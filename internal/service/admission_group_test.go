@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // groupRequest is one claimed run of repository repoID declaring group.
-func groupRequest(runID string, repoID int64, size periapsis.Size, group string) admissionRequest {
+func groupRequest(runID string, repoID int64, size pipeline.Size, group string) admissionRequest {
 	return admissionRequest{RunID: runID, RepoID: repoID, Size: size, Group: group}
 }
 
@@ -37,11 +37,11 @@ func acquireRequestWithinBudget(t *testing.T, reservation *admissionReservation,
 func TestGroupAdmissionSerializesOneRepositoryGroup(t *testing.T) {
 	gate := newWeightedAdmissionForJobs(6)
 	holder := gate.reserve(1)
-	releaseHolder := acquireRequestWithinBudget(t, holder, groupRequest("plan", 1, periapsis.M, "terraform-state"))
+	releaseHolder := acquireRequestWithinBudget(t, holder, groupRequest("plan", 1, pipeline.M, "terraform-state"))
 
 	waiter := gate.reserve(2)
 	acquired := make(chan func(), 1)
-	go acquireRequestForTest(waiter, groupRequest("apply", 1, periapsis.M, "terraform-state"), acquired)
+	go acquireRequestForTest(waiter, groupRequest("apply", 1, pipeline.M, "terraform-state"), acquired)
 	awaitWaiting(t, waiter)
 	if used, runs := gateUsage(gate); used != 2 || runs != 1 {
 		t.Fatalf("used=%d runs=%d; a run waiting on its group must hold no weight", used, runs)
@@ -57,10 +57,10 @@ func TestGroupAdmissionSerializesOneRepositoryGroup(t *testing.T) {
 func TestGroupAdmissionIsPerGroupAndPerRepository(t *testing.T) {
 	gate := newWeightedAdmissionForJobs(6)
 	releases := []func(){
-		acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("tf-plan", 1, periapsis.M, "terraform-state")),
-		acquireRequestWithinBudget(t, gate.reserve(2), groupRequest("tf-docs", 1, periapsis.M, "docs-site")),
-		acquireRequestWithinBudget(t, gate.reserve(3), groupRequest("squatter", 2, periapsis.M, "terraform-state")),
-		acquireRequestWithinBudget(t, gate.reserve(4), groupRequest("ungrouped", 1, periapsis.M, "")),
+		acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("tf-plan", 1, pipeline.M, "terraform-state")),
+		acquireRequestWithinBudget(t, gate.reserve(2), groupRequest("tf-docs", 1, pipeline.M, "docs-site")),
+		acquireRequestWithinBudget(t, gate.reserve(3), groupRequest("squatter", 2, pipeline.M, "terraform-state")),
+		acquireRequestWithinBudget(t, gate.reserve(4), groupRequest("ungrouped", 1, pipeline.M, "")),
 	}
 	for _, release := range releases {
 		release()
@@ -78,15 +78,15 @@ func TestGroupAdmissionIsPerGroupAndPerRepository(t *testing.T) {
 // admitted on the weight budget while it waits for its own repository.
 func TestGroupAdmissionParkedRunDoesNotBlockLaterClaims(t *testing.T) {
 	gate := newWeightedAdmissionForJobs(3) // capacity 6
-	releaseHolder := acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("plan", 1, periapsis.M, "terraform-state"))
+	releaseHolder := acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("plan", 1, pipeline.M, "terraform-state"))
 
 	parked := gate.reserve(2)
 	parkedAcquired := make(chan func(), 1)
-	go acquireRequestForTest(parked, groupRequest("second-plan", 1, periapsis.M, "terraform-state"), parkedAcquired)
+	go acquireRequestForTest(parked, groupRequest("second-plan", 1, pipeline.M, "terraform-state"), parkedAcquired)
 	awaitWaiting(t, parked)
 
 	// Another repository's M run, claimed after the parked run, is admitted.
-	releaseOther := acquireRequestWithinBudget(t, gate.reserve(3), groupRequest("beacon", 2, periapsis.M, ""))
+	releaseOther := acquireRequestWithinBudget(t, gate.reserve(3), groupRequest("beacon", 2, pipeline.M, ""))
 	if used, _ := gateUsage(gate); used != 4 {
 		t.Fatalf("used = %d, want the holder and the other repository only (4)", used)
 	}
@@ -100,16 +100,16 @@ func TestGroupAdmissionParkedRunDoesNotBlockLaterClaims(t *testing.T) {
 // newer run of the group never overtakes an older one when the group frees.
 func TestGroupAdmissionKeepsClaimOrderWithinTheGroup(t *testing.T) {
 	gate := newWeightedAdmissionForJobs(6)
-	releaseHolder := acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("branch-a", 1, periapsis.M, "terraform-state"))
+	releaseHolder := acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("branch-a", 1, pipeline.M, "terraform-state"))
 
 	older := gate.reserve(2)
 	newer := gate.reserve(3)
 	olderAcquired := make(chan func(), 1)
 	newerAcquired := make(chan func(), 1)
 	// The newer claim finishes sizing first; claim order still decides.
-	go acquireRequestForTest(newer, groupRequest("apply-tag", 1, periapsis.M, "terraform-state"), newerAcquired)
+	go acquireRequestForTest(newer, groupRequest("apply-tag", 1, pipeline.M, "terraform-state"), newerAcquired)
 	awaitWaiting(t, newer)
-	go acquireRequestForTest(older, groupRequest("branch-b", 1, periapsis.M, "terraform-state"), olderAcquired)
+	go acquireRequestForTest(older, groupRequest("branch-b", 1, pipeline.M, "terraform-state"), olderAcquired)
 	awaitWaiting(t, older)
 
 	releaseHolder()
@@ -125,16 +125,16 @@ func TestGroupAdmissionKeepsClaimOrderWithinTheGroup(t *testing.T) {
 // starve heavy runs or to jump the queue.
 func TestGroupAdmissionFreeGroupStillQueuesOnWeight(t *testing.T) {
 	gate := newWeightedAdmission(4)
-	releaseBig := acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("other", 2, periapsis.L, ""))
+	releaseBig := acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("other", 2, pipeline.L, ""))
 
 	grouped := gate.reserve(2)
 	groupedAcquired := make(chan func(), 1)
-	go acquireRequestForTest(grouped, groupRequest("plan", 1, periapsis.M, "terraform-state"), groupedAcquired)
+	go acquireRequestForTest(grouped, groupRequest("plan", 1, pipeline.M, "terraform-state"), groupedAcquired)
 	awaitWaiting(t, grouped)
 
 	small := gate.reserve(3)
 	smallAcquired := make(chan func(), 1)
-	go acquireRequestForTest(small, groupRequest("small", 3, periapsis.S, ""), smallAcquired)
+	go acquireRequestForTest(small, groupRequest("small", 3, pipeline.S, ""), smallAcquired)
 	awaitWaiting(t, small)
 
 	releaseBig()
@@ -148,20 +148,20 @@ func TestGroupAdmissionFreeGroupStillQueuesOnWeight(t *testing.T) {
 // size, and XL keeps its exclusivity whether or not it declares a group.
 func TestGroupAdmissionPreservesDeclaredWeightAndXL(t *testing.T) {
 	gate := newWeightedAdmissionForJobs(6)
-	releaseLarge := acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("plan", 1, periapsis.L, "terraform-state"))
+	releaseLarge := acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("plan", 1, pipeline.L, "terraform-state"))
 	if used, _ := gateUsage(gate); used != DefaultSizeWeights.L {
 		t.Fatalf("used = %d, want the declared L weight %d", used, DefaultSizeWeights.L)
 	}
 	xl := gate.reserve(2)
 	xlAcquired := make(chan func(), 1)
-	go acquireRequestForTest(xl, groupRequest("kernel-matrix", 2, periapsis.XL, "vm-lab"), xlAcquired)
+	go acquireRequestForTest(xl, groupRequest("kernel-matrix", 2, pipeline.XL, "vm-lab"), xlAcquired)
 	awaitWaiting(t, xl)
 	releaseLarge()
 	releaseXL := awaitAcquired(t, xlAcquired)
 
 	after := gate.reserve(3)
 	afterAcquired := make(chan func(), 1)
-	go acquireRequestForTest(after, groupRequest("tiny", 3, periapsis.S, ""), afterAcquired)
+	go acquireRequestForTest(after, groupRequest("tiny", 3, pipeline.S, ""), afterAcquired)
 	awaitWaiting(t, after)
 	releaseXL()
 	releaseAfter := awaitAcquired(t, afterAcquired)
@@ -176,7 +176,7 @@ func TestGroupAdmissionCountsParkedRunsAndWakesTheDispatcher(t *testing.T) {
 	wakes := make(chan struct{}, 8)
 	gate.onPark = func() { wakes <- struct{}{} }
 
-	releaseHolder := acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("plan", 1, periapsis.M, "terraform-state"))
+	releaseHolder := acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("plan", 1, pipeline.M, "terraform-state"))
 	if parked := gate.groupParked(); parked != 0 {
 		t.Fatalf("parked = %d with only the holder", parked)
 	}
@@ -190,9 +190,9 @@ func TestGroupAdmissionCountsParkedRunsAndWakesTheDispatcher(t *testing.T) {
 	second := gate.reserve(3)
 	firstAcquired := make(chan func(), 1)
 	secondAcquired := make(chan func(), 1)
-	go acquireRequestForTest(first, groupRequest("apply", 1, periapsis.M, "terraform-state"), firstAcquired)
+	go acquireRequestForTest(first, groupRequest("apply", 1, pipeline.M, "terraform-state"), firstAcquired)
 	awaitWake(t, wakes)
-	go acquireRequestForTest(second, groupRequest("plan-2", 1, periapsis.M, "terraform-state"), secondAcquired)
+	go acquireRequestForTest(second, groupRequest("plan-2", 1, pipeline.M, "terraform-state"), secondAcquired)
 	awaitWake(t, wakes)
 	if parked := gate.groupParked(); parked != 2 {
 		t.Fatalf("parked = %d, want both runs behind the holder", parked)
@@ -216,11 +216,11 @@ func TestGroupAdmissionCountsParkedRunsAndWakesTheDispatcher(t *testing.T) {
 func TestGroupAdmissionMirroredRunCeiling(t *testing.T) {
 	gate := newWeightedAdmissionForJobs(2) // capacity 4
 	gate.maxRuns = 2
-	releaseOne := acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("one", 1, periapsis.S, ""))
-	releaseTwo := acquireRequestWithinBudget(t, gate.reserve(2), groupRequest("two", 2, periapsis.S, ""))
+	releaseOne := acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("one", 1, pipeline.S, ""))
+	releaseTwo := acquireRequestWithinBudget(t, gate.reserve(2), groupRequest("two", 2, pipeline.S, ""))
 	third := gate.reserve(3)
 	thirdAcquired := make(chan func(), 1)
-	go acquireRequestForTest(third, groupRequest("three", 3, periapsis.S, ""), thirdAcquired)
+	go acquireRequestForTest(third, groupRequest("three", 3, pipeline.S, ""), thirdAcquired)
 	awaitWaiting(t, third)
 	releaseOne()
 	releaseThird := awaitAcquired(t, thirdAcquired)
@@ -232,18 +232,18 @@ func TestGroupAdmissionMirroredRunCeiling(t *testing.T) {
 func TestGroupAdmissionCancellationFreesTheGroup(t *testing.T) {
 	gate := newWeightedAdmissionForJobs(6)
 	holder := gate.reserve(1)
-	acquireRequestWithinBudget(t, holder, groupRequest("plan", 1, periapsis.M, "terraform-state"))
+	acquireRequestWithinBudget(t, holder, groupRequest("plan", 1, pipeline.M, "terraform-state"))
 
 	parkedCtx, cancelParked := context.WithCancel(context.Background())
 	parked := gate.reserve(2)
 	parkedDone := make(chan error, 1)
 	go func() {
-		_, err := parked.acquireRequest(parkedCtx, groupRequest("superseded", 1, periapsis.M, "terraform-state"))
+		_, err := parked.acquireRequest(parkedCtx, groupRequest("superseded", 1, pipeline.M, "terraform-state"))
 		parkedDone <- err
 	}()
 	next := gate.reserve(3)
 	nextAcquired := make(chan func(), 1)
-	go acquireRequestForTest(next, groupRequest("newest", 1, periapsis.M, "terraform-state"), nextAcquired)
+	go acquireRequestForTest(next, groupRequest("newest", 1, pipeline.M, "terraform-state"), nextAcquired)
 	awaitWaiting(t, next)
 	cancelParked()
 	if err := <-parkedDone; err == nil {
@@ -260,12 +260,12 @@ func TestGroupAdmissionCancellationFreesTheGroup(t *testing.T) {
 func TestGroupAdmissionRetainedGrantKeepsItsGroupAndWeight(t *testing.T) {
 	gate := newWeightedAdmissionForJobs(6)
 	holder := gate.reserve(1)
-	releaseHolder := acquireRequestWithinBudget(t, holder, groupRequest("plan", 1, periapsis.M, "terraform-state"))
+	releaseHolder := acquireRequestWithinBudget(t, holder, groupRequest("plan", 1, pipeline.M, "terraform-state"))
 	member := gate.reserve(2)
 	memberCtx, cancelMember := context.WithCancel(context.Background())
 	memberDone := make(chan error, 1)
 	go func() {
-		_, err := member.acquireRequest(memberCtx, groupRequest("apply", 1, periapsis.M, "terraform-state"))
+		_, err := member.acquireRequest(memberCtx, groupRequest("apply", 1, pipeline.M, "terraform-state"))
 		memberDone <- err
 	}()
 	awaitWaiting(t, member)
@@ -281,7 +281,7 @@ func TestGroupAdmissionRetainedGrantKeepsItsGroupAndWeight(t *testing.T) {
 	// Retaining is only for a live grant: an ungranted or released
 	// reservation is unaffected, so nothing can be retained by accident.
 	unrelated := gate.reserve(3)
-	releaseUnrelated := acquireRequestWithinBudget(t, unrelated, groupRequest("beacon", 2, periapsis.M, ""))
+	releaseUnrelated := acquireRequestWithinBudget(t, unrelated, groupRequest("beacon", 2, pipeline.M, ""))
 	releaseUnrelated()
 	unrelated.retain()
 	if used, runs := gateUsage(gate); used != 2 || runs != 1 {
@@ -296,7 +296,7 @@ func TestGroupAdmissionRetainedGrantKeepsItsGroupAndWeight(t *testing.T) {
 func TestGroupAdmissionRefusesAMalformedGroup(t *testing.T) {
 	gate := newWeightedAdmissionForJobs(3)
 	reservation := gate.reserve(1)
-	if _, err := reservation.acquireRequest(context.Background(), groupRequest("bad", 1, periapsis.M, "Bad_Group")); err == nil ||
+	if _, err := reservation.acquireRequest(context.Background(), groupRequest("bad", 1, pipeline.M, "Bad_Group")); err == nil ||
 		!strings.Contains(err.Error(), "invalid concurrency group") {
 		t.Fatalf("malformed group = %v", err)
 	}
@@ -312,7 +312,7 @@ func TestGroupAdmissionRefusesAMalformedGroup(t *testing.T) {
 func TestGroupAdmissionSnapshotNamesTheGroupAndItsHolder(t *testing.T) {
 	gate := newWeightedAdmissionForJobs(6)
 	scheduler := &Scheduler{admission: gate}
-	releaseHolder := acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 1, periapsis.M, "terraform-state"))
+	releaseHolder := acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 1, pipeline.M, "terraform-state"))
 	if snapshot := scheduler.AdmissionSnapshot(1); snapshot.State != "admitted" || snapshot.Group != "terraform-state" ||
 		snapshot.GroupHolder != "" || snapshot.GroupAhead != "" {
 		t.Fatalf("holder snapshot = %#v", snapshot)
@@ -320,7 +320,7 @@ func TestGroupAdmissionSnapshotNamesTheGroupAndItsHolder(t *testing.T) {
 
 	waiter := gate.reserve(2)
 	acquired := make(chan func(), 1)
-	go acquireRequestForTest(waiter, groupRequest("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 1, periapsis.M, "terraform-state"), acquired)
+	go acquireRequestForTest(waiter, groupRequest("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 1, pipeline.M, "terraform-state"), acquired)
 	awaitWaiting(t, waiter)
 	snapshot := scheduler.AdmissionSnapshot(2)
 	if snapshot.State != "waiting" || snapshot.Group != "terraform-state" ||
@@ -336,14 +336,14 @@ func TestGroupAdmissionSnapshotNamesTheGroupAndItsHolder(t *testing.T) {
 	releaseWaiter()
 
 	// With no holder, the run ahead in the group is named instead.
-	releaseBig := acquireRequestWithinBudget(t, gate.reserve(3), groupRequest("big", 2, periapsis.XL, ""))
+	releaseBig := acquireRequestWithinBudget(t, gate.reserve(3), groupRequest("big", 2, pipeline.XL, ""))
 	ahead := gate.reserve(4)
 	behind := gate.reserve(5)
 	aheadAcquired := make(chan func(), 1)
 	behindAcquired := make(chan func(), 1)
-	go acquireRequestForTest(ahead, groupRequest("cccccccccccccccccccccccccccccccc", 1, periapsis.M, "terraform-state"), aheadAcquired)
+	go acquireRequestForTest(ahead, groupRequest("cccccccccccccccccccccccccccccccc", 1, pipeline.M, "terraform-state"), aheadAcquired)
 	awaitWaiting(t, ahead)
-	go acquireRequestForTest(behind, groupRequest("dddddddddddddddddddddddddddddddd", 1, periapsis.M, "terraform-state"), behindAcquired)
+	go acquireRequestForTest(behind, groupRequest("dddddddddddddddddddddddddddddddd", 1, pipeline.M, "terraform-state"), behindAcquired)
 	awaitWaiting(t, behind)
 	if snapshot := scheduler.AdmissionSnapshot(4); snapshot.GroupHolder != "" || snapshot.GroupAhead != "" {
 		t.Fatalf("head of a free group waits on weight, not on the group: %#v", snapshot)

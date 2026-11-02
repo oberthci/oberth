@@ -11,7 +11,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type adoptedRun struct {
@@ -62,7 +62,7 @@ func adoptionFailure(adopter JobAdopter, run model.Run, err error) error {
 
 // adopt restores grants for work already running, even if the new owner's
 // configured capacity is smaller. New admissions wait until it has drained.
-func (gate *weightedAdmission) adopt(run model.Run, size periapsis.Size, demand argoworkflow.VMIDemand, pods ...*argoworkflow.PodDemand) (*admissionReservation, error) {
+func (gate *weightedAdmission) adopt(run model.Run, size pipeline.Size, demand argoworkflow.VMIDemand, pods ...*argoworkflow.PodDemand) (*admissionReservation, error) {
 	var peak *argoworkflow.PodDemand
 	if len(pods) > 0 && pods[0] != nil {
 		if !pods[0].Valid() {

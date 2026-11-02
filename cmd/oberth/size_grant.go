@@ -9,7 +9,7 @@ import (
 	"io"
 
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 const sizeGrantUsage = "size grant <repo> --max L|XL | size revoke <repo> | size get <repo>"
@@ -50,7 +50,7 @@ func runSizeGrant(ctx context.Context, arguments []string, output io.Writer) err
 	} else if repo == "" || flags.NArg() != 0 {
 		return fmt.Errorf("%w: %s", errUsage, sizeGrantUsage)
 	}
-	if action == "grant" && !store.ValidSizeGrantMax(periapsis.Size(maximum)) {
+	if action == "grant" && !store.ValidSizeGrantMax(pipeline.Size(maximum)) {
 		return fmt.Errorf("%w: size grant needs --max L or --max XL", errUsage)
 	}
 	if action != "get" {
@@ -70,11 +70,11 @@ func runSizeGrant(ctx context.Context, arguments []string, output io.Writer) err
 	var value any
 	switch action {
 	case "grant":
-		value, err = database.SetSizeGrant(ctx, repository.ID, administrativeActor, periapsis.Size(maximum))
+		value, err = database.SetSizeGrant(ctx, repository.ID, administrativeActor, pipeline.Size(maximum))
 	case "revoke":
 		value, err = database.SetSizeGrant(ctx, repository.ID, administrativeActor, "")
 	case "get":
-		var size periapsis.Size
+		var size pipeline.Size
 		size, err = database.MaxRunSize(ctx, repository.ID)
 		if err == nil {
 			grant, grantErr := database.SizeGrant(ctx, repository.ID)

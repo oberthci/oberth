@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type ResourceUsageReport struct {
@@ -131,7 +131,7 @@ type ResourceSizeComparison struct {
 
 func CompareResourceSize(values []StepResourceUsage) []ResourceSizeComparison {
 	out := make([]ResourceSizeComparison, 0, 5)
-	for _, size := range []periapsis.Size{periapsis.S, periapsis.M, periapsis.L, periapsis.XL, ""} {
+	for _, size := range []pipeline.Size{pipeline.S, pipeline.M, pipeline.L, pipeline.XL, ""} {
 		r := ResourceSizeComparison{WorkflowSize: string(size)}
 		if size == "" {
 			r.WorkflowSize = "unknown"

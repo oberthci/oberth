@@ -18,7 +18,7 @@ import (
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type adoptingJobs struct {
@@ -33,11 +33,11 @@ type adoptingJobs struct {
 	retained       int64
 }
 
-func (jobs *adoptingJobs) Adopt(_ context.Context, run model.Run) (periapsis.Size, bool, error) {
+func (jobs *adoptingJobs) Adopt(_ context.Context, run model.Run) (pipeline.Size, bool, error) {
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.adopted = append(jobs.adopted, run.ID)
-	return periapsis.L, jobs.found, jobs.adoptErr
+	return pipeline.L, jobs.found, jobs.adoptErr
 }
 
 func (*adoptingJobs) JobNamespace() string { return "oberth-argo" }
@@ -175,7 +175,7 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 				if order != run.AdmissionSequence {
 					t.Fatalf("adopted admission order = %d, want persisted %d", order, run.AdmissionSequence)
 				}
-				if used != scheduler.admission.weights.of(periapsis.L, scheduler.admission.capacity) || runs != 1 || groups != 1 {
+				if used != scheduler.admission.weights.of(pipeline.L, scheduler.admission.capacity) || runs != 1 || groups != 1 {
 					t.Fatalf("admission used/runs/groups = %d/%d/%d", used, runs, groups)
 				}
 				close(jobs.waitBlocks)
@@ -218,7 +218,7 @@ func TestAdoptionMissingWorkflowRequeuesButReadFailureDoesNot(t *testing.T) {
 		fixture.setJobName(t, run.ID, "oberth-missing")
 		jobs := &adoptingJobs{adoptErr: readErr, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}
 		scheduler := fixture.scheduler(t, jobs)
-		err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(model.Run, periapsis.Size) error { return errors.New("absent Workflow adopted") })
+		err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(model.Run, pipeline.Size) error { return errors.New("absent Workflow adopted") })
 		current, lookupErr := fixture.store.Run(context.Background(), run.ID)
 		if lookupErr != nil {
 			t.Fatal(lookupErr)
@@ -276,22 +276,22 @@ func TestAdoptedWorkflowSurvivesShutdownWithWorkspace(t *testing.T) {
 func TestAdoptedAdmissionIsIdempotentAndHoldsItsGroup(t *testing.T) {
 	gate := newWeightedAdmissionForJobs(1)
 	run := model.Run{ID: "active", QueueSequence: 11, AdmissionSequence: 2, RepoID: 1, ConcurrencyGroup: "build"}
-	first, err := gate.adopt(run, periapsis.L, argoworkflow.VMIDemand{})
+	first, err := gate.adopt(run, pipeline.L, argoworkflow.VMIDemand{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.sequence != run.QueueSequence || first.order != run.AdmissionSequence {
 		t.Fatalf("adoption changed admission identity: key=%d order=%d", first.sequence, first.order)
 	}
-	again, err := gate.adopt(run, periapsis.L, argoworkflow.VMIDemand{})
+	again, err := gate.adopt(run, pipeline.L, argoworkflow.VMIDemand{})
 	if err != nil || again != first {
 		t.Fatalf("second adoption = %p, %v", again, err)
 	}
-	other, err := gate.adopt(model.Run{ID: "also-active", QueueSequence: 2, RepoID: 2}, periapsis.L, argoworkflow.VMIDemand{})
+	other, err := gate.adopt(model.Run{ID: "also-active", QueueSequence: 2, RepoID: 2}, pipeline.L, argoworkflow.VMIDemand{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gate.used != 2*gate.weights.of(periapsis.L, gate.capacity) || gate.runs != 2 {
+	if gate.used != 2*gate.weights.of(pipeline.L, gate.capacity) || gate.runs != 2 {
 		t.Fatalf("over-capacity adoption = %d/%d", gate.used, gate.runs)
 	}
 	waiting := gate.reserveRun(model.Run{ID: "next", QueueSequence: 3, RepoID: 1, ConcurrencyGroup: "build"})
@@ -299,7 +299,7 @@ func TestAdoptedAdmissionIsIdempotentAndHoldsItsGroup(t *testing.T) {
 	defer cancel()
 	granted := make(chan func(), 1)
 	go func() {
-		release, err := waiting.acquireRequest(ctx, admissionRequest{RunID: "next", RepoID: 1, Group: "build", Size: periapsis.S})
+		release, err := waiting.acquireRequest(ctx, admissionRequest{RunID: "next", RepoID: 1, Group: "build", Size: pipeline.S})
 		if err == nil {
 			granted <- release
 		}
@@ -349,7 +349,7 @@ func TestAdoptedRunStillHonorsCancelAndSupersede(t *testing.T) {
 			fixture.setJobName(t, run.ID, "oberth-preempted")
 			jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal, waitErr: errors.New("Workflow deleted"), waitBlocks: make(chan struct{}), waitEntered: make(chan struct{})}}
 			scheduler := fixture.scheduler(t, jobs)
-			reservation, err := scheduler.admission.adopt(run, periapsis.M, argoworkflow.VMIDemand{})
+			reservation, err := scheduler.admission.adopt(run, pipeline.M, argoworkflow.VMIDemand{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -465,7 +465,7 @@ func TestNonAdoptingEngineKeepsPromotionAndReleaseRecovery(t *testing.T) {
 		// A legacy engine exposes no adoption capability. Preserve its
 		// conservative recovery and all original deletion/refire assertions.
 		scheduler := fixture.scheduler(t, struct{ JobController }{jobs})
-		if err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(model.Run, periapsis.Size) error { return errors.New("out-of-scope adoption") }); err != nil {
+		if err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(model.Run, pipeline.Size) error { return errors.New("out-of-scope adoption") }); err != nil {
 			t.Fatal(err)
 		}
 		current, err := fixture.store.Run(context.Background(), run.ID)
@@ -488,7 +488,7 @@ func TestAdoptionPreemptedBeforeWaitRetainsAdmissionOnDeleteFailure(t *testing.T
 	run.ConcurrencyGroup = "build"
 	jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{deleteErr: errors.New("API unavailable")}}
 	scheduler := fixture.scheduler(t, jobs)
-	reservation, err := scheduler.admission.adopt(run, periapsis.M, argoworkflow.VMIDemand{})
+	reservation, err := scheduler.admission.adopt(run, pipeline.M, argoworkflow.VMIDemand{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -558,7 +558,7 @@ func TestAdoptedTerminalObservationErrorKeepsRealResult(t *testing.T) {
 		waitErr: errors.New("step test/unit breached the aggregate run log budget"),
 	}}
 	scheduler := fixture.scheduler(t, jobs)
-	reservation, err := scheduler.admission.adopt(run, periapsis.M, argoworkflow.VMIDemand{})
+	reservation, err := scheduler.admission.adopt(run, pipeline.M, argoworkflow.VMIDemand{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -602,11 +602,11 @@ func TestAdoptionFailureNamesTheWorkflowToDelete(t *testing.T) {
 			jobs := &adoptingJobs{found: test.adoptErr == nil, adoptErr: test.adoptErr, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}
 			scheduler := fixture.scheduler(t, jobs)
 			if test.holdOther {
-				if _, err := scheduler.admission.adopt(model.Run{ID: "holder", QueueSequence: run.QueueSequence + 100, RepoID: run.RepoID, ConcurrencyGroup: "build"}, periapsis.M, argoworkflow.VMIDemand{}); err != nil {
+				if _, err := scheduler.admission.adopt(model.Run{ID: "holder", QueueSequence: run.QueueSequence + 100, RepoID: run.RepoID, ConcurrencyGroup: "build"}, pipeline.M, argoworkflow.VMIDemand{}); err != nil {
 					t.Fatal(err)
 				}
 			}
-			err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(run model.Run, size periapsis.Size) error {
+			err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(run model.Run, size pipeline.Size) error {
 				_, err := scheduler.admission.adopt(run, size, argoworkflow.VMIDemand{})
 				return err
 			})

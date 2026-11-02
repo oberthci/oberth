@@ -9,7 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 const kvmTestDocument = `apiVersion: argoproj.io/v1alpha1
@@ -70,7 +70,7 @@ spec:
 func TestBuildKVMLeaves(t *testing.T) {
 	config := testConfig()
 	config.KVMEnabled = true
-	request := testRequest(periapsis.TriggerCI, kvmTestDocument)
+	request := testRequest(pipeline.TriggerCI, kvmTestDocument)
 	request.KubeVirtGranted = true
 	request.SourceVolume = SourceVolume{ClaimName: "run-source", SubPath: "src", ArtifactsSubPath: "artifacts"}
 
@@ -162,7 +162,7 @@ func TestBuildKVMLeaves(t *testing.T) {
 func TestBuildKVMSwitchOff(t *testing.T) {
 	config := testConfig()
 	config.KVMEnabled = false
-	request := testRequest(periapsis.TriggerCI, kvmTestDocument)
+	request := testRequest(pipeline.TriggerCI, kvmTestDocument)
 	request.KubeVirtGranted = true
 	request.SourceVolume = SourceVolume{ClaimName: "run-source", SubPath: "src", ArtifactsSubPath: "artifacts"}
 
@@ -186,7 +186,7 @@ func TestBuildKVMNotDeclared(t *testing.T) {
 		config.KVMEnabled = enabled
 
 		// Use the greedy document which has no KVM annotation.
-		request := testRequest(periapsis.TriggerCI, greedyDocument)
+		request := testRequest(pipeline.TriggerCI, greedyDocument)
 		_, err := Build(config, request)
 		if err != nil {
 			t.Fatalf("KVMEnabled=%v: %v", enabled, err)

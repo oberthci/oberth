@@ -25,7 +25,7 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 const maximumCIIssueTailBytes = 16 << 10
@@ -481,7 +481,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 			run.reservation.cancel()
 		}
 	}()
-	if err := scheduler.reconcileStrandedRunsWithGate(workerCtx, scheduler.awaitMutation, func(run model.Run, size periapsis.Size) error {
+	if err := scheduler.reconcileStrandedRunsWithGate(workerCtx, scheduler.awaitMutation, func(run model.Run, size pipeline.Size) error {
 		demand, err := scheduler.adoptedKubeVirtDemand(run)
 		if err != nil {
 			return err
@@ -851,7 +851,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	}
 	if requirement.Contract != nil {
 		if sized, ok := scheduler.trusted.(interface {
-			Size(context.Context, JobRequest) (periapsis.Size, error)
+			Size(context.Context, JobRequest) (pipeline.Size, error)
 		}); ok {
 			preflightSize, sizeErr := sized.Size(ctx, jobRequest)
 			if sizeErr != nil {
@@ -1508,7 +1508,7 @@ func (scheduler *Scheduler) persistSteps(ctx context.Context, runID string, step
 			next++
 		}
 		if result.DeclaredSize == "" {
-			result.DeclaredSize = periapsis.M
+			result.DeclaredSize = pipeline.M
 		}
 		result.LogStart, result.LogEnd = logOffsets(index, result.Burn, result.Step)
 		if _, err := scheduler.database().PutStepResult(ctx, result); err != nil {
@@ -1769,7 +1769,7 @@ func (scheduler *Scheduler) finishInfrastructureFailureWithRetry(ctx context.Con
 // Absent Workflows and other run kinds keep their existing fallback. This
 // must run before completePendingCancellationsWithGate,
 // which would delete the K8s Jobs before their terminal state can be read.
-func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, require mutationRequirement, adopt func(model.Run, periapsis.Size) error) error {
+func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, require mutationRequirement, adopt func(model.Run, pipeline.Size) error) error {
 	if err := require(ctx); err != nil {
 		return err
 	}
@@ -1976,7 +1976,7 @@ func (scheduler *Scheduler) requireMutation(ctx context.Context) error {
 // RunSizeLimiter reports the largest admission size a repository's runs may
 // be admitted at (#1021): L unless an administrator granted XL.
 type RunSizeLimiter interface {
-	MaxRunSize(context.Context, int64) (periapsis.Size, error)
+	MaxRunSize(context.Context, int64) (pipeline.Size, error)
 }
 
 // authorizeRunSize refuses a branch, promotion or schedule run whose resolved
@@ -1985,12 +1985,12 @@ type RunSizeLimiter interface {
 // repository wait for a full drain. A tag run keeps its reviewed
 // release.yaml size. A store without the capability (test doubles) limits
 // nothing; the production store always has it.
-func (scheduler *Scheduler) authorizeRunSize(ctx context.Context, run model.Run, repository model.Repository, size periapsis.Size) error {
+func (scheduler *Scheduler) authorizeRunSize(ctx context.Context, run model.Run, repository model.Repository, size pipeline.Size) error {
 	limiter, ok := scheduler.store.(RunSizeLimiter)
 	if run.Release || !ok {
 		return nil
 	}
-	maximum, err := retryDatabase(ctx, "MaxRunSize", func(ctx context.Context) (periapsis.Size, error) { return limiter.MaxRunSize(ctx, run.RepoID) })
+	maximum, err := retryDatabase(ctx, "MaxRunSize", func(ctx context.Context) (pipeline.Size, error) { return limiter.MaxRunSize(ctx, run.RepoID) })
 	if err != nil {
 		return fmt.Errorf("read repository size grant: %w", err)
 	}
@@ -2012,7 +2012,7 @@ func runTriggerName(run model.Run) string {
 	}
 }
 
-func (scheduler *Scheduler) pipelineSize(ctx context.Context, request JobRequest) (periapsis.Size, error) {
+func (scheduler *Scheduler) pipelineSize(ctx context.Context, request JobRequest) (pipeline.Size, error) {
 	if request.Run.Release {
 		if sizer, ok := scheduler.releaseJobs.(PipelineSizer); ok {
 			return sizer.PipelineSize(ctx, request)
@@ -2021,7 +2021,7 @@ func (scheduler *Scheduler) pipelineSize(ctx context.Context, request JobRequest
 	if sizer, ok := scheduler.jobs.(PipelineSizer); ok {
 		return sizer.PipelineSize(ctx, request)
 	}
-	return periapsis.M, nil
+	return pipeline.M, nil
 }
 
 // pipelineConcurrencyGroup reads the concurrency group the run's own pipeline

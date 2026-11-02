@@ -13,7 +13,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 const (
@@ -110,7 +110,7 @@ func nonrootPodPatch(tmpl *wfv1.Template, config Config) ([]byte, error) {
 	if strings.TrimSpace(seedImage) == "" {
 		return nil, fmt.Errorf("argojob: nonroot preparation requires the server's pinned source seed image")
 	}
-	if err := periapsis.ValidateRunnerImage(seedImage); err != nil {
+	if err := pipeline.ValidateRunnerImage(seedImage); err != nil {
 		return nil, fmt.Errorf("argojob: invalid nonroot preparation image: %w", err)
 	}
 	prepareMounts := []corev1.VolumeMount{

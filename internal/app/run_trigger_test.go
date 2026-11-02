@@ -10,7 +10,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestRunKindReadsOnlyTheDurableRun(t *testing.T) {
@@ -79,10 +79,10 @@ func TestPipelineSizeIsPerRunTrigger(t *testing.T) {
 	dir := writeBuild(t, perTriggerBuild)
 	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
 	preflight := &TrustedPreflights{}
-	for trigger, want := range map[string]periapsis.Size{
-		"branch":    periapsis.M,
-		"promotion": periapsis.XL,
-		"schedule":  periapsis.XL, // unnamed: oberth.ci/size
+	for trigger, want := range map[string]pipeline.Size{
+		"branch":    pipeline.M,
+		"promotion": pipeline.XL,
+		"schedule":  pipeline.XL, // unnamed: oberth.ci/size
 	} {
 		request := service.JobRequest{
 			Run:        model.Run{Ref: "feature/x", Trigger: trigger},
@@ -104,7 +104,7 @@ func TestPipelineSizeIsPerRunTrigger(t *testing.T) {
 	size, err := preflight.Size(context.Background(), service.JobRequest{
 		Run: model.Run{Ref: "v1.0.0", Trigger: "tag", Release: true}, Repository: model.Repository{Name: "ebpf"}, SourceDir: dir,
 	})
-	if err != nil || size != periapsis.XL {
+	if err != nil || size != pipeline.XL {
 		t.Fatalf("tag preflight Size = %q, %v; want XL", size, err)
 	}
 }

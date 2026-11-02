@@ -8,7 +8,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type fakeFragmentBlobs struct {
@@ -92,7 +92,7 @@ func TestFragmentLoaderReadsThePinnedCommit(t *testing.T) {
 	loader, blobs := testLoader(t, nil)
 	key := argoworkflow.FragmentKey{Repo: "transferz/maven-verify", Version: "v3"}
 
-	fragment, err := loader.Load(context.Background(), key, periapsis.TriggerCI, model.RefBranch, "branch")
+	fragment, err := loader.Load(context.Background(), key, pipeline.TriggerCI, model.RefBranch, "branch")
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -112,30 +112,30 @@ func TestFragmentLoaderSHARequiresBranchGreenRun(t *testing.T) {
 	loader, blobs := testLoader(t, nil)
 	sha := strings.Repeat("a", 40)
 	key := argoworkflow.FragmentKey{Repo: "transferz/maven-verify", Version: sha}
-	if _, err := loader.Load(t.Context(), key, periapsis.TriggerRelease, model.RefTag, "release"); err == nil || !strings.Contains(err.Error(), "only plain branch-push CI") {
+	if _, err := loader.Load(t.Context(), key, pipeline.TriggerRelease, model.RefTag, "release"); err == nil || !strings.Contains(err.Error(), "only plain branch-push CI") {
 		t.Fatalf("release accepted SHA fragment: %v", err)
 	}
-	if _, err := loader.Load(t.Context(), key, periapsis.TriggerCI, model.RefTag, "branch"); err == nil || !strings.Contains(err.Error(), "only plain branch-push CI") {
+	if _, err := loader.Load(t.Context(), key, pipeline.TriggerCI, model.RefTag, "branch"); err == nil || !strings.Contains(err.Error(), "only plain branch-push CI") {
 		t.Fatalf("tag CI accepted SHA fragment: %v", err)
 	}
-	if _, err := loader.Load(t.Context(), key, periapsis.TriggerCI, model.RefBranch, "promotion"); err == nil || !strings.Contains(err.Error(), "only plain branch-push CI") {
+	if _, err := loader.Load(t.Context(), key, pipeline.TriggerCI, model.RefBranch, "promotion"); err == nil || !strings.Contains(err.Error(), "only plain branch-push CI") {
 		t.Fatalf("promotion CI accepted SHA fragment: %v", err)
 	}
-	if _, err := loader.Load(t.Context(), key, periapsis.TriggerCI, model.RefBranch, "schedule"); err == nil || !strings.Contains(err.Error(), "only plain branch-push CI") {
+	if _, err := loader.Load(t.Context(), key, pipeline.TriggerCI, model.RefBranch, "schedule"); err == nil || !strings.Contains(err.Error(), "only plain branch-push CI") {
 		t.Fatalf("scheduled CI accepted SHA fragment: %v", err)
 	}
 	short := argoworkflow.FragmentKey{Repo: key.Repo, Version: sha[:12]}
-	if _, err := loader.Load(t.Context(), short, periapsis.TriggerCI, model.RefBranch, "branch"); err == nil || !strings.Contains(err.Error(), "tag not found") {
+	if _, err := loader.Load(t.Context(), short, pipeline.TriggerCI, model.RefBranch, "branch"); err == nil || !strings.Contains(err.Error(), "tag not found") {
 		t.Fatalf("abbreviated SHA resolved: %v", err)
 	}
-	if _, err := loader.Load(t.Context(), key, periapsis.TriggerCI, model.RefBranch, "branch"); err == nil || !strings.Contains(err.Error(), "no green run") {
+	if _, err := loader.Load(t.Context(), key, pipeline.TriggerCI, model.RefBranch, "branch"); err == nil || !strings.Contains(err.Error(), "no green run") {
 		t.Fatalf("untested SHA resolved: %v", err)
 	}
 	if blobs.tagCalls != 1 || blobs.reachCalls != 0 || len(blobs.readArgs) != 0 {
 		t.Fatalf("refused SHA reached git: tags %d, reachability %d, reads %v", blobs.tagCalls, blobs.reachCalls, blobs.readArgs)
 	}
 	loader.registry = fakeRegistry{known: map[string]bool{key.Repo: true}, green: map[string]bool{key.Repo + "@" + sha: true}}
-	fragment, err := loader.Load(t.Context(), key, periapsis.TriggerCI, model.RefBranch, "branch")
+	fragment, err := loader.Load(t.Context(), key, pipeline.TriggerCI, model.RefBranch, "branch")
 	if err != nil || fragment.SHA != sha || fragment.Key != key || string(fragment.Source) != testFragmentBody {
 		t.Fatalf("green SHA fragment = %#v, %v", fragment, err)
 	}
@@ -154,7 +154,7 @@ spec:
               name: transferz/maven-verify@` + sha + `
               template: run
 `)
-	loaded, err := loadFragments(t.Context(), loader, source, periapsis.TriggerCI, model.RefBranch, "branch")
+	loaded, err := loadFragments(t.Context(), loader, source, pipeline.TriggerCI, model.RefBranch, "branch")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestFragmentLoaderResolvesNumericAndShortHexTags(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fragment, err := loader.Load(t.Context(), key, periapsis.TriggerCI, model.RefBranch, "branch")
+		fragment, err := loader.Load(t.Context(), key, pipeline.TriggerCI, model.RefBranch, "branch")
 		if err != nil || fragment.SHA != strings.Repeat("a", 40) {
 			t.Fatalf("tag %s = %+v, %v", version, fragment, err)
 		}
@@ -201,10 +201,10 @@ spec:
               name: transferz/maven-verify@` + sha + `
               template: run
 `)
-	if _, err := loadFragments(t.Context(), loader, source, periapsis.TriggerCI, model.RefBranch, "promotion"); err == nil || !strings.Contains(err.Error(), "only plain branch-push CI") {
+	if _, err := loadFragments(t.Context(), loader, source, pipeline.TriggerCI, model.RefBranch, "promotion"); err == nil || !strings.Contains(err.Error(), "only plain branch-push CI") {
 		t.Fatalf("promotion fragment loading = %v", err)
 	}
-	if _, err := loader.Load(t.Context(), argoworkflow.FragmentKey{Repo: "transferz/maven-verify", Version: "v3"}, periapsis.TriggerCI, model.RefBranch, "promotion"); err != nil || blobs.reachCalls != 1 {
+	if _, err := loader.Load(t.Context(), argoworkflow.FragmentKey{Repo: "transferz/maven-verify", Version: "v3"}, pipeline.TriggerCI, model.RefBranch, "promotion"); err != nil || blobs.reachCalls != 1 {
 		t.Fatalf("promotion tag must retain reachability gate: %v, calls=%d", err, blobs.reachCalls)
 	}
 }
@@ -214,7 +214,7 @@ func TestFragmentLoaderRefusesAnUnregisteredRepository(t *testing.T) {
 	loader, blobs := testLoader(t, nil)
 	key := argoworkflow.FragmentKey{Repo: "attacker/elsewhere", Version: "v1"}
 
-	if _, err := loader.Load(context.Background(), key, periapsis.TriggerCI, model.RefBranch, "branch"); err == nil {
+	if _, err := loader.Load(context.Background(), key, pipeline.TriggerCI, model.RefBranch, "branch"); err == nil {
 		t.Fatal("a repository this server does not host resolved as a fragment")
 	}
 	if blobs.tagCalls != 0 {
@@ -227,7 +227,7 @@ func TestFragmentLoaderHonoursTheAllowlist(t *testing.T) {
 	key := argoworkflow.FragmentKey{Repo: "transferz/maven-verify", Version: "v3"}
 
 	blocked, blobs := testLoader(t, []string{"transferz/something-else"})
-	if _, err := blocked.Load(context.Background(), key, periapsis.TriggerCI, model.RefBranch, "branch"); err == nil {
+	if _, err := blocked.Load(context.Background(), key, pipeline.TriggerCI, model.RefBranch, "branch"); err == nil {
 		t.Fatal("a repository outside the allowlist resolved")
 	}
 	if blobs.tagCalls != 0 {
@@ -235,7 +235,7 @@ func TestFragmentLoaderHonoursTheAllowlist(t *testing.T) {
 	}
 
 	allowed, _ := testLoader(t, []string{"transferz/maven-verify"})
-	if _, err := allowed.Load(context.Background(), key, periapsis.TriggerCI, model.RefBranch, "branch"); err != nil {
+	if _, err := allowed.Load(context.Background(), key, pipeline.TriggerCI, model.RefBranch, "branch"); err != nil {
 		t.Fatalf("an allowlisted repository was refused: %v", err)
 	}
 }
@@ -245,7 +245,7 @@ func TestFragmentLoaderRefusesAnUnknownTag(t *testing.T) {
 	loader, _ := testLoader(t, nil)
 	key := argoworkflow.FragmentKey{Repo: "transferz/maven-verify", Version: "v99"}
 
-	if _, err := loader.Load(context.Background(), key, periapsis.TriggerCI, model.RefBranch, "branch"); err == nil {
+	if _, err := loader.Load(context.Background(), key, pipeline.TriggerCI, model.RefBranch, "branch"); err == nil {
 		t.Fatal("an unknown tag resolved")
 	}
 }
@@ -258,7 +258,7 @@ func TestFragmentLoaderRefusesAnUnreachableTagCommit(t *testing.T) {
 	}
 	key := argoworkflow.FragmentKey{Repo: "transferz/maven-verify", Version: "v3"}
 
-	_, err := loader.Load(context.Background(), key, periapsis.TriggerCI, model.RefBranch, "branch")
+	_, err := loader.Load(context.Background(), key, pipeline.TriggerCI, model.RefBranch, "branch")
 	if err == nil {
 		t.Fatal("a tag on a commit unreachable from the upstream default branch resolved as a fragment (#213)")
 	}
@@ -276,7 +276,7 @@ func TestFragmentLoaderFailsClosedWhenReachabilityErrors(t *testing.T) {
 	blobs.reachErr = errors.New("cache unavailable")
 	key := argoworkflow.FragmentKey{Repo: "transferz/maven-verify", Version: "v3"}
 
-	if _, err := loader.Load(context.Background(), key, periapsis.TriggerCI, model.RefBranch, "branch"); err == nil {
+	if _, err := loader.Load(context.Background(), key, pipeline.TriggerCI, model.RefBranch, "branch"); err == nil {
 		t.Fatal("a reachability-check error did not refuse the fragment")
 	}
 	if len(blobs.readArgs) != 0 {
@@ -289,7 +289,7 @@ func TestFragmentLoaderConsultsReachabilityBeforeReading(t *testing.T) {
 	loader, blobs := testLoader(t, nil)
 	key := argoworkflow.FragmentKey{Repo: "transferz/maven-verify", Version: "v3"}
 
-	if _, err := loader.Load(context.Background(), key, periapsis.TriggerCI, model.RefBranch, "branch"); err != nil {
+	if _, err := loader.Load(context.Background(), key, pipeline.TriggerCI, model.RefBranch, "branch"); err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	if blobs.reachCalls != 1 {
@@ -317,7 +317,7 @@ spec:
               name: transferz/maven-verify@v3
               template: run
 `)
-	fragments, err := loadFragments(context.Background(), loader, source, periapsis.TriggerCI, model.RefBranch, "branch")
+	fragments, err := loadFragments(context.Background(), loader, source, pipeline.TriggerCI, model.RefBranch, "branch")
 	if err != nil {
 		t.Fatalf("loadFragments: %v", err)
 	}
@@ -342,7 +342,7 @@ spec:
       container:
         image: golang:1.26
 `)
-	fragments, err := loadFragments(context.Background(), loader, source, periapsis.TriggerCI, model.RefBranch, "branch")
+	fragments, err := loadFragments(context.Background(), loader, source, pipeline.TriggerCI, model.RefBranch, "branch")
 	if err != nil {
 		t.Fatalf("loadFragments: %v", err)
 	}
@@ -369,7 +369,7 @@ spec:
               name: transferz/maven-verify@v3
               template: run
 `)
-	if _, err := loadFragments(context.Background(), nil, source, periapsis.TriggerCI, model.RefBranch, "branch"); err == nil {
+	if _, err := loadFragments(context.Background(), nil, source, pipeline.TriggerCI, model.RefBranch, "branch"); err == nil {
 		t.Fatal("fragment references were silently ignored when no loader is configured")
 	}
 }

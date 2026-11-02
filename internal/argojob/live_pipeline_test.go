@@ -10,7 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/oberthci/oberth/internal/runprogress"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // This is the test that turns "admission-proven" into "actually works": it
@@ -84,7 +84,7 @@ func TestLiveRepositoryBuildPipelineExecutes(t *testing.T) {
 	request := Request{
 		RunID: runID, Name: runID, Repo: "oberth", UpstreamOrg: "skipops",
 		Ref: "refs/heads/argo-workflow-execution-engine", SHA: testSHA,
-		Trigger: periapsis.TriggerCI, Source: source,
+		Trigger: pipeline.TriggerCI, Source: source,
 		// This repository's own working tree is the checkout under test.
 		SourceDir: "../..",
 	}
@@ -120,7 +120,7 @@ func TestLiveRepositoryBuildPipelineExecutes(t *testing.T) {
 			truncate(log.String(), 40000))
 	}
 
-	// Every burn periapsis.go declares for the CI trigger must have run, with
+	// Every burn pipeline.go declares for the CI trigger must have run, with
 	// its steps attributed to it.
 	burns := map[string][]string{}
 	for _, step := range completion.Steps {
@@ -137,7 +137,7 @@ func TestLiveRepositoryBuildPipelineExecutes(t *testing.T) {
 	// The setup burn is where per-step granularity actually pays: eight
 	// sequential commands, each with its own exit code and log slice.
 	if len(burns["setup"]) < 8 {
-		t.Errorf("setup ran %d steps, want the 8 periapsis.go declares: %v", len(burns["setup"]), burns["setup"])
+		t.Errorf("setup ran %d steps, want the 8 pipeline.go declares: %v", len(burns["setup"]), burns["setup"])
 	}
 
 	body := log.String()

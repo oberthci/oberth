@@ -9,7 +9,7 @@ import (
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestBootstrapPublisherSourceAndToolSubstitution(t *testing.T) {
@@ -171,7 +171,7 @@ func TestBootstrapExecutedEnvironmentIgnoresSharedCachesAndCredentials(t *testin
 	workflow, err := Build(config, Request{
 		RunID: "bootstrap-environment", Name: "oberth-bootstrap-environment",
 		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github", Ref: "v1.2.3", SHA: testSHA,
-		Trigger: periapsis.TriggerRelease, Source: loadPipeline(t, "release.yaml"),
+		Trigger: pipeline.TriggerRelease, Source: loadPipeline(t, "release.yaml"),
 		ApprovedSecrets: oberthReleaseApprovedSecrets(),
 		SourceVolume:    SourceVolume{ClaimName: "source-fixture", SubPath: "source", ArtifactsSubPath: "artifacts"},
 	})

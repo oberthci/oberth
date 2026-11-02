@@ -7,7 +7,7 @@ import (
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // guardedDocument skips its heavy task on branch runs and declares a
@@ -55,7 +55,7 @@ func TestBuildStampsTheDurableRunTriggerOverTheDocumentDefault(t *testing.T) {
 	for _, trigger := range []argoworkflow.RunTrigger{
 		argoworkflow.RunTriggerBranch, argoworkflow.RunTriggerPromotion, argoworkflow.RunTriggerSchedule,
 	} {
-		request := testRequest(periapsis.TriggerCI, guardedDocument)
+		request := testRequest(pipeline.TriggerCI, guardedDocument)
 		request.RunTrigger = trigger
 		built, err := Build(testConfig(), request)
 		if err != nil {
@@ -68,7 +68,7 @@ func TestBuildStampsTheDurableRunTriggerOverTheDocumentDefault(t *testing.T) {
 
 	// A release run of a document that uses the parameter is a tag run.
 	release := strings.Replace(guardedDocument, "branch=M,promotion=XL,schedule=XL", "tag=L", 1)
-	built, err := Build(testConfig(), testRequest(periapsis.TriggerRelease, release))
+	built, err := Build(testConfig(), testRequest(pipeline.TriggerRelease, release))
 	if err != nil {
 		t.Fatalf("build release: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestBuildStampsTheDurableRunTriggerOverTheDocumentDefault(t *testing.T) {
 }
 
 func TestBuildLeavesDocumentsThatNeverMentionTheParameterUnchanged(t *testing.T) {
-	request := testRequest(periapsis.TriggerCI, greedyDocument)
+	request := testRequest(pipeline.TriggerCI, greedyDocument)
 	request.RunTrigger = argoworkflow.RunTriggerPromotion
 	built, err := Build(testConfig(), request)
 	if err != nil {
@@ -91,13 +91,13 @@ func TestBuildLeavesDocumentsThatNeverMentionTheParameterUnchanged(t *testing.T)
 
 func TestBuildRefusesARunTriggerOutsideItsTier(t *testing.T) {
 	for _, testCase := range []struct {
-		tier    periapsis.Trigger
+		tier    pipeline.Trigger
 		trigger argoworkflow.RunTrigger
 	}{
-		{periapsis.TriggerCI, argoworkflow.RunTriggerTag},
-		{periapsis.TriggerRelease, argoworkflow.RunTriggerBranch},
-		{periapsis.TriggerRelease, argoworkflow.RunTriggerPromotion},
-		{periapsis.TriggerCI, argoworkflow.RunTrigger("push")},
+		{pipeline.TriggerCI, argoworkflow.RunTriggerTag},
+		{pipeline.TriggerRelease, argoworkflow.RunTriggerBranch},
+		{pipeline.TriggerRelease, argoworkflow.RunTriggerPromotion},
+		{pipeline.TriggerCI, argoworkflow.RunTrigger("push")},
 	} {
 		request := testRequest(testCase.tier, guardedDocument)
 		request.RunTrigger = testCase.trigger

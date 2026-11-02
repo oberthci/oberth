@@ -13,7 +13,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type snapshotRecorder struct {
@@ -66,7 +66,7 @@ func TestDeclarationRepositoryMatchesUpstreamFallback(t *testing.T) {
 			jobs := &ArgoJobs{declarations: recorder}
 			request := service.JobRequest{SourceDir: dir, Repository: model.Repository{Name: "repo"}, UpstreamName: upstream.Name, UpstreamOrg: upstream.Org(), Run: model.Run{SHA: "commit"}}
 			want := upstream.QualifiedRepo("repo")
-			jobs.recordDeclarations(context.Background(), request, source, periapsis.TriggerCI)
+			jobs.recordDeclarations(context.Background(), request, source, pipeline.TriggerCI)
 			if !recorder.called || recorder.repo != want {
 				t.Fatalf("observation repo=%q want=%q", recorder.repo, want)
 			}

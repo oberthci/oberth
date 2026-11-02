@@ -12,7 +12,7 @@ import (
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type adoptingArgoControl struct {
@@ -41,16 +41,16 @@ func (controller *adoptingArgoControl) WaitResumed(_ context.Context, name, runI
 }
 
 func TestArgoJobsAdoptRestoresIntentAndResumesWait(t *testing.T) {
-	controller := &adoptingArgoControl{found: true, binding: argojob.Adoption{Size: periapsis.L, UID: "workflow-uid", Identity: "spec-identity"}}
+	controller := &adoptingArgoControl{found: true, binding: argojob.Adoption{Size: pipeline.L, UID: "workflow-uid", Identity: "spec-identity"}}
 	jobs := &ArgoJobs{controller: controller, intents: map[string]argoIntent{}}
 	run := model.Run{ID: "run", JobName: "workflow", RefKind: model.RefBranch, Ref: "feature/adopt", SHA: "pushed-sha", TestedSHA: "tested-sha", ConcurrencyGroup: "build", Trigger: "branch"}
 	for range 2 {
 		size, found, err := jobs.Adopt(context.Background(), run)
-		if err != nil || !found || size != periapsis.L {
+		if err != nil || !found || size != pipeline.L {
 			t.Fatalf("adopt = %s %v %v", size, found, err)
 		}
 	}
-	if controller.request.SHA != "tested-sha" || controller.request.Group != "build" || controller.request.RunTrigger != argoworkflow.RunTriggerBranch || controller.request.Trigger != periapsis.TriggerCI {
+	if controller.request.SHA != "tested-sha" || controller.request.Group != "build" || controller.request.RunTrigger != argoworkflow.RunTriggerBranch || controller.request.Trigger != pipeline.TriggerCI {
 		t.Fatalf("adopt request = %#v", controller.request)
 	}
 	if _, _, err := jobs.Adopt(context.Background(), model.Run{ID: "foreign", JobName: run.JobName, Trigger: "branch"}); err == nil {
@@ -75,7 +75,7 @@ func TestArgoJobsAdoptAbsentWorkflowDoesNotCreateIntent(t *testing.T) {
 
 func TestArgoJobsAdoptedTerminalObservationErrorStillCollectsArtifacts(t *testing.T) {
 	budget := errors.New("step test/unit breached the aggregate run log budget")
-	controller := &adoptingArgoControl{found: true, waitErr: budget, binding: argojob.Adoption{Size: periapsis.L, UID: "workflow-uid", Identity: "spec-identity"}}
+	controller := &adoptingArgoControl{found: true, waitErr: budget, binding: argojob.Adoption{Size: pipeline.L, UID: "workflow-uid", Identity: "spec-identity"}}
 	collector, artifacts := &fakeCollector{body: []byte("archive")}, &fakeArtifactStore{}
 	jobs := &ArgoJobs{controller: controller, intents: map[string]argoIntent{}, collector: collector, artifacts: artifacts, artifactLimit: 1 << 20}
 	run := model.Run{ID: "run", JobName: "workflow", RefKind: model.RefBranch, Ref: "feature/adopt", SHA: "sha", Trigger: "branch"}
@@ -111,20 +111,20 @@ func TestArgoJobsAdoptMarksRefusalButNotReadFailure(t *testing.T) {
 func TestArgoJobsAdoptionKeepsPromotionAndReleaseTriggerBindings(t *testing.T) {
 	for _, kind := range []string{"promotion", "tag", "release"} {
 		t.Run(kind, func(t *testing.T) {
-			controller := &adoptingArgoControl{found: true, binding: argojob.Adoption{Size: periapsis.L, UID: "workflow-uid", Identity: "spec-identity", SpecSHA256: "exact-admitted-spec"}}
+			controller := &adoptingArgoControl{found: true, binding: argojob.Adoption{Size: pipeline.L, UID: "workflow-uid", Identity: "spec-identity", SpecSHA256: "exact-admitted-spec"}}
 			jobs := &ArgoJobs{controller: controller, intents: map[string]argoIntent{}}
 			run := model.Run{ID: "run-" + kind, JobName: "workflow-" + kind, RefKind: model.RefTag, Ref: "v1.2.3", SHA: "annotated-tag-object", TestedSHA: "peeled-reviewed-commit", ConcurrencyGroup: "publish", Trigger: kind, Release: true, Credentialed: true}
-			expectedTier := periapsis.TriggerRelease
+			expectedTier := pipeline.TriggerRelease
 			expectedKind := argoworkflow.RunTriggerTag
 			if kind == "promotion" {
 				run.RefKind = model.RefBranch
 				run.Release = false
 				run.Ref = "promotion/main/merged"
-				expectedTier = periapsis.TriggerCI
+				expectedTier = pipeline.TriggerCI
 				expectedKind = argoworkflow.RunTriggerPromotion
 			}
 			size, found, err := jobs.Adopt(context.Background(), run)
-			if err != nil || !found || size != periapsis.L || controller.request.Trigger != expectedTier || controller.request.RunTrigger != expectedKind || controller.request.SHA != run.TestedSHA || controller.request.Ref != run.Ref || controller.request.Group != run.ConcurrencyGroup {
+			if err != nil || !found || size != pipeline.L || controller.request.Trigger != expectedTier || controller.request.RunTrigger != expectedKind || controller.request.SHA != run.TestedSHA || controller.request.Ref != run.Ref || controller.request.Group != run.ConcurrencyGroup {
 				t.Fatalf("adoption binding changed: %+v %v", controller.request, err)
 			}
 			result, err := jobs.WaitResumed(context.Background(), run.JobName, io.Discard, nil, 0)

@@ -3,16 +3,16 @@ package argoworkflow
 import (
 	"strings"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // FileTrigger is the inverse of TriggerFile.
-func FileTrigger(file string) (periapsis.Trigger, bool) {
+func FileTrigger(file string) (pipeline.Trigger, bool) {
 	switch strings.TrimSpace(file) {
 	case BuildFile:
-		return periapsis.TriggerCI, true
+		return pipeline.TriggerCI, true
 	case ReleaseFile:
-		return periapsis.TriggerRelease, true
+		return pipeline.TriggerRelease, true
 	default:
 		return "", false
 	}

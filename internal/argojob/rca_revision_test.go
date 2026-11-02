@@ -12,7 +12,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestRCARevisionPreparationProofRequiresAbsenceAndNoPost(t *testing.T) {
@@ -38,7 +38,7 @@ func TestRCARevisionPreparationProofRequiresAbsenceAndNoPost(t *testing.T) {
 			}
 			var seeds []seedExecCall
 			controller.WithSourceSeeder(NewSourceSeeder(kube, recordingExec(&seeds), config))
-			request := testRequest(periapsis.TriggerCI, greedyDocument)
+			request := testRequest(pipeline.TriggerCI, greedyDocument)
 			request.SourceDir = writeCheckout(t)
 			_, err = controller.Create(t.Context(), request)
 			if err == nil || len(client.posts) != 0 {

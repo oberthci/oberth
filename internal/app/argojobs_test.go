@@ -14,14 +14,14 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestNoPipelineError_NotExist(t *testing.T) {
 	err := fmt.Errorf("open .oberth/build.yaml without escaping source root: %w",
 		&os.PathError{Op: "openat", Path: ".oberth/build.yaml", Err: os.ErrNotExist})
 
-	got := noPipelineError(err, periapsis.TriggerCI, "terraform")
+	got := noPipelineError(err, pipeline.TriggerCI, "terraform")
 	want := `repository "terraform" has no pipeline configuration (.oberth/build.yaml); run "oberth init" in the repository to generate one`
 	if got.Error() != want {
 		t.Fatalf("noPipelineError(ErrNotExist):\n  got:  %s\n  want: %s", got, want)
@@ -32,7 +32,7 @@ func TestNoPipelineError_ReleaseFile(t *testing.T) {
 	err := fmt.Errorf("open .oberth/release.yaml without escaping source root: %w",
 		&os.PathError{Op: "openat", Path: ".oberth/release.yaml", Err: os.ErrNotExist})
 
-	got := noPipelineError(err, periapsis.TriggerRelease, "oberth")
+	got := noPipelineError(err, pipeline.TriggerRelease, "oberth")
 	if !strings.Contains(got.Error(), argoworkflow.ReleaseFile) {
 		t.Fatalf("expected release file path in error, got: %s", got)
 	}
@@ -43,7 +43,7 @@ func TestNoPipelineError_ReleaseFile(t *testing.T) {
 
 func TestNoPipelineError_OtherError(t *testing.T) {
 	original := fmt.Errorf("permission denied")
-	got := noPipelineError(original, periapsis.TriggerCI, "terraform")
+	got := noPipelineError(original, pipeline.TriggerCI, "terraform")
 	if got.Error() != original.Error() {
 		t.Fatalf("non-ErrNotExist should pass through unchanged, got: %v", got)
 	}
@@ -106,7 +106,7 @@ spec:
 	if err != nil {
 		t.Fatalf("PipelineSize should succeed with valid file: %v", err)
 	}
-	if size != periapsis.M {
+	if size != pipeline.M {
 		t.Fatalf("expected size M, got %s", size)
 	}
 }
@@ -164,14 +164,14 @@ spec:
 		SourceDir:  dir,
 	}
 	// Build the submission the same way create() does.
-	source, err := readArgoSource(dir, periapsis.TriggerRelease)
+	source, err := readArgoSource(dir, pipeline.TriggerRelease)
 	if err != nil {
 		t.Fatal(err)
 	}
 	submission := argojob.Request{
 		RunID: request.Run.ID, Name: "test-workflow",
 		Repo: "oberth", Ref: request.Run.Ref,
-		SHA: commitSHA, Trigger: periapsis.TriggerRelease, Source: source,
+		SHA: commitSHA, Trigger: pipeline.TriggerRelease, Source: source,
 		SourceDir: dir, ApprovedSecrets: map[string]bool{},
 	}
 	if err := jobs.auditSubmission(context.Background(), request, submission); err != nil {

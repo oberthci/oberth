@@ -16,7 +16,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 const terraformState = "terraform-state"
@@ -29,7 +29,7 @@ type groupEngine struct {
 	mu         sync.Mutex
 	groups     map[string]string // run ref -> declared group
 	groupErrs  map[string]error  // run ref -> document refusal
-	sizes      map[string]periapsis.Size
+	sizes      map[string]pipeline.Size
 	jobs       map[string]*groupEngineJob // Job name -> job
 	byRun      map[string]*groupEngineJob // run ID -> job
 	executing  map[string]string          // "<repo>/<group>" -> run ID
@@ -58,13 +58,13 @@ type groupEngineJob struct {
 
 func newGroupEngine() *groupEngine {
 	return &groupEngine{
-		groups: map[string]string{}, groupErrs: map[string]error{}, sizes: map[string]periapsis.Size{},
+		groups: map[string]string{}, groupErrs: map[string]error{}, sizes: map[string]pipeline.Size{},
 		jobs: map[string]*groupEngineJob{}, byRun: map[string]*groupEngineJob{},
 		executing: map[string]string{}, created: make(chan string, 64), deleteErrs: map[string]error{},
 	}
 }
 
-func (engine *groupEngine) declare(ref, group string, size periapsis.Size) {
+func (engine *groupEngine) declare(ref, group string, size pipeline.Size) {
 	engine.mu.Lock()
 	defer engine.mu.Unlock()
 	engine.groups[ref] = group
@@ -102,13 +102,13 @@ func (engine *groupEngine) CreateRelease(_ context.Context, request JobRequest) 
 	return engine.create(request)
 }
 
-func (engine *groupEngine) PipelineSize(_ context.Context, request JobRequest) (periapsis.Size, error) {
+func (engine *groupEngine) PipelineSize(_ context.Context, request JobRequest) (pipeline.Size, error) {
 	engine.mu.Lock()
 	defer engine.mu.Unlock()
 	if size, ok := engine.sizes[request.Run.Ref]; ok {
 		return size, nil
 	}
-	return periapsis.M, nil
+	return pipeline.M, nil
 }
 
 func (engine *groupEngine) PipelineConcurrencyGroup(_ context.Context, request JobRequest) (string, error) {
@@ -289,7 +289,7 @@ func newGroupFixture(t *testing.T, maxConcurrent int) *groupFixture {
 	// These fixtures exercise admission mechanics with XL runs; XL takes a
 	// size grant since #1021.
 	for _, repository := range []model.Repository{terraform, beacon} {
-		if _, err := database.SetSizeGrant(ctx, repository.ID, "admin@host", periapsis.XL); err != nil {
+		if _, err := database.SetSizeGrant(ctx, repository.ID, "admin@host", pipeline.XL); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -415,13 +415,13 @@ func (fixture *groupFixture) awaitParked(t *testing.T, run model.Run, holder str
 // an unrelated repository's run is admitted during the group's run.
 func TestSchedulerSerializesAConcurrencyGroupAcrossTriggersWhileOtherRepositoriesRun(t *testing.T) {
 	fixture := newGroupFixture(t, 3)
-	if _, err := fixture.store.SetSizeGrant(t.Context(), fixture.terraform.ID, "admin", periapsis.L); err != nil {
+	if _, err := fixture.store.SetSizeGrant(t.Context(), fixture.terraform.ID, "admin", pipeline.L); err != nil {
 		t.Fatal(err)
 	}
-	fixture.engine.declare("fix-a", terraformState, periapsis.M)
-	fixture.engine.declare("fix-b", terraformState, periapsis.M)
-	fixture.engine.declare("apply-1", terraformState, periapsis.M)
-	fixture.engine.declare("feature-x", "", periapsis.M)
+	fixture.engine.declare("fix-a", terraformState, pipeline.M)
+	fixture.engine.declare("fix-b", terraformState, pipeline.M)
+	fixture.engine.declare("apply-1", terraformState, pipeline.M)
+	fixture.engine.declare("feature-x", "", pipeline.M)
 	planA := fixture.branch(t, fixture.terraform, "fix-a", "a")
 	fixture.start(t)
 	if first := fixture.awaitCreated(t, 1); !first[planA.ID] {
@@ -481,7 +481,7 @@ func TestSchedulerSerializesAConcurrencyGroupAcrossTriggersWhileOtherRepositorie
 func TestSchedulerParkedGroupRunsDoNotHoldDispatchSlots(t *testing.T) {
 	fixture := newGroupFixture(t, 2)
 	for _, ref := range []string{"fix-a", "fix-b", "fix-c"} {
-		fixture.engine.declare(ref, terraformState, periapsis.M)
+		fixture.engine.declare(ref, terraformState, pipeline.M)
 	}
 	planA := fixture.branch(t, fixture.terraform, "fix-a", "a")
 	planB := fixture.branch(t, fixture.terraform, "fix-b", "b")
@@ -521,8 +521,8 @@ func TestSchedulerParkedGroupRunsDoNotHoldDispatchSlots(t *testing.T) {
 // reaches Job creation (parked) or frees the group for the next run (holder).
 func TestSchedulerSupersedesSameBranchRunsInsideAConcurrencyGroup(t *testing.T) {
 	fixture := newGroupFixture(t, 3)
-	fixture.engine.declare("fix-a", terraformState, periapsis.M)
-	fixture.engine.declare("fix-b", terraformState, periapsis.M)
+	fixture.engine.declare("fix-a", terraformState, pipeline.M)
+	fixture.engine.declare("fix-b", terraformState, pipeline.M)
 	holder := fixture.branch(t, fixture.terraform, "fix-a", "a")
 	fixture.start(t)
 	if created := fixture.awaitCreated(t, 1); !created[holder.ID] {
@@ -565,8 +565,8 @@ func TestSchedulerSupersedesSameBranchRunsInsideAConcurrencyGroup(t *testing.T) 
 // Workflow, so the ordering is asserted, not inferred from timing.
 func TestSchedulerHoldsTheGroupUntilAFailedWaitsWorkflowIsDeleted(t *testing.T) {
 	fixture := newGroupFixture(t, 3)
-	fixture.engine.declare("fix-a", terraformState, periapsis.M)
-	fixture.engine.declare("fix-b", terraformState, periapsis.M)
+	fixture.engine.declare("fix-a", terraformState, pipeline.M)
+	fixture.engine.declare("fix-b", terraformState, pipeline.M)
 	holder := fixture.branch(t, fixture.terraform, "fix-a", "a")
 	next := fixture.branch(t, fixture.terraform, "fix-b", "b")
 	fixture.start(t)
@@ -617,8 +617,8 @@ func TestSchedulerHoldsTheGroupUntilAFailedWaitsWorkflowIsDeleted(t *testing.T) 
 // next member beside a Workflow that may still be alive.
 func TestSchedulerKeepsTheGroupWhenAFailedWaitsWorkflowCannotBeDeleted(t *testing.T) {
 	fixture := newGroupFixture(t, 3)
-	fixture.engine.declare("fix-a", terraformState, periapsis.M)
-	fixture.engine.declare("fix-b", terraformState, periapsis.M)
+	fixture.engine.declare("fix-a", terraformState, pipeline.M)
+	fixture.engine.declare("fix-b", terraformState, pipeline.M)
 	fixture.branch(t, fixture.terraform, "fix-a", "a")
 	fixture.branch(t, fixture.terraform, "fix-b", "b")
 	ctx := context.Background()
@@ -679,8 +679,8 @@ func TestSchedulerKeepsTheGroupWhenAFailedWaitsWorkflowCannotBeDeleted(t *testin
 // running plan either.
 func TestSchedulerPromotionCIWaitsForItsConcurrencyGroup(t *testing.T) {
 	fixture := newGroupFixture(t, 3)
-	fixture.engine.declare("fix-a", terraformState, periapsis.M)
-	fixture.engine.declare("promotion/main", terraformState, periapsis.M)
+	fixture.engine.declare("fix-a", terraformState, pipeline.M)
+	fixture.engine.declare("promotion/main", terraformState, pipeline.M)
 	holder := fixture.branch(t, fixture.terraform, "fix-a", "a")
 	fixture.start(t)
 	if created := fixture.awaitCreated(t, 1); !created[holder.ID] {
@@ -725,7 +725,7 @@ func TestSchedulerFailsARunWhoseConcurrencyGroupIsMalformed(t *testing.T) {
 	fixture.engine.mu.Lock()
 	fixture.engine.groupErrs["fix-bad"] = errors.New(`argoworkflow: annotation oberth.ci/concurrency-group declares invalid concurrency group "Terraform_State"`)
 	fixture.engine.mu.Unlock()
-	fixture.engine.declare("fix-good", terraformState, periapsis.M)
+	fixture.engine.declare("fix-good", terraformState, pipeline.M)
 	bad := fixture.branch(t, fixture.terraform, "fix-bad", "a")
 	good := fixture.branch(t, fixture.terraform, "fix-good", "b")
 	fixture.start(t)

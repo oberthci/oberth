@@ -10,7 +10,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type recordingAuditor struct {
@@ -38,7 +38,7 @@ func (jobs failingDelete) Delete(context.Context, string, string) error { return
 // with its run and weight, admission_release clears it after proving the
 // Workflow gone, and the run waiting behind it is admitted without a restart.
 func TestRetainedReservationIsListedAndReleasable(t *testing.T) {
-	fixture := newConcurrencyFixture(t, periapsis.M, 1)
+	fixture := newConcurrencyFixture(t, pipeline.M, 1)
 	scheduler := fixture.scheduler
 	auditor := &recordingAuditor{next: fixture.store}
 	scheduler.auditor = auditor
@@ -60,12 +60,12 @@ func TestRetainedReservationIsListedAndReleasable(t *testing.T) {
 	}
 	gate := scheduler.admission
 	held := gate.reserve(stale.QueueSequence)
-	acquireRequestWithinBudget(t, held, admissionRequest{RunID: stale.ID, RepoID: fixture.repo.ID, Repo: fixture.repo.Name, Ref: "feature/stale", Size: periapsis.M})
+	acquireRequestWithinBudget(t, held, admissionRequest{RunID: stale.ID, RepoID: fixture.repo.ID, Repo: fixture.repo.Name, Ref: "feature/stale", Size: pipeline.M})
 	held.retain()
 
 	waiter := gate.reserve(stale.QueueSequence + 1)
 	waiterReady := make(chan func(), 1)
-	go acquireRequestForTest(waiter, admissionRequest{RunID: "waiting-run", RepoID: fixture.repo.ID, Repo: fixture.repo.Name, Ref: "feature/next", Size: periapsis.M}, waiterReady)
+	go acquireRequestForTest(waiter, admissionRequest{RunID: "waiting-run", RepoID: fixture.repo.ID, Repo: fixture.repo.Name, Ref: "feature/next", Size: pipeline.M}, waiterReady)
 	awaitWaiting(t, waiter)
 
 	state := scheduler.AdmissionState()
@@ -86,7 +86,7 @@ func TestRetainedReservationIsListedAndReleasable(t *testing.T) {
 	}
 
 	// Without proof the Workflow is gone, release is refused unless forced.
-	scheduler.jobs = failingDelete{newConcurrentJobs(periapsis.M, 1), errors.New("apiserver unavailable")}
+	scheduler.jobs = failingDelete{newConcurrentJobs(pipeline.M, 1), errors.New("apiserver unavailable")}
 	if _, err := scheduler.ReleaseAdmission(ctx, stale.ID, "admin@host", false); !errors.Is(err, ErrAdmissionReleaseRefused) {
 		t.Fatalf("unverified release = %v", err)
 	}
@@ -110,7 +110,7 @@ func TestRetainedReservationIsListedAndReleasable(t *testing.T) {
 }
 
 func TestAdmissionReleaseRefusesLiveRunsAndNonAdmins(t *testing.T) {
-	fixture := newConcurrencyFixture(t, periapsis.M, 1)
+	fixture := newConcurrencyFixture(t, pipeline.M, 1)
 	scheduler := fixture.scheduler
 	ctx := context.Background()
 	live, err := scheduler.EnqueueCI(ctx, CIRequest{EventID: "live", Repository: fixture.repo, Branch: "feature/live",
@@ -122,7 +122,7 @@ func TestAdmissionReleaseRefusesLiveRunsAndNonAdmins(t *testing.T) {
 		t.Fatal(err)
 	}
 	reservation := scheduler.admission.reserve(live.QueueSequence)
-	release := acquireRequestWithinBudget(t, reservation, admissionRequest{RunID: live.ID, RepoID: fixture.repo.ID, Repo: fixture.repo.Name, Ref: "feature/live", Size: periapsis.M})
+	release := acquireRequestWithinBudget(t, reservation, admissionRequest{RunID: live.ID, RepoID: fixture.repo.ID, Repo: fixture.repo.Name, Ref: "feature/live", Size: pipeline.M})
 	defer release()
 	if _, err := scheduler.ReleaseAdmission(ctx, live.ID, "admin@host", true); !errors.Is(err, ErrAdmissionReleaseRefused) ||
 		!strings.Contains(err.Error(), "run_cancel") {
@@ -142,7 +142,7 @@ func TestAdmissionReleaseRefusesLiveRunsAndNonAdmins(t *testing.T) {
 // its preflight Workflow may still be alive, so nothing proves it gone. A
 // release without force must not free its weight and claim verification.
 func TestReleaseOfAGrantWithoutAWorkflowNameNeedsForce(t *testing.T) {
-	fixture := newConcurrencyFixture(t, periapsis.M, 1)
+	fixture := newConcurrencyFixture(t, pipeline.M, 1)
 	scheduler := fixture.scheduler
 	auditor := &recordingAuditor{next: fixture.store}
 	scheduler.auditor = auditor
@@ -160,7 +160,7 @@ func TestReleaseOfAGrantWithoutAWorkflowNameNeedsForce(t *testing.T) {
 		t.Fatal(err)
 	}
 	reservation := scheduler.admission.reserveRun(claimed)
-	acquireRequestWithinBudget(t, reservation, admissionRequest{RunID: preflight.ID, RepoID: fixture.repo.ID, Repo: fixture.repo.Name, Ref: "feature/kvm", Size: periapsis.M})
+	acquireRequestWithinBudget(t, reservation, admissionRequest{RunID: preflight.ID, RepoID: fixture.repo.ID, Repo: fixture.repo.Name, Ref: "feature/kvm", Size: pipeline.M})
 
 	if _, err := scheduler.ReleaseAdmission(ctx, preflight.ID, "admin@host", false); !errors.Is(err, ErrAdmissionReleaseRefused) ||
 		!strings.Contains(err.Error(), "force") {
@@ -184,7 +184,7 @@ func TestReleaseOfAGrantWithoutAWorkflowNameNeedsForce(t *testing.T) {
 // TestClaimedReservationIsAddressableWhilePreparing pins that a reservation
 // carries its run ID from the claim, before its checkout and static reads.
 func TestClaimedReservationIsAddressableWhilePreparing(t *testing.T) {
-	fixture := newConcurrencyFixture(t, periapsis.M, 1)
+	fixture := newConcurrencyFixture(t, pipeline.M, 1)
 	reservation := fixture.scheduler.admission.reserveRun(model.Run{ID: "claimed-run", QueueSequence: 7, RepoID: fixture.repo.ID, Ref: "feature/x"})
 	defer reservation.cancel()
 	state := fixture.scheduler.AdmissionState()

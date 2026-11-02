@@ -6,14 +6,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestMarkerRoundTripAndStrictValidation(t *testing.T) {
 	started := time.Now().UTC()
 	event := Event{
 		Version: Version, Burn: "test", Step: "unit", Ordinal: 2,
-		Status: StepRunning, DeclaredSize: periapsis.L, StartedAt: &started,
+		Status: StepRunning, DeclaredSize: pipeline.L, StartedAt: &started,
 	}
 	marker, err := MarshalMarker(event)
 	if err != nil {
@@ -83,7 +83,7 @@ func TestEventValidate(t *testing.T) {
 	valid := func(status Status, started, finished *time.Time) Event {
 		return Event{
 			Version: Version, Burn: "test", Step: "unit", Ordinal: 0,
-			Status: status, DeclaredSize: periapsis.M,
+			Status: status, DeclaredSize: pipeline.M,
 			StartedAt: started, FinishedAt: finished,
 		}
 	}
@@ -148,7 +148,7 @@ func TestEventValidate(t *testing.T) {
 	})
 	t.Run("invalid declared size", func(t *testing.T) {
 		e := valid(StepQueued, nil, nil)
-		e.DeclaredSize = periapsis.Size("XXXL")
+		e.DeclaredSize = pipeline.Size("XXXL")
 		if err := e.Validate(); err == nil {
 			t.Fatal("accepted invalid declared size")
 		}

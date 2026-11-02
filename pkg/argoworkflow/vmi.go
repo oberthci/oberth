@@ -14,7 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/yaml"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // The manifest is deliberately decoded into this small shape, rather than a
@@ -331,10 +331,10 @@ func admitVMIResource(where string, tmpl *wfv1.ResourceTemplate, prefixes []stri
 			kinds++
 			containerDisks++
 			image := volume.ContainerDisk.Image
-			if err := periapsis.ValidateRunnerImage(image); err != nil {
+			if err := pipeline.ValidateRunnerImage(image); err != nil {
 				return fmt.Errorf("argoworkflow: %s.containerDisk.image: %w", path, err)
 			}
-			if !periapsis.RunnerImageAllowed(image, prefixes) {
+			if !pipeline.RunnerImageAllowed(image, prefixes) {
 				return fmt.Errorf("argoworkflow: %s.containerDisk.image must have an allowlisted prefix", path)
 			}
 		}
@@ -405,10 +405,10 @@ func admitKernelBoot(path string, kernelBoot *vmiKernelBoot, prefixes []string) 
 		return fmt.Errorf("argoworkflow: %s.container is required", path)
 	}
 	container := kernelBoot.Container
-	if err := periapsis.ValidateRunnerImage(container.Image); err != nil {
+	if err := pipeline.ValidateRunnerImage(container.Image); err != nil {
 		return fmt.Errorf("argoworkflow: %s.container.image: %w", path, err)
 	}
-	if !periapsis.RunnerImageAllowed(container.Image, prefixes) {
+	if !pipeline.RunnerImageAllowed(container.Image, prefixes) {
 		return fmt.Errorf("argoworkflow: %s.container.image must have an allowlisted containerDisk prefix", path)
 	}
 	if container.KernelPath == "" {
@@ -432,7 +432,7 @@ func admitKernelBoot(path string, kernelBoot *vmiKernelBoot, prefixes []string) 
 }
 
 func validateContainerDiskPrefixes(prefixes []string) error {
-	if err := periapsis.ValidateRunnerImagePrefixes(prefixes); err != nil {
+	if err := pipeline.ValidateRunnerImagePrefixes(prefixes); err != nil {
 		return fmt.Errorf("containerDisk prefixes: %w", err)
 	}
 	for _, prefix := range prefixes {

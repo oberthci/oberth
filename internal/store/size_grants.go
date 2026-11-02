@@ -10,36 +10,36 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // DefaultMaxRunSize is the largest admission size a repository without an
 // active size grant may run at (#1021). XL reserves the whole host and makes
 // every other repository wait for a full drain, so it takes an admin grant.
-const DefaultMaxRunSize = periapsis.L
+const DefaultMaxRunSize = pipeline.L
 
 // SizeGrant raises one repository's maximum admission size. It belongs to a
 // durable repository ID, never an ambiguous name. Revoking also disables the
 // automatic tag boost; granting re-enables it within the maximum size.
 type SizeGrant struct {
-	RepoID    int64          `json:"repo_id"`
-	MaxSize   periapsis.Size `json:"max_size"`
-	GrantedBy string         `json:"granted_by"`
-	GrantedAt time.Time      `json:"granted_at"`
-	RevokedBy string         `json:"revoked_by,omitempty"`
-	RevokedAt *time.Time     `json:"revoked_at,omitempty"`
+	RepoID    int64         `json:"repo_id"`
+	MaxSize   pipeline.Size `json:"max_size"`
+	GrantedBy string        `json:"granted_by"`
+	GrantedAt time.Time     `json:"granted_at"`
+	RevokedBy string        `json:"revoked_by,omitempty"`
+	RevokedAt *time.Time    `json:"revoked_at,omitempty"`
 }
 
 // ValidSizeGrantMax reports whether a grant may name this maximum. Only the
 // sizes above what every repository may already reach by default, plus L
 // itself (an explicit record of the default), are grantable.
-func ValidSizeGrantMax(size periapsis.Size) bool {
-	return size == periapsis.L || size == periapsis.XL
+func ValidSizeGrantMax(size pipeline.Size) bool {
+	return size == pipeline.L || size == pipeline.XL
 }
 
 // MaxRunSize is the largest size this repository's runs may be admitted at:
 // its active grant's maximum, or DefaultMaxRunSize.
-func (s *Store) MaxRunSize(ctx context.Context, repoID int64) (periapsis.Size, error) {
+func (s *Store) MaxRunSize(ctx context.Context, repoID int64) (pipeline.Size, error) {
 	if repoID <= 0 {
 		return "", fmt.Errorf("%w: repository ID is required", ErrInvalid)
 	}
@@ -51,7 +51,7 @@ func (s *Store) MaxRunSize(ctx context.Context, repoID int64) (periapsis.Size, e
 	if err != nil {
 		return "", err
 	}
-	return periapsis.Size(size), nil
+	return pipeline.Size(size), nil
 }
 
 func (s *Store) SizeGrant(ctx context.Context, repoID int64) (SizeGrant, error) {
@@ -67,7 +67,7 @@ func (s *Store) SizeGrant(ctx context.Context, repoID int64) (SizeGrant, error) 
 	if err != nil {
 		return SizeGrant{}, err
 	}
-	grant.MaxSize = periapsis.Size(size)
+	grant.MaxSize = pipeline.Size(size)
 	grant.GrantedAt = fromUnixNano(grantedAt)
 	if revokedAt.Valid {
 		at := fromUnixNano(revokedAt.Int64)
@@ -81,13 +81,13 @@ func (s *Store) SizeGrant(ctx context.Context, repoID int64) (SizeGrant, error) 
 // an active grant replaces its maximum; granting the maximum already active,
 // or revoking an already revoked grant, is an invalid state. A first revoke
 // records an opt-out even when no size grant was ever needed.
-func (s *Store) SetSizeGrant(ctx context.Context, repoID int64, actor string, max periapsis.Size) (SizeGrant, error) {
+func (s *Store) SetSizeGrant(ctx context.Context, repoID int64, actor string, max pipeline.Size) (SizeGrant, error) {
 	if repoID <= 0 || strings.TrimSpace(actor) == "" {
 		return SizeGrant{}, fmt.Errorf("%w: repository and actor are required", ErrInvalid)
 	}
 	allow := max != ""
 	if allow && !ValidSizeGrantMax(max) {
-		return SizeGrant{}, fmt.Errorf("%w: size grant maximum must be %s or %s, got %q", ErrInvalid, periapsis.L, periapsis.XL, max)
+		return SizeGrant{}, fmt.Errorf("%w: size grant maximum must be %s or %s, got %q", ErrInvalid, pipeline.L, pipeline.XL, max)
 	}
 	now := unixNano(s.now())
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -114,7 +114,7 @@ func (s *Store) SetSizeGrant(ctx context.Context, repoID int64, actor string, ma
 		previous = currentSize
 	}
 	switch {
-	case allow && active && periapsis.Size(currentSize) == max:
+	case allow && active && pipeline.Size(currentSize) == max:
 		return SizeGrant{}, fmt.Errorf("%w: size grant %s is already active", ErrInvalidState, max)
 	case !allow && revoked.Valid:
 		return SizeGrant{}, fmt.Errorf("%w: size grant is already revoked", ErrInvalidState)

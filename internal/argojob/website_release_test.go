@@ -13,7 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 const websiteSecretPath = "oberth/data/release/cloudflare-oberth-workers-token"
@@ -34,7 +34,7 @@ func builtOberthRelease(t *testing.T) *wfv1.Workflow {
 	workflow, err := Build(config, Request{
 		RunID: "run-website", Name: "oberth-oberth-run-website-aabbccddeeff",
 		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github", Ref: "v1.2.3", SHA: testSHA,
-		Trigger: periapsis.TriggerRelease, Source: loadPipeline(t, "release.yaml"),
+		Trigger: pipeline.TriggerRelease, Source: loadPipeline(t, "release.yaml"),
 		ApprovedSecrets: oberthReleaseApprovedSecrets(),
 		SourceVolume: SourceVolume{
 			ClaimName: "oberth-oberth-run-website-aabbccddeeff-src", SubPath: "src",

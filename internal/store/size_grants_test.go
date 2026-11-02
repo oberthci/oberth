@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestSizeGrantDefaultsToLAndIsScopedAuditedAndRevocable(t *testing.T) {
@@ -26,7 +26,7 @@ func TestSizeGrantDefaultsToLAndIsScopedAuditedAndRevocable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	maximum := func(id int64) periapsis.Size {
+	maximum := func(id int64) pipeline.Size {
 		t.Helper()
 		size, err := database.MaxRunSize(ctx, id)
 		if err != nil {
@@ -34,40 +34,40 @@ func TestSizeGrantDefaultsToLAndIsScopedAuditedAndRevocable(t *testing.T) {
 		}
 		return size
 	}
-	if maximum(ebpf.ID) != periapsis.L {
+	if maximum(ebpf.ID) != pipeline.L {
 		t.Fatal("an ungranted repository may exceed L")
 	}
 	if _, err := database.SizeGrant(ctx, ebpf.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing grant: %v", err)
 	}
-	for _, refused := range []periapsis.Size{periapsis.S, periapsis.M, "XXL"} {
+	for _, refused := range []pipeline.Size{pipeline.S, pipeline.M, "XXL"} {
 		if _, err := database.SetSizeGrant(ctx, ebpf.ID, "admin@host", refused); !errors.Is(err, ErrInvalid) {
 			t.Fatalf("grant %q: %v", refused, err)
 		}
 	}
-	grant, err := database.SetSizeGrant(ctx, ebpf.ID, "admin@host", periapsis.XL)
-	if err != nil || grant.MaxSize != periapsis.XL || grant.GrantedBy != "admin@host" || grant.RevokedAt != nil {
+	grant, err := database.SetSizeGrant(ctx, ebpf.ID, "admin@host", pipeline.XL)
+	if err != nil || grant.MaxSize != pipeline.XL || grant.GrantedBy != "admin@host" || grant.RevokedAt != nil {
 		t.Fatalf("grant XL: %+v, %v", grant, err)
 	}
-	if maximum(ebpf.ID) != periapsis.XL || maximum(other.ID) != periapsis.L {
+	if maximum(ebpf.ID) != pipeline.XL || maximum(other.ID) != pipeline.L {
 		t.Fatal("the grant is not scoped to its repository")
 	}
-	if _, err := database.SetSizeGrant(ctx, ebpf.ID, "admin@host", periapsis.XL); !errors.Is(err, ErrInvalidState) {
+	if _, err := database.SetSizeGrant(ctx, ebpf.ID, "admin@host", pipeline.XL); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("duplicate grant: %v", err)
 	}
-	if grant, err = database.SetSizeGrant(ctx, ebpf.ID, "admin@host", periapsis.L); err != nil || grant.MaxSize != periapsis.L {
+	if grant, err = database.SetSizeGrant(ctx, ebpf.ID, "admin@host", pipeline.L); err != nil || grant.MaxSize != pipeline.L {
 		t.Fatalf("lower to L: %+v, %v", grant, err)
 	}
 	if grant, err = database.SetSizeGrant(ctx, ebpf.ID, "admin@host", ""); err != nil || grant.RevokedAt == nil {
 		t.Fatalf("revoke: %+v, %v", grant, err)
 	}
-	if maximum(ebpf.ID) != periapsis.L {
+	if maximum(ebpf.ID) != pipeline.L {
 		t.Fatal("a revoked grant still raises the maximum")
 	}
 	if _, err := database.SetSizeGrant(ctx, ebpf.ID, "admin@host", ""); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("revoke without a grant: %v", err)
 	}
-	if _, err := database.SetSizeGrant(ctx, other.ID+100, "admin@host", periapsis.XL); !errors.Is(err, ErrNotFound) {
+	if _, err := database.SetSizeGrant(ctx, other.ID+100, "admin@host", pipeline.XL); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unknown repo: %v", err)
 	}
 	var audited int

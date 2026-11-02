@@ -13,11 +13,11 @@ import (
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func kubeVirtRequest(id string, repoID int64, demand, limit argoworkflow.VMIDemand) admissionRequest {
-	request := groupRequest(id, repoID, periapsis.S, "")
+	request := groupRequest(id, repoID, pipeline.S, "")
 	request.KubeVirt = &KubeVirtResources{Demand: demand, Limit: limit}
 	return request
 }
@@ -116,7 +116,7 @@ func TestKubeVirtCapacityKeepsFIFOAndDeclaredGroup(t *testing.T) {
 	t.Cleanup(grouped.cancel)
 	groupAcquired := make(chan func(), 1)
 	// A declared group still serializes ordinary and VMI-bearing runs together.
-	go acquireRequestForTest(grouped, groupRequest("ordinary-release", 1, periapsis.S, "release-state"), groupAcquired)
+	go acquireRequestForTest(grouped, groupRequest("ordinary-release", 1, pipeline.S, "release-state"), groupAcquired)
 	awaitWaiting(t, grouped)
 	holder()
 	releaseOld := awaitAcquired(t, oldAcquired)
@@ -290,17 +290,17 @@ func TestKubeVirtAdoptionCountsOnceAndDrainsReducedCapacity(t *testing.T) {
 	unit := argoworkflow.VMIDemand{VMs: 1, Cores: 2, MemoryBytes: 1 << 30}
 	runs := []model.Run{{ID: "first", QueueSequence: 1, RepoID: 7}, {ID: "second", QueueSequence: 2, RepoID: 7}}
 	for _, run := range runs {
-		first, err := gate.adopt(run, periapsis.M, unit)
+		first, err := gate.adopt(run, pipeline.M, unit)
 		if err != nil {
 			t.Fatal(err)
 		}
-		again, err := gate.adopt(run, periapsis.M, unit)
+		again, err := gate.adopt(run, pipeline.M, unit)
 		if err != nil || again != first || !again.submitted {
 			t.Fatalf("repeated adoption = %p, %v", again, err)
 		}
 		changed := unit
 		changed.Cores++
-		if _, err := gate.adopt(run, periapsis.M, changed); err == nil {
+		if _, err := gate.adopt(run, pipeline.M, changed); err == nil {
 			t.Fatal("changed demand accepted for the same reservation")
 		}
 	}
@@ -338,11 +338,11 @@ type adoptingKubeVirtEngine struct {
 
 func (engine *adoptingKubeVirtEngine) JobNamespace() string { return "workflows" }
 
-func (engine *adoptingKubeVirtEngine) Adopt(_ context.Context, run model.Run) (periapsis.Size, bool, error) {
+func (engine *adoptingKubeVirtEngine) Adopt(_ context.Context, run model.Run) (pipeline.Size, bool, error) {
 	engine.mu.Lock()
 	defer engine.mu.Unlock()
 	job := engine.jobs[run.JobName]
-	return periapsis.M, job != nil && job.runID == run.ID, nil
+	return pipeline.M, job != nil && job.runID == run.ID, nil
 }
 
 func (engine *adoptingKubeVirtEngine) AdoptedKubeVirtDemand(run model.Run) (argoworkflow.VMIDemand, error) {

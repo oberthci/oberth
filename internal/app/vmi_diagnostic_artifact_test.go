@@ -9,7 +9,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func diagnosticArchive(t *testing.T, name, body string) []byte {
@@ -36,7 +36,7 @@ func TestVMIDiagnosticArtifactPreservesCollectionAndTierGate(t *testing.T) {
 	store := &fakeArtifactStore{}
 	jobs := jobsWithArtifacts(collector, store)
 	diagnostic := []byte(`{"version":1,"vmis":[]}`)
-	if reason := jobs.collectArtifacts(context.Background(), "wf", "run-1", periapsis.TriggerCI, diagnostic); reason != "" {
+	if reason := jobs.collectArtifacts(context.Background(), "wf", "run-1", pipeline.TriggerCI, diagnostic); reason != "" {
 		t.Fatal(reason)
 	}
 	gz, err := gzip.NewReader(bytes.NewReader(store.stored))
@@ -63,11 +63,11 @@ func TestVMIDiagnosticArtifactPreservesCollectionAndTierGate(t *testing.T) {
 	if store.calls != 1 || members["report.txt"] != "test report" || members["oberth/vmi-diagnostics.json"] != string(diagnostic) {
 		t.Fatalf("members=%v calls=%d", members, store.calls)
 	}
-	if reason := jobs.collectArtifacts(context.Background(), "wf", "run-1", periapsis.TriggerRelease, diagnostic); reason != "" || store.calls != 1 || collector.calls != 1 {
+	if reason := jobs.collectArtifacts(context.Background(), "wf", "run-1", pipeline.TriggerRelease, diagnostic); reason != "" || store.calls != 1 || collector.calls != 1 {
 		t.Fatal("credentialed diagnostic escaped tier gate")
 	}
 	collector.err = errors.New("claim gone")
-	if reason := jobs.collectArtifacts(context.Background(), "wf", "run-2", periapsis.TriggerCI, diagnostic); reason == "" || store.calls != 2 || len(store.stored) == 0 {
+	if reason := jobs.collectArtifacts(context.Background(), "wf", "run-2", pipeline.TriggerCI, diagnostic); reason == "" || store.calls != 2 || len(store.stored) == 0 {
 		t.Fatal("diagnostic lost with failed user artifact collection")
 	}
 }

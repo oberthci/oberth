@@ -10,13 +10,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // cacheLeafRequest is a pipeline with a "work" VCT and delivered artifacts,
 // so every automatic workspace mount is in play, whose "main" leaf carries
 // the given workspace annotations and a sibling leaf carries none.
-func cacheLeafRequest(t *testing.T, trigger periapsis.Trigger, annotations map[string]string) Request {
+func cacheLeafRequest(t *testing.T, trigger pipeline.Trigger, annotations map[string]string) Request {
 	t.Helper()
 	wf, err := argoworkflow.Decode([]byte(greedyDocument))
 	if err != nil {
@@ -75,7 +75,7 @@ func TestWorkspaceCacheMountsOnlyTheCache(t *testing.T) {
 		"cache-env-none": {argoworkflow.WorkspaceMountsAnnotation: "cache", argoworkflow.WorkspaceEnvAnnotation: "none"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			wf, err := Build(cachingConfig(), cacheLeafRequest(t, periapsis.TriggerCI, annotations))
+			wf, err := Build(cachingConfig(), cacheLeafRequest(t, pipeline.TriggerCI, annotations))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -130,9 +130,9 @@ func TestWorkspaceCacheMountsOnlyTheCache(t *testing.T) {
 // never sees the CI root, and the reverse.
 func TestWorkspaceCacheStaysOnItsTier(t *testing.T) {
 	annotations := map[string]string{argoworkflow.WorkspaceMountsAnnotation: "cache", argoworkflow.WorkspaceEnvAnnotation: "none"}
-	for trigger, want := range map[periapsis.Trigger]string{
-		periapsis.TriggerCI:      testCICacheRoot,
-		periapsis.TriggerRelease: testReleaseCacheRoot,
+	for trigger, want := range map[pipeline.Trigger]string{
+		pipeline.TriggerCI:      testCICacheRoot,
+		pipeline.TriggerRelease: testReleaseCacheRoot,
 	} {
 		t.Run(string(trigger), func(t *testing.T) {
 			r := cacheLeafRequest(t, trigger, annotations)
@@ -150,7 +150,7 @@ func TestWorkspaceCacheStaysOnItsTier(t *testing.T) {
 				t.Fatal(err)
 			}
 			other := testReleaseCacheRoot
-			if trigger == periapsis.TriggerRelease {
+			if trigger == pipeline.TriggerRelease {
 				other = testCICacheRoot
 			}
 			if strings.Contains(string(encoded), `"`+other) {
@@ -161,7 +161,7 @@ func TestWorkspaceCacheStaysOnItsTier(t *testing.T) {
 	// A release tier with no cache root gets no cache, even when CI has one.
 	config := cachingConfig()
 	config.ReleaseCacheRoot = ""
-	r := cacheLeafRequest(t, periapsis.TriggerRelease, annotations)
+	r := cacheLeafRequest(t, pipeline.TriggerRelease, annotations)
 	r.Ref = "refs/tags/v1.2.3"
 	wf, err := Build(config, r)
 	if err != nil {
@@ -176,7 +176,7 @@ func TestWorkspaceCacheStaysOnItsTier(t *testing.T) {
 // nor the per-run work-VCT fallback, and is never pointed at either path: the
 // authored private locations stand.
 func TestWorkspaceCacheWithoutTierRootKeepsAuthoredCaches(t *testing.T) {
-	wf, err := Build(testConfig(), cacheLeafRequest(t, periapsis.TriggerCI, map[string]string{argoworkflow.WorkspaceMountsAnnotation: "cache"}))
+	wf, err := Build(testConfig(), cacheLeafRequest(t, pipeline.TriggerCI, map[string]string{argoworkflow.WorkspaceMountsAnnotation: "cache"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,14 +331,14 @@ func TestWorkspaceCacheCoversEveryPodContainerShape(t *testing.T) {
 // credentialed CI leaf may still use none.
 func TestWorkspaceCacheRefusedOnCredentialedCILeaf(t *testing.T) {
 	path := "oberth/upstream/oberthci/oberth/test-secret"
-	request := func(trigger periapsis.Trigger, mode string) Request {
+	request := func(trigger pipeline.Trigger, mode string) Request {
 		document := strings.Replace(perRepoCredentialedDocument(path), "    - name: main\n",
 			"    - name: main\n      metadata:\n        annotations:\n          oberth.ci/workspace-mounts: "+mode+"\n", 1)
 		r := testRequest(trigger, document)
 		r.Repo, r.UpstreamName, r.UpstreamOrg = "oberth", "codeberg", "oberthci"
 		r.ApprovedSecrets = map[string]bool{path: true}
 		r.SourceVolume = SourceVolume{ClaimName: "test-claim", SubPath: "src", VaultCASubPath: "vault-ca", BinarySubPath: "bin"}
-		if trigger == periapsis.TriggerRelease {
+		if trigger == pipeline.TriggerRelease {
 			r.Ref = "refs/tags/v1.2.3"
 		}
 		return r
@@ -346,14 +346,14 @@ func TestWorkspaceCacheRefusedOnCredentialedCILeaf(t *testing.T) {
 	config := testConfigWithPerRepo()
 	config.CICacheRoot, config.ReleaseCacheRoot = testCICacheRoot, testReleaseCacheRoot
 
-	_, err := Build(config, request(periapsis.TriggerCI, "cache"))
+	_, err := Build(config, request(pipeline.TriggerCI, "cache"))
 	if err == nil || !strings.Contains(err.Error(), "cannot use oberth.ci/workspace-mounts: cache on the CI tier") {
 		t.Fatalf("credentialed CI cache leaf: err=%v", err)
 	}
-	if _, err := Build(config, request(periapsis.TriggerCI, "none")); err != nil {
+	if _, err := Build(config, request(pipeline.TriggerCI, "none")); err != nil {
 		t.Fatalf("credentialed CI none leaf refused: %v", err)
 	}
-	wf, err := Build(config, request(periapsis.TriggerRelease, "cache"))
+	wf, err := Build(config, request(pipeline.TriggerRelease, "cache"))
 	if err != nil {
 		t.Fatalf("credentialed release cache leaf refused: %v", err)
 	}

@@ -10,7 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // ResourceCeiling bounds each pipeline container's requests and limits. The
@@ -22,11 +22,11 @@ type ResourceCeiling struct {
 	EphemeralStorage string `json:"ephemeral-storage"`
 }
 
-func ResourceCeilingForSize(maximum periapsis.Size) (ResourceCeiling, error) {
+func ResourceCeilingForSize(maximum pipeline.Size) (ResourceCeiling, error) {
 	switch maximum {
-	case periapsis.L:
+	case pipeline.L:
 		return ResourceCeiling{CPU: "4", Memory: "8Gi", EphemeralStorage: "16Gi"}, nil
-	case periapsis.XL:
+	case pipeline.XL:
 		return ResourceCeiling{CPU: MaxContainerCPU, Memory: MaxContainerMemory, EphemeralStorage: MaxContainerEphemeral}, nil
 	default:
 		return ResourceCeiling{}, errors.New("invalid administrator resource ceiling grant")
@@ -35,7 +35,7 @@ func ResourceCeilingForSize(maximum periapsis.Size) (ResourceCeiling, error) {
 
 // ValidateResourceCeiling reads declarations only. It never defaults, clamps,
 // rounds or changes requests/limits. Call before server helper injection.
-func ValidateResourceCeiling(wf *wfv1.Workflow, repo string, maximum periapsis.Size, deadlineSeconds int64) error {
+func ValidateResourceCeiling(wf *wfv1.Workflow, repo string, maximum pipeline.Size, deadlineSeconds int64) error {
 	ceiling, err := ResourceCeilingForSize(maximum)
 	if err != nil {
 		return err

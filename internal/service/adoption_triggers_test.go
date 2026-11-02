@@ -12,7 +12,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 const adoptionBaseSHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -289,7 +289,7 @@ func TestStartupAdoptsPromotionTagAndReleaseAcrossRepeatedRestarts(t *testing.T)
 				}
 				reopenSlice2Owner(t, fixture)
 				recovery := slice2Scheduler(t, fixture, jobs, git)
-				if err := recovery.reconcileStrandedRunsWithGate(context.Background(), recovery.requireMutation, func(model.Run, periapsis.Size) error { return errors.New("terminal run re-adopted") }); err != nil {
+				if err := recovery.reconcileStrandedRunsWithGate(context.Background(), recovery.requireMutation, func(model.Run, pipeline.Size) error { return errors.New("terminal run re-adopted") }); err != nil {
 					t.Fatal(err)
 				}
 				if err := recovery.recoverPendingPublications(context.Background()); err != nil {
@@ -464,7 +464,7 @@ func TestMissingPromotionTagAndReleaseStayIneligibleForRefire(t *testing.T) {
 			reopenSlice2Owner(t, fixture)
 			jobs := &adoptingJobs{found: false, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}
 			scheduler := slice2Scheduler(t, fixture, jobs, &controlGit{})
-			if err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(model.Run, periapsis.Size) error { return errors.New("missing Workflow adopted") }); err != nil {
+			if err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(model.Run, pipeline.Size) error { return errors.New("missing Workflow adopted") }); err != nil {
 				t.Fatal(err)
 			}
 			final, err := fixture.store.Run(context.Background(), run.ID)
@@ -534,7 +534,7 @@ func TestLegacyNonReleaseTagKeepsFallbackWithoutInferringRelease(t *testing.T) {
 	fixture.setJobName(t, enqueued.ID, "legacy-tag-job")
 	jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}
 	scheduler := fixture.scheduler(t, jobs)
-	if err = scheduler.reconcileStrandedRunsWithGate(ctx, scheduler.requireMutation, func(model.Run, periapsis.Size) error { return errors.New("legacy tag adopted") }); err != nil {
+	if err = scheduler.reconcileStrandedRunsWithGate(ctx, scheduler.requireMutation, func(model.Run, pipeline.Size) error { return errors.New("legacy tag adopted") }); err != nil {
 		t.Fatal(err)
 	}
 	final, err := fixture.store.Run(ctx, enqueued.ID)

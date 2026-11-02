@@ -16,7 +16,7 @@ import (
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type journalRecoveryJobs struct {
@@ -31,8 +31,8 @@ type journalRecoveryJobs struct {
 	observed       bool
 }
 
-func (*journalRecoveryJobs) Adopt(context.Context, model.Run) (periapsis.Size, bool, error) {
-	return periapsis.M, true, nil
+func (*journalRecoveryJobs) Adopt(context.Context, model.Run) (pipeline.Size, bool, error) {
+	return pipeline.M, true, nil
 }
 func (*journalRecoveryJobs) JobNamespace() string { return "oberth-argo" }
 func (j *journalRecoveryJobs) WaitResumed(ctx context.Context, name string, out io.Writer, _ []runprogress.Event, _ int64) (JobResult, error) {
@@ -167,7 +167,7 @@ func TestSchedulerPodJournalFailureDegradesWithoutStrandingRun(t *testing.T) {
 					}
 
 				}
-				reservation, err := scheduler.admission.adopt(run, periapsis.M, argoworkflow.VMIDemand{})
+				reservation, err := scheduler.admission.adopt(run, pipeline.M, argoworkflow.VMIDemand{})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -236,7 +236,7 @@ func TestSchedulerActiveOwnerRetainsPodJournalForRestart(t *testing.T) {
 	}
 	jobs := &journalRecoveryJobs{t: t, block: true, entered: make(chan struct{})}
 	scheduler := fixture.scheduler(t, jobs)
-	reservation, err := scheduler.admission.adopt(run, periapsis.M, argoworkflow.VMIDemand{})
+	reservation, err := scheduler.admission.adopt(run, pipeline.M, argoworkflow.VMIDemand{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +305,7 @@ func TestSchedulerPendingCancellationKeepsPodJournal(t *testing.T) {
 	}
 	_ = j.Close()
 	_ = f.Close()
-	reservation, err := scheduler.admission.adopt(run, periapsis.M, argoworkflow.VMIDemand{})
+	reservation, err := scheduler.admission.adopt(run, pipeline.M, argoworkflow.VMIDemand{})
 	if err != nil {
 		t.Fatal(err)
 	}

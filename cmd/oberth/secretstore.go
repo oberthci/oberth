@@ -20,7 +20,7 @@ import (
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/secretstore"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -623,7 +623,7 @@ func secretStoreVerifyPaths(input []string, kvMount string) ([]string, map[strin
 	declaredByFetch := make(map[string]string, len(input))
 	seen := make(map[string]bool, len(input))
 	for _, path := range input {
-		scoped, upstreamScoped, err := periapsis.ParseUpstreamSecretStorePath(path)
+		scoped, upstreamScoped, err := pipeline.ParseUpstreamSecretStorePath(path)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%w: %w", errUsage, err)
 		}
@@ -632,7 +632,7 @@ func secretStoreVerifyPaths(input []string, kvMount string) ([]string, map[strin
 			declaredByFetch[canonical] = path
 			path = canonical
 		}
-		if err := periapsis.ValidateSecretStorePath(path); err != nil {
+		if err := pipeline.ValidateSecretStorePath(path); err != nil {
 			return nil, nil, fmt.Errorf("%w: %w", errUsage, err)
 		}
 		if !seen[path] {

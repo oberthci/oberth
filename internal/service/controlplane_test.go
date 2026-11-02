@@ -19,7 +19,7 @@ import (
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type controlGit struct {
@@ -902,7 +902,7 @@ type fakeJobs struct {
 	createdPlans    []JobRequest
 	createdApplies  []JobRequest
 	deleted         []string
-	size            periapsis.Size
+	size            pipeline.Size
 	plan            []runprogress.PlannedStep
 	planErr         error
 }
@@ -1069,7 +1069,7 @@ func (jobs *fakeJobs) CreateCI(_ context.Context, request JobRequest) error {
 	return nil
 }
 
-func (jobs *fakeJobs) PipelineSize(context.Context, JobRequest) (periapsis.Size, error) {
+func (jobs *fakeJobs) PipelineSize(context.Context, JobRequest) (pipeline.Size, error) {
 	return jobs.size.Effective(), nil
 }
 
@@ -1365,7 +1365,7 @@ func TestSchedulerPassesStaticSizeIntoJobCreation(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{
 		Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)},
 	})
-	fixture.jobs.size = periapsis.L
+	fixture.jobs.size = pipeline.L
 	enqueued, err := fixture.scheduler.EnqueueCI(context.Background(), CIRequest{
 		EventID: "sized-run", Repository: fixture.repo, Branch: "feature/sized",
 		SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "agent@host",
@@ -1376,7 +1376,7 @@ func TestSchedulerPassesStaticSizeIntoJobCreation(t *testing.T) {
 	if err := fixture.scheduler.ProcessNext(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(fixture.jobs.createdCI) != 1 || fixture.jobs.createdCI[0].Run.ID != enqueued.ID || fixture.jobs.createdCI[0].Size != periapsis.L {
+	if len(fixture.jobs.createdCI) != 1 || fixture.jobs.createdCI[0].Run.ID != enqueued.ID || fixture.jobs.createdCI[0].Size != pipeline.L {
 		t.Fatalf("created requests = %#v", fixture.jobs.createdCI)
 	}
 }
@@ -1780,7 +1780,7 @@ func TestActiveMCPAndDashboardLogsReadCurrentStepRange(t *testing.T) {
 	started := time.Now().UTC()
 	if err := fixture.logs.AppendStepProgress(enqueued.ID, runprogress.Event{
 		Version: runprogress.Version, Burn: "release", Step: "advance-stable-aliases", Ordinal: 0,
-		Status: runprogress.StepRunning, DeclaredSize: periapsis.M, StartedAt: &started,
+		Status: runprogress.StepRunning, DeclaredSize: pipeline.M, StartedAt: &started,
 	}); err != nil {
 		t.Fatal(err)
 	}

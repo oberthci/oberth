@@ -8,7 +8,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func (jobs *ArgoJobs) runSourceFile(request service.JobRequest) (string, error) {
@@ -16,7 +16,7 @@ func (jobs *ArgoJobs) runSourceFile(request service.JobRequest) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	if trigger != periapsis.TriggerRelease {
+	if trigger != pipeline.TriggerRelease {
 		return argoworkflow.TriggerFile(trigger)
 	}
 	// Preserve legacy behavior for unconfigured repositories, including older
@@ -51,7 +51,7 @@ func (jobs *ArgoJobs) noRunPipelineError(err error, request service.JobRequest) 
 	if routeErr != nil {
 		return routeErr
 	}
-	if errors.Is(err, os.ErrNotExist) && trigger == periapsis.TriggerRelease && file != argoworkflow.ReleaseFile {
+	if errors.Is(err, os.ErrNotExist) && trigger == pipeline.TriggerRelease && file != argoworkflow.ReleaseFile {
 		return fmt.Errorf("repository %q has no administrator-routed release workflow %q: %w", request.Repository.Name, file, err)
 	}
 	return noPipelineError(err, trigger, request.Repository.Name)

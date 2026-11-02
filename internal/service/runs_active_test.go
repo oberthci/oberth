@@ -10,7 +10,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // The active view lists a started run first even though it is newer than the
@@ -46,13 +46,13 @@ func TestActiveRunsOrderAndWaitReasons(t *testing.T) {
 	// 1: oldest; admitted, then parked on trusted VM capacity.
 	vm := enqueue("feature/vm")
 	vmReservation := gate.reserve(vm.QueueSequence)
-	cleanup = append(cleanup, acquireRequestWithinBudget(t, vmReservation, groupRequest(vm.ID, vm.RepoID, periapsis.M, "")))
+	cleanup = append(cleanup, acquireRequestWithinBudget(t, vmReservation, groupRequest(vm.ID, vm.RepoID, pipeline.M, "")))
 	if err := vmReservation.parkVM(); err != nil {
 		t.Fatal(err)
 	}
 	// 2: holds concurrency group "deploy" and has started.
 	holder := enqueue("feature/holder")
-	cleanup = append(cleanup, acquireRequestWithinBudget(t, gate.reserve(holder.QueueSequence), groupRequest(holder.ID, holder.RepoID, periapsis.M, "deploy")))
+	cleanup = append(cleanup, acquireRequestWithinBudget(t, gate.reserve(holder.QueueSequence), groupRequest(holder.ID, holder.RepoID, pipeline.M, "deploy")))
 	if _, err := fixture.store.SetRunJobName(ctx, holder.ID, "wf-holder"); err != nil {
 		t.Fatal(err)
 	}
@@ -64,12 +64,12 @@ func TestActiveRunsOrderAndWaitReasons(t *testing.T) {
 	groupedReservation := gate.reserve(grouped.QueueSequence)
 	// Waiters give up when the test context ends, so none outlives the test.
 	go func() {
-		_, _ = groupedReservation.acquireRequest(ctx, groupRequest(grouped.ID, grouped.RepoID, periapsis.S, "deploy"))
+		_, _ = groupedReservation.acquireRequest(ctx, groupRequest(grouped.ID, grouped.RepoID, pipeline.S, "deploy"))
 	}()
 	awaitWaiting(t, groupedReservation)
 	// 4: newer than the waiters, admitted and finished.
 	done := enqueue("feature/done")
-	releaseDone := acquireRequestWithinBudget(t, gate.reserve(done.QueueSequence), groupRequest(done.ID, done.RepoID, periapsis.S, ""))
+	releaseDone := acquireRequestWithinBudget(t, gate.reserve(done.QueueSequence), groupRequest(done.ID, done.RepoID, pipeline.S, ""))
 	if _, err := fixture.store.FinishRun(ctx, done.ID, model.RunResult{Status: model.RunPassed, Phase: "passed"}); err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestActiveRunsOrderAndWaitReasons(t *testing.T) {
 	head := enqueue("feature/head")
 	headReservation := gate.reserve(head.QueueSequence)
 	go func() {
-		_, _ = headReservation.acquireRequest(ctx, groupRequest(head.ID, head.RepoID, periapsis.L, ""))
+		_, _ = headReservation.acquireRequest(ctx, groupRequest(head.ID, head.RepoID, pipeline.L, ""))
 	}()
 	awaitWaiting(t, headReservation)
 	// 6: accepted, not yet claimed.

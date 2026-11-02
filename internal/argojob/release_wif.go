@@ -17,7 +17,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 const (
@@ -217,7 +217,7 @@ func authorizeReleaseWIFLeaf(wf *wfv1.Workflow, t *wfv1.Template, topLevel bool,
 	if tokenDisabled(t) || (wf.Spec.AutomountServiceAccountToken != nil && !*wf.Spec.AutomountServiceAccountToken) {
 		return fmt.Errorf("argojob: release WIF template %q explicitly disables its service-account token", t.Name)
 	}
-	if request.Trigger != periapsis.TriggerRelease || config.ReleaseWIF == nil || config.ReleaseWIF.Namespace != config.Namespace {
+	if request.Trigger != pipeline.TriggerRelease || config.ReleaseWIF == nil || config.ReleaseWIF.Namespace != config.Namespace {
 		return errors.New("argojob: release WIF requires an enabled administrator capability and a release trigger")
 	}
 	key := canonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo)

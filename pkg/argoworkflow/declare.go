@@ -7,11 +7,11 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // Repository declarations the server reads statically from the decoded
-// document. They are the Argo-path counterparts of pkg/periapsis's
+// document. They are the Argo-path counterparts of pkg/pipeline's
 // DeclaredJobSizes and DeclaredSecretStoreSecrets: annotations rather than Go
 // literals, but the same rule applies — the server reads them, never evaluates
 // them, and the reviewed source and the admission decision cannot diverge.
@@ -105,21 +105,21 @@ func DeclaredConcurrencyGroup(workflow *wfv1.Workflow) (string, error) {
 }
 
 // DeclaredSize returns the scheduler admission weight the document requests.
-func DeclaredSize(workflow *wfv1.Workflow) (periapsis.Size, error) {
+func DeclaredSize(workflow *wfv1.Workflow) (pipeline.Size, error) {
 	if workflow == nil {
 		return "", errors.New("argoworkflow: no Workflow to read")
 	}
 	declared, ok := workflow.Annotations[SizeAnnotation]
 	if !ok || strings.TrimSpace(declared) == "" {
-		return periapsis.M, nil
+		return pipeline.M, nil
 	}
-	size := periapsis.Size(strings.TrimSpace(declared))
+	size := pipeline.Size(strings.TrimSpace(declared))
 	switch size {
-	case periapsis.S, periapsis.M, periapsis.L, periapsis.XL:
+	case pipeline.S, pipeline.M, pipeline.L, pipeline.XL:
 		return size, nil
 	default:
 		return "", fmt.Errorf("argoworkflow: annotation %s declares unknown size %q; sizes are %q, %q, %q, and %q",
-			SizeAnnotation, declared, periapsis.S, periapsis.M, periapsis.L, periapsis.XL)
+			SizeAnnotation, declared, pipeline.S, pipeline.M, pipeline.L, pipeline.XL)
 	}
 }
 
@@ -142,7 +142,7 @@ func DeclaredSecretPaths(workflow *wfv1.Workflow) ([]string, error) {
 	seen := make(map[string]struct{}, len(fields))
 	for index, field := range fields {
 		path := strings.TrimSpace(field)
-		if err := periapsis.ValidateSecretStorePath(path); err != nil {
+		if err := pipeline.ValidateSecretStorePath(path); err != nil {
 			return nil, fmt.Errorf("argoworkflow: annotation %s entry %d: %w", SecretPathsAnnotation, index, err)
 		}
 		if _, duplicate := seen[path]; duplicate {

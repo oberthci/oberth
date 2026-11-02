@@ -11,7 +11,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/service"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type restartReadController struct {
@@ -44,7 +44,7 @@ func TestRestartCutArgoJobsMapsInterruptionAndKeepsFallbackBinding(t *testing.T)
 	real := argojob.Completion{Name: "workflow", Terminal: true, FailedBurn: "build", FailedStep: "test", Reason: "test exited 2", Steps: []argojob.StepResult{{Burn: "build", Step: "test", Status: runprogress.StepFailed, ExitCode: 2, ExitCodeKnown: true}}}
 	for _, mode := range []string{"normal", "terminal-log-error", "late-terminal", "partial-running", "late-real-failure", "real-failure", "earlier-real-failure", "read-error"} {
 		t.Run(mode, func(t *testing.T) {
-			c := &restartReadController{adoptingArgoControl: adoptingArgoControl{found: true, binding: argojob.Adoption{UID: "workflow-uid", Identity: "identity", Size: periapsis.M}}, observed: cut, next: cut}
+			c := &restartReadController{adoptingArgoControl: adoptingArgoControl{found: true, binding: argojob.Adoption{UID: "workflow-uid", Identity: "identity", Size: pipeline.M}}, observed: cut, next: cut}
 			if mode != "normal" {
 				c.observationError = errors.New("log stream failed")
 			}
@@ -110,7 +110,7 @@ func TestRestartCutFallbackOwnsJournalAndNewlyObservedExit(t *testing.T) {
 	start := time.Now().UTC()
 	finish := start.Add(time.Second)
 	completion := argojob.Completion{Name: "workflow", Terminal: true, FailedBurn: "build", FailedStep: "test", Steps: []argojob.StepResult{{Burn: "build", Step: "test", Status: runprogress.StepFailed, ExitCode: 2, ExitCodeKnown: true, StartedAt: &start, FinishedAt: &finish}}}
-	c := &restartReadController{adoptingArgoControl: adoptingArgoControl{found: true, binding: argojob.Adoption{UID: "workflow-uid", Identity: "identity", Size: periapsis.M}}, observed: completion, next: completion}
+	c := &restartReadController{adoptingArgoControl: adoptingArgoControl{found: true, binding: argojob.Adoption{UID: "workflow-uid", Identity: "identity", Size: pipeline.M}}, observed: completion, next: completion}
 	jobs := &ArgoJobs{controller: c, intents: map[string]argoIntent{}}
 	run := model.Run{ID: "run", JobName: "workflow", RefKind: model.RefBranch, Ref: "feature", SHA: "sha", Trigger: "branch"}
 	if _, found, err := jobs.Adopt(t.Context(), run); err != nil || !found {
@@ -136,7 +136,7 @@ func TestRestartCutFallbackOwnsJournalAndNewlyObservedExit(t *testing.T) {
 func TestRestartCutR2PartialRunningObservationAllowsTerminalCut(t *testing.T) {
 	failure := errors.New("executor token delivery unavailable")
 	c := &restartReadController{
-		adoptingArgoControl: adoptingArgoControl{found: true, binding: argojob.Adoption{UID: "workflow-uid", Identity: "identity", Size: periapsis.M}},
+		adoptingArgoControl: adoptingArgoControl{found: true, binding: argojob.Adoption{UID: "workflow-uid", Identity: "identity", Size: pipeline.M}},
 		observed:            argojob.Completion{Name: "workflow", Phase: "Running", Reason: "Workflow running"},
 		next:                argojob.Completion{Name: "workflow", Terminal: true, Interrupted: true, Infrastructure: true, Reason: "server restart interrupted build/test: missing exit"},
 		observationError:    failure,

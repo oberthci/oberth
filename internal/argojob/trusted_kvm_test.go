@@ -25,7 +25,7 @@ import (
 	"github.com/oberthci/oberth/internal/testtimeout"
 	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func trustedKVMRequest(t *testing.T) (Config, Request) {
@@ -34,7 +34,7 @@ func trustedKVMRequest(t *testing.T) (Config, Request) {
 	config.KVMEnabled = true
 	config.NonrootProfile = argoworkflow.NonrootStaticProfile
 	config.TrustedKVMGroup = 1234
-	request := testRequest(periapsis.TriggerCI, greedyDocument)
+	request := testRequest(pipeline.TriggerCI, greedyDocument)
 	request.UpstreamName = "codeberg"
 	digest := sha256.Sum256(request.Source)
 	now := time.Date(2026, 10, 13, 20, 0, 0, 0, time.UTC)

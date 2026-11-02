@@ -10,7 +10,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // ---------------------------------------------------------------------------
@@ -107,7 +107,7 @@ func TestRecordDeclarations_TemplateAndAnnotationPaths(t *testing.T) {
 		SourceDir:  dir,
 	}
 
-	jobs.recordDeclarations(context.Background(), request, source, periapsis.TriggerCI)
+	jobs.recordDeclarations(context.Background(), request, source, pipeline.TriggerCI)
 
 	if !recorder.called {
 		t.Fatal("RecordGrantDeclarations was not called")
@@ -159,7 +159,7 @@ func TestRecordDeclarations_RecorderErrorDoesNotBlockAdmission(t *testing.T) {
 	}
 
 	// recordDeclarations is best-effort; it must not panic or propagate errors.
-	jobs.recordDeclarations(context.Background(), request, source, periapsis.TriggerCI)
+	jobs.recordDeclarations(context.Background(), request, source, pipeline.TriggerCI)
 
 	if !recorder.called {
 		t.Fatal("RecordGrantDeclarations was not called despite source having declarations")
@@ -184,7 +184,7 @@ func TestRecordDeclarations_NilRecorderIsNoOp(t *testing.T) {
 	}
 
 	// Must not panic when declarations is nil.
-	jobs.recordDeclarations(context.Background(), request, source, periapsis.TriggerCI)
+	jobs.recordDeclarations(context.Background(), request, source, pipeline.TriggerCI)
 }
 
 func TestRecordDeclarations_NoSecretPaths(t *testing.T) {
@@ -220,7 +220,7 @@ spec:
 		SourceDir:  dir,
 	}
 
-	jobs.recordDeclarations(context.Background(), request, source, periapsis.TriggerCI)
+	jobs.recordDeclarations(context.Background(), request, source, pipeline.TriggerCI)
 
 	if recorder.called {
 		t.Fatal("RecordGrantDeclarations should not be called when no paths are declared")

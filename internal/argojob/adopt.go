@@ -16,7 +16,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // Adoption pins observation to the exact Workflow found during owner recovery.
@@ -26,7 +26,7 @@ type Adoption struct {
 	Pods        argoworkflow.PodDemand
 	RestartedAt time.Time
 	KubeVirt    argoworkflow.VMIDemand
-	Size        periapsis.Size
+	Size        pipeline.Size
 	UID         types.UID
 	Identity    string
 	SpecSHA256  string
@@ -39,7 +39,7 @@ var ErrAdoptionRefused = errors.New("argojob: Workflow refused for adoption")
 
 type AdoptionRequest struct {
 	Name, RunID, Ref, SHA, Group string
-	Trigger                      periapsis.Trigger
+	Trigger                      pipeline.Trigger
 	RunTrigger                   argoworkflow.RunTrigger
 	ScheduleEntry                string
 }

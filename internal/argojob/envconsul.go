@@ -36,7 +36,7 @@ import (
 	hcl "github.com/hashicorp/hcl"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // maxEnvconsulValueDepth bounds the walk over decoded configuration values.
@@ -165,14 +165,14 @@ func readBoundedWorkspaceFile(sourceDir, relative string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("stat it in the run workspace: %w", err)
 	}
-	if !info.Mode().IsRegular() || info.Size() > periapsis.MaxSourceBytes {
+	if !info.Mode().IsRegular() || info.Size() > pipeline.MaxSourceBytes {
 		return nil, errors.New("it must be one bounded regular file")
 	}
-	content, err := io.ReadAll(io.LimitReader(file, periapsis.MaxSourceBytes+1))
+	content, err := io.ReadAll(io.LimitReader(file, pipeline.MaxSourceBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("read it from the run workspace: %w", err)
 	}
-	if len(content) > periapsis.MaxSourceBytes {
+	if len(content) > pipeline.MaxSourceBytes {
 		return nil, errors.New("it exceeds the source-size limit")
 	}
 	return content, nil
@@ -263,11 +263,11 @@ func collectPathStrings(value any, paths *[]string, depth int) error {
 // declarations are already API paths and gain their logical spelling for the
 // same reason.
 func allowedStoreSpellings(declaredPaths []string) map[string]string {
-	upstreamMount := strings.SplitN(periapsis.UpstreamSecretPathPrefix, "/", 2)[0]
+	upstreamMount := strings.SplitN(pipeline.UpstreamSecretPathPrefix, "/", 2)[0]
 	allowed := make(map[string]string, len(declaredPaths)*2)
 	for _, declared := range declaredPaths {
 		allowed[declared] = declared
-		if scoped, upstreamScoped, err := periapsis.ParseUpstreamSecretStorePath(declared); err == nil && upstreamScoped {
+		if scoped, upstreamScoped, err := pipeline.ParseUpstreamSecretStorePath(declared); err == nil && upstreamScoped {
 			allowed[scoped.FetchPath(upstreamMount)] = declared
 			continue
 		}

@@ -9,7 +9,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func resourceBoundsSource(resources string) string {
@@ -29,12 +29,12 @@ spec:
 ` + resources
 }
 func resourceBoundsRequest(source string) Request {
-	r := testRequest(periapsis.TriggerCI, source)
+	r := testRequest(pipeline.TriggerCI, source)
 	r.Repo = "repo-01"
 	r.UpstreamName = "repo-01"
 	r.UpstreamOrg = "repo-01"
 	r.ApprovedSecrets = map[string]bool{}
-	r.ResourceMaximum = periapsis.L
+	r.ResourceMaximum = pipeline.L
 	return r
 }
 func TestResourceBoundsBuildUsesTrustedMaximumAndHonorsExactValues(t *testing.T) {
@@ -60,7 +60,7 @@ func TestResourceBoundsBuildUsesTrustedMaximumAndHonorsExactValues(t *testing.T)
 	if _, e := Build(config, r); e == nil || !strings.Contains(e.Error(), "administrator L ceiling 4") {
 		t.Fatalf("pipeline annotation raised grant: %v", e)
 	}
-	r.ResourceMaximum = periapsis.XL
+	r.ResourceMaximum = pipeline.XL
 	if _, e := Build(config, r); e != nil {
 		t.Fatal(e)
 	}

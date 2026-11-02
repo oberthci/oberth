@@ -6,7 +6,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestParallelismAdmissionMatrixSharesAndReportsConcurrency(t *testing.T) {
@@ -46,14 +46,14 @@ spec:
 		t.Fatalf("bounded matrix fell back: %+v %s", d, fallback)
 	}
 	r := g.reserve(1)
-	release := acquireRequestWithinBudget(t, r, admissionRequest{RunID: strings.Repeat("a", 32), Size: periapsis.XL, Pods: d})
+	release := acquireRequestWithinBudget(t, r, admissionRequest{RunID: strings.Repeat("a", 32), Size: pipeline.XL, Pods: d})
 	defer release()
 	charged := r.declaredResources()
 	// 24Gi requests + ceil(2.4Gi headroom) + 1Gi executor allowance.
 	if charged.CPUMilli != 8400 || charged.MemoryBytes != (25<<30)+2_576_980_378 || charged.Pods != 4 {
 		t.Fatalf("lost executor allowance or run headroom: %+v", charged)
 	}
-	small := acquireRequestWithinBudget(t, g.reserve(2), admissionRequest{Size: periapsis.XL, Pods: &argoworkflow.PodDemand{CPUMilli: 1000, MemoryBytes: 1 << 30, Pods: 1}})
+	small := acquireRequestWithinBudget(t, g.reserve(2), admissionRequest{Size: pipeline.XL, Pods: &argoworkflow.PodDemand{CPUMilli: 1000, MemoryBytes: 1 << 30, Pods: 1}})
 	defer small()
 	api := &API{admission: &Scheduler{admission: g}}
 	runs := []model.Run{{ID: r.runID, DisplayReason: "Priority normal: ordinary run."}}
@@ -64,10 +64,10 @@ spec:
 }
 
 func TestParallelismNoticeSurvivesCreateRecovery(t *testing.T) {
-	f := newConcurrencyFixture(t, periapsis.M, 3)
+	f := newConcurrencyFixture(t, pipeline.M, 3)
 	run := model.Run{ID: strings.Repeat("a", 32), JobName: "step-abc12345", SHA: strings.Repeat("b", 40), RepoID: f.repo.ID, QueueSequence: 1}
 	d := &argoworkflow.PodDemand{CPUMilli: 4000, MemoryBytes: 4 << 30, Pods: 4, Assumptions: argoworkflow.PodPeakDynamic | argoworkflow.PodPeakNested}
-	if err := f.scheduler.recordCreateAdmission(run, run.JobName, periapsis.M, argoworkflow.VMIDemand{}, d); err != nil {
+	if err := f.scheduler.recordCreateAdmission(run, run.JobName, pipeline.M, argoworkflow.VMIDemand{}, d); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.scheduler.restoreCreateGrant(run, nil); err != nil {

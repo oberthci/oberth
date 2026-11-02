@@ -13,7 +13,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // blockingController is a fake argoControl that lets tests control when
@@ -360,7 +360,7 @@ spec:
 	jobs.mu.Lock()
 	jobs.intents[name] = argoIntent{
 		runID:   runID,
-		trigger: periapsis.TriggerCI,
+		trigger: pipeline.TriggerCI,
 		// Not yet created, but already cancelled by Delete.
 		cancelled: true,
 	}

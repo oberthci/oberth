@@ -13,7 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 const nonrootTestDocument = `apiVersion: argoproj.io/v1alpha1
@@ -66,7 +66,7 @@ func nonrootBuiltWithScratch(t *testing.T, script bool, scratch string) *wfv1.Wo
 	config.NonrootProfile = argoworkflow.NonrootStaticProfile
 	config.CICacheRoot = "/server/cache/ci"
 	config.ReleaseCacheRoot = "/server/cache/release"
-	request := testRequest(periapsis.TriggerCI, document)
+	request := testRequest(pipeline.TriggerCI, document)
 	request.SourceVolume = SourceVolume{ClaimName: "run-source", SubPath: "src", ArtifactsSubPath: "artifacts"}
 	request = nonrootFixtureProof(request)
 	wf, err := Build(config, request)
@@ -122,7 +122,7 @@ func TestBuildNonrootLeaves(t *testing.T) {
 }
 
 func TestNonrootControllerSupportFailsClosed(t *testing.T) {
-	_, err := Build(testConfig(), testRequest(periapsis.TriggerCI, nonrootTestDocument))
+	_, err := Build(testConfig(), testRequest(pipeline.TriggerCI, nonrootTestDocument))
 	if err == nil || !strings.Contains(err.Error(), "support has not been established") {
 		t.Fatalf("unverified controller accepted selected leaves: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestNonrootSizeIsRecheckedAfterServerInjection(t *testing.T) {
 		config.NonrootProfile = argoworkflow.NonrootStaticProfile
 		config.CICacheRoot = "/server/cache/ci"
 		config.ReleaseCacheRoot = "/server/cache/release"
-		request := testRequest(periapsis.TriggerCI, string(document))
+		request := testRequest(pipeline.TriggerCI, string(document))
 		request.SourceVolume = SourceVolume{ClaimName: "run-source", SubPath: "src", ArtifactsSubPath: "artifacts"}
 		request = nonrootFixtureProof(request)
 		_, err = Build(config, request)

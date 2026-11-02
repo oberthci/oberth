@@ -13,7 +13,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // This suite holds Oberth's own .oberth/build.yaml and .oberth/release.yaml to
@@ -55,7 +55,7 @@ func oberthConfig() Config {
 // Unit pipeline renders use the existing private controller-proof fixture;
 // production admission still requires the real current controller proof.
 func buildOberthPipeline(config Config, request Request) (*wfv1.Workflow, error) {
-	if request.Trigger == periapsis.TriggerCI {
+	if request.Trigger == pipeline.TriggerCI {
 		request = nonrootFixtureProof(request)
 	}
 	return Build(config, request)
@@ -83,7 +83,7 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 	built, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
 		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
-		Ref: "refs/heads/main", SHA: testSHA, Trigger: periapsis.TriggerCI,
+		Ref: "refs/heads/main", SHA: testSHA, Trigger: pipeline.TriggerCI,
 		Source:          loadPipeline(t, "build.yaml"),
 		ApprovedSecrets: map[string]bool{},
 	})
@@ -116,9 +116,9 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 		t.Fatal("static Git qualification missing")
 	}
 
-	// Declared weight matches periapsis.go's JobSizes{"ci": "L"}.
+	// Declared weight matches pipeline.go's JobSizes{"ci": "L"}.
 	size, err := argoworkflow.DeclaredSize(built)
-	if err != nil || size != periapsis.L {
+	if err != nil || size != pipeline.L {
 		t.Fatalf("declared size = %q,%v; want L", size, err)
 	}
 
@@ -154,12 +154,12 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 
 // TestOberthReleasePipelineIsAdmissible proves the release document clears the
 // same gate and binds the release identity, and that its declared secret paths
-// are the ones periapsis.go declares.
+// are the ones pipeline.go declares.
 func TestOberthReleasePipelineIsAdmissible(t *testing.T) {
 	built, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
 		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
-		Ref: "refs/tags/v0.1.0", SHA: testSHA, Trigger: periapsis.TriggerRelease,
+		Ref: "refs/tags/v0.1.0", SHA: testSHA, Trigger: pipeline.TriggerRelease,
 		Source:          loadPipeline(t, "release.yaml"),
 		ApprovedSecrets: oberthReleaseApprovedSecrets(),
 	})
@@ -226,7 +226,7 @@ func TestOberthReleasePipelineOnBranchPushRefusesSystemPaths(t *testing.T) {
 	_, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
 		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
-		Ref: "refs/heads/main", SHA: testSHA, Trigger: periapsis.TriggerCI,
+		Ref: "refs/heads/main", SHA: testSHA, Trigger: pipeline.TriggerCI,
 		Source:          releasePipelineWithoutWIF(t),
 		ApprovedSecrets: oberthReleaseApprovedSecrets(),
 	})
@@ -247,7 +247,7 @@ func TestOberthReleasePipelineOnBranchRefusedWithoutAllowlist(t *testing.T) {
 	_, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
 		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
-		Ref: "refs/heads/main", SHA: testSHA, Trigger: periapsis.TriggerCI,
+		Ref: "refs/heads/main", SHA: testSHA, Trigger: pipeline.TriggerCI,
 		Source:          releasePipelineWithoutWIF(t),
 		ApprovedSecrets: map[string]bool{},
 	})
@@ -331,7 +331,7 @@ func TestOberthReleasePublisherUsesPrivateChildDir(t *testing.T) {
 	built, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
 		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
-		Ref: "refs/tags/v0.1.0", SHA: testSHA, Trigger: periapsis.TriggerRelease,
+		Ref: "refs/tags/v0.1.0", SHA: testSHA, Trigger: pipeline.TriggerRelease,
 		Source:          loadPipeline(t, "release.yaml"),
 		ApprovedSecrets: oberthReleaseApprovedSecrets(),
 	})
@@ -450,10 +450,10 @@ func TestOberthReleasePipelineRetriesCredentialedSteps(t *testing.T) {
 // the server's read-only checkout rather than fetching source themselves.
 func TestOberthPipelinesMountTheServerProvidedSource(t *testing.T) {
 	for _, name := range []string{"build.yaml", "release.yaml"} {
-		trigger := periapsis.TriggerCI
+		trigger := pipeline.TriggerCI
 		approved := map[string]bool{}
 		if name == "release.yaml" {
-			trigger = periapsis.TriggerRelease
+			trigger = pipeline.TriggerRelease
 			approved = oberthReleaseApprovedSecrets()
 		}
 		built, err := buildOberthPipeline(oberthConfig(), Request{
@@ -500,7 +500,7 @@ func TestOberthPipelinesMountTheServerProvidedSource(t *testing.T) {
 }
 
 // assertBurnGraph checks that the entrypoint DAG's tasks and their depends
-// expressions match the burn graph periapsis.go declares.
+// expressions match the burn graph pipeline.go declares.
 func assertBurnGraph(t *testing.T, workflow *wfv1.Workflow, entrypoint string, want map[string]string) {
 	t.Helper()
 	if workflow.Spec.Entrypoint != entrypoint {
@@ -626,7 +626,7 @@ func TestOberthReleasePipelineScopesTokenToCredentialedTemplates(t *testing.T) {
 	workflow, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
 		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
-		Ref: "refs/tags/v0.1.0", SHA: testSHA, Trigger: periapsis.TriggerRelease,
+		Ref: "refs/tags/v0.1.0", SHA: testSHA, Trigger: pipeline.TriggerRelease,
 		Source:          loadPipeline(t, "release.yaml"),
 		ApprovedSecrets: oberthReleaseApprovedSecrets(),
 	})
@@ -855,7 +855,7 @@ func TestStaticGitQualificationUsesOnlyInstalledRunnerPrefixes(t *testing.T) {
 	if !found {
 		t.Fatal("static musl build template missing")
 	}
-	request := Request{RunID: "run-static-git", Name: "oberth-static-git", Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github", Ref: "refs/heads/main", SHA: testSHA, Trigger: periapsis.TriggerCI, Source: loadPipeline(t, "build.yaml")}
+	request := Request{RunID: "run-static-git", Name: "oberth-static-git", Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github", Ref: "refs/heads/main", SHA: testSHA, Trigger: pipeline.TriggerCI, Source: loadPipeline(t, "build.yaml")}
 	if _, err := Build(config, request); err == nil {
 		t.Fatal("nonroot qualification accepted without current controller proof")
 	}

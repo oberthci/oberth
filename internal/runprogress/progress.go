@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // LogDeliveryPrefix identifies retained delivery observations outside command output.
@@ -47,15 +47,15 @@ func (status Status) terminal() bool {
 // It deliberately excludes commands, arguments, environment, errors, and
 // output so the progress channel can never carry credentials.
 type Event struct {
-	Version      int            `json:"version"`
-	Burn         string         `json:"burn"`
-	Step         string         `json:"step"`
-	Ordinal      int            `json:"ordinal"`
-	Status       Status         `json:"status"`
-	DeclaredSize periapsis.Size `json:"declared_size,omitempty"`
-	ExitCode     int            `json:"exit_code,omitempty"`
-	StartedAt    *time.Time     `json:"started_at,omitempty"`
-	FinishedAt   *time.Time     `json:"finished_at,omitempty"`
+	Version      int           `json:"version"`
+	Burn         string        `json:"burn"`
+	Step         string        `json:"step"`
+	Ordinal      int           `json:"ordinal"`
+	Status       Status        `json:"status"`
+	DeclaredSize pipeline.Size `json:"declared_size,omitempty"`
+	ExitCode     int           `json:"exit_code,omitempty"`
+	StartedAt    *time.Time    `json:"started_at,omitempty"`
+	FinishedAt   *time.Time    `json:"finished_at,omitempty"`
 }
 
 func (event Event) Validate() error {

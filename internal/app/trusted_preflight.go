@@ -17,7 +17,7 @@ import (
 	"github.com/oberthci/oberth/internal/trustedharness"
 	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type trustedController interface {
@@ -82,7 +82,7 @@ func (p *TrustedPreflights) Supports(contract vmrunner.Contract) error {
 }
 
 func (p *TrustedPreflights) request(job service.JobRequest, intent vmrunner.KVMIntent) (argojob.Request, error) {
-	source, err := readArgoSource(job.SourceDir, periapsis.TriggerCI)
+	source, err := readArgoSource(job.SourceDir, pipeline.TriggerCI)
 	if err != nil {
 		return argojob.Request{}, err
 	}
@@ -94,7 +94,7 @@ func (p *TrustedPreflights) request(job service.JobRequest, intent vmrunner.KVMI
 	if err != nil {
 		return argojob.Request{}, err
 	}
-	return argojob.Request{RunID: job.Run.ID, RepositoryID: job.Repository.ID, Name: intent.WorkflowName, Repo: job.Repository.Name, UpstreamName: job.UpstreamName, UpstreamOrg: job.UpstreamOrg, Ref: job.Run.Ref, SHA: intent.CandidateSHA, Trigger: periapsis.TriggerCI, RunTrigger: kind, ScheduleEntry: job.Run.ScheduleEntry, Source: source, SourceDir: job.SourceDir, ApprovedSecrets: map[string]bool{}, StepGrants: map[string]map[string]bool{}, TrustedKVM: &intent}, nil
+	return argojob.Request{RunID: job.Run.ID, RepositoryID: job.Repository.ID, Name: intent.WorkflowName, Repo: job.Repository.Name, UpstreamName: job.UpstreamName, UpstreamOrg: job.UpstreamOrg, Ref: job.Run.Ref, SHA: intent.CandidateSHA, Trigger: pipeline.TriggerCI, RunTrigger: kind, ScheduleEntry: job.Run.ScheduleEntry, Source: source, SourceDir: job.SourceDir, ApprovedSecrets: map[string]bool{}, StepGrants: map[string]map[string]bool{}, TrustedKVM: &intent}, nil
 }
 
 func (p *TrustedPreflights) Execute(ctx context.Context, job service.JobRequest, requirement vmrunner.Requirement, output io.Writer) (retErr error) {
@@ -115,7 +115,7 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.JobRequest,
 		return err
 	}
 	inventory, count := suite.Inventory()
-	source, err := readArgoSource(job.SourceDir, periapsis.TriggerCI)
+	source, err := readArgoSource(job.SourceDir, pipeline.TriggerCI)
 	if err != nil {
 		return err
 	}
@@ -460,8 +460,8 @@ func (p *TrustedPreflights) RecipeAllowed(recipe vmrunner.KVMRecipe) error {
 	}
 	return errors.New("journaled trusted recipe has been revoked or changed")
 }
-func (p *TrustedPreflights) Size(_ context.Context, job service.JobRequest) (periapsis.Size, error) {
-	source, err := readArgoSource(job.SourceDir, periapsis.TriggerCI)
+func (p *TrustedPreflights) Size(_ context.Context, job service.JobRequest) (pipeline.Size, error) {
+	source, err := readArgoSource(job.SourceDir, pipeline.TriggerCI)
 	if err != nil {
 		return "", err
 	}
@@ -484,8 +484,8 @@ func (p *TrustedPreflights) Size(_ context.Context, job service.JobRequest) (per
 		return "", err
 	}
 	// The server leaf itself needs two CPUs/four GiB even for an S build.
-	if size == periapsis.S {
-		size = periapsis.M
+	if size == pipeline.S {
+		size = pipeline.M
 	}
 	return size, nil
 }

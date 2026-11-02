@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 const kubevirtGroup = "kubevirt"
@@ -35,10 +35,10 @@ func (fixture *groupFixture) awaitAdmission(t *testing.T, run model.Run, what st
 // reservation at once, so the next grant pass admits the runs it blocked.
 func TestSupersedingAWaitingXLHeadReleasesItsReservationOnTheNextGrantPass(t *testing.T) {
 	fixture := newGroupFixture(t, 10)
-	fixture.engine.declare("busy", "", periapsis.L)
-	fixture.engine.declare("feat-kv", kubevirtGroup, periapsis.XL)
-	fixture.engine.declare("feat-kv-2", kubevirtGroup, periapsis.S)
-	fixture.engine.declare("small", "", periapsis.S)
+	fixture.engine.declare("busy", "", pipeline.L)
+	fixture.engine.declare("feat-kv", kubevirtGroup, pipeline.XL)
+	fixture.engine.declare("feat-kv-2", kubevirtGroup, pipeline.S)
+	fixture.engine.declare("small", "", pipeline.S)
 	holder := fixture.branch(t, fixture.beacon, "busy", "a")
 	head := fixture.branch(t, fixture.terraform, "feat-kv", "b")
 	member := fixture.branch(t, fixture.terraform, "feat-kv-2", "c")
@@ -49,7 +49,7 @@ func TestSupersedingAWaitingXLHeadReleasesItsReservationOnTheNextGrantPass(t *te
 		t.Fatalf("created %v; want only the L holder", created)
 	}
 	fixture.awaitAdmission(t, head, "waiting XL at the queue head", func(snapshot *model.AdmissionObservation) bool {
-		return snapshot != nil && snapshot.State == "waiting" && snapshot.Size == string(periapsis.XL) && snapshot.Position == 1 &&
+		return snapshot != nil && snapshot.State == "waiting" && snapshot.Size == string(pipeline.XL) && snapshot.Position == 1 &&
 			snapshot.Used == 3 && snapshot.Capacity == 20
 	})
 	fixture.awaitAdmission(t, member, "waiting behind the XL head in its group", func(snapshot *model.AdmissionObservation) bool {

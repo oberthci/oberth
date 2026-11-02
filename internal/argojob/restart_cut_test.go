@@ -17,7 +17,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func restartCutFixture(t *testing.T, change func(*wfv1.Workflow, *wfv1.NodeStatus, *corev1.Pod)) (*Controller, *wfv1.Workflow, Adoption, []runprogress.Event) {
@@ -41,7 +41,7 @@ func restartCutFixture(t *testing.T, change func(*wfv1.Workflow, *wfv1.NodeStatu
 	controller.WithPodLogFollower(func(context.Context, string, string, corev1.PodLogOptions) (io.ReadCloser, error) {
 		return io.NopCloser(strings.NewReader("")), nil
 	})
-	binding, found, err := controller.Adopt(t.Context(), AdoptionRequest{Name: wf.Name, RunID: wf.Annotations[runIDAnnotation], Ref: "feature/restart", SHA: strings.Repeat("c", 40), Trigger: periapsis.TriggerCI, RunTrigger: argoworkflow.RunTriggerBranch})
+	binding, found, err := controller.Adopt(t.Context(), AdoptionRequest{Name: wf.Name, RunID: wf.Annotations[runIDAnnotation], Ref: "feature/restart", SHA: strings.Repeat("c", 40), Trigger: pipeline.TriggerCI, RunTrigger: argoworkflow.RunTriggerBranch})
 	if err != nil || !found {
 		t.Fatal("verified adoption failed", binding, found, err)
 	}

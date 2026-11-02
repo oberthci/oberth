@@ -44,7 +44,7 @@ import (
 	"github.com/oberthci/oberth/internal/sshserver"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/kubernetes"
@@ -251,7 +251,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.upstreamKey, "upstream-key", "/etc/oberth/upstream-key/id_ed25519", "upstream SSH private key")
 	flags.StringVar(&options.knownHosts, "known-hosts", "/etc/oberth/known-hosts/known_hosts", "upstream known_hosts")
 	flags.StringVar(&options.namespace, "namespace", "oberth", "Kubernetes namespace")
-	flags.StringVar(&options.runnerImagePrefixes, "runner-image-prefixes", strings.Join(periapsis.DefaultRunnerImagePrefixes, ","), "comma-separated allowlist of permitted runner image prefixes")
+	flags.StringVar(&options.runnerImagePrefixes, "runner-image-prefixes", strings.Join(pipeline.DefaultRunnerImagePrefixes, ","), "comma-separated allowlist of permitted runner image prefixes")
 	flags.DurationVar(&options.scheduleMinInterval, "schedule-min-interval", defaultScheduleMinInterval, "shortest interval a repository may schedule itself at")
 	flags.IntVar(&options.scheduleMaxEntries, "schedule-max-entries", defaultScheduleMaxEntries, "most schedule entries one repository may declare")
 	flags.StringVar(&options.fragmentAllowlist, "fragment-allowlist", "", "comma-separated repositories usable as pipeline fragments; empty permits every registered repository")
@@ -419,7 +419,7 @@ func validateServeOptions(options serveOptions) error {
 	if strings.TrimSpace(options.namespace) == "" {
 		return errors.New("serve: namespace is required")
 	}
-	if err := periapsis.ValidateRunnerImagePrefixes(splitRunnerImagePrefixes(options.runnerImagePrefixes)); err != nil {
+	if err := pipeline.ValidateRunnerImagePrefixes(splitRunnerImagePrefixes(options.runnerImagePrefixes)); err != nil {
 		return fmt.Errorf("serve: %w", err)
 	}
 	if options.auditTSAURL != "" && !validAuditHTTPSURL(options.auditTSAURL) {
@@ -527,7 +527,7 @@ func validateSecretStoreSingleSegment(label, value string) error {
 	if strings.Contains(value, "/") {
 		return fmt.Errorf("serve: secret store %s must be one clean non-reserved path segment", label)
 	}
-	if err := periapsis.ValidateSecretStorePath(value); err != nil {
+	if err := pipeline.ValidateSecretStorePath(value); err != nil {
 		return fmt.Errorf("serve: secret store %s: %w", label, err)
 	}
 	return nil

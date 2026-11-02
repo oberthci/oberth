@@ -11,7 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // Issue #567: a credentialed release step must never execute a binary from a
@@ -78,14 +78,14 @@ var (
 	}
 )
 
-func buildOberthPipelineForIsolation(t *testing.T, trigger periapsis.Trigger, source []byte) (*wfv1.Workflow, error) {
+func buildOberthPipelineForIsolation(t *testing.T, trigger pipeline.Trigger, source []byte) (*wfv1.Workflow, error) {
 	t.Helper()
 	config := oberthConfig()
 	config.CICacheRoot = "/var/lib/oberth-cache/ci"
 	config.ReleaseCacheRoot = "/var/lib/oberth-cache/release"
 	approved := map[string]bool{}
 	ref := "refs/heads/main"
-	if trigger == periapsis.TriggerRelease {
+	if trigger == pipeline.TriggerRelease {
 		approved = oberthReleaseApprovedSecrets()
 		ref = "refs/tags/v0.1.0"
 	}
@@ -350,14 +350,14 @@ func checkOberthBuildIsolation(workflow *wfv1.Workflow) error {
 
 // TestOberthPipelinesIsolateSharedWorkspace proves #567 on the admitted Pods.
 func TestOberthPipelinesIsolateSharedWorkspace(t *testing.T) {
-	release, err := buildOberthPipelineForIsolation(t, periapsis.TriggerRelease, loadPipeline(t, "release.yaml"))
+	release, err := buildOberthPipelineForIsolation(t, pipeline.TriggerRelease, loadPipeline(t, "release.yaml"))
 	if err != nil {
 		t.Fatalf("release admission: %v", err)
 	}
 	if err := checkOberthReleaseIsolation(release); err != nil {
 		t.Errorf("release.yaml:\n%v", err)
 	}
-	build, err := buildOberthPipelineForIsolation(t, periapsis.TriggerCI, loadPipeline(t, "build.yaml"))
+	build, err := buildOberthPipelineForIsolation(t, pipeline.TriggerCI, loadPipeline(t, "build.yaml"))
 	if err != nil {
 		t.Fatalf("build admission: %v", err)
 	}
@@ -401,10 +401,10 @@ func TestOberthPipelinesIsolationRejectsDrift(t *testing.T) {
 				t.Fatalf("mutation anchor no longer matches %q", tc.old)
 			}
 			mutated := strings.Replace(raw, tc.old, tc.replacement, 1)
-			trigger := periapsis.TriggerCI
+			trigger := pipeline.TriggerCI
 			check := checkOberthBuildIsolation
 			if tc.file == "release.yaml" {
-				trigger = periapsis.TriggerRelease
+				trigger = pipeline.TriggerRelease
 				check = checkOberthReleaseIsolation
 			}
 			workflow, err := buildOberthPipelineForIsolation(t, trigger, []byte(mutated))

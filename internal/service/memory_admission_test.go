@@ -7,7 +7,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestMemoryLimitFallbackUsesLegacyAdmissionAndVisibleNotice(t *testing.T) {
@@ -58,7 +58,7 @@ spec:
 			g := newWeightedAdmission(6)
 			pods, reason := g.selectDeclaredDemand(receipt)
 			r := g.reserve(1)
-			release := acquireRequestWithinBudget(t, r, admissionRequest{RunID: strings.Repeat("a", 32), Size: periapsis.S, Pods: pods, Fallback: reason})
+			release := acquireRequestWithinBudget(t, r, admissionRequest{RunID: strings.Repeat("a", 32), Size: pipeline.S, Pods: pods, Fallback: reason})
 			defer release()
 			runs := []model.Run{{ID: r.runID, DisplayReason: "Priority normal: ordinary run."}}
 			(&API{admission: &Scheduler{admission: g}}).applyResourceMessages(t.Context(), runs)

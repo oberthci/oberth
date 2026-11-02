@@ -15,7 +15,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func runValidate(_ context.Context, arguments []string, output io.Writer) error {
@@ -30,7 +30,7 @@ func runValidate(_ context.Context, arguments []string, output io.Writer) error 
 	maxMemory := flags.String("kubevirt-max-memory", "", "per-run peak VMI memory to validate against (default 12Gi)")
 	allowUnresolved := flags.Bool("allow-unresolved-fragments", false,
 		"report fragment references without failing; their contents are still unchecked")
-	flags.StringVar(&imagePrefixes, "runner-image-prefixes", strings.Join(periapsis.DefaultRunnerImagePrefixes, ","), "comma-separated allowlist of permitted runner image prefixes")
+	flags.StringVar(&imagePrefixes, "runner-image-prefixes", strings.Join(pipeline.DefaultRunnerImagePrefixes, ","), "comma-separated allowlist of permitted runner image prefixes")
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
@@ -127,15 +127,15 @@ func executeValidate(target validateTarget, output io.Writer) error {
 
 	for _, entry := range []struct {
 		file    string
-		trigger periapsis.Trigger
+		trigger pipeline.Trigger
 	}{
-		{".oberth/build.yaml", periapsis.TriggerCI},
-		{".oberth/release.yaml", periapsis.TriggerRelease},
+		{".oberth/build.yaml", pipeline.TriggerCI},
+		{".oberth/release.yaml", pipeline.TriggerRelease},
 	} {
 		raw, err := readConfinedPipelineFile(target.repoRoot, entry.file)
 		if err != nil {
 			if os.IsNotExist(err) {
-				if entry.trigger == periapsis.TriggerCI {
+				if entry.trigger == pipeline.TriggerCI {
 					report.problem("%s not found: every repository needs a CI pipeline", entry.file)
 				} else {
 					report.line("  %s  not present (optional)", entry.file)
@@ -243,8 +243,8 @@ func readConfinedPipelineFile(repoRoot, relative string) ([]byte, error) {
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("%s is not a regular file", relative)
 	}
-	if info.Size() > periapsis.MaxSourceBytes {
-		return nil, fmt.Errorf("%s exceeds %d bytes", relative, periapsis.MaxSourceBytes)
+	if info.Size() > pipeline.MaxSourceBytes {
+		return nil, fmt.Errorf("%s exceeds %d bytes", relative, pipeline.MaxSourceBytes)
 	}
 	root, err := os.OpenRoot(repoRoot)
 	if err != nil {
@@ -256,11 +256,11 @@ func readConfinedPipelineFile(repoRoot, relative string) ([]byte, error) {
 		return nil, err
 	}
 	defer func() { _ = file.Close() }()
-	source, err := io.ReadAll(io.LimitReader(file, periapsis.MaxSourceBytes+1))
+	source, err := io.ReadAll(io.LimitReader(file, pipeline.MaxSourceBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", relative, err)
 	}
-	if int64(len(source)) > periapsis.MaxSourceBytes {
+	if int64(len(source)) > pipeline.MaxSourceBytes {
 		return nil, fmt.Errorf("%s exceeds the source-size limit", relative)
 	}
 	return source, nil
@@ -269,7 +269,7 @@ func readConfinedPipelineFile(repoRoot, relative string) ([]byte, error) {
 // describeSizes prints the admission weight each run trigger of this document
 // resolves to, so what a push, a promotion and a schedule will each reserve is
 // knowable before the push.
-func describeSizes(workflow *wfv1.Workflow, tier periapsis.Trigger) string {
+func describeSizes(workflow *wfv1.Workflow, tier pipeline.Trigger) string {
 	var parts []string
 	for _, trigger := range argoworkflow.RunTriggers() {
 		if trigger.Tier() != tier {

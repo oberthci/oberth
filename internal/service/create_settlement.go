@@ -14,7 +14,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 const createObservationWindow = time.Minute
@@ -26,7 +26,7 @@ type createAdmission struct {
 	Pods                       *argoworkflow.PodDemand         `json:",omitempty"`
 	RunID, JobName, SHA, Group string
 	RepoID                     int64
-	Size                       periapsis.Size
+	Size                       pipeline.Size
 	Demand                     argoworkflow.VMIDemand
 }
 
@@ -56,7 +56,7 @@ func runCreateAdmissionPath(root, id string) string {
 	return filepath.Join(root, ".create-admissions", id+".json")
 }
 
-func (scheduler *Scheduler) recordResourceAdmission(run model.Run, name string, size periapsis.Size, demand argoworkflow.VMIDemand, peak *argoworkflow.PodDemand, fallback model.ResourceAdmissionFallback) error {
+func (scheduler *Scheduler) recordResourceAdmission(run model.Run, name string, size pipeline.Size, demand argoworkflow.VMIDemand, peak *argoworkflow.PodDemand, fallback model.ResourceAdmissionFallback) error {
 	target := scheduler.createAdmissionPath(run.ID)
 	if !pathWithin(scheduler.workspaceRoot, target) {
 		return errors.New("service: create admission escaped workspace")
@@ -134,7 +134,7 @@ func (scheduler *Scheduler) restoreCreateGrant(run model.Run, grant *admissionRe
 		if err != nil {
 			// Pre-feature/corrupt snapshots have no trustworthy resource contract.
 			// Keep the API available, conservatively reserve the ceiling, and warn.
-			saved.Size = periapsis.XL
+			saved.Size = pipeline.XL
 			saved.Demand = argoworkflow.VMIBudgetLimit().DemandLimit()
 			log.Printf("WARN: create_cleanup run=%q missing_admission_contract=true reserving_ceiling=true", run.ID)
 		}
@@ -147,7 +147,7 @@ func (scheduler *Scheduler) restoreCreateGrant(run model.Run, grant *admissionRe
 		if err != nil {
 			// Conflicting historical groups are quarantined behind a full budget.
 			run.ConcurrencyGroup = ""
-			grant, err = scheduler.admission.adopt(run, periapsis.XL, argoworkflow.VMIBudgetLimit().DemandLimit())
+			grant, err = scheduler.admission.adopt(run, pipeline.XL, argoworkflow.VMIBudgetLimit().DemandLimit())
 			if err != nil {
 				return nil, err
 			}

@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // SizeWeights is the operator's admission weight per size (#1021). XL = 0
@@ -42,14 +42,14 @@ func ParseSizeWeights(value string) (SizeWeights, error) {
 		if err != nil {
 			return SizeWeights{}, fmt.Errorf("size weight %s=%q is not an integer", key, raw)
 		}
-		switch periapsis.Size(key) {
-		case periapsis.S:
+		switch pipeline.Size(key) {
+		case pipeline.S:
 			weights.S = weight
-		case periapsis.M:
+		case pipeline.M:
 			weights.M = weight
-		case periapsis.L:
+		case pipeline.L:
 			weights.L = weight
-		case periapsis.XL:
+		case pipeline.XL:
 			weights.XL = weight
 		default:
 			return SizeWeights{}, fmt.Errorf("size weight names unknown size %q; sizes are S, M, L and XL", key)
@@ -88,22 +88,22 @@ func (weights SizeWeights) String() string {
 }
 
 // wholeBudget reports whether XL takes the whole budget and runs alone.
-func (weights SizeWeights) wholeBudget(size periapsis.Size) bool {
-	return size.Effective() == periapsis.XL && weights.XL == 0
+func (weights SizeWeights) wholeBudget(size pipeline.Size) bool {
+	return size.Effective() == pipeline.XL && weights.XL == 0
 }
 
 // of returns a size's weight against a budget, clamped to it; XL = 0 is the
 // whole budget.
-func (weights SizeWeights) of(size periapsis.Size, capacity int) int {
+func (weights SizeWeights) of(size pipeline.Size, capacity int) int {
 	weight := 0
 	switch size.Effective() {
-	case periapsis.S:
+	case pipeline.S:
 		weight = weights.S
-	case periapsis.M:
+	case pipeline.M:
 		weight = weights.M
-	case periapsis.L:
+	case pipeline.L:
 		weight = weights.L
-	case periapsis.XL:
+	case pipeline.XL:
 		weight = weights.XL
 		if weight == 0 {
 			weight = capacity
@@ -114,15 +114,15 @@ func (weights SizeWeights) of(size periapsis.Size, capacity int) int {
 
 // sizeRank orders sizes for comparisons that are about the declaration, not
 // the configured weight (size grants, preflight sizing).
-func sizeRank(size periapsis.Size) int {
+func sizeRank(size pipeline.Size) int {
 	switch size.Effective() {
-	case periapsis.S:
+	case pipeline.S:
 		return 1
-	case periapsis.M:
+	case pipeline.M:
 		return 2
-	case periapsis.L:
+	case pipeline.L:
 		return 3
-	case periapsis.XL:
+	case pipeline.XL:
 		return 4
 	default:
 		return 0

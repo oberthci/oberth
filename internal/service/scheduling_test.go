@@ -14,7 +14,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type schedulingObserverFunc func(context.Context, model.Run) (*model.ExecutionObservation, error)
@@ -33,7 +33,7 @@ func TestSchedulingAdmissionSnapshotsFollowLifecycle(t *testing.T) {
 	gate := newWeightedAdmission(2)
 	scheduler := &Scheduler{admission: gate}
 	first := gate.reserve(1)
-	release, err := first.acquire(t.Context(), periapsis.XL)
+	release, err := first.acquire(t.Context(), pipeline.XL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestSchedulingAdmissionSnapshotsFollowLifecycle(t *testing.T) {
 		t.Fatalf("preparing=%#v", result)
 	}
 	acquired := make(chan func(), 1)
-	go acquireForTest(second, periapsis.M, acquired)
+	go acquireForTest(second, pipeline.M, acquired)
 	assertNotAcquired(t, acquired)
 	if result := scheduler.AdmissionSnapshot(2); result.State != "waiting" || result.Position != 1 || result.Used != 2 || result.Size != "M" {
 		t.Fatalf("waiting=%#v", result)
@@ -68,14 +68,14 @@ func TestClaimedRunShowsCapacityWaitUntilSubmission(t *testing.T) {
 	gate := newWeightedAdmission(3)
 	scheduler := &Scheduler{admission: gate}
 	first := gate.reserve(1)
-	releaseFirst, err := first.acquire(t.Context(), periapsis.L)
+	releaseFirst, err := first.acquire(t.Context(), pipeline.L)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer releaseFirst()
 	second := gate.reserve(2)
 	acquired := make(chan func(), 1)
-	go acquireForTest(second, periapsis.M, acquired)
+	go acquireForTest(second, pipeline.M, acquired)
 	assertNotAcquired(t, acquired)
 	service := &API{admission: scheduler, schedulingObserver: schedulingObserverFunc(func(context.Context, model.Run) (*model.ExecutionObservation, error) {
 		t.Fatal("unsubmitted run reached workflow observation")
@@ -362,7 +362,7 @@ func TestSchedulingDeadlineVisibleAfterProgressWithoutChangingDurableStatus(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = fixture.store.PutStepResult(ctx, model.StepResult{RunID: run.ID, Burn: "test", Step: "unit", Status: model.StepPassed, DeclaredSize: periapsis.Size("S")}); err != nil {
+	if _, err = fixture.store.PutStepResult(ctx, model.StepResult{RunID: run.ID, Burn: "test", Step: "unit", Status: model.StepPassed, DeclaredSize: pipeline.Size("S")}); err != nil {
 		t.Fatal(err)
 	}
 	service := fixture.api(t)

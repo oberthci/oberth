@@ -8,7 +8,7 @@ import (
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestReleaseWIFAuditBindsPublicPolicyAndSource(t *testing.T) {
@@ -29,7 +29,7 @@ spec:
       image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       command: ["true"]
 `
-	submission := argojob.Request{RunID: "run-wif", Name: "wif-test", Repo: "repo", UpstreamName: "github", UpstreamOrg: "org", Ref: "v1.0.0", SHA: strings.Repeat("a", 40), Trigger: periapsis.TriggerRelease, Source: []byte(document), ApprovedSecrets: map[string]bool{}}
+	submission := argojob.Request{RunID: "run-wif", Name: "wif-test", Repo: "repo", UpstreamName: "github", UpstreamOrg: "org", Ref: "v1.0.0", SHA: strings.Repeat("a", 40), Trigger: pipeline.TriggerRelease, Source: []byte(document), ApprovedSecrets: map[string]bool{}}
 	var captured model.AuditActionSpec
 	jobs := &ArgoJobs{config: config, auditor: &stubAuditor{onAppend: func(s model.AuditActionSpec) { captured = s }}}
 	request := service.JobRequest{Run: model.Run{ID: submission.RunID, Actor: "reviewer@host", Ref: "v1.0.0", SHA: strings.Repeat("b", 40)}, Repository: model.Repository{Name: "repo"}, UpstreamOrg: "org"}
@@ -51,7 +51,7 @@ spec:
 		t.Fatal("audit lost exact named capability")
 	}
 	captured = model.AuditActionSpec{}
-	submission.Trigger = periapsis.TriggerCI
+	submission.Trigger = pipeline.TriggerCI
 	if err := jobs.auditSubmission(t.Context(), request, submission); err == nil || captured.Action != "" {
 		t.Fatal("branch obtained a release capability audit binding")
 	}

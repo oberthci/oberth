@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/testtimeout"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestOpenBaoPipelinePhasesPreserveTestsAndStopOnFailure(t *testing.T) {
-	workflow, err := buildOberthPipelineForIsolation(t, periapsis.TriggerCI, loadPipeline(t, "build.yaml"))
+	workflow, err := buildOberthPipelineForIsolation(t, pipeline.TriggerCI, loadPipeline(t, "build.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}

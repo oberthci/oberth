@@ -12,7 +12,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // PerRepoIdentityConfig describes a repository's per-repo Vault identity.
@@ -121,13 +121,13 @@ func (config Config) vaultRoleForPerRepoCI(upstreamName, org, repo string) strin
 // declared the pipeline), not the fragment source's repo. This ensures the
 // fragment runs under the host's identity, because the host's pipeline is
 // what declared the secrets and the host's approval table is what was checked.
-func (config Config) identityForWithRepo(trigger periapsis.Trigger, hasSecretPaths bool, upstreamName, org, repo string) (argoworkflow.Identity, error) {
+func (config Config) identityForWithRepo(trigger pipeline.Trigger, hasSecretPaths bool, upstreamName, org, repo string) (argoworkflow.Identity, error) {
 	if !hasSecretPaths {
 		// No secrets: always the pipeline SA, regardless of per-repo config.
 		return config.identityFor(trigger, false)
 	}
 
-	if trigger == periapsis.TriggerRelease {
+	if trigger == pipeline.TriggerRelease {
 		if identity, ok := config.identityForPerRepo(upstreamName, org, repo); ok {
 			return identity, nil
 		}
@@ -156,7 +156,7 @@ func (config Config) identityForWithRepo(trigger periapsis.Trigger, hasSecretPat
 		}
 	}
 
-	if trigger == periapsis.TriggerCI {
+	if trigger == pipeline.TriggerCI {
 		if identity, ok := config.identityForPerRepoCI(upstreamName, org, repo); ok {
 			return identity, nil
 		}
@@ -193,13 +193,13 @@ func (config Config) identityForWithRepo(trigger periapsis.Trigger, hasSecretPat
 // must stay in lockstep: a shared-SA pod told to log in with a per-repo role
 // would merely fail at Vault (bound_service_account_names mismatch), but the
 // admission record would misstate the run's reachable credentials.
-func (config Config) vaultRoleForWithRepo(trigger periapsis.Trigger, upstreamName, org, repo string) string {
-	if trigger == periapsis.TriggerRelease {
+func (config Config) vaultRoleForWithRepo(trigger pipeline.Trigger, upstreamName, org, repo string) string {
+	if trigger == pipeline.TriggerRelease {
 		if role := config.vaultRoleForPerRepo(upstreamName, org, repo); role != "" {
 			return role
 		}
 	}
-	if trigger == periapsis.TriggerCI {
+	if trigger == pipeline.TriggerCI {
 		if role := config.vaultRoleForPerRepoCI(upstreamName, org, repo); role != "" {
 			return role
 		}

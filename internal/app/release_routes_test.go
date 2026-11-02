@@ -19,7 +19,7 @@ import (
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestReleaseRoutesUseOneDocumentForEveryRead(t *testing.T) {
@@ -32,7 +32,7 @@ func TestReleaseRoutesUseOneDocumentForEveryRead(t *testing.T) {
 	writePipeline(t, dir, "release.yaml", strings.ReplaceAll(groupedPipeline(""), "oberth.ci/size: M", "oberth.ci/size: XL"))
 	jobs := &ArgoJobs{config: argojob.Config{ReleaseTagRoutes: argojob.ReleaseTagRoutes{"github/org/repo": {{Pattern: "deploy-*", File: ".oberth/deploy.yaml"}}}}}
 	request := service.JobRequest{SourceDir: dir, UpstreamName: "github", UpstreamOrg: "org", Repository: model.Repository{Name: "repo"}, Run: model.Run{Release: true, RefKind: model.RefTag, Ref: "deploy-1"}}
-	if size, err := jobs.PipelineSize(t.Context(), request); err != nil || size != periapsis.M {
+	if size, err := jobs.PipelineSize(t.Context(), request); err != nil || size != pipeline.M {
 		t.Fatalf("routed size=%s err=%v", size, err)
 	}
 	if group, err := jobs.PipelineConcurrencyGroup(t.Context(), request); err != nil || group != "deployment" {
@@ -48,14 +48,14 @@ func TestReleaseRoutesUseOneDocumentForEveryRead(t *testing.T) {
 		t.Fatalf("credentialed=%v err=%v", credentialed, err)
 	}
 	request.Run.Ref = "v1"
-	if size, err := jobs.PipelineSize(t.Context(), request); err != nil || size != periapsis.XL {
+	if size, err := jobs.PipelineSize(t.Context(), request); err != nil || size != pipeline.XL {
 		t.Fatalf("default release changed: %s %v", size, err)
 	}
 	request.Run.Release = false
 	request.Run.Trigger = "branch"
 	request.Run.Ref = "deploy-1"
 	request.Run.RefKind = model.RefBranch
-	if size, err := jobs.PipelineSize(t.Context(), request); err != nil || size != periapsis.S {
+	if size, err := jobs.PipelineSize(t.Context(), request); err != nil || size != pipeline.S {
 		t.Fatalf("branch read release route: %s %v", size, err)
 	}
 	request.Run.Release = true
@@ -238,8 +238,8 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 	})
 	for _, tc := range []struct {
 		tag, file string
-		size      periapsis.Size
-	}{{"deploy-1", ".oberth/deploy.yaml", periapsis.M}, {"v1", ".oberth/release.yaml", periapsis.XL}} {
+		size      pipeline.Size
+	}{{"deploy-1", ".oberth/deploy.yaml", pipeline.M}, {"v1", ".oberth/release.yaml", pipeline.XL}} {
 		git(work, "tag", "-a", tc.tag, "-m", tc.tag)
 		object := git(work, "rev-parse", "refs/tags/"+tc.tag)
 		commit := git(work, "rev-parse", "refs/tags/"+tc.tag+"^{commit}")

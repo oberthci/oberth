@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // writeEnvconsulWorkspace materialises a fake immutable run workspace holding
@@ -48,7 +48,7 @@ spec:
 
 func ciEnvconsulRequest(t *testing.T, files map[string]string) Request {
 	t.Helper()
-	request := testRequest(periapsis.TriggerCI, ciEnvconsulDocument)
+	request := testRequest(pipeline.TriggerCI, ciEnvconsulDocument)
 	request.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/credentials": true}
 	request.SourceDir = writeEnvconsulWorkspace(t, files)
 	return request
@@ -130,7 +130,7 @@ func TestEnvconsulRefusesUndeclaredSecretFlag(t *testing.T) {
 	document := strings.Replace(ciEnvconsulDocument,
 		`"-config", ".oberth/envconsul.hcl", "-config", ".oberth/envconsul/plan.hcl"`,
 		`"-secret=oberth/data/release/cosign-secret"`, 1)
-	request := testRequest(periapsis.TriggerCI, document)
+	request := testRequest(pipeline.TriggerCI, document)
 	request.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/credentials": true}
 	_, err := Build(testConfig(), request)
 	if err == nil {
@@ -151,7 +151,7 @@ func TestEnvconsulAdmitsDeclaredSecretFlag(t *testing.T) {
 		document := strings.Replace(ciEnvconsulDocument,
 			`"-config", ".oberth/envconsul.hcl", "-config", ".oberth/envconsul/plan.hcl"`,
 			`"-secret", "`+spelling+`"`, 1)
-		request := testRequest(periapsis.TriggerCI, document)
+		request := testRequest(pipeline.TriggerCI, document)
 		request.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/credentials": true}
 		if _, err := Build(testConfig(), request); err != nil {
 			t.Fatalf("declared -secret %q was rejected: %v", spelling, err)
@@ -168,7 +168,7 @@ func TestEnvconsulRefusesConfigOutsideSource(t *testing.T) {
 		document := strings.Replace(ciEnvconsulDocument,
 			`"-config", ".oberth/envconsul.hcl", "-config", ".oberth/envconsul/plan.hcl"`,
 			`"-config", "`+outside+`"`, 1)
-		request := testRequest(periapsis.TriggerCI, document)
+		request := testRequest(pipeline.TriggerCI, document)
 		request.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/credentials": true}
 		request.SourceDir = writeEnvconsulWorkspace(t, nil)
 		if _, err := Build(testConfig(), request); err == nil {
@@ -184,7 +184,7 @@ func TestEnvconsulAdmitsAbsoluteSourcePath(t *testing.T) {
 	document := strings.Replace(ciEnvconsulDocument,
 		`"-config", ".oberth/envconsul.hcl", "-config", ".oberth/envconsul/plan.hcl"`,
 		`"-config", "/work/src/.oberth/envconsul/plan.hcl"`, 1)
-	request := testRequest(periapsis.TriggerCI, document)
+	request := testRequest(pipeline.TriggerCI, document)
 	request.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/credentials": true}
 	request.SourceDir = writeEnvconsulWorkspace(t, map[string]string{
 		".oberth/envconsul/plan.hcl": `secret {
@@ -226,7 +226,7 @@ func TestEnvconsulRefusesMissingUnparseableOrDirectoryConfig(t *testing.T) {
 func TestEnvconsulRefusesWithoutDeclaredAnnotation(t *testing.T) {
 	document := strings.Replace(ciEnvconsulDocument,
 		"    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/credentials\n", "", 1)
-	request := testRequest(periapsis.TriggerCI, document)
+	request := testRequest(pipeline.TriggerCI, document)
 	request.SourceDir = writeEnvconsulWorkspace(t, map[string]string{
 		".oberth/envconsul.hcl":      vaultOnlyHCL,
 		".oberth/envconsul/plan.hcl": `secret { path = "oberth/data/upstream/skipops/oberth/credentials" }`,
@@ -264,7 +264,7 @@ spec:
                 command: [envconsul]
                 args: ["-secret", "oberth/data/release/cosign-secret", "/bin/true"]
 `
-	request := testRequest(periapsis.TriggerCI, document)
+	request := testRequest(pipeline.TriggerCI, document)
 	request.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/credentials": true}
 	_, err := Build(testConfig(), request)
 	if err == nil {
@@ -298,7 +298,7 @@ spec:
                 command: [/run/oberth/bin/oberth]
                 args: ["secretstore", "exec", "--path", "oberth/data/release/cosign-secret", "--", "/bin/true"]
 `
-	request := testRequest(periapsis.TriggerCI, document)
+	request := testRequest(pipeline.TriggerCI, document)
 	request.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/credentials": true}
 	_, err := Build(testConfig(), request)
 	if err == nil {
@@ -315,7 +315,7 @@ spec:
 func TestEnvconsulWithoutCredentialConfigurationIsAdmitted(t *testing.T) {
 	document := strings.Replace(ciEnvconsulDocument,
 		`"-config", ".oberth/envconsul.hcl", "-config", ".oberth/envconsul/plan.hcl", `, "", 1)
-	request := testRequest(periapsis.TriggerCI, document)
+	request := testRequest(pipeline.TriggerCI, document)
 	request.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/credentials": true}
 	if _, err := Build(testConfig(), request); err != nil {
 		t.Fatalf("envconsul without credential configuration was rejected: %v", err)

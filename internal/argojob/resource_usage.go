@@ -17,7 +17,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/resourcesampler"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type ResourceUsageRecorder interface {
@@ -317,7 +317,7 @@ func (c *Controller) sampleResourceUsageWithState(ctx context.Context, wf *wfv1.
 // Read only the verified Workflow's existing declaration and server-bound
 // trigger parameter. Never use progress/termination messages as class evidence.
 // A size-by-trigger declaration without an unambiguous bound trigger is unknown.
-func observedResourceWorkflowSize(wf *wfv1.Workflow) periapsis.Size {
+func observedResourceWorkflowSize(wf *wfv1.Workflow) pipeline.Size {
 	byTrigger, err := argoworkflow.DeclaredSizesByTrigger(wf)
 	if err != nil {
 		return ""

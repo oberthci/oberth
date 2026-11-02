@@ -10,7 +10,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type unavailablePrioritySizeStore struct {
@@ -21,7 +21,7 @@ type unavailablePrioritySizeStore struct {
 	calls       atomic.Int64
 }
 
-func (s *unavailablePrioritySizeStore) MaxRunSize(ctx context.Context, repoID int64) (periapsis.Size, error) {
+func (s *unavailablePrioritySizeStore) MaxRunSize(ctx context.Context, repoID int64) (pipeline.Size, error) {
 	s.calls.Add(1)
 	if repoID == s.repoID && s.unavailable.Load() {
 		return "", s.lookupErr
@@ -46,7 +46,7 @@ func (jobs *priorityObservingReleaseJobs) CreateRelease(ctx context.Context, req
 }
 
 func TestPrioritySizeLookupFailureDoesNotFailReleaseExecution(t *testing.T) {
-	for _, size := range []periapsis.Size{periapsis.S, periapsis.M, periapsis.XL} {
+	for _, size := range []pipeline.Size{pipeline.S, pipeline.M, pipeline.XL} {
 		for _, lookupErr := range []error{prioritySQLiteError(5), context.DeadlineExceeded} {
 			t.Run(fmt.Sprintf("%s/%v", size, lookupErr), func(t *testing.T) {
 				f := newControlFixture(t, JobResult{Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)}})
@@ -81,7 +81,7 @@ func TestPrioritySizeLookupFailureDoesNotFailReleaseExecution(t *testing.T) {
 func TestPrioritySizeLookupRefreshWithholdsBoostAndRecovers(t *testing.T) {
 	f := newControlFixture(t)
 	ctx := t.Context()
-	if _, err := f.store.SetSizeGrant(ctx, f.repo.ID, "admin", periapsis.XL); err != nil {
+	if _, err := f.store.SetSizeGrant(ctx, f.repo.ID, "admin", pipeline.XL); err != nil {
 		t.Fatal(err)
 	}
 	other, err := f.store.CreateRepository(ctx, model.RepositorySpec{Name: "other", UpstreamID: f.repo.UpstreamID, DefaultBranch: "main"})
@@ -91,7 +91,7 @@ func TestPrioritySizeLookupRefreshWithholdsBoostAndRecovers(t *testing.T) {
 	g := newWeightedAdmission(4)
 	f.scheduler.admission = g
 	holder := g.reserve(-1)
-	release, err := holder.acquire(ctx, periapsis.XL)
+	release, err := holder.acquire(ctx, pipeline.XL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestPrioritySizeLookupRefreshWithholdsBoostAndRecovers(t *testing.T) {
 		r := g.reserveRun(tag.Run)
 		t.Cleanup(r.cancel)
 		g.mu.Lock()
-		r.prepared, r.size, r.weight = true, periapsis.S, 1
+		r.prepared, r.size, r.weight = true, pipeline.S, 1
 		g.mu.Unlock()
 		return r
 	}

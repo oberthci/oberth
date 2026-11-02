@@ -16,7 +16,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/redact"
 	"github.com/oberthci/oberth/internal/secretstore"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 const (
@@ -440,7 +440,7 @@ func kvMountName() string {
 func translateUpstreamPaths(paths []string, kvMount string) []string {
 	translated := make([]string, 0, len(paths))
 	for _, path := range paths {
-		scoped, upstreamScoped, err := periapsis.ParseUpstreamSecretStorePath(path)
+		scoped, upstreamScoped, err := pipeline.ParseUpstreamSecretStorePath(path)
 		if err != nil || !upstreamScoped {
 			translated = append(translated, path)
 			continue

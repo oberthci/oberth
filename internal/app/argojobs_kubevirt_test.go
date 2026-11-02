@@ -16,7 +16,7 @@ import (
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type kubeVirtGrantFunc func(context.Context, int64) (store.KubeVirtBudget, bool, error)
@@ -101,7 +101,7 @@ func TestPipelineKubeVirtRefusesMissingGrantAndOversizedDemand(t *testing.T) {
 
 func TestAdoptedKubeVirtDemandUsesVerifiedBindingWithoutGrant(t *testing.T) {
 	want := argoworkflow.VMIDemand{VMs: 2, Cores: 4, MemoryBytes: 8 << 30}
-	controller := &adoptingArgoControl{found: true, binding: argojob.Adoption{Size: periapsis.M, KubeVirt: want}}
+	controller := &adoptingArgoControl{found: true, binding: argojob.Adoption{Size: pipeline.M, KubeVirt: want}}
 	jobs := &ArgoJobs{controller: controller, intents: map[string]argoIntent{}}
 	run := model.Run{ID: "run", JobName: "workflow", Trigger: "branch"}
 	if _, err := jobs.AdoptedKubeVirtDemand(run); err == nil {

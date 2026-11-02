@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type RunStatus string
@@ -356,7 +356,7 @@ type StepResult struct {
 	ExitCode               int
 	LogStart               int64
 	LogEnd                 int64
-	DeclaredSize           periapsis.Size
+	DeclaredSize           pipeline.Size
 	// Usage counters are self-reported by untrusted build code, never evidence
 	// for admission or size grants. Any aggregation must saturate on overflow.
 	// Pointers distinguish unavailable telemetry from measured zero.

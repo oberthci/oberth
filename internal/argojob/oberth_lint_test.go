@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/testtimeout"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestOberthLintKeepsDeadlineCacheAndToolIsolation(t *testing.T) {
@@ -24,7 +24,7 @@ func TestOberthLintKeepsDeadlineCacheAndToolIsolation(t *testing.T) {
 			config.CICacheRoot = cacheRoot
 			workflow, err := buildOberthPipeline(config, Request{
 				RunID: "run-lint", Name: "oberth-lint", Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
-				Ref: "refs/heads/main", SHA: testSHA, Trigger: periapsis.TriggerCI, Source: loadPipeline(t, "build.yaml"), ApprovedSecrets: map[string]bool{},
+				Ref: "refs/heads/main", SHA: testSHA, Trigger: pipeline.TriggerCI, Source: loadPipeline(t, "build.yaml"), ApprovedSecrets: map[string]bool{},
 			})
 			if err != nil {
 				t.Fatal(err)

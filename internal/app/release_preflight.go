@@ -7,7 +7,7 @@ import (
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func (jobs *ArgoJobs) PreflightRelease(ctx context.Context, request service.JobRequest, source []byte) (service.ReleasePreflightResult, error) {
@@ -43,12 +43,12 @@ func (jobs *ArgoJobs) preflightRelease(ctx context.Context, request service.JobR
 			}
 		}
 	}
-	fragments, err := loadFragments(ctx, jobs.fragments, source, periapsis.TriggerRelease, request.Run.RefKind, "release")
+	fragments, err := loadFragments(ctx, jobs.fragments, source, pipeline.TriggerRelease, request.Run.RefKind, "release")
 	if err != nil {
 		return service.ReleasePreflightResult{}, err
 	}
 	submission := argojob.Request{Repo: request.Repository.Name, UpstreamName: request.UpstreamName, UpstreamOrg: request.UpstreamOrg,
-		Source: source, PipelineFile: request.PipelineFile, Trigger: periapsis.TriggerRelease, ApprovedSecrets: approved, StepGrants: grants, Fragments: fragments}
+		Source: source, PipelineFile: request.PipelineFile, Trigger: pipeline.TriggerRelease, ApprovedSecrets: approved, StepGrants: grants, Fragments: fragments}
 	submission.RepositoryID = request.Repository.ID
 	if err := jobs.bindResourceMaximum(ctx, &submission); err != nil {
 		return service.ReleasePreflightResult{}, err

@@ -20,7 +20,7 @@ import (
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // scriptedWorkflowClient serves successive Workflow observations, repeating the
@@ -101,7 +101,7 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 	terminal.Annotations[refAnnotation] = "feature/adopt"
 	terminal.Annotations[argoworkflow.SizeAnnotation] = "L"
 	terminal.Annotations[argoworkflow.ConcurrencyGroupAnnotation] = "build"
-	terminal.Labels = map[string]string{"oberth.ci/sha": sha, "oberth.ci/trigger": string(periapsis.TriggerCI)}
+	terminal.Labels = map[string]string{"oberth.ci/sha": sha, "oberth.ci/trigger": string(pipeline.TriggerCI)}
 	terminal.Spec.Entrypoint = "dag"
 	terminal.Spec.Templates = []wfv1.Template{
 		{Name: "dag", DAG: &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{{Name: "test", Template: "leaf"}, {Name: "unit", Template: "leaf"}}}},
@@ -169,7 +169,7 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 	}
 	defer db.Close()
 	recorder = &failingTimingRecorder{Store: db}
-	request := AdoptionRequest{Name: terminal.Name, RunID: run.ID, Ref: "feature/adopt", SHA: sha, Group: "build", Trigger: periapsis.TriggerCI, RunTrigger: argoworkflow.RunTriggerBranch}
+	request := AdoptionRequest{Name: terminal.Name, RunID: run.ID, Ref: "feature/adopt", SHA: sha, Group: "build", Trigger: pipeline.TriggerCI, RunTrigger: argoworkflow.RunTriggerBranch}
 	binding, found, err := (&Controller{workflows: &staticWorkflowClient{workflow: running}, config: config}).Adopt(ctx, request)
 	if err != nil || !found {
 		t.Fatalf("adopt: %v %v", found, err)

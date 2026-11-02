@@ -13,7 +13,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestWorkflowDeadlineSubmittedAndRetryPreservesClock(t *testing.T) {
@@ -34,7 +34,7 @@ func TestWorkflowDeadlineSubmittedAndRetryPreservesClock(t *testing.T) {
 			controller.WithSourceSeeder(NewSourceSeeder(kube, recordingExec(&calls), config))
 			source := strings.Replace(greedyDocument, "activeDeadlineSeconds: 999999", "activeDeadlineSeconds: "+test.seconds, 1)
 			source = strings.Replace(source, "    - name: main\n", "    - name: main\n      activeDeadlineSeconds: 60\n      timeout: 75s\n", 1)
-			request := testRequest(periapsis.TriggerCI, source)
+			request := testRequest(pipeline.TriggerCI, source)
 			request.SourceDir = writeCheckout(t)
 			if _, err := controller.Create(t.Context(), request); err != nil {
 				t.Fatal(err)

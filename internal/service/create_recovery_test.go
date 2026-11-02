@@ -10,7 +10,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // Production ArgoJobs supports both interfaces. A settler-only fixture cannot
@@ -21,11 +21,11 @@ type createRecoveryJobs struct {
 	settleCalls int
 }
 
-func (j *createRecoveryJobs) Adopt(_ context.Context, run model.Run) (periapsis.Size, bool, error) {
+func (j *createRecoveryJobs) Adopt(_ context.Context, run model.Run) (pipeline.Size, bool, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.adopted = append(j.adopted, run.ID)
-	return periapsis.S, j.present[run.ID], nil
+	return pipeline.S, j.present[run.ID], nil
 }
 func (j *createRecoveryJobs) SettleCreate(context.Context, string, string, time.Time) (bool, error) {
 	j.settleCalls++
@@ -74,7 +74,7 @@ func TestWorkflowCreateRecoveryParkedGroupMateRequeuesInEitherOrder(t *testing.T
 				t.Fatal("fixture has a create contract", err)
 			}
 			adopted := 0
-			if err := scheduler.reconcileStrandedRunsWithGate(t.Context(), scheduler.requireMutation, func(run model.Run, size periapsis.Size) error {
+			if err := scheduler.reconcileStrandedRunsWithGate(t.Context(), scheduler.requireMutation, func(run model.Run, size pipeline.Size) error {
 				adopted++
 				if run.ID != holder.ID {
 					t.Fatal("parked placeholder adopted")
@@ -120,13 +120,13 @@ func TestWorkflowCreateRecoveryWaitingExistingWorkflowAdoptsBeforeCleanup(t *tes
 			jobs := &createRecoveryJobs{present: map[string]bool{run.ID: true}, adoptingJobs: adoptingJobs{recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal, waitBlocks: make(chan struct{}), waitEntered: make(chan struct{})}}}
 			scheduler := f.scheduler(t, jobs)
 			if contract {
-				if err := scheduler.recordCreateAdmission(run, run.JobName, periapsis.S, argoworkflow.VMIDemand{}); err != nil {
+				if err := scheduler.recordCreateAdmission(run, run.JobName, pipeline.S, argoworkflow.VMIDemand{}); err != nil {
 					t.Fatal(err)
 				}
 			}
 			var resumed model.Run
 			var grant *admissionReservation
-			if err := scheduler.reconcileStrandedRunsWithGate(t.Context(), scheduler.requireMutation, func(found model.Run, size periapsis.Size) error {
+			if err := scheduler.reconcileStrandedRunsWithGate(t.Context(), scheduler.requireMutation, func(found model.Run, size pipeline.Size) error {
 				resumed = found
 				var err error
 				grant, err = scheduler.admission.adopt(found, size, argoworkflow.VMIDemand{})
@@ -190,7 +190,7 @@ func TestWorkflowCreateRecoveryAbsentWorkflowRequiresContractToSettle(t *testing
 			jobs := &createRecoveryJobs{present: map[string]bool{}, adoptingJobs: adoptingJobs{recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}}
 			scheduler := f.scheduler(t, jobs)
 			if contract != "none" {
-				if err := scheduler.recordCreateAdmission(run, run.JobName, periapsis.S, argoworkflow.VMIDemand{}); err != nil {
+				if err := scheduler.recordCreateAdmission(run, run.JobName, pipeline.S, argoworkflow.VMIDemand{}); err != nil {
 					t.Fatal(err)
 				}
 				if contract == "corrupt" {
@@ -199,7 +199,7 @@ func TestWorkflowCreateRecoveryAbsentWorkflowRequiresContractToSettle(t *testing
 					}
 				}
 			}
-			if err := scheduler.reconcileStrandedRunsWithGate(t.Context(), scheduler.requireMutation, func(model.Run, periapsis.Size) error { t.Fatal("absent Workflow adopted"); return nil }); err != nil {
+			if err := scheduler.reconcileStrandedRunsWithGate(t.Context(), scheduler.requireMutation, func(model.Run, pipeline.Size) error { t.Fatal("absent Workflow adopted"); return nil }); err != nil {
 				t.Fatal(err)
 			}
 			if len(jobs.adopted) != 1 || jobs.adopted[0] != run.ID || jobs.settleCalls != 0 {

@@ -18,7 +18,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 const nonrootProfileAnnotation = "oberth.ci/verified-controller-profile"
@@ -115,7 +115,7 @@ func (controller *Controller) expectedSourceVolume(request Request) SourceVolume
 	if controller.config.GoProxyCACertPEM != "" {
 		volume.GoProxyCASubPath = goProxyCASubPath + "/" + goProxyCACertFile
 	}
-	if request.Trigger == periapsis.TriggerRelease || pipelineDeclaresSecretPaths(request.Source) {
+	if request.Trigger == pipeline.TriggerRelease || pipelineDeclaresSecretPaths(request.Source) {
 		volume.BinarySubPath = binarySubPath
 		if controller.config.VaultCACertPEM != "" {
 			volume.VaultCASubPath = vaultCASubPath

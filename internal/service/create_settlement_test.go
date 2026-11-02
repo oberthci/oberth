@@ -14,7 +14,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type pendingCreateJobs struct {
@@ -33,9 +33,9 @@ func (j *pendingCreateJobs) CreateCI(ctx context.Context, req JobRequest) error 
 	}
 	return j.fakeJobs.CreateCI(ctx, req)
 }
-func (j *pendingCreateJobs) Adopt(context.Context, model.Run) (periapsis.Size, bool, error) {
+func (j *pendingCreateJobs) Adopt(context.Context, model.Run) (pipeline.Size, bool, error) {
 	j.adoptCalls.Add(1)
-	return periapsis.M, false, nil
+	return pipeline.M, false, nil
 }
 func (*pendingCreateJobs) JobNamespace() string { return "test-argo" }
 func (j *pendingCreateJobs) WaitResumed(ctx context.Context, name string, out io.Writer, _ []runprogress.Event, _ int64) (JobResult, error) {
@@ -225,7 +225,7 @@ func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForSettlement(t *testi
 				if i == 0 {
 					demand = argoworkflow.VMIDemand{VMs: 1, Cores: 1, MemoryBytes: 1 << 30}
 				}
-				if err := f.scheduler.recordCreateAdmission(run, run.JobName, periapsis.S, demand); err != nil {
+				if err := f.scheduler.recordCreateAdmission(run, run.JobName, pipeline.S, demand); err != nil {
 					t.Fatal(err)
 				}
 				if marked {
@@ -318,7 +318,7 @@ func TestWorkflowCreateProcessNextAndCancelNeverSettleInline(t *testing.T) {
 	// The snapshot survives ordinary workspace removal and cannot be supplied by repo files.
 	run, _ := f.store.Run(t.Context(), source.ID)
 	saved, err := f.scheduler.readCreateAdmission(run)
-	if err != nil || saved.Size != periapsis.M {
+	if err != nil || saved.Size != pipeline.M {
 		t.Fatalf("durable contract missing: %+v %v", saved, err)
 	}
 	_ = os.RemoveAll(f.scheduler.workspaceRoot + "/" + source.ID)

@@ -12,7 +12,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/vmrunner"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type capacityFixture struct {
@@ -46,7 +46,7 @@ func (p *capacityFixture) Execute(ctx context.Context, job JobRequest, requireme
 func TestTrustedCapacityParkReleasesResourcesAndPreservesOrder(t *testing.T) {
 	gate := newWeightedAdmissionForJobs(1)
 	first := gate.reserve(1)
-	release := acquireRequestWithinBudget(t, first, groupRequest("vm", 1, periapsis.M, "shared"))
+	release := acquireRequestWithinBudget(t, first, groupRequest("vm", 1, pipeline.M, "shared"))
 	defer release()
 	if err := first.parkVM(); err != nil {
 		t.Fatal(err)
@@ -59,13 +59,13 @@ func TestTrustedCapacityParkReleasesResourcesAndPreservesOrder(t *testing.T) {
 		t.Fatal("parked dispatch exemption unbounded or missing")
 	}
 	ordinary := gate.reserve(2)
-	releaseOther := acquireRequestWithinBudget(t, ordinary, groupRequest("ordinary", 1, periapsis.M, "shared"))
+	releaseOther := acquireRequestWithinBudget(t, ordinary, groupRequest("ordinary", 1, pipeline.M, "shared"))
 	olderReady := make(chan func(), 1)
-	go acquireRequestForTest(first, groupRequest("vm", 1, periapsis.M, "shared"), olderReady)
+	go acquireRequestForTest(first, groupRequest("vm", 1, pipeline.M, "shared"), olderReady)
 	awaitWaiting(t, first)
 	later := gate.reserve(3)
 	laterReady := make(chan func(), 1)
-	go acquireRequestForTest(later, groupRequest("later", 1, periapsis.M, "shared"), laterReady)
+	go acquireRequestForTest(later, groupRequest("later", 1, pipeline.M, "shared"), laterReady)
 	awaitWaiting(t, later)
 	releaseOther()
 	awaitAcquired(t, olderReady)()
@@ -97,7 +97,7 @@ func TestTrustedCapacityRetryBoundaries(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			job := JobRequest{Run: run, Repository: f.repo, Size: periapsis.M, ConcurrencyGroup: "group", UpstreamName: "codeberg", UpstreamOrg: "acme"}
+			job := JobRequest{Run: run, Repository: f.repo, Size: pipeline.M, ConcurrencyGroup: "group", UpstreamName: "codeberg", UpstreamOrg: "acme"}
 			reservation := f.scheduler.admission.reserve(1)
 			defer acquireRequestWithinBudget(t, reservation, groupRequest(run.ID, f.repo.ID, job.Size, job.ConcurrencyGroup))()
 			if mode == "existing journal" {
@@ -250,7 +250,7 @@ func TestTrustedCapacityRotationAuditsOnceAcrossRetries(t *testing.T) {
 		assertOneAudit()
 		return nil
 	}
-	job := JobRequest{Run: run, Repository: f.repo, Size: periapsis.M, ConcurrencyGroup: "group"}
+	job := JobRequest{Run: run, Repository: f.repo, Size: pipeline.M, ConcurrencyGroup: "group"}
 	reservation := f.scheduler.admission.reserve(1)
 	defer acquireRequestWithinBudget(t, reservation, groupRequest(run.ID, f.repo.ID, job.Size, job.ConcurrencyGroup))()
 	stopped, err := f.scheduler.executeTrustedWithCapacity(ctx, job, requirement, io.Discard, reservation, func(context.Context) error { return nil })
@@ -317,7 +317,7 @@ func TestTrustedCapacityAuditsRotationThatAppearsWhileParked(t *testing.T) {
 		git.baseline = []byte(older)
 		return nil
 	}
-	job := JobRequest{Run: run, Repository: f.repo, Size: periapsis.M, ConcurrencyGroup: "group"}
+	job := JobRequest{Run: run, Repository: f.repo, Size: pipeline.M, ConcurrencyGroup: "group"}
 	reservation := f.scheduler.admission.reserve(1)
 	defer acquireRequestWithinBudget(t, reservation, groupRequest(run.ID, f.repo.ID, job.Size, job.ConcurrencyGroup))()
 	stopped, err := f.scheduler.executeTrustedWithCapacity(ctx, job, requirement, io.Discard, reservation, func(context.Context) error { return nil })

@@ -16,7 +16,7 @@ import (
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type vmiReceiptFragments struct {
@@ -24,10 +24,10 @@ type vmiReceiptFragments struct {
 	calls int
 }
 
-func (f *vmiReceiptFragments) Load(_ context.Context, key argoworkflow.FragmentKey, tier periapsis.Trigger, ref model.RefKind, trigger string) (argoworkflow.Fragment, error) {
+func (f *vmiReceiptFragments) Load(_ context.Context, key argoworkflow.FragmentKey, tier pipeline.Trigger, ref model.RefKind, trigger string) (argoworkflow.Fragment, error) {
 	f.t.Helper()
 	f.calls++
-	if tier != periapsis.TriggerCI || ref != model.RefBranch || (trigger != "branch" && trigger != "push" && trigger != "schedule") {
+	if tier != pipeline.TriggerCI || ref != model.RefBranch || (trigger != "branch" && trigger != "push" && trigger != "schedule") {
 		f.t.Fatalf("untrusted fragment loading context: %s %s %s", tier, ref, trigger)
 	}
 	name := strings.TrimPrefix(key.Repo, "example/")

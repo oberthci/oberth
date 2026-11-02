@@ -11,7 +11,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestInitFreshGoProject(t *testing.T) {
@@ -428,7 +428,7 @@ func TestInitRejectsDanglingSymlink(t *testing.T) {
 
 // TestDefaultRunnerImagePrefixesMatchChart parses the chart values.yaml and
 // asserts that its runnerImagePrefixes list equals the code-level default in
-// periapsis.DefaultRunnerImagePrefixes. Drift between the two is a silent
+// pipeline.DefaultRunnerImagePrefixes. Drift between the two is a silent
 // admission mismatch: the server's flag default may disagree with the chart's
 // rendered deployment args, causing `oberth init` templates to pass one gate
 // and fail the other.
@@ -444,14 +444,14 @@ func TestDefaultRunnerImagePrefixesMatchChart(t *testing.T) {
 	if err := yaml.Unmarshal(content, &values); err != nil {
 		t.Fatalf("parse values.yaml: %v", err)
 	}
-	if len(values.RunnerImagePrefixes) != len(periapsis.DefaultRunnerImagePrefixes) {
+	if len(values.RunnerImagePrefixes) != len(pipeline.DefaultRunnerImagePrefixes) {
 		t.Fatalf("chart runnerImagePrefixes %v != code DefaultRunnerImagePrefixes %v",
-			values.RunnerImagePrefixes, periapsis.DefaultRunnerImagePrefixes)
+			values.RunnerImagePrefixes, pipeline.DefaultRunnerImagePrefixes)
 	}
 	for i, prefix := range values.RunnerImagePrefixes {
-		if prefix != periapsis.DefaultRunnerImagePrefixes[i] {
+		if prefix != pipeline.DefaultRunnerImagePrefixes[i] {
 			t.Fatalf("chart runnerImagePrefixes[%d] = %q, code DefaultRunnerImagePrefixes[%d] = %q",
-				i, prefix, i, periapsis.DefaultRunnerImagePrefixes[i])
+				i, prefix, i, pipeline.DefaultRunnerImagePrefixes[i])
 		}
 	}
 }

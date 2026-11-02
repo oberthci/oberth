@@ -13,7 +13,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // concurrentJobs holds every run inside Wait so the test can observe how many
@@ -22,13 +22,13 @@ import (
 // execution object anywhere, which is precisely the state this test guards.
 type concurrentJobs struct {
 	mu       sync.Mutex
-	size     periapsis.Size
+	size     pipeline.Size
 	created  []string
 	admitted chan string
 	release  chan struct{}
 }
 
-func newConcurrentJobs(size periapsis.Size, capacity int) *concurrentJobs {
+func newConcurrentJobs(size pipeline.Size, capacity int) *concurrentJobs {
 	return &concurrentJobs{
 		size:     size,
 		admitted: make(chan string, capacity),
@@ -46,7 +46,7 @@ func (jobs *concurrentJobs) CreateCI(_ context.Context, request JobRequest) erro
 
 func (jobs *concurrentJobs) CreateRelease(context.Context, JobRequest) error { return nil }
 
-func (jobs *concurrentJobs) PipelineSize(context.Context, JobRequest) (periapsis.Size, error) {
+func (jobs *concurrentJobs) PipelineSize(context.Context, JobRequest) (pipeline.Size, error) {
 	return jobs.size.Effective(), nil
 }
 
@@ -94,21 +94,21 @@ func TestSchedulerCreatesJobsConcurrentlyForOneRepository(t *testing.T) {
 	// and one lighter than the default packs into the weight budget the
 	// ceiling implies (2 x maxConcurrentJobs, #1021).
 	sizes := []struct {
-		declared periapsis.Size
+		declared pipeline.Size
 		expected int
 	}{
 		{declared: "", expected: maxConcurrentJobs},
-		{declared: periapsis.S, expected: 2 * maxConcurrentJobs},
-		{declared: periapsis.M, expected: maxConcurrentJobs},
-		{declared: periapsis.L, expected: 2},
-		{declared: periapsis.XL, expected: 1},
+		{declared: pipeline.S, expected: 2 * maxConcurrentJobs},
+		{declared: pipeline.M, expected: maxConcurrentJobs},
+		{declared: pipeline.L, expected: 2},
+		{declared: pipeline.XL, expected: 1},
 	}
 	for _, size := range sizes {
 		t.Run(fmt.Sprintf("size=%s", size.declared.Effective()), func(t *testing.T) {
 			fixture := newConcurrencyFixture(t, size.declared, maxConcurrentJobs)
-			if size.declared == periapsis.XL {
+			if size.declared == pipeline.XL {
 				// XL takes an admin size grant (#1021).
-				if _, err := fixture.store.SetSizeGrant(context.Background(), fixture.repo.ID, "admin@host", periapsis.XL); err != nil {
+				if _, err := fixture.store.SetSizeGrant(context.Background(), fixture.repo.ID, "admin@host", pipeline.XL); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -168,7 +168,7 @@ type concurrencyFixture struct {
 	scheduler *Scheduler
 }
 
-func newConcurrencyFixture(t *testing.T, size periapsis.Size, maxConcurrentJobs int) *concurrencyFixture {
+func newConcurrencyFixture(t *testing.T, size pipeline.Size, maxConcurrentJobs int) *concurrencyFixture {
 	t.Helper()
 	ctx := context.Background()
 	root := t.TempDir()

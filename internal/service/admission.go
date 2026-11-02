@@ -12,7 +12,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type weightedAdmission struct {
@@ -107,9 +107,9 @@ type admissionReservation struct {
 	// backfilled marks a grant made beside a waiting head.
 	backfilled bool
 	kubeVirt   KubeVirtResources
-	size       periapsis.Size
+	size       pipeline.Size
 	// priorityMaximum caps only automatic tag urgency, not release execution.
-	priorityMaximum      periapsis.Size
+	priorityMaximum      pipeline.Size
 	priorityLookupFailed bool
 	weight               int
 	// group is the repository-scoped key of the run's concurrency group and
@@ -150,8 +150,8 @@ type admissionRequest struct {
 	RepoID               int64
 	Repo                 string
 	Ref                  string
-	Size                 periapsis.Size
-	PriorityMaximum      periapsis.Size
+	Size                 pipeline.Size
+	PriorityMaximum      pipeline.Size
 	PriorityLookupFailed bool
 	Group                string
 	KubeVirt             *KubeVirtResources

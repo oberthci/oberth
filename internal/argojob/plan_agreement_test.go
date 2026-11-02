@@ -12,7 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // The plan Oberth seeds at submission and the step list it records while a run
@@ -161,14 +161,14 @@ func observedKeys(t *testing.T, workflow *wfv1.Workflow) []string {
 func TestPlannedStepsAgreeWithObservedStepsForOberthsOwnPipelines(t *testing.T) {
 	for _, entry := range []struct {
 		file    string
-		trigger periapsis.Trigger
+		trigger pipeline.Trigger
 	}{
-		{"build.yaml", periapsis.TriggerCI},
-		{"release.yaml", periapsis.TriggerRelease},
+		{"build.yaml", pipeline.TriggerCI},
+		{"release.yaml", pipeline.TriggerRelease},
 	} {
 		t.Run(entry.file, func(t *testing.T) {
 			approved := map[string]bool{}
-			if entry.trigger == periapsis.TriggerRelease {
+			if entry.trigger == pipeline.TriggerRelease {
 				approved = oberthReleaseApprovedSecrets()
 			}
 			built, err := buildOberthPipeline(oberthConfig(), Request{
@@ -197,7 +197,7 @@ func TestPlannedStepsAgreeWithObservedStepsForOberthsOwnPipelines(t *testing.T) 
 // documents do not currently use: a steps burn, a dag burn, a bare container
 // burn, and a dag nested two levels deep.
 func TestPlannedStepsAgreeAcrossNestedShapes(t *testing.T) {
-	built, err := Build(testConfig(), testRequest(periapsis.TriggerCI, `
+	built, err := Build(testConfig(), testRequest(pipeline.TriggerCI, `
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 spec:

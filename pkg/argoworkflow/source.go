@@ -1,22 +1,22 @@
 // Package argoworkflow is the admission contract for repositories that author
-// their pipeline as real Argo Workflow YAML instead of .oberth/periapsis.go.
+// their pipeline as real Argo Workflow YAML instead of .oberth/pipeline.go.
 //
-// It is the structural analogue of pkg/periapsis: the server reads the
+// It is the structural analogue of pkg/pipeline: the server reads the
 // repository's checked-out declaration statically, decides what the run is
-// allowed to do, and never evaluates repository code. Where pkg/periapsis
+// allowed to do, and never evaluates repository code. Where pkg/pipeline
 // parses Go declarations with go/ast, this package decodes YAML into the real
 // upstream Argo CRD types (wfv1.Workflow) and admits or refuses the result.
 //
 // The two paths are independent. A repository carries either
-// .oberth/periapsis.go or .oberth/build.yaml; nothing in this package changes
-// how a periapsis.go repository is admitted or executed.
+// .oberth/pipeline.go or .oberth/build.yaml; nothing in this package changes
+// how a pipeline.go repository is admitted or executed.
 package argoworkflow
 
 import (
 	"errors"
 	"fmt"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // The repository-owned pipeline files. A repository declares one Workflow per
@@ -32,7 +32,7 @@ const FragmentFile = ".oberth/fragment.yaml"
 
 // MaxSourceBytes bounds one pipeline document. It matches the Go path's bound
 // so neither authoring format can present the server with an unbounded read.
-const MaxSourceBytes = periapsis.MaxSourceBytes
+const MaxSourceBytes = pipeline.MaxSourceBytes
 
 // ErrUnsupportedTrigger reports that a trigger class has no Argo-authored
 // equivalent. Plan and Apply remain Go-path only: their trust model binds a
@@ -41,11 +41,11 @@ const MaxSourceBytes = periapsis.MaxSourceBytes
 var ErrUnsupportedTrigger = errors.New("argoworkflow: trigger has no Argo-authored pipeline file")
 
 // TriggerFile returns the repository file that defines one trigger's Workflow.
-func TriggerFile(trigger periapsis.Trigger) (string, error) {
+func TriggerFile(trigger pipeline.Trigger) (string, error) {
 	switch trigger {
-	case periapsis.TriggerCI:
+	case pipeline.TriggerCI:
 		return BuildFile, nil
-	case periapsis.TriggerRelease:
+	case pipeline.TriggerRelease:
 		return ReleaseFile, nil
 	default:
 		return "", fmt.Errorf("argoworkflow: unknown trigger %q", trigger)

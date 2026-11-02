@@ -15,7 +15,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/service"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // ---------------------------------------------------------------------------
@@ -401,7 +401,7 @@ func TestWait_Success(t *testing.T) {
 	const name = "wf-wait-01"
 	const runID = "run-wait-01"
 	jobs.mu.Lock()
-	jobs.intents[name] = argoIntent{runID: runID, trigger: periapsis.TriggerCI, created: true}
+	jobs.intents[name] = argoIntent{runID: runID, trigger: pipeline.TriggerCI, created: true}
 	jobs.mu.Unlock()
 
 	result, err := jobs.Wait(context.Background(), name, io.Discard)
@@ -466,7 +466,7 @@ func TestWait_ControllerError(t *testing.T) {
 
 	const name = "wf-wait-err"
 	jobs.mu.Lock()
-	jobs.intents[name] = argoIntent{runID: "run-wait-err", trigger: periapsis.TriggerCI, created: true}
+	jobs.intents[name] = argoIntent{runID: "run-wait-err", trigger: pipeline.TriggerCI, created: true}
 	jobs.mu.Unlock()
 
 	_, err = jobs.Wait(context.Background(), name, io.Discard)
@@ -670,7 +670,7 @@ func TestForget_CleansMatchingIntent(t *testing.T) {
 	const name = "wf-forget"
 	const runID = "run-forget"
 	jobs.mu.Lock()
-	jobs.intents[name] = argoIntent{runID: runID, trigger: periapsis.TriggerCI}
+	jobs.intents[name] = argoIntent{runID: runID, trigger: pipeline.TriggerCI}
 	jobs.mu.Unlock()
 
 	jobs.forget(name, runID)
@@ -699,7 +699,7 @@ func TestForget_IgnoresDifferentRunID(t *testing.T) {
 
 	const name = "wf-forget-mismatch"
 	jobs.mu.Lock()
-	jobs.intents[name] = argoIntent{runID: "run-owner", trigger: periapsis.TriggerCI}
+	jobs.intents[name] = argoIntent{runID: "run-owner", trigger: pipeline.TriggerCI}
 	jobs.mu.Unlock()
 
 	// Call forget with a different runID -- should NOT remove.
@@ -886,7 +886,7 @@ func TestDelete_WrongRunIDForIntent(t *testing.T) {
 
 	const name = "wf-wrong-run"
 	jobs.mu.Lock()
-	jobs.intents[name] = argoIntent{runID: "run-owner", trigger: periapsis.TriggerCI, created: true}
+	jobs.intents[name] = argoIntent{runID: "run-owner", trigger: pipeline.TriggerCI, created: true}
 	jobs.mu.Unlock()
 
 	err = jobs.Delete(context.Background(), name, "run-intruder")
@@ -913,7 +913,7 @@ func TestDelete_CreatedIntent(t *testing.T) {
 	const name = "wf-delete-created"
 	const runID = "run-delete-created"
 	jobs.mu.Lock()
-	jobs.intents[name] = argoIntent{runID: runID, trigger: periapsis.TriggerCI, created: true}
+	jobs.intents[name] = argoIntent{runID: runID, trigger: pipeline.TriggerCI, created: true}
 	jobs.mu.Unlock()
 
 	if err := jobs.Delete(context.Background(), name, runID); err != nil {
@@ -1033,7 +1033,7 @@ func TestNoPipelineError_UnknownTrigger(t *testing.T) {
 	t.Parallel()
 	// When TriggerFile returns empty for an unknown trigger, noPipelineError
 	// falls back to BuildFile.
-	err := noPipelineError(os.ErrNotExist, periapsis.Trigger("unknown"), "test-repo")
+	err := noPipelineError(os.ErrNotExist, pipeline.Trigger("unknown"), "test-repo")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -1083,7 +1083,7 @@ spec:
 	if err != nil {
 		t.Fatalf("PipelineSize: %v", err)
 	}
-	if size != periapsis.L {
+	if size != pipeline.L {
 		t.Fatalf("size = %s, want L", size)
 	}
 }
@@ -1104,7 +1104,7 @@ func TestReadArgoSource_ValidCI(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	source, err := readArgoSource(dir, periapsis.TriggerCI)
+	source, err := readArgoSource(dir, pipeline.TriggerCI)
 	if err != nil {
 		t.Fatalf("readArgoSource: %v", err)
 	}
@@ -1115,7 +1115,7 @@ func TestReadArgoSource_ValidCI(t *testing.T) {
 
 func TestReadArgoSource_InvalidTrigger(t *testing.T) {
 	t.Parallel()
-	_, err := readArgoSource(t.TempDir(), periapsis.Trigger("invalid"))
+	_, err := readArgoSource(t.TempDir(), pipeline.Trigger("invalid"))
 	if err == nil {
 		t.Fatal("expected error for invalid trigger")
 	}
@@ -1128,7 +1128,7 @@ func TestReadArgoSource_InvalidTrigger(t *testing.T) {
 func TestRunTrigger_CI(t *testing.T) {
 	t.Parallel()
 	trigger, err := runTrigger(model.Run{Release: false})
-	if err != nil || trigger != periapsis.TriggerCI {
+	if err != nil || trigger != pipeline.TriggerCI {
 		t.Fatalf("trigger = %v, err = %v", trigger, err)
 	}
 }
@@ -1136,7 +1136,7 @@ func TestRunTrigger_CI(t *testing.T) {
 func TestRunTrigger_Release(t *testing.T) {
 	t.Parallel()
 	trigger, err := runTrigger(model.Run{Release: true})
-	if err != nil || trigger != periapsis.TriggerRelease {
+	if err != nil || trigger != pipeline.TriggerRelease {
 		t.Fatalf("trigger = %v, err = %v", trigger, err)
 	}
 }

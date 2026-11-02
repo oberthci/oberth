@@ -11,7 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	k8svalidation "k8s.io/apimachinery/pkg/util/validation"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // Structural bounds. A repository-authored document is untrusted input to a
@@ -40,13 +40,13 @@ const (
 
 // Policy is the administrator-owned half of admission. It mirrors the Go
 // path's controls so an Argo-authored repository cannot reach substrate the
-// periapsis path is denied.
+// pipeline path is denied.
 type Policy struct {
 	// Only ResolveRunSource may attach a source-bound, server-owned context.
 	runVMISource *ResolvedRunSource
 	// RunnerImagePrefixes is the same administrator allowlist the Go path
 	// applies to a declared RunnerImage. Empty selects the built-in
-	// periapsis.DefaultRunnerImagePrefixes.
+	// pipeline.DefaultRunnerImagePrefixes.
 	RunnerImagePrefixes []string
 	// KubeVirt permits VM resources and KVM device leaves for an admin-granted repository.
 	// The server sets this only after checking the repository's VM grant.
@@ -75,7 +75,7 @@ func Admit(workflow *wfv1.Workflow, policy Policy) error {
 	if workflow == nil {
 		return errors.New("argoworkflow: no Workflow to admit")
 	}
-	if err := periapsis.ValidateRunnerImagePrefixes(policy.RunnerImagePrefixes); err != nil {
+	if err := pipeline.ValidateRunnerImagePrefixes(policy.RunnerImagePrefixes); err != nil {
 		return fmt.Errorf("argoworkflow: %w", err)
 	}
 	var problems []error
@@ -619,9 +619,9 @@ func admitContainer(location string, container *corev1.Container, policy Policy)
 	var problems []error
 	// The same administrator allowlist that governs the Go path's RunnerImage
 	// governs every image an Argo-authored template runs.
-	if err := periapsis.ValidateRunnerImage(container.Image); err != nil {
+	if err := pipeline.ValidateRunnerImage(container.Image); err != nil {
 		problems = append(problems, fmt.Errorf("argoworkflow: %s.image: %w", location, err))
-	} else if !periapsis.RunnerImageAllowed(container.Image, policy.RunnerImagePrefixes) {
+	} else if !pipeline.RunnerImageAllowed(container.Image, policy.RunnerImagePrefixes) {
 		problems = append(problems, fmt.Errorf("argoworkflow: %s.image %q is outside the administrator prefix allowlist",
 			location, container.Image))
 	}

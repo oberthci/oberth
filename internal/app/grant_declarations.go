@@ -11,7 +11,7 @@ import (
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // declarationSnapshot captures both documents before replacing observations;
@@ -48,9 +48,9 @@ func (jobs *ArgoJobs) recordCurrentDeclarations(ctx context.Context, request ser
 	snapshot := &declarationSnapshot{}
 	collector := &ArgoJobs{declarations: snapshot}
 	for _, file := range append([]string{argoworkflow.BuildFile}, jobs.config.ReleaseTagRoutes.Files(repo)...) {
-		trigger := periapsis.TriggerRelease
+		trigger := pipeline.TriggerRelease
 		if file == argoworkflow.BuildFile {
-			trigger = periapsis.TriggerCI
+			trigger = pipeline.TriggerCI
 		}
 		stage = "read"
 		source, err := readBoundedSourceFile(request.SourceDir, file)
@@ -66,7 +66,7 @@ func (jobs *ArgoJobs) recordCurrentDeclarations(ctx context.Context, request ser
 			return
 		}
 		refKind, runTrigger := model.RefBranch, "branch"
-		if trigger == periapsis.TriggerRelease {
+		if trigger == pipeline.TriggerRelease {
 			refKind, runTrigger = model.RefTag, "release"
 		}
 		stage = "fragments"

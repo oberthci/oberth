@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // The release-credential live suite is the only test that reaches a real
@@ -143,7 +143,7 @@ spec:
         echo "anchor-verified $observed"
 `, VaultCACertPath, hex.EncodeToString(digest[:]))
 
-	request := liveRequest("oberth-live-anchor", periapsis.TriggerRelease, document)
+	request := liveRequest("oberth-live-anchor", pipeline.TriggerRelease, document)
 	request.SourceDir = repositoryRoot(t)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
@@ -211,7 +211,7 @@ func TestLiveReleaseCredentialsMaterialiseFromTheRealStore(t *testing.T) {
 	}
 	controller = controller.WithSourceSeeder(seeder)
 
-	request := liveRequest("oberth-live-credentials", periapsis.TriggerRelease, releaseCredentialDocument)
+	request := liveRequest("oberth-live-credentials", pipeline.TriggerRelease, releaseCredentialDocument)
 	request.SourceDir = credentialProofCheckout(t, envconsul, materialize, cosign)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)

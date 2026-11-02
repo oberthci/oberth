@@ -9,7 +9,7 @@ import (
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func genericWIFConfig() Config {
@@ -73,7 +73,7 @@ func TestGenericWIFOnlyIdentityWithoutSecretGrant(t *testing.T) {
 	delete(source.Spec.Templates[0].Metadata.Annotations, argoworkflow.ReleaseWIFRoleAnnotation)
 	source.Spec.Templates[0].ServiceAccountName = "release-step-main"
 	r.Source, _ = json.Marshal(source)
-	r.Trigger = periapsis.TriggerCI
+	r.Trigger = pipeline.TriggerCI
 	r.RunTrigger = argoworkflow.RunTriggerBranch
 	r.Ref = "refs/heads/artifact-deploy-test"
 	branch, err := Build(c, r)
@@ -114,13 +114,13 @@ func TestGenericWIFRefusesIdentityMisuse(t *testing.T) {
 			grant := c.ReleaseWIF.Repositories["github/skipops/oberth"]
 			switch kind {
 			case "branch":
-				r.Trigger = periapsis.TriggerCI
+				r.Trigger = pipeline.TriggerCI
 				r.RunTrigger = argoworkflow.RunTriggerBranch
 			case "promotion":
-				r.Trigger = periapsis.TriggerCI
+				r.Trigger = pipeline.TriggerCI
 				r.RunTrigger = argoworkflow.RunTriggerPromotion
 			case "schedule":
-				r.Trigger = periapsis.TriggerCI
+				r.Trigger = pipeline.TriggerCI
 				r.RunTrigger = argoworkflow.RunTriggerSchedule
 			case "repo-sa":
 				grant.StepServiceAccounts["main"] = grant.ServiceAccountName

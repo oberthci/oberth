@@ -8,7 +8,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type declaredJobs struct{ *concurrentJobs }
@@ -40,8 +40,8 @@ spec:
 func TestDeclaredSubmissionIgnoresSizeGrantAndKillSwitchRestoresIt(t *testing.T) {
 	for _, disabled := range []bool{false, true} {
 		t.Run(map[bool]string{false: "declared", true: "disabled"}[disabled], func(t *testing.T) {
-			fixture := newConcurrencyFixture(t, periapsis.XL, 3)
-			jobs := newConcurrentJobs(periapsis.XL, 2)
+			fixture := newConcurrencyFixture(t, pipeline.XL, 3)
+			jobs := newConcurrentJobs(pipeline.XL, 2)
 			fixture.scheduler.jobs = declaredJobs{jobs}
 			fixture.scheduler.admission.resources.Disabled = disabled
 			run, err := fixture.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "step-abc12345", Repository: fixture.repo, Branch: "step-abc12345", SHA: strings.Repeat("a", 40), Actor: "repo-01"})
@@ -79,10 +79,10 @@ func TestDeclaredSubmissionIgnoresSizeGrantAndKillSwitchRestoresIt(t *testing.T)
 }
 
 func TestDeclaredCreateContractRestoresNumericReservationWithKillSwitch(t *testing.T) {
-	f := newConcurrencyFixture(t, periapsis.M, 3)
+	f := newConcurrencyFixture(t, pipeline.M, 3)
 	run := model.Run{ID: strings.Repeat("a", 32), JobName: "step-abc12345", SHA: strings.Repeat("b", 40), RepoID: f.repo.ID, QueueSequence: 1}
 	d := &argoworkflow.PodDemand{CPUMilli: 6000, MemoryBytes: 8 << 30, Pods: 2}
-	if err := f.scheduler.recordCreateAdmission(run, run.JobName, periapsis.S, argoworkflow.VMIDemand{}, d); err != nil {
+	if err := f.scheduler.recordCreateAdmission(run, run.JobName, pipeline.S, argoworkflow.VMIDemand{}, d); err != nil {
 		t.Fatal(err)
 	}
 	f.scheduler.admission.resources.Disabled = true
@@ -93,14 +93,14 @@ func TestDeclaredCreateContractRestoresNumericReservationWithKillSwitch(t *testi
 	// Already submitted declarations must remain reserved when a kill switch
 	// sends NEW work back to legacy sizes, even if the old annotation was S.
 	f.scheduler.admission.mu.Lock()
-	fits := f.scheduler.admission.canGrantLocked(&admissionReservation{size: periapsis.M, weight: 2})
+	fits := f.scheduler.admission.canGrantLocked(&admissionReservation{size: pipeline.M, weight: 2})
 	f.scheduler.admission.mu.Unlock()
 	if fits {
 		t.Fatal("kill switch undercounted already-running declared work")
 	}
 	changed := *d
 	changed.CPUMilli++
-	if _, err := f.scheduler.admission.adopt(run, periapsis.S, argoworkflow.VMIDemand{}, &changed); err == nil {
+	if _, err := f.scheduler.admission.adopt(run, pipeline.S, argoworkflow.VMIDemand{}, &changed); err == nil {
 		t.Fatal("conflicting restored declaration accepted")
 	}
 }

@@ -8,12 +8,12 @@ import (
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func seededRequest(t *testing.T, source string) Request {
 	t.Helper()
-	request := testRequest(periapsis.TriggerCI, source)
+	request := testRequest(pipeline.TriggerCI, source)
 	request.SourceVolume = SourceVolume{
 		ClaimName:        "oberth-src-abc",
 		SubPath:          "src",
@@ -192,7 +192,7 @@ func TestPodPVCReferencesHaveConsistentReadOnlyMode(t *testing.T) {
 }
 
 func TestARunWithNoSeededArtifactsDirectoryGetsNoMount(t *testing.T) {
-	request := testRequest(periapsis.TriggerCI, greedyDocument)
+	request := testRequest(pipeline.TriggerCI, greedyDocument)
 	request.SourceVolume = SourceVolume{ClaimName: "oberth-src-abc", SubPath: "src"}
 	workflow, err := Build(testConfig(), request)
 	if err != nil {
@@ -212,7 +212,7 @@ func TestARunWithNoSeededArtifactsDirectoryGetsNoMount(t *testing.T) {
 }
 
 func TestAPipelineWithoutASourceVolumeIsUnchanged(t *testing.T) {
-	before, err := Build(testConfig(), testRequest(periapsis.TriggerCI, greedyDocument))
+	before, err := Build(testConfig(), testRequest(pipeline.TriggerCI, greedyDocument))
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestAPipelineWithoutASourceVolumeIsUnchanged(t *testing.T) {
 }
 
 func TestArtifactsAddNothingBesidesTheirOwnVolumeMountAndVariable(t *testing.T) {
-	plain := testRequest(periapsis.TriggerCI, greedyDocument)
+	plain := testRequest(pipeline.TriggerCI, greedyDocument)
 	plain.SourceVolume = SourceVolume{ClaimName: "oberth-src-abc", SubPath: "src"}
 	before, err := Build(testConfig(), plain)
 	if err != nil {

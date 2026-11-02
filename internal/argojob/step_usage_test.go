@@ -22,7 +22,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/oberthci/oberth/internal/stepusage"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 var measuredUsageDocument = strings.Replace(greedyDocument, "command: [/bin/true]", "command: [/bin/true]\n        resources:\n          limits: {memory: 256Mi}", 1)
@@ -56,7 +56,7 @@ spec:
 `
 
 func TestStepUsageTiny32MiAdmission(t *testing.T) {
-	request := testRequest(periapsis.TriggerCI, tinyUsageDocument)
+	request := testRequest(pipeline.TriggerCI, tinyUsageDocument)
 	config := testConfig()
 	config.RunnerImagePrefixes = []string{"busybox:"}
 	beforeSeed, err := Build(config, request)
@@ -157,7 +157,7 @@ func TestStepUsageMemoryPolicyRecovery(t *testing.T) {
 		t.Run(fmt.Sprintf("old-wrapper=%v", oldWrapper), func(t *testing.T) {
 			config := testConfig()
 			config.RunnerImagePrefixes = []string{"busybox:"}
-			request := testRequest(periapsis.TriggerCI, tinyUsageDocument)
+			request := testRequest(pipeline.TriggerCI, tinyUsageDocument)
 			request.SourceVolume = SourceVolume{ClaimName: sourceClaimName(request.Name), SubPath: "src", ArtifactsSubPath: artifactsSubPath, BinarySubPath: binarySubPath}
 			request.legacyStepUsage = oldWrapper // Reconstruct the pre-fix spec.
 			existing, err := Build(config, request)
@@ -186,7 +186,7 @@ func TestStepUsageMemoryPolicyRecovery(t *testing.T) {
 }
 
 func TestStepUsageWrapsExplicitCommandsAfterCredentialAdmission(t *testing.T) {
-	request := testRequest(periapsis.TriggerCI, measuredUsageDocument)
+	request := testRequest(pipeline.TriggerCI, measuredUsageDocument)
 	request.SourceVolume = SourceVolume{ClaimName: "source", SubPath: "checkout", BinarySubPath: "oberth-bin"}
 	wf, err := Build(testConfig(), request)
 	if err != nil {
@@ -272,7 +272,7 @@ func TestStepUsageFinalAttemptBindingAndMissing(t *testing.T) {
 func TestStepUsageCreateRecoversLegacyAndMeasuredWithoutReseeding(t *testing.T) {
 	for _, legacy := range []bool{true, false} {
 		config := testConfig()
-		request := testRequest(periapsis.TriggerCI, measuredUsageDocument)
+		request := testRequest(pipeline.TriggerCI, measuredUsageDocument)
 		request.omitStepUsage = legacy
 		request.SourceVolume = SourceVolume{ClaimName: sourceClaimName(request.Name), SubPath: "src", ArtifactsSubPath: artifactsSubPath}
 		if !legacy {

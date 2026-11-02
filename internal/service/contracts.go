@@ -19,7 +19,7 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 var (
@@ -235,8 +235,8 @@ type SecretAccessStore interface {
 // size (#1021).
 type SizeGrantStore interface {
 	SizeGrant(context.Context, int64) (store.SizeGrant, error)
-	MaxRunSize(context.Context, int64) (periapsis.Size, error)
-	SetSizeGrant(context.Context, int64, string, periapsis.Size) (store.SizeGrant, error)
+	MaxRunSize(context.Context, int64) (pipeline.Size, error)
+	SetSizeGrant(context.Context, int64, string, pipeline.Size) (store.SizeGrant, error)
 }
 
 type KubeVirtGrantStore interface {
@@ -385,7 +385,7 @@ type JobRequest struct {
 	// PipelineFile identifies the document under read-only release preflight.
 	PipelineFile string
 	SourceDir    string
-	Size         periapsis.Size
+	Size         pipeline.Size
 	// ConcurrencyGroup is the repository-declared group the scheduler admitted
 	// this run under (#658), empty for none. Engines record it with the
 	// submission; it never selects identity or resources.
@@ -444,7 +444,7 @@ var ErrAdoptionRefused = errors.New("service: Workflow refused for adoption")
 // On error it returns a nonzero result only if the exact Workflow was terminal.
 // JobNamespace names where the engine's Workflows live, for operator messages.
 type JobAdopter interface {
-	Adopt(context.Context, model.Run) (periapsis.Size, bool, error)
+	Adopt(context.Context, model.Run) (pipeline.Size, bool, error)
 	WaitResumed(context.Context, string, io.Writer, []runprogress.Event, int64) (JobResult, error)
 	JobNamespace() string
 }
@@ -463,7 +463,7 @@ type ReleaseJobController interface {
 // PipelineSizer statically reads the immutable checked-out pipeline without
 // evaluating repository code in the server process.
 type PipelineSizer interface {
-	PipelineSize(context.Context, JobRequest) (periapsis.Size, error)
+	PipelineSize(context.Context, JobRequest) (pipeline.Size, error)
 }
 
 // PipelineConcurrencyGrouper reads the concurrency group the immutable

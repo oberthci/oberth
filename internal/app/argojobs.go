@@ -22,7 +22,7 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // argoControl is the engine seam, narrowed the same way jobControl narrows the
@@ -124,7 +124,7 @@ type ArgoJobs struct {
 type argoIntent struct {
 	adoption  *argojob.Adoption
 	runID     string
-	trigger   periapsis.Trigger
+	trigger   pipeline.Trigger
 	created   bool // true once controller.Create has returned successfully
 	cancelled bool // true once Delete has requested cancellation
 }
@@ -193,17 +193,17 @@ func (jobs *ArgoJobs) SetIdentityStore(store *argojob.IdentityStore) {
 }
 
 func (jobs *ArgoJobs) CreateCI(ctx context.Context, request service.JobRequest) error {
-	return jobs.create(ctx, request, periapsis.TriggerCI)
+	return jobs.create(ctx, request, pipeline.TriggerCI)
 }
 
 func (jobs *ArgoJobs) CreateRelease(ctx context.Context, request service.JobRequest) error {
-	return jobs.create(ctx, request, periapsis.TriggerRelease)
+	return jobs.create(ctx, request, pipeline.TriggerRelease)
 }
 
 // PipelineSize reads the run's declared scheduler weight from the checked-out
 // document without evaluating anything: the size-by-trigger entry for this
 // run's own trigger when the document names one, oberth.ci/size otherwise.
-func (jobs *ArgoJobs) PipelineSize(_ context.Context, request service.JobRequest) (periapsis.Size, error) {
+func (jobs *ArgoJobs) PipelineSize(_ context.Context, request service.JobRequest) (pipeline.Size, error) {
 	source, err := jobs.readRunSource(request)
 	if err != nil {
 		return "", jobs.noRunPipelineError(err, request)
@@ -273,7 +273,7 @@ func (jobs *ArgoJobs) PlannedSteps(_ context.Context, request service.JobRequest
 	return steps, nil
 }
 
-func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, trigger periapsis.Trigger) error {
+func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, trigger pipeline.Trigger) error {
 	if strings.TrimSpace(request.JobName) == "" || strings.TrimSpace(request.Run.ID) == "" || request.Repository.Name == "" {
 		return errors.New("app: deterministic Workflow name, run, and repository are required")
 	}
@@ -556,7 +556,7 @@ func (jobs *ArgoJobs) auditSubmission(ctx context.Context, request service.JobRe
 // recordDeclarations extracts (step, path) declarations from the workflow
 // source and records them for `access_list --pending`. Best-effort: failures
 // are logged to the run context and never block admission. Issue #623, finding 4.
-func (jobs *ArgoJobs) recordDeclarations(ctx context.Context, request service.JobRequest, source []byte, trigger periapsis.Trigger) {
+func (jobs *ArgoJobs) recordDeclarations(ctx context.Context, request service.JobRequest, source []byte, trigger pipeline.Trigger) {
 	if jobs.declarations == nil {
 		return
 	}
@@ -622,7 +622,7 @@ func (jobs *ArgoJobs) recordDeclarations(ctx context.Context, request service.Jo
 
 // Adopt rebuilds the intent from the durable run and the existing Workflow.
 // It never seeds sources, submits work, or re-evaluates repository commands.
-func (jobs *ArgoJobs) Adopt(ctx context.Context, run model.Run) (periapsis.Size, bool, error) {
+func (jobs *ArgoJobs) Adopt(ctx context.Context, run model.Run) (pipeline.Size, bool, error) {
 	controller, ok := jobs.controller.(interface {
 		Adopt(context.Context, argojob.AdoptionRequest) (argojob.Adoption, bool, error)
 	})
@@ -925,8 +925,8 @@ func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 
 // readArgoSource reads the pipeline document for one trigger out of the
 // immutable run workspace, through the same bounded, root-confined reader the
-// Go path uses for periapsis.go.
-func readArgoSource(sourceDir string, trigger periapsis.Trigger) ([]byte, error) {
+// Go path uses for pipeline.go.
+func readArgoSource(sourceDir string, trigger pipeline.Trigger) ([]byte, error) {
 	file, err := argoworkflow.TriggerFile(trigger)
 	if err != nil {
 		return nil, err
@@ -938,7 +938,7 @@ func readArgoSource(sourceDir string, trigger periapsis.Trigger) ([]byte, error)
 // pipeline configuration file for the given trigger. If the underlying error
 // is not os.ErrNotExist it is returned unchanged so callers can use this as a
 // pass-through wrapper.
-func noPipelineError(err error, trigger periapsis.Trigger, repoName string) error {
+func noPipelineError(err error, trigger pipeline.Trigger, repoName string) error {
 	if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}

@@ -1,7 +1,7 @@
-// Package periapsis defines the format-neutral pipeline vocabulary shared by
+// Package pipeline defines the format-neutral pipeline vocabulary shared by
 // the Argo Workflow execution engine, the store/model/service layers, and the
 // CLI admission checks.
-package periapsis
+package pipeline
 
 // Size is the declared resource tier of one pipeline step.
 type Size string

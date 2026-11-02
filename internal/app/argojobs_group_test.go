@@ -11,7 +11,7 @@ import (
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func groupedPipeline(annotations string) string {
@@ -105,14 +105,14 @@ func TestAuditSubmissionRecordsTheAdmittedConcurrencyGroup(t *testing.T) {
 		},
 		intents: map[string]argoIntent{},
 	}
-	source, err := readArgoSource(dir, periapsis.TriggerCI)
+	source, err := readArgoSource(dir, pipeline.TriggerCI)
 	if err != nil {
 		t.Fatal(err)
 	}
 	const commit = "cccccccccccccccccccccccccccccccccccccccc"
 	submission := argojob.Request{
 		RunID: "run-grouped", Name: "wf-grouped", Repo: "terraform", Ref: "fix-a",
-		SHA: commit, Trigger: periapsis.TriggerCI, Source: source, SourceDir: dir, ApprovedSecrets: map[string]bool{},
+		SHA: commit, Trigger: pipeline.TriggerCI, Source: source, SourceDir: dir, ApprovedSecrets: map[string]bool{},
 	}
 	for _, tc := range []struct {
 		group string

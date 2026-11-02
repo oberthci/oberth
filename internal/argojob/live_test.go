@@ -22,7 +22,7 @@ import (
 	"k8s.io/client-go/tools/remotecommand"
 
 	"github.com/oberthci/oberth/internal/runprogress"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // The live suite runs against a real Argo Workflows controller. It is gated on
@@ -162,7 +162,7 @@ func TestLiveBranchSubmissionCannotReachTheCredentialedServiceAccount(t *testing
 	}
 	seeder := NewSourceSeeder(cluster.kube, cluster.execStreamer(), cluster.config())
 	controller = controller.WithSourceSeeder(seeder)
-	request := liveRequest("oberth-live-identity", periapsis.TriggerCI, liveGreedyDocument)
+	request := liveRequest("oberth-live-identity", pipeline.TriggerCI, liveGreedyDocument)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cleanupCancel()
@@ -264,7 +264,7 @@ func TestLiveReadOnlyRootFilesystemIsRealAndTmpIsWritable(t *testing.T) {
 		t.Fatalf("controller: %v", err)
 	}
 	controller = controller.WithSourceSeeder(NewSourceSeeder(cluster.kube, cluster.execStreamer(), cluster.config()))
-	request := liveRequest("oberth-live-rootfs", periapsis.TriggerCI, liveFilesystemDocument)
+	request := liveRequest("oberth-live-rootfs", pipeline.TriggerCI, liveFilesystemDocument)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cleanupCancel()
@@ -316,7 +316,7 @@ func TestLiveWorkflowRunsToCompletion(t *testing.T) {
 		t.Fatalf("controller: %v", err)
 	}
 	controller = controller.WithSourceSeeder(NewSourceSeeder(cluster.kube, cluster.execStreamer(), cluster.config()))
-	request := liveRequest("oberth-live-success", periapsis.TriggerCI, liveTwoBurnDocument)
+	request := liveRequest("oberth-live-success", pipeline.TriggerCI, liveTwoBurnDocument)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cleanupCancel()
@@ -379,7 +379,7 @@ func TestLiveFailingWorkflowReportsTheFailedStep(t *testing.T) {
 		t.Fatalf("controller: %v", err)
 	}
 	controller = controller.WithSourceSeeder(NewSourceSeeder(cluster.kube, cluster.execStreamer(), cluster.config()))
-	request := liveRequest("oberth-live-failure", periapsis.TriggerCI, liveFailingDocument)
+	request := liveRequest("oberth-live-failure", pipeline.TriggerCI, liveFailingDocument)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cleanupCancel()
@@ -423,7 +423,7 @@ func TestLiveTerminalStateReconstructsWithoutInProcessState(t *testing.T) {
 		t.Fatalf("controller: %v", err)
 	}
 	controller = controller.WithSourceSeeder(NewSourceSeeder(cluster.kube, cluster.execStreamer(), cluster.config()))
-	request := liveRequest("oberth-live-recovery", periapsis.TriggerCI, liveTwoBurnDocument)
+	request := liveRequest("oberth-live-recovery", pipeline.TriggerCI, liveTwoBurnDocument)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cleanupCancel()
@@ -473,7 +473,7 @@ func TestLiveCreateIsIdempotentForTheSameRun(t *testing.T) {
 		t.Fatalf("controller: %v", err)
 	}
 	controller = controller.WithSourceSeeder(NewSourceSeeder(cluster.kube, cluster.execStreamer(), cluster.config()))
-	request := liveRequest("oberth-live-idempotent", periapsis.TriggerCI, liveTwoBurnDocument)
+	request := liveRequest("oberth-live-idempotent", pipeline.TriggerCI, liveTwoBurnDocument)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cleanupCancel()
@@ -513,7 +513,7 @@ func awaitRunPod(t *testing.T, ctx context.Context, cluster liveCluster, runID s
 	return corev1.Pod{}
 }
 
-func liveRequest(name string, trigger periapsis.Trigger, source string) Request {
+func liveRequest(name string, trigger pipeline.Trigger, source string) Request {
 	return Request{
 		RunID: name, Name: name, Repo: "oberth", UpstreamOrg: "skipops",
 		Ref: "refs/heads/argo-live", SHA: testSHA, Trigger: trigger,

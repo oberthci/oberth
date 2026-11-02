@@ -8,7 +8,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 const (
@@ -56,7 +56,7 @@ func TestBuildUsesPerRepoIdentityForRelease(t *testing.T) {
 	t.Parallel()
 	cfg := testConfigWithPerRepo()
 	path := "oberth/upstream/oberthci/oberth/test-secret"
-	req := testRequest(periapsis.TriggerRelease, perRepoCredentialedDocument(path))
+	req := testRequest(pipeline.TriggerRelease, perRepoCredentialedDocument(path))
 	req.Repo = "oberth"
 	req.UpstreamName = "codeberg"
 	req.UpstreamOrg = "oberthci"
@@ -90,7 +90,7 @@ func TestBuildCIUsesPerRepoCIIdentity(t *testing.T) {
 	t.Parallel()
 	cfg := testConfigWithPerRepo()
 	path := "oberth/upstream/oberthci/oberth/test-secret"
-	req := testRequest(periapsis.TriggerCI, perRepoCredentialedDocument(path))
+	req := testRequest(pipeline.TriggerCI, perRepoCredentialedDocument(path))
 	req.Repo = "oberth"
 	req.UpstreamName = "codeberg"
 	req.UpstreamOrg = "oberthci"
@@ -116,7 +116,7 @@ func TestBuildCIFallsBackToSharedWhenNoCIPerRepoIdentities(t *testing.T) {
 	t.Parallel()
 	cfg := testConfig() // no PerRepoCIIdentities
 	path := "oberth/upstream/oberthci/oberth/test-secret"
-	req := testRequest(periapsis.TriggerCI, perRepoCredentialedDocument(path))
+	req := testRequest(pipeline.TriggerCI, perRepoCredentialedDocument(path))
 	req.Repo = "oberth"
 	req.UpstreamName = "codeberg"
 	req.UpstreamOrg = "oberthci"
@@ -141,7 +141,7 @@ func TestBuildCIRefusesSharedFallbackWhenOtherReposHaveCIIdentities(t *testing.T
 	t.Parallel()
 	cfg := testConfigWithPerRepo() // has CI per-repo for codeberg/oberthci/oberth
 	path := "oberth/upstream/skipops/other-repo/test-secret"
-	req := testRequest(periapsis.TriggerCI, perRepoCredentialedDocument(path))
+	req := testRequest(pipeline.TriggerCI, perRepoCredentialedDocument(path))
 	req.Repo = "other-repo"
 	req.UpstreamName = "codeberg"
 	req.UpstreamOrg = "skipops"
@@ -181,7 +181,7 @@ func TestBuildRefusesSharedFallbackWhenMultipleReposHaveGrants(t *testing.T) {
 	t.Parallel()
 	cfg := testConfigWithPerRepo()
 	path := "oberth/upstream/skipops/other-repo/test-secret"
-	req := testRequest(periapsis.TriggerRelease, perRepoCredentialedDocument(path))
+	req := testRequest(pipeline.TriggerRelease, perRepoCredentialedDocument(path))
 	req.Repo = "other-repo"
 	req.UpstreamName = "codeberg"
 	req.UpstreamOrg = "skipops"
@@ -225,7 +225,7 @@ func TestBuildFallsBackToSharedIdentityForSingleRepo(t *testing.T) {
 	t.Parallel()
 	cfg := testConfig() // no PerRepoIdentities — single-repo case
 	path := "oberth/upstream/skipops/other-repo/test-secret"
-	req := testRequest(periapsis.TriggerRelease, perRepoCredentialedDocument(path))
+	req := testRequest(pipeline.TriggerRelease, perRepoCredentialedDocument(path))
 	req.Repo = "other-repo"
 	req.UpstreamName = "codeberg"
 	req.UpstreamOrg = "skipops"
@@ -251,7 +251,7 @@ func TestBuildFallsBackToSharedIdentityForSingleRepo(t *testing.T) {
 func TestBuildWithoutSecretsStillUsesPipelineSA(t *testing.T) {
 	t.Parallel()
 	cfg := testConfigWithPerRepo()
-	req := testRequest(periapsis.TriggerRelease, greedyDocument)
+	req := testRequest(pipeline.TriggerRelease, greedyDocument)
 	req.Repo = "oberth"
 
 	wf, err := Build(cfg, req)
@@ -269,7 +269,7 @@ func TestPerRepoVaultRoleIsInjected(t *testing.T) {
 	t.Parallel()
 	cfg := testConfigWithPerRepo()
 	path := "oberth/upstream/oberthci/oberth/test-secret"
-	req := testRequest(periapsis.TriggerRelease, perRepoCredentialedDocument(path))
+	req := testRequest(pipeline.TriggerRelease, perRepoCredentialedDocument(path))
 	req.Repo = "oberth"
 	req.UpstreamName = "codeberg"
 	req.UpstreamOrg = "oberthci"
@@ -300,7 +300,7 @@ func TestFragmentRunUsesHostRepoIdentity(t *testing.T) {
 	t.Parallel()
 	cfg := testConfigWithPerRepo()
 	path := "oberth/upstream/oberthci/oberth/test-secret"
-	req := testRequest(periapsis.TriggerRelease, perRepoCredentialedDocument(path))
+	req := testRequest(pipeline.TriggerRelease, perRepoCredentialedDocument(path))
 	req.Repo = "oberth" // HOST repo
 	req.UpstreamName = "codeberg"
 	req.UpstreamOrg = "oberthci"
@@ -339,7 +339,7 @@ func TestCICrossRepoReadRefusedByPerRepoCIRole(t *testing.T) {
 	}
 
 	pathA := "oberth/upstream/org-a/repo-a/test-secret"
-	reqA := testRequest(periapsis.TriggerCI, perRepoCredentialedDocument(pathA))
+	reqA := testRequest(pipeline.TriggerCI, perRepoCredentialedDocument(pathA))
 	reqA.Repo = "repo-a"
 	reqA.UpstreamName = "codeberg"
 	reqA.UpstreamOrg = "org-a"
@@ -351,7 +351,7 @@ func TestCICrossRepoReadRefusedByPerRepoCIRole(t *testing.T) {
 	}
 
 	pathB := "oberth/upstream/org-b/repo-b/test-secret"
-	reqB := testRequest(periapsis.TriggerCI, perRepoCredentialedDocument(pathB))
+	reqB := testRequest(pipeline.TriggerCI, perRepoCredentialedDocument(pathB))
 	reqB.Repo = "repo-b"
 	reqB.UpstreamName = "codeberg"
 	reqB.UpstreamOrg = "org-b"
@@ -379,7 +379,7 @@ func TestCrossRepoReadRefusedByPerRepoRole(t *testing.T) {
 	}
 
 	pathA := "oberth/upstream/org/repo-a/test-secret"
-	reqA := testRequest(periapsis.TriggerRelease, perRepoCredentialedDocument(pathA))
+	reqA := testRequest(pipeline.TriggerRelease, perRepoCredentialedDocument(pathA))
 	reqA.Repo = "repo-a"
 	reqA.UpstreamName = "codeberg"
 	reqA.UpstreamOrg = "org"
@@ -397,7 +397,7 @@ func TestCrossRepoReadRefusedByPerRepoRole(t *testing.T) {
 	}
 
 	pathB := "oberth/upstream/org/repo-b/test-secret"
-	reqB := testRequest(periapsis.TriggerRelease, perRepoCredentialedDocument(pathB))
+	reqB := testRequest(pipeline.TriggerRelease, perRepoCredentialedDocument(pathB))
 	reqB.Repo = "repo-b"
 	reqB.UpstreamName = "codeberg"
 	reqB.UpstreamOrg = "org"

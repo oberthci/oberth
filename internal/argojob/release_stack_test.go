@@ -12,7 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // The release combines two last-stage Build transformations. A measured driver
@@ -30,7 +30,7 @@ func TestReleaseStackPreservesVMIQuotaAndStepUsage(t *testing.T) {
 	config.RunnerImagePrefixes = []string{"busybox:"}
 	config.applyDefaults()
 	source = bytes.Replace(source, []byte(`command: ["true"]`), []byte("command: [\"true\"]\n        resources:\n          limits: {memory: 256Mi}"), 1)
-	request := testRequest(periapsis.TriggerCI, string(source))
+	request := testRequest(pipeline.TriggerCI, string(source))
 	request.KubeVirtGranted = true
 	request.SourceVolume = SourceVolume{ClaimName: sourceClaimName(request.Name), SubPath: "src", ArtifactsSubPath: artifactsSubPath, BinarySubPath: binarySubPath}
 	wf, err := Build(config, request)

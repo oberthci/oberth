@@ -9,7 +9,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // newWeightedAdmissionForJobs converts the operator's configured concurrent-run
@@ -38,7 +38,7 @@ func (gate *weightedAdmission) reserveInOrder(sequence, order int64) *admissionR
 }
 
 // acquire admits an ungrouped run of the given size.
-func (reservation *admissionReservation) acquire(ctx context.Context, size periapsis.Size) (func(), error) {
+func (reservation *admissionReservation) acquire(ctx context.Context, size pipeline.Size) (func(), error) {
 	return reservation.acquireRequest(ctx, admissionRequest{Size: size})
 }
 
@@ -52,7 +52,7 @@ func (service *API) waitRun(ctx context.Context, repositoryName, selector, trigg
 
 // Persist the server-admitted contract before POST. Recovery must never need a
 // Kubernetes read, a moving repository ref or a remote fragment to restore it.
-func (scheduler *Scheduler) recordCreateAdmission(run model.Run, name string, size periapsis.Size, demand argoworkflow.VMIDemand, pods ...*argoworkflow.PodDemand) error {
+func (scheduler *Scheduler) recordCreateAdmission(run model.Run, name string, size pipeline.Size, demand argoworkflow.VMIDemand, pods ...*argoworkflow.PodDemand) error {
 	var peak *argoworkflow.PodDemand
 	if len(pods) > 0 {
 		peak = pods[0]

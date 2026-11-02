@@ -27,7 +27,7 @@ import (
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // WorkflowClient is the narrow slice of the generated Argo clientset this
@@ -200,7 +200,7 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 	// secret store -- so the seeder knows whether to deliver the trust anchor.
 	// The document is decoded again inside Build; this lightweight pre-check
 	// avoids restructuring the Seed-before-Build ordering.
-	credentialed := request.Trigger == periapsis.TriggerRelease || pipelineDeclaresSecretPaths(request.Source)
+	credentialed := request.Trigger == pipeline.TriggerRelease || pipelineDeclaresSecretPaths(request.Source)
 
 	// GET the Workflow BEFORE any seeding. If the same submission already
 	// exists, return/repair ownership without touching its claim. This

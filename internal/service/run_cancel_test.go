@@ -15,7 +15,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 var (
@@ -123,10 +123,10 @@ func TestRunCancelQueuedRunIsNeverClaimed(t *testing.T) {
 // repositories alike.
 func TestRunCancelWaitingRunReleasesItsAdmissionReservation(t *testing.T) {
 	fixture := newGroupFixture(t, 10)
-	fixture.engine.declare("busy", "", periapsis.L)
-	fixture.engine.declare("feat-kv", kubevirtGroup, periapsis.XL)
-	fixture.engine.declare("feat-kv-2", kubevirtGroup, periapsis.S)
-	fixture.engine.declare("small", "", periapsis.S)
+	fixture.engine.declare("busy", "", pipeline.L)
+	fixture.engine.declare("feat-kv", kubevirtGroup, pipeline.XL)
+	fixture.engine.declare("feat-kv-2", kubevirtGroup, pipeline.S)
+	fixture.engine.declare("small", "", pipeline.S)
 	holder := fixture.branch(t, fixture.beacon, "busy", "a")
 	head := fixture.branch(t, fixture.terraform, "feat-kv", "b")
 	member := fixture.branch(t, fixture.terraform, "feat-kv-2", "c")
@@ -181,8 +181,8 @@ func TestRunCancelWaitingRunReleasesItsAdmissionReservation(t *testing.T) {
 // gone.
 func TestRunCancelRunningRunDeletesItsWorkflowAndKeepsTheCancel(t *testing.T) {
 	fixture := newGroupFixture(t, 3)
-	fixture.engine.declare("busy", "", periapsis.M)
-	fixture.engine.declare("heavy", "", periapsis.XL)
+	fixture.engine.declare("busy", "", pipeline.M)
+	fixture.engine.declare("heavy", "", pipeline.XL)
 	running := fixture.branch(t, fixture.beacon, "busy", "a")
 	next := fixture.branch(t, fixture.beacon, "heavy", "b")
 	fixture.start(t)

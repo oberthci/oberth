@@ -7,7 +7,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // These tests cover the gap that an audit test was reporting as closed: the
@@ -49,7 +49,7 @@ spec:
 // TestBuildForcesThePodSecurityBaseline proves the workflow-level context is
 // server-assigned rather than absent.
 func TestBuildForcesThePodSecurityBaseline(t *testing.T) {
-	built, err := Build(testConfig(), testRequest(periapsis.TriggerCI, nestedSecurityDocument))
+	built, err := Build(testConfig(), testRequest(pipeline.TriggerCI, nestedSecurityDocument))
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestBuildForcesThePodSecurityBaseline(t *testing.T) {
 // TestBuildForcesTheContainerSecurityBaselineEverywhere walks every container
 // position, including inline templates, init containers and sidecars.
 func TestBuildForcesTheContainerSecurityBaselineEverywhere(t *testing.T) {
-	built, err := Build(testConfig(), testRequest(periapsis.TriggerCI, nestedSecurityDocument))
+	built, err := Build(testConfig(), testRequest(pipeline.TriggerCI, nestedSecurityDocument))
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestBuildForcesTheContainerSecurityBaselineEverywhere(t *testing.T) {
 }
 
 func TestBuildProvidesAWritableTmpVolume(t *testing.T) {
-	built, err := Build(testConfig(), testRequest(periapsis.TriggerCI, nestedSecurityDocument))
+	built, err := Build(testConfig(), testRequest(pipeline.TriggerCI, nestedSecurityDocument))
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -307,7 +307,7 @@ func TestBuildRefusesAReleaseThatCanNeverVerifyTheStore(t *testing.T) {
 	// The same deployment must keep running branch CI. A branch push receives
 	// no token and contacts no store, so refusing it would take the engine down
 	// over a value only releases use.
-	if _, err := Build(config, testRequest(periapsis.TriggerCI, admissibleSecurityDocument)); err != nil {
+	if _, err := Build(config, testRequest(pipeline.TriggerCI, admissibleSecurityDocument)); err != nil {
 		t.Fatalf("branch CI was refused over a release-only value: %v", err)
 	}
 
@@ -365,7 +365,7 @@ spec:
         command: [/tmp/tools/envconsul]
         args: ["-once", "-config", "test.hcl"]
 `
-	request := testRequest(periapsis.TriggerRelease, document)
+	request := testRequest(pipeline.TriggerRelease, document)
 	request.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
 	request.SourceDir = writeEnvconsulWorkspace(t, map[string]string{
 		"test.hcl": `secret {

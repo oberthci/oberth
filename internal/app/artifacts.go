@@ -9,7 +9,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/artifacts"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type ArtifactCollector interface {
@@ -26,7 +26,7 @@ func (jobs *ArgoJobs) SetArtifacts(collector ArtifactCollector, store ArtifactSt
 	jobs.artifactLimit = limit
 }
 
-func (jobs *ArgoJobs) collectArtifacts(ctx context.Context, workflowName, runID string, trigger periapsis.Trigger, diagnostics ...[]byte) string {
+func (jobs *ArgoJobs) collectArtifacts(ctx context.Context, workflowName, runID string, trigger pipeline.Trigger, diagnostics ...[]byte) string {
 	if jobs.artifacts == nil {
 		return ""
 	}

@@ -9,7 +9,7 @@ import (
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // Shared partial-execution evidence must survive the immutable fallback after
@@ -18,7 +18,7 @@ func TestRestartCutR2CombinedKeepsRunningEvidenceAndTerminalFallback(t *testing.
 	started := time.Now().Add(-time.Minute)
 	failure := errors.New("executor identity delivery unavailable")
 	c := &restartReadController{
-		adoptingArgoControl: adoptingArgoControl{found: true, binding: argojob.Adoption{UID: "workflow-uid", Identity: "identity", Size: periapsis.M}},
+		adoptingArgoControl: adoptingArgoControl{found: true, binding: argojob.Adoption{UID: "workflow-uid", Identity: "identity", Size: pipeline.M}},
 		observed:            argojob.Completion{Name: "workflow", Phase: "Running", Reason: "Workflow running", ReplayAttempts: []argojob.StepResult{{Burn: "ci", Step: "test", Status: runprogress.StepRunning, StartedAt: &started}}},
 		observationError:    failure,
 		next:                argojob.Completion{Name: "workflow", Terminal: true, Interrupted: true, Infrastructure: true, Reason: "server restart interrupted ci/test: missing exit"},

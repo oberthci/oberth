@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestDecodeRejectsNonWorkflowKinds(t *testing.T) {
@@ -80,11 +80,11 @@ func TestDeclaredSize(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	size, err := DeclaredSize(workflow)
-	if err != nil || size != periapsis.M {
+	if err != nil || size != pipeline.M {
 		t.Fatalf("undeclared size = %q,%v; want M", size, err)
 	}
-	for declared, expected := range map[string]periapsis.Size{
-		"S": periapsis.S, "M": periapsis.M, "L": periapsis.L, "XL": periapsis.XL,
+	for declared, expected := range map[string]pipeline.Size{
+		"S": pipeline.S, "M": pipeline.M, "L": pipeline.L, "XL": pipeline.XL,
 	} {
 		workflow.Annotations = map[string]string{SizeAnnotation: declared}
 		size, err := DeclaredSize(workflow)

@@ -1,4 +1,4 @@
-package periapsis
+package pipeline
 
 import (
 	"strings"

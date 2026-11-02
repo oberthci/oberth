@@ -6,11 +6,11 @@ import (
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestGoProxyEnvironmentPreventsAmbientBypass(t *testing.T) {
-	for _, trigger := range []periapsis.Trigger{periapsis.TriggerCI, periapsis.TriggerRelease} {
+	for _, trigger := range []pipeline.Trigger{pipeline.TriggerCI, pipeline.TriggerRelease} {
 		t.Run(string(trigger), func(t *testing.T) {
 			container := func() *corev1.Container {
 				return &corev1.Container{Env: []corev1.EnvVar{

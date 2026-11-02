@@ -10,11 +10,11 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestReleaseWIFRejectsAuthoredProvenanceWithoutCapabilities(t *testing.T) {
-	for _, trigger := range []periapsis.Trigger{periapsis.TriggerCI, periapsis.TriggerRelease} {
+	for _, trigger := range []pipeline.Trigger{pipeline.TriggerCI, pipeline.TriggerRelease} {
 		for _, enabled := range []bool{false, true} {
 			c := wifTestConfig()
 			if !enabled {

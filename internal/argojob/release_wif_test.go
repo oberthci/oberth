@@ -10,7 +10,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func wifTestConfig() Config {
@@ -42,7 +42,7 @@ func wifTestRequest(t *testing.T, mutate func(*wfv1.Workflow)) Request {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := testRequest(periapsis.TriggerRelease, string(source))
+	r := testRequest(pipeline.TriggerRelease, string(source))
 	r.UpstreamName = "github"
 	return r
 }
@@ -163,7 +163,7 @@ func TestReleaseWIFRejectsUnapprovedAuthority(t *testing.T) {
 			case "repo-identity-alias":
 				c.PerRepoIdentities["github/skipops/foreign"] = PerRepoIdentityConfig{ServiceAccountName: "oberth-per-repo"}
 			case "ci":
-				r.Trigger = periapsis.TriggerCI
+				r.Trigger = pipeline.TriggerCI
 			case "repo":
 				r.Repo = "other"
 			case "upstream":
