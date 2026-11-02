@@ -483,6 +483,8 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, err
 		}
 		return service.retryRun(ctx, actor, arguments.ID, requestedPriority(actor, arguments.PriorityRequest))
+	case "publication_abandon":
+		return service.abandonPublication(ctx, actor, raw)
 	case "run_cancel":
 		var arguments struct {
 			ID     string `json:"id"`
@@ -2885,7 +2887,7 @@ func MutatingTool(name string) bool {
 		return true
 	case "issue_unlock", "issue_close_many":
 		return true
-	case "sync", "promote", "promote_retry", "publish_retry", "run_retry", "run_rerun", "run_cancel", "run_purge", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
+	case "sync", "promote", "promote_retry", "publish_retry", "publication_abandon", "run_retry", "run_rerun", "run_cancel", "run_purge", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
 		"access_allow", "access_revoke",
 		"kubevirt_grant", "kubevirt_revoke",
 		"size_grant", "size_revoke",
@@ -3338,6 +3340,9 @@ func (service *API) publishRetry(ctx context.Context, actor api.Actor, id string
 		response.Message += "publication delivered; run is " + response.RunStatus + "/" + response.RunPhase
 	case model.PublicationFailed:
 		response.Message += "publication failed; run is " + response.RunStatus + "/" + response.RunPhase
+		response.Error = current.Publication.Error
+	case model.PublicationAbandoned:
+		response.Message += "publication abandoned; run is " + response.RunStatus + "/" + response.RunPhase
 		response.Error = current.Publication.Error
 	}
 	service.signals.NotifyRun(runID)

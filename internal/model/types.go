@@ -520,11 +520,12 @@ const (
 	PublicationPending   PublicationStatus = "pending"
 	PublicationDelivered PublicationStatus = "delivered"
 	PublicationFailed    PublicationStatus = "failed"
+	PublicationAbandoned PublicationStatus = "abandoned"
 )
 
 func (s PublicationStatus) Valid() bool {
 	switch s {
-	case PublicationPending, PublicationDelivered, PublicationFailed:
+	case PublicationPending, PublicationDelivered, PublicationFailed, PublicationAbandoned:
 		return true
 	default:
 		return false

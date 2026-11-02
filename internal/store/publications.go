@@ -207,6 +207,27 @@ WHERE status = 'pending' ORDER BY sequence`)
 // owner in one SQLite transaction. There is no state in which the external ref
 // is recorded as delivered while its run or promotion remains pending.
 func (s *Store) FinalizePublication(ctx context.Context, id string, status model.PublicationStatus, failure string) (model.PublicationFinalization, error) {
+	if status == model.PublicationAbandoned {
+		return model.PublicationFinalization{}, fmt.Errorf("%w: use AbandonPublication with an actor and reason", ErrInvalid)
+	}
+	return s.finalizePublication(ctx, id, status, failure, "")
+}
+
+// AbandonPublication records an operator decision and closes the intent and
+// its owners atomically. Callers must authorize the admin and serialize with
+// delivery; this storage operation performs no Git I/O.
+func (s *Store) AbandonPublication(ctx context.Context, id, actor, reason string) (model.PublicationFinalization, error) {
+	actor, reason = strings.TrimSpace(actor), strings.TrimSpace(reason)
+	if actor == "" || reason == "" {
+		return model.PublicationFinalization{}, fmt.Errorf("%w: abandon actor and reason are required", ErrInvalid)
+	}
+	if err := ValidateCancelReason(reason); err != nil {
+		return model.PublicationFinalization{}, err
+	}
+	return s.finalizePublication(ctx, id, model.PublicationAbandoned, "abandoned by "+actor+": "+reason, actor)
+}
+
+func (s *Store) finalizePublication(ctx context.Context, id string, status model.PublicationStatus, failure, abandonActor string) (model.PublicationFinalization, error) {
 	if strings.TrimSpace(id) == "" || !status.Terminal() {
 		return model.PublicationFinalization{}, fmt.Errorf("%w: terminal publication result is required", ErrInvalid)
 	}
@@ -237,17 +258,20 @@ SELECT `+publicationColumns+` FROM publications WHERE id = ?`, id))
 	finalization := model.PublicationFinalization{}
 	if publication.RunID != "" {
 		runStatus, phase := model.RunPassed, "passed"
-		if status == model.PublicationFailed {
+		if status == model.PublicationFailed || status == model.PublicationAbandoned {
 			runStatus, phase = model.RunFailed, "publishing"
 			if pushretry.PublicationFailure(failure) {
 				phase = "infrastructure"
 			}
 		}
+		if status == model.PublicationAbandoned {
+			phase = "abandoned"
+		}
 		finalization.Run, err = scanRun(tx.QueryRowContext(ctx, `
 UPDATE runs
-SET status = ?, phase = ?, error = ?, finished_at = ?, updated_at = ?
+SET status = ?, phase = ?, error = ?, reason = CASE WHEN ? != '' THEN ? ELSE reason END, finished_at = ?, updated_at = ?
 WHERE id = ? AND status = 'running' AND phase = 'publishing'
-RETURNING `+runColumns, runStatus, phase, failure, now, now, publication.RunID))
+RETURNING `+runColumns, runStatus, phase, failure, abandonActor, failure, now, now, publication.RunID))
 		if errors.Is(err, sql.ErrNoRows) {
 			return model.PublicationFinalization{}, fmt.Errorf("%w: publication run is not active", ErrInvalidState)
 		}
@@ -257,7 +281,7 @@ RETURNING `+runColumns, runStatus, phase, failure, now, now, publication.RunID))
 	}
 	if publication.PromotionID != "" {
 		promotionStatus := model.PromotionPassed
-		if status == model.PublicationFailed {
+		if status == model.PublicationFailed || status == model.PublicationAbandoned {
 			promotionStatus = model.PromotionFailed
 		}
 		finalization.Promotion, err = scanPromotion(tx.QueryRowContext(ctx, `
@@ -295,7 +319,12 @@ RETURNING `+publicationColumns, status, failure, now, publication.ID))
 	if err != nil {
 		return model.PublicationFinalization{}, fmt.Errorf("finalize publication: %w", err)
 	}
-	if err := s.appendPublicationAudit(ctx, tx, finalization.Publication, "publication."+string(status), failure); err != nil {
+	auditPublication, action := finalization.Publication, "publication."+string(status)
+	if abandonActor != "" {
+		auditPublication.Actor = abandonActor
+		action = "publication.abandon"
+	}
+	if err := s.appendPublicationAudit(ctx, tx, auditPublication, action, failure); err != nil {
 		return model.PublicationFinalization{}, err
 	}
 	if err := tx.Commit(); err != nil {

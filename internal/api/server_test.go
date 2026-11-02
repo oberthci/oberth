@@ -692,6 +692,7 @@ func TestMCPToolInputsMatchContract(t *testing.T) {
 		"issue_get":          {"body_limit", "fields", "id"},
 		"issue_get_many":     {"body_limit", "fields", "ids"},
 		"secretstore_verify": {"expect", "keys", "paths", "release_tier", "repo", "tier", "timeout"},
+		"publication_abandon": {"id", "reason"},
 	}
 	for _, definition := range toolDefinitions() {
 		name, ok := definition["name"].(string)
@@ -828,7 +829,7 @@ func TestMCPToolCountMatchesDocumented(t *testing.T) {
 	t.Parallel()
 	// The documented count in docs/mcp-setup.md must match the registered
 	// tool count. A mismatch means the table drifted from the code.
-	const documented = 70
+	const documented = 71
 	definitions := toolDefinitions()
 	if len(definitions) != documented {
 		t.Fatalf("registered %d tools, documented %d in docs/mcp-setup.md — update the table", len(definitions), documented)
@@ -847,7 +848,7 @@ func TestMCPToolCountMatchesDocumented(t *testing.T) {
 
 func TestMCPToolSurfaceMatchesContract(t *testing.T) {
 	want := []string{
-		"status", "logs", "run_kvm_preflight", "run_get", "run_resources", "run_retry", "run_cancel", "run_rerun", "run_purge", "artifacts", "artifact_get", "run_logs", "wait", "sync", "promote", "promotion_list", "promote_status", "promote_retry",
+		"status", "logs", "run_kvm_preflight", "run_get", "run_resources", "run_retry", "publication_abandon", "run_cancel", "run_rerun", "run_purge", "artifacts", "artifact_get", "run_logs", "wait", "sync", "promote", "promotion_list", "promote_status", "promote_retry",
 		"issue_create", "issue_get", "issue_get_many", "issue_update", "issue_append", "issue_close", "issue_reopen",
 		"issue_delete", "issue_list", "issue_unlock", "issue_close_many", "issue_lock",
 		"uplink_list", "uplink_revoke", "uplink_rotate", "access_dismiss", "kubevirt_grant_list",

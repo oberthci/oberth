@@ -100,6 +100,20 @@ type PublishRetryResponse struct {
 	Error         string `json:"error,omitempty"`
 }
 
+// PublicationAbandonResponse reports an explicit administrative terminal verdict.
+type PublicationAbandonResponse struct {
+	Action        string `json:"action"`
+	PublicationID string `json:"publication_id"`
+	Status        string `json:"status"`
+	RunID         string `json:"run_id,omitempty"`
+	RunStatus     string `json:"run_status,omitempty"`
+	RunPhase      string `json:"run_phase,omitempty"`
+	PromotionID   string `json:"promotion_id,omitempty"`
+	AbandonedBy   string `json:"abandoned_by"`
+	Reason        string `json:"reason"`
+	Message       string `json:"message"`
+}
+
 // RunCancelResponse is the response for run_cancel. Status stays the durable
 // terminal status (interrupted); Phase "cancelled" marks an explicit cancel.
 // Workflow is none (never claimed), not_submitted (claimed, no Workflow was
@@ -522,6 +536,10 @@ func toolDefinitions() []map[string]any {
 		tool("run_get", "Return one run by full durable ID or unique hexadecimal prefix (at least 8 characters). Default: full run, step results and versioned retained timing; missing timing is unknown. Set summary:true for only id/status/phase/failed_burn/failed_step/error and steps (burn, name, status, started_at, finished_at), omitting Timing, repository and diagnostics.", object(map[string]any{"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"), "summary": map[string]any{"type": "boolean", "description": "Return only run status/failure and compact steps; default false"}}, "id")),
 		tool("run_resources", "Read captured per-template resource history and numeric declarations at the newest selected SHA. Git remains the source of truth. Suggestions use p95/max, never the median; insufficient or censored samples get no suggestion. YAML includes paste-ready ordinary pod resources and activeDeadlineSeconds. No logs, commands, environment or image details.", object(map[string]any{"repo": stringProperty("Registered repository; optional with run"), "run": stringProperty("Exact run ID or unique prefix"), "burn": stringProperty("Optional burn"), "step": stringProperty("Optional stable template name, without fragment hash"), "ref": stringProperty("Exact ref; default includes default branch and linked promotions targeting it; any includes all refs; exclusive with run"), "last": map[string]any{"type": "integer", "minimum": 1, "maximum": 100, "default": 30}, "include_failed": map[string]any{"type": "boolean", "default": false}, "format": map[string]any{"type": "string", "enum": []string{"json", "yaml"}}})),
 		tool("run_retry", "Queue a fresh attempt for the newest interrupted or infrastructure-failed run, retaining repository, ref, SHA and release admission. Workflow-level failures without a failed step qualify. Tag/release retries require an admin, an unchanged tag object and complete credential-aware terminal observations for the entire tag history (or proof of no Workflow intent). Started secret-store/WIF work, old plans, missing evidence, a moved tag or an older source need run_rerun with force. Pending Workflow deletion is refused even with force. Test failures, older runs, promotion/plan/apply runs, published tags and refs with an active run are refused. The caller is recorded as actor.", object(map[string]any{"priority": map[string]any{"type": "string", "enum": []string{"normal", "high", "highest"}}, "priority_reason": stringProperty("Reason for submission priority"), "id": stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)")}, "id")),
+		tool("publication_abandon", "Abandon one pending upstream publication by its full publication ID. Requires an unscoped admin uplink and a reason. Atomically marks the publication abandoned and its run failed/abandoned (and its promotion failed), with the administrator in the audit chain. Never pushes; earlier pushes may already be visible upstream. Abandoned intents cannot be retried with publish_retry. An in-flight delivery settles before this operation; terminal publications are refused.", object(map[string]any{
+			"id":     stringProperty("Full publication ID from publication logs, publish_retry, or audit_list with action publication.pending"),
+			"reason": stringProperty("Why publication is abandoned; required printable text, at most 512 bytes"),
+		}, "id", "reason")),
 		tool("run_cancel", "Cancel one queued, waiting or running run. The run becomes interrupted with phase cancelled and a reason naming the caller; a claimed run's Workflow is deleted and its admission released, and it is never re-fired. Cancelling a terminal run is refused. Non-admin uplinks may cancel only branch-push runs outside a concurrency group; admins may cancel any run but must set force for tag/release and apply runs, whose publication may be left partial. Cancelling promotion CI fails the promotion without merging. Audited.", object(map[string]any{
 			"id":     stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),
 			"reason": stringProperty("Why the run is cancelled (printable text, at most 512 bytes)"),

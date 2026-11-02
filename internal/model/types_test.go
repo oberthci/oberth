@@ -77,7 +77,7 @@ func TestPublicationStatusClassification(t *testing.T) {
 	if !PublicationPending.Valid() || PublicationPending.Terminal() {
 		t.Fatal("pending publication classification is invalid")
 	}
-	for _, status := range []PublicationStatus{PublicationDelivered, PublicationFailed} {
+	for _, status := range []PublicationStatus{PublicationDelivered, PublicationFailed, PublicationAbandoned} {
 		if !status.Valid() || !status.Terminal() {
 			t.Fatalf("terminal publication status %q is invalid", status)
 		}

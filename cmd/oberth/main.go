@@ -68,7 +68,7 @@ func main() {
 	}
 }
 
-const usageCommands = "admin, wait-idle, git-ssh, audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, schedules, fragments, artifacts, runs, run, promotion, log, repos, issues, status, uplink, access, kubevirt, size, admission, secretstore, mcp, preflight, or version"
+const usageCommands = "admin, wait-idle, git-ssh, audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, schedules, fragments, artifacts, runs, run, promotion, publication, log, repos, issues, status, uplink, access, kubevirt, size, admission, secretstore, mcp, preflight, or version"
 
 func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.Writer) (resultErr error) {
 	defer func() {
@@ -109,6 +109,7 @@ Commands:
   runs          List recent CI/CD runs, or cancel a ref's active runs
   run           Show a run; retry, rerun at the same SHA, cancel one, or purge its retained logs/artifacts
   promotion     Retry a failed or interrupted promotion onto the current target head
+  publication   Abandon a pending upstream publication (admin only)
   log           Show step logs for a run
   repos         List registered repositories
   issues        List and manage issues
@@ -148,6 +149,8 @@ Commands:
 		return runRuns(ctx, arguments[1:], output)
 	case "run":
 		return runRunDetail(ctx, arguments[1:], output)
+	case "publication":
+		return runPublication(ctx, arguments[1:], output)
 	case "promotion":
 		return runPromotion(ctx, arguments[1:], output)
 	case "repos":

@@ -29,8 +29,8 @@ func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	if err := validateMigrations(migrations, latestMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
-	if latestMigrationVersion != 40 {
-		t.Fatalf("latest migration version = %d, want 40", latestMigrationVersion)
+	if latestMigrationVersion != 41 {
+		t.Fatalf("latest migration version = %d, want 41", latestMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)
@@ -1111,7 +1111,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"superseded_by text not null default ''",
 		"reason text not null check (reason in ('superseded', 'owner_restart'))")
 	assertSchemaContains(t, store.db, "table", "publications",
-		"status text not null default 'pending' check (status in ('pending', 'delivered', 'failed'))",
+		"status text not null default 'pending' check (status in ('pending', 'delivered', 'failed', 'abandoned'))",
 		"check (run_id is not null or promotion_id is not null)")
 	assertSchemaContains(t, store.db, "table", "ci_issue_work",
 		"origin = 'branch' and run_id is not null and promotion_id is null",

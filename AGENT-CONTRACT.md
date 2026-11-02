@@ -985,9 +985,9 @@ trust assumptions and complete invalidation rules.
   it encodes the same result object. Authenticated tool refusal text keeps its
   stable error class and may append only an explicitly public service reason.
   Raw dependency chains stay masked; scoped missing/hidden equivalence remains.
-- MCP exposes 70 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 71 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, read-only `run_resources` (captured history and reviewed git resource suggestions), `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`, `run_kvm_preflight`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
-  `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, issue
+  `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, `publication_abandon`, issue
   create/get/get_many/update/append/close/reopen/delete/list/lock/unlock/close_many,
   secret-access list/allow/revoke, unscoped-admin-only uplink list/revoke/rotate,
   `access_dismiss` and `kubevirt_grant_list`, admin-only `kubevirt_grant` and
@@ -1075,6 +1075,18 @@ trust assumptions and complete invalidation rules.
   Existing MCP encoding duplicates the JSON as text and structured content;
   the encoded tool result is bounded by three times this payload budget plus
   128 bytes of envelope overhead (excluding the JSON-RPC request ID).
+- `publication_abandon` requires an unscoped admin uplink, a full publication
+  `id`, and a printable `reason` (at most 512 bytes). It shares the live
+  scheduler's delivery permit, then atomically records `publication.abandon`
+  as the acting administrator, marks the intent `abandoned`, its run
+  `failed/abandoned` with the actor and reason, and its promotion failed.
+  It never pushes or reads the remote; a previous ambiguous push may already
+  have reached upstream. An in-flight delivery settles first; terminal intents
+  are refused. An abandoned intent is immutable and cannot be reactivated by
+  publication retry or restart recovery. Use
+  `oberth publication abandon <publication-id> --reason "stop delivery"`.
+  Find the publication ID in attempt logs or in `audit_list` with
+  `action: "publication.pending"`, matching the entry details to the run ID.
 - `publish_retry` retries the upstream publication for a branch or tag run
   whose burns all passed but whose upstream push failed (#696). Input is
   exactly one durable run ID — never a ref, SHA, or tag name.
@@ -2838,6 +2850,7 @@ alone is never evidence that missing migrations ran.
 | v39 | Submission priority | Persist expiring identity grants, audited priority requests and supersession protection; existing priority ordering remains compatible | Database restore |
 | v39 | Bearer token expiry | Nullable absolute expiry; existing credentials retain their lifetime | Database restore |
 | v40 | Issue metadata revision | Positive revision; advances only for real title, state or scope changes | Database restore |
+| v41 | Publication abandon (#1320) | Immutable abandoned outbox verdict and audited owner termination | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding
