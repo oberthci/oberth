@@ -550,6 +550,9 @@ func vaultAddressRequiresPinnedAnchor(address string) bool {
 
 // Request is one run's submission intent.
 type Request struct {
+	// ResourceMaximum is selected from the server's durable repository grant,
+	// never from pipeline annotations. Empty is legacy reconstruction only.
+	ResourceMaximum  periapsis.Size
 	VMIDemandReceipt *argoworkflow.VMIDemandReceipt
 	// omitStepUsage preserves already-running legacy specs during recovery.
 	omitStepUsage bool
@@ -666,6 +669,11 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 		return nil, err
 	}
 	workflow := resolved.Workflow()
+	if request.ResourceMaximum != "" {
+		if err := argoworkflow.ValidateResourceCeiling(workflow, request.Repo, request.ResourceMaximum, int64(config.WorkflowTimeout/time.Second)); err != nil {
+			return nil, err
+		}
+	}
 	if request.TrustedKVM != nil {
 		if err := admitTrustedKVMSource(workflow); err != nil {
 			return nil, err

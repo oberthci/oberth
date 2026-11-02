@@ -143,6 +143,9 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.JobRequest,
 			submission.KubeVirtBudget = kubeVirtBudget(budget)
 		}
 	}
+	if err := p.jobs.bindResourceMaximum(ctx, &submission); err != nil {
+		return err
+	}
 	if preparer, ok := p.jobs.controller.(interface {
 		PrepareNonroot(context.Context, argojob.Request) (argojob.Request, error)
 	}); ok {

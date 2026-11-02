@@ -95,6 +95,16 @@ func (s *Store) RecordWorkflowTiming(ctx context.Context, value model.WorkflowTi
 		return err
 	}
 	if existing.Valid && existing.String != string(body) {
+		var old model.WorkflowTiming
+		if json.Unmarshal([]byte(existing.String), &old) == nil && old.Resources == nil {
+			legacy := value
+			legacy.Resources = nil
+			previous, _ := json.Marshal(old)
+			candidate, _ := json.Marshal(legacy)
+			if string(previous) == string(candidate) {
+				return tx.Commit()
+			}
+		}
 		return fmt.Errorf("%w: Workflow timing attempt changed", ErrInvalidState)
 	}
 	if !existing.Valid {

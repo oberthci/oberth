@@ -53,6 +53,7 @@ const grantPolicySyncAdvisory = "Grant recorded; the identity map refreshes auto
 	"Until then, access fails closed."
 
 type APIConfig struct {
+	ResourceCoverages         ResourceCoverageReader
 	RunResources              RunResourceReader
 	ResourceDeclarations      ResourceDeclarationReader
 	Resources                 ResourceUsageReader
@@ -107,6 +108,7 @@ type APIConfig struct {
 }
 
 type API struct {
+	resourceCoverages         ResourceCoverageReader
 	runResources              RunResourceReader
 	resourceDeclarations      ResourceDeclarationReader
 	redactPressure            bool
@@ -173,6 +175,9 @@ type API struct {
 }
 
 func NewAPI(config APIConfig) (*API, error) {
+	if config.ResourceCoverages == nil {
+		config.ResourceCoverages, _ = config.History.(ResourceCoverageReader)
+	}
 	if config.RunResources == nil {
 		config.RunResources, _ = config.History.(RunResourceReader)
 	}
@@ -222,7 +227,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		issueLifecycle:     config.IssueLifecycle,
 		kvmPreflights:      config.KVMPreflights,
 		schedulingObserver: config.SchedulingObserver, admission: config.Admission,
-		runResources: config.RunResources, resourceDeclarations: config.ResourceDeclarations,
+		resourceCoverages: config.ResourceCoverages, runResources: config.RunResources, resourceDeclarations: config.ResourceDeclarations,
 		resources: config.Resources, runs: config.Runs, history: config.History, runRetries: config.RunRetries, repositories: config.Repositories,
 		issues: config.Issues, promotions: config.Promotions, promotionRuns: config.PromotionRuns,
 		enqueues: config.Enqueues, git: config.Git, refs: config.Refs, logs: config.Logs, artifacts: config.Artifacts, auditor: config.Auditor,
@@ -1576,6 +1581,9 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 	if run.Status == model.RunFailed && model.IsExecutionDeadlineReason(run.Error) {
 		visible.DisplayStatus, visible.DisplayReason = "deadline-exceeded", model.ExecutionDeadlineMessage
 	}
+	if run.Status == model.RunFailed && model.IsResourceFailureMessage(run.Error) {
+		visible.DisplayReason = run.Error
+	}
 	if run.Status == model.RunFailed && run.AutoRetriedBy != "" {
 		visible.DisplayStatus = "infra-retried"
 		visible.DisplayReason = "infra error, retried as " + shortRunID(run.AutoRetriedBy)
@@ -1612,7 +1620,12 @@ func runDisplayReason(run model.Run) string {
 	}
 }
 
-func (service *API) presentationRun(ctx context.Context, run model.Run) model.Run {
+func (service *API) presentationRun(ctx context.Context, run model.Run) (result model.Run) {
+	defer func() {
+		visible := []model.Run{result}
+		service.applyResourceMessages(ctx, visible)
+		result = visible[0]
+	}()
 	if run.SupersededBy == "" || service.history == nil {
 		return service.presentationRunWithSuccessor(ctx, run, nil)
 	}
@@ -1624,13 +1637,20 @@ func (service *API) presentationRun(ctx context.Context, run model.Run) model.Ru
 }
 
 // presentationRuns resolves every successor in one lookup for list views.
-func (service *API) presentationRuns(ctx context.Context, runs []model.Run) ([]model.Run, error) {
+func (service *API) presentationRuns(ctx context.Context, runs []model.Run) (result []model.Run, resultErr error) {
+	defer func() {
+		if resultErr == nil {
+			service.applyResourceMessages(ctx, result)
+		}
+	}()
 	batch, ok := service.history.(interface {
 		RunsByIDs(context.Context, []string) (map[string]model.Run, error)
 	})
 	if !ok {
+		plain := *service
+		plain.resourceCoverages = nil
 		for i := range runs {
-			runs[i] = service.presentationRun(ctx, runs[i])
+			runs[i] = plain.presentationRun(ctx, runs[i])
 		}
 		return runs, nil
 	}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
@@ -32,9 +33,13 @@ func (service *API) sizeGrantTool(ctx context.Context, actor api.Actor, name, re
 		if err != nil {
 			return nil, err
 		}
+		ceiling, err := argoworkflow.ResourceCeilingForSize(current)
+		if err != nil {
+			return nil, err
+		}
 		grant, err := service.sizeGrants.SizeGrant(ctx, repository.ID)
 		if errors.Is(err, store.ErrNotFound) {
-			return map[string]any{"repo": repoName, "max_size": current, "state": "never_granted"}, nil
+			return map[string]any{"repo": repoName, "max_size": current, "resource_ceiling": ceiling, "state": "never_granted"}, nil
 		}
 		if err != nil {
 			return nil, err
@@ -43,7 +48,7 @@ func (service *API) sizeGrantTool(ctx context.Context, actor api.Actor, name, re
 		if grant.RevokedAt != nil {
 			state = "revoked"
 		}
-		return map[string]any{"repo": repoName, "max_size": current, "state": state, "grant": grant}, nil
+		return map[string]any{"repo": repoName, "max_size": current, "resource_ceiling": ceiling, "state": state, "grant": grant}, nil
 	}
 	if !actor.Admin {
 		return nil, refuse(ErrForbidden, "size grants require an admin uplink")
@@ -69,5 +74,9 @@ func (service *API) sizeGrantTool(ctx context.Context, actor api.Actor, name, re
 	if grant.RevokedAt == nil {
 		current = grant.MaxSize
 	}
-	return map[string]any{"repo": repoName, "max_size": current, "grant": grant}, nil
+	ceiling, err := argoworkflow.ResourceCeilingForSize(current)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"repo": repoName, "max_size": current, "resource_ceiling": ceiling, "grant": grant}, nil
 }

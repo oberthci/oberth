@@ -253,7 +253,7 @@ func IsExecutionDeadlineReason(message string) bool {
 	case "DeadlineExceeded", "Deadline exceeded", "Step exceeded its deadline", "Workflow deadline exceeded", "workflow deadline exceeded", ExecutionDeadlineMessage:
 		return true
 	default:
-		return false
+		return strings.HasPrefix(strings.TrimSpace(message), ExecutionDeadlineMessage+" Step ") && IsResourceFailureMessage(strings.TrimSpace(message))
 	}
 }
 

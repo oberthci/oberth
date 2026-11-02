@@ -398,6 +398,9 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 			submission.KubeVirtBudget = kubeVirtBudget(budget)
 		}
 	}
+	if err := jobs.bindResourceMaximum(ctx, &submission); err != nil {
+		return err
+	}
 	// Snapshot the identity store once for both Builds of this admission
 	// (audit and controller), so the audit record and the pod spec agree
 	// on which ServiceAccount the run executes under. (Issue #465)
@@ -484,7 +487,8 @@ func (jobs *ArgoJobs) auditSubmission(ctx context.Context, request service.JobRe
 	}
 	automount := workflow.Spec.AutomountServiceAccountToken != nil && *workflow.Spec.AutomountServiceAccountToken
 	details := map[string]any{
-		"repo": request.Repository.Name, "upstream_org": request.UpstreamOrg,
+		"resource_maximum": submission.ResourceMaximum,
+		"repo":             request.Repository.Name, "upstream_org": request.UpstreamOrg,
 		"ref": request.Run.Ref,
 		// "sha" is the commit the Workflow actually executes (submission.SHA,
 		// derived from TestedSHA). "object_sha" preserves the original pushed

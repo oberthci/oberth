@@ -1323,6 +1323,7 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 	if gateErr := require(finalizeCtx); gateErr != nil {
 		return gateErr
 	}
+	jobResult = scheduler.withResourceFailure(finalizeCtx, run.ID, jobResult)
 	if err := scheduler.persistSteps(finalizeCtx, run.ID, jobResult.Steps, index); err != nil {
 		jobResult = JobResult{Status: model.RunFailed, Phase: "collect", Error: err.Error()}
 	}
@@ -1847,6 +1848,7 @@ func (scheduler *Scheduler) finalizeReconciledRun(ctx context.Context, run model
 	if indexErr != nil {
 		index = runlog.Index{}
 	}
+	jobResult = scheduler.withResourceFailure(ctx, run.ID, jobResult)
 	if err := scheduler.persistSteps(ctx, run.ID, jobResult.Steps, index); err != nil {
 		jobResult = JobResult{Status: model.RunFailed, Phase: "collect", Error: err.Error()}
 	}

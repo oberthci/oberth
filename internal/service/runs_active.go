@@ -39,6 +39,10 @@ func (service *API) activeRuns(ctx context.Context, filter api.RunFilter) (any, 
 	if err != nil {
 		return nil, err
 	}
+	runs, err = service.presentationRuns(ctx, runs)
+	if err != nil {
+		return nil, err
+	}
 	// The list observes admission only: one Workflow and Pod read per
 	// started run would be unbounded work on every dashboard poll.
 	observer := *service
@@ -47,7 +51,7 @@ func (service *API) activeRuns(ctx context.Context, filter api.RunFilter) (any, 
 	admitted := make([]ActiveRun, 0)
 	pending := make([]ActiveRun, 0, len(runs))
 	for _, run := range runs {
-		entry := ActiveRun{Run: service.presentationRun(ctx, run)}
+		entry := ActiveRun{Run: run}
 		if run.StartedAt != nil {
 			started = append(started, entry)
 			continue

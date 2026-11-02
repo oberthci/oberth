@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 type TimingRecorder interface {
@@ -43,6 +44,9 @@ func (controller *Controller) retainWorkflowTiming(ctx context.Context, workflow
 		return
 	}
 	value := model.WorkflowTiming{RunID: runID, Namespace: workflow.Namespace, Name: workflow.Name, UID: string(workflow.UID), SpecIdentity: identity, CreatedAt: workflow.CreationTimestamp.Time, Tasks: []model.TimingTask{}}
+	if coverage := argoworkflow.ResourceCoverage(workflow); coverage != nil {
+		value.Resources = &model.ResourceCoverage{Declared: coverage.Declared, Undeclared: coverage.Undeclared}
+	}
 	var err error
 	value.Tasks, err = timingGraph(workflow)
 	if err != nil {
