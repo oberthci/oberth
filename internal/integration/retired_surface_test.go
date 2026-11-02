@@ -13,6 +13,7 @@ import (
 // retaining a second security or execution policy in the production binary.
 func TestRetiredProductionSurface(t *testing.T) {
 	cases := map[string][]string{
+		"internal/client/client.go":   {"GetTo"},
 		"pkg/argoworkflow/declare.go": {"AuthorizeSecretPaths"},
 		"internal/store/store.go":     {"TrustedPlan", "TrustedApply"},
 	}

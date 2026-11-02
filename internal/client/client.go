@@ -245,33 +245,6 @@ func (client *Client) GetRaw(ctx context.Context, path string, query map[string]
 	return raw, nil
 }
 
-// GetTo streams the response body into output without JSON decoding and
-// without maxResponseSize: that cap exists to bound JSON decoding in
-// memory, but an artifact is served as application/octet-stream and the
-// server's default per-run artifact ceiling is 256 MiB, so capping the
-// read at 8 MiB silently truncated every larger download (#237). The
-// transfer is bounded by the server's own artifact limits and cancelled
-// through ctx; nothing is buffered beyond io.Copy's window.
-func (client *Client) GetTo(ctx context.Context, path string, query map[string]string, output io.Writer) error {
-	request, err := client.newGetRequest(ctx, path, query)
-	if err != nil {
-		return err
-	}
-	response, err := client.download.Do(request)
-	if err != nil {
-		return classifyTransport(path, err)
-	}
-	defer func() { _ = response.Body.Close() }()
-
-	if response.StatusCode != http.StatusOK {
-		return statusError(path, response)
-	}
-	if _, err := io.Copy(output, response.Body); err != nil {
-		return fmt.Errorf("client: read %s: %w", path, err)
-	}
-	return nil
-}
-
 // errRedirectDowngrade marks a refused https-to-http downgrade redirect so
 // classifyTransport can surface the reason instead of the generic bucket.
 var errRedirectDowngrade = errors.New("client: refusing a redirect from https to a cleartext scheme — the token would be transmitted in cleartext")
