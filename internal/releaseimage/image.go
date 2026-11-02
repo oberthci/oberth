@@ -167,15 +167,13 @@ func Repack(base v1.Image, kind Kind, architecture string, binary []byte, create
 		if slices.Contains(definition.required, cleanName) {
 			foundRequired[cleanName] = true
 		}
-		canonical := *header
-		canonical.Name = cleanName
-		canonical.Uname = ""
-		canonical.Gname = ""
-		canonical.ModTime = created
-		canonical.AccessTime = time.Time{}
-		canonical.ChangeTime = time.Time{}
-		canonical.PAXRecords = nil
-		canonical.Xattrs = nil //nolint:staticcheck // Clearing the deprecated input field prevents substrate xattrs from leaking into the canonical layer.
+		canonical := tar.Header{
+			Name: cleanName, Typeflag: header.Typeflag, Linkname: header.Linkname,
+			Mode: header.Mode, Uid: header.Uid, Gid: header.Gid, Size: header.Size,
+			Devmajor: header.Devmajor, Devminor: header.Devminor,
+			ModTime: created, Format: header.Format,
+		}
+
 		if err := target.WriteHeader(&canonical); err != nil {
 			return nil, fmt.Errorf("write %s substrate entry %s: %w", kind, cleanName, err)
 		}
