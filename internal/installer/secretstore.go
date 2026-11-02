@@ -287,6 +287,30 @@ func (b openBaoExec) policyList(ctx context.Context, token string) ([]string, er
 	return names, nil
 }
 
+func (b openBaoExec) roleList(ctx context.Context, token string) ([]string, error) {
+	out, err := b.authenticated(ctx, token, nil, "list", "-format=json", "auth/"+defaultAuthMount+"/role")
+	if err != nil {
+		if bytes.Contains(out, []byte("No value found at")) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("bao role list: %w%s", err, commandOutputSuffix(out))
+	}
+	var names []string
+	if err := json.Unmarshal(out, &names); err == nil && names != nil {
+		return names, nil
+	}
+	// Accept the full response envelope as well as the CLI's keys-only JSON.
+	var response struct {
+		Data struct {
+			Keys []string `json:"keys"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(out, &response); err != nil || response.Data.Keys == nil {
+		return nil, errors.New("bao role list returned invalid keys JSON")
+	}
+	return response.Data.Keys, nil
+}
+
 func (b openBaoExec) deleteRole(ctx context.Context, token, rolePath string) error {
 	if out, err := b.authenticated(ctx, token, nil, "delete", rolePath); err != nil {
 		return fmt.Errorf("bao delete %s: %w%s", rolePath, err, commandOutputSuffix(out))
