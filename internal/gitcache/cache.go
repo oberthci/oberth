@@ -1096,6 +1096,12 @@ func (c *Cache) ListTags(ctx context.Context, input string) ([]string, error) {
 // Go's checksum verification (go.sum /go.mod h1: lines) hashes the exact
 // file bytes and any whitespace change breaks the hash (#726).
 func (c *Cache) ShowFile(ctx context.Context, input, ref, filePath string) ([]byte, error) {
+	if err := validateModuleRef(ref); err != nil {
+		return nil, err
+	}
+	if err := validateBlobPath(filePath); err != nil {
+		return nil, err
+	}
 	_, repoPath, err := c.modulePath(ctx, input)
 	if err != nil {
 		return nil, err
@@ -1115,7 +1121,7 @@ func (c *Cache) ShowFile(ctx context.Context, input, ref, filePath string) ([]by
 	var buf bytes.Buffer
 	if err := c.run(ctx, commandSpec{
 		dir:    repoPath,
-		args:   []string{"show", ref + ":" + filePath},
+		args:   []string{"show", "--end-of-options", ref + ":" + filePath, "--"},
 		stdout: &buf,
 	}); err != nil {
 		return nil, c.classifyModuleReadFailure(ctx, repoPath, ref, err)
@@ -1126,6 +1132,9 @@ func (c *Cache) ShowFile(ctx context.Context, input, ref, filePath string) ([]by
 // ArchiveTar writes a tar archive of the tree at the given ref.
 // Used by the GOPROXY handler (#662) to build module zip files.
 func (c *Cache) ArchiveTar(ctx context.Context, input, ref string, w io.Writer) error {
+	if err := validateModuleRef(ref); err != nil {
+		return err
+	}
 	_, repoPath, err := c.modulePath(ctx, input)
 	if err != nil {
 		return err
@@ -1140,11 +1149,24 @@ func (c *Cache) ArchiveTar(ctx context.Context, input, ref string, w io.Writer) 
 	}
 	err = c.run(ctx, commandSpec{
 		dir:    repoPath,
-		args:   []string{"archive", "--format=tar", ref},
+		args:   []string{"archive", "--format=tar", "--", ref},
 		stdout: w,
 	})
 	if err != nil {
 		return c.classifyModuleReadFailure(ctx, repoPath, ref, err)
 	}
 	return nil
+}
+
+func validateModuleRef(ref string) error {
+	if ValidateSHA(ref) == nil {
+		return nil
+	}
+	if strings.HasPrefix(ref, "refs/heads/") {
+		return ValidateBranch(strings.TrimPrefix(ref, "refs/heads/"))
+	}
+	if strings.HasPrefix(ref, "refs/tags/") {
+		return ValidateTag(strings.TrimPrefix(ref, "refs/tags/"))
+	}
+	return ValidateTag(ref)
 }
