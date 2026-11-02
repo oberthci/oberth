@@ -314,41 +314,12 @@ func cursorMovedBack(previous, next string) bool {
 	return next != previous
 }
 
-// resolveRemoteRunID expands the abbreviation the push banner prints into the
-// identifier the API indexes by. Only a value that looks abbreviated costs a
-// request; a whole identifier goes straight through.
-func resolveRemoteRunID(ctx context.Context, api *client.Client, given string) (string, error) {
-	if !looksAbbreviated(given) {
-		return given, nil
+// resolveRemoteRunID leaves lookup and ambiguity detection to the server.
+func resolveRemoteRunID(_ context.Context, _ *client.Client, given string) (string, error) {
+	if len(given) > 0 && len(given) < 8 && strings.Trim(strings.ToLower(given), "0123456789abcdef") == "" {
+		return "", fmt.Errorf("%w: run ID must contain 8 to 32 hexadecimal characters", errUsage)
 	}
-	// Walk every page: the server returns at most 100 runs per request, so
-	// a short ID from an older run was "not found" (#050). Bounded so a
-	// misbehaving server cannot loop forever.
-	var known []string
-	query := map[string]string{"limit": "100"}
-	for page := 0; page < 1000; page++ {
-		var runs []remoteRun
-		if err := api.Get(ctx, "/api/runs", query, &runs); err != nil {
-			return "", err
-		}
-		cursor := ""
-		if len(runs) > 0 {
-			cursor = runCursor(runs[len(runs)-1])
-		}
-		// An older server ignores ?before and repeats the newest page; stop
-		// before counting the same runs twice (each would then "match" twice).
-		if previous := query["before"]; previous != "" && !cursorMovedBack(previous, cursor) {
-			break
-		}
-		for _, run := range runs {
-			known = append(known, run.ID)
-		}
-		if datedRunCount(runs) < 100 || cursor == "" {
-			break
-		}
-		query["before"] = cursor
-	}
-	return resolveRunIDPrefix(given, known)
+	return given, nil
 }
 
 func runRunDetail(ctx context.Context, arguments []string, output io.Writer) error {

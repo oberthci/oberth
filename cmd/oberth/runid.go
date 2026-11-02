@@ -14,7 +14,7 @@ const runIDLength = 32
 // rather than an identifier of some other shape entirely. A deployment whose
 // run IDs are not 32 hex characters should still get the plain message.
 func looksAbbreviated(value string) bool {
-	if value == "" || len(value) >= runIDLength {
+	if len(value) < 8 || len(value) >= runIDLength {
 		return false
 	}
 	for _, character := range value {
