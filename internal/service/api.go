@@ -2852,6 +2852,7 @@ func wireIssueList(page model.IssuePage) api.IssueListResponse {
 	issues := make([]api.IssueListItem, len(page.Issues))
 	for index, issue := range page.Issues {
 		item := api.IssueListItem{
+			Revision:    issue.Revision,
 			Lock:        issue.Lock,
 			ID:          issue.ID,
 			State:       string(issue.State),

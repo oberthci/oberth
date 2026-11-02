@@ -46,6 +46,14 @@ func TestIssueUpdateRevisionSerializesConcurrentWriters(t *testing.T) {
 	if err != nil || got.Revision != 2 || got.Body != "original" {
 		t.Fatalf("post-update issue: %+v %v", got, err)
 	}
+	listed, err := service.CallTool(t.Context(), api.Actor{Identity: "writer"}, "issue_list", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := listed.(api.IssueListResponse).Issues
+	if len(rows) != 1 || rows[0].Revision != got.Revision {
+		t.Fatalf("issue list lost revision: %+v", rows)
+	}
 	for _, raw := range []string{`{"id":1,"title":"invalid","expected_revision":null}`, `{"id":1,"title":"invalid","expected_revision":0}`, `{"id":1,"title":"invalid","expected_revision":1.5}`} {
 		if _, err := service.CallTool(t.Context(), api.Actor{Identity: "writer"}, "issue_update", json.RawMessage(raw)); !errors.Is(err, ErrInvalidInput) {
 			t.Fatalf("invalid precondition %s: %v", raw, err)
