@@ -1,5 +1,8 @@
 # Schema-35 emergency restore qualification
 
+> Historical release evidence. These pinned procedures do not describe the current release.
+> For current operations, use [backup/restore](../backup-restore.md) and the shipped CLI help.
+
 For v0.17.74/schema 36, use the [new qualification note](schema36-upgrade-note.md).
 The pins and assertions below remain evidence for v0.17.73 only.
 

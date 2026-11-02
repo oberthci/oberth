@@ -1,5 +1,8 @@
 # v0.17.73 release notes
 
+> Historical release evidence. These pinned procedures do not describe the current release.
+> For current operations, use [backup/restore](../backup-restore.md) and the shipped CLI help.
+
 This candidate includes DB-deadline R2, init-readonly R2, IO admission R2,
 restart-cut R3, RCA UX R2, runtime capacity #1215, controller admission #1214
 R3, API reader isolation #1217 and log-continuity R2 382e1a7a. All inputs are
@@ -13,7 +16,7 @@ restore evidence are recorded in the release handoff (V073-READY.md).
 Raising capacity can send more work onto the saturated disk when pressure clears
 or individual maximum-deferral clocks expire. Lowering preserves running work
 and lets it drain; it does not cancel existing grants. Use the effective runtime
-capacity shown in Status and the [runtime-capacity procedure](runtime-admission-capacity.md).
+capacity shown in Status and the [runtime-capacity procedure](../runtime-admission-capacity.md).
 
 Behavior changes in this release:
 
@@ -56,9 +59,9 @@ Behavior changes in this release:
 Actual tuxbox upgrades start from **v0.17.67/schema33**. They apply migration
 **34** (queue_priority_patterns and run_priority_overrides) plus **35**
 (runs_latest_ref_idx), with ledger entries, and include the v0.17.68–72
-behavior changes. Use the [from-67 pin preparation](v073-from67-pins.md),
-[from-67 upgrade/restore procedure](v073-from67-upgrade-runbook.md) and
-[cumulative change digest/first-hours watch](v073-from67-watch.md), including
+behavior changes. Use the [from-67 pin preparation](../v073-from67-pins.md),
+[from-67 upgrade/restore procedure](../v073-from67-upgrade-runbook.md) and
+[cumulative change digest/first-hours watch](../v073-from67-watch.md), including
 reserved readers/auth partitions, bounded log cursors and running index,
 last-used throttling, safe tag reruns, priority aging/size-grant effects,
 less backfill, compact issue acknowledgments and resource-delete/RBAC changes.
@@ -88,7 +91,7 @@ schema and audit head.
 v0.17.72 refuses schema 35; Helm rollback alone cannot recover either. Index/ledger edits are unsupported.
 `oberth restore`
 alone does not downgrade the binary and the new binary migrates a restored old
-DB back to 35. For tuxbox follow the [from-67 old-chart/old-CLI emergency procedure](v073-from67-upgrade-runbook.md)
+DB back to 35. For tuxbox follow the [from-67 old-chart/old-CLI emergency procedure](../v073-from67-upgrade-runbook.md)
 (the [from-72 variant](v073-upgrade-runbook.md) is only for actual schema34):
 stop writers, stage a maintenance copy of the old chart at zero replicas, use
 the old CLI's `restore --only history` dry-run then confirmed restore, verify
@@ -117,7 +120,7 @@ Rekor. It is not production witness/storage authorization or qualification of a
 published/signed release image. The final assembly handoff also records its
 exact-head rehearsal separately, with complete logs and JSON.
 
-The [from-67 qualification](v073-from67-qualification.md) separately exercises the actual published/signed
+The [from-67 qualification](../v073-from67-qualification.md) separately exercises the actual published/signed
 v0.17.67 CLI and image (source 5e567d5c1f60), a manually stamped Git-tag chart,
 and exact 863a88eb new artifacts, for **33 → 35 → 33**. It validates both new
 migrations and unchanged rollback prefix, without SQL schema/ledger edits.

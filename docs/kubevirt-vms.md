@@ -279,7 +279,7 @@ unchanged. No hostPath, new Pod privilege or pipeline create permission is added
 **Drain legacy resource-based VMI workflows before upgrading.** Adoption now
 refuses a VMI Workflow without a server quota binding immediately. Old
 resource-create Pods cannot obtain new launcher tokens. See the
-[release note](releases/v0.17.59-kubevirt.md).
+[release note](archive/releases/v0.17.59-kubevirt.md).
 
 Each durable operation permits only one API POST, without automatic retries.
 The operation has a 20-second context and the POST sends a 20-second API request

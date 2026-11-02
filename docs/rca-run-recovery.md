@@ -178,10 +178,10 @@ normal restore, so backup integrity alone does not establish operational rollbac
 permission. OpenBao secrets, grants, chart values, identities, logs and VM resource
 ownership need their own preserved recovery state. Qualify the restore path on a
 copy with the old binary before deployment; otherwise choose forward repair.
-See [schema-35 restore qualification](schema35-rollback-qualification.md).
+See [schema-35 restore qualification](archive/schema35-rollback-qualification.md).
 
 The schema-35 emergency restore ordering is defined in the
-[v0.17.73 runbook](v073-upgrade-runbook.md). `oberth restore` with the new binary
+[v0.17.73 runbook](archive/v073-upgrade-runbook.md). `oberth restore` with the new binary
 does not downgrade it; the old chart must first be staged without starting a
 Pod. The old chart rejects replicaCount=0, so use the rehearsed single-field
 maintenance copy described there. Check the Rekor/pending-intent deadline before

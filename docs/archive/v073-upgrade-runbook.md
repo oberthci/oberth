@@ -1,7 +1,10 @@
 # v0.17.73: schema-35 upgrade and emergency history restore
 
+> Historical release evidence. These pinned procedures do not describe the current release.
+> For current operations, use [backup/restore](../backup-restore.md) and the shipped CLI help.
+
 For tuxbox's actual v0.17.67/schema33 baseline, use the
-[from-67 runbook](v073-from67-upgrade-runbook.md), including verified v0.17.67
+[from-67 runbook](../v073-from67-upgrade-runbook.md), including verified v0.17.67
 CLI/chart pins and schema33 asserts. The v0.17.62 operator CLI is not valid.
 This original 72-to-73 procedure remains for genuine schema34 installations.
 

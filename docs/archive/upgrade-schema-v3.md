@@ -1,5 +1,8 @@
 # Upgrading across a backup-and-replace schema boundary (v2 -> v3)
 
+> Historical release evidence. These pinned procedures do not describe the current release.
+> For current operations, use [backup/restore](../backup-restore.md) and the shipped CLI help.
+
 Store schema version 3 (introduced in v0.10.57 by step-level node budgets)
 adds declared-size and durable resource-usage columns. `v1 -> v2` is the sole
 ratified live migration; **every later schema evolution is backup-and-replace

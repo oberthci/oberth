@@ -1,5 +1,8 @@
 # Upgrade to the static Git runtime
 
+> Historical release evidence. These pinned procedures do not describe the current release.
+> For current operations, use [backup/restore](../backup-restore.md) and the shipped CLI help.
+
 Git CLI is the only backend. The minimal runtime has no shell, OpenSSH or curl.
 Upstream HTTPS registrations are incompatible and now refused explicitly,
 including when a cache already exists. Before upgrading, use the old server's
@@ -44,5 +47,5 @@ it. Existing hooks are replaced atomically on cache preparation. For rollback,
 keep the old published CLI/chart/image pins and verify cache preparation occurs
 before accepting pushes, so the old release rewrites native hook aliases.
 
-See [Git runtime and required qualification](gitcache.md) for build inputs,
+See [Git runtime and required qualification](../gitcache.md) for build inputs,
 component security scans, transport policy and CI coverage.

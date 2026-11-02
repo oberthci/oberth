@@ -1,9 +1,12 @@
 # Upgrade an existing install to v0.17.59
 
+> Historical release evidence. These pinned procedures do not describe the current release.
+> For current operations, use [backup/restore](../backup-restore.md) and the shipped CLI help.
+
 This runbook covers an existing v0.17.58 install, including its schema v32
 history. Review the [release notes](releases/v0.17.59.md) before starting.
 This is a historical runbook. Current releases support only the Git CLI;
-retired Git settings require explicit migration (see [gitcache.md](gitcache.md)).
+retired Git settings require explicit migration (see [gitcache.md](../gitcache.md)).
 Existing release files/roles/identities keep their behavior.
 
 Migration v33 rebuilds `step_results` in a startup transaction. Allow database
@@ -77,7 +80,7 @@ The first backup creates a local recipient key/certificate. Store the private
 key off-machine and verify this archive can be inspected with that key. With a
 custom key, add `--key /secure/path/recipient.key` to inspect/restore commands.
 Keep the archive checksum and protected values alongside the key inventory.
-Stop if backup or inspection fails. See [backup and restore](backup-restore.md)
+Stop if backup or inspection fails. See [backup and restore](../backup-restore.md)
 for encryption, scope and recovery limits.
 
 ## 2. Choose optional values
@@ -196,7 +199,7 @@ only to `system:serviceaccount:pipelines:project-demo-publish-wif` after adaptin
 the namespace/account. Verify intended exchanges and refusals for other roles,
 repositories and branch identities. A successful chart render/preflight proves
 no live cloud authorization. The upgrade does not create IAM policy, retire
-keys or migrate publisher commands. See [release WIF](release-wif.md).
+keys or migrate publisher commands. See [release WIF](../release-wif.md).
 
 ## 3. Upgrade
 
@@ -248,7 +251,7 @@ Before resuming normal submissions:
    Resource/ContainerSet executors and opaque entrypoints remain unknown.
    Counters are untrusted self-reports, never admission inputs. The seeded
    executable adds a per-run transfer/readback cost; use the
-   [shipped benchmark](step-resource-usage.md#seed-cost-measurement) on the actual
+   [shipped benchmark](../step-resource-usage.md#seed-cost-measurement) on the actual
    server network/storage if that cost matters for capacity planning.
 2. If new release policy is enabled, check the pinned step accounts, exact
    cloud trust subjects, branch/sibling refusal and successful intended tag
@@ -343,4 +346,4 @@ uplink access, previous pipeline behavior and scheduling before resuming
 submissions. Remove optional new policy from future upgrade values deliberately;
 Helm history restores its old revision, not the external values files you saved.
 Retain the failed-upgrade database files for investigation. See
-[backup and restore](backup-restore.md) for recovery limitations and failure cases.
+[backup and restore](../backup-restore.md) for recovery limitations and failure cases.

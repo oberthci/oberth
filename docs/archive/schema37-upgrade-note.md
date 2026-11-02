@@ -1,5 +1,8 @@
 # Schema 37: container telemetry and rollback
 
+> Historical release evidence. These pinned procedures do not describe the current release.
+> For current operations, use [backup/restore](../backup-restore.md) and the shipped CLI help.
+
 Schema 37 retains the version-2 observation-format guard. It also adds
 `step_resource_usage_retention_idx(last_observed_at)` for oldest-first bounded
 cleanup. Schema-36 table/index definitions and version-1 rows are preserved;
@@ -363,7 +366,7 @@ PY
 
 The local prefix screen is necessary, not sufficient. Before restore, the witness
 operator must verify authoritative current remote history/receipts and reconcile
-pending intents according to the [existing continuity procedure](v073-from67-upgrade-runbook.md#the-witness-deadline).
+pending intents according to the [existing continuity procedure](../v073-from67-upgrade-runbook.md#the-witness-deadline).
 A publication outside the backup prefix can close rollback. Unavailable history
 or an unprovable prefix requires forward repair; never reset witnesses, delete
 continuity ConfigMaps or disable verification to proceed. Stop at zero if the

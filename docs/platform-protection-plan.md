@@ -405,7 +405,7 @@ does not downgrade the DB; use a matching verified pre-upgrade backup and the
 appropriate old CLI/image restore procedure. For a v0.17.73 predecessor this is
 normally 36→35; skipping back to a schema-34 release needs its matching schema-34
 backup. Do not re-use schema35 rehearsal assertions or modify migration ledgers.
-See [schema36 release/rollback note](schema36-upgrade-note.md).
+See [schema36 release/rollback note](archive/schema36-upgrade-note.md).
 
 ## 8. Sampler rollout and stage 2 constraint
 

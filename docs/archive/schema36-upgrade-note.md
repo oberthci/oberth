@@ -1,5 +1,8 @@
 # v0.17.74: schema 36 and platform/sampler qualification
 
+> Historical release evidence. These pinned procedures do not describe the current release.
+> For current operations, use [backup/restore](../backup-restore.md) and the shipped CLI help.
+
 The extended #1216 measurement branch now targets schema 37; its [schema-37
 upgrade/rollback supplement](schema37-upgrade-note.md) takes precedence for that
 branch. The schema-36 qualification below remains historical for its pinned target.
@@ -45,10 +48,10 @@ The old v0.17.67 binary refuses the upgraded database as too new; restarting it
 or rolling back Helm cannot downgrade schema 36. Rollback requires restoring
 the verified pre-upgrade **schema-33** backup with the pinned v0.17.67 CLI/image
 and zero-writer maintenance chart from the
-[from-67 runbook](v073-from67-upgrade-runbook.md). Use its
-[pin preparation](v073-from67-pins.md),
-[qualification and limits](v073-from67-qualification.md) and
-[watch procedure](v073-from67-watch.md) as the starting procedure, with new
+[from-67 runbook](../v073-from67-upgrade-runbook.md). Use its
+[pin preparation](../v073-from67-pins.md),
+[qualification and limits](../v073-from67-qualification.md) and
+[watch procedure](../v073-from67-watch.md) as the starting procedure, with new
 v0.17.74 pins and explicit 33→36→33 assertions. Their historical 33→35→33
 evidence does not qualify this rollout; retain the schema-33 backup rather
 than asserting a schema-35 backup exists on that host.
@@ -74,7 +77,7 @@ coordinator must repeat the pinned operator rehearsal for v0.17.74 rather than
 copy the v0.17.73 schema assertions.
 
 Platform rollout is independently gated by the
-[R2 protection plan](platform-protection-plan.md): measure Argo/OpenBao before
+[R2 protection plan](../platform-protection-plan.md): measure Argo/OpenBao before
 first limits, lower CI capacity first, qualify namespace critical-class policy
 and pressure recreation, check unseal/application health per restart, and restore
 capacity last. Source-only sampler approval does not authorize blind host changes.

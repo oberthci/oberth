@@ -1,6 +1,6 @@
 # tuxbox: v0.17.67/schema33 to v0.17.73/schema35 and back
 
-For v0.17.74, follow the [schema36 upgrade note](schema36-upgrade-note.md)
+For v0.17.74, follow the [schema36 upgrade note](archive/schema36-upgrade-note.md)
 for the **33→36→33** migration/restore assertions and new release pins.
 This runbook's pinned 33→35→33 rehearsal remains historical evidence, not
 qualification of schema36. Its zero-writer, old-image schema-33 restore

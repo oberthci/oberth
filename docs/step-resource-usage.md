@@ -220,7 +220,7 @@ version-2/non-main rows, so schema 37 prevents opening them. The migration appli
 even with sampling disabled and follows the existing forward-only backup/restore
 contract. Helm rollback alone stops the old server with schema-too-new; rollback
 requires restoring the pre-upgrade database backup. See the [schema-37
-upgrade/rollback note](schema37-upgrade-note.md). No admission, authored requests, limits, weights or workload specs are
+upgrade/rollback note](archive/schema37-upgrade-note.md). No admission, authored requests, limits, weights or workload specs are
 changed. Low/unknown/OOM-censored observations cannot authorize smaller resources.
 
 The optional storage field shapes and pod-cgroup scope follow the pinned

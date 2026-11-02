@@ -57,7 +57,7 @@ recreation. No pressure-survival qualification is claimed.
 
 ## Activation in a quiet window
 
-Pause intake through the [maintenance-window procedure](upgrade-v0.17.59.md) and drain all runs,
+Pause intake through the [maintenance-window procedure](archive/upgrade-v0.17.59.md) and drain all runs,
 including tag, release, apply, promotion, trusted KVM, source/helper and VM cells.
 Keep intake paused through all replacements and health checks; `--wait-idle` is advisory, not an admission freeze. Enabling the
 Oberth option restarts Oberth (`Recreate`) and chart-managed cloudflared

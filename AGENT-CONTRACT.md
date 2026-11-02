@@ -3499,6 +3499,6 @@ of at most 1,000 rows, with 100-row DELETE batches on a separate SQLite connecti
 (one-second pass, 25ms busy wait; backlog may exceed targets until swept).
 Unchanged terminal rows are not rewritten and sessions suppress up to 4,096
 successfully recorded finishes. Helm rollback alone fails schema-too-new and
-requires a pre-upgrade database restore; see [schema 37](docs/schema37-upgrade-note.md).
+requires a pre-upgrade database restore; see [schema 37](docs/archive/schema37-upgrade-note.md).
 Full scopes, exclusions and overhead:
 [external sampler coverage](docs/step-resource-usage.md#external-sampler-coverage-1216).
