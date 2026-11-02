@@ -2671,10 +2671,8 @@ func (service *API) issueUpdate(ctx context.Context, actor api.Actor, id int64, 
 		}
 		patch.ScopeUpstreamID = &id
 	}
-	// When the caller sends expected_body_sha256, verify that the current body
-	// matches before replacing it. This catches silently truncated payloads: if
-	// the model harness cuts the MCP call mid-payload, the hash of the intended
-	// body will not match the existing body, and the server rejects the update.
+	// This checks the current body snapshot before the write transaction.
+	// It does not guard concurrent title, state or scope changes.
 	if expectedBodySHA256 != "" {
 		existing, err := service.issues.Issue(ctx, id)
 		if err != nil {

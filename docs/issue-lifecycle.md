@@ -26,3 +26,8 @@ without duplicating the reason or audit record. Unexpected storage failures
 abort the call; earlier successful items remain closed and can safely be retried.
 
 No schema migration, chart values or additional cluster permissions are needed.
+
+`issue_update.expected_body_sha256` checks the current body snapshot before
+the write transaction. Body replacement and `issue_append` change that hash;
+title, state and scope changes do not. It is not an atomic metadata revision
+precondition.
