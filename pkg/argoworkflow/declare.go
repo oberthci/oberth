@@ -173,7 +173,7 @@ func UsesEnvconsul(template *wfv1.Template) bool {
 }
 
 // UsesOberthSecretstore reports whether a template's main container command
-// is `oberth secretstore exec` or `oberth secretstore materialize`, the native
+// is `oberth secretstore exec`, the native
 // credential chain that handles the store fetch, file materialisation, env
 // stripping, and redaction in a single binary.
 func UsesOberthSecretstore(template *wfv1.Template) bool {
@@ -191,7 +191,7 @@ func UsesOberthSecretstore(template *wfv1.Template) bool {
 		if len(rest) < 2 {
 			return false
 		}
-		return rest[0] == "secretstore" && (rest[1] == "exec" || rest[1] == "materialize")
+		return rest[0] == "secretstore" && rest[1] == "exec"
 	}
 	if template.Container != nil &&
 		isOberthSecretstore(template.Container.Command, template.Container.Args) {
@@ -205,7 +205,7 @@ func UsesOberthSecretstore(template *wfv1.Template) bool {
 }
 
 // UsesSecrets reports whether a template runs any recognised credential
-// chain: envconsul (legacy) or oberth secretstore exec/materialize (native).
+// chain: envconsul (legacy) or oberth secretstore exec (native).
 // The server mounts the secret store login token into exactly these Pods and
 // no others, so this is also what marks a planned step as one that reads
 // secrets.

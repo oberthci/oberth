@@ -151,8 +151,6 @@ func TestExecRefusesNonTmpfs(t *testing.T) {
 	}
 }
 
-// --- materialize subcommand tests (ported from cmd/oberth-secret-materialize) ---
-
 // --- #248: structured fetch marker tests ---
 
 func TestEmitSecretFetchMarkerOmitsValues(t *testing.T) {

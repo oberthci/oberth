@@ -373,7 +373,7 @@ func TestUsesSecrets(t *testing.T) {
 		{"bare envconsul", container([]string{"envconsul", "-config", "x.hcl"}), true},
 		{"envconsul by path", script([]string{"/usr/local/bin/envconsul"}), true},
 		{"secretstore exec in args", container([]string{"/run/oberth/bin/oberth"}, "secretstore", "exec", "--path", "kv/a"), true},
-		{"secretstore materialize in command", script([]string{"oberth", "secretstore", "materialize"}), true},
+		{"retired materialize gets no credential token", script([]string{"oberth", "secretstore", "materialize"}), false},
 		{"oberth without secretstore", container([]string{"oberth", "version"}), false},
 		{"secretstore under another binary", container([]string{"sh"}, "secretstore", "exec"), false},
 		{"secretstore subcommand alone", container([]string{"oberth"}, "secretstore"), false},
