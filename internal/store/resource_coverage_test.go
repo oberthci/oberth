@@ -13,7 +13,7 @@ func TestResourceCoveragePersistsInExistingJSONAndLegacyStaysUnknown(t *testing.
 	s := testStore(t, &at)
 	repo := createRepo(t, s)
 	var ids []string
-	for i := range 4 {
+	for i := range 5 {
 		run, e := s.EnqueueRun(t.Context(), testRunSpec(repo.ID, "main", strings.Repeat(string(rune('a'+i)), 40)))
 		if e != nil {
 			t.Fatal(e)
@@ -32,6 +32,9 @@ func TestResourceCoveragePersistsInExistingJSONAndLegacyStaysUnknown(t *testing.
 		if i == 3 {
 			timing.Resources = &model.ResourceCoverage{Declared: 1, Fallback: model.ResourceFallbackMemory}
 		}
+		if i == 4 {
+			timing.Resources = &model.ResourceCoverage{Undeclared: 1, Fallback: model.ResourceFallbackRequests}
+		}
 		if e = s.RecordWorkflowTiming(t.Context(), timing); e != nil {
 			t.Fatal(e)
 		}
@@ -43,7 +46,7 @@ func TestResourceCoveragePersistsInExistingJSONAndLegacyStaysUnknown(t *testing.
 		}
 	}
 	got, e := s.ResourceCoverages(t.Context(), ids)
-	if e != nil || len(got) != 3 || got[ids[0]].Undeclared != 1 {
+	if e != nil || len(got) != 4 || got[ids[0]].Undeclared != 1 {
 		t.Fatalf("coverage: %+v %v", got, e)
 	}
 	if _, ok := got[ids[1]]; ok {
@@ -57,6 +60,9 @@ func TestResourceCoveragePersistsInExistingJSONAndLegacyStaysUnknown(t *testing.
 	}
 	if c := got[ids[3]]; c.Fallback != model.ResourceFallbackMemory || !strings.Contains(c.Message(ids[3]), "memory limit") {
 		t.Fatal("memory fallback lost its durable notice")
+	}
+	if c := got[ids[4]]; c.Fallback != model.ResourceFallbackRequests || !strings.Contains(c.Message(ids[4]), "requests") || strings.Contains(c.Message(ids[4]), "memory limit") {
+		t.Fatal("missing-requests fallback lost its durable notice")
 	}
 	if _, e := s.ResourceCoverages(t.Context(), make([]string, 513)); e == nil {
 		t.Fatal("unbounded coverage read")

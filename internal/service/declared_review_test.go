@@ -93,7 +93,7 @@ func TestDeclaredBudgetFallbackAdmitsAndExplains(t *testing.T) {
 }
 
 func TestFallbackSurvivesUncertainCreateRecovery(t *testing.T) {
-	for _, reason := range []model.ResourceAdmissionFallback{model.ResourceFallbackGraph, model.ResourceFallbackMemory} {
+	for _, reason := range []model.ResourceAdmissionFallback{model.ResourceFallbackGraph, model.ResourceFallbackMemory, model.ResourceFallbackRequests} {
 		t.Run(string(reason), func(t *testing.T) {
 			f := newConcurrencyFixture(t, periapsis.M, 3)
 			run := model.Run{ID: strings.Repeat("a", 32), JobName: "step-abc12345", SHA: strings.Repeat("b", 40), RepoID: f.repo.ID, QueueSequence: 1}

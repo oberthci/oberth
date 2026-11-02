@@ -54,31 +54,28 @@ func (g *podGraph) node(d PodDemand) (int, error) {
 }
 
 func containerDemand(c, defaults *corev1.Container) (PodDemand, error) {
-	limit, limited := c.Resources.Limits[corev1.ResourceMemory]
-	if !limited && defaults != nil {
-		limit, limited = defaults.Resources.Limits[corev1.ResourceMemory]
-	}
-	if !limited || limit.Sign() <= 0 {
-		return PodDemand{}, ErrMemoryUnbounded
-	}
 	d := PodDemand{Pods: 1}
 	for _, name := range []corev1.ResourceName{corev1.ResourceCPU, corev1.ResourceMemory} {
 		q, ok := c.Resources.Requests[name]
 		if !ok && defaults != nil {
 			q, ok = defaults.Resources.Requests[name]
 		}
+		// Missing requests already select size admission. Report that cause
+		// before testing whether a fully requested container has a limit.
+		if !ok || q.Sign() <= 0 {
+			return PodDemand{}, errPodUndeclared
+		}
 		if name == corev1.ResourceMemory {
 			limit, set := c.Resources.Limits[name]
 			if !set && defaults != nil {
 				limit, set = defaults.Resources.Limits[name]
 			}
-			if set && limit.Sign() > 0 && (!ok || limit.Cmp(q) > 0) {
-				q = limit
-				ok = true
+			if !set || limit.Sign() <= 0 {
+				return PodDemand{}, ErrMemoryUnbounded
 			}
-		}
-		if !ok || q.Sign() <= 0 {
-			return PodDemand{}, errPodUndeclared
+			if limit.Cmp(q) > 0 {
+				q = limit
+			}
 		}
 		if name == corev1.ResourceCPU {
 			if q.CmpInt64(1000) > 0 {

@@ -2,6 +2,7 @@ package argoworkflow
 
 import (
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -102,20 +103,42 @@ func TestDeclaredMemoryLimitsRequiredForEveryPodContainer(t *testing.T) {
 	}
 }
 
-func TestDeclaredVMMemoryLimitsCoverVMIAndLauncherHelpers(t *testing.T) {
-	for _, shape := range []string{"vmi-request-only", "launcher-init", "launcher-sidecar", "ordinary-step", "all-limited", "launcher-helpers-limited"} {
+func TestVMIRequestMemoryBoundRejectsGuestOverride(t *testing.T) {
+	wf := hostVMWorkflow(t)
+	r := wf.Spec.Templates[1].Resource
+	var manifest map[string]any
+	if err := json.Unmarshal([]byte(r.Manifest), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	domain := manifest["spec"].(map[string]any)["domain"].(map[string]any)
+	domain["memory"] = map[string]any{"guest": "64Gi"}
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Manifest = string(raw)
+	if err := admitVMIResource("step-11111111", r, []string{"example.invalid/"}); err == nil || !strings.Contains(err.Error(), "unapproved field") {
+		t.Fatalf("guest memory override admitted: %v", err)
+	}
+}
+
+func TestDeclaredVMGuestMemoryBoundAndLauncherContainerLimits(t *testing.T) {
+	for _, shape := range []string{"vmi-request-only", "vmi-memory-undeclared", "launcher-init", "launcher-sidecar", "ordinary-step", "all-limited", "launcher-helpers-limited"} {
 		t.Run(shape, func(t *testing.T) {
 			wf := hostVMWorkflow(t)
 			wf.Spec.Templates[2].Container.Resources.Limits = corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("1Gi")}
 			helper := wfv1.UserContainer{Container: *memoryLimitedLeaf("step-44444444").Container}
 			helper.Resources.Limits = nil
 			switch shape {
-			case "vmi-request-only":
+			case "vmi-request-only", "vmi-memory-undeclared":
 				var m vmiManifest
 				if err := json.Unmarshal([]byte(wf.Spec.Templates[1].Resource.Manifest), &m); err != nil {
 					t.Fatal(err)
 				}
 				m.Spec.Domain.Resources.Limits.Memory = ""
+				if shape == "vmi-memory-undeclared" {
+					m.Spec.Domain.Resources.Requests.Memory = ""
+				}
 				raw, err := json.Marshal(m)
 				if err != nil {
 					t.Fatal(err)
@@ -133,16 +156,41 @@ func TestDeclaredVMMemoryLimitsCoverVMIAndLauncherHelpers(t *testing.T) {
 				wf.Spec.Templates[1].Sidecars = []wfv1.UserContainer{helper}
 			}
 			before := wf.DeepCopy()
+			if shape == "vmi-request-only" {
+				if err := admitVMIResource("step-11111111", wf.Spec.Templates[1].Resource, []string{"example.invalid/"}); err != nil {
+					t.Fatalf("request-only VMI refused by policy: %v", err)
+				}
+			}
 			demand, err := DeclaredHostPeak(wf, RunTriggerBranch)
-			if shape == "all-limited" || shape == "launcher-helpers-limited" {
+			if shape == "all-limited" || shape == "launcher-helpers-limited" || shape == "vmi-request-only" {
 				if err != nil || demand == nil {
 					t.Fatalf("bounded VM lost numeric eligibility: %+v %v", demand, err)
+				}
+				if shape == "vmi-request-only" && demand.MemoryBytes != (3<<30)+VMILauncherMemoryBytes {
+					t.Fatalf("request-only VMI did not reserve guest memory plus launcher: %+v", demand)
+				}
+			} else if shape == "vmi-memory-undeclared" {
+				if demand != nil || !errors.Is(err, ErrVMHostUndeclared) {
+					t.Fatalf("VMI without memory declaration gained numeric credit: %+v %v", demand, err)
 				}
 			} else if demand != nil || err == nil || !strings.Contains(err.Error(), "memory limit") {
 				t.Fatalf("unbounded VM pod gained numeric eligibility: %+v %v", demand, err)
 			}
 			if !reflect.DeepEqual(wf, before) {
 				t.Fatal("VM manifest changed")
+			}
+		})
+	}
+}
+
+func TestPodRequestChecksPrecedeMissingMemoryLimit(t *testing.T) {
+	for _, missing := range []corev1.ResourceName{corev1.ResourceCPU, corev1.ResourceMemory} {
+		t.Run(string(missing), func(t *testing.T) {
+			c := declaredLeaf("step-abc12345", "100m", "16Mi").Container
+			c.Resources.Limits = nil
+			delete(c.Resources.Requests, missing)
+			if _, err := containerDemand(c, nil); !errors.Is(err, errPodUndeclared) {
+				t.Fatalf("missing request reported as missing limit: %v", err)
 			}
 		})
 	}

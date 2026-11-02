@@ -38,9 +38,6 @@ func vmHostCost(raw string) (string, PodDemand, error) {
 	if cpuText == "" || memText == "" {
 		return "", PodDemand{}, ErrVMHostUndeclared
 	}
-	if r.Limits.Memory == "" {
-		return "", PodDemand{}, ErrMemoryUnbounded
-	}
 	cpu, e := resource.ParseQuantity(cpuText)
 	if e != nil || cpu.Sign() <= 0 || cpu.CmpInt64(1000) > 0 {
 		return "", PodDemand{}, errPodGraph
@@ -49,15 +46,16 @@ func vmHostCost(raw string) (string, PodDemand, error) {
 	if e != nil || memory.Sign() <= 0 || memory.CmpInt64(1<<40) > 0 {
 		return "", PodDemand{}, errPodGraph
 	}
-	limit, e := resource.ParseQuantity(r.Limits.Memory)
-	if e != nil || limit.Sign() <= 0 {
-		return "", PodDemand{}, ErrMemoryUnbounded
-	}
-	if limit.CmpInt64(1<<40) > 0 {
-		return "", PodDemand{}, errPodGraph
-	}
-	if limit.Cmp(memory) > 0 {
-		memory = limit
+	// Admitted VMI manifests cannot override guest memory. Its request is a
+	// bound even without a limit; ordinary pod containers still need limits.
+	if r.Limits.Memory != "" {
+		limit, e := resource.ParseQuantity(r.Limits.Memory)
+		if e != nil || limit.Sign() <= 0 || limit.CmpInt64(1<<40) > 0 {
+			return "", PodDemand{}, errPodGraph
+		}
+		if limit.Cmp(memory) > 0 {
+			memory = limit
+		}
 	}
 	return m.Metadata.Name, PodDemand{CPUMilli: cpu.MilliValue() + VMILauncherCPUMilli, MemoryBytes: memory.Value() + VMILauncherMemoryBytes}, nil
 }

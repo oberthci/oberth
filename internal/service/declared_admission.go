@@ -114,7 +114,7 @@ func (g *weightedAdmission) selectDeclaredDemand(receipt *argoworkflow.VMIDemand
 		return nil, model.ResourceFallbackGraph
 	}
 	if d == nil {
-		return nil, ""
+		return nil, model.ResourceFallbackRequests
 	}
 	if !d.Valid() {
 		return nil, model.ResourceFallbackGraph

@@ -42,6 +42,8 @@ notice appears in the existing run-message cell through `resource_message`,
 without changing `display_reason`. It is available while waiting, retained in
 submission timing metadata, and restored after uncertain creation/restart.
 Work with missing helper requests or unknown coverage also keeps the legacy path.
+Requests are checked before limits: work without CPU/memory requests receives a
+missing-requests notice, rather than a missing-memory-limit notice.
 Missing or nonpositive memory limits use the same legacy path with a fixed
 memory-limit notice in the run message. No memory or CPU limits are manufactured.
 Existing source validity, grants and per-container ceilings still apply.
@@ -56,7 +58,10 @@ not detected host capacity or measurements.
 ## VM host demand and memory policy
 
 A VM reserves its declared CPU request, or its CPU limit when no request exists.
-VMI memory requires a positive declared limit and reserves the higher request/limit.
+VMI memory uses its positive declared request as a bound when no limit exists,
+or its limit when no request exists; with both, it reserves the higher value.
+The admitted VMI schema refuses guest-memory overrides and unknown fields, so
+a request-only VMI cannot raise guest memory independently of that request.
 Ordinary containers in VM workflows and init containers/sidecars on their resource
 templates follow the same memory-limit rule, including inherited helpers.
 Each VM adds a separate
@@ -75,7 +80,7 @@ still fail validation; guest-core bounds, image/identity policy and cell grants
 remain enforced. No request or limit is inserted into the manifest.
 
 Reserving memory limits avoids packing a known larger limit as a small request.
-A request-only container or VMI cannot earn numeric host credit: it falls back
+A request-only pod container cannot earn numeric host credit: it falls back
 to legacy admission with a visible notice. Review and commit the missing limits
 in git to become eligible; Oberth does not fill them in. Existing running
 reservations restore their sealed cost rather than being silently resized.
