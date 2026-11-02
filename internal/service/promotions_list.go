@@ -57,6 +57,18 @@ func (service *API) promotionList(ctx context.Context, args promotionListArgumen
 		response.NextCursor = page.Promotions[len(page.Promotions)-1].ID
 	}
 	for _, p := range page.Promotions {
+		// Terminal promotion rows are immutable. Refresh pending candidates
+		// after the page read, so completion while assembling the response
+		// cannot leave a stale pending row or violate the requested filter.
+		if p.Status == model.PromotionPending {
+			p, err = service.promotions.Promotion(ctx, p.ID)
+			if err != nil {
+				return api.PromotionListResponse{}, err
+			}
+		}
+		if args.Status != "" && p.Status != args.Status {
+			continue
+		}
 		response.Promotions = append(response.Promotions, api.PromotionListItem{
 			ID: p.ID, Sequence: p.Sequence, RepoID: p.RepoID, SourceBranch: p.SourceBranch, SourceSHA: p.SourceSHA,
 			TargetRef: p.TargetRef, ResultSHA: p.ResultSHA, RunID: p.RunID, Status: string(p.Status),

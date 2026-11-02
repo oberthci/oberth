@@ -289,6 +289,25 @@ func (service *API) Shutdown(ctx context.Context) error {
 }
 
 func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, raw json.RawMessage) (value any, resultErr error) {
+	if name == "run_rerun" || name == "publish_retry" {
+		defer func() {
+			if resultErr == nil {
+				return
+			}
+			action, message := "", ""
+			switch result := value.(type) {
+			case api.RunRerunResponse:
+				action, message = result.Action, result.Message
+			case api.PublishRetryResponse:
+				action, message = result.Action, result.Message
+			}
+			if action == "" || action == "none" {
+				resultErr = &retryOutcomeError{cause: resultErr, outcome: "nothing started"}
+			} else if message != "" {
+				resultErr = &retryOutcomeError{cause: resultErr, outcome: message}
+			}
+		}()
+	}
 	copy := *service
 	copy.redactPressure = true
 	service = &copy
@@ -1548,7 +1567,7 @@ func wireRunStatus(status model.RunStatus) string {
 }
 
 func visibleRun(run model.Run) model.Run {
-	if run.Status == model.RunRunning && run.StartedAt == nil {
+	if run.Status == model.RunRunning && run.StartedAt == nil && run.Phase != "publishing" {
 		run.Status = model.RunWaiting
 	}
 	return run
@@ -1560,7 +1579,7 @@ func displayRunStatus(run model.Run) string {
 		return "infra-pending"
 	case run.Status == model.RunQueued, run.Status == model.RunWaiting:
 		return string(model.RunQueued)
-	case run.Status == model.RunRunning && run.StartedAt == nil:
+	case run.Status == model.RunRunning && run.StartedAt == nil && run.Phase != "publishing":
 		return string(model.RunQueued)
 	case run.Status == model.RunInterrupted && run.Phase == model.PhaseCancelled:
 		return model.PhaseCancelled
@@ -1604,10 +1623,19 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 	if run.Status == model.RunRunning && isPendingCreate(run) {
 		visible.DisplayReason = pendingCreateMessage
 	}
+	if run.Status == model.RunRunning && run.Phase == "publishing" {
+		visible.DisplayReason = "upstream publication pending"
+		if message := displayFailureText(run.Error); message != "" {
+			visible.DisplayReason = message
+		}
+	}
 	return visible
 }
 
 func runDisplayReason(run model.Run) string {
+	if run.Status == model.RunFailed {
+		return failedRunDisplayReason(run)
+	}
 	if run.Status != model.RunInterrupted {
 		return ""
 	}
@@ -2538,6 +2566,13 @@ func (service *API) prepareWaitPromotion(ctx context.Context, id string, request
 			case <-ctx.Done():
 				return PromotionWaitResponse{}, ctx.Err()
 			case <-timer.C:
+				promotion, err = service.promotions.Promotion(ctx, id)
+				if err != nil {
+					return PromotionWaitResponse{}, err
+				}
+				if promotion.Status.Terminal() {
+					return terminal(ctx, promotion)
+				}
 				response := PromotionWaitResponse{Promotion: promotion}
 				response.StillRunning = true
 				return response, nil
@@ -3249,57 +3284,55 @@ func (service *API) publishRetry(ctx context.Context, actor api.Actor, id string
 		return api.PublishRetryResponse{}, err
 	}
 
-	// Atomically transition the run/promotion back to publishing and create
-	// a new publication record.
+	// Atomically reactivate the run and its exact publication intent.
 	publication, err := service.promotions.RetryFailedPublication(ctx, runID, "", actor.Identity)
 	if err != nil {
+		if IsTransientDatabaseError(err) || strings.Contains(err.Error(), "commit publication retry") {
+			if publication.ID != "" {
+				service.enqueues.NotifyPublicationRecovery(publication.ID)
+			}
+			return api.PublishRetryResponse{Action: "unknown", Message: "Publication retry admission is unconfirmed; inspect run_get before retrying", RunID: runID, PublicationID: publication.ID, Status: "unknown", RunStatus: "unknown"}, err
+		}
 		return api.PublishRetryResponse{}, err
 	}
 
+	service.signals.NotifyRun(runID)
 	// Deliver the publication through the existing path.
 	deliveryCtx, cancelDelivery := context.WithTimeout(context.WithoutCancel(ctx), promotionCompensationTimeout)
-	finalization, deliveryErr := service.enqueues.DeliverPublication(deliveryCtx, publication.ID)
+	_, deliveryErr := service.enqueues.DeliverPublication(deliveryCtx, publication.ID)
 	cancelDelivery()
 
-	response := api.PublishRetryResponse{
-		RunID:         runID,
-		PublicationID: publication.ID,
-	}
-
-	if deliveryErr != nil {
+	response := api.PublishRetryResponse{Action: "publication_retry", RunID: runID, PublicationID: publication.ID}
+	// Re-read the durable publication and run together even when delivery
+	// returned without error. A stale/lost reply must not invent an outcome.
+	readCtx, cancelRead := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	current, readErr := service.promotions.PublicationState(readCtx, publication.ID)
+	cancelRead()
+	if readErr != nil {
 		service.enqueues.NotifyPublicationRecovery(publication.ID)
-		// Delivery may have reached the forge before finalization timed out.
-		// Recovery still owns that intent; only a durable terminal row can
-		// justify reporting failed or delivered to this caller.
-		response.Status = string(model.PublicationPending)
-		response.Error = "publication queued for recovery; follow run_status for the result"
-		readCtx, cancelRead := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		current, readErr := service.promotions.Publication(readCtx, publication.ID)
-		cancelRead()
-		if readErr == nil && current.Status.Terminal() {
-			response.Status, response.Error = string(current.Status), current.Error
-			service.signals.NotifyRun(runID)
-		}
+		response.Status, response.RunStatus = "unknown", "unknown"
+		response.Message = "Publication retry started for existing run " + runID + "; current status unavailable; inspect run_get"
+		response.Error = fmt.Sprintf("read publication retry status: %v", readErr)
 		return response, nil
 	}
-
-	response.Status = string(finalization.Publication.Status)
-	if finalization.Publication.Status == model.PublicationPending {
+	response.Status = string(current.Publication.Status)
+	response.RunStatus, response.RunPhase = string(visibleRun(current.Run).Status), current.Run.Phase
+	response.Message = "Publication retry started for existing run " + runID + "; "
+	switch current.Publication.Status {
+	case model.PublicationPending:
 		service.enqueues.NotifyPublicationRecovery(publication.ID)
-		response.Error = finalization.Publication.Error
-		if response.Error == "" {
-			response.Error = "publication queued for recovery; follow run_status for the result"
+		response.Message += "publication queued; run is " + response.RunStatus + "/" + response.RunPhase
+		response.Error = current.Publication.Error
+		if response.Error == "" && deliveryErr != nil {
+			response.Error = "publication queued for recovery; follow run_get for the result"
 		}
+	case model.PublicationDelivered:
+		response.Message += "publication delivered; run is " + response.RunStatus + "/" + response.RunPhase
+	case model.PublicationFailed:
+		response.Message += "publication failed; run is " + response.RunStatus + "/" + response.RunPhase
+		response.Error = current.Publication.Error
 	}
-	if finalization.Publication.Status == model.PublicationFailed {
-		response.Error = finalization.Publication.Error
-	}
-	if finalization.Run.ID != "" {
-		service.signals.NotifyRun(finalization.Run.ID)
-	}
-	if finalization.Promotion.ID != "" {
-		service.signals.NotifyPromotion(finalization.Promotion.ID)
-	}
+	service.signals.NotifyRun(runID)
 	service.enqueues.NotifyQueue()
 	return response, nil
 }

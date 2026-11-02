@@ -372,3 +372,11 @@ contexts after a push deadline; progress/audit persistence across restart;
 budget reset only by explicit retry; and promote_retry reuse of an unchanged
 tested merge versus re-testing after target movement. Historical migration
 fixtures remove v38 before reconstructing older schemas.
+
+Status-consistency regressions hold completion at list rendering and long-poll
+timeout boundaries, enforce status filters after refresh, and prove reads do
+not infer completion from remote ref equality or mutate the ledger. Publication
+status and its owners are read in one committed snapshot, including behind an
+uncommitted writer. Retry tests cover queued, delivered, failed, stale/lost
+replies, unreadable status, admitted dispatch failures and no-work refusals.
+Run-list/detail/CLI tests keep failure phase and publication backoff visible.

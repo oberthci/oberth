@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/oberthci/oberth/internal/model"
 )
@@ -78,10 +79,19 @@ type PromotionListResponse struct {
 }
 
 // PublishRetryResponse reports the outcome of retrying a failed upstream
-// publication. The publication ID is the new durable record created for the
-// retry. A pending status means delivery/finalization is still being recovered;
+// publication. PublicationID identifies the durable intent reactivated for the
+// retry. Status is the publication status; RunStatus/RunPhase identify the run
+// observation returned by run_get. A pending publication means delivery/finalization
+// is still being recovered;
 // poll run_get or wait using the returned run ID for its eventual outcome.
 type PublishRetryResponse struct {
+	// Action names the admitted work. Status retains its legacy meaning;
+	// RunStatus and RunPhase describe the same durable observation as run_get.
+	Action    string `json:"action"`
+	Message   string `json:"message"`
+	RunStatus string `json:"run_status"`
+	RunPhase  string `json:"run_phase"`
+
 	RunID         string `json:"run_id,omitempty"`
 	PromotionID   string `json:"promotion_id,omitempty"`
 	PublicationID string `json:"publication_id"`
@@ -112,6 +122,13 @@ type RunCancelResponse struct {
 // so that publication was retried (PublicationID, Status, Error) without
 // re-running anything.
 type RunRerunResponse struct {
+	// Action names the admitted work. Status retains its legacy meaning;
+	// RunStatus and RunPhase describe the same durable observation as run_get.
+	Action    string `json:"action"`
+	Message   string `json:"message"`
+	RunStatus string `json:"run_status"`
+	RunPhase  string `json:"run_phase"`
+
 	Mode          string `json:"mode"`
 	RunID         string `json:"run_id,omitempty"`
 	RerunOf       string `json:"rerun_of"`
@@ -372,6 +389,14 @@ func (server *Server) classifyToolFailure(err error) map[string]any {
 		log.Printf("mcp: tool error [%s]: %v", correlationID, err)
 		message = fmt.Sprintf("internal error (reference %s)", correlationID)
 	}
+	// Admission outcome is explicitly public and independent of the private
+	// error cause, including causes replaced by an internal-error reference.
+	var outcome interface{ MCPWorkOutcome() string }
+	if errors.As(err, &outcome) {
+		if public := outcome.MCPWorkOutcome(); public != "" && !strings.HasPrefix(message, public+": ") {
+			message = public + ": " + message
+		}
+	}
 	return toolFailure(errors.New(message))
 }
 
@@ -469,7 +494,7 @@ func toolDefinitions() []map[string]any {
 			"reason": stringProperty("Why the run is cancelled (printable text, at most 512 bytes)"),
 			"force":  map[string]any{"type": "boolean", "description": "Admin only: confirm cancelling a tag/release or apply run whose publication may be partial"},
 		}, "id")),
-		tool("run_rerun", "Rerun a failed or interrupted run at the same SHA and ref, linked to the original (rerun_of), for what run_retry refuses: a failed step such as a flaky test, a run that is no longer the newest of its ref, and tag/release test failures. SHA-keyed status, wait and promote then follow the newest run for that SHA. Refused while the ref has an active run, when a branch has moved past the run's SHA, and for promotion (use promote_retry), plan and apply runs. A run that passed every step and failed only in upstream publication is not re-executed: its publication is retried as publish_retry does (mode publish_retry). Non-admin uplinks may rerun branch-push runs; tag/release runs need an admin; force-free replay requires the newest source, an unchanged tag object, current credential-aware plans and complete terminal observations for every tag attempt (or no Workflow intent). Secret-store/WIF starts, incomplete observation, legacy plans, older sources, moved tags and unknown evidence require force. Pending Workflow deletion is refused even with force. A tag that is already published or green is refused, so it is never published twice. Audited as run.rerun.", object(map[string]any{
+		tool("run_rerun", "Rerun a failed or interrupted run at the same SHA and ref, linked to the original (rerun_of), for what run_retry refuses: a failed step such as a flaky test, a run that is no longer the newest of its ref, and tag/release test failures. SHA-keyed status, wait and promote then follow the newest run for that SHA. Refused while the ref has an active run, when a branch has moved past the run's SHA, and for promotion (use promote_retry), plan and apply runs. A run that passed every step and failed only in upstream publication is not re-executed: its publication is retried as publish_retry does (mode publish_retry, action publication_retry). Responses name the started action and include run_status/run_phase; no-work refusals say nothing started. Non-admin uplinks may rerun branch-push runs; tag/release runs need an admin; force-free replay requires the newest source, an unchanged tag object, current credential-aware plans and complete terminal observations for every tag attempt (or no Workflow intent). Secret-store/WIF starts, incomplete observation, legacy plans, older sources, moved tags and unknown evidence require force. Pending Workflow deletion is refused even with force. A tag that is already published or green is refused, so it is never published twice. Audited as run.rerun.", object(map[string]any{
 			"id":     stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),
 			"reason": stringProperty("Why the run is rerun (printable text, at most 512 bytes)"),
 			"force":  map[string]any{"type": "boolean", "description": "Admin only: confirm replaying a tag/release run after credentialed/publication work started or when replay safety is unknown"},
@@ -485,7 +510,7 @@ func toolDefinitions() []map[string]any {
 		tool("wait", "Long-poll until a SHA or exact run reaches a terminal state; timeout returns still-running cleanly. Timeout defaults to 600 seconds and cannot exceed 600; larger values are rejected. The CLI allows at least 60 seconds, or the tool timeout plus 30 seconds, unless --timeout overrides its client deadline. Pass id alone to wait for one run by full ID or unique prefix of at least 8 hex characters. When trigger is set, waits for a run with that trigger (e.g. 'release' for a tag-push run).", object(map[string]any{"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters); cannot be combined with repo, sha, or trigger"), "repo": stringProperty("Repository name when the SHA is ambiguous"), "sha": stringProperty("Full or short SHA (required unless id is provided)"), "trigger": stringProperty("Filter by trigger type (e.g. 'release' for tag runs, 'branch' for branch runs; 'ci' is accepted as an alias for 'branch')"), "timeout": timeoutProperty()})),
 		tool("sync", "Park the exact SHA's WIP branch upstream without a green gate; this is not completion or promotion evidence. Rejects promotion, release, plan, and apply runs. When the SHA has branch-trigger runs on multiple distinct branches, the explicit branch argument is required.", object(map[string]any{"repo": stringProperty("Repository name when the SHA is ambiguous"), "sha": stringProperty("Full SHA"), "branch": stringProperty("Explicit branch name; required when the SHA has runs on multiple branches, optional otherwise")}, "sha")),
 		tool("promote", "Green-gate and publish a SHA without force.", object(map[string]any{"repo": stringProperty("Repository name when the SHA is ambiguous"), "sha": stringProperty("Full SHA"), "branch": stringProperty("Target branch")}, "sha", "branch")),
-		tool("promotion_list", "Recover durable promotion IDs by exact repository/source SHA/status. Read-only, newest admission first; pass next_before (or next_cursor for a scoped uplink) as before for older records. A record is not publication evidence.", object(map[string]any{
+		tool("promotion_list", "Recover durable promotion IDs by exact repository/source SHA/status. Read-only, newest admission first; pass next_before (or next_cursor for a scoped uplink) as before for older records. Status comes from the committed promotion row, as in promote_status; remote ref equality alone never marks a pending record passed.", object(map[string]any{
 			"repo":       stringProperty("Filter by exact repository name"),
 			"source_sha": stringProperty("Filter by full source commit SHA; no ref or prefix resolution"),
 			"status":     map[string]any{"type": "string", "enum": []string{"pending", "passed", "failed", "interrupted"}, "description": "Filter by current promotion status"},
@@ -565,7 +590,7 @@ func toolDefinitions() []map[string]any {
 		tool("schedule_resume", "Resume a paused schedule entry. It fires once at its next tick if it came due while paused. Requires admin uplink; audited as schedule.resume.", object(map[string]any{"repo": stringProperty("Repository name"), "entry": stringProperty("Schedule entry name")}, "repo", "entry")),
 		tool("schedule_trigger", "Run one schedule entry now: queues a trigger=schedule run at the entry's branch head through the normal CI admission path, as the caller. Refused while the repository has active runs, or the entry is paused, unless force is set (a forced run supersedes active runs of the same branch and entry, while other entries and ordinary pushes remain independent). Requires admin uplink; audited as schedule.trigger.", object(map[string]any{"repo": stringProperty("Repository name"), "entry": stringProperty("Schedule entry name"), "force": map[string]any{"type": "boolean", "description": "Run despite active runs in the repository or a paused entry"}}, "repo", "entry")),
 		tool("system_status", "Return system health: database, upstreams, cluster, audit, and version.", object(map[string]any{})),
-		tool("publish_retry", "Retry the upstream publication for a branch or tag run whose burns all passed but whose upstream push failed. Input is one full run ID or unique hexadecimal prefix of at least 8 characters. Refuses when the run is not in a publishing-failed or upstream publication infrastructure-failed state, or when the cached Git object no longer matches the record. Transient server/transport failures retry automatically up to five attempts over about thirty minutes. A pending response says publication is queued and names the publication and run IDs; poll run_get or wait for the run while finalization is recovered. A promotion (or its CI run) is retried with promote_retry instead, which reuses a tested push-only candidate when its target is unchanged, or merges onto the current head and re-tests.", object(map[string]any{
+		tool("publish_retry", "Retry the upstream publication for a branch or tag run whose burns all passed but whose upstream push failed. Input is one full run ID or unique hexadecimal prefix of at least 8 characters. Refuses when the run is not in a publishing-failed or upstream publication infrastructure-failed state, or when the cached Git object no longer matches the record. Transient server/transport failures retry automatically up to five attempts over about thirty minutes. Responses name the actual action and include run_status/run_phase from the same committed snapshot as publication status. A pending response says publication is queued and names the publication and run IDs; poll run_get or wait for the run while finalization is recovered. A promotion (or its CI run) is retried with promote_retry instead, which reuses a tested push-only candidate when its target is unchanged, or merges onto the current head and re-tests.", object(map[string]any{
 			"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters) whose publication failed"),
 		}, "id")),
 		tool("secretstore_plan", "Compute the policy/role diff that `oberth secretstore sync` would apply based on current approved grants. Admin uplink required. Read-only: the server never receives an admin Bao token. Returns per-repo policy names and paths; never secret values.", object(map[string]any{})),

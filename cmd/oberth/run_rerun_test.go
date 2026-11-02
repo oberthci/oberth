@@ -39,3 +39,14 @@ func TestRunRerunCLIForwardsToTheMCPTool(t *testing.T) {
 		}
 	}
 }
+
+func TestRunRerunCLIExplainsPublicationActionAndRunStatus(t *testing.T) {
+	var output strings.Builder
+	raw := []byte(`{"mode":"publish_retry","action":"publication_retry","rerun_of":"existing-run","publication_id":"pub","status":"pending","run_status":"running","run_phase":"publishing","message":"Publication retry started for existing run existing-run; queued for upstream delivery."}`)
+	if err := writeRunRerun(&output, raw, false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "Publication retry started") || !strings.Contains(output.String(), "running/publishing") {
+		t.Fatal("CLI hid action or run status", output.String())
+	}
+}

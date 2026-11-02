@@ -60,7 +60,7 @@ func TestRunDisplayReasonsCoverTerminalCausesAndTrustedPreflight(t *testing.T) {
 	}{
 		{model.Run{Status: model.RunInterrupted, Phase: model.PhaseCancelled, Reason: "cancelled by owner: no longer needed"}, "cancelled by owner: no longer needed"},
 		{model.Run{Status: model.RunInterrupted, Reason: "oberth restarted"}, "server restart, retry needed"},
-		{model.Run{Status: model.RunFailed, Error: "controller unavailable"}, ""},
+		{model.Run{Status: model.RunFailed, Error: "controller unavailable"}, "run failed: controller unavailable"},
 	} {
 		if got := presentationRun(tc.run).DisplayReason; got != tc.want {
 			t.Fatalf("display reason for %+v = %q, want %q", tc.run, got, tc.want)
@@ -278,11 +278,15 @@ func TestDisplayReasonUsesDurableCauseNotSHAOrTextHeuristics(t *testing.T) {
 	for _, phase := range []string{"waiting", "preflight", "running", "publishing"} {
 		now := time.Now()
 		run := model.Run{Status: model.RunRunning, Phase: phase, StartedAt: &now}
-		if got := presentationRun(run); got.DisplayStatus != "running" || got.DisplayReason != "" {
+		wantReason, wantUnadmitted := "", "queued"
+		if phase == "publishing" {
+			wantReason, wantUnadmitted = "upstream publication pending", "running"
+		}
+		if got := presentationRun(run); got.DisplayStatus != "running" || got.DisplayReason != wantReason {
 			t.Fatalf("phase %s: %+v", phase, got)
 		}
 		run.StartedAt = nil
-		if got := presentationRun(run); got.DisplayStatus != "queued" {
+		if got := presentationRun(run); got.DisplayStatus != wantUnadmitted {
 			t.Fatalf("unadmitted phase %s: %+v", phase, got)
 		}
 	}

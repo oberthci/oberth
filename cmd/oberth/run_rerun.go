@@ -56,7 +56,18 @@ func writeRunRerun(output io.Writer, raw json.RawMessage, asJSON bool) error {
 		return err
 	}
 	var line string
-	if response.Mode == "publish_retry" {
+	if response.Message != "" {
+		line = response.Message
+		if response.RunStatus != "" {
+			line += "\n  run: " + response.RunStatus
+			if response.RunPhase != "" {
+				line += "/" + response.RunPhase
+			}
+		}
+		if response.Error != "" {
+			line += "\n  detail: " + response.Error
+		}
+	} else if response.Mode == "publish_retry" {
 		line = fmt.Sprintf("%s  publication retried (%s): %s", response.RerunOf, response.PublicationID, response.Status)
 		if response.Error != "" {
 			line += "\n  error: " + response.Error

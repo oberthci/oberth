@@ -833,3 +833,18 @@ terminal cause; `priority_class` and `priority_reason` remain separate fields.
 views attach the same `MeasuredSizeComparison`. This is reporting, not a
 request recommendation or change to admission; see
 [coverage, units and class provenance](measured-size-report.md).
+
+Retry responses identify the work with `action` and a readable `message`.
+`run_rerun` uses `action=rerun` for a new run and `action=publication_retry`
+for the existing `rerun_of` run's upstream publication. `publish_retry` also
+uses `action=publication_retry`. `run_status` and `run_phase` describe the run
+as `run_get` observes it; legacy `status` still describes publication in a
+publication-only response. An unreadable status is `unknown`. Refusals before
+admission say `nothing started`; errors after admission identify the recorded
+work. A failed run's `display_reason` names its phase/cause, and publication
+backoff remains visible while the run is running.
+
+`promotion_list` and `promote_status` use committed promotion status. A ref
+already equal to the intended SHA does not itself mark a pending ledger row
+passed. Pending list entries and timeout replies are refreshed before return;
+a real commit between separate reads can advance status and its update time.

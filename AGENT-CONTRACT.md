@@ -1049,6 +1049,18 @@ trust assumptions and complete invalidation rules.
   run/publication IDs; poll `run_get` or `wait` for
   the run. Only a durable terminal publication row justifies a terminal
   response. Delivery attempts and outcomes log both IDs (#1189).
+  Retry acknowledgements include `action`, `message`, `run_status` and
+  `run_phase`. `action=publication_retry` identifies retry of the existing run;
+  `status` keeps its legacy publication outcome (`pending`/`delivered`/`failed`).
+  Publication and owning run are observed in one committed WAL snapshot even
+  after a successful delivery reply; a stale or lost delivery reply cannot
+  override durable failure/completion. `run_status`/`run_phase` match `run_get`
+  at that observation. When status cannot be read, report `unknown` rather
+  than guessing `pending` or claiming a terminal outcome. Notifications begin
+  at durable reactivation. No-work refusals say `nothing started`; errors after
+  admission identify the admitted work, and an ambiguous admission is explicitly
+  unconfirmed. Publication ownership remains with the outbox during backoff.
+
   Transient upstream server/transport failures retain the exact durable intent.
   Five attempts are allowed, with backoff of 2, 4, 8 and 16 minutes (about
   thirty minutes total, excluding I/O). Schema v38 persists the attempt count
@@ -1236,7 +1248,9 @@ trust assumptions and complete invalidation rules.
   | queued or claimed before admission | `queued` | scheduling observation |
   | admitted, including trusted preflight | `running` | empty (phase is `preflight` while its VM executes) |
   | passed CI / published release | `passed` | empty |
-  | failed step or infrastructure | `failed` | empty; error and failed step remain separately available |
+  | failed step or infrastructure | `failed` | failed phase and bounded cause; never empty |
+  | upstream publication failure | `failed` | upstream rejection class, or upstream publication failure with transient cause |
+  | queued publication retry | `running` | publication attempt/backoff message; not replaced by queue priority |
   | infrastructure failure automatically retried | `infra-retried` | `infra error, retried`; linked successor |
   | superseded (`reason='superseded by newer run'`) | `superseded` | `superseded by <short SHA>`; successor run remains linked |
   | restart re-fire (`reason='re-queued after restart'`; fallback when an adoptable branch Workflow is missing, #1172) | `superseded` | `server restart, re-queued as <run12>` |
@@ -1438,6 +1452,14 @@ trust assumptions and complete invalidation rules.
   with an explicit `force`, tag/release runs. The response carries `mode`
   (`rerun` or `publish_retry`), `run_id`, `rerun_of`, `status`, `ref`, `sha`
   and optional `publication_id`, `warning` and `error`.
+  Additive `action` and `message` name the actual work: `rerun` means a new
+  run, `publication_retry` means the existing `rerun_of` run's publication.
+  `run_status`/`run_phase` carry the current run observation independently of
+  legacy `status` (which is publication status in `mode=publish_retry`). The
+  CLI prints this action and run state. A recorded rerun remains recorded even
+  when its dispatch acknowledgement is lost; such an error never says nothing
+  started. These observations can advance after the response as work completes.
+
 - Background scheduler storage deadlines and SQLite BUSY/LOCKED errors keep
   the exact operation pending with fresh 10-second attempt budgets and capped
   exponential backoff (250ms to 5s), until recovery or owner shutdown. They do
@@ -2756,7 +2778,14 @@ page bound (default 50, max 200). The exclusive admission-sequence cursor
 `next_before`/`before` supports older records. Pending admissions remain visible
 without a run/result SHA. Typed output carries only public identity, scope,
 status and timestamps; it omits internal error text and actor fields. Listing
-is not completion or publication evidence.
+is not inferred from Git ref equality. The committed promotion row is the
+status authority for both `promotion_list` and `promote_status`. Pending page
+entries are refreshed before rendering and the requested status filter is
+reapplied. Long polls re-read the row at timeout before returning pending.
+Both reads remain pending while finalization is unconfirmed, even if the
+remote already contains the result, and report passed after atomic recovery.
+Terminal rows are immutable; independent reads may observe a real intervening
+commit, reflected by `updated_at`/`UpdatedAt`. Reads never finalize a publication.
 
 ## Watch connector adoption and upgrade preservation (#671)
 

@@ -173,3 +173,9 @@ func (database schedulerDatabase) FailedPromotionPublication(ctx context.Context
 		return database.SchedulerStore.FailedPromotionPublication(ctx, id)
 	})
 }
+
+func (database schedulerDatabase) PublicationState(ctx context.Context, id string) (model.PublicationFinalization, error) {
+	return retryDatabase(ctx, "PublicationState", func(ctx context.Context) (model.PublicationFinalization, error) {
+		return database.SchedulerStore.PublicationState(ctx, id)
+	})
+}

@@ -278,7 +278,7 @@ func (service *API) schedulingClock() clock.Clock {
 
 // Execution display never changes durable status or decides wait completion.
 func applyExecutionDisplay(run *model.Run, scheduling *model.RunScheduling) {
-	if scheduling == nil || scheduling.Execution == nil {
+	if run.Phase == "publishing" || scheduling == nil || scheduling.Execution == nil {
 		return
 	}
 	switch scheduling.Execution.State {

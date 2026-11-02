@@ -99,13 +99,13 @@ func (service *API) rerunRun(ctx context.Context, actor api.Actor, id, reason st
 		// Every step passed; re-running them would repeat a release's
 		// publishing work. Re-push the exact recorded object instead.
 		retried, err := service.publishRetry(ctx, actor, source.ID)
-		if err != nil {
-			return api.RunRerunResponse{}, err
-		}
+		// Preserve admission uncertainty as well as successful action metadata;
+		// dropping it would falsely turn a lost commit reply into "nothing started".
 		return api.RunRerunResponse{
 			Mode: rerunModePublish, RerunOf: source.ID, PublicationID: retried.PublicationID,
+			Action: retried.Action, Message: retried.Message, RunStatus: retried.RunStatus, RunPhase: retried.RunPhase,
 			Status: retried.Status, Error: retried.Error,
-		}, nil
+		}, err
 	}
 	if source.RefKind == model.RefBranch {
 		if err := service.requireBranchHead(ctx, source); err != nil {
@@ -144,16 +144,29 @@ func (service *API) rerunRun(ctx context.Context, actor api.Actor, id, reason st
 		},
 	})
 	if err != nil {
+		if IsTransientDatabaseError(err) || strings.Contains(err.Error(), "commit run rerun") {
+			return api.RunRerunResponse{Action: "unknown", Message: "Full rerun admission is unconfirmed; inspect run_list before retrying", RerunOf: source.ID, Status: "unknown", RunStatus: "unknown"}, err
+		}
 		return api.RunRerunResponse{}, err
 	}
 	enqueued := result.Enqueued
 	service.signals.NotifyRun(enqueued.ID)
 	response := api.RunRerunResponse{
 		Mode: rerunModeRun, RunID: enqueued.ID, RerunOf: source.ID, Status: string(enqueued.Status),
+		Action: "rerun", Message: "Full rerun started as new run " + enqueued.ID, RunStatus: string(visibleRun(enqueued.Run).Status), RunPhase: enqueued.Phase,
 		Ref: enqueued.Ref, SHA: enqueued.SHA, Warning: result.Warning,
 	}
 	if err := service.enqueues.AcceptEnqueue(ctx, enqueued); err != nil {
 		return response, err
+	}
+	observed, readErr := service.history.Run(ctx, enqueued.ID)
+	if readErr == nil {
+		response.Status = string(observed.Status)
+		response.RunStatus = string(visibleRun(observed).Status)
+		response.RunPhase = observed.Phase
+	} else {
+		response.Status, response.RunStatus, response.RunPhase = "unknown", "unknown", ""
+		response.Message += "; current run status unavailable; inspect run_get"
 	}
 	return response, nil
 }

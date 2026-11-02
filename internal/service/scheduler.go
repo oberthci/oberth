@@ -1723,21 +1723,7 @@ func (scheduler *Scheduler) loadPublicationFinalization(
 	ctx context.Context,
 	publication model.Publication,
 ) (model.PublicationFinalization, error) {
-	finalization := model.PublicationFinalization{Publication: publication}
-	var err error
-	if publication.RunID != "" {
-		finalization.Run, err = scheduler.database().Run(ctx, publication.RunID)
-		if err != nil {
-			return model.PublicationFinalization{}, fmt.Errorf("load finalized publication run %s: %w", publication.RunID, err)
-		}
-	}
-	if publication.PromotionID != "" {
-		finalization.Promotion, err = scheduler.database().Promotion(ctx, publication.PromotionID)
-		if err != nil {
-			return model.PublicationFinalization{}, fmt.Errorf("load finalized publication promotion %s: %w", publication.PromotionID, err)
-		}
-	}
-	return finalization, nil
+	return scheduler.database().PublicationState(ctx, publication.ID)
 }
 
 func (scheduler *Scheduler) finishPublication(_ context.Context, _ model.Repository, finalization model.PublicationFinalization) error {
