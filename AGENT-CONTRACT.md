@@ -3527,3 +3527,14 @@ successfully recorded finishes. Helm rollback alone fails schema-too-new and
 requires a pre-upgrade database restore; see [schema 37](docs/archive/schema37-upgrade-note.md).
 Full scopes, exclusions and overhead:
 [external sampler coverage](docs/step-resource-usage.md#external-sampler-coverage-1216).
+
+## Additive HTTP/MCP compatibility (v0.17.x)
+
+Public typed records retain legacy keys and add snake_case aliases after
+redaction. Primary run records/control responses accept or expose `run_id`
+alongside their existing ID spelling; conflicting input aliases are refused.
+HTTP collection arrays remain the default; `envelope=1` opts into the matching
+MCP collection object. No existing name or envelope is removed in v0.17.x.
+Any removal requires a later major version after an announced deprecation
+window of at least 90 days and one stable minor release. No removal date is
+announced here. See [the compatibility policy](docs/api-compatibility.md).

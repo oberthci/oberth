@@ -22,6 +22,10 @@ func (service *API) PrepareLongPoll(ctx context.Context, actor api.Actor, name s
 	if err != nil {
 		return nil, err
 	}
+	raw, err = normalizeRunIDArgument(name, raw)
+	if err != nil {
+		return nil, err
+	}
 	switch name {
 	case "wait":
 		var arguments struct {

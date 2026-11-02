@@ -410,7 +410,7 @@ func (server *Server) handleRuns(writer http.ResponseWriter, request *http.Reque
 		}
 		writer.Header().Set("X-Oberth-Next-Before", cursor)
 	}
-	server.writeView(writer, value, err)
+	server.writeCollectionView(writer, request, "runs", value, err)
 }
 
 // RunPageFull reports whether the time-ordered part of a run page is full.
@@ -665,7 +665,7 @@ func validRunSelector(value string) bool {
 
 func (server *Server) handleRepos(writer http.ResponseWriter, request *http.Request) {
 	value, err := server.views.Repositories(request.Context(), actorFrom(request.Context()))
-	server.writeView(writer, value, err)
+	server.writeCollectionView(writer, request, "repositories", value, err)
 }
 
 func (server *Server) handleIssues(writer http.ResponseWriter, request *http.Request) {
@@ -712,7 +712,7 @@ func (server *Server) handleGrants(writer http.ResponseWriter, request *http.Req
 		Status:     query.Get("status"),
 	}
 	value, err := server.views.Grants(request.Context(), actorFrom(request.Context()), filter)
-	server.writeView(writer, value, err)
+	server.writeCollectionView(writer, request, "grants", value, err)
 }
 
 func (server *Server) handleStatus(writer http.ResponseWriter, request *http.Request) {
@@ -803,9 +803,14 @@ func strictUnmarshal(raw json.RawMessage, value any) error {
 }
 
 func writeJSON(writer http.ResponseWriter, status int, value any) {
+	raw, err := marshalCompatible(value)
+	if err != nil {
+		status = http.StatusInternalServerError
+		raw = []byte(`{"error":"internal error"}`)
+	}
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(status)
-	_ = json.NewEncoder(writer).Encode(value)
+	_, _ = writer.Write(append(raw, '\n'))
 }
 
 // servePage writes the dashboard shell: server-rendered chrome (brand, tabs,

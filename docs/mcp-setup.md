@@ -893,3 +893,12 @@ backoff remains visible while the run is running.
 already equal to the intended SHA does not itself mark a pending ledger row
 passed. Pending list entries and timeout replies are refreshed before return;
 a real commit between separate reads can advance status and its update time.
+
+## Additive API names and conditional issue updates
+
+See [HTTP/MCP compatibility](api-compatibility.md) for preferred snake_case
+fields, run ID aliases, opt-in collection envelopes and the deprecation policy.
+Existing names and default envelopes remain supported throughout v0.17.x.
+Issue metadata writes can pass `expected_revision` from a prior read; mismatch
+is a conflict, while omission preserves last-write-wins. See
+[conditional metadata updates](issue-lifecycle.md).

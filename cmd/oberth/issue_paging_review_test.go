@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -38,5 +40,28 @@ func TestIssuesJSONPreservesIntegerPrecision(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "9007199254740993") {
 		t.Fatalf("issue ID lost precision: %s", out.String())
+	}
+}
+
+func TestCompatibilityIssuePageAliasesStayEqual(t *testing.T) {
+	raw, err := collectIssuePages(t.Context(), func(_ context.Context, before int64) (json.RawMessage, error) {
+		if before == 0 {
+			return json.RawMessage(`{"Issues":[{"id":2}],"issues":[{"id":2}],"NextBefore":1,"next_before":1}`), nil
+		}
+		return json.RawMessage(`{"Issues":[{"id":1}],"issues":[{"id":1}],"NextBefore":0,"next_before":0}`), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]json.RawMessage
+	if err = json.Unmarshal(raw, &result); err != nil {
+		t.Fatal(err)
+	}
+	if string(result["Issues"]) != string(result["issues"]) || string(result["NextBefore"]) != "0" || string(result["next_before"]) != "0" {
+		t.Fatalf("aggregated issue aliases disagree: %s", raw)
+	}
+	var issues []any
+	if err = json.Unmarshal(result["issues"], &issues); err != nil || len(issues) != 2 {
+		t.Fatal("preferred alias lost older pages", string(raw), err)
 	}
 }

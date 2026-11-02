@@ -365,7 +365,7 @@ func writeRPC(writer http.ResponseWriter, response rpcResponse) {
 }
 
 func toolSuccess(payload any) map[string]any {
-	raw, err := json.Marshal(payload)
+	raw, err := marshalCompatible(payload)
 	if err != nil || len(raw) == 0 || raw[0] != '{' {
 		return toolFailure(errors.New("internal error: tool result must be a JSON object"))
 	}
@@ -489,6 +489,26 @@ func toolDefinitions() []map[string]any {
 		return schema
 	}
 	tool := func(name, description string, schema map[string]any) map[string]any {
+		if key := RunIDArgument(name); key != "" {
+			properties := schema["properties"].(map[string]any)
+			properties["run_id"] = stringProperty("Preferred run identifier; alias of " + key + "; conflicting spellings are refused")
+			if required, ok := schema["required"].([]string); ok {
+				remaining := make([]string, 0, len(required))
+				for _, field := range required {
+					if field != key {
+						remaining = append(remaining, field)
+					}
+				}
+				if len(remaining) != len(required) {
+					if len(remaining) == 0 {
+						delete(schema, "required")
+					} else {
+						schema["required"] = remaining
+					}
+					schema["anyOf"] = []any{map[string]any{"required": []string{key}}, map[string]any{"required": []string{"run_id"}}}
+				}
+			}
+		}
 		return map[string]any{"name": name, "description": description, "inputSchema": schema, "outputSchema": toolOutputSchema(name)}
 	}
 	return []map[string]any{

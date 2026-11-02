@@ -71,5 +71,16 @@ func collectIssuePages(ctx context.Context, load func(context.Context, int64) (j
 	}
 	first[issuesKey] = encoded
 	first[cursorKey] = json.RawMessage("0")
+	// Preserve equality of additive aliases when combining HTTP pages.
+	for _, key := range []string{"Issues", "issues"} {
+		if _, exists := first[key]; exists {
+			first[key] = encoded
+		}
+	}
+	for _, key := range []string{"NextBefore", "next_before"} {
+		if _, exists := first[key]; exists {
+			first[key] = json.RawMessage("0")
+		}
+	}
 	return json.Marshal(first)
 }

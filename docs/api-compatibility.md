@@ -1,0 +1,83 @@
+# HTTP and MCP compatibility
+
+Except for the issue-list privacy change below, the v0.17.x API retains existing
+field names, tool arguments, value meanings
+and default response envelopes. New clients should use the additive names below.
+Older clients may continue using their existing names and array responses.
+
+## Record fields
+
+Typed public records in HTTP JSON bodies and MCP structured content expose
+snake_case aliases alongside legacy Go-style names.
+For example, a run keeps `ID`, `RepoID`, `QueueSequence`, `Status` and `SHA`, and
+also returns `id`, `repo_id`, `queue_sequence`, `status` and `sha`, respectively.
+Nested records follow the same rule: a full run response keeps `Run`, `Steps`
+and `Repository` and adds `run`, `steps` and `repository`. Both spellings contain
+the same value. Integers keep their full JSON integer precision. JavaScript
+clients should use an integer-preserving decoder for IDs above 2^53.
+
+Names already written in snake_case retain their spelling. Dictionary keys,
+such as step names, labels and resource names, are data and are not renamed.
+Aliases are generated after visibility checks and redaction, from fields
+already exposed in the response. Private storage fields remain private.
+
+A primary run record returns both `id` and `run_id`, alongside legacy `ID` where
+it was present. Full run details also expose top-level `id` and `run_id`.
+Run log, artifact-list, artifact, cancel, rerun, preflight and HTTP live-log responses
+keep `run_id` and add `id`. A promotion's `id` still identifies the promotion;
+its related `run_id` never replaces it. Publication responses keep their distinct
+`publication_id`, `promotion_id` and `run_id` meanings.
+
+The tools `run_get`, `run_logs`, `run_retry`, `run_cancel`, `run_rerun`,
+`run_purge`, `run_kvm_preflight`, `artifacts`, `artifact_get` and ID-based `wait`
+accept preferred `run_id` alongside legacy `id`. `run_resources` accepts
+`run_id` alongside legacy `run`. If both spellings are sent, they must be equal;
+conflicting selectors are invalid input. Alias resolution uses the same scope
+checks and canonical run-ID resolver. HTTP resource-history queries also accept
+`run_id`; path and query aliases must not conflict.
+
+## Collection envelopes
+
+Default HTTP array responses are unchanged. To request the matching MCP object
+shape, append `envelope=1` to these HTTP GET routes:
+
+| HTTP route | Opt-in envelope / MCP collection field |
+| --- | --- |
+| `/api/runs` | `{"runs": [...]}` |
+| `/api/repos` | `{"repositories": [...]}` |
+| `/api/grants` | `{"grants": [...]}` |
+
+Run paging still returns `X-Oberth-Next-Before`. The opt-in object also includes
+`next_before` for an unscoped sequence cursor or `next_cursor` for a scoped run
+ID, matching `run_list`. Follow the returned cursor; do not derive it from the
+last record. No global sequence is added for scoped callers. Empty collections
+are arrays (`[]`), not null. Existing object responses retain their envelope and
+add record aliases: `/api/issues` keeps `Issues` and `NextBefore` and adds
+`issues` and `next_before`, matching the names in MCP `issue_list`.
+
+Default MCP text and structured JSON carry the same aliases. Tools with a
+specialized text format, such as logs or YAML reports, keep that existing text
+format; their structured records receive the additive fields. JSON-RPC framing
+is unchanged.
+
+## Compatibility and deprecation policy
+
+Apart from the issue-list privacy exception, no existing name, argument or
+default envelope is removed or repurposed in v0.17.x. Prefer the unified names for new integrations; legacy names remain
+supported aliases. Clients must tolerate additional object fields.
+
+A future removal requires an explicit deprecation announcement in release notes
+and this document, identifying the replacement and first eligible removal
+version. The deprecation window must span at least 90 days and one stable minor
+release after that announcement. Removal is permitted only in a later major
+version after both conditions are met. No removal announcement or deadline is
+established by this change. Envelope defaults also require that later-major
+migration process; opting into `envelope=1` does not change other callers.
+
+## Issue-list privacy exception
+
+`GET /api/issues` and `oberth issues --json` now return summaries. They omit
+`Body`, `ScopeUpstreamID` and `CIWorkSequence`; body text remains available
+from authenticated `GET /api/issues/{id}` and `issue_get`. These removed fields
+are an explicit v0.17.x privacy exception to the additive compatibility policy.
+The list includes no discussion fields or discussion API.

@@ -352,6 +352,10 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 	if err != nil {
 		return nil, err
 	}
+	raw, err = normalizeRunIDArgument(name, raw)
+	if err != nil {
+		return nil, err
+	}
 	value, err = service.callTool(ctx, actor, name, raw)
 	return service.stripScopedSequences(value), err
 }

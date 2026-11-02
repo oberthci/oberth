@@ -33,6 +33,18 @@ func (s *Server) handleRunResources(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	run := q.Get("run")
+	alias := q.Get("run_id")
+	if alias != "" && run != "" && alias != run {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "conflicting run and run_id"})
+		return
+	}
+	if run == "" {
+		run = alias
+	}
+	if alias != "" && r.PathValue("run") != "" && alias != r.PathValue("run") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "conflicting path and run_id"})
+		return
+	}
 	if r.PathValue("run") != "" {
 		run = r.PathValue("run")
 	}
