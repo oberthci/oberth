@@ -1832,64 +1832,6 @@ RETURNING sequence, id, repo_id, source_branch, source_sha, target_ref, previous
 	return value, nil
 }
 
-func (s *Store) TrustedPlan(ctx context.Context, id string) (model.TrustedPlan, error) {
-	if strings.TrimSpace(id) == "" {
-		return model.TrustedPlan{}, fmt.Errorf("%w: trusted plan ID is required", ErrInvalid)
-	}
-	var value model.TrustedPlan
-	var created, expires, updated int64
-	var consumed sql.NullInt64
-	err := s.reader().QueryRowContext(ctx, `
-SELECT sequence, id, repo_id, upstream_id, source_ref, source_sha, target_ref,
-       base_sha, result_sha, green_run_id, plan_run_id, promotion_id, apply_id,
-       apply_enqueue_error, backend_identity, backend_key, tool_digest, lock_digest,
-       config_digest, artifact_digest, artifact_size,
-       actor, status, error, created_at, expires_at, consumed_at, updated_at
-FROM trusted_plans WHERE id = ?`, id).Scan(
-		&value.Sequence, &value.ID, &value.RepoID, &value.UpstreamID,
-		&value.SourceRef, &value.SourceSHA, &value.TargetRef,
-		&value.BaseSHA, &value.ResultSHA, &value.GreenRunID, &value.PlanRunID,
-		&value.PromotionID, &value.ApplyID, &value.ApplyEnqueueError,
-		&value.BackendIdentity, &value.BackendKey, &value.ToolDigest, &value.LockDigest,
-		&value.ConfigDigest, &value.ArtifactDigest, &value.ArtifactSize,
-		&value.Actor, &value.Status, &value.Error,
-		&created, &expires, &consumed, &updated)
-	if err != nil {
-		return model.TrustedPlan{}, translateNotFound("trusted plan", err)
-	}
-	value.CreatedAt = fromUnixNano(created)
-	value.ExpiresAt = fromUnixNano(expires)
-	value.ConsumedAt = nullableTime(consumed)
-	value.UpdatedAt = fromUnixNano(updated)
-	return value, nil
-}
-
-func (s *Store) TrustedApply(ctx context.Context, id string) (model.TrustedApply, error) {
-	if strings.TrimSpace(id) == "" {
-		return model.TrustedApply{}, fmt.Errorf("%w: trusted apply ID is required", ErrInvalid)
-	}
-	var value model.TrustedApply
-	var created, updated int64
-	var started, finished sql.NullInt64
-	err := s.reader().QueryRowContext(ctx, `
-SELECT sequence, id, plan_id, promotion_id, repo_id, target_ref, sha, run_id,
-       artifact_digest, backend_key, actor, status, error,
-       created_at, started_at, finished_at, updated_at
-FROM trusted_applies WHERE id = ?`, id).Scan(
-		&value.Sequence, &value.ID, &value.PlanID, &value.PromotionID,
-		&value.RepoID, &value.TargetRef, &value.SHA, &value.RunID,
-		&value.ArtifactDigest, &value.BackendKey, &value.Actor, &value.Status,
-		&value.Error, &created, &started, &finished, &updated)
-	if err != nil {
-		return model.TrustedApply{}, translateNotFound("trusted apply", err)
-	}
-	value.CreatedAt = fromUnixNano(created)
-	value.StartedAt = nullableTime(started)
-	value.FinishedAt = nullableTime(finished)
-	value.UpdatedAt = fromUnixNano(updated)
-	return value, nil
-}
-
 func scanPromotion(row rowScanner) (model.Promotion, error) {
 	var value model.Promotion
 	var created, updated int64

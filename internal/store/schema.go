@@ -422,6 +422,8 @@ ALTER TABLE step_results ADD COLUMN user_cpu_ns INTEGER NOT NULL DEFAULT 0 CHECK
 ALTER TABLE step_results ADD COLUMN system_cpu_ns INTEGER NOT NULL DEFAULT 0 CHECK (system_cpu_ns >= 0);`,
 	},
 	{
+		// Inert historical trusted plan/apply tables. Retain migration SQL for
+		// schema compatibility; no production reader or writer uses these tables.
 		version: 4,
 		sql: `
 CREATE TABLE trusted_plans (

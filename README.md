@@ -34,7 +34,7 @@ Website: [oberth.ci](https://oberth.ci)
   intersected with the administrator allowlist. After every burn is green,
   Oberth publishes the exact admitted tag object upstream.
 - **MCP** — eighteen tools over authenticated HTTPS for AI agents: SHA- and
-  exact-run status/logs, long-poll wait, trusted plan/apply, promotion, and the
+  exact-run status/logs, long-poll wait, promotion, and the
   issue queue.
 - **Audit** — every mutation joins a gap-free SHA-256 chain, always. Opt-in
   external anchoring adds RFC 3161 timestamps and public Rekor witnesses,
@@ -55,18 +55,6 @@ Release steps wrap their command with `envconsul`, which authenticates to
 OpenBao via Kubernetes auth using the release-tier ServiceAccount token, reads
 the declared paths, and injects them into the child process environment.
 Branch builds receive zero release credentials, always.
-
-Trusted infrastructure changes use a separate, phase-explicit contract. An
-actor authorizes `plan` for one exact already-green SHA and the target's exact
-current base. Plan and Apply use different operator-owned secret paths:
-`oberth/upstream/<org>/<repo>/plan/<name>` and
-`oberth/upstream/<org>/<repo>/apply/<name>`. A Plan can never fetch Apply
-credentials. The resulting plan file is capped at 16 MiB, encrypted through
-OpenBao Transit before it reaches Oberth's PVC, and bound to the exact source,
-target base, pipeline/lockfile identity, actor, and expiry. Promotion publishes
-Git first; only then does Oberth enqueue the bound artifact for one-shot Apply.
-Promotion evidence and Apply status remain distinct because Apply failure does
-not roll Git back or make publication unsuccessful.
 
 Setup is one script run where your own `bao`/`vault` CLI is authenticated —
 the Oberth binary has no code path that accepts a store admin token — and
@@ -396,9 +384,7 @@ unauthenticated.
   ServiceAccount, whose role reaches the upstream subtree only, so release
   credentials are unreachable from a branch push at the Vault layer. Branch
   pipelines may only declare upstream-scoped paths; system-namespace paths
-  require a release trigger and an administrator allowlist entry. Explicit trusted Plan and Apply
-  triggers receive only their distinct, phase-scoped paths; neither
-  phase can consume the other's operator-owned path namespace. All fetched
+  require a release trigger and an administrator allowlist entry. All fetched
   secret-store values are delivered to memory only.
 - Secret-store values never appear in etcd, Kubernetes objects, node disk, or
   logs; per-run store tokens are read-only, short-lived, and revoked after
