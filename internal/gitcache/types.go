@@ -155,6 +155,8 @@ type RepoQualification struct {
 }
 
 type Config struct {
+	// AllowLocalUpstreams is reserved for hermetic fixtures. Production accepts SSH URLs only.
+	AllowLocalUpstreams bool
 	// RepositoryGate refuses network/cache admission while a repository is archived.
 	RepositoryGate func(context.Context, string) error
 	Root           string

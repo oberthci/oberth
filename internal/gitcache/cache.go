@@ -37,23 +37,24 @@ type materializeManifest struct {
 // Cache owns bare repositories under one persistent root.
 type Cache struct {
 	// Hook read-only children stay in the enclosing receive process group.
-	hookChild       bool
-	backend         gitBackend
-	root            string
-	outboxRoot      string
-	globalConfig    string
-	upstream        func(string) (string, error)
-	qualify         func(string) (RepoQualification, error)
-	qualifyContext  func(context.Context, string) (RepoQualification, error)
-	gitBinary       string
-	timeout         time.Duration
-	env             map[string]string
-	redact          []string
-	logger          Logger
-	repositoryGate  func(context.Context, string) error
-	preFinalizeGate func(context.Context) error
-	locks           sync.Map
-	receiveLocks    sync.Map
+	allowLocalUpstreams bool
+	hookChild           bool
+	backend             gitBackend
+	root                string
+	outboxRoot          string
+	globalConfig        string
+	upstream            func(string) (string, error)
+	qualify             func(string) (RepoQualification, error)
+	qualifyContext      func(context.Context, string) (RepoQualification, error)
+	gitBinary           string
+	timeout             time.Duration
+	env                 map[string]string
+	redact              []string
+	logger              Logger
+	repositoryGate      func(context.Context, string) error
+	preFinalizeGate     func(context.Context) error
+	locks               sync.Map
+	receiveLocks        sync.Map
 }
 
 // New validates static configuration without contacting an upstream.
@@ -93,19 +94,20 @@ func New(config Config) (*Cache, error) {
 		}
 	}
 	cache := &Cache{
-		root:            root,
-		outboxRoot:      outboxRoot,
-		globalConfig:    globalConfig,
-		upstream:        config.Upstream,
-		qualify:         config.RepoQualifier,
-		qualifyContext:  config.RepoQualifierContext,
-		gitBinary:       gitBinary,
-		timeout:         defaultTimeout(config.CommandTimeout),
-		env:             cloneMap(config.Env),
-		redact:          append([]string(nil), config.Redact...),
-		logger:          logger,
-		preFinalizeGate: config.PreFinalizeGate,
-		repositoryGate:  config.RepositoryGate,
+		allowLocalUpstreams: config.AllowLocalUpstreams,
+		root:                root,
+		outboxRoot:          outboxRoot,
+		globalConfig:        globalConfig,
+		upstream:            config.Upstream,
+		qualify:             config.RepoQualifier,
+		qualifyContext:      config.RepoQualifierContext,
+		gitBinary:           gitBinary,
+		timeout:             defaultTimeout(config.CommandTimeout),
+		env:                 cloneMap(config.Env),
+		redact:              append([]string(nil), config.Redact...),
+		logger:              logger,
+		preFinalizeGate:     config.PreFinalizeGate,
+		repositoryGate:      config.RepositoryGate,
 	}
 	cache.backend = &cliBackend{cache: cache}
 	return cache, nil
@@ -401,6 +403,9 @@ func (c *Cache) validatedUpstream(input string) (string, error) {
 	}
 	if strings.TrimSpace(remote) == "" {
 		return "", fmt.Errorf("upstream for %s is empty", input)
+	}
+	if filepath.IsAbs(remote) && !c.allowLocalUpstreams {
+		return "", fmt.Errorf("%w: local filesystem upstreams are disabled", ErrUpstreamRefused)
 	}
 	if err := ValidateUpstream(remote); err != nil {
 		return "", fmt.Errorf("upstream for %s: %w", input, err)

@@ -120,8 +120,7 @@ func (b *cliBackend) execute(ctx context.Context, spec commandSpec, capture bool
 		cmd.WaitDelay = captureWaitDelay
 	}
 
-	var output tailBuffer
-	output.max = maxCapturedOutput
+	output := headBuffer{max: maxCapturedOutput}
 	// Always retain the tail of stderr, bounded and redacted, so a failure at
 	// the upstream boundary carries the forge's own reason (URL, "repository
 	// not found", "Permission denied (publickey)") instead of a bare "exit
@@ -132,10 +131,10 @@ func (b *cliBackend) execute(ctx context.Context, spec commandSpec, capture bool
 	stderrTail.max = maxCapturedOutput
 	switch {
 	case capture:
-		// Both streams into one buffer; os/exec reuses a single copier because
-		// Stdout == Stderr (identical writer), so there is no concurrent write.
+		// Machine-readable stdout must not contain successful diagnostics.
+		// Overflow fails the command instead of accepting a truncated value.
 		cmd.Stdout = &output
-		cmd.Stderr = &output
+		cmd.Stderr = &stderrTail
 	case spec.stderr == nil:
 		cmd.Stdout = spec.stdout
 		cmd.Stderr = &stderrTail
@@ -180,9 +179,6 @@ func (b *cliBackend) execute(ctx context.Context, spec commandSpec, capture bool
 	}
 	if stopErr != nil {
 		detail := stderrTail.String()
-		if capture {
-			detail = output.String()
-		}
 		if detail = c.redactOutput(detail); detail != "" {
 			return "", fmt.Errorf("git command stopped: %w: %s", stopErr, detail)
 		}
@@ -190,9 +186,6 @@ func (b *cliBackend) execute(ctx context.Context, spec commandSpec, capture bool
 	}
 	if waitErr != nil {
 		detail := stderrTail.String()
-		if capture {
-			detail = output.String()
-		}
 		detail = c.redactOutput(detail)
 		repository := spec.repository
 		if repository == "" {
@@ -204,7 +197,10 @@ func (b *cliBackend) execute(ctx context.Context, spec commandSpec, capture bool
 		}
 		return "", fmt.Errorf("git command failed: %w", waitErr)
 	}
-	return output.String(), nil
+	if output.err != nil {
+		return "", fmt.Errorf("git stdout exceeds %d bytes: %w", maxCapturedOutput, output.err)
+	}
+	return strings.TrimSpace(string(output.data)), nil
 }
 
 // gitSubcommand skips the global options used by cache commands, including

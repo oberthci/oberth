@@ -2,6 +2,7 @@ package gitcache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -423,13 +424,18 @@ func (c *Cache) LsRemoteHeads(ctx context.Context, input string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	output, err := c.execute(ctx, commandSpec{repository: input, args: []string{"ls-remote", "--heads", remote}}, true)
+	output := headBuffer{max: maxRefsOutput}
+	err = c.run(ctx, commandSpec{repository: input, args: []string{"ls-remote", "--heads", remote}, stdout: &output})
 	if err != nil {
 		return 0, fmt.Errorf("ls-remote probe for %s: %w", input, err)
 	}
 	count := 0
-	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+	for _, line := range strings.Split(strings.TrimSpace(string(output.data)), "\n") {
 		if line != "" {
+			fields := strings.Fields(line)
+			if len(fields) != 2 || ValidateSHA(fields[0]) != nil || !strings.HasPrefix(fields[1], "refs/heads/") {
+				return 0, errors.New("ls-remote returned an invalid branch row")
+			}
 			count++
 		}
 	}
