@@ -221,12 +221,12 @@ func TestInspectShowsContentsWithoutValues(t *testing.T) {
 func TestHistoryChangesNameUplinksAndTokens(t *testing.T) {
 	t.Parallel()
 	var out bytes.Buffer
-	archive := restoreArchive{Contents: store.ContentSummary{Runs: 2347, Issues: 905, OpenIssues: 6, Uplinks: []string{"admin@tuxbox (admin)", "yellowmegaman@tuxbox"}}}
-	target := restoreTarget{Contents: &store.ContentSummary{Runs: 3, Issues: 1, Uplinks: []string{"yellowmegaman@lab-4a05"}}}
+	archive := restoreArchive{Contents: store.ContentSummary{Runs: 2347, Issues: 905, OpenIssues: 6, Uplinks: []string{"admin@example-host (admin)", "operator@example-host"}}}
+	target := restoreTarget{Contents: &store.ContentSummary{Runs: 3, Issues: 1, Uplinks: []string{"operator@target-host"}}}
 	printHistoryChanges(&out, archive, target)
 	assertSubstringsInOrder(t, out.String(), []string{"runs 3 -> 2347, issues 1 -> 905 (6 open)",
-		"uplinks removed: yellowmegaman@lab-4a05 — their tokens, including the one this install printed, stop working",
-		"uplinks restored: admin@tuxbox (admin), yellowmegaman@tuxbox — their previous tokens work again"})
+		"uplinks removed: operator@target-host — their tokens, including the one this install printed, stop working",
+		"uplinks restored: admin@example-host (admin), operator@example-host — their previous tokens work again"})
 }
 
 func TestStoreSummaryCountsHistory(t *testing.T) {
