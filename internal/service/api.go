@@ -3144,13 +3144,7 @@ func (service *API) accessRevoke(ctx context.Context, actor api.Actor, repo, ste
 				return response, nil
 			}
 		}
-		// Return the last known state with a synthetic revocation indicator.
-		target.RevokedBy = "configmap"
-		now := time.Now().UTC()
-		target.RevokedAt = &now
-		response := wireAccessGrant(*target)
-		response.Warning = revokePolicySyncAdvisory
-		return response, nil
+		return api.AccessGrantResponse{}, refuse(ErrUnavailable, "revocation was requested but its committed state could not be confirmed; inspect access_list")
 	}
 	grant, err := service.secretAccess.Revoke(ctx, repo, step, secret, actor.Identity)
 	if err != nil {
