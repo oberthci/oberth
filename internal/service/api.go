@@ -289,6 +289,11 @@ func (service *API) Shutdown(ctx context.Context) error {
 }
 
 func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, raw json.RawMessage) (value any, resultErr error) {
+	defer func() {
+		if errors.Is(resultErr, store.ErrInvalid) && !errors.Is(resultErr, ErrInvalidInput) {
+			resultErr = fmt.Errorf("%w: %w", ErrInvalidInput, resultErr)
+		}
+	}()
 	if name == "run_rerun" || name == "publish_retry" {
 		defer func() {
 			if resultErr == nil {
