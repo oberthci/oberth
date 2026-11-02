@@ -428,7 +428,10 @@ func validateServeOptions(options serveOptions) error {
 	if err := pipeline.ValidateRunnerImagePrefixes(splitRunnerImagePrefixes(options.runnerImagePrefixes)); err != nil {
 		return fmt.Errorf("serve: %w", err)
 	}
-	if options.auditTSAURL != "" && !validAuditHTTPSURL(options.auditTSAURL) {
+	if options.auditTSAURL != "" && !validAuditURL(options.auditTSAURL, options.auditTSAInsecureHTTP) {
+		if options.auditTSAInsecureHTTP {
+			return errors.New("serve: audit TSA URL must be an absolute HTTP or HTTPS URL without credentials or a fragment")
+		}
 		return errors.New("serve: audit TSA URL must be an absolute HTTPS URL without credentials or a fragment")
 	}
 	if options.auditRekorURL != "" && !validAuditURL(options.auditRekorURL, options.auditRekorInsecureHTTP) {
