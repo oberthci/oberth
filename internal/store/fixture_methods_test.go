@@ -376,3 +376,14 @@ SELECT id, name, kind, base_url, key_name, created_at, updated_at FROM upstreams
 func (s *Store) LatestRunForRef(ctx context.Context, repoID int64, ref string) (model.Run, error) {
 	return s.latestRunForRef(ctx, repoID, ref)
 }
+
+func validatePromotionSpec(spec model.PromotionSpec) error {
+	if err := validatePromotionAdmissionSpec(spec); err != nil {
+		return err
+	}
+	if !validOID(spec.ResultSHA) {
+		return fmt.Errorf("%w: promotion result SHA is invalid", ErrInvalid)
+	}
+	return nil
+}
+

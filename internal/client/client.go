@@ -215,10 +215,6 @@ func (client *Client) GetWithHeaders(ctx context.Context, path string, query map
 	}
 }
 
-func (client *Client) getOnce(ctx context.Context, path string, query map[string]string, into any) (error, bool) {
-	return client.getOnceHeaders(ctx, path, query, into, nil)
-}
-
 func (client *Client) getOnceHeaders(ctx context.Context, path string, query map[string]string, into any, headers *http.Header) (error, bool) {
 	request, err := client.newGetRequest(ctx, path, query)
 	if err != nil {

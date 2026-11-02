@@ -1606,16 +1606,6 @@ RETURNING sequence, id, repo_id, source_branch, source_sha, target_ref, previous
 	return value, nil
 }
 
-func validatePromotionSpec(spec model.PromotionSpec) error {
-	if err := validatePromotionAdmissionSpec(spec); err != nil {
-		return err
-	}
-	if !validOID(spec.ResultSHA) {
-		return fmt.Errorf("%w: promotion result SHA is invalid", ErrInvalid)
-	}
-	return nil
-}
-
 func validatePromotionAdmissionSpec(spec model.PromotionSpec) error {
 	if spec.RepoID <= 0 || strings.TrimSpace(spec.SourceBranch) == "" || !validOID(spec.SourceSHA) ||
 		strings.TrimSpace(spec.TargetRef) == "" || strings.TrimSpace(spec.Actor) == "" {
