@@ -137,7 +137,7 @@ func runSecretStoreExec(ctx context.Context, arguments []string, standardOut, er
 
 	// Upstream-scoped paths arrive in their virtual form,
 	// oberth/upstream/<org>/<repo>/<secret>. A CI trigger may declare nothing
-	// else (pkg/argoworkflow/declare.go AuthorizeSecretPaths) and admission
+	// else (pkg/argoworkflow/declare.go authorizeWithApprovalTable) and admission
 	// requires every --path to match its declaration verbatim
 	// (internal/argojob/spec.go), so the virtual form is the only thing that
 	// can reach this point on a branch pipeline. The value itself lives at the

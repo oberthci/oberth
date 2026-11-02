@@ -231,56 +231,6 @@ func UsesReleaseWIF(template *wfv1.Template) bool {
 	return present
 }
 
-// AuthorizeSecretPaths proves every declared path is one this repository may
-// reach for this trigger, reusing the Go path's hierarchical scoping rules so
-// both authoring formats answer to the same namespace policy.
-//
-// systemAllowlist is the administrator's exact-path allowlist for the
-// oberth/data/ system namespace; oberth/upstream/ paths are authorized by the
-// declaring repository's own org and name instead and are never allowlisted.
-//
-// CI pipelines may only declare upstream-scoped paths (oberth/upstream/...).
-// System-namespace paths (oberth/data/release/...) are CI-ineligible: a branch
-// push must never be able to reach release credentials, regardless of what the
-// document asks for. The release trigger remains unrestricted.
-func AuthorizeSecretPaths(paths []string, systemAllowlist []string, trigger periapsis.Trigger, org, repo string) error {
-	if len(paths) == 0 {
-		return nil
-	}
-	allowed := make(map[string]struct{}, len(systemAllowlist))
-	for _, entry := range systemAllowlist {
-		allowed[entry] = struct{}{}
-	}
-	var problems []error
-	for _, path := range paths {
-		scoped, upstreamScoped, err := periapsis.ParseUpstreamSecretStorePath(path)
-		if err != nil {
-			problems = append(problems, fmt.Errorf("argoworkflow: %w", err))
-			continue
-		}
-		if upstreamScoped {
-			if err := scoped.Authorize(org, repo); err != nil {
-				problems = append(problems, fmt.Errorf("argoworkflow: %w", err))
-			}
-			continue
-		}
-		// System-namespace paths are release-only. A CI pipeline declaring one
-		// would need the release SA to read it, which is the trust-tier collapse
-		// this gate exists to prevent.
-		if trigger == periapsis.TriggerCI {
-			problems = append(problems, fmt.Errorf(
-				"argoworkflow: secret store path %q is a system-namespace path; "+
-					"CI pipelines may only declare upstream-scoped paths (%s<org>/<repo>/<secret>)",
-				path, periapsis.UpstreamSecretPathPrefix))
-			continue
-		}
-		if _, ok := allowed[path]; !ok {
-			problems = append(problems, fmt.Errorf("argoworkflow: secret store path %q is not in the administrator allowlist", path))
-		}
-	}
-	return errors.Join(problems...)
-}
-
 // Resource measurement is outside the credential chain in admitted specs.
 // Keep static plans and post-admission credential classification identical.
 func resourceUsageCommand(command []string) []string {
