@@ -768,7 +768,7 @@ func queryLimit(request *http.Request, fallback, maximum int) int {
 }
 
 func decodeOne(reader io.Reader, value any) error {
-	decoder := json.NewDecoder(io.LimitReader(reader, maxRequestBytes))
+	decoder := json.NewDecoder(reader)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(value); err != nil {
 		return fmt.Errorf("decode JSON: %w", err)
@@ -783,7 +783,19 @@ func decodeOne(reader io.Reader, value any) error {
 	return nil
 }
 
+func writeOversizedBody(writer http.ResponseWriter, err error) bool {
+	var oversized *http.MaxBytesError
+	if !errors.As(err, &oversized) {
+		return false
+	}
+	writeJSON(writer, http.StatusRequestEntityTooLarge, map[string]string{"error": "request body exceeds 1 MiB"})
+	return true
+}
+
 func strictUnmarshal(raw json.RawMessage, value any) error {
+	if len(raw) > maxRequestBytes {
+		return &http.MaxBytesError{Limit: maxRequestBytes}
+	}
 	if len(raw) == 0 {
 		raw = json.RawMessage("{}")
 	}

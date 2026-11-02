@@ -292,6 +292,9 @@ func (server *Server) handleMCP(writer http.ResponseWriter, request *http.Reques
 	request.Body = http.MaxBytesReader(writer, request.Body, maxRequestBytes)
 	var incoming rpcRequest
 	if err := decodeOne(request.Body, &incoming); err != nil {
+		if writeOversizedBody(writer, err) {
+			return
+		}
 		writeRPC(writer, rpcResponse{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &rpcError{Code: -32700, Message: "parse error"}})
 		return
 	}

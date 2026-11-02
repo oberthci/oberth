@@ -16,39 +16,16 @@ import (
 	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
-// TestMCPRejectsOversizeBody verifies that the MaxBytesReader guard rejects a
-// body larger than the configured limit. The server must return a parse error
-// (the MaxBytesReader closes the connection with a 413, but the json.Decoder
-// surfaces it as a decode error that handleMCP maps to a JSON-RPC parse
-// error).
+// Oversized requests are transport failures and never reach a tool.
 func TestMCPRejectsOversizeBody(t *testing.T) {
-	t.Parallel()
 	server, backend := testServer(t)
-
-	// maxRequestBytes is 1 << 20 (1 MiB). Build a body just over the limit.
-	oversizePayload := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"status","arguments":{"ref":"` +
-		strings.Repeat("x", (1<<20)+1) + `"}}}`
-
-	request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(oversizePayload))
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"status","arguments":{"ref":"` + strings.Repeat("x", maxRequestBytes+1) + `"}}}`
+	request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
 	request.Header.Set("Authorization", "Bearer valid-token")
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
-
-	// The handler must NOT have invoked the backend.
-	if backend.calledName != "" {
-		t.Fatalf("backend was invoked for oversize body: tool=%q", backend.calledName)
-	}
-
-	// The response must be a JSON-RPC parse error (code -32700).
-	if response.Code != http.StatusOK {
-		// Note: the MCP handler writes a 200 with a JSON-RPC error body rather
-		// than a raw HTTP 413, because the MaxBytesReader error surfaces through
-		// json.Decoder as a read error that handleMCP maps to parse error.
-		t.Fatalf("status = %d, want 200 (JSON-RPC error envelope)", response.Code)
-	}
-	body := response.Body.String()
-	if !strings.Contains(body, `"code":-32700`) || !strings.Contains(body, `"parse error"`) {
-		t.Fatalf("oversize body response = %s, want JSON-RPC parse error", body)
+	if response.Code != http.StatusRequestEntityTooLarge || backend.calledName != "" {
+		t.Fatalf("oversized body: %d %s", response.Code, response.Body)
 	}
 }
 
