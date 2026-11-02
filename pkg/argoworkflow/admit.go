@@ -38,14 +38,12 @@ const (
 	MaxPVCCapacity        = "64Gi"
 )
 
-// Policy is the administrator-owned half of admission. It mirrors the Go
-// path's controls so an Argo-authored repository cannot reach substrate the
-// pipeline path is denied.
+// Policy is the administrator-owned admission boundary for repository YAML.
 type Policy struct {
 	// Only ResolveRunSource may attach a source-bound, server-owned context.
 	runVMISource *ResolvedRunSource
-	// RunnerImagePrefixes is the same administrator allowlist the Go path
-	// applies to a declared RunnerImage. Empty selects the built-in
+	// RunnerImagePrefixes is the administrator's image allowlist.
+	// Empty selects the built-in
 	// pipeline.DefaultRunnerImagePrefixes.
 	RunnerImagePrefixes []string
 	// KubeVirt permits VM resources and KVM device leaves for an admin-granted repository.
@@ -203,7 +201,7 @@ func admitSpec(spec *wfv1.WorkflowSpec) []error {
 	problems = append(problems, admitNodeTargeting("spec", spec.NodeSelector, spec.Affinity, spec.Tolerations)...)
 	// Pod metadata reaches every Pod the run creates, and that surface
 	// includes AppArmor and seccomp annotations and sidecar-injection
-	// triggers. The Go path assigns Pod metadata server-side; so does this one.
+	// triggers. Pod metadata is assigned server-side.
 	problems = append(problems, admitPodMetadata("spec.podMetadata", spec.PodMetadata)...)
 	if spec.PodPriorityClassName != "" || spec.Priority != nil {
 		problems = append(problems, errors.New("argoworkflow: spec.priority and spec.podPriorityClassName are not admitted"))
@@ -617,8 +615,7 @@ func admitContainer(location string, container *corev1.Container, policy Policy)
 		return nil
 	}
 	var problems []error
-	// The same administrator allowlist that governs the Go path's RunnerImage
-	// governs every image an Argo-authored template runs.
+	// Every template image must satisfy the administrator's allowlist.
 	if err := pipeline.ValidateRunnerImage(container.Image); err != nil {
 		problems = append(problems, fmt.Errorf("argoworkflow: %s.image: %w", location, err))
 	} else if !pipeline.RunnerImageAllowed(container.Image, policy.RunnerImagePrefixes) {
@@ -786,10 +783,8 @@ func admitHooks(location string, hooks wfv1.LifecycleHooks) []error {
 	return problems
 }
 
-// admitNodeTargeting refuses a document's attempt to choose where it runs. The
-// Go path gives a repository no say in scheduling; parity matters because a
-// pipeline that can pick its node can pick a node whose other tenants it wants
-// to sit beside.
+// admitNodeTargeting reserves placement for the administrator: a repository
+// must not select its node or the tenants beside which its Pods run.
 func admitNodeTargeting(location string, selector map[string]string, affinity *corev1.Affinity, tolerations []corev1.Toleration) []error {
 	var problems []error
 	if len(selector) != 0 {

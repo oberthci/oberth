@@ -370,9 +370,12 @@ unauthenticated.
 
 ## Security
 
-- Job pods run with `automountServiceAccountToken: false`, as non-root 65534,
-  all capabilities dropped, read-only root filesystem, seccomp
-  `RuntimeDefault`, bounded resources and deadlines.
+- Workflow Pods use server-enforced identities, dropped capabilities,
+  read-only root filesystems, seccomp `RuntimeDefault`, bounded resources and
+  deadlines. Credentialed main containers and the executor receive separate,
+  scoped projected tokens; ordinary build containers receive no store token.
+  [Non-root test leaves](docs/nonroot-test-leaves.md) have a separately enforced
+  UID and controller contract.
 - **Declared paths and the trigger together are the security boundary.**
   Pipelines without declared secret-store paths bind to the pipeline
   ServiceAccount and receive no secrets on either trigger. Release pipelines

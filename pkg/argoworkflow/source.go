@@ -1,15 +1,7 @@
-// Package argoworkflow is the admission contract for repositories that author
-// their pipeline as real Argo Workflow YAML instead of .oberth/pipeline.go.
-//
-// It is the structural analogue of pkg/pipeline: the server reads the
-// repository's checked-out declaration statically, decides what the run is
-// allowed to do, and never evaluates repository code. Where pkg/pipeline
-// parses Go declarations with go/ast, this package decodes YAML into the real
-// upstream Argo CRD types (wfv1.Workflow) and admits or refuses the result.
-//
-// The two paths are independent. A repository carries either
-// .oberth/pipeline.go or .oberth/build.yaml; nothing in this package changes
-// how a pipeline.go repository is admitted or executed.
+// Package argoworkflow admits repository-authored Argo Workflow YAML.
+// The server decodes declarations statically, applies administrator policy,
+// and never executes repository code during admission. Shared resource and
+// secret-path vocabulary lives in pkg/pipeline.
 package argoworkflow
 
 import (
@@ -30,8 +22,7 @@ const (
 
 const FragmentFile = ".oberth/fragment.yaml"
 
-// MaxSourceBytes bounds one pipeline document. It matches the Go path's bound
-// so neither authoring format can present the server with an unbounded read.
+// MaxSourceBytes bounds one pipeline document before decoding.
 const MaxSourceBytes = pipeline.MaxSourceBytes
 
 // ErrUnsupportedTrigger reports that a trigger class has no Argo-authored

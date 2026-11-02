@@ -924,8 +924,7 @@ func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 }
 
 // readArgoSource reads the pipeline document for one trigger out of the
-// immutable run workspace, through the same bounded, root-confined reader the
-// Go path uses for pipeline.go.
+// immutable run workspace through a bounded, root-confined reader.
 func readArgoSource(sourceDir string, trigger pipeline.Trigger) ([]byte, error) {
 	file, err := argoworkflow.TriggerFile(trigger)
 	if err != nil {

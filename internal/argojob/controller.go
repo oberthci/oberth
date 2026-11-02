@@ -416,11 +416,8 @@ func sameSubmission(existing, intended *wfv1.Workflow) error {
 // progress markers and each step's pod log into destination as the run
 // proceeds.
 //
-// Progress markers use the same wire protocol the Go path's runner emits, so
-// the scheduler's existing step-progress writer, log index, and dashboard read
-// an Argo run exactly as they read a Job run. The difference is only where the
-// events come from: the Go runner emits them from inside the Job, while here
-// the server derives them from the Workflow's node tree.
+// The server derives progress events from the Workflow node tree and writes
+// the retained marker protocol consumed by the scheduler, index and dashboard.
 func (controller *Controller) Wait(ctx context.Context, name, runID string, destination io.Writer) (Completion, error) {
 	return controller.wait(ctx, name, runID, destination, nil, 0, Adoption{})
 }

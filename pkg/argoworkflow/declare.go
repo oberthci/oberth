@@ -10,16 +10,13 @@ import (
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
-// Repository declarations the server reads statically from the decoded
-// document. They are the Argo-path counterparts of pkg/pipeline's
-// DeclaredJobSizes and DeclaredSecretStoreSecrets: annotations rather than Go
-// literals, but the same rule applies — the server reads them, never evaluates
-// them, and the reviewed source and the admission decision cannot diverge.
+// Repository annotations are read statically so the reviewed source and
+// admission decision cannot diverge through evaluated repository code.
 const (
 	// SizeAnnotation declares the scheduler admission weight of this pipeline,
 	// one of S/M/L/XL. Absent selects M.
 	//
-	// Unlike the Go path, this does not size any container: an Argo template
+	// This does not size any container: an Argo template
 	// carries its own resources block. It only tells Oberth's weighted queue
 	// how much of the node this run intends to occupy.
 	//
@@ -45,18 +42,10 @@ const (
 	// lowercase letters, digits, and hyphens; anything else fails admission.
 	ConcurrencyGroupAnnotation = "oberth.ci/concurrency-group"
 
-	// SecretPathsAnnotation declares, comma-separated, the OpenBao KV paths
-	// this pipeline's credentialed steps intend to read in-Pod through
-	// envconsul. Both CI and release pipelines may declare paths; the
-	// authorization boundary is the allowlist and the OpenBao Kubernetes-auth
-	// role binding, not the trigger type.
-	//
-	// AI-CONTRACT: this declaration is auditable intent, not enforcement. The
-	// authoritative boundary is the Vault Kubernetes-auth role bound to the
-	// release ServiceAccount and the policy attached to it. Oberth records the
-	// declaration in its audit chain at submission so the intended and the
-	// granted set can be compared; it cannot observe the actual read, because
-	// on this tier the value never passes through the server.
+	// SecretPathsAnnotation declares the OpenBao paths credentialed steps
+	// intend to read through secretstore exec. Admission checks the approval
+	// table and chooses the trigger-appropriate ServiceAccount. OpenBao role
+	// policies remain the authority for actual reads; declarations record intent.
 	SecretPathsAnnotation = "oberth.ci/secret-paths"
 )
 

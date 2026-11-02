@@ -116,7 +116,7 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 		t.Fatal("static Git qualification missing")
 	}
 
-	// Declared weight matches pipeline.go's JobSizes{"ci": "L"}.
+	// Declared weight matches the build.yaml size annotation.
 	size, err := argoworkflow.DeclaredSize(built)
 	if err != nil || size != pipeline.L {
 		t.Fatalf("declared size = %q,%v; want L", size, err)
@@ -154,7 +154,7 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 
 // TestOberthReleasePipelineIsAdmissible proves the release document clears the
 // same gate and binds the release identity, and that its declared secret paths
-// are the ones pipeline.go declares.
+// match the release.yaml declarations.
 func TestOberthReleasePipelineIsAdmissible(t *testing.T) {
 	built, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
@@ -499,8 +499,7 @@ func TestOberthPipelinesMountTheServerProvidedSource(t *testing.T) {
 	}
 }
 
-// assertBurnGraph checks that the entrypoint DAG's tasks and their depends
-// expressions match the burn graph pipeline.go declares.
+// assertStageGraph checks the entrypoint DAG and its declared dependency edges.
 func assertStageGraph(t *testing.T, workflow *wfv1.Workflow, entrypoint string, want map[string]string) {
 	t.Helper()
 	if workflow.Spec.Entrypoint != entrypoint {

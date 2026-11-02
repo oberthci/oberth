@@ -118,8 +118,7 @@ type Config struct {
 	// repository grant's VMI budget. Zero selects the hard limit.
 	KubeVirtCeiling argoworkflow.VMIBudget
 
-	// RunnerImagePrefixes is the same administrator allowlist the Go path
-	// applies to a declared RunnerImage.
+	// RunnerImagePrefixes is the administrator's template image allowlist.
 	RunnerImagePrefixes []string
 
 	// VaultAddress and VaultCredentialedRole are injected into credentialed
@@ -1240,11 +1239,8 @@ func applyServerBounds(workflow *wfv1.Workflow, config Config) {
 // a non-root UID (65534) is a separate, riskier follow-up that needs real
 // step execution validated against the toolchain and the PVC's ownership.
 //
-// The container-level baseline is deliberately STRICTER than the Go path:
-// ReadOnlyRootFilesystem is true rather than false. That is safe here only
-// because this engine also injects a writable emptyDir at /tmp below --
-// os.TempDir() is where the Go toolchain writes, so a read-only root without
-// it would break every build.
+// ReadOnlyRootFilesystem requires the writable /tmp emptyDir below because
+// the Go toolchain writes temporary files there.
 const (
 	stepTmpVolumeName = "oberth-tmp"
 	stepTmpMountPath  = "/tmp"
@@ -1560,10 +1556,8 @@ func cacheVolumeAndMount(config Config, request Request) (corev1.Volume, corev1.
 // Go-toolchain workspace paths (tools, per-run fallback caches, trivy cache,
 // release artifacts) are also injected into every container.
 //
-// The Go path solves the checkout problem by mounting the same PVC with the
-// run's subPath into its single Job container. Doing it server-side here keeps
-// the property that made that safe: the repository never names the claim, never
-// chooses the subPath, and never gets it writable.
+// The server chooses the source claim and per-run subPath. Repository YAML
+// cannot name that claim, select another run's subPath, or write the checkout.
 //
 // Common mounts (cache, source, vault CA, workspace) go to every container via
 // injectTemplateVolumeMounts. The release token mount is scoped to credentialed
@@ -2059,8 +2053,8 @@ func injectWorkspaceEnvironment(workflow *wfv1.Workflow) {
 	}
 }
 
-// injectRunEnvironment gives every container the same run identity variables
-// the Go path's runner receives, plus the Vault coordinates on any
+// injectRunEnvironment gives every container the server-owned run identity
+// variables, plus Vault coordinates on any
 // credentialed tier. Repository-set values are preserved: a name collision
 // resolves in favour of the server's value, because these describe the run,
 // not the step.

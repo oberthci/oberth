@@ -85,15 +85,6 @@ func TestStaticSiteContract(t *testing.T) {
 	}
 }
 
-// TestPeriapsisShowcase is removed: the pipeline-showcase section was deleted
-// from index.html because the Go-DSL pipeline format it demonstrated is no
-// longer Oberth's own dogfooded pipeline (see .oberth/build.yaml). pipeline.go
-// itself is not retired as a product feature — it remains the required format
-// for release-credentialed pipelines in every other repo that has not adopted
-// the Argo path — but this page's flagship PIPELINE section now demonstrates
-// what Oberth's own CI actually runs, and a pipeline.go code showcase
-// alongside that would contradict it.
-
 // TestNoInterpreterEraVocabulary pins out the retired yaegi/interpreter
 // description of how a pipeline executes, and the now-inaccurate claim that
 // the pipeline is Go orchestrating plain subprocesses rather than containers.

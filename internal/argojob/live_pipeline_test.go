@@ -120,7 +120,7 @@ func TestLiveRepositoryBuildPipelineExecutes(t *testing.T) {
 			truncate(log.String(), 40000))
 	}
 
-	// Every burn pipeline.go declares for the CI trigger must have run, with
+	// Every stage build.yaml declares for the CI trigger must have run, with
 	// its steps attributed to it.
 	stages := map[string][]string{}
 	for _, step := range completion.Steps {
@@ -131,13 +131,13 @@ func TestLiveRepositoryBuildPipelineExecutes(t *testing.T) {
 	}
 	for _, stage := range []string{"setup", "lint", "test-store", "test-service", "test-rest", "security", "chart", "build-amd64", "build-arm64"} {
 		if len(stages[stage]) == 0 {
-			t.Errorf("burn %q ran no steps; observed %v", stage, stages)
+			t.Errorf("stage %q ran no steps; observed %v", stage, stages)
 		}
 	}
-	// The setup burn is where per-step granularity actually pays: eight
+	// The setup stage is where per-step granularity actually pays: nine
 	// sequential commands, each with its own exit code and log slice.
-	if len(stages["setup"]) < 8 {
-		t.Errorf("setup ran %d steps, want the 8 pipeline.go declares: %v", len(stages["setup"]), stages["setup"])
+	if len(stages["setup"]) < 9 {
+		t.Errorf("setup ran %d steps, want the 9 build.yaml declares: %v", len(stages["setup"]), stages["setup"])
 	}
 
 	body := log.String()
