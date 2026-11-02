@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"github.com/oberthci/oberth/internal/model"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -74,5 +75,70 @@ func TestIssueRevisionMismatchRollsBackLockAndAudit(t *testing.T) {
 	}
 	if beforeAudit != afterAudit || beforeExpiry != afterExpiry {
 		t.Fatalf("conflict changed audit/lock: %d/%d %d/%d", beforeAudit, afterAudit, beforeExpiry, afterExpiry)
+	}
+}
+
+func TestIssueRevisionMigrationPreservesPopulatedV38AndRestarts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "revision.sqlite")
+	s, err := OpenAdminClient(t.Context(), path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if s != nil {
+			_ = s.Close()
+		}
+	}()
+	issue, err := s.CreateManualIssue(t.Context(), "writer", model.ManualIssueSpec{Title: "retained", Body: "history"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.AcquireIssueLock(t.Context(), issue.ID, "writer"); err != nil {
+		t.Fatal(err)
+	}
+	head, err := s.VerifyAuditState(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.ExecContext(t.Context(), integrationDowngradeSQL); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = OpenAdminClient(t.Context(), path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Issue(t.Context(), issue.ID)
+	if err != nil || got.Revision != 1 || got.Title != issue.Title || got.Body != issue.Body {
+		t.Fatalf("migration lost issue: %+v %v", got, err)
+	}
+	after, err := s.VerifyAuditState(t.Context())
+	if err != nil || head != after {
+		t.Fatalf("migration changed audit: %+v %+v %v", head, after, err)
+	}
+	title := "new title"
+	expected := got.Revision
+	got, err = s.UpdateIssue(t.Context(), "writer", issue.ID, model.IssuePatch{Title: &title, ExpectedRevision: &expected})
+	if err != nil || got.Revision != 2 {
+		t.Fatalf("trigger revision not returned: %+v %v", got, err)
+	}
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = OpenAdminClient(t.Context(), path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.Issue(t.Context(), issue.ID)
+	if err != nil || got.Revision != 2 || got.Title != title {
+		t.Fatalf("restart lost revision: %+v %v", got, err)
+	}
+	if _, err = s.db.ExecContext(t.Context(), `UPDATE issues SET revision=9223372036854775807 WHERE id=?`, issue.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.ExecContext(t.Context(), `UPDATE issues SET title='overflow' WHERE id=?`, issue.ID); err == nil {
+		t.Fatal("revision overflow committed")
 	}
 }
