@@ -812,10 +812,11 @@ func (s *Store) migrate(ctx context.Context, expectedLegacyHead *model.AuditHead
 				return fmt.Errorf("record connection-level migration %d: %w", item.version, err)
 			}
 			applied[item.version] = true
-			tx, err = s.db.BeginTx(ctx, nil)
-			if err != nil {
-				return fmt.Errorf("resume after connection-level migration %d: %w", item.version, err)
+			nextTx, beginErr := s.db.BeginTx(ctx, nil)
+			if beginErr != nil {
+				return fmt.Errorf("resume after connection-level migration %d: %w", item.version, beginErr)
 			}
+			tx = nextTx
 			continue
 		}
 		switch {
