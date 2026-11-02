@@ -2029,7 +2029,7 @@ func TestRepoRemoveDeletesMappingAndCleansCacheDirectory(t *testing.T) {
 	registerTestUpstream(t, databasePath, "github", "ssh://git@github.com/octocat")
 	if err := runRepoWithDependencies(context.Background(), []string{
 		"add", "--database", databasePath, "widget", "github",
-	}, io.Discard, repoDependencies{mutationGate: allowTestMutation}); err != nil {
+	}, io.Discard, repoDependencies{mutationGate: allowTestMutation, removeRepository: removeTestRepository}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2046,7 +2046,7 @@ func TestRepoRemoveDeletesMappingAndCleansCacheDirectory(t *testing.T) {
 	var output bytes.Buffer
 	if err := runRepoWithDependencies(context.Background(), []string{
 		"remove", "--database", databasePath, "--git-cache-root", gitCacheRoot, "widget",
-	}, &output, repoDependencies{mutationGate: allowTestMutation}); err != nil {
+	}, &output, repoDependencies{mutationGate: allowTestMutation, removeRepository: removeTestRepository}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "removed repository widget") || !strings.Contains(output.String(), "was upstream github") {
@@ -2079,7 +2079,7 @@ func TestRepoRemoveRefusesInFlightRuns(t *testing.T) {
 	registerTestUpstream(t, databasePath, "github", "ssh://git@github.com/octocat")
 	if err := runRepoWithDependencies(context.Background(), []string{
 		"add", "--database", databasePath, "widget", "github",
-	}, io.Discard, repoDependencies{mutationGate: allowTestMutation}); err != nil {
+	}, io.Discard, repoDependencies{mutationGate: allowTestMutation, removeRepository: removeTestRepository}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2104,7 +2104,7 @@ func TestRepoRemoveRefusesInFlightRuns(t *testing.T) {
 
 	err = runRepoWithDependencies(context.Background(), []string{
 		"remove", "--database", databasePath, "widget",
-	}, io.Discard, repoDependencies{mutationGate: allowTestMutation})
+	}, io.Discard, repoDependencies{mutationGate: allowTestMutation, removeRepository: removeTestRepository})
 	if err == nil || !strings.Contains(err.Error(), "in-flight") {
 		t.Fatalf("expected in-flight run rejection, got %v", err)
 	}
@@ -2117,7 +2117,7 @@ func TestRepoRemoveRefusesNonexistentRepository(t *testing.T) {
 
 	err := runRepoWithDependencies(context.Background(), []string{
 		"remove", "--database", databasePath, "nonexistent",
-	}, io.Discard, repoDependencies{mutationGate: allowTestMutation})
+	}, io.Discard, repoDependencies{mutationGate: allowTestMutation, removeRepository: removeTestRepository})
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
@@ -2139,7 +2139,7 @@ func TestRepoRemoveFailsClosedWhenAuditGateRejects(t *testing.T) {
 func TestRepoRemoveHelpReturnsNil(t *testing.T) {
 	t.Parallel()
 	var output bytes.Buffer
-	err := runRepoWithDependencies(context.Background(), []string{"remove", "--help"}, &output, repoDependencies{mutationGate: allowTestMutation})
+	err := runRepoWithDependencies(context.Background(), []string{"remove", "--help"}, &output, repoDependencies{mutationGate: allowTestMutation, removeRepository: removeTestRepository})
 	if err != nil {
 		t.Fatalf("repo remove --help = %v", err)
 	}

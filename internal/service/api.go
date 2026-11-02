@@ -3216,7 +3216,12 @@ func (service *API) repoRemove(ctx context.Context, actor api.Actor, repo string
 	// directory later. The cache path derives from the store's registered
 	// name, never from raw tool input.
 	if service.removeGitCache != nil {
-		if cacheErr := service.removeGitCache(removed.Name); cacheErr != nil {
+		org := removed.UpstreamOrg
+		if org == "" {
+			org = removed.UpstreamName
+		}
+		input := removed.UpstreamName + "/" + org + "/" + removed.Name
+		if cacheErr := service.removeGitCache(input); cacheErr != nil {
 			response["cache_warning"] = cacheErr.Error()
 		}
 	}

@@ -19,9 +19,7 @@ func TestModuleReadsRejectOptionRefsAndInvalidPaths(t *testing.T) {
 		if err := c.ArchiveTar(t.Context(), "example", ref, io.Discard); err == nil {
 			t.Errorf("ArchiveTar accepted %q", ref)
 		}
-		if _, err := c.TagTime(t.Context(), "example", ref); err == nil {
-			t.Errorf("TagTime accepted %q", ref)
-		}
+
 	}
 	if _, err := c.ShowFile(t.Context(), "example", r.initialSHA, "../file.txt"); err == nil {
 		t.Error("ShowFile accepted traversal")

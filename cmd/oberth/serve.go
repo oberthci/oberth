@@ -1057,8 +1057,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 			}
 			return err
 		},
-		RepositoryRemover:         database,
-		RemoveGitCache:            git.RemoveRepository,
+		RepositoryRemover:         lockedRepositoryRemover{database: database, cache: git},
 		PromotionGrants:           database,
 		PromotionGrantMaxLifetime: options.promotionGrantMaxLifetime,
 		RunCancels:                database,
@@ -1224,7 +1223,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	queueDone := make(chan struct{})
 	go func() { defer close(queueDone); queueSnapshot.watch(queueCtx, database.IdleQueueStatus) }()
 	defer func() { stopQueue(); <-queueDone }()
-	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, newAdminGateServer(anchors.AllowMutation, options.database, scheduler.NotifyQueue, queueSnapshot.current), activateScheduler, accessReconciler, schedules, ciIssues, retention, logger, controlAPI.Shutdown, httpAPI.BeginDrain)
+	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, withRepositoryRemoval(newAdminGateServer(anchors.AllowMutation, options.database, scheduler.NotifyQueue, queueSnapshot.current), anchors.AllowMutation, options.database, database, git), activateScheduler, accessReconciler, schedules, ciIssues, retention, logger, controlAPI.Shutdown, httpAPI.BeginDrain)
 }
 
 type startupContinuity interface {

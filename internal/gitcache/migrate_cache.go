@@ -19,8 +19,8 @@ func (c *Cache) MigrateToQualifiedLayout(repos map[string]RepoQualification) err
 		if qual.UpstreamName == "" || qual.Org == "" {
 			continue // skip repos without full qualification
 		}
-		flatPath := filepath.Join(c.root, repo+".git")
-		qualifiedPath := filepath.Join(c.root, qual.UpstreamName, qual.Org, repo+".git")
+		flatPath := c.qualifiedCachePath("", "", repo)
+		qualifiedPath := c.qualifiedCachePath(qual.UpstreamName, qual.Org, repo)
 
 		if flatPath == qualifiedPath {
 			continue // shouldn't happen, but guard

@@ -871,9 +871,9 @@ func (c *Cache) repoLock(cachePath string) *repositoryLock {
 // callback delivery, without forcing callbacks to run under repoLock. Receive
 // handlers need to inspect the accepted Git objects and therefore legitimately
 // re-enter Cache methods that acquire repoLock themselves.
-func (c *Cache) receiveLock(repo string) *sync.Mutex {
-	value, _ := c.receiveLocks.LoadOrStore(repo, &sync.Mutex{})
-	return value.(*sync.Mutex)
+func (c *Cache) receiveLock(repo string) *repositoryLock {
+	value, _ := c.receiveLocks.LoadOrStore(repo, newRepositoryLock())
+	return value.(*repositoryLock)
 }
 
 // RemoveRepository deletes the bare cache directory for one repository,
@@ -885,18 +885,64 @@ func (c *Cache) receiveLock(repo string) *sync.Mutex {
 // missing directory is success: removal is idempotent, and the next push's
 // Ensure recreates the cache from the upstream.
 func (c *Cache) RemoveRepository(input string) error {
+	return c.RemoveRepositoryContext(context.Background(), input)
+}
+func (c *Cache) RemoveRepositoryContext(ctx context.Context, input string) error {
 	_, path, err := c.path(input)
 	if err != nil {
 		return err
 	}
-	receiveLock := c.receiveLock(path)
-	receiveLock.Lock()
-	defer receiveLock.Unlock()
+	return c.removeRepositoryPath(ctx, path, nil)
+}
+
+// RemoveLegacyRepositoryContext uses the same path builder and locks for a
+// flat pre-migration cache. The caller must prove no surviving mapping owns it.
+func (c *Cache) RemoveLegacyRepositoryContext(ctx context.Context, input string) error {
+	repo, err := NormalizeRepo(input)
+	if err != nil {
+		return err
+	}
+	return c.removeRepositoryPath(ctx, c.qualifiedCachePath("", "", repo), nil)
+}
+
+// RemoveRepositoryWith commits a catalog change while the live cache owner
+// holds both receive and repository locks. Pending receive evidence is retained.
+func (c *Cache) RemoveRepositoryWith(ctx context.Context, input string, change func() error) error {
+	_, path, err := c.path(input)
+	if err != nil {
+		return err
+	}
+	return c.removeRepositoryPath(ctx, path, func() error {
+		_, _, repo, err := ParseRepoPath(input)
+		if err != nil {
+			return err
+		}
+		if _, err := c.readReservation(c.reservationIdentity(repo, path)); err == nil {
+			return ErrArchivePendingReceive
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return change()
+	})
+}
+func (c *Cache) removeRepositoryPath(ctx context.Context, path string, change func() error) error {
+	receive := c.receiveLock(path)
+	if err := receive.LockContext(ctx); err != nil {
+		return err
+	}
+	defer receive.Unlock()
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return err
+	}
 	defer lock.Unlock()
+	if change != nil {
+		if err := change(); err != nil {
+			return err
+		}
+	}
 	if err := os.RemoveAll(path); err != nil {
-		return fmt.Errorf("remove repository cache: %w", err)
+		return fmt.Errorf("remove repository cache after catalog removal: %w", err)
 	}
 	return nil
 }

@@ -984,7 +984,8 @@ func runUplinkRemove(ctx context.Context, arguments []string, output io.Writer, 
 }
 
 type repoDependencies struct {
-	mutationGate func(context.Context, string, string) error
+	removeRepository func(context.Context, string, string, string) (store.RemovedRepository, error)
+	mutationGate     func(context.Context, string, string) error
 }
 
 func runRepo(ctx context.Context, arguments []string, output io.Writer) error {
@@ -1244,40 +1245,13 @@ func runRepoRemove(ctx context.Context, arguments []string, output io.Writer, de
 	if err := dependencies.mutationGate(ctx, "repository.database.open", *databasePath); err != nil {
 		return err
 	}
-	database, err := store.OpenAdminClient(ctx, *databasePath, configuredStoreOptions(ctx))
+	remove := dependencies.removeRepository
+	if remove == nil {
+		remove = requestLiveRepositoryRemoval
+	}
+	removed, err := remove(ctx, *databasePath, *gitCacheRoot, name)
 	if err != nil {
 		return err
-	}
-	defer func() { _ = database.Close() }()
-	if err := dependencies.mutationGate(ctx, "repository.remove", *databasePath); err != nil {
-		return err
-	}
-	removed, err := database.RemoveRepository(ctx, administrativeActor, name)
-	if err != nil {
-		return err
-	}
-
-	// Clean up the bare Git cache directory (qualified layout).
-	org := removed.UpstreamOrg
-	if org == "" {
-		org = removed.UpstreamName
-	}
-	cachePath := filepath.Join(*gitCacheRoot, removed.UpstreamName, org, removed.Name+".git")
-	if err := os.RemoveAll(cachePath); err != nil {
-		// Cache cleanup is best-effort: the database record is already gone,
-		// so a stale directory is inert and the next push will re-create it.
-		_, _ = fmt.Fprintf(output, "warning: failed to remove git cache %s: %v\n", cachePath, err)
-	}
-	// A pre-#264 flat cache may survive if the server never migrated it.
-	// Remove it only when no OTHER repository still answers to the bare
-	// name — with a same-named survivor the flat directory cannot be
-	// attributed and deleting it could destroy the survivor's unmigrated
-	// cache.
-	if _, lookupErr := database.RepositoryByName(ctx, removed.Name); errors.Is(lookupErr, store.ErrNotFound) {
-		legacyPath := filepath.Join(*gitCacheRoot, removed.Name+".git")
-		if err := os.RemoveAll(legacyPath); err != nil {
-			_, _ = fmt.Fprintf(output, "warning: failed to remove legacy git cache %s: %v\n", legacyPath, err)
-		}
 	}
 
 	_, err = fmt.Fprintf(output, "removed repository %s (was upstream %s)\n", removed.Name, removed.UpstreamName)

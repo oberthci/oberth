@@ -3829,8 +3829,8 @@ func TestRepoRemoveRequiresAdminUplink(t *testing.T) {
 	if len(remover.removed) != 1 || remover.removed[0] != "widget" {
 		t.Fatalf("admin repo_remove removed = %v, want [widget]", remover.removed)
 	}
-	if len(cacheRemovals) != 1 || cacheRemovals[0] != "widget" {
-		t.Fatalf("admin repo_remove cache removals = %v, want [widget]", cacheRemovals)
+	if len(cacheRemovals) != 1 || cacheRemovals[0] != "test-upstream/test-upstream/widget" {
+		t.Fatalf("admin repo_remove cache removals = %v, want [test-upstream/test-upstream/widget]", cacheRemovals)
 	}
 	resultMap, ok := result.(map[string]string)
 	if !ok {
