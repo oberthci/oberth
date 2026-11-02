@@ -718,7 +718,7 @@ func (s *Store) verifyCurrentSchema(ctx context.Context) error {
 		return fmt.Errorf("%w: live database requires exact schema version %d", ErrSchemaLegacyV1, latestMigrationVersion)
 	}
 	if version == 2 {
-		return fmt.Errorf("%w: existing schema version 2 requires backup-and-replace; live migration to version %d is disabled; see docs/upgrade-schema-v3.md",
+		return fmt.Errorf("%w: existing schema version 2 requires backup-and-replace; live migration to version %d is disabled; see docs/archive/upgrade-schema-v3.md",
 			ErrSchemaIncompatible, latestMigrationVersion)
 	}
 	// Versions 3 through latestMigrationVersion are compatible: the schema
@@ -760,7 +760,7 @@ func (s *Store) migrate(ctx context.Context, expectedLegacyHead *model.AuditHead
 	// chain was restructured. v3+ migrations are additive (new tables, new
 	// columns) and can be applied live.
 	if databaseVersion == 2 {
-		return fmt.Errorf("%w: existing schema version 2 requires backup-and-replace; live migration to version %d is disabled; see docs/upgrade-schema-v3.md",
+		return fmt.Errorf("%w: existing schema version 2 requires backup-and-replace; live migration to version %d is disabled; see docs/archive/upgrade-schema-v3.md",
 			ErrSchemaIncompatible, latestMigrationVersion)
 	}
 	targetVersion := latestMigrationVersion
