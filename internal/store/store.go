@@ -2137,25 +2137,14 @@ func (s *Store) RevokeTokenCredential(ctx context.Context, id string) error {
 		return fmt.Errorf("begin revoke token credential: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	pendingResult, err := tx.ExecContext(ctx, `DELETE FROM pending_token_credentials WHERE token_credential_id = ?`, id)
+	changed, err := revokeTokenCredentialTx(ctx, tx, id, unixNano(s.now()))
 	if err != nil {
-		return fmt.Errorf("clear pending token credential: %w", err)
-	}
-	pending, err := pendingResult.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("read pending token credential change: %w", err)
-	}
-	query := `UPDATE token_credentials SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`
-	if pending > 0 {
-		query = `UPDATE token_credentials SET revoked_at = ? WHERE id = ?`
-	}
-	result, err := tx.ExecContext(ctx, query, unixNano(s.now()), id)
-	if err != nil {
-		return fmt.Errorf("revoke token credential: %w", err)
-	}
-	if err := requireChanged("token credential", result); err != nil {
 		return err
 	}
+	if !changed {
+		return fmt.Errorf("%w: token credential", ErrNotFound)
+	}
+
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit revoke token credential: %w", err)
 	}

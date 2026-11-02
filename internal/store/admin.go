@@ -522,8 +522,7 @@ func (s *Store) RemoveUplink(ctx context.Context, actor, identity, fingerprint s
 	if _, err := tx.ExecContext(ctx, `DELETE FROM uplinks WHERE id = ?`, value.ID); err != nil {
 		return model.Uplink{}, fmt.Errorf("remove uplink: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `
-UPDATE token_credentials SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, now, value.TokenCredentialID); err != nil {
+	if _, err := revokeTokenCredentialTx(ctx, tx, value.TokenCredentialID, now); err != nil {
 		return model.Uplink{}, fmt.Errorf("revoke uplink token credential: %w", err)
 	}
 	details, err := json.Marshal(map[string]string{"identity": value.Identity, "fingerprint": value.Fingerprint})
@@ -604,8 +603,7 @@ RETURNING id, fingerprint, identity, token_credential_id, auth_actor, admin, cre
 		value.Scope = scopes
 	}
 	if displacedCredentialID != "" && displacedCredentialID != spec.TokenCredentialID {
-		if _, err := tx.ExecContext(ctx, `
-UPDATE token_credentials SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, now, displacedCredentialID); err != nil {
+		if _, err := revokeTokenCredentialTx(ctx, tx, displacedCredentialID, now); err != nil {
 			return model.Uplink{}, fmt.Errorf("revoke displaced credential: %w", err)
 		}
 	}

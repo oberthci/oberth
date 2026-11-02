@@ -76,10 +76,7 @@ func (s *Store) RevokeUplink(ctx context.Context, actor, identity, fingerprint, 
 		}
 	}
 	now := unixNano(s.now())
-	if _, err := tx.ExecContext(ctx, `DELETE FROM pending_token_credentials WHERE token_credential_id=?`, value.TokenCredentialID); err != nil {
-		return model.Uplink{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE token_credentials SET revoked_at=? WHERE id=?`, now, value.TokenCredentialID); err != nil {
+	if _, err := revokeTokenCredentialTx(ctx, tx, value.TokenCredentialID, now); err != nil {
 		return model.Uplink{}, err
 	}
 	details, _ := json.Marshal(map[string]string{"identity": identity, "fingerprint": value.Fingerprint, "replacement_fingerprint": replacement})
