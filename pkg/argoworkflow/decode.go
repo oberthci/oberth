@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"strings"
+	"io"
 
 	"github.com/argoproj/argo-workflows/v4/pkg/apis/workflow"
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	yamlv3 "go.yaml.in/yaml/v3"
 	"sigs.k8s.io/yaml"
 )
 
@@ -53,42 +54,14 @@ func Decode(source []byte) (*wfv1.Workflow, error) {
 // rejectMultipleDocuments refuses a multi-document stream. One file declares
 // one pipeline: a second document would be a second, differently-admitted
 // object hiding behind a reviewed first one.
-//
-// YAML document indicators (`---` and `...`) are only recognized at column
-// zero (no leading whitespace). An indented `---` or `...` inside a block
-// scalar is content, not a document boundary. The earlier version stripped
-// leading whitespace before matching, so a literal-block script containing
-// `  ---` was rejected as a second document.
-//
-// `---` after content starts a new document (rejected). `...` ends the
-// current document without starting a new one; content after a `...` is an
-// implicit second document (rejected). A leading `---` before any content
-// opens the first document and is not rejected.
 func rejectMultipleDocuments(source []byte) error {
-	contentSeen := false
-	terminated := false
-	for _, line := range strings.Split(string(source), "\n") {
-		stripped := strings.TrimRight(line, " \t\r")
-		switch stripped {
-		case "---":
-			if contentSeen {
-				return errors.New("argoworkflow: pipeline document must contain exactly one YAML document")
-			}
-			continue
-		case "...":
-			if contentSeen {
-				terminated = true
-			}
-			continue
-		}
-		trimmed := strings.TrimSpace(stripped)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		if terminated {
-			return errors.New("argoworkflow: pipeline document must contain exactly one YAML document")
-		}
-		contentSeen = true
+	decoder := yamlv3.NewDecoder(bytes.NewReader(source))
+	var document yamlv3.Node
+	if err := decoder.Decode(&document); err != nil {
+		return fmt.Errorf("argoworkflow: decode YAML document: %w", err)
+	}
+	if err := decoder.Decode(&document); !errors.Is(err, io.EOF) {
+		return errors.New("argoworkflow: pipeline document must contain exactly one YAML document")
 	}
 	return nil
 }
