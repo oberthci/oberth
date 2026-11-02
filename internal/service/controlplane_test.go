@@ -3466,8 +3466,8 @@ func TestIssueToolsListBothKindsAndUseActingIdentity(t *testing.T) {
 	if got.ID != created.ID || got.Kind != string(model.IssueManual) || got.Title != "manual" || got.Body != "body" || got.State != string(model.IssueOpen) {
 		t.Fatalf("issue get response = %#v", got)
 	}
-	if _, err := service.CallTool(ctx, actor, "issue_update", json.RawMessage(fmt.Sprintf(`{"id":%d,"title":"partial"}`, created.ID))); !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("partial issue_update error = %v", err)
+	if _, err := service.CallTool(ctx, actor, "issue_update", json.RawMessage(fmt.Sprintf(`{"id":%d,"title":"partial"}`, created.ID))); err != nil {
+		t.Fatalf("title-only issue_update error = %v", err)
 	}
 	updatedValue, err := service.CallTool(ctx, actor, "issue_update", json.RawMessage(fmt.Sprintf(`{"id":%d,"title":"updated","body":"new"}`, created.ID)))
 	if err != nil {

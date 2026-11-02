@@ -588,7 +588,7 @@ func TestIssueUpdateMovesScopeWithAuditAndPreservesIssue(t *testing.T) {
 		t.Fatal(err)
 	}
 	found = false
-	for _, item := range view.(model.IssuePage).Issues {
+	for _, item := range view.(api.IssueListPage).Issues {
 		if item.ID == global.ID {
 			found = item.Upstream == "github" && strings.Contains(item.Body, "follow-up")
 		}

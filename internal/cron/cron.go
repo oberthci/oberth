@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -174,7 +175,34 @@ func (schedule Schedule) dayMatches(candidate time.Time) bool {
 // Interval checks time-of-day gaps and the full Gregorian calendar cycle.
 // UTC dates and weekdays repeat after 400 years (146097 days). Checking one
 // cycle plus its wraparound covers leap years and month/year boundaries.
-func (schedule Schedule) Interval(from time.Time) (time.Duration, error) {
+type intervalResult struct {
+	duration time.Duration
+	err      error
+}
+
+var intervalCache = struct {
+	sync.Mutex
+	values map[Schedule]intervalResult
+}{values: make(map[Schedule]intervalResult)}
+
+const maximumIntervalCacheEntries = 1024
+
+// The minimum gap is independent of the caller's starting time. Cache the
+// normalized masks and bound memory even when many different expressions arrive.
+func (schedule Schedule) Interval(_ time.Time) (time.Duration, error) {
+	intervalCache.Lock()
+	defer intervalCache.Unlock()
+	if value, ok := intervalCache.values[schedule]; ok {
+		return value.duration, value.err
+	}
+	duration, err := schedule.calendarInterval()
+	if len(intervalCache.values) >= maximumIntervalCacheEntries {
+		clear(intervalCache.values)
+	}
+	intervalCache.values[schedule] = intervalResult{duration, err}
+	return duration, err
+}
+func (schedule Schedule) calendarInterval() (time.Duration, error) {
 	var times []time.Duration
 	for hour := 0; hour < 24; hour++ {
 		for minute := 0; minute < 60; minute++ {
@@ -195,7 +223,7 @@ func (schedule Schedule) Interval(from time.Time) (time.Duration, error) {
 	for i := 1; i < len(times); i++ {
 		consider(times[i] - times[i-1])
 	}
-	day := time.Date(from.UTC().Year(), 1, 1, 0, 0, 0, 0, time.UTC)
+	day := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
 	var first, previous time.Time
 	for i := 0; i < 146097; i++ {
 		if schedule.month.matches(int(day.Month())) && schedule.dayMatches(day) {

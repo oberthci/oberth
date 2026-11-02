@@ -50,3 +50,28 @@ func TestIntervalFindsMonthBoundaryAndLeapGaps(t *testing.T) {
 		}
 	}
 }
+
+func TestCalendarIntervalCacheUsesNormalizedExpressionAndIgnoresFrom(t *testing.T) {
+	a, err := Parse("0 0 29 2 *")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := Parse("00 00 29 02 *")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := a.Interval(time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := b.Interval(time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil || first != second {
+		t.Fatalf("cached minimum changed: %s %s %v", first, second, err)
+	}
+	intervalCache.Lock()
+	_, ok := intervalCache.values[a]
+	intervalCache.Unlock()
+	if !ok {
+		t.Fatal("normalized schedule was not cached")
+	}
+}
