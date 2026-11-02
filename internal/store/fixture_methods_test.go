@@ -136,16 +136,12 @@ INSERT INTO issues(repo_id, kind, branch, title, body, state, occurrences, creat
 VALUES(?, 'ci', ?, ?, ?, 'open', 1, ?, ?)
 ON CONFLICT(repo_id, branch) WHERE kind = 'ci' AND state = 'open' DO UPDATE SET
     title = excluded.title,
+    body = excluded.body,
     occurrences = issues.occurrences + 1,
     updated_at = excluded.updated_at
 RETURNING `+issueColumns, repoID, branch, title, body, now, now))
 	if err != nil {
 		return model.Issue{}, fmt.Errorf("upsert CI issue: %w", err)
-	}
-	if value.Occurrences > 1 {
-		if err := s.addIssueComment(ctx, tx, actor, value.ID, "evidence", body, acquired); err != nil {
-			return model.Issue{}, err
-		}
 	}
 	if err := s.appendIssueAudit(ctx, tx, actor, "issue.ci.upsert", value.ID, map[string]any{"branch": branch, "occurrences": value.Occurrences}, now); err != nil {
 		return model.Issue{}, err

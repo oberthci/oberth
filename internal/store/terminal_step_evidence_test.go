@@ -18,7 +18,7 @@ func TestTerminalRunStepEvidenceCannotBeRewritten(t *testing.T) {
 	if _, err = s.ClaimNextRun(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	result := model.StepResult{RunID: run.ID, Burn: "test", Step: "unit", DeclaredSize: "S", Status: model.StepPassed}
+	result := model.StepResult{RunID: run.ID, Stage: "test", Step: "unit", DeclaredSize: "S", Status: model.StepPassed}
 	if _, err = s.PutStepResult(t.Context(), result); err != nil {
 		t.Fatal(err)
 	}

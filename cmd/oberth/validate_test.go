@@ -208,7 +208,7 @@ func TestReleaseExampleArtifactsOnSharedVolume(t *testing.T) {
 		t.Error("release templates missing release subPath mount")
 	}
 	// Credentialed release steps use Oberth's approved-path wrapper.
-	if !strings.Contains(text, "oberth secretstore exec") || strings.Contains(text, "envconsul") {
+	if !strings.Contains(text, `command: ["/run/oberth/bin/oberth"]`) || !strings.Contains(text, `- "secretstore"`) || !strings.Contains(text, `- "exec"`) || strings.Contains(text, "envconsul") {
 		t.Error("release example must fetch approved credentials through Oberth")
 	}
 	// Cosign must be installed (not just invoked).
