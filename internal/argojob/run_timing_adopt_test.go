@@ -19,6 +19,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
@@ -73,7 +74,7 @@ func (r *failingTimingRecorder) RecordStepTimings(ctx context.Context, values []
 func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "timing.db")
-	db, err := store.Open(ctx, path, store.Options{})
+	db, err := storetest.Open(ctx, path, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +164,7 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 	}
 
 	// Restart: the first leaf's Pod was garbage collected while no owner ran.
-	db, err = store.Open(ctx, path, store.Options{})
+	db, err = storetest.Open(ctx, path, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

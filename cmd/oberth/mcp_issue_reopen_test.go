@@ -14,11 +14,12 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestMCPIssueReopenRejectsCIWithActionableErrorWithoutMutation(t *testing.T) {
 	ctx := t.Context()
-	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{})
+	database, err := storetest.Open(ctx, filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

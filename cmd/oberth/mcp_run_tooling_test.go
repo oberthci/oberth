@@ -19,6 +19,7 @@ import (
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type toolingAuthenticator struct{}
@@ -32,7 +33,7 @@ func (toolingAuthenticator) Authenticate(context.Context, string) (api.Actor, er
 func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	database, err := store.Open(ctx, filepath.Join(root, "oberth.sqlite"), store.Options{})
+	database, err := storetest.Open(ctx, filepath.Join(root, "oberth.sqlite"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +237,7 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 
 func TestMCPBothLogRoutesBoundActualFilteredTailLines(t *testing.T) {
 	root := t.TempDir()
-	db, err := store.Open(t.Context(), filepath.Join(root, "db"), store.Options{})
+	db, err := storetest.Open(t.Context(), filepath.Join(root, "db"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +322,7 @@ func TestMCPBothLogRoutesBoundActualFilteredTailLines(t *testing.T) {
 
 func TestRunCursorHTTPErrorExplainsHowToResume(t *testing.T) {
 	ctx := t.Context()
-	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "cursor.sqlite"), store.Options{})
+	database, err := storetest.Open(ctx, filepath.Join(t.TempDir(), "cursor.sqlite"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

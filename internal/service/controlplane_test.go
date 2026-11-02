@@ -19,6 +19,7 @@ import (
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
@@ -1969,7 +1970,7 @@ func TestSchedulerCompletesSupersedeAndRestartCancellationObligations(t *testing
 	if err := fixture.store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := store.Open(ctx, filepath.Join(fixture.root, "oberth.sqlite"), store.Options{})
+	reopened, err := storetest.Open(ctx, filepath.Join(fixture.root, "oberth.sqlite"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2171,7 +2172,7 @@ func TestPostCreateReadAndDeleteFailureRecoversExactJobOnRestart(t *testing.T) {
 	if err := fixture.store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := store.Open(ctx, filepath.Join(fixture.root, "oberth.sqlite"), store.Options{})
+	reopened, err := storetest.Open(ctx, filepath.Join(fixture.root, "oberth.sqlite"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

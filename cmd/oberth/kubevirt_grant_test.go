@@ -9,12 +9,13 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestKubeVirtGrantCLIReadsDurableRepoGrant(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := store.Open(ctx, path, store.Options{})
+	database, err := storetest.Open(ctx, path, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

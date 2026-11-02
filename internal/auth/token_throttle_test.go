@@ -14,6 +14,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
@@ -37,7 +38,7 @@ func TestTokenUseThrottleSkipsWriterButReadsRevocationEveryTime(t *testing.T) {
 	clock.Store(now.UnixNano())
 	readClock := func() time.Time { return time.Unix(0, clock.Load()).UTC() }
 	path := filepath.Join(t.TempDir(), "token.sqlite")
-	db, err := store.Open(t.Context(), path, store.Options{Now: readClock})
+	db, err := storetest.Open(t.Context(), path, store.Options{Now: readClock})
 	if err != nil {
 		t.Fatal(err)
 	}

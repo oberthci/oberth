@@ -9,11 +9,12 @@ import (
 	"github.com/oberthci/oberth/internal/goproxy"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestGoProxyDiscoveryBindsExactCatalogOwner(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "instance.sqlite"), store.Options{})
+	db, err := storetest.Open(ctx, filepath.Join(t.TempDir(), "instance.sqlite"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

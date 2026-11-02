@@ -16,6 +16,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
@@ -42,7 +43,7 @@ func TestReposWithDueTokenUseWhileWriterHeld(t *testing.T) {
 				t.Run(map[bool]string{false: "first-use", true: "expired-touch"}[usedBefore], func(t *testing.T) {
 					now := time.Now().UTC()
 					path := filepath.Join(t.TempDir(), "repos.sqlite")
-					db, err := store.Open(t.Context(), path, store.Options{Now: func() time.Time { return now }})
+					db, err := storetest.Open(t.Context(), path, store.Options{Now: func() time.Time { return now }})
 					if err != nil {
 						t.Fatal(err)
 					}

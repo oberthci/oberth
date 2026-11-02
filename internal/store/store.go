@@ -101,10 +101,6 @@ type Store struct {
 	reruns rerunLineage
 }
 
-func Open(ctx context.Context, path string, opts Options) (*Store, error) {
-	return open(ctx, path, opts, true, nil)
-}
-
 // OpenAdminClient opens the shared current-schema database for a short-lived
 // administrative command. It deliberately does not run owner-startup recovery
 // because the live server may currently own active Jobs. Existing legacy

@@ -21,6 +21,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type retentionFixture struct {
@@ -35,7 +36,7 @@ type retentionFixture struct {
 func newRetentionFixture(t *testing.T) *retentionFixture {
 	t.Helper()
 	f := &retentionFixture{root: t.TempDir(), now: time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)}
-	db, err := store.Open(context.Background(), filepath.Join(f.root, "oberth.sqlite"), store.Options{Now: func() time.Time { return f.now }})
+	db, err := storetest.Open(context.Background(), filepath.Join(f.root, "oberth.sqlite"), store.Options{Now: func() time.Time { return f.now }})
 	if err != nil {
 		t.Fatal(err)
 	}

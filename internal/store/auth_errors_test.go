@@ -15,6 +15,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type failedTokenReads struct {
@@ -27,7 +28,7 @@ func (r failedTokenReads) AuthenticatedUplinkByDigest(context.Context, []byte) (
 }
 
 func TestAuthenticationReadFailureIsUnavailableForValidToken(t *testing.T) {
-	db, err := store.Open(t.Context(), filepath.Join(t.TempDir(), "auth.sqlite"), store.Options{})
+	db, err := storetest.Open(t.Context(), filepath.Join(t.TempDir(), "auth.sqlite"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

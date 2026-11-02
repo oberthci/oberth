@@ -17,6 +17,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
@@ -143,7 +144,7 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 			if err := fixture.store.Close(); err != nil {
 				t.Fatal(err)
 			}
-			fixture.store, err = store.Open(context.Background(), filepath.Join(fixture.root, "oberth.sqlite"), store.Options{})
+			fixture.store, err = storetest.Open(context.Background(), filepath.Join(fixture.root, "oberth.sqlite"), store.Options{})
 			if err != nil {
 				t.Fatal(err)
 			}

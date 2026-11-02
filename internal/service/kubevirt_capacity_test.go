@@ -12,6 +12,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
@@ -382,7 +383,7 @@ func TestKubeVirtRestartRestoresTwoRunsBeforeAdmittingThird(t *testing.T) {
 		t.Fatal(err)
 	}
 	var err error
-	fixture.store, err = store.Open(t.Context(), filepath.Join(fixture.root, "oberth.sqlite"), store.Options{})
+	fixture.store, err = storetest.Open(t.Context(), filepath.Join(fixture.root, "oberth.sqlite"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

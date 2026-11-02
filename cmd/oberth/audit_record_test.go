@@ -8,12 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestAuditRecordAppendsLifecycleActionAfterGate(t *testing.T) {
 	database := filepath.Join(t.TempDir(), "oberth.sqlite")
-	initial, err := store.Open(context.Background(), database, configuredStoreOptions(context.Background()))
+	initial, err := storetest.Open(context.Background(), database, configuredStoreOptions(context.Background()))
 	if err != nil {
 		t.Fatal(err)
 	}

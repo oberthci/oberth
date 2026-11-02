@@ -27,6 +27,7 @@ import (
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
@@ -178,7 +179,7 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 			fixture.jobs.config.TrustedKVMGroup = 1234
 			fixture.jobs.config.NonrootProfile = argoworkflow.NonrootStaticProfile
 			controller.preparer = protectedProfilePreparer(t, fixture.jobs.config)
-			database, err := store.Open(ctx, filepath.Join(t.TempDir(), "db.sqlite"), store.Options{})
+			database, err := storetest.Open(ctx, filepath.Join(t.TempDir(), "db.sqlite"), store.Options{})
 			if err != nil {
 				t.Fatal(err)
 			}

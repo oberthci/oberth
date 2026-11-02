@@ -12,6 +12,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // recoveryJobs is a configurable JobController fake for testing the
@@ -359,7 +360,7 @@ func TestStartupReconciliationFinishesRunWhoseJobCompleted(t *testing.T) {
 	// Phase 2: reopen the store (simulating server restart). The modified
 	// recoverInterruptedRuns leaves this run in "running" because it has a
 	// job_name.
-	database, err = store.Open(ctx, dbPath, store.Options{})
+	database, err = storetest.Open(ctx, dbPath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,7 +457,7 @@ func TestStartupReconciliationRequeuesRunWithVanishedJob(t *testing.T) {
 	}
 
 	// Phase 2: reopen.
-	database, err = store.Open(ctx, dbPath, store.Options{})
+	database, err = storetest.Open(ctx, dbPath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -578,7 +579,7 @@ func TestStartupReconciliationTerminalizesIneligibleStrandedRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	database, err = store.Open(ctx, dbPath, store.Options{})
+	database, err = storetest.Open(ctx, dbPath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

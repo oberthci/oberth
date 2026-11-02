@@ -13,6 +13,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type shortWriter struct{ bytes.Buffer }
@@ -42,7 +43,7 @@ func TestIssueAndAuthenticateTokenWithoutPlaintextPersistence(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "oberth.db")
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
-	database, err := store.Open(ctx, path, store.Options{Now: func() time.Time { return now }})
+	database, err := storetest.Open(ctx, path, store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +126,7 @@ func TestIssueLeavesCredentialInactiveWhenOutputOrActivationFails(t *testing.T) 
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			database, err := store.Open(ctx, filepath.Join(t.TempDir(), "oberth.db"), store.Options{Now: func() time.Time { return now }})
+			database, err := storetest.Open(ctx, filepath.Join(t.TempDir(), "oberth.db"), store.Options{Now: func() time.Time { return now }})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -154,7 +155,7 @@ func TestIssueLeavesCredentialInactiveWhenOutputOrActivationFails(t *testing.T) 
 
 func TestUnboundPendingCredentialCannotActivate(t *testing.T) {
 	ctx := context.Background()
-	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "oberth.db"), store.Options{})
+	database, err := storetest.Open(ctx, filepath.Join(t.TempDir(), "oberth.db"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +173,7 @@ func TestUnboundPendingCredentialCannotActivate(t *testing.T) {
 func TestIssuedTokensAreRandom(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
-	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "oberth.db"), store.Options{Now: func() time.Time { return now }})
+	database, err := storetest.Open(ctx, filepath.Join(t.TempDir(), "oberth.db"), store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}

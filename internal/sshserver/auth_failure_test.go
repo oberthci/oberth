@@ -24,6 +24,7 @@ import (
 	"github.com/oberthci/oberth/internal/app"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
@@ -148,7 +149,7 @@ func (s *revokeOnSign) Sign(random io.Reader, data []byte) (*ssh.Signature, erro
 
 func TestDurableKeyAuthDuringWriterHoldAndRevocation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "auth.sqlite")
-	db, err := store.Open(t.Context(), path, store.Options{})
+	db, err := storetest.Open(t.Context(), path, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

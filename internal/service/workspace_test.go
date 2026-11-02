@@ -14,6 +14,7 @@ import (
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestSchedulerRemovesRunWorkspaceOnlyAfterTerminalOutcome(t *testing.T) {
@@ -212,7 +213,7 @@ func TestWorkspaceStartupRecoveryPreservesPendingPublication(t *testing.T) {
 	if err := fixture.store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := store.Open(ctx, databasePath, store.Options{})
+	reopened, err := storetest.Open(ctx, databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +320,7 @@ func TestOwnerRestartCompletesEmptyNameSupersedeBeforeCleanup(t *testing.T) {
 	if err := fixture.store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := store.Open(ctx, databasePath, store.Options{})
+	reopened, err := storetest.Open(ctx, databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

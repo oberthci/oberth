@@ -15,6 +15,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // The runs cursor is the oldest run's sequence, or its ID when a scoped
@@ -46,7 +47,7 @@ func TestUplinkScopeLifecycle(t *testing.T) {
 	ctx := context.Background()
 	directory := t.TempDir()
 	database := filepath.Join(directory, "oberth.sqlite")
-	seed, err := store.Open(ctx, database, store.Options{})
+	seed, err := storetest.Open(ctx, database, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

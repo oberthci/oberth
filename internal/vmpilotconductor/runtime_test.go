@@ -22,6 +22,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/testtimeout"
 	"github.com/oberthci/oberth/internal/vmrunner"
 )
@@ -57,7 +58,7 @@ func newFixtureAt(t *testing.T, now time.Time) *fixture {
 	t.Helper()
 	f := &fixture{ctx: context.Background(), now: now}
 	var err error
-	f.s, err = store.Open(f.ctx, filepath.Join(t.TempDir(), "journal.sqlite"), store.Options{Now: func() time.Time { return f.now }})
+	f.s, err = storetest.Open(f.ctx, filepath.Join(t.TempDir(), "journal.sqlite"), store.Options{Now: func() time.Time { return f.now }})
 	must(t, err)
 	t.Cleanup(func() { must(t, f.s.Close()) })
 	upstream, err := f.s.CreateUpstream(f.ctx, model.UpstreamSpec{Name: "codeberg", Kind: "forgejo", BaseURL: "https://codeberg.org"})

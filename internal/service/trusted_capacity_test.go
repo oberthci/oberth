@@ -11,6 +11,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
@@ -138,7 +139,7 @@ func TestTrustedCapacityRetryBoundaries(t *testing.T) {
 					git.candidate = []byte(strings.ReplaceAll(string(raw), "build/program", "build/changed"))
 					git.baseline = git.candidate
 				case "restart":
-					restarted, err := store.Open(ctx, filepath.Join(f.root, "oberth.sqlite"), store.Options{})
+					restarted, err := storetest.Open(ctx, filepath.Join(f.root, "oberth.sqlite"), store.Options{})
 					if err != nil {
 						return err
 					}

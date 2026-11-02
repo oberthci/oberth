@@ -15,11 +15,12 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestMCPArtifactMissingFileIsNotFoundButIOFailureIsInternal(t *testing.T) {
 	root := t.TempDir()
-	db, err := store.Open(t.Context(), filepath.Join(root, "db"), store.Options{})
+	db, err := storetest.Open(t.Context(), filepath.Join(root, "db"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -24,7 +24,7 @@ func testStore(t *testing.T, now *time.Time) *Store {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "oberth.db")
 	storeTemplate.Copy(t, path, func(path string) error {
-		s, err := Open(context.Background(), path, Options{})
+		s, err := CreateGenesis(context.Background(), path, Options{})
 		if err != nil {
 			return err
 		}
@@ -35,8 +35,18 @@ func testStore(t *testing.T, now *time.Time) *Store {
 
 func openTestStore(t *testing.T, path string, now *time.Time) *Store {
 	t.Helper()
-	s, err := Open(context.Background(), path, Options{Now: func() time.Time { return *now }})
+	opts := Options{Now: func() time.Time { return *now }}
+	s, err := CreateGenesis(context.Background(), path, opts)
+	if errors.Is(err, os.ErrExist) {
+		s, err = OpenCurrent(context.Background(), path, opts)
+	}
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReconcileInconsistentPublications(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecoverOwnerState(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {

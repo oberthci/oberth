@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestScheduleLegacyBusySkipQueuesAfterRestartWhileRepositoryRemainsBusy(t *testing.T) {
@@ -19,7 +20,7 @@ func TestScheduleLegacyBusySkipQueuesAfterRestartWhileRepositoryRemainsBusy(t *t
 			t.Parallel()
 			ctx := context.Background()
 			path := filepath.Join(t.TempDir(), "schedules.db")
-			state, err := store.Open(ctx, path, store.Options{})
+			state, err := storetest.Open(ctx, path, store.Options{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -49,7 +50,7 @@ func TestScheduleLegacyBusySkipQueuesAfterRestartWhileRepositoryRemainsBusy(t *t
 			if err := state.Close(); err != nil {
 				t.Fatal(err)
 			}
-			state, err = store.Open(ctx, path, store.Options{})
+			state, err = storetest.Open(ctx, path, store.Options{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -70,7 +71,7 @@ func TestScheduleLegacyBusySkipQueuesAfterRestartWhileRepositoryRemainsBusy(t *t
 			if err := state.Close(); err != nil {
 				t.Fatal(err)
 			}
-			state, err = store.Open(ctx, path, store.Options{})
+			state, err = storetest.Open(ctx, path, store.Options{})
 			if err != nil {
 				t.Fatal(err)
 			}

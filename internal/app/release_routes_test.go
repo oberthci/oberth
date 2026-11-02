@@ -18,6 +18,7 @@ import (
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
@@ -196,7 +197,7 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "db.sqlite"), store.Options{})
+	db, err := storetest.Open(ctx, filepath.Join(t.TempDir(), "db.sqlite"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
