@@ -47,7 +47,7 @@ const maximumServeCmdlineBytes = 1 << 20
 
 func runSecretStore(ctx context.Context, arguments []string, output io.Writer) error {
 	if len(arguments) == 0 {
-		return fmt.Errorf("%w: secretstore setup|verify|sync|exec|materialize", errUsage)
+		return fmt.Errorf("%w: secretstore setup|verify|sync|exec", errUsage)
 	}
 	switch arguments[0] {
 	case "setup":
@@ -60,8 +60,6 @@ func runSecretStore(ctx context.Context, arguments []string, output io.Writer) e
 		return runSecretStoreBootstrapTLS(arguments[1:], output)
 	case "exec":
 		return runSecretStoreExec(ctx, arguments[1:], output, os.Stderr)
-	case "materialize":
-		return runSecretStoreMaterialize(ctx, arguments[1:], output, os.Stderr)
 	default:
 		return fmt.Errorf("%w: unknown secretstore command %q", errUsage, arguments[0])
 	}

@@ -51,10 +51,10 @@ metadata:
     oberth.ci/secret-paths: oberth/data/release/r2-upload-token,oberth/data/release/cosign-secret
 ```
 
-Release steps wrap their command with `envconsul`, which authenticates to
-OpenBao via Kubernetes auth using the release-tier ServiceAccount token, reads
-the declared paths, and injects them into the child process environment.
-Branch builds receive zero release credentials, always.
+Release steps use `oberth secretstore exec` to authenticate with their
+ServiceAccount, fetch approved paths, and write private files to a verified
+tmpfs. The wrapper strips store credentials from the child environment and
+redacts fetched values from output. Branch builds receive no release credentials.
 
 Setup is one script run where your own `bao`/`vault` CLI is authenticated —
 the Oberth binary has no code path that accepts a store admin token — and
@@ -164,8 +164,8 @@ MCP client (full walkthrough in [docs/mcp-setup.md](docs/mcp-setup.md)):
    Workflow. The presence of declared secret-store paths in the
    `oberth.ci/secret-paths` annotation selects the credentialed
    ServiceAccount and its projected token. Release steps wrap their command
-   with `envconsul`, which authenticates to OpenBao via Kubernetes auth and
-   injects the declared secrets into the child process environment. Only
+   with `oberth secretstore exec`, which fetches the approved secrets into
+   private files on verified tmpfs and redacts child output. Only
    after every burn is terminal green does Oberth sync the exact admitted
    tag object upstream.
 

@@ -13,10 +13,11 @@ import (
 // retaining a second security or execution policy in the production binary.
 func TestRetiredProductionSurface(t *testing.T) {
 	cases := map[string][]string{
-		"internal/app/artifacts.go":   {"ArtifactFailure", "reportArtifactFailure"},
-		"internal/client/client.go":   {"GetTo"},
-		"pkg/argoworkflow/declare.go": {"AuthorizeSecretPaths"},
-		"internal/store/store.go":     {"TrustedPlan", "TrustedApply"},
+		"cmd/oberth/secretstore_exec.go": {"runSecretStoreMaterialize", "parseMaterializeArgs", "writeMaterializeSecret", "executeMaterialize"},
+		"internal/app/artifacts.go":      {"ArtifactFailure", "reportArtifactFailure"},
+		"internal/client/client.go":      {"GetTo"},
+		"pkg/argoworkflow/declare.go":    {"AuthorizeSecretPaths"},
+		"internal/store/store.go":        {"TrustedPlan", "TrustedApply"},
 	}
 	for path, names := range cases {
 		t.Run(path, func(t *testing.T) {
