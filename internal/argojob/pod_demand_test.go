@@ -101,3 +101,20 @@ func TestDeclaredPodAdoptionRestoresSealedDemand(t *testing.T) {
 		t.Fatal("malformed reservation restored")
 	}
 }
+
+func TestParallelismNoticeRetainedWithWorkflowTiming(t *testing.T) {
+	wf, _, _, _ := diagnosticFixture()
+	wf.Annotations[identityAnnotation] = strings.Repeat("c", 64)
+	d := argoworkflow.PodDemand{CPUMilli: 4000, MemoryBytes: 4 << 30, Pods: 4}
+	stampPodDemand(wf, &d)
+	recorder := &timingRecorderStub{}
+	controller := &Controller{timings: recorder}
+	controller.retainWorkflowTiming(t.Context(), wf)
+	if len(recorder.workflows) != 1 || recorder.workflows[0].Resources == nil {
+		t.Fatal("missing durable resource metadata")
+	}
+	retained := recorder.workflows[0]
+	if message := retained.Resources.Message(retained.RunID); !strings.Contains(message, "effective concurrency: 4 pods") {
+		t.Fatalf("concurrency notice lost: %q", message)
+	}
+}
