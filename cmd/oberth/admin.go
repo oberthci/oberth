@@ -1353,6 +1353,9 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	if err := policy.Validate(); err != nil {
 		return err
 	}
+	if lifetime > policy.MaxTTL {
+		return fmt.Errorf("%w: token lifetime exceeds server maximum %s", errUsage, policy.MaxTTL)
+	}
 	database, err := store.OpenAdminClient(ctx, *databasePath, configuredStoreOptions(ctx))
 	if err != nil {
 		return err
@@ -1760,7 +1763,7 @@ func runUplinkRotate(ctx context.Context, arguments []string, input io.Reader, o
 	var expiry *time.Time
 	seen := false
 	for _, status := range statuses {
-		if status.Identity != identity {
+		if status.Identity != identity || status.RevokedAt != nil || status.Pending {
 			continue
 		}
 		admin = admin || status.Admin
