@@ -150,7 +150,9 @@ func (c *Cache) ReachableFromUpstreamDefault(ctx context.Context, input, commit 
 		return false, err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return false, err
+	}
 	defer lock.Unlock()
 	if !c.isBare(ctx, path) {
 		return false, fmt.Errorf("repository %s is not cached", repo)

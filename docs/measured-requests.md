@@ -31,13 +31,17 @@ images, termination messages or image-pull details.
 
 ## Population and suggestions
 
-Default selection is the last 30 **passed runs on the repository default branch**.
+Default selection is the last 30 **passed default-branch runs**, including
+promotion CI runs linked to a promotion targeting that branch. The promotion
+record, not a branch-name prefix, proves the target.
 `ref=any` includes tags/releases and other branches; a specific ref selects that
-ref. `last` is bounded to 1..100. `run` accepts the same full ID or unique 8+
+exact ref without adding promotion refs. The response's `include_promotions`
+identifies default selection. `last` is bounded to 1..100. `run` accepts the same full ID or unique 8+
 hexadecimal prefix as `run_get`, is exclusive with `ref`, and can infer `repo`.
 Failed/incomplete runs are excluded unless `include_failed=true`, including for
-an exact run. Missing or expired measurements stay unknown; self-reported
-termination counters are never substituted.
+an exact run. Missing or expired measurements stay unknown. A step's own
+memory peak can supplement a retained, exactly matched container attempt for
+advice; other self-reported counters are not substituted.
 
 Each row identifies the consumer repo, normalized burn and **template name**.
 Retry suffixes and pod hashes are removed, and `frag-<hash>-<template>` normalizes
@@ -54,6 +58,15 @@ branch head.
 Quantiles are across container attempts, not individual polls. Repeated samples
 of one incarnation are deduplicated. Each metric reports its own count, and rows
 show sample count, attempts, distinct run IDs and the captured time window.
+Memory prefers the step's own cgroup `memory_peak`, bound through its termination
+diagnostic to the same run, workflow, pod, main container ID and restart count.
+It is self-reported advice, never an admission input. Otherwise memory requires
+**at least four polls per attempt**. A higher external peak with four polls is
+retained even when a step peak exists. Attempts lacking either source suppress
+the entire suggestion, including when other attempts provide five good runs.
+The `memory_step_peak_attempts`, `memory_sampler_attempts` and
+`memory_insufficient_attempts` counts expose this coverage.
+
 Memory and peak CPU are main-container peaks. Average CPU is cumulative externally
 captured CPU time divided by the interval from container start to its CPU sample
 timestamp (clipped to finish). Duration uses pod container start/finish,
@@ -81,10 +94,12 @@ margin allows ordinary variation; limit margin allows bursts missed by 15-second
 sampling. These margins are advice, not proof that the next run fits. A single
 exact run can be compared but cannot alone establish a suggestion.
 
-No suggestion is returned for insufficient history, OOM, a measured peak at or
+No suggestion is returned for insufficient history, OOM, a deadline kill, a measured peak at or
 above a recorded limit (censoring), saturation, counter resets, changed requests,
-restarts, ambiguous identity or truncated history. Unknown legacy limits are
-flagged: absence of a censor flag does not prove absence of throttling. Inspect
+restarts, ambiguous identity or truncated history. Unknown historical CPU,
+memory or ephemeral limits also suppress advice. Deadline-killed durations are
+censored, including workflow-wide deadline kills with no precise step diagnostic.
+Inspect
 coverage before committing a reduction. No automatic higher retry is performed.
 
 ## Bounds and retention
@@ -93,7 +108,9 @@ The tool reads through the database read pool, not the writer. Run selection use
 existing repository/ref indexes, then primary-key run lookups of telemetry and
 step diagnostics. It reads at most 100 runs and returns at most 10,000 main
 incarnations; truncation is explicit and suppresses suggestions. The storage
-operation has a five-second deadline and the entire service call ten seconds.
+operation has a five-second deadline and the entire service call ten seconds,
+including waiting for repository read locks. The query-plan test explains the
+exact executed observation SQL and verifies run-ID primary-key lookups.
 It takes no write transaction and makes no cluster calls. No SQL schema change
 is needed: new optional provenance and limits live in the existing versioned
 observation JSON, and old rows remain readable.

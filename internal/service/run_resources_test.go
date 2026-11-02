@@ -38,11 +38,17 @@ func TestRunResourcesAuthorizesBeforeHistoryAndDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := got.(measured.Report); !ok {
+	if report, ok := got.(measured.Report); !ok || !report.IncludePromotions {
 		t.Fatalf("type %T", got)
 	}
-	if reader.filter.Runs != 30 || reader.filter.Ref != f.visible.DefaultBranch || reader.filter.IncludeFailed || reader.repoID != f.visible.ID {
+	if reader.filter.Runs != 30 || reader.filter.Ref != f.visible.DefaultBranch || !reader.filter.IncludePromotions || reader.filter.IncludeFailed || reader.repoID != f.visible.ID {
 		t.Fatalf("defaults: %+v", reader)
+	}
+	if _, err := f.call(scopedActor, "run_resources", map[string]any{"repo": f.visible.Name, "ref": f.visible.DefaultBranch}); err != nil {
+		t.Fatal(err)
+	}
+	if reader.filter.IncludePromotions {
+		t.Fatal("explicit ref unexpectedly included promotions")
 	}
 }
 func TestRunResourcesRejectsBoundsAndHiddenExactRun(t *testing.T) {

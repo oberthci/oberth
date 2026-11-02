@@ -20,7 +20,9 @@ func (c *Cache) ReadOptionalBlob(ctx context.Context, input, sha, file string, l
 		return nil, false, err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return nil, false, err
+	}
 	defer lock.Unlock()
 	return c.readOptionalBlobLocked(ctx, path, sha, file, limit)
 }
@@ -37,7 +39,9 @@ func (c *Cache) ReadDefaultBlob(ctx context.Context, input, file string, limit i
 		return "", nil, false, err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return "", nil, false, err
+	}
 	defer lock.Unlock()
 	if !c.isBare(ctx, path) {
 		return "", nil, false, errors.New("policy repository is not cached")

@@ -71,10 +71,11 @@ func (s *API) readRunResources(ctx context.Context, raw json.RawMessage) (any, e
 			return nil, e
 		}
 	}
+	includePromotions := a.Ref == "" && exact.ID == ""
 	if a.Ref == "" {
 		a.Ref = repo.DefaultBranch
 	}
-	filter := store.RunResourceFilter{Ref: a.Ref, Runs: a.Last, IncludeFailed: a.IncludeFailed}
+	filter := store.RunResourceFilter{Ref: a.Ref, Runs: a.Last, IncludeFailed: a.IncludeFailed, IncludePromotions: includePromotions}
 	if exact.ID != "" {
 		filter.RunID = exact.ID
 		filter.Ref = "any"
@@ -85,7 +86,7 @@ func (s *API) readRunResources(ctx context.Context, raw json.RawMessage) (any, e
 	if e != nil {
 		return nil, e
 	}
-	r := measured.Report{Format: a.Format, Repository: repo.Name, Ref: a.Ref, Run: exact.ID, RequestedRuns: filter.Runs, SelectedRuns: len(history.Runs), IncludeFailed: a.IncludeFailed, Truncated: history.Truncated, DeclarationsStatus: "unavailable", Retention: measured.Retention, Semantics: measured.Semantics, Steps: []measured.Step{}}
+	r := measured.Report{Format: a.Format, Repository: repo.Name, Ref: a.Ref, Run: exact.ID, RequestedRuns: filter.Runs, SelectedRuns: len(history.Runs), IncludeFailed: a.IncludeFailed, IncludePromotions: includePromotions, Truncated: history.Truncated, DeclarationsStatus: "unavailable", Retention: measured.Retention, Semantics: measured.Semantics, Steps: []measured.Step{}}
 	var declarations []measured.Declaration
 	if len(history.Runs) > 0 {
 		newest := history.Runs[0]

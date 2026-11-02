@@ -11,11 +11,27 @@ import (
 )
 
 type RunResourceFilter struct {
-	Ref           string
-	RunID         string
-	Runs          int
-	IncludeFailed bool
+	IncludePromotions bool
+	Ref               string
+	RunID             string
+	Runs              int
+	IncludeFailed     bool
 }
+
+// Keep the executed query and its EXPLAIN test identical. CROSS JOIN fixes the
+// bounded selected-run inventory as the outer loop; INDEXED BY requires each
+// observation lookup to use the existing run_id primary-key prefix.
+const runResourceObservationSQL = `SELECT u.observation_json,s.termination_json,s.memory_peak_bytes,s.status,r.error
+ FROM json_each(?) selected
+ CROSS JOIN step_resource_usage u INDEXED BY sqlite_autoindex_step_resource_usage_1 ON u.run_id=selected.value
+ JOIN runs r ON r.id=u.run_id
+ LEFT JOIN step_results s ON s.run_id=u.run_id AND s.burn=u.burn AND s.step=u.step
+ WHERE u.repo_id=?
+ AND json_extract(u.observation_json,'$.container_name')='main'
+ AND COALESCE(json_extract(u.observation_json,'$.container_kind'),'app')='app'
+ AND COALESCE(json_extract(u.observation_json,'$.pod_kind'),'workflow')='workflow'
+ ORDER BY u.last_observed_at DESC,u.run_id,u.node_id,u.pod_uid,u.container_id LIMIT ?`
+
 type RunResourceHistory struct {
 	Runs         []model.Run
 	Observations []measured.Observation
@@ -38,8 +54,14 @@ func (s *Store) RunResources(ctx context.Context, repoID int64, f RunResourceFil
 		query += ` AND id=?`
 		args = append(args, f.RunID)
 	} else if f.Ref != "any" {
-		query += ` AND ref=?`
-		args = append(args, f.Ref)
+		if f.IncludePromotions {
+			query += ` AND (ref=? OR (trigger='promotion' AND EXISTS (
+ SELECT 1 FROM promotions p WHERE p.run_id=runs.id AND p.run_id!='' AND p.repo_id=? AND p.target_ref=?)))`
+			args = append(args, f.Ref, repoID, f.Ref)
+		} else {
+			query += ` AND ref=?`
+			args = append(args, f.Ref)
+		}
 	}
 	if !f.IncludeFailed {
 		query += ` AND status='passed'`
@@ -72,13 +94,7 @@ func (s *Store) RunResources(ctx context.Context, repoID int64, f RunResourceFil
 	}
 	// The run_id prefix of the primary key bounds each lookup to at most
 	// 4,096 retained incarnations; helpers are excluded before the output cap.
-	observations, err := s.reader().QueryContext(ctx, `SELECT u.observation_json,s.termination_json
- FROM step_resource_usage u LEFT JOIN step_results s ON s.run_id=u.run_id AND s.burn=u.burn AND s.step=u.step
- WHERE u.repo_id=? AND u.run_id IN (SELECT value FROM json_each(?))
- AND json_extract(u.observation_json,'$.container_name')='main'
- AND COALESCE(json_extract(u.observation_json,'$.container_kind'),'app')='app'
- AND COALESCE(json_extract(u.observation_json,'$.pod_kind'),'workflow')='workflow'
- ORDER BY u.last_observed_at DESC,u.run_id,u.node_id,u.pod_uid,u.container_id LIMIT ?`, repoID, string(payload), measured.MaxRows+1)
+	observations, err := s.reader().QueryContext(ctx, runResourceObservationSQL, string(payload), repoID, measured.MaxRows+1)
 	if err != nil {
 		return out, err
 	}
@@ -86,7 +102,10 @@ func (s *Store) RunResources(ctx context.Context, repoID int64, f RunResourceFil
 	for observations.Next() {
 		var raw string
 		var diagnostic *string
-		if err := observations.Scan(&raw, &diagnostic); err != nil {
+		var memory *int64
+		var status *string
+		var runError string
+		if err := observations.Scan(&raw, &diagnostic, &memory, &status, &runError); err != nil {
 			return out, err
 		}
 		var v model.StepResourceUsage
@@ -94,10 +113,15 @@ func (s *Store) RunResources(ctx context.Context, repoID int64, f RunResourceFil
 			return out, fmt.Errorf("invalid stored resource observation")
 		}
 		o := measured.Observation{Usage: v, Template: measured.TemplateOf(v), Owner: v.FragmentRepository}
+		o.DeadlineKilled = model.IsExecutionDeadlineReason(runError) || (status != nil && model.StepStatus(*status) == model.StepTimedOut)
 		if diagnostic != nil {
 			var d model.StepDiagnostic
 			if json.Unmarshal([]byte(*diagnostic), &d) == nil {
-				o = measured.WithDiagnostic(o, &d)
+				stepStatus := model.StepStatus("")
+				if status != nil {
+					stepStatus = model.StepStatus(*status)
+				}
+				o = measured.WithStepResult(o, &d, memory, stepStatus)
 			}
 		}
 		out.Observations = append(out.Observations, o)

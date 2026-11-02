@@ -22,6 +22,11 @@ const MaxRuns = 100
 const MaxRows = 10000
 const MinimumSamples = 5
 
+// MinimumMemoryPolls avoids treating a short, sparsely observed attempt's
+// sampled memory as its peak. A bound step-reported cgroup peak does not need
+// this polling coverage, but remains advisory and explicitly self-reported.
+const MinimumMemoryPolls int64 = 4
+
 // RequestMarginPercent covers normal variation above p95 without reserving a maximum for
 // every run. Limits use the maximum, never the median, plus 50% to allow bursts
 // missed between 15-second polls. These are suggestions, not safety proofs.
@@ -31,6 +36,8 @@ const DeadlineMarginPercent = 50
 const DeadlineStartupSeconds = 60
 
 type Observation struct {
+	StepMemoryPeakBytes *int64
+	DeadlineKilled      bool
 	Ambiguous           bool
 	Usage               model.StepResourceUsage
 	Template            string
@@ -66,6 +73,7 @@ func (s Suggested) Resources() map[string]map[string]string {
 }
 
 type Flags struct {
+	DeadlineKilled    bool `json:"deadline_killed"`
 	LowSamples        bool `json:"low_samples"`
 	SampledLowerBound bool `json:"sampled_lower_bound"`
 	Saturated         bool `json:"saturated"`
@@ -78,28 +86,31 @@ type Flags struct {
 	IdentityUnknown   bool `json:"identity_unknown"`
 }
 type Step struct {
-	Burn                string                  `json:"burn"`
-	Template            string                  `json:"template"`
-	OwnerRepository     string                  `json:"owner_repository"`
-	Runs                int                     `json:"runs"`
-	RunIDs              []string                `json:"run_ids"`
-	Attempts            int                     `json:"attempts"`
-	Samples             int64                   `json:"samples"`
-	Since               time.Time               `json:"since,omitzero"`
-	Until               time.Time               `json:"until,omitzero"`
-	Declared            *Declaration            `json:"declared"`
-	MemoryPeakBytes     model.ResourceQuantiles `json:"memory_peak_bytes"`
-	AverageCPUNanoCores model.ResourceQuantiles `json:"average_cpu_nanocores"`
-	PeakCPUNanoCores    model.ResourceQuantiles `json:"peak_cpu_nanocores"`
-	EphemeralBytes      model.ResourceQuantiles `json:"ephemeral_storage_bytes"`
-	DurationNS          model.ResourceQuantiles `json:"duration_ns"`
-	IOReadBytes         model.ResourceQuantiles `json:"io_read_bytes"`
-	IOWriteBytes        model.ResourceQuantiles `json:"io_write_bytes"`
-	IOPressureSomeNS    model.ResourceQuantiles `json:"io_pressure_some_ns"`
-	IOPressureFullNS    model.ResourceQuantiles `json:"io_pressure_full_ns"`
-	Flags               Flags                   `json:"flags"`
-	Suggested           *Suggested              `json:"suggested"`
-	NoSuggestion        []string                `json:"no_suggestion"`
+	MemoryStepAttempts         int                     `json:"memory_step_peak_attempts"`
+	MemorySamplerAttempts      int                     `json:"memory_sampler_attempts"`
+	MemoryInsufficientAttempts int                     `json:"memory_insufficient_attempts"`
+	Burn                       string                  `json:"burn"`
+	Template                   string                  `json:"template"`
+	OwnerRepository            string                  `json:"owner_repository"`
+	Runs                       int                     `json:"runs"`
+	RunIDs                     []string                `json:"run_ids"`
+	Attempts                   int                     `json:"attempts"`
+	Samples                    int64                   `json:"samples"`
+	Since                      time.Time               `json:"since,omitzero"`
+	Until                      time.Time               `json:"until,omitzero"`
+	Declared                   *Declaration            `json:"declared"`
+	MemoryPeakBytes            model.ResourceQuantiles `json:"memory_peak_bytes"`
+	AverageCPUNanoCores        model.ResourceQuantiles `json:"average_cpu_nanocores"`
+	PeakCPUNanoCores           model.ResourceQuantiles `json:"peak_cpu_nanocores"`
+	EphemeralBytes             model.ResourceQuantiles `json:"ephemeral_storage_bytes"`
+	DurationNS                 model.ResourceQuantiles `json:"duration_ns"`
+	IOReadBytes                model.ResourceQuantiles `json:"io_read_bytes"`
+	IOWriteBytes               model.ResourceQuantiles `json:"io_write_bytes"`
+	IOPressureSomeNS           model.ResourceQuantiles `json:"io_pressure_some_ns"`
+	IOPressureFullNS           model.ResourceQuantiles `json:"io_pressure_full_ns"`
+	Flags                      Flags                   `json:"flags"`
+	Suggested                  *Suggested              `json:"suggested"`
+	NoSuggestion               []string                `json:"no_suggestion"`
 }
 type Report struct {
 	Format             string `json:"-"`
@@ -110,6 +121,7 @@ type Report struct {
 	SelectedRuns       int    `json:"selected_runs"`
 	NewestSHA          string `json:"newest_sha"`
 	IncludeFailed      bool   `json:"include_failed"`
+	IncludePromotions  bool   `json:"include_promotions"`
 	Truncated          bool   `json:"truncated"`
 	DeclarationsStatus string `json:"declarations_status"`
 	Retention          string `json:"retention"`
@@ -125,8 +137,8 @@ func (r Report) MCPToolText() string {
 	return string(raw)
 }
 
-const Retention = "External samples retain at most 90 days / 100,000 container incarnations globally, asynchronously. There is no per-repo or release reservation: busy repositories can displace rare release history. Missing history is unknown; step results and self-reports are not substituted."
-const Semantics = "Read-only. Quantiles are across container attempts, not time samples; each metric reports its own count. CPU average uses captured CPU time over its measured interval. Ephemeral and IO pressure are pod-scoped, once per main attempt; PVC bytes are excluded. Peaks are sampled lower bounds. Git is the source of truth; suggestions never change execution."
+const Retention = "External samples retain at most 90 days / 100,000 container incarnations globally, asynchronously. There is no per-repo or release reservation: busy repositories can displace rare release history. Missing history is unknown. A step-reported memory peak is used only with exact retained attempt identity, and only for advice."
+const Semantics = "Read-only. Quantiles are across container attempts, not time samples; each metric reports its own count. Memory prefers an identity-bound step-reported cgroup peak (self-reported, advisory), retaining any higher external peak with at least four polls; otherwise sampler memory requires four polls per attempt. Any missing memory coverage, unknown limits or deadline kill suppresses suggestions. CPU average uses captured CPU time over its measured interval. Ephemeral and IO pressure are pod-scoped, once per main attempt; PVC bytes are excluded. External peaks are sampled lower bounds. Git is the source of truth; suggestions never change execution."
 
 var fragmentName = regexp.MustCompile(`^frag-[0-9a-f]{8}-(.+)$`)
 var retrySuffix = regexp.MustCompile(`\([0-9]+\)$`)
@@ -232,9 +244,9 @@ func Build(values []Observation, declarations []Declaration) []Step {
 			s.Flags.Saturated = s.Flags.Saturated || v.Saturated
 			s.Flags.Restarts = s.Flags.Restarts || v.RestartCount > 0
 			s.Flags.OOM = s.Flags.OOM || v.Reason == "OOMKilled"
+			s.Flags.DeadlineKilled = s.Flags.DeadlineKilled || o.DeadlineKilled || v.Reason == "DeadlineExceeded"
 			s.Flags.RequestsChanged = s.Flags.RequestsChanged || v.RequestsChanged
 			s.Flags.CounterReset = s.Flags.CounterReset || v.CounterReset
-			s.Flags.LimitsUnknown = s.Flags.LimitsUnknown || (o.MemoryLimitBytes == nil && v.MemoryLimitBytes == nil)
 			if o.MemoryLimitBytes == nil {
 				o.MemoryLimitBytes = v.MemoryLimitBytes
 			}
@@ -244,7 +256,22 @@ func Build(values []Observation, declarations []Declaration) []Step {
 			if o.EphemeralLimitBytes == nil {
 				o.EphemeralLimitBytes = v.EphemeralLimitBytes
 			}
-			for _, p := range [][2]*int64{{v.MemoryPeakBytes, o.MemoryLimitBytes}, {v.CPUPeakNanoCores, o.CPULimitNanoCores}, {v.EphemeralStoragePeakBytes, o.EphemeralLimitBytes}} {
+			s.Flags.LimitsUnknown = s.Flags.LimitsUnknown || o.MemoryLimitBytes == nil || o.CPULimitNanoCores == nil || o.EphemeralLimitBytes == nil
+			var memory *int64
+			if o.StepMemoryPeakBytes != nil && *o.StepMemoryPeakBytes >= 0 {
+				memory = o.StepMemoryPeakBytes
+				s.MemoryStepAttempts++
+				if v.Samples >= MinimumMemoryPolls && v.MemoryPeakBytes != nil && *v.MemoryPeakBytes > *memory {
+					memory = v.MemoryPeakBytes
+				}
+			} else if v.Samples >= MinimumMemoryPolls && v.MemoryPeakBytes != nil && *v.MemoryPeakBytes >= 0 {
+				memory = v.MemoryPeakBytes
+				s.MemorySamplerAttempts++
+			} else {
+				s.MemoryInsufficientAttempts++
+				s.Flags.LowSamples = true
+			}
+			for _, p := range [][2]*int64{{memory, o.MemoryLimitBytes}, {v.MemoryPeakBytes, o.MemoryLimitBytes}, {v.CPUPeakNanoCores, o.CPULimitNanoCores}, {v.EphemeralStoragePeakBytes, o.EphemeralLimitBytes}} {
 				if p[0] != nil && p[1] != nil && *p[1] > 0 && *p[0] >= *p[1] {
 					s.Flags.LimitReached = true
 				}
@@ -268,7 +295,7 @@ func Build(values []Observation, declarations []Declaration) []Step {
 					}
 				}
 			}
-			metrics := []*int64{v.MemoryPeakBytes, average, v.CPUPeakNanoCores, v.EphemeralStoragePeakBytes, duration, v.IOReadBytes, v.IOWriteBytes, v.IOPressureSomeNS, v.IOPressureFullNS}
+			metrics := []*int64{memory, average, v.CPUPeakNanoCores, v.EphemeralStoragePeakBytes, duration, v.IOReadBytes, v.IOWriteBytes, v.IOPressureSomeNS, v.IOPressureFullNS}
 			for i, n := range metrics {
 				if n != nil && *n >= 0 {
 					populations[i] = append(populations[i], *n)
@@ -288,13 +315,24 @@ func Build(values []Observation, declarations []Declaration) []Step {
 			*targets[i] = model.Quantiles(p)
 		}
 		s.Flags.IdentityUnknown = s.Flags.IdentityUnknown || s.Template == "" || s.OwnerRepository == ""
+		insufficientRuns := false
 		for _, i := range []int{0, 1, 3, 4} {
 			if len(metricRuns[i]) < MinimumSamples {
 				s.Flags.LowSamples = true
+				insufficientRuns = true
 			}
 		}
-		if s.Flags.LowSamples {
+		if insufficientRuns {
 			s.NoSuggestion = append(s.NoSuggestion, fmt.Sprintf("need %d distinct terminal runs with memory, average CPU, ephemeral and duration measurements", MinimumSamples))
+		}
+		if s.MemoryInsufficientAttempts > 0 {
+			s.NoSuggestion = append(s.NoSuggestion, fmt.Sprintf("%d attempts lack a bound step memory peak or at least %d memory polls", s.MemoryInsufficientAttempts, MinimumMemoryPolls))
+		}
+		if s.Flags.LimitsUnknown {
+			s.NoSuggestion = append(s.NoSuggestion, "historical CPU, memory or ephemeral limits are unknown; censoring cannot be ruled out")
+		}
+		if s.Flags.DeadlineKilled {
+			s.NoSuggestion = append(s.NoSuggestion, "deadline-killed attempt duration is censored; measure with a reviewed higher deadline first")
 		}
 		if s.Flags.LimitReached || s.Flags.OOM {
 			s.NoSuggestion = append(s.NoSuggestion, "a peak was censored by a limit or OOM; measure with a reviewed higher limit first")
@@ -322,9 +360,10 @@ func WithDiagnostic(o Observation, d *model.StepDiagnostic) Observation {
 	}
 	c := d.Container
 	v := &o.Usage
-	if c.RunID != v.RunID || c.WorkflowUID != v.WorkflowUID || c.PodUID != v.PodUID || c.ContainerID != v.ContainerID || c.ContainerName != "main" {
+	if c.RunID != v.RunID || c.WorkflowUID != v.WorkflowUID || c.PodUID != v.PodUID || c.ContainerID != v.ContainerID || c.ContainerName != "main" || c.RestartCount != v.RestartCount {
 		return o
 	}
+	o.DeadlineKilled = o.DeadlineKilled || c.PodReason == "DeadlineExceeded"
 	if c.CPULimitMilli != nil && *c.CPULimitMilli <= 1_000_000 {
 		n := *c.CPULimitMilli * 1_000_000
 		o.CPULimitNanoCores = &n
@@ -336,6 +375,24 @@ func WithDiagnostic(o Observation, d *model.StepDiagnostic) Observation {
 	if v.ContainerFinishedAt.IsZero() {
 		v.ContainerFinishedAt = c.FinishedAt
 	}
+	return o
+}
+
+// WithStepResult permits the step's own cgroup peak for reviewed suggestions,
+// never admission. A final display row must not supply a peak to an older retry.
+func WithStepResult(o Observation, d *model.StepDiagnostic, memory *int64, status model.StepStatus) Observation {
+	o = WithDiagnostic(o, d)
+	if d == nil || !d.Available || d.Validate() != nil || d.Container == nil {
+		return o
+	}
+	c, v := d.Container, o.Usage
+	if c.RunID != v.RunID || c.WorkflowUID != v.WorkflowUID || c.PodUID != v.PodUID || c.ContainerID != v.ContainerID || c.ContainerName != "main" || c.RestartCount != v.RestartCount {
+		return o
+	}
+	if memory != nil && *memory >= 0 {
+		o.StepMemoryPeakBytes = memory
+	}
+	o.DeadlineKilled = o.DeadlineKilled || status == model.StepTimedOut
 	return o
 }
 func satAdd(a, b int64) int64 {

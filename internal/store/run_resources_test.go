@@ -55,7 +55,7 @@ func TestRunResourcesReadHistoryRefFailedAndRepoBounds(t *testing.T) {
 func TestRunResourcesUsesIndexedReadPoolWithoutWriterTransaction(t *testing.T) {
 	at := time.Now().UTC()
 	s := testStore(t, &at)
-	rows, e := s.reader().Query(`EXPLAIN QUERY PLAN SELECT observation_json FROM step_resource_usage WHERE run_id IN (SELECT value FROM json_each(?)) ORDER BY last_observed_at DESC LIMIT ?`, `["run"]`, 10)
+	rows, e := s.reader().Query(`EXPLAIN QUERY PLAN `+runResourceObservationSQL, `["run"]`, 1, 10)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -73,7 +73,7 @@ func TestRunResourcesUsesIndexedReadPoolWithoutWriterTransaction(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if !strings.Contains(plan.String(), "INDEX") || strings.Contains(plan.String(), "SCAN step_resource_usage") {
+	if !strings.Contains(plan.String(), "SEARCH u USING INDEX sqlite_autoindex_step_resource_usage_1 (run_id=?)") || strings.Contains(plan.String(), "step_resource_usage_repo_idx") {
 		t.Fatal(plan.String())
 	}
 	// Holding the write connection must not make a history report wait for

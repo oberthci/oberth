@@ -31,7 +31,9 @@ func (c *Cache) resolveTagSHA(ctx context.Context, input string, tag string, pee
 			return "", fmt.Errorf("tag %s lookup is busy in %s", tag, repo)
 		}
 	} else {
-		lock.Lock()
+		if err := lock.LockContext(ctx); err != nil {
+			return "", err
+		}
 	}
 	defer lock.Unlock()
 	if !c.isBare(ctx, path) {

@@ -14,8 +14,8 @@ func observations() []Observation {
 	now := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
 	var out []Observation
 	for i := range 5 {
-		v := model.StepResourceUsage{Version: 2, Source: "kubelet-cadvisor", RunID: fmt.Sprint(i), WorkflowName: "wf", PodName: fmt.Sprintf("wf-frag-1234abcd-step-abc12345-%d", i), PodUID: fmt.Sprint(i), ContainerID: fmt.Sprint(i), ContainerName: "main", ContainerKind: "app", PodKind: "workflow", Burn: "step-12345678", Step: "step-abc12345", Terminal: true, Samples: 3, SampledLowerBound: true, LastObservedAt: now, ContainerStartedAt: now.Add(-10 * time.Second), ContainerFinishedAt: now, CPUTimeNS: value(5e9), CPUTimeAt: now, CPUPeakNanoCores: value(1e9), MemoryPeakBytes: value(int64(i+1) * 100 << 20), EphemeralStoragePeakBytes: value(100 << 20)}
-		out = append(out, Observation{Usage: v, Template: "frag-1234abcd-step-abc12345", Owner: "repo-01", MemoryLimitBytes: value(1 << 30)})
+		v := model.StepResourceUsage{Version: 2, Source: "kubelet-cadvisor", RunID: fmt.Sprint(i), WorkflowName: "wf", PodName: fmt.Sprintf("wf-frag-1234abcd-step-abc12345-%d", i), PodUID: fmt.Sprint(i), ContainerID: fmt.Sprint(i), ContainerName: "main", ContainerKind: "app", PodKind: "workflow", Burn: "step-12345678", Step: "step-abc12345", Terminal: true, Samples: 4, SampledLowerBound: true, LastObservedAt: now, ContainerStartedAt: now.Add(-10 * time.Second), ContainerFinishedAt: now, CPUTimeNS: value(5e9), CPUTimeAt: now, CPUPeakNanoCores: value(1e9), MemoryPeakBytes: value(int64(i+1) * 100 << 20), EphemeralStoragePeakBytes: value(100 << 20)}
+		out = append(out, Observation{Usage: v, Template: "frag-1234abcd-step-abc12345", Owner: "repo-01", MemoryLimitBytes: value(1 << 30), CPULimitNanoCores: value(0), EphemeralLimitBytes: value(0)})
 	}
 	return out
 }
@@ -23,7 +23,7 @@ func TestRunResourcesQuantilesSuggestionsAndStableFragmentIdentity(t *testing.T)
 	rows := observations()
 	rows[4].Template = "frag-deadbeef-step-abc12345"
 	got := Build(rows, nil)
-	if len(got) != 1 || got[0].Template != "step-abc12345" || got[0].OwnerRepository != "repo-01" || got[0].Runs != 5 || got[0].Samples != 15 {
+	if len(got) != 1 || got[0].Template != "step-abc12345" || got[0].OwnerRepository != "repo-01" || got[0].Runs != 5 || got[0].Samples != 20 {
 		t.Fatalf("identity: %+v", got)
 	}
 	s := got[0]
@@ -50,11 +50,11 @@ func TestRunResourcesWithholdsCensoredAndLowSamples(t *testing.T) {
 		t.Fatalf("low samples: %+v", s)
 	}
 }
-func TestRunResourcesNeverUsesSelfReportsOrDoublesRepeatedSamples(t *testing.T) {
+func TestRunResourcesRequiresExternalAttemptAndDeduplicatesSamples(t *testing.T) {
 	rows := observations()
 	rows = append(rows, rows...)
 	got := Build(rows, nil)[0]
-	if got.Runs != 5 || got.Attempts != 5 || got.Samples != 15 {
+	if got.Runs != 5 || got.Attempts != 5 || got.Samples != 20 {
 		t.Fatalf("duplicates: %+v", got)
 	}
 	rows[0].Usage.Source = "termination"
