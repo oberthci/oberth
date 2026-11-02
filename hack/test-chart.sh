@@ -331,7 +331,7 @@ fi
 if grep -Eq 'kind: Secret$|secretKeyRef:|secretName:|resources: \["secrets"\]' "$manifest"; then
   exit 1
 fi
-grep -q 'name: OBERTH_IDENTITY_STORE' "$manifest"
+if grep -q 'name: OBERTH_IDENTITY_STORE' "$manifest"; then exit 1; fi
 grep -q 'medium: Memory' "$manifest"
 for legacy in tls.existingSecret ssh.hostKey.existingSecret auditAnchor.rootsSecret; do
   if render --set "$legacy=old-identity" >/dev/null 2>&1; then exit 1; fi
