@@ -2673,6 +2673,9 @@ func (service *API) issueUpdate(ctx context.Context, actor api.Actor, id int64, 
 	patch := model.IssuePatch{Title: title, Body: body}
 	if upstream != nil {
 		name := strings.TrimSpace(*upstream)
+		if actor.Admin && actor.Scoped() && (name == "" || strings.EqualFold(name, "global") || !actor.SeesUpstream(name)) {
+			return model.Issue{}, fmt.Errorf("%w: upstream", store.ErrNotFound)
+		}
 		var id int64
 		if name == "" || strings.EqualFold(name, "global") {
 			if !actor.Admin {
