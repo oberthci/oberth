@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
@@ -34,13 +33,7 @@ func (s *API) applyResourceMessages(ctx context.Context, runs []model.Run) {
 			if message == "" {
 				continue
 			}
-			if strings.Contains(runs[i].DisplayReason, message) {
-				continue
-			}
-			if runs[i].DisplayReason == "" {
-				runs[i].DisplayReason = runs[i].Error
-			}
-			runs[i].DisplayReason = strings.TrimSpace(runs[i].DisplayReason + " " + message)
+			runs[i].ResourceMessage = message
 		}
 	}
 }

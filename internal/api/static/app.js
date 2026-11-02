@@ -509,8 +509,9 @@ function runTimeLabel(run) {
 }
 function rowMessage(run, tooltip = false) {
   if (run.priority_class && run.display_reason === `Priority ${run.priority_class}: ${run.priority_reason}.`) run = {...run, display_reason: ""};
-  return (tooltip ? queueDetail(run) : displayRunStatus(run) === "queued" ? queueReason(run) : runMessage(run))
+  const message = (tooltip ? queueDetail(run) : displayRunStatus(run) === "queued" ? queueReason(run) : runMessage(run))
     || (run.Release ? "release" : run.Trigger === "schedule" && run.ScheduleEntry ? `schedule: ${run.ScheduleEntry}` : "");
+  return [message, run.resource_message].filter(Boolean).join(" ");
 }
 function runMessageCell(run) {
   const message = rowMessage(run);
@@ -906,6 +907,7 @@ function summaryLines(detail) {
     "",
   ];
   const passed = steps.filter(step => step.Status === "passed").length;
+  if (run.resource_message) lines.push(run.resource_message);
   const burns = new Set(steps.map(step => step.Burn)).size;
   /* Steps the pipeline declares that this run never reached. They exist in the
      list because the plan is seeded at submission; counting them is the whole

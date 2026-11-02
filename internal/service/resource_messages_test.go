@@ -94,7 +94,7 @@ func (r *coverageReaderStub) ResourceCoverages(_ context.Context, ids []string) 
 	}
 	return out, nil
 }
-func TestResourceMessageUsesMessageFieldAndOneBoundedBatch(t *testing.T) {
+func TestResourceMessageUsesSeparateFieldAndOneBoundedBatch(t *testing.T) {
 	reader := &coverageReaderStub{}
 	s := &API{resourceCoverages: reader}
 	ids := []string{strings.Repeat("a", 32), strings.Repeat("b", 32)}
@@ -103,9 +103,29 @@ func TestResourceMessageUsesMessageFieldAndOneBoundedBatch(t *testing.T) {
 	if reader.calls != 1 || len(reader.ids) != 2 {
 		t.Fatal("not batched")
 	}
-	for _, run := range runs {
-		if !strings.Contains(run.DisplayReason, "2 steps") || !strings.Contains(run.DisplayReason, "oberth run resources --run "+run.ID) {
-			t.Fatal(run.DisplayReason)
+	for i, run := range runs {
+		if !strings.Contains(run.ResourceMessage, "2 steps") || !strings.Contains(run.ResourceMessage, "oberth run resources --run "+run.ID) {
+			t.Fatal(run.ResourceMessage)
+		}
+		if run.DisplayReason != []string{"running", "waiting"}[i] {
+			t.Fatal("resource notice changed the display reason")
+		}
+	}
+}
+
+func TestResourceMessagePreservesPresentationVocabulary(t *testing.T) {
+	s := &API{resourceCoverages: &coverageReaderStub{}}
+	for _, reason := range []string{"Priority normal: ordinary run.", "", "server restart, retry needed", "Execution deadline exceeded."} {
+		runs := []model.Run{{ID: strings.Repeat("a", 32), DisplayReason: reason, Error: "step-abc12345"}}
+		s.applyResourceMessages(t.Context(), runs)
+		s.applyResourceMessages(t.Context(), runs)
+		if runs[0].DisplayReason != reason || runs[0].Error != "step-abc12345" || strings.Count(runs[0].ResourceMessage, "2 steps") != 1 {
+			t.Fatalf("presentation vocabulary changed: %+v", runs[0])
+		}
+		b, err := json.Marshal(runs[0])
+		var fields map[string]any
+		if err != nil || json.Unmarshal(b, &fields) != nil || fields["display_reason"] != reason || fields["resource_message"] != runs[0].ResourceMessage {
+			t.Fatal("resource notice must have its own wire field")
 		}
 	}
 }

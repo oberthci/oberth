@@ -19,6 +19,9 @@ import (
 )
 
 type remoteRun struct {
+	// ResourceMessage is advice, separate from the exact status vocabulary.
+	ResourceMessage string `json:"resource_message"`
+
 	ID string
 	// QueueSequence orders runs; the oldest one on a page is the cursor for
 	// the next, older page. A scoped uplink gets none and pages by run ID
@@ -274,13 +277,13 @@ func datedRunCount(runs []remoteRun) int {
 }
 
 func displayRunReason(run remoteRun) string {
+	message := run.Reason
 	if run.DisplayReason != "" {
-		return run.DisplayReason
+		message = run.DisplayReason
+	} else if run.Scheduling != nil && displayRunStatus(run) == "queued" {
+		message = run.Scheduling.Message
 	}
-	if run.Scheduling != nil && displayRunStatus(run) == "queued" {
-		return run.Scheduling.Message
-	}
-	return run.Reason
+	return strings.TrimSpace(message + " " + run.ResourceMessage)
 }
 
 // remoteActiveRun is one /api/runs?view=active entry: the run, plus the
@@ -465,6 +468,11 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 	// The reason first, before the step list: a failed run is read to find out
 	// what went wrong, and burying it under timings makes the reader scroll
 	// past the answer.
+	if detail.Run.ResourceMessage != "" {
+		if _, err := fmt.Fprintln(output, detail.Run.ResourceMessage); err != nil {
+			return err
+		}
+	}
 	if detail.Run.DisplayReason != "" {
 		if _, err := fmt.Fprintln(output, detail.Run.DisplayReason); err != nil {
 			return err

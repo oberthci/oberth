@@ -20,6 +20,10 @@ Both requests and limits must fit. L uses half of the existing global maxima;
 XL reaches those global maxima. These are declaration ceilings, not a claim
 about host capacity or measured usage. They do not add limits to a container
 that omitted them. VM allocations retain their separate grants and bounds.
+A step with no limit remains unbounded, as it is today. The ceiling validates
+explicit declarations per container; it does not cap a whole workflow's resource
+use or account for simultaneous containers. Enforcement through aggregate
+CPU/memory admission comes with Stage C.
 The existing server workflow timeout also bounds explicit step deadlines;
 positive integer step deadlines are required when declared.
 
@@ -59,7 +63,11 @@ Unused templates do not inflate the count. Unsupported or excessive graphs
 remain unknown rather than reporting zero missing declarations.
 
 The existing run message reports the number of incomplete declarations and
-`oberth run resources --run <id> --include-failed`. No new run-row labels are added. Counts are
+`oberth run resources --run <id> --include-failed`. This notice is returned in
+`resource_message`, separately from the exact status vocabulary in
+`display_reason`. The dashboard appends it to the message cell after its usual
+status, schedule or release message; restart-warning styling remains intact.
+No new run-row labels are added. Counts are
 stored as optional numeric metadata in existing workflow timing JSON and read
 in indexed batches, through the read pool. Old immutable timing records stay
 unknown. Missing telemetry does not prevent execution or fabricate a count.

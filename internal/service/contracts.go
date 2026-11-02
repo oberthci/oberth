@@ -523,6 +523,9 @@ type PushResult struct {
 }
 
 type StatusResponse struct {
+	// ResourceMessage is advice, separate from the exact status vocabulary.
+	ResourceMessage string `json:"resource_message,omitempty"`
+
 	ScheduleEntry string               `json:"schedule_entry,omitempty"`
 	Scheduling    *model.RunScheduling `json:"scheduling,omitempty"`
 	DisplayStatus string               `json:"display_status,omitempty"`

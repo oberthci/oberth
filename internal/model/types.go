@@ -128,6 +128,9 @@ type RepositorySpec struct {
 }
 
 type Run struct {
+	// ResourceMessage is advice, separate from the exact status vocabulary.
+	ResourceMessage string `json:"resource_message,omitempty"`
+
 	EarlierAttempts int         `json:"earlier_attempts,omitempty"`
 	AutoRetryOf     string      `json:"auto_retry_of,omitempty"`
 	AutoRetriedBy   string      `json:"auto_retried_by,omitempty"`
