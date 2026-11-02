@@ -2,10 +2,12 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"testing"
 
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
@@ -62,9 +64,23 @@ func TestCollectArtifactsReportsRatherThanFailingTheRun(t *testing.T) {
 	if reason == "" {
 		t.Fatal("a failed collection reported nothing, so the loss would be silent")
 	}
-	jobs.reportArtifactFailure("run-1", reason)
-	if got := jobs.ArtifactFailure("run-1"); got != reason {
-		t.Fatalf("ArtifactFailure = %q, want %q", got, reason)
+	var recorded bool
+	jobs.auditor = &stubAuditor{onAppend: func(spec model.AuditActionSpec) {
+		var details struct {
+			Stored bool   `json:"stored"`
+			Reason string `json:"reason"`
+		}
+		if err := json.Unmarshal([]byte(spec.Details), &details); err != nil {
+			t.Fatal(err)
+		}
+		if spec.Action != "ci.argo.artifacts" || spec.ResourceID != "run-1" || details.Stored || details.Reason != reason {
+			t.Fatalf("failure audit = %+v: %+v", spec, details)
+		}
+		recorded = true
+	}}
+	jobs.recordArtifactFailure(context.Background(), "run-1", reason)
+	if !recorded {
+		t.Fatal("artifact failure lost its durable audit evidence")
 	}
 }
 

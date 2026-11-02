@@ -85,7 +85,6 @@ type ArgoJobs struct {
 	collector         ArtifactCollector
 	artifacts         ArtifactStore
 	artifactLimit     int64
-	artifactFailures  map[string]string
 	reconcilerHealthy ReconcilerHealthChecker
 
 	// identities holds the live per-repo identity maps. When non-nil,

@@ -85,22 +85,6 @@ func (jobs *ArgoJobs) auditArtifacts(ctx context.Context, runID string, details 
 	})
 }
 
-func (jobs *ArgoJobs) reportArtifactFailure(runID, reason string) {
-	jobs.mu.Lock()
-	if jobs.artifactFailures == nil {
-		jobs.artifactFailures = map[string]string{}
-	}
-	jobs.artifactFailures[runID] = reason
-	jobs.mu.Unlock()
-}
-
 func (jobs *ArgoJobs) recordArtifactFailure(ctx context.Context, runID, reason string) {
-	jobs.reportArtifactFailure(runID, reason)
 	jobs.auditArtifacts(ctx, runID, map[string]any{"stored": false, "reason": reason})
-}
-
-func (jobs *ArgoJobs) ArtifactFailure(runID string) string {
-	jobs.mu.Lock()
-	defer jobs.mu.Unlock()
-	return jobs.artifactFailures[runID]
 }
