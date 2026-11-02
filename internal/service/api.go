@@ -1034,32 +1034,11 @@ func (service *API) Grants(ctx context.Context, actor api.Actor, filter api.Gran
 	if service.promotionGrants == nil || service.runs == nil {
 		return nil, refuse(ErrUnavailable, "promotion grants")
 	}
-	storeFilter := model.PromotionGrantListFilter{
-		SourceSHA: filter.SHA,
-	}
-	if strings.TrimSpace(filter.Repository) != "" {
-		repository, err := service.runs.RepositoryByName(ctx, filter.Repository)
-		if err != nil {
-			return nil, err
-		}
-		storeFilter.RepoID = repository.ID
-	}
-	switch filter.Status {
-	case "active":
-		active := true
-		storeFilter.Active = &active
-	case "revoked", "expired", "consumed":
-		inactive := false
-		storeFilter.Active = &inactive
-	case "all", "":
-		// No filter.
-	default:
-		return nil, fmt.Errorf("%w: status must be one of: active, revoked, expired, consumed, all", ErrInvalidInput)
-	}
-	grants, err := service.promotionGrants.ListPromotionGrants(ctx, storeFilter)
+	grants, err := service.promotionGrantRows(ctx, filter.Repository, filter.SHA, filter.Status)
 	if err != nil {
 		return nil, err
 	}
+
 	result := make([]map[string]any, 0, len(grants))
 	for _, grant := range grants {
 		result = append(result, promotionGrantResponse(grant))

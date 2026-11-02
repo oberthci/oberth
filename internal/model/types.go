@@ -503,6 +503,7 @@ type PromotionGrantSpec struct {
 }
 
 type PromotionGrantListFilter struct {
+	Status    string // active, revoked, expired, consumed, all; empty preserves Active
 	RepoID    int64
 	SourceSHA string
 	Active    *bool // nil = all, true = active only, false = inactive only

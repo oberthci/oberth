@@ -163,7 +163,22 @@ SELECT id, repo_id, source_sha, target_ref, issuer, issuer_fingerprint, note,
 FROM promotion_grants
 WHERE (? = 0 OR repo_id = ?) AND (? = '' OR source_sha = ?)`
 	args := []any{filter.RepoID, filter.RepoID, filter.SourceSHA, strings.ToLower(filter.SourceSHA)}
-	if filter.Active != nil {
+	switch filter.Status {
+	case "", "all":
+	case "active":
+		query += ` AND revoked_at IS NULL AND consumed_at IS NULL AND expires_at > ?`
+		args = append(args, now)
+	case "revoked":
+		query += ` AND revoked_at IS NOT NULL`
+	case "consumed":
+		query += ` AND revoked_at IS NULL AND consumed_at IS NOT NULL`
+	case "expired":
+		query += ` AND revoked_at IS NULL AND consumed_at IS NULL AND expires_at <= ?`
+		args = append(args, now)
+	default:
+		return nil, fmt.Errorf("%w: promotion grant status", ErrInvalid)
+	}
+	if filter.Status == "" && filter.Active != nil {
 		if *filter.Active {
 			query += ` AND revoked_at IS NULL AND consumed_at IS NULL AND expires_at > ?`
 			args = append(args, now)
