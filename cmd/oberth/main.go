@@ -68,7 +68,7 @@ func main() {
 	}
 }
 
-const usageCommands = "admin, wait-idle, git-ssh, audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, schedules, fragments, artifacts, runs, run, promotion, log, repos, issues, attention, status, uplink, access, kubevirt, size, admission, secretstore, mcp, preflight, or version"
+const usageCommands = "admin, wait-idle, git-ssh, audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, schedules, fragments, artifacts, runs, run, promotion, log, repos, issues, status, uplink, access, kubevirt, size, admission, secretstore, mcp, preflight, or version"
 
 func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.Writer) (resultErr error) {
 	defer func() {
@@ -112,7 +112,6 @@ Commands:
   log           Show step logs for a run
   repos         List registered repositories
   issues        List and manage issues
-  attention     Show issues that need attention
   status        Show CI status for a ref
   uplink        Manage uplink identities
   access        Manage secret access grants

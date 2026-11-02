@@ -49,3 +49,16 @@ func TestAdminHelpNamesOnlySupportedMaintenance(t *testing.T) {
 		t.Fatalf("admin help: %v %s", err, &out)
 	}
 }
+
+func TestHelpOmitsRemovedAttentionCommand(t *testing.T) {
+	var out strings.Builder
+	if err := runCLI(t.Context(), []string{"--help"}, nil, &out); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "attention") || strings.Contains(usageCommands, "attention") {
+		t.Fatalf("help advertises removed attention command: %s; usage: %s", &out, usageCommands)
+	}
+	if !strings.Contains(out.String(), "issues") {
+		t.Fatalf("help omits supported issues command: %s", &out)
+	}
+}
