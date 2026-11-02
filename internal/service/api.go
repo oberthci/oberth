@@ -1526,44 +1526,10 @@ func (service *API) statusForBranchRef(ctx context.Context, repositoryName, sele
 // repository and run, overriding the response ref with the caller's original
 // selector (so "status main" shows ref "main" even when the run's own ref is
 // a promotion ref like "promotion/main/abcdef012345").
-func (service *API) statusFromRun(ctx context.Context, repository model.Repository, run model.Run, ref, actor string) (StatusResponse, error) {
-	presented := service.presentationRun(ctx, run)
-	response := StatusResponse{
-		Repository: repository, Run: run, Repo: repository.Name, Ref: ref,
-		SHA: run.SHA, RunID: run.ID, Status: wireRunStatus(visibleRun(run).Status), Stages: map[string]string{},
-		DisplayStatus:   presented.DisplayStatus,
-		DisplayReason:   presented.DisplayReason,
-		ResourceMessage: presented.ResourceMessage,
-		ScheduleEntry:   run.ScheduleEntry,
-	}
-	if service.history != nil {
-		var err error
-		response.Steps, err = service.stepsForRun(ctx, run)
-		if err != nil {
-			return StatusResponse{}, fmt.Errorf("load run steps: %w", err)
-		}
-		response.Stages, response.ExitCode = wireStages(response.Steps, run)
-	}
-	response.Scheduling = service.scheduling(ctx, run, response.Steps)
-	response.Run = presented
-	applyExecutionDisplay(&response.Run, response.Scheduling)
-	response.DisplayStatus, response.DisplayReason = response.Run.DisplayStatus, response.Run.DisplayReason
-	if presented.DisplayStatus == "queued" && response.Scheduling != nil {
-		response.DisplayReason = response.Scheduling.Message
-		response.Run.DisplayReason = response.DisplayReason
-	}
-	response.FailedStep = run.FailedStep
-	if service.issues != nil && run.RefKind == model.RefBranch {
-		issue, issueErr := service.issues.OpenCIIssue(ctx, repository.ID, run.Ref)
-		if issueErr != nil && !errors.Is(issueErr, store.ErrNotFound) {
-			return StatusResponse{}, fmt.Errorf("load run issue: %w", issueErr)
-		}
-		if issueErr == nil {
-			issueID := issue.ID
-			response.Issue = &issueID
-		}
-	}
-	return response, nil
+func (service *API) statusFromRun(ctx context.Context, repository model.Repository, run model.Run, ref, _ string) (StatusResponse, error) {
+	response, err := service.statusForRun(ctx, repository, run)
+	response.Ref = ref
+	return response, err
 }
 
 func wireRunStatus(status model.RunStatus) string {
