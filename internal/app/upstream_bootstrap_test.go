@@ -17,9 +17,8 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 
-	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
-	clienttesting "k8s.io/client-go/testing"
 
 	"github.com/oberthci/oberth/internal/testtimeout"
 )
@@ -386,49 +385,11 @@ func serveAuthProbe(t *testing.T, listener net.Listener, hostSigner ssh.Signer, 
 	result <- nil
 }
 
-func TestApplySecretForcesOwnershipOfHelmClaimedFields(t *testing.T) {
-	t.Parallel()
-	clientset := fake.NewClientset()
-	bootstrap := UpstreamSSHBootstrap{
-		Namespace: "oberth",
-		MutationGate: func(context.Context, string) error {
-			return nil
-		},
-	}
-	if err := bootstrap.applySecret(context.Background(), clientset, "oberth-known-hosts", map[string][]byte{
-		"known_hosts": []byte("codeberg.org ssh-ed25519 AAAA"),
-	}, ""); err != nil {
-		t.Fatalf("applySecret: %v", err)
-	}
-	var patches []clienttesting.PatchActionImpl
-	for _, action := range clientset.Actions() {
-		if patch, ok := action.(clienttesting.PatchActionImpl); ok {
-			patches = append(patches, patch)
-		}
-	}
-	if len(patches) != 1 {
-		t.Fatalf("expected exactly one patch action, got %d", len(patches))
-	}
-	patch := patches[0]
-	if patch.PatchType != types.ApplyPatchType {
-		t.Fatalf("expected server-side apply, got %q", patch.PatchType)
-	}
-	if patch.PatchOptions.FieldManager != bootstrapFieldManager {
-		t.Fatalf("expected field manager %q, got %q", bootstrapFieldManager, patch.PatchOptions.FieldManager)
-	}
-	// The chart's zero-prerequisite install pre-creates the upstream Secrets
-	// with helm owning .data; a non-forced apply fails closed against that
-	// placeholder ownership and breaks the first `oberth upstream add`.
-	if patch.PatchOptions.Force == nil || !*patch.PatchOptions.Force {
-		t.Fatal("bootstrap server-side apply must force ownership of its fields")
-	}
-}
-
 func TestApplySecretRefusesWithoutMutationGate(t *testing.T) {
 	t.Parallel()
 	clientset := fake.NewSimpleClientset()
-	bootstrap := UpstreamSSHBootstrap{Namespace: "oberth"}
-	err := bootstrap.applySecret(context.Background(), clientset, "oberth-known-hosts", nil, "")
+	bootstrap := UpstreamSSHBootstrap{Namespace: "oberth", Store: fixtureIdentityStore{client: func() (kubernetes.Interface, error) { return clientset, nil }, namespace: "oberth"}}
+	err := bootstrap.saveIdentity(context.Background(), "oberth-known-hosts", nil)
 	if err == nil {
 		t.Fatal("expected applySecret to fail without a mutation gate")
 	}

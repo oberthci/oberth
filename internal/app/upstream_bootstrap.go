@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	cryptorand "crypto/rand"
-	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -18,12 +17,7 @@ import (
 	"strings"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
-	"k8s.io/client-go/kubernetes"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -32,7 +26,6 @@ import (
 const (
 	maximumBootstrapMaterialBytes = 1 << 20
 	maximumConfirmationBytes      = 4 << 10
-	bootstrapFieldManager         = "oberth-upstream-bootstrap"
 	defaultSSHProbeTimeout        = 15 * time.Second
 )
 
@@ -42,16 +35,6 @@ var ErrUpstreamBootstrapIncomplete = errors.New("app: upstream bootstrap is inco
 // during an interactive confirmation prompt. Callers should propagate it to
 // produce a clean exit without an error dump.
 var ErrInterrupted = errors.New("interrupted")
-
-// UpstreamKeyFieldManager derives the per-upstream server-side-apply field
-// manager for the shared upstream-key Secret. Each upstream owns exactly its
-// own data keys under its own manager, so applying one upstream's key can
-// never prune another upstream's (or the shared fallback's) key material.
-// The upstream name is ValidateUpstreamName-restricted, keeping the manager
-// a plain ASCII identifier.
-func UpstreamKeyFieldManager(upstreamName string) string {
-	return bootstrapFieldManager + "-" + upstreamName
-}
 
 // SSHHostKeyScanner obtains the public host keys offered by one SSH endpoint.
 // The result is untrusted until the operator confirms its fingerprints.
@@ -66,7 +49,7 @@ type SSHAuthProbe func(context.Context, string, []byte, []byte) error
 
 // UpstreamSSHBootstrap ensures that the strict SSH identity used for an
 // upstream is either already projected or durably stored in name-scoped
-// Kubernetes Secrets. KubernetesClient is lazy so a fully configured install
+// OpenBao identity bundles. KubernetesClient is lazy so a fully configured install
 // does not need to contact the API during an ordinary upstream registration.
 type BootstrapIdentityStore interface {
 	Load(context.Context, string) (map[string][]byte, error)
@@ -78,12 +61,11 @@ type UpstreamSSHBootstrap struct {
 	Input  io.Reader
 	Output io.Writer
 
-	KubernetesClient func() (kubernetes.Interface, error)
-	ScanHostKeys     SSHHostKeyScanner
-	Probe            SSHAuthProbe
-	Random           io.Reader
+	ScanHostKeys SSHHostKeyScanner
+	Probe        SSHAuthProbe
+	Random       io.Reader
 	// MutationGate is the live daemon's fail-closed external audit gate. It is
-	// invoked immediately before each Kubernetes Secret patch.
+	// invoked immediately before each OpenBao identity bundle patch.
 	MutationGate func(context.Context, string) error
 
 	Namespace         string
@@ -94,15 +76,6 @@ type UpstreamSSHBootstrap struct {
 	PrivateKeyDataKey string
 	PublicKeyDataKey  string
 	KnownHostsDataKey string
-	// KeyFieldManager overrides the server-side-apply field manager for the
-	// private-key Secret apply only. Per-upstream registrations must supply a
-	// manager unique to the upstream: server-side apply prunes every field a
-	// manager previously owned but no longer applies, so re-using one shared
-	// manager for the shared Secret would delete every other upstream's key
-	// (and the shared fallback key) on each registration. Empty selects the
-	// shared default manager; the known-hosts apply always uses the shared
-	// manager because known_hosts is a single merged document.
-	KeyFieldManager string
 
 	// Registration polling: after printing a generated or Secret-recovered
 	// deploy key whose authentication probe does not yet succeed, Ensure waits
@@ -172,14 +145,7 @@ func (bootstrap UpstreamSSHBootstrap) Ensure(ctx context.Context, baseURL string
 		confirmations = newConfirmationReader(bootstrap.Input)
 	}
 
-	var client kubernetes.Interface
-	if bootstrap.Store == nil {
-		client, err = bootstrap.KubernetesClient()
-		if err != nil {
-			return UpstreamSSHIdentity{}, fmt.Errorf("create identity storage client: %w", err)
-		}
-	}
-	persisted, err := bootstrap.loadPersisted(ctx, client)
+	persisted, err := bootstrap.loadPersisted(ctx)
 	if err != nil {
 		return UpstreamSSHIdentity{}, err
 	}
@@ -206,25 +172,25 @@ func (bootstrap UpstreamSSHBootstrap) Ensure(ctx context.Context, baseURL string
 	}
 
 	if acquiredHosts {
-		if err := bootstrap.applySecret(ctx, client, bootstrap.KnownHostsSecret, map[string][]byte{
+		if err := bootstrap.saveIdentity(ctx, bootstrap.KnownHostsSecret, map[string][]byte{
 			bootstrap.KnownHostsDataKey: knownHosts,
-		}, bootstrapFieldManager); err != nil {
+		}); err != nil {
 			return UpstreamSSHIdentity{}, err
 		}
-		if err := bootstrap.verifySecretData(ctx, client, bootstrap.KnownHostsSecret, map[string][]byte{
+		if err := bootstrap.verifyIdentityData(ctx, bootstrap.KnownHostsSecret, map[string][]byte{
 			bootstrap.KnownHostsDataKey: knownHosts,
 		}); err != nil {
 			return UpstreamSSHIdentity{}, err
 		}
 	}
 	if generated {
-		if err := bootstrap.applySecret(ctx, client, bootstrap.PrivateKeySecret, map[string][]byte{
+		if err := bootstrap.saveIdentity(ctx, bootstrap.PrivateKeySecret, map[string][]byte{
 			bootstrap.PrivateKeyDataKey: identity.privateKey,
 			bootstrap.PublicKeyDataKey:  identity.publicKey,
-		}, bootstrap.KeyFieldManager); err != nil {
+		}); err != nil {
 			return UpstreamSSHIdentity{}, err
 		}
-		if err := bootstrap.verifySecretData(ctx, client, bootstrap.PrivateKeySecret, map[string][]byte{
+		if err := bootstrap.verifyIdentityData(ctx, bootstrap.PrivateKeySecret, map[string][]byte{
 			bootstrap.PrivateKeyDataKey: identity.privateKey,
 			bootstrap.PublicKeyDataKey:  identity.publicKey,
 		}); err != nil {
@@ -350,16 +316,16 @@ func terseProbeError(err error) string {
 }
 
 func (bootstrap UpstreamSSHBootstrap) validate() error {
-	if bootstrap.Input == nil || bootstrap.Output == nil || (bootstrap.KubernetesClient == nil && bootstrap.Store == nil) || bootstrap.ScanHostKeys == nil || bootstrap.Probe == nil {
-		return errors.New("app: upstream bootstrap input, output, Kubernetes client, host-key scanner, and authentication probe are required")
+	if bootstrap.Input == nil || bootstrap.Output == nil || bootstrap.Store == nil || bootstrap.ScanHostKeys == nil || bootstrap.Probe == nil {
+		return errors.New("app: upstream bootstrap input, output, identity store, host-key scanner, and authentication probe are required")
 	}
 	if bootstrap.PrivateKeySecret == bootstrap.KnownHostsSecret {
-		return errors.New("app: upstream private-key and known-hosts Secrets must be distinct")
+		return errors.New("app: upstream private-key and known-hosts identity bundles must be distinct")
 	}
 	for kind, value := range map[string]string{
 		"namespace":          bootstrap.Namespace,
-		"private-key Secret": bootstrap.PrivateKeySecret,
-		"known-hosts Secret": bootstrap.KnownHostsSecret,
+		"private-key bundle": bootstrap.PrivateKeySecret,
+		"known-hosts bundle": bootstrap.KnownHostsSecret,
 	} {
 		if problems := validation.IsDNS1123Subdomain(value); len(problems) != 0 {
 			return fmt.Errorf("app: invalid %s %q: %s", kind, value, strings.Join(problems, "; "))
@@ -552,116 +518,6 @@ func (bootstrap UpstreamSSHBootstrap) printPersistedIdentity(identity privateIde
 		"\nPersisted upstream deploy public key (%s):\n\n%s\nEnsure this public key is registered for %s:%s with repository write access.\n",
 		identity.fingerprint, identity.publicKey, host, port)
 	return err
-}
-
-func (bootstrap UpstreamSSHBootstrap) loadPersisted(ctx context.Context, client kubernetes.Interface) (secretMaterial, error) {
-	if bootstrap.Store != nil {
-		keys, err := bootstrap.Store.Load(ctx, bootstrap.PrivateKeySecret)
-		if err != nil {
-			return secretMaterial{}, err
-		}
-		hosts, err := bootstrap.Store.Load(ctx, bootstrap.KnownHostsSecret)
-		if err != nil {
-			return secretMaterial{}, err
-		}
-		return secretMaterial{privateKey: keys[bootstrap.PrivateKeyDataKey], publicKey: keys[bootstrap.PublicKeyDataKey], knownHosts: hosts[bootstrap.KnownHostsDataKey]}, nil
-	}
-
-	privateSecret, err := client.CoreV1().Secrets(bootstrap.Namespace).Get(ctx, bootstrap.PrivateKeySecret, metav1.GetOptions{})
-	if err != nil && !apierrors.IsNotFound(err) {
-		return secretMaterial{}, fmt.Errorf("app: read upstream private-key Secret %s/%s: %w", bootstrap.Namespace, bootstrap.PrivateKeySecret, err)
-	}
-	knownHostsSecret, err := client.CoreV1().Secrets(bootstrap.Namespace).Get(ctx, bootstrap.KnownHostsSecret, metav1.GetOptions{})
-	if err != nil && !apierrors.IsNotFound(err) {
-		return secretMaterial{}, fmt.Errorf("app: read upstream known-hosts Secret %s/%s: %w", bootstrap.Namespace, bootstrap.KnownHostsSecret, err)
-	}
-	var material secretMaterial
-	if privateSecret != nil {
-		material.privateKey = append([]byte(nil), privateSecret.Data[bootstrap.PrivateKeyDataKey]...)
-		material.publicKey = append([]byte(nil), privateSecret.Data[bootstrap.PublicKeyDataKey]...)
-	}
-	if knownHostsSecret != nil {
-		material.knownHosts = append([]byte(nil), knownHostsSecret.Data[bootstrap.KnownHostsDataKey]...)
-	}
-	return material, nil
-}
-
-func (bootstrap UpstreamSSHBootstrap) applySecret(ctx context.Context, client kubernetes.Interface, name string, data map[string][]byte, fieldManager string) error {
-	if bootstrap.Store != nil {
-		if bootstrap.MutationGate == nil {
-			return errors.New("identity write requires the audit mutation gate")
-		}
-		if err := bootstrap.MutationGate(ctx, "upstream.identity."+name); err != nil {
-			return err
-		}
-		return bootstrap.Store.Save(ctx, name, data)
-	}
-
-	if bootstrap.MutationGate == nil {
-		return errors.New("app: audit mutation gate is required before applying an upstream Secret")
-	}
-	if fieldManager == "" {
-		fieldManager = bootstrapFieldManager
-	}
-	if err := bootstrap.MutationGate(ctx, "upstream.secret."+name); err != nil {
-		return fmt.Errorf("app: audit mutation gate before upstream Secret %s/%s: %w", bootstrap.Namespace, name, err)
-	}
-	secret := corev1.Secret{
-		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: bootstrap.Namespace},
-		Type:       corev1.SecretTypeOpaque,
-		Data:       data,
-	}
-	body, err := json.Marshal(secret)
-	if err != nil {
-		return fmt.Errorf("app: encode upstream Secret apply: %w", err)
-	}
-	// The chart's zero-prerequisite install pre-creates these Secrets with an
-	// empty data map, so the "helm" field manager owns .data before the first
-	// bootstrap write, and every later `helm upgrade` re-claims it via the
-	// lookup-preserving template. The bootstrap is the authoritative writer of
-	// exactly the fields it applies (audit-gated immediately above), so it must
-	// force server-side-apply conflicts as Kubernetes prescribes for
-	// controllers; a non-forced apply fails closed against the placeholder.
-	force := true
-	if _, err := client.CoreV1().Secrets(bootstrap.Namespace).Patch(ctx, name, types.ApplyPatchType, body, metav1.PatchOptions{
-		FieldManager: fieldManager,
-		Force:        &force,
-	}); err != nil {
-		return fmt.Errorf("app: apply upstream Secret %s/%s: %w", bootstrap.Namespace, name, err)
-	}
-	return nil
-}
-
-func (bootstrap UpstreamSSHBootstrap) verifySecretData(ctx context.Context, client kubernetes.Interface, name string, expected map[string][]byte) error {
-	if bootstrap.Store != nil {
-		data, err := bootstrap.Store.Load(ctx, name)
-		if err != nil {
-			return err
-		}
-		defer func() {
-			for _, v := range data {
-				clear(v)
-			}
-		}()
-		for key, value := range expected {
-			if !bytes.Equal(data[key], value) {
-				return errors.New("identity store readback mismatch")
-			}
-		}
-		return nil
-	}
-
-	secret, err := client.CoreV1().Secrets(bootstrap.Namespace).Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("app: verify upstream Secret %s/%s: %w", bootstrap.Namespace, name, err)
-	}
-	for key, value := range expected {
-		if !bytes.Equal(secret.Data[key], value) {
-			return fmt.Errorf("app: upstream Secret %s/%s did not retain data key %s", bootstrap.Namespace, name, key)
-		}
-	}
-	return nil
 }
 
 func readPrivateIdentityFile(path string) (privateIdentity, error) {
@@ -1062,3 +918,41 @@ type stringAddress string
 
 func (address stringAddress) Network() string { return "tcp" }
 func (address stringAddress) String() string  { return string(address) }
+
+func (bootstrap UpstreamSSHBootstrap) loadPersisted(ctx context.Context) (secretMaterial, error) {
+	keys, err := bootstrap.Store.Load(ctx, bootstrap.PrivateKeySecret)
+	if err != nil {
+		return secretMaterial{}, err
+	}
+	hosts, err := bootstrap.Store.Load(ctx, bootstrap.KnownHostsSecret)
+	if err != nil {
+		return secretMaterial{}, err
+	}
+	return secretMaterial{privateKey: keys[bootstrap.PrivateKeyDataKey], publicKey: keys[bootstrap.PublicKeyDataKey], knownHosts: hosts[bootstrap.KnownHostsDataKey]}, nil
+}
+func (bootstrap UpstreamSSHBootstrap) saveIdentity(ctx context.Context, name string, data map[string][]byte) error {
+	if bootstrap.MutationGate == nil {
+		return errors.New("identity write requires the audit mutation gate")
+	}
+	if err := bootstrap.MutationGate(ctx, "upstream.identity."+name); err != nil {
+		return err
+	}
+	return bootstrap.Store.Save(ctx, name, data)
+}
+func (bootstrap UpstreamSSHBootstrap) verifyIdentityData(ctx context.Context, name string, expected map[string][]byte) error {
+	data, err := bootstrap.Store.Load(ctx, name)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		for _, v := range data {
+			clear(v)
+		}
+	}()
+	for key, value := range expected {
+		if !bytes.Equal(data[key], value) {
+			return fmt.Errorf("identity store did not retain data key %s", key)
+		}
+	}
+	return nil
+}

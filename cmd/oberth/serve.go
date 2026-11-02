@@ -47,7 +47,6 @@ import (
 	"github.com/oberthci/oberth/pkg/periapsis"
 
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -563,7 +562,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err := store.SweepBackupStagingAtStartup(options.database); err != nil {
 		logger.Printf("WARNING: interrupted database snapshot cleanup incomplete; inspect/remove the named stale entry: %v", err)
 	}
-	if identityStoreEnabled() {
+	{
 		if err := bootstrapRuntimeIdentities(ctx, &options); err != nil {
 			return fmt.Errorf("load OpenBao identities: %w", err)
 		}
@@ -833,14 +832,8 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 			options.sizeWeights.XL, budget, options.maxConcurrent, options.sizeWeights.M, budget)
 	}
 	retention.AcquirePurge = scheduler.AcquireEvidencePurge
-	var secretConfigured func(context.Context, []model.Upstream) error
-	if !identityStoreEnabled() {
-		secretConfigured = func(ctx context.Context, registered []model.Upstream) error {
-			return checkUpstreamSecretConfigured(ctx, kube, options.namespace, options.upstreamKey, options.knownHosts, registered)
-		}
-	}
 	writerProgress := &liveness.Heartbeat{}
-	health := app.Health{WriterReady: writerProgress.ProbeError, Store: database, Audit: anchors.Ready, VCSCache: &app.VCSSnapshot{}, Configured: upstreamReadinessProbe(options, secretConfigured), VCS: func(ctx context.Context, upstream model.Upstream) error {
+	health := app.Health{WriterReady: writerProgress.ProbeError, Store: database, Audit: anchors.Ready, VCSCache: &app.VCSSnapshot{}, Configured: upstreamReadinessProbe(options), VCS: func(ctx context.Context, upstream model.Upstream) error {
 		if upstream.Kind == "local" {
 			info, err := os.Stat(upstream.BaseURL)
 			if err != nil {
@@ -1891,52 +1884,6 @@ func secretStoreStatus(options serveOptions) *app.SecretStoreStatus {
 		Role:       options.secretStoreRole,
 		Transport:  transport,
 	}
-}
-
-// checkUpstreamSecretConfigured returns nil when both the upstream-key and
-// known-hosts Secrets contain data matching the expected keys. This bridges
-// the ~60s kubelet Secret-projection delay after `upstream add`: the Secret
-// already holds the key before the projected volume mount catches up.
-func checkUpstreamSecretConfigured(
-	ctx context.Context,
-	kube kubernetes.Interface,
-	namespace, upstreamKeyPath, knownHostsPath string,
-	registered []model.Upstream,
-) error {
-	secretCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-
-	keySecret, err := kube.CoreV1().Secrets(namespace).Get(secretCtx, defaultUpstreamKeySecret, metav1.GetOptions{})
-	if err != nil {
-		return err
-	}
-	hostsSecret, err := kube.CoreV1().Secrets(namespace).Get(secretCtx, defaultUpstreamKnownHostsSecret, metav1.GetOptions{})
-	if err != nil {
-		return err
-	}
-
-	hostsKey := filepath.Base(knownHostsPath)
-	if len(hostsSecret.Data[hostsKey]) == 0 {
-		return errors.New("known_hosts Secret has no data for the expected key")
-	}
-
-	// Check the shared upstream key.
-	keyFile := filepath.Base(upstreamKeyPath)
-	if len(keySecret.Data[keyFile]) > 0 {
-		return nil
-	}
-
-	// Check per-upstream dedicated keys.
-	for _, upstream := range registered {
-		if upstream.Kind != "ssh" || upstream.KeyName == "" || !app.ValidUpstreamKeyName(upstream.KeyName) {
-			continue
-		}
-		if len(keySecret.Data[upstream.KeyName]) > 0 {
-			return nil
-		}
-	}
-
-	return errors.New("upstream key Secret has no matching data key")
 }
 
 func loadTSARoots(path string) (*x509.CertPool, error) {

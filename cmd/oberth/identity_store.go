@@ -25,8 +25,6 @@ import (
 
 const identityRoot = "/run/oberth-identities"
 
-func identityStoreEnabled() bool { return os.Getenv("OBERTH_IDENTITY_STORE") == "openbao" }
-
 type baoIdentityStore struct {
 	client    *secretstore.Client
 	namespace string

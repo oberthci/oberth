@@ -194,10 +194,10 @@ func TestAdministrativeBootstrapRegistersUpstreamAndBoundToken(t *testing.T) {
 	}, &upstreamOutput, upstreamDependencies{
 		input:        strings.NewReader(""),
 		mutationGate: allowTestMutation,
-		kubernetesClient: func() (kubernetes.Interface, error) {
+		identityStore: fixtureStoreFactory(func() (kubernetes.Interface, error) {
 			t.Fatal("Kubernetes must not be contacted for projected credentials")
 			return nil, nil
-		},
+		}),
 		scanHostKeys: func(context.Context, string, string) ([]ssh.PublicKey, error) {
 			t.Fatal("host-key scanner must not run for projected credentials")
 			return nil, nil

@@ -19,10 +19,6 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
-	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
@@ -52,11 +48,11 @@ func defaultPodNamespace() string {
 }
 
 type upstreamDependencies struct {
-	input            io.Reader
-	kubernetesClient func() (kubernetes.Interface, error)
-	scanHostKeys     app.SSHHostKeyScanner
-	probe            app.SSHAuthProbe
-	mutationGate     func(context.Context, string, string) error
+	input         io.Reader
+	identityStore func(string) (app.BootstrapIdentityStore, error)
+	scanHostKeys  app.SSHHostKeyScanner
+	probe         app.SSHAuthProbe
+	mutationGate  func(context.Context, string, string) error
 	// probeInterval and probeWait override the registration-wait timings for
 	// tests; zero values select the production defaults (10s / 10m).
 	probeInterval time.Duration
@@ -65,7 +61,7 @@ type upstreamDependencies struct {
 
 // hostUpstreamDeps holds injectable dependencies for the host-side
 // upstream add flow. The host never dials the pod-private mutation gate,
-// database, or Kubernetes API for Secret mutations. A provided key is
+// database, or Kubernetes API for identity mutations. A provided key is
 // streamed over kubectl exec stdin to the in-pod provide-key handler,
 // which gates, applies, and verifies.
 type hostUpstreamDeps struct {
@@ -104,13 +100,11 @@ func runUpstream(ctx context.Context, arguments []string, output io.Writer) erro
 	if inClusterErr == nil {
 		inCluster.Timeout = 10 * time.Second
 		return runUpstreamWithDependencies(ctx, arguments, output, upstreamDependencies{
-			input: os.Stdin,
-			kubernetesClient: func() (kubernetes.Interface, error) {
-				return kubernetes.NewForConfig(inCluster)
-			},
-			scanHostKeys: app.ScanSSHHostKeys,
-			probe:        app.ProbeSSHAuthentication,
-			mutationGate: requestLiveAdminMutationGate,
+			input:         os.Stdin,
+			identityStore: func(namespace string) (app.BootstrapIdentityStore, error) { return newBaoIdentityStore(namespace) },
+			scanHostKeys:  app.ScanSSHHostKeys,
+			probe:         app.ProbeSSHAuthentication,
+			mutationGate:  requestLiveAdminMutationGate,
 		})
 	}
 	// Host mode: provide-key is only available inside the Oberth pod.
@@ -120,7 +114,7 @@ func runUpstream(ctx context.Context, arguments []string, output io.Writer) erro
 	// Host mode for "add": defer kubeconfig loading to first use so that
 	// --help does not fail on a host without a kubeconfig. The host never
 	// dials the pod-private mutation gate, database, or Kubernetes API for
-	// Secret mutations — it execs into the pod for all gated operations.
+	// identity mutations — it execs into the pod for all gated operations.
 	return runUpstreamAddFromHost(ctx, arguments[1:], output, hostUpstreamDeps{
 		input: os.Stdin,
 		loadTarget: func() (string, string, error) {
@@ -151,14 +145,14 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 	flags := flag.NewFlagSet("upstream add", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path (in-pod; requires the live admin daemon)")
-	upstreamKey := flags.String("upstream-key", "/etc/oberth/upstream-key/id_ed25519", "upstream SSH private key")
-	knownHosts := flags.String("known-hosts", "/etc/oberth/known-hosts/known_hosts", "upstream known_hosts")
+	upstreamKey := flags.String("upstream-key", identityRoot+"/upstream/id_ed25519", "upstream SSH private key")
+	knownHosts := flags.String("known-hosts", identityRoot+"/hosts/known_hosts", "upstream known_hosts")
 	namespace := flags.String("namespace", defaultPodNamespace(), "Kubernetes namespace")
-	upstreamKeySecret := flags.String("upstream-key-secret", "oberth-upstream-key", "Secret holding the upstream SSH private keys")
-	knownHostsSecret := flags.String("known-hosts-secret", "oberth-known-hosts", "upstream known_hosts Secret")
+	upstreamKeySecret := flags.String("upstream-key-secret", "oberth-upstream-key", "OpenBao identity bundle holding upstream SSH keys")
+	knownHostsSecret := flags.String("known-hosts-secret", "oberth-known-hosts", "OpenBao known_hosts identity bundle")
 	noWait := flags.Bool("no-wait", false, "print the deploy key and exit immediately instead of waiting for its registration")
 	autoYes := flags.Bool("yes", false, "auto-accept key generation and host-key prompts")
-	dedicatedKey := flags.Bool("dedicated-key", false, "provision a dedicated SSH identity for this upstream instead of the shared key (stored as an additional data key of the upstream-key Secret)")
+	dedicatedKey := flags.Bool("dedicated-key", false, "provision a dedicated SSH identity for this upstream instead of the shared key (stored in the OpenBao upstream-key bundle)")
 	expectedHostFingerprint := flags.String("expected-host-fingerprint", "", "expected SSH host-key fingerprint (SHA256:...) for unattended bootstrap of unknown forges")
 	if err := flags.Parse(arguments[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -180,10 +174,10 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 		return err
 	}
 	// With --dedicated-key, this upstream gets its own identity stored as an
-	// additional data key of the one chart-owned upstream-key Secret. The
-	// existing whole-Secret volume mount projects it as a file beside the
+	// additional data key of the one chart-owned upstream-key bundle. The
+	// existing whole-OpenBao tmpfs mount projects it as a file beside the
 	// shared key, so the server reads it from tmpfs without any Kubernetes
-	// API access and RBAC stays scoped to the two named Secrets. Without the
+	// API access and RBAC stays scoped to the two named identity bundles. Without the
 	// flag — and for every pre-existing upstream row — the shared key keeps
 	// today's semantics exactly, including the no-API projected fast path.
 	if *dedicatedKey && kind != "ssh" {
@@ -194,17 +188,18 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 		keyName = app.UpstreamKeyDataKey(filepath.Base(*upstreamKey), name)
 	}
 	var identityStore app.BootstrapIdentityStore
-	if identityStoreEnabled() {
-		configured, err := newBaoIdentityStore(*namespace)
+	if kind == "ssh" {
+		if dependencies.identityStore == nil {
+			return errors.New("OpenBao identity store is required")
+		}
+		configured, err := dependencies.identityStore(*namespace)
 		if err != nil {
 			return err
 		}
 		identityStore = configured
-		*upstreamKey = identityRoot + "/upstream/id_ed25519"
-		*knownHosts = identityRoot + "/hosts/known_hosts"
 	}
 	if kind == "ssh" {
-		privateKeyPath, privateDataKey, keyFieldManager := *upstreamKey, filepath.Base(*upstreamKey), ""
+		privateKeyPath, privateDataKey := *upstreamKey, filepath.Base(*upstreamKey)
 		if keyName != "" {
 			// The dedicated identity lives beside the shared one: the fast
 			// path re-uses an already projected dedicated key, and a missing
@@ -212,7 +207,6 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 			// under this upstream's own server-side-apply field manager.
 			privateKeyPath = filepath.Join(filepath.Dir(*upstreamKey), keyName)
 			privateDataKey = keyName
-			keyFieldManager = app.UpstreamKeyFieldManager(name)
 		}
 		secretGate := func(ctx context.Context, operation string) error {
 			if dependencies.mutationGate == nil {
@@ -223,7 +217,6 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 		if _, err := (app.UpstreamSSHBootstrap{
 			Store: identityStore,
 			Input: dependencies.input, Output: output,
-			KubernetesClient:        dependencies.kubernetesClient,
 			ScanHostKeys:            dependencies.scanHostKeys,
 			Probe:                   dependencies.probe,
 			Namespace:               *namespace,
@@ -234,7 +227,6 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 			PrivateKeyDataKey:       privateDataKey,
 			PublicKeyDataKey:        privateDataKey + ".pub",
 			KnownHostsDataKey:       filepath.Base(*knownHosts),
-			KeyFieldManager:         keyFieldManager,
 			MutationGate:            secretGate,
 			ProbeInterval:           dependencies.probeInterval,
 			ProbeWait:               dependencies.probeWait,
@@ -276,7 +268,7 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 	if keyName != "" {
 		// The server assembles its SSH configuration once at startup, and the
 		// kubelet needs a short interval to project a freshly applied data
-		// key onto the Secret volume. Without a restart, Git operations for
+		// key onto the OpenBao tmpfs. Without a restart, Git operations for
 		// this upstream keep using the shared fallback key.
 		if _, err := fmt.Fprintf(output,
 			"Per-upstream key stored as data key %s. Restart the server (kubectl rollout restart deploy/oberth) to activate it for Git operations.\n",
@@ -300,8 +292,8 @@ func runUpstreamAddFromHost(ctx context.Context, arguments []string, output io.W
 	flags := flag.NewFlagSet("upstream add", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	namespace := flags.String("namespace", defaultPodNamespace(), "Kubernetes namespace")
-	upstreamKeySecret := flags.String("upstream-key-secret", defaultUpstreamKeySecret, "Secret holding the upstream SSH private keys")
-	knownHostsSecret := flags.String("known-hosts-secret", defaultUpstreamKnownHostsSecret, "upstream known_hosts Secret")
+	upstreamKeySecret := flags.String("upstream-key-secret", defaultUpstreamKeySecret, "OpenBao identity bundle holding upstream SSH keys")
+	knownHostsSecret := flags.String("known-hosts-secret", defaultUpstreamKnownHostsSecret, "OpenBao known_hosts identity bundle")
 	autoYes := flags.Bool("yes", false, "auto-accept key generation and host-key prompts")
 	dedicatedKey := flags.Bool("dedicated-key", false, "provision a dedicated SSH identity for this upstream")
 	expectedHostFingerprint := flags.String("expected-host-fingerprint", "", "expected SSH host-key fingerprint (SHA256:...)")
@@ -525,7 +517,7 @@ func runUpstreamProvideKey(ctx context.Context, arguments []string, input io.Rea
 	flags.SetOutput(io.Discard)
 	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path")
 	namespace := flags.String("namespace", defaultPodNamespace(), "Kubernetes namespace")
-	upstreamKeySecret := flags.String("upstream-key-secret", defaultUpstreamKeySecret, "Secret holding the upstream SSH private keys")
+	upstreamKeySecret := flags.String("upstream-key-secret", defaultUpstreamKeySecret, "OpenBao identity bundle holding upstream SSH keys")
 	dedicatedKey := flags.Bool("dedicated-key", false, "store as a per-upstream dedicated key")
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -545,10 +537,8 @@ func runUpstreamProvideKey(ctx context.Context, arguments []string, input io.Rea
 
 	// Determine data keys and field manager.
 	dataKey := "id_ed25519"
-	fieldManager := "oberth-upstream-bootstrap"
 	if *dedicatedKey {
 		dataKey = app.UpstreamKeyDataKey(dataKey, name)
-		fieldManager = app.UpstreamKeyFieldManager(name)
 	}
 	publicDataKey := dataKey + ".pub"
 
@@ -581,14 +571,14 @@ func runUpstreamProvideKey(ctx context.Context, arguments []string, input io.Rea
 	}
 	publicKey := append(bytes.TrimSpace(ssh.MarshalAuthorizedKey(signer.PublicKey())), []byte(" oberth\n")...)
 
-	if identityStoreEnabled() {
+	{
 		if dependencies.mutationGate == nil {
 			return errors.New("admin audit mutation gate is unavailable")
 		}
 		if err := dependencies.mutationGate(ctx, "upstream.identity.import", *databasePath); err != nil {
 			return err
 		}
-		store, err := newBaoIdentityStore(*namespace)
+		store, err := dependencies.identityStore(*namespace)
 		if err != nil {
 			return err
 		}
@@ -598,69 +588,7 @@ func runUpstreamProvideKey(ctx context.Context, arguments []string, input io.Rea
 		_, err = fmt.Fprintf(output, "Stored existing upstream identity in OpenBao (%s).\n", ssh.FingerprintSHA256(signer.PublicKey()))
 		return err
 	}
-	// Get Kubernetes client.
-	if dependencies.kubernetesClient == nil {
-		return errors.New("kubernetes client is required for upstream provide-key")
-	}
-	client, err := dependencies.kubernetesClient()
-	if err != nil {
-		return fmt.Errorf("create Kubernetes client: %w", err)
-	}
 
-	// Check overwrite: refuse to replace an existing key at this data key.
-	existing, err := client.CoreV1().Secrets(*namespace).Get(ctx, *upstreamKeySecret, metav1.GetOptions{})
-	if err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("read Secret %s/%s: %w", *namespace, *upstreamKeySecret, err)
-	}
-	if err == nil && len(existing.Data[dataKey]) > 0 {
-		return fmt.Errorf("the Secret %s/%s already holds a key at %s; refusing to overwrite (delete the data key first if replacement is intended)", *namespace, *upstreamKeySecret, dataKey)
-	}
-
-	// Gate: the live daemon's fail-closed audit gate must approve before
-	// any Secret mutation.
-	if dependencies.mutationGate == nil {
-		return errors.New("admin audit mutation gate is unavailable")
-	}
-	if err := dependencies.mutationGate(ctx, "upstream.secret."+*upstreamKeySecret, *databasePath); err != nil {
-		return err
-	}
-
-	// Apply via SSA patch — the same pattern as UpstreamSSHBootstrap.applySecret.
-	data := map[string][]byte{
-		dataKey:       privateKey,
-		publicDataKey: publicKey,
-	}
-	secret := corev1.Secret{
-		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
-		ObjectMeta: metav1.ObjectMeta{Name: *upstreamKeySecret, Namespace: *namespace},
-		Type:       corev1.SecretTypeOpaque,
-		Data:       data,
-	}
-	body, err := json.Marshal(secret)
-	if err != nil {
-		return fmt.Errorf("encode upstream Secret apply: %w", err)
-	}
-	force := true
-	if _, err := client.CoreV1().Secrets(*namespace).Patch(ctx, *upstreamKeySecret, types.ApplyPatchType, body, metav1.PatchOptions{
-		FieldManager: fieldManager,
-		Force:        &force,
-	}); err != nil {
-		return fmt.Errorf("apply upstream Secret %s/%s: %w", *namespace, *upstreamKeySecret, err)
-	}
-
-	// Verify readback.
-	verifySecret, err := client.CoreV1().Secrets(*namespace).Get(ctx, *upstreamKeySecret, metav1.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("verify upstream Secret %s/%s: %w", *namespace, *upstreamKeySecret, err)
-	}
-	if !bytes.Equal(verifySecret.Data[dataKey], privateKey) {
-		return fmt.Errorf("upstream Secret %s/%s did not retain data key %s", *namespace, *upstreamKeySecret, dataKey)
-	}
-
-	if _, err := fmt.Fprintf(output, "Stored the provided key in Secret %s/%s.\n", *namespace, *upstreamKeySecret); err != nil {
-		return err
-	}
-	return nil
 }
 
 // readLineFromReader reads one line from reader without buffering ahead. This
@@ -773,7 +701,7 @@ func isShellSafe(r rune) bool {
 // runUpstreamList prints every configured upstream with its SSH key
 // fingerprint. An upstream with a dedicated key name reads the projected
 // per-upstream key file beside the shared --upstream-key; others use the
-// shared key. Everything comes from the Secret volume mount, so listing
+// shared key. Everything comes from the OpenBao tmpfs mount, so listing
 // never contacts the Kubernetes API. Listing is read-only: no mutation gate
 // is required and an unreadable key degrades to "-" instead of failing the
 // listing. Only fingerprints of the public halves are ever printed.
@@ -781,11 +709,9 @@ func runUpstreamList(ctx context.Context, arguments []string, output io.Writer) 
 	flags := flag.NewFlagSet("upstream list", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path (in-pod; requires the live admin daemon)")
-	upstreamKey := flags.String("upstream-key", "/etc/oberth/upstream-key/id_ed25519", "upstream SSH private key")
-	knownHosts := flags.String("known-hosts", "/etc/oberth/known-hosts/known_hosts", "upstream known_hosts")
-	if identityStoreEnabled() {
-		*upstreamKey = identityRoot + "/upstream/id_ed25519"
-		*knownHosts = identityRoot + "/hosts/known_hosts"
+	upstreamKey := flags.String("upstream-key", identityRoot+"/upstream/id_ed25519", "upstream SSH private key")
+	knownHosts := flags.String("known-hosts", identityRoot+"/hosts/known_hosts", "upstream known_hosts")
+	{
 	}
 	check := flags.Bool("check", false, "authenticate to each SSH upstream now and report whether the forge still accepts its key")
 	if err := flags.Parse(arguments); err != nil {
@@ -1197,8 +1123,8 @@ func runRepoVerify(ctx context.Context, arguments []string, output io.Writer) er
 	flags.SetOutput(io.Discard)
 	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path")
 	gitCacheRoot := flags.String("git-cache-root", "/data/git", "root directory for bare Git caches")
-	upstreamKey := flags.String("upstream-key", "/etc/oberth/upstream-key/id_ed25519", "upstream SSH private key")
-	knownHosts := flags.String("known-hosts", "/etc/oberth/known-hosts/known_hosts", "pinned upstream known_hosts")
+	upstreamKey := flags.String("upstream-key", identityRoot+"/upstream/id_ed25519", "upstream SSH private key")
+	knownHosts := flags.String("known-hosts", identityRoot+"/hosts/known_hosts", "pinned upstream known_hosts")
 	all := flags.Bool("all", false, "verify every registered repository")
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -1406,7 +1332,7 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	flags.SetOutput(io.Discard)
 	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path (in-pod; requires the live admin daemon)")
 	defaultCertificate := "/etc/oberth/tls/tls.crt"
-	if identityStoreEnabled() {
+	{
 		defaultCertificate = identityRoot + "/server/tls.crt"
 	}
 	certificatePath := flags.String("tls-cert", defaultCertificate, "HTTPS certificate path (in-pod; requires the live admin daemon)")
@@ -1755,7 +1681,7 @@ func uplinkKeyFingerprint(source string, input io.Reader) (string, error) {
 
 // upstreamKeyDirectory is where the pod holds its upstream SSH identities.
 func upstreamKeyDirectory() string {
-	if identityStoreEnabled() {
+	{
 		return identityRoot + "/upstream"
 	}
 	return "/etc/oberth/upstream-key"

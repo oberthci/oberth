@@ -65,3 +65,18 @@ func TestRetiredFilesAbsent(t *testing.T) {
 		}
 	}
 }
+
+func TestRuntimeIdentitiesNeverUseKubernetesSecrets(t *testing.T) {
+	for _, path := range []string{"internal/app/upstream_bootstrap.go", "cmd/oberth/admin.go", "cmd/oberth/serve.go"} {
+		f, err := parser.ParseFile(token.NewFileSet(), filepath.Join("..", "..", path), nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			if s, ok := n.(*ast.SelectorExpr); ok && s.Sel.Name == "Secrets" {
+				t.Errorf("%s still uses Kubernetes Secret identity storage", path)
+			}
+			return true
+		})
+	}
+}

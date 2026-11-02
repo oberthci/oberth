@@ -251,15 +251,6 @@ func TestBoundedDetail_Whitespace(t *testing.T) {
 // upstream_bootstrap.go pure functions (many at 0%)
 // ---------------------------------------------------------------------------
 
-func TestUpstreamKeyFieldManager(t *testing.T) {
-	t.Parallel()
-	manager := UpstreamKeyFieldManager("codeberg")
-	want := "oberth-upstream-bootstrap-codeberg"
-	if manager != want {
-		t.Fatalf("field manager = %q, want %q", manager, want)
-	}
-}
-
 func TestTerseProbeError(t *testing.T) {
 	t.Parallel()
 	short := terseProbeError(errors.New("connection refused"))
@@ -435,11 +426,9 @@ func TestUpstreamSSHBootstrap_Validate_SameSecrets(t *testing.T) {
 	t.Parallel()
 	clientset := fake.NewSimpleClientset()
 	bootstrap := UpstreamSSHBootstrap{
-		Input:  strings.NewReader(""),
-		Output: &bytes.Buffer{},
-		KubernetesClient: func() (kubernetes.Interface, error) {
-			return clientset, nil
-		},
+		Input:        strings.NewReader(""),
+		Output:       &bytes.Buffer{},
+		Store:        fixtureIdentityStore{client: func() (kubernetes.Interface, error) { return clientset, nil }, namespace: "oberth"},
 		ScanHostKeys: func(context.Context, string, string) ([]ssh.PublicKey, error) { return nil, nil },
 		Probe: func(context.Context, string, []byte, []byte) error {
 			return nil
@@ -518,16 +507,17 @@ func TestVerifySecretData_Match(t *testing.T) {
 	clientset := fake.NewClientset()
 	bootstrap := UpstreamSSHBootstrap{
 		Namespace:    "oberth",
+		Store:        fixtureIdentityStore{client: func() (kubernetes.Interface, error) { return clientset, nil }, namespace: "oberth"},
 		MutationGate: func(context.Context, string) error { return nil },
 	}
 	// Use the real Argo test path: NewClientset handles server-side apply.
-	if err := bootstrap.applySecret(context.Background(), clientset, "test-secret", map[string][]byte{
+	if err := bootstrap.saveIdentity(context.Background(), "test-secret", map[string][]byte{
 		"key": []byte("value"),
-	}, ""); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
-	err := bootstrap.verifySecretData(context.Background(), clientset, "test-secret", map[string][]byte{
+	err := bootstrap.verifyIdentityData(context.Background(), "test-secret", map[string][]byte{
 		"key": []byte("value"),
 	})
 	if err != nil {
@@ -540,15 +530,16 @@ func TestVerifySecretData_MissingKey(t *testing.T) {
 	clientset := fake.NewClientset()
 	bootstrap := UpstreamSSHBootstrap{
 		Namespace:    "oberth",
+		Store:        fixtureIdentityStore{client: func() (kubernetes.Interface, error) { return clientset, nil }, namespace: "oberth"},
 		MutationGate: func(context.Context, string) error { return nil },
 	}
-	if err := bootstrap.applySecret(context.Background(), clientset, "test-secret-mismatch", map[string][]byte{
+	if err := bootstrap.saveIdentity(context.Background(), "test-secret-mismatch", map[string][]byte{
 		"key": []byte("value"),
-	}, ""); err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
-	err := bootstrap.verifySecretData(context.Background(), clientset, "test-secret-mismatch", map[string][]byte{
+	err := bootstrap.verifyIdentityData(context.Background(), "test-secret-mismatch", map[string][]byte{
 		"key":   []byte("value"),
 		"other": []byte("missing"),
 	})
