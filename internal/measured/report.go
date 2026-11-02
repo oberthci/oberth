@@ -216,6 +216,11 @@ func Build(values []Observation, declarations []Declaration) []Step {
 		}
 		for _, o := range groups[k] {
 			v := o.Usage
+			// A running attempt has only partial peaks and duration. It cannot
+			// contribute to the population used to size completed work.
+			if !v.Terminal {
+				continue
+			}
 			s.Flags.IdentityUnknown = s.Flags.IdentityUnknown || o.Ambiguous
 			id := v.RunID + "\x00" + v.PodUID + "\x00" + v.ContainerID
 			if seen[id] {
