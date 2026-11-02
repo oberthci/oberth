@@ -337,7 +337,26 @@ func (store *Store) Tail(runID string, maximum int64) ([]byte, error) {
 	if _, err := file.Seek(start, io.SeekStart); err != nil {
 		return nil, err
 	}
-	return io.ReadAll(io.LimitReader(file, maximum))
+	chunk, err := io.ReadAll(io.LimitReader(file, maximum))
+	if err != nil {
+		return nil, err
+	}
+	if start > 0 {
+		var previous [1]byte
+		if _, err := file.ReadAt(previous[:], start-1); err != nil {
+			return nil, err
+		}
+		if previous[0] != '\n' {
+			// Drop the partial first record, including any split UTF-8 rune.
+			// A record larger than the entire excerpt budget is omitted.
+			if newline := bytes.IndexByte(chunk, '\n'); newline >= 0 {
+				chunk = chunk[newline+1:]
+			} else {
+				chunk = chunk[:0]
+			}
+		}
+	}
+	return chunk, nil
 }
 
 // InitializeStepProgress records an explicitly empty journal before a fresh
