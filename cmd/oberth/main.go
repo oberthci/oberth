@@ -68,7 +68,7 @@ func main() {
 	}
 }
 
-const usageCommands = "audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, schedules, fragments, artifacts, runs, run, promotion, log, repos, issues, status, uplink, access, kubevirt, size, admission, secretstore, mcp, preflight, or version"
+const usageCommands = "admin, wait-idle, git-ssh, audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, schedules, fragments, artifacts, runs, run, promotion, log, repos, issues, status, uplink, access, kubevirt, size, admission, secretstore, mcp, preflight, or version"
 
 func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.Writer) (resultErr error) {
 	defer func() {
@@ -90,7 +90,7 @@ func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.
 
 Commands:
   audit         Verify and inspect the audit chain
-  init          Initialize a bare repository
+  init          Write a starter .oberth/build.yaml workflow
   validate      Validate a repository's .oberth pipeline
   install       Install or upgrade Oberth on a cluster
   setup         Interactive setup wizard
@@ -98,7 +98,7 @@ Commands:
   wait-idle     Wait for the live daemon queue to empty (in-pod)
   backup        Write an encrypted backup of OpenBao state and the server database
   restore       Restore an oberth backup onto an installed Oberth
-  admin         Read local files or hash the database for maintenance
+  admin         Read allowed local files and inspect database integrity
   git-ssh       Run Git's native pinned-key SSH transport
   serve         Start the Oberth server
   upstream      Manage upstream forge connections

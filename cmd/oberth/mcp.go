@@ -278,7 +278,7 @@ var errMCPResponseTooLarge = fmt.Errorf("MCP response exceeds %d bytes; narrow i
 	"or save an artifact with artifact_get --output", mcpMaxResponseSize)
 
 // errMCPToolError is returned when the tool reports isError. The caller
-// maps this to exit code 2 (distinct from exit 1 for transport/auth errors).
+// maps this to exit code 1, like transport/auth errors; usage errors exit 2.
 var errMCPToolError = errors.New("tool returned an error")
 
 // mcpFlagResult holds parsed flags and remaining positional arguments.
