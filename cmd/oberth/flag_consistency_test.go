@@ -35,3 +35,17 @@ func TestFlagErrorsStayOutOfCommandOutput(t *testing.T) {
 		}
 	}
 }
+
+func TestSharedFlagsPreserveStdinSentinel(t *testing.T) {
+	t.Setenv("OBERTH_TOKEN", "fixture")
+	config, err := parseMCPFlags("mcp call", []string{"status", "--args-file", "-"}, 1)
+	if err != nil || config.argsFile != "-" {
+		t.Fatalf("stdin sentinel rejected: %+v %v", config, err)
+	}
+}
+func TestAdminHelpNamesOnlySupportedMaintenance(t *testing.T) {
+	var out strings.Builder
+	if err := runCLI(t.Context(), []string{"admin", "--help"}, nil, &out); err != nil || !strings.Contains(out.String(), "read-file") || strings.Contains(out.String(), "database") {
+		t.Fatalf("admin help: %v %s", err, &out)
+	}
+}

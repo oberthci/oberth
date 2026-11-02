@@ -40,7 +40,7 @@ func parseOperatorFlags(flags *flag.FlagSet, arguments []string) ([]string, bool
 				return nil, true, nil
 			}
 			i++
-			if strings.HasPrefix(arguments[i], "-") {
+			if arguments[i] != "-" && strings.HasPrefix(arguments[i], "-") {
 				return nil, false, fmt.Errorf("%w: %s needs a value, but got %q, which looks like another flag", errUsage, flagSpelling(name), arguments[i])
 			}
 			optionArgs = append(optionArgs, arguments[i])

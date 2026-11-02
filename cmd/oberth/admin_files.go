@@ -13,6 +13,11 @@ import (
 // These local, read-only commands replace file tools in the scratch server.
 // Kubernetes exec authorization, a public-path allowlist and the process UID govern access.
 func runAdmin(ctx context.Context, arguments []string, output io.Writer) error {
+	if len(arguments) == 1 && (arguments[0] == "--help" || arguments[0] == "-h") {
+		_, err := fmt.Fprintln(output, "Usage: oberth admin read-file <public-identity-path> [fallback-path]\nRead allowed public identity files inside the Oberth pod.")
+		return err
+	}
+
 	if len(arguments) == 0 {
 		return fmt.Errorf("%w: admin read-file <public-identity-path> [fallback-path]", errUsage)
 	}
