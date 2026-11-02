@@ -23,7 +23,7 @@ func TestSizeGrantCLIReadsAndValidates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repository, err := database.CreateRepository(ctx, model.RepositorySpec{Name: "cloudtaser-ebpf", UpstreamID: upstream.ID, DefaultBranch: "main"})
+	repository, err := database.CreateRepository(ctx, model.RepositorySpec{Name: "exampleorg-ebpf", UpstreamID: upstream.ID, DefaultBranch: "main"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,17 +34,17 @@ func TestSizeGrantCLIReadsAndValidates(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	if err := runSizeGrant(ctx, []string{"get", "cloudtaser-ebpf", "--database", path}, &output); err != nil {
+	if err := runSizeGrant(ctx, []string{"get", "exampleorg-ebpf", "--database", path}, &output); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), `"max_size":"XL"`) || !strings.Contains(output.String(), `"granted_by":"admin@host"`) {
 		t.Fatalf("size get output = %s", output.String())
 	}
 	for _, arguments := range [][]string{
-		{"grant", "cloudtaser-ebpf", "--database", path},
-		{"grant", "cloudtaser-ebpf", "--max", "M", "--database", path},
+		{"grant", "exampleorg-ebpf", "--database", path},
+		{"grant", "exampleorg-ebpf", "--max", "M", "--database", path},
 		{"grant", "--max", "XL"},
-		{"resize", "cloudtaser-ebpf"},
+		{"resize", "exampleorg-ebpf"},
 		{},
 	} {
 		if err := runSizeGrant(ctx, arguments, &output); !errors.Is(err, errUsage) {

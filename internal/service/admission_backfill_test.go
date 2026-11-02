@@ -63,7 +63,7 @@ func TestXLHeadBackfillsRunsThatFit(t *testing.T) {
 	scheduler := &Scheduler{admission: gate}
 	release := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "running-l", Size: periapsis.L})
 	defer release()
-	head := pending(t, gate, 2, admissionRequest{RunID: "ebpf", RepoID: 5, Repo: "cloudtaser-ebpf", Ref: "promotion/main/1", Size: periapsis.XL,
+	head := pending(t, gate, 2, admissionRequest{RunID: "ebpf", RepoID: 5, Repo: "exampleorg-ebpf", Ref: "promotion/main/1", Size: periapsis.XL,
 		RefKind: model.RefBranch, SHA: strings.Repeat("a", 40)})
 	small := pending(t, gate, 3, admissionRequest{RunID: "docs", Size: periapsis.S})
 	medium := pending(t, gate, 4, admissionRequest{RunID: "cli", Size: periapsis.M})

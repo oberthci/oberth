@@ -96,8 +96,8 @@ func TestScheduleMutationsAreAdminOnlyAuditedAndScoped(t *testing.T) {
 	}
 
 	// A scoped admin cannot tell a hidden repository from a missing one.
-	_, hiddenErr := fixture.call(scopedAdmin, "schedule_pause", map[string]any{"repo": "codeberg/cloudtaser/" + hiddenRepoName, "entry": "nightly"})
-	_, missingErr := fixture.call(scopedAdmin, "schedule_pause", map[string]any{"repo": "codeberg/cloudtaser/does-not-exist", "entry": "nightly"})
+	_, hiddenErr := fixture.call(scopedAdmin, "schedule_pause", map[string]any{"repo": "codeberg/exampleorg/" + hiddenRepoName, "entry": "nightly"})
+	_, missingErr := fixture.call(scopedAdmin, "schedule_pause", map[string]any{"repo": "codeberg/exampleorg/does-not-exist", "entry": "nightly"})
 	if !errors.Is(hiddenErr, store.ErrNotFound) || !errors.Is(missingErr, store.ErrNotFound) {
 		t.Fatalf("hidden %v, missing %v; both want not found", hiddenErr, missingErr)
 	}
@@ -202,7 +202,7 @@ func TestScheduleHTTPMatchesMCPAndHidesOutOfScopeRepositories(t *testing.T) {
 		if response.Code != http.StatusUnauthorized {
 			t.Fatalf("unauthenticated schedule list: %d", response.Code)
 		}
-		for _, repo := range []string{"", "oberth", "codeberg/cloudtaser/" + hiddenRepoName, "codeberg/cloudtaser/does-not-exist"} {
+		for _, repo := range []string{"", "oberth", "codeberg/exampleorg/" + hiddenRepoName, "codeberg/exampleorg/does-not-exist"} {
 			request = httptest.NewRequest(http.MethodGet, "/api/schedules?repo="+url.QueryEscape(repo), nil)
 			request.Header.Set("Authorization", "Bearer test")
 			response = httptest.NewRecorder()

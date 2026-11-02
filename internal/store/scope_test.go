@@ -24,7 +24,7 @@ func scopeTestStore(t *testing.T) (*Store, model.Upstream, model.Upstream) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	codeberg, err := s.CreateUpstream(ctx, model.UpstreamSpec{Name: "codeberg", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/cloudtaser"})
+	codeberg, err := s.CreateUpstream(ctx, model.UpstreamSpec{Name: "codeberg", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/exampleorg"})
 	if err != nil {
 		t.Fatal(err)
 	}

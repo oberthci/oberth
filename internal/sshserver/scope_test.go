@@ -29,8 +29,8 @@ func scopeQualify(input string, scope []string) (string, error) {
 		return "github/oberthci/oberth", nil
 	case "github/oberthci/new-repo":
 		return input, nil
-	case "codeberg/cloudtaser/secret", "cloudtaser/secret":
-		return "codeberg/cloudtaser/secret", nil // resolves, but out of a github scope
+	case "codeberg/exampleorg/secret", "exampleorg/secret":
+		return "codeberg/exampleorg/secret", nil // resolves, but out of a github scope
 	}
 	return "", errors.New("app: repository is not in this uplink's scope")
 }
@@ -79,9 +79,9 @@ func TestScopedKeyReachesOnlyItsUpstreams(t *testing.T) {
 		command string
 		qualify func(string, []string) (string, error)
 	}{
-		{"git-upload-pack 'codeberg/cloudtaser/secret.git'", scopeQualify},
-		{"git-upload-pack 'cloudtaser/secret'", scopeQualify},
-		{"git-receive-pack 'codeberg/cloudtaser/secret'", scopeQualify},
+		{"git-upload-pack 'codeberg/exampleorg/secret.git'", scopeQualify},
+		{"git-upload-pack 'exampleorg/secret'", scopeQualify},
+		{"git-receive-pack 'codeberg/exampleorg/secret'", scopeQualify},
 		{"git-receive-pack 'elsewhere/brand-new'", scopeQualify},
 		{"git-upload-pack 'oberth.git'", nil},
 	} {
@@ -104,7 +104,7 @@ func TestScopedKeyReachesOnlyItsUpstreams(t *testing.T) {
 	git, stderr, _ := run(t, nil, func(string, []string) (string, error) {
 		t.Error("QualifyInScope called for an unscoped key")
 		return "", errors.New("unexpected")
-	}, "git-upload-pack 'codeberg/cloudtaser/secret.git'")
+	}, "git-upload-pack 'codeberg/exampleorg/secret.git'")
 	git.mu.Lock()
 	defer git.mu.Unlock()
 	if git.ensureCalls == 0 || strings.Contains(stderr, "scoped uplink") {

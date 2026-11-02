@@ -405,8 +405,8 @@ func TestSyncPrunesNamedStepPathFromPerRepoPolicy(t *testing.T) {
 	t.Parallel()
 
 	accessList := `[
-	  {"repo":"codeberg/cloudtaser/cloudtaser-port","step":"*","secret":"oberth/data/release/cosign-secret"},
-	  {"repo":"codeberg/cloudtaser/cloudtaser-port","step":"release-publish-images","secret":"oberth/data/release/gar-image-key"}
+	  {"repo":"codeberg/exampleorg/exampleorg-port","step":"*","secret":"oberth/data/release/cosign-secret"},
+	  {"repo":"codeberg/exampleorg/exampleorg-port","step":"release-publish-images","secret":"oberth/data/release/gar-image-key"}
 	]`
 	identities, grants, err := ParseAccessListJSONWithSteps([]byte(accessList))
 	if err != nil {
@@ -417,9 +417,9 @@ func TestSyncPrunesNamedStepPathFromPerRepoPolicy(t *testing.T) {
 		t.Fatalf("expected 1 per-repo and 1 per-step identity, got %d and %d", len(identities), len(stepIdentities))
 	}
 
-	name := PerRepoName("codeberg", "cloudtaser", "cloudtaser-port")
-	ciName := PerRepoCIName("codeberg", "cloudtaser", "cloudtaser-port")
-	stepName := PerStepName("codeberg", "cloudtaser", "cloudtaser-port", "release-publish-images")
+	name := PerRepoName("codeberg", "exampleorg", "exampleorg-port")
+	ciName := PerRepoCIName("codeberg", "exampleorg", "exampleorg-port")
+	stepName := PerStepName("codeberg", "exampleorg", "exampleorg-port", "release-publish-images")
 
 	// The policy a pre-#814 sync left behind: wildcard ∪ named.
 	unionPaths, err := credentialedPolicyPaths(defaultKVPrefix, []string{
@@ -429,7 +429,7 @@ func TestSyncPrunesNamedStepPathFromPerRepoPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stalePerRepoPolicy := PerRepoPolicy(defaultKVPrefix, "cloudtaser", "cloudtaser-port", unionPaths)
+	stalePerRepoPolicy := PerRepoPolicy(defaultKVPrefix, "exampleorg", "exampleorg-port", unionPaths)
 	if !strings.Contains(stalePerRepoPolicy, "gar-image-key") {
 		t.Fatal("fixture is wrong: the stale per-repo policy must carry the named-step path")
 	}
@@ -452,7 +452,7 @@ func TestSyncPrunesNamedStepPathFromPerRepoPolicy(t *testing.T) {
 		"policy write " + name + " -":                    {out: "Success!"},
 		"read -format=json auth/kubernetes/role/" + name: {out: matchingRoleJSON(name)},
 		// Per-repo CI identity: already current.
-		"policy read " + ciName:                            {out: PerRepoCIPolicy(defaultKVPrefix, "cloudtaser", "cloudtaser-port")},
+		"policy read " + ciName:                            {out: PerRepoCIPolicy(defaultKVPrefix, "exampleorg", "exampleorg-port")},
 		"read -format=json auth/kubernetes/role/" + ciName: {out: matchingRoleJSON(ciName)},
 		// Per-step identity: created by this sync.
 		"policy read " + stepName:                            {out: "No policy named: " + stepName, err: errors.New("exit status 2")},

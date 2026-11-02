@@ -176,7 +176,7 @@ func TestPolicyIsolation_RealOpenBao(t *testing.T) {
 
 	const (
 		kvPrefix = "oberth"
-		org      = "cloudtaser"
+		org      = "exampleorg"
 		repo     = "test-repo"
 	)
 

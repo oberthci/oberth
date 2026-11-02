@@ -1581,6 +1581,7 @@ spec:
           OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
           OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
           OBERTH_RELEASE_WIF="${OBERTH_RELEASE_WIF:-}" \
+          OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT="${OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT:-}" \
           GOOGLE_APPLICATION_CREDENTIALS=/run/oberth-gar/adc.json \
           GOBIN=/tmp/oberth-tools/bin \
           OBERTH_SECRETSTORE_DIR="$OBERTH_SECRETSTORE_DIR" \
@@ -1589,6 +1590,8 @@ spec:
       - ./.oberth/release.sh
       - publish-images
       env:
+      - name: OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT
+        value: "" # Admission replaces this placeholder from the selected install role.
       - name: PATH
         value: /usr/bin:/bin
       volumeMounts:
@@ -1726,6 +1729,7 @@ spec:
           OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
           OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
           OBERTH_RELEASE_WIF="${OBERTH_RELEASE_WIF:-}" \
+          OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT="${OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT:-}" \
           GOOGLE_APPLICATION_CREDENTIALS=/run/oberth-gar/adc.json \
           GOBIN=/tmp/oberth-tools/bin \
           OBERTH_SECRETSTORE_DIR="$OBERTH_SECRETSTORE_DIR" \
@@ -1734,6 +1738,8 @@ spec:
       - ./.oberth/release.sh
       - publish-chart
       env:
+      - name: OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT
+        value: "" # Admission replaces this placeholder from the selected install role.
       - name: PATH
         value: /usr/bin:/bin
       volumeMounts:
@@ -1811,6 +1817,7 @@ spec:
           OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
           OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
           OBERTH_RELEASE_WIF="${OBERTH_RELEASE_WIF:-}" \
+          OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT="${OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT:-}" \
           GOOGLE_APPLICATION_CREDENTIALS=/run/oberth-gar/adc.json \
           GOBIN=/tmp/oberth-tools/bin \
           CGO_ENABLED=1 "$@"
@@ -1818,6 +1825,8 @@ spec:
       - ./.oberth/release.sh
       - verify
       env:
+      - name: OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT
+        value: "" # Admission replaces this placeholder from the selected install role.
       - name: PATH
         value: /usr/bin:/bin
       volumeMounts:
@@ -2171,6 +2180,7 @@ spec:
           OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
           OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
           OBERTH_RELEASE_WIF="${OBERTH_RELEASE_WIF:-}" \
+          OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT="${OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT:-}" \
           GOOGLE_APPLICATION_CREDENTIALS=/run/oberth-gar/adc.json \
           GOBIN=/tmp/oberth-tools/bin \
           OBERTH_SECRETSTORE_DIR="$OBERTH_SECRETSTORE_DIR" \
@@ -2179,6 +2189,8 @@ spec:
       - ./.oberth/release.sh
       - publish-kvm-harness
       env:
+      - name: OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT
+        value: "" # Admission replaces this placeholder from the selected install role.
       - name: PATH
         value: /usr/bin:/bin
       volumeMounts:

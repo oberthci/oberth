@@ -76,7 +76,7 @@ func TestClientHostOverridesTheAPIServerHost(t *testing.T) {
 func TestAlsoUpstreamNameAvoidsNamesAndOrganizations(t *testing.T) {
 	t.Parallel()
 	used := map[string]bool{"codeberg": true}
-	orgs := map[string]bool{"cloudtaser": true, "skipops": true}
+	orgs := map[string]bool{"exampleorg": true, "skipops": true}
 	if got := alsoUpstreamName("ssh://git@github.com/oberthci", used, orgs); got != "github" {
 		t.Errorf("got %q, want github", got)
 	}
@@ -97,7 +97,7 @@ func TestNextStepsNameEveryUpstreamAndHowToAddMore(t *testing.T) {
 		Namespace: "oberth",
 		Upstreams: []NextStepsUpstream{
 			{Name: "github", BaseURL: "ssh://git@github.com/oberthci", Connected: true},
-			{Name: "codeberg", BaseURL: "ssh://git@codeberg.org/cloudtaser", Connected: false},
+			{Name: "codeberg", BaseURL: "ssh://git@codeberg.org/exampleorg", Connected: false},
 		},
 		SSHAlias: true,
 	})
@@ -105,8 +105,8 @@ func TestNextStepsNameEveryUpstreamAndHowToAddMore(t *testing.T) {
 	for _, want := range []string{
 		"git clone ssh://git@192.168.64.5:30022/github/oberthci/<repo>.git",
 		"git clone git@oberth:github/oberthci/<repo>.git",
-		"Finish codeberg (codeberg.org/cloudtaser)",
-		"kubectl --context default exec -n oberth deploy/oberth -c oberth -- /usr/local/bin/oberth upstream add --yes --no-wait codeberg ssh://git@codeberg.org/cloudtaser",
+		"Finish codeberg (codeberg.org/exampleorg)",
+		"kubectl --context default exec -n oberth deploy/oberth -c oberth -- /usr/local/bin/oberth upstream add --yes --no-wait codeberg ssh://git@codeberg.org/exampleorg",
 		"oberth upstream add --yes github ssh://git@github.com/<org>",
 		"kubectl --context default exec -i -n oberth deploy/oberth -c oberth -- /usr/local/bin/oberth uplink add - you@laptop < you@laptop.pub",
 		"OBERTH_BASE_URL=https://192.168.64.5:30443",
@@ -133,7 +133,7 @@ func TestConnectAlsoUpstreamsRegistersEachWithTheSameKey(t *testing.T) {
 	host := &fakeOberthHost{t: t}
 	var buf bytes.Buffer
 	deps := onboardingDeps(t, host, &buf, strings.NewReader(""), false)
-	cfg := Config{AlsoUpstreams: []string{"ssh://git@codeberg.org/cloudtaser", "ssh://git@github.com/oberthci", "ssh://git@codeberg.org/skipops"}}
+	cfg := Config{AlsoUpstreams: []string{"ssh://git@codeberg.org/exampleorg", "ssh://git@github.com/oberthci", "ssh://git@codeberg.org/skipops"}}
 	tw := newTableWriter(&buf, false)
 	got := connectAlsoUpstreams(context.Background(), cfg, deps, tw, []NextStepsUpstream{{Name: "github", BaseURL: "ssh://git@github.com/oberthci"}})
 	tw.WriteFooter()
@@ -194,14 +194,14 @@ func TestFinishInstallConnectsAlsoUpstreamsOnAConfiguredDeployment(t *testing.T)
 	host := &fakeOberthHost{t: t, upstreamRows: []string{"github   ssh   ssh://git@github.com/oberthci   SHA256:x"}}
 	var buf bytes.Buffer
 	deps := onboardingDeps(t, host, &buf, strings.NewReader(""), false)
-	cfg := Config{AlsoUpstreams: []string{"codeberg.org/cloudtaser"}}
+	cfg := Config{AlsoUpstreams: []string{"codeberg.org/exampleorg"}}
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
 	if err := finishInstallTest(context.Background(), cfg, deps, &buf); err != nil {
 		t.Fatal(err)
 	}
-	if len(host.addArgv) != 1 || !slices.Contains(host.addArgv[0], "codeberg") || !slices.Contains(host.addArgv[0], "ssh://git@codeberg.org/cloudtaser") {
+	if len(host.addArgv) != 1 || !slices.Contains(host.addArgv[0], "codeberg") || !slices.Contains(host.addArgv[0], "ssh://git@codeberg.org/exampleorg") {
 		t.Fatalf("upstream add argv %q\n%s", host.addArgv, buf.String())
 	}
 }
@@ -213,10 +213,10 @@ func TestFinishInstallNamesAlsoUpstreamsWhenOnboardingCannotRun(t *testing.T) {
 	host := &fakeOberthHost{t: t}
 	var buf bytes.Buffer
 	deps := onboardingDeps(t, host, &buf, strings.NewReader(""), false)
-	cfg := Config{AlsoUpstreams: []string{"codeberg.org/cloudtaser"}}
+	cfg := Config{AlsoUpstreams: []string{"codeberg.org/exampleorg"}}
 	_ = cfg.Validate()
 	_ = finishInstallTest(context.Background(), cfg, deps, &buf)
-	if !strings.Contains(buf.String(), "upstream add --yes codeberg ssh://git@codeberg.org/cloudtaser") {
+	if !strings.Contains(buf.String(), "upstream add --yes codeberg ssh://git@codeberg.org/exampleorg") {
 		t.Fatalf("output:\n%s", buf.String())
 	}
 }

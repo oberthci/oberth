@@ -88,7 +88,7 @@ func TestAuditListRepoFilterMatchesBareAndQualifiedNames(t *testing.T) {
 	}
 	bare := record("oberth")
 	qualified := record("github/oberthci/oberth")
-	record("codeberg/cloudtaser/" + hiddenRepoName)
+	record("codeberg/exampleorg/" + hiddenRepoName)
 	record("gitlab/oberthci/oberth")
 
 	value, err := fixture.call(unscopedActor, "audit_list", map[string]any{"action": "schedule.", "repo": "oberth"})

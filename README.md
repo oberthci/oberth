@@ -274,8 +274,8 @@ inspect these repositories:
 
 ```bash
 oberth mcp call size_grant_get '{"repo":"oberth"}'
-oberth mcp call size_grant_get '{"repo":"cloudtaser-wrapper"}'
-oberth mcp call size_grant_get '{"repo":"cloudtaser-ebpf"}'
+oberth mcp call size_grant_get '{"repo":"exampleorg-wrapper"}'
+oberth mcp call size_grant_get '{"repo":"exampleorg-ebpf"}'
 ```
 
 `revoked` disables the automatic boost; `never_granted` enables it within L.

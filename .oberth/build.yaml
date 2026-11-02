@@ -88,6 +88,8 @@ spec:
       tasks:
       - name: setup
         template: setup
+      - name: generic-names
+        template: generic-names
       - name: lint
         template: lint
         depends: setup
@@ -142,6 +144,26 @@ spec:
       - name: build-darwin-arm64
         template: build-darwin-arm64
         depends: "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart"
+
+  # Refuse retired branding in every tracked file, including fixtures and docs.
+  - name: generic-names
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
+      workingDir: /work/src
+      command: ["/bin/sh", "-ec"]
+      args: ["/usr/bin/python3 -I -B hack/test-generic-names.py; exec /usr/bin/python3 -I -B hack/check-generic-names.py"]
+      resources:
+        requests:
+          cpu: "1"
+          memory: "256Mi"
+        limits:
+          cpu: "1"
+          memory: "256Mi"
 
   # ---- setup burn (8 sequential steps) ----
   # Maps to: Test("setup", repositorySteps(inlineToolchainSteps()...)...)

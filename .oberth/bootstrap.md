@@ -61,26 +61,54 @@ official v0.73.0 image. Every credentialed leaf checks all five pins.
 GAR actions use release-only Workload Identity Federation (WIF), selected by
 `oberth.ci/release-wif-role` on the admitted leaf. The public
 `scripts/release-wif-credential.py` helper exchanges the projected JWT at Google
-STS, impersonates the matching CloudTaser principal, then delegates to the
-matching Oberth principal. All accounts below belong to
-`skipopsmain.iam.gserviceaccount.com`.
+STS, impersonates the administrator-configured source principal, then delegates
+to the matching Oberth principal. Final accounts below belong to
+`skipopsmain.iam.gserviceaccount.com`; source placeholders refer to full service
+account emails held only in the tuxbox installation configuration.
 
 | Release template | Role / audience pool | First-hop principal | Final principal |
 | --- | --- | --- | --- |
-| `release-publish-images`, `release-publish-kvm-harness` | `image-writer` / `oberth-release-images` | `cloudtaser-release-publisher` | `oberth-release-publisher` |
-| `release-publish-chart` | `chart-writer` / `oberth-release-charts` | `cloudtaser-chart-publisher` | `oberth-chart-publisher` |
-| `release-verify` | `image-reader` / `oberth-release-reader` | `cloudtaser-release-reader` | `oberth-release-reader` |
+| `release-publish-images`, `release-publish-kvm-harness` | `image-writer` / `oberth-release-images` | `<release-publisher>` | `oberth-release-publisher` |
+| `release-publish-chart` | `chart-writer` / `oberth-release-charts` | `<chart-publisher>` | `oberth-chart-publisher` |
+| `release-verify` | `image-reader` / `oberth-release-reader` | `<release-reader>` | `oberth-release-reader` |
 
 Each audience is
 `//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/<pool>/providers/tuxbox`.
 Admission binds the exact repository, release ServiceAccount, template and role;
 branch pipelines receive no WIF projection. The helper validates the fixed ADC
 at `/run/oberth-gar/adc.json` and projected token at `/run/oberth-gar/token`,
-requires `OBERTH_RELEASE_WIF=1`, and fixes both impersonation targets from the
-validated audience. Both IAM requests use a 600-second lifetime. Google enforces
-the existing matching TokenCreator and repository IAM bindings; the reader stays
+requires `OBERTH_RELEASE_WIF=1`, and checks the first-hop URL against the
+server-injected `OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT`. The final target
+is fixed by the validated audience. Both IAM requests use a 600-second lifetime.
+Google enforces the existing matching TokenCreator and repository IAM bindings; the reader stays
 read-only. HTTPS uses verified TLS 1.3, without redirects or proxies. A failed
 exchange is fatal, with no fallback to another role or a static key.
+
+Before the next release, the coordinator must retain/set these existing keys in
+**tuxbox-only** Helm values (`argo.releaseWIF.roles`) or the administrator JSON
+file passed to `--argo-release-wif-config` (`roles`):
+
+| Role key | `service_account` value |
+| --- | --- |
+| `image-writer` | `<release-publisher>`: existing full first-hop publisher email |
+| `image-reader` | `<release-reader>`: existing full first-hop reader email |
+| `chart-writer` | `<chart-publisher>`: existing full first-hop chart publisher email |
+
+Use the current deployed source identities, preserving provider values, IAM,
+repository/template grants and role separation. Never replace these source
+accounts with the final Oberth accounts or commit their real values. Roll out
+the server containing the source-account environment injection **before** running
+a release from this revision. This ordering also applies when the three install
+values already exist; the previous server does not inject the new variable.
+All four release leaves declare an empty
+`OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT` environment placeholder. Admission
+replaces any declared value with the selected role's configured `service_account`
+on the approved main container; the release wrappers preserve it through `env -i`.
+Other WIF consumers receive this public variable only if they declare it.
+Missing/invalid configuration refuses authentication before network exchange
+with a diagnostic naming that variable and the install key. There is no source
+identity default. Confirm intended exchanges and cross-role refusal in the next
+coordinator-authorized live release; offline tests cannot prove IAM bindings.
 
 Only the final token reaches the private Docker credential-helper pipe.
 Docker/Helm configuration contains the public helper mapping, not an access

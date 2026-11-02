@@ -6,15 +6,15 @@ import (
 )
 
 func TestPerStepNameDeterministic(t *testing.T) {
-	a := PerStepName("codeberg", "cloudtaser", "cloudtaser-port", "release-publish-images")
-	b := PerStepName("codeberg", "cloudtaser", "cloudtaser-port", "release-publish-images")
+	a := PerStepName("codeberg", "exampleorg", "exampleorg-port", "release-publish-images")
+	b := PerStepName("codeberg", "exampleorg", "exampleorg-port", "release-publish-images")
 	if a != b {
 		t.Fatalf("not deterministic: %q != %q", a, b)
 	}
 }
 
 func TestPerStepNameHasCorrectPrefix(t *testing.T) {
-	name := PerStepName("codeberg", "cloudtaser", "cloudtaser-port", "release-publish-images")
+	name := PerStepName("codeberg", "exampleorg", "exampleorg-port", "release-publish-images")
 	if !strings.HasPrefix(name, PerStepPrefix) {
 		t.Fatalf("%q does not start with %q", name, PerStepPrefix)
 	}
@@ -28,15 +28,15 @@ func TestPerStepNameFitsLabel(t *testing.T) {
 }
 
 func TestPerStepNameDistinctAcrossSteps(t *testing.T) {
-	a := PerStepName("codeberg", "cloudtaser", "cloudtaser-port", "release-publish-images")
-	b := PerStepName("codeberg", "cloudtaser", "cloudtaser-port", "release-publish-r2")
+	a := PerStepName("codeberg", "exampleorg", "exampleorg-port", "release-publish-images")
+	b := PerStepName("codeberg", "exampleorg", "exampleorg-port", "release-publish-r2")
 	if a == b {
 		t.Fatalf("different steps produce the same name: %q", a)
 	}
 }
 
 func TestPerStepNameDNS1123Safe(t *testing.T) {
-	name := PerStepName("codeberg", "cloud.taser", "my_repo", "my-step")
+	name := PerStepName("codeberg", "example.org", "my_repo", "my-step")
 	for _, c := range name {
 		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
 			t.Fatalf("%q contains non-DNS-1123 character %q", name, c)
@@ -48,8 +48,8 @@ func TestPerStepNameDNS1123Safe(t *testing.T) {
 }
 
 func TestPerStepNameFromQualified(t *testing.T) {
-	direct := PerStepName("codeberg", "cloudtaser", "cloudtaser-port", "release-publish-images")
-	fromQualified := PerStepNameFromQualified("codeberg/cloudtaser/cloudtaser-port", "release-publish-images")
+	direct := PerStepName("codeberg", "exampleorg", "exampleorg-port", "release-publish-images")
+	fromQualified := PerStepNameFromQualified("codeberg/exampleorg/exampleorg-port", "release-publish-images")
 	if direct != fromQualified {
 		t.Fatalf("PerStepNameFromQualified %q != PerStepName %q", fromQualified, direct)
 	}

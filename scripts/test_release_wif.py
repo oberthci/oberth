@@ -21,7 +21,12 @@ spec.loader.exec_module(wif)
 # Pick the first role (image-writer) as default for backward-compat tests.
 _AUDIENCES = list(wif.ROLES.keys())
 _DEFAULT_AUDIENCE = _AUDIENCES[0]
-_DEFAULT_IAM = wif.ROLES[_DEFAULT_AUDIENCE]
+# All source identities are inert fixtures, never installation values.
+_SOURCE_ACCOUNTS = {audience: role + '@example-project.iam.gserviceaccount.com'
+                    for audience, role in wif.ROLES.items()}
+_SOURCE_IAMS = {audience: 'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/' + account + ':generateAccessToken'
+                for audience, account in _SOURCE_ACCOUNTS.items()}
+_DEFAULT_IAM = _SOURCE_IAMS[_DEFAULT_AUDIENCE]
 
 
 def config_for_audience(audience):
@@ -29,7 +34,7 @@ def config_for_audience(audience):
     return {
         'type': 'external_account', 'audience': audience,
         'subject_token_type': 'urn:ietf:params:oauth:token-type:jwt',
-        'token_url': wif.STS, 'service_account_impersonation_url': wif.ROLES[audience],
+        'token_url': wif.STS, 'service_account_impersonation_url': _SOURCE_IAMS[audience],
         'credential_source': {'file': wif.TOKEN},
     }
 
@@ -38,16 +43,52 @@ CONFIG = config_for_audience(_DEFAULT_AUDIENCE)
 
 
 class ExchangeTests(unittest.TestCase):
+    def setUp(self):
+        self.environment = patch.dict(os.environ, {
+            'OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT': _SOURCE_ACCOUNTS[_DEFAULT_AUDIENCE],
+        }, clear=True)
+        self.environment.start()
+        self.addCleanup(self.environment.stop)
+
     def exchange(self, config=None, replies=None):
         config = CONFIG if config is None else config
         replies = replies or [{'token_type': 'Bearer', 'access_token': 'inert-federated'},
                               {'accessToken': 'inert-source'}, {'accessToken': 'inert-publisher'}]
         def read(path):
             return json.dumps(config).encode() if path == wif.ADC else b'inert.jwt.signature'
-        with patch.dict(os.environ, {'OBERTH_RELEASE_WIF': '1', 'GOOGLE_APPLICATION_CREDENTIALS': wif.ADC}), \
+        with patch.dict(os.environ, {'OBERTH_RELEASE_WIF': '1', 'GOOGLE_APPLICATION_CREDENTIALS': wif.ADC,
+                                     'OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT': _SOURCE_ACCOUNTS[config['audience']]}), \
                 patch.object(wif, 'read', side_effect=read), patch.object(wif, 'post', side_effect=replies) as post:
             result = wif.credential(wif.REGISTRY)
         return result, post.call_args_list
+
+    def test_install_config_source_is_required_before_network(self):
+        for value in ('', 'bad/account@example.invalid', 'reader@example.invalid\n'):
+            with self.subTest(value=value), patch.dict(os.environ, {
+                    'OBERTH_RELEASE_WIF': '1', 'GOOGLE_APPLICATION_CREDENTIALS': wif.ADC,
+                    'OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT': value}), \
+                    patch.object(wif, 'read', return_value=json.dumps(CONFIG).encode()), \
+                    patch.object(wif, 'post') as post:
+                with self.assertRaisesRegex(ValueError, 'OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT'):
+                    wif.credential(wif.REGISTRY)
+                post.assert_not_called()
+
+    def test_missing_source_config_has_clear_safe_protocol_diagnostic(self):
+        output, error = io.StringIO(), io.StringIO()
+        with patch.dict(os.environ, {
+                'OBERTH_RELEASE_WIF': '1', 'GOOGLE_APPLICATION_CREDENTIALS': wif.ADC}, clear=True), \
+                patch.object(sys, 'argv', ['helper', 'get']), \
+                patch.object(sys, 'stdin', io.StringIO(wif.REGISTRY + '\n')), \
+                patch.object(sys, 'stdout', output), patch.object(sys, 'stderr', error), \
+                patch.object(wif.os, 'fstat') as fstat, \
+                patch.object(wif, 'read', return_value=json.dumps(CONFIG).encode()), \
+                patch.object(wif, 'post') as post:
+            fstat.return_value.st_mode = stat.S_IFIFO | 0o600
+            self.assertEqual(wif.main(), 1)
+            post.assert_not_called()
+        self.assertEqual(output.getvalue(), '')
+        self.assertEqual(error.getvalue(), wif.SOURCE_ACCOUNT_ERROR + '\n')
+        self.assertIn('argo.releaseWIF.roles.<role>.service_account', error.getvalue())
 
     def test_exact_exchange_and_impersonation(self):
         result, calls = self.exchange()
@@ -74,7 +115,7 @@ class ExchangeTests(unittest.TestCase):
             'oberth-release-reader': 'oberth-release-reader',
             'oberth-release-charts': 'oberth-chart-publisher',
         }
-        for audience, expected_iam in wif.ROLES.items():
+        for audience, expected_iam in _SOURCE_IAMS.items():
             with self.subTest(audience=audience):
                 cfg = config_for_audience(audience)
                 result, calls = self.exchange(config=cfg)
@@ -89,7 +130,7 @@ class ExchangeTests(unittest.TestCase):
 
     def test_cross_paired_audience_and_sa_rejected(self):
         """Publisher audience with reader SA URL must be refused before network."""
-        reader_iam = wif.ROLES[_AUDIENCES[1]]
+        reader_iam = _SOURCE_IAMS[_AUDIENCES[1]]
         cfg = copy.deepcopy(CONFIG)
         cfg['service_account_impersonation_url'] = reader_iam
         with patch.dict(os.environ, {'OBERTH_RELEASE_WIF': '1', 'GOOGLE_APPLICATION_CREDENTIALS': wif.ADC}), \
@@ -105,12 +146,14 @@ class ExchangeTests(unittest.TestCase):
                 if audience == other:
                     continue
                 cfg = config_for_audience(audience)
-                cfg['service_account_impersonation_url'] = wif.ROLES[other]
+                cfg['service_account_impersonation_url'] = _SOURCE_IAMS[other]
                 with self.subTest(audience=audience, other=other), patch.dict(os.environ, {
-                        'OBERTH_RELEASE_WIF': '1', 'GOOGLE_APPLICATION_CREDENTIALS': wif.ADC}), \
+                        'OBERTH_RELEASE_WIF': '1', 'GOOGLE_APPLICATION_CREDENTIALS': wif.ADC,
+                        'OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT': _SOURCE_ACCOUNTS[audience]}), \
                         patch.object(wif, 'read', return_value=json.dumps(cfg).encode()), \
                         patch.object(wif, 'post') as post:
-                    with self.assertRaises(ValueError): wif.credential(wif.REGISTRY)
+                    with self.assertRaisesRegex(ValueError, 'unapproved ADC configuration'):
+                        wif.credential(wif.REGISTRY)
                     post.assert_not_called()
         for key in ('delegates', 'oberth_impersonation_url'):
             cfg = copy.deepcopy(CONFIG)

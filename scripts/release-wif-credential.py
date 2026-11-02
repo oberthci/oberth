@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Docker credential protocol: projected JWT -> STS -> CloudTaser -> Oberth role.
+"""Docker credential protocol: projected JWT -> STS -> configured source -> Oberth role.
 
 Only the credential-helper pipe receives credentials. No credentials are cached,
 written to files, passed in arguments, or included in diagnostics.
@@ -20,23 +20,33 @@ ADC = '/run/oberth-gar/adc.json'
 TOKEN = '/run/oberth-gar/token'
 LIMIT = 65536
 
-# Exact allowlist of (audience, impersonation URL) pairs. Each role uses a
-# distinct workload identity pool so a projected token cannot impersonate
-# another role's target by replacing the client-side ADC. The helper derives
-# the active role from the ADC's audience field; any audience or pairing not
-# in this map is refused before any network call.
+# Exact audience allowlist. Admission supplies the matching first-hop account
+# from the administrator-owned WIF role config, independently of the ADC.
+# The repository must never carry installation-specific source identities.
 ROLES = {
-    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-images/providers/tuxbox':
-        'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/cloudtaser-release-publisher@skipopsmain.iam.gserviceaccount.com:generateAccessToken',
-    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-reader/providers/tuxbox':
-        'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/cloudtaser-release-reader@skipopsmain.iam.gserviceaccount.com:generateAccessToken',
-    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-charts/providers/tuxbox':
-        'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/cloudtaser-chart-publisher@skipopsmain.iam.gserviceaccount.com:generateAccessToken',
+    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-images/providers/tuxbox': 'image-writer',
+    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-reader/providers/tuxbox': 'image-reader',
+    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-charts/providers/tuxbox': 'chart-writer',
 }
+SOURCE_ACCOUNT_ENV = 'OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT'
+SOURCE_ACCOUNT_ERROR = ('missing or invalid ' + SOURCE_ACCOUNT_ENV +
+                        '; configure argo.releaseWIF.roles.<role>.service_account and roll out the server')
+
+
+class SourceAccountError(ValueError):
+    """Safe configuration diagnostic, containing no supplied values."""
+
+
+def source_iam():
+    account = os.environ.get(SOURCE_ACCOUNT_ENV, '')
+    if not re.fullmatch(r'[a-z][a-z0-9-]*@[a-z][a-z0-9-]*\.iam\.gserviceaccount\.com', account):
+        raise SourceAccountError(SOURCE_ACCOUNT_ERROR)
+    return ('https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/' +
+            account + ':generateAccessToken')
 
 
 # Oberth's repositories already grant each matching Oberth principal access,
-# and each CloudTaser source principal TokenCreator on only that target. Keep
+# and each configured source principal TokenCreator on only that target. Keep
 # this second hop fixed by the validated audience, never ADC/env input (#875).
 OBERTH_ROLES = {
     '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-images/providers/tuxbox':
@@ -105,9 +115,9 @@ def credential(server):
         raise ValueError('unapproved ADC path')
     config = decode(read(ADC))
     audience = config.get('audience')
-    iam = ROLES.get(audience)
-    if iam is None:
+    if audience not in ROLES:
         raise ValueError('unapproved audience')
+    iam = source_iam()
     expected = {
         'type': 'external_account', 'audience': audience,
         'subject_token_type': 'urn:ietf:params:oauth:token-type:jwt',
@@ -150,6 +160,9 @@ def main():
         # This stdout is the private Docker helper protocol pipe, never a log.
         result = credential(server)
         sys.stdout.write(json.dumps(result) + '\n')
+    except SourceAccountError:
+        sys.stderr.write(SOURCE_ACCOUNT_ERROR + '\n')
+        return 1
     except Exception:
         sys.stderr.write('keyless registry authentication failed\n')
         return 1

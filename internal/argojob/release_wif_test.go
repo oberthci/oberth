@@ -98,7 +98,7 @@ func TestReleaseWIFBindsOnlyApprovedMainCapability(t *testing.T) {
 						}
 					}
 					for _, e := range c.Env {
-						if e.Name == "GOOGLE_APPLICATION_CREDENTIALS" || e.Name == "OBERTH_RELEASE_WIF" {
+						if e.Name == "GOOGLE_APPLICATION_CREDENTIALS" || e.Name == "OBERTH_RELEASE_WIF" || e.Name == "OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT" {
 							t.Fatal("helper received ADC")
 						}
 					}
@@ -230,7 +230,7 @@ func TestReleaseWIFDoesNotCredentialUnselectedLeaves(t *testing.T) {
 			}
 			templateContainers(other, func(c *corev1.Container) {
 				for _, e := range c.Env {
-					if e.Name == "GOOGLE_APPLICATION_CREDENTIALS" || e.Name == "OBERTH_RELEASE_WIF" {
+					if e.Name == "GOOGLE_APPLICATION_CREDENTIALS" || e.Name == "OBERTH_RELEASE_WIF" || e.Name == "OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT" {
 						t.Fatal("unselected leaf received ADC environment")
 					}
 				}
@@ -271,5 +271,38 @@ func TestReleaseWIFRetainsExplicitApprovedVaultProjection(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("approved explicit Vault projection removed")
+	}
+}
+
+func TestReleaseWIFSourceAccountFromInstallConfig(t *testing.T) {
+	for _, role := range []string{"image-writer", "image-reader", "chart-writer"} {
+		t.Run(role, func(t *testing.T) {
+			config := wifTestConfig()
+			grant := config.ReleaseWIF.Repositories["github/skipops/oberth"]
+			grant.Templates["main"] = role
+			request := wifTestRequest(t, func(wf *wfv1.Workflow) {
+				leaf := &wf.Spec.Templates[0]
+				leaf.Metadata.Annotations[argoworkflow.ReleaseWIFRoleAnnotation] = role
+				leaf.Container.Env = append(leaf.Container.Env, corev1.EnvVar{
+					Name: "OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT", Value: "authored-account@other-project.iam.gserviceaccount.com",
+				})
+			})
+			wf, err := Build(config, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			count := 0
+			for _, env := range templateMainContainer(&wf.Spec.Templates[0]).Env {
+				if env.Name == "OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT" {
+					count++
+					if env.Value != config.ReleaseWIF.Roles[role].ServiceAccount || env.ValueFrom != nil {
+						t.Fatal("repository authored source account survived admission")
+					}
+				}
+			}
+			if count != 1 {
+				t.Fatalf("source account environment entries = %d, want 1", count)
+			}
+		})
 	}
 }

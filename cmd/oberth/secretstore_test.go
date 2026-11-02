@@ -1050,7 +1050,7 @@ func TestPlanDigestCLIEqualsServer(t *testing.T) {
 	grants := []store.SecretAccessGrant{
 		{Repo: "codeberg/oberthci/oberth", Step: "*", Secret: "oberth/data/release/cosign-secret"},
 		{Repo: "codeberg/oberthci/oberth", Step: "release-publish-images", Secret: "oberth/data/release/gar-image-key"},
-		{Repo: "codeberg/cloudtaser/cloudtaser-port", Step: "*", Secret: "oberth/data/release/cosign-secret"},
+		{Repo: "codeberg/exampleorg/exampleorg-port", Step: "*", Secret: "oberth/data/release/cosign-secret"},
 	}
 
 	// Server side: computeSecretStorePlan + ComputePlanDigest.

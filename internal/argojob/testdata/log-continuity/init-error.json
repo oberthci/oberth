@@ -2,7 +2,7 @@
   {
     "workflow": {
       "metadata": {
-        "name": "oberth-cloudtaser-docs-105ea601-390f6c44a6e0",
+        "name": "oberth-exampleinc-docs-105ea601-390f6c44a6e0",
         "namespace": "oberth-argo",
         "uid": "26f562d6-9c50-4225-ab2e-f261f3c11728",
         "annotations": {
@@ -14,11 +14,11 @@
       "status": {
         "phase": "Failed",
         "nodes": {
-          "oberth-cloudtaser-docs-105ea601-390f6c44a6e0-3725571690": {
+          "oberth-exampleinc-docs-105ea601-390f6c44a6e0-4253268492": {
             "displayName": "test-stock-cos-targets",
             "finishedAt": "2026-10-30T17:48:28Z",
-            "id": "oberth-cloudtaser-docs-105ea601-390f6c44a6e0-3725571690",
-            "name": "oberth-cloudtaser-docs-105ea601-390f6c44a6e0.test-stock-cos-targets",
+            "id": "oberth-exampleinc-docs-105ea601-390f6c44a6e0-4253268492",
+            "name": "oberth-exampleinc-docs-105ea601-390f6c44a6e0.test-stock-cos-targets",
             "phase": "Failed",
             "startedAt": "2026-10-30T17:48:09Z",
             "templateName": "test-stock-cos-targets",
@@ -29,7 +29,7 @@
     },
     "pod": {
       "metadata": {
-        "name": "oberth-cloudtaser-docs-105ea601-390f6c44a6e0-test-stock-cos-targets-3725571690",
+        "name": "oberth-exampleinc-docs-105ea601-390f6c44a6e0-test-stock-cos-targets-4253268492",
         "namespace": "oberth-argo",
         "uid": "4ececbe9-4a20-49b1-a1c1-5f9cc063186c",
         "ownerReferences": [
@@ -38,13 +38,13 @@
             "blockOwnerDeletion": true,
             "controller": true,
             "kind": "Workflow",
-            "name": "oberth-cloudtaser-docs-105ea601-390f6c44a6e0",
+            "name": "oberth-exampleinc-docs-105ea601-390f6c44a6e0",
             "uid": "26f562d6-9c50-4225-ab2e-f261f3c11728"
           }
         ],
         "annotations": {
-          "workflows.argoproj.io/node-id": "oberth-cloudtaser-docs-105ea601-390f6c44a6e0-3725571690",
-          "workflows.argoproj.io/node-name": "oberth-cloudtaser-docs-105ea601-390f6c44a6e0.test-stock-cos-targets"
+          "workflows.argoproj.io/node-id": "oberth-exampleinc-docs-105ea601-390f6c44a6e0-4253268492",
+          "workflows.argoproj.io/node-name": "oberth-exampleinc-docs-105ea601-390f6c44a6e0.test-stock-cos-targets"
         }
       },
       "status": {
@@ -118,7 +118,7 @@
   {
     "workflow": {
       "metadata": {
-        "name": "oberth-cloudtaser-docs-2a1971bf-5bc08e73f145",
+        "name": "oberth-exampleinc-docs-2a1971bf-5bc08e73f145",
         "namespace": "oberth-argo",
         "uid": "39714b57-29aa-452d-a1b4-367fd91a754b",
         "annotations": {
@@ -130,11 +130,11 @@
       "status": {
         "phase": "Failed",
         "nodes": {
-          "oberth-cloudtaser-docs-2a1971bf-5bc08e73f145-2067775598": {
+          "oberth-exampleinc-docs-2a1971bf-5bc08e73f145-3390539668": {
             "displayName": "test-stock-cos-targets",
             "finishedAt": "2026-10-30T17:30:02Z",
-            "id": "oberth-cloudtaser-docs-2a1971bf-5bc08e73f145-2067775598",
-            "name": "oberth-cloudtaser-docs-2a1971bf-5bc08e73f145.test-stock-cos-targets",
+            "id": "oberth-exampleinc-docs-2a1971bf-5bc08e73f145-3390539668",
+            "name": "oberth-exampleinc-docs-2a1971bf-5bc08e73f145.test-stock-cos-targets",
             "phase": "Failed",
             "startedAt": "2026-10-30T17:29:42Z",
             "templateName": "test-stock-cos-targets",
@@ -145,7 +145,7 @@
     },
     "pod": {
       "metadata": {
-        "name": "oberth-cloudtaser-docs-2a1971bf-5bc08e73f145-test-stock-cos-targets-2067775598",
+        "name": "oberth-exampleinc-docs-2a1971bf-5bc08e73f145-test-stock-cos-targets-3390539668",
         "namespace": "oberth-argo",
         "uid": "4c1643c0-238c-4e10-b610-25e805c0fbfc",
         "ownerReferences": [
@@ -154,13 +154,13 @@
             "blockOwnerDeletion": true,
             "controller": true,
             "kind": "Workflow",
-            "name": "oberth-cloudtaser-docs-2a1971bf-5bc08e73f145",
+            "name": "oberth-exampleinc-docs-2a1971bf-5bc08e73f145",
             "uid": "39714b57-29aa-452d-a1b4-367fd91a754b"
           }
         ],
         "annotations": {
-          "workflows.argoproj.io/node-id": "oberth-cloudtaser-docs-2a1971bf-5bc08e73f145-2067775598",
-          "workflows.argoproj.io/node-name": "oberth-cloudtaser-docs-2a1971bf-5bc08e73f145.test-stock-cos-targets"
+          "workflows.argoproj.io/node-id": "oberth-exampleinc-docs-2a1971bf-5bc08e73f145-3390539668",
+          "workflows.argoproj.io/node-name": "oberth-exampleinc-docs-2a1971bf-5bc08e73f145.test-stock-cos-targets"
         }
       },
       "status": {

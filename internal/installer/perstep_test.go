@@ -8,15 +8,15 @@ import (
 )
 
 func TestPerStepNameDeterministic(t *testing.T) {
-	a := PerStepName("codeberg", "cloudtaser", "cloudtaser-port", "release-publish-images")
-	b := PerStepName("codeberg", "cloudtaser", "cloudtaser-port", "release-publish-images")
+	a := PerStepName("codeberg", "exampleorg", "exampleorg-port", "release-publish-images")
+	b := PerStepName("codeberg", "exampleorg", "exampleorg-port", "release-publish-images")
 	if a != b {
 		t.Fatalf("PerStepName is not deterministic: %q != %q", a, b)
 	}
 }
 
 func TestPerStepNameHasCorrectPrefix(t *testing.T) {
-	name := PerStepName("codeberg", "cloudtaser", "cloudtaser-port", "release-publish-images")
+	name := PerStepName("codeberg", "exampleorg", "exampleorg-port", "release-publish-images")
 	if !strings.HasPrefix(name, identityname.PerStepPrefix) {
 		t.Fatalf("PerStepName %q does not start with %q", name, identityname.PerStepPrefix)
 	}
@@ -31,23 +31,23 @@ func TestPerStepNameFitsLabel(t *testing.T) {
 }
 
 func TestPerStepNameDistinctFromPerRepo(t *testing.T) {
-	perRepo := PerRepoName("codeberg", "cloudtaser", "cloudtaser-port")
-	perStep := PerStepName("codeberg", "cloudtaser", "cloudtaser-port", "release-publish-images")
+	perRepo := PerRepoName("codeberg", "exampleorg", "exampleorg-port")
+	perStep := PerStepName("codeberg", "exampleorg", "exampleorg-port", "release-publish-images")
 	if perRepo == perStep {
 		t.Fatal("per-step and per-repo names must differ")
 	}
 }
 
 func TestPerStepNameDistinctAcrossSteps(t *testing.T) {
-	a := PerStepName("codeberg", "cloudtaser", "cloudtaser-port", "release-publish-images")
-	b := PerStepName("codeberg", "cloudtaser", "cloudtaser-port", "release-publish-r2")
+	a := PerStepName("codeberg", "exampleorg", "exampleorg-port", "release-publish-images")
+	b := PerStepName("codeberg", "exampleorg", "exampleorg-port", "release-publish-r2")
 	if a == b {
 		t.Fatalf("different steps produce the same name: %q", a)
 	}
 }
 
 func TestPerStepNameDNS1123Safe(t *testing.T) {
-	name := PerStepName("codeberg", "cloud.taser", "my_repo", "my-step")
+	name := PerStepName("codeberg", "example.org", "my_repo", "my-step")
 	for _, c := range name {
 		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
 			t.Fatalf("PerStepName %q contains non-DNS-1123 character %q", name, c)
@@ -59,28 +59,28 @@ func TestPerStepNameDNS1123Safe(t *testing.T) {
 }
 
 func TestPerStepPolicyContainsGrantPaths(t *testing.T) {
-	policy := PerStepPolicy("oberth", "cloudtaser", "cloudtaser-port",
-		[]string{"release/gar-image-key", "upstream/cloudtaser/cloudtaser-port/test-secret"})
+	policy := PerStepPolicy("oberth", "exampleorg", "exampleorg-port",
+		[]string{"release/gar-image-key", "upstream/exampleorg/exampleorg-port/test-secret"})
 
 	if !strings.Contains(policy, `path "oberth/data/release/gar-image-key"`) {
 		t.Fatal("policy must contain the first grant path")
 	}
-	if !strings.Contains(policy, `path "oberth/data/upstream/cloudtaser/cloudtaser-port/test-secret"`) {
+	if !strings.Contains(policy, `path "oberth/data/upstream/exampleorg/exampleorg-port/test-secret"`) {
 		t.Fatal("policy must contain the second grant path")
 	}
 }
 
 func TestPerStepPolicyContainsUpstreamWildcard(t *testing.T) {
-	policy := PerStepPolicy("oberth", "cloudtaser", "cloudtaser-port",
+	policy := PerStepPolicy("oberth", "exampleorg", "exampleorg-port",
 		[]string{"release/gar-image-key"})
 
-	if !strings.Contains(policy, `path "oberth/data/upstream/cloudtaser/cloudtaser-port/*"`) {
+	if !strings.Contains(policy, `path "oberth/data/upstream/exampleorg/exampleorg-port/*"`) {
 		t.Fatal("policy must contain the upstream org/repo wildcard")
 	}
 }
 
 func TestPerStepPolicyContainsSelfRevoke(t *testing.T) {
-	policy := PerStepPolicy("oberth", "cloudtaser", "cloudtaser-port",
+	policy := PerStepPolicy("oberth", "exampleorg", "exampleorg-port",
 		[]string{"release/gar-image-key"})
 
 	if !strings.Contains(policy, `path "auth/token/revoke-self"`) {
@@ -89,7 +89,7 @@ func TestPerStepPolicyContainsSelfRevoke(t *testing.T) {
 }
 
 func TestPerStepPolicyDeniesServerIdentities(t *testing.T) {
-	policy := PerStepPolicy("oberth", "cloudtaser", "cloudtaser-port",
+	policy := PerStepPolicy("oberth", "exampleorg", "exampleorg-port",
 		[]string{"release/gar-image-key"})
 
 	if !strings.Contains(policy, `path "oberth/data/identities/*"`) {
@@ -98,7 +98,7 @@ func TestPerStepPolicyDeniesServerIdentities(t *testing.T) {
 }
 
 func TestPerStepPolicyDeduplicatesPaths(t *testing.T) {
-	policy := PerStepPolicy("oberth", "cloudtaser", "cloudtaser-port",
+	policy := PerStepPolicy("oberth", "exampleorg", "exampleorg-port",
 		[]string{"release/gar-image-key", "release/gar-image-key"})
 
 	count := strings.Count(policy, "gar-image-key")
@@ -109,11 +109,11 @@ func TestPerStepPolicyDeduplicatesPaths(t *testing.T) {
 
 func TestPerStepPolicyNarrowerThanPerRepo(t *testing.T) {
 	// Per-repo policy includes all grant paths.
-	perRepoPolicy := PerRepoPolicy("oberth", "cloudtaser", "cloudtaser-port",
+	perRepoPolicy := PerRepoPolicy("oberth", "exampleorg", "exampleorg-port",
 		[]string{"release/gar-image-key", "release/cosign-secret", "release/r2-upload-token"})
 
 	// Per-step policy includes only the step's paths.
-	perStepPolicy := PerStepPolicy("oberth", "cloudtaser", "cloudtaser-port",
+	perStepPolicy := PerStepPolicy("oberth", "exampleorg", "exampleorg-port",
 		[]string{"release/gar-image-key"})
 
 	if !strings.Contains(perRepoPolicy, "cosign-secret") {
@@ -126,7 +126,7 @@ func TestPerStepPolicyNarrowerThanPerRepo(t *testing.T) {
 
 func TestDerivePerStepIdentitiesWildcardOnly(t *testing.T) {
 	grants := []grantWithStep{
-		{upstream: "codeberg", org: "cloudtaser", repo: "cloudtaser-port", step: "*", secret: "oberth/data/release/gar-image-key"},
+		{upstream: "codeberg", org: "exampleorg", repo: "exampleorg-port", step: "*", secret: "oberth/data/release/gar-image-key"},
 	}
 	result := DerivePerStepIdentities(nil, grants)
 	if len(result) != 0 {
@@ -136,7 +136,7 @@ func TestDerivePerStepIdentitiesWildcardOnly(t *testing.T) {
 
 func TestDerivePerStepIdentitiesNamedGrant(t *testing.T) {
 	grants := []grantWithStep{
-		{upstream: "codeberg", org: "cloudtaser", repo: "cloudtaser-port", step: "release-publish-images", secret: "oberth/data/release/gar-image-key"},
+		{upstream: "codeberg", org: "exampleorg", repo: "exampleorg-port", step: "release-publish-images", secret: "oberth/data/release/gar-image-key"},
 	}
 	result := DerivePerStepIdentities(nil, grants)
 	if len(result) != 1 {
@@ -152,8 +152,8 @@ func TestDerivePerStepIdentitiesNamedGrant(t *testing.T) {
 
 func TestDerivePerStepIdentitiesInheritsWildcard(t *testing.T) {
 	grants := []grantWithStep{
-		{upstream: "codeberg", org: "cloudtaser", repo: "cloudtaser-port", step: "*", secret: "oberth/data/release/r2-token"},
-		{upstream: "codeberg", org: "cloudtaser", repo: "cloudtaser-port", step: "release-publish-images", secret: "oberth/data/release/gar-image-key"},
+		{upstream: "codeberg", org: "exampleorg", repo: "exampleorg-port", step: "*", secret: "oberth/data/release/r2-token"},
+		{upstream: "codeberg", org: "exampleorg", repo: "exampleorg-port", step: "release-publish-images", secret: "oberth/data/release/gar-image-key"},
 	}
 	result := DerivePerStepIdentities(nil, grants)
 	if len(result) != 1 {
@@ -169,8 +169,8 @@ func TestDerivePerStepIdentitiesInheritsWildcard(t *testing.T) {
 
 func TestDerivePerStepIdentitiesMultipleSteps(t *testing.T) {
 	grants := []grantWithStep{
-		{upstream: "codeberg", org: "cloudtaser", repo: "cloudtaser-port", step: "release-publish-images", secret: "oberth/data/release/gar-image-key"},
-		{upstream: "codeberg", org: "cloudtaser", repo: "cloudtaser-port", step: "release-publish-r2", secret: "oberth/data/release/r2-token"},
+		{upstream: "codeberg", org: "exampleorg", repo: "exampleorg-port", step: "release-publish-images", secret: "oberth/data/release/gar-image-key"},
+		{upstream: "codeberg", org: "exampleorg", repo: "exampleorg-port", step: "release-publish-r2", secret: "oberth/data/release/r2-token"},
 	}
 	result := DerivePerStepIdentities(nil, grants)
 	if len(result) != 2 {
@@ -184,8 +184,8 @@ func TestDerivePerStepIdentitiesMultipleSteps(t *testing.T) {
 
 func TestDerivePerStepIdentitiesCrossRepoIsolation(t *testing.T) {
 	grants := []grantWithStep{
-		{upstream: "codeberg", org: "cloudtaser", repo: "repo-a", step: "release-publish", secret: "oberth/data/release/key-a"},
-		{upstream: "codeberg", org: "cloudtaser", repo: "repo-b", step: "release-publish", secret: "oberth/data/release/key-b"},
+		{upstream: "codeberg", org: "exampleorg", repo: "repo-a", step: "release-publish", secret: "oberth/data/release/key-a"},
+		{upstream: "codeberg", org: "exampleorg", repo: "repo-b", step: "release-publish", secret: "oberth/data/release/key-b"},
 	}
 	result := DerivePerStepIdentities(nil, grants)
 	if len(result) != 2 {
@@ -204,8 +204,8 @@ func TestDerivePerStepIdentitiesCrossRepoIsolation(t *testing.T) {
 
 func TestPerStepIdentityNamesSorted(t *testing.T) {
 	identities := []PerStepIdentity{
-		{Upstream: "codeberg", Org: "cloudtaser", Repo: "zzz-repo", Step: "step-a"},
-		{Upstream: "codeberg", Org: "cloudtaser", Repo: "aaa-repo", Step: "step-b"},
+		{Upstream: "codeberg", Org: "exampleorg", Repo: "zzz-repo", Step: "step-a"},
+		{Upstream: "codeberg", Org: "exampleorg", Repo: "aaa-repo", Step: "step-b"},
 	}
 	names := PerStepIdentityNames(identities)
 	if len(names) != 2 {

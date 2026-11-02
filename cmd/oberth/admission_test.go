@@ -17,7 +17,7 @@ func TestRenderAdmissionShowsRetainedReservations(t *testing.T) {
 	err := renderAdmission(&output, &model.AdmissionState{
 		Capacity: 20, Used: 20, Runs: 1, MaxRuns: 20,
 		Reservations: []model.AdmissionReservation{
-			{RunID: "aaaa", State: "retained", Size: "XL", Weight: 20, Repo: "cloudtaser-ebpf", Ref: "main", Since: now.Add(-90 * time.Second)},
+			{RunID: "aaaa", State: "retained", Size: "XL", Weight: 20, Repo: "exampleorg-ebpf", Ref: "main", Since: now.Add(-90 * time.Second)},
 			{RunID: "bbbb", State: "waiting", Size: "M", Weight: 2, Repo: "cli", Ref: "feature/x", Group: "tf"},
 		},
 		Blocker: &model.AdmissionBlocker{Repo: "cli", Ref: "feature/x", Size: "M", Weight: 2, Used: 20, Capacity: 20},
@@ -26,7 +26,7 @@ func TestRenderAdmissionShowsRetainedReservations(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := output.String()
-	for _, want := range []string{"weight 20/20 used", "queue head: cli/feature/x (M, needs 2 weight; 20/20 used)", "aaaa  retained", "1m30s", "cloudtaser-ebpf/main"} {
+	for _, want := range []string{"weight 20/20 used", "queue head: cli/feature/x (M, needs 2 weight; 20/20 used)", "aaaa  retained", "1m30s", "exampleorg-ebpf/main"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("output lacks %q:\n%s", want, text)
 		}

@@ -20,11 +20,11 @@ func TestScopedStatusCountsOnlyTheScope(t *testing.T) {
 		Store: fakeHealthStore{
 			upstreams: []model.Upstream{
 				{ID: 1, Name: "github", Kind: "ssh", BaseURL: "ssh://git@github.com/oberthci"},
-				{ID: 2, Name: "codeberg", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/cloudtaser"},
+				{ID: 2, Name: "codeberg", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/exampleorg"},
 			},
 			repositories: []model.Repository{
 				{ID: 1, Name: "oberth", UpstreamID: 1},
-				{ID: 2, Name: "cloudtaser-cli", UpstreamID: 2}, {ID: 3, Name: "cloudtaser-wire", UpstreamID: 2},
+				{ID: 2, Name: "exampleorg-cli", UpstreamID: 2}, {ID: 3, Name: "exampleorg-wire", UpstreamID: 2},
 			},
 		},
 		Cluster: func(context.Context) error { return nil },
@@ -47,7 +47,7 @@ func TestScopedStatusCountsOnlyTheScope(t *testing.T) {
 		t.Fatalf("scoped status = %#v", status)
 	}
 	encoded, _ := json.Marshal(status)
-	if strings.Contains(string(encoded), "codeberg") || strings.Contains(string(encoded), "cloudtaser") {
+	if strings.Contains(string(encoded), "codeberg") || strings.Contains(string(encoded), "exampleorg") {
 		t.Fatalf("scoped status leaks the other upstream: %s", encoded)
 	}
 	// The unscoped view is unchanged: both upstreams, the codeberg outage.
@@ -73,14 +73,14 @@ func TestQualifyInScopeResolvesShortNamesWithinTheScope(t *testing.T) {
 	catalog := fakeUpstreamCatalog{
 		repositories: map[string]model.Repository{
 			"github/oberthci/terraform":     {Name: "terraform", UpstreamID: 1},
-			"codeberg/cloudtaser/terraform": {Name: "terraform", UpstreamID: 2},
-			"codeberg/cloudtaser/secret":    {Name: "secret", UpstreamID: 2},
+			"codeberg/exampleorg/terraform": {Name: "terraform", UpstreamID: 2},
+			"codeberg/exampleorg/secret":    {Name: "secret", UpstreamID: 2},
 			"secret":                        {Name: "secret", UpstreamID: 2},
 		},
 		ambiguous: map[string]bool{"terraform": true},
 		upstreams: []model.Upstream{
 			{ID: 1, Name: "github", BaseURL: "ssh://git@github.com/oberthci"},
-			{ID: 2, Name: "codeberg", BaseURL: "ssh://git@codeberg.org/cloudtaser"},
+			{ID: 2, Name: "codeberg", BaseURL: "ssh://git@codeberg.org/exampleorg"},
 			{ID: 3, Name: "skipops", BaseURL: "ssh://git@codeberg.org/skipops"},
 		},
 	}
@@ -98,7 +98,7 @@ func TestQualifyInScopeResolvesShortNamesWithinTheScope(t *testing.T) {
 			t.Errorf("QualifyInScope(%q) = %q, %v; want %q", input, got, err, want)
 		}
 	}
-	for _, input := range []string{"cloudtaser/secret", "codeberg/cloudtaser/terraform"} {
+	for _, input := range []string{"exampleorg/secret", "codeberg/exampleorg/terraform"} {
 		if got, err := resolver.QualifyInScope(input, []string{"github"}); err == nil || strings.Contains(err.Error(), "codeberg") && !strings.Contains(input, "codeberg") {
 			t.Errorf("QualifyInScope(%q) = %q, %v; want a refusal naming nothing outside the scope", input, got, err)
 		}

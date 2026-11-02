@@ -661,9 +661,9 @@ func TestProducePerStepIdentitiesNilRunnerReturnsNil(t *testing.T) {
 func TestParseAccessListJSONExcludesNamedStepGrantsFromPerRepo(t *testing.T) {
 	t.Parallel()
 	entries := []accessListJSONEntry{
-		{Repo: "codeberg/cloudtaser/cloudtaser-port", Step: "*", Secret: "oberth/data/release/cosign-secret"},
-		{Repo: "codeberg/cloudtaser/cloudtaser-port", Step: "release-publish-images", Secret: "oberth/data/release/gar-image-key"},
-		{Repo: "codeberg/cloudtaser/cloudtaser-port", Step: "*", Secret: "oberth/data/release/r2-upload-token"},
+		{Repo: "codeberg/exampleorg/exampleorg-port", Step: "*", Secret: "oberth/data/release/cosign-secret"},
+		{Repo: "codeberg/exampleorg/exampleorg-port", Step: "release-publish-images", Secret: "oberth/data/release/gar-image-key"},
+		{Repo: "codeberg/exampleorg/exampleorg-port", Step: "*", Secret: "oberth/data/release/r2-upload-token"},
 	}
 	data, _ := json.Marshal(entries)
 	result, err := ParseAccessListJSON(data)
@@ -686,8 +686,8 @@ func TestParseAccessListJSONExcludesNamedStepGrantsFromPerRepo(t *testing.T) {
 func TestParseAccessListJSONWithStepsSplitsPerRepoAndPerStepPaths(t *testing.T) {
 	t.Parallel()
 	entries := []accessListJSONEntry{
-		{Repo: "codeberg/cloudtaser/cloudtaser-port", Step: "*", Secret: "oberth/data/release/cosign-secret"},
-		{Repo: "codeberg/cloudtaser/cloudtaser-port", Step: "release-publish-images", Secret: "oberth/data/release/gar-image-key"},
+		{Repo: "codeberg/exampleorg/exampleorg-port", Step: "*", Secret: "oberth/data/release/cosign-secret"},
+		{Repo: "codeberg/exampleorg/exampleorg-port", Step: "release-publish-images", Secret: "oberth/data/release/gar-image-key"},
 	}
 	data, _ := json.Marshal(entries)
 	repoIdentities, grants, err := ParseAccessListJSONWithSteps(data)
@@ -721,7 +721,7 @@ func TestParseAccessListJSONWithStepsSplitsPerRepoAndPerStepPaths(t *testing.T) 
 func TestParseAccessListJSONNamedOnlyRepoKeepsIdentityWithoutGrants(t *testing.T) {
 	t.Parallel()
 	entries := []accessListJSONEntry{
-		{Repo: "codeberg/cloudtaser/cttv", Step: "release-publish-images", Secret: "oberth/data/release/gar-image-key"},
+		{Repo: "codeberg/exampleorg/cttv", Step: "release-publish-images", Secret: "oberth/data/release/gar-image-key"},
 	}
 	data, _ := json.Marshal(entries)
 	result, err := ParseAccessListJSON(data)
@@ -734,7 +734,7 @@ func TestParseAccessListJSONNamedOnlyRepoKeepsIdentityWithoutGrants(t *testing.T
 	if len(result[0].Grants) != 0 {
 		t.Fatalf("named-only repo must have no per-repo grants, got %v", result[0].Grants)
 	}
-	if result[0].Repo != "cttv" || result[0].Org != "cloudtaser" || result[0].Upstream != "codeberg" {
+	if result[0].Repo != "cttv" || result[0].Org != "exampleorg" || result[0].Upstream != "codeberg" {
 		t.Fatalf("unexpected identity: %+v", result[0])
 	}
 }
@@ -745,8 +745,8 @@ func TestParseAccessListOutputExcludesNamedStepGrants(t *testing.T) {
 	t.Parallel()
 	output := strings.Join([]string{
 		"REPO                                      STEP                     SECRET                                 APPROVED BY   APPROVED AT        STATUS",
-		"codeberg/cloudtaser/cloudtaser-port       *                        oberth/data/release/cosign-secret      admin         2026-08-21 16:40   active",
-		"codeberg/cloudtaser/cloudtaser-port       release-publish-images   oberth/data/release/gar-image-key      fabian        2026-10-07 18:00   active",
+		"codeberg/exampleorg/exampleorg-port       *                        oberth/data/release/cosign-secret      admin         2026-08-21 16:40   active",
+		"codeberg/exampleorg/exampleorg-port       release-publish-images   oberth/data/release/gar-image-key      fabian        2026-10-07 18:00   active",
 	}, "\n")
 	result, err := ParseAccessListOutput([]byte(output))
 	if err != nil {
@@ -768,10 +768,10 @@ func TestProduceFromConfigMapExcludesNamedStepGrants(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: secretAccessConfigMapName, Namespace: "oberth"},
 		Data: map[string]string{
 			secretAccessConfigMapKey: `
-- repo: codeberg/cloudtaser/cloudtaser-port
+- repo: codeberg/exampleorg/exampleorg-port
   step: "*"
   secret: oberth/data/release/cosign-secret
-- repo: codeberg/cloudtaser/cloudtaser-port
+- repo: codeberg/exampleorg/exampleorg-port
   step: release-publish-images
   secret: oberth/data/release/gar-image-key
 `,

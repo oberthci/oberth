@@ -26,8 +26,8 @@ import (
 var globalSequence = regexp.MustCompile(`"[A-Za-z_]*[Ss]equence":[1-9]`)
 
 const (
-	hiddenRepoName  = "cloudtaser-secret"
-	hiddenIssueText = "cloudtaser-confidential"
+	hiddenRepoName  = "exampleorg-secret"
+	hiddenIssueText = "exampleorg-confidential"
 )
 
 type scopeFixture struct {
@@ -81,7 +81,7 @@ func newScopeFixture(t *testing.T) *scopeFixture {
 	if fixture.github, err = database.CreateUpstream(ctx, model.UpstreamSpec{Name: "github", Kind: "ssh", BaseURL: "ssh://git@github.com/oberthci"}); err != nil {
 		t.Fatal(err)
 	}
-	if fixture.codeberg, err = database.CreateUpstream(ctx, model.UpstreamSpec{Name: "codeberg", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/cloudtaser"}); err != nil {
+	if fixture.codeberg, err = database.CreateUpstream(ctx, model.UpstreamSpec{Name: "codeberg", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/exampleorg"}); err != nil {
 		t.Fatal(err)
 	}
 	if fixture.visible, err = database.CreateRepository(ctx, model.RepositorySpec{Name: "oberth", UpstreamID: fixture.github.ID, DefaultBranch: "main"}); err != nil {
@@ -212,7 +212,7 @@ func (fixture *scopeFixture) assertNoLeak(t *testing.T, what string, value any, 
 			text = strings.ReplaceAll(text, echo, "<input>")
 		}
 	}
-	needles := []string{"codeberg", "cloudtaser", hiddenRepoName, hiddenIssueText}
+	needles := []string{"codeberg", "exampleorg", hiddenRepoName, hiddenIssueText}
 	for _, run := range fixture.runs["codeberg"] {
 		needles = append(needles, run.ID, run.SHA[:12])
 	}
@@ -386,8 +386,8 @@ func TestScopedUplinkCannotTellHiddenFromMissing(t *testing.T) {
 	missingRunID := strings.Repeat("e", 32)
 	hiddenIssue := fixture.issues["codeberg"][0].ID
 	missingIssue := int64(99999)
-	hiddenRepo := "codeberg/cloudtaser/" + hiddenRepoName
-	missingRepo := "codeberg/cloudtaser/does-not-exist"
+	hiddenRepo := "codeberg/exampleorg/" + hiddenRepoName
+	missingRepo := "codeberg/exampleorg/does-not-exist"
 	missingSHA := sha("9")
 
 	pairs := []struct {
@@ -482,7 +482,7 @@ func selectorOf(arguments map[string]any) string {
 
 func TestScopedAdminCannotActOutsideItsUpstream(t *testing.T) {
 	fixture := newScopeFixture(t)
-	hiddenRepo := "codeberg/cloudtaser/" + hiddenRepoName
+	hiddenRepo := "codeberg/exampleorg/" + hiddenRepoName
 	for tool, arguments := range map[string]map[string]any{
 		"access_allow":         {"repo": hiddenRepo, "step": "deploy", "secret": "oberth/data/x"},
 		"access_revoke":        {"repo": hiddenRepo, "step": "release", "secret": "oberth/data/codeberg/token"},

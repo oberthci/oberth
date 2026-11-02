@@ -25,14 +25,14 @@ func TestAnXLHeadIsNamedByEveryRunBehindIt(t *testing.T) {
 	releaseRunning := acquireRequestWithinBudget(t, gate.reserve(1), blockerRequest("running", 1, "docs", "main", periapsis.M))
 	head := gate.reserve(2)
 	headReady := make(chan func(), 1)
-	go acquireRequestForTest(head, blockerRequest("ebpf-run", 2, "cloudtaser-ebpf", "promotion/main/335d751c79f3", periapsis.XL), headReady)
+	go acquireRequestForTest(head, blockerRequest("ebpf-run", 2, "exampleorg-ebpf", "promotion/main/335d751c79f3", periapsis.XL), headReady)
 	awaitWaiting(t, head)
 	behind := gate.reserve(3)
 	behindReady := make(chan func(), 1)
 	go acquireRequestForTest(behind, blockerRequest("small", 3, "website", "feature/x", periapsis.S), behindReady)
 	awaitWaiting(t, behind)
 
-	const want = "blocked behind cloudtaser-ebpf/promotion/main/335d751c79f3 (XL, needs a full drain)."
+	const want = "blocked behind exampleorg-ebpf/promotion/main/335d751c79f3 (XL, needs a full drain)."
 	snapshot := scheduler.AdmissionSnapshot(3)
 	if snapshot.BlockedBy == nil || snapshot.BlockedBy.RunID != "ebpf-run" || !snapshot.BlockedBy.FullDrain || snapshot.HeadOfQueue {
 		t.Fatalf("behind snapshot = %#v", snapshot)
@@ -48,7 +48,7 @@ func TestAnXLHeadIsNamedByEveryRunBehindIt(t *testing.T) {
 		t.Fatalf("head message = %q", message)
 	}
 	blocker := scheduler.AdmissionBlocker()
-	if blocker == nil || blocker.Repo != "cloudtaser-ebpf" || blocker.Used != 2 || blocker.Capacity != 6 || blocker.WaitingSince.IsZero() {
+	if blocker == nil || blocker.Repo != "exampleorg-ebpf" || blocker.Used != 2 || blocker.Capacity != 6 || blocker.WaitingSince.IsZero() {
 		t.Fatalf("status blocker = %#v", blocker)
 	}
 
@@ -60,7 +60,7 @@ func TestAnXLHeadIsNamedByEveryRunBehindIt(t *testing.T) {
 		t.Fatalf("queued message = %q", queued.Message)
 	}
 	scoped := &API{admission: scheduler, scope: &repoScope{repos: map[int64]model.Repository{3: {ID: 3}}}}
-	if message := scoped.scheduling(context.Background(), model.Run{ID: "q", Status: model.RunQueued}, nil).Message; strings.Contains(message, "cloudtaser-ebpf") {
+	if message := scoped.scheduling(context.Background(), model.Run{ID: "q", Status: model.RunQueued}, nil).Message; strings.Contains(message, "exampleorg-ebpf") {
 		t.Fatalf("scoped queued message leaks the blocker: %q", message)
 	}
 	visible := &API{admission: scheduler, scope: &repoScope{repos: map[int64]model.Repository{2: {ID: 2}, 3: {ID: 3}}}}

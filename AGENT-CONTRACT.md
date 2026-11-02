@@ -2818,20 +2818,21 @@ does not authorize changing or dropping them during the ownership handoff.
 ## Keyless GAR publication and verification (#557)
 
 The repository-owned credential helper (`scripts/release-wif-credential.py`)
-serves all three WIF roles via an exact allowlist of (audience, impersonation
-URL) pairs. Role selection is by ADC only -- the helper derives the active
+serves all three WIF roles via an exact audience allowlist and
+administrator-configured first-hop accounts. The helper derives the active
 role from the `audience` field of the Oberth-projected ADC at
 `/run/oberth-gar/adc.json` and requires `service_account_impersonation_url`
-to be the paired service account. Any audience or pairing not in the
-allowlist is refused before any network call.
+to match `OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT`, injected by admission from
+the selected role in installation configuration. Unknown audiences, missing or
+invalid source accounts and mismatched ADC URLs refuse before network exchange.
 
 ### Role allowlist
 
 | Role | Pool | Service Account |
 |------|------|-----------------|
-| `image-writer` | `oberth-release-images` | `cloudtaser-release-publisher@skipopsmain` |
-| `image-reader` | `oberth-release-reader` | `cloudtaser-release-reader@skipopsmain` |
-| `chart-writer` | `oberth-release-charts` | `cloudtaser-chart-publisher@skipopsmain` |
+| `image-writer` | `oberth-release-images` | `<release-publisher>` |
+| `image-reader` | `oberth-release-reader` | `<release-reader>` |
+| `chart-writer` | `oberth-release-charts` | `<chart-publisher>` |
 
 All pools use provider `tuxbox` under project `138624361369`.
 
@@ -2839,14 +2840,22 @@ Oberth's helper additionally performs the existing matching delegation (#875):
 image-writer to `oberth-release-publisher@skipopsmain.iam.gserviceaccount.com`,
 image-reader to `oberth-release-reader@skipopsmain.iam.gserviceaccount.com`, and
 chart-writer to `oberth-chart-publisher@skipopsmain.iam.gserviceaccount.com`.
-The exact validated audience fixes both hops. ADC still names the CloudTaser
-first-hop principal; it cannot override the Oberth target. Both IAM requests
+The validated audience fixes the final hop. ADC names the configured
+first-hop principal and must agree with the server-injected environment; it
+cannot override the Oberth target. Both IAM requests
 use 600-second tokens over the same verified TLS/no-proxy/no-redirect transport.
 Only the final Oberth token reaches the credential pipe; intermediate tokens
 stay in memory, and second-hop refusal never falls back to the first token or
 static keys. This consumes existing matching TokenCreator and repository IAM,
-without widening either. The helper intentionally specializes the shared
-CloudTaser exchange for Oberth's separate repositories.
+without widening either. The helper uses the configured source exchange for
+Oberth's repositories.
+Real source account emails live only in tuxbox installation configuration.
+Before the next release, configure/retain `argo.releaseWIF.roles.<role>.service_account`
+for all three roles and roll out the updated server before running this
+revision's release workflow. The four release leaves preserve the injected
+source account through their clean environment wrappers.
+See [publication prerequisites](.oberth/bootstrap.md#publication-prerequisites)
+for the exact coordinator handoff and placeholders.
 
 The KVM runtime build explicitly directs apko's default enabled SBOM output to
 the existing writable release output directory (#874). Source/workspace mounts

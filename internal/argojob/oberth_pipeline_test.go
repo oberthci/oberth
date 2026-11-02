@@ -130,6 +130,7 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 	// same dependency edges.
 	assertBurnGraph(t, built, "ci", map[string]string{
 		"setup":                    "",
+		"generic-names":            "",
 		"lint":                     "setup",
 		"test-store":               "setup",
 		"test-service":             "setup",

@@ -10,3 +10,8 @@ init containers succeeded. The supplied Pod status has no termination message.
 The original dump omitted Pod spec. The test supplies only the observed init
 container names in a minimal spec to test the projection; this is not a captured
 Pod-create spec. No log text is inferred from these status dumps.
+
+Repository/workflow names are generic fixtures of the original byte lengths.
+Node and Pod hash suffixes were recomputed with Argo's FNV-1a naming rule after
+the rename, preserving exact ownership and node-binding checks. Status evidence,
+UIDs, times and container outcomes are unchanged.

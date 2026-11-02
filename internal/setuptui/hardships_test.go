@@ -154,13 +154,13 @@ func TestMoreOrganizations(t *testing.T) {
 	st := newWizardState(Options{})
 	st.ForgeType, st.ForgeOrg = "github", "oberthci"
 	q := questionByID(t, "forge.more")
-	if err := q.save(st, []string{"codeberg.org/cloudtaser, ssh://git@codeberg.org/skipops, codeberg.org/cloudtaser"}); err != nil {
+	if err := q.save(st, []string{"codeberg.org/exampleorg, ssh://git@codeberg.org/skipops, codeberg.org/exampleorg"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(st.Config.AlsoUpstreams, " "); got != "ssh://git@codeberg.org/cloudtaser ssh://git@codeberg.org/skipops" {
+	if got := strings.Join(st.Config.AlsoUpstreams, " "); got != "ssh://git@codeberg.org/exampleorg ssh://git@codeberg.org/skipops" {
 		t.Fatalf("AlsoUpstreams = %q", got)
 	}
-	if cmd := BuildCommandLine(st); !strings.Contains(cmd, "--also-upstream='codeberg.org/cloudtaser'") || !strings.Contains(cmd, "--also-upstream='codeberg.org/skipops'") {
+	if cmd := BuildCommandLine(st); !strings.Contains(cmd, "--also-upstream='codeberg.org/exampleorg'") || !strings.Contains(cmd, "--also-upstream='codeberg.org/skipops'") {
 		t.Errorf("equivalent command:\n%s", cmd)
 	}
 	if err := q.save(st, []string{"github.com/oberthci"}); err == nil {
@@ -247,10 +247,10 @@ func TestLogViewAndFile(t *testing.T) {
 // The real server's aligned output, with the fingerprint replaced.
 func TestParseUpstreamCheckServerOutput(t *testing.T) {
 	out := "NAME       KIND   URL                                 KEY NAME   KEY FINGERPRINT                                      AUTH\n" +
-		"codeberg   ssh    ssh://git@codeberg.org/cloudtaser   -          SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA   ok\n" +
+		"codeberg   ssh    ssh://git@codeberg.org/exampleorg   -          SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA   ok\n" +
 		"github     ssh    ssh://git@github.com/oberthci       -          SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA   ok\n"
 	rows := parseUpstreamCheck([]byte(out))
-	if len(rows) != 2 || rows[0].name != "codeberg" || rows[0].url != "ssh://git@codeberg.org/cloudtaser" || !rows[0].ok() || !rows[1].ok() {
+	if len(rows) != 2 || rows[0].name != "codeberg" || rows[0].url != "ssh://git@codeberg.org/exampleorg" || !rows[0].ok() || !rows[1].ok() {
 		t.Fatalf("parsed %+v", rows)
 	}
 }
@@ -260,7 +260,7 @@ func TestParseUpstreamCheckServerOutput(t *testing.T) {
 func TestNextStepsKeepPendingAlsoUpstreams(t *testing.T) {
 	st := newWizardState(Options{})
 	st.ForgeType, st.ForgeOrg = "github", "oberthci"
-	st.Config.AlsoUpstreams = []string{"ssh://git@codeberg.org/cloudtaser"}
+	st.Config.AlsoUpstreams = []string{"ssh://git@codeberg.org/exampleorg"}
 	v := &verifyResult{upstream: true, upstreams: []upstreamCheck{{name: "github", url: "ssh://git@github.com/oberthci", auth: "ok"}}}
 	ups := nextStepsUpstreams(st, v)
 	if len(ups) != 2 || ups[1].Name != "codeberg" || ups[1].Connected {

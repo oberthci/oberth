@@ -233,7 +233,7 @@ func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
 }
 
 // blockedBehindMessage names the queue-head run every later run waits behind,
-// e.g. "blocked behind cloudtaser-ebpf/main (XL, needs a full drain)". The
+// e.g. "blocked behind exampleorg-ebpf/main (XL, needs a full drain)". The
 // repository is a registered name and the ref a validated Git ref.
 func blockedBehindMessage(blocker *model.AdmissionBlocker) string {
 	if backfill := blocker.Backfill(); backfill != "" {
