@@ -1,7 +1,7 @@
 # Oberth
 
 AI-native CI for Kubernetes — a self-hosted gate that runs every AI-agent push
-as one Kubernetes Job and lets only green reach your forge.
+as an Argo Workflow and lets only green reach your forge.
 
 Agents `git push` to Oberth over SSH. Each push runs the repository's own
 pipeline as an Argo Workflow — no forge queue, no API rate limits, feedback at
@@ -33,7 +33,7 @@ Website: [oberth.ci](https://oberth.ci)
   from the default branch, with exactly the secrets the repository declares,
   intersected with the administrator allowlist. After every burn is green,
   Oberth publishes the exact admitted tag object upstream.
-- **MCP** — eighteen tools over authenticated HTTPS for AI agents: SHA- and
+- **MCP** — tools over authenticated HTTPS for AI agents: SHA- and
   exact-run status/logs, long-poll wait, promotion, and the
   issue queue.
 - **Audit** — every mutation joins a gap-free SHA-256 chain, always. Opt-in
@@ -56,14 +56,12 @@ ServiceAccount, fetch approved paths, and write private files to a verified
 tmpfs. The wrapper strips store credentials from the child environment and
 redacts fetched values from output. Branch builds receive no release credentials.
 
-Setup is one script run where your own `bao`/`vault` CLI is authenticated —
-the Oberth binary has no code path that accepts a store admin token — and
-`oberth secretstore verify` proves the whole trust chain from inside the pod.
-On verified HTTPS the setup also creates one non-exportable Transit key for
-trusted-plan envelopes; its policy grants only that key's exact encrypt and
-decrypt endpoints. The installer-managed production path generates listener
-TLS material directly on OpenBao's retained PVC, publishes only the public CA
-through a ConfigMap, and never starts a plaintext listener.
+Setup runs in the operator's authenticated `bao`/`vault` CLI session.
+The server daemon authenticates through its workload identity; the operator-only
+`oberth secretstore sync` command reads `BAO_TOKEN` from its environment.
+`oberth secretstore verify` checks the workload trust chain inside the pod.
+The installer bootstraps verified OpenBao TLS directly on its retained PVC,
+publishes only the public CA through a ConfigMap, and keeps its listener encrypted.
 
 ## Quick start
 
