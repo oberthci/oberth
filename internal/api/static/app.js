@@ -1053,6 +1053,10 @@ class LiveLogEventSource {
           const line = pending.slice(0, newline).replace(/\r$/, "");
           pending = pending.slice(newline + 1);
           if (!line) {
+            if (event === "auth_error") {
+              const detail = data.length ? JSON.parse(data.join("\n")) : {};
+              throw new Error(detail.error || "stream authentication required");
+            }
             if (event === "chunk" && data.length) onChunk(JSON.parse(data.join("\n")));
             event = ""; data = [];
           } else if (line.startsWith("event:")) event = line.slice(6).trim();

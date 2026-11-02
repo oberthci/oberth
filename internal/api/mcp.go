@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/oberthci/oberth/internal/model"
 )
@@ -438,14 +439,15 @@ func requestCorrelationID() string {
 	return hex.EncodeToString(body[:])
 }
 
-func knownTool(name string) bool {
+var registeredToolNames = sync.OnceValue(func() map[string]bool {
+	names := map[string]bool{}
 	for _, definition := range toolDefinitions() {
-		if definition["name"] == name {
-			return true
-		}
+		names[definition["name"].(string)] = true
 	}
-	return false
-}
+	return names
+})
+
+func knownTool(name string) bool { return registeredToolNames()[name] }
 
 // ToolNames lists every MCP tool the server offers, so the service can prove
 // each one is classified for scoped uplinks (#073).

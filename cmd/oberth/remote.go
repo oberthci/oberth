@@ -178,13 +178,14 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 	next := ""
 	for {
 		var page []remoteRun
-		if err := api.Get(ctx, "/api/runs", query, &page); err != nil {
+		headers, err := api.GetWithHeaders(ctx, "/api/runs", query, &page)
+		if err != nil {
 			return err
 		}
 		runs = append(runs, page...)
 		previous := next
-		next = ""
-		if len(page) > 0 && datedRunCount(page) == *limit {
+		next = headers.Get("X-Oberth-Next-Before")
+		if next == "" && len(page) > 0 && datedRunCount(page) == *limit {
 			next = runCursor(page[len(page)-1])
 		}
 		// A server older than paging ignores ?before and returns the newest
