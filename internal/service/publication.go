@@ -9,6 +9,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/pushretry"
+	"github.com/oberthci/oberth/internal/store"
 )
 
 type remotePublicationState uint8
@@ -124,7 +125,11 @@ func attemptPublicationMutation(
 	}
 	next := time.Now().Add(delay)
 	var err error
+	publicationID := publication.ID
 	publication, err = publications.UpdatePublicationAttempt(ctx, publication.ID, publication.Attempts, attempt, next, fmt.Sprintf("upstream publication attempt %d/%d", attempt, pushretry.MaxAttempts))
+	if errors.Is(err, store.ErrPromotionGrantInactive) {
+		return finalizePublication(ctx, publications, publicationID, model.PublicationFailed, err.Error())
+	}
 	if err != nil {
 		return model.PublicationFinalization{}, err
 	}

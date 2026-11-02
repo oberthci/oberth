@@ -74,6 +74,9 @@ FROM promotions WHERE id = ?`, spec.PromotionID))
 			!strings.EqualFold(promotion.ResultSHA, spec.ResultSHA) || promotion.RunID != spec.RunID {
 			return model.Publication{}, fmt.Errorf("%w: publication does not match pending promotion", ErrInvalidState)
 		}
+		if err := checkPromotionDeliveryGrantTx(ctx, tx, promotion, now); err != nil {
+			return model.Publication{}, err
+		}
 	}
 
 	value, err := scanPublication(tx.QueryRowContext(ctx, `

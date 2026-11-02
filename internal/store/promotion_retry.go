@@ -157,16 +157,39 @@ func (s *Store) appendPromotionGrantReserveAudit(ctx context.Context, tx *sql.Tx
 	return nil
 }
 
+var ErrPromotionGrantInactive = errors.New("store: promotion grant is no longer active")
+
+// checkPromotionDeliveryGrantTx repeats authorization before publication and
+// each push attempt. Reservation alone cannot survive revocation or expiry.
+func checkPromotionDeliveryGrantTx(ctx context.Context, tx *sql.Tx, promotion model.Promotion, now int64) error {
+	if promotion.GrantID == "" {
+		return nil
+	}
+	var active bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM promotion_grants
+WHERE id=? AND repo_id=? AND lower(source_sha)=lower(?) AND target_ref=?
+AND revoked_at IS NULL AND expires_at>?
+AND (consumed_at IS NULL OR consumed_by=?))`, promotion.GrantID, promotion.RepoID, promotion.SourceSHA, promotion.TargetRef, now, promotion.ID).Scan(&active); err != nil {
+		return err
+	}
+	if !active {
+		return fmt.Errorf("%w: %w", ErrInvalidState, ErrPromotionGrantInactive)
+	}
+	return nil
+}
+
 // consumeDeliveredPromotionGrantTx consumes the grant a promotion holds, in
 // the transaction that records its delivered publication. A grant consumed at
 // admission by an older server is already consumed and is left unchanged.
+// Invalidation during a push cannot undo external delivery: preserve that
+// delivered fact, but never mark the invalidated grant as consumed.
 func (s *Store) consumeDeliveredPromotionGrantTx(ctx context.Context, tx *sql.Tx, promotion model.Promotion, publicationID string, now int64) error {
 	if promotion.GrantID == "" {
 		return nil
 	}
 	result, err := tx.ExecContext(ctx, `
 UPDATE promotion_grants SET consumed_by = ?, consumed_at = ?
-WHERE id = ? AND consumed_at IS NULL`, promotion.ID, now, promotion.GrantID)
+WHERE id = ? AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at > ?`, promotion.ID, now, promotion.GrantID, now)
 	if err != nil {
 		return fmt.Errorf("consume delivered promotion grant: %w", err)
 	}
