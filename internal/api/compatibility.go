@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 )
 
@@ -32,6 +33,38 @@ func marshalCompatible(payload any) ([]byte, error) {
 	return json.Marshal(document)
 }
 
+type recordAliasField struct {
+	index       int
+	name, alias string
+	embedded    bool
+}
+
+var recordAliasPlans sync.Map // reflect.Type -> []recordAliasField, immutable after publication.
+
+func recordAliasPlan(typ reflect.Type) []recordAliasField {
+	if plan, ok := recordAliasPlans.Load(typ); ok {
+		return plan.([]recordAliasField)
+	}
+	fields := make([]recordAliasField, 0, typ.NumField())
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		if field.PkgPath != "" {
+			continue
+		}
+		name := strings.Split(field.Tag.Get("json"), ",")[0]
+		if name == "-" {
+			continue
+		}
+		embedded := field.Anonymous && name == ""
+		if name == "" {
+			name = field.Name
+		}
+		fields = append(fields, recordAliasField{index: i, name: name, alias: snakeCase(name), embedded: embedded})
+	}
+	plan, _ := recordAliasPlans.LoadOrStore(typ, fields)
+	return plan.([]recordAliasField)
+}
+
 func addRecordAliases(document any, value reflect.Value, changed *bool) {
 	for value.IsValid() && (value.Kind() == reflect.Pointer || value.Kind() == reflect.Interface) {
 		if value.IsNil() {
@@ -49,30 +82,18 @@ func addRecordAliases(document any, value reflect.Value, changed *bool) {
 			return
 		}
 		typ := value.Type()
-		for i := 0; i < typ.NumField(); i++ {
-			field := typ.Field(i)
-			if field.PkgPath != "" {
+		for _, field := range recordAliasPlan(typ) {
+			if field.embedded {
+				addRecordAliases(object, value.Field(field.index), changed)
 				continue
 			}
-			name := strings.Split(field.Tag.Get("json"), ",")[0]
-			if name == "-" {
-				continue
-			}
-			if field.Anonymous && name == "" {
-				addRecordAliases(object, value.Field(i), changed)
-				continue
-			}
-			if name == "" {
-				name = field.Name
-			}
-			item, exists := object[name]
+			item, exists := object[field.name]
 			if !exists {
 				continue
 			}
-			addRecordAliases(item, value.Field(i), changed)
-			alias := snakeCase(name)
-			if _, exists := object[alias]; !exists {
-				object[alias] = item
+			addRecordAliases(item, value.Field(field.index), changed)
+			if _, exists := object[field.alias]; !exists {
+				object[field.alias] = item
 				*changed = true
 			}
 		}
