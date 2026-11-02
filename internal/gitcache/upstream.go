@@ -21,7 +21,9 @@ func (c *Cache) SyncBranch(ctx context.Context, input, branch, sha string) error
 		return err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return err
+	}
 	defer lock.Unlock()
 	if err := c.checkRepositoryActive(ctx, input); err != nil {
 		return err
@@ -50,7 +52,9 @@ func (c *Cache) SyncTag(ctx context.Context, input, tag, sha string) error {
 		return err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return err
+	}
 	defer lock.Unlock()
 	if err := c.checkRepositoryActive(ctx, input); err != nil {
 		return err
@@ -76,8 +80,15 @@ func (c *Cache) DeleteBranch(ctx context.Context, input, branch string) error {
 	if err != nil {
 		return err
 	}
+	receive := c.receiveLock(path)
+	if err := receive.LockContext(ctx); err != nil {
+		return err
+	}
+	defer receive.Unlock()
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return err
+	}
 	defer lock.Unlock()
 	if err := c.checkRepositoryActive(ctx, input); err != nil {
 		return err
@@ -120,8 +131,10 @@ func (c *Cache) ReleaseReachable(ctx context.Context, input, commit, admissionSH
 		return false, err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
-	defer lock.Unlock()
+	if err := lock.RLockContext(ctx); err != nil {
+		return false, err
+	}
+	defer lock.RUnlock()
 	if err := c.assertCommit(ctx, path, admissionSHA); err != nil {
 		return false, fmt.Errorf("release admission snapshot is unavailable: %w", err)
 	}
@@ -154,10 +167,10 @@ func (c *Cache) ReachableFromUpstreamDefault(ctx context.Context, input, commit 
 		return false, err
 	}
 	lock := c.repoLock(path)
-	if err := lock.LockContext(ctx); err != nil {
+	if err := lock.RLockContext(ctx); err != nil {
 		return false, err
 	}
-	defer lock.Unlock()
+	defer lock.RUnlock()
 	if !c.isBare(ctx, path) {
 		return false, fmt.Errorf("repository %s is not cached", repo)
 	}
@@ -201,7 +214,9 @@ func (c *Cache) PreparePromotion(ctx context.Context, input, sourceSHA, targetBr
 		return MergeCandidate{}, err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return MergeCandidate{}, err
+	}
 	defer lock.Unlock()
 	if err := c.checkRepositoryActive(ctx, input); err != nil {
 		return MergeCandidate{}, err
@@ -317,7 +332,9 @@ func (c *Cache) PushPromotion(ctx context.Context, input, targetBranch, mergedSH
 		return err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return err
+	}
 	defer lock.Unlock()
 	if err := c.checkRepositoryActive(ctx, input); err != nil {
 		return err
@@ -376,8 +393,10 @@ func (c *Cache) PeelObject(ctx context.Context, input, objectSHA string) (Peeled
 		return PeeledObject{}, err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
-	defer lock.Unlock()
+	if err := lock.RLockContext(ctx); err != nil {
+		return PeeledObject{}, err
+	}
+	defer lock.RUnlock()
 	if err := c.assertObject(ctx, path, objectSHA); err != nil {
 		return PeeledObject{}, err
 	}
@@ -415,7 +434,9 @@ func (c *Cache) LsRemoteHeads(ctx context.Context, input string) (int, error) {
 		return 0, err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return 0, err
+	}
 	defer lock.Unlock()
 	if err := c.checkRepositoryActive(ctx, input); err != nil {
 		return 0, err

@@ -12,10 +12,10 @@ import (
 // can leave it without a detached goroutine acquiring the lock later.
 func (c *Cache) lockModuleRepository(ctx context.Context, path string) (func(), error) {
 	lock := c.repoLock(path)
-	if err := lock.LockContext(ctx); err != nil {
+	if err := lock.RLockContext(ctx); err != nil {
 		return nil, err
 	}
-	return lock.Unlock, nil
+	return lock.RUnlock, nil
 }
 
 // ModuleTagSnapshot resolves an exact public tag and its published timestamp

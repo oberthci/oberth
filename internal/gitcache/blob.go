@@ -33,10 +33,10 @@ func (c *Cache) ReadBlob(ctx context.Context, input, sha, file string, limit int
 		return nil, err
 	}
 	lock := c.repoLock(path)
-	if err := lock.LockContext(ctx); err != nil {
+	if err := lock.RLockContext(ctx); err != nil {
 		return nil, err
 	}
-	defer lock.Unlock()
+	defer lock.RUnlock()
 	if !c.isBare(ctx, path) {
 		return nil, fmt.Errorf("repository %s is not cached", repo)
 	}

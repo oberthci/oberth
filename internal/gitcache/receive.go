@@ -60,7 +60,9 @@ func (c *Cache) Receive(ctx context.Context, input, actor, protocol string, stdi
 		return errors.New("receive handler is required")
 	}
 	receiveLock := c.receiveLock(path)
-	receiveLock.Lock()
+	if err := receiveLock.LockContext(ctx); err != nil {
+		return err
+	}
 	defer receiveLock.Unlock()
 
 	if err := c.checkRepositoryActive(ctx, input); err != nil {
@@ -73,7 +75,9 @@ func (c *Cache) Receive(ctx context.Context, input, actor, protocol string, stdi
 		return fmt.Errorf("replay earlier receive for %s: %w", identity, err)
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return err
+	}
 	repository, err := c.ensureReceiveLocked(ctx, input, repo, path)
 	lock.Unlock()
 	if err != nil {
@@ -115,7 +119,9 @@ func (c *Cache) receiveTransactionSerialized(
 	}
 
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return err
+	}
 	if !c.isBare(ctx, path) {
 		lock.Unlock()
 		return fmt.Errorf("repository %s is not cached", identity)
@@ -147,7 +153,15 @@ func (c *Cache) receiveTransactionSerialized(
 		return err
 	}
 
+	// Git owns atomic ref transactions during the transport. The shared
+	// cache lock protects object lifetime while allowing independent readers;
+	// receiveLock still excludes removal and other receive lifecycles.
+	lock.downgrade()
 	receiveErr := receive()
+	lock.RUnlock()
+	if err := lock.LockContext(ctx); err != nil {
+		return errors.Join(receiveErr, err)
+	}
 	// The pre-receive hook saves push options before Git moves refs. Reload the
 	// same reservation so finalization and crash replay carry identical intent.
 	recorded, readErr := c.readReservation(identity)
@@ -280,7 +294,9 @@ func (c *Cache) ReplayPending(ctx context.Context, handler ReceiveHandler) error
 			continue
 		}
 		receiveLock := c.receiveLock(path)
-		receiveLock.Lock()
+		if err := receiveLock.LockContext(ctx); err != nil {
+			return err
+		}
 		err := c.replayRepoSerialized(ctx, item.Repo, path, handler)
 		receiveLock.Unlock()
 		if err != nil {
@@ -332,7 +348,9 @@ func (c *Cache) replayRepoSerialized(ctx context.Context, identity, path string,
 		return err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return err
+	}
 	if !c.isBare(ctx, path) {
 		lock.Unlock()
 		return fmt.Errorf("repository %s is not cached", identity)

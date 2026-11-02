@@ -26,10 +26,14 @@ func (c *Cache) ChangeRepositoryArchive(ctx context.Context, input string, archi
 		return err
 	}
 	receiveLock := c.receiveLock(path)
-	receiveLock.Lock()
+	if err := receiveLock.LockContext(ctx); err != nil {
+		return err
+	}
 	defer receiveLock.Unlock()
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return err
+	}
 	defer lock.Unlock()
 	if err := ctx.Err(); err != nil {
 		return err

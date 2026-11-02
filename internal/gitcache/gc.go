@@ -18,7 +18,9 @@ func (c *Cache) GCAll(ctx context.Context) error {
 	var errs []error
 	for _, path := range paths {
 		lock := c.repoLock(path)
-		lock.Lock()
+		if err := lock.LockContext(ctx); err != nil {
+			return errors.Join(append(errs, err)...)
+		}
 		bare := c.isBare(ctx, path)
 		if bare {
 			if err := c.run(ctx, commandSpec{dir: path, args: []string{"gc", "--auto"}}); err != nil {

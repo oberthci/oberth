@@ -19,7 +19,9 @@ func (c *Cache) RemoteRef(ctx context.Context, input, ref string) (sha string, e
 		return "", false, err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return "", false, err
+	}
 	defer lock.Unlock()
 	if err := c.checkRepositoryActive(ctx, input); err != nil {
 		return "", false, err

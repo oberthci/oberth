@@ -122,8 +122,19 @@ func (c *Cache) Ensure(ctx context.Context, input string) (Repository, error) {
 		return Repository{}, err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return Repository{}, err
+	}
 	defer lock.Unlock()
+	identity := c.reservationIdentity(repo, path)
+	if reservation, err := c.readReservation(identity); err == nil && (reservation.State == receiveReserved || reservation.State == receiveGateFailed) {
+		if err := c.checkRepositoryActive(ctx, input); err != nil {
+			return Repository{}, err
+		}
+		return c.ensureCachedOnlyLocked(ctx, repo, path)
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return Repository{}, err
+	}
 	return c.ensureLocked(ctx, input, repo, path)
 }
 
@@ -143,7 +154,34 @@ func (c *Cache) EnsureForFetch(ctx context.Context, input string) (Repository, e
 		return Repository{}, err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := ctx.Err(); err != nil {
+		return Repository{}, err
+	}
+	if !lock.TryLock() {
+		if err := lock.RLockContext(ctx); err != nil {
+			return Repository{}, err
+		}
+		defer lock.RUnlock()
+		if err := c.checkRepositoryActive(ctx, input); err != nil {
+			return Repository{}, err
+		}
+		if !c.isBare(ctx, path) {
+			return Repository{}, fmt.Errorf("repository %s is not cached", repo)
+		}
+		expected, err := c.validatedUpstream(input)
+		if err != nil {
+			return Repository{}, err
+		}
+		actual, err := c.capture(ctx, path, "remote", "get-url", "upstream")
+		if err != nil {
+			return Repository{}, err
+		}
+		if expected != actual {
+			return Repository{}, errors.New("cached upstream identity changed while repository is busy")
+		}
+		branch, err := c.currentDefaultBranch(ctx, path)
+		return Repository{Path: path, DefaultBranch: branch, Stale: true}, err
+	}
 	defer lock.Unlock()
 	if err := c.checkRepositoryActive(ctx, input); err != nil {
 		return Repository{}, err
@@ -959,8 +997,10 @@ func (c *Cache) RefSHA(ctx context.Context, input string, branch string) (string
 		return "", err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
-	defer lock.Unlock()
+	if err := lock.RLockContext(ctx); err != nil {
+		return "", err
+	}
+	defer lock.RUnlock()
 	if !c.isBare(ctx, path) {
 		return "", fmt.Errorf("repository %s is not cached", repo)
 	}
@@ -982,8 +1022,10 @@ func (c *Cache) SnapshotRefs(ctx context.Context, input string) (map[string]stri
 		return nil, err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
-	defer lock.Unlock()
+	if err := lock.RLockContext(ctx); err != nil {
+		return nil, err
+	}
+	defer lock.RUnlock()
 	return c.listRefsAtMost(ctx, path, maximumReceiveSnapshotRefs, "refs/heads/", "refs/tags/")
 }
 
@@ -1060,13 +1102,18 @@ func (c *Cache) Serve(ctx context.Context, input string, service Service, protoc
 		return err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
-	defer lock.Unlock()
+	if lock.TryLock() {
+		if err := c.cleanReplacementRefsLocked(ctx, path); err != nil {
+			lock.Unlock()
+			return err
+		}
+		lock.downgrade()
+	} else if err := lock.RLockContext(ctx); err != nil {
+		return err
+	}
+	defer lock.RUnlock()
 	if !c.isBare(ctx, path) {
 		return fmt.Errorf("repository %s is not cached", repo)
-	}
-	if err := c.cleanReplacementRefsLocked(ctx, path); err != nil {
-		return fmt.Errorf("clean replacement refs for %s: %w", repo, err)
 	}
 	return c.serveLocked(ctx, path, parsed, protocol, stdin, stdout, stderr)
 }

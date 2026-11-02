@@ -20,10 +20,10 @@ func (c *Cache) ReadOptionalBlob(ctx context.Context, input, sha, file string, l
 		return nil, false, err
 	}
 	lock := c.repoLock(path)
-	if err := lock.LockContext(ctx); err != nil {
+	if err := lock.RLockContext(ctx); err != nil {
 		return nil, false, err
 	}
-	defer lock.Unlock()
+	defer lock.RUnlock()
 	return c.readOptionalBlobLocked(ctx, path, sha, file, limit)
 }
 

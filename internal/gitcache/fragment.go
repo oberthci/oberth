@@ -27,15 +27,15 @@ func (c *Cache) resolveTagSHA(ctx context.Context, input string, tag string, pee
 	// Replay invokes exact-tag lookup inside a DB writer transaction. Never
 	// wait on a receive holding the repository lock: unavailable is unknown.
 	if !peel {
-		if !lock.TryLock() {
+		if !lock.TryRLock() {
 			return "", fmt.Errorf("tag %s lookup is busy in %s", tag, repo)
 		}
 	} else {
-		if err := lock.LockContext(ctx); err != nil {
+		if err := lock.RLockContext(ctx); err != nil {
 			return "", err
 		}
 	}
-	defer lock.Unlock()
+	defer lock.RUnlock()
 	if !c.isBare(ctx, path) {
 		return "", fmt.Errorf("repository %s is not cached", repo)
 	}

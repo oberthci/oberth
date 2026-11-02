@@ -92,10 +92,11 @@ type Config struct {
 	// upstream/org/repo path, so a scoped key reaches only its upstreams and
 	// a short name means the one repository of that name in scope (#073).
 	// Without it a scoped key reaches no repository.
-	QualifyInScope           func(input string, scope []string) (string, error)
-	Logger                   Logger
-	MutationGate             func(context.Context) error
-	HandshakeTimeout         time.Duration
+	QualifyInScope   func(input string, scope []string) (string, error)
+	Logger           Logger
+	MutationGate     func(context.Context) error
+	HandshakeTimeout time.Duration
+	// RequestTimeout also bounds inactivity on an executing Git stream.
 	RequestTimeout           time.Duration
 	SessionTimeout           time.Duration
 	MaxConnections           int
@@ -358,7 +359,7 @@ func (s *Server) handleConn(ctx context.Context, connection net.Conn) error {
 			defer releaseSession()
 			s.handleSession(connectionCtx, actor, stream, channelRequests, func() error {
 				return connection.SetDeadline(maximumDeadline)
-			}, releaseSession)
+			}, releaseSession, func() { _ = connection.Close() })
 		}()
 	}
 	cancel()
@@ -392,6 +393,7 @@ func (s *Server) handleSession(
 	requests <-chan *ssh.Request,
 	beginExec func() error,
 	complete func(),
+	abort ...func(),
 ) {
 	defer func() { _ = channel.Close() }()
 	defer complete()
@@ -425,7 +427,18 @@ func (s *Server) handleSession(
 			if request.WantReply {
 				_ = request.Reply(true, nil)
 			}
-			if err := s.runGit(ctx, actor, protocol, command, channel); err != nil {
+			sessionCtx, cancelSession := context.WithCancel(ctx)
+			defer cancelSession()
+			idle := newIdleChannel(channel, s.requestTimeout, func() {
+				cancelSession()
+				if len(abort) > 0 {
+					abort[0]()
+				} else {
+					_ = channel.Close()
+				}
+			})
+			defer idle.stop()
+			if err := s.runGit(sessionCtx, actor, protocol, command, idle); err != nil {
 				complete()
 				_, _ = io.WriteString(channel.Stderr(), "oberth: "+err.Error()+"\n")
 				sendExitStatus(channel, 1)
