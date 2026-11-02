@@ -118,3 +118,30 @@ func TestParallelismNoticeRetainedWithWorkflowTiming(t *testing.T) {
 		t.Fatalf("concurrency notice lost: %q", message)
 	}
 }
+
+func TestParallelismChangeCannotReuseReservation(t *testing.T) {
+	cfg := testConfig()
+	cfg.RunnerImagePrefixes = []string{"example.invalid/"}
+	source := resourceBoundsSource("      resources:\n        requests: {cpu: 1000m, memory: 1Gi}\n        limits: {memory: 1Gi}\n")
+	source = strings.Replace(source, "  entrypoint: step-abc12345", "  entrypoint: step-11111111", 1)
+	source += `  - name: step-11111111
+    parallelism: 4
+    steps:
+    - - name: step-abc12345
+        template: step-abc12345
+        withSequence: {count: "18"}
+`
+	r := resourceBoundsRequest(source)
+	r.PodDemand = &argoworkflow.PodDemand{CPUMilli: 4000, MemoryBytes: 4 << 30, Pods: 4}
+	wf, err := Build(cfg, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d, err := readPodDemand(wf); err != nil || d == nil || *d != *r.PodDemand {
+		t.Fatalf("wrong submission demand: %+v %v", d, err)
+	}
+	r.Source = []byte(strings.Replace(source, "parallelism: 4", "parallelism: 5", 1))
+	if _, err := Build(cfg, r); err == nil || !strings.Contains(err.Error(), "changed after reservation") {
+		t.Fatalf("changed parallelism reused reservation: %v", err)
+	}
+}

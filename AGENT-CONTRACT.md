@@ -556,6 +556,18 @@ trust assumptions and complete invalidation rules.
   included, without a grant. Automatic queue urgency is limited to the size
   maximum; oversized tags use normal order and bounded backfill. Size audits
   also record `automatic_tag_priority_enabled` and its previous value.
+- Declared admission honors workflow-wide pod parallelism and steps/DAG
+  template parallelism at each invocation boundary, including inherited limits,
+  inline templates and bounded item/parameter/sequence loops. Template limits
+  cap child invocations; nested children retain their full inner pod envelope.
+  A leaf's limit never serializes its callers. Unknown dynamic inner fan-out
+  needs its own limit or a workflow bound; otherwise admission stays legacy.
+  CPU requests, memory bounds, executor and VM launcher allowances are retained.
+  `resource_message` reports the effective concurrency and fixed explanations
+  for conservative bounds, without changing status reasons. The sealed demand
+  and explanations survive creation recovery, adoption and timing history;
+  old reservations/history are not recalculated. See
+  [declared admission](docs/declared-admission.md).
 - The server-owned workflow parameter `oberth-trigger`
   (`branch|promotion|schedule|tag`, the same durable run trigger) is set on
   every document that declares or mentions it, so `when:` guards can skip

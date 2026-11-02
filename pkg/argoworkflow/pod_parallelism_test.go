@@ -1,7 +1,9 @@
 package argoworkflow
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -135,7 +137,179 @@ func TestPodParallelismUnboundedInnerAndMissingDeclarations(t *testing.T) {
 	}
 	wf.Spec.Templates[1].Parallelism = podLimit(4)
 	wf.Spec.Templates[2].Container.Resources.Limits = nil
-	if d, err := DeclaredPodPeak(wf); d != nil || err != ErrMemoryUnbounded {
+	if d, err := DeclaredPodPeak(wf); d != nil || !errors.Is(err, ErrMemoryUnbounded) {
 		t.Fatalf("missing limit got credit: %+v %v", d, err)
+	}
+}
+
+func TestPodParallelismNeverUndercountsSmallDAGs(t *testing.T) {
+	for mask := 0; mask < 64; mask++ {
+		for limit := int64(1); limit <= 4; limit++ {
+			root := wfv1.Template{Name: "root", Parallelism: podLimit(limit), DAG: &wfv1.DAGTemplate{}}
+			wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Entrypoint: "root"}}
+			reach := [4][4]bool{}
+			bit := 0
+			for i := range 4 {
+				name := fmt.Sprintf("leaf-%d", i)
+				task := wfv1.DAGTask{Name: name, Template: name}
+				for j := 0; j < i; j++ {
+					if mask&(1<<bit) != 0 {
+						reach[j][i] = true
+						task.Dependencies = append(task.Dependencies, fmt.Sprintf("leaf-%d", j))
+					}
+					bit++
+				}
+				root.DAG.Tasks = append(root.DAG.Tasks, task)
+				wf.Spec.Templates = append(wf.Spec.Templates, declaredLeaf(name, fmt.Sprint(i+1), fmt.Sprintf("%dMi", 4-i)))
+			}
+			wf.Spec.Templates = append(wf.Spec.Templates, root)
+			for k := range 4 {
+				for i := range 4 {
+					for j := range 4 {
+						reach[i][j] = reach[i][j] || reach[i][k] && reach[k][j]
+					}
+				}
+			}
+			var cpu, memory, pods int64
+			for subset := 1; subset < 16; subset++ {
+				valid := true
+				var c, m, p int64
+				for i := range 4 {
+					if subset&(1<<i) == 0 {
+						continue
+					}
+					c += int64(i+1) * 1000
+					m += int64(4-i) << 20
+					p++
+					for j := i + 1; j < 4; j++ {
+						if subset&(1<<j) != 0 && reach[i][j] {
+							valid = false
+						}
+					}
+				}
+				if valid && p <= limit {
+					cpu = max(cpu, c)
+					memory = max(memory, m)
+					pods = max(pods, p)
+				}
+			}
+			for _, workflowLimit := range []bool{false, true} {
+				if workflowLimit {
+					wf.Spec.Parallelism = podLimit(limit)
+					wf.Spec.Templates[4].Parallelism = nil
+				}
+				d, err := DeclaredPodPeak(wf)
+				if err != nil || d == nil || d.CPUMilli < cpu || d.MemoryBytes < memory || d.Pods != pods {
+					t.Fatalf("mask=%d limit=%d workflow=%v: %+v %v; feasible=%d/%d/%d", mask, limit, workflowLimit, d, err, cpu, memory, pods)
+				}
+			}
+		}
+	}
+}
+
+func TestPodParallelismInlineScopeHelpersAndDefaultsOverride(t *testing.T) {
+	inner := parallelFanout("steps", "items", 18)
+	inner.Parallelism = podLimit(2)
+	root := wfv1.Template{Name: "root", DAG: &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{
+		{Name: "inner", Inline: &inner}, {Name: "sibling", Template: "leaf"},
+	}}}
+	leaf := declaredLeaf("leaf", "1", "1Gi")
+	leaf.Sidecars = []wfv1.UserContainer{{Container: *declaredLeaf("sidecar", "100m", "128Mi").Container}}
+	leaf.InitContainers = []wfv1.UserContainer{{Container: *declaredLeaf("init", "2", "256Mi").Container}}
+	wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Entrypoint: "root", Templates: []wfv1.Template{root, leaf}, TemplateDefaults: &wfv1.Template{Parallelism: podLimit(4)}}}
+	// The inline limit overrides defaults and cannot limit its sibling.
+	assertPodPeak(t, wf, 6000, 3*((1<<30)+(128<<20)), 3)
+}
+
+func TestPodParallelismSequencesAndInvalidBounds(t *testing.T) {
+	for _, test := range []struct {
+		start, end, count string
+		pods              int64
+	}{
+		{"5", "3", "", 3}, {"-2", "0", "", 3}, {"0", "", "2", 2},
+		{"-9223372036854775808", "9223372036854775807", "", 4},
+		{"9223372036854775807", "9223372036854775805", "", 3},
+		{"0", "", "9223372036854775807", 4},
+	} {
+		root := parallelFanout("steps", "sequence", 18)
+		root.Parallelism = podLimit(4)
+		seq := &wfv1.Sequence{Format: "%02d"}
+		if test.start != "" {
+			v := intstr.FromString(test.start)
+			seq.Start = &v
+		}
+		if test.end != "" {
+			v := intstr.FromString(test.end)
+			seq.End = &v
+		}
+		if test.count != "" {
+			v := intstr.FromString(test.count)
+			seq.Count = &v
+		}
+		root.Steps[0].Steps[0].WithSequence = seq
+		wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Entrypoint: "root", Templates: []wfv1.Template{root, declaredLeaf("leaf", "1", "1Gi")}}}
+		assertPodPeak(t, wf, test.pods*1000, test.pods<<30, test.pods)
+	}
+	for _, p := range []int64{0, -1, 257} {
+		root := parallelFanout("steps", "param", 18)
+		root.Parallelism = podLimit(p)
+		wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Entrypoint: "root", Templates: []wfv1.Template{root, declaredLeaf("leaf", "1", "1Gi")}}}
+		assertPodPeak(t, wf, 18000, 18<<30, 18)
+	}
+}
+
+func TestPodParallelismPreservesVMAndLauncherDemand(t *testing.T) {
+	wf := hostVMWorkflow(t)
+	wf.Spec.Templates[0].Parallelism = podLimit(4)
+	wf.Spec.Templates[0].Steps[1].Steps[0].WithParam = "[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]"
+	d, err := DeclaredHostPeak(wf, RunTriggerBranch)
+	if err != nil || d == nil || d.CPUMilli != 5500+VMILauncherCPUMilli || d.MemoryBytes != (8<<30)+VMILauncherMemoryBytes || d.Pods != 4 {
+		t.Fatalf("VM launcher or worker count lost: %+v %v", d, err)
+	}
+}
+
+func TestPodParallelismAbsentPreservesLegacySequenceFallback(t *testing.T) {
+	root := parallelFanout("steps", "sequence", 18)
+	wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Entrypoint: "root", Templates: []wfv1.Template{root, declaredLeaf("leaf", "1", "1Gi")}}}
+	if d, err := DeclaredPodPeak(wf); d != nil || err == nil {
+		t.Fatalf("unlimited sequence changed its legacy admission path: %+v %v", d, err)
+	}
+}
+
+func TestPodParallelismExplainsConservativeConditions(t *testing.T) {
+	root := parallelFanout("dag", "param", 18)
+	root.Parallelism = podLimit(4)
+	root.DAG.Tasks[0].When = "{{workflow.parameters.run}} == yes"
+	root.DAG.Tasks = append(root.DAG.Tasks, wfv1.DAGTask{Name: "observer", Template: "leaf", Depends: "workers.Running || workers.Succeeded"})
+	wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Entrypoint: "root", Templates: []wfv1.Template{root, declaredLeaf("leaf", "1", "1Gi")}}}
+	d, err := DeclaredPodPeak(wf)
+	if err != nil || d == nil || d.Pods != 4 || !strings.Contains(d.ConcurrencyMessage(), "Conditions and early-start") {
+		t.Fatalf("conservative envelope lacks explanation: %+v %v", d, err)
+	}
+}
+
+func TestPodParallelismAmbiguousAndEmptyLoopsCannotUndercount(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		items    int
+		param    string
+		sequence bool
+		pods     int64
+	}{
+		{"empty-items", 0, "", false, 1},
+		{"conflicting-param", 18, "[1]", false, 4},
+		{"conflicting-sequence", 18, "", true, 4},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := parallelFanout("steps", "items", test.items)
+			root.Parallelism = podLimit(4)
+			root.Steps[0].Steps[0].WithParam = test.param
+			if test.sequence {
+				n := intstr.FromInt(1)
+				root.Steps[0].Steps[0].WithSequence = &wfv1.Sequence{Count: &n}
+			}
+			wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Entrypoint: "root", Templates: []wfv1.Template{root, declaredLeaf("leaf", "1", "1Gi")}}}
+			assertPodPeak(t, wf, test.pods*1000, test.pods<<30, test.pods)
+		})
 	}
 }

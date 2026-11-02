@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -14,13 +15,14 @@ import (
 // PodDemand contains CPU requests and memory reservations, never observed usage. Each
 // dimension is an independent upper bound; its peak need not occur together.
 type PodDemand struct {
-	CPUMilli    int64 `json:"cpu_milli"`
-	MemoryBytes int64 `json:"memory_bytes"`
-	Pods        int64 `json:"pods"`
+	CPUMilli    int64              `json:"cpu_milli"`
+	MemoryBytes int64              `json:"memory_bytes"`
+	Pods        int64              `json:"pods"`
+	Assumptions PodPeakAssumptions `json:"assumptions,omitempty"`
 }
 
 func (d PodDemand) Valid() bool {
-	return d.CPUMilli > 0 && d.CPUMilli <= 1_000_000_000 && d.MemoryBytes > 0 && d.MemoryBytes <= 1<<60 && d.Pods > 0 && d.Pods <= 256
+	return d.Assumptions.Valid() && d.CPUMilli > 0 && d.CPUMilli <= 1_000_000_000 && d.MemoryBytes > 0 && d.MemoryBytes <= 1<<60 && d.Pods > 0 && d.Pods <= 256
 }
 
 const maxPodGraphWork = 4096
@@ -34,6 +36,11 @@ var ErrMemoryUnbounded = errors.New("pod or VM lacks a positive declared memory 
 
 type podGraph struct {
 	resourcePods bool
+	parallelism  int64
+	limited      bool
+	sequence     bool
+	leaves       []PodDemand
+	assumptions  PodPeakAssumptions
 	templates    map[string]*wfv1.Template
 	defaults     *wfv1.Template
 	stack        map[*wfv1.Template]bool
@@ -215,22 +222,64 @@ func (g *podGraph) expand(t *wfv1.Template, depth int) (int, int, error) {
 	if t.DAG == nil && len(t.Steps) == 0 {
 		d, err := templatePodDemand(t, g.defaults, g.resourcePods)
 		g.demands[start] = d
+		g.leaves = append(g.leaves, d)
 		return start, start, err
 	}
 	end, err := g.node(PodDemand{})
 	if err != nil {
 		return 0, 0, err
 	}
+	limit := t.Parallelism
+	if limit == nil && g.defaults != nil {
+		limit = g.defaults.Parallelism
+	}
+	var localLimit int64
+	if limit != nil && *limit > 0 && *limit <= 256 {
+		localLimit = *limit
+		g.limited = true
+	}
+	fanoutLimit := localLimit
+	if g.parallelism > 0 && (fanoutLimit == 0 || g.parallelism < fanoutLimit) {
+		fanoutLimit = g.parallelism
+	}
+	var children []PodDemand
+	expandChild := func(child *wfv1.Template) (int, int, error) {
+		first := len(g.edges)
+		a, b, err := g.expand(child, depth+1)
+		if err != nil || localLimit == 0 {
+			return a, b, err
+		}
+		d, err := g.peak(first, len(g.edges))
+		if err != nil {
+			return 0, 0, err
+		}
+		children = append(children, d)
+		if child.DAG != nil || len(child.Steps) > 0 {
+			g.assumptions |= PodPeakNested
+		}
+		return a, b, nil
+	}
 	call := func(name string, inline *wfv1.Template, ref *wfv1.TemplateRef, exit string, hooks wfv1.LifecycleHooks, copies int) (int, int, error) {
-		if ref != nil || exit != "" || len(hooks) != 0 || copies < 0 {
+		if ref != nil || exit != "" || len(hooks) != 0 {
 			return 0, 0, errPodGraph
 		}
 		child := g.templates[name]
 		if inline != nil {
 			child = inline
 		}
+		if copies < 0 {
+			if fanoutLimit == 0 {
+				return 0, 0, errPodGraph
+			}
+			copies = int(fanoutLimit)
+			g.assumptions |= PodPeakDynamic
+		} else if fanoutLimit > 0 {
+			copies = min(copies, int(fanoutLimit))
+		} else if copies > 128 {
+			return 0, 0, errPodGraph
+		}
 		if copies == 1 {
-			return g.expand(child, depth+1)
+			return expandChild(child)
 		}
 		a, err := g.node(PodDemand{})
 		if err != nil {
@@ -242,7 +291,7 @@ func (g *podGraph) expand(t *wfv1.Template, depth int) (int, int, error) {
 		}
 		g.edges[a] = append(g.edges[a], b)
 		for range copies {
-			x, y, e := g.expand(child, depth+1)
+			x, y, e := expandChild(child)
 			if e != nil {
 				return 0, 0, e
 			}
@@ -255,6 +304,10 @@ func (g *podGraph) expand(t *wfv1.Template, depth int) (int, int, error) {
 		starts, ends := map[string]int{}, map[string]int{}
 		deps := map[string][]string{}
 		for _, task := range t.DAG.Tasks {
+			g.sequence = g.sequence || task.WithSequence != nil
+			if task.When != "" {
+				g.assumptions |= PodPeakConditions
+			}
 			if _, duplicate := starts[task.Name]; duplicate {
 				return 0, 0, errPodGraph
 			}
@@ -277,6 +330,8 @@ func (g *podGraph) expand(t *wfv1.Template, depth int) (int, int, error) {
 					for _, part := range parts {
 						deps[task.Name] = append(deps[task.Name], strings.TrimSuffix(strings.TrimSpace(part), ".Succeeded"))
 					}
+				} else {
+					g.assumptions |= PodPeakConditions
 				}
 			}
 		}
@@ -296,6 +351,10 @@ func (g *podGraph) expand(t *wfv1.Template, depth int) (int, int, error) {
 		for _, group := range t.Steps {
 			next := []int{}
 			for _, step := range group.Steps {
+				g.sequence = g.sequence || step.WithSequence != nil
+				if step.When != "" {
+					g.assumptions |= PodPeakConditions
+				}
 				a, b, e := call(step.Template, step.Inline, step.TemplateRef, step.OnExit, step.Hooks, podFanoutCount(step.WithItems, step.WithParam, step.WithSequence))
 				if e != nil {
 					return 0, 0, e
@@ -311,14 +370,31 @@ func (g *podGraph) expand(t *wfv1.Template, depth int) (int, int, error) {
 			g.edges[p] = append(g.edges[p], end)
 		}
 	}
+	if localLimit > 0 {
+		d, err := g.peak(start, len(g.edges))
+		if err != nil {
+			return 0, 0, err
+		}
+		// Template parallelism limits direct child invocations, not all pods
+		// recursively. Each child keeps its full independently bounded demand.
+		cpu, memory, pods := demandVectors(children)
+		d.CPUMilli = min(d.CPUMilli, largestPodRequests(cpu, int(localLimit)))
+		d.MemoryBytes = min(d.MemoryBytes, largestPodRequests(memory, int(localLimit)))
+		d.Pods = min(d.Pods, largestPodRequests(pods, int(localLimit)))
+		g.edges = g.edges[:start+1]
+		g.edges[start] = nil
+		g.demands = g.demands[:start+1]
+		g.demands[start] = d
+		return start, start, nil
+	}
 	return start, end, nil
 }
 
 // DeclaredPodPeak returns nil for incomplete requests and ErrMemoryUnbounded
-// for a missing effective memory limit. Fully declared but
-// dynamic/unsupported graphs require a workflow parallelism bound; that path
-// reserves the largest possible pod in each dimension times the bound. It does
-// not infer fanout size or condition results from mutable inputs.
+// for a missing effective memory limit. Workflow and template parallelism bound
+// fan-out at their respective scopes. Unsupported graphs require a workflow
+// bound and reserve the largest possible pod per slot. Mutable item counts and
+// conditions earn no reductions beyond their enforced concurrency bounds.
 func DeclaredPodPeak(wf *wfv1.Workflow) (*PodDemand, error) { return declaredPodPeak(wf, false) }
 
 func declaredPodPeak(wf *wfv1.Workflow, resourcePods bool) (*PodDemand, error) {
@@ -332,7 +408,11 @@ func declaredPodPeak(wf *wfv1.Workflow, resourcePods bool) (*PodDemand, error) {
 	if c.Undeclared != 0 || (c.Declared == 0 && !resourcePods) {
 		return nil, nil
 	}
-	g := podGraph{resourcePods: resourcePods, templates: map[string]*wfv1.Template{}, defaults: wf.Spec.TemplateDefaults, stack: map[*wfv1.Template]bool{}}
+	var parallelism int64
+	if p := wf.Spec.Parallelism; p != nil && *p > 0 && *p <= 256 {
+		parallelism = *p
+	}
+	g := podGraph{parallelism: parallelism, resourcePods: resourcePods, templates: map[string]*wfv1.Template{}, defaults: wf.Spec.TemplateDefaults, stack: map[*wfv1.Template]bool{}}
 	for i := range wf.Spec.Templates {
 		t := &wf.Spec.Templates[i]
 		g.templates[t.Name] = t
@@ -347,15 +427,42 @@ func declaredPodPeak(wf *wfv1.Workflow, resourcePods bool) (*PodDemand, error) {
 	if wf.Spec.OnExit != "" || len(wf.Spec.Hooks) != 0 {
 		return nil, errPodGraph
 	}
-	if err != nil {
+	// Keep the previous legacy path for sequences without any effective
+	// parallelism limit. This change only enables their bounded analysis.
+	if err != nil || g.sequence && !g.limited && parallelism == 0 {
 		return boundedPodPeak(wf, resourcePods)
 	}
-	n := len(g.edges)
+	d, err := g.peak(0, len(g.edges))
+	if err != nil {
+		return nil, err
+	}
+	if parallelism > 0 && parallelism < d.Pods {
+		// Use actual leaf weights, never a collapsed nested template envelope,
+		// for the workflow-wide pod cap.
+		cpu, memory, _ := demandVectors(g.leaves)
+		d.CPUMilli = min(d.CPUMilli, largestPodRequests(cpu, int(parallelism)))
+		d.MemoryBytes = min(d.MemoryBytes, largestPodRequests(memory, int(parallelism)))
+		d.Pods = parallelism
+	}
+	d.Assumptions = g.assumptions
+	emptyExecutor := resourcePods && d.Pods > 0 && d.CPUMilli == 0 && d.MemoryBytes == 0
+	if !d.Valid() && !emptyExecutor {
+		return nil, errPodGraph
+	}
+	return &d, nil
+}
+
+// peak preserves dependency ordering within a subgraph. Collapsed bounded
+// templates carry independent upper bounds in each dimension.
+func (g *podGraph) peak(first, end int) (PodDemand, error) {
+	n := end - first
 	reach := make([][]bool, n)
 	for i := range reach {
 		reach[i] = make([]bool, n)
-		for _, j := range g.edges[i] {
-			reach[i][j] = true
+		for _, j := range g.edges[first+i] {
+			if j >= first && j < end {
+				reach[i][j-first] = true
+			}
 		}
 	}
 	for k := range n {
@@ -367,24 +474,22 @@ func declaredPodPeak(wf *wfv1.Workflow, resourcePods bool) (*PodDemand, error) {
 			}
 		}
 	}
-	cpu, memory, pods := make([]int64, n), make([]int64, n), make([]int64, n)
-	for i, d := range g.demands {
+	for i := range n {
 		if reach[i][i] {
-			return nil, errPodGraph
+			return PodDemand{}, errPodGraph
 		}
-		cpu[i], memory[i], pods[i] = d.CPUMilli, d.MemoryBytes, d.Pods
 	}
-	d := PodDemand{CPUMilli: maxWeightedVMAntichain(reach, cpu), MemoryBytes: maxWeightedVMAntichain(reach, memory), Pods: maxWeightedVMAntichain(reach, pods)}
-	if p := wf.Spec.Parallelism; p != nil && *p > 0 && *p < d.Pods {
-		d.CPUMilli = min(d.CPUMilli, largestPodRequests(cpu, int(*p)))
-		d.MemoryBytes = min(d.MemoryBytes, largestPodRequests(memory, int(*p)))
-		d.Pods = *p
+	cpu, memory, pods := demandVectors(g.demands[first:end])
+	return PodDemand{CPUMilli: maxWeightedVMAntichain(reach, cpu), MemoryBytes: maxWeightedVMAntichain(reach, memory), Pods: maxWeightedVMAntichain(reach, pods)}, nil
+}
+
+func demandVectors(demands []PodDemand) (cpu, memory, pods []int64) {
+	for _, d := range demands {
+		cpu = append(cpu, d.CPUMilli)
+		memory = append(memory, d.MemoryBytes)
+		pods = append(pods, d.Pods)
 	}
-	emptyExecutor := resourcePods && d.Pods > 0 && d.CPUMilli == 0 && d.MemoryBytes == 0
-	if !d.Valid() && !emptyExecutor {
-		return nil, errPodGraph
-	}
-	return &d, nil
+	return
 }
 
 func largestPodRequests(values []int64, count int) int64 {
@@ -466,7 +571,7 @@ func boundedPodPeak(wf *wfv1.Workflow, resourcePods bool) (*PodDemand, error) {
 	} else if err != nil {
 		return nil, err
 	}
-	d := PodDemand{CPUMilli: maximum.CPUMilli * *p, MemoryBytes: maximum.MemoryBytes * *p, Pods: *p}
+	d := PodDemand{CPUMilli: maximum.CPUMilli * *p, MemoryBytes: maximum.MemoryBytes * *p, Pods: *p, Assumptions: PodPeakGraph}
 	if !d.Valid() {
 		return nil, fmt.Errorf("%w: requests exceed graph bounds", errPodGraph)
 	}
@@ -474,22 +579,67 @@ func boundedPodPeak(wf *wfv1.Workflow, resourcePods bool) (*PodDemand, error) {
 }
 
 func podFanoutCount(items []wfv1.Item, param string, sequence *wfv1.Sequence) int {
+	forms := 0
+	if len(items) > 0 {
+		forms++
+	}
+	if param != "" {
+		forms++
+	}
 	if sequence != nil {
+		forms++
+	}
+	if forms > 1 {
+		// Conflicting loop sources must never earn the smaller cardinality.
+		// Use the full enforced bound, or decline numeric admission.
 		return -1
 	}
-	n := 1
-	if items != nil {
-		n = len(items)
+	if sequence != nil {
+		return podSequenceCount(sequence)
 	}
 	if param != "" {
 		var values []json.RawMessage
 		if json.Unmarshal([]byte(param), &values) != nil || !strings.HasPrefix(strings.TrimSpace(param), "[") {
 			return -1
 		}
-		n = len(values)
+		return len(values)
 	}
-	if n > 128 {
-		return -1
+	if len(items) > 0 {
+		return len(items)
 	}
-	return n
+	// An empty withItems is not expanded by the executor: the call runs once.
+	return 1
+}
+
+// Saturate large literal sequences before expansion; limits can still bound
+// their concurrency. Parse in int64 and compare before subtracting endpoints.
+func podSequenceCount(sequence *wfv1.Sequence) int {
+	parse := func(value string) (int64, error) { return strconv.ParseInt(value, 10, 64) }
+	start := int64(0)
+	var err error
+	if sequence.Start != nil {
+		start, err = parse(sequence.Start.String())
+		if err != nil {
+			return -1
+		}
+	}
+	if sequence.End != nil {
+		end, err := parse(sequence.End.String())
+		if err != nil {
+			return -1
+		}
+		lo, hi := min(start, end), max(start, end)
+		if lo <= (1<<63-1)-maxPodGraphWork && hi > lo+maxPodGraphWork {
+			return maxPodGraphWork + 1
+		}
+		return int(hi-lo) + 1
+	}
+	if sequence.Count != nil {
+		count, err := parse(sequence.Count.String())
+		if err != nil || count < 0 {
+			return -1
+		}
+		return int(min(count, maxPodGraphWork+1))
+	}
+	return -1
 }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 // ResourceCoverages reads only numeric coverage and fixed admission reason codes, in one indexed read
@@ -24,7 +25,7 @@ func (s *Store) ResourceCoverages(ctx context.Context, ids []string) (map[string
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.reader().QueryContext(ctx, `SELECT run_id,json_extract(workflow_json,'$.resources.declared'),json_extract(workflow_json,'$.resources.undeclared'),COALESCE(json_extract(workflow_json,'$.resources.fallback'),''),COALESCE(json_extract(workflow_json,'$.resources.unknown'),0) FROM run_timings WHERE run_id IN (SELECT value FROM json_each(?))`, string(raw))
+	rows, err := s.reader().QueryContext(ctx, `SELECT run_id,json_extract(workflow_json,'$.resources.declared'),json_extract(workflow_json,'$.resources.undeclared'),COALESCE(json_extract(workflow_json,'$.resources.fallback'),''),COALESCE(json_extract(workflow_json,'$.resources.unknown'),0),json_extract(workflow_json,'$.resources.pod_demand') FROM run_timings WHERE run_id IN (SELECT value FROM json_each(?))`, string(raw))
 	if err != nil {
 		return nil, err
 	}
@@ -34,11 +35,19 @@ func (s *Store) ResourceCoverages(ctx context.Context, ids []string) (map[string
 		var declared, undeclared *int
 		var fallback string
 		var unknown bool
-		if err := rows.Scan(&id, &declared, &undeclared, &fallback, &unknown); err != nil {
+		var demandJSON *string
+		if err := rows.Scan(&id, &declared, &undeclared, &fallback, &unknown, &demandJSON); err != nil {
 			return nil, err
 		}
 		if declared != nil && undeclared != nil {
 			c := model.ResourceCoverage{Declared: *declared, Undeclared: *undeclared, Fallback: model.ResourceAdmissionFallback(fallback), Unknown: unknown}
+			if demandJSON != nil {
+				var demand argoworkflow.PodDemand
+				if len(*demandJSON) > 256 || json.Unmarshal([]byte(*demandJSON), &demand) != nil || !demand.Valid() {
+					continue
+				}
+				c.PodDemand = &demand
+			}
 			if c.Valid() {
 				out[id] = c
 			}

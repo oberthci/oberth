@@ -47,6 +47,14 @@ func (controller *Controller) retainWorkflowTiming(ctx context.Context, workflow
 	if coverage := argoworkflow.ResourceCoverage(workflow); coverage != nil {
 		value.Resources = &model.ResourceCoverage{Declared: coverage.Declared, Undeclared: coverage.Undeclared}
 	}
+	// Retain the sealed admission count, never re-size an already running
+	// workflow using a newer analyzer or changed source.
+	if demand, err := readPodDemand(workflow); err == nil && demand != nil {
+		if value.Resources == nil {
+			value.Resources = &model.ResourceCoverage{Unknown: true}
+		}
+		value.Resources.PodDemand = demand
+	}
 	if fallback, err := readResourceFallback(workflow); err == nil && fallback != "" {
 		if value.Resources == nil {
 			value.Resources = &model.ResourceCoverage{Unknown: true}

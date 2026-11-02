@@ -31,15 +31,42 @@ container sets, inherited requests, authored init containers and sidecars count.
 Container-set requests are summed for the pod. Init requests use a conservative
 scheduling envelope, including restartable init containers.
 
-Dynamic fan-out requires positive workflow `parallelism`, bounded to 256 pods.
-Its reservation uses the largest possible declared pod in each dimension times
-that bound. Unsupported lifetime graphs, hooks and exit handlers do not earn
-concurrency credits. Graph expansion and analysis have explicit size/depth/work
+Workflow `parallelism` caps the total concurrent workflow pods. A positive
+`parallelism` on a steps or DAG template caps its concurrent **child
+invocations**, shared across sibling tasks and loops in that invocation. Template
+defaults apply when the template does not override the limit. Static `withItems`,
+array `withParam`, and literal `withSequence` loops reserve at most the smaller
+of their item count and the applicable limit. A limit on a container/script leaf
+does not serialize separate invocations of that leaf.
+
+Nested limits apply at their own boundaries. An outer limit of 2 invoking an
+inner four-pod fan-out can reserve 8 pods; it cannot safely be treated as a
+workflow-wide two-pod cap. The outer limit caps the number of inner invocations,
+and each retains its full inner demand. Repeated and inline calls follow the
+same rule. CPU, memory and pod count retain independent conservative bounds;
+when child costs differ, the largest permitted child demands are charged in
+each dimension. Dependency ordering can reduce that envelope.
+
+Dynamic `withParam` or `withSequence` loops use the full applicable template or
+workflow limit because their item count is unknown. An outer template limit
+alone cannot bound an unbounded dynamic fan-out inside a child template.
+Workflow limits are bounded to 256 pods by the analyzer; the existing trusted
+submission ceilings still apply. Unsupported graphs with a workflow bound
+reserve the largest possible declared pod in each dimension times that bound.
+Unsupported lifetime graphs, hooks and exit handlers do not earn concurrency
+credits. Nonempty array fan-outs and dependency graphs without parallelism retain
+their previous resource accounting; sequences without a limit retain legacy
+fallback. Empty `withItems` follows the executor's single-call behavior.
+Conflicting loop sources use the full enforced bound, or legacy admission if
+there is no bound, so an ambiguous smaller count cannot reduce the reservation. Graph expansion and analysis have explicit size/depth/work
 bounds. A graph that cannot be bounded falls back to legacy size admission;
 so does a reservation that exceeds the configured numeric budget, including
 helper reserve. These cases never acquire a new numeric sizing refusal. A fixed
 notice appears in the existing run-message cell through `resource_message`,
-without changing `display_reason`. It is available while waiting, retained in
+without changing `display_reason`. Numeric admission shows the effective pod
+concurrency used as an upper bound. The notice explains full-bound dynamic
+fan-out, nested child envelopes, ignored conditions/early-start dependencies,
+and largest-pod graph fallbacks when applicable. It is available while waiting, retained in
 submission timing metadata, and restored after uncertain creation/restart.
 Work with missing helper requests or unknown coverage also keeps the legacy path.
 Requests are checked before limits: work without CPU/memory requests receives a

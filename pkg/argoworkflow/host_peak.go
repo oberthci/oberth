@@ -102,6 +102,7 @@ func DeclaredHostPeak(wf *wfv1.Workflow, trigger RunTrigger) (*PodDemand, error)
 		d.CPUMilli += x.CPUMilli
 		d.MemoryBytes += x.MemoryBytes
 		d.Pods += x.Pods
+		d.Assumptions |= x.Assumptions
 	}
 	if peak, ok := runVMIPeakWithCosts(wf, trigger, costs); ok {
 		sum.CPUMilli = min(sum.CPUMilli, int64(peak.Cores))

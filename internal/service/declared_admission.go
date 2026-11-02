@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"math/big"
+	"strings"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
@@ -136,7 +137,11 @@ func (s *Scheduler) ResourceAdmissionMessage(runID string) string {
 	defer g.mu.Unlock()
 	for _, r := range g.reservations {
 		if r.runID == runID {
-			return r.fallback.Message()
+			message := r.fallback.Message()
+			if r.pods != nil {
+				message = strings.TrimSpace(message + " " + r.pods.ConcurrencyMessage())
+			}
+			return message
 		}
 	}
 	return ""

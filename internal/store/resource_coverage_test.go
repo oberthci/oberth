@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 func TestResourceCoveragePersistsInExistingJSONAndLegacyStaysUnknown(t *testing.T) {
@@ -66,5 +67,59 @@ func TestResourceCoveragePersistsInExistingJSONAndLegacyStaysUnknown(t *testing.
 	}
 	if _, e := s.ResourceCoverages(t.Context(), make([]string, 513)); e == nil {
 		t.Fatal("unbounded coverage read")
+	}
+}
+
+func TestParallelismNoticeSurvivesTimingStoreRead(t *testing.T) {
+	at := time.Now().UTC()
+	s := testStore(t, &at)
+	repo := createRepo(t, s)
+	run, err := s.EnqueueRun(t.Context(), testRunSpec(repo.ID, "main", strings.Repeat("a", 40)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.SetRunJobName(t.Context(), run.ID, "step-abc12345"); err != nil {
+		t.Fatal(err)
+	}
+	demand := &argoworkflow.PodDemand{CPUMilli: 4000, MemoryBytes: 4 << 30, Pods: 4}
+	timing := model.WorkflowTiming{RunID: run.ID, Namespace: "oberth", Name: "step-abc12345", UID: "11111111-1111-4111-8111-111111111111", SpecIdentity: strings.Repeat("a", 64), CreatedAt: at, Tasks: []model.TimingTask{}, Resources: &model.ResourceCoverage{Declared: 1, PodDemand: demand}}
+	if err = s.RecordWorkflowTiming(t.Context(), timing); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ResourceCoverages(t.Context(), []string{run.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message := got[run.ID].Message(run.ID); !strings.Contains(message, "effective concurrency: 4 pods") {
+		t.Fatalf("stored concurrency lost in batched read: %q", message)
+	}
+}
+
+func TestParallelismNoticeDoesNotRewriteOldTiming(t *testing.T) {
+	at := time.Now().UTC()
+	s := testStore(t, &at)
+	repo := createRepo(t, s)
+	run, err := s.EnqueueRun(t.Context(), testRunSpec(repo.ID, "main", strings.Repeat("a", 40)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.SetRunJobName(t.Context(), run.ID, "step-abc12345"); err != nil {
+		t.Fatal(err)
+	}
+	timing := model.WorkflowTiming{RunID: run.ID, Namespace: "oberth", Name: "step-abc12345", UID: "11111111-1111-4111-8111-111111111111", SpecIdentity: strings.Repeat("a", 64), CreatedAt: at, Tasks: []model.TimingTask{}, Resources: &model.ResourceCoverage{Declared: 1}}
+	if err = s.RecordWorkflowTiming(t.Context(), timing); err != nil {
+		t.Fatal(err)
+	}
+	timing.Resources.PodDemand = &argoworkflow.PodDemand{CPUMilli: 4000, MemoryBytes: 4 << 30, Pods: 4}
+	if err = s.RecordWorkflowTiming(t.Context(), timing); err != nil {
+		t.Fatal("new observer rejected unchanged legacy timing", err)
+	}
+	got, err := s.ResourceCoverages(t.Context(), []string{run.ID})
+	if err != nil || got[run.ID].PodDemand != nil {
+		t.Fatalf("legacy timing rewritten: %+v %v", got, err)
+	}
+	timing.Resources.Declared++
+	if err = s.RecordWorkflowTiming(t.Context(), timing); err == nil {
+		t.Fatal("changed existing coverage accepted")
 	}
 }

@@ -1,3 +1,15 @@
+Declared parallelism: `TestPodParallelismFanouts` covers workflow/template/default
+limits for steps and DAG item, parameter and sequence loops, including dynamic
+counts. Scope/multiplicity, inline helpers, sequence extremes and VM launcher
+checks guard against reducing the wrong level or dropping allowances.
+`TestPodParallelismNeverUndercountsSmallDAGs` enumerates all four-node DAG edge
+sets and feasible concurrent subsets under every limit. Unlimited workflows
+retain the existing exhaustive antichain tests and legacy sequence fallback.
+`TestParallelismAdmissionMatrixSharesAndReportsConcurrency` checks immutable
+receipt analysis, helper charges, host sharing and the separate run notice.
+Submission rejects changed parallelism; notices survive create recovery,
+Workflow timing and the batched history query without rewriting old timing.
+
 Schedule entry identity: `TestScheduleEntryCronAndManualKeepTheSameResolvedIdentity`
 compares cron and manual enqueue on one SHA and preserves a plan after file edits.
 `TestScheduleEntriesAreIndependentAndSurviveRetryRecovery` uses SQLite to prove
