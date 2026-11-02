@@ -17,6 +17,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/yaml"
 
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
 )
 
@@ -207,21 +208,24 @@ func (r *AccessReconciler) reconcileLocked(ctx context.Context, actorPrefix stri
 // through the qualified key only. Any other store error aborts the
 // reconcile so it retries rather than converging on partial state.
 func (r *AccessReconciler) canonicalGrantRepo(ctx context.Context, repo string) (string, bool, error) {
-	repository, err := r.store.RepositoryByName(ctx, repo)
-	if err != nil {
-		if errors.Is(err, store.ErrAmbiguous) {
-			return "", false, nil
-		}
-		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrInvalid) {
-			return repo, true, nil
-		}
-		return "", false, err
+	key, err := canonicalGrantRepoKey(ctx, repo, r.store.RepositoryByName, r.store.QualifiedRepoName)
+	if errors.Is(err, store.ErrAmbiguous) {
+		return "", false, nil
 	}
-	qualified, err := r.store.QualifiedRepoName(ctx, repository.ID)
-	if err != nil {
-		return "", false, err
+	return key, err == nil, err
+}
+
+// Only absent or syntactically invalid selectors remain inert verbatim keys.
+// Operational failures must abort both API mutations and reconciliation.
+func canonicalGrantRepoKey(ctx context.Context, repo string, lookup func(context.Context, string) (model.Repository, error), qualify func(context.Context, int64) (string, error)) (string, error) {
+	repository, err := lookup(ctx, repo)
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrInvalid) {
+		return repo, nil
 	}
-	return qualified, true, nil
+	if err != nil {
+		return "", err
+	}
+	return qualify(ctx, repository.ID)
 }
 
 func (r *AccessReconciler) revokeAllLocked(ctx context.Context, actor string) error {

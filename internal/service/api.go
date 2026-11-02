@@ -2961,19 +2961,14 @@ func (service *API) canonicalAccessRepo(ctx context.Context, repo string) (strin
 	if service.repositories == nil {
 		return repo, nil
 	}
-	resolved, err := service.repositories.RepositoryByName(ctx, repo)
-	if err != nil {
-		if errors.Is(err, store.ErrAmbiguous) {
-			return "", fmt.Errorf("%w: %w", ErrInvalidInput, err)
-		}
-		// Unregistered or unparseable spellings keep their verbatim form.
-		return repo, nil
+	key, err := canonicalGrantRepoKey(ctx, repo, service.repositories.RepositoryByName, service.secretAccess.QualifiedRepoName)
+	if errors.Is(err, store.ErrAmbiguous) {
+		return "", fmt.Errorf("%w: %w", ErrInvalidInput, err)
 	}
-	qualified, err := service.secretAccess.QualifiedRepoName(ctx, resolved.ID)
 	if err != nil {
-		return repo, nil
+		return "", err
 	}
-	return qualified, nil
+	return key, nil
 }
 
 func (service *API) accessList(ctx context.Context, repo string, includeRevoked bool) (api.AccessListResponse, error) {
