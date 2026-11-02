@@ -1261,7 +1261,7 @@ func TestBuildRecognisesOberthSecretstoreExec(t *testing.T) {
 		t.Fatalf("build: %v", err)
 	}
 
-	// The credentialed template should have the release token mount.
+	// Removing materialize must also remove its authority to receive a token.
 	template := workflow.Spec.Templates[0]
 	var hasTokenMount bool
 	for _, mount := range template.Container.VolumeMounts {
@@ -1357,7 +1357,7 @@ spec:
 	}
 }
 
-// Tests that a materialize invocation (no --path flags) passes admission.
+// A retired materialize spelling is ordinary workload input, never a credential consumer.
 const oberthMaterializeDocument = `
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
@@ -1381,14 +1381,14 @@ spec:
           - release.sh
 `
 
-func TestBuildAcceptsOberthSecretstoreMaterialize(t *testing.T) {
+func TestBuildDoesNotGrantTokensToRetiredMaterialize(t *testing.T) {
 	request := testRequest(pipeline.TriggerRelease, oberthMaterializeDocument)
 	request.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
 	workflow, err := Build(testConfig(), request)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	// The credentialed template should have the release token mount.
+	// Removing materialize must also remove its authority to receive a token.
 	template := workflow.Spec.Templates[0]
 	var hasTokenMount bool
 	for _, mount := range template.Container.VolumeMounts {
@@ -1396,8 +1396,8 @@ func TestBuildAcceptsOberthSecretstoreMaterialize(t *testing.T) {
 			hasTokenMount = true
 		}
 	}
-	if !hasTokenMount {
-		t.Fatal("oberth secretstore materialize template is missing the release token mount")
+	if hasTokenMount {
+		t.Fatal("retired materialize command received a release token mount")
 	}
 }
 

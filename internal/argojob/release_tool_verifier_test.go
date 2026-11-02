@@ -179,10 +179,14 @@ func TestBootstrapExecutedEnvironmentIgnoresSharedCachesAndCredentials(t *testin
 		t.Fatal(err)
 	}
 	tested := 0
+	sawDeadcode := false
 	for _, template := range workflow.Spec.Templates {
 		container := template.Container
 		if container == nil || template.Name == "copy-test-tools" {
 			continue
+		}
+		if template.Name == "deadcode" {
+			sawDeadcode = true
 		}
 		t.Run(template.Name, func(t *testing.T) {
 			credentialed := templateUsesOberthSecretstore(&template)
@@ -260,11 +264,11 @@ func TestBootstrapExecutedEnvironmentIgnoresSharedCachesAndCredentials(t *testin
 		})
 		tested++
 	}
-	// 25 bootstrap wrappers plus the five website templates of #649
+	// 26 bootstrap wrappers (including deadcode) plus the five website templates of #649
 	// (fetch-node, verify-node, stage-website-packages, release-website,
 	// release-website-readback) plus four KVM harness templates of #278
 	// (fetch-apko, verify-apko, install-apko, release-publish-kvm-harness).
-	if tested != 34 {
-		t.Fatalf("executed %d wrappers, want all 34", tested)
+	if tested != 35 || !sawDeadcode {
+		t.Fatalf("executed %d wrappers (deadcode=%t), want all 35 including deadcode", tested, sawDeadcode)
 	}
 }

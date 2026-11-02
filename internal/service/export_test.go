@@ -117,8 +117,6 @@ func (s historicalStepStore) PutStepResult(ctx context.Context, result model.Ste
 	return storetest.PutHistoricalStepResult(s.database, ctx, result)
 }
 func (scheduler *Scheduler) seedHistoricalSteps(ctx context.Context, database *store.Store, runID string, steps []model.StepResult, index runlog.Index) error {
-	previous := scheduler.store
-	scheduler.store = historicalStepStore{previous, database}
-	defer func() { scheduler.store = previous }()
-	return scheduler.persistSteps(ctx, runID, steps, index)
+	fixture := &Scheduler{store: historicalStepStore{scheduler.store, database}, logs: scheduler.logs}
+	return fixture.persistSteps(ctx, runID, steps, index)
 }
