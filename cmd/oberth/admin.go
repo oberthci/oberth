@@ -173,13 +173,9 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 	if err != nil {
 		return err
 	}
-	// With --dedicated-key, this upstream gets its own identity stored as an
-	// additional data key of the one chart-owned upstream-key bundle. The
-	// existing whole-OpenBao tmpfs mount projects it as a file beside the
-	// shared key, so the server reads it from tmpfs without any Kubernetes
-	// API access and RBAC stays scoped to the two named identity bundles. Without the
-	// flag — and for every pre-existing upstream row — the shared key keeps
-	// today's semantics exactly, including the no-API projected fast path.
+	// Dedicated identities are fields in the OpenBao upstream-key bundle,
+	// materialized beside the shared key on private tmpfs. Existing upstream
+	// registrations retain their shared-key behavior.
 	if *dedicatedKey && kind != "ssh" {
 		return fmt.Errorf("%w: --dedicated-key applies only to SSH upstreams", errUsage)
 	}
@@ -201,10 +197,7 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 	if kind == "ssh" {
 		privateKeyPath, privateDataKey := *upstreamKey, filepath.Base(*upstreamKey)
 		if keyName != "" {
-			// The dedicated identity lives beside the shared one: the fast
-			// path re-uses an already projected dedicated key, and a missing
-			// file selects the generation flow for exactly this data key
-			// under this upstream's own server-side-apply field manager.
+			// Reuse an existing materialized key, or bootstrap this bundle field.
 			privateKeyPath = filepath.Join(filepath.Dir(*upstreamKey), keyName)
 			privateDataKey = keyName
 		}
@@ -266,10 +259,8 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 		return err
 	}
 	if keyName != "" {
-		// The server assembles its SSH configuration once at startup, and the
-		// kubelet needs a short interval to project a freshly applied data
-		// key onto the OpenBao tmpfs. Without a restart, Git operations for
-		// this upstream keep using the shared fallback key.
+		// The server assembles its per-upstream SSH configuration at startup.
+		// Restart it to add this identity to that configuration.
 		if _, err := fmt.Fprintf(output,
 			"Per-upstream key stored as data key %s. Restart the server (kubectl rollout restart deploy/oberth) to activate it for Git operations.\n",
 			keyName); err != nil {
@@ -284,7 +275,7 @@ const maximumDeployKeyBytes = 1 << 20
 
 // runUpstreamAddFromHost handles `upstream add` from the host. It parses the
 // same flags as the in-pod path, optionally runs a [G]enerate / [P]rovide
-// key selection prompt, stores a provided key in the Secret via the
+// key selection prompt, stores a provided key in OpenBao via the
 // Kubernetes API (the same pattern as installer/onboard.go
 // applyProvidedDeployKey), then execs into the pod for the full upstream add
 // flow (SSH bootstrap, mutation gate, database registration).
@@ -509,8 +500,8 @@ func defaultRunWithStdin(ctx context.Context, stdin io.Reader, name string, args
 // runUpstreamProvideKey is the in-pod handler for a host-streamed deploy key.
 // The host validates the key locally and streams it over kubectl exec stdin;
 // this handler re-validates, checks overwrite semantics, gates via the live
-// daemon's audit gate, applies via SSA patch (the same pattern as
-// UpstreamSSHBootstrap.applySecret), and verifies the readback. It is a
+// daemon's audit gate, and saves through the OpenBao store's CAS and
+// verified readback. It is a
 // hidden subcommand — not shown in usage — reachable only through the exec.
 func runUpstreamProvideKey(ctx context.Context, arguments []string, input io.Reader, output io.Writer, dependencies upstreamDependencies) error {
 	flags := flag.NewFlagSet("upstream provide-key", flag.ContinueOnError)

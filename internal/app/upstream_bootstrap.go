@@ -47,10 +47,8 @@ type SSHHostKeyScanner func(context.Context, string, string) ([]ssh.PublicKey, e
 // Implementations must never log the privateKey argument.
 type SSHAuthProbe func(context.Context, string, []byte, []byte) error
 
-// UpstreamSSHBootstrap ensures that the strict SSH identity used for an
-// upstream is either already projected or durably stored in name-scoped
-// OpenBao identity bundles. KubernetesClient is lazy so a fully configured install
-// does not need to contact the API during an ordinary upstream registration.
+// BootstrapIdentityStore persists SSH identities in named OpenBao bundles.
+// A complete materialized identity can be validated without contacting storage.
 type BootstrapIdentityStore interface {
 	Load(context.Context, string) (map[string][]byte, error)
 	Save(context.Context, string, map[string][]byte) error
@@ -77,12 +75,12 @@ type UpstreamSSHBootstrap struct {
 	PublicKeyDataKey  string
 	KnownHostsDataKey string
 
-	// Registration polling: after printing a generated or Secret-recovered
+	// Registration polling: after printing a generated or store-recovered
 	// deploy key whose authentication probe does not yet succeed, Ensure waits
 	// for the operator to register the key on the forge instead of demanding
 	// a rerun. ProbeInterval defaults to 10s and ProbeWait to 10m; NoWait
 	// restores the immediate exit for non-interactive automation. The
-	// fully-projected fast path never waits — a previously working identity
+	// materialized-file fast path never waits — a previously working identity
 	// that stops probing is an incident signal, not an onboarding state.
 	ProbeInterval           time.Duration
 	ProbeWait               time.Duration
@@ -612,7 +610,7 @@ func readKnownHostsFile(path, address string) (knownHostsMaterial, error) {
 
 func readBoundedFileForBootstrap(kind, path string, reader io.Reader) ([]byte, error) {
 	if reader == nil {
-		// #nosec G304 -- validated absolute operator paths select projected Secret files.
+		// #nosec G304 -- validated absolute operator paths select materialized identity files.
 		file, err := os.Open(path)
 		if err != nil {
 			return nil, err

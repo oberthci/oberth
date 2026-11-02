@@ -845,7 +845,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 			}
 			return nil
 		}
-		// Per-upstream key: the Secret volume mount projects each dedicated
+		// Per-upstream key: the OpenBao bundle materializes each dedicated
 		// key as a file beside the shared one. Fall back to the shared key
 		// while the kubelet has not yet projected a freshly added data key.
 		keyPath := options.upstreamKey
@@ -1996,7 +1996,7 @@ func perUpstreamSSHEntries(ctx context.Context, database *store.Store, options s
 		}
 		identityFile := filepath.Join(keyDirectory, upstream.KeyName)
 		if _, statErr := os.Stat(identityFile); statErr != nil {
-			logger.Printf("WARNING: per-upstream key %s for upstream %s is not projected yet: %v; using the shared fallback key", upstream.KeyName, upstream.Name, statErr)
+			logger.Printf("WARNING: per-upstream key %s for upstream %s is not materialized yet: %v; using the shared fallback key", upstream.KeyName, upstream.Name, statErr)
 			continue
 		}
 		entries = append(entries, app.SSHConfigEntry{
