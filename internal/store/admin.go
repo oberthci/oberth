@@ -519,6 +519,9 @@ func (s *Store) RemoveUplink(ctx context.Context, actor, identity, fingerprint s
 			ErrAmbiguous, identity, len(matches), strings.Join(fingerprints, ", "))
 	}
 	value := matches[0]
+	if err := guardLastActiveAdmin(ctx, tx, value.ID); err != nil {
+		return model.Uplink{}, err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM uplinks WHERE id = ?`, value.ID); err != nil {
 		return model.Uplink{}, fmt.Errorf("remove uplink: %w", err)
 	}
