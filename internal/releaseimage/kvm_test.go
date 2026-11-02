@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/authn"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/empty"
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
@@ -207,7 +208,7 @@ func TestPublishKVMRejectsEmptyConfig(t *testing.T) {
 	if _, err := PublishKVM(ctx, config, "nonexistent.tar"); err == nil {
 		t.Fatal("accepted publish with empty access token")
 	}
-	config.AccessToken = []byte("token")
+	config.Authenticator = authn.Anonymous
 	config.Dist = ""
 	if _, err := PublishKVM(ctx, config, "nonexistent.tar"); err == nil {
 		t.Fatal("accepted publish with empty dist")
@@ -221,7 +222,7 @@ func TestVerifyKVMRejectsEmptyConfig(t *testing.T) {
 	if err := VerifyKVM(ctx, config, published); err == nil {
 		t.Fatal("accepted verify with empty access token")
 	}
-	config.AccessToken = []byte("token")
+	config.Authenticator = authn.Anonymous
 	published.Runtime = ""
 	if err := VerifyKVM(ctx, config, published); err == nil {
 		t.Fatal("accepted verify with empty runtime reference")

@@ -103,15 +103,6 @@ var upgradePKIPinnedKeys = map[string]bool{
 	"tls.pki":           true,
 }
 
-// UpgradePinnedKeys returns the set of pinned keys for tests.
-func UpgradePinnedKeys() map[string]bool {
-	out := make(map[string]bool, len(upgradePinnedKeys))
-	for k, v := range upgradePinnedKeys {
-		out[k] = v
-	}
-	return out
-}
-
 // UpgradeResult describes the outcome of an upgrade.
 type UpgradeResult struct {
 	PreviousVersion string

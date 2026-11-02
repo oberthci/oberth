@@ -1084,33 +1084,6 @@ func (c *Cache) ListTags(ctx context.Context, input string) ([]string, error) {
 	return tags, nil
 }
 
-// TagTime returns the tagger date for an annotated tag, or the author date
-// for a lightweight tag's commit. Used by the GOPROXY handler (#662).
-func (c *Cache) TagTime(ctx context.Context, input, tag string) (time.Time, error) {
-	_, path, err := c.modulePath(ctx, input)
-	if err != nil {
-		return time.Time{}, err
-	}
-	unlock, err := c.lockModuleRepository(ctx, path)
-	if err != nil {
-		return time.Time{}, err
-	}
-	defer unlock()
-	if !c.isBare(ctx, path) {
-		return time.Time{}, fmt.Errorf("repository is not cached")
-	}
-	// Try annotated tag first (taggerdate), fall back to committerdate.
-	output, err := c.capture(ctx, path, "for-each-ref", "--format=%(creatordate:iso-strict)", "refs/tags/"+tag)
-	if err != nil {
-		return time.Time{}, err
-	}
-	dateStr := strings.TrimSpace(output)
-	if dateStr == "" {
-		return time.Time{}, fmt.Errorf("tag %s not found", tag)
-	}
-	return time.Parse(time.RFC3339, dateStr)
-}
-
 // ShowFile returns the verbatim contents of a single file at the given ref.
 // Used by the GOPROXY handler (#662) to serve go.mod. The bytes are returned
 // exactly as stored in the git tree — no trimming or normalisation — because

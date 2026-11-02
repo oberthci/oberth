@@ -72,7 +72,7 @@ func TestHandlerOverTLS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := testHandler()
+	handler := testHandler(t)
 	server := &http.Server{
 		Handler: handler,
 		TLSConfig: &tls.Config{
@@ -121,7 +121,7 @@ func TestTLS12Refused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := testHandler()
+	handler := testHandler(t)
 	server := &http.Server{
 		Handler: handler,
 		TLSConfig: &tls.Config{
@@ -162,7 +162,7 @@ func TestPOSTRefusedOverTLS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := testHandler()
+	handler := testHandler(t)
 	server := &http.Server{
 		Handler: handler,
 		TLSConfig: &tls.Config{

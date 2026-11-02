@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // MigrateToQualifiedLayout renames flat cache directories (<root>/repo.git) to
@@ -80,33 +79,4 @@ func (c *Cache) logf(format string, args ...any) {
 	if c.logger != nil {
 		c.logger.Printf(format, args...)
 	}
-}
-
-// CacheRoot returns the cache root directory for external migration orchestration.
-func (c *Cache) CacheRoot() string { return c.root }
-
-// ListFlatCaches returns bare repository names that still use the flat
-// (<root>/repo.git) layout. Used by migration verification.
-func (c *Cache) ListFlatCaches() ([]string, error) {
-	entries, err := os.ReadDir(c.root)
-	if err != nil {
-		return nil, fmt.Errorf("read cache root: %w", err)
-	}
-	var flat []string
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if !strings.HasSuffix(name, ".git") {
-			continue
-		}
-		// A flat cache dir is directly under the root (not in a subdirectory).
-		// Qualified dirs are under <root>/<upstream>/<org>/<repo>.git.
-		bare := strings.TrimSuffix(name, ".git")
-		if bare != "" && !strings.Contains(bare, "/") {
-			flat = append(flat, bare)
-		}
-	}
-	return flat, nil
 }

@@ -247,13 +247,13 @@ input,select{height:32px;border:1px solid var(--line);background:var(--panel);co
 .mono-detail{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
 .copy-btn{height:26px;border:1px solid var(--line);border-radius:6px;padding:0 10px;background:var(--panel);color:var(--fg);font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap}
 .copy-btn:hover{border-color:var(--line2)}
-.chain-ok{color:var(--green)}.chain-bad{color:var(--red)}.chain-warn{color:var(--orange)}
+.chain-bad{color:var(--red)}.chain-warn{color:var(--orange)}
 /* token prompt */
 .token-panel{max-width:480px;margin:60px auto;padding:28px}
 .token-panel h1{margin:0 0 8px}
 .token-panel input{width:100%;margin-bottom:12px}
 .token-actions{display:flex;gap:8px}
-.sr-live{position:fixed;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+
 @media (prefers-reduced-motion:reduce){.pill.run,.dot.live,.ic.run,.ic.o{animation:none;transform:none}*{transition:none !important}}
 @media (max-width:980px){
   .app{grid-template-rows:auto 1fr}.top{min-height:48px;flex-wrap:wrap;padding:8px 12px}.brand{flex:1 1 auto}.brand .sub{min-width:0;max-width:120px}.tabs{order:3;width:100%}.tab{flex:1;width:auto}.top-right{gap:8px;flex-wrap:wrap;justify-content:flex-end}.top-status{gap:6px}.status-divider{height:14px}

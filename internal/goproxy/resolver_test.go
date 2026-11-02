@@ -189,7 +189,7 @@ func TestGoResolverPrivateRouting(t *testing.T) {
 		{"zip backend", "zip", []string{"mod", "download", private + "@v1.0.0"}, "/@v/v1.0.0.zip", false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			f := newResolverFixture(t, routingFixture(tt.fail), http.StatusNotFound)
+			f := newResolverFixture(t, routingFixture(t, tt.fail), http.StatusNotFound)
 			output, err := f.run(t, tt.args...)
 			if (err == nil) != tt.ok {
 				t.Fatalf("Go error %v; output %s", err, output)
@@ -207,7 +207,7 @@ func TestGoResolverPrivateRouting(t *testing.T) {
 func TestGoResolverLatestEndpoint(t *testing.T) {
 	// With no tags, Go invokes @latest after list. Its denial must remain
 	// terminal as well; an empty list is not permission to try public lookup.
-	h := NewHandler(&mockCache{}, "go.example.test", map[string]string{"issue764-fixture": "fixture"})
+	h := cachedTestHandler(t, &mockCache{}, "go.example.test", map[string]string{"issue764-fixture": "fixture"})
 	f := newResolverFixture(t, h, http.StatusNotFound)
 	output, err := f.run(t, "list", "-m", "go.example.test/issue764-fixture@latest")
 	if err == nil || !strings.Contains(strings.Join(f.mirror.all(), "\n"), "/@latest") {
@@ -221,7 +221,7 @@ func TestGoResolverLatestEndpoint(t *testing.T) {
 func TestGoResolverPublicFallback(t *testing.T) {
 	for _, status := range []int{http.StatusOK, http.StatusNotFound, http.StatusGone, http.StatusBadGateway} {
 		t.Run(fmt.Sprint(status), func(t *testing.T) {
-			f := newResolverFixture(t, routingFixture(""), status)
+			f := newResolverFixture(t, routingFixture(t, ""), status)
 			output, err := f.run(t, "mod", "download", "-json", "public.example.invalid/issue764-fixture@v1.0.0")
 			if len(f.mirror.all()) == 0 || len(f.public.all()) == 0 {
 				t.Fatalf("fallback not exercised: %s", output)
@@ -248,7 +248,7 @@ func TestGoResolverOriginal404Control(t *testing.T) {
 }
 
 func TestGoResolverUntrustedMirrorStops(t *testing.T) {
-	f := newResolverFixture(t, routingFixture(""), http.StatusNotFound)
+	f := newResolverFixture(t, routingFixture(t, ""), http.StatusNotFound)
 	otherCA, _, _, _ := selfSignedCA(t)
 	if err := os.WriteFile(f.ca, otherCA, 0o600); err != nil {
 		t.Fatal(err)

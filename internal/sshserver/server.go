@@ -269,19 +269,6 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	}
 }
 
-// HandleConn serves one already accepted network connection.
-func (s *Server) HandleConn(ctx context.Context, connection net.Conn) error {
-	if connection == nil {
-		return errors.New("SSH connection is required")
-	}
-	if !tryAcquire(s.connections) {
-		_ = connection.Close()
-		return errors.New("SSH connection limit reached")
-	}
-	defer release(s.connections)
-	return s.handleConn(ctx, connection)
-}
-
 func (s *Server) handleConn(ctx context.Context, connection net.Conn) error {
 	defer func() { _ = connection.Close() }()
 	if err := connection.SetDeadline(time.Now().Add(s.handshakeTimeout)); err != nil {

@@ -78,7 +78,6 @@ func TestModuleRepositoryLockWaitHonorsContext(t *testing.T) {
 	defer lock.Unlock()
 	operations := map[string]func(context.Context) error{
 		"list": func(ctx context.Context) error { _, err := cache.ListTags(ctx, "example"); return err },
-		"time": func(ctx context.Context) error { _, err := cache.TagTime(ctx, "example", "v1.0.0"); return err },
 		"mod": func(ctx context.Context) error {
 			_, err := cache.ShowFile(ctx, "example", "v1.0.0", "go.mod")
 			return err

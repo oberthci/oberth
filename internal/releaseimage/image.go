@@ -51,7 +51,6 @@ type PublishConfig struct {
 	Tag           string
 	SHA           string
 	Created       time.Time
-	AccessToken   []byte
 	Authenticator authn.Authenticator
 	Dist          string
 	RemoteOpts    []remote.Option
@@ -262,10 +261,10 @@ func cleanTarName(name string) (string, error) {
 // Publish builds and writes deterministic supported-platform indexes, then
 // proves the registry readback digest for each exact source-specific tag.
 func Publish(ctx context.Context, config PublishConfig) (Published, error) {
-	if len(config.AccessToken) == 0 && config.Authenticator == nil || config.Dist == "" {
+	if config.Authenticator == nil || config.Dist == "" {
 		return Published{}, errors.New("GAR access token and distribution directory are required")
 	}
-	authenticator := config.authenticator()
+	authenticator := config.Authenticator
 	remoteOptions := append([]remote.Option{remote.WithContext(ctx), remote.WithAuth(authenticator), remote.WithUserAgent("oberth-release")}, config.RemoteOpts...)
 	result := Published{}
 	for _, kind := range []Kind{Server} {
@@ -337,10 +336,10 @@ func Publish(ctx context.Context, config PublishConfig) (Published, error) {
 // source-built executable. A manifest-only registry response is not evidence
 // that the referenced blobs or runtime contract are intact.
 func Verify(ctx context.Context, config PublishConfig, published Published) error {
-	if len(config.AccessToken) == 0 && config.Authenticator == nil || config.Dist == "" || published.Server == "" {
+	if config.Authenticator == nil || config.Dist == "" || published.Server == "" {
 		return errors.New("GAR access token, distribution directory, and the digest reference are required")
 	}
-	authenticator := config.authenticator()
+	authenticator := config.Authenticator
 	remoteOptions := append([]remote.Option{remote.WithContext(ctx), remote.WithAuth(authenticator), remote.WithUserAgent("oberth-release")}, config.RemoteOpts...)
 	for _, item := range []struct {
 		kind      Kind
@@ -494,32 +493,9 @@ func regularTarType(typeFlag byte) bool {
 	return typeFlag == tar.TypeReg || typeFlag == 0
 }
 
-// garAuthenticator builds the GAR registry authenticator from a delegated
-// access token. Exactly one string copy is made here, at the last possible moment
-// before the third-party API boundary.
-//
-// Accepted residual: the Go string inside the returned authn.Authenticator is
-// immutable and cannot be zeroed (Go runtime/GC limitation);
-// go-containerregistry additionally derives a base64 basic-auth form
-// internally. The caller must zero the source []byte (accessToken) after the
-// authenticator's last use.
-func garAuthenticator(accessToken []byte) authn.Authenticator {
-	return authn.FromConfig(authn.AuthConfig{
-		Username: "oauth2accesstoken",
-		Password: string(accessToken), // sole string conversion — see residual note above
-	})
-}
-
 func isNotFound(err error) bool {
 	var transportError *transport.Error
 	return errors.As(err, &transportError) && transportError.StatusCode == 404
-}
-
-func (c PublishConfig) authenticator() authn.Authenticator {
-	if c.Authenticator != nil {
-		return c.Authenticator
-	}
-	return garAuthenticator(c.AccessToken)
 }
 
 func releaseLabels(created time.Time, version, revision string) map[string]string {

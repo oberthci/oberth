@@ -12,7 +12,6 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -34,9 +33,6 @@ import (
 type GitCache interface {
 	// ListTags returns all tag names (without refs/tags/ prefix) for the repo.
 	ListTags(ctx context.Context, input string) ([]string, error)
-	// TagTime returns the tagger date for an annotated tag, or the commit date
-	// for a lightweight tag.
-	TagTime(ctx context.Context, input, tag string) (time.Time, error)
 	// ShowFile returns the contents of a single file at the given ref.
 	ShowFile(ctx context.Context, input, ref, filePath string) ([]byte, error)
 	// ArchiveTar writes a tar archive of the tree at the given ref.
@@ -168,7 +164,11 @@ func (h *Handler) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if h.artifacts != nil && extension != "" {
+	if h.artifacts == nil {
+		backendUnavailable(w)
+		return
+	}
+	if extension != "" {
 		h.serveImmutable(w, r, repoInput, modulePath, version, extension)
 		return
 	}
@@ -214,20 +214,8 @@ func (h *Handler) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		privateUnavailable(w)
 		return
 	}
-	if h.artifacts != nil {
-		// @latest chooses from live tags, then uses the same pinned .info as
-		// an explicit version request and rechecks revocation before serving.
-		h.serveImmutable(w, r, repoInput, modulePath, version, extension)
-		return
-	}
-	switch extension {
-	case ".info":
-		h.serveInfo(r.Context(), w, repoInput, version)
-	case ".mod":
-		h.serveMod(r.Context(), w, repoInput, modulePath, version)
-	case ".zip":
-		h.serveZip(r.Context(), w, repoInput, modulePath, version)
-	}
+	// @latest resolves from live tags, then serves the pinned version bundle.
+	h.serveImmutable(w, r, repoInput, modulePath, version, extension)
 }
 
 func privateUnavailable(w http.ResponseWriter) {
@@ -251,40 +239,6 @@ func (h *Handler) versions(ctx context.Context, input, modulePath string) ([]str
 	}
 	sort.Slice(versions, func(i, j int) bool { return semver.Compare(versions[i], versions[j]) < 0 })
 	return versions, nil
-}
-
-func (h *Handler) serveInfo(ctx context.Context, w http.ResponseWriter, input, version string) {
-	t, err := h.cache.TagTime(ctx, input, version)
-	if err != nil {
-		backendUnavailable(w)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"Version": version,
-		"Time":    t.UTC().Format(time.RFC3339),
-	})
-}
-
-func (h *Handler) serveMod(ctx context.Context, w http.ResponseWriter, input, modulePath, version string) {
-	content, err := h.cache.ShowFile(ctx, input, version, "go.mod")
-	if err != nil {
-		backendUnavailable(w)
-		return
-	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	// The content is go.mod read from the git cache (trusted source, not user input).
-	_, _ = w.Write(content) // #nosec G705
-}
-
-func (h *Handler) serveZip(ctx context.Context, w http.ResponseWriter, input, modulePath, version string) {
-	content, err := h.buildZip(ctx, input, modulePath, version, version)
-	if err != nil {
-		writeBuildError(w, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/zip")
-	_, _ = w.Write(content)
 }
 
 func (h *Handler) buildZip(ctx context.Context, input, modulePath, version, ref string) ([]byte, error) {

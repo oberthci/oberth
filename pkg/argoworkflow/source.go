@@ -53,10 +53,6 @@ func TriggerFile(trigger periapsis.Trigger) (string, error) {
 	}
 }
 
-// TriggerFiles lists every file that can make a repository Argo-authored, in
-// the order dispatch should probe them.
-func TriggerFiles() []string { return []string{BuildFile, ReleaseFile} }
-
 // FileTrigger is the inverse of TriggerFile.
 func FileTrigger(file string) (periapsis.Trigger, bool) {
 	switch strings.TrimSpace(file) {

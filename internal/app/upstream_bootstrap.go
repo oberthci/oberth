@@ -1058,47 +1058,6 @@ func ProbeSSHAuthentication(ctx context.Context, baseURL string, privateKey, kno
 	return nil
 }
 
-func parseScannedHostKeys(body []byte) ([]ssh.PublicKey, error) {
-	var result []ssh.PublicKey
-	rest := body
-	for {
-		marker, _, key, _, next, err := ssh.ParseKnownHosts(rest)
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("parse ssh-keyscan output: %w", err)
-		}
-		if marker != "" {
-			return nil, errors.New("ssh-keyscan returned an unexpected known_hosts marker")
-		}
-		result = append(result, key)
-		rest = next
-	}
-	return uniqueHostKeys(result), nil
-}
-
-type cappedBuffer struct {
-	bytes.Buffer
-	limit    int
-	overflow bool
-}
-
-func (buffer *cappedBuffer) Write(value []byte) (int, error) {
-	original := len(value)
-	remaining := buffer.limit - buffer.Len()
-	if remaining <= 0 {
-		buffer.overflow = true
-		return original, nil
-	}
-	if len(value) > remaining {
-		buffer.overflow = true
-		value = value[:remaining]
-	}
-	_, _ = buffer.Buffer.Write(value)
-	return original, nil
-}
-
 type stringAddress string
 
 func (address stringAddress) Network() string { return "tcp" }

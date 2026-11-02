@@ -26,7 +26,7 @@ func TestProxyFailureClasses(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var output bytes.Buffer
-			h := routingFixture(test.backend).WithLogger(log.New(&output, "", 0))
+			h := routingFixture(t, test.backend).WithLogger(log.New(&output, "", 0))
 			response := httptest.NewRecorder()
 			h.ServeHTTP(response, httptest.NewRequest(test.method, test.path, nil))
 			if response.Code != test.status || response.Header().Get("X-Oberth-GoProxy-Error") != test.class {
@@ -54,7 +54,7 @@ func (w failedResponse) Write([]byte) (int, error) { return 0, io.ErrClosedPipe 
 
 func TestProxyResponseWriteFailureIsAttributable(t *testing.T) {
 	var output bytes.Buffer
-	h := routingFixture("").WithLogger(log.New(&output, "", 0))
+	h := routingFixture(t, "").WithLogger(log.New(&output, "", 0))
 	h.ServeHTTP(failedResponse{header: make(http.Header)}, httptest.NewRequest("GET", "/go.example.test/issue764-fixture/@v/v1.0.0.mod", nil))
 	if !strings.Contains(output.String(), "class=response_write_failed status=200") {
 		t.Fatal(output.String())
@@ -67,7 +67,7 @@ func TestProxyResponseWriteFailureIsAttributable(t *testing.T) {
 
 func TestProxyFailureLogBoundsRequestText(t *testing.T) {
 	var output bytes.Buffer
-	h := routingFixture("").WithLogger(log.New(&output, "", 0))
+	h := routingFixture(t, "").WithLogger(log.New(&output, "", 0))
 	request := httptest.NewRequest(strings.Repeat("X", 4096), "/"+strings.Repeat("x", 4096)+"?secret=canary", nil)
 	h.ServeHTTP(httptest.NewRecorder(), request)
 	if output.Len() > 512 || strings.Count(output.String(), "\n") != 1 || strings.Contains(output.String(), "canary") {

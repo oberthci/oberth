@@ -10,28 +10,6 @@ import (
 	"time"
 )
 
-// Compact explicitly consolidates a cache, bypassing automatic thresholds and
-// attempt cooldown while retaining the same object-age safety window.
-func (c *Cache) Compact(ctx context.Context, input string) error { return c.gc(ctx, input, false) }
-
-// GC compacts only when the selected backend heuristics say work is useful,
-// retaining the normal grace window for unreachable run objects.
-func (c *Cache) GC(ctx context.Context, input string) error { return c.gc(ctx, input, true) }
-func (c *Cache) gc(ctx context.Context, input string, automatic bool) error {
-	_, path, err := c.path(input)
-	if err != nil {
-		return err
-	}
-	lock := c.repoLock(path)
-	lock.Lock()
-	defer lock.Unlock()
-	args := []string{"gc"}
-	if automatic {
-		args = append(args, "--auto")
-	}
-	return c.run(ctx, commandSpec{dir: path, args: args})
-}
-
 // GCAll compacts every validated bare cache under the root, scanning both the
 // flat legacy layout (<root>/<repo>.git) and the qualified layout
 // (<root>/<upstream>/<org>/<repo>.git) up to 3 levels deep.
