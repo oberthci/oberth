@@ -8,12 +8,13 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestGrantStatusFiltersRemainDistinct(t *testing.T) {
 	now := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
 	db := testAccessStore(t, &now)
-	up, err := db.CreateUpstream(t.Context(), model.UpstreamSpec{Name: "origin", Kind: "ssh", BaseURL: "ssh://git@forge.example.test/org"})
+	up, err := storetest.CreateUpstream(db, t.Context(), model.UpstreamSpec{Name: "origin", Kind: "ssh", BaseURL: "ssh://git@forge.example.test/org"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +39,7 @@ func TestGrantStatusFiltersRemainDistinct(t *testing.T) {
 			}
 		}
 		if status == "consumed" {
-			if err = db.ConsumePromotionGrant(t.Context(), g.ID, "promotion", "admin"); err != nil {
+			if err = storetest.ConsumePromotionGrant(db, t.Context(), g.ID, "promotion", "admin"); err != nil {
 				t.Fatal(err)
 			}
 		}

@@ -1033,6 +1033,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"ci_issue_projection_monotonic",
 		"ci_issue_work_no_delete",
 		"ci_issue_work_no_update",
+		"issues_metadata_revision",
 		"promotion_grants_guard_update",
 		"promotion_grants_no_delete",
 		"promotions_guard_update",

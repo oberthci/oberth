@@ -590,11 +590,15 @@ func TestIssueUpdateMovesScopeWithAuditAndPreservesIssue(t *testing.T) {
 	found = false
 	for _, item := range view.(api.IssueListPage).Issues {
 		if item.ID == global.ID {
-			found = item.Upstream == "github" && strings.Contains(item.Body, "follow-up")
+			found = item.Upstream == "github"
 		}
 	}
 	if !found {
 		t.Fatalf("moved issue missing or unlabeled in /api/issues: %#v", view)
+	}
+	detail := mustCall(t, fixture, scopedActor, "issue_get", map[string]any{"id": global.ID}).(api.IssueResponse)
+	if !strings.Contains(detail.Body, "follow-up") {
+		t.Fatalf("issue detail lost body: %+v", detail)
 	}
 	if _, err := fixture.call(scopedActor, "issue_update", map[string]any{"id": global.ID, "upstream": "global"}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("scoped global move = %v", err)
