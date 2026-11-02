@@ -1,0 +1,37 @@
+package main
+
+import (
+	"bytes"
+	"strings"
+	"testing"
+)
+
+func TestSharedFlagSyntax(t *testing.T) {
+	t.Setenv("OBERTH_TOKEN", "fixture")
+	config, err := parseMCPFlags("fixture", []string{"arg", "-url=http://fixture.invalid/mcp"}, 1)
+	if err != nil || config.URL != "http://fixture.invalid/mcp" {
+		t.Fatalf("single dash or trailing flag rejected: %+v %v", config, err)
+	}
+	options, err := parseCancelOptions([]string{"run", "--force=false"}, false)
+	if err != nil || options.force {
+		t.Fatalf("explicit boolean rejected: %+v %v", options, err)
+	}
+	flags, _, err := remoteFlags("fixture", []string{"--json", "--", "-literal"}, &bytes.Buffer{})
+	if err != nil || flags == nil || flags.NArg() != 1 || flags.Arg(0) != "-literal" {
+		t.Fatalf("double dash lost: %v %v", flags, err)
+	}
+}
+func TestMCPSubcommandHelpSucceeds(t *testing.T) {
+	var out strings.Builder
+	if err := runCLI(t.Context(), []string{"mcp", "tools", "--help"}, nil, &out); err != nil || !strings.Contains(out.String(), "Usage:") {
+		t.Fatalf("help = %v %s", err, &out)
+	}
+}
+func TestFlagErrorsStayOutOfCommandOutput(t *testing.T) {
+	for _, args := range [][]string{{"wait-idle", "--unknown"}, {"run", "resources", "--unknown"}} {
+		var out strings.Builder
+		if err := runCLI(t.Context(), args, nil, &out); err == nil || out.Len() != 0 {
+			t.Fatalf("%v: %v output %q", args, err, out.String())
+		}
+	}
+}

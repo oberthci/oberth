@@ -19,7 +19,7 @@ func runArtifacts(ctx context.Context, arguments []string, output io.Writer) err
 	var outputPath string
 	flags.StringVar(&outputPath, "output", "", "save the artifact to this file (written atomically, digest-verified)")
 	flags.StringVar(&outputPath, "o", "", "shorthand for --output")
-	if err := flags.Parse(permuteFlagsFirst(arguments)); err != nil {
+	if err := parseCommandFlags(flags, arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
 			flags.Usage()

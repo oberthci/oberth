@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"strings"
@@ -33,54 +34,26 @@ type cancelOptions struct {
 
 func parseCancelOptions(arguments []string, allowSelector bool) (cancelOptions, error) {
 	var options cancelOptions
-	value := func(index *int, name string) (string, error) {
-		argument := arguments[*index]
-		if prefix := name + "="; strings.HasPrefix(argument, prefix) {
-			return strings.TrimPrefix(argument, prefix), nil
-		}
-		if *index+1 >= len(arguments) {
-			return "", fmt.Errorf("%w: %s requires a value", errUsage, name)
-		}
-		*index++
-		return arguments[*index], nil
+	flags := flag.NewFlagSet("run cancel", flag.ContinueOnError)
+	flags.StringVar(&options.reason, "reason", "", "cancellation reason")
+	flags.StringVar(&options.database, "database", "", "in-pod database")
+	flags.BoolVar(&options.force, "force", false, "force cancellation")
+	flags.BoolVar(&options.asJSON, "json", false, "emit JSON")
+	if allowSelector {
+		flags.StringVar(&options.repo, "repo", "", "repository")
+		flags.StringVar(&options.ref, "ref", "", "ref")
 	}
-	for index := 0; index < len(arguments); index++ {
-		argument := arguments[index]
-		name := ""
-		if strings.HasPrefix(argument, "-") {
-			name, _, _ = strings.Cut(argument, "=")
-			name = "--" + strings.TrimLeft(name, "-")
-		}
-		var err error
-		switch {
-		case argument == "--":
-			options.positional = append(options.positional, arguments[index+1:]...)
-			index = len(arguments)
-		case name == "--reason":
-			options.reason, err = value(&index, "--reason")
-		case name == "--database":
-			options.database, err = value(&index, "--database")
-		case name == "--repo" && allowSelector:
-			options.repo, err = value(&index, "--repo")
-		case name == "--ref" && allowSelector:
-			options.ref, err = value(&index, "--ref")
-		case argument == "--force" || argument == "-force":
-			options.force = true
-		case argument == "--json" || argument == "-json":
-			options.asJSON = true
-		case name == "--url" || name == "--token-file" || name == "--ca-file":
-			var flagValue string
-			flagValue, err = value(&index, name)
-			options.transport = append(options.transport, name+"="+flagValue)
-		case strings.HasPrefix(argument, "-"):
-			return cancelOptions{}, fmt.Errorf("%w: unknown flag %q", errUsage, argument)
-		default:
-			options.positional = append(options.positional, argument)
-		}
-		if err != nil {
-			return cancelOptions{}, err
-		}
+	transport := mcpTransportFlags(flags)
+	var help bool
+	var err error
+	options.positional, help, err = parseOperatorFlags(flags, arguments)
+	if err != nil {
+		return options, err
 	}
+	if help {
+		return options, commandHelpError{usage: runCancelUsage}
+	}
+	options.transport = transport()
 	if options.database != "" && len(options.transport) > 0 {
 		return cancelOptions{}, fmt.Errorf("%w: --database (in-pod) and --url/--token-file/--ca-file (remote) are exclusive", errUsage)
 	}

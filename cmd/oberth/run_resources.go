@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -13,7 +14,7 @@ import (
 
 func runRunResources(ctx context.Context, arguments []string, output io.Writer) error {
 	flags := flag.NewFlagSet("run resources", flag.ContinueOnError)
-	flags.SetOutput(output)
+	flags.SetOutput(io.Discard)
 	repo := flags.String("repo", "", "registered repository (optional with --run)")
 	run := flags.String("run", "", "exact run ID or unique prefix")
 	ref := flags.String("ref", "", "exact ref; default includes default branch and its promotion runs; any includes all refs")
@@ -24,7 +25,12 @@ func runRunResources(ctx context.Context, arguments []string, output io.Writer) 
 	format := flags.String("format", "json", "json or yaml")
 	asYAML := flags.Bool("yaml", false, "YAML report with paste-ready resources")
 	asJSON := flags.Bool("json", false, "JSON report (default)")
-	if e := flags.Parse(arguments); e != nil {
+	if e := parseCommandFlags(flags, arguments); e != nil {
+		if errors.Is(e, flag.ErrHelp) {
+			flags.SetOutput(output)
+			flags.Usage()
+			return nil
+		}
 		return e
 	}
 	if flags.NArg() == 1 && *repo == "" {

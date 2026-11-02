@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -303,52 +304,32 @@ func parseMCPFlags(name string, arguments []string, wantPositional int) (mcpFlag
 	var reconnectSet bool
 	var positional []string
 
-	for i := 0; i < len(arguments); i++ {
-		arg := arguments[i]
-		switch {
-		case arg == "--url" && i+1 < len(arguments):
-			i++
-			result.URL = arguments[i]
-		case strings.HasPrefix(arg, "--url="):
-			result.URL = strings.TrimPrefix(arg, "--url=")
-		case arg == "--token-file" && i+1 < len(arguments):
-			i++
-			tokenFile = arguments[i]
-		case strings.HasPrefix(arg, "--token-file="):
-			tokenFile = strings.TrimPrefix(arg, "--token-file=")
-		case arg == "--ca-file" && i+1 < len(arguments):
-			i++
-			result.CAFile = arguments[i]
-		case strings.HasPrefix(arg, "--ca-file="):
-			result.CAFile = strings.TrimPrefix(arg, "--ca-file=")
-		case arg == "--timeout" && i+1 < len(arguments):
-			i++
-			timeoutFlag, timeoutSet = arguments[i], true
-		case strings.HasPrefix(arg, "--timeout="):
-			timeoutFlag, timeoutSet = strings.TrimPrefix(arg, "--timeout="), true
-		case arg == "--reconnect-window" && i+1 < len(arguments):
-			i++
-			reconnectFlag, reconnectSet = arguments[i], true
-		case strings.HasPrefix(arg, "--reconnect-window="):
-			reconnectFlag, reconnectSet = strings.TrimPrefix(arg, "--reconnect-window="), true
-		case arg == "--args-file" && i+1 < len(arguments):
-			i++
-			result.argsFile = arguments[i]
-		case strings.HasPrefix(arg, "--args-file="):
-			result.argsFile = strings.TrimPrefix(arg, "--args-file=")
-		case (arg == "--output" || arg == "-o") && i+1 < len(arguments):
-			i++
-			result.output = arguments[i]
-		case strings.HasPrefix(arg, "--output="):
-			result.output = strings.TrimPrefix(arg, "--output=")
-		case arg == "--help" || arg == "-h":
-			return result, fmt.Errorf("%w: %s [--url <url>] [--token-file <path>] [--ca-file <path>] [--timeout <duration>] [--reconnect-window <duration>]", errUsage, name)
-		case strings.HasPrefix(arg, "-"):
-			return result, fmt.Errorf("%w: unknown flag %q", errUsage, arg)
-		default:
-			positional = append(positional, arg)
-		}
+	flags := flag.NewFlagSet(name, flag.ContinueOnError)
+	flags.StringVar(&result.URL, "url", "", "MCP URL")
+	flags.StringVar(&tokenFile, "token-file", "", "token file")
+	flags.StringVar(&result.CAFile, "ca-file", "", "CA file")
+	flags.StringVar(&timeoutFlag, "timeout", "", "positive request duration")
+	flags.StringVar(&reconnectFlag, "reconnect-window", "", "positive reconnect duration")
+	flags.StringVar(&result.argsFile, "args-file", "", "JSON file or - for stdin")
+	flags.StringVar(&result.output, "output", "", "output file")
+	flags.StringVar(&result.output, "o", "", "output file")
+	var help bool
+	var err error
+	positional, help, err = parseOperatorFlags(flags, arguments)
+	if err != nil {
+		return result, err
 	}
+	if help {
+		return result, commandHelpError{usage: "Usage: oberth " + name + " [--url URL] [--token-file PATH] [--ca-file PATH] [--timeout DURATION] [--reconnect-window DURATION]"}
+	}
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "timeout" {
+			timeoutSet = true
+		}
+		if f.Name == "reconnect-window" {
+			reconnectSet = true
+		}
+	})
 
 	if wantPositional >= 0 && len(positional) != wantPositional {
 		return result, fmt.Errorf("%w: %s expects %d positional arguments, got %d", errUsage, name, wantPositional, len(positional))

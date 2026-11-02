@@ -89,7 +89,7 @@ func remoteFlags(name string, arguments []string, output io.Writer) (*flag.FlagS
 	flags := flag.NewFlagSet(name, flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	asJSON := flags.Bool("json", false, "emit the server's payload unchanged")
-	if err := flags.Parse(permuteFlagsFirst(arguments)); err != nil {
+	if err := parseCommandFlags(flags, arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
 			flags.Usage()
@@ -98,52 +98,6 @@ func remoteFlags(name string, arguments []string, output io.Writer) (*flag.FlagS
 		return nil, nil, fmt.Errorf("%w: %w", errUsage, err)
 	}
 	return flags, asJSON, nil
-}
-
-// permuteFlagsFirst moves flags ahead of positional arguments.
-//
-// Go's flag package stops parsing at the first non-flag argument, so
-// `oberth run <id> --json` reads --json as a second positional and fails with
-// a usage error that says nothing about flag order. The documentation promises
-// --json on every command without qualifying where it goes, and the natural
-// place to type it is at the end.
-//
-// Everything after a bare "--" is left alone, so a positional that begins with
-// a dash can still be passed.
-func permuteFlagsFirst(arguments []string) []string {
-	var flagsSeen, positional []string
-	for index := 0; index < len(arguments); index++ {
-		argument := arguments[index]
-		if argument == "--" {
-			positional = append(positional, arguments[index+1:]...)
-			break
-		}
-		if strings.HasPrefix(argument, "-") && argument != "-" {
-			flagsSeen = append(flagsSeen, argument)
-			// A flag that takes a value consumes the next argument, unless the
-			// value was already joined with "=".
-			if !strings.Contains(argument, "=") && index+1 < len(arguments) &&
-				flagTakesValue(argument) {
-				index++
-				flagsSeen = append(flagsSeen, arguments[index])
-			}
-			continue
-		}
-		positional = append(positional, argument)
-	}
-	return append(flagsSeen, positional...)
-}
-
-// flagTakesValue reports whether a remote-command flag consumes the argument
-// after it. Booleans must not, or they would swallow the run ID.
-func flagTakesValue(argument string) bool {
-	name := strings.TrimLeft(argument, "-")
-	switch name {
-	case "json", "tail", "raw", "force":
-		return false
-	default:
-		return true
-	}
 }
 
 func emitJSON(ctx context.Context, api *client.Client, path string, query map[string]string, output io.Writer) error {
@@ -569,7 +523,7 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 	tail := flags.Bool("tail", false, "read from the end")
 	raw := flags.Bool("raw", false, "keep the [burn/step] prefix on each line and the Argo executor lines")
 	asJSON := flags.Bool("json", false, "emit the server's payload unchanged")
-	if err := flags.Parse(permuteFlagsFirst(arguments)); err != nil {
+	if err := parseCommandFlags(flags, arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
 			flags.Usage()

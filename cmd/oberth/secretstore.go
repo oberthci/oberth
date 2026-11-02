@@ -35,7 +35,7 @@ import (
 //
 //   - `setup` guidance and the embedded setup script belong NEXT TO the store,
 //     where the administrator's own CLI session already holds admin authority.
-//     This binary has no code path that accepts a store admin token.
+//     The server daemon uses workload identity; operator-only sync reads BAO_TOKEN.
 //   - `verify` belongs IN THIS POD, because the thing under test is the
 //     workload identity itself: it logs in with the pod's ServiceAccount token
 //     through the production fetch code path and proves the whole trust chain
@@ -113,7 +113,7 @@ func runSecretStoreSetup(arguments []string, output io.Writer) error {
 	}
 	digest := sha256.Sum256(oberth.SetupSecretStoreScript)
 	_, err := fmt.Fprintf(output, `Store-side setup runs NEXT TO your OpenBao (or Vault), never in this pod:
-this binary deliberately has no code path that accepts a store admin token.
+the server daemon uses workload identity; operator-only secretstore sync reads BAO_TOKEN.
 
 1. Extract the setup script from this signed image (or use the identical
    scripts/setup-secretstore.sh from the Oberth repository):
@@ -165,15 +165,6 @@ type releaseTierVerifyConfig struct {
 // uses rest.InClusterConfig, and tests inject a fake.
 type kubeClientFactory func() (kubernetes.Interface, error)
 
-// stringSliceFlag implements flag.Value for a repeatable string flag.
-type stringSliceFlag []string
-
-func (f *stringSliceFlag) String() string { return strings.Join(*f, ", ") }
-func (f *stringSliceFlag) Set(value string) error {
-	*f = append(*f, value)
-	return nil
-}
-
 func defaultKubeClient() (kubernetes.Interface, error) {
 	restConfig, err := rest.InClusterConfig()
 	if err != nil {
@@ -219,9 +210,9 @@ func runSecretStoreVerifyWithSources(ctx context.Context, arguments []string, ou
 	tierFlag := flags.String("tier", "release", "which per-repo tier to verify: release or ci (only with --repo or --release-tier)")
 	timeout := flags.Duration("timeout", 45*time.Second, "overall verification deadline")
 	keys := flags.Bool("keys", false, "verify or list KV field names; use with --expect to assert")
-	var expects stringSliceFlag
+	var expects stringList
 	flags.Var(&expects, "expect", "expected fields: <path-base>/<field>[,<field>,...] (repeatable, implies -keys)")
-	var pathFlags stringSliceFlag
+	var pathFlags stringList
 	flags.Var(&pathFlags, "path", "KV path to verify (repeatable; alternative to positional paths)")
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -999,7 +990,7 @@ func releaseTierConfigFromServeCmdline(path string) (releaseTierVerifyConfig, er
 //
 // It runs under the administrator's own BAO_TOKEN (from the environment),
 // exactly like the full install's secret-store path does. The Oberth server
-// has no code path that accepts a store admin token — the sync is an
+// does not accept a store admin token through its API — sync is an
 // operator-session action by design.
 func runSecretStoreSync(ctx context.Context, arguments []string, output io.Writer) error {
 	flags := flag.NewFlagSet("secretstore sync", flag.ContinueOnError)

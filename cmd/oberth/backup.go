@@ -578,51 +578,6 @@ func resolveBackupKey(flagValue, archive string) (string, error) {
 
 // --- Operator-friendly flag handling for backup and restore (#065) ---
 
-// parseOperatorFlags parses flags the way a first-time operator expects:
-// flags may come before or after arguments, --help or -h anywhere shows help
-// (instead of becoming a flag's value), a string flag whose value is itself a
-// flag is refused, and errors spell flags with two dashes as the
-// documentation does. It returns the positional arguments.
-func parseOperatorFlags(flags *flag.FlagSet, arguments []string) (positional []string, help bool, err error) {
-	for _, arg := range arguments {
-		if arg == "--" {
-			break
-		}
-		if arg == "--help" || arg == "-help" || arg == "-h" {
-			return nil, true, nil
-		}
-	}
-	rest := arguments
-	for {
-		if err := flags.Parse(rest); err != nil {
-			if errors.Is(err, flag.ErrHelp) {
-				return nil, true, nil
-			}
-			return nil, false, fmt.Errorf("%w: %s", errUsage, doubleDashFlags(err.Error()))
-		}
-		rest = flags.Args()
-		if len(rest) == 0 {
-			break
-		}
-		if rest[0] == "--" {
-			positional = append(positional, rest[1:]...)
-			break
-		}
-		positional = append(positional, rest[0])
-		rest = rest[1:]
-	}
-	var bad error
-	flags.Visit(func(f *flag.Flag) {
-		if boolean, ok := f.Value.(interface{ IsBoolFlag() bool }); ok && boolean.IsBoolFlag() {
-			return
-		}
-		if value := f.Value.String(); bad == nil && strings.HasPrefix(value, "-") {
-			bad = fmt.Errorf("%w: %s needs a value, but got %q, which looks like another flag", errUsage, flagSpelling(f.Name), value)
-		}
-	})
-	return positional, false, bad
-}
-
 var singleDashFlag = regexp.MustCompile(`(^|[\s:])-([a-zA-Z][a-zA-Z0-9-]+)`)
 
 // doubleDashFlags rewrites the flag package's "-output" as "--output".

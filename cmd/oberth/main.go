@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -69,7 +70,12 @@ func main() {
 
 const usageCommands = "audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, schedules, fragments, artifacts, runs, run, promotion, log, repos, issues, status, uplink, access, kubevirt, size, admission, secretstore, mcp, preflight, or version"
 
-func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.Writer) error {
+func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.Writer) (resultErr error) {
+	defer func() {
+		if errors.Is(resultErr, flag.ErrHelp) {
+			_, resultErr = fmt.Fprintln(output, resultErr.Error())
+		}
+	}()
 	var err error
 	ctx, err = withCommandProtocol(ctx)
 	if err != nil {

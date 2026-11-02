@@ -893,20 +893,6 @@ func runUplinkList(ctx context.Context, arguments []string, output io.Writer) er
 	return writer.Flush()
 }
 
-// scopeFlag collects --scope values, repeatable and comma-separated.
-type scopeFlag []string
-
-func (scope *scopeFlag) String() string { return strings.Join(*scope, ",") }
-
-func (scope *scopeFlag) Set(value string) error {
-	for _, part := range strings.Split(value, ",") {
-		if part = strings.TrimSpace(part); part != "" {
-			*scope = append(*scope, part)
-		}
-	}
-	return nil
-}
-
 // scopeLabel is the SCOPE column: the upstreams, or "all" when unscoped.
 func scopeLabel(scope []string) string {
 	if len(scope) == 0 {
@@ -923,8 +909,8 @@ func runUplinkScope(ctx context.Context, arguments []string, output io.Writer, m
 	flags.SetOutput(io.Discard)
 	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path (in-pod; requires the live admin daemon)")
 	fingerprint := flags.String("fingerprint", "", "disambiguating SSH public-key fingerprint when one identity has several uplinks")
-	var set scopeFlag
-	flags.Var(&set, "set", "limit the uplink to these upstreams (repeatable or comma-separated)")
+	var set []string
+	flags.Func("set", "limit the uplink to these upstreams (repeatable or comma-separated)", func(value string) error { set = append(set, splitScope(value)...); return nil })
 	clearScope := flags.Bool("clear", false, "remove the limit: the uplink reaches every repository again")
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -1337,8 +1323,8 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	}
 	certificatePath := flags.String("tls-cert", defaultCertificate, "HTTPS certificate path (in-pod; requires the live admin daemon)")
 	isAdmin := flags.Bool("admin", false, "Grant admin privileges (required for access_allow/access_revoke)")
-	var scope scopeFlag
-	flags.Var(&scope, "scope", "limit the uplink to these upstreams' repositories (repeatable or comma-separated; default: every repository)")
+	var scope []string
+	flags.Func("scope", "limit the uplink to these upstreams' repositories (repeatable or comma-separated; default: every repository)", func(value string) error { scope = append(scope, splitScope(value)...); return nil })
 	if err := flags.Parse(arguments[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
@@ -1837,4 +1823,14 @@ func upstreamAuthStatus(ctx context.Context, upstream model.Upstream, sharedKey,
 		return "error: " + message
 	}
 	return "ok"
+}
+
+func splitScope(value string) []string {
+	var out []string
+	for _, p := range strings.Split(value, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io"
 	"strings"
@@ -14,42 +15,21 @@ func runRunPurge(ctx context.Context, arguments []string, output io.Writer) erro
 		_, err := fmt.Fprintln(output, runPurgeUsage)
 		return err
 	}
-	var id, what, reason string
-	var transport []string
-	for index := 0; index < len(arguments); index++ {
-		argument := arguments[index]
-		if argument == "--json" {
-			continue
-		}
-		if !strings.HasPrefix(argument, "-") {
-			if id != "" {
-				return fmt.Errorf("%w: %s", errUsage, runPurgeUsage)
-			}
-			id = argument
-			continue
-		}
-		name, value, hasValue := strings.Cut(argument, "=")
-		switch name {
-		case "--what", "--reason", "--url", "--token-file", "--ca-file":
-			if !hasValue {
-				index++
-				if index >= len(arguments) {
-					return fmt.Errorf("%w: %s requires a value", errUsage, name)
-				}
-				value = arguments[index]
-			}
-			switch name {
-			case "--what":
-				what = value
-			case "--reason":
-				reason = value
-			default:
-				transport = append(transport, name+"="+value)
-			}
-		default:
-			return fmt.Errorf("%w: unknown flag %q", errUsage, argument)
-		}
+	flags := flag.NewFlagSet("run purge", flag.ContinueOnError)
+	whatFlag := flags.String("what", "", "logs, artifacts or both")
+	reasonFlag := flags.String("reason", "", "purge reason")
+	flags.Bool("json", false, "emit JSON")
+	transportFlags := mcpTransportFlags(flags)
+	positional, _, err := parseOperatorFlags(flags, arguments)
+	if err != nil {
+		return err
 	}
+	id := ""
+	if len(positional) == 1 {
+		id = positional[0]
+	}
+	what, reason := *whatFlag, *reasonFlag
+	transport := transportFlags()
 	if id == "" || (what != "logs" && what != "artifacts" && what != "both") || strings.TrimSpace(reason) == "" {
 		return fmt.Errorf("%w: %s", errUsage, runPurgeUsage)
 	}

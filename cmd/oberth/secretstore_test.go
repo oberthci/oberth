@@ -238,7 +238,7 @@ func TestSecretStoreSetupGuidanceAndScript(t *testing.T) {
 		hex.EncodeToString(digest[:]),
 		"--print-script",
 		"oberth secretstore verify",
-		"no code path that accepts a store admin token",
+		"operator-only secretstore sync reads BAO_TOKEN",
 	} {
 		if !strings.Contains(guidance.String(), want) {
 			t.Fatalf("setup guidance misses %q:\n%s", want, guidance.String())

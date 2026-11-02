@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -206,54 +207,34 @@ func runSecretStoreExec(ctx context.Context, arguments []string, standardOut, er
 
 // parseExecArgs extracts --dir, --path flags, and the command after --.
 func parseExecArgs(arguments []string) (string, []string, []string, error) {
-	directory := ""
-	var paths []string
-	index := 0
-
-	for ; index < len(arguments); index++ {
-		arg := arguments[index]
+	separator := -1
+	for i, arg := range arguments {
 		if arg == "--" {
-			index++
+			separator = i
 			break
 		}
-		// --dir=value or --dir value
-		if arg == "--dir" || arg == "-dir" {
-			if index+1 >= len(arguments) {
-				return "", nil, nil, errors.New("--dir requires a value")
-			}
-			index++
-			directory = arguments[index]
-			continue
-		}
-		if rest, found := strings.CutPrefix(arg, "--dir="); found {
-			directory = rest
-			continue
-		}
-		if rest, found := strings.CutPrefix(arg, "-dir="); found {
-			directory = rest
-			continue
-		}
-		// --path=value or --path value
-		if arg == "--path" || arg == "-path" {
-			if index+1 >= len(arguments) {
-				return "", nil, nil, errors.New("--path requires a value")
-			}
-			index++
-			paths = append(paths, arguments[index])
-			continue
-		}
-		if rest, found := strings.CutPrefix(arg, "--path="); found {
-			paths = append(paths, rest)
-			continue
-		}
-		if rest, found := strings.CutPrefix(arg, "-path="); found {
-			paths = append(paths, rest)
-			continue
-		}
-		return "", nil, nil, fmt.Errorf("unknown flag %q; expected --dir, --path, or --", arg)
 	}
-
-	command := arguments[index:]
+	if separator < 0 && wantsHelp(arguments) {
+		return "", nil, nil, commandHelpError{usage: "Usage: oberth secretstore exec --dir DIR --path PATH -- COMMAND [ARG...]"}
+	}
+	if separator < 0 {
+		return "", nil, nil, fmt.Errorf("%w: no command given after --", errUsage)
+	}
+	flags := flag.NewFlagSet("secretstore exec", flag.ContinueOnError)
+	directoryFlag := flags.String("dir", "", "private tmpfs root")
+	var pathFlags stringList
+	flags.Var(&pathFlags, "path", "approved secret path (repeatable)")
+	positional, help, err := parseOperatorFlags(flags, arguments[:separator])
+	if err != nil {
+		return "", nil, nil, err
+	}
+	if help {
+		return "", nil, nil, commandHelpError{usage: "Usage: oberth secretstore exec --dir DIR --path PATH -- COMMAND [ARG...]"}
+	}
+	if len(positional) > 0 {
+		return "", nil, nil, fmt.Errorf("%w: expected flags before --", errUsage)
+	}
+	directory, paths, command := *directoryFlag, []string(pathFlags), arguments[separator+1:]
 	if strings.TrimSpace(directory) == "" {
 		return "", nil, nil, errors.New("--dir is required")
 	}

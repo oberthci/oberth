@@ -72,7 +72,7 @@ func runAuditRecordWithGate(ctx context.Context, arguments []string, output io.W
 	flags.SetOutput(io.Discard)
 	database := flags.String("database", "/data/oberth.sqlite", "SQLite database path (in-pod; requires the live admin daemon)")
 	details := flags.String("details", "{}", "JSON details to record")
-	if err := flags.Parse(permuteFlagsFirst(arguments)); err != nil {
+	if err := parseCommandFlags(flags, arguments); err != nil {
 		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if flags.NArg() != 1 {
