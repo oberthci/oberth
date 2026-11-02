@@ -41,3 +41,13 @@ The envconsul and environment-variable materialize chain is retired.
 OpenBao policy remains the enforcement boundary for reads. Join the Oberth
 admission/fetch evidence with OpenBao audit records when attributing a read;
 annotations record intent and do not replace store policy.
+
+The `oberth-argo-` and per-step identity prefixes are reserved for policies and
+roles managed by Oberth. Avoid manually provisioning identities under those
+prefixes: authoritative sync removes managed names absent from the live grant
+table. Sync refuses a ConfigMap fallback or a producer warning before making
+changes, because a partial desired set cannot authorize orphan deletion.
+
+Legacy workflows using envconsul remain recognized as secret-store consumers
+and receive the token mount. The retired `oberth materialize` command is no
+longer supported; new workflows use `oberth secretstore exec`.

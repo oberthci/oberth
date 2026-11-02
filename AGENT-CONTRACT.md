@@ -3551,7 +3551,8 @@ Public typed records retain legacy keys and add snake_case aliases after
 redaction. Primary run records/control responses accept or expose `run_id`
 alongside their existing ID spelling; conflicting input aliases are refused.
 HTTP collection arrays remain the default; `envelope=1` opts into the matching
-MCP collection object. No existing name or envelope is removed in v0.17.x.
+MCP collection object. `/api/issues` explicitly removes body and internal
+list fields for privacy; all other existing names and envelopes remain.
 Any removal requires a later major version after an announced deprecation
 window of at least 90 days and one stable minor release. No removal date is
 announced here. See [the compatibility policy](docs/api-compatibility.md).
