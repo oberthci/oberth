@@ -41,8 +41,8 @@ func TestAuthenticationFailuresAreLimitedByPeerIPAndLogged(t *testing.T) {
 		if code := call("192.0.2.1:5678", false); code != http.StatusTooManyRequests {
 			t.Fatalf("exhausted IP: %d, want 429", code)
 		}
-		if lookups != 5 {
-			t.Fatalf("throttled request reached authenticator: %d lookups", lookups)
+		if lookups != 6 {
+			t.Fatalf("failure lookup count: %d lookups", lookups)
 		}
 		if code := call("192.0.2.2:1234", false); code != http.StatusUnauthorized {
 			t.Fatalf("other IP: %d", code)
@@ -51,8 +51,34 @@ func TestAuthenticationFailuresAreLimitedByPeerIPAndLogged(t *testing.T) {
 		if code := call("192.0.2.1:9999", false); code != http.StatusUnauthorized {
 			t.Fatalf("expired limit: %d", code)
 		}
-		if strings.Count(logs.String(), "api: authentication failure:") != 13 || strings.Contains(logs.String(), "private-test-credential") {
+		if strings.Count(logs.String(), "api: authentication failure:") != 12 || strings.Contains(logs.String(), "private-test-credential") {
 			t.Fatalf("failure logging missing or includes credential: %s", logs.String())
 		}
 	})
+}
+
+func TestValidBearerSurvivesSharedPeerFailureLimit(t *testing.T) {
+	server, _ := testServer(t)
+	server.auth = streamAuthFunc(func(_ context.Context, token string) (Actor, error) {
+		if token == "valid" {
+			return Actor{Identity: "operator", Admin: true}, nil
+		}
+		return Actor{}, ErrInvalidToken
+	})
+	for i := 0; i < 50; i++ {
+		request := httptest.NewRequest(http.MethodGet, "/api/repos", nil)
+		request.RemoteAddr = "192.0.2.1:1234"
+		request.Header.Set("Authorization", "Bearer invalid")
+		server.Handler().ServeHTTP(httptest.NewRecorder(), request)
+	}
+	for i := 0; i < 20; i++ {
+		request := httptest.NewRequest(http.MethodGet, "/api/repos", nil)
+		request.RemoteAddr = "192.0.2.1:5678"
+		request.Header.Set("Authorization", "Bearer valid")
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("valid token after peer failures: %d", response.Code)
+		}
+	}
 }

@@ -303,11 +303,6 @@ func (server *Server) routes() {
 
 func (server *Server) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if server.authFailures.check(authPeer(request), false) {
-			server.logAuthFailure(request, "rate_limited")
-			writeAuthRateLimit(writer)
-			return
-		}
 		token, ok := bearerToken(request.Header.Values("Authorization"))
 		if !ok {
 			if server.recordAuthFailure(writer, request, "missing_or_malformed") {

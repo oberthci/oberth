@@ -75,11 +75,11 @@ func (server *Server) logAuthFailure(request *http.Request, reason string) {
 }
 
 func (server *Server) recordAuthFailure(writer http.ResponseWriter, request *http.Request, reason string) bool {
-	server.logAuthFailure(request, reason)
 	if server.authFailures.check(authPeer(request), true) {
 		writeAuthRateLimit(writer)
 		return true
 	}
+	server.logAuthFailure(request, reason)
 	return false
 }
 
