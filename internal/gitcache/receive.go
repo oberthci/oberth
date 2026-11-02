@@ -43,6 +43,9 @@ type receiveReservation struct {
 // Git publishes refs it is finalized into replayable events before callbacks
 // run. A callback failure leaves the stable event in the PVC outbox.
 func (c *Cache) Receive(ctx context.Context, input, actor, protocol string, stdin io.Reader, stdout, stderr io.Writer, handler ReceiveHandler) error {
+	return c.receiveWithTransport(ctx, input, actor, protocol, stdin, stdout, stderr, handler, nil)
+}
+func (c *Cache) receiveWithTransport(ctx context.Context, input, actor, protocol string, stdin io.Reader, stdout, stderr io.Writer, handler ReceiveHandler, transport func() error) error {
 	repo, path, err := c.path(input)
 	if err != nil {
 		return err
@@ -98,6 +101,9 @@ func (c *Cache) Receive(ctx context.Context, input, actor, protocol string, stdi
 		}
 		return admission, nil
 	}, func() error {
+		if transport != nil {
+			return transport()
+		}
 		return c.run(ctx, commandSpec{dir: path, args: c.serviceArgs(ReceivePack, path), stdin: stdin, stdout: stdout, stderr: stderr, env: map[string]string{"GIT_PROTOCOL": protocol, "OBERTH_RECEIVE_OUTBOX": c.outboxRoot, "OBERTH_RECEIVE_REPO": identity}})
 	}, handler)
 }

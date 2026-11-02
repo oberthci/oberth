@@ -1,0 +1,3 @@
+package gitcache
+import("context";"errors";"testing")
+func TestReceiveFixtureHonorsRepositoryGate(t *testing.T){r:=newTestRepository(t);c:=newTestCache(t,r.upstream);ready,err:=c.Ensure(t.Context(),"example");if err!=nil{t.Fatal(err)};blocked:=errors.New("archived");c.repositoryGate=func(context.Context,string)error{return blocked};called:=false;err=c.receiveTransaction(t.Context(),"example",ready.Path,"actor",func()error{called=true;return nil},ReceiveHandlerFunc(func(context.Context,ReceiveEvent)error{return nil}));if !errors.Is(err,blocked)||called{t.Fatalf("fixture bypasses live repository gate: %v, called=%v",err,called)}}
