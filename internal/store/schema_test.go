@@ -1079,7 +1079,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"issue_locks":               {"issue_id", "owner", "acquired_at", "expires_at"},
 		"audit_actions":             {"id", "actor", "action", "resource_type", "resource_id", "details", "previous_sha256", "sha256", "created_at"},
 		"audit_anchors":             {"id", "audit_id", "audit_sha256", "tsa_url", "receipt", "anchored_at", "created_at"},
-		"token_credentials":         {"id", "name", "digest", "created_at", "last_used_at", "revoked_at", "activated_at"},
+		"token_credentials":         {"id", "name", "digest", "created_at", "last_used_at", "revoked_at", "activated_at", "expires_at"},
 		"uplinks":                   {"id", "fingerprint", "identity", "token_credential_id", "auth_actor", "created_at", "updated_at", "admin"},
 		"run_cancellations":         {"run_id", "job_name", "superseded_by", "reason", "created_at", "completed_at"},
 		"receive_events":            {"id", "actor", "repo_id", "ref_kind", "ref", "old_sha", "object_sha", "commit_sha", "outcome", "run_id", "created_at"},

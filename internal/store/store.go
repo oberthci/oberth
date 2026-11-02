@@ -1974,8 +1974,8 @@ func validateUplinkBinding(uplink model.Uplink) error {
 func scanTokenCredential(row rowScanner) (model.TokenCredential, error) {
 	var value model.TokenCredential
 	var created int64
-	var activated, lastUsed, revoked sql.NullInt64
-	if err := scanRowNotFound(row, "TokenCredential", &value.ID, &value.Name, &value.Digest, &created, &activated, &lastUsed, &revoked); err != nil {
+	var activated, lastUsed, revoked, expiry sql.NullInt64
+	if err := scanRowNotFound(row, "TokenCredential", &value.ID, &value.Name, &value.Digest, &created, &activated, &lastUsed, &revoked, &expiry); err != nil {
 		return model.TokenCredential{}, err
 	}
 	value.CreatedAt = fromUnixNano(created)
