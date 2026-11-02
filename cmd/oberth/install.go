@@ -33,8 +33,6 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 	flags.Var(&alsoUpstreams, "also-upstream",
 		"another organization to connect with the same upstream key, host/organization or ssh:// URL (repeatable), "+
 			"e.g. codeberg.org/acme")
-	flags.BoolVar(&cfg.Dev, "dev", false, "install in dev/evaluation mode (default)")
-	flags.BoolVar(&cfg.Production, "production", false, "install in production mode (not implemented)")
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "print plan without making changes")
 	flags.BoolVar(&cfg.Yes, "yes", false, "proceed even for non-local clusters")
 	flags.BoolVar(&cfg.Upgrade, "upgrade", false,

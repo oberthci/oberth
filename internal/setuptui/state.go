@@ -106,7 +106,6 @@ type WizardState struct {
 func newWizardState(opts Options) *WizardState {
 	st := &WizardState{
 		Config: installer.Config{
-			Dev:           true,
 			Namespace:     installer.DefaultNamespace,
 			ChartPath:     opts.ChartPath,
 			ImageRef:      opts.ImageRef,

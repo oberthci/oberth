@@ -30,3 +30,19 @@ func TestRunResourcesCLIUsesAuthenticatedHistoryAndYAML(t *testing.T) {
 		t.Fatal(out.String())
 	}
 }
+
+func TestRunResourcesJSONOverridesFormat(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(measured.Report{Repository: "fixture"})
+	}))
+	defer server.Close()
+	t.Setenv("OBERTH_BASE_URL", server.URL)
+	t.Setenv("OBERTH_TOKEN", "fixture")
+	var out strings.Builder
+	if err := runRunResources(t.Context(), []string{"--repo=fixture", "--format=yaml", "--json"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid([]byte(out.String())) {
+		t.Fatalf("--json did not select JSON: %s", &out)
+	}
+}

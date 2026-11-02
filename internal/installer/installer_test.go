@@ -938,38 +938,11 @@ func TestPrepareKindImagesExplainsGARAuthentication(t *testing.T) {
 
 // --- Config validation ---
 
-func TestConfigValidateDevProductionMutualExclusion(t *testing.T) {
-	t.Parallel()
-	cfg := Config{Dev: true, Production: true}
-	err := cfg.Validate()
-	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
-		t.Fatalf("want mutual exclusion error, got %v", err)
-	}
-}
-
-func TestConfigValidateProductionRejected(t *testing.T) {
-	t.Parallel()
-	cfg := Config{Production: true}
-	err := cfg.Validate()
-	if err == nil {
-		t.Fatal("want error for production mode")
-	}
-	if !strings.Contains(err.Error(), "not implemented") {
-		t.Fatalf("error should mention not implemented, got %v", err)
-	}
-	if !strings.Contains(err.Error(), "BACKLOG.md") {
-		t.Fatalf("error should mention BACKLOG.md, got %v", err)
-	}
-}
-
 func TestConfigValidateDefaultsToDev(t *testing.T) {
 	t.Parallel()
 	cfg := Config{}
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
-	}
-	if !cfg.Dev {
-		t.Fatal("should default to dev mode")
 	}
 	if cfg.OpenBaoNamespace != DefaultOpenBaoNamespace {
 		t.Fatalf("OpenBaoNamespace = %q, want %q", cfg.OpenBaoNamespace, DefaultOpenBaoNamespace)

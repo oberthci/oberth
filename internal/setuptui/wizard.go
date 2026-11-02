@@ -458,9 +458,6 @@ func BuildCommandLine(state *WizardState) string {
 	if c.UpstreamPrivateKeyPath != "" {
 		args = append(args, "--upstream-key-file="+shellQuote(c.UpstreamPrivateKeyPath))
 	}
-	if c.Dev {
-		args = append(args, "--dev")
-	}
 	if c.Namespace != "" && c.Namespace != installer.DefaultNamespace {
 		args = append(args, "--namespace="+c.Namespace)
 	}

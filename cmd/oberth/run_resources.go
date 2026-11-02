@@ -32,6 +32,9 @@ func runRunResources(ctx context.Context, arguments []string, output io.Writer) 
 	} else if flags.NArg() != 0 {
 		return fmt.Errorf("%w: run resources [--repo repo | --run id] [--yaml]", errUsage)
 	}
+	if *asJSON {
+		*format = "json"
+	}
 	if *asYAML {
 		*format = "yaml"
 	}

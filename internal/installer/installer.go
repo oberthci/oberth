@@ -104,8 +104,6 @@ type Config struct {
 	CreateKind             bool
 	UpstreamPrivateKeyPath string
 
-	Dev               bool
-	Production        bool
 	DryRun            bool
 	Yes               bool
 	Upgrade           bool
@@ -626,12 +624,6 @@ func (cfg *Config) Validate() error {
 			return err
 		}
 	}
-	if cfg.Dev && cfg.Production {
-		return errors.New("--dev and --production are mutually exclusive")
-	}
-	if cfg.Production {
-		return errors.New("production mode is not implemented yet; tracked in BACKLOG.md")
-	}
 	if cfg.InstallSecretStore && cfg.InstallSecretStoreDev {
 		return errors.New("--install-secretstore and --install-secretstore-dev are mutually exclusive")
 	}
@@ -639,9 +631,6 @@ func (cfg *Config) Validate() error {
 	case "", "NodePort", "LoadBalancer", "ClusterIP":
 	default:
 		return fmt.Errorf("--service-type must be NodePort, LoadBalancer or ClusterIP, not %q", cfg.ServiceType)
-	}
-	if !cfg.Dev {
-		cfg.Dev = true
 	}
 	if cfg.OpenBaoNamespace == "" {
 		cfg.OpenBaoNamespace = DefaultOpenBaoNamespace

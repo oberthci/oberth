@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -19,15 +18,9 @@ import (
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
-const (
-	validateDefaultTimeout = 5 * time.Minute
-)
-
 func runValidate(_ context.Context, arguments []string, output io.Writer) error {
 	flags := flag.NewFlagSet("validate", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	_ = flags.Duration("timeout", validateDefaultTimeout, "reserved for future use")
-	_ = flags.Bool("static", false, "reserved for future use")
 	var imagePrefixes string
 	var containerDiskPrefixes string
 	kubeVirt := flags.Bool("kubevirt", false, "validate KubeVirt VM templates and KVM device leaves, including guest-test leaves (server grant still required)")
