@@ -307,3 +307,7 @@ func (service *API) purgedEvidence(ctx context.Context, run model.Run, what stri
 	}
 	return service.retention.EvidenceError(ctx, run.ID, what)
 }
+
+func (r *Retention) purgeSweepCandidate(ctx context.Context, id, what, reason string, keep int) (model.EvidencePurge, error) {
+	return r.purge(ctx, "oberth-retention", id, what, reason, keep)
+}

@@ -49,3 +49,9 @@ func privateAdminSocket(t *testing.T) string {
 	t.Cleanup(func() { _ = os.Remove(directory) })
 	return filepath.Join(directory, "admin.sock")
 }
+
+func TestAdminGateRejectsRetiredSecretBootstrapOperation(t *testing.T) {
+	if validAdminOperation("upstream.secret.oberth-known-hosts") {
+		t.Fatal("retired Secret bootstrap operation remains authorized")
+	}
+}
