@@ -1,9 +1,11 @@
 # Admission from reviewed declarations — Stage C
 
 Git remains the source of truth. A workflow whose reachable pod-producing steps
-all declare positive CPU and memory requests uses those scheduling requests at
-peak concurrency. Its size annotation no longer determines its reservation or
-requires a size grant. The administrator's per-container declaration ceilings
+all declare positive CPU and memory requests can use numeric admission at peak
+concurrency. CPU reserves the request; memory reserves the higher of its request
+and positive declared limit, including inherited limits. On that numeric path,
+its size annotation no longer determines its reservation or requires a size
+grant. The administrator's per-container declaration ceilings
 still apply at trusted submission. No resource value, missing limit or retry is
 changed. Requests reserve capacity; an absent runtime limit remains unbounded.
 
@@ -12,12 +14,14 @@ combined weight reserves the same fraction of both CPU and memory budgets when
 sharing with declared work. A declared XL workflow can therefore share with
 small work, while a legacy whole-budget XL keeps its existing exclusion.
 Release urgency, repository groups and VM grants remain separate protections.
-VM and trusted preflight workflows retain their independent admission path.
+VM workflows participate in numeric host admission when their declarations and
+graph can be bounded and fit. Separate VM cell quotas and trusted preflight
+eligibility remain enforced.
 
 ## Bounds
 
 Static DAG and step graphs reserve the maximum concurrent CPU requests and the
-maximum concurrent memory requests independently. A dependency earns ordering
+maximum concurrent memory reservations independently. A dependency earns ordering
 credit only when it requires successful completion; early-start and OR
 expressions earn no credit. Conditions are conservatively assumed to run.
 Repeated calls and static array fan-outs are counted separately. Nested and inline templates, scripts,
@@ -29,15 +33,47 @@ Dynamic fan-out requires positive workflow `parallelism`, bounded to 256 pods.
 Its reservation uses the largest possible declared pod in each dimension times
 that bound. Unsupported lifetime graphs, hooks and exit handlers do not earn
 concurrency credits. Graph expansion and analysis have explicit size/depth/work
-bounds; a fully declared graph that cannot be bounded is refused before create.
-Work with missing helper requests or unknown declaration coverage keeps the legacy path rather than claiming a
-complete numeric reservation.
+bounds. A graph that cannot be bounded falls back to legacy size admission;
+so does a reservation that exceeds the configured numeric budget, including
+helper reserve. These cases never acquire a new numeric sizing refusal. A fixed
+notice appears in the existing run-message cell through `resource_message`,
+without changing `display_reason`. It is available while waiting, retained in
+submission timing metadata, and restored after uncertain creation/restart.
+Work with missing helper requests or unknown coverage also keeps the legacy path.
+Existing source validity, grants and per-container ceilings still apply.
 
 Each concurrent pod also reserves 100m CPU and 256Mi memory for server/executor
 helpers. This is capacity held aside, not a mutation of pod requests. Deployment
 executor defaults must fit this allowance; review them before release. CPU and
-memory budgets must exclude platform and VM capacity. They are administrator
-settings, not detected host capacity or measurements.
+memory budgets must exclude platform reserve and other external work. Declared
+VM host demand is included in these budgets. They are administrator settings,
+not detected host capacity or measurements.
+
+## VM host demand and memory policy
+
+A VM reserves its declared CPU request, or its CPU limit when no request exists.
+Memory reserves the higher declared request/limit. Each VM adds a separate
+100m CPU / 256Mi launcher reserve; workflow executor pods retain their own
+100m/256Mi reserve. The existing run-aware create/delete lifetime proof computes
+VM peaks in these host-cost units. If that proof is unavailable, the conservative
+sum is used. Workflow pod peaks are added conservatively; simple bounded VM exit
+cleanup also counts. The same pinned source/fragment receipt is verified before
+create. VM cell quotas still count guest cores and the higher declared memory
+value, so sharing host capacity cannot increase a cell grant.
+
+A VM with no scheduling requests or limits earns no numeric host credit and
+keeps legacy sizing with a notice. Its cell reservation conservatively uses the
+per-instance memory ceiling and declared guest cores. Partial invalid declarations
+still fail validation; guest-core bounds, image/identity policy and cell grants
+remain enforced. No request or limit is inserted into the manifest.
+
+Reserving memory limits avoids packing a known larger limit as a small request.
+It does **not** make a missing limit bounded: such a container reserves its
+request and can still exceed it at runtime. The choice preserves the owner's
+existing default behavior rather than adding limits or another eligibility
+mode. Existing running reservations restore their sealed cost rather than being
+silently resized. Host-memory isolation still requires reviewed limits in git.
+Both helper allowances must be checked against deployment defaults before rollout.
 
 ## Administrator settings
 
@@ -56,8 +92,10 @@ IO remains independent of CPU/memory fit. The coarse run ceiling, disk-space
 floor and existing host-pressure gate remain in force. A positive IO-run cap can
 only narrow concurrency. The existing queue, starvation/backfill window,
 repository groups, cancellation and uncertain-create ownership are retained.
-Oversized numeric demand is refused instead of waiting forever for a budget it
-cannot fit. Admission messages expose this run's declared demand without adding
+Oversized numeric demand falls back to its existing size class, with a run
+message explaining the choice. It neither waits forever for impossible numeric
+capacity nor refuses an otherwise valid pipeline merely for exceeding that
+budget. Admission messages expose this run's declared demand without adding
 run-row labels or exposing another repository's capacity usage.
 
 The same immutable source and fragment receipt supplies reservation and trusted

@@ -14,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
@@ -21,6 +22,7 @@ import (
 // Adoption pins observation to the exact Workflow found during owner recovery.
 // Resource size comes from that submission, never from the current default branch.
 type Adoption struct {
+	Fallback    model.ResourceAdmissionFallback
 	Pods        argoworkflow.PodDemand
 	RestartedAt time.Time
 	KubeVirt    argoworkflow.VMIDemand
@@ -121,7 +123,11 @@ func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request Adop
 	if pods != nil {
 		peak = *pods
 	}
-	return Adoption{Pods: peak, RestartedAt: controller.restartedAt, KubeVirt: demand, Size: size, UID: workflow.UID, Identity: identity, SpecSHA256: specHash}, nil
+	fallback, err := readResourceFallback(workflow)
+	if err != nil {
+		return Adoption{}, err
+	}
+	return Adoption{Fallback: fallback, Pods: peak, RestartedAt: controller.restartedAt, KubeVirt: demand, Size: size, UID: workflow.UID, Identity: identity, SpecSHA256: specHash}, nil
 }
 
 // Argo's status and API metadata change while it runs. Its live spec must stay
@@ -131,7 +137,8 @@ func adoptionSpecHash(workflow *wfv1.Workflow) (string, error) {
 		Spec      wfv1.WorkflowSpec `json:"spec"`
 		VMIQuota  string            `json:"vmi_quota,omitempty"`
 		PodDemand string            `json:"pod_demand,omitempty"`
-	}{workflow.Spec, workflow.Annotations[vmiQuotaAnnotation], workflow.Annotations[podDemandAnnotation]})
+		Fallback  string            `json:"resource_fallback,omitempty"`
+	}{workflow.Spec, workflow.Annotations[vmiQuotaAnnotation], workflow.Annotations[podDemandAnnotation], workflow.Annotations[resourceFallbackAnnotation]})
 	if err != nil {
 		return "", fmt.Errorf("argojob: encode adopted Workflow spec: %w", err)
 	}

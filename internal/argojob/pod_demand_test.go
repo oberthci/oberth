@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
@@ -33,6 +34,44 @@ func TestDeclaredPodSubmissionBindsExactDemandAndRejectsChanges(t *testing.T) {
 	}
 	if wf.Annotations[podDemandAnnotation] != "" {
 		t.Fatal("pipeline forged server reservation")
+	}
+}
+
+func TestResourceFallbackIsServerOwnedAndRestored(t *testing.T) {
+	cfg := testConfig()
+	cfg.RunnerImagePrefixes = []string{"example.invalid/"}
+	r := resourceBoundsRequest(resourceBoundsSource("      resources:\n        requests: {cpu: 1, memory: 1Gi}\n"))
+	r.ResourceFallback = model.ResourceFallbackBudget
+	wf, err := Build(cfg, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fallback, err := readResourceFallback(wf)
+	if err != nil || fallback != model.ResourceFallbackBudget {
+		t.Fatal("fallback submission notice lost")
+	}
+	r.ResourceFallback = model.ResourceFallbackGraph
+	r.Source = []byte(strings.Replace(string(r.Source), "  entrypoint: step-abc12345", "  entrypoint: step-abc12345\n  onExit: step-11111111", 1) + "  - name: step-11111111\n    container:\n      image: example.invalid/repo-01@sha256:" + strings.Repeat("a", 64) + "\n      resources:\n        requests: {cpu: 1, memory: 1Gi}\n")
+	wf, err = Build(cfg, r)
+	if err != nil {
+		t.Fatalf("graph fallback refused at trusted submission: %v", err)
+	}
+	if fallback, err = readResourceFallback(wf); err != nil || fallback != model.ResourceFallbackGraph {
+		t.Fatal("graph fallback notice lost at trusted submission")
+	}
+	wf, req := adoptionWorkflow()
+	if err = stampResourceFallback(wf, model.ResourceFallbackGraph); err != nil {
+		t.Fatal(err)
+	}
+	c := &Controller{config: Config{Namespace: wf.Namespace}}
+	binding, err := c.bindAdoption(wf, req)
+	if err != nil || binding.Fallback != model.ResourceFallbackGraph {
+		t.Fatal("fallback adoption lost")
+	}
+	changed := wf.DeepCopy()
+	_ = stampResourceFallback(changed, model.ResourceFallbackBudget)
+	if binding.matches(changed) {
+		t.Fatal("fallback binding changed undetected")
 	}
 }
 

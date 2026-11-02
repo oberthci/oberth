@@ -2,7 +2,6 @@ package service
 
 import (
 	"errors"
-	"fmt"
 	"math/big"
 
 	"github.com/oberthci/oberth/internal/model"
@@ -92,11 +91,52 @@ func (g *weightedAdmission) validatePodDemand(d *argoworkflow.PodDemand) error {
 	if !d.Valid() {
 		return errors.New("invalid declared workflow resource demand")
 	}
-	c := podCharge(*d)
-	if c.CPUMilli > g.resources.CPUMilli || c.MemoryBytes > g.resources.MemoryBytes {
-		return fmt.Errorf("declared workflow needs %dm CPU and %d memory bytes including executor reserve; administrator budget is %dm CPU and %d memory bytes", c.CPUMilli, c.MemoryBytes, g.resources.CPUMilli, g.resources.MemoryBytes)
-	}
 	return nil
+}
+
+func (g *weightedAdmission) demandFitsBudget(d *argoworkflow.PodDemand) bool {
+	c := podCharge(*d)
+	return c.CPUMilli <= g.resources.CPUMilli && c.MemoryBytes <= g.resources.MemoryBytes
+}
+
+func (g *weightedAdmission) selectDeclaredDemand(receipt *argoworkflow.VMIDemandReceipt) (*argoworkflow.PodDemand, model.ResourceAdmissionFallback) {
+	if g.resources.Disabled || receipt == nil {
+		return nil, ""
+	}
+	d, err := receipt.DeclaredPodDemand()
+	if errors.Is(err, argoworkflow.ErrVMHostUndeclared) {
+		return nil, model.ResourceFallbackVM
+	}
+	if err != nil {
+		return nil, model.ResourceFallbackGraph
+	}
+	if d == nil {
+		return nil, ""
+	}
+	if !d.Valid() {
+		return nil, model.ResourceFallbackGraph
+	}
+	if !g.demandFitsBudget(d) {
+		return nil, model.ResourceFallbackBudget
+	}
+	return d, ""
+}
+
+// Only called after the API has authorized the run. This also works before a
+// Workflow exists; completed notices come from immutable timing metadata.
+func (s *Scheduler) ResourceAdmissionMessage(runID string) string {
+	if s == nil || s.admission == nil {
+		return ""
+	}
+	g := s.admission
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, r := range g.reservations {
+		if r.runID == runID {
+			return r.fallback.Message()
+		}
+	}
+	return ""
 }
 
 func samePodDemand(a, b *argoworkflow.PodDemand) bool {

@@ -47,6 +47,12 @@ func (controller *Controller) retainWorkflowTiming(ctx context.Context, workflow
 	if coverage := argoworkflow.ResourceCoverage(workflow); coverage != nil {
 		value.Resources = &model.ResourceCoverage{Declared: coverage.Declared, Undeclared: coverage.Undeclared}
 	}
+	if fallback, err := readResourceFallback(workflow); err == nil && fallback != "" {
+		if value.Resources == nil {
+			value.Resources = &model.ResourceCoverage{Unknown: true}
+		}
+		value.Resources.Fallback = fallback
+	}
 	var err error
 	value.Tasks, err = timingGraph(workflow)
 	if err != nil {

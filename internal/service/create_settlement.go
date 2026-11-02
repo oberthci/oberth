@@ -22,7 +22,8 @@ const createSettlementAttemptBudget = 15 * time.Second
 const pendingCreateMessage = "Workflow create outcome uncertain; cleanup pending"
 
 type createAdmission struct {
-	Pods                       *argoworkflow.PodDemand `json:",omitempty"`
+	Fallback                   model.ResourceAdmissionFallback `json:",omitempty"`
+	Pods                       *argoworkflow.PodDemand         `json:",omitempty"`
 	RunID, JobName, SHA, Group string
 	RepoID                     int64
 	Size                       periapsis.Size
@@ -58,6 +59,14 @@ func runCreateAdmissionPath(root, id string) string {
 // Persist the server-admitted contract before POST. Recovery must never need a
 // Kubernetes read, a moving repository ref or a remote fragment to restore it.
 func (scheduler *Scheduler) recordCreateAdmission(run model.Run, name string, size periapsis.Size, demand argoworkflow.VMIDemand, pods ...*argoworkflow.PodDemand) error {
+	var peak *argoworkflow.PodDemand
+	if len(pods) > 0 {
+		peak = pods[0]
+	}
+	return scheduler.recordResourceAdmission(run, name, size, demand, peak, "")
+}
+
+func (scheduler *Scheduler) recordResourceAdmission(run model.Run, name string, size periapsis.Size, demand argoworkflow.VMIDemand, peak *argoworkflow.PodDemand, fallback model.ResourceAdmissionFallback) error {
 	target := scheduler.createAdmissionPath(run.ID)
 	if !pathWithin(scheduler.workspaceRoot, target) {
 		return errors.New("service: create admission escaped workspace")
@@ -65,11 +74,7 @@ func (scheduler *Scheduler) recordCreateAdmission(run model.Run, name string, si
 	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
 		return err
 	}
-	var peak *argoworkflow.PodDemand
-	if len(pods) > 0 {
-		peak = pods[0]
-	}
-	body, err := json.Marshal(createAdmission{Pods: peak, RunID: run.ID, JobName: name, SHA: run.SHA, RepoID: run.RepoID, Group: run.ConcurrencyGroup, Size: size.Effective(), Demand: demand})
+	body, err := json.Marshal(createAdmission{Fallback: fallback, Pods: peak, RunID: run.ID, JobName: name, SHA: run.SHA, RepoID: run.RepoID, Group: run.ConcurrencyGroup, Size: size.Effective(), Demand: demand})
 	if err != nil {
 		return err
 	}
@@ -118,6 +123,9 @@ func (scheduler *Scheduler) readCreateAdmission(run model.Run) (createAdmission,
 	if saved.Pods != nil && !saved.Pods.Valid() {
 		return createAdmission{}, errors.New("invalid saved workflow resource demand")
 	}
+	if !saved.Fallback.Valid() {
+		return createAdmission{}, errors.New("invalid saved admission fallback")
+	}
 	return saved, nil
 }
 
@@ -141,6 +149,11 @@ func (scheduler *Scheduler) restoreCreateGrant(run model.Run, grant *admissionRe
 			log.Printf("WARN: create_cleanup run=%q missing_admission_contract=true reserving_ceiling=true", run.ID)
 		}
 		grant, err = scheduler.admission.adopt(run, saved.Size, saved.Demand, saved.Pods)
+		if err == nil {
+			scheduler.admission.mu.Lock()
+			grant.fallback = saved.Fallback
+			scheduler.admission.mu.Unlock()
+		}
 		if err != nil {
 			// Conflicting historical groups are quarantined behind a full budget.
 			run.ConcurrencyGroup = ""

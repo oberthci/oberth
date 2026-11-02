@@ -61,7 +61,7 @@ func (r *VMIDemandReceipt) DeclaredPodDemand() (*PodDemand, error) {
 	if r == nil || r.pods == nil {
 		return nil, nil
 	}
-	return DeclaredPodPeak(r.pods.DeepCopy())
+	return DeclaredHostPeak(r.pods.DeepCopy(), r.summary.Binding.Trigger)
 }
 
 func (r *VMIDemandReceipt) Summary() VMIDemandSummary { return r.summary }

@@ -41,9 +41,13 @@ type vmiManifest struct {
 			} `json:"firmware"`
 			Resources struct {
 				Requests struct {
-					CPU    string `json:"cpu"`
-					Memory string `json:"memory"`
+					CPU    string `json:"cpu,omitempty"`
+					Memory string `json:"memory,omitempty"`
 				} `json:"requests"`
+				Limits struct {
+					CPU    string `json:"cpu,omitempty"`
+					Memory string `json:"memory,omitempty"`
+				} `json:"limits"`
 			} `json:"resources"`
 			Devices struct {
 				Disks []struct {
@@ -261,11 +265,27 @@ func admitVMIResource(where string, tmpl *wfv1.ResourceTemplate, prefixes []stri
 	if manifest.Spec.Domain.CPU.Cores < 1 || manifest.Spec.Domain.CPU.Cores > maxVMICores {
 		return fmt.Errorf("argoworkflow: %s.manifest.spec.domain.cpu.cores must be 1..%d", where, maxVMICores)
 	}
-	cpu, err := resource.ParseQuantity(manifest.Spec.Domain.Resources.Requests.CPU)
+	declared := manifest.Spec.Domain.Resources
+	undeclared := declared.Requests.CPU == "" && declared.Requests.Memory == "" && declared.Limits.CPU == "" && declared.Limits.Memory == ""
+	cpuText := manifest.Spec.Domain.Resources.Requests.CPU
+	if cpuText == "" {
+		cpuText = manifest.Spec.Domain.Resources.Limits.CPU
+	}
+	if undeclared {
+		cpuText = fmt.Sprint(manifest.Spec.Domain.CPU.Cores)
+	}
+	cpu, err := resource.ParseQuantity(cpuText)
 	if err != nil || cpu.Sign() <= 0 || cpu.Cmp(resource.MustParse("4")) > 0 {
 		return fmt.Errorf("argoworkflow: %s.manifest.spec.domain.resources.requests.cpu must be 1..4", where)
 	}
-	memory, err := resource.ParseQuantity(manifest.Spec.Domain.Resources.Requests.Memory)
+	memoryText := manifest.Spec.Domain.Resources.Requests.Memory
+	if memoryText == "" {
+		memoryText = manifest.Spec.Domain.Resources.Limits.Memory
+	}
+	if undeclared {
+		memoryText = maxVMIMemory
+	}
+	memory, err := resource.ParseQuantity(memoryText)
 	if err != nil || memory.Sign() <= 0 || memory.Cmp(resource.MustParse(maxVMIMemory)) > 0 {
 		return fmt.Errorf("argoworkflow: %s.manifest.spec.domain.resources.requests.memory must be positive and at most %s", where, maxVMIMemory)
 	}
@@ -273,6 +293,21 @@ func admitVMIResource(where string, tmpl *wfv1.ResourceTemplate, prefixes []stri
 	// reserve node capacity the budget never sees.
 	if cpu.Cmp(*resource.NewQuantity(int64(manifest.Spec.Domain.CPU.Cores), resource.DecimalSI)) > 0 {
 		return fmt.Errorf("argoworkflow: %s.manifest.spec.domain.resources.requests.cpu must not exceed spec.domain.cpu.cores", where)
+	}
+	for name, text := range map[string]string{"cpu": manifest.Spec.Domain.Resources.Limits.CPU, "memory": manifest.Spec.Domain.Resources.Limits.Memory} {
+		if text == "" {
+			continue
+		}
+		limit, e := resource.ParseQuantity(text)
+		if e != nil || limit.Sign() <= 0 {
+			return fmt.Errorf("argoworkflow: %s.manifest.spec.domain.resources.limits.%s must be positive", where, name)
+		}
+		if name == "cpu" && (limit.Cmp(cpu) < 0 || limit.CmpInt64(int64(manifest.Spec.Domain.CPU.Cores)) > 0) {
+			return fmt.Errorf("argoworkflow: %s.manifest.spec.domain.resources.limits.cpu must cover the request and not exceed domain cores", where)
+		}
+		if name == "memory" && (limit.Cmp(memory) < 0 || limit.Cmp(resource.MustParse(maxVMIMemory)) > 0) {
+			return fmt.Errorf("argoworkflow: %s.manifest.spec.domain.resources.limits.memory must cover the request within the instance ceiling", where)
+		}
 	}
 	if manifest.Spec.Domain.Firmware != nil {
 		if err := admitKernelBoot(where+".manifest.spec.domain.firmware", manifest.Spec.Domain.Firmware.KernelBoot, prefixes); err != nil {
@@ -427,10 +462,30 @@ func vmiCreateUsage(raw string) (vmiUsage, error) {
 	if err := json.Unmarshal(converted, &manifest); err != nil {
 		return vmiUsage{}, err
 	}
-	memory, err := resource.ParseQuantity(manifest.Spec.Domain.Resources.Requests.Memory)
+	memText := manifest.Spec.Domain.Resources.Requests.Memory
+	if memText == "" {
+		memText = manifest.Spec.Domain.Resources.Limits.Memory
+	}
+	// Missing scheduling declarations earn no host credit. Cell accounting
+	// still reserves the instance memory ceiling, never an invented zero.
+	r := manifest.Spec.Domain.Resources
+	if r.Requests.CPU == "" && r.Requests.Memory == "" && r.Limits.CPU == "" && r.Limits.Memory == "" {
+		memText = maxVMIMemory
+	}
+	memory, err := resource.ParseQuantity(memText)
 	if err != nil {
 		return vmiUsage{}, err
 	}
+	if text := manifest.Spec.Domain.Resources.Limits.Memory; text != "" {
+		limit, e := resource.ParseQuantity(text)
+		if e != nil {
+			return vmiUsage{}, e
+		}
+		if limit.Cmp(memory) > 0 {
+			memory = limit
+		}
+	}
+
 	return vmiUsage{cores: manifest.Spec.Domain.CPU.Cores, memory: memory}, nil
 }
 

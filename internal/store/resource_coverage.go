@@ -8,7 +8,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-// ResourceCoverages reads only numeric submission metadata, in one indexed read
+// ResourceCoverages reads only numeric coverage and fixed admission reason codes, in one indexed read
 // pool query. No workflow bodies, step logs or writer transaction are loaded.
 func (s *Store) ResourceCoverages(ctx context.Context, ids []string) (map[string]model.ResourceCoverage, error) {
 	out := map[string]model.ResourceCoverage{}
@@ -24,7 +24,7 @@ func (s *Store) ResourceCoverages(ctx context.Context, ids []string) (map[string
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.reader().QueryContext(ctx, `SELECT run_id,json_extract(workflow_json,'$.resources.declared'),json_extract(workflow_json,'$.resources.undeclared') FROM run_timings WHERE run_id IN (SELECT value FROM json_each(?))`, string(raw))
+	rows, err := s.reader().QueryContext(ctx, `SELECT run_id,json_extract(workflow_json,'$.resources.declared'),json_extract(workflow_json,'$.resources.undeclared'),COALESCE(json_extract(workflow_json,'$.resources.fallback'),''),COALESCE(json_extract(workflow_json,'$.resources.unknown'),0) FROM run_timings WHERE run_id IN (SELECT value FROM json_each(?))`, string(raw))
 	if err != nil {
 		return nil, err
 	}
@@ -32,11 +32,13 @@ func (s *Store) ResourceCoverages(ctx context.Context, ids []string) (map[string
 	for rows.Next() {
 		var id string
 		var declared, undeclared *int
-		if err := rows.Scan(&id, &declared, &undeclared); err != nil {
+		var fallback string
+		var unknown bool
+		if err := rows.Scan(&id, &declared, &undeclared, &fallback, &unknown); err != nil {
 			return nil, err
 		}
 		if declared != nil && undeclared != nil {
-			c := model.ResourceCoverage{Declared: *declared, Undeclared: *undeclared}
+			c := model.ResourceCoverage{Declared: *declared, Undeclared: *undeclared, Fallback: model.ResourceAdmissionFallback(fallback), Unknown: unknown}
 			if c.Valid() {
 				out[id] = c
 			}

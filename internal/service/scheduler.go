@@ -503,6 +503,17 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		if reader, ok := scheduler.jobs.(interface {
+			AdoptedResourceFallback(model.Run) (model.ResourceAdmissionFallback, error)
+		}); ok {
+			fallback, e := reader.AdoptedResourceFallback(run)
+			if e != nil {
+				return e
+			}
+			scheduler.admission.mu.Lock()
+			reservation.fallback = fallback
+			scheduler.admission.mu.Unlock()
+		}
 		adopted = append(adopted, adoptedRun{run: run, reservation: reservation})
 		return nil
 	}); err != nil {
@@ -877,12 +888,9 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	}
 	jobRequest.VMIDemandReceipt = kubeVirt.Receipt
 	var pods *argoworkflow.PodDemand
-	if !scheduler.admission.resources.Disabled && requirement.Contract == nil && kubeVirt.Demand.VMs == 0 && kubeVirt.Receipt != nil {
-		pods, err = kubeVirt.Receipt.DeclaredPodDemand()
-		if err != nil {
-			_ = logFile.Close()
-			return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
-		}
+	var fallback model.ResourceAdmissionFallback
+	if requirement.Contract == nil {
+		pods, fallback = scheduler.admission.selectDeclaredDemand(kubeVirt.Receipt)
 	}
 	if pods == nil {
 		if err := scheduler.authorizeRunSize(ctx, run, repository, size); err != nil {
@@ -891,10 +899,11 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		}
 	}
 	jobRequest.PodDemand = pods
+	jobRequest.ResourceFallback = fallback
 	scheduler.admissionRequested(ctx, run.ID)
 	headSince, estimate := scheduler.admissionHistory(ctx, run)
 	releaseAdmission, err := reservation.acquireRequest(ctx, admissionRequest{
-		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref, Size: size, Group: group, Pods: pods,
+		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref, Size: size, Group: group, Pods: pods, Fallback: fallback,
 		RefKind: run.RefKind, SHA: run.SHA, HeadSince: headSince, Estimate: estimate, KubeVirt: &kubeVirt, PriorityMaximum: priorityMaximum, PriorityLookupFailed: priorityErr != nil,
 	})
 	if errors.Is(err, errAdmissionAbandoned) {
@@ -912,6 +921,24 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		return err
 	}
 	defer releaseAdmission()
+	// Keep submission and recovery bound to the contract the gate actually held.
+	scheduler.admission.mu.Lock()
+	actualPods := reservation.pods
+	if actualPods != nil {
+		copy := *actualPods
+		actualPods = &copy
+	}
+	fallback = reservation.fallback
+	scheduler.admission.mu.Unlock()
+	if pods != nil && actualPods == nil {
+		if err := scheduler.authorizeRunSize(ctx, run, repository, size); err != nil {
+			_ = logFile.Close()
+			return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
+		}
+	}
+	pods = actualPods
+	jobRequest.PodDemand = pods
+	jobRequest.ResourceFallback = fallback
 	if reservation.wasDelayed() {
 		current, err = scheduler.database().Run(ctx, run.ID)
 		if err != nil {
@@ -1038,7 +1065,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	}
 
 	if _, ok := scheduler.jobs.(JobCreateSettler); ok {
-		if err := scheduler.recordCreateAdmission(run, jobName, size, kubeVirt.Demand, pods); err != nil {
+		if err := scheduler.recordResourceAdmission(run, jobName, size, kubeVirt.Demand, pods, fallback); err != nil {
 			_ = logFile.Close()
 			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("record Workflow admission contract: %w", err))
 		}

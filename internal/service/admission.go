@@ -59,6 +59,7 @@ type weightedAdmission struct {
 }
 
 type admissionReservation struct {
+	fallback model.ResourceAdmissionFallback
 	pods     *argoworkflow.PodDemand
 	gate     *weightedAdmission
 	sequence int64
@@ -132,6 +133,7 @@ var errAdmissionAbandoned = errors.New("service: admission abandoned: run is no 
 // admissionRequest is what a claimed run knows once its immutable checkout has
 // been read: its declared size and, optionally, its repository-scoped group.
 type admissionRequest struct {
+	Fallback             model.ResourceAdmissionFallback
 	Pods                 *argoworkflow.PodDemand
 	RunID                string
 	RepoID               int64
@@ -313,9 +315,14 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 		return nil, err
 	}
 	reservation.pods = nil
+	reservation.fallback = request.Fallback
 	if request.Pods != nil && !gate.resources.Disabled {
-		pods := *request.Pods
-		reservation.pods = &pods
+		if gate.demandFitsBudget(request.Pods) {
+			pods := *request.Pods
+			reservation.pods = &pods
+		} else {
+			reservation.fallback = model.ResourceFallbackBudget
+		}
 	}
 	reservation.priorityMaximum = request.PriorityMaximum
 	reservation.priorityLookupFailed = request.PriorityLookupFailed

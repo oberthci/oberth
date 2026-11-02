@@ -34,6 +34,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/containerimage"
 	"github.com/oberthci/oberth/internal/goproxy"
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
@@ -553,6 +554,7 @@ type Request struct {
 	// ResourceMaximum is selected from the server's durable repository grant,
 	// never from pipeline annotations. Empty is legacy reconstruction only.
 	ResourceMaximum  periapsis.Size
+	ResourceFallback model.ResourceAdmissionFallback
 	PodDemand        *argoworkflow.PodDemand
 	VMIDemandReceipt *argoworkflow.VMIDemandReceipt
 	// omitStepUsage preserves already-running legacy specs during recovery.
@@ -671,8 +673,9 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	}
 	workflow := resolved.Workflow()
 	delete(workflow.Annotations, podDemandAnnotation)
+	delete(workflow.Annotations, resourceFallbackAnnotation)
 	if request.PodDemand != nil {
-		peak, e := argoworkflow.DeclaredPodPeak(workflow)
+		peak, e := argoworkflow.DeclaredHostPeak(workflow, request.effectiveRunTrigger())
 		if e != nil || peak == nil || *peak != *request.PodDemand {
 			return nil, errors.New("argojob: declared resource graph changed after reservation")
 		}
@@ -882,6 +885,9 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 		return nil, err
 	}
 	stampPodDemand(workflow, request.PodDemand)
+	if err := stampResourceFallback(workflow, request.ResourceFallback); err != nil {
+		return nil, err
+	}
 	digest, err := specIdentity(workflow)
 	if err != nil {
 		return nil, err

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
@@ -15,7 +16,16 @@ type ResourceCoverageReader interface {
 // dependency is raw; scoped repo/run wrappers establish access before using it.
 // Chunking bounds SQL and avoids per-run reads on dashboard lists.
 func (s *API) applyResourceMessages(ctx context.Context, runs []model.Run) {
-	if s.resourceCoverages == nil || len(runs) == 0 {
+	if len(runs) == 0 {
+		return
+	}
+	live, _ := s.admission.(interface{ ResourceAdmissionMessage(string) string })
+	for i := range runs {
+		if live != nil {
+			runs[i].ResourceMessage = live.ResourceAdmissionMessage(runs[i].ID)
+		}
+	}
+	if s.resourceCoverages == nil {
 		return
 	}
 	for start := 0; start < len(runs); start += 512 {
@@ -32,6 +42,10 @@ func (s *API) applyResourceMessages(ctx context.Context, runs []model.Run) {
 			message := coverage[runs[i].ID].Message(runs[i].ID)
 			if message == "" {
 				continue
+			}
+			liveMessage := runs[i].ResourceMessage
+			if liveMessage != "" && !strings.Contains(message, liveMessage) {
+				message = strings.TrimSpace(message + " " + liveMessage)
 			}
 			runs[i].ResourceMessage = message
 		}

@@ -10,18 +10,24 @@ import (
 // ResourceCoverage is optional, immutable submission metadata in the existing
 // workflow timing JSON. Old runs have unknown coverage, rather than zero.
 type ResourceCoverage struct {
-	Declared   int `json:"declared"`
-	Undeclared int `json:"undeclared"`
+	Unknown    bool                      `json:"unknown,omitempty"`
+	Fallback   ResourceAdmissionFallback `json:"fallback,omitempty"`
+	Declared   int                       `json:"declared"`
+	Undeclared int                       `json:"undeclared"`
 }
 
 func (c ResourceCoverage) Valid() bool {
-	return c.Declared >= 0 && c.Undeclared >= 0 && c.Declared <= 512 && c.Undeclared <= 512-c.Declared
+	return c.Fallback.Valid() && (!c.Unknown || c.Declared == 0 && c.Undeclared == 0) && c.Declared >= 0 && c.Undeclared >= 0 && c.Declared <= 512 && c.Undeclared <= 512-c.Declared
 }
 func (c ResourceCoverage) Message(runID string) string {
-	if !c.Valid() || c.Undeclared == 0 || !diagnosticRun.MatchString(runID) {
+	if !c.Valid() || !diagnosticRun.MatchString(runID) {
 		return ""
 	}
-	return fmt.Sprintf("%d steps have undeclared CPU/memory requests; inspect oberth run resources --run %s --include-failed.", c.Undeclared, runID)
+	message := ""
+	if c.Undeclared > 0 {
+		message = fmt.Sprintf("%d steps have undeclared CPU/memory requests; inspect oberth run resources --run %s --include-failed.", c.Undeclared, runID)
+	}
+	return strings.TrimSpace(message + " " + c.Fallback.Message())
 }
 
 func resourceBytes(n *int64) string {

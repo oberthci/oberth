@@ -23,6 +23,7 @@ type runVMIArc struct {
 	executed bool
 }
 type runVMIGraph struct {
+	hostCosts    map[string]PodDemand
 	templates    map[string]*wfv1.Template
 	pure         map[string]bool
 	classified   map[string]bool
@@ -404,10 +405,16 @@ func (g *runVMIGraph) cleanupOnly(name string, seen map[string]bool) bool {
 }
 
 func runVMIPeak(wf *wfv1.Workflow, trigger RunTrigger) (VMIDemand, bool) {
+	return runVMIPeakWithCosts(wf, trigger, nil)
+}
+
+// With host costs, Cores is an internal integer weight in millicores. The cell
+// receipt path passes nil and retains its original core-count semantics.
+func runVMIPeakWithCosts(wf *wfv1.Workflow, trigger RunTrigger, costs map[string]PodDemand) (VMIDemand, bool) {
 	if !trigger.Valid() || wf.Spec.TemplateDefaults != nil || wf.Spec.RetryStrategy != nil || len(wf.Spec.Hooks) > 0 {
 		return VMIDemand{}, false
 	}
-	g := runVMIGraph{templates: map[string]*wfv1.Template{}, pure: map[string]bool{}, classified: map[string]bool{}, dependencies: map[string]map[string][]vmiDependency{}, stack: map[string]bool{}, trigger: trigger}
+	g := runVMIGraph{hostCosts: costs, templates: map[string]*wfv1.Template{}, pure: map[string]bool{}, classified: map[string]bool{}, dependencies: map[string]map[string][]vmiDependency{}, stack: map[string]bool{}, trigger: trigger}
 	for i := range wf.Spec.Templates {
 		t := &wf.Spec.Templates[i]
 		if g.templates[t.Name] != nil {
@@ -541,6 +548,13 @@ func (g *runVMIGraph) scenarioPeak(order, success [][]bool, selector, value stri
 	vms, cores, memory := make([]int64, len(creates)), make([]int64, len(creates)), make([]int64, len(creates))
 	for i, a := range creates {
 		vms[i], cores[i], memory[i] = 1, int64(a.demand.Cores), a.demand.MemoryBytes
+		if g.hostCosts != nil {
+			c, ok := g.hostCosts[a.name]
+			if !ok {
+				return VMIDemand{}, false
+			}
+			cores[i], memory[i] = c.CPUMilli, c.MemoryBytes
+		}
 		before[i] = make([]bool, len(creates))
 		for j, b := range creates {
 			if !g.spend(1) {

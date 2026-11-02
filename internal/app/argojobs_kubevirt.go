@@ -115,3 +115,13 @@ func (jobs *ArgoJobs) AdoptedPodDemand(run model.Run) (*argoworkflow.PodDemand, 
 	d := intent.adoption.Pods
 	return &d, nil
 }
+
+func (jobs *ArgoJobs) AdoptedResourceFallback(run model.Run) (model.ResourceAdmissionFallback, error) {
+	jobs.mu.Lock()
+	defer jobs.mu.Unlock()
+	intent, ok := jobs.intents[run.JobName]
+	if !ok || intent.runID != run.ID || intent.adoption == nil {
+		return "", fmt.Errorf("app: no adopted resource binding for run %s", run.ID)
+	}
+	return intent.adoption.Fallback, nil
+}

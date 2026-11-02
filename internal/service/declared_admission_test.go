@@ -42,12 +42,16 @@ func TestDeclaredAdmissionMixedLegacyAndKillSwitch(t *testing.T) {
 	g.mu.Unlock()
 }
 
-func TestDeclaredAdmissionRejectsOversizeBeforeWaitAndRetainsCopiedDemand(t *testing.T) {
+func TestDeclaredAdmissionFallsBackForOversizeAndRetainsCopiedDemand(t *testing.T) {
 	g := newWeightedAdmission(6)
 	oversize := &argoworkflow.PodDemand{CPUMilli: 8000, MemoryBytes: 1 << 30, Pods: 1}
-	if _, err := g.reserve(1).acquireRequest(t.Context(), admissionRequest{Size: periapsis.S, Pods: oversize}); err == nil {
-		t.Fatal("oversize demand waited instead of refusing")
+	legacy := g.reserve(1)
+	releaseLegacy, err := legacy.acquireRequest(t.Context(), admissionRequest{Size: periapsis.S, Pods: oversize})
+	if err != nil || legacy.pods != nil || legacy.weight != 1 {
+		t.Fatalf("oversize fallback: %v", err)
 	}
+	releaseLegacy()
+
 	d := &argoworkflow.PodDemand{CPUMilli: 1000, MemoryBytes: 1 << 30, Pods: 1}
 	r := g.reserve(2)
 	release := acquireRequestWithinBudget(t, r, admissionRequest{Size: periapsis.XL, Pods: d})
