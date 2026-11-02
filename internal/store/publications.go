@@ -501,117 +501,35 @@ RETURNING `+publicationColumns, actor, now, failed.ID))
 	return value, nil
 }
 
-// ReconcileInconsistentPublications heals pending publications whose latest
-// chained audit action is not one of the gate-valid actions (publication.pending
-// or publication.predecessor). This state was produced by RetryFailedPublication
-// in v0.16.18, which chained publication.retry as the latest action without a
-// subsequent canonical publication.pending. The mutation gate then rejects every
-// operation (including readiness), taking the server fully offline.
-//
-// For each inconsistent pending publication, this method chains a canonical
-// publication.pending action through the normal append path so the hash chain
-// stays gap-free. When the actor from the publication row is empty (impossible
-// for a valid publication, but defended), the row is transitioned to failed
-// instead.
-//
-// This method is idempotent: a publication whose latest action is already
-// gate-valid is left untouched. It MUST run before the first gate evaluation
-// and before readiness can report ready.
+// ReconcileInconsistentPublications appends the missing canonical intent for
+// the exact historical retry defect. Call only after startup has verified
+// external continuity with VerifyStartupAuditState; unrelated corruption is
+// refused. Every repair is atomic, chained, and idempotent.
 func (s *Store) ReconcileInconsistentPublications(ctx context.Context) (int, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("begin publication reconciliation: %w", err)
+		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
-
-	rows, err := tx.QueryContext(ctx, `
-SELECT `+publicationColumns+` FROM publications
-WHERE status = 'pending' ORDER BY sequence`)
+	if _, err = s.verifyAuditChain(ctx, tx); err != nil {
+		return 0, err
+	}
+	repairs, err := readStartupPublicationRepairs(ctx, tx)
 	if err != nil {
-		return 0, fmt.Errorf("list pending publications for reconciliation: %w", err)
+		return 0, err
 	}
-	defer func() { _ = rows.Close() }()
-	var pending []model.Publication
-	for rows.Next() {
-		publication, scanErr := scanPublication(rows)
-		if scanErr != nil {
-			return 0, fmt.Errorf("scan pending publication for reconciliation: %w", scanErr)
-		}
-		pending = append(pending, publication)
-	}
-	if err := rows.Err(); err != nil {
-		return 0, fmt.Errorf("list pending publications for reconciliation: %w", err)
-	}
-	if err := rows.Close(); err != nil {
-		return 0, fmt.Errorf("close pending publications for reconciliation: %w", err)
-	}
-
-	now := unixNano(s.now())
-	healed := 0
-	for _, publication := range pending {
-		var actor, action, details string
-		scanErr := tx.QueryRowContext(ctx, `
-SELECT actor, action, details FROM audit_actions
-WHERE resource_type = 'publication' AND resource_id = ?
-ORDER BY id DESC LIMIT 1`, publication.ID).Scan(&actor, &action, &details)
-		if scanErr != nil {
-			return 0, fmt.Errorf("read latest audit action for publication %s: %w", publication.ID, scanErr)
-		}
-
-		// Check if the publication is already gate-valid.
-		if action == "publication.pending" || action == "publication.predecessor" {
-			expected, detailErr := publicationAuditDetails(publication, "")
-			if detailErr != nil {
-				return 0, detailErr
-			}
-			if actor == publication.Actor && details == expected {
-				continue // already consistent
-			}
-		}
-
-		// Inconsistent: chain a canonical publication.pending action to heal it.
-		if strings.TrimSpace(publication.Actor) == "" {
-			// Defensive: a publication with no actor cannot be healed to a
-			// gate-valid state. Transition it to failed instead.
-			if _, execErr := tx.ExecContext(ctx, `
-UPDATE publications SET status = 'failed', error = 'reconciled: no actor for gate-consistent retry', updated_at = ?
-WHERE id = ? AND status = 'pending'`, now, publication.ID); execErr != nil {
-				return 0, fmt.Errorf("fail actorless publication %s: %w", publication.ID, execErr)
-			}
-			// Also put the owning run back to failed/publishing if it was reactivated.
-			if publication.RunID != "" {
-				if _, execErr := tx.ExecContext(ctx, `
-UPDATE runs SET status = 'failed', phase = 'publishing',
-    error = 'reconciled: publication had no actor', finished_at = ?, updated_at = ?
-WHERE id = ? AND status = 'running' AND phase = 'publishing'`, now, now, publication.RunID); execErr != nil {
-					return 0, fmt.Errorf("fail run for actorless publication %s: %w", publication.ID, execErr)
-				}
-			}
-			// Re-read the now-failed publication for the audit action.
-			failedPub, failErr := scanPublication(tx.QueryRowContext(ctx, `
-SELECT `+publicationColumns+` FROM publications WHERE id = ?`, publication.ID))
-			if failErr != nil {
-				return 0, fmt.Errorf("re-read failed publication %s: %w", publication.ID, failErr)
-			}
-			if err := s.appendPublicationAudit(ctx, tx, failedPub, "publication.failed", "reconciled: no actor for gate-consistent retry"); err != nil {
-				return 0, err
-			}
-			healed++
-			continue
-		}
-
-		if err := s.appendPublicationAudit(ctx, tx, publication, "publication.pending", ""); err != nil {
-			return 0, fmt.Errorf("heal publication %s: %w", publication.ID, err)
-		}
-		healed++
-	}
-
-	if healed > 0 {
-		if err := tx.Commit(); err != nil {
-			return 0, fmt.Errorf("commit publication reconciliation: %w", err)
+	for _, pub := range repairs {
+		if err := s.appendPublicationAudit(ctx, tx, pub, "publication.pending", ""); err != nil {
+			return 0, err
 		}
 	}
-	return healed, nil
+	if len(repairs) == 0 {
+		return 0, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return len(repairs), nil
 }
 
 func nullableID(value string) any {

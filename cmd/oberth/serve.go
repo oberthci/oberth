@@ -666,7 +666,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	}
 	witnessRecoveryDeferred := false
 	database, err := openStartupDatabase(ctx, options.database, continuity, reset, adoption, func(inspection *store.Store) error {
-		verifier, managerErr := auditanchor.NewManager(newAuditManagerConfig(inspection))
+		verifier, managerErr := auditanchor.NewManager(startupPublicationConfig(newAuditManagerConfig(inspection)))
 		if managerErr != nil {
 			return managerErr
 		}
@@ -1203,6 +1203,23 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		logger.Printf("go module proxy: %s → %s (%d repo mappings)", options.argoGoProxyListen, options.argoGoProxyURL, len(repoMap))
 	}
 	activateScheduler := func(activationCtx context.Context) error {
+		// During a witness outage the writable handle was opened without
+		// recovery. Verify the original history before repairing it here.
+		if witnessRecoveryDeferred {
+			if err := waitForAuditIntegrity(activationCtx, func(ctx context.Context) error {
+				verifier, err := auditanchor.NewManager(startupPublicationConfig(newAuditManagerConfig(database)))
+				if err != nil {
+					return err
+				}
+				if err = verifier.VerifyStartup(ctx); err != nil {
+					return err
+				}
+				_, err = database.ReconcileInconsistentPublications(ctx)
+				return err
+			}); err != nil {
+				return err
+			}
+		}
 		if err := waitForAuditIntegrity(activationCtx, anchors.AllowMutation); err != nil {
 			return err
 		}
@@ -1396,7 +1413,7 @@ func openStartupDatabase(
 		if err := errors.Join(verifyErr, closeErr); err != nil {
 			return nil, err
 		}
-		return store.OpenCurrent(ctx, path, configuredStoreOptions(ctx))
+		return openReconciledStartupDatabase(ctx, path)
 	case !errors.Is(err, os.ErrNotExist):
 		return nil, fmt.Errorf("inspect startup database: %w", err)
 	}
@@ -1475,7 +1492,7 @@ func adoptExistingGenesisDatabase(
 	if err := errors.Join(verifyErr, closeErr); err != nil {
 		return nil, fmt.Errorf("adopt genesis database that appeared during startup: %w", err)
 	}
-	return store.OpenCurrent(ctx, path, configuredStoreOptions(ctx))
+	return openReconciledStartupDatabase(ctx, path)
 }
 
 // resumeWitnessChainReset covers the crash window between an accepted reset and
