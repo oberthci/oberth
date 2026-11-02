@@ -208,7 +208,8 @@ func (c *Cache) PreparePromotion(ctx context.Context, input, sourceSHA, targetBr
 	if err := c.assertCommit(ctx, path, sourceSHA); err != nil {
 		return MergeCandidate{}, err
 	}
-	tracking := upstreamRefPrefix + "promote/" + targetBranch
+	tracking := "refs/oberth/promotion-targets/" + targetBranch
+	defer func() { _ = c.deleteRef(context.WithoutCancel(ctx), path, tracking, "") }()
 	if err := c.run(ctx, commandSpec{dir: path, args: []string{"fetch", "--no-tags", "upstream", "+refs/heads/" + targetBranch + ":" + tracking}}); err != nil {
 		unborn, unbornErr := c.remoteBranchAbsent(ctx, path, targetBranch)
 		if unbornErr != nil || !unborn {
@@ -290,7 +291,7 @@ func (c *Cache) remoteBranchAbsent(ctx context.Context, path, branch string) (bo
 }
 
 func (c *Cache) pinPromotion(ctx context.Context, cachePath, targetBranch, sha, workspace string) error {
-	ref := upstreamRefPrefix + "promotions/" + targetBranch + "/" + sha
+	ref := promotionRefPrefix + targetBranch + "/" + sha
 	if workspace != "" {
 		if err := c.run(ctx, commandSpec{dir: workspace, args: []string{"push", "origin", sha + ":" + ref}}); err != nil {
 			return fmt.Errorf("persist merged promotion object in cache: %w", err)
@@ -327,7 +328,10 @@ func (c *Cache) PushPromotion(ctx context.Context, input, targetBranch, mergedSH
 	if err := c.run(ctx, commandSpec{dir: path, args: []string{"push", "upstream", mergedSHA + ":" + ref}}); err != nil {
 		return fmt.Errorf("push promotion target %s without force: %w", targetBranch, err)
 	}
-	return c.verifyRemoteRef(ctx, path, "--heads", ref, mergedSHA)
+	if err := c.verifyRemoteRef(ctx, path, "--heads", ref, mergedSHA); err != nil {
+		return err
+	}
+	return c.deleteRef(ctx, path, promotionRefPrefix+targetBranch+"/"+mergedSHA, "")
 }
 
 func (c *Cache) verifyRemoteRef(ctx context.Context, path, selector, ref, expected string) error {
@@ -430,4 +434,65 @@ func (c *Cache) LsRemoteHeads(ctx context.Context, input string) (int, error) {
 		}
 	}
 	return count, nil
+}
+
+const promotionRefPrefix = "refs/oberth/promotions/"
+
+// Move old pins before materialization so private promotion state never becomes
+// part of the upstream snapshot. Keep undelivered objects pinned across restart.
+func (c *Cache) migratePromotionPins(ctx context.Context, path string) error {
+	legacy, err := c.listRefs(ctx, path, upstreamRefPrefix+"promotions/")
+	if err != nil {
+		return err
+	}
+	for ref, sha := range legacy {
+		suffix := strings.TrimPrefix(ref, upstreamRefPrefix+"promotions/")
+		// The last component is the object ID; branch names may contain slashes.
+		split := strings.LastIndex(suffix, "/")
+		if split < 1 || suffix[split+1:] != sha {
+			return fmt.Errorf("invalid legacy promotion pin %s", ref)
+		}
+		target := suffix[:split]
+		if !c.isAncestor(ctx, path, sha, upstreamRefPrefix+"heads/"+target) {
+			if err := c.updateRef(ctx, path, promotionRefPrefix+suffix, sha, ""); err != nil {
+				return err
+			}
+		}
+		if err := c.deleteRef(ctx, path, ref, sha); err != nil {
+			return err
+		}
+	}
+	// The old preparation ref was only scratch state, never an ownership pin.
+	scratch, err := c.listRefs(ctx, path, upstreamRefPrefix+"promote/")
+	if err != nil {
+		return err
+	}
+	for ref, sha := range scratch {
+		if err := c.deleteRef(ctx, path, ref, sha); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Remove only pins proven reachable from the refreshed target. Unpublished
+// candidates retain their object lifetime across restarts and retries.
+func (c *Cache) sweepDeliveredPromotionPins(ctx context.Context, path string) error {
+	pins, err := c.listRefs(ctx, path, promotionRefPrefix)
+	if err != nil {
+		return err
+	}
+	for ref, sha := range pins {
+		suffix := strings.TrimPrefix(ref, promotionRefPrefix)
+		split := strings.LastIndex(suffix, "/")
+		if split < 1 || suffix[split+1:] != sha {
+			return fmt.Errorf("invalid promotion pin %s", ref)
+		}
+		if c.isAncestor(ctx, path, sha, upstreamRefPrefix+"heads/"+suffix[:split]) {
+			if err := c.deleteRef(ctx, path, ref, sha); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

@@ -354,6 +354,9 @@ func (c *Cache) prepareReleaseAdmissionLocked(ctx context.Context, path string, 
 }
 
 func (c *Cache) refresh(ctx context.Context, input, path string) (string, error) {
+	if err := c.migratePromotionPins(ctx, path); err != nil {
+		return "", err
+	}
 	old, err := c.listRefs(ctx, path, upstreamRefPrefix)
 	if err != nil {
 		return "", err
@@ -362,6 +365,9 @@ func (c *Cache) refresh(ctx context.Context, input, path string) (string, error)
 		return "", err
 	}
 	if err := c.fetchTracking(ctx, path); err != nil {
+		return "", err
+	}
+	if err := c.sweepDeliveredPromotionPins(ctx, path); err != nil {
 		return "", err
 	}
 	if err := c.materialize(ctx, path, old); err != nil {
