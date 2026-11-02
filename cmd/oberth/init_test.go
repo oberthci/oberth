@@ -186,6 +186,7 @@ func TestInitAllTypesGenerateSameTemplate(t *testing.T) {
 	var contents []string
 	for _, projType := range allProjectTypes {
 		dir := t.TempDir()
+		writeDetectedProjectFixture(t, dir, projectType(projType))
 		var output bytes.Buffer
 		if err := executeInit(dir, false, &output); err != nil {
 			t.Fatalf("init %s: %v", projType, err)
@@ -209,6 +210,7 @@ func TestInitAllTemplatesUseAllowlistedImages(t *testing.T) {
 		t.Run(string(projType), func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
+			writeDetectedProjectFixture(t, dir, projectType(projType))
 			var output bytes.Buffer
 			if err := executeInit(dir, false, &output); err != nil {
 				t.Fatal(err)
@@ -239,9 +241,7 @@ func TestInitAllTemplatesHaveDigestPinnedImages(t *testing.T) {
 		t.Run(projType, func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
-			if projType == "go" {
-				writeTestFile(t, filepath.Join(dir, "go.mod"), "module test\ngo 1.22\n")
-			}
+			writeDetectedProjectFixture(t, dir, projectType(projType))
 			var output bytes.Buffer
 			if err := executeInit(dir, false, &output); err != nil {
 				t.Fatal(err)
@@ -460,5 +460,16 @@ func writeTestFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func writeDetectedProjectFixture(t *testing.T, root string, kind projectType) {
+	t.Helper()
+	name := map[projectType]string{projectGo: "go.mod", projectNode: "package.json", projectPython: "pyproject.toml"}[kind]
+	if name != "" {
+		writeTestFile(t, filepath.Join(root, name), "fixture")
+	}
+	if detected, _ := detectProject(root); detected != kind {
+		t.Fatalf("fixture detected %s, want %s", detected, kind)
 	}
 }
