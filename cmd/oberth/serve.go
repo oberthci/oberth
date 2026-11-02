@@ -157,7 +157,7 @@ type serveOptions struct {
 
 	// Argo execution engine. Leaving argoNamespace empty leaves the engine
 	// off entirely, which is the default: every repository then runs on the
-	// Kubernetes Job engine exactly as before.
+	// Argo Workflow engine exactly as before.
 	argoNamespace                string
 	argoControllerProfile        string
 	argoExecutorScratchSizeLimit string

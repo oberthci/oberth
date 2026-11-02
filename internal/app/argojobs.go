@@ -26,7 +26,7 @@ import (
 )
 
 // argoControl is the engine seam, narrowed the same way jobControl narrows the
-// Kubernetes Job engine.
+// Argo Workflow engine.
 type argoControl interface {
 	Create(context.Context, argojob.Request) (string, error)
 	Wait(context.Context, string, string, io.Writer) (argojob.Completion, error)
@@ -71,7 +71,7 @@ type DeclarationRecorder interface {
 }
 
 // ArgoJobs adapts the Argo execution engine to the same control-plane
-// contracts the Kubernetes Job engine satisfies, so the scheduler, admission
+// contracts the Argo Workflow engine satisfies, so the scheduler, admission
 // gate, store, and audit chain need no knowledge of which engine ran a run.
 type ArgoJobs struct {
 	resourceBlobs     vmrunner.PolicyGit

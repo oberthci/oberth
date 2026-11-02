@@ -274,3 +274,8 @@ removes readiness before stopping admission and drains HTTP/SSE observers. See
 [restart handover](restart-handover.md) for client retries and upgrade behavior.
 Upstream availability is a bounded diagnostic in `/status`, not a readiness
 dependency, so an upstream outage cannot induce a control-plane restart loop.
+
+Go code names execution objects as Workflows and pipeline groups as stages.
+Existing database columns, log markers and serialized JSON fields retain their
+historical `job_name`, `JobName`, `burn` and `Burn` spellings so stored evidence
+and clients remain compatible. These spellings do not select another engine.

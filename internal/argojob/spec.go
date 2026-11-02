@@ -1,10 +1,5 @@
-// Package argojob submits and supervises repository-authored Argo Workflows
-// as Oberth's second execution engine.
-//
-// It is the Argo counterpart of internal/job: same lifecycle (build, create,
-// wait, cancel, reconcile), same durable name, same result vocabulary, but the
-// executed object is a Workflow CRD interpreted by the Argo controller instead
-// of a single Kubernetes Job running the repository's own Go pipeline module.
+// Package argojob builds, submits, supervises, cancels and reconciles
+// repository-authored Argo Workflows using their durable Workflow names.
 //
 // The submission path never contacts an Argo Server. Workflows are created
 // through the plain Kubernetes API with the generated Argo clientset, which is
