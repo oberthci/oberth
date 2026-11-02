@@ -37,6 +37,7 @@ func (j *requestJournal) all() []string {
 }
 
 type resolverFixture struct {
+	cachedInfo             bool
 	mirror, public, direct *requestJournal
 	proxy, guard, ca       string
 }
@@ -138,6 +139,17 @@ func (f resolverFixture) runWithSum(t *testing.T, sums string, args ...string) (
 			t.Fatal(err)
 		}
 	}
+	if f.cachedInfo {
+		// Go normally asks for .info first. Seed only that public metadata so a
+		// real .mod backend failure is still exercised at the .mod endpoint.
+		info := filepath.Join(dir, "gomod", "cache", "download", "go.example.test", "issue764-fixture", "@v", "v1.0.0.info")
+		if err := os.MkdirAll(filepath.Dir(info), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(info, []byte(`{"Version":"v1.0.0","Time":"2026-09-29T12:00:00Z"}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(30*time.Second))
 	defer cancel()
 	goBinary, err := exec.LookPath("go")
@@ -186,10 +198,12 @@ func TestGoResolverPrivateRouting(t *testing.T) {
 		{"list backend", "list", []string{"list", "-m", "-versions", private}, "/@v/list", false},
 		{"info backend", "info", []string{"mod", "download", private + "@v1.0.0"}, "/@v/v1.0.0.info", false},
 		{"mod backend", "mod", []string{"mod", "download", private + "@v1.0.0"}, "/@v/v1.0.0.mod", false},
+		{"mod backend refuses cold metadata bundle", "mod", []string{"mod", "download", private + "@v1.0.0"}, "/@v/v1.0.0.info", false},
 		{"zip backend", "zip", []string{"mod", "download", private + "@v1.0.0"}, "/@v/v1.0.0.zip", false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newResolverFixture(t, routingFixture(t, tt.fail), http.StatusNotFound)
+			f.cachedInfo = tt.name == "mod backend"
 			output, err := f.run(t, tt.args...)
 			if (err == nil) != tt.ok {
 				t.Fatalf("Go error %v; output %s", err, output)

@@ -125,8 +125,9 @@ func TestParallelGoModDownloads(t *testing.T) {
 		})
 	}
 	workers.Wait()
-	if cache.archives.Load() != modules*clients || cache.peak.Load() < 2 {
-		t.Fatalf("archives=%d want=%d peak_concurrency=%d", cache.archives.Load(), modules*clients, cache.peak.Load())
+	// Every client shares the one immutable version bundle for each module.
+	if cache.archives.Load() != modules || cache.peak.Load() < 2 {
+		t.Fatalf("archives=%d want=%d peak_concurrency=%d", cache.archives.Load(), modules, cache.peak.Load())
 	}
 	t.Logf("clients=%d modules=%d archives=%d peak_concurrency=%d", clients, modules, cache.archives.Load(), cache.peak.Load())
 }
