@@ -481,10 +481,6 @@ func logRecordDigest(previous, record [32]byte) [32]byte {
 	return sha256.Sum256(combined[:])
 }
 
-func (worker *stepLogFollower) consume(reader io.Reader) error {
-	return worker.consumeRecords(reader, false)
-}
-
 // A final snapshot can legitimately end in an unterminated command line.
 // Transport failures must never commit their incomplete frame.
 type logRecordReader struct {

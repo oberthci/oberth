@@ -145,10 +145,6 @@ func (s *resourceSession) finish() {
 	<-s.done
 }
 
-func (c *Controller) sampleResourceUsage(ctx context.Context, wf *wfv1.Workflow, runID string) error {
-	return c.sampleResourceUsageWithState(ctx, wf, runID, nil)
-}
-
 func (c *Controller) sampleResourceUsageWithState(ctx context.Context, wf *wfv1.Workflow, runID string, finished map[string]time.Time) error {
 	if c.verifyOwnership(wf, runID) != nil || wf.UID == "" || len(wf.Status.Nodes) > 2048 {
 		return nil

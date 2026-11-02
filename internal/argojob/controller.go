@@ -604,13 +604,6 @@ func (controller *Controller) verifyOwnership(workflow *wfv1.Workflow, runID str
 	return nil
 }
 
-// publish emits the progress transitions and step logs this observation
-// reveals that previous ones did not. It returns an error when the aggregate
-// run log budget is breached during step log replay, naming the offending step.
-func (controller *Controller) publish(ctx context.Context, workflow *wfv1.Workflow, reporter *progressReporter, destination io.Writer) error {
-	return controller.publishLogs(ctx, workflow, reporter, destination, nil)
-}
-
 func (controller *Controller) publishLogs(ctx context.Context, workflow *wfv1.Workflow, reporter *progressReporter, destination io.Writer, live *stepLogFollowers) error {
 	if workflow == nil {
 		return nil

@@ -180,21 +180,6 @@ func newWeightedAdmission(capacity int) *weightedAdmission {
 	}
 }
 
-// newWeightedAdmissionForJobs converts the operator's configured concurrent-run
-// ceiling into the weight budget this gate is denominated in.
-//
-// The two are different units and conflating them silently caps the whole
-// server at one run: a budget of maxConcurrentJobs weight admits only
-// floor(maxConcurrentJobs / weight) runs, which for the default M size (weight
-// 2) is one run at maxConcurrentJobs=3. Scaling by the default size's weight
-// makes maxConcurrentJobs runs of an undeclared-size pipeline fit exactly, so
-// the configured number is the number an ordinary repository actually gets.
-// A pipeline that declares a heavier size then trades concurrency for
-// per-run resources proportionally, instead of collapsing the server to one.
-func newWeightedAdmissionForJobs(maxConcurrentJobs int) *weightedAdmission {
-	return newWeightedAdmissionForJobsWeights(maxConcurrentJobs, DefaultSizeWeights)
-}
-
 // newWeightedAdmissionForJobsWeights is newWeightedAdmissionForJobs with the
 // operator's size weights: the budget is maxConcurrentJobs M runs.
 func newWeightedAdmissionForJobsWeights(maxConcurrentJobs int, weights SizeWeights) *weightedAdmission {
@@ -211,16 +196,6 @@ func newWeightedAdmissionForJobsWeights(maxConcurrentJobs int, weights SizeWeigh
 // repository's group of the same name.
 func concurrencyGroupKey(repoID int64, group string) string {
 	return strconv.FormatInt(repoID, 10) + "/" + group
-}
-
-// reserve records FIFO claim order before exact-SHA checkout and static
-// parsing can finish out of order.
-func (gate *weightedAdmission) reserve(sequence int64) *admissionReservation {
-	return gate.reserveInOrder(sequence, sequence)
-}
-
-func (gate *weightedAdmission) reserveInOrder(sequence, order int64) *admissionReservation {
-	return gate.reservePriorityRun(sequence, order, model.Run{})
 }
 
 func (gate *weightedAdmission) reservePriorityRun(sequence, order int64, run model.Run) *admissionReservation {
@@ -267,11 +242,6 @@ func admissionBeforeAt(a, b *admissionReservation, now time.Time) bool {
 		return a.order < b.order
 	}
 	return a.sequence < b.sequence
-}
-
-// acquire admits an ungrouped run of the given size.
-func (reservation *admissionReservation) acquire(ctx context.Context, size periapsis.Size) (func(), error) {
-	return reservation.acquireRequest(ctx, admissionRequest{Size: size})
 }
 
 // acquireRequest sizes the reservation and waits until it is granted. A grouped

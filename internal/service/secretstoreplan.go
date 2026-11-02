@@ -251,25 +251,12 @@ func ComputePlanDigest(repos []SecretStorePlanRepo) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// ExportComputeSecretStorePlan is the exported entry point for testing digest
-// agreement between the CLI and the server. Issue #623, finding 5.
-func ExportComputeSecretStorePlan(grants []store.SecretAccessGrant) SecretStorePlanResponse {
-	return computeSecretStorePlan(grants)
-}
-
 // derivePolicyName converts a qualified repo identity (upstream/org/repo)
 // into the conventional Vault policy name, matching the installer's naming.
 func derivePolicyName(repo string) string {
 	// Replace / with - and prepend "oberth-argo-"
 	safe := strings.NewReplacer("/", "-", ".", "-").Replace(repo)
 	return "oberth-argo-" + safe
-}
-
-// deriveStepPolicyName is retained for backward-compatible digest computation
-// only. New code uses identityname.PerStepNameFromQualified directly.
-// Issue #623, finding 3: the plan and the installer must produce the same name.
-func deriveStepPolicyName(repo, step string) string {
-	return identityname.PerStepNameFromQualified(repo, step)
 }
 
 // renderLastMaterialized returns the text line for the last_materialized

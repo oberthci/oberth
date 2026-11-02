@@ -56,16 +56,6 @@ func runCreateAdmissionPath(root, id string) string {
 	return filepath.Join(root, ".create-admissions", id+".json")
 }
 
-// Persist the server-admitted contract before POST. Recovery must never need a
-// Kubernetes read, a moving repository ref or a remote fragment to restore it.
-func (scheduler *Scheduler) recordCreateAdmission(run model.Run, name string, size periapsis.Size, demand argoworkflow.VMIDemand, pods ...*argoworkflow.PodDemand) error {
-	var peak *argoworkflow.PodDemand
-	if len(pods) > 0 {
-		peak = pods[0]
-	}
-	return scheduler.recordResourceAdmission(run, name, size, demand, peak, "")
-}
-
 func (scheduler *Scheduler) recordResourceAdmission(run model.Run, name string, size periapsis.Size, demand argoworkflow.VMIDemand, peak *argoworkflow.PodDemand, fallback model.ResourceAdmissionFallback) error {
 	target := scheduler.createAdmissionPath(run.ID)
 	if !pathWithin(scheduler.workspaceRoot, target) {
@@ -373,13 +363,6 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 	}
 	log.Printf("create_cleanup run=%q settled=true", run.ID)
 	return true, nil
-}
-
-// Kept separate for status/diagnostic callers without exposing API errors.
-func (scheduler *Scheduler) pendingCreateCount() int {
-	scheduler.createMu.Lock()
-	defer scheduler.createMu.Unlock()
-	return len(scheduler.createPending)
 }
 
 // The shared background owner retains capacity during uncertain create/delete

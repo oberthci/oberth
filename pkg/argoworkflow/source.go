@@ -15,7 +15,6 @@ package argoworkflow
 import (
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
@@ -50,17 +49,5 @@ func TriggerFile(trigger periapsis.Trigger) (string, error) {
 		return ReleaseFile, nil
 	default:
 		return "", fmt.Errorf("argoworkflow: unknown trigger %q", trigger)
-	}
-}
-
-// FileTrigger is the inverse of TriggerFile.
-func FileTrigger(file string) (periapsis.Trigger, bool) {
-	switch strings.TrimSpace(file) {
-	case BuildFile:
-		return periapsis.TriggerCI, true
-	case ReleaseFile:
-		return periapsis.TriggerRelease, true
-	default:
-		return "", false
 	}
 }

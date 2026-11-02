@@ -359,12 +359,6 @@ func (scheduler *Scheduler) NotifyPublicationRecovery(publicationID string) {
 	}
 }
 
-// completePendingCancellations finishes durable supersession and owner-restart
-// cleanup only after the idempotent Job deletion succeeds.
-func (scheduler *Scheduler) completePendingCancellations(ctx context.Context) error {
-	return scheduler.completePendingCancellationsWithGate(ctx, scheduler.requireMutation)
-}
-
 func (scheduler *Scheduler) completePendingCancellationsWithGate(ctx context.Context, require mutationRequirement) error {
 	pending, err := scheduler.database().PendingRunCancellations(ctx)
 	if err != nil {
@@ -1569,12 +1563,6 @@ func (scheduler *Scheduler) beginRunPublication(ctx context.Context, repository 
 		RepoID: repository.ID, RunID: run.ID, RefKind: run.RefKind, Ref: run.Ref,
 		PreviousKnown: false, ResultSHA: run.SHA, Actor: run.Actor,
 	})
-}
-
-// recoverPendingPublications resolves the full durable outbox at owner startup.
-// Live retry wakes are ID-specific so they cannot seize another delivery.
-func (scheduler *Scheduler) recoverPendingPublications(ctx context.Context) error {
-	return scheduler.recoverPendingPublicationsWithGate(ctx, scheduler.requireMutation)
 }
 
 func (scheduler *Scheduler) recoverPendingPublicationsWithGate(ctx context.Context, require mutationRequirement) error {

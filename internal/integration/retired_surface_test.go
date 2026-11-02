@@ -13,6 +13,17 @@ import (
 // retaining a second security or execution policy in the production binary.
 func TestRetiredProductionSurface(t *testing.T) {
 	cases := map[string][]string{
+		"internal/service/admission.go":         {"newWeightedAdmissionForJobs", "reserve", "reserveInOrder", "acquire"},
+		"internal/service/api.go":               {"waitRun"},
+		"internal/service/create_settlement.go": {"recordCreateAdmission", "pendingCreateCount"},
+		"internal/service/promotion_retry.go":   {"waitBackground"},
+		"internal/service/scheduler.go":         {"completePendingCancellations", "recoverPendingPublications"},
+		"internal/service/secretstoreplan.go":   {"deriveStepPolicyName", "ExportComputeSecretStorePlan"},
+		"internal/argojob/controller.go":        {"publish"},
+		"internal/argojob/identitystore.go":     {"NewIdentityStore"},
+		"internal/argojob/live_logs.go":         {"consume"},
+		"internal/argojob/nonroot_terminal.go":  {"selectNonrootController"},
+		"internal/argojob/resource_usage.go":    {"sampleResourceUsage"},
 
 		"internal/gitcache/cache.go":         {"TagTime"},
 		"internal/app/upstream_bootstrap.go": {"parseScannedHostKeys"},

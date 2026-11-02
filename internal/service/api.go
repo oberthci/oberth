@@ -2106,14 +2106,6 @@ func selectLogRange(results []model.StepResult, wanted string) (string, string, 
 	return selectedBurn, wanted, nil
 }
 
-func (service *API) waitRun(ctx context.Context, repositoryName, selector, trigger string, requestedSeconds int, actor string) (WaitResponse, error) {
-	prepared, err := service.prepareWaitRun(ctx, repositoryName, selector, trigger, requestedSeconds, actor)
-	if err != nil {
-		return WaitResponse{}, err
-	}
-	return prepared(ctx)
-}
-
 func (service *API) prepareWaitRun(ctx context.Context, repositoryName, selector, trigger string, requestedSeconds int, actor string) (func(context.Context) (WaitResponse, error), error) {
 	if !validSHASelector(selector) {
 		return nil, fmt.Errorf("%w: full or short SHA is required", ErrInvalidInput)

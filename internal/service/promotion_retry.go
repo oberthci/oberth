@@ -228,9 +228,6 @@ func (service *API) RetryMovedPromotion(ctx context.Context, failed model.Promot
 	log.Printf("oberth: automatic retry of moved promotion %s failed: %v", failed.ID, err)
 }
 
-// waitBackground waits for automatic promotion retries started so far.
-func (service *API) waitBackground() { service.background.Wait() }
-
 // promotionRetriedAs names the promotion that retried a terminal, undelivered
 // promotion, or "" when there is none yet.
 func (service *API) promotionRetriedAs(ctx context.Context, promotion model.Promotion) (string, error) {
