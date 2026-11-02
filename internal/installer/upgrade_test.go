@@ -952,7 +952,7 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool, shadow string) {
 				if !verified || name != "kubectl" {
 					t.Fatalf("audit before verification: %s %v", name, args)
 				}
-				want := []string{"exec", "-c", "oberth", "-n", "oberth", "deploy/oberth", "--", "/usr/local/bin/oberth", "audit", "record", "upgrade.completed", "--details", string(auditDetails)}
+				want := []string{"exec", "-c", "oberth", "--context", "remote-fixture", "-n", "oberth", "deploy/oberth", "--", "/usr/local/bin/oberth", "audit", "record", "upgrade.completed", "--details", string(auditDetails)}
 				if !reflect.DeepEqual(args, want) {
 					t.Fatalf("audit args=%v want=%v", args, want)
 				}
@@ -965,12 +965,14 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool, shadow string) {
 			verified = true
 			return []byte("oberth v0.12.35 commit=abc123 date=2026-08-18T00:00:00Z\n"), nil
 		},
-		KubeClient: kubeClient,
-		RestConfig: &rest.Config{Host: "https://127.0.0.1:6443"},
+		KubeClient:  kubeClient,
+		RestConfig:  &rest.Config{Host: "https://api.remote.example:6443"},
+		ContextName: "remote-fixture",
 	}
 
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
 		BinaryVersion: "0.12.35",
+		Yes:           true,
 		Namespace:     "oberth",
 		Timeout:       10 * time.Second,
 	}, deps)
@@ -993,6 +995,9 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool, shadow string) {
 		t.Fatalf("PreviousVersion = %q", result.PreviousVersion)
 	}
 	text := output.String()
+	if !strings.Contains(text, "Ready — Oberth deployment in namespace oberth (context remote-fixture)") || strings.Contains(text, "https://localhost:") {
+		t.Fatalf("upgrade reported an assumed local endpoint: %s", text)
+	}
 	if !strings.Contains(text, "v0.12.34") || !strings.Contains(text, "v0.12.35") {
 		t.Fatalf("output = %q", text)
 	}

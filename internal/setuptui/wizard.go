@@ -459,13 +459,13 @@ func BuildCommandLine(state *WizardState) string {
 		args = append(args, "--upstream-key-file="+shellQuote(c.UpstreamPrivateKeyPath))
 	}
 	if c.Namespace != "" && c.Namespace != installer.DefaultNamespace {
-		args = append(args, "--namespace="+c.Namespace)
+		args = append(args, "--namespace="+shellArg(c.Namespace))
 	}
 	if c.ArgoNamespace != "" {
-		args = append(args, "--argo-namespace="+c.ArgoNamespace)
+		args = append(args, "--argo-namespace="+shellArg(c.ArgoNamespace))
 	}
 	if c.OpenBaoNamespace != "" && c.OpenBaoNamespace != installer.DefaultOpenBaoNamespace {
-		args = append(args, "--openbao-namespace="+c.OpenBaoNamespace)
+		args = append(args, "--openbao-namespace="+shellArg(c.OpenBaoNamespace))
 	}
 	if c.InstallSecretStore {
 		args = append(args, "--install-secretstore")
@@ -477,19 +477,19 @@ func BuildCommandLine(state *WizardState) string {
 		args = append(args, "--install-rekor")
 	}
 	if c.NetworkPolicy != "" {
-		args = append(args, "--network-policy="+c.NetworkPolicy)
+		args = append(args, "--network-policy="+shellArg(c.NetworkPolicy))
 	}
 	if c.ArgoVaultAddress != "" {
 		args = append(args, "--argo-vault-address="+shellQuote(c.ArgoVaultAddress))
 	}
 	if c.ArgoVaultCredentialedRole != "" {
-		args = append(args, "--argo-vault-credentialed-role="+c.ArgoVaultCredentialedRole)
+		args = append(args, "--argo-vault-credentialed-role="+shellArg(c.ArgoVaultCredentialedRole))
 	}
 	for _, dns := range c.TLSExtraDNSNames {
-		args = append(args, "--tls-extra-dns-name="+dns)
+		args = append(args, "--tls-extra-dns-name="+shellArg(dns))
 	}
 	for _, ip := range c.TLSExtraIPs {
-		args = append(args, "--tls-extra-ip="+ip)
+		args = append(args, "--tls-extra-ip="+shellArg(ip))
 	}
 	if c.ClientHost != "" {
 		args = append(args, "--client-host="+shellQuote(c.ClientHost))
@@ -520,7 +520,7 @@ func BuildCommandLine(state *WizardState) string {
 		args = append(args, "--ssh-public-key="+shellQuote(state.SSHKeyPath))
 	}
 	if state.ClientAccess != "" {
-		args = append(args, "--client-access="+state.ClientAccess)
+		args = append(args, "--client-access="+shellArg(state.ClientAccess))
 	}
 	return strings.Join(args, " \\\n  ")
 }
@@ -546,4 +546,16 @@ func installConfig(st *WizardState) installer.Config {
 		cfg.ChartVersion = ""
 	}
 	return cfg
+}
+
+func shellArg(value string) string {
+	if value == "" {
+		return shellQuote(value)
+	}
+	for _, r := range value {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("_./:@%+=,-", r)) {
+			return shellQuote(value)
+		}
+	}
+	return value
 }

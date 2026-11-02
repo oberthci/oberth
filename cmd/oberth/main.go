@@ -56,7 +56,7 @@ func main() {
 	if err := runCLI(ctx, os.Args[1:], os.Stdin, os.Stdout); err != nil {
 		// Ctrl+C during interactive prompts: exit silently with the Unix
 		// convention (128 + SIGINT signal number 2 = 130).
-		if errors.Is(err, installer.ErrInterrupted) || errors.Is(err, app.ErrInterrupted) {
+		if errors.Is(err, installer.ErrInterrupted) || errors.Is(err, app.ErrInterrupted) || (errors.Is(err, context.Canceled) && errors.Is(ctx.Err(), context.Canceled)) {
 			_, _ = fmt.Fprintln(os.Stderr)
 			os.Exit(130)
 		}

@@ -440,9 +440,12 @@ type Deps struct {
 	RestConfig *rest.Config
 	// ClientHost is Config.ClientHost, copied by Run so every step that
 	// advertises an address (client files, SSH config, next steps) uses it.
-	ClientHost      string
-	ContextName     string
-	KindClusterName string
+	ClientSSHPort     string
+	ClientHTTPSPort   string
+	ClientServiceType string
+	ClientHost        string
+	ContextName       string
+	KindClusterName   string
 	// PollInterval overrides the retry cadence of in-cluster status polls
 	// (OpenBao status, in-pod upstream listing) for tests; zero selects the
 	// production default of 2s.
@@ -1717,7 +1720,7 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 		bannerHost = pushBannerHost(cfg.TLSExtraIPs, cfg.TLSExtraDNSNames)
 	}
 	if bannerHost != "" {
-		args = append(args, "--set-string", "pushBannerURL=https://"+URLHost(bannerHost)+":"+httpsNodePort+"/runs")
+		args = append(args, "--set-string", "pushBannerURL=https://"+URLHost(bannerHost)+":"+defaultClientHTTPSPort(cfg.ServiceType)+"/runs")
 	}
 	args = append(args, argoOberthHelmValues(cfg, openbao)...)
 	args = append(args,
@@ -1985,6 +1988,9 @@ func waitForPodRunning(ctx context.Context, deps Deps, namespace, labelSelector 
 }
 
 func waitForPodCondition(ctx context.Context, deps Deps, namespace, labelSelector string, timeout time.Duration, condition func(*corev1.Pod) bool) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	deadline, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -2016,6 +2022,9 @@ func waitForPodCondition(ctx context.Context, deps Deps, namespace, labelSelecto
 	for {
 		select {
 		case <-deadline.Done():
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			return printTimeoutDiagnostics(deps, namespace, labelSelector, timeout)
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
@@ -2120,9 +2129,13 @@ func PrintNextSteps(cfg Config, w io.Writer) error {
 	if ns == "" {
 		ns = DefaultNamespace
 	}
+	endpoint := WithServiceEndpoint(nil, ns, Deps{ClientHost: cfg.ClientHost, ClientServiceType: cfg.ServiceType})
 	installed := "Oberth is installed."
 	if cfg.InstallSecretStore {
 		installed = "Oberth is installed and connected to OpenBao."
+	}
+	if cfg.ServiceType == "ClusterIP" {
+		installed += "\nClusterIP is internal only. For workstation access, keep a port-forward running:\n  kubectl -n " + ns + " port-forward service/oberth 30022:2222 30443:443"
 	}
 	_, err := fmt.Fprintf(w, `
 %[2]s
@@ -2141,7 +2154,7 @@ Next steps:
 
   3. Clone an existing repository through Oberth:
 
-       git clone ssh://git@localhost:30022/<upstream>/<org>/<repo>.git
+       git clone ssh://git@%[3]s:%[4]s/<upstream>/<org>/<repo>.git
 
   4. Generate a pipeline and push:
 
@@ -2150,7 +2163,7 @@ Next steps:
        git add .oberth/ && git commit -m "add oberth pipeline"
        git push origin main
 
-`, ns, installed)
+`, ns, installed, URLHost(endpoint.ClientHost), endpoint.ClientSSHPort)
 	return err
 }
 

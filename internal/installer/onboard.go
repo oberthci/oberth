@@ -41,9 +41,6 @@ var ErrInterrupted = errors.New("interrupted")
 var ErrOnboardingPartial = errors.New("onboarding partial: manual steps remain")
 
 const (
-	// oberthWebUIURL is where the chart's fixed HTTPS NodePort (30443)
-	// serves the web UI on a local cluster.
-	oberthWebUIURL       = "https://localhost:30443/runs"
 	defaultUplinkKeyPath = "~/.ssh/id_ed25519.pub"
 )
 
@@ -52,6 +49,11 @@ const (
 // results are appended to the table via AppendRow so the table grows in
 // place. Credentials are flushed after the table.
 func FinishInstall(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, creds *heldCredentials) error {
+	var endpointErr error
+	deps, endpointErr = configureClientEndpoint(ctx, cfg.Namespace, cfg.ServiceType, deps)
+	if endpointErr != nil {
+		return endpointErr
+	}
 	ns := cfg.Namespace
 	if ns == "" {
 		ns = DefaultNamespace
@@ -1084,6 +1086,10 @@ func onboardUplink(ctx context.Context, cfg Config, deps Deps, tw *tableWriter) 
 // result to the table. Returns ErrInterrupted when the user presses Ctrl+C
 // during the prompt so the caller can exit cleanly.
 func offerSSHConfig(ctx context.Context, deps Deps, pubKeyPath string, tw *tableWriter) error {
+	if deps.ClientServiceType == "ClusterIP" {
+		tw.AppendRow("SSH config", "ClusterIP: use internal networking or port-forward", "⚠ manual", false)
+		return nil
+	}
 	w := deps.Output
 	color := isColor(deps)
 	host := sshHostFromServer(deps)
@@ -1163,7 +1169,8 @@ func offerSSHConfig(ctx context.Context, deps Deps, pubKeyPath string, tw *table
 		return nil
 	}
 
-	block := GenerateSSHConfigBlock(host, sshNodePort, keyPath)
+	sshPort, _ := clientPorts(deps)
+	block := GenerateSSHConfigBlock(host, sshPort, keyPath)
 	// Read existing content (may be empty or nonexistent).
 	existing, _ := os.ReadFile(configPath) //nolint:gosec // G304: path is derived from os.UserHomeDir
 	newContent := append(existing, []byte("\n"+block)...)

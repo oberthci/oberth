@@ -541,7 +541,7 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		details["migrated"] = result.Migrated
 	}
 	recordServerAudit(ctx, deps, cfg.Namespace, "deploy/oberth", "upgrade.completed", details)
-	_, _ = fmt.Fprintf(w, "\nReady — %s\n", oberthWebUIURL)
+	_, _ = fmt.Fprintf(w, "\nReady — Oberth deployment in namespace %s (context %s)\n", cfg.Namespace, deps.ContextName)
 	return result, nil
 }
 
@@ -676,6 +676,9 @@ func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string, compatibility ba
 // waitForUpgradeRollout watches the deployment until all replicas are updated
 // and available with the target image, or the timeout expires.
 func waitForUpgradeRollout(ctx context.Context, deps Deps, cfg UpgradeConfig, targetImageRef string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	deadline, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
 
@@ -689,7 +692,10 @@ func waitForUpgradeRollout(ctx context.Context, deps Deps, cfg UpgradeConfig, ta
 		}
 		select {
 		case <-deadline.Done():
-			return fmt.Errorf("timeout (%s) waiting for Oberth deployment rollout in namespace %s", cfg.Timeout, cfg.Namespace)
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return fmt.Errorf("timeout (%s) waiting for Oberth deployment rollout in namespace %s: %w", cfg.Timeout, cfg.Namespace, deadline.Err())
 		case <-time.After(2 * time.Second):
 		}
 	}
