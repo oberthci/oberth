@@ -171,7 +171,7 @@ func TestRunCancelInPodRecordsTheCancelAndWakesTheDaemon(t *testing.T) {
 	}
 	release := enqueue("v1.2.3", model.RefTag, "tag", "b", true)
 
-	socket := filepath.Join("/tmp", "oberth-admin-"+filepath.Base(t.TempDir())+".sock")
+	socket := privateAdminSocket(t)
 	woken := make(chan struct{}, 4)
 	server := newAdminGateServer(nil, path, func() { woken <- struct{}{} })
 	listener, err := listenAdminSocket(ctx, socket)

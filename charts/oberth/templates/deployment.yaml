@@ -144,6 +144,7 @@ spec:
             - {{ .Values.cache.ciRoot | quote }}
             - {{ .Values.cache.releaseRoot | quote }}
             - /run/oberth-identities
+            - /run/oberth
           securityContext:
             runAsUser: 0
             runAsGroup: 0
@@ -161,6 +162,8 @@ spec:
               cpu: 100m
               memory: 64Mi
           volumeMounts:
+            - name: admin-run
+              mountPath: /run/oberth
             - name: identities
               mountPath: /run/oberth-identities
             - name: ci-cache
@@ -543,6 +546,8 @@ spec:
               mountPath: /etc/oberth/argo-vault-ca
               readOnly: true
             {{- end }}
+            - name: admin-run
+              mountPath: /run/oberth
             - name: tmp
               mountPath: /tmp
             {{- if .Values.argo.releaseTagRoutes }}
@@ -630,6 +635,9 @@ spec:
           configMap:
             name: {{ include "oberth.fullname" . }}-argo-vault-ca
         {{- end }}
+        - name: admin-run
+          emptyDir:
+            sizeLimit: 1Mi
         - name: tmp
           emptyDir:
             sizeLimit: {{ index .Values.resources.limits "ephemeral-storage" | quote }}

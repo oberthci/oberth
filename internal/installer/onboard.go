@@ -860,7 +860,7 @@ func registerUpstream(ctx context.Context, cfg Config, deps Deps, name, baseURL 
 	}
 	addArgs := []string{"upstream", "add", "--yes", "--no-wait", name, baseURL}
 
-	// The admin socket (/tmp/oberth-admin.sock) is bound just before the
+	// The admin socket (/run/oberth/admin.sock) is bound just before the
 	// server prints "ready for bootstrap". A pod that is Running but not
 	// yet bootstrapped rejects exec commands with "connection refused".
 	// The command is idempotent, so retrying is safe. We retry only when

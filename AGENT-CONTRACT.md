@@ -2048,7 +2048,11 @@ trust assumptions and complete invalidation rules.
   `repo add`, `uplink add|list|remove`, `secretstore verify`, and `run
   cancel` / `runs cancel` with `--database`. Every
   mutation passes the live audit mutation gate and appends an audit action;
-  listings are read-only. An in-pod cancel acts as the administrative actor
+  listings are read-only. The private admin socket is `/run/oberth/admin.sock`,
+  in a daemon-owned 0700 directory on a dedicated writable runtime volume.
+  Linux peer credentials must match the daemon UID; mutation-gate requests
+  must name a recognized operation in `X-Oberth-Admin-Operation`.
+  An in-pod cancel acts as the administrative actor
   (admin rules, `force` included) and then asks the daemon, through the
   admin socket's body-less `POST /v1/cancellation-pass`, to run its
   cancellation pass; the wake carries no input and mutates nothing itself,

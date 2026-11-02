@@ -378,7 +378,7 @@ func TestRepoAddFailsClosedWhenAuditGateRejects(t *testing.T) {
 func allowTestMutation(context.Context, string, string) error { return nil }
 
 func TestAdminMutationGateUsesLiveDaemonSocket(t *testing.T) {
-	socket := filepath.Join("/tmp", "oberth-admin-"+filepath.Base(t.TempDir())+".sock")
+	socket := privateAdminSocket(t)
 	if err := validateAdminSocket(socket); err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +398,7 @@ func TestAdminMutationGateUsesLiveDaemonSocket(t *testing.T) {
 	})
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- server.Serve(listener) }()
-	if err := requestAdminMutationGate(context.Background(), socket, "test.mutation", "/data/oberth.sqlite"); err != nil {
+	if err := requestAdminMutationGate(context.Background(), socket, "uplink.register", "/data/oberth.sqlite"); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -406,7 +406,7 @@ func TestAdminMutationGateUsesLiveDaemonSocket(t *testing.T) {
 	case <-time.After(testtimeout.Start(time.Second)):
 		t.Fatal("live daemon mutation gate was not invoked")
 	}
-	if err := requestAdminMutationGate(context.Background(), socket, "test.mutation", "/tmp/rolled-back.sqlite"); err == nil ||
+	if err := requestAdminMutationGate(context.Background(), socket, "uplink.register", "/tmp/rolled-back.sqlite"); err == nil ||
 		!strings.Contains(err.Error(), "not the live daemon database") {
 		t.Fatalf("mismatched database gate error = %v", err)
 	}
