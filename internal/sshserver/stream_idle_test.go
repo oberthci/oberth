@@ -14,6 +14,13 @@ type idleStreamGit struct {
 }
 
 func (g *idleStreamGit) Serve(ctx context.Context, _ string, _ gitcache.Service, _ string, input io.Reader, _, _ io.Writer) error {
+	if transport, ok := input.(interface {
+		BeginTransport()
+		EndTransport()
+	}); ok {
+		transport.BeginTransport()
+		defer transport.EndTransport()
+	}
 	close(g.started)
 	_, err := io.Copy(io.Discard, input)
 	return err
@@ -21,7 +28,7 @@ func (g *idleStreamGit) Serve(ctx context.Context, _ string, _ gitcache.Service,
 func TestGitStreamIdleDeadlineClosesStalledSession(t *testing.T) {
 	signer := newSigner(t)
 	git := &idleStreamGit{started: make(chan struct{})}
-	server, err := New(Config{HostSigner: newSigner(t), Resolver: IdentityResolverFunc(func(string) (string, bool, error) { return "actor", true, nil }), Git: git, OnUpdate: noOpUpdateHandler(), RequestTimeout: 100 * time.Millisecond, SessionTimeout: 10 * time.Second})
+	server, err := New(Config{HostSigner: newSigner(t), Resolver: IdentityResolverFunc(func(string) (string, bool, error) { return "actor", true, nil }), Git: git, OnUpdate: noOpUpdateHandler(), StreamIdleTimeout: 100 * time.Millisecond, SessionTimeout: 10 * time.Second})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1119,6 +1119,14 @@ func (c *Cache) Serve(ctx context.Context, input string, service Service, protoc
 }
 
 func (c *Cache) serveLocked(ctx context.Context, path string, service Service, protocol string, stdin io.Reader, stdout, stderr io.Writer) error {
+	// Repository preparation precedes this point; durable finalization follows it.
+	if transport, ok := stdin.(interface {
+		BeginTransport()
+		EndTransport()
+	}); ok {
+		transport.BeginTransport()
+		defer transport.EndTransport()
+	}
 	extra := map[string]string{}
 	if protocol != "" {
 		extra["GIT_PROTOCOL"] = protocol

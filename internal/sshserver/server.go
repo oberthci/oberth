@@ -96,8 +96,10 @@ type Config struct {
 	Logger           Logger
 	MutationGate     func(context.Context) error
 	HandshakeTimeout time.Duration
-	// RequestTimeout also bounds inactivity on an executing Git stream.
-	RequestTimeout           time.Duration
+	// RequestTimeout bounds the exec request before Git starts.
+	RequestTimeout time.Duration
+	// StreamIdleTimeout bounds client read/write inactivity during Git transport.
+	StreamIdleTimeout        time.Duration
 	SessionTimeout           time.Duration
 	MaxConnections           int
 	MaxSessions              int
@@ -115,6 +117,7 @@ type Server struct {
 	mutationGate             func(context.Context) error
 	handshakeTimeout         time.Duration
 	requestTimeout           time.Duration
+	streamIdleTimeout        time.Duration
 	sessionTimeout           time.Duration
 	connections              chan struct{}
 	sessions                 chan struct{}
@@ -134,7 +137,7 @@ func New(config Config) (*Server, error) {
 	if config.OnUpdate == nil {
 		return nil, errors.New("durable receive update handler is required")
 	}
-	if config.HandshakeTimeout < 0 || config.RequestTimeout < 0 || config.SessionTimeout < 0 ||
+	if config.HandshakeTimeout < 0 || config.RequestTimeout < 0 || config.StreamIdleTimeout < 0 || config.SessionTimeout < 0 ||
 		config.MaxConnections < 0 || config.MaxSessions < 0 || config.MaxSessionsPerConnection < 0 {
 		return nil, errors.New("SSH limits must not be negative")
 	}
@@ -143,6 +146,9 @@ func New(config Config) (*Server, error) {
 	}
 	if config.RequestTimeout == 0 {
 		config.RequestTimeout = defaultRequestTimeout
+	}
+	if config.StreamIdleTimeout == 0 {
+		config.StreamIdleTimeout = 30 * time.Second
 	}
 	if config.SessionTimeout == 0 {
 		config.SessionTimeout = defaultSessionTimeout
@@ -210,6 +216,7 @@ func New(config Config) (*Server, error) {
 		qualifyInScope:           config.QualifyInScope,
 		handshakeTimeout:         config.HandshakeTimeout,
 		requestTimeout:           config.RequestTimeout,
+		streamIdleTimeout:        config.StreamIdleTimeout,
 		sessionTimeout:           config.SessionTimeout,
 		connections:              make(chan struct{}, config.MaxConnections),
 		sessions:                 make(chan struct{}, config.MaxSessions),
@@ -429,7 +436,7 @@ func (s *Server) handleSession(
 			}
 			sessionCtx, cancelSession := context.WithCancel(ctx)
 			defer cancelSession()
-			idle := newIdleChannel(channel, s.requestTimeout, func() {
+			idle := newIdleChannel(channel, s.streamIdleTimeout, func() {
 				cancelSession()
 				if len(abort) > 0 {
 					abort[0]()

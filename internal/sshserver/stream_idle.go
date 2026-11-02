@@ -20,13 +20,21 @@ type idleChannel struct {
 }
 
 func newIdleChannel(channel ssh.Channel, timeout time.Duration, expire func()) *idleChannel {
-	c := &idleChannel{Channel: channel, timeout: timeout, expire: expire}
-	if timeout > 0 {
-		c.deadline = time.Now().Add(timeout)
-		c.timer = time.AfterFunc(timeout, c.check)
-	}
-	return c
+	return &idleChannel{Channel: channel, timeout: timeout, expire: expire}
 }
+
+// BeginTransport arms inactivity detection only while the Git subprocess owns I/O.
+func (c *idleChannel) BeginTransport() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.timeout > 0 && !c.stopped {
+		c.deadline = time.Now().Add(c.timeout)
+		c.timer = time.AfterFunc(c.timeout, c.check)
+	}
+}
+
+// EndTransport leaves finalization and receive replay under the session lifetime.
+func (c *idleChannel) EndTransport() { c.stop() }
 func (c *idleChannel) check() {
 	c.mu.Lock()
 	if c.stopped {
