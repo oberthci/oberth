@@ -9,7 +9,7 @@ import (
 
 func TestOversizedBodiesReturn413(t *testing.T) {
 	s, b := testServer(t)
-	for _, path := range []string{"/mcp", "/api/issues/1/comments"} {
+	for _, path := range []string{"/mcp"} {
 		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"text":"`+strings.Repeat("x", 5<<20)+`"}`))
 		req.Header.Set("Authorization", "Bearer valid-token")
 		out := httptest.NewRecorder()

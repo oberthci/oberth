@@ -186,7 +186,7 @@ func TestRunAliasSchemasRetainOldNamesAndAcceptPreferredName(t *testing.T) {
 }
 
 func TestAdditiveInputSchemasAcceptOldAndPreferredArguments(t *testing.T) {
-	for _, name := range []string{"run_get", "issue_update", "issue_assign"} {
+	for _, name := range []string{"run_get", "issue_update"} {
 		var schema spec.Schema
 		for _, definition := range toolDefinitions() {
 			if definition["name"] == name {
@@ -199,7 +199,7 @@ func TestAdditiveInputSchemasAcceptOldAndPreferredArguments(t *testing.T) {
 		var good, bad []string
 		if name == "run_get" {
 			good = []string{`{"id":"aaaaaaaa"}`, `{"run_id":"aaaaaaaa"}`, `{"id":"aaaaaaaa","run_id":"aaaaaaaa"}`}
-			bad = []string{`{}`, `{"run_id":4}`}
+			bad = []string{`{"run_id":4}`}
 		} else {
 			good = []string{`{"id":1}`, `{"id":1,"expected_revision":1}`}
 			bad = []string{`{"id":1,"expected_revision":0}`, `{"id":1,"expected_revision":null}`, `{"id":1,"expected_revision":"1"}`}

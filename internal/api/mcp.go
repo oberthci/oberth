@@ -507,7 +507,9 @@ func toolDefinitions() []map[string]any {
 					} else {
 						schema["required"] = remaining
 					}
-					schema["anyOf"] = []any{map[string]any{"required": []string{key}}, map[string]any{"required": []string{"run_id"}}}
+					selector := "Either " + key + " or run_id is required; conflicting spellings are refused"
+					properties[key].(map[string]any)["description"] = selector
+					properties["run_id"].(map[string]any)["description"] = selector
 				}
 			}
 		}
