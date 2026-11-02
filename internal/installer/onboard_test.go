@@ -781,7 +781,7 @@ func TestOrgFromBaseURL(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"ssh://git@github.com/valariantech", "valariantech"},
+		{"ssh://git@github.com/exampletools", "exampletools"},
 		{"ssh://git@github.com/acme/", "acme"},
 		{"ssh://git@codeberg.org/skipops", "skipops"},
 		{"ssh://git@gitlab.com/group/subgroup", "subgroup"},

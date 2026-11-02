@@ -425,7 +425,7 @@ func TestComponentTableMinimumWidths(t *testing.T) {
 
 func TestComponentTableAutoSize(t *testing.T) {
 	t.Parallel()
-	longURL := "ssh://git@github.com/valariantech"
+	longURL := "ssh://git@github.com/exampletools"
 	var buf bytes.Buffer
 	rows := []tableRow{
 		{Name: "Upstream", Detail: longURL, Status: "✓ connected"},
@@ -549,7 +549,7 @@ func TestTableWriterSpanRowWidthMatchesTable(t *testing.T) {
 
 func TestTableWriterRegisterContentAutoSize(t *testing.T) {
 	t.Parallel()
-	longURL := "ssh://git@github.com/valariantech"
+	longURL := "ssh://git@github.com/exampletools"
 	var buf bytes.Buffer
 	tw := newTableWriter(&buf, false)
 	tw.RegisterContent("Upstream", longURL, "✓ connected")

@@ -20,29 +20,29 @@ ADC = '/run/oberth-gar/adc.json'
 TOKEN = '/run/oberth-gar/token'
 LIMIT = 65536
 
-# Exact audience allowlist. Admission supplies the matching first-hop account
-# from the administrator-owned WIF role config, independently of the ADC.
-# The repository must never carry installation-specific source identities.
+# Exact audience allowlist. The existing server projects the first-hop account
+# from administrator-owned WIF configuration into a read-only ADC mount.
+# Source account permissions are enforced by Google, not a client-side pairing.
 ROLES = {
     '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-images/providers/tuxbox': 'image-writer',
     '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-reader/providers/tuxbox': 'image-reader',
     '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-charts/providers/tuxbox': 'chart-writer',
 }
-SOURCE_ACCOUNT_ENV = 'OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT'
-SOURCE_ACCOUNT_ERROR = ('missing or invalid ' + SOURCE_ACCOUNT_ENV +
-                        '; configure argo.releaseWIF.roles.<role>.service_account and roll out the server')
+SOURCE_ACCOUNT_ERROR = ('missing or invalid ADC service_account_impersonation_url; '
+                        'configure argo.releaseWIF.roles.<role>.service_account')
 
 
 class SourceAccountError(ValueError):
     """Safe configuration diagnostic, containing no supplied values."""
 
 
-def source_iam():
-    account = os.environ.get(SOURCE_ACCOUNT_ENV, '')
-    if not re.fullmatch(r'[a-z][a-z0-9-]*@[a-z][a-z0-9-]*\.iam\.gserviceaccount\.com', account):
+def source_iam(config):
+    iam = config.get('service_account_impersonation_url')
+    if not isinstance(iam, str) or not re.fullmatch(
+            r'https://iamcredentials\.googleapis\.com/v1/projects/-/serviceAccounts/'
+            r'[a-z][a-z0-9-]*@[a-z][a-z0-9-]*\.iam\.gserviceaccount\.com:generateAccessToken', iam):
         raise SourceAccountError(SOURCE_ACCOUNT_ERROR)
-    return ('https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/' +
-            account + ':generateAccessToken')
+    return iam
 
 
 # Oberth's repositories already grant each matching Oberth principal access,
@@ -117,7 +117,7 @@ def credential(server):
     audience = config.get('audience')
     if audience not in ROLES:
         raise ValueError('unapproved audience')
-    iam = source_iam()
+    iam = source_iam(config)
     expected = {
         'type': 'external_account', 'audience': audience,
         'subject_token_type': 'urn:ietf:params:oauth:token-type:jwt',

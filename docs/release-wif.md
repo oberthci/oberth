@@ -103,14 +103,12 @@ The server projects a 600-second audience-specific JWT at
 `/run/oberth-gar/token`, and non-secret `external_account` configuration at
 `/run/oberth-gar/adc.json` through the Pod's downward API. Only main receives the
 readonly mount, `GOOGLE_APPLICATION_CREDENTIALS` and `OBERTH_RELEASE_WIF=1`.
-If main declares `OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT`, admission replaces
-it with the selected administrator role's `service_account`. Oberth's four
-release leaves request this public value with an empty environment placeholder.
-Other WIF consumers keep their existing environment. Admission overrides
-authored values for these selected variables.
-The repository release helper compares the ADC first-hop URL with that
-independently injected source account; its final Oberth target remains fixed by
-audience. Release wrappers preserve the source variable through `env -i`. Authored helper
+Admission overrides authored values for these variables. Oberth's repository
+release helper reads the first-hop URL from the server-owned, read-only ADC
+and validates its exact Google IAM endpoint/account syntax. Its final Oberth
+target remains fixed by the allowlisted audience. Google enforces first-hop
+role permissions; no new source-account environment variable or server rollout
+is required. Authored helper
 mirrors are resolved before projection, and a server Pod patch removes Argo's
 generated wait-container mirror. The Pod explicitly disables automatic token
 mounting throughout the WIF-enabled workflow, including ordinary unselected

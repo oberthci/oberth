@@ -30,17 +30,16 @@ func TestReleaseWIFConsumerRoleAndCleanEnvironment(t *testing.T) {
 		if leaf.Container == nil {
 			t.Fatalf("%s must be container", leaf.Name)
 		}
-		foundSource := false
+		args := strings.Join(leaf.Container.Args, "\n")
+		if strings.Contains(args, "OBERTH_RELEASE_WIF_SOURCE_") {
+			t.Errorf("%s requires new server-side source-account injection", leaf.Name)
+		}
 		for _, env := range leaf.Container.Env {
-			if env.Name == "OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT" && env.Value == "" && env.ValueFrom == nil {
-				foundSource = true
+			if strings.HasPrefix(env.Name, "OBERTH_RELEASE_WIF_SOURCE_") {
+				t.Errorf("%s declares a source-account injection dependency", leaf.Name)
 			}
 		}
-		if !foundSource {
-			t.Errorf("%s lacks the install-account environment placeholder", leaf.Name)
-		}
-		args := strings.Join(leaf.Container.Args, "\n")
-		for _, env := range []string{`OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT="${OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT:-}"`, `OBERTH_RELEASE_WIF="${OBERTH_RELEASE_WIF:-}"`, `GOOGLE_APPLICATION_CREDENTIALS=/run/oberth-gar/adc.json`} {
+		for _, env := range []string{`OBERTH_RELEASE_WIF="${OBERTH_RELEASE_WIF:-}"`, `GOOGLE_APPLICATION_CREDENTIALS=/run/oberth-gar/adc.json`} {
 			if !strings.Contains(args, env) {
 				t.Errorf("%s loses %s", leaf.Name, env)
 			}

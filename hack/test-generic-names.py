@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('name_check', Path(__file__).with_name('check-generic-names.py'))
 gate = importlib.util.module_from_spec(spec)
@@ -36,10 +37,23 @@ class NameCheckTests(unittest.TestCase):
     def test_mixed_case_substrings_and_binary_contents_fail(self):
         for body in (gate.FORBIDDEN.upper().encode(),
                      b'prefix-' + gate.FORBIDDEN.title().encode() + b'-suffix',
-                     b'\0' + gate.FORBIDDEN.encode()):
+                     b'\0' + gate.FORBIDDEN.encode(),
+                     b'\0' + b'.'.join((gate.FORBIDDEN[:5].encode(), gate.FORBIDDEN[5:].encode()))):
             with self.subTest(body=body):
                 self.write('fixture.txt', body)
                 self.assertEqual(gate.check(self.root), 1)
+
+    def test_separator_spellings_in_contents_fail(self):
+        for separator in ('.', '_', '-', ' ', '..', '._-'):
+            spelling = separator.join((gate.FORBIDDEN[:5], gate.FORBIDDEN[5:])).upper()
+            with self.subTest(separator=separator):
+                self.write('fixture.txt', b'prefix-' + spelling.encode() + b'-suffix')
+                self.assertEqual(gate.check(self.root), 1)
+
+    def test_separator_spelling_in_filename_fails(self):
+        spelling = '_'.join((gate.FORBIDDEN[:5], gate.FORBIDDEN[5:]))
+        self.write(spelling + '.txt', b'generic content')
+        self.assertEqual(gate.check(self.root), 1)
 
     def test_tracked_filename_fails(self):
         self.write(gate.FORBIDDEN.upper() + '.txt', b'generic content')
@@ -49,6 +63,14 @@ class NameCheckTests(unittest.TestCase):
         self.write('fixture.txt', b'generic content')
         self.write('fixture.txt', gate.FORBIDDEN.encode(), tracked=False)
         self.assertEqual(gate.check(self.root), 1)
+
+    def test_seeded_checkout_with_different_owner_is_scoped_safe(self):
+        self.write('fixture.txt', b'generic content')
+        with patch.dict(os.environ, dict(self.env, GIT_TEST_ASSUME_DIFFERENT_OWNER='1'), clear=True):
+            refused = subprocess.run(['git', 'ls-files'], cwd=self.root, capture_output=True)
+            self.assertEqual(refused.returncode, 128)
+            self.assertIn(b'dubious ownership', refused.stderr)
+            self.assertEqual(gate.check(self.root), 0)
 
     def test_missing_git_metadata_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory, self.assertRaises(subprocess.CalledProcessError):

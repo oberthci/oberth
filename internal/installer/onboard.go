@@ -1772,7 +1772,7 @@ func sshHostBlockExists() bool {
 }
 
 // orgFromBaseURL extracts the organization (last path segment) from an
-// upstream base URL like "ssh://git@github.com/valariantech". Returns "" when
+// upstream base URL like "ssh://git@github.com/exampletools". Returns "" when
 // the URL is empty or unparseable.
 //
 // The canonical org derivation is model.Upstream.Org(); this function must

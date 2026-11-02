@@ -77,8 +77,8 @@ Each audience is
 Admission binds the exact repository, release ServiceAccount, template and role;
 branch pipelines receive no WIF projection. The helper validates the fixed ADC
 at `/run/oberth-gar/adc.json` and projected token at `/run/oberth-gar/token`,
-requires `OBERTH_RELEASE_WIF=1`, and checks the first-hop URL against the
-server-injected `OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT`. The final target
+requires `OBERTH_RELEASE_WIF=1`, and validates the ADC's first-hop URL against
+an exact Google IAM endpoint/account pattern. The final target
 is fixed by the validated audience. Both IAM requests use a 600-second lifetime.
 Google enforces the existing matching TokenCreator and repository IAM bindings; the reader stays
 read-only. HTTPS uses verified TLS 1.3, without redirects or proxies. A failed
@@ -96,19 +96,19 @@ file passed to `--argo-release-wif-config` (`roles`):
 
 Use the current deployed source identities, preserving provider values, IAM,
 repository/template grants and role separation. Never replace these source
-accounts with the final Oberth accounts or commit their real values. Roll out
-the server containing the source-account environment injection **before** running
-a release from this revision. This ordering also applies when the three install
-values already exist; the previous server does not inject the new variable.
-All four release leaves declare an empty
-`OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT` environment placeholder. Admission
-replaces any declared value with the selected role's configured `service_account`
-on the approved main container; the release wrappers preserve it through `env -i`.
-Other WIF consumers receive this public variable only if they declare it.
-Missing/invalid configuration refuses authentication before network exchange
-with a diagnostic naming that variable and the install key. There is no source
-identity default. Confirm intended exchanges and cross-role refusal in the next
-coordinator-authorized live release; offline tests cannot prove IAM bindings.
+accounts with the final Oberth accounts or commit their real values. The helper
+reads the first-hop URL directly from the existing server-owned, read-only ADC
+mount. This release works with today's server: no new environment variable,
+installation key or preliminary server rollout is required.
+
+Missing or malformed ADC source URLs refuse before network exchange with a
+safe diagnostic naming `service_account_impersonation_url` and the install key.
+The helper accepts any source account matching the strict endpoint pattern;
+Google's existing WIF and IAM bindings enforce first-hop role permissions.
+The final Oberth target remains fixed by the validated audience, and ADC cannot
+override it. Confirm intended exchanges and provider-enforced cross-role
+refusal in the next coordinator-authorized live release; offline tests cannot
+prove IAM bindings.
 
 Only the final token reaches the private Docker credential-helper pipe.
 Docker/Helm configuration contains the public helper mapping, not an access

@@ -281,14 +281,6 @@ func injectReleaseWIF(wf *wfv1.Workflow, leaves []*wfv1.Template, config *Releas
 			},
 		}}})
 		main := templateMainContainer(t)
-		// The repository helper requests this public install value with a named
-		// environment placeholder. Preserve other WIF consumers' environments.
-		for _, env := range main.Env {
-			if env.Name == "OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT" {
-				main.Env = overrideEnvironment(main.Env, []corev1.EnvVar{{Name: env.Name, Value: role.ServiceAccount}})
-				break
-			}
-		}
 		main.VolumeMounts = append(main.VolumeMounts, corev1.VolumeMount{Name: releaseWIFVolume, MountPath: releaseWIFPath, ReadOnly: true})
 		main.Env = overrideEnvironment(main.Env, []corev1.EnvVar{
 			{Name: "GOOGLE_APPLICATION_CREDENTIALS", Value: releaseWIFPath + "/adc.json"},

@@ -2822,9 +2822,11 @@ serves all three WIF roles via an exact audience allowlist and
 administrator-configured first-hop accounts. The helper derives the active
 role from the `audience` field of the Oberth-projected ADC at
 `/run/oberth-gar/adc.json` and requires `service_account_impersonation_url`
-to match `OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT`, injected by admission from
-the selected role in installation configuration. Unknown audiences, missing or
-invalid source accounts and mismatched ADC URLs refuse before network exchange.
+to match the exact Google IAM endpoint and service-account syntax. The first-hop
+URL comes directly from the existing server-owned, read-only ADC mount.
+Unknown audiences and missing or malformed source URLs refuse before exchange.
+Google's WIF and IAM bindings enforce first-hop role permissions; the helper
+does not carry an installation-specific audience-to-source-account allowlist.
 
 ### Role allowlist
 
@@ -2841,8 +2843,8 @@ image-writer to `oberth-release-publisher@skipopsmain.iam.gserviceaccount.com`,
 image-reader to `oberth-release-reader@skipopsmain.iam.gserviceaccount.com`, and
 chart-writer to `oberth-chart-publisher@skipopsmain.iam.gserviceaccount.com`.
 The validated audience fixes the final hop. ADC names the configured
-first-hop principal and must agree with the server-injected environment; it
-cannot override the Oberth target. Both IAM requests
+first-hop principal; its URL must pass strict syntax validation and cannot
+override the Oberth target. Both IAM requests
 use 600-second tokens over the same verified TLS/no-proxy/no-redirect transport.
 Only the final Oberth token reaches the credential pipe; intermediate tokens
 stay in memory, and second-hop refusal never falls back to the first token or
@@ -2851,9 +2853,8 @@ without widening either. The helper uses the configured source exchange for
 Oberth's repositories.
 Real source account emails live only in tuxbox installation configuration.
 Before the next release, configure/retain `argo.releaseWIF.roles.<role>.service_account`
-for all three roles and roll out the updated server before running this
-revision's release workflow. The four release leaves preserve the injected
-source account through their clean environment wrappers.
+for all three roles. The current server already supplies the required ADC;
+this revision requires no new environment variable or preliminary server rollout.
 See [publication prerequisites](.oberth/bootstrap.md#publication-prerequisites)
 for the exact coordinator handoff and placeholders.
 

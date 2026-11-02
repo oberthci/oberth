@@ -213,7 +213,7 @@ func validateForgeOrg(org string) error {
 
 // suggestedIdentity builds name@host from $USER and the hostname, each
 // reduced to characters an identity can carry, so the default always passes
-// validation (#006: USER=dr@valarian.com used to produce two @ signs).
+// validation (#006: USER=dev@example.org used to produce two @ signs).
 func suggestedIdentity() string {
 	clean := func(s string) string {
 		var b strings.Builder

@@ -427,7 +427,7 @@ func TestCtrlCConfirmedAbortZerosSecrets(t *testing.T) {
 // the value changes (#006).
 func TestIdentityEditing(t *testing.T) {
 	newTestHost(t)
-	t.Setenv("USER", "dr@valarian.com")
+	t.Setenv("USER", "dev@example.org")
 	if err := validateUplinkIdentityTUI(suggestedIdentity()); err != nil {
 		t.Fatalf("the suggested identity %q must be valid: %v", suggestedIdentity(), err)
 	}

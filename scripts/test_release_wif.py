@@ -44,11 +44,9 @@ CONFIG = config_for_audience(_DEFAULT_AUDIENCE)
 
 class ExchangeTests(unittest.TestCase):
     def setUp(self):
-        self.environment = patch.dict(os.environ, {
-            'OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT': _SOURCE_ACCOUNTS[_DEFAULT_AUDIENCE],
-        }, clear=True)
-        self.environment.start()
-        self.addCleanup(self.environment.stop)
+        environment = patch.dict(os.environ, {}, clear=True)
+        environment.start()
+        self.addCleanup(environment.stop)
 
     def exchange(self, config=None, replies=None):
         config = CONFIG if config is None else config
@@ -56,38 +54,50 @@ class ExchangeTests(unittest.TestCase):
                               {'accessToken': 'inert-source'}, {'accessToken': 'inert-publisher'}]
         def read(path):
             return json.dumps(config).encode() if path == wif.ADC else b'inert.jwt.signature'
-        with patch.dict(os.environ, {'OBERTH_RELEASE_WIF': '1', 'GOOGLE_APPLICATION_CREDENTIALS': wif.ADC,
-                                     'OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT': _SOURCE_ACCOUNTS[config['audience']]}), \
+        with patch.dict(os.environ, {'OBERTH_RELEASE_WIF': '1', 'GOOGLE_APPLICATION_CREDENTIALS': wif.ADC}, clear=True), \
                 patch.object(wif, 'read', side_effect=read), patch.object(wif, 'post', side_effect=replies) as post:
             result = wif.credential(wif.REGISTRY)
         return result, post.call_args_list
 
-    def test_install_config_source_is_required_before_network(self):
-        for value in ('', 'bad/account@example.invalid', 'reader@example.invalid\n'):
+    def test_adc_source_url_is_required_and_strict_before_network(self):
+        for value in (None, '', 7, 'https://attacker.invalid/token',
+                      _DEFAULT_IAM + '?delegates=other', _DEFAULT_IAM + '\n',
+                      _DEFAULT_IAM.replace('serviceAccounts/', 'serviceAccounts/../'),
+                      _DEFAULT_IAM.replace('https://', 'http://'),
+                      _DEFAULT_IAM.replace('googleapis.com/', 'googleapis.com.evil.invalid/'),
+                      _DEFAULT_IAM.replace('iamcredentials.googleapis.com', 'user@iamcredentials.googleapis.com'),
+                      _DEFAULT_IAM.replace('@example-project', '%40example-project')):
+            config = copy.deepcopy(CONFIG)
+            if value is None:
+                del config['service_account_impersonation_url']
+            else:
+                config['service_account_impersonation_url'] = value
             with self.subTest(value=value), patch.dict(os.environ, {
-                    'OBERTH_RELEASE_WIF': '1', 'GOOGLE_APPLICATION_CREDENTIALS': wif.ADC,
-                    'OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT': value}), \
-                    patch.object(wif, 'read', return_value=json.dumps(CONFIG).encode()), \
+                    'OBERTH_RELEASE_WIF': '1', 'GOOGLE_APPLICATION_CREDENTIALS': wif.ADC}, clear=True), \
+                    patch.object(wif, 'read', return_value=json.dumps(config).encode()), \
                     patch.object(wif, 'post') as post:
-                with self.assertRaisesRegex(ValueError, 'OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT'):
+                with self.assertRaisesRegex(ValueError, 'ADC service_account_impersonation_url'):
                     wif.credential(wif.REGISTRY)
                 post.assert_not_called()
 
-    def test_missing_source_config_has_clear_safe_protocol_diagnostic(self):
+    def test_missing_adc_source_has_clear_safe_protocol_diagnostic(self):
         output, error = io.StringIO(), io.StringIO()
+        config = copy.deepcopy(CONFIG)
+        del config['service_account_impersonation_url']
         with patch.dict(os.environ, {
                 'OBERTH_RELEASE_WIF': '1', 'GOOGLE_APPLICATION_CREDENTIALS': wif.ADC}, clear=True), \
                 patch.object(sys, 'argv', ['helper', 'get']), \
                 patch.object(sys, 'stdin', io.StringIO(wif.REGISTRY + '\n')), \
                 patch.object(sys, 'stdout', output), patch.object(sys, 'stderr', error), \
                 patch.object(wif.os, 'fstat') as fstat, \
-                patch.object(wif, 'read', return_value=json.dumps(CONFIG).encode()), \
+                patch.object(wif, 'read', return_value=json.dumps(config).encode()), \
                 patch.object(wif, 'post') as post:
             fstat.return_value.st_mode = stat.S_IFIFO | 0o600
             self.assertEqual(wif.main(), 1)
             post.assert_not_called()
         self.assertEqual(output.getvalue(), '')
         self.assertEqual(error.getvalue(), wif.SOURCE_ACCOUNT_ERROR + '\n')
+        self.assertIn('ADC service_account_impersonation_url', error.getvalue())
         self.assertIn('argo.releaseWIF.roles.<role>.service_account', error.getvalue())
 
     def test_exact_exchange_and_impersonation(self):
@@ -128,33 +138,23 @@ class ExchangeTests(unittest.TestCase):
                 self.assertEqual(json.loads(calls[2].args[1])['lifetime'], '600s')
                 self.assertEqual(result['Secret'], 'inert-publisher')
 
-    def test_cross_paired_audience_and_sa_rejected(self):
-        """Publisher audience with reader SA URL must be refused before network."""
-        reader_iam = _SOURCE_IAMS[_AUDIENCES[1]]
-        cfg = copy.deepcopy(CONFIG)
-        cfg['service_account_impersonation_url'] = reader_iam
-        with patch.dict(os.environ, {'OBERTH_RELEASE_WIF': '1', 'GOOGLE_APPLICATION_CREDENTIALS': wif.ADC}), \
-                patch.object(wif, 'read', return_value=json.dumps(cfg).encode()), \
-                patch.object(wif, 'post') as post:
-            with self.assertRaises(ValueError):
-                wif.credential(wif.REGISTRY)
-        post.assert_not_called()
-
-    def test_all_cross_role_pairs_and_second_hop_overrides_refused(self):
+    def test_adc_sources_keep_audience_selected_final_hop(self):
+        # Source accounts are install-owned ADC data; Google enforces first-hop
+        # role permissions. The helper must keep its final target audience-bound.
+        source_iams = [*_SOURCE_IAMS.values(), _DEFAULT_IAM.replace(
+            'image-writer@example-project', 'custom-publisher@another-project')]
         for audience in _AUDIENCES:
-            for other in _AUDIENCES:
-                if audience == other:
-                    continue
-                cfg = config_for_audience(audience)
-                cfg['service_account_impersonation_url'] = _SOURCE_IAMS[other]
-                with self.subTest(audience=audience, other=other), patch.dict(os.environ, {
-                        'OBERTH_RELEASE_WIF': '1', 'GOOGLE_APPLICATION_CREDENTIALS': wif.ADC,
-                        'OBERTH_RELEASE_WIF_SOURCE_SERVICE_ACCOUNT': _SOURCE_ACCOUNTS[audience]}), \
-                        patch.object(wif, 'read', return_value=json.dumps(cfg).encode()), \
-                        patch.object(wif, 'post') as post:
-                    with self.assertRaisesRegex(ValueError, 'unapproved ADC configuration'):
-                        wif.credential(wif.REGISTRY)
-                    post.assert_not_called()
+            for source in source_iams:
+                config = config_for_audience(audience)
+                config['service_account_impersonation_url'] = source
+                with self.subTest(audience=audience, source=source):
+                    result, calls = self.exchange(config=config)
+                    self.assertEqual(result['Secret'], 'inert-publisher')
+                    self.assertEqual(len(calls), 3)
+                    self.assertEqual(calls[1].args[0], source)
+                    self.assertEqual(calls[2].args[0], wif.OBERTH_ROLES[audience])
+
+    def test_second_hop_overrides_refused(self):
         for key in ('delegates', 'oberth_impersonation_url'):
             cfg = copy.deepcopy(CONFIG)
             cfg[key] = wif.OBERTH_ROLES[_AUDIENCES[1]]
@@ -223,7 +223,7 @@ class ExchangeTests(unittest.TestCase):
     def test_unapproved_config_denied_before_network(self):
         for key, value in [('audience', '//iam.googleapis.com/other-pool'),
                            ('token_url', 'https://attacker.invalid'),
-                           ('service_account_impersonation_url', _DEFAULT_IAM.replace('publisher', 'reader')),
+                           ('service_account_impersonation_url', _DEFAULT_IAM.replace('https://', 'http://')),
                            ('credential_source', {'file': '/foreign/token'}),
                            ('extra', 'unexpected')]:
             config = copy.deepcopy(CONFIG); config[key] = value
