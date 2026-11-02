@@ -60,7 +60,7 @@ type Completion struct {
 	Infrastructure      bool
 	Phase               string
 	Reason              string
-	FailedStage         string `json:"FailedBurn"`
+	FailedStage         string `json:"FailedStage"`
 	FailedStep          string
 	Steps               []StepResult
 }
@@ -276,7 +276,7 @@ func PodName(workflow *wfv1.Workflow, node wfv1.NodeStatus) string {
 }
 
 // burnAndStep names one observed node, deferring to the same rule the static
-// enumeration applies to the document (argoworkflow.BurnAndStep). The only
+// enumeration applies to the document (argoworkflow.StageAndStep). The only
 // work done here is turning Argo's node tree into that rule's two inputs: the
 // nearest enclosing non-root boundary, and the node itself.
 //
@@ -586,7 +586,7 @@ func optionalTime(value metav1.Time) *time.Time {
 // the retryStrategy wraps the pod itself or a whole DAG or steps template, so
 // only the latest attempt of every Retry node is a verdict. Retries exhausted
 // leave that latest attempt failed, which keeps the run red and attributes
-// FailedBurn/FailedStep to it.
+// FailedStage/FailedStep to it.
 // A terminally failed configured step — regardless of whether the DAG's depends
 // expressions handle it — makes the run red. Enhanced-depends cleanup or
 // verification tasks may still run after a failure but must not convert the
@@ -667,10 +667,11 @@ func completionFor(workflow *wfv1.Workflow) Completion {
 		if !terminal(step.Status) {
 			continue
 		}
-		// Any terminally failed configured step is attributed as the
-		// run-level failure. The DAG's depends expressions control Argo's
-		// execution flow but do not control Oberth's success gate.
-		completion.FailedStage, completion.FailedStep = step.Stage, step.Step
+		// Preserve the first failed step in deterministic execution order.
+		// Later cleanup failures remain evidence without replacing the cause.
+		if completion.FailedStep == "" {
+			completion.FailedStage, completion.FailedStep = step.Stage, step.Step
+		}
 		completion.Succeeded = false
 	}
 

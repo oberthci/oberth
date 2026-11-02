@@ -67,7 +67,9 @@ func (completion *Completion) classifyInfrastructure() {
 		// A separate test failure must still open a CI-red issue and must not
 		// become eligible for infrastructure retry.
 		if step.AttemptAmbiguous || step.InfrastructureReason == "" {
-			failedStage, failedStep = step.Stage, step.Step
+			if failedStep == "" {
+				failedStage, failedStep = step.Stage, step.Step
+			}
 			continue
 		}
 		if reason == "" {

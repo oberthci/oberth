@@ -439,7 +439,7 @@ func TestRetryAllFailedSetsFailedStep(t *testing.T) {
 		t.Errorf("FailedStep = %q, want 'publish'", completion.FailedStep)
 	}
 	if completion.FailedStage != "release" {
-		t.Errorf("FailedBurn = %q, want 'release'", completion.FailedStage)
+		t.Errorf("FailedStage = %q, want 'release'", completion.FailedStage)
 	}
 	if completion.Succeeded {
 		t.Error("a failed Workflow reported success")
@@ -511,7 +511,7 @@ func TestCompletionNamesTheFailedStageAndStep(t *testing.T) {
 // regression test: Argo's enhanced-depends semantics mark the Workflow
 // Succeeded when the only failed task's failure is handled by every depends
 // expression that references it (the homebrew pattern). The completion must
-// stay Succeeded with no FailedBurn/FailedStep — so the engine's
+// stay Succeeded with no FailedStage/FailedStep — so the engine's
 // successful-Workflow-with-failed-step guard no longer flips the run — while
 // the step row itself keeps its failed status for the step list.
 // TestCompletionSucceededWorkflowWithFailedStepIsRed proves that a Succeeded
@@ -568,7 +568,7 @@ func TestCompletionSucceededWorkflowWithFailedStepIsRed(t *testing.T) {
 		t.Fatal("a Succeeded Workflow with a failed configured step must NOT stay Succeeded")
 	}
 	if completion.FailedStage != "homebrew" || completion.FailedStep != "homebrew" {
-		t.Errorf("FailedBurn/FailedStep = %q/%q, want homebrew/homebrew",
+		t.Errorf("FailedStage/FailedStep = %q/%q, want homebrew/homebrew",
 			completion.FailedStage, completion.FailedStep)
 	}
 
@@ -639,7 +639,7 @@ func TestCompletionFailedWorkflowIsNeverOverridden(t *testing.T) {
 		t.Fatal("a Failed Workflow must never be overridden to Succeeded by step-row inspection")
 	}
 	if completion.FailedStage != "homebrew" || completion.FailedStep != "homebrew" {
-		t.Errorf("FailedBurn/FailedStep = %q/%q, want homebrew/homebrew",
+		t.Errorf("FailedStage/FailedStep = %q/%q, want homebrew/homebrew",
 			completion.FailedStage, completion.FailedStep)
 	}
 	if completion.Reason == "" {
@@ -648,7 +648,7 @@ func TestCompletionFailedWorkflowIsNeverOverridden(t *testing.T) {
 }
 
 // TestCompletionPreservesBlockingFailure proves that when multiple steps fail,
-// the last failed step is attributed (chronological order).
+// the first failed step is attributed (deterministic execution order).
 func TestCompletionPreservesBlockingFailure(t *testing.T) {
 	started := metav1.NewTime(time.Unix(1000, 0).UTC())
 	finished := metav1.NewTime(time.Unix(1010, 0).UTC())
@@ -687,10 +687,9 @@ func TestCompletionPreservesBlockingFailure(t *testing.T) {
 	if completion.Succeeded {
 		t.Fatal("a Failed Workflow with a blocking failure must remain failed")
 	}
-	// Both steps failed; the last in iteration order (sorted by start time,
-	// then burn name) is attributed. "build" < "homebrew" lexically.
-	if completion.FailedStage != "homebrew" {
-		t.Errorf("FailedBurn = %q, want 'homebrew' (last failed step in iteration order)", completion.FailedStage)
+	// Equal start times use the stable burn/step order: build precedes homebrew.
+	if completion.FailedStage != "build" || completion.FailedStep != "build" {
+		t.Errorf("FailedStage/FailedStep = %q/%q, want build/build", completion.FailedStage, completion.FailedStep)
 	}
 }
 
@@ -729,7 +728,7 @@ func TestCompletionNoOverrideWithoutNonBlockingFailure(t *testing.T) {
 		t.Fatal("a Failed Workflow with only blocking failures must not be overridden")
 	}
 	if completion.FailedStage != "build" || completion.FailedStep != "build" {
-		t.Errorf("FailedBurn/FailedStep = %q/%q, want build/build", completion.FailedStage, completion.FailedStep)
+		t.Errorf("FailedStage/FailedStep = %q/%q, want build/build", completion.FailedStage, completion.FailedStep)
 	}
 }
 
@@ -776,7 +775,7 @@ func TestCompletionRetriedStepFinalPassIsGreen(t *testing.T) {
 		t.Fatal("a retried step whose final attempt succeeded must keep the run green")
 	}
 	if completion.FailedStage != "" || completion.FailedStep != "" {
-		t.Errorf("FailedBurn/FailedStep = %q/%q, want empty", completion.FailedStage, completion.FailedStep)
+		t.Errorf("FailedStage/FailedStep = %q/%q, want empty", completion.FailedStage, completion.FailedStep)
 	}
 }
 
