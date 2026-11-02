@@ -472,10 +472,10 @@ func TestRunInitRejectsPositionalArguments(t *testing.T) {
 	}
 }
 
-func TestRunInitRejectsUnknownType(t *testing.T) {
+func TestRunInitRejectsRemovedTypeFlag(t *testing.T) {
 	t.Parallel()
 	err := runInit(context.Background(), []string{"--type", "rust"}, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "unknown project type") {
+	if !errors.Is(err, errUsage) || !strings.Contains(err.Error(), "flag provided but not defined: -type") {
 		t.Fatalf("runInit unknown type error = %v", err)
 	}
 }
