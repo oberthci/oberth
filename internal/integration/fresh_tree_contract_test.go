@@ -22,7 +22,17 @@ func TestFreshTreeHasArgoBuildYAML(t *testing.T) {
 }
 
 func TestFreshTreeOmitsObsoleteProductAndBranchDoctrine(t *testing.T) {
-	repoRoot := filepath.Join("..", "..")
+	matches, err := obsoleteDoctrine(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range matches {
+		t.Errorf("obsolete product or branch doctrine remains in %s", path)
+	}
+}
+
+func obsoleteDoctrine(repoRoot string) ([]string, error) {
+	var matches []string
 	forbidden := [][]byte{
 		[]byte(strings.Join([]string{"oberth", "lite"}, "-")),
 		[]byte(strings.Join([]string{"protected", "branch"}, " ")),
@@ -35,7 +45,7 @@ func TestFreshTreeOmitsObsoleteProductAndBranchDoctrine(t *testing.T) {
 		}
 		if entry.IsDir() {
 			switch entry.Name() {
-			case ".git", ".worktrees", "artifacts", "bin", "dist":
+			case ".git", ".worktrees", "artifacts", "bin", "dist", "node_modules":
 				return filepath.SkipDir
 			}
 			return nil
@@ -53,13 +63,34 @@ func TestFreshTreeOmitsObsoleteProductAndBranchDoctrine(t *testing.T) {
 		}
 		for _, phrase := range forbidden {
 			if bytes.Contains(bytes.ToLower(body), phrase) {
-				t.Errorf("obsolete product or branch doctrine remains in %s", path)
+				matches = append(matches, path)
 			}
 		}
 		return nil
 	})
-	if err != nil {
+	return matches, err
+}
+
+func TestFreshTreeIgnoresNodeDependencies(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "node_modules", "vendor")
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
+	}
+	phrase := strings.Join([]string{"protected", "branch"}, " ")
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte(phrase), 0600); err != nil {
+		t.Fatal(err)
+	}
+	matches, err := obsoleteDoctrine(root)
+	if err != nil || len(matches) != 0 {
+		t.Fatalf("walk scanned dependencies: %v %v", matches, err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte(phrase), 0600); err != nil {
+		t.Fatal(err)
+	}
+	matches, err = obsoleteDoctrine(root)
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("walk missed repository content: %v %v", matches, err)
 	}
 }
 
