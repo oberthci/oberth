@@ -27,6 +27,10 @@ var grantRepoPattern = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 // (issue #414).
 var grantSecretPattern = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 
+// Named steps use the same safe alphabet as grant paths; the standalone
+// wildcard retains its existing meaning of all steps.
+var grantStepPattern = regexp.MustCompile(`^(\*|[A-Za-z0-9._/-]+)$`)
+
 // SecretAccessGrant records an approval for a (repo, step, secret) triple. If
 // a revoked grant already exists for the same triple, a new active row is
 // inserted. If an active grant already exists, it is returned unchanged.
@@ -95,6 +99,9 @@ func (s *Store) Grant(ctx context.Context, repo, step, secret, actor string) (Se
 	}
 	if !grantRepoPattern.MatchString(repo) {
 		return SecretAccessGrant{}, fmt.Errorf("%w: repo %q contains characters outside [A-Za-z0-9._/-]; refusing to persist (HCL injection risk)", ErrInvalid, repo)
+	}
+	if !grantStepPattern.MatchString(step) {
+		return SecretAccessGrant{}, fmt.Errorf("%w: step must be * or contain only [A-Za-z0-9._/-]", ErrInvalid)
 	}
 	if !grantSecretPattern.MatchString(secret) {
 		return SecretAccessGrant{}, fmt.Errorf("%w: secret %q contains characters outside [A-Za-z0-9._/-]; refusing to persist (HCL injection risk)", ErrInvalid, secret)
