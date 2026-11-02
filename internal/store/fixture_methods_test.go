@@ -338,30 +338,6 @@ func (s *Store) RevokeTokenCredential(ctx context.Context, id string) error {
 // association. Production callers go through EnqueueReceiveEvent which binds
 // the receive idempotency key atomically; this wrapper is retained for test
 // setup where fabricating a receive event is unnecessary overhead.
-func (s *Store) EnqueueRun(ctx context.Context, spec model.RunSpec) (model.EnqueueRunResult, error) {
-	spec, err := validateRunSpec(spec)
-	if err != nil {
-		return model.EnqueueRunResult{}, err
-	}
-	id, err := randomID()
-	if err != nil {
-		return model.EnqueueRunResult{}, fmt.Errorf("generate run id: %w", err)
-	}
-	now := unixNano(s.now())
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return model.EnqueueRunResult{}, fmt.Errorf("begin enqueue run: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	result, err := s.enqueueRunTx(ctx, tx, spec, id, now, 0)
-	if err != nil {
-		return model.EnqueueRunResult{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return model.EnqueueRunResult{}, fmt.Errorf("commit enqueue run: %w", err)
-	}
-	return result, nil
-}
 
 // ReleaseIssueLock explicitly releases a lock before expiry. Production callers
 // rely on TTL expiry; this method is retained for test fixtures that need

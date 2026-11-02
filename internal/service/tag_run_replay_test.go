@@ -90,7 +90,7 @@ func TestTagRunReplayRequiresForceAfterSecretsStarted(t *testing.T) {
 					result.Status = model.StepPassed
 				}
 				result.RunID = failed.ID
-				if _, err := harness.fixture.store.PutStepResult(t.Context(), result); err != nil {
+				if _, err := storetest.PutHistoricalStepResult(harness.fixture.store, t.Context(), result); err != nil {
 					t.Fatal(err)
 				}
 			}

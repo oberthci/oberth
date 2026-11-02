@@ -78,7 +78,7 @@ func TestDeclaredRetryOutcomeInRunDetailAndStatus(t *testing.T) {
 				t.Fatal(err)
 			}
 			// Assign a real indexed range as persistSteps does for replayed logs.
-			if err := fixture.scheduler.persistSteps(ctx, run.ID, result.Steps, runlog.Index{Ranges: []runlog.Range{
+			if err := fixture.scheduler.seedHistoricalSteps(ctx, fixture.store, run.ID, result.Steps, runlog.Index{Ranges: []runlog.Range{
 				{Stage: "retry", Step: "check", Start: 10, End: 100},
 			}}); err != nil {
 				t.Fatal(err)

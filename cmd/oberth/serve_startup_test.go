@@ -19,6 +19,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
+	"github.com/oberthci/oberth/internal/testdb"
 )
 
 type staticStartupContinuity struct {
@@ -628,6 +629,7 @@ func seedPreviousV2Database(t *testing.T, path string) (model.AuditHead, string)
 	if _, err := raw.Exec(`
 PRAGMA foreign_keys = OFF;
 BEGIN IMMEDIATE;
+` + testdb.PublicationV38Schema + `
 DROP TRIGGER issues_metadata_revision;
 ALTER TABLE issues DROP COLUMN revision;
 ALTER TABLE token_credentials DROP COLUMN expires_at;
@@ -799,6 +801,7 @@ func seedLegacyV1Database(t *testing.T, path string, actionCount int) {
 	if _, err := raw.Exec(`
 PRAGMA foreign_keys = OFF;
 BEGIN IMMEDIATE;
+` + testdb.PublicationV38Schema + `
 DROP TRIGGER issues_metadata_revision;
 ALTER TABLE issues DROP COLUMN revision;
 ALTER TABLE token_credentials DROP COLUMN expires_at;

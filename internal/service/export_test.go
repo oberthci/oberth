@@ -7,7 +7,9 @@ import (
 
 	"github.com/oberthci/oberth/internal/identityname"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
@@ -103,4 +105,20 @@ func deriveStepPolicyName(repo, step string) string {
 // agreement between the CLI and the server. Issue #623, finding 5.
 func ExportComputeSecretStorePlan(grants []store.SecretAccessGrant) SecretStorePlanResponse {
 	return computeSecretStorePlan(grants)
+}
+
+// Historical step rendering fixtures need evidence recorded by older binaries.
+type historicalStepStore struct {
+	SchedulerStore
+	database *store.Store
+}
+
+func (s historicalStepStore) PutStepResult(ctx context.Context, result model.StepResult) (model.StepResult, error) {
+	return storetest.PutHistoricalStepResult(s.database, ctx, result)
+}
+func (scheduler *Scheduler) seedHistoricalSteps(ctx context.Context, database *store.Store, runID string, steps []model.StepResult, index runlog.Index) error {
+	previous := scheduler.store
+	scheduler.store = historicalStepStore{previous, database}
+	defer func() { scheduler.store = previous }()
+	return scheduler.persistSteps(ctx, runID, steps, index)
 }

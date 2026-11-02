@@ -2,9 +2,7 @@ package storetest
 
 import (
 	"context"
-	"crypto/rand"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -79,20 +77,12 @@ func UpsertUplink(database *store.Store, ctx context.Context, spec model.UplinkS
 	return database.RegisterUplink(ctx, spec.AuthActor, spec)
 }
 
-// EnqueueRun fabricates only a receive identity; the live idempotency and run
-// transaction owns all actual state transitions.
+// EnqueueRun seeds historical runs without inventing a receive event. Live
+// receive semantics are exercised separately through EnqueueReceiveEvent.
 func EnqueueRun(database interface {
-	EnqueueReceiveEvent(context.Context, model.ReceiveEventSpec, model.RunSpec) (model.EnqueueRunResult, error)
+	EnqueueRun(context.Context, model.RunSpec) (model.EnqueueRunResult, error)
 }, ctx context.Context, spec model.RunSpec) (model.EnqueueRunResult, error) {
-	var random [16]byte
-	if _, err := rand.Read(random[:]); err != nil {
-		return model.EnqueueRunResult{}, err
-	}
-	if spec.TestedSHA == "" {
-		spec.TestedSHA = spec.SHA
-	}
-	event := model.ReceiveEventSpec{ID: "fixture-" + hex.EncodeToString(random[:]), Actor: spec.Actor, RepoID: spec.RepoID, RefKind: spec.RefKind, Ref: spec.Ref, ObjectSHA: spec.SHA, CommitSHA: spec.TestedSHA, Outcome: "queued"}
-	return database.EnqueueReceiveEvent(ctx, event, spec)
+	return database.EnqueueRun(ctx, spec)
 }
 func EnqueuePromotionRun(database *store.Store, ctx context.Context, run model.RunSpec, spec model.PromotionSpec) (model.EnqueueRunResult, model.Promotion, error) {
 	promotion, err := database.AppendPromotion(ctx, spec)

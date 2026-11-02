@@ -11,6 +11,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type reportReader struct {
@@ -68,7 +69,7 @@ func TestResourceSizeComparisonRunGetIsScopedAndReadOnly(t *testing.T) {
 	f := newScopeFixture(t)
 	run := f.runs["github"][0]
 	step := model.StepResult{RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepFailed, ExitCode: 1, DeclaredSize: "S"}
-	if _, err := f.store.PutStepResult(t.Context(), step); err != nil {
+	if _, err := storetest.PutHistoricalStepResult(f.store, t.Context(), step); err != nil {
 		t.Fatal(err)
 	}
 	peak := int64(3 << 30)

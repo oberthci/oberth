@@ -146,7 +146,7 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 	// A workflow failure can leave a failed step that never had a pod or log
 	// marker. Exercise both wire formats with no file, an empty file, and a
 	// finalized index containing only another step's output.
-	if _, err := database.PutStepResult(ctx, model.StepResult{
+	if _, err := storetest.PutHistoricalStepResult(database, ctx, model.StepResult{
 		RunID: run.ID, Stage: "release-build-variants", Step: "release-build-variants",
 		Status: model.StepFailed, DeclaredSize: "M", Termination: model.UnavailableStepDiagnostic("not-executed"),
 	}); err != nil {
@@ -225,7 +225,7 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 	} {
 		step.RunID, step.Stage, step.Step = run.ID, want.Stage, want.Step
 		step.Status, step.DeclaredSize = model.StepFailed, "M"
-		if _, err := database.PutStepResult(ctx, step); err != nil {
+		if _, err := storetest.PutHistoricalStepResult(database, ctx, step); err != nil {
 			t.Fatal(err)
 		}
 		isError, text := call("run_logs", fmt.Sprintf(`{"id":%q,"step":%q}`, run.ID, want.Step))

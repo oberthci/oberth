@@ -73,7 +73,7 @@ func TestLegacyPersistedAttemptsResolveDeclaredRows(t *testing.T) {
 				if err := fixture.scheduler.ProcessNext(ctx); err != nil {
 					t.Fatal(err)
 				}
-				if err := fixture.scheduler.persistSteps(ctx, run.ID, result.Steps, runlog.Index{Ranges: ranges}); err != nil {
+				if err := fixture.scheduler.seedHistoricalSteps(ctx, fixture.store, run.ID, result.Steps, runlog.Index{Ranges: ranges}); err != nil {
 					t.Fatal(err)
 				}
 				control := fixture.api(t)
