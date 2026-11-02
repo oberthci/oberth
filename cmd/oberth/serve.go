@@ -562,14 +562,15 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err := store.SweepBackupStagingAtStartup(options.database); err != nil {
 		logger.Printf("WARNING: interrupted database snapshot cleanup incomplete; inspect/remove the named stale entry: %v", err)
 	}
+
+	restConfig, err := rest.InClusterConfig()
+	if err != nil {
+		return fmt.Errorf("load in-cluster Kubernetes config: %w", err)
+	}
 	{
 		if err := bootstrapRuntimeIdentities(ctx, &options); err != nil {
 			return fmt.Errorf("load OpenBao identities: %w", err)
 		}
-	}
-	restConfig, err := rest.InClusterConfig()
-	if err != nil {
-		return fmt.Errorf("load in-cluster Kubernetes config: %w", err)
 	}
 	restConfig = serverKubernetesConfig(restConfig, options)
 	kube, err := kubernetes.NewForConfig(restConfig)

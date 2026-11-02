@@ -11,7 +11,6 @@ import (
 )
 
 func TestServeSweepsInterruptedSnapshotsBeforeStartupIO(t *testing.T) {
-	t.Setenv("OBERTH_IDENTITY_STORE", "")
 	t.Setenv("KUBERNETES_SERVICE_HOST", "")
 	t.Setenv("KUBERNETES_SERVICE_PORT", "")
 	root := t.TempDir()

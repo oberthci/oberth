@@ -40,12 +40,12 @@ func TestChartCarriesPublicNamesAndNoPrivateIdentities(t *testing.T) {
 		t.Fatalf("render: %v %s", err, out)
 	}
 	text := string(out)
-	for _, forbidden := range []string{"kind: Secret\n", "secretName:", "BEGIN PRIVATE KEY", "BEGIN OPENSSH PRIVATE KEY", "genPrivateKey", "genSelfSignedCert"} {
+	for _, forbidden := range []string{"kind: Secret\n", "secretName:", "BEGIN PRIVATE KEY", "BEGIN OPENSSH PRIVATE KEY", "genPrivateKey", "genSelfSignedCert", "OBERTH_IDENTITY_STORE"} {
 		if strings.Contains(text, forbidden) {
 			t.Errorf("chart contains %s", forbidden)
 		}
 	}
-	for _, want := range []string{"OBERTH_TLS_NAMES", "localhost,oberth.example.internal,127.0.0.1", "OBERTH_IDENTITY_STORE", "medium: Memory"} {
+	for _, want := range []string{"OBERTH_TLS_NAMES", "localhost,oberth.example.internal,127.0.0.1", "medium: Memory"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing %s", want)
 		}

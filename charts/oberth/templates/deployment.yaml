@@ -412,8 +412,6 @@ spec:
             - --promotion-grant-max-lifetime={{ $grantMaxLifetime }}
             {{- end }}
           env:
-            - name: OBERTH_IDENTITY_STORE
-              value: openbao
             - name: VAULT_ADDR
               value: {{ .Values.secretstore.address | quote }}
             - name: VAULT_CACERT
