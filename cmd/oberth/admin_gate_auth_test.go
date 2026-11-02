@@ -33,7 +33,7 @@ func TestDefaultAdminSocketUsesPrivateRunDirectory(t *testing.T) {
 }
 
 func TestAdminGateRecognizesBootstrapStorageOperations(t *testing.T) {
-	for _, operation := range []string{"upstream.identity.oberth-upstream-key", "upstream.secret.oberth-known-hosts", "uplink.token.create", "run.cancel"} {
+	for _, operation := range []string{"upstream.identity.oberth-upstream-key", "uplink.token.create", "run.cancel"} {
 		if !validAdminOperation(operation) {
 			t.Fatalf("supported operation rejected: %s", operation)
 		}

@@ -252,9 +252,8 @@ func validAdminOperation(operation string) bool {
 		"kubevirt.grant", "kubevirt.revoke", "size.grant", "size.revoke", "run.cancel":
 		return true
 	}
-	// These suffixes name identity records or Kubernetes Secrets, never
-	// secret material. Both bootstrap storage modes use the same gate.
-	for _, prefix := range []string{"upstream.secret.", "upstream.identity."} {
+	// These suffixes name OpenBao identity records, never secret material.
+	for _, prefix := range []string{"upstream.identity."} {
 		if suffix, ok := strings.CutPrefix(operation, prefix); ok && len(suffix) > 0 && len(suffix) <= 253 {
 			for _, c := range suffix {
 				if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '.') {

@@ -250,7 +250,7 @@ esac
 						t.Fatalf("child kill: %v: %s", err, text)
 					}
 				case "cancel":
-					if exit.ExitCode() != 130 || !strings.Contains(text, "context canceled") {
+					if exit.ExitCode() != 130 || strings.Contains(text, "context canceled") || strings.Contains(text, "oberth:") {
 						t.Fatalf("cancel: %v: %s", err, text)
 					}
 				case "deadline":
@@ -259,7 +259,7 @@ esac
 					}
 				case "unavailable":
 					// This case ends with SIGTERM after proving that 503 is retried.
-					if exit.ExitCode() != 130 || unavailableProbes.Load() < 2 || !strings.Contains(text, "HTTP 503") || !strings.Contains(text, "context canceled") {
+					if exit.ExitCode() != 130 || unavailableProbes.Load() < 2 || !strings.Contains(text, "HTTP 503") || strings.Contains(text, "context canceled") || strings.Contains(text, "oberth:") {
 						t.Fatalf("unavailable: %v: %s", err, text)
 					}
 				case "old-critical":
