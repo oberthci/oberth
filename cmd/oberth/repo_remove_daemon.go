@@ -85,6 +85,7 @@ func requestLiveRepositoryRemoval(ctx context.Context, path, root, input string)
 	if err != nil {
 		return store.RemovedRepository{}, err
 	}
+	request.Header.Set("X-Oberth-Admin-Operation", "repository.remove")
 	request.Header.Set("X-Oberth-Admin-Database", path)
 	request.Header.Set("X-Oberth-Admin-Cache-Root", root)
 	response, err := (&http.Client{Transport: transport, Timeout: 35 * time.Second}).Do(request)

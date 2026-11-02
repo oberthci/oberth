@@ -107,8 +107,12 @@ func (s *Store) CloseIssueWithReason(ctx context.Context, actor string, id int64
 	if err := s.appendIssueAudit(ctx, tx, actor, "issue.close", id, map[string]any{"reason": reason, "kind": value.Kind, "source": "issue_close_many"}, unixNano(now)); err != nil {
 		return model.Issue{}, err
 	}
+	value, err = scanIssue(tx.QueryRowContext(ctx, `SELECT `+issueColumns+` FROM issues WHERE id=?`, id))
+	if err != nil {
+		return model.Issue{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return model.Issue{}, err
 	}
-	return scanIssue(tx.QueryRowContext(ctx, `SELECT `+issueColumns+` FROM issues WHERE id=?`, id))
+	return value, nil
 }

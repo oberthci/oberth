@@ -5,9 +5,11 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"github.com/oberthci/oberth/internal/gitcache"
 	"golang.org/x/crypto/ssh"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -33,17 +35,24 @@ func TestReceiveFinalizationOutlivesTransportIdleDeadline(t *testing.T) {
 	gitRun("init", "--initial-branch=main", work)
 	gitRun("-C", work, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--allow-empty", "-m", "initial")
 	gitRun("-C", work, "push", upstream, "main")
+	var git *phaseObservedGit
 	cache, err := gitcache.New(gitcache.Config{Root: filepath.Join(root, "cache"), AllowLocalUpstreams: true, PreFinalizeGate: func(ctx context.Context) error {
-		select {
-		case <-time.After(250 * time.Millisecond):
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
+		stream := git.stream
+		stream.mu.Lock()
+		stopped := stream.stopped
+		stream.mu.Unlock()
+		if !stopped {
+			return errors.New("transport idle timer survived Git exit")
 		}
+		// Invoke expiry checking during finalization without depending on host
+		// scheduling or making a real Git transport fit a 100 ms deadline.
+		stream.check()
+		return ctx.Err()
 	}, Upstream: func(string) (string, error) { return upstream, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
+	git = &phaseObservedGit{Cache: cache}
 	if _, err = cache.Ensure(t.Context(), "example"); err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +72,7 @@ func TestReceiveFinalizationOutlivesTransportIdleDeadline(t *testing.T) {
 	if err = os.WriteFile(keyPath, pem.EncodeToMemory(block), 0600); err != nil {
 		t.Fatal(err)
 	}
-	server, err := New(Config{HostSigner: newSigner(t), Resolver: IdentityResolverFunc(func(string) (string, bool, error) { return "actor", true, nil }), Git: cache, OnUpdate: noOpUpdateHandler(), StreamIdleTimeout: 100 * time.Millisecond})
+	server, err := New(Config{HostSigner: newSigner(t), Resolver: IdentityResolverFunc(func(string) (string, bool, error) { return "actor", true, nil }), Git: git, OnUpdate: noOpUpdateHandler()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,4 +90,14 @@ func TestReceiveFinalizationOutlivesTransportIdleDeadline(t *testing.T) {
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("server finalization was cut off by stream idle timer: %v: %s", err, output)
 	}
+}
+
+type phaseObservedGit struct {
+	*gitcache.Cache
+	stream *idleChannel
+}
+
+func (g *phaseObservedGit) Receive(ctx context.Context, input, actor, protocol string, stdin io.Reader, stdout, stderr io.Writer, handler gitcache.ReceiveHandler) error {
+	g.stream = stdin.(*idleChannel)
+	return g.Cache.Receive(ctx, input, actor, protocol, stdin, stdout, stderr, handler)
 }
