@@ -29,6 +29,11 @@ runnerImagePrefixes:
   - "debian:"
   - "aquasec/trivy:"
 
+uplinkTokens:
+  # New bearer tokens only. Existing tokens are never assigned an expiry.
+  defaultTTL: 2160h # 90 days
+  maxTTL: 8760h # 365-day hard ceiling; may be lowered
+
 replicaCount: 1
 maxConcurrentJobs: 3
 

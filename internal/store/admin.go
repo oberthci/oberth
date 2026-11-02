@@ -23,6 +23,19 @@ type UplinkStatus struct {
 	Pending    bool
 }
 
+// NoExpiry flags active legacy bearer credentials for deliberate rotation.
+func (status UplinkStatus) NoExpiry() bool {
+	return status.ExpiresAt == nil && status.RevokedAt == nil && !status.Pending
+}
+
+func (s *Store) CountNonExpiringUplinkTokens(ctx context.Context) (int, error) {
+	var count int
+	err := s.reader().QueryRowContext(ctx, `SELECT COUNT(DISTINCT t.id) FROM token_credentials t
+JOIN uplinks u ON u.token_credential_id=t.id
+WHERE t.activated_at IS NOT NULL AND t.revoked_at IS NULL AND t.expires_at IS NULL`).Scan(&count)
+	return count, err
+}
+
 // RegisterUpstream atomically creates operator configuration and its audit
 // record. Administrative commands must not leave unaudited live mutations.
 func (s *Store) RegisterUpstream(ctx context.Context, actor string, spec model.UpstreamSpec) (model.Upstream, error) {

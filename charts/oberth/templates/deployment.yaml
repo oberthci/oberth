@@ -187,6 +187,9 @@ spec:
             - --upstream-key=/run/oberth-identities/upstream/{{ .Values.upstream.keyFile }}
             - --known-hosts=/run/oberth-identities/hosts/{{ .Values.upstream.knownHostsKey }}
             - --namespace={{ .Release.Namespace }}
+            {{- $uplinkTokens := .Values.uplinkTokens | default dict }}
+            - "--uplink-token-default-ttl={{ $uplinkTokens.defaultTTL | default "2160h" }}"
+            - "--uplink-token-max-ttl={{ $uplinkTokens.maxTTL | default "8760h" }}"
             {{- /*
             Quoted because the default prefix ends in a colon ("golang:"), and
             an unquoted YAML scalar ending in ':' parses as a mapping key --

@@ -288,6 +288,7 @@ func (server *Server) routes() {
 	server.mux.Handle("GET /api/audit", server.requireAuth(http.HandlerFunc(server.handleAudit)))
 	server.mux.Handle("GET /api/schedules", server.requireAuth(http.HandlerFunc(server.handleSchedules)))
 	server.mux.Handle("GET /api/status", server.requireAuth(http.HandlerFunc(server.handleStatus)))
+	server.mux.Handle("GET /api/uplinks", server.requireAuth(http.HandlerFunc(server.handleUplinks)))
 	server.mux.Handle("GET /metrics", server.requireAuth(http.HandlerFunc(server.handleMetrics)))
 	server.mux.HandleFunc("GET /assets/{asset...}", serveAsset)
 	server.mux.HandleFunc("GET /{$}", func(writer http.ResponseWriter, request *http.Request) {
@@ -721,6 +722,16 @@ func (server *Server) handleGrants(writer http.ResponseWriter, request *http.Req
 
 func (server *Server) handleStatus(writer http.ResponseWriter, request *http.Request) {
 	value, err := server.views.Status(request.Context(), actorFrom(request.Context()))
+	server.writeView(writer, value, err)
+}
+
+func (server *Server) handleUplinks(writer http.ResponseWriter, request *http.Request) {
+	actor := actorFrom(request.Context())
+	if !actor.Admin || actor.Scoped() {
+		writeJSON(writer, http.StatusForbidden, map[string]string{"error": "unscoped admin required"})
+		return
+	}
+	value, err := server.tools.CallTool(request.Context(), actor, "uplink_list", json.RawMessage(`{}`))
 	server.writeView(writer, value, err)
 }
 

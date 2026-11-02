@@ -1459,9 +1459,18 @@ function admissionPausedBanner(profile) {
  if (!profile || !(profile.admission_paused ?? profile.state !== "verified")) return "";
  return `<div role="status" class="svc warn"><strong>Admission paused</strong><div>${esc(profile.reason || "Controller profile is unverified")}</div><div>${esc(profile.remedy || "Check controller profile and ReplicaSet readiness in Status.")}</div></div>`;
 }
+function uplinkExpiryWarnings(data) {
+  if (!data) return "";
+  if (data.unavailable) return svcCard("uplink token expiry", "unavailable", "Could not check tokens without an expiry.", "warn");
+  const legacy = (data.uplinks || []).filter(uplink => uplink.no_expiry);
+  if (!legacy.length) return "";
+  return `<div class="vcs-panel" role="status"><div class="vcs-head">Uplink tokens without expiry</div>
+    <p class="meta">These existing tokens keep working. Rotate them deliberately to give them an expiry.</p>
+    ${legacy.map(uplink => `<div class="vcs-entry"><span class="vcs-led na"></span><span class="vcs-host">${esc(uplink.identity)}</span><span class="meta">NO EXPIRY · rotate</span><span class="mono-detail">${esc(uplink.fingerprint)}</span></div>`).join("")}</div>`;
+}
 async function renderStatus(seq) {
   setChrome("status", "/ status");
-  await Promise.all([loadStatus(), loadRepos().catch(() => { })]);
+  const [, , uplinks] = await Promise.all([loadStatus(), loadRepos().catch(() => { }), api("/api/uplinks", {detached: true}).catch(err => err.status === 403 ? null : {unavailable: true})]);
   if (!currentRoute(seq)) return;
   const s = state.status || {};
   const store = s.secret_store;
@@ -1482,6 +1491,7 @@ async function renderStatus(seq) {
       ${capacityStatusCard(s.admission)}
       ${controllerProfileStatusCard(s.controller_profile)}
     </div>
+    ${uplinkExpiryWarnings(uplinks)}
     <div class="vcs-panel">
       <div class="vcs-head">Upstreams</div>
       ${(s.upstream_info || []).map(upstream => `<div class="vcs-entry"><span class="vcs-led ${upstream.probe === "ready" ? "ok" : "err"}"></span><span class="vcs-host">${esc(upstream.name)}</span><span class="meta">${esc(upstream.kind)}</span><span class="mono-detail">${esc(upstream.base_url)}</span><span class="mono-detail">${esc(upstream.probe === "ready" ? "reachable" : upstream.probe || "unprobed")}</span></div>`).join("") || '<div class="vcs-entry"><span class="vcs-led na"></span><span class="meta">No upstream registered — run oberth admin upstream register in-pod.</span></div>'}

@@ -81,6 +81,7 @@ type hostUpstreamDeps struct {
 
 type uplinkDependencies struct {
 	tokenExpiry  *time.Time // Rotation preserves an existing absolute expiry.
+	tokenPolicy  func(context.Context, string) (model.UplinkTokenPolicy, error)
 	mutationGate func(context.Context, string, string) error
 }
 
@@ -874,6 +875,9 @@ func runUplinkList(ctx context.Context, arguments []string, output io.Writer) er
 			lastSeen = uplink.LastUsedAt.UTC().Format("2006-01-02 15:04")
 		}
 		expires := "never"
+		if uplink.NoExpiry() {
+			expires = "NO EXPIRY (rotate)"
+		}
 		if uplink.ExpiresAt != nil {
 			expires = uplink.ExpiresAt.UTC().Format(time.RFC3339)
 		}
@@ -1264,7 +1268,7 @@ func runRepoRemove(ctx context.Context, arguments []string, output io.Writer, de
 }
 
 func runUplink(ctx context.Context, arguments []string, input io.Reader, output io.Writer) error {
-	return runUplinkWithDependencies(ctx, arguments, input, output, uplinkDependencies{mutationGate: requestLiveAdminMutationGate})
+	return runUplinkWithDependencies(ctx, arguments, input, output, uplinkDependencies{mutationGate: requestLiveAdminMutationGate, tokenPolicy: requestLiveUplinkTokenPolicy})
 }
 
 func runUplinkWithDependencies(ctx context.Context, arguments []string, input io.Reader, output io.Writer, dependencies uplinkDependencies) error {
@@ -1292,7 +1296,7 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 		defaultCertificate = identityRoot + "/server/tls.crt"
 	}
 	certificatePath := flags.String("tls-cert", defaultCertificate, "HTTPS certificate path (in-pod; requires the live admin daemon)")
-	ttl := flags.String("ttl", "", "bearer token lifetime (positive Go duration; omitted preserves no expiry)")
+	ttl := flags.String("ttl", "", "bearer token lifetime (positive Go duration; default and maximum come from the live server)")
 	isAdmin := flags.Bool("admin", false, "Grant admin privileges (required for access_allow/access_revoke)")
 	var scope []string
 	flags.Func("scope", "limit the uplink to these upstreams' repositories (repeatable or comma-separated; default: every repository)", func(value string) error { scope = append(scope, splitScope(value)...); return nil })
@@ -1339,6 +1343,16 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	if err := gate(ctx, "uplink.database.open"); err != nil {
 		return err
 	}
+	policy := model.DefaultUplinkTokenPolicy()
+	if dependencies.tokenPolicy != nil {
+		policy, err = dependencies.tokenPolicy(ctx, *databasePath)
+		if err != nil {
+			return err
+		}
+	}
+	if err := policy.Validate(); err != nil {
+		return err
+	}
 	database, err := store.OpenAdminClient(ctx, *databasePath, configuredStoreOptions(ctx))
 	if err != nil {
 		return err
@@ -1351,7 +1365,7 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 			return err
 		}
 	}
-	tokens := gatedAdminTokens{Store: database, Gate: gate}
+	tokens := gatedAdminTokens{Store: database, Gate: gate, Policy: policy}
 	issuer := auth.Issuer{
 		Tokens:    tokens,
 		ExpiresAt: dependencies.tokenExpiry,
@@ -1379,6 +1393,9 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	if lifetime > 0 {
 		expires := time.Now().Add(lifetime)
 		issuer.ExpiresAt = &expires
+	} else if issuer.ExpiresAt != nil && issuer.ExpiresAt.After(time.Now().Add(policy.DefaultTTL)) {
+		expires := time.Now().Add(policy.DefaultTTL)
+		issuer.ExpiresAt = &expires
 	}
 	if _, err := issuer.Issue(ctx, identity, output); err != nil {
 		return err
@@ -1388,14 +1405,15 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 
 type gatedAdminTokens struct {
 	*store.Store
-	Gate func(context.Context, string) error
+	Gate   func(context.Context, string) error
+	Policy model.UplinkTokenPolicy
 }
 
 func (tokens gatedAdminTokens) CreateTokenCredential(ctx context.Context, spec model.TokenCredentialSpec) (model.TokenCredential, error) {
 	if err := tokens.Gate(ctx, "uplink.token.create"); err != nil {
 		return model.TokenCredential{}, err
 	}
-	return tokens.Store.CreateTokenCredential(ctx, spec)
+	return tokens.Store.CreateTokenCredentialWithPolicy(ctx, spec, tokens.Policy)
 }
 
 func (tokens gatedAdminTokens) ActivateTokenCredential(ctx context.Context, id string) (model.TokenCredential, error) {

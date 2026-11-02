@@ -21,6 +21,14 @@
     "compatibility"
   ],
   "properties": {
+    "uplinkTokens": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "defaultTTL": {"type": "string", "minLength": 1, "description": "New uplink bearer lifetime; positive Go duration, at most maxTTL. Default 2160h (90 days)."},
+        "maxTTL": {"type": "string", "minLength": 1, "description": "Maximum new uplink bearer lifetime; positive Go duration, hard ceiling 8760h (365 days)."}
+      }
+    },
     "platformProtection": {
       "type": "object",
       "additionalProperties": false,

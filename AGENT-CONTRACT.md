@@ -3232,11 +3232,23 @@ The last active unscoped admin credential cannot be revoked. Rotation is a
 handoff to an already-issued, active, distinct replacement with the same
 identity, admin flag and scope; key/token issuance remains in-pod.
 
-`uplink add --ttl 24h` sets an absolute bearer-token expiry. `uplink list`
-and `uplink_list` show it; authentication refuses the token at the exact
-expiry boundary, including during the last-used telemetry interval. Omitted
-`--ttl` and pre-v40 credentials retain no expiry. CLI rotation preserves the
-earliest existing expiry unless `--ttl` explicitly sets a new lifetime.
+New uplink bearer tokens default to 90 days. `serve --uplink-token-default-ttl`
+and `--uplink-token-max-ttl` configure issuance: `0 < default <= maximum <= 8760h`
+(365 days), with a default maximum of 365 days. Chart values are
+`uplinkTokens.defaultTTL` (2160h) and `uplinkTokens.maxTTL` (8760h).
+The in-pod CLI reads the running daemon's policy over its private admin socket;
+policy read failures refuse issuance. `uplink add --ttl 24h` may select another
+positive lifetime within that maximum. Expiry is enforced at the exact boundary,
+including during last-used telemetry coalescing. Rotation without `--ttl` uses
+the shorter of the existing remaining lifetime and the current default.
+
+Existing credentials retain their stored expiry; missing expiry is never
+backfilled. `uplink list` marks active legacy credentials `NO EXPIRY (rotate)`;
+`uplink_list` and the unscoped-admin-only dashboard `/api/uplinks` view expose
+`no_expiry`. The dashboard Status page lists those public identities with a
+rotation warning. The server warns at startup and hourly while any active,
+unrevoked uplink token has no expiry. Counts and warnings use read-only queries
+and log no credential material.
 Expiry affects the bearer token; SSH-key revocation remains a separate action.
 Expired replacements cannot satisfy rotation or last-active-admin checks.
 

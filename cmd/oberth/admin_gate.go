@@ -26,7 +26,24 @@ const maximumAdminGateError = 4 << 10
 // reservation, delete its Workflow) instead of on the next queue event. The
 // wake carries no input and performs no mutation of its own.
 func newAdminGateServer(gate func(context.Context) error, databasePath string, wake func(), counts ...func(context.Context) (model.IdleQueueStatus, error)) *http.Server {
+	return newAdminGateServerWithTokenPolicy(gate, databasePath, wake, model.DefaultUplinkTokenPolicy(), counts...)
+}
+
+func newAdminGateServerWithTokenPolicy(gate func(context.Context) error, databasePath string, wake func(), policy model.UplinkTokenPolicy, counts ...func(context.Context) (model.IdleQueueStatus, error)) *http.Server {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/token-policy", func(output http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("X-Oberth-Admin-Database") != databasePath {
+			http.Error(output, "requested database is not the live daemon database", http.StatusConflict)
+			return
+		}
+		if err := policy.Validate(); err != nil {
+			http.Error(output, "token policy unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		output.Header().Set("Content-Type", "application/json")
+		output.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(output).Encode(policy)
+	})
 	mux.HandleFunc("GET /v1/idle", func(output http.ResponseWriter, request *http.Request) {
 		if len(counts) == 0 || counts[0] == nil {
 			http.Error(output, "queue state unavailable", http.StatusServiceUnavailable)

@@ -74,7 +74,7 @@ func TestIssueAndAuthenticateTokenWithoutPlaintextPersistence(t *testing.T) {
 	if credential.ActivatedAt == nil {
 		t.Fatal("issued credential is inactive")
 	}
-	authenticator := Authenticator{Tokens: database}
+	authenticator := Authenticator{Tokens: database, Now: func() time.Time { return now }}
 	authenticated, err := authenticator.Authenticate(ctx, plaintext)
 	if err != nil || authenticated.TokenCredential.ID != credential.ID || authenticated.Identity != "agent@host" || authenticated.Fingerprint != "SHA256:key" {
 		t.Fatalf("authenticate = %#v, %v", authenticated, err)

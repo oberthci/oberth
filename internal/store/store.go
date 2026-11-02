@@ -1830,23 +1830,35 @@ func (s *Store) AppendAuditAction(ctx context.Context, spec model.AuditActionSpe
 }
 
 func (s *Store) CreateTokenCredential(ctx context.Context, spec model.TokenCredentialSpec) (model.TokenCredential, error) {
+	return s.CreateTokenCredentialWithPolicy(ctx, spec, model.DefaultUplinkTokenPolicy())
+}
+
+// CreateTokenCredentialWithPolicy applies the live daemon's issuance policy.
+// Only new credentials change; legacy rows are never assigned an expiry here.
+func (s *Store) CreateTokenCredentialWithPolicy(ctx context.Context, spec model.TokenCredentialSpec, policy model.UplinkTokenPolicy) (model.TokenCredential, error) {
+	if err := policy.Validate(); err != nil {
+		return model.TokenCredential{}, fmt.Errorf("%w: %w", ErrInvalid, err)
+	}
 	if strings.TrimSpace(spec.Name) == "" || len(spec.Digest) != 32 {
 		return model.TokenCredential{}, fmt.Errorf("%w: token name and SHA-256 digest are required", ErrInvalid)
 	}
-	var expires any
-	var expiresAt *time.Time
+	nowTime := s.now()
+	expiry := nowTime.Add(policy.DefaultTTL)
 	if spec.ExpiresAt != nil {
-		value := spec.ExpiresAt.UTC()
-		if !value.After(s.now()) || !fromUnixNano(unixNano(value)).Equal(value) {
-			return model.TokenCredential{}, fmt.Errorf("%w: token expiry must be a future timestamp representable in nanoseconds", ErrInvalid)
-		}
-		expires, expiresAt = unixNano(value), &value
+		expiry = spec.ExpiresAt.UTC()
 	}
+	if !expiry.After(nowTime) || !fromUnixNano(unixNano(expiry)).Equal(expiry) {
+		return model.TokenCredential{}, fmt.Errorf("%w: token expiry must be a future timestamp representable in nanoseconds", ErrInvalid)
+	}
+	if expiry.After(nowTime.Add(policy.MaxTTL)) {
+		return model.TokenCredential{}, fmt.Errorf("%w: token lifetime exceeds maximum of %s", ErrInvalid, policy.MaxTTL)
+	}
+	expires, expiresAt := unixNano(expiry), &expiry
 	id, err := randomID()
 	if err != nil {
 		return model.TokenCredential{}, fmt.Errorf("generate token credential id: %w", err)
 	}
-	now := unixNano(s.now())
+	now := unixNano(nowTime)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return model.TokenCredential{}, fmt.Errorf("begin create token credential: %w", err)
