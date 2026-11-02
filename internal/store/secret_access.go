@@ -340,7 +340,7 @@ func scanSecretAccess(row rowScanner) (SecretAccessGrant, error) {
 	var grant SecretAccessGrant
 	var approvedAt int64
 	var revokedAt sql.NullInt64
-	if err := row.Scan(&grant.ID, &grant.Repo, &grant.Step, &grant.Secret,
+	if err := scanRowNotFound(row, "SecretAccess", &grant.ID, &grant.Repo, &grant.Step, &grant.Secret,
 		&grant.ApprovedBy, &approvedAt, &grant.RevokedBy, &revokedAt); err != nil {
 		return SecretAccessGrant{}, err
 	}

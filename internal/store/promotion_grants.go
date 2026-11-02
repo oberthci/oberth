@@ -257,7 +257,7 @@ func scanPromotionGrant(row rowScanner) (model.PromotionGrant, error) {
 	var value model.PromotionGrant
 	var created, expires int64
 	var revokedAt, consumedAt sql.NullInt64
-	if err := row.Scan(&value.ID, &value.RepoID, &value.SourceSHA, &value.TargetRef,
+	if err := scanRowNotFound(row, "PromotionGrant", &value.ID, &value.RepoID, &value.SourceSHA, &value.TargetRef,
 		&value.Issuer, &value.IssuerFingerprint, &value.Note,
 		&created, &expires, &value.RevokedBy, &revokedAt, &value.ConsumedBy, &consumedAt); err != nil {
 		return model.PromotionGrant{}, err

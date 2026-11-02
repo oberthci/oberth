@@ -930,7 +930,7 @@ FROM audit_actions WHERE action = ? AND resource_type = ? ORDER BY id DESC LIMIT
 func scanAuditAnchor(row rowScanner) (model.AuditAnchor, error) {
 	var value model.AuditAnchor
 	var anchoredAt, createdAt int64
-	if err := row.Scan(&value.ID, &value.AuditID, &value.AuditSHA256, &value.TSAURL, &value.Receipt, &anchoredAt, &createdAt); err != nil {
+	if err := scanRowNotFound(row, "AuditAnchor", &value.ID, &value.AuditID, &value.AuditSHA256, &value.TSAURL, &value.Receipt, &anchoredAt, &createdAt); err != nil {
 		return model.AuditAnchor{}, translateNotFound("audit anchor", err)
 	}
 	value.AnchoredAt, value.CreatedAt = fromUnixNano(anchoredAt), fromUnixNano(createdAt)

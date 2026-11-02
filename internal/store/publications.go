@@ -625,7 +625,7 @@ func scanPublication(row rowScanner) (model.Publication, error) {
 	var value model.Publication
 	var runID, promotionID sql.NullString
 	var created, updated, retryAfter int64
-	if err := row.Scan(&value.Sequence, &value.ID, &value.RepoID, &runID, &promotionID,
+	if err := scanRowNotFound(row, "Publication", &value.Sequence, &value.ID, &value.RepoID, &runID, &promotionID,
 		&value.RefKind, &value.Ref, &value.PreviousSHA, &value.PreviousKnown, &value.ResultSHA, &value.Actor,
 		&value.Status, &value.Error, &created, &updated, &value.Attempts, &retryAfter); err != nil {
 		return model.Publication{}, err

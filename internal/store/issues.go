@@ -584,7 +584,7 @@ func scanIssue(row rowScanner) (model.Issue, error) {
 	var repoID sql.NullInt64
 	var created, updated int64
 	var closed, scopeUpstreamID sql.NullInt64
-	if err := row.Scan(&value.ID, &repoID, &value.Kind, &value.Branch,
+	if err := scanRowNotFound(row, "Issue", &value.ID, &repoID, &value.Kind, &value.Branch,
 		&value.Title, &value.Body, &value.State, &value.Occurrences,
 		&value.CIOrigin, &value.CIWorkSequence, &value.CIWorkID,
 		&created, &updated, &closed, &scopeUpstreamID); err != nil {
@@ -600,7 +600,7 @@ func scanIssue(row rowScanner) (model.Issue, error) {
 func scanIssueLock(row rowScanner) (model.IssueLock, error) {
 	var value model.IssueLock
 	var acquired, expires int64
-	if err := row.Scan(&value.IssueID, &value.Owner, &acquired, &expires); err != nil {
+	if err := scanRowNotFound(row, "IssueLock", &value.IssueID, &value.Owner, &acquired, &expires); err != nil {
 		return model.IssueLock{}, err
 	}
 	value.AcquiredAt, value.ExpiresAt = fromUnixNano(acquired), fromUnixNano(expires)

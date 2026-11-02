@@ -1392,7 +1392,7 @@ func scanRepository(row rowScanner) (model.Repository, error) {
 	var value model.Repository
 	var created, updated int64
 	var archived sql.NullInt64
-	if err := row.Scan(&value.ID, &value.Name, &value.UpstreamID, &value.DefaultBranch, &created, &updated, &archived, &value.ArchivedBy); err != nil {
+	if err := scanRowNotFound(row, "Repository", &value.ID, &value.Name, &value.UpstreamID, &value.DefaultBranch, &created, &updated, &archived, &value.ArchivedBy); err != nil {
 		return model.Repository{}, translateNotFound("repository", err)
 	}
 	value.CreatedAt, value.UpdatedAt = fromUnixNano(created), fromUnixNano(updated)
@@ -1836,7 +1836,7 @@ RETURNING sequence, id, repo_id, source_branch, source_sha, target_ref, previous
 func scanPromotion(row rowScanner) (model.Promotion, error) {
 	var value model.Promotion
 	var created, updated int64
-	if err := row.Scan(&value.Sequence, &value.ID, &value.RepoID, &value.SourceBranch,
+	if err := scanRowNotFound(row, "Promotion", &value.Sequence, &value.ID, &value.RepoID, &value.SourceBranch,
 		&value.SourceSHA, &value.TargetRef, &value.PreviousSHA, &value.ResultSHA,
 		&value.Actor, &value.Status, &value.RunID, &value.GrantID, &value.Error, &created, &updated); err != nil {
 		return model.Promotion{}, err
@@ -2102,7 +2102,7 @@ func scanTokenCredential(row rowScanner) (model.TokenCredential, error) {
 	var value model.TokenCredential
 	var created int64
 	var activated, lastUsed, revoked sql.NullInt64
-	if err := row.Scan(&value.ID, &value.Name, &value.Digest, &created, &activated, &lastUsed, &revoked); err != nil {
+	if err := scanRowNotFound(row, "TokenCredential", &value.ID, &value.Name, &value.Digest, &created, &activated, &lastUsed, &revoked); err != nil {
 		return model.TokenCredential{}, err
 	}
 	value.CreatedAt = fromUnixNano(created)
@@ -2185,8 +2185,11 @@ func nullableTime(value sql.NullInt64) *time.Time {
 }
 
 func translateNotFound(entity string, err error) error {
+	if errors.Is(err, ErrNotFound) {
+		return err
+	}
 	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("%w: %s", ErrNotFound, entity)
+		return notFoundRow{entity: strings.ToLower(entity)}
 	}
 	return err
 }
@@ -2211,3 +2214,14 @@ func pageLimit(limit int) int {
 	}
 	return limit
 }
+
+func scanRowNotFound(row rowScanner, entity string, dest ...any) error {
+	return translateNotFound(entity, row.Scan(dest...))
+}
+
+// Keep driver compatibility for internal callers without exposing driver text
+// or distinguishing a missing row from a hidden row at scoped boundaries.
+type notFoundRow struct{ entity string }
+
+func (e notFoundRow) Error() string   { return fmt.Sprintf("%s: %s", ErrNotFound, e.entity) }
+func (e notFoundRow) Unwrap() []error { return []error{ErrNotFound, sql.ErrNoRows} }

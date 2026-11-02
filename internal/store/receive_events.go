@@ -192,7 +192,7 @@ func (s *Store) appendReceiveAudit(ctx context.Context, tx *sql.Tx, spec model.R
 func scanReceiveEvent(row rowScanner) (model.ReceiveEvent, error) {
 	var value model.ReceiveEvent
 	var created int64
-	if err := row.Scan(&value.ID, &value.Actor, &value.RepoID, &value.RefKind, &value.Ref,
+	if err := scanRowNotFound(row, "ReceiveEvent", &value.ID, &value.Actor, &value.RepoID, &value.RefKind, &value.Ref,
 		&value.OldSHA, &value.ObjectSHA, &value.CommitSHA, &value.Outcome, &value.RunID, &created); err != nil {
 		return model.ReceiveEvent{}, err
 	}

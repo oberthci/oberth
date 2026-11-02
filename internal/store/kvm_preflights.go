@@ -247,7 +247,7 @@ func (s *Store) auditKVMExecution(ctx context.Context, tx *sql.Tx, actor, action
 func scanKVMExecution(row rowScanner) (vmrunner.KVMExecution, error) {
 	var value vmrunner.KVMExecution
 	var kind, intent, identity, receipt, refusal string
-	if err := row.Scan(&kind, &intent, &identity, &value.WorkflowUID, &value.Submitted, &value.Rejected, &value.Cleaned, &receipt, &refusal); err != nil {
+	if err := scanRowNotFound(row, "KVMExecution", &kind, &intent, &identity, &value.WorkflowUID, &value.Submitted, &value.Rejected, &value.Cleaned, &receipt, &refusal); err != nil {
 		return value, err
 	}
 	if kind != "kvm-preflight" {

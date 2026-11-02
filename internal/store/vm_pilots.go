@@ -129,7 +129,7 @@ func scanPilot(row rowScanner) (vmrunner.PilotExecution, error) {
 	var value vmrunner.PilotExecution
 	var plan, identity, attempt, receipt, endpoint, restart, attach string
 	var created, updated int64
-	if err := row.Scan(&plan, &identity, &value.Submitted, &value.Cleaning, &value.Cleaned, &value.Failure, &attempt, &receipt, &endpoint, &restart, &attach, &created, &updated); err != nil {
+	if err := scanRowNotFound(row, "Pilot", &plan, &identity, &value.Submitted, &value.Cleaning, &value.Cleaned, &value.Failure, &attempt, &receipt, &endpoint, &restart, &attach, &created, &updated); err != nil {
 		return value, err
 	}
 	if err := decodePilotJSON(plan, &value.Plan); err != nil {

@@ -70,7 +70,7 @@ FROM ci_issue_work WHERE promotion_id = ?`, promotionID))
 func scanCIIssueWork(row rowScanner) (ciIssueWork, error) {
 	var value ciIssueWork
 	var runID, promotionID sql.NullString
-	if err := row.Scan(&value.Sequence, &value.RepoID, &value.Branch, &value.Origin,
+	if err := scanRowNotFound(row, "CIIssueWork", &value.Sequence, &value.RepoID, &value.Branch, &value.Origin,
 		&runID, &promotionID, &value.Actor); err != nil {
 		return ciIssueWork{}, err
 	}
@@ -362,6 +362,6 @@ type desiredCIIssue struct {
 
 func scanDesiredCIIssue(row rowScanner) (desiredCIIssue, error) {
 	var value desiredCIIssue
-	err := row.Scan(&value.Sequence, &value.WorkID, &value.Origin, &value.Title, &value.Body, &value.Actor)
+	err := scanRowNotFound(row, "DesiredCIIssue", &value.Sequence, &value.WorkID, &value.Origin, &value.Title, &value.Body, &value.Actor)
 	return value, err
 }

@@ -368,7 +368,7 @@ WHERE queue_sequence = (
 )
 RETURNING `+runColumns, now))
 	if err != nil {
-		return model.Run{}, err
+		return model.Run{}, translateNotFound("queued run", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return value, fmt.Errorf("commit run claim: %w", err)
@@ -1311,7 +1311,7 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 		&value.Status, &value.Reason, &value.SupersededBy, &queued, &started, &finished,
 		&created, &updated, &value.ConcurrencyGroup, &value.ScheduleEntry, &value.Priority, &value.PriorityReason, &value.PriorityOverride, &value.PriorityOverrideReason, &value.PriorityAccepted, &value.PriorityAcceptedReason, &value.PriorityRequestedBy, &value.PriorityRefusal, &value.PriorityProtected,
 	}
-	if err := row.Scan(append(dest, extra...)...); err != nil {
+	if err := scanRowNotFound(row, "Run", append(dest, extra...)...); err != nil {
 		return model.Run{}, err
 	}
 	value.AutoRetryOf = strings.TrimPrefix(value.Reason, autoRetryOfPrefix)
@@ -1336,7 +1336,7 @@ func scanStepResult(row rowScanner) (model.StepResult, error) {
 	var userCPUNanos, systemCPUNanos, rss, peak sql.NullInt64
 	var recorded int64
 	var diagnostic sql.NullString
-	if err := row.Scan(&value.RunID, &value.Stage, &value.Step, &value.Ordinal,
+	if err := scanRowNotFound(row, "StepResult", &value.RunID, &value.Stage, &value.Step, &value.Ordinal,
 		&value.Status, &value.ExitCode, &value.LogStart, &value.LogEnd,
 		&value.DeclaredSize, &rss, &userCPUNanos, &systemCPUNanos,
 		&started, &finished, &recorded, &diagnostic, &peak); err != nil {
@@ -1356,7 +1356,7 @@ func scanRunCancellation(row rowScanner) (model.RunCancellation, error) {
 	var value model.RunCancellation
 	var created int64
 	var completed sql.NullInt64
-	if err := row.Scan(&value.RunID, &value.WorkflowName, &value.SupersededBy, &value.Reason, &created, &completed); err != nil {
+	if err := scanRowNotFound(row, "RunCancellation", &value.RunID, &value.WorkflowName, &value.SupersededBy, &value.Reason, &created, &completed); err != nil {
 		return model.RunCancellation{}, err
 	}
 	value.CreatedAt = fromUnixNano(created)
