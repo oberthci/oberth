@@ -50,8 +50,18 @@ func (s VMIDemandSummary) Valid() bool {
 // stay private and are copied at both boundaries, so sizing and submission use
 // one exact, policy-admitted resolution even if the source tag subsequently moves.
 type VMIDemandReceipt struct {
+	pods      *wfv1.Workflow
 	summary   VMIDemandSummary
 	fragments map[FragmentKey]Fragment
+}
+
+// DeclaredPodDemand analyzes the same immutable source and fragment resolution
+// whose receipt final submission verifies. No second tag lookup is involved.
+func (r *VMIDemandReceipt) DeclaredPodDemand() (*PodDemand, error) {
+	if r == nil || r.pods == nil {
+		return nil, nil
+	}
+	return DeclaredPodPeak(r.pods.DeepCopy())
 }
 
 func (r *VMIDemandReceipt) Summary() VMIDemandSummary { return r.summary }
@@ -186,7 +196,7 @@ func (r *ResolvedRunSource) Receipt(policy Policy) (*VMIDemandReceipt, error) {
 	}
 	summary := r.identity
 	summary.Demand = demand
-	return &VMIDemandReceipt{summary: summary, fragments: cloneVMIFragments(r.fragments)}, nil
+	return &VMIDemandReceipt{summary: summary, fragments: cloneVMIFragments(r.fragments), pods: r.workflow.DeepCopy()}, nil
 }
 
 func (r *VMIDemandReceipt) Verify(other *VMIDemandReceipt) error {

@@ -127,9 +127,9 @@ the same `measured.Build` and suggestion code. Its declaration proxy is the newe
 captured request/diagnostic values, explicitly marked; this export does not
 contain every repository's git source or fragment lock.
 
-Stage A changes no admission, priorities or execution resources. Later stages will
-honor and bound git declarations and reserve declared peak CPU/memory, retaining
-the size-class path for undeclared workflows. pod-only queuing remains a
+Stage A changes no admission, priorities or execution resources.
+[Stage C admission](declared-admission.md) reserves declared peak CPU/memory,
+retaining the size-class path for undeclared workflows. pod-only queuing remains a
 later stage: the workflow controller workflow deadlines include Pending time, pod has
 no FIFO aging/workflow gang guarantee, and a global Pending-pod cap and VM
 deadlock policy need proof before handing it the queue.

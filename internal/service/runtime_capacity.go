@@ -145,7 +145,7 @@ func (scheduler *Scheduler) refreshRuntimeCapacity(ctx context.Context) {
 	// Granted/retained reservations keep the exact weight they hold. Waiting
 	// weights must be repriced, including whole-budget XL and clamped L weights.
 	for _, waiter := range gate.waiters {
-		if waiter.prepared {
+		if waiter.prepared && !gate.usesDeclarations(waiter) {
 			waiter.weight = gate.weights.of(waiter.size, budget)
 		}
 	}

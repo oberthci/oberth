@@ -194,6 +194,7 @@ func (service *API) submittedKVMPreflight(ctx context.Context, run model.Run) bo
 // grouped run waits on (#658). The group is a validated [a-z0-9-] name and the
 // runs are server-issued IDs, so neither can carry arbitrary text.
 func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
+
 	if admission.KubeVirtCapacity {
 		return "KubeVirt capacity"
 	}
@@ -225,6 +226,11 @@ func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
 	case admission.HeadOfQueue && admission.BlockedBy != nil:
 		return fmt.Sprintf("At the head of the weighted resource admission queue (%s); every later run waits behind it.",
 			admission.BlockedBy.Reason())
+	case admission.DeclaredResources != nil:
+		if admission.BlockedBy != nil && admission.BlockedBy.RunCeiling {
+			return "Waiting for an IO/run concurrency slot."
+		}
+		return fmt.Sprintf("Waiting for capacity for declared requests: %dm CPU, %d memory bytes.", admission.DeclaredResources.CPUMilli, admission.DeclaredResources.MemoryBytes)
 	case admission.BlockedBy != nil:
 		return "Waiting in the weighted resource admission queue, " + blockedBehindMessage(admission.BlockedBy)
 	default:

@@ -22,6 +22,7 @@ const createSettlementAttemptBudget = 15 * time.Second
 const pendingCreateMessage = "Workflow create outcome uncertain; cleanup pending"
 
 type createAdmission struct {
+	Pods                       *argoworkflow.PodDemand `json:",omitempty"`
 	RunID, JobName, SHA, Group string
 	RepoID                     int64
 	Size                       periapsis.Size
@@ -56,7 +57,7 @@ func runCreateAdmissionPath(root, id string) string {
 
 // Persist the server-admitted contract before POST. Recovery must never need a
 // Kubernetes read, a moving repository ref or a remote fragment to restore it.
-func (scheduler *Scheduler) recordCreateAdmission(run model.Run, name string, size periapsis.Size, demand argoworkflow.VMIDemand) error {
+func (scheduler *Scheduler) recordCreateAdmission(run model.Run, name string, size periapsis.Size, demand argoworkflow.VMIDemand, pods ...*argoworkflow.PodDemand) error {
 	target := scheduler.createAdmissionPath(run.ID)
 	if !pathWithin(scheduler.workspaceRoot, target) {
 		return errors.New("service: create admission escaped workspace")
@@ -64,7 +65,11 @@ func (scheduler *Scheduler) recordCreateAdmission(run model.Run, name string, si
 	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
 		return err
 	}
-	body, err := json.Marshal(createAdmission{RunID: run.ID, JobName: name, SHA: run.SHA, RepoID: run.RepoID, Group: run.ConcurrencyGroup, Size: size.Effective(), Demand: demand})
+	var peak *argoworkflow.PodDemand
+	if len(pods) > 0 {
+		peak = pods[0]
+	}
+	body, err := json.Marshal(createAdmission{Pods: peak, RunID: run.ID, JobName: name, SHA: run.SHA, RepoID: run.RepoID, Group: run.ConcurrencyGroup, Size: size.Effective(), Demand: demand})
 	if err != nil {
 		return err
 	}
@@ -110,6 +115,9 @@ func (scheduler *Scheduler) readCreateAdmission(run model.Run) (createAdmission,
 	if err := (KubeVirtResources{Demand: saved.Demand, Limit: argoworkflow.VMIBudgetLimit().DemandLimit()}).Validate(); err != nil {
 		return createAdmission{}, err
 	}
+	if saved.Pods != nil && !saved.Pods.Valid() {
+		return createAdmission{}, errors.New("invalid saved workflow resource demand")
+	}
 	return saved, nil
 }
 
@@ -132,7 +140,7 @@ func (scheduler *Scheduler) restoreCreateGrant(run model.Run, grant *admissionRe
 			saved.Demand = argoworkflow.VMIBudgetLimit().DemandLimit()
 			log.Printf("WARN: create_cleanup run=%q missing_admission_contract=true reserving_ceiling=true", run.ID)
 		}
-		grant, err = scheduler.admission.adopt(run, saved.Size, saved.Demand)
+		grant, err = scheduler.admission.adopt(run, saved.Size, saved.Demand, saved.Pods)
 		if err != nil {
 			// Conflicting historical groups are quarantined behind a full budget.
 			run.ConcurrencyGroup = ""

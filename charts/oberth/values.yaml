@@ -37,7 +37,7 @@ maxConcurrentJobs: 3
 # are separate releases: see docs/platform-protection.md for their overlays.
 # Requests in those overlays are based on one idle sample, unmeasured under load.
 platformProtection:
-  enabled: false
+  enabled: true
 
 # Per-client API limits with headroom for eight concurrent jobs and trusted
 # preflight pod polling. Admission retries read failures without exiting.
@@ -74,6 +74,13 @@ promotion:
 # is held until the server's data filesystem has at least this many free bytes.
 # Default 0 = disabled. The proposal from #602/#673 is 160000000000 (160 GB).
 admission:
+  # Declarations opt each repository into numeric admission through git.
+  # Budgets exclude platform and VM capacity. Zero IO cap retains the run cap.
+  declaredResources:
+    disabled: false
+    cpuMillis: 8000
+    memoryBytes: 17179869184
+    ioRuns: 0
   # Mounted directory is re-read every 5s; direct ConfigMap edits need no restart.
   # Null initializes the runtime value from the boot maxConcurrentJobs above.
   runtimeCapacity:

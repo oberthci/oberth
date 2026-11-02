@@ -24,3 +24,9 @@ assert.equal(evaluate('runMessageCell(row)'),'&lt;step-abc12345&gt;');
 context.row = base;
 assert.ok(evaluate('summaryLines({Run:row,Steps:[]})').includes(notice),'run detail must show the separate notice');
 console.log('Resource message rows passed.');
+
+context.row = {...base,Status:'queued',StartedAt:null,Scheduling:{state:'waiting',admission:{size:'XL',declared_resources:{cpu_milli:1100,memory_bytes:1342177280,pods:1},head_of_queue:true,blocked_by:{backfilling:true}}}};
+assert.equal(evaluate('queueSize(row)'),'', 'declared admission must not show the ignored size annotation');
+assert.ok(evaluate('rowMessage(row)').includes('1100m CPU'));
+assert.ok(evaluate('rowMessage(row)').includes('smaller runs admitted meanwhile'));
+assert.ok(!evaluate('rowMessage(row)').includes('whole host'));

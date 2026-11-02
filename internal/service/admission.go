@@ -15,6 +15,7 @@ import (
 )
 
 type weightedAdmission struct {
+	resources      DeclaredAdmissionConfig
 	mu             sync.Mutex
 	capacity       int
 	capacityConfig model.AdmissionCapacityConfig
@@ -58,6 +59,7 @@ type weightedAdmission struct {
 }
 
 type admissionReservation struct {
+	pods     *argoworkflow.PodDemand
 	gate     *weightedAdmission
 	sequence int64
 	// order retains restart FIFO position; sequence stays the unique run key.
@@ -130,6 +132,7 @@ var errAdmissionAbandoned = errors.New("service: admission abandoned: run is no 
 // admissionRequest is what a claimed run knows once its immutable checkout has
 // been read: its declared size and, optionally, its repository-scoped group.
 type admissionRequest struct {
+	Pods                 *argoworkflow.PodDemand
 	RunID                string
 	RepoID               int64
 	Repo                 string
@@ -156,6 +159,7 @@ func newWeightedAdmission(capacity int) *weightedAdmission {
 		capacity = 1
 	}
 	return &weightedAdmission{
+		resources:    DefaultDeclaredAdmissionConfig(),
 		capacity:     capacity,
 		weights:      DefaultSizeWeights,
 		reservations: make(map[int64]*admissionReservation),
@@ -303,9 +307,22 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 		reservation.preparedAt = time.Now().UTC()
 	}
 	reservation.size = size
+	if err := gate.validatePodDemand(request.Pods); err != nil {
+		gate.mu.Unlock()
+		reservation.cancel()
+		return nil, err
+	}
+	reservation.pods = nil
+	if request.Pods != nil && !gate.resources.Disabled {
+		pods := *request.Pods
+		reservation.pods = &pods
+	}
 	reservation.priorityMaximum = request.PriorityMaximum
 	reservation.priorityLookupFailed = request.PriorityLookupFailed
 	reservation.weight = gate.weights.of(size, gate.capacity)
+	if gate.usesDeclarations(reservation) {
+		reservation.weight = 0
+	}
 	if request.Group != "" {
 		reservation.group = concurrencyGroupKey(request.RepoID, request.Group)
 		reservation.groupName = request.Group
@@ -556,6 +573,9 @@ func (gate *weightedAdmission) canGrantLocked(reservation *admissionReservation)
 	if gate.maxRuns > 0 && gate.runs >= gate.maxRuns {
 		return false
 	}
+	if gate.resources.IORuns > 0 && gate.runs >= gate.resources.IORuns {
+		return false
+	}
 	// Disk floor hold (#673): when enabled and the filesystem is below the
 	// configured floor, hold all new admissions until disk frees up. The
 	// check uses a cached statfs result (sub-microsecond syscall, 5 s TTL)
@@ -565,12 +585,15 @@ func (gate *weightedAdmission) canGrantLocked(reservation *admissionReservation)
 	}
 	// A whole-budget XL grant stays exclusive even if capacity is raised.
 	for _, held := range gate.reservations {
-		if held.granted && !held.released && gate.weights.wholeBudget(held.size) {
+		if held.granted && !held.released && !gate.usesDeclarations(held) && gate.weights.wholeBudget(held.size) {
 			return false
 		}
 	}
-	if gate.weights.wholeBudget(reservation.size) {
-		return gate.used == 0
+	if !gate.usesDeclarations(reservation) && gate.weights.wholeBudget(reservation.size) {
+		return gate.runs == 0 && gate.used == 0
+	}
+	if !gate.numericFitsLocked(reservation) {
+		return false
 	}
 	return gate.used+reservation.weight <= gate.capacity
 }
@@ -670,7 +693,8 @@ func (gate *weightedAdmission) headBlockerLocked() *admissionReservation {
 
 func (gate *weightedAdmission) blockerLocked(reservation *admissionReservation) *model.AdmissionBlocker {
 	blocker := &model.AdmissionBlocker{
-		RunID: reservation.runID, RepoID: reservation.repoID, Repo: reservation.repo, Ref: reservation.ref,
+		DeclaredResources: reservation.declaredResources(),
+		RunID:             reservation.runID, RepoID: reservation.repoID, Repo: reservation.repo, Ref: reservation.ref,
 		Size: string(reservation.size), Weight: reservation.weight, Used: gate.used, Capacity: gate.capacity,
 		WaitingSince: reservation.preparedAt,
 		Pressure:     gate.pressureWaitLocked(reservation),
@@ -678,9 +702,9 @@ func (gate *weightedAdmission) blockerLocked(reservation *admissionReservation) 
 	switch {
 	case gate.diskFloor != nil && !gate.diskFloor.freeAboveFloor():
 		blocker.DiskFloor = true
-	case gate.weights.wholeBudget(reservation.size):
+	case !gate.usesDeclarations(reservation) && gate.weights.wholeBudget(reservation.size):
 		blocker.FullDrain = true
-	case gate.maxRuns > 0 && gate.runs >= gate.maxRuns:
+	case (gate.maxRuns > 0 && gate.runs >= gate.maxRuns) || (gate.resources.IORuns > 0 && gate.runs >= gate.resources.IORuns):
 		blocker.RunCeiling = true
 	}
 	gate.backfillStateLocked(reservation, blocker)
@@ -712,6 +736,7 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 	}
 	result := &model.AdmissionObservation{State: "preparing", Used: gate.used, Capacity: gate.capacity}
 	if reservation.prepared {
+		result.DeclaredResources = reservation.declaredResources()
 		result.State = "waiting"
 		result.VMCapacity = reservation.vmParked
 		result.KubeVirtCapacity = gate.kubeVirtBlockedLocked(reservation)

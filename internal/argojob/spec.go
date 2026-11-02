@@ -553,6 +553,7 @@ type Request struct {
 	// ResourceMaximum is selected from the server's durable repository grant,
 	// never from pipeline annotations. Empty is legacy reconstruction only.
 	ResourceMaximum  periapsis.Size
+	PodDemand        *argoworkflow.PodDemand
 	VMIDemandReceipt *argoworkflow.VMIDemandReceipt
 	// omitStepUsage preserves already-running legacy specs during recovery.
 	omitStepUsage bool
@@ -669,6 +670,13 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 		return nil, err
 	}
 	workflow := resolved.Workflow()
+	delete(workflow.Annotations, podDemandAnnotation)
+	if request.PodDemand != nil {
+		peak, e := argoworkflow.DeclaredPodPeak(workflow)
+		if e != nil || peak == nil || *peak != *request.PodDemand {
+			return nil, errors.New("argojob: declared resource graph changed after reservation")
+		}
+	}
 	if request.ResourceMaximum != "" {
 		if err := argoworkflow.ValidateResourceCeiling(workflow, request.Repo, request.ResourceMaximum, int64(config.WorkflowTimeout/time.Second)); err != nil {
 			return nil, err
@@ -873,6 +881,7 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	if err := wrapStepUsage(workflow, request.legacyStepUsage); err != nil {
 		return nil, err
 	}
+	stampPodDemand(workflow, request.PodDemand)
 	digest, err := specIdentity(workflow)
 	if err != nil {
 		return nil, err

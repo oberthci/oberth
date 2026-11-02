@@ -360,6 +360,7 @@ type LogStore interface {
 }
 
 type JobRequest struct {
+	PodDemand *argoworkflow.PodDemand
 	// VMIDemandReceipt carries the exact graph reserved before submission.
 	VMIDemandReceipt *argoworkflow.VMIDemandReceipt
 	JobName          string

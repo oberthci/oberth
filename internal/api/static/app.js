@@ -477,9 +477,10 @@ function queuePhase(run) {
   const status = displayRunStatus(run);
   return status === "queued" && run.Scheduling?.state === "waiting" ? "waiting" : status;
 }
-function queueSize(run) { return admissionOf(run)?.size || ""; }
+function queueSize(run) { return admissionOf(run)?.declared_resources ? "" : admissionOf(run)?.size || ""; }
 function queueSizeTitle(run) {
   const admission = admissionOf(run);
+  if (admission?.declared_resources) return "declared CPU/memory requests, including executor reserve";
   if (!admission?.size) return "";
   return `declared size ${admission.size}${admission.capacity > 0 ? ` · admission weight ${admission.weight} of ${admission.capacity}` : ""}`;
 }
@@ -493,6 +494,9 @@ function queueReason(run) {
   if (a.group_holder || a.group_ahead) return `waiting for group ${a.group}`;
   const pressure = a.pressure || b?.pressure;
   if (pressure) return pressure.redacted ? `deferred: host ${pressure.resource} pressure` : `deferred: ${pressure.resource} pressure ${Number(pressure.avg60).toFixed(1)}%`;
+  if (a.declared_resources && b?.run_ceiling) return "waiting for an IO/run concurrency slot";
+  if (a.declared_resources) return `waiting for declared CPU/memory capacity (${a.declared_resources.cpu_milli}m CPU, ${a.declared_resources.memory_bytes} memory bytes)`
+    + (a.head_of_queue && b?.backfilling ? " · smaller runs admitted meanwhile" : a.head_of_queue && b?.draining ? " · host draining for it" : "");
   if (a.head_of_queue && b) return `waiting for capacity (${b.size}${b.full_drain ? ", needs the whole host" : ""})`
     + (b.backfilling ? " · smaller runs admitted meanwhile" : b.draining ? " · host draining for it" : "");
   if (b) return `waiting behind ${b.repo}/${b.ref} (${b.size})`;

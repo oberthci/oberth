@@ -379,6 +379,7 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 		return err
 	}
 	submission := argojob.Request{
+		PodDemand:        request.PodDemand,
 		VMIDemandReceipt: request.VMIDemandReceipt,
 		PipelineFile:     pipelineFile,
 		RunID:            request.Run.ID, RepositoryID: request.Repository.ID, Name: request.JobName,

@@ -24,6 +24,7 @@ import (
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/vmrunner"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
@@ -35,6 +36,7 @@ var errMutationBlocked = errors.New("service: mutation blocked by unavailable au
 type mutationRequirement func(context.Context) error
 
 type SchedulerConfig struct {
+	DeclaredAdmission DeclaredAdmissionConfig
 	Store             SchedulerStore
 	Git               WorkspaceGit
 	Logs              LogStore
@@ -196,6 +198,16 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 	// (weight 1) pack two per M slot. A grant wakes the loop too, so it can
 	// claim into weight a small run left spare.
 	scheduler.admission.maxRuns = scheduler.admission.capacity
+	if config.DeclaredAdmission.CPUMilli == 0 {
+		config.DeclaredAdmission.CPUMilli = DefaultDeclaredAdmissionConfig().CPUMilli
+	}
+	if config.DeclaredAdmission.MemoryBytes == 0 {
+		config.DeclaredAdmission.MemoryBytes = DefaultDeclaredAdmissionConfig().MemoryBytes
+	}
+	if err := config.DeclaredAdmission.Validate(); err != nil {
+		return nil, err
+	}
+	scheduler.admission.resources = config.DeclaredAdmission
 	scheduler.admission.capacityConfig = model.AdmissionCapacityConfig{MaxConcurrentJobs: config.MaxConcurrent, BootDefault: config.MaxConcurrent, Source: "boot", File: config.MaxConcurrentFile}
 	scheduler.admission.pressure = newPressureCheck(config.AdmissionPressure)
 	scheduler.admission.onPark = scheduler.signalQueue
@@ -478,7 +490,16 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		reservation, err := scheduler.admission.adopt(run, size, demand)
+		var pods *argoworkflow.PodDemand
+		if reader, ok := scheduler.jobs.(interface {
+			AdoptedPodDemand(model.Run) (*argoworkflow.PodDemand, error)
+		}); ok {
+			pods, err = reader.AdoptedPodDemand(run)
+			if err != nil {
+				return err
+			}
+		}
+		reservation, err := scheduler.admission.adopt(run, size, demand, pods)
 		if err != nil {
 			return err
 		}
@@ -828,10 +849,6 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			}
 		}
 	}
-	if err := scheduler.authorizeRunSize(ctx, run, repository, size); err != nil {
-		_ = logFile.Close()
-		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
-	}
 	// Priority is advisory: an unavailable grant read withholds the boost,
 	// never the release's execution or publication.
 	priorityMaximum, priorityErr := scheduler.releasePriorityMaximum(ctx, run)
@@ -859,10 +876,25 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("read pipeline KubeVirt demand: %w", err))
 	}
 	jobRequest.VMIDemandReceipt = kubeVirt.Receipt
+	var pods *argoworkflow.PodDemand
+	if !scheduler.admission.resources.Disabled && requirement.Contract == nil && kubeVirt.Demand.VMs == 0 && kubeVirt.Receipt != nil {
+		pods, err = kubeVirt.Receipt.DeclaredPodDemand()
+		if err != nil {
+			_ = logFile.Close()
+			return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
+		}
+	}
+	if pods == nil {
+		if err := scheduler.authorizeRunSize(ctx, run, repository, size); err != nil {
+			_ = logFile.Close()
+			return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
+		}
+	}
+	jobRequest.PodDemand = pods
 	scheduler.admissionRequested(ctx, run.ID)
 	headSince, estimate := scheduler.admissionHistory(ctx, run)
 	releaseAdmission, err := reservation.acquireRequest(ctx, admissionRequest{
-		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref, Size: size, Group: group,
+		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref, Size: size, Group: group, Pods: pods,
 		RefKind: run.RefKind, SHA: run.SHA, HeadSince: headSince, Estimate: estimate, KubeVirt: &kubeVirt, PriorityMaximum: priorityMaximum, PriorityLookupFailed: priorityErr != nil,
 	})
 	if errors.Is(err, errAdmissionAbandoned) {
@@ -1006,7 +1038,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	}
 
 	if _, ok := scheduler.jobs.(JobCreateSettler); ok {
-		if err := scheduler.recordCreateAdmission(run, jobName, size, kubeVirt.Demand); err != nil {
+		if err := scheduler.recordCreateAdmission(run, jobName, size, kubeVirt.Demand, pods); err != nil {
 			_ = logFile.Close()
 			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("record Workflow admission contract: %w", err))
 		}

@@ -246,6 +246,11 @@ spec:
             {{- with merge (deepCopy ($admission.sizeWeights | default dict)) (dict "S" 1 "M" 2 "L" 3 "XL" 0) }}
             - --admission-size-weights=S={{ int .S }},M={{ int .M }},L={{ int .L }},XL={{ int .XL }}
             {{- end }}
+            {{- $declared := merge (deepCopy ($admission.declaredResources | default dict)) (dict "disabled" false "cpuMillis" 8000 "memoryBytes" 17179869184 "ioRuns" 0) }}
+            - --disable-declared-admission={{ $declared.disabled }}
+            - --admission-cpu-millis={{ int64 $declared.cpuMillis }}
+            - --admission-memory-bytes={{ int64 $declared.memoryBytes }}
+            - --admission-io-runs={{ int $declared.ioRuns }}
             - --ci-cache-root={{ .Values.cache.ciRoot }}
             - --release-cache-root={{ .Values.cache.releaseRoot }}
             {{- if .Values.pushBannerURL }}

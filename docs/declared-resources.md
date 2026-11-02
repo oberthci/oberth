@@ -89,4 +89,5 @@ The anonymised laptop table remains unchanged and cannot supply suggestions
 where attempt identity is ambiguous.
 
 Stage B changes no queue units, admission weights, run ceilings or scheduling
-clocks. Stage C and later work remain separate. No schema migration is required.
+clocks. Stage C is described in [declared admission](declared-admission.md); later queue
+work remains separate. No schema migration is required.

@@ -20,6 +20,8 @@ type RunScheduling struct {
 }
 
 type AdmissionObservation struct {
+	DeclaredResources *DeclaredResources `json:"declared_resources,omitempty"`
+
 	Pressure         *PressureDeferral `json:"pressure,omitempty"`
 	KubeVirtCapacity bool              `json:"kubevirt_capacity,omitempty"`
 	VMCapacity       bool              `json:"vm_capacity,omitempty"`
@@ -52,6 +54,8 @@ type AdmissionObservation struct {
 // AdmissionBlocker is the claimed run at the head of the weighted admission
 // queue that does not fit, which holds back every run claimed after it.
 type AdmissionBlocker struct {
+	DeclaredResources *DeclaredResources `json:"declared_resources,omitempty"`
+
 	Pressure *PressureDeferral `json:"pressure,omitempty"`
 	RunID    string            `json:"run_id"`
 	RepoID   int64             `json:"-"`
@@ -109,6 +113,9 @@ func waitText(seconds int64) string {
 // Reason is the parenthesized why of a blocked admission, e.g.
 // "XL, needs a full drain".
 func (blocker AdmissionBlocker) Reason() string {
+	if d := blocker.DeclaredResources; d != nil {
+		return fmt.Sprintf("declared requests %dm CPU, %d memory bytes", d.CPUMilli, d.MemoryBytes)
+	}
 	switch {
 	case blocker.DiskFloor:
 		return blocker.Size + ", held by the disk floor"
@@ -209,6 +216,8 @@ type AdmissionState struct {
 // capacity), granted, or retained (granted, and kept held after its owner
 // stopped on an error that may have left its Workflow running).
 type AdmissionReservation struct {
+	DeclaredResources *DeclaredResources `json:"declared_resources,omitempty"`
+
 	Pressure *PressureDeferral `json:"pressure,omitempty"`
 	RunID    string            `json:"run_id"`
 	RepoID   int64             `json:"-"`
@@ -303,4 +312,12 @@ func (p *PressureDeferral) Reason() string {
 		return "deferred: host " + p.Resource + " pressure"
 	}
 	return fmt.Sprintf("deferred: %s pressure %.1f%%", p.Resource, p.Avg60)
+}
+
+// DeclaredResources describes this run's bound scheduling requests, including
+// the server helper reserve. Aggregate host usage is deliberately not included.
+type DeclaredResources struct {
+	CPUMilli    int64 `json:"cpu_milli"`
+	MemoryBytes int64 `json:"memory_bytes"`
+	Pods        int64 `json:"pods"`
 }

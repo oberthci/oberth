@@ -100,3 +100,18 @@ func (jobs *ArgoJobs) AdoptedKubeVirtDemand(run model.Run) (argoworkflow.VMIDema
 }
 
 var _ service.AdoptedKubeVirtSizer = (*ArgoJobs)(nil)
+
+// Restore the server-owned submission binding, never a fresh source analysis.
+func (jobs *ArgoJobs) AdoptedPodDemand(run model.Run) (*argoworkflow.PodDemand, error) {
+	jobs.mu.Lock()
+	defer jobs.mu.Unlock()
+	intent, ok := jobs.intents[run.JobName]
+	if !ok || intent.runID != run.ID || intent.adoption == nil {
+		return nil, fmt.Errorf("app: no adopted resource binding for run %s", run.ID)
+	}
+	if !intent.adoption.Pods.Valid() {
+		return nil, nil
+	}
+	d := intent.adoption.Pods
+	return &d, nil
+}

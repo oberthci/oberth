@@ -21,6 +21,7 @@ import (
 // Adoption pins observation to the exact Workflow found during owner recovery.
 // Resource size comes from that submission, never from the current default branch.
 type Adoption struct {
+	Pods        argoworkflow.PodDemand
 	RestartedAt time.Time
 	KubeVirt    argoworkflow.VMIDemand
 	Size        periapsis.Size
@@ -112,16 +113,25 @@ func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request Adop
 	if err != nil {
 		return Adoption{}, err
 	}
-	return Adoption{RestartedAt: controller.restartedAt, KubeVirt: demand, Size: size, UID: workflow.UID, Identity: identity, SpecSHA256: specHash}, nil
+	pods, err := readPodDemand(workflow)
+	if err != nil {
+		return Adoption{}, err
+	}
+	var peak argoworkflow.PodDemand
+	if pods != nil {
+		peak = *pods
+	}
+	return Adoption{Pods: peak, RestartedAt: controller.restartedAt, KubeVirt: demand, Size: size, UID: workflow.UID, Identity: identity, SpecSHA256: specHash}, nil
 }
 
 // Argo's status and API metadata change while it runs. Its live spec must stay
 // fixed, even if a replacement keeps the original identity annotation.
 func adoptionSpecHash(workflow *wfv1.Workflow) (string, error) {
 	body, err := json.Marshal(struct {
-		Spec     wfv1.WorkflowSpec `json:"spec"`
-		VMIQuota string            `json:"vmi_quota,omitempty"`
-	}{workflow.Spec, workflow.Annotations[vmiQuotaAnnotation]})
+		Spec      wfv1.WorkflowSpec `json:"spec"`
+		VMIQuota  string            `json:"vmi_quota,omitempty"`
+		PodDemand string            `json:"pod_demand,omitempty"`
+	}{workflow.Spec, workflow.Annotations[vmiQuotaAnnotation], workflow.Annotations[podDemandAnnotation]})
 	if err != nil {
 		return "", fmt.Errorf("argojob: encode adopted Workflow spec: %w", err)
 	}
