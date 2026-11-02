@@ -266,11 +266,11 @@ func (witness *RekorWitness) AbandonedChainTip(ctx context.Context) (model.Audit
 	var tip model.AuditWitness
 	found := false
 	ownCount := 0
-	for _, uuid := range candidates {
+	for verifiedCount, uuid := range candidates {
 		if enumerationDeadline.Err() != nil {
 			return model.AuditWitness{}, false, fmt.Errorf(
 				"audit anchor: Rekor identity enumeration timed out after verifying %d of %d candidates (%d own-chain)",
-				ownCount, len(candidates), ownCount,
+				verifiedCount, len(candidates), ownCount,
 			)
 		}
 		actualUUID, entry, getErr := witness.api.Get(enumerationDeadline, uuid)
