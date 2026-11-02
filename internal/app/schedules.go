@@ -23,8 +23,6 @@ const (
 	scheduleRunLookback    = 5
 )
 
-func isServerActor(actor string) bool { return actor == ScheduleActor }
-
 type ScheduleGit interface {
 	RefSHA(ctx context.Context, repo, branch string) (string, error)
 	ReadBlob(ctx context.Context, repo, sha, file string, limit int) ([]byte, error)

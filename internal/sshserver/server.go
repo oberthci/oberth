@@ -40,12 +40,6 @@ type IdentityResolver interface {
 	ResolveFingerprint(fingerprint string) (identity string, found bool, err error)
 }
 
-type IdentityResolverFunc func(string) (string, bool, error)
-
-func (f IdentityResolverFunc) ResolveFingerprint(fingerprint string) (string, bool, error) {
-	return f(fingerprint)
-}
-
 // ScopedIdentityResolver also returns the upstreams a scoped key is limited
 // to (#073). The server prefers it over ResolveFingerprint; a resolver
 // without it serves every key unscoped.

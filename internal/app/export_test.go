@@ -96,3 +96,5 @@ func (s fixtureIdentityStore) Save(ctx context.Context, name string, values map[
 	_, err = c.CoreV1().Secrets(s.namespace).Patch(ctx, name, types.ApplyPatchType, body, metav1.PatchOptions{FieldManager: "fixture", Force: &force})
 	return err
 }
+
+func isServerActor(actor string) bool { return actor == ScheduleActor }

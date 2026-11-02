@@ -98,10 +98,6 @@ func validArtifactDigest(value string) bool {
 	return err == nil && len(digest) == sha256.Size && hex.EncodeToString(digest) == value
 }
 
-func (c *artifactCache) lookup(repository, modulePath, version string) (*artifactVersion, error) {
-	return c.lookupStage(repository, modulePath, version, "")
-}
-
 // Zip publication is separate so metadata never depends on tree extraction.
 func (c *artifactCache) lookupStage(repository, modulePath, version, stage string) (*artifactVersion, error) {
 	file, err := os.Open(c.versionPath(artifactKey(repository, modulePath, version) + stage)) //nolint:gosec // Digest-only path under the private cache root.

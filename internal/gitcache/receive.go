@@ -98,20 +98,6 @@ func (c *Cache) Receive(ctx context.Context, input, actor, protocol string, stdi
 	}, handler)
 }
 
-func (c *Cache) receiveTransaction(ctx context.Context, repo, path, actor string, receive func() error, handler ReceiveHandler) error {
-	if strings.TrimSpace(actor) == "" {
-		return errors.New("receive actor is required")
-	}
-	if receive == nil || handler == nil {
-		return errors.New("receive operation and handler are required")
-	}
-	identity := c.reservationIdentity(repo, path)
-	receiveLock := c.receiveLock(path)
-	receiveLock.Lock()
-	defer receiveLock.Unlock()
-	return c.receiveTransactionSerialized(ctx, identity, path, actor, false, nil, receive, handler)
-}
-
 // receiveTransactionSerialized requires receiveLock for the repository's
 // path. `identity` is the reservation identity from reservationIdentity —
 // the canonical qualified spelling for a qualified cache, the bare name for
@@ -202,10 +188,6 @@ func (c *Cache) receiveTransactionSerialized(
 	// but outside repoLock so handlers can safely inspect accepted Git objects.
 	replayErr := c.replayRepoSerialized(ctx, identity, path, handler)
 	return errors.Join(receiveErr, replayErr)
-}
-
-func (c *Cache) reserveReceiveLocked(ctx context.Context, identity, path, actor string, admission ReleaseAdmission) (receiveReservation, error) {
-	return c.reserveReceiveAtMostLocked(ctx, identity, path, actor, admission, maximumPublicRefs)
 }
 
 func (c *Cache) reserveReceiveAtMostLocked(ctx context.Context, identity, path, actor string, admission ReleaseAdmission, maximum int) (receiveReservation, error) {

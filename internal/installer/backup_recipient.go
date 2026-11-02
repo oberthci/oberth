@@ -230,10 +230,6 @@ func BackupKeyOpens(archive, keyPath string) (bool, error) {
 	return false, nil
 }
 
-// IsUncheckableKey reports whether err only means the key could not be
-// tested before decryption.
-func IsUncheckableKey(err error) bool { return errors.Is(err, errKeyUncheckable) }
-
 func readRSAPrivateKey(path string) (*rsa.PrivateKey, error) {
 	if err := validateBackupPrivateKey(path); err != nil {
 		return nil, err

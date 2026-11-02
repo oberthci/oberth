@@ -164,10 +164,6 @@ func parseRekorEndpoint(endpoint string, insecureHTTP bool) (*url.URL, error) {
 	return parsed, nil
 }
 
-func newRekorWitness(api rekorAPI, verifier rekorEntryVerifier, keyMaterial []byte) (*RekorWitness, error) {
-	return newRekorWitnessWithInfo(api, verifier, keyMaterial, DefaultWitnessKeyInfo)
-}
-
 func newRekorWitnessWithInfo(api rekorAPI, verifier rekorEntryVerifier, keyMaterial []byte, info string) (*RekorWitness, error) {
 	if api == nil || verifier == nil {
 		return nil, errors.New("audit anchor: Rekor API and verifier are required")
@@ -187,10 +183,6 @@ func newRekorWitnessWithInfo(api rekorAPI, verifier rekorEntryVerifier, keyMater
 		publicDER: publicDER, identity: identity,
 		verified: make(map[string]model.AuditWitness),
 	}, nil
-}
-
-func deriveWitnessKey(keyMaterial []byte) (*ecdsa.PrivateKey, error) {
-	return deriveWitnessKeyWithInfo(keyMaterial, DefaultWitnessKeyInfo)
 }
 
 func deriveWitnessKeyWithInfo(keyMaterial []byte, info string) (*ecdsa.PrivateKey, error) {
