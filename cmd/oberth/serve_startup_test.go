@@ -628,6 +628,8 @@ func seedPreviousV2Database(t *testing.T, path string) (model.AuditHead, string)
 	if _, err := raw.Exec(`
 PRAGMA foreign_keys = OFF;
 BEGIN IMMEDIATE;
+DROP TRIGGER issues_metadata_revision;
+ALTER TABLE issues DROP COLUMN revision;
 ALTER TABLE token_credentials DROP COLUMN expires_at;
 DELETE FROM schema_migrations WHERE version >= 39;
 DROP TABLE IF EXISTS trusted_applies;
@@ -797,6 +799,8 @@ func seedLegacyV1Database(t *testing.T, path string, actionCount int) {
 	if _, err := raw.Exec(`
 PRAGMA foreign_keys = OFF;
 BEGIN IMMEDIATE;
+DROP TRIGGER issues_metadata_revision;
+ALTER TABLE issues DROP COLUMN revision;
 ALTER TABLE token_credentials DROP COLUMN expires_at;
 DELETE FROM schema_migrations WHERE version >= 39;
 DROP INDEX runs_latest_ref_idx;

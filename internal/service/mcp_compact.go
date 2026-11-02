@@ -68,7 +68,7 @@ func limitIssueBody(body string, limit int) string {
 
 func issueFieldValues(issue api.IssueResponse) map[string]any {
 	return map[string]any{
-		"id": issue.ID, "lock": issue.Lock, "upstream": issue.Upstream,
+		"revision": issue.Revision, "id": issue.ID, "lock": issue.Lock, "upstream": issue.Upstream,
 		"kind": issue.Kind, "title": issue.Title, "body": issue.Body,
 		"state": issue.State, "repo_id": issue.RepoID, "branch": issue.Branch,
 		"occurrences": issue.Occurrences, "ci_origin": issue.CIOrigin,
@@ -96,7 +96,7 @@ func issueReadBytes(value any) int {
 
 func wireIssueMutation(issue model.Issue, appendedBytes int) api.IssueMutationResponse {
 	return api.IssueMutationResponse{
-		ID: issue.ID, State: string(issue.State),
+		ID: issue.ID, State: string(issue.State), Revision: issue.Revision,
 		UpdatedAt:   issue.UpdatedAt.UTC().Format(time.RFC3339),
 		Occurrences: issue.Occurrences, AppendedBytes: appendedBytes,
 	}

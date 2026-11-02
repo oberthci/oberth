@@ -110,5 +110,5 @@ func (s *Store) CloseIssueWithReason(ctx context.Context, actor string, id int64
 	if err := tx.Commit(); err != nil {
 		return model.Issue{}, err
 	}
-	return value, nil
+	return scanIssue(tx.QueryRowContext(ctx, `SELECT `+issueColumns+` FROM issues WHERE id=?`, id))
 }

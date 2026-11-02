@@ -31,3 +31,11 @@ No schema migration, chart values or additional cluster permissions are needed.
 the write transaction. Body replacement and `issue_append` change that hash;
 title, state and scope changes do not. It is not an atomic metadata revision
 precondition.
+
+Issue reads return `revision`, initially 1. `issue_update` accepts optional
+`expected_revision`; the writer transaction checks it before metadata or audit
+changes. A mismatch is a conflict. Omission keeps last-write-wins behavior.
+Revision advances only when title, state or scope actually changes. Body and
+lock updates leave it unchanged; use the body hash separately for body snapshots.
+After a successful write, read the returned revision rather than predicting it.
+Migration v40 adds the column and trigger; rollback requires the v38 backup.

@@ -678,11 +678,17 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			Body               *string `json:"body"`
 			Upstream           *string `json:"upstream"`
 			ExpectedBodySHA256 string  `json:"expected_body_sha256"`
+			ExpectedRevision   *int64  `json:"expected_revision"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		issue, err := service.issueUpdate(ctx, actor, arguments.ID, arguments.Title, arguments.Body, arguments.Upstream, arguments.ExpectedBodySHA256)
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &fields)
+		if value, ok := fields["expected_revision"]; ok && (string(value) == "null" || arguments.ExpectedRevision == nil || *arguments.ExpectedRevision < 1) {
+			return nil, fmt.Errorf("%w: expected_revision must be a positive integer", ErrInvalidInput)
+		}
+		issue, err := service.issueUpdate(ctx, actor, arguments.ID, arguments.Title, arguments.Body, arguments.Upstream, arguments.ExpectedBodySHA256, arguments.ExpectedRevision)
 		if err != nil {
 			return nil, err
 		}
@@ -1341,20 +1347,21 @@ func (service *API) Issues(ctx context.Context, actor api.Actor, filter api.Issu
 	result := api.IssueListPage{Issues: make([]api.IssueListSummary, len(page.Issues)), NextBefore: page.NextBefore, Total: page.Total, Counts: page.Counts}
 	for i, issue := range page.Issues {
 		result.Issues[i] = api.IssueListSummary{
-			ID:            issue.ID,
-			RepoID:        issue.RepoID,
-			Kind:          issue.Kind,
-			Branch:        issue.Branch,
-			Title:         issue.Title,
-			State:         issue.State,
-			Occurrences:   issue.Occurrences,
-			CIOrigin:      issue.CIOrigin,
-			CIWorkID:      issue.CIWorkID,
-			Upstream:      issue.Upstream,
-			Lock:          issue.Lock,
-			CreatedAt:     issue.CreatedAt,
-			UpdatedAt:     issue.UpdatedAt,
-			ClosedAt:      issue.ClosedAt,
+			ID:          issue.ID,
+			Revision:    issue.Revision,
+			RepoID:      issue.RepoID,
+			Kind:        issue.Kind,
+			Branch:      issue.Branch,
+			Title:       issue.Title,
+			State:       issue.State,
+			Occurrences: issue.Occurrences,
+			CIOrigin:    issue.CIOrigin,
+			CIWorkID:    issue.CIWorkID,
+			Upstream:    issue.Upstream,
+			Lock:        issue.Lock,
+			CreatedAt:   issue.CreatedAt,
+			UpdatedAt:   issue.UpdatedAt,
+			ClosedAt:    issue.ClosedAt,
 		}
 	}
 	return result, nil
@@ -2648,14 +2655,14 @@ func (service *API) issueGet(ctx context.Context, _ api.Actor, id int64) (model.
 	return service.withIssueLock(ctx, issues[0])
 }
 
-func (service *API) issueUpdate(ctx context.Context, actor api.Actor, id int64, title, body, upstream *string, expectedBodySHA256 string) (model.Issue, error) {
+func (service *API) issueUpdate(ctx context.Context, actor api.Actor, id int64, title, body, upstream *string, expectedBodySHA256 string, expectedRevision *int64) (model.Issue, error) {
 	if service.issues == nil {
 		return model.Issue{}, refuse(ErrUnavailable, "issues")
 	}
-	if id <= 0 || (title == nil && body == nil && upstream == nil) || (title == nil) != (body == nil) {
-		return model.Issue{}, fmt.Errorf("%w: issue ID and either upstream or both title and body are required", ErrInvalidInput)
+	if id <= 0 || (title == nil && body == nil && upstream == nil) {
+		return model.Issue{}, fmt.Errorf("%w: issue ID and title, body or upstream are required", ErrInvalidInput)
 	}
-	patch := model.IssuePatch{Title: title, Body: body}
+	patch := model.IssuePatch{Title: title, Body: body, ExpectedRevision: expectedRevision}
 	if upstream != nil {
 		name := strings.TrimSpace(*upstream)
 		if actor.Admin && actor.Scoped() && (name == "" || strings.EqualFold(name, "global") || !actor.SeesUpstream(name)) {
@@ -2827,8 +2834,8 @@ func (service *API) labelIssueScopes(ctx context.Context, issues []model.Issue) 
 
 func wireIssue(issue model.Issue) api.IssueResponse {
 	return api.IssueResponse{
-		Lock: issue.Lock,
-		ID:   issue.ID, Kind: string(issue.Kind), Title: issue.Title,
+		Lock: issue.Lock, Revision: issue.Revision,
+		ID: issue.ID, Kind: string(issue.Kind), Title: issue.Title,
 		Body: issue.Body, State: string(issue.State),
 		Upstream: issue.Upstream,
 		RepoID:   issue.RepoID, Branch: issue.Branch,

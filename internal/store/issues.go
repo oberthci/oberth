@@ -14,7 +14,7 @@ import (
 
 const issueColumns = `
 id, repo_id, kind, branch, title, body, state, occurrences,
-ci_origin, ci_work_sequence, ci_work_id, created_at, updated_at, closed_at, scope_upstream_id`
+ci_origin, ci_work_sequence, ci_work_id, created_at, updated_at, closed_at, scope_upstream_id, revision`
 
 func (s *Store) CloseCIIssue(ctx context.Context, actor string, issueID int64, resolution string) (model.Issue, error) {
 	resolution = strings.TrimSpace(resolution)
@@ -56,7 +56,7 @@ RETURNING `+issueColumns, now, now, resolution, resolution, issueID))
 	if err := s.appendIssueAudit(ctx, tx, actor, "issue.ci.close", value.ID, map[string]any{"branch": value.Branch, "resolution": resolution}, now); err != nil {
 		return model.Issue{}, err
 	}
-	return value, nil
+	return scanIssue(tx.QueryRowContext(ctx, `SELECT `+issueColumns+` FROM issues WHERE id=?`, issueID))
 }
 
 func (s *Store) CreateManualIssue(ctx context.Context, actor string, spec model.ManualIssueSpec) (model.Issue, error) {
@@ -163,6 +163,9 @@ func (s *Store) updateIssue(ctx context.Context, actor string, id int64, patch m
 	if err := s.requireIssueMutationLock(ctx, tx, id, actor, updatedAt, !closing); err != nil {
 		return model.Issue{}, err
 	}
+	if err := requireIssueRevision(ctx, tx, id, patch.ExpectedRevision); err != nil {
+		return model.Issue{}, err
+	}
 	var oldScope int64
 	if patch.ScopeUpstreamID != nil {
 		var kind model.IssueKind
@@ -225,6 +228,10 @@ func (s *Store) updateIssue(ctx context.Context, actor string, id int64, patch m
 		details["new_scope_upstream_id"] = value.ScopeUpstreamID
 	}
 	if err := s.appendIssueAudit(ctx, tx, actor, "issue.update", value.ID, details, now); err != nil {
+		return model.Issue{}, err
+	}
+	value, err = scanIssue(tx.QueryRowContext(ctx, `SELECT `+issueColumns+` FROM issues WHERE id=?`, id))
+	if err != nil {
 		return model.Issue{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -510,7 +517,7 @@ func scanIssue(row rowScanner) (model.Issue, error) {
 	if err := scanRowNotFound(row, "Issue", &value.ID, &repoID, &value.Kind, &value.Branch,
 		&value.Title, &value.Body, &value.State, &value.Occurrences,
 		&value.CIOrigin, &value.CIWorkSequence, &value.CIWorkID,
-		&created, &updated, &closed, &scopeUpstreamID); err != nil {
+		&created, &updated, &closed, &scopeUpstreamID, &value.Revision); err != nil {
 		return model.Issue{}, err
 	}
 	value.RepoID = repoID.Int64

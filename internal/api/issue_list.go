@@ -16,18 +16,19 @@ type IssueListPage struct {
 	Counts     model.IssueCounts `json:"counts"`
 }
 type IssueListSummary struct {
-	ID            int64
-	RepoID        int64
-	Kind          model.IssueKind
-	Branch        string
-	Title         string
-	State         model.IssueState
-	Occurrences   int64
-	CIOrigin      string
-	CIWorkID      string
-	Upstream      string           `json:"upstream"`
-	Lock          *model.IssueLock `json:"lock"`
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	ClosedAt      *time.Time
+	Revision    int64 `json:"revision"`
+	ID          int64
+	RepoID      int64
+	Kind        model.IssueKind
+	Branch      string
+	Title       string
+	State       model.IssueState
+	Occurrences int64
+	CIOrigin    string
+	CIWorkID    string
+	Upstream    string           `json:"upstream"`
+	Lock        *model.IssueLock `json:"lock"`
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	ClosedAt    *time.Time
 }

@@ -2837,6 +2837,7 @@ alone is never evidence that missing migrations ran.
 | v38 | Upstream publication retry | Persist bounded attempts, retry deadlines and audited owner progress without changing the pushed object or promotion plan | Database restore |
 | v39 | Submission priority | Persist expiring identity grants, audited priority requests and supersession protection; existing priority ordering remains compatible | Database restore |
 | v39 | Bearer token expiry | Nullable absolute expiry; existing credentials retain their lifetime | Database restore |
+| v40 | Issue metadata revision | Positive revision; advances only for real title, state or scope changes | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding

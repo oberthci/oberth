@@ -18,7 +18,7 @@ func TestTokenExpiryMigrationPreservesExistingCredentials(t *testing.T) {
 	}
 	defer database.Close()
 	_, digest := lifecycleUplink(t, database, "legacy", "SHA256:legacy", false)
-	if _, err := database.db.ExecContext(t.Context(), `ALTER TABLE token_credentials DROP COLUMN expires_at; DELETE FROM schema_migrations WHERE version=39;`); err != nil {
+	if _, err := database.db.ExecContext(t.Context(), integrationDowngradeSQL); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.Close(); err != nil {

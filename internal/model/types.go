@@ -597,6 +597,7 @@ const (
 func (s IssueState) Valid() bool { return s == IssueOpen || s == IssueClosed }
 
 type Issue struct {
+	Revision int64 `json:"revision"`
 	// Lock is transient API observation, populated after visibility checks.
 	Lock           *IssueLock `json:"lock"`
 	ID             int64
@@ -628,9 +629,10 @@ type ManualIssueSpec struct {
 }
 
 type IssuePatch struct {
-	Title *string
-	Body  *string
-	State *IssueState
+	ExpectedRevision *int64
+	Title            *string
+	Body             *string
+	State            *IssueState
 	// ScopeUpstreamID moves a manual issue; zero means workspace-global.
 	ScopeUpstreamID *int64
 }
