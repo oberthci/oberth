@@ -1,4 +1,4 @@
-package oberth
+package main
 
 import (
 	"context"
