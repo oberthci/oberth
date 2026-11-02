@@ -67,7 +67,7 @@ func parseField(name, raw string, low, high int, wrapSeven bool) (field, error) 
 	if raw == "" {
 		return field{}, fmt.Errorf("cron: %s field is empty", name)
 	}
-	result.restricted = raw != "*"
+	result.restricted = !strings.HasPrefix(raw, "*")
 	for _, item := range strings.Split(raw, ",") {
 		if item == "" {
 			return field{}, fmt.Errorf("cron: %s field %q has an empty entry", name, raw)
@@ -113,6 +113,9 @@ func parseField(name, raw string, low, high int, wrapSeven bool) (field, error) 
 				return field{}, fmt.Errorf("cron: %s entry %q is not numeric", name, item)
 			}
 			start, end = value, value
+			if strings.Contains(item, "/") {
+				end = high
+			}
 		}
 		if start < low || end > high {
 			return field{}, fmt.Errorf("cron: %s entry %q is outside %d-%d", name, item, low, high)
@@ -123,6 +126,9 @@ func parseField(name, raw string, low, high int, wrapSeven bool) (field, error) 
 				slot = 0
 			}
 			result.allowed[slot] = true
+			if step > end-value {
+				break
+			}
 		}
 	}
 	return result, nil
@@ -131,10 +137,6 @@ func parseField(name, raw string, low, high int, wrapSeven bool) (field, error) 
 func (f field) matches(value int) bool { return f.allowed[value] }
 
 func (schedule Schedule) Next(after time.Time) (time.Time, error) {
-	if !schedule.month.restricted && !schedule.minute.restricted &&
-		!schedule.hour.restricted && !schedule.day.restricted && !schedule.weekday.restricted {
-		return after.UTC().Truncate(time.Minute).Add(time.Minute), nil
-	}
 	candidate := after.UTC().Truncate(time.Minute).Add(time.Minute)
 	limit := candidate.AddDate(0, 0, maxSearchDays)
 	for candidate.Before(limit) {
@@ -169,34 +171,47 @@ func (schedule Schedule) dayMatches(candidate time.Time) bool {
 	return dayOK && weekdayOK
 }
 
-const intervalWindow = 48 * time.Hour
-
-const maxIntervalSamples = 4000
-
+// Interval checks time-of-day gaps and the full Gregorian calendar cycle.
+// UTC dates and weekdays repeat after 400 years (146097 days). Checking one
+// cycle plus its wraparound covers leap years and month/year boundaries.
 func (schedule Schedule) Interval(from time.Time) (time.Duration, error) {
-	first, err := schedule.Next(from)
-	if err != nil {
-		return 0, err
-	}
-	deadline := first.Add(intervalWindow)
-	smallest := time.Duration(0)
-	previous := first
-	for samples := 0; samples < maxIntervalSamples; samples++ {
-		next, err := schedule.Next(previous)
-		if err != nil {
-			break
+	var times []time.Duration
+	for hour := 0; hour < 24; hour++ {
+		for minute := 0; minute < 60; minute++ {
+			if schedule.hour.matches(hour) && schedule.minute.matches(minute) {
+				times = append(times, time.Duration(hour*60+minute)*time.Minute)
+			}
 		}
-		gap := next.Sub(previous)
+	}
+	if len(times) == 0 {
+		return 0, fmt.Errorf("cron: no allowed time of day")
+	}
+	smallest := time.Duration(0)
+	consider := func(gap time.Duration) {
 		if smallest == 0 || gap < smallest {
 			smallest = gap
 		}
-		if !next.Before(deadline) {
-			break
+	}
+	for i := 1; i < len(times); i++ {
+		consider(times[i] - times[i-1])
+	}
+	day := time.Date(from.UTC().Year(), 1, 1, 0, 0, 0, 0, time.UTC)
+	var first, previous time.Time
+	for i := 0; i < 146097; i++ {
+		if schedule.month.matches(int(day.Month())) && schedule.dayMatches(day) {
+			if first.IsZero() {
+				first = day
+			}
+			if !previous.IsZero() {
+				consider(day.Add(times[0]).Sub(previous.Add(times[len(times)-1])))
+			}
+			previous = day
 		}
-		previous = next
+		day = day.AddDate(0, 0, 1)
 	}
-	if smallest == 0 {
-		return 0, fmt.Errorf("cron: no second occurrence after %s", first.Format(time.RFC3339))
+	if first.IsZero() {
+		return 0, fmt.Errorf("cron: no occurrence in the Gregorian calendar cycle")
 	}
+	consider(first.AddDate(400, 0, 0).Add(times[0]).Sub(previous.Add(times[len(times)-1])))
 	return smallest, nil
 }
