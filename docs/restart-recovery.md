@@ -7,7 +7,8 @@ worker's claim so the new scheduler can admit the original run; a promotion
 keeps its pending record and original CI run. A deterministic Workflow name
 recorded before admission does not mean a Workflow was submitted. These runs
 need no Workflow deletion. Recovery still excludes durable execution and
-publication evidence from this path.
+publication evidence from this path. An eligible waiting run is retained even
+when a newer active sibling exists in the same ref and schedule lane.
 
 An owner restart adopts a live branch or tag Workflow only after the engine
 verifies its existing run, specification, identity, and credential bindings.
