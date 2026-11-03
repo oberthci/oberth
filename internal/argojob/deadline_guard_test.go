@@ -118,7 +118,7 @@ func TestDeadlineGuardVMWithoutDeclaredDeadline(t *testing.T) {
 	workflow.CreationTimestamp = metav1.NewTime(origin)
 	observation := &model.ExecutionObservation{}
 	observeServerDeadline(workflow, observation, 30*time.Minute, origin.Add(time.Minute))
-	if observation.ServerDeadline == nil || observation.ServerDeadline.ExpiresAt == nil || !observation.ServerDeadline.ExpiresAt.Equal(origin.Add(30*time.Minute)) || *observation.ServerDeadline.RemainingSeconds != 1740 {
+	if observation.ServerDeadline == nil || observation.ServerDeadline.ExpiresAt == nil || !observation.ServerDeadline.ExpiresAt.Equal(origin.Add(33*time.Minute)) || *observation.ServerDeadline.RemainingSeconds != 1920 {
 		t.Fatalf("VM watchdog hidden or reset: %+v", observation)
 	}
 }

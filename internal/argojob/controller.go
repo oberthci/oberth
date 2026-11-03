@@ -437,9 +437,13 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 	parent := ctx
 	ctx, cancelWatchdog := context.WithCancelCause(ctx)
 	watchdogFailure := fmt.Errorf("%s Server watchdog expired: %w", model.ExecutionDeadlineMessage, context.DeadlineExceeded)
-	watchdog := time.AfterFunc(controller.config.ExecutionTimeout("", nil), func() { cancelWatchdog(watchdogFailure) })
+	// Arm only after reading the submitted bound. A failed first read must not
+	// substitute the default timeout for a longer declared deadline.
+	var watchdog *time.Timer
 	defer func() {
-		watchdog.Stop()
+		if watchdog != nil {
+			watchdog.Stop()
+		}
 		if context.Cause(ctx) == watchdogFailure {
 			cleanup, stop := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
 			defer stop()
@@ -447,7 +451,8 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 		}
 		cancelWatchdog(nil)
 	}()
-	deadlineBound := false
+	var boundDeadline time.Time
+	observingSince := time.Now()
 	session := controller.resourceSession(ctx, runID)
 	defer session.finish()
 	if retained < 0 {
@@ -507,19 +512,32 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 		if binding.UID != "" && !binding.matches(workflow) {
 			return Completion{}, errors.New("argojob: adopted Workflow identity changed")
 		}
-		if !deadlineBound && !workflow.Status.Phase.Completed() {
-			budget := controller.config.ExecutionTimeout("", workflow.Spec.ActiveDeadlineSeconds)
-			origin := workflow.CreationTimestamp.Time
+		if !workflow.Status.Phase.Completed() {
+			budget := watchdogBudget(controller.config.ExecutionTimeout("", workflow.Spec.ActiveDeadlineSeconds))
+			origin, _ := watchdogOrigin(workflow)
 			if origin.IsZero() {
-				origin = time.Now()
+				origin = observingSince
 			}
-			remaining := time.Until(origin.Add(budget))
-			deadlineBound = true
+			expires := origin.Add(budget)
+			remaining := time.Until(expires)
 			if remaining <= 0 {
 				cancelWatchdog(watchdogFailure)
 				return Completion{}, watchdogFailure
 			}
-			watchdog.Reset(remaining)
+			// Rebind when Argo first records its start, including after adoption.
+			// Ordinary polling must not extend either clock.
+			if !expires.Equal(boundDeadline) {
+				if watchdog == nil {
+					watchdog = time.AfterFunc(remaining, func() { cancelWatchdog(watchdogFailure) })
+				} else {
+					watchdog.Reset(remaining)
+				}
+				boundDeadline = expires
+			}
+		} else if watchdog != nil {
+			// Once Argo has finished, log and diagnostic collection must not
+			// turn its observed result into a watchdog deletion.
+			watchdog.Stop()
 		}
 		// Observe already-created Pods before identity delivery can block on a
 		// later Pod: early step output must not wait behind that setup RPC.

@@ -10,3 +10,6 @@ console.log('Preflight absolute deadline and admission clock are visible.');
 const vmLines = vm.runInContext(`summaryLines({Run:{ID:'run',Status:'running'},Steps:[],Scheduling:{execution:{state:'observed',server_deadline:{clock:'workflow_created_at',expires_at:'2026-11-03T13:00:00Z',remaining_seconds:55}}}})`,context);
 assert.ok(vmLines.some(line => typeof line === 'string' && line.includes('[server watchdog] 2026-11-03T13:00:00Z') && line.includes('55s remaining') && line.includes('Workflow creation')));
 console.log('VM server watchdog deadline is visible before Workflow start.');
+const startedLines = vm.runInContext(`summaryLines({Run:{ID:'run',Status:'running'},Steps:[],Scheduling:{execution:{state:'observed',server_deadline:{clock:'workflow_started_at',expires_at:'2026-11-03T13:00:00Z',remaining_seconds:55}}}})`,context);
+assert.ok(startedLines.some(line => typeof line === 'string' && line.includes('[server watchdog]') && line.includes('clock: Workflow start')));
+console.log('VM server watchdog displays the Argo start clock after start.');

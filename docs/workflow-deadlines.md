@@ -21,11 +21,15 @@ workflow and template suspension are refused.
 Templates may also declare `activeDeadlineSeconds` and `timeout`; these fields
 survive submission. Argo constrains ordinary step Pods by the workflow time
 remaining and any shorter template deadline. Every step, including VM resource steps, shares the bounded workflow lifetime.
-A server watchdog independently bounds observation from Workflow creation,
-including an unstarted Workflow or a hung init container. Restart and retry
-use the same creation timestamp; they do not restart this budget. The watchdog
-requests ownership-checked deletion when it expires. Individual commands may
-also have shorter bounds.
+A server watchdog uses Argo's start timestamp and adds a grace period of
+`max(2 minutes, 10% of the workflow budget)`. This lets Argo record its deadline
+failure, failed steps and diagnostics before the watchdog requests
+ownership-checked deletion. Before Argo reports a start, the watchdog uses
+Workflow creation with the same budget and grace, bounding an unstarted
+Workflow too. Once the start appears, the watchdog switches to that clock.
+Restart and retry retain the observed timestamps and do not restart the budget.
+An initial failed read uses the existing bounded read-outage policy until the
+submitted deadline can be read. Individual commands may have shorter bounds.
 
 Detailed MCP `status` / `run_get`, the run-detail API, `oberth run`, and the
 dashboard's run detail expose an ephemeral execution observation, bounded by
@@ -34,7 +38,8 @@ have progressed. The observation uses one exact Workflow GET and at most one
 scoped Pod LIST of 16 items, with ownership checks; it does not read logs.
 Run-list and live-log refreshes do not gain execution polling.
 `Scheduling.execution.server_deadline` shows the independent watchdog with
-`clock: workflow_created_at`, including before Argo records a start timestamp.
+`clock: workflow_started_at` after Argo records a start timestamp and
+`clock: workflow_created_at` beforehand. Its budget includes the grace period.
 
 `Scheduling.execution.deadline` (`scheduling` on MCP status) includes:
 
