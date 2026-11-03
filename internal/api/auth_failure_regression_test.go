@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -12,7 +13,7 @@ import (
 	"time"
 )
 
-func TestAuthenticationFailuresAreLimitedByPeerIPAndLogged(t *testing.T) {
+func TestAuthenticationFailuresAreLimitedByPeerAndCredentialAndLogged(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var logs bytes.Buffer
 		previous := log.Writer()
@@ -34,14 +35,14 @@ func TestAuthenticationFailuresAreLimitedByPeerIPAndLogged(t *testing.T) {
 			return response.Code
 		}
 		for i := 0; i < 10; i++ {
-			if code := call("192.0.2.1:1234", i%2 == 0); code != http.StatusUnauthorized {
+			if code := call("192.0.2.1:1234", false); code != http.StatusUnauthorized {
 				t.Fatalf("failure %d: %d", i, code)
 			}
 		}
 		if code := call("192.0.2.1:5678", false); code != http.StatusTooManyRequests {
 			t.Fatalf("exhausted IP: %d, want 429", code)
 		}
-		if lookups != 6 {
+		if lookups != 11 {
 			t.Fatalf("failure lookup count: %d lookups", lookups)
 		}
 		if code := call("192.0.2.2:1234", false); code != http.StatusUnauthorized {
@@ -80,5 +81,46 @@ func TestValidBearerSurvivesSharedPeerFailureLimit(t *testing.T) {
 		if response.Code != http.StatusOK {
 			t.Fatalf("valid token after peer failures: %d", response.Code)
 		}
+	}
+}
+
+func TestFailureLimiterSeparatesCredentialsBehindSharedIngress(t *testing.T) {
+	server, _ := testServer(t)
+	server.auth = streamAuthFunc(func(context.Context, string) (Actor, error) { return Actor{}, ErrInvalidToken })
+	call := func(token string) int {
+		request := httptest.NewRequest(http.MethodGet, "/api/repos", nil)
+		request.RemoteAddr = "192.0.2.1:1234"
+		if token != "" {
+			request.Header.Set("Authorization", "Bearer "+token)
+		}
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		return response.Code
+	}
+	for range authFailureLimit {
+		if code := call("invalid-one"); code != 401 {
+			t.Fatalf("initial failure: %d", code)
+		}
+	}
+	if code := call("invalid-one"); code != 429 {
+		t.Fatalf("exhausted principal: %d", code)
+	}
+	for _, token := range []string{"invalid-two", "expired-token", ""} {
+		if code := call(token); code != 401 {
+			t.Fatalf("distinct credential behind ingress got %d, want 401", code)
+		}
+	}
+}
+
+func TestFailureLimiterCapacityDoesNotRejectNewPrincipal(t *testing.T) {
+	var limiter authFailureLimiter
+	for i := range maxAuthFailurePeers {
+		limiter.check(fmt.Sprintf("principal-%d", i), true)
+	}
+	if limiter.check("new-principal", true) {
+		t.Fatal("unrelated buckets must not rate-limit a new principal")
+	}
+	if len(limiter.peers) > maxAuthFailurePeers {
+		t.Fatal("failure limiter exceeded its memory bound")
 	}
 }

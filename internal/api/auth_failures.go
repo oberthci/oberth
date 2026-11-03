@@ -1,6 +1,8 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"log"
 	"net"
 	"net/http"
@@ -36,6 +38,18 @@ func authPeer(request *http.Request) string {
 	return addr.Unmap().String()
 }
 
+// Hash the complete bearer credential to keep independent principals behind a
+// shared ingress separate without retaining token material. Malformed/missing
+// credentials share their peer's anonymous bucket. Forwarded headers are ignored.
+func authFailurePrincipal(request *http.Request) string {
+	token, ok := bearerToken(request.Header.Values("Authorization"))
+	if !ok {
+		return authPeer(request) + ":anonymous"
+	}
+	sum := sha256.Sum256([]byte(token))
+	return authPeer(request) + ":" + hex.EncodeToString(sum[:])
+}
+
 func (limiter *authFailureLimiter) check(peer string, failure bool) bool {
 	limiter.mu.Lock()
 	defer limiter.mu.Unlock()
@@ -60,7 +74,16 @@ func (limiter *authFailureLimiter) check(peer string, failure bool) bool {
 			}
 		}
 		if _, exists := limiter.peers[peer]; !exists && len(limiter.peers) >= maxAuthFailurePeers {
-			return true
+			// Capacity pressure must not turn unrelated failures into a global
+			// lockout. Replace the bucket nearest expiry, retaining the bound.
+			var oldest string
+			var until time.Time
+			for key, value := range limiter.peers {
+				if oldest == "" || value.until.Before(until) {
+					oldest, until = key, value.until
+				}
+			}
+			delete(limiter.peers, oldest)
 		}
 	}
 	bucket.count++
@@ -75,7 +98,7 @@ func (server *Server) logAuthFailure(request *http.Request, reason string) {
 }
 
 func (server *Server) recordAuthFailure(writer http.ResponseWriter, request *http.Request, reason string) bool {
-	if server.authFailures.check(authPeer(request), true) {
+	if server.authFailures.check(authFailurePrincipal(request), true) {
 		writeAuthRateLimit(writer)
 		return true
 	}
