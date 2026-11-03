@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -165,6 +167,16 @@ func (s *Store) updateIssue(ctx context.Context, actor string, id int64, patch m
 	}
 	if err := requireIssueRevision(ctx, tx, id, patch.ExpectedRevision); err != nil {
 		return model.Issue{}, err
+	}
+	if patch.ExpectedBodySHA256 != "" {
+		var body string
+		if err := tx.QueryRowContext(ctx, `SELECT body FROM issues WHERE id=?`, id).Scan(&body); err != nil {
+			return model.Issue{}, translateNotFound("issue", err)
+		}
+		sum := sha256.Sum256([]byte(body))
+		if hex.EncodeToString(sum[:]) != patch.ExpectedBodySHA256 {
+			return model.Issue{}, fmt.Errorf("%w: expected_body_sha256 mismatch; reread issue_get before retrying", ErrInvalid)
+		}
 	}
 	var oldScope int64
 	if patch.ScopeUpstreamID != nil {

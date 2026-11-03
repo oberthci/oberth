@@ -630,10 +630,11 @@ type ManualIssueSpec struct {
 }
 
 type IssuePatch struct {
-	ExpectedRevision *int64
-	Title            *string
-	Body             *string
-	State            *IssueState
+	ExpectedBodySHA256 string
+	ExpectedRevision   *int64
+	Title              *string
+	Body               *string
+	State              *IssueState
 	// ScopeUpstreamID moves a manual issue; zero means workspace-global.
 	ScopeUpstreamID *int64
 }

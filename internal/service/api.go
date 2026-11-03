@@ -3,8 +3,6 @@ package service
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -2664,7 +2662,7 @@ func (service *API) issueUpdate(ctx context.Context, actor api.Actor, id int64, 
 	if id <= 0 || (title == nil && body == nil && upstream == nil) {
 		return model.Issue{}, fmt.Errorf("%w: issue ID and title, body or upstream are required", ErrInvalidInput)
 	}
-	patch := model.IssuePatch{Title: title, Body: body, ExpectedRevision: expectedRevision}
+	patch := model.IssuePatch{Title: title, Body: body, ExpectedRevision: expectedRevision, ExpectedBodySHA256: expectedBodySHA256}
 	if upstream != nil {
 		name := strings.TrimSpace(*upstream)
 		if actor.Admin && actor.Scoped() && (name == "" || strings.EqualFold(name, "global") || !actor.SeesUpstream(name)) {
@@ -2684,21 +2682,11 @@ func (service *API) issueUpdate(ctx context.Context, actor api.Actor, id int64, 
 		}
 		patch.ScopeUpstreamID = &id
 	}
-	// This checks the current body snapshot before the write transaction.
-	// It does not guard concurrent title, state or scope changes.
-	if expectedBodySHA256 != "" {
-		existing, err := service.issues.Issue(ctx, id)
-		if err != nil {
-			return model.Issue{}, err
-		}
-		sum := sha256.Sum256([]byte(existing.Body))
-		actual := hex.EncodeToString(sum[:])
-		if actual != expectedBodySHA256 {
-			return model.Issue{}, fmt.Errorf("%w: expected_body_sha256 mismatch: the existing body has changed or the caller's hash is wrong (got %s)", ErrInvalidInput, actual)
-		}
-	}
 	issue, err := service.issues.UpdateIssue(ctx, actor.Identity, id, patch)
 	if err != nil {
+		if errors.Is(err, store.ErrInvalid) {
+			return model.Issue{}, fmt.Errorf("%w: %w", ErrInvalidInput, err)
+		}
 		return model.Issue{}, err
 	}
 	issues := []model.Issue{issue}
