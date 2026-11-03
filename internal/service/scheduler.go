@@ -900,8 +900,10 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	jobRequest.VMIDemandReceipt = kubeVirt.Receipt
 	var pods *argoworkflow.PodDemand
 	var fallback model.ResourceAdmissionFallback
-	if requirement.Contract == nil {
-		pods, fallback = scheduler.admission.selectDeclaredDemand(kubeVirt.Receipt)
+	pods, fallback, err = scheduler.admission.selectDeclaredDemand(kubeVirt.Receipt)
+	if err != nil {
+		_ = logFile.Close()
+		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
 	}
 	if pods == nil {
 		if err := scheduler.authorizeRunSize(ctx, run, repository, size); err != nil {
@@ -942,10 +944,8 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	fallback = reservation.fallback
 	scheduler.admission.mu.Unlock()
 	if pods != nil && actualPods == nil {
-		if err := scheduler.authorizeRunSize(ctx, run, repository, size); err != nil {
-			_ = logFile.Close()
-			return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
-		}
+		_ = logFile.Close()
+		return scheduler.finishInfrastructureFailure(ctx, run, repository, errors.New("declared resource reservation lost before submission"))
 	}
 	pods = actualPods
 	jobRequest.PodDemand = pods

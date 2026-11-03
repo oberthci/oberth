@@ -41,7 +41,10 @@ spec:
 	}
 	g := newWeightedAdmission(6)
 	g.resources.CPUMilli, g.resources.MemoryBytes = 12000, 32<<30
-	d, fallback := g.selectDeclaredDemand(receipt)
+	d, fallback, selectionErr := g.selectDeclaredDemand(receipt)
+	if selectionErr != nil {
+		t.Fatal(selectionErr)
+	}
 	if d == nil || fallback != "" {
 		t.Fatalf("bounded matrix fell back: %+v %s", d, fallback)
 	}

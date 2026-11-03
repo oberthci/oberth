@@ -268,7 +268,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.IntVar(&options.kubernetesBurst, "kubernetes-client-burst", 100, "Kubernetes API burst allowance per server client")
 	flags.IntVar(&options.maxConcurrent, "max-concurrent-jobs", 3, "maximum concurrent Jobs (boot default)")
 	flags.StringVar(&extendedResourceBudgets, "admission-extended-resources", "{}", "JSON map of qualified extended-resource names to integer capacity; no implicit capacity")
-	flags.BoolVar(&options.declaredAdmission.Disabled, "disable-declared-admission", false, "administrator kill switch: admit new runs by size class")
+	flags.BoolVar(&options.declaredAdmission.Disabled, "disable-declared-admission", false, "administrator kill switch: refuse new declared runs; undeclared workflows retain deprecated size admission")
 	flags.Int64Var(&options.declaredAdmission.CPUMilli, "admission-cpu-millis", 8000, "CPU budget for declared workflow and VM demand, excluding platform reserve")
 	flags.Int64Var(&options.declaredAdmission.MemoryBytes, "admission-memory-bytes", 17179869184, "memory budget for declared workflow and VM demand, excluding platform reserve")
 	flags.Int64Var(options.declaredAdmission.MemoryHeadroomBytes, "admission-memory-headroom-bytes", 1073741824, "minimum memory headroom per declared run; combined with proportional headroom using the larger value")

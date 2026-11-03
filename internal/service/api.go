@@ -840,6 +840,20 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, err
 		}
 		return service.kubeVirtGrantTool(ctx, actor, name, arguments.Repo, store.KubeVirtBudget{})
+	case "resource_grant", "resource_revoke", "resource_grant_get":
+		var arguments struct {
+			Repo     string            `json:"repo"`
+			Requests map[string]string `json:"requests"`
+			Limits   map[string]string `json:"limits"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		resources, err := store.ParseResourceCeiling(arguments.Requests, arguments.Limits)
+		if err != nil && name == "resource_grant" {
+			return nil, fmt.Errorf("%w: %w", ErrInvalidInput, err)
+		}
+		return service.resourceGrantTool(ctx, actor, name, arguments.Repo, resources)
 	case "size_grant", "size_revoke", "size_grant_get":
 		var arguments struct {
 			Repo string `json:"repo"`
@@ -2921,7 +2935,7 @@ func MutatingTool(name string) bool {
 	case "sync", "promote", "promote_retry", "publish_retry", "run_retry", "run_rerun", "run_cancel", "run_purge", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
 		"access_allow", "access_revoke",
 		"kubevirt_grant", "kubevirt_revoke", "workflow_capability_grant", "workflow_capability_revoke",
-		"size_grant", "size_revoke",
+		"size_grant", "size_revoke", "resource_grant", "resource_revoke",
 		"admission_release", "queue_priority_config", "run_priority", "priority_grant", "priority_grant_revoke",
 		"repo_remove", "repo_archive", "repo_unarchive",
 		"secretstore_sync_receipt",

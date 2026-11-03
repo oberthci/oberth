@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"maps"
 	"math/big"
 	"strings"
@@ -13,7 +14,7 @@ import (
 )
 
 // DeclaredAdmissionConfig is administrator-owned. Disabled is the single kill
-// switch; repositories opt into numeric admission by committing declarations.
+// switch for new declared work; repositories opt in by committing declarations.
 type DeclaredAdmissionConfig struct {
 	ExtendedResources map[string]int64
 	Disabled          bool
@@ -163,14 +164,14 @@ func (g *weightedAdmission) validatePodDemand(d *argoworkflow.PodDemand) error {
 	if d == nil {
 		return nil
 	}
-	if len(d.ExtendedResources) > 0 && (g.resources.Disabled || !g.demandFitsBudget(d)) {
-		return errors.New("extended resources require enabled numeric admission and sufficient explicit operator budgets")
-	}
-	if g.resources.Disabled {
-		return nil
-	}
 	if !d.Valid() {
 		return errors.New("invalid declared workflow resource demand")
+	}
+	if g.resources.Disabled {
+		return errors.New("declared resource admission is disabled; declared workflows cannot use deprecated size admission")
+	}
+	if !g.demandFitsBudget(d) {
+		return errors.New("declared resource demand including helper and memory headroom reserves exceeds the numeric budget; reduce requests or parallelism in git, or raise the administrator budget")
 	}
 	return nil
 }
@@ -185,30 +186,24 @@ func (g *weightedAdmission) demandFitsBudget(d *argoworkflow.PodDemand) bool {
 	return c.CPUMilli <= g.resources.CPUMilli && c.MemoryBytes <= g.resources.MemoryBytes
 }
 
-func (g *weightedAdmission) selectDeclaredDemand(receipt *argoworkflow.DemandReceipt) (*argoworkflow.PodDemand, model.ResourceAdmissionFallback) {
-	if g.resources.Disabled || receipt == nil {
-		return nil, ""
+func (g *weightedAdmission) selectDeclaredDemand(receipt *argoworkflow.DemandReceipt) (*argoworkflow.PodDemand, model.ResourceAdmissionFallback, error) {
+	if receipt == nil {
+		return nil, model.ResourceFallbackRequests, nil
 	}
 	d, err := receipt.DeclaredPodDemand()
-	if errors.Is(err, argoworkflow.ErrMemoryUnbounded) {
-		return nil, model.ResourceFallbackMemory
-	}
-	if errors.Is(err, argoworkflow.ErrVMHostUndeclared) {
-		return nil, model.ResourceFallbackVM
+	if d == nil && !receipt.HasResourceDeclarations() {
+		return nil, model.ResourceFallbackRequests, nil
 	}
 	if err != nil {
-		return nil, model.ResourceFallbackGraph
+		return nil, "", fmt.Errorf("declared resource admission refused: %w; complete the declarations or bound workflow parallelism in git", err)
 	}
 	if d == nil {
-		return nil, model.ResourceFallbackRequests
+		return nil, "", errors.New("declared resource admission refused: incomplete CPU/memory requests; complete every container declaration in git")
 	}
-	if !d.Valid() {
-		return nil, model.ResourceFallbackGraph
+	if err := g.validatePodDemand(d); err != nil {
+		return nil, "", err
 	}
-	if !g.demandFitsBudget(d) {
-		return nil, model.ResourceFallbackBudget
-	}
-	return d, ""
+	return d, "", nil
 }
 
 // Only called after the API has authorized the run. This also works before a

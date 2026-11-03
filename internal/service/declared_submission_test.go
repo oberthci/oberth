@@ -37,7 +37,7 @@ spec:
 	return KubeVirtResources{Receipt: receipt}, err
 }
 
-func TestDeclaredSubmissionIgnoresSizeGrantAndKillSwitchRestoresIt(t *testing.T) {
+func TestDeclaredSubmissionIgnoresSizeGrantAndKillSwitchRefusesIt(t *testing.T) {
 	for _, disabled := range []bool{false, true} {
 		t.Run(map[bool]string{false: "declared", true: "disabled"}[disabled], func(t *testing.T) {
 			fixture := newConcurrencyFixture(t, periapsis.XL, 3)
@@ -54,7 +54,7 @@ func TestDeclaredSubmissionIgnoresSizeGrantAndKillSwitchRestoresIt(t *testing.T)
 			defer func() { close(jobs.release); cancel(); <-done }()
 			if disabled {
 				failed := awaitRunStatus(t, fixture, run.ID, model.RunFailed)
-				if !strings.Contains(failed.Error, "may run at most L") {
+				if !strings.Contains(failed.Error, "declared resource admission is disabled") {
 					t.Fatal(failed.Error)
 				}
 				return

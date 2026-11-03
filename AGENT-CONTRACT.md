@@ -584,8 +584,8 @@ trust assumptions and complete invalidation rules.
   retain their busy-repository guard unless forced. Run list/detail expose
   `ScheduleEntry`; status/wait expose
   `schedule_entry`. See [scheduled runs](docs/scheduled-runs.md).
-- XL takes an audited admin size grant (#1021). A branch, promotion or
-  schedule run whose resolved size
+- Legacy undeclared XL takes an audited admin size grant (#1021). A branch, promotion or
+  schedule run whose resolved size (including its trusted preflight's)
   exceeds its repository's maximum fails before it takes any weight (phase
   `infrastructure`, before a Workflow exists), with the grant command in its
   error; other repositories' runs are never held behind it. Without a grant
@@ -603,13 +603,26 @@ trust assumptions and complete invalidation rules.
   inline templates and bounded item/parameter/sequence loops. Template limits
   cap child invocations; nested children retain their full inner pod envelope.
   A leaf's limit never serializes its callers. Unknown dynamic inner fan-out
-  needs its own limit or a workflow bound; otherwise admission stays legacy.
+  needs its own limit or a workflow bound; otherwise declared admission refuses it.
   CPU requests, memory bounds, executor allowances are retained.
   `resource_message` reports the effective concurrency and fixed explanations
   for conservative bounds, without changing status reasons. The sealed demand
   and explanations survive creation recovery, adoption and timing history;
   old reservations/history are not recalculated. See
   [declared admission](docs/declared-admission.md).
+- Declared workflows never fall back to size classes. Partial declarations,
+  missing effective memory limits and demand above the host budget (including
+  helper/headroom reserves) fail before submission. The declared-admission kill
+  switch refuses new declared work; sealed existing reservations remain held.
+  Undeclared legacy work retains sizes and a deprecation warning in
+  `resource_message`. Host IO-pressure, disk floor and run ceilings still apply.
+- Numeric per-container resource ceilings are administered independently using
+  `oberth resource grant/get/revoke` or `resource_grant`, `resource_grant_get`,
+  `resource_revoke`. Grants contain separate requests/limits quantity maps.
+  Migration v48 copies historical size-grant ceilings and provenance, including
+  revocations; later size changes affect only legacy admission and priority.
+  Every fresh submission and release preflight reads and enforces the numeric
+  ceiling; lookup failure refuses submission. No workflow values are changed.
 - The server-owned workflow parameter `oberth-trigger`
   (`branch|promotion|schedule|tag`, the same durable run trigger) is set on
   every document that declares or mentions it, so `when:` guards can skip
@@ -969,13 +982,14 @@ trust assumptions and complete invalidation rules.
   it encodes the same result object. Authenticated tool refusal text keeps its
   stable error class and may append only an explicitly public service reason.
   Raw dependency chains stay masked; scoped missing/hidden equivalence remains.
-- MCP exposes 73 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 76 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, read-only `run_resources` (captured history and reviewed git resource suggestions), `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`, `run_kvm_preflight`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, issue
   create/get/get_many/update/append/close/reopen/delete/list/lock/unlock/close_many,
   secret-access list/allow/revoke, unscoped-admin-only uplink list/revoke/rotate,
   `access_dismiss`, admin-only `workflow_capability_grant` and
-  `workflow_capability_revoke`, read-only `workflow_capability_get`, admin-only `size_grant`
+  `workflow_capability_revoke`, read-only `workflow_capability_get`, admin-only
+  `resource_grant` / `resource_revoke`, read-only `resource_grant_get`, admin-only `size_grant`
   and `size_revoke`, read-only `size_grant_get` (#1021), admin-only
   unscoped `admission_release` (#1099), `queue_priority_config`, `queue_priority_get`, `run_priority`, `priority_grant`, `priority_grant_list`, `priority_grant_revoke`, `repo_usage`, `repo_list`, `repo_remove`, `repo_archive`, `repo_unarchive`, `run_list`,
   admin-only `audit_list` (#1104; verified entries, never available to a scoped uplink;
@@ -2539,6 +2553,7 @@ alone is never evidence that missing migrations ran.
 | v45 | Pilot retirement | Preserve inactive pilot journals as read-only history; remove them from execution decisions | Database restore |
 | v46 | Operator capabilities | Empty repository-bound authority for operator ServiceAccounts, resource kinds and extended resources; no conversion of historical grants | Database restore |
 | v47 | Deferred execution retirement | Preserve writable execution journals, interlocks and grant authority so owner recovery can settle work in flight | Database restore |
+| v48 | #1216 stage 2 | Independent per-repository numeric request/limit ceilings, migrated exactly from size grants with grant and revocation provenance | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding

@@ -100,6 +100,7 @@ CREATE TRIGGER publications_no_delete BEFORE DELETE ON publications BEGIN
 // PostV38Downgrade removes every later schema object before historical fixtures
 // drop referenced columns. Restore the outbox CHECK as well as its guards.
 const PostV38Downgrade = PublicationV38Schema + `
+DROP TABLE IF EXISTS resource_ceilings;
 DROP TRIGGER IF EXISTS issues_metadata_revision;
 ALTER TABLE issues DROP COLUMN revision;
 ALTER TABLE token_credentials DROP COLUMN expires_at;

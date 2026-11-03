@@ -241,6 +241,9 @@ call the proxy hostname directly.
 | `access_list` | List secret access grants for a repository |
 | `access_allow` | Grant a step access to a secret path (admin-only) |
 | `access_revoke` | Revoke a step's access to a secret path (admin-only) |
+| `resource_grant` | Set per-container numeric `requests` and `limits` ceilings for CPU and memory (Kubernetes quantity strings); optional ephemeral-storage defaults to 16Gi; admin-only, audited |
+| `resource_revoke` | Return numeric ceilings to requests/limits of 4 CPU, 8Gi memory, 16Gi ephemeral-storage; admin-only, audited |
+| `resource_grant_get` | Read the numeric resource ceiling and grant/revocation provenance |
 | `size_grant` | Set a repository's maximum admission size, `L` or `XL` (admin-only, audited); without a grant the maximum is `L`; re-enables the oldest waiting tag's automatic boost within that maximum |
 | `size_revoke` | Return a repository to `L` and disable automatic tag priority, even if never granted (admin-only, audited) |
 | `size_grant_get` | Read a repository's maximum admission size (`max_size`) and grant state: `never_granted`, `granted`, or `revoked` |

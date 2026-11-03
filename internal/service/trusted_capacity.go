@@ -50,7 +50,7 @@ func (scheduler *Scheduler) executeTrustedWithCapacity(ctx context.Context, job 
 		}
 
 		scheduler.admissionRequested(ctx, job.Run.ID)
-		_, err = reservation.acquireRequest(ctx, admissionRequest{RunID: job.Run.ID, RepoID: job.Repository.ID, Size: job.Size, Group: job.ConcurrencyGroup})
+		_, err = reservation.acquireRequest(ctx, admissionRequest{RunID: job.Run.ID, RepoID: job.Repository.ID, Size: job.Size, Group: job.ConcurrencyGroup, Pods: job.PodDemand, Fallback: job.ResourceFallback})
 		if errors.Is(err, errAdmissionAbandoned) {
 			return true, nil
 		}

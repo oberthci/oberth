@@ -39,7 +39,7 @@ func TestExecutionUpgradePreservesInFlightWorkForRecovery(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if _, err = s.db.Exec(`DELETE FROM schema_migrations WHERE version=47`); err != nil {
+			if _, err = s.db.Exec(resourceCeilingDowngradeSQL + `DELETE FROM schema_migrations WHERE version=47`); err != nil {
 				t.Fatal(err)
 			}
 			candidate, err := OpenAdminClient(ctx, path, Options{})
@@ -84,7 +84,7 @@ func TestExecutionUpgradeAllowsDrainedGrantsAndLaterRecovery(t *testing.T) {
 	if _, err = s.SetKubeVirtGrant(ctx, repo.ID, "admin", true, KubeVirtBudget{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.db.Exec(`DELETE FROM schema_migrations WHERE version=47`); err != nil {
+	if _, err = s.db.Exec(resourceCeilingDowngradeSQL + `DELETE FROM schema_migrations WHERE version=47`); err != nil {
 		t.Fatal(err)
 	}
 	_ = s.Close()

@@ -1,6 +1,8 @@
 package argojob
 
 import (
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	"reflect"
 	"strings"
 	"testing"
@@ -107,5 +109,41 @@ func TestResourceBoundsPriorityAndPodPatchesCannotBypass(t *testing.T) {
 				t.Fatal("priority/patch bypass")
 			}
 		})
+	}
+}
+
+func TestNumericResourceCeilingBuildAndReleasePreflight(t *testing.T) {
+	config := testConfig()
+	config.RunnerImagePrefixes = []string{"example.invalid/"}
+	source := resourceBoundsSource("      resources:\n        requests: {cpu: 1250m, memory: 128Mi}\n        limits: {memory: 512Mi}\n")
+	r := resourceBoundsRequest(source)
+	ceiling := argoworkflow.ResourceRequirementsForCeiling(argoworkflow.ResourceCeiling{CPU: "2", Memory: "2Gi", EphemeralStorage: "16Gi"})
+	ceiling.Requests[corev1.ResourceCPU] = resource.MustParse("1250m")
+	ceiling.Requests[corev1.ResourceMemory] = resource.MustParse("256Mi")
+	r.ResourceCeiling = &ceiling
+	wf, err := Build(config, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := wf.Spec.Templates[0].Container.Resources.Limits[corev1.ResourceCPU]; ok {
+		t.Fatal("CPU limit inserted")
+	}
+	for _, resources := range []string{
+		"      resources:\n        requests: {cpu: 1251m, memory: 128Mi}\n        limits: {memory: 512Mi}\n",
+		"      resources:\n        requests: {cpu: 1250m, memory: 257Mi}\n        limits: {memory: 512Mi}\n",
+		"      resources:\n        requests: {cpu: 1250m, memory: 128Mi}\n        limits: {cpu: 2001m, memory: 512Mi}\n",
+		"      resources:\n        requests: {cpu: 1250m, memory: 128Mi}\n        limits: {memory: 2049Mi}\n",
+	} {
+		r.Source = []byte(resourceBoundsSource(resources))
+		if _, err = Build(config, r); err == nil || !strings.Contains(err.Error(), "administrator resource ceiling") {
+			t.Fatalf("build failed ceiling enforcement: %v", err)
+		}
+		preflight, err := PreflightRelease(config, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(strings.Join(preflight.Problems, " "), "administrator resource ceiling") {
+			t.Fatalf("release preflight skipped ceiling: %+v", preflight)
+		}
 	}
 }

@@ -18,7 +18,7 @@ func TestLegacyExecutionGrantSurvivesCapabilityUpgrade(t *testing.T) {
 	if _, err = s.SetKubeVirtGrant(ctx, repo.ID, "admin", true, KubeVirtBudget{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.db.Exec(`DELETE FROM schema_migrations WHERE version>=46; DROP TABLE workflow_capability_grants`); err != nil {
+	if _, err = s.db.Exec(executionRetirementDowngradeSQL + `DELETE FROM schema_migrations WHERE version>=46; DROP TABLE workflow_capability_grants`); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Close(); err != nil {
@@ -46,7 +46,7 @@ func TestLegacyExecutionGrantSurvivesCapabilityUpgrade(t *testing.T) {
 	}
 }
 
-const executionRetirementDowngradeSQL = `
+const executionRetirementDowngradeSQL = resourceCeilingDowngradeSQL + `
 DROP TRIGGER IF EXISTS vm_executions_retired_insert;
 DROP TRIGGER IF EXISTS vm_executions_retired_update;
 DROP TRIGGER IF EXISTS vm_executions_retired_delete;

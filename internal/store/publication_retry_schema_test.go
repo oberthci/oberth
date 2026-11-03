@@ -5,6 +5,8 @@ import "strings"
 // Historical fixtures reconstruct an older schema from a fresh database.
 // Remove all later migrations and v38 guards so their real upgrades run once.
 var publicationRetryDowngradeSQL = pilotRetirementDowngradeSQL + `
+DROP TABLE IF EXISTS resource_ceilings;
+DELETE FROM schema_migrations WHERE version=48;
 DROP TABLE IF EXISTS run_priority_requests;
 DROP TABLE IF EXISTS priority_grants;
 DELETE FROM schema_migrations WHERE version=39;

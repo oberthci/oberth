@@ -79,6 +79,7 @@ admission:
   # Zero IO cap retains the run cap.
   declaredResources:
     extendedResources: {}
+    # When true, refuse new declared runs; legacy workflows keep size admission.
     disabled: false
     cpuMillis: 8000
     memoryBytes: 17179869184

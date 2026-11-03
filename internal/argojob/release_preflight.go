@@ -53,8 +53,10 @@ func PreflightRelease(config Config, request Request) (ReleasePreflight, error) 
 			result.Problems = append(result.Problems, err.Error())
 		}
 	}
-	if request.ResourceMaximum != "" {
-		add(argoworkflow.ValidateResourceCeiling(wf, request.Repo, request.ResourceMaximum, int64(config.WorkflowTimeout/time.Second)))
+	if request.ResourceCeiling != nil {
+		add(argoworkflow.ValidateResourceRequirementsWithCapability(wf, request.Repo, *request.ResourceCeiling, int64(config.WorkflowTimeout/time.Second), request.Capability))
+	} else if request.ResourceMaximum != "" {
+		add(argoworkflow.ValidateResourceCeilingWithCapability(wf, request.Repo, request.ResourceMaximum, int64(config.WorkflowTimeout/time.Second), request.Capability))
 	}
 	top := map[*wfv1.Template]bool{}
 	for i := range wf.Spec.Templates {

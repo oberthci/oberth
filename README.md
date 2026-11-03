@@ -258,7 +258,7 @@ running beside them, and each member keeps its declared size. Group names are
 `status` and `run_get` show the group and, while a run waits on it, which run
 holds it.
 
-`XL` needs an admin size grant (`oberth size grant <repo> --max XL`, or MCP
+For undeclared legacy workflows, `XL` needs an admin size grant (`oberth size grant <repo> --max XL`, or MCP
 `size_grant`); without one a repository's branch, promotion and schedule runs
 may declare at most `L`, and an XL declaration fails at admission instead of
 making every other repository wait for a full drain. The grant applies to
@@ -318,6 +318,12 @@ metadata:
     oberth.ci/size: M
     oberth.ci/concurrency-group: terraform-state
 ```
+
+Numeric resource ceilings use `oberth resource grant/get/revoke` or MCP
+`resource_grant`, `resource_grant_get`, `resource_revoke`. Migration 40 copies
+existing size grants; later size changes affect only legacy admission and tag
+priority. Declared workflows never fall back to sizes. See
+[declared resources](docs/declared-resources.md).
 
 ## MCP tools (18)
 
