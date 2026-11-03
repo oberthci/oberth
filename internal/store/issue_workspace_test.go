@@ -130,7 +130,7 @@ func TestIssueWorkspaceUpgradeFromV49PreservesIssueAndLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Reconstruct the actual v49 shape, then migrate through policy v50, work status v51 and run-list v52.
+	// Reconstruct v49, then migrate policy, work status, run-list and trailer receipts.
 	if _, err = s.db.Exec(testdb.PostV49Downgrade); err != nil {
 		t.Fatal(err)
 	}
@@ -148,8 +148,8 @@ func TestIssueWorkspaceUpgradeFromV49PreservesIssueAndLock(t *testing.T) {
 	}
 	defer func() { _ = s.Close() }()
 	var ledger string
-	if err = s.db.QueryRow(`SELECT group_concat(version, ',') FROM (SELECT version FROM schema_migrations WHERE version>=50 ORDER BY version)`).Scan(&ledger); err != nil || ledger != "50,51,52,53,54" {
-		t.Fatalf("upgrade ledger=%q, want policy 50, work status 51 run-list 52 train 53 and park 54: %v", ledger, err)
+	if err = s.db.QueryRow(`SELECT group_concat(version, ',') FROM (SELECT version FROM schema_migrations WHERE version>=50 ORDER BY version)`).Scan(&ledger); err != nil || ledger != "50,51,52,53,54,55" {
+		t.Fatalf("upgrade ledger=%q, want policy 50, work status 51, run-list 52, train 53, park 54 and trailers 55: %v", ledger, err)
 	}
 	assertSchemaContains(t, s.db, "index", "runs_latest_ref_idx", "status", "started_at", "finished_at", "queued_at", "id")
 	got, err := s.Issue(t.Context(), issue.ID)

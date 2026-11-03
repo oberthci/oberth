@@ -41,7 +41,7 @@ Body and lock updates leave it unchanged; use the body hash separately for body
 snapshots.
 After a successful write, read the returned revision rather than predicting it.
 Migration 42 adds the column and trigger. Upgrading from v0.17.82 advances
-schema 39 or 40 through 53; rollback requires restoring the verified pre-upgrade
+schema 39 or 40 through 55; rollback requires restoring the verified pre-upgrade
 database and its matching identity/backup material. See the
 [v0.17.84 upgrade notes](releases/v0.17.84.md#upgrade-from-v01782-or-v01783).
 
@@ -97,3 +97,78 @@ Migration 51 adds the constrained work-status column and extends the metadata
 revision trigger. It follows the unchanged policy-refresh migration 50. The
 ledger stays contiguous; older binaries refuse the newer database. Rollback
 requires the verified pre-upgrade backup and its matching identity material.
+
+## Commit trailers on green default branches
+
+Automatic trailer processing is off by default. Opt in for one repository by
+committing `.oberth/issues.yaml`:
+
+```yaml
+close_from_trailers: true
+```
+
+The setting is read from the commit that was published. An absent file or
+`false` disables processing. Unknown settings, multiple YAML documents,
+symlinks and oversized files are refused. There is no installation-wide
+permission change.
+
+After a successful default-branch push, or a successful promotion published to
+that branch, Oberth reads every commit newly reachable since the previous green
+published head. Failed, interrupted, cancelled, scheduled, tag and other branch
+runs do not trigger this feature. Fast-forward promotions reuse the successful
+source run as their evidence. Git identifies the final trailer block; prose
+such as “this fixes #123” does not count. For example:
+
+```text
+Repair the cache lookup
+
+Fixes: #123, #124
+Refs: #125
+Closes: #126
+```
+
+`Fixes` and `Closes` append evidence then close the issue; `Refs` only appends.
+Keys are case-insensitive. Several comma- or whitespace-separated positive
+issue IDs, repeated trailers and folded values are supported. An invalid value
+is ignored as a whole. Close takes precedence when an issue has both kinds of
+trailer on the same commit. Each referenced commit supplies one evidence line;
+commits encountered after the issue closes add nothing:
+
+```text
+upstream/team/repository abcdef123456 run <run-id>: green on main
+```
+
+Only issues visible to a caller scoped to the repository's upstream can change:
+repository-backed issues in that upstream and manual issues filed under it.
+Workspace-global issues and issues from other upstreams are excluded. Closed
+issues receive no evidence. An active lock, including one owned by `oberth`,
+prevents changes and records `issue.trailer.locked` in the audit instead. Locked
+work is skipped permanently for that publication; unlocking does not replay it.
+The issue model has no structured set of repositories, so the first eligible
+close trailer closes a cross-repository issue; repository names in prose are
+not interpreted as policy.
+
+Evidence and closure use the existing issue audit chain, with actor `oberth`,
+the run ID, publication ID, full commit SHA and repository. Evidence, closure,
+and the processing receipt commit together. Replaying a delivery or restarting
+the server does not duplicate evidence. Pending work is recovered at startup
+and on scheduler recovery ticks. Missing Git caches, unavailable objects and
+other infrastructure errors retain the pending record. Recovery batches
+interleave repositories, so one repository's failing rows cannot consume every
+slot ahead of another repository.
+
+Invalid policy (including unknown fields, multiple documents or a non-regular
+file), malformed Git trailer framing (including embedded NULs) and byte-limit
+overflows permanently skip that publication. An `issue.trailer.skipped` audit
+entry records the reason, repository, full head SHA, run ID, branch and
+publication ID with actor `oberth`. The skip audit and completed receipt commit
+together; the issue remains unchanged and later ticks do not retry that input.
+Fixing policy at a later commit does not replay a skipped range. Rejected YAML
+content is not copied into the audit. This does not change the published run's
+green verdict. Historical green deliveries seed
+the boundary during migration 55 without replaying their trailers. With no
+previous green delivery, the first green run scans all reachable history.
+Disabled green deliveries still advance the boundary, so enabling the setting
+does not replay older green commits. History output is bounded at 4 MiB and
+policy files at 16 KiB; exceeding either skips the whole publication without
+applying partial evidence.

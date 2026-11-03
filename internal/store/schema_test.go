@@ -29,8 +29,8 @@ func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	if err := validateMigrations(migrations, latestMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
-	if latestMigrationVersion != 54 {
-		t.Fatalf("latest migration version = %d, want 54", latestMigrationVersion)
+	if latestMigrationVersion != 55 {
+		t.Fatalf("latest migration version = %d, want 55", latestMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)
@@ -956,6 +956,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"ci_issue_work",
 		"grant_declarations",
 		"issue_locks",
+		"issue_trailer_publications",
 		"issues",
 		"kubevirt_grants",
 		"pending_token_credentials",
@@ -1005,6 +1006,8 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"ci_issue_work_promotion_idx",
 		"ci_issue_work_run_idx",
 		"issue_locks_expiry_idx",
+		"issue_trailer_head_idx",
+		"issue_trailer_pending_idx",
 		"issues_page_idx",
 		"manual_issues_page_idx",
 		"one_open_ci_issue_idx",
