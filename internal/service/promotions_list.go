@@ -32,7 +32,7 @@ func (service *API) promotionList(ctx context.Context, args promotionListArgumen
 	}
 	filter := model.PromotionListFilter{SourceSHA: args.SourceSHA, Status: args.Status, Before: args.Before.Sequence, Limit: args.Limit}
 	if args.Before.ID != "" {
-		cursor, err := service.promotions.Promotion(ctx, args.Before.ID)
+		cursor, err := service.resolveReadPromotionID(ctx, args.Before.ID)
 		switch {
 		case err == nil:
 			filter.Before = cursor.Sequence
@@ -69,8 +69,12 @@ func (service *API) promotionList(ctx context.Context, args promotionListArgumen
 		if args.Status != "" && p.Status != args.Status {
 			continue
 		}
+		repo, err := service.repositoryIdentity(ctx, p.RepoID)
+		if err != nil {
+			return api.PromotionListResponse{}, err
+		}
 		response.Promotions = append(response.Promotions, api.PromotionListItem{
-			ID: p.ID, Sequence: p.Sequence, RepoID: p.RepoID, SourceBranch: p.SourceBranch, SourceSHA: p.SourceSHA,
+			Repo: repo, Ref: p.SourceBranch, ID: p.ID, Sequence: p.Sequence, RepoID: p.RepoID, SourceBranch: p.SourceBranch, SourceSHA: p.SourceSHA,
 			TargetRef: p.TargetRef, ResultSHA: p.ResultSHA, RunID: p.RunID, Status: string(p.Status),
 			CreatedAt: p.CreatedAt.UTC().Format(time.RFC3339Nano), UpdatedAt: p.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		})

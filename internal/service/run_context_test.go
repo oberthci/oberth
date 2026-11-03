@@ -60,10 +60,12 @@ func TestRunRepositoryContextSurfaces(t *testing.T) {
 	assert := func(t *testing.T, row map[string]any, summary bool) {
 		t.Helper()
 		repo, ref, sha, position := "Repo", "Ref", "SHA", "QueuePosition"
+		expectedRepo := f.repo.Name
 		if summary {
 			repo, ref, sha, position = "repo", "ref", "sha", "queue_position"
+			expectedRepo = "codeberg/acme/oberth"
 		}
-		if row[repo] != f.repo.Name || row[ref] != old.Ref || row[sha] != old.SHA || row[position] != float64(1) || row["superseded"] != true || row["size"] != "L" {
+		if row[repo] != expectedRepo || row[ref] != old.Ref || row[sha] != old.SHA || row[position] != float64(1) || row["superseded"] != true || row["size"] != "L" {
 			t.Errorf("missing run context: %#v", row)
 		}
 		demand, ok := row["declared_resources"].(map[string]any)
@@ -203,7 +205,7 @@ func TestRunRepositoryContextUnknownAndScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := runContextJSON(t, value)
-	if row["repo"] != f.visible.Name || row["ref"] != old.Ref || row["sha"] != old.SHA || row["superseded"] != true || row["size"] != "" {
+	if row["repo"] != "github/oberthci/oberth" || row["ref"] != old.Ref || row["sha"] != old.SHA || row["superseded"] != true || row["size"] != "" {
 		t.Fatalf("scoped summary: %#v", row)
 	}
 	if _, exists := row["queue_position"]; exists {

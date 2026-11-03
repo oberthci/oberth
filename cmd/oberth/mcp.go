@@ -124,6 +124,11 @@ Commands:
   tools     List available MCP tools
   call      Call an MCP tool
 
+Repository arguments accept upstream/org/name (for example codeberg/acme/widget).
+Bare names and org/name work only when unique; ambiguity errors list candidates.
+Run and promotion IDs accept unique hexadecimal prefixes of at least 8 characters.
+Issue IDs are full decimal integers.
+
 Environment:
   OBERTH_MCP_URL        MCP server URL (overrides OBERTH_BASE_URL)
   OBERTH_BASE_URL       Server URL; /mcp is appended when no MCP URL is set

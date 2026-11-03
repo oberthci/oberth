@@ -40,7 +40,7 @@ func parseCancelOptions(arguments []string, allowSelector bool) (cancelOptions, 
 	flags.BoolVar(&options.force, "force", false, "force cancellation")
 	flags.BoolVar(&options.asJSON, "json", false, "emit JSON")
 	if allowSelector {
-		flags.StringVar(&options.repo, "repo", "", "repository")
+		flags.StringVar(&options.repo, "repo", "", "repository; use upstream/org/name when ambiguous")
 		flags.StringVar(&options.ref, "ref", "", "ref")
 	}
 	transport := mcpTransportFlags(flags)

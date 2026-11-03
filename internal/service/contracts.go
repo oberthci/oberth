@@ -642,6 +642,8 @@ type WaitResponse struct {
 }
 
 type PromotionWaitResponse struct {
+	Repo         string          `json:"repo"`
+	Ref          string          `json:"ref"`
 	Promotion    model.Promotion `json:"promotion"`
 	StillRunning bool            `json:"still_running"`
 	// RetriedAs names the promotion that retries a failed or interrupted

@@ -54,7 +54,7 @@ func runAuditList(ctx context.Context, arguments []string, output io.Writer) err
 	asJSON := flags.Bool("json", false, "emit the server's payload unchanged")
 	action := flags.String("action", "", "action prefix")
 	actor := flags.String("actor", "", "exact actor identity")
-	repo := flags.String("repo", "", "repository")
+	repo := flags.String("repo", "", "repository; use upstream/org/name when ambiguous")
 	since := flags.String("since", "", "RFC 3339 time or duration such as 24h")
 	until := flags.String("until", "", "RFC 3339 time or duration such as 24h")
 	limit := flags.Int("limit", 0, "entries per page (default 50, tail default 20)")

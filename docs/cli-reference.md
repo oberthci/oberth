@@ -30,7 +30,7 @@ Usage of access list:
   -json
         emit grants as a JSON array (machine-readable)
   -repo string
-        filter by repository name
+        filter by repository name; use upstream/org/name when ambiguous
   -revoked
         include revoked grants
 ```
@@ -467,6 +467,11 @@ Commands:
   tools     List available MCP tools
   call      Call an MCP tool
 
+Repository arguments accept upstream/org/name (for example codeberg/acme/widget).
+Bare names and org/name work only when unique; ambiguity errors list candidates.
+Run and promotion IDs accept unique hexadecimal prefixes of at least 8 characters.
+Issue IDs are full decimal integers.
+
 Environment:
   OBERTH_MCP_URL        MCP server URL (overrides OBERTH_BASE_URL)
   OBERTH_BASE_URL       Server URL; /mcp is appended when no MCP URL is set
@@ -797,7 +802,7 @@ Usage of run resources:
   -ref string
         exact ref; default includes default branch and its promotion runs; any includes all refs
   -repo string
-        registered repository (optional with --run)
+        registered repository (optional with --run); use upstream/org/name when ambiguous
   -run string
         exact run ID or unique prefix
   -step string
@@ -829,7 +834,7 @@ Usage of runs:
   -ref string
         only this branch or tag
   -repo string
-        only this repository
+        only this repository; use upstream/org/name when ambiguous
 ```
 
 ## oberth runs cancel

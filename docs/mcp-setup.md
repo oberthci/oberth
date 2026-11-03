@@ -546,9 +546,10 @@ page. `latest_per_ref=1` keeps the same grouping for each ref's newest run.
 - `history` keeps only terminal runs (passed, failed, interrupted), with legacy
   sequence paging via `before`/`next_before`/`next_cursor`.
 - `active` is deprecated; it still returns every queued, waiting and running
-  run in one unpaged list (at most 500), in scheduling order: started runs (oldest start first), then
-  claimed runs in admission order (the weighted gate's FIFO), then unclaimed
-  queued runs in accepted order. Each run that has not started carries
+  run in one unpaged list (at most 500): started runs (oldest start first), then
+  all runs that have not started, claimed or unclaimed, in one queue. Effective
+  priority comes first, then ascending admission sequence and queue sequence
+  (FIFO), matching the scheduler's claim order. Each run that has not started carries
   `Scheduling` with its state, message, queue or admission position, size,
   weight, used/capacity and concurrency group, so a run blocking the head of
   the queue, or one waiting on its group, says so.
@@ -972,3 +973,20 @@ explicitly. This credential-safety change also applies to older scripts.
 MCP and REST both refuse plain HTTP except to
 `localhost`, `127.0.0.1`, or `::1`, before resolving credentials. Redirects
 cannot downgrade HTTPS to HTTP.
+
+## Identifier and repository selectors
+
+Run and promotion ID arguments accept a full hexadecimal ID or a unique prefix
+of at least 8 characters. Ambiguous prefixes list the matching visible full IDs;
+use a longer prefix or the full ID. This also applies to ID pagination cursors,
+`run_priority`, `admission_release`, `promote_status`, and `promote_retry`.
+Issue IDs and grant IDs are decimal integers and must be supplied in full.
+Publication IDs (for `publication_abandon`) remain exact IDs.
+
+Repository arguments accept the fully qualified `upstream/org/name` form, for
+example `codeberg/acme/widget`. A bare `widget` or `acme/widget` is accepted only
+when unique among repositories visible to the caller. Ambiguity errors list
+all visible fully qualified candidates; pass one as `repo` to `promote`,
+`status`, `sync`, `wait`, or other repository-taking tools. The same form works
+with CLI `--repo` options and MCP JSON arguments. When an omitted repository
+makes a SHA or branch ambiguous, the error lists candidates as well.

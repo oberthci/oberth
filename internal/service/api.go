@@ -1179,6 +1179,12 @@ func (service *API) readRun(ctx context.Context, actor api.Actor, id string, sum
 	}
 	run = service.runAdmissionContext(ctx, run, true)
 	if summary {
+		shown := service.presentationRun(ctx, run)
+		run.Repo, err = service.repositoryIdentity(ctx, run.RepoID)
+		if err != nil {
+			return nil, err
+		}
+		run.DisplayStatus, run.DisplayReason = shown.DisplayStatus, shown.DisplayReason
 		return summarizeRun(run, steps), nil
 	}
 	scheduling, queuedReason := service.observeScheduling(ctx, run, steps, true)
@@ -1479,7 +1485,7 @@ func (service *API) status(ctx context.Context, repositoryName, selector, actor 
 		(runErr != nil || run.RefKind == model.RefBranch) {
 		response, refErr := service.statusForBranchRef(ctx, repositoryName, selector, actor)
 		if refErr == nil && runErr == nil && response.Repository.ID != repository.ID {
-			return StatusResponse{}, fmt.Errorf("%w: %q", ErrAmbiguousRepository, selector)
+			return StatusResponse{}, service.ambiguousRepositories(ctx, selector, []model.Repository{repository, response.Repository})
 		}
 		// A missing or unreadable current ref is not evidence that its old
 		// branch run is current. Historical evidence remains addressable by SHA.
@@ -1583,15 +1589,17 @@ func (service *API) statusForBranchRef(ctx context.Context, repositoryName, sele
 	}
 	var matched model.Repository
 	var matchedSHA string
+	var matches []model.Repository
 	for _, repository := range repositories {
 		sha, refErr := service.refs.RefSHA(ctx, service.cacheInputFor(ctx, repository), strings.TrimPrefix(selector, "refs/heads/"))
 		if refErr != nil {
 			continue
 		}
-		if matched.ID != 0 {
-			return StatusResponse{}, fmt.Errorf("%w: %q", ErrAmbiguousRepository, selector)
-		}
+		matches = append(matches, repository)
 		matched, matchedSHA = repository, sha
+	}
+	if len(matches) > 1 {
+		return StatusResponse{}, service.ambiguousRepositories(ctx, selector, matches)
 	}
 	if matched.ID == 0 {
 		return StatusResponse{}, fmt.Errorf("%w: run selector %q", store.ErrNotFound, selector)
@@ -2603,7 +2611,12 @@ func (service *API) prepareWaitPromotion(ctx context.Context, id string, request
 		return nil, err
 	}
 	deadline := time.Now().Add(duration)
-	promotion, err := service.promotions.Promotion(ctx, id)
+	promotion, err := service.resolveReadPromotionID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	id = promotion.ID
+	repo, err := service.repositoryIdentity(ctx, promotion.RepoID)
 	if err != nil {
 		return nil, err
 	}
@@ -2612,7 +2625,7 @@ func (service *API) prepareWaitPromotion(ctx context.Context, id string, request
 		if err != nil {
 			return PromotionWaitResponse{}, err
 		}
-		return PromotionWaitResponse{Promotion: promotion, RetriedAs: retriedAs}, nil
+		return PromotionWaitResponse{Promotion: promotion, Repo: repo, Ref: promotion.SourceBranch, RetriedAs: retriedAs}, nil
 	}
 	return func(ctx context.Context) (PromotionWaitResponse, error) {
 		timer := time.NewTimer(time.Until(deadline))
@@ -2640,7 +2653,7 @@ func (service *API) prepareWaitPromotion(ctx context.Context, id string, request
 				if promotion.Status.Terminal() {
 					return terminal(ctx, promotion)
 				}
-				response := PromotionWaitResponse{Promotion: promotion}
+				response := PromotionWaitResponse{Promotion: promotion, Repo: repo, Ref: promotion.SourceBranch}
 				response.StillRunning = true
 				return response, nil
 			case <-changed:
@@ -3006,6 +3019,7 @@ func (service *API) resolveRunWith(ctx context.Context, repositoryName, selector
 	}
 	var matchedRepository model.Repository
 	var matchedRun model.Run
+	var matches []model.Repository
 	for _, repository := range repositories {
 		run, resolveErr := resolve(ctx, repository.ID, selector)
 		if errors.Is(resolveErr, store.ErrNotFound) {
@@ -3014,10 +3028,11 @@ func (service *API) resolveRunWith(ctx context.Context, repositoryName, selector
 		if resolveErr != nil {
 			return model.Repository{}, model.Run{}, resolveErr
 		}
-		if matchedRepository.ID != 0 {
-			return model.Repository{}, model.Run{}, fmt.Errorf("%w: %q", ErrAmbiguousRepository, selector)
-		}
+		matches = append(matches, repository)
 		matchedRepository, matchedRun = repository, run
+	}
+	if len(matches) > 1 {
+		return model.Repository{}, model.Run{}, service.ambiguousRepositories(ctx, selector, matches)
 	}
 	if matchedRepository.ID == 0 {
 		return model.Repository{}, model.Run{}, fmt.Errorf("%w: run selector %q", store.ErrNotFound, selector)
@@ -3319,36 +3334,36 @@ func (service *API) publishRetry(ctx context.Context, actor api.Actor, id string
 		return api.PublishRetryResponse{}, fmt.Errorf("%w: run or promotion ID is required", ErrInvalidInput)
 	}
 
-	// Resolve a run ID first; a promotion ID is recognized only to point the
-	// caller at promote_retry.
-	var runID string
-
+	run, runErr := model.Run{}, store.ErrNotFound
 	if service.history != nil {
-		run, runErr := service.resolveReadRunID(ctx, id)
-		if runErr != nil && !errors.Is(runErr, store.ErrNotFound) && !errors.Is(runErr, ErrInvalidInput) {
-			return api.PublishRetryResponse{}, runErr
-		}
-		if runErr == nil {
-			if run.Trigger == "promotion" {
-				if promotion, promErr := service.promotions.PromotionByRun(ctx, run.ID); promErr == nil {
-					return api.PublishRetryResponse{}, promotionPublishRetryRefusal(promotion)
-				}
-				return api.PublishRetryResponse{}, fmt.Errorf("%w: run %s is promotion CI; retry its promotion with promote_retry", ErrInvalidInput, run.ID)
-			}
-			if run.Status != model.RunFailed || (run.Phase != "publishing" && !pushretry.PublicationFailure(run.Error)) {
-				return api.PublishRetryResponse{}, fmt.Errorf("%w: run %s is %s/%s, not publishing-failed; retry is only valid for runs that failed during upstream publication",
-					ErrInvalidInput, id, run.Status, run.Phase)
-			}
-			runID = run.ID
-		}
+		run, runErr = service.resolveReadRunID(ctx, id)
 	}
-	if runID == "" {
-		promotion, promErr := service.promotions.Promotion(ctx, id)
-		if promErr != nil {
-			return api.PublishRetryResponse{}, fmt.Errorf("%w: %q is not a known run or promotion ID", ErrInvalidInput, id)
-		}
-		return api.PublishRetryResponse{}, promotionPublishRetryRefusal(promotion)
+	promotion, promErr := service.resolveReadPromotionID(ctx, id)
+	if runErr != nil && !errors.Is(runErr, store.ErrNotFound) && !errors.Is(runErr, ErrInvalidInput) {
+		return api.PublishRetryResponse{}, runErr
 	}
+	if promErr != nil && !errors.Is(promErr, store.ErrNotFound) && !errors.Is(promErr, ErrInvalidInput) {
+		return api.PublishRetryResponse{}, promErr
+	}
+	if runErr == nil && promErr == nil {
+		return api.PublishRetryResponse{}, fmt.Errorf("%w: ID %q matches run %s and promotion %s; use an unambiguous full ID", store.ErrAmbiguous, id, run.ID, promotion.ID)
+	}
+	if runErr != nil {
+		if promErr == nil {
+			return api.PublishRetryResponse{}, promotionPublishRetryRefusal(promotion)
+		}
+		return api.PublishRetryResponse{}, fmt.Errorf("%w: %q is not a known run or promotion ID", ErrInvalidInput, id)
+	}
+	if run.Trigger == "promotion" {
+		if promotion, err := service.promotions.PromotionByRun(ctx, run.ID); err == nil {
+			return api.PublishRetryResponse{}, promotionPublishRetryRefusal(promotion)
+		}
+		return api.PublishRetryResponse{}, fmt.Errorf("%w: run %s is promotion CI; retry its promotion with promote_retry", ErrInvalidInput, run.ID)
+	}
+	if run.Status != model.RunFailed || (run.Phase != "publishing" && !pushretry.PublicationFailure(run.Error)) {
+		return api.PublishRetryResponse{}, fmt.Errorf("%w: run %s is %s/%s, not publishing-failed; retry is only valid for runs that failed during upstream publication", ErrInvalidInput, run.ID, run.Status, run.Phase)
+	}
+	runID := run.ID
 
 	// Verify the mutation gate before reactivating any state. A gate failure
 	// must leave the run in failed/publishing (retryable) with a typed error,

@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1213,7 +1214,7 @@ SELECT `+repositoryColumns+` FROM repositories r WHERE r.id = ?`, id))
 //   - fully qualified ("upstream/org/repo") — resolved via upstream name + org
 //
 // When a bare name matches multiple repositories under different upstreams,
-// ErrAmbiguous is returned naming the conflicting upstreams.
+// ErrAmbiguous is returned listing fully qualified repository candidates.
 func (s *Store) RepositoryByName(ctx context.Context, name string) (model.Repository, error) {
 	upstream, org, bare, err := parseRepoSelector(name)
 	if err != nil {
@@ -1235,7 +1236,7 @@ func (s *Store) RepositoryByName(ctx context.Context, name string) (model.Reposi
 func (s *Store) repositoryByBareName(ctx context.Context, name string) (model.Repository, error) {
 	rows, err := s.reader().QueryContext(ctx, `
 SELECT `+repositoryColumns+`,
-       u.name
+       u.name, u.kind, u.base_url
 FROM repositories r
 JOIN upstreams u ON u.id = r.upstream_id
 WHERE r.name = ?`, name)
@@ -1244,13 +1245,13 @@ WHERE r.name = ?`, name)
 	}
 	defer func() { _ = rows.Close() }()
 	var matched []model.Repository
-	var upstreamNames []string
+	var candidates []string
 	for rows.Next() {
 		var repo model.Repository
 		var created, updated int64
-		var upstreamName string
+		var upstream model.Upstream
 		var archived sql.NullInt64
-		if err := rows.Scan(&repo.ID, &repo.Name, &repo.UpstreamID, &repo.DefaultBranch, &created, &updated, &archived, &repo.ArchivedBy, &upstreamName); err != nil {
+		if err := rows.Scan(&repo.ID, &repo.Name, &repo.UpstreamID, &repo.DefaultBranch, &created, &updated, &archived, &repo.ArchivedBy, &upstream.Name, &upstream.Kind, &upstream.BaseURL); err != nil {
 			return model.Repository{}, fmt.Errorf("scan repository %q: %w", name, err)
 		}
 		repo.CreatedAt, repo.UpdatedAt = fromUnixNano(created), fromUnixNano(updated)
@@ -1259,7 +1260,7 @@ WHERE r.name = ?`, name)
 			repo.ArchivedAt = &at
 		}
 		matched = append(matched, repo)
-		upstreamNames = append(upstreamNames, upstreamName)
+		candidates = append(candidates, upstream.QualifiedRepo(repo.Name))
 	}
 	if err := rows.Err(); err != nil {
 		return model.Repository{}, fmt.Errorf("look up repository %q: %w", name, err)
@@ -1270,40 +1271,47 @@ WHERE r.name = ?`, name)
 	case 1:
 		return matched[0], nil
 	default:
+		sort.Strings(candidates)
 		return model.Repository{}, fmt.Errorf(
-			"%w: repository %q exists under upstreams %s; qualify as org/repo or upstream/org/repo",
-			ErrAmbiguous, name, strings.Join(upstreamNames, ", "))
+			"%w: repository %q matches %s; use upstream/org/repo",
+			ErrAmbiguous, name, strings.Join(candidates, ", "))
 	}
 }
 
 func (s *Store) repositoryByOrgName(ctx context.Context, org, name string) (model.Repository, error) {
-	// Find upstreams whose org matches.
 	upstreams, err := s.ListUpstreams(ctx)
 	if err != nil {
 		return model.Repository{}, fmt.Errorf("list upstreams for org lookup: %w", err)
 	}
-	var matchingUpstreamIDs []int64
+	var matched []model.Repository
+	var candidates []string
 	for _, upstream := range upstreams {
-		if strings.EqualFold(upstream.Org(), org) {
-			matchingUpstreamIDs = append(matchingUpstreamIDs, upstream.ID)
+		candidateOrg := upstream.Org()
+		if candidateOrg == "" {
+			candidateOrg = upstream.Name
 		}
-	}
-	if len(matchingUpstreamIDs) == 0 {
-		return model.Repository{}, fmt.Errorf("%w: no upstream with org %q", ErrNotFound, org)
-	}
-	// Query with each matching upstream.
-	for _, upstreamID := range matchingUpstreamIDs {
-		repo, err := scanRepository(s.reader().QueryRowContext(ctx, `
-SELECT `+repositoryColumns+`
-FROM repositories r WHERE r.name = ? AND r.upstream_id = ?`, name, upstreamID))
-		if err == nil {
-			return repo, nil
+		if !strings.EqualFold(candidateOrg, org) {
+			continue
 		}
-		if !errors.Is(err, ErrNotFound) {
+		repo, err := scanRepository(s.reader().QueryRowContext(ctx, `SELECT `+repositoryColumns+` FROM repositories r WHERE r.name = ? AND r.upstream_id = ?`, name, upstream.ID))
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
+		if err != nil {
 			return model.Repository{}, err
 		}
+		matched = append(matched, repo)
+		candidates = append(candidates, upstream.QualifiedRepo(repo.Name))
 	}
-	return model.Repository{}, fmt.Errorf("%w: repository %q under org %q", ErrNotFound, name, org)
+	switch len(matched) {
+	case 0:
+		return model.Repository{}, fmt.Errorf("%w: repository %q under org %q", ErrNotFound, name, org)
+	case 1:
+		return matched[0], nil
+	default:
+		sort.Strings(candidates)
+		return model.Repository{}, fmt.Errorf("%w: repository %q matches %s; use upstream/org/repo", ErrAmbiguous, org+"/"+name, strings.Join(candidates, ", "))
+	}
 }
 
 func (s *Store) repositoryByUpstreamOrgName(ctx context.Context, upstreamName, org, name string) (model.Repository, error) {
@@ -1311,7 +1319,11 @@ func (s *Store) repositoryByUpstreamOrgName(ctx context.Context, upstreamName, o
 	if err != nil {
 		return model.Repository{}, fmt.Errorf("look up upstream %q: %w", upstreamName, err)
 	}
-	if upstream.Org() != org {
+	actualOrg := upstream.Org()
+	if actualOrg == "" {
+		actualOrg = upstream.Name
+	}
+	if actualOrg != org {
 		return model.Repository{}, fmt.Errorf(
 			"%w: upstream %q has org %q, not %q", ErrInvalid, upstreamName, upstream.Org(), org)
 	}
