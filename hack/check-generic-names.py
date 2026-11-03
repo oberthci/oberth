@@ -10,6 +10,9 @@ import sys
 # SHA-256 of lowercase alphanumeric labels. Keep the labels themselves out of
 # public source, including the gate and its negative controls.
 BRAND_DIGESTS = {
+    6: {
+        '8a62e967fcd6dfa5d75308c37808b4668a7faf1cdb06e09ac0a7161827603887',
+    },
     10: {
         'ae87e18457eeee44eb012a45dfc3b261413407941de02c96064bff4f442d30bb',
     },

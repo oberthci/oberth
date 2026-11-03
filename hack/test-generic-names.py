@@ -151,5 +151,13 @@ class NameCheckTests(unittest.TestCase):
             gate.check(directory)
 
 
+class RetiredProtocolNameTests(unittest.TestCase):
+    def test_retired_protocol_name_is_rejected_across_identifiers(self):
+        label = bytes([98, 101, 97, 99, 111, 110])
+        for value in (label, label.upper(), b'Capture' + label.title() + b'Artifact'):
+            with self.subTest(value=value):
+                self.assertTrue(gate.forbidden(value))
+
+
 if __name__ == '__main__':
     unittest.main()

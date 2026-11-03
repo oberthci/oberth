@@ -152,7 +152,7 @@ func TestCredentialedArgoOutputArtifactRejectedBeforeWaitPatch(t *testing.T) {
 // These are selected mount fields from two real Argo v4.0.8 admitted Pods;
 // images, arguments, environment and volume contents are intentionally absent.
 func TestWaitCredentialPatchMatchesAdmittedArgoPodShapes(t *testing.T) {
-	for _, name := range []string{"cli142", "website105"} {
+	for _, name := range []string{"example-container", "example-script"} {
 		t.Run(name, func(t *testing.T) {
 			data, err := os.ReadFile(filepath.Join("testdata", "wait-credential-argo4.0.8", name+"-podspec.json"))
 			if err != nil {
