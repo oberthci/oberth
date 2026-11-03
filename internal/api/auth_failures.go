@@ -104,7 +104,8 @@ func (server *Server) logAuthFailure(request *http.Request, reason string) {
 
 func (server *Server) recordAuthFailure(writer http.ResponseWriter, request *http.Request, reason string) bool {
 	// The coarse source ceiling remains stable when a client rotates tokens.
-	// It counts failures only, so valid credentials behind an ingress still work.
+	// This shapes failure responses after authentication; it does not cap backend
+	// lookups. Valid credentials behind a shared ingress still work.
 	sourceLimited := server.authFailureSources.checkLimit(authPeer(request), true, authFailureSourceLimit)
 	principalLimited := server.authFailures.check(authFailurePrincipal(request), true)
 	if sourceLimited || principalLimited {
