@@ -211,7 +211,7 @@ call the proxy hostname directly.
 | `promote_retry` | Retry a failed or interrupted promotion (`id`): a new promotion of the same repo/source SHA/target, merged onto the target's current head and re-tested; a transient push-only failure reuses its exact tested SHA when the target is unchanged. Same authorization as `promote`; the original grant still authorizes it, because a grant is consumed only by a delivered promotion. Audited as `promotion.retry` |
 | `publication_abandon` | Admin only, unscoped: abandon a pending publication by full publication `id` with a required `reason`. The audited transaction marks the intent `abandoned`, its run `failed/abandoned`, and its promotion failed. It never pushes; earlier ambiguous pushes may already be upstream. Terminal intents are refused and abandoned intents cannot be reactivated. CLI: `oberth publication abandon <publication-id> --reason "stop delivery"` |
 | `publish_retry` | Retry upstream publication for a branch or tag run whose burns passed but whose upstream push failed, including exhausted infrastructure failures. Transient errors get five durable attempts with 2/4/8/16-minute backoff, and pending responses say queued; a promotion is retried with `promote_retry` instead |
-| `issue_create` | Create a manual issue, workspace-global or filed under one `upstream` |
+| `issue_create` | Create a manual issue, installation-wide or filed under one `upstream` |
 | `issue_get` | Get an issue by ID; optional `fields` and `body_limit` reduce the response |
 | `issue_get_many` | Get 1..50 issues in request order, with optional `fields`/`body_limit` and explicit missing/size-limit results |
 | `issue_update` | Update an issue title and body or move a manual issue with `upstream`; optional `expected_body_sha256` rejects the update on mismatch; returns a compact acknowledgment |
@@ -646,11 +646,11 @@ count.
 For the latest 5, 10, or 50 created issues, set `limit` accordingly (1..50).
 Ordering is descending issue ID, not most recently updated. Listing does not
 include bodies. `issue_get`, `issue_list`, and `/api/issues` show `upstream`
-(empty for a workspace-global manual issue).
+(empty for a installation-wide manual issue).
 
 To repair a mis-scoped manual issue without changing its ID, body, appends, or
 history, call `issue_update({"id":1094,"upstream":"github"})`. An admin may
-use an empty `upstream` or `"global"` to make it workspace-global. Other
+use an empty `upstream` or `"global"` to make it installation-wide. Other
 uplinks can only move visible issues to upstreams in their scope; CI issues
 cannot move. The CLI can call the same tool with
 `oberth mcp call issue_update '{"id":1094,"upstream":"github"}'`.

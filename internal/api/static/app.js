@@ -1403,7 +1403,7 @@ async function openIssue(id, opener) {
   state.issueOpener = opener || document.activeElement;
   const dialog = document.getElementById("issueDialog");
   document.getElementById("issueDialogTitle").textContent = `Issue #${issue.ID}`;
-  document.getElementById("issueDialogMeta").textContent = `${issue.Kind} · ${issue.State} · ${issue.upstream || "workspace-global"}`;
+  document.getElementById("issueDialogMeta").textContent = `${issue.Kind} · ${issue.State} · ${issue.upstream || "installation-wide"}`;
   const requestID = state.issueDetailRequest = (state.issueDetailRequest || 0) + 1;
   const content = document.getElementById("issueDialogContent");
   content.textContent = "Loading issue…";
@@ -1420,11 +1420,11 @@ async function openIssue(id, opener) {
   issue = { ...issue, Body: detail.body };
   content.innerHTML = `
     <h3>${esc(issue.Title || "Untitled issue")}</h3>
-    <p class="meta">${esc(issue.RepoID ? repoName(issue.RepoID) : (issue.upstream || "workspace-global"))} ${issue.Branch ? "/ " + esc(issue.Branch) : ""} · Oberth internal ledger</p>
+    <p class="meta">${esc(issue.RepoID ? repoName(issue.RepoID) : (issue.upstream || "installation-wide"))} ${issue.Branch ? "/ " + esc(issue.Branch) : ""} · Oberth internal ledger</p>
     <dl class="kv-grid">
       <dt>kind</dt><dd>${esc(issue.Kind)}</dd>
       <dt>state</dt><dd>${esc(issue.State)}</dd>
-      <dt>upstream</dt><dd>${esc(issue.upstream || "workspace-global")}</dd>
+      <dt>upstream</dt><dd>${esc(issue.upstream || "installation-wide")}</dd>
       <dt>occurrences</dt><dd>${esc(issue.Occurrences || 1)}</dd>
       ${issue.CIOrigin ? `<dt>ci origin</dt><dd>${esc(issue.CIOrigin)}</dd>` : ""}
       ${issue.CIWorkID ? `<dt>ci work</dt><dd>${esc(issue.CIWorkID)}</dd>` : ""}

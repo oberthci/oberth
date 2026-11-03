@@ -1059,7 +1059,8 @@ trust assumptions and complete invalidation rules.
   This is the complete tool surface. Issues are first-class in Oberth;
   manual and CI issues retain their current write surface and scoped access.
   The owner decision of 2026-11-03 drops the external-tracker migration.
-  Work statuses and a server-computed stale flag are not implemented. See
+  Issues are the CI issue queue, not a general work tracker. This version has
+  no task workspaces, work-status enum or computed stale field. See
   [CI and manual issue scope](docs/ci-issue-scope.md).
   `issue_create` takes a `title`, a `body` and an optional `upstream`;
   without one it creates a global manual

@@ -2718,7 +2718,7 @@ func (service *API) issueUpdate(ctx context.Context, actor api.Actor, id int64, 
 		var id int64
 		if name == "" || strings.EqualFold(name, "global") {
 			if !actor.Admin {
-				return model.Issue{}, fmt.Errorf("%w: only an admin may make an issue workspace-global", ErrInvalidInput)
+				return model.Issue{}, fmt.Errorf("%w: only an admin may make an issue installation-wide", ErrInvalidInput)
 			}
 		} else {
 			var err error

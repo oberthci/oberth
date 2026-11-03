@@ -186,8 +186,9 @@ green default branch or a verified upstream deletion. It checks the accepted
 local branch head for ancestry, since a failed newer push may be ahead of the
 last published upstream ref. The close reason is retained in the issue and
 audit history; default-branch issues still require their own green run.
-Manual issues are workspace-global flat-list records; they are never attached to
-a repository or synchronized to the upstream forge.
+Manual CI investigation issues can be installation-wide or scoped to an upstream.
+They are not attached to an individual repository or synchronized to the upstream
+forge. See [issue scope and retained compatibility](ci-issue-scope.md).
 
 Promotion first green-gates the candidate. It reuses the already-tested commit
 only when the fetched target fast-forwards to that exact candidate. A divergent
