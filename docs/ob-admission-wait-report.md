@@ -25,7 +25,9 @@ Zero `maxHeadWait` keeps strict FIFO.
 Duration samples come from the retained step observations used by
 `run_resources`, grouped into whole workflow spans for each repository's
 branch, release, promotion or schedule history. Known run startup/teardown
-extends those spans. At least five distinct complete measured runs are required;
+extends those spans. The history read selects the newest 30 passed runs of
+the requested workflow class before reading their retained observations.
+At least five distinct complete measured runs are required;
 fewer samples count as unmeasured. Truncated history and incomplete terminal timestamps
 provide no estimate. These are p95 forecasts, not execution deadlines: an
 overrun can still delay the head. An expired reservation stops new backfill

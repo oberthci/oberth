@@ -11,7 +11,7 @@ import (
 )
 
 // DefaultMaxHeadWait marks when the queue reports draining for its head.
-// Only measured backfill preserving the head's reservation is admitted.
+// Backfill must preserve the head's reservation.
 const DefaultMaxHeadWait = 20 * time.Minute
 
 // headWaitKey identifies a run's head-wait origin across a restart: a
@@ -135,8 +135,8 @@ func (gate *weightedAdmission) backfillFitsLocked(head, candidate *admissionRese
 			return false
 		}
 		if candidate.estimate > 0 && now.Add(candidate.estimate).Before(deadline) {
-			candidate.backfillMessage = fmt.Sprintf("backfilled: ends before head can start (p95 %s < %s)",
-				backfillDuration(candidate.estimate), backfillDuration(deadline.Sub(now)))
+			candidate.backfillMessage = fmt.Sprintf("backfilled: ends before head can start (p95 %dm < %dm)",
+				(candidate.estimate-1)/time.Minute+1, deadline.Sub(now)/time.Minute)
 			return true
 		}
 		// Coexistence protects only this head. A lower effective or base
@@ -165,10 +165,6 @@ func (gate *weightedAdmission) backfillFitsLocked(head, candidate *admissionRese
 	}
 	candidate.backfillMessage += " (running p95 finish unknown)"
 	return false
-}
-
-func backfillDuration(d time.Duration) string {
-	return fmt.Sprintf("%gm", d.Minutes())
 }
 
 // Unknown, retained and overrun work is never assumed to finish now. Treating

@@ -444,3 +444,28 @@ func TestEASYDeadlineResetsOnlyWhenHeadChanges(t *testing.T) {
 		})
 	}
 }
+
+func TestEASYMessagesUseConservativeWholeMinutes(t *testing.T) {
+	g, clock, _ := easyGate(t)
+	head := pendingPriority(t, g, 2, model.PriorityHighest, easyRequest("head", 8200, time.Hour))
+	t.Cleanup(head.cancel)
+	clock.now = clock.now.Add(20*time.Minute + 2*time.Second)
+	r := pending(t, g, 3, easyRequest("fractional", 1100, 4*time.Minute+43*time.Second))
+	t.Cleanup(r.cancel)
+	if !granted(g, r) {
+		t.Fatal("safe fractional-minute candidate held")
+	}
+	got := (&Scheduler{admission: g}).AdmissionSnapshot(r.sequence).BackfillMessage
+	if want := "backfilled: ends before head can start (p95 5m < 9m)"; got != want {
+		t.Fatalf("message = %q, want %q", got, want)
+	}
+}
+
+func TestEASYHistoryUsesDefaultRuns(t *testing.T) {
+	var filter store.RunResourceFilter
+	s := &Scheduler{store: easyHistoryStore{filter: &filter}}
+	s.measuredBackfillDuration(t.Context(), model.Run{RepoID: 1})
+	if filter.Runs != measured.DefaultRuns {
+		t.Fatalf("history limit = %d, want %d", filter.Runs, measured.DefaultRuns)
+	}
+}

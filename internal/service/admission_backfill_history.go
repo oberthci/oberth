@@ -30,7 +30,7 @@ func (s *Scheduler) measuredBackfillDuration(ctx context.Context, run model.Run)
 	if !ok {
 		return 0
 	}
-	history, err := reader.RunResources(ctx, run.RepoID, store.RunResourceFilter{Ref: "any", Runs: measured.MaxRuns, DurationClass: durationClass(run)})
+	history, err := reader.RunResources(ctx, run.RepoID, store.RunResourceFilter{Ref: "any", Runs: measured.DefaultRuns, DurationClass: durationClass(run)})
 	if err != nil || history.Truncated {
 		return 0
 	}
