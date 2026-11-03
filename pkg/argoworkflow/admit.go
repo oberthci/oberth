@@ -438,8 +438,8 @@ func admitTemplate(location string, template wfv1.Template, policy Policy, depth
 	// privilege escalation out of the pipeline.
 	if template.Resource != nil {
 		if policy.Capability != nil {
-			if strings.Contains(location, ".inline") || location == "spec.templateDefaults" {
-				problems = append(problems, fmt.Errorf("argoworkflow: %s.resource requires a named template for its operator executor identity", location))
+			if strings.HasPrefix(template.Name, "frag-") || strings.Contains(location, ".inline") || location == "spec.templateDefaults" {
+				problems = append(problems, fmt.Errorf("argoworkflow: %s.resource must be a named template in the consuming repository", location))
 			} else if err := admitCapabilityResource(location+".resource", template.Resource, policy.Capability); err != nil {
 				problems = append(problems, err)
 			}
