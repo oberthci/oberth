@@ -460,6 +460,7 @@ fi
 render --set networkPolicy.enabled=true --show-only templates/networkpolicy.yaml >"$netpol_manifest"
 grep -Fq 'kubernetes.io/metadata.name: openbao' "$netpol_manifest"
 grep -Fq 'port: 8200' "$netpol_manifest"
+grep -Fq 'kubernetes.io/metadata.name: "kube-system"' "$netpol_manifest"
 # NetworkPolicy: alternate namespace.
 render --set networkPolicy.enabled=true \
   --set networkPolicy.vault.namespace=vault \
@@ -472,11 +473,11 @@ render --set networkPolicy.enabled=true \
   --set-json 'networkPolicy.vault={"externalCIDRs":["10.0.1.5/32"],"port":8200}' \
   --show-only templates/networkpolicy.yaml >"$ext_netpol"
 grep -Fq 'cidr: 10.0.1.5/32' "$ext_netpol"
-# Structural assertion: external vault mode must not emit a namespaceSelector
-# rule. Strip YAML comments first — the template's documentation legitimately
-# names the field, and helm template preserves comments in rendered output.
-if grep -v '^[[:space:]]*#' "$ext_netpol" | grep -Fq 'namespaceSelector'; then
-  echo "networkpolicy: external vault mode must not render a namespaceSelector rule" >&2
+# External vault mode removes only the store namespace rule. The DNS
+# namespace restriction must remain in force independently.
+grep -Fq 'kubernetes.io/metadata.name: "kube-system"' "$ext_netpol"
+if grep -Fq 'kubernetes.io/metadata.name: openbao' "$ext_netpol"; then
+  echo "networkpolicy: external vault mode must not retain the store namespace rule" >&2
   exit 1
 fi
 # NetworkPolicy: enabled by default (resource rendered).

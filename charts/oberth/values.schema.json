@@ -538,6 +538,17 @@
           "type": "boolean",
           "description": "Create a NetworkPolicy in the pipeline namespace restricting egress. Disable on clusters without a NetworkPolicy-capable CNI."
         },
+        "dnsNamespace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+          "description": "DNS resolver Pod namespace. Default kube-system, including old reused values."
+        },
+        "dnsAnyDestination": {
+          "type": "boolean",
+          "description": "Explicitly allow DNS to any destination for host-networked/node-local resolvers. Default false."
+        },
         "vault": {
           "type": "object",
           "additionalProperties": false,

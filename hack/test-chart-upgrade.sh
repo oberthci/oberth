@@ -39,6 +39,8 @@ check_default() {
 "$helm_tool" template oberth "$legacy_chart" --is-upgrade --namespace oberth \
   --set-string "image.ref=$server_image" >"$work/rendered.yaml"
 check_default
+# New policy defaults must also apply when old --reuse-values omit their keys.
+grep -Fq 'kubernetes.io/metadata.name: "kube-system"' "$work/rendered.yaml"
 
 # The reset-then-reuse path merges new defaults with the old release's values.
 "$helm_tool" template oberth "$chart" --is-upgrade --namespace oberth \

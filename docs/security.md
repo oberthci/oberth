@@ -137,6 +137,11 @@
   disabled policy produces a prominent warning. Clusters must provide an
   enforcing CNI; selecting the Kubernetes distribution alone does not prove
   that an operator has left its controller enabled.
+- DNS egress (UDP/TCP 53) targets resolver Pods in
+  `networkPolicy.dnsNamespace` (default `kube-system`). For host-networked or
+  node-local resolvers, explicitly set `networkPolicy.dnsAnyDestination=true`;
+  this restores unrestricted DNS destinations. Configure this before upgrade
+  if the resolver is not represented by ordinary Pods in the selected namespace.
 - SQLite accepts only the immutable fresh-schema identity; incompatible or newer
   databases fail before startup recovery.
 
