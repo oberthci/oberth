@@ -25,7 +25,12 @@ func backfillGate(clock *fakeClock) *weightedAdmission {
 // pending starts an acquire that may wait and returns its reservation.
 func pending(t *testing.T, gate *weightedAdmission, sequence int64, request admissionRequest) *admissionReservation {
 	t.Helper()
-	reservation := gate.reserve(sequence)
+	return pendingPriority(t, gate, sequence, model.PriorityNormal, request)
+}
+
+func pendingPriority(t *testing.T, gate *weightedAdmission, sequence int64, priority model.RunPriority, request admissionRequest) *admissionReservation {
+	t.Helper()
+	reservation := gate.reserveRun(model.Run{ID: request.RunID, QueueSequence: sequence, Priority: priority, QueuedAt: gate.clock()})
 	go func() { _, _ = reservation.acquireRequest(context.Background(), request) }()
 	deadline := time.Now().Add(testStartTimeout(admissionAcquireBudget))
 	for {

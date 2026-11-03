@@ -8,27 +8,29 @@ import (
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
-func TestPriorityReviewNoBackfillBehindPriorityHead(t *testing.T) {
-	g := newWeightedAdmission(6)
-	g.maxHeadWait = 20 * time.Minute
-	// A long L and a short S consume four units. Another S would stop the L
-	// head starting when the short running S finishes.
-	g.reservations[1] = &admissionReservation{sequence: 1, size: periapsis.L, weight: 3, granted: true}
-	g.reservations[2] = &admissionReservation{sequence: 2, size: periapsis.S, weight: 1, granted: true}
-	head := &admissionReservation{sequence: 3, size: periapsis.L, weight: 3, priority: model.PriorityHighest}
-	candidate := &admissionReservation{sequence: 4, size: periapsis.S, weight: 1, priority: model.PriorityHighest}
-	if g.priorityHeadFitsAlongsideLocked(head, candidate) {
-		t.Fatal("backfill can delay priority head behind running work")
-	}
-}
-
+// Short work may backfill every class; long work cannot consume capacity
+// needed by the head when the first running grant finishes.
 func TestPriorityReviewBackfillPolicyForAllClasses(t *testing.T) {
-	g := newWeightedAdmission(8)
 	for _, priority := range []model.RunPriority{model.PriorityNormal, model.PriorityHigh, model.PriorityHighest} {
-		head := &admissionReservation{priority: priority, weight: 1, size: periapsis.S}
-		candidate := &admissionReservation{weight: 1, size: periapsis.S}
-		if got, want := g.priorityHeadFitsAlongsideLocked(head, candidate), priority == model.PriorityNormal; got != want {
-			t.Errorf("class %s backfill=%v, want %v", priority, got, want)
-		}
+		t.Run(string(priority), func(t *testing.T) {
+			clock := &fakeClock{now: time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)}
+			g := newWeightedAdmission(6)
+			g.now, g.maxHeadWait = clock.Now, 20*time.Minute
+			long := g.reserve(1)
+			acquireRequestWithinBudget(t, long, admissionRequest{Size: periapsis.L, Estimate: time.Hour})
+			t.Cleanup(long.release)
+			short := g.reserve(2)
+			acquireRequestWithinBudget(t, short, admissionRequest{Size: periapsis.S, Estimate: 10 * time.Minute})
+			t.Cleanup(short.release)
+			head := priorityWaiter(g, 3, priority, clock.now, periapsis.L)
+			t.Cleanup(head.cancel)
+			delaying := priorityWaiter(g, 4, priority, clock.now, periapsis.S, 30*time.Minute)
+			t.Cleanup(delaying.cancel)
+			safe := priorityWaiter(g, 5, priority, clock.now, periapsis.S, time.Minute)
+			t.Cleanup(safe.cancel)
+			if granted(g, head) || granted(g, delaying) || !granted(g, safe) {
+				t.Fatal("admission lost safe backfill or admitted a candidate that delays the head")
+			}
+		})
 	}
 }

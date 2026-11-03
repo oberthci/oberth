@@ -22,7 +22,8 @@ past ordinary waiting claims to expose higher priority work, with bounded
 extra claims. This does not create extra weight, run permits or capacity.
 Already admitted work is not preempted.
 
-Backfill candidates are considered in priority/FIFO order. Measured work from
+In v0.17.83, EASY replaces v0.17.82's ban on backfill behind priority
+heads. Backfill candidates are considered in priority/FIFO order. Measured work from
 the head's class or a lower class may use spare capacity only if its p95
 duration ends before the head's predicted start, or the head still fits with
 it running at that time. Missing samples prevent backfill. The default
