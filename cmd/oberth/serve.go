@@ -38,7 +38,6 @@ import (
 	"github.com/oberthci/oberth/internal/goproxy"
 	"github.com/oberthci/oberth/internal/liveness"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/retirement"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/secretstore"
 	"github.com/oberthci/oberth/internal/service"
@@ -797,11 +796,8 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		return err
 	}
 	removalCheck := app.LegacyRemovalCheck{Catalog: database, Git: git, Fragments: fragmentLoader}
-	if retirement.LegacyExecutionRemoved {
-		if err := removalCheck.Check(ctx); err != nil {
-			return err
-		}
-	}
+	// Retirement inventory runs only through the authenticated admin route.
+	// Upstream availability and repository declarations must not gate startup.
 	artifactStore, err := artifacts.Open(filepath.Join(options.dataRoot, "artifacts"))
 	if err != nil {
 		return err
