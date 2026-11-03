@@ -6,10 +6,10 @@
   "controller_source_sha256": "97d059a8ffed7854760fa8c109f657a4d6be0e2496ed193ee1dd541118b8f763",
   "files_sha256": {
     "generate_test.go.txt": "bd66cdf049500723e210de8ebec46f21dd32a031a0fbd07aff377a318a0aaf73",
-    "vmi-before-patch.json": "955013e8678aec4ea5e0b03bd3ac6bd8d656caab51512842219946d5a6dec991",
+    "vmi-before-patch.json": "205669f2fe9f023888845076eda3b81f6cbd66dfa91360440b856faa0c30b84f",
     "vmi-workflow.json": "8afaea9f94b77529b3e00c414afe46538dd8d1827488e5de72cc7296a09e84e8",
     "capture_test.go.txt": "6befd88419c6208165b4449feee1c5bba4b6144c243d0b1e2155cb8a9b676065",
-    "vmi-submitted.json": "20e55b10cc3e6048cd19034864c125331d4a227625d62eaf309c5c698abda1c7",
+    "vmi-submitted.json": "4bb91a1d257ec82be15878d477eaaba294019d5d1022c80bb5c43fe3de66b346",
     "capture-hook.go.txt": "4cb2988575ac294ad6cb5e5f45c8455927b551f31888964adbd69afca8eb3127",
     "capture-call.go.txt": "4cb2988575ac294ad6cb5e5f45c8455927b551f31888964adbd69afca8eb3127"
   },
@@ -18,6 +18,6 @@
   "Sum": "h1:qa2GNFSihNtvI/v9/dgwq84E1mrfbVb8eTXB6YMxMlY=",
   "GoModSum": "h1:WLJnjr1uNM+6dhpVdnJArvSq90FJ3bdRgHEsHVR00wM=",
   "instrumented_sha256": "e94c816c3116278d8b6c363568ab3922aed0a178e6afcd83d6fd0a3270b0e8d4",
-  "recaptured_with": "2026-11-03 CX-OB-STACK-REPAIRS; authenticated upstream Argo v4.0.8 with retained capture helpers; all 27 submitted Pods pass retained Kubernetes v1.35.7 ValidatePodCreate; no live cluster",
+  "recaptured_with": "2026-11-03 Oberth candidate; authenticated upstream Argo v4.0.8 with retained capture helpers; all 27 submitted Pods pass retained Kubernetes v1.35.7 ValidatePodCreate; no live cluster",
   "source_sha256": "97d059a8ffed7854760fa8c109f657a4d6be0e2496ed193ee1dd541118b8f763"
 }

@@ -194,8 +194,14 @@ func resolveUserMountMirrors(t *wfv1.Template) {
 	}
 }
 
+// Artifact policy follows the mount, since source and artifacts share a volume.
+// Authored mounts using either reserved name are stripped before injection.
+func isArtifactsMount(m corev1.VolumeMount) bool {
+	return m.Name == SourceVolumeName && m.MountPath == ArtifactsMountPath
+}
+
 func sharedWorkspaceMount(m corev1.VolumeMount) bool {
-	return m.Name == WorkspaceVolumeName || m.Name == CacheVolumeName || m.Name == ArtifactsVolumeName
+	return m.Name == WorkspaceVolumeName || m.Name == CacheVolumeName || m.Name == ArtifactsVolumeName || isArtifactsMount(m)
 }
 
 // A readonly request protects the underlying directory, not just one path in

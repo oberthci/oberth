@@ -1412,12 +1412,11 @@ const (
 	// replacing anything.
 	GoProxyCACertMountPath = "/etc/ssl/certs/oberth-goproxy-ca.pem"
 
-	// OberthBinMountPath is where a credentialed container finds the Oberth
-	// server binary, delivered from the source claim. The binary enables
-	// `oberth secretstore exec` as the native credential chain replacement.
+	// ArtifactsVolumeName remains reserved so authored legacy aliases are stripped.
 	ArtifactsVolumeName = "oberth-artifacts"
 	ArtifactsMountPath  = "/work/artifacts"
 
+	// OberthBinMountPath delivers the server binary for credentialed containers.
 	OberthBinMountPath = "/run/oberth/bin"
 	// OberthBinPath is the full path to the oberth binary inside the mount.
 	OberthBinPath = OberthBinMountPath + "/oberth"
@@ -1626,10 +1625,9 @@ func injectServerVolumes(workflow *wfv1.Workflow, config Config, request Request
 		mounts = append(mounts, mount)
 	}
 	if claim := strings.TrimSpace(request.SourceVolume.ClaimName); claim != "" {
-		// Keep the claim reference writable in both Pod volumes. On local-path
-		// PVs kubelet can reuse one mount for both names; a claim-level RO
-		// source mount can then make the artifacts path RO too. The source
-		// subPaths are protected by their individual VolumeMounts below.
+		// Declare the run claim once. Multiple volume aliases for a local PV
+		// can prevent kubelet from completing mount setup. Keep the claim
+		// writable for artifacts; individual subPath mounts protect inputs.
 		workflow.Spec.Volumes = append(workflow.Spec.Volumes, corev1.Volume{
 			Name: SourceVolumeName,
 			VolumeSource: corev1.VolumeSource{
@@ -1645,16 +1643,8 @@ func injectServerVolumes(workflow *wfv1.Workflow, config Config, request Request
 			ReadOnly:  true,
 		})
 		if request.artifactsDelivered() {
-			workflow.Spec.Volumes = append(workflow.Spec.Volumes, corev1.Volume{
-				Name: ArtifactsVolumeName,
-				VolumeSource: corev1.VolumeSource{
-					PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-						ClaimName: claim,
-					},
-				},
-			})
 			mounts = append(mounts, corev1.VolumeMount{
-				Name:      ArtifactsVolumeName,
+				Name:      SourceVolumeName,
 				MountPath: ArtifactsMountPath,
 				SubPath:   request.SourceVolume.ArtifactsSubPath,
 			})

@@ -74,7 +74,7 @@ func applyNonrootLeaves(workflow *wfv1.Workflow, config Config, request Request)
 			}
 			// Pinned tools and source are inputs. Only the existing, separately
 			// collected per-run artifacts mount may be written for publication.
-			mount.ReadOnly = mount.Name != ArtifactsVolumeName
+			mount.ReadOnly = mount.ReadOnly || !isArtifactsMount(mount)
 			mounts = append(mounts, mount)
 		}
 		container.VolumeMounts = append(mounts, corev1.VolumeMount{Name: nonrootTmpVolume, MountPath: "/tmp"})

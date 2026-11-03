@@ -210,7 +210,7 @@ func TestWorkspaceCacheOnCredentialedReleaseLeaf(t *testing.T) {
 	}
 	var sawCache bool
 	for _, m := range wf.Spec.Templates[0].Container.VolumeMounts {
-		if m.Name == WorkspaceVolumeName || m.Name == ArtifactsVolumeName {
+		if m.Name == WorkspaceVolumeName || isArtifactsMount(m) {
 			t.Errorf("unrequested workspace mount %+v", m)
 		}
 		sawCache = sawCache || m.Name == CacheVolumeName
@@ -301,7 +301,7 @@ func TestWorkspaceCacheCoversEveryPodContainerShape(t *testing.T) {
 					var cache bool
 					for _, m := range c.VolumeMounts {
 						cache = cache || (m.Name == CacheVolumeName && m.MountPath == CacheMountPath)
-						if m.Name == ArtifactsVolumeName || (m.Name == WorkspaceVolumeName && strings.HasPrefix(m.MountPath, "/tmp/oberth-")) ||
+						if isArtifactsMount(m) || (m.Name == WorkspaceVolumeName && strings.HasPrefix(m.MountPath, "/tmp/oberth-")) ||
 							m.MountPath == WorkspaceGomodFallbackPath || m.MountPath == WorkspaceGobuildFallbackPath {
 							t.Errorf("%s received automatic mount %+v", c.Name, m)
 						}
