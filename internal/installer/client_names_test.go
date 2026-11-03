@@ -72,7 +72,7 @@ func TestRotateCertificateAddsIPAddresses(t *testing.T) {
 
 // A restored or older identity that lacks the addresses clients use is
 // re-issued for them (same key) instead of only warning that it never will
-// be (observed on example-node: the restored certificate carried in-cluster names only).
+// be (observed on an installation: the restored certificate carried in-cluster names only).
 func TestPreflightRotatesForClientAddresses(t *testing.T) {
 	t.Setenv(baoTokenEnvVar, "test-root-token")
 	certPEM, keyPEM := testCertAndKey(t, []string{"oberth", "oberth.oberth.svc"})

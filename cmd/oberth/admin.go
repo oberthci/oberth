@@ -1682,7 +1682,7 @@ func upstreamKeyDirectory() string {
 // same keypair the server uses to authenticate to the forge. The workstation
 // then holds the organization-wide upstream key, and replacing the
 // workstation key at the forge silently breaks every fetch and publication
-// (observed on example-node, issue 040).
+// (observed on a production installation, issue 040).
 func warnUplinkSharesUpstreamKey(output io.Writer, uplinkFingerprint, keyDirectory string) {
 	entries, err := os.ReadDir(keyDirectory)
 	if err != nil {
