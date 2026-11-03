@@ -41,7 +41,7 @@ func TestTrustedPolicyPublicationOutageStaysPending(t *testing.T) {
 		t.Fatalf("publication policy outage failed or published run: %#v", run)
 	}
 	view := presentationRun(run)
-	observation := (&API{}).observeScheduling(ctx, run, nil, false)
+	observation, _ := (&API{}).observeScheduling(ctx, run, nil, false)
 	if view.DisplayStatus != "waiting" || view.DisplayReason != store.PolicyRefreshWaitingReason || observation.State != "waiting" || !strings.Contains(observation.Message, store.PolicyRefreshWaitingReason) {
 		t.Fatalf("waiting cause hidden: %#v, %#v", view, observation)
 	}

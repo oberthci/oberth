@@ -9,7 +9,7 @@ import (
 
 func TestSchedulingQueuedIgnoresStalePolicyWait(t *testing.T) {
 	run := model.Run{ID: "recovered", Status: model.RunQueued, Reason: "retried after restart; " + store.PolicyRefreshWaitingReason}
-	got := (&API{}).observeScheduling(t.Context(), run, nil, false)
+	got, _ := (&API{}).observeScheduling(t.Context(), run, nil, false)
 	if got.State != "queued" {
 		t.Fatalf("recovered queue retains obsolete policy wait: %#v", got)
 	}

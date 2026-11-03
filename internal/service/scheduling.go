@@ -75,7 +75,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 	if run.Status == model.RunRunning && (run.Reason == store.PolicyRefreshWaitingReason || strings.HasSuffix(run.Reason, "; "+store.PolicyRefreshWaitingReason)) {
 		result.State = "waiting"
 		result.Message = store.PolicyRefreshWaitingReason + ": waiting for upstream trusted test policy; no publication is allowed."
-		return result
+		return result, reason
 	}
 	if isPendingCreate(run) {
 		result.State = "infra-pending"
