@@ -630,6 +630,10 @@ func seedPreviousV2Database(t *testing.T, path string) (model.AuditHead, string)
 PRAGMA foreign_keys = OFF;
 BEGIN IMMEDIATE;
 ` + testdb.PublicationV38Schema + `
+DROP TRIGGER IF EXISTS publications_tag_tuple_insert;
+DROP INDEX IF EXISTS publications_tag_tuple_idx;
+DROP TABLE IF EXISTS restart_step_timings;
+DROP TABLE IF EXISTS restart_workflow_timings;
 DROP TRIGGER issues_metadata_revision;
 ALTER TABLE issues DROP COLUMN revision;
 ALTER TABLE token_credentials DROP COLUMN expires_at;
@@ -808,6 +812,10 @@ func seedLegacyV1Database(t *testing.T, path string, actionCount int) {
 PRAGMA foreign_keys = OFF;
 BEGIN IMMEDIATE;
 ` + testdb.PublicationV38Schema + `
+DROP TRIGGER IF EXISTS publications_tag_tuple_insert;
+DROP INDEX IF EXISTS publications_tag_tuple_idx;
+DROP TABLE IF EXISTS restart_step_timings;
+DROP TABLE IF EXISTS restart_workflow_timings;
 DROP TRIGGER issues_metadata_revision;
 ALTER TABLE issues DROP COLUMN revision;
 ALTER TABLE token_credentials DROP COLUMN expires_at;

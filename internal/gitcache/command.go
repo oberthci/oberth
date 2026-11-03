@@ -122,7 +122,9 @@ func (b *cliBackend) execute(ctx context.Context, spec commandSpec, capture bool
 		cmd.WaitDelay = captureWaitDelay
 	}
 
-	output := headBuffer{max: maxCapturedOutput}
+	ctx, cancelOutput := context.WithCancel(ctx)
+	defer cancelOutput()
+	output := boundedio.Buffer{Limit: maxCapturedOutput, OnOverflow: cancelOutput}
 	// Always retain the tail of stderr, bounded and redacted, so a failure at
 	// the upstream boundary carries the forge's own reason (URL, "repository
 	// not found", "Permission denied (publickey)") instead of a bare "exit
@@ -199,10 +201,10 @@ func (b *cliBackend) execute(ctx context.Context, spec commandSpec, capture bool
 		}
 		return "", fmt.Errorf("git command failed: %w", waitErr)
 	}
-	if output.err != nil {
-		return "", fmt.Errorf("git stdout exceeds %d bytes: %w", maxCapturedOutput, output.err)
+	if output.Err() != nil {
+		return "", fmt.Errorf("git stdout exceeds %d bytes: %w", maxCapturedOutput, output.Err())
 	}
-	return strings.TrimSpace(string(output.data)), nil
+	return strings.TrimSpace(output.String()), nil
 }
 
 // gitSubcommand skips the global options used by cache commands, including

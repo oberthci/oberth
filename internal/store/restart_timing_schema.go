@@ -1,6 +1,6 @@
 package store
 
-const restartTimingMigrationVersion = 39
+const restartTimingMigrationVersion = 43
 
 // Initial-attempt timing remains in the v30 tables. Restart attempts append
 // separate evidence keyed by the immutable run.restart audit count.

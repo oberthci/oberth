@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/oberthci/oberth/internal/boundedio"
 	"os"
 	"strings"
 )
@@ -445,13 +446,15 @@ func (c *Cache) LsRemoteHeads(ctx context.Context, input string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	output := headBuffer{max: maxRefsOutput}
+	ctx, cancelOutput := context.WithCancel(ctx)
+	defer cancelOutput()
+	output := boundedio.Buffer{Limit: maxRefsOutput, OnOverflow: cancelOutput}
 	err = c.run(ctx, commandSpec{repository: input, args: []string{"ls-remote", "--heads", remote}, stdout: &output})
 	if err != nil {
 		return 0, fmt.Errorf("ls-remote probe for %s: %w", input, err)
 	}
 	count := 0
-	for _, line := range strings.Split(strings.TrimSpace(string(output.data)), "\n") {
+	for _, line := range strings.Split(strings.TrimSpace(output.String()), "\n") {
 		if line != "" {
 			fields := strings.Fields(line)
 			if len(fields) != 2 || ValidateSHA(fields[0]) != nil || !strings.HasPrefix(fields[1], "refs/heads/") {

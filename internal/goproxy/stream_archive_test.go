@@ -36,8 +36,8 @@ func (c *streamedArchiveCache) ArchiveTar(ctx context.Context, _, _ string, w io
 }
 
 func TestOversizedModuleArchiveHasBoundedHeapAndJoinsProducer(t *testing.T) {
-	cache := &streamedArchiveCache{mockCache: mockCache{tags: []string{"v1.0.0"}}}
-	h := NewHandler(cache, "go.example.test", map[string]string{"wire": "repo"})
+	cache := &streamedArchiveCache{mockCache: *mockModuleCache([]string{"v1.0.0"}, "go.example.test/wire")}
+	h := cachedTestHandler(t, cache, "go.example.test", map[string]string{"wire": "repo"})
 	h.archiveLimit = 16 << 20
 	runtime.GC()
 	var before, after runtime.MemStats
@@ -45,7 +45,7 @@ func TestOversizedModuleArchiveHasBoundedHeapAndJoinsProducer(t *testing.T) {
 	response := httptest.NewRecorder()
 	h.ServeHTTP(response, httptest.NewRequest("GET", "/go.example.test/wire/@v/v1.0.0.zip", nil))
 	runtime.ReadMemStats(&after)
-	if response.Code < 400 {
+	if response.Code < 400 || response.Header().Get("X-Oberth-GoProxy-Error") != "archive_too_large" {
 		t.Errorf("oversized tar accepted: %d", response.Code)
 	}
 	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 8<<20 {

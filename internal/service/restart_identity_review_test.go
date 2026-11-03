@@ -9,12 +9,13 @@ import (
 	"testing"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/internal/storetest"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestStartupAdoptsNonReleaseTagWorkflow(t *testing.T) {
 	fixture := newRecoveryFixture(t)
-	queued, err := fixture.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefTag, Ref: "v1.2.3", SHA: strings.Repeat("a", 40), Actor: "tester", Trigger: "tag"})
+	queued, err := storetest.EnqueueRun(fixture.store, t.Context(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefTag, Ref: "v1.2.3", SHA: strings.Repeat("a", 40), Actor: "tester", Trigger: "tag"})
 	if err != nil {
 		t.Fatal(err)
 	}

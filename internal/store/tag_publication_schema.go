@@ -1,6 +1,6 @@
 package store
 
-const tagPublicationMigrationVersion = 40
+const tagPublicationMigrationVersion = 44
 
 // Preserve any legacy duplicate rows as evidence while preventing new ones.
 const tagPublicationSchema = `

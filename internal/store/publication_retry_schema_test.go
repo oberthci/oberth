@@ -23,5 +23,5 @@ DROP TRIGGER IF EXISTS publications_tag_tuple_insert;
 DROP INDEX IF EXISTS publications_tag_tuple_idx;
 DROP TABLE IF EXISTS restart_step_timings;
 DROP TABLE IF EXISTS restart_workflow_timings;
-DELETE FROM schema_migrations WHERE version >= 39;
+DELETE FROM schema_migrations WHERE version >= 43;
 `

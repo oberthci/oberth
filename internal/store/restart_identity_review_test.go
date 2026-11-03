@@ -65,7 +65,7 @@ func TestRestartResetWaitsForOldWorkflowCancellation(t *testing.T) {
 	if _, err = s.ClaimNextRun(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.SetRunJobName(t.Context(), original.ID, "old-workflow"); err != nil {
+	if _, err = s.SetRunWorkflowName(t.Context(), original.ID, "old-workflow"); err != nil {
 		t.Fatal(err)
 	}
 	reset, err := s.RequeueStrandedRun(t.Context(), original.ID)
@@ -102,7 +102,7 @@ func TestRestartResetRefusesExecutionAndPublicationEvidence(t *testing.T) {
 			_, err = s.ClaimNextRun(t.Context())
 			requireRestartNoError(t, err)
 			if evidence == "step" {
-				_, err = s.PutStepResult(t.Context(), model.StepResult{RunID: run.ID, Burn: "test", Step: "unit", Status: model.StepPassed, DeclaredSize: "S"})
+				_, err = s.PutStepResult(t.Context(), model.StepResult{RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed, DeclaredSize: "S"})
 			} else {
 				_, err = s.BeginPublication(t.Context(), model.PublicationSpec{RepoID: repo.ID, RunID: run.ID, RefKind: run.RefKind, Ref: run.Ref, ResultSHA: run.SHA, Actor: run.Actor})
 			}
@@ -127,7 +127,7 @@ func TestRestartRecordsNewWorkflowTimingWithoutRewritingHistory(t *testing.T) {
 	requireRestartNoError(t, err)
 	_, err = s.ClaimNextRun(t.Context())
 	requireRestartNoError(t, err)
-	_, err = s.SetRunJobName(t.Context(), run.ID, "workflow-before")
+	_, err = s.SetRunWorkflowName(t.Context(), run.ID, "workflow-before")
 	requireRestartNoError(t, err)
 	first := model.WorkflowTiming{RunID: run.ID, Namespace: "pipelines", Name: "workflow-before", UID: "11111111-1111-4111-8111-111111111111", SpecIdentity: strings.Repeat("a", 64), CreatedAt: now, Tasks: []model.TimingTask{}}
 	requireRestartNoError(t, s.RecordWorkflowTiming(t.Context(), first))
@@ -141,7 +141,7 @@ func TestRestartRecordsNewWorkflowTimingWithoutRewritingHistory(t *testing.T) {
 	requireRestartNoError(t, s.CompleteObservedRunCancellation(t.Context(), pending[0]))
 	_, err = s.ClaimNextRun(t.Context())
 	requireRestartNoError(t, err)
-	_, err = s.SetRunJobName(t.Context(), run.ID, "workflow-after")
+	_, err = s.SetRunWorkflowName(t.Context(), run.ID, "workflow-after")
 	requireRestartNoError(t, err)
 	second := first
 	second.Name = "workflow-after"
@@ -216,7 +216,7 @@ func TestRestartMigrationsUpgradeV38WithoutLosingReleaseIntent(t *testing.T) {
 	requireRestartNoError(t, err)
 	publication, err := s.BeginPublication(t.Context(), model.PublicationSpec{RepoID: repo.ID, RunID: run.ID, RefKind: model.RefTag, Ref: run.Ref, ResultSHA: run.SHA, Actor: run.Actor})
 	requireRestartNoError(t, err)
-	_, err = s.db.Exec(restartRecoveryDowngradeSQL)
+	_, err = s.db.Exec(integrationDowngradeSQL)
 	requireRestartNoError(t, err)
 	requireRestartNoError(t, s.Close())
 	upgraded, err := Open(context.Background(), path, Options{})

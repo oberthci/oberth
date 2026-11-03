@@ -2278,9 +2278,9 @@ func TestSchedulerShutdownCancelsAndJoinsWorkers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pending) != 1 || pending[0].RunID != enqueued.ID || pending[0].WorkflowName != jobName ||
+	if len(pending) != 1 || pending[0].RunID != enqueued.ID || pending[0].WorkflowName != workflowName ||
 		pending[0].SupersededBy != "" {
-		t.Fatalf("pending obligations = %#v, want the canceled Job %q owned by the requeue", pending, jobName)
+		t.Fatalf("pending obligations = %#v, want the canceled Job %q owned by the requeue", pending, workflowName)
 	}
 }
 
