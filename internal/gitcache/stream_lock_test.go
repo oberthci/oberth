@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 type advertisedWriter struct {
@@ -64,7 +66,9 @@ func TestStalledUploadAllowsConcurrentFetchCheckoutAndModuleRead(t *testing.T) {
 	}
 	for name, op := range operations {
 		t.Run(name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+			// Real Git clone/fetch must finish while the transport remains
+			// stalled. Use the shared fixture budget, not a latency assertion.
+			ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(2*time.Second))
 			defer cancel()
 			completed := make(chan error, 1)
 			go func() { completed <- op(ctx) }()
@@ -144,7 +148,7 @@ func TestStalledReceiveAllowsReadersWithoutRefreshingItsSnapshot(t *testing.T) {
 	<-started
 	// An upstream advance must not be attributed to this actor's still-open receive.
 	r.commit(t, "upstream advanced", "new\\n")
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(time.Second))
 	defer cancel()
 	readDone := make(chan error, 1)
 	go func() {
