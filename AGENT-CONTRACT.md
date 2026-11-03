@@ -253,6 +253,12 @@ trust assumptions and complete invalidation rules.
   across uninstall (`helm.sh/resource-policy: keep`). The SSH host key also
   derives the deployment's public audit-witness identity and must never be
   regenerated casually.
+- PKI leaf renewal swaps the served certificate without restarting listeners.
+  Failed renewal makes readiness fail within the last 10% of its lifetime,
+  capped at one hour before expiry; an expired or not-yet-valid leaf is always
+  unready. Successful renewal clears the error. Administrator metrics expose
+  expiry, renewal failure and its bounded diagnostic. Renewal and secret-store
+  probe workers are canceled and joined before server teardown completes.
 - Upstream Git authentication is supplied by the configured Secret. Oberth does
   not mint a replacement when one is configured. Per-upstream deploy keys are
   additional data keys (`<keyFile>-<name>` / `<keyFile>-<name>.pub`) of that

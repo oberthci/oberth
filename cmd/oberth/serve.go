@@ -844,6 +844,10 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	}
 	retention.AcquirePurge = scheduler.AcquireEvidencePurge
 	writerProgress := &liveness.Heartbeat{}
+	served, err := loadServedCertificate(options.tlsCert, options.tlsKey)
+	if err != nil {
+		return fmt.Errorf("load HTTPS identity: %w", err)
+	}
 	health := app.Health{WriterReady: writerProgress.ProbeError, Store: database, Audit: anchors.Ready, VCSCache: &app.VCSSnapshot{}, Configured: upstreamReadinessProbe(options), VCS: func(ctx context.Context, upstream model.Upstream) error {
 		if upstream.Kind == "local" {
 			info, err := os.Stat(upstream.BaseURL)
@@ -886,7 +890,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		if !scheduler.Recovered() {
 			return errors.New("scheduler recovery is pending")
 		}
-		return nil
+		return served.readyAt(time.Now())
 	}
 	health.Readiness = &app.ReadinessSnapshot{}
 	health.ReadinessUpstreams = database.ListReadinessUpstreams
@@ -928,19 +932,21 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 			Log:     logger.Printf,
 			Address: options.secretStoreAddress,
 		}
-		go func() {
+		probeHealth := health
+		stopProbe := startServerTask(ctx, func(probeCtx context.Context) {
 			ticker := time.NewTicker(secretStoreProbeInterval)
 			defer ticker.Stop()
 			for {
 				select {
-				case <-ctx.Done():
+				case <-probeCtx.Done():
 					return
 				case <-ticker.C:
-					result := health.RefreshSecretStore(ctx)
+					result := probeHealth.RefreshSecretStore(probeCtx)
 					observer.Observe(result)
 				}
 			}
-		}()
+		})
+		defer stopProbe()
 	}
 	externallyAnchored := tsaClient != nil || rekorWitness != nil
 	health.AuditMode = "local"
@@ -1109,6 +1115,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	httpAPI, err := api.New(authenticator, controlAPI, controlAPI, version,
 		api.WithErrorClassifier(classifyViewError),
 		api.WithMetrics(func(w io.Writer) {
+			served.writeMetrics(w)
 			database.WriteTokenUseMetrics(w)
 			health.Readiness.WriteMetrics(w)
 			scheduler.WritePressureMetrics(w)
@@ -1153,12 +1160,11 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
-	served, err := loadServedCertificate(options.tlsCert, options.tlsKey)
-	if err != nil {
-		return fmt.Errorf("load HTTPS identity: %w", err)
-	}
 	if renewal := options.serverLeafRenewal; renewal != nil {
-		go renewServerLeaf(ctx, renewal.pki, renewal.store, served, renewal.issued, logger)
+		stopRenewal := startServerTask(ctx, func(renewalCtx context.Context) {
+			renewServerLeaf(renewalCtx, renewal.pki, renewal.store, served, renewal.issued, logger)
+		})
+		defer stopRenewal()
 	}
 	httpsServer := &http.Server{
 		Handler: httpAPI.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second,
