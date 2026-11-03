@@ -432,7 +432,7 @@ func TestArtifactReservedAliasCannotRestoreSourceWrite(t *testing.T) {
 			if m.MountPath == "/source-write-alias" {
 				t.Errorf("%s admits reserved source alias: %+v", mode, m)
 			}
-			if m.Name == ArtifactsVolumeName {
+			if isArtifactsMount(m) {
 				found = true
 				if m.SubPath != artifactsSubPath || m.MountPath != ArtifactsMountPath || m.ReadOnly != (mode == "readonly") {
 					t.Errorf("wrong bounded artifact mount: %+v", m)

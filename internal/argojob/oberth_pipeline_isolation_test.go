@@ -112,7 +112,7 @@ func isolationContainers(template *wfv1.Template) []*corev1.Container {
 }
 
 func serverSharedMount(mount corev1.VolumeMount) bool {
-	return mount.Name == WorkspaceVolumeName || mount.Name == CacheVolumeName || mount.Name == ArtifactsVolumeName
+	return mount.Name == WorkspaceVolumeName || mount.Name == CacheVolumeName || isArtifactsMount(mount)
 }
 
 func credentialMaterial(template *wfv1.Template) error {
@@ -320,7 +320,7 @@ func checkOberthBuildIsolation(workflow *wfv1.Workflow) error {
 			}
 			for _, c := range isolationContainers(template) {
 				for _, m := range c.VolumeMounts {
-					if m.Name == CacheVolumeName || m.Name == ArtifactsVolumeName {
+					if m.Name == CacheVolumeName || isArtifactsMount(m) {
 						fail("container %q receives shared %s", c.Name, m.Name)
 					}
 					if m.Name == WorkspaceVolumeName && (m.SubPath == "" || (m.SubPath == "tools" && !m.ReadOnly)) {

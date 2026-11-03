@@ -99,7 +99,7 @@ func TestBuildNonrootLeaves(t *testing.T) {
 			if mount.Name == CacheVolumeName {
 				t.Fatal("persistent cache is mounted")
 			}
-			if mount.Name != nonrootTmpVolume && mount.Name != ArtifactsVolumeName && !mount.ReadOnly {
+			if mount.Name != nonrootTmpVolume && !isArtifactsMount(mount) && !mount.ReadOnly {
 				t.Fatalf("input writable: %s", mount.Name)
 			}
 		}

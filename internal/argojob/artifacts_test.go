@@ -83,8 +83,8 @@ func TestTheArtifactsMountIsWritableAndTheSourceMountIsNot(t *testing.T) {
 	if source == nil || !source.ReadOnly {
 		t.Fatal("the source mount must stay read-only")
 	}
-	if artifacts.Name == source.Name {
-		t.Fatal("artifacts and source need distinct volume names for their independent mount permissions")
+	if artifacts.Name != source.Name {
+		t.Fatal("artifacts and source must share one volume with independent mount permissions")
 	}
 }
 
@@ -93,31 +93,22 @@ func TestTheArtifactsVolumeReferencesTheRunClaimWritable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	var artifacts, source *corev1.Volume
+
+	var source *corev1.Volume
+	claims := 0
 	for index := range workflow.Spec.Volumes {
 		volume := &workflow.Spec.Volumes[index]
-		switch volume.Name {
-		case ArtifactsVolumeName:
-			artifacts = volume
-		case SourceVolumeName:
+		if volume.PersistentVolumeClaim != nil && volume.PersistentVolumeClaim.ClaimName == "oberth-src-abc" {
+			claims++
 			source = volume
 		}
 	}
-	if artifacts == nil || artifacts.PersistentVolumeClaim == nil {
-		t.Fatal("no artifacts volume backed by the run claim")
-	}
-	if artifacts.PersistentVolumeClaim.ReadOnly {
-		t.Fatal("the artifacts volume source is read-only, which makes the mount read-only whatever the mount says")
-	}
-	if source == nil || source.PersistentVolumeClaim == nil || source.PersistentVolumeClaim.ReadOnly {
-		t.Fatal("the source claim reference must use the same writable mode as artifacts; source mounts enforce read-only")
-	}
-	if artifacts.PersistentVolumeClaim.ClaimName != source.PersistentVolumeClaim.ClaimName {
-		t.Fatal("artifacts should ride the run's existing claim, not a second one")
+	if claims != 1 || source == nil || source.Name != SourceVolumeName || source.PersistentVolumeClaim.ReadOnly {
+		t.Fatal("source and artifacts require exactly one writable claim reference; individual mounts protect inputs")
 	}
 }
 
-func TestPodPVCReferencesHaveConsistentReadOnlyMode(t *testing.T) {
+func TestPodPVCMountPermissions(t *testing.T) {
 	for _, shape := range []string{"container", "containerset"} {
 		t.Run(shape, func(t *testing.T) {
 			request := seededRequest(t, greedyDocument)
@@ -137,7 +128,7 @@ func TestPodPVCReferencesHaveConsistentReadOnlyMode(t *testing.T) {
 				}
 				templateContainers(template, func(container *corev1.Container) {
 					for _, mount := range container.VolumeMounts {
-						if mount.Name == SourceVolumeName && !mount.ReadOnly {
+						if mount.Name == SourceVolumeName && !isArtifactsMount(mount) && !mount.ReadOnly {
 							t.Errorf("template %q container %q has a writable source mount at %q", template.Name, container.Name, mount.MountPath)
 						}
 					}
@@ -156,7 +147,7 @@ func TestPodPVCReferencesHaveConsistentReadOnlyMode(t *testing.T) {
 				}
 				for _, container := range patch.Containers {
 					for _, mount := range container.VolumeMounts {
-						if mount.Name == SourceVolumeName {
+						if mount.Name == SourceVolumeName && !isArtifactsMount(mount) {
 							mirrors++
 							if !mount.ReadOnly {
 								t.Errorf("template %q Pod patch leaves %q source mirror writable", template.Name, container.Name)
@@ -164,25 +155,22 @@ func TestPodPVCReferencesHaveConsistentReadOnlyMode(t *testing.T) {
 						}
 					}
 				}
-				claimModes := map[string]bool{}
+				claimNames := map[string]string{}
 				volumes := append(append(append([]corev1.Volume(nil), workflow.Spec.Volumes...), template.Volumes...), patch.Volumes...)
 				for _, volume := range volumes {
 					claim := volume.PersistentVolumeClaim
 					if claim == nil {
 						continue
 					}
-					if previous, seen := claimModes[claim.ClaimName]; seen {
-						checked++
-						if previous != claim.ReadOnly {
-							t.Errorf("template %q mounts PVC %q with both readOnly=%t and readOnly=%t", template.Name, claim.ClaimName, previous, claim.ReadOnly)
-						}
-					} else {
-						claimModes[claim.ClaimName] = claim.ReadOnly
+					checked++
+					if previous, seen := claimNames[claim.ClaimName]; seen && previous != volume.Name {
+						t.Errorf("template %q mounts PVC %q as both %q and %q", template.Name, claim.ClaimName, previous, volume.Name)
 					}
+					claimNames[claim.ClaimName] = volume.Name
 				}
 			})
 			if checked == 0 {
-				t.Fatal("test did not inspect a pod with duplicate PVC references")
+				t.Fatal("test did not inspect a Pod PVC reference")
 			}
 			if mirrors == 0 {
 				t.Fatal("Pod patch did not protect an executor source mirror")
@@ -204,6 +192,11 @@ func TestARunWithNoSeededArtifactsDirectoryGetsNoMount(t *testing.T) {
 		}
 	}
 	container := containerOf(t, workflow, "main")
+	for _, mount := range container.VolumeMounts {
+		if mount.MountPath == ArtifactsMountPath {
+			t.Fatal("artifacts mount appeared without a seeded directory")
+		}
+	}
 	for _, variable := range container.Env {
 		if variable.Name == "OBERTH_ARTIFACTS" {
 			t.Fatal("OBERTH_ARTIFACTS points at a directory that was never created")
@@ -229,7 +222,7 @@ func TestAPipelineWithoutASourceVolumeIsUnchanged(t *testing.T) {
 	}
 }
 
-func TestArtifactsAddNothingBesidesTheirOwnVolumeMountAndVariable(t *testing.T) {
+func TestArtifactsAddOnlyTheirMountAndVariable(t *testing.T) {
 	plain := testRequest(periapsis.TriggerCI, greedyDocument)
 	plain.SourceVolume = SourceVolume{ClaimName: "oberth-src-abc", SubPath: "src"}
 	before, err := Build(testConfig(), plain)
@@ -242,13 +235,6 @@ func TestArtifactsAddNothingBesidesTheirOwnVolumeMountAndVariable(t *testing.T) 
 	}
 
 	stripped := after.DeepCopy()
-	var volumes []corev1.Volume
-	for _, volume := range stripped.Spec.Volumes {
-		if volume.Name != ArtifactsVolumeName {
-			volumes = append(volumes, volume)
-		}
-	}
-	stripped.Spec.Volumes = volumes
 	for index := range stripped.Spec.Templates {
 		container := stripped.Spec.Templates[index].Container
 		if container == nil {
@@ -256,7 +242,7 @@ func TestArtifactsAddNothingBesidesTheirOwnVolumeMountAndVariable(t *testing.T) 
 		}
 		var mounts []corev1.VolumeMount
 		for _, mount := range container.VolumeMounts {
-			if mount.Name != ArtifactsVolumeName {
+			if !isArtifactsMount(mount) {
 				mounts = append(mounts, mount)
 			}
 		}
@@ -279,7 +265,7 @@ func TestArtifactsAddNothingBesidesTheirOwnVolumeMountAndVariable(t *testing.T) 
 	delete(before.Annotations, identityAnnotation)
 
 	if renderJSON(t, stripped) != renderJSON(t, before) {
-		t.Fatalf("artifacts changed something other than their own volume, mount and variable:\nwith    %s\nwithout %s",
+		t.Fatalf("artifacts changed something other than their mount and variable:\nwith    %s\nwithout %s",
 			renderJSON(t, stripped), renderJSON(t, before))
 	}
 }

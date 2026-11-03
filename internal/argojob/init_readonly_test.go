@@ -62,7 +62,7 @@ func TestInitPopulatesLocalToolsBeforeReadonlyReaders(t *testing.T) {
 							if m.Name == "stock-cos-tools" && m.ReadOnly != (c.Name != "install-jq") {
 								t.Errorf("%s tools mount readonly=%v: %+v", c.Name, m.ReadOnly, m)
 							}
-							if m.Name == SourceVolumeName && !m.ReadOnly {
+							if m.Name == SourceVolumeName && !isArtifactsMount(m) && !m.ReadOnly {
 								t.Errorf("%s source writable", c.Name)
 							}
 						}

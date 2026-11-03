@@ -54,10 +54,12 @@ a claim that the Pod has no shared storage. Source remains read-only at
 `/work/src`; bounded per-Pod `/tmp` remains writable. Declare private cache
 locations when automatic caches are absent or read-only.
 
-The run's source and artifacts paths use separate Pod volume names on one PVC.
-Both PVC references leave claim-level `readOnly` unset so kubelet mounts that
-claim consistently. Every source `volumeMount` is read-only; the artifacts
-subpath has its own writable mount.
+The run's source and artifacts paths share one Pod volume for their PVC.
+Its claim-level `readOnly` stays unset so artifacts can be written; every
+source `volumeMount` and executor source mirror is read-only. The artifacts
+subpath has its own mount and follows the leaf's workspace controls. Using
+one volume avoids duplicate PVC aliases that can stall kubelet mount setup
+on local PVs.
 
 ### Keeping only the build cache
 
