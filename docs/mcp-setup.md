@@ -546,9 +546,11 @@ page. `latest_per_ref=1` keeps the same grouping for each ref's newest run.
 - `history` keeps only terminal runs (passed, failed, interrupted), with legacy
   sequence paging via `before`/`next_before`/`next_cursor`.
 - `active` is deprecated; it still returns every queued, waiting and running
-  run in one unpaged list (at most 500), in scheduling order: started runs (oldest start first), then
-  claimed runs in admission order (the weighted gate's FIFO), then unclaimed
-  queued runs in accepted order. Each run that has not started carries
+  run in one unpaged list (at most 500): started runs (oldest start first), then
+  claimed runs that have not started, then unclaimed queued runs. Within each
+  of the latter two groups, effective priority comes first, then ascending
+  admission sequence (FIFO), matching the scheduler's claim order. Each run
+  that has not started carries
   `Scheduling` with its state, message, queue or admission position, size,
   weight, used/capacity and concurrency group, so a run blocking the head of
   the queue, or one waiting on its group, says so.
