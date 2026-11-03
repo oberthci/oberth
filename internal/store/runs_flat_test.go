@@ -55,7 +55,7 @@ func TestParkedRunLosesAdmissionTimeUntilReacquired(t *testing.T) {
 	}
 }
 
-func TestFlatRunsKeepQueueFirstAndPageByAdmissionTime(t *testing.T) {
+func TestFlatRunsListQueueThenRunningThenFinishedAndPageByEndTime(t *testing.T) {
 	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
@@ -95,12 +95,18 @@ func TestFlatRunsKeepQueueFirstAndPageByAdmissionTime(t *testing.T) {
 	c := finish("c", "c")
 	firstQueued := enqueue("queued-1", "d")
 	secondQueued := enqueue("queued-2", "e")
+	// The queue reads bottom-up: the run admitted next is the lowest queued
+	// row. The limit counts only the finished rows.
 	first, err := s.ListRecentRuns(ctx, model.RunListFilter{Limit: 2})
-	if err != nil || strings.Join(runIDs(first), ",") != strings.Join([]string{firstQueued.ID, secondQueued.ID, c.ID, b.ID}, ",") {
+	if err != nil || strings.Join(runIDs(first), ",") != strings.Join([]string{secondQueued.ID, firstQueued.ID, c.ID, b.ID}, ",") {
 		t.Fatalf("flat first page = %v, %v", runIDs(first), err)
 	}
-	// Admission changes the first page but cannot duplicate the moved run on
-	// the older page, whose cursor is the admitted run B's fixed start time.
+	if first[0].QueuePosition != 2 || first[1].QueuePosition != 1 {
+		t.Fatalf("queue positions = %d, %d", first[0].QueuePosition, first[1].QueuePosition)
+	}
+	// Admission moves the run into the running group, between the queue and
+	// the finished runs; the older page's cursor is run B's fixed end time,
+	// so the moved run cannot appear twice.
 	if claimed, err := s.ClaimNextRun(ctx); err != nil || claimed.ID != firstQueued.ID {
 		t.Fatalf("claim queued run = %+v, %v", claimed, err)
 	}
@@ -108,20 +114,30 @@ func TestFlatRunsKeepQueueFirstAndPageByAdmissionTime(t *testing.T) {
 	if _, err := s.MarkRunAdmitted(ctx, firstQueued.ID); err != nil {
 		t.Fatal(err)
 	}
+	current, err := s.ListRecentRuns(ctx, model.RunListFilter{Limit: 2})
+	if err != nil || strings.Join(runIDs(current), ",") != strings.Join([]string{secondQueued.ID, firstQueued.ID, c.ID, b.ID}, ",") {
+		t.Fatalf("flat page after admission = %v, %v", runIDs(current), err)
+	}
 	older, err := s.ListRecentRuns(ctx, model.RunListFilter{Limit: 2, BeforeRun: b.ID})
 	if err != nil || strings.Join(runIDs(older), ",") != a.ID {
 		t.Fatalf("older page after admission = %v, %v", runIDs(older), err)
 	}
-	// A queued run cancelled before admission has no start time; its end
-	// time places it among dated rows, ahead of older admitted runs.
+	// A queued run cancelled before admission is terminal: its end time
+	// places it first among the finished rows, below the running run.
 	neverAdmitted := enqueue("cancelled", "f")
 	now = now.Add(time.Minute)
 	if _, err := s.CancelRun(ctx, model.RunCancelRequest{RunID: neverAdmitted.ID, Actor: "owner@host"}); err != nil {
 		t.Fatal(err)
 	}
-	current, err := s.ListRecentRuns(ctx, model.RunListFilter{Limit: 2})
-	if err != nil || strings.Join(runIDs(current), ",") != strings.Join([]string{secondQueued.ID, neverAdmitted.ID, firstQueued.ID}, ",") {
+	current, err = s.ListRecentRuns(ctx, model.RunListFilter{Limit: 2})
+	if err != nil || strings.Join(runIDs(current), ",") != strings.Join([]string{secondQueued.ID, firstQueued.ID, neverAdmitted.ID, c.ID}, ",") {
 		t.Fatalf("never-admitted terminal order = %v, %v", runIDs(current), err)
+	}
+	// The finished run that ended last is also the cursor for the older page
+	// of finished runs: the page continues by end time, never by admission.
+	older, err = s.ListRecentRuns(ctx, model.RunListFilter{Limit: 2, Before: c.QueueSequence})
+	if err != nil || strings.Join(runIDs(older), ",") != strings.Join([]string{b.ID, a.ID}, ",") {
+		t.Fatalf("older page by end time = %v, %v", runIDs(older), err)
 	}
 }
 
@@ -148,7 +164,7 @@ func TestFlatRunsGlobalQueuePositionsAndCounts(t *testing.T) {
 	if err != nil || len(rows) != 2 {
 		t.Fatalf("rows: %+v, %v", rows, err)
 	}
-	for i, want := range []int64{2, 4} {
+	for i, want := range []int64{4, 2} {
 		if rows[i].QueuePosition != want {
 			t.Fatalf("position %+v, want %d", rows[i], want)
 		}
@@ -240,7 +256,7 @@ func TestFlatRunsPrunedCursorIsNotFound(t *testing.T) {
 	}
 }
 
-func TestFlatRunsFinishedRowsSortByAdmissionNotFinish(t *testing.T) {
+func TestFlatRunsFinishedRowsSortByFinishNotAdmission(t *testing.T) {
 	now := time.Now()
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
@@ -259,8 +275,10 @@ func TestFlatRunsFinishedRowsSortByAdmissionNotFinish(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// The second run was admitted later but finished first: the run that
+	// finished most recently is listed first.
 	rows, err := s.ListRecentRuns(t.Context(), model.RunListFilter{})
-	if err != nil || len(rows) != 2 || rows[0].ID != second.ID || rows[1].ID != first.ID {
-		t.Fatalf("finish order displaced admission order: %+v, %v", rows, err)
+	if err != nil || len(rows) != 2 || rows[0].ID != first.ID || rows[1].ID != second.ID {
+		t.Fatalf("admission order displaced finish order: %+v, %v", rows, err)
 	}
 }
