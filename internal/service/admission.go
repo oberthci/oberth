@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strconv"
@@ -12,7 +13,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type weightedAdmission struct {
@@ -107,9 +108,9 @@ type admissionReservation struct {
 	// backfilled marks a grant made beside a waiting head.
 	backfilled bool
 	kubeVirt   KubeVirtResources
-	size       periapsis.Size
+	size       pipeline.Size
 	// priorityMaximum caps only automatic tag urgency, not release execution.
-	priorityMaximum      periapsis.Size
+	priorityMaximum      pipeline.Size
 	priorityLookupFailed bool
 	weight               int
 	// group is the repository-scoped key of the run's concurrency group and
@@ -150,8 +151,8 @@ type admissionRequest struct {
 	RepoID               int64
 	Repo                 string
 	Ref                  string
-	Size                 periapsis.Size
-	PriorityMaximum      periapsis.Size
+	Size                 pipeline.Size
+	PriorityMaximum      pipeline.Size
 	PriorityLookupFailed bool
 	Group                string
 	KubeVirt             *KubeVirtResources
@@ -180,21 +181,6 @@ func newWeightedAdmission(capacity int) *weightedAdmission {
 	}
 }
 
-// newWeightedAdmissionForJobs converts the operator's configured concurrent-run
-// ceiling into the weight budget this gate is denominated in.
-//
-// The two are different units and conflating them silently caps the whole
-// server at one run: a budget of maxConcurrentJobs weight admits only
-// floor(maxConcurrentJobs / weight) runs, which for the default M size (weight
-// 2) is one run at maxConcurrentJobs=3. Scaling by the default size's weight
-// makes maxConcurrentJobs runs of an undeclared-size pipeline fit exactly, so
-// the configured number is the number an ordinary repository actually gets.
-// A pipeline that declares a heavier size then trades concurrency for
-// per-run resources proportionally, instead of collapsing the server to one.
-func newWeightedAdmissionForJobs(maxConcurrentJobs int) *weightedAdmission {
-	return newWeightedAdmissionForJobsWeights(maxConcurrentJobs, DefaultSizeWeights)
-}
-
 // newWeightedAdmissionForJobsWeights is newWeightedAdmissionForJobs with the
 // operator's size weights: the budget is maxConcurrentJobs M runs.
 func newWeightedAdmissionForJobsWeights(maxConcurrentJobs int, weights SizeWeights) *weightedAdmission {
@@ -211,16 +197,6 @@ func newWeightedAdmissionForJobsWeights(maxConcurrentJobs int, weights SizeWeigh
 // repository's group of the same name.
 func concurrencyGroupKey(repoID int64, group string) string {
 	return strconv.FormatInt(repoID, 10) + "/" + group
-}
-
-// reserve records FIFO claim order before exact-SHA checkout and static
-// parsing can finish out of order.
-func (gate *weightedAdmission) reserve(sequence int64) *admissionReservation {
-	return gate.reserveInOrder(sequence, sequence)
-}
-
-func (gate *weightedAdmission) reserveInOrder(sequence, order int64) *admissionReservation {
-	return gate.reservePriorityRun(sequence, order, model.Run{})
 }
 
 func (gate *weightedAdmission) reservePriorityRun(sequence, order int64, run model.Run) *admissionReservation {
@@ -267,11 +243,6 @@ func admissionBeforeAt(a, b *admissionReservation, now time.Time) bool {
 		return a.order < b.order
 	}
 	return a.sequence < b.sequence
-}
-
-// acquire admits an ungrouped run of the given size.
-func (reservation *admissionReservation) acquire(ctx context.Context, size periapsis.Size) (func(), error) {
-	return reservation.acquireRequest(ctx, admissionRequest{Size: size})
 }
 
 // acquireRequest sizes the reservation and waits until it is granted. A grouped
@@ -333,13 +304,12 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 	}
 	reservation.pods = nil
 	reservation.fallback = request.Fallback
-	if request.Pods != nil && !gate.resources.Disabled {
-		if gate.demandFitsBudget(request.Pods) {
-			pods := *request.Pods
-			reservation.pods = &pods
-		} else {
-			reservation.fallback = model.ResourceFallbackBudget
-		}
+	if request.Pods != nil {
+		pods := *request.Pods
+		pods.ExtendedResources = maps.Clone(request.Pods.ExtendedResources)
+		reservation.pods = &pods
+	} else if reservation.fallback == "" {
+		reservation.fallback = model.ResourceFallbackRequests
 	}
 	reservation.priorityMaximum = request.PriorityMaximum
 	reservation.priorityLookupFailed = request.PriorityLookupFailed
@@ -446,13 +416,20 @@ func (reservation *admissionReservation) release() {
 	gate.releaseLocked(reservation)
 }
 
+// releaseAfterCleanup clears a retained grant only after its owner has durable
+// proof that the external resources are gone. Clear and release under one lock.
+func (reservation *admissionReservation) releaseAfterCleanup() {
+	gate := reservation.gate
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	reservation.retained = false
+	gate.releaseLocked(reservation)
+}
+
 // retain keeps a granted reservation's weight and concurrency group held
-// until the process exits. The scheduler calls it only on the error paths
-// where a Workflow may still be running and the owner is about to stop
-// without having proved it terminal or deleted: passing the group on there
-// would let the next member of the group start beside a live one. Startup
-// reconciliation in the next process settles the Workflow; this process
-// admits nothing further against the held weight.
+// while a Workflow may still be running. Passing the group on before observed
+// cleanup would let its next member start beside a live Workflow. Exact-run
+// cleanup or startup reconciliation must confirm absence before release.
 func (reservation *admissionReservation) retain() {
 	gate := reservation.gate
 	gate.mu.Lock()

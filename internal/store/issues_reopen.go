@@ -47,6 +47,10 @@ RETURNING `+issueColumns, unixNano(now), id))
 		map[string]any{"from": model.IssueClosed, "state": model.IssueOpen}, unixNano(now)); err != nil {
 		return model.Issue{}, err
 	}
+	value, err = scanIssue(tx.QueryRowContext(ctx, `SELECT `+issueColumns+` FROM issues WHERE id=?`, id))
+	if err != nil {
+		return model.Issue{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return model.Issue{}, fmt.Errorf("commit reopen manual issue: %w", err)
 	}

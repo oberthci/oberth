@@ -24,7 +24,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func nonrootVerifierObjects() (*corev1.Pod, *corev1.ConfigMap) {
@@ -65,7 +65,7 @@ func TestNonrootControllerRequiredConfigCausality(t *testing.T) {
 	} {
 		pod, cm := nonrootVerifierObjects()
 		mutate(pod, cm)
-		if _, err := verifyNonrootController(t.Context(), fake.NewClientset(pod, cm), testNamespace, testRequest(periapsis.TriggerCI, nonrootTestDocument)); err != nil {
+		if _, err := verifyNonrootController(t.Context(), fake.NewClientset(pod, cm), testNamespace, testRequest(pipeline.TriggerCI, nonrootTestDocument)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -101,7 +101,7 @@ func TestNonrootControllerRequiredConfigCausality(t *testing.T) {
 			pod, cm := nonrootVerifierObjects()
 			pod.Status.ContainerStatuses[0].State.Running.StartedAt = cm.CreationTimestamp
 			mutate(pod)
-			if _, err := verifyNonrootController(t.Context(), fake.NewClientset(pod, cm), testNamespace, testRequest(periapsis.TriggerCI, nonrootTestDocument)); err == nil {
+			if _, err := verifyNonrootController(t.Context(), fake.NewClientset(pod, cm), testNamespace, testRequest(pipeline.TriggerCI, nonrootTestDocument)); err == nil {
 				t.Fatal("uncausal or injected profile accepted")
 			}
 		})
@@ -151,7 +151,7 @@ func TestNonrootProfileMatchesActualUpstreamHelmRender(t *testing.T) {
 	pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, accountMount)
 	fixture.ConfigMap.ObjectMeta = meta.ObjectMeta
 	pod.Status.ContainerStatuses[0].State.Running.StartedAt = meta.CreationTimestamp
-	if _, err := verifyNonrootController(t.Context(), fake.NewClientset(pod, &fixture.ConfigMap), testNamespace, testRequest(periapsis.TriggerCI, nonrootTestDocument)); err != nil {
+	if _, err := verifyNonrootController(t.Context(), fake.NewClientset(pod, &fixture.ConfigMap), testNamespace, testRequest(pipeline.TriggerCI, nonrootTestDocument)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -194,7 +194,7 @@ func TestNonrootVerifierRejectsUnsupportedControllerState(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			pod, cm := nonrootVerifierObjects()
 			mutate(pod, cm)
-			_, err := verifyNonrootController(t.Context(), fake.NewClientset(pod, cm), testNamespace, testRequest(periapsis.TriggerCI, nonrootTestDocument))
+			_, err := verifyNonrootController(t.Context(), fake.NewClientset(pod, cm), testNamespace, testRequest(pipeline.TriggerCI, nonrootTestDocument))
 			if err == nil {
 				t.Fatal("unsupported controller accepted")
 			}
@@ -208,7 +208,7 @@ func TestNonrootVerifierRejectsUnsupportedControllerState(t *testing.T) {
 		other := pod.DeepCopy()
 		other.Name = "second"
 		other.UID = "second"
-		if _, err := verifyNonrootController(t.Context(), fake.NewClientset(pod, other, cm), testNamespace, testRequest(periapsis.TriggerCI, nonrootTestDocument)); err == nil {
+		if _, err := verifyNonrootController(t.Context(), fake.NewClientset(pod, other, cm), testNamespace, testRequest(pipeline.TriggerCI, nonrootTestDocument)); err == nil {
 			t.Fatal("ambiguous controllers accepted")
 		}
 	})
@@ -218,7 +218,7 @@ func TestNonrootVerifierRejectsUnsupportedControllerState(t *testing.T) {
 		client.PrependReactor("get", "configmaps", func(ktesting.Action) (bool, runtime.Object, error) {
 			return true, nil, errors.New("do-not-serialize-this-value")
 		})
-		_, err := verifyNonrootController(t.Context(), client, testNamespace, testRequest(periapsis.TriggerCI, nonrootTestDocument))
+		_, err := verifyNonrootController(t.Context(), client, testNamespace, testRequest(pipeline.TriggerCI, nonrootTestDocument))
 		if err == nil || strings.Contains(err.Error(), "do-not-serialize") {
 			t.Fatalf("unsafe read error: %v", err)
 		}
@@ -234,7 +234,7 @@ func TestNonrootProofBindsActualRequestAndPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request, err := controller.PrepareNonroot(t.Context(), testRequest(periapsis.TriggerCI, nonrootTestDocument))
+	request, err := controller.PrepareNonroot(t.Context(), testRequest(pipeline.TriggerCI, nonrootTestDocument))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestNonrootProofBindsActualRequestAndPolicy(t *testing.T) {
 }
 
 func TestNonrootRequestBindingCoversEveryInputExceptExpectedVolume(t *testing.T) {
-	request := testRequest(periapsis.TriggerCI, nonrootTestDocument)
+	request := testRequest(pipeline.TriggerCI, nonrootTestDocument)
 	request.SourceDir = "/trusted/source"
 	base := nonrootRequestIdentity(request)
 	changes := map[string]func(*Request){
@@ -305,7 +305,7 @@ func TestNonrootRequestBindingCoversEveryInputExceptExpectedVolume(t *testing.T)
 		"organization":     func(r *Request) { r.UpstreamOrg += "-other" },
 		"ref":              func(r *Request) { r.Ref += "-other" },
 		"sha":              func(r *Request) { r.SHA = strings.Repeat("b", 40) },
-		"trigger":          func(r *Request) { r.Trigger = periapsis.TriggerRelease },
+		"trigger":          func(r *Request) { r.Trigger = pipeline.TriggerRelease },
 		"source-directory": func(r *Request) { r.SourceDir += "-other" },
 		"source-bytes":     func(r *Request) { r.Source = append(append([]byte(nil), r.Source...), '\n') },
 		"secret-grants":    func(r *Request) { r.ApprovedSecrets = map[string]bool{"other": true} },
@@ -415,7 +415,7 @@ func TestNonrootRefreshStopsSeedOrCreateAfterConfigurationChange(t *testing.T) {
 				seedCalls++
 				return seedExec(ctx, ns, pod, container, command, input, stdout, stderr)
 			}, config))
-			request := testRequest(periapsis.TriggerCI, nonrootTestDocument)
+			request := testRequest(pipeline.TriggerCI, nonrootTestDocument)
 			request.SourceDir = writeCheckout(t)
 			request, err = controller.PrepareNonroot(t.Context(), request)
 			if err != nil {
@@ -472,7 +472,7 @@ func TestNonrootCreateAndRecoverPersistedWorkflow(t *testing.T) {
 			}
 			source = string(encoded)
 		}
-		request := testRequest(periapsis.TriggerCI, source)
+		request := testRequest(pipeline.TriggerCI, source)
 		request.SourceDir = writeCheckout(t)
 		request, err = controller.PrepareNonroot(t.Context(), request)
 		if err != nil {

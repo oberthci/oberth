@@ -18,6 +18,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // Exercise real service results through MCP, including nil store lists and
@@ -199,7 +200,7 @@ func TestMCPPromotionValidationRefusals(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newControlFixture(t)
-			run, err := f.store.EnqueueRun(t.Context(), model.RunSpec{
+			run, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{
 				RepoID: f.repo.ID, RefKind: tc.kind, Ref: "feature/promote",
 				SHA: sha, TestedSHA: tc.tested, Actor: admin.Identity, Trigger: "branch",
 			})

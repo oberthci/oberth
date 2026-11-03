@@ -174,20 +174,28 @@ func (service *API) currentPromotionAuthority(ctx context.Context, failed model.
 // fast-forward delivery run in the background, holding no admission
 // reservation or delivery permit of the run or request that failed.
 func (service *API) RetryMovedPromotion(ctx context.Context, failed model.Promotion) {
+	service.retryAutomaticPromotion(ctx, failed, "target moved")
+}
+
+func (service *API) retryAutomaticPromotion(ctx context.Context, failed model.Promotion, reason string) {
 	if service.lifetime.Err() != nil {
-		log.Printf("oberth: automatic retry of moved promotion %s skipped: server is shutting down", failed.ID)
+		log.Printf("oberth: automatic retry of promotion %s skipped: server is shutting down", failed.ID)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(withoutDispatchProgress(ctx)), promotionAutoRetryTimeout)
 	if err := service.requireMutation(ctx); err != nil {
 		cancel()
-		log.Printf("oberth: automatic retry of moved promotion %s skipped: %v", failed.ID, err)
+		log.Printf("oberth: automatic retry of promotion %s skipped: %v", failed.ID, err)
 		return
 	}
 	lineage, err := service.promotions.PromotionLineage(ctx, failed.ID)
 	if err != nil {
 		cancel()
-		log.Printf("oberth: automatic retry of moved promotion %s skipped: %v", failed.ID, err)
+		log.Printf("oberth: automatic retry of promotion %s skipped: %v", failed.ID, err)
+		return
+	}
+	if lineage.RetriedAs != "" {
+		cancel()
 		return
 	}
 	if lineage.Mode == model.PromotionRetryAuto && lineage.AutoAttempt >= maxAutoMovedPromotionRetries {
@@ -205,7 +213,7 @@ func (service *API) RetryMovedPromotion(ctx context.Context, failed model.Promot
 			var retried model.Promotion
 			repository, candidate, retried, err = scoped.admitPromotionRetry(ctx, actor, failed, model.PromotionRetryAuto)
 			if err == nil {
-				log.Printf("oberth: promotion %s found %s moved; retried as promotion %s", failed.ID, failed.TargetRef, retried.ID)
+				log.Printf("oberth: promotion %s interrupted (%s); retried as promotion %s", failed.ID, reason, retried.ID)
 				if !service.startBackground() {
 					// Shutting down: the retry stays pending with no plan,
 					// and owner-startup recovery interrupts it.
@@ -225,11 +233,8 @@ func (service *API) RetryMovedPromotion(ctx context.Context, failed model.Promot
 		}
 	}
 	cancel()
-	log.Printf("oberth: automatic retry of moved promotion %s failed: %v", failed.ID, err)
+	log.Printf("oberth: automatic retry of promotion %s failed: %v", failed.ID, err)
 }
-
-// waitBackground waits for automatic promotion retries started so far.
-func (service *API) waitBackground() { service.background.Wait() }
 
 // promotionRetriedAs names the promotion that retried a terminal, undelivered
 // promotion, or "" when there is none yet.
@@ -242,4 +247,35 @@ func (service *API) promotionRetriedAs(ctx context.Context, promotion model.Prom
 		return "", err
 	}
 	return lineage.RetriedAs, nil
+}
+
+// RecoverInterruptedPromotions runs after Workflow cleanup and publication
+// recovery, so a durable outbox always takes precedence over a fresh attempt.
+func (service *API) RecoverInterruptedPromotions(ctx context.Context) error {
+	eligibility, ok := service.promotions.(interface {
+		InterruptedPromotionRetryEligible(context.Context, string) (bool, error)
+	})
+	if !ok {
+		return nil
+	}
+	var before int64
+	for {
+		page, err := service.promotions.ListPromotions(ctx, model.PromotionListFilter{Status: model.PromotionInterrupted, Before: before, Limit: 100})
+		if err != nil {
+			return err
+		}
+		for _, promotion := range page.Promotions {
+			eligible, err := eligibility.InterruptedPromotionRetryEligible(ctx, promotion.ID)
+			if err != nil {
+				return err
+			}
+			if eligible {
+				service.retryAutomaticPromotion(ctx, promotion, "owner restart")
+			}
+		}
+		if page.NextBefore == 0 {
+			return nil
+		}
+		before = page.NextBefore
+	}
 }

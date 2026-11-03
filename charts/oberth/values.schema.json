@@ -21,24 +21,42 @@
     "compatibility"
   ],
   "properties": {
+    "uplinkTokens": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "defaultTTL": {"type": "string", "minLength": 1, "description": "New uplink bearer lifetime; positive Go duration, at most maxTTL. Default 2160h (90 days)."},
+        "maxTTL": {"type": "string", "minLength": 1, "description": "Maximum new uplink bearer lifetime; positive Go duration, hard ceiling 8760h (365 days)."}
+      }
+    },
     "platformProtection": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "enabled": {"type": "boolean", "default": true}
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        }
       },
       "description": "Opt-in platform PriorityClasses; external Argo/OpenBao releases require their own values overlays."
     },
     "gitBackend": {
       "type": "string",
-      "enum": ["cli"],
+      "enum": [
+        "cli"
+      ],
       "description": "Accepted and ignored for legacy chart reuse; Git CLI is the only backend."
     },
     "gitcache": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "shadow": {"type": "boolean", "enum": [false]}
+        "shadow": {
+          "type": "boolean",
+          "enum": [
+            false
+          ]
+        }
       },
       "description": "Accepted and ignored for legacy chart reuse; shadow execution is removed."
     },
@@ -69,8 +87,15 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "qps": {"type": "number", "exclusiveMinimum": 0, "maximum": 3.4028234663852886e38},
-        "burst": {"type": "integer", "minimum": 1}
+        "qps": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 3.4028234663852886e+38
+        },
+        "burst": {
+          "type": "integer",
+          "minimum": 1
+        }
       }
     },
     "maxConcurrentJobs": {
@@ -88,22 +113,33 @@
       "additionalProperties": false,
       "properties": {
         "declaredResources": {
-          "type": "object", "additionalProperties": false,
+          "type": "object",
+          "additionalProperties": false,
           "properties": {
             "disabled": {"type": "boolean"},
             "cpuMillis": {"type": "integer", "minimum": 1, "maximum": 1000000},
             "memoryBytes": {"type": "integer", "minimum": 1, "maximum": 1125899906842624},
             "memoryHeadroomBytes": {"type": "integer", "minimum": 0, "maximum": 1125899906842624},
             "memoryHeadroomPercent": {"type": "integer", "minimum": 0, "maximum": 100},
-            "ioRuns": {"type": "integer", "minimum": 0, "maximum": 64}
+            "ioRuns": {"type": "integer", "minimum": 0, "maximum": 64},
+            "extendedResources": {"type":"object","maxProperties":32,"additionalProperties":{"type":"integer","minimum":1,"maximum":1000000}}
           }
         },
         "runtimeCapacity": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "enabled": { "type": "boolean" },
-            "maxConcurrentJobs": { "type": ["integer", "null"], "minimum": 1, "maximum": 64 }
+            "enabled": {
+              "type": "boolean"
+            },
+            "maxConcurrentJobs": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "maximum": 64
+            }
           }
         },
         "diskFloorBytes": {
@@ -139,10 +175,22 @@
           "additionalProperties": false,
           "description": "Admission weight per size. XL 0 = the whole budget (runs alone).",
           "properties": {
-            "S": {"type": "integer", "minimum": 1},
-            "M": {"type": "integer", "minimum": 1},
-            "L": {"type": "integer", "minimum": 1},
-            "XL": {"type": "integer", "minimum": 0}
+            "S": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "M": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "L": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "XL": {
+              "type": "integer",
+              "minimum": 0
+            }
           }
         }
       }
@@ -455,56 +503,7 @@
       "$ref": "#/definitions/resources"
     },
     "watchTunnel": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "originCACert": {
-          "type": "string",
-          "maxLength": 65536,
-          "description": "Public PEM CA for the HTTPS Oberth origin; empty uses public trust."
-        },
-        "enabled": {
-          "type": "boolean"
-        },
-        "image": {
-          "type": "string",
-          "minLength": 1
-        },
-        "openbaoImage": {
-          "type": "string",
-          "minLength": 1
-        },
-        "openbao": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "address": {
-              "type": "string",
-              "minLength": 1
-            },
-            "authMount": {
-              "type": "string",
-              "minLength": 1
-            },
-            "role": {
-              "type": "string",
-              "minLength": 1
-            },
-            "secretMount": {
-              "type": "string",
-              "minLength": 1
-            },
-            "secretPath": {
-              "type": "string",
-              "minLength": 1
-            },
-            "secretField": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        }
-      }
+      "description": "Retired compatibility key. Ignored; connectors are managed outside Oberth."
     },
     "podAnnotations": {
       "type": "object",
@@ -602,10 +601,28 @@
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["pattern", "file"],
+              "required": [
+                "pattern",
+                "file"
+              ],
               "properties": {
-                "pattern": {"type": "string", "minLength": 1, "maxLength": 256},
-                "file": {"type": "string", "pattern": "^\\.oberth/[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.yaml$", "not": {"enum": [".oberth/build.yaml", ".oberth/fragment.yaml", ".oberth/schedule.yaml", ".oberth/tests.yaml"]}}
+                "pattern": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "file": {
+                  "type": "string",
+                  "pattern": "^\\.oberth/[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.yaml$",
+                  "not": {
+                    "enum": [
+                      ".oberth/build.yaml",
+                      ".oberth/fragment.yaml",
+                      ".oberth/schedule.yaml",
+                      ".oberth/tests.yaml"
+                    ]
+                  }
+                }
               }
             }
           }
@@ -763,12 +780,13 @@
           "additionalProperties": false,
           "properties": {
             "serviceAccount": {
-              "$ref": "#/definitions/kubernetesName"
+              "$ref": "#/definitions/optionalKubernetesName",
+              "description": "Empty selects oberth-argo-ci-secrets for this release only; deprecated. Omit the key or set the default explicitly before the next chart release."
             },
             "vaultRole": {
               "type": "string",
-              "minLength": 1,
-              "pattern": "^[A-Za-z0-9._-]+$"
+              "pattern": "^$|^[A-Za-z0-9._-]+$",
+              "description": "Empty selects oberth-argo-ci-secrets for this release only; deprecated. Omit the key or set the default explicitly before the next chart release."
             }
           }
         },
@@ -877,16 +895,34 @@
           "minLength": 1,
           "description": "Positive Kubernetes quantity for per-Pod emissary scratch on nonroot and trusted KVM leaves. Defaults to 1Gi; the server validates the quantity at startup."
         },
-        "vmLauncherServiceAccount": {"type": "string"},
-        "containerDiskPrefixes": {"type": "array", "items": {"type": "string"}},
+        "vmLauncherServiceAccount": {
+          "type": "string",
+          "description": "Active until the VM runtime is removed; afterwards accepted and ignored for upgrades carrying saved VM values."
+        },
+        "containerDiskPrefixes": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Active until the VM runtime is removed; afterwards accepted and ignored for upgrades carrying saved VM values."
+        },
         "kubevirtCeiling": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Cluster-wide ceiling on every KubeVirt grant's per-run VMI budget.",
+          "description": "Active until the VM runtime is removed; sets the cluster-wide KubeVirt ceiling. Afterwards accepted and ignored for upgrades carrying saved ceilings.",
           "properties": {
-            "maxVMs": {"type": "integer", "minimum": 1, "maximum": 16},
-            "maxCores": {"type": "integer", "minimum": 1, "maximum": 64},
-            "maxMemory": {"type": "string", "pattern": "^[1-9][0-9]*(Mi|Gi)$"}
+            "maxVMs": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16
+            },
+            "maxCores": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64
+            },
+            "maxMemory": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*(Mi|Gi)$"
+            }
           }
         },
         "workflowTimeout": {
@@ -1275,6 +1311,10 @@
             "budgetBytes": {
               "type": "integer",
               "minimum": 0
+            },
+            "limitBytes": {
+              "type": "integer",
+              "minimum": 1
             }
           }
         },

@@ -255,7 +255,7 @@ func TestRunProgressReadDoesNotWaitForGlobalAppenderLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	if err := store.AppendStepProgress("progress-lock", runprogress.Event{Version: runprogress.Version, Burn: "t", Step: "u", Status: runprogress.StepRunning, DeclaredSize: "M", StartedAt: &now}); err != nil {
+	if err := store.AppendStepProgress("progress-lock", runprogress.Event{Version: runprogress.Version, Stage: "t", Step: "u", Status: runprogress.StepRunning, DeclaredSize: "M", StartedAt: &now}); err != nil {
 		t.Fatal(err)
 	}
 	store.progressMu.Lock()

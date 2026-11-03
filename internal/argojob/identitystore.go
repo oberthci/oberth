@@ -25,13 +25,6 @@ type IdentityStore struct {
 	current atomic.Pointer[IdentitySnapshot]
 }
 
-// NewIdentityStore creates a store seeded with the given maps.
-func NewIdentityStore(release, ci map[string]PerRepoIdentityConfig) *IdentityStore {
-	store := &IdentityStore{}
-	store.Replace(release, ci)
-	return store
-}
-
 // NewIdentityStoreWithSteps creates a store seeded with repo and step maps.
 func NewIdentityStoreWithSteps(release, ci, step map[string]PerRepoIdentityConfig) *IdentityStore {
 	store := &IdentityStore{}

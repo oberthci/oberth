@@ -18,12 +18,22 @@ spec = importlib.util.spec_from_file_location('wif', ROOT / 'scripts/release-wif
 wif = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(wif)
 
+# Keep fixture pools independent of the implementation's allowlist.
+_POOLS = {
+    'oberth-release-images': 'image-writer',
+    'oberth-release-reader': 'image-reader',
+    'oberth-release-charts': 'chart-writer',
+}
+_POOL_BY_AUDIENCE = {
+    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/'
+    + pool + '/providers/oberth': pool for pool in _POOLS
+}
 # Pick the first role (image-writer) as default for backward-compat tests.
-_AUDIENCES = list(wif.ROLES.keys())
+_AUDIENCES = list(_POOL_BY_AUDIENCE)
 _DEFAULT_AUDIENCE = _AUDIENCES[0]
 # All source identities are inert fixtures, never installation values.
-_SOURCE_ACCOUNTS = {audience: role + '@example-project.iam.gserviceaccount.com'
-                    for audience, role in wif.ROLES.items()}
+_SOURCE_ACCOUNTS = {audience: _POOLS[pool] + '@example-project.iam.gserviceaccount.com'
+                    for audience, pool in _POOL_BY_AUDIENCE.items()}
 _SOURCE_IAMS = {audience: 'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/' + account + ':generateAccessToken'
                 for audience, account in _SOURCE_ACCOUNTS.items()}
 _DEFAULT_IAM = _SOURCE_IAMS[_DEFAULT_AUDIENCE]
@@ -58,6 +68,62 @@ class ExchangeTests(unittest.TestCase):
                 patch.object(wif, 'read', side_effect=read), patch.object(wif, 'post', side_effect=replies) as post:
             result = wif.credential(wif.REGISTRY)
         return result, post.call_args_list
+
+    def test_roles_are_keyed_by_fixed_pool(self):
+        self.assertEqual(wif.ROLES, _POOLS)
+        self.assertEqual(set(wif.OBERTH_ROLES), set(_POOLS))
+
+    def assert_provider_exchange(self, provider):
+        targets = {
+            'oberth-release-images': 'oberth-release-publisher',
+            'oberth-release-reader': 'oberth-release-reader',
+            'oberth-release-charts': 'oberth-chart-publisher',
+        }
+        for pool, target in targets.items():
+            audience = ('//iam.googleapis.com/projects/138624361369/locations/global/'
+                        'workloadIdentityPools/' + pool + '/providers/' + provider)
+            config = copy.deepcopy(CONFIG)
+            config['audience'] = audience
+            with self.subTest(pool=pool, provider=provider):
+                result, calls = self.exchange(config=config)
+                self.assertEqual(result, {'Username': 'oauth2accesstoken', 'Secret': 'inert-publisher'})
+                self.assertEqual(len(calls), 3)
+                self.assertEqual(urllib.parse.parse_qs(calls[0].args[1].decode())['audience'], [audience])
+                self.assertEqual(calls[1].args[0], _DEFAULT_IAM)
+                self.assertEqual(calls[2].args[0],
+                                 'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/'
+                                 + target + '@skipopsmain.iam.gserviceaccount.com:generateAccessToken')
+
+    def test_old_provider_audiences_accepted(self):
+        # Inert fixture for a deployment retaining its existing provider name.
+        self.assert_provider_exchange('legacy-provider')
+
+    def test_new_provider_audiences_accepted(self):
+        self.assert_provider_exchange('oberth')
+
+    def test_other_valid_provider_audiences_accepted(self):
+        for provider in ('a', 'oberth-release-2'):
+            self.assert_provider_exchange(provider)
+
+    def test_malformed_audiences_refused_before_network(self):
+        prefix = CONFIG['audience'].rsplit('/providers/', 1)[0] + '/providers/'
+        audiences = [prefix + provider for provider in (
+            '', '2provider', 'Uppercase', 'provider_name', 'provider.name',
+            'oberth/extra', 'oberth?query=value', 'oberth#fragment',
+            'oberth\n', '%6fberth', '../oberth')]
+        audiences += [None, 7, [], {}, CONFIG['audience'].replace(
+            'iam.googleapis.com/', 'iam.googleapis.com.evil.invalid/'),
+            CONFIG['audience'].replace('/locations/global/', '/locations/other/')]
+        for audience in audiences:
+            config = copy.deepcopy(CONFIG)
+            config['audience'] = audience
+            with self.subTest(audience=audience), patch.dict(os.environ, {
+                    'OBERTH_RELEASE_WIF': '1', 'GOOGLE_APPLICATION_CREDENTIALS': wif.ADC}, clear=True), \
+                    patch.object(wif, 'read', return_value=json.dumps(config).encode()), \
+                    patch.object(wif, 'post') as post:
+                with self.assertRaisesRegex(ValueError, 'unapproved audience'):
+                    wif.credential(wif.REGISTRY)
+                post.assert_not_called()
 
     def test_adc_source_url_is_required_and_strict_before_network(self):
         for value in (None, '', 7, 'https://attacker.invalid/token',
@@ -152,12 +218,12 @@ class ExchangeTests(unittest.TestCase):
                     self.assertEqual(result['Secret'], 'inert-publisher')
                     self.assertEqual(len(calls), 3)
                     self.assertEqual(calls[1].args[0], source)
-                    self.assertEqual(calls[2].args[0], wif.OBERTH_ROLES[audience])
+                    self.assertEqual(calls[2].args[0], wif.OBERTH_ROLES[_POOL_BY_AUDIENCE[audience]])
 
     def test_second_hop_overrides_refused(self):
         for key in ('delegates', 'oberth_impersonation_url'):
             cfg = copy.deepcopy(CONFIG)
-            cfg[key] = wif.OBERTH_ROLES[_AUDIENCES[1]]
+            cfg[key] = wif.OBERTH_ROLES[_POOL_BY_AUDIENCE[_AUDIENCES[1]]]
             with self.subTest(key=key), patch.dict(os.environ, {
                     'OBERTH_RELEASE_WIF': '1', 'GOOGLE_APPLICATION_CREDENTIALS': wif.ADC}), \
                     patch.object(wif, 'read', return_value=json.dumps(cfg).encode()), \
@@ -187,14 +253,19 @@ class ExchangeTests(unittest.TestCase):
 
     def test_unknown_pool_rejected(self):
         """A syntactically valid but unknown pool must be refused."""
-        cfg = copy.deepcopy(CONFIG)
-        cfg['audience'] = '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-unknown/providers/tuxbox'
-        with patch.dict(os.environ, {'OBERTH_RELEASE_WIF': '1', 'GOOGLE_APPLICATION_CREDENTIALS': wif.ADC}), \
-                patch.object(wif, 'read', return_value=json.dumps(cfg).encode()), \
-                patch.object(wif, 'post') as post:
-            with self.assertRaises(ValueError):
-                wif.credential(wif.REGISTRY)
-        post.assert_not_called()
+        for pool in ('oberth-release-unknown', 'foreign-oberth-release-images', 'oberth-release-images-extra'):
+            for provider in ('legacy-provider', 'oberth'):
+                cfg = copy.deepcopy(CONFIG)
+                cfg['audience'] = (
+                    '//iam.googleapis.com/projects/138624361369/locations/global/'
+                    'workloadIdentityPools/' + pool + '/providers/' + provider)
+                with self.subTest(pool=pool, provider=provider), patch.dict(os.environ, {
+                        'OBERTH_RELEASE_WIF': '1', 'GOOGLE_APPLICATION_CREDENTIALS': wif.ADC}), \
+                        patch.object(wif, 'read', return_value=json.dumps(cfg).encode()), \
+                        patch.object(wif, 'post') as post:
+                    with self.assertRaisesRegex(ValueError, 'unapproved audience'):
+                        wif.credential(wif.REGISTRY)
+                    post.assert_not_called()
 
     def test_wrong_project_number_rejected(self):
         """A different project number must be refused."""

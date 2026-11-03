@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestPriorityReleaseOversizedTagKeepsAcceptedRequest(t *testing.T) {
@@ -33,7 +33,7 @@ func TestPriorityReleaseOversizedTagKeepsAcceptedRequest(t *testing.T) {
 				r := g.reserveRun(tag.Run)
 				defer r.cancel()
 				g.mu.Lock()
-				r.prepared, r.size, r.priorityMaximum = true, periapsis.XL, periapsis.L
+				r.prepared, r.size, r.priorityMaximum = true, pipeline.XL, pipeline.L
 				g.mu.Unlock()
 				want := model.PriorityNormal
 				if granted && requested != model.PriorityNormal {

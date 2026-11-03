@@ -11,7 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // Issue #567: a credentialed release step must never execute a binary from a
@@ -27,13 +27,13 @@ import (
 // chain. Each one verifies its executables in an init container before the
 // secretstore in its main container can fetch anything.
 var oberthReleaseCredentialedLeaves = []string{
+	"release-public-artifacts",
 	"release-publish-chart",
 	"release-publish-homebrew",
 	"release-publish-images",
 	"release-publish-kvm-harness",
 	"release-sign-binaries",
 	"release-verify",
-	"release-website",
 }
 
 // Setup steps that populate the trusted publisher tools. No other release
@@ -49,7 +49,7 @@ var oberthReleaseToolWriters = map[string]bool{
 // artifacts. They receive their own read-only tool copies, never the trusted
 // publisher tools.
 var oberthReleaseTestLeaves = map[string]bool{
-	"vet": true, "golangci-lint-run": true, "release-test": true, "release-chart-test": true,
+	"vet": true, "golangci-lint-run": true, "deadcode": true, "release-test": true, "release-chart-test": true,
 	"release-build": true, "release-runtime": true, "release-scan": true,
 }
 
@@ -58,11 +58,12 @@ var oberthReleaseTestLeaves = map[string]bool{
 // other leaf opts out of the shared workspace entirely.
 var (
 	oberthBuildToolWriters = map[string]bool{
-		"tools-dir": true, "link-go": true, "install-golangci-lint": true, "install-helm": true,
+		"tools-dir": true, "link-go": true, "install-golangci-lint": true, "install-deadcode": true, "install-helm": true,
 		"fetch-shellcheck": true, "verify-shellcheck": true, "decompress-shellcheck": true, "install-shellcheck": true,
+		"fetch-helm-unittest": true, "verify-helm-unittest": true, "install-helm-unittest": true,
 	}
 	oberthBuildCachedGoLeaves = map[string]bool{
-		"vet": true, "golangci-lint-run": true,
+		"vet": true, "golangci-lint-run": true, "deadcode": true,
 		"test-store": true, "test-service": true, "test-rest": true,
 		"test-gitcache":            true,
 		"build-static-git-runtime": true,
@@ -71,27 +72,28 @@ var (
 		"build-darwin-amd64": true, "build-darwin-arm64": true,
 	}
 	oberthBuildIsolatedLeaves = map[string]bool{
-		"generic-names":           true,
+		"generic-names":  true,
+		"chart-unittest": true, "test-chart-schema": true, "test-make-entrypoints": true, "test-release-prune-contract": true,
 		"test-static-git-runtime": true,
 		"shellcheck":              true, "chart": true, "security": true, "release-diagnostic": true, "test-openbao": true,
 		"vpt-build-and-fetch": true, "vpt-copy-trivy": true, "vpt-verify": true,
 	}
 )
 
-func buildOberthPipelineForIsolation(t *testing.T, trigger periapsis.Trigger, source []byte) (*wfv1.Workflow, error) {
+func buildOberthPipelineForIsolation(t *testing.T, trigger pipeline.Trigger, source []byte) (*wfv1.Workflow, error) {
 	t.Helper()
 	config := oberthConfig()
 	config.CICacheRoot = "/var/lib/oberth-cache/ci"
 	config.ReleaseCacheRoot = "/var/lib/oberth-cache/release"
 	approved := map[string]bool{}
 	ref := "refs/heads/main"
-	if trigger == periapsis.TriggerRelease {
+	if trigger == pipeline.TriggerRelease {
 		approved = oberthReleaseApprovedSecrets()
 		ref = "refs/tags/v0.1.0"
 	}
 	return buildOberthPipeline(config, Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
+		Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
 		Ref: ref, SHA: testSHA, Trigger: trigger,
 		Source: source, ApprovedSecrets: approved,
 		SourceVolume: SourceVolume{
@@ -350,14 +352,14 @@ func checkOberthBuildIsolation(workflow *wfv1.Workflow) error {
 
 // TestOberthPipelinesIsolateSharedWorkspace proves #567 on the admitted Pods.
 func TestOberthPipelinesIsolateSharedWorkspace(t *testing.T) {
-	release, err := buildOberthPipelineForIsolation(t, periapsis.TriggerRelease, loadPipeline(t, "release.yaml"))
+	release, err := buildOberthPipelineForIsolation(t, pipeline.TriggerRelease, loadPipeline(t, "release.yaml"))
 	if err != nil {
 		t.Fatalf("release admission: %v", err)
 	}
 	if err := checkOberthReleaseIsolation(release); err != nil {
 		t.Errorf("release.yaml:\n%v", err)
 	}
-	build, err := buildOberthPipelineForIsolation(t, periapsis.TriggerCI, loadPipeline(t, "build.yaml"))
+	build, err := buildOberthPipelineForIsolation(t, pipeline.TriggerCI, loadPipeline(t, "build.yaml"))
 	if err != nil {
 		t.Fatalf("build admission: %v", err)
 	}
@@ -401,10 +403,10 @@ func TestOberthPipelinesIsolationRejectsDrift(t *testing.T) {
 				t.Fatalf("mutation anchor no longer matches %q", tc.old)
 			}
 			mutated := strings.Replace(raw, tc.old, tc.replacement, 1)
-			trigger := periapsis.TriggerCI
+			trigger := pipeline.TriggerCI
 			check := checkOberthBuildIsolation
 			if tc.file == "release.yaml" {
-				trigger = periapsis.TriggerRelease
+				trigger = pipeline.TriggerRelease
 				check = checkOberthReleaseIsolation
 			}
 			workflow, err := buildOberthPipelineForIsolation(t, trigger, []byte(mutated))

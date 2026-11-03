@@ -25,18 +25,7 @@ func Valid(value string) bool {
 // ValidTrimmed reports whether value, after leading/trailing whitespace
 // removal and lowercase normalization, is a well-formed hex object ID.
 // Service-boundary callers that accept external input use this form.
-func ValidTrimmed(value string) bool {
-	value = strings.TrimSpace(value)
-	if len(value) != 40 && len(value) != 64 {
-		return false
-	}
-	for _, character := range strings.ToLower(value) {
-		if (character < '0' || character > '9') && (character < 'a' || character > 'f') {
-			return false
-		}
-	}
-	return true
-}
+func ValidTrimmed(value string) bool { return Valid(strings.ToLower(strings.TrimSpace(value))) }
 
 // Same reports whether two object IDs refer to the same object, ignoring
 // case and surrounding whitespace.

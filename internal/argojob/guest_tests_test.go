@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestGuestTestsAdmission(t *testing.T) {
@@ -13,13 +13,13 @@ func TestGuestTestsAdmission(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
 		grant, enabled bool
-		trigger        periapsis.Trigger
+		trigger        pipeline.Trigger
 		want           string
 	}{
-		{"granted", true, true, periapsis.TriggerCI, ""},
-		{"absent or revoked", false, true, periapsis.TriggerCI, "admin grant"},
-		{"disabled", true, false, periapsis.TriggerCI, "vm.kvm.enabled"},
-		{"release", true, true, periapsis.TriggerRelease, "credential-free CI"},
+		{"granted", true, true, pipeline.TriggerCI, ""},
+		{"absent or revoked", false, true, pipeline.TriggerCI, "admin grant"},
+		{"disabled", true, false, pipeline.TriggerCI, "vm.kvm.enabled"},
+		{"release", true, true, pipeline.TriggerRelease, "credential-free CI"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			config := testConfig()

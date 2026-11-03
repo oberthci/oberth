@@ -14,6 +14,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/vmrunner"
 )
 
@@ -51,14 +52,14 @@ func trustedPublicationFixture(t *testing.T, release, cleaned bool) (*controlFix
 		spec.Credentialed = true
 		spec.Trigger = "tag"
 	}
-	if _, err = f.store.EnqueueRun(ctx, spec); err != nil {
+	if _, err = storetest.EnqueueRun(f.store, ctx, spec); err != nil {
 		t.Fatal(err)
 	}
 	run, err := f.store.ClaimNextRun(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = executor.Execute(ctx, JobRequest{Run: run, Repository: f.repo, UpstreamName: "codeberg", UpstreamOrg: "acme"}, vmrunner.Requirement{CandidateSHA: run.TestedSHA, BaselineSHA: strings.Repeat("b", 40), Contract: &contract}, io.Discard)
+	err = executor.Execute(ctx, WorkflowRequest{Run: run, Repository: f.repo, UpstreamName: "codeberg", UpstreamOrg: "acme"}, vmrunner.Requirement{CandidateSHA: run.TestedSHA, BaselineSHA: strings.Repeat("b", 40), Contract: &contract}, io.Discard)
 	if cleaned && err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +95,7 @@ func TestTrustedPublicationGateRejectsMismatchedEvidence(t *testing.T) {
 			case "release object mismatch":
 				publication.ResultSHA = run.TestedSHA
 			case "fast forward newer failed run":
-				if _, err = f.store.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/newer", SHA: run.TestedSHA, TestedSHA: run.TestedSHA, Actor: "agent", Trigger: "branch"}); err != nil {
+				if _, err = storetest.EnqueueRun(f.store, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/newer", SHA: run.TestedSHA, TestedSHA: run.TestedSHA, Actor: "agent", Trigger: "branch"}); err != nil {
 					t.Fatal(err)
 				}
 				newer, err := f.store.ClaimNextRun(ctx)
@@ -179,7 +180,7 @@ func TestTrustedPreflightSchedulerStartupRecovery(t *testing.T) {
 					t.Fatalf("undelivered parent not interrupted: %#v", got)
 				}
 				retry, err := f.store.Run(context.Background(), got.SupersededBy)
-				if err != nil || retry.Status != model.RunQueued || retry.JobName != "" || retry.AdmissionSequence != got.AdmissionSequence || retry.SHA != got.SHA {
+				if err != nil || retry.Status != model.RunQueued || retry.WorkflowName != "" || retry.AdmissionSequence != got.AdmissionSequence || retry.SHA != got.SHA {
 					t.Fatalf("fresh retry not durably gated: %+v %v", retry, err)
 				}
 				if _, err := f.store.KVMPreflight(context.Background(), retry.ID); !errors.Is(err, store.ErrNotFound) {

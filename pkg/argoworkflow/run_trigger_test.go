@@ -6,7 +6,7 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func decodeAdmissible(t *testing.T, annotations map[string]string) *wfv1.Workflow {
@@ -24,11 +24,11 @@ func TestDeclaredSizeForResolvesPerTriggerThenFallback(t *testing.T) {
 		SizeAnnotation:          "XL",
 		SizeByTriggerAnnotation: " branch = M , promotion=XL",
 	})
-	for trigger, want := range map[RunTrigger]periapsis.Size{
-		RunTriggerBranch:    periapsis.M,
-		RunTriggerPromotion: periapsis.XL,
+	for trigger, want := range map[RunTrigger]pipeline.Size{
+		RunTriggerBranch:    pipeline.M,
+		RunTriggerPromotion: pipeline.XL,
 		// Not named: falls back to oberth.ci/size, not to M.
-		RunTriggerSchedule: periapsis.XL,
+		RunTriggerSchedule: pipeline.XL,
 	} {
 		got, err := DeclaredSizeFor(workflow, trigger)
 		if err != nil || got != want {
@@ -39,23 +39,23 @@ func TestDeclaredSizeForResolvesPerTriggerThenFallback(t *testing.T) {
 	// Neither annotation: every trigger is M, exactly as before.
 	bare := decodeAdmissible(t, nil)
 	for _, trigger := range []RunTrigger{RunTriggerBranch, RunTriggerPromotion, RunTriggerSchedule} {
-		if got, err := DeclaredSizeFor(bare, trigger); err != nil || got != periapsis.M {
+		if got, err := DeclaredSizeFor(bare, trigger); err != nil || got != pipeline.M {
 			t.Fatalf("undeclared %s size = %q, %v; want M", trigger, got, err)
 		}
 	}
 
 	// Only the per-trigger annotation: unnamed triggers are M.
 	only := decodeAdmissible(t, map[string]string{SizeByTriggerAnnotation: "promotion=L"})
-	if got, err := DeclaredSizeFor(only, RunTriggerBranch); err != nil || got != periapsis.M {
+	if got, err := DeclaredSizeFor(only, RunTriggerBranch); err != nil || got != pipeline.M {
 		t.Fatalf("unnamed branch size = %q, %v; want M", got, err)
 	}
-	if got, err := DeclaredSizeFor(only, RunTriggerPromotion); err != nil || got != periapsis.L {
+	if got, err := DeclaredSizeFor(only, RunTriggerPromotion); err != nil || got != pipeline.L {
 		t.Fatalf("promotion size = %q, %v; want L", got, err)
 	}
 
 	// A release document keys its one trigger as tag.
 	release := decodeAdmissible(t, map[string]string{SizeAnnotation: "S", SizeByTriggerAnnotation: "tag=L"})
-	if got, err := DeclaredSizeFor(release, RunTriggerTag); err != nil || got != periapsis.L {
+	if got, err := DeclaredSizeFor(release, RunTriggerTag); err != nil || got != pipeline.L {
 		t.Fatalf("tag size = %q, %v; want L", got, err)
 	}
 }
@@ -96,7 +96,7 @@ func TestSizeByTriggerRefusesOutsideTheClosedVocabulary(t *testing.T) {
 
 func TestSizeByTriggerRefusesTriggersTheDocumentNeverRuns(t *testing.T) {
 	build := decodeAdmissible(t, map[string]string{SizeByTriggerAnnotation: "branch=M,tag=XL"})
-	if err := AdmitSizeDeclarations(build, periapsis.TriggerCI); err == nil || !strings.Contains(err.Error(), "names tag") {
+	if err := AdmitSizeDeclarations(build, pipeline.TriggerCI); err == nil || !strings.Contains(err.Error(), "names tag") {
 		t.Fatalf("build.yaml naming tag: %v", err)
 	}
 	// Even a branch run of that document is refused: half-obeying a
@@ -105,7 +105,7 @@ func TestSizeByTriggerRefusesTriggersTheDocumentNeverRuns(t *testing.T) {
 		t.Fatal("branch size read accepted a build.yaml that names tag")
 	}
 	release := decodeAdmissible(t, map[string]string{SizeByTriggerAnnotation: "promotion=XL"})
-	if err := AdmitSizeDeclarations(release, periapsis.TriggerRelease); err == nil || !strings.Contains(err.Error(), "names promotion") {
+	if err := AdmitSizeDeclarations(release, pipeline.TriggerRelease); err == nil || !strings.Contains(err.Error(), "names promotion") {
 		t.Fatalf("release.yaml naming promotion: %v", err)
 	}
 	if _, err := DeclaredSizeFor(release, RunTriggerTag); err == nil {

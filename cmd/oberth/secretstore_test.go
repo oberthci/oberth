@@ -20,6 +20,7 @@ import (
 	"time"
 
 	oberth "github.com/oberthci/oberth"
+	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
@@ -237,7 +238,7 @@ func TestSecretStoreSetupGuidanceAndScript(t *testing.T) {
 		hex.EncodeToString(digest[:]),
 		"--print-script",
 		"oberth secretstore verify",
-		"no code path that accepts a store admin token",
+		"operator-only secretstore sync reads BAO_TOKEN",
 	} {
 		if !strings.Contains(guidance.String(), want) {
 			t.Fatalf("setup guidance misses %q:\n%s", want, guidance.String())
@@ -1054,7 +1055,7 @@ func TestPlanDigestCLIEqualsServer(t *testing.T) {
 	}
 
 	// Server side: computeSecretStorePlan + ComputePlanDigest.
-	serverPlan := service.ExportComputeSecretStorePlan(grants)
+	serverPlan := serverPlanForGrants(t, grants)
 	serverDigest := service.ComputePlanDigest(serverPlan.Repos)
 
 	// CLI side: derive the identities exactly as `secretstore sync` does —
@@ -1107,7 +1108,7 @@ func TestPlanDigestCLIEqualsServerWildcardOnly(t *testing.T) {
 		{Repo: "codeberg/oberthci/oberth", Step: "*", Secret: "oberth/data/release/cosign-secret"},
 	}
 
-	serverPlan := service.ExportComputeSecretStorePlan(grants)
+	serverPlan := serverPlanForGrants(t, grants)
 	serverDigest := service.ComputePlanDigest(serverPlan.Repos)
 
 	cliRepoIdentities := []installer.PerRepoIdentity{
@@ -1124,4 +1125,27 @@ func TestPlanDigestCLIEqualsServerWildcardOnly(t *testing.T) {
 	if cliDigest != serverDigest {
 		t.Fatalf("CLI digest %q != server digest %q (wildcard-only)", cliDigest, serverDigest)
 	}
+}
+
+// Exercise the public tool boundary so CLI/server agreement never needs a
+// test-only production export.
+type planGrantStore struct {
+	service.SecretAccessStore
+	grants []store.SecretAccessGrant
+}
+
+func (s planGrantStore) SecretAccessList(context.Context, string, bool) ([]store.SecretAccessGrant, error) {
+	return s.grants, nil
+}
+func serverPlanForGrants(t *testing.T, grants []store.SecretAccessGrant) service.SecretStorePlanResponse {
+	t.Helper()
+	control, err := service.NewAPI(service.APIConfig{Runs: new(store.Store), SecretAccess: planGrantStore{grants: grants}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := control.CallTool(t.Context(), api.Actor{Identity: "admin@fixture", Admin: true}, "secretstore_plan", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return value.(service.SecretStorePlanResponse)
 }

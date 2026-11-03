@@ -33,20 +33,11 @@ func TestSetupProductionSecretStoreInteractiveTokenPrompt(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "kube-root-ca.crt", Namespace: "kube-public"},
 		Data:       map[string]string{"ca.crt": "-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n"},
 	}
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "openbao-0", Namespace: DefaultOpenBaoNamespace,
-			Labels: map[string]string{"app.kubernetes.io/instance": "openbao"},
-		},
-		Status: corev1.PodStatus{
-			Phase:      corev1.PodRunning,
-			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
-		},
-	}
+	pod := runningOpenBaoPod()
 	deps := Deps{
 		Output:       &buf,
 		Input:        strings.NewReader(""),
-		KubeClient:   fake.NewClientset(ca, pod),
+		KubeClient:   fake.NewClientset(ca, pod, runningOpenBaoStatefulSet()),
 		RestConfig:   &rest.Config{Host: "https://127.0.0.1:6443"},
 		RunCommand:   runner.run,
 		ContextName:  "test-ctx",
@@ -64,7 +55,7 @@ func TestSetupProductionSecretStoreInteractiveTokenPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	configured, err := SetupProductionSecretStore(context.Background(), cfg, deps, productionOpenBaoResult())
+	configured, err := setupProductionSecretStoreFixture(context.Background(), cfg, deps, productionOpenBaoResult())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,16 +99,7 @@ func TestSetupProductionSecretStoreNonInteractiveTokenPromptNotShown(t *testing.
 	runner := &fakeBaoRunner{t: t, responses: map[string]fakeBaoResponse{
 		"status -format=json": {out: `{"initialized":true,"sealed":false,"storage_type":"file"}`},
 	}}
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "openbao-0", Namespace: DefaultOpenBaoNamespace,
-			Labels: map[string]string{"app.kubernetes.io/instance": "openbao"},
-		},
-		Status: corev1.PodStatus{
-			Phase:      corev1.PodRunning,
-			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
-		},
-	}
+	pod := runningOpenBaoPod()
 	ca := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Name: "kube-root-ca.crt", Namespace: "kube-public"},
 		Data:       map[string]string{"ca.crt": "fake-ca"},
@@ -125,7 +107,7 @@ func TestSetupProductionSecretStoreNonInteractiveTokenPromptNotShown(t *testing.
 	var buf bytes.Buffer
 	deps := Deps{
 		Output:       &buf,
-		KubeClient:   fake.NewClientset(ca, pod),
+		KubeClient:   fake.NewClientset(ca, pod, runningOpenBaoStatefulSet()),
 		RestConfig:   &rest.Config{Host: "https://127.0.0.1:6443"},
 		RunCommand:   runner.run,
 		ContextName:  "test-ctx",
@@ -135,7 +117,7 @@ func TestSetupProductionSecretStoreNonInteractiveTokenPromptNotShown(t *testing.
 	cfg := Config{InstallSecretStore: true}
 	_ = cfg.Validate()
 
-	_, err := SetupProductionSecretStore(context.Background(), cfg, deps, productionOpenBaoResult())
+	_, err := setupProductionSecretStoreFixture(context.Background(), cfg, deps, productionOpenBaoResult())
 	if err == nil || !strings.Contains(err.Error(), baoTokenEnvVar) {
 		t.Fatalf("non-interactive missing-token error = %v", err)
 	}
@@ -173,7 +155,7 @@ func TestValidateOrgNameRejectsControlChars(t *testing.T) {
 }
 
 func TestValidateOrgNameAcceptsValid(t *testing.T) {
-	for _, name := range []string{"oberthci", "skip-ops", "my.org", "org_name", "MixedCase123", "a"} {
+	for _, name := range []string{"oberthci", "example-org", "my.org", "org_name", "MixedCase123", "a"} {
 		if err := ValidateOrgName(name); err != nil {
 			t.Errorf("ValidateOrgName(%q) = %v; want nil", name, err)
 		}

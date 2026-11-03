@@ -107,7 +107,7 @@ func run(ctx context.Context, arguments []string, output io.Writer) error {
 	case len(arguments) >= 4 && arguments[0] == "heartbeat":
 		return runReleaseHeartbeat(ctx, arguments[1], arguments[2], arguments[3:], output, releaseHeartbeatInterval)
 	default:
-		return errors.New("usage: oberth-release-support semver-compare LEFT RIGHT | normalize-tree DIR CREATED | chart-index-state INDEX VERSION DIGEST URL | chart-index-rebase INDEX REPOSITORY OUTPUT | registry-digest REF ACCESS_TOKEN | registry-token ACTION SOURCE_JSON OUTPUT | r2-auth TOKEN_FILE ACCOUNT_ID BUCKET PREFIX OUTPUT | heartbeat LABEL COMMAND [ARG...]")
+		return errors.New("usage: oberth-release-support semver-compare LEFT RIGHT | normalize-tree DIR CREATED | chart-index-state INDEX VERSION DIGEST URL | chart-index-rebase INDEX REPOSITORY OUTPUT | registry-digest REF CREDENTIAL_SOURCE_JSON | registry-token ACTION SOURCE_JSON OUTPUT | r2-auth TOKEN_FILE ACCOUNT_ID BUCKET PREFIX OUTPUT | heartbeat LABEL ./.oberth/release.sh ACTION (build|publish-r2|publish-images|package-chart|publish-chart|verify|finalize)")
 	}
 }
 

@@ -31,7 +31,7 @@ func TestDashboardLiveLogBehavior(t *testing.T) {
 	if err != nil {
 		t.Fatal("dashboard behavior checks require Node on PATH: install Node or use hack/with-test-node.sh on Linux/x86_64")
 	}
-	for _, script := range []string{"test-live-logs.mjs", "test-dashboard-runs.mjs", "test-resource-messages.mjs"} {
+	for _, script := range []string{"test-live-logs.mjs", "test-dashboard-runs.mjs", "test-resource-messages.mjs", "test-dashboard-token-expiry.mjs", "test-dashboard-preflight-deadline.mjs"} {
 		t.Run(script, func(t *testing.T) {
 			command := exec.Command(node, "../../hack/"+script)
 			if output, err := command.CombinedOutput(); err != nil {

@@ -32,7 +32,7 @@ func TestPreStepAutoRetryUsesAllProgressAndExecutionEvidence(t *testing.T) {
 				}
 			}
 			if kind == "queued" || kind == "started" || kind == "earlier-start-then-queued" {
-				event := runprogress.Event{Version: 1, Burn: "ci", Step: "unit", Ordinal: 0, DeclaredSize: "M", Status: runprogress.StepQueued}
+				event := runprogress.Event{Version: 1, Stage: "ci", Step: "unit", Ordinal: 0, DeclaredSize: "M", Status: runprogress.StepQueued}
 				if kind != "queued" {
 					event.Status = runprogress.StepRunning
 					event.StartedAt = &now
@@ -94,7 +94,7 @@ type rcaCreateFailure struct {
 	createCalls int
 }
 
-func (j *rcaCreateFailure) CreateCI(context.Context, JobRequest) error {
+func (j *rcaCreateFailure) CreateWorkflow(context.Context, WorkflowRequest) error {
 	j.createCalls++
 	return j.createErr
 }
@@ -116,7 +116,7 @@ func TestAutomaticRetryRequiresFailedCreateCleanupAndKeepsStartedSteps(t *testin
 				jobs.createErr = nil
 				jobs.waitErr = &identityObservationFailure{cause: context.DeadlineExceeded}
 				jobs.terminalErr = ErrJobNotTerminal
-				jobs.waitResult = JobResult{Steps: []model.StepResult{{Burn: "ci", Step: "unit", Status: model.StepPassed, DeclaredSize: "M"}}}
+				jobs.waitResult = JobResult{Steps: []model.StepResult{{Stage: "ci", Step: "unit", Status: model.StepPassed, DeclaredSize: "M"}}}
 			}
 			err := fixture.scheduler(t, jobs).executeAndCleanup(t.Context(), run)
 			current, lookupErr := fixture.store.Run(t.Context(), run.ID)

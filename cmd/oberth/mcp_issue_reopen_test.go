@@ -14,16 +14,17 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestMCPIssueReopenRejectsCIWithActionableErrorWithoutMutation(t *testing.T) {
 	ctx := t.Context()
-	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{})
+	database, err := storetest.Open(ctx, filepath.Join(t.TempDir(), "oberth.sqlite"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
-	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{Name: "origin", Kind: "forgejo", BaseURL: "https://forge.example.test/org"})
+	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{Name: "origin", Kind: "forgejo", BaseURL: "https://forge.example.test/org"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +32,7 @@ func TestMCPIssueReopenRejectsCIWithActionableErrorWithoutMutation(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	issue, err := database.UpsertCIIssue(ctx, "tooling-test@host", repo.ID, "feature", "red", "failure")
+	issue, err := storetest.UpsertCIIssue(database, ctx, "tooling-test@host", repo.ID, "feature", "red", "failure")
 	if err != nil {
 		t.Fatal(err)
 	}

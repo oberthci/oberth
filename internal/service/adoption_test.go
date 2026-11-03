@@ -17,8 +17,9 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type adoptingJobs struct {
@@ -33,25 +34,25 @@ type adoptingJobs struct {
 	retained       int64
 }
 
-func (jobs *adoptingJobs) Adopt(_ context.Context, run model.Run) (periapsis.Size, bool, error) {
+func (jobs *adoptingJobs) Adopt(_ context.Context, run model.Run) (pipeline.Size, bool, error) {
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.adopted = append(jobs.adopted, run.ID)
-	return periapsis.L, jobs.found, jobs.adoptErr
+	return pipeline.L, jobs.found, jobs.adoptErr
 }
 
-func (*adoptingJobs) JobNamespace() string { return "oberth-argo" }
+func (*adoptingJobs) WorkflowNamespace() string { return "oberth-argo" }
 
 var _ JobAdopter = (*adoptingJobs)(nil)
 
-func (jobs *adoptingJobs) CreateCI(context.Context, JobRequest) error {
+func (jobs *adoptingJobs) CreateWorkflow(context.Context, WorkflowRequest) error {
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.created++
 	return nil
 }
 
-func (jobs *adoptingJobs) CreateRelease(context.Context, JobRequest) error {
+func (jobs *adoptingJobs) CreateRelease(context.Context, WorkflowRequest) error {
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.releaseCreated++
@@ -96,13 +97,13 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 				t.Fatal(err)
 			}
 			run, err := fixture.store.ClaimNextRun(context.Background())
-			if err != nil || run.ID != replacement.ID || run.AdmissionSequence != previous.AdmissionSequence || run.QueueSequence == previous.QueueSequence {
+			if err != nil || run.ID != replacement.ID || run.AdmissionSequence != previous.AdmissionSequence || run.QueueSequence != previous.QueueSequence || run.ID != previous.ID {
 				t.Fatalf("re-fired fixture lost its admission order: previous=%#v run=%#v err=%v", previous, run, err)
 			}
 			if err := fixture.store.SetRunConcurrencyGroup(context.Background(), run.ID, "build"); err != nil {
 				t.Fatal(err)
 			}
-			fixture.setJobName(t, run.ID, "oberth-adopt")
+			fixture.setWorkflowName(t, run.ID, "oberth-adopt")
 			if _, err := fixture.store.MarkRunSubmitted(context.Background(), run.ID); err != nil {
 				t.Fatal(err)
 			}
@@ -125,14 +126,14 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 				t.Fatal(err)
 			}
 			now := time.Now().UTC()
-			event := runprogress.Event{Version: runprogress.Version, Burn: "test", Step: "unit", Status: runprogress.StepPassed, StartedAt: &now, FinishedAt: &now}
+			event := runprogress.Event{Version: runprogress.Version, Stage: "test", Step: "unit", Status: runprogress.StepPassed, StartedAt: &now, FinishedAt: &now}
 			// v0.17.44 retained DAG-attempt burns beside the planned key.
 			// A colliding orphan must not stop scheduler startup/adoption.
-			if err := scheduler.logs.WriteStepPlan(run.ID, []runprogress.PlannedStep{{Burn: "test", Step: "unit", Ordinal: 0}}); err != nil {
+			if err := scheduler.logs.WriteStepPlan(run.ID, []runprogress.PlannedStep{{Stage: "test", Step: "unit", Ordinal: 0}}); err != nil {
 				t.Fatal(err)
 			}
 			orphan := event
-			orphan.Burn = "test(0)"
+			orphan.Stage = "test(0)"
 			if err := scheduler.logs.AppendStepProgress(run.ID, orphan); err != nil {
 				t.Fatal(err)
 			}
@@ -143,7 +144,7 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 			if err := fixture.store.Close(); err != nil {
 				t.Fatal(err)
 			}
-			fixture.store, err = store.Open(context.Background(), filepath.Join(fixture.root, "oberth.sqlite"), store.Options{})
+			fixture.store, err = storetest.Open(context.Background(), filepath.Join(fixture.root, "oberth.sqlite"), store.Options{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -175,7 +176,7 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 				if order != run.AdmissionSequence {
 					t.Fatalf("adopted admission order = %d, want persisted %d", order, run.AdmissionSequence)
 				}
-				if used != scheduler.admission.weights.of(periapsis.L, scheduler.admission.capacity) || runs != 1 || groups != 1 {
+				if used != scheduler.admission.weights.of(pipeline.L, scheduler.admission.capacity) || runs != 1 || groups != 1 {
 					t.Fatalf("admission used/runs/groups = %d/%d/%d", used, runs, groups)
 				}
 				close(jobs.waitBlocks)
@@ -185,10 +186,10 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 			if err := <-done; err != nil {
 				t.Fatal(err)
 			}
-			if current.SupersededBy != "" || current.JobName != "oberth-adopt" || current.QueueSequence != run.QueueSequence || current.AdmissionSequence != run.AdmissionSequence {
+			if current.SupersededBy != "" || current.WorkflowName != "oberth-adopt" || current.QueueSequence != run.QueueSequence || current.AdmissionSequence != run.AdmissionSequence {
 				t.Fatalf("finalized run = %#v", current)
 			}
-			if counts, err := fixture.store.CountRuns(context.Background()); err != nil || counts.Total != 2 {
+			if counts, err := fixture.store.CountRuns(context.Background()); err != nil || counts.Total != 1 {
 				t.Fatalf("adoption enqueued another run: counts=%#v err=%v", counts, err)
 			}
 			if pending, err := fixture.store.PendingRunCancellations(context.Background()); err != nil || len(pending) != 0 {
@@ -215,16 +216,16 @@ func TestAdoptionMissingWorkflowRequeuesButReadFailureDoesNot(t *testing.T) {
 	for _, readErr := range []error{nil, errors.New("API unavailable")} {
 		fixture := newRecoveryFixture(t)
 		run := fixture.enqueueAndClaim(t, "feature/missing", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
-		fixture.setJobName(t, run.ID, "oberth-missing")
+		fixture.setWorkflowName(t, run.ID, "oberth-missing")
 		jobs := &adoptingJobs{adoptErr: readErr, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}
 		scheduler := fixture.scheduler(t, jobs)
-		err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(model.Run, periapsis.Size) error { return errors.New("absent Workflow adopted") })
+		err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(model.Run, pipeline.Size) error { return errors.New("absent Workflow adopted") })
 		current, lookupErr := fixture.store.Run(context.Background(), run.ID)
 		if lookupErr != nil {
 			t.Fatal(lookupErr)
 		}
 		if readErr == nil {
-			if err != nil || current.Status != model.RunInterrupted || current.SupersededBy == "" {
+			if err != nil || current.Status != model.RunQueued || current.SupersededBy != "" {
 				t.Fatalf("missing recovery: %#v, %v", current, err)
 			}
 		} else if err == nil || current.Status != model.RunRunning || current.SupersededBy != "" {
@@ -236,7 +237,7 @@ func TestAdoptionMissingWorkflowRequeuesButReadFailureDoesNot(t *testing.T) {
 func TestAdoptedWorkflowSurvivesShutdownWithWorkspace(t *testing.T) {
 	fixture := newRecoveryFixture(t)
 	run := fixture.enqueueAndClaim(t, "feature/shutdown", "cccccccccccccccccccccccccccccccccccccccc")
-	fixture.setJobName(t, run.ID, "oberth-shutdown")
+	fixture.setWorkflowName(t, run.ID, "oberth-shutdown")
 	jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal, waitBlocks: make(chan struct{}), waitEntered: make(chan struct{})}}
 	scheduler := fixture.scheduler(t, jobs)
 	source := filepath.Join(fixture.root, "work", run.ID, "src")
@@ -262,7 +263,7 @@ func TestAdoptedWorkflowSurvivesShutdownWithWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if current.Status != model.RunRunning || current.JobName != "oberth-shutdown" || current.SupersededBy != "" || len(jobs.deleted) != 0 {
+	if current.Status != model.RunRunning || current.WorkflowName != "oberth-shutdown" || current.SupersededBy != "" || len(jobs.deleted) != 0 {
 		t.Fatalf("shutdown disrupted Workflow: %#v; deleted %v", current, jobs.deleted)
 	}
 	if pending, err := fixture.store.PendingRunCancellations(context.Background()); err != nil || len(pending) != 0 {
@@ -276,22 +277,22 @@ func TestAdoptedWorkflowSurvivesShutdownWithWorkspace(t *testing.T) {
 func TestAdoptedAdmissionIsIdempotentAndHoldsItsGroup(t *testing.T) {
 	gate := newWeightedAdmissionForJobs(1)
 	run := model.Run{ID: "active", QueueSequence: 11, AdmissionSequence: 2, RepoID: 1, ConcurrencyGroup: "build"}
-	first, err := gate.adopt(run, periapsis.L, argoworkflow.VMIDemand{})
+	first, err := gate.adopt(run, pipeline.L, argoworkflow.VMIDemand{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.sequence != run.QueueSequence || first.order != run.AdmissionSequence {
 		t.Fatalf("adoption changed admission identity: key=%d order=%d", first.sequence, first.order)
 	}
-	again, err := gate.adopt(run, periapsis.L, argoworkflow.VMIDemand{})
+	again, err := gate.adopt(run, pipeline.L, argoworkflow.VMIDemand{})
 	if err != nil || again != first {
 		t.Fatalf("second adoption = %p, %v", again, err)
 	}
-	other, err := gate.adopt(model.Run{ID: "also-active", QueueSequence: 2, RepoID: 2}, periapsis.L, argoworkflow.VMIDemand{})
+	other, err := gate.adopt(model.Run{ID: "also-active", QueueSequence: 2, RepoID: 2}, pipeline.L, argoworkflow.VMIDemand{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gate.used != 2*gate.weights.of(periapsis.L, gate.capacity) || gate.runs != 2 {
+	if gate.used != 2*gate.weights.of(pipeline.L, gate.capacity) || gate.runs != 2 {
 		t.Fatalf("over-capacity adoption = %d/%d", gate.used, gate.runs)
 	}
 	waiting := gate.reserveRun(model.Run{ID: "next", QueueSequence: 3, RepoID: 1, ConcurrencyGroup: "build"})
@@ -299,7 +300,7 @@ func TestAdoptedAdmissionIsIdempotentAndHoldsItsGroup(t *testing.T) {
 	defer cancel()
 	granted := make(chan func(), 1)
 	go func() {
-		release, err := waiting.acquireRequest(ctx, admissionRequest{RunID: "next", RepoID: 1, Group: "build", Size: periapsis.S})
+		release, err := waiting.acquireRequest(ctx, admissionRequest{RunID: "next", RepoID: 1, Group: "build", Size: pipeline.S})
 		if err == nil {
 			granted <- release
 		}
@@ -346,10 +347,10 @@ func TestAdoptedRunStillHonorsCancelAndSupersede(t *testing.T) {
 		t.Run(map[bool]string{false: "cancel", true: "supersede"}[supersede], func(t *testing.T) {
 			fixture := newRecoveryFixture(t)
 			run := fixture.enqueueAndClaim(t, "feature/preempted", "dddddddddddddddddddddddddddddddddddddddd")
-			fixture.setJobName(t, run.ID, "oberth-preempted")
+			fixture.setWorkflowName(t, run.ID, "oberth-preempted")
 			jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal, waitErr: errors.New("Workflow deleted"), waitBlocks: make(chan struct{}), waitEntered: make(chan struct{})}}
 			scheduler := fixture.scheduler(t, jobs)
-			reservation, err := scheduler.admission.adopt(run, periapsis.M, argoworkflow.VMIDemand{})
+			reservation, err := scheduler.admission.adopt(run, pipeline.M, argoworkflow.VMIDemand{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -365,7 +366,7 @@ func TestAdoptedRunStillHonorsCancelAndSupersede(t *testing.T) {
 				t.Fatal("Wait not entered")
 			}
 			if supersede {
-				if _, err := fixture.store.EnqueueRun(context.Background(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: run.Ref, SHA: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", Actor: "agent@host", Trigger: "branch"}); err != nil {
+				if _, err := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: run.Ref, SHA: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", Actor: "agent@host", Trigger: "branch"}); err != nil {
 					t.Fatal(err)
 				}
 			} else {
@@ -384,7 +385,7 @@ func TestAdoptedRunStillHonorsCancelAndSupersede(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !current.Preempted() || len(jobs.deleted) != 1 || jobs.deleted[0] != current.JobName {
+			if !current.Preempted() || len(jobs.deleted) != 1 || jobs.deleted[0] != current.WorkflowName {
 				t.Fatalf("adopted cancellation = %#v deleted=%v", current, jobs.deleted)
 			}
 			if pending, err := fixture.store.PendingRunCancellations(context.Background()); err != nil || len(pending) != 0 {
@@ -424,7 +425,7 @@ func TestNewBranchWorkflowSurvivesShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if current.Status != model.RunRunning || current.SupersededBy != "" || current.JobName == "" || jobs.created != 1 || len(jobs.deleted) != 0 {
+	if current.Status != model.RunRunning || current.SupersededBy != "" || current.WorkflowName == "" || jobs.created != 1 || len(jobs.deleted) != 0 {
 		t.Fatalf("new Workflow shutdown = %#v created=%d deleted=%v", current, jobs.created, jobs.deleted)
 	}
 	if pending, err := fixture.store.PendingRunCancellations(context.Background()); err != nil || len(pending) != 0 {
@@ -445,10 +446,10 @@ func TestNonAdoptingEngineKeepsPromotionAndReleaseRecovery(t *testing.T) {
 		var enqueued model.EnqueueRunResult
 		var err error
 		if release {
-			enqueued, err = fixture.store.EnqueueRun(context.Background(), spec)
+			enqueued, err = storetest.EnqueueRun(fixture.store, context.Background(), spec)
 		} else {
 			spec.TestedSHA, spec.BaseSHA = spec.SHA, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-			enqueued, _, err = fixture.store.EnqueuePromotionRun(context.Background(), spec, model.PromotionSpec{
+			enqueued, _, err = storetest.EnqueuePromotionRun(fixture.store, context.Background(), spec, model.PromotionSpec{
 				RepoID: fixture.repo.ID, SourceBranch: spec.Ref, SourceSHA: spec.SHA, TargetRef: "main", Actor: "agent@host",
 				ResultSHA: spec.SHA, PreviousSHA: spec.BaseSHA,
 			})
@@ -460,19 +461,23 @@ func TestNonAdoptingEngineKeepsPromotionAndReleaseRecovery(t *testing.T) {
 		if _, err := fixture.store.ClaimNextRun(context.Background()); err != nil {
 			t.Fatal(err)
 		}
-		fixture.setJobName(t, run.ID, "oberth-legacy")
+		fixture.setWorkflowName(t, run.ID, "oberth-legacy")
 		jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}
-		// A legacy engine exposes no adoption capability. Preserve its
-		// conservative recovery and all original deletion/refire assertions.
+		// A legacy engine exposes no adoption capability. Release runs
+		// reset behind cleanup; promotion work uses its separate retry path.
 		scheduler := fixture.scheduler(t, struct{ JobController }{jobs})
-		if err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(model.Run, periapsis.Size) error { return errors.New("out-of-scope adoption") }); err != nil {
+		if err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(model.Run, pipeline.Size) error { return errors.New("out-of-scope adoption") }); err != nil {
 			t.Fatal(err)
 		}
 		current, err := fixture.store.Run(context.Background(), run.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if current.Status != model.RunInterrupted || current.SupersededBy != "" || len(jobs.adopted) != 0 || len(jobs.deleted) != 1 {
+		wantStatus, wantDeletes := model.RunInterrupted, 1
+		if release {
+			wantStatus, wantDeletes = model.RunQueued, 0
+		}
+		if current.Status != wantStatus || current.SupersededBy != "" || len(jobs.adopted) != 0 || len(jobs.deleted) != wantDeletes {
 			t.Fatalf("legacy recovery changed: %#v adopted=%v deleted=%v", current, jobs.adopted, jobs.deleted)
 		}
 	}
@@ -481,14 +486,14 @@ func TestNonAdoptingEngineKeepsPromotionAndReleaseRecovery(t *testing.T) {
 func TestAdoptionPreemptedBeforeWaitRetainsAdmissionOnDeleteFailure(t *testing.T) {
 	fixture := newRecoveryFixture(t)
 	run := fixture.enqueueAndClaim(t, "feature/delete-failure", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-	fixture.setJobName(t, run.ID, "oberth-delete-failure")
+	fixture.setWorkflowName(t, run.ID, "oberth-delete-failure")
 	if err := fixture.store.SetRunConcurrencyGroup(context.Background(), run.ID, "build"); err != nil {
 		t.Fatal(err)
 	}
 	run.ConcurrencyGroup = "build"
 	jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{deleteErr: errors.New("API unavailable")}}
 	scheduler := fixture.scheduler(t, jobs)
-	reservation, err := scheduler.admission.adopt(run, periapsis.M, argoworkflow.VMIDemand{})
+	reservation, err := scheduler.admission.adopt(run, pipeline.M, argoworkflow.VMIDemand{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -509,7 +514,7 @@ func TestAdoptionPreemptedBeforeWaitRetainsAdmissionOnDeleteFailure(t *testing.T
 func TestAdoptedObservationFailureFailsOnlyThatRun(t *testing.T) {
 	fixture := newRecoveryFixture(t)
 	run := fixture.enqueueAndClaim(t, "feature/blip", "abababababababababababababababababababab")
-	fixture.setJobName(t, run.ID, "oberth-blip")
+	fixture.setWorkflowName(t, run.ID, "oberth-blip")
 	// Wait returns only after the controller's bounded read retry gave up.
 	jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal, waitErr: errors.New("argojob: read Workflow oberth-blip: connection refused")}}
 	scheduler := fixture.scheduler(t, jobs)
@@ -527,7 +532,7 @@ func TestAdoptedObservationFailureFailsOnlyThatRun(t *testing.T) {
 	case <-time.After(testTimeout(50 * time.Millisecond)):
 	}
 	// The scheduler keeps dispatching new work after the failed adoption.
-	next, err := fixture.store.EnqueueRun(context.Background(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/next", SHA: "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd", Actor: "agent@host", Trigger: "branch"})
+	next, err := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/next", SHA: "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd", Actor: "agent@host", Trigger: "branch"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -551,14 +556,14 @@ func TestAdoptedObservationFailureFailsOnlyThatRun(t *testing.T) {
 func TestAdoptedTerminalObservationErrorKeepsRealResult(t *testing.T) {
 	fixture := newRecoveryFixture(t)
 	run := fixture.enqueueAndClaim(t, "feature/budget", "efefefefefefefefefefefefefefefefefefefef")
-	fixture.setJobName(t, run.ID, "oberth-budget")
+	fixture.setWorkflowName(t, run.ID, "oberth-budget")
 	passed := JobResult{Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)}}
 	jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{
 		terminalResult: passed, waitResult: passed,
 		waitErr: errors.New("step test/unit breached the aggregate run log budget"),
 	}}
 	scheduler := fixture.scheduler(t, jobs)
-	reservation, err := scheduler.admission.adopt(run, periapsis.M, argoworkflow.VMIDemand{})
+	reservation, err := scheduler.admission.adopt(run, pipeline.M, argoworkflow.VMIDemand{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -595,18 +600,18 @@ func TestAdoptionFailureNamesTheWorkflowToDelete(t *testing.T) {
 			logged.Reset()
 			fixture := newRecoveryFixture(t)
 			run := fixture.enqueueAndClaim(t, "feature/refused", "abcdefabcdefabcdefabcdefabcdefabcdefabcd")
-			fixture.setJobName(t, run.ID, "oberth-refused")
+			fixture.setWorkflowName(t, run.ID, "oberth-refused")
 			if err := fixture.store.SetRunConcurrencyGroup(context.Background(), run.ID, "build"); err != nil {
 				t.Fatal(err)
 			}
 			jobs := &adoptingJobs{found: test.adoptErr == nil, adoptErr: test.adoptErr, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}
 			scheduler := fixture.scheduler(t, jobs)
 			if test.holdOther {
-				if _, err := scheduler.admission.adopt(model.Run{ID: "holder", QueueSequence: run.QueueSequence + 100, RepoID: run.RepoID, ConcurrencyGroup: "build"}, periapsis.M, argoworkflow.VMIDemand{}); err != nil {
+				if _, err := scheduler.admission.adopt(model.Run{ID: "holder", QueueSequence: run.QueueSequence + 100, RepoID: run.RepoID, ConcurrencyGroup: "build"}, pipeline.M, argoworkflow.VMIDemand{}); err != nil {
 					t.Fatal(err)
 				}
 			}
-			err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(run model.Run, size periapsis.Size) error {
+			err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(run model.Run, size pipeline.Size) error {
 				_, err := scheduler.admission.adopt(run, size, argoworkflow.VMIDemand{})
 				return err
 			})

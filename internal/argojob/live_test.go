@@ -22,7 +22,7 @@ import (
 	"k8s.io/client-go/tools/remotecommand"
 
 	"github.com/oberthci/oberth/internal/runprogress"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // The live suite runs against a real Argo Workflows controller. It is gated on
@@ -162,7 +162,7 @@ func TestLiveBranchSubmissionCannotReachTheCredentialedServiceAccount(t *testing
 	}
 	seeder := NewSourceSeeder(cluster.kube, cluster.execStreamer(), cluster.config())
 	controller = controller.WithSourceSeeder(seeder)
-	request := liveRequest("oberth-live-identity", periapsis.TriggerCI, liveGreedyDocument)
+	request := liveRequest("oberth-live-identity", pipeline.TriggerCI, liveGreedyDocument)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cleanupCancel()
@@ -264,7 +264,7 @@ func TestLiveReadOnlyRootFilesystemIsRealAndTmpIsWritable(t *testing.T) {
 		t.Fatalf("controller: %v", err)
 	}
 	controller = controller.WithSourceSeeder(NewSourceSeeder(cluster.kube, cluster.execStreamer(), cluster.config()))
-	request := liveRequest("oberth-live-rootfs", periapsis.TriggerCI, liveFilesystemDocument)
+	request := liveRequest("oberth-live-rootfs", pipeline.TriggerCI, liveFilesystemDocument)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cleanupCancel()
@@ -316,7 +316,7 @@ func TestLiveWorkflowRunsToCompletion(t *testing.T) {
 		t.Fatalf("controller: %v", err)
 	}
 	controller = controller.WithSourceSeeder(NewSourceSeeder(cluster.kube, cluster.execStreamer(), cluster.config()))
-	request := liveRequest("oberth-live-success", periapsis.TriggerCI, liveTwoBurnDocument)
+	request := liveRequest("oberth-live-success", pipeline.TriggerCI, liveTwoStageDocument)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cleanupCancel()
@@ -339,16 +339,16 @@ func TestLiveWorkflowRunsToCompletion(t *testing.T) {
 	}
 
 	// Every step is attributed to the burn (the nested DAG) that encloses it.
-	burns := map[string][]string{}
+	stages := map[string][]string{}
 	for _, step := range completion.Steps {
-		burns[step.Burn] = append(burns[step.Burn], step.Step)
+		stages[step.Stage] = append(stages[step.Stage], step.Step)
 		if step.Status != runprogress.StepPassed {
-			t.Errorf("step %s/%s = %s", step.Burn, step.Step, step.Status)
+			t.Errorf("step %s/%s = %s", step.Stage, step.Step, step.Status)
 		}
 	}
-	for _, burn := range []string{"setup", "verify"} {
-		if len(burns[burn]) == 0 {
-			t.Errorf("no steps attributed to burn %q; observed %v", burn, burns)
+	for _, stage := range []string{"setup", "verify"} {
+		if len(stages[stage]) == 0 {
+			t.Errorf("no steps attributed to burn %q; observed %v", stage, stages)
 		}
 	}
 
@@ -379,7 +379,7 @@ func TestLiveFailingWorkflowReportsTheFailedStep(t *testing.T) {
 		t.Fatalf("controller: %v", err)
 	}
 	controller = controller.WithSourceSeeder(NewSourceSeeder(cluster.kube, cluster.execStreamer(), cluster.config()))
-	request := liveRequest("oberth-live-failure", periapsis.TriggerCI, liveFailingDocument)
+	request := liveRequest("oberth-live-failure", pipeline.TriggerCI, liveFailingDocument)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cleanupCancel()
@@ -423,7 +423,7 @@ func TestLiveTerminalStateReconstructsWithoutInProcessState(t *testing.T) {
 		t.Fatalf("controller: %v", err)
 	}
 	controller = controller.WithSourceSeeder(NewSourceSeeder(cluster.kube, cluster.execStreamer(), cluster.config()))
-	request := liveRequest("oberth-live-recovery", periapsis.TriggerCI, liveTwoBurnDocument)
+	request := liveRequest("oberth-live-recovery", pipeline.TriggerCI, liveTwoStageDocument)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cleanupCancel()
@@ -473,7 +473,7 @@ func TestLiveCreateIsIdempotentForTheSameRun(t *testing.T) {
 		t.Fatalf("controller: %v", err)
 	}
 	controller = controller.WithSourceSeeder(NewSourceSeeder(cluster.kube, cluster.execStreamer(), cluster.config()))
-	request := liveRequest("oberth-live-idempotent", periapsis.TriggerCI, liveTwoBurnDocument)
+	request := liveRequest("oberth-live-idempotent", pipeline.TriggerCI, liveTwoStageDocument)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cleanupCancel()
@@ -513,9 +513,9 @@ func awaitRunPod(t *testing.T, ctx context.Context, cluster liveCluster, runID s
 	return corev1.Pod{}
 }
 
-func liveRequest(name string, trigger periapsis.Trigger, source string) Request {
+func liveRequest(name string, trigger pipeline.Trigger, source string) Request {
 	return Request{
-		RunID: name, Name: name, Repo: "oberth", UpstreamOrg: "skipops",
+		RunID: name, Name: name, Repo: "oberth", UpstreamOrg: "acme",
 		Ref: "refs/heads/argo-live", SHA: testSHA, Trigger: trigger,
 		Source:          []byte(source),
 		SourceDir:       "/tmp/oberth-live-test-src",
@@ -545,7 +545,7 @@ spec:
 
 // liveTwoBurnDocument is the burn/step shape Oberth's model expects: an
 // entrypoint DAG of burns, each burn a nested DAG of steps.
-const liveTwoBurnDocument = `
+const liveTwoStageDocument = `
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 spec:

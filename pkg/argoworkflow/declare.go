@@ -7,19 +7,16 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
-// Repository declarations the server reads statically from the decoded
-// document. They are the Argo-path counterparts of pkg/periapsis's
-// DeclaredJobSizes and DeclaredSecretStoreSecrets: annotations rather than Go
-// literals, but the same rule applies — the server reads them, never evaluates
-// them, and the reviewed source and the admission decision cannot diverge.
+// Repository annotations are read statically so the reviewed source and
+// admission decision cannot diverge through evaluated repository code.
 const (
 	// SizeAnnotation declares the scheduler admission weight of this pipeline,
 	// one of S/M/L/XL. Absent selects M.
 	//
-	// Unlike the Go path, this does not size any container: an Argo template
+	// This does not size any container: an Argo template
 	// carries its own resources block. It only tells Oberth's weighted queue
 	// how much of the node this run intends to occupy.
 	//
@@ -45,18 +42,10 @@ const (
 	// lowercase letters, digits, and hyphens; anything else fails admission.
 	ConcurrencyGroupAnnotation = "oberth.ci/concurrency-group"
 
-	// SecretPathsAnnotation declares, comma-separated, the OpenBao KV paths
-	// this pipeline's credentialed steps intend to read in-Pod through
-	// envconsul. Both CI and release pipelines may declare paths; the
-	// authorization boundary is the allowlist and the OpenBao Kubernetes-auth
-	// role binding, not the trigger type.
-	//
-	// AI-CONTRACT: this declaration is auditable intent, not enforcement. The
-	// authoritative boundary is the Vault Kubernetes-auth role bound to the
-	// release ServiceAccount and the policy attached to it. Oberth records the
-	// declaration in its audit chain at submission so the intended and the
-	// granted set can be compared; it cannot observe the actual read, because
-	// on this tier the value never passes through the server.
+	// SecretPathsAnnotation declares the OpenBao paths credentialed steps
+	// intend to read through secretstore exec. Admission checks the approval
+	// table and chooses the trigger-appropriate ServiceAccount. OpenBao role
+	// policies remain the authority for actual reads; declarations record intent.
 	SecretPathsAnnotation = "oberth.ci/secret-paths"
 )
 
@@ -105,21 +94,21 @@ func DeclaredConcurrencyGroup(workflow *wfv1.Workflow) (string, error) {
 }
 
 // DeclaredSize returns the scheduler admission weight the document requests.
-func DeclaredSize(workflow *wfv1.Workflow) (periapsis.Size, error) {
+func DeclaredSize(workflow *wfv1.Workflow) (pipeline.Size, error) {
 	if workflow == nil {
 		return "", errors.New("argoworkflow: no Workflow to read")
 	}
 	declared, ok := workflow.Annotations[SizeAnnotation]
 	if !ok || strings.TrimSpace(declared) == "" {
-		return periapsis.M, nil
+		return pipeline.M, nil
 	}
-	size := periapsis.Size(strings.TrimSpace(declared))
+	size := pipeline.Size(strings.TrimSpace(declared))
 	switch size {
-	case periapsis.S, periapsis.M, periapsis.L, periapsis.XL:
+	case pipeline.S, pipeline.M, pipeline.L, pipeline.XL:
 		return size, nil
 	default:
 		return "", fmt.Errorf("argoworkflow: annotation %s declares unknown size %q; sizes are %q, %q, %q, and %q",
-			SizeAnnotation, declared, periapsis.S, periapsis.M, periapsis.L, periapsis.XL)
+			SizeAnnotation, declared, pipeline.S, pipeline.M, pipeline.L, pipeline.XL)
 	}
 }
 
@@ -142,7 +131,7 @@ func DeclaredSecretPaths(workflow *wfv1.Workflow) ([]string, error) {
 	seen := make(map[string]struct{}, len(fields))
 	for index, field := range fields {
 		path := strings.TrimSpace(field)
-		if err := periapsis.ValidateSecretStorePath(path); err != nil {
+		if err := pipeline.ValidateSecretStorePath(path); err != nil {
 			return nil, fmt.Errorf("argoworkflow: annotation %s entry %d: %w", SecretPathsAnnotation, index, err)
 		}
 		if _, duplicate := seen[path]; duplicate {
@@ -173,7 +162,7 @@ func UsesEnvconsul(template *wfv1.Template) bool {
 }
 
 // UsesOberthSecretstore reports whether a template's main container command
-// is `oberth secretstore exec` or `oberth secretstore materialize`, the native
+// is `oberth secretstore exec`, the native
 // credential chain that handles the store fetch, file materialisation, env
 // stripping, and redaction in a single binary.
 func UsesOberthSecretstore(template *wfv1.Template) bool {
@@ -191,7 +180,7 @@ func UsesOberthSecretstore(template *wfv1.Template) bool {
 		if len(rest) < 2 {
 			return false
 		}
-		return rest[0] == "secretstore" && (rest[1] == "exec" || rest[1] == "materialize")
+		return rest[0] == "secretstore" && rest[1] == "exec"
 	}
 	if template.Container != nil &&
 		isOberthSecretstore(template.Container.Command, template.Container.Args) {
@@ -205,7 +194,7 @@ func UsesOberthSecretstore(template *wfv1.Template) bool {
 }
 
 // UsesSecrets reports whether a template runs any recognised credential
-// chain: envconsul (legacy) or oberth secretstore exec/materialize (native).
+// chain: envconsul (legacy) or oberth secretstore exec (native).
 // The server mounts the secret store login token into exactly these Pods and
 // no others, so this is also what marks a planned step as one that reads
 // secrets.
@@ -229,56 +218,6 @@ func UsesReleaseWIF(template *wfv1.Template) bool {
 	}
 	_, present := template.Metadata.Annotations[ReleaseWIFRoleAnnotation]
 	return present
-}
-
-// AuthorizeSecretPaths proves every declared path is one this repository may
-// reach for this trigger, reusing the Go path's hierarchical scoping rules so
-// both authoring formats answer to the same namespace policy.
-//
-// systemAllowlist is the administrator's exact-path allowlist for the
-// oberth/data/ system namespace; oberth/upstream/ paths are authorized by the
-// declaring repository's own org and name instead and are never allowlisted.
-//
-// CI pipelines may only declare upstream-scoped paths (oberth/upstream/...).
-// System-namespace paths (oberth/data/release/...) are CI-ineligible: a branch
-// push must never be able to reach release credentials, regardless of what the
-// document asks for. The release trigger remains unrestricted.
-func AuthorizeSecretPaths(paths []string, systemAllowlist []string, trigger periapsis.Trigger, org, repo string) error {
-	if len(paths) == 0 {
-		return nil
-	}
-	allowed := make(map[string]struct{}, len(systemAllowlist))
-	for _, entry := range systemAllowlist {
-		allowed[entry] = struct{}{}
-	}
-	var problems []error
-	for _, path := range paths {
-		scoped, upstreamScoped, err := periapsis.ParseUpstreamSecretStorePath(path)
-		if err != nil {
-			problems = append(problems, fmt.Errorf("argoworkflow: %w", err))
-			continue
-		}
-		if upstreamScoped {
-			if err := scoped.Authorize(org, repo); err != nil {
-				problems = append(problems, fmt.Errorf("argoworkflow: %w", err))
-			}
-			continue
-		}
-		// System-namespace paths are release-only. A CI pipeline declaring one
-		// would need the release SA to read it, which is the trust-tier collapse
-		// this gate exists to prevent.
-		if trigger == periapsis.TriggerCI {
-			problems = append(problems, fmt.Errorf(
-				"argoworkflow: secret store path %q is a system-namespace path; "+
-					"CI pipelines may only declare upstream-scoped paths (%s<org>/<repo>/<secret>)",
-				path, periapsis.UpstreamSecretPathPrefix))
-			continue
-		}
-		if _, ok := allowed[path]; !ok {
-			problems = append(problems, fmt.Errorf("argoworkflow: secret store path %q is not in the administrator allowlist", path))
-		}
-	}
-	return errors.Join(problems...)
 }
 
 // Resource measurement is outside the credential chain in admitted specs.

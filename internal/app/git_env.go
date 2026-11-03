@@ -25,7 +25,7 @@ func GitSSHCommand(privateKeyPath, knownHostsPath string) (string, error) {
 }
 
 // GitSSHCommandPaths builds the same fail-closed transport before bootstrap
-// Secrets exist. Git will fail until both projected files appear; readiness
+// identities are materialized. Git will fail until both files appear; readiness
 // separately requires GitSSHCommand's full file validation.
 func GitSSHCommandPaths(privateKeyPath, knownHostsPath string) (string, error) {
 	if err := validateOperatorPath(privateKeyPath); err != nil {

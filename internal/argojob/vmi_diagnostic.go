@@ -40,7 +40,7 @@ type vmiEvent struct {
 type vmiSnapshot struct {
 	Version     int             `json:"version"`
 	WorkflowUID string          `json:"workflow_uid"`
-	Burn        string          `json:"burn"`
+	Stage       string          `json:"burn"`
 	Step        string          `json:"step"`
 	Unavailable string          `json:"unavailable,omitempty"`
 	VMIs        []vmiDiagnostic `json:"vmis"`
@@ -65,11 +65,11 @@ func (controller *Controller) collectVMIFailure(ctx context.Context, workflow *w
 	if completion.Succeeded || controller.vmi == nil || !hasVMIResources(workflow) {
 		return
 	}
-	step := StepResult{Burn: completion.FailedBurn, Step: completion.FailedStep}
-	if step.Burn == "" || step.Step == "" {
+	step := StepResult{Stage: completion.FailedStage, Step: completion.FailedStep}
+	if step.Stage == "" || step.Step == "" {
 		return
 	}
-	value := vmiSnapshot{Version: 1, WorkflowUID: string(workflow.UID), Burn: step.Burn, Step: step.Step, VMIs: []vmiDiagnostic{}}
+	value := vmiSnapshot{Version: 1, WorkflowUID: string(workflow.UID), Stage: step.Stage, Step: step.Step, VMIs: []vmiDiagnostic{}}
 	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	list, err := controller.vmi.Resource(vmiResource).Namespace(workflow.Namespace).List(readCtx, metav1.ListOptions{LabelSelector: "oberth.ci/workflow=" + workflow.Name, Limit: 8})

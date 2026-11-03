@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
@@ -124,19 +123,13 @@ func BuildHarnessImage(runtime v1.Image, binary []byte, created time.Time, versi
 	return mutate.ConfigFile(image, configFile)
 }
 
-// GARAuthenticator builds the GAR registry authenticator from a delegated
-// access token. This is the single auth function to swap for WIF migration.
-func GARAuthenticator(accessToken []byte) authn.Authenticator {
-	return garAuthenticator(accessToken)
-}
-
 // PublishKVM builds the harness image from an apko runtime tarball and the
 // local harness binary, then pushes both images to GAR.
 func PublishKVM(ctx context.Context, config PublishConfig, runtimeTarball string) (KVMPublished, error) {
-	if len(config.AccessToken) == 0 && config.Authenticator == nil || config.Dist == "" {
+	if config.Authenticator == nil || config.Dist == "" {
 		return KVMPublished{}, errors.New("GAR access token and distribution directory are required")
 	}
-	authenticator := config.authenticator()
+	authenticator := config.Authenticator
 	opts := append([]remote.Option{
 		remote.WithContext(ctx), remote.WithAuth(authenticator),
 		remote.WithUserAgent("oberth-release"),
@@ -216,10 +209,10 @@ func pushSingleImage(img v1.Image, repository string, config PublishConfig, opts
 // VerifyKVM performs a complete authenticated read-back of the published
 // KVM images and verifies the harness image contains the expected binary.
 func VerifyKVM(ctx context.Context, config PublishConfig, published KVMPublished) error {
-	if len(config.AccessToken) == 0 && config.Authenticator == nil || config.Dist == "" || published.Runtime == "" || published.Harness == "" {
+	if config.Authenticator == nil || config.Dist == "" || published.Runtime == "" || published.Harness == "" {
 		return errors.New("GAR access token, dist, and both digest references are required")
 	}
-	authenticator := config.authenticator()
+	authenticator := config.Authenticator
 	opts := append([]remote.Option{
 		remote.WithContext(ctx), remote.WithAuth(authenticator),
 		remote.WithUserAgent("oberth-release"),

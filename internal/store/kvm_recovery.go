@@ -38,7 +38,7 @@ func (s *Store) RecoverKVMPreflight(ctx context.Context, runID string) (model.Ru
 	if err != nil {
 		return model.Run{}, err
 	}
-	if !execution.Cleaned || run.JobName != "" || execution.Intent.RunID != run.ID || execution.Intent.RepoID != run.RepoID || execution.Intent.CandidateSHA != run.TestedSHA {
+	if !execution.Cleaned || run.WorkflowName != "" || execution.Intent.RunID != run.ID || execution.Intent.RepoID != run.RepoID || execution.Intent.CandidateSHA != run.TestedSHA {
 		return model.Run{}, ErrInvalidState
 	}
 	var publications int
@@ -130,7 +130,7 @@ func (s *Store) kvmRetryAllowedTx(ctx context.Context, tx *sql.Tx, run model.Run
 		return err
 	}
 	spec := preflightPromotionSpec(promotion)
-	if _, err = checkPromotionRetryTx(ctx, tx, spec); err != nil {
+	if _, err = checkPromotionRetryAdmissionTx(ctx, tx, spec, true); err != nil {
 		return err
 	}
 	if err = requireKVMRetryPromotionAuthority(ctx, tx, promotion); err != nil {
@@ -165,7 +165,7 @@ func (s *Store) enqueueKVMRetryTx(ctx context.Context, tx *sql.Tx, run model.Run
 			return model.Run{}, err
 		}
 		spec := preflightPromotionSpec(original)
-		retry, err := checkPromotionRetryTx(ctx, tx, spec)
+		retry, err := checkPromotionRetryAdmissionTx(ctx, tx, spec, true)
 		if err != nil {
 			return model.Run{}, err
 		}

@@ -8,7 +8,7 @@ and source injection.
 
 | Example | For | Key demonstration |
 |---|---|---|
-| [`go-project/`](go-project/.oberth/build.yaml) | Go repositories | Cross-compile identity via explicit GOOS/GOARCH per template, release credential isolation via trigger-gated ServiceAccount, envconsul credential delivery |
+| [`go-project/`](go-project/.oberth/build.yaml) | Go repositories | Cross-compile identity via explicit GOOS/GOARCH per template, release credential isolation via trigger-gated ServiceAccount, native tmpfs credential delivery |
 | [`generic/`](generic/.oberth/build.yaml) | Any language | SHA-256 verified tool install, per-template timeouts, no-shell exec model |
 
 ## What Oberth's enforcement catches

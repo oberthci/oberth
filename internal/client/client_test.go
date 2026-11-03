@@ -1,7 +1,6 @@
 package client
 
 import (
-	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -11,7 +10,6 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
-	"io"
 	"math/big"
 	"net"
 	"net/http"
@@ -49,7 +47,7 @@ func TestConfiguredReportsWhetherAServerIsSet(t *testing.T) {
 func TestTokenComesFromTheEnvironment(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("OBERTH_TOKEN", secret)
-	got, err := FromEnv().resolveToken(t.Context())
+	got, err := FromEnv().ResolveToken(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +59,7 @@ func TestTokenComesFromTheEnvironment(t *testing.T) {
 func TestTokenCommandStdoutIsTrimmed(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("OBERTH_TOKEN_COMMAND", "printf '"+secret+"\\n\\n'")
-	got, err := FromEnv().resolveToken(t.Context())
+	got, err := FromEnv().ResolveToken(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +71,7 @@ func TestTokenCommandStdoutIsTrimmed(t *testing.T) {
 func TestTokenCommandFailureSurfacesItsOwnStderr(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("OBERTH_TOKEN_COMMAND", "echo 'vault is locked' >&2; exit 3")
-	_, err := FromEnv().resolveToken(t.Context())
+	_, err := FromEnv().ResolveToken(t.Context())
 	if err == nil {
 		t.Fatal("a failing token command succeeded")
 	}
@@ -84,7 +82,7 @@ func TestTokenCommandFailureSurfacesItsOwnStderr(t *testing.T) {
 
 func TestAMissingTokenNamesTheEnvironmentVariable(t *testing.T) {
 	clearEnv(t)
-	_, err := FromEnv().resolveToken(t.Context())
+	_, err := FromEnv().ResolveToken(t.Context())
 	if err == nil {
 		t.Fatal("no token was accepted")
 	}
@@ -395,70 +393,6 @@ func TestPlainHTTPIsAllowedForLoopback(t *testing.T) {
 
 // --- #237: GetTo streams raw binary, not JSON ---
 
-func TestGetToStreamsRawBinaryContent(t *testing.T) {
-	binary := []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a} // PNG header
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/octet-stream")
-		_, _ = w.Write(binary)
-	}))
-	defer server.Close()
-
-	client := newClient(t, server)
-	var got bytes.Buffer
-	if err := client.GetTo(context.Background(), "/api/runs/r/artifacts/img.png", nil, &got); err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(got.Bytes(), binary) {
-		t.Fatalf("body = %x, want %x", got.Bytes(), binary)
-	}
-}
-
-func TestGetToDoesNotSetAcceptJSON(t *testing.T) {
-	var seenAccept string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seenAccept = r.Header.Get("Accept")
-		_, _ = w.Write([]byte("data"))
-	}))
-	defer server.Close()
-
-	client := newClient(t, server)
-	_ = client.GetTo(context.Background(), "/test", nil, io.Discard)
-	if seenAccept == "application/json" {
-		t.Fatal("GetTo set Accept: application/json, but it is for binary downloads")
-	}
-}
-
-func TestGetToIsNotCappedAtTheJSONResponseSize(t *testing.T) {
-	// The server's default artifact ceiling is 256 MiB per run while the
-	// JSON read cap is 8 MiB. Before the streaming fix the client returned
-	// the first 8 MiB of a larger artifact with no error — a silently
-	// corrupt download is worse than a loud one.
-	const chunkSize = 64 * 1024
-	const size = maxResponseSize + chunkSize
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/octet-stream")
-		chunk := bytes.Repeat([]byte{0xA5}, chunkSize)
-		for written := 0; written < size; written += chunkSize {
-			if _, err := w.Write(chunk); err != nil {
-				return
-			}
-		}
-	}))
-	defer server.Close()
-
-	client := newClient(t, server)
-	var got bytes.Buffer
-	if err := client.GetTo(context.Background(), "/api/runs/r/artifacts/big.bin", nil, &got); err != nil {
-		t.Fatal(err)
-	}
-	if got.Len() != size {
-		t.Fatalf("downloaded %d bytes of %d; the transfer was truncated", got.Len(), size)
-	}
-	if got.Bytes()[size-1] != 0xA5 {
-		t.Fatalf("final byte = %02x, want a5", got.Bytes()[size-1])
-	}
-}
-
 // --- #236: OBERTH_CA_CERT is a pin, TLS floor is 1.3, no silent fallback ---
 
 // mintUnrelatedCA writes a freshly generated self-signed CA certificate to a
@@ -753,9 +687,9 @@ func TestARedirectWithinHTTPSIsStillFollowed(t *testing.T) {
 }
 
 func TestClassifyTransportExplainsUnresolvedLocalNames(t *testing.T) {
-	dnsErr := &net.DNSError{Err: "no such host", Name: "tuxbox.local", IsNotFound: true}
+	dnsErr := &net.DNSError{Err: "no such host", Name: "example-node.local", IsNotFound: true}
 	got := classifyTransport("/api/runs", &net.OpError{Op: "dial", Net: "tcp", Err: dnsErr})
-	if !strings.Contains(got.Error(), `cannot resolve "tuxbox.local"`) || !strings.Contains(got.Error(), mdnsdial.Hint) {
+	if !strings.Contains(got.Error(), `cannot resolve "example-node.local"`) || !strings.Contains(got.Error(), mdnsdial.Hint) {
 		t.Fatalf("a .local resolution failure is not explained: %v", got)
 	}
 }

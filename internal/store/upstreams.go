@@ -8,11 +8,6 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-func (s *Store) UpstreamByName(ctx context.Context, name string) (model.Upstream, error) {
-	return scanUpstream(s.reader().QueryRowContext(ctx, `
-SELECT id, name, kind, base_url, key_name, created_at, updated_at FROM upstreams WHERE name = ?`, name))
-}
-
 func (s *Store) ListUpstreams(ctx context.Context) ([]model.Upstream, error) {
 	return listUpstreams(ctx, s.reader())
 }
@@ -41,9 +36,13 @@ SELECT id, name, kind, base_url, key_name, created_at, updated_at FROM upstreams
 func scanUpstream(row rowScanner) (model.Upstream, error) {
 	var value model.Upstream
 	var created, updated int64
-	if err := row.Scan(&value.ID, &value.Name, &value.Kind, &value.BaseURL, &value.KeyName, &created, &updated); err != nil {
+	if err := scanRowNotFound(row, "Upstream", &value.ID, &value.Name, &value.Kind, &value.BaseURL, &value.KeyName, &created, &updated); err != nil {
 		return model.Upstream{}, translateNotFound("upstream", err)
 	}
 	value.CreatedAt, value.UpdatedAt = fromUnixNano(created), fromUnixNano(updated)
 	return value, nil
+}
+
+func (s *Store) upstreamByName(ctx context.Context, name string) (model.Upstream, error) {
+	return scanUpstream(s.reader().QueryRowContext(ctx, `SELECT id,name,kind,base_url,key_name,created_at,updated_at FROM upstreams WHERE name=?`, name))
 }

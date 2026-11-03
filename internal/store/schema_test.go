@@ -29,8 +29,8 @@ func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	if err := validateMigrations(migrations, latestMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
-	if latestMigrationVersion != 39 {
-		t.Fatalf("latest migration version = %d, want 39", latestMigrationVersion)
+	if latestMigrationVersion != 48 {
+		t.Fatalf("latest migration version = %d, want 48", latestMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)
@@ -955,6 +955,9 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"queue_priority_patterns",
 		"receive_events",
 		"repositories",
+		"resource_ceilings",
+		"restart_step_timings",
+		"restart_workflow_timings",
 		"run_admission_timings",
 		"run_cancellations",
 		"run_priority_overrides",
@@ -979,6 +982,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"vm_executions",
 		"vm_suite_executions",
 		"vm_suite_resources",
+		"workflow_capability_grants",
 	})
 	assertSchemaObjects(t, store.db, "index", []string{
 		"audit_actions_page_idx",
@@ -998,6 +1002,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"publications_pending_idx",
 		"publications_promotion_idx",
 		"publications_run_idx",
+		"publications_tag_tuple_idx",
 		"receive_events_repo_idx",
 		"receive_events_run_idx",
 		"repository_archive_actions_idx",
@@ -1033,12 +1038,16 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"ci_issue_projection_monotonic",
 		"ci_issue_work_no_delete",
 		"ci_issue_work_no_update",
+		"issues_metadata_revision",
 		"promotion_grants_guard_update",
 		"promotion_grants_no_delete",
 		"promotions_guard_update",
 		"promotions_no_delete",
 		"publications_guard_update",
 		"publications_no_delete",
+		"publications_tag_tuple_insert",
+		"restart_step_timing_immutable",
+		"restart_workflow_timing_immutable",
 		"run_schedule_entry_immutable",
 		"run_timing_claim",
 		"run_timing_grant",
@@ -1056,11 +1065,19 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"vm_executions_guard_update",
 		"vm_executions_no_delete",
 		"vm_executions_no_replace",
+		"vm_suite_executions_retired_delete",
+		"vm_suite_executions_retired_insert",
+		"vm_suite_executions_retired_update",
+		"vm_suite_resources_retired_delete",
+		"vm_suite_resources_retired_insert",
+		"vm_suite_resources_retired_update",
 	})
 
 	expectedColumns := map[string][]string{
 		"priority_grants":           {"identity", "max_class", "expires", "granted_by"},
 		"run_priority_requests":     {"run_id", "requested", "accepted", "reason", "actor", "refusal"},
+		"restart_workflow_timings":  {"run_id", "epoch", "workflow_created_at", "workflow_json"},
+		"restart_step_timings":      {"run_id", "epoch", "node_id", "workflow_uid", "pod_uid", "available", "ordinal", "timing_json"},
 		"queue_priority_patterns":   {"pattern"},
 		"run_priority_overrides":    {"run_id", "priority", "reason", "actor", "updated_at"},
 		"schedule_fires":            {"repo", "entry", "fired_at", "outcome", "last_fired_at"},
@@ -1075,11 +1092,11 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"step_results":              {"run_id", "burn", "step", "ordinal", "status", "exit_code", "log_start", "log_end", "started_at", "finished_at", "recorded_at", "declared_size", "max_rss_bytes", "user_cpu_ns", "system_cpu_ns", "termination_json", "memory_peak_bytes"},
 		"promotions":                {"sequence", "id", "repo_id", "source_branch", "source_sha", "target_ref", "previous_sha", "result_sha", "actor", "status", "run_id", "error", "created_at", "updated_at", "grant_id"},
 		"promotion_grants":          {"id", "repo_id", "source_sha", "target_ref", "issuer", "issuer_fingerprint", "note", "created_at", "expires_at", "revoked_by", "revoked_at", "consumed_by", "consumed_at"},
-		"issues":                    {"id", "repo_id", "kind", "branch", "title", "body", "state", "occurrences", "created_at", "updated_at", "closed_at", "ci_origin", "ci_work_sequence", "ci_work_id", "scope_upstream_id"},
+		"issues":                    {"id", "repo_id", "kind", "branch", "title", "body", "state", "occurrences", "created_at", "updated_at", "closed_at", "ci_origin", "ci_work_sequence", "ci_work_id", "scope_upstream_id", "revision"},
 		"issue_locks":               {"issue_id", "owner", "acquired_at", "expires_at"},
 		"audit_actions":             {"id", "actor", "action", "resource_type", "resource_id", "details", "previous_sha256", "sha256", "created_at"},
 		"audit_anchors":             {"id", "audit_id", "audit_sha256", "tsa_url", "receipt", "anchored_at", "created_at"},
-		"token_credentials":         {"id", "name", "digest", "created_at", "last_used_at", "revoked_at", "activated_at"},
+		"token_credentials":         {"id", "name", "digest", "created_at", "last_used_at", "revoked_at", "activated_at", "expires_at"},
 		"uplinks":                   {"id", "fingerprint", "identity", "token_credential_id", "auth_actor", "created_at", "updated_at", "admin"},
 		"run_cancellations":         {"run_id", "job_name", "superseded_by", "reason", "created_at", "completed_at"},
 		"receive_events":            {"id", "actor", "repo_id", "ref_kind", "ref", "old_sha", "object_sha", "commit_sha", "outcome", "run_id", "created_at"},
@@ -1111,7 +1128,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"superseded_by text not null default ''",
 		"reason text not null check (reason in ('superseded', 'owner_restart'))")
 	assertSchemaContains(t, store.db, "table", "publications",
-		"status text not null default 'pending' check (status in ('pending', 'delivered', 'failed'))",
+		"status text not null default 'pending' check (status in ('pending', 'delivered', 'failed', 'abandoned'))",
 		"check (run_id is not null or promotion_id is not null)")
 	assertSchemaContains(t, store.db, "table", "ci_issue_work",
 		"origin = 'branch' and run_id is not null and promotion_id is null",
@@ -1303,7 +1320,7 @@ func TestOpenRejectsLegacyAndFutureSchemaVersions(t *testing.T) {
 		{
 			name: "future schema", version: 99,
 			wantError:  ErrSchemaTooNew,
-			wantDetail: fmt.Sprintf("database=99 binary=%d", latestMigrationVersion),
+			wantDetail: fmt.Sprintf("database=99 binary=%d; see docs/upgrade-schema-v3.md", latestMigrationVersion),
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {

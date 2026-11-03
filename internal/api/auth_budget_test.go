@@ -25,13 +25,13 @@ func TestAuthenticationFailuresAreClassified(t *testing.T) {
 		status int
 		logged bool
 	}{
-		{"invalid", fmt.Errorf("wrapped: %w", ErrInvalidToken), http.StatusUnauthorized, false},
+		{"invalid", fmt.Errorf("wrapped: %w", ErrInvalidToken), http.StatusUnauthorized, true},
 		{"read-error", errors.New("private database failure"), http.StatusServiceUnavailable, true},
-		{"deadline", context.DeadlineExceeded, http.StatusServiceUnavailable, false},
-		{"canceled", context.Canceled, http.StatusServiceUnavailable, false},
-		{"wrapped-deadline", fmt.Errorf("lookup: %w", context.DeadlineExceeded), http.StatusServiceUnavailable, false},
-		{"wrapped-canceled", fmt.Errorf("lookup: %w", context.Canceled), http.StatusServiceUnavailable, false},
-		{"missing-identity", nil, http.StatusServiceUnavailable, false},
+		{"deadline", context.DeadlineExceeded, http.StatusServiceUnavailable, true},
+		{"canceled", context.Canceled, http.StatusServiceUnavailable, true},
+		{"wrapped-deadline", fmt.Errorf("lookup: %w", context.DeadlineExceeded), http.StatusServiceUnavailable, true},
+		{"wrapped-canceled", fmt.Errorf("lookup: %w", context.Canceled), http.StatusServiceUnavailable, true},
+		{"missing-identity", nil, http.StatusServiceUnavailable, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			logs.Reset()
@@ -42,7 +42,7 @@ func TestAuthenticationFailuresAreClassified(t *testing.T) {
 			response := httptest.NewRecorder()
 			server.Handler().ServeHTTP(response, request)
 			if tc.logged {
-				if !strings.Contains(logs.String(), "api: authentication failure: "+tc.err.Error()) {
+				if !strings.Contains(logs.String(), "api: authentication failure: reason=") {
 					t.Fatalf("authentication failure cause missing from server log: %s", &logs)
 				}
 			} else if logs.Len() != 0 {

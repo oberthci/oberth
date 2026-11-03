@@ -68,8 +68,8 @@ func TestIssuedServerCertificateValidation(t *testing.T) {
 
 func TestServerTLSNamesDeduplicatesAndSplitsIPs(t *testing.T) {
 	t.Parallel()
-	dns, ips := ServerTLSNames("oberth", []string{"tuxbox", "", "127.0.0.1", "tuxbox", "oberth"})
-	if !slices.Contains(dns, "tuxbox") || slices.Contains(dns, "127.0.0.1") || !slices.Equal(ips, []string{"127.0.0.1"}) {
+	dns, ips := ServerTLSNames("oberth", []string{"example-node", "", "127.0.0.1", "example-node", "oberth"})
+	if !slices.Contains(dns, "example-node") || slices.Contains(dns, "127.0.0.1") || !slices.Equal(ips, []string{"127.0.0.1"}) {
 		t.Fatalf("dns=%v ips=%v", dns, ips)
 	}
 	seen := map[string]bool{}

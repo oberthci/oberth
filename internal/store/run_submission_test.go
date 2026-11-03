@@ -26,7 +26,7 @@ func TestRunStartsOnlyAfterSubmission(t *testing.T) {
 	if _, err := s.MarkRunSubmitted(ctx, claimed.ID); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("submission without Job intent = %v", err)
 	}
-	if _, err := s.SetRunJobName(ctx, claimed.ID, "oberth-test-workflow"); err != nil {
+	if _, err := s.SetRunWorkflowName(ctx, claimed.ID, "oberth-test-workflow"); err != nil {
 		t.Fatal(err)
 	}
 	now = now.Add(7 * time.Minute)

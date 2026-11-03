@@ -13,7 +13,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func isolationRequest(t *testing.T, mutate func(*wfv1.Workflow)) Request {
@@ -30,7 +30,7 @@ func isolationRequest(t *testing.T, mutate func(*wfv1.Workflow)) Request {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := testRequest(periapsis.TriggerRelease, string(source))
+	r := testRequest(pipeline.TriggerRelease, string(source))
 	r.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
 	r.SourceVolume = SourceVolume{ClaimName: "source-claim", SubPath: "source", VaultCASubPath: "ca", BinarySubPath: "bin"}
 	return r

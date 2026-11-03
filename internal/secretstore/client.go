@@ -24,7 +24,7 @@ import (
 
 	vaultapi "github.com/hashicorp/vault/api"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 const (
@@ -138,7 +138,7 @@ func New(config Config) (*Client, error) {
 	if mount == "" {
 		mount = DefaultAuthMountPath
 	}
-	if err := periapsis.ValidateSecretStorePath(mount); err != nil {
+	if err := pipeline.ValidateSecretStorePath(mount); err != nil {
 		return nil, fmt.Errorf("secret store Kubernetes auth mount: %w", err)
 	}
 	transit := config.TransitMountPath
@@ -363,7 +363,7 @@ func validateTransitSegment(label, value string) error {
 	if strings.Contains(value, "/") {
 		return fmt.Errorf("secret store transit %s is required and must be a single clean path segment", label)
 	}
-	if err := periapsis.ValidateSecretStorePath(value); err != nil {
+	if err := pipeline.ValidateSecretStorePath(value); err != nil {
 		return fmt.Errorf("secret store transit %s: %w", label, err)
 	}
 	return nil
@@ -401,7 +401,7 @@ func (client *Client) FetchKV(ctx context.Context, paths []string) (map[string]m
 		return nil, fmt.Errorf("secret store fetch requests %d paths, maximum is %d", len(paths), maxFetchPaths)
 	}
 	for _, path := range paths {
-		if err := periapsis.ValidateSecretStorePath(path); err != nil {
+		if err := pipeline.ValidateSecretStorePath(path); err != nil {
 			return nil, err
 		}
 	}

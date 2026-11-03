@@ -11,10 +11,11 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func observedTestFailure() JobResult {
-	return observedTagResult(JobResult{Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit", Steps: []model.StepResult{stepResult(model.StepFailed)}})
+	return observedTagResult(JobResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Steps: []model.StepResult{stepResult(model.StepFailed)}})
 }
 func requireTagForce(t *testing.T, h *rerunHarness, id string) {
 	t.Helper()
@@ -29,7 +30,7 @@ func requireTagForce(t *testing.T, h *rerunHarness, id string) {
 func TestTagReplayReviewWIFStartedRequiresForce(t *testing.T) {
 	result := observedTagResult(infraFailure)
 	result.TerminalObservation.Nodes = 1
-	result.TerminalObservation.Steps = []model.RunObservedStep{{Burn: "publish", Step: "push", Status: model.StepFailed, Started: true}}
+	result.TerminalObservation.Steps = []model.RunObservedStep{{Stage: "publish", Step: "push", Status: model.StepFailed, Started: true}}
 	h := newRerunHarness(t, result)
 	plan := tagReplayPlan()
 	plan[1].Secrets = false
@@ -72,14 +73,14 @@ func (*deferredReplayCancel) AcceptCancellations(context.Context, []model.RunCan
 }
 func TestTagReplayReviewPendingDeletionRefusesEvenForce(t *testing.T) {
 	h := newRerunHarness(t)
-	source, err := h.fixture.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: h.fixture.repo.ID, RefKind: model.RefTag, Ref: rerunTag, SHA: rerunTagObject, TestedSHA: rerunTagCommit, Actor: "pusher", Release: true, Credentialed: true, Trigger: "tag"})
+	source, err := storetest.EnqueueRun(h.fixture.store, t.Context(), model.RunSpec{RepoID: h.fixture.repo.ID, RefKind: model.RefTag, Ref: rerunTag, SHA: rerunTagObject, TestedSHA: rerunTagCommit, Actor: "pusher", Release: true, Credentialed: true, Trigger: "tag"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.fixture.store.ClaimNextRun(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.fixture.store.SetRunJobName(t.Context(), source.ID, "live-source"); err != nil {
+	if _, err := h.fixture.store.SetRunWorkflowName(t.Context(), source.ID, "live-source"); err != nil {
 		t.Fatal(err)
 	}
 	h.service.runCancels = h.fixture.store
@@ -119,7 +120,7 @@ func TestTagReplayReviewWholeChainAndNewest(t *testing.T) {
 			if unsafe {
 				first = observedTagResult(infraFailure)
 				first.TerminalObservation.Nodes = 1
-				first.TerminalObservation.Steps = []model.RunObservedStep{{Burn: "publish", Step: "push", Status: model.StepFailed, Started: true}}
+				first.TerminalObservation.Steps = []model.RunObservedStep{{Stage: "publish", Step: "push", Status: model.StepFailed, Started: true}}
 			}
 			second := observedTestFailure()
 			if unsafe {
@@ -151,7 +152,7 @@ func TestTagReplayReviewWholeChainAndNewest(t *testing.T) {
 func TestTagReplayReviewSafeAncestorCannotHideNewPublisher(t *testing.T) {
 	publisher := observedTagResult(infraFailure)
 	publisher.TerminalObservation.Nodes = 1
-	publisher.TerminalObservation.Steps = []model.RunObservedStep{{Burn: "publish", Step: "push", Status: model.StepFailed, Started: true}}
+	publisher.TerminalObservation.Steps = []model.RunObservedStep{{Stage: "publish", Step: "push", Status: model.StepFailed, Started: true}}
 	h := newRerunHarness(t, observedTestFailure(), publisher)
 	h.fixture.jobs.plan = tagReplayPlan()
 	a := admitRerunTag(t, h)
@@ -240,7 +241,7 @@ func TestTagReplayReviewHistoryLimitAndUnknownResolverFailClosed(t *testing.T) {
 				h.service.refs = struct{ RefResolver }{h.refs}
 			} else {
 				for range 64 {
-					queued, err := h.fixture.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: h.fixture.repo.ID, RefKind: model.RefTag, Ref: rerunTag, SHA: rerunTagObject, TestedSHA: rerunTagCommit, Actor: "pusher", Release: true, Credentialed: true, Trigger: "tag"})
+					queued, err := storetest.EnqueueRun(h.fixture.store, t.Context(), model.RunSpec{RepoID: h.fixture.repo.ID, RefKind: model.RefTag, Ref: rerunTag, SHA: rerunTagObject, TestedSHA: rerunTagCommit, Actor: "pusher", Release: true, Credentialed: true, Trigger: "tag"})
 					if err != nil {
 						t.Fatal(err)
 					}

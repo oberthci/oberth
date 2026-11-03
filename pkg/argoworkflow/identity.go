@@ -21,6 +21,7 @@ import (
 // standing between a branch push and a release credential is that Oberth
 // decides the ServiceAccount server-side. ForceIdentity is that decision.
 type Identity struct {
+	ResourceServiceAccountName string
 	// Namespace is where the Workflow object and all its pods are created.
 	Namespace string
 	// ServiceAccountName is applied to every identity-bearing field in the
@@ -131,6 +132,9 @@ func Prepare(workflow *wfv1.Workflow, policy Policy, identity Identity) error {
 	if err := Admit(workflow, policy); err != nil {
 		return err
 	}
+	if identity.ResourceServiceAccountName != "" && (policy.Capability == nil || identity.ResourceServiceAccountName != policy.Capability.ServiceAccount || identity.ServiceAccountName != policy.Capability.ServiceAccount || identity.Namespace != policy.Capability.Namespace) {
+		return errors.New("argoworkflow: resource identity differs from the operator capability")
+	}
 	return ForceIdentity(workflow, identity)
 }
 
@@ -173,6 +177,10 @@ func ForceIdentity(workflow *wfv1.Workflow, identity Identity) error {
 	for index := range workflow.Spec.Templates {
 		template := &workflow.Spec.Templates[index]
 		if template.Resource == nil {
+			continue
+		}
+		if identity.ResourceServiceAccountName != "" {
+			template.Executor = &wfv1.ExecutorConfig{ServiceAccountName: identity.ResourceServiceAccountName}
 			continue
 		}
 		if identity.VMLauncherServiceAccountName == "" {
@@ -379,41 +387,4 @@ func carriesIdentity(walked reflect.Type, visiting map[reflect.Type]bool, depth 
 		}
 	}
 	return false
-}
-
-// IdentityFieldPaths enumerates every distinct type-graph path at which the
-// upstream schema exposes an identity field. It exists so an Argo upgrade that
-// widens the attack surface is visible in a test diff rather than only in the
-// normalizer's behavior.
-func IdentityFieldPaths() []string {
-	return identityFieldPaths(reflect.TypeOf(wfv1.WorkflowSpec{}), "WorkflowSpec", map[reflect.Type]bool{}, 0)
-}
-
-func identityFieldPaths(walked reflect.Type, path string, visiting map[reflect.Type]bool, depth int) []string {
-	if depth > 12 {
-		return nil
-	}
-	for walked.Kind() == reflect.Pointer || walked.Kind() == reflect.Slice ||
-		walked.Kind() == reflect.Array || walked.Kind() == reflect.Map {
-		walked = walked.Elem()
-	}
-	if walked.Kind() != reflect.Struct || visiting[walked] {
-		return nil
-	}
-	visiting[walked] = true
-	defer delete(visiting, walked)
-	var paths []string
-	for index := range walked.NumField() {
-		field := walked.Field(index)
-		if !field.IsExported() {
-			continue
-		}
-		next := path + "." + field.Name
-		if field.Name == serviceAccountField || field.Name == automountField {
-			paths = append(paths, next)
-			continue
-		}
-		paths = append(paths, identityFieldPaths(field.Type, next, visiting, depth+1)...)
-	}
-	return paths
 }

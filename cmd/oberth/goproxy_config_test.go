@@ -9,11 +9,12 @@ import (
 	"github.com/oberthci/oberth/internal/goproxy"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestGoProxyDiscoveryBindsExactCatalogOwner(t *testing.T) {
 	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "instance.sqlite"), store.Options{})
+	db, err := storetest.Open(ctx, filepath.Join(t.TempDir(), "instance.sqlite"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +25,7 @@ func TestGoProxyDiscoveryBindsExactCatalogOwner(t *testing.T) {
 		t.Fatalf("unenrolled namespace: %v %v", empty, err)
 	}
 	for _, spec := range []model.UpstreamSpec{{Name: "forge", Kind: "ssh", BaseURL: "ssh://git@forge.example.test/example"}, {Name: "other", Kind: "ssh", BaseURL: "ssh://git@other.example.test/untrusted"}} {
-		owner, err := db.CreateUpstream(ctx, spec)
+		owner, err := storetest.CreateUpstream(db, ctx, spec)
 		if err != nil {
 			t.Fatal(err)
 		}

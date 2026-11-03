@@ -13,6 +13,7 @@ import (
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/pushretry"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // Use the durable scheduler path for each attempt, as both live dispatch and
@@ -25,7 +26,7 @@ func TestTransientPublicationRetriesBoundedAndProtected(t *testing.T) {
 			if ref == "v1.0" {
 				kind = model.RefTag
 			}
-			run, err := f.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: kind, Ref: ref, SHA: retrySourceSHA, Actor: "agent@host", Trigger: "branch"})
+			run, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: kind, Ref: ref, SHA: retrySourceSHA, Actor: "agent@host", Trigger: "branch"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -104,7 +105,7 @@ func TestPublicationLostReplyAndPermanentRejection(t *testing.T) {
 	for _, lost := range []bool{false, true} {
 		t.Run(map[bool]string{false: "permission", true: "lost reply"}[lost], func(t *testing.T) {
 			f := newControlFixture(t)
-			run, err := f.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "main", SHA: retrySourceSHA, Actor: "agent@host", Trigger: "branch"})
+			run, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "main", SHA: retrySourceSHA, Actor: "agent@host", Trigger: "branch"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -235,7 +236,7 @@ func TestPublishRetryQueuedResponseAndRunRetryDoNotRepeatCI(t *testing.T) {
 	for _, tool := range []string{"publish_retry", "run_retry", "run_rerun"} {
 		t.Run(tool, func(t *testing.T) {
 			f := newControlFixture(t)
-			run, err := f.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/retry", SHA: retrySourceSHA, Actor: "agent@host", Trigger: "branch"})
+			run, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/retry", SHA: retrySourceSHA, Actor: "agent@host", Trigger: "branch"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -293,7 +294,7 @@ func exhaustPublicationRetries(t *testing.T, f *controlFixture) {
 
 func TestSchedulerAutomaticallyResumesDuePublication(t *testing.T) {
 	f := newControlFixture(t)
-	run, err := f.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/automatic", SHA: retrySourceSHA, Actor: "agent@host", Trigger: "branch"})
+	run, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/automatic", SHA: retrySourceSHA, Actor: "agent@host", Trigger: "branch"})
 	if err != nil {
 		t.Fatal(err)
 	}

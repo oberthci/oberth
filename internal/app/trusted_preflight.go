@@ -14,10 +14,11 @@ import (
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
+	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/trustedharness"
 	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type trustedController interface {
@@ -81,8 +82,8 @@ func (p *TrustedPreflights) Supports(contract vmrunner.Contract) error {
 	return err
 }
 
-func (p *TrustedPreflights) request(job service.JobRequest, intent vmrunner.KVMIntent) (argojob.Request, error) {
-	source, err := readArgoSource(job.SourceDir, periapsis.TriggerCI)
+func (p *TrustedPreflights) request(job service.WorkflowRequest, intent vmrunner.KVMIntent) (argojob.Request, error) {
+	source, err := readArgoSource(job.SourceDir, pipeline.TriggerCI)
 	if err != nil {
 		return argojob.Request{}, err
 	}
@@ -94,10 +95,10 @@ func (p *TrustedPreflights) request(job service.JobRequest, intent vmrunner.KVMI
 	if err != nil {
 		return argojob.Request{}, err
 	}
-	return argojob.Request{RunID: job.Run.ID, RepositoryID: job.Repository.ID, Name: intent.WorkflowName, Repo: job.Repository.Name, UpstreamName: job.UpstreamName, UpstreamOrg: job.UpstreamOrg, Ref: job.Run.Ref, SHA: intent.CandidateSHA, Trigger: periapsis.TriggerCI, RunTrigger: kind, ScheduleEntry: job.Run.ScheduleEntry, Source: source, SourceDir: job.SourceDir, ApprovedSecrets: map[string]bool{}, StepGrants: map[string]map[string]bool{}, TrustedKVM: &intent}, nil
+	return argojob.Request{RunID: job.Run.ID, RepositoryID: job.Repository.ID, Name: intent.WorkflowName, Repo: job.Repository.Name, UpstreamName: job.UpstreamName, UpstreamOrg: job.UpstreamOrg, Ref: job.Run.Ref, SHA: intent.CandidateSHA, Trigger: pipeline.TriggerCI, RunTrigger: kind, ScheduleEntry: job.Run.ScheduleEntry, Source: source, SourceDir: job.SourceDir, ApprovedSecrets: map[string]bool{}, StepGrants: map[string]map[string]bool{}, TrustedKVM: &intent}, nil
 }
 
-func (p *TrustedPreflights) Execute(ctx context.Context, job service.JobRequest, requirement vmrunner.Requirement, output io.Writer) (retErr error) {
+func (p *TrustedPreflights) Execute(ctx context.Context, job service.WorkflowRequest, requirement vmrunner.Requirement, output io.Writer) (retErr error) {
 	if requirement.Contract == nil {
 		return errors.New("missing trusted contract")
 	}
@@ -105,6 +106,27 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.JobRequest,
 	if err != nil {
 		return err
 	}
+	source, err := readArgoSource(job.SourceDir, pipeline.TriggerCI)
+	if err != nil {
+		return err
+	}
+	blueprint, err := argoworkflow.Decode(source)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	duration := p.jobs.config.ExecutionTimeout(model.CanonicalRepoKey(job.UpstreamName, job.UpstreamOrg, job.Repository.Name), blueprint.Spec.ActiveDeadlineSeconds)
+	if duration > vmrunner.MaxDeadline {
+		duration = vmrunner.MaxDeadline
+	}
+	parent := ctx
+	ctx, cancel := context.WithDeadline(ctx, now.Add(duration))
+	defer cancel()
+	defer func() {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) && parent.Err() == nil {
+			retErr = errors.Join(service.ErrPreflightDeadline, retErr)
+		}
+	}()
 	// Approval is checked BEFORE fetching/executing any suite-selected content.
 	bundle, err := p.fetch(ctx, recipe.SuiteURL, recipe.SuiteSHA256, vmrunner.MaxSuiteBundleBytes)
 	if err != nil {
@@ -115,20 +137,11 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.JobRequest,
 		return err
 	}
 	inventory, count := suite.Inventory()
-	source, err := readArgoSource(job.SourceDir, periapsis.TriggerCI)
-	if err != nil {
-		return err
-	}
 	sum := sha256.Sum256(source)
 	if job.UpstreamOrg == "" {
 		job.UpstreamOrg = job.UpstreamName
 	}
-	now := time.Now().UTC()
-	duration := p.jobs.config.WorkflowTimeout
-	if duration <= 0 || duration > vmrunner.MaxDeadline {
-		duration = vmrunner.MaxDeadline
-	}
-	intent := vmrunner.KVMIntent{RunID: job.Run.ID, RepoID: job.Repository.ID, Repository: model.CanonicalRepoKey(job.UpstreamName, job.UpstreamOrg, job.Repository.Name), CandidateSHA: requirement.CandidateSHA, BaselineSHA: requirement.BaselineSHA, Contract: *requirement.Contract, Recipe: recipe, Namespace: p.jobs.controller.Namespace(), WorkflowName: job.JobName + "-trusted", WorkflowSpecDigest: hex.EncodeToString(sum[:]), InventoryDigest: inventory, CaseCount: count, AdmittedAt: now, Deadline: now.Add(duration)}
+	intent := vmrunner.KVMIntent{RunID: job.Run.ID, RepoID: job.Repository.ID, Repository: model.CanonicalRepoKey(job.UpstreamName, job.UpstreamOrg, job.Repository.Name), CandidateSHA: requirement.CandidateSHA, BaselineSHA: requirement.BaselineSHA, Contract: *requirement.Contract, Recipe: recipe, Namespace: p.jobs.controller.Namespace(), WorkflowName: job.WorkflowName + "-trusted", WorkflowSpecDigest: hex.EncodeToString(sum[:]), InventoryDigest: inventory, CaseCount: count, AdmittedAt: now, Deadline: now.Add(duration)}
 	submission, err := p.request(job, intent)
 	if err != nil {
 		return err
@@ -179,8 +192,6 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.JobRequest,
 	if execution.Submitted || execution.Cleaned {
 		return errors.New("trusted preflight already has a lifecycle; retry with a fresh run")
 	}
-	ctx, cancel := context.WithDeadline(ctx, intent.Deadline)
-	defer cancel()
 	watched := make(chan struct{})
 	defer func() { cancel(); <-watched }()
 	go func() {
@@ -228,16 +239,17 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.JobRequest,
 		if submitted && !rejected && uid == "" {
 			var lookupErr error
 			uid, lookupErr = p.controller.TrustedKVMWorkflowUID(cleanupCtx, submission)
-			if lookupErr != nil {
+			if lookupErr != nil && !trustedMismatchCleanupUID(uid, lookupErr) {
 				retErr = errors.Join(retErr, fmt.Errorf("uncertain trusted create retains capacity: %w", lookupErr))
 				return
 			}
+
+		}
+		if uid != "" {
 			if e := p.store.BindKVMPreflight(cleanupCtx, intent.RunID, uid); e != nil {
 				retErr = errors.Join(retErr, e)
 				return
 			}
-		}
-		if uid != "" {
 			if e := p.controller.CleanupTrustedKVM(cleanupCtx, intent.WorkflowName, intent.RunID, uid); e != nil {
 				retErr = errors.Join(retErr, e)
 				return
@@ -301,7 +313,7 @@ func (p *TrustedPreflights) failure(completion argojob.Completion, cause error) 
 	// a failed Workflow/Pod, and receipt collection failures remain infrastructure.
 	if completion.Succeeded || completion.Infrastructure || result.FailedStep == "" {
 		result.Phase = "infrastructure"
-		result.FailedBurn, result.FailedStep = "", ""
+		result.FailedStage, result.FailedStep = "", ""
 	}
 	result.Status = model.RunFailed
 	result.Error = cause.Error()
@@ -413,7 +425,7 @@ func (p *TrustedPreflights) recoverOne(ctx context.Context, execution vmrunner.K
 			if err != nil {
 				return err
 			}
-			job := service.JobRequest{Run: run, Repository: repo, UpstreamName: upstream.Name, UpstreamOrg: upstream.Org(), SourceDir: filepath.Join(p.workspaceRoot, run.ID, "src")}
+			job := service.WorkflowRequest{Run: run, Repository: repo, UpstreamName: upstream.Name, UpstreamOrg: upstream.Org(), SourceDir: filepath.Join(p.workspaceRoot, run.ID, "src")}
 			request, err := p.request(job, intent)
 			if err != nil {
 				return err
@@ -429,7 +441,7 @@ func (p *TrustedPreflights) recoverOne(ctx context.Context, execution vmrunner.K
 			request.KubeVirtGranted = true
 			request.KubeVirtBudget = argoworkflow.VMIBudgetLimit()
 			uid, err = p.controller.TrustedKVMWorkflowUID(ctx, request)
-			if err != nil {
+			if err != nil && !trustedMismatchCleanupUID(uid, err) {
 				return fmt.Errorf("uncertain trusted create still requires reconciliation: %w", err)
 			}
 			if err := p.store.BindKVMPreflight(ctx, intent.RunID, uid); err != nil {
@@ -460,8 +472,8 @@ func (p *TrustedPreflights) RecipeAllowed(recipe vmrunner.KVMRecipe) error {
 	}
 	return errors.New("journaled trusted recipe has been revoked or changed")
 }
-func (p *TrustedPreflights) Size(_ context.Context, job service.JobRequest) (periapsis.Size, error) {
-	source, err := readArgoSource(job.SourceDir, periapsis.TriggerCI)
+func (p *TrustedPreflights) Size(_ context.Context, job service.WorkflowRequest) (pipeline.Size, error) {
+	source, err := readArgoSource(job.SourceDir, pipeline.TriggerCI)
 	if err != nil {
 		return "", err
 	}
@@ -484,8 +496,34 @@ func (p *TrustedPreflights) Size(_ context.Context, job service.JobRequest) (per
 		return "", err
 	}
 	// The server leaf itself needs two CPUs/four GiB even for an S build.
-	if size == periapsis.S {
-		size = periapsis.M
+	if size == pipeline.S {
+		size = pipeline.M
 	}
 	return size, nil
+}
+
+// An observer may bind an owned, altered Workflow solely for UID-pinned cleanup.
+// A foreign run/source never supplies a cleanup UID with this classification.
+func trustedMismatchCleanupUID(uid string, err error) bool {
+	var mismatch interface{ WorkflowSpecMismatch() bool }
+	return uid != "" && errors.As(err, &mismatch) && mismatch.WorkflowSpecMismatch()
+}
+
+// CancelPreflight requests deletion without waiting for Pod finalizers. The
+// journal retains VM capacity and the absence-readback obligation independently.
+func (p *TrustedPreflights) CancelPreflight(ctx context.Context, id string) error {
+	execution, err := p.store.KVMPreflight(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil || execution.Cleaned || !execution.Submitted || execution.Rejected {
+		return err
+	}
+	controller, ok := p.controller.(interface {
+		CancelTrustedKVM(context.Context, vmrunner.KVMIntent, string) error
+	})
+	if !ok {
+		return errors.New("trusted cancellation controller unavailable")
+	}
+	return controller.CancelTrustedKVM(ctx, execution.Intent, execution.WorkflowUID)
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func annotatedWaitTag(t *testing.T) (string, string) {
@@ -110,13 +111,13 @@ func TestWaitResolvesAnnotatedTagAndPeeledCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.store.EnqueueRun(context.Background(), model.RunSpec{
+	if _, err := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{
 		RepoID: fixture.repo.ID, RefKind: model.RefTag, Ref: "v2.0.0", Trigger: "tag", Release: true,
 		SHA: strings.Repeat("e", 40), TestedSHA: strings.Repeat("f", 40), Actor: "agent@host",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.store.EnqueueRun(context.Background(), model.RunSpec{
+	if _, err := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{
 		RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "promotion/next", Trigger: "promotion",
 		SHA: commitSHA, TestedSHA: commitSHA, Actor: "agent@host",
 	}); err != nil {
@@ -149,7 +150,7 @@ func TestWaitResolvesAnnotatedTagAndPeeledCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.store.EnqueueRun(context.Background(), model.RunSpec{
+	if _, err := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{
 		RepoID: other.ID, RefKind: model.RefTag, Ref: "v1.0.0", Trigger: "tag", Release: true,
 		SHA: objectSHA, TestedSHA: commitSHA, Actor: "agent@host",
 	}); err != nil {

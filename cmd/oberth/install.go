@@ -33,15 +33,11 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 	flags.Var(&alsoUpstreams, "also-upstream",
 		"another organization to connect with the same upstream key, host/organization or ssh:// URL (repeatable), "+
 			"e.g. codeberg.org/acme")
-	flags.BoolVar(&cfg.Dev, "dev", false, "install in dev/evaluation mode (default)")
-	flags.BoolVar(&cfg.Production, "production", false, "install in production mode (not implemented)")
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "print plan without making changes")
 	flags.BoolVar(&cfg.Yes, "yes", false, "proceed even for non-local clusters")
 	flags.BoolVar(&cfg.Upgrade, "upgrade", false,
 		"force helm upgrade of existing releases even when already up to date "+
 			"(re-runs auto-upgrade when a newer chart is targeted; this flag forces reconciliation)")
-	flags.StringVar(&cfg.WatchAdoptionPlan, "watch-tunnel-adoption-plan", "",
-		"reviewed public plan for UID/resourceVersion-bound adoption of the four watch connector objects; requires --upgrade --skip-argo-workflows")
 	flags.BoolVar(&cfg.InstallSecretStore, "install-secretstore", false,
 		"also install a production-mode OpenBao (persistent storage; verified TLS bootstrapped directly on its PVC; initialized and unsealed via kubectl exec, "+
 			"root token and unseal key printed once) and configure it as Oberth's release secret store")
@@ -74,6 +70,7 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 	flags.StringVar(&cfg.ArgoControllerProfile, "argo-controller-profile", "", "install the verified nonroot-static-v1 controller profile (requires the managed pinned chart)")
 	flags.StringVar(&cfg.ArgoVaultAddress, "argo-vault-address", "",
 		"OpenBao/Vault base URL injected into credentialed pipeline containers as VAULT_ADDR (https only)")
+	flags.StringVar(&cfg.PushBannerURL, "push-banner-url", "", "push feedback URL; omitted preserves the live URL, explicit empty clears it")
 	flags.StringVar(&cfg.ServiceType, "service-type", "",
 		"Oberth Service type: NodePort (default for a fresh install; clients use NodePorts 30022/30443), "+
 			"LoadBalancer (on k3s, servicelb also takes host ports 2222 and 443 on the node) or ClusterIP; "+
@@ -123,9 +120,17 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 		return fmt.Errorf("%w: install accepts flags only, no positional arguments", errUsage)
 	}
 
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "push-banner-url" {
+			cfg.PushBannerURLSet = true
+		}
+		if f.Name == "accept-witness-genesis" {
+			cfg.AcceptWitnessGenesisSet = true
+		}
+	})
 	cfg.Timeout = *timeout
 	cfg.BinaryVersion = version
-	cfg.SecretStoreUndecided = !cfg.InstallSecretStore && !cfg.InstallSecretStoreDev && cfg.WatchAdoptionPlan == ""
+	cfg.SecretStoreUndecided = !cfg.InstallSecretStore && !cfg.InstallSecretStoreDev
 	cfg.CredentialedSecretPaths = credentialedSecretPaths
 	cfg.TLSExtraDNSNames = tlsExtraDNSNames
 	cfg.TLSExtraIPs = tlsExtraIPs

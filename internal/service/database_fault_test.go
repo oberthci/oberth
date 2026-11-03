@@ -48,11 +48,11 @@ func (s *deadlineFaultStore) ClaimNextRun(a0 context.Context) (model.Run, error)
 	return s.Store.ClaimNextRun(a0)
 }
 
-func (s *deadlineFaultStore) MarkRunCreatePending(a0 context.Context, a1 string, a2 string) error {
+func (s *deadlineFaultStore) MarkRunCreatePending(a0 context.Context, a1 string, a2 string, reason ...string) error {
 	if err := s.fault("MarkRunCreatePending"); err != nil {
 		return err
 	}
-	return s.Store.MarkRunCreatePending(a0, a1, a2)
+	return s.Store.MarkRunCreatePending(a0, a1, a2, reason...)
 }
 
 func (s *deadlineFaultStore) MarkRunSubmitted(a0 context.Context, a1 string) (model.Run, error) {
@@ -87,12 +87,12 @@ func (s *deadlineFaultStore) Run(a0 context.Context, a1 string) (model.Run, erro
 	return s.Store.Run(a0, a1)
 }
 
-func (s *deadlineFaultStore) SetRunJobName(a0 context.Context, a1 string, a2 string) (model.Run, error) {
-	if err := s.fault("SetRunJobName"); err != nil {
+func (s *deadlineFaultStore) SetRunWorkflowName(a0 context.Context, a1 string, a2 string) (model.Run, error) {
+	if err := s.fault("SetRunWorkflowName"); err != nil {
 		var zero model.Run
 		return zero, err
 	}
-	return s.Store.SetRunJobName(a0, a1, a2)
+	return s.Store.SetRunWorkflowName(a0, a1, a2)
 }
 
 func (s *deadlineFaultStore) SetRunCredentialed(a0 context.Context, a1 string) error {

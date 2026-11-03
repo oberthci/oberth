@@ -5,16 +5,16 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestResourceSizeComparisonUnknownZeroAndCensoredPeaks(t *testing.T) {
 	zero, peak, cpu := int64(0), int64(8<<30), int64(2_000_000_000)
 	rows := []StepResourceUsage{
-		{Burn: "checks", Step: "unit", WorkflowSize: periapsis.XL, Samples: 2, MemoryPeakBytes: &peak, CPUPeakNanoCores: &cpu, Reason: "OOMKilled", Terminal: true},
-		{Burn: "checks", Step: "unit", WorkflowSize: periapsis.M, Samples: 1, MemoryPeakBytes: &zero},
-		{Burn: "checks", Step: "unit", Samples: 0, Terminal: true}, // legacy class/usage unknown
-		{Burn: "checks", Step: "unit", SizeClassChanged: true, Samples: 1, MemoryPeakBytes: &peak},
+		{Stage: "checks", Step: "unit", WorkflowSize: pipeline.XL, Samples: 2, MemoryPeakBytes: &peak, CPUPeakNanoCores: &cpu, Reason: "OOMKilled", Terminal: true},
+		{Stage: "checks", Step: "unit", WorkflowSize: pipeline.M, Samples: 1, MemoryPeakBytes: &zero},
+		{Stage: "checks", Step: "unit", Samples: 0, Terminal: true}, // legacy class/usage unknown
+		{Stage: "checks", Step: "unit", SizeClassChanged: true, Samples: 1, MemoryPeakBytes: &peak},
 	}
 	before, _ := json.Marshal(rows)
 	groups := CompareResourceSize(rows)
@@ -30,9 +30,9 @@ func TestResourceSizeComparisonUnknownZeroAndCensoredPeaks(t *testing.T) {
 	if groups[2].Observations != 2 || groups[2].Unsampled != 1 || groups[2].Flagged != 1 {
 		t.Fatal("coverage flags lost", groups[2])
 	}
-	steps := []StepResult{{Burn: "checks", Step: "unit", DeclaredSize: periapsis.S}}
+	steps := []StepResult{{Stage: "checks", Step: "unit", DeclaredSize: pipeline.S}}
 	AttachResourceUsage(steps, rows, true)
-	if !steps[0].MeasuredUsageTruncated || !reflect.DeepEqual(groups, steps[0].MeasuredSizeComparison) || steps[0].DeclaredSize != periapsis.S {
+	if !steps[0].MeasuredUsageTruncated || !reflect.DeepEqual(groups, steps[0].MeasuredSizeComparison) || steps[0].DeclaredSize != pipeline.S {
 		t.Fatal("report changed declared metadata or used it as trusted class evidence", steps)
 	}
 	report := BuildResourceReport(rows)

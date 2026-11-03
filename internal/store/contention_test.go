@@ -44,20 +44,6 @@ func TestLiveReadsDoNotWaitForWriter(t *testing.T) {
 		"run":           func(ctx context.Context) error { _, err := s.Run(ctx, run.ID); return err },
 		"summary":       func(ctx context.Context) error { _, err := s.Summary(ctx); return err },
 		"idle":          func(ctx context.Context) error { _, err := s.IdleQueueStatus(ctx); return err },
-		"pilot resources": func(ctx context.Context) error {
-			_, err := s.PilotResources(ctx, run.ID)
-			if errors.Is(err, ErrNotFound) {
-				return nil
-			}
-			return err
-		},
-		"pilot receipt": func(ctx context.Context) error {
-			_, err := s.CompletedPilotReceipt(ctx, run.ID)
-			if errors.Is(err, ErrNotFound) {
-				return nil
-			}
-			return err
-		},
 	}
 	for name, check := range checks {
 		t.Run(name, func(t *testing.T) {
@@ -103,11 +89,11 @@ func TestConcurrentStatusWritersAndReceiveLookups(t *testing.T) {
 		wg.Go(func() {
 			<-start
 			for i := range rounds {
-				if _, err := s.SetRunJobName(ctx, id, fmt.Sprintf("workflow-%d", i)); err != nil {
+				if _, err := s.SetRunWorkflowName(ctx, id, fmt.Sprintf("workflow-%d", i)); err != nil {
 					errs <- err
 					return
 				}
-				if _, err := s.PutStepResult(ctx, model.StepResult{RunID: id, Burn: "test", Step: fmt.Sprintf("step-%d", i), Ordinal: i, Status: model.StepPassed, DeclaredSize: "S"}); err != nil {
+				if _, err := s.PutStepResult(ctx, model.StepResult{RunID: id, Stage: "test", Step: fmt.Sprintf("step-%d", i), Ordinal: i, Status: model.StepPassed, DeclaredSize: "S"}); err != nil {
 					errs <- err
 					return
 				}

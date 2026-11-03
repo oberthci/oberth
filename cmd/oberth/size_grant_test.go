@@ -10,16 +10,17 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestSizeGrantCLIReadsAndValidates(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := store.Open(ctx, path, store.Options{})
+	database, err := storetest.Open(ctx, path, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{Name: "codeberg", Kind: "ssh", BaseURL: "ssh://codeberg.org/acme"})
+	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{Name: "codeberg", Kind: "ssh", BaseURL: "ssh://codeberg.org/acme"})
 	if err != nil {
 		t.Fatal(err)
 	}

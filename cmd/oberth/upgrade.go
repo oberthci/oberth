@@ -6,21 +6,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/store"
 )
-
-// upgradeStringSlice implements flag.Value for repeatable string flags.
-type upgradeStringSlice []string
-
-func (s *upgradeStringSlice) String() string { return strings.Join([]string(*s), ", ") }
-func (s *upgradeStringSlice) Set(value string) error {
-	*s = append(*s, value)
-	return nil
-}
 
 func runUpgrade(ctx context.Context, arguments []string, output io.Writer) error {
 	flags := flag.NewFlagSet("upgrade", flag.ContinueOnError)
@@ -28,7 +18,7 @@ func runUpgrade(ctx context.Context, arguments []string, output io.Writer) error
 
 	var cfg installer.UpgradeConfig
 	var kubeContext string
-	var userValues, userSet upgradeStringSlice
+	var userValues, userSet stringList
 	var tlsDNS, tlsIPs, removeDNS, removeIPs stringList
 	flags.Var(&tlsDNS, "tls-extra-dns-name", "add a server TLS DNS name (repeatable)")
 	flags.Var(&tlsIPs, "tls-extra-ip", "add a server TLS IP SAN (repeatable)")

@@ -21,7 +21,7 @@ func resourceStoreFixture(t *testing.T) (*Store, model.Run, time.Time) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.SetRunJobName(t.Context(), run.ID, "workflow-test"); err != nil {
+	if _, err = s.SetRunWorkflowName(t.Context(), run.ID, "workflow-test"); err != nil {
 		t.Fatal(err)
 	}
 	return s, run.Run, at

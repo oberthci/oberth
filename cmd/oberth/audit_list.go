@@ -60,7 +60,7 @@ func runAuditList(ctx context.Context, arguments []string, output io.Writer) err
 	limit := flags.Int("limit", 0, "entries per page (default 50, tail default 20)")
 	before := flags.Int64("before", 0, "exclusive audit ID cursor")
 	transport := mcpTransportFlags(flags)
-	if err := flags.Parse(permuteFlagsFirst(arguments)); err != nil {
+	if err := parseCommandFlags(flags, arguments); err != nil {
 		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if flags.NArg() != 0 {

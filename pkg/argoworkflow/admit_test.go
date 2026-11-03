@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // admissibleDocument is the smallest document that satisfies every structural
@@ -455,9 +455,9 @@ func TestAdmitRejectsAMalformedAdministratorAllowlist(t *testing.T) {
 }
 
 func TestTriggerFileMapping(t *testing.T) {
-	for trigger, expected := range map[periapsis.Trigger]string{
-		periapsis.TriggerCI:      BuildFile,
-		periapsis.TriggerRelease: ReleaseFile,
+	for trigger, expected := range map[pipeline.Trigger]string{
+		pipeline.TriggerCI:      BuildFile,
+		pipeline.TriggerRelease: ReleaseFile,
 	} {
 		file, err := TriggerFile(trigger)
 		if err != nil {
@@ -471,7 +471,7 @@ func TestTriggerFileMapping(t *testing.T) {
 			t.Fatalf("FileTrigger(%q) = %q,%v", file, back, ok)
 		}
 	}
-	if _, err := TriggerFile(periapsis.Trigger("unknown")); err == nil {
+	if _, err := TriggerFile(pipeline.Trigger("unknown")); err == nil {
 		t.Fatal("expected unknown trigger to have no Argo-authored pipeline file")
 	}
 }
@@ -1053,7 +1053,7 @@ spec:
 // includes the image prefixes the live deployment allowlists.
 func TestOberthPipelinesPassAdmission(t *testing.T) {
 	t.Parallel()
-	policy := Policy{RunnerImagePrefixes: periapsis.DefaultRunnerImagePrefixes}
+	policy := Policy{RunnerImagePrefixes: pipeline.DefaultRunnerImagePrefixes}
 	for _, file := range []string{"../../.oberth/build.yaml", "../../.oberth/release.yaml"} {
 		name := file
 		t.Run(name, func(t *testing.T) {

@@ -164,10 +164,6 @@ func parseRekorEndpoint(endpoint string, insecureHTTP bool) (*url.URL, error) {
 	return parsed, nil
 }
 
-func newRekorWitness(api rekorAPI, verifier rekorEntryVerifier, keyMaterial []byte) (*RekorWitness, error) {
-	return newRekorWitnessWithInfo(api, verifier, keyMaterial, DefaultWitnessKeyInfo)
-}
-
 func newRekorWitnessWithInfo(api rekorAPI, verifier rekorEntryVerifier, keyMaterial []byte, info string) (*RekorWitness, error) {
 	if api == nil || verifier == nil {
 		return nil, errors.New("audit anchor: Rekor API and verifier are required")
@@ -187,10 +183,6 @@ func newRekorWitnessWithInfo(api rekorAPI, verifier rekorEntryVerifier, keyMater
 		publicDER: publicDER, identity: identity,
 		verified: make(map[string]model.AuditWitness),
 	}, nil
-}
-
-func deriveWitnessKey(keyMaterial []byte) (*ecdsa.PrivateKey, error) {
-	return deriveWitnessKeyWithInfo(keyMaterial, DefaultWitnessKeyInfo)
 }
 
 func deriveWitnessKeyWithInfo(keyMaterial []byte, info string) (*ecdsa.PrivateKey, error) {
@@ -274,11 +266,11 @@ func (witness *RekorWitness) AbandonedChainTip(ctx context.Context) (model.Audit
 	var tip model.AuditWitness
 	found := false
 	ownCount := 0
-	for _, uuid := range candidates {
+	for verifiedCount, uuid := range candidates {
 		if enumerationDeadline.Err() != nil {
 			return model.AuditWitness{}, false, fmt.Errorf(
 				"audit anchor: Rekor identity enumeration timed out after verifying %d of %d candidates (%d own-chain)",
-				ownCount, len(candidates), ownCount,
+				verifiedCount, len(candidates), ownCount,
 			)
 		}
 		actualUUID, entry, getErr := witness.api.Get(enumerationDeadline, uuid)

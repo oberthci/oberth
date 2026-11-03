@@ -39,7 +39,7 @@ func TestReleasePreflightReportsEveryGrantAndWIFGap(t *testing.T) {
 	}
 	problems := strings.Join(result.Problems, "\n")
 	for _, step := range []string{"main", "publish-other"} {
-		args, _ := json.Marshal(map[string]string{"repo": "github/skipops/oberth", "step": step, "secret": "oberth/data/release/signing"})
+		args, _ := json.Marshal(map[string]string{"repo": "github/acme/oberth", "step": step, "secret": "oberth/data/release/signing"})
 		if !strings.Contains(problems, "access_allow "+string(args)) || !strings.Contains(problems, "step \""+step+"\": argojob: release WIF") {
 			t.Fatalf("missing remediation for %s: %s", step, problems)
 		}
@@ -52,7 +52,7 @@ func TestReleasePreflightReportsEveryGrantAndWIFGap(t *testing.T) {
 func TestReleasePreflightGrantAndMaterializationAreSeparate(t *testing.T) {
 	r := preflightRequest(t)
 	config := wifTestConfig()
-	grant := config.ReleaseWIF.Repositories["github/skipops/oberth"]
+	grant := config.ReleaseWIF.Repositories["github/acme/oberth"]
 	grant.Templates["publish-other"] = "image-writer"
 	r.ApprovedSecrets["oberth/data/release/signing"] = true
 	r.StepGrants["oberth/data/release/signing"] = map[string]bool{"main": true, "publish-other": true}
@@ -61,8 +61,8 @@ func TestReleasePreflightGrantAndMaterializationAreSeparate(t *testing.T) {
 		t.Fatalf("%+v %v", result, err)
 	}
 	config.PerStepIdentities = map[string]PerRepoIdentityConfig{
-		"github/skipops/oberth/main":          {ServiceAccountName: "step-main"},
-		"github/skipops/oberth/publish-other": {ServiceAccountName: "step-other"},
+		"github/acme/oberth/main":          {ServiceAccountName: "step-main"},
+		"github/acme/oberth/publish-other": {ServiceAccountName: "step-other"},
 	}
 	result, err = PreflightRelease(config, r)
 	if err != nil || len(result.Problems) != 0 {
@@ -96,14 +96,14 @@ func TestReleasePreflightReportsEffectiveWIFSubject(t *testing.T) {
 		t.Run(fmt.Sprint(named), func(t *testing.T) {
 			r := preflightRequest(t)
 			config := wifTestConfig()
-			config.ReleaseWIF.Repositories["github/skipops/oberth"].Templates["publish-other"] = "image-writer"
+			config.ReleaseWIF.Repositories["github/acme/oberth"].Templates["publish-other"] = "image-writer"
 			r.ApprovedSecrets["oberth/data/release/signing"] = true
 			r.StepGrants["oberth/data/release/signing"] = map[string]bool{"*": true}
 			wantSA := "oberth-per-repo"
 			if named {
 				r.StepGrants["oberth/data/release/signing"]["main"] = true
 				config.PerStepIdentities = map[string]PerRepoIdentityConfig{
-					"github/skipops/oberth/main": {ServiceAccountName: "step-main"},
+					"github/acme/oberth/main": {ServiceAccountName: "step-main"},
 				}
 				wantSA = "step-main"
 			}
@@ -178,11 +178,11 @@ func TestReleasePreflightUncredentialedPathMatchesBuild(t *testing.T) {
 func TestReleasePreflightSnapshotPreservesConfiguredSteps(t *testing.T) {
 	r := preflightRequest(t)
 	config := wifTestConfig()
-	config.ReleaseWIF.Repositories["github/skipops/oberth"].Templates["publish-other"] = "image-writer"
+	config.ReleaseWIF.Repositories["github/acme/oberth"].Templates["publish-other"] = "image-writer"
 	r.ApprovedSecrets["oberth/data/release/signing"] = true
 	r.StepGrants["oberth/data/release/signing"] = map[string]bool{"main": true, "*": true}
 	config.PerStepIdentities = map[string]PerRepoIdentityConfig{
-		"github/skipops/oberth/main": {ServiceAccountName: "step-main"},
+		"github/acme/oberth/main": {ServiceAccountName: "step-main"},
 	}
 	r.Identities = &IdentitySnapshot{Release: config.PerRepoIdentities, CI: config.PerRepoCIIdentities}
 	result, err := PreflightRelease(config, r)

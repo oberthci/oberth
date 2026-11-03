@@ -11,7 +11,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type adoptedRun struct {
@@ -22,9 +22,9 @@ type adoptedRun struct {
 // Workflow adoption keeps the durable run classification; the engine checks
 // the exact trigger, source and credential-bearing spec before resuming it.
 func workflowRunAdoptable(run model.Run) bool {
-	// Argo admits tag pipelines only through the durable release capability.
-	// Historical non-release tag Jobs keep the conservative legacy fallback.
-	return run.RefKind == model.RefBranch || (run.RefKind == model.RefTag && run.Release)
+	// Keep the persisted trigger and credential classification. The engine's
+	// exact Workflow binding checks apply to ordinary tags as well as releases.
+	return run.RefKind == model.RefBranch || run.RefKind == model.RefTag
 }
 
 func (scheduler *Scheduler) withoutPendingPreflight(ctx context.Context, run model.Run) (bool, error) {
@@ -50,11 +50,11 @@ func (scheduler *Scheduler) withoutPendingPreflight(ctx context.Context, run mod
 // fallback and re-queues the run. A failed read names the same object but
 // asks for nothing: the next start retries it.
 func adoptionFailure(adopter JobAdopter, run model.Run, err error) error {
-	namespace := adopter.JobNamespace()
-	failure := fmt.Errorf("adopt run %s: Workflow %s/%s: %w", run.ID, namespace, run.JobName, err)
+	namespace := adopter.WorkflowNamespace()
+	failure := fmt.Errorf("adopt run %s: Workflow %s/%s: %w", run.ID, namespace, run.WorkflowName, err)
 	if errors.Is(err, ErrAdoptionRefused) {
 		failure = fmt.Errorf("%w; startup stops until it is deleted (kubectl -n %s delete workflow %s), after which the run is re-queued",
-			failure, namespace, run.JobName)
+			failure, namespace, run.WorkflowName)
 	}
 	log.Printf("ERROR: %v", failure)
 	return failure
@@ -62,7 +62,7 @@ func adoptionFailure(adopter JobAdopter, run model.Run, err error) error {
 
 // adopt restores grants for work already running, even if the new owner's
 // configured capacity is smaller. New admissions wait until it has drained.
-func (gate *weightedAdmission) adopt(run model.Run, size periapsis.Size, demand argoworkflow.VMIDemand, pods ...*argoworkflow.PodDemand) (*admissionReservation, error) {
+func (gate *weightedAdmission) adopt(run model.Run, size pipeline.Size, demand argoworkflow.VMIDemand, pods ...*argoworkflow.PodDemand) (*admissionReservation, error) {
 	var peak *argoworkflow.PodDemand
 	if len(pods) > 0 && pods[0] != nil {
 		if !pods[0].Valid() {

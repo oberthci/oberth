@@ -41,18 +41,18 @@ type remoteRun struct {
 	// Phase and Error carry why a run failed. Without them the client decodes
 	// a failed run into a struct that says only "failed", which is the one
 	// thing the reader already knows.
-	Phase      string
-	Error      string
-	Reason     string
-	FailedBurn string
-	FailedStep string
-	QueuedAt   time.Time
-	StartedAt  *time.Time
-	FinishedAt *time.Time
+	Phase       string
+	Error       string
+	Reason      string
+	FailedStage string `json:"FailedBurn"`
+	FailedStep  string
+	QueuedAt    time.Time
+	StartedAt   *time.Time
+	FinishedAt  *time.Time
 }
 
 type remoteStep struct {
-	Burn       string
+	Stage      string `json:"Burn"`
 	Step       string
 	Status     string
 	StartedAt  *time.Time
@@ -89,7 +89,7 @@ func remoteFlags(name string, arguments []string, output io.Writer) (*flag.FlagS
 	flags := flag.NewFlagSet(name, flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	asJSON := flags.Bool("json", false, "emit the server's payload unchanged")
-	if err := flags.Parse(permuteFlagsFirst(arguments)); err != nil {
+	if err := parseCommandFlags(flags, arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
 			flags.Usage()
@@ -98,52 +98,6 @@ func remoteFlags(name string, arguments []string, output io.Writer) (*flag.FlagS
 		return nil, nil, fmt.Errorf("%w: %w", errUsage, err)
 	}
 	return flags, asJSON, nil
-}
-
-// permuteFlagsFirst moves flags ahead of positional arguments.
-//
-// Go's flag package stops parsing at the first non-flag argument, so
-// `oberth run <id> --json` reads --json as a second positional and fails with
-// a usage error that says nothing about flag order. The documentation promises
-// --json on every command without qualifying where it goes, and the natural
-// place to type it is at the end.
-//
-// Everything after a bare "--" is left alone, so a positional that begins with
-// a dash can still be passed.
-func permuteFlagsFirst(arguments []string) []string {
-	var flagsSeen, positional []string
-	for index := 0; index < len(arguments); index++ {
-		argument := arguments[index]
-		if argument == "--" {
-			positional = append(positional, arguments[index+1:]...)
-			break
-		}
-		if strings.HasPrefix(argument, "-") && argument != "-" {
-			flagsSeen = append(flagsSeen, argument)
-			// A flag that takes a value consumes the next argument, unless the
-			// value was already joined with "=".
-			if !strings.Contains(argument, "=") && index+1 < len(arguments) &&
-				flagTakesValue(argument) {
-				index++
-				flagsSeen = append(flagsSeen, arguments[index])
-			}
-			continue
-		}
-		positional = append(positional, argument)
-	}
-	return append(flagsSeen, positional...)
-}
-
-// flagTakesValue reports whether a remote-command flag consumes the argument
-// after it. Booleans must not, or they would swallow the run ID.
-func flagTakesValue(argument string) bool {
-	name := strings.TrimLeft(argument, "-")
-	switch name {
-	case "json", "tail", "raw", "force":
-		return false
-	default:
-		return true
-	}
 }
 
 func emitJSON(ctx context.Context, api *client.Client, path string, query map[string]string, output io.Writer) error {
@@ -224,13 +178,14 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 	next := ""
 	for {
 		var page []remoteRun
-		if err := api.Get(ctx, "/api/runs", query, &page); err != nil {
+		headers, err := api.GetWithHeaders(ctx, "/api/runs", query, &page)
+		if err != nil {
 			return err
 		}
 		runs = append(runs, page...)
 		previous := next
-		next = ""
-		if len(page) > 0 && datedRunCount(page) == *limit {
+		next = headers.Get("X-Oberth-Next-Before")
+		if next == "" && len(page) > 0 && datedRunCount(page) == *limit {
 			next = runCursor(page[len(page)-1])
 		}
 		// A server older than paging ignores ?before and returns the newest
@@ -360,41 +315,12 @@ func cursorMovedBack(previous, next string) bool {
 	return next != previous
 }
 
-// resolveRemoteRunID expands the abbreviation the push banner prints into the
-// identifier the API indexes by. Only a value that looks abbreviated costs a
-// request; a whole identifier goes straight through.
-func resolveRemoteRunID(ctx context.Context, api *client.Client, given string) (string, error) {
-	if !looksAbbreviated(given) {
-		return given, nil
+// resolveRemoteRunID leaves lookup and ambiguity detection to the server.
+func resolveRemoteRunID(_ context.Context, _ *client.Client, given string) (string, error) {
+	if len(given) > 0 && len(given) < 8 && strings.Trim(strings.ToLower(given), "0123456789abcdef") == "" {
+		return "", fmt.Errorf("%w: run ID must contain 8 to 32 hexadecimal characters", errUsage)
 	}
-	// Walk every page: the server returns at most 100 runs per request, so
-	// a short ID from an older run was "not found" (#050). Bounded so a
-	// misbehaving server cannot loop forever.
-	var known []string
-	query := map[string]string{"limit": "100"}
-	for page := 0; page < 1000; page++ {
-		var runs []remoteRun
-		if err := api.Get(ctx, "/api/runs", query, &runs); err != nil {
-			return "", err
-		}
-		cursor := ""
-		if len(runs) > 0 {
-			cursor = runCursor(runs[len(runs)-1])
-		}
-		// An older server ignores ?before and repeats the newest page; stop
-		// before counting the same runs twice (each would then "match" twice).
-		if previous := query["before"]; previous != "" && !cursorMovedBack(previous, cursor) {
-			break
-		}
-		for _, run := range runs {
-			known = append(known, run.ID)
-		}
-		if datedRunCount(runs) < 100 || cursor == "" {
-			break
-		}
-		query["before"] = cursor
-	}
-	return resolveRunIDPrefix(given, known)
+	return given, nil
 }
 
 func runRunDetail(ctx context.Context, arguments []string, output io.Writer) error {
@@ -497,11 +423,11 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 	}
 	for _, step := range detail.Steps {
 		marker := " "
-		if step.Burn == detail.Run.FailedBurn && step.Step == detail.Run.FailedStep {
+		if step.Stage == detail.Run.FailedStage && step.Step == detail.Run.FailedStep {
 			marker = "*"
 		}
 		if _, err := fmt.Fprintf(output, "%s %-12s %-20s %-9s %s\n",
-			marker, step.Burn, step.Step, step.Status, span(step.StartedAt, step.FinishedAt)); err != nil {
+			marker, step.Stage, step.Step, step.Status, span(step.StartedAt, step.FinishedAt)); err != nil {
 			return err
 		}
 	}
@@ -537,7 +463,7 @@ type remoteLog struct {
 	TotalScannedBytes int64  `json:"total_scanned_bytes"`
 	ScanLimitBytes    int64  `json:"scan_limit_bytes"`
 	RunID             string `json:"run_id"`
-	Burn              string `json:"burn"`
+	Stage             string `json:"burn"`
 	Step              string `json:"step"`
 	Output            string `json:"output"`
 	Note              string `json:"note"`
@@ -559,7 +485,7 @@ type remoteLog struct {
 func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) error {
 	flags := flag.NewFlagSet("log", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	burn := flags.String("burn", "", "burn name")
+	stage := flags.String("burn", "", "burn name")
 	step := flags.String("step", "", "step name")
 	pattern := flags.String("pattern", "", "RE2 pattern; offset and limit then page over matches")
 	context_ := flags.Int("context", 0, "lines of context around each match")
@@ -569,7 +495,7 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 	tail := flags.Bool("tail", false, "read from the end")
 	raw := flags.Bool("raw", false, "keep the [burn/step] prefix on each line and the Argo executor lines")
 	asJSON := flags.Bool("json", false, "emit the server's payload unchanged")
-	if err := flags.Parse(permuteFlagsFirst(arguments)); err != nil {
+	if err := parseCommandFlags(flags, arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
 			flags.Usage()
@@ -580,7 +506,7 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 	if flags.NArg() != 1 {
 		return fmt.Errorf("%w: log <run-id> --burn <burn> --step <step>", errUsage)
 	}
-	if strings.TrimSpace(*burn) == "" || strings.TrimSpace(*step) == "" {
+	if strings.TrimSpace(*stage) == "" || strings.TrimSpace(*step) == "" {
 		return fmt.Errorf("%w: --burn and --step are required; oberth run <id> lists them", errUsage)
 	}
 	api, err := remoteClient(ctx)
@@ -593,7 +519,7 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 		return err
 	}
 	path := "/api/runs/" + runID + "/logs"
-	query := map[string]string{"burn": *burn, "step": *step, "pattern": *pattern}
+	query := map[string]string{"burn": *stage, "step": *step, "pattern": *pattern}
 	for name, value := range map[string]int{"context": *context_, "offset": *offset, "limit": *limit} {
 		if value > 0 {
 			query[name] = fmt.Sprint(value)
@@ -619,7 +545,7 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 	}
 	body, hidden := log.Output, 0
 	if !*raw {
-		body = stripStepPrefix(body, log.Burn, log.Step)
+		body = stripStepPrefix(body, log.Stage, log.Step)
 		body, hidden = dropExecutorLines(body)
 	}
 	if _, err := io.WriteString(output, body); err != nil {
@@ -696,8 +622,8 @@ func truncatedNote(truncated bool) string {
 	return ""
 }
 
-func stripStepPrefix(body, burn, step string) string {
-	prefix := "[" + burn + "/" + step + "] "
+func stripStepPrefix(body, stage, step string) string {
+	prefix := "[" + stage + "/" + step + "] "
 	lines := strings.Split(body, "\n")
 	for index, line := range lines {
 		lines[index] = strings.TrimPrefix(line, prefix)
@@ -805,11 +731,29 @@ func runIssues(ctx context.Context, arguments []string, output io.Writer) error 
 		return err
 	}
 	reportMode("server")
+	raw, err := collectIssuePages(ctx, func(ctx context.Context, before int64) (json.RawMessage, error) {
+		query := map[string]string{}
+		if before > 0 {
+			query["before"] = strconv.FormatInt(before, 10)
+		}
+		return api.GetRaw(ctx, "/api/issues", query)
+	})
+	if err != nil {
+		return err
+	}
 	if *asJSON {
-		return emitJSON(ctx, api, "/api/issues", nil, output)
+		var document any
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.UseNumber()
+		if err = decoder.Decode(&document); err != nil {
+			return err
+		}
+		encoder := json.NewEncoder(output)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(document)
 	}
 	var page remoteIssuePage
-	if err := api.Get(ctx, "/api/issues", nil, &page); err != nil {
+	if err = json.Unmarshal(raw, &page); err != nil {
 		return err
 	}
 	if len(page.Issues) == 0 {

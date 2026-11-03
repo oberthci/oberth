@@ -102,7 +102,10 @@ func prepareUpgradeControllerProfile(ctx context.Context, cfg UpgradeConfig, dep
 	if err != nil {
 		return nil, noop, err
 	}
-	release, exists := findHelmRelease(ctx, deps, "argo-workflows", namespace)
+	release, exists, err := findHelmRelease(ctx, deps, "argo-workflows", namespace)
+	if err != nil {
+		return nil, noop, err
+	}
 	// Failed exact releases may be forward repaired. Pending/unknown/absent
 	// releases never authorize installing, adopting or downgrading a controller.
 	if !exists || release.Chart != "argo-workflows-"+DefaultArgoChartVersion || (release.Status != "deployed" && release.Status != "failed") || helmRevisionLabel(release.Revision) == "" {
@@ -139,7 +142,10 @@ func (p *upgradeControllerProfile) describe(w io.Writer, timeout time.Duration) 
 }
 
 func (p *upgradeControllerProfile) verifySnapshot(ctx context.Context, deps Deps) error {
-	release, exists := findHelmRelease(ctx, deps, "argo-workflows", p.namespace)
+	release, exists, err := findHelmRelease(ctx, deps, "argo-workflows", p.namespace)
+	if err != nil {
+		return err
+	}
 	raw, err := deps.RunHelm(ctx, []string{"get", "values", "argo-workflows", "-n", p.namespace, "-o", "json"})
 	if err != nil || !exists || release.Chart != "argo-workflows-"+DefaultArgoChartVersion || release.Status != p.status || helmRevisionLabel(release.Revision) != p.revision || sha256.Sum256(raw) != p.valuesDigest {
 		return errors.New("argo release or values changed after transition preparation")

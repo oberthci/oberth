@@ -53,7 +53,7 @@ keeps only a minimal status for `kubectl describe`, with the legacy step-array
 message still decoded from runs of older SDK versions. Byte ranges for every
 `[burn/step]` section let one named-step MCP read return exactly that step
 after Kubernetes reaps the pod. A run fails if retained output exceeds the
-fixed 64 MiB ceiling.
+configured per-run ceiling (`--run-log-limit-bytes`, 64 MiB by default).
 
 The Argo controller starts following pod nodes as soon as they are known,
 including Pending nodes whose containers can start before Argo publishes
@@ -274,3 +274,23 @@ removes readiness before stopping admission and drains HTTP/SSE observers. See
 [restart handover](restart-handover.md) for client retries and upgrade behavior.
 Upstream availability is a bounded diagnostic in `/status`, not a readiness
 dependency, so an upstream outage cannot induce a control-plane restart loop.
+
+Go code names execution objects as Workflows and pipeline groups as stages.
+Existing database columns, log markers and serialized JSON fields retain their
+historical `job_name`, `JobName`, `burn` and `Burn` spellings so stored evidence
+and clients remain compatible. These spellings do not select another engine.
+
+Startup tolerates temporary OpenBao failures for up to two minutes with bounded
+backoff. HTTP 400/403 and invalid trust fail immediately. During initialization,
+HTTPS `/healthz` and `/livez` serve probe-only responses using an ephemeral
+in-memory certificate; `/readyz` and application routes remain unavailable. The
+probe identity is discarded before the application listener starts, and bootstrap
+liveness expires after five minutes. ServiceAccount projection gets three attempts
+at two-second intervals. Terminal workspace removal failures are logged and retried
+by a one-minute sweep, without stopping dispatch. Continuous SQLite contention has
+a two-minute total retry budget per operation; exhaustion reaches the owner failure
+path instead of refreshing liveness forever.
+
+A corrupt receive outbox quarantines only its repository. Startup replays healthy
+repositories and retains the corrupt record for operator repair. Refresh, receive
+and publication refuse the affected repository until its record is repaired.

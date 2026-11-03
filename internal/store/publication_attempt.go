@@ -30,6 +30,15 @@ func (s *Store) UpdatePublicationAttempt(ctx context.Context, id string, expecte
 	if current.Status != model.PublicationPending {
 		return current, fmt.Errorf("%w: publication is terminal", ErrInvalidState)
 	}
+	if attempts > expected && current.PromotionID != "" {
+		promotion, err := promotionTx(ctx, tx, current.PromotionID)
+		if err != nil {
+			return model.Publication{}, err
+		}
+		if err := checkPromotionDeliveryGrantTx(ctx, tx, promotion, unixNano(s.now())); err != nil {
+			return model.Publication{}, err
+		}
+	}
 	if current.Attempts == attempts && current.RetryAfter.Equal(retryAfter) && current.Error == message {
 		return current, nil
 	}

@@ -150,7 +150,7 @@ func TestRealGitPrunedPinnedCommitCannotRebindLazyZip(t *testing.T) {
 	git(work, "add", ".")
 	git(work, "commit", "-m", "first")
 	git(work, "tag", "v1.0.0")
-	cache, err := gitcache.New(gitcache.Config{Root: t.TempDir(), Upstream: func(string) (string, error) { return work, nil }})
+	cache, err := gitcache.New(gitcache.Config{AllowLocalUpstreams: true, Root: t.TempDir(), Upstream: func(string) (string, error) { return work, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -42,3 +42,31 @@ func TestPurgedEvidenceReturnsGoneWithItsExplanation(t *testing.T) {
 		t.Fatalf("purged response=%d %q", code, message)
 	}
 }
+
+func TestPerRunLogLimitServeOption(t *testing.T) {
+	for _, tc := range []struct {
+		arg     string
+		want    int64
+		invalid bool
+	}{
+		{"", 64 << 20, false}, {"--run-log-limit-bytes=1024", 1024, false}, {"--run-log-limit-bytes=0", 0, true}, {"--run-log-limit-bytes=-1", 0, true},
+	} {
+		args := []string{"--argo-namespace=pipelines"}
+		if tc.arg != "" {
+			args = append(args, tc.arg)
+		}
+		options, err := parseServeOptions(args, io.Discard)
+		if tc.invalid {
+			if err == nil {
+				t.Fatalf("accepted %s", tc.arg)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if options.runLogLimitBytes != tc.want {
+			t.Fatalf("%s: limit=%d want=%d", tc.arg, options.runLogLimitBytes, tc.want)
+		}
+	}
+}

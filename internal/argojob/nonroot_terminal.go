@@ -9,13 +9,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-// Selection trusts the API/kubelet's final incarnation status, not phase alone.
-// Historical records grant no authority. The one remaining candidate still
-// undergoes every existing live controller and immutable configuration check.
-func selectNonrootController(pods []corev1.Pod, namespace string) (*corev1.Pod, error) {
-	return selectNonrootControllerWithHistory(pods, namespace, nil)
-}
-
 // prior contains only provisional Evicted records. The API verifier must prove
 // their ReplicaSet replacement before returning submission authority.
 func selectNonrootControllerWithHistory(pods []corev1.Pod, namespace string, prior map[types.UID]bool) (*corev1.Pod, error) {

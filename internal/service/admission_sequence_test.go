@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestAdmissionReservationUsesInheritedFIFOOrderAndUniqueRunKeys(t *testing.T) {
@@ -29,7 +29,7 @@ func TestAdmissionReservationUsesInheritedFIFOOrderAndUniqueRunKeys(t *testing.T
 func TestAdmissionSnapshotAndStateKeepRefiredHeadIdentity(t *testing.T) {
 	gate := newWeightedAdmissionForJobs(2)
 	held := gate.reserve(1)
-	release, err := held.acquire(context.Background(), periapsis.XL)
+	release, err := held.acquire(context.Background(), pipeline.XL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestAdmissionSnapshotAndStateKeepRefiredHeadIdentity(t *testing.T) {
 	defer refired.cancel()
 	gate.mu.Lock()
 	for _, reservation := range []*admissionReservation{behind, refired} {
-		reservation.prepared, reservation.size, reservation.weight = true, periapsis.L, gate.capacity
+		reservation.prepared, reservation.size, reservation.weight = true, pipeline.L, gate.capacity
 	}
 	gate.mu.Unlock()
 	scheduler := &Scheduler{admission: gate}

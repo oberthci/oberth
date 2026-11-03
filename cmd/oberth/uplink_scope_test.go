@@ -15,6 +15,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // The runs cursor is the oldest run's sequence, or its ID when a scoped
@@ -31,13 +32,11 @@ func TestRunCursorFallsBackToTheRunID(t *testing.T) {
 
 func TestScopeFlagIsRepeatableAndCommaSeparated(t *testing.T) {
 	t.Parallel()
-	var scope scopeFlag
-	for _, value := range []string{"github, codeberg", "", "skipops"} {
-		if err := scope.Set(value); err != nil {
-			t.Fatal(err)
-		}
+	var scope []string
+	for _, value := range []string{"github, codeberg", "", "acme"} {
+		scope = append(scope, splitScope(value)...)
 	}
-	if !slices.Equal(scope, scopeFlag{"github", "codeberg", "skipops"}) || scopeLabel(nil) != "all" || scopeLabel([]string{"a", "b"}) != "a,b" {
+	if !slices.Equal(scope, []string{"github", "codeberg", "acme"}) || scopeLabel(nil) != "all" || scopeLabel([]string{"a", "b"}) != "a,b" {
 		t.Fatalf("scope = %v", scope)
 	}
 }
@@ -48,12 +47,12 @@ func TestUplinkScopeLifecycle(t *testing.T) {
 	ctx := context.Background()
 	directory := t.TempDir()
 	database := filepath.Join(directory, "oberth.sqlite")
-	seed, err := store.Open(ctx, database, store.Options{})
+	seed, err := storetest.Open(ctx, database, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for name, base := range map[string]string{"github": "ssh://git@github.com/oberthci", "codeberg": "ssh://git@codeberg.org/exampleorg"} {
-		if _, err := seed.CreateUpstream(ctx, model.UpstreamSpec{Name: name, Kind: "ssh", BaseURL: base}); err != nil {
+		if _, err := storetest.CreateUpstream(seed, ctx, model.UpstreamSpec{Name: name, Kind: "ssh", BaseURL: base}); err != nil {
 			t.Fatal(err)
 		}
 	}

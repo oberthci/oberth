@@ -35,7 +35,7 @@ func TestStepUsageNullZeroAndMeasurementsSurviveReopen(t *testing.T) {
 		{Step: "zero", MaxRSSBytes: ptr.To(int64(0)), MemoryPeakBytes: ptr.To(int64(0)), UserCPU: ptr.To(time.Duration(0)), SystemCPU: ptr.To(time.Duration(0))},
 		{Step: "measured", MaxRSSBytes: ptr.To(int64(64 << 20)), MemoryPeakBytes: ptr.To(int64(90 << 20)), UserCPU: ptr.To(2 * time.Second), SystemCPU: ptr.To(25 * time.Millisecond)},
 	} {
-		step.RunID, step.Burn, step.Status, step.DeclaredSize, step.Ordinal = run.ID, "test", model.StepPassed, "M", i
+		step.RunID, step.Stage, step.Status, step.DeclaredSize, step.Ordinal = run.ID, "test", model.StepPassed, "M", i
 		if _, err := s.PutStepResult(ctx, step); err != nil {
 			t.Fatal(err)
 		}

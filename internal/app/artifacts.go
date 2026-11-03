@@ -9,7 +9,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/artifacts"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type ArtifactCollector interface {
@@ -26,7 +26,7 @@ func (jobs *ArgoJobs) SetArtifacts(collector ArtifactCollector, store ArtifactSt
 	jobs.artifactLimit = limit
 }
 
-func (jobs *ArgoJobs) collectArtifacts(ctx context.Context, workflowName, runID string, trigger periapsis.Trigger, diagnostics ...[]byte) string {
+func (jobs *ArgoJobs) collectArtifacts(ctx context.Context, workflowName, runID string, trigger pipeline.Trigger, diagnostics ...[]byte) string {
 	if jobs.artifacts == nil {
 		return ""
 	}
@@ -85,22 +85,6 @@ func (jobs *ArgoJobs) auditArtifacts(ctx context.Context, runID string, details 
 	})
 }
 
-func (jobs *ArgoJobs) reportArtifactFailure(runID, reason string) {
-	jobs.mu.Lock()
-	if jobs.artifactFailures == nil {
-		jobs.artifactFailures = map[string]string{}
-	}
-	jobs.artifactFailures[runID] = reason
-	jobs.mu.Unlock()
-}
-
 func (jobs *ArgoJobs) recordArtifactFailure(ctx context.Context, runID, reason string) {
-	jobs.reportArtifactFailure(runID, reason)
 	jobs.auditArtifacts(ctx, runID, map[string]any{"stored": false, "reason": reason})
-}
-
-func (jobs *ArgoJobs) ArtifactFailure(runID string) string {
-	jobs.mu.Lock()
-	defer jobs.mu.Unlock()
-	return jobs.artifactFailures[runID]
 }

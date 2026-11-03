@@ -12,12 +12,13 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func kubeVirtRequest(id string, repoID int64, demand, limit argoworkflow.VMIDemand) admissionRequest {
-	request := groupRequest(id, repoID, periapsis.S, "")
+	request := groupRequest(id, repoID, pipeline.S, "")
 	request.KubeVirt = &KubeVirtResources{Demand: demand, Limit: limit}
 	return request
 }
@@ -116,7 +117,7 @@ func TestKubeVirtCapacityKeepsFIFOAndDeclaredGroup(t *testing.T) {
 	t.Cleanup(grouped.cancel)
 	groupAcquired := make(chan func(), 1)
 	// A declared group still serializes ordinary and VMI-bearing runs together.
-	go acquireRequestForTest(grouped, groupRequest("ordinary-release", 1, periapsis.S, "release-state"), groupAcquired)
+	go acquireRequestForTest(grouped, groupRequest("ordinary-release", 1, pipeline.S, "release-state"), groupAcquired)
 	awaitWaiting(t, grouped)
 	holder()
 	releaseOld := awaitAcquired(t, oldAcquired)
@@ -133,7 +134,7 @@ type kubeVirtEngine struct {
 	holdWait  bool
 }
 
-func (engine *kubeVirtEngine) PipelineKubeVirt(_ context.Context, request JobRequest) (KubeVirtResources, error) {
+func (engine *kubeVirtEngine) PipelineKubeVirt(_ context.Context, request WorkflowRequest) (KubeVirtResources, error) {
 	return engine.resources[request.Run.Ref], nil
 }
 
@@ -290,17 +291,17 @@ func TestKubeVirtAdoptionCountsOnceAndDrainsReducedCapacity(t *testing.T) {
 	unit := argoworkflow.VMIDemand{VMs: 1, Cores: 2, MemoryBytes: 1 << 30}
 	runs := []model.Run{{ID: "first", QueueSequence: 1, RepoID: 7}, {ID: "second", QueueSequence: 2, RepoID: 7}}
 	for _, run := range runs {
-		first, err := gate.adopt(run, periapsis.M, unit)
+		first, err := gate.adopt(run, pipeline.M, unit)
 		if err != nil {
 			t.Fatal(err)
 		}
-		again, err := gate.adopt(run, periapsis.M, unit)
+		again, err := gate.adopt(run, pipeline.M, unit)
 		if err != nil || again != first || !again.submitted {
 			t.Fatalf("repeated adoption = %p, %v", again, err)
 		}
 		changed := unit
 		changed.Cores++
-		if _, err := gate.adopt(run, periapsis.M, changed); err == nil {
+		if _, err := gate.adopt(run, pipeline.M, changed); err == nil {
 			t.Fatal("changed demand accepted for the same reservation")
 		}
 	}
@@ -336,13 +337,13 @@ type adoptingKubeVirtEngine struct {
 	adopted chan string
 }
 
-func (engine *adoptingKubeVirtEngine) JobNamespace() string { return "workflows" }
+func (engine *adoptingKubeVirtEngine) WorkflowNamespace() string { return "workflows" }
 
-func (engine *adoptingKubeVirtEngine) Adopt(_ context.Context, run model.Run) (periapsis.Size, bool, error) {
+func (engine *adoptingKubeVirtEngine) Adopt(_ context.Context, run model.Run) (pipeline.Size, bool, error) {
 	engine.mu.Lock()
 	defer engine.mu.Unlock()
-	job := engine.jobs[run.JobName]
-	return periapsis.M, job != nil && job.runID == run.ID, nil
+	job := engine.jobs[run.WorkflowName]
+	return pipeline.M, job != nil && job.runID == run.ID, nil
 }
 
 func (engine *adoptingKubeVirtEngine) AdoptedKubeVirtDemand(run model.Run) (argoworkflow.VMIDemand, error) {
@@ -365,12 +366,12 @@ func TestKubeVirtRestartRestoresTwoRunsBeforeAdmittingThird(t *testing.T) {
 	for i, ref := range []string{"first", "second"} {
 		engine.resources[ref] = KubeVirtResources{Demand: unit, Limit: limit}
 		run := fixture.enqueueAndClaim(t, ref, strings.Repeat(string(rune('a'+i)), 40))
-		run.JobName = "workflow-" + ref
-		fixture.setJobName(t, run.ID, run.JobName)
+		run.WorkflowName = "workflow-" + ref
+		fixture.setWorkflowName(t, run.ID, run.WorkflowName)
 		if _, err := fixture.store.MarkRunSubmitted(t.Context(), run.ID); err != nil {
 			t.Fatal(err)
 		}
-		if err := engine.CreateCI(t.Context(), JobRequest{Run: run, JobName: run.JobName}); err != nil {
+		if err := engine.CreateWorkflow(t.Context(), WorkflowRequest{Run: run, WorkflowName: run.WorkflowName}); err != nil {
 			t.Fatal(err)
 		}
 		<-engine.created
@@ -382,7 +383,7 @@ func TestKubeVirtRestartRestoresTwoRunsBeforeAdmittingThird(t *testing.T) {
 		t.Fatal(err)
 	}
 	var err error
-	fixture.store, err = store.Open(t.Context(), filepath.Join(fixture.root, "oberth.sqlite"), store.Options{})
+	fixture.store, err = storetest.Open(t.Context(), filepath.Join(fixture.root, "oberth.sqlite"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -410,7 +411,7 @@ func TestKubeVirtRestartRestoresTwoRunsBeforeAdmittingThird(t *testing.T) {
 	}
 	for _, run := range runs {
 		current := group.run(t, run.ID)
-		if current.Status != model.RunRunning || current.JobName != run.JobName || current.SupersededBy != "" {
+		if current.Status != model.RunRunning || current.WorkflowName != run.WorkflowName || current.SupersededBy != "" {
 			t.Fatalf("restart replaced run: %#v", current)
 		}
 	}

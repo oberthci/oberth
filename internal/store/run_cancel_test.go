@@ -126,7 +126,7 @@ func TestCancelClaimedRunRecordsDeletionObligationAndIsNotRefiredAtRestart(t *te
 			t.Fatal(err)
 		}
 	}
-	if _, err := s.SetRunJobName(ctx, withJob.ID, "oberth-job-running"); err != nil {
+	if _, err := s.SetRunWorkflowName(ctx, withJob.ID, "oberth-job-running"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.MarkRunSubmitted(ctx, withJob.ID); err != nil {
@@ -138,20 +138,20 @@ func TestCancelClaimedRunRecordsDeletionObligationAndIsNotRefiredAtRestart(t *te
 		t.Fatal(err)
 	}
 	if running.PreviousState != model.RunRunning || len(running.Cancellations) != 1 ||
-		running.Cancellations[0].JobName != "oberth-job-running" || running.Cancellations[0].SupersededBy != "" {
+		running.Cancellations[0].WorkflowName != "oberth-job-running" || running.Cancellations[0].SupersededBy != "" {
 		t.Fatalf("running cancel = %#v", running)
 	}
 	waiting, err := s.CancelRun(ctx, model.RunCancelRequest{RunID: withoutJob.ID, Actor: "dima@host"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if waiting.PreviousState != model.RunWaiting || len(waiting.Cancellations) != 1 || waiting.Cancellations[0].JobName != "" {
+	if waiting.PreviousState != model.RunWaiting || len(waiting.Cancellations) != 1 || waiting.Cancellations[0].WorkflowName != "" {
 		t.Fatalf("waiting cancel = %#v", waiting)
 	}
 	// The owner of the waiting run may still publish its Job name; the
 	// obligation follows it, and MarkRunSubmitted hands back the cancelled
 	// record instead of starting it.
-	named, err := s.SetRunJobName(ctx, withoutJob.ID, "oberth-job-waiting")
+	named, err := s.SetRunWorkflowName(ctx, withoutJob.ID, "oberth-job-waiting")
 	if err != nil || !named.Cancelled() {
 		t.Fatalf("job name after cancel = %#v, %v", named, err)
 	}
@@ -163,7 +163,7 @@ func TestCancelClaimedRunRecordsDeletionObligationAndIsNotRefiredAtRestart(t *te
 		t.Fatalf("pending cancellations = %#v, %v", pending, err)
 	}
 	for _, obligation := range pending {
-		if obligation.JobName == "" {
+		if obligation.WorkflowName == "" {
 			t.Fatalf("obligation lost its Job name: %#v", obligation)
 		}
 	}
@@ -184,7 +184,7 @@ func TestCancelClaimedRunRecordsDeletionObligationAndIsNotRefiredAtRestart(t *te
 		}
 	}
 	for _, obligation := range pending {
-		if err := s.CompleteRunCancellation(ctx, obligation.RunID, obligation.JobName); err != nil {
+		if err := s.CompleteRunCancellation(ctx, obligation.RunID, obligation.WorkflowName); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -368,7 +368,7 @@ func TestRearmRunCancellationReopensOnlyPreemptedRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending, err := s.PendingRunCancellations(ctx)
-	if err != nil || len(pending) != 1 || pending[0].RunID != run.ID || pending[0].JobName != "oberth-late-workflow" {
+	if err != nil || len(pending) != 1 || pending[0].RunID != run.ID || pending[0].WorkflowName != "oberth-late-workflow" {
 		t.Fatalf("re-armed obligations = %#v, %v", pending, err)
 	}
 }

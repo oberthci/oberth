@@ -18,7 +18,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 const nonrootProfileAnnotation = "oberth.ci/verified-controller-profile"
@@ -54,6 +54,24 @@ func nonrootRequestIdentity(request Request) string {
 		VMIReceipt      *argoworkflow.VMIDemandSummary `json:",omitempty"`
 	}{[]string{request.RunID, request.Name, request.Repo, request.UpstreamName, request.UpstreamOrg, request.Ref, request.SHA, string(request.Trigger), request.SourceDir}, request.Source, request.ApprovedSecrets, fragments, trustedIntent,
 		vmiReceipt}
+	if request.Capability != nil {
+		var receipt *argoworkflow.RunSourceSummary
+		if request.DemandReceipt != nil {
+			summary := request.DemandReceipt.Summary()
+			receipt = &summary
+		}
+		if request.VMIDemandReceipt != nil {
+			summary := request.VMIDemandReceipt.Summary()
+			receipt = &summary
+		}
+		encoded, _ := json.Marshal(struct {
+			Identity      any
+			Capability    string
+			SourceReceipt *argoworkflow.RunSourceSummary
+		}{identity, capabilityBinding(request.RepositoryID, request.Capability), receipt})
+		digest := sha256.Sum256(encoded)
+		return hex.EncodeToString(digest[:])
+	}
 	encoded, _ := json.Marshal(identity) // Only primitive serializable types.
 	digest := sha256.Sum256(encoded)
 	return hex.EncodeToString(digest[:])
@@ -115,7 +133,7 @@ func (controller *Controller) expectedSourceVolume(request Request) SourceVolume
 	if controller.config.GoProxyCACertPEM != "" {
 		volume.GoProxyCASubPath = goProxyCASubPath + "/" + goProxyCACertFile
 	}
-	if request.Trigger == periapsis.TriggerRelease || pipelineDeclaresSecretPaths(request.Source) {
+	if request.Trigger == pipeline.TriggerRelease || pipelineDeclaresSecretPaths(request.Source) {
 		volume.BinarySubPath = binarySubPath
 		if controller.config.VaultCACertPEM != "" {
 			volume.VaultCASubPath = vaultCASubPath

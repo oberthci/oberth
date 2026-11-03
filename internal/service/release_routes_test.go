@@ -26,22 +26,22 @@ func (g *routedReleaseCheckGit) ReadDefaultBlob(ctx context.Context, repo, file 
 type routedReleaseChecker struct {
 	releaseChecker
 	files    []string
-	requests []JobRequest
+	requests []WorkflowRequest
 }
 
-func (c *routedReleaseChecker) PreflightRelease(ctx context.Context, request JobRequest, source []byte) (ReleasePreflightResult, error) {
+func (c *routedReleaseChecker) PreflightRelease(ctx context.Context, request WorkflowRequest, source []byte) (ReleasePreflightResult, error) {
 	c.requests = append(c.requests, request)
 	return c.releaseChecker.PreflightRelease(ctx, request, source)
 }
 
-func (c *routedReleaseChecker) ReleasePreflightFiles(context.Context, JobRequest) ([]string, error) {
+func (c *routedReleaseChecker) ReleasePreflightFiles(context.Context, WorkflowRequest) ([]string, error) {
 	return c.files, nil
 }
 
 func TestReleasePreflightIncludesAdminRoutedFiles(t *testing.T) {
 	checker := &routedReleaseChecker{files: []string{releasePreflightFile, ".oberth/deploy.yaml"}, releaseChecker: releaseChecker{problems: []string{"unapproved role"}}}
 	git := &routedReleaseCheckGit{releaseCheckGit: &releaseCheckGit{source: []byte("new"), base: []byte("old")}}
-	request := JobRequest{Run: model.Run{SHA: strings.Repeat("a", 40)}}
+	request := WorkflowRequest{Run: model.Run{SHA: strings.Repeat("a", 40)}}
 	result, err := releasePreflight(t.Context(), git, checker, request, "", true)
 	if err != nil || checker.calls != 1 || len(result.Problems) != 1 || !strings.Contains(result.Problems[0], ".oberth/deploy.yaml: unapproved role") {
 		t.Fatalf("routed declaration bypassed preflight: %+v err=%v calls=%d", result, err, checker.calls)
@@ -76,7 +76,7 @@ func (g *pinnedReleaseFilesGit) ReadOptionalBlob(_ context.Context, _ string, sh
 func TestRoutedPreflightPinsOneDefaultCommit(t *testing.T) {
 	checker := &routedReleaseChecker{files: []string{releasePreflightFile, ".oberth/deploy.yaml"}}
 	git := &pinnedReleaseFilesGit{releaseCheckGit: &releaseCheckGit{}}
-	_, err := releasePreflight(t.Context(), git, checker, JobRequest{Run: model.Run{SHA: strings.Repeat("a", 40)}}, "", true)
+	_, err := releasePreflight(t.Context(), git, checker, WorkflowRequest{Run: model.Run{SHA: strings.Repeat("a", 40)}}, "", true)
 	if err != nil || git.defaults != 1 || len(git.files) != 1 || git.files[0] != ".oberth/deploy.yaml" || checker.calls != 2 {
 		t.Fatalf("mixed default revisions: defaults=%d files=%v calls=%d err=%v", git.defaults, git.files, checker.calls, err)
 	}
@@ -99,6 +99,6 @@ type routedReleasePlanner struct {
 	files []string
 }
 
-func (c *routedReleasePlanner) ReleasePreflightFiles(context.Context, JobRequest) ([]string, error) {
+func (c *routedReleasePlanner) ReleasePreflightFiles(context.Context, WorkflowRequest) ([]string, error) {
 	return c.files, nil
 }

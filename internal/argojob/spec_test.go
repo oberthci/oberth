@@ -16,7 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 const (
@@ -77,10 +77,10 @@ spec:
             value: yes-please
 `
 
-func testRequest(trigger periapsis.Trigger, source string) Request {
+func testRequest(trigger pipeline.Trigger, source string) Request {
 	return Request{
 		RunID: "run-abc123", RepositoryID: 1, Name: "oberth-oberth-run-abc1-aabbccddeeff",
-		Repo: "oberth", UpstreamOrg: "skipops",
+		Repo: "oberth", UpstreamOrg: "acme",
 		Ref: "refs/heads/main", SHA: testSHA,
 		Trigger: trigger, Source: []byte(source),
 		ApprovedSecrets: map[string]bool{},
@@ -90,7 +90,7 @@ func testRequest(trigger periapsis.Trigger, source string) Request {
 // TestBuildAssignsPipelineIdentityWithoutSecrets proves that both CI and
 // release documents without declared secret paths receive the pipeline SA.
 func TestBuildAssignsPipelineIdentityWithoutSecrets(t *testing.T) {
-	branch, err := Build(testConfig(), testRequest(periapsis.TriggerCI, greedyDocument))
+	branch, err := Build(testConfig(), testRequest(pipeline.TriggerCI, greedyDocument))
 	if err != nil {
 		t.Fatalf("build CI: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestBuildAssignsPipelineIdentityWithoutSecrets(t *testing.T) {
 		t.Fatal("CI submission automounts a ServiceAccount token")
 	}
 
-	release, err := Build(testConfig(), testRequest(periapsis.TriggerRelease, greedyDocument))
+	release, err := Build(testConfig(), testRequest(pipeline.TriggerRelease, greedyDocument))
 	if err != nil {
 		t.Fatalf("build release: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestBuildAssignsPipelineIdentityWithoutSecrets(t *testing.T) {
 
 // TestBuildRefusesUnknownTriggers ensures unknown trigger values are refused.
 func TestBuildRefusesUnknownTriggers(t *testing.T) {
-	if _, err := Build(testConfig(), testRequest(periapsis.Trigger("unknown"), greedyDocument)); err == nil {
+	if _, err := Build(testConfig(), testRequest(pipeline.Trigger("unknown"), greedyDocument)); err == nil {
 		t.Fatal("expected unknown trigger to be refused by the Argo engine")
 	}
 }
@@ -123,7 +123,7 @@ func TestBuildRefusesUnknownTriggers(t *testing.T) {
 func TestBuildInjectsRunIdentityAndVaultCoordinates(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
 		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
-	request := testRequest(periapsis.TriggerRelease, withPaths)
+	request := testRequest(pipeline.TriggerRelease, withPaths)
 	request.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
 	release, err := Build(testConfig(), request)
 	if err != nil {
@@ -134,7 +134,7 @@ func TestBuildInjectsRunIdentityAndVaultCoordinates(t *testing.T) {
 		"OBERTH_REPO":       "oberth",
 		"OBERTH_REF":        "refs/heads/main",
 		"OBERTH_SHA":        testSHA,
-		"OBERTH_TRIGGER":    string(periapsis.TriggerRelease),
+		"OBERTH_TRIGGER":    string(pipeline.TriggerRelease),
 		"OBERTH_RUN_ID":     "run-abc123",
 		"VAULT_ADDR":        testVaultAddress,
 		"OBERTH_VAULT_ROLE": testVaultCredentialedRole,
@@ -149,12 +149,12 @@ func TestBuildInjectsRunIdentityAndVaultCoordinates(t *testing.T) {
 // TestBuildOverridesRunIdentityTheDocumentTriesToSet proves a document cannot
 // lie to its own steps about which trigger they are running under.
 func TestBuildOverridesRunIdentityTheDocumentTriesToSet(t *testing.T) {
-	branch, err := Build(testConfig(), testRequest(periapsis.TriggerCI, greedyDocument))
+	branch, err := Build(testConfig(), testRequest(pipeline.TriggerCI, greedyDocument))
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
 	environment := environmentOf(t, branch, "main")
-	if environment["OBERTH_TRIGGER"] != string(periapsis.TriggerCI) {
+	if environment["OBERTH_TRIGGER"] != string(pipeline.TriggerCI) {
 		t.Fatalf("OBERTH_TRIGGER = %q, want ci", environment["OBERTH_TRIGGER"])
 	}
 	if _, present := environment["VAULT_ADDR"]; present {
@@ -200,7 +200,7 @@ func TestBuildWorkspacePATH(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			built, err := Build(testConfig(), testRequest(periapsis.TriggerCI, string(source)))
+			built, err := Build(testConfig(), testRequest(pipeline.TriggerCI, string(source)))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -221,7 +221,7 @@ func TestBuildWorkspacePATH(t *testing.T) {
 }
 
 func TestBuildCapsTheDocumentDeadline(t *testing.T) {
-	built, err := Build(testConfig(), testRequest(periapsis.TriggerCI, greedyDocument))
+	built, err := Build(testConfig(), testRequest(pipeline.TriggerCI, greedyDocument))
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestBuildCapsTheDocumentDeadline(t *testing.T) {
 
 	// A document asking for less than the ceiling keeps its own value.
 	modest := strings.Replace(greedyDocument, "activeDeadlineSeconds: 999999", "activeDeadlineSeconds: 300", 1)
-	built, err = Build(testConfig(), testRequest(periapsis.TriggerCI, modest))
+	built, err = Build(testConfig(), testRequest(pipeline.TriggerCI, modest))
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestBuildCapsTheDocumentDeadline(t *testing.T) {
 }
 
 func TestBuildDoesNotSetPodGC(t *testing.T) {
-	built, err := Build(testConfig(), testRequest(periapsis.TriggerCI, greedyDocument))
+	built, err := Build(testConfig(), testRequest(pipeline.TriggerCI, greedyDocument))
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestBuildDoesNotSetPodGC(t *testing.T) {
 }
 
 func TestBuildStampsServerOwnedIdentity(t *testing.T) {
-	request := testRequest(periapsis.TriggerCI, greedyDocument)
+	request := testRequest(pipeline.TriggerCI, greedyDocument)
 	built, err := Build(testConfig(), request)
 	if err != nil {
 		t.Fatalf("build: %v", err)
@@ -273,11 +273,11 @@ func TestBuildStampsServerOwnedIdentity(t *testing.T) {
 
 func TestBuildSetsTierLabelOnWorkflowAndPods(t *testing.T) {
 	for _, test := range []struct {
-		trigger  periapsis.Trigger
+		trigger  pipeline.Trigger
 		wantTier string
 	}{
-		{periapsis.TriggerCI, "ci"},
-		{periapsis.TriggerRelease, "release"},
+		{pipeline.TriggerCI, "ci"},
+		{pipeline.TriggerRelease, "release"},
 	} {
 		t.Run(string(test.trigger), func(t *testing.T) {
 			request := testRequest(test.trigger, greedyDocument)
@@ -301,11 +301,11 @@ func TestBuildSetsTierLabelOnWorkflowAndPods(t *testing.T) {
 // TestBuildIsDeterministic proves the spec digest is stable, which is what
 // makes an ambiguous create safely retryable.
 func TestBuildIsDeterministic(t *testing.T) {
-	first, err := Build(testConfig(), testRequest(periapsis.TriggerCI, greedyDocument))
+	first, err := Build(testConfig(), testRequest(pipeline.TriggerCI, greedyDocument))
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	second, err := Build(testConfig(), testRequest(periapsis.TriggerCI, greedyDocument))
+	second, err := Build(testConfig(), testRequest(pipeline.TriggerCI, greedyDocument))
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -318,28 +318,28 @@ func TestBuildAuthorizesDeclaredSecretPaths(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
 		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
 	// Release with an approved system-namespace path: admitted.
-	approvedRelease := testRequest(periapsis.TriggerRelease, withPaths)
+	approvedRelease := testRequest(pipeline.TriggerRelease, withPaths)
 	approvedRelease.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
 	if _, err := Build(testConfig(), approvedRelease); err != nil {
 		t.Fatalf("approved release path: %v", err)
 	}
 	// CI pipelines cannot declare system-namespace paths (oberth/data/...).
-	ciSystemPath := testRequest(periapsis.TriggerCI, withPaths)
+	ciSystemPath := testRequest(pipeline.TriggerCI, withPaths)
 	ciSystemPath.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
 	if _, err := Build(testConfig(), ciSystemPath); err == nil {
 		t.Fatal("expected a system-namespace path to be refused for CI")
 	}
 	// CI pipelines CAN declare upstream-scoped paths.
 	withUpstream := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/test-secret\n", 1)
-	ciUpstream := testRequest(periapsis.TriggerCI, withUpstream)
-	ciUpstream.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/test-secret": true}
+		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
+	ciUpstream := testRequest(pipeline.TriggerCI, withUpstream)
+	ciUpstream.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/test-secret": true}
 	if _, err := Build(testConfig(), ciUpstream); err != nil {
 		t.Fatalf("upstream-scoped CI path: %v", err)
 	}
 	// Unapproved path: rejected.
 	notAllowed := strings.Replace(withPaths, "oberth/data/release/r2-upload-token", "oberth/data/somebody-elses", 1)
-	if _, err := Build(testConfig(), testRequest(periapsis.TriggerRelease, notAllowed)); err == nil {
+	if _, err := Build(testConfig(), testRequest(pipeline.TriggerRelease, notAllowed)); err == nil {
 		t.Fatal("expected an unapproved path to be refused")
 	}
 }
@@ -353,10 +353,10 @@ func TestBuildAuthorizesDeclaredSecretPaths(t *testing.T) {
 // identity the release role binds.
 func TestBuildGrantsCISecretsIdentityWithSecretPaths(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/test-secret\n", 1)
+		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
 
-	request := testRequest(periapsis.TriggerCI, withPaths)
-	request.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/test-secret": true}
+	request := testRequest(pipeline.TriggerCI, withPaths)
+	request.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/test-secret": true}
 	credentialed, err := Build(testConfig(), request)
 	if err != nil {
 		t.Fatalf("build credentialed CI: %v", err)
@@ -397,7 +397,7 @@ func TestBuildGrantsCISecretsIdentityWithSecretPaths(t *testing.T) {
 	}
 
 	// A CI pipeline without secret paths keeps the pipeline identity.
-	plain, err := Build(testConfig(), testRequest(periapsis.TriggerCI, greedyDocument))
+	plain, err := Build(testConfig(), testRequest(pipeline.TriggerCI, greedyDocument))
 	if err != nil {
 		t.Fatalf("build plain CI: %v", err)
 	}
@@ -416,9 +416,9 @@ func TestBuildGrantsCISecretsIdentityWithSecretPaths(t *testing.T) {
 // fall back to the release-tier role.
 func TestBuildRefusesCICredentialedWithoutCISecretsRole(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/test-secret\n", 1)
-	request := testRequest(periapsis.TriggerCI, withPaths)
-	request.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/test-secret": true}
+		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
+	request := testRequest(pipeline.TriggerCI, withPaths)
+	request.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/test-secret": true}
 	config := testConfig()
 	config.VaultCISecretsRole = ""
 	_, err := Build(config, request)
@@ -454,7 +454,7 @@ func TestPipelineAndCredentialedServiceAccountsMustDiffer(t *testing.T) {
 func TestReleaseWithSecretsGetsCredentialedIdentity(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
 		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
-	request := testRequest(periapsis.TriggerRelease, withPaths)
+	request := testRequest(pipeline.TriggerRelease, withPaths)
 	request.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
 	release, err := Build(testConfig(), request)
 	if err != nil {
@@ -473,7 +473,7 @@ func TestReleaseWithSecretsGetsCredentialedIdentity(t *testing.T) {
 func TestBuildRecordsDeclaredPathsForAudit(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
 		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
-	request := testRequest(periapsis.TriggerRelease, withPaths)
+	request := testRequest(pipeline.TriggerRelease, withPaths)
 	request.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
 	built, err := Build(testConfig(), request)
 	if err != nil {
@@ -498,9 +498,9 @@ func TestConfigRefusesASharedIdentity(t *testing.T) {
 // finding 11.
 func TestBuildRejectsCredentialedRunWithMissingVaultCoordinates(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/test-secret\n", 1)
-	request := testRequest(periapsis.TriggerCI, withPaths)
-	request.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/test-secret": true}
+		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
+	request := testRequest(pipeline.TriggerCI, withPaths)
+	request.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/test-secret": true}
 
 	// Missing address.
 	noAddr := testConfig()
@@ -538,13 +538,13 @@ func TestConfigRefusesPlaintextVault(t *testing.T) {
 func TestBuildRefusesAnInadmissibleDocument(t *testing.T) {
 	hostile := strings.Replace(greedyDocument, "  entrypoint: main\n",
 		"  entrypoint: main\n  podSpecPatch: '{\"serviceAccountName\":\"oberth-argo-release\"}'\n", 1)
-	if _, err := Build(testConfig(), testRequest(periapsis.TriggerCI, hostile)); err == nil {
+	if _, err := Build(testConfig(), testRequest(pipeline.TriggerCI, hostile)); err == nil {
 		t.Fatal("expected podSpecPatch to be refused by the engine")
 	}
 }
 
 func TestBuildRefusesAMalformedRequest(t *testing.T) {
-	broken := testRequest(periapsis.TriggerCI, greedyDocument)
+	broken := testRequest(pipeline.TriggerCI, greedyDocument)
 	broken.SHA = "not-a-sha"
 	if _, err := Build(testConfig(), broken); err == nil {
 		t.Fatal("expected a malformed SHA to be refused")
@@ -571,7 +571,7 @@ spec:
                 image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
                 command: [/bin/true]
 `
-	built, err := Build(testConfig(), testRequest(periapsis.TriggerCI, nested))
+	built, err := Build(testConfig(), testRequest(pipeline.TriggerCI, nested))
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -601,7 +601,7 @@ spec:
                 image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
                 command: [/bin/true]
 `
-	built, err := Build(testConfig(), testRequest(periapsis.TriggerCI, nested))
+	built, err := Build(testConfig(), testRequest(pipeline.TriggerCI, nested))
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -616,12 +616,12 @@ spec:
 }
 
 func TestDeclaredSizeFlowsThroughTheEngine(t *testing.T) {
-	built, err := Build(testConfig(), testRequest(periapsis.TriggerCI, greedyDocument))
+	built, err := Build(testConfig(), testRequest(pipeline.TriggerCI, greedyDocument))
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
 	size, err := argoworkflow.DeclaredSize(built)
-	if err != nil || size != periapsis.L {
+	if err != nil || size != pipeline.L {
 		t.Fatalf("size = %q,%v; want L", size, err)
 	}
 }
@@ -657,7 +657,7 @@ func renderJSON(t *testing.T, value any) string {
 // releaseRequestWithAnchor is a release submission whose seeding delivered the
 // trust anchor, which is the only state in which Build may advertise one.
 func releaseRequestWithAnchor(source string) Request {
-	request := testRequest(periapsis.TriggerRelease, source)
+	request := testRequest(pipeline.TriggerRelease, source)
 	request.SourceVolume = SourceVolume{
 		ClaimName:      "oberth-oberth-run-abc1-aabbccddeeff-src",
 		SubPath:        "src",
@@ -757,7 +757,7 @@ func TestBuildMountsTheVaultTrustAnchorOnTheReleaseTier(t *testing.T) {
 // hold no token, so an anchor there would only make the tier look configurable.
 func TestBuildWithholdsTheVaultTrustAnchorFromTheCITier(t *testing.T) {
 	request := releaseRequestWithAnchor(greedyDocument)
-	request.Trigger = periapsis.TriggerCI
+	request.Trigger = pipeline.TriggerCI
 	request.SourceVolume.VaultCASubPath = vaultCASubPath
 
 	workflow, err := Build(testConfig(), request)
@@ -869,8 +869,8 @@ func TestValidateRefusesAVaultCABundleThatIsNotAnAnchor(t *testing.T) {
 // secret path not in the approval table is rejected at admission.
 func TestBuildRejectsUnapprovedSecretPath(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/test-secret\n", 1)
-	request := testRequest(periapsis.TriggerCI, withPaths)
+		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
+	request := testRequest(pipeline.TriggerCI, withPaths)
 	// ApprovedSecrets is set but empty — no grants.
 	request.ApprovedSecrets = map[string]bool{}
 	if _, err := Build(testConfig(), request); err == nil {
@@ -884,10 +884,10 @@ func TestBuildRejectsUnapprovedSecretPath(t *testing.T) {
 // present in the approval table is admitted.
 func TestBuildAdmitsApprovedSecretPath(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/test-secret\n", 1)
-	request := testRequest(periapsis.TriggerCI, withPaths)
+		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
+	request := testRequest(pipeline.TriggerCI, withPaths)
 	request.ApprovedSecrets = map[string]bool{
-		"oberth/upstream/skipops/oberth/test-secret": true,
+		"oberth/upstream/acme/oberth/test-secret": true,
 	}
 	workflow, err := Build(testConfig(), request)
 	if err != nil {
@@ -909,7 +909,7 @@ func TestBuildAdmitsApprovedSecretPath(t *testing.T) {
 func TestBuildRejectsCISystemPathWithApprovalTable(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
 		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
-	request := testRequest(periapsis.TriggerCI, withPaths)
+	request := testRequest(pipeline.TriggerCI, withPaths)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/data/release/r2-upload-token": true,
 	}
@@ -926,7 +926,7 @@ func TestBuildRejectsCISystemPathWithApprovalTable(t *testing.T) {
 func TestBuildAdmitsApprovedReleaseSystemPath(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
 		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
-	request := testRequest(periapsis.TriggerRelease, withPaths)
+	request := testRequest(pipeline.TriggerRelease, withPaths)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/data/release/r2-upload-token": true,
 	}
@@ -945,7 +945,7 @@ func TestBuildAdmitsApprovedReleaseSystemPath(t *testing.T) {
 func TestBuildRejectsUnapprovedReleaseSystemPath(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
 		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/data/release/r2-upload-token\n", 1)
-	request := testRequest(periapsis.TriggerRelease, withPaths)
+	request := testRequest(pipeline.TriggerRelease, withPaths)
 	request.ApprovedSecrets = map[string]bool{
 		// No grant for this path.
 	}
@@ -963,10 +963,10 @@ func TestBuildRejectsUnapprovedReleaseSystemPath(t *testing.T) {
 func TestBuildRejectsCrossRepoUpstreamPathWithApprovalTable(t *testing.T) {
 	// Oberth trying to declare a path in terraform's namespace.
 	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/skipops/terraform/stolen-secret\n", 1)
-	request := testRequest(periapsis.TriggerCI, withPaths)
+		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/acme/terraform/stolen-secret\n", 1)
+	request := testRequest(pipeline.TriggerCI, withPaths)
 	request.ApprovedSecrets = map[string]bool{
-		"oberth/upstream/skipops/terraform/stolen-secret": true,
+		"oberth/upstream/acme/terraform/stolen-secret": true,
 	}
 	if _, err := Build(testConfig(), request); err == nil {
 		t.Fatal("expected a cross-repo upstream path to be rejected")
@@ -976,7 +976,7 @@ func TestBuildRejectsCrossRepoUpstreamPathWithApprovalTable(t *testing.T) {
 // TestBuildRejectsNilApprovedSecrets proves that a nil ApprovedSecrets map
 // is refused at admission -- the caller must always load the approval table.
 func TestBuildRejectsNilApprovedSecrets(t *testing.T) {
-	request := testRequest(periapsis.TriggerCI, greedyDocument)
+	request := testRequest(pipeline.TriggerCI, greedyDocument)
 	request.ApprovedSecrets = nil
 	if _, err := Build(testConfig(), request); err == nil {
 		t.Fatal("expected nil ApprovedSecrets to be refused")
@@ -1124,7 +1124,7 @@ spec:
 // switch keys on hasSecretPaths alone, not on trigger type.
 func TestBranchAndPromotionNeverGetCredentialedSA(t *testing.T) {
 	// CI with no paths.
-	plain, err := Build(testConfig(), testRequest(periapsis.TriggerCI, greedyDocument))
+	plain, err := Build(testConfig(), testRequest(pipeline.TriggerCI, greedyDocument))
 	if err != nil {
 		t.Fatalf("build plain CI: %v", err)
 	}
@@ -1172,7 +1172,7 @@ spec:
       image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       command: [/bin/true]
 `
-	_, err := Build(testConfig(), testRequest(periapsis.TriggerCI, duplicateStepDoc))
+	_, err := Build(testConfig(), testRequest(pipeline.TriggerCI, duplicateStepDoc))
 	if err == nil {
 		t.Fatal("Build accepted a pipeline with duplicate step keys; expected rejection before Workflow creation")
 	}
@@ -1197,7 +1197,7 @@ spec:
         image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         command: [/bin/true]
 `
-	workflow, err := Build(testConfig(), testRequest(periapsis.TriggerRelease, withMutex))
+	workflow, err := Build(testConfig(), testRequest(pipeline.TriggerRelease, withMutex))
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -1211,7 +1211,7 @@ spec:
 		t.Fatalf("scoped mutex name = %q, want %q", got, want)
 	}
 
-	ciWorkflow, err := Build(testConfig(), testRequest(periapsis.TriggerCI, withMutex))
+	ciWorkflow, err := Build(testConfig(), testRequest(pipeline.TriggerCI, withMutex))
 	if err != nil {
 		t.Fatalf("build CI: %v", err)
 	}
@@ -1251,7 +1251,7 @@ spec:
 `
 
 func TestBuildRecognisesOberthSecretstoreExec(t *testing.T) {
-	request := testRequest(periapsis.TriggerRelease, oberthExecDocument)
+	request := testRequest(pipeline.TriggerRelease, oberthExecDocument)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/data/release/r2-upload-token": true,
 		"oberth/data/release/cosign-secret":   true,
@@ -1261,7 +1261,7 @@ func TestBuildRecognisesOberthSecretstoreExec(t *testing.T) {
 		t.Fatalf("build: %v", err)
 	}
 
-	// The credentialed template should have the release token mount.
+	// Removing materialize must also remove its authority to receive a token.
 	template := workflow.Spec.Templates[0]
 	var hasTokenMount bool
 	for _, mount := range template.Container.VolumeMounts {
@@ -1325,7 +1325,7 @@ spec:
           - --
           - release.sh
 `
-	request := testRequest(periapsis.TriggerRelease, undeclaredPathDoc)
+	request := testRequest(pipeline.TriggerRelease, undeclaredPathDoc)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/data/release/r2-upload-token":   true,
 		"oberth/data/release/undeclared-secret": true,
@@ -1351,13 +1351,13 @@ spec:
         command: [/run/oberth/bin/oberth]
         args: [secretstore, exec, --dir=/run/oberth-secrets, --path=oberth/data/release/r2, --, release.sh]
 `
-	_, err := Build(testConfig(), testRequest(periapsis.TriggerRelease, noAnnotationDoc))
+	_, err := Build(testConfig(), testRequest(pipeline.TriggerRelease, noAnnotationDoc))
 	if err == nil || !strings.Contains(err.Error(), "secret-paths") {
 		t.Fatalf("expected admission refusal for exec without declared paths, got: %v", err)
 	}
 }
 
-// Tests that a materialize invocation (no --path flags) passes admission.
+// A retired materialize spelling is ordinary workload input, never a credential consumer.
 const oberthMaterializeDocument = `
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
@@ -1381,14 +1381,14 @@ spec:
           - release.sh
 `
 
-func TestBuildAcceptsOberthSecretstoreMaterialize(t *testing.T) {
-	request := testRequest(periapsis.TriggerRelease, oberthMaterializeDocument)
+func TestBuildDoesNotGrantTokensToRetiredMaterialize(t *testing.T) {
+	request := testRequest(pipeline.TriggerRelease, oberthMaterializeDocument)
 	request.ApprovedSecrets = map[string]bool{"oberth/data/release/r2-upload-token": true}
 	workflow, err := Build(testConfig(), request)
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	// The credentialed template should have the release token mount.
+	// Removing materialize must also remove its authority to receive a token.
 	template := workflow.Spec.Templates[0]
 	var hasTokenMount bool
 	for _, mount := range template.Container.VolumeMounts {
@@ -1396,8 +1396,8 @@ func TestBuildAcceptsOberthSecretstoreMaterialize(t *testing.T) {
 			hasTokenMount = true
 		}
 	}
-	if !hasTokenMount {
-		t.Fatal("oberth secretstore materialize template is missing the release token mount")
+	if hasTokenMount {
+		t.Fatal("retired materialize command received a release token mount")
 	}
 }
 
@@ -1529,7 +1529,7 @@ func TestPerStepGrantExactMatchPasses(t *testing.T) {
 		"oberth/release-publish-r2":     {ServiceAccountName: "oberth-step-test-r2"},
 		"oberth/release-publish-images": {ServiceAccountName: "oberth-step-test-images"},
 	}
-	request := testRequest(periapsis.TriggerRelease, multiTemplateExecDocument)
+	request := testRequest(pipeline.TriggerRelease, multiTemplateExecDocument)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/data/release/r2-upload-token": true,
 		"oberth/data/release/gar-image-key":   true,
@@ -1546,7 +1546,7 @@ func TestPerStepGrantExactMatchPasses(t *testing.T) {
 // TestPerStepGrantWildcardPasses proves that a wildcard step grant ("*")
 // authorizes any template to consume the path. Issue #623.
 func TestPerStepGrantWildcardPasses(t *testing.T) {
-	request := testRequest(periapsis.TriggerRelease, multiTemplateExecDocument)
+	request := testRequest(pipeline.TriggerRelease, multiTemplateExecDocument)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/data/release/r2-upload-token": true,
 		"oberth/data/release/gar-image-key":   true,
@@ -1564,7 +1564,7 @@ func TestPerStepGrantWildcardPasses(t *testing.T) {
 // granted only to a different template is rejected with the exact error
 // message. Issue #623.
 func TestPerStepGrantMismatchRejected(t *testing.T) {
-	request := testRequest(periapsis.TriggerRelease, multiTemplateExecDocument)
+	request := testRequest(pipeline.TriggerRelease, multiTemplateExecDocument)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/data/release/r2-upload-token": true,
 		"oberth/data/release/gar-image-key":   true,
@@ -1596,7 +1596,7 @@ func TestPerStepGrantCrossTemplateRejected(t *testing.T) {
 	// Swap the grants: r2-upload-token granted to release-publish-images,
 	// gar-image-key granted to release-publish-r2. Both templates should be
 	// rejected because each consumes the wrong path.
-	request := testRequest(periapsis.TriggerRelease, multiTemplateExecDocument)
+	request := testRequest(pipeline.TriggerRelease, multiTemplateExecDocument)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/data/release/r2-upload-token": true,
 		"oberth/data/release/gar-image-key":   true,
@@ -1647,7 +1647,7 @@ spec:
                   - --
                   - publish.sh
 `
-	request := testRequest(periapsis.TriggerRelease, inlineExecDoc)
+	request := testRequest(pipeline.TriggerRelease, inlineExecDoc)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/data/release/r2-upload-token": true,
 	}
@@ -1699,7 +1699,7 @@ spec:
           - --
           - publish.sh
 `
-	request := testRequest(periapsis.TriggerRelease, fragmentExecDoc)
+	request := testRequest(pipeline.TriggerRelease, fragmentExecDoc)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/data/release/r2-upload-token": true,
 	}
@@ -1749,7 +1749,7 @@ spec:
                   - --
                   - publish.sh
 `
-	request := testRequest(periapsis.TriggerRelease, inlineExecDoc)
+	request := testRequest(pipeline.TriggerRelease, inlineExecDoc)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/data/release/r2-upload-token": true,
 	}
@@ -1765,7 +1765,7 @@ spec:
 // TestOberthStepEnvironmentInjected proves that OBERTH_STEP is set to the
 // template name on every template after Build. Issue #623.
 func TestOberthStepEnvironmentInjected(t *testing.T) {
-	request := testRequest(periapsis.TriggerRelease, multiTemplateExecDocument)
+	request := testRequest(pipeline.TriggerRelease, multiTemplateExecDocument)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/data/release/r2-upload-token": true,
 		"oberth/data/release/gar-image-key":   true,
@@ -1801,7 +1801,7 @@ func TestOberthStepEnvironmentInjected(t *testing.T) {
 // map (pre-existing callers that only populate ApprovedSecrets) still passes
 // admission — backward compatibility with the wildcard-only era. Issue #623.
 func TestPerStepGrantNilStepGrantsBackwardCompatible(t *testing.T) {
-	request := testRequest(periapsis.TriggerRelease, oberthExecDocument)
+	request := testRequest(pipeline.TriggerRelease, oberthExecDocument)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/data/release/r2-upload-token": true,
 		"oberth/data/release/cosign-secret":   true,
@@ -1819,13 +1819,13 @@ func TestPerStepGrantNilStepGrantsBackwardCompatible(t *testing.T) {
 // step. A branch run that declares only its upstream path must never select
 // that identity, because its token could then read the undeclared release path.
 func TestCINamedStepGrantKeepsCISecretsIdentity(t *testing.T) {
-	const upstreamPath = "oberth/upstream/skipops/oberth/test-secret"
+	const upstreamPath = "oberth/upstream/acme/oberth/test-secret"
 	const document = `
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/test-secret
+    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret
     oberth.ci/size: L
 spec:
   entrypoint: publish
@@ -1839,7 +1839,7 @@ spec:
           - secretstore
           - exec
           - --dir=/run/oberth-secrets
-          - --path=oberth/upstream/skipops/oberth/test-secret
+          - --path=oberth/upstream/acme/oberth/test-secret
           - --
           - publish.sh
 `
@@ -1847,7 +1847,7 @@ spec:
 	config.PerStepIdentities = map[string]PerRepoIdentityConfig{
 		"oberth/publish": {ServiceAccountName: "oberth-step-release-publish"},
 	}
-	request := testRequest(periapsis.TriggerCI, document)
+	request := testRequest(pipeline.TriggerCI, document)
 	request.ApprovedSecrets = map[string]bool{upstreamPath: true}
 	request.StepGrants = map[string]map[string]bool{upstreamPath: {"publish": true}}
 
@@ -1875,7 +1875,7 @@ spec:
 // to the template that consumes the named-step-granted path. Issue #623.
 func TestPerStepIdentityAssignedToTemplate(t *testing.T) {
 	config := testConfig()
-	// canonicalRepoKey("", "skipops", "oberth") = "oberth" when UpstreamName is empty.
+	// canonicalRepoKey("", "acme", "oberth") = "oberth" when UpstreamName is empty.
 	config.PerRepoIdentities = map[string]PerRepoIdentityConfig{
 		"oberth": {ServiceAccountName: "oberth-argo-test-repo"},
 	}
@@ -1883,7 +1883,7 @@ func TestPerStepIdentityAssignedToTemplate(t *testing.T) {
 		"oberth/release-publish-images": {ServiceAccountName: "oberth-step-test-images"},
 	}
 
-	request := testRequest(periapsis.TriggerRelease, multiTemplateExecDocument)
+	request := testRequest(pipeline.TriggerRelease, multiTemplateExecDocument)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/data/release/r2-upload-token": true,
 		"oberth/data/release/gar-image-key":   true,
@@ -1942,7 +1942,7 @@ func TestPerStepIdentityWildcardKeepsPerRepo(t *testing.T) {
 		"oberth/release-publish-images": {ServiceAccountName: "oberth-step-test-images"},
 	}
 
-	request := testRequest(periapsis.TriggerRelease, multiTemplateExecDocument)
+	request := testRequest(pipeline.TriggerRelease, multiTemplateExecDocument)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/data/release/r2-upload-token": true,
 		"oberth/data/release/gar-image-key":   true,
@@ -1977,7 +1977,7 @@ func TestPerStepIdentityNilMapDeniesNamedGrants(t *testing.T) {
 	config := testConfig()
 	config.PerStepIdentities = nil
 
-	request := testRequest(periapsis.TriggerRelease, multiTemplateExecDocument)
+	request := testRequest(pipeline.TriggerRelease, multiTemplateExecDocument)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/data/release/r2-upload-token": true,
 		"oberth/data/release/gar-image-key":   true,
@@ -2003,7 +2003,7 @@ func TestPerStepIdentityNilMapWildcardOnlyPasses(t *testing.T) {
 	config := testConfig()
 	config.PerStepIdentities = nil
 
-	request := testRequest(periapsis.TriggerRelease, multiTemplateExecDocument)
+	request := testRequest(pipeline.TriggerRelease, multiTemplateExecDocument)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/data/release/r2-upload-token": true,
 		"oberth/data/release/gar-image-key":   true,
@@ -2036,7 +2036,7 @@ func TestPerStepIdentityMissingDeniesAdmission(t *testing.T) {
 		"oberth/release-publish-r2": {ServiceAccountName: "oberth-step-test-r2"},
 	}
 
-	request := testRequest(periapsis.TriggerRelease, multiTemplateExecDocument)
+	request := testRequest(pipeline.TriggerRelease, multiTemplateExecDocument)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/data/release/r2-upload-token": true,
 		"oberth/data/release/gar-image-key":   true,
@@ -2078,7 +2078,7 @@ func TestPerStepIdentityEmptySADeniesAdmission(t *testing.T) {
 		"oberth/release-publish-images": {ServiceAccountName: ""},
 	}
 
-	request := testRequest(periapsis.TriggerRelease, multiTemplateExecDocument)
+	request := testRequest(pipeline.TriggerRelease, multiTemplateExecDocument)
 	request.ApprovedSecrets = map[string]bool{
 		"oberth/data/release/r2-upload-token": true,
 		"oberth/data/release/gar-image-key":   true,

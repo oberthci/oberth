@@ -10,7 +10,7 @@ import (
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type rcaEvidenceController struct {
@@ -27,9 +27,9 @@ func TestRCARevisionPartialWorkflowEvidenceDoesNotCollectLiveArtifacts(t *testin
 		t.Run(map[bool]string{false: "live", true: "terminal"}[terminal], func(t *testing.T) {
 			now := time.Now()
 			failure := errors.New("identity delivery interrupted")
-			controller := &rcaEvidenceController{failure: failure, completion: argojob.Completion{Name: "workflow", Terminal: terminal, ReplayAttempts: []argojob.StepResult{{Burn: "ci", Step: "earlier", Status: runprogress.StepPassed, StartedAt: &now}}}}
+			controller := &rcaEvidenceController{failure: failure, completion: argojob.Completion{Name: "workflow", Terminal: terminal, ReplayAttempts: []argojob.StepResult{{Stage: "ci", Step: "earlier", Status: runprogress.StepPassed, StartedAt: &now}}}}
 			collector, artifacts := &fakeCollector{body: []byte("archive")}, &fakeArtifactStore{}
-			jobs := &ArgoJobs{controller: controller, intents: map[string]argoIntent{"workflow": {runID: "run", trigger: periapsis.TriggerCI, created: true}}, collector: collector, artifacts: artifacts, artifactLimit: 1 << 20}
+			jobs := &ArgoJobs{controller: controller, intents: map[string]argoIntent{"workflow": {runID: "run", trigger: pipeline.TriggerCI, created: true}}, collector: collector, artifacts: artifacts, artifactLimit: 1 << 20}
 			result, err := jobs.Wait(t.Context(), "workflow", io.Discard)
 			if !errors.Is(err, failure) || !result.ObservedStepStart {
 				t.Fatal("partial evidence erased", result, err)

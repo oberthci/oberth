@@ -41,7 +41,9 @@ func (controller *Controller) ObserveScheduling(ctx context.Context, name, runID
 	if workflow.Status.Message == "" && workflow.Status.Phase == wfv1.WorkflowRunning {
 		result.Message = "Workflow execution is running."
 	}
-	observeWorkflowDeadline(workflow, result, time.Now().UTC())
+	now := time.Now().UTC()
+	observeWorkflowDeadline(workflow, result, now)
+	observeServerDeadline(workflow, result, controller.config.ExecutionTimeout("", workflow.Spec.ActiveDeadlineSeconds), now)
 	// Sort only a bounded sample using insertion, avoiding an allocation for every
 	// node in a large Workflow. No node name is returned: expanded names can carry
 	// user-supplied parameter values.

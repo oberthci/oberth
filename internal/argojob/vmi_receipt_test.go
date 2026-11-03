@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestAdoptionPreservesRunAwareVMIReceipt(t *testing.T) {
@@ -19,7 +19,7 @@ func TestAdoptionPreservesRunAwareVMIReceipt(t *testing.T) {
 		}
 		return b
 	}
-	request := testRequest(periapsis.TriggerCI, string(read("vmi-run-projection.yaml")))
+	request := testRequest(pipeline.TriggerCI, string(read("vmi-run-projection.yaml")))
 	request.RunTrigger = argoworkflow.RunTriggerSchedule
 	request.ScheduleEntry = "nightly"
 	request.PipelineFile = argoworkflow.BuildFile

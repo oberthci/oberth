@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/oberthci/oberth/internal/identityname"
@@ -124,39 +125,59 @@ func syncGrantPolicies(ctx context.Context, store openBaoExec, rootToken string,
 		}
 	}
 
-	// --- Orphan removal (issue #623, finding 5) ---
-	// List existing oberth-step-* policies and remove any that are not in
-	// the desired set. This handles revoked grants: the per-step identity
-	// stays in OpenBao until the next sync removes it. Tokens outstanding
-	// under a removed role expire by TTL (≤30m token_max_ttl).
+	// Remove both tiers of per-repo identities and named-step identities that
+	// disappeared from the approval table. Listing is part of the sync's
+	// success condition: a receipt cannot claim revoked grants were removed
+	// when the store could not enumerate their policies.
+	desiredNames := desiredStepNames
+	// The shared policies use the same oberth-argo- prefix but are always
+	// managed above, independently of the per-repository approval table.
+	desiredNames[defaultCredentialedPolicy] = struct{}{}
+	desiredNames[defaultCISecretsPolicy] = struct{}{}
+	for _, id := range identities {
+		desiredNames[PerRepoName(id.Upstream, id.Org, id.Repo)] = struct{}{}
+		desiredNames[PerRepoCIName(id.Upstream, id.Org, id.Repo)] = struct{}{}
+	}
 	existingPolicies, err := store.policyList(ctx, rootToken)
 	if err != nil {
-		// Policy list is best-effort for orphan removal — do not fail the
-		// entire sync if the store does not support listing.
-		_ = err
-	} else {
-		for _, name := range existingPolicies {
-			if !identityname.HasPerStepPrefix(name) {
-				continue
-			}
-			if _, desired := desiredStepNames[name]; desired {
-				continue
-			}
-			// Orphan: print the planned removal, then remove the policy and role.
-			_, _ = fmt.Fprintf(output, "  removing orphan per-step identity %s (not in desired set)\n", name)
-			if err := store.policyDelete(ctx, rootToken, name); err != nil {
-				return results, fmt.Errorf("remove orphan per-step policy %s: %w", name, err)
-			}
-			rolePath := "auth/" + defaultAuthMount + "/role/" + name
-			if err := store.deleteRole(ctx, rootToken, rolePath); err != nil {
-				// Role may already be gone; log but do not fail.
-				_ = err
-			}
-			results = append(results, SyncResult{
-				Name:    "removed per-step " + name,
-				Changed: true,
-			})
+		return results, fmt.Errorf("list policies for orphan removal: %w", err)
+	}
+	existingRoles, err := store.roleList(ctx, rootToken)
+	if err != nil {
+		return results, fmt.Errorf("list roles for orphan removal: %w", err)
+	}
+	// A previous sync may have deleted a policy but failed to remove its role.
+	// Enumerate both sides, so those roles remain discoverable and retryable.
+	existing := make(map[string]struct{})
+	for _, name := range append(existingPolicies, existingRoles...) {
+		existing[name] = struct{}{}
+	}
+	names := make([]string, 0, len(existing))
+	for name := range existing {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		kind := "per-repo"
+		if identityname.HasPerStepPrefix(name) {
+			kind = "per-step"
+		} else if !strings.HasPrefix(name, identityname.PerRepoPrefix) {
+			continue
 		}
+		if _, desired := desiredNames[name]; desired {
+			continue
+		}
+		_, _ = fmt.Fprintf(output, "  removing orphan %s identity %s (not in desired set)\n", kind, name)
+		// Keep the policy discoverable until role deletion succeeds, so a
+		// partial failure can be retried by the next sync.
+		rolePath := "auth/" + defaultAuthMount + "/role/" + name
+		if err := store.deleteRole(ctx, rootToken, rolePath); err != nil {
+			return results, fmt.Errorf("remove orphan %s role %s: %w", kind, name, err)
+		}
+		if err := store.policyDelete(ctx, rootToken, name); err != nil {
+			return results, fmt.Errorf("remove orphan %s policy %s: %w", kind, name, err)
+		}
+		results = append(results, SyncResult{Name: "removed " + kind + " " + name, Changed: true})
 	}
 
 	return results, nil

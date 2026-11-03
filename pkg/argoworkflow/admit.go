@@ -11,7 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	k8svalidation "k8s.io/apimachinery/pkg/util/validation"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // Structural bounds. A repository-authored document is untrusted input to a
@@ -38,15 +38,17 @@ const (
 	MaxPVCCapacity        = "64Gi"
 )
 
-// Policy is the administrator-owned half of admission. It mirrors the Go
-// path's controls so an Argo-authored repository cannot reach substrate the
-// periapsis path is denied.
+// Policy is the administrator-owned admission boundary for repository YAML.
 type Policy struct {
+	Capability *Capability
+	// ServerDeadline permits an omitted deadline only for a server that injects
+	// its own bound before submission and enforces a separate watchdog.
+	ServerDeadline bool
 	// Only ResolveRunSource may attach a source-bound, server-owned context.
 	runVMISource *ResolvedRunSource
-	// RunnerImagePrefixes is the same administrator allowlist the Go path
-	// applies to a declared RunnerImage. Empty selects the built-in
-	// periapsis.DefaultRunnerImagePrefixes.
+	// RunnerImagePrefixes is the administrator's image allowlist.
+	// Empty selects the built-in
+	// pipeline.DefaultRunnerImagePrefixes.
 	RunnerImagePrefixes []string
 	// KubeVirt permits VM resources and KVM device leaves for an admin-granted repository.
 	// The server sets this only after checking the repository's VM grant.
@@ -75,12 +77,18 @@ func Admit(workflow *wfv1.Workflow, policy Policy) error {
 	if workflow == nil {
 		return errors.New("argoworkflow: no Workflow to admit")
 	}
-	if err := periapsis.ValidateRunnerImagePrefixes(policy.RunnerImagePrefixes); err != nil {
+	if err := pipeline.ValidateRunnerImagePrefixes(policy.RunnerImagePrefixes); err != nil {
 		return fmt.Errorf("argoworkflow: %w", err)
 	}
+	if err := policy.Capability.Validate(); err != nil {
+		return err
+	}
 	var problems []error
+	if policy.Capability != nil {
+		problems = append(problems, validateExtendedPeak(workflow, policy.Capability))
+	}
 	problems = append(problems, admitMetadata(workflow)...)
-	problems = append(problems, admitSpec(&workflow.Spec)...)
+	problems = append(problems, admitSpec(&workflow.Spec, policy.ServerDeadline)...)
 	if policy.KubeVirt && len(policy.ContainerDiskPrefixes) != 0 {
 		if err := validateContainerDiskPrefixes(policy.ContainerDiskPrefixes); err != nil {
 			problems = append(problems, fmt.Errorf("argoworkflow: %w", err))
@@ -161,7 +169,7 @@ func admitMetadata(workflow *wfv1.Workflow) []error {
 	return problems
 }
 
-func admitSpec(spec *wfv1.WorkflowSpec) []error {
+func admitSpec(spec *wfv1.WorkflowSpec, serverDeadline bool) []error {
 	var problems []error
 	if strings.TrimSpace(spec.Entrypoint) == "" {
 		problems = append(problems, errors.New("argoworkflow: spec.entrypoint is required"))
@@ -203,7 +211,7 @@ func admitSpec(spec *wfv1.WorkflowSpec) []error {
 	problems = append(problems, admitNodeTargeting("spec", spec.NodeSelector, spec.Affinity, spec.Tolerations)...)
 	// Pod metadata reaches every Pod the run creates, and that surface
 	// includes AppArmor and seccomp annotations and sidecar-injection
-	// triggers. The Go path assigns Pod metadata server-side; so does this one.
+	// triggers. Pod metadata is assigned server-side.
 	problems = append(problems, admitPodMetadata("spec.podMetadata", spec.PodMetadata)...)
 	if spec.PodPriorityClassName != "" || spec.Priority != nil {
 		problems = append(problems, errors.New("argoworkflow: spec.priority and spec.podPriorityClassName are not admitted"))
@@ -214,7 +222,7 @@ func admitSpec(spec *wfv1.WorkflowSpec) []error {
 	if spec.Suspend != nil && *spec.Suspend {
 		problems = append(problems, errors.New("argoworkflow: spec.suspend would hold a queue slot indefinitely"))
 	}
-	if spec.ActiveDeadlineSeconds == nil || *spec.ActiveDeadlineSeconds <= 0 {
+	if (spec.ActiveDeadlineSeconds == nil && !serverDeadline) || (spec.ActiveDeadlineSeconds != nil && *spec.ActiveDeadlineSeconds <= 0) {
 		// The examples corpus demonstrates no acquisition timeout on
 		// synchronization mutexes; a workflow that blocks on a held mutex
 		// forever would occupy a scheduler slot forever. A positive workflow
@@ -301,7 +309,7 @@ func admitTemplates(workflow *wfv1.Workflow, policy Policy) []error {
 			entrypointFound = true
 		}
 		problems = append(problems, admitTemplate(location, template, policy, 0)...)
-		if policy.KubeVirt && template.Resource != nil && !strings.HasPrefix(template.Name, "frag-") {
+		if policy.Capability == nil && policy.KubeVirt && template.Resource != nil && !strings.HasPrefix(template.Name, "frag-") {
 			vmiTemplates++
 			if template.Resource.Action == "create" {
 				// The individual manifest is validated above. A malformed one
@@ -316,8 +324,12 @@ func admitTemplates(workflow *wfv1.Workflow, policy Policy) []error {
 	}
 	grant, ceiling, budget := policy.effectiveVMIBudget()
 	declaredCreates := vmiCreates
-	demand, demandErr := DeclaredVMIDemand(workflow)
-	if policy.runVMISource != nil {
+	var demand VMIDemand
+	var demandErr error
+	if policy.Capability == nil {
+		demand, demandErr = DeclaredVMIDemand(workflow)
+	}
+	if policy.Capability == nil && policy.runVMISource != nil {
 		demand, demandErr = policy.runVMISource.demandFor(workflow)
 		if demandErr != nil {
 			problems = append(problems, demandErr)
@@ -425,7 +437,13 @@ func admitTemplate(location string, template wfv1.Template, policy Policy, depth
 	// workflow's own ServiceAccount. On the release tier that is a direct
 	// privilege escalation out of the pipeline.
 	if template.Resource != nil {
-		if !policy.KubeVirt {
+		if policy.Capability != nil {
+			if strings.Contains(location, ".inline") || location == "spec.templateDefaults" {
+				problems = append(problems, fmt.Errorf("argoworkflow: %s.resource requires a named template for its operator executor identity", location))
+			} else if err := admitCapabilityResource(location+".resource", template.Resource, policy.Capability); err != nil {
+				problems = append(problems, err)
+			}
+		} else if !policy.KubeVirt {
 			problems = append(problems, fmt.Errorf("argoworkflow: %s.resource creates arbitrary Kubernetes objects and is not admitted", location))
 		} else if strings.HasPrefix(template.Name, "frag-") || strings.Contains(location, ".inline") || location == "spec.templateDefaults" {
 			problems = append(problems, fmt.Errorf("argoworkflow: %s.resource must be a named template in the consuming repository", location))
@@ -617,11 +635,10 @@ func admitContainer(location string, container *corev1.Container, policy Policy)
 		return nil
 	}
 	var problems []error
-	// The same administrator allowlist that governs the Go path's RunnerImage
-	// governs every image an Argo-authored template runs.
-	if err := periapsis.ValidateRunnerImage(container.Image); err != nil {
+	// Every template image must satisfy the administrator's allowlist.
+	if err := pipeline.ValidateRunnerImage(container.Image); err != nil {
 		problems = append(problems, fmt.Errorf("argoworkflow: %s.image: %w", location, err))
-	} else if !periapsis.RunnerImageAllowed(container.Image, policy.RunnerImagePrefixes) {
+	} else if !pipeline.RunnerImageAllowed(container.Image, policy.RunnerImagePrefixes) {
 		problems = append(problems, fmt.Errorf("argoworkflow: %s.image %q is outside the administrator prefix allowlist",
 			location, container.Image))
 	}
@@ -645,7 +662,7 @@ func admitContainer(location string, container *corev1.Container, policy Policy)
 	}
 	problems = append(problems, admitContainerPorts(location, container.Ports)...)
 	problems = append(problems, admitContainerSecurityContext(location+".securityContext", container.SecurityContext)...)
-	problems = append(problems, admitContainerResources(location, container.Resources)...)
+	problems = append(problems, admitContainerResources(location, container.Resources, policy.Capability)...)
 	return problems
 }
 
@@ -653,7 +670,7 @@ func admitContainer(location string, container *corev1.Container, policy Policy)
 // storage. GPU and custom resources are refused outright: the deployment
 // target has none, and admitting them by name would let a repository
 // claim unbounded quantities of resources the server cannot price.
-func admitContainerResources(location string, resources corev1.ResourceRequirements) []error {
+func admitContainerResources(location string, resources corev1.ResourceRequirements, capability *Capability) []error {
 	var problems []error
 	ceilings := map[corev1.ResourceName]string{
 		corev1.ResourceCPU:              MaxContainerCPU,
@@ -663,6 +680,9 @@ func admitContainerResources(location string, resources corev1.ResourceRequireme
 	checkList := func(tier string, list corev1.ResourceList) {
 		for name, quantity := range list {
 			ceiling, known := ceilings[name]
+			if !known && capability != nil && capability.ExtendedResources[string(name)] > 0 {
+				continue
+			}
 			if !known {
 				problems = append(problems, fmt.Errorf(
 					"argoworkflow: %s.resources.%s declares resource %q which is not admitted",
@@ -679,6 +699,7 @@ func admitContainerResources(location string, resources corev1.ResourceRequireme
 	}
 	checkList("requests", resources.Requests)
 	checkList("limits", resources.Limits)
+	problems = append(problems, admitExtendedResources(location, resources, capability)...)
 	return problems
 }
 
@@ -786,10 +807,8 @@ func admitHooks(location string, hooks wfv1.LifecycleHooks) []error {
 	return problems
 }
 
-// admitNodeTargeting refuses a document's attempt to choose where it runs. The
-// Go path gives a repository no say in scheduling; parity matters because a
-// pipeline that can pick its node can pick a node whose other tenants it wants
-// to sit beside.
+// admitNodeTargeting reserves placement for the administrator: a repository
+// must not select its node or the tenants beside which its Pods run.
 func admitNodeTargeting(location string, selector map[string]string, affinity *corev1.Affinity, tolerations []corev1.Toleration) []error {
 	var problems []error
 	if len(selector) != 0 {

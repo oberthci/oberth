@@ -53,3 +53,7 @@ A revoked or rotated credential, unavailable authentication, or changed identity
 admin flag or scope closes the stream with an `auth_error` SSE event directing
 the client to reconnect with a current token. Authentication checks have a
 five-second deadline. Other HTTP requests authenticate on every request.
+
+The private in-pod administrative socket requires Linux peer credential checks.
+On other platforms `serve` refuses to start that socket. Local developer tools
+and remote clients remain usable without running the daemon.

@@ -14,7 +14,7 @@ func observations() []Observation {
 	now := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
 	var out []Observation
 	for i := range 5 {
-		v := model.StepResourceUsage{Version: 2, Source: "kubelet-cadvisor", RunID: fmt.Sprint(i), WorkflowName: "wf", PodName: fmt.Sprintf("wf-frag-1234abcd-step-abc12345-%d", i), PodUID: fmt.Sprint(i), ContainerID: fmt.Sprint(i), ContainerName: "main", ContainerKind: "app", PodKind: "workflow", Burn: "step-12345678", Step: "step-abc12345", Terminal: true, Samples: 4, SampledLowerBound: true, LastObservedAt: now, ContainerStartedAt: now.Add(-10 * time.Second), ContainerFinishedAt: now, CPUTimeNS: value(5e9), CPUTimeAt: now, CPUPeakNanoCores: value(1e9), MemoryPeakBytes: value(int64(i+1) * 100 << 20), EphemeralStoragePeakBytes: value(100 << 20)}
+		v := model.StepResourceUsage{Version: 2, Source: "kubelet-cadvisor", RunID: fmt.Sprint(i), WorkflowName: "wf", PodName: fmt.Sprintf("wf-frag-1234abcd-step-abc12345-%d", i), PodUID: fmt.Sprint(i), ContainerID: fmt.Sprint(i), ContainerName: "main", ContainerKind: "app", PodKind: "workflow", Stage: "step-12345678", Step: "step-abc12345", Terminal: true, Samples: 4, SampledLowerBound: true, LastObservedAt: now, ContainerStartedAt: now.Add(-10 * time.Second), ContainerFinishedAt: now, CPUTimeNS: value(5e9), CPUTimeAt: now, CPUPeakNanoCores: value(1e9), MemoryPeakBytes: value(int64(i+1) * 100 << 20), EphemeralStoragePeakBytes: value(100 << 20)}
 		out = append(out, Observation{Usage: v, Template: "frag-1234abcd-step-abc12345", Owner: "repo-01", MemoryLimitBytes: value(1 << 30), CPULimitNanoCores: value(0), EphemeralLimitBytes: value(0)})
 	}
 	return out

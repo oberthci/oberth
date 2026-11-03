@@ -173,10 +173,6 @@ function displayRunStatus(run) {
   if (run.Status === "waiting" || run.Status === "queued" || (run.Status === "running" && !run.StartedAt)) return "queued";
   return run.Status;
 }
-function runStatusCell(run) {
-  const status = displayRunStatus(run);
-  return `${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}`;
-}
 function scheduleBadge(run) { return run.Trigger === "schedule" && run.ScheduleEntry ? `<span class="v4b dim" title="schedule entry">${esc(run.ScheduleEntry)}</span>` : ""; }
 function priorityBadge(run) { return run.priority_class ? `<span class="v4b dim" title="${esc(run.priority_reason || "")}">${esc(run.priority_class)} priority</span>` : ""; }
 function releaseBadge(run) { return priorityBadge(run) + (run.Release ? '<span class="v4b release">⏏ RELEASE</span>' : ""); }
@@ -193,7 +189,7 @@ function runMessage(run) {
   return "";
 }
 /* Repository names repeat across upstreams (a "terraform" under github,
-   codeberg and skipops), and a bare name is then an ambiguous selector the
+   codeberg and acme), and a bare name is then an ambiguous selector the
    API refuses. The dashboard keys a repository by upstream/org/name — the
    qualified selector the API resolves — and labels a shared name org/name. */
 function upstreamOf(repo) {
@@ -353,9 +349,11 @@ async function api(url, opts = {}) {
   }
   // Discard the response if auth changed or route changed while we waited.
   if (state.authGen !== gen || (!opts.detached && state.routeSeq !== seq)) throw new Error("stale request");
-  if (response.status === 401) {
+  if (response.status === 401 || response.status === 429) {
     // Only show the prompt if auth generation has not changed since we sent.
-    if (state.authGen === gen) showTokenPrompt(hasToken() ? "Token rejected — enter a current uplink token." : "");
+    if (state.authGen === gen) showTokenPrompt(response.status === 429
+      ? "Too many authentication attempts. Wait one minute, then retry with a current uplink token."
+      : (hasToken() ? "Token rejected — enter a current uplink token." : ""));
     throw new Error("authentication required");
   }
   if (!response.ok) {
@@ -942,8 +940,10 @@ function summaryLines(detail) {
   if (execution) {
     if (["deadline_exceeded", "deadline_elapsed", "terminal_observed"].includes(execution.state)) lines.push(`[execution] ${detail.Scheduling.message}`);
     const deadline = execution.deadline;
-    if (deadline?.expires_at) lines.push(`[deadline] ${deadline.expires_at} · ${deadline.remaining_seconds ?? "unknown"}s remaining · clock: Workflow start`);
+    if (deadline?.expires_at) lines.push(`[deadline] ${deadline.expires_at} · ${deadline.remaining_seconds ?? "unknown"}s remaining · clock: ${deadline.clock === "preflight_admitted_at" ? "Preflight admission" : "Workflow start"}`);
     else if (deadline) lines.push(`[deadline] ${deadline.budget_seconds}s budget · Workflow start not observed`);
+    const serverDeadline = execution.server_deadline;
+    if (serverDeadline?.expires_at) lines.push(`[server watchdog] ${serverDeadline.expires_at} · ${serverDeadline.remaining_seconds ?? "unknown"}s remaining · clock: ${serverDeadline.clock === "workflow_started_at" ? "Workflow start" : "Workflow creation"}`);
     if (execution.reconciliation_lag_seconds != null) lines.push(`[execution] observed ${execution.phase} · finalization lag ${execution.reconciliation_lag_seconds}s`);
   }
   if (unreached) lines.push(`${unreached} declared step${unreached === 1 ? "" : "s"} not reached`);
@@ -1057,6 +1057,10 @@ class LiveLogEventSource {
           const line = pending.slice(0, newline).replace(/\r$/, "");
           pending = pending.slice(newline + 1);
           if (!line) {
+            if (event === "auth_error") {
+              const detail = data.length ? JSON.parse(data.join("\n")) : {};
+              throw new Error(detail.error || "stream authentication required");
+            }
             if (event === "chunk" && data.length) onChunk(JSON.parse(data.join("\n")));
             event = ""; data = [];
           } else if (line.startsWith("event:")) event = line.slice(6).trim();
@@ -1393,14 +1397,28 @@ function changeIssueFilter(patch) {
   state.issueCursorHistory = [];
   route();
 }
-function openIssue(id, opener) {
-  const issue = (state.issuePage?.Issues || []).find(item => String(item.ID) === String(id));
+async function openIssue(id, opener) {
+  let issue = (state.issuePage?.Issues || []).find(item => String(item.ID) === String(id));
   if (!issue) return;
   state.issueOpener = opener || document.activeElement;
   const dialog = document.getElementById("issueDialog");
   document.getElementById("issueDialogTitle").textContent = `Issue #${issue.ID}`;
   document.getElementById("issueDialogMeta").textContent = `${issue.Kind} · ${issue.State} · ${issue.upstream || "workspace-global"}`;
-  document.getElementById("issueDialogContent").innerHTML = `
+  const requestID = state.issueDetailRequest = (state.issueDetailRequest || 0) + 1;
+  const content = document.getElementById("issueDialogContent");
+  content.textContent = "Loading issue…";
+  document.querySelector(".app").inert = true;
+  if (!dialog.open) dialog.showModal();
+  let detail;
+  try {
+    detail = await api(`/api/issues/${encodeURIComponent(issue.ID)}`);
+  } catch (err) {
+    if (state.issueDetailRequest === requestID && dialog.open) content.textContent = err.message;
+    return;
+  }
+  if (state.issueDetailRequest !== requestID || !dialog.open) return;
+  issue = { ...issue, Body: detail.body };
+  content.innerHTML = `
     <h3>${esc(issue.Title || "Untitled issue")}</h3>
     <p class="meta">${esc(issue.RepoID ? repoName(issue.RepoID) : (issue.upstream || "workspace-global"))} ${issue.Branch ? "/ " + esc(issue.Branch) : ""} · Oberth internal ledger</p>
     <dl class="kv-grid">
@@ -1416,10 +1434,9 @@ function openIssue(id, opener) {
     </dl>
     <h4>Body</h4>
     <div class="issue-body md">${issue.Body ? renderMarkdown(issue.Body) : esc("(empty)")}</div>`;
-  document.querySelector(".app").inert = true;
-  dialog.showModal();
 }
 function closeIssue() {
+  state.issueDetailRequest = (state.issueDetailRequest || 0) + 1;
   const dialog = document.getElementById("issueDialog");
   if (dialog?.open) dialog.close();
   document.querySelector(".app").inert = false;
@@ -1463,9 +1480,18 @@ function admissionPausedBanner(profile) {
  if (!profile || !(profile.admission_paused ?? profile.state !== "verified")) return "";
  return `<div role="status" class="svc warn"><strong>Admission paused</strong><div>${esc(profile.reason || "Controller profile is unverified")}</div><div>${esc(profile.remedy || "Check controller profile and ReplicaSet readiness in Status.")}</div></div>`;
 }
+function uplinkExpiryWarnings(data) {
+  if (!data) return "";
+  if (data.unavailable) return svcCard("uplink token expiry", "unavailable", "Could not check tokens without an expiry.", "warn");
+  const legacy = (data.uplinks || []).filter(uplink => uplink.no_expiry);
+  if (!legacy.length) return "";
+  return `<div class="vcs-panel" role="status"><div class="vcs-head">Uplink tokens without expiry</div>
+    <p class="meta">These existing tokens keep working. Rotate them deliberately to give them an expiry.</p>
+    ${legacy.map(uplink => `<div class="vcs-entry"><span class="vcs-led na"></span><span class="vcs-host">${esc(uplink.identity)}</span><span class="meta">NO EXPIRY · rotate</span><span class="mono-detail">${esc(uplink.fingerprint)}</span></div>`).join("")}</div>`;
+}
 async function renderStatus(seq) {
   setChrome("status", "/ status");
-  await Promise.all([loadStatus(), loadRepos().catch(() => { })]);
+  const [, , uplinks] = await Promise.all([loadStatus(), loadRepos().catch(() => { }), api("/api/uplinks", {detached: true}).catch(err => err.status === 403 ? null : {unavailable: true})]);
   if (!currentRoute(seq)) return;
   const s = state.status || {};
   const store = s.secret_store;
@@ -1486,6 +1512,7 @@ async function renderStatus(seq) {
       ${capacityStatusCard(s.admission)}
       ${controllerProfileStatusCard(s.controller_profile)}
     </div>
+    ${uplinkExpiryWarnings(uplinks)}
     <div class="vcs-panel">
       <div class="vcs-head">Upstreams</div>
       ${(s.upstream_info || []).map(upstream => `<div class="vcs-entry"><span class="vcs-led ${upstream.probe === "ready" ? "ok" : "err"}"></span><span class="vcs-host">${esc(upstream.name)}</span><span class="meta">${esc(upstream.kind)}</span><span class="mono-detail">${esc(upstream.base_url)}</span><span class="mono-detail">${esc(upstream.probe === "ready" ? "reachable" : upstream.probe || "unprobed")}</span></div>`).join("") || '<div class="vcs-entry"><span class="vcs-led na"></span><span class="meta">No upstream registered — run oberth admin upstream register in-pod.</span></div>'}

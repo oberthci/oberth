@@ -22,8 +22,8 @@ render() {
   "$helm_tool" template oberth "$chart" --namespace oberth "$@"
 }
 
-render --set watchTunnel.enabled=true >"$work/default.yaml"
-render --set watchTunnel.enabled=true --set platformProtection.enabled=false >"$work/off.yaml"
+render >"$work/default.yaml"
+render --set platformProtection.enabled=false >"$work/off.yaml"
 if grep -Eq 'kind: PriorityClass|priorityClassName:' "$work/off.yaml"; then
   echo 'explicitly disabled platform priority still rendered protection' >&2
   exit 1
@@ -40,27 +40,26 @@ if grep -Eq 'kind: PriorityClass|priorityClassName:' "$work/legacy.yaml"; then
 fi
 
 render --set platformProtection.enabled=true >"$work/no-tunnel.yaml"
-test "$(grep -c '^kind: PriorityClass$' "$work/no-tunnel.yaml")" -eq 4
+test "$(grep -c '^kind: PriorityClass$' "$work/no-tunnel.yaml")" -eq 3
 test "$(grep -c '^      priorityClassName:' "$work/no-tunnel.yaml")" -eq 1
-render --set watchTunnel.enabled=true --set platformProtection.enabled=true >"$work/on.yaml"
+render --set platformProtection.enabled=true >"$work/on.yaml"
 # Stage C protects platform workloads by default. Explicit opt-out and raw
 # historical values remain covered separately below and above.
 diff -u "$work/default.yaml" "$work/on.yaml"
-test "$(grep -c '^kind: PriorityClass$' "$work/on.yaml")" -eq 4
-test "$(grep -c '^value: 1000000$' "$work/on.yaml")" -eq 4
-test "$(grep -c '^globalDefault: false$' "$work/on.yaml")" -eq 4
-test "$(grep -c '^preemptionPolicy: PreemptLowerPriority$' "$work/on.yaml")" -eq 4
+test "$(grep -c '^kind: PriorityClass$' "$work/on.yaml")" -eq 3
+test "$(grep -c '^value: 1000000$' "$work/on.yaml")" -eq 3
+test "$(grep -c '^globalDefault: false$' "$work/on.yaml")" -eq 3
+test "$(grep -c '^preemptionPolicy: PreemptLowerPriority$' "$work/on.yaml")" -eq 3
 test "$(awk '/^kind:/ { priority=($0 == "kind: PriorityClass") } priority && /^    helm.sh\/resource-policy: keep$/ { count++ } END { print count+0 }' "$work/on.yaml")" -eq 2
 for component in argo-controller openbao; do
   grep -A2 -Fx "  name: oberth-oberth-platform-$component" "$work/on.yaml" | \
     grep -Fxq '    helm.sh/resource-policy: keep'
 done
-test "$(grep -c '^      priorityClassName:' "$work/on.yaml")" -eq 2
-for component in oberth cloudflared argo-controller openbao; do
+test "$(grep -c '^      priorityClassName:' "$work/on.yaml")" -eq 1
+for component in oberth argo-controller openbao; do
   grep -Fxq "  name: oberth-oberth-platform-$component" "$work/on.yaml"
 done
 grep -Fxq '      priorityClassName: oberth-oberth-platform-oberth' "$work/on.yaml"
-grep -Fxq '      priorityClassName: oberth-oberth-platform-cloudflared' "$work/on.yaml"
 
 # Every other rendered byte, including CI configuration, requests, limits and
 # admission capacity, must stay identical. No class on workflow defaults/helpers.

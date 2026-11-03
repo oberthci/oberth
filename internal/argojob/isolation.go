@@ -11,7 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func tokenDisabled(t *wfv1.Template) bool {
@@ -285,7 +285,7 @@ func preserveWorkspaceReadOnly(t *wfv1.Template, protected []corev1.VolumeMount)
 	})
 }
 
-func validateTemplateIsolation(wf *wfv1.Workflow, trigger periapsis.Trigger) error {
+func validateTemplateIsolation(wf *wfv1.Workflow, trigger pipeline.Trigger) error {
 	var problems []error
 	walkTemplates(wf, func(t *wfv1.Template) {
 		// The CI cache root is written by every branch run of the repository,
@@ -294,7 +294,7 @@ func validateTemplateIsolation(wf *wfv1.Workflow, trigger periapsis.Trigger) err
 		// link them with its secrets in the environment. The release root
 		// is written only by tag runs, so release leaves keep cache. Any
 		// tier other than release fails closed.
-		if workspaceMountMode(t) == argoworkflow.WorkspaceMountsCache && trigger != periapsis.TriggerRelease && templateUsesCredentialChain(t) {
+		if workspaceMountMode(t) == argoworkflow.WorkspaceMountsCache && trigger != pipeline.TriggerRelease && templateUsesCredentialChain(t) {
 			problems = append(problems, fmt.Errorf("argojob: template %q runs a credential chain and cannot use %s: cache on the CI tier; branch runs write that cache. Use none",
 				t.Name, argoworkflow.WorkspaceMountsAnnotation))
 		}

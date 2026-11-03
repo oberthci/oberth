@@ -19,7 +19,7 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 var (
@@ -93,12 +93,12 @@ type RunRetryStore interface {
 type RunQueueStore interface {
 	EnqueueReceiveEvent(context.Context, model.ReceiveEventSpec, model.RunSpec) (model.EnqueueRunResult, error)
 	ClaimNextRun(context.Context) (model.Run, error)
-	MarkRunCreatePending(context.Context, string, string) error
+	MarkRunCreatePending(context.Context, string, string, ...string) error
 	MarkRunSubmitted(context.Context, string) (model.Run, error)
 	MarkRunAdmitted(context.Context, string) (model.Run, error)
 	MarkRunParked(context.Context, string) (model.Run, error)
 	Run(context.Context, string) (model.Run, error)
-	SetRunJobName(context.Context, string, string) (model.Run, error)
+	SetRunWorkflowName(context.Context, string, string) (model.Run, error)
 	SetRunCredentialed(context.Context, string) error
 	SetRunConcurrencyGroup(context.Context, string, string) error
 	PendingRunCancellations(context.Context) ([]model.RunCancellation, error)
@@ -109,9 +109,9 @@ type RunQueueStore interface {
 	FinishRun(context.Context, string, model.RunResult) (model.Run, error)
 	PutStepResult(context.Context, model.StepResult) (model.StepResult, error)
 	RunningRunsWithJobs(context.Context) ([]model.Run, error)
-	// RequeueStrandedRun supersedes one stranded running run with a fresh
-	// queued copy of the same spec (issue #270); store.ErrRequeueIneligible
-	// signals the caller must terminalize instead.
+	// RequeueStrandedRun resets one unexecuted stranded run under the same ID;
+	// the durable cancellation ledger fences any old Workflow before another claim.
+	// store.ErrRequeueIneligible signals the caller must terminalize instead.
 	RequeueStrandedRun(context.Context, string) (model.Run, error)
 }
 
@@ -235,8 +235,13 @@ type SecretAccessStore interface {
 // size (#1021).
 type SizeGrantStore interface {
 	SizeGrant(context.Context, int64) (store.SizeGrant, error)
-	MaxRunSize(context.Context, int64) (periapsis.Size, error)
-	SetSizeGrant(context.Context, int64, string, periapsis.Size) (store.SizeGrant, error)
+	MaxRunSize(context.Context, int64) (pipeline.Size, error)
+	SetSizeGrant(context.Context, int64, string, pipeline.Size) (store.SizeGrant, error)
+}
+
+type WorkflowCapabilityStore interface {
+	WorkflowCapabilityGrant(context.Context, int64) (store.WorkflowCapabilityGrant, error)
+	SetWorkflowCapabilityGrant(context.Context, int64, string, *argoworkflow.Capability) (store.WorkflowCapabilityGrant, error)
 }
 
 type KubeVirtGrantStore interface {
@@ -364,12 +369,13 @@ type LogStore interface {
 	StepPlanRecord(string) (runprogress.Plan, error)
 }
 
-type JobRequest struct {
+type WorkflowRequest struct {
+	DemandReceipt    *argoworkflow.DemandReceipt
 	ResourceFallback model.ResourceAdmissionFallback
 	PodDemand        *argoworkflow.PodDemand
 	// VMIDemandReceipt carries the exact graph reserved before submission.
 	VMIDemandReceipt *argoworkflow.VMIDemandReceipt
-	JobName          string
+	WorkflowName     string `json:"WorkflowName"`
 	Run              model.Run
 	Repository       model.Repository
 	// UpstreamName is the registered name of the repository's upstream,
@@ -385,7 +391,7 @@ type JobRequest struct {
 	// PipelineFile identifies the document under read-only release preflight.
 	PipelineFile string
 	SourceDir    string
-	Size         periapsis.Size
+	Size         pipeline.Size
 	// ConcurrencyGroup is the repository-declared group the scheduler admitted
 	// this run under (#658), empty for none. Engines record it with the
 	// submission; it never selects identity or resources.
@@ -403,7 +409,7 @@ type JobResult struct {
 	Phase               string
 	TestedSHA           string
 	BaseSHA             string
-	FailedBurn          string
+	FailedStage         string `json:"FailedBurn"`
 	FailedStep          string
 	Error               string
 	Steps               []model.StepResult
@@ -422,7 +428,7 @@ type InfrastructureError interface {
 var ErrJobNotTerminal = errors.New("service: job has not reached terminal state")
 
 type JobController interface {
-	CreateCI(context.Context, JobRequest) error
+	CreateWorkflow(context.Context, WorkflowRequest) error
 	Wait(context.Context, string, io.Writer) (JobResult, error)
 	Delete(context.Context, string, string) error
 	// TerminalResult checks whether a named K8s Job has reached a terminal
@@ -442,11 +448,11 @@ var ErrAdoptionRefused = errors.New("service: Workflow refused for adoption")
 // and a Workflow that exists but must not be adopted wraps ErrAdoptionRefused.
 // WaitResumed uses the durable progress journal and the retained byte count.
 // On error it returns a nonzero result only if the exact Workflow was terminal.
-// JobNamespace names where the engine's Workflows live, for operator messages.
+// WorkflowNamespace names where the engine's Workflows live, for operator messages.
 type JobAdopter interface {
-	Adopt(context.Context, model.Run) (periapsis.Size, bool, error)
+	Adopt(context.Context, model.Run) (pipeline.Size, bool, error)
 	WaitResumed(context.Context, string, io.Writer, []runprogress.Event, int64) (JobResult, error)
-	JobNamespace() string
+	WorkflowNamespace() string
 }
 
 // JobCreateSettler performs one bounded cleanup observation, with no sleeps.
@@ -457,13 +463,13 @@ type JobCreateSettler interface {
 }
 
 type ReleaseJobController interface {
-	CreateRelease(context.Context, JobRequest) error
+	CreateRelease(context.Context, WorkflowRequest) error
 }
 
 // PipelineSizer statically reads the immutable checked-out pipeline without
 // evaluating repository code in the server process.
 type PipelineSizer interface {
-	PipelineSize(context.Context, JobRequest) (periapsis.Size, error)
+	PipelineSize(context.Context, WorkflowRequest) (pipeline.Size, error)
 }
 
 // PipelineConcurrencyGrouper reads the concurrency group the immutable
@@ -472,7 +478,7 @@ type PipelineSizer interface {
 // error, exactly as a malformed size is. It is optional: an engine that does
 // not implement it runs every pipeline ungrouped.
 type PipelineConcurrencyGrouper interface {
-	PipelineConcurrencyGroup(context.Context, JobRequest) (string, error)
+	PipelineConcurrencyGroup(context.Context, WorkflowRequest) (string, error)
 }
 
 // PipelinePlanner enumerates the steps the immutable checked-out pipeline
@@ -483,7 +489,7 @@ type PipelineConcurrencyGrouper interface {
 // its own format simply has no plan, and its runs behave as they always have:
 // steps appear as execution reaches them.
 type PipelinePlanner interface {
-	PlannedSteps(context.Context, JobRequest) ([]runprogress.PlannedStep, error)
+	PlannedSteps(context.Context, WorkflowRequest) ([]runprogress.PlannedStep, error)
 }
 
 // PipelineCredentialDetector reports whether the checked-out pipeline declares
@@ -492,7 +498,7 @@ type PipelinePlanner interface {
 // assumed to have no credentialed CI pipelines; release runs are always
 // credentialed regardless.
 type PipelineCredentialDetector interface {
-	PipelineCredentialed(context.Context, JobRequest) (bool, error)
+	PipelineCredentialed(context.Context, WorkflowRequest) (bool, error)
 }
 
 type Health interface {
@@ -557,14 +563,14 @@ type StatusResponse struct {
 	// ConcurrencyGroup is the repository-declared concurrency group the run
 	// was admitted under (#658), once the scheduler has read it.
 	ConcurrencyGroup string            `json:"concurrency_group,omitempty"`
-	Burns            map[string]string `json:"burns"`
+	Stages           map[string]string `json:"burns"`
 }
 
 type LogResponse struct {
 	TotalScannedBytes int64  `json:"total_scanned_bytes"`
 	ScanLimitBytes    int64  `json:"scan_limit_bytes"`
 	RunID             string `json:"run_id"`
-	Burn              string `json:"burn"`
+	Stage             string `json:"burn"`
 	Step              string `json:"step,omitempty"`
 	Output            string `json:"output"`
 	Note              string `json:"note,omitempty"`

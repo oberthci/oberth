@@ -334,8 +334,7 @@ func TestValidateAdminSocketRejectsUnsafePaths(t *testing.T) {
 func TestValidateAdminSocketAcceptsValidPaths(t *testing.T) {
 	t.Parallel()
 	for _, path := range []string{
-		"/tmp/oberth-admin.sock",
-		"/tmp/test-socket",
+		privateAdminSocket(t),
 	} {
 		if err := validateAdminSocket(path); err != nil {
 			t.Errorf("validateAdminSocket(%q) = %v", path, err)
@@ -472,10 +471,10 @@ func TestRunInitRejectsPositionalArguments(t *testing.T) {
 	}
 }
 
-func TestRunInitRejectsUnknownType(t *testing.T) {
+func TestRunInitRejectsRemovedTypeFlag(t *testing.T) {
 	t.Parallel()
 	err := runInit(context.Background(), []string{"--type", "rust"}, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "unknown project type") {
+	if !errors.Is(err, errUsage) || !strings.Contains(err.Error(), "flag provided but not defined: -type") {
 		t.Fatalf("runInit unknown type error = %v", err)
 	}
 }
@@ -483,8 +482,8 @@ func TestRunInitRejectsUnknownType(t *testing.T) {
 func TestRequestLiveAdminMutationGateFailsWithoutSocket(t *testing.T) {
 	t.Parallel()
 	// requestLiveAdminMutationGate uses defaultAdminSocket which is
-	// /tmp/oberth-admin.sock. Outside a running daemon, the connection fails.
-	err := requestLiveAdminMutationGate(context.Background(), "test.operation", "/data/oberth.sqlite")
+	// /run/oberth/admin.sock. Outside a running daemon, the connection fails.
+	err := requestLiveAdminMutationGate(context.Background(), "uplink.register", "/data/oberth.sqlite")
 	if err == nil {
 		t.Fatal("requestLiveAdminMutationGate succeeded without a daemon socket")
 	}
@@ -514,7 +513,7 @@ func TestRunAccessHelpPaths(t *testing.T) {
 
 func TestAdminGateServerRejectsNilGate(t *testing.T) {
 	t.Parallel()
-	socket := filepath.Join("/tmp", "oberth-nilgate-"+filepath.Base(t.TempDir())+".sock")
+	socket := privateAdminSocket(t)
 	server := newAdminGateServer(nil, "/data/oberth.sqlite", nil)
 	listener, err := listenAdminSocket(context.Background(), socket)
 	if err != nil {
@@ -526,7 +525,7 @@ func TestAdminGateServerRejectsNilGate(t *testing.T) {
 		_ = removeStaleAdminSocket(socket)
 	})
 	go func() { _ = server.Serve(listener) }()
-	err = requestAdminMutationGate(context.Background(), socket, "test.operation", "/data/oberth.sqlite")
+	err = requestAdminMutationGate(context.Background(), socket, "uplink.register", "/data/oberth.sqlite")
 	if err == nil || !strings.Contains(err.Error(), "mutation gate") {
 		t.Fatalf("nil gate error = %v, want mutation gate rejection", err)
 	}
@@ -534,7 +533,7 @@ func TestAdminGateServerRejectsNilGate(t *testing.T) {
 
 func TestAdminGateServerRejectsGateError(t *testing.T) {
 	t.Parallel()
-	socket := filepath.Join("/tmp", "oberth-gatefail-"+filepath.Base(t.TempDir())+".sock")
+	socket := privateAdminSocket(t)
 	server := newAdminGateServer(func(context.Context) error {
 		return errors.New("audit integrity not verified")
 	}, "/data/oberth.sqlite", nil)
@@ -548,7 +547,7 @@ func TestAdminGateServerRejectsGateError(t *testing.T) {
 		_ = removeStaleAdminSocket(socket)
 	})
 	go func() { _ = server.Serve(listener) }()
-	err = requestAdminMutationGate(context.Background(), socket, "test.operation", "/data/oberth.sqlite")
+	err = requestAdminMutationGate(context.Background(), socket, "uplink.register", "/data/oberth.sqlite")
 	if err == nil || !strings.Contains(err.Error(), "audit integrity not verified") {
 		t.Fatalf("gate error = %v, want audit integrity failure", err)
 	}
@@ -786,7 +785,7 @@ func TestRoundTripTabwriterOutputThroughProducerParser(t *testing.T) {
 		{"codeberg/oberthci/oberth", "release", "oberth/data/release/cosign-secret"},
 		{"codeberg/oberthci/oberth", "release", "oberth/data/release/r2-upload-token"},
 		{"codeberg/oberthci/oberth", "*", "oberth/data/release/gar-reader-key"},
-		{"github/skipops/terraform", "*", "oberth/upstream/skipops/terraform/gcp-sa"},
+		{"github/acme/terraform", "*", "oberth/upstream/acme/terraform/gcp-sa"},
 	} {
 		if _, err := database.Grant(context.Background(), g.repo, g.step, g.secret, "admin@localhost"); err != nil {
 			t.Fatal(err)
@@ -810,7 +809,7 @@ func TestRoundTripTabwriterOutputThroughProducerParser(t *testing.T) {
 
 	assertIdentitySet(t, identities, map[string]int{
 		"codeberg/oberthci/oberth": 1,
-		"github/skipops/terraform": 1,
+		"github/acme/terraform":    1,
 	})
 	for _, id := range identities {
 		if id.Repo == "oberth" && id.Grants[0] != "oberth/data/release/gar-reader-key" {
@@ -833,7 +832,7 @@ func TestRoundTripJSONOutputThroughProducerParser(t *testing.T) {
 		{"codeberg/oberthci/oberth", "release", "oberth/data/release/cosign-secret"},
 		{"codeberg/oberthci/oberth", "release", "oberth/data/release/r2-upload-token"},
 		{"codeberg/oberthci/oberth", "*", "oberth/data/release/gar-reader-key"},
-		{"github/skipops/terraform", "*", "oberth/upstream/skipops/terraform/gcp-sa"},
+		{"github/acme/terraform", "*", "oberth/upstream/acme/terraform/gcp-sa"},
 	} {
 		if _, err := database.Grant(context.Background(), g.repo, g.step, g.secret, "admin@localhost"); err != nil {
 			t.Fatal(err)
@@ -857,7 +856,7 @@ func TestRoundTripJSONOutputThroughProducerParser(t *testing.T) {
 
 	assertIdentitySet(t, identities, map[string]int{
 		"codeberg/oberthci/oberth": 1,
-		"github/skipops/terraform": 1,
+		"github/acme/terraform":    1,
 	})
 
 	// The named-step rows are not lost: they round-trip to the per-step

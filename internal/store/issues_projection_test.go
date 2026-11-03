@@ -81,7 +81,7 @@ func TestInfrastructureRunRetriesWithoutProjectingCIRedIssue(t *testing.T) {
 	}
 	// A real test failure still opens an issue. A later infrastructure failure
 	// neither updates its evidence nor resolves it.
-	if _, err := database.FinishRun(ctx, retry.ID, model.RunResult{Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit"}); err != nil {
+	if _, err := database.FinishRun(ctx, retry.ID, model.RunResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit"}); err != nil {
 		t.Fatal(err)
 	}
 	issue, err := database.OpenCIIssue(ctx, repository.ID, branch)
@@ -201,7 +201,7 @@ func TestContainerMemoryLimitOOMProjectsCIRedIssue(t *testing.T) {
 	repository := projectionRepository(t, database)
 	run := projectionRun(t, database, repository.ID, repository.DefaultBranch, projectionSourceSHA)
 	if _, err := database.FinishRun(t.Context(), run.ID, model.RunResult{
-		Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit", Error: "main: OOMKilled (exit code 137)",
+		Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Error: "main: OOMKilled (exit code 137)",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ BEGIN SELECT RAISE(ABORT, 'injected issue projection failure'); END;`); err != n
 		t.Fatal(err)
 	}
 	_, err := database.FinishRun(ctx, run.ID, model.RunResult{
-		Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit", Error: "red",
+		Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Error: "red",
 	})
 	if err == nil || !strings.Contains(err.Error(), "injected issue projection failure") {
 		t.Fatalf("FinishRun error = %v, want injected projection failure", err)
@@ -245,7 +245,7 @@ BEGIN SELECT RAISE(ABORT, 'injected issue projection failure'); END;`); err != n
 		t.Fatal(err)
 	}
 	finished, err := database.FinishRun(ctx, run.ID, model.RunResult{
-		Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit", Error: "red",
+		Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Error: "red",
 	})
 	if err != nil || finished.Status != model.RunFailed {
 		t.Fatalf("finished run = %#v, %v", finished, err)
@@ -256,7 +256,7 @@ BEGIN SELECT RAISE(ABORT, 'injected issue projection failure'); END;`); err != n
 	}
 }
 
-func TestRunIssueProjectionIncludesTransientFailureTailAndBurnLogHint(t *testing.T) {
+func TestRunIssueProjectionIncludesTransientFailureTailAndStageLogHint(t *testing.T) {
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	database := testStore(t, &now)
 	repository := projectionRepository(t, database)
@@ -266,7 +266,7 @@ func TestRunIssueProjectionIncludesTransientFailureTailAndBurnLogHint(t *testing
 	first := projectionRun(t, database, repository.ID, branch, projectionSourceSHA)
 	firstTail := "--- FAIL: TestResolve_TimeoutEnforced\nFAIL example/internal/registry"
 	finished, err := database.FinishRun(ctx, first.ID, model.RunResult{
-		Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit",
+		Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit",
 		Error: "step test/unit failed with exit code 1", FailureTail: firstTail,
 	})
 	if err != nil {
@@ -287,7 +287,7 @@ func TestRunIssueProjectionIncludesTransientFailureTailAndBurnLogHint(t *testing
 	second := projectionRun(t, database, repository.ID, branch, projectionResultSHA)
 	secondTail := "--- FAIL: TestResolve_NewFailure\nFAIL example/internal/newfailure"
 	if _, err := database.FinishRun(ctx, second.ID, model.RunResult{
-		Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit",
+		Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit",
 		Error: "step test/unit failed with exit code 1", FailureTail: secondTail,
 	}); err != nil {
 		t.Fatal(err)

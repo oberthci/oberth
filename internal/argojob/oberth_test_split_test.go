@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestOberthTestNodeCacheAndFailures(t *testing.T) {
@@ -138,8 +138,8 @@ else:
 	}
 }
 
-func TestOberthSplitBurnsUseTheRaceGroupLauncher(t *testing.T) {
-	built, err := buildOberthPipelineForIsolation(t, periapsis.TriggerCI, loadPipeline(t, "build.yaml"))
+func TestOberthSplitStagesUseTheRaceGroupLauncher(t *testing.T) {
+	built, err := buildOberthPipelineForIsolation(t, pipeline.TriggerCI, loadPipeline(t, "build.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}

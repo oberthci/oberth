@@ -7,7 +7,8 @@ import (
 )
 
 // RemoteRef reads one canonical upstream branch or tag ref without changing
-// the cache. A missing ref is represented by exists=false; malformed or
+// public cache refs. Verified branch reads also release an exact delivered
+// promotion pin. A missing ref is represented by exists=false; malformed or
 // ambiguous output fails closed.
 func (c *Cache) RemoteRef(ctx context.Context, input, ref string) (sha string, exists bool, err error) {
 	if err := validatePublicationRef(ref); err != nil {
@@ -18,7 +19,9 @@ func (c *Cache) RemoteRef(ctx context.Context, input, ref string) (sha string, e
 		return "", false, err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return "", false, err
+	}
 	defer lock.Unlock()
 	if err := c.checkRepositoryActive(ctx, input); err != nil {
 		return "", false, err
@@ -44,6 +47,12 @@ func (c *Cache) RemoteRef(ctx context.Context, input, ref string) (sha string, e
 	}
 	if err := ValidateSHA(found); err != nil {
 		return "", false, fmt.Errorf("upstream %s object ID: %w", ref, err)
+	}
+	if strings.HasPrefix(ref, "refs/heads/") {
+		pin := promotionRefPrefix + strings.TrimPrefix(ref, "refs/heads/") + "/" + found
+		if err := c.deleteRef(ctx, path, pin, ""); err != nil {
+			c.logger.Printf("release verified promotion pin: %v", err)
+		}
 	}
 	return found, true, nil
 }

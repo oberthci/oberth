@@ -5,6 +5,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/oberthci/oberth/internal/boundedio"
 )
 
 // Preserve the promotion policy while using native Git: both sides may change
@@ -57,7 +59,9 @@ func (c *Cache) mergePromotionTrees(ctx context.Context, workspace, sourceSHA, t
 // NUL framing preserves literal Git filenames. The inventory is bounded and
 // refuses oversize repositories rather than comparing a truncated tree.
 func (c *Cache) promotionTree(ctx context.Context, workspace, ref string) (map[string]string, error) {
-	output := &boundedGitInventory{}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	output := &boundedio.Buffer{Limit: 32 << 20, OnOverflow: cancel}
 	if err := c.run(ctx, commandSpec{dir: workspace, args: []string{"ls-tree", "-rz", "--full-tree", ref}, stdout: output}); err != nil {
 		return nil, err
 	}

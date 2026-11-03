@@ -25,11 +25,11 @@ func (c routingCache) ListTags(ctx context.Context, repo string) ([]string, erro
 	return c.mockCache.ListTags(ctx, repo)
 }
 
-func (c routingCache) TagTime(ctx context.Context, repo, tag string) (time.Time, error) {
+func (c routingCache) ModuleTagSnapshot(ctx context.Context, repo, tag string) (string, time.Time, error) {
 	if c.fail == "info" {
-		return time.Time{}, errors.New("fixture info failure")
+		return "", time.Time{}, errors.New("fixture info failure")
 	}
-	return c.mockCache.TagTime(ctx, repo, tag)
+	return c.mockCache.ModuleTagSnapshot(ctx, repo, tag)
 }
 
 func (c routingCache) ShowFile(ctx context.Context, repo, ref, path string) ([]byte, error) {
@@ -46,8 +46,8 @@ func (c routingCache) ArchiveTar(ctx context.Context, repo, ref string, w io.Wri
 	return c.mockCache.ArchiveTar(ctx, repo, ref, w)
 }
 
-func routingFixture(fail string) *Handler {
-	return NewHandler(routingCache{mockCache: &mockCache{
+func routingFixture(t *testing.T, fail string) *Handler {
+	return cachedTestHandler(t, routingCache{mockCache: &mockCache{
 		tags: []string{"v1.0.0"},
 		files: map[string][]byte{
 			"v1.0.0:go.mod": []byte("module go.example.test/issue764-fixture\n\ngo 1.22\n"),
@@ -59,7 +59,7 @@ func TestPrivateRoutingAllShapes(t *testing.T) {
 	for _, module := range []string{"go.example.test", "go.example.test/unknown", "go.example.test/issue764-fixture/nested"} {
 		for _, request := range []string{"@latest", "@v/list", "@v/v1.0.0.info", "@v/v1.0.0.mod", "@v/v1.0.0.zip", "@v/unsupported", "invalid"} {
 			t.Run(module+"/"+request, func(t *testing.T) {
-				assertRoutingStatus(t, routingFixture(""), "/"+module+"/"+request, http.StatusForbidden)
+				assertRoutingStatus(t, routingFixture(t, ""), "/"+module+"/"+request, http.StatusForbidden)
 			})
 		}
 	}
@@ -71,7 +71,7 @@ func TestPrivateRoutingAllShapes(t *testing.T) {
 		"//../other/@v/list", "@latest/", "@v/../@v/list", "@v/list/extra", "@v/list/@v/list",
 	} {
 		t.Run(request, func(t *testing.T) {
-			assertRoutingStatus(t, routingFixture(""), "/go.example.test/issue764-fixture/"+request, http.StatusForbidden)
+			assertRoutingStatus(t, routingFixture(t, ""), "/go.example.test/issue764-fixture/"+request, http.StatusForbidden)
 		})
 	}
 	for _, path := range []string{
@@ -79,21 +79,21 @@ func TestPrivateRoutingAllShapes(t *testing.T) {
 		"/go.example.test/../github.com/example/@v/list",
 		"/go.example.test/!invalid/@v/list",
 	} {
-		assertRoutingStatus(t, routingFixture(""), path, http.StatusForbidden)
+		assertRoutingStatus(t, routingFixture(t, ""), path, http.StatusForbidden)
 	}
 	for _, path := range []string{"/example.invalid/mod/@latest", "/example.invalid/mod/@v/list", "/go.example.test.example.invalid/mod/@v/list"} {
-		assertRoutingStatus(t, routingFixture(""), path, http.StatusNotFound)
+		assertRoutingStatus(t, routingFixture(t, ""), path, http.StatusNotFound)
 	}
 }
 
 func TestPrivateRoutingCacheFailures(t *testing.T) {
 	for _, request := range []string{"@latest", "@v/list", "@v/v1.0.0.info", "@v/v1.0.0.mod", "@v/v1.0.0.zip"} {
-		assertRoutingStatus(t, routingFixture("list"), "/go.example.test/issue764-fixture/"+request, http.StatusServiceUnavailable)
+		assertRoutingStatus(t, routingFixture(t, "list"), "/go.example.test/issue764-fixture/"+request, http.StatusServiceUnavailable)
 	}
 	for _, op := range []string{"info", "mod", "zip"} {
-		assertRoutingStatus(t, routingFixture(op), "/go.example.test/issue764-fixture/@v/v1.0.0."+op, http.StatusServiceUnavailable)
+		assertRoutingStatus(t, routingFixture(t, op), "/go.example.test/issue764-fixture/@v/v1.0.0."+op, http.StatusServiceUnavailable)
 	}
-	assertRoutingStatus(t, routingFixture("info"), "/go.example.test/issue764-fixture/@latest", http.StatusServiceUnavailable)
+	assertRoutingStatus(t, routingFixture(t, "info"), "/go.example.test/issue764-fixture/@latest", http.StatusServiceUnavailable)
 }
 
 func TestLatestAndListUseSupportedTags(t *testing.T) {
@@ -108,7 +108,7 @@ func TestLatestAndListUseSupportedTags(t *testing.T) {
 		{"empty", nil, "", ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHandler(&mockCache{tags: tt.tags}, "go.example.test", map[string]string{"issue764-fixture": "fixture"})
+			h := cachedTestHandler(t, mockModuleCache(tt.tags, "go.example.test/issue764-fixture"), "go.example.test", map[string]string{"issue764-fixture": "fixture"})
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, httptest.NewRequest("GET", "/go.example.test/issue764-fixture/@v/list", nil))
 			if rec.Code != http.StatusOK || rec.Body.String() != tt.list {

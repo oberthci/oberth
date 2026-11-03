@@ -7,7 +7,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // runKind is the durable run's RunTrigger: what the size-by-trigger
@@ -32,11 +32,11 @@ func runKind(run model.Run) (argoworkflow.RunTrigger, error) {
 	}
 }
 
-func runTrigger(run model.Run) (periapsis.Trigger, error) {
+func runTrigger(run model.Run) (pipeline.Trigger, error) {
 	if run.Release {
-		return periapsis.TriggerRelease, nil
+		return pipeline.TriggerRelease, nil
 	}
-	return periapsis.TriggerCI, nil
+	return pipeline.TriggerCI, nil
 }
 
 // readBoundedSourceFile reads one bounded regular file from the immutable run
@@ -56,14 +56,14 @@ func readBoundedSourceFile(sourceDir, relative string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("stat %s: %w", relative, err)
 	}
-	if !info.Mode().IsRegular() || info.Size() > periapsis.MaxSourceBytes {
+	if !info.Mode().IsRegular() || info.Size() > pipeline.MaxSourceBytes {
 		return nil, fmt.Errorf("%s must be a bounded regular file", relative)
 	}
-	source, err := io.ReadAll(io.LimitReader(file, periapsis.MaxSourceBytes+1))
+	source, err := io.ReadAll(io.LimitReader(file, pipeline.MaxSourceBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", relative, err)
 	}
-	if len(source) > periapsis.MaxSourceBytes {
+	if len(source) > pipeline.MaxSourceBytes {
 		return nil, fmt.Errorf("%s exceeds the source-size limit", relative)
 	}
 	return source, nil

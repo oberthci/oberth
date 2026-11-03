@@ -14,6 +14,7 @@ import (
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestSchedulerRemovesRunWorkspaceOnlyAfterTerminalOutcome(t *testing.T) {
@@ -64,14 +65,29 @@ func TestWorkspaceCleanupFailureDoesNotRepaintTerminalRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	failedPath = filepath.Join(fixture.root, "work", enqueued.ID)
-	if err := scheduler.ProcessNext(ctx); !errors.Is(err, cleanupErr) {
-		t.Fatalf("cleanup error = %v, want %v", err, cleanupErr)
+	if err := scheduler.ProcessNext(ctx); err != nil {
+		t.Fatalf("cleanup stopped dispatch: %v", err)
 	}
 	finished, err := fixture.store.Run(ctx, enqueued.ID)
 	if err != nil || finished.Status != model.RunFailed {
 		t.Fatalf("run after cleanup failure = %#v, %v", finished, err)
 	}
 	assertWorkspaceExists(t, failedPath)
+
+	if err := scheduler.recoverOwnedWorkspaces(ctx); err != nil {
+		t.Fatalf("cleanup stopped startup: %v", err)
+	}
+	later, err := scheduler.EnqueueCI(ctx, CIRequest{EventID: "after-cleanup-failure", Repository: fixture.repo, Branch: "feature/later", SHA: "cccccccccccccccccccccccccccccccccccccccc", Actor: "agent@host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := scheduler.ProcessNext(ctx); err != nil {
+		t.Fatalf("subsequent dispatch: %v", err)
+	}
+	laterRun, err := fixture.store.Run(ctx, later.ID)
+	if err != nil || !laterRun.Status.Terminal() {
+		t.Fatalf("subsequent run did not complete: %#v %v", laterRun, err)
+	}
 
 	restarted, err := NewScheduler(SchedulerConfig{
 		Store: fixture.store, Git: fixture.git, Logs: fixture.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs,
@@ -212,7 +228,7 @@ func TestWorkspaceStartupRecoveryPreservesPendingPublication(t *testing.T) {
 	if err := fixture.store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := store.Open(ctx, databasePath, store.Options{})
+	reopened, err := storetest.Open(ctx, databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +243,8 @@ func TestWorkspaceStartupRecoveryPreservesPendingPublication(t *testing.T) {
 	if err := restarted.recoverOwnedWorkspaces(ctx); err != nil {
 		t.Fatal(err)
 	}
-	assertWorkspaceMissing(t, interruptedPath)
+	// The reset run owns its scratch until execution recreates it.
+	assertWorkspaceExists(t, interruptedPath)
 	assertWorkspaceExists(t, publicationPath)
 	assertWorkspaceExists(t, promotionPath)
 
@@ -248,14 +265,14 @@ func TestSupersededWorkspaceWaitsForCancellationCompletion(t *testing.T) {
 	if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	jobName, err := deterministicJobName(fixture.repo.Name, first.ID)
+	workflowName, err := deterministicWorkflowName(fixture.repo.Name, first.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.store.SetRunJobName(ctx, first.ID, jobName); err != nil {
+	if _, err := fixture.store.SetRunWorkflowName(ctx, first.ID, workflowName); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.store.EnqueueRun(ctx, model.RunSpec{
+	if _, err := storetest.EnqueueRun(fixture.store, ctx, model.RunSpec{
 		RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: first.Ref,
 		SHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Actor: first.Actor, Trigger: "branch",
 	}); err != nil {
@@ -292,7 +309,7 @@ func TestOwnerRestartCompletesEmptyNameSupersedeBeforeCleanup(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(workspace, "src"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.store.EnqueueRun(ctx, model.RunSpec{
+	if _, err := storetest.EnqueueRun(fixture.store, ctx, model.RunSpec{
 		RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: first.Ref,
 		SHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Actor: first.Actor, Trigger: "branch",
 	}); err != nil {
@@ -303,7 +320,7 @@ func TestOwnerRestartCompletesEmptyNameSupersedeBeforeCleanup(t *testing.T) {
 		t.Fatalf("pre-Job superseded workspace owner = %#v, %v", interrupted, err)
 	}
 	pending, err := fixture.store.PendingRunCancellations(ctx)
-	if err != nil || len(pending) != 1 || pending[0].RunID != first.ID || pending[0].JobName != "" {
+	if err != nil || len(pending) != 1 || pending[0].RunID != first.ID || pending[0].WorkflowName != "" {
 		t.Fatalf("pre-Job cancellation = %#v, %v", pending, err)
 	}
 	// The original process may still be checking out until owner shutdown, so
@@ -319,7 +336,7 @@ func TestOwnerRestartCompletesEmptyNameSupersedeBeforeCleanup(t *testing.T) {
 	if err := fixture.store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := store.Open(ctx, databasePath, store.Options{})
+	reopened, err := storetest.Open(ctx, databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -380,7 +397,7 @@ func TestWorkerJoinCompletesEmptyNameSupersedeBeforeCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending, err := fixture.store.PendingRunCancellations(ctx)
-	if err != nil || len(pending) != 1 || pending[0].RunID != first.ID || pending[0].JobName != "" {
+	if err != nil || len(pending) != 1 || pending[0].RunID != first.ID || pending[0].WorkflowName != "" {
 		close(git.release)
 		t.Fatalf("live empty-name cancellation = %#v, %v", pending, err)
 	}
@@ -614,7 +631,7 @@ func seedWorkspacePromotionCandidate(t *testing.T, fixture *controlFixture, sha 
 
 func enqueueWorkspaceRun(t *testing.T, fixture *controlFixture, ref, sha string) model.Run {
 	t.Helper()
-	enqueued, err := fixture.store.EnqueueRun(context.Background(), model.RunSpec{
+	enqueued, err := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{
 		RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: ref,
 		SHA: sha, Actor: "agent@host", Trigger: "branch",
 	})

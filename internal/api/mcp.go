@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/oberthci/oberth/internal/model"
 )
@@ -99,6 +100,20 @@ type PublishRetryResponse struct {
 	Error         string `json:"error,omitempty"`
 }
 
+// PublicationAbandonResponse reports an explicit administrative terminal verdict.
+type PublicationAbandonResponse struct {
+	Action        string `json:"action"`
+	PublicationID string `json:"publication_id"`
+	Status        string `json:"status"`
+	RunID         string `json:"run_id,omitempty"`
+	RunStatus     string `json:"run_status,omitempty"`
+	RunPhase      string `json:"run_phase,omitempty"`
+	PromotionID   string `json:"promotion_id,omitempty"`
+	AbandonedBy   string `json:"abandoned_by"`
+	Reason        string `json:"reason"`
+	Message       string `json:"message"`
+}
+
 // RunCancelResponse is the response for run_cancel. Status stays the durable
 // terminal status (interrupted); Phase "cancelled" marks an explicit cancel.
 // Workflow is none (never claimed), not_submitted (claimed, no Workflow was
@@ -152,6 +167,7 @@ type IssueCreateResponse struct {
 // IssueResponse is the complete issue record exposed to MCP clients. Internal
 // projection sequence and storage ownership fields stay behind the service.
 type IssueResponse struct {
+	Revision    int64            `json:"revision"`
 	Lock        *model.IssueLock `json:"lock"`
 	ID          int64            `json:"id"`
 	Upstream    string           `json:"upstream"`
@@ -172,6 +188,7 @@ type IssueResponse struct {
 // AppendedBytes counts caller text bytes (excluding the dated separator), and
 // is zero for update/close.
 type IssueMutationResponse struct {
+	Revision      int64  `json:"revision"`
 	ID            int64  `json:"id"`
 	State         string `json:"state"`
 	UpdatedAt     string `json:"updated_at"`
@@ -194,6 +211,7 @@ type IssueGetManyResponse struct {
 }
 
 type IssueListItem struct {
+	Revision    int64            `json:"revision"`
 	Lock        *model.IssueLock `json:"lock"`
 	ID          int64            `json:"id"`
 	Upstream    string           `json:"upstream"`
@@ -292,6 +310,9 @@ func (server *Server) handleMCP(writer http.ResponseWriter, request *http.Reques
 	request.Body = http.MaxBytesReader(writer, request.Body, maxRequestBytes)
 	var incoming rpcRequest
 	if err := decodeOne(request.Body, &incoming); err != nil {
+		if writeOversizedBody(writer, err) {
+			return
+		}
 		writeRPC(writer, rpcResponse{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &rpcError{Code: -32700, Message: "parse error"}})
 		return
 	}
@@ -361,7 +382,7 @@ func writeRPC(writer http.ResponseWriter, response rpcResponse) {
 }
 
 func toolSuccess(payload any) map[string]any {
-	raw, err := json.Marshal(payload)
+	raw, err := marshalCompatible(payload)
 	if err != nil || len(raw) == 0 || raw[0] != '{' {
 		return toolFailure(errors.New("internal error: tool result must be a JSON object"))
 	}
@@ -435,14 +456,15 @@ func requestCorrelationID() string {
 	return hex.EncodeToString(body[:])
 }
 
-func knownTool(name string) bool {
+var registeredToolNames = sync.OnceValue(func() map[string]bool {
+	names := map[string]bool{}
 	for _, definition := range toolDefinitions() {
-		if definition["name"] == name {
-			return true
-		}
+		names[definition["name"].(string)] = true
 	}
-	return false
-}
+	return names
+})
+
+func knownTool(name string) bool { return registeredToolNames()[name] }
 
 // ToolNames lists every MCP tool the server offers, so the service can prove
 // each one is classified for scoped uplinks (#073).
@@ -484,15 +506,41 @@ func toolDefinitions() []map[string]any {
 		return schema
 	}
 	tool := func(name, description string, schema map[string]any) map[string]any {
+		if key := RunIDArgument(name); key != "" {
+			properties := schema["properties"].(map[string]any)
+			properties["run_id"] = stringProperty("Preferred run identifier; alias of " + key + "; conflicting spellings are refused")
+			if required, ok := schema["required"].([]string); ok {
+				remaining := make([]string, 0, len(required))
+				for _, field := range required {
+					if field != key {
+						remaining = append(remaining, field)
+					}
+				}
+				if len(remaining) != len(required) {
+					if len(remaining) == 0 {
+						delete(schema, "required")
+					} else {
+						schema["required"] = remaining
+					}
+					selector := "Either " + key + " or run_id is required; conflicting spellings are refused"
+					properties[key].(map[string]any)["description"] = selector
+					properties["run_id"].(map[string]any)["description"] = selector
+				}
+			}
+		}
 		return map[string]any{"name": name, "description": description, "inputSchema": schema, "outputSchema": toolOutputSchema(name)}
 	}
 	return []map[string]any{
 		tool("status", "Return concise CI status for a full SHA, short SHA, or branch, including the failed step.", object(map[string]any{"repo": stringProperty("Repository name when the selector is ambiguous"), "ref": stringProperty("Full SHA, short SHA, or branch")}, "ref")),
 		tool("logs", "Return one named step log for a SHA, optionally filtered server-side. Prefer a pattern over retrieving a whole step: counts are lower bounds unless scan_complete is true; continue has_more pages with next_byte_offset as byte_offset and offset:0.", object(logFilterProperties(map[string]any{"repo": stringProperty("Repository name when the SHA is ambiguous"), "sha": stringProperty("Full or short SHA"), "step": stringProperty("Step name")}), "sha", "step")),
-		tool("run_kvm_preflight", "Read bounded immutable KVM preflight evidence for one full run ID or unique hexadecimal prefix (at least 8 characters). Receipt validity and cleanup are historical evidence, not publication eligibility; parent status is separate. A known run without a preflight returns present=false.", object(map[string]any{"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)")}, "id")),
+		tool("run_kvm_preflight", "Deprecated; retained for legacy VM pipelines. Read bounded immutable KVM preflight evidence for one full run ID or unique hexadecimal prefix (at least 8 characters). Receipt validity and cleanup are historical evidence, not publication eligibility; parent status is separate. A known run without a preflight returns present=false.", object(map[string]any{"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)")}, "id")),
 		tool("run_get", "Return one run by full durable ID or unique hexadecimal prefix (at least 8 characters). Default: full run, step results and versioned retained timing; missing timing is unknown. Set summary:true for only id/status/phase/failed_burn/failed_step/error and steps (burn, name, status, started_at, finished_at), omitting Timing, repository and diagnostics.", object(map[string]any{"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"), "summary": map[string]any{"type": "boolean", "description": "Return only run status/failure and compact steps; default false"}}, "id")),
 		tool("run_resources", "Read captured per-template resource history and numeric declarations at the newest selected SHA. Git remains the source of truth. Suggestions use p95/max, never the median; insufficient or censored samples get no suggestion. YAML includes paste-ready ordinary pod resources and activeDeadlineSeconds. No logs, commands, environment or image details.", object(map[string]any{"repo": stringProperty("Registered repository; optional with run"), "run": stringProperty("Exact run ID or unique prefix"), "burn": stringProperty("Optional burn"), "step": stringProperty("Optional stable template name, without fragment hash"), "ref": stringProperty("Exact ref; default includes default branch and linked promotions targeting it; any includes all refs; exclusive with run"), "last": map[string]any{"type": "integer", "minimum": 1, "maximum": 100, "default": 30}, "include_failed": map[string]any{"type": "boolean", "default": false}, "format": map[string]any{"type": "string", "enum": []string{"json", "yaml"}}})),
 		tool("run_retry", "Queue a fresh attempt for the newest interrupted or infrastructure-failed run, retaining repository, ref, SHA and release admission. Workflow-level failures without a failed step qualify. Tag/release retries require an admin, an unchanged tag object and complete credential-aware terminal observations for the entire tag history (or proof of no Workflow intent). Started secret-store/WIF work, old plans, missing evidence, a moved tag or an older source need run_rerun with force. Pending Workflow deletion is refused even with force. Test failures, older runs, promotion/plan/apply runs, published tags and refs with an active run are refused. The caller is recorded as actor.", object(map[string]any{"priority": map[string]any{"type": "string", "enum": []string{"normal", "high", "highest"}}, "priority_reason": stringProperty("Reason for submission priority"), "id": stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)")}, "id")),
+		tool("publication_abandon", "Abandon one pending upstream publication by its full publication ID. Requires an unscoped admin uplink and a reason. Atomically marks the publication abandoned and its run failed/abandoned (and its promotion failed), with the administrator in the audit chain. Never pushes; earlier pushes may already be visible upstream. Abandoned intents cannot be retried with publish_retry. An in-flight delivery settles before this operation; terminal publications are refused.", object(map[string]any{
+			"id":     stringProperty("Full publication ID from publication logs, publish_retry, or audit_list with action publication.pending"),
+			"reason": stringProperty("Why publication is abandoned; required printable text, at most 512 bytes"),
+		}, "id", "reason")),
 		tool("run_cancel", "Cancel one queued, waiting or running run. The run becomes interrupted with phase cancelled and a reason naming the caller; a claimed run's Workflow is deleted and its admission released, and it is never re-fired. Cancelling a terminal run is refused. Non-admin uplinks may cancel only branch-push runs outside a concurrency group; admins may cancel any run but must set force for tag/release and apply runs, whose publication may be left partial. Cancelling promotion CI fails the promotion without merging. Audited.", object(map[string]any{
 			"id":     stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),
 			"reason": stringProperty("Why the run is cancelled (printable text, at most 512 bytes)"),
@@ -526,7 +574,7 @@ func toolDefinitions() []map[string]any {
 		tool("issue_create", "Create a manual issue, workspace-global or filed under one upstream. Uplinks scoped to that upstream see it; an uplink scoped to one upstream files there by default.", object(map[string]any{"title": stringProperty("Issue title"), "body": stringProperty("Issue body"), "upstream": stringProperty("Upstream name to file the issue under (required for an uplink scoped to several upstreams)")}, "title", "body")),
 		tool("issue_get", "Get an issue by ID. Full record by default for compatibility. Optional fields selects only named fields; body_limit caps retained body/occurrence-history bytes with an explicit truncated N bytes marker. The numeric occurrences count remains exact. Read-only; does not renew locks.", object(issueReadProperties("id", integerProperty("Issue ID")), "id")),
 		tool("issue_get_many", "Get 1..50 issues in request order, each with issue or error (not_found or response_limit). Full records by default. Optional fields and body_limit apply to each issue before the 256 KiB structured JSON budget; body_limit truncates body/occurrence history with a truncated N bytes marker, keeping numeric occurrences exact. Use compact options or issue_get for response_limit IDs. Read-only; does not renew locks.", object(issueReadProperties("ids", map[string]any{"type": "array", "minItems": 1, "maxItems": 50, "uniqueItems": true, "items": map[string]any{"type": "integer", "minimum": 1}}), "ids")),
-		tool("issue_update", "Update an issue title and body, or move a manual issue to an upstream (empty or global means workspace-global, admin only). A non-admin can move only a visible issue to an upstream in scope. When expected_body_sha256 is set, the server rejects the update if the SHA-256 of the existing body does not match. Returns only id, state, updated_at, occurrences, appended_bytes (zero); use issue_get to read content.", object(map[string]any{"id": integerProperty("Issue ID"), "title": stringProperty("Issue title (send with body)"), "body": stringProperty("Issue body (send with title)"), "upstream": stringProperty("New upstream name, or empty/global for workspace-global (admin only)"), "expected_body_sha256": stringProperty("Hex-encoded SHA-256 of the existing body; the server rejects the update on mismatch")}, "id")),
+		tool("issue_update", "Update an issue title and body, or move a manual issue to an upstream (empty or global means workspace-global, admin only). A non-admin can move only a visible issue to an upstream in scope. expected_revision atomically checks the current metadata revision; a mismatch is a conflict. Revision advances only for real title, state or upstream changes, not body edits. When expected_body_sha256 is set, the server checks the existing body hash inside the write transaction and rejects a mismatch. Returns only id, state, updated_at, occurrences, appended_bytes (zero); use issue_get to read content.", object(map[string]any{"id": integerProperty("Issue ID"), "title": stringProperty("Issue title (body optional)"), "body": stringProperty("Replacement issue body (title optional)"), "upstream": stringProperty("New upstream name, or empty/global for workspace-global (admin only)"), "expected_revision": map[string]any{"type": "integer", "minimum": 1, "description": "Optional current metadata revision; mismatch is a conflict; omitted means last-write-wins"}, "expected_body_sha256": stringProperty("Hex-encoded SHA-256 of the existing body; the server rejects the update on mismatch")}, "id")),
 		tool("issue_append", "Append text to an issue body with a dated separator, without replacing the existing content. Safer than issue_update for checkpoints on large issues: the caller never re-sends the existing body. Returns only id, state, updated_at, occurrences, appended_bytes (UTF-8 bytes of text, excluding separator); use issue_get to read content.", object(map[string]any{"id": integerProperty("Issue ID"), "text": stringProperty("Text to append")}, "id", "text")),
 		tool("issue_close", "Close an issue without deleting its history. Returns only id, state, updated_at, occurrences, appended_bytes (zero); use issue_get to read content.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
 		tool("issue_reopen", "Reopen a manual issue without changing its ID or history. Already-open manual issues are unchanged; CI issues cannot be reopened manually.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
@@ -548,21 +596,38 @@ func toolDefinitions() []map[string]any {
 		tool("uplink_revoke", "Revoke an uplink SSH key and bearer immediately. Unscoped admin only; audited; the last active unscoped admin cannot be revoked.", object(map[string]any{"identity": stringProperty("Uplink identity"), "fingerprint": stringProperty("Exact key fingerprint, required when identity has several keys")}, "identity")),
 		tool("uplink_rotate", "Finish rotation to an already registered active replacement key with identical identity, admin status and scope, atomically revoking the selected old credential. Unscoped admin only. Issue the replacement through uplink add first; no key material crosses MCP.", object(map[string]any{"identity": stringProperty("Uplink identity"), "fingerprint": stringProperty("Old key fingerprint"), "replacement_fingerprint": stringProperty("Already issued replacement key fingerprint")}, "identity", "fingerprint", "replacement_fingerprint")),
 		tool("access_dismiss", "Dismiss one stale pending declaration. Unscoped admin only. Copy its exact repository key from access_list; legacy or orphaned keys are supported. Scoped uplinks are refused. Audited; later admission can observe it again.", object(map[string]any{"repo": stringProperty("Repository"), "step": stringProperty("Declared step"), "secret": stringProperty("Exact declared path")}, "repo", "step", "secret")),
-		tool("kubevirt_grant_list", "List active KubeVirt grants for every repository. Unscoped admin only.", object(map[string]any{})),
+		tool("kubevirt_grant_list", "Deprecated; retained for legacy VM pipelines. List active KubeVirt grants for every repository. Unscoped admin only.", object(map[string]any{})),
 		tool("access_list", "List secret access grants for a repository.", object(map[string]any{"repo": stringProperty("Repository name (empty lists all)"), "revoked": map[string]any{"type": "boolean", "description": "Include revoked grants"}, "pending": map[string]any{"type": "boolean", "description": "Return declared-but-not-granted paths observed at Workflow admission (issue #623)"}})),
 		tool("access_allow", "Grant a step access to a secret path. Requires admin uplink.", object(map[string]any{"repo": stringProperty("Repository name"), "step": stringProperty("Step/template name"), "secret": stringProperty("Exact secret path from the pipeline declaration or access_list (e.g. oberth/data/release/cosign-secret). Copied verbatim; no prefix expansion or path normalization.")}, "repo", "step", "secret")),
 		tool("access_revoke", "Revoke a step's access to a secret path. Requires admin uplink.", object(map[string]any{"repo": stringProperty("Repository name"), "step": stringProperty("Step/template name"), "secret": stringProperty("Exact secret path from the pipeline declaration or access_list (e.g. oberth/data/release/cosign-secret). Copied verbatim; no prefix expansion or path normalization.")}, "repo", "step", "secret")),
-		tool("kubevirt_grant", "Grant a registered repository permission to submit narrowly admitted KubeVirt VMI templates and KVM device leaves (oberth.ci/kvm-templates, including guest-test lanes), with a VMI budget shared across its admitted runs. The budget bounds VMI creates only; KVM leaves declare no VMI demand. Unset budget fields default to 2 VMs, 6 cores, 12Gi; the server's cluster ceiling still caps the budget at admission. Granting an active grant again with a different budget replaces it. Admin uplink required; audited.", object(map[string]any{
+		tool("workflow_capability_grant", "Grant operator-owned Kubernetes access and extended resources to one registered repository. The operator owns the ServiceAccount, RBAC and namespace quota. Administrator only; audited. Existing technology-specific grants confer no authority here.", object(map[string]any{
+			"repo": stringProperty("Registered repository name"),
+			"capability": object(map[string]any{
+				"namespace":       stringProperty("Configured execution namespace"),
+				"service_account": stringProperty("Operator-provided ServiceAccount"),
+				"resource_kinds": map[string]any{"type": "array", "maxItems": 32, "items": object(map[string]any{
+					"api_version": stringProperty("Exact API version"), "kind": stringProperty("Exact resource kind"),
+					"actions": map[string]any{"type": "array", "minItems": 1, "maxItems": 4, "uniqueItems": true, "items": map[string]any{"type": "string", "enum": []string{"create", "get", "delete", "apply"}}},
+				}, "api_version", "kind", "actions")},
+				"extended_resources": map[string]any{"type": "object", "maxProperties": 32, "additionalProperties": map[string]any{"type": "integer", "minimum": 1, "maximum": 1000000}},
+			}, "namespace", "service_account"),
+		}, "repo", "capability")),
+		tool("workflow_capability_revoke", "Revoke a repository's operator capability. New submissions and restart adoption refuse the revoked authority. Running Kubernetes workloads remain operator-owned. Administrator only; audited.", object(map[string]any{"repo": stringProperty("Registered repository name")}, "repo")),
+		tool("workflow_capability_get", "Read the repository's current or revoked operator capability within the caller's upstream scope.", object(map[string]any{"repo": stringProperty("Registered repository name")}, "repo")),
+		tool("kubevirt_grant", "Deprecated; retained for legacy VM pipelines. Grant a registered repository permission to submit narrowly admitted KubeVirt VMI templates and KVM device leaves (oberth.ci/kvm-templates, including guest-test lanes), with a VMI budget shared across its admitted runs. The budget bounds VMI creates only; KVM leaves declare no VMI demand. Unset budget fields default to 2 VMs, 6 cores, 12Gi; the server's cluster ceiling still caps the budget at admission. Granting an active grant again with a different budget replaces it. Admin uplink required; audited.", object(map[string]any{
 			"repo":       stringProperty("Registered repository name"),
 			"max_vms":    integerProperty("Maximum concurrent VMIs across admitted runs, 1..16 (default 2)"),
 			"max_cores":  integerProperty("Maximum concurrent VMI cores across admitted runs, 1..64 (default 6)"),
 			"max_memory": stringProperty("Maximum concurrent VMI memory requests across admitted runs as a Kubernetes quantity, 1Gi..256Gi (default 12Gi)"),
 		}, "repo")),
-		tool("kubevirt_revoke", "Revoke a repository's KubeVirt permission for VMI templates and KVM device leaves. New submissions fail closed; running workflows continue. Admin uplink required; audited.", object(map[string]any{"repo": stringProperty("Registered repository name")}, "repo")),
-		tool("kubevirt_grant_get", "Read a repository's KubeVirt grant, which authorizes both VMI templates and KVM device leaves (oberth.ci/kvm-templates), and its VMI budget shared across admitted runs.", object(map[string]any{"repo": stringProperty("Registered repository name")}, "repo")),
+		tool("kubevirt_revoke", "Deprecated; retained for legacy VM pipelines. Revoke a repository's KubeVirt permission for VMI templates and KVM device leaves. New submissions fail closed; running workflows continue. Admin uplink required; audited.", object(map[string]any{"repo": stringProperty("Registered repository name")}, "repo")),
+		tool("kubevirt_grant_get", "Deprecated; retained for legacy VM pipelines. Read a repository's KubeVirt grant, which authorizes both VMI templates and KVM device leaves (oberth.ci/kvm-templates), and its VMI budget shared across admitted runs.", object(map[string]any{"repo": stringProperty("Registered repository name")}, "repo")),
+		tool("resource_grant", "Set a repository's per-container CPU, memory and ephemeral-storage ceilings, expressed as requests and limits. Does not change workflow declarations or legacy size/priority policy. Admin only; audited.", object(map[string]any{"repo": stringProperty("Registered repository name"), "requests": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}, "limits": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}}, "repo", "requests", "limits")),
+		tool("resource_revoke", "Revoke a numeric resource ceiling to the defaults (requests/limits: 4 CPU, 8Gi memory, 16Gi ephemeral-storage). Admin only; audited.", object(map[string]any{"repo": stringProperty("Registered repository name")}, "repo")),
+		tool("resource_grant_get", "Read the repository's numeric resource ceiling and grant provenance. Applies to every fresh submission, including releases.", object(map[string]any{"repo": stringProperty("Registered repository name")}, "repo")),
 		tool("size_grant", "Raise (or set) the largest admission size a repository's branch, promotion and schedule runs may declare. The default without a grant is L; XL reserves the whole host and makes every other repository wait for a full drain. Re-enables automatic tag priority: only the oldest waiting tag per repository qualifies, and only within this size maximum. Ungranted repositories default to enabled within L. Admin uplink required; audited.", object(map[string]any{"repo": stringProperty("Registered repository name"), "max": map[string]any{"type": "string", "enum": []string{"L", "XL"}, "description": "Maximum size"}}, "repo", "max")),
 		tool("size_revoke", "Return a repository to maximum L and disable its automatic tag priority, even if never granted. Explicit admin bumps, promotions and 60-minute aging still apply; running work continues. Admin uplink required; audited.", object(map[string]any{"repo": stringProperty("Registered repository name")}, "repo")),
-		tool("size_grant_get", "Read a repository's maximum admission size, size grant record, and per-container resource_ceiling for requests and limits: L permits 4 CPU, 8Gi memory, 16Gi ephemeral; XL permits 8 CPU, 16Gi memory, 32Gi ephemeral. The ceiling also applies to release submissions; pipeline annotations cannot raise it.", object(map[string]any{"repo": stringProperty("Registered repository name")}, "repo")),
+		tool("size_grant_get", "Read legacy admission size and priority policy, plus the independent numeric resource ceiling. Use resource_grant to change request/limit ceilings.", object(map[string]any{"repo": stringProperty("Registered repository name")}, "repo")),
 		tool("queue_priority_config", "Replace administrator RC branch globs (case-sensitive * and ? match slash); [] disables RC priority. Applies to waiting runs immediately. Normal and high runs age into highest priority after 60 minutes. Unscoped admin only; audited.", object(map[string]any{"rc_patterns": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 16}}, "rc_patterns")),
 		tool("queue_priority_get", "Read administrator RC globs and starvation threshold. Unscoped admin only.", object(map[string]any{})),
 		tool("priority_grant", "Allow an identity to request submission priority up to max_class until expires (RFC3339). Unscoped admin only; audited.", object(map[string]any{"identity": stringProperty("Requesting identity"), "max_class": map[string]any{"type": "string", "enum": []string{"high", "highest"}}, "expires": map[string]any{"type": "string", "format": "date-time"}}, "identity", "max_class", "expires")),
@@ -637,6 +702,7 @@ func toolDefinitions() []map[string]any {
 // IssueReadFields is the public MCP field allowlist; persistence-only fields
 // cannot be selected. Keep the schema and service validation on this list.
 var IssueReadFields = []string{
+	"revision",
 	"id", "lock", "upstream", "kind", "title", "body", "state", "repo_id",
 	"branch", "occurrences", "ci_origin", "ci_work_id", "created_at", "updated_at",
 }

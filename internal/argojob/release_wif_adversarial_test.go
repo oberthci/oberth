@@ -10,11 +10,11 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestReleaseWIFRejectsAuthoredProvenanceWithoutCapabilities(t *testing.T) {
-	for _, trigger := range []periapsis.Trigger{periapsis.TriggerCI, periapsis.TriggerRelease} {
+	for _, trigger := range []pipeline.Trigger{pipeline.TriggerCI, pipeline.TriggerRelease} {
 		for _, enabled := range []bool{false, true} {
 			c := wifTestConfig()
 			if !enabled {
@@ -38,18 +38,18 @@ func TestReleaseWIFConfigCanonicalBindings(t *testing.T) {
 	if err := foreignNamespace.Validate(); err == nil {
 		t.Fatal("startup accepted foreign WIF namespace")
 	}
-	for _, repo := range []string{"/github/skipops/oberth", "github/skipops/oberth.git", "github/../oberth", "github/skipops/*", "github/skipops/ob?erth", "github/skipops/ob\\erth", "release/skipops/oberth", "github/skipops/"} {
+	for _, repo := range []string{"/github/acme/oberth", "github/acme/oberth.git", "github/../oberth", "github/acme/*", "github/acme/ob?erth", "github/acme/ob\\erth", "release/acme/oberth", "github/acme/"} {
 		c := wifTestConfig().ReleaseWIF
-		c.Repositories = map[string]ReleaseWIFRepository{repo: c.Repositories["github/skipops/oberth"]}
+		c.Repositories = map[string]ReleaseWIFRepository{repo: c.Repositories["github/acme/oberth"]}
 		if err := c.Validate(); err == nil {
 			t.Errorf("accepted noncanonical repository %q", repo)
 		}
 	}
 	c := wifTestConfig().ReleaseWIF
 	frozen := c.Clone()
-	c.Repositories["github/skipops/oberth"].Templates["foreign"] = "chart-writer"
+	c.Repositories["github/acme/oberth"].Templates["foreign"] = "chart-writer"
 	delete(c.Roles, "image-writer")
-	if frozen.Repositories["github/skipops/oberth"].Templates["foreign"] != "" || frozen.Roles["image-writer"].Provider == "" {
+	if frozen.Repositories["github/acme/oberth"].Templates["foreign"] != "" || frozen.Roles["image-writer"].Provider == "" {
 		t.Fatal("capability clone retained mutable maps")
 	}
 }
@@ -118,10 +118,10 @@ func TestReleaseWIFRejectsInlineAndCredentialAliases(t *testing.T) {
 				}
 			})
 			if shape == "shared-sa" {
-				grant := c.ReleaseWIF.Repositories["github/skipops/oberth"]
+				grant := c.ReleaseWIF.Repositories["github/acme/oberth"]
 				grant.ServiceAccountName = c.CredentialedServiceAccount
-				c.ReleaseWIF.Repositories["github/skipops/oberth"] = grant
-				c.PerRepoIdentities["github/skipops/oberth"] = PerRepoIdentityConfig{ServiceAccountName: grant.ServiceAccountName}
+				c.ReleaseWIF.Repositories["github/acme/oberth"] = grant
+				c.PerRepoIdentities["github/acme/oberth"] = PerRepoIdentityConfig{ServiceAccountName: grant.ServiceAccountName}
 			}
 			if shape == "cross-role-pool" {
 				role := c.ReleaseWIF.Roles["image-reader"]
@@ -145,15 +145,15 @@ func wifControllerInput(t *testing.T, shape string) (Config, Request) {
 	if shape == "wif-only-step" {
 		c = genericWIFConfig()
 		c.PerRepoIdentities = nil // This repository has no secret grants.
-		grant := c.ReleaseWIF.Repositories["github/skipops/oberth"]
+		grant := c.ReleaseWIF.Repositories["github/acme/oberth"]
 		grant.ServiceAccountName = ""
-		c.ReleaseWIF.Repositories["github/skipops/oberth"] = grant
+		c.ReleaseWIF.Repositories["github/acme/oberth"] = grant
 		role = "artifact-deployer"
 	}
 	if strings.HasPrefix(shape, "image-") || shape == "chart-writer" {
 		role = shape
 	}
-	c.ReleaseWIF.Repositories["github/skipops/oberth"].Templates["main"] = role
+	c.ReleaseWIF.Repositories["github/acme/oberth"].Templates["main"] = role
 	r := wifTestRequest(t, func(wf *wfv1.Workflow) {
 		leaf := &wf.Spec.Templates[0]
 		leaf.Metadata.Annotations[argoworkflow.ReleaseWIFRoleAnnotation] = role

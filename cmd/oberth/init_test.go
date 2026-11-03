@@ -11,7 +11,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestInitFreshGoProject(t *testing.T) {
@@ -20,7 +20,7 @@ func TestInitFreshGoProject(t *testing.T) {
 	writeTestFile(t, filepath.Join(dir, "go.mod"), "module test\ngo 1.22\n")
 
 	var output bytes.Buffer
-	if err := executeInit(dir, "", false, &output); err != nil {
+	if err := executeInit(dir, false, &output); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".oberth", "build.yaml")); err != nil {
@@ -38,7 +38,7 @@ func TestInitPrecedenceGoOverNode(t *testing.T) {
 	writeTestFile(t, filepath.Join(dir, "package.json"), "{}\n")
 
 	var output bytes.Buffer
-	if err := executeInit(dir, "", false, &output); err != nil {
+	if err := executeInit(dir, false, &output); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "detected: go") {
@@ -57,7 +57,7 @@ func TestInitRefusesOverwrite(t *testing.T) {
 	writeTestFile(t, filepath.Join(dir, "go.mod"), "module test\n")
 
 	var output bytes.Buffer
-	err := executeInit(dir, "", false, &output)
+	err := executeInit(dir, false, &output)
 	if err == nil {
 		t.Fatal("expected refusal error")
 	}
@@ -78,47 +78,12 @@ func TestInitForcePreservesSiblings(t *testing.T) {
 	writeTestFile(t, filepath.Join(dir, "go.mod"), "module test\n")
 
 	var output bytes.Buffer
-	if err := executeInit(dir, "", true, &output); err != nil {
+	if err := executeInit(dir, true, &output); err != nil {
 		t.Fatal(err)
 	}
 	sibling, err := os.ReadFile(filepath.Join(oberthDir, "other.txt"))
 	if err != nil || string(sibling) != "sibling" {
 		t.Fatalf("sibling file modified: %v %q", err, sibling)
-	}
-}
-
-func TestInitTypeOverride(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	var output bytes.Buffer
-	if err := executeInit(dir, "go", false, &output); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(output.String(), "--type go") {
-		t.Fatalf("output = %q, want --type go", output.String())
-	}
-}
-
-func TestInitTypeDeprecationNotice(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	var output bytes.Buffer
-	if err := executeInit(dir, "node", false, &output); err != nil {
-		t.Fatal(err)
-	}
-	out := output.String()
-	if !strings.Contains(out, "--type has no effect yet") {
-		t.Fatalf("output missing deprecation notice: %q", out)
-	}
-}
-
-func TestInitInvalidType(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	var output bytes.Buffer
-	err := executeInit(dir, "rust", false, &output)
-	if err == nil || !strings.Contains(err.Error(), "unknown project type") {
-		t.Fatalf("error = %v, want unknown project type", err)
 	}
 }
 
@@ -128,7 +93,7 @@ func TestInitPermissions(t *testing.T) {
 	writeTestFile(t, filepath.Join(dir, "go.mod"), "module test\n")
 
 	var output bytes.Buffer
-	if err := executeInit(dir, "", false, &output); err != nil {
+	if err := executeInit(dir, false, &output); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(filepath.Join(dir, ".oberth", "build.yaml"))
@@ -146,7 +111,7 @@ func TestInitWritesValidArgoWorkflowYAML(t *testing.T) {
 	writeTestFile(t, filepath.Join(dir, "go.mod"), "module test\n")
 
 	var output bytes.Buffer
-	if err := executeInit(dir, "", false, &output); err != nil {
+	if err := executeInit(dir, false, &output); err != nil {
 		t.Fatal(err)
 	}
 	content, err := os.ReadFile(filepath.Join(dir, ".oberth", "build.yaml"))
@@ -183,7 +148,7 @@ func TestInitSummaryOutput(t *testing.T) {
 	writeTestFile(t, filepath.Join(dir, "go.mod"), "module test\n")
 
 	var output bytes.Buffer
-	if err := executeInit(dir, "", false, &output); err != nil {
+	if err := executeInit(dir, false, &output); err != nil {
 		t.Fatal(err)
 	}
 	out := output.String()
@@ -202,7 +167,7 @@ func TestInitDAGDiagramInOutput(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	var output bytes.Buffer
-	if err := executeInit(dir, "generic", false, &output); err != nil {
+	if err := executeInit(dir, false, &output); err != nil {
 		t.Fatal(err)
 	}
 	out := output.String()
@@ -221,8 +186,9 @@ func TestInitAllTypesGenerateSameTemplate(t *testing.T) {
 	var contents []string
 	for _, projType := range allProjectTypes {
 		dir := t.TempDir()
+		writeDetectedProjectFixture(t, dir, projectType(projType))
 		var output bytes.Buffer
-		if err := executeInit(dir, string(projType), false, &output); err != nil {
+		if err := executeInit(dir, false, &output); err != nil {
 			t.Fatalf("init %s: %v", projType, err)
 		}
 		content, err := os.ReadFile(filepath.Join(dir, ".oberth", "build.yaml"))
@@ -244,8 +210,9 @@ func TestInitAllTemplatesUseAllowlistedImages(t *testing.T) {
 		t.Run(string(projType), func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
+			writeDetectedProjectFixture(t, dir, projectType(projType))
 			var output bytes.Buffer
-			if err := executeInit(dir, string(projType), false, &output); err != nil {
+			if err := executeInit(dir, false, &output); err != nil {
 				t.Fatal(err)
 			}
 			content, err := os.ReadFile(filepath.Join(dir, ".oberth", "build.yaml"))
@@ -274,11 +241,9 @@ func TestInitAllTemplatesHaveDigestPinnedImages(t *testing.T) {
 		t.Run(projType, func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
-			if projType == "go" {
-				writeTestFile(t, filepath.Join(dir, "go.mod"), "module test\ngo 1.22\n")
-			}
+			writeDetectedProjectFixture(t, dir, projectType(projType))
 			var output bytes.Buffer
-			if err := executeInit(dir, projType, false, &output); err != nil {
+			if err := executeInit(dir, false, &output); err != nil {
 				t.Fatal(err)
 			}
 			content, err := os.ReadFile(filepath.Join(dir, ".oberth", "build.yaml"))
@@ -305,7 +270,7 @@ func TestInitNoAllowlistWarning(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	var output bytes.Buffer
-	if err := executeInit(dir, "generic", false, &output); err != nil {
+	if err := executeInit(dir, false, &output); err != nil {
 		t.Fatal(err)
 	}
 	out := output.String()
@@ -320,7 +285,7 @@ func TestInitDemoTemplatePassesAdmission(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	var output bytes.Buffer
-	if err := executeInit(dir, "generic", false, &output); err != nil {
+	if err := executeInit(dir, false, &output); err != nil {
 		t.Fatal(err)
 	}
 	content, err := os.ReadFile(filepath.Join(dir, ".oberth", "build.yaml"))
@@ -345,7 +310,7 @@ func TestInitDemoDAGStepNames(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	var output bytes.Buffer
-	if err := executeInit(dir, "generic", false, &output); err != nil {
+	if err := executeInit(dir, false, &output); err != nil {
 		t.Fatal(err)
 	}
 	content, err := os.ReadFile(filepath.Join(dir, ".oberth", "build.yaml"))
@@ -384,7 +349,7 @@ func TestInitDetectedLanguageDemoSuffix(t *testing.T) {
 				writeTestFile(t, filepath.Join(dir, tc.markerFile), tc.markerData)
 			}
 			var output bytes.Buffer
-			if err := executeInit(dir, "", false, &output); err != nil {
+			if err := executeInit(dir, false, &output); err != nil {
 				t.Fatal(err)
 			}
 			out := output.String()
@@ -412,7 +377,7 @@ func TestInitRejectsOberthDirSymlink(t *testing.T) {
 	writeTestFile(t, filepath.Join(dir, "go.mod"), "module test\n")
 
 	var output bytes.Buffer
-	err := executeInit(dir, "", false, &output)
+	err := executeInit(dir, false, &output)
 	if err == nil {
 		t.Fatal("expected error for symlinked .oberth directory")
 	}
@@ -434,7 +399,7 @@ func TestInitRejectsBuildYAMLSymlink(t *testing.T) {
 	writeTestFile(t, filepath.Join(dir, "go.mod"), "module test\n")
 
 	var output bytes.Buffer
-	err := executeInit(dir, "", true, &output)
+	err := executeInit(dir, true, &output)
 	if err == nil {
 		t.Fatal("expected error for symlinked build.yaml")
 	}
@@ -452,7 +417,7 @@ func TestInitRejectsDanglingSymlink(t *testing.T) {
 	writeTestFile(t, filepath.Join(dir, "go.mod"), "module test\n")
 
 	var output bytes.Buffer
-	err := executeInit(dir, "", false, &output)
+	err := executeInit(dir, false, &output)
 	if err == nil {
 		t.Fatal("expected error for dangling .oberth symlink")
 	}
@@ -463,7 +428,7 @@ func TestInitRejectsDanglingSymlink(t *testing.T) {
 
 // TestDefaultRunnerImagePrefixesMatchChart parses the chart values.yaml and
 // asserts that its runnerImagePrefixes list equals the code-level default in
-// periapsis.DefaultRunnerImagePrefixes. Drift between the two is a silent
+// pipeline.DefaultRunnerImagePrefixes. Drift between the two is a silent
 // admission mismatch: the server's flag default may disagree with the chart's
 // rendered deployment args, causing `oberth init` templates to pass one gate
 // and fail the other.
@@ -479,14 +444,14 @@ func TestDefaultRunnerImagePrefixesMatchChart(t *testing.T) {
 	if err := yaml.Unmarshal(content, &values); err != nil {
 		t.Fatalf("parse values.yaml: %v", err)
 	}
-	if len(values.RunnerImagePrefixes) != len(periapsis.DefaultRunnerImagePrefixes) {
+	if len(values.RunnerImagePrefixes) != len(pipeline.DefaultRunnerImagePrefixes) {
 		t.Fatalf("chart runnerImagePrefixes %v != code DefaultRunnerImagePrefixes %v",
-			values.RunnerImagePrefixes, periapsis.DefaultRunnerImagePrefixes)
+			values.RunnerImagePrefixes, pipeline.DefaultRunnerImagePrefixes)
 	}
 	for i, prefix := range values.RunnerImagePrefixes {
-		if prefix != periapsis.DefaultRunnerImagePrefixes[i] {
+		if prefix != pipeline.DefaultRunnerImagePrefixes[i] {
 			t.Fatalf("chart runnerImagePrefixes[%d] = %q, code DefaultRunnerImagePrefixes[%d] = %q",
-				i, prefix, i, periapsis.DefaultRunnerImagePrefixes[i])
+				i, prefix, i, pipeline.DefaultRunnerImagePrefixes[i])
 		}
 	}
 }
@@ -495,5 +460,16 @@ func writeTestFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func writeDetectedProjectFixture(t *testing.T, root string, kind projectType) {
+	t.Helper()
+	name := map[projectType]string{projectGo: "go.mod", projectNode: "package.json", projectPython: "pyproject.toml"}[kind]
+	if name != "" {
+		writeTestFile(t, filepath.Join(root, name), "fixture")
+	}
+	if detected, _ := detectProject(root); detected != kind {
+		t.Fatalf("fixture detected %s, want %s", detected, kind)
 	}
 }

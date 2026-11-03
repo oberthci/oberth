@@ -169,7 +169,7 @@ func sanitizeSecretStoreHTTPError(operation string, err error) error {
 	}
 	var readErr *secretStoreResponseReadError
 	if errors.As(err, &readErr) {
-		return errors.New("secret store " + operation + " failed: response read error")
+		return &TransportError{operation, "response read error", true}
 	}
 	if errors.Is(err, context.Canceled) {
 		return fmt.Errorf("secret store %s failed: %w", operation, context.Canceled)
@@ -181,13 +181,13 @@ func sanitizeSecretStoreHTTPError(operation string, err error) error {
 	var networkErr net.Error
 	switch {
 	case errors.Is(err, syscall.ECONNREFUSED):
-		return errors.New("secret store " + operation + " failed: connection refused")
+		return &TransportError{operation, "connection refused", true}
 	case errors.As(err, &unknownCA):
 		return errors.New("secret store " + operation + " failed: unknown CA")
 	case errors.As(err, &networkErr) && networkErr.Timeout():
-		return errors.New("secret store " + operation + " failed: timeout")
+		return &TransportError{operation, "timeout", true}
 	}
-	return errors.New("secret store " + operation + " failed: transport error")
+	return &TransportError{operation, "transport error", errors.As(err, &networkErr)}
 }
 
 func secretStoreRetryPolicy(ctx context.Context, response *http.Response, err error) (bool, error) {
@@ -199,4 +199,21 @@ func secretStoreRetryPolicy(ctx context.Context, response *http.Response, err er
 		return false, nil
 	}
 	return vaultapi.DefaultRetryPolicy(ctx, response, err)
+}
+
+// TransportError preserves retry classification without retaining a URL, token,
+// request body, or an unsafe nested error from the HTTP client.
+type TransportError struct {
+	Op, Reason string
+	Temporary  bool
+}
+
+func (err *TransportError) Error() string { return "secret store " + err.Op + " failed: " + err.Reason }
+func IsUnavailable(err error) bool {
+	var status *StatusError
+	if errors.As(err, &status) {
+		return status.Code == http.StatusTooManyRequests || status.Code >= 500
+	}
+	var transport *TransportError
+	return (errors.As(err, &transport) && transport.Temporary) || errors.Is(err, context.DeadlineExceeded)
 }

@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 )
 
 // RunSourceBinding comes exclusively from the durable run and server-selected
@@ -50,9 +51,10 @@ func (s VMIDemandSummary) Valid() bool {
 // stay private and are copied at both boundaries, so sizing and submission use
 // one exact, policy-admitted resolution even if the source tag subsequently moves.
 type VMIDemandReceipt struct {
-	pods      *wfv1.Workflow
-	summary   VMIDemandSummary
-	fragments map[FragmentKey]Fragment
+	capability bool
+	pods       *wfv1.Workflow
+	summary    VMIDemandSummary
+	fragments  map[FragmentKey]Fragment
 }
 
 // DeclaredPodDemand analyzes the same immutable source and fragment resolution
@@ -60,6 +62,9 @@ type VMIDemandReceipt struct {
 func (r *VMIDemandReceipt) DeclaredPodDemand() (*PodDemand, error) {
 	if r == nil || r.pods == nil {
 		return nil, nil
+	}
+	if r.capability {
+		return DeclaredCapabilityPeak(r.pods.DeepCopy())
 	}
 	return DeclaredHostPeak(r.pods.DeepCopy(), r.summary.Binding.Trigger)
 }
@@ -190,18 +195,72 @@ func (r *ResolvedRunSource) Receipt(policy Policy) (*VMIDemandReceipt, error) {
 	if err := Admit(r.workflow, r.Policy(policy)); err != nil {
 		return nil, err
 	}
-	demand, err := r.demand()
+	var demand VMIDemand
+	var err error
+	if policy.Capability == nil {
+		demand, err = r.demand()
+	}
 	if err != nil {
 		return nil, err
 	}
 	summary := r.identity
 	summary.Demand = demand
-	return &VMIDemandReceipt{summary: summary, fragments: cloneVMIFragments(r.fragments), pods: r.workflow.DeepCopy()}, nil
+	return &VMIDemandReceipt{capability: policy.Capability != nil, summary: summary, fragments: cloneVMIFragments(r.fragments), pods: r.workflow.DeepCopy()}, nil
 }
 
 func (r *VMIDemandReceipt) Verify(other *VMIDemandReceipt) error {
-	if r == nil || other == nil || r.summary != other.summary {
+	if r == nil || other == nil || r.summary != other.summary || r.capability != other.capability {
 		return errors.New("argoworkflow: VMI demand receipt source, trigger or resolved graph changed after reservation")
 	}
 	return nil
+}
+
+// HasResourceRequests distinguishes legacy (including limits-only) documents
+// from measured or partially requested ones. Partial requests must be completed
+// in git. The receipt holds already-resolved fragments.
+func (r *VMIDemandReceipt) HasResourceRequests() bool {
+	if r == nil || r.pods == nil {
+		return false
+	}
+	declared := false
+	check := func(resources corev1.ResourceRequirements) {
+		for _, name := range []corev1.ResourceName{corev1.ResourceCPU, corev1.ResourceMemory} {
+			if _, ok := resources.Requests[name]; ok {
+				declared = true
+			}
+		}
+	}
+	var walk func(*wfv1.Template, int)
+	walk = func(t *wfv1.Template, depth int) {
+		if t == nil || depth > MaxIdentityWalkDepth {
+			return
+		}
+		if t.Container != nil {
+			check(t.Container.Resources)
+		}
+		if t.Script != nil {
+			check(t.Script.Resources)
+		}
+		if t.ContainerSet != nil {
+			for _, c := range t.ContainerSet.Containers {
+				check(c.Resources)
+			}
+		}
+		for _, c := range t.InitContainers {
+			check(c.Resources)
+		}
+		for _, c := range t.Sidecars {
+			check(c.Resources)
+		}
+		for _, call := range invocations(t) {
+			if call.inline != nil {
+				walk(call.inline, depth+1)
+			}
+		}
+	}
+	walk(r.pods.Spec.TemplateDefaults, 0)
+	for i := range r.pods.Spec.Templates {
+		walk(&r.pods.Spec.Templates[i], 0)
+	}
+	return declared
 }

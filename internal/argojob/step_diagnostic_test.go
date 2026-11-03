@@ -24,7 +24,10 @@ import (
 )
 
 func diagnosticFixture() (*wfv1.Workflow, wfv1.NodeStatus, *corev1.Pod, time.Time) {
-	at := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	return diagnosticFixtureAt(time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC))
+}
+
+func diagnosticFixtureAt(at time.Time) (*wfv1.Workflow, wfv1.NodeStatus, *corev1.Pod, time.Time) {
 	wf := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "workflow-test", Namespace: "pipelines", UID: "11111111-1111-4111-8111-111111111111", Annotations: map[string]string{runIDAnnotation: strings.Repeat("a", 32)}}}
 	node := wfv1.NodeStatus{ID: "workflow-test-1234", Name: "workflow-test.test", DisplayName: "test", Type: wfv1.NodeTypePod, Phase: wfv1.NodeFailed, StartedAt: metav1.NewTime(at.Add(-time.Minute)), FinishedAt: metav1.NewTime(at.Add(-time.Second)), Outputs: &wfv1.Outputs{ExitCode: ptr.To("137")}}
 	wf.Status.Nodes = wfv1.Nodes{node.ID: node}

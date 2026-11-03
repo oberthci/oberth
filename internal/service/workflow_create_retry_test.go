@@ -13,11 +13,11 @@ import (
 
 type workflowCreateFailureJobs struct{ *fakeJobs }
 
-func (*workflowCreateFailureJobs) CreateCI(context.Context, JobRequest) error {
+func (*workflowCreateFailureJobs) CreateWorkflow(context.Context, WorkflowRequest) error {
 	return fmt.Errorf("argojob: create Workflow exhausted: %w", context.DeadlineExceeded)
 }
-func (jobs *workflowCreateFailureJobs) CreateRelease(ctx context.Context, request JobRequest) error {
-	return jobs.CreateCI(ctx, request)
+func (jobs *workflowCreateFailureJobs) CreateRelease(ctx context.Context, request WorkflowRequest) error {
+	return jobs.CreateWorkflow(ctx, request)
 }
 
 func TestWorkflowCreateExhaustionIsInfrastructureAndRunRetryApplies(t *testing.T) {

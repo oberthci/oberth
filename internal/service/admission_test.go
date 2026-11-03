@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // admissionAcquireBudget bounds an acquire a test expects to succeed, so a
@@ -14,7 +14,7 @@ import (
 // was starved instead of blocking until the package timeout kills the suite.
 const admissionAcquireBudget = 2 * time.Second
 
-func acquireWithinBudget(t *testing.T, reservation *admissionReservation, size periapsis.Size) (func(), error) {
+func acquireWithinBudget(t *testing.T, reservation *admissionReservation, size pipeline.Size) (func(), error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), testStartTimeout(admissionAcquireBudget))
 	defer cancel()
@@ -30,14 +30,14 @@ func acquireWithinBudget(t *testing.T, reservation *admissionReservation, size p
 func TestWeightedAdmissionEnforcesCapacityForLargeRuns(t *testing.T) {
 	gate := newWeightedAdmission(6)
 	first := gate.reserve(1)
-	releaseFirst, err := first.acquire(context.Background(), periapsis.L)
+	releaseFirst, err := first.acquire(context.Background(), pipeline.L)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer releaseFirst()
 
 	second := gate.reserve(2)
-	releaseSecond, err := acquireWithinBudget(t, second, periapsis.L)
+	releaseSecond, err := acquireWithinBudget(t, second, pipeline.L)
 	if err != nil {
 		t.Fatalf("two large runs must fit a budget that weighs exactly two of them: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestWeightedAdmissionEnforcesCapacityForLargeRuns(t *testing.T) {
 
 	third := gate.reserve(3)
 	acquired := make(chan func(), 1)
-	go acquireForTest(third, periapsis.L, acquired)
+	go acquireForTest(third, pipeline.L, acquired)
 	assertNotAcquired(t, acquired)
 	releaseSecond()
 	releaseThird := awaitAcquired(t, acquired)
@@ -92,14 +92,14 @@ func TestWeightedAdmissionForJobsAdmitsConfiguredConcurrencyAtDefaultSize(t *tes
 func TestWeightedAdmissionForJobsRunsLargePipelinesConcurrently(t *testing.T) {
 	gate := newWeightedAdmissionForJobs(3)
 	first := gate.reserve(1)
-	releaseFirst, err := first.acquire(context.Background(), periapsis.L)
+	releaseFirst, err := first.acquire(context.Background(), pipeline.L)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer releaseFirst()
 
 	second := gate.reserve(2)
-	releaseSecond, err := acquireWithinBudget(t, second, periapsis.L)
+	releaseSecond, err := acquireWithinBudget(t, second, pipeline.L)
 	if err != nil {
 		t.Fatalf("a second large run must not serialize behind the first: %v", err)
 	}
@@ -111,14 +111,14 @@ func TestWeightedAdmissionForJobsRunsLargePipelinesConcurrently(t *testing.T) {
 func TestWeightedAdmissionForJobsKeepsExtraLargeExclusive(t *testing.T) {
 	gate := newWeightedAdmissionForJobs(3)
 	first := gate.reserve(1)
-	releaseFirst, err := first.acquire(context.Background(), periapsis.XL)
+	releaseFirst, err := first.acquire(context.Background(), pipeline.XL)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	second := gate.reserve(2)
 	acquired := make(chan func(), 1)
-	go acquireForTest(second, periapsis.S, acquired)
+	go acquireForTest(second, pipeline.S, acquired)
 	assertNotAcquired(t, acquired)
 	releaseFirst()
 	releaseSecond := awaitAcquired(t, acquired)
@@ -130,7 +130,7 @@ func TestWeightedAdmissionForJobsKeepsExtraLargeExclusive(t *testing.T) {
 // than the default can fit twice in it; the hard run-count ceiling is the
 // dispatch loop's `active < maxConcurrent`, not this gate.
 func TestWeightedAdmissionForJobsHonorsSingleJobCeiling(t *testing.T) {
-	for _, size := range []periapsis.Size{"", periapsis.M, periapsis.L, periapsis.XL} {
+	for _, size := range []pipeline.Size{"", pipeline.M, pipeline.L, pipeline.XL} {
 		gate := newWeightedAdmissionForJobs(1)
 		first := gate.reserve(1)
 		releaseFirst, err := first.acquire(context.Background(), size)
@@ -150,7 +150,7 @@ func TestWeightedAdmissionForJobsHonorsSingleJobCeiling(t *testing.T) {
 func TestWeightedAdmissionIsFIFOAndXLDrains(t *testing.T) {
 	gate := newWeightedAdmission(3)
 	medium := gate.reserve(1)
-	releaseMedium, err := medium.acquire(context.Background(), periapsis.M)
+	releaseMedium, err := medium.acquire(context.Background(), pipeline.M)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,8 +159,8 @@ func TestWeightedAdmissionIsFIFOAndXLDrains(t *testing.T) {
 	small := gate.reserve(3)
 	xlAcquired := make(chan func(), 1)
 	smallAcquired := make(chan func(), 1)
-	go acquireForTest(xl, periapsis.XL, xlAcquired)
-	go acquireForTest(small, periapsis.S, smallAcquired)
+	go acquireForTest(xl, pipeline.XL, xlAcquired)
+	go acquireForTest(small, pipeline.S, smallAcquired)
 	assertNotAcquired(t, xlAcquired)
 	assertNotAcquired(t, smallAcquired)
 
@@ -177,10 +177,10 @@ func TestWeightedAdmissionReservesClaimOrderBeforeSizingCompletes(t *testing.T) 
 	first := gate.reserve(1)
 	second := gate.reserve(2)
 	secondAcquired := make(chan func(), 1)
-	go acquireForTest(second, periapsis.S, secondAcquired)
+	go acquireForTest(second, pipeline.S, secondAcquired)
 	assertNotAcquired(t, secondAcquired)
 
-	releaseFirst, err := first.acquire(context.Background(), periapsis.XL)
+	releaseFirst, err := first.acquire(context.Background(), pipeline.XL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestWeightedAdmissionClampsDefaultMToSmallCapacity(t *testing.T) {
 	release()
 }
 
-func acquireForTest(reservation *admissionReservation, size periapsis.Size, acquired chan<- func()) {
+func acquireForTest(reservation *admissionReservation, size pipeline.Size, acquired chan<- func()) {
 	release, err := reservation.acquire(context.Background(), size)
 	if err == nil {
 		acquired <- release
@@ -235,19 +235,19 @@ func awaitAcquired(t *testing.T, acquired <-chan func()) func() {
 func TestWeightedAdmissionAbandonWithdrawsOnlyUngrantedReservations(t *testing.T) {
 	gate := newWeightedAdmission(6)
 	holder := gate.reserve(1)
-	releaseHolder, err := holder.acquire(context.Background(), periapsis.L)
+	releaseHolder, err := holder.acquire(context.Background(), pipeline.L)
 	if err != nil {
 		t.Fatal(err)
 	}
 	head := gate.reserve(2)
 	headErr := make(chan error, 1)
 	go func() {
-		_, err := head.acquire(context.Background(), periapsis.XL)
+		_, err := head.acquire(context.Background(), pipeline.XL)
 		headErr <- err
 	}()
 	behind := gate.reserve(3)
 	acquired := make(chan func(), 1)
-	go acquireForTest(behind, periapsis.S, acquired)
+	go acquireForTest(behind, pipeline.S, acquired)
 	assertNotAcquired(t, acquired)
 
 	if gate.abandon(1) {
@@ -273,7 +273,7 @@ func TestWeightedAdmissionAbandonWithdrawsOnlyUngrantedReservations(t *testing.T
 	if !gate.abandon(4) {
 		t.Fatal("a preparing reservation was not abandoned")
 	}
-	if _, err := preparing.acquire(context.Background(), periapsis.S); !errors.Is(err, errAdmissionAbandoned) {
+	if _, err := preparing.acquire(context.Background(), pipeline.S); !errors.Is(err, errAdmissionAbandoned) {
 		t.Fatalf("acquire after abandon = %v", err)
 	}
 	releaseBehind()

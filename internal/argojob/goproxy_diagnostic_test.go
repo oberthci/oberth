@@ -25,7 +25,7 @@ func TestGoProxyRefusalLogAttribution(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var output bytes.Buffer
-			step := StepResult{Burn: "build", Step: "image", Status: runprogress.StepFailed}
+			step := StepResult{Stage: "build", Step: "image", Status: runprogress.StepFailed}
 			// Replay retains the original line and emits one attributed diagnostic.
 			if err := copyPrefixed(&output, step, strings.NewReader(test.line+"\n"+test.line+"\n"), test.proxy); err != nil {
 				t.Fatal(err)

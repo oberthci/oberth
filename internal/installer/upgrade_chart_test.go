@@ -2,7 +2,9 @@ package installer
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -96,7 +98,7 @@ func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string, sh
 	if err := os.WriteFile(history, encoded, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method != http.MethodGet {
 			t.Errorf("dry-run attempted a Kubernetes mutation: %s %s", r.Method, r.URL.Path)
@@ -119,7 +121,8 @@ func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string, sh
 	}))
 	defer server.Close()
 	kubeconfig := filepath.Join(dir, "kubeconfig")
-	body := "apiVersion: v1\nkind: Config\nclusters:\n- name: fixture\n  cluster:\n    server: " + server.URL + "\ncontexts:\n- name: fixture\n  context:\n    cluster: fixture\n    namespace: oberth\ncurrent-context: fixture\n"
+	caData := base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}))
+	body := "apiVersion: v1\nkind: Config\nclusters:\n- name: fixture\n  cluster:\n    server: " + server.URL + "\n    certificate-authority-data: " + caData + "\ncontexts:\n- name: fixture\n  context:\n    cluster: fixture\n    namespace: oberth\ncurrent-context: fixture\n"
 	if err := os.WriteFile(kubeconfig, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -325,6 +328,9 @@ func requireHelmForUpgradeTest(t *testing.T) {
 func testUpgradeValuePreflight(args []string) ([]byte, bool) {
 	if len(args) == 0 {
 		return nil, false
+	}
+	if args[0] == "upgrade" && slices.Contains(args, "--dry-run=server") {
+		return []byte(`{"config":{}}`), true
 	}
 	if args[0] == "history" {
 		return []byte(`[{"revision":1,"status":"deployed"}]`), true

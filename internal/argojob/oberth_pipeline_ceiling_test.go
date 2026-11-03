@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // Check authored containers, scripts, container sets, defaults, inline calls,
@@ -18,7 +18,7 @@ func TestOberthPipelinesFitLCeiling(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err = argoworkflow.ValidateResourceCeiling(workflow, "oberth", periapsis.L, 86400); err != nil {
+			if err = argoworkflow.ValidateResourceCeiling(workflow, "oberth", pipeline.L, 86400); err != nil {
 				t.Fatalf("every pipeline leaf must fit 4 CPU / 8Gi: %v", err)
 			}
 		})

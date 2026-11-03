@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestParseSizeWeightsValidates(t *testing.T) {
@@ -46,14 +46,14 @@ func TestDefaultWeightsKeepXLExclusive(t *testing.T) {
 	if gate.capacity != 16 {
 		t.Fatalf("capacity = %d, want 16", gate.capacity)
 	}
-	release := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "xl", Size: periapsis.XL})
+	release := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "xl", Size: pipeline.XL})
 	defer release()
 	if used, _ := gateUsage(gate); used != 16 {
 		t.Fatalf("XL used %d, want the whole budget 16", used)
 	}
 	beside := gate.reserve(2)
 	ready := make(chan func(), 1)
-	go acquireRequestForTest(beside, admissionRequest{RunID: "s", Size: periapsis.S}, ready)
+	go acquireRequestForTest(beside, admissionRequest{RunID: "s", Size: pipeline.S}, ready)
 	awaitWaiting(t, beside)
 	if blocker := (&Scheduler{admission: gate}).AdmissionBlocker(); beside.granted || blocker == nil || !blocker.FullDrain && blocker.RunID != "s" {
 		t.Fatalf("an S run was admitted beside a whole-budget XL: %#v", blocker)
@@ -67,16 +67,16 @@ func TestFiniteXLWeightSharesTheHost(t *testing.T) {
 	weights := SizeWeights{S: 1, M: 2, L: 3, XL: 11}
 	gate := newWeightedAdmissionForJobsWeights(8, weights)
 	scheduler := &Scheduler{admission: gate}
-	releaseXL := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "xl", Repo: "ebpf", Ref: "main", Size: periapsis.XL})
+	releaseXL := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "xl", Repo: "ebpf", Ref: "main", Size: pipeline.XL})
 	defer releaseXL()
-	releaseL := acquireRequestWithinBudget(t, gate.reserve(2), admissionRequest{RunID: "l", Size: periapsis.L})
+	releaseL := acquireRequestWithinBudget(t, gate.reserve(2), admissionRequest{RunID: "l", Size: pipeline.L})
 	defer releaseL()
 	if used, runs := gateUsage(gate); used != 14 || runs != 2 {
 		t.Fatalf("used %d runs %d, want 14 and 2", used, runs)
 	}
 	second := gate.reserve(3)
 	ready := make(chan func(), 1)
-	go acquireRequestForTest(second, admissionRequest{RunID: "l2", Repo: "cli", Ref: "feature/x", Size: periapsis.L}, ready)
+	go acquireRequestForTest(second, admissionRequest{RunID: "l2", Repo: "cli", Ref: "feature/x", Size: pipeline.L}, ready)
 	awaitWaiting(t, second)
 	if blocker := scheduler.AdmissionBlocker(); blocker == nil || blocker.FullDrain || blocker.Reason() != "L, needs 3 weight; 14/16 used" {
 		t.Fatalf("blocker = %#v", blocker)
@@ -86,13 +86,13 @@ func TestFiniteXLWeightSharesTheHost(t *testing.T) {
 
 	// An XL waiting for weight says its configured weight, not a drain.
 	head := newWeightedAdmissionForJobsWeights(8, weights)
-	hold := acquireRequestWithinBudget(t, head.reserve(1), admissionRequest{RunID: "m", Size: periapsis.L})
+	hold := acquireRequestWithinBudget(t, head.reserve(1), admissionRequest{RunID: "m", Size: pipeline.L})
 	defer hold()
 	for index := int64(2); index <= 3; index++ {
-		acquireRequestWithinBudget(t, head.reserve(index), admissionRequest{RunID: "m", Size: periapsis.M})
+		acquireRequestWithinBudget(t, head.reserve(index), admissionRequest{RunID: "m", Size: pipeline.M})
 	}
 	xl := head.reserve(4)
-	go acquireRequestForTest(xl, admissionRequest{RunID: "xl", Repo: "ebpf", Ref: "main", Size: periapsis.XL}, make(chan func(), 1))
+	go acquireRequestForTest(xl, admissionRequest{RunID: "xl", Repo: "ebpf", Ref: "main", Size: pipeline.XL}, make(chan func(), 1))
 	awaitWaiting(t, xl)
 	blocker := (&Scheduler{admission: head}).AdmissionBlocker()
 	if blocker == nil || blocker.FullDrain || !strings.HasPrefix(blocker.Reason(), "XL · 11w") {
@@ -105,7 +105,7 @@ func TestFiniteXLWeightSharesTheHost(t *testing.T) {
 // no S run can use: 15 of 16 used leaves no room for an S of weight 2.
 func TestSpareClaimNeedsRoomForAnSRun(t *testing.T) {
 	gate := newWeightedAdmissionForJobsWeights(4, SizeWeights{S: 2, M: 4, L: 5, XL: 0}) // budget 16
-	for index, size := range []periapsis.Size{periapsis.L, periapsis.L, periapsis.L} {
+	for index, size := range []pipeline.Size{pipeline.L, pipeline.L, pipeline.L} {
 		acquireRequestWithinBudget(t, gate.reserve(int64(index+1)), admissionRequest{RunID: "l", Size: size})
 	}
 	if used, runs := gateUsage(gate); used != 15 || runs != 3 {

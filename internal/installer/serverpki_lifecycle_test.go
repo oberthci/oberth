@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -194,13 +195,14 @@ func TestUpgradePKIRejectsTLSOverrideBypasses(t *testing.T) {
 }
 
 func TestUpgradeReconcilesPKIBeforeHelmAndDryRunNeverWrites(t *testing.T) {
-	t.Setenv(baoTokenEnvVar, "test-token")
 	for _, dryRun := range []bool{false, true} {
 		t.Run(fmt.Sprint(dryRun), func(t *testing.T) {
+			t.Setenv(baoTokenEnvVar, "test-token")
 			deps, runner := pkiLifecycleDeps(t, []string{"ci.example.com"}, []string{"192.0.2.1"})
 			deps.RestConfig = &rest.Config{Host: "https://127.0.0.1:6443"}
 			stop := errors.New("stop after Helm apply")
 			rendered, applied := false, false
+			previews := 0
 			deps.RunHelm = func(_ context.Context, args []string) ([]byte, error) {
 				switch args[0] {
 				case "list":
@@ -222,6 +224,18 @@ func TestUpgradeReconcilesPKIBeforeHelmAndDryRunNeverWrites(t *testing.T) {
 					rendered = true
 					return nil, nil
 				case "upgrade":
+					if slices.Contains(args, "--dry-run=server") {
+						previews++
+						if !rendered {
+							t.Fatal("preview preceded chart validation")
+						}
+						for _, call := range runner.calls {
+							if !strings.HasPrefix(call.command, "read ") {
+								t.Fatalf("PKI changed before preview: %s", call.command)
+							}
+						}
+						return []byte(`{"config":{}}`), nil
+					}
 					applied = true
 					if !rendered || runner.callsByCommand()["write oberth-pki/roles/oberth-server -"].stdin == "" {
 						t.Fatal("Helm applied before PKI reconciliation")
@@ -243,6 +257,9 @@ func TestUpgradeReconcilesPKIBeforeHelmAndDryRunNeverWrites(t *testing.T) {
 			if result.AlreadyUpToDate || (!dryRun && (!errors.Is(err, stop) || !applied)) || (dryRun && (err != nil || applied)) {
 				t.Fatalf("upgrade result=%+v applied=%v err=%v", result, applied, err)
 			}
+			if !dryRun && previews != 1 {
+				t.Fatalf("previews = %d, want 1", previews)
+			}
 			if dryRun {
 				for _, call := range runner.calls {
 					if !strings.HasPrefix(call.command, "read ") {
@@ -251,5 +268,20 @@ func TestUpgradeReconcilesPKIBeforeHelmAndDryRunNeverWrites(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestServerPKIAccessUsesCapturedInstallerToken(t *testing.T) {
+	t.Setenv(baoTokenEnvVar, "fixture-invocation-token")
+	deps, _ := pkiLifecycleDeps(t, []string{"ci.example.com"}, nil)
+	if err := captureBaoEnvironment(&deps); err != nil {
+		t.Fatal(err)
+	}
+	if os.Getenv(baoTokenEnvVar) != "" {
+		t.Fatal("token remained in child environment")
+	}
+	_, token, err := serverPKIAccess(t.Context(), Config{}, deps)
+	if err != nil || token != "fixture-invocation-token" {
+		t.Fatalf("PKI lost invocation-local credential: %v", err)
 	}
 }

@@ -195,7 +195,7 @@ The normal sweep interval is 10 minutes. Busy sweeps skip at DEBUG level and
 retry resource telemetry after at most one minute; a retry that commits rows
 also invalidates the cache. Gates interleaved with a sweep's batches can see more
 than one invalidation. There is no per-sweep guarantee of exactly one extra scan,
-and real-chain scan cost on tuxbox has not been measured.
+and real-chain scan cost on example-node has not been measured.
 
 A gate racing these commits retains the same conservative outside-writer path:
 it can re-verify locally for up to two extra rounds, then return audit-verification

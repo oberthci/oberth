@@ -735,7 +735,7 @@ func TestRunningRunsWithJobs(t *testing.T) {
 	}
 
 	// Set job name.
-	if _, err := s.SetRunJobName(ctx, enqueued.ID, "oberth-job-test"); err != nil {
+	if _, err := s.SetRunWorkflowName(ctx, enqueued.ID, "oberth-job-test"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -744,7 +744,7 @@ func TestRunningRunsWithJobs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(runs) != 1 || runs[0].ID != enqueued.ID || runs[0].JobName != "oberth-job-test" {
+	if len(runs) != 1 || runs[0].ID != enqueued.ID || runs[0].WorkflowName != "oberth-job-test" {
 		t.Fatalf("running runs with jobs = %#v", runs)
 	}
 
@@ -1518,143 +1518,6 @@ func TestRevokeTokenCredential(t *testing.T) {
 // TrustedPlan and TrustedApply lookup — ErrNotFound on missing
 // ---------------------------------------------------------------------------
 
-func TestTrustedPlanLookup(t *testing.T) {
-	now := time.Date(2026, 8, 17, 14, 0, 0, 0, time.UTC)
-	s := testStore(t, &now)
-	ctx := context.Background()
-
-	if _, err := s.TrustedPlan(ctx, "nonexistent"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("TrustedPlan(missing) = %v, want ErrNotFound", err)
-	}
-	if _, err := s.TrustedPlan(ctx, ""); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("TrustedPlan(empty) = %v, want ErrInvalid", err)
-	}
-
-	// Insert a test trusted plan row to exercise the success scan path.
-	repo := createRepo(t, s)
-	sha := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	digest := strings.Repeat("ab", 32) // 64-char hex
-	greenRun, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/tp", sha))
-	if err != nil {
-		t.Fatal(err)
-	}
-	now = now.Add(time.Second)
-	planRun, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/tp-plan", sha))
-	if err != nil {
-		t.Fatal(err)
-	}
-	upstream, err := s.Upstream(ctx, repo.UpstreamID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	createdNano := unixNano(now)
-	expiresNano := unixNano(now.Add(time.Hour))
-	if _, err := s.db.ExecContext(ctx, `
-INSERT INTO trusted_plans(id, repo_id, upstream_id, source_ref, source_sha, target_ref,
-	base_sha, result_sha, green_run_id, plan_run_id, backend_identity, backend_key,
-	tool_digest, lock_digest, config_digest, actor, status, created_at, expires_at, updated_at)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'authorized', ?, ?, ?)`,
-		"tp-id-1", repo.ID, upstream.ID, "feature/tp", sha, "main",
-		sha, sha, greenRun.ID, planRun.ID, "backend@host", "backend-key-1",
-		digest, digest, digest, "agent@host", createdNano, expiresNano, createdNano,
-	); err != nil {
-		t.Fatal(err)
-	}
-
-	plan, err := s.TrustedPlan(ctx, "tp-id-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if plan.ID != "tp-id-1" || plan.RepoID != repo.ID || plan.SourceRef != "feature/tp" ||
-		plan.CreatedAt.IsZero() || plan.ExpiresAt.IsZero() {
-		t.Fatalf("TrustedPlan lookup = %#v", plan)
-	}
-}
-
-func TestTrustedApplyLookup(t *testing.T) {
-	now := time.Date(2026, 8, 17, 14, 0, 0, 0, time.UTC)
-	s := testStore(t, &now)
-	ctx := context.Background()
-
-	if _, err := s.TrustedApply(ctx, "nonexistent"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("TrustedApply(missing) = %v, want ErrNotFound", err)
-	}
-	if _, err := s.TrustedApply(ctx, ""); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("TrustedApply(empty) = %v, want ErrInvalid", err)
-	}
-
-	// Insert test data for TrustedApply to exercise the success scan path.
-	repo := createRepo(t, s)
-	sha := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	digest := strings.Repeat("cd", 32) // 64-char hex
-
-	// Create supporting records.
-	greenRun, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/ta-green", sha))
-	if err != nil {
-		t.Fatal(err)
-	}
-	now = now.Add(time.Second)
-	planRun, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/ta-plan", sha))
-	if err != nil {
-		t.Fatal(err)
-	}
-	upstream, err := s.Upstream(ctx, repo.UpstreamID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	createdNano := unixNano(now)
-	expiresNano := unixNano(now.Add(time.Hour))
-
-	// Insert trusted_plan.
-	if _, err := s.db.ExecContext(ctx, `
-INSERT INTO trusted_plans(id, repo_id, upstream_id, source_ref, source_sha, target_ref,
-	base_sha, result_sha, green_run_id, plan_run_id, backend_identity, backend_key,
-	tool_digest, lock_digest, config_digest, actor, status, created_at, expires_at, updated_at)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'authorized', ?, ?, ?)`,
-		"ta-plan-1", repo.ID, upstream.ID, "feature/ta", sha, "main",
-		sha, sha, greenRun.ID, planRun.ID, "backend@host", "backend-key-2",
-		digest, digest, digest, "agent@host", createdNano, expiresNano, createdNano,
-	); err != nil {
-		t.Fatal(err)
-	}
-
-	// Create a promotion.
-	now = now.Add(time.Second)
-	promotion, err := s.AppendPromotion(ctx, model.PromotionSpec{
-		RepoID: repo.ID, SourceBranch: "feature/ta", SourceSHA: sha,
-		TargetRef: "main", PreviousSHA: sha, ResultSHA: sha, Actor: "agent@host",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Create the apply run.
-	now = now.Add(time.Second)
-	applyRun, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/ta-apply", sha))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Insert trusted_apply.
-	if _, err := s.db.ExecContext(ctx, `
-INSERT INTO trusted_applies(id, plan_id, promotion_id, repo_id, target_ref, sha, run_id,
-	artifact_digest, backend_key, actor, status, created_at, updated_at)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
-		"ta-id-1", "ta-plan-1", promotion.ID, repo.ID, "main", sha, applyRun.ID,
-		digest, "backend-key-2", "agent@host", createdNano, createdNano,
-	); err != nil {
-		t.Fatal(err)
-	}
-
-	apply, err := s.TrustedApply(ctx, "ta-id-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if apply.ID != "ta-id-1" || apply.PlanID != "ta-plan-1" || apply.RepoID != repo.ID {
-		t.Fatalf("TrustedApply lookup = %#v", apply)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // EnqueueAdmittedPromotionRun
 // ---------------------------------------------------------------------------
@@ -1731,7 +1594,7 @@ func TestCompleteRunCancellationIdempotent(t *testing.T) {
 	if _, err := s.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SetRunJobName(ctx, first.ID, "job-cancel"); err != nil {
+	if _, err := s.SetRunWorkflowName(ctx, first.ID, "job-cancel"); err != nil {
 		t.Fatal(err)
 	}
 	now = now.Add(time.Second)
@@ -1766,7 +1629,7 @@ func TestCompleteRunCancellationIdempotent(t *testing.T) {
 // SetRunJobName — terminal run rejection
 // ---------------------------------------------------------------------------
 
-func TestSetRunJobNameTerminalRejection(t *testing.T) {
+func TestSetRunWorkflowNameTerminalRejection(t *testing.T) {
 	now := time.Date(2026, 8, 17, 14, 0, 0, 0, time.UTC)
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
@@ -1788,20 +1651,20 @@ func TestSetRunJobNameTerminalRejection(t *testing.T) {
 	}
 
 	// Setting job name on a terminal run: rejected.
-	if _, err := s.SetRunJobName(ctx, enqueued.ID, "late-job"); !errors.Is(err, ErrInvalidState) {
+	if _, err := s.SetRunWorkflowName(ctx, enqueued.ID, "late-job"); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("terminal job name = %v, want ErrInvalidState", err)
 	}
 
 	// Nonexistent run.
-	if _, err := s.SetRunJobName(ctx, "nonexistent", "job"); !errors.Is(err, ErrNotFound) {
+	if _, err := s.SetRunWorkflowName(ctx, "nonexistent", "job"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing run job name = %v, want ErrNotFound", err)
 	}
 
 	// Validation.
-	if _, err := s.SetRunJobName(ctx, "", "job"); !errors.Is(err, ErrInvalid) {
+	if _, err := s.SetRunWorkflowName(ctx, "", "job"); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("empty run ID = %v, want ErrInvalid", err)
 	}
-	if _, err := s.SetRunJobName(ctx, enqueued.ID, ""); !errors.Is(err, ErrInvalid) {
+	if _, err := s.SetRunWorkflowName(ctx, enqueued.ID, ""); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("empty job name = %v, want ErrInvalid", err)
 	}
 }
@@ -3081,7 +2944,7 @@ func TestResolveRunNonHexSelector(t *testing.T) {
 // SetRunJobName on queued run
 // ---------------------------------------------------------------------------
 
-func TestSetRunJobNameOnQueuedRun(t *testing.T) {
+func TestSetRunWorkflowNameOnQueuedRun(t *testing.T) {
 	now := time.Date(2026, 8, 17, 14, 0, 0, 0, time.UTC)
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
@@ -3092,11 +2955,11 @@ func TestSetRunJobNameOnQueuedRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Setting job name on a queued run should work.
-	updated, err := s.SetRunJobName(ctx, enqueued.ID, "queued-job-name")
+	updated, err := s.SetRunWorkflowName(ctx, enqueued.ID, "queued-job-name")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.JobName != "queued-job-name" || updated.Status != model.RunQueued {
+	if updated.WorkflowName != "queued-job-name" || updated.Status != model.RunQueued {
 		t.Fatalf("queued run after SetRunJobName = %#v", updated)
 	}
 }
@@ -3105,7 +2968,7 @@ func TestSetRunJobNameOnQueuedRun(t *testing.T) {
 // Restart recovery — running run with job name that is a promotion
 // ---------------------------------------------------------------------------
 
-func TestRestartRecoveryRunningPromotionWithJobName(t *testing.T) {
+func TestRestartRecoveryRunningPromotionWithWorkflowName(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 17, 14, 0, 0, 0, time.UTC)
 	path := filepath.Join(t.TempDir(), "oberth-prom-job.db")
@@ -3140,7 +3003,7 @@ func TestRestartRecoveryRunningPromotionWithJobName(t *testing.T) {
 	if _, err := s.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SetRunJobName(ctx, enqueued.ID, "prom-job-restart"); err != nil {
+	if _, err := s.SetRunWorkflowName(ctx, enqueued.ID, "prom-job-restart"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
@@ -3314,7 +3177,7 @@ func TestFinishRunWithFailureTail(t *testing.T) {
 	finished, err := s.FinishRun(ctx, enqueued.ID, model.RunResult{
 		Status:      model.RunFailed,
 		Phase:       "test",
-		FailedBurn:  "test",
+		FailedStage: "test",
 		FailedStep:  "unit",
 		Error:       "tests failed",
 		FailureTail: "--- FAIL: TestSomething\nExpected 1, got 2",
@@ -3322,7 +3185,7 @@ func TestFinishRunWithFailureTail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if finished.FailedBurn != "test" || finished.FailedStep != "unit" {
+	if finished.FailedStage != "test" || finished.FailedStep != "unit" {
 		t.Fatalf("finished run = %#v", finished)
 	}
 }
@@ -3344,7 +3207,7 @@ func TestPutStepResultWithTimes(t *testing.T) {
 	startedAt := now
 	finishedAt := now.Add(5 * time.Second)
 	result, err := s.PutStepResult(ctx, model.StepResult{
-		RunID: run.ID, Burn: "test", Step: "unit", Ordinal: 0,
+		RunID: run.ID, Stage: "test", Step: "unit", Ordinal: 0,
 		Status: model.StepPassed, ExitCode: 0, LogStart: 0, LogEnd: 100,
 		DeclaredSize: "S", StartedAt: &startedAt, FinishedAt: &finishedAt,
 	})
@@ -3516,7 +3379,7 @@ func TestPutStepResultUpsert(t *testing.T) {
 	}
 	// First insert.
 	if _, err := s.PutStepResult(ctx, model.StepResult{
-		RunID: run.ID, Burn: "test", Step: "unit", Ordinal: 0,
+		RunID: run.ID, Stage: "test", Step: "unit", Ordinal: 0,
 		Status: model.StepPassed, ExitCode: 0, LogStart: 0, LogEnd: 100,
 		DeclaredSize: "S",
 	}); err != nil {
@@ -3525,7 +3388,7 @@ func TestPutStepResultUpsert(t *testing.T) {
 	// Upsert: same burn+step, different data.
 	now = now.Add(time.Second)
 	result, err := s.PutStepResult(ctx, model.StepResult{
-		RunID: run.ID, Burn: "test", Step: "unit", Ordinal: 1,
+		RunID: run.ID, Stage: "test", Step: "unit", Ordinal: 1,
 		Status: model.StepFailed, ExitCode: 1, LogStart: 0, LogEnd: 200,
 		DeclaredSize: "M",
 	})

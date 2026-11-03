@@ -1,0 +1,11 @@
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+import assert from 'node:assert/strict';
+const source = readFileSync(new URL('../internal/api/static/app.js', import.meta.url), 'utf8');
+let reads = 0;
+const bytes = new TextEncoder().encode('event: auth_error\ndata: {"error":"stream authorization changed"}\n\n');
+const sandbox = vm.createContext({AbortController, TextDecoder, authHeaders:()=>({}), fetch:async()=>({ok:true,headers:new Headers({'content-type':'text/event-stream'}),body:{getReader(){return {async read(){return reads++ ? {done:true}:{done:false,value:bytes};},async cancel(){},releaseLock(){}};}}})});
+vm.runInContext(source.slice(source.indexOf('class LiveLogEventSource'), source.indexOf('function stopLiveTransport')), sandbox);
+const result = vm.runInContext('new Promise(resolve => { new LiveLogEventSource("/stream", () => {}, err => resolve(err.message), () => {}); })',sandbox);
+assert.equal(await result,'stream authorization changed');
+assert.equal(reads,1,'authorization failure must stop consuming the stream');

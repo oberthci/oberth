@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io"
 	"strings"
@@ -13,35 +14,17 @@ func runRepoArchive(ctx context.Context, action string, arguments []string, outp
 		_, err := fmt.Fprintln(output, usage)
 		return err
 	}
-	var repo string
-	var transport []string
-	for i := 0; i < len(arguments); i++ {
-		argument := arguments[i]
-		if !strings.HasPrefix(argument, "-") {
-			if repo != "" {
-				return fmt.Errorf("%w: %s", errUsage, usage)
-			}
-			repo = argument
-			continue
-		}
-		name, value, found := strings.Cut(argument, "=")
-		switch name {
-		case "--url", "--token-file", "--ca-file":
-			if !found {
-				i++
-				if i >= len(arguments) {
-					return fmt.Errorf("%w: %s requires a value", errUsage, name)
-				}
-				value = arguments[i]
-			}
-			transport = append(transport, name+"="+value)
-		default:
-			return fmt.Errorf("%w: unknown flag %q", errUsage, argument)
-		}
+	flags := flag.NewFlagSet("repo "+action, flag.ContinueOnError)
+	transportFlags := mcpTransportFlags(flags)
+	positional, _, err := parseOperatorFlags(flags, arguments)
+	if err != nil {
+		return err
 	}
-	if repo == "" {
+	if len(positional) != 1 || positional[0] == "" {
 		return fmt.Errorf("%w: %s", errUsage, usage)
 	}
+	repo := positional[0]
+	transport := transportFlags()
 	config, err := parseMCPFlags("repo "+action, transport, 0)
 	if err != nil {
 		return err

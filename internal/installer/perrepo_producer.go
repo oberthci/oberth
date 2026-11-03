@@ -396,3 +396,15 @@ func produceFromConfigMap(ctx context.Context, kube kubernetes.Interface, namesp
 	}
 	return result, nil
 }
+
+// ProducePerRepoIdentitiesForSync reads the desired set for destructive reconciliation.
+func ProducePerRepoIdentitiesForSync(ctx context.Context, kube kubernetes.Interface, run CommandRunner, contextName, namespace string) ([]PerRepoIdentity, []string, error) {
+	identities, warnings, err := ProducePerRepoIdentities(ctx, kube, run, contextName, namespace)
+	if err != nil {
+		return nil, warnings, err
+	}
+	if run == nil || len(warnings) != 0 {
+		return nil, warnings, fmt.Errorf("refusing sync: the desired repository set was not read from the live database without warnings; orphan deletion requires an authoritative set")
+	}
+	return identities, warnings, nil
+}

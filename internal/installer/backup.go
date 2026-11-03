@@ -185,9 +185,14 @@ func prepareOperatorDeps(host InstallDeps, kubeconfigPath, contextName string, l
 		}
 		return backupDeps{}, fmt.Errorf("load kubeconfig: %w", err)
 	}
-	helmKubeArgs, _, _ := ResolveHelmKubeArgs(contextName)
+	var helmKubeArgs []string
 	if kubeconfigPath != "" {
 		helmKubeArgs = []string{"--kubeconfig", kubeconfigPath, "--kube-context", selectedContext}
+	} else {
+		helmKubeArgs, _, err = ResolveHelmKubeArgs(contextName)
+		if err != nil {
+			return backupDeps{}, fmt.Errorf("resolve Helm cluster target: %w", err)
+		}
 	}
 
 	var readPassword func() ([]byte, error)
@@ -441,7 +446,10 @@ func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultEr
 	if pod == "" {
 		return fmt.Errorf("no running server pod in namespace %s; the database snapshot is taken through the running server", cfg.Namespace)
 	}
-	release, found := findHelmRelease(ctx, deps.Deps, "oberth", cfg.Namespace)
+	release, found, err := findHelmRelease(ctx, deps.Deps, "oberth", cfg.Namespace)
+	if err != nil {
+		return err
+	}
 	if !found {
 		return fmt.Errorf("no oberth Helm release in namespace %s", cfg.Namespace)
 	}

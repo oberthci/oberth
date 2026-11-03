@@ -19,13 +19,13 @@ func (s *API) repoUsage(ctx context.Context, raw json.RawMessage) (any, error) {
 		Repo  string    `json:"repo"`
 		Since time.Time `json:"since"`
 		Limit int       `json:"limit"`
-		Burn  string    `json:"burn"`
+		Stage string    `json:"burn"`
 		Step  string    `json:"step"`
 	}
 	if err := decodeTool(raw, &args); err != nil {
 		return nil, err
 	}
-	if args.Repo == "" || args.Limit < 0 || args.Limit > 5000 || len(args.Burn) > 253 || len(args.Step) > 253 {
+	if args.Repo == "" || args.Limit < 0 || args.Limit > 5000 || len(args.Stage) > 253 || len(args.Step) > 253 {
 		return nil, refuse(ErrInvalidInput, "resource report bounds")
 	}
 	if s.repositories == nil || s.resources == nil {
@@ -43,7 +43,7 @@ func (s *API) repoUsage(ctx context.Context, raw json.RawMessage) (any, error) {
 	if args.Since.IsZero() {
 		args.Since = time.Now().UTC().Add(-30 * 24 * time.Hour)
 	}
-	rows, truncated, err := s.resources.RepositoryResourceUsage(ctx, repo.ID, store.ResourceUsageFilter{Since: args.Since, Limit: args.Limit, Burn: args.Burn, Step: args.Step})
+	rows, truncated, err := s.resources.RepositoryResourceUsage(ctx, repo.ID, store.ResourceUsageFilter{Since: args.Since, Limit: args.Limit, Stage: args.Stage, Step: args.Step})
 	if err != nil {
 		return nil, err
 	}

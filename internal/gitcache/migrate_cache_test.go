@@ -187,35 +187,6 @@ func TestQualifiedCachePathWithQualifier(t *testing.T) {
 	}
 }
 
-func TestListFlatCaches(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-
-	// Create a flat cache and a qualified cache.
-	if err := os.MkdirAll(filepath.Join(root, "oberth.git"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(root, "github", "oberthci", "terraform.git"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-
-	cache, err := newBackendTestCache(t, Config{
-		Root:     root,
-		Upstream: func(repo string) (string, error) { return "/dev/null", nil },
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	flat, err := cache.ListFlatCaches()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(flat) != 1 || flat[0] != "oberth" {
-		t.Fatalf("ListFlatCaches = %v, want [oberth]", flat)
-	}
-}
-
 // TestReservationIdentityAndPathIsolation proves the durable receive outbox
 // cannot alias across same-named repositories (issue #264): the reservation
 // identity derives from the resolved cache path, filenames encode it with a

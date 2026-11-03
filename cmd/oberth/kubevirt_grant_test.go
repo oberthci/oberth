@@ -9,16 +9,17 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestKubeVirtGrantCLIReadsDurableRepoGrant(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := store.Open(ctx, path, store.Options{})
+	database, err := storetest.Open(ctx, path, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{Name: "github", Kind: "ssh", BaseURL: "ssh://github.com/acme"})
+	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{Name: "github", Kind: "ssh", BaseURL: "ssh://github.com/acme"})
 	if err != nil {
 		t.Fatal(err)
 	}

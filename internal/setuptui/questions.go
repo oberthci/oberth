@@ -141,19 +141,7 @@ func loadKubeContexts(path string) ([]kubeContext, string, error) {
 }
 
 // isLocalServer heuristically determines if a server URL is local.
-func isLocalServer(server string) bool {
-	for _, prefix := range []string{
-		"https://127.", "https://localhost", "https://192.168.",
-		"https://10.", "https://172.16.", "https://172.17.",
-		"https://172.18.", "https://172.19.", "https://172.2",
-		"https://172.3",
-	} {
-		if strings.HasPrefix(server, prefix) {
-			return true
-		}
-	}
-	return false
-}
+func isLocalServer(server string) bool { return installer.IsLocalServer(server) }
 
 func contextOptions(contexts []kubeContext, current string) []option {
 	opts := make([]option, 0, len(contexts))

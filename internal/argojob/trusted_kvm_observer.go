@@ -41,8 +41,15 @@ func (controller *Controller) trustedKVMWorkflow(ctx context.Context, request Re
 	if err != nil {
 		return nil, nil, err
 	}
-	if actual.UID == "" || actual.DeletionTimestamp != nil || actual.Name != expected.Name || actual.Namespace != expected.Namespace || actual.Annotations[runIDAnnotation] != request.RunID || actual.Annotations[trustedKVMAnnotation] != expected.Annotations[trustedKVMAnnotation] || actual.Annotations[nonrootProfileAnnotation] != expected.Annotations[nonrootProfileAnnotation] || !reflect.DeepEqual(actual.Spec, expected.Spec) {
-		return nil, nil, errors.New("argojob: trusted Workflow differs from admitted final server spec")
+	if actual.UID == "" || actual.DeletionTimestamp != nil || actual.Name != expected.Name || actual.Namespace != expected.Namespace {
+		return nil, nil, errors.New("argojob: trusted Workflow identity is unavailable")
+	}
+	if err := sameSubmission(actual, expected); err != nil {
+		var mismatch *workflowSpecMismatch
+		if errors.As(err, &mismatch) {
+			return actual, nil, err
+		}
+		return nil, nil, err
 	}
 	for i := range expected.Spec.Templates {
 		if expected.Spec.Templates[i].Name == trustedKVMTemplate {
@@ -52,11 +59,16 @@ func (controller *Controller) trustedKVMWorkflow(ctx context.Context, request Re
 	return nil, nil, errors.New("argojob: missing trusted leaf")
 }
 
-// TrustedKVMWorkflowUID binds only an API object whose actual spec matches the
-// rebuilt server submission, never an identity annotation supplied as evidence.
+// TrustedKVMWorkflowUID accepts an exactly admitted Workflow. An owned spec
+// mismatch returns its UID with an error solely for cleanup, never as evidence.
 func (controller *Controller) TrustedKVMWorkflowUID(ctx context.Context, request Request) (string, error) {
 	workflow, _, err := controller.trustedKVMWorkflow(ctx, request)
 	if err != nil {
+		// A nonempty UID with this classification authorizes cleanup only,
+		// never receipt acceptance. Foreign run/source identities return no UID.
+		if workflow != nil {
+			return string(workflow.UID), err
+		}
 		return "", err
 	}
 	return string(workflow.UID), nil
@@ -669,4 +681,21 @@ func (controller *Controller) TrustedKVMRefusal(ctx context.Context, request Req
 	}
 	terminated := status.State.Terminated
 	return &vmrunner.KVMTerminationRecord{ImageID: status.ImageID, ContainerID: status.ContainerID, PodUID: string(pod.UID), WorkflowUID: workflowUID, ExitCode: terminated.ExitCode, Signal: terminated.Signal, RestartCount: status.RestartCount, StartedAt: terminated.StartedAt.Time, FinishedAt: terminated.FinishedAt.Time}, nil
+}
+
+// CancelTrustedKVM accepts termination of the journal-bound workflow and Pods.
+// It never declares cleanup complete: finalizers may still keep them present.
+func (controller *Controller) CancelTrustedKVM(ctx context.Context, intent vmrunner.KVMIntent, expectedUID string) error {
+	workflow, err := controller.workflows.Get(ctx, intent.WorkflowName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if workflow.Namespace != intent.Namespace || workflow.Namespace != controller.config.Namespace || workflow.Annotations[runIDAnnotation] != intent.RunID || workflow.Annotations[trustedKVMAnnotation] != vmrunner.KVMIntentDigest(intent) || workflow.UID == "" || (expectedUID != "" && string(workflow.UID) != expectedUID) {
+		return errors.New("argojob: refusing foreign trusted Workflow cancellation")
+	}
+	_, err = controller.cleanTrustedKVMOnce(ctx, intent.WorkflowName, intent.RunID, workflow.UID)
+	return err
 }

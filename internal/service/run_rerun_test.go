@@ -128,7 +128,7 @@ func (harness *rerunHarness) run(t *testing.T, id string) model.Run {
 var (
 	rerunUplink = api.Actor{Identity: "agent@host", Fingerprint: "SHA256:agent"}
 	rerunAdmin  = api.Actor{Identity: "admin@host", Fingerprint: "SHA256:admin", Admin: true}
-	flakyResult = JobResult{Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit",
+	flakyResult = JobResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit",
 		Steps: []model.StepResult{stepResult(model.StepFailed)}}
 	greenResult  = JobResult{Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)}}
 	infraFailure = JobResult{Status: model.RunFailed, Phase: "job", Error: "pod evicted"}

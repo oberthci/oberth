@@ -48,7 +48,7 @@ func ReadConductorStream(ctx context.Context, reader io.ReadCloser, input io.Wri
 			}
 			return progress.accept(body)
 		}
-		if header.Type != "restart-beacon" || progress.sequence != 15 || restarted {
+		if header.Type != "restart-example-service" || progress.sequence != 15 || restarted {
 			return errors.New("vmrunner: unexpected or replayed conductor operation")
 		}
 		var request PilotRestartRequest

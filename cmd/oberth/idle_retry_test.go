@@ -62,6 +62,9 @@ func TestUpgradeWaitRetriesTimeoutBeforeUpgrade(t *testing.T) {
 						case "template":
 							return nil, nil
 						case "upgrade":
+							if slices.Contains(args, "--dry-run=server") {
+								return []byte(`{"config":{}}`), nil
+							}
 							upgrades++
 							return nil, upgradeReached
 						default:

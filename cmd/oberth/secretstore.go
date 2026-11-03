@@ -20,7 +20,7 @@ import (
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/secretstore"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -35,7 +35,7 @@ import (
 //
 //   - `setup` guidance and the embedded setup script belong NEXT TO the store,
 //     where the administrator's own CLI session already holds admin authority.
-//     This binary has no code path that accepts a store admin token.
+//     The server daemon uses workload identity; operator-only sync reads BAO_TOKEN.
 //   - `verify` belongs IN THIS POD, because the thing under test is the
 //     workload identity itself: it logs in with the pod's ServiceAccount token
 //     through the production fetch code path and proves the whole trust chain
@@ -47,7 +47,7 @@ const maximumServeCmdlineBytes = 1 << 20
 
 func runSecretStore(ctx context.Context, arguments []string, output io.Writer) error {
 	if len(arguments) == 0 {
-		return fmt.Errorf("%w: secretstore setup|verify|sync|exec|materialize", errUsage)
+		return fmt.Errorf("%w: secretstore setup|verify|sync|exec", errUsage)
 	}
 	switch arguments[0] {
 	case "setup":
@@ -60,8 +60,6 @@ func runSecretStore(ctx context.Context, arguments []string, output io.Writer) e
 		return runSecretStoreBootstrapTLS(arguments[1:], output)
 	case "exec":
 		return runSecretStoreExec(ctx, arguments[1:], output, os.Stderr)
-	case "materialize":
-		return runSecretStoreMaterialize(ctx, arguments[1:], output, os.Stderr)
 	default:
 		return fmt.Errorf("%w: unknown secretstore command %q", errUsage, arguments[0])
 	}
@@ -115,7 +113,7 @@ func runSecretStoreSetup(arguments []string, output io.Writer) error {
 	}
 	digest := sha256.Sum256(oberth.SetupSecretStoreScript)
 	_, err := fmt.Fprintf(output, `Store-side setup runs NEXT TO your OpenBao (or Vault), never in this pod:
-this binary deliberately has no code path that accepts a store admin token.
+the server daemon uses workload identity; operator-only secretstore sync reads BAO_TOKEN.
 
 1. Extract the setup script from this signed image (or use the identical
    scripts/setup-secretstore.sh from the Oberth repository):
@@ -167,15 +165,6 @@ type releaseTierVerifyConfig struct {
 // uses rest.InClusterConfig, and tests inject a fake.
 type kubeClientFactory func() (kubernetes.Interface, error)
 
-// stringSliceFlag implements flag.Value for a repeatable string flag.
-type stringSliceFlag []string
-
-func (f *stringSliceFlag) String() string { return strings.Join(*f, ", ") }
-func (f *stringSliceFlag) Set(value string) error {
-	*f = append(*f, value)
-	return nil
-}
-
 func defaultKubeClient() (kubernetes.Interface, error) {
 	restConfig, err := rest.InClusterConfig()
 	if err != nil {
@@ -221,9 +210,9 @@ func runSecretStoreVerifyWithSources(ctx context.Context, arguments []string, ou
 	tierFlag := flags.String("tier", "release", "which per-repo tier to verify: release or ci (only with --repo or --release-tier)")
 	timeout := flags.Duration("timeout", 45*time.Second, "overall verification deadline")
 	keys := flags.Bool("keys", false, "verify or list KV field names; use with --expect to assert")
-	var expects stringSliceFlag
+	var expects stringList
 	flags.Var(&expects, "expect", "expected fields: <path-base>/<field>[,<field>,...] (repeatable, implies -keys)")
-	var pathFlags stringSliceFlag
+	var pathFlags stringList
 	flags.Var(&pathFlags, "path", "KV path to verify (repeatable; alternative to positional paths)")
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -357,37 +346,6 @@ func runSecretStoreVerifyWithSources(ctx context.Context, arguments []string, ou
 	}
 	_, err = fmt.Fprintln(output, "secret store verify: OK — ServiceAccount login, TokenReview, read policy, and TLS all verified")
 	return err
-}
-
-// runReleaseTierVerify proves the release-tier OpenBao trust chain end to end.
-// The server tier (secretstore verify without --release-tier) verifies the
-// server's own leg: its own namespace, ServiceAccount, and secretstore.caCert.
-// The release tier runs in a completely independent namespace with a different
-// ServiceAccount and a separate CA anchor; nothing automated exercises this
-// path until a real release tag runs a credentialed step.
-//
-// The approach:
-//  1. Discover --argo-vault-*, --argo-credentialed-serviceaccount, and --argo-namespace
-//     from the serve process command line.
-//  2. Request a short-lived token for the credentialed ServiceAccount via the
-//     Kubernetes TokenRequest API (the server's SA must have create permission
-//     on serviceaccounts/token in the pipeline namespace).
-//  3. Attempt a real Vault Kubernetes-auth login with that token, against
-//     --argo-vault-address, using --argo-vault-ca-cert as the CA anchor.
-//  4. Fetch at least one path from the server's --secretstore-path allowlist
-//     to prove read access.
-func runReleaseTierVerify(
-	ctx context.Context,
-	explicit secretStoreVerifyConfig,
-	positionalPaths []string,
-	repo string,
-	tier string,
-	timeout time.Duration,
-	output io.Writer,
-	procCmdline string,
-	newKube kubeClientFactory,
-) error {
-	return runReleaseTierVerifyWithSources(ctx, explicit, positionalPaths, repo, tier, timeout, output, secretStoreVerifySourcesFromCmdline(procCmdline, newKube))
 }
 
 func runReleaseTierVerifyWithSources(
@@ -634,7 +592,7 @@ func secretStoreVerifyPaths(input []string, kvMount string) ([]string, map[strin
 	declaredByFetch := make(map[string]string, len(input))
 	seen := make(map[string]bool, len(input))
 	for _, path := range input {
-		scoped, upstreamScoped, err := periapsis.ParseUpstreamSecretStorePath(path)
+		scoped, upstreamScoped, err := pipeline.ParseUpstreamSecretStorePath(path)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%w: %w", errUsage, err)
 		}
@@ -643,7 +601,7 @@ func secretStoreVerifyPaths(input []string, kvMount string) ([]string, map[strin
 			declaredByFetch[canonical] = path
 			path = canonical
 		}
-		if err := periapsis.ValidateSecretStorePath(path); err != nil {
+		if err := pipeline.ValidateSecretStorePath(path); err != nil {
 			return nil, nil, fmt.Errorf("%w: %w", errUsage, err)
 		}
 		if !seen[path] {
@@ -1001,7 +959,7 @@ func releaseTierConfigFromServeCmdline(path string) (releaseTierVerifyConfig, er
 //
 // It runs under the administrator's own BAO_TOKEN (from the environment),
 // exactly like the full install's secret-store path does. The Oberth server
-// has no code path that accepts a store admin token — the sync is an
+// does not accept a store admin token through its API — sync is an
 // operator-session action by design.
 func runSecretStoreSync(ctx context.Context, arguments []string, output io.Writer) error {
 	flags := flag.NewFlagSet("secretstore sync", flag.ContinueOnError)
@@ -1043,7 +1001,7 @@ func runSecretStoreSync(ctx context.Context, arguments []string, output io.Write
 
 	// Read per-repo identities from the running Oberth server.
 	_, _ = fmt.Fprintln(output, "Reading per-repo identities from the running server...")
-	identities, warnings, produceErr := installer.ProducePerRepoIdentities(
+	identities, warnings, produceErr := installer.ProducePerRepoIdentitiesForSync(
 		ctx, kube, installer.DefaultRunCommand, *kubeContext, *namespace,
 	)
 	for _, warn := range warnings {

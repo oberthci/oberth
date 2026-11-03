@@ -358,10 +358,8 @@ func TestArgoOberthHelmValuesOmitsVaultWithoutStore(t *testing.T) {
 	}
 }
 
-// argoOberthHelmValues must pin promotion.grantMaxLifetime explicitly so a
-// `helm upgrade --reuse-values` from a pre-#826 release still carries the
-// default (#826).
-func TestArgoOberthHelmValuesPinsPromotionGrantMaxLifetime(t *testing.T) {
+// Server and chart defaults supply absent lifetimes; installer flags must not override the operator.
+func TestArgoOberthHelmValuesPreservesPromotionGrantMaxLifetime(t *testing.T) {
 	t.Parallel()
 	cfg := Config{}
 	if err := cfg.Validate(); err != nil {
@@ -369,7 +367,7 @@ func TestArgoOberthHelmValuesPinsPromotionGrantMaxLifetime(t *testing.T) {
 	}
 	values := argoOberthHelmValues(cfg, OpenBaoResult{})
 	joined := strings.Join(values, " ")
-	if !strings.Contains(joined, "promotion.grantMaxLifetime=24h") {
-		t.Errorf("expected promotion.grantMaxLifetime=24h pinned in helm values, got: %s", joined)
+	if strings.Contains(joined, "promotion.grantMaxLifetime=") {
+		t.Errorf("unexpected grant lifetime override, got: %s", joined)
 	}
 }

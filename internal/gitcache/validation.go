@@ -3,6 +3,7 @@ package gitcache
 import (
 	"errors"
 	"fmt"
+	"github.com/oberthci/oberth/internal/gitoid"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -11,7 +12,6 @@ import (
 
 var (
 	repoPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
-	shaPattern  = regexp.MustCompile(`^[0-9a-f]{40}$`)
 	userPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 )
 
@@ -154,11 +154,10 @@ func ValidateUpstreamName(name string) error {
 	return nil
 }
 
-// ValidateSHA requires the exact SHA-1 object IDs used by the configured
-// Forge. Abbreviations are an API convenience, never a mutation primitive.
+// ValidateSHA requires a complete canonical Git object ID.
 func ValidateSHA(value string) error {
-	if !shaPattern.MatchString(value) {
-		return fmt.Errorf("SHA %q must be 40 lowercase hexadecimal characters", value)
+	if !gitoid.Valid(value) {
+		return fmt.Errorf("SHA %q must be 40 or 64 lowercase hexadecimal characters", value)
 	}
 	return nil
 }

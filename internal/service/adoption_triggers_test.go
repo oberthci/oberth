@@ -12,7 +12,8 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/internal/storetest"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 const adoptionBaseSHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -38,9 +39,9 @@ func slice2ClaimedRun(t *testing.T, kind string) (*recoveryFixture, model.Run, m
 		spec.BaseSHA = adoptionBaseSHA
 		spec.Trigger = "promotion"
 		spec.Release = false
-		enqueued, promotion, err = fixture.store.EnqueuePromotionRun(ctx, spec, model.PromotionSpec{RepoID: fixture.repo.ID, SourceBranch: "feature/adopt", SourceSHA: spec.SHA, TargetRef: "main", PreviousSHA: spec.BaseSHA, ResultSHA: spec.SHA, Actor: spec.Actor})
+		enqueued, promotion, err = storetest.EnqueuePromotionRun(fixture.store, ctx, spec, model.PromotionSpec{RepoID: fixture.repo.ID, SourceBranch: "feature/adopt", SourceSHA: spec.SHA, TargetRef: "main", PreviousSHA: spec.BaseSHA, ResultSHA: spec.SHA, Actor: spec.Actor})
 	} else {
-		enqueued, err = fixture.store.EnqueueRun(ctx, spec)
+		enqueued, err = storetest.EnqueueRun(fixture.store, ctx, spec)
 	}
 	if err != nil {
 		t.Fatal(err)
@@ -64,7 +65,7 @@ func slice2RecoveryRun(t *testing.T, kind string) (*recoveryFixture, model.Run, 
 	if _, err = fixture.store.MarkRunAdmitted(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	fixture.setJobName(t, run.ID, "oberth-"+kind+"-adopt")
+	fixture.setWorkflowName(t, run.ID, "oberth-"+kind+"-adopt")
 	run, err = fixture.store.MarkRunSubmitted(ctx, run.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +78,7 @@ func reopenSlice2Owner(t *testing.T, fixture *recoveryFixture) {
 		t.Fatal(err)
 	}
 	var err error
-	fixture.store, err = store.Open(context.Background(), filepath.Join(fixture.root, "oberth.sqlite"), store.Options{})
+	fixture.store, err = storetest.Open(context.Background(), filepath.Join(fixture.root, "oberth.sqlite"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +290,7 @@ func TestStartupAdoptsPromotionTagAndReleaseAcrossRepeatedRestarts(t *testing.T)
 				}
 				reopenSlice2Owner(t, fixture)
 				recovery := slice2Scheduler(t, fixture, jobs, git)
-				if err := recovery.reconcileStrandedRunsWithGate(context.Background(), recovery.requireMutation, func(model.Run, periapsis.Size) error { return errors.New("terminal run re-adopted") }); err != nil {
+				if err := recovery.reconcileStrandedRunsWithGate(context.Background(), recovery.requireMutation, func(model.Run, pipeline.Size) error { return errors.New("terminal run re-adopted") }); err != nil {
 					t.Fatal(err)
 				}
 				if err := recovery.recoverPendingPublications(context.Background()); err != nil {
@@ -457,18 +458,22 @@ func TestAdoptedTriggerPublicationRecoversPushBeforeLedgerFinalization(t *testin
 	}
 }
 
-func TestMissingPromotionTagAndReleaseStayIneligibleForRefire(t *testing.T) {
+func TestMissingWorkflowResetsTagsAndInterruptsPromotions(t *testing.T) {
 	for _, kind := range []string{"promotion", "tag", "release"} {
 		t.Run(kind, func(t *testing.T) {
 			fixture, run, promotion := slice2RecoveryRun(t, kind)
 			reopenSlice2Owner(t, fixture)
 			jobs := &adoptingJobs{found: false, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}
 			scheduler := slice2Scheduler(t, fixture, jobs, &controlGit{})
-			if err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(model.Run, periapsis.Size) error { return errors.New("missing Workflow adopted") }); err != nil {
+			if err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(model.Run, pipeline.Size) error { return errors.New("missing Workflow adopted") }); err != nil {
 				t.Fatal(err)
 			}
 			final, err := fixture.store.Run(context.Background(), run.ID)
-			if err != nil || final.Status != model.RunInterrupted || final.SupersededBy != "" || final.ID != run.ID || len(jobs.adopted) != 1 || len(jobs.deleted) != 1 || jobs.created != 0 || jobs.releaseCreated != 0 {
+			wantStatus, wantDeleted := model.RunQueued, 0
+			if kind == "promotion" {
+				wantStatus, wantDeleted = model.RunInterrupted, 1
+			}
+			if err != nil || final.Status != wantStatus || final.SupersededBy != "" || final.ID != run.ID || len(jobs.adopted) != 1 || len(jobs.deleted) != wantDeleted || jobs.created != 0 || jobs.releaseCreated != 0 {
 				t.Fatalf("missing fallback: %+v %v", final, err)
 			}
 			if counts, err := fixture.store.CountRuns(context.Background()); err != nil || counts.Total != 1 {
@@ -521,24 +526,29 @@ func TestNewPromotionTagAndReleaseKeepWorkflowAndWorkspaceOnShutdown(t *testing.
 	}
 }
 
-func TestLegacyNonReleaseTagKeepsFallbackWithoutInferringRelease(t *testing.T) {
+func TestLegacyNonReleaseTagAdoptsWithoutInferringRelease(t *testing.T) {
 	fixture := newRecoveryFixture(t)
 	ctx := context.Background()
-	enqueued, err := fixture.store.EnqueueRun(ctx, model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefTag, Ref: "v1.0.0", SHA: adoptionTagObjectSHA, TestedSHA: adoptionTestedSHA, Actor: "agent@host", Trigger: "tag"})
+	enqueued, err := storetest.EnqueueRun(fixture.store, ctx, model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefTag, Ref: "v1.0.0", SHA: adoptionTagObjectSHA, TestedSHA: adoptionTestedSHA, Actor: "agent@host", Trigger: "tag"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err = fixture.store.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	fixture.setJobName(t, enqueued.ID, "legacy-tag-job")
+	fixture.setWorkflowName(t, enqueued.ID, "legacy-tag-job")
 	jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}
 	scheduler := fixture.scheduler(t, jobs)
-	if err = scheduler.reconcileStrandedRunsWithGate(ctx, scheduler.requireMutation, func(model.Run, periapsis.Size) error { return errors.New("legacy tag adopted") }); err != nil {
+	if err = scheduler.reconcileStrandedRunsWithGate(ctx, scheduler.requireMutation, func(adopted model.Run, _ pipeline.Size) error {
+		if adopted.ID != enqueued.ID || adopted.Release {
+			t.Fatalf("wrong adoption: %+v", adopted)
+		}
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 	final, err := fixture.store.Run(ctx, enqueued.ID)
-	if err != nil || final.Release || final.Status != model.RunInterrupted || final.SupersededBy != "" || len(jobs.adopted) != 0 || len(jobs.deleted) != 1 {
+	if err != nil || final.Release || final.Status != model.RunRunning || final.SupersededBy != "" || len(jobs.adopted) != 1 || len(jobs.deleted) != 0 {
 		t.Fatalf("legacy tag rebound: %+v %v", final, err)
 	}
 }

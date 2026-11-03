@@ -2,6 +2,8 @@ package service
 
 import (
 	"errors"
+	"fmt"
+	"maps"
 	"math/big"
 	"strings"
 
@@ -12,11 +14,12 @@ import (
 )
 
 // DeclaredAdmissionConfig is administrator-owned. Disabled is the single kill
-// switch; repositories opt into numeric admission by committing declarations.
+// switch for new declared work; repositories opt in by committing declarations.
 type DeclaredAdmissionConfig struct {
-	Disabled    bool
-	CPUMilli    int64
-	MemoryBytes int64
+	ExtendedResources map[string]int64
+	Disabled          bool
+	CPUMilli          int64
+	MemoryBytes       int64
 	// Headroom is max(fixed bytes, percentage of declared run memory). Nil
 	// selects the default independently of CPU/memory budgets; zero is explicit.
 	MemoryHeadroomBytes   *int64
@@ -42,6 +45,9 @@ func (c DeclaredAdmissionConfig) memoryHeadroom() (fixed, percent int64) {
 }
 
 func (c DeclaredAdmissionConfig) Validate() error {
+	if err := argoworkflow.ValidateExtendedResourceLimits(c.ExtendedResources); err != nil {
+		return err
+	}
 	fixed, percent := c.memoryHeadroom()
 	if c.CPUMilli <= 0 || c.CPUMilli > 1_000_000 || c.MemoryBytes <= 0 || c.MemoryBytes > 1<<50 || fixed < 0 || fixed > 1<<50 || percent < 0 || percent > 100 || c.IORuns < 0 || c.IORuns > 64 {
 		return errors.New("declared admission requires positive CPU/memory budgets, memory headroom in 0..2^50 bytes and 0..100 percent and an IO run ceiling in 0..64")
@@ -80,10 +86,17 @@ func (g *weightedAdmission) usesDeclarations(r *admissionReservation) bool {
 
 func (g *weightedAdmission) numericFitsLocked(candidate *admissionReservation) bool {
 	cpu, memory := g.resources.CPUMilli, g.resources.MemoryBytes
+	extended := maps.Clone(g.resources.ExtendedResources)
 	legacy := 0
 	charge := func(r *admissionReservation) bool {
 		if g.usesDeclarations(r) {
 			d := g.runCharge(*r.pods)
+			for name, count := range d.ExtendedResources {
+				if count > extended[name] {
+					return false
+				}
+				extended[name] -= count
+			}
 			if d.CPUMilli > cpu || d.MemoryBytes > memory {
 				return false
 			}
@@ -148,44 +161,49 @@ func (g *weightedAdmission) numericBlockedLocked(r *admissionReservation) bool {
 }
 
 func (g *weightedAdmission) validatePodDemand(d *argoworkflow.PodDemand) error {
-	if d == nil || g.resources.Disabled {
+	if d == nil {
 		return nil
 	}
 	if !d.Valid() {
 		return errors.New("invalid declared workflow resource demand")
+	}
+	if g.resources.Disabled {
+		return errors.New("declared resource admission is disabled; declared workflows cannot use deprecated size admission")
+	}
+	if !g.demandFitsBudget(d) {
+		return errors.New("declared resource demand including helper and memory headroom reserves exceeds the numeric budget; reduce requests or parallelism in git, or raise the administrator budget")
 	}
 	return nil
 }
 
 func (g *weightedAdmission) demandFitsBudget(d *argoworkflow.PodDemand) bool {
 	c := g.runCharge(*d)
+	for name, count := range c.ExtendedResources {
+		if count > g.resources.ExtendedResources[name] {
+			return false
+		}
+	}
 	return c.CPUMilli <= g.resources.CPUMilli && c.MemoryBytes <= g.resources.MemoryBytes
 }
 
-func (g *weightedAdmission) selectDeclaredDemand(receipt *argoworkflow.VMIDemandReceipt) (*argoworkflow.PodDemand, model.ResourceAdmissionFallback) {
-	if g.resources.Disabled || receipt == nil {
-		return nil, ""
+func (g *weightedAdmission) selectDeclaredDemand(receipt *argoworkflow.DemandReceipt) (*argoworkflow.PodDemand, model.ResourceAdmissionFallback, error) {
+	if receipt == nil {
+		return nil, model.ResourceFallbackRequests, nil
 	}
 	d, err := receipt.DeclaredPodDemand()
-	if errors.Is(err, argoworkflow.ErrMemoryUnbounded) {
-		return nil, model.ResourceFallbackMemory
-	}
-	if errors.Is(err, argoworkflow.ErrVMHostUndeclared) {
-		return nil, model.ResourceFallbackVM
+	if d == nil && !receipt.HasResourceRequests() {
+		return nil, model.ResourceFallbackRequests, nil
 	}
 	if err != nil {
-		return nil, model.ResourceFallbackGraph
+		return nil, "", fmt.Errorf("declared resource admission refused: %w; complete the declarations or bound workflow parallelism in git", err)
 	}
 	if d == nil {
-		return nil, model.ResourceFallbackRequests
+		return nil, "", errors.New("declared resource admission refused: incomplete CPU/memory requests; complete every container declaration in git")
 	}
-	if !d.Valid() {
-		return nil, model.ResourceFallbackGraph
+	if err := g.validatePodDemand(d); err != nil {
+		return nil, "", err
 	}
-	if !g.demandFitsBudget(d) {
-		return nil, model.ResourceFallbackBudget
-	}
-	return d, ""
+	return d, "", nil
 }
 
 // Only called after the API has authorized the run. This also works before a
@@ -213,7 +231,7 @@ func samePodDemand(a, b *argoworkflow.PodDemand) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
 	}
-	return *a == *b
+	return a.Equal(*b)
 }
 
 func (r *admissionReservation) declaredResources() *model.DeclaredResources {
@@ -221,5 +239,5 @@ func (r *admissionReservation) declaredResources() *model.DeclaredResources {
 		return nil
 	}
 	d := r.gate.runCharge(*r.pods)
-	return &model.DeclaredResources{CPUMilli: d.CPUMilli, MemoryBytes: d.MemoryBytes, Pods: d.Pods}
+	return &model.DeclaredResources{ExtendedResources: maps.Clone(d.ExtendedResources), CPUMilli: d.CPUMilli, MemoryBytes: d.MemoryBytes, Pods: d.Pods}
 }

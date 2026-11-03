@@ -99,38 +99,34 @@ func (service *API) promoteGrantList(ctx context.Context, actor api.Actor, raw j
 		return nil, err
 	}
 
-	filter := model.PromotionGrantListFilter{
-		SourceSHA: arguments.SHA,
-	}
-	if strings.TrimSpace(arguments.Repo) != "" {
-		repository, err := service.runs.RepositoryByName(ctx, arguments.Repo)
-		if err != nil {
-			return nil, err
-		}
-		filter.RepoID = repository.ID
-	}
-	switch arguments.Status {
-	case "active":
-		active := true
-		filter.Active = &active
-	case "revoked", "expired", "consumed":
-		inactive := false
-		filter.Active = &inactive
-	case "all", "":
-		// No filter.
-	default:
-		return nil, fmt.Errorf("%w: status must be one of: active, revoked, expired, consumed, all", ErrInvalidInput)
-	}
-
-	grants, err := service.promotionGrants.ListPromotionGrants(ctx, filter)
+	grants, err := service.promotionGrantRows(ctx, arguments.Repo, arguments.SHA, arguments.Status)
 	if err != nil {
 		return nil, err
 	}
+
 	result := make([]map[string]any, 0, len(grants))
 	for _, grant := range grants {
 		result = append(result, promotionGrantResponse(grant))
 	}
 	return api.PromotionGrantListResponse{Grants: result}, nil
+}
+
+// Both REST and MCP use the same repository resolution and store status filter.
+func (service *API) promotionGrantRows(ctx context.Context, repo, sha, status string) ([]model.PromotionGrant, error) {
+	filter := model.PromotionGrantListFilter{SourceSHA: sha, Status: status}
+	switch status {
+	case "", "all", "active", "revoked", "expired", "consumed":
+	default:
+		return nil, fmt.Errorf("%w: status must be one of: active, revoked, expired, consumed, all", ErrInvalidInput)
+	}
+	if strings.TrimSpace(repo) != "" {
+		repository, err := service.runs.RepositoryByName(ctx, repo)
+		if err != nil {
+			return nil, err
+		}
+		filter.RepoID = repository.ID
+	}
+	return service.promotionGrants.ListPromotionGrants(ctx, filter)
 }
 
 func promotionGrantResponse(grant model.PromotionGrant) map[string]any {

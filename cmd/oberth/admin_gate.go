@@ -16,17 +16,24 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-const defaultAdminSocket = "/tmp/oberth-admin.sock"
+const defaultAdminSocket = "/run/oberth/admin.sock"
 const maximumAdminGateError = 4 << 10
 
-// newAdminGateServer serves the live daemon's private admin socket. Besides
-// the audit mutation gate, it accepts one body-less wake: an in-pod run
-// cancel committed its obligation directly to the database and asks the
-// scheduler to run its cancellation pass now (withdraw the run's admission
-// reservation, delete its Workflow) instead of on the next queue event. The
-// wake carries no input and performs no mutation of its own.
-func newAdminGateServer(gate func(context.Context) error, databasePath string, wake func(), counts ...func(context.Context) (model.IdleQueueStatus, error)) *http.Server {
+func newAdminGateServerWithTokenPolicy(gate func(context.Context) error, databasePath string, wake func(), policy model.UplinkTokenPolicy, counts ...func(context.Context) (model.IdleQueueStatus, error)) *http.Server {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/token-policy", func(output http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("X-Oberth-Admin-Database") != databasePath {
+			http.Error(output, "requested database is not the live daemon database", http.StatusConflict)
+			return
+		}
+		if err := policy.Validate(); err != nil {
+			http.Error(output, "token policy unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		output.Header().Set("Content-Type", "application/json")
+		output.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(output).Encode(policy)
+	})
 	mux.HandleFunc("GET /v1/idle", func(output http.ResponseWriter, request *http.Request) {
 		if len(counts) == 0 || counts[0] == nil {
 			http.Error(output, "queue state unavailable", http.StatusServiceUnavailable)
@@ -76,6 +83,11 @@ func newAdminGateServer(gate func(context.Context) error, databasePath string, w
 		output.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("POST /v1/mutation-gate", func(output http.ResponseWriter, request *http.Request) {
+		operations := request.Header.Values("X-Oberth-Admin-Operation")
+		if len(operations) != 1 || !validAdminOperation(operations[0]) {
+			http.Error(output, "admin mutation operation is invalid", http.StatusBadRequest)
+			return
+		}
 		if gate == nil {
 			http.Error(output, "audit mutation gate is unavailable", http.StatusServiceUnavailable)
 			return
@@ -104,7 +116,7 @@ func requestAdminMutationGate(ctx context.Context, socket, operation, databasePa
 	if err := validateAdminSocket(socket); err != nil {
 		return err
 	}
-	if strings.TrimSpace(operation) == "" || strings.ContainsAny(operation, "\x00\r\n") {
+	if !validAdminOperation(operation) {
 		return errors.New("admin mutation operation is invalid")
 	}
 	dialer := net.Dialer{Timeout: 5 * time.Second}
@@ -184,6 +196,19 @@ func requestLiveAdminMutationGate(ctx context.Context, operation, databasePath s
 }
 
 func listenAdminSocket(ctx context.Context, path string) (net.Listener, error) {
+	if path == defaultAdminSocket {
+		directory := filepath.Dir(path)
+		if err := os.Mkdir(directory, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+			return nil, fmt.Errorf("create admin socket directory: %w", err)
+		}
+		info, err := os.Lstat(directory)
+		if err != nil || !info.IsDir() || !adminPathOwned(info) {
+			return nil, errors.New("admin socket directory must be owned by the daemon user and must not be a symlink")
+		}
+		if err := os.Chmod(directory, 0o700); err != nil {
+			return nil, err
+		}
+	}
 	if err := validateAdminSocket(path); err != nil {
 		return nil, err
 	}
@@ -200,15 +225,63 @@ func listenAdminSocket(ctx context.Context, path string) (net.Listener, error) {
 		_ = removeStaleAdminSocket(path)
 		return nil, fmt.Errorf("restrict admin socket permissions: %w", err)
 	}
-	return listener, nil
+	return &adminPeerListener{Listener: listener, uid: uint32(os.Geteuid())}, nil
 }
 
 func validateAdminSocket(path string) error {
 	clean := filepath.Clean(path)
-	if path != clean || !filepath.IsAbs(path) || filepath.Dir(path) != "/tmp" || filepath.Base(path) == "." || len(path) > 100 {
-		return errors.New("admin socket must be a clean direct child of /tmp no longer than 100 bytes")
+	if path != clean || !filepath.IsAbs(path) || filepath.Base(path) == "." || len(path) > 100 {
+		return errors.New("admin socket must be a clean absolute path no longer than 100 bytes")
+	}
+	info, err := os.Lstat(filepath.Dir(path))
+	if err != nil {
+		return fmt.Errorf("inspect admin socket directory: %w", err)
+	}
+	if !info.IsDir() || info.Mode().Perm() != 0o700 || !adminPathOwned(info) {
+		return errors.New("admin socket directory must be owned by the daemon user with mode 0700 and must not be a symlink")
 	}
 	return nil
+}
+
+func validAdminOperation(operation string) bool {
+	switch operation {
+	case "upstream.database.open", "upstream.register", "upstream.remove", "upstream.identity.import",
+		"repository.database.open", "repository.register", "repository.remove",
+		"uplink.database.open", "uplink.register", "uplink.remove", "uplink.scope", "uplink.token.create", "uplink.token.activate",
+		"access.database.open", "access.allow", "access.revoke", "audit.database.open", "audit.record",
+		"kubevirt.grant", "kubevirt.revoke", "size.grant", "size.revoke", "run.cancel":
+		return true
+	}
+	// These suffixes name OpenBao identity records, never secret material.
+	for _, prefix := range []string{"upstream.identity."} {
+		if suffix, ok := strings.CutPrefix(operation, prefix); ok && len(suffix) > 0 && len(suffix) <= 253 {
+			for _, c := range suffix {
+				if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '.') {
+					return false
+				}
+			}
+			return true
+		}
+	}
+	return false
+}
+
+type adminPeerListener struct {
+	net.Listener
+	uid uint32
+}
+
+func (listener *adminPeerListener) Accept() (net.Conn, error) {
+	for {
+		connection, err := listener.Listener.Accept()
+		if err != nil {
+			return nil, err
+		}
+		if err := checkAdminPeer(connection, listener.uid); err == nil {
+			return connection, nil
+		}
+		_ = connection.Close()
+	}
 }
 
 func removeStaleAdminSocket(path string) error {

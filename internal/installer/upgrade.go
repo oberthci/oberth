@@ -22,14 +22,6 @@ import (
 // Oberth release images. Published chart refs must resolve to this registry.
 const canonicalGARPrefix = "europe-west4-docker.pkg.dev/skipopsmain/oberth/"
 
-// watchTunnelImageDefault is the digest-pinned cloudflared image the chart
-// and installer pin by default. Update deliberately.
-const watchTunnelImageDefault = "docker.io/cloudflare/cloudflared:2026.10.6@sha256:004d843fa5fdc3103983fd580ee19fab4a8fa98add31f87249c1659e848c98e0"
-
-// watchTunnelOpenbaoImageDefault is the digest-pinned OpenBao image used by
-// the init container that fetches the connector token.
-const watchTunnelOpenbaoImageDefault = "quay.io/openbao/openbao:2.6.1@sha256:5b2486ab0fb90bbc788cc345b0a08616dfb375873ee8be5df3a2fd4d378a67e0"
-
 // DefaultUpgradeWaitTimeout bounds queue observation independently of rollout.
 const DefaultUpgradeWaitTimeout = 2 * time.Hour
 
@@ -88,8 +80,6 @@ var upgradePinnedKeys = map[string]bool{
 	"image.ref":                    true,
 	"argo.goProxy.enabled":         true,
 	"argo.goProxy.port":            true,
-	"watchTunnel.image":            true,
-	"watchTunnel.openbaoImage":     true,
 	"compatibility.schemaIdentity": true,
 	"compatibility.auditDomain":    true,
 	"compatibility.witnessKeyInfo": true,
@@ -101,15 +91,6 @@ var upgradePKIPinnedKeys = map[string]bool{
 	"tls.extraDNSNames": true,
 	"tls.extraIPs":      true,
 	"tls.pki":           true,
-}
-
-// UpgradePinnedKeys returns the set of pinned keys for tests.
-func UpgradePinnedKeys() map[string]bool {
-	out := make(map[string]bool, len(upgradePinnedKeys))
-	for k, v := range upgradePinnedKeys {
-		out[k] = v
-	}
-	return out
 }
 
 // UpgradeResult describes the outcome of an upgrade.
@@ -306,6 +287,9 @@ func keyPathExists(values map[string]any, key string) bool {
 // the binary's version, upgrade the Helm release, wait for rollout, and
 // verify the new version.
 func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResult, error) {
+	if err := captureBaoEnvironment(&deps); err != nil {
+		return UpgradeResult{}, err
+	}
 	if err := cfg.ValidateUpgrade(); err != nil {
 		return UpgradeResult{}, err
 	}
@@ -338,7 +322,10 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	}
 
 	// Detect current version from the Helm release.
-	release, exists := findHelmRelease(ctx, deps, "oberth", cfg.Namespace)
+	release, exists, err := findHelmRelease(ctx, deps, "oberth", cfg.Namespace)
+	if err != nil {
+		return UpgradeResult{}, err
+	}
 	if !exists {
 		return UpgradeResult{}, fmt.Errorf("no Oberth Helm release found in namespace %s; run oberth install first", cfg.Namespace)
 	}
@@ -491,6 +478,20 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	pki := prepared.pki
 	pki.configure(&cfg)
 
+	previewArgs, previewFlags := upgradeHelmArgs(cfg, chart, imageRef, compatibility)
+	previewArgs = append(previewArgs, previewFlags...)
+	previewArgs = append(previewArgs, "--dry-run=server", "--no-hooks", "--output=json")
+	previewRaw, previewErr := deps.RunHelm(ctx, previewArgs)
+	if previewErr != nil {
+		clear(previewRaw)
+		return result, fmt.Errorf("preview upgrade before writes: %w", previewErr)
+	}
+	previewErr = printHelmValueChanges(ctx, deps, cfg.Namespace, previewRaw, prepared.revision)
+	clear(previewRaw)
+	if previewErr != nil {
+		return result, previewErr
+	}
+
 	if cfg.WaitIdle {
 		if err := waitForUpgradeIdle(ctx, cfg, deps); err != nil {
 			return result, err
@@ -550,7 +551,7 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		details["migrated"] = result.Migrated
 	}
 	recordServerAudit(ctx, deps, cfg.Namespace, "deploy/oberth", "upgrade.completed", details)
-	_, _ = fmt.Fprintf(w, "\nReady — %s\n", oberthWebUIURL)
+	_, _ = fmt.Fprintf(w, "\nReady — Oberth deployment in namespace %s (context %s)\n", cfg.Namespace, deps.ContextName)
 	return result, nil
 }
 
@@ -641,14 +642,10 @@ func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string, compatibility ba
 		"--set-string", "compatibility.witnessKeyInfo="+compatibility.WitnessKeyInfo,
 		// Keep the existing proxy enablement and mapping from reused values.
 		"--set", "argo.goProxy.port=8444",
-		// Retain the explicit promotion grant lifetime safety pin (#826).
-		"--set", "promotion.grantMaxLifetime=24h",
 		// Preserve the administrator's enablement through reused configuration.
 		// An absent enabled key renders false; a present value remains subject
 		// to the chart's boolean schema. Only the reviewed image pins override
 		// stored connector configuration (#671).
-		"--set-string", "watchTunnel.image="+watchTunnelImageDefault,
-		"--set-string", "watchTunnel.openbaoImage="+watchTunnelOpenbaoImageDefault,
 	)
 	if cfg.ArgoControllerProfile != "" {
 		args = append(args, "--set-string", "argo.controllerProfile="+cfg.ArgoControllerProfile)
@@ -685,6 +682,9 @@ func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string, compatibility ba
 // waitForUpgradeRollout watches the deployment until all replicas are updated
 // and available with the target image, or the timeout expires.
 func waitForUpgradeRollout(ctx context.Context, deps Deps, cfg UpgradeConfig, targetImageRef string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	deadline, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
 
@@ -698,7 +698,10 @@ func waitForUpgradeRollout(ctx context.Context, deps Deps, cfg UpgradeConfig, ta
 		}
 		select {
 		case <-deadline.Done():
-			return fmt.Errorf("timeout (%s) waiting for Oberth deployment rollout in namespace %s", cfg.Timeout, cfg.Namespace)
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return fmt.Errorf("timeout (%s) waiting for Oberth deployment rollout in namespace %s: %w", cfg.Timeout, cfg.Namespace, deadline.Err())
 		case <-time.After(2 * time.Second):
 		}
 	}

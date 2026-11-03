@@ -3,8 +3,6 @@ package service
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +24,7 @@ import (
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 const promotionCompensationTimeout = 30 * time.Second
@@ -54,6 +53,7 @@ const grantPolicySyncAdvisory = "Grant recorded; the identity map refreshes auto
 	"Until then, access fails closed."
 
 type APIConfig struct {
+	WorkflowCapabilities      WorkflowCapabilityStore
 	ResourceCoverages         ResourceCoverageReader
 	RunResources              RunResourceReader
 	ResourceDeclarations      ResourceDeclarationReader
@@ -109,6 +109,7 @@ type APIConfig struct {
 }
 
 type API struct {
+	workflowCapabilities      WorkflowCapabilityStore
 	resourceCoverages         ResourceCoverageReader
 	runResources              RunResourceReader
 	resourceDeclarations      ResourceDeclarationReader
@@ -235,11 +236,12 @@ func NewAPI(config APIConfig) (*API, error) {
 		health: config.Health, signals: signals, maximumWait: maximumWait, mutationGate: mutationGate,
 		promotionWorkspaceRoot: promotionWorkspaceRoot, workspaces: workspaces,
 		secretAccess: config.SecretAccess, secretAccessReconciler: config.SecretAccessReconciler,
-		kubeVirtGrants:      config.KubeVirtGrants,
-		sizeGrants:          config.SizeGrants,
-		queuePriorities:     config.QueuePriorities,
-		secretStoreVerifier: config.SecretStoreVerifier,
-		repositoryArchiver:  config.RepositoryArchiver, changeRepositoryArchive: config.ChangeRepositoryArchive,
+		kubeVirtGrants:       config.KubeVirtGrants,
+		workflowCapabilities: config.WorkflowCapabilities,
+		sizeGrants:           config.SizeGrants,
+		queuePriorities:      config.QueuePriorities,
+		secretStoreVerifier:  config.SecretStoreVerifier,
+		repositoryArchiver:   config.RepositoryArchiver, changeRepositoryArchive: config.ChangeRepositoryArchive,
 		repositoryRemover: config.RepositoryRemover, removeGitCache: config.RemoveGitCache,
 		promotionGrants: config.PromotionGrants, promotionGrantMaxLifetime: promotionGrantMaxLifetime,
 		runCancels: config.RunCancels, retention: config.Retention, runReruns: config.RunReruns, schedules: config.Schedules, uplinks: config.Uplinks, background: &sync.WaitGroup{},
@@ -289,6 +291,11 @@ func (service *API) Shutdown(ctx context.Context) error {
 }
 
 func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, raw json.RawMessage) (value any, resultErr error) {
+	defer func() {
+		if errors.Is(resultErr, store.ErrInvalid) && !errors.Is(resultErr, ErrInvalidInput) {
+			resultErr = fmt.Errorf("%w: %w", ErrInvalidInput, resultErr)
+		}
+	}()
 	if name == "run_rerun" || name == "publish_retry" {
 		defer func() {
 			if resultErr == nil {
@@ -344,6 +351,10 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 	if !adminScopeMove {
 		service, err = service.forActor(ctx, actor)
 	}
+	if err != nil {
+		return nil, err
+	}
+	raw, err = normalizeRunIDArgument(name, raw)
 	if err != nil {
 		return nil, err
 	}
@@ -474,6 +485,8 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, err
 		}
 		return service.retryRun(ctx, actor, arguments.ID, requestedPriority(actor, arguments.PriorityRequest))
+	case "publication_abandon":
+		return service.abandonPublication(ctx, actor, raw)
 	case "run_cancel":
 		var arguments struct {
 			ID     string `json:"id"`
@@ -518,7 +531,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 	case "run_logs":
 		var arguments struct {
 			ID         string `json:"id"`
-			Burn       string `json:"burn"`
+			Stage      string `json:"burn"`
 			Step       string `json:"step"`
 			Pattern    string `json:"pattern"`
 			Context    int    `json:"context"`
@@ -541,7 +554,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, fmt.Errorf("%w: byte_offset must be nonnegative", ErrInvalidInput)
 		}
 		filter.ByteOffset = arguments.ByteOffset
-		return service.RunLogFiltered(ctx, actor, arguments.ID, arguments.Burn, arguments.Step, filter)
+		return service.RunLogFiltered(ctx, actor, arguments.ID, arguments.Stage, arguments.Step, filter)
 	case "artifacts":
 		var arguments struct {
 			ID string `json:"id"`
@@ -669,11 +682,17 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			Body               *string `json:"body"`
 			Upstream           *string `json:"upstream"`
 			ExpectedBodySHA256 string  `json:"expected_body_sha256"`
+			ExpectedRevision   *int64  `json:"expected_revision"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		issue, err := service.issueUpdate(ctx, actor, arguments.ID, arguments.Title, arguments.Body, arguments.Upstream, arguments.ExpectedBodySHA256)
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &fields)
+		if value, ok := fields["expected_revision"]; ok && (string(value) == "null" || arguments.ExpectedRevision == nil || *arguments.ExpectedRevision < 1) {
+			return nil, fmt.Errorf("%w: expected_revision must be a positive integer", ErrInvalidInput)
+		}
+		issue, err := service.issueUpdate(ctx, actor, arguments.ID, arguments.Title, arguments.Body, arguments.Upstream, arguments.ExpectedBodySHA256, arguments.ExpectedRevision)
 		if err != nil {
 			return nil, err
 		}
@@ -789,6 +808,26 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return service.accessListPending(ctx, arguments.Repo)
 		}
 		return service.accessList(ctx, arguments.Repo, arguments.Revoked)
+	case "workflow_capability_grant":
+		var arguments struct {
+			Repo       string                   `json:"repo"`
+			Capability *argoworkflow.Capability `json:"capability"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		if arguments.Capability == nil {
+			return nil, fmt.Errorf("%w: capability is required", ErrInvalidInput)
+		}
+		return service.workflowCapabilityTool(ctx, actor, name, arguments.Repo, arguments.Capability)
+	case "workflow_capability_revoke", "workflow_capability_get":
+		var arguments struct {
+			Repo string `json:"repo"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		return service.workflowCapabilityTool(ctx, actor, name, arguments.Repo, nil)
 	case "kubevirt_grant":
 		var arguments struct {
 			Repo      string `json:"repo"`
@@ -816,6 +855,20 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, err
 		}
 		return service.kubeVirtGrantTool(ctx, actor, name, arguments.Repo, store.KubeVirtBudget{})
+	case "resource_grant", "resource_revoke", "resource_grant_get":
+		var arguments struct {
+			Repo     string            `json:"repo"`
+			Requests map[string]string `json:"requests"`
+			Limits   map[string]string `json:"limits"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		resources, err := store.ParseResourceCeiling(arguments.Requests, arguments.Limits)
+		if err != nil && name == "resource_grant" {
+			return nil, fmt.Errorf("%w: %w", ErrInvalidInput, err)
+		}
+		return service.resourceGrantTool(ctx, actor, name, arguments.Repo, resources)
 	case "size_grant", "size_revoke", "size_grant_get":
 		var arguments struct {
 			Repo string `json:"repo"`
@@ -1029,32 +1082,11 @@ func (service *API) Grants(ctx context.Context, actor api.Actor, filter api.Gran
 	if service.promotionGrants == nil || service.runs == nil {
 		return nil, refuse(ErrUnavailable, "promotion grants")
 	}
-	storeFilter := model.PromotionGrantListFilter{
-		SourceSHA: filter.SHA,
-	}
-	if strings.TrimSpace(filter.Repository) != "" {
-		repository, err := service.runs.RepositoryByName(ctx, filter.Repository)
-		if err != nil {
-			return nil, err
-		}
-		storeFilter.RepoID = repository.ID
-	}
-	switch filter.Status {
-	case "active":
-		active := true
-		storeFilter.Active = &active
-	case "revoked", "expired", "consumed":
-		inactive := false
-		storeFilter.Active = &inactive
-	case "all", "":
-		// No filter.
-	default:
-		return nil, fmt.Errorf("%w: status must be one of: active, revoked, expired, consumed, all", ErrInvalidInput)
-	}
-	grants, err := service.promotionGrants.ListPromotionGrants(ctx, storeFilter)
+	grants, err := service.promotionGrantRows(ctx, filter.Repository, filter.SHA, filter.Status)
 	if err != nil {
 		return nil, err
 	}
+
 	result := make([]map[string]any, 0, len(grants))
 	for _, grant := range grants {
 		result = append(result, promotionGrantResponse(grant))
@@ -1150,11 +1182,11 @@ func (service *API) readRun(ctx context.Context, actor api.Actor, id string, sum
 // log. Active runs authorize against their progress journal and read an
 // in-memory index snapshot; terminal runs authorize against durable results
 // and their finalized retained-log index.
-func (service *API) RunLog(ctx context.Context, actor api.Actor, id, burn, step string) (any, error) {
-	return service.RunLogFiltered(ctx, actor, id, burn, step, runlog.Filter{})
+func (service *API) RunLog(ctx context.Context, actor api.Actor, id, stage, step string) (any, error) {
+	return service.RunLogFiltered(ctx, actor, id, stage, step, runlog.Filter{})
 }
 
-func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, burn, step string, filter runlog.Filter) (value any, resultErr error) {
+func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, stage, step string, filter runlog.Filter) (value any, resultErr error) {
 	ctx = withRunLogCaller(ctx, actor)
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithTimeout(ctx, runReadBudget)
@@ -1187,38 +1219,38 @@ func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, bur
 	if err != nil {
 		return nil, fmt.Errorf("load run steps: %w", err)
 	}
-	if strings.TrimSpace(burn) == "" {
-		burn = run.FailedBurn
+	if strings.TrimSpace(stage) == "" {
+		stage = run.FailedStage
 		if strings.TrimSpace(step) == "" {
 			step = run.FailedStep
 		}
 	}
-	if strings.TrimSpace(burn) == "" {
+	if strings.TrimSpace(stage) == "" {
 		return nil, fmt.Errorf("%w: burn is required when the run has no failed burn", ErrInvalidInput)
 	}
 	if strings.TrimSpace(step) == "" {
 		var count int
 		for _, result := range steps {
-			if result.Burn == burn {
+			if result.Stage == stage {
 				step = result.Step
 				count++
 			}
 		}
 		if count != 1 {
-			return nil, fmt.Errorf("%w: step is required unless burn %q has exactly one step", ErrInvalidInput, burn)
+			return nil, fmt.Errorf("%w: step is required unless burn %q has exactly one step", ErrInvalidInput, stage)
 		}
 	}
 	recorded := false
 	for _, result := range steps {
-		if result.Burn == burn && result.Step == step {
+		if result.Stage == stage && result.Step == step {
 			recorded = true
 			break
 		}
 	}
 	if !recorded {
-		return nil, fmt.Errorf("no log range for burn %q step %q: %w", burn, step, store.ErrNotFound)
+		return nil, fmt.Errorf("no log range for burn %q step %q: %w", stage, step, store.ErrNotFound)
 	}
-	return service.stepLogResponse(ctx, run, steps, burn, step, filter)
+	return service.stepLogResponse(ctx, run, steps, stage, step, filter)
 }
 
 // maxLiveLogChunk bounds one live-log poll response. 256 KiB keeps a fast
@@ -1350,7 +1382,27 @@ func (service *API) Issues(ctx context.Context, actor api.Actor, filter api.Issu
 	if err != nil {
 		return nil, err
 	}
-	return service.stripScopedSequences(page), nil
+	result := api.IssueListPage{Issues: make([]api.IssueListSummary, len(page.Issues)), NextBefore: page.NextBefore, Total: page.Total, Counts: page.Counts}
+	for i, issue := range page.Issues {
+		result.Issues[i] = api.IssueListSummary{
+			ID:          issue.ID,
+			Revision:    issue.Revision,
+			RepoID:      issue.RepoID,
+			Kind:        issue.Kind,
+			Branch:      issue.Branch,
+			Title:       issue.Title,
+			State:       issue.State,
+			Occurrences: issue.Occurrences,
+			CIOrigin:    issue.CIOrigin,
+			CIWorkID:    issue.CIWorkID,
+			Upstream:    issue.Upstream,
+			Lock:        issue.Lock,
+			CreatedAt:   issue.CreatedAt,
+			UpdatedAt:   issue.UpdatedAt,
+			ClosedAt:    issue.ClosedAt,
+		}
+	}
+	return result, nil
 }
 
 func (service *API) Status(ctx context.Context, actor api.Actor) (any, error) {
@@ -1407,7 +1459,7 @@ func (service *API) statusForRun(ctx context.Context, repository model.Repositor
 	response := StatusResponse{
 		Priority: presented.Priority, PriorityReason: presented.PriorityReason, PriorityRequestedBy: presented.PriorityRequestedBy, PriorityRefusal: presented.PriorityRefusal,
 		Repository: repository, Run: run, Repo: repository.Name, Ref: run.Ref,
-		SHA: run.SHA, RunID: run.ID, Status: wireRunStatus(visibleRun(run).Status), Burns: map[string]string{},
+		SHA: run.SHA, RunID: run.ID, Status: wireRunStatus(visibleRun(run).Status), Stages: map[string]string{},
 		DisplayStatus:    presented.DisplayStatus,
 		DisplayReason:    presented.DisplayReason,
 		ResourceMessage:  presented.ResourceMessage,
@@ -1420,7 +1472,7 @@ func (service *API) statusForRun(ctx context.Context, repository model.Repositor
 			return StatusResponse{}, fmt.Errorf("load run steps: %w", err)
 		}
 		response.Steps = steps
-		response.Burns, response.ExitCode = wireBurns(response.Steps, run)
+		response.Stages, response.ExitCode = wireStages(response.Steps, run)
 	}
 	response.Scheduling = service.scheduling(ctx, run, response.Steps)
 	response.Run = presented
@@ -1487,7 +1539,7 @@ func (service *API) statusForBranchRef(ctx context.Context, repositoryName, sele
 		}
 		return StatusResponse{
 			Repository: repository, Repo: repository.Name, Ref: selector,
-			SHA: sha, Status: "no-runs", Burns: map[string]string{},
+			SHA: sha, Status: "no-runs", Stages: map[string]string{},
 		}, nil
 	}
 	repositories, err := service.runs.ListRepositories(ctx)
@@ -1518,7 +1570,7 @@ func (service *API) statusForBranchRef(ctx context.Context, repositoryName, sele
 	}
 	return StatusResponse{
 		Repository: matched, Repo: matched.Name, Ref: selector,
-		SHA: matchedSHA, Status: "no-runs", Burns: map[string]string{},
+		SHA: matchedSHA, Status: "no-runs", Stages: map[string]string{},
 	}, nil
 }
 
@@ -1526,44 +1578,10 @@ func (service *API) statusForBranchRef(ctx context.Context, repositoryName, sele
 // repository and run, overriding the response ref with the caller's original
 // selector (so "status main" shows ref "main" even when the run's own ref is
 // a promotion ref like "promotion/main/abcdef012345").
-func (service *API) statusFromRun(ctx context.Context, repository model.Repository, run model.Run, ref, actor string) (StatusResponse, error) {
-	presented := service.presentationRun(ctx, run)
-	response := StatusResponse{
-		Repository: repository, Run: run, Repo: repository.Name, Ref: ref,
-		SHA: run.SHA, RunID: run.ID, Status: wireRunStatus(visibleRun(run).Status), Burns: map[string]string{},
-		DisplayStatus:   presented.DisplayStatus,
-		DisplayReason:   presented.DisplayReason,
-		ResourceMessage: presented.ResourceMessage,
-		ScheduleEntry:   run.ScheduleEntry,
-	}
-	if service.history != nil {
-		var err error
-		response.Steps, err = service.stepsForRun(ctx, run)
-		if err != nil {
-			return StatusResponse{}, fmt.Errorf("load run steps: %w", err)
-		}
-		response.Burns, response.ExitCode = wireBurns(response.Steps, run)
-	}
-	response.Scheduling = service.scheduling(ctx, run, response.Steps)
-	response.Run = presented
-	applyExecutionDisplay(&response.Run, response.Scheduling)
-	response.DisplayStatus, response.DisplayReason = response.Run.DisplayStatus, response.Run.DisplayReason
-	if presented.DisplayStatus == "queued" && response.Scheduling != nil {
-		response.DisplayReason = response.Scheduling.Message
-		response.Run.DisplayReason = response.DisplayReason
-	}
-	response.FailedStep = run.FailedStep
-	if service.issues != nil && run.RefKind == model.RefBranch {
-		issue, issueErr := service.issues.OpenCIIssue(ctx, repository.ID, run.Ref)
-		if issueErr != nil && !errors.Is(issueErr, store.ErrNotFound) {
-			return StatusResponse{}, fmt.Errorf("load run issue: %w", issueErr)
-		}
-		if issueErr == nil {
-			issueID := issue.ID
-			response.Issue = &issueID
-		}
-	}
-	return response, nil
+func (service *API) statusFromRun(ctx context.Context, repository model.Repository, run model.Run, ref, _ string) (StatusResponse, error) {
+	response, err := service.statusForRun(ctx, repository, run)
+	response.Ref = ref
+	return response, err
 }
 
 func wireRunStatus(status model.RunStatus) string {
@@ -1750,24 +1768,24 @@ func (service *API) presentationRunWithSuccessor(ctx context.Context, run model.
 // one passed step and one the run never reached is not a passed burn, and
 // before the plan existed it could not say so -- the unreached step was absent
 // from the list entirely, so the burn read "passed".
-var burnPrecedence = map[string]int{"-": 0, "passed": 1, "pending": 2, "queued": 3, "running": 4, "failed": 5}
+var stagePrecedence = map[string]int{"-": 0, "passed": 1, "pending": 2, "queued": 3, "running": 4, "failed": 5}
 
-func wireBurns(steps []model.StepResult, run model.Run) (map[string]string, *int) {
-	burns := make(map[string]string)
+func wireStages(steps []model.StepResult, run model.Run) (map[string]string, *int) {
+	stages := make(map[string]string)
 	var exitCode *int
-	if canonical := runlog.LegacyRetryBurn(run.FailedBurn); canonical != run.FailedBurn {
+	if canonical := runlog.LegacyRetryStage(run.FailedStage); canonical != run.FailedStage {
 		// A legacy result may now resolve a declaration under its canonical
 		// name. Match that failure identity too, while preserving literal
 		// suffixed burns that still have their own row.
 		literal := false
 		for _, step := range steps {
-			if step.Burn == run.FailedBurn {
+			if step.Stage == run.FailedStage {
 				literal = true
 				break
 			}
 		}
 		if !literal {
-			run.FailedBurn = canonical
+			run.FailedStage = canonical
 		}
 	}
 	for _, step := range steps {
@@ -1794,11 +1812,11 @@ func wireBurns(steps []model.StepResult, run model.Run) (map[string]string, *int
 		default:
 			continue
 		}
-		if current, seen := burns[step.Burn]; !seen || burnPrecedence[state] > burnPrecedence[current] {
-			burns[step.Burn] = state
+		if current, seen := stages[step.Stage]; !seen || stagePrecedence[state] > stagePrecedence[current] {
+			stages[step.Stage] = state
 		}
 	}
-	return burns, exitCode
+	return stages, exitCode
 }
 
 // matchesFailedStep returns true when the given step result matches the run's
@@ -1807,14 +1825,14 @@ func wireBurns(steps []model.StepResult, run model.Run) (map[string]string, *int
 // When neither is populated, the first failed step wins (the caller already
 // checks exitCode == nil).
 func matchesFailedStep(step model.StepResult, run model.Run) bool {
-	burnRecorded := run.FailedBurn != ""
+	stageRecorded := run.FailedStage != ""
 	stepRecorded := run.FailedStep != ""
-	if !burnRecorded && !stepRecorded {
+	if !stageRecorded && !stepRecorded {
 		return true // no identity recorded; take the first failed step
 	}
-	burnMatch := !burnRecorded || step.Burn == run.FailedBurn
+	stageMatch := !stageRecorded || step.Stage == run.FailedStage
 	stepMatch := !stepRecorded || step.Step == run.FailedStep
-	return burnMatch && stepMatch
+	return stageMatch && stepMatch
 }
 
 // stepsForRun assembles the run's step list from the three records that each
@@ -1879,32 +1897,32 @@ func mergeSteps(run model.Run, planned []runprogress.PlannedStep, events []runpr
 	order := make(map[string]int, len(planned))
 	secrets := make(map[string]bool, len(planned))
 	for _, step := range planned {
-		order[step.Burn+"\x00"+step.Step] = step.Ordinal
-		secrets[step.Burn+"\x00"+step.Step] = step.Secrets
+		order[step.Stage+"\x00"+step.Step] = step.Ordinal
+		secrets[step.Stage+"\x00"+step.Step] = step.Secrets
 	}
 	canonicalObserved := make(map[string]bool)
 	for _, event := range events {
-		canonicalObserved[event.Burn+"\x00"+event.Step] = true
+		canonicalObserved[event.Stage+"\x00"+event.Step] = true
 	}
 	for _, result := range persisted {
-		canonicalObserved[result.Burn+"\x00"+result.Step] = true
+		canonicalObserved[result.Stage+"\x00"+result.Step] = true
 	}
 	merged := make([]model.StepResult, 0, len(planned)+len(events)+len(persisted))
 	position := make(map[string]int, cap(merged))
 	latestLegacy := make(map[string]int)
 	advance := func(candidate model.StepResult) {
-		key := candidate.Burn + "\x00" + candidate.Step
+		key := candidate.Stage + "\x00" + candidate.Step
 		newAttempt := false
 		if _, isPlanned := order[key]; !isPlanned {
-			canonical := runlog.LegacyRetryBurn(candidate.Burn)
+			canonical := runlog.LegacyRetryStage(candidate.Stage)
 			canonicalKey := canonical + "\x00" + candidate.Step
-			if _, planned := order[canonicalKey]; planned && canonical != candidate.Burn {
+			if _, planned := order[canonicalKey]; planned && canonical != candidate.Stage {
 				// A modern canonical observation supersedes the legacy alias,
 				// as it does when the journal is restored for adoption.
 				if canonicalObserved[canonicalKey] {
 					return
 				}
-				attempt, err := strconv.Atoi(candidate.Burn[len(canonical)+1 : len(candidate.Burn)-1])
+				attempt, err := strconv.Atoi(candidate.Stage[len(canonical)+1 : len(candidate.Stage)-1])
 				if err == nil {
 					// Old durable results used the attempt as their burn. Select
 					// by attempt number, not result order or timestamps, and keep
@@ -1915,7 +1933,7 @@ func mergeSteps(run model.Run, planned []runprogress.PlannedStep, events []runpr
 					}
 					newAttempt = !seen || attempt > previous
 					latestLegacy[canonicalKey] = attempt
-					candidate.Burn, key = canonical, canonicalKey
+					candidate.Stage, key = canonical, canonicalKey
 				}
 			}
 		}
@@ -1940,7 +1958,7 @@ func mergeSteps(run model.Run, planned []runprogress.PlannedStep, events []runpr
 	}
 	for _, step := range planned {
 		advance(model.StepResult{
-			RunID: run.ID, Burn: step.Burn, Step: step.Step,
+			RunID: run.ID, Stage: step.Stage, Step: step.Step,
 			Ordinal: step.Ordinal, Status: model.StepPending, Secrets: step.Secrets,
 		})
 	}
@@ -1965,8 +1983,8 @@ func mergeSteps(run model.Run, planned []runprogress.PlannedStep, events []runpr
 		if merged[left].Ordinal != merged[right].Ordinal {
 			return merged[left].Ordinal < merged[right].Ordinal
 		}
-		if merged[left].Burn != merged[right].Burn {
-			return merged[left].Burn < merged[right].Burn
+		if merged[left].Stage != merged[right].Stage {
+			return merged[left].Stage < merged[right].Stage
 		}
 		return merged[left].Step < merged[right].Step
 	})
@@ -1975,7 +1993,7 @@ func mergeSteps(run model.Run, planned []runprogress.PlannedStep, events []runpr
 
 func progressStepResult(runID string, event runprogress.Event) model.StepResult {
 	return model.StepResult{
-		RunID: runID, Burn: event.Burn, Step: event.Step, Ordinal: event.Ordinal,
+		RunID: runID, Stage: event.Stage, Step: event.Step, Ordinal: event.Ordinal,
 		Status: model.StepStatus(event.Status), ExitCode: event.ExitCode,
 		DeclaredSize: event.DeclaredSize.Effective(), StartedAt: event.StartedAt, FinishedAt: event.FinishedAt,
 	}
@@ -2008,19 +2026,19 @@ func (service *API) logsFor(ctx context.Context, repositoryName, selector, wante
 	if err != nil {
 		return LogResponse{}, fmt.Errorf("load run steps: %w", err)
 	}
-	burn, step, err := selectLogRange(steps, wanted)
+	stage, step, err := selectLogRange(steps, wanted)
 	if err != nil {
 		return LogResponse{}, err
 	}
-	return service.stepLogResponse(ctx, run, steps, burn, step, filter)
+	return service.stepLogResponse(ctx, run, steps, stage, step, filter)
 }
 
-func (service *API) stepLogResponse(ctx context.Context, run model.Run, steps []model.StepResult, burn, step string, filter runlog.Filter) (LogResponse, error) {
+func (service *API) stepLogResponse(ctx context.Context, run model.Run, steps []model.StepResult, stage, step string, filter runlog.Filter) (LogResponse, error) {
 	if run.Status.Terminal() {
 		forgetActiveLogIndex(service.logs, run.ID)
 	}
 	for _, result := range steps {
-		if result.Burn != burn || result.Step != step {
+		if result.Stage != stage || result.Step != step {
 			continue
 		}
 		// A workflow can fail before this step ever gets a pod or writes a
@@ -2035,26 +2053,26 @@ func (service *API) stepLogResponse(ctx context.Context, run model.Run, steps []
 			if err != nil {
 				return LogResponse{}, err
 			}
-			response := newLogResponse(run.ID, burn, step, body, meta)
+			response := newLogResponse(run.ID, stage, step, body, meta)
 			response.Note = "step was not executed; no log recorded"
 			response.RunError = run.Error
 			return response, nil
 		}
 		break
 	}
-	body, meta, err := service.readStepLogFiltered(ctx, run, burn, step, filter)
+	body, meta, err := service.readStepLogFiltered(ctx, run, stage, step, filter)
 	if err != nil {
 		return LogResponse{}, fmt.Errorf("read bounded run log: %w", err)
 	}
-	return newLogResponse(run.ID, burn, step, body, meta), nil
+	return newLogResponse(run.ID, stage, step, body, meta), nil
 }
 
-func newLogResponse(runID, burn, step string, body []byte, meta runlog.Meta) LogResponse {
+func newLogResponse(runID, stage, step string, body []byte, meta runlog.Meta) LogResponse {
 	if meta.ScanLimitBytes == 0 {
 		meta.ScanLimitBytes = runlog.MaxScanBytes
 	}
 	return LogResponse{
-		RunID: runID, Burn: burn, Step: step, Output: string(body),
+		RunID: runID, Stage: stage, Step: step, Output: string(body),
 		TotalLines: meta.TotalLines, MatchedLines: meta.MatchedLines,
 		ReturnedLines: meta.ReturnedLines, Truncated: meta.Truncated, Bytes: meta.Bytes,
 		ScanComplete: meta.ScanComplete, BytesExact: meta.BytesExact, ScannedBytes: meta.ScannedBytes, DiscoveryBytes: meta.DiscoveryBytes,
@@ -2064,7 +2082,7 @@ func newLogResponse(runID, burn, step string, body []byte, meta runlog.Meta) Log
 	}
 }
 
-func (service *API) readStepLogFiltered(ctx context.Context, run model.Run, burn, step string, filter runlog.Filter) ([]byte, runlog.Meta, error) {
+func (service *API) readStepLogFiltered(ctx context.Context, run model.Run, stage, step string, filter runlog.Filter) ([]byte, runlog.Meta, error) {
 	filter = filter.WithContext(ctx)
 	if err := service.purgedEvidence(ctx, run, "logs"); err != nil {
 		return nil, runlog.Meta{}, err
@@ -2077,41 +2095,33 @@ func (service *API) readStepLogFiltered(ctx context.Context, run model.Run, burn
 		defer release()
 	}
 	if run.Status.Active() {
-		body, meta, err := service.logs.ReadActiveFiltered(run.ID, burn, step, filter)
+		body, meta, err := service.logs.ReadActiveFiltered(run.ID, stage, step, filter)
 		if errors.Is(err, os.ErrNotExist) {
 			// Argo may journal progress before the first pod output arrives.
 			// Only an already-authorized step reaches this retained-log read;
 			// a missing file or range while active is pending, not a fault.
-			return nil, runlog.Meta{}, fmt.Errorf("%w: run %s is %s; retained output for burn %q step %q is not available yet; retry while the step runs", ErrStepLogPending, run.ID, run.Status, burn, step)
+			return nil, runlog.Meta{}, fmt.Errorf("%w: run %s is %s; retained output for burn %q step %q is not available yet; retry while the step runs", ErrStepLogPending, run.ID, run.Status, stage, step)
 		}
 		return body, meta, err
 	}
-	return service.logs.ReadFiltered(run.ID, burn, step, filter)
+	return service.logs.ReadFiltered(run.ID, stage, step, filter)
 }
 
 func selectLogRange(results []model.StepResult, wanted string) (string, string, error) {
-	selectedBurn := ""
+	selectedStage := ""
 	for _, result := range results {
 		if result.Step != wanted {
 			continue
 		}
-		if selectedBurn != "" {
+		if selectedStage != "" {
 			return "", "", fmt.Errorf("%w: step %q is ambiguous across burns", ErrInvalidInput, wanted)
 		}
-		selectedBurn = result.Burn
+		selectedStage = result.Stage
 	}
-	if selectedBurn == "" {
+	if selectedStage == "" {
 		return "", "", fmt.Errorf("no log range for step %q: %w", wanted, store.ErrNotFound)
 	}
-	return selectedBurn, wanted, nil
-}
-
-func (service *API) waitRun(ctx context.Context, repositoryName, selector, trigger string, requestedSeconds int, actor string) (WaitResponse, error) {
-	prepared, err := service.prepareWaitRun(ctx, repositoryName, selector, trigger, requestedSeconds, actor)
-	if err != nil {
-		return WaitResponse{}, err
-	}
-	return prepared(ctx)
+	return selectedStage, wanted, nil
 }
 
 func (service *API) prepareWaitRun(ctx context.Context, repositoryName, selector, trigger string, requestedSeconds int, actor string) (func(context.Context) (WaitResponse, error), error) {
@@ -2383,7 +2393,16 @@ func (service *API) admitPromotion(ctx context.Context, actor api.Actor, reposit
 		return model.Promotion{}, refuse(ErrInvalidInput, "promotion source must be the exactly tested green branch commit")
 	}
 	var grantID string
-	if !actor.Admin {
+	if retryOf != "" && mode == model.PromotionRetryAuto {
+		original, err := service.promotions.Promotion(ctx, retryOf)
+		if err != nil {
+			return model.Promotion{}, err
+		}
+		grantID = original.GrantID
+		if grantID == "" && !actor.Admin {
+			return model.Promotion{}, refuse(ErrForbidden, "automatic promotion retry lost its original authority")
+		}
+	} else if !actor.Admin {
 		if service.promotionGrants == nil {
 			return model.Promotion{}, refuse(ErrForbidden, "promote requires an admin uplink or a promotion grant")
 		}
@@ -2551,7 +2570,10 @@ func promotionRunRef(target, sha string) string {
 }
 
 func (service *API) prepareWaitPromotion(ctx context.Context, id string, requestedSeconds int) (func(context.Context) (PromotionWaitResponse, error), error) {
-	if service.promotions == nil || strings.TrimSpace(id) == "" {
+	if service.promotions == nil {
+		return nil, refuse(ErrUnavailable, "promotions")
+	}
+	if strings.TrimSpace(id) == "" {
 		return nil, fmt.Errorf("%w: promotion ID is required", ErrInvalidInput)
 	}
 	duration, err := service.waitDuration(requestedSeconds)
@@ -2610,7 +2632,10 @@ func (service *API) prepareWaitPromotion(ctx context.Context, id string, request
 }
 
 func (service *API) issueCreate(ctx context.Context, actor api.Actor, title, body, upstream string) (model.Issue, error) {
-	if service.issues == nil || strings.TrimSpace(title) == "" {
+	if service.issues == nil {
+		return model.Issue{}, refuse(ErrUnavailable, "issues")
+	}
+	if strings.TrimSpace(title) == "" {
 		return model.Issue{}, fmt.Errorf("%w: issue title is required", ErrInvalidInput)
 	}
 	spec := model.ManualIssueSpec{Title: title, Body: body}
@@ -2660,7 +2685,10 @@ func (service *API) upstreamID(ctx context.Context, name string) (int64, error) 
 }
 
 func (service *API) issueGet(ctx context.Context, _ api.Actor, id int64) (model.Issue, error) {
-	if service.issues == nil || id <= 0 {
+	if service.issues == nil {
+		return model.Issue{}, refuse(ErrUnavailable, "issues")
+	}
+	if id <= 0 {
 		return model.Issue{}, fmt.Errorf("%w: issue ID is required", ErrInvalidInput)
 	}
 	issue, err := service.issues.Issue(ctx, id)
@@ -2674,13 +2702,19 @@ func (service *API) issueGet(ctx context.Context, _ api.Actor, id int64) (model.
 	return service.withIssueLock(ctx, issues[0])
 }
 
-func (service *API) issueUpdate(ctx context.Context, actor api.Actor, id int64, title, body, upstream *string, expectedBodySHA256 string) (model.Issue, error) {
-	if service.issues == nil || id <= 0 || (title == nil && body == nil && upstream == nil) || (title == nil) != (body == nil) {
-		return model.Issue{}, fmt.Errorf("%w: issue ID and either upstream or both title and body are required", ErrInvalidInput)
+func (service *API) issueUpdate(ctx context.Context, actor api.Actor, id int64, title, body, upstream *string, expectedBodySHA256 string, expectedRevision *int64) (model.Issue, error) {
+	if service.issues == nil {
+		return model.Issue{}, refuse(ErrUnavailable, "issues")
 	}
-	patch := model.IssuePatch{Title: title, Body: body}
+	if id <= 0 || (title == nil && body == nil && upstream == nil) {
+		return model.Issue{}, fmt.Errorf("%w: issue ID and title, body or upstream are required", ErrInvalidInput)
+	}
+	patch := model.IssuePatch{Title: title, Body: body, ExpectedRevision: expectedRevision, ExpectedBodySHA256: expectedBodySHA256}
 	if upstream != nil {
 		name := strings.TrimSpace(*upstream)
+		if actor.Admin && actor.Scoped() && (name == "" || strings.EqualFold(name, "global") || !actor.SeesUpstream(name)) {
+			return model.Issue{}, fmt.Errorf("%w: upstream", store.ErrNotFound)
+		}
 		var id int64
 		if name == "" || strings.EqualFold(name, "global") {
 			if !actor.Admin {
@@ -2695,23 +2729,11 @@ func (service *API) issueUpdate(ctx context.Context, actor api.Actor, id int64, 
 		}
 		patch.ScopeUpstreamID = &id
 	}
-	// When the caller sends expected_body_sha256, verify that the current body
-	// matches before replacing it. This catches silently truncated payloads: if
-	// the model harness cuts the MCP call mid-payload, the hash of the intended
-	// body will not match the existing body, and the server rejects the update.
-	if expectedBodySHA256 != "" {
-		existing, err := service.issues.Issue(ctx, id)
-		if err != nil {
-			return model.Issue{}, err
-		}
-		sum := sha256.Sum256([]byte(existing.Body))
-		actual := hex.EncodeToString(sum[:])
-		if actual != expectedBodySHA256 {
-			return model.Issue{}, fmt.Errorf("%w: expected_body_sha256 mismatch: the existing body has changed or the caller's hash is wrong (got %s)", ErrInvalidInput, actual)
-		}
-	}
 	issue, err := service.issues.UpdateIssue(ctx, actor.Identity, id, patch)
 	if err != nil {
+		if errors.Is(err, store.ErrInvalid) {
+			return model.Issue{}, fmt.Errorf("%w: %w", ErrInvalidInput, err)
+		}
 		return model.Issue{}, err
 	}
 	issues := []model.Issue{issue}
@@ -2722,7 +2744,10 @@ func (service *API) issueUpdate(ctx context.Context, actor api.Actor, id int64, 
 }
 
 func (service *API) issueAppend(ctx context.Context, actor api.Actor, id int64, text string) (model.Issue, error) {
-	if service.issues == nil || id <= 0 {
+	if service.issues == nil {
+		return model.Issue{}, refuse(ErrUnavailable, "issues")
+	}
+	if id <= 0 {
 		return model.Issue{}, fmt.Errorf("%w: issue ID is required", ErrInvalidInput)
 	}
 	if strings.TrimSpace(text) == "" {
@@ -2756,7 +2781,10 @@ func (service *API) issueClose(ctx context.Context, actor api.Actor, id int64) (
 }
 
 func (service *API) issueDelete(ctx context.Context, actor api.Actor, id int64) error {
-	if service.issues == nil || id <= 0 {
+	if service.issues == nil {
+		return refuse(ErrUnavailable, "issues")
+	}
+	if id <= 0 {
 		return fmt.Errorf("%w: issue ID is required", ErrInvalidInput)
 	}
 	return service.issues.DeleteManualIssue(ctx, actor.Identity, id)
@@ -2843,8 +2871,8 @@ func (service *API) labelIssueScopes(ctx context.Context, issues []model.Issue) 
 
 func wireIssue(issue model.Issue) api.IssueResponse {
 	return api.IssueResponse{
-		Lock: issue.Lock,
-		ID:   issue.ID, Kind: string(issue.Kind), Title: issue.Title,
+		Lock: issue.Lock, Revision: issue.Revision,
+		ID: issue.ID, Kind: string(issue.Kind), Title: issue.Title,
 		Body: issue.Body, State: string(issue.State),
 		Upstream: issue.Upstream,
 		RepoID:   issue.RepoID, Branch: issue.Branch,
@@ -2859,6 +2887,7 @@ func wireIssueList(page model.IssuePage) api.IssueListResponse {
 	issues := make([]api.IssueListItem, len(page.Issues))
 	for index, issue := range page.Issues {
 		item := api.IssueListItem{
+			Revision:    issue.Revision,
 			Lock:        issue.Lock,
 			ID:          issue.ID,
 			State:       string(issue.State),
@@ -2894,10 +2923,10 @@ func MutatingTool(name string) bool {
 		return true
 	case "issue_unlock", "issue_close_many":
 		return true
-	case "sync", "promote", "promote_retry", "publish_retry", "run_retry", "run_rerun", "run_cancel", "run_purge", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
+	case "sync", "promote", "promote_retry", "publish_retry", "publication_abandon", "run_retry", "run_rerun", "run_cancel", "run_purge", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
 		"access_allow", "access_revoke",
-		"kubevirt_grant", "kubevirt_revoke",
-		"size_grant", "size_revoke",
+		"kubevirt_grant", "kubevirt_revoke", "workflow_capability_grant", "workflow_capability_revoke",
+		"size_grant", "size_revoke", "resource_grant", "resource_revoke",
 		"admission_release", "queue_priority_config", "run_priority", "priority_grant", "priority_grant_revoke",
 		"repo_remove", "repo_archive", "repo_unarchive",
 		"secretstore_sync_receipt",
@@ -2995,19 +3024,14 @@ func (service *API) canonicalAccessRepo(ctx context.Context, repo string) (strin
 	if service.repositories == nil {
 		return repo, nil
 	}
-	resolved, err := service.repositories.RepositoryByName(ctx, repo)
-	if err != nil {
-		if errors.Is(err, store.ErrAmbiguous) {
-			return "", fmt.Errorf("%w: %w", ErrInvalidInput, err)
-		}
-		// Unregistered or unparseable spellings keep their verbatim form.
-		return repo, nil
+	key, err := canonicalGrantRepoKey(ctx, repo, service.repositories.RepositoryByName, service.secretAccess.QualifiedRepoName)
+	if errors.Is(err, store.ErrAmbiguous) {
+		return "", fmt.Errorf("%w: %w", ErrInvalidInput, err)
 	}
-	qualified, err := service.secretAccess.QualifiedRepoName(ctx, resolved.ID)
 	if err != nil {
-		return repo, nil
+		return "", err
 	}
-	return qualified, nil
+	return key, nil
 }
 
 func (service *API) accessList(ctx context.Context, repo string, includeRevoked bool) (api.AccessListResponse, error) {
@@ -3185,13 +3209,7 @@ func (service *API) accessRevoke(ctx context.Context, actor api.Actor, repo, ste
 				return response, nil
 			}
 		}
-		// Return the last known state with a synthetic revocation indicator.
-		target.RevokedBy = "configmap"
-		now := time.Now().UTC()
-		target.RevokedAt = &now
-		response := wireAccessGrant(*target)
-		response.Warning = revokePolicySyncAdvisory
-		return response, nil
+		return api.AccessGrantResponse{}, refuse(ErrUnavailable, "revocation was requested but its committed state could not be confirmed; inspect access_list")
 	}
 	grant, err := service.secretAccess.Revoke(ctx, repo, step, secret, actor.Identity)
 	if err != nil {
@@ -3224,7 +3242,12 @@ func (service *API) repoRemove(ctx context.Context, actor api.Actor, repo string
 	// directory later. The cache path derives from the store's registered
 	// name, never from raw tool input.
 	if service.removeGitCache != nil {
-		if cacheErr := service.removeGitCache(removed.Name); cacheErr != nil {
+		org := removed.UpstreamOrg
+		if org == "" {
+			org = removed.UpstreamName
+		}
+		input := removed.UpstreamName + "/" + org + "/" + removed.Name
+		if cacheErr := service.removeGitCache(input); cacheErr != nil {
 			response["cache_warning"] = cacheErr.Error()
 		}
 	}
@@ -3353,6 +3376,9 @@ func (service *API) publishRetry(ctx context.Context, actor api.Actor, id string
 		response.Message += "publication delivered; run is " + response.RunStatus + "/" + response.RunPhase
 	case model.PublicationFailed:
 		response.Message += "publication failed; run is " + response.RunStatus + "/" + response.RunPhase
+		response.Error = current.Publication.Error
+	case model.PublicationAbandoned:
+		response.Message += "publication abandoned; run is " + response.RunStatus + "/" + response.RunPhase
 		response.Error = current.Publication.Error
 	}
 	service.signals.NotifyRun(runID)

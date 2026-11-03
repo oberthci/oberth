@@ -21,9 +21,9 @@ func (database schedulerDatabase) EnqueueReceiveEvent(ctx context.Context, event
 	})
 }
 
-func (database schedulerDatabase) MarkRunCreatePending(ctx context.Context, runID string, jobName string) error {
+func (database schedulerDatabase) MarkRunCreatePending(ctx context.Context, runID string, workflowName string, reason ...string) error {
 	return retryDatabaseError(ctx, "MarkRunCreatePending", func(ctx context.Context) error {
-		return database.SchedulerStore.MarkRunCreatePending(ctx, runID, jobName)
+		return database.SchedulerStore.MarkRunCreatePending(ctx, runID, workflowName, reason...)
 	})
 }
 
@@ -31,9 +31,9 @@ func (database schedulerDatabase) Run(ctx context.Context, id string) (model.Run
 	return retryDatabase(ctx, "Run", func(ctx context.Context) (model.Run, error) { return database.SchedulerStore.Run(ctx, id) })
 }
 
-func (database schedulerDatabase) SetRunJobName(ctx context.Context, runID string, jobName string) (model.Run, error) {
-	return retryDatabase(ctx, "SetRunJobName", func(ctx context.Context) (model.Run, error) {
-		return database.SchedulerStore.SetRunJobName(ctx, runID, jobName)
+func (database schedulerDatabase) SetRunWorkflowName(ctx context.Context, runID string, workflowName string) (model.Run, error) {
+	return retryDatabase(ctx, "SetRunWorkflowName", func(ctx context.Context) (model.Run, error) {
+		return database.SchedulerStore.SetRunWorkflowName(ctx, runID, workflowName)
 	})
 }
 
@@ -53,9 +53,9 @@ func (database schedulerDatabase) PendingRunCancellations(ctx context.Context) (
 	})
 }
 
-func (database schedulerDatabase) CompleteRunCancellation(ctx context.Context, runID string, jobName string) error {
+func (database schedulerDatabase) CompleteRunCancellation(ctx context.Context, runID string, workflowName string) error {
 	return retryDatabaseError(ctx, "CompleteRunCancellation", func(ctx context.Context) error {
-		return database.SchedulerStore.CompleteRunCancellation(ctx, runID, jobName)
+		return database.SchedulerStore.CompleteRunCancellation(ctx, runID, workflowName)
 	})
 }
 
@@ -65,9 +65,9 @@ func (database schedulerDatabase) CompleteObservedRunCancellation(ctx context.Co
 	})
 }
 
-func (database schedulerDatabase) RearmRunCancellation(ctx context.Context, runID string, jobName string) error {
+func (database schedulerDatabase) RearmRunCancellation(ctx context.Context, runID string, workflowName string) error {
 	return retryDatabaseError(ctx, "RearmRunCancellation", func(ctx context.Context) error {
-		return database.SchedulerStore.RearmRunCancellation(ctx, runID, jobName)
+		return database.SchedulerStore.RearmRunCancellation(ctx, runID, workflowName)
 	})
 }
 

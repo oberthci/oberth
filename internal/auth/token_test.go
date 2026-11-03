@@ -13,6 +13,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type shortWriter struct{ bytes.Buffer }
@@ -42,13 +43,13 @@ func TestIssueAndAuthenticateTokenWithoutPlaintextPersistence(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "oberth.db")
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
-	database, err := store.Open(ctx, path, store.Options{Now: func() time.Time { return now }})
+	database, err := storetest.Open(ctx, path, store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	issuer := Issuer{Tokens: database, Bind: func(ctx context.Context, pending model.TokenCredential) error {
-		_, err := database.UpsertUplink(ctx, model.UplinkSpec{
+		_, err := storetest.UpsertUplink(database, ctx, model.UplinkSpec{
 			Fingerprint: "SHA256:key", Identity: "agent@host", TokenCredentialID: pending.ID, AuthActor: "bootstrap",
 		})
 		return err
@@ -73,7 +74,7 @@ func TestIssueAndAuthenticateTokenWithoutPlaintextPersistence(t *testing.T) {
 	if credential.ActivatedAt == nil {
 		t.Fatal("issued credential is inactive")
 	}
-	authenticator := Authenticator{Tokens: database}
+	authenticator := Authenticator{Tokens: database, Now: func() time.Time { return now }}
 	authenticated, err := authenticator.Authenticate(ctx, plaintext)
 	if err != nil || authenticated.TokenCredential.ID != credential.ID || authenticated.Identity != "agent@host" || authenticated.Fingerprint != "SHA256:key" {
 		t.Fatalf("authenticate = %#v, %v", authenticated, err)
@@ -99,7 +100,7 @@ func TestIssueLeavesCredentialInactiveWhenOutputOrActivationFails(t *testing.T) 
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	bind := func(database *store.Store, fingerprint string) func(context.Context, model.TokenCredential) error {
 		return func(ctx context.Context, pending model.TokenCredential) error {
-			_, err := database.UpsertUplink(ctx, model.UplinkSpec{
+			_, err := storetest.UpsertUplink(database, ctx, model.UplinkSpec{
 				Fingerprint: fingerprint, Identity: fingerprint + "@host", TokenCredentialID: pending.ID, AuthActor: "bootstrap",
 			})
 			return err
@@ -125,7 +126,7 @@ func TestIssueLeavesCredentialInactiveWhenOutputOrActivationFails(t *testing.T) 
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			database, err := store.Open(ctx, filepath.Join(t.TempDir(), "oberth.db"), store.Options{Now: func() time.Time { return now }})
+			database, err := storetest.Open(ctx, filepath.Join(t.TempDir(), "oberth.db"), store.Options{Now: func() time.Time { return now }})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -138,7 +139,7 @@ func TestIssueLeavesCredentialInactiveWhenOutputOrActivationFails(t *testing.T) 
 				t.Fatalf("Issue error = %v, want io.ErrShortWrite", issueErr)
 			}
 			digest := sha256.Sum256(plaintext)
-			credential, err := database.TokenCredentialByDigest(ctx, digest[:])
+			credential, err := storetest.TokenCredentialByDigest(database, ctx, digest[:])
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -154,7 +155,7 @@ func TestIssueLeavesCredentialInactiveWhenOutputOrActivationFails(t *testing.T) 
 
 func TestUnboundPendingCredentialCannotActivate(t *testing.T) {
 	ctx := context.Background()
-	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "oberth.db"), store.Options{})
+	database, err := storetest.Open(ctx, filepath.Join(t.TempDir(), "oberth.db"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,13 +173,13 @@ func TestUnboundPendingCredentialCannotActivate(t *testing.T) {
 func TestIssuedTokensAreRandom(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
-	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "oberth.db"), store.Options{Now: func() time.Time { return now }})
+	database, err := storetest.Open(ctx, filepath.Join(t.TempDir(), "oberth.db"), store.Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
 	issuer := Issuer{Tokens: database, Bind: func(ctx context.Context, pending model.TokenCredential) error {
-		_, err := database.UpsertUplink(ctx, model.UplinkSpec{
+		_, err := storetest.UpsertUplink(database, ctx, model.UplinkSpec{
 			Fingerprint: "SHA256:" + pending.ID, Identity: pending.Name + "@host", TokenCredentialID: pending.ID, AuthActor: "bootstrap",
 		})
 		return err

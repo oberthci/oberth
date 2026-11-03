@@ -28,8 +28,9 @@ type TokenRepository interface {
 }
 
 type Issuer struct {
-	Tokens TokenRepository
-	Random io.Reader
+	ExpiresAt *time.Time
+	Tokens    TokenRepository
+	Random    io.Reader
 	// Bind durably associates the pending credential with exactly one uplink.
 	// It runs only after the complete plaintext write and before activation.
 	Bind func(context.Context, model.TokenCredential) error
@@ -53,7 +54,7 @@ func (i Issuer) Issue(ctx context.Context, name string, output io.Writer) (model
 	plaintext := "oberth_" + base64.RawURLEncoding.EncodeToString(secret[:])
 	digest := sha256.Sum256([]byte(plaintext))
 	credential, err := i.Tokens.CreateTokenCredential(ctx, model.TokenCredentialSpec{
-		Name: name, Digest: digest[:],
+		Name: name, Digest: digest[:], ExpiresAt: i.ExpiresAt,
 	})
 	if err != nil {
 		return model.TokenCredential{}, fmt.Errorf("auth: store token digest: %w", err)
@@ -102,6 +103,9 @@ func (a Authenticator) Authenticate(ctx context.Context, plaintext string) (mode
 	now := time.Now()
 	if a.Now != nil {
 		now = a.Now()
+	}
+	if credential.ExpiresAt != nil && !now.Before(*credential.ExpiresAt) {
+		return model.AuthenticatedUplink{}, ErrInvalidToken
 	}
 	// Authority and revocation above are always freshly read. Last-used is
 	// best-effort telemetry; neither a writer slot nor a commit belongs on

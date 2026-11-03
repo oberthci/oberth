@@ -3,12 +3,16 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode"
 
 	"github.com/oberthci/oberth/internal/secretstore"
 )
@@ -17,7 +21,8 @@ import (
 // PKI-issued leaf is swapped in place when renewed, so renewal needs neither
 // a restart nor a client change (clients pin the CA).
 type servedCertificate struct {
-	current atomic.Pointer[tls.Certificate]
+	current      atomic.Pointer[tls.Certificate]
+	renewalError atomic.Pointer[string]
 }
 
 func loadServedCertificate(certPath, keyPath string) (*servedCertificate, error) {
@@ -25,9 +30,67 @@ func loadServedCertificate(certPath, keyPath string) (*servedCertificate, error)
 	if err != nil {
 		return nil, err
 	}
+	if pair.Leaf == nil {
+		pair.Leaf, err = x509.ParseCertificate(pair.Certificate[0])
+		if err != nil {
+			return nil, err
+		}
+	}
 	served := &servedCertificate{}
 	served.current.Store(&pair)
 	return served, nil
+}
+
+func (served *servedCertificate) readyAt(now time.Time) error {
+	current := served.current.Load()
+	if current == nil || current.Leaf == nil {
+		return errors.New("server TLS leaf is unavailable")
+	}
+	leaf := current.Leaf
+	if now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) {
+		return fmt.Errorf("server TLS leaf is outside its validity window (expires %s)", leaf.NotAfter.UTC().Format(time.RFC3339))
+	}
+	margin := min(leaf.NotAfter.Sub(leaf.NotBefore)/10, time.Hour)
+	if failure := served.renewalError.Load(); failure != nil && !now.Add(margin).Before(leaf.NotAfter) {
+		return fmt.Errorf("server TLS leaf expires %s and renewal failed: %s", leaf.NotAfter.UTC().Format(time.RFC3339), *failure)
+	}
+	return nil
+}
+
+func (served *servedCertificate) writeMetrics(w io.Writer) {
+	if current := served.current.Load(); current != nil && current.Leaf != nil {
+		_, _ = fmt.Fprintf(w, "# TYPE oberth_server_tls_leaf_not_after_seconds gauge\noberth_server_tls_leaf_not_after_seconds %d\n", current.Leaf.NotAfter.Unix())
+	}
+	failure := served.renewalError.Load()
+	value := 0
+	if failure != nil {
+		value = 1
+	}
+	_, _ = fmt.Fprintf(w, "# TYPE oberth_server_tls_renewal_error gauge\noberth_server_tls_renewal_error %d\n", value)
+	if failure != nil {
+		// A single bounded diagnostic series; no tokens, private key or bodies
+		// from non-PKI endpoints enter the issuer's sanitized errors.
+		detail := strings.Map(func(r rune) rune {
+			if unicode.IsControl(r) {
+				return ' '
+			}
+			return r
+		}, *failure)
+		runes := []rune(detail)
+		if len(runes) > 1024 {
+			detail = string(runes[:1024])
+		}
+		_, _ = fmt.Fprintf(w, "# TYPE oberth_server_tls_last_renewal_error_info gauge\noberth_server_tls_last_renewal_error_info{reason=%q} 1\n", detail)
+	}
+}
+
+// startServerTask ties both cancellation and completion to the server scope,
+// including early returns before its parent context has been canceled.
+func startServerTask(parent context.Context, run func(context.Context)) func() {
+	ctx, cancel := context.WithCancel(parent)
+	done := make(chan struct{})
+	go func() { defer close(done); run(ctx) }()
+	return func() { cancel(); <-done }
 }
 
 func (served *servedCertificate) getCertificate(*tls.ClientHelloInfo) (*tls.Certificate, error) {
@@ -78,13 +141,9 @@ func renewServerLeaf(ctx context.Context, pki serverPKI, store *baoIdentityStore
 			return
 		case <-time.After(wait):
 		}
-		files, issued, err := pki.issueServerLeaf(ctx, store)
-		if err == nil {
-			err = replaceServedLeaf(files, served)
-		}
-		for _, value := range files {
-			clear(value)
-		}
+		issued, err := renewServedLeaf(ctx, served, func(ctx context.Context) (map[string][]byte, secretstore.IssuedServerCertificate, error) {
+			return pki.issueServerLeaf(ctx, store)
+		}, func(files map[string][]byte) error { return replaceServedLeaf(files, served) })
 		if err != nil {
 			logger.Printf("server certificate renewal failed (current leaf expires %s); retrying in 1m: %v", current.NotAfter.UTC().Format(time.RFC3339), err)
 			renewAt = time.Now().Add(time.Minute)
@@ -96,10 +155,35 @@ func renewServerLeaf(ctx context.Context, pki serverPKI, store *baoIdentityStore
 	}
 }
 
+func renewServedLeaf(ctx context.Context, served *servedCertificate, issue func(context.Context) (map[string][]byte, secretstore.IssuedServerCertificate, error), replace func(map[string][]byte) error) (secretstore.IssuedServerCertificate, error) {
+	files, issued, err := issue(ctx)
+	defer func() {
+		for _, value := range files {
+			clear(value)
+		}
+	}()
+	if err == nil {
+		err = replace(files)
+	}
+	if err != nil {
+		detail := err.Error()
+		served.renewalError.Store(&detail)
+	} else {
+		served.renewalError.Store(nil)
+	}
+	return issued, err
+}
+
 func replaceServedLeaf(files map[string][]byte, served *servedCertificate) error {
 	pair, err := tls.X509KeyPair(files["tls.crt"], files["tls.key"])
 	if err != nil {
 		return err
+	}
+	if pair.Leaf == nil {
+		pair.Leaf, err = x509.ParseCertificate(pair.Certificate[0])
+		if err != nil {
+			return err
+		}
 	}
 	if err := materializeIdentity("server", files); err != nil {
 		return err

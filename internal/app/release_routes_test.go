@@ -18,8 +18,9 @@ import (
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestReleaseRoutesUseOneDocumentForEveryRead(t *testing.T) {
@@ -31,8 +32,8 @@ func TestReleaseRoutesUseOneDocumentForEveryRead(t *testing.T) {
 	writePipeline(t, dir, "build.yaml", strings.ReplaceAll(groupedPipeline(""), "oberth.ci/size: M", "oberth.ci/size: S"))
 	writePipeline(t, dir, "release.yaml", strings.ReplaceAll(groupedPipeline(""), "oberth.ci/size: M", "oberth.ci/size: XL"))
 	jobs := &ArgoJobs{config: argojob.Config{ReleaseTagRoutes: argojob.ReleaseTagRoutes{"github/org/repo": {{Pattern: "deploy-*", File: ".oberth/deploy.yaml"}}}}}
-	request := service.JobRequest{SourceDir: dir, UpstreamName: "github", UpstreamOrg: "org", Repository: model.Repository{Name: "repo"}, Run: model.Run{Release: true, RefKind: model.RefTag, Ref: "deploy-1"}}
-	if size, err := jobs.PipelineSize(t.Context(), request); err != nil || size != periapsis.M {
+	request := service.WorkflowRequest{SourceDir: dir, UpstreamName: "github", UpstreamOrg: "org", Repository: model.Repository{Name: "repo"}, Run: model.Run{Release: true, RefKind: model.RefTag, Ref: "deploy-1"}}
+	if size, err := jobs.PipelineSize(t.Context(), request); err != nil || size != pipeline.M {
 		t.Fatalf("routed size=%s err=%v", size, err)
 	}
 	if group, err := jobs.PipelineConcurrencyGroup(t.Context(), request); err != nil || group != "deployment" {
@@ -48,14 +49,14 @@ func TestReleaseRoutesUseOneDocumentForEveryRead(t *testing.T) {
 		t.Fatalf("credentialed=%v err=%v", credentialed, err)
 	}
 	request.Run.Ref = "v1"
-	if size, err := jobs.PipelineSize(t.Context(), request); err != nil || size != periapsis.XL {
+	if size, err := jobs.PipelineSize(t.Context(), request); err != nil || size != pipeline.XL {
 		t.Fatalf("default release changed: %s %v", size, err)
 	}
 	request.Run.Release = false
 	request.Run.Trigger = "branch"
 	request.Run.Ref = "deploy-1"
 	request.Run.RefKind = model.RefBranch
-	if size, err := jobs.PipelineSize(t.Context(), request); err != nil || size != periapsis.S {
+	if size, err := jobs.PipelineSize(t.Context(), request); err != nil || size != pipeline.S {
 		t.Fatalf("branch read release route: %s %v", size, err)
 	}
 	request.Run.Release = true
@@ -84,7 +85,7 @@ func TestReleaseRoutesExecutionAndAuditBindSelectedFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	config.ReleaseTagRoutes["github/org/repo"][0].File = ".oberth/release.yaml" // Startup snapshot must remain pinned.
-	request := service.JobRequest{SourceDir: dir, JobName: "route-run", UpstreamName: "github", UpstreamOrg: "org", Repository: model.Repository{Name: "repo"}, Run: model.Run{ID: "route-run", Actor: "admin", Release: true, RefKind: model.RefTag, Ref: "deploy-1", SHA: strings.Repeat("a", 40)}}
+	request := service.WorkflowRequest{SourceDir: dir, WorkflowName: "route-run", UpstreamName: "github", UpstreamOrg: "org", Repository: model.Repository{Name: "repo"}, Run: model.Run{ID: "route-run", Actor: "admin", Release: true, RefKind: model.RefTag, Ref: "deploy-1", SHA: strings.Repeat("a", 40)}}
 	if err := jobs.CreateRelease(t.Context(), request); err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +129,7 @@ func TestGrantFreeWIFReleaseAndBranchRefusalThroughEngine(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			request := service.JobRequest{SourceDir: dir, JobName: "wif-route", UpstreamName: "github", UpstreamOrg: org, Repository: model.Repository{Name: "repo"}, Run: model.Run{ID: "wif-route", Actor: "admin", Release: true, RefKind: model.RefTag, Ref: "deploy-1", SHA: strings.Repeat("a", 40)}}
+			request := service.WorkflowRequest{SourceDir: dir, WorkflowName: "wif-route", UpstreamName: "github", UpstreamOrg: org, Repository: model.Repository{Name: "repo"}, Run: model.Run{ID: "wif-route", Actor: "admin", Release: true, RefKind: model.RefTag, Ref: "deploy-1", SHA: strings.Repeat("a", 40)}}
 			if err := jobs.CreateRelease(t.Context(), request); err != nil {
 				t.Fatal(err)
 			}
@@ -141,18 +142,18 @@ func TestGrantFreeWIFReleaseAndBranchRefusalThroughEngine(t *testing.T) {
 			}
 			control.request = argojob.Request{}
 			request.Run.Ref = "v1"
-			request.Run.ID, request.JobName = "default-wif", "default-wif"
+			request.Run.ID, request.WorkflowName = "default-wif", "default-wif"
 			if err := jobs.CreateRelease(t.Context(), request); err == nil || control.request.RunID != "" {
 				t.Fatal("default v* release reused the demo route's identity")
 			}
 			control.request = argojob.Request{}
-			request.JobName = "branch-route"
+			request.WorkflowName = "branch-route"
 			request.Run.ID = "branch-route"
 			request.Run.Release = false
 			request.Run.Trigger = "branch"
 			request.Run.Ref = "deploy-1"
 			request.Run.RefKind = model.RefBranch
-			if err := jobs.CreateCI(t.Context(), request); err == nil || control.request.RunID != "" {
+			if err := jobs.CreateWorkflow(t.Context(), request); err == nil || control.request.RunID != "" {
 				t.Fatal("branch reached controller with a release WIF identity")
 			}
 		})
@@ -187,7 +188,7 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 	git(work, "init", "--bare", bare)
 	git(work, "push", bare, "main")
 	git(work, "--git-dir="+bare, "symbolic-ref", "HEAD", "refs/heads/main")
-	cache, err := gitcache.New(gitcache.Config{Root: t.TempDir(),
+	cache, err := gitcache.New(gitcache.Config{AllowLocalUpstreams: true, Root: t.TempDir(),
 		Upstream: func(string) (string, error) { return bare, nil },
 		RepoQualifier: func(string) (gitcache.RepoQualification, error) {
 			return gitcache.RepoQualification{UpstreamName: "github", Org: "org"}, nil
@@ -196,12 +197,12 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "db.sqlite"), store.Options{})
+	db, err := storetest.Open(ctx, filepath.Join(t.TempDir(), "db.sqlite"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	upstream, err := db.CreateUpstream(ctx, model.UpstreamSpec{Name: "github", Kind: "github", BaseURL: "https://github.com/org"})
+	upstream, err := storetest.CreateUpstream(db, ctx, model.UpstreamSpec{Name: "github", Kind: "github", BaseURL: "https://github.com/org"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,8 +239,8 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 	})
 	for _, tc := range []struct {
 		tag, file string
-		size      periapsis.Size
-	}{{"deploy-1", ".oberth/deploy.yaml", periapsis.M}, {"v1", ".oberth/release.yaml", periapsis.XL}} {
+		size      pipeline.Size
+	}{{"deploy-1", ".oberth/deploy.yaml", pipeline.M}, {"v1", ".oberth/release.yaml", pipeline.XL}} {
 		git(work, "tag", "-a", tc.tag, "-m", tc.tag)
 		object := git(work, "rev-parse", "refs/tags/"+tc.tag)
 		commit := git(work, "rev-parse", "refs/tags/"+tc.tag+"^{commit}")
@@ -269,7 +270,7 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 		if event.Update.Ref != "refs/tags/"+tc.tag || event.Update.NewSHA != object || event.ReleaseAdmission.SHA != commit {
 			t.Fatalf("wrong durable receive: %+v", event)
 		}
-		run, err := db.LatestRunForRef(ctx, repo.ID, tc.tag)
+		run, err := storetest.LatestRunForRef(db, ctx, repo.ID, tc.tag)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -280,7 +281,7 @@ func TestReleaseRoutesForPushedTagsThroughReceiveAdapter(t *testing.T) {
 		if run.RefKind != model.RefTag || run.Ref != tc.tag {
 			t.Fatalf("unexpected durable tag: %+v", run)
 		}
-		request := service.JobRequest{Run: run, Repository: repo, UpstreamName: "github", UpstreamOrg: "org", SourceDir: work, JobName: "push-" + tc.tag}
+		request := service.WorkflowRequest{Run: run, Repository: repo, UpstreamName: "github", UpstreamOrg: "org", SourceDir: work, WorkflowName: "push-" + tc.tag}
 		if size, err := jobs.PipelineSize(ctx, request); err != nil || size != tc.size {
 			t.Fatalf("%s size=%s err=%v", tc.tag, size, err)
 		}

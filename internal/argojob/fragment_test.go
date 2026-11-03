@@ -9,7 +9,7 @@ import (
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 const fragmentImage = "golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -45,7 +45,7 @@ metadata:
 
 func fragmentRequest(t *testing.T, source string, fragments map[argoworkflow.FragmentKey]argoworkflow.Fragment) Request {
 	t.Helper()
-	request := testRequest(periapsis.TriggerCI, source)
+	request := testRequest(pipeline.TriggerCI, source)
 	request.Fragments = fragments
 	return request
 }
@@ -131,7 +131,7 @@ func TestBuildChecksAFragmentsSecretPathsAgainstTheApprovalTable(t *testing.T) {
 `)}
 	source := consumingDocument("    oberth.ci/secret-paths: oberth/data/release/approved\n", key.String())
 	request := fragmentRequest(t, source, map[argoworkflow.FragmentKey]argoworkflow.Fragment{key: fragment})
-	request.Trigger = periapsis.TriggerRelease
+	request.Trigger = pipeline.TriggerRelease
 	request.ApprovedSecrets = map[string]bool{"oberth/data/release/approved": true}
 
 	_, err := Build(testConfig(), request)
@@ -159,7 +159,7 @@ func TestBuildAcceptsAFragmentUsingADeclaredAndApprovedPath(t *testing.T) {
 `)}
 	source := consumingDocument("    oberth.ci/secret-paths: oberth/data/release/approved\n", key.String())
 	request := fragmentRequest(t, source, map[argoworkflow.FragmentKey]argoworkflow.Fragment{key: fragment})
-	request.Trigger = periapsis.TriggerRelease
+	request.Trigger = pipeline.TriggerRelease
 	request.ApprovedSecrets = map[string]bool{"oberth/data/release/approved": true}
 
 	if _, err := Build(testConfig(), request); err != nil {
@@ -202,7 +202,7 @@ func TestBuildRefusesAReferenceMissingFromTheFragmentMap(t *testing.T) {
 }
 
 func TestBuildRefusesFragmentReferencesWithoutAPreLoadedMap(t *testing.T) {
-	request := testRequest(periapsis.TriggerCI, consumingDocument("    oberth.ci/size: S\n", "transferz/x@v1"))
+	request := testRequest(pipeline.TriggerCI, consumingDocument("    oberth.ci/size: S\n", "transferz/x@v1"))
 	request.Fragments = nil
 
 	if _, err := Build(testConfig(), request); err == nil {
@@ -236,7 +236,7 @@ func TestBuildIsIdenticalWhenCalledTwice(t *testing.T) {
 }
 
 func TestBuildWithoutFragmentsIsUnaffected(t *testing.T) {
-	request := testRequest(periapsis.TriggerCI, greedyDocument)
+	request := testRequest(pipeline.TriggerCI, greedyDocument)
 	before, err := Build(testConfig(), request)
 	if err != nil {
 		t.Fatalf("build: %v", err)
@@ -334,7 +334,7 @@ func TestAMovedTagChangesTheRecordedSHA(t *testing.T) {
 }
 
 func TestBuildRecordsNothingWhenNoFragmentsAreUsed(t *testing.T) {
-	workflow, err := Build(testConfig(), testRequest(periapsis.TriggerCI, greedyDocument))
+	workflow, err := Build(testConfig(), testRequest(pipeline.TriggerCI, greedyDocument))
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}

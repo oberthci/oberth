@@ -18,6 +18,8 @@ import (
 	"github.com/oberthci/oberth/internal/auditanchor"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
+	"github.com/oberthci/oberth/internal/testdb"
 )
 
 type staticStartupContinuity struct {
@@ -574,7 +576,8 @@ func seedPreviousV2Database(t *testing.T, path string) (model.AuditHead, string)
 	if err != nil {
 		t.Fatal(err)
 	}
-	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{
+	storetest.Track(database, path, store.Options{})
+	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{
 		Name: "codeberg", Kind: "forgejo", BaseURL: "https://codeberg.org",
 	})
 	if err != nil {
@@ -588,7 +591,7 @@ func seedPreviousV2Database(t *testing.T, path string) (model.AuditHead, string)
 		_ = database.Close()
 		t.Fatal(err)
 	}
-	run, err := database.EnqueueRun(ctx, model.RunSpec{
+	run, err := storetest.EnqueueRun(database, ctx, model.RunSpec{
 		RepoID: repository.ID, RefKind: model.RefBranch, Ref: "feature/v2",
 		SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "SHA256:test", Trigger: "push",
 	})
@@ -597,7 +600,7 @@ func seedPreviousV2Database(t *testing.T, path string) (model.AuditHead, string)
 		t.Fatal(err)
 	}
 	if _, err := database.PutStepResult(ctx, model.StepResult{
-		RunID: run.ID, Burn: "test", Step: "unit", Ordinal: 0,
+		RunID: run.ID, Stage: "test", Step: "unit", Ordinal: 0,
 		Status: model.StepPassed, ExitCode: 0, LogStart: 10, LogEnd: 20,
 		DeclaredSize: "XL", MaxRSSBytes: ptr.To(int64(8192 << 10)), UserCPU: ptr.To(100 * time.Millisecond), SystemCPU: ptr.To(25 * time.Millisecond),
 	}); err != nil {
@@ -626,10 +629,12 @@ func seedPreviousV2Database(t *testing.T, path string) (model.AuditHead, string)
 	if _, err := raw.Exec(`
 PRAGMA foreign_keys = OFF;
 BEGIN IMMEDIATE;
+` + testdb.PostV38Downgrade + `
 DROP TABLE IF EXISTS trusted_applies;
 DROP TABLE IF EXISTS trusted_plans;
 DROP TABLE IF EXISTS secret_access;
 DROP TABLE IF EXISTS kubevirt_grants;
+DROP TABLE IF EXISTS resource_ceilings;
 DROP TABLE IF EXISTS size_grants;
 DROP TABLE IF EXISTS run_priority_overrides;
 DROP TABLE IF EXISTS queue_priority_patterns; DROP TABLE IF EXISTS run_priority_requests; DROP TABLE IF EXISTS priority_grants;
@@ -649,6 +654,11 @@ DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_t
 ALTER TABLE runs DROP COLUMN admission_sequence;
 ALTER TABLE runs DROP COLUMN credentialed;
 ALTER TABLE runs DROP COLUMN concurrency_group;
+-- Remove restart recovery additions when reconstructing the predecessor.
+DROP TRIGGER IF EXISTS publications_tag_tuple_insert;
+DROP INDEX IF EXISTS publications_tag_tuple_idx;
+DROP TABLE IF EXISTS restart_step_timings;
+DROP TABLE IF EXISTS restart_workflow_timings;
 DROP TRIGGER publications_guard_update;
 ALTER TABLE publications DROP COLUMN attempts;
 ALTER TABLE publications DROP COLUMN retry_after;
@@ -735,6 +745,7 @@ DROP TABLE vm_suite_executions;
 DROP TABLE vm_capacity_slots;
 DROP TABLE vm_executions;
 DROP TABLE IF EXISTS kubevirt_grants;
+DROP TABLE IF EXISTS resource_ceilings;
 DROP TABLE IF EXISTS size_grants;
 DROP TABLE IF EXISTS run_priority_overrides;
 DROP TABLE IF EXISTS queue_priority_patterns; DROP TABLE IF EXISTS run_priority_requests; DROP TABLE IF EXISTS priority_grants;
@@ -793,6 +804,7 @@ func seedLegacyV1Database(t *testing.T, path string, actionCount int) {
 	if _, err := raw.Exec(`
 PRAGMA foreign_keys = OFF;
 BEGIN IMMEDIATE;
+` + testdb.PostV38Downgrade + `
 DROP INDEX runs_latest_ref_idx;
 DROP INDEX runs_passed_tested_sha_idx;
 CREATE TABLE step_results_v1 (
@@ -847,6 +859,7 @@ DROP TABLE IF EXISTS trusted_applies;
 DROP TABLE IF EXISTS trusted_plans;
 DROP TABLE IF EXISTS secret_access;
 DROP TABLE IF EXISTS kubevirt_grants;
+DROP TABLE IF EXISTS resource_ceilings;
 DROP TABLE IF EXISTS size_grants;
 DROP TABLE IF EXISTS run_priority_overrides;
 DROP TABLE IF EXISTS queue_priority_patterns; DROP TABLE IF EXISTS run_priority_requests; DROP TABLE IF EXISTS priority_grants;
@@ -876,6 +889,11 @@ DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_t
 ALTER TABLE runs DROP COLUMN admission_sequence;
 ALTER TABLE runs DROP COLUMN credentialed;
 ALTER TABLE runs DROP COLUMN concurrency_group;
+-- Remove restart recovery additions when reconstructing the predecessor.
+DROP TRIGGER IF EXISTS publications_tag_tuple_insert;
+DROP INDEX IF EXISTS publications_tag_tuple_idx;
+DROP TABLE IF EXISTS restart_step_timings;
+DROP TABLE IF EXISTS restart_workflow_timings;
 DROP TRIGGER publications_guard_update;
 ALTER TABLE publications DROP COLUMN attempts;
 ALTER TABLE publications DROP COLUMN retry_after;
@@ -962,6 +980,7 @@ DROP TABLE vm_suite_executions;
 DROP TABLE vm_capacity_slots;
 DROP TABLE vm_executions;
 DROP TABLE IF EXISTS kubevirt_grants;
+DROP TABLE IF EXISTS resource_ceilings;
 DROP TABLE IF EXISTS size_grants;
 DROP TABLE IF EXISTS run_priority_overrides;
 DROP TABLE IF EXISTS queue_priority_patterns; DROP TABLE IF EXISTS run_priority_requests; DROP TABLE IF EXISTS priority_grants;

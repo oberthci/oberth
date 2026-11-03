@@ -131,7 +131,7 @@ func TestIssueLifecycleMutationsRequireAuditGate(t *testing.T) {
 
 func TestIssueLifecycleLeavesProjectedCIIssueUnlocked(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{
-		Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit", Error: "red",
+		Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Error: "red",
 		Steps: []model.StepResult{stepResult(model.StepFailed)},
 	})
 	ctx := context.Background()

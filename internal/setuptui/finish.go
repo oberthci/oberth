@@ -2,6 +2,7 @@ package setuptui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -11,6 +12,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/rest"
 
 	tea "charm.land/bubbletea/v2"
 	"golang.org/x/crypto/ssh"
@@ -49,9 +53,7 @@ func podExec(st *WizardState, command ...string) []string {
 func kubectlLine(args []string) string {
 	parts := []string{"kubectl"}
 	for _, a := range args {
-		if strings.ContainsAny(a, " '\"$*?{}()|&;<>") {
-			a = shellQuote(a)
-		}
+		a = shellArg(a)
 		parts = append(parts, a)
 	}
 	return strings.Join(parts, " ")
@@ -86,6 +88,7 @@ type fileCheck struct {
 
 // verifyResult is what one Verify run found.
 type verifyResult struct {
+	endpoint    installer.Deps
 	at          time.Time
 	upstream    bool
 	upstreams   []upstreamCheck
@@ -280,6 +283,15 @@ func verifyInstall(ctx context.Context, st WizardState, reRegister bool) verifyR
 			}
 		}
 	}
+	endpoint := wizardClientEndpoint(&st, nil)
+	serviceArgs := append(kubectlTarget(&st), "get", "service", "oberth", "-n", st.namespace(), "-o", "json")
+	if raw, readErr := runKubectl(ctx, serviceArgs...); readErr == nil {
+		var service corev1.Service
+		if json.Unmarshal(raw, &service) == nil && service.Name != "" {
+			endpoint = wizardClientEndpoint(&st, &service)
+		}
+	}
+	res.endpoint = endpoint
 	checkClientSide(ctx, &st, &res)
 	args := append(kubectlTarget(&st), "get", "deployment", "oberth", "-n", st.namespace(),
 		"-o", `jsonpath={.status.readyReplicas}/{.spec.replicas} {.spec.template.spec.containers[0].image}`)
@@ -309,10 +321,19 @@ func verifyInstall(ctx context.Context, st WizardState, reRegister bool) verifyR
 // HTTPS answering on the advertised address, and, when the client files read
 // the owner-only token file, a token in it (#058).
 func checkClientSide(ctx context.Context, st *WizardState, res *verifyResult) {
-	host := clientHost(st)
+	endpoint := res.endpoint
+	if endpoint.ClientHost == "" {
+		endpoint = wizardClientEndpoint(st, nil)
+	}
+	if endpoint.ClientServiceType == "ClusterIP" {
+		res.portsChecked = false
+		res.portsText = "ClusterIP: use internal networking or port-forward before workstation verification"
+		return
+	}
+	host := endpoint.ClientHost
 	var failed []string
 	var unresolved *net.DNSError
-	for _, port := range []string{"30022", "30443"} {
+	for _, port := range []string{endpoint.ClientSSHPort, endpoint.ClientHTTPSPort} {
 		err := dialPort(ctx, net.JoinHostPort(host, port))
 		var dnsErr *net.DNSError
 		switch {
@@ -327,7 +348,7 @@ func checkClientSide(ctx context.Context, st *WizardState, res *verifyResult) {
 	res.portsOK = unresolved == nil && len(failed) == 0
 	switch {
 	case res.portsOK:
-		res.portsText = "SSH 30022 and HTTPS 30443 answer on " + host
+		res.portsText = "SSH " + endpoint.ClientSSHPort + " and HTTPS " + endpoint.ClientHTTPSPort + " answer on " + host
 	case unresolved != nil:
 		// The name never reached a port, so "not reachable" would mislead.
 		res.portsText = "cannot resolve " + host
@@ -536,7 +557,11 @@ func headline(st *WizardState, v *verifyResult) string {
 // plain text. Commands are kept whole; the screen wraps them.
 func finishLines(w *wizard, v *verifyResult) []string {
 	st := &w.state
-	host := clientHost(st)
+	endpoint := wizardClientEndpoint(st, nil)
+	if v != nil && v.endpoint.ClientHost != "" {
+		endpoint = v.endpoint
+	}
+	host := endpoint.ClientHost
 	var lines []string
 	add := func(s ...string) { lines = append(lines, s...) }
 
@@ -627,7 +652,8 @@ func finishLines(w *wizard, v *verifyResult) []string {
 		}
 		add("")
 		add(installer.NextSteps(installer.NextStepsInput{
-			Host:      host,
+			Host:    host,
+			SSHPort: endpoint.ClientSSHPort, HTTPSPort: endpoint.ClientHTTPSPort, ServiceType: endpoint.ClientServiceType,
 			Context:   st.contextForCommands(),
 			Namespace: st.namespace(),
 			Upstreams: nextStepsUpstreams(st, v),
@@ -640,9 +666,9 @@ func finishLines(w *wizard, v *verifyResult) []string {
 		add("", "Full install log (secrets masked): "+displayHome(w.install.logPath))
 	}
 	add("", "Verify the server out of band on every workstation:",
-		"   TLS 30443:  "+serverCAFingerprintCommand(st),
-		"   SSH 30022:  ssh-keyscan -p 30022 "+host,
-		"", "Dashboard https://"+installer.URLHost(host)+":30443/runs · docs https://oberth.ci/docs")
+		"   TLS "+endpoint.ClientHTTPSPort+":  "+serverCAFingerprintCommand(st),
+		"   SSH "+endpoint.ClientSSHPort+":  ssh-keyscan -p "+endpoint.ClientSSHPort+" "+shellArg(host),
+		"", "Dashboard https://"+installer.URLHost(host)+":"+endpoint.ClientHTTPSPort+"/runs · docs https://oberth.ci/docs")
 	return lines
 }
 
@@ -798,7 +824,11 @@ func reportText(w *wizard) string {
 		p("  %d. %s: %s", int(i)+1, i.name(), valueOr(stepSummary(st, i), "not answered"))
 	}
 	p("  context: %s", valueOr(st.contextForCommands(), "(current)"))
-	p("  endpoints: https://%s:30443 · ssh://git@%s:30022", installer.URLHost(clientHost(st)), installer.URLHost(clientHost(st)))
+	endpoint := wizardClientEndpoint(st, nil)
+	if w.lastVerify != nil && w.lastVerify.endpoint.ClientHost != "" {
+		endpoint = w.lastVerify.endpoint
+	}
+	p("  endpoints: https://%s:%s · ssh://git@%s:%s", installer.URLHost(endpoint.ClientHost), endpoint.ClientHTTPSPort, installer.URLHost(endpoint.ClientHost), endpoint.ClientSSHPort)
 	p("")
 	p("Install phases (attempt %d)", w.install.attempts)
 	for _, step := range w.install.steps {
@@ -833,4 +863,12 @@ func valueOr(v, fallback string) string {
 		return fallback
 	}
 	return v
+}
+
+func wizardClientEndpoint(st *WizardState, service *corev1.Service) installer.Deps {
+	deps := installer.Deps{ClientHost: st.Config.ClientHost, ClientServiceType: st.Config.ServiceType, RestConfig: &rest.Config{Host: st.ClusterInfo.server}}
+	if st.Config.CreateKind {
+		deps.KindClusterName = "wizard"
+	}
+	return installer.WithServiceEndpoint(service, st.namespace(), deps)
 }

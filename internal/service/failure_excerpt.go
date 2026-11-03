@@ -32,12 +32,12 @@ const (
 // error and the full-log pointer rather than another step's output. Only a
 // run without any recorded failed step (a Job-level failure) falls back to the
 // combined run-log tail.
-func (scheduler *Scheduler) failureExcerpt(runID, burn, step string) ([]byte, error) {
-	burn, step = strings.TrimSpace(burn), strings.TrimSpace(step)
-	if burn == "" {
+func (scheduler *Scheduler) failureExcerpt(runID, stage, step string) ([]byte, error) {
+	stage, step = strings.TrimSpace(stage), strings.TrimSpace(step)
+	if stage == "" {
 		return scheduler.logs.Tail(runID, maximumCIIssueTailBytes)
 	}
-	return stepFailureExcerpt(scheduler.logs, runID, burn, step, maximumCIIssueTailBytes), nil
+	return stepFailureExcerpt(scheduler.logs, runID, stage, step, maximumCIIssueTailBytes), nil
 }
 
 type excerptLine struct {
@@ -50,11 +50,11 @@ type excerptLine struct {
 // tail window (at most a quarter of the budget), a blank separator line, then
 // the slice's tail. Every non-empty line is a line of that slice, carrying its
 // own "[burn/step] " prefix. A missing or unreadable slice yields nil.
-func stepFailureExcerpt(logs LogStore, runID, burn, step string, budget int64) []byte {
+func stepFailureExcerpt(logs LogStore, runID, stage, step string, budget int64) []byte {
 	if budget <= 0 {
 		return nil
 	}
-	tailBody, tailMeta, err := logs.ReadFiltered(runID, burn, step, runlog.Filter{Tail: true, Limit: excerptTailLines})
+	tailBody, tailMeta, err := logs.ReadFiltered(runID, stage, step, runlog.Filter{Tail: true, Limit: excerptTailLines})
 	if err != nil {
 		return nil
 	}
@@ -63,7 +63,7 @@ func stepFailureExcerpt(logs LogStore, runID, burn, step string, budget int64) [
 		return nil
 	}
 	var diagnostics []excerptLine
-	if body, meta, diagnosticErr := logs.ReadFiltered(runID, burn, step, runlog.Filter{
+	if body, meta, diagnosticErr := logs.ReadFiltered(runID, stage, step, runlog.Filter{
 		Pattern: failureDiagnosticPattern, Tail: true, Limit: excerptDiagnosticLines,
 	}); diagnosticErr == nil {
 		diagnostics = numberedExcerptLines(body, excerptNumbers(meta))

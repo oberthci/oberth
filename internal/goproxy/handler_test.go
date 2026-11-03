@@ -39,8 +39,8 @@ func (m *mockCache) ListTags(_ context.Context, _ string) ([]string, error) {
 	return m.tags, nil
 }
 
-func (m *mockCache) TagTime(_ context.Context, _, tag string) (time.Time, error) {
-	return time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC), nil
+func (m *mockCache) ModuleTagSnapshot(_ context.Context, _, tag string) (string, time.Time, error) {
+	return tag, time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC), nil
 }
 
 func (m *mockCache) ShowFile(_ context.Context, _, ref, filePath string) ([]byte, error) {
@@ -100,18 +100,13 @@ func (m *mockCache) ArchiveTar(_ context.Context, _, ref string, w io.Writer) er
 	return err
 }
 
-func testHandler() *Handler {
-	cache := &mockCache{
-		tags: []string{"v0.1.0", "v0.2.0", "v0.3.12", "not-semver"},
-		files: map[string][]byte{
-			"v0.3.12:go.mod": []byte("module go.example.test/wire\n\ngo 1.22\n"),
-		},
-	}
-	return NewHandler(cache, "go.example.test", map[string]string{"wire": "sample-wire"})
+func testHandler(t *testing.T) *Handler {
+	cache := mockModuleCache([]string{"v0.1.0", "v0.2.0", "v0.3.12", "not-semver"}, "go.example.test/wire")
+	return cachedTestHandler(t, cache, "go.example.test", map[string]string{"wire": "sample-wire"})
 }
 
 func TestList(t *testing.T) {
-	handler := testHandler()
+	handler := testHandler(t)
 	req := httptest.NewRequest("GET", "/go.example.test/wire/@v/list", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -129,7 +124,7 @@ func TestList(t *testing.T) {
 }
 
 func TestInfo(t *testing.T) {
-	handler := testHandler()
+	handler := testHandler(t)
 	req := httptest.NewRequest("GET", "/go.example.test/wire/@v/v0.3.12.info", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -147,7 +142,7 @@ func TestInfo(t *testing.T) {
 }
 
 func TestMod(t *testing.T) {
-	handler := testHandler()
+	handler := testHandler(t)
 	req := httptest.NewRequest("GET", "/go.example.test/wire/@v/v0.3.12.mod", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -174,7 +169,7 @@ func TestModVerbatimBytes(t *testing.T) {
 			"v0.3.12:go.mod": gomod,
 		},
 	}
-	handler := NewHandler(cache, "go.example.test", map[string]string{"wire": "sample-wire"})
+	handler := cachedTestHandler(t, cache, "go.example.test", map[string]string{"wire": "sample-wire"})
 
 	req := httptest.NewRequest("GET", "/go.example.test/wire/@v/v0.3.12.mod", nil)
 	rec := httptest.NewRecorder()
@@ -201,7 +196,7 @@ func TestModVerbatimNoTrailingNewline(t *testing.T) {
 			"v0.3.12:go.mod": gomod,
 		},
 	}
-	handler := NewHandler(cache, "go.example.test", map[string]string{"wire": "sample-wire"})
+	handler := cachedTestHandler(t, cache, "go.example.test", map[string]string{"wire": "sample-wire"})
 
 	req := httptest.NewRequest("GET", "/go.example.test/wire/@v/v0.3.12.mod", nil)
 	rec := httptest.NewRecorder()
@@ -230,7 +225,7 @@ func TestModGoSumHash(t *testing.T) {
 			"v0.3.12:go.mod": gomod,
 		},
 	}
-	handler := NewHandler(cache, "go.example.test", map[string]string{"wire": "sample-wire"})
+	handler := cachedTestHandler(t, cache, "go.example.test", map[string]string{"wire": "sample-wire"})
 
 	req := httptest.NewRequest("GET", "/go.example.test/wire/@v/v0.3.12.mod", nil)
 	rec := httptest.NewRecorder()
@@ -273,7 +268,7 @@ func TestModGoSumHash(t *testing.T) {
 }
 
 func TestZip(t *testing.T) {
-	handler := testHandler()
+	handler := testHandler(t)
 	req := httptest.NewRequest("GET", "/go.example.test/wire/@v/v0.3.12.zip", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -304,7 +299,7 @@ func TestZip(t *testing.T) {
 }
 
 func TestRoutingStatus(t *testing.T) {
-	handler := testHandler()
+	handler := testHandler(t)
 	for _, tt := range []struct {
 		path   string
 		status int
@@ -325,7 +320,7 @@ func TestRoutingStatus(t *testing.T) {
 }
 
 func TestMethodNotAllowed(t *testing.T) {
-	handler := testHandler()
+	handler := testHandler(t)
 	req := httptest.NewRequest("POST", "/go.example.test/wire/@v/list", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -368,7 +363,7 @@ func TestZipCanonicalHash(t *testing.T) {
 			{name: ".git/config", content: []byte("[core]\n"), typeflag: tar.TypeReg},
 		},
 	}
-	handler := NewHandler(cache, "go.example.test", map[string]string{"testmod": "test-repo"})
+	handler := cachedTestHandler(t, cache, "go.example.test", map[string]string{"testmod": "test-repo"})
 
 	req := httptest.NewRequest("GET", "/go.example.test/testmod/@v/v1.0.0.zip", nil)
 	rec := httptest.NewRecorder()
@@ -467,7 +462,7 @@ func TestZipCanonicalHash(t *testing.T) {
 // TestZipDeterministic asserts that two requests for the same module version
 // produce byte-identical zip output.
 func TestZipDeterministic(t *testing.T) {
-	handler := testHandler()
+	handler := testHandler(t)
 	serve := func() []byte {
 		req := httptest.NewRequest("GET", "/go.example.test/wire/@v/v0.3.12.zip", nil)
 		rec := httptest.NewRecorder()

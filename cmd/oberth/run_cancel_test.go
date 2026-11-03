@@ -17,6 +17,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
@@ -113,13 +114,13 @@ func TestRunsCancelCLICancelsOnlyTheRefsActiveRuns(t *testing.T) {
 	t.Setenv("OBERTH_MCP_URL", server.URL)
 
 	var output strings.Builder
-	err := runRuns(context.Background(), []string{"cancel", "--repo", "beacon", "--ref", "feature-x", "--reason", "abandoned"}, &output)
+	err := runRuns(context.Background(), []string{"cancel", "--repo", "example-service", "--ref", "feature-x", "--reason", "abandoned"}, &output)
 	if !errors.Is(err, errMCPToolError) || !strings.Contains(err.Error(), "run cccc") {
 		t.Fatalf("runs cancel error = %v", err)
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if listed["repo"] != "beacon" || listed["ref"] != "feature-x" {
+	if listed["repo"] != "example-service" || listed["ref"] != "feature-x" {
 		t.Fatalf("run_list arguments = %v", listed)
 	}
 	if strings.Join(cancelled, ",") != "aaaa,bbbb,cccc" {
@@ -130,7 +131,7 @@ func TestRunsCancelCLICancelsOnlyTheRefsActiveRuns(t *testing.T) {
 			t.Fatalf("output %q lacks %q", output.String(), want)
 		}
 	}
-	if err := runRuns(context.Background(), []string{"cancel", "--repo", "beacon"}, &output); !errors.Is(err, errUsage) {
+	if err := runRuns(context.Background(), []string{"cancel", "--repo", "example-service"}, &output); !errors.Is(err, errUsage) {
 		t.Fatalf("runs cancel without --ref = %v", err)
 	}
 }
@@ -141,11 +142,11 @@ func TestRunsCancelCLICancelsOnlyTheRefsActiveRuns(t *testing.T) {
 func TestRunCancelInPodRecordsTheCancelAndWakesTheDaemon(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := store.Open(ctx, path, store.Options{})
+	database, err := storetest.Open(ctx, path, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{Name: "github", Kind: "ssh", BaseURL: "ssh://github.com/acme"})
+	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{Name: "github", Kind: "ssh", BaseURL: "ssh://github.com/acme"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +155,7 @@ func TestRunCancelInPodRecordsTheCancelAndWakesTheDaemon(t *testing.T) {
 		t.Fatal(err)
 	}
 	enqueue := func(ref string, kind model.RefKind, trigger, digit string, release bool) model.Run {
-		enqueued, err := database.EnqueueRun(ctx, model.RunSpec{RepoID: repository.ID, RefKind: kind, Ref: ref,
+		enqueued, err := storetest.EnqueueRun(database, ctx, model.RunSpec{RepoID: repository.ID, RefKind: kind, Ref: ref,
 			SHA: strings.Repeat(digit, 40), Actor: "pusher@host", Trigger: trigger, Release: release})
 		if err != nil {
 			t.Fatal(err)
@@ -165,12 +166,12 @@ func TestRunCancelInPodRecordsTheCancelAndWakesTheDaemon(t *testing.T) {
 	if _, err := database.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.SetRunJobName(ctx, claimed.ID, "oberth-oberth-"+claimed.ID[:8]); err != nil {
+	if _, err := database.SetRunWorkflowName(ctx, claimed.ID, "oberth-oberth-"+claimed.ID[:8]); err != nil {
 		t.Fatal(err)
 	}
 	release := enqueue("v1.2.3", model.RefTag, "tag", "b", true)
 
-	socket := filepath.Join("/tmp", "oberth-admin-"+filepath.Base(t.TempDir())+".sock")
+	socket := privateAdminSocket(t)
 	woken := make(chan struct{}, 4)
 	server := newAdminGateServer(nil, path, func() { woken <- struct{}{} })
 	listener, err := listenAdminSocket(ctx, socket)
@@ -204,7 +205,7 @@ func TestRunCancelInPodRecordsTheCancelAndWakesTheDaemon(t *testing.T) {
 		t.Fatal("the daemon was not asked to run its cancellation pass")
 	}
 	pending, err := database.PendingRunCancellations(ctx)
-	if err != nil || len(pending) != 1 || pending[0].RunID != claimed.ID || pending[0].JobName == "" {
+	if err != nil || len(pending) != 1 || pending[0].RunID != claimed.ID || pending[0].WorkflowName == "" {
 		t.Fatalf("in-pod cancel obligation = %#v, %v", pending, err)
 	}
 	audit, err := database.LatestAuditActionByType(ctx, "run.cancel", "run")

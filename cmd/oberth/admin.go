@@ -19,10 +19,6 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
-	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
@@ -52,11 +48,11 @@ func defaultPodNamespace() string {
 }
 
 type upstreamDependencies struct {
-	input            io.Reader
-	kubernetesClient func() (kubernetes.Interface, error)
-	scanHostKeys     app.SSHHostKeyScanner
-	probe            app.SSHAuthProbe
-	mutationGate     func(context.Context, string, string) error
+	input         io.Reader
+	identityStore func(string) (app.BootstrapIdentityStore, error)
+	scanHostKeys  app.SSHHostKeyScanner
+	probe         app.SSHAuthProbe
+	mutationGate  func(context.Context, string, string) error
 	// probeInterval and probeWait override the registration-wait timings for
 	// tests; zero values select the production defaults (10s / 10m).
 	probeInterval time.Duration
@@ -65,7 +61,7 @@ type upstreamDependencies struct {
 
 // hostUpstreamDeps holds injectable dependencies for the host-side
 // upstream add flow. The host never dials the pod-private mutation gate,
-// database, or Kubernetes API for Secret mutations. A provided key is
+// database, or Kubernetes API for identity mutations. A provided key is
 // streamed over kubectl exec stdin to the in-pod provide-key handler,
 // which gates, applies, and verifies.
 type hostUpstreamDeps struct {
@@ -84,6 +80,8 @@ type hostUpstreamDeps struct {
 }
 
 type uplinkDependencies struct {
+	tokenExpiry  *time.Time // Rotation preserves an existing absolute expiry.
+	tokenPolicy  func(context.Context, string) (model.UplinkTokenPolicy, error)
 	mutationGate func(context.Context, string, string) error
 }
 
@@ -104,13 +102,11 @@ func runUpstream(ctx context.Context, arguments []string, output io.Writer) erro
 	if inClusterErr == nil {
 		inCluster.Timeout = 10 * time.Second
 		return runUpstreamWithDependencies(ctx, arguments, output, upstreamDependencies{
-			input: os.Stdin,
-			kubernetesClient: func() (kubernetes.Interface, error) {
-				return kubernetes.NewForConfig(inCluster)
-			},
-			scanHostKeys: app.ScanSSHHostKeys,
-			probe:        app.ProbeSSHAuthentication,
-			mutationGate: requestLiveAdminMutationGate,
+			input:         os.Stdin,
+			identityStore: func(namespace string) (app.BootstrapIdentityStore, error) { return newBaoIdentityStore(namespace) },
+			scanHostKeys:  app.ScanSSHHostKeys,
+			probe:         app.ProbeSSHAuthentication,
+			mutationGate:  requestLiveAdminMutationGate,
 		})
 	}
 	// Host mode: provide-key is only available inside the Oberth pod.
@@ -120,7 +116,7 @@ func runUpstream(ctx context.Context, arguments []string, output io.Writer) erro
 	// Host mode for "add": defer kubeconfig loading to first use so that
 	// --help does not fail on a host without a kubeconfig. The host never
 	// dials the pod-private mutation gate, database, or Kubernetes API for
-	// Secret mutations — it execs into the pod for all gated operations.
+	// identity mutations — it execs into the pod for all gated operations.
 	return runUpstreamAddFromHost(ctx, arguments[1:], output, hostUpstreamDeps{
 		input: os.Stdin,
 		loadTarget: func() (string, string, error) {
@@ -151,14 +147,14 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 	flags := flag.NewFlagSet("upstream add", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path (in-pod; requires the live admin daemon)")
-	upstreamKey := flags.String("upstream-key", "/etc/oberth/upstream-key/id_ed25519", "upstream SSH private key")
-	knownHosts := flags.String("known-hosts", "/etc/oberth/known-hosts/known_hosts", "upstream known_hosts")
+	upstreamKey := flags.String("upstream-key", identityRoot+"/upstream/id_ed25519", "upstream SSH private key")
+	knownHosts := flags.String("known-hosts", identityRoot+"/hosts/known_hosts", "upstream known_hosts")
 	namespace := flags.String("namespace", defaultPodNamespace(), "Kubernetes namespace")
-	upstreamKeySecret := flags.String("upstream-key-secret", "oberth-upstream-key", "Secret holding the upstream SSH private keys")
-	knownHostsSecret := flags.String("known-hosts-secret", "oberth-known-hosts", "upstream known_hosts Secret")
+	upstreamKeySecret := flags.String("upstream-key-secret", "oberth-upstream-key", "OpenBao identity bundle holding upstream SSH keys")
+	knownHostsSecret := flags.String("known-hosts-secret", "oberth-known-hosts", "OpenBao known_hosts identity bundle")
 	noWait := flags.Bool("no-wait", false, "print the deploy key and exit immediately instead of waiting for its registration")
 	autoYes := flags.Bool("yes", false, "auto-accept key generation and host-key prompts")
-	dedicatedKey := flags.Bool("dedicated-key", false, "provision a dedicated SSH identity for this upstream instead of the shared key (stored as an additional data key of the upstream-key Secret)")
+	dedicatedKey := flags.Bool("dedicated-key", false, "provision a dedicated SSH identity for this upstream instead of the shared key (stored in the OpenBao upstream-key bundle)")
 	expectedHostFingerprint := flags.String("expected-host-fingerprint", "", "expected SSH host-key fingerprint (SHA256:...) for unattended bootstrap of unknown forges")
 	if err := flags.Parse(arguments[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -179,13 +175,9 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 	if err != nil {
 		return err
 	}
-	// With --dedicated-key, this upstream gets its own identity stored as an
-	// additional data key of the one chart-owned upstream-key Secret. The
-	// existing whole-Secret volume mount projects it as a file beside the
-	// shared key, so the server reads it from tmpfs without any Kubernetes
-	// API access and RBAC stays scoped to the two named Secrets. Without the
-	// flag — and for every pre-existing upstream row — the shared key keeps
-	// today's semantics exactly, including the no-API projected fast path.
+	// Dedicated identities are fields in the OpenBao upstream-key bundle,
+	// materialized beside the shared key on private tmpfs. Existing upstream
+	// registrations retain their shared-key behavior.
 	if *dedicatedKey && kind != "ssh" {
 		return fmt.Errorf("%w: --dedicated-key applies only to SSH upstreams", errUsage)
 	}
@@ -194,25 +186,22 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 		keyName = app.UpstreamKeyDataKey(filepath.Base(*upstreamKey), name)
 	}
 	var identityStore app.BootstrapIdentityStore
-	if identityStoreEnabled() {
-		configured, err := newBaoIdentityStore(*namespace)
+	if kind == "ssh" {
+		if dependencies.identityStore == nil {
+			return errors.New("OpenBao identity store is required")
+		}
+		configured, err := dependencies.identityStore(*namespace)
 		if err != nil {
 			return err
 		}
 		identityStore = configured
-		*upstreamKey = identityRoot + "/upstream/id_ed25519"
-		*knownHosts = identityRoot + "/hosts/known_hosts"
 	}
 	if kind == "ssh" {
-		privateKeyPath, privateDataKey, keyFieldManager := *upstreamKey, filepath.Base(*upstreamKey), ""
+		privateKeyPath, privateDataKey := *upstreamKey, filepath.Base(*upstreamKey)
 		if keyName != "" {
-			// The dedicated identity lives beside the shared one: the fast
-			// path re-uses an already projected dedicated key, and a missing
-			// file selects the generation flow for exactly this data key
-			// under this upstream's own server-side-apply field manager.
+			// Reuse an existing materialized key, or bootstrap this bundle field.
 			privateKeyPath = filepath.Join(filepath.Dir(*upstreamKey), keyName)
 			privateDataKey = keyName
-			keyFieldManager = app.UpstreamKeyFieldManager(name)
 		}
 		secretGate := func(ctx context.Context, operation string) error {
 			if dependencies.mutationGate == nil {
@@ -223,7 +212,6 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 		if _, err := (app.UpstreamSSHBootstrap{
 			Store: identityStore,
 			Input: dependencies.input, Output: output,
-			KubernetesClient:        dependencies.kubernetesClient,
 			ScanHostKeys:            dependencies.scanHostKeys,
 			Probe:                   dependencies.probe,
 			Namespace:               *namespace,
@@ -234,7 +222,6 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 			PrivateKeyDataKey:       privateDataKey,
 			PublicKeyDataKey:        privateDataKey + ".pub",
 			KnownHostsDataKey:       filepath.Base(*knownHosts),
-			KeyFieldManager:         keyFieldManager,
 			MutationGate:            secretGate,
 			ProbeInterval:           dependencies.probeInterval,
 			ProbeWait:               dependencies.probeWait,
@@ -274,10 +261,8 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 		return err
 	}
 	if keyName != "" {
-		// The server assembles its SSH configuration once at startup, and the
-		// kubelet needs a short interval to project a freshly applied data
-		// key onto the Secret volume. Without a restart, Git operations for
-		// this upstream keep using the shared fallback key.
+		// The server assembles its per-upstream SSH configuration at startup.
+		// Restart it to add this identity to that configuration.
 		if _, err := fmt.Fprintf(output,
 			"Per-upstream key stored as data key %s. Restart the server (kubectl rollout restart deploy/oberth) to activate it for Git operations.\n",
 			keyName); err != nil {
@@ -292,7 +277,7 @@ const maximumDeployKeyBytes = 1 << 20
 
 // runUpstreamAddFromHost handles `upstream add` from the host. It parses the
 // same flags as the in-pod path, optionally runs a [G]enerate / [P]rovide
-// key selection prompt, stores a provided key in the Secret via the
+// key selection prompt, stores a provided key in OpenBao via the
 // Kubernetes API (the same pattern as installer/onboard.go
 // applyProvidedDeployKey), then execs into the pod for the full upstream add
 // flow (SSH bootstrap, mutation gate, database registration).
@@ -300,8 +285,8 @@ func runUpstreamAddFromHost(ctx context.Context, arguments []string, output io.W
 	flags := flag.NewFlagSet("upstream add", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	namespace := flags.String("namespace", defaultPodNamespace(), "Kubernetes namespace")
-	upstreamKeySecret := flags.String("upstream-key-secret", defaultUpstreamKeySecret, "Secret holding the upstream SSH private keys")
-	knownHostsSecret := flags.String("known-hosts-secret", defaultUpstreamKnownHostsSecret, "upstream known_hosts Secret")
+	upstreamKeySecret := flags.String("upstream-key-secret", defaultUpstreamKeySecret, "OpenBao identity bundle holding upstream SSH keys")
+	knownHostsSecret := flags.String("known-hosts-secret", defaultUpstreamKnownHostsSecret, "OpenBao known_hosts identity bundle")
 	autoYes := flags.Bool("yes", false, "auto-accept key generation and host-key prompts")
 	dedicatedKey := flags.Bool("dedicated-key", false, "provision a dedicated SSH identity for this upstream")
 	expectedHostFingerprint := flags.String("expected-host-fingerprint", "", "expected SSH host-key fingerprint (SHA256:...)")
@@ -517,15 +502,15 @@ func defaultRunWithStdin(ctx context.Context, stdin io.Reader, name string, args
 // runUpstreamProvideKey is the in-pod handler for a host-streamed deploy key.
 // The host validates the key locally and streams it over kubectl exec stdin;
 // this handler re-validates, checks overwrite semantics, gates via the live
-// daemon's audit gate, applies via SSA patch (the same pattern as
-// UpstreamSSHBootstrap.applySecret), and verifies the readback. It is a
+// daemon's audit gate, and saves through the OpenBao store's CAS and
+// verified readback. It is a
 // hidden subcommand — not shown in usage — reachable only through the exec.
 func runUpstreamProvideKey(ctx context.Context, arguments []string, input io.Reader, output io.Writer, dependencies upstreamDependencies) error {
 	flags := flag.NewFlagSet("upstream provide-key", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path")
 	namespace := flags.String("namespace", defaultPodNamespace(), "Kubernetes namespace")
-	upstreamKeySecret := flags.String("upstream-key-secret", defaultUpstreamKeySecret, "Secret holding the upstream SSH private keys")
+	upstreamKeySecret := flags.String("upstream-key-secret", defaultUpstreamKeySecret, "OpenBao identity bundle holding upstream SSH keys")
 	dedicatedKey := flags.Bool("dedicated-key", false, "store as a per-upstream dedicated key")
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -545,10 +530,8 @@ func runUpstreamProvideKey(ctx context.Context, arguments []string, input io.Rea
 
 	// Determine data keys and field manager.
 	dataKey := "id_ed25519"
-	fieldManager := "oberth-upstream-bootstrap"
 	if *dedicatedKey {
 		dataKey = app.UpstreamKeyDataKey(dataKey, name)
-		fieldManager = app.UpstreamKeyFieldManager(name)
 	}
 	publicDataKey := dataKey + ".pub"
 
@@ -581,14 +564,14 @@ func runUpstreamProvideKey(ctx context.Context, arguments []string, input io.Rea
 	}
 	publicKey := append(bytes.TrimSpace(ssh.MarshalAuthorizedKey(signer.PublicKey())), []byte(" oberth\n")...)
 
-	if identityStoreEnabled() {
+	{
 		if dependencies.mutationGate == nil {
 			return errors.New("admin audit mutation gate is unavailable")
 		}
 		if err := dependencies.mutationGate(ctx, "upstream.identity.import", *databasePath); err != nil {
 			return err
 		}
-		store, err := newBaoIdentityStore(*namespace)
+		store, err := dependencies.identityStore(*namespace)
 		if err != nil {
 			return err
 		}
@@ -598,69 +581,7 @@ func runUpstreamProvideKey(ctx context.Context, arguments []string, input io.Rea
 		_, err = fmt.Fprintf(output, "Stored existing upstream identity in OpenBao (%s).\n", ssh.FingerprintSHA256(signer.PublicKey()))
 		return err
 	}
-	// Get Kubernetes client.
-	if dependencies.kubernetesClient == nil {
-		return errors.New("kubernetes client is required for upstream provide-key")
-	}
-	client, err := dependencies.kubernetesClient()
-	if err != nil {
-		return fmt.Errorf("create Kubernetes client: %w", err)
-	}
 
-	// Check overwrite: refuse to replace an existing key at this data key.
-	existing, err := client.CoreV1().Secrets(*namespace).Get(ctx, *upstreamKeySecret, metav1.GetOptions{})
-	if err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("read Secret %s/%s: %w", *namespace, *upstreamKeySecret, err)
-	}
-	if err == nil && len(existing.Data[dataKey]) > 0 {
-		return fmt.Errorf("the Secret %s/%s already holds a key at %s; refusing to overwrite (delete the data key first if replacement is intended)", *namespace, *upstreamKeySecret, dataKey)
-	}
-
-	// Gate: the live daemon's fail-closed audit gate must approve before
-	// any Secret mutation.
-	if dependencies.mutationGate == nil {
-		return errors.New("admin audit mutation gate is unavailable")
-	}
-	if err := dependencies.mutationGate(ctx, "upstream.secret."+*upstreamKeySecret, *databasePath); err != nil {
-		return err
-	}
-
-	// Apply via SSA patch — the same pattern as UpstreamSSHBootstrap.applySecret.
-	data := map[string][]byte{
-		dataKey:       privateKey,
-		publicDataKey: publicKey,
-	}
-	secret := corev1.Secret{
-		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
-		ObjectMeta: metav1.ObjectMeta{Name: *upstreamKeySecret, Namespace: *namespace},
-		Type:       corev1.SecretTypeOpaque,
-		Data:       data,
-	}
-	body, err := json.Marshal(secret)
-	if err != nil {
-		return fmt.Errorf("encode upstream Secret apply: %w", err)
-	}
-	force := true
-	if _, err := client.CoreV1().Secrets(*namespace).Patch(ctx, *upstreamKeySecret, types.ApplyPatchType, body, metav1.PatchOptions{
-		FieldManager: fieldManager,
-		Force:        &force,
-	}); err != nil {
-		return fmt.Errorf("apply upstream Secret %s/%s: %w", *namespace, *upstreamKeySecret, err)
-	}
-
-	// Verify readback.
-	verifySecret, err := client.CoreV1().Secrets(*namespace).Get(ctx, *upstreamKeySecret, metav1.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("verify upstream Secret %s/%s: %w", *namespace, *upstreamKeySecret, err)
-	}
-	if !bytes.Equal(verifySecret.Data[dataKey], privateKey) {
-		return fmt.Errorf("upstream Secret %s/%s did not retain data key %s", *namespace, *upstreamKeySecret, dataKey)
-	}
-
-	if _, err := fmt.Fprintf(output, "Stored the provided key in Secret %s/%s.\n", *namespace, *upstreamKeySecret); err != nil {
-		return err
-	}
-	return nil
 }
 
 // readLineFromReader reads one line from reader without buffering ahead. This
@@ -773,7 +694,7 @@ func isShellSafe(r rune) bool {
 // runUpstreamList prints every configured upstream with its SSH key
 // fingerprint. An upstream with a dedicated key name reads the projected
 // per-upstream key file beside the shared --upstream-key; others use the
-// shared key. Everything comes from the Secret volume mount, so listing
+// shared key. Everything comes from the OpenBao tmpfs mount, so listing
 // never contacts the Kubernetes API. Listing is read-only: no mutation gate
 // is required and an unreadable key degrades to "-" instead of failing the
 // listing. Only fingerprints of the public halves are ever printed.
@@ -781,11 +702,9 @@ func runUpstreamList(ctx context.Context, arguments []string, output io.Writer) 
 	flags := flag.NewFlagSet("upstream list", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path (in-pod; requires the live admin daemon)")
-	upstreamKey := flags.String("upstream-key", "/etc/oberth/upstream-key/id_ed25519", "upstream SSH private key")
-	knownHosts := flags.String("known-hosts", "/etc/oberth/known-hosts/known_hosts", "upstream known_hosts")
-	if identityStoreEnabled() {
-		*upstreamKey = identityRoot + "/upstream/id_ed25519"
-		*knownHosts = identityRoot + "/hosts/known_hosts"
+	upstreamKey := flags.String("upstream-key", identityRoot+"/upstream/id_ed25519", "upstream SSH private key")
+	knownHosts := flags.String("known-hosts", identityRoot+"/hosts/known_hosts", "upstream known_hosts")
+	{
 	}
 	check := flags.Bool("check", false, "authenticate to each SSH upstream now and report whether the forge still accepts its key")
 	if err := flags.Parse(arguments); err != nil {
@@ -947,7 +866,7 @@ func runUplinkList(ctx context.Context, arguments []string, output io.Writer) er
 		return err
 	}
 	writer := tabwriter.NewWriter(output, 0, 0, 3, ' ', 0)
-	if _, err := fmt.Fprintln(writer, "IDENTITY\tFINGERPRINT\tADMIN\tSCOPE\tCREATED\tLAST SEEN"); err != nil {
+	if _, err := fmt.Fprintln(writer, "IDENTITY\tFINGERPRINT\tADMIN\tSCOPE\tCREATED\tLAST SEEN\tEXPIRES"); err != nil {
 		return err
 	}
 	for _, uplink := range uplinks {
@@ -955,30 +874,23 @@ func runUplinkList(ctx context.Context, arguments []string, output io.Writer) er
 		if !uplink.LastUsedAt.IsZero() {
 			lastSeen = uplink.LastUsedAt.UTC().Format("2006-01-02 15:04")
 		}
+		expires := "never"
+		if uplink.NoExpiry() {
+			expires = "NO EXPIRY (rotate)"
+		}
+		if uplink.ExpiresAt != nil {
+			expires = uplink.ExpiresAt.UTC().Format(time.RFC3339)
+		}
 		adminLabel := "no"
 		if uplink.Admin {
 			adminLabel = "yes"
 		}
-		if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\n",
-			uplink.Identity, uplink.Fingerprint, adminLabel, scopeLabel(uplink.Scope), uplink.CreatedAt.UTC().Format("2006-01-02 15:04"), lastSeen); err != nil {
+		if _, err := fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			uplink.Identity, uplink.Fingerprint, adminLabel, scopeLabel(uplink.Scope), uplink.CreatedAt.UTC().Format("2006-01-02 15:04"), lastSeen, expires); err != nil {
 			return err
 		}
 	}
 	return writer.Flush()
-}
-
-// scopeFlag collects --scope values, repeatable and comma-separated.
-type scopeFlag []string
-
-func (scope *scopeFlag) String() string { return strings.Join(*scope, ",") }
-
-func (scope *scopeFlag) Set(value string) error {
-	for _, part := range strings.Split(value, ",") {
-		if part = strings.TrimSpace(part); part != "" {
-			*scope = append(*scope, part)
-		}
-	}
-	return nil
 }
 
 // scopeLabel is the SCOPE column: the upstreams, or "all" when unscoped.
@@ -997,8 +909,8 @@ func runUplinkScope(ctx context.Context, arguments []string, output io.Writer, m
 	flags.SetOutput(io.Discard)
 	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path (in-pod; requires the live admin daemon)")
 	fingerprint := flags.String("fingerprint", "", "disambiguating SSH public-key fingerprint when one identity has several uplinks")
-	var set scopeFlag
-	flags.Var(&set, "set", "limit the uplink to these upstreams (repeatable or comma-separated)")
+	var set []string
+	flags.Func("set", "limit the uplink to these upstreams (repeatable or comma-separated)", func(value string) error { set = append(set, splitScope(value)...); return nil })
 	clearScope := flags.Bool("clear", false, "remove the limit: the uplink reaches every repository again")
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -1081,7 +993,8 @@ func runUplinkRemove(ctx context.Context, arguments []string, output io.Writer, 
 }
 
 type repoDependencies struct {
-	mutationGate func(context.Context, string, string) error
+	removeRepository func(context.Context, string, string, string) (store.RemovedRepository, error)
+	mutationGate     func(context.Context, string, string) error
 }
 
 func runRepo(ctx context.Context, arguments []string, output io.Writer) error {
@@ -1197,8 +1110,8 @@ func runRepoVerify(ctx context.Context, arguments []string, output io.Writer) er
 	flags.SetOutput(io.Discard)
 	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path")
 	gitCacheRoot := flags.String("git-cache-root", "/data/git", "root directory for bare Git caches")
-	upstreamKey := flags.String("upstream-key", "/etc/oberth/upstream-key/id_ed25519", "upstream SSH private key")
-	knownHosts := flags.String("known-hosts", "/etc/oberth/known-hosts/known_hosts", "pinned upstream known_hosts")
+	upstreamKey := flags.String("upstream-key", identityRoot+"/upstream/id_ed25519", "upstream SSH private key")
+	knownHosts := flags.String("known-hosts", identityRoot+"/hosts/known_hosts", "pinned upstream known_hosts")
 	all := flags.Bool("all", false, "verify every registered repository")
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -1341,40 +1254,13 @@ func runRepoRemove(ctx context.Context, arguments []string, output io.Writer, de
 	if err := dependencies.mutationGate(ctx, "repository.database.open", *databasePath); err != nil {
 		return err
 	}
-	database, err := store.OpenAdminClient(ctx, *databasePath, configuredStoreOptions(ctx))
+	remove := dependencies.removeRepository
+	if remove == nil {
+		remove = requestLiveRepositoryRemoval
+	}
+	removed, err := remove(ctx, *databasePath, *gitCacheRoot, name)
 	if err != nil {
 		return err
-	}
-	defer func() { _ = database.Close() }()
-	if err := dependencies.mutationGate(ctx, "repository.remove", *databasePath); err != nil {
-		return err
-	}
-	removed, err := database.RemoveRepository(ctx, administrativeActor, name)
-	if err != nil {
-		return err
-	}
-
-	// Clean up the bare Git cache directory (qualified layout).
-	org := removed.UpstreamOrg
-	if org == "" {
-		org = removed.UpstreamName
-	}
-	cachePath := filepath.Join(*gitCacheRoot, removed.UpstreamName, org, removed.Name+".git")
-	if err := os.RemoveAll(cachePath); err != nil {
-		// Cache cleanup is best-effort: the database record is already gone,
-		// so a stale directory is inert and the next push will re-create it.
-		_, _ = fmt.Fprintf(output, "warning: failed to remove git cache %s: %v\n", cachePath, err)
-	}
-	// A pre-#264 flat cache may survive if the server never migrated it.
-	// Remove it only when no OTHER repository still answers to the bare
-	// name — with a same-named survivor the flat directory cannot be
-	// attributed and deleting it could destroy the survivor's unmigrated
-	// cache.
-	if _, lookupErr := database.RepositoryByName(ctx, removed.Name); errors.Is(lookupErr, store.ErrNotFound) {
-		legacyPath := filepath.Join(*gitCacheRoot, removed.Name+".git")
-		if err := os.RemoveAll(legacyPath); err != nil {
-			_, _ = fmt.Fprintf(output, "warning: failed to remove legacy git cache %s: %v\n", legacyPath, err)
-		}
 	}
 
 	_, err = fmt.Fprintf(output, "removed repository %s (was upstream %s)\n", removed.Name, removed.UpstreamName)
@@ -1382,7 +1268,7 @@ func runRepoRemove(ctx context.Context, arguments []string, output io.Writer, de
 }
 
 func runUplink(ctx context.Context, arguments []string, input io.Reader, output io.Writer) error {
-	return runUplinkWithDependencies(ctx, arguments, input, output, uplinkDependencies{mutationGate: requestLiveAdminMutationGate})
+	return runUplinkWithDependencies(ctx, arguments, input, output, uplinkDependencies{mutationGate: requestLiveAdminMutationGate, tokenPolicy: requestLiveUplinkTokenPolicy})
 }
 
 func runUplinkWithDependencies(ctx context.Context, arguments []string, input io.Reader, output io.Writer, dependencies uplinkDependencies) error {
@@ -1400,19 +1286,20 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	case "scope":
 		return runUplinkScope(ctx, arguments[1:], output, dependencies.mutationGate)
 	default:
-		return fmt.Errorf("%w: uplink add [--admin] [--scope UPSTREAM[,UPSTREAM]] [--database PATH] [--tls-cert PATH] <public-key-file|raw-key|-> <identity@host> | uplink list | uplink remove <identity> | uplink rotate <public-key-file|raw-key|-> <identity@host> | uplink scope [--fingerprint SHA256:...] (--set UPSTREAM[,UPSTREAM] | --clear) <identity@host>", errUsage)
+		return fmt.Errorf("%w: uplink add [--admin] [--ttl DURATION] [--scope UPSTREAM[,UPSTREAM]] [--database PATH] [--tls-cert PATH] <public-key-file|raw-key|-> <identity@host> | uplink list | uplink remove <identity> | uplink rotate <public-key-file|raw-key|-> <identity@host> | uplink scope [--fingerprint SHA256:...] (--set UPSTREAM[,UPSTREAM] | --clear) <identity@host>", errUsage)
 	}
 	flags := flag.NewFlagSet("uplink add", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path (in-pod; requires the live admin daemon)")
 	defaultCertificate := "/etc/oberth/tls/tls.crt"
-	if identityStoreEnabled() {
+	{
 		defaultCertificate = identityRoot + "/server/tls.crt"
 	}
 	certificatePath := flags.String("tls-cert", defaultCertificate, "HTTPS certificate path (in-pod; requires the live admin daemon)")
+	ttl := flags.String("ttl", "", "bearer token lifetime (positive Go duration; default and maximum come from the live server)")
 	isAdmin := flags.Bool("admin", false, "Grant admin privileges (required for access_allow/access_revoke)")
-	var scope scopeFlag
-	flags.Var(&scope, "scope", "limit the uplink to these upstreams' repositories (repeatable or comma-separated; default: every repository)")
+	var scope []string
+	flags.Func("scope", "limit the uplink to these upstreams' repositories (repeatable or comma-separated; default: every repository)", func(value string) error { scope = append(scope, splitScope(value)...); return nil })
 	if err := flags.Parse(arguments[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
@@ -1423,6 +1310,14 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	}
 	if flags.NArg() != 2 {
 		return fmt.Errorf("%w: uplink add requires one public-key source and identity", errUsage)
+	}
+	var lifetime time.Duration
+	if *ttl != "" {
+		var err error
+		lifetime, err = time.ParseDuration(*ttl)
+		if err != nil || lifetime <= 0 {
+			return fmt.Errorf("%w: ttl must be a positive Go duration", errUsage)
+		}
 	}
 	identity := flags.Arg(1)
 	if err := app.ValidateUplinkIdentity(identity); err != nil {
@@ -1448,6 +1343,19 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	if err := gate(ctx, "uplink.database.open"); err != nil {
 		return err
 	}
+	policy := model.DefaultUplinkTokenPolicy()
+	if dependencies.tokenPolicy != nil {
+		policy, err = dependencies.tokenPolicy(ctx, *databasePath)
+		if err != nil {
+			return err
+		}
+	}
+	if err := policy.Validate(); err != nil {
+		return err
+	}
+	if lifetime > policy.MaxTTL {
+		return fmt.Errorf("%w: token lifetime exceeds server maximum %s", errUsage, policy.MaxTTL)
+	}
 	database, err := store.OpenAdminClient(ctx, *databasePath, configuredStoreOptions(ctx))
 	if err != nil {
 		return err
@@ -1460,9 +1368,10 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 			return err
 		}
 	}
-	tokens := gatedAdminTokens{Store: database, Gate: gate}
+	tokens := gatedAdminTokens{Store: database, Gate: gate, Policy: policy}
 	issuer := auth.Issuer{
-		Tokens: tokens,
+		Tokens:    tokens,
+		ExpiresAt: dependencies.tokenExpiry,
 		Bind: func(ctx context.Context, pending model.TokenCredential) error {
 			if err := gate(ctx, "uplink.register"); err != nil {
 				return err
@@ -1484,6 +1393,13 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	if _, err := fmt.Fprintf(output, "Uplink token for %s%s (shown once):\n", identity, adminLabel); err != nil {
 		return err
 	}
+	if lifetime > 0 {
+		expires := time.Now().Add(lifetime)
+		issuer.ExpiresAt = &expires
+	} else if issuer.ExpiresAt != nil && issuer.ExpiresAt.After(time.Now().Add(policy.DefaultTTL)) {
+		expires := time.Now().Add(policy.DefaultTTL)
+		issuer.ExpiresAt = &expires
+	}
 	if _, err := issuer.Issue(ctx, identity, output); err != nil {
 		return err
 	}
@@ -1492,14 +1408,15 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 
 type gatedAdminTokens struct {
 	*store.Store
-	Gate func(context.Context, string) error
+	Gate   func(context.Context, string) error
+	Policy model.UplinkTokenPolicy
 }
 
 func (tokens gatedAdminTokens) CreateTokenCredential(ctx context.Context, spec model.TokenCredentialSpec) (model.TokenCredential, error) {
 	if err := tokens.Gate(ctx, "uplink.token.create"); err != nil {
 		return model.TokenCredential{}, err
 	}
-	return tokens.Store.CreateTokenCredential(ctx, spec)
+	return tokens.Store.CreateTokenCredentialWithPolicy(ctx, spec, tokens.Policy)
 }
 
 func (tokens gatedAdminTokens) ActivateTokenCredential(ctx context.Context, id string) (model.TokenCredential, error) {
@@ -1755,7 +1672,7 @@ func uplinkKeyFingerprint(source string, input io.Reader) (string, error) {
 
 // upstreamKeyDirectory is where the pod holds its upstream SSH identities.
 func upstreamKeyDirectory() string {
-	if identityStoreEnabled() {
+	{
 		return identityRoot + "/upstream"
 	}
 	return "/etc/oberth/upstream-key"
@@ -1765,7 +1682,7 @@ func upstreamKeyDirectory() string {
 // same keypair the server uses to authenticate to the forge. The workstation
 // then holds the organization-wide upstream key, and replacing the
 // workstation key at the forge silently breaks every fetch and publication
-// (observed on tuxbox, issue 040).
+// (observed on a production installation, issue 040).
 func warnUplinkSharesUpstreamKey(output io.Writer, uplinkFingerprint, keyDirectory string) {
 	entries, err := os.ReadDir(keyDirectory)
 	if err != nil {
@@ -1800,6 +1717,7 @@ func runUplinkRotate(ctx context.Context, arguments []string, input io.Reader, o
 	flags := flag.NewFlagSet("uplink rotate", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path (in-pod; requires the live admin daemon)")
+	ttl := flags.String("ttl", "", "new bearer token lifetime (default: preserve the earliest existing expiry)")
 	certificatePath := flags.String("tls-cert", "", "HTTPS certificate path passed to uplink add (default: the add default)")
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -1810,7 +1728,7 @@ func runUplinkRotate(ctx context.Context, arguments []string, input io.Reader, o
 		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if flags.NArg() != 2 {
-		return fmt.Errorf("%w: uplink rotate [--database PATH] <public-key-file|raw-key|-> <identity@host>", errUsage)
+		return fmt.Errorf("%w: uplink rotate [--database PATH] [--ttl DURATION] <public-key-file|raw-key|-> <identity@host>", errUsage)
 	}
 	source, identity := flags.Arg(0), flags.Arg(1)
 	if err := app.ValidateUplinkIdentity(identity); err != nil {
@@ -1842,12 +1760,16 @@ func runUplinkRotate(ctx context.Context, arguments []string, input io.Reader, o
 	var old []string
 	admin := false
 	var scope []string
+	var expiry *time.Time
 	seen := false
 	for _, status := range statuses {
-		if status.Identity != identity {
+		if status.Identity != identity || status.RevokedAt != nil || status.Pending {
 			continue
 		}
 		admin = admin || status.Admin
+		if status.ExpiresAt != nil && (expiry == nil || status.ExpiresAt.Before(*expiry)) {
+			expiry = status.ExpiresAt
+		}
 		// Rotation keeps the scope (#073). Keys of one identity with
 		// different scopes are refused: the new key's scope would be a guess.
 		if seen && !slices.Equal(scope, status.Scope) {
@@ -1862,6 +1784,14 @@ func runUplinkRotate(ctx context.Context, arguments []string, input io.Reader, o
 		return fmt.Errorf("uplink %s has no other key to rotate from; use uplink add", identity)
 	}
 	addArguments := []string{"add", "--database", *databasePath}
+	if *ttl != "" {
+		addArguments = append(addArguments, "--ttl", *ttl)
+	} else {
+		if expiry != nil && !expiry.After(time.Now()) {
+			return errors.New("existing bearer token has expired; specify --ttl when rotating")
+		}
+		dependencies.tokenExpiry = expiry
+	}
 	if *certificatePath != "" {
 		addArguments = append(addArguments, "--tls-cert", *certificatePath)
 	}
@@ -1911,4 +1841,14 @@ func upstreamAuthStatus(ctx context.Context, upstream model.Upstream, sharedKey,
 		return "error: " + message
 	}
 	return "ok"
+}
+
+func splitScope(value string) []string {
+	var out []string
+	for _, p := range strings.Split(value, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

@@ -9,7 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func resourceLeaf(name string, cpu, memory string) wfv1.Template {
@@ -27,7 +27,7 @@ func TestResourceBoundsDeadlineNegativeAndRequestLimitValidation(t *testing.T) {
 	for _, kind := range []string{"deadline", "negative", "request-limit", "grant"} {
 		t.Run(kind, func(t *testing.T) {
 			wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Entrypoint: "step-abc12345", Templates: []wfv1.Template{resourceLeaf("step-abc12345", "1", "128Mi")}}}
-			maximum := periapsis.L
+			maximum := pipeline.L
 			switch kind {
 			case "deadline":
 				value := intstr.FromInt(3601)
@@ -37,7 +37,7 @@ func TestResourceBoundsDeadlineNegativeAndRequestLimitValidation(t *testing.T) {
 			case "request-limit":
 				wf.Spec.Templates[0].Container.Resources.Limits = corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("500m")}
 			case "grant":
-				maximum = periapsis.Size("invalid")
+				maximum = pipeline.Size("invalid")
 			}
 			if err := ValidateResourceCeiling(wf, "repo-01", maximum, 3600); err == nil {
 				t.Fatal("invalid declaration accepted")
@@ -48,11 +48,11 @@ func TestResourceBoundsDeadlineNegativeAndRequestLimitValidation(t *testing.T) {
 func TestResourceBoundsRespectServerGrantWithoutMutatingDeclarations(t *testing.T) {
 	wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Entrypoint: "step-abc12345", Templates: []wfv1.Template{resourceLeaf("step-abc12345", "5", "1Gi")}}}
 	before := wf.DeepCopy()
-	err := ValidateResourceCeiling(wf, "repo-01", periapsis.L, 3600)
+	err := ValidateResourceCeiling(wf, "repo-01", pipeline.L, 3600)
 	if err == nil || !strings.Contains(err.Error(), "repo-01") || !strings.Contains(err.Error(), "step-abc12345") || !strings.Contains(err.Error(), "requests.cpu 5") || !strings.Contains(err.Error(), "ceiling 4") {
 		t.Fatalf("exact refusal: %v", err)
 	}
-	if err := ValidateResourceCeiling(wf, "repo-01", periapsis.XL, 3600); err != nil {
+	if err := ValidateResourceCeiling(wf, "repo-01", pipeline.XL, 3600); err != nil {
 		t.Fatal(err)
 	}
 	if !wf.Spec.Templates[0].Container.Resources.Requests.Cpu().Equal(*before.Spec.Templates[0].Container.Resources.Requests.Cpu()) {
@@ -82,7 +82,7 @@ func TestResourceBoundsCoverDefaultsInlineSetsHelpersAndLimits(t *testing.T) {
 			case "limit":
 				wf.Spec.Templates[0].Container.Resources.Limits = corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("9Gi")}
 			}
-			if err := ValidateResourceCeiling(wf, "repo-01", periapsis.L, 3600); err == nil {
+			if err := ValidateResourceCeiling(wf, "repo-01", pipeline.L, 3600); err == nil {
 				t.Fatal("ceiling bypass")
 			}
 		})
@@ -99,5 +99,33 @@ func TestResourceCoverageIncludesRootNestedRepeatedAndDynamicCalls(t *testing.T)
 	wf.Spec.Templates = append(wf.Spec.Templates, wfv1.Template{Name: wf.Spec.Entrypoint, DAG: &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{{Name: "step-11111111", Template: declared.Name}, {Name: "step-22222222", Template: declared.Name}, {Name: "step-33333333", Template: missing.Name, WithParam: "{{inputs.parameters.items}}"}}}})
 	if got := ResourceCoverage(wf); got == nil || got.Declared != 2 || got.Undeclared != 1 {
 		t.Fatalf("calls: %+v", got)
+	}
+}
+
+func TestNumericResourceCeilingPreservesOperatorCapability(t *testing.T) {
+	wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Entrypoint: "step-abc12345", Templates: []wfv1.Template{resourceLeaf("step-abc12345", "1", "128Mi")}}}
+	name := corev1.ResourceName("devices.example.test/worker")
+	wf.Spec.Templates[0].Container.Resources.Requests[name] = resource.MustParse("1")
+	wf.Spec.Templates[0].Container.Resources.Limits = corev1.ResourceList{name: resource.MustParse("1")}
+	sizeCeiling, _ := ResourceCeilingForSize(pipeline.L)
+	ceiling := ResourceRequirementsForCeiling(sizeCeiling)
+	capability := capabilityPolicyForTest(t).Capability
+	if err := ValidateResourceRequirements(wf, "repo-01", ceiling, 3600); err == nil {
+		t.Fatal("ungranted extended resource accepted")
+	}
+	if err := ValidateResourceRequirementsWithCapability(wf, "repo-01", ceiling, 3600, capability); err != nil {
+		t.Fatal(err)
+	}
+	wf.Spec.Templates[0].Container.Resources.Limits[name] = resource.MustParse("3")
+	if err := ValidateResourceRequirementsWithCapability(wf, "repo-01", ceiling, 3600, capability); err == nil {
+		t.Fatal("operator ceiling bypassed")
+	}
+	wf.Spec.Templates[0].Container.Resources.Limits[name] = resource.MustParse("1")
+	wf.Spec.Templates[0].Container.Resources.Requests[corev1.ResourceCPU] = resource.MustParse("5")
+	if err := ValidateResourceRequirementsWithCapability(wf, "repo-01", ceiling, 3600, capability); err == nil {
+		t.Fatal("numeric ceiling bypassed by operator grant")
+	}
+	if len(ceiling.Requests) != 3 || len(ceiling.Limits) != 3 {
+		t.Fatal("administrator ceiling mutated")
 	}
 }

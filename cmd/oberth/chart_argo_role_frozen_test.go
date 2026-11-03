@@ -18,7 +18,7 @@ import (
 // emergency repair, kubectl-client-side-apply from adoption), and Helm 4's
 // server-side apply conflicts on any value that differs from the one that
 // manager owns, half-applying the upgrade. v0.17.10 (2c532e0) prepended two
-// rules and broke that contract on the first upgrade of tuxbox (issue #813).
+// rules and broke that contract on the first upgrade of example-node (issue #813).
 // New permissions must be added as a new Role bound to the same
 // ServiceAccount. These tests pin both halves.
 

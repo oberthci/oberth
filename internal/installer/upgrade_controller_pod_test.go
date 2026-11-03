@@ -182,7 +182,7 @@ func TestRunUpgradeControllerPartialFailureNeverSucceeds(t *testing.T) {
 					return nil, os.WriteFile(filepath.Join(dir, "argo-workflows-1.0.24.tgz"), chart, 0o600)
 				}
 				raw, err := base(ctx, args)
-				if args[0] == "upgrade" && ((mode == "argo-failure" && args[1] == "argo-workflows") || (mode == "oberth-failure" && args[1] == "oberth")) {
+				if args[0] == "upgrade" && !slices.Contains(args, "--dry-run=server") && ((mode == "argo-failure" && args[1] == "argo-workflows") || (mode == "oberth-failure" && args[1] == "oberth")) {
 					return nil, errors.New("fixed fixture failure")
 				}
 				return raw, err
@@ -206,7 +206,7 @@ func TestRunUpgradeControllerPartialFailureNeverSucceeds(t *testing.T) {
 				if call[0] == "rollback" {
 					t.Fatal("rollback attempted")
 				}
-				if call[0] == "upgrade" {
+				if call[0] == "upgrade" && !slices.Contains(call, "--dry-run=server") {
 					upgrades = append(upgrades, call[1])
 				}
 			}

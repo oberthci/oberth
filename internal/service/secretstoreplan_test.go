@@ -13,6 +13,7 @@ import (
 	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // testService creates a minimal API instance with an auditor and secret access
@@ -26,7 +27,7 @@ func testService(t *testing.T) *API {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = database.Close() })
-	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{
+	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{
 		Name: "codeberg", Kind: "ssh", BaseURL: "ssh://codeberg.org/acme",
 	})
 	if err != nil {
@@ -53,7 +54,7 @@ func testService(t *testing.T) *API {
 func TestSecretStorePlanFirstGrant(t *testing.T) {
 	now := time.Now()
 	grants := []store.SecretAccessGrant{
-		{ID: 1, Repo: "codeberg/acme/terraform", Step: "*", Secret: "terraform/credentials", ApprovedBy: "admin@tuxbox", ApprovedAt: now},
+		{ID: 1, Repo: "codeberg/acme/terraform", Step: "*", Secret: "terraform/credentials", ApprovedBy: "admin@example-node", ApprovedAt: now},
 	}
 	result := computeSecretStorePlan(grants)
 	if len(result.Repos) != 1 {
@@ -675,7 +676,7 @@ func TestSecretStorePlanPerRepoExcludesNamedStepPaths(t *testing.T) {
 	// A repo whose grants are all named keeps its per-repo entry (its
 	// ServiceAccount and zero-grant policy still exist) with no paths.
 	namedOnly := computeSecretStorePlan([]store.SecretAccessGrant{
-		{ID: 3, Repo: "codeberg/acme/cttv", Step: "release-publish-images", Secret: "release/gar-image-key", ApprovedBy: "admin", ApprovedAt: now},
+		{ID: 3, Repo: "codeberg/acme/example-web", Step: "release-publish-images", Secret: "release/gar-image-key", ApprovedBy: "admin", ApprovedAt: now},
 	})
 	if len(namedOnly.Repos) != 1 || len(namedOnly.Repos[0].Paths) != 0 || len(namedOnly.Repos[0].Steps) != 1 {
 		t.Fatalf("named-only repo must keep a per-repo entry with no paths and one step: %+v", namedOnly.Repos)

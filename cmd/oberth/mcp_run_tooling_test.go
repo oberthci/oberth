@@ -19,6 +19,7 @@ import (
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type toolingAuthenticator struct{}
@@ -32,7 +33,7 @@ func (toolingAuthenticator) Authenticate(context.Context, string) (api.Actor, er
 func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	database, err := store.Open(ctx, filepath.Join(root, "oberth.sqlite"), store.Options{})
+	database, err := storetest.Open(ctx, filepath.Join(root, "oberth.sqlite"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +42,7 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	upstream, err := database.CreateUpstream(ctx, model.UpstreamSpec{Name: "origin", Kind: "forgejo", BaseURL: "https://forge.example.test/org"})
+	upstream, err := storetest.CreateUpstream(database, ctx, model.UpstreamSpec{Name: "origin", Kind: "forgejo", BaseURL: "https://forge.example.test/org"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +50,7 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := database.EnqueueRun(ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: "feature/tooling", SHA: strings.Repeat("a", 40), Trigger: "branch", Actor: "tooling-test@host"})
+	run, err := storetest.EnqueueRun(database, ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: "feature/tooling", SHA: strings.Repeat("a", 40), Trigger: "branch", Actor: "tooling-test@host"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +62,7 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 	started := time.Now()
-	if err := logs.AppendStepProgress(run.ID, runprogress.Event{Version: runprogress.Version, Burn: "release-build-variants", Step: "release-build-variants", Status: runprogress.StepRunning, StartedAt: &started}); err != nil {
+	if err := logs.AppendStepProgress(run.ID, runprogress.Event{Version: runprogress.Version, Stage: "release-build-variants", Step: "release-build-variants", Status: runprogress.StepRunning, StartedAt: &started}); err != nil {
 		t.Fatal(err)
 	}
 	control, err := service.NewAPI(service.APIConfig{Runs: database, History: database, Repositories: database, Logs: logs, KVMPreflights: database})
@@ -98,7 +99,7 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 			t.Fatalf("MCP result = %s", response.Body)
 		}
 		if got := envelope.Result.Structured; (tool == "run_logs" || tool == "logs") && !envelope.Result.IsError {
-			want := service.LogResponse{RunID: run.ID, Burn: "release-build-variants", Step: "release-build-variants",
+			want := service.LogResponse{RunID: run.ID, Stage: "release-build-variants", Step: "release-build-variants",
 				Note: "step was not executed; no log recorded", RunError: "Workflow error", ScanComplete: true, BytesExact: true,
 				TotalScannedBytes: 0, ScanLimitBytes: runlog.MaxScanBytes}
 			if got != want {
@@ -145,18 +146,18 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 	// A workflow failure can leave a failed step that never had a pod or log
 	// marker. Exercise both wire formats with no file, an empty file, and a
 	// finalized index containing only another step's output.
-	if _, err := database.PutStepResult(ctx, model.StepResult{
-		RunID: run.ID, Burn: "release-build-variants", Step: "release-build-variants",
+	if _, err := storetest.PutHistoricalStepResult(database, ctx, model.StepResult{
+		RunID: run.ID, Stage: "release-build-variants", Step: "release-build-variants",
 		Status: model.StepFailed, DeclaredSize: "M", Termination: model.UnavailableStepDiagnostic("not-executed"),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.FinishRun(ctx, run.ID, model.RunResult{
-		Status: model.RunFailed, FailedBurn: "release-build-variants", FailedStep: "release-build-variants", Error: "Workflow error",
+		Status: model.RunFailed, FailedStage: "release-build-variants", FailedStep: "release-build-variants", Error: "Workflow error",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	want := service.LogResponse{RunID: run.ID, Burn: "release-build-variants", Step: "release-build-variants",
+	want := service.LogResponse{RunID: run.ID, Stage: "release-build-variants", Step: "release-build-variants",
 		Note: "step was not executed; no log recorded", RunError: "Workflow error", ScanComplete: true, BytesExact: true,
 		TotalScannedBytes: 0, ScanLimitBytes: runlog.MaxScanBytes}
 	for _, storage := range []string{"missing", "empty", "other-step"} {
@@ -207,7 +208,7 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 	configure(t, remote)
 	for _, flags := range [][]string{nil, {"--raw"}, {"--tail", "--pattern", "FAIL", "--offset", "10"}} {
 		var out bytes.Buffer
-		args := append([]string{run.ID, "--burn", want.Burn, "--step", want.Step}, flags...)
+		args := append([]string{run.ID, "--burn", want.Stage, "--step", want.Step}, flags...)
 		if err := runRemoteLog(ctx, args, &out); err != nil {
 			t.Fatal(err)
 		}
@@ -222,9 +223,9 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 		{Termination: model.UnavailableStepDiagnostic("not-recorded")},
 		{Termination: model.UnavailableStepDiagnostic("not-executed"), LogEnd: 1},
 	} {
-		step.RunID, step.Burn, step.Step = run.ID, want.Burn, want.Step
+		step.RunID, step.Stage, step.Step = run.ID, want.Stage, want.Step
 		step.Status, step.DeclaredSize = model.StepFailed, "M"
-		if _, err := database.PutStepResult(ctx, step); err != nil {
+		if _, err := storetest.PutHistoricalStepResult(database, ctx, step); err != nil {
 			t.Fatal(err)
 		}
 		isError, text := call("run_logs", fmt.Sprintf(`{"id":%q,"step":%q}`, run.ID, want.Step))
@@ -236,12 +237,12 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 
 func TestMCPBothLogRoutesBoundActualFilteredTailLines(t *testing.T) {
 	root := t.TempDir()
-	db, err := store.Open(t.Context(), filepath.Join(root, "db"), store.Options{})
+	db, err := storetest.Open(t.Context(), filepath.Join(root, "db"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	u, err := db.CreateUpstream(t.Context(), model.UpstreamSpec{Name: "origin", Kind: "forgejo", BaseURL: "https://forge.example.test/org"})
+	u, err := storetest.CreateUpstream(db, t.Context(), model.UpstreamSpec{Name: "origin", Kind: "forgejo", BaseURL: "https://forge.example.test/org"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +250,7 @@ func TestMCPBothLogRoutesBoundActualFilteredTailLines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := db.EnqueueRun(t.Context(), model.RunSpec{RepoID: r.ID, RefKind: model.RefBranch, Ref: "feature/logs", SHA: strings.Repeat("a", 40), Trigger: "branch", Actor: "test@host"})
+	run, err := storetest.EnqueueRun(db, t.Context(), model.RunSpec{RepoID: r.ID, RefKind: model.RefBranch, Ref: "feature/logs", SHA: strings.Repeat("a", 40), Trigger: "branch", Actor: "test@host"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +258,7 @@ func TestMCPBothLogRoutesBoundActualFilteredTailLines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := logs.WriteStepPlan(run.ID, []runprogress.PlannedStep{{Burn: "test", Step: "test"}}); err != nil {
+	if err := logs.WriteStepPlan(run.ID, []runprogress.PlannedStep{{Stage: "test", Step: "test"}}); err != nil {
 		t.Fatal(err)
 	}
 	f, err := logs.Create(run.ID)
@@ -321,7 +322,7 @@ func TestMCPBothLogRoutesBoundActualFilteredTailLines(t *testing.T) {
 
 func TestRunCursorHTTPErrorExplainsHowToResume(t *testing.T) {
 	ctx := t.Context()
-	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "cursor.sqlite"), store.Options{})
+	database, err := storetest.Open(ctx, filepath.Join(t.TempDir(), "cursor.sqlite"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

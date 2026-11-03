@@ -105,11 +105,11 @@ ON CONFLICT(run_id) DO UPDATE SET
     superseded_by = '',
     reason = excluded.reason,
     created_at = excluded.created_at,
-    completed_at = NULL`, cancelled.ID, cancelled.JobName, cleanupReason, now); err != nil {
+    completed_at = NULL`, cancelled.ID, cancelled.WorkflowName, cleanupReason, now); err != nil {
 			return model.RunCancelResult{}, fmt.Errorf("record run cancellation: %w", err)
 		}
 		result.Cancellations = []model.RunCancellation{{
-			RunID: cancelled.ID, JobName: cancelled.JobName, Reason: cleanupReason, CreatedAt: fromUnixNano(now),
+			RunID: cancelled.ID, WorkflowName: cancelled.WorkflowName, Reason: cleanupReason, CreatedAt: fromUnixNano(now),
 		}}
 	}
 	if cancelled.Trigger == "promotion" {
@@ -126,7 +126,7 @@ ON CONFLICT(run_id) DO UPDATE SET
 	}
 	details, err := json.Marshal(map[string]any{
 		"run_id": cancelled.ID, "repo_id": cancelled.RepoID, "ref_kind": cancelled.RefKind, "ref": cancelled.Ref,
-		"sha": cancelled.SHA, "trigger": cancelled.Trigger, "previous_state": previous, "job_name": cancelled.JobName,
+		"sha": cancelled.SHA, "trigger": cancelled.Trigger, "previous_state": previous, "job_name": cancelled.WorkflowName,
 		"concurrency_group": cancelled.ConcurrencyGroup, "reason": request.Reason, "force": request.Force,
 		"warning": request.Warning, "promotion_id": result.PromotionID,
 	})
@@ -148,8 +148,8 @@ ON CONFLICT(run_id) DO UPDATE SET
 // Workflow after a cancellation pass had already settled the obligation and
 // its own deletion failed: the next pass (or restart) then retries it instead
 // of leaving the Workflow orphaned.
-func (s *Store) RearmRunCancellation(ctx context.Context, runID, jobName string) error {
-	if strings.TrimSpace(runID) == "" || strings.TrimSpace(jobName) == "" {
+func (s *Store) RearmRunCancellation(ctx context.Context, runID, workflowName string) error {
+	if strings.TrimSpace(runID) == "" || strings.TrimSpace(workflowName) == "" {
 		return fmt.Errorf("%w: run ID and job name are required", ErrInvalid)
 	}
 	if _, err := s.db.ExecContext(ctx, `
@@ -158,7 +158,7 @@ SELECT id, ?, superseded_by, 'superseded', ?
 FROM runs
 WHERE id = ? AND status = 'interrupted' AND (superseded_by != '' OR phase = 'cancelled')
 ON CONFLICT(run_id) DO UPDATE SET job_name = excluded.job_name, completed_at = NULL`,
-		jobName, unixNano(s.now()), runID); err != nil {
+		workflowName, unixNano(s.now()), runID); err != nil {
 		return fmt.Errorf("re-arm run cancellation: %w", err)
 	}
 	return nil

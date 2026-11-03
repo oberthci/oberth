@@ -74,7 +74,7 @@ func TestExecuteInitNodeAutoDetect(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "package.json"), "{}\n")
 	var output bytes.Buffer
-	if err := executeInit(dir, "", false, &output); err != nil {
+	if err := executeInit(dir, false, &output); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "detected: node") {
@@ -95,7 +95,7 @@ func TestExecuteInitPythonAutoDetect(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "pyproject.toml"), "[project]\nname = \"test\"\n")
 	var output bytes.Buffer
-	if err := executeInit(dir, "", false, &output); err != nil {
+	if err := executeInit(dir, false, &output); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "detected: python") {
@@ -107,7 +107,7 @@ func TestExecuteInitGenericAutoDetect(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	var output bytes.Buffer
-	if err := executeInit(dir, "", false, &output); err != nil {
+	if err := executeInit(dir, false, &output); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "detected: generic") {

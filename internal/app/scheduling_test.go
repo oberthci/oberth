@@ -20,7 +20,7 @@ func TestArgoSchedulingUsesEffectiveTestedSHA(t *testing.T) {
 	controller := &schedulingControl{}
 	jobs := &ArgoJobs{controller: controller}
 	for _, tested := range []string{"", "merged-tree"} {
-		run := model.Run{SHA: "pushed-object", TestedSHA: tested, JobName: "wf", ID: "run"}
+		run := model.Run{SHA: "pushed-object", TestedSHA: tested, WorkflowName: "wf", ID: "run"}
 		if _, err := jobs.ObserveScheduling(t.Context(), run); err != nil {
 			t.Fatal(err)
 		}

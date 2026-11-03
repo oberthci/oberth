@@ -26,7 +26,7 @@ import (
 // ends up in a shell history.
 //
 // Nothing in this file may fail an install. A cluster that will not answer for
-// its own TLS Secret, a home directory that will not accept a write, a refused
+// its OpenBao TLS identity, a home directory that will not accept a write, a refused
 // prompt: each of them means the operator finishes by hand, which is what the
 // table row says. Only ErrInterrupted propagates.
 
@@ -94,6 +94,10 @@ func offerClientAccessToConfiguredDeployment(ctx context.Context, cfg Config, de
 }
 
 func runClientAccessOffer(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, freshToken bool) error {
+	if deps.ClientServiceType == "ClusterIP" && cfg.ClientHost == "" {
+		tw.AppendRow("Client access", "ClusterIP: configure an internal route or port-forward first", "⚠ manual", false)
+		return nil
+	}
 	w := deps.Output
 	color := isColor(deps)
 
@@ -143,7 +147,8 @@ func runClientAccessOffer(ctx context.Context, cfg Config, deps Deps, tw *tableW
 		return nil
 	}
 
-	baseURL := "https://" + URLHost(clientReachableHost(deps)) + ":" + httpsNodePort
+	_, httpsPort := clientPorts(deps)
+	baseURL := "https://" + URLHost(clientReachableHost(deps)) + ":" + httpsPort
 	tokenCommand, tokenHint := tokenCommandForHost()
 
 	if choice == clientAccessBoth || choice == clientAccessCLI {
@@ -364,12 +369,9 @@ func printClientAccessNotes(w io.Writer, root string, choice int, storeCommand s
 // certificateNamesNotYetIssued reports the addresses a deployment has asked its
 // certificate to carry that the certificate it already has does not.
 //
-// The TLS Secret is generated once and kept, and the template renders nothing
-// when it is already present, so tls.extraDNSNames on an existing release has
-// no effect until that Secret is deleted. Emitting the values silently and
-// letting the operator discover it as a hostname mismatch weeks later is the
-// failure this prevents: the installer holds a cluster client and the Secret is
-// right there, so it can simply look.
+// Compare requested names with the certificate read through the running
+// server's identity path. Existing deployments can require certificate
+// rotation before the additional names become usable.
 //
 // Returns nothing for a fresh install, where there is no certificate yet and
 // the values are about to be honoured, and nothing when the existing

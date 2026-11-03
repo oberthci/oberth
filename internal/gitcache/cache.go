@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/oberthci/oberth/internal/boundedio"
 )
 
 const upstreamRefPrefix = "refs/oberth/upstream/"
@@ -37,23 +39,25 @@ type materializeManifest struct {
 // Cache owns bare repositories under one persistent root.
 type Cache struct {
 	// Hook read-only children stay in the enclosing receive process group.
-	hookChild       bool
-	backend         gitBackend
-	root            string
-	outboxRoot      string
-	globalConfig    string
-	upstream        func(string) (string, error)
-	qualify         func(string) (RepoQualification, error)
-	qualifyContext  func(context.Context, string) (RepoQualification, error)
-	gitBinary       string
-	timeout         time.Duration
-	env             map[string]string
-	redact          []string
-	logger          Logger
-	repositoryGate  func(context.Context, string) error
-	preFinalizeGate func(context.Context) error
-	locks           sync.Map
-	receiveLocks    sync.Map
+	allowLocalUpstreams   bool
+	hookChild             bool
+	backend               gitBackend
+	root                  string
+	outboxRoot            string
+	globalConfig          string
+	upstream              func(string) (string, error)
+	qualify               func(string) (RepoQualification, error)
+	qualifyContext        func(context.Context, string) (RepoQualification, error)
+	gitBinary             string
+	timeout               time.Duration
+	env                   map[string]string
+	redact                []string
+	logger                Logger
+	repositoryGate        func(context.Context, string) error
+	promotionPinAbandoned func(context.Context, string, string, string) (bool, error)
+	preFinalizeGate       func(context.Context) error
+	locks                 sync.Map
+	receiveLocks          sync.Map
 }
 
 // New validates static configuration without contacting an upstream.
@@ -93,19 +97,21 @@ func New(config Config) (*Cache, error) {
 		}
 	}
 	cache := &Cache{
-		root:            root,
-		outboxRoot:      outboxRoot,
-		globalConfig:    globalConfig,
-		upstream:        config.Upstream,
-		qualify:         config.RepoQualifier,
-		qualifyContext:  config.RepoQualifierContext,
-		gitBinary:       gitBinary,
-		timeout:         defaultTimeout(config.CommandTimeout),
-		env:             cloneMap(config.Env),
-		redact:          append([]string(nil), config.Redact...),
-		logger:          logger,
-		preFinalizeGate: config.PreFinalizeGate,
-		repositoryGate:  config.RepositoryGate,
+		allowLocalUpstreams:   config.AllowLocalUpstreams,
+		root:                  root,
+		outboxRoot:            outboxRoot,
+		globalConfig:          globalConfig,
+		upstream:              config.Upstream,
+		qualify:               config.RepoQualifier,
+		qualifyContext:        config.RepoQualifierContext,
+		gitBinary:             gitBinary,
+		timeout:               defaultTimeout(config.CommandTimeout),
+		env:                   cloneMap(config.Env),
+		redact:                append([]string(nil), config.Redact...),
+		logger:                logger,
+		preFinalizeGate:       config.PreFinalizeGate,
+		repositoryGate:        config.RepositoryGate,
+		promotionPinAbandoned: config.PromotionPinAbandoned,
 	}
 	cache.backend = &cliBackend{cache: cache}
 	return cache, nil
@@ -120,8 +126,19 @@ func (c *Cache) Ensure(ctx context.Context, input string) (Repository, error) {
 		return Repository{}, err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return Repository{}, err
+	}
 	defer lock.Unlock()
+	identity := c.reservationIdentity(repo, path)
+	if reservation, err := c.readReservation(identity); err == nil && (reservation.State == receiveReserved || reservation.State == receiveGateFailed) {
+		if err := c.checkRepositoryActive(ctx, input); err != nil {
+			return Repository{}, err
+		}
+		return c.ensureCachedOnlyLocked(ctx, repo, path)
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return Repository{}, err
+	}
 	return c.ensureLocked(ctx, input, repo, path)
 }
 
@@ -141,7 +158,34 @@ func (c *Cache) EnsureForFetch(ctx context.Context, input string) (Repository, e
 		return Repository{}, err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := ctx.Err(); err != nil {
+		return Repository{}, err
+	}
+	if !lock.TryLock() {
+		if err := lock.RLockContext(ctx); err != nil {
+			return Repository{}, err
+		}
+		defer lock.RUnlock()
+		if err := c.checkRepositoryActive(ctx, input); err != nil {
+			return Repository{}, err
+		}
+		if !c.isBare(ctx, path) {
+			return Repository{}, fmt.Errorf("repository %s is not cached", repo)
+		}
+		expected, err := c.validatedUpstream(input)
+		if err != nil {
+			return Repository{}, err
+		}
+		actual, err := c.capture(ctx, path, "remote", "get-url", "upstream")
+		if err != nil {
+			return Repository{}, err
+		}
+		if expected != actual {
+			return Repository{}, errors.New("cached upstream identity changed while repository is busy")
+		}
+		branch, err := c.currentDefaultBranch(ctx, path)
+		return Repository{Path: path, DefaultBranch: branch, Stale: true}, err
+	}
 	defer lock.Unlock()
 	if err := c.checkRepositoryActive(ctx, input); err != nil {
 		return Repository{}, err
@@ -354,6 +398,9 @@ func (c *Cache) prepareReleaseAdmissionLocked(ctx context.Context, path string, 
 }
 
 func (c *Cache) refresh(ctx context.Context, input, path string) (string, error) {
+	if err := c.migratePromotionPins(ctx, path); err != nil {
+		return "", err
+	}
 	old, err := c.listRefs(ctx, path, upstreamRefPrefix)
 	if err != nil {
 		return "", err
@@ -362,6 +409,9 @@ func (c *Cache) refresh(ctx context.Context, input, path string) (string, error)
 		return "", err
 	}
 	if err := c.fetchTracking(ctx, path); err != nil {
+		return "", err
+	}
+	if err := c.sweepDeliveredPromotionPins(ctx, input, path); err != nil {
 		return "", err
 	}
 	if err := c.materialize(ctx, path, old); err != nil {
@@ -395,6 +445,9 @@ func (c *Cache) validatedUpstream(input string) (string, error) {
 	}
 	if strings.TrimSpace(remote) == "" {
 		return "", fmt.Errorf("upstream for %s is empty", input)
+	}
+	if filepath.IsAbs(remote) && !c.allowLocalUpstreams {
+		return "", fmt.Errorf("%w: local filesystem upstreams are disabled", ErrUpstreamRefused)
 	}
 	if err := ValidateUpstream(remote); err != nil {
 		return "", fmt.Errorf("upstream for %s: %w", input, err)
@@ -860,9 +913,9 @@ func (c *Cache) repoLock(cachePath string) *repositoryLock {
 // callback delivery, without forcing callbacks to run under repoLock. Receive
 // handlers need to inspect the accepted Git objects and therefore legitimately
 // re-enter Cache methods that acquire repoLock themselves.
-func (c *Cache) receiveLock(repo string) *sync.Mutex {
-	value, _ := c.receiveLocks.LoadOrStore(repo, &sync.Mutex{})
-	return value.(*sync.Mutex)
+func (c *Cache) receiveLock(repo string) *repositoryLock {
+	value, _ := c.receiveLocks.LoadOrStore(repo, newRepositoryLock())
+	return value.(*repositoryLock)
 }
 
 // RemoveRepository deletes the bare cache directory for one repository,
@@ -874,18 +927,64 @@ func (c *Cache) receiveLock(repo string) *sync.Mutex {
 // missing directory is success: removal is idempotent, and the next push's
 // Ensure recreates the cache from the upstream.
 func (c *Cache) RemoveRepository(input string) error {
+	return c.RemoveRepositoryContext(context.Background(), input)
+}
+func (c *Cache) RemoveRepositoryContext(ctx context.Context, input string) error {
 	_, path, err := c.path(input)
 	if err != nil {
 		return err
 	}
-	receiveLock := c.receiveLock(path)
-	receiveLock.Lock()
-	defer receiveLock.Unlock()
+	return c.removeRepositoryPath(ctx, path, nil)
+}
+
+// RemoveLegacyRepositoryContext uses the same path builder and locks for a
+// flat pre-migration cache. The caller must prove no surviving mapping owns it.
+func (c *Cache) RemoveLegacyRepositoryContext(ctx context.Context, input string) error {
+	repo, err := NormalizeRepo(input)
+	if err != nil {
+		return err
+	}
+	return c.removeRepositoryPath(ctx, c.qualifiedCachePath("", "", repo), nil)
+}
+
+// RemoveRepositoryWith commits a catalog change while the live cache owner
+// holds both receive and repository locks. Pending receive evidence is retained.
+func (c *Cache) RemoveRepositoryWith(ctx context.Context, input string, change func() error) error {
+	_, path, err := c.path(input)
+	if err != nil {
+		return err
+	}
+	return c.removeRepositoryPath(ctx, path, func() error {
+		_, _, repo, err := ParseRepoPath(input)
+		if err != nil {
+			return err
+		}
+		if _, err := c.readReservation(c.reservationIdentity(repo, path)); err == nil {
+			return ErrArchivePendingReceive
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return change()
+	})
+}
+func (c *Cache) removeRepositoryPath(ctx context.Context, path string, change func() error) error {
+	receive := c.receiveLock(path)
+	if err := receive.LockContext(ctx); err != nil {
+		return err
+	}
+	defer receive.Unlock()
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return err
+	}
 	defer lock.Unlock()
+	if change != nil {
+		if err := change(); err != nil {
+			return err
+		}
+	}
 	if err := os.RemoveAll(path); err != nil {
-		return fmt.Errorf("remove repository cache: %w", err)
+		return fmt.Errorf("remove repository cache after catalog removal: %w", err)
 	}
 	return nil
 }
@@ -902,8 +1001,10 @@ func (c *Cache) RefSHA(ctx context.Context, input string, branch string) (string
 		return "", err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
-	defer lock.Unlock()
+	if err := lock.RLockContext(ctx); err != nil {
+		return "", err
+	}
+	defer lock.RUnlock()
 	if !c.isBare(ctx, path) {
 		return "", fmt.Errorf("repository %s is not cached", repo)
 	}
@@ -925,8 +1026,10 @@ func (c *Cache) SnapshotRefs(ctx context.Context, input string) (map[string]stri
 		return nil, err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
-	defer lock.Unlock()
+	if err := lock.RLockContext(ctx); err != nil {
+		return nil, err
+	}
+	defer lock.RUnlock()
 	return c.listRefsAtMost(ctx, path, maximumReceiveSnapshotRefs, "refs/heads/", "refs/tags/")
 }
 
@@ -944,13 +1047,16 @@ func (c *Cache) cleanReplacementRefsLocked(ctx context.Context, path string) err
 }
 
 func (c *Cache) listRefs(ctx context.Context, path string, prefixes ...string) (map[string]string, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	args := append([]string{"for-each-ref", "--format=%(refname) %(objectname)"}, prefixes...)
-	var buf bytes.Buffer
-	if err := c.run(ctx, commandSpec{dir: path, args: args, stdout: &buf, stderr: &buf}); err != nil {
-		return nil, err
+	buf := &boundedio.Buffer{Limit: maxRefsOutput, OnOverflow: cancel}
+	err := c.run(ctx, commandSpec{dir: path, args: args, stdout: buf, stderr: buf})
+	if buf.Err() != nil {
+		return nil, fmt.Errorf("ref output exceeds %d bytes; too many refs", maxRefsOutput)
 	}
-	if buf.Len() > maxRefsOutput {
-		return nil, fmt.Errorf("ref output exceeds %d bytes (%d bytes); too many refs", maxRefsOutput, buf.Len())
+	if err != nil {
+		return nil, err
 	}
 	refs := make(map[string]string)
 	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
@@ -1003,13 +1109,21 @@ func (c *Cache) Serve(ctx context.Context, input string, service Service, protoc
 		return err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
-	defer lock.Unlock()
+	if lock.TryLock() {
+		if err := c.cleanReplacementRefsLocked(ctx, path); err != nil {
+			lock.Unlock()
+			return err
+		}
+		lock.downgrade()
+	} else if err := lock.RLockContext(ctx); err != nil {
+		return err
+	}
+	defer lock.RUnlock()
+	if err := c.checkReceiveOutbox(input); err != nil {
+		return err
+	}
 	if !c.isBare(ctx, path) {
 		return fmt.Errorf("repository %s is not cached", repo)
-	}
-	if err := c.cleanReplacementRefsLocked(ctx, path); err != nil {
-		return fmt.Errorf("clean replacement refs for %s: %w", repo, err)
 	}
 	return c.serveLocked(ctx, path, parsed, protocol, stdin, stdout, stderr)
 }
@@ -1019,10 +1133,22 @@ func (c *Cache) serveLocked(ctx context.Context, path string, service Service, p
 	if protocol != "" {
 		extra["GIT_PROTOCOL"] = protocol
 	}
-	return c.run(ctx, commandSpec{
+	return c.runTransport(ctx, commandSpec{
 		dir: path, args: c.serviceArgs(service, path),
 		stdin: stdin, stdout: stdout, stderr: stderr, env: extra,
 	})
+}
+
+func (c *Cache) runTransport(ctx context.Context, command commandSpec) error {
+	// Repository preparation precedes this point; durable finalization follows it.
+	if transport, ok := command.stdin.(interface {
+		BeginTransport()
+		EndTransport()
+	}); ok {
+		transport.BeginTransport()
+		defer transport.EndTransport()
+	}
+	return c.run(ctx, command)
 }
 
 func (c *Cache) serviceArgs(service Service, path string) []string {
@@ -1084,39 +1210,18 @@ func (c *Cache) ListTags(ctx context.Context, input string) ([]string, error) {
 	return tags, nil
 }
 
-// TagTime returns the tagger date for an annotated tag, or the author date
-// for a lightweight tag's commit. Used by the GOPROXY handler (#662).
-func (c *Cache) TagTime(ctx context.Context, input, tag string) (time.Time, error) {
-	_, path, err := c.modulePath(ctx, input)
-	if err != nil {
-		return time.Time{}, err
-	}
-	unlock, err := c.lockModuleRepository(ctx, path)
-	if err != nil {
-		return time.Time{}, err
-	}
-	defer unlock()
-	if !c.isBare(ctx, path) {
-		return time.Time{}, fmt.Errorf("repository is not cached")
-	}
-	// Try annotated tag first (taggerdate), fall back to committerdate.
-	output, err := c.capture(ctx, path, "for-each-ref", "--format=%(creatordate:iso-strict)", "refs/tags/"+tag)
-	if err != nil {
-		return time.Time{}, err
-	}
-	dateStr := strings.TrimSpace(output)
-	if dateStr == "" {
-		return time.Time{}, fmt.Errorf("tag %s not found", tag)
-	}
-	return time.Parse(time.RFC3339, dateStr)
-}
-
 // ShowFile returns the verbatim contents of a single file at the given ref.
 // Used by the GOPROXY handler (#662) to serve go.mod. The bytes are returned
 // exactly as stored in the git tree — no trimming or normalisation — because
 // Go's checksum verification (go.sum /go.mod h1: lines) hashes the exact
 // file bytes and any whitespace change breaks the hash (#726).
 func (c *Cache) ShowFile(ctx context.Context, input, ref, filePath string) ([]byte, error) {
+	if err := validateModuleRef(ref); err != nil {
+		return nil, err
+	}
+	if err := validateBlobPath(filePath); err != nil {
+		return nil, err
+	}
 	_, repoPath, err := c.modulePath(ctx, input)
 	if err != nil {
 		return nil, err
@@ -1136,7 +1241,7 @@ func (c *Cache) ShowFile(ctx context.Context, input, ref, filePath string) ([]by
 	var buf bytes.Buffer
 	if err := c.run(ctx, commandSpec{
 		dir:    repoPath,
-		args:   []string{"show", ref + ":" + filePath},
+		args:   []string{"show", "--end-of-options", ref + ":" + filePath, "--"},
 		stdout: &buf,
 	}); err != nil {
 		return nil, c.classifyModuleReadFailure(ctx, repoPath, ref, err)
@@ -1147,6 +1252,9 @@ func (c *Cache) ShowFile(ctx context.Context, input, ref, filePath string) ([]by
 // ArchiveTar writes a tar archive of the tree at the given ref.
 // Used by the GOPROXY handler (#662) to build module zip files.
 func (c *Cache) ArchiveTar(ctx context.Context, input, ref string, w io.Writer) error {
+	if err := validateModuleRef(ref); err != nil {
+		return err
+	}
 	_, repoPath, err := c.modulePath(ctx, input)
 	if err != nil {
 		return err
@@ -1161,7 +1269,7 @@ func (c *Cache) ArchiveTar(ctx context.Context, input, ref string, w io.Writer) 
 	}
 	err = c.run(ctx, commandSpec{
 		dir:    repoPath,
-		args:   []string{"archive", "--format=tar", ref},
+		args:   []string{"archive", "--format=tar", "--", ref},
 		stdout: w,
 	})
 	if err != nil {
@@ -1169,3 +1277,19 @@ func (c *Cache) ArchiveTar(ctx context.Context, input, ref string, w io.Writer) 
 	}
 	return nil
 }
+
+func validateModuleRef(ref string) error {
+	if ValidateSHA(ref) == nil {
+		return nil
+	}
+	if strings.HasPrefix(ref, "refs/heads/") {
+		return ValidateBranch(strings.TrimPrefix(ref, "refs/heads/"))
+	}
+	if strings.HasPrefix(ref, "refs/tags/") {
+		return ValidateTag(strings.TrimPrefix(ref, "refs/tags/"))
+	}
+	return ValidateTag(ref)
+}
+
+// CacheRoot identifies the daemon-owned repository cache for removal requests.
+func (c *Cache) CacheRoot() string { return c.root }

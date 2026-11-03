@@ -12,6 +12,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/vmrunner"
 )
 
@@ -134,7 +135,7 @@ func TestRunViewsAddDisplayStatusAndReasonToDefaultList(t *testing.T) {
 	}
 }
 
-func TestRestartRefireDisplaysCancelledWithSuccessor(t *testing.T) {
+func TestRestartResetDisplaysQueuedUnderOriginalID(t *testing.T) {
 	fixture := newControlFixture(t)
 	ctx := context.Background()
 	original, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: "restart-display", Repository: fixture.repo,
@@ -157,9 +158,8 @@ func TestRestartRefireDisplaysCancelledWithSuccessor(t *testing.T) {
 		t.Fatal(err)
 	}
 	run := value.(RunDetailResponse).Run
-	want := "server restart, re-queued as " + shortRunID(replacement.ID)
-	if run.DisplayStatus != "superseded" || run.DisplayReason != want || run.SupersededBy != replacement.ID {
-		t.Fatalf("restart presentation = %+v, want %q", run, want)
+	if run.DisplayStatus != "queued" || run.Reason != store.RestartRequeueReason || run.SupersededBy != "" || replacement.ID != original.ID {
+		t.Fatalf("restart presentation = %+v", run)
 	}
 }
 
@@ -346,7 +346,7 @@ func TestRunListsUseStorePositionsWithoutPerRowQueries(t *testing.T) {
 func TestPromotionRestartDisplaysRetryNeededWithoutCIIssue(t *testing.T) {
 	f := newControlFixture(t)
 	ctx := t.Context()
-	enqueued, _, err := f.store.EnqueuePromotionRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "promotion/main/bbbbbbbbbbbb", SHA: strings.Repeat("b", 40), Actor: "agent", Trigger: "promotion", TestedSHA: strings.Repeat("b", 40), BaseSHA: strings.Repeat("a", 40)}, model.PromotionSpec{RepoID: f.repo.ID, SourceBranch: "feature/restart", SourceSHA: strings.Repeat("b", 40), TargetRef: "main", PreviousSHA: strings.Repeat("a", 40), ResultSHA: strings.Repeat("b", 40), Actor: "agent"})
+	enqueued, _, err := storetest.EnqueuePromotionRun(f.store, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "promotion/main/bbbbbbbbbbbb", SHA: strings.Repeat("b", 40), Actor: "agent", Trigger: "promotion", TestedSHA: strings.Repeat("b", 40), BaseSHA: strings.Repeat("a", 40)}, model.PromotionSpec{RepoID: f.repo.ID, SourceBranch: "feature/restart", SourceSHA: strings.Repeat("b", 40), TargetRef: "main", PreviousSHA: strings.Repeat("a", 40), ResultSHA: strings.Repeat("b", 40), Actor: "agent"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +356,7 @@ func TestPromotionRestartDisplaysRetryNeededWithoutCIIssue(t *testing.T) {
 	if err = f.store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	recovered, err := store.Open(ctx, filepath.Join(f.root, "oberth.sqlite"), store.Options{})
+	recovered, err := storetest.Open(ctx, filepath.Join(f.root, "oberth.sqlite"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

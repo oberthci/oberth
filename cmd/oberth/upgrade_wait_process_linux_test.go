@@ -97,6 +97,7 @@ case "$*" in
    if [ "$OBERTH_TEST_ALREADY" = yes ]; then chart=oberth-0.17.52; else chart=oberth-0.17.51; fi
    printf '[{"name":"oberth","revision":1,"chart":"%s","status":"deployed"}]\n' "$chart" ;;
  *"show values "*) printf 'image:\n  ref: example.invalid/oberth@sha256:1111111111111111111111111111111111111111111111111111111111111111\n' ;;
+ *"upgrade oberth "*"--dry-run=server"*) printf '{"config":{}}\n' ;;
  *"upgrade oberth "*) : > "$OBERTH_TEST_UPGRADE_MARKER"; echo 'fixture Helm upgrade refusal' >&2; exit 73 ;;
  *) echo 'unexpected fixture Helm command' >&2; exit 91 ;;
 esac
@@ -250,7 +251,7 @@ esac
 						t.Fatalf("child kill: %v: %s", err, text)
 					}
 				case "cancel":
-					if exit.ExitCode() != 1 || !strings.Contains(text, "context canceled") {
+					if exit.ExitCode() != 130 || strings.Contains(text, "context canceled") || strings.Contains(text, "oberth:") {
 						t.Fatalf("cancel: %v: %s", err, text)
 					}
 				case "deadline":
@@ -258,7 +259,8 @@ esac
 						t.Fatalf("deadline: %v: %s", err, text)
 					}
 				case "unavailable":
-					if exit.ExitCode() != 1 || unavailableProbes.Load() < 2 || !strings.Contains(text, "HTTP 503") || !strings.Contains(text, "context canceled") {
+					// This case ends with SIGTERM after proving that 503 is retried.
+					if exit.ExitCode() != 130 || unavailableProbes.Load() < 2 || !strings.Contains(text, "HTTP 503") || strings.Contains(text, "context canceled") || strings.Contains(text, "oberth:") {
 						t.Fatalf("unavailable: %v: %s", err, text)
 					}
 				case "old-critical":

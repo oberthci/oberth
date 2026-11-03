@@ -1,7 +1,7 @@
 # Oberth
 
 AI-native CI for Kubernetes — a self-hosted gate that runs every AI-agent push
-as one Kubernetes Job and lets only green reach your forge.
+as an Argo Workflow and lets only green reach your forge.
 
 Agents `git push` to Oberth over SSH. Each push runs the repository's own
 pipeline as an Argo Workflow — no forge queue, no API rate limits, feedback at
@@ -33,8 +33,8 @@ Website: [oberth.ci](https://oberth.ci)
   from the default branch, with exactly the secrets the repository declares,
   intersected with the administrator allowlist. After every burn is green,
   Oberth publishes the exact admitted tag object upstream.
-- **MCP** — eighteen tools over authenticated HTTPS for AI agents: SHA- and
-  exact-run status/logs, long-poll wait, trusted plan/apply, promotion, and the
+- **MCP** — tools over authenticated HTTPS for AI agents: SHA- and
+  exact-run status/logs, long-poll wait, promotion, and the
   issue queue.
 - **Audit** — every mutation joins a gap-free SHA-256 chain, always. Opt-in
   external anchoring adds RFC 3161 timestamps and public Rekor witnesses,
@@ -51,31 +51,17 @@ metadata:
     oberth.ci/secret-paths: oberth/data/release/r2-upload-token,oberth/data/release/cosign-secret
 ```
 
-Release steps wrap their command with `envconsul`, which authenticates to
-OpenBao via Kubernetes auth using the release-tier ServiceAccount token, reads
-the declared paths, and injects them into the child process environment.
-Branch builds receive zero release credentials, always.
+Release steps use `oberth secretstore exec` to authenticate with their
+ServiceAccount, fetch approved paths, and write private files to a verified
+tmpfs. The wrapper strips store credentials from the child environment and
+redacts fetched values from output. Branch builds receive no release credentials.
 
-Trusted infrastructure changes use a separate, phase-explicit contract. An
-actor authorizes `plan` for one exact already-green SHA and the target's exact
-current base. Plan and Apply use different operator-owned secret paths:
-`oberth/upstream/<org>/<repo>/plan/<name>` and
-`oberth/upstream/<org>/<repo>/apply/<name>`. A Plan can never fetch Apply
-credentials. The resulting plan file is capped at 16 MiB, encrypted through
-OpenBao Transit before it reaches Oberth's PVC, and bound to the exact source,
-target base, pipeline/lockfile identity, actor, and expiry. Promotion publishes
-Git first; only then does Oberth enqueue the bound artifact for one-shot Apply.
-Promotion evidence and Apply status remain distinct because Apply failure does
-not roll Git back or make publication unsuccessful.
-
-Setup is one script run where your own `bao`/`vault` CLI is authenticated —
-the Oberth binary has no code path that accepts a store admin token — and
-`oberth secretstore verify` proves the whole trust chain from inside the pod.
-On verified HTTPS the setup also creates one non-exportable Transit key for
-trusted-plan envelopes; its policy grants only that key's exact encrypt and
-decrypt endpoints. The installer-managed production path generates listener
-TLS material directly on OpenBao's retained PVC, publishes only the public CA
-through a ConfigMap, and never starts a plaintext listener.
+Setup runs in the operator's authenticated `bao`/`vault` CLI session.
+The server daemon authenticates through its workload identity; the operator-only
+`oberth secretstore sync` command reads `BAO_TOKEN` from its environment.
+`oberth secretstore verify` checks the workload trust chain inside the pod.
+The installer bootstraps verified OpenBao TLS directly on its retained PVC,
+publishes only the public CA through a ConfigMap, and keeps its listener encrypted.
 
 ## Quick start
 
@@ -176,8 +162,8 @@ MCP client (full walkthrough in [docs/mcp-setup.md](docs/mcp-setup.md)):
    Workflow. The presence of declared secret-store paths in the
    `oberth.ci/secret-paths` annotation selects the credentialed
    ServiceAccount and its projected token. Release steps wrap their command
-   with `envconsul`, which authenticates to OpenBao via Kubernetes auth and
-   injects the declared secrets into the child process environment. Only
+   with `oberth secretstore exec`, which fetches the approved secrets into
+   private files on verified tmpfs and redacts child output. Only
    after every burn is terminal green does Oberth sync the exact admitted
    tag object upstream.
 
@@ -258,7 +244,7 @@ running beside them, and each member keeps its declared size. Group names are
 `status` and `run_get` show the group and, while a run waits on it, which run
 holds it.
 
-`XL` needs an admin size grant (`oberth size grant <repo> --max XL`, or MCP
+For undeclared legacy workflows, `XL` needs an admin size grant (`oberth size grant <repo> --max XL`, or MCP
 `size_grant`); without one a repository's branch, promotion and schedule runs
 may declare at most `L`, and an XL declaration fails at admission instead of
 making every other repository wait for a full drain. The grant applies to
@@ -318,6 +304,12 @@ metadata:
     oberth.ci/size: M
     oberth.ci/concurrency-group: terraform-state
 ```
+
+Numeric resource ceilings use `oberth resource grant/get/revoke` or MCP
+`resource_grant`, `resource_grant_get`, `resource_revoke`. Migration 40 copies
+existing size grants; later size changes affect only legacy admission and tag
+priority. Declared workflows never fall back to sizes. See
+[declared resources](docs/declared-resources.md).
 
 ## MCP tools (18)
 
@@ -384,9 +376,12 @@ unauthenticated.
 
 ## Security
 
-- Job pods run with `automountServiceAccountToken: false`, as non-root 65534,
-  all capabilities dropped, read-only root filesystem, seccomp
-  `RuntimeDefault`, bounded resources and deadlines.
+- Workflow Pods use server-enforced identities, dropped capabilities,
+  read-only root filesystems, seccomp `RuntimeDefault`, bounded resources and
+  deadlines. Credentialed main containers and the executor receive separate,
+  scoped projected tokens; ordinary build containers receive no store token.
+  [Non-root test leaves](docs/nonroot-test-leaves.md) have a separately enforced
+  UID and controller contract.
 - **Declared paths and the trigger together are the security boundary.**
   Pipelines without declared secret-store paths bind to the pipeline
   ServiceAccount and receive no secrets on either trigger. Release pipelines
@@ -396,9 +391,7 @@ unauthenticated.
   ServiceAccount, whose role reaches the upstream subtree only, so release
   credentials are unreachable from a branch push at the Vault layer. Branch
   pipelines may only declare upstream-scoped paths; system-namespace paths
-  require a release trigger and an administrator allowlist entry. Explicit trusted Plan and Apply
-  triggers receive only their distinct, phase-scoped paths; neither
-  phase can consume the other's operator-owned path namespace. All fetched
+  require a release trigger and an administrator allowlist entry. All fetched
   secret-store values are delivered to memory only.
 - Secret-store values never appear in etcd, Kubernetes objects, node disk, or
   logs; per-run store tokens are read-only, short-lived, and revoked after
@@ -460,9 +453,8 @@ the exact annotated tag only after the run is green.
 - [docs/secretstore-verification.md](docs/secretstore-verification.md) — three-tier secret-store verification
 - [docs/helm-service-migration.md](docs/helm-service-migration.md) — two-stage ownership-safe Service migration
 - [docs/standalone-configuration.md](docs/standalone-configuration.md) — preserving deployment protocol identities and configuring an owned private module namespace
-- [v0.17.59 release notes](docs/releases/v0.17.59.md) — resource measurements and release policy
-- [v0.17.59 upgrade runbook](docs/upgrade-v0.17.59.md) — backup, optional values, verification and schema-safe rollback
-- [docs/upgrade-schema-v3.md](docs/upgrade-schema-v3.md) — upgrading across a backup-and-replace store schema boundary (v2 → v3)
+- [Historical release evidence](docs/archive/README.md) — superseded pins and qualification records
+- [Deadcode gate](docs/deadcode.md) — pinned reachability checks and explicit exceptions
 - [docs/backup-restore.md](docs/backup-restore.md) — `oberth backup` / `oberth restore`: one encrypted file with the history and the secrets pipelines use, restored onto a fresh install
 - [AGENT-CONTRACT.md](AGENT-CONTRACT.md) — the cross-component compatibility contract
 

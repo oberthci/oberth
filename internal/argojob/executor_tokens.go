@@ -30,7 +30,25 @@ const executorTokenVolume = "exec-sa-token"
 const executorTokenDir = "/var/run/secrets/kubernetes.io/serviceaccount"
 
 // #nosec G101 -- fixed runtime path/command, not credential material.
-const executorTokenWaitCommand = "until test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do sleep 1; done"
+const executorTokenWaitCommand = `trap 'printf "%s\n" "executor token wait terminated" >&2; exit 143' TERM
+trap 'printf "%s\n" "executor token wait interrupted" >&2; exit 130' INT
+printf '%s\n' 'waiting for executor token from Oberth' >&2
+waited_seconds=0
+until test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do
+  if ! sleep 1; then
+    printf '%s\n' 'executor token wait failed' >&2
+    exit 1
+  fi
+  waited_seconds=$((waited_seconds + 1))
+  if [ "$((waited_seconds % 30))" -eq 0 ]; then
+    printf 'still waiting for executor token from Oberth after %ss\n' "$waited_seconds" >&2
+  fi
+done
+printf '%s\n' 'executor token ready' >&2`
+
+// Existing Pods retain their exact server-authored waiter across an upgrade.
+// #nosec G101 -- fixed runtime path/command, not credential material.
+const legacyExecutorTokenWaitCommand = "until test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do sleep 1; done"
 
 // Argo adds a Secret-backed executor volume before applying the server-owned
 // pod patch. Replace that volume with tmpfs and wait for a Pod-bound TokenRequest
@@ -95,6 +113,10 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 	if controller.kube == nil || controller.seeder == nil {
 		return nil
 	}
+	capability, err := controller.boundCapability(ctx, wf, 0)
+	if err != nil {
+		return identityFailure("operator_capability", err)
+	}
 	pods, err := controller.kube.CoreV1().Pods(wf.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "workflows.argoproj.io/workflow=" + wf.Name})
 	if err != nil {
 		if ctx.Err() == nil && retryExecutorIdentityRead(err) {
@@ -126,19 +148,23 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 			continue
 		}
 		// Only a resource Pod's main container can mount the executor token.
-		// Its node mapping must settle before selecting the launcher identity;
+		// Its node mapping must settle before selecting the operator identity;
 		// ordinary steps can receive their executor token immediately.
 		if nodeID := pod.Annotations["workflows.argoproj.io/node-id"]; nodeID != "" && mainMountsExecutorToken(pod) {
 			if _, ok := wf.Status.Nodes[nodeID]; !ok {
 				continue
 			}
 		}
-		launcher := resourcePodTemplate(wf, pod, controller.config.VMLauncherServiceAccount)
+		resourceAccount := controller.config.VMLauncherServiceAccount
+		if capability != nil {
+			resourceAccount = capability.ServiceAccount
+		}
+		launcher := resourcePodTemplate(wf, pod, resourceAccount)
 		if err := validateExecutorTokenTarget(pod, controller.config.SourceSeedImage, launcher); err != nil {
 			return identityFailure("target_validation", err)
 		}
 		serviceAccount := controller.config.ExecutorServiceAccount
-		if launcher {
+		if launcher && capability == nil {
 			if err := controller.ensureVMIForResourcePod(ctx, wf, pod); err != nil {
 				if errors.Is(err, errResourceDeletePending) {
 					continue
@@ -146,6 +172,9 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 				return identityFailure("launcher_provision", err)
 			}
 			serviceAccount = controller.config.VMLauncherServiceAccount
+		}
+		if launcher && capability != nil {
+			serviceAccount = capability.ServiceAccount
 		}
 		// Bound tokens die with the workflow-owned identity Pod. The deadline covers the workflow,
 		// including queue/startup slack, without needing a long-lived token Secret.
@@ -211,9 +240,9 @@ func mainMountsExecutorToken(pod *corev1.Pod) bool {
 }
 
 // A controller-owned Pod node resolves to a named, admitted resource template.
-// A Pod annotation alone cannot select the launcher identity.
-func resourcePodTemplate(wf *wfv1.Workflow, pod *corev1.Pod, launcherSA string) bool {
-	if launcherSA == "" {
+// A Pod annotation alone cannot select the operator identity.
+func resourcePodTemplate(wf *wfv1.Workflow, pod *corev1.Pod, operatorSA string) bool {
+	if operatorSA == "" {
 		return false
 	}
 	node, ok := wf.Status.Nodes[pod.Annotations["workflows.argoproj.io/node-id"]]
@@ -222,7 +251,7 @@ func resourcePodTemplate(wf *wfv1.Workflow, pod *corev1.Pod, launcherSA string) 
 	}
 	for i := range wf.Spec.Templates {
 		t := &wf.Spec.Templates[i]
-		if t.Name == node.TemplateName && t.Resource != nil && t.Executor != nil && t.Executor.ServiceAccountName == launcherSA {
+		if t.Name == node.TemplateName && t.Resource != nil && t.Executor != nil && t.Executor.ServiceAccountName == operatorSA {
 			return true
 		}
 	}
@@ -249,7 +278,7 @@ func validateExecutorTokenTarget(pod *corev1.Pod, image string, resourcePod bool
 	found := false
 	for _, container := range append(append([]corev1.Container{}, pod.Spec.InitContainers...), pod.Spec.Containers...) {
 		if container.Name == executorTokenWaiter {
-			if container.Image != image || len(container.Command) != 3 || container.Command[0] != "sh" || container.Command[1] != "-c" || len(container.Args) != 0 || container.Command[2] != executorTokenWaitCommand {
+			if container.Image != image || len(container.Command) != 3 || container.Command[0] != "sh" || container.Command[1] != "-c" || len(container.Args) != 0 || (container.Command[2] != executorTokenWaitCommand && container.Command[2] != legacyExecutorTokenWaitCommand) {
 				return errors.New("executor identity waiter was modified")
 			}
 			found = true
@@ -314,7 +343,11 @@ func (controller *Controller) retireExecutorIdentity(ctx context.Context, wf *wf
 	if controller.kube == nil || wf.UID == "" {
 		return nil
 	}
-	for _, account := range []string{controller.config.ExecutorServiceAccount, controller.config.VMLauncherServiceAccount} {
+	accounts := []string{controller.config.ExecutorServiceAccount, controller.config.VMLauncherServiceAccount}
+	if wf.Annotations[capabilityAnnotation] != "" {
+		accounts = append(accounts, wf.Spec.ServiceAccountName)
+	}
+	for _, account := range accounts {
 		if account == "" {
 			continue
 		}

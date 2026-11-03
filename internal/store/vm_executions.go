@@ -270,7 +270,7 @@ func scanVMExecution(row rowScanner) (vmrunner.Execution, error) {
 	var value vmrunner.Execution
 	var kind, intent, identity, instance string
 	var created, updated int64
-	if err := row.Scan(&kind, &intent, &identity, &instance, &value.Submitted, &value.Rejected, &value.Cleaning, &value.Cleaned, &created, &updated); err != nil {
+	if err := scanRowNotFound(row, "VMExecution", &kind, &intent, &identity, &instance, &value.Submitted, &value.Rejected, &value.Cleaning, &value.Cleaned, &created, &updated); err != nil {
 		return value, err
 	}
 	if kind != "vm" {

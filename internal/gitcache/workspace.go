@@ -20,8 +20,10 @@ func (c *Cache) Checkout(ctx context.Context, input, sha, destination string) er
 		return err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
-	defer lock.Unlock()
+	if err := lock.RLockContext(ctx); err != nil {
+		return err
+	}
+	defer lock.RUnlock()
 	return c.checkoutLocked(ctx, path, sha, destination)
 }
 

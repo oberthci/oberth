@@ -33,7 +33,7 @@ type fakeBackend struct {
 	runFilter       RunFilter
 	runPage         []model.Run
 	runID           string
-	logBurn         string
+	logStage        string
 	logStep         string
 	logCalls        int
 	logFilter       runlog.Filter
@@ -85,10 +85,10 @@ func (backend *fakeBackend) Run(_ context.Context, _ Actor, id string) (any, err
 	backend.runID = id
 	return map[string]any{"Run": map[string]any{"ID": id}, "Steps": []any{}}, nil
 }
-func (backend *fakeBackend) RunLog(_ context.Context, _ Actor, id, burn, step string) (any, error) {
-	backend.runID, backend.logBurn, backend.logStep = id, burn, step
+func (backend *fakeBackend) RunLog(_ context.Context, _ Actor, id, stage, step string) (any, error) {
+	backend.runID, backend.logStage, backend.logStep = id, stage, step
 	backend.logCalls++
-	return map[string]string{"run_id": id, "burn": burn, "step": step, "output": "[test/unit] ok\n"}, nil
+	return map[string]string{"run_id": id, "burn": stage, "step": step, "output": "[test/unit] ok\n"}, nil
 }
 func (backend *fakeBackend) RunArtifacts(_ context.Context, _ Actor, id string) (any, error) {
 	backend.runID = id
@@ -123,11 +123,11 @@ type fakeArtifact struct {
 func (f fakeArtifact) ArtifactBytes() []byte { return []byte(f.body) }
 func (f fakeArtifact) ArtifactName() string  { return f.name }
 
-func (backend *fakeBackend) RunLogFiltered(_ context.Context, _ Actor, id, burn, step string, filter runlog.Filter) (any, error) {
-	backend.runID, backend.logBurn, backend.logStep = id, burn, step
+func (backend *fakeBackend) RunLogFiltered(_ context.Context, _ Actor, id, stage, step string, filter runlog.Filter) (any, error) {
+	backend.runID, backend.logStage, backend.logStep = id, stage, step
 	backend.logFilter = filter
 	backend.logCalls++
-	return map[string]any{"run_id": id, "burn": burn, "step": step, "output": "[test/unit] ok\n"}, nil
+	return map[string]any{"run_id": id, "burn": stage, "step": step, "output": "[test/unit] ok\n"}, nil
 }
 func (backend *fakeBackend) RunLogLive(_ context.Context, _ Actor, id string, offset int64) (any, error) {
 	backend.runID, backend.liveOffset = id, offset
@@ -493,8 +493,8 @@ func TestRunDetailAndLogViewsRequireAuthAndForwardSelectors(t *testing.T) {
 	logRequest.Header.Set("Authorization", "Bearer valid-token")
 	logResponse := httptest.NewRecorder()
 	server.Handler().ServeHTTP(logResponse, logRequest)
-	if logResponse.Code != http.StatusOK || backend.logBurn != "test" || backend.logStep != "unit" {
-		t.Fatalf("run log = %d, forwarded %q/%q", logResponse.Code, backend.logBurn, backend.logStep)
+	if logResponse.Code != http.StatusOK || backend.logStage != "test" || backend.logStep != "unit" {
+		t.Fatalf("run log = %d, forwarded %q/%q", logResponse.Code, backend.logStage, backend.logStep)
 	}
 	backend.logCalls = 0
 	for _, query := range []string{"burn=%20&step=unit", "burn=test&step=%20"} {
@@ -675,23 +675,25 @@ func TestDefaultClassifierReturns500(t *testing.T) {
 func TestMCPToolInputsMatchContract(t *testing.T) {
 	t.Parallel()
 	want := map[string][]string{
-		"status":             {"ref", "repo"},
-		"logs":               {"byte_offset", "context", "limit", "offset", "pattern", "repo", "sha", "step", "tail"},
-		"run_get":            {"id", "summary"},
-		"run_resources":      {"burn", "format", "include_failed", "last", "ref", "repo", "run", "step"},
-		"artifact_get":       {"context", "id", "limit", "name", "offset", "pattern", "tail"},
-		"run_retry":          {"id", "priority", "priority_reason"},
-		"run_cancel":         {"force", "id", "reason"},
-		"run_purge":          {"id", "reason", "what"},
-		"run_kvm_preflight":  {"id"},
-		"run_logs":           {"burn", "byte_offset", "context", "id", "limit", "offset", "pattern", "step", "tail"},
-		"wait":               {"id", "repo", "sha", "timeout", "trigger"},
-		"sync":               {"branch", "priority", "priority_reason", "repo", "sha"},
-		"promote":            {"branch", "priority", "priority_reason", "repo", "sha"},
-		"issue_list":         {"before", "kind", "limit", "query", "repo", "state"},
-		"issue_get":          {"body_limit", "fields", "id"},
-		"issue_get_many":     {"body_limit", "fields", "ids"},
-		"secretstore_verify": {"expect", "keys", "paths", "release_tier", "repo", "tier", "timeout"},
+		"status":              {"ref", "repo"},
+		"logs":                {"byte_offset", "context", "limit", "offset", "pattern", "repo", "sha", "step", "tail"},
+		"run_get":             {"id", "run_id", "summary"},
+		"run_resources":       {"burn", "format", "include_failed", "last", "ref", "repo", "run", "run_id", "step"},
+		"artifact_get":        {"context", "id", "limit", "name", "offset", "pattern", "run_id", "tail"},
+		"run_retry":           {"id", "priority", "priority_reason", "run_id"},
+		"run_cancel":          {"force", "id", "reason", "run_id"},
+		"run_purge":           {"id", "reason", "run_id", "what"},
+		"run_kvm_preflight":   {"id", "run_id"},
+		"run_logs":            {"burn", "byte_offset", "context", "id", "limit", "offset", "pattern", "run_id", "step", "tail"},
+		"wait":                {"id", "repo", "run_id", "sha", "timeout", "trigger"},
+		"sync":                {"branch", "priority", "priority_reason", "repo", "sha"},
+		"promote":             {"branch", "priority", "priority_reason", "repo", "sha"},
+		"issue_list":          {"before", "kind", "limit", "query", "repo", "state"},
+		"issue_get":           {"body_limit", "fields", "id"},
+		"issue_get_many":      {"body_limit", "fields", "ids"},
+		"secretstore_verify":  {"expect", "keys", "paths", "release_tier", "repo", "tier", "timeout"},
+		"publication_abandon": {"id", "reason"},
+		"issue_update":        {"body", "expected_body_sha256", "expected_revision", "id", "title", "upstream"},
 	}
 	for _, definition := range toolDefinitions() {
 		name, ok := definition["name"].(string)
@@ -828,10 +830,43 @@ func TestMCPToolCountMatchesDocumented(t *testing.T) {
 	t.Parallel()
 	// The documented count in docs/mcp-setup.md must match the registered
 	// tool count. A mismatch means the table drifted from the code.
-	const documented = 70
+	const documented = 77
 	definitions := toolDefinitions()
 	if len(definitions) != documented {
 		t.Fatalf("registered %d tools, documented %d in docs/mcp-setup.md — update the table", len(definitions), documented)
+	}
+
+	doc, err := os.ReadFile("../../docs/mcp-setup.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	toolsDoc := strings.SplitN(strings.SplitN(string(doc), "## MCP tools", 2)[1], "\n## ", 2)[0]
+	registered := map[string]bool{}
+	for _, definition := range definitions {
+		registered[definition["name"].(string)] = true
+	}
+	rows := map[string]bool{}
+	for _, line := range strings.Split(toolsDoc, "\n") {
+		if !strings.HasPrefix(line, "| `") {
+			continue
+		}
+		// Some rows document paired tools; later tables document tool arguments.
+		// Only complete registered names in the first cell are tool entries.
+		cell := strings.Split(line, "|")[1]
+		quoted := strings.Split(cell, "`")
+		for i := 1; i < len(quoted); i += 2 {
+			if registered[quoted[i]] {
+				rows[quoted[i]] = true
+			}
+		}
+	}
+	if len(rows) != len(definitions) {
+		t.Errorf("documented tool rows=%d, registered=%d", len(rows), len(definitions))
+	}
+	for _, definition := range definitions {
+		if name := definition["name"].(string); !rows[name] {
+			t.Errorf("tool missing from MCP table: %s", name)
+		}
 	}
 
 	// AGENT-CONTRACT.md must state the same count (issue #53 item 3).
@@ -847,13 +882,14 @@ func TestMCPToolCountMatchesDocumented(t *testing.T) {
 
 func TestMCPToolSurfaceMatchesContract(t *testing.T) {
 	want := []string{
-		"status", "logs", "run_kvm_preflight", "run_get", "run_resources", "run_retry", "run_cancel", "run_rerun", "run_purge", "artifacts", "artifact_get", "run_logs", "wait", "sync", "promote", "promotion_list", "promote_status", "promote_retry",
+		"status", "logs", "run_kvm_preflight", "run_get", "run_resources", "run_retry", "publication_abandon", "run_cancel", "run_rerun", "run_purge", "artifacts", "artifact_get", "run_logs", "wait", "sync", "promote", "promotion_list", "promote_status", "promote_retry",
 		"issue_create", "issue_get", "issue_get_many", "issue_update", "issue_append", "issue_close", "issue_reopen",
 		"issue_delete", "issue_list", "issue_unlock", "issue_close_many", "issue_lock",
 		"uplink_list", "uplink_revoke", "uplink_rotate", "access_dismiss", "kubevirt_grant_list",
 		"access_list", "access_allow", "access_revoke",
+		"workflow_capability_grant", "workflow_capability_revoke", "workflow_capability_get",
 		"kubevirt_grant", "kubevirt_revoke", "kubevirt_grant_get",
-		"size_grant", "size_revoke", "size_grant_get", "queue_priority_config", "queue_priority_get", "priority_grant", "priority_grant_list", "priority_grant_revoke", "run_priority", "admission_release",
+		"resource_grant", "resource_revoke", "resource_grant_get", "size_grant", "size_revoke", "size_grant_get", "queue_priority_config", "queue_priority_get", "priority_grant", "priority_grant_list", "priority_grant_revoke", "run_priority", "admission_release",
 		"repo_usage", "repo_list", "repo_archive", "repo_unarchive", "repo_remove", "run_list", "audit_list", "schedule_list", "schedule_pause", "schedule_resume", "schedule_trigger", "system_status", "publish_retry", "secretstore_plan", "secretstore_sync_receipt", "secretstore_verify",
 		"promote_grant", "promote_grant_revoke", "promote_grant_list",
 	}

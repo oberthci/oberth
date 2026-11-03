@@ -132,7 +132,7 @@ func TestRealGitTagMoveDeletionAndExplicitRevocation(t *testing.T) {
 	git("add", ".")
 	git("commit", "-m", "first")
 	git("tag", "v1.0.0")
-	cache, err := gitcache.New(gitcache.Config{Root: t.TempDir(), Upstream: func(string) (string, error) { return work, nil }})
+	cache, err := gitcache.New(gitcache.Config{AllowLocalUpstreams: true, Root: t.TempDir(), Upstream: func(string) (string, error) { return work, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}

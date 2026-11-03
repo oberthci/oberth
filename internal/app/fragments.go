@@ -8,11 +8,11 @@ import (
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type FragmentLoader interface {
-	Load(ctx context.Context, key argoworkflow.FragmentKey, trigger periapsis.Trigger, refKind model.RefKind, runTrigger string) (argoworkflow.Fragment, error)
+	Load(ctx context.Context, key argoworkflow.FragmentKey, trigger pipeline.Trigger, refKind model.RefKind, runTrigger string) (argoworkflow.Fragment, error)
 }
 
 type FragmentBlobs interface {
@@ -56,7 +56,7 @@ func NewGitFragmentLoader(blobs FragmentBlobs, registry FragmentRegistry, allowl
 	return loader, nil
 }
 
-func (loader *GitFragmentLoader) Load(ctx context.Context, key argoworkflow.FragmentKey, trigger periapsis.Trigger, refKind model.RefKind, runTrigger string) (argoworkflow.Fragment, error) {
+func (loader *GitFragmentLoader) Load(ctx context.Context, key argoworkflow.FragmentKey, trigger pipeline.Trigger, refKind model.RefKind, runTrigger string) (argoworkflow.Fragment, error) {
 	if loader.allowlist != nil && !loader.allowlist[key.Repo] {
 		return argoworkflow.Fragment{}, fmt.Errorf("app: fragment %s is not in the fragment allowlist", key)
 	}
@@ -73,7 +73,7 @@ func (loader *GitFragmentLoader) Load(ctx context.Context, key argoworkflow.Frag
 	}
 	var sha string
 	if argoworkflow.IsFullFragmentSHA(key.Version) {
-		if trigger != periapsis.TriggerCI || refKind != model.RefBranch || runTrigger != "branch" {
+		if trigger != pipeline.TriggerCI || refKind != model.RefBranch || runTrigger != "branch" {
 			return argoworkflow.Fragment{}, fmt.Errorf("app: fragment %s uses a commit SHA; only plain branch-push CI runs may use SHA-pinned fragments", key)
 		}
 		sha = key.Version
@@ -107,7 +107,7 @@ func (loader *GitFragmentLoader) Load(ctx context.Context, key argoworkflow.Frag
 	return argoworkflow.Fragment{Key: key, SHA: sha, Source: source}, nil
 }
 
-func loadFragments(ctx context.Context, loader FragmentLoader, source []byte, trigger periapsis.Trigger, refKind model.RefKind, runTrigger string) (map[argoworkflow.FragmentKey]argoworkflow.Fragment, error) {
+func loadFragments(ctx context.Context, loader FragmentLoader, source []byte, trigger pipeline.Trigger, refKind model.RefKind, runTrigger string) (map[argoworkflow.FragmentKey]argoworkflow.Fragment, error) {
 	workflow, err := argoworkflow.Decode(source)
 	if err != nil {
 		return nil, err

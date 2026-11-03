@@ -89,7 +89,7 @@ func TestPrioritySubmissionKeepsRunningSameBranch(t *testing.T) {
 	if _, err = s.MarkRunAdmitted(t.Context(), original.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.SetRunJobName(t.Context(), original.ID, "existing-workflow"); err != nil {
+	if _, err = s.SetRunWorkflowName(t.Context(), original.ID, "existing-workflow"); err != nil {
 		t.Fatal(err)
 	}
 	admin := true
@@ -100,7 +100,7 @@ func TestPrioritySubmissionKeepsRunningSameBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := s.Run(t.Context(), original.ID)
-	if err != nil || got.Status != model.RunRunning || got.StartedAt == nil || got.JobName != "existing-workflow" || got.SupersededBy != "" || len(urgent.Cancellations) != 0 {
+	if err != nil || got.Status != model.RunRunning || got.StartedAt == nil || got.WorkflowName != "existing-workflow" || got.SupersededBy != "" || len(urgent.Cancellations) != 0 {
 		t.Fatalf("priority submission changed running work: %+v %v", got, err)
 	}
 	if pending, err := s.PendingRunCancellations(t.Context()); err != nil || len(pending) != 0 {
@@ -128,7 +128,7 @@ func TestPriorityRestartKeepsNewerNormalSiblingAndRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	recovered, err := s.RequeueStrandedRun(t.Context(), original.ID)
-	if err != nil || recovered.Priority != model.PriorityHighest || recovered.PriorityRequestedBy != "requester" || recovered.PriorityReason != "submission priority: urgent recovery" || recovered.AdmissionSequence != original.AdmissionSequence {
+	if err != nil || recovered.ID != original.ID || recovered.QueueSequence != original.QueueSequence || !recovered.PriorityProtected || recovered.Priority != model.PriorityHighest || recovered.PriorityRequestedBy != "requester" || recovered.PriorityReason != "submission priority: urgent recovery" || recovered.AdmissionSequence != original.AdmissionSequence {
 		t.Fatalf("priority recovery lost request/place: %+v %v", recovered, err)
 	}
 	newer, err := s.Run(t.Context(), sibling.ID)
@@ -136,8 +136,8 @@ func TestPriorityRestartKeepsNewerNormalSiblingAndRequest(t *testing.T) {
 		t.Fatalf("recovery cancelled newer normal push: %+v %v", newer, err)
 	}
 	old, err := s.Run(t.Context(), original.ID)
-	if err != nil || old.SupersededBy != recovered.ID {
-		t.Fatalf("recovery source not linked: %+v %v", old, err)
+	if err != nil || old.ID != recovered.ID || old.Status != model.RunQueued || old.SupersededBy != "" {
+		t.Fatalf("recovery changed same-ID source: %+v %v", old, err)
 	}
 }
 

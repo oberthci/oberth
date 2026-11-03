@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type RunStatus string
@@ -165,10 +165,10 @@ type Run struct {
 	Trigger       string
 	ScheduleEntry string `json:",omitempty"`
 	Phase         string
-	JobName       string
+	WorkflowName  string `json:"JobName"`
 	TestedSHA     string
 	BaseSHA       string
-	FailedBurn    string
+	FailedStage   string `json:"FailedBurn"`
 	FailedStep    string
 	Error         string
 	Status        RunStatus
@@ -209,7 +209,7 @@ type RunResult struct {
 	Phase               string
 	TestedSHA           string
 	BaseSHA             string
-	FailedBurn          string
+	FailedStage         string `json:"FailedBurn"`
 	FailedStep          string
 	Error               string
 	// FailureTail is transient issue-projection input. Store implementations must
@@ -247,7 +247,7 @@ type RunCounts struct {
 
 type RunCancellation struct {
 	RunID        string
-	JobName      string
+	WorkflowName string `json:"JobName"`
 	SupersededBy string
 	Reason       string
 	CreatedAt    time.Time
@@ -349,14 +349,14 @@ type StepResult struct {
 	MeasuredSizeComparison []ResourceSizeComparison `json:",omitempty"`
 	Termination            *StepDiagnostic
 	RunID                  string
-	Burn                   string
+	Stage                  string `json:"Burn"`
 	Step                   string
 	Ordinal                int
 	Status                 StepStatus
 	ExitCode               int
 	LogStart               int64
 	LogEnd                 int64
-	DeclaredSize           periapsis.Size
+	DeclaredSize           pipeline.Size
 	// Usage counters are self-reported by untrusted build code, never evidence
 	// for admission or size grants. Any aggregation must saturate on overflow.
 	// Pointers distinguish unavailable telemetry from measured zero.
@@ -503,6 +503,7 @@ type PromotionGrantSpec struct {
 }
 
 type PromotionGrantListFilter struct {
+	Status    string // active, revoked, expired, consumed, all; empty preserves Active
 	RepoID    int64
 	SourceSHA string
 	Active    *bool // nil = all, true = active only, false = inactive only
@@ -519,11 +520,12 @@ const (
 	PublicationPending   PublicationStatus = "pending"
 	PublicationDelivered PublicationStatus = "delivered"
 	PublicationFailed    PublicationStatus = "failed"
+	PublicationAbandoned PublicationStatus = "abandoned"
 )
 
 func (s PublicationStatus) Valid() bool {
 	switch s {
-	case PublicationPending, PublicationDelivered, PublicationFailed:
+	case PublicationPending, PublicationDelivered, PublicationFailed, PublicationAbandoned:
 		return true
 	default:
 		return false
@@ -568,144 +570,15 @@ type PublicationSpec struct {
 // publication obligation and its owning run and/or promotion. Empty owner
 // records mean that kind of owner was not attached to the publication.
 type PublicationFinalization struct {
-	Publication Publication
-	Run         Run
-	Promotion   Promotion
+	// CleanupWarning reports post-commit local cleanup deferred to a later refresh.
+	CleanupWarning string `json:"-"`
+	Publication    Publication
+	Run            Run
+	Promotion      Promotion
 	// TargetMovedTo is set, only by the delivery that finalized it, when a
 	// promotion publication failed because the remote target held this
 	// head instead of the planned base (#1097). It is not persisted.
 	TargetMovedTo string
-}
-
-// TrustedPlanStatus is the append-oriented lifecycle of one explicitly
-// authorized plan artifact. Active states hold the durable backend lease.
-type TrustedPlanStatus string
-
-const (
-	TrustedPlanAuthorized TrustedPlanStatus = "authorized"
-	TrustedPlanReady      TrustedPlanStatus = "ready"
-	TrustedPlanAttached   TrustedPlanStatus = "attached"
-	TrustedPlanApplying   TrustedPlanStatus = "applying"
-	TrustedPlanConsumed   TrustedPlanStatus = "consumed"
-	TrustedPlanFailed     TrustedPlanStatus = "failed"
-	TrustedPlanExpired    TrustedPlanStatus = "expired"
-)
-
-func (status TrustedPlanStatus) Valid() bool {
-	switch status {
-	case TrustedPlanAuthorized, TrustedPlanReady, TrustedPlanAttached, TrustedPlanApplying,
-		TrustedPlanConsumed, TrustedPlanFailed, TrustedPlanExpired:
-		return true
-	default:
-		return false
-	}
-}
-
-func (status TrustedPlanStatus) Terminal() bool {
-	return status == TrustedPlanConsumed || status == TrustedPlanFailed || status == TrustedPlanExpired
-}
-
-// TrustedPlan binds one green candidate and exact target predecessor to an
-// encrypted artifact. Ciphertext is intentionally omitted from this model;
-// only the artifact manager/store capability can read it.
-type TrustedPlan struct {
-	ID                string
-	Sequence          int64
-	RepoID            int64
-	UpstreamID        int64
-	SourceRef         string
-	SourceSHA         string
-	TargetRef         string
-	BaseSHA           string
-	ResultSHA         string
-	GreenRunID        string
-	PlanRunID         string
-	PromotionID       string
-	ApplyID           string
-	ApplyEnqueueError string
-	BackendIdentity   string
-	BackendKey        string
-	ToolDigest        string
-	LockDigest        string
-	ConfigDigest      string
-	ArtifactDigest    string
-	ArtifactSize      int64
-	Actor             string
-	Status            TrustedPlanStatus
-	Error             string
-	CreatedAt         time.Time
-	ExpiresAt         time.Time
-	ConsumedAt        *time.Time
-	UpdatedAt         time.Time
-}
-
-type TrustedPlanSpec struct {
-	RepoID          int64
-	UpstreamID      int64
-	SourceRef       string
-	SourceSHA       string
-	TargetRef       string
-	BaseSHA         string
-	ResultSHA       string
-	GreenRunID      string
-	BackendIdentity string
-	BackendKey      string
-	ToolDigest      string
-	LockDigest      string
-	ConfigDigest    string
-	Actor           string
-	ExpiresAt       time.Time
-}
-
-type TrustedPlanArtifact struct {
-	Ciphertext string
-	Digest     string
-	Size       int64
-}
-
-type TrustedApplyStatus string
-
-const (
-	TrustedApplyQueued      TrustedApplyStatus = "queued"
-	TrustedApplyRunning     TrustedApplyStatus = "running"
-	TrustedApplyPassed      TrustedApplyStatus = "passed"
-	TrustedApplyFailed      TrustedApplyStatus = "failed"
-	TrustedApplyInterrupted TrustedApplyStatus = "interrupted"
-)
-
-func (status TrustedApplyStatus) Valid() bool {
-	switch status {
-	case TrustedApplyQueued, TrustedApplyRunning, TrustedApplyPassed, TrustedApplyFailed, TrustedApplyInterrupted:
-		return true
-	default:
-		return false
-	}
-}
-
-func (status TrustedApplyStatus) Terminal() bool {
-	return status.Valid() && status != TrustedApplyQueued && status != TrustedApplyRunning
-}
-
-// TrustedApply is status evidence distinct from the already-finalized Git
-// promotion. A failed apply never rewrites promotion publication history.
-type TrustedApply struct {
-	ID             string
-	Sequence       int64
-	PlanID         string
-	PromotionID    string
-	RepoID         int64
-	TargetRef      string
-	SHA            string
-	RunID          string
-	ArtifactDigest string
-	BackendKey     string
-	Actor          string
-	Status         TrustedApplyStatus
-	Error          string
-	CreatedAt      time.Time
-	StartedAt      *time.Time
-	FinishedAt     *time.Time
-	UpdatedAt      time.Time
 }
 
 type IssueKind string
@@ -727,6 +600,7 @@ const (
 func (s IssueState) Valid() bool { return s == IssueOpen || s == IssueClosed }
 
 type Issue struct {
+	Revision int64 `json:"revision"`
 	// Lock is transient API observation, populated after visibility checks.
 	Lock           *IssueLock `json:"lock"`
 	ID             int64
@@ -758,9 +632,11 @@ type ManualIssueSpec struct {
 }
 
 type IssuePatch struct {
-	Title *string
-	Body  *string
-	State *IssueState
+	ExpectedBodySHA256 string
+	ExpectedRevision   *int64
+	Title              *string
+	Body               *string
+	State              *IssueState
 	// ScopeUpstreamID moves a manual issue; zero means workspace-global.
 	ScopeUpstreamID *int64
 }
@@ -892,11 +768,14 @@ type TokenCredential struct {
 	ActivatedAt *time.Time
 	LastUsedAt  *time.Time
 	RevokedAt   *time.Time
+	// ExpiresAt is the absolute bearer expiry; nil preserves legacy lifetime.
+	ExpiresAt *time.Time
 }
 
 type TokenCredentialSpec struct {
-	Name   string
-	Digest []byte
+	ExpiresAt *time.Time
+	Name      string
+	Digest    []byte
 }
 
 type AuthenticatedUplink struct {

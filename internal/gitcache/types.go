@@ -155,15 +155,19 @@ type RepoQualification struct {
 }
 
 type Config struct {
+	// AllowLocalUpstreams is reserved for hermetic fixtures. Production accepts SSH URLs only.
+	AllowLocalUpstreams bool
 	// RepositoryGate refuses network/cache admission while a repository is archived.
 	RepositoryGate func(context.Context, string) error
-	Root           string
-	Upstream       func(repo string) (string, error)
-	GitBinary      string
-	CommandTimeout time.Duration
-	Env            map[string]string
-	Redact         []string
-	Logger         Logger
+	// PromotionPinAbandoned checks committed publication state for an exact local pin.
+	PromotionPinAbandoned func(context.Context, string, string, string) (bool, error)
+	Root                  string
+	Upstream              func(repo string) (string, error)
+	GitBinary             string
+	CommandTimeout        time.Duration
+	Env                   map[string]string
+	Redact                []string
+	Logger                Logger
 	// RepoQualifier resolves a repository input — bare ("repo"),
 	// org-qualified ("org/repo"), or fully qualified ("upstream/org/repo") —
 	// to its canonical catalog identity. It determines the org-qualified

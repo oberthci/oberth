@@ -275,7 +275,7 @@ Bridge tier (6 variants x 2 kernel versions = 12 runs, parallelized):
 | 4-wide | 30-54 min | 15-24 min |
 | 6-wide | 20-36 min | 10-16 min |
 
-The tuxbox host has 12 cores. Each QEMU VM uses 2 vCPUs, so 6-wide
+The example-node host has 12 cores. Each QEMU VM uses 2 vCPUs, so 6-wide
 parallelism is feasible but saturates the host. Recommendation: 4-wide for
 branch CI (leaves headroom for other runs), 6-wide for release-gate runs.
 

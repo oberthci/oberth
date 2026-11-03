@@ -130,6 +130,8 @@ type ErrorClassifier func(error) (int, string)
 const writeDeadlineMargin = 1 * time.Minute
 
 type Server struct {
+	authFailures          authFailureLimiter
+	authFailureSources    authFailureLimiter
 	metrics               func(io.Writer)
 	liveness              func() error
 	draining              atomic.Bool
@@ -282,11 +284,13 @@ func (server *Server) routes() {
 	server.mux.Handle("GET /api/runs/{run}/artifacts", server.requireAuth(http.HandlerFunc(server.handleRunArtifacts)))
 	server.mux.Handle("GET /api/runs/{run}/artifacts/{name...}", server.requireAuth(http.HandlerFunc(server.handleRunArtifactDownload)))
 	server.mux.Handle("GET /api/repos", server.requireAuth(http.HandlerFunc(server.handleRepos)))
+	server.mux.Handle("GET /api/issues/{id}", server.requireAuth(http.HandlerFunc(server.handleIssue)))
 	server.mux.Handle("GET /api/issues", server.requireAuth(http.HandlerFunc(server.handleIssues)))
 	server.mux.Handle("GET /api/grants", server.requireAuth(http.HandlerFunc(server.handleGrants)))
 	server.mux.Handle("GET /api/audit", server.requireAuth(http.HandlerFunc(server.handleAudit)))
 	server.mux.Handle("GET /api/schedules", server.requireAuth(http.HandlerFunc(server.handleSchedules)))
 	server.mux.Handle("GET /api/status", server.requireAuth(http.HandlerFunc(server.handleStatus)))
+	server.mux.Handle("GET /api/uplinks", server.requireAuth(http.HandlerFunc(server.handleUplinks)))
 	server.mux.Handle("GET /metrics", server.requireAuth(http.HandlerFunc(server.handleMetrics)))
 	server.mux.HandleFunc("GET /assets/{asset...}", serveAsset)
 	server.mux.HandleFunc("GET /{$}", func(writer http.ResponseWriter, request *http.Request) {
@@ -303,6 +307,9 @@ func (server *Server) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		token, ok := bearerToken(request.Header.Values("Authorization"))
 		if !ok {
+			if server.recordAuthFailure(writer, request, "missing_or_malformed") {
+				return
+			}
 			writer.Header().Set("WWW-Authenticate", `Bearer realm="oberth"`)
 			writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "authentication required"})
 			return
@@ -317,14 +324,15 @@ func (server *Server) requireAuth(next http.Handler) http.Handler {
 			return
 		}
 		if !errors.Is(err, ErrInvalidToken) && (err != nil || strings.TrimSpace(actor.Identity) == "") {
-			if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-				log.Printf("api: authentication failure: %v", err)
-			}
+			server.logAuthFailure(request, "unavailable")
 			writer.Header().Set("Retry-After", "1")
 			writeJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "authentication temporarily unavailable; retry the request"})
 			return
 		}
 		if errors.Is(err, ErrInvalidToken) {
+			if server.recordAuthFailure(writer, request, "invalid_token") {
+				return
+			}
 			writer.Header().Set("WWW-Authenticate", `Bearer realm="oberth", error="invalid_token"`)
 			writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "invalid bearer token"})
 			return
@@ -404,7 +412,7 @@ func (server *Server) handleRuns(writer http.ResponseWriter, request *http.Reque
 		}
 		writer.Header().Set("X-Oberth-Next-Before", cursor)
 	}
-	server.writeView(writer, value, err)
+	server.writeCollectionView(writer, request, "runs", value, err)
 }
 
 // RunPageFull reports whether the time-ordered part of a run page is full.
@@ -447,8 +455,8 @@ const (
 func (server *Server) handleRunLog(writer http.ResponseWriter, request *http.Request) {
 	id := request.PathValue("run")
 	query := request.URL.Query()
-	burn, step := query.Get("burn"), query.Get("step")
-	if !validRunSelector(id) || (burn != "" && !validRunSelector(burn)) || (step != "" && !validRunSelector(step)) {
+	stage, step := query.Get("burn"), query.Get("step")
+	if !validRunSelector(id) || (stage != "" && !validRunSelector(stage)) || (step != "" && !validRunSelector(step)) {
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "run ID is required; burn and step must be valid selectors when provided"})
 		return
 	}
@@ -457,7 +465,7 @@ func (server *Server) handleRunLog(writer http.ResponseWriter, request *http.Req
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	value, err := server.views.RunLogFiltered(request.Context(), actorFrom(request.Context()), id, burn, step, filter)
+	value, err := server.views.RunLogFiltered(request.Context(), actorFrom(request.Context()), id, stage, step, filter)
 	server.writeView(writer, value, err)
 }
 
@@ -659,7 +667,7 @@ func validRunSelector(value string) bool {
 
 func (server *Server) handleRepos(writer http.ResponseWriter, request *http.Request) {
 	value, err := server.views.Repositories(request.Context(), actorFrom(request.Context()))
-	server.writeView(writer, value, err)
+	server.writeCollectionView(writer, request, "repositories", value, err)
 }
 
 func (server *Server) handleIssues(writer http.ResponseWriter, request *http.Request) {
@@ -669,6 +677,19 @@ func (server *Server) handleIssues(writer http.ResponseWriter, request *http.Req
 		return
 	}
 	value, err := server.views.Issues(request.Context(), actorFrom(request.Context()), filter)
+	server.writeView(writer, value, err)
+}
+
+// Reuse issue_get so dashboard details have the same scoped visibility checks
+// as other issue readers. Lists intentionally omit bodies.
+func (server *Server) handleIssue(writer http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid issue ID"})
+		return
+	}
+	arguments, _ := json.Marshal(map[string]any{"id": id})
+	value, err := server.tools.CallTool(request.Context(), actorFrom(request.Context()), "issue_get", arguments)
 	server.writeView(writer, value, err)
 }
 
@@ -706,11 +727,21 @@ func (server *Server) handleGrants(writer http.ResponseWriter, request *http.Req
 		Status:     query.Get("status"),
 	}
 	value, err := server.views.Grants(request.Context(), actorFrom(request.Context()), filter)
-	server.writeView(writer, value, err)
+	server.writeCollectionView(writer, request, "grants", value, err)
 }
 
 func (server *Server) handleStatus(writer http.ResponseWriter, request *http.Request) {
 	value, err := server.views.Status(request.Context(), actorFrom(request.Context()))
+	server.writeView(writer, value, err)
+}
+
+func (server *Server) handleUplinks(writer http.ResponseWriter, request *http.Request) {
+	actor := actorFrom(request.Context())
+	if !actor.Admin || actor.Scoped() {
+		writeJSON(writer, http.StatusForbidden, map[string]string{"error": "unscoped admin required"})
+		return
+	}
+	value, err := server.tools.CallTool(request.Context(), actor, "uplink_list", json.RawMessage(`{}`))
 	server.writeView(writer, value, err)
 }
 
@@ -752,7 +783,7 @@ func queryLimit(request *http.Request, fallback, maximum int) int {
 }
 
 func decodeOne(reader io.Reader, value any) error {
-	decoder := json.NewDecoder(io.LimitReader(reader, maxRequestBytes))
+	decoder := json.NewDecoder(reader)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(value); err != nil {
 		return fmt.Errorf("decode JSON: %w", err)
@@ -767,7 +798,19 @@ func decodeOne(reader io.Reader, value any) error {
 	return nil
 }
 
+func writeOversizedBody(writer http.ResponseWriter, err error) bool {
+	var oversized *http.MaxBytesError
+	if !errors.As(err, &oversized) {
+		return false
+	}
+	writeJSON(writer, http.StatusRequestEntityTooLarge, map[string]string{"error": "request body exceeds 1 MiB"})
+	return true
+}
+
 func strictUnmarshal(raw json.RawMessage, value any) error {
+	if len(raw) > maxRequestBytes {
+		return &http.MaxBytesError{Limit: maxRequestBytes}
+	}
 	if len(raw) == 0 {
 		raw = json.RawMessage("{}")
 	}
@@ -775,9 +818,14 @@ func strictUnmarshal(raw json.RawMessage, value any) error {
 }
 
 func writeJSON(writer http.ResponseWriter, status int, value any) {
+	raw, err := marshalCompatible(value)
+	if err != nil {
+		status = http.StatusInternalServerError
+		raw = []byte(`{"error":"internal error"}`)
+	}
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(status)
-	_ = json.NewEncoder(writer).Encode(value)
+	_, _ = writer.Write(append(raw, '\n'))
 }
 
 // servePage writes the dashboard shell: server-rendered chrome (brand, tabs,

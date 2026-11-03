@@ -9,12 +9,14 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type lostDatabaseAck struct {
 	*store.Store
-	operation string
-	writes    atomic.Int64
+	operation      string
+	writes         atomic.Int64
+	committedClaim *model.Run
 }
 
 func (s *lostDatabaseAck) lost(operation string, err error) error {
@@ -27,6 +29,11 @@ func (s *lostDatabaseAck) lost(operation string, err error) error {
 	return err
 }
 func (s *lostDatabaseAck) ClaimNextRun(ctx context.Context) (model.Run, error) {
+	if s.committedClaim != nil {
+		v := *s.committedClaim
+		s.committedClaim = nil
+		return v, s.lost("ClaimNextRun", nil)
+	}
 	v, e := s.Store.ClaimNextRun(ctx)
 	return v, s.lost("ClaimNextRun", e)
 }
@@ -57,20 +64,28 @@ func (s *lostDatabaseAck) MarkRunParked(ctx context.Context, id string) (model.R
 
 func TestDatabaseDeadlineLostClaimAckKeepsExactRun(t *testing.T) {
 	fixture := newRecoveryFixture(t)
-	first, err := fixture.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "one", SHA: strings.Repeat("a", 40), Actor: "test", Trigger: "branch"})
+	first, err := storetest.EnqueueRun(fixture.store, t.Context(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "one", SHA: strings.Repeat("a", 40), Actor: "test", Trigger: "branch"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := fixture.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "two", SHA: strings.Repeat("b", 40), Actor: "test", Trigger: "branch"})
+	second, err := storetest.EnqueueRun(fixture.store, t.Context(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "two", SHA: strings.Repeat("b", 40), Actor: "test", Trigger: "branch"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	// Commit outside the short attempt budget so host scheduling under -race
+	// cannot replace the intended lost-ack fault with a pre-commit timeout.
+	// The fixture exposes this result once. Replaying the write would invoke
+	// the live store again, claim the second run and fail the assertions below.
+	committed, err := fixture.store.ClaimNextRun(t.Context())
+	if err != nil || committed.ID != first.ID {
+		t.Fatalf("commit original claim: %+v %v", committed, err)
 	}
 	scheduler := fixture.scheduler(t, &recoveryJobs{})
-	fault := &lostDatabaseAck{Store: fixture.store, operation: "ClaimNextRun"}
+	fault := &lostDatabaseAck{Store: fixture.store, operation: "ClaimNextRun", committedClaim: &committed}
 	scheduler.store = fault
 	run, err := scheduler.database().ClaimNextRun(deadlineScope(t.Context(), scheduler))
-	if err != nil || run.ID != first.ID || fault.writes.Load() != 1 {
-		t.Fatalf("lost original claim: %+v %v writes=%d", run, err, fault.writes.Load())
+	if err != nil || run.ID != first.ID || fault.writes.Load() != 1 || scheduler.DatabaseRetries() != 1 {
+		t.Fatalf("lost original claim: %+v %v writes=%d retries=%d", run, err, fault.writes.Load(), scheduler.DatabaseRetries())
 	}
 	remaining, err := fixture.store.Run(t.Context(), second.ID)
 	if err != nil || remaining.Status != model.RunQueued {
@@ -97,7 +112,7 @@ func TestDatabaseDeadlineLostTransitionAcksConverge(t *testing.T) {
 					t.Fatal(current, err)
 				}
 			case "MarkRunSubmitted":
-				fixture.setJobName(t, run.ID, "known-job")
+				fixture.setWorkflowName(t, run.ID, "known-job")
 				current, err := database.MarkRunSubmitted(ctx, run.ID)
 				if err != nil || current.Phase != "running" {
 					t.Fatal(current, err)
@@ -111,13 +126,13 @@ func TestDatabaseDeadlineLostTransitionAcksConverge(t *testing.T) {
 					t.Fatal(current, err)
 				}
 			case "RequeueStrandedRun":
-				fixture.setJobName(t, run.ID, "known-job")
+				fixture.setWorkflowName(t, run.ID, "known-job")
 				successor, err := database.RequeueStrandedRun(ctx, run.ID)
-				if err != nil || successor.ID == "" || successor.ID == run.ID {
+				if err != nil || successor.ID != run.ID || successor.Status != model.RunQueued {
 					t.Fatal(successor, err)
 				}
 				old, err := fixture.store.Run(t.Context(), run.ID)
-				if err != nil || old.SupersededBy != successor.ID {
+				if err != nil || old.SupersededBy != "" || old.Status != model.RunQueued {
 					t.Fatal(old, err)
 				}
 			case "BeginPublication":

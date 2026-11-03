@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -55,7 +56,7 @@ func main() {
 	if err := runCLI(ctx, os.Args[1:], os.Stdin, os.Stdout); err != nil {
 		// Ctrl+C during interactive prompts: exit silently with the Unix
 		// convention (128 + SIGINT signal number 2 = 130).
-		if errors.Is(err, installer.ErrInterrupted) || errors.Is(err, app.ErrInterrupted) {
+		if errors.Is(err, installer.ErrInterrupted) || errors.Is(err, app.ErrInterrupted) || (errors.Is(err, context.Canceled) && errors.Is(ctx.Err(), context.Canceled)) {
 			_, _ = fmt.Fprintln(os.Stderr)
 			os.Exit(130)
 		}
@@ -67,9 +68,14 @@ func main() {
 	}
 }
 
-const usageCommands = "audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, schedules, fragments, artifacts, runs, run, promotion, log, repos, issues, status, uplink, access, kubevirt, size, admission, secretstore, mcp, preflight, or version"
+const usageCommands = "admin, wait-idle, git-ssh, audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, schedules, fragments, artifacts, runs, run, promotion, publication, log, repos, issues, status, uplink, access, kubevirt, size, admission, secretstore, mcp, preflight, or version"
 
-func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.Writer) error {
+func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.Writer) (resultErr error) {
+	defer func() {
+		if errors.Is(resultErr, flag.ErrHelp) {
+			_, resultErr = fmt.Fprintln(output, resultErr.Error())
+		}
+	}()
 	var err error
 	ctx, err = withCommandProtocol(ctx)
 	if err != nil {
@@ -84,7 +90,7 @@ func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.
 
 Commands:
   audit         Verify and inspect the audit chain
-  init          Initialize a bare repository
+  init          Write a starter .oberth/build.yaml workflow
   validate      Validate a repository's .oberth pipeline
   install       Install or upgrade Oberth on a cluster
   setup         Interactive setup wizard
@@ -92,7 +98,7 @@ Commands:
   wait-idle     Wait for the live daemon queue to empty (in-pod)
   backup        Write an encrypted backup of OpenBao state and the server database
   restore       Restore an oberth backup onto an installed Oberth
-  admin         Read local files or hash the database for maintenance
+  admin         Read allowed public identity files
   git-ssh       Run Git's native pinned-key SSH transport
   serve         Start the Oberth server
   upstream      Manage upstream forge connections
@@ -103,6 +109,7 @@ Commands:
   runs          List recent CI/CD runs, or cancel a ref's active runs
   run           Show a run; retry, rerun at the same SHA, cancel one, or purge its retained logs/artifacts
   promotion     Retry a failed or interrupted promotion onto the current target head
+  publication   Abandon a pending upstream publication (admin only)
   log           Show step logs for a run
   repos         List registered repositories
   issues        List and manage issues
@@ -110,7 +117,8 @@ Commands:
   uplink        Manage uplink identities
   access        Manage secret access grants
   kubevirt      Manage repository VMI grants
-  size          Manage repository admission size grants (default max L; XL needs a grant)
+  resource      Manage repository CPU/memory request and limit ceilings
+  size          Manage legacy admission size and tag priority policy
   admission     Show the server's admission reservations, or release a stale one
   secretstore   Verify and inspect the secret store
   mcp           Call Oberth MCP tools
@@ -142,6 +150,8 @@ Commands:
 		return runRuns(ctx, arguments[1:], output)
 	case "run":
 		return runRunDetail(ctx, arguments[1:], output)
+	case "publication":
+		return runPublication(ctx, arguments[1:], output)
 	case "promotion":
 		return runPromotion(ctx, arguments[1:], output)
 	case "repos":
@@ -158,6 +168,8 @@ Commands:
 		return runAccess(ctx, arguments[1:], output)
 	case "kubevirt":
 		return runKubeVirtGrant(ctx, arguments[1:], output)
+	case "resource":
+		return runResourceGrant(ctx, arguments[1:], output)
 	case "size":
 		return runSizeGrant(ctx, arguments[1:], output)
 	case "admission":

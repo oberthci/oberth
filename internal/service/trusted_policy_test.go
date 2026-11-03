@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/vmrunner"
 )
 
@@ -73,7 +74,7 @@ func TestTrustedPolicyPublicationRecoveryAndFastForwardRefuseMissingEvidence(t *
 			if promotion {
 				_, publication = beginPendingPromotionPublication(t, fixture, "main", strings.Repeat("b", 40), strings.Repeat("a", 40))
 			} else {
-				_, err = fixture.store.EnqueueRun(ctx, model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch,
+				_, err = storetest.EnqueueRun(fixture.store, ctx, model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch,
 					Ref: "feature/recovery", SHA: strings.Repeat("a", 40), Actor: "agent@host", Trigger: "branch", TestedSHA: strings.Repeat("a", 40)})
 				if err != nil {
 					t.Fatal(err)

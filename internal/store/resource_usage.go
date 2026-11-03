@@ -30,11 +30,11 @@ func (s *Store) RecordStepResourceUsage(ctx context.Context, values []model.Step
 			return fmt.Errorf("%w: invalid resource observation", ErrInvalid)
 		}
 		var repoID int64
-		var jobName string
-		if err := tx.QueryRowContext(ctx, `SELECT repo_id,job_name FROM runs WHERE id=?`, v.RunID).Scan(&repoID, &jobName); err != nil {
+		var workflowName string
+		if err := tx.QueryRowContext(ctx, `SELECT repo_id,job_name FROM runs WHERE id=?`, v.RunID).Scan(&repoID, &workflowName); err != nil {
 			return err
 		}
-		if jobName != v.WorkflowName {
+		if workflowName != v.WorkflowName {
 			return fmt.Errorf("%w: resource observation job binding mismatch", ErrInvalid)
 		}
 		var previous string
@@ -68,7 +68,7 @@ func (s *Store) RecordStepResourceUsage(ctx context.Context, values []model.Step
 		if string(body) == previous {
 			continue
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO step_resource_usage(run_id,repo_id,node_id,pod_uid,container_id,burn,step,last_observed_at,observation_json) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(run_id,node_id,pod_uid,container_id) DO UPDATE SET last_observed_at=excluded.last_observed_at,observation_json=excluded.observation_json`, v.RunID, repoID, v.NodeID, v.PodUID, v.ContainerID, v.Burn, v.Step, unixNano(v.LastObservedAt), string(body))
+		_, err = tx.ExecContext(ctx, `INSERT INTO step_resource_usage(run_id,repo_id,node_id,pod_uid,container_id,burn,step,last_observed_at,observation_json) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(run_id,node_id,pod_uid,container_id) DO UPDATE SET last_observed_at=excluded.last_observed_at,observation_json=excluded.observation_json`, v.RunID, repoID, v.NodeID, v.PodUID, v.ContainerID, v.Stage, v.Step, unixNano(v.LastObservedAt), string(body))
 		if err != nil {
 			return err
 		}
@@ -109,23 +109,23 @@ func readResourceUsage(rows *sql.Rows) ([]model.StepResourceUsage, error) {
 }
 
 type ResourceUsageFilter struct {
-	Since      time.Time
-	Limit      int
-	Burn, Step string
+	Since       time.Time
+	Limit       int
+	Stage, Step string
 }
 
 func (s *Store) RepositoryResourceUsage(ctx context.Context, repoID int64, f ResourceUsageFilter) ([]model.StepResourceUsage, bool, error) {
 	if f.Limit == 0 {
 		f.Limit = 1000
 	}
-	if f.Limit < 1 || f.Limit > 5000 || len(f.Burn) > 253 || len(f.Step) > 253 {
+	if f.Limit < 1 || f.Limit > 5000 || len(f.Stage) > 253 || len(f.Step) > 253 {
 		return nil, false, fmt.Errorf("%w: resource report bounds", ErrInvalid)
 	}
 	where := `repo_id=? AND last_observed_at>=?`
 	args := []any{repoID, unixNano(f.Since)}
-	if f.Burn != "" {
+	if f.Stage != "" {
 		where += ` AND burn=?`
-		args = append(args, f.Burn)
+		args = append(args, f.Stage)
 	}
 	if f.Step != "" {
 		where += ` AND step=?`

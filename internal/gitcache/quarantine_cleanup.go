@@ -44,7 +44,7 @@ func sweepReceiveQuarantines(repository string, now time.Time) error {
 	}
 	var failures error
 	for _, entry := range entries {
-		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "oberth-incoming-") {
+		if !entry.IsDir() || (!strings.HasPrefix(entry.Name(), "oberth-incoming-") && !strings.HasPrefix(entry.Name(), "tmp_objdir-incoming-")) {
 			continue
 		}
 		info, err := entry.Info()

@@ -11,6 +11,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type reportReader struct {
@@ -29,7 +30,7 @@ func (r *reportReader) RepositoryResourceUsage(_ context.Context, id int64, _ st
 	if r.repoValues != nil {
 		return r.repoValues, true, nil
 	}
-	return []model.StepResourceUsage{{Burn: "checks", Step: "unit", Samples: 0, Terminal: true}}, true, nil
+	return []model.StepResourceUsage{{Stage: "checks", Step: "unit", Samples: 0, Terminal: true}}, true, nil
 }
 func TestResourceReportScopesBeforeReadingStorage(t *testing.T) {
 	f := newScopeFixture(t)
@@ -67,12 +68,12 @@ func TestResourceReportScopesBeforeReadingStorage(t *testing.T) {
 func TestResourceSizeComparisonRunGetIsScopedAndReadOnly(t *testing.T) {
 	f := newScopeFixture(t)
 	run := f.runs["github"][0]
-	step := model.StepResult{RunID: run.ID, Burn: "test", Step: "unit", Status: model.StepFailed, ExitCode: 1, DeclaredSize: "S"}
-	if _, err := f.store.PutStepResult(t.Context(), step); err != nil {
+	step := model.StepResult{RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepFailed, ExitCode: 1, DeclaredSize: "S"}
+	if _, err := storetest.PutHistoricalStepResult(f.store, t.Context(), step); err != nil {
 		t.Fatal(err)
 	}
 	peak := int64(3 << 30)
-	reader := &reportReader{values: []model.StepResourceUsage{{RunID: run.ID, Burn: "test", Step: "unit", WorkflowSize: "XL", Samples: 1, MemoryPeakBytes: &peak, ContainerName: "main"}}}
+	reader := &reportReader{values: []model.StepResourceUsage{{RunID: run.ID, Stage: "test", Step: "unit", WorkflowSize: "XL", Samples: 1, MemoryPeakBytes: &peak, ContainerName: "main"}}}
 	helper := reader.values[0]
 	helper.ContainerName = "wait"
 	large := int64(100 << 30)
@@ -125,7 +126,7 @@ func TestResourceReportIncludesBoundedContainersPodsAndOverlap(t *testing.T) {
 	reader := &reportReader{repoValues: []model.StepResourceUsage{}}
 	for i := 0; i < 129; i++ {
 		peak := int64(i + 1)
-		reader.repoValues = append(reader.repoValues, model.StepResourceUsage{RunID: "run", PodUID: fmt.Sprintf("pod-%d", i), Burn: "ci", Step: fmt.Sprintf("step-%d", i), ContainerName: "wait", ContainerKind: "app", PodKind: "workflow", Samples: 1, MemoryPeakBytes: &peak, PodMemoryPeakBytes: &peak, PodStartedAt: at, PodFinishedAt: at.Add(time.Second)})
+		reader.repoValues = append(reader.repoValues, model.StepResourceUsage{RunID: "run", PodUID: fmt.Sprintf("pod-%d", i), Stage: "ci", Step: fmt.Sprintf("step-%d", i), ContainerName: "wait", ContainerKind: "app", PodKind: "workflow", Samples: 1, MemoryPeakBytes: &peak, PodMemoryPeakBytes: &peak, PodStartedAt: at, PodFinishedAt: at.Add(time.Second)})
 	}
 	f.service.resources = reader
 	before, _ := json.Marshal(reader.repoValues)

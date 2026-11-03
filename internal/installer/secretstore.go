@@ -12,8 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"os"
+	"os/exec"
 	"regexp"
 	"sort"
 	"strings"
@@ -147,15 +146,22 @@ func (b openBaoExec) status(ctx context.Context) (baoStatus, error) {
 // share. The result is the only copy of the credentials in existence.
 func (b openBaoExec) operatorInit(ctx context.Context) (baoInitResult, error) {
 	out, err := b.bao(ctx, nil, "operator", "init", "-key-shares=1", "-key-threshold=1", "-format=json")
-	if err != nil {
-		return baoInitResult{}, fmt.Errorf("bao operator init: %w%s", err, commandOutputSuffix(out))
+	defer clear(out)
+	var exitError *exec.ExitError
+	if errors.As(err, &exitError) {
+		defer clear(exitError.Stderr)
 	}
 	var result baoInitResult
-	if err := parseBaoJSON(out, &result); err != nil {
-		return baoInitResult{}, fmt.Errorf("bao operator init: %w", err)
+	parseErr := parseBaoJSON(out, &result)
+	if err != nil {
+		return result, errors.New("bao operator init failed; any parsed credentials are delivered separately")
 	}
+	if parseErr != nil {
+		return result, errors.New("bao operator init returned an invalid credential response")
+	}
+
 	if result.RootToken == "" || len(result.UnsealKeysB64) == 0 {
-		return baoInitResult{}, errors.New("bao operator init returned no root token or unseal keys")
+		return result, errors.New("bao operator init returned no root token or unseal keys")
 	}
 	return result, nil
 }
@@ -288,6 +294,30 @@ func (b openBaoExec) policyList(ctx context.Context, token string) ([]string, er
 	return names, nil
 }
 
+func (b openBaoExec) roleList(ctx context.Context, token string) ([]string, error) {
+	out, err := b.authenticated(ctx, token, nil, "list", "-format=json", "auth/"+defaultAuthMount+"/role")
+	if err != nil {
+		if bytes.Contains(out, []byte("No value found at")) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("bao role list: %w%s", err, commandOutputSuffix(out))
+	}
+	var names []string
+	if err := json.Unmarshal(out, &names); err == nil && names != nil {
+		return names, nil
+	}
+	// Accept the full response envelope as well as the CLI's keys-only JSON.
+	var response struct {
+		Data struct {
+			Keys []string `json:"keys"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(out, &response); err != nil || response.Data.Keys == nil {
+		return nil, errors.New("bao role list returned invalid keys JSON")
+	}
+	return response.Data.Keys, nil
+}
+
 func (b openBaoExec) deleteRole(ctx context.Context, token, rolePath string) error {
 	if out, err := b.authenticated(ctx, token, nil, "delete", rolePath); err != nil {
 		return fmt.Errorf("bao delete %s: %w%s", rolePath, err, commandOutputSuffix(out))
@@ -326,24 +356,18 @@ func findOpenBaoPod(ctx context.Context, deps Deps, namespace string) (string, e
 	if !isPodRunning(pod) {
 		return "", fmt.Errorf("OpenBao pod %s/%s is not running", namespace, expectedOpenBaoPodName)
 	}
-	// Verify the pod is owned by the expected StatefulSet. Without this check
-	// an attacker who deleted the real pod and created one with the same name
-	// could receive the root token. When ownerReferences are absent (e.g. a
-	// bare pod from an older chart or a test fixture), the deterministic name
-	// lookup is already a significant improvement over label-based selection.
-	if len(pod.OwnerReferences) > 0 {
-		owned := false
-		for _, ref := range pod.OwnerReferences {
-			if ref.Kind == "StatefulSet" && ref.Name == expectedOpenBaoStatefulSet {
-				owned = true
-				break
-			}
-		}
-		if !owned {
-			return "", fmt.Errorf("OpenBao pod %s/%s is not owned by StatefulSet %s; refusing to exec into an unverified pod",
-				namespace, expectedOpenBaoPodName, expectedOpenBaoStatefulSet)
-		}
+	owner := metav1.GetControllerOf(pod)
+	if owner == nil || owner.APIVersion != "apps/v1" || owner.Kind != "StatefulSet" || owner.Name != expectedOpenBaoStatefulSet || owner.UID == "" {
+		return "", fmt.Errorf("OpenBao pod %s/%s lacks the expected StatefulSet controller; refusing unverified exec", namespace, pod.Name)
 	}
+	controller, err := deps.KubeClient.AppsV1().StatefulSets(namespace).Get(ctx, expectedOpenBaoStatefulSet, metav1.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("verify live OpenBao controller: %w", err)
+	}
+	if controller.UID == "" || controller.UID != owner.UID || controller.DeletionTimestamp != nil {
+		return "", errors.New("OpenBao pod controller UID does not match the live StatefulSet")
+	}
+
 	return pod.Name, nil
 }
 
@@ -416,95 +440,8 @@ func SetupDevSecretStore(ctx context.Context, cfg Config, deps Deps, openbao Ope
 	return nil
 }
 
-// SetupProductionSecretStore initializes and unseals the standalone OpenBao
-// through kubectl exec, prints the root token and unseal key exactly once,
-// and configures the secret store with the captured root token. Re-runs
-// against an already-initialized store skip init and use BAO_TOKEN when the
-// operator supplies it.
-func SetupProductionSecretStore(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoResult) (SecretStoreResult, error) {
-	color := isColor(deps)
-
-	client, status, err := waitForOpenBaoStatus(ctx, cfg, deps, openbao.Namespace)
-	if err != nil {
-		return SecretStoreResult{}, err
-	}
-	if isInMemoryStorage(status) {
-		return SecretStoreResult{}, fmt.Errorf("the OpenBao release in namespace %s runs in dev mode (in-memory storage); production mode cannot adopt it. "+
-			"Re-run with --upgrade to reinstall it in production mode, or uninstall it first (helm uninstall openbao -n %s). "+
-			"(Right after a mode-switch upgrade the dev pod may still be terminating — re-run in a moment.)",
-			openbao.Namespace, openbao.Namespace)
-	}
-
-	var rootToken string
-	switch {
-	case !status.Initialized:
-		initResult, err := client.operatorInit(ctx)
-		if err != nil {
-			return SecretStoreResult{}, err
-		}
-		// Print the credentials BEFORE anything that can still fail: after a
-		// successful init they exist nowhere but here, and losing them locks
-		// the store permanently.
-		printProductionCredentials(deps.Output, initResult, color)
-		rootToken = initResult.RootToken
-		unsealStatus, err := client.unseal(ctx, initResult.UnsealKeysB64[0])
-		if err != nil {
-			return SecretStoreResult{}, err
-		}
-		if unsealStatus.Sealed {
-			return SecretStoreResult{}, errors.New("OpenBao is still sealed after submitting the unseal key")
-		}
-	case status.Sealed:
-		return SecretStoreResult{}, fmt.Errorf("OpenBao in namespace %s is initialized but sealed (the pod restarted). Unseal it with your saved unseal key:\n\n"+
-			"    kubectl exec -it -n %s %s -- bao operator unseal\n\nthen re-run oberth install. "+
-			"To unseal automatically on a single node, see deploy/systemd/README.md",
-			openbao.Namespace, openbao.Namespace, client.pod)
-	default:
-		_, _ = fmt.Fprintln(deps.Output, "OpenBao is already initialized and unsealed; skipping operator init (credentials were printed once at first initialization).")
-		rootToken = os.Getenv(baoTokenEnvVar)
-		if rootToken == "" && isInteractive(deps) && deps.ReadPassword != nil {
-			_, _ = fmt.Fprint(deps.Output, "Root token (echo disabled): ")
-			tokenBytes, err := deps.ReadPassword()
-			_, _ = fmt.Fprintln(deps.Output) // newline after the silent read
-			if err != nil {
-				return SecretStoreResult{}, fmt.Errorf("read root token: %w", err)
-			}
-			rootToken = strings.TrimSpace(string(tokenBytes))
-		}
-		if rootToken == "" {
-			_, _ = fmt.Fprintln(deps.Output, "Cannot enable trusted Plan Transit: a re-run has no root token available to positively verify the managed mount, key, policy, and role.")
-			_, _ = fmt.Fprintln(deps.Output, "To verify or repair the configuration, supply the root token without exposing it in shell history:")
-			_, _ = fmt.Fprintln(deps.Output, "")
-			_, _ = fmt.Fprintln(deps.Output, "    read -rs BAO_TOKEN && export BAO_TOKEN")
-			_, _ = fmt.Fprintln(deps.Output, "    oberth install --install-secretstore")
-			_, _ = fmt.Fprintln(deps.Output, "")
-			_, _ = fmt.Fprintln(deps.Output, "Keep every install flag unchanged, especially --namespace, --openbao-namespace, --chart-version, --openbao-chart-version, and --yes.")
-			_, _ = fmt.Fprintln(deps.Output, "Or run scripts/setup-secretstore.sh from an already-authenticated bao CLI session.")
-			return SecretStoreResult{}, fmt.Errorf("%s is required to verify production Transit provisioning before Oberth can be enabled", baoTokenEnvVar)
-		}
-		_, _ = fmt.Fprintf(deps.Output, "Using the root token to verify the secret-store configuration.\n")
-	}
-
-	if err := waitForPodReady(ctx, deps, openbao.Namespace, openBaoPodSelector, cfg.Timeout); err != nil {
-		return SecretStoreResult{}, fmt.Errorf("wait for OpenBao: %w", err)
-	}
-
-	configured, err := ConfigureSecretStore(ctx, cfg, deps, client, rootToken)
-	if err != nil {
-		return SecretStoreResult{}, fmt.Errorf("configure secret store: %w", err)
-	}
-	if !configured.TrustedTransitVerified {
-		return SecretStoreResult{}, errors.New("production secret-store setup completed without verified Transit provisioning")
-	}
-	return configured, nil
-}
-
-// SetupProductionSecretStoreDeferred is like SetupProductionSecretStore but
-// returns the init result (when a fresh initialization occurred) instead of
-// printing credentials immediately. The caller collects credentials into a
-// heldCredentials pool and displays them once after the install table closes.
-// interactiveDeps is used for prompts (root token re-entry on re-runs);
-// quietDeps is used for non-interactive bao operations.
+// SetupProductionSecretStoreDeferred retains newly created credentials for the
+// caller to display once, including when a later setup step fails.
 func SetupProductionSecretStoreDeferred(ctx context.Context, cfg Config, interactiveDeps, quietDeps Deps, openbao OpenBaoResult) (SecretStoreResult, *baoInitResult, error) {
 	client, status, err := waitForOpenBaoStatus(ctx, cfg, quietDeps, openbao.Namespace)
 	if err != nil {
@@ -522,13 +459,13 @@ func SetupProductionSecretStoreDeferred(ctx context.Context, cfg Config, interac
 	switch {
 	case !status.Initialized:
 		initResult, err := client.operatorInit(ctx)
-		if err != nil {
-			return SecretStoreResult{}, nil, err
+		if initResult.RootToken != "" || len(initResult.UnsealKeysB64) > 0 {
+			captured = &initResult
 		}
-		// Capture the credentials for deferred display instead of printing
-		// them now. The caller must guarantee these are displayed before the
-		// process exits.
-		captured = &initResult
+		if err != nil {
+			return SecretStoreResult{}, captured, err
+		}
+
 		rootToken = initResult.RootToken
 		unsealStatus, err := client.unseal(ctx, initResult.UnsealKeysB64[0])
 		if err != nil {
@@ -544,7 +481,7 @@ func SetupProductionSecretStoreDeferred(ctx context.Context, cfg Config, interac
 			openbao.Namespace, openbao.Namespace, client.pod)
 	default:
 		_, _ = fmt.Fprintln(interactiveDeps.Output, "OpenBao is already initialized and unsealed; skipping operator init (credentials were printed once at first initialization).")
-		rootToken = os.Getenv(baoTokenEnvVar)
+		rootToken = installerBaoToken(interactiveDeps)
 		if rootToken == "" && isInteractive(interactiveDeps) && interactiveDeps.ReadPassword != nil {
 			_, _ = fmt.Fprint(interactiveDeps.Output, "Root token (echo disabled): ")
 			tokenBytes, err := interactiveDeps.ReadPassword()
@@ -553,6 +490,7 @@ func SetupProductionSecretStoreDeferred(ctx context.Context, cfg Config, interac
 				return SecretStoreResult{}, nil, fmt.Errorf("read root token: %w", err)
 			}
 			rootToken = strings.TrimSpace(string(tokenBytes))
+			clear(tokenBytes)
 		}
 		if rootToken == "" {
 			_, _ = fmt.Fprintln(interactiveDeps.Output, "Cannot enable trusted Plan Transit: a re-run has no root token available to positively verify the managed mount, key, policy, and role.")
@@ -601,27 +539,6 @@ func setupProductionSecretStoreCollect(ctx context.Context, cfg Config, interact
 		}
 	}
 	return configured, err
-}
-
-// printProductionCredentials prints the once-only init credentials inside a
-// titled credential box. They are deliberately never persisted by the installer.
-func printProductionCredentials(w io.Writer, initResult baoInitResult, color bool) {
-	_, _ = fmt.Fprintln(w)
-	rows := []credentialRow{
-		{Label: "Root token", Value: initResult.RootToken},
-	}
-	for i, key := range initResult.UnsealKeysB64 {
-		label := "Unseal key"
-		if len(initResult.UnsealKeysB64) > 1 {
-			label = fmt.Sprintf("Unseal key %d", i+1)
-		}
-		rows = append(rows, credentialRow{Label: label, Value: key})
-	}
-	credentialBox(w,
-		"OpenBao credentials (save now, shown once)",
-		"",
-		rows, color)
-	_, _ = fmt.Fprintln(w)
 }
 
 // --- Secret store configuration (setup-secretstore.sh port) ---
@@ -989,16 +906,9 @@ func exactSingletonString(value any, want string) bool {
 
 // OberthPolicy returns the HCL policy for Oberth's read-only secret access.
 func OberthPolicy(kvPrefix string, namespace ...string) string {
-	return fmt.Sprintf(`# Oberth release secrets: read-only, data endpoints only. No list, no
-# metadata, no write, no delete. Managed by oberth install.
-path "%s/data/*" {
-  capabilities = ["read"]
-}
-
-# Allow the fetch client to revoke its own short-lived login token.
-path "auth/token/revoke-self" {
-  capabilities = ["update"]
-}`, kvPrefix) + serverIdentityPolicy(kvPrefix, namespace...)
+	return `# Server identity access only. Pipelines use their own scoped roles.
+path "auth/token/revoke-self" { capabilities = ["update"] }
+` + serverIdentityPolicy(kvPrefix, namespace...)
 }
 
 // credentialedPolicyPaths converts approval-table path vocabulary into the
@@ -1054,18 +964,6 @@ func credentialedPolicyPaths(kvPrefix string, paths []string) ([]string, error) 
 		out = append(out, rest)
 	}
 	return out, nil
-}
-
-// OberthCredentialedPolicy returns the HCL policy for credentialed pipeline
-// templates. It grants read access to registered upstream subtrees only; the
-// approval table in Oberth's database is the fine-grained admission gate,
-// and any non-upstream paths (e.g. release secrets) require explicit
-// approval-table entries that are synced to the policy via
-// OberthCredentialedPolicyWithGrants. The release/* wildcard was removed
-// to close a trust-tier collapse where any CI pipeline declaring an
-// upstream path received credentials that could read all release secrets.
-func OberthCredentialedPolicy(kvPrefix string, upstreamOrgs []string) string {
-	return OberthCredentialedPolicyWithGrants(kvPrefix, upstreamOrgs, nil)
 }
 
 // OberthCredentialedPolicyWithGrants returns the credentialed HCL policy
@@ -1175,6 +1073,11 @@ func ValidateRepoName(name string) error {
 // backslashes, newlines, and control characters would escape the string
 // boundary and inject arbitrary policy rules.
 func validateSecretPath(path string) error {
+	for _, segment := range strings.Split(path, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return errors.New("secret path must contain clean non-reserved segments")
+		}
+	}
 	if !secretPathPattern.MatchString(path) {
 		return fmt.Errorf("credentialed secret path %q contains characters outside [A-Za-z0-9._/-]; refusing to interpolate into Vault policy HCL", path)
 	}
@@ -1214,13 +1117,7 @@ func writeUpstreamOrgRules(builder *strings.Builder, kvPrefix string, upstreamOr
 // for trusted-plan envelopes. It grants no key-management, export, rotate,
 // backup, configuration, list, or wildcard Transit capability.
 func OberthProductionPolicy(kvPrefix, transitMount, transitKey string, namespace ...string) string {
-	return fmt.Sprintf(`# Oberth release secrets: read-only, data endpoints only. No list, no
-# metadata, no write, no delete. Managed by oberth install.
-path "%s/data/*" {
-  capabilities = ["read"]
-}
-
-# Trusted-plan envelope encryption/decryption through one non-exportable key.
+	return fmt.Sprintf(`# Trusted-plan envelope encryption/decryption through one non-exportable key.
 path "%s/encrypt/%s" {
   capabilities = ["update"]
 }
@@ -1232,7 +1129,7 @@ path "%s/decrypt/%s" {
 # Allow the client to revoke its own short-lived login token.
 path "auth/token/revoke-self" {
   capabilities = ["update"]
-}`, kvPrefix, transitMount, transitKey, transitMount, transitKey) + serverIdentityPolicy(kvPrefix, namespace...)
+}`, transitMount, transitKey, transitMount, transitKey) + serverIdentityPolicy(kvPrefix, namespace...)
 }
 
 func getClusterCA(ctx context.Context, deps Deps) (string, error) {

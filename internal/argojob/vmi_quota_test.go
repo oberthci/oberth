@@ -32,7 +32,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func guardedVMIFixture(t *testing.T, id int) (Config, *wfv1.Workflow, *corev1.Pod) {
@@ -51,7 +51,7 @@ func guardedVMISourceFixture(t *testing.T, id int, repoID int64, source string) 
 	config.applyDefaults()
 	config.VMLauncherServiceAccount = "vm-launcher"
 	config.ContainerDiskPrefixes = []string{"quay.io/example/"}
-	r := testRequest(periapsis.TriggerCI, source)
+	r := testRequest(pipeline.TriggerCI, source)
 	r.KubeVirtGranted = true
 	r.RepositoryID = repoID
 	r.Name = fmt.Sprintf("quota-%d", id)

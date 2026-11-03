@@ -18,13 +18,20 @@ import (
 	"github.com/oberthci/oberth/internal/testdb"
 )
 
+func requireStoreNoError(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 var storeTemplate testdb.Template
 
 func testStore(t *testing.T, now *time.Time) *Store {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "oberth.db")
 	storeTemplate.Copy(t, path, func(path string) error {
-		s, err := Open(context.Background(), path, Options{})
+		s, err := CreateGenesis(context.Background(), path, Options{})
 		if err != nil {
 			return err
 		}
@@ -35,8 +42,18 @@ func testStore(t *testing.T, now *time.Time) *Store {
 
 func openTestStore(t *testing.T, path string, now *time.Time) *Store {
 	t.Helper()
-	s, err := Open(context.Background(), path, Options{Now: func() time.Time { return *now }})
+	opts := Options{Now: func() time.Time { return *now }}
+	s, err := CreateGenesis(context.Background(), path, opts)
+	if errors.Is(err, os.ErrExist) {
+		s, err = OpenCurrent(context.Background(), path, opts)
+	}
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReconcileInconsistentPublications(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecoverOwnerState(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -529,7 +546,7 @@ func TestRunLifecycleListingAndFlexibleResolution(t *testing.T) {
 	if !run.Release || run.Actor != spec.Actor || run.Trigger != "manual" || run.TestedSHA != sha || run.BaseSHA != base {
 		t.Fatalf("enqueued run metadata = %#v", run)
 	}
-	if _, err := s.SetRunJobName(ctx, run.ID, "oberth-job-1"); err != nil {
+	if _, err := s.SetRunWorkflowName(ctx, run.ID, "oberth-job-1"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.ClaimNextRun(ctx); err != nil {
@@ -537,14 +554,14 @@ func TestRunLifecycleListingAndFlexibleResolution(t *testing.T) {
 	}
 	now = now.Add(time.Minute)
 	finished, err := s.FinishRun(ctx, run.ID, model.RunResult{
-		Status: model.RunFailed, Phase: "test", FailedBurn: "test",
+		Status: model.RunFailed, Phase: "test", FailedStage: "test",
 		FailedStep: "unit", Error: "tests failed",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if finished.JobName != "oberth-job-1" || finished.Status != model.RunFailed ||
-		finished.Phase != "test" || finished.FailedBurn != "test" || finished.FailedStep != "unit" ||
+	if finished.WorkflowName != "oberth-job-1" || finished.Status != model.RunFailed ||
+		finished.Phase != "test" || finished.FailedStage != "test" || finished.FailedStep != "unit" ||
 		finished.Error != "tests failed" || finished.FinishedAt == nil {
 		t.Fatalf("terminal run = %#v", finished)
 	}
@@ -642,7 +659,7 @@ func TestRestartRecoveryRetainsBranchWorkflows(t *testing.T) {
 	if _, err := s.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SetRunJobName(ctx, run.ID, "job-before-restart"); err != nil {
+	if _, err := s.SetRunWorkflowName(ctx, run.ID, "job-before-restart"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
@@ -672,8 +689,8 @@ func TestRestartRecoveryRetainsBranchWorkflows(t *testing.T) {
 		t.Fatalf("restart cancellations = %#v, want none for the resumable branch Workflow", cancellations)
 	}
 	// A claimed ordinary branch run without a job_name is requeued by store
-	// recovery (issue #270): the old attempt is interrupted with a link to a
-	// fresh queued copy, and the no-Job cancellation obligation terminalizes
+	// recovery: its ID and queue ordering remain stable, and the no-Job
+	// cancellation obligation terminalizes
 	// inside the recovery transaction because owner startup proves the
 	// claiming worker is gone.
 	noJobRun, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/no-job", "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"))
@@ -696,10 +713,10 @@ func TestRestartRecoveryRetainsBranchWorkflows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if noJobRecovered.Status != model.RunInterrupted || noJobRecovered.FinishedAt == nil || noJobRecovered.SupersededBy == "" {
-		t.Fatalf("no-job recovered run = %#v, want interrupted and superseded by its requeue", noJobRecovered)
+	if noJobRecovered.Status != model.RunQueued || noJobRecovered.FinishedAt != nil || noJobRecovered.SupersededBy != "" {
+		t.Fatalf("no-job recovered run = %#v, want queued under the same ID", noJobRecovered)
 	}
-	requeued, err := s.Run(ctx, noJobRecovered.SupersededBy)
+	requeued, err := s.Run(ctx, noJobRun.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -717,11 +734,8 @@ func TestRestartRecoveryRetainsBranchWorkflows(t *testing.T) {
 	}
 }
 
-// TestRestartRecoveryDoesNotRequeueTagRun pins the conservative side of the
-// issue #270 requeue: release-tier (tag) work is never re-fired
-// automatically; a claimed tag run without a Job is terminally interrupted
-// exactly as before.
-func TestRestartRecoveryDoesNotRequeueTagRun(t *testing.T) {
+// Unexecuted tag work resumes under the original durable ID.
+func TestRestartRecoveryRequeuesTagRun(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 9, 7, 6, 0, 0, 0, time.UTC)
 	path := filepath.Join(t.TempDir(), "oberth.db")
@@ -753,15 +767,15 @@ func TestRestartRecoveryDoesNotRequeueTagRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Status != model.RunInterrupted || recovered.SupersededBy != "" || recovered.Reason != "oberth restarted" {
-		t.Fatalf("recovered tag run = %#v, want terminally interrupted without requeue", recovered)
+	if recovered.Status != model.RunQueued || recovered.SupersededBy != "" || recovered.Reason != RestartRequeueReason {
+		t.Fatalf("recovered tag run = %#v, want queued under the same ID", recovered)
 	}
 }
 
 // TestRequeueStrandedRunReplacesOwnerRestartObligation covers the scheduler
 // reconciliation path of issue #270 at the store level: a stranded run whose
 // owner_restart cancellation already exists (run_id is the primary key) gets
-// its obligation upserted to a superseded one pointing at the requeued run,
+// its obligation upserted to retain the old Workflow while the same run queues,
 // re-armed for the cancellation pass.
 func TestRequeueStrandedRunReplacesOwnerRestartObligation(t *testing.T) {
 	ctx := context.Background()
@@ -779,7 +793,7 @@ func TestRequeueStrandedRunReplacesOwnerRestartObligation(t *testing.T) {
 	if _, err := s.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SetRunJobName(ctx, run.ID, "job-stranded"); err != nil {
+	if _, err := s.SetRunWorkflowName(ctx, run.ID, "job-stranded"); err != nil {
 		t.Fatal(err)
 	}
 	// A credentialed (ci-secrets tier) branch run is requeue-eligible; the
@@ -809,8 +823,8 @@ func TestRequeueStrandedRunReplacesOwnerRestartObligation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if old.Status != model.RunInterrupted || old.SupersededBy != requeued.ID {
-		t.Fatalf("stranded run after requeue = %#v, want interrupted superseded by %s", old, requeued.ID)
+	if old.Status != model.RunQueued || old.SupersededBy != "" || old.ID != requeued.ID {
+		t.Fatalf("stranded run after requeue = %#v, want queued under original ID %s", old, requeued.ID)
 	}
 	if requeued.Status != model.RunQueued || requeued.Ref != run.Ref || requeued.SHA != run.SHA || requeued.Credentialed {
 		t.Fatalf("requeued run = %#v, want uncredentialed queued copy", requeued)
@@ -819,9 +833,9 @@ func TestRequeueStrandedRunReplacesOwnerRestartObligation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pending) != 1 || pending[0].RunID != run.ID || pending[0].JobName != "job-stranded" ||
-		pending[0].Reason != "superseded" || pending[0].SupersededBy != requeued.ID {
-		t.Fatalf("pending obligations = %#v, want upserted superseded obligation for job-stranded", pending)
+	if len(pending) != 1 || pending[0].RunID != run.ID || pending[0].WorkflowName != "job-stranded" ||
+		pending[0].Reason != "owner_restart" || pending[0].SupersededBy != "" {
+		t.Fatalf("pending obligations = %#v, want upserted owner-restart obligation for job-stranded", pending)
 	}
 
 	// A second requeue attempt is refused: the run is no longer running.
@@ -879,7 +893,7 @@ func TestStepResultsRetainLogByteOffsets(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := s.PutStepResult(context.Background(), model.StepResult{
-		RunID: run.ID, Burn: "test", Step: "unit", Ordinal: 2,
+		RunID: run.ID, Stage: "test", Step: "unit", Ordinal: 2,
 		Status: model.StepTimedOut, ExitCode: -1, LogStart: 128, LogEnd: 4096,
 		DeclaredSize: "L", MaxRSSBytes: ptr.To(int64(64 << 20)), UserCPU: ptr.To(1250 * time.Millisecond), SystemCPU: ptr.To(250 * time.Millisecond),
 	})
@@ -918,7 +932,7 @@ func TestPutStepResultRefusesEveryNonTerminalStatus(t *testing.T) {
 	}
 	for _, status := range []model.StepStatus{model.StepPending, model.StepQueued, model.StepRunning, "invented"} {
 		if _, err := s.PutStepResult(context.Background(), model.StepResult{
-			RunID: run.ID, Burn: "setup", Step: "tools-dir", Ordinal: 0,
+			RunID: run.ID, Stage: "setup", Step: "tools-dir", Ordinal: 0,
 			Status: status, DeclaredSize: "M",
 		}); !errors.Is(err, ErrInvalid) {
 			t.Errorf("PutStepResult(%q) error = %v, want ErrInvalid", status, err)
@@ -1295,7 +1309,7 @@ BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END`); err != nil {
 	}
 }
 
-func TestSupersededRunCancellationPersistsAndLateJobNameIsRetained(t *testing.T) {
+func TestSupersededRunCancellationPersistsAndLateWorkflowNameIsRetained(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	path := filepath.Join(t.TempDir(), "oberth.db")
@@ -1315,10 +1329,10 @@ func TestSupersededRunCancellationPersistsAndLateJobNameIsRetained(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(replacement.Cancellations) != 1 || replacement.Cancellations[0].RunID != first.ID || replacement.Cancellations[0].JobName != "" {
+	if len(replacement.Cancellations) != 1 || replacement.Cancellations[0].RunID != first.ID || replacement.Cancellations[0].WorkflowName != "" {
 		t.Fatalf("enqueue cancellations = %#v", replacement.Cancellations)
 	}
-	if _, err := s.SetRunJobName(ctx, first.ID, "job-late"); err != nil {
+	if _, err := s.SetRunWorkflowName(ctx, first.ID, "job-late"); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
@@ -1330,7 +1344,7 @@ func TestSupersededRunCancellationPersistsAndLateJobNameIsRetained(t *testing.T)
 	}
 	t.Cleanup(func() { _ = s.Close() })
 	pending, err := s.PendingRunCancellations(ctx)
-	if err != nil || len(pending) != 1 || pending[0].JobName != "job-late" || pending[0].SupersededBy != replacement.ID {
+	if err != nil || len(pending) != 1 || pending[0].WorkflowName != "job-late" || pending[0].SupersededBy != replacement.ID {
 		t.Fatalf("pending cancellations = %#v, %v", pending, err)
 	}
 	if err := s.CompleteRunCancellation(ctx, first.ID, "job-late"); err != nil {
@@ -1351,14 +1365,14 @@ func TestEnqueueReturnsKnownJobCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SetRunJobName(ctx, first.ID, "job-known"); err != nil {
+	if _, err := s.SetRunWorkflowName(ctx, first.ID, "job-known"); err != nil {
 		t.Fatal(err)
 	}
 	replacement, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/known-job", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(replacement.Cancellations) != 1 || replacement.Cancellations[0].RunID != first.ID || replacement.Cancellations[0].JobName != "job-known" {
+	if len(replacement.Cancellations) != 1 || replacement.Cancellations[0].RunID != first.ID || replacement.Cancellations[0].WorkflowName != "job-known" {
 		t.Fatalf("known job cancellation = %#v", replacement.Cancellations)
 	}
 }
@@ -1918,7 +1932,7 @@ func TestOwnerRecoveryRetiresLegacyBranchRestartCancellation(t *testing.T) {
 	if _, err := s.ClaimNextRun(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SetRunJobName(context.Background(), run.ID, "old-owner-workflow"); err != nil {
+	if _, err := s.SetRunWorkflowName(context.Background(), run.ID, "old-owner-workflow"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(`INSERT INTO run_cancellations(run_id,job_name,superseded_by,reason,created_at) VALUES(?,?,'','owner_restart',?)`, run.ID, "old-owner-workflow", unixNano(now)); err != nil {

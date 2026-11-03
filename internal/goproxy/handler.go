@@ -10,9 +10,7 @@ package goproxy
 
 import (
 	"archive/tar"
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -34,9 +32,6 @@ import (
 type GitCache interface {
 	// ListTags returns all tag names (without refs/tags/ prefix) for the repo.
 	ListTags(ctx context.Context, input string) ([]string, error)
-	// TagTime returns the tagger date for an annotated tag, or the commit date
-	// for a lightweight tag.
-	TagTime(ctx context.Context, input, tag string) (time.Time, error)
 	// ShowFile returns the contents of a single file at the given ref.
 	ShowFile(ctx context.Context, input, ref, filePath string) ([]byte, error)
 	// ArchiveTar writes a tar archive of the tree at the given ref.
@@ -55,6 +50,7 @@ type Handler struct {
 	repoForModule map[string]string
 	artifacts     *artifactCache
 	backendBudget time.Duration
+	archiveLimit  int64
 }
 
 // NewHandler builds a GOPROXY handler that resolves modules against the
@@ -168,7 +164,11 @@ func (h *Handler) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if h.artifacts != nil && extension != "" {
+	if h.artifacts == nil {
+		backendUnavailable(w)
+		return
+	}
+	if extension != "" {
 		h.serveImmutable(w, r, repoInput, modulePath, version, extension)
 		return
 	}
@@ -214,20 +214,8 @@ func (h *Handler) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		privateUnavailable(w)
 		return
 	}
-	if h.artifacts != nil {
-		// @latest chooses from live tags, then uses the same pinned .info as
-		// an explicit version request and rechecks revocation before serving.
-		h.serveImmutable(w, r, repoInput, modulePath, version, extension)
-		return
-	}
-	switch extension {
-	case ".info":
-		h.serveInfo(r.Context(), w, repoInput, version)
-	case ".mod":
-		h.serveMod(r.Context(), w, repoInput, modulePath, version)
-	case ".zip":
-		h.serveZip(r.Context(), w, repoInput, modulePath, version)
-	}
+	// @latest resolves from live tags, then serves the pinned version bundle.
+	h.serveImmutable(w, r, repoInput, modulePath, version, extension)
 }
 
 func privateUnavailable(w http.ResponseWriter) {
@@ -253,46 +241,21 @@ func (h *Handler) versions(ctx context.Context, input, modulePath string) ([]str
 	return versions, nil
 }
 
-func (h *Handler) serveInfo(ctx context.Context, w http.ResponseWriter, input, version string) {
-	t, err := h.cache.TagTime(ctx, input, version)
-	if err != nil {
-		backendUnavailable(w)
-		return
+func (h *Handler) buildZip(ctx context.Context, input, modulePath, version, ref string) (*moduleZip, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	reader, writer := io.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		err := h.cache.ArchiveTar(ctx, input, ref, writer)
+		_ = writer.CloseWithError(err)
+		done <- err
+	}()
+	defer func() { cancel(); _ = reader.CloseWithError(context.Canceled); <-done }()
+	limit := h.archiveLimit
+	if limit <= 0 {
+		limit = 512 << 20
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{
-		"Version": version,
-		"Time":    t.UTC().Format(time.RFC3339),
-	})
-}
-
-func (h *Handler) serveMod(ctx context.Context, w http.ResponseWriter, input, modulePath, version string) {
-	content, err := h.cache.ShowFile(ctx, input, version, "go.mod")
-	if err != nil {
-		backendUnavailable(w)
-		return
-	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	// The content is go.mod read from the git cache (trusted source, not user input).
-	_, _ = w.Write(content) // #nosec G705
-}
-
-func (h *Handler) serveZip(ctx context.Context, w http.ResponseWriter, input, modulePath, version string) {
-	content, err := h.buildZip(ctx, input, modulePath, version, version)
-	if err != nil {
-		writeBuildError(w, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/zip")
-	_, _ = w.Write(content)
-}
-
-func (h *Handler) buildZip(ctx context.Context, input, modulePath, version, ref string) ([]byte, error) {
-	// Read the tar archive from git.
-	var tarBuf bytes.Buffer
-	if err := h.cache.ArchiveTar(ctx, input, ref, &tarBuf); err != nil {
-		return nil, moduleReadBuildError(err)
-	}
+	bounded := &io.LimitedReader{R: proxyContextReader{ctx, reader}, N: limit + 1}
 
 	// Extract the tar to a temporary directory so we can build a canonical
 	// module zip with golang.org/x/mod/zip.CreateFromDir. This ensures the
@@ -306,16 +269,28 @@ func (h *Handler) buildZip(ctx context.Context, input, modulePath, version, ref 
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
 
-	tr := tar.NewReader(&tarBuf)
+	tr := tar.NewReader(bounded)
 	for {
 		if ctx.Err() != nil {
 			return nil, backendBuildError()
 		}
 		header, err := tr.Next()
 		if errors.Is(err, io.EOF) {
+			if _, err = io.Copy(io.Discard, bounded); err != nil {
+				return nil, moduleReadBuildError(err)
+			}
+			if bounded.N == 0 {
+				return nil, &proxyBuildError{class: "archive_too_large", status: http.StatusInternalServerError}
+			}
 			break
 		}
+		if bounded.N == 0 || (err == nil && header.Size > bounded.N-1) {
+			return nil, &proxyBuildError{class: "archive_too_large", status: http.StatusInternalServerError}
+		}
 		if err != nil {
+			if !errors.Is(err, tar.ErrHeader) && !errors.Is(err, io.ErrUnexpectedEOF) {
+				return nil, moduleReadBuildError(err)
+			}
 			return nil, &proxyBuildError{class: "archive_error", status: http.StatusInternalServerError}
 		}
 		// Only extract regular files; symlinks and directories are excluded
@@ -326,7 +301,7 @@ func (h *Handler) buildZip(ctx context.Context, input, modulePath, version, ref 
 		}
 		name := path.Clean(header.Name)
 		// Defense in depth: reject path traversal (git archive is trusted).
-		if strings.HasPrefix(name, "..") || strings.Contains(name, "/../") {
+		if !filepath.IsLocal(filepath.FromSlash(name)) || strings.HasPrefix(name, "..") || strings.Contains(name, "/../") {
 			continue
 		}
 		// Exclude vendor/ trees: Go module zips never include vendor/
@@ -343,7 +318,7 @@ func (h *Handler) buildZip(ctx context.Context, input, modulePath, version, ref 
 		if createErr != nil {
 			return nil, &proxyBuildError{class: "internal_error", status: http.StatusInternalServerError}
 		}
-		// #nosec G110 -- tar stream from git archive; size bounded by tree.
+		// #nosec G110 -- the aggregate archive and each entry are bounded above.
 		if _, cpErr := io.Copy(f, proxyContextReader{ctx, tr}); cpErr != nil {
 			_ = f.Close()
 			if ctx.Err() != nil {
@@ -360,16 +335,31 @@ func (h *Handler) buildZip(ctx context.Context, input, modulePath, version, ref 
 	// rules: nested module exclusion (subdirs with their own go.mod), vendor/
 	// tree exclusion, symlink exclusion, deterministic entry ordering, and
 	// canonical zip metadata (timestamps, permissions, compression).
-	var zipBuf bytes.Buffer
+	file, err := os.CreateTemp("", "goproxy-module-*.zip")
+	if err != nil {
+		return nil, &proxyBuildError{class: "internal_error", status: http.StatusInternalServerError}
+	}
+	zip := &moduleZip{File: file}
+	keep := false
+	defer func() {
+		if !keep {
+			_ = zip.Close()
+		}
+	}()
 	mv := module.Version{Path: modulePath, Version: version}
-	if err := modzip.CreateFromDir(proxyContextWriter{ctx, &zipBuf}, mv, dir); err != nil {
+	output := &proxyLimitWriter{writer: proxyContextWriter{ctx, file}, remaining: 500 << 20}
+	if err := modzip.CreateFromDir(output, mv, dir); err != nil {
 		if ctx.Err() != nil {
 			return nil, &proxyBuildError{class: "private_backend_unavailable", status: http.StatusServiceUnavailable}
 		}
 		return nil, &proxyBuildError{class: "zip_creation_error", status: http.StatusInternalServerError}
 	}
 
-	return zipBuf.Bytes(), nil
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	keep = true
+	return zip, nil
 }
 
 // isVendorPath reports whether name is inside a vendor/ directory.

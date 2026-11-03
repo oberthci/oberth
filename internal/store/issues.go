@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,54 +16,7 @@ import (
 
 const issueColumns = `
 id, repo_id, kind, branch, title, body, state, occurrences,
-ci_origin, ci_work_sequence, ci_work_id, created_at, updated_at, closed_at, scope_upstream_id`
-
-// UpsertCIIssue creates or updates a CI issue for a red branch. Production
-// callers go through the issue projection system; this method is retained for
-// test fixtures that need a CI issue without a full run lifecycle.
-func (s *Store) UpsertCIIssue(ctx context.Context, actor string, repoID int64, branch, title, body string) (model.Issue, error) {
-	if strings.TrimSpace(actor) == "" || repoID <= 0 || strings.TrimSpace(branch) == "" || strings.TrimSpace(title) == "" {
-		return model.Issue{}, fmt.Errorf("%w: CI issue fields are invalid", ErrInvalid)
-	}
-	acquired := s.now().UTC()
-	now := unixNano(acquired)
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return model.Issue{}, fmt.Errorf("begin upsert CI issue: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	value, err := scanIssue(tx.QueryRowContext(ctx, `
-INSERT INTO issues(repo_id, kind, branch, title, body, state, occurrences, created_at, updated_at)
-VALUES(?, 'ci', ?, ?, ?, 'open', 1, ?, ?)
-ON CONFLICT(repo_id, branch) WHERE kind = 'ci' AND state = 'open' DO UPDATE SET
-    title = excluded.title,
-    body = excluded.body,
-    occurrences = issues.occurrences + 1,
-    updated_at = excluded.updated_at
-RETURNING `+issueColumns, repoID, branch, title, body, now, now))
-	if err != nil {
-		return model.Issue{}, fmt.Errorf("upsert CI issue: %w", err)
-	}
-	if err := s.appendIssueAudit(ctx, tx, actor, "issue.ci.upsert", value.ID, map[string]any{"branch": branch, "occurrences": value.Occurrences}, now); err != nil {
-		return model.Issue{}, err
-	}
-	expires := acquired.Add(IssueLockTTL)
-	if _, err := tx.ExecContext(ctx, `
-INSERT INTO issue_locks(issue_id, owner, acquired_at, expires_at) VALUES(?, ?, ?, ?)
-ON CONFLICT(issue_id) DO UPDATE SET
-    owner = excluded.owner,
-    acquired_at = excluded.acquired_at,
-    expires_at = excluded.expires_at`, value.ID, actor, now, unixNano(expires)); err != nil {
-		return model.Issue{}, fmt.Errorf("lock CI issue for pushing uplink: %w", err)
-	}
-	if err := s.appendIssueAudit(ctx, tx, actor, "issue.lock.acquire", value.ID, map[string]any{"expires_at": expires.Format(time.RFC3339Nano), "source": "ci_red"}, now); err != nil {
-		return model.Issue{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return model.Issue{}, fmt.Errorf("commit upsert CI issue: %w", err)
-	}
-	return value, nil
-}
+ci_origin, ci_work_sequence, ci_work_id, created_at, updated_at, closed_at, scope_upstream_id, revision`
 
 func (s *Store) CloseCIIssue(ctx context.Context, actor string, issueID int64, resolution string) (model.Issue, error) {
 	resolution = strings.TrimSpace(resolution)
@@ -103,7 +58,7 @@ RETURNING `+issueColumns, now, now, resolution, resolution, issueID))
 	if err := s.appendIssueAudit(ctx, tx, actor, "issue.ci.close", value.ID, map[string]any{"branch": value.Branch, "resolution": resolution}, now); err != nil {
 		return model.Issue{}, err
 	}
-	return value, nil
+	return scanIssue(tx.QueryRowContext(ctx, `SELECT `+issueColumns+` FROM issues WHERE id=?`, issueID))
 }
 
 func (s *Store) CreateManualIssue(ctx context.Context, actor string, spec model.ManualIssueSpec) (model.Issue, error) {
@@ -210,6 +165,19 @@ func (s *Store) updateIssue(ctx context.Context, actor string, id int64, patch m
 	if err := s.requireIssueMutationLock(ctx, tx, id, actor, updatedAt, !closing); err != nil {
 		return model.Issue{}, err
 	}
+	if err := requireIssueRevision(ctx, tx, id, patch.ExpectedRevision); err != nil {
+		return model.Issue{}, err
+	}
+	if patch.ExpectedBodySHA256 != "" {
+		var body string
+		if err := tx.QueryRowContext(ctx, `SELECT body FROM issues WHERE id=?`, id).Scan(&body); err != nil {
+			return model.Issue{}, translateNotFound("issue", err)
+		}
+		sum := sha256.Sum256([]byte(body))
+		if hex.EncodeToString(sum[:]) != patch.ExpectedBodySHA256 {
+			return model.Issue{}, fmt.Errorf("%w: expected_body_sha256 mismatch; reread issue_get before retrying", ErrInvalid)
+		}
+	}
 	var oldScope int64
 	if patch.ScopeUpstreamID != nil {
 		var kind model.IssueKind
@@ -272,6 +240,10 @@ func (s *Store) updateIssue(ctx context.Context, actor string, id int64, patch m
 		details["new_scope_upstream_id"] = value.ScopeUpstreamID
 	}
 	if err := s.appendIssueAudit(ctx, tx, actor, "issue.update", value.ID, details, now); err != nil {
+		return model.Issue{}, err
+	}
+	value, err = scanIssue(tx.QueryRowContext(ctx, `SELECT `+issueColumns+` FROM issues WHERE id=?`, id))
+	if err != nil {
 		return model.Issue{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -549,45 +521,15 @@ RETURNING issue_id, owner, acquired_at, expires_at`,
 	return value, nil
 }
 
-// ReleaseIssueLock explicitly releases a lock before expiry. Production callers
-// rely on TTL expiry; this method is retained for test fixtures that need
-// immediate lock release without waiting.
-func (s *Store) ReleaseIssueLock(ctx context.Context, issueID int64, owner string) error {
-	if issueID <= 0 || strings.TrimSpace(owner) == "" {
-		return fmt.Errorf("%w: issue and lock owner are required", ErrInvalid)
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin release issue lock: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	value, err := scanIssueLock(tx.QueryRowContext(ctx, `
-DELETE FROM issue_locks WHERE issue_id = ? AND owner = ?
-RETURNING issue_id, owner, acquired_at, expires_at`, issueID, owner))
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrLockNotOwned
-	}
-	if err != nil {
-		return fmt.Errorf("release issue lock: %w", err)
-	}
-	if err := s.appendIssueAudit(ctx, tx, owner, "issue.lock.release", issueID, map[string]any{"acquired_at": value.AcquiredAt.Format(time.RFC3339Nano)}, unixNano(s.now())); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit release issue lock: %w", err)
-	}
-	return nil
-}
-
 func scanIssue(row rowScanner) (model.Issue, error) {
 	var value model.Issue
 	var repoID sql.NullInt64
 	var created, updated int64
 	var closed, scopeUpstreamID sql.NullInt64
-	if err := row.Scan(&value.ID, &repoID, &value.Kind, &value.Branch,
+	if err := scanRowNotFound(row, "Issue", &value.ID, &repoID, &value.Kind, &value.Branch,
 		&value.Title, &value.Body, &value.State, &value.Occurrences,
 		&value.CIOrigin, &value.CIWorkSequence, &value.CIWorkID,
-		&created, &updated, &closed, &scopeUpstreamID); err != nil {
+		&created, &updated, &closed, &scopeUpstreamID, &value.Revision); err != nil {
 		return model.Issue{}, err
 	}
 	value.RepoID = repoID.Int64
@@ -600,7 +542,7 @@ func scanIssue(row rowScanner) (model.Issue, error) {
 func scanIssueLock(row rowScanner) (model.IssueLock, error) {
 	var value model.IssueLock
 	var acquired, expires int64
-	if err := row.Scan(&value.IssueID, &value.Owner, &acquired, &expires); err != nil {
+	if err := scanRowNotFound(row, "IssueLock", &value.IssueID, &value.Owner, &acquired, &expires); err != nil {
 		return model.IssueLock{}, err
 	}
 	value.AcquiredAt, value.ExpiresAt = fromUnixNano(acquired), fromUnixNano(expires)

@@ -21,7 +21,7 @@ const (
 	KVMSuiteAMD64Profile = "kvm-suite-amd64-v1"
 	OfflineEBPFProfile   = "ebpf-offline-amd64-v1"
 	BPFArtifact          = "ebpf/secret_monitor.o"
-	BurnName             = "trusted-tests"
+	StageName            = "trusted-tests"
 )
 
 // Contract is deliberately closed. New profiles and inputs require a product

@@ -14,30 +14,30 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type pendingCreateJobs struct {
 	*fakeJobs
-	createHook func(context.Context, JobRequest) error
+	createHook func(context.Context, WorkflowRequest) error
 	settle     func(context.Context, string, string, time.Time) (bool, error)
 	adoptCalls atomic.Int32
 }
 
-func (j *pendingCreateJobs) CreateCI(ctx context.Context, req JobRequest) error {
+func (j *pendingCreateJobs) CreateWorkflow(ctx context.Context, req WorkflowRequest) error {
 	if j.createHook != nil {
 		return j.createHook(ctx, req)
 	}
 	if req.Run.Ref == "feature/pending" {
 		return &uncertainWorkflowCreateError{}
 	}
-	return j.fakeJobs.CreateCI(ctx, req)
+	return j.fakeJobs.CreateWorkflow(ctx, req)
 }
-func (j *pendingCreateJobs) Adopt(context.Context, model.Run) (periapsis.Size, bool, error) {
+func (j *pendingCreateJobs) Adopt(context.Context, model.Run) (pipeline.Size, bool, error) {
 	j.adoptCalls.Add(1)
-	return periapsis.M, false, nil
+	return pipeline.M, false, nil
 }
-func (*pendingCreateJobs) JobNamespace() string { return "test-argo" }
+func (*pendingCreateJobs) WorkflowNamespace() string { return "test-argo" }
 func (j *pendingCreateJobs) WaitResumed(ctx context.Context, name string, out io.Writer, _ []runprogress.Event, _ int64) (JobResult, error) {
 	return j.Wait(ctx, name, out)
 }
@@ -114,7 +114,7 @@ func TestWorkflowCreateBrownoutTenMinutesDoesNotStopServerOrOtherRuns(t *testing
 				if err != nil {
 					return false, err
 				}
-				if name != run.JobName || boundary.IsZero() {
+				if name != run.WorkflowName || boundary.IsZero() {
 					return false, errors.New("lost cleanup identity/boundary")
 				}
 				if !recovered.Load() {
@@ -217,7 +217,7 @@ func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForSettlement(t *testi
 				if err != nil || run.ID != queued.ID {
 					t.Fatal(err)
 				}
-				run, err = f.store.SetRunJobName(t.Context(), run.ID, fmt.Sprintf("wf-%d", i))
+				run, err = f.store.SetRunWorkflowName(t.Context(), run.ID, fmt.Sprintf("wf-%d", i))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -225,11 +225,11 @@ func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForSettlement(t *testi
 				if i == 0 {
 					demand = argoworkflow.VMIDemand{VMs: 1, Cores: 1, MemoryBytes: 1 << 30}
 				}
-				if err := f.scheduler.recordCreateAdmission(run, run.JobName, periapsis.S, demand); err != nil {
+				if err := f.scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S, demand); err != nil {
 					t.Fatal(err)
 				}
 				if marked {
-					if err := f.store.MarkRunCreatePending(t.Context(), run.ID, run.JobName); err != nil {
+					if err := f.store.MarkRunCreatePending(t.Context(), run.ID, run.WorkflowName); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -318,7 +318,7 @@ func TestWorkflowCreateProcessNextAndCancelNeverSettleInline(t *testing.T) {
 	// The snapshot survives ordinary workspace removal and cannot be supplied by repo files.
 	run, _ := f.store.Run(t.Context(), source.ID)
 	saved, err := f.scheduler.readCreateAdmission(run)
-	if err != nil || saved.Size != periapsis.M {
+	if err != nil || saved.Size != pipeline.M {
 		t.Fatalf("durable contract missing: %+v %v", saved, err)
 	}
 	_ = os.RemoveAll(f.scheduler.workspaceRoot + "/" + source.ID)
@@ -372,14 +372,14 @@ func TestWorkflowCreateLegacyOwnerRestartStillUsesDeleteWithSettlerEngine(t *tes
 	if err != nil || run.ID != source.ID {
 		t.Fatal(err)
 	}
-	run, err = f.store.SetRunJobName(t.Context(), run.ID, "preflight-workflow")
+	run, err = f.store.SetRunWorkflowName(t.Context(), run.ID, "preflight-workflow")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.store.FinishRun(t.Context(), run.ID, model.RunResult{Status: model.RunInterrupted, Phase: "interrupted"}); err != nil {
 		t.Fatal(err)
 	}
-	ledger := &legacyOwnerRestartStore{SchedulerStore: f.store, cancellation: model.RunCancellation{RunID: run.ID, JobName: run.JobName, Reason: "owner_restart", CreatedAt: time.Now()}}
+	ledger := &legacyOwnerRestartStore{SchedulerStore: f.store, cancellation: model.RunCancellation{RunID: run.ID, WorkflowName: run.WorkflowName, Reason: "owner_restart", CreatedAt: time.Now()}}
 	f.scheduler.store = ledger
 	jobs := &pendingCreateJobs{fakeJobs: f.jobs, settle: func(context.Context, string, string, time.Time) (bool, error) {
 		t.Fatal("trusted-KVM owner_restart bypassed VMI Delete cleanup")
@@ -389,7 +389,7 @@ func TestWorkflowCreateLegacyOwnerRestartStillUsesDeleteWithSettlerEngine(t *tes
 	if err := f.scheduler.completePendingCancellations(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if !ledger.completed || len(f.jobs.deleted) != 1 || f.jobs.deleted[0] != run.JobName {
+	if !ledger.completed || len(f.jobs.deleted) != 1 || f.jobs.deleted[0] != run.WorkflowName {
 		t.Fatalf("legacy cleanup not deleted: completed=%t deleted=%v", ledger.completed, f.jobs.deleted)
 	}
 }
@@ -408,11 +408,11 @@ type deferredPendingStore struct {
 	fail bool
 }
 
-func (s *deferredPendingStore) MarkRunCreatePending(ctx context.Context, id, name string) error {
+func (s *deferredPendingStore) MarkRunCreatePending(ctx context.Context, id, name string, reason ...string) error {
 	if s.fail {
 		return context.DeadlineExceeded
 	}
-	return s.SchedulerStore.MarkRunCreatePending(ctx, id, name)
+	return s.SchedulerStore.MarkRunCreatePending(ctx, id, name, reason...)
 }
 func TestWorkflowCreatePendingPersistenceFailureIsRetriedWithoutFatal(t *testing.T) {
 	f := newControlFixture(t)

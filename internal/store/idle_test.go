@@ -32,7 +32,7 @@ func TestIdleQueueStatusIncludesEveryActiveTrigger(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := database.SetRunJobName(t.Context(), run.ID, "fixture-workflow-"+run.ID); err != nil {
+			if _, err := database.SetRunWorkflowName(t.Context(), run.ID, "fixture-workflow-"+run.ID); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := database.MarkRunSubmitted(t.Context(), run.ID); err != nil {

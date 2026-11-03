@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/oberthci/oberth/internal/boundedio"
 )
 
 const maxCapturedOutput = 64 << 10
@@ -120,8 +122,9 @@ func (b *cliBackend) execute(ctx context.Context, spec commandSpec, capture bool
 		cmd.WaitDelay = captureWaitDelay
 	}
 
-	var output tailBuffer
-	output.max = maxCapturedOutput
+	ctx, cancelOutput := context.WithCancel(ctx)
+	defer cancelOutput()
+	output := boundedio.Buffer{Limit: maxCapturedOutput, OnOverflow: cancelOutput}
 	// Always retain the tail of stderr, bounded and redacted, so a failure at
 	// the upstream boundary carries the forge's own reason (URL, "repository
 	// not found", "Permission denied (publickey)") instead of a bare "exit
@@ -132,10 +135,10 @@ func (b *cliBackend) execute(ctx context.Context, spec commandSpec, capture bool
 	stderrTail.max = maxCapturedOutput
 	switch {
 	case capture:
-		// Both streams into one buffer; os/exec reuses a single copier because
-		// Stdout == Stderr (identical writer), so there is no concurrent write.
+		// Machine-readable stdout must not contain successful diagnostics.
+		// Overflow fails the command instead of accepting a truncated value.
 		cmd.Stdout = &output
-		cmd.Stderr = &output
+		cmd.Stderr = &stderrTail
 	case spec.stderr == nil:
 		cmd.Stdout = spec.stdout
 		cmd.Stderr = &stderrTail
@@ -180,9 +183,6 @@ func (b *cliBackend) execute(ctx context.Context, spec commandSpec, capture bool
 	}
 	if stopErr != nil {
 		detail := stderrTail.String()
-		if capture {
-			detail = output.String()
-		}
 		if detail = c.redactOutput(detail); detail != "" {
 			return "", fmt.Errorf("git command stopped: %w: %s", stopErr, detail)
 		}
@@ -190,9 +190,6 @@ func (b *cliBackend) execute(ctx context.Context, spec commandSpec, capture bool
 	}
 	if waitErr != nil {
 		detail := stderrTail.String()
-		if capture {
-			detail = output.String()
-		}
 		detail = c.redactOutput(detail)
 		repository := spec.repository
 		if repository == "" {
@@ -204,7 +201,10 @@ func (b *cliBackend) execute(ctx context.Context, spec commandSpec, capture bool
 		}
 		return "", fmt.Errorf("git command failed: %w", waitErr)
 	}
-	return output.String(), nil
+	if output.Err() != nil {
+		return "", fmt.Errorf("git stdout exceeds %d bytes: %w", maxCapturedOutput, output.Err())
+	}
+	return strings.TrimSpace(output.String()), nil
 }
 
 // gitSubcommand skips the global options used by cache commands, including
@@ -399,10 +399,16 @@ func defaultTimeout(value time.Duration) time.Duration {
 // Unlike listRefs, this uses a direct buffer (not the 64 KB tail-buffer
 // capture path) so it can handle several thousand refs without truncation.
 func (c *Cache) listRefsAtMost(ctx context.Context, path string, maximum int, prefixes ...string) (map[string]string, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	countArg := fmt.Sprintf("--count=%d", maximum+1)
 	args := append([]string{"for-each-ref", countArg, "--format=%(refname) %(objectname)"}, prefixes...)
-	var buf bytes.Buffer
-	if err := c.run(ctx, commandSpec{dir: path, args: args, stdout: &buf, stderr: &buf}); err != nil {
+	buf := &boundedio.Buffer{Limit: maxRefsOutput, OnOverflow: cancel}
+	err := c.run(ctx, commandSpec{dir: path, args: args, stdout: buf, stderr: buf})
+	if buf.Err() != nil {
+		return nil, fmt.Errorf("ref output exceeds %d bytes; too many refs", maxRefsOutput)
+	}
+	if err != nil {
 		return nil, err
 	}
 	refs := make(map[string]string)

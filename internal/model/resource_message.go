@@ -60,7 +60,7 @@ func ResourceFailureMessage(runID string, steps []StepResult, usage []StepResour
 		if step.Status != StepFailed && step.Status != StepTimedOut {
 			continue
 		}
-		if !diagnosticName.MatchString(step.Burn) || !diagnosticName.MatchString(step.Step) {
+		if !diagnosticName.MatchString(step.Stage) || !diagnosticName.MatchString(step.Step) {
 			continue
 		}
 		var c *StepTermination
@@ -86,7 +86,7 @@ func ResourceFailureMessage(runID string, steps []StepResult, usage []StepResour
 		}
 		command := "oberth run resources --run " + runID + " --include-failed"
 		if oom {
-			return fmt.Sprintf("OOM kill at %s/%s: memory limit %s; sampled memory peak %s (lower bound). Inspect %s; change resources in git.", step.Burn, step.Step, resourceBytes(c.MemoryLimitBytes), resourceBytes(peak), command)
+			return fmt.Sprintf("OOM kill at %s/%s: memory limit %s; sampled memory peak %s (lower bound). Inspect %s; change resources in git.", step.Stage, step.Step, resourceBytes(c.MemoryLimitBytes), resourceBytes(peak), command)
 		}
 		limit := "unknown"
 		runtime := "unknown"
@@ -98,7 +98,7 @@ func ResourceFailureMessage(runID string, steps []StepResult, usage []StepResour
 				runtime = c.FinishedAt.Sub(c.StartedAt).String()
 			}
 		}
-		return fmt.Sprintf("%s Step %s/%s: deadline limit %s; observed runtime %s; sampled memory peak %s (lower bound). Inspect %s; change deadlines in git.", ExecutionDeadlineMessage, step.Burn, step.Step, limit, runtime, resourceBytes(peak), command)
+		return fmt.Sprintf("%s Step %s/%s: deadline limit %s; observed runtime %s; sampled memory peak %s (lower bound). Inspect %s; change deadlines in git.", ExecutionDeadlineMessage, step.Stage, step.Step, limit, runtime, resourceBytes(peak), command)
 	}
 	if deadline {
 		return fmt.Sprintf("%s Step unknown: deadline limit unknown; sampled memory peak unknown. Inspect oberth run resources --run %s --include-failed; change deadlines in git.", ExecutionDeadlineMessage, runID)

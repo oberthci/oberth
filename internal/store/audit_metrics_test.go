@@ -148,7 +148,7 @@ func seedAuditMetricRows(t testing.TB, database *Store, count int, createdAt tim
 	previous := append([]byte(nil), auditGenesisSHA256...)
 	for index := 1; index <= count; index++ {
 		spec := model.AuditActionSpec{
-			Actor: "metric@tuxbox", Action: "metric.measure", ResourceType: "metric",
+			Actor: "metric@example-node", Action: "metric.measure", ResourceType: "metric",
 			ResourceID: strconv.Itoa(index), Details: `{"fixture":true}`,
 		}
 		timestamp := createdAt.Add(time.Duration(index) * time.Nanosecond).UnixNano()

@@ -153,7 +153,7 @@ restore_config
 k wait --for=condition=MemoryPressure=false "node/$task_node" --timeout=120s
 echo 'PASS synthetic MemoryPressure scheduler positive/negative controls'
 
-for task_app in oberth argo openbao cloudflared; do
+for task_app in oberth argo openbao; do
   create_pod "$task_app" system-cluster-critical yes yes
   k -n "$task_namespace" wait --for=condition=Ready "pod/$task_app" --timeout=60s
 done
@@ -174,7 +174,7 @@ done
 [[ "$task_verdict" == Evicted ]] || { echo 'ordinary tolerant pod was not rejected by kubelet' >&2; exit 1; }
 k -n "$task_namespace" get pod tolerant-ordinary -o json > "$task_root/ordinary-kubelet-rejection.json"
 echo 'PASS tolerant custom-priority control rejected by real kubelet DiskPressure'
-for task_app in oberth argo openbao cloudflared; do
+for task_app in oberth argo openbao; do
   k -n "$task_namespace" delete pod "$task_app" --wait=true
   create_pod "$task_app" system-cluster-critical yes yes
   k -n "$task_namespace" wait --for=condition=Ready "pod/$task_app" --timeout=60s
@@ -184,7 +184,7 @@ python3 - "$task_root/before-pressure.json" "$task_root/recreated-under-pressure
 import json,sys
 old={p['metadata']['name']:p for p in json.load(open(sys.argv[1]))['items']}
 new={p['metadata']['name']:p for p in json.load(open(sys.argv[2]))['items']}
-for name in ('oberth','argo','openbao','cloudflared'):
+for name in ('oberth','argo','openbao'):
     p=new[name]
     assert p['metadata']['uid']!=old[name]['metadata']['uid']
     assert p['spec']['priority']==2000000000 and p['status']['qosClass']=='Guaranteed'

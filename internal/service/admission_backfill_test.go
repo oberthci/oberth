@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type fakeClock struct{ now time.Time }
@@ -66,12 +66,12 @@ func TestXLHeadBackfillsRunsThatFit(t *testing.T) {
 	clock := &fakeClock{now: time.Date(2026, 10, 20, 15, 0, 0, 0, time.UTC)}
 	gate := backfillGate(clock)
 	scheduler := &Scheduler{admission: gate}
-	release := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "running-l", Size: periapsis.L, Estimate: 20 * time.Minute})
+	release := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "running-l", Size: pipeline.L, Estimate: 20 * time.Minute})
 	defer release()
-	head := pending(t, gate, 2, admissionRequest{RunID: "ebpf", RepoID: 5, Repo: "exampleorg-ebpf", Ref: "promotion/main/1", Size: periapsis.XL,
+	head := pending(t, gate, 2, admissionRequest{RunID: "ebpf", RepoID: 5, Repo: "exampleorg-ebpf", Ref: "promotion/main/1", Size: pipeline.XL,
 		RefKind: model.RefBranch, SHA: strings.Repeat("a", 40)})
-	small := pending(t, gate, 3, admissionRequest{RunID: "docs", Size: periapsis.S, Estimate: 5 * time.Minute})
-	medium := pending(t, gate, 4, admissionRequest{RunID: "cli", Size: periapsis.M, Estimate: 5 * time.Minute})
+	small := pending(t, gate, 3, admissionRequest{RunID: "docs", Size: pipeline.S, Estimate: 5 * time.Minute})
+	medium := pending(t, gate, 4, admissionRequest{RunID: "cli", Size: pipeline.M, Estimate: 5 * time.Minute})
 	if granted(gate, head) || !granted(gate, small) || !granted(gate, medium) {
 		t.Fatalf("head %v small %v medium %v; want the S and M backfilled beside the waiting XL", head.granted, small.granted, medium.granted)
 	}
@@ -101,7 +101,7 @@ func TestXLHeadBackfillsRunsThatFit(t *testing.T) {
 	if !strings.Contains(headMessage, "head waiting 7m/20m, backfilling") {
 		t.Fatalf("head message = %q", headMessage)
 	}
-	behind := pending(t, gate, 5, admissionRequest{RunID: "huge", Size: periapsis.XL})
+	behind := pending(t, gate, 5, admissionRequest{RunID: "huge", Size: pipeline.XL})
 	if message := waitingAdmissionMessage(scheduler.AdmissionSnapshot(5)); !strings.Contains(message, "head waiting 7m/20m, backfilling") {
 		t.Fatalf("behind message = %q", message)
 	}
@@ -115,8 +115,8 @@ func TestHeadStartsWithinTheBoundUnderASteadyStream(t *testing.T) {
 	clock := &fakeClock{now: start}
 	gate := backfillGate(clock)
 	first := gate.reserve(1)
-	acquireRequestWithinBudget(t, first, admissionRequest{RunID: "first", Size: periapsis.M, Estimate: 6 * time.Minute})
-	head := pending(t, gate, 2, admissionRequest{RunID: "head", Size: periapsis.XL})
+	acquireRequestWithinBudget(t, first, admissionRequest{RunID: "first", Size: pipeline.M, Estimate: 6 * time.Minute})
+	head := pending(t, gate, 2, admissionRequest{RunID: "head", Size: pipeline.XL})
 
 	type running struct {
 		reservation *admissionReservation
@@ -148,7 +148,7 @@ func TestHeadStartsWithinTheBoundUnderASteadyStream(t *testing.T) {
 		if minute%2 == 0 {
 			estimate = duration
 		}
-		reservation := pending(t, gate, sequence, admissionRequest{RunID: "s", Size: periapsis.S, Estimate: estimate})
+		reservation := pending(t, gate, sequence, admissionRequest{RunID: "s", Size: pipeline.S, Estimate: estimate})
 		sequence++
 		if granted(gate, reservation) {
 			if estimate > 0 && clock.now.Add(estimate).After(start.Add(gate.maxHeadWait)) {
@@ -179,10 +179,10 @@ func TestRestartKeepsTheHeadWaitOrigin(t *testing.T) {
 	clock := &fakeClock{now: origin.Add(21 * time.Minute)}
 	gate := backfillGate(clock)
 	scheduler := &Scheduler{admission: gate}
-	release := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "running", Size: periapsis.M})
+	release := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "running", Size: pipeline.M})
 	defer release()
-	head := pending(t, gate, 2, admissionRequest{RunID: "head", Size: periapsis.XL, HeadSince: origin})
-	small := pending(t, gate, 3, admissionRequest{RunID: "small", Size: periapsis.S})
+	head := pending(t, gate, 2, admissionRequest{RunID: "head", Size: pipeline.XL, HeadSince: origin})
+	small := pending(t, gate, 3, admissionRequest{RunID: "small", Size: pipeline.S})
 	if granted(gate, head) || granted(gate, small) {
 		t.Fatal("a restarted gate backfilled past the recorded bound")
 	}
@@ -200,10 +200,10 @@ func TestRestartKeepsTheHeadWaitOrigin(t *testing.T) {
 // With backfill disabled (the zero value) the gate is strict FIFO as before.
 func TestZeroMaxHeadWaitIsStrictFIFO(t *testing.T) {
 	gate := newWeightedAdmissionForJobsWeights(8, DefaultSizeWeights)
-	release := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "running", Size: periapsis.M})
+	release := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "running", Size: pipeline.M})
 	defer release()
-	head := pending(t, gate, 2, admissionRequest{RunID: "head", Size: periapsis.XL})
-	small := pending(t, gate, 3, admissionRequest{RunID: "small", Size: periapsis.S})
+	head := pending(t, gate, 2, admissionRequest{RunID: "head", Size: pipeline.XL})
+	small := pending(t, gate, 3, admissionRequest{RunID: "small", Size: pipeline.S})
 	if granted(gate, head) || granted(gate, small) {
 		t.Fatal("strict FIFO admitted a run behind a waiting head")
 	}
@@ -213,7 +213,7 @@ func TestZeroMaxHeadWaitIsStrictFIFO(t *testing.T) {
 
 // The durable origin is read back for a requeued copy of the same commit.
 func TestAdmissionHistoryReadsTheDurableOrigin(t *testing.T) {
-	fixture := newConcurrencyFixture(t, periapsis.M, 1)
+	fixture := newConcurrencyFixture(t, pipeline.M, 1)
 	ctx := context.Background()
 	sha := strings.Repeat("b", 40)
 	origin := time.Now().Add(-10 * time.Minute).UTC().Truncate(time.Microsecond)
@@ -232,10 +232,10 @@ func TestAdmissionHistoryReadsTheDurableOrigin(t *testing.T) {
 func TestPassedOverCandidateDoesNotFreezeBackfillClaims(t *testing.T) {
 	clock := &fakeClock{now: time.Date(2026, 10, 20, 15, 0, 0, 0, time.UTC)}
 	gate := backfillGate(clock)
-	release := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "running", Size: periapsis.L})
+	release := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "running", Size: pipeline.L})
 	defer release()
-	head := pending(t, gate, 2, admissionRequest{RunID: "head", Size: periapsis.XL})
-	long := pending(t, gate, 3, admissionRequest{RunID: "long", Size: periapsis.M, Estimate: time.Hour})
+	head := pending(t, gate, 2, admissionRequest{RunID: "head", Size: pipeline.XL})
+	long := pending(t, gate, 3, admissionRequest{RunID: "long", Size: pipeline.M, Estimate: time.Hour})
 	if granted(gate, head) || granted(gate, long) {
 		t.Fatal("the long candidate or the head was admitted")
 	}
@@ -259,9 +259,9 @@ func TestPassedOverCandidateDoesNotFreezeBackfillClaims(t *testing.T) {
 func TestNoHeadOriginWithoutBackfill(t *testing.T) {
 	gate := newWeightedAdmissionForJobsWeights(8, DefaultSizeWeights)
 	gate.headEvents = make(chan headEvent, 4)
-	release := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "running", Size: periapsis.M})
+	release := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "running", Size: pipeline.M})
 	defer release()
-	head := pending(t, gate, 2, admissionRequest{RunID: "head", Size: periapsis.XL, RepoID: 1, SHA: strings.Repeat("a", 40)})
+	head := pending(t, gate, 2, admissionRequest{RunID: "head", Size: pipeline.XL, RepoID: 1, SHA: strings.Repeat("a", 40)})
 	gate.mu.Lock()
 	marked := !head.headSince.IsZero()
 	gate.mu.Unlock()
@@ -276,9 +276,9 @@ func TestNoHeadOriginWithoutBackfill(t *testing.T) {
 func TestRegrantWithoutAHeadClearsBackfilled(t *testing.T) {
 	clock := &fakeClock{now: time.Date(2026, 10, 20, 15, 0, 0, 0, time.UTC)}
 	gate := backfillGate(clock)
-	releaseRunning := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "running", Size: periapsis.M, Estimate: 20 * time.Minute})
-	head := pending(t, gate, 2, admissionRequest{RunID: "head", Size: periapsis.XL})
-	small := pending(t, gate, 3, admissionRequest{RunID: "small", Size: periapsis.S, Estimate: 5 * time.Minute})
+	releaseRunning := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "running", Size: pipeline.M, Estimate: 20 * time.Minute})
+	head := pending(t, gate, 2, admissionRequest{RunID: "head", Size: pipeline.XL})
+	small := pending(t, gate, 3, admissionRequest{RunID: "small", Size: pipeline.S, Estimate: 5 * time.Minute})
 	if !granted(gate, small) || !small.backfilled {
 		t.Fatal("the S run was not backfilled")
 	}
@@ -288,7 +288,7 @@ func TestRegrantWithoutAHeadClearsBackfilled(t *testing.T) {
 	head.cancel()
 	releaseRunning()
 	go func() {
-		_, _ = small.acquireRequest(context.Background(), admissionRequest{RunID: "small", Size: periapsis.S})
+		_, _ = small.acquireRequest(context.Background(), admissionRequest{RunID: "small", Size: pipeline.S})
 	}()
 	deadline := time.Now().Add(testStartTimeout(admissionAcquireBudget))
 	for !granted(gate, small) {

@@ -44,7 +44,7 @@ func (gate *weightedAdmission) reservationViewLocked(reservation *admissionReser
 		State:    gate.reservationStateLocked(reservation), Backfilled: reservation.granted && reservation.backfilled,
 	}
 	if reservation.repo != "" && reservation.runID != "" {
-		if name, err := deterministicJobName(reservation.repo, reservation.runID); err == nil {
+		if name, err := deterministicWorkflowName(reservation.repo, reservation.runID); err == nil {
 			view.Workflow = name
 		}
 	}
@@ -156,7 +156,7 @@ func (scheduler *Scheduler) ReleaseAdmission(ctx context.Context, runID, actor s
 			ErrAdmissionReleaseRefused, runID)
 	}
 	active := err == nil && run.Status.Active()
-	result := model.AdmissionRelease{RunID: runID, State: view.State, Weight: view.Weight, Group: view.Group, Workflow: run.JobName, Forced: force}
+	result := model.AdmissionRelease{RunID: runID, State: view.State, Weight: view.Weight, Group: view.Group, Workflow: run.WorkflowName, Forced: force}
 	switch view.State {
 	case "retained":
 	case "granted":
@@ -172,7 +172,7 @@ func (scheduler *Scheduler) ReleaseAdmission(ctx context.Context, runID, actor s
 	}
 	result.Verified = true
 	if view.State == "granted" || view.State == "retained" {
-		switch run.JobName {
+		switch run.WorkflowName {
 		case "":
 			// A granted run with no recorded Workflow name is either between
 			// its grant and the name being recorded, or in a trusted KVM
@@ -185,13 +185,13 @@ func (scheduler *Scheduler) ReleaseAdmission(ctx context.Context, runID, actor s
 			result.Verified = false
 			result.Warning = "released without proof: run " + runID + " has no recorded Workflow (a trusted preflight may still be running)"
 		default:
-			if deleteErr := scheduler.jobs.Delete(ctx, run.JobName, runID); deleteErr != nil {
+			if deleteErr := scheduler.jobs.Delete(ctx, run.WorkflowName, runID); deleteErr != nil {
 				if !force {
 					return model.AdmissionRelease{}, fmt.Errorf("%w: could not delete Workflow %s to prove it gone (%w); retry, or release with force",
-						ErrAdmissionReleaseRefused, run.JobName, deleteErr)
+						ErrAdmissionReleaseRefused, run.WorkflowName, deleteErr)
 				}
 				result.Verified = false
-				result.Warning = "released without proof that Workflow " + run.JobName + " is gone: " + deleteErr.Error()
+				result.Warning = "released without proof that Workflow " + run.WorkflowName + " is gone: " + deleteErr.Error()
 			}
 		}
 	}
@@ -206,7 +206,7 @@ func (scheduler *Scheduler) ReleaseAdmission(ctx context.Context, runID, actor s
 	}
 	details, err := json.Marshal(map[string]any{
 		"run_id": runID, "state": view.State, "weight": view.Weight, "group": view.Group,
-		"workflow": run.JobName, "verified": result.Verified, "force": force,
+		"workflow": run.WorkflowName, "verified": result.Verified, "force": force,
 	})
 	if err == nil {
 		_, err = scheduler.auditor.AppendAuditAction(ctx, model.AuditActionSpec{

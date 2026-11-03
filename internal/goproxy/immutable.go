@@ -1,6 +1,7 @@
 package goproxy
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -98,10 +99,6 @@ func validArtifactDigest(value string) bool {
 	return err == nil && len(digest) == sha256.Size && hex.EncodeToString(digest) == value
 }
 
-func (c *artifactCache) lookup(repository, modulePath, version string) (*artifactVersion, error) {
-	return c.lookupStage(repository, modulePath, version, "")
-}
-
 // Zip publication is separate so metadata never depends on tree extraction.
 func (c *artifactCache) lookupStage(repository, modulePath, version, stage string) (*artifactVersion, error) {
 	file, err := os.Open(c.versionPath(artifactKey(repository, modulePath, version) + stage)) //nolint:gosec // Digest-only path under the private cache root.
@@ -141,6 +138,24 @@ func (c *artifactCache) lookupStage(repository, modulePath, version, stage strin
 // Each waiter owns only its wait. Shared work has a separate, bounded lifetime,
 // including build-slot admission; disconnecting the first client cannot abort it.
 func (c *artifactCache) get(ctx context.Context, repository, modulePath, version, stage string, budget time.Duration, build func(context.Context) (string, map[string][]byte, error)) (*artifactVersion, error) {
+	return c.getObjects(ctx, repository, modulePath, version, stage, budget, func(ctx context.Context) (string, map[string]artifactObject, error) {
+		source, data, err := build(ctx)
+		if err != nil {
+			return "", nil, err
+		}
+		objects := make(map[string]artifactObject, len(data))
+		for ext, body := range data {
+			object, err := c.storeObject(ctx, bytes.NewReader(body))
+			if err != nil {
+				return "", nil, err
+			}
+			objects[ext] = object
+		}
+		return source, objects, nil
+	})
+}
+
+func (c *artifactCache) getObjects(ctx context.Context, repository, modulePath, version, stage string, budget time.Duration, build func(context.Context) (string, map[string]artifactObject, error)) (*artifactVersion, error) {
 	if ctx.Err() != nil {
 		return nil, backendBuildError()
 	}
@@ -174,7 +189,7 @@ func (c *artifactCache) get(ctx context.Context, repository, modulePath, version
 	}
 }
 
-func (c *artifactCache) fill(ctx context.Context, repository, modulePath, version, stage string, build func(context.Context) (string, map[string][]byte, error)) (*artifactVersion, error) {
+func (c *artifactCache) fill(ctx context.Context, repository, modulePath, version, stage string, build func(context.Context) (string, map[string]artifactObject, error)) (*artifactVersion, error) {
 	select {
 	case c.builds <- struct{}{}:
 		defer func() { <-c.builds }()
@@ -190,18 +205,7 @@ func (c *artifactCache) fill(ctx context.Context, repository, modulePath, versio
 	if err != nil {
 		return nil, err
 	}
-	entry = &artifactVersion{Format: 1, Repository: repository, Module: modulePath, Version: version, Source: source, Objects: make(map[string]artifactObject)}
-	for ext, data := range objects {
-		digest := sha256.Sum256(data)
-		object := artifactObject{SHA256: hex.EncodeToString(digest[:]), Size: int64(len(data))}
-		if object.Size > 500<<20 {
-			return nil, errors.New("immutable module object exceeds limit")
-		}
-		if err := publishArtifact(ctx, c.objectPath(object.SHA256), data); err != nil {
-			return nil, err
-		}
-		entry.Objects[ext] = object
-	}
+	entry = &artifactVersion{Format: 1, Repository: repository, Module: modulePath, Version: version, Source: source, Objects: objects}
 	manifest, err := json.Marshal(entry)
 	if err == nil {
 		err = publishArtifact(ctx, c.versionPath(artifactKey(repository, modulePath, version)+stage), manifest)
@@ -300,11 +304,16 @@ func (h *Handler) serveImmutable(w http.ResponseWriter, r *http.Request, reposit
 		if _, exists := entry.Objects[".zip"]; !exists {
 			source := entry.Source
 			var zipEntry *artifactVersion
-			zipEntry, err = h.artifacts.get(ctx, repository, modulePath, version, ".zip", budget, func(work context.Context) (string, map[string][]byte, error) {
-				return h.buildWithRetry(work, func(attempt context.Context) (string, map[string][]byte, error) {
-					data, err := h.buildZip(attempt, repository, modulePath, version, source)
-					return source, map[string][]byte{".zip": data}, err
+			zipEntry, err = h.artifacts.getObjects(ctx, repository, modulePath, version, ".zip", budget, func(work context.Context) (string, map[string]artifactObject, error) {
+				file, err := retryModuleBuild(work, h.backendBudget, func(attempt context.Context) (*moduleZip, error) {
+					return h.buildZip(attempt, repository, modulePath, version, source)
 				})
+				if err != nil {
+					return "", nil, err
+				}
+				defer func() { _ = file.Close() }()
+				object, err := h.artifacts.storeObject(work, file)
+				return source, map[string]artifactObject{".zip": object}, err
 			})
 			if err == nil {
 				if zipEntry.Source != source {
@@ -384,17 +393,30 @@ func (h *Handler) buildVersion(ctx context.Context, repository, modulePath, vers
 }
 
 func (h *Handler) buildWithRetry(ctx context.Context, build func(context.Context) (string, map[string][]byte, error)) (string, map[string][]byte, error) {
+	type result struct {
+		source  string
+		objects map[string][]byte
+	}
+	value, err := retryModuleBuild(ctx, h.backendBudget, func(ctx context.Context) (result, error) {
+		source, objects, err := build(ctx)
+		return result{source, objects}, err
+	})
+	return value.source, value.objects, err
+}
+
+func retryModuleBuild[T any](ctx context.Context, budget time.Duration, build func(context.Context) (T, error)) (T, error) {
 	for attempt := 0; ; attempt++ {
-		attemptCtx, stop := context.WithTimeout(ctx, h.backendBudget)
-		source, data, err := build(attemptCtx)
+		attemptCtx, stop := context.WithTimeout(ctx, budget)
+		data, err := build(attemptCtx)
 		stop()
 		var failure *proxyBuildError
 		if err == nil || !errors.As(err, &failure) || failure.status != http.StatusServiceUnavailable || attempt == 1 {
-			return source, data, err
+			return data, err
 		}
 		select {
 		case <-ctx.Done():
-			return "", nil, backendBuildError()
+			var zero T
+			return zero, backendBuildError()
 		case <-time.After(250 * time.Millisecond):
 		}
 	}

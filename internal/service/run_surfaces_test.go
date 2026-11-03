@@ -10,6 +10,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type runSurfaceAuth struct{}
@@ -29,7 +30,7 @@ func TestRunListMCPMatchesHTTPOrderAndPassedAlias(t *testing.T) {
 			spec.Ref = "v1.0.0"
 			spec.RefKind = model.RefTag
 		}
-		run, err := f.store.EnqueueRun(ctx, spec)
+		run, err := storetest.EnqueueRun(f.store, ctx, spec)
 		if err != nil {
 			t.Fatal(err)
 		}

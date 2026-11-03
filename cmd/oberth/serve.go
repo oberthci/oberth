@@ -44,10 +44,9 @@ import (
 	"github.com/oberthci/oberth/internal/sshserver"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -112,6 +111,7 @@ func (values *stringList) Set(value string) error {
 }
 
 type serveOptions struct {
+	uplinkTokenPolicy       model.UplinkTokenPolicy
 	kubernetesQPS           float64
 	kubernetesBurst         int
 	dataRoot                string
@@ -133,6 +133,7 @@ type serveOptions struct {
 	logRetention            time.Duration
 	artifactRetention       time.Duration
 	logsBudgetBytes         int64
+	runLogLimitBytes        int64
 	retentionInterval       time.Duration
 	retentionKeepNewest     int
 	maxConcurrent           int
@@ -158,7 +159,7 @@ type serveOptions struct {
 
 	// Argo execution engine. Leaving argoNamespace empty leaves the engine
 	// off entirely, which is the default: every repository then runs on the
-	// Kubernetes Job engine exactly as before.
+	// Argo Workflow engine exactly as before.
 	argoNamespace                string
 	argoControllerProfile        string
 	argoExecutorScratchSizeLimit string
@@ -178,6 +179,7 @@ type serveOptions struct {
 	argoReleaseWIFConfig         string
 	argoReleaseTagRoutesConfig   string
 	argoWorkflowTimeout          time.Duration
+	argoRepoWorkflowTimeouts     []string
 	argoWorkflowTTL              int
 	argoResourceSamplerConfig    string
 	// argoSourceStorageClass names the class for the per-run source claim the
@@ -240,7 +242,10 @@ func runServe(ctx context.Context, arguments []string, output io.Writer) error {
 
 func parseServeOptions(arguments []string, output io.Writer) (serveOptions, error) {
 	options := serveOptions{declaredAdmission: service.DefaultDeclaredAdmissionConfig()}
+	var extendedResourceBudgets string
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
+	flags.DurationVar(&options.uplinkTokenPolicy.DefaultTTL, "uplink-token-default-ttl", model.DefaultUplinkTokenTTL, "default lifetime for new uplink bearer tokens (90 days)")
+	flags.DurationVar(&options.uplinkTokenPolicy.MaxTTL, "uplink-token-max-ttl", model.MaximumUplinkTokenTTL, "maximum new uplink bearer lifetime (hard ceiling 8760h / 365 days)")
 	flags.SetOutput(io.Discard)
 	flags.StringVar(&options.dataRoot, "data", "/data", "persistent data root")
 	flags.StringVar(&options.database, "database", "/data/oberth.sqlite", "SQLite database path")
@@ -252,7 +257,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.upstreamKey, "upstream-key", "/etc/oberth/upstream-key/id_ed25519", "upstream SSH private key")
 	flags.StringVar(&options.knownHosts, "known-hosts", "/etc/oberth/known-hosts/known_hosts", "upstream known_hosts")
 	flags.StringVar(&options.namespace, "namespace", "oberth", "Kubernetes namespace")
-	flags.StringVar(&options.runnerImagePrefixes, "runner-image-prefixes", strings.Join(periapsis.DefaultRunnerImagePrefixes, ","), "comma-separated allowlist of permitted runner image prefixes")
+	flags.StringVar(&options.runnerImagePrefixes, "runner-image-prefixes", strings.Join(pipeline.DefaultRunnerImagePrefixes, ","), "comma-separated allowlist of permitted runner image prefixes")
 	flags.DurationVar(&options.scheduleMinInterval, "schedule-min-interval", defaultScheduleMinInterval, "shortest interval a repository may schedule itself at")
 	flags.IntVar(&options.scheduleMaxEntries, "schedule-max-entries", defaultScheduleMaxEntries, "most schedule entries one repository may declare")
 	flags.StringVar(&options.fragmentAllowlist, "fragment-allowlist", "", "comma-separated repositories usable as pipeline fragments; empty permits every registered repository")
@@ -260,13 +265,15 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.Int64Var(&options.artifactsBudgetBytes, "artifacts-budget-bytes", defaultArtifactsBudgetBytes, "total artifact storage before the oldest runs are evicted")
 	flags.DurationVar(&options.logRetention, "log-retention", 0, "maximum age of terminal run logs (0 disables age retention)")
 	flags.DurationVar(&options.artifactRetention, "artifact-retention", 0, "maximum age of terminal run artifacts (0 disables age retention)")
+	flags.Int64Var(&options.runLogLimitBytes, "run-log-limit-bytes", runlog.DefaultRunLimitBytes, "maximum retained log bytes per run")
 	flags.Int64Var(&options.logsBudgetBytes, "logs-budget-bytes", 0, "total retained log budget (0 disables size retention)")
 	flags.DurationVar(&options.retentionInterval, "retention-sweep-interval", 10*time.Minute, "interval between protected evidence retention sweeps")
 	flags.IntVar(&options.retentionKeepNewest, "retention-keep-newest", 1, "terminal runs retained per repository/ref during automatic sweeps")
 	flags.Float64Var(&options.kubernetesQPS, "kubernetes-client-qps", 50, "Kubernetes API requests per second per server client")
 	flags.IntVar(&options.kubernetesBurst, "kubernetes-client-burst", 100, "Kubernetes API burst allowance per server client")
 	flags.IntVar(&options.maxConcurrent, "max-concurrent-jobs", 3, "maximum concurrent Jobs (boot default)")
-	flags.BoolVar(&options.declaredAdmission.Disabled, "disable-declared-admission", false, "administrator kill switch: admit new runs by size class")
+	flags.StringVar(&extendedResourceBudgets, "admission-extended-resources", "{}", "JSON map of qualified extended-resource names to integer capacity; no implicit capacity")
+	flags.BoolVar(&options.declaredAdmission.Disabled, "disable-declared-admission", false, "administrator kill switch: refuse new declared runs; undeclared workflows retain deprecated size admission")
 	flags.Int64Var(&options.declaredAdmission.CPUMilli, "admission-cpu-millis", 8000, "CPU budget for declared workflow and VM demand, excluding platform reserve")
 	flags.Int64Var(&options.declaredAdmission.MemoryBytes, "admission-memory-bytes", 17179869184, "memory budget for declared workflow and VM demand, excluding platform reserve")
 	flags.Int64Var(options.declaredAdmission.MemoryHeadroomBytes, "admission-memory-headroom-bytes", 1073741824, "minimum memory headroom per declared run; combined with proportional headroom using the larger value")
@@ -330,6 +337,10 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.argoGoProxyNamespace.RepositoryPrefix, "argo-goproxy-repository-prefix", "", "Repository-name prefix within the configured owner")
 	flags.StringVar(&options.argoGoProxyNamespace.Upstream, "argo-goproxy-upstream", "", "Exact upstream owning private module repositories")
 	flags.StringVar(&options.argoGoProxyNamespace.Organization, "argo-goproxy-organization", "", "Exact organization owning private module repositories")
+	flags.Func("argo-repo-workflow-timeout", "administrator repository deadline cap: upstream/org/repo=30m (repeatable)", func(value string) error {
+		options.argoRepoWorkflowTimeouts = append(options.argoRepoWorkflowTimeouts, value)
+		return nil
+	})
 	flags.DurationVar(&options.argoWorkflowTimeout, "argo-workflow-timeout", 12*time.Hour, "ceiling on a Workflow's own activeDeadlineSeconds")
 	flags.IntVar(&options.argoWorkflowTTL, "argo-workflow-ttl", 3600, "finished Workflow retention in seconds")
 	flags.StringVar(&options.argoResourceSamplerConfig, "argo-resource-sampler-config", "", "administrator-owned kubelet sampler JSON config; disabled when empty")
@@ -367,7 +378,13 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	if flags.NArg() != 0 {
 		return serveOptions{}, fmt.Errorf("%w: serve accepts flags only", errUsage)
 	}
+	if err := options.uplinkTokenPolicy.Validate(); err != nil {
+		return serveOptions{}, err
+	}
 	if err := validateServeOptions(options); err != nil {
+		return serveOptions{}, err
+	}
+	if err := json.Unmarshal([]byte(extendedResourceBudgets), &options.declaredAdmission.ExtendedResources); err != nil {
 		return serveOptions{}, err
 	}
 	if err := options.declaredAdmission.Validate(); err != nil {
@@ -397,7 +414,7 @@ func validateServeOptions(options serveOptions) error {
 	if math.IsNaN(options.kubernetesQPS) || math.IsInf(options.kubernetesQPS, 0) || options.kubernetesQPS <= 0 || options.kubernetesQPS > math.MaxFloat32 || options.kubernetesBurst <= 0 {
 		return errors.New("serve: Kubernetes client QPS must be finite and positive, and burst must be positive")
 	}
-	if options.logRetention < 0 || options.artifactRetention < 0 || options.logsBudgetBytes < 0 || options.artifactsBudgetBytes < 0 || options.artifactsLimitBytes <= 0 || options.retentionInterval <= 0 || options.retentionKeepNewest < 0 {
+	if options.logRetention < 0 || options.artifactRetention < 0 || options.logsBudgetBytes < 0 || options.runLogLimitBytes <= 0 || options.artifactsBudgetBytes < 0 || options.artifactsLimitBytes <= 0 || options.retentionInterval <= 0 || options.retentionKeepNewest < 0 {
 		return errors.New("serve: retention ages, budgets and keep count must be nonnegative; sweep interval and artifact collection limit must be positive")
 	}
 	root := filepath.Clean(options.dataRoot)
@@ -420,10 +437,13 @@ func validateServeOptions(options serveOptions) error {
 	if strings.TrimSpace(options.namespace) == "" {
 		return errors.New("serve: namespace is required")
 	}
-	if err := periapsis.ValidateRunnerImagePrefixes(splitRunnerImagePrefixes(options.runnerImagePrefixes)); err != nil {
+	if err := pipeline.ValidateRunnerImagePrefixes(splitRunnerImagePrefixes(options.runnerImagePrefixes)); err != nil {
 		return fmt.Errorf("serve: %w", err)
 	}
-	if options.auditTSAURL != "" && !validAuditHTTPSURL(options.auditTSAURL) {
+	if options.auditTSAURL != "" && !validAuditURL(options.auditTSAURL, options.auditTSAInsecureHTTP) {
+		if options.auditTSAInsecureHTTP {
+			return errors.New("serve: audit TSA URL must be an absolute HTTP or HTTPS URL without credentials or a fragment")
+		}
 		return errors.New("serve: audit TSA URL must be an absolute HTTPS URL without credentials or a fragment")
 	}
 	if options.auditRekorURL != "" && !validAuditURL(options.auditRekorURL, options.auditRekorInsecureHTTP) {
@@ -528,7 +548,7 @@ func validateSecretStoreSingleSegment(label, value string) error {
 	if strings.Contains(value, "/") {
 		return fmt.Errorf("serve: secret store %s must be one clean non-reserved path segment", label)
 	}
-	if err := periapsis.ValidateSecretStorePath(value); err != nil {
+	if err := pipeline.ValidateSecretStorePath(value); err != nil {
 		return fmt.Errorf("serve: secret store %s: %w", label, err)
 	}
 	return nil
@@ -563,14 +583,20 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err := store.SweepBackupStagingAtStartup(options.database); err != nil {
 		logger.Printf("WARNING: interrupted database snapshot cleanup incomplete; inspect/remove the named stale entry: %v", err)
 	}
-	if identityStoreEnabled() {
-		if err := bootstrapRuntimeIdentities(ctx, &options); err != nil {
-			return fmt.Errorf("load OpenBao identities: %w", err)
-		}
+	stopBootstrap, _, err := startBootstrapHealth(ctx, options.httpsListen)
+	if err != nil {
+		return fmt.Errorf("start bootstrap health: %w", err)
 	}
-	restConfig, err := rest.InClusterConfig()
+	defer stopBootstrap()
+	var restConfig *rest.Config
+	err = inClusterConfigWithRetry(ctx, func() error { var err error; restConfig, err = rest.InClusterConfig(); return err })
 	if err != nil {
 		return fmt.Errorf("load in-cluster Kubernetes config: %w", err)
+	}
+	{
+		if err := retryStartup(ctx, 2*time.Minute, time.Second, func(attempt context.Context) error { return bootstrapRuntimeIdentities(attempt, &options) }, transientIdentityStartup, logger); err != nil {
+			return fmt.Errorf("load OpenBao identities: %w", err)
+		}
 	}
 	restConfig = serverKubernetesConfig(restConfig, options)
 	kube, err := kubernetes.NewForConfig(restConfig)
@@ -581,7 +607,12 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
-	hostKey, err := readBoundedFile(options.sshHostKey, 1<<20)
+	var hostKey []byte
+	err = retryStartup(ctx, 6*time.Second, 2*time.Second, func(context.Context) error {
+		var err error
+		hostKey, err = readBoundedFile(options.sshHostKey, 1<<20)
+		return err
+	}, func(err error) bool { return errors.Is(err, os.ErrNotExist) }, logger)
 	if err != nil {
 		return fmt.Errorf("read SSH host key: %w", err)
 	}
@@ -666,7 +697,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	}
 	witnessRecoveryDeferred := false
 	database, err := openStartupDatabase(ctx, options.database, continuity, reset, adoption, func(inspection *store.Store) error {
-		verifier, managerErr := auditanchor.NewManager(newAuditManagerConfig(inspection))
+		verifier, managerErr := auditanchor.NewManager(startupPublicationConfig(newAuditManagerConfig(inspection)))
 		if managerErr != nil {
 			return managerErr
 		}
@@ -733,13 +764,14 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	upstreams := app.Upstreams{Catalog: database}
 	git, err := gitcache.New(gitcache.Config{
 		Root: filepath.Join(options.dataRoot, "git"), Upstream: upstreams.Remote,
-		CommandTimeout:       options.gitCommandTimeout,
-		Env:                  sshEnvironment,
-		Logger:               logger,
-		RepoQualifier:        upstreams.QualifyInput,
-		RepoQualifierContext: upstreams.QualifyInputContext,
-		RepositoryGate:       upstreams.RequireActive,
-		PreFinalizeGate:      anchors.AllowMutation,
+		CommandTimeout:        options.gitCommandTimeout,
+		Env:                   sshEnvironment,
+		Logger:                logger,
+		RepoQualifier:         upstreams.QualifyInput,
+		RepoQualifierContext:  upstreams.QualifyInputContext,
+		RepositoryGate:        upstreams.RequireActive,
+		PreFinalizeGate:       anchors.AllowMutation,
+		PromotionPinAbandoned: database.AbandonedPromotionPin,
 	})
 	if err != nil {
 		return err
@@ -796,6 +828,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		return err
 	}
 	argoJobs.SetKubeVirtGrantLoader(database)
+	argoJobs.SetWorkflowCapabilityLoader(database.ActiveWorkflowCapability)
 	logger.Printf("argo execution engine: namespace=%s pipeline-sa=%s credentialed-sa=%s ci-secrets-sa=%s executor-sa=%s",
 		options.argoNamespace, options.argoPipelineAccount, options.argoCredentialedAccount,
 		options.argoCISecretsAccount, options.argoExecutorAccount)
@@ -818,6 +851,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		Store: database, Git: git, Logs: logs, Jobs: argoJobs, ReleaseJobs: argoJobs, Auditor: database,
 		TrustedPreflight: trusted, Signals: signals, WorkspaceRoot: filepath.Join(options.dataRoot, "work"), MaxConcurrent: options.maxConcurrent,
 		MaxConcurrentFile:       options.maxConcurrentFile,
+		MaxRunLogBytes:          options.runLogLimitBytes,
 		MutationGate:            anchors.AllowMutation,
 		AdmissionDiskFloorBytes: options.admissionDiskFloorBytes,
 		AdmissionPressure:       options.admissionPressure,
@@ -833,14 +867,12 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 			options.sizeWeights.XL, budget, options.maxConcurrent, options.sizeWeights.M, budget)
 	}
 	retention.AcquirePurge = scheduler.AcquireEvidencePurge
-	var secretConfigured func(context.Context, []model.Upstream) error
-	if !identityStoreEnabled() {
-		secretConfigured = func(ctx context.Context, registered []model.Upstream) error {
-			return checkUpstreamSecretConfigured(ctx, kube, options.namespace, options.upstreamKey, options.knownHosts, registered)
-		}
-	}
 	writerProgress := &liveness.Heartbeat{}
-	health := app.Health{WriterReady: writerProgress.ProbeError, Store: database, Audit: anchors.Ready, VCSCache: &app.VCSSnapshot{}, Configured: upstreamReadinessProbe(options, secretConfigured), VCS: func(ctx context.Context, upstream model.Upstream) error {
+	served, err := loadServedCertificate(options.tlsCert, options.tlsKey)
+	if err != nil {
+		return fmt.Errorf("load HTTPS identity: %w", err)
+	}
+	health := app.Health{WriterReady: writerProgress.ProbeError, Store: database, Audit: anchors.Ready, VCSCache: &app.VCSSnapshot{}, Configured: upstreamReadinessProbe(options), VCS: func(ctx context.Context, upstream model.Upstream) error {
 		if upstream.Kind == "local" {
 			info, err := os.Stat(upstream.BaseURL)
 			if err != nil {
@@ -851,7 +883,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 			}
 			return nil
 		}
-		// Per-upstream key: the Secret volume mount projects each dedicated
+		// Per-upstream key: the OpenBao bundle materializes each dedicated
 		// key as a file beside the shared one. Fall back to the shared key
 		// while the kubelet has not yet projected a freshly added data key.
 		keyPath := options.upstreamKey
@@ -882,7 +914,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		if !scheduler.Recovered() {
 			return errors.New("scheduler recovery is pending")
 		}
-		return nil
+		return served.readyAt(time.Now())
 	}
 	health.Readiness = &app.ReadinessSnapshot{}
 	health.ReadinessUpstreams = database.ListReadinessUpstreams
@@ -924,19 +956,21 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 			Log:     logger.Printf,
 			Address: options.secretStoreAddress,
 		}
-		go func() {
+		probeHealth := health
+		stopProbe := startServerTask(ctx, func(probeCtx context.Context) {
 			ticker := time.NewTicker(secretStoreProbeInterval)
 			defer ticker.Stop()
 			for {
 				select {
-				case <-ctx.Done():
+				case <-probeCtx.Done():
 					return
 				case <-ticker.C:
-					result := health.RefreshSecretStore(ctx)
+					result := probeHealth.RefreshSecretStore(probeCtx)
 					observer.Observe(result)
 				}
 			}
-		}()
+		})
+		defer stopProbe()
 	}
 	externallyAnchored := tsaClient != nil || rekorWitness != nil
 	health.AuditMode = "local"
@@ -1051,6 +1085,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		PromotionWorkspaceRoot: filepath.Join(options.dataRoot, "work"),
 		SecretAccess:           database,
 		KubeVirtGrants:         database,
+		WorkflowCapabilities:   database,
 		SizeGrants:             database,
 		QueuePriorities:        database,
 		SecretStoreVerifier:    buildSecretStoreVerifier(options, kube),
@@ -1063,8 +1098,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 			}
 			return err
 		},
-		RepositoryRemover:         database,
-		RemoveGitCache:            git.RemoveRepository,
+		RepositoryRemover:         lockedRepositoryRemover{database: database, cache: git},
 		PromotionGrants:           database,
 		PromotionGrantMaxLifetime: options.promotionGrantMaxLifetime,
 		RunCancels:                database,
@@ -1106,6 +1140,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	httpAPI, err := api.New(authenticator, controlAPI, controlAPI, version,
 		api.WithErrorClassifier(classifyViewError),
 		api.WithMetrics(func(w io.Writer) {
+			served.writeMetrics(w)
 			database.WriteTokenUseMetrics(w)
 			health.Readiness.WriteMetrics(w)
 			scheduler.WritePressureMetrics(w)
@@ -1150,12 +1185,11 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
-	served, err := loadServedCertificate(options.tlsCert, options.tlsKey)
-	if err != nil {
-		return fmt.Errorf("load HTTPS identity: %w", err)
-	}
 	if renewal := options.serverLeafRenewal; renewal != nil {
-		go renewServerLeaf(ctx, renewal.pki, renewal.store, served, renewal.issued, logger)
+		stopRenewal := startServerTask(ctx, func(renewalCtx context.Context) {
+			renewServerLeaf(renewalCtx, renewal.pki, renewal.store, served, renewal.issued, logger)
+		})
+		defer stopRenewal()
 	}
 	httpsServer := &http.Server{
 		Handler: httpAPI.Handler(), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 90 * time.Second,
@@ -1210,6 +1244,23 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		logger.Printf("go module proxy: %s → %s (%d repo mappings)", options.argoGoProxyListen, options.argoGoProxyURL, len(repoMap))
 	}
 	activateScheduler := func(activationCtx context.Context) error {
+		// During a witness outage the writable handle was opened without
+		// recovery. Verify the original history before repairing it here.
+		if witnessRecoveryDeferred {
+			if err := waitForAuditIntegrity(activationCtx, func(ctx context.Context) error {
+				verifier, err := auditanchor.NewManager(startupPublicationConfig(newAuditManagerConfig(database)))
+				if err != nil {
+					return err
+				}
+				if err = verifier.VerifyStartup(ctx); err != nil {
+					return err
+				}
+				_, err = database.ReconcileInconsistentPublications(ctx)
+				return err
+			}); err != nil {
+				return err
+			}
+		}
 		if err := waitForAuditIntegrity(activationCtx, anchors.AllowMutation); err != nil {
 			return err
 		}
@@ -1230,7 +1281,15 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	queueDone := make(chan struct{})
 	go func() { defer close(queueDone); queueSnapshot.watch(queueCtx, database.IdleQueueStatus) }()
 	defer func() { stopQueue(); <-queueDone }()
-	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, newAdminGateServer(anchors.AllowMutation, options.database, scheduler.NotifyQueue, queueSnapshot.current), activateScheduler, accessReconciler, schedules, ciIssues, retention, logger, controlAPI.Shutdown, httpAPI.BeginDrain)
+	tokenWarningCtx, stopTokenWarnings := context.WithCancel(ctx)
+	tokenWarningsDone := make(chan struct{})
+	go func() {
+		defer close(tokenWarningsDone)
+		watchNonExpiringUplinkTokens(tokenWarningCtx, database.CountNonExpiringUplinkTokens, logger)
+	}()
+	defer func() { stopTokenWarnings(); <-tokenWarningsDone }()
+	stopBootstrap()
+	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, withRepositoryRemoval(newAdminGateServerWithTokenPolicy(anchors.AllowMutation, options.database, scheduler.NotifyQueue, options.uplinkTokenPolicy, queueSnapshot.current), anchors.AllowMutation, options.database, database, git), activateScheduler, accessReconciler, schedules, ciIssues, retention, logger, controlAPI.Shutdown, httpAPI.BeginDrain)
 }
 
 type startupContinuity interface {
@@ -1403,7 +1462,7 @@ func openStartupDatabase(
 		if err := errors.Join(verifyErr, closeErr); err != nil {
 			return nil, err
 		}
-		return store.OpenCurrent(ctx, path, configuredStoreOptions(ctx))
+		return openReconciledStartupDatabase(ctx, path)
 	case !errors.Is(err, os.ErrNotExist):
 		return nil, fmt.Errorf("inspect startup database: %w", err)
 	}
@@ -1482,7 +1541,7 @@ func adoptExistingGenesisDatabase(
 	if err := errors.Join(verifyErr, closeErr); err != nil {
 		return nil, fmt.Errorf("adopt genesis database that appeared during startup: %w", err)
 	}
-	return store.OpenCurrent(ctx, path, configuredStoreOptions(ctx))
+	return openReconciledStartupDatabase(ctx, path)
 }
 
 // resumeWitnessChainReset covers the crash window between an accepted reset and
@@ -1893,52 +1952,6 @@ func secretStoreStatus(options serveOptions) *app.SecretStoreStatus {
 	}
 }
 
-// checkUpstreamSecretConfigured returns nil when both the upstream-key and
-// known-hosts Secrets contain data matching the expected keys. This bridges
-// the ~60s kubelet Secret-projection delay after `upstream add`: the Secret
-// already holds the key before the projected volume mount catches up.
-func checkUpstreamSecretConfigured(
-	ctx context.Context,
-	kube kubernetes.Interface,
-	namespace, upstreamKeyPath, knownHostsPath string,
-	registered []model.Upstream,
-) error {
-	secretCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-
-	keySecret, err := kube.CoreV1().Secrets(namespace).Get(secretCtx, defaultUpstreamKeySecret, metav1.GetOptions{})
-	if err != nil {
-		return err
-	}
-	hostsSecret, err := kube.CoreV1().Secrets(namespace).Get(secretCtx, defaultUpstreamKnownHostsSecret, metav1.GetOptions{})
-	if err != nil {
-		return err
-	}
-
-	hostsKey := filepath.Base(knownHostsPath)
-	if len(hostsSecret.Data[hostsKey]) == 0 {
-		return errors.New("known_hosts Secret has no data for the expected key")
-	}
-
-	// Check the shared upstream key.
-	keyFile := filepath.Base(upstreamKeyPath)
-	if len(keySecret.Data[keyFile]) > 0 {
-		return nil
-	}
-
-	// Check per-upstream dedicated keys.
-	for _, upstream := range registered {
-		if upstream.Kind != "ssh" || upstream.KeyName == "" || !app.ValidUpstreamKeyName(upstream.KeyName) {
-			continue
-		}
-		if len(keySecret.Data[upstream.KeyName]) > 0 {
-			return nil
-		}
-	}
-
-	return errors.New("upstream key Secret has no matching data key")
-}
-
 func loadTSARoots(path string) (*x509.CertPool, error) {
 	if path == "" {
 		roots, err := x509.SystemCertPool()
@@ -2048,7 +2061,7 @@ func perUpstreamSSHEntries(ctx context.Context, database *store.Store, options s
 		}
 		identityFile := filepath.Join(keyDirectory, upstream.KeyName)
 		if _, statErr := os.Stat(identityFile); statErr != nil {
-			logger.Printf("WARNING: per-upstream key %s for upstream %s is not projected yet: %v; using the shared fallback key", upstream.KeyName, upstream.Name, statErr)
+			logger.Printf("WARNING: per-upstream key %s for upstream %s is not materialized yet: %v; using the shared fallback key", upstream.KeyName, upstream.Name, statErr)
 			continue
 		}
 		entries = append(entries, app.SSHConfigEntry{

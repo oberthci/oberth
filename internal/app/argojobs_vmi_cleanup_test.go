@@ -9,7 +9,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type failingVMICleanupController struct {
@@ -32,7 +32,7 @@ func TestVMICleanupFailureDoesNotChangeCompletedRun(t *testing.T) {
 	jobs := &ArgoJobs{
 		controller: controller,
 		auditor:    &stubAuditor{onAppend: func(spec model.AuditActionSpec) { audited = spec }},
-		intents:    map[string]argoIntent{"run-workflow": {runID: "run-123", trigger: periapsis.TriggerCI, created: true}},
+		intents:    map[string]argoIntent{"run-workflow": {runID: "run-123", trigger: pipeline.TriggerCI, created: true}},
 	}
 	controller.WithVMICleanupFailure(jobs.auditVMICleanupFailure)
 	result, err := jobs.Wait(t.Context(), "run-workflow", io.Discard)

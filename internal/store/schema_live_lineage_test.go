@@ -49,7 +49,7 @@ func TestMigrationLiveLineageAppliesRebuildAfterRecordedV10(t *testing.T) {
 		t.Fatal(err)
 	}
 	up2, err := s.RegisterUpstream(ctx, "admin@test", model.UpstreamSpec{
-		Name: "skipops", BaseURL: "ssh://git@codeberg.org/skipops", Kind: "ssh",
+		Name: "example-other", BaseURL: "ssh://git@codeberg.org/example-other", Kind: "ssh",
 	})
 	if err != nil {
 		t.Fatal(err)

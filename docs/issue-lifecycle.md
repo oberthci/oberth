@@ -26,3 +26,16 @@ without duplicating the reason or audit record. Unexpected storage failures
 abort the call; earlier successful items remain closed and can safely be retried.
 
 No schema migration, chart values or additional cluster permissions are needed.
+
+`issue_update.expected_body_sha256` checks the current body snapshot before
+the write transaction. Body replacement and `issue_append` change that hash;
+title, state and scope changes do not. It is not an atomic metadata revision
+precondition.
+
+Issue reads return `revision`, initially 1. `issue_update` accepts optional
+`expected_revision`; the writer transaction checks it before metadata or audit
+changes. A mismatch is a conflict. Omission keeps last-write-wins behavior.
+Revision advances only when title, state or scope actually changes. Body and
+lock updates leave it unchanged; use the body hash separately for body snapshots.
+After a successful write, read the returned revision rather than predicting it.
+Migration v40 adds the column and trigger; rollback requires the v38 backup.

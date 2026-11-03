@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"strings"
@@ -17,7 +18,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/resourcesampler"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type ResourceUsageRecorder interface {
@@ -145,10 +146,6 @@ func (s *resourceSession) finish() {
 	<-s.done
 }
 
-func (c *Controller) sampleResourceUsage(ctx context.Context, wf *wfv1.Workflow, runID string) error {
-	return c.sampleResourceUsageWithState(ctx, wf, runID, nil)
-}
-
 func (c *Controller) sampleResourceUsageWithState(ctx context.Context, wf *wfv1.Workflow, runID string, finished map[string]time.Time) error {
 	if c.verifyOwnership(wf, runID) != nil || wf.UID == "" || len(wf.Status.Nodes) > 2048 {
 		return nil
@@ -156,6 +153,9 @@ func (c *Controller) sampleResourceUsageWithState(ctx context.Context, wf *wfv1.
 	pods, err := c.kube.CoreV1().Pods(wf.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "workflows.argoproj.io/workflow=" + wf.Name, Limit: 2048})
 	if err != nil {
 		return err
+	}
+	if pods.Continue != "" || len(pods.Items) > 2048 {
+		return fmt.Errorf("resource sampler pod inventory truncated at 2048 entries")
 	}
 	byName := make(map[string]int, min(len(pods.Items), 2048))
 	for i := range pods.Items[:min(len(pods.Items), 2048)] {
@@ -228,7 +228,7 @@ func (c *Controller) sampleResourceUsageWithState(ctx context.Context, wf *wfv1.
 		if owner == nil || owner.APIVersion != "argoproj.io/v1alpha1" || owner.Kind != "Workflow" || owner.UID != wf.UID || owner.Name != wf.Name || pod.Namespace != wf.Namespace || pod.Annotations["workflows.argoproj.io/node-id"] != node.ID || pod.Annotations["workflows.argoproj.io/node-name"] != node.Name || pod.Spec.NodeName == "" {
 			continue
 		}
-		binding := resourcesampler.Binding{RunID: runID, WorkflowName: wf.Name, WorkflowUID: string(wf.UID), Namespace: wf.Namespace, NodeID: node.ID, NodeName: node.Name, PodName: step.PodName, Burn: step.Burn, Step: step.Step}
+		binding := resourcesampler.Binding{RunID: runID, WorkflowName: wf.Name, WorkflowUID: string(wf.UID), Namespace: wf.Namespace, NodeID: node.ID, NodeName: node.Name, PodName: step.PodName, Stage: step.Stage, Step: step.Step}
 		binding.TemplateName = node.TemplateName
 		binding.FragmentRepository, _ = argoworkflow.FragmentTemplateOwner(node.TemplateName, fragmentLock)
 		bindings[string(pod.UID)] = binding
@@ -321,7 +321,7 @@ func (c *Controller) sampleResourceUsageWithState(ctx context.Context, wf *wfv1.
 // Read only the verified Workflow's existing declaration and server-bound
 // trigger parameter. Never use progress/termination messages as class evidence.
 // A size-by-trigger declaration without an unambiguous bound trigger is unknown.
-func observedResourceWorkflowSize(wf *wfv1.Workflow) periapsis.Size {
+func observedResourceWorkflowSize(wf *wfv1.Workflow) pipeline.Size {
 	byTrigger, err := argoworkflow.DeclaredSizesByTrigger(wf)
 	if err != nil {
 		return ""

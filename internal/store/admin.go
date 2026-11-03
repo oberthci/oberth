@@ -17,9 +17,23 @@ import (
 // token has never authenticated.
 type UplinkStatus struct {
 	model.Uplink
+	ExpiresAt  *time.Time
 	LastUsedAt time.Time
 	RevokedAt  *time.Time
 	Pending    bool
+}
+
+// NoExpiry flags active legacy bearer credentials for deliberate rotation.
+func (status UplinkStatus) NoExpiry() bool {
+	return status.ExpiresAt == nil && status.RevokedAt == nil && !status.Pending
+}
+
+func (s *Store) CountNonExpiringUplinkTokens(ctx context.Context) (int, error) {
+	var count int
+	err := s.reader().QueryRowContext(ctx, `SELECT COUNT(DISTINCT t.id) FROM token_credentials t
+JOIN uplinks u ON u.token_credential_id=t.id
+WHERE t.activated_at IS NOT NULL AND t.revoked_at IS NULL AND t.expires_at IS NULL`).Scan(&count)
+	return count, err
 }
 
 // RegisterUpstream atomically creates operator configuration and its audit
@@ -344,6 +358,17 @@ SELECT COUNT(*) FROM promotions WHERE repo_id = ? AND status = 'pending'`,
 			ErrInvalidState, name, pendingPromotions)
 	}
 
+	// Old KubeVirt grants remain authoritative during the staged migration.
+	// Preserve both active and revoked grant history instead of cascading it
+	// away or exposing a raw SQLite retirement-trigger error.
+	var legacyGrants int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM kubevirt_grants WHERE repo_id=?`, repoID).Scan(&legacyGrants); err != nil {
+		return RemovedRepository{}, fmt.Errorf("check legacy KubeVirt grant: %w", err)
+	}
+	if legacyGrants != 0 {
+		return RemovedRepository{}, fmt.Errorf("%w: repository %s has legacy KubeVirt grant history; archive the repository to preserve it", ErrInvalidState, name)
+	}
+
 	// Attempt deletion. FK constraints from runs, promotions, receive_events,
 	// publications, issues, ci_issue_work, ci_issue_projections, trusted_plans,
 	// and trusted_applies will fail the deletion if any immutable history exists.
@@ -447,7 +472,7 @@ func matchUplinksByIdentity(ctx context.Context, tx *sql.Tx, identity, fingerpri
 func (s *Store) ListUplinkStatuses(ctx context.Context) ([]UplinkStatus, error) {
 	rows, err := s.reader().QueryContext(ctx, `
 SELECT u.id, u.fingerprint, u.identity, u.token_credential_id, u.auth_actor, u.admin, u.created_at, u.updated_at,
-       COALESCE(t.last_used_at, 0), t.revoked_at,
+       COALESCE(t.last_used_at, 0), t.revoked_at, t.expires_at,
        EXISTS (SELECT 1 FROM pending_token_credentials p WHERE p.token_credential_id = t.id)
 FROM uplinks u LEFT JOIN token_credentials t ON t.id = u.token_credential_id
 ORDER BY u.identity, u.fingerprint`)
@@ -459,12 +484,13 @@ ORDER BY u.identity, u.fingerprint`)
 	for rows.Next() {
 		var value UplinkStatus
 		var created, updated, lastUsed int64
-		var revoked sql.NullInt64
+		var revoked, expiry sql.NullInt64
 		var admin int
 		if err := rows.Scan(&value.ID, &value.Fingerprint, &value.Identity, &value.TokenCredentialID,
-			&value.AuthActor, &admin, &created, &updated, &lastUsed, &revoked, &value.Pending); err != nil {
+			&value.AuthActor, &admin, &created, &updated, &lastUsed, &revoked, &expiry, &value.Pending); err != nil {
 			return nil, fmt.Errorf("scan uplink: %w", err)
 		}
+		value.ExpiresAt = nullableTime(expiry)
 		// Pending credentials are deliberately stored as revoked until activation.
 		if !value.Pending {
 			value.RevokedAt = nullableTime(revoked)
@@ -519,11 +545,13 @@ func (s *Store) RemoveUplink(ctx context.Context, actor, identity, fingerprint s
 			ErrAmbiguous, identity, len(matches), strings.Join(fingerprints, ", "))
 	}
 	value := matches[0]
+	if err := guardLastActiveAdmin(ctx, tx, value.ID, now); err != nil {
+		return model.Uplink{}, err
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM uplinks WHERE id = ?`, value.ID); err != nil {
 		return model.Uplink{}, fmt.Errorf("remove uplink: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `
-UPDATE token_credentials SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, now, value.TokenCredentialID); err != nil {
+	if _, err := revokeTokenCredentialTx(ctx, tx, value.TokenCredentialID, now); err != nil {
 		return model.Uplink{}, fmt.Errorf("revoke uplink token credential: %w", err)
 	}
 	details, err := json.Marshal(map[string]string{"identity": value.Identity, "fingerprint": value.Fingerprint})
@@ -604,8 +632,7 @@ RETURNING id, fingerprint, identity, token_credential_id, auth_actor, admin, cre
 		value.Scope = scopes
 	}
 	if displacedCredentialID != "" && displacedCredentialID != spec.TokenCredentialID {
-		if _, err := tx.ExecContext(ctx, `
-UPDATE token_credentials SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, now, displacedCredentialID); err != nil {
+		if _, err := revokeTokenCredentialTx(ctx, tx, displacedCredentialID, now); err != nil {
 			return model.Uplink{}, fmt.Errorf("revoke displaced credential: %w", err)
 		}
 	}

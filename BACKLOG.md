@@ -23,33 +23,30 @@ marked **deadline-bound** carry an external clock.
 
 ## CI platform
 
-- **Privileged eBPF test tier** (from #707): branch Jobs are unprivileged by
+- **Privileged eBPF test tier** (from #707): branch Workflow Pods are unprivileged by
   contract (no `privileged`, no SA token). Kernel-loading eBPF tests need an
   operator-owned privileged tier (KubeVirt VM or equivalent) with the exact
   candidate SHA bound into the run and pin cleanup proven. Until designed,
   privileged eBPF validation stays outside Oberth CI.
 - **Trusted cross-repository checkouts** (from #709): a provider-owned,
-  allowlisted read-only checkout of a second repository inside a Job (e.g.
+  allowlisted read-only checkout of a second repository inside a Workflow Pod (e.g.
   CLI validating the Helm chart schema byte-for-byte). No primitive exists in
-  the one-Job model today.
-- **Per-run resource classes — Job-shape residual** (from #754): v0.10.57
-  shipped repository-declared step sizes (`WithSize` S/M/L/XL), the
-  server-side `DeclaredMaxSize` static analysis, weighted node-budget
-  admission, and durable per-step `declared_size` evidence. Remaining from
-  the original entry: mapping the declared class onto distinct bounded Job
-  resource request/limit shapes (all Jobs still share one shape from the
-  chart).
+  the Workflow model today.
+- **Resource recommendations and enforcement** (from #754): declared admission
+  classes and per-template measured history are implemented. Keep numeric Pod
+  resources in repository YAML and compare suggestions with the declared
+  budget; see [measured requests](docs/measured-requests.md).
 - **Adaptive GOMAXPROCS** (from #755): auto-derive GOMAXPROCS from the Job's
   cgroup quota. The admission load guard half of the original entry shipped
   in v0.10.57 as size-weighted scheduler admission.
 - **Branch-Job egress policy option** (from #691 residual): the inline
-  pinned-tool pattern requires egress, and branch Jobs hold no secrets — but
-  an optional chart NetworkPolicy restricting branch-Job egress to declared
+  pinned-tool pattern requires egress, and branch Workflow Pods hold no secrets — but
+  an optional chart NetworkPolicy restricting branch-pipeline egress to declared
   tool endpoints would add defense-in-depth against exfiltration of source
   not yet public and cache-poisoning callbacks. Also from #691: per-step
   clean `HOME`/`GOENV` isolation inside a burn.
-- **Release resume-from-boundary** (from #818 residual): a release Job is
-  atomic today (`BackoffLimit: 0`); an infrastructure failure after
+- **Release resume-from-boundary** (from #818 residual): a release Workflow is
+  retried only through the recorded run/replay rules; an infrastructure failure after
   publication requires re-running the whole release identity. Exact-boundary
   resume with artifact revalidation remains future work; the original
   get.helm.sh root cause is closed (all tools checksum-pinned from
@@ -83,10 +80,6 @@ reframed for the Argo execution engine where they still apply:
   repository refreshes its cache from upstream).
 - **`oberth watch` CLI** (from #789): follow a push's CI outcome from the
   terminal on top of the server's `wait` long-poll; exit non-zero on red.
-- **`repos_list` MCP tool** (from #822): the 13-tool surface is deliberately
-  minimal and `GET /api/repos` serves the inventory today; add the MCP tool
-  only with a deliberate contract revision if agent workflows keep needing
-  it in-band.
 - **Issue queue dispatch layer** (from #798 remainder): `issue_lock` (claim
   lease), global `issue_list`, and green-auto-close shipped in the rewrite.
   Remaining: a blocking `issue_watch` (from #800), priority labels, and a
@@ -112,7 +105,7 @@ reframed for the Argo execution engine where they still apply:
 ## Distribution and adoption (OBERTH-RELEASE wave, updated 2026-08-09)
 
 Residuals from the OBERTH-RELEASE wave; full specifications live in the
-workspace issue files `issues/OBERTH-RELEASE-*.md`. Landed in v0.10.55:
+historical release issues; the current contracts live in [the architecture](docs/architecture.md). Landed in v0.10.55:
 `oberth init` (004), `oberth install` dev-evaluation core (005), the
 `oberthci/homebrew-tap` distribution point (002/013), and the clean-break
 Test/Build/Done rename (015). Landed in v0.10.56: multi-arch OCI release
@@ -124,7 +117,7 @@ single-upstream-only by design).
 
 - **Release-burn tap automation** (OBERTH-RELEASE-002/013 residual): the tap
   repo exists and serves the release formula, but updates are pushed by the
-  release operator, not yet by the Release burn. Wire the burn to template
+  release operator, not yet by the release template. Wire the template to template
   the four checksums from the just-published SHA256SUMS, verify with
   `homebrew/verify-formula.sh` semantics, and push to the tap via a scoped
   credential declared in `ReleaseSecrets`. A release is then incomplete
@@ -139,29 +132,21 @@ single-upstream-only by design).
   `.sigstore.json` bundle (no bare `.sig` anywhere), the public
   download-and-verify procedure in README/website, and `latest/VERSION`
   monotonic convergence observed across two sequential tags.
-- **`oberth install --production`** (OBERTH-RELEASE-005 residual): the
-  hardened path — OpenBao raft HA with persistent volumes, StorageClass
-  preflight, and the completion security
-  recommendations block (unseal shares, root-token rotation, raft
-  snapshots, audit device, exposure review). The flag exists and
-  hard-rejects until this lands. Verified installer-managed listener TLS now
-  stages private material directly on the retained PVC before OpenBao starts,
-  publishes only its public CA, and makes trusted-plan Transit structurally
-  impossible over HTTP. Also from 005: a kind-based e2e job
-  running `install --dev` + smoke `upstream add` in this repo's own
-  pipeline.
+- **OpenBao HA qualification** (OBERTH-RELEASE-005 residual): qualify raft HA,
+  StorageClass behavior, unseal-share custody, root-token rotation, snapshots
+  and audit devices. The installer supports persistent verified-TLS OpenBao
+  through `--install-secretstore`; generic `--dev` and `--production` mode
+  flags have been removed. The separate `--install-secretstore-dev` option
+  selects the documented in-memory evaluation store.
 - **Multi-arch OCI images** (OBERTH-RELEASE-011, landed in v0.10.56): the
-  Release burns publish the server image as a two-child OCI index
+  Release templates publish the server image as a two-child OCI index
   (linux/amd64 + linux/arm64) repacked from a multi-arch substrate index,
   and the chart pins the index digest. The former runner image and its
-  evidence tooling are retired: Jobs run repository-declared standard
-  golang images executing `go -C .oberth run .`.
-- **Node Budget — step resource sizes** (OBERTH-RELEASE-012, epic-sized):
-  `WithSize(oberth.S/M/L/XL)` on steps; weighted admission (never
-  co-schedule two L+ across concurrent Jobs, XL exclusive, interactive
-  reserve), size-mapped Job resources, per-step peak-RSS/CPU capture from
-  wait4 rusage, measured-vs-declared divergence reporting, and
-  `oberth suggest-sizes`. Full design:
-  `00_Architecture/oberth/ci-robustness-design.md`. Phase 1 alone is 5–7
-  days; never preempt-kill or cgroup-freeze running steps, no parallel
-  steps within a burn, no auto-retry.
+  evidence tooling are retired: Argo Workflow templates use repository-declared tool images and commands
+  with server-injected source and an Oberth credential wrapper.
+- **Node Budget — continued qualification** (OBERTH-RELEASE-012): declared
+  admission classes, per-template Pod requests, resource measurement and
+  numeric recommendations are implemented. Continue qualifying capacity
+  accounting under contention and incomplete observations; see
+  [declared admission](docs/declared-admission.md) and
+  [runtime capacity](docs/runtime-admission-capacity.md).

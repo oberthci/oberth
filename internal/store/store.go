@@ -20,10 +20,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	_ "modernc.org/sqlite"
+
 	"github.com/oberthci/oberth/internal/gitoid"
 	"github.com/oberthci/oberth/internal/model"
-
-	_ "modernc.org/sqlite"
 )
 
 const (
@@ -99,10 +99,6 @@ type Store struct {
 
 	// reruns caches run_rerun lineage (#1098); see RunRerunOf.
 	reruns rerunLineage
-}
-
-func Open(ctx context.Context, path string, opts Options) (*Store, error) {
-	return open(ctx, path, opts, true, nil)
 }
 
 // OpenAdminClient opens the shared current-schema database for a short-lived
@@ -718,7 +714,7 @@ func (s *Store) verifyCurrentSchema(ctx context.Context) error {
 		return fmt.Errorf("%w: live database requires exact schema version %d", ErrSchemaLegacyV1, latestMigrationVersion)
 	}
 	if version == 2 {
-		return fmt.Errorf("%w: existing schema version 2 requires backup-and-replace; live migration to version %d is disabled; see docs/upgrade-schema-v3.md",
+		return fmt.Errorf("%w: existing schema version 2 requires backup-and-replace; live migration to version %d is disabled; see docs/archive/upgrade-schema-v3.md",
 			ErrSchemaIncompatible, latestMigrationVersion)
 	}
 	// Versions 3 through latestMigrationVersion are compatible: the schema
@@ -760,7 +756,7 @@ func (s *Store) migrate(ctx context.Context, expectedLegacyHead *model.AuditHead
 	// chain was restructured. v3+ migrations are additive (new tables, new
 	// columns) and can be applied live.
 	if databaseVersion == 2 {
-		return fmt.Errorf("%w: existing schema version 2 requires backup-and-replace; live migration to version %d is disabled; see docs/upgrade-schema-v3.md",
+		return fmt.Errorf("%w: existing schema version 2 requires backup-and-replace; live migration to version %d is disabled; see docs/archive/upgrade-schema-v3.md",
 			ErrSchemaIncompatible, latestMigrationVersion)
 	}
 	targetVersion := latestMigrationVersion
@@ -796,6 +792,18 @@ func (s *Store) migrate(ctx context.Context, expectedLegacyHead *model.AuditHead
 		if applied[item.version] || item.version > targetVersion {
 			continue
 		}
+		if item.version == publicationAbandonMigrationVersion {
+			var table, parent string
+			var rowID sql.NullInt64
+			var foreignKey int
+			err := tx.QueryRowContext(ctx, `SELECT "table", rowid, parent, fkid FROM pragma_foreign_key_check('publications') LIMIT 1`).Scan(&table, &rowID, &parent, &foreignKey)
+			if err == nil {
+				return fmt.Errorf("%w: migration %d refused: publications has orphaned foreign keys; run PRAGMA foreign_key_check on a copy and repair the source database before retrying", ErrSchemaIncompatible, publicationAbandonMigrationVersion)
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("check publications foreign keys before migration %d: %w", publicationAbandonMigrationVersion, err)
+			}
+		}
 		if item.rawApply != nil {
 			// Connection-level migration: commit the current transaction,
 			// run the migration with direct db access (for PRAGMA changes
@@ -812,10 +820,11 @@ func (s *Store) migrate(ctx context.Context, expectedLegacyHead *model.AuditHead
 				return fmt.Errorf("record connection-level migration %d: %w", item.version, err)
 			}
 			applied[item.version] = true
-			tx, err = s.db.BeginTx(ctx, nil)
-			if err != nil {
-				return fmt.Errorf("resume after connection-level migration %d: %w", item.version, err)
+			nextTx, beginErr := s.db.BeginTx(ctx, nil)
+			if beginErr != nil {
+				return fmt.Errorf("resume after connection-level migration %d: %w", item.version, beginErr)
 			}
+			tx = nextTx
 			continue
 		}
 		switch {
@@ -848,6 +857,26 @@ type schemaIdentityQuerier interface {
 }
 
 func (s *Store) verifySchemaIdentity(ctx context.Context, querier schemaIdentityQuerier) error {
+	// The discarded workspace build reused v39 for unrelated schema. Never
+	// try to repair that lineage by recording the current migrations over it.
+	var comments, expiry, expiryMigration int
+	if err := querier.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_schema WHERE type='table' AND name='issue_comments'`).Scan(&comments); err != nil {
+		return fmt.Errorf("check discarded schema: %w", err)
+	}
+	if comments != 0 {
+		return fmt.Errorf("%w: issue_comments identifies a discarded workspace database; restore a v38 backup before starting Oberth", ErrSchemaIncompatible)
+	}
+	if err := querier.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version=?`, tokenExpiryMigrationVersion).Scan(&expiryMigration); err != nil {
+		return fmt.Errorf("check token expiry migration: %w", err)
+	}
+	if expiryMigration != 0 {
+		if err := querier.QueryRowContext(ctx, `SELECT count(*) FROM pragma_table_info('token_credentials') WHERE name='expires_at'`).Scan(&expiry); err != nil {
+			return fmt.Errorf("check token expiry column: %w", err)
+		}
+		if expiry != 1 {
+			return fmt.Errorf("%w: migration v%d is recorded but token_credentials.expires_at is missing; restore a v38 backup before starting Oberth", ErrSchemaIncompatible, tokenExpiryMigrationVersion)
+		}
+	}
 	var identityTables int
 	if err := querier.QueryRowContext(ctx, `
 SELECT count(*) FROM sqlite_schema
@@ -963,7 +992,7 @@ ORDER BY queue_sequence`)
 		return fmt.Errorf("list active recovery runs: %w", err)
 	}
 	for _, active := range activeRuns {
-		if active.JobName != "" {
+		if active.WorkflowName != "" {
 			// Runs with a known Job name stay in "running" status so the
 			// scheduler's startup reconciliation can query K8s for their
 			// terminal state before deciding whether to interrupt.
@@ -980,11 +1009,8 @@ ORDER BY queue_sequence`)
 			continue
 		}
 		if _, requeueErr := s.requeueStrandedRunTx(ctx, tx, active, now); requeueErr == nil {
-			// The enqueue's supersede interrupted this run with a link to
-			// its replacement and recorded a no-Job cancellation obligation.
-			// Owner startup proves the claiming worker is gone (the same
-			// argument as the pass above), so that obligation terminalizes
-			// here instead of lingering unexecutable (issue #270).
+			// This owner has not submitted a Workflow. Startup proves the
+			// old worker is gone, so an empty-name cleanup obligation is done.
 			if _, err := tx.ExecContext(ctx, `
 UPDATE run_cancellations
 SET completed_at = ?
@@ -1139,27 +1165,6 @@ func (s *Store) Close() error {
 	return errors.Join(readersErr, s.db.Close())
 }
 
-// CreateUpstream inserts a named upstream. Production callers go through the
-// discovery-based bootstrap path; this method is retained for test fixtures
-// where fabricating a discovery response is unnecessary overhead.
-func (s *Store) CreateUpstream(ctx context.Context, spec model.UpstreamSpec) (model.Upstream, error) {
-	if strings.TrimSpace(spec.Name) == "" || strings.TrimSpace(spec.Kind) == "" || strings.TrimSpace(spec.BaseURL) == "" {
-		return model.Upstream{}, fmt.Errorf("%w: upstream fields are required", ErrInvalid)
-	}
-	now := unixNano(s.now())
-	result, err := s.db.ExecContext(ctx, `
-INSERT INTO upstreams(name, kind, base_url, key_name, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?)`,
-		spec.Name, spec.Kind, spec.BaseURL, spec.KeyName, now, now)
-	if err != nil {
-		return model.Upstream{}, fmt.Errorf("create upstream: %w", err)
-	}
-	id, err := result.LastInsertId()
-	if err != nil {
-		return model.Upstream{}, fmt.Errorf("read upstream id: %w", err)
-	}
-	return s.Upstream(ctx, id)
-}
-
 func (s *Store) Upstream(ctx context.Context, id int64) (model.Upstream, error) {
 	row := s.reader().QueryRowContext(ctx, `SELECT id, name, kind, base_url, key_name, created_at, updated_at FROM upstreams WHERE id = ?`, id)
 	var value model.Upstream
@@ -1294,7 +1299,7 @@ FROM repositories r WHERE r.name = ? AND r.upstream_id = ?`, name, upstreamID))
 }
 
 func (s *Store) repositoryByUpstreamOrgName(ctx context.Context, upstreamName, org, name string) (model.Repository, error) {
-	upstream, err := s.UpstreamByName(ctx, upstreamName)
+	upstream, err := s.upstreamByName(ctx, upstreamName)
 	if err != nil {
 		return model.Repository{}, fmt.Errorf("look up upstream %q: %w", upstreamName, err)
 	}
@@ -1391,7 +1396,7 @@ func scanRepository(row rowScanner) (model.Repository, error) {
 	var value model.Repository
 	var created, updated int64
 	var archived sql.NullInt64
-	if err := row.Scan(&value.ID, &value.Name, &value.UpstreamID, &value.DefaultBranch, &created, &updated, &archived, &value.ArchivedBy); err != nil {
+	if err := scanRowNotFound(row, "Repository", &value.ID, &value.Name, &value.UpstreamID, &value.DefaultBranch, &created, &updated, &archived, &value.ArchivedBy); err != nil {
 		return model.Repository{}, translateNotFound("repository", err)
 	}
 	value.CreatedAt, value.UpdatedAt = fromUnixNano(created), fromUnixNano(updated)
@@ -1499,56 +1504,6 @@ func (s *Store) appendPromotion(ctx context.Context, spec model.PromotionSpec, r
 		return model.Promotion{}, fmt.Errorf("commit append promotion: %w", err)
 	}
 	return value, nil
-}
-
-// EnqueuePromotionRun commits the merged-tree run and its immutable promotion
-// association together. Production callers go through the admitted plan/apply
-// path; this method is retained for test fixtures that need a promotion-bound
-// run without fabricating a full trusted plan flow.
-func (s *Store) EnqueuePromotionRun(ctx context.Context, runSpec model.RunSpec, promotionSpec model.PromotionSpec) (model.EnqueueRunResult, model.Promotion, error) {
-	validatedRun, err := validateRunSpec(runSpec)
-	if err != nil {
-		return model.EnqueueRunResult{}, model.Promotion{}, err
-	}
-	if err := validatePromotionSpec(promotionSpec); err != nil {
-		return model.EnqueueRunResult{}, model.Promotion{}, err
-	}
-	if validatedRun.Trigger != "promotion" || validatedRun.Release || validatedRun.RefKind != model.RefBranch ||
-		validatedRun.RepoID != promotionSpec.RepoID || validatedRun.Actor != promotionSpec.Actor ||
-		!strings.EqualFold(validatedRun.SHA, promotionSpec.ResultSHA) ||
-		!strings.EqualFold(validatedRun.TestedSHA, promotionSpec.ResultSHA) ||
-		!strings.EqualFold(validatedRun.BaseSHA, promotionSpec.PreviousSHA) {
-		return model.EnqueueRunResult{}, model.Promotion{}, fmt.Errorf("%w: promotion run does not match promotion", ErrInvalid)
-	}
-	runID, err := randomID()
-	if err != nil {
-		return model.EnqueueRunResult{}, model.Promotion{}, fmt.Errorf("generate promotion run id: %w", err)
-	}
-	promotionID, err := randomID()
-	if err != nil {
-		return model.EnqueueRunResult{}, model.Promotion{}, fmt.Errorf("generate promotion id: %w", err)
-	}
-	now := unixNano(s.now())
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return model.EnqueueRunResult{}, model.Promotion{}, fmt.Errorf("begin promotion run enqueue: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	enqueued, err := s.enqueueRunTx(ctx, tx, validatedRun, runID, now, 0)
-	if err != nil {
-		return model.EnqueueRunResult{}, model.Promotion{}, err
-	}
-	promotion, err := insertPromotion(ctx, tx, promotionSpec, promotionID, runID, promotionSpec.GrantID, now)
-	if err != nil {
-		return model.EnqueueRunResult{}, model.Promotion{}, err
-	}
-	if err := s.appendPromotionAdmissionAudit(ctx, tx, promotion, now); err != nil {
-		return model.EnqueueRunResult{}, model.Promotion{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return model.EnqueueRunResult{}, model.Promotion{}, fmt.Errorf("commit promotion run enqueue: %w", err)
-	}
-	return enqueued, promotion, nil
 }
 
 // PlanPromotion fills the immutable Git plan for an already admitted
@@ -1678,16 +1633,6 @@ RETURNING sequence, id, repo_id, source_branch, source_sha, target_ref, previous
 		return model.Promotion{}, fmt.Errorf("append promotion: %w", err)
 	}
 	return value, nil
-}
-
-func validatePromotionSpec(spec model.PromotionSpec) error {
-	if err := validatePromotionAdmissionSpec(spec); err != nil {
-		return err
-	}
-	if !validOID(spec.ResultSHA) {
-		return fmt.Errorf("%w: promotion result SHA is invalid", ErrInvalid)
-	}
-	return nil
 }
 
 func validatePromotionAdmissionSpec(spec model.PromotionSpec) error {
@@ -1832,124 +1777,13 @@ RETURNING sequence, id, repo_id, source_branch, source_sha, target_ref, previous
 	return value, nil
 }
 
-func (s *Store) TrustedPlan(ctx context.Context, id string) (model.TrustedPlan, error) {
-	if strings.TrimSpace(id) == "" {
-		return model.TrustedPlan{}, fmt.Errorf("%w: trusted plan ID is required", ErrInvalid)
-	}
-	var value model.TrustedPlan
-	var created, expires, updated int64
-	var consumed sql.NullInt64
-	err := s.reader().QueryRowContext(ctx, `
-SELECT sequence, id, repo_id, upstream_id, source_ref, source_sha, target_ref,
-       base_sha, result_sha, green_run_id, plan_run_id, promotion_id, apply_id,
-       apply_enqueue_error, backend_identity, backend_key, tool_digest, lock_digest,
-       config_digest, artifact_digest, artifact_size,
-       actor, status, error, created_at, expires_at, consumed_at, updated_at
-FROM trusted_plans WHERE id = ?`, id).Scan(
-		&value.Sequence, &value.ID, &value.RepoID, &value.UpstreamID,
-		&value.SourceRef, &value.SourceSHA, &value.TargetRef,
-		&value.BaseSHA, &value.ResultSHA, &value.GreenRunID, &value.PlanRunID,
-		&value.PromotionID, &value.ApplyID, &value.ApplyEnqueueError,
-		&value.BackendIdentity, &value.BackendKey, &value.ToolDigest, &value.LockDigest,
-		&value.ConfigDigest, &value.ArtifactDigest, &value.ArtifactSize,
-		&value.Actor, &value.Status, &value.Error,
-		&created, &expires, &consumed, &updated)
-	if err != nil {
-		return model.TrustedPlan{}, translateNotFound("trusted plan", err)
-	}
-	value.CreatedAt = fromUnixNano(created)
-	value.ExpiresAt = fromUnixNano(expires)
-	value.ConsumedAt = nullableTime(consumed)
-	value.UpdatedAt = fromUnixNano(updated)
-	return value, nil
-}
-
-func (s *Store) TrustedApply(ctx context.Context, id string) (model.TrustedApply, error) {
-	if strings.TrimSpace(id) == "" {
-		return model.TrustedApply{}, fmt.Errorf("%w: trusted apply ID is required", ErrInvalid)
-	}
-	var value model.TrustedApply
-	var created, updated int64
-	var started, finished sql.NullInt64
-	err := s.reader().QueryRowContext(ctx, `
-SELECT sequence, id, plan_id, promotion_id, repo_id, target_ref, sha, run_id,
-       artifact_digest, backend_key, actor, status, error,
-       created_at, started_at, finished_at, updated_at
-FROM trusted_applies WHERE id = ?`, id).Scan(
-		&value.Sequence, &value.ID, &value.PlanID, &value.PromotionID,
-		&value.RepoID, &value.TargetRef, &value.SHA, &value.RunID,
-		&value.ArtifactDigest, &value.BackendKey, &value.Actor, &value.Status,
-		&value.Error, &created, &started, &finished, &updated)
-	if err != nil {
-		return model.TrustedApply{}, translateNotFound("trusted apply", err)
-	}
-	value.CreatedAt = fromUnixNano(created)
-	value.StartedAt = nullableTime(started)
-	value.FinishedAt = nullableTime(finished)
-	value.UpdatedAt = fromUnixNano(updated)
-	return value, nil
-}
-
 func scanPromotion(row rowScanner) (model.Promotion, error) {
 	var value model.Promotion
 	var created, updated int64
-	if err := row.Scan(&value.Sequence, &value.ID, &value.RepoID, &value.SourceBranch,
+	if err := scanRowNotFound(row, "Promotion", &value.Sequence, &value.ID, &value.RepoID, &value.SourceBranch,
 		&value.SourceSHA, &value.TargetRef, &value.PreviousSHA, &value.ResultSHA,
 		&value.Actor, &value.Status, &value.RunID, &value.GrantID, &value.Error, &created, &updated); err != nil {
 		return model.Promotion{}, err
-	}
-	value.CreatedAt, value.UpdatedAt = fromUnixNano(created), fromUnixNano(updated)
-	return value, nil
-}
-
-// UpsertUplink inserts or updates an uplink record. Production callers go
-// through the admin CLI gate which assembles the full admission chain; this
-// method is retained for test fixtures that need an uplink without the CLI.
-func (s *Store) UpsertUplink(ctx context.Context, spec model.UplinkSpec) (model.Uplink, error) {
-	if strings.TrimSpace(spec.Fingerprint) == "" || strings.TrimSpace(spec.Identity) == "" ||
-		strings.TrimSpace(spec.TokenCredentialID) == "" || strings.TrimSpace(spec.AuthActor) == "" {
-		return model.Uplink{}, fmt.Errorf("%w: uplink fields are required", ErrInvalid)
-	}
-	adminInt := 0
-	if spec.Admin {
-		adminInt = 1
-	}
-	scopes, err := normalizeUplinkScopes(spec.Scope)
-	if err != nil {
-		return model.Uplink{}, err
-	}
-	now := unixNano(s.now())
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return model.Uplink{}, fmt.Errorf("begin upsert uplink: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	row := tx.QueryRowContext(ctx, `
-INSERT INTO uplinks(fingerprint, identity, token_credential_id, auth_actor, admin, created_at, updated_at)
-VALUES(?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(fingerprint) DO UPDATE SET
-    identity = excluded.identity,
-    token_credential_id = excluded.token_credential_id,
-    auth_actor = excluded.auth_actor,
-    admin = excluded.admin,
-    updated_at = excluded.updated_at
-RETURNING id, fingerprint, identity, token_credential_id, auth_actor, admin, created_at, updated_at`,
-		spec.Fingerprint, spec.Identity, spec.TokenCredentialID, spec.AuthActor, adminInt, now, now)
-	var value model.Uplink
-	var created, updated int64
-	var scannedAdmin int
-	if err := row.Scan(&value.ID, &value.Fingerprint, &value.Identity, &value.TokenCredentialID, &value.AuthActor, &scannedAdmin, &created, &updated); err != nil {
-		return model.Uplink{}, fmt.Errorf("upsert uplink: %w", err)
-	}
-	value.Admin = scannedAdmin != 0
-	if err := replaceUplinkScopes(ctx, tx, value.ID, scopes); err != nil {
-		return model.Uplink{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return model.Uplink{}, fmt.Errorf("commit upsert uplink: %w", err)
-	}
-	if len(scopes) > 0 {
-		value.Scope = scopes
 	}
 	value.CreatedAt, value.UpdatedAt = fromUnixNano(created), fromUnixNano(updated)
 	return value, nil
@@ -2015,22 +1849,43 @@ func (s *Store) AppendAuditAction(ctx context.Context, spec model.AuditActionSpe
 }
 
 func (s *Store) CreateTokenCredential(ctx context.Context, spec model.TokenCredentialSpec) (model.TokenCredential, error) {
+	return s.CreateTokenCredentialWithPolicy(ctx, spec, model.DefaultUplinkTokenPolicy())
+}
+
+// CreateTokenCredentialWithPolicy applies the live daemon's issuance policy.
+// Only new credentials change; legacy rows are never assigned an expiry here.
+func (s *Store) CreateTokenCredentialWithPolicy(ctx context.Context, spec model.TokenCredentialSpec, policy model.UplinkTokenPolicy) (model.TokenCredential, error) {
+	if err := policy.Validate(); err != nil {
+		return model.TokenCredential{}, fmt.Errorf("%w: %w", ErrInvalid, err)
+	}
 	if strings.TrimSpace(spec.Name) == "" || len(spec.Digest) != 32 {
 		return model.TokenCredential{}, fmt.Errorf("%w: token name and SHA-256 digest are required", ErrInvalid)
 	}
+	nowTime := s.now()
+	expiry := nowTime.Add(policy.DefaultTTL)
+	if spec.ExpiresAt != nil {
+		expiry = spec.ExpiresAt.UTC()
+	}
+	if !expiry.After(nowTime) || !fromUnixNano(unixNano(expiry)).Equal(expiry) {
+		return model.TokenCredential{}, fmt.Errorf("%w: token expiry must be a future timestamp representable in nanoseconds", ErrInvalid)
+	}
+	if expiry.After(nowTime.Add(policy.MaxTTL)) {
+		return model.TokenCredential{}, fmt.Errorf("%w: token lifetime exceeds maximum of %s", ErrInvalid, policy.MaxTTL)
+	}
+	expires, expiresAt := unixNano(expiry), &expiry
 	id, err := randomID()
 	if err != nil {
 		return model.TokenCredential{}, fmt.Errorf("generate token credential id: %w", err)
 	}
-	now := unixNano(s.now())
+	now := unixNano(nowTime)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return model.TokenCredential{}, fmt.Errorf("begin create token credential: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
-INSERT INTO token_credentials(id, name, digest, created_at, revoked_at) VALUES(?, ?, ?, ?, ?)`,
-		id, spec.Name, append([]byte(nil), spec.Digest...), now, now); err != nil {
+INSERT INTO token_credentials(id, name, digest, created_at, revoked_at, expires_at) VALUES(?, ?, ?, ?, ?, ?)`,
+		id, spec.Name, append([]byte(nil), spec.Digest...), now, now, expires); err != nil {
 		return model.TokenCredential{}, fmt.Errorf("create token credential: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -2041,7 +1896,7 @@ INSERT INTO pending_token_credentials(token_credential_id, created_at) VALUES(?,
 		return model.TokenCredential{}, fmt.Errorf("commit token credential: %w", err)
 	}
 	pendingAt := fromUnixNano(now)
-	return model.TokenCredential{ID: id, Name: spec.Name, Digest: append([]byte(nil), spec.Digest...), CreatedAt: pendingAt, RevokedAt: &pendingAt}, nil
+	return model.TokenCredential{ID: id, Name: spec.Name, Digest: append([]byte(nil), spec.Digest...), CreatedAt: pendingAt, ExpiresAt: expiresAt, RevokedAt: &pendingAt}, nil
 }
 
 func (s *Store) ActivateTokenCredential(ctx context.Context, id string) (model.TokenCredential, error) {
@@ -2058,36 +1913,14 @@ DELETE FROM pending_token_credentials WHERE token_credential_id = ? RETURNING to
 	}
 	value, err := scanTokenCredential(tx.QueryRowContext(ctx, `
 UPDATE token_credentials SET activated_at = ?, revoked_at = NULL
-WHERE id = ? AND activated_at IS NULL
+WHERE id = ? AND activated_at IS NULL AND (expires_at IS NULL OR expires_at > ?)
   AND EXISTS (SELECT 1 FROM uplinks WHERE token_credential_id = token_credentials.id)
-RETURNING id, name, digest, created_at, activated_at, last_used_at, revoked_at`, now, id))
+RETURNING id, name, digest, created_at, activated_at, last_used_at, revoked_at, expires_at`, now, id, now))
 	if err != nil {
 		return model.TokenCredential{}, translateNotFound("pending token credential", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return model.TokenCredential{}, fmt.Errorf("commit activate token credential: %w", err)
-	}
-	return value, nil
-}
-
-// TokenCredentialByDigest looks up a credential by its SHA-256 digest.
-// Production callers use AuthenticatedUplinkByDigest which joins the uplink in
-// one query; this method is retained for test fixtures that verify credential
-// lifecycle state independently.
-func (s *Store) TokenCredentialByDigest(ctx context.Context, digest []byte) (model.TokenCredential, error) {
-	if len(digest) != 32 {
-		return model.TokenCredential{}, ErrNotFound
-	}
-	release, err := acquireAuthSlot(ctx, s.bearerAuthSlots)
-	if err != nil {
-		return model.TokenCredential{}, fmt.Errorf("wait for bearer credential reader: %w", err)
-	}
-	defer release()
-	value, err := scanTokenCredential(s.authReader().QueryRowContext(ctx, `
-SELECT id, name, digest, created_at, activated_at, last_used_at, revoked_at
-FROM token_credentials WHERE digest = ?`, digest))
-	if err != nil {
-		return model.TokenCredential{}, translateNotFound("token credential", err)
 	}
 	return value, nil
 }
@@ -2109,19 +1942,20 @@ func (s *Store) AuthenticatedUplinkByDigest(ctx context.Context, digest []byte) 
 	defer func() { _ = tx.Rollback() }()
 	row := tx.QueryRowContext(ctx, `
 SELECT u.id, u.fingerprint, u.identity, u.token_credential_id, u.auth_actor, u.admin, u.created_at, u.updated_at,
-       t.id, t.name, t.digest, t.created_at, t.activated_at, t.last_used_at, t.revoked_at
+       t.id, t.name, t.digest, t.created_at, t.activated_at, t.last_used_at, t.revoked_at, t.expires_at
 FROM token_credentials t
 JOIN uplinks u ON u.token_credential_id = t.id
-WHERE t.digest = ? AND t.activated_at IS NOT NULL AND t.revoked_at IS NULL`, digest)
+WHERE t.digest = ? AND t.activated_at IS NOT NULL AND t.revoked_at IS NULL
+AND (t.expires_at IS NULL OR t.expires_at > ?)`, digest, unixNano(s.now()))
 	var value model.AuthenticatedUplink
 	var uplinkCreated, uplinkUpdated, tokenCreated int64
 	var admin int
-	var activated, lastUsed, revoked sql.NullInt64
+	var activated, lastUsed, revoked, expiry sql.NullInt64
 	if err := row.Scan(
 		&value.ID, &value.Fingerprint, &value.Identity, &value.TokenCredentialID,
 		&value.AuthActor, &admin, &uplinkCreated, &uplinkUpdated,
 		&value.TokenCredential.ID, &value.TokenCredential.Name, &value.TokenCredential.Digest,
-		&tokenCreated, &activated, &lastUsed, &revoked,
+		&tokenCreated, &activated, &lastUsed, &revoked, &expiry,
 	); err != nil {
 		return model.AuthenticatedUplink{}, translateNotFound("authenticated uplink", err)
 	}
@@ -2143,6 +1977,7 @@ WHERE t.digest = ? AND t.activated_at IS NOT NULL AND t.revoked_at IS NULL`, dig
 	value.TokenCredential.ActivatedAt = nullableTime(activated)
 	value.TokenCredential.LastUsedAt = nullableTime(lastUsed)
 	value.TokenCredential.RevokedAt = nullableTime(revoked)
+	value.TokenCredential.ExpiresAt = nullableTime(expiry)
 	return value, nil
 }
 
@@ -2158,14 +1993,15 @@ func validateUplinkBinding(uplink model.Uplink) error {
 func scanTokenCredential(row rowScanner) (model.TokenCredential, error) {
 	var value model.TokenCredential
 	var created int64
-	var activated, lastUsed, revoked sql.NullInt64
-	if err := row.Scan(&value.ID, &value.Name, &value.Digest, &created, &activated, &lastUsed, &revoked); err != nil {
+	var activated, lastUsed, revoked, expiry sql.NullInt64
+	if err := scanRowNotFound(row, "TokenCredential", &value.ID, &value.Name, &value.Digest, &created, &activated, &lastUsed, &revoked, &expiry); err != nil {
 		return model.TokenCredential{}, err
 	}
 	value.CreatedAt = fromUnixNano(created)
 	value.ActivatedAt = nullableTime(activated)
 	value.LastUsedAt = nullableTime(lastUsed)
 	value.RevokedAt = nullableTime(revoked)
+	value.ExpiresAt = nullableTime(expiry)
 	return value, nil
 }
 
@@ -2177,7 +2013,8 @@ func (s *Store) touchTokenCredentialAt(ctx context.Context, id string, at time.T
 	result, err := s.db.ExecContext(ctx, `
 UPDATE token_credentials SET last_used_at = ?
 WHERE id = ? AND activated_at IS NOT NULL AND revoked_at IS NULL
-  AND (last_used_at IS NULL OR last_used_at <= ?)`, unixNano(at), id, unixNano(at.Add(-TokenCredentialTouchInterval)))
+  AND (expires_at IS NULL OR expires_at > ?)
+  AND (last_used_at IS NULL OR last_used_at <= ?)`, unixNano(at), id, unixNano(at), unixNano(at.Add(-TokenCredentialTouchInterval)))
 	if err != nil {
 		return false, fmt.Errorf("touch token credential: %w", err)
 	}
@@ -2186,37 +2023,6 @@ WHERE id = ? AND activated_at IS NOT NULL AND revoked_at IS NULL
 		return false, fmt.Errorf("read token use change: %w", err)
 	}
 	return changed != 0, nil
-}
-
-func (s *Store) RevokeTokenCredential(ctx context.Context, id string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin revoke token credential: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	pendingResult, err := tx.ExecContext(ctx, `DELETE FROM pending_token_credentials WHERE token_credential_id = ?`, id)
-	if err != nil {
-		return fmt.Errorf("clear pending token credential: %w", err)
-	}
-	pending, err := pendingResult.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("read pending token credential change: %w", err)
-	}
-	query := `UPDATE token_credentials SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`
-	if pending > 0 {
-		query = `UPDATE token_credentials SET revoked_at = ? WHERE id = ?`
-	}
-	result, err := tx.ExecContext(ctx, query, unixNano(s.now()), id)
-	if err != nil {
-		return fmt.Errorf("revoke token credential: %w", err)
-	}
-	if err := requireChanged("token credential", result); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit revoke token credential: %w", err)
-	}
-	return nil
 }
 
 func randomID() (string, error) {
@@ -2242,8 +2048,11 @@ func nullableTime(value sql.NullInt64) *time.Time {
 }
 
 func translateNotFound(entity string, err error) error {
+	if errors.Is(err, ErrNotFound) {
+		return err
+	}
 	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("%w: %s", ErrNotFound, entity)
+		return notFoundRow{entity: strings.ToLower(entity)}
 	}
 	return err
 }
@@ -2268,3 +2077,14 @@ func pageLimit(limit int) int {
 	}
 	return limit
 }
+
+func scanRowNotFound(row rowScanner, entity string, dest ...any) error {
+	return translateNotFound(entity, row.Scan(dest...))
+}
+
+// Keep driver compatibility for internal callers without exposing driver text
+// or distinguishing a missing row from a hidden row at scoped boundaries.
+type notFoundRow struct{ entity string }
+
+func (e notFoundRow) Error() string   { return fmt.Sprintf("%s: %s", ErrNotFound, e.entity) }
+func (e notFoundRow) Unwrap() []error { return []error{ErrNotFound, sql.ErrNoRows} }

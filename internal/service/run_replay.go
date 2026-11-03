@@ -49,7 +49,7 @@ func (service *API) releaseReplayDecision(run model.Run, evidence model.RunRepla
 		if !safe {
 			return audit, false
 		}
-		preIntent = preIntent && attempt.Run.JobName == ""
+		preIntent = preIntent && attempt.Run.WorkflowName == ""
 	}
 	audit.Basis = "observed-terminal-no-credential-start"
 	if preIntent {
@@ -66,11 +66,11 @@ func (service *API) releaseAttemptSafe(attempt model.RunReplayAttempt) (int, boo
 		return 0, false
 	}
 	events, progressErr := service.logs.StepProgressHistory(run.ID)
-	if run.JobName == "" {
+	if run.WorkflowName == "" {
 		return 0, (progressErr == nil || errors.Is(progressErr, os.ErrNotExist)) && len(events) == 0 && len(attempt.Steps) == 0 && run.FailedStep == ""
 	}
 	observation := attempt.Observation
-	if observation == nil || observation.Version != 1 || observation.JobName != run.JobName || observation.Nodes < len(observation.Steps) {
+	if observation == nil || observation.Version != 1 || observation.WorkflowName != run.WorkflowName || observation.Nodes < len(observation.Steps) {
 		return 0, false
 	}
 	if observation.Nodes == 0 && (len(attempt.Steps) > 0 || len(events) > 0 || run.FailedStep != "") {
@@ -88,7 +88,7 @@ func (service *API) releaseAttemptSafe(attempt model.RunReplayAttempt) (int, boo
 	}
 	labels := make(map[string]bool, len(planned))
 	for _, step := range planned {
-		labels[step.Burn+"\x00"+step.Step] = step.Secrets || step.Credentialed
+		labels[step.Stage+"\x00"+step.Step] = step.Secrets || step.Credentialed
 	}
 	started := func(step model.StepResult) bool {
 		if step.StartedAt != nil || step.LogEnd > step.LogStart {
@@ -104,9 +104,9 @@ func (service *API) releaseAttemptSafe(attempt model.RunReplayAttempt) (int, boo
 		return false
 	}
 	check := func(step model.StepResult) bool {
-		secret, known := labels[step.Burn+"\x00"+step.Step]
+		secret, known := labels[step.Stage+"\x00"+step.Step]
 		if !known {
-			secret, known = labels[runlog.LegacyRetryBurn(step.Burn)+"\x00"+step.Step]
+			secret, known = labels[runlog.LegacyRetryStage(step.Stage)+"\x00"+step.Step]
 		}
 		return !started(step) || (known && !secret)
 	}
@@ -121,7 +121,7 @@ func (service *API) releaseAttemptSafe(attempt model.RunReplayAttempt) (int, boo
 		}
 	}
 	for _, observed := range observation.Steps {
-		result := model.StepResult{Burn: observed.Burn, Step: observed.Step, Status: observed.Status}
+		result := model.StepResult{Stage: observed.Stage, Step: observed.Step, Status: observed.Status}
 		// Started is retained independently of the final/latest attempt status.
 		if observed.Started {
 			result.Status = model.StepRunning
@@ -131,9 +131,9 @@ func (service *API) releaseAttemptSafe(attempt model.RunReplayAttempt) (int, boo
 		}
 	}
 	if run.FailedStep != "" {
-		failed := model.StepResult{Burn: run.FailedBurn, Step: run.FailedStep, Status: model.StepFailed}
+		failed := model.StepResult{Stage: run.FailedStage, Step: run.FailedStep, Status: model.StepFailed}
 		for _, step := range attempt.Steps {
-			if step.Burn == run.FailedBurn && step.Step == run.FailedStep {
+			if step.Stage == run.FailedStage && step.Step == run.FailedStep {
 				failed = step
 				break
 			}

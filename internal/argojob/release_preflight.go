@@ -11,7 +11,7 @@ import (
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // ReleaseDeclaration contains public intent only; observing it grants no access.
@@ -36,7 +36,7 @@ func PreflightRelease(config Config, request Request) (ReleasePreflight, error) 
 			config.PerStepIdentities = request.Identities.Step
 		}
 	}
-	request.Trigger = periapsis.TriggerRelease
+	request.Trigger = pipeline.TriggerRelease
 	wf, err := argoworkflow.Decode(request.Source)
 	if err != nil {
 		return result, err
@@ -53,8 +53,10 @@ func PreflightRelease(config Config, request Request) (ReleasePreflight, error) 
 			result.Problems = append(result.Problems, err.Error())
 		}
 	}
-	if request.ResourceMaximum != "" {
-		add(argoworkflow.ValidateResourceCeiling(wf, request.Repo, request.ResourceMaximum, int64(config.WorkflowTimeout/time.Second)))
+	if request.ResourceCeiling != nil {
+		add(argoworkflow.ValidateResourceRequirementsWithCapability(wf, request.Repo, *request.ResourceCeiling, int64(config.WorkflowTimeout/time.Second), request.Capability))
+	} else if request.ResourceMaximum != "" {
+		add(argoworkflow.ValidateResourceCeilingWithCapability(wf, request.Repo, request.ResourceMaximum, int64(config.WorkflowTimeout/time.Second), request.Capability))
 	}
 	top := map[*wfv1.Template]bool{}
 	for i := range wf.Spec.Templates {
@@ -127,7 +129,7 @@ func PreflightRelease(config Config, request Request) (ReleasePreflight, error) 
 		add(err)
 		return result, nil
 	}
-	identity, err := config.identityForWithRepo(periapsis.TriggerRelease, len(paths) > 0 || releaseWIFNeedsRepoIdentity(wifLeaves, config, request), request.UpstreamName, request.UpstreamOrg, request.Repo)
+	identity, err := config.identityForWithRepo(pipeline.TriggerRelease, len(paths) > 0 || releaseWIFNeedsRepoIdentity(wifLeaves, config, request), request.UpstreamName, request.UpstreamOrg, request.Repo)
 	if err != nil {
 		add(err)
 		return result, nil
@@ -195,7 +197,7 @@ func (controller *Controller) PreflightReleaseAccounts(ctx context.Context, requ
 	paths, pathErr := argoworkflow.DeclaredSecretPaths(wf)
 	problems = append(problems, pathErr)
 	if len(paths) > 0 || releaseWIFNeedsRepoIdentity(leaves, config, request) {
-		identity, err := config.identityForWithRepo(periapsis.TriggerRelease, true, request.UpstreamName, request.UpstreamOrg, request.Repo)
+		identity, err := config.identityForWithRepo(pipeline.TriggerRelease, true, request.UpstreamName, request.UpstreamOrg, request.Repo)
 		problems = append(problems, err)
 		if err == nil {
 			problems = append(problems, controller.verifyServiceAccount(ctx, config.Namespace, identity.ServiceAccountName))

@@ -14,6 +14,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type deadlineBusyError int
@@ -28,11 +29,14 @@ type deadlineJobs struct {
 	passed  bool
 }
 
-func (j *deadlineJobs) CreateCI(context.Context, JobRequest) error { j.creates.Add(1); return nil }
-func (j *deadlineJobs) PipelineConcurrencyGroup(context.Context, JobRequest) (string, error) {
+func (j *deadlineJobs) CreateWorkflow(context.Context, WorkflowRequest) error {
+	j.creates.Add(1)
+	return nil
+}
+func (j *deadlineJobs) PipelineConcurrencyGroup(context.Context, WorkflowRequest) (string, error) {
 	return "db-deadline", nil
 }
-func (j *deadlineJobs) PipelineCredentialed(context.Context, JobRequest) (bool, error) {
+func (j *deadlineJobs) PipelineCredentialed(context.Context, WorkflowRequest) (bool, error) {
 	return true, nil
 }
 func (j *deadlineJobs) Wait(context.Context, string, io.Writer) (JobResult, error) {
@@ -40,7 +44,7 @@ func (j *deadlineJobs) Wait(context.Context, string, io.Writer) (JobResult, erro
 	if j.passed {
 		return JobResult{Status: model.RunPassed, Phase: "job"}, nil
 	}
-	return JobResult{Status: model.RunFailed, Phase: "job", Error: "test failed", Steps: []model.StepResult{{Burn: "build", Step: "test", Status: model.StepFailed}}}, nil
+	return JobResult{Status: model.RunFailed, Phase: "job", Error: "test failed", Steps: []model.StepResult{{Stage: "build", Step: "test", Status: model.StepFailed}}}, nil
 }
 
 func deadlineScope(ctx context.Context, scheduler *Scheduler) context.Context {
@@ -99,7 +103,7 @@ func awaitDeadlineRun(t *testing.T, fixture *recoveryFixture, id string, done <-
 // Exercise actual Run startup, dispatch, submitted worker and finalization;
 // checking only adapter returns would miss a fatal completion-channel escape.
 func TestDatabaseDeadlineSchedulerConverges(t *testing.T) {
-	operations := []string{"RunningRunsWithJobs", "PendingRunCancellations", "PendingPublications", "RunWorkspaceCleanupCandidates", "PromotionWorkspaceCleanupCandidates", "ClaimNextRun", "Run", "Repository", "Upstream", "SetRunJobName", "SetRunConcurrencyGroup", "SetRunCredentialed", "MarkRunAdmitted", "MarkRunSubmitted", "PutStepResult", "FinishRun", "CompleteSupersededRunCancellationWithoutJob", "RunWorkspaceCleanupEligible"}
+	operations := []string{"RunningRunsWithJobs", "PendingRunCancellations", "PendingPublications", "RunWorkspaceCleanupCandidates", "PromotionWorkspaceCleanupCandidates", "ClaimNextRun", "Run", "Repository", "Upstream", "SetRunWorkflowName", "SetRunConcurrencyGroup", "SetRunCredentialed", "MarkRunAdmitted", "MarkRunSubmitted", "PutStepResult", "FinishRun", "CompleteSupersededRunCancellationWithoutJob", "RunWorkspaceCleanupEligible"}
 	for _, operation := range operations {
 		for _, fault := range []struct {
 			name string
@@ -108,7 +112,7 @@ func TestDatabaseDeadlineSchedulerConverges(t *testing.T) {
 			t.Run(operation+"/"+fault.name, func(t *testing.T) {
 				t.Parallel()
 				fixture := newRecoveryFixture(t)
-				queued, err := fixture.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "db-deadline", SHA: strings.Repeat("a", 40), Actor: "test", Trigger: "branch"})
+				queued, err := storetest.EnqueueRun(fixture.store, t.Context(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "db-deadline", SHA: strings.Repeat("a", 40), Actor: "test", Trigger: "branch"})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -151,7 +155,7 @@ func testDatabasePublicationDoesNotReplayJobOrPush(t *testing.T, failure error) 
 		t.Run(operation, func(t *testing.T) {
 			t.Parallel()
 			fixture := newRecoveryFixture(t)
-			queued, err := fixture.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "main", SHA: strings.Repeat("a", 40), Actor: "test", Trigger: "branch"})
+			queued, err := storetest.EnqueueRun(fixture.store, t.Context(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "main", SHA: strings.Repeat("a", 40), Actor: "test", Trigger: "branch"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -178,6 +182,20 @@ func (g *deadlineGit) PushPromotion(context.Context, string, string, string) err
 	return nil
 }
 
+// A create notification precedes the scheduler's post-create reread. Wait until
+// observation begins so supersession exercises the observed-cancellation path,
+// rather than legitimately completing inside the post-create cleanup branch.
+type deadlineObservingJobs struct {
+	*groupEngine
+	observing chan struct{}
+	once      sync.Once
+}
+
+func (jobs *deadlineObservingJobs) Wait(ctx context.Context, name string, output io.Writer) (JobResult, error) {
+	jobs.once.Do(func() { close(jobs.observing) })
+	return jobs.groupEngine.Wait(ctx, name, output)
+}
+
 func TestDatabaseDeadlineCancellationContinuesLiveDispatch(t *testing.T) {
 	testDatabaseCancellationContinuesLiveDispatch(t, context.DeadlineExceeded)
 }
@@ -188,21 +206,30 @@ func testDatabaseCancellationContinuesLiveDispatch(t *testing.T, failure error) 
 	for _, operation := range []string{"PendingRunCancellations", "Run", "CompleteObservedRunCancellation"} {
 		t.Run(operation, func(t *testing.T) {
 			fixture := newGroupFixture(t, 2)
+			jobs := &deadlineObservingJobs{groupEngine: fixture.engine, observing: make(chan struct{})}
+			fixture.scheduler.jobs = jobs
 			database := &deadlineFaultStore{Store: fixture.store, failures: make(map[string]int), calls: make(map[string]int), faultError: failure}
 			fixture.scheduler.store = database
 			fixture.scheduler.workspaces.owners = fixture.scheduler.database()
 			done, _ := startDeadlineScheduler(t, fixture.scheduler)
-			old := fixture.branch(t, fixture.beacon, "supersede-db", "a")
+			old := fixture.branch(t, fixture.exampleService, "supersede-db", "a")
 			awaitDeadlineCreated(t, fixture.engine, done)
 			// CreateCI announces creation before MarkRunSubmitted commits. An
 			// earlier supersession uses the worker's post-create cleanup path,
 			// bypassing the observed-cancellation operation under test.
 			awaitDeadlineSubmitted(t, fixture.store, old.ID, done)
+			select {
+			case <-jobs.observing:
+			case err := <-done:
+				t.Fatalf("scheduler stopped before observing initial Workflow: %v", err)
+			case <-time.After(testStartTimeout(15 * time.Second)):
+				t.Fatal("initial Workflow observation did not start")
+			}
 			database.mu.Lock()
 			before := database.calls[operation]
 			database.failures[operation] = 2
 			database.mu.Unlock()
-			successor, err := fixture.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: fixture.beacon.ID, RefKind: model.RefBranch, Ref: "supersede-db", SHA: strings.Repeat("b", 40), Actor: "test", Trigger: "branch"})
+			successor, err := storetest.EnqueueRun(fixture.store, t.Context(), model.RunSpec{RepoID: fixture.exampleService.ID, RefKind: model.RefBranch, Ref: "supersede-db", SHA: strings.Repeat("b", 40), Actor: "test", Trigger: "branch"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -420,7 +447,7 @@ func (s *deadlineJoinStore) Run(context.Context, string) (model.Run, error) {
 }
 func TestDatabaseDeadlineFatalInvariantCancelsOtherRetryingWorkers(t *testing.T) {
 	fixture := newRecoveryFixture(t)
-	if _, err := fixture.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "pending", SHA: strings.Repeat("a", 40), Actor: "test", Trigger: "branch"}); err != nil {
+	if _, err := storetest.EnqueueRun(fixture.store, t.Context(), model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "pending", SHA: strings.Repeat("a", 40), Actor: "test", Trigger: "branch"}); err != nil {
 		t.Fatal(err)
 	}
 	scheduler := fixture.scheduler(t, &deadlineJobs{})
@@ -466,9 +493,19 @@ func awaitDeadlineSubmitted(t *testing.T, database *store.Store, id string, done
 			if err != nil {
 				t.Fatal(err)
 			}
-			if run.Status == model.RunRunning && run.Phase == "running" && run.JobName != "" {
+			if run.Status == model.RunRunning && run.Phase == "running" && run.WorkflowName != "" {
 				return
 			}
 		}
+	}
+}
+
+func TestDatabaseRetryHasTotalBudget(t *testing.T) {
+	scheduler := &Scheduler{}
+	ctx := context.WithValue(t.Context(), databaseRetryKey{}, &databaseRetryScope{lifetime: t.Context(), owner: scheduler, maximum: 20 * time.Millisecond})
+	calls := 0
+	_, err := retryDatabaseClassified(ctx, "permanent contention", time.Second, func(context.Context) (int, error) { calls++; return 0, deadlineBusyError(5) }, transientDatabaseAttemptError)
+	if !errors.Is(err, context.DeadlineExceeded) || calls == 0 || calls > 2 {
+		t.Fatalf("unbounded retry: calls=%d err=%v", calls, err)
 	}
 }

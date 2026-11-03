@@ -26,7 +26,7 @@ func TestPreviewHelmUpgradeRefusesOnSSAConflict(t *testing.T) {
 				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.17.11"}]`), nil
 			}
 			// helm upgrade --dry-run=server → SSA conflict, verbatim Helm
-			// v4.2.3 output as recorded on tuxbox (helm history rev 75,
+			// v4.2.3 output as recorded on example-node (helm history rev 75,
 			// 2026-10-07): two objects in two namespaces joined by " && ".
 			if strings.Contains(joined, "--dry-run=server") {
 				return nil, errors.New(helm4TwoObjectConflict)
@@ -36,7 +36,7 @@ func TestPreviewHelmUpgradeRefusesOnSSAConflict(t *testing.T) {
 	}
 	cfg := Config{Namespace: "oberth"}
 
-	err := previewHelmUpgrade(context.Background(), cfg, deps, OpenBaoResult{}, "")
+	err := previewHelmUpgrade(context.Background(), cfg, deps, OpenBaoResult{})
 	if err == nil {
 		t.Fatal("expected error from SSA conflict preview")
 	}
@@ -52,7 +52,7 @@ func TestPreviewHelmUpgradeRefusesOnSSAConflict(t *testing.T) {
 	// The exact transfer command, per object, in the object's OWN namespace:
 	// the Role lives in oberth-argo, not in the release namespace.
 	for _, want := range []string{
-		"kubectl -n oberth get configmap cloudflared-watch-oberth-origin-ca -o yaml | kubectl -n oberth apply --server-side --field-manager=helm --force-conflicts -f -",
+		"kubectl -n oberth get configmap example-public-ca -o yaml | kubectl -n oberth apply --server-side --field-manager=helm --force-conflicts -f -",
 		"kubectl -n oberth-argo get role oberth-argo -o yaml | kubectl -n oberth-argo apply --server-side --field-manager=helm --force-conflicts -f -",
 	} {
 		if !strings.Contains(err.Error(), want) {
@@ -62,9 +62,9 @@ func TestPreviewHelmUpgradeRefusesOnSSAConflict(t *testing.T) {
 }
 
 // helm4TwoObjectConflict is the verbatim UPGRADE FAILED text Helm v4.2.3
-// produced on tuxbox for release revision 75 (2026-10-07 17:42Z), minus the
+// produced on example-node for release revision 75 (2026-10-07 17:42Z), minus the
 // `Upgrade "oberth" failed: ` prefix.
-const helm4TwoObjectConflict = `conflict occurred while applying object oberth/cloudflared-watch-oberth-origin-ca /v1, Kind=ConfigMap: ` +
+const helm4TwoObjectConflict = `conflict occurred while applying object oberth/example-public-ca /v1, Kind=ConfigMap: ` +
 	`Apply failed with 1 conflict: conflict with "kubectl-client-side-apply" using v1: .data.ca.crt && ` +
 	`conflict occurred while applying object oberth-argo/oberth-argo rbac.authorization.k8s.io/v1, Kind=Role: ` +
 	`Apply failed with 1 conflict: conflict with "kubectl-patch" using rbac.authorization.k8s.io/v1: .rules`
@@ -80,14 +80,14 @@ func TestPreviewHelmUpgradePassesOnCleanPreview(t *testing.T) {
 				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.17.11"}]`), nil
 			}
 			if strings.Contains(joined, "--dry-run=server") {
-				return []byte(`{"name":"oberth","namespace":"oberth"}`), nil
+				return []byte(`{"name":"oberth","namespace":"oberth","config":{}}`), nil
 			}
-			return nil, nil
+			return []byte(`{}`), nil
 		},
 	}
 	cfg := Config{Namespace: "oberth"}
 
-	if err := previewHelmUpgrade(context.Background(), cfg, deps, OpenBaoResult{}, ""); err != nil {
+	if err := previewHelmUpgrade(context.Background(), cfg, deps, OpenBaoResult{}); err != nil {
 		t.Fatalf("preview should pass on clean preview: %v", err)
 	}
 }
@@ -108,7 +108,7 @@ func TestPreviewHelmUpgradeSkipsOnFreshInstall(t *testing.T) {
 	}
 	cfg := Config{Namespace: "oberth"}
 
-	if err := previewHelmUpgrade(context.Background(), cfg, deps, OpenBaoResult{}, ""); err != nil {
+	if err := previewHelmUpgrade(context.Background(), cfg, deps, OpenBaoResult{}); err != nil {
 		t.Fatalf("preview should skip on fresh install: %v", err)
 	}
 }
@@ -139,7 +139,7 @@ func TestPreviewHelmUpgradeUsedBeforeAnyWrite(t *testing.T) {
 	}
 	cfg := Config{Namespace: "oberth"}
 
-	err := previewHelmUpgrade(context.Background(), cfg, deps, OpenBaoResult{}, "")
+	err := previewHelmUpgrade(context.Background(), cfg, deps, OpenBaoResult{})
 	if err == nil {
 		t.Fatal("expected preview to refuse on SSA conflict")
 	}
@@ -200,7 +200,7 @@ func TestParseSSAConflicts(t *testing.T) {
 
 	conflicts := parseSSAConflicts(`Upgrade "oberth" failed: ` + helm4TwoObjectConflict)
 	want := []ssaConflict{
-		{ssaObject: ssaObject{Namespace: "oberth", Name: "cloudflared-watch-oberth-origin-ca", APIVersion: "v1", Kind: "ConfigMap"},
+		{ssaObject: ssaObject{Namespace: "oberth", Name: "example-public-ca", APIVersion: "v1", Kind: "ConfigMap"},
 			Manager: "kubectl-client-side-apply", Field: ".data.ca.crt"},
 		{ssaObject: ssaObject{Namespace: "oberth-argo", Name: "oberth-argo", APIVersion: "rbac.authorization.k8s.io/v1", Kind: "Role"},
 			Manager: "kubectl-patch", Field: ".rules"},
@@ -270,7 +270,7 @@ func TestOberthHelmArgsNoAtomicOnInstallPath(t *testing.T) {
 // A re-run of `oberth install --install-secretstore` against an existing
 // release previews before the OpenBao phase. The preview must render the
 // planned secret-store values, not an empty secretstore.address that the
-// chart schema rejects (observed on tuxbox, v0.17.26 setup retry).
+// chart schema rejects (observed on an installation, v0.17.26 setup retry).
 func TestPreviewHelmUpgradePlansSecretStoreValues(t *testing.T) {
 	t.Parallel()
 
@@ -288,14 +288,14 @@ func TestPreviewHelmUpgradePlansSecretStoreValues(t *testing.T) {
 					strconv.Quote(liveCA) + `,"transit":{"enabled":true}}}`), nil
 			case strings.Contains(joined, "--dry-run=server"):
 				preview = joined
-				return []byte(`{}`), nil
+				return []byte(`{"config":{}}`), nil
 			}
 			return nil, nil
 		},
 	}
 	cfg := Config{Namespace: "oberth", InstallSecretStore: true}
 
-	if err := previewHelmUpgrade(context.Background(), cfg, deps, OpenBaoResult{}, ""); err != nil {
+	if err := previewHelmUpgrade(context.Background(), cfg, deps, OpenBaoResult{}); err != nil {
 		t.Fatalf("preview: %v", err)
 	}
 	for _, want := range []string{
@@ -324,20 +324,43 @@ func TestPreviewHelmUpgradePlansDevSecretStoreAddress(t *testing.T) {
 			case strings.HasPrefix(joined, "list"):
 				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.17.26"}]`), nil
 			case strings.HasPrefix(joined, "get values"):
-				t.Fatal("dev mode needs no live trust anchor")
+				return []byte(`{}`), nil // full values are read only to print the change plan
 			case strings.Contains(joined, "--dry-run=server"):
 				preview = joined
-				return []byte(`{}`), nil
+				return []byte(`{"config":{}}`), nil
 			}
 			return nil, nil
 		},
 	}
 	cfg := Config{Namespace: "oberth", InstallSecretStoreDev: true, OpenBaoNamespace: "bao"}
 
-	if err := previewHelmUpgrade(context.Background(), cfg, deps, OpenBaoResult{}, ""); err != nil {
+	if err := previewHelmUpgrade(context.Background(), cfg, deps, OpenBaoResult{}); err != nil {
 		t.Fatalf("preview: %v", err)
 	}
 	if !strings.Contains(preview, "secretstore.address=http://openbao.bao.svc:8200 ") {
 		t.Fatalf("preview did not plan the dev OpenBao address:\n%s", preview)
+	}
+}
+
+func TestPreviewPlansRekorURLAndPreservesLivePublicKey(t *testing.T) {
+	var preview string
+	deps := Deps{Output: &bytes.Buffer{}, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+		joined := strings.Join(args, " ")
+		if strings.HasPrefix(joined, "list") {
+			return []byte(`[{"name":"oberth","status":"deployed"}]`), nil
+		}
+		if strings.HasPrefix(joined, "get values") {
+			return []byte(`{"auditAnchor":{"rekorPublicKey":"existing-public-key"}}`), nil
+		}
+		preview = joined
+		return []byte(`{"config":{}}`), nil
+	}}
+	if err := previewHelmUpgrade(t.Context(), Config{InstallRekor: true, RekorNamespace: "logs"}, deps, OpenBaoResult{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"auditAnchor.rekorURL=http://rekor-server.logs.svc:80", "auditAnchor.rekorPublicKey=existing-public-key", "--dry-run=server"} {
+		if !strings.Contains(preview, want) {
+			t.Fatalf("preview missing %s: %s", want, preview)
+		}
 	}
 }

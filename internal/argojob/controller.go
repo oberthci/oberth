@@ -9,13 +9,13 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"reflect"
 	"sort"
 	"sync"
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -27,7 +27,7 @@ import (
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // WorkflowClient is the narrow slice of the generated Argo clientset this
@@ -72,6 +72,7 @@ var errRunLogBudget = errors.New("argojob: aggregate run log budget exceeded")
 
 // Controller submits Workflows and supervises them to a terminal result.
 type Controller struct {
+	capabilities      func(context.Context, int64) (*argoworkflow.Capability, error)
 	restartedAt       time.Time
 	vmiQuotaMu        sync.Mutex
 	profileVerifyMu   sync.Mutex
@@ -170,6 +171,9 @@ func (controller *Controller) Namespace() string { return controller.config.Name
 // and refuses otherwise rather than executing something that was not built
 // from this run's reviewed source.
 func (controller *Controller) Create(ctx context.Context, request Request) (name string, resultErr error) {
+	if err := controller.verifyCapabilityGrant(ctx, request.RepositoryID, request.Capability); err != nil {
+		return "", err
+	}
 	attemptedCreate := false
 	definitelyRejected := false
 	if request.TrustedKVM != nil {
@@ -200,7 +204,7 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 	// secret store -- so the seeder knows whether to deliver the trust anchor.
 	// The document is decoded again inside Build; this lightweight pre-check
 	// avoids restructuring the Seed-before-Build ordering.
-	credentialed := request.Trigger == periapsis.TriggerRelease || pipelineDeclaresSecretPaths(request.Source)
+	credentialed := request.Trigger == pipeline.TriggerRelease || pipelineDeclaresSecretPaths(request.Source)
 
 	// GET the Workflow BEFORE any seeding. If the same submission already
 	// exists, return/repair ownership without touching its claim. This
@@ -380,24 +384,19 @@ func (controller *Controller) isSharedServiceAccount(name string) bool {
 		name == controller.config.ExecutorServiceAccount
 }
 
-func sameSubmission(existing, intended *wfv1.Workflow) error {
-	if binding := intended.Annotations[trustedKVMAnnotation]; binding != "" {
-		if existing.Annotations[trustedKVMAnnotation] != binding || !reflect.DeepEqual(existing.Spec, intended.Spec) {
-			return errors.New("argojob: existing Workflow differs from trusted KVM server spec")
-		}
-	}
+// An owned but altered Workflow must be cleaned up before releasing its grant.
+// The named classification crosses the engine boundary without exposing a spec.
+type workflowSpecMismatch struct{}
 
-	if binding := intended.Annotations[nonrootProfileAnnotation]; binding != "" {
-		// Recovery cannot accept a forged identity annotation on old/root
-		// semantics. Compare the actual stored spec with current server output,
-		// including selected policies, source volumes and executor patch.
-		if existing.Annotations[nonrootProfileAnnotation] != binding || !reflect.DeepEqual(existing.Spec, intended.Spec) {
-			return errors.New("argojob: existing Workflow does not carry the verified nonroot policy and profile")
-		}
-	}
-	// Ordinary pipelines retain the legacy annotation-only identity check.
-	// Namespace Workflow-create RBAC is part of this trust boundary; only the
-	// nonroot/trusted-KVM cases above compare the actual stored spec.
+func (*workflowSpecMismatch) Error() string {
+	return "argojob: Workflow spec mismatch: verified policy or profile changed"
+}
+func (*workflowSpecMismatch) AmbiguousCreate() bool      { return true }
+func (*workflowSpecMismatch) WorkflowSpecMismatch() bool { return true }
+
+func sameSubmission(existing, intended *wfv1.Workflow) error {
+	// Establish the complete submission identity before classifying a mismatch
+	// as ours to clean up. A foreign run/source never enters cancellation.
 	existingRun, existingIdentity, ok := WorkflowMeta(existing)
 	if !ok {
 		return fmt.Errorf("argojob: Workflow %s already exists and is not an Oberth run", intended.Name)
@@ -409,6 +408,21 @@ func sameSubmission(existing, intended *wfv1.Workflow) error {
 	if existingIdentity != intendedIdentity {
 		return fmt.Errorf("argojob: Workflow %s exists with a different spec than this run's source produces", intended.Name)
 	}
+	if binding := intended.Annotations[trustedKVMAnnotation]; binding != "" {
+		if existing.Annotations[trustedKVMAnnotation] != binding || !apiequality.Semantic.DeepEqual(existing.Spec, intended.Spec) {
+			return &workflowSpecMismatch{}
+		}
+	}
+	if binding := intended.Annotations[nonrootProfileAnnotation]; binding != "" {
+		// Quantity encodings and internal caches can change in Kubernetes
+		// serialization. Compare semantic values while retaining the full
+		// policy, source-volume, executor-patch and controller-profile checks.
+		if existing.Annotations[nonrootProfileAnnotation] != binding || !apiequality.Semantic.DeepEqual(existing.Spec, intended.Spec) {
+			return &workflowSpecMismatch{}
+		}
+	}
+	// Ordinary pipelines retain the annotation-only identity check. Namespace
+	// Workflow-create RBAC remains part of that trust boundary.
 	return nil
 }
 
@@ -416,11 +430,8 @@ func sameSubmission(existing, intended *wfv1.Workflow) error {
 // progress markers and each step's pod log into destination as the run
 // proceeds.
 //
-// Progress markers use the same wire protocol the Go path's runner emits, so
-// the scheduler's existing step-progress writer, log index, and dashboard read
-// an Argo run exactly as they read a Job run. The difference is only where the
-// events come from: the Go runner emits them from inside the Job, while here
-// the server derives them from the Workflow's node tree.
+// The server derives progress events from the Workflow node tree and writes
+// the retained marker protocol consumed by the scheduler, index and dashboard.
 func (controller *Controller) Wait(ctx context.Context, name, runID string, destination io.Writer) (Completion, error) {
 	return controller.wait(ctx, name, runID, destination, nil, 0, Adoption{})
 }
@@ -433,7 +444,26 @@ func (controller *Controller) WaitResumed(ctx context.Context, name, runID strin
 	return controller.wait(ctx, name, runID, destination, events, retained, binding)
 }
 
-func (controller *Controller) wait(ctx context.Context, name, runID string, destination io.Writer, events []runprogress.Event, retained int64, binding Adoption) (Completion, error) {
+func (controller *Controller) wait(ctx context.Context, name, runID string, destination io.Writer, events []runprogress.Event, retained int64, binding Adoption) (result Completion, retErr error) {
+	parent := ctx
+	ctx, cancelWatchdog := context.WithCancelCause(ctx)
+	watchdogFailure := fmt.Errorf("%s Server watchdog expired: %w", model.ExecutionDeadlineMessage, context.DeadlineExceeded)
+	// Arm only after reading the submitted bound. A failed first read must not
+	// substitute the default timeout for a longer declared deadline.
+	var watchdog *time.Timer
+	defer func() {
+		if watchdog != nil {
+			watchdog.Stop()
+		}
+		if errors.Is(context.Cause(ctx), watchdogFailure) {
+			cleanup, stop := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
+			defer stop()
+			retErr = errors.Join(watchdogFailure, controller.Cancel(cleanup, name, runID))
+		}
+		cancelWatchdog(nil)
+	}()
+	var boundDeadline time.Time
+	observingSince := time.Now()
 	session := controller.resourceSession(ctx, runID)
 	defer session.finish()
 	if retained < 0 {
@@ -453,9 +483,9 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 		if err := event.Validate(); err != nil {
 			return Completion{}, err
 		}
-		reporter.reported[event.Burn+"/"+event.Step] = event.Status
-		reporter.ordinals[event.Burn+"/"+event.Step] = event.Ordinal
-		reporter.ordinalOwners[event.Ordinal] = event.Burn + "/" + event.Step
+		reporter.reported[event.Stage+"/"+event.Step] = event.Status
+		reporter.ordinals[event.Stage+"/"+event.Step] = event.Ordinal
+		reporter.ordinalOwners[event.Ordinal] = event.Stage + "/" + event.Step
 	}
 	ticker := time.NewTicker(controller.interval)
 	defer ticker.Stop()
@@ -492,6 +522,33 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 		}
 		if binding.UID != "" && !binding.matches(workflow) {
 			return Completion{}, errors.New("argojob: adopted Workflow identity changed")
+		}
+		if !workflow.Status.Phase.Completed() {
+			budget := watchdogBudget(controller.config.ExecutionTimeout("", workflow.Spec.ActiveDeadlineSeconds))
+			origin, _ := watchdogOrigin(workflow)
+			if origin.IsZero() {
+				origin = observingSince
+			}
+			expires := origin.Add(budget)
+			remaining := time.Until(expires)
+			if remaining <= 0 {
+				cancelWatchdog(watchdogFailure)
+				return Completion{}, watchdogFailure
+			}
+			// Rebind when Argo first records its start, including after adoption.
+			// Ordinary polling must not extend either clock.
+			if !expires.Equal(boundDeadline) {
+				if watchdog == nil {
+					watchdog = time.AfterFunc(remaining, func() { cancelWatchdog(watchdogFailure) })
+				} else {
+					watchdog.Reset(remaining)
+				}
+				boundDeadline = expires
+			}
+		} else if watchdog != nil {
+			// Once Argo has finished, log and diagnostic collection must not
+			// turn its observed result into a watchdog deletion.
+			watchdog.Stop()
 		}
 		// Observe already-created Pods before identity delivery can block on a
 		// later Pod: early step output must not wait behind that setup RPC.
@@ -604,13 +661,6 @@ func (controller *Controller) verifyOwnership(workflow *wfv1.Workflow, runID str
 	return nil
 }
 
-// publish emits the progress transitions and step logs this observation
-// reveals that previous ones did not. It returns an error when the aggregate
-// run log budget is breached during step log replay, naming the offending step.
-func (controller *Controller) publish(ctx context.Context, workflow *wfv1.Workflow, reporter *progressReporter, destination io.Writer) error {
-	return controller.publishLogs(ctx, workflow, reporter, destination, nil)
-}
-
 func (controller *Controller) publishLogs(ctx context.Context, workflow *wfv1.Workflow, reporter *progressReporter, destination io.Writer, live *stepLogFollowers) error {
 	if workflow == nil {
 		return nil
@@ -673,7 +723,7 @@ func (controller *Controller) replayStepLog(ctx context.Context, workflow *wfv1.
 			// Best-effort banner -- the budget is exhausted so this write
 			// will likely fail, but writeLine silently drops write errors.
 			writeLine(destination, step, "oberth: run log truncated: aggregate budget exceeded")
-			return fmt.Errorf("step %s/%s breached the aggregate run log budget", step.Burn, step.Step)
+			return fmt.Errorf("step %s/%s breached the aggregate run log budget", step.Stage, step.Step)
 		}
 		writeLine(destination, step, fmt.Sprintf("oberth: step log truncated: %v", err))
 	}
@@ -826,7 +876,7 @@ func newProgressReporter(destination io.Writer) *progressReporter {
 // assignOrdinal requires reporter.mu. Journal assignments survive adoption;
 // newly named keys take an unused slot instead of displacing a sibling.
 func (reporter *progressReporter) assignOrdinal(step StepResult) StepResult {
-	key := step.Burn + "/" + step.Step
+	key := step.Stage + "/" + step.Step
 	if ordinal, exists := reporter.ordinals[key]; exists {
 		step.Ordinal = ordinal
 	} else {
@@ -866,7 +916,7 @@ func (reporter *progressReporter) order(steps []StepResult) []StepResult {
 func (reporter *progressReporter) observe(destination io.Writer, step StepResult) bool {
 	reporter.mu.Lock()
 	defer reporter.mu.Unlock()
-	key := step.Burn + "/" + step.Step
+	key := step.Stage + "/" + step.Step
 	step = reporter.assignOrdinal(step)
 	if step.NodeID != "" && reporter.done[step.NodeID] {
 		// This attempt's terminal state is already in the run log.
@@ -908,7 +958,7 @@ func (reporter *progressReporter) observe(destination io.Writer, step StepResult
 		// between two polls). Emit its running event first so the log reads
 		// as a sequence rather than a jump.
 		reporter.emit(destination, StepResult{
-			Burn: step.Burn, Step: step.Step, Ordinal: step.Ordinal,
+			Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal,
 			Status: runprogress.StepRunning, StartedAt: step.StartedAt,
 		})
 	}
@@ -941,7 +991,7 @@ func rank(status runprogress.Status) int {
 func (reporter *progressReporter) emit(destination io.Writer, step StepResult) {
 	event := runprogress.Event{
 		Version: runprogress.Version,
-		Burn:    step.Burn, Step: step.Step, Ordinal: step.Ordinal,
+		Stage:   step.Stage, Step: step.Step, Ordinal: step.Ordinal,
 		Status: step.Status, ExitCode: step.ExitCode,
 		StartedAt: step.StartedAt, FinishedAt: step.FinishedAt,
 	}
@@ -1038,7 +1088,7 @@ func (writer *runBudgetWriter) Write(body []byte) (int, error) {
 // the per-step budget, and stops reading immediately in either case.
 func copyPrefixed(destination io.Writer, step StepResult, body io.Reader, proxyURL string) error {
 	var diagnostic goProxyDiagnostic
-	prefix := []byte("[" + step.Burn + "/" + step.Step + "] ")
+	prefix := []byte("[" + step.Stage + "/" + step.Step + "] ")
 	buffered := make([]byte, 0, 8192)
 	chunk := make([]byte, 4096)
 	var written int64
@@ -1088,7 +1138,7 @@ func copyPrefixed(destination io.Writer, step StepResult, body io.Reader, proxyU
 }
 
 func writeLine(destination io.Writer, step StepResult, text string) {
-	_, _ = destination.Write([]byte("[" + step.Burn + "/" + step.Step + "] " + text + "\n"))
+	_, _ = destination.Write([]byte("[" + step.Stage + "/" + step.Step + "] " + text + "\n"))
 }
 
 func indexByte(body []byte, target byte) int {

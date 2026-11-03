@@ -24,6 +24,7 @@ var testGitCommandTimeout = testtimeout.Start(2 * time.Minute)
 // tests with an explicit executable continue to exercise the CLI adapter.
 func newBackendTestCache(t *testing.T, config Config) (*Cache, error) {
 	t.Helper()
+	config.AllowLocalUpstreams = true
 	// Preserve longer budgets and zero's production default; lift only the
 	// short fixture deadlines that can otherwise fail on wall-clock load.
 	if config.CommandTimeout > 0 && config.CommandTimeout < testGitCommandTimeout {

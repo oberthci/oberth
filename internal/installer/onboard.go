@@ -41,9 +41,6 @@ var ErrInterrupted = errors.New("interrupted")
 var ErrOnboardingPartial = errors.New("onboarding partial: manual steps remain")
 
 const (
-	// oberthWebUIURL is where the chart's fixed HTTPS NodePort (30443)
-	// serves the web UI on a local cluster.
-	oberthWebUIURL       = "https://localhost:30443/runs"
 	defaultUplinkKeyPath = "~/.ssh/id_ed25519.pub"
 )
 
@@ -52,6 +49,11 @@ const (
 // results are appended to the table via AppendRow so the table grows in
 // place. Credentials are flushed after the table.
 func FinishInstall(ctx context.Context, cfg Config, deps Deps, tw *tableWriter, creds *heldCredentials) error {
+	var endpointErr error
+	deps, endpointErr = configureClientEndpoint(ctx, cfg.Namespace, cfg.ServiceType, deps)
+	if endpointErr != nil {
+		return endpointErr
+	}
 	ns := cfg.Namespace
 	if ns == "" {
 		ns = DefaultNamespace
@@ -699,7 +701,8 @@ func provideDeployKey(ctx context.Context, cfg Config, deps Deps, tw *tableWrite
 		return err
 	}
 	// #nosec G304 -- the operator explicitly names their own key file.
-	privateKey, err := os.ReadFile(expanded)
+	privateKey, err := readDeployKey(expanded)
+	defer clear(privateKey)
 	if err != nil {
 		erasePromptLines(w, color, 1)
 		tw.AppendRow("Deploy key", keyPath, "✗ error", false)
@@ -858,7 +861,7 @@ func registerUpstream(ctx context.Context, cfg Config, deps Deps, name, baseURL 
 	}
 	addArgs := []string{"upstream", "add", "--yes", "--no-wait", name, baseURL}
 
-	// The admin socket (/tmp/oberth-admin.sock) is bound just before the
+	// The admin socket (/run/oberth/admin.sock) is bound just before the
 	// server prints "ready for bootstrap". A pod that is Running but not
 	// yet bootstrapped rejects exec commands with "connection refused".
 	// The command is idempotent, so retrying is safe. We retry only when
@@ -1084,6 +1087,10 @@ func onboardUplink(ctx context.Context, cfg Config, deps Deps, tw *tableWriter) 
 // result to the table. Returns ErrInterrupted when the user presses Ctrl+C
 // during the prompt so the caller can exit cleanly.
 func offerSSHConfig(ctx context.Context, deps Deps, pubKeyPath string, tw *tableWriter) error {
+	if deps.ClientServiceType == "ClusterIP" {
+		tw.AppendRow("SSH config", "ClusterIP: use internal networking or port-forward", "⚠ manual", false)
+		return nil
+	}
 	w := deps.Output
 	color := isColor(deps)
 	host := sshHostFromServer(deps)
@@ -1163,7 +1170,8 @@ func offerSSHConfig(ctx context.Context, deps Deps, pubKeyPath string, tw *table
 		return nil
 	}
 
-	block := GenerateSSHConfigBlock(host, sshNodePort, keyPath)
+	sshPort, _ := clientPorts(deps)
+	block := GenerateSSHConfigBlock(host, sshPort, keyPath)
 	// Read existing content (may be empty or nonexistent).
 	existing, _ := os.ReadFile(configPath) //nolint:gosec // G304: path is derived from os.UserHomeDir
 	newContent := append(existing, []byte("\n"+block)...)
@@ -1924,4 +1932,28 @@ func isSSHKeyFile(path string, wantPub bool) bool {
 			strings.HasPrefix(firstLine, "sk-ecdsa-")
 	}
 	return strings.HasPrefix(firstLine, "-----BEGIN")
+}
+
+// readDeployKey bounds private material before allocation and clears partial
+// reads on failure. The successful caller owns and clears the returned bytes.
+func readDeployKey(path string) ([]byte, error) {
+	file, err := os.Open(path) // #nosec G304 -- Explicit operator-selected key path.
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	const limit = 1 << 20
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > limit {
+		return nil, errors.New("deploy key must be a regular file no larger than 1 MiB")
+	}
+	body, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil || len(body) > limit {
+		clear(body)
+		return nil, errors.New("deploy key read failed or exceeded 1 MiB")
+	}
+	return body, nil
 }

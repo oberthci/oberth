@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"os"
 	"regexp"
 	"strings"
@@ -32,49 +33,6 @@ func TestFlagsBeforePositionalsStillWork(t *testing.T) {
 	}
 }
 
-// A value-taking flag must keep its value when it moves, and a boolean must
-// not swallow the argument after it. This exercises the permutation directly:
-// each command registers its own flags, so remoteFlags alone knows only --json.
-func TestPermutationKeepsFlagValuesAndSparesBooleans(t *testing.T) {
-	got := permuteFlagsFirst([]string{"abc123", "--burn", "ci", "--tail"})
-	want := []string{"--burn", "ci", "--tail", "abc123"}
-	if len(got) != len(want) {
-		t.Fatalf("permuted to %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("permuted to %v, want %v", got, want)
-		}
-	}
-}
-
-// The boolean case, arranged so a wrong answer is visible.
-//
-// With the boolean first and one positional, consuming the next argument
-// produces the same sequence either way, so the mistake hides. A trailing flag
-// separates them: if --tail swallows the run ID, the ID never reaches the
-// positional tail and --json ends up behind it.
-func TestABooleanFlagDoesNotSwallowThePositional(t *testing.T) {
-	got := permuteFlagsFirst([]string{"--tail", "abc123", "--json"})
-	want := []string{"--tail", "--json", "abc123"}
-	if len(got) != len(want) {
-		t.Fatalf("permuted to %v, want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("permuted to %v, want %v; --tail consumed the run ID", got, want)
-		}
-	}
-}
-
-// A positional that begins with a dash survives after "--".
-func TestDoubleDashEndsFlagPermutation(t *testing.T) {
-	got := permuteFlagsFirst([]string{"--json", "--", "-weird-id"})
-	if len(got) != 2 || got[0] != "--json" || got[1] != "-weird-id" {
-		t.Fatalf("permuted to %v", got)
-	}
-}
-
 // TestAFailedRunReportsItsReason guards the field the client used to drop.
 //
 // remoteRun had no Error or Phase, so the API returned them and the decoder
@@ -96,3 +54,28 @@ func TestAFailedRunReportsItsReason(t *testing.T) {
 type io_Discard struct{}
 
 func (io_Discard) Write(p []byte) (int, error) { return len(p), nil }
+
+func TestRegisteredFlagTypesPreserveInterspersedArguments(t *testing.T) {
+	for _, args := range [][]string{{"abc123", "--burn", "ci", "--tail"}, {"--tail", "abc123", "--json"}, {"--json", "--", "-weird-id"}} {
+		flags := flag.NewFlagSet("fixture", flag.ContinueOnError)
+		group := flags.String("burn", "", "group")
+		tail := flags.Bool("tail", false, "tail")
+		asJSON := flags.Bool("json", false, "json")
+		if err := parseCommandFlags(flags, args); err != nil {
+			t.Fatal(err)
+		}
+		want := "abc123"
+		if args[1] == "--" {
+			want = "-weird-id"
+		}
+		if flags.NArg() != 1 || flags.Arg(0) != want {
+			t.Fatalf("positionals %v for %v", flags.Args(), args)
+		}
+		if args[0] == "abc123" && (*group != "ci" || !*tail) {
+			t.Fatalf("flag values lost: %s %t", *group, *tail)
+		}
+		if args[0] == "--tail" && (!*tail || !*asJSON) {
+			t.Fatal("boolean consumed positional")
+		}
+	}
+}

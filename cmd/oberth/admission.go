@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"strings"
@@ -23,32 +24,17 @@ func runAdmission(ctx context.Context, arguments []string, output io.Writer) err
 		_, err := fmt.Fprintln(output, admissionUsage)
 		return err
 	}
-	var transport, positional []string
-	force, asJSON := false, false
-	for index := 0; index < len(arguments); index++ {
-		argument := arguments[index]
-		name, inline, hasInline := strings.Cut(argument, "=")
-		switch {
-		case argument == "--force":
-			force = true
-		case argument == "--json":
-			asJSON = true
-		case name == "--url" || name == "--token-file" || name == "--ca-file":
-			value := inline
-			if !hasInline {
-				if index+1 >= len(arguments) {
-					return fmt.Errorf("%w: %s requires a value", errUsage, name)
-				}
-				index++
-				value = arguments[index]
-			}
-			transport = append(transport, name, value)
-		case strings.HasPrefix(argument, "-"):
-			return fmt.Errorf("%w: unknown flag %q", errUsage, argument)
-		default:
-			positional = append(positional, argument)
-		}
+	flags := flag.NewFlagSet("admission", flag.ContinueOnError)
+	forceFlag := flags.Bool("force", false, "release a stale reservation")
+	jsonFlag := flags.Bool("json", false, "emit JSON")
+	transportFlags := mcpTransportFlags(flags)
+	positional, _, err := parseOperatorFlags(flags, arguments)
+	if err != nil {
+		return err
 	}
+	force, asJSON := *forceFlag, *jsonFlag
+	transport := transportFlags()
+
 	release := len(positional) > 0 && positional[0] == "release"
 	switch {
 	case release && len(positional) != 2:
@@ -60,7 +46,7 @@ func runAdmission(ctx context.Context, arguments []string, output io.Writer) err
 	if err != nil {
 		return err
 	}
-	remote := admissionCaller{config: config}
+	remote := remoteRunCanceller{config: config}
 	if release {
 		arguments := map[string]any{"run_id": positional[1]}
 		if force {
@@ -151,36 +137,4 @@ func dash(value string) string {
 		return "-"
 	}
 	return value
-}
-
-// admissionCaller calls one MCP tool for the admission commands and returns
-// its JSON text.
-type admissionCaller struct{ config mcpFlagResult }
-
-func (caller admissionCaller) call(ctx context.Context, tool string, arguments map[string]any) (json.RawMessage, error) {
-	encoded, err := json.Marshal(arguments)
-	if err != nil {
-		return nil, err
-	}
-	response, err := mcpRequest(ctx, caller.config, mcpMethodToolsCall, toolsCallParams{Name: tool, Arguments: encoded})
-	if err != nil {
-		return nil, err
-	}
-	if response.Error != nil {
-		return nil, fmt.Errorf("server error: %s (code %d)", response.Error.Message, response.Error.Code)
-	}
-	var result toolsCallResult
-	if err := json.Unmarshal(response.Result, &result); err != nil {
-		return nil, fmt.Errorf("invalid tools/call result: %w", err)
-	}
-	var text strings.Builder
-	for _, content := range result.Content {
-		if content.Type == "text" {
-			text.WriteString(content.Text)
-		}
-	}
-	if result.IsError {
-		return nil, fmt.Errorf("%w: %s", errMCPToolError, strings.TrimSpace(text.String()))
-	}
-	return json.RawMessage(text.String()), nil
 }

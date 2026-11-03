@@ -13,12 +13,13 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/internal/storetest"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // Prepare under the gate lock so tests control every admission/release without
 // sleeps, blocked worker goroutines or access to live reservation fields.
-func priorityWaiter(g *weightedAdmission, seq int64, p model.RunPriority, at time.Time, size periapsis.Size, estimates ...time.Duration) *admissionReservation {
+func priorityWaiter(g *weightedAdmission, seq int64, p model.RunPriority, at time.Time, size pipeline.Size, estimates ...time.Duration) *admissionReservation {
 	r := g.reserveRun(model.Run{ID: string(rune('a' + seq)), QueueSequence: seq, AdmissionSequence: seq, Priority: p, QueuedAt: at})
 	g.mu.Lock()
 	r.prepared = true
@@ -36,15 +37,15 @@ func priorityWaiter(g *weightedAdmission, seq int64, p model.RunPriority, at tim
 func TestPriorityAdmissionOrdersClassesThenFIFO(t *testing.T) {
 	g := newWeightedAdmission(4)
 	holder := g.reserve(1)
-	release, err := holder.acquire(context.Background(), periapsis.XL)
+	release, err := holder.acquire(context.Background(), pipeline.XL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	normal := priorityWaiter(g, 2, model.PriorityNormal, now, periapsis.XL)
-	high := priorityWaiter(g, 3, model.PriorityHigh, now, periapsis.XL)
-	highest := priorityWaiter(g, 4, model.PriorityHighest, now, periapsis.XL)
-	highest2 := priorityWaiter(g, 5, model.PriorityHighest, now, periapsis.XL)
+	normal := priorityWaiter(g, 2, model.PriorityNormal, now, pipeline.XL)
+	high := priorityWaiter(g, 3, model.PriorityHigh, now, pipeline.XL)
+	highest := priorityWaiter(g, 4, model.PriorityHighest, now, pipeline.XL)
+	highest2 := priorityWaiter(g, 5, model.PriorityHighest, now, pipeline.XL)
 	release()
 	for i, r := range []*admissionReservation{highest, highest2, high, normal} {
 		if !granted(g, r) {
@@ -65,20 +66,20 @@ func TestPriorityAdmissionMeasuredBackfillDuringDrain(t *testing.T) {
 	g.now = clock.Now
 	g.maxHeadWait = 20 * time.Minute
 	holder := g.reserve(1)
-	release, err := holder.acquireRequest(context.Background(), admissionRequest{Size: periapsis.M, Estimate: 30 * time.Minute})
+	release, err := holder.acquireRequest(context.Background(), admissionRequest{Size: pipeline.M, Estimate: 30 * time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer release()
-	head := priorityWaiter(g, 2, model.PriorityHigh, clock.now, periapsis.L)
-	normal := priorityWaiter(g, 3, model.PriorityNormal, clock.now, periapsis.M)
-	small := priorityWaiter(g, 4, model.PriorityHigh, clock.now, periapsis.S, 5*time.Minute)
+	head := priorityWaiter(g, 2, model.PriorityHigh, clock.now, pipeline.L)
+	normal := priorityWaiter(g, 3, model.PriorityNormal, clock.now, pipeline.M)
+	small := priorityWaiter(g, 4, model.PriorityHigh, clock.now, pipeline.S, 5*time.Minute)
 	if granted(g, head) || granted(g, normal) || !granted(g, small) {
 		t.Fatal("unmeasured backfill started or measured backfill was lost")
 	}
 	small.release()
 	clock.now = clock.now.Add(20 * time.Minute)
-	later := priorityWaiter(g, 5, model.PriorityHigh, clock.now, periapsis.S, 5*time.Minute)
+	later := priorityWaiter(g, 5, model.PriorityHigh, clock.now, pipeline.S, 5*time.Minute)
 	if !granted(g, later) || granted(g, normal) {
 		t.Fatal("drain lost safe measured backfill or admitted unmeasured work")
 	}
@@ -97,12 +98,12 @@ func TestPriorityAdmissionStarvationReordersExistingWaiters(t *testing.T) {
 	g := newWeightedAdmission(4)
 	g.now = clock.Now
 	holder := g.reserve(1)
-	release, err := holder.acquire(context.Background(), periapsis.XL)
+	release, err := holder.acquire(context.Background(), pipeline.XL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	normal := priorityWaiter(g, 2, model.PriorityNormal, clock.now.Add(-time.Hour+time.Nanosecond), periapsis.XL)
-	highest := priorityWaiter(g, 3, model.PriorityHighest, clock.now, periapsis.XL)
+	normal := priorityWaiter(g, 2, model.PriorityNormal, clock.now.Add(-time.Hour+time.Nanosecond), pipeline.XL)
+	highest := priorityWaiter(g, 3, model.PriorityHighest, clock.now, pipeline.XL)
 	if g.waiters[0] != highest {
 		t.Fatal("normal aged before threshold")
 	}
@@ -126,7 +127,7 @@ func TestQueuePriorityToolsAdminOnlyAuditedAndGated(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = control.Shutdown(ctx) }()
-	run, err := f.store.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "rc/v1", SHA: strings.Repeat("a", 40), Actor: "dev", Trigger: "push"})
+	run, err := storetest.EnqueueRun(f.store, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "rc/v1", SHA: strings.Repeat("a", 40), Actor: "dev", Trigger: "push"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +176,7 @@ func TestPriorityDispatchClaimsPastLowerClassWaitersAndRefreshesBumps(t *testing
 	g := newWeightedAdmission(2)
 	scheduler := &Scheduler{store: f.store, admission: g, maxConcurrent: 1}
 	holder := g.reserve(-1)
-	release, err := holder.acquire(ctx, periapsis.XL)
+	release, err := holder.acquire(ctx, pipeline.XL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +187,7 @@ func TestPriorityDispatchClaimsPastLowerClassWaitersAndRefreshesBumps(t *testing
 		if kind == model.RefTag {
 			trigger = "tag"
 		}
-		r, err := f.store.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: kind, Ref: ref, SHA: strings.Repeat("a", 40), Actor: "dev", Trigger: trigger})
+		r, err := storetest.EnqueueRun(f.store, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: kind, Ref: ref, SHA: strings.Repeat("a", 40), Actor: "dev", Trigger: trigger})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -202,7 +203,7 @@ func TestPriorityDispatchClaimsPastLowerClassWaitersAndRefreshesBumps(t *testing
 		reservation := g.reserveRun(r)
 		g.mu.Lock()
 		reservation.prepared = true
-		reservation.size = periapsis.M
+		reservation.size = pipeline.M
 		reservation.weight = 2
 		g.mu.Unlock()
 	}
@@ -234,7 +235,7 @@ func TestPriorityDispatchClaimsPastLowerClassWaitersAndRefreshesBumps(t *testing
 	}
 	g.mu.Lock()
 	tagReservation.prepared = true
-	tagReservation.size = periapsis.M
+	tagReservation.size = pipeline.M
 	tagReservation.weight = 2
 	g.mu.Unlock()
 	release()
@@ -252,10 +253,10 @@ func TestPriorityDispatchClaimsPastLowerClassWaitersAndRefreshesBumps(t *testing
 
 func TestSchedulerReleaseCandidateOvertakesAlreadyClaimedBranchQueue(t *testing.T) {
 	f := newGroupFixture(t, 2)
-	f.engine.declare("running", "", periapsis.L) // 3/4 used
-	f.engine.declare("ordinary-a", "", periapsis.L)
-	f.engine.declare("ordinary-b", "", periapsis.L)
-	f.engine.declare("rc/v1", "", periapsis.S)
+	f.engine.declare("running", "", pipeline.L) // 3/4 used
+	f.engine.declare("ordinary-a", "", pipeline.L)
+	f.engine.declare("ordinary-b", "", pipeline.L)
+	f.engine.declare("rc/v1", "", pipeline.S)
 	if _, err := f.store.SetQueuePriorityPatterns(t.Context(), "admin", []string{"rc/*"}); err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +266,7 @@ func TestSchedulerReleaseCandidateOvertakesAlreadyClaimedBranchQueue(t *testing.
 		t.Fatalf("initial creation=%v", created)
 	}
 	ordinaryA := f.branch(t, f.terraform, "ordinary-a", "b")
-	ordinaryB := f.branch(t, f.beacon, "ordinary-b", "c")
+	ordinaryB := f.branch(t, f.exampleService, "ordinary-b", "c")
 	// Wait until an ordinary L has filled dispatch while awaiting weight.
 	deadline := time.Now().Add(testStartTimeout(10 * time.Second))
 	for {
@@ -278,7 +279,7 @@ func TestSchedulerReleaseCandidateOvertakesAlreadyClaimedBranchQueue(t *testing.
 		}
 		time.Sleep(testTimeout(time.Millisecond))
 	}
-	rc := f.branch(t, f.beacon, "rc/v1", "d")
+	rc := f.branch(t, f.exampleService, "rc/v1", "d")
 	if created := f.awaitCreated(t, 1); !created[rc.ID] {
 		t.Fatalf("higher-class RC did not overtake branches: %v", created)
 	}
@@ -306,13 +307,13 @@ func TestPriorityAdmissionAgesHighBeforeNewerNormal(t *testing.T) {
 	g := newWeightedAdmission(4)
 	g.now = clock.Now
 	holder := g.reserve(1)
-	release, err := holder.acquire(t.Context(), periapsis.XL)
+	release, err := holder.acquire(t.Context(), pipeline.XL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	high := priorityWaiter(g, 2, model.PriorityHigh, clock.now, periapsis.XL)
+	high := priorityWaiter(g, 2, model.PriorityHigh, clock.now, pipeline.XL)
 	clock.now = clock.now.Add(time.Minute)
-	normal := priorityWaiter(g, 3, model.PriorityNormal, clock.now, periapsis.XL)
+	normal := priorityWaiter(g, 3, model.PriorityNormal, clock.now, pipeline.XL)
 	clock.now = clock.now.Add(time.Hour)
 	release()
 	if !granted(g, high) || granted(g, normal) {
@@ -333,7 +334,7 @@ func TestQueuePriorityToolRefusesGrantedBeforeStartIsPersisted(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = control.Shutdown(ctx) }()
-	enqueued, err := f.store.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "main", SHA: strings.Repeat("a", 40), Actor: "dev", Trigger: "push"})
+	enqueued, err := storetest.EnqueueRun(f.store, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "main", SHA: strings.Repeat("a", 40), Actor: "dev", Trigger: "push"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +343,7 @@ func TestQueuePriorityToolRefusesGrantedBeforeStartIsPersisted(t *testing.T) {
 		t.Fatalf("claim=%+v %v", run, err)
 	}
 	r := f.scheduler.admission.reserveRun(run)
-	release, err := r.acquire(ctx, periapsis.M)
+	release, err := r.acquire(ctx, pipeline.M)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,9 +412,9 @@ func TestPrioritySchedulerSurvivesBusyReadsAndResumesDispatch(t *testing.T) {
 			f := newGroupFixture(t, 2)
 			busy := &busyPriorityStore{Store: f.store, observed: make(chan string, 1)}
 			f.scheduler.store = busy
-			f.engine.declare("running", "", periapsis.L)
-			f.engine.declare("waiting", "", periapsis.L)
-			f.engine.declare("rc/v1", "", periapsis.S)
+			f.engine.declare("running", "", pipeline.L)
+			f.engine.declare("waiting", "", pipeline.L)
+			f.engine.declare("rc/v1", "", pipeline.S)
 			if _, err := f.store.SetQueuePriorityPatterns(t.Context(), "admin", []string{"rc/*"}); err != nil {
 				t.Fatal(err)
 			}
@@ -473,14 +474,14 @@ func TestPriorityReleaseStreamPreservesAgingAndResourceBounds(t *testing.T) {
 	g.now, g.maxHeadWait, g.maxRuns = clock.Now, 20*time.Minute, 1
 	origin := clock.Now()
 	holder := g.reserve(1)
-	release, err := holder.acquire(t.Context(), periapsis.XL)
+	release, err := holder.acquire(t.Context(), pipeline.XL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	normal := priorityWaiter(g, 2, model.PriorityNormal, origin, periapsis.XL)
+	normal := priorityWaiter(g, 2, model.PriorityNormal, origin, pipeline.XL)
 	clock.now = origin.Add(45 * time.Minute)
-	tag := priorityWaiter(g, 3, realTag.Priority, clock.Now(), periapsis.L)
-	promotion := priorityWaiter(g, 4, model.PriorityHighest, clock.Now(), periapsis.XL)
+	tag := priorityWaiter(g, 3, realTag.Priority, clock.Now(), pipeline.L)
+	promotion := priorityWaiter(g, 4, model.PriorityHighest, clock.Now(), pipeline.XL)
 	if granted(g, tag) || granted(g, normal) {
 		t.Fatal("priority preempted existing resource grant")
 	}
@@ -495,7 +496,7 @@ func TestPriorityReleaseStreamPreservesAgingAndResourceBounds(t *testing.T) {
 	clock.now = origin.Add(time.Hour - time.Nanosecond)
 	var later []*admissionReservation
 	for seq := int64(5); seq < 25; seq++ {
-		later = append(later, priorityWaiter(g, seq, model.PriorityHighest, clock.Now(), periapsis.XL))
+		later = append(later, priorityWaiter(g, seq, model.PriorityHighest, clock.Now(), pipeline.XL))
 	}
 	g.mu.Lock()
 	before := g.waiters[0]
@@ -546,11 +547,11 @@ func TestPriorityReleaseAdmissionWithoutGrantAndBranchTransportSignals(t *testin
 }
 
 func TestPriorityOversizedReleaseAllowsNormalBackfillAndSurvivesRefresh(t *testing.T) {
-	for _, maximum := range []periapsis.Size{periapsis.L, periapsis.XL} {
+	for _, maximum := range []pipeline.Size{pipeline.L, pipeline.XL} {
 		t.Run(string(maximum), func(t *testing.T) {
 			f := newControlFixture(t)
 			ctx := t.Context()
-			if maximum == periapsis.XL {
+			if maximum == pipeline.XL {
 				if _, err := f.store.SetSizeGrant(ctx, f.repo.ID, "admin", maximum); err != nil {
 					t.Fatal(err)
 				}
@@ -567,7 +568,7 @@ func TestPriorityOversizedReleaseAllowsNormalBackfillAndSurvivesRefresh(t *testi
 			g.maxHeadWait = 20 * time.Minute
 			f.scheduler.admission = g
 			holder := g.reserve(-1)
-			releaseHolder, err := holder.acquireRequest(ctx, admissionRequest{Size: periapsis.M, Estimate: 30 * time.Minute})
+			releaseHolder, err := holder.acquireRequest(ctx, admissionRequest{Size: pipeline.M, Estimate: 30 * time.Minute})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -580,7 +581,7 @@ func TestPriorityOversizedReleaseAllowsNormalBackfillAndSurvivesRefresh(t *testi
 			waitCtx, cancel := context.WithCancel(ctx)
 			done := make(chan error, 1)
 			go func() {
-				release, err := r.acquireRequest(waitCtx, admissionRequest{RunID: tag.ID, RepoID: tag.RepoID, RefKind: tag.RefKind, Size: periapsis.XL, PriorityMaximum: limit})
+				release, err := r.acquireRequest(waitCtx, admissionRequest{RunID: tag.ID, RepoID: tag.RepoID, RefKind: tag.RefKind, Size: pipeline.XL, PriorityMaximum: limit})
 				if release != nil {
 					release()
 				}
@@ -602,7 +603,7 @@ func TestPriorityOversizedReleaseAllowsNormalBackfillAndSurvivesRefresh(t *testi
 			}
 			// Measured work that finishes before the XL head reservation may
 			// backfill regardless of the tag's priority classification.
-			light := priorityWaiter(g, tag.QueueSequence+1, model.PriorityNormal, tag.QueuedAt, periapsis.S, 5*time.Minute)
+			light := priorityWaiter(g, tag.QueueSequence+1, model.PriorityNormal, tag.QueuedAt, pipeline.S, 5*time.Minute)
 			defer light.cancel()
 			if !granted(g, light) {
 				t.Fatalf("normal backfill=%v with maximum %s", granted(g, light), maximum)
@@ -612,7 +613,7 @@ func TestPriorityOversizedReleaseAllowsNormalBackfillAndSurvivesRefresh(t *testi
 			}
 			p, reason, ok := f.scheduler.AdmissionPriority(tag.QueueSequence)
 			want := model.PriorityHighest
-			if maximum == periapsis.L {
+			if maximum == pipeline.L {
 				want = model.PriorityNormal
 				if !strings.Contains(reason, "size XL exceeds repository maximum L") {
 					t.Fatalf("missing size reason: %s", reason)
@@ -632,8 +633,8 @@ func TestPriorityOversizedReleaseAllowsNormalBackfillAndSurvivesRefresh(t *testi
 			if observation := control.scheduling(ctx, claimed, nil); !strings.Contains(observation.Message, reason) {
 				t.Fatalf("scheduling hides size limit: %+v", observation)
 			}
-			if maximum == periapsis.XL {
-				if _, err := f.store.SetSizeGrant(ctx, f.repo.ID, "admin", periapsis.L); err != nil {
+			if maximum == pipeline.XL {
+				if _, err := f.store.SetSizeGrant(ctx, f.repo.ID, "admin", pipeline.L); err != nil {
 					t.Fatal(err)
 				}
 				if err := f.scheduler.refreshPriorities(ctx); err != nil {
@@ -662,7 +663,7 @@ func TestPrioritySizeCapPreservesAdminBumpsPromotionsAndAging(t *testing.T) {
 		{"admin bump: deliberately urgent", model.PriorityHighest},
 		{"promotion run", model.PriorityHighest},
 	} {
-		r := &admissionReservation{gate: g, prepared: true, size: periapsis.XL, priority: model.PriorityHighest, priorityReason: tc.reason, queuedAt: now}
+		r := &admissionReservation{gate: g, prepared: true, size: pipeline.XL, priority: model.PriorityHighest, priorityReason: tc.reason, queuedAt: now}
 		if got := r.effectivePriority(now); got != tc.want {
 			t.Fatalf("size cap for %q=%s", tc.reason, got)
 		}
@@ -673,7 +674,7 @@ func TestPrioritySizeCapPreservesAdminBumpsPromotionsAndAging(t *testing.T) {
 }
 
 func TestPriorityOversizedTagRetainsExplicitAdminFallback(t *testing.T) {
-	r := &admissionReservation{prepared: true, size: periapsis.XL, priority: model.PriorityHighest, priorityReason: model.TagReleasePriorityReason, priorityOverride: model.PriorityHigh, priorityOverrideReason: "intentional expedite"}
+	r := &admissionReservation{prepared: true, size: pipeline.XL, priority: model.PriorityHighest, priorityReason: model.TagReleasePriorityReason, priorityOverride: model.PriorityHigh, priorityOverrideReason: "intentional expedite"}
 	run := r.priorityRun()
 	if run.Priority != model.PriorityHigh || run.PriorityReason != "admin bump: intentional expedite" {
 		t.Fatalf("size cap lost explicit fallback: %+v", run)

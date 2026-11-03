@@ -21,16 +21,6 @@ func (scheduler *Scheduler) Live() error {
 	return nil
 }
 
-func (scheduler *Scheduler) liveAt(now time.Time) error {
-	if err := scheduler.dispatchProgress.CheckAt(now); err != nil {
-		return fmt.Errorf("scheduler: %w", err)
-	}
-	if err := scheduler.headProgress.CheckAt(now); err != nil {
-		return fmt.Errorf("admission persistence: %w", err)
-	}
-	return nil
-}
-
 // Live checks every queued promotion independently, so one busy queue cannot
 // mask a wedged worker in another. Planning/delivery use external services and
 // are not included in the local queue-wait heartbeat.

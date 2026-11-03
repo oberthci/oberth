@@ -41,6 +41,7 @@ func TestReopenManualIssueAuditAndRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := closed
+	want.Revision++ // Reopening changes state exactly once.
 	want.State, want.ClosedAt, want.UpdatedAt = model.IssueOpen, nil, now
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("reopen = %#v, want %#v", got, want)

@@ -17,7 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 var workflowTestResource = schema.GroupResource{Group: "argoproj.io", Resource: "workflows"}
@@ -64,7 +64,7 @@ func TestWorkflowCreateRetryReconcilesWithoutReseeding(t *testing.T) {
 			}
 			var seeds []seedExecCall
 			controller.WithSourceSeeder(NewSourceSeeder(kube, recordingExec(&seeds), config))
-			request := testRequest(periapsis.TriggerCI, greedyDocument)
+			request := testRequest(pipeline.TriggerCI, greedyDocument)
 			request.SourceDir = writeCheckout(t)
 			seedCount, reconciliationReads := 0, 0
 			var pending *wfv1.Workflow
@@ -165,7 +165,7 @@ func TestWorkflowCreateRetryErrorClassesAndUncertainGet(t *testing.T) {
 				client := &createRetryWorkflowClient{}
 				client.postHook = func(context.Context, *wfv1.Workflow) (*wfv1.Workflow, error) { return nil, cause }
 				controller := &Controller{workflows: client}
-				request := testRequest(periapsis.TriggerCI, greedyDocument)
+				request := testRequest(pipeline.TriggerCI, greedyDocument)
 				intended, err := Build(testConfig(), request)
 				if err != nil {
 					t.Fatal(err)
@@ -186,7 +186,7 @@ func TestWorkflowCreateRetryErrorClassesAndUncertainGet(t *testing.T) {
 			client.getHook = func(context.Context, string) (*wfv1.Workflow, error) {
 				return nil, apierrors.NewServiceUnavailable("not readable")
 			}
-			request := testRequest(periapsis.TriggerCI, greedyDocument)
+			request := testRequest(pipeline.TriggerCI, greedyDocument)
 			intended, err := Build(testConfig(), request)
 			if err != nil {
 				t.Fatal(err)
@@ -207,7 +207,7 @@ func TestWorkflowCreateRetryStopsOnPolicyAndCancellation(t *testing.T) {
 	} {
 		synctest.Test(t, func(t *testing.T) {
 			client := &createRetryWorkflowClient{postHook: func(context.Context, *wfv1.Workflow) (*wfv1.Workflow, error) { return nil, denied }}
-			request := testRequest(periapsis.TriggerCI, greedyDocument)
+			request := testRequest(pipeline.TriggerCI, greedyDocument)
 			intended, err := Build(testConfig(), request)
 			if err != nil {
 				t.Fatal(err)
@@ -225,7 +225,7 @@ func TestWorkflowCreateRetryStopsOnPolicyAndCancellation(t *testing.T) {
 			cancel()
 			return nil, context.DeadlineExceeded
 		}
-		request := testRequest(periapsis.TriggerCI, greedyDocument)
+		request := testRequest(pipeline.TriggerCI, greedyDocument)
 		intended, err := Build(testConfig(), request)
 		if err != nil {
 			t.Fatal(err)
@@ -247,7 +247,7 @@ func TestWorkflowCreateRetryHardRefusalAfterTimeoutRetainsUncertainSource(t *tes
 			}
 			return nil, denied
 		}
-		request := testRequest(periapsis.TriggerCI, greedyDocument)
+		request := testRequest(pipeline.TriggerCI, greedyDocument)
 		intended, err := Build(testConfig(), request)
 		if err != nil {
 			t.Fatal(err)
@@ -272,7 +272,7 @@ func TestWorkflowCreateRetryBudgetBoundsPostAndRetryAfter(t *testing.T) {
 					}
 					return nil, apierrors.NewTooManyRequests("busy", 120)
 				}
-				request := testRequest(periapsis.TriggerCI, greedyDocument)
+				request := testRequest(pipeline.TriggerCI, greedyDocument)
 				intended, err := Build(testConfig(), request)
 				if err != nil {
 					t.Fatal(err)
@@ -325,7 +325,7 @@ func TestWorkflowCreateRetryWrappedCancellationDoesNotWait(t *testing.T) {
 		client := &createRetryWorkflowClient{postHook: func(context.Context, *wfv1.Workflow) (*wfv1.Workflow, error) {
 			return nil, &url.Error{Op: "Post", URL: "https://kube.invalid", Err: context.Canceled}
 		}}
-		request := testRequest(periapsis.TriggerCI, greedyDocument)
+		request := testRequest(pipeline.TriggerCI, greedyDocument)
 		intended, err := Build(testConfig(), request)
 		if err != nil {
 			t.Fatal(err)

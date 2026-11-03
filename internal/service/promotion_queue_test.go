@@ -12,6 +12,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // TestSecondPromotionWaitsAndIsPreparedOnTheNewTarget is #1021's promotion
@@ -31,7 +32,7 @@ func TestSecondPromotionWaitsAndIsPreparedOnTheNewTarget(t *testing.T) {
 	fixture := newControlFixture(t)
 	ctx := context.Background()
 	for branch, sha := range map[string]string{"feature/one": firstSource, "feature/two": secondSource} {
-		run, err := fixture.store.EnqueueRun(ctx, model.RunSpec{
+		run, err := storetest.EnqueueRun(fixture.store, ctx, model.RunSpec{
 			RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: branch,
 			SHA: sha, Actor: "agent@host", Trigger: "branch", TestedSHA: sha,
 		})
@@ -133,7 +134,7 @@ func TestRetriedPromotionQueuesBehindAPendingOne(t *testing.T) {
 	fixture := newControlFixture(t)
 	ctx := context.Background()
 	for branch, sha := range map[string]string{"feature/retried": retriedSource, "feature/pending": pendingSource} {
-		run, err := fixture.store.EnqueueRun(ctx, model.RunSpec{
+		run, err := storetest.EnqueueRun(fixture.store, ctx, model.RunSpec{
 			RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: branch,
 			SHA: sha, Actor: "agent@host", Trigger: "branch", TestedSHA: sha,
 		})
@@ -269,7 +270,7 @@ func TestShutdownCancelsAQueuedPromotionWait(t *testing.T) {
 	fixture := newControlFixture(t)
 	ctx := context.Background()
 	for branch, sha := range map[string]string{"feature/one": firstSource, "feature/two": secondSource} {
-		run, err := fixture.store.EnqueueRun(ctx, model.RunSpec{
+		run, err := storetest.EnqueueRun(fixture.store, ctx, model.RunSpec{
 			RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: branch,
 			SHA: sha, Actor: "agent@host", Trigger: "branch", TestedSHA: sha,
 		})

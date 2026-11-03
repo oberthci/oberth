@@ -25,8 +25,8 @@ type parallelCache struct{ active, peak, archives atomic.Int32 }
 func (*parallelCache) ListTags(context.Context, string) ([]string, error) {
 	return []string{"v1.0.0"}, nil
 }
-func (*parallelCache) TagTime(context.Context, string, string) (time.Time, error) {
-	return time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC), nil
+func (*parallelCache) ModuleTagSnapshot(context.Context, string, string) (string, time.Time, error) {
+	return "fixture-pinned-object", time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC), nil
 }
 func (*parallelCache) ShowFile(_ context.Context, input, _, _ string) ([]byte, error) {
 	return []byte("module go.example.test/" + input + "\n\ngo 1.26\n"), nil
@@ -87,7 +87,7 @@ func TestParallelGoModDownloads(t *testing.T) {
 	}
 	root.WriteString(")\n")
 	server := &http.Server{
-		Handler:           NewHandler(cache, "go.example.test", mapping),
+		Handler:           cachedTestHandler(t, cache, "go.example.test", mapping),
 		ReadHeaderTimeout: testtimeout.Start(10 * time.Second), ReadTimeout: testtimeout.Start(30 * time.Second),
 		IdleTimeout: testtimeout.Start(30 * time.Second), WriteTimeout: testtimeout.Start(2 * time.Minute),
 		TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{cert}},
@@ -125,8 +125,9 @@ func TestParallelGoModDownloads(t *testing.T) {
 		})
 	}
 	workers.Wait()
-	if cache.archives.Load() != modules*clients || cache.peak.Load() < 2 {
-		t.Fatalf("archives=%d want=%d peak_concurrency=%d", cache.archives.Load(), modules*clients, cache.peak.Load())
+	// Every client shares the one immutable version bundle for each module.
+	if cache.archives.Load() != modules || cache.peak.Load() < 2 {
+		t.Fatalf("archives=%d want=%d peak_concurrency=%d", cache.archives.Load(), modules, cache.peak.Load())
 	}
 	t.Logf("clients=%d modules=%d archives=%d peak_concurrency=%d", clients, modules, cache.archives.Load(), cache.peak.Load())
 }

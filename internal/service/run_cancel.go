@@ -154,7 +154,12 @@ func (service *API) cancelRun(ctx context.Context, actor api.Actor, id, reason s
 		return response, nil
 	}
 	response.Workflow = cancelWorkflowPending
-	if result.Cancellations[0].JobName == "" {
+	preflight := false
+	if service.kvmPreflights != nil {
+		state, err := service.kvmPreflights.KVMPreflight(ctx, run.ID)
+		preflight = err == nil && state.Submitted && !state.Cleaned && !state.Rejected
+	}
+	if result.Cancellations[0].WorkflowName == "" && !preflight {
 		response.Workflow = cancelWorkflowNotYet
 	}
 	if observer, ok := service.enqueues.(RunCancellationObserver); ok {
@@ -163,7 +168,7 @@ func (service *API) cancelRun(ctx context.Context, actor api.Actor, id, reason s
 			// the deletion. Report it instead of failing a committed cancel.
 			log.Printf("run cancel %s: Workflow deletion deferred to the cancellation pass: %v", run.ID, err)
 			response.Workflow = cancelWorkflowPending
-		} else if result.Cancellations[0].JobName != "" {
+		} else if result.Cancellations[0].WorkflowName != "" || preflight {
 			response.Workflow = cancelWorkflowDeleted
 		}
 	}

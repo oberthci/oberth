@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestQueuePriorityClassificationAndFIFO(t *testing.T) {
@@ -18,7 +18,7 @@ func TestQueuePriorityClassificationAndFIFO(t *testing.T) {
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
 	ctx := context.Background()
-	if _, err := s.SetSizeGrant(ctx, repo.ID, "admin", periapsis.L); err != nil {
+	if _, err := s.SetSizeGrant(ctx, repo.ID, "admin", pipeline.L); err != nil {
 		t.Fatal(err)
 	}
 	enqueue := func(ref string, kind model.RefKind, trigger string) model.Run {
@@ -239,7 +239,7 @@ func TestQueuePriorityMigrationFromV33ClassifiesExistingWork(t *testing.T) {
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
 	ctx := context.Background()
-	if _, err := s.SetSizeGrant(ctx, repo.ID, "admin", periapsis.L); err != nil {
+	if _, err := s.SetSizeGrant(ctx, repo.ID, "admin", pipeline.L); err != nil {
 		t.Fatal(err)
 	}
 	normal, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/a", strings.Repeat("a", 40)))
@@ -348,7 +348,7 @@ func TestQueuePriorityTagsIndependentOfSizeGrantsAndBranchSignals(t *testing.T) 
 			t.Fatalf("ungranted tag/branch classification: %+v; want %s", r, want)
 		}
 	}
-	if _, err = s.SetSizeGrant(ctx, repo.ID, "admin", periapsis.L); err != nil {
+	if _, err = s.SetSizeGrant(ctx, repo.ID, "admin", pipeline.L); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
@@ -563,7 +563,7 @@ func TestQueuePriorityOneWaitingTagPerRepoAndAdminOptOut(t *testing.T) {
 		t.Fatalf("promotion disabled=%+v %v", promotion, err)
 	}
 	// L is sufficient to opt back in; the per-repo cap still applies.
-	if _, err := s.SetSizeGrant(ctx, repo.ID, "admin", periapsis.L); err != nil {
+	if _, err := s.SetSizeGrant(ctx, repo.ID, "admin", pipeline.L); err != nil {
 		t.Fatal(err)
 	}
 	check(third.ID, model.PriorityHighest, "oldest waiting")

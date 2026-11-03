@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/runprogress"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
-func TestIndexAndReadBurnOrStepSlices(t *testing.T) {
+func TestIndexAndReadStageOrStepSlices(t *testing.T) {
 	store, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -35,9 +35,9 @@ func TestIndexAndReadBurnOrStepSlices(t *testing.T) {
 	if index.Size != int64(len(body)) || len(index.Ranges) != 3 {
 		t.Fatalf("index = %#v", index)
 	}
-	burn, err := store.Read("r-1", "test", "")
-	if err != nil || !strings.Contains(string(burn), "go test") || !strings.Contains(string(burn), "retained") || strings.Contains(string(burn), "go vet") {
-		t.Fatalf("burn slice = %q, %v", burn, err)
+	stage, err := store.Read("r-1", "test", "")
+	if err != nil || !strings.Contains(string(stage), "go test") || !strings.Contains(string(stage), "retained") || strings.Contains(string(stage), "go vet") {
+		t.Fatalf("burn slice = %q, %v", stage, err)
 	}
 	unit, err := store.Read("r-1", "test", "unit")
 	if err != nil || !strings.Contains(string(unit), "go test") || strings.Contains(string(unit), "retained") {
@@ -110,7 +110,7 @@ func TestLongLineDoesNotRepaintPassingRunAsIndexFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if index.Size != int64(len(body)) || len(index.Ranges) != 1 || index.Ranges[0].Burn != "test" || index.Ranges[0].Step != "unit" {
+	if index.Size != int64(len(body)) || len(index.Ranges) != 1 || index.Ranges[0].Stage != "test" || index.Ranges[0].Step != "unit" {
 		t.Fatalf("long-line index = %#v", index)
 	}
 	if _, err := store.Read("r-long", "test", "unit"); !errors.Is(err, ErrLogSliceTooLarge) {
@@ -240,8 +240,8 @@ func TestStepProgressJournalReducesTransitionsInPlanOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	queued := runprogress.Event{
-		Version: runprogress.Version, Burn: "test", Step: "unit", Ordinal: 0,
-		Status: runprogress.StepQueued, DeclaredSize: periapsis.L,
+		Version: runprogress.Version, Stage: "test", Step: "unit", Ordinal: 0,
+		Status: runprogress.StepQueued, DeclaredSize: pipeline.L,
 	}
 	if err := store.AppendStepProgress("r-progress", queued); err != nil {
 		t.Fatal(err)
@@ -346,7 +346,7 @@ func TestResumeRetainsBytesAndProgress(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	event := runprogress.Event{Version: runprogress.Version, Burn: "test", Step: "unit", Status: runprogress.StepPassed, StartedAt: &now, FinishedAt: &now}
+	event := runprogress.Event{Version: runprogress.Version, Stage: "test", Step: "unit", Status: runprogress.StepPassed, StartedAt: &now, FinishedAt: &now}
 	if err := logs.AppendStepProgress("resumed", event); err != nil {
 		t.Fatal(err)
 	}

@@ -39,7 +39,7 @@ func TestBackendArchiveParity(t *testing.T) {
 	}
 	for _, backend := range []string{"cli"} {
 		t.Run(backend, func(t *testing.T) {
-			cache, err := New(Config{Root: filepath.Join(t.TempDir(), "cache"), Upstream: func(string) (string, error) { return repository.upstream, nil }})
+			cache, err := New(Config{AllowLocalUpstreams: true, Root: filepath.Join(t.TempDir(), "cache"), Upstream: func(string) (string, error) { return repository.upstream, nil }})
 			if err != nil {
 				t.Fatal(err)
 			}

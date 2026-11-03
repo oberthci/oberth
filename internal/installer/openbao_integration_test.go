@@ -15,6 +15,8 @@ package installer
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +33,14 @@ import (
 // baoDevServer starts OpenBao in dev mode and returns the root token and
 // address. The caller must call the returned cleanup function.
 func baoDevServer(t *testing.T, configPaths ...string) (rootToken, addr string, cleanup func()) {
+	t.Helper()
+	rootToken, addr, _, cleanup = baoDevServerWithTLS(t, false, configPaths...)
+	return
+}
+
+// baoDevServerWithTLS optionally uses the dev server's generated CA. Both the
+// readiness probe and callers verify that CA; no insecure TLS override is needed.
+func baoDevServerWithTLS(t *testing.T, useTLS bool, configPaths ...string) (rootToken, addr, caPath string, cleanup func()) {
 	t.Helper()
 	baoPath := os.Getenv("BAO_PATH")
 	if baoPath == "" {
@@ -55,6 +66,12 @@ func baoDevServer(t *testing.T, configPaths ...string) (rootToken, addr string, 
 		"-dev-listen-address="+fmt.Sprintf("127.0.0.1:%d", port),
 		"-dev-no-store-token",
 	)
+	if useTLS {
+		certDir := t.TempDir()
+		caPath = filepath.Join(certDir, "vault-ca.pem")
+		addr = fmt.Sprintf("https://127.0.0.1:%d", port)
+		cmd.Args = append(cmd.Args, "-dev-tls", "-dev-tls-cert-dir="+certDir)
+	}
 	for _, path := range configPaths {
 		cmd.Args = append(cmd.Args, "-config="+path)
 	}
@@ -75,6 +92,18 @@ func baoDevServer(t *testing.T, configPaths ...string) (rootToken, addr string, 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	for {
+		if useTLS && client.Transport == nil {
+			if ca, err := os.ReadFile(caPath); err == nil {
+				roots := x509.NewCertPool()
+				if !roots.AppendCertsFromPEM(ca) {
+					cleanup()
+					t.Fatal("invalid dev server CA")
+				}
+				transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}}
+				client.Transport = transport
+				defer transport.CloseIdleConnections()
+			}
+		}
 		req, _ := http.NewRequestWithContext(ctx, "GET", addr+"/v1/sys/health", nil)
 		resp, err := client.Do(req)
 		if err == nil {
@@ -90,7 +119,7 @@ func baoDevServer(t *testing.T, configPaths ...string) (rootToken, addr string, 
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	return rootToken, addr, cleanup
+	return rootToken, addr, caPath, cleanup
 }
 
 // baoHTTP sends a Vault/Bao API request and returns the status code and body.
@@ -132,12 +161,12 @@ func baoWritePolicy(t *testing.T, addr, rootToken, name, rules string) {
 func baoCreateToken(t *testing.T, addr, rootToken string, policies []string) string {
 	t.Helper()
 	payload, _ := json.Marshal(map[string]any{
-		"policies":             policies,
-		"ttl":                  "5m",
-		"no_default_policy":    true,
-		"no_parent":            true,
-		"renewable":            false,
-		"num_uses":             0,
+		"policies":          policies,
+		"ttl":               "5m",
+		"no_default_policy": true,
+		"no_parent":         true,
+		"renewable":         false,
+		"num_uses":          0,
 	})
 	status, result := baoHTTP(t, "POST", addr, "/v1/auth/token/create", rootToken, strings.NewReader(string(payload)))
 	if status != 200 {

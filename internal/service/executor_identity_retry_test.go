@@ -12,7 +12,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type identityObservationFailure struct {
@@ -70,7 +70,7 @@ func TestExecutorIdentityFailureKeepsTerminalResultAndDeletionSafety(t *testing.
 			if deletionFails {
 				jobs.terminalErr, jobs.deleteErr = ErrJobNotTerminal, errors.New("API unavailable")
 			} else {
-				jobs.terminalResult = JobResult{Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit", Error: "assertion failed"}
+				jobs.terminalResult = JobResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit", Error: "assertion failed"}
 			}
 			err := fixture.scheduler(t, jobs).executeAndCleanup(t.Context(), run)
 			current, lookupErr := fixture.store.Run(t.Context(), run.ID)
@@ -112,8 +112,8 @@ func TestExecutorIdentityAdoptedFailureKeepsClassification(t *testing.T) {
 		t.Run(fmt.Sprintf("hard=%t", hard), func(t *testing.T) {
 			fixture := newRecoveryFixture(t)
 			run := fixture.enqueueAndClaim(t, "feature/adopted-identity", strings.Repeat("d", 40))
-			fixture.setJobName(t, run.ID, "adopted-identity")
-			run.JobName = "adopted-identity"
+			fixture.setWorkflowName(t, run.ID, "adopted-identity")
+			run.WorkflowName = "adopted-identity"
 			jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{waitErr: &identityObservationFailure{cause: context.DeadlineExceeded, hard: hard}, terminalErr: ErrJobNotTerminal}}
 			scheduler := fixture.scheduler(t, jobs)
 			file, err := scheduler.logs.Create(run.ID)
@@ -123,7 +123,7 @@ func TestExecutorIdentityAdoptedFailureKeepsClassification(t *testing.T) {
 			if err := file.Close(); err != nil {
 				t.Fatal(err)
 			}
-			reservation, err := scheduler.admission.adopt(run, periapsis.M, argoworkflow.VMIDemand{})
+			reservation, err := scheduler.admission.adopt(run, pipeline.M, argoworkflow.VMIDemand{})
 			if err != nil {
 				t.Fatal(err)
 			}

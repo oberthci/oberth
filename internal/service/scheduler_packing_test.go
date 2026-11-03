@@ -8,22 +8,22 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // sizedByBranch sizes each run from its branch name ("s-3" is S), so one
 // scheduler can be fed a mix of sizes.
 type sizedByBranch struct{ *concurrentJobs }
 
-func (jobs sizedByBranch) PipelineSize(_ context.Context, request JobRequest) (periapsis.Size, error) {
+func (jobs sizedByBranch) PipelineSize(_ context.Context, request WorkflowRequest) (pipeline.Size, error) {
 	prefix, _, _ := strings.Cut(strings.TrimPrefix(request.Run.Ref, "pack/"), "-")
-	return periapsis.Size(strings.ToUpper(prefix)), nil
+	return pipeline.Size(strings.ToUpper(prefix)), nil
 }
 
 func runPacking(t *testing.T, maxConcurrentJobs, expected int, branches []string) (admitted int) {
 	t.Helper()
-	fixture := newConcurrencyFixture(t, periapsis.M, maxConcurrentJobs)
-	jobs := newConcurrentJobs(periapsis.M, len(branches)+1)
+	fixture := newConcurrencyFixture(t, pipeline.M, maxConcurrentJobs)
+	jobs := newConcurrentJobs(pipeline.M, len(branches)+1)
 	fixture.scheduler.jobs = sizedByBranch{jobs}
 	fixture.scheduler.releaseJobs = sizedByBranch{jobs}
 	var waiting model.Run

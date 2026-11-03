@@ -13,7 +13,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestRunLogWriterRetainsExactBoundAndFailsClosed(t *testing.T) {
@@ -41,8 +41,8 @@ func TestStepProgressLogWriterJournalsControlRecordsWithoutRetainingThem(t *test
 	}
 	started := time.Now().UTC()
 	event := runprogress.Event{
-		Version: runprogress.Version, Burn: "test", Step: "unit", Ordinal: 0,
-		Status: runprogress.StepRunning, DeclaredSize: periapsis.M, StartedAt: &started,
+		Version: runprogress.Version, Stage: "test", Step: "unit", Ordinal: 0,
+		Status: runprogress.StepRunning, DeclaredSize: pipeline.M, StartedAt: &started,
 	}
 	marker, err := runprogress.MarshalMarker(event)
 	if err != nil {
@@ -73,8 +73,8 @@ func TestStepProgressLogWriterJournalsControlRecordsWithoutRetainingThem(t *test
 
 type overflowingJobs struct{}
 
-func (overflowingJobs) CreateCI(context.Context, JobRequest) error   { return nil }
-func (overflowingJobs) Delete(context.Context, string, string) error { return nil }
+func (overflowingJobs) CreateWorkflow(context.Context, WorkflowRequest) error { return nil }
+func (overflowingJobs) Delete(context.Context, string, string) error          { return nil }
 func (overflowingJobs) TerminalResult(context.Context, string) (JobResult, error) {
 	return JobResult{}, ErrJobNotTerminal
 }

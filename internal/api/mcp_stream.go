@@ -86,10 +86,6 @@ func writeMCPFrame(writer http.ResponseWriter, frame string, deadline time.Time,
 	return controller.Flush()
 }
 
-func (server *Server) streamLongPoll(writer http.ResponseWriter, request *http.Request, response rpcResponse, prepared PreparedLongPoll, deadline time.Time) error {
-	return server.streamLongPollObserved(writer, request, response, prepared, deadline, nil)
-}
-
 func (server *Server) streamLongPollObserved(writer http.ResponseWriter, request *http.Request, response rpcResponse, prepared PreparedLongPoll, deadline time.Time, trace *mcpWaitObservation) error {
 	ctx, cancel := context.WithCancel(request.Context())
 	defer cancel()

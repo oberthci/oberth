@@ -104,7 +104,7 @@ func scanKubeVirtGrant(row *sql.Row) (KubeVirtGrant, error) {
 	var grant KubeVirtGrant
 	var grantedAt int64
 	var revokedAt sql.NullInt64
-	if err := row.Scan(&grant.RepoID, &grant.MaxVMs, &grant.MaxCores, &grant.MaxMemoryBytes, &grant.GrantedBy, &grantedAt, &grant.RevokedBy, &revokedAt); err != nil {
+	if err := scanRowNotFound(row, "KubeVirtGrant", &grant.RepoID, &grant.MaxVMs, &grant.MaxCores, &grant.MaxMemoryBytes, &grant.GrantedBy, &grantedAt, &grant.RevokedBy, &revokedAt); err != nil {
 		return KubeVirtGrant{}, err
 	}
 	grant.GrantedAt = fromUnixNano(grantedAt)

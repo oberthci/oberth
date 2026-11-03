@@ -15,7 +15,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func adoptionWorkflow() (*wfv1.Workflow, AdoptionRequest) {
@@ -25,8 +25,8 @@ func adoptionWorkflow() (*wfv1.Workflow, AdoptionRequest) {
 	wf.Annotations[refAnnotation] = "feature/adopt"
 	wf.Annotations[argoworkflow.SizeAnnotation] = "L"
 	wf.Annotations[argoworkflow.ConcurrencyGroupAnnotation] = "build"
-	wf.Labels = map[string]string{"oberth.ci/sha": strings.Repeat("b", 40), "oberth.ci/trigger": string(periapsis.TriggerCI)}
-	return wf, AdoptionRequest{Name: wf.Name, RunID: wf.Annotations[runIDAnnotation], Ref: "feature/adopt", SHA: strings.Repeat("b", 40), Group: "build", Trigger: periapsis.TriggerCI, RunTrigger: argoworkflow.RunTriggerBranch}
+	wf.Labels = map[string]string{"oberth.ci/sha": strings.Repeat("b", 40), "oberth.ci/trigger": string(pipeline.TriggerCI)}
+	return wf, AdoptionRequest{Name: wf.Name, RunID: wf.Annotations[runIDAnnotation], Ref: "feature/adopt", SHA: strings.Repeat("b", 40), Group: "build", Trigger: pipeline.TriggerCI, RunTrigger: argoworkflow.RunTriggerBranch}
 }
 
 func TestAdoptionBindsDurableRunAndSubmittedResources(t *testing.T) {
@@ -51,7 +51,7 @@ func TestAdoptionBindsDurableRunAndSubmittedResources(t *testing.T) {
 			controller := &Controller{workflows: &staticWorkflowClient{workflow: candidate}, config: Config{Namespace: wf.Namespace}}
 			binding, found, err := controller.Adopt(context.Background(), request)
 			if test.name == "valid" {
-				if err != nil || !found || binding.Size != periapsis.L || binding.UID != wf.UID || binding.Identity != wf.Annotations[identityAnnotation] {
+				if err != nil || !found || binding.Size != pipeline.L || binding.UID != wf.UID || binding.Identity != wf.Annotations[identityAnnotation] {
 					t.Fatalf("adoption = %#v, %v, %v", binding, found, err)
 				}
 			} else if err == nil || !errors.Is(err, ErrAdoptionRefused) {
@@ -124,7 +124,7 @@ func TestAdoptedWaitReplaysOnlyUnrecordedStepsAndRestoresBudget(t *testing.T) {
 	}
 	steps := StepResults(wf)
 	event := func(step StepResult) runprogress.Event {
-		return runprogress.Event{Version: runprogress.Version, Burn: step.Burn, Step: step.Step, Ordinal: step.Ordinal, Status: step.Status, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt}
+		return runprogress.Event{Version: runprogress.Version, Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Status: step.Status, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt}
 	}
 	var output bytes.Buffer
 	completion, err := controller.WaitResumed(context.Background(), wf.Name, request.RunID, &output, []runprogress.Event{event(steps[0])}, 100, binding)
@@ -169,7 +169,7 @@ func TestAdoptedWaitRefusesReplacedWorkflow(t *testing.T) {
 }
 
 func TestAdoptionAcceptsActualServerBuiltWorkflow(t *testing.T) {
-	request := testRequest(periapsis.TriggerCI, greedyDocument)
+	request := testRequest(pipeline.TriggerCI, greedyDocument)
 	workflow, err := Build(testConfig(), request)
 	if err != nil {
 		t.Fatal(err)
@@ -177,7 +177,7 @@ func TestAdoptionAcceptsActualServerBuiltWorkflow(t *testing.T) {
 	workflow.UID = "server-assigned-uid"
 	controller := &Controller{workflows: &staticWorkflowClient{workflow: workflow}, config: testConfig()}
 	binding, found, err := controller.Adopt(context.Background(), AdoptionRequest{Name: request.Name, RunID: request.RunID, Ref: request.Ref, SHA: request.SHA, Trigger: request.Trigger, RunTrigger: argoworkflow.RunTriggerBranch})
-	if err != nil || !found || binding.Size != periapsis.L {
+	if err != nil || !found || binding.Size != pipeline.L {
 		t.Fatalf("built Workflow adoption = %#v %v %v", binding, found, err)
 	}
 }

@@ -10,7 +10,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestSizeGrantToolRequiresAdminAndReportsTheMaximum(t *testing.T) {
@@ -20,7 +20,7 @@ func TestSizeGrantToolRequiresAdminAndReportsTheMaximum(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	lookup := func(wantState string, wantMax periapsis.Size) {
+	lookup := func(wantState string, wantMax pipeline.Size) {
 		t.Helper()
 		value, err := control.CallTool(ctx, api.Actor{Identity: "auditor@host"}, "size_grant_get", json.RawMessage(`{"repo":"oberth"}`))
 		if err != nil {
@@ -31,7 +31,7 @@ func TestSizeGrantToolRequiresAdminAndReportsTheMaximum(t *testing.T) {
 			t.Fatalf("size lookup = %#v, want %s/%s", got, wantState, wantMax)
 		}
 	}
-	lookup("never_granted", periapsis.L)
+	lookup("never_granted", pipeline.L)
 	if _, err := control.CallTool(ctx, api.Actor{Identity: "agent@host"}, "size_revoke", json.RawMessage(`{"repo":"oberth"}`)); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("nonadmin opt-out = %v", err)
 	}
@@ -43,15 +43,15 @@ func TestSizeGrantToolRequiresAdminAndReportsTheMaximum(t *testing.T) {
 	if _, err := control.CallTool(ctx, admin, "size_grant", json.RawMessage(`{"repo":"oberth","max":"M"}`)); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("grant M = %v", err)
 	}
-	lookup("never_granted", periapsis.L)
+	lookup("never_granted", pipeline.L)
 	if _, err := control.CallTool(ctx, admin, "size_grant", grantXL); err != nil {
 		t.Fatal(err)
 	}
-	lookup("granted", periapsis.XL)
+	lookup("granted", pipeline.XL)
 	if _, err := control.CallTool(ctx, admin, "size_revoke", json.RawMessage(`{"repo":"oberth"}`)); err != nil {
 		t.Fatal(err)
 	}
-	lookup("revoked", periapsis.L)
+	lookup("revoked", pipeline.L)
 	if !MutatingTool("size_grant") || !MutatingTool("size_revoke") || MutatingTool("size_grant_get") {
 		t.Fatal("size grant mutations are not behind the mutation gate")
 	}
@@ -68,7 +68,7 @@ func TestSizeGrantToolRevokesNeverGrantedTagPriorityAndRefreshesWaiter(t *testin
 	r := g.reserveRun(tag.Run)
 	defer r.cancel()
 	g.mu.Lock()
-	r.prepared, r.size = true, periapsis.M
+	r.prepared, r.size = true, pipeline.M
 	g.mu.Unlock()
 	control, err := NewAPI(APIConfig{Runs: f.store, Repositories: f.store, SizeGrants: f.store, Enqueues: f.scheduler})
 	if err != nil {

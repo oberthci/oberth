@@ -25,7 +25,7 @@ func TestStepDiagnosticMigrationAndDurableRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	step := model.StepResult{RunID: run.ID, Burn: "test", Step: "unit", Status: model.StepFailed, ExitCode: 137, DeclaredSize: "M"}
+	step := model.StepResult{RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepFailed, ExitCode: 137, DeclaredSize: "M"}
 	if _, err = s.PutStepResult(ctx, step); err != nil {
 		t.Fatal(err)
 	}

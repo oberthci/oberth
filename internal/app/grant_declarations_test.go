@@ -13,7 +13,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type snapshotRecorder struct {
@@ -34,7 +34,7 @@ func TestCurrentDeclarationsKeepBothTiersAndClearRemovedPaths(t *testing.T) {
 	}
 	recorder := &snapshotRecorder{}
 	jobs := &ArgoJobs{declarations: recorder}
-	request := service.JobRequest{SourceDir: dir, Repository: model.Repository{Name: "repo"}, UpstreamName: "forge", UpstreamOrg: "org", Run: model.Run{SHA: "old", TestedSHA: "new"}}
+	request := service.WorkflowRequest{SourceDir: dir, Repository: model.Repository{Name: "repo"}, UpstreamName: "forge", UpstreamOrg: "org", Run: model.Run{SHA: "old", TestedSHA: "new"}}
 	jobs.recordCurrentDeclarations(context.Background(), request)
 	if recorder.replacements != 1 || len(recorder.declarations) != 4 || recorder.repo != "forge/org/repo" || recorder.sha != "new" {
 		t.Fatalf("%+v", recorder)
@@ -64,9 +64,9 @@ func TestDeclarationRepositoryMatchesUpstreamFallback(t *testing.T) {
 			source, dir := writeWorkflowSource(t, declarationWorkflow)
 			recorder := &snapshotRecorder{}
 			jobs := &ArgoJobs{declarations: recorder}
-			request := service.JobRequest{SourceDir: dir, Repository: model.Repository{Name: "repo"}, UpstreamName: upstream.Name, UpstreamOrg: upstream.Org(), Run: model.Run{SHA: "commit"}}
+			request := service.WorkflowRequest{SourceDir: dir, Repository: model.Repository{Name: "repo"}, UpstreamName: upstream.Name, UpstreamOrg: upstream.Org(), Run: model.Run{SHA: "commit"}}
 			want := upstream.QualifiedRepo("repo")
-			jobs.recordDeclarations(context.Background(), request, source, periapsis.TriggerCI)
+			jobs.recordDeclarations(context.Background(), request, source, pipeline.TriggerCI)
 			if !recorder.called || recorder.repo != want {
 				t.Fatalf("observation repo=%q want=%q", recorder.repo, want)
 			}
@@ -95,7 +95,7 @@ func TestDroppedDeclarationSnapshotDebugLog(t *testing.T) {
 			}
 			_, dir := writeWorkflowSource(t, source)
 			jobs := &ArgoJobs{declarations: recorder}
-			jobs.recordCurrentDeclarations(context.Background(), service.JobRequest{SourceDir: dir, Repository: model.Repository{Name: "repo"}, Run: model.Run{SHA: "commit"}})
+			jobs.recordCurrentDeclarations(context.Background(), service.WorkflowRequest{SourceDir: dir, Repository: model.Repository{Name: "repo"}, Run: model.Run{SHA: "commit"}})
 			if !strings.Contains(output.String(), "grant declaration snapshot dropped") || !strings.Contains(output.String(), "stage="+stage) || strings.Contains(output.String(), "private-source-marker") {
 				t.Fatalf("unsafe or missing debug diagnostic: %s", output.String())
 			}

@@ -19,14 +19,10 @@ const (
 	projectGeneric projectType = "generic"
 )
 
-var allProjectTypes = []projectType{projectGo, projectNode, projectPython, projectGeneric}
-
 func runInit(_ context.Context, arguments []string, output io.Writer) error {
-	var typeOverride string
 	var force bool
 	flags := flag.NewFlagSet("init", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	flags.StringVar(&typeOverride, "type", "", "project type: go|node|python|generic (default: auto-detect)")
 	flags.BoolVar(&force, "force", false, "overwrite existing .oberth/build.yaml")
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -43,31 +39,11 @@ func runInit(_ context.Context, arguments []string, output io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("determine working directory: %w", err)
 	}
-	return executeInit(root, typeOverride, force, output)
+	return executeInit(root, force, output)
 }
 
-func executeInit(root, typeOverride string, force bool, output io.Writer) error {
-	var detected projectType
-	var reason string
-	if typeOverride != "" {
-		detected = projectType(typeOverride)
-		valid := false
-		for _, t := range allProjectTypes {
-			if detected == t {
-				valid = true
-				break
-			}
-		}
-		if !valid {
-			return fmt.Errorf("%w: unknown project type %q; use go, node, python, or generic", errUsage, typeOverride)
-		}
-		reason = fmt.Sprintf("--type %s", typeOverride)
-		if _, err := fmt.Fprintln(output, "note: --type has no effect yet; all project types generate the same demo pipeline"); err != nil {
-			return err
-		}
-	} else {
-		detected, reason = detectProject(root)
-	}
+func executeInit(root string, force bool, output io.Writer) error {
+	detected, reason := detectProject(root)
 
 	if detected != projectGeneric {
 		if _, err := fmt.Fprintf(output, "detected: %s (%s) -- generic demo pipeline generated; customize for your %s project after the first run\n", detected, reason, detected); err != nil {
@@ -79,7 +55,7 @@ func executeInit(root, typeOverride string, force bool, output io.Writer) error 
 		}
 	}
 
-	content := renderBuildYAML(detected)
+	content := renderBuildYAML()
 
 	oberthDir := filepath.Join(root, ".oberth")
 	target := filepath.Join(oberthDir, "build.yaml")
@@ -164,7 +140,7 @@ func detectProject(root string) (projectType, string) {
 	return projectGeneric, "no recognized project marker"
 }
 
-func renderBuildYAML(_ projectType) string {
+func renderBuildYAML() string {
 	return buildYAMLDemo
 }
 

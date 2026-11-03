@@ -12,34 +12,35 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestRunLogDefaults(t *testing.T) {
 	for _, test := range []struct {
-		name, failedBurn, failedStep, burn, step, wantStep, wantError string
-		multi                                                         bool
+		name, failedStage, failedStep, stage, step, wantStep, wantError string
+		multi                                                           bool
 	}{
-		{name: "failed step in multi-step burn", failedBurn: "test", failedStep: "unit", multi: true, wantStep: "unit"},
-		{name: "explicit step", failedBurn: "test", failedStep: "integration", step: "unit", multi: true, wantStep: "unit"},
-		{name: "explicit burn only", failedBurn: "test", failedStep: "integration", burn: "setup", wantStep: "prepare"},
-		{name: "single step", burn: "test", wantStep: "unit"},
-		{name: "failed burn only", failedBurn: "test", wantStep: "unit"},
-		{name: "multi-step needs step", burn: "test", multi: true, wantError: "step"},
-		{name: "explicit burn does not infer failed step", failedBurn: "test", failedStep: "unit", burn: "test", multi: true, wantError: "step"},
+		{name: "failed step in multi-step burn", failedStage: "test", failedStep: "unit", multi: true, wantStep: "unit"},
+		{name: "explicit step", failedStage: "test", failedStep: "integration", step: "unit", multi: true, wantStep: "unit"},
+		{name: "explicit burn only", failedStage: "test", failedStep: "integration", stage: "setup", wantStep: "prepare"},
+		{name: "single step", stage: "test", wantStep: "unit"},
+		{name: "failed burn only", failedStage: "test", wantStep: "unit"},
+		{name: "multi-step needs step", stage: "test", multi: true, wantError: "step"},
+		{name: "explicit burn does not infer failed step", failedStage: "test", failedStep: "unit", stage: "test", multi: true, wantError: "step"},
 		{name: "no failed burn", wantError: "burn"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			f := newRetentionFixture(t)
 			ctx := t.Context()
-			enqueued, err := f.retention.Database.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch,
+			enqueued, err := storetest.EnqueueRun(f.retention.Database, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch,
 				Ref: "feature/defaults", SHA: strings.Repeat("a", 40), Actor: "reader", Trigger: "branch"})
 			if err != nil {
 				t.Fatal(err)
 			}
 			run := enqueued.Run
-			steps := []model.StepResult{{Burn: "test", Step: "unit"}, {Burn: "setup", Step: "prepare"}}
+			steps := []model.StepResult{{Stage: "test", Step: "unit"}, {Stage: "setup", Step: "prepare"}}
 			if test.multi {
-				steps = append(steps, model.StepResult{Burn: "test", Step: "integration"})
+				steps = append(steps, model.StepResult{Stage: "test", Step: "integration"})
 			}
 			for i, step := range steps {
 				step.RunID, step.Status, step.DeclaredSize, step.Ordinal = run.ID, model.StepPassed, "M", i
@@ -47,7 +48,7 @@ func TestRunLogDefaults(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if _, err := f.retention.Database.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunFailed, FailedBurn: test.failedBurn, FailedStep: test.failedStep}); err != nil {
+			if _, err := f.retention.Database.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunFailed, FailedStage: test.failedStage, FailedStep: test.failedStep}); err != nil {
 				t.Fatal(err)
 			}
 			file, err := f.retention.Logs.Create(run.ID)
@@ -63,7 +64,7 @@ func TestRunLogDefaults(t *testing.T) {
 			if _, err := f.retention.Logs.BuildIndex(run.ID); err != nil {
 				t.Fatal(err)
 			}
-			raw, _ := json.Marshal(map[string]string{"id": run.ID[:8], "burn": test.burn, "step": test.step})
+			raw, _ := json.Marshal(map[string]string{"id": run.ID[:8], "burn": test.stage, "step": test.step})
 			value, err := f.api.CallTool(ctx, api.Actor{Identity: "reader"}, "run_logs", raw)
 			if test.wantError != "" {
 				if !errors.Is(err, ErrInvalidInput) || !strings.Contains(err.Error(), test.wantError+" is required") {

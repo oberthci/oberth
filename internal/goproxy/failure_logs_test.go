@@ -15,7 +15,7 @@ import (
 func TestProxyFailureLogsCoalesceConcurrentRequests(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var output bytes.Buffer
-		handler := routingFixture("").WithLogger(log.New(&output, "", 0))
+		handler := routingFixture(t, "").WithLogger(log.New(&output, "", 0))
 		request := func(method, path string, status int) {
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, httptest.NewRequest(method, path, nil))

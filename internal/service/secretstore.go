@@ -9,7 +9,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/gitcache"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // SecretStoreVerifier is wired from the running server's operator-owned configuration.
@@ -76,7 +76,7 @@ func validateSecretStoreVerifyArguments(arguments *api.SecretStoreVerifyRequest)
 		return fmt.Errorf("paths and expect each allow at most 32 entries")
 	}
 	for _, path := range arguments.Paths {
-		if _, _, err := periapsis.ParseUpstreamSecretStorePath(path); err != nil {
+		if _, _, err := pipeline.ParseUpstreamSecretStorePath(path); err != nil {
 			return err
 		}
 	}

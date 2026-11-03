@@ -16,6 +16,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type backupStatusAuth struct{ actor api.Actor }
@@ -27,7 +28,7 @@ func (auth backupStatusAuth) Authenticate(context.Context, string) (api.Actor, e
 func TestBackupStatusMCPAndHTTPReadAuditRecord(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "status.sqlite"), store.Options{})
+	database, err := storetest.Open(ctx, filepath.Join(t.TempDir(), "status.sqlite"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +84,7 @@ func TestBackupStatusMCPAndHTTPReadAuditRecord(t *testing.T) {
 func TestUnreadableBackupRecordIsABackupWarningNotADatabaseOutage(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	database, err := store.Open(ctx, filepath.Join(t.TempDir(), "status.sqlite"), store.Options{})
+	database, err := storetest.Open(ctx, filepath.Join(t.TempDir(), "status.sqlite"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

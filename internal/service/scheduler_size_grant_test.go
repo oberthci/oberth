@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func awaitRunStatus(t *testing.T, fixture *concurrencyFixture, runID string, want model.RunStatus) model.Run {
@@ -33,8 +33,8 @@ func awaitRunStatus(t *testing.T, fixture *concurrencyFixture, runID string, wan
 // any weight, with the command that would grant it, and another repository's
 // run queued behind it is admitted at once instead of waiting for a drain.
 func TestUngrantedXLIsRefusedWithoutHoldingTheQueue(t *testing.T) {
-	fixture := newConcurrencyFixture(t, periapsis.M, 3)
-	jobs := newConcurrentJobs(periapsis.M, 4)
+	fixture := newConcurrencyFixture(t, pipeline.M, 3)
+	jobs := newConcurrentJobs(pipeline.M, 4)
 	fixture.scheduler.jobs = sizedByBranch{jobs}
 	other, err := fixture.store.CreateRepository(context.Background(), model.RepositorySpec{
 		Name: "docs", UpstreamID: fixture.repo.UpstreamID, DefaultBranch: "main",
@@ -79,17 +79,17 @@ func TestUngrantedXLIsRefusedWithoutHoldingTheQueue(t *testing.T) {
 	}
 
 	// With the grant, the same declaration is admitted.
-	if _, err := fixture.store.SetSizeGrant(context.Background(), fixture.repo.ID, "admin@host", periapsis.XL); err != nil {
+	if _, err := fixture.store.SetSizeGrant(context.Background(), fixture.repo.ID, "admin@host", pipeline.XL); err != nil {
 		t.Fatal(err)
 	}
-	if err := fixture.scheduler.authorizeRunSize(context.Background(), refused, fixture.repo, periapsis.XL); err != nil {
+	if err := fixture.scheduler.authorizeRunSize(context.Background(), refused, fixture.repo, pipeline.XL); err != nil {
 		t.Fatalf("granted XL refused: %v", err)
 	}
 	// A tag run keeps its reviewed release.yaml size without a grant.
-	if err := fixture.scheduler.authorizeRunSize(context.Background(), model.Run{RepoID: other.ID, Release: true}, other, periapsis.XL); err != nil {
+	if err := fixture.scheduler.authorizeRunSize(context.Background(), model.Run{RepoID: other.ID, Release: true}, other, pipeline.XL); err != nil {
 		t.Fatalf("release XL refused: %v", err)
 	}
-	if err := fixture.scheduler.authorizeRunSize(context.Background(), model.Run{RepoID: other.ID, Trigger: "promotion"}, other, periapsis.XL); err == nil ||
+	if err := fixture.scheduler.authorizeRunSize(context.Background(), model.Run{RepoID: other.ID, Trigger: "promotion"}, other, pipeline.XL); err == nil ||
 		!strings.Contains(err.Error(), "promotion run") {
 		t.Fatalf("ungranted promotion XL = %v", err)
 	}
@@ -100,18 +100,18 @@ func TestUngrantedXLIsRefusedWithoutHoldingTheQueue(t *testing.T) {
 // credentialed tier, sized by its reviewed release.yaml, and is admitted at XL
 // without any grant; every other trigger of the same repository is refused.
 func TestTagRunsAreNotSizeGated(t *testing.T) {
-	fixture := newConcurrencyFixture(t, periapsis.M, 3)
+	fixture := newConcurrencyFixture(t, pipeline.M, 3)
 	ctx := context.Background()
-	if size, err := fixture.store.MaxRunSize(ctx, fixture.repo.ID); err != nil || size != periapsis.L {
+	if size, err := fixture.store.MaxRunSize(ctx, fixture.repo.ID); err != nil || size != pipeline.L {
 		t.Fatalf("fixture repository maximum = %q, %v; want the default L", size, err)
 	}
 	tag := model.Run{RepoID: fixture.repo.ID, RefKind: model.RefTag, Ref: "v1.0.0", Trigger: "tag", Release: true}
-	if err := fixture.scheduler.authorizeRunSize(ctx, tag, fixture.repo, periapsis.XL); err != nil {
+	if err := fixture.scheduler.authorizeRunSize(ctx, tag, fixture.repo, pipeline.XL); err != nil {
 		t.Fatalf("tag run at XL without a grant = %v", err)
 	}
 	for _, trigger := range []string{"branch", "promotion", "schedule"} {
 		run := model.Run{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "main", Trigger: trigger}
-		if err := fixture.scheduler.authorizeRunSize(ctx, run, fixture.repo, periapsis.XL); err == nil {
+		if err := fixture.scheduler.authorizeRunSize(ctx, run, fixture.repo, pipeline.XL); err == nil {
 			t.Fatalf("%s run at XL without a grant was admitted", trigger)
 		}
 	}

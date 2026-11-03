@@ -94,3 +94,21 @@ unchanged; all 27 submitted Pods across isolation, WIF, nonroot and VMI cases
 passed the retained Kubernetes validator. Isolation inputs now explicitly declare
 256Mi so the measured-leaf architecture and inherited pool checks still exercise
 wrapped Pods. No expected Pod was assembled or edited by hand.
+
+CX-OB-1398-REBASE (2026-11-03) recaptured current deadline-bounded Build
+outputs with the replay token waiter. The authenticated v4.0.8 controller ran
+its real operation with the retained fake-client helpers and capture-only
+hooks. All 27 submitted Pods passed the retained Kubernetes v1.35.7 validator.
+No expected Pod was edited manually and no live cluster was used.
+
+CX-OB-STACK-TRIAL (2026-11-03) recaptured current deadline-bounded Build
+outputs with the replay token waiter. The authenticated v4.0.8 controller ran
+its real operation with the retained fake-client helpers and capture-only
+hooks. All 27 submitted Pods passed the retained Kubernetes v1.35.7 validator.
+No expected Pod was edited manually and no live cluster was used.
+
+CX-OB-STACK-REPAIRS (2026-11-03) recaptured current deadline-bounded Build
+outputs with the replay token waiter. The authenticated v4.0.8 controller ran
+its real operation with the retained fake-client helpers and capture-only
+hooks. All 27 submitted Pods passed the retained Kubernetes v1.35.7 validator.
+No expected Pod was edited manually and no live cluster was used.

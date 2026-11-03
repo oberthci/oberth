@@ -152,9 +152,7 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 	if cfg.CreateKind && cfg.KubeconfigPath != "" {
 		return errors.New("choose either --kubeconfig for an existing cluster or --create-kind")
 	}
-	if cfg.WatchAdoptionPlan != "" && deps.GOOS != "linux" {
-		return errors.New("watch adoption requires an existing Linux cluster context; cluster bootstrap is forbidden")
-	}
+
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
@@ -273,9 +271,14 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 
 	// Resolve helm kubeconfig targeting so every helm invocation in the
 	// install flow targets the same cluster the binary resolved (#464).
-	helmKubeArgs, _, _ := ResolveHelmKubeArgs(contextName)
+	var helmKubeArgs []string
 	if cfg.KubeconfigPath != "" {
 		helmKubeArgs = []string{"--kubeconfig", cfg.KubeconfigPath, "--kube-context", selectedContext}
+	} else {
+		helmKubeArgs, _, err = ResolveHelmKubeArgs(contextName)
+		if err != nil {
+			return fmt.Errorf("resolve Helm cluster target: %w", err)
+		}
 	}
 	runHelm := HelmWithKubeArgs(deps.RunHelm, helmKubeArgs)
 
@@ -886,6 +889,7 @@ func DefaultRunCommand(ctx context.Context, input []byte, name string, args ...s
 	// #nosec G204 -- callers select a fixed executable and pass structured
 	// arguments; no shell interpolation occurs.
 	command := exec.CommandContext(ctx, name, args...)
+	command.Env = installerChildEnvironment()
 	if len(input) > 0 {
 		command.Stdin = bytes.NewReader(input)
 	}
@@ -932,6 +936,7 @@ func DefaultRunInteractive(ctx context.Context, name string, args ...string) err
 	// #nosec G204 -- callers select a fixed executable and pass structured
 	// arguments; no shell interpolation occurs.
 	command := exec.CommandContext(ctx, name, args...)
+	command.Env = installerChildEnvironment()
 	command.Stdin = os.Stdin
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
@@ -951,6 +956,7 @@ func StdinIsTerminal() bool {
 func DefaultRunCommandStream(ctx context.Context, output io.Writer, name string, args ...string) error {
 	// #nosec G204 -- fixed executable and structured arguments, as in DefaultRunCommand.
 	command := exec.CommandContext(ctx, name, args...)
+	command.Env = installerChildEnvironment()
 	command.Stdout, command.Stderr = output, output
 	command.WaitDelay = 5 * time.Second
 	return errors.Join(command.Run(), ctx.Err())

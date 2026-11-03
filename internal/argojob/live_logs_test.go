@@ -31,7 +31,7 @@ func stamped(lines ...string) string {
 
 func testLogWorker(output io.Writer) *stepLogFollower {
 	owner := newStepLogFollowers(context.Background(), nil, output, nil)
-	return &stepLogFollower{owner: owner, step: StepResult{Burn: "build", Step: "compile"}}
+	return &stepLogFollower{owner: owner, step: StepResult{Stage: "build", Step: "compile"}}
 }
 
 func TestLiveCursorInclusiveRepeatedTimestamp(t *testing.T) {
@@ -283,7 +283,7 @@ func TestLiveCancellationAndAdoptionGap(t *testing.T) {
 	restored := newStepLogFollowers(context.Background(), func(_ context.Context, _, _ string, options corev1.PodLogOptions) (io.ReadCloser, error) {
 		since = options.SinceTime
 		return io.NopCloser(strings.NewReader(stamped("historical"))), nil
-	}, &runBudgetWriter{destination: &output, remaining: 1 << 20}, []runprogress.Event{{Burn: "build", Step: "compile", Status: runprogress.StepRunning}})
+	}, &runBudgetWriter{destination: &output, remaining: 1 << 20}, []runprogress.Event{{Stage: "build", Step: "compile", Status: runprogress.StepRunning}})
 	restored.resumedAt, _ = time.Parse(time.RFC3339Nano, "2026-10-24T01:00:00Z")
 	restored.drain(singleStepWorkflow())
 	restored.close()

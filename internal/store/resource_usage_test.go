@@ -15,7 +15,7 @@ import (
 
 func resourceRow(runID string, at time.Time) model.StepResourceUsage {
 	n := int64(123)
-	return model.StepResourceUsage{Version: 1, Source: "kubelet-cadvisor", RunID: runID, WorkflowName: "workflow-test", WorkflowUID: "11111111-1111-4111-8111-111111111111", Namespace: "argo", NodeID: "workflow-test-123", PodName: "workflow-test-123", PodUID: "22222222-2222-4222-8222-222222222222", NodeName: "node-a", ContainerID: "containerd://" + strings.Repeat("b", 64), ContainerName: "main", Burn: "checks", Step: "test", FirstObservedAt: at, LastObservedAt: at, SourceAt: at, Samples: 1, SampledLowerBound: true, MemoryPeakBytes: &n, IOReadBytes: &n}
+	return model.StepResourceUsage{Version: 1, Source: "kubelet-cadvisor", RunID: runID, WorkflowName: "workflow-test", WorkflowUID: "11111111-1111-4111-8111-111111111111", Namespace: "argo", NodeID: "workflow-test-123", PodName: "workflow-test-123", PodUID: "22222222-2222-4222-8222-222222222222", NodeName: "node-a", ContainerID: "containerd://" + strings.Repeat("b", 64), ContainerName: "main", Stage: "checks", Step: "test", FirstObservedAt: at, LastObservedAt: at, SourceAt: at, Samples: 1, SampledLowerBound: true, MemoryPeakBytes: &n, IOReadBytes: &n}
 }
 func TestResourceUsageDurableConcurrentKilledAndRepositoryIsolation(t *testing.T) {
 	at := time.Now().UTC()
@@ -26,7 +26,7 @@ func TestResourceUsageDurableConcurrentKilledAndRepositoryIsolation(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.SetRunJobName(ctx, run.ID, "workflow-test"); err != nil {
+	if _, err = s.SetRunWorkflowName(ctx, run.ID, "workflow-test"); err != nil {
 		t.Fatal(err)
 	}
 	v := resourceRow(run.ID, at)
@@ -159,7 +159,7 @@ func TestResourceSizeComparisonPersistsClassAndKeepsConflictsUnknown(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.SetRunJobName(t.Context(), run.ID, "workflow-test"); err != nil {
+	if _, err = s.SetRunWorkflowName(t.Context(), run.ID, "workflow-test"); err != nil {
 		t.Fatal(err)
 	}
 	v := resourceRow(run.ID, at)
@@ -205,7 +205,7 @@ func TestResourceContainerRowsUpgradeLegacyAndRetainDistinctHelpers(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.SetRunJobName(t.Context(), run.ID, "workflow-test"); err != nil {
+	if _, err = s.SetRunWorkflowName(t.Context(), run.ID, "workflow-test"); err != nil {
 		t.Fatal(err)
 	}
 	v := resourceRow(run.ID, at)
@@ -261,7 +261,7 @@ func TestResourceFormatGuardMigrationPreservesSchema36Rows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.SetRunJobName(t.Context(), run.ID, "workflow-test"); err != nil {
+	if _, err = s.SetRunWorkflowName(t.Context(), run.ID, "workflow-test"); err != nil {
 		t.Fatal(err)
 	}
 	v := resourceRow(run.ID, at)

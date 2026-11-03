@@ -19,8 +19,9 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // scriptedWorkflowClient serves successive Workflow observations, repeating the
@@ -73,11 +74,11 @@ func (r *failingTimingRecorder) RecordStepTimings(ctx context.Context, values []
 func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "timing.db")
-	db, err := store.Open(ctx, path, store.Options{})
+	db, err := storetest.Open(ctx, path, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	upstream, err := db.CreateUpstream(ctx, model.UpstreamSpec{Name: "codeberg", Kind: "forgejo", BaseURL: "https://codeberg.org"})
+	upstream, err := storetest.CreateUpstream(db, ctx, model.UpstreamSpec{Name: "codeberg", Kind: "forgejo", BaseURL: "https://codeberg.org"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +87,7 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 		t.Fatal(err)
 	}
 	sha := strings.Repeat("b", 40)
-	run, err := db.EnqueueRun(ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: "feature/adopt", SHA: sha, Actor: "SHA256:test", Trigger: "push"})
+	run, err := storetest.EnqueueRun(db, ctx, model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: "feature/adopt", SHA: sha, Actor: "SHA256:test", Trigger: "push"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,20 +95,20 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	terminal, first, pod, at := diagnosticFixture()
+	terminal, first, pod, at := diagnosticFixtureAt(time.Now().UTC().Add(-time.Minute))
 	terminal.CreationTimestamp = metav1.NewTime(at.Add(-10 * time.Minute))
 	terminal.Annotations[runIDAnnotation] = run.ID
 	terminal.Annotations[identityAnnotation] = strings.Repeat("a", 64)
 	terminal.Annotations[refAnnotation] = "feature/adopt"
 	terminal.Annotations[argoworkflow.SizeAnnotation] = "L"
 	terminal.Annotations[argoworkflow.ConcurrencyGroupAnnotation] = "build"
-	terminal.Labels = map[string]string{"oberth.ci/sha": sha, "oberth.ci/trigger": string(periapsis.TriggerCI)}
+	terminal.Labels = map[string]string{"oberth.ci/sha": sha, "oberth.ci/trigger": string(pipeline.TriggerCI)}
 	terminal.Spec.Entrypoint = "dag"
 	terminal.Spec.Templates = []wfv1.Template{
 		{Name: "dag", DAG: &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{{Name: "test", Template: "leaf"}, {Name: "unit", Template: "leaf"}}}},
 		{Name: "leaf", Container: &corev1.Container{Name: "main"}},
 	}
-	if _, err = db.SetRunJobName(ctx, run.ID, terminal.Name); err != nil {
+	if _, err = db.SetRunWorkflowName(ctx, run.ID, terminal.Name); err != nil {
 		t.Fatal(err)
 	}
 	first.Phase = wfv1.NodeSucceeded
@@ -163,13 +164,13 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 	}
 
 	// Restart: the first leaf's Pod was garbage collected while no owner ran.
-	db, err = store.Open(ctx, path, store.Options{})
+	db, err = storetest.Open(ctx, path, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
 	recorder = &failingTimingRecorder{Store: db}
-	request := AdoptionRequest{Name: terminal.Name, RunID: run.ID, Ref: "feature/adopt", SHA: sha, Group: "build", Trigger: periapsis.TriggerCI, RunTrigger: argoworkflow.RunTriggerBranch}
+	request := AdoptionRequest{Name: terminal.Name, RunID: run.ID, Ref: "feature/adopt", SHA: sha, Group: "build", Trigger: pipeline.TriggerCI, RunTrigger: argoworkflow.RunTriggerBranch}
 	binding, found, err := (&Controller{workflows: &staticWorkflowClient{workflow: running}, config: config}).Adopt(ctx, request)
 	if err != nil || !found {
 		t.Fatalf("adopt: %v %v", found, err)
@@ -178,7 +179,7 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 	var events []runprogress.Event
 	for _, step := range steps {
 		if step.NodeID == first.ID {
-			events = append(events, runprogress.Event{Version: runprogress.Version, Burn: step.Burn, Step: step.Step, Ordinal: step.Ordinal, Status: step.Status, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt})
+			events = append(events, runprogress.Event{Version: runprogress.Version, Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Status: step.Status, StartedAt: step.StartedAt, FinishedAt: step.FinishedAt})
 		}
 	}
 	resumed := &Controller{workflows: &scriptedWorkflowClient{states: []*wfv1.Workflow{running, terminal}}, kube: fake.NewClientset(secondPod.DeepCopy()), logs: logs, config: config, interval: time.Millisecond, timings: recorder}

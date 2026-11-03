@@ -1,42 +1,46 @@
-# Opt-in platform protection (#1216)
+# Platform protection
 
-Set `platformProtection.enabled: true` on the Oberth release to create four
-PriorityClasses and assign the Oberth and cloudflared pod templates. Default,
-explicit `false`, and historical stored values without this key leave rendered
-workloads unchanged. This does not change **admission capacity**; new platform
-requests consume additional schedulable capacity. Existing admission settings
-must be retained. No kubelet, taint, toleration, sampler or migration changes are
-included.
+Set `platformProtection.enabled: true` to create three PriorityClasses for
+Oberth, the Argo workflow-controller, and OpenBao. Default, false, and historical
+stored values without this key leave workloads unchanged. This does not change
+run admission capacity.
 
-All four classes have value **1,000,000**, `globalDefault: false`, and
-`preemptionPolicy: PreemptLowerPriority`. CI workflows, resource/helper pods and
-VM launchers receive none of them; their ordinary priority is zero. Existing
-admission refuses authored workflow/template priority overrides, pod patches
-and VMI priority fields. For Oberth release `oberth` in namespace `oberth`:
+All three classes have value 1,000,000, `globalDefault: false`, and
+`preemptionPolicy: PreemptLowerPriority`. The chart assigns Oberth's Pod template.
+CI workflows do not receive these classes. Admission refuses authored priority
+overrides and Pod patches.
+
+For release `oberth` in namespace `oberth`:
 
 | Component | PriorityClass |
 | --- | --- |
 | Oberth | `oberth-oberth-platform-oberth` |
-| cloudflared | `oberth-oberth-platform-cloudflared` |
 | Argo workflow-controller | `oberth-oberth-platform-argo-controller` |
 | OpenBao | `oberth-oberth-platform-openbao` |
 
-Names include the namespace and release identity because classes are cluster
-scoped. The Argo controller and OpenBao belong to **separate Helm releases**.
-Their [Argo 1.0.24 overlay](../deploy/platform-protection/argo-workflows-values.yaml)
-and [OpenBao 0.28.6 overlay](../deploy/platform-protection/openbao-values.yaml)
-select the classes and add initial CPU/memory requests. The installer does not
-automatically apply these overlays. The Argo nonroot profile reuse check permits
-`controller.priorityClassName` and `controller.resources.requests.cpu/memory`,
-while still refusing limits and other customization.
+Class names include namespace and release identity. Argo and OpenBao belong to
+separate Helm releases: operator-reviewed overlays in
+`deploy/platform-protection/` select their classes and add initial CPU/memory
+requests. The installer does not apply those overlays. Adjust class names and
+qualify requests against your workload before applying them. Priority improves
+scheduling, preemption and kubelet eviction ranking; it does not guarantee
+survival under memory pressure or change kernel OOM ranking.
 
-Adjust both overlays to the rendered class names if the Oberth release name or
-namespace differs. Do not set workflow defaults, executor priority or a cluster
-global default. Other principals able to create Pods are outside Oberth's
-workflow gate; restrict their platform-class consumption through cluster policy
-where needed.
+Activation requires cluster-scoped permissions. Pause intake, drain work, retain
+private copies of current Helm values and chart/image pins, and render all three
+releases before changing them. Create and verify classes before assigning the
+external releases. The Argo controller uses Recreate. OpenBao uses OnDelete;
+changing its template does not update an existing Pod. Follow your deployment's
+unseal procedure for replacements and verify new Pod identities, readiness,
+requests, classes and credential delivery before resuming intake.
 
-## Initial sizing and protection limits
+The Argo/OpenBao classes carry `helm.sh/resource-policy: keep` because separate
+releases depend on them. Before disabling, rolling back or uninstalling Oberth,
+restore those releases' previous assignments and requests together, verify
+replacement health, then remove unused retained classes. The Oberth class follows
+the ordinary release lifecycle. Never remove a class still referenced by a Pod
+or workload template. Historical charts may reject the platformProtection key;
+prepare compatible values explicitly for a downgrade.
 
 The initial requests derive from a **coordinator-supplied idle sample** and a
 coordinator instruction to choose a margin. They are **unmeasured under load**,
@@ -57,7 +61,7 @@ recreation. No pressure-survival qualification is claimed.
 
 ## Activation in a quiet window
 
-Pause intake through the [maintenance-window procedure](upgrade-v0.17.59.md) and drain all runs,
+Pause intake through the [maintenance-window procedure](archive/upgrade-v0.17.59.md) and drain all runs,
 including tag, release, apply, promotion, trusted KVM, source/helper and VM cells.
 Keep intake paused through all replacements and health checks; `--wait-idle` is advisory, not an admission freeze. Enabling the
 Oberth option restarts Oberth (`Recreate`) and chart-managed cloudflared

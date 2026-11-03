@@ -10,7 +10,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // QueuePriorityStore is an installation-wide admin capability. It is not
@@ -178,7 +178,7 @@ func (scheduler *Scheduler) refreshPriorities(ctx context.Context) error {
 	}
 	// Read grant state outside the gate as well. An unavailable size limit
 	// drops automatic urgency but must never fail a release or abort refresh.
-	maxima := make(map[int64]periapsis.Size)
+	maxima := make(map[int64]pipeline.Size)
 	lookupFailed := make(map[int64]bool)
 	for _, run := range runs {
 		if _, seen := maxima[run.RepoID]; seen || run.RefKind != model.RefTag {
@@ -280,7 +280,7 @@ func (r *admissionReservation) priorityRun() model.Run {
 
 // releasePriorityMaximum is advisory: callers drop automatic urgency on error,
 // never fail the run. Log the cause without depending on an audit DB write.
-func (scheduler *Scheduler) releasePriorityMaximum(ctx context.Context, run model.Run) (periapsis.Size, error) {
+func (scheduler *Scheduler) releasePriorityMaximum(ctx context.Context, run model.Run) (pipeline.Size, error) {
 	if limiter, ok := scheduler.store.(RunSizeLimiter); ok && run.RefKind == model.RefTag {
 		maximum, err := limiter.MaxRunSize(ctx, run.RepoID)
 		if err != nil {

@@ -27,7 +27,7 @@ func TestStepProgressPodJournalKeepsControlsAndRecoverySeparate(t *testing.T) {
 	writer := newStepProgressLogWriter(newRunLogWriter(f, 1<<20), func(runprogress.Event) error { events++; return nil })
 	writer.journal = journal
 	now := time.Now().UTC()
-	event := runprogress.Event{Version: runprogress.Version, Burn: "test", Step: "unit", Status: runprogress.StepRunning, StartedAt: &now}
+	event := runprogress.Event{Version: runprogress.Version, Stage: "test", Step: "unit", Status: runprogress.StepRunning, StartedAt: &now}
 	marker, err := runprogress.MarshalMarker(event)
 	if err != nil {
 		t.Fatal(err)

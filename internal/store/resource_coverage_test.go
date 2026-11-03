@@ -19,7 +19,7 @@ func TestResourceCoveragePersistsInExistingJSONAndLegacyStaysUnknown(t *testing.
 		if e != nil {
 			t.Fatal(e)
 		}
-		if _, e = s.SetRunJobName(t.Context(), run.ID, "step-abc12345"); e != nil {
+		if _, e = s.SetRunWorkflowName(t.Context(), run.ID, "step-abc12345"); e != nil {
 			t.Fatal(e)
 		}
 		ids = append(ids, run.ID)
@@ -78,7 +78,7 @@ func TestParallelismNoticeSurvivesTimingStoreRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.SetRunJobName(t.Context(), run.ID, "step-abc12345"); err != nil {
+	if _, err = s.SetRunWorkflowName(t.Context(), run.ID, "step-abc12345"); err != nil {
 		t.Fatal(err)
 	}
 	demand := &argoworkflow.PodDemand{CPUMilli: 4000, MemoryBytes: 4 << 30, Pods: 4}
@@ -103,7 +103,7 @@ func TestParallelismNoticeDoesNotRewriteOldTiming(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.SetRunJobName(t.Context(), run.ID, "step-abc12345"); err != nil {
+	if _, err = s.SetRunWorkflowName(t.Context(), run.ID, "step-abc12345"); err != nil {
 		t.Fatal(err)
 	}
 	timing := model.WorkflowTiming{RunID: run.ID, Namespace: "oberth", Name: "step-abc12345", UID: "11111111-1111-4111-8111-111111111111", SpecIdentity: strings.Repeat("a", 64), CreatedAt: at, Tasks: []model.TimingTask{}, Resources: &model.ResourceCoverage{Declared: 1}}

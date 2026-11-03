@@ -174,6 +174,7 @@ type ExecutionObservation struct {
 	FinishedAt               *time.Time         `json:"finished_at,omitempty"`
 	ReconciliationLagSeconds *int64             `json:"reconciliation_lag_seconds,omitempty"`
 	Deadline                 *ExecutionDeadline `json:"deadline,omitempty"`
+	ServerDeadline           *ExecutionDeadline `json:"server_deadline,omitempty"`
 	Reason                   string             `json:"reason,omitempty"`
 	State                    string             `json:"state"`
 	Phase                    string             `json:"phase,omitempty"`
@@ -348,7 +349,8 @@ func (p *PressureDeferral) Reason() string {
 // declared requests/VM host demand, server helpers and memory headroom.
 // Aggregate host usage is deliberately not included.
 type DeclaredResources struct {
-	CPUMilli    int64 `json:"cpu_milli"`
-	MemoryBytes int64 `json:"memory_bytes"`
-	Pods        int64 `json:"pods"`
+	ExtendedResources map[string]int64 `json:"extended_resources,omitempty"`
+	CPUMilli          int64            `json:"cpu_milli"`
+	MemoryBytes       int64            `json:"memory_bytes"`
+	Pods              int64            `json:"pods"`
 }

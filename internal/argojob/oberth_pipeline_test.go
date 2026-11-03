@@ -13,7 +13,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // This suite holds Oberth's own .oberth/build.yaml and .oberth/release.yaml to
@@ -42,8 +42,8 @@ func loadPipeline(t *testing.T, name string) []byte {
 
 func oberthConfig() Config {
 	config := wifTestConfig()
-	config.PerRepoIdentities = map[string]PerRepoIdentityConfig{"github/skipops/oberth": {ServiceAccountName: "oberth-per-repo"}}
-	config.ReleaseWIF.Repositories = map[string]ReleaseWIFRepository{"github/skipops/oberth": {ServiceAccountName: "oberth-per-repo", Templates: map[string]string{"release-publish-images": "image-writer", "release-publish-kvm-harness": "image-writer", "release-publish-chart": "chart-writer", "release-verify": "image-reader"}}}
+	config.PerRepoIdentities = map[string]PerRepoIdentityConfig{"github/acme/oberth": {ServiceAccountName: "oberth-per-repo"}}
+	config.ReleaseWIF.Repositories = map[string]ReleaseWIFRepository{"github/acme/oberth": {ServiceAccountName: "oberth-per-repo", Templates: map[string]string{"release-publish-images": "image-writer", "release-publish-kvm-harness": "image-writer", "release-publish-chart": "chart-writer", "release-verify": "image-reader"}}}
 	// Oberth's own pipeline uses golang: for toolchain steps and aquasec/trivy:
 	// for the security scan (the official image, pinned by digest).
 	config.RunnerImagePrefixes = []string{"golang:", "debian:", "aquasec/trivy:"}
@@ -55,7 +55,7 @@ func oberthConfig() Config {
 // Unit pipeline renders use the existing private controller-proof fixture;
 // production admission still requires the real current controller proof.
 func buildOberthPipeline(config Config, request Request) (*wfv1.Workflow, error) {
-	if request.Trigger == periapsis.TriggerCI {
+	if request.Trigger == pipeline.TriggerCI {
 		request = nonrootFixtureProof(request)
 	}
 	return Build(config, request)
@@ -72,7 +72,7 @@ func oberthReleaseApprovedSecrets() map[string]bool {
 		"oberth/data/release/r2-upload-token":  true,
 		"oberth/data/release/cosign-secret":    true,
 		"oberth/data/release/homebrew-tap-key": true,
-		// The oberth.ci Worker deploy token, used only by release-website (#649).
+		// The public artifact upload token, used only by release-public-artifacts (#649).
 		"oberth/data/release/cloudflare-oberth-workers-token": true,
 	}
 }
@@ -82,8 +82,8 @@ func oberthReleaseApprovedSecrets() map[string]bool {
 func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 	built, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
-		Ref: "refs/heads/main", SHA: testSHA, Trigger: periapsis.TriggerCI,
+		Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
+		Ref: "refs/heads/main", SHA: testSHA, Trigger: pipeline.TriggerCI,
 		Source:          loadPipeline(t, "build.yaml"),
 		ApprovedSecrets: map[string]bool{},
 	})
@@ -116,9 +116,9 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 		t.Fatal("static Git qualification missing")
 	}
 
-	// Declared weight matches periapsis.go's JobSizes{"ci": "L"}.
+	// Declared weight matches the build.yaml size annotation.
 	size, err := argoworkflow.DeclaredSize(built)
-	if err != nil || size != periapsis.L {
+	if err != nil || size != pipeline.L {
 		t.Fatalf("declared size = %q,%v; want L", size, err)
 	}
 
@@ -128,38 +128,74 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 
 	// Every burn build.yaml declares for the CI trigger is present, with the
 	// same dependency edges.
-	assertBurnGraph(t, built, "ci", map[string]string{
-		"setup":                    "",
-		"generic-names":            "",
-		"lint":                     "setup",
-		"test-store":               "setup",
-		"test-service":             "setup",
-		"test-rest":                "setup",
-		"test-gitcache":            "setup",
-		"build-static-git-runtime": "setup",
-		"test-static-git-runtime":  "build-static-git-runtime",
-		"test-archive-history":     "setup",
-		"test-openbao":             "setup",
-		"security":                 "setup",
-		"shellcheck":               "setup",
-		"chart":                    "setup",
-		"release-diagnostic":       "setup",
-		"verify-publisher-tools":   "setup",
-		"build-amd64":              "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart",
-		"build-arm64":              "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart",
-		"build-darwin-amd64":       "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart",
-		"build-darwin-arm64":       "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart",
+	assertStageGraph(t, built, "ci", map[string]string{
+		"setup":                       "",
+		"generic-names":               "",
+		"lint":                        "setup",
+		"test-store":                  "setup",
+		"test-service":                "setup",
+		"test-rest":                   "setup",
+		"test-gitcache":               "setup",
+		"build-static-git-runtime":    "setup",
+		"test-static-git-runtime":     "build-static-git-runtime",
+		"test-archive-history":        "setup",
+		"test-openbao":                "setup",
+		"security":                    "setup",
+		"shellcheck":                  "setup",
+		"chart":                       "setup",
+		"chart-unittest":              "setup",
+		"test-chart-schema":           "setup",
+		"test-make-entrypoints":       "setup",
+		"test-release-prune-contract": "setup",
+		"release-diagnostic":          "setup",
+		"verify-publisher-tools":      "setup",
+		"build-amd64":                 "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart && chart-unittest && test-chart-schema && test-make-entrypoints && test-release-prune-contract",
+		"build-arm64":                 "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart && chart-unittest && test-chart-schema && test-make-entrypoints && test-release-prune-contract",
+		"build-darwin-amd64":          "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart && chart-unittest && test-chart-schema && test-make-entrypoints && test-release-prune-contract",
+		"build-darwin-arm64":          "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart && chart-unittest && test-chart-schema && test-make-entrypoints && test-release-prune-contract",
 	})
+}
+
+// Keep the regression files executable in CI as well as required in the DAG.
+func TestOberthBuildPipelineRunsChartRegressions(t *testing.T) {
+	var workflow wfv1.Workflow
+	if err := yaml.Unmarshal(loadPipeline(t, "build.yaml"), &workflow); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][]string{
+		"chart-unittest":              {"/tmp/oberth-tools/bin/untt-linux-amd64", "--strict", "charts/oberth"},
+		"test-chart-schema":           {"/usr/bin/python3", "-I", "-B", "scripts/test_chart_schema.py", "-v"},
+		"test-make-entrypoints":       {"/usr/bin/python3", "-I", "-B", "scripts/test_make_entrypoints.py", "-v"},
+		"test-release-prune-contract": {"/usr/bin/python3", "-I", "-B", "scripts/test_release_prune_contract.py", "-v"},
+	}
+	for _, template := range workflow.Spec.Templates {
+		expected, ok := want[template.Name]
+		if !ok {
+			continue
+		}
+		if template.Container == nil {
+			t.Errorf("%s has no regression command", template.Name)
+			continue
+		}
+		command := append(append([]string{}, template.Container.Command...), template.Container.Args...)
+		if !reflect.DeepEqual(command, expected) {
+			t.Errorf("%s command = %v, want %v", template.Name, command, expected)
+		}
+		delete(want, template.Name)
+	}
+	for name := range want {
+		t.Errorf("missing regression gate %s", name)
+	}
 }
 
 // TestOberthReleasePipelineIsAdmissible proves the release document clears the
 // same gate and binds the release identity, and that its declared secret paths
-// are the ones periapsis.go declares.
+// match the release.yaml declarations.
 func TestOberthReleasePipelineIsAdmissible(t *testing.T) {
 	built, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
-		Ref: "refs/tags/v0.1.0", SHA: testSHA, Trigger: periapsis.TriggerRelease,
+		Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
+		Ref: "refs/tags/v0.1.0", SHA: testSHA, Trigger: pipeline.TriggerRelease,
 		Source:          loadPipeline(t, "release.yaml"),
 		ApprovedSecrets: oberthReleaseApprovedSecrets(),
 	})
@@ -187,7 +223,7 @@ func TestOberthReleasePipelineIsAdmissible(t *testing.T) {
 		t.Fatalf("declared paths = %v, want %v", paths, want)
 	}
 
-	assertBurnGraph(t, built, "release", map[string]string{
+	assertStageGraph(t, built, "release", map[string]string{
 		"release-setup":                  "",
 		"release-lint":                   "release-setup && release-scan",
 		"release-scan":                   "release-setup",
@@ -212,8 +248,6 @@ func TestOberthReleasePipelineIsAdmissible(t *testing.T) {
 		"release-finalize":       "release-runtime",
 		// #649: the oberth.ci Worker publishes after the signed artifacts
 		// verified; a tokenless leaf then reads the public bytes back.
-		"release-website":          "release-finalize",
-		"release-website-readback": "release-website",
 	})
 }
 
@@ -225,8 +259,8 @@ func TestOberthReleasePipelineIsAdmissible(t *testing.T) {
 func TestOberthReleasePipelineOnBranchPushRefusesSystemPaths(t *testing.T) {
 	_, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
-		Ref: "refs/heads/main", SHA: testSHA, Trigger: periapsis.TriggerCI,
+		Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
+		Ref: "refs/heads/main", SHA: testSHA, Trigger: pipeline.TriggerCI,
 		Source:          releasePipelineWithoutWIF(t),
 		ApprovedSecrets: oberthReleaseApprovedSecrets(),
 	})
@@ -246,8 +280,8 @@ func TestOberthReleasePipelineOnBranchRefusedWithoutAllowlist(t *testing.T) {
 	// CI-ineligible regardless.
 	_, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
-		Ref: "refs/heads/main", SHA: testSHA, Trigger: periapsis.TriggerCI,
+		Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
+		Ref: "refs/heads/main", SHA: testSHA, Trigger: pipeline.TriggerCI,
 		Source:          releasePipelineWithoutWIF(t),
 		ApprovedSecrets: map[string]bool{},
 	})
@@ -330,8 +364,8 @@ func TestOberthReleasePipelineWrapsCredentialedStepsWithSecretstoreExec(t *testi
 func TestOberthReleasePublisherUsesPrivateChildDir(t *testing.T) {
 	built, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
-		Ref: "refs/tags/v0.1.0", SHA: testSHA, Trigger: periapsis.TriggerRelease,
+		Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
+		Ref: "refs/tags/v0.1.0", SHA: testSHA, Trigger: pipeline.TriggerRelease,
 		Source:          loadPipeline(t, "release.yaml"),
 		ApprovedSecrets: oberthReleaseApprovedSecrets(),
 	})
@@ -344,7 +378,7 @@ func TestOberthReleasePublisherUsesPrivateChildDir(t *testing.T) {
 		"release-publish-images":      {"--path=oberth/data/release/cosign-secret"},
 		"release-publish-kvm-harness": {"--path=oberth/data/release/cosign-secret"},
 		"release-publish-chart":       {"--path=oberth/data/release/cosign-secret"},
-		"release-website":             {"--path=oberth/data/release/cloudflare-oberth-workers-token"},
+		"release-public-artifacts":    {"--path=oberth/data/release/cloudflare-oberth-workers-token"},
 	}
 	seen := map[string]bool{}
 	secretVolume := false
@@ -450,15 +484,15 @@ func TestOberthReleasePipelineRetriesCredentialedSteps(t *testing.T) {
 // the server's read-only checkout rather than fetching source themselves.
 func TestOberthPipelinesMountTheServerProvidedSource(t *testing.T) {
 	for _, name := range []string{"build.yaml", "release.yaml"} {
-		trigger := periapsis.TriggerCI
+		trigger := pipeline.TriggerCI
 		approved := map[string]bool{}
 		if name == "release.yaml" {
-			trigger = periapsis.TriggerRelease
+			trigger = pipeline.TriggerRelease
 			approved = oberthReleaseApprovedSecrets()
 		}
 		built, err := buildOberthPipeline(oberthConfig(), Request{
 			RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-			Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github", Ref: "refs/heads/main",
+			Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github", Ref: "refs/heads/main",
 			SHA: testSHA, Trigger: trigger, Source: loadPipeline(t, name),
 			// The claim the server seeded for this run, in the pipeline
 			// namespace. Before this existed the Workflow named the server's
@@ -499,9 +533,8 @@ func TestOberthPipelinesMountTheServerProvidedSource(t *testing.T) {
 	}
 }
 
-// assertBurnGraph checks that the entrypoint DAG's tasks and their depends
-// expressions match the burn graph periapsis.go declares.
-func assertBurnGraph(t *testing.T, workflow *wfv1.Workflow, entrypoint string, want map[string]string) {
+// assertStageGraph checks the entrypoint DAG and its declared dependency edges.
+func assertStageGraph(t *testing.T, workflow *wfv1.Workflow, entrypoint string, want map[string]string) {
 	t.Helper()
 	if workflow.Spec.Entrypoint != entrypoint {
 		t.Fatalf("entrypoint = %q, want %q", workflow.Spec.Entrypoint, entrypoint)
@@ -519,19 +552,19 @@ func assertBurnGraph(t *testing.T, workflow *wfv1.Workflow, entrypoint string, w
 	for _, task := range dag.Tasks {
 		found[task.Name] = task.Depends
 	}
-	for burn, depends := range want {
-		got, present := found[burn]
+	for stage, depends := range want {
+		got, present := found[stage]
 		if !present {
-			t.Errorf("burn %q is missing from the %s DAG", burn, entrypoint)
+			t.Errorf("burn %q is missing from the %s DAG", stage, entrypoint)
 			continue
 		}
 		if got != depends {
-			t.Errorf("burn %q depends on %q, want %q", burn, got, depends)
+			t.Errorf("burn %q depends on %q, want %q", stage, got, depends)
 		}
 	}
-	for burn := range found {
-		if _, expected := want[burn]; !expected {
-			t.Errorf("burn %q is not declared in the expected %s DAG", burn, entrypoint)
+	for stage := range found {
+		if _, expected := want[stage]; !expected {
+			t.Errorf("burn %q is not declared in the expected %s DAG", stage, entrypoint)
 		}
 	}
 }
@@ -625,8 +658,8 @@ func TestOberthPipelinesPinCompatibleGoToolchains(t *testing.T) {
 func TestOberthReleasePipelineScopesTokenToCredentialedTemplates(t *testing.T) {
 	workflow, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
-		Ref: "refs/tags/v0.1.0", SHA: testSHA, Trigger: periapsis.TriggerRelease,
+		Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
+		Ref: "refs/tags/v0.1.0", SHA: testSHA, Trigger: pipeline.TriggerRelease,
 		Source:          loadPipeline(t, "release.yaml"),
 		ApprovedSecrets: oberthReleaseApprovedSecrets(),
 	})
@@ -700,7 +733,7 @@ func TestOberthReleaseScriptReadsStoreFieldNames(t *testing.T) {
 		"cosign-secret/COSIGN_PUB":      true,
 		"homebrew-tap-key/SSH_KEY":      true,
 		// #649: the scoped oberth.ci Worker deploy token (Terraform
-		// output oberth_website_deploy_token in oberthci/terraform).
+		// operator-owned public artifact token configuration).
 		"cloudflare-oberth-workers-token/CLOUDFLARE_API_TOKEN": true,
 	}
 	seen := map[string]bool{}
@@ -855,7 +888,7 @@ func TestStaticGitQualificationUsesOnlyInstalledRunnerPrefixes(t *testing.T) {
 	if !found {
 		t.Fatal("static musl build template missing")
 	}
-	request := Request{RunID: "run-static-git", Name: "oberth-static-git", Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github", Ref: "refs/heads/main", SHA: testSHA, Trigger: periapsis.TriggerCI, Source: loadPipeline(t, "build.yaml")}
+	request := Request{RunID: "run-static-git", Name: "oberth-static-git", Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github", Ref: "refs/heads/main", SHA: testSHA, Trigger: pipeline.TriggerCI, Source: loadPipeline(t, "build.yaml")}
 	if _, err := Build(config, request); err == nil {
 		t.Fatal("nonroot qualification accepted without current controller proof")
 	}

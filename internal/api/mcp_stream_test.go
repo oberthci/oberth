@@ -232,7 +232,7 @@ func TestMCPStreamWriteFailureCancelsObserverAndJoins(t *testing.T) {
 				writer.failAt = 2
 			}
 			deadline := time.Now().Add(time.Minute)
-			err := server.streamLongPoll(writer, httptest.NewRequest(http.MethodPost, "/mcp", nil), rpcResponse{JSONRPC: "2.0", ID: json.RawMessage("1")}, prepared, deadline)
+			err := server.streamLongPollObserved(writer, httptest.NewRequest(http.MethodPost, "/mcp", nil), rpcResponse{JSONRPC: "2.0", ID: json.RawMessage("1")}, prepared, deadline, nil)
 			if !errors.Is(err, io.ErrClosedPipe) {
 				t.Fatalf("error %v", err)
 			}
@@ -255,7 +255,7 @@ func TestMCPStreamFlushFailureAndPanicJoin(t *testing.T) {
 	t.Parallel()
 	server := &Server{mcpHeartbeatInterval: time.Millisecond}
 	writer := &streamFailureWriter{ResponseRecorder: httptest.NewRecorder(), failFlush: true}
-	err := server.streamLongPoll(writer, httptest.NewRequest(http.MethodPost, "/mcp", nil), rpcResponse{}, func(context.Context) (any, error) { t.Fatal("observer started after flush failure"); return nil, nil }, time.Now().Add(time.Minute))
+	err := server.streamLongPollObserved(writer, httptest.NewRequest(http.MethodPost, "/mcp", nil), rpcResponse{}, func(context.Context) (any, error) { t.Fatal("observer started after flush failure"); return nil, nil }, time.Now().Add(time.Minute), nil)
 	if !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func TestMCPStreamFlushFailureAndPanicJoin(t *testing.T) {
 				t.Error("missing observer panic")
 			}
 		}()
-		_ = server.streamLongPoll(writer, httptest.NewRequest(http.MethodPost, "/mcp", nil), rpcResponse{}, func(context.Context) (any, error) { panic("observer") }, time.Now().Add(time.Minute))
+		_ = server.streamLongPollObserved(writer, httptest.NewRequest(http.MethodPost, "/mcp", nil), rpcResponse{}, func(context.Context) (any, error) { panic("observer") }, time.Now().Add(time.Minute), nil)
 	}()
 	writes := writer.writes
 	time.Sleep(testtimeout.Scale(5 * time.Millisecond))
@@ -507,7 +507,7 @@ func TestMCPStreamBoundsSocketBackpressure(t *testing.T) {
 			server := &Server{mcpHeartbeatInterval: time.Millisecond, mcpStreamWriteTimeout: 30 * time.Millisecond}
 			called := false
 			started := time.Now()
-			err := server.streamLongPoll(writer, httptest.NewRequest(http.MethodPost, "/mcp", nil), rpcResponse{}, func(ctx context.Context) (any, error) { called = true; <-ctx.Done(); return nil, ctx.Err() }, time.Now().Add(time.Minute))
+			err := server.streamLongPollObserved(writer, httptest.NewRequest(http.MethodPost, "/mcp", nil), rpcResponse{}, func(ctx context.Context) (any, error) { called = true; <-ctx.Done(); return nil, ctx.Err() }, time.Now().Add(time.Minute), nil)
 			var netErr net.Error
 			if !errors.As(err, &netErr) || !netErr.Timeout() {
 				t.Fatalf("expected bounded socket timeout: %v", err)

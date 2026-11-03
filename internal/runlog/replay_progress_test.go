@@ -14,8 +14,8 @@ func TestStepProgressHistoryRetainsStartsAndRejectsTornTail(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	started := runprogress.Event{Version: 1, Burn: "publish", Step: "push", Ordinal: 0, Status: runprogress.StepRunning, DeclaredSize: "M", StartedAt: &now}
-	queued := runprogress.Event{Version: 1, Burn: "publish", Step: "push", Ordinal: 0, Status: runprogress.StepQueued, DeclaredSize: "M"}
+	started := runprogress.Event{Version: 1, Stage: "publish", Step: "push", Ordinal: 0, Status: runprogress.StepRunning, DeclaredSize: "M", StartedAt: &now}
+	queued := runprogress.Event{Version: 1, Stage: "publish", Step: "push", Ordinal: 0, Status: runprogress.StepQueued, DeclaredSize: "M"}
 	for _, event := range []runprogress.Event{started, queued} {
 		if err := logs.AppendStepProgress("history", event); err != nil {
 			t.Fatal(err)

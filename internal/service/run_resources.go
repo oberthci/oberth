@@ -15,14 +15,14 @@ type RunResourceReader interface {
 	RunResources(context.Context, int64, store.RunResourceFilter) (store.RunResourceHistory, error)
 }
 type ResourceDeclarationReader interface {
-	ResourceDeclarations(context.Context, JobRequest) ([]measured.Declaration, error)
+	ResourceDeclarations(context.Context, WorkflowRequest) ([]measured.Declaration, error)
 }
 
 func (s *API) readRunResources(ctx context.Context, raw json.RawMessage) (any, error) {
 	var a struct {
 		Repo          string `json:"repo"`
 		Run           string `json:"run"`
-		Burn          string `json:"burn"`
+		Stage         string `json:"burn"`
 		Step          string `json:"step"`
 		Ref           string `json:"ref"`
 		Last          int    `json:"last"`
@@ -38,7 +38,7 @@ func (s *API) readRunResources(ctx context.Context, raw json.RawMessage) (any, e
 	if a.Format == "" {
 		a.Format = "json"
 	}
-	if a.Last < 1 || a.Last > measured.MaxRuns || len(a.Burn) > 253 || len(a.Step) > 253 || len(a.Ref) > 1024 || a.Format != "json" && a.Format != "yaml" || a.Repo == "" && a.Run == "" || a.Run != "" && a.Ref != "" {
+	if a.Last < 1 || a.Last > measured.MaxRuns || len(a.Stage) > 253 || len(a.Step) > 253 || len(a.Ref) > 1024 || a.Format != "json" && a.Format != "yaml" || a.Repo == "" && a.Run == "" || a.Run != "" && a.Ref != "" {
 		return nil, refuse(ErrInvalidInput, "run_resources: repo or run required; last 1..100; format json or yaml; run and ref are exclusive")
 	}
 	if s.repositories == nil || s.history == nil || s.runResources == nil {
@@ -103,7 +103,7 @@ func (s *API) readRunResources(ctx context.Context, raw json.RawMessage) (any, e
 				if e != nil {
 					return nil, e
 				}
-				declarations, e = s.resourceDeclarations.ResourceDeclarations(ctx, JobRequest{Run: newest, Repository: repo, UpstreamName: up.Name, UpstreamOrg: up.Org()})
+				declarations, e = s.resourceDeclarations.ResourceDeclarations(ctx, WorkflowRequest{Run: newest, Repository: repo, UpstreamName: up.Name, UpstreamOrg: up.Org()})
 				if e == nil {
 					r.DeclarationsStatus = "newest-selected-sha"
 				} else {
@@ -116,7 +116,7 @@ func (s *API) readRunResources(ctx context.Context, raw json.RawMessage) (any, e
 	// the current declaration lock, never by a hash-free name alone. Unknown/conflicting owners remain explicit, not guessed.
 	owners := map[string]string{}
 	for _, d := range declarations {
-		k := measured.NormalizeTemplate(d.Burn) + "\x00" + d.ResolvedTemplate
+		k := measured.NormalizeTemplate(d.Stage) + "\x00" + d.ResolvedTemplate
 		if previous, ok := owners[k]; ok && previous != d.OwnerRepository {
 			owners[k] = ""
 		} else {
@@ -127,14 +127,14 @@ func (s *API) readRunResources(ctx context.Context, raw json.RawMessage) (any, e
 		o := &history.Observations[i]
 		if o.Owner == "" {
 			if strings.HasPrefix(o.Template, "frag-") {
-				o.Owner = owners[measured.NormalizeTemplate(o.Usage.Burn)+"\x00"+o.Template]
+				o.Owner = owners[measured.NormalizeTemplate(o.Usage.Stage)+"\x00"+o.Template]
 			} else {
 				o.Owner = repo.Name
 			}
 		}
 	}
 	for _, step := range measured.Build(history.Observations, declarations) {
-		if a.Burn != "" && step.Burn != measured.NormalizeTemplate(a.Burn) {
+		if a.Stage != "" && step.Stage != measured.NormalizeTemplate(a.Stage) {
 			continue
 		}
 		if a.Step != "" && step.Template != measured.NormalizeTemplate(a.Step) {

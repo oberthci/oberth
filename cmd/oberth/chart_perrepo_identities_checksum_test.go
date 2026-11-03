@@ -58,7 +58,7 @@ func TestChartPerRepoIdentitiesChecksumChangesOnReleaseListChange(t *testing.T) 
 	added, err := exec.Command("helm", "template", "oberth", "../../charts/oberth",
 		"--set", "image.ref=example.invalid/oberth@"+testImageDigest,
 		"--set", "argo.perRepoIdentities[0]=oberth-argo-codeberg-oberthci-oberth-abc123",
-		"--set", "argo.perRepoIdentities[1]=oberth-argo-codeberg-skipops-other-xyz789",
+		"--set", "argo.perRepoIdentities[1]=oberth-argo-codeberg-acme-other-xyz789",
 	).Output()
 	if err != nil {
 		t.Fatalf("render chart with added identity: %v", err)
@@ -87,7 +87,7 @@ func TestChartPerRepoIdentitiesChecksumChangesOnCIListChange(t *testing.T) {
 	added, err := exec.Command("helm", "template", "oberth", "../../charts/oberth",
 		"--set", "image.ref=example.invalid/oberth@"+testImageDigest,
 		"--set", "argo.perRepoCIIdentities[0]=oberth-argo-ci-codeberg-oberthci-oberth-abc123",
-		"--set", "argo.perRepoCIIdentities[1]=oberth-argo-ci-codeberg-skipops-other-xyz789",
+		"--set", "argo.perRepoCIIdentities[1]=oberth-argo-ci-codeberg-acme-other-xyz789",
 	).Output()
 	if err != nil {
 		t.Fatalf("render chart with added CI identity: %v", err)

@@ -166,7 +166,7 @@ func TestPilotPlanAndResourceRemainClosed(t *testing.T) {
 			case "profile":
 				plan.Profile = "candidate-shell"
 			case "retired-profile":
-				plan.Profile = "beacon-transport-amd64-v1"
+				plan.Profile = "example-service-transport-amd64-v1"
 			case "mutable-conductor":
 				plan.ConductorImageRef = "registry.example/conductor:latest"
 			case "same-namespace":

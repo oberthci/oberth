@@ -51,7 +51,7 @@ func (s *Store) RevokeUplink(ctx context.Context, actor, identity, fingerprint, 
 			return model.Uplink{}, err
 		}
 		var active bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM token_credentials WHERE id=? AND activated_at IS NOT NULL AND revoked_at IS NULL)`, next.TokenCredentialID).Scan(&active); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM token_credentials WHERE id=? AND activated_at IS NOT NULL AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>?))`, next.TokenCredentialID, unixNano(s.now())).Scan(&active); err != nil {
 			return model.Uplink{}, err
 		}
 		if !active || next.Admin != value.Admin || !slices.Equal(scope, value.Scope) {
@@ -66,20 +66,11 @@ func (s *Store) RevokeUplink(ctx context.Context, actor, identity, fingerprint, 
 	if revoked.Valid && !pending {
 		return value, nil
 	}
-	if value.Admin && len(value.Scope) == 0 && activated.Valid && !revoked.Valid {
-		var remaining int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM uplinks u JOIN token_credentials t ON t.id=u.token_credential_id WHERE u.id<>? AND u.admin=1 AND t.activated_at IS NOT NULL AND t.revoked_at IS NULL AND NOT EXISTS(SELECT 1 FROM uplink_scopes sc WHERE sc.uplink_id=u.id)`, value.ID).Scan(&remaining); err != nil {
-			return model.Uplink{}, err
-		}
-		if remaining == 0 {
-			return model.Uplink{}, fmt.Errorf("%w: cannot revoke the last active unscoped admin credential", ErrInvalidState)
-		}
-	}
-	now := unixNano(s.now())
-	if _, err := tx.ExecContext(ctx, `DELETE FROM pending_token_credentials WHERE token_credential_id=?`, value.TokenCredentialID); err != nil {
+	if err := guardLastActiveAdmin(ctx, tx, value.ID, unixNano(s.now())); err != nil {
 		return model.Uplink{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE token_credentials SET revoked_at=? WHERE id=?`, now, value.TokenCredentialID); err != nil {
+	now := unixNano(s.now())
+	if _, err := revokeTokenCredentialTx(ctx, tx, value.TokenCredentialID, now); err != nil {
 		return model.Uplink{}, err
 	}
 	details, _ := json.Marshal(map[string]string{"identity": identity, "fingerprint": value.Fingerprint, "replacement_fingerprint": replacement})
@@ -94,4 +85,21 @@ func (s *Store) RevokeUplink(ctx context.Context, actor, identity, fingerprint, 
 		return model.Uplink{}, err
 	}
 	return value, nil
+}
+
+// Both administrative removal and remote revocation must retain a usable
+// installation administrator. Run inside the mutation's serialized transaction.
+func guardLastActiveAdmin(ctx context.Context, tx *sql.Tx, id, now int64) error {
+	var targetActive, otherActive bool
+	const active = `SELECT u.id FROM uplinks u JOIN token_credentials t ON t.id=u.token_credential_id
+WHERE u.admin=1 AND t.activated_at IS NOT NULL AND t.revoked_at IS NULL
+AND (t.expires_at IS NULL OR t.expires_at>?)
+AND NOT EXISTS(SELECT 1 FROM uplink_scopes sc WHERE sc.uplink_id=u.id)`
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM (`+active+`) WHERE id=?), EXISTS(SELECT 1 FROM (`+active+`) WHERE id<>?)`, now, id, now, id).Scan(&targetActive, &otherActive); err != nil {
+		return err
+	}
+	if targetActive && !otherActive {
+		return fmt.Errorf("%w: cannot remove or revoke the last active unscoped admin credential", ErrInvalidState)
+	}
+	return nil
 }

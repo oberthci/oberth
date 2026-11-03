@@ -4,11 +4,10 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type fallbackJobs struct {
@@ -16,10 +15,10 @@ type fallbackJobs struct {
 	graph bool
 }
 
-func (j fallbackJobs) PipelineSize(context.Context, JobRequest) (periapsis.Size, error) {
-	return periapsis.M, nil
+func (j fallbackJobs) PipelineSize(context.Context, WorkflowRequest) (pipeline.Size, error) {
+	return pipeline.M, nil
 }
-func (j fallbackJobs) PipelineKubeVirt(ctx context.Context, req JobRequest) (KubeVirtResources, error) {
+func (j fallbackJobs) PipelineKubeVirt(ctx context.Context, req WorkflowRequest) (KubeVirtResources, error) {
 	if !j.graph {
 		return j.declaredJobs.PipelineKubeVirt(ctx, req)
 	}
@@ -47,11 +46,11 @@ spec:
 	return KubeVirtResources{Receipt: receipt}, err
 }
 
-func TestDeclaredGraphAndBudgetFallbackReachSubmission(t *testing.T) {
+func TestDeclaredGraphAndBudgetAreRefusedBeforeSubmission(t *testing.T) {
 	for _, graph := range []bool{false, true} {
 		t.Run(map[bool]string{false: "budget", true: "graph"}[graph], func(t *testing.T) {
-			f := newConcurrencyFixture(t, periapsis.M, 3)
-			jobs := newConcurrentJobs(periapsis.M, 2)
+			f := newConcurrencyFixture(t, pipeline.M, 3)
+			jobs := newConcurrentJobs(pipeline.M, 2)
 			f.scheduler.jobs = fallbackJobs{declaredJobs: declaredJobs{jobs}, graph: graph}
 			if !graph {
 				f.scheduler.admission.resources.CPUMilli = 1000
@@ -64,40 +63,30 @@ func TestDeclaredGraphAndBudgetFallbackReachSubmission(t *testing.T) {
 			done := make(chan error, 1)
 			go func() { done <- f.scheduler.Run(ctx) }()
 			defer func() { close(jobs.release); cancel(); <-done }()
-			select {
-			case id := <-jobs.admitted:
-				if id != run.ID || !strings.Contains(f.scheduler.ResourceAdmissionMessage(id), "legacy size") {
-					t.Fatal("fallback was refused or lost its notice")
-				}
-			case <-time.After(testStartTimeout(10 * time.Second)):
-				t.Fatal("fallback never reached submission")
+			failed := awaitRunStatus(t, f, run.ID, model.RunFailed)
+			want := "numeric budget"
+			if graph {
+				want = "graph"
 			}
-		})
-	}
-}
+			if !strings.Contains(failed.Error, want) {
+				t.Fatalf("wrong refusal: %s", failed.Error)
+			}
+			select {
+			case <-jobs.admitted:
+				t.Fatal("unsafe declared workflow submitted")
+			default:
+			}
 
-func TestDeclaredBudgetFallbackAdmitsAndExplains(t *testing.T) {
-	g := newWeightedAdmission(6)
-	r := g.reserve(1)
-	release := acquireRequestWithinBudget(t, r, admissionRequest{RunID: strings.Repeat("a", 32), Size: periapsis.S, Pods: &argoworkflow.PodDemand{CPUMilli: 8000, MemoryBytes: 16 << 30, Pods: 2}})
-	defer release()
-	if r.pods != nil || r.weight != 1 || r.fallback != model.ResourceFallbackBudget {
-		t.Fatalf("not legacy: %+v", r)
-	}
-	api := &API{admission: &Scheduler{admission: g}}
-	runs := []model.Run{{ID: r.runID, DisplayReason: "Priority normal: ordinary run."}}
-	api.applyResourceMessages(t.Context(), runs)
-	if !strings.Contains(runs[0].ResourceMessage, "legacy size") || runs[0].DisplayReason != "Priority normal: ordinary run." {
-		t.Fatal("fallback notice missing or replaced reason")
+		})
 	}
 }
 
 func TestFallbackSurvivesUncertainCreateRecovery(t *testing.T) {
 	for _, reason := range []model.ResourceAdmissionFallback{model.ResourceFallbackGraph, model.ResourceFallbackMemory, model.ResourceFallbackRequests} {
 		t.Run(string(reason), func(t *testing.T) {
-			f := newConcurrencyFixture(t, periapsis.M, 3)
-			run := model.Run{ID: strings.Repeat("a", 32), JobName: "step-abc12345", SHA: strings.Repeat("b", 40), RepoID: f.repo.ID, QueueSequence: 1}
-			if err := f.scheduler.recordResourceAdmission(run, run.JobName, periapsis.M, argoworkflow.VMIDemand{}, nil, reason); err != nil {
+			f := newConcurrencyFixture(t, pipeline.M, 3)
+			run := model.Run{ID: strings.Repeat("a", 32), WorkflowName: "step-abc12345", SHA: strings.Repeat("b", 40), RepoID: f.repo.ID, QueueSequence: 1}
+			if err := f.scheduler.recordResourceAdmission(run, run.WorkflowName, pipeline.M, argoworkflow.VMIDemand{}, nil, reason); err != nil {
 				t.Fatal(err)
 			}
 			r, err := f.scheduler.restoreCreateGrant(run, nil)
@@ -111,9 +100,9 @@ func TestFallbackSurvivesUncertainCreateRecovery(t *testing.T) {
 func TestDeclaredVMAndSmallRunsShareButCellLimitRemains(t *testing.T) {
 	g := newWeightedAdmission(6)
 	vm := &KubeVirtResources{Demand: argoworkflow.VMIDemand{VMs: 1, Cores: 2, MemoryBytes: 4 << 30}, Limit: argoworkflow.VMIDemand{VMs: 1, Cores: 2, MemoryBytes: 4 << 30}}
-	releaseVM := acquireRequestWithinBudget(t, g.reserve(1), admissionRequest{RunID: "step-abc12345", RepoID: 1, Size: periapsis.XL, KubeVirt: vm, Pods: &argoworkflow.PodDemand{CPUMilli: 2600, MemoryBytes: (5 << 30) + (256 << 20), Pods: 1}})
+	releaseVM := acquireRequestWithinBudget(t, g.reserve(1), admissionRequest{RunID: "step-abc12345", RepoID: 1, Size: pipeline.XL, KubeVirt: vm, Pods: &argoworkflow.PodDemand{CPUMilli: 2600, MemoryBytes: (5 << 30) + (256 << 20), Pods: 1}})
 	defer releaseVM()
-	releaseSmall := acquireRequestWithinBudget(t, g.reserve(2), admissionRequest{RunID: "step-11111111", RepoID: 1, Size: periapsis.M, Pods: &argoworkflow.PodDemand{CPUMilli: 500, MemoryBytes: 1 << 30, Pods: 1}})
+	releaseSmall := acquireRequestWithinBudget(t, g.reserve(2), admissionRequest{RunID: "step-11111111", RepoID: 1, Size: pipeline.M, Pods: &argoworkflow.PodDemand{CPUMilli: 500, MemoryBytes: 1 << 30, Pods: 1}})
 	defer releaseSmall()
 	g.mu.Lock()
 	defer g.mu.Unlock()

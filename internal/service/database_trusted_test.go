@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -15,24 +16,26 @@ import (
 
 type deadlinePreflight struct {
 	*protectedFixture
-	executedRunID string
-	executed      atomic.Int64
-	recovered     atomic.Int64
+	executed      sync.Map // run ID -> *atomic.Int64; automatic retries are separate executions.
+	recovered     sync.Map // run ID -> *atomic.Int64
 	failure       error
 	beforeCleanup func()
 }
 
-func (p *deadlinePreflight) Execute(ctx context.Context, job JobRequest, requirement vmrunner.Requirement, output io.Writer) error {
-	if job.Run.ID == p.executedRunID {
-		p.executed.Add(1)
-	}
+func preflightCallCount(calls *sync.Map, runID string) *atomic.Int64 {
+	value, _ := calls.LoadOrStore(runID, &atomic.Int64{})
+	return value.(*atomic.Int64)
+}
+
+func (p *deadlinePreflight) Execute(ctx context.Context, job WorkflowRequest, requirement vmrunner.Requirement, output io.Writer) error {
+	preflightCallCount(&p.executed, job.Run.ID).Add(1)
 	if err := p.protectedFixture.Execute(ctx, job, requirement, output); err == nil {
 		return nil
 	}
 	return p.failure
 }
 func (p *deadlinePreflight) RecoverRun(ctx context.Context, id string) error {
-	if p.recovered.Add(1) < 3 {
+	if preflightCallCount(&p.recovered, id).Add(1) < 3 {
 		return deadlineBusyError(5)
 	}
 	if p.beforeCleanup != nil {
@@ -69,7 +72,6 @@ func testDatabasePreflightRetainsUntilCleanup(t *testing.T, failure error) {
 	}
 	// KVM restart recovery may enqueue and execute a separate retry before
 	// the poll below observes the parent terminalizing. Count this parent only.
-	executor.executedRunID = queued.ID
 	done, _ := startDeadlineScheduler(t, fixture.scheduler)
 	timer := time.NewTimer(testStartTimeout(15 * time.Second))
 	defer timer.Stop()
@@ -85,9 +87,20 @@ func testDatabasePreflightRetainsUntilCleanup(t *testing.T, failure error) {
 				t.Fatal(err)
 			}
 			if run.Status.Terminal() {
-				if run.Status != model.RunInterrupted || executor.executed.Load() != 1 || executor.recovered.Load() != 3 || fixture.scheduler.DatabaseRetries() < 3 {
-					t.Fatalf("unsafe preflight replay/result: run=%+v execute=%d recover=%d retries=%d", run, executor.executed.Load(), executor.recovered.Load(), fixture.scheduler.DatabaseRetries())
+				executed := preflightCallCount(&executor.executed, queued.ID).Load()
+				recovered := preflightCallCount(&executor.recovered, queued.ID).Load()
+				if run.Status != model.RunInterrupted || executed != 1 || recovered != 3 || fixture.scheduler.DatabaseRetries() < 3 {
+					t.Fatalf("unsafe preflight replay/result: run=%+v execute=%d recover=%d retries=%d", run, executed, recovered, fixture.scheduler.DatabaseRetries())
 				}
+				// The scheduler may already have started the admitted retry.
+				// Neither that new run nor the original may execute twice.
+				executor.executed.Range(func(key, value any) bool {
+					id := key.(string)
+					if value.(*atomic.Int64).Load() != 1 || (id != queued.ID && id != run.SupersededBy) {
+						t.Errorf("unexpected preflight execution: run=%s count=%d original=%s retry=%s", id, value.(*atomic.Int64).Load(), queued.ID, run.SupersededBy)
+					}
+					return true
+				})
 				state, err := fixture.store.KVMPreflight(t.Context(), queued.ID)
 				if err != nil || !state.Cleaned {
 					t.Fatal("parent settled before cleanup", state, err)

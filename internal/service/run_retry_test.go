@@ -10,6 +10,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type retryEnqueueObserver struct{ accepted string }
@@ -29,7 +30,7 @@ func TestRunRetryToolQueuesRunAndChecksMutationGate(t *testing.T) {
 	service := fixture.api(t)
 	service.runRetries = fixture.store
 	ctx := context.Background()
-	source, err := fixture.store.EnqueueRun(ctx, model.RunSpec{RepoID: fixture.repo.ID,
+	source, err := storetest.EnqueueRun(fixture.store, ctx, model.RunSpec{RepoID: fixture.repo.ID,
 		RefKind: model.RefBranch, Ref: "feature/retry", SHA: strings.Repeat("a", 40), Actor: "pusher", Trigger: "branch"})
 	if err != nil {
 		t.Fatal(err)

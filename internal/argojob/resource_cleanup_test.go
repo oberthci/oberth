@@ -305,7 +305,7 @@ func TestCleanupVerdictPreservesPipelineFailure(t *testing.T) {
 	}
 	c.kube = cleanupKubeClient()
 	c.WithVMIClient(cleanupClient())
-	completion := Completion{Succeeded: false, FailedBurn: "test", FailedStep: "driver", Reason: "guest failed"}
+	completion := Completion{Succeeded: false, FailedStage: "test", FailedStep: "driver", Reason: "guest failed"}
 	var log bytes.Buffer
 	c.cleanupVerdict(t.Context(), wf, wf.Annotations[runIDAnnotation], &log, &completion)
 	if completion.Succeeded || completion.FailedStep != "driver" || completion.Reason != "guest failed" || completion.Steps[0].Status != runprogress.StepPassed {
@@ -541,7 +541,7 @@ func TestCleanupVerdictFailureAttribution(t *testing.T) {
 				}
 				completion := Completion{Succeeded: !pipelineFailed}
 				if pipelineFailed {
-					completion.FailedBurn = "test"
+					completion.FailedStage = "test"
 					completion.FailedStep = "driver"
 					completion.Reason = "guest failed"
 				}

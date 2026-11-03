@@ -33,9 +33,9 @@ func TestProducePerRepoIdentitiesFromQualifiedGrants(t *testing.T) {
 - repo: codeberg/oberthci/oberth
   step: "*"
   secret: oberth/data/release/r2-token
-- repo: github/skipops/terraform
+- repo: github/acme/terraform
   step: "*"
-  secret: oberth/upstream/skipops/terraform/plan/gcp-sa
+  secret: oberth/upstream/acme/terraform/plan/gcp-sa
 `,
 		},
 	}
@@ -66,8 +66,8 @@ func TestProducePerRepoIdentitiesFromQualifiedGrants(t *testing.T) {
 		t.Fatalf("expected 2 grants for oberth, got %d", len(result[0].Grants))
 	}
 
-	// Second: terraform (github/skipops)
-	if result[1].Upstream != "github" || result[1].Org != "skipops" || result[1].Repo != "terraform" {
+	// Second: terraform (github/acme)
+	if result[1].Upstream != "github" || result[1].Org != "acme" || result[1].Repo != "terraform" {
 		t.Fatalf("unexpected identity[1]: %+v", result[1])
 	}
 }
@@ -143,8 +143,8 @@ func TestProduceFromAccessListParsesQualifiedOutput(t *testing.T) {
 	// Simulate the tabwriter-formatted output of `oberth access list`.
 	accessListOutput := strings.Join([]string{
 		"REPO                                        STEP   SECRET                                             APPROVED BY                            APPROVED AT        STATUS",
-		"codeberg/acme/acme-beacon       *      oberth/data/release/cosign-secret                  admin@localhost+configmap@rv=225951    2026-08-21 16:40   active",
-		"codeberg/acme/acme-beacon       *      oberth/data/release/gar-sa-key                     admin@localhost+configmap@rv=225949    2026-08-21 16:40   active",
+		"codeberg/acme/acme-example-service       *      oberth/data/release/cosign-secret                  admin@localhost+configmap@rv=225951    2026-08-21 16:40   active",
+		"codeberg/acme/acme-example-service       *      oberth/data/release/gar-sa-key                     admin@localhost+configmap@rv=225949    2026-08-21 16:40   active",
 		"codeberg/acme/terraform               *      oberth/upstream/acme/terraform/credentials   configmap@rv=699072                    2026-08-23 22:23   active",
 		"github/oberthci/oberth                      *      oberth/data/release/cosign-secret                  configmap@rv=18991                     2026-08-18 08:54   active",
 		"github/oberthci/oberth                      *      oberth/data/release/r2-upload-token                admin@localhost+configmap@rv=18990     2026-08-18 08:54   active",
@@ -177,12 +177,12 @@ func TestProduceFromAccessListParsesQualifiedOutput(t *testing.T) {
 		return key(result[i]) < key(result[j])
 	})
 
-	// acme-beacon: 2 grants
-	if result[0].Upstream != "codeberg" || result[0].Org != "acme" || result[0].Repo != "acme-beacon" {
+	// acme-example-service: 2 grants
+	if result[0].Upstream != "codeberg" || result[0].Org != "acme" || result[0].Repo != "acme-example-service" {
 		t.Fatalf("unexpected identity[0]: %+v", result[0])
 	}
 	if len(result[0].Grants) != 2 {
-		t.Fatalf("expected 2 grants for acme-beacon, got %d: %v", len(result[0].Grants), result[0].Grants)
+		t.Fatalf("expected 2 grants for acme-example-service, got %d: %v", len(result[0].Grants), result[0].Grants)
 	}
 
 	// terraform: 1 upstream grant
@@ -279,7 +279,7 @@ func TestParseAccessListJSONQualifiedEntries(t *testing.T) {
 	entries := []accessListJSONEntry{
 		{Repo: "codeberg/oberthci/oberth", Step: "release", Secret: "oberth/data/release/cosign-secret"},
 		{Repo: "codeberg/oberthci/oberth", Step: "release", Secret: "oberth/data/release/r2-upload-token"},
-		{Repo: "github/skipops/terraform", Step: "*", Secret: "oberth/upstream/skipops/terraform/gcp-sa"},
+		{Repo: "github/acme/terraform", Step: "*", Secret: "oberth/upstream/acme/terraform/gcp-sa"},
 	}
 	data, _ := json.Marshal(entries)
 	result, err := ParseAccessListJSON(data)
@@ -537,8 +537,8 @@ func TestProducerOutputAcceptedByConfigurePerRepoIdentities(t *testing.T) {
 	// Simulate access list output with both data-prefix and upstream-prefix grants.
 	accessListOutput := strings.Join([]string{
 		"REPO                                        STEP   SECRET                                             APPROVED BY       APPROVED AT        STATUS",
-		"codeberg/acme/acme-beacon       *      oberth/data/release/cosign-secret                  admin             2026-08-21 16:40   active",
-		"codeberg/acme/acme-beacon       *      oberth/data/release/gar-sa-key                     admin             2026-08-21 16:40   active",
+		"codeberg/acme/acme-example-service       *      oberth/data/release/cosign-secret                  admin             2026-08-21 16:40   active",
+		"codeberg/acme/acme-example-service       *      oberth/data/release/gar-sa-key                     admin             2026-08-21 16:40   active",
 		"codeberg/acme/terraform               *      oberth/upstream/acme/terraform/credentials   admin             2026-08-23 22:23   active",
 	}, "\n")
 
@@ -563,22 +563,22 @@ func TestProducerOutputAcceptedByConfigurePerRepoIdentities(t *testing.T) {
 
 	// Script bao responses for both identities' policy + role operations,
 	// including the CI-tier per-repo identities added by issue #433.
-	beaconName := PerRepoName("codeberg", "acme", "acme-beacon")
+	serviceName := PerRepoName("codeberg", "acme", "acme-example-service")
 	terraformName := PerRepoName("codeberg", "acme", "terraform")
-	beaconCIName := PerRepoCIName("codeberg", "acme", "acme-beacon")
+	serviceCIName := PerRepoCIName("codeberg", "acme", "acme-example-service")
 	terraformCIName := PerRepoCIName("codeberg", "acme", "terraform")
 
 	responses := map[string]fakeBaoResponse{
-		// beacon: release policy and role not yet present
-		"policy read " + beaconName:                            {out: "No policy named: " + beaconName, err: errors.New("exit status 2")},
-		"policy write " + beaconName + " -":                    {out: "Success!"},
-		"read -format=json auth/kubernetes/role/" + beaconName: {out: "No value found", err: errors.New("exit status 2")},
-		"write auth/kubernetes/role/" + beaconName + " -":      {out: "Success!"},
-		// beacon: CI policy and role not yet present
-		"policy read " + beaconCIName:                            {out: "No policy named: " + beaconCIName, err: errors.New("exit status 2")},
-		"policy write " + beaconCIName + " -":                    {out: "Success!"},
-		"read -format=json auth/kubernetes/role/" + beaconCIName: {out: "No value found", err: errors.New("exit status 2")},
-		"write auth/kubernetes/role/" + beaconCIName + " -":      {out: "Success!"},
+		// example-service: release policy and role not yet present
+		"policy read " + serviceName:                            {out: "No policy named: " + serviceName, err: errors.New("exit status 2")},
+		"policy write " + serviceName + " -":                    {out: "Success!"},
+		"read -format=json auth/kubernetes/role/" + serviceName: {out: "No value found", err: errors.New("exit status 2")},
+		"write auth/kubernetes/role/" + serviceName + " -":      {out: "Success!"},
+		// example-service: CI policy and role not yet present
+		"policy read " + serviceCIName:                            {out: "No policy named: " + serviceCIName, err: errors.New("exit status 2")},
+		"policy write " + serviceCIName + " -":                    {out: "Success!"},
+		"read -format=json auth/kubernetes/role/" + serviceCIName: {out: "No value found", err: errors.New("exit status 2")},
+		"write auth/kubernetes/role/" + serviceCIName + " -":      {out: "Success!"},
 		// terraform: release policy and role not yet present
 		"policy read " + terraformName:                            {out: "No policy named: " + terraformName, err: errors.New("exit status 2")},
 		"policy write " + terraformName + " -":                    {out: "Success!"},
@@ -721,7 +721,7 @@ func TestParseAccessListJSONWithStepsSplitsPerRepoAndPerStepPaths(t *testing.T) 
 func TestParseAccessListJSONNamedOnlyRepoKeepsIdentityWithoutGrants(t *testing.T) {
 	t.Parallel()
 	entries := []accessListJSONEntry{
-		{Repo: "codeberg/exampleorg/cttv", Step: "release-publish-images", Secret: "oberth/data/release/gar-image-key"},
+		{Repo: "codeberg/exampleorg/example-web", Step: "release-publish-images", Secret: "oberth/data/release/gar-image-key"},
 	}
 	data, _ := json.Marshal(entries)
 	result, err := ParseAccessListJSON(data)
@@ -734,7 +734,7 @@ func TestParseAccessListJSONNamedOnlyRepoKeepsIdentityWithoutGrants(t *testing.T
 	if len(result[0].Grants) != 0 {
 		t.Fatalf("named-only repo must have no per-repo grants, got %v", result[0].Grants)
 	}
-	if result[0].Repo != "cttv" || result[0].Org != "exampleorg" || result[0].Upstream != "codeberg" {
+	if result[0].Repo != "example-web" || result[0].Org != "exampleorg" || result[0].Upstream != "codeberg" {
 		t.Fatalf("unexpected identity: %+v", result[0])
 	}
 }
@@ -787,5 +787,23 @@ func TestProduceFromConfigMapExcludesNamedStepGrants(t *testing.T) {
 	}
 	if got, want := result[0].Grants, []string{"oberth/data/release/cosign-secret"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("ConfigMap per-repo grants: got %v want %v", got, want)
+	}
+}
+
+func TestSyncRefusesConfigMapFallbackDesiredSet(t *testing.T) {
+	kube := fake.NewSimpleClientset(&corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: secretAccessConfigMapName, Namespace: "oberth"},
+		Data:       map[string]string{secretAccessConfigMapKey: "- repo: bare\n  step: '*'\n  secret: oberth/data/key\n"},
+	})
+	failedExec := func(context.Context, []byte, string, ...string) ([]byte, error) {
+		return nil, errors.New("exec unavailable")
+	}
+	_, _, err := ProducePerRepoIdentitiesForSync(t.Context(), kube, failedExec, "", "oberth")
+	if err == nil {
+		t.Fatal("sync accepted a partial ConfigMap desired set for orphan removal")
+	}
+	_, _, err = ProducePerRepoIdentitiesForSync(t.Context(), kube, nil, "", "oberth")
+	if err == nil {
+		t.Fatal("sync accepted ConfigMap-only desired set")
 	}
 }

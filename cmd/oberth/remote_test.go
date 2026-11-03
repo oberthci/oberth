@@ -206,7 +206,7 @@ func TestLogHidesExecutorLinesUnlessRaw(t *testing.T) {
 	}
 }
 
-func TestLogRequiresBurnAndStep(t *testing.T) {
+func TestLogRequiresStageAndStep(t *testing.T) {
 	configure(t, remoteServer(t, `{}`))
 	var out bytes.Buffer
 	err := runRemoteLog(context.Background(), []string{"run-abc"}, &out)
@@ -418,12 +418,13 @@ func TestRunsRejectsPositionalArgs(t *testing.T) {
 
 // --- #445: short run ID resolution ---
 
-func TestLogResolvesShortRunID(t *testing.T) {
+func TestLogDelegatesShortRunIDResolution(t *testing.T) {
 	var requestedPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/runs" {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`[{"ID":"abcdef1234567890abcdef1234567890","Ref":"main","SHA":"0123456789abcdef","Status":"ok"}]`))
+			t.Error("short ID lookup must not list runs")
+			http.Error(w, "list forbidden", http.StatusForbidden)
 			return
 		}
 		requestedPath = r.URL.Path
@@ -438,17 +439,18 @@ func TestLogResolvesShortRunID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(requestedPath, "abcdef1234567890abcdef1234567890") {
-		t.Fatalf("short ID was not resolved; requested path = %q", requestedPath)
+	if requestedPath != "/api/runs/abcdef12/logs" {
+		t.Fatalf("short ID was not passed to the server; requested path = %q", requestedPath)
 	}
 }
 
-func TestArtifactsResolvesShortRunID(t *testing.T) {
+func TestArtifactsDelegatesShortRunIDResolution(t *testing.T) {
 	var requestedPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/runs" {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`[{"ID":"abcdef1234567890abcdef1234567890","Ref":"main","SHA":"0123456789abcdef","Status":"ok"}]`))
+			t.Error("short ID lookup must not list runs")
+			http.Error(w, "list forbidden", http.StatusForbidden)
 			return
 		}
 		requestedPath = r.URL.Path
@@ -463,8 +465,8 @@ func TestArtifactsResolvesShortRunID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(requestedPath, "abcdef1234567890abcdef1234567890") {
-		t.Fatalf("short ID was not resolved; requested path = %q", requestedPath)
+	if requestedPath != "/api/runs/abcdef12/artifacts" {
+		t.Fatalf("short ID was not passed to the server; requested path = %q", requestedPath)
 	}
 }
 
@@ -507,8 +509,8 @@ func TestRunsAllFollowsPages(t *testing.T) {
 }
 
 // Against a server older than paging, which ignores ?before and repeats the
-// newest page, --all and short-ID resolution must stop instead of looping
-// or counting each run once per repeated page (review finding).
+// newest page, --all must stop instead of duplicating rows. Short-ID reads
+// go directly to the server and do not enumerate any page.
 func TestRunPagingStopsWhenServerIgnoresCursor(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -537,10 +539,10 @@ func TestRunPagingStopsWhenServerIgnoresCursor(t *testing.T) {
 	}
 	requests = 0
 	if err := runRemoteLog(context.Background(), []string{"--burn", "ci", "--step", "test", "abcdef12"}, &out); err != nil {
-		t.Fatalf("short ID must resolve once against an old server: %v", err)
+		t.Fatalf("short ID must be passed through once: %v", err)
 	}
-	if requests > 4 {
-		t.Fatalf("short-ID resolution made %d requests against an old server", requests)
+	if requests != 1 {
+		t.Fatalf("short-ID read made %d requests; want one direct read", requests)
 	}
 }
 

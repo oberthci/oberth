@@ -12,7 +12,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type contractSubmitFailureStore struct{ SchedulerStore }
@@ -40,7 +40,7 @@ func TestWorkflowCreateContractCleanupAfterDefiniteFailure(t *testing.T) {
 			jobs := &contractFailureJobs{pendingCreateJobs: &pendingCreateJobs{fakeJobs: f.jobs}}
 			f.scheduler.jobs = jobs
 			if mode == "create-rejected" {
-				jobs.createHook = func(context.Context, JobRequest) error { return errors.New("create rejected") }
+				jobs.createHook = func(context.Context, WorkflowRequest) error { return errors.New("create rejected") }
 			} else {
 				f.scheduler.store = &contractSubmitFailureStore{SchedulerStore: f.store}
 			}
@@ -72,10 +72,10 @@ func TestWorkflowCreateContractTerminalSweepRespectsPendingCancellation(t *testi
 	f := newRecoveryFixture(t)
 	run := recoveryWaitingRun(t, f, "feature/contract-sweep", "wf-contract", "")
 	scheduler := f.scheduler(t, &recoveryJobs{})
-	if err := scheduler.recordCreateAdmission(run, run.JobName, periapsis.S, argoworkflow.VMIDemand{}); err != nil {
+	if err := scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S, argoworkflow.VMIDemand{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.store.MarkRunCreatePending(t.Context(), run.ID, run.JobName); err != nil {
+	if err := f.store.MarkRunCreatePending(t.Context(), run.ID, run.WorkflowName); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.store.CancelRun(t.Context(), model.RunCancelRequest{RunID: run.ID, Actor: "operator"}); err != nil {
@@ -87,7 +87,7 @@ func TestWorkflowCreateContractTerminalSweepRespectsPendingCancellation(t *testi
 	if _, err := os.Stat(scheduler.createAdmissionPath(run.ID)); err != nil {
 		t.Fatal("pending cancellation lost recovery metadata", err)
 	}
-	if err := f.store.CompleteRunCancellation(t.Context(), run.ID, run.JobName); err != nil {
+	if err := f.store.CompleteRunCancellation(t.Context(), run.ID, run.WorkflowName); err != nil {
 		t.Fatal(err)
 	}
 	if err := scheduler.recoverOwnedWorkspaces(t.Context()); err != nil {
@@ -126,7 +126,7 @@ func TestWorkflowCreateRestoreFailureRegistersAndRetries(t *testing.T) {
 	scheduler := f.scheduler(t, jobs)
 	now := time.Now()
 	scheduler.createNow = func() time.Time { return now }
-	if err := scheduler.recordCreateAdmission(run, run.JobName, periapsis.S, argoworkflow.VMIDemand{}); err != nil {
+	if err := scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S, argoworkflow.VMIDemand{}); err != nil {
 		t.Fatal(err)
 	}
 	// An existing ungranted reservation makes both normal and quarantine
@@ -182,7 +182,7 @@ func TestWorkflowCreateConcurrentRegistrationHasOneGrant(t *testing.T) {
 	f := newRecoveryFixture(t)
 	run := recoveryWaitingRun(t, f, "feature/register-once", "wf-once", "")
 	scheduler := f.scheduler(t, &recoveryJobs{})
-	if err := scheduler.recordCreateAdmission(run, run.JobName, periapsis.S, argoworkflow.VMIDemand{}); err != nil {
+	if err := scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S, argoworkflow.VMIDemand{}); err != nil {
 		t.Fatal(err)
 	}
 	var workers sync.WaitGroup

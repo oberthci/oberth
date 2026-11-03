@@ -7,7 +7,7 @@ import (
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 const (
@@ -96,7 +96,7 @@ func mountPaths(container *corev1.Container, volumeName string) []string {
 // branch run receives a writable node-local directory scoped to its repository,
 // and is told where it is.
 func TestBuildInjectsThePersistentCache(t *testing.T) {
-	workflow, err := Build(cachingConfig(), testRequest(periapsis.TriggerCI, greedyCacheDocument))
+	workflow, err := Build(cachingConfig(), testRequest(pipeline.TriggerCI, greedyCacheDocument))
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -139,11 +139,11 @@ func TestBuildInjectsThePersistentCache(t *testing.T) {
 // to the same directory, and neither may sit inside the other.
 func TestBuildKeepsTheCacheTiersApart(t *testing.T) {
 	config := cachingConfig()
-	ciWorkflow, err := Build(config, testRequest(periapsis.TriggerCI, greedyCacheDocument))
+	ciWorkflow, err := Build(config, testRequest(pipeline.TriggerCI, greedyCacheDocument))
 	if err != nil {
 		t.Fatalf("Build(CI): %v", err)
 	}
-	releaseWorkflow, err := Build(config, testRequest(periapsis.TriggerRelease, greedyCacheDocument))
+	releaseWorkflow, err := Build(config, testRequest(pipeline.TriggerRelease, greedyCacheDocument))
 	if err != nil {
 		t.Fatalf("Build(release): %v", err)
 	}
@@ -174,8 +174,8 @@ func TestBuildKeepsTheCacheTiersApart(t *testing.T) {
 // of another's, which is what makes a shared node safe to cache on at all.
 func TestBuildSeparatesCachesByRepository(t *testing.T) {
 	config := cachingConfig()
-	first := testRequest(periapsis.TriggerCI, greedyCacheDocument)
-	second := testRequest(periapsis.TriggerCI, greedyCacheDocument)
+	first := testRequest(pipeline.TriggerCI, greedyCacheDocument)
+	second := testRequest(pipeline.TriggerCI, greedyCacheDocument)
 	second.Repo = "acme-wrapper"
 
 	firstWorkflow, err := Build(config, first)
@@ -196,7 +196,7 @@ func TestBuildSeparatesCachesByRepository(t *testing.T) {
 // TestBuildOmitsTheCacheWhenTheTierHasNoRoot proves the feature is optional and
 // fails open into "slow", never into "broken".
 func TestBuildOmitsTheCacheWhenTheTierHasNoRoot(t *testing.T) {
-	workflow, err := Build(testConfig(), testRequest(periapsis.TriggerCI, greedyCacheDocument))
+	workflow, err := Build(testConfig(), testRequest(pipeline.TriggerCI, greedyCacheDocument))
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestBuildOmitsTheCacheWhenTheTierHasNoRoot(t *testing.T) {
 // TestBuildStripsARepositoryMountAtTheCachePath proves the server owns the path,
 // not just the volume name: a document mounting anything at /work/cache loses it.
 func TestBuildStripsARepositoryMountAtTheCachePath(t *testing.T) {
-	workflow, err := Build(cachingConfig(), testRequest(periapsis.TriggerCI, greedyCacheDocument))
+	workflow, err := Build(cachingConfig(), testRequest(pipeline.TriggerCI, greedyCacheDocument))
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestBuildStripsARepositoryMountAtTheCachePath(t *testing.T) {
 // single-walk invariant: the cache and the checkout are attached in one pass, so
 // adding one must not strip the other.
 func TestBuildKeepsTheSourceMountAlongsideTheCache(t *testing.T) {
-	request := testRequest(periapsis.TriggerCI, greedyCacheDocument)
+	request := testRequest(pipeline.TriggerCI, greedyCacheDocument)
 	request.SourceVolume = SourceVolume{ClaimName: "run-claim", SubPath: "src"}
 	workflow, err := Build(cachingConfig(), request)
 	if err != nil {
@@ -336,7 +336,7 @@ spec:
                 image: golang:1.26-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd
                 command: [/bin/true]
 `
-	workflow, err := Build(cachingConfig(), testRequest(periapsis.TriggerCI, inlineDocument))
+	workflow, err := Build(cachingConfig(), testRequest(pipeline.TriggerCI, inlineDocument))
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -355,7 +355,7 @@ spec:
 // TestCacheRootForRefusesAnUnknownTrigger fails closed: a trigger the switch
 // does not recognise gets no writable node directory at all.
 func TestCacheRootForRefusesAnUnknownTrigger(t *testing.T) {
-	if root := cachingConfig().cacheRootFor(periapsis.Trigger("promotion-of-some-kind")); root != "" {
+	if root := cachingConfig().cacheRootFor(pipeline.Trigger("promotion-of-some-kind")); root != "" {
 		t.Fatalf("an unknown trigger resolved to cache root %q", root)
 	}
 }

@@ -67,7 +67,7 @@
 - Repository code runs only in a Job with no Kubernetes credentials.
 - Every Job has CPU, memory, and ephemeral-storage limits; its writable
   `emptyDir` is size-bounded, retained logs are bounded per step (32 MiB) and
-  per run (64 MiB) with a breach failing the run rather than silently
+  per run (64 MiB by default; `--run-log-limit-bytes`) with a breach failing the run rather than silently
   truncating its evidence, and the shared PVC is provisioned at a fixed
   capacity.
 - CI Jobs have no Secret volumes. Release Secrets and writable caches are wholly

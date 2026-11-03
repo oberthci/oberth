@@ -5,13 +5,10 @@ coverage.out
 /oberth
 *.test
 .worktrees/
-website/node_modules/
-website/.wrangler/
 .claude/settings.local.json
 
 # Loose binary artifacts
 oberth-*
-!cmd/oberth-node-bridge/
 !cmd/oberth-kvm-harness/
 # Host service files shipped from deploy/systemd (issue 056).
 !deploy/systemd/oberth-*

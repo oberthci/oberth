@@ -16,6 +16,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
@@ -42,7 +43,7 @@ func TestReposWithDueTokenUseWhileWriterHeld(t *testing.T) {
 				t.Run(map[bool]string{false: "first-use", true: "expired-touch"}[usedBefore], func(t *testing.T) {
 					now := time.Now().UTC()
 					path := filepath.Join(t.TempDir(), "repos.sqlite")
-					db, err := store.Open(t.Context(), path, store.Options{Now: func() time.Time { return now }})
+					db, err := storetest.Open(t.Context(), path, store.Options{Now: func() time.Time { return now }})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -52,7 +53,7 @@ func TestReposWithDueTokenUseWhileWriterHeld(t *testing.T) {
 					}
 					var output bytes.Buffer
 					credential, err := (auth.Issuer{Tokens: db, Bind: func(ctx context.Context, pending model.TokenCredential) error {
-						_, err := db.UpsertUplink(ctx, model.UplinkSpec{Identity: "reader", Fingerprint: "SHA256:reader", TokenCredentialID: pending.ID, AuthActor: "test"})
+						_, err := storetest.UpsertUplink(db, ctx, model.UplinkSpec{Identity: "reader", Fingerprint: "SHA256:reader", TokenCredentialID: pending.ID, AuthActor: "test"})
 						return err
 					}}).Issue(t.Context(), "reader", &output)
 					if err != nil {
@@ -116,7 +117,7 @@ func TestReposWithDueTokenUseWhileWriterHeld(t *testing.T) {
 					// Once the writer is available, usage must eventually be recorded.
 					deadline := time.Now().Add(testtimeout.Start(2 * time.Second))
 					for {
-						got, err := db.TokenCredentialByDigest(t.Context(), credential.Digest)
+						got, err := storetest.TokenCredentialByDigest(db, t.Context(), credential.Digest)
 						if err != nil {
 							t.Fatal(err)
 						}

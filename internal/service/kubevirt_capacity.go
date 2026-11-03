@@ -37,10 +37,10 @@ func (resources KubeVirtResources) Validate() error {
 // PipelineKubeVirtSizer reads the same immutable document used for submission.
 // Engines without VMI resources need not implement it.
 type PipelineKubeVirtSizer interface {
-	PipelineKubeVirt(context.Context, JobRequest) (KubeVirtResources, error)
+	PipelineKubeVirt(context.Context, WorkflowRequest) (KubeVirtResources, error)
 }
 
-func (scheduler *Scheduler) pipelineKubeVirt(ctx context.Context, request JobRequest) (KubeVirtResources, error) {
+func (scheduler *Scheduler) pipelineKubeVirt(ctx context.Context, request WorkflowRequest) (KubeVirtResources, error) {
 	engine := any(scheduler.jobs)
 	if request.Run.Release {
 		if _, ok := scheduler.releaseJobs.(PipelineKubeVirtSizer); ok {
@@ -49,7 +49,8 @@ func (scheduler *Scheduler) pipelineKubeVirt(ctx context.Context, request JobReq
 	}
 	sizer, ok := engine.(PipelineKubeVirtSizer)
 	if !ok {
-		return KubeVirtResources{}, nil
+		receipt, err := scheduler.pipelineDemandReceipt(ctx, request)
+		return KubeVirtResources{Receipt: receipt}, err
 	}
 	resources, err := sizer.PipelineKubeVirt(ctx, request)
 	if err != nil {
@@ -145,4 +146,18 @@ func (scheduler *Scheduler) adoptedKubeVirtDemand(run model.Run) (argoworkflow.V
 		return argoworkflow.VMIDemand{}, fmt.Errorf("service: VMI-capable engine cannot restore adopted demand")
 	}
 	return argoworkflow.VMIDemand{}, nil
+}
+
+// Preflight admission is released on durable cancellation or deadline, even
+// when Kubernetes cleanup is pending. The VM journal still owns its VM slot.
+func (gate *weightedAdmission) releasePreflightRun(runID string) {
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	for _, reservation := range gate.reservations {
+		if reservation.runID == runID && reservation.granted && !reservation.submitted {
+			reservation.retained = false
+			gate.releaseLocked(reservation)
+			return
+		}
+	}
 }

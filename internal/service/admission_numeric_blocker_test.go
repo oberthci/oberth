@@ -11,14 +11,14 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestLegacyHeadBlocksOnNumericBudgetBesideDeclaredRun(t *testing.T) {
 	g := newWeightedAdmission(8)
-	release := acquireRequestWithinBudget(t, g.reserve(1), admissionRequest{Size: periapsis.XL, Pods: &argoworkflow.PodDemand{CPUMilli: 6900, MemoryBytes: 1 << 30, Pods: 1}})
+	release := acquireRequestWithinBudget(t, g.reserve(1), admissionRequest{Size: pipeline.XL, Pods: &argoworkflow.PodDemand{CPUMilli: 6900, MemoryBytes: 1 << 30, Pods: 1}})
 	defer release()
-	head := priorityWaiter(g, 2, model.PriorityNormal, time.Now(), periapsis.M)
+	head := priorityWaiter(g, 2, model.PriorityNormal, time.Now(), pipeline.M)
 	defer head.cancel()
 	s := &Scheduler{admission: g}
 	blocker := s.AdmissionBlocker()
@@ -52,14 +52,14 @@ func TestNumericBackfillDoesNotConsumeBlockedHeadsBudget(t *testing.T) {
 	g := newWeightedAdmission(8)
 	g.maxHeadWait = time.Minute
 	g.weights.L = 4
-	release := acquireRequestWithinBudget(t, g.reserve(1), admissionRequest{Size: periapsis.XL, Pods: &argoworkflow.PodDemand{CPUMilli: 4900, MemoryBytes: 1 << 30, Pods: 1}})
+	release := acquireRequestWithinBudget(t, g.reserve(1), admissionRequest{Size: pipeline.XL, Pods: &argoworkflow.PodDemand{CPUMilli: 4900, MemoryBytes: 1 << 30, Pods: 1}})
 	defer release()
-	head := priorityWaiter(g, 2, model.PriorityNormal, time.Now(), periapsis.L)
+	head := priorityWaiter(g, 2, model.PriorityNormal, time.Now(), pipeline.L)
 	defer head.cancel()
 	candidate := g.reserve(3)
 	defer candidate.cancel()
 	g.mu.Lock()
-	candidate.prepared, candidate.size = true, periapsis.XL
+	candidate.prepared, candidate.size = true, pipeline.XL
 	candidate.pods = &argoworkflow.PodDemand{CPUMilli: 2400, MemoryBytes: 1 << 30, Pods: 1}
 	g.grantLocked()
 	admitted := candidate.granted
@@ -74,10 +74,10 @@ func TestPriorityBumpReevaluatesAvailableBudgetImmediately(t *testing.T) {
 	f := newControlFixture(t)
 	g := newWeightedAdmission(4)
 	f.scheduler.admission = g
-	release := acquireRequestWithinBudget(t, g.reserve(-1), admissionRequest{Size: periapsis.M})
+	release := acquireRequestWithinBudget(t, g.reserve(-1), admissionRequest{Size: pipeline.M})
 	defer release()
 	var waiters []*admissionReservation
-	for i, size := range []periapsis.Size{periapsis.L, periapsis.S} {
+	for i, size := range []pipeline.Size{pipeline.L, pipeline.S} {
 		_, err := f.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: []string{"head", "small"}[i], SHA: strings.Repeat("a", 40), Actor: "agent", Trigger: "branch"})
 		if err != nil {
 			t.Fatal(err)

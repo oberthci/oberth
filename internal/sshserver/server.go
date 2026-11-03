@@ -40,12 +40,6 @@ type IdentityResolver interface {
 	ResolveFingerprint(fingerprint string) (identity string, found bool, err error)
 }
 
-type IdentityResolverFunc func(string) (string, bool, error)
-
-func (f IdentityResolverFunc) ResolveFingerprint(fingerprint string) (string, bool, error) {
-	return f(fingerprint)
-}
-
 // ScopedIdentityResolver also returns the upstreams a scoped key is limited
 // to (#073). The server prefers it over ResolveFingerprint; a resolver
 // without it serves every key unscoped.
@@ -98,11 +92,14 @@ type Config struct {
 	// upstream/org/repo path, so a scoped key reaches only its upstreams and
 	// a short name means the one repository of that name in scope (#073).
 	// Without it a scoped key reaches no repository.
-	QualifyInScope           func(input string, scope []string) (string, error)
-	Logger                   Logger
-	MutationGate             func(context.Context) error
-	HandshakeTimeout         time.Duration
-	RequestTimeout           time.Duration
+	QualifyInScope   func(input string, scope []string) (string, error)
+	Logger           Logger
+	MutationGate     func(context.Context) error
+	HandshakeTimeout time.Duration
+	// RequestTimeout bounds the exec request before Git starts.
+	RequestTimeout time.Duration
+	// StreamIdleTimeout bounds client read/write inactivity during Git transport.
+	StreamIdleTimeout        time.Duration
 	SessionTimeout           time.Duration
 	MaxConnections           int
 	MaxSessions              int
@@ -120,6 +117,7 @@ type Server struct {
 	mutationGate             func(context.Context) error
 	handshakeTimeout         time.Duration
 	requestTimeout           time.Duration
+	streamIdleTimeout        time.Duration
 	sessionTimeout           time.Duration
 	connections              chan struct{}
 	sessions                 chan struct{}
@@ -139,7 +137,7 @@ func New(config Config) (*Server, error) {
 	if config.OnUpdate == nil {
 		return nil, errors.New("durable receive update handler is required")
 	}
-	if config.HandshakeTimeout < 0 || config.RequestTimeout < 0 || config.SessionTimeout < 0 ||
+	if config.HandshakeTimeout < 0 || config.RequestTimeout < 0 || config.StreamIdleTimeout < 0 || config.SessionTimeout < 0 ||
 		config.MaxConnections < 0 || config.MaxSessions < 0 || config.MaxSessionsPerConnection < 0 {
 		return nil, errors.New("SSH limits must not be negative")
 	}
@@ -148,6 +146,9 @@ func New(config Config) (*Server, error) {
 	}
 	if config.RequestTimeout == 0 {
 		config.RequestTimeout = defaultRequestTimeout
+	}
+	if config.StreamIdleTimeout == 0 {
+		config.StreamIdleTimeout = 30 * time.Second
 	}
 	if config.SessionTimeout == 0 {
 		config.SessionTimeout = defaultSessionTimeout
@@ -215,6 +216,7 @@ func New(config Config) (*Server, error) {
 		qualifyInScope:           config.QualifyInScope,
 		handshakeTimeout:         config.HandshakeTimeout,
 		requestTimeout:           config.RequestTimeout,
+		streamIdleTimeout:        config.StreamIdleTimeout,
 		sessionTimeout:           config.SessionTimeout,
 		connections:              make(chan struct{}, config.MaxConnections),
 		sessions:                 make(chan struct{}, config.MaxSessions),
@@ -267,19 +269,6 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 			}
 		}()
 	}
-}
-
-// HandleConn serves one already accepted network connection.
-func (s *Server) HandleConn(ctx context.Context, connection net.Conn) error {
-	if connection == nil {
-		return errors.New("SSH connection is required")
-	}
-	if !tryAcquire(s.connections) {
-		_ = connection.Close()
-		return errors.New("SSH connection limit reached")
-	}
-	defer release(s.connections)
-	return s.handleConn(ctx, connection)
 }
 
 func (s *Server) handleConn(ctx context.Context, connection net.Conn) error {
@@ -377,7 +366,7 @@ func (s *Server) handleConn(ctx context.Context, connection net.Conn) error {
 			defer releaseSession()
 			s.handleSession(connectionCtx, actor, stream, channelRequests, func() error {
 				return connection.SetDeadline(maximumDeadline)
-			}, releaseSession)
+			}, releaseSession, func() { _ = connection.Close() })
 		}()
 	}
 	cancel()
@@ -411,6 +400,7 @@ func (s *Server) handleSession(
 	requests <-chan *ssh.Request,
 	beginExec func() error,
 	complete func(),
+	abort ...func(),
 ) {
 	defer func() { _ = channel.Close() }()
 	defer complete()
@@ -444,7 +434,18 @@ func (s *Server) handleSession(
 			if request.WantReply {
 				_ = request.Reply(true, nil)
 			}
-			if err := s.runGit(ctx, actor, protocol, command, channel); err != nil {
+			sessionCtx, cancelSession := context.WithCancel(ctx)
+			defer cancelSession()
+			idle := newIdleChannel(channel, s.streamIdleTimeout, func() {
+				cancelSession()
+				if len(abort) > 0 {
+					abort[0]()
+				} else {
+					_ = channel.Close()
+				}
+			})
+			defer idle.stop()
+			if err := s.runGit(sessionCtx, actor, protocol, command, idle); err != nil {
 				complete()
 				_, _ = io.WriteString(channel.Stderr(), "oberth: "+err.Error()+"\n")
 				sendExitStatus(channel, 1)

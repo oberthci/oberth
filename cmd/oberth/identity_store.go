@@ -25,8 +25,6 @@ import (
 
 const identityRoot = "/run/oberth-identities"
 
-func identityStoreEnabled() bool { return os.Getenv("OBERTH_IDENTITY_STORE") == "openbao" }
-
 type baoIdentityStore struct {
 	client    *secretstore.Client
 	namespace string
@@ -143,6 +141,11 @@ func bootstrapRuntimeIdentities(ctx context.Context, options *serveOptions) erro
 	if err != nil {
 		return err
 	}
+	defer func() {
+		for _, value := range data {
+			clear(value)
+		}
+	}()
 	if data == nil {
 		data, err = generateRuntimeIdentity(options.namespace, strings.Split(os.Getenv("OBERTH_TLS_NAMES"), ","))
 		if err != nil {
@@ -152,11 +155,6 @@ func bootstrapRuntimeIdentities(ctx context.Context, options *serveOptions) erro
 			return err
 		}
 	}
-	defer func() {
-		for _, v := range data {
-			clear(v)
-		}
-	}()
 	// With the server PKI configured, the HTTPS identity is a short-lived
 	// leaf from the installer-managed CA instead of the bundle's long-lived
 	// self-signed certificate; the bundle still supplies the SSH host key.

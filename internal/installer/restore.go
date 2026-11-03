@@ -2,7 +2,7 @@ package installer
 
 // `oberth restore`: rebuild an installation's state from an `oberth backup`
 // archive onto a (typically fresh) install. It automates the hand restore of
-// tuxbox on 2026-10-16 (issues 038 and 048): validate the database offline,
+// an installation on 2026-10-16 (issues 038 and 048): validate the database offline,
 // write OpenBao state field-for-field and verify it by read-back, scale the
 // server to zero, swap the database on its volume keeping the previous one
 // aside, restore the secret-access table, remove Argo Workflows whose runs
@@ -312,7 +312,10 @@ func inspectRestoreTarget(ctx context.Context, cfg RestoreConfig, deps backupDep
 	if target.Server, err = inspectServerDeployment(ctx, deps.Deps, cfg.Namespace); err != nil {
 		return target, openBaoExec{}, err
 	}
-	release, found := findHelmRelease(ctx, deps.Deps, "oberth", cfg.Namespace)
+	release, found, err := findHelmRelease(ctx, deps.Deps, "oberth", cfg.Namespace)
+	if err != nil {
+		return target, openBaoExec{}, err
+	}
 	if !found {
 		return target, openBaoExec{}, fmt.Errorf("no oberth Helm release in namespace %s; install Oberth on the target first (oberth setup)", cfg.Namespace)
 	}

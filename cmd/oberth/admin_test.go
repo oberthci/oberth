@@ -25,6 +25,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
@@ -274,7 +275,7 @@ func TestUpstreamRemoveFailsClosedWhenRepositoryHasHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.EnqueueRun(context.Background(), model.RunSpec{
+	if _, err := storetest.EnqueueRun(database, context.Background(), model.RunSpec{
 		RepoID: repository.ID, RefKind: model.RefBranch, Ref: "refs/heads/main",
 		SHA: strings.Repeat("a", 40), Actor: "test@host", Trigger: "push",
 	}); err != nil {
@@ -377,7 +378,7 @@ func TestRepoAddFailsClosedWhenAuditGateRejects(t *testing.T) {
 func allowTestMutation(context.Context, string, string) error { return nil }
 
 func TestAdminMutationGateUsesLiveDaemonSocket(t *testing.T) {
-	socket := filepath.Join("/tmp", "oberth-admin-"+filepath.Base(t.TempDir())+".sock")
+	socket := privateAdminSocket(t)
 	if err := validateAdminSocket(socket); err != nil {
 		t.Fatal(err)
 	}
@@ -397,7 +398,7 @@ func TestAdminMutationGateUsesLiveDaemonSocket(t *testing.T) {
 	})
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- server.Serve(listener) }()
-	if err := requestAdminMutationGate(context.Background(), socket, "test.mutation", "/data/oberth.sqlite"); err != nil {
+	if err := requestAdminMutationGate(context.Background(), socket, "uplink.register", "/data/oberth.sqlite"); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -405,7 +406,7 @@ func TestAdminMutationGateUsesLiveDaemonSocket(t *testing.T) {
 	case <-time.After(testtimeout.Start(time.Second)):
 		t.Fatal("live daemon mutation gate was not invoked")
 	}
-	if err := requestAdminMutationGate(context.Background(), socket, "test.mutation", "/tmp/rolled-back.sqlite"); err == nil ||
+	if err := requestAdminMutationGate(context.Background(), socket, "uplink.register", "/tmp/rolled-back.sqlite"); err == nil ||
 		!strings.Contains(err.Error(), "not the live daemon database") {
 		t.Fatalf("mismatched database gate error = %v", err)
 	}
@@ -438,8 +439,8 @@ func TestUpstreamSecretMutationFailsClosedBeforePatch(t *testing.T) {
 		"--known-hosts", filepath.Join(directory, "missing-hosts"),
 		"codeberg", "ssh://git@codeberg.org/acme",
 	}, io.Discard, upstreamDependencies{
-		input:            strings.NewReader("yes\nyes\n"),
-		kubernetesClient: func() (kubernetes.Interface, error) { return client, nil },
+		input:         strings.NewReader("yes\nyes\n"),
+		identityStore: fixtureStoreFactory(func() (kubernetes.Interface, error) { return client, nil }),
 		scanHostKeys: func(context.Context, string, string) ([]ssh.PublicKey, error) {
 			return []ssh.PublicKey{hostKey}, nil
 		},
@@ -471,9 +472,9 @@ func TestUpstreamAddGeneratesConfirmsPersistsAndRecovers(t *testing.T) {
 	dependencies := upstreamDependencies{
 		input:        strings.NewReader("yes\nyes\n"),
 		mutationGate: allowTestMutation,
-		kubernetesClient: func() (kubernetes.Interface, error) {
+		identityStore: fixtureStoreFactory(func() (kubernetes.Interface, error) {
 			return client, nil
-		},
+		}),
 		scanHostKeys: func(_ context.Context, host, port string) ([]ssh.PublicKey, error) {
 			scanCalls++
 			if host != "codeberg.org" || port != "22" {
@@ -611,9 +612,9 @@ func TestUpstreamAddWaitsForKeyRegistrationInOneInvocation(t *testing.T) {
 	dependencies := upstreamDependencies{
 		input:        strings.NewReader("yes\nyes\n"),
 		mutationGate: allowTestMutation,
-		kubernetesClient: func() (kubernetes.Interface, error) {
+		identityStore: fixtureStoreFactory(func() (kubernetes.Interface, error) {
 			return client, nil
-		},
+		}),
 		scanHostKeys: func(context.Context, string, string) ([]ssh.PublicKey, error) {
 			return []ssh.PublicKey{hostKey}, nil
 		},
@@ -666,9 +667,9 @@ func TestUpstreamAddRegistrationWaitCancelsCleanly(t *testing.T) {
 	dependencies := upstreamDependencies{
 		input:        strings.NewReader("yes\nyes\n"),
 		mutationGate: allowTestMutation,
-		kubernetesClient: func() (kubernetes.Interface, error) {
+		identityStore: fixtureStoreFactory(func() (kubernetes.Interface, error) {
 			return client, nil
-		},
+		}),
 		scanHostKeys: func(context.Context, string, string) ([]ssh.PublicKey, error) {
 			return []ssh.PublicKey{hostKey}, nil
 		},
@@ -719,9 +720,9 @@ func TestUpstreamAddStoresPerUpstreamDataKeys(t *testing.T) {
 	dependencies := upstreamDependencies{
 		input:        strings.NewReader("yes\nyes\n"),
 		mutationGate: allowTestMutation,
-		kubernetesClient: func() (kubernetes.Interface, error) {
+		identityStore: fixtureStoreFactory(func() (kubernetes.Interface, error) {
 			return client, nil
-		},
+		}),
 		scanHostKeys: func(context.Context, string, string) ([]ssh.PublicKey, error) {
 			return []ssh.PublicKey{hostKey}, nil
 		},
@@ -750,23 +751,12 @@ func TestUpstreamAddStoresPerUpstreamDataKeys(t *testing.T) {
 	if len(secret.Data["id_ed25519"]) != 0 {
 		t.Fatal("per-upstream add must not write the shared data key")
 	}
-	manager := ""
-	for _, action := range client.Actions() {
-		patch, ok := action.(k8stesting.PatchActionImpl)
-		if !ok || patch.Name != "oberth-upstream-key" {
-			continue
-		}
-		manager = patch.PatchOptions.FieldManager
-	}
-	if manager != "oberth-upstream-bootstrap-codeberg" {
-		t.Fatalf("per-upstream key apply used field manager %q, want oberth-upstream-bootstrap-codeberg", manager)
-	}
 	database, err := store.OpenAdminClient(ctx, databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = database.Close() }()
-	registered, err := database.UpstreamByName(ctx, "codeberg")
+	registered, err := storetest.UpstreamByName(database, ctx, "codeberg")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -787,9 +777,9 @@ func TestUpstreamAddDedicatedKeyRerunHintPreservesFlag(t *testing.T) {
 	dependencies := upstreamDependencies{
 		input:        strings.NewReader("yes\nyes\n"),
 		mutationGate: allowTestMutation,
-		kubernetesClient: func() (kubernetes.Interface, error) {
+		identityStore: fixtureStoreFactory(func() (kubernetes.Interface, error) {
 			return client, nil
-		},
+		}),
 		scanHostKeys: func(context.Context, string, string) ([]ssh.PublicKey, error) {
 			return []ssh.PublicKey{hostKey}, nil
 		},
@@ -833,9 +823,9 @@ func TestUpstreamAddRerunHintPreservesNonDefaultFlags(t *testing.T) {
 	dependencies := upstreamDependencies{
 		input:        strings.NewReader("yes\nyes\n"),
 		mutationGate: allowTestMutation,
-		kubernetesClient: func() (kubernetes.Interface, error) {
+		identityStore: fixtureStoreFactory(func() (kubernetes.Interface, error) {
 			return client, nil
-		},
+		}),
 		scanHostKeys: func(context.Context, string, string) ([]ssh.PublicKey, error) {
 			return []ssh.PublicKey{hostKey}, nil
 		},
@@ -944,9 +934,9 @@ func TestUpstreamAddExpectedHostFingerprintFlagPlumbed(t *testing.T) {
 	}, &output, upstreamDependencies{
 		input:        strings.NewReader("yes\n"),
 		mutationGate: allowTestMutation,
-		kubernetesClient: func() (kubernetes.Interface, error) {
+		identityStore: fixtureStoreFactory(func() (kubernetes.Interface, error) {
 			return client, nil
-		},
+		}),
 		scanHostKeys: func(context.Context, string, string) ([]ssh.PublicKey, error) {
 			return []ssh.PublicKey{hostKey}, nil
 		},
@@ -1008,9 +998,9 @@ func TestUpstreamAddRequiresBothExplicitConfirmations(t *testing.T) {
 				"--known-hosts", filepath.Join(directory, "missing-hosts"),
 				"myforge", "ssh://git@forge.example.com/acme",
 			}, &output, upstreamDependencies{
-				input:            strings.NewReader(test.input),
-				mutationGate:     allowTestMutation,
-				kubernetesClient: func() (kubernetes.Interface, error) { return client, nil },
+				input:         strings.NewReader(test.input),
+				mutationGate:  allowTestMutation,
+				identityStore: fixtureStoreFactory(func() (kubernetes.Interface, error) { return client, nil }),
 				scanHostKeys: func(context.Context, string, string) ([]ssh.PublicKey, error) {
 					scans++
 					return []ssh.PublicKey{hostKey}, nil
@@ -1059,10 +1049,10 @@ func TestUpstreamAddUsesProvidedProjectedMaterialWithoutKubernetes(t *testing.T)
 	}, &output, upstreamDependencies{
 		input:        strings.NewReader(""),
 		mutationGate: allowTestMutation,
-		kubernetesClient: func() (kubernetes.Interface, error) {
+		identityStore: fixtureStoreFactory(func() (kubernetes.Interface, error) {
 			clientCalled = true
 			return nil, errors.New("Kubernetes must not be contacted")
-		},
+		}),
 		scanHostKeys: func(context.Context, string, string) ([]ssh.PublicKey, error) {
 			return nil, errors.New("scanner must not run")
 		},
@@ -1103,10 +1093,10 @@ func TestUpstreamAddProjectedProbeFailureReadvertisesOnlyPublicKey(t *testing.T)
 	}, &output, upstreamDependencies{
 		input:        strings.NewReader(""),
 		mutationGate: allowTestMutation,
-		kubernetesClient: func() (kubernetes.Interface, error) {
+		identityStore: fixtureStoreFactory(func() (kubernetes.Interface, error) {
 			t.Fatal("Kubernetes must not be contacted for valid projected material")
 			return nil, nil
-		},
+		}),
 		scanHostKeys: func(context.Context, string, string) ([]ssh.PublicKey, error) {
 			t.Fatal("host-key scanner must not run for valid projected material")
 			return nil, nil
@@ -1746,7 +1736,7 @@ func TestInPodProvideKeyFailsClosedWithoutMutationGate(t *testing.T) {
 	client := newBootstrapClient("oberth", "oberth-upstream-key", "oberth-known-hosts")
 	var output bytes.Buffer
 	err := runUpstreamProvideKey(context.Background(), []string{"codeberg"}, bytes.NewReader(privatePEM), &output, upstreamDependencies{
-		kubernetesClient: func() (kubernetes.Interface, error) { return client, nil },
+		identityStore: fixtureStoreFactory(func() (kubernetes.Interface, error) { return client, nil }),
 		mutationGate: func(context.Context, string, string) error {
 			return errors.New("injected external audit failure")
 		},
@@ -1773,8 +1763,8 @@ func TestInPodProvideKeyRefusesOverwrite(t *testing.T) {
 	)
 	var output bytes.Buffer
 	err := runUpstreamProvideKey(context.Background(), []string{"codeberg"}, bytes.NewReader(newPEM), &output, upstreamDependencies{
-		kubernetesClient: func() (kubernetes.Interface, error) { return client, nil },
-		mutationGate:     allowTestMutation,
+		identityStore: fixtureStoreFactory(func() (kubernetes.Interface, error) { return client, nil }),
+		mutationGate:  allowTestMutation,
 	})
 	if err == nil || !strings.Contains(err.Error(), "refusing to overwrite") {
 		t.Fatalf("overwrite guard error = %v, want 'refusing to overwrite'", err)
@@ -1976,9 +1966,9 @@ func TestInPodModeSkipsKeySelectionPrompt(t *testing.T) {
 	}, &output, upstreamDependencies{
 		input:        strings.NewReader(""),
 		mutationGate: allowTestMutation,
-		kubernetesClient: func() (kubernetes.Interface, error) {
+		identityStore: fixtureStoreFactory(func() (kubernetes.Interface, error) {
 			return client, nil
-		},
+		}),
 		scanHostKeys: func(context.Context, string, string) ([]ssh.PublicKey, error) {
 			return []ssh.PublicKey{hostKey}, nil
 		},
@@ -2040,7 +2030,7 @@ func TestRepoRemoveDeletesMappingAndCleansCacheDirectory(t *testing.T) {
 	registerTestUpstream(t, databasePath, "github", "ssh://git@github.com/octocat")
 	if err := runRepoWithDependencies(context.Background(), []string{
 		"add", "--database", databasePath, "widget", "github",
-	}, io.Discard, repoDependencies{mutationGate: allowTestMutation}); err != nil {
+	}, io.Discard, repoDependencies{mutationGate: allowTestMutation, removeRepository: removeTestRepository}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2057,7 +2047,7 @@ func TestRepoRemoveDeletesMappingAndCleansCacheDirectory(t *testing.T) {
 	var output bytes.Buffer
 	if err := runRepoWithDependencies(context.Background(), []string{
 		"remove", "--database", databasePath, "--git-cache-root", gitCacheRoot, "widget",
-	}, &output, repoDependencies{mutationGate: allowTestMutation}); err != nil {
+	}, &output, repoDependencies{mutationGate: allowTestMutation, removeRepository: removeTestRepository}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "removed repository widget") || !strings.Contains(output.String(), "was upstream github") {
@@ -2090,7 +2080,7 @@ func TestRepoRemoveRefusesInFlightRuns(t *testing.T) {
 	registerTestUpstream(t, databasePath, "github", "ssh://git@github.com/octocat")
 	if err := runRepoWithDependencies(context.Background(), []string{
 		"add", "--database", databasePath, "widget", "github",
-	}, io.Discard, repoDependencies{mutationGate: allowTestMutation}); err != nil {
+	}, io.Discard, repoDependencies{mutationGate: allowTestMutation, removeRepository: removeTestRepository}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2103,7 +2093,7 @@ func TestRepoRemoveRefusesInFlightRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.EnqueueRun(context.Background(), model.RunSpec{
+	if _, err := storetest.EnqueueRun(database, context.Background(), model.RunSpec{
 		RepoID: repository.ID, RefKind: model.RefBranch, Ref: "main",
 		SHA: strings.Repeat("a", 40), Actor: "test@host", Trigger: "push",
 	}); err != nil {
@@ -2115,7 +2105,7 @@ func TestRepoRemoveRefusesInFlightRuns(t *testing.T) {
 
 	err = runRepoWithDependencies(context.Background(), []string{
 		"remove", "--database", databasePath, "widget",
-	}, io.Discard, repoDependencies{mutationGate: allowTestMutation})
+	}, io.Discard, repoDependencies{mutationGate: allowTestMutation, removeRepository: removeTestRepository})
 	if err == nil || !strings.Contains(err.Error(), "in-flight") {
 		t.Fatalf("expected in-flight run rejection, got %v", err)
 	}
@@ -2128,7 +2118,7 @@ func TestRepoRemoveRefusesNonexistentRepository(t *testing.T) {
 
 	err := runRepoWithDependencies(context.Background(), []string{
 		"remove", "--database", databasePath, "nonexistent",
-	}, io.Discard, repoDependencies{mutationGate: allowTestMutation})
+	}, io.Discard, repoDependencies{mutationGate: allowTestMutation, removeRepository: removeTestRepository})
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
@@ -2150,7 +2140,7 @@ func TestRepoRemoveFailsClosedWhenAuditGateRejects(t *testing.T) {
 func TestRepoRemoveHelpReturnsNil(t *testing.T) {
 	t.Parallel()
 	var output bytes.Buffer
-	err := runRepoWithDependencies(context.Background(), []string{"remove", "--help"}, &output, repoDependencies{mutationGate: allowTestMutation})
+	err := runRepoWithDependencies(context.Background(), []string{"remove", "--help"}, &output, repoDependencies{mutationGate: allowTestMutation, removeRepository: removeTestRepository})
 	if err != nil {
 		t.Fatalf("repo remove --help = %v", err)
 	}

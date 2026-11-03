@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/authn"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/empty"
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
@@ -332,7 +333,7 @@ func TestPublishRejectsEmptyConfig(t *testing.T) {
 		}
 	})
 	t.Run("empty dist", func(t *testing.T) {
-		config := PublishConfig{Tag: "v1.0.0", SHA: "abc", AccessToken: []byte(`{"key":"value"}`)}
+		config := PublishConfig{Tag: "v1.0.0", SHA: "abc", Authenticator: authn.Anonymous}
 		if _, err := Publish(ctx, config); err == nil {
 			t.Fatal("accepted Publish with empty dist")
 		}
@@ -355,14 +356,14 @@ func TestVerifyRejectsEmptyConfig(t *testing.T) {
 		}
 	})
 	t.Run("empty dist", func(t *testing.T) {
-		config := PublishConfig{Tag: "v1.0.0", SHA: "abc", AccessToken: []byte(`{"key":"value"}`)}
+		config := PublishConfig{Tag: "v1.0.0", SHA: "abc", Authenticator: authn.Anonymous}
 		published := Published{Server: "example.com/img@sha256:abcd"}
 		if err := Verify(ctx, config, published); err == nil {
 			t.Fatal("accepted Verify with empty dist")
 		}
 	})
 	t.Run("empty server reference", func(t *testing.T) {
-		config := PublishConfig{Tag: "v1.0.0", SHA: "abc", AccessToken: []byte(`{"key":"value"}`), Dist: "/tmp/dist"}
+		config := PublishConfig{Tag: "v1.0.0", SHA: "abc", Authenticator: authn.Anonymous, Dist: "/tmp/dist"}
 		published := Published{Server: ""}
 		if err := Verify(ctx, config, published); err == nil {
 			t.Fatal("accepted Verify with empty server reference")

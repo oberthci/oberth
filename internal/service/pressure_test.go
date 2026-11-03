@@ -17,7 +17,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type pressureFixture struct {
@@ -40,7 +40,7 @@ func pressureTestGate() *pressureFixture {
 	return f
 }
 
-func (f *pressureFixture) prepare(id int64, priority model.RunPriority, group string, size periapsis.Size, estimates ...time.Duration) *admissionReservation {
+func (f *pressureFixture) prepare(id int64, priority model.RunPriority, group string, size pipeline.Size, estimates ...time.Duration) *admissionReservation {
 	r := f.gate.reservePriorityRun(id, id, model.Run{ID: fmt.Sprint(id), Priority: priority, QueuedAt: f.now, RepoID: 1})
 	f.gate.mu.Lock()
 	defer f.gate.mu.Unlock()
@@ -67,13 +67,13 @@ func (f *pressureFixture) advance(d time.Duration) {
 func TestPressureThresholdHysteresisAndNewWorkOnly(t *testing.T) {
 	f := pressureTestGate()
 	f.sample.IO.FullAvg60 = 29.99
-	running := f.prepare(1, model.PriorityNormal, "", periapsis.M)
+	running := f.prepare(1, model.PriorityNormal, "", pipeline.M)
 	if !running.granted {
 		t.Fatal("below threshold did not grant")
 	}
 	f.sample.IO.FullAvg60 = 30
 	f.advance(time.Second)
-	waiting := f.prepare(2, model.PriorityNormal, "", periapsis.M)
+	waiting := f.prepare(2, model.PriorityNormal, "", pipeline.M)
 	if waiting.granted || !running.granted || f.gate.used != 2 {
 		t.Fatal("pressure must hold new work and leave running grant alone")
 	}
@@ -111,7 +111,7 @@ func TestPressureCPUGateOptionalAndIndependent(t *testing.T) {
 			}
 			f.sample.CPU.SomeAvg60 = 80
 			f.sample.Memory.FullAvg60 = 99 // Observed, never a new memory gate.
-			r := f.prepare(1, model.PriorityNormal, "", periapsis.M)
+			r := f.prepare(1, model.PriorityNormal, "", pipeline.M)
 			if r.granted == enabled {
 				t.Fatal("optional CPU threshold ignored")
 			}
@@ -140,9 +140,9 @@ func TestPressureMaximumDeferralAdmitsButPreservesOtherGates(t *testing.T) {
 		t.Run(guard, func(t *testing.T) {
 			f := pressureTestGate()
 			f.sample.IO.FullAvg60 = 80
-			size := periapsis.M
+			size := pipeline.M
 			if guard == "whole-budget" {
-				size = periapsis.XL
+				size = pipeline.XL
 			}
 			r := f.prepare(1, model.PriorityNormal, "", size)
 			if r.granted {
@@ -224,10 +224,10 @@ func TestPressureZeroStartDoesNotExpire(t *testing.T) {
 func TestPressureTimeoutDoesNotJumpHigherPriorityOrGroupHead(t *testing.T) {
 	f := pressureTestGate()
 	f.sample.IO.FullAvg60 = 80
-	normal := f.prepare(1, model.PriorityNormal, "deploy", periapsis.M)
+	normal := f.prepare(1, model.PriorityNormal, "deploy", pipeline.M)
 	f.advance(19 * time.Minute)
-	release := f.prepare(2, model.PriorityHighest, "", periapsis.M)
-	tag := f.prepare(3, model.PriorityHigh, "", periapsis.M)
+	release := f.prepare(2, model.PriorityHighest, "", pipeline.M)
+	tag := f.prepare(3, model.PriorityHigh, "", pipeline.M)
 	f.advance(time.Minute)
 	if normal.granted || release.granted || tag.granted {
 		t.Fatal("expired normal run jumped pressure-held release/tag priority")
@@ -242,7 +242,7 @@ func TestPressureTimeoutDoesNotJumpHigherPriorityOrGroupHead(t *testing.T) {
 	f.gate.releaseLocked(release)
 	f.gate.releaseLocked(tag)
 	f.gate.mu.Unlock()
-	follower := f.prepare(4, model.PriorityNormal, "deploy", periapsis.M)
+	follower := f.prepare(4, model.PriorityNormal, "deploy", pipeline.M)
 	if !normal.granted || follower.granted {
 		t.Fatal("pressure path changed concurrency-group ordering")
 	}
@@ -257,11 +257,11 @@ func TestPressureTimeoutDoesNotJumpHigherPriorityOrGroupHead(t *testing.T) {
 func TestPressureTimeoutPreservesBackfillDrain(t *testing.T) {
 	f := pressureTestGate()
 	f.gate.maxHeadWait = time.Minute
-	running := f.prepare(1, model.PriorityNormal, "", periapsis.M, time.Minute)
-	head := f.prepare(2, model.PriorityNormal, "", periapsis.XL)
+	running := f.prepare(1, model.PriorityNormal, "", pipeline.M, time.Minute)
+	head := f.prepare(2, model.PriorityNormal, "", pipeline.XL)
 	f.sample.IO.FullAvg60 = 80
 	f.advance(time.Second)
-	small := f.prepare(3, model.PriorityNormal, "", periapsis.S, 30*time.Second)
+	small := f.prepare(3, model.PriorityNormal, "", pipeline.S, 30*time.Second)
 	if small.pressureSince.IsZero() {
 		t.Fatal("fixture did not reach pressure gate during backfill window")
 	}
@@ -285,7 +285,7 @@ func TestPressureTimeoutPreservesBackfillDrain(t *testing.T) {
 func TestPressureUnavailableFailsOpenWarnsOnceAndResetsEpisode(t *testing.T) {
 	f := pressureTestGate()
 	f.sample.IO.FullAvg60 = 80
-	r := f.prepare(1, model.PriorityNormal, "", periapsis.M)
+	r := f.prepare(1, model.PriorityNormal, "", pipeline.M)
 	f.err = errors.New("parse fixture error")
 	f.advance(time.Second)
 	if !r.granted || f.gate.pressure.state.Available || f.gate.pressure.state.Sample != nil || f.gate.pressure.state.Holding {
@@ -305,7 +305,7 @@ func TestPressureUnavailableFailsOpenWarnsOnceAndResetsEpisode(t *testing.T) {
 	f.gate.capacity = 6
 	f.sample.IO.FullAvg60 = 80
 	f.advance(time.Second)
-	next := f.prepare(2, model.PriorityNormal, "", periapsis.M)
+	next := f.prepare(2, model.PriorityNormal, "", pipeline.M)
 	if next.granted {
 		t.Fatal("valid PSI did not resume pressure protection")
 	}
@@ -315,7 +315,7 @@ func TestPressureUnavailableFailsOpenWarnsOnceAndResetsEpisode(t *testing.T) {
 	// A fresh episode must not inherit a previous run's pressure timeout.
 	f.sample.IO.FullAvg60 = 80
 	f.advance(time.Second)
-	third := f.prepare(3, model.PriorityNormal, "", periapsis.M)
+	third := f.prepare(3, model.PriorityNormal, "", pipeline.M)
 	if third.granted || !third.pressureSince.Equal(f.now) {
 		t.Fatal("fresh pressure episode inherited an old timeout")
 	}
@@ -324,7 +324,7 @@ func TestPressureUnavailableFailsOpenWarnsOnceAndResetsEpisode(t *testing.T) {
 func TestPressureAdoptionPreservesExistingWorkflowGrant(t *testing.T) {
 	f := pressureTestGate()
 	f.sample.IO.FullAvg60 = 80
-	r, err := f.gate.adopt(model.Run{ID: "existing", QueueSequence: 1, RepoID: 1}, periapsis.M, argoworkflow.VMIDemand{})
+	r, err := f.gate.adopt(model.Run{ID: "existing", QueueSequence: 1, RepoID: 1}, pipeline.M, argoworkflow.VMIDemand{})
 	if err != nil || !r.granted || !r.submitted {
 		t.Fatal("pressure held adoption of running work", err)
 	}
@@ -339,7 +339,7 @@ func TestPressureObservationsMetricsAndScopedRedaction(t *testing.T) {
 	f.sample.IO.FullAvg60 = 61.25
 	f.sample.CPU.SomeAvg60 = 21
 	f.sample.Memory.FullAvg60 = 3
-	f.prepare(1, model.PriorityNormal, "", periapsis.M)
+	f.prepare(1, model.PriorityNormal, "", pipeline.M)
 	scheduler := &Scheduler{admission: f.gate}
 	reads := f.reads
 	state := scheduler.AdmissionState()
@@ -361,7 +361,7 @@ func TestPressureObservationsMetricsAndScopedRedaction(t *testing.T) {
 		t.Fatal("status caller mutated admission sample")
 	}
 	service := &API{admission: scheduler}
-	run := model.Run{ID: "1", Status: model.RunRunning, QueueSequence: 1, RepoID: 1, JobName: "reserved"}
+	run := model.Run{ID: "1", Status: model.RunRunning, QueueSequence: 1, RepoID: 1, WorkflowName: "reserved"}
 	if got := service.scheduling(t.Context(), run, nil); !strings.Contains(got.Message, "io pressure 61.2%") {
 		t.Fatal("missing run reason", got.Message)
 	}
@@ -413,7 +413,7 @@ func TestPressureParsingAndFailOpenReadErrors(t *testing.T) {
 		}
 		f := pressureTestGate()
 		f.gate.pressure.config.Source = func() (model.PressureSample, error) { return readPressureDirectory(root) }
-		if r := f.prepare(1, model.PriorityNormal, "", periapsis.M); !r.granted || f.gate.pressure.state.Available {
+		if r := f.prepare(1, model.PriorityNormal, "", pipeline.M); !r.granted || f.gate.pressure.state.Available {
 			t.Fatal("parse/oversize error blocked admission")
 		}
 	}
@@ -443,7 +443,7 @@ func TestPressureValidationAndDisabledSource(t *testing.T) {
 	}
 	f := pressureTestGate()
 	f.sample.IO.FullAvg60 = math.NaN()
-	if r := f.prepare(1, model.PriorityNormal, "", periapsis.M); !r.granted {
+	if r := f.prepare(1, model.PriorityNormal, "", pipeline.M); !r.granted {
 		t.Fatal("non-finite injected sample held admission")
 	}
 }
@@ -451,7 +451,7 @@ func TestPressureValidationAndDisabledSource(t *testing.T) {
 func TestPressureCachedReadsAreRaceSafe(t *testing.T) {
 	f := pressureTestGate()
 	f.sample.IO.FullAvg60 = 60
-	f.prepare(1, model.PriorityNormal, "", periapsis.M)
+	f.prepare(1, model.PriorityNormal, "", pipeline.M)
 	scheduler := &Scheduler{admission: f.gate}
 	var workers sync.WaitGroup
 	for range 8 {
@@ -478,7 +478,7 @@ func TestPressureEpisodeResetsWhileCapacityBlocks(t *testing.T) {
 		t.Run(fmt.Sprint(unavailable), func(t *testing.T) {
 			f := pressureTestGate()
 			f.sample.IO.FullAvg60 = 80
-			r := f.prepare(1, model.PriorityNormal, "", periapsis.M)
+			r := f.prepare(1, model.PriorityNormal, "", pipeline.M)
 			f.gate.used = f.gate.capacity
 			f.advance(19 * time.Minute)
 			if unavailable {
@@ -524,7 +524,7 @@ func TestPressureEachQueuedRunHasOwnMaximumWait(t *testing.T) {
 			}
 		}
 	}
-	runs := []*admissionReservation{f.prepare(1, model.PriorityNormal, "", periapsis.S), f.prepare(2, model.PriorityHighest, "", periapsis.S), f.prepare(3, model.PriorityHigh, "", periapsis.S), f.prepare(4, model.PriorityNormal, "", periapsis.S)}
+	runs := []*admissionReservation{f.prepare(1, model.PriorityNormal, "", pipeline.S), f.prepare(2, model.PriorityHighest, "", pipeline.S), f.prepare(3, model.PriorityHigh, "", pipeline.S), f.prepare(4, model.PriorityNormal, "", pipeline.S)}
 	if state := (&Scheduler{admission: f.gate}).AdmissionState().Pressure; state.Deferred != 4 {
 		t.Fatal("not all queued pressure waiters counted", state)
 	}
@@ -587,7 +587,7 @@ func TestPressureNonAdminAndMCPViewsKeepNonNumericReason(t *testing.T) {
 	}
 	f := pressureTestGate()
 	f.sample.IO.FullAvg60 = 67.25
-	r := f.prepare(claimed.QueueSequence, model.PriorityNormal, "", periapsis.M)
+	r := f.prepare(claimed.QueueSequence, model.PriorityNormal, "", pipeline.M)
 	r.runID = source.ID
 	r.repoID = fixture.repo.ID
 	fixture.scheduler.admission = f.gate
@@ -600,7 +600,7 @@ func TestPressureNonAdminAndMCPViewsKeepNonNumericReason(t *testing.T) {
 			t.Fatal(err)
 		}
 		run := claimed
-		run.JobName = "reserved"
+		run.WorkflowName = "reserved"
 		observed := view.scheduling(t.Context(), run, nil)
 		if admin {
 			if !strings.Contains(observed.Message, "67.2%") {
@@ -628,8 +628,8 @@ func TestPressureObserveHighLoadKeepsOtherAdmissionGates(t *testing.T) {
 	f.gate.pressure.config.Mode = PressureObserve
 	f.gate.pressure.state.Mode = PressureObserve
 	f.sample.IO.FullAvg60 = 72
-	first := f.prepare(1, model.PriorityNormal, "", periapsis.L)
-	second := f.prepare(2, model.PriorityNormal, "", periapsis.L)
+	first := f.prepare(1, model.PriorityNormal, "", pipeline.L)
+	second := f.prepare(2, model.PriorityNormal, "", pipeline.L)
 	if !first.granted || second.granted { // L weighs 3; a budget of 4 still binds.
 		t.Fatal("observation bypassed weighted capacity or blocked the first grant")
 	}
@@ -671,7 +671,7 @@ func TestPressureExplicitEnforcementRecoversWithoutRestart(t *testing.T) {
 	f := pressureTestGate()
 	f.gate.pressure.config.Mode = PressureEnforce
 	f.sample.IO.FullAvg60 = 65
-	waiting := f.prepare(1, model.PriorityNormal, "", periapsis.M)
+	waiting := f.prepare(1, model.PriorityNormal, "", pipeline.M)
 	if waiting.granted || !f.gate.pressure.state.Holding {
 		t.Fatal("explicit enforcement failed to hold at loaded-host pressure")
 	}
@@ -696,7 +696,7 @@ func TestPressureObserveDoesNotBypassDiskOrGroupOwnership(t *testing.T) {
 	f.gate.pressure.state.Mode = PressureObserve
 	f.sample.IO.FullAvg60 = 70
 	f.gate.diskFloor = &diskFloorCheck{floorBytes: 100, cachedFree: 0, cacheTime: time.Now(), cacheTTL: time.Hour}
-	waiting := f.prepare(1, model.PriorityNormal, "deploy", periapsis.S)
+	waiting := f.prepare(1, model.PriorityNormal, "deploy", pipeline.S)
 	if waiting.granted {
 		t.Fatal("observation waived the disk floor")
 	}
@@ -705,7 +705,7 @@ func TestPressureObserveDoesNotBypassDiskOrGroupOwnership(t *testing.T) {
 	if !waiting.granted {
 		t.Fatal("disk recovery did not progress")
 	}
-	follower := f.prepare(2, model.PriorityNormal, "deploy", periapsis.S)
+	follower := f.prepare(2, model.PriorityNormal, "deploy", pipeline.S)
 	if follower.granted {
 		t.Fatal("observation waived group ownership")
 	}

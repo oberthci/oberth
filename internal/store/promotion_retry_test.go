@@ -107,7 +107,7 @@ func TestPromotionRetryAdmissionLineageAndGuards(t *testing.T) {
 	if _, err := s.AppendPromotion(ctx, retry); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("retry of a pending promotion error = %v, want ErrInvalidState", err)
 	}
-	if _, err := s.FinishPromotion(ctx, pending.ID, model.PromotionInterrupted, "", "server restarted"); err != nil {
+	if _, err := s.FinishPromotion(ctx, pending.ID, model.PromotionInterrupted, "", "oberth restarted before promotion publication intent"); err != nil {
 		t.Fatal(err)
 	}
 	for name, bad := range map[string]model.PromotionSpec{
@@ -295,5 +295,33 @@ func TestUplinksByIdentityReportsCurrentAuthority(t *testing.T) {
 	}
 	if _, err := s.UplinksByIdentity(ctx, " "); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("blank identity error = %v", err)
+	}
+}
+
+func TestAutomaticPromotionRetryCannotReplaceExpiredGrant(t *testing.T) {
+	now := time.Now().UTC()
+	s := testStore(t, &now)
+	repo := createRepo(t, s)
+	grant, err := s.AppendPromotionGrant(t.Context(), model.PromotionGrantSpec{RepoID: repo.ID, SourceSHA: retryStoreSource, TargetRef: "main", Issuer: "admin", IssuerFingerprint: "SHA256:admin", ExpiresAt: now.Add(time.Minute)})
+	requireRestartNoError(t, err)
+	spec := retryPromotionSpec(repo.ID, grant.ID)
+	original, err := s.AppendPromotion(t.Context(), spec)
+	requireRestartNoError(t, err)
+	_, err = s.FinishPromotion(t.Context(), original.ID, model.PromotionInterrupted, "", "oberth restarted before promotion publication intent")
+	requireRestartNoError(t, err)
+	now = now.Add(2 * time.Minute)
+	spec.RetryOf, spec.RetryMode = original.ID, model.PromotionRetryAuto
+	if _, err = s.AppendPromotion(t.Context(), spec); !errors.Is(err, ErrInvalidState) {
+		t.Fatal("expired grant admitted", err)
+	}
+	replacement, err := s.AppendPromotionGrant(t.Context(), model.PromotionGrantSpec{RepoID: repo.ID, SourceSHA: retryStoreSource, TargetRef: "main", Issuer: "admin", IssuerFingerprint: "SHA256:admin", ExpiresAt: now.Add(time.Hour)})
+	requireRestartNoError(t, err)
+	spec.GrantID = replacement.ID
+	if _, err = s.AppendPromotion(t.Context(), spec); !errors.Is(err, ErrInvalidState) {
+		t.Fatal("automatic retry switched grant", err)
+	}
+	spec.GrantID = ""
+	if _, err = s.AppendPromotion(t.Context(), spec); !errors.Is(err, ErrInvalidState) {
+		t.Fatal("automatic retry escalated to direct authority", err)
 	}
 }

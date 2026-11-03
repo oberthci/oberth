@@ -9,11 +9,11 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // RunTrigger is what started a durable run, finer than the trust-tier
-// periapsis.Trigger: build.yaml runs for a branch push, a promotion candidate,
+// pipeline.Trigger: build.yaml runs for a branch push, a promotion candidate,
 // or a schedule, and release.yaml for a tag. The vocabulary is closed. The
 // server derives the value from the durable run record, never from the
 // document or a caller.
@@ -43,11 +43,11 @@ func (trigger RunTrigger) Valid() bool {
 
 // Tier returns the trust tier, and so the pipeline document, a run trigger
 // executes under: tag runs read release.yaml, every other run build.yaml.
-func (trigger RunTrigger) Tier() periapsis.Trigger {
+func (trigger RunTrigger) Tier() pipeline.Trigger {
 	if trigger == RunTriggerTag {
-		return periapsis.TriggerRelease
+		return pipeline.TriggerRelease
 	}
-	return periapsis.TriggerCI
+	return pipeline.TriggerCI
 }
 
 const (
@@ -82,7 +82,7 @@ const (
 
 // DeclaredSizesByTrigger parses the size-by-trigger annotation. An absent or
 // blank annotation yields nil.
-func DeclaredSizesByTrigger(workflow *wfv1.Workflow) (map[RunTrigger]periapsis.Size, error) {
+func DeclaredSizesByTrigger(workflow *wfv1.Workflow) (map[RunTrigger]pipeline.Size, error) {
 	if workflow == nil {
 		return nil, errors.New("argoworkflow: no Workflow to read")
 	}
@@ -90,11 +90,11 @@ func DeclaredSizesByTrigger(workflow *wfv1.Workflow) (map[RunTrigger]periapsis.S
 	if !ok || strings.TrimSpace(declared) == "" {
 		return nil, nil
 	}
-	sizes := map[RunTrigger]periapsis.Size{}
+	sizes := map[RunTrigger]pipeline.Size{}
 	for index, entry := range strings.Split(declared, ",") {
 		key, value, found := strings.Cut(entry, "=")
 		trigger := RunTrigger(strings.TrimSpace(key))
-		size := periapsis.Size(strings.TrimSpace(value))
+		size := pipeline.Size(strings.TrimSpace(value))
 		if !found || trigger == "" || size == "" {
 			return nil, fmt.Errorf("argoworkflow: annotation %s entry %d %q is not trigger=size",
 				SizeByTriggerAnnotation, index, strings.TrimSpace(entry))
@@ -104,10 +104,10 @@ func DeclaredSizesByTrigger(workflow *wfv1.Workflow) (map[RunTrigger]periapsis.S
 				SizeByTriggerAnnotation, trigger, quotedTriggers())
 		}
 		switch size {
-		case periapsis.S, periapsis.M, periapsis.L, periapsis.XL:
+		case pipeline.S, pipeline.M, pipeline.L, pipeline.XL:
 		default:
 			return nil, fmt.Errorf("argoworkflow: annotation %s declares unknown size %q for %s; sizes are %q, %q, %q, and %q",
-				SizeByTriggerAnnotation, size, trigger, periapsis.S, periapsis.M, periapsis.L, periapsis.XL)
+				SizeByTriggerAnnotation, size, trigger, pipeline.S, pipeline.M, pipeline.L, pipeline.XL)
 		}
 		if _, duplicate := sizes[trigger]; duplicate {
 			return nil, fmt.Errorf("argoworkflow: annotation %s declares %s more than once", SizeByTriggerAnnotation, trigger)
@@ -122,7 +122,7 @@ func DeclaredSizesByTrigger(workflow *wfv1.Workflow) (map[RunTrigger]periapsis.S
 // trigger named is one this document can run for (tag only in release.yaml,
 // the others only in build.yaml). It is the check `oberth validate` and the
 // server share.
-func AdmitSizeDeclarations(workflow *wfv1.Workflow, tier periapsis.Trigger) error {
+func AdmitSizeDeclarations(workflow *wfv1.Workflow, tier pipeline.Trigger) error {
 	if _, err := DeclaredSize(workflow); err != nil {
 		return err
 	}
@@ -146,7 +146,7 @@ func AdmitSizeDeclarations(workflow *wfv1.Workflow, tier periapsis.Trigger) erro
 // DeclaredSizeFor returns the admission weight the document requests for one
 // run trigger: its size-by-trigger entry when present, otherwise
 // oberth.ci/size, otherwise M.
-func DeclaredSizeFor(workflow *wfv1.Workflow, trigger RunTrigger) (periapsis.Size, error) {
+func DeclaredSizeFor(workflow *wfv1.Workflow, trigger RunTrigger) (pipeline.Size, error) {
 	if !trigger.Valid() {
 		return "", fmt.Errorf("argoworkflow: run trigger %q is invalid", trigger)
 	}

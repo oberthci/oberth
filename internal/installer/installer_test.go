@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
@@ -28,6 +29,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
+	"k8s.io/utils/ptr"
 )
 
 // fakeChartImageRef is the digest-pinned image reference returned by fake
@@ -884,7 +886,7 @@ func TestExecuteDarwinNodeListFailureStillLoadsKindImages(t *testing.T) {
 			// HelmWithKubeArgs; match on substrings instead of exact prefixes.
 			command := strings.Join(args, " ")
 			switch {
-			case strings.Contains(command, "list -n openbao -o json") || strings.Contains(command, "list -n oberth -o json"):
+			case strings.Contains(command, "list -n "):
 				return []byte("[]"), nil
 			case strings.Contains(command, "show values oberth-charts/oberth"):
 				return []byte("image:\n  ref: private.example/oberth:latest\n"), nil
@@ -938,38 +940,11 @@ func TestPrepareKindImagesExplainsGARAuthentication(t *testing.T) {
 
 // --- Config validation ---
 
-func TestConfigValidateDevProductionMutualExclusion(t *testing.T) {
-	t.Parallel()
-	cfg := Config{Dev: true, Production: true}
-	err := cfg.Validate()
-	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
-		t.Fatalf("want mutual exclusion error, got %v", err)
-	}
-}
-
-func TestConfigValidateProductionRejected(t *testing.T) {
-	t.Parallel()
-	cfg := Config{Production: true}
-	err := cfg.Validate()
-	if err == nil {
-		t.Fatal("want error for production mode")
-	}
-	if !strings.Contains(err.Error(), "not implemented") {
-		t.Fatalf("error should mention not implemented, got %v", err)
-	}
-	if !strings.Contains(err.Error(), "BACKLOG.md") {
-		t.Fatalf("error should mention BACKLOG.md, got %v", err)
-	}
-}
-
 func TestConfigValidateDefaultsToDev(t *testing.T) {
 	t.Parallel()
 	cfg := Config{}
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
-	}
-	if !cfg.Dev {
-		t.Fatal("should default to dev mode")
 	}
 	if cfg.OpenBaoNamespace != DefaultOpenBaoNamespace {
 		t.Fatalf("OpenBaoNamespace = %q, want %q", cfg.OpenBaoNamespace, DefaultOpenBaoNamespace)
@@ -1156,9 +1131,12 @@ func TestDryRunZeroWrites(t *testing.T) {
 	}
 	deps := Deps{
 		Output: &buf,
-		RunHelm: func(_ context.Context, _ []string) ([]byte, error) {
+		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if args[0] != "list" {
+				t.Fatalf("dry-run attempted mutation: %v", args)
+			}
 			helmCalls++
-			return nil, nil
+			return []byte(`[]`), nil
 		},
 		KubeClient:  fake.NewClientset(node, readyArgoControllerPod()),
 		RestConfig:  &rest.Config{Host: "https://127.0.0.1:6443"},
@@ -1168,8 +1146,8 @@ func TestDryRunZeroWrites(t *testing.T) {
 	if err := Run(context.Background(), cfg, deps); err != nil {
 		t.Fatal(err)
 	}
-	if helmCalls != 0 {
-		t.Fatalf("dry-run called helm %d times, want 0", helmCalls)
+	if helmCalls != 1 {
+		t.Fatalf("dry-run called helm %d times, want one read-only release lookup", helmCalls)
 	}
 	output := buf.String()
 	if !strings.Contains(output, "Dry-run plan") {
@@ -1330,9 +1308,6 @@ func TestOberthHelmArgs(t *testing.T) {
 				// defaults; pinned unconditionally (#662).
 				"--set", "argo.goProxy.port=8444",
 				// Promotion grant lifetime (#826).
-				"--set", "promotion.grantMaxLifetime=24h",
-				"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
-				"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
 				"--set", "secretstore.enabled=true",
 				"--set", "secretstore.address=https://openbao.openbao.svc:8200",
 				"--set", "secretstore.role=oberth-ci",
@@ -1352,9 +1327,6 @@ func TestOberthHelmArgs(t *testing.T) {
 				// Go module proxy pins (#662).
 				"--set", "argo.goProxy.port=8444",
 				// Promotion grant lifetime (#826).
-				"--set", "promotion.grantMaxLifetime=24h",
-				"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
-				"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
 				"--set", "secretstore.enabled=true",
 				"--set", "secretstore.address=http://openbao.openbao.svc:8200",
 				"--set", "secretstore.role=oberth-ci",
@@ -1522,9 +1494,6 @@ func TestOberthHelmArgsWithoutSecretStore(t *testing.T) {
 		// Go module proxy pins (#662).
 		"--set", "argo.goProxy.port=8444",
 		// Promotion grant lifetime (#826).
-		"--set", "promotion.grantMaxLifetime=24h",
-		"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
-		"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
 		"--version", "0.10.54",
 		"--reuse-values",
 	}
@@ -1552,13 +1521,9 @@ func TestOberthHelmArgsWithRekor(t *testing.T) {
 		// Go module proxy pins (#662).
 		"--set", "argo.goProxy.port=8444",
 		// Promotion grant lifetime (#826).
-		"--set", "promotion.grantMaxLifetime=24h",
-		"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
-		"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
 		"--set", "auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",
 		"--set", "auditAnchor.rekorInsecureHTTP=true",
 		"--set-string", "auditAnchor.rekorPublicKey=" + publicKeyPEM,
-		"--set-string", "auditAnchor.acceptWitnessGenesis=",
 		"--version", "0.10.54",
 		"--reuse-values",
 	}
@@ -1758,9 +1723,12 @@ func TestDryRunFullPlanRendersAllPhases(t *testing.T) {
 	helmCalls := 0
 	deps := Deps{
 		Output: &buf,
-		RunHelm: func(_ context.Context, _ []string) ([]byte, error) {
+		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if args[0] != "list" {
+				t.Fatalf("dry-run attempted mutation: %v", args)
+			}
 			helmCalls++
-			return nil, nil
+			return []byte(`[]`), nil
 		},
 		KubeClient:  fake.NewClientset(node, readyArgoControllerPod()),
 		RestConfig:  &rest.Config{Host: "https://127.0.0.1:6443"},
@@ -1770,8 +1738,8 @@ func TestDryRunFullPlanRendersAllPhases(t *testing.T) {
 	if err := Run(context.Background(), cfg, deps); err != nil {
 		t.Fatal(err)
 	}
-	if helmCalls != 0 {
-		t.Fatalf("dry-run called helm %d times, want 0", helmCalls)
+	if helmCalls != 1 {
+		t.Fatalf("dry-run called helm %d times, want one read-only release lookup", helmCalls)
 	}
 	output := buf.String()
 	for _, want := range []string{
@@ -1812,7 +1780,7 @@ func TestDryRunDevSecretStorePlan(t *testing.T) {
 	}
 	deps := Deps{
 		Output:      &buf,
-		RunHelm:     func(_ context.Context, _ []string) ([]byte, error) { return nil, nil },
+		RunHelm:     func(_ context.Context, _ []string) ([]byte, error) { return []byte(`[]`), nil },
 		KubeClient:  fake.NewClientset(node, readyArgoControllerPod()),
 		RestConfig:  &rest.Config{Host: "https://127.0.0.1:6443"},
 		ContextName: "kind-test",
@@ -1842,12 +1810,12 @@ func TestDryRunPlainPlanOmitsOptionalPhases(t *testing.T) {
 	// A non-kind engine keeps the plain plan free of the kind-only image
 	// preparation phase, so Oberth installation is genuinely the first step.
 	node := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{Name: "tuxbox"},
+		ObjectMeta: metav1.ObjectMeta{Name: "example-node"},
 		Status:     corev1.NodeStatus{NodeInfo: corev1.NodeSystemInfo{KubeletVersion: "v1.31.4+k3s1"}},
 	}
 	deps := Deps{
 		Output:      &buf,
-		RunHelm:     func(_ context.Context, _ []string) ([]byte, error) { return nil, nil },
+		RunHelm:     func(_ context.Context, _ []string) ([]byte, error) { return []byte(`[]`), nil },
 		KubeClient:  fake.NewClientset(node, readyArgoControllerPod()),
 		RestConfig:  &rest.Config{Host: "https://127.0.0.1:6443"},
 		ContextName: "default",
@@ -1895,7 +1863,7 @@ func TestInstallOberthExistingKindReleaseSkipsImagePreparation(t *testing.T) {
 	if !result.AlreadyInstalled {
 		t.Fatal("existing release should be reported as already installed")
 	}
-	if len(helmCalls) != 1 || strings.Join(helmCalls[0], " ") != "list -n oberth -o json" {
+	if len(helmCalls) != 1 || strings.Join(helmCalls[0], " ") != "list -n oberth -o json -a" {
 		t.Fatalf("helm calls = %v, want only release lookup", helmCalls)
 	}
 }
@@ -2018,9 +1986,17 @@ func secretStoreTestDeps(runner *fakeBaoRunner, output io.Writer, objects ...k8s
 		ObjectMeta: metav1.ObjectMeta{Name: "kube-root-ca.crt", Namespace: "kube-public"},
 		Data:       map[string]string{"ca.crt": "-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n"},
 	}
+	for _, object := range objects {
+		if pod, ok := object.(*corev1.Pod); ok && pod.Name == expectedOpenBaoPodName && pod.Namespace != DefaultOpenBaoNamespace {
+			controller := runningOpenBaoStatefulSet()
+			controller.Namespace = pod.Namespace
+			objects = append(objects, controller)
+		}
+	}
+
 	return Deps{
 		Output:       output,
-		KubeClient:   fake.NewClientset(append([]k8sruntime.Object{ca}, objects...)...),
+		KubeClient:   fake.NewClientset(append([]k8sruntime.Object{ca, runningOpenBaoStatefulSet()}, objects...)...),
 		RestConfig:   &rest.Config{Host: "https://127.0.0.1:6443"},
 		RunCommand:   runner.run,
 		ContextName:  "test-ctx",
@@ -2051,13 +2027,18 @@ func runningOpenBaoPod() *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "openbao-0", Namespace: DefaultOpenBaoNamespace,
-			Labels: map[string]string{"app.kubernetes.io/instance": "openbao"},
+			OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "StatefulSet", Name: "openbao", UID: "openbao-controller-fixture", Controller: ptr.To(true)}},
+			Labels:          map[string]string{"app.kubernetes.io/instance": "openbao"},
 		},
 		Status: corev1.PodStatus{
 			Phase:      corev1.PodRunning,
 			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
 		},
 	}
+}
+
+func runningOpenBaoStatefulSet() *appsv1.StatefulSet {
+	return &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: "openbao", Namespace: DefaultOpenBaoNamespace, UID: "openbao-controller-fixture"}}
 }
 
 func TestConfigureSecretStoreFresh(t *testing.T) {
@@ -2116,7 +2097,7 @@ func TestConfigureSecretStoreFresh(t *testing.T) {
 		t.Fatal("policy was not written")
 	}
 	policyBody := strings.TrimPrefix(policyWrite.stdin, token+"\n")
-	if !strings.Contains(policyBody, `path "oberth/data/*"`) || !strings.Contains(policyBody, "auth/token/revoke-self") {
+	if !strings.Contains(policyBody, `path "oberth/data/identities/oberth/*"`) || !strings.Contains(policyBody, "auth/token/revoke-self") {
 		t.Fatalf("policy body incomplete:\n%s", policyBody)
 	}
 
@@ -2310,7 +2291,10 @@ func TestFindHelmRelease(t *testing.T) {
 				return []byte(`[{"name":"openbao","namespace":"openbao","status":"deployed","chart":"openbao-0.28.6"}]`), nil
 			},
 		}
-		release, exists := findHelmRelease(ctx, deps, "openbao", "openbao")
+		release, exists, err := findHelmRelease(ctx, deps, "openbao", "openbao")
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !exists {
 			t.Fatal("should find existing release")
 		}
@@ -2326,7 +2310,7 @@ func TestFindHelmRelease(t *testing.T) {
 				return []byte(`[]`), nil
 			},
 		}
-		if _, exists := findHelmRelease(ctx, deps, "openbao", "openbao"); exists {
+		if _, exists, err := findHelmRelease(ctx, deps, "openbao", "openbao"); exists || err != nil {
 			t.Fatal("should not find missing release")
 		}
 	})
@@ -2338,8 +2322,8 @@ func TestFindHelmRelease(t *testing.T) {
 				return nil, errors.New("namespace not found")
 			},
 		}
-		if _, exists := findHelmRelease(ctx, deps, "openbao", "openbao"); exists {
-			t.Fatal("helm error should report not exists")
+		if _, exists, err := findHelmRelease(ctx, deps, "openbao", "openbao"); exists || err == nil {
+			t.Fatal("helm failure must be distinguished from absence")
 		}
 	})
 }
@@ -2487,13 +2471,9 @@ func TestInstallOberthReconcilesRekorAtInstalledVersion(t *testing.T) {
 				// Go module proxy pins (#662).
 				"--set", "argo.goProxy.port=8444",
 				// Promotion grant lifetime (#826).
-				"--set", "promotion.grantMaxLifetime=24h",
-				"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
-				"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
 				"--set", "auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",
 				"--set", "auditAnchor.rekorInsecureHTTP=true",
 				"--set-string", "auditAnchor.rekorPublicKey=" + publicKeyPEM,
-				"--set-string", "auditAnchor.acceptWitnessGenesis=",
 				"--version", tc.installedVersion,
 				"--reuse-values",
 			}
@@ -2646,13 +2626,9 @@ func TestInstallOberthRekorUpgradeAllowsUnknownInstalledVersion(t *testing.T) {
 		// Go module proxy pins (#662).
 		"--set", "argo.goProxy.port=8444",
 		// Promotion grant lifetime (#826).
-		"--set", "promotion.grantMaxLifetime=24h",
-		"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
-		"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
 		"--set", "auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",
 		"--set", "auditAnchor.rekorInsecureHTTP=true",
 		"--set-string", "auditAnchor.rekorPublicKey=" + publicKeyPEM,
-		"--set-string", "auditAnchor.acceptWitnessGenesis=",
 		"--version", "0.10.58",
 		"--reuse-values",
 	}
@@ -3393,7 +3369,7 @@ func TestSetupProductionSecretStoreInitializesAndConfigures(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	configured, err := SetupProductionSecretStore(context.Background(), cfg, deps, productionOpenBaoResult())
+	configured, err := setupProductionSecretStoreFixture(context.Background(), cfg, deps, productionOpenBaoResult())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3403,7 +3379,7 @@ func TestSetupProductionSecretStoreInitializesAndConfigures(t *testing.T) {
 
 	output := buf.String()
 	for _, want := range []string{
-		"OpenBao credentials (save now, shown once)",
+		"Credentials (save now, shown once)",
 		rootToken,
 		unsealKey,
 		"└──",
@@ -3445,7 +3421,7 @@ func TestSetupProductionSecretStoreSealedRerunFails(t *testing.T) {
 	cfg := Config{InstallSecretStore: true}
 	_ = cfg.Validate()
 
-	_, err := SetupProductionSecretStore(context.Background(), cfg, deps, productionOpenBaoResult())
+	_, err := setupProductionSecretStoreFixture(context.Background(), cfg, deps, productionOpenBaoResult())
 	if err == nil {
 		t.Fatal("sealed already-initialized store must fail with unseal guidance")
 	}
@@ -3529,7 +3505,7 @@ func TestSetupProductionSecretStoreAlreadyInitializedWithoutTokenFailsBeforeRunt
 	openbao := productionOpenBaoResult()
 	openbao.Namespace = openBaoNamespace
 
-	_, err := SetupProductionSecretStore(context.Background(), cfg, deps, openbao)
+	_, err := setupProductionSecretStoreFixture(context.Background(), cfg, deps, openbao)
 	if err == nil || !strings.Contains(err.Error(), baoTokenEnvVar) {
 		t.Fatalf("missing-token production setup error = %v", err)
 	}
@@ -3572,7 +3548,7 @@ func TestSetupProductionSecretStoreAlreadyInitializedUsesEnvToken(t *testing.T) 
 	cfg := Config{InstallSecretStore: true}
 	_ = cfg.Validate()
 
-	configured, err := SetupProductionSecretStore(context.Background(), cfg, deps, productionOpenBaoResult())
+	configured, err := setupProductionSecretStoreFixture(context.Background(), cfg, deps, productionOpenBaoResult())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3606,7 +3582,7 @@ func TestSetupProductionSecretStoreRefusesDevStore(t *testing.T) {
 	cfg := Config{InstallSecretStore: true}
 	_ = cfg.Validate()
 
-	_, err := SetupProductionSecretStore(context.Background(), cfg, deps, productionOpenBaoResult())
+	_, err := setupProductionSecretStoreFixture(context.Background(), cfg, deps, productionOpenBaoResult())
 	if err == nil || !strings.Contains(err.Error(), "dev mode (in-memory storage)") {
 		t.Fatalf("want dev-store refusal, got %v", err)
 	}
@@ -4669,7 +4645,7 @@ func TestCredentialedPolicyPathsAcceptsUpstreamPrefix(t *testing.T) {
 	t.Parallel()
 	paths, err := credentialedPolicyPaths("oberth", []string{
 		"oberth/upstream/acme/terraform/credentials",
-		"oberth/upstream/skipops/terraform/plan/gcp-sa",
+		"oberth/upstream/acme/terraform/plan/gcp-sa",
 		"oberth/data/release/cosign-secret",
 	})
 	if err != nil {
@@ -4677,7 +4653,7 @@ func TestCredentialedPolicyPathsAcceptsUpstreamPrefix(t *testing.T) {
 	}
 	want := []string{
 		"upstream/acme/terraform/credentials",
-		"upstream/skipops/terraform/plan/gcp-sa",
+		"upstream/acme/terraform/plan/gcp-sa",
 		"release/cosign-secret",
 	}
 	if len(paths) != len(want) {
@@ -4831,7 +4807,7 @@ func TestValidateExistingKindClusterRejectsMixedBindings(t *testing.T) {
 func TestK3sAutoNetworkPolicySetsFlag(t *testing.T) {
 	t.Parallel()
 	node := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{Name: "tuxbox"},
+		ObjectMeta: metav1.ObjectMeta{Name: "example-node"},
 		Status: corev1.NodeStatus{
 			NodeInfo: corev1.NodeSystemInfo{KubeletVersion: "v1.31.4+k3s1"},
 		},
@@ -4839,7 +4815,7 @@ func TestK3sAutoNetworkPolicySetsFlag(t *testing.T) {
 	var buf bytes.Buffer
 	deps := Deps{
 		Output:      &buf,
-		RunHelm:     func(_ context.Context, _ []string) ([]byte, error) { return nil, nil },
+		RunHelm:     func(_ context.Context, _ []string) ([]byte, error) { return []byte(`[]`), nil },
 		KubeClient:  fake.NewClientset(node, readyArgoControllerPod()),
 		RestConfig:  &rest.Config{Host: "https://127.0.0.1:6443"},
 		ContextName: "default",
@@ -4877,21 +4853,21 @@ func TestCredentialedPolicyWithNoGrantsMatchesBasePolicy(t *testing.T) {
 // upstream orgs produce separate per-org path rules, sorted and deduplicated.
 func TestCISecretsPolicyEnumeratesMultipleOrgs(t *testing.T) {
 	t.Parallel()
-	policy := OberthCISecretsPolicy("oberth", []string{"skipops", "oberthci", "oberthci"})
+	policy := OberthCISecretsPolicy("oberth", []string{"acme", "oberthci", "oberthci"})
 	if !strings.Contains(policy, `path "oberth/data/upstream/oberthci/*"`) {
 		t.Fatal("policy missing oberthci org rule")
 	}
-	if !strings.Contains(policy, `path "oberth/data/upstream/skipops/*"`) {
-		t.Fatal("policy missing skipops org rule")
+	if !strings.Contains(policy, `path "oberth/data/upstream/acme/*"`) {
+		t.Fatal("policy missing acme org rule")
 	}
 	if strings.Contains(policy, `path "oberth/data/upstream/*"`) {
 		t.Fatal("policy still uses static upstream/* wildcard")
 	}
-	// oberthci appears before skipops (sorted)
+	// acme appears before oberthci (sorted)
 	oberthciIdx := strings.Index(policy, "oberthci")
-	skipopsIdx := strings.Index(policy, "skipops")
-	if oberthciIdx > skipopsIdx {
-		t.Fatal("org rules are not sorted: oberthci should appear before skipops")
+	acmeIdx := strings.Index(policy, "acme")
+	if acmeIdx > oberthciIdx {
+		t.Fatal("org rules are not sorted: acme should appear before oberthci")
 	}
 	// Deduplicated: oberthci appears exactly once in path rules
 	if count := strings.Count(policy, `upstream/oberthci/*"`); count != 1 {
@@ -4931,14 +4907,14 @@ func TestCredentialedPolicyEmptyOrgsFailsClosed(t *testing.T) {
 // rules and exact grant paths coexist in the credentialed policy.
 func TestCredentialedPolicyWithOrgsAndGrants(t *testing.T) {
 	t.Parallel()
-	policy := OberthCredentialedPolicyWithGrants("oberth", []string{"oberthci", "skipops"}, []string{
+	policy := OberthCredentialedPolicyWithGrants("oberth", []string{"oberthci", "acme"}, []string{
 		"release/cosign-secret",
 	})
 	if !strings.Contains(policy, `upstream/oberthci/*`) {
 		t.Fatal("missing oberthci org rule")
 	}
-	if !strings.Contains(policy, `upstream/skipops/*`) {
-		t.Fatal("missing skipops org rule")
+	if !strings.Contains(policy, `upstream/acme/*`) {
+		t.Fatal("missing acme org rule")
 	}
 	if !strings.Contains(policy, `oberth/data/release/cosign-secret`) {
 		t.Fatal("missing grant path")
@@ -4955,15 +4931,15 @@ func TestUpstreamOrgsFromIdentities(t *testing.T) {
 	ids := []PerRepoIdentity{
 		{Upstream: "codeberg", Org: "oberthci", Repo: "oberth"},
 		{Upstream: "codeberg", Org: "oberthci", Repo: "acme-operator"},
-		{Upstream: "github", Org: "skipops", Repo: "terraform"},
+		{Upstream: "github", Org: "acme", Repo: "terraform"},
 		{Upstream: "local", Org: "", Repo: "empty-org"},
 	}
 	orgs := upstreamOrgsFromIdentities(ids)
 	if len(orgs) != 2 {
 		t.Fatalf("expected 2 unique orgs, got %d: %v", len(orgs), orgs)
 	}
-	if orgs[0] != "oberthci" || orgs[1] != "skipops" {
-		t.Fatalf("expected [oberthci skipops], got %v", orgs)
+	if orgs[0] != "acme" || orgs[1] != "oberthci" {
+		t.Fatalf("expected [acme oberthci], got %v", orgs)
 	}
 }
 

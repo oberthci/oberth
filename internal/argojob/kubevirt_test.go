@@ -10,7 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 const kubeVirtWorkflow = `apiVersion: argoproj.io/v1alpha1
@@ -66,7 +66,7 @@ func TestBuildKubeVirtRequiresGrantAndRefusesCredentialed(t *testing.T) {
 	config := testConfig()
 	config.VMLauncherServiceAccount = "oberth-argo-vm-launcher"
 	config.ContainerDiskPrefixes = []string{"quay.io/example/"}
-	request := testRequest(periapsis.TriggerCI, kubeVirtWorkflow)
+	request := testRequest(pipeline.TriggerCI, kubeVirtWorkflow)
 	if _, err := Build(config, request); err == nil || !strings.Contains(err.Error(), "not admitted") {
 		t.Fatalf("ungranted VMI = %v", err)
 	}
@@ -81,9 +81,9 @@ func TestBuildKubeVirtRequiresGrantAndRefusesCredentialed(t *testing.T) {
 	if got := wf.Spec.Executor.ServiceAccountName; got != config.ExecutorServiceAccount {
 		t.Fatalf("shared executor = %q", got)
 	}
-	credentialedSource := strings.Replace(kubeVirtWorkflow, "kind: Workflow\n", "kind: Workflow\nmetadata:\n  annotations:\n    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/test-secret\n", 1)
+	credentialedSource := strings.Replace(kubeVirtWorkflow, "kind: Workflow\n", "kind: Workflow\nmetadata:\n  annotations:\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
 	request.Source = []byte(credentialedSource)
-	request.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/test-secret": true}
+	request.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/test-secret": true}
 	if _, err := Build(config, request); err == nil || !strings.Contains(err.Error(), "refused in credentialed workflows") {
 		t.Fatalf("credentialed VMI = %v", err)
 	}
@@ -96,7 +96,7 @@ func TestBuildRefusesInlineVMICreate(t *testing.T) {
 	config := testConfig()
 	config.VMLauncherServiceAccount = "oberth-argo-vm-launcher"
 	config.ContainerDiskPrefixes = []string{"quay.io/example/"}
-	request := testRequest(periapsis.TriggerCI, kubeVirtWorkflow)
+	request := testRequest(pipeline.TriggerCI, kubeVirtWorkflow)
 	request.KubeVirtGranted = true
 	if _, err := Build(config, request); err != nil {
 		t.Fatalf("top-level named VMI control refused: %v", err)
@@ -149,7 +149,7 @@ func TestFragmentSourcedVMIRefusesCredentialedWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := "oberth/upstream/skipops/oberth/test-secret"
+	path := "oberth/upstream/acme/oberth/test-secret"
 	request := fragmentRequest(t, consumingDocument("    oberth.ci/secret-paths: "+path+"\n", key.String()), map[argoworkflow.FragmentKey]argoworkflow.Fragment{key: fragment})
 	request.ApprovedSecrets = map[string]bool{path: true}
 	request.KubeVirtGranted = true
@@ -171,7 +171,7 @@ func TestWIFLeafRefusesVMIWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := testRequest(periapsis.TriggerRelease, string(source))
+	request := testRequest(pipeline.TriggerRelease, string(source))
 	request.UpstreamName = "github"
 	request.KubeVirtGranted = true
 	config := wifTestConfig()
@@ -194,7 +194,7 @@ func TestBuildKubeVirtAppliesGrantBudgetUnderCeiling(t *testing.T) {
 		second = strings.Replace(second, "    - name: vm\n", "    - name: vm-"+suffix+"\n", 1)
 		threeVMs += strings.Replace(second, "{{workflow.name}}-amd64", "{{workflow.name}}-"+suffix, 1)
 	}
-	request := testRequest(periapsis.TriggerCI, threeVMs)
+	request := testRequest(pipeline.TriggerCI, threeVMs)
 	request.KubeVirtGranted = true
 	if _, err := Build(config, request); err == nil || !strings.Contains(err.Error(), "3 concurrent VMs (maximum 2)") {
 		t.Fatalf("three VMIs under the default grant budget = %v", err)

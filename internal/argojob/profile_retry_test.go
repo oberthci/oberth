@@ -18,7 +18,7 @@ import (
 	ktesting "k8s.io/client-go/testing"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestProfileReadFailureRetriesBeforePreparingSubmission(t *testing.T) {
@@ -41,7 +41,7 @@ func TestProfileReadFailureRetriesBeforePreparingSubmission(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				request, err := controller.PrepareNonroot(t.Context(), testRequest(periapsis.TriggerCI, nonrootTestDocument))
+				request, err := controller.PrepareNonroot(t.Context(), testRequest(pipeline.TriggerCI, nonrootTestDocument))
 				if err != nil || request.nonrootProof == nil || reads != 4 {
 					t.Fatalf("profile read failure escaped instead of recovering: reads=%d proof=%v error=%v", reads, request.nonrootProof != nil, err)
 				}
@@ -71,7 +71,7 @@ func TestProfileOutageBlocksAdmissionAndCancellationDoesNotAuthorize(t *testing.
 		ctx, cancel := context.WithCancel(t.Context())
 		prepared := make(chan error, 1)
 		go func() {
-			_, err := controller.PrepareNonroot(ctx, testRequest(periapsis.TriggerCI, nonrootTestDocument))
+			_, err := controller.PrepareNonroot(ctx, testRequest(pipeline.TriggerCI, nonrootTestDocument))
 			prepared <- err
 		}()
 		synctest.Wait()
@@ -125,7 +125,7 @@ func TestProfileRetryBackoffIsCapped(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = controller.PrepareNonroot(ctx, testRequest(periapsis.TriggerCI, nonrootTestDocument))
+		_, err = controller.PrepareNonroot(ctx, testRequest(pipeline.TriggerCI, nonrootTestDocument))
 		if !errors.Is(err, context.Canceled) {
 			t.Fatal(err)
 		}

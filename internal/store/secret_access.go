@@ -27,6 +27,10 @@ var grantRepoPattern = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 // (issue #414).
 var grantSecretPattern = regexp.MustCompile(`^[A-Za-z0-9._/-]+$`)
 
+// Named steps use the same safe alphabet as grant paths; the standalone
+// wildcard retains its existing meaning of all steps.
+var grantStepPattern = regexp.MustCompile(`^(\*|[A-Za-z0-9._/-]+)$`)
+
 // SecretAccessGrant records an approval for a (repo, step, secret) triple. If
 // a revoked grant already exists for the same triple, a new active row is
 // inserted. If an active grant already exists, it is returned unchanged.
@@ -95,6 +99,9 @@ func (s *Store) Grant(ctx context.Context, repo, step, secret, actor string) (Se
 	}
 	if !grantRepoPattern.MatchString(repo) {
 		return SecretAccessGrant{}, fmt.Errorf("%w: repo %q contains characters outside [A-Za-z0-9._/-]; refusing to persist (HCL injection risk)", ErrInvalid, repo)
+	}
+	if !grantStepPattern.MatchString(step) {
+		return SecretAccessGrant{}, fmt.Errorf("%w: step must be * or contain only [A-Za-z0-9._/-]", ErrInvalid)
 	}
 	if !grantSecretPattern.MatchString(secret) {
 		return SecretAccessGrant{}, fmt.Errorf("%w: secret %q contains characters outside [A-Za-z0-9._/-]; refusing to persist (HCL injection risk)", ErrInvalid, secret)
@@ -190,22 +197,6 @@ RETURNING id, repo, step, secret, approved_by, approved_at, revoked_by, revoked_
 		return SecretAccessGrant{}, fmt.Errorf("commit revocation: %w", err)
 	}
 	return grant, nil
-}
-
-// SecretAccessCheck reports whether an active (non-revoked) grant exists for
-// the given (repo, step, secret) triple.
-func (s *Store) SecretAccessCheck(ctx context.Context, repo, step, secret string) (bool, error) {
-	if strings.TrimSpace(repo) == "" || strings.TrimSpace(step) == "" || strings.TrimSpace(secret) == "" {
-		return false, fmt.Errorf("%w: repo, step, and secret are required", ErrInvalid)
-	}
-	var count int
-	if err := s.reader().QueryRowContext(ctx, `
-SELECT count(*) FROM secret_access
-WHERE repo = ? AND step = ? AND secret = ? AND revoked_at IS NULL`,
-		repo, step, secret).Scan(&count); err != nil {
-		return false, fmt.Errorf("check secret access: %w", err)
-	}
-	return count > 0, nil
 }
 
 // ActiveSecretGrants returns all active grants for a repository, keyed by
@@ -340,7 +331,7 @@ func scanSecretAccess(row rowScanner) (SecretAccessGrant, error) {
 	var grant SecretAccessGrant
 	var approvedAt int64
 	var revokedAt sql.NullInt64
-	if err := row.Scan(&grant.ID, &grant.Repo, &grant.Step, &grant.Secret,
+	if err := scanRowNotFound(row, "SecretAccess", &grant.ID, &grant.Repo, &grant.Step, &grant.Secret,
 		&grant.ApprovedBy, &approvedAt, &grant.RevokedBy, &revokedAt); err != nil {
 		return SecretAccessGrant{}, err
 	}

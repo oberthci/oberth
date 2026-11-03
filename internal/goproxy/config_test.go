@@ -29,7 +29,7 @@ func TestNamespaceConfigurationFailsClosed(t *testing.T) {
 
 func TestHandlerSnapshotsConfiguredRoutes(t *testing.T) {
 	routes := map[string]string{"wire": "forge/example/sample-wire"}
-	h := NewHandler(&mockCache{}, "go.example.test", routes)
+	h := cachedTestHandler(t, &mockCache{}, "go.example.test", routes)
 	routes["untrusted"] = "other/untrusted/source"
 	assertRoutingStatus(t, h, "/go.example.test/untrusted/@v/list", http.StatusForbidden)
 	assertRoutingStatus(t, h, "/go.example.test.elsewhere/module/@v/list", http.StatusNotFound)

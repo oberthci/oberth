@@ -42,7 +42,7 @@ func TestArchiveRealHistory(t *testing.T) {
 	if err := os.Symlink(repository, filepath.Join(root, "mirror.git")); err != nil {
 		t.Fatal(err)
 	}
-	cache, err := gitcache.New(gitcache.Config{Root: root, Upstream: func(string) (string, error) { return "", errors.New("offline fixture must not fetch") }})
+	cache, err := gitcache.New(gitcache.Config{AllowLocalUpstreams: true, Root: root, Upstream: func(string) (string, error) { return "", errors.New("offline fixture must not fetch") }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func extractHistoryFixture(t *testing.T) string {
 // enough. This real commit also corrupts with the released streaming decoder.
 func TestCheckoutRealDeltaParity(t *testing.T) {
 	repository := extractHistoryFixture(t)
-	cache, err := gitcache.New(gitcache.Config{Root: filepath.Join(t.TempDir(), "cache"), Upstream: func(string) (string, error) { return repository, nil }})
+	cache, err := gitcache.New(gitcache.Config{AllowLocalUpstreams: true, Root: filepath.Join(t.TempDir(), "cache"), Upstream: func(string) (string, error) { return repository, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}

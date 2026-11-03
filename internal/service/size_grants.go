@@ -9,7 +9,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // sizeGrantTool serves size_grant, size_revoke and size_grant_get (#1021),
@@ -33,7 +33,7 @@ func (service *API) sizeGrantTool(ctx context.Context, actor api.Actor, name, re
 		if err != nil {
 			return nil, err
 		}
-		ceiling, err := argoworkflow.ResourceCeilingForSize(current)
+		ceiling, err := service.resourceCeilingForGrant(ctx, repository.ID, current)
 		if err != nil {
 			return nil, err
 		}
@@ -53,14 +53,14 @@ func (service *API) sizeGrantTool(ctx context.Context, actor api.Actor, name, re
 	if !actor.Admin {
 		return nil, refuse(ErrForbidden, "size grants require an admin uplink")
 	}
-	var size periapsis.Size
+	var size pipeline.Size
 	if name == "size_grant" {
 		if err := refuseArchivedGrant(repository, name, repoName); err != nil {
 			return nil, err
 		}
-		size = periapsis.Size(strings.TrimSpace(maximum))
+		size = pipeline.Size(strings.TrimSpace(maximum))
 		if !store.ValidSizeGrantMax(size) {
-			return nil, fmt.Errorf("%w: max must be %s or %s", ErrInvalidInput, periapsis.L, periapsis.XL)
+			return nil, fmt.Errorf("%w: max must be %s or %s", ErrInvalidInput, pipeline.L, pipeline.XL)
 		}
 	}
 	grant, err := service.sizeGrants.SetSizeGrant(ctx, repository.ID, actor.Identity, size)
@@ -74,9 +74,16 @@ func (service *API) sizeGrantTool(ctx context.Context, actor api.Actor, name, re
 	if grant.RevokedAt == nil {
 		current = grant.MaxSize
 	}
-	ceiling, err := argoworkflow.ResourceCeilingForSize(current)
+	ceiling, err := service.resourceCeilingForGrant(ctx, repository.ID, current)
 	if err != nil {
 		return nil, err
 	}
 	return map[string]any{"repo": repoName, "max_size": current, "resource_ceiling": ceiling, "grant": grant}, nil
+}
+
+func (s *API) resourceCeilingForGrant(ctx context.Context, repoID int64, size pipeline.Size) (any, error) {
+	if grants, ok := s.sizeGrants.(ResourceGrantStore); ok {
+		return grants.ResourceCeiling(ctx, repoID)
+	}
+	return argoworkflow.ResourceCeilingForSize(size)
 }

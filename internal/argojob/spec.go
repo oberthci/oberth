@@ -1,10 +1,5 @@
-// Package argojob submits and supervises repository-authored Argo Workflows
-// as Oberth's second execution engine.
-//
-// It is the Argo counterpart of internal/job: same lifecycle (build, create,
-// wait, cancel, reconcile), same durable name, same result vocabulary, but the
-// executed object is a Workflow CRD interpreted by the Argo controller instead
-// of a single Kubernetes Job running the repository's own Go pipeline module.
+// Package argojob builds, submits, supervises, cancels and reconciles
+// repository-authored Argo Workflows using their durable Workflow names.
 //
 // The submission path never contacts an Argo Server. Workflows are created
 // through the plain Kubernetes API with the generated Argo clientset, which is
@@ -35,9 +30,10 @@ import (
 	"github.com/oberthci/oberth/internal/containerimage"
 	"github.com/oberthci/oberth/internal/goproxy"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 const (
@@ -123,8 +119,7 @@ type Config struct {
 	// repository grant's VMI budget. Zero selects the hard limit.
 	KubeVirtCeiling argoworkflow.VMIBudget
 
-	// RunnerImagePrefixes is the same administrator allowlist the Go path
-	// applies to a declared RunnerImage.
+	// RunnerImagePrefixes is the administrator's template image allowlist.
 	RunnerImagePrefixes []string
 
 	// VaultAddress and VaultCredentialedRole are injected into credentialed
@@ -221,6 +216,9 @@ type Config struct {
 	// WorkflowTimeout caps the document's own spec.activeDeadlineSeconds.
 	WorkflowTimeout time.Duration
 
+	// PerRepoWorkflowTimeout holds administrator caps keyed by upstream/org/repo.
+	PerRepoWorkflowTimeout map[string]time.Duration
+
 	// TTLSeconds is how long a finished Workflow object is retained.
 	TTLSeconds int32
 
@@ -292,12 +290,20 @@ func (config *Config) applyDefaults() {
 		config.SourceSeedImage = defaultSourceSeedImage
 	}
 	if config.MaxRunLogBytes <= 0 {
-		config.MaxRunLogBytes = 64 << 20 // 64 MiB, matching the Go engine's default
+		config.MaxRunLogBytes = runlog.DefaultRunLimitBytes
 	}
 }
 
 // Validate rejects a configuration that could not produce a safe submission.
 func (config Config) Validate() error {
+	if config.WorkflowTimeout > 0 && (config.WorkflowTimeout < time.Second || config.WorkflowTimeout%time.Second != 0) {
+		return errors.New("argojob: workflow timeout must use whole positive seconds")
+	}
+	for repo, cap := range config.PerRepoWorkflowTimeout {
+		if len(strings.Split(repo, "/")) != 3 || cap < time.Second || cap%time.Second != 0 {
+			return fmt.Errorf("argojob: repository deadline cap %q must name upstream/org/repo and whole positive seconds", repo)
+		}
+	}
 	if config.ExecutorScratchSizeLimit != "" {
 		quantity, err := resource.ParseQuantity(config.ExecutorScratchSizeLimit)
 		if err != nil || quantity.Sign() <= 0 || quantity.Cmp(resource.MustParse("1Pi")) > 0 {
@@ -358,7 +364,7 @@ func (config Config) Validate() error {
 		}
 		distinct[account] = struct{}{}
 	}
-	if err := periapsis.ValidateRunnerImagePrefixes(config.RunnerImagePrefixes); err != nil {
+	if err := pipeline.ValidateRunnerImagePrefixes(config.RunnerImagePrefixes); err != nil {
 		problems = append(problems, fmt.Errorf("argojob: %w", err))
 	}
 	if len(config.ContainerDiskPrefixes) > 0 {
@@ -551,9 +557,13 @@ func vaultAddressRequiresPinnedAnchor(address string) bool {
 
 // Request is one run's submission intent.
 type Request struct {
-	// ResourceMaximum is selected from the server's durable repository grant,
-	// never from pipeline annotations. Empty is legacy reconstruction only.
-	ResourceMaximum  periapsis.Size
+	Capability    *argoworkflow.Capability
+	DemandReceipt *argoworkflow.DemandReceipt
+	// ResourceMaximum supports legacy reconstruction and callers without numeric grants.
+	ResourceMaximum pipeline.Size
+	// ResourceCeiling is the fresh server-owned repository grant snapshot.
+	// Workflow annotations and usage history cannot select or raise it.
+	ResourceCeiling  *corev1.ResourceRequirements
 	ResourceFallback model.ResourceAdmissionFallback
 	PodDemand        *argoworkflow.PodDemand
 	VMIDemandReceipt *argoworkflow.VMIDemandReceipt
@@ -580,7 +590,7 @@ type Request struct {
 	UpstreamOrg  string
 	Ref          string
 	SHA          string
-	Trigger      periapsis.Trigger
+	Trigger      pipeline.Trigger
 	// RunTrigger is what started the durable run (branch, promotion,
 	// schedule, tag). Build writes it into the server-owned oberth-trigger
 	// workflow parameter. Empty derives it from Trigger (tag for release,
@@ -605,7 +615,7 @@ type Request struct {
 	// ApprovedSecrets is the set of secret paths this repository has active
 	// approval-table grants for. Build checks each declared path against
 	// this set. The map key is the full declared path (e.g.
-	// "oberth/upstream/skipops/oberth/test-secret"). Pre-loaded by the
+	// "oberth/upstream/acme/oberth/test-secret"). Pre-loaded by the
 	// caller via store.ActiveSecretGrants before calling Build.
 	//
 	// Must be non-nil. An empty map means no grants; a nil map is a
@@ -672,16 +682,37 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 		return nil, err
 	}
 	workflow := resolved.Workflow()
+	delete(workflow.Annotations, capabilityAnnotation)
+	resourceSteps, extended := argoworkflow.CapabilityUsage(workflow)
+	if !resourceSteps && !extended {
+		request.Capability = nil
+	}
+	if err := config.validateCapability(request.Capability); err != nil {
+		return nil, err
+	}
+	if request.Capability != nil && request.RepositoryID <= 0 {
+		return nil, errors.New("argojob: workflow capability requires a durable repository binding")
+	}
+	if extended && (request.PodDemand == nil || request.ResourceFallback != "") {
+		return nil, errors.New("argojob: extended resources require a numeric reservation without fallback")
+	}
 	delete(workflow.Annotations, podDemandAnnotation)
 	delete(workflow.Annotations, resourceFallbackAnnotation)
 	if request.PodDemand != nil {
 		peak, e := argoworkflow.DeclaredHostPeak(workflow, request.effectiveRunTrigger())
-		if e != nil || peak == nil || *peak != *request.PodDemand {
+		if request.Capability != nil {
+			peak, e = argoworkflow.DeclaredCapabilityPeak(workflow)
+		}
+		if e != nil || peak == nil || !peak.Equal(*request.PodDemand) {
 			return nil, errors.New("argojob: declared resource graph changed after reservation")
 		}
 	}
-	if request.ResourceMaximum != "" {
-		if err := argoworkflow.ValidateResourceCeiling(workflow, request.Repo, request.ResourceMaximum, int64(config.WorkflowTimeout/time.Second)); err != nil {
+	if request.ResourceCeiling != nil {
+		if err := argoworkflow.ValidateResourceRequirementsWithCapability(workflow, request.Repo, *request.ResourceCeiling, int64(config.WorkflowTimeout/time.Second), request.Capability); err != nil {
+			return nil, err
+		}
+	} else if request.ResourceMaximum != "" {
+		if err := argoworkflow.ValidateResourceCeilingWithCapability(workflow, request.Repo, request.ResourceMaximum, int64(config.WorkflowTimeout/time.Second), request.Capability); err != nil {
 			return nil, err
 		}
 	}
@@ -712,12 +743,15 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	// independently approved WIF leaf can select the per-repository identity
 	// and its own audience-scoped projection without any Vault wiring.
 	credentialed := len(declaredPaths) > 0
+	if request.Capability != nil && (credentialed || len(wifLeaves) > 0) {
+		return nil, errors.New("argojob: operator capabilities cannot be combined with secret or WIF identities")
+	}
 	if names, err := argoworkflow.DeclaredKVMTemplates(workflow); err != nil {
 		return nil, err
-	} else if len(names) != 0 && (request.Trigger != periapsis.TriggerCI || credentialed || len(wifLeaves) > 0) {
+	} else if len(names) != 0 && (request.Trigger != pipeline.TriggerCI || credentialed || len(wifLeaves) > 0) {
 		return nil, errors.New("argojob: KVM leaves require a credential-free CI workflow")
 	}
-	if (credentialed || len(wifLeaves) > 0) && hasVMIResources(workflow) {
+	if request.Capability == nil && (credentialed || len(wifLeaves) > 0) && hasVMIResources(workflow) {
 		return nil, errors.New("argojob: VMI resource templates are refused in credentialed workflows")
 	}
 
@@ -743,13 +777,23 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	if err != nil {
 		return nil, err
 	}
+	if c := request.Capability; c != nil {
+		identity = argoworkflow.Identity{Namespace: c.Namespace, ServiceAccountName: c.ServiceAccount, ExecutorServiceAccountName: config.ExecutorServiceAccount, ResourceServiceAccountName: c.ServiceAccount, AutomountServiceAccountToken: true}
+	}
 	policy := argoworkflow.Policy{
+		Capability:          request.Capability,
+		ServerDeadline:      true,
 		RunnerImagePrefixes: config.RunnerImagePrefixes, KubeVirt: request.KubeVirtGranted, ContainerDiskPrefixes: config.ContainerDiskPrefixes,
 		VMIBudget: request.KubeVirtBudget, VMICeiling: config.KubeVirtCeiling,
 	}
 	receipt, err := resolved.Receipt(policy)
 	if err != nil {
 		return nil, err
+	}
+	if request.DemandReceipt != nil {
+		if err := request.DemandReceipt.Verify(receipt); err != nil {
+			return nil, err
+		}
 	}
 	if request.VMIDemandReceipt != nil {
 		if err := request.VMIDemandReceipt.Verify(receipt); err != nil {
@@ -786,7 +830,7 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 		}
 		if config.vaultRoleForWithRepo(request.Trigger, request.UpstreamName, request.UpstreamOrg, request.Repo) == "" {
 			switch request.Trigger {
-			case periapsis.TriggerCI:
+			case pipeline.TriggerCI:
 				return nil, fmt.Errorf("argojob: refusing the CI run for %q: it declares secret-store paths but no "+
 					"CI-secrets Vault role is configured (argo.ciSecrets.vaultRole / --argo-vault-ci-secrets-role); "+
 					"a CI pipeline never runs under the release-tier credentialed role", request.Repo)
@@ -822,6 +866,10 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 
 	scopeSynchronization(workflow, request)
 	applyServerMetadata(workflow, config, request, declaredPaths, fragmentLock)
+	if request.Capability != nil {
+		workflow.Annotations[capabilityAnnotation] = capabilityBinding(request.RepositoryID, request.Capability)
+	}
+	applyExecutionDeadline(workflow, config, canonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo))
 	applyServerBounds(workflow, config)
 	applyServerSecurity(workflow)
 	injectServerVolumes(workflow, config, request, credentialed)
@@ -840,7 +888,7 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	// Until grants have ref scopes, the same per-step policy can include
 	// release paths and upstream paths. A branch run must keep its CI-secrets
 	// identity even when it uses a named-step upstream grant.
-	if credentialed && request.Trigger == periapsis.TriggerRelease {
+	if credentialed && request.Trigger == pipeline.TriggerRelease {
 		if err := applyPerStepIdentities(workflow, config, request); err != nil {
 			return nil, err
 		}
@@ -878,8 +926,10 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 		return nil, err
 	}
 
-	if err := projectVMICreateGuard(workflow, config, request, receipt); err != nil {
-		return nil, err
+	if request.Capability == nil {
+		if err := projectVMICreateGuard(workflow, config, request, receipt); err != nil {
+			return nil, err
+		}
 	}
 	if err := wrapStepUsage(workflow, request.legacyStepUsage); err != nil {
 		return nil, err
@@ -909,7 +959,7 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 func authorizeWithApprovalTable(paths []string, request Request) error {
 	var problems []error
 	for _, declared := range paths {
-		scoped, upstreamScoped, err := periapsis.ParseUpstreamSecretStorePath(declared)
+		scoped, upstreamScoped, err := pipeline.ParseUpstreamSecretStorePath(declared)
 		if err != nil {
 			problems = append(problems, fmt.Errorf("argojob: %w", err))
 			continue
@@ -926,11 +976,11 @@ func authorizeWithApprovalTable(paths []string, request Request) error {
 		// the upstream subtree only, so admitting the declaration would let
 		// the run proceed and fail at Vault read time — a worse signal — and
 		// the admission record would misstate what the run could reach.
-		if !upstreamScoped && request.Trigger == periapsis.TriggerCI {
+		if !upstreamScoped && request.Trigger == pipeline.TriggerCI {
 			problems = append(problems, fmt.Errorf(
 				"argojob: secret store path %q is a system-namespace path; "+
 					"CI pipelines may only declare upstream-scoped paths (%s<org>/<repo>/<secret>)",
-				declared, periapsis.UpstreamSecretPathPrefix))
+				declared, pipeline.UpstreamSecretPathPrefix))
 			continue
 		}
 		if !request.ApprovedSecrets[declared] {
@@ -1055,7 +1105,7 @@ func admitSecretstoreExecPaths(workflow *wfv1.Workflow, declaredPaths []string, 
 // declared or not — repository-authored code runs in that pod. Binding CI
 // pods to a ServiceAccount the release role does not accept is what makes
 // release credentials unreachable from a branch push even then (issue #200).
-func (config Config) identityFor(trigger periapsis.Trigger, hasSecretPaths bool) (argoworkflow.Identity, error) {
+func (config Config) identityFor(trigger pipeline.Trigger, hasSecretPaths bool) (argoworkflow.Identity, error) {
 	if !trigger.Valid() {
 		return argoworkflow.Identity{}, fmt.Errorf("argojob: unknown trigger %q", trigger)
 	}
@@ -1069,14 +1119,14 @@ func (config Config) identityFor(trigger periapsis.Trigger, hasSecretPaths bool)
 		}, nil
 	}
 	switch trigger {
-	case periapsis.TriggerRelease:
+	case pipeline.TriggerRelease:
 		return argoworkflow.Identity{
 			Namespace:                    config.Namespace,
 			ServiceAccountName:           config.CredentialedServiceAccount,
 			ExecutorServiceAccountName:   config.ExecutorServiceAccount,
 			AutomountServiceAccountToken: true,
 		}, nil
-	case periapsis.TriggerCI:
+	case pipeline.TriggerCI:
 		// Config.Validate requires the account, so this is a defensive
 		// backstop for direct construction: absent configuration must fail
 		// the submission, never fall through to the release-tier identity.
@@ -1115,11 +1165,11 @@ func hasVMIResources(workflow *wfv1.Workflow) bool {
 // accepts only its own tier's ServiceAccount, which identityFor already
 // forced. An unknown trigger returns no role, which fails closed at the
 // credentialed-coordinates check in Build.
-func (config Config) vaultRoleFor(trigger periapsis.Trigger) string {
+func (config Config) vaultRoleFor(trigger pipeline.Trigger) string {
 	switch trigger {
-	case periapsis.TriggerCI:
+	case pipeline.TriggerCI:
 		return strings.TrimSpace(config.VaultCISecretsRole)
-	case periapsis.TriggerRelease:
+	case pipeline.TriggerRelease:
 		return strings.TrimSpace(config.VaultCredentialedRole)
 	default:
 		return ""
@@ -1130,11 +1180,11 @@ func (config Config) vaultRoleFor(trigger periapsis.Trigger) string {
 // network-policy-visible classification that scopes egress rules: branch
 // (ci) pods must never be able to reach release (credentialed) pods even
 // when in-namespace egress is enabled (#207).
-func tierFor(trigger periapsis.Trigger) string {
+func tierFor(trigger pipeline.Trigger) string {
 	switch trigger {
-	case periapsis.TriggerCI:
+	case pipeline.TriggerCI:
 		return "ci"
-	case periapsis.TriggerRelease:
+	case pipeline.TriggerRelease:
 		return "release"
 	default:
 		return string(trigger)
@@ -1245,11 +1295,8 @@ func applyServerBounds(workflow *wfv1.Workflow, config Config) {
 // a non-root UID (65534) is a separate, riskier follow-up that needs real
 // step execution validated against the toolchain and the PVC's ownership.
 //
-// The container-level baseline is deliberately STRICTER than the Go path:
-// ReadOnlyRootFilesystem is true rather than false. That is safe here only
-// because this engine also injects a writable emptyDir at /tmp below --
-// os.TempDir() is where the Go toolchain writes, so a read-only root without
-// it would break every build.
+// ReadOnlyRootFilesystem requires the writable /tmp emptyDir below because
+// the Go toolchain writes temporary files there.
 const (
 	stepTmpVolumeName = "oberth-tmp"
 	stepTmpMountPath  = "/tmp"
@@ -1478,11 +1525,11 @@ const (
 // ServiceAccount and the trigger picks the cache, so there is one answer to
 // "what tier is this run" rather than two that could drift apart. An unknown
 // trigger gets no cache, which fails closed.
-func (config Config) cacheRootFor(trigger periapsis.Trigger) string {
+func (config Config) cacheRootFor(trigger pipeline.Trigger) string {
 	switch trigger {
-	case periapsis.TriggerCI:
+	case pipeline.TriggerCI:
 		return strings.TrimSpace(config.CICacheRoot)
-	case periapsis.TriggerRelease:
+	case pipeline.TriggerRelease:
 		return strings.TrimSpace(config.ReleaseCacheRoot)
 	default:
 		return ""
@@ -1565,10 +1612,8 @@ func cacheVolumeAndMount(config Config, request Request) (corev1.Volume, corev1.
 // Go-toolchain workspace paths (tools, per-run fallback caches, trivy cache,
 // release artifacts) are also injected into every container.
 //
-// The Go path solves the checkout problem by mounting the same PVC with the
-// run's subPath into its single Job container. Doing it server-side here keeps
-// the property that made that safe: the repository never names the claim, never
-// chooses the subPath, and never gets it writable.
+// The server chooses the source claim and per-run subPath. Repository YAML
+// cannot name that claim, select another run's subPath, or write the checkout.
 //
 // Common mounts (cache, source, vault CA, workspace) go to every container via
 // injectTemplateVolumeMounts. The release token mount is scoped to credentialed
@@ -2035,14 +2080,14 @@ func workspaceEnvironment() []corev1.EnvVar {
 // workspaceVolumeMounts returns the standard subPath mounts from the "work"
 // VCT. On the release tier an additional mount for release artifacts is
 // included; CI runs do not need it.
-func workspaceVolumeMounts(trigger periapsis.Trigger) []corev1.VolumeMount {
+func workspaceVolumeMounts(trigger pipeline.Trigger) []corev1.VolumeMount {
 	mounts := []corev1.VolumeMount{
 		{Name: WorkspaceVolumeName, MountPath: WorkspaceToolsMountPath, SubPath: "tools"},
 		{Name: WorkspaceVolumeName, MountPath: WorkspaceGomodFallbackPath, SubPath: "gomod"},
 		{Name: WorkspaceVolumeName, MountPath: WorkspaceGobuildFallbackPath, SubPath: "gobuild"},
 		{Name: WorkspaceVolumeName, MountPath: WorkspaceTrivyCacheMountPath, SubPath: "trivy-cache"},
 	}
-	if trigger == periapsis.TriggerRelease {
+	if trigger == pipeline.TriggerRelease {
 		mounts = append(mounts, corev1.VolumeMount{
 			Name: WorkspaceVolumeName, MountPath: WorkspaceReleaseMountPath, SubPath: "release",
 		})
@@ -2064,8 +2109,8 @@ func injectWorkspaceEnvironment(workflow *wfv1.Workflow) {
 	}
 }
 
-// injectRunEnvironment gives every container the same run identity variables
-// the Go path's runner receives, plus the Vault coordinates on any
+// injectRunEnvironment gives every container the server-owned run identity
+// variables, plus Vault coordinates on any
 // credentialed tier. Repository-set values are preserved: a name collision
 // resolves in favour of the server's value, because these describe the run,
 // not the step.
@@ -2095,7 +2140,7 @@ func injectRunEnvironment(workflow *wfv1.Workflow, config Config, request Reques
 			corev1.EnvVar{Name: "OBERTH_CACHE_DIR", Value: CacheMountPath},
 		)
 	}
-	if request.Trigger == periapsis.TriggerRelease {
+	if request.Trigger == pipeline.TriggerRelease {
 		// release.sh reads these from the environment (not from Argo workflow
 		// parameters). They are the release-tier counterparts of OBERTH_REF
 		// and OBERTH_SHA: the ref is the tag (e.g. "refs/tags/v0.12.11") and
@@ -2359,7 +2404,7 @@ func (request Request) effectiveRunTrigger() argoworkflow.RunTrigger {
 	if request.RunTrigger != "" {
 		return request.RunTrigger
 	}
-	if request.Trigger == periapsis.TriggerRelease {
+	if request.Trigger == pipeline.TriggerRelease {
 		return argoworkflow.RunTriggerTag
 	}
 	return argoworkflow.RunTriggerBranch

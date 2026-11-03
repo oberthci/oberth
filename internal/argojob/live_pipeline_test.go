@@ -10,7 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/oberthci/oberth/internal/runprogress"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // This is the test that turns "admission-proven" into "actually works": it
@@ -82,9 +82,9 @@ func TestLiveRepositoryBuildPipelineExecutes(t *testing.T) {
 	}
 	t.Logf("pipeline document: %s", pipelineFile)
 	request := Request{
-		RunID: runID, Name: runID, Repo: "oberth", UpstreamOrg: "skipops",
+		RunID: runID, Name: runID, Repo: "oberth", UpstreamOrg: "acme",
 		Ref: "refs/heads/argo-workflow-execution-engine", SHA: testSHA,
-		Trigger: periapsis.TriggerCI, Source: source,
+		Trigger: pipeline.TriggerCI, Source: source,
 		// This repository's own working tree is the checkout under test.
 		SourceDir: "../..",
 	}
@@ -112,32 +112,32 @@ func TestLiveRepositoryBuildPipelineExecutes(t *testing.T) {
 	// Report every step before asserting, so a failure is diagnosable from the
 	// test output alone rather than needing the cluster.
 	for _, step := range completion.Steps {
-		t.Logf("  %-14s %-24s %-8s exit=%d", step.Burn, step.Step, step.Status, step.ExitCode)
+		t.Logf("  %-14s %-24s %-8s exit=%d", step.Stage, step.Step, step.Status, step.ExitCode)
 	}
 	if !completion.Succeeded {
 		t.Fatalf("pipeline failed at %s/%s: phase=%s reason=%s\n%s",
-			completion.FailedBurn, completion.FailedStep, completion.Phase, completion.Reason,
+			completion.FailedStage, completion.FailedStep, completion.Phase, completion.Reason,
 			truncate(log.String(), 40000))
 	}
 
-	// Every burn periapsis.go declares for the CI trigger must have run, with
+	// Every stage build.yaml declares for the CI trigger must have run, with
 	// its steps attributed to it.
-	burns := map[string][]string{}
+	stages := map[string][]string{}
 	for _, step := range completion.Steps {
-		burns[step.Burn] = append(burns[step.Burn], step.Step)
+		stages[step.Stage] = append(stages[step.Stage], step.Step)
 		if step.Status != runprogress.StepPassed {
-			t.Errorf("step %s/%s = %s (exit %d)", step.Burn, step.Step, step.Status, step.ExitCode)
+			t.Errorf("step %s/%s = %s (exit %d)", step.Stage, step.Step, step.Status, step.ExitCode)
 		}
 	}
-	for _, burn := range []string{"setup", "lint", "test-store", "test-service", "test-rest", "security", "chart", "build-amd64", "build-arm64"} {
-		if len(burns[burn]) == 0 {
-			t.Errorf("burn %q ran no steps; observed %v", burn, burns)
+	for _, stage := range []string{"setup", "lint", "test-store", "test-service", "test-rest", "security", "chart", "build-amd64", "build-arm64"} {
+		if len(stages[stage]) == 0 {
+			t.Errorf("stage %q ran no steps; observed %v", stage, stages)
 		}
 	}
-	// The setup burn is where per-step granularity actually pays: eight
+	// The setup stage is where per-step granularity actually pays: nine
 	// sequential commands, each with its own exit code and log slice.
-	if len(burns["setup"]) < 8 {
-		t.Errorf("setup ran %d steps, want the 8 periapsis.go declares: %v", len(burns["setup"]), burns["setup"])
+	if len(stages["setup"]) < 9 {
+		t.Errorf("setup ran %d steps, want the 9 build.yaml declares: %v", len(stages["setup"]), stages["setup"])
 	}
 
 	body := log.String()
@@ -150,7 +150,7 @@ func TestLiveRepositoryBuildPipelineExecutes(t *testing.T) {
 			t.Errorf("no log lines attributed to %s", marker)
 		}
 	}
-	t.Logf("pipeline completed: %d steps across %d burns", len(completion.Steps), len(burns))
+	t.Logf("pipeline completed: %d steps across %d burns", len(completion.Steps), len(stages))
 }
 
 // reportProgress logs which steps are running while the pipeline executes, so
@@ -174,7 +174,7 @@ func reportProgress(t *testing.T, ctx context.Context, controller *Controller, n
 		for _, step := range StepResults(workflow) {
 			switch step.Status {
 			case runprogress.StepRunning:
-				running = append(running, step.Burn+"/"+step.Step)
+				running = append(running, step.Stage+"/"+step.Step)
 			case runprogress.StepPassed, runprogress.StepFailed, runprogress.StepSkipped:
 				done++
 			}

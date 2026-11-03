@@ -19,14 +19,16 @@ import (
 // The private socket avoids opening a second owner or probing a scoped API view.
 func runWaitIdle(ctx context.Context, arguments []string, output io.Writer) error {
 	flags := flag.NewFlagSet("wait-idle", flag.ContinueOnError)
-	flags.SetOutput(output)
+	flags.SetOutput(io.Discard)
 	timeout := flags.Duration("timeout", installer.DefaultUpgradeWaitTimeout, "maximum time to wait for the live daemon queue (in-pod)")
 	mode := flags.String("wait-for", "all", "runs to wait for: all or critical (tag/promotion/plan/apply/unknown)")
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
+			flags.SetOutput(output)
+			flags.Usage()
 			return nil
 		}
-		return err
+		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if flags.NArg() != 0 || *timeout <= 0 || (*mode != "all" && *mode != "critical") {
 		return fmt.Errorf("%w: wait-idle requires a positive --timeout and --wait-for=all|critical", errUsage)

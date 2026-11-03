@@ -21,6 +21,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type retentionFixture struct {
@@ -35,12 +36,12 @@ type retentionFixture struct {
 func newRetentionFixture(t *testing.T) *retentionFixture {
 	t.Helper()
 	f := &retentionFixture{root: t.TempDir(), now: time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)}
-	db, err := store.Open(context.Background(), filepath.Join(f.root, "oberth.sqlite"), store.Options{Now: func() time.Time { return f.now }})
+	db, err := storetest.Open(context.Background(), filepath.Join(f.root, "oberth.sqlite"), store.Options{Now: func() time.Time { return f.now }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	upstream, err := db.CreateUpstream(context.Background(), model.UpstreamSpec{Name: "github", Kind: "ssh", BaseURL: "ssh://git@github.com/acme"})
+	upstream, err := storetest.CreateUpstream(db, context.Background(), model.UpstreamSpec{Name: "github", Kind: "ssh", BaseURL: "ssh://git@github.com/acme"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +69,7 @@ func (f *retentionFixture) run(t *testing.T, ref, trigger string, terminal bool)
 	t.Helper()
 	ctx := context.Background()
 	f.count++
-	enqueued, err := f.retention.Database.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: ref, SHA: fmt.Sprintf("%040x", f.count), Actor: "operator", Trigger: trigger})
+	enqueued, err := storetest.EnqueueRun(f.retention.Database, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: ref, SHA: fmt.Sprintf("%040x", f.count), Actor: "operator", Trigger: trigger})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +78,7 @@ func (f *retentionFixture) run(t *testing.T, ref, trigger string, terminal bool)
 		if _, err := f.retention.Database.ClaimNextRun(ctx); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := f.retention.Database.PutStepResult(ctx, model.StepResult{RunID: run.ID, Burn: "test", Step: "unit", Status: model.StepPassed, DeclaredSize: "M"}); err != nil {
+		if _, err := f.retention.Database.PutStepResult(ctx, model.StepResult{RunID: run.ID, Stage: "test", Step: "unit", Status: model.StepPassed, DeclaredSize: "M"}); err != nil {
 			t.Fatal(err)
 		}
 		run, err = f.retention.Database.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunPassed, TestedSHA: run.SHA})
@@ -275,7 +276,7 @@ func TestRunPurgeNeverOverridesEvidenceProtection(t *testing.T) {
 					t.Fatal(err)
 				}
 			case "open issue":
-				if _, err := f.retention.Database.UpsertCIIssue(ctx, "owner", f.repo.ID, run.Ref, "open investigation", "evidence needed"); err != nil {
+				if _, err := storetest.UpsertCIIssue(f.retention.Database, ctx, "owner", f.repo.ID, run.Ref, "open investigation", "evidence needed"); err != nil {
 					t.Fatal(err)
 				}
 			case "active grant":
@@ -331,7 +332,7 @@ func TestPurgeWaitsForCancelledSchedulerWriter(t *testing.T) {
 		t.Fatal(err)
 	}
 	retention := &Retention{Database: fixture.store, Logs: fixture.logs, Artifacts: kept, AcquirePurge: fixture.scheduler.AcquireEvidencePurge}
-	run, err := fixture.store.EnqueueRun(ctx, model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/cancel-purge", SHA: strings.Repeat("a", 40), Actor: "owner", Trigger: "branch"})
+	run, err := storetest.EnqueueRun(fixture.store, ctx, model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/cancel-purge", SHA: strings.Repeat("a", 40), Actor: "owner", Trigger: "branch"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +353,7 @@ func TestPurgeWaitsForCancelledSchedulerWriter(t *testing.T) {
 	if len(cancelled.Cancellations) != 1 {
 		t.Fatalf("cancellation=%#v", cancelled)
 	}
-	if err := fixture.store.CompleteRunCancellation(ctx, run.ID, cancelled.Cancellations[0].JobName); err != nil {
+	if err := fixture.store.CompleteRunCancellation(ctx, run.ID, cancelled.Cancellations[0].WorkflowName); err != nil {
 		t.Fatal(err)
 	}
 	actor := api.Actor{Identity: "owner", Admin: true}
@@ -380,7 +381,7 @@ func TestTerminalClaimCannotRecreatePurgedEvidence(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	fixture := newControlFixture(t)
-	run, err := fixture.store.EnqueueRun(ctx, model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/late-dispatch", SHA: strings.Repeat("a", 40), Actor: "owner", Trigger: "branch"})
+	run, err := storetest.EnqueueRun(fixture.store, ctx, model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/late-dispatch", SHA: strings.Repeat("a", 40), Actor: "owner", Trigger: "branch"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,7 +419,7 @@ func TestProtectedPurgeRetryResolvesCrashedIntent(t *testing.T) {
 	if err := f.retention.EvidenceError(ctx, run.ID, "logs"); !errors.Is(err, ErrEvidencePurged) {
 		t.Fatalf("unresolved intent not fenced: %v", err)
 	}
-	if _, err := f.retention.Database.UpsertCIIssue(ctx, "owner", f.repo.ID, run.Ref, "keep evidence", "investigation"); err != nil {
+	if _, err := storetest.UpsertCIIssue(f.retention.Database, ctx, "owner", f.repo.ID, run.Ref, "keep evidence", "investigation"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.retention.Purge(ctx, api.Actor{Identity: "owner", Admin: true}, run.ID, "both", "retry cleanup"); !errors.Is(err, store.ErrEvidenceProtected) {
@@ -571,12 +572,12 @@ func TestRetentionStatusUsesLastSweepTotals(t *testing.T) {
 func seedRetentionResourceUsage(t *testing.T, f *retentionFixture) model.Run {
 	t.Helper()
 	run := f.run(t, "telemetry", "branch", false)
-	if _, err := f.retention.Database.SetRunJobName(t.Context(), run.ID, "workflow-test"); err != nil {
+	if _, err := f.retention.Database.SetRunWorkflowName(t.Context(), run.ID, "workflow-test"); err != nil {
 		t.Fatal(err)
 	}
 	at := f.now.Add(-91 * 24 * time.Hour)
 	code := int32(0)
-	v := model.StepResourceUsage{Version: 2, Source: "kubelet-cadvisor", RunID: run.ID, WorkflowName: "workflow-test", WorkflowUID: "11111111-1111-4111-8111-111111111111", Namespace: "argo", NodeID: "node-1", PodName: "pod-1", PodUID: "22222222-2222-4222-8222-222222222222", NodeName: "node-a", ContainerID: "containerd://" + strings.Repeat("a", 64), ContainerName: "main", ContainerKind: "app", PodKind: "workflow", Burn: "ci", Step: "test", FirstObservedAt: at, LastObservedAt: at, Terminal: true, ExitCode: &code, Reason: "Completed", SampledLowerBound: true}
+	v := model.StepResourceUsage{Version: 2, Source: "kubelet-cadvisor", RunID: run.ID, WorkflowName: "workflow-test", WorkflowUID: "11111111-1111-4111-8111-111111111111", Namespace: "argo", NodeID: "node-1", PodName: "pod-1", PodUID: "22222222-2222-4222-8222-222222222222", NodeName: "node-a", ContainerID: "containerd://" + strings.Repeat("a", 64), ContainerName: "main", ContainerKind: "app", PodKind: "workflow", Stage: "ci", Step: "test", FirstObservedAt: at, LastObservedAt: at, Terminal: true, ExitCode: &code, Reason: "Completed", SampledLowerBound: true}
 	if err := f.retention.Database.RecordStepResourceUsage(t.Context(), []model.StepResourceUsage{v}); err != nil {
 		t.Fatal(err)
 	}

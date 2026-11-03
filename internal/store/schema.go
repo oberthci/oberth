@@ -15,7 +15,7 @@ func LatestMigrationVersion() int { return latestMigrationVersion }
 const (
 	admissionSequenceMigrationVersion = 28
 	repositoryArchiveMigrationVersion = 29
-	latestMigrationVersion            = prioritySubmissionMigrationVersion
+	latestMigrationVersion            = resourceCeilingMigrationVersion
 	latestRefMigrationVersion         = 35
 	// oberthSchemaIdentity is the fresh-deployment default. Existing deployments
 	// supply their original immutable identity through ProtocolConfig; bootstrap
@@ -422,6 +422,8 @@ ALTER TABLE step_results ADD COLUMN user_cpu_ns INTEGER NOT NULL DEFAULT 0 CHECK
 ALTER TABLE step_results ADD COLUMN system_cpu_ns INTEGER NOT NULL DEFAULT 0 CHECK (system_cpu_ns >= 0);`,
 	},
 	{
+		// Inert historical trusted plan/apply tables. Retain migration SQL for
+		// schema compatibility; no production reader or writer uses these tables.
 		version: 4,
 		sql: `
 CREATE TABLE trusted_plans (
@@ -1142,4 +1144,13 @@ CREATE INDEX runs_admission_idx ON runs(status, admission_sequence, queue_sequen
 	{version: containerResourceUsageMigrationVersion, sql: `CREATE INDEX step_resource_usage_retention_idx ON step_resource_usage(last_observed_at);`},
 	{version: publicationRetryMigrationVersion, sql: publicationRetrySchema},
 	{version: prioritySubmissionMigrationVersion, sql: prioritySubmissionSchema},
+	{version: tokenExpiryMigrationVersion, sql: tokenExpirySchema},
+	{version: issueRevisionMigrationVersion, sql: issueRevisionSchema},
+	{version: publicationAbandonMigrationVersion, sql: publicationAbandonSchema},
+	{version: restartTimingMigrationVersion, sql: restartTimingSchema},
+	{version: tagPublicationMigrationVersion, sql: tagPublicationSchema},
+	{version: pilotRetirementMigrationVersion, sql: pilotRetirementSchema},
+	{version: workflowCapabilityMigrationVersion, sql: workflowCapabilitySchema},
+	{version: executionRetirementMigrationVersion, sql: executionRetirementSchema},
+	{version: resourceCeilingMigrationVersion, sql: resourceCeilingSchema},
 }

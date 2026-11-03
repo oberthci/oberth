@@ -13,8 +13,9 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 const createObservationWindow = time.Minute
@@ -22,16 +23,17 @@ const createSettlementAttemptBudget = 15 * time.Second
 const pendingCreateMessage = "Workflow create outcome uncertain; cleanup pending"
 
 type createAdmission struct {
-	Fallback                   model.ResourceAdmissionFallback `json:",omitempty"`
-	Pods                       *argoworkflow.PodDemand         `json:",omitempty"`
-	RunID, JobName, SHA, Group string
-	RepoID                     int64
-	Size                       periapsis.Size
-	Demand                     argoworkflow.VMIDemand
+	Fallback                        model.ResourceAdmissionFallback `json:",omitempty"`
+	Pods                            *argoworkflow.PodDemand         `json:",omitempty"`
+	RunID, WorkflowName, SHA, Group string
+	RepoID                          int64
+	Size                            pipeline.Size
+	Demand                          argoworkflow.VMIDemand
 }
 
 type pendingCreate struct {
 	runID       string
+	reason      string
 	grant       *admissionReservation
 	persisted   bool
 	confirmed   bool
@@ -40,7 +42,7 @@ type pendingCreate struct {
 }
 
 func isPendingCreate(run model.Run) bool {
-	return run.Phase == "infrastructure-pending" || strings.HasPrefix(run.Error, pendingCreateMessage)
+	return run.Phase == "infrastructure-pending" || strings.HasPrefix(run.Error, pendingCreateMessage) || run.Error == store.WorkflowSpecMismatchPendingMessage
 }
 func (scheduler *Scheduler) createTime() time.Time {
 	if scheduler.createNow != nil {
@@ -56,17 +58,7 @@ func runCreateAdmissionPath(root, id string) string {
 	return filepath.Join(root, ".create-admissions", id+".json")
 }
 
-// Persist the server-admitted contract before POST. Recovery must never need a
-// Kubernetes read, a moving repository ref or a remote fragment to restore it.
-func (scheduler *Scheduler) recordCreateAdmission(run model.Run, name string, size periapsis.Size, demand argoworkflow.VMIDemand, pods ...*argoworkflow.PodDemand) error {
-	var peak *argoworkflow.PodDemand
-	if len(pods) > 0 {
-		peak = pods[0]
-	}
-	return scheduler.recordResourceAdmission(run, name, size, demand, peak, "")
-}
-
-func (scheduler *Scheduler) recordResourceAdmission(run model.Run, name string, size periapsis.Size, demand argoworkflow.VMIDemand, peak *argoworkflow.PodDemand, fallback model.ResourceAdmissionFallback) error {
+func (scheduler *Scheduler) recordResourceAdmission(run model.Run, name string, size pipeline.Size, demand argoworkflow.VMIDemand, peak *argoworkflow.PodDemand, fallback model.ResourceAdmissionFallback) error {
 	target := scheduler.createAdmissionPath(run.ID)
 	if !pathWithin(scheduler.workspaceRoot, target) {
 		return errors.New("service: create admission escaped workspace")
@@ -74,7 +66,7 @@ func (scheduler *Scheduler) recordResourceAdmission(run model.Run, name string, 
 	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
 		return err
 	}
-	body, err := json.Marshal(createAdmission{Fallback: fallback, Pods: peak, RunID: run.ID, JobName: name, SHA: run.SHA, RepoID: run.RepoID, Group: run.ConcurrencyGroup, Size: size.Effective(), Demand: demand})
+	body, err := json.Marshal(createAdmission{Fallback: fallback, Pods: peak, RunID: run.ID, WorkflowName: name, SHA: run.SHA, RepoID: run.RepoID, Group: run.ConcurrencyGroup, Size: size.Effective(), Demand: demand})
 	if err != nil {
 		return err
 	}
@@ -114,7 +106,7 @@ func (scheduler *Scheduler) readCreateAdmission(run model.Run) (createAdmission,
 		return createAdmission{}, err
 	}
 	var saved createAdmission
-	if len(body) > 4096 || json.Unmarshal(body, &saved) != nil || saved.RunID != run.ID || saved.JobName != run.JobName || saved.RepoID != run.RepoID || saved.SHA != run.SHA || saved.Group != run.ConcurrencyGroup || !saved.Size.Valid() || saved.Size != saved.Size.Effective() {
+	if len(body) > 4096 || json.Unmarshal(body, &saved) != nil || saved.RunID != run.ID || saved.WorkflowName != run.WorkflowName || saved.RepoID != run.RepoID || saved.SHA != run.SHA || saved.Group != run.ConcurrencyGroup || !saved.Size.Valid() || saved.Size != saved.Size.Effective() {
 		return createAdmission{}, errors.New("service: pending create admission binding mismatch")
 	}
 	if err := (KubeVirtResources{Demand: saved.Demand, Limit: argoworkflow.VMIBudgetLimit().DemandLimit()}).Validate(); err != nil {
@@ -144,7 +136,7 @@ func (scheduler *Scheduler) restoreCreateGrant(run model.Run, grant *admissionRe
 		if err != nil {
 			// Pre-feature/corrupt snapshots have no trustworthy resource contract.
 			// Keep the API available, conservatively reserve the ceiling, and warn.
-			saved.Size = periapsis.XL
+			saved.Size = pipeline.XL
 			saved.Demand = argoworkflow.VMIBudgetLimit().DemandLimit()
 			log.Printf("WARN: create_cleanup run=%q missing_admission_contract=true reserving_ceiling=true", run.ID)
 		}
@@ -157,7 +149,7 @@ func (scheduler *Scheduler) restoreCreateGrant(run model.Run, grant *admissionRe
 		if err != nil {
 			// Conflicting historical groups are quarantined behind a full budget.
 			run.ConcurrencyGroup = ""
-			grant, err = scheduler.admission.adopt(run, periapsis.XL, argoworkflow.VMIBudgetLimit().DemandLimit())
+			grant, err = scheduler.admission.adopt(run, pipeline.XL, argoworkflow.VMIBudgetLimit().DemandLimit())
 			if err != nil {
 				return nil, err
 			}
@@ -193,7 +185,11 @@ func (scheduler *Scheduler) registerCreateCleanup(run model.Run, grant *admissio
 		scheduler.createPending = make(map[string]*pendingCreate)
 	}
 	// A nil grant is an owned, retryable restore failure, never a dropped run.
-	scheduler.createPending[run.ID] = &pendingCreate{runID: run.ID, grant: restored, persisted: persisted, next: now, since: now}
+	reason := ""
+	if run.Error == store.WorkflowSpecMismatchPendingMessage {
+		reason = run.Error
+	}
+	scheduler.createPending[run.ID] = &pendingCreate{runID: run.ID, reason: reason, grant: restored, persisted: persisted, next: now, since: now}
 	scheduler.signalCreateCleanup()
 }
 func (scheduler *Scheduler) signalCreateCleanup() {
@@ -295,7 +291,7 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 		return false, err
 	}
 	if !pending.persisted {
-		if err := scheduler.store.MarkRunCreatePending(ctx, run.ID, run.JobName); err != nil {
+		if err := scheduler.store.MarkRunCreatePending(ctx, run.ID, run.WorkflowName, pending.reason); err != nil {
 			return false, err
 		}
 		pending.persisted = true
@@ -328,7 +324,7 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 		if !ok {
 			return false, errors.New("service: engine cannot settle uncertain create")
 		}
-		done, err := settler.SettleCreate(ctx, observed.JobName, run.ID, observed.CreatedAt.Add(createObservationWindow))
+		done, err := settler.SettleCreate(ctx, observed.WorkflowName, run.ID, observed.CreatedAt.Add(createObservationWindow))
 		if err != nil || !done {
 			return false, err
 		}
@@ -340,7 +336,7 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 	if !pending.confirmed {
 		// A prior owner may have committed completion but lost finalization.
 		// Re-arm one observation window rather than wedging the grant forever.
-		if err := scheduler.store.MarkRunCreatePending(ctx, run.ID, run.JobName); err != nil {
+		if err := scheduler.store.MarkRunCreatePending(ctx, run.ID, run.WorkflowName); err != nil {
 			return false, err
 		}
 		return false, nil
@@ -350,7 +346,11 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 		return false, err
 	}
 	if run.Status == model.RunRunning {
-		if err := scheduler.finishInfrastructureFailure(ctx, run, model.Repository{}, errors.New("workflow create outcome uncertain; cleanup confirmed absence")); err != nil {
+		message := "workflow create outcome uncertain; cleanup confirmed absence"
+		if run.Error == store.WorkflowSpecMismatchPendingMessage {
+			message = "Workflow spec mismatch; cleanup confirmed absence"
+		}
+		if err := scheduler.finishInfrastructureFailure(ctx, run, model.Repository{}, errors.New(message)); err != nil {
 			return false, err
 		}
 	}
@@ -375,21 +375,22 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 	return true, nil
 }
 
-// Kept separate for status/diagnostic callers without exposing API errors.
-func (scheduler *Scheduler) pendingCreateCount() int {
-	scheduler.createMu.Lock()
-	defer scheduler.createMu.Unlock()
-	return len(scheduler.createPending)
-}
-
 // The shared background owner retains capacity during uncertain create/delete
 // outcomes; API outages must not turn this run's cleanup into a component exit.
-func (scheduler *Scheduler) deferCreateCleanup(ctx context.Context, run model.Run, name string, grant *admissionReservation) {
+func (scheduler *Scheduler) deferCreateCleanup(ctx context.Context, run model.Run, name string, grant *admissionReservation, failures ...error) {
 	grant.retain()
+	reason := ""
+	for _, failure := range failures {
+		var mismatch interface{ WorkflowSpecMismatch() bool }
+		if errors.As(failure, &mismatch) && mismatch.WorkflowSpecMismatch() {
+			reason = store.WorkflowSpecMismatchPendingMessage
+			run.Error = reason
+		}
+	}
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	err := scheduler.database().MarkRunCreatePending(persistCtx, run.ID, name)
+	err := scheduler.database().MarkRunCreatePending(persistCtx, run.ID, name, reason)
 	cancel()
-	run.JobName = name
+	run.WorkflowName = name
 	scheduler.registerCreateCleanup(run, grant, err == nil)
 	if err != nil {
 		log.Printf("WARN: create_cleanup run=%q persistence_deferred=true", run.ID)

@@ -6,13 +6,13 @@ import (
 	"testing"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestScheduleEntryMaterializationUsesDurableIdentity(t *testing.T) {
 	source := strings.Replace(greedyDocument, "/bin/true", "/bin/echo", 1)
 	for _, entry := range []string{"nightly", "weekly-sweep"} {
-		request := testRequest(periapsis.TriggerCI, source)
+		request := testRequest(pipeline.TriggerCI, source)
 		request.RunTrigger = argoworkflow.RunTriggerSchedule
 		request.ScheduleEntry = entry
 		workflow, err := Build(testConfig(), request)
@@ -40,9 +40,9 @@ func TestScheduleEntryMaterializationUsesDurableIdentity(t *testing.T) {
 
 func TestScheduleEntryCannotBeForgedByNonScheduleRuns(t *testing.T) {
 	for _, trigger := range []argoworkflow.RunTrigger{argoworkflow.RunTriggerBranch, argoworkflow.RunTriggerPromotion, argoworkflow.RunTriggerTag} {
-		tier := periapsis.TriggerCI
+		tier := pipeline.TriggerCI
 		if trigger == argoworkflow.RunTriggerTag {
-			tier = periapsis.TriggerRelease
+			tier = pipeline.TriggerRelease
 		}
 		request := testRequest(tier, strings.Replace(greedyDocument, "value: yes-please", "value: \"{{workflow.parameters.oberth-schedule}}\"", 1))
 		request.RunTrigger = trigger
@@ -62,7 +62,7 @@ func TestScheduleEntryCannotBeForgedByNonScheduleRuns(t *testing.T) {
 	}
 	for _, value := range []string{"nightly", "''", "\"{{workflow.parameters.fake}}\""} {
 		source := strings.Replace(greedyDocument, "spec:\n", "spec:\n  arguments:\n    parameters:\n    - name: oberth-schedule\n      value: "+value+"\n", 1)
-		if _, err := Build(testConfig(), testRequest(periapsis.TriggerCI, source)); err == nil || !strings.Contains(err.Error(), "server-owned") {
+		if _, err := Build(testConfig(), testRequest(pipeline.TriggerCI, source)); err == nil || !strings.Contains(err.Error(), "server-owned") {
 			t.Fatalf("repository forged schedule default %s: %v", value, err)
 		}
 	}

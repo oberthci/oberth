@@ -39,6 +39,21 @@ func (s *Store) BeginPublication(ctx context.Context, spec model.PublicationSpec
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// A tag publication is identified by its repository, tag and immutable
+	// result SHA. Reopening the same intent is idempotent even after delivery;
+	// another run cannot acquire a second external side effect for that tuple.
+	if spec.RefKind == model.RefTag {
+		existing, lookupErr := scanPublication(tx.QueryRowContext(ctx, `SELECT `+publicationColumns+` FROM publications WHERE repo_id=? AND ref_kind='tag' AND ref=? AND lower(result_sha)=lower(?) ORDER BY (run_id=?) DESC,sequence LIMIT 1`, spec.RepoID, spec.Ref, spec.ResultSHA, spec.RunID))
+		if lookupErr == nil {
+			if existing.RunID == spec.RunID && existing.PromotionID == spec.PromotionID && existing.Actor == spec.Actor && (!spec.PreviousKnown || (existing.PreviousKnown && strings.EqualFold(existing.PreviousSHA, spec.PreviousSHA))) {
+				return existing, nil
+			}
+			return model.Publication{}, fmt.Errorf("%w: tag %s at %s already has publication %s", ErrInvalidState, spec.Ref, spec.ResultSHA, existing.ID)
+		}
+		if !errors.Is(lookupErr, sql.ErrNoRows) {
+			return model.Publication{}, lookupErr
+		}
+	}
 	var run model.Run
 	if spec.RunID != "" {
 		run, err = scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id = ?`, spec.RunID))
@@ -73,6 +88,9 @@ FROM promotions WHERE id = ?`, spec.PromotionID))
 			!strings.EqualFold(promotion.PreviousSHA, spec.PreviousSHA) ||
 			!strings.EqualFold(promotion.ResultSHA, spec.ResultSHA) || promotion.RunID != spec.RunID {
 			return model.Publication{}, fmt.Errorf("%w: publication does not match pending promotion", ErrInvalidState)
+		}
+		if err := checkPromotionDeliveryGrantTx(ctx, tx, promotion, now); err != nil {
+			return model.Publication{}, err
 		}
 	}
 
@@ -204,6 +222,27 @@ WHERE status = 'pending' ORDER BY sequence`)
 // owner in one SQLite transaction. There is no state in which the external ref
 // is recorded as delivered while its run or promotion remains pending.
 func (s *Store) FinalizePublication(ctx context.Context, id string, status model.PublicationStatus, failure string) (model.PublicationFinalization, error) {
+	if status == model.PublicationAbandoned {
+		return model.PublicationFinalization{}, fmt.Errorf("%w: use AbandonPublication with an actor and reason", ErrInvalid)
+	}
+	return s.finalizePublication(ctx, id, status, failure, "")
+}
+
+// AbandonPublication records an operator decision and closes the intent and
+// its owners atomically. Callers must authorize the admin and serialize with
+// delivery; this storage operation performs no Git I/O.
+func (s *Store) AbandonPublication(ctx context.Context, id, actor, reason string) (model.PublicationFinalization, error) {
+	actor, reason = strings.TrimSpace(actor), strings.TrimSpace(reason)
+	if actor == "" || reason == "" {
+		return model.PublicationFinalization{}, fmt.Errorf("%w: abandon actor and reason are required", ErrInvalid)
+	}
+	if err := ValidateCancelReason(reason); err != nil {
+		return model.PublicationFinalization{}, err
+	}
+	return s.finalizePublication(ctx, id, model.PublicationAbandoned, "abandoned by "+actor+": "+reason, actor)
+}
+
+func (s *Store) finalizePublication(ctx context.Context, id string, status model.PublicationStatus, failure, abandonActor string) (model.PublicationFinalization, error) {
 	if strings.TrimSpace(id) == "" || !status.Terminal() {
 		return model.PublicationFinalization{}, fmt.Errorf("%w: terminal publication result is required", ErrInvalid)
 	}
@@ -234,17 +273,20 @@ SELECT `+publicationColumns+` FROM publications WHERE id = ?`, id))
 	finalization := model.PublicationFinalization{}
 	if publication.RunID != "" {
 		runStatus, phase := model.RunPassed, "passed"
-		if status == model.PublicationFailed {
+		if status == model.PublicationFailed || status == model.PublicationAbandoned {
 			runStatus, phase = model.RunFailed, "publishing"
 			if pushretry.PublicationFailure(failure) {
 				phase = "infrastructure"
 			}
 		}
+		if status == model.PublicationAbandoned {
+			phase = "abandoned"
+		}
 		finalization.Run, err = scanRun(tx.QueryRowContext(ctx, `
 UPDATE runs
-SET status = ?, phase = ?, error = ?, finished_at = ?, updated_at = ?
+SET status = ?, phase = ?, error = ?, reason = CASE WHEN ? != '' THEN ? ELSE reason END, finished_at = ?, updated_at = ?
 WHERE id = ? AND status = 'running' AND phase = 'publishing'
-RETURNING `+runColumns, runStatus, phase, failure, now, now, publication.RunID))
+RETURNING `+runColumns, runStatus, phase, failure, abandonActor, failure, now, now, publication.RunID))
 		if errors.Is(err, sql.ErrNoRows) {
 			return model.PublicationFinalization{}, fmt.Errorf("%w: publication run is not active", ErrInvalidState)
 		}
@@ -254,7 +296,7 @@ RETURNING `+runColumns, runStatus, phase, failure, now, now, publication.RunID))
 	}
 	if publication.PromotionID != "" {
 		promotionStatus := model.PromotionPassed
-		if status == model.PublicationFailed {
+		if status == model.PublicationFailed || status == model.PublicationAbandoned {
 			promotionStatus = model.PromotionFailed
 		}
 		finalization.Promotion, err = scanPromotion(tx.QueryRowContext(ctx, `
@@ -292,7 +334,12 @@ RETURNING `+publicationColumns, status, failure, now, publication.ID))
 	if err != nil {
 		return model.PublicationFinalization{}, fmt.Errorf("finalize publication: %w", err)
 	}
-	if err := s.appendPublicationAudit(ctx, tx, finalization.Publication, "publication."+string(status), failure); err != nil {
+	auditPublication, action := finalization.Publication, "publication."+string(status)
+	if abandonActor != "" {
+		auditPublication.Actor = abandonActor
+		action = "publication.abandon"
+	}
+	if err := s.appendPublicationAudit(ctx, tx, auditPublication, action, failure); err != nil {
 		return model.PublicationFinalization{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -501,117 +548,35 @@ RETURNING `+publicationColumns, actor, now, failed.ID))
 	return value, nil
 }
 
-// ReconcileInconsistentPublications heals pending publications whose latest
-// chained audit action is not one of the gate-valid actions (publication.pending
-// or publication.predecessor). This state was produced by RetryFailedPublication
-// in v0.16.18, which chained publication.retry as the latest action without a
-// subsequent canonical publication.pending. The mutation gate then rejects every
-// operation (including readiness), taking the server fully offline.
-//
-// For each inconsistent pending publication, this method chains a canonical
-// publication.pending action through the normal append path so the hash chain
-// stays gap-free. When the actor from the publication row is empty (impossible
-// for a valid publication, but defended), the row is transitioned to failed
-// instead.
-//
-// This method is idempotent: a publication whose latest action is already
-// gate-valid is left untouched. It MUST run before the first gate evaluation
-// and before readiness can report ready.
+// ReconcileInconsistentPublications appends the missing canonical intent for
+// the exact historical retry defect. Call only after startup has verified
+// external continuity with VerifyStartupAuditState; unrelated corruption is
+// refused. Every repair is atomic, chained, and idempotent.
 func (s *Store) ReconcileInconsistentPublications(ctx context.Context) (int, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("begin publication reconciliation: %w", err)
+		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
-
-	rows, err := tx.QueryContext(ctx, `
-SELECT `+publicationColumns+` FROM publications
-WHERE status = 'pending' ORDER BY sequence`)
+	if _, err = s.verifyAuditChain(ctx, tx); err != nil {
+		return 0, err
+	}
+	repairs, err := readStartupPublicationRepairs(ctx, tx)
 	if err != nil {
-		return 0, fmt.Errorf("list pending publications for reconciliation: %w", err)
+		return 0, err
 	}
-	defer func() { _ = rows.Close() }()
-	var pending []model.Publication
-	for rows.Next() {
-		publication, scanErr := scanPublication(rows)
-		if scanErr != nil {
-			return 0, fmt.Errorf("scan pending publication for reconciliation: %w", scanErr)
-		}
-		pending = append(pending, publication)
-	}
-	if err := rows.Err(); err != nil {
-		return 0, fmt.Errorf("list pending publications for reconciliation: %w", err)
-	}
-	if err := rows.Close(); err != nil {
-		return 0, fmt.Errorf("close pending publications for reconciliation: %w", err)
-	}
-
-	now := unixNano(s.now())
-	healed := 0
-	for _, publication := range pending {
-		var actor, action, details string
-		scanErr := tx.QueryRowContext(ctx, `
-SELECT actor, action, details FROM audit_actions
-WHERE resource_type = 'publication' AND resource_id = ?
-ORDER BY id DESC LIMIT 1`, publication.ID).Scan(&actor, &action, &details)
-		if scanErr != nil {
-			return 0, fmt.Errorf("read latest audit action for publication %s: %w", publication.ID, scanErr)
-		}
-
-		// Check if the publication is already gate-valid.
-		if action == "publication.pending" || action == "publication.predecessor" {
-			expected, detailErr := publicationAuditDetails(publication, "")
-			if detailErr != nil {
-				return 0, detailErr
-			}
-			if actor == publication.Actor && details == expected {
-				continue // already consistent
-			}
-		}
-
-		// Inconsistent: chain a canonical publication.pending action to heal it.
-		if strings.TrimSpace(publication.Actor) == "" {
-			// Defensive: a publication with no actor cannot be healed to a
-			// gate-valid state. Transition it to failed instead.
-			if _, execErr := tx.ExecContext(ctx, `
-UPDATE publications SET status = 'failed', error = 'reconciled: no actor for gate-consistent retry', updated_at = ?
-WHERE id = ? AND status = 'pending'`, now, publication.ID); execErr != nil {
-				return 0, fmt.Errorf("fail actorless publication %s: %w", publication.ID, execErr)
-			}
-			// Also put the owning run back to failed/publishing if it was reactivated.
-			if publication.RunID != "" {
-				if _, execErr := tx.ExecContext(ctx, `
-UPDATE runs SET status = 'failed', phase = 'publishing',
-    error = 'reconciled: publication had no actor', finished_at = ?, updated_at = ?
-WHERE id = ? AND status = 'running' AND phase = 'publishing'`, now, now, publication.RunID); execErr != nil {
-					return 0, fmt.Errorf("fail run for actorless publication %s: %w", publication.ID, execErr)
-				}
-			}
-			// Re-read the now-failed publication for the audit action.
-			failedPub, failErr := scanPublication(tx.QueryRowContext(ctx, `
-SELECT `+publicationColumns+` FROM publications WHERE id = ?`, publication.ID))
-			if failErr != nil {
-				return 0, fmt.Errorf("re-read failed publication %s: %w", publication.ID, failErr)
-			}
-			if err := s.appendPublicationAudit(ctx, tx, failedPub, "publication.failed", "reconciled: no actor for gate-consistent retry"); err != nil {
-				return 0, err
-			}
-			healed++
-			continue
-		}
-
-		if err := s.appendPublicationAudit(ctx, tx, publication, "publication.pending", ""); err != nil {
-			return 0, fmt.Errorf("heal publication %s: %w", publication.ID, err)
-		}
-		healed++
-	}
-
-	if healed > 0 {
-		if err := tx.Commit(); err != nil {
-			return 0, fmt.Errorf("commit publication reconciliation: %w", err)
+	for _, pub := range repairs {
+		if err := s.appendPublicationAudit(ctx, tx, pub, "publication.pending", ""); err != nil {
+			return 0, err
 		}
 	}
-	return healed, nil
+	if len(repairs) == 0 {
+		return 0, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return len(repairs), nil
 }
 
 func nullableID(value string) any {
@@ -625,7 +590,7 @@ func scanPublication(row rowScanner) (model.Publication, error) {
 	var value model.Publication
 	var runID, promotionID sql.NullString
 	var created, updated, retryAfter int64
-	if err := row.Scan(&value.Sequence, &value.ID, &value.RepoID, &runID, &promotionID,
+	if err := scanRowNotFound(row, "Publication", &value.Sequence, &value.ID, &value.RepoID, &runID, &promotionID,
 		&value.RefKind, &value.Ref, &value.PreviousSHA, &value.PreviousKnown, &value.ResultSHA, &value.Actor,
 		&value.Status, &value.Error, &created, &updated, &value.Attempts, &retryAfter); err != nil {
 		return model.Publication{}, err
@@ -657,4 +622,22 @@ func pendingPublicationRows(ctx context.Context, querier publicationAuditQuerier
 		return nil, err
 	}
 	return query(legacyPublicationColumns + ", 0, 0")
+}
+
+// AbandonedPromotionPin verifies exact committed ownership before local cleanup.
+// A newer pending publication for the same target and object still owns the pin.
+func (s *Store) AbandonedPromotionPin(ctx context.Context, input, target, sha string) (bool, error) {
+	repository, err := s.RepositoryByName(ctx, input)
+	if err != nil {
+		return false, err
+	}
+	var abandoned bool
+	err = s.reader().QueryRowContext(ctx, `SELECT
+ EXISTS(SELECT 1 FROM publications WHERE repo_id=? AND ref_kind='branch' AND ref=? AND result_sha=? AND promotion_id IS NOT NULL AND status='abandoned')
+ AND NOT EXISTS(SELECT 1 FROM publications WHERE repo_id=? AND ref_kind='branch' AND ref=? AND result_sha=? AND promotion_id IS NOT NULL AND status='pending')`,
+		repository.ID, target, sha, repository.ID, target, sha).Scan(&abandoned)
+	if err != nil {
+		return false, fmt.Errorf("check abandoned promotion pin: %w", err)
+	}
+	return abandoned, nil
 }

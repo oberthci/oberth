@@ -67,6 +67,12 @@ func saveMCPArtifact(ctx context.Context, cfg mcpFlagResult, args json.RawMessag
 	if err != nil {
 		return err
 	}
+	tokenContext, cancelToken := context.WithTimeout(ctx, mcpRequestTimeout)
+	cfg.Token, err = (client.Config{Token: cfg.Token, TokenCommand: cfg.TokenCommand}).ResolveToken(tokenContext)
+	cancelToken()
+	if err != nil {
+		return err
+	}
 	httpClient, err := mcpHTTPClientFunc(cfg.CAFile)
 	if err != nil {
 		return err

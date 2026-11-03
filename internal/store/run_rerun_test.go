@@ -31,7 +31,7 @@ func TestRerunRunRefusesWithoutQueueingAndRecordsLineage(t *testing.T) {
 		return finished
 	}
 	branch := model.RunSpec{RepoID: repo.ID, RefKind: model.RefBranch, Ref: "feature/x", SHA: sha, Actor: "agent@host", Trigger: "branch"}
-	failed := finish(branch, model.RunResult{Status: model.RunFailed, Phase: "test", FailedBurn: "test", FailedStep: "unit"})
+	failed := finish(branch, model.RunResult{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit"})
 	const base = "bcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbc"
 	enqueued, _, err := s.EnqueuePromotionRun(ctx, model.RunSpec{
 		RepoID: repo.ID, RefKind: model.RefBranch, Ref: "promotion/main/abababababab", SHA: sha, Actor: "agent@host",

@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type capacityAudit struct {
@@ -65,12 +65,12 @@ func TestRuntimeCapacityPlatformProtectionFiniteXLFourSharesAfterRaise(t *testin
 	}
 	// Positive XL=4 fills the initial budget by weight, without an exclusion
 	// flag. Raising capacity to six lets a waiting M share the held XL grant.
-	releaseXL, err := acquireWithinBudget(t, s.admission.reserve(1), periapsis.XL)
+	releaseXL, err := acquireWithinBudget(t, s.admission.reserve(1), pipeline.XL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer releaseXL()
-	_, ready := capacityWaiting(t, s.admission, 2, periapsis.M)
+	_, ready := capacityWaiting(t, s.admission, 2, pipeline.M)
 	writeCapacity(t, s, "3")
 	s.refreshRuntimeCapacity(t.Context())
 	select {
@@ -90,7 +90,7 @@ func writeCapacity(t *testing.T, s *Scheduler, text string) {
 		t.Fatal(err)
 	}
 }
-func capacityWaiting(t *testing.T, g *weightedAdmission, seq int64, size periapsis.Size) (*admissionReservation, <-chan func()) {
+func capacityWaiting(t *testing.T, g *weightedAdmission, seq int64, size pipeline.Size) (*admissionReservation, <-chan func()) {
 	t.Helper()
 	r := g.reserve(seq)
 	ch := make(chan func(), 1)
@@ -111,14 +111,14 @@ func TestRuntimeCapacityRaiseAndLowerPreserveGrants(t *testing.T) {
 	g := s.admission
 	var releases []func()
 	for seq := int64(1); seq <= 2; seq++ {
-		release, err := acquireWithinBudget(t, g.reserve(seq), periapsis.M)
+		release, err := acquireWithinBudget(t, g.reserve(seq), pipeline.M)
 		if err != nil {
 			t.Fatal(err)
 		}
 		releases = append(releases, release)
 		defer release()
 	}
-	waiting, ready := capacityWaiting(t, g, 3, periapsis.M)
+	waiting, ready := capacityWaiting(t, g, 3, pipeline.M)
 	writeCapacity(t, s, "3\n")
 	s.refreshRuntimeCapacity(t.Context())
 	var third func()
@@ -137,7 +137,7 @@ func TestRuntimeCapacityRaiseAndLowerPreserveGrants(t *testing.T) {
 	if state.Used != 6 || state.Capacity != 2 || state.Runs != 3 || state.Configuration.MaxConcurrentJobs != 1 || state.Configuration.Source != "file" || s.dispatchSlotAvailable(3) {
 		t.Fatal("lower changed held grants", state)
 	}
-	next, nextReady := capacityWaiting(t, g, 4, periapsis.M)
+	next, nextReady := capacityWaiting(t, g, 4, pipeline.M)
 	releases[0]()
 	if capacityGranted(t, next) {
 		t.Fatal("over-budget grant after lower")
@@ -226,12 +226,12 @@ func TestRuntimeCapacityXLAndOverflowValidation(t *testing.T) {
 func TestRuntimeCapacityRepricesWaitersAndKeepsWholeXLExclusive(t *testing.T) {
 	s, _ := runtimeCapacityFixture(t, 1)
 	g := s.admission
-	release, err := acquireWithinBudget(t, g.reserve(1), periapsis.XL)
+	release, err := acquireWithinBudget(t, g.reserve(1), pipeline.XL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer release()
-	next, ready := capacityWaiting(t, g, 2, periapsis.XL)
+	next, ready := capacityWaiting(t, g, 2, pipeline.XL)
 	writeCapacity(t, s, "4")
 	s.refreshRuntimeCapacity(t.Context())
 	if capacityGranted(t, next) {
@@ -252,7 +252,7 @@ func TestRuntimeCapacityRepricesWaitersAndKeepsWholeXLExclusive(t *testing.T) {
 	case <-time.After(testStartTimeout(time.Second)):
 		t.Fatal("XL did not acquire raised budget")
 	}
-	small, _ := capacityWaiting(t, g, 3, periapsis.S)
+	small, _ := capacityWaiting(t, g, 3, pipeline.S)
 	writeCapacity(t, s, "6")
 	s.refreshRuntimeCapacity(t.Context())
 	if capacityGranted(t, small) {
@@ -273,7 +273,7 @@ func TestRuntimeCapacityAuditDoesNotBlockAdmissionOrStatus(t *testing.T) {
 	case <-time.After(testStartTimeout(time.Second)):
 		t.Fatal("audit did not start")
 	}
-	release, err := acquireWithinBudget(t, s.admission.reserve(1), periapsis.M)
+	release, err := acquireWithinBudget(t, s.admission.reserve(1), pipeline.M)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +348,7 @@ func TestRuntimeCapacityWatchReopensConfigMapSymlink(t *testing.T) {
 }
 
 func TestRuntimeCapacityRunUsesOverrideBeyondBootDispatchLimit(t *testing.T) {
-	f := newConcurrencyFixture(t, periapsis.M, 1)
+	f := newConcurrencyFixture(t, pipeline.M, 1)
 	s := f.scheduler
 	s.capacityFile = filepath.Join(t.TempDir(), "capacity")
 	s.admission.capacityConfig.File = s.capacityFile

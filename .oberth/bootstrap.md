@@ -64,7 +64,7 @@ GAR actions use release-only Workload Identity Federation (WIF), selected by
 STS, impersonates the administrator-configured source principal, then delegates
 to the matching Oberth principal. Final accounts below belong to
 `skipopsmain.iam.gserviceaccount.com`; source placeholders refer to full service
-account emails held only in the tuxbox installation configuration.
+account emails held only in the operator installation configuration.
 
 | Release template | Role / audience pool | First-hop principal | Final principal |
 | --- | --- | --- | --- |
@@ -73,19 +73,21 @@ account emails held only in the tuxbox installation configuration.
 | `release-verify` | `image-reader` / `oberth-release-reader` | `<release-reader>` | `oberth-release-reader` |
 
 Each audience is
-`//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/<pool>/providers/tuxbox`.
+`//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/<pool>/providers/<provider>`.
+The project and the three pools above are fixed. Provider names are owned by
+the deployment and must match `[a-z][a-z0-9-]*`; retain existing provider values.
 Admission binds the exact repository, release ServiceAccount, template and role;
 branch pipelines receive no WIF projection. The helper validates the fixed ADC
 at `/run/oberth-gar/adc.json` and projected token at `/run/oberth-gar/token`,
 requires `OBERTH_RELEASE_WIF=1`, and validates the ADC's first-hop URL against
 an exact Google IAM endpoint/account pattern. The final target
-is fixed by the validated audience. Both IAM requests use a 600-second lifetime.
+is fixed by the validated pool. Both IAM requests use a 600-second lifetime.
 Google enforces the existing matching TokenCreator and repository IAM bindings; the reader stays
 read-only. HTTPS uses verified TLS 1.3, without redirects or proxies. A failed
 exchange is fatal, with no fallback to another role or a static key.
 
 Before the next release, the coordinator must retain/set these existing keys in
-**tuxbox-only** Helm values (`argo.releaseWIF.roles`) or the administrator JSON
+**operator-owned** Helm values (`argo.releaseWIF.roles`) or the administrator JSON
 file passed to `--argo-release-wif-config` (`roles`):
 
 | Role key | `service_account` value |
@@ -105,7 +107,7 @@ Missing or malformed ADC source URLs refuse before network exchange with a
 safe diagnostic naming `service_account_impersonation_url` and the install key.
 The helper accepts any source account matching the strict endpoint pattern;
 Google's existing WIF and IAM bindings enforce first-hop role permissions.
-The final Oberth target remains fixed by the validated audience, and ADC cannot
+The final Oberth target remains fixed by the validated pool, and ADC cannot
 override it. Confirm intended exchanges and provider-enforced cross-role
 refusal in the next coordinator-authorized live release; offline tests cannot
 prove IAM bindings.
@@ -120,9 +122,9 @@ invoke Secretstore. The retired `gar-image-key`, `gar-reader-key`,
 must not be recreated. Legacy code documents only an explicit reviewed source
 rollback; it does not authorize restoring retired credentials or grants.
 
-The existing website-authorized leaf also publishes signed objects to the
+The credentialed artifact leaf publishes signed objects to the
 Oberth-owned `oberth-releases` bucket. Its fixed phases run public upload, then
-finalization after the credential-free runtime proof, then website deployment.
+finalization after the credential-free runtime proof.
 The signer leaves receive no Cloudflare token. Artifact snapshots are bounded,
 read-only at the source, signature-checked before upload, and never executed in
 the credentialed leaf. Finalization retains its shared mutex and conditional
@@ -141,47 +143,9 @@ tags, fetched-artifact verification, and deployment authorization remain
 separate gates. Local controller fixtures are construction evidence, not a
 claim of live Pod execution or an applied registry policy.
 
-## Website publication (#649)
+## Dashboard test runtime
 
-The oberth.ci Worker (`oberth-ci`, Workers Static Assets, custom domains
-oberth.ci and www.oberth.ci) is published by the release burn, not by hand.
-
-- `release-setup` gains three credential-free steps. `fetch-node` downloads
-  the official Node tarball named in `pins/node.url` into the dedicated
-  `bootstrap-website-inputs` claim, `verify-node` checks it against
-  `pins/node.sha256`, and `stage-website-packages` re-verifies a private copy,
-  extracts it, proves the executable against `pins/node-bin.sha256`, and runs
-  `npm ci --ignore-scripts` from the committed `website/package-lock.json`
-  with only the npm cache written back to the claim. No package code runs;
-  the claim holds only hash-checked or content-addressed inputs. These Pods
-  are tokenless (`automountServiceAccountToken: false`) and receive no shared
-  workspace mounts or environment.
-- `release-website` depends on `release-verify`. Its first init container,
-  `verify-website-inputs.py`, binds the publisher source (release.sh, the
-  verifier, the Node pins, the npm manifest and lockfile, `wrangler.jsonc`
-  and the exact `website/public` tree) to the admitted commit and tag, then
-  copies the tarball (hashed while copied) and the npm cache into Pod-private
-  `/tmp/oberth-website`. The second, `install-website-tools`, extracts Node,
-  re-proves the executable pin, installs wrangler with
-  `npm ci --offline --ignore-scripts` (every tarball re-verified against the
-  lockfile's sha512) and requires the lockfile's exact wrangler version.
-  Only then does the main container run `oberth secretstore exec` with its
-  single path, `oberth/data/release/cloudflare-oberth-workers-token` (field
-  `CLOUDFLARE_API_TOKEN`); it never receives a GAR key, the cosign secret or
-  the publisher tools claim. `release.sh publish-website` re-proves the Node
-  pin, refuses any `wrangler.jsonc` other than the reviewed Worker, and hands
-  the token to wrangler through its environment only, with wrangler's home,
-  config and logs on the memory-backed secret mount.
-- `release-website-readback` is tokenless. It re-asserts the #647 contract on
-  the admitted source (identical semantic audit preflight in both
-  `setup-secretstore.sh` copies, no pre-#647 grep) and polls, without cache
-  busting, until `https://oberth.ci/`, `https://www.oberth.ci/`, both
-  `/setup-secretstore.sh` URLs and `/install.sh` serve the admitted bytes
-  with their `_headers` content types (window 900 s, above the scripts'
-  300 s max-age). A stale edge copy is not publication.
-
-The deploy token is Terraform-owned (`oberthci/terraform`
-`website-deploy-token.tf`: account Workers Scripts Write, read-only Zone Read
-and Workers Routes Read on oberth.ci, no cache purge or DNS write). Its value
-reaches OpenBao only through the administrator's custody step and the
-release Pod only through `secretstore exec`.
+The tokenless fetch-node and verify-node steps stage the pinned Node archive in
+bootstrap-node-inputs. The release-test leaf mounts that claim read-only and
+verifies its private executable before running dashboard JavaScript tests.
+The artifact publisher has no Node tooling or site deployment authority.

@@ -48,7 +48,7 @@ type Observation struct {
 }
 type Declaration struct {
 	ResolvedTemplate      string                       `json:"-"`
-	Burn                  string                       `json:"burn"`
+	Stage                 string                       `json:"burn"`
 	Template              string                       `json:"template"`
 	OwnerRepository       string                       `json:"owner_repository"`
 	SHA                   string                       `json:"sha"`
@@ -89,7 +89,7 @@ type Step struct {
 	MemoryStepAttempts         int                     `json:"memory_step_peak_attempts"`
 	MemorySamplerAttempts      int                     `json:"memory_sampler_attempts"`
 	MemoryInsufficientAttempts int                     `json:"memory_insufficient_attempts"`
-	Burn                       string                  `json:"burn"`
+	Stage                      string                  `json:"burn"`
 	Template                   string                  `json:"template"`
 	OwnerRepository            string                  `json:"owner_repository"`
 	Runs                       int                     `json:"runs"`
@@ -168,8 +168,8 @@ func TemplateOf(v model.StepResourceUsage) string {
 	}
 	return ""
 }
-func key(burn, template string) string {
-	return NormalizeTemplate(burn) + "\x00" + NormalizeTemplate(template)
+func key(stage, template string) string {
+	return NormalizeTemplate(stage) + "\x00" + NormalizeTemplate(template)
 }
 func Build(values []Observation, declarations []Declaration) []Step {
 	groups := map[string][]Observation{}
@@ -184,12 +184,12 @@ func Build(values []Observation, declarations []Declaration) []Step {
 		if o.Owner == "" {
 			o.Owner = v.FragmentRepository
 		}
-		groups[key(v.Burn, o.Template)] = append(groups[key(v.Burn, o.Template)], o)
+		groups[key(v.Stage, o.Template)] = append(groups[key(v.Stage, o.Template)], o)
 	}
 	declared := map[string]*Declaration{}
 	for i := range declarations {
 		d := &declarations[i]
-		k := key(d.Burn, d.Template)
+		k := key(d.Stage, d.Template)
 		declared[k] = d
 		if _, ok := groups[k]; !ok {
 			groups[k] = nil
@@ -202,8 +202,8 @@ func Build(values []Observation, declarations []Declaration) []Step {
 	slices.Sort(keys)
 	out := make([]Step, 0, len(keys))
 	for _, k := range keys {
-		burn, template, _ := strings.Cut(k, "\x00")
-		s := Step{Burn: burn, Template: template, Declared: declared[k], RunIDs: []string{}, NoSuggestion: []string{}}
+		stage, template, _ := strings.Cut(k, "\x00")
+		s := Step{Stage: stage, Template: template, Declared: declared[k], RunIDs: []string{}, NoSuggestion: []string{}}
 		if s.Declared != nil {
 			s.OwnerRepository = s.Declared.OwnerRepository
 		}
@@ -216,6 +216,11 @@ func Build(values []Observation, declarations []Declaration) []Step {
 		}
 		for _, o := range groups[k] {
 			v := o.Usage
+			// A running attempt has only partial peaks and duration. It cannot
+			// contribute to the population used to size completed work.
+			if !v.Terminal {
+				continue
+			}
 			s.Flags.IdentityUnknown = s.Flags.IdentityUnknown || o.Ambiguous
 			id := v.RunID + "\x00" + v.PodUID + "\x00" + v.ContainerID
 			if seen[id] {

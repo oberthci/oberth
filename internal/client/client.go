@@ -44,7 +44,9 @@ func FromEnv() Config {
 
 func (config Config) Configured() bool { return config.BaseURL != "" }
 
-func (config Config) resolveToken(ctx context.Context) (string, error) {
+// ResolveToken shares credential precedence between REST and MCP clients.
+// The caller's context bounds execution of an operator-configured command.
+func (config Config) ResolveToken(ctx context.Context) (string, error) {
 	if config.Token != "" {
 		return config.Token, nil
 	}
@@ -82,23 +84,11 @@ type Client struct {
 }
 
 func New(ctx context.Context, config Config) (*Client, error) {
-	if config.BaseURL == "" {
-		return nil, errors.New("client: set OBERTH_BASE_URL to the server's https address")
-	}
-	base, err := url.Parse(config.BaseURL)
+	base, err := ValidateServerURL(config.BaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("client: OBERTH_BASE_URL is not a URL: %w", err)
+		return nil, err
 	}
-	if base.Scheme != "https" && base.Scheme != "http" {
-		return nil, fmt.Errorf("client: OBERTH_BASE_URL must be http or https, got %q", base.Scheme)
-	}
-	if base.Host == "" {
-		return nil, errors.New("client: OBERTH_BASE_URL has no host")
-	}
-	if base.Scheme == "http" && !isLoopback(base.Hostname()) {
-		return nil, errors.New("client: use https:// — the token would be transmitted in cleartext")
-	}
-	token, err := config.resolveToken(ctx)
+	token, err := config.ResolveToken(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -112,6 +102,28 @@ func New(ctx context.Context, config Config) (*Client, error) {
 		http:     &http.Client{Timeout: requestTimeout, Transport: transport, CheckRedirect: refuseSchemeDowngrade},
 		download: &http.Client{Transport: transport, CheckRedirect: refuseSchemeDowngrade},
 	}, nil
+}
+
+// ValidateServerURL applies the shared REST and MCP transport policy before
+// resolving credentials or constructing a transport.
+func ValidateServerURL(address string) (*url.URL, error) {
+	if address == "" {
+		return nil, errors.New("client: set OBERTH_BASE_URL to the server's https address")
+	}
+	base, err := url.Parse(address)
+	if err != nil {
+		return nil, fmt.Errorf("client: OBERTH_BASE_URL is not a URL: %w", err)
+	}
+	if base.Scheme != "https" && base.Scheme != "http" {
+		return nil, fmt.Errorf("client: OBERTH_BASE_URL must be http or https, got %q", base.Scheme)
+	}
+	if base.Host == "" {
+		return nil, errors.New("client: OBERTH_BASE_URL has no host")
+	}
+	if base.Scheme == "http" && !isLoopback(base.Hostname()) {
+		return nil, errors.New("client: use https:// — the token would be transmitted in cleartext")
+	}
+	return base, nil
 }
 
 // refuseSchemeDowngrade rejects any redirect that steps from https down to a
@@ -193,21 +205,29 @@ func (client *Client) newGetRequest(ctx context.Context, path string, query map[
 }
 
 func (client *Client) Get(ctx context.Context, path string, query map[string]string, into any) error {
+	_, err := client.GetWithHeaders(ctx, path, query, into)
+	return err
+}
+
+// GetWithHeaders returns the headers from the successful response, including
+// the server's authoritative paging cursor, with the same retry/read bounds.
+func (client *Client) GetWithHeaders(ctx context.Context, path string, query map[string]string, into any) (http.Header, error) {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 	var budget restartretry.Budget
 	for {
-		err, retry := client.getOnce(ctx, path, query, into)
+		var headers http.Header
+		err, retry := client.getOnceHeaders(ctx, path, query, into, &headers)
 		if err == nil || !retry {
-			return err
+			return headers, err
 		}
 		if !budget.Wait(ctx) {
-			return errors.Join(err, ctx.Err())
+			return nil, errors.Join(err, ctx.Err())
 		}
 	}
 }
 
-func (client *Client) getOnce(ctx context.Context, path string, query map[string]string, into any) (error, bool) {
+func (client *Client) getOnceHeaders(ctx context.Context, path string, query map[string]string, into any, headers *http.Header) (error, bool) {
 	request, err := client.newGetRequest(ctx, path, query)
 	if err != nil {
 		return err, false
@@ -228,6 +248,9 @@ func (client *Client) getOnce(ctx context.Context, path string, query map[string
 	if len(body) > maxResponseSize {
 		return fmt.Errorf("client: %s response too large", path), false
 	}
+	if headers != nil {
+		*headers = response.Header.Clone()
+	}
 	if into == nil {
 		return nil, false
 	}
@@ -243,33 +266,6 @@ func (client *Client) GetRaw(ctx context.Context, path string, query map[string]
 		return nil, err
 	}
 	return raw, nil
-}
-
-// GetTo streams the response body into output without JSON decoding and
-// without maxResponseSize: that cap exists to bound JSON decoding in
-// memory, but an artifact is served as application/octet-stream and the
-// server's default per-run artifact ceiling is 256 MiB, so capping the
-// read at 8 MiB silently truncated every larger download (#237). The
-// transfer is bounded by the server's own artifact limits and cancelled
-// through ctx; nothing is buffered beyond io.Copy's window.
-func (client *Client) GetTo(ctx context.Context, path string, query map[string]string, output io.Writer) error {
-	request, err := client.newGetRequest(ctx, path, query)
-	if err != nil {
-		return err
-	}
-	response, err := client.download.Do(request)
-	if err != nil {
-		return classifyTransport(path, err)
-	}
-	defer func() { _ = response.Body.Close() }()
-
-	if response.StatusCode != http.StatusOK {
-		return statusError(path, response)
-	}
-	if _, err := io.Copy(output, response.Body); err != nil {
-		return fmt.Errorf("client: read %s: %w", path, err)
-	}
-	return nil
 }
 
 // errRedirectDowngrade marks a refused https-to-http downgrade redirect so

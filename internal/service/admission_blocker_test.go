@@ -6,10 +6,10 @@ import (
 	"testing"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
-func blockerRequest(runID string, repoID int64, repo, ref string, size periapsis.Size) admissionRequest {
+func blockerRequest(runID string, repoID int64, repo, ref string, size pipeline.Size) admissionRequest {
 	return admissionRequest{RunID: runID, RepoID: repoID, Repo: repo, Ref: ref, Size: size}
 }
 
@@ -22,14 +22,14 @@ func TestAnXLHeadIsNamedByEveryRunBehindIt(t *testing.T) {
 	if scheduler.AdmissionBlocker() != nil {
 		t.Fatal("an empty gate reports a blocker")
 	}
-	releaseRunning := acquireRequestWithinBudget(t, gate.reserve(1), blockerRequest("running", 1, "docs", "main", periapsis.M))
+	releaseRunning := acquireRequestWithinBudget(t, gate.reserve(1), blockerRequest("running", 1, "docs", "main", pipeline.M))
 	head := gate.reserve(2)
 	headReady := make(chan func(), 1)
-	go acquireRequestForTest(head, blockerRequest("ebpf-run", 2, "exampleorg-ebpf", "promotion/main/335d751c79f3", periapsis.XL), headReady)
+	go acquireRequestForTest(head, blockerRequest("ebpf-run", 2, "exampleorg-ebpf", "promotion/main/335d751c79f3", pipeline.XL), headReady)
 	awaitWaiting(t, head)
 	behind := gate.reserve(3)
 	behindReady := make(chan func(), 1)
-	go acquireRequestForTest(behind, blockerRequest("small", 3, "website", "feature/x", periapsis.S), behindReady)
+	go acquireRequestForTest(behind, blockerRequest("small", 3, "website", "feature/x", pipeline.S), behindReady)
 	awaitWaiting(t, behind)
 
 	const want = "blocked behind exampleorg-ebpf/promotion/main/335d751c79f3 (XL, needs a full drain)."

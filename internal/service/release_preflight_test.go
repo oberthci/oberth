@@ -40,7 +40,7 @@ type releaseChecker struct {
 	checks   []string
 }
 
-func (c *releaseChecker) PreflightRelease(context.Context, JobRequest, []byte) (ReleasePreflightResult, error) {
+func (c *releaseChecker) PreflightRelease(context.Context, WorkflowRequest, []byte) (ReleasePreflightResult, error) {
 	c.calls++
 	return ReleasePreflightResult{Problems: c.problems, Checks: c.checks}, nil
 }
@@ -54,7 +54,7 @@ func TestReleasePreflightBranchWarningAndPromotionRefusal(t *testing.T) {
 	checker := &releaseChecker{problems: []string{"access_allow exact-call"}}
 	git := &releaseCheckGit{source: []byte("new"), base: []byte("old")}
 	scheduler := &Scheduler{git: git, jobs: &releaseCheckJobs{releaseChecker: checker}}
-	request := JobRequest{Run: model.Run{SHA: strings.Repeat("a", 40), Trigger: "branch"}}
+	request := WorkflowRequest{Run: model.Run{SHA: strings.Repeat("a", 40), Trigger: "branch"}}
 	var output bytes.Buffer
 	if err := scheduler.checkReleasePreflight(context.Background(), request, &output); err != nil {
 		t.Fatal(err)
@@ -97,7 +97,7 @@ type grantRefusingReleaseJobs struct {
 	database *store.Store
 }
 
-func (jobs *grantRefusingReleaseJobs) CreateRelease(ctx context.Context, request JobRequest) error {
+func (jobs *grantRefusingReleaseJobs) CreateRelease(ctx context.Context, request WorkflowRequest) error {
 	grants, err := jobs.database.ActiveSecretGrants(ctx, request.Repository.ID)
 	if err != nil {
 		return err
@@ -130,7 +130,7 @@ func TestReleasePreflightIdentityAdviceIsVisibleWithoutBlocking(t *testing.T) {
 	checker := &releaseChecker{checks: []string{"warning: cloud trust must include subject system:serviceaccount:pipeline:step-publish"}}
 	scheduler := &Scheduler{git: &releaseCheckGit{source: []byte("new"), base: []byte("old")}, jobs: &releaseCheckJobs{releaseChecker: checker}}
 	var output bytes.Buffer
-	if err := scheduler.checkReleasePreflight(context.Background(), JobRequest{Run: model.Run{Trigger: "promotion"}}, &output); err != nil {
+	if err := scheduler.checkReleasePreflight(context.Background(), WorkflowRequest{Run: model.Run{Trigger: "promotion"}}, &output); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), "[release-preflight/check] "+checker.checks[0]) {
@@ -150,7 +150,7 @@ func TestReleasePreflightCanonicalRepositoryKey(t *testing.T) {
 			t.Run(tc.want+"/"+name, func(t *testing.T) {
 				git := &releaseCheckGit{source: []byte("new"), base: []byte("old")}
 				checker := &releaseChecker{}
-				request := JobRequest{UpstreamName: "upstream", UpstreamOrg: tc.org, Repository: model.Repository{Name: "repo"}, Run: model.Run{TestedSHA: strings.Repeat("a", 40)}}
+				request := WorkflowRequest{UpstreamName: "upstream", UpstreamOrg: tc.org, Repository: model.Repository{Name: "repo"}, Run: model.Run{TestedSHA: strings.Repeat("a", 40)}}
 				if _, err := releasePreflight(t.Context(), git, checker, request, strings.Repeat("b", 40), defaultBase); err != nil {
 					t.Fatal(err)
 				}

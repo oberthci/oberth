@@ -10,7 +10,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // Validate against the current identity snapshot too: a later grant reconcile
@@ -50,7 +50,7 @@ func applyReleaseWIFStepIdentities(leaves []*wfv1.Template, config Config, reque
 	if len(leaves) == 0 {
 		return nil
 	}
-	if config.ReleaseWIF == nil || request.Trigger != periapsis.TriggerRelease || request.effectiveRunTrigger() != argoworkflow.RunTriggerTag {
+	if config.ReleaseWIF == nil || request.Trigger != pipeline.TriggerRelease || request.effectiveRunTrigger() != argoworkflow.RunTriggerTag {
 		return fmt.Errorf("argojob: WIF step identities require a tag release")
 	}
 	if err := config.ReleaseWIF.Validate(); err != nil {

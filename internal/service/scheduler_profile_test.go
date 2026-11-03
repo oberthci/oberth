@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type profileGatedJobs struct {
@@ -34,7 +34,7 @@ func (jobs *profileGatedJobs) AwaitAdmission(ctx context.Context) error {
 }
 
 func TestSchedulerPausesAdmissionWithoutStoppingExistingWork(t *testing.T) {
-	fixture := newConcurrencyFixture(t, periapsis.M, 2)
+	fixture := newConcurrencyFixture(t, pipeline.M, 2)
 	jobs := &profileGatedJobs{concurrentJobs: fixture.jobs, waiting: make(chan struct{}, 2), recovered: make(chan struct{})}
 	fixture.scheduler.jobs = jobs
 	ctx, cancel := context.WithCancel(context.Background())

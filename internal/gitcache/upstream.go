@@ -2,7 +2,9 @@ package gitcache
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"github.com/oberthci/oberth/internal/boundedio"
 	"os"
 	"strings"
 )
@@ -20,7 +22,9 @@ func (c *Cache) SyncBranch(ctx context.Context, input, branch, sha string) error
 		return err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return err
+	}
 	defer lock.Unlock()
 	if err := c.checkRepositoryActive(ctx, input); err != nil {
 		return err
@@ -49,7 +53,9 @@ func (c *Cache) SyncTag(ctx context.Context, input, tag, sha string) error {
 		return err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return err
+	}
 	defer lock.Unlock()
 	if err := c.checkRepositoryActive(ctx, input); err != nil {
 		return err
@@ -75,8 +81,15 @@ func (c *Cache) DeleteBranch(ctx context.Context, input, branch string) error {
 	if err != nil {
 		return err
 	}
+	receive := c.receiveLock(path)
+	if err := receive.LockContext(ctx); err != nil {
+		return err
+	}
+	defer receive.Unlock()
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return err
+	}
 	defer lock.Unlock()
 	if err := c.checkRepositoryActive(ctx, input); err != nil {
 		return err
@@ -119,8 +132,10 @@ func (c *Cache) ReleaseReachable(ctx context.Context, input, commit, admissionSH
 		return false, err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
-	defer lock.Unlock()
+	if err := lock.RLockContext(ctx); err != nil {
+		return false, err
+	}
+	defer lock.RUnlock()
 	if err := c.assertCommit(ctx, path, admissionSHA); err != nil {
 		return false, fmt.Errorf("release admission snapshot is unavailable: %w", err)
 	}
@@ -153,10 +168,10 @@ func (c *Cache) ReachableFromUpstreamDefault(ctx context.Context, input, commit 
 		return false, err
 	}
 	lock := c.repoLock(path)
-	if err := lock.LockContext(ctx); err != nil {
+	if err := lock.RLockContext(ctx); err != nil {
 		return false, err
 	}
-	defer lock.Unlock()
+	defer lock.RUnlock()
 	if !c.isBare(ctx, path) {
 		return false, fmt.Errorf("repository %s is not cached", repo)
 	}
@@ -200,7 +215,9 @@ func (c *Cache) PreparePromotion(ctx context.Context, input, sourceSHA, targetBr
 		return MergeCandidate{}, err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return MergeCandidate{}, err
+	}
 	defer lock.Unlock()
 	if err := c.checkRepositoryActive(ctx, input); err != nil {
 		return MergeCandidate{}, err
@@ -208,7 +225,8 @@ func (c *Cache) PreparePromotion(ctx context.Context, input, sourceSHA, targetBr
 	if err := c.assertCommit(ctx, path, sourceSHA); err != nil {
 		return MergeCandidate{}, err
 	}
-	tracking := upstreamRefPrefix + "promote/" + targetBranch
+	tracking := "refs/oberth/promotion-targets/" + targetBranch
+	defer func() { _ = c.deleteRef(context.WithoutCancel(ctx), path, tracking, "") }()
 	if err := c.run(ctx, commandSpec{dir: path, args: []string{"fetch", "--no-tags", "upstream", "+refs/heads/" + targetBranch + ":" + tracking}}); err != nil {
 		unborn, unbornErr := c.remoteBranchAbsent(ctx, path, targetBranch)
 		if unbornErr != nil || !unborn {
@@ -290,7 +308,7 @@ func (c *Cache) remoteBranchAbsent(ctx context.Context, path, branch string) (bo
 }
 
 func (c *Cache) pinPromotion(ctx context.Context, cachePath, targetBranch, sha, workspace string) error {
-	ref := upstreamRefPrefix + "promotions/" + targetBranch + "/" + sha
+	ref := promotionRefPrefix + targetBranch + "/" + sha
 	if workspace != "" {
 		if err := c.run(ctx, commandSpec{dir: workspace, args: []string{"push", "origin", sha + ":" + ref}}); err != nil {
 			return fmt.Errorf("persist merged promotion object in cache: %w", err)
@@ -315,7 +333,9 @@ func (c *Cache) PushPromotion(ctx context.Context, input, targetBranch, mergedSH
 		return err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return err
+	}
 	defer lock.Unlock()
 	if err := c.checkRepositoryActive(ctx, input); err != nil {
 		return err
@@ -327,7 +347,10 @@ func (c *Cache) PushPromotion(ctx context.Context, input, targetBranch, mergedSH
 	if err := c.run(ctx, commandSpec{dir: path, args: []string{"push", "upstream", mergedSHA + ":" + ref}}); err != nil {
 		return fmt.Errorf("push promotion target %s without force: %w", targetBranch, err)
 	}
-	return c.verifyRemoteRef(ctx, path, "--heads", ref, mergedSHA)
+	if err := c.verifyRemoteRef(ctx, path, "--heads", ref, mergedSHA); err != nil {
+		return err
+	}
+	return c.deleteRef(ctx, path, promotionRefPrefix+targetBranch+"/"+mergedSHA, "")
 }
 
 func (c *Cache) verifyRemoteRef(ctx context.Context, path, selector, ref, expected string) error {
@@ -371,8 +394,10 @@ func (c *Cache) PeelObject(ctx context.Context, input, objectSHA string) (Peeled
 		return PeeledObject{}, err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
-	defer lock.Unlock()
+	if err := lock.RLockContext(ctx); err != nil {
+		return PeeledObject{}, err
+	}
+	defer lock.RUnlock()
 	if err := c.assertObject(ctx, path, objectSHA); err != nil {
 		return PeeledObject{}, err
 	}
@@ -410,7 +435,9 @@ func (c *Cache) LsRemoteHeads(ctx context.Context, input string) (int, error) {
 		return 0, err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return 0, err
+	}
 	defer lock.Unlock()
 	if err := c.checkRepositoryActive(ctx, input); err != nil {
 		return 0, err
@@ -419,15 +446,90 @@ func (c *Cache) LsRemoteHeads(ctx context.Context, input string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	output, err := c.execute(ctx, commandSpec{repository: input, args: []string{"ls-remote", "--heads", remote}}, true)
+	ctx, cancelOutput := context.WithCancel(ctx)
+	defer cancelOutput()
+	output := boundedio.Buffer{Limit: maxRefsOutput, OnOverflow: cancelOutput}
+	err = c.run(ctx, commandSpec{repository: input, args: []string{"ls-remote", "--heads", remote}, stdout: &output})
 	if err != nil {
 		return 0, fmt.Errorf("ls-remote probe for %s: %w", input, err)
 	}
 	count := 0
-	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+	for _, line := range strings.Split(strings.TrimSpace(output.String()), "\n") {
 		if line != "" {
+			fields := strings.Fields(line)
+			if len(fields) != 2 || ValidateSHA(fields[0]) != nil || !strings.HasPrefix(fields[1], "refs/heads/") {
+				return 0, errors.New("ls-remote returned an invalid branch row")
+			}
 			count++
 		}
 	}
 	return count, nil
+}
+
+const promotionRefPrefix = "refs/oberth/promotions/"
+
+// Move old pins before materialization so private promotion state never becomes
+// part of the upstream snapshot. Keep undelivered objects pinned across restart.
+func (c *Cache) migratePromotionPins(ctx context.Context, path string) error {
+	legacy, err := c.listRefs(ctx, path, upstreamRefPrefix+"promotions/")
+	if err != nil {
+		return err
+	}
+	for ref, sha := range legacy {
+		suffix := strings.TrimPrefix(ref, upstreamRefPrefix+"promotions/")
+		// The last component is the object ID; branch names may contain slashes.
+		split := strings.LastIndex(suffix, "/")
+		if split < 1 || suffix[split+1:] != sha {
+			return fmt.Errorf("invalid legacy promotion pin %s", ref)
+		}
+		target := suffix[:split]
+		if !c.isAncestor(ctx, path, sha, upstreamRefPrefix+"heads/"+target) {
+			if err := c.updateRef(ctx, path, promotionRefPrefix+suffix, sha, ""); err != nil {
+				return err
+			}
+		}
+		if err := c.deleteRef(ctx, path, ref, sha); err != nil {
+			return err
+		}
+	}
+	// The old preparation ref was only scratch state, never an ownership pin.
+	scratch, err := c.listRefs(ctx, path, upstreamRefPrefix+"promote/")
+	if err != nil {
+		return err
+	}
+	for ref, sha := range scratch {
+		if err := c.deleteRef(ctx, path, ref, sha); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Remove pins proven delivered or abandoned in the publication ledger. Other
+// candidates retain their object lifetime across restarts and retries.
+func (c *Cache) sweepDeliveredPromotionPins(ctx context.Context, input, path string) error {
+	pins, err := c.listRefs(ctx, path, promotionRefPrefix)
+	if err != nil {
+		return err
+	}
+	for ref, sha := range pins {
+		suffix := strings.TrimPrefix(ref, promotionRefPrefix)
+		split := strings.LastIndex(suffix, "/")
+		if split < 1 || suffix[split+1:] != sha {
+			return fmt.Errorf("invalid promotion pin %s", ref)
+		}
+		remove := c.isAncestor(ctx, path, sha, upstreamRefPrefix+"heads/"+suffix[:split])
+		if !remove && c.promotionPinAbandoned != nil {
+			remove, err = c.promotionPinAbandoned(ctx, input, suffix[:split], sha)
+			if err != nil {
+				return fmt.Errorf("check abandoned promotion pin: %w", err)
+			}
+		}
+		if remove {
+			if err := c.deleteRef(ctx, path, ref, sha); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

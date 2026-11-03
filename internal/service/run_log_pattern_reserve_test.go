@@ -20,12 +20,12 @@ type heldPatternLogs struct {
 	release <-chan struct{}
 }
 
-func (logs heldPatternLogs) ReadFiltered(id, burn, step string, filter runlog.Filter) ([]byte, runlog.Meta, error) {
+func (logs heldPatternLogs) ReadFiltered(id, stage, step string, filter runlog.Filter) ([]byte, runlog.Meta, error) {
 	if filter.Pattern != "" {
 		logs.entered <- struct{}{}
 		<-logs.release
 	}
-	return logs.LogStore.ReadFiltered(id, burn, step, filter)
+	return logs.LogStore.ReadFiltered(id, stage, step, filter)
 }
 
 func TestRunLogPatternReserveDoesNotBlockCIIssueCreation(t *testing.T) {
@@ -65,7 +65,7 @@ func TestRunLogPatternReserveDoesNotBlockCIIssueCreation(t *testing.T) {
 		t.Fatalf("plain read unnecessarily queued: %q %v", plain, err)
 	}
 
-	fixture := newControlFixture(t, JobResult{Status: model.RunFailed, Phase: "security", FailedBurn: "security", FailedStep: "security", Error: "step failed", Steps: []model.StepResult{{Burn: "security", Step: "security", Status: model.StepFailed, ExitCode: 2}}})
+	fixture := newControlFixture(t, JobResult{Status: model.RunFailed, Phase: "security", FailedStage: "security", FailedStep: "security", Error: "step failed", Steps: []model.StepResult{{Stage: "security", Step: "security", Status: model.StepFailed, ExitCode: 2}}})
 	fixture.jobs.transcripts = []string{siblingInterleavedTranscript()}
 	queued, err := fixture.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "pattern-reserve-ci", Repository: fixture.repo, Branch: "main", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
 	if err != nil {

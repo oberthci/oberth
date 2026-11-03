@@ -15,6 +15,7 @@ type NextStepsUpstream struct {
 
 // NextStepsInput describes an installed server for NextSteps.
 type NextStepsInput struct {
+	SSHPort, HTTPSPort, ServiceType string
 	// Host is the address clients use (Config.ClientHost or the default);
 	// empty means localhost.
 	Host      string
@@ -35,6 +36,7 @@ type NextStepsInput struct {
 // this server (#060). The setup finish screen and the installer print the
 // same lines. Lines without indentation are headings.
 func NextSteps(in NextStepsInput) []string {
+	sshPort, httpsPort := clientPorts(Deps{ClientSSHPort: in.SSHPort, ClientHTTPSPort: in.HTTPSPort, ClientServiceType: in.ServiceType})
 	host := in.Host
 	if host == "" {
 		host = "localhost"
@@ -63,10 +65,13 @@ func NextSteps(in NextStepsInput) []string {
 
 	var pending []NextStepsUpstream
 	firstRepo := ""
+	if in.ServiceType == "ClusterIP" {
+		add("ClusterIP is reachable only through an internal route. For workstation access, keep this port-forward running:", "   kubectl -n "+ns+" port-forward service/oberth 30022:"+sshPort+" 30443:"+httpsPort, "   Then use localhost:30022 for SSH and https://localhost:30443 for HTTPS.", "")
+	}
 	add("Clone a repository through Oberth (the first clone registers it):")
 	for _, u := range in.Upstreams {
 		repo := u.Name + "/" + orgFromBaseURL(u.BaseURL) + "/<repo>"
-		add("   git clone ssh://git@" + host + ":" + sshNodePort + "/" + repo + ".git")
+		add("   git clone ssh://git@" + host + ":" + sshPort + "/" + repo + ".git")
 		if !u.Connected {
 			pending = append(pending, u)
 			add("     (once " + hostnameFromURL(u.BaseURL) + " accepts the upstream key)")
@@ -82,7 +87,7 @@ func NextSteps(in NextStepsInput) []string {
 
 	add("", "Run CI: push a branch. A repository without a pipeline gets one from oberth init:",
 		"   cd <repo> && oberth init && git push origin HEAD:my-branch",
-		"   oberth runs --ref my-branch   ·   https://"+host+":"+httpsNodePort+"/runs")
+		"   oberth runs --ref my-branch   ·   https://"+host+":"+httpsPort+"/runs")
 
 	if in.OmitPendingHelp {
 		pending = nil
@@ -106,7 +111,7 @@ func NextSteps(in NextStepsInput) []string {
 	add("", "Give another machine or agent access (an uplink):",
 		"   1. there:  cat ~/.ssh/id_ed25519.pub   and copy it here as you@laptop.pub",
 		"   2. here:   "+exec(true, "uplink", "add", "-", "you@laptop")+" < you@laptop.pub",
-		"   3. there:  export OBERTH_BASE_URL=https://"+host+":"+httpsNodePort+" OBERTH_CA_CERT=<a copy of ~/.config/oberth/ca.crt>",
+		"   3. there:  export OBERTH_BASE_URL=https://"+host+":"+httpsPort+" OBERTH_CA_CERT=<a copy of ~/.config/oberth/ca.crt>",
 		"              and store the token step 2 printed once (docs/remote-cli.md, docs/mcp-setup.md)")
 	if local {
 		add("", "localhost works on this machine only. For other machines, rerun oberth setup and pick this host's address on the TLS step (oberth install --client-host <address>).")
@@ -116,7 +121,8 @@ func NextSteps(in NextStepsInput) []string {
 
 // readyURL is the dashboard address clients are told to open.
 func readyURL(deps Deps) string {
-	return "https://" + URLHost(clientReachableHost(deps)) + ":" + httpsNodePort + "/runs"
+	_, httpsPort := clientPorts(deps)
+	return "https://" + URLHost(clientReachableHost(deps)) + ":" + httpsPort + "/runs"
 }
 
 // printReadyWithNextSteps prints the Ready banner followed by NextSteps.
@@ -128,7 +134,8 @@ func printReadyWithNextSteps(w io.Writer, cfg Config, deps Deps, upstreams []Nex
 	}
 	_, _ = fmt.Fprintln(w)
 	for _, line := range NextSteps(NextStepsInput{
-		Host:      clientReachableHost(deps),
+		Host:    clientReachableHost(deps),
+		SSHPort: deps.ClientSSHPort, HTTPSPort: deps.ClientHTTPSPort, ServiceType: deps.ClientServiceType,
 		Context:   deps.ContextName,
 		Namespace: cfg.Namespace,
 		Upstreams: upstreams,

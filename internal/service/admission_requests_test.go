@@ -12,7 +12,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	pipeline "github.com/oberthci/oberth/pkg/periapsis"
+	pipeline "github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestDeclaredAdmissionTwoMeasuredRunsFit(t *testing.T) {
@@ -76,11 +76,10 @@ func TestDeclaredMemoryHeadroomChargeAndBudget(t *testing.T) {
 		release()
 		g.resources.MemoryBytes--
 		r = g.reserve(2)
-		release = acquireRequestWithinBudget(t, r, admissionRequest{Size: pipeline.S, Pods: d})
-		if r.pods != nil || r.weight != 1 {
-			t.Fatalf("headroom %d: oversize demand did not fall back", headroom)
+		release, err := r.acquireRequest(t.Context(), admissionRequest{Size: pipeline.S, Pods: d})
+		if err == nil || release != nil || r.weight != 0 {
+			t.Fatalf("headroom %d: oversize demand was not refused", headroom)
 		}
-		release()
 	}
 	for _, headroom := range []int64{-1, (1 << 50) + 1} {
 		c := DefaultDeclaredAdmissionConfig()
@@ -101,7 +100,7 @@ func TestDeclaredMemoryHeadroomRestoredAndReported(t *testing.T) {
 	}
 	defer r.release()
 	charged := r.declaredResources()
-	if charged.MemoryBytes != (5<<30)+2*executorMemoryBytes || *r.pods != *d {
+	if charged.MemoryBytes != (5<<30)+2*executorMemoryBytes || !r.pods.Equal(*d) {
 		t.Fatalf("restored reservation: %+v, sealed %+v", charged, r.pods)
 	}
 	observation := &model.AdmissionObservation{DeclaredResources: charged}

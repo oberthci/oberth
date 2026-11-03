@@ -2,11 +2,13 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"testing"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type fakeCollector struct {
@@ -46,7 +48,7 @@ func TestCollectArtifactsStoresWhatTheRunProduced(t *testing.T) {
 	store := &fakeArtifactStore{}
 	jobs := jobsWithArtifacts(collector, store)
 
-	if reason := jobs.collectArtifacts(context.Background(), "wf", "run-1", periapsis.TriggerCI); reason != "" {
+	if reason := jobs.collectArtifacts(context.Background(), "wf", "run-1", pipeline.TriggerCI); reason != "" {
 		t.Fatalf("unexpected failure reason %q", reason)
 	}
 	if string(store.stored) != "archive" {
@@ -58,13 +60,27 @@ func TestCollectArtifactsReportsRatherThanFailingTheRun(t *testing.T) {
 	t.Parallel()
 	jobs := jobsWithArtifacts(&fakeCollector{err: errors.New("claim already gone")}, &fakeArtifactStore{})
 
-	reason := jobs.collectArtifacts(context.Background(), "wf", "run-1", periapsis.TriggerCI)
+	reason := jobs.collectArtifacts(context.Background(), "wf", "run-1", pipeline.TriggerCI)
 	if reason == "" {
 		t.Fatal("a failed collection reported nothing, so the loss would be silent")
 	}
-	jobs.reportArtifactFailure("run-1", reason)
-	if got := jobs.ArtifactFailure("run-1"); got != reason {
-		t.Fatalf("ArtifactFailure = %q, want %q", got, reason)
+	var recorded bool
+	jobs.auditor = &stubAuditor{onAppend: func(spec model.AuditActionSpec) {
+		var details struct {
+			Stored bool   `json:"stored"`
+			Reason string `json:"reason"`
+		}
+		if err := json.Unmarshal([]byte(spec.Details), &details); err != nil {
+			t.Fatal(err)
+		}
+		if spec.Action != "ci.argo.artifacts" || spec.ResourceID != "run-1" || details.Stored || details.Reason != reason {
+			t.Fatalf("failure audit = %+v: %+v", spec, details)
+		}
+		recorded = true
+	}}
+	jobs.recordArtifactFailure(context.Background(), "run-1", reason)
+	if !recorded {
+		t.Fatal("artifact failure lost its durable audit evidence")
 	}
 }
 
@@ -73,7 +89,7 @@ func TestCollectArtifactsReportsAStoreRefusal(t *testing.T) {
 	jobs := jobsWithArtifacts(&fakeCollector{body: []byte("archive")},
 		&fakeArtifactStore{err: errors.New("member escapes the collection")})
 
-	if reason := jobs.collectArtifacts(context.Background(), "wf", "run-1", periapsis.TriggerCI); reason == "" {
+	if reason := jobs.collectArtifacts(context.Background(), "wf", "run-1", pipeline.TriggerCI); reason == "" {
 		t.Fatal("a refused archive reported nothing")
 	}
 }
@@ -83,7 +99,7 @@ func TestCollectArtifactsSkipsAnEmptyCollection(t *testing.T) {
 	store := &fakeArtifactStore{}
 	jobs := jobsWithArtifacts(&fakeCollector{body: nil}, store)
 
-	if reason := jobs.collectArtifacts(context.Background(), "wf", "run-1", periapsis.TriggerCI); reason != "" {
+	if reason := jobs.collectArtifacts(context.Background(), "wf", "run-1", pipeline.TriggerCI); reason != "" {
 		t.Fatalf("an empty collection reported %q", reason)
 	}
 	if store.calls != 0 {
@@ -94,14 +110,14 @@ func TestCollectArtifactsSkipsAnEmptyCollection(t *testing.T) {
 func TestCollectArtifactsIsANoOpWhenNotConfigured(t *testing.T) {
 	t.Parallel()
 	jobs := &ArgoJobs{}
-	if reason := jobs.collectArtifacts(context.Background(), "wf", "run-1", periapsis.TriggerCI); reason != "" {
+	if reason := jobs.collectArtifacts(context.Background(), "wf", "run-1", pipeline.TriggerCI); reason != "" {
 		t.Fatalf("an unconfigured deployment reported %q", reason)
 	}
 }
 
 func TestCollectArtifactsSkipsCredentialedTiers(t *testing.T) {
 	t.Parallel()
-	for _, trigger := range []periapsis.Trigger{periapsis.TriggerRelease, periapsis.Trigger("plan"), periapsis.Trigger("apply")} {
+	for _, trigger := range []pipeline.Trigger{pipeline.TriggerRelease, pipeline.Trigger("plan"), pipeline.Trigger("apply")} {
 		collector := &fakeCollector{body: []byte("archive")}
 		store := &fakeArtifactStore{}
 		jobs := jobsWithArtifacts(collector, store)
@@ -124,7 +140,7 @@ func TestCollectArtifactsRunsForTheCITrigger(t *testing.T) {
 	store := &fakeArtifactStore{}
 	jobs := jobsWithArtifacts(collector, store)
 
-	if reason := jobs.collectArtifacts(context.Background(), "wf", "run-1", periapsis.TriggerCI); reason != "" {
+	if reason := jobs.collectArtifacts(context.Background(), "wf", "run-1", pipeline.TriggerCI); reason != "" {
 		t.Fatalf("CI-tier collection failed: %s", reason)
 	}
 	if collector.calls != 1 || store.calls != 1 {

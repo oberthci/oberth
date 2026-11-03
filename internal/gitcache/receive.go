@@ -43,6 +43,9 @@ type receiveReservation struct {
 // Git publishes refs it is finalized into replayable events before callbacks
 // run. A callback failure leaves the stable event in the PVC outbox.
 func (c *Cache) Receive(ctx context.Context, input, actor, protocol string, stdin io.Reader, stdout, stderr io.Writer, handler ReceiveHandler) error {
+	return c.receiveWithTransport(ctx, input, actor, protocol, stdin, stdout, stderr, handler, nil)
+}
+func (c *Cache) receiveWithTransport(ctx context.Context, input, actor, protocol string, stdin io.Reader, stdout, stderr io.Writer, handler ReceiveHandler, transport func() error) error {
 	repo, path, err := c.path(input)
 	if err != nil {
 		return err
@@ -60,7 +63,9 @@ func (c *Cache) Receive(ctx context.Context, input, actor, protocol string, stdi
 		return errors.New("receive handler is required")
 	}
 	receiveLock := c.receiveLock(path)
-	receiveLock.Lock()
+	if err := receiveLock.LockContext(ctx); err != nil {
+		return err
+	}
 	defer receiveLock.Unlock()
 
 	if err := c.checkRepositoryActive(ctx, input); err != nil {
@@ -73,7 +78,9 @@ func (c *Cache) Receive(ctx context.Context, input, actor, protocol string, stdi
 		return fmt.Errorf("replay earlier receive for %s: %w", identity, err)
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return err
+	}
 	repository, err := c.ensureReceiveLocked(ctx, input, repo, path)
 	lock.Unlock()
 	if err != nil {
@@ -94,22 +101,11 @@ func (c *Cache) Receive(ctx context.Context, input, actor, protocol string, stdi
 		}
 		return admission, nil
 	}, func() error {
-		return c.run(ctx, commandSpec{dir: path, args: c.serviceArgs(ReceivePack, path), stdin: stdin, stdout: stdout, stderr: stderr, env: map[string]string{"GIT_PROTOCOL": protocol, "OBERTH_RECEIVE_OUTBOX": c.outboxRoot, "OBERTH_RECEIVE_REPO": identity}})
+		if transport != nil {
+			return transport()
+		}
+		return c.runTransport(ctx, commandSpec{dir: path, args: c.serviceArgs(ReceivePack, path), stdin: stdin, stdout: stdout, stderr: stderr, env: map[string]string{"GIT_PROTOCOL": protocol, "OBERTH_RECEIVE_OUTBOX": c.outboxRoot, "OBERTH_RECEIVE_REPO": identity}})
 	}, handler)
-}
-
-func (c *Cache) receiveTransaction(ctx context.Context, repo, path, actor string, receive func() error, handler ReceiveHandler) error {
-	if strings.TrimSpace(actor) == "" {
-		return errors.New("receive actor is required")
-	}
-	if receive == nil || handler == nil {
-		return errors.New("receive operation and handler are required")
-	}
-	identity := c.reservationIdentity(repo, path)
-	receiveLock := c.receiveLock(path)
-	receiveLock.Lock()
-	defer receiveLock.Unlock()
-	return c.receiveTransactionSerialized(ctx, identity, path, actor, false, nil, receive, handler)
 }
 
 // receiveTransactionSerialized requires receiveLock for the repository's
@@ -129,7 +125,9 @@ func (c *Cache) receiveTransactionSerialized(
 	}
 
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return err
+	}
 	if !c.isBare(ctx, path) {
 		lock.Unlock()
 		return fmt.Errorf("repository %s is not cached", identity)
@@ -161,7 +159,15 @@ func (c *Cache) receiveTransactionSerialized(
 		return err
 	}
 
+	// Git owns atomic ref transactions during the transport. The shared
+	// cache lock protects object lifetime while allowing independent readers;
+	// receiveLock still excludes removal and other receive lifecycles.
+	lock.downgrade()
 	receiveErr := receive()
+	lock.RUnlock()
+	if err := lock.LockContext(ctx); err != nil {
+		return errors.Join(receiveErr, err)
+	}
 	// The pre-receive hook saves push options before Git moves refs. Reload the
 	// same reservation so finalization and crash replay carry identical intent.
 	recorded, readErr := c.readReservation(identity)
@@ -202,10 +208,6 @@ func (c *Cache) receiveTransactionSerialized(
 	// but outside repoLock so handlers can safely inspect accepted Git objects.
 	replayErr := c.replayRepoSerialized(ctx, identity, path, handler)
 	return errors.Join(receiveErr, replayErr)
-}
-
-func (c *Cache) reserveReceiveLocked(ctx context.Context, identity, path, actor string, admission ReleaseAdmission) (receiveReservation, error) {
-	return c.reserveReceiveAtMostLocked(ctx, identity, path, actor, admission, maximumPublicRefs)
 }
 
 func (c *Cache) reserveReceiveAtMostLocked(ctx context.Context, identity, path, actor string, admission ReleaseAdmission, maximum int) (receiveReservation, error) {
@@ -289,6 +291,10 @@ func (c *Cache) ReplayPending(ctx context.Context, handler ReceiveHandler) error
 	}
 	var replayErrs []error
 	for _, item := range pending {
+		if item.State == "quarantined" {
+			c.logger.Printf("WARN: receive outbox repository=%q quarantined; original record retained; operator repair required", item.Repo)
+			continue
+		}
 		// item.Repo is the reservation identity (a valid repository input:
 		// bare for legacy flat reservations, upstream/org/repo for qualified
 		// ones), so path resolution and replay address exactly one cache.
@@ -298,10 +304,14 @@ func (c *Cache) ReplayPending(ctx context.Context, handler ReceiveHandler) error
 			continue
 		}
 		receiveLock := c.receiveLock(path)
-		receiveLock.Lock()
+		if err := receiveLock.LockContext(ctx); err != nil {
+			return err
+		}
 		err := c.replayRepoSerialized(ctx, item.Repo, path, handler)
 		receiveLock.Unlock()
-		if err != nil {
+		if errors.Is(err, ErrCorruptReceiveReservation) {
+			c.logger.Printf("WARN: receive outbox repository=%q quarantined; original record retained; operator repair required", item.Repo)
+		} else if err != nil {
 			replayErrs = append(replayErrs, fmt.Errorf("replay receive for %s: %w", item.Repo, err))
 		}
 	}
@@ -324,6 +334,13 @@ func (c *Cache) PendingReceives() ([]PendingReceive, error) {
 		// no "@" and round-trips unchanged.
 		identity := strings.ReplaceAll(strings.TrimSuffix(entry.Name(), ".json"), "@", "/")
 		reservation, err := c.readReservation(identity)
+		if errors.Is(err, ErrCorruptReceiveReservation) {
+			result = append(result, PendingReceive{Repo: identity, State: "quarantined"})
+			continue
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		} // another replay completed
 		if err != nil {
 			return nil, err
 		}
@@ -350,7 +367,9 @@ func (c *Cache) replayRepoSerialized(ctx context.Context, identity, path string,
 		return err
 	}
 	lock := c.repoLock(path)
-	lock.Lock()
+	if err := lock.LockContext(ctx); err != nil {
+		return err
+	}
 	if !c.isBare(ctx, path) {
 		lock.Unlock()
 		return fmt.Errorf("repository %s is not cached", identity)
@@ -468,24 +487,38 @@ func (c *Cache) readReservation(repo string) (receiveReservation, error) {
 	if err != nil {
 		return receiveReservation{}, err
 	}
-	// reservationPath canonicalizes the repository name and proves containment
-	// under the configured outbox root before this variable-path read.
-	body, err := os.ReadFile(path) //nolint:gosec
+	// Keep corrupt evidence in place. Bound the read before JSON decoding;
+	// a malformed record must not consume startup memory without a limit.
+	info, err := os.Lstat(path)
 	if err != nil {
 		return receiveReservation{}, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > 8<<20 {
+		return receiveReservation{}, fmt.Errorf("%w: repository %s has an invalid outbox file", ErrCorruptReceiveReservation, repo)
+	}
+	file, err := os.Open(path) //nolint:gosec -- reservationPath proves containment.
+	if err != nil {
+		return receiveReservation{}, err
+	}
+	body, readErr := io.ReadAll(io.LimitReader(file, (8<<20)+1))
+	if err = errors.Join(readErr, file.Close()); err != nil {
+		return receiveReservation{}, err
+	}
+	if len(body) > 8<<20 {
+		return receiveReservation{}, fmt.Errorf("%w: repository %s outbox exceeds its bound", ErrCorruptReceiveReservation, repo)
 	}
 	var reservation receiveReservation
 	decoder := json.NewDecoder(strings.NewReader(string(body)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&reservation); err != nil {
-		return receiveReservation{}, fmt.Errorf("decode receive reservation for %s: %w", repo, err)
+		return receiveReservation{}, fmt.Errorf("%w: repository %s contains invalid JSON", ErrCorruptReceiveReservation, repo)
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return receiveReservation{}, fmt.Errorf("receive reservation for %s has trailing data", repo)
+		return receiveReservation{}, fmt.Errorf("%w: repository %s contains trailing data", ErrCorruptReceiveReservation, repo)
 	}
 	if err := validateReservation(reservation, repo); err != nil {
-		return receiveReservation{}, err
+		return receiveReservation{}, fmt.Errorf("%w: repository %s has invalid reservation metadata", ErrCorruptReceiveReservation, repo)
 	}
 	return reservation, nil
 }
@@ -612,4 +645,23 @@ func newReceiveID() (string, error) {
 		return "", fmt.Errorf("generate receive reservation id: %w", err)
 	}
 	return hex.EncodeToString(value[:]), nil
+}
+
+// ErrCorruptReceiveReservation is repository-local. No caller may mutate that
+// cache until its original durable outbox record has been repaired.
+var ErrCorruptReceiveReservation = errors.New("corrupt receive outbox; repository quarantined")
+
+func (c *Cache) checkReceiveOutbox(input string) error {
+	if c.outboxRoot == "" {
+		return nil
+	}
+	repo, path, err := c.path(input)
+	if err != nil {
+		return err
+	}
+	_, err = c.readReservation(c.reservationIdentity(repo, path))
+	if err == nil || errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
 }

@@ -6,7 +6,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestNumericBudgetReportsRunCharge(t *testing.T) {
@@ -25,7 +25,7 @@ func TestNumericBudgetReportsRunCharge(t *testing.T) {
 			demand := argoworkflow.PodDemand{CPUMilli: 4900, MemoryBytes: 3 << 30, Pods: 2}
 			charge := g.runCharge(demand)
 			reservation := g.reserve(1)
-			release := acquireRequestWithinBudget(t, reservation, admissionRequest{Size: periapsis.XL, Pods: &demand})
+			release := acquireRequestWithinBudget(t, reservation, admissionRequest{Size: pipeline.XL, Pods: &demand})
 			defer release()
 			g.mu.Lock()
 			budget := g.numericBudgetLocked()

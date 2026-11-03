@@ -306,22 +306,19 @@ func (upstreams Upstreams) QualifyInScope(input string, scope []string) (string,
 	if err != nil {
 		return "", err
 	}
-	if qualification, err := upstreams.QualifyInput(input); err == nil && slices.Contains(scope, qualification.UpstreamName) {
-		return qualification.UpstreamName + "/" + qualification.Org + "/" + repositoryName, nil
-	}
 	refused := fmt.Errorf("app: repository %q is not in this uplink's scope: %w", input, gitcache.ErrUpstreamRefused)
-	if upstreamName != "" || upstreams.Catalog == nil {
+	if upstreams.Catalog == nil {
 		return "", refused
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), upstreams.timeout())
 	defer cancel()
 	values, err := upstreams.Catalog.ListUpstreams(ctx)
 	if err != nil {
-		return "", refused
+		return "", fmt.Errorf("app: list scoped upstreams: %w", err)
 	}
 	var registered, candidates []string
 	for _, upstream := range values {
-		if !slices.Contains(scope, upstream.Name) || org != "" && !upstreamMatchesOrg(upstream, org) {
+		if !slices.Contains(scope, upstream.Name) || upstreamName != "" && !strings.EqualFold(upstreamName, upstream.Name) || org != "" && !upstreamMatchesOrg(upstream, org) {
 			continue
 		}
 		qualifiedOrg := upstream.Org()
@@ -332,6 +329,8 @@ func (upstreams Upstreams) QualifyInScope(input string, scope []string) (string,
 		candidates = append(candidates, candidate)
 		if _, err := upstreams.Catalog.RepositoryByName(ctx, candidate); err == nil {
 			registered = append(registered, candidate)
+		} else if !errors.Is(err, store.ErrNotFound) && !errors.Is(err, store.ErrInvalid) && !errors.Is(err, store.ErrAmbiguous) {
+			return "", fmt.Errorf("app: scoped repository lookup: %w", err)
 		}
 	}
 	switch {

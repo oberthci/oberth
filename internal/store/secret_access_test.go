@@ -185,7 +185,7 @@ func TestActiveSecretGrants(t *testing.T) {
 
 	// Create upstream + repo so QualifiedRepoName can resolve.
 	upstream, err := s.CreateUpstream(ctx, model.UpstreamSpec{
-		Name: "codeberg", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/skipops",
+		Name: "codeberg", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/acme",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -242,7 +242,7 @@ func TestActiveSecretGrantsBareRowIsInert(t *testing.T) {
 	ctx := context.Background()
 
 	upstream1, err := s.CreateUpstream(ctx, model.UpstreamSpec{
-		Name: "codeberg", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/skipops",
+		Name: "codeberg", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/acme",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -294,7 +294,7 @@ func TestActiveSecretGrantsIsolation(t *testing.T) {
 	ctx := context.Background()
 
 	upstream1, err := s.CreateUpstream(ctx, model.UpstreamSpec{
-		Name: "codeberg", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/skipops",
+		Name: "codeberg", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/acme",
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -31,7 +31,8 @@ func TestSyncGrantPoliciesCreatesNewPolicies(t *testing.T) {
 		"read -format=json auth/kubernetes/role/" + ciName: {out: "No value found at auth/kubernetes/role/" + ciName, err: errors.New("exit status 2")},
 		"write auth/kubernetes/role/" + ciName + " -":      {out: "Success!"},
 		// No orphan per-step policies.
-		"policy list": {out: "default\nroot\n"},
+		"list -format=json auth/kubernetes/role": {out: `[]`},
+		"policy list":                            {out: "default\nroot\n"},
 	}
 	runner := &fakeBaoRunner{t: t, responses: responses}
 	store := openBaoExec{run: runner.run, namespace: "openbao", pod: "openbao-0"}
@@ -132,7 +133,8 @@ func TestSyncGrantPoliciesIdempotent(t *testing.T) {
 		"policy read " + ciName:                            {out: wantPerRepoCIPolicy},
 		"read -format=json auth/kubernetes/role/" + ciName: {out: matchingRoleJSON(ciName)},
 		// No orphan per-step policies.
-		"policy list": {out: "default\nroot\n" + name + "\n" + ciName + "\n"},
+		"list -format=json auth/kubernetes/role": {out: `[]`},
+		"policy list":                            {out: "default\nroot\n" + name + "\n" + ciName + "\n"},
 	}
 	runner := &fakeBaoRunner{t: t, responses: responses}
 	store := openBaoExec{run: runner.run, namespace: "openbao", pod: "openbao-0"}
@@ -176,30 +178,31 @@ func TestSyncGrantPoliciesIdempotent(t *testing.T) {
 func TestSyncGrantPoliciesSharedPoliciesZeroStanzaWithIdentities(t *testing.T) {
 	t.Parallel()
 
-	name := PerRepoName("github", "skipops", "terraform")
-	ciName := PerRepoCIName("github", "skipops", "terraform")
+	name := PerRepoName("github", "acme", "terraform")
+	ciName := PerRepoCIName("github", "acme", "terraform")
 
 	responses := map[string]fakeBaoResponse{
 		// Shared policies: currently carry the org-union (pre-#456 shape).
 		// Sync must overwrite them with the zero-stanza shape.
-		"policy read " + defaultCredentialedPolicy:         {out: OberthCredentialedPolicyWithGrants(defaultKVPrefix, []string{"skipops"}, []string{"release/cosign-secret"})},
+		"policy read " + defaultCredentialedPolicy:         {out: OberthCredentialedPolicyWithGrants(defaultKVPrefix, []string{"acme"}, []string{"release/cosign-secret"})},
 		"policy write " + defaultCredentialedPolicy + " -": {out: "Success!"},
-		"policy read " + defaultCISecretsPolicy:            {out: OberthCISecretsPolicy(defaultKVPrefix, []string{"skipops"})},
+		"policy read " + defaultCISecretsPolicy:            {out: OberthCISecretsPolicy(defaultKVPrefix, []string{"acme"})},
 		"policy write " + defaultCISecretsPolicy + " -":    {out: "Success!"},
 		// Per-repo identities: matching, so no write needed.
-		"policy read " + name:                              {out: PerRepoPolicy(defaultKVPrefix, "skipops", "terraform", []string{"release/cosign-secret"})},
+		"policy read " + name:                              {out: PerRepoPolicy(defaultKVPrefix, "acme", "terraform", []string{"release/cosign-secret"})},
 		"read -format=json auth/kubernetes/role/" + name:   {out: `{"request_id":"1","data":{"bound_service_account_names":["` + name + `"],"bound_service_account_namespaces":["oberth-argo"],"token_policies":["` + name + `"],"token_no_default_policy":true,"token_ttl":1200,"token_max_ttl":1800}}`},
-		"policy read " + ciName:                            {out: PerRepoCIPolicy(defaultKVPrefix, "skipops", "terraform")},
+		"policy read " + ciName:                            {out: PerRepoCIPolicy(defaultKVPrefix, "acme", "terraform")},
 		"read -format=json auth/kubernetes/role/" + ciName: {out: `{"request_id":"1","data":{"bound_service_account_names":["` + ciName + `"],"bound_service_account_namespaces":["oberth-argo"],"token_policies":["` + ciName + `"],"token_no_default_policy":true,"token_ttl":1200,"token_max_ttl":1800}}`},
 		// No orphan per-step policies.
-		"policy list": {out: "default\nroot\n" + name + "\n" + ciName + "\n"},
+		"list -format=json auth/kubernetes/role": {out: `[]`},
+		"policy list":                            {out: "default\nroot\n" + name + "\n" + ciName + "\n"},
 	}
 	runner := &fakeBaoRunner{t: t, responses: responses}
 	store := openBaoExec{run: runner.run, namespace: "openbao", pod: "openbao-0"}
 
 	identities := []PerRepoIdentity{{
 		Upstream: "github",
-		Org:      "skipops",
+		Org:      "acme",
 		Repo:     "terraform",
 		Grants:   []string{"oberth/data/release/cosign-secret"},
 	}}
@@ -250,7 +253,8 @@ func TestSyncGrantPoliciesNoIdentities(t *testing.T) {
 		"policy read " + defaultCredentialedPolicy: {out: wantCredentialedPolicy},
 		"policy read " + defaultCISecretsPolicy:    {out: wantCISecretsPolicy},
 		// No orphan per-step policies.
-		"policy list": {out: "default\nroot\n"},
+		"list -format=json auth/kubernetes/role": {out: `[]`},
+		"policy list":                            {out: "default\nroot\n"},
 	}
 	runner := &fakeBaoRunner{t: t, responses: responses}
 	store := openBaoExec{run: runner.run, namespace: "openbao", pod: "openbao-0"}
@@ -321,7 +325,8 @@ func TestSyncGrantPoliciesRemovesOrphanPerStepIdentities(t *testing.T) {
 		"policy read " + ciName:                            {out: wantPerRepoCIPolicy},
 		"read -format=json auth/kubernetes/role/" + ciName: {out: matchingRoleJSON(ciName)},
 		// Policy list returns the orphan per-step policy.
-		"policy list": {out: "default\nroot\n" + defaultCredentialedPolicy + "\n" + defaultCISecretsPolicy + "\n" + name + "\n" + ciName + "\n" + orphanStepName + "\n"},
+		"list -format=json auth/kubernetes/role": {out: `[]`},
+		"policy list":                            {out: "default\nroot\n" + defaultCredentialedPolicy + "\n" + defaultCISecretsPolicy + "\n" + name + "\n" + ciName + "\n" + orphanStepName + "\n"},
 		// Orphan removal: delete the policy and role.
 		"policy delete " + orphanStepName:               {out: "Success!"},
 		"delete auth/kubernetes/role/" + orphanStepName: {out: "Success!"},
@@ -459,7 +464,8 @@ func TestSyncPrunesNamedStepPathFromPerRepoPolicy(t *testing.T) {
 		"policy write " + stepName + " -":                    {out: "Success!"},
 		"read -format=json auth/kubernetes/role/" + stepName: {out: "No value found at auth/kubernetes/role/" + stepName, err: errors.New("exit status 2")},
 		"write auth/kubernetes/role/" + stepName + " -":      {out: "Success!"},
-		"policy list": {out: "default\nroot\n" + name + "\n" + ciName + "\n" + stepName + "\n"},
+		"list -format=json auth/kubernetes/role":             {out: `[]`},
+		"policy list":                                        {out: "default\nroot\n" + name + "\n" + ciName + "\n" + stepName + "\n"},
 	}
 	runner := &fakeBaoRunner{t: t, responses: responses}
 	store := openBaoExec{run: runner.run, namespace: "openbao", pod: "openbao-0"}

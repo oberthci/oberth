@@ -11,7 +11,7 @@ import (
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func slice2CredentialedWorkflow(t *testing.T, kind string) (Config, *wfv1.Workflow, AdoptionRequest) {
@@ -21,7 +21,7 @@ func slice2CredentialedWorkflow(t *testing.T, kind string) (Config, *wfv1.Workfl
 	if kind == "promotion" {
 		config = testConfigWithPerRepo()
 		path := "oberth/upstream/oberthci/oberth/test-secret"
-		request = testRequest(periapsis.TriggerCI, perRepoCredentialedDocument(path))
+		request = testRequest(pipeline.TriggerCI, perRepoCredentialedDocument(path))
 		request.UpstreamName = "codeberg"
 		request.UpstreamOrg = "oberthci"
 		request.Repo = "oberth"

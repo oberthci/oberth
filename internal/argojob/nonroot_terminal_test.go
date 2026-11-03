@@ -14,7 +14,7 @@ import (
 	ktesting "k8s.io/client-go/testing"
 	"k8s.io/utils/ptr"
 
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func terminalControllerHistory(t *testing.T) []corev1.Pod {
@@ -124,7 +124,7 @@ func TestNonrootTerminalHistoryRejectsUncertainIncarnations(t *testing.T) {
 			client.PrependReactor("list", "pods", func(ktesting.Action) (bool, runtime.Object, error) {
 				return true, &corev1.PodList{Items: []corev1.Pod{*current, history}}, nil
 			})
-			_, err := verifyNonrootController(t.Context(), client, testNamespace, testRequest(periapsis.TriggerCI, nonrootTestDocument))
+			_, err := verifyNonrootController(t.Context(), client, testNamespace, testRequest(pipeline.TriggerCI, nonrootTestDocument))
 			if err == nil {
 				t.Fatal("full profile accepted uncertain historical record")
 			}
@@ -190,7 +190,7 @@ func TestNonrootTerminalHistoryNeverBypassesLiveProfile(t *testing.T) {
 	current, config := nonrootVerifierObjects()
 	current.Spec.Containers[0].Image = "public-wrong-image"
 	history := terminalControllerHistory(t)
-	_, err := verifyNonrootController(t.Context(), fake.NewClientset(current, config, &history[0], &history[1]), testNamespace, testRequest(periapsis.TriggerCI, nonrootTestDocument))
+	_, err := verifyNonrootController(t.Context(), fake.NewClientset(current, config, &history[0], &history[1]), testNamespace, testRequest(pipeline.TriggerCI, nonrootTestDocument))
 	if err == nil || !strings.Contains(err.Error(), "controller image or running image identity") {
 		t.Fatal("terminal selection bypassed or did not reach existing live identity checks")
 	}
@@ -209,7 +209,7 @@ func TestNonrootControllerWithObservedTerminalHistory(t *testing.T) {
 	for _, pod := range terminalControllerHistory(t) {
 		objects = append(objects, pod.DeepCopy())
 	}
-	proof, err := verifyNonrootController(t.Context(), fake.NewClientset(objects...), testNamespace, testRequest(periapsis.TriggerCI, nonrootTestDocument))
+	proof, err := verifyNonrootController(t.Context(), fake.NewClientset(objects...), testNamespace, testRequest(pipeline.TriggerCI, nonrootTestDocument))
 	if err != nil {
 		t.Fatal(err)
 	}

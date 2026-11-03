@@ -11,8 +11,9 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/vmrunner"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type capacityFixture struct {
@@ -31,7 +32,7 @@ func (p *capacityFixture) Supports(contract vmrunner.Contract) error {
 	return p.protectedFixture.Supports(contract)
 }
 
-func (p *capacityFixture) Execute(ctx context.Context, job JobRequest, requirement vmrunner.Requirement, output io.Writer) error {
+func (p *capacityFixture) Execute(ctx context.Context, job WorkflowRequest, requirement vmrunner.Requirement, output io.Writer) error {
 	p.calls++
 	p.requirements = append(p.requirements, requirement)
 	if p.calls <= max(1, p.refusals) {
@@ -46,7 +47,7 @@ func (p *capacityFixture) Execute(ctx context.Context, job JobRequest, requireme
 func TestTrustedCapacityParkReleasesResourcesAndPreservesOrder(t *testing.T) {
 	gate := newWeightedAdmissionForJobs(1)
 	first := gate.reserve(1)
-	release := acquireRequestWithinBudget(t, first, groupRequest("vm", 1, periapsis.M, "shared"))
+	release := acquireRequestWithinBudget(t, first, groupRequest("vm", 1, pipeline.M, "shared"))
 	defer release()
 	if err := first.parkVM(); err != nil {
 		t.Fatal(err)
@@ -59,13 +60,13 @@ func TestTrustedCapacityParkReleasesResourcesAndPreservesOrder(t *testing.T) {
 		t.Fatal("parked dispatch exemption unbounded or missing")
 	}
 	ordinary := gate.reserve(2)
-	releaseOther := acquireRequestWithinBudget(t, ordinary, groupRequest("ordinary", 1, periapsis.M, "shared"))
+	releaseOther := acquireRequestWithinBudget(t, ordinary, groupRequest("ordinary", 1, pipeline.M, "shared"))
 	olderReady := make(chan func(), 1)
-	go acquireRequestForTest(first, groupRequest("vm", 1, periapsis.M, "shared"), olderReady)
+	go acquireRequestForTest(first, groupRequest("vm", 1, pipeline.M, "shared"), olderReady)
 	awaitWaiting(t, first)
 	later := gate.reserve(3)
 	laterReady := make(chan func(), 1)
-	go acquireRequestForTest(later, groupRequest("later", 1, periapsis.M, "shared"), laterReady)
+	go acquireRequestForTest(later, groupRequest("later", 1, pipeline.M, "shared"), laterReady)
 	awaitWaiting(t, later)
 	releaseOther()
 	awaitAcquired(t, olderReady)()
@@ -82,7 +83,7 @@ func TestTrustedCapacityRetryBoundaries(t *testing.T) {
 			f.scheduler.git = git
 			executor := &capacityFixture{protectedFixture: &protectedFixture{store: f.store}}
 			f.scheduler.trusted = executor
-			_, err := f.store.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/capacity", SHA: strings.Repeat("c", 40), TestedSHA: strings.Repeat("c", 40), Actor: "agent", Trigger: "branch"})
+			_, err := storetest.EnqueueRun(f.store, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/capacity", SHA: strings.Repeat("c", 40), TestedSHA: strings.Repeat("c", 40), Actor: "agent", Trigger: "branch"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -97,7 +98,7 @@ func TestTrustedCapacityRetryBoundaries(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			job := JobRequest{Run: run, Repository: f.repo, Size: periapsis.M, ConcurrencyGroup: "group", UpstreamName: "codeberg", UpstreamOrg: "acme"}
+			job := WorkflowRequest{Run: run, Repository: f.repo, Size: pipeline.M, ConcurrencyGroup: "group", UpstreamName: "codeberg", UpstreamOrg: "acme"}
 			reservation := f.scheduler.admission.reserve(1)
 			defer acquireRequestWithinBudget(t, reservation, groupRequest(run.ID, f.repo.ID, job.Size, job.ConcurrencyGroup))()
 			if mode == "existing journal" {
@@ -132,13 +133,13 @@ func TestTrustedCapacityRetryBoundaries(t *testing.T) {
 				case "cancel":
 					return context.Canceled
 				case "supersede":
-					_, err := f.store.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: run.Ref, SHA: strings.Repeat("d", 40), Actor: "agent", Trigger: "branch"})
+					_, err := storetest.EnqueueRun(f.store, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: run.Ref, SHA: strings.Repeat("d", 40), Actor: "agent", Trigger: "branch"})
 					return err
 				case "policy changed":
 					git.candidate = []byte(strings.ReplaceAll(string(raw), "build/program", "build/changed"))
 					git.baseline = git.candidate
 				case "restart":
-					restarted, err := store.Open(ctx, filepath.Join(f.root, "oberth.sqlite"), store.Options{})
+					restarted, err := storetest.Open(ctx, filepath.Join(f.root, "oberth.sqlite"), store.Options{})
 					if err != nil {
 						return err
 					}
@@ -222,7 +223,7 @@ func TestTrustedCapacityRotationAuditsOnceAcrossRetries(t *testing.T) {
 	f.scheduler.git = git
 	executor := &capacityFixture{protectedFixture: &protectedFixture{store: f.store}, refusals: 3}
 	f.scheduler.trusted = executor
-	_, err := f.store.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/rotation", SHA: strings.Repeat("e", 40), TestedSHA: strings.Repeat("e", 40), Actor: "agent", Trigger: "branch"})
+	_, err := storetest.EnqueueRun(f.store, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/rotation", SHA: strings.Repeat("e", 40), TestedSHA: strings.Repeat("e", 40), Actor: "agent", Trigger: "branch"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +251,7 @@ func TestTrustedCapacityRotationAuditsOnceAcrossRetries(t *testing.T) {
 		assertOneAudit()
 		return nil
 	}
-	job := JobRequest{Run: run, Repository: f.repo, Size: periapsis.M, ConcurrencyGroup: "group"}
+	job := WorkflowRequest{Run: run, Repository: f.repo, Size: pipeline.M, ConcurrencyGroup: "group"}
 	reservation := f.scheduler.admission.reserve(1)
 	defer acquireRequestWithinBudget(t, reservation, groupRequest(run.ID, f.repo.ID, job.Size, job.ConcurrencyGroup))()
 	stopped, err := f.scheduler.executeTrustedWithCapacity(ctx, job, requirement, io.Discard, reservation, func(context.Context) error { return nil })
@@ -286,7 +287,7 @@ func TestTrustedCapacityAuditsRotationThatAppearsWhileParked(t *testing.T) {
 	f.scheduler.git = git
 	executor := &capacityFixture{protectedFixture: &protectedFixture{store: f.store}, refusals: 2}
 	f.scheduler.trusted = executor
-	_, err := f.store.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/parked", SHA: strings.Repeat("e", 40), TestedSHA: strings.Repeat("e", 40), Actor: "agent", Trigger: "branch"})
+	_, err := storetest.EnqueueRun(f.store, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/parked", SHA: strings.Repeat("e", 40), TestedSHA: strings.Repeat("e", 40), Actor: "agent", Trigger: "branch"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +318,7 @@ func TestTrustedCapacityAuditsRotationThatAppearsWhileParked(t *testing.T) {
 		git.baseline = []byte(older)
 		return nil
 	}
-	job := JobRequest{Run: run, Repository: f.repo, Size: periapsis.M, ConcurrencyGroup: "group"}
+	job := WorkflowRequest{Run: run, Repository: f.repo, Size: pipeline.M, ConcurrencyGroup: "group"}
 	reservation := f.scheduler.admission.reserve(1)
 	defer acquireRequestWithinBudget(t, reservation, groupRequest(run.ID, f.repo.ID, job.Size, job.ConcurrencyGroup))()
 	stopped, err := f.scheduler.executeTrustedWithCapacity(ctx, job, requirement, io.Discard, reservation, func(context.Context) error { return nil })

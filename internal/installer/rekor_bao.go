@@ -47,7 +47,9 @@ func configureRekorBao(ctx context.Context, cfg Config, deps Deps, store openBao
 		return "", err
 	}
 	if key == nil {
-		if _, exists := findHelmRelease(ctx, deps, "rekor", ns); exists {
+		if _, exists, err := findHelmRelease(ctx, deps, "rekor", ns); err != nil {
+			return "", err
+		} else if exists {
 			return "", errors.New("existing Rekor release has no Transit key; refusing to replace its identity")
 		}
 		if err := store.writeJSON(ctx, token, keyPath, map[string]any{"type": "ecdsa-p256", "exportable": false, "allow_plaintext_backup": false}); err != nil {
@@ -93,7 +95,9 @@ func configureRekorBao(ctx context.Context, cfg Config, deps Deps, store openBao
 		if metadata != nil {
 			return "", fmt.Errorf("rekor database credential %s was deleted; restore it before proceeding", name)
 		}
-		if _, exists := findHelmRelease(ctx, deps, "rekor", ns); exists {
+		if _, exists, err := findHelmRelease(ctx, deps, "rekor", ns); err != nil {
+			return "", err
+		} else if exists {
 			return "", errors.New("existing Rekor release has missing database credentials; refusing to generate replacements")
 		}
 		password := make([]byte, 32)
