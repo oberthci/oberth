@@ -1,6 +1,10 @@
 package store
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/oberthci/oberth/internal/testdb"
+)
 
 // Historical fixtures reconstruct an older schema from a fresh database.
 // Remove all later schemas before reconstructing historical fixtures.
@@ -15,7 +19,7 @@ DELETE FROM schema_migrations WHERE version=38;
 	"DROP TRIGGER promotions_guard_update; CREATE TRIGGER promotions_guard_update" + strings.Split(strings.Split(migrations[18].sql, "CREATE TRIGGER promotions_guard_update")[1], "CREATE TRIGGER promotion_grants_no_delete")[0]
 
 // Reconstruct the v38 surface before replaying any earlier migration.
-const restartRecoveryDowngradeSQL = `
+const restartRecoveryDowngradeSQL = testdb.PostV44Downgrade + `
 DROP TRIGGER IF EXISTS publications_tag_tuple_insert;
 DROP INDEX IF EXISTS publications_tag_tuple_idx;
 DROP TABLE IF EXISTS restart_step_timings;

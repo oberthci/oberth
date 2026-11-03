@@ -65,6 +65,10 @@ VALUES('operator', 'high', 999999999999999999, 'admin');`)
 			if err != nil {
 				t.Fatal(err)
 			}
+			var beforeCount, beforeVersion int
+			if err := s.db.QueryRow(`SELECT count(*), max(version) FROM schema_migrations`).Scan(&beforeCount, &beforeVersion); err != nil || beforeCount != 39 || beforeVersion != 39 {
+				t.Fatalf("historical ledger = %d rows through %d, want 39: %v", beforeCount, beforeVersion, err)
+			}
 			if err := s.Close(); err != nil {
 				t.Fatal(err)
 			}
@@ -77,8 +81,8 @@ VALUES('operator', 'high', 999999999999999999, 'admin');`)
 			if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil {
 				t.Fatal(err)
 			}
-			if version != 44 {
-				t.Fatalf("version=%d, want 44", version)
+			if version != 48 {
+				t.Fatalf("version=%d, want 48", version)
 			}
 			if err := s.db.QueryRow(`SELECT count(*) FROM priority_grants WHERE identity='operator'`).Scan(&grants); err != nil || grants != 1 {
 				t.Fatalf("priority grant not preserved: %d %v", grants, err)

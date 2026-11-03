@@ -100,8 +100,7 @@ DELETE FROM schema_migrations WHERE version>=42;
 
 // PostV38Downgrade removes every later schema object before historical fixtures
 // drop referenced columns. Restore the outbox CHECK as well as its guards.
-const PostV38Downgrade = PublicationV38Schema + `
-DROP TABLE IF EXISTS resource_ceilings;
+const PostV38Downgrade = PostV44Downgrade + PublicationV38Schema + `
 DROP TRIGGER IF EXISTS issues_metadata_revision;
 ALTER TABLE issues DROP COLUMN revision;
 ALTER TABLE token_credentials DROP COLUMN expires_at;
@@ -109,6 +108,13 @@ DROP TABLE IF EXISTS run_priority_requests;
 DROP TABLE IF EXISTS priority_grants;
 DROP TABLE IF EXISTS restart_workflow_timings;
 DROP TABLE IF EXISTS restart_step_timings;
+DELETE FROM schema_migrations WHERE version>=39;
+`
+
+// PostV44Downgrade removes later capability/retirement/ceiling objects before
+// reconstructed restart and priority fixtures replay the real migrations.
+const PostV44Downgrade = `
+DROP TABLE IF EXISTS resource_ceilings;
 DROP TRIGGER IF EXISTS vm_suite_executions_retired_insert;
 DROP TRIGGER IF EXISTS vm_suite_executions_retired_update;
 DROP TRIGGER IF EXISTS vm_suite_executions_retired_delete;
@@ -116,5 +122,5 @@ DROP TRIGGER IF EXISTS vm_suite_resources_retired_insert;
 DROP TRIGGER IF EXISTS vm_suite_resources_retired_update;
 DROP TRIGGER IF EXISTS vm_suite_resources_retired_delete;
 DROP TABLE IF EXISTS workflow_capability_grants;
-DELETE FROM schema_migrations WHERE version>=39;
+DELETE FROM schema_migrations WHERE version>=45;
 `
