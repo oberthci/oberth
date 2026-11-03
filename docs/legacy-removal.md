@@ -1,11 +1,19 @@
 # Finishing the execution-engine retirement
 
-The preparatory commit exposes `oberth admin retirement-check` through the
-live daemon's private, peer-authorized admin socket. It retains the old recovery
-engine. The final removal commit enables the same check at startup and before
-each upgrade's preparation and first live write. No override flag bypasses it.
-After migration and drain, the check succeeds automatically; no further product
-patch or deployment-specific repository allowlist is needed.
+The preparatory **release** (the v0.17.84 input on `fix/ob-84-laptop`)
+exposes `oberth admin retirement-check` through the live daemon's private,
+peer-authorized admin socket. It retains the old execution and recovery engine.
+The final removal (`03728183` from the original series) is excluded and must
+ship in a **later release**, after the preparatory release has been installed
+and the live migration/drain evidence below has been collected. Publishing both
+in one release leaves older installations without a proof-capable intermediate
+release and is not supported.
+
+The inventory is an on-demand administrator operation. It never gates server
+startup: upstream outages, archived repositories and newly pushed legacy branches
+can refuse a requested verification, but cannot prevent the listeners starting.
+A later final-removal implementation must retain that availability boundary.
+Upgrade preflight may require a successful live check; there is no override flag.
 
 The check covers every registered repository, fresh upstream branch heads and
 unpublished branches still held by Oberth. It reads all regular YAML sources
@@ -28,7 +36,7 @@ cancellations, unclean VM/suite journals or capacity slots. It never deletes or
 marks these records cleaned. The existing Kubernetes inventory guard separately
 requires all externally owned legacy Workflows and VM/VMIs to be absent.
 
-1. Deploy the preparatory commit series while retaining the recovery engine.
+1. Publish and install the preparatory release while retaining the recovery engine.
    The final removal must not be the first installed binary to expose the check;
    the upgrade CLI refuses an old daemon with no proof protocol.
 2. Migrate the dependent repositories and their pinned fragments to ordinary
@@ -43,13 +51,15 @@ requires all externally owned legacy Workflows and VM/VMIs to be absent.
    1,000 repositories, 1,024 refs per repository, 256 YAML files per tree and
    16 MiB of distinct source bodies per repository. Narrow oversized histories
    through the ordinary repository lifecycle rather than accepting a prefix.
-5. Take the normal verified backup, then upgrade to the final removal commit.
-   The CLI rechecks; startup checks again before creating the execution engine
-   or listeners. The observations are not a durable submission pause, so keep
-   sources stopped throughout cutover. Restart submissions after readiness.
+5. Take the normal verified backup. Publish and install a later final-removal
+   release only after its separate review and live acceptance. The CLI must
+   recheck before replacing the proof-capable preparatory daemon. Keep sources
+   stopped throughout the cutover; the observations are not a durable submission
+   pause. Resume submissions after readiness.
 
 Direct Helm/image replacement bypasses the CLI preflight and is not the staged
-upgrade procedure. A failed startup must not be worked around by editing the
-database or deleting ownership records. Retain the preparatory recovery binary
-and verified backup for recovery. Legacy journal tables are historical evidence,
-not a request to silently mark old external resources deleted.
+upgrade procedure. Keep the preparatory release and verified backup for rollback.
+Never edit the database or delete ownership records to bypass a refused check.
+Legacy journal tables are historical evidence, not permission to mark external
+resources deleted. Ordinary startup recovery remains responsible for its own
+pending work and readiness; retirement inventory is never a process-start gate.

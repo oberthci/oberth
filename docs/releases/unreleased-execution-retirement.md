@@ -48,3 +48,18 @@ traffic. Remove any reference to the chart's `cloudflared` PriorityClass from th
 externally owned PriorityClass first. Confirm new connector Pods can be created
 with the resulting class and that the website pipeline has an external owner
 before upgrading the chart that removes these objects.
+
+## Required release split
+
+The v0.17.84 laptop input is preparatory: it adds the live, read-only
+`oberth admin retirement-check`, keeps legacy execution/recovery, and requires
+the connector/site handoff on the relevant upgrades. Retirement inventory never
+runs at server startup. Upstream outages, archived repositories and new legacy
+branches refuse only a requested retirement verification.
+
+The original final-removal commit `03728183` is deliberately excluded. A later
+published release may remove the old engine after a published preparatory release
+has been installed, dependent repositories have migrated, and the live drain,
+cleanup and backup receipts are accepted. See [the release sequence](../legacy-removal.md).
+This input adds no database migration: versions 1–48 remain unchanged; 49 and 50
+belong to other inputs, and any future migration here must begin at 51.

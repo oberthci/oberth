@@ -9,9 +9,9 @@ The owner decision of 2026-11-03 keeps issues in Oberth and assigns the new
 AI-workspace model, work statuses and stale handling to a separate worker.
 External tracker migration and global-write retirement are no longer objectives.
 Commits `65ba8037` and `48e01e56` are deliberately excluded; this branch adds no
-issue-import policy, write-retirement switch or database migration. Migration 49
-is reserved for the separate v0.17.84 input; any new migration here would start
-at 50. Existing migrations 1–48 remain contiguous and unchanged.
+issue-import policy, write-retirement switch or database migration. Migrations 49 and 50
+are reserved for separate v0.17.84 inputs; any new migration here would start
+at 51. Existing migrations 1–48 remain contiguous and unchanged.
 
 This audit covers the same 33 identifiable issues (#1216, #1287, #1292–#1320,
 #1398 and #1464). It is an implementation disposition, not a live tracker
@@ -23,17 +23,18 @@ closure report. No issue states or other repositories were changed.
 | --- | --- | --- | --- |
 | #1216 / #1287 | Per-step sizing acceptance requires five distinct comparable terminal runs with complete CPU/memory/storage/duration and known limits together. Censored, mixed or incomplete history cannot justify reductions. CLI JSON/YAML and MCP expose the verdict. | `cc303f3e` (from `b7b262f4`) | Collect qualifying real runs and inspect the report. No workflow resource values were resized. |
 | #1294 preparation | Private live check inventories all registered branch sources, exact pinned fragments, legacy declarations, cleanup journals and drain obligations. Refusal names the dependent source/record. Legacy recovery remains available at the preparatory head. | `77121496`, `daa0f614` (from `704e3fe2`, `95e82c57`) | Deploy preparation, migrate dependent pipelines, stop submissions, drain and confirm external cleanup, then back up. |
-| #1294 removal | Remove VM/KVM/trusted/guest execution, technology-specific tools/grants/RBAC and harness publishing. Startup/upgrade check sources and obligations; accepted historical original/tested commits are checked. Ordinary restart recovery and generic capability token isolation remain. Historical schemas and evidence stay intact. | `8d659ff7` (from `03728183`) | Install final head only after the proof succeeds. No additional product edit is needed. |
+| #1294 final removal | Held for a later release. Legacy VM/KVM/guest/trusted execution, grants, RBAC and harness publishing remain available on this branch. Retirement inventory is on-demand only. | Original `03728183` explicitly excluded (review F2) | Install a published preparatory release first; migrate dependent repositories, drain and verify cleanup, then separately review and release the final removal. |
 | #1292 | Document independent connector/site ownership and require a fresh cluster/release-bound handoff before upgrading a release that still owned those objects. Check connector readiness/UID/dependencies, explicit site evidence and independent credentials; recheck before first live write. | `bbc24198` (from `4806ce67`) | Transfer ownership/routing/publishing, verify traffic and supply the handoff receipt before replacing the owning release. |
 | #1317 | Retain the full recorded issue map with the current owner decision and explicit live prerequisites. | This audit commit (adapted from `3a12278c`) | Closure depends on coordinator acceptance and the separately owned workspace input. |
 
-The deployable preparation head on this branch is
-`daa0f614` (the exact full hash is recorded in `OB-84-LAPTOP-READY.md`).
-It retains legacy execution/recovery. The next commit activates final removal.
-The live check is an observation, not a durable submission pause. Direct
-Helm/image replacement bypasses CLI preflight; retain the preparatory binary and
-verified backup for recovery. Connector/site removal is already in v0.17.83, so
-its handoff is required before even a preparatory upgrade from an owning release.
+The complete `fix/ob-84-laptop` branch is now the preparatory release input.
+It retains legacy execution/recovery; no commit on this branch activates final
+removal. Startup inventory has been removed, and the three-minute write deadline
+applies only to the on-demand retirement-check admin route. The check is an
+observation, not a durable submission pause. Retain the published preparatory
+release and verified backup for rollback after a later removal release.
+Connector/site removal already exists in v0.17.83, so its ownership handoff is
+required even before a preparatory upgrade from an owning release.
 
 ## Entire recorded queue
 Candidate commit/source evidence below was previously inspected against the
@@ -44,8 +45,8 @@ integrated candidate. The unchanged integrated fixes were retained, not replayed
 | #1216 | `e0db3394`; numeric declarations, `internal/resourcesampler`, `internal/measured`, resource reports and explicit admission ceilings | Coordinator-owned numeric admission retained; `cc303f3e` completes the requested per-step sizing acceptance in CLI JSON/YAML and MCP. Real-run qualification remains owner-operated. |
 | #1287 | `run_resources` refreshed for 100 passed Oberth runs, 67 groups, 663 attempts | `cc303f3e` refuses a sizing decision until five distinct terminal runs jointly provide complete comparable CPU/memory/storage/duration/limits. Censored or mixed cohorts cannot justify reductions. No workflow requests/limits were resized. The earlier live report is not new acceptance evidence. |
 | #1292 | `691d493e`, `15ebb279`, `2fd2344f`; website/tunnel removal, generic-name and private-address gates, deployment notes | `bbc24198` adds external ownership instructions and fail-closed upgrade proof bound to cluster UID, Helm revision/manifest, connector identity/dependencies and explicit site evidence. The coordinator must perform and attest the actual ownership/traffic transfer. |
-| #1293 | `e14e4353`; deleted pilot/bridge packages and `pilot_retirement_schema.go` (schema 45), retained read-only journal | Integrated pilot removal retained. Final #1294 now removes the remaining shared legacy VM package; historical database evidence remains. |
-| #1294 | `714ee610`, `6986c3ec`, `51df7085`, `330e524c`; capability grants/admission/identity, schema 46 and deferred schema 47 | `77121496` and `daa0f614` provide the deployable preparation check; `8d659ff7` removes legacy execution behind startup/upgrade guards. The final server checks accepted historical commits as well as fresh registered branches and pinned fragments. Live dependent migration/drain remains required. |
+| #1293 | `e14e4353`; deleted pilot/bridge packages and `pilot_retirement_schema.go` (schema 45), retained read-only journal | Integrated pilot removal retained. Shared legacy VM execution and recovery remain until the separately released #1294 final removal. |
+| #1294 | `714ee610`, `6986c3ec`, `51df7085`, `330e524c`; capability grants/admission/identity, schema 46 and deferred schema 47 | `77121496` and `daa0f614` provide preparation and live verification. Startup never runs inventory. `03728183` is excluded; final removal requires a later published release and live migration/drain evidence. |
 | #1295 | `e21f55cb` added installer env support; `a2c9b106` restored an implicit hosted endpoint | Remaining regression fixed in `4c989840`: explicit endpoint required before credentials or transport, fallback removed, contract/generic-name guards restored. Existing HTTPS guard verified. |
 | #1296 | `b284ad8f`; Git default-branch refusal, `internal/service/push.go` deletion intent/outcome audit | Already present; no replay. |
 | #1297 | `3ceded7c`; additive PKI role names, `serverpki_lifecycle.go`, preflight and explicit name removal | Already present; no replay. |
@@ -65,12 +66,12 @@ integrated candidate. The unchanged integrated fixes were retained, not replayed
 | #1311 | `935640b6`, `689b2985`, `4dc24c78`, `50fbdeb8`, `607e2bbe`, `3a09683f`, `28fd043d`; original failed step, terminal-only sizing, cron, log tails, YAML and shared status | Already present; no replay. |
 | #1312 | `e3ef5fcb` through `1f9a9fc7` and related fixes; atomic issue hash/revision checks, dependency errors, 413 and compatible HTTP/MCP aliases | Base already includes `6568b452`, which checks the body hash inside the update transaction. This branch adds deterministic race qualification; HTTP/MCP aliases and metadata revisions remain unchanged. |
 | #1313 | `f2361e47`, `ffd3075a`, `a7f01b69`, `90136603`; production publication heal, production database fixture path, live Git preparation, retired installer wrapper in tests | Already present. `serve.go` calls `openReconciledStartupDatabase`; audit verification uses the startup wrapper. |
-| #1314 | `c00e44e2`, `27337a70`, `c15250ac`, `3fa7135f`, `d4b2c33f`, `f0037fa9`, `5798fb3d`; dead-code removal and exact exception gate | Integrated gate retained. Final #1294 removes its 68 obsolete VM exceptions and two newly unused helpers. Pinned deadcode v0.49.0 and exact-exception gate pass with 23 existing exceptions; no new exception added. |
+| #1314 | `c00e44e2`, `27337a70`, `c15250ac`, `3fa7135f`, `d4b2c33f`, `f0037fa9`, `5798fb3d`; dead-code removal and exact exception gate | Integrated exact-exception gate retained. Existing legacy VM exceptions remain with the retained engine; remove them only with the later final removal. No new exception added. |
 | #1315 | `880cce9a`, `ee0115b0`, `0f391042`, `a5d45507`, `fbcd1cfb`; Makefile, help/flags, archive docs, tree scan and installer output | Already present; no replay. |
-| #1316 | Existing review-only artifact `/tmp/fix/out/REVIEW-1316.md`; candidate `35971efa`, `00522073`, `8649755c`, merges `753a651a` / `f7f89308` | Review delivered. Its eight findings have candidate fixes: checked secret-store reads, ingress/egress, CA checksums, CI identity RBAC, schema types, test target and release-prune contract. |
+| #1316 | Additional 2026-11-03 review of chart/RBAC, Docker build context, scripts and AGENT-CONTRACT | Fixes are included, adapted to retain the legacy engine and its four KubeVirt tools. Full commit/finding map and validation are in the delivery READY file. |
 | #1317 | Owner triage umbrella; workspace remains absent, discarded workspace schemas refused (`0cb2a114`) | Owner decision of 2026-11-03 retains Oberth issues and assigns the new AI-workspace model to a separate worker. This branch supplies the retained sizing/removal/ownership work; no workspace feature is implemented here. |
 | #1318 | Candidate has CI issue projection/locks and #1312 concurrency fixes, but no migration aid or feature audit | External tracker migration and global-write retirement are superseded by the owner decision. Commits `65ba8037` and `48e01e56` are excluded. Existing issue history and writes stay in Oberth; the new workspace model belongs to another worker. |
-| #1319 | `71897545`, `f87a762b`; trusted workflow mismatch becomes a run-local failure, exact UID cleanup retained until absence | Candidate run-local trusted-workflow mismatch fix was retained through the preparatory head. Its final execution path is removed with #1294 after the migration guard; generic Workflow identity/ownership checks remain. |
+| #1319 | `71897545`, `f87a762b`; trusted workflow mismatch becomes a run-local failure, exact UID cleanup retained until absence | Candidate run-local trusted-workflow mismatch fix and exact UID cleanup remain active with legacy execution. Final removal is held for a later release. |
 | #1320 | `f0402338`, `8b01b219`, `cd49997a`; audited unscoped-admin publication abandonment, delivery serialization, no push, quiet backoff and pin cleanup retry | Already present; no replay. |
 | #1398 | `f62358c5`, bounded execution/deadline follow-ups; token wait progress, signal diagnostics and workflow/watchdog termination | Already present; no replay. No deployment was used to reproduce the live incident. |
 | #1464 | Priority submission/grants, durable ordering/supersession guards and integrated EASY backfill | Coordinator-owned implementation retained. The live issue is closed with its v0.17.81 receipt; this worker did not deploy or independently certify that rollout. |
