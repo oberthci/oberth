@@ -1308,7 +1308,6 @@ func TestOberthHelmArgs(t *testing.T) {
 				// defaults; pinned unconditionally (#662).
 				"--set", "argo.goProxy.port=8444",
 				// Promotion grant lifetime (#826).
-				"--set", "promotion.grantMaxLifetime=24h",
 				"--set", "secretstore.enabled=true",
 				"--set", "secretstore.address=https://openbao.openbao.svc:8200",
 				"--set", "secretstore.role=oberth-ci",
@@ -1328,7 +1327,6 @@ func TestOberthHelmArgs(t *testing.T) {
 				// Go module proxy pins (#662).
 				"--set", "argo.goProxy.port=8444",
 				// Promotion grant lifetime (#826).
-				"--set", "promotion.grantMaxLifetime=24h",
 				"--set", "secretstore.enabled=true",
 				"--set", "secretstore.address=http://openbao.openbao.svc:8200",
 				"--set", "secretstore.role=oberth-ci",
@@ -1496,7 +1494,6 @@ func TestOberthHelmArgsWithoutSecretStore(t *testing.T) {
 		// Go module proxy pins (#662).
 		"--set", "argo.goProxy.port=8444",
 		// Promotion grant lifetime (#826).
-		"--set", "promotion.grantMaxLifetime=24h",
 		"--version", "0.10.54",
 		"--reuse-values",
 	}
@@ -1524,7 +1521,6 @@ func TestOberthHelmArgsWithRekor(t *testing.T) {
 		// Go module proxy pins (#662).
 		"--set", "argo.goProxy.port=8444",
 		// Promotion grant lifetime (#826).
-		"--set", "promotion.grantMaxLifetime=24h",
 		"--set", "auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",
 		"--set", "auditAnchor.rekorInsecureHTTP=true",
 		"--set-string", "auditAnchor.rekorPublicKey=" + publicKeyPEM,
@@ -2475,7 +2471,6 @@ func TestInstallOberthReconcilesRekorAtInstalledVersion(t *testing.T) {
 				// Go module proxy pins (#662).
 				"--set", "argo.goProxy.port=8444",
 				// Promotion grant lifetime (#826).
-				"--set", "promotion.grantMaxLifetime=24h",
 				"--set", "auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",
 				"--set", "auditAnchor.rekorInsecureHTTP=true",
 				"--set-string", "auditAnchor.rekorPublicKey=" + publicKeyPEM,
@@ -2631,7 +2626,6 @@ func TestInstallOberthRekorUpgradeAllowsUnknownInstalledVersion(t *testing.T) {
 		// Go module proxy pins (#662).
 		"--set", "argo.goProxy.port=8444",
 		// Promotion grant lifetime (#826).
-		"--set", "promotion.grantMaxLifetime=24h",
 		"--set", "auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",
 		"--set", "auditAnchor.rekorInsecureHTTP=true",
 		"--set-string", "auditAnchor.rekorPublicKey=" + publicKeyPEM,

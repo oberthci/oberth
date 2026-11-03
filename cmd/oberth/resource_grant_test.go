@@ -9,15 +9,16 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestResourceGrantCLIReadsAndValidates(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := store.Open(t.Context(), path, store.Options{})
+	database, err := storetest.Open(t.Context(), path, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	up, err := database.CreateUpstream(t.Context(), model.UpstreamSpec{Name: "example", Kind: "ssh", BaseURL: "ssh://example.invalid/org"})
+	up, err := storetest.CreateUpstream(database, t.Context(), model.UpstreamSpec{Name: "example", Kind: "ssh", BaseURL: "ssh://example.invalid/org"})
 	if err != nil {
 		t.Fatal(err)
 	}
