@@ -72,6 +72,9 @@ func (s *Scheduler) measuredBackfillDuration(ctx context.Context, run model.Run)
 		}
 		samples = append(samples, int64(v.end.Sub(v.start)))
 	}
+	if len(samples) < measured.MinimumSamples {
+		return 0
+	}
 	quantiles := model.Quantiles(samples)
 	if quantiles.P95 == nil {
 		return 0

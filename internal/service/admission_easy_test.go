@@ -274,13 +274,28 @@ func TestEASYHistoryRejectsMissingIncompleteAndOtherWorkflowClasses(t *testing.T
 		want         time.Duration
 	}{
 		{"missing", model.Run{ID: "sample", Status: model.RunPassed}, nil, 0},
-		{"one sample", model.Run{ID: "sample", Status: model.RunPassed}, []measured.Observation{complete}, 5 * time.Minute},
+		{"one sample", model.Run{ID: "sample", Status: model.RunPassed}, []measured.Observation{complete}, 0},
+		{"complete samples", model.Run{ID: "sample", Status: model.RunPassed}, []measured.Observation{complete}, 5 * time.Minute},
 		{"other workflow class", model.Run{ID: "sample", Status: model.RunPassed, Release: true}, []measured.Observation{complete}, 0},
 		{"failed", model.Run{ID: "sample", Status: model.RunFailed}, []measured.Observation{complete}, 0},
 		{"incomplete", model.Run{ID: "sample", Status: model.RunPassed}, []measured.Observation{complete, {Usage: model.StepResourceUsage{RunID: "sample"}}}, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := &Scheduler{store: easyHistoryStore{history: store.RunResourceHistory{Runs: []model.Run{tc.run}, Observations: tc.observations}}}
+			history := store.RunResourceHistory{}
+			count := measured.MinimumSamples
+			if tc.name == "one sample" {
+				count = 1
+			}
+			for i := 0; i < count; i++ {
+				run := tc.run
+				run.ID = fmt.Sprint(i)
+				history.Runs = append(history.Runs, run)
+				for _, observation := range tc.observations {
+					observation.Usage.RunID = run.ID
+					history.Observations = append(history.Observations, observation)
+				}
+			}
+			s := &Scheduler{store: easyHistoryStore{history: history}}
 			_, got := s.admissionHistory(t.Context(), model.Run{RepoID: 1})
 			if got != tc.want {
 				t.Fatalf("duration = %s, want %s", got, tc.want)
@@ -352,5 +367,33 @@ func TestEASYAgedNormalCannotCoexistBehindBaseHighest(t *testing.T) {
 	g.mu.Unlock()
 	if granted(g, r) {
 		t.Fatal("aged lower base class used coexistence behind explicit highest")
+	}
+}
+
+func TestEASYHistoryRequiresMinimumMeasuredRuns(t *testing.T) {
+	at := time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)
+	for count := 0; count <= measured.MinimumSamples; count++ {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			history := store.RunResourceHistory{}
+			for i := 0; i < count; i++ {
+				id := fmt.Sprint(i)
+				history.Runs = append(history.Runs, model.Run{ID: id, Status: model.RunPassed})
+				// Multiple steps are one run, not multiple samples.
+				for j := 0; j < measured.MinimumSamples; j++ {
+					history.Observations = append(history.Observations, measured.Observation{Usage: model.StepResourceUsage{
+						RunID: id, Terminal: true, ContainerStartedAt: at, ContainerFinishedAt: at.Add(5 * time.Minute),
+					}})
+				}
+			}
+			s := &Scheduler{store: easyHistoryStore{history: history}}
+			got := s.measuredBackfillDuration(t.Context(), model.Run{RepoID: 1})
+			want := time.Duration(0)
+			if count == measured.MinimumSamples {
+				want = 5 * time.Minute
+			}
+			if got != want {
+				t.Fatalf("%d measured runs: duration=%s, want %s", count, got, want)
+			}
+		})
 	}
 }

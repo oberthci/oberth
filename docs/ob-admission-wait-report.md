@@ -25,7 +25,8 @@ Zero `maxHeadWait` keeps strict FIFO.
 Duration samples come from the retained step observations used by
 `run_resources`, grouped into whole workflow spans for each repository's
 branch, release, promotion or schedule history. Known run startup/teardown
-extends those spans. Truncated history and incomplete terminal timestamps
+extends those spans. At least five distinct complete measured runs are required;
+fewer samples count as unmeasured. Truncated history and incomplete terminal timestamps
 provide no estimate. These are p95 forecasts, not execution deadlines: an
 overrun can still delay the head. The scheduler does not preempt running work.
 
