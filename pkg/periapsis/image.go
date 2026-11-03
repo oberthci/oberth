@@ -71,6 +71,11 @@ func RunnerImageAllowed(image string, prefixes []string) bool {
 	}
 	base, digest, _ := strings.Cut(image, "@")
 	canonical := reference.Context().Name()
+	// The name package treats bare localhost as a Docker Hub namespace.
+	// Docker's reference syntax reserves it as an explicit registry instead.
+	if strings.HasPrefix(image, "localhost/") {
+		canonical = strings.TrimPrefix(canonical, name.DefaultRegistry+"/")
+	}
 	if colon := strings.LastIndex(base, ":"); colon > strings.LastIndex(base, "/") {
 		canonical += base[colon:]
 	}
@@ -97,6 +102,18 @@ func RunnerImageAllowed(image string, prefixes []string) bool {
 
 func normalizedImagePrefix(prefix string) (string, error) {
 	base, digest, hasDigest := strings.Cut(prefix, "@")
+	registryName := strings.TrimSuffix(base, "/")
+	host, port, hasPort := strings.Cut(registryName, ":")
+	// Preserve repository tag prefixes such as golang: and golang:1.26.
+	// A numeric port also identifies a registry without a dotted hostname.
+	numericPort := hasPort && port != "" && strings.Trim(port, "0123456789") == ""
+	if !hasDigest && !strings.Contains(registryName, "/") && (strings.Contains(host, ".") || host == "localhost" || numericPort) {
+		registry, err := name.NewRegistry(registryName)
+		if err != nil {
+			return "", err
+		}
+		return registry.Name() + "/", nil
+	}
 	suffix := ""
 	if colon := strings.LastIndex(base, ":"); colon > strings.LastIndex(base, "/") {
 		suffix, base = base[colon:], base[:colon]
@@ -106,6 +123,9 @@ func normalizedImagePrefix(prefix string) (string, error) {
 	}
 	if strings.HasSuffix(base, "/") {
 		base = strings.TrimSuffix(base, "/")
+		if base == "" {
+			return "", fmt.Errorf("repository or registry is required")
+		}
 		suffix = "/" + suffix
 		if !strings.Contains(base, "/") && strings.ContainsAny(base, ".:") {
 			registry, err := name.NewRegistry(base)
@@ -120,13 +140,21 @@ func normalizedImagePrefix(prefix string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return strings.TrimSuffix(repository.Name(), "/prefix-placeholder") + suffix, nil
+		normalized := strings.TrimSuffix(repository.Name(), "/prefix-placeholder")
+		if strings.HasPrefix(base, "localhost/") {
+			normalized = strings.TrimPrefix(normalized, name.DefaultRegistry+"/")
+		}
+		return normalized + suffix, nil
 	}
 	repository, err := name.NewRepository(base)
 	if err != nil {
 		return "", err
 	}
-	return repository.Name() + suffix, nil
+	normalized := repository.Name()
+	if strings.HasPrefix(base, "localhost/") {
+		normalized = strings.TrimPrefix(normalized, name.DefaultRegistry+"/")
+	}
+	return normalized + suffix, nil
 }
 
 // ValidateRunnerImagePrefixes rejects malformed administrator allowlist
@@ -142,6 +170,9 @@ func ValidateRunnerImagePrefixes(prefixes []string) error {
 		}
 		if _, duplicate := seen[prefix]; duplicate {
 			return fmt.Errorf("runner image prefix %q is duplicated", prefix)
+		}
+		if _, err := normalizedImagePrefix(prefix); err != nil {
+			return fmt.Errorf("runner image prefix %q is invalid: %w", prefix, err)
 		}
 		seen[prefix] = struct{}{}
 	}
