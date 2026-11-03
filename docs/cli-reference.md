@@ -49,7 +49,8 @@ Usage of access revoke:
 
 ```text
 Usage: oberth admin read-file <public-identity-path> [fallback-path]
-Read allowed public identity files inside the Oberth pod.
+       oberth admin retirement-check [--database path]
+Read allowed public identity files or check legacy-removal prerequisites inside the Oberth pod.
 ```
 
 ## oberth admin read-file
@@ -57,6 +58,15 @@ Read allowed public identity files inside the Oberth pod.
 ```text
 Usage: oberth admin read-file <public-identity-path> [fallback-path]
 Read allowed public identity files inside the Oberth pod.
+```
+
+## oberth admin retirement-check
+
+```text
+Usage: oberth admin retirement-check [--database path]
+Check legacy-removal prerequisites through the private in-pod admin socket.
+  -database string
+        live daemon database path (default "/data/oberth.sqlite")
 ```
 
 ## oberth admission
@@ -314,7 +324,7 @@ Usage of install:
   -namespace string
         Oberth namespace (default: oberth)
   -network-policy string
-        pipeline egress NetworkPolicy: auto (default: enable on conforming CNIs, disable on k3s+kube-router), true (always enable), false (always disable)
+        pipeline egress NetworkPolicy: auto (default: enable, including k3s; preserve existing values), true (always enable), false (always disable)
   -openbao-chart-version string
         OpenBao chart version
   -openbao-namespace string
@@ -1255,6 +1265,8 @@ Usage of upgrade:
         Oberth namespace (default: oberth)
   -openbao-namespace string
         OpenBao namespace (default: openbao)
+  -ownership-handoff string
+        verified connector/site ownership handoff receipt required before retirement
   -set value
         one canonical dotted key=scalar per flag; escape literal commas (repeatable)
   -timeout duration

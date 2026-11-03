@@ -22,6 +22,7 @@ access list
 access revoke
 admin
 admin read-file
+admin retirement-check
 admission
 admission release
 artifacts

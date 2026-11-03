@@ -45,9 +45,12 @@ func withLegacyRemovalCheck(server *http.Server, path string, check func(context
 
 func runRetirementCheck(ctx context.Context, arguments []string, output io.Writer) error {
 	flags := flag.NewFlagSet("admin retirement-check", flag.ContinueOnError)
-	flags.SetOutput(output)
+	flags.SetOutput(io.Discard)
 	path := flags.String("database", "/data/oberth.sqlite", "live daemon database path")
 	if err := flags.Parse(arguments); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return commandFlagHelp(flags, "Usage: oberth admin retirement-check [--database path]\nCheck legacy-removal prerequisites through the private in-pod admin socket.")
+		}
 		return err
 	}
 	if flags.NArg() != 0 {
