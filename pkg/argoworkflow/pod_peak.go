@@ -16,6 +16,9 @@ import (
 // PodDemand contains CPU requests and memory reservations, never observed usage. Each
 // dimension is an independent upper bound; its peak need not occur together.
 type PodDemand struct {
+	// DeclaredTotal sums static pod invocations before dependency/parallelism
+	// reductions. Nil means the total is unknown; it never sizes admission.
+	DeclaredTotal     *PodRequests       `json:"declared_total,omitempty"`
 	ExtendedResources map[string]int64   `json:"extended_resources,omitempty"`
 	CPUMilli          int64              `json:"cpu_milli"`
 	MemoryBytes       int64              `json:"memory_bytes"`
@@ -23,6 +26,8 @@ type PodDemand struct {
 	Assumptions       PodPeakAssumptions `json:"assumptions,omitempty"`
 }
 
+// Equal compares the capacity contract; optional diagnostic totals do not
+// change historical reservation equality or permit a different peak.
 func (d PodDemand) Equal(other PodDemand) bool {
 	return d.CPUMilli == other.CPUMilli && d.MemoryBytes == other.MemoryBytes && d.Pods == other.Pods && d.Assumptions == other.Assumptions && maps.Equal(d.ExtendedResources, other.ExtendedResources)
 }
@@ -31,7 +36,7 @@ func (d PodDemand) Valid() bool {
 	if ValidateExtendedResourceLimits(d.ExtendedResources) != nil {
 		return false
 	}
-	return d.Assumptions.Valid() && d.CPUMilli > 0 && d.CPUMilli <= 1_000_000_000 && d.MemoryBytes > 0 && d.MemoryBytes <= 1<<60 && d.Pods > 0 && d.Pods <= 256
+	return validPodTotal(d.DeclaredTotal) && d.Assumptions.Valid() && d.CPUMilli > 0 && d.CPUMilli <= 1_000_000_000 && d.MemoryBytes > 0 && d.MemoryBytes <= 1<<60 && d.Pods > 0 && d.Pods <= 256
 }
 
 const maxPodGraphWork = 4096
@@ -44,6 +49,7 @@ var errPodUndeclared = errors.New("pod has undeclared CPU/memory requests")
 var ErrMemoryUnbounded = errors.New("pod lacks a positive declared memory limit")
 
 type podGraph struct {
+	uncapped     bool // diagnostic static total; still subject to graph work bounds
 	resourcePods bool
 	parallelism  int64
 	limited      bool
@@ -251,7 +257,7 @@ func (g *podGraph) expand(t *wfv1.Template, depth int) (int, int, error) {
 		limit = g.defaults.Parallelism
 	}
 	var localLimit int64
-	if limit != nil && *limit > 0 && *limit <= 256 {
+	if !g.uncapped && limit != nil && *limit > 0 && *limit <= 256 {
 		localLimit = *limit
 		g.limited = true
 	}
@@ -335,17 +341,13 @@ func (g *podGraph) expand(t *wfv1.Template, depth int) (int, int, error) {
 			starts[task.Name], ends[task.Name] = a, b
 			deps[task.Name] = task.Dependencies
 			if task.Depends != "" {
-				// OR/early-start expressions earn no ordering credits. Assuming
-				// all their children run concurrently is a safe upper bound.
+				// Recognize only proven completion prerequisites. Terminal OR
+				// groups for the same predecessor serialize ordinary pods too.
+				// Mixed-task OR, negation and early-start logic earn no credit.
 				deps[task.Name] = nil
-				parts := strings.Split(task.Depends, "&&")
-				valid := true
-				for _, part := range parts {
-					valid = valid && successfulDependency.MatchString(strings.TrimSpace(part))
-				}
-				if valid {
-					for _, part := range parts {
-						deps[task.Name] = append(deps[task.Name], strings.TrimSuffix(strings.TrimSpace(part), ".Succeeded"))
+				if completed, ok := podCompletionDependencies(task.Depends); ok {
+					for _, dep := range completed {
+						deps[task.Name] = append(deps[task.Name], dep)
 					}
 				} else {
 					g.assumptions |= PodPeakConditions
@@ -468,6 +470,7 @@ func declaredPodPeak(wf *wfv1.Workflow, resourcePods bool) (*PodDemand, error) {
 		d.MemoryBytes = min(d.MemoryBytes, largestPodRequests(memory, int(parallelism)))
 		d.Pods = parallelism
 	}
+	d.DeclaredTotal = declaredPodTotal(wf, resourcePods)
 	d.Assumptions = g.assumptions
 	emptyExecutor := resourcePods && d.Pods > 0 && d.CPUMilli == 0 && d.MemoryBytes == 0
 	if !d.Valid() && !emptyExecutor {

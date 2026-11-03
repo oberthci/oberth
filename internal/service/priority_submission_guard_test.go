@@ -202,7 +202,7 @@ func TestPriorityBackfillPreservesNumericHeadAndAggregateDemand(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			clock := &fakeClock{now: time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)}
 			g := newWeightedAdmission(8)
-			g.now, g.maxHeadWait = clock.Now, 20*time.Minute
+			g.now, g.maxHeadWait = clock.Now, time.Hour
 			running := g.reserve(1)
 			acquireRequestWithinBudget(t, running, admissionRequest{Size: pipeline.M, Estimate: 30 * time.Minute,
 				Pods: &argoworkflow.PodDemand{CPUMilli: 4000, MemoryBytes: 4 << 30, Pods: 1}})
@@ -226,7 +226,7 @@ func TestPriorityBackfillPreservesNumericHeadAndAggregateDemand(t *testing.T) {
 		})
 	}
 	g := newWeightedAdmission(4)
-	g.maxHeadWait = 20 * time.Minute
+	g.maxHeadWait = 2 * time.Hour
 	running := g.reserve(1)
 	acquireRequestWithinBudget(t, running, admissionRequest{Size: pipeline.M, Estimate: time.Hour})
 	t.Cleanup(running.release)

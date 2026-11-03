@@ -22,17 +22,19 @@ past ordinary waiting claims to expose higher priority work, with bounded
 extra claims. This does not create extra weight, run permits or capacity.
 Already admitted work is not preempted.
 
-In v0.17.82, EASY replaces v0.17.81's ban on backfill behind priority
-heads. Backfill candidates are considered in priority/FIFO order. Work from
-the head's class may use spare capacity if its p95 duration ends strictly
-before the head's predicted start, or the head still fits with it running at
-that time. Lower effective or base classes must finish before that start;
-they cannot use coexistence and occupy room needed by higher-class waiters.
-Unmeasured candidates can use only the coexistence test. The default
-20-minute head wait marks draining; this same rule still permits safe backfill
-during draining. Zero selects strict FIFO. Repository concurrency groups,
-VM-capacity parking, pressure, disk-floor holds and run-count/size limits
-still apply. P95 predictions are estimates, not enforced runtime deadlines.
+Backfill candidates are considered in priority/FIFO order while the head's
+wait remains below `max_head_wait_seconds` (20 minutes by default). A measured
+candidate must finish strictly before the earlier of the predicted head start
+and the remaining head-wait window. If running durations are unknown, measured
+short work may use existing capacity when its finish remains inside that window.
+Work in the same effective and base priority classes may also coexist if the
+head still fits with all surviving grants at its reserved start. Lower classes
+cannot use coexistence and occupy room needed by higher-class waiters.
+Unmeasured candidates can use only proven coexistence. At the head-wait limit,
+new backfill stops and existing grants drain; zero selects strict FIFO.
+Repository concurrency groups, VM-capacity parking, pressure, disk-floor holds
+and run-count/size limits still apply. P95 predictions are estimates, not enforced
+runtime deadlines; running work is never preempted.
 
 At 60 minutes, normal and high work join effective `highest`. Within that
 class, base `highest` precedes aged `high`, then aged `normal`; each base class

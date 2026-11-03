@@ -42,10 +42,13 @@ func TestPriorityReleaseHeadMessageMatchesBackfillPolicy(t *testing.T) {
 				}
 				safe := pending(t, g, 6, easyRequest("short", cpu, time.Minute))
 				t.Cleanup(safe.cancel)
-				if !granted(g, safe) || granted(g, head) {
-					t.Fatal("short work must backfill while the head still waits for capacity")
+				if got, want := granted(g, safe), elapsed < g.maxHeadWait; got != want || granted(g, head) {
+					t.Fatalf("short backfill=%v, want %v at head wait %s", got, want, elapsed)
 				}
-				if view := (&Scheduler{admission: g}).AdmissionSnapshot(safe.sequence); !strings.HasPrefix(view.BackfillMessage, "backfilled: ends before head can start") {
+				if elapsed >= g.maxHeadWait {
+					return
+				}
+				if view := (&Scheduler{admission: g}).AdmissionSnapshot(safe.sequence); !strings.HasPrefix(view.BackfillMessage, "backfilled: measured finish within remaining head-wait window") {
 					t.Fatalf("safe backfill explanation=%q", view.BackfillMessage)
 				}
 			})

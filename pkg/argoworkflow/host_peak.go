@@ -108,6 +108,8 @@ func DeclaredHostPeak(wf *wfv1.Workflow, trigger RunTrigger) (*PodDemand, error)
 		sum.CPUMilli = min(sum.CPUMilli, int64(peak.Cores))
 		sum.MemoryBytes = min(sum.MemoryBytes, peak.MemoryBytes)
 	}
+	// A pod invocation total does not describe VM lifetimes.
+	d.DeclaredTotal = nil
 	d.CPUMilli += sum.CPUMilli
 	d.MemoryBytes += sum.MemoryBytes
 	if !d.Valid() {

@@ -60,7 +60,7 @@ func TestPriorityAdmissionOrdersClassesThenFIFO(t *testing.T) {
 	}
 }
 
-func TestPriorityAdmissionMeasuredBackfillDuringDrain(t *testing.T) {
+func TestPriorityAdmissionStopsBackfillDuringDrain(t *testing.T) {
 	clock := &fakeClock{now: time.Now()}
 	g := newWeightedAdmission(4)
 	g.now = clock.Now
@@ -80,8 +80,8 @@ func TestPriorityAdmissionMeasuredBackfillDuringDrain(t *testing.T) {
 	small.release()
 	clock.now = clock.now.Add(20 * time.Minute)
 	later := priorityWaiter(g, 5, model.PriorityHigh, clock.now, pipeline.S, 5*time.Minute)
-	if !granted(g, later) || granted(g, normal) {
-		t.Fatal("drain lost safe measured backfill or admitted unmeasured work")
+	if granted(g, later) || granted(g, normal) {
+		t.Fatal("drain admitted new backfill")
 	}
 	later.release()
 	release()

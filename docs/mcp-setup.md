@@ -848,14 +848,14 @@ remove supersession protection from a build already classified as priority.
 
 The queue orders highest, high, then normal, with acceptance order within each
 class and the existing starvation bound. A waiting priority head still needs
-the declared budget and pressure gate. Measured EASY backfill admits later work
-when its measured p95 ends strictly before the head's reserved start. Work in
-the same effective and base priority classes may also coexist when the head
-still fits alongside the candidate and all surviving grants at that start.
-Lower classes cannot use this coexistence exception. Work without enough
-measurement samples can use only same-class coexistence. These rules still
-apply while the queue reports draining after the head-wait bound; running work
-is never preempted.
+the declared budget and pressure gate. Measured backfill may finish before the
+earlier of the head's reserved start and the remaining head-wait window. If
+running durations are unknown, measured short work may use existing capacity
+within that window. Same effective and base priority classes may also coexist
+when the head still fits alongside all surviving grants at its reserved start.
+Unmeasured candidates use only this proven coexistence; lower classes cannot.
+At `max_head_wait_seconds`, new backfill stops and existing grants drain for the
+head. Running work is never preempted.
 
 For an urgent individual run, call `run_priority` with
 `{"run_id":"<exact ID>","priority":"highest","reason":"release blocker"}`.

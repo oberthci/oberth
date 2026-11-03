@@ -239,5 +239,13 @@ func (r *admissionReservation) declaredResources() *model.DeclaredResources {
 		return nil
 	}
 	d := r.gate.runCharge(*r.pods)
-	return &model.DeclaredResources{ExtendedResources: maps.Clone(d.ExtendedResources), CPUMilli: d.CPUMilli, MemoryBytes: d.MemoryBytes, Pods: d.Pods}
+	return &model.DeclaredResources{
+		DeclaredTotal: r.pods.DeclaredTotal.Clone(),
+		Peak: &argoworkflow.PodRequests{
+			ExtendedResources: maps.Clone(r.pods.ExtendedResources),
+			CPUMilli:          r.pods.CPUMilli, MemoryBytes: r.pods.MemoryBytes, Pods: r.pods.Pods,
+		},
+		ExtendedResources: maps.Clone(d.ExtendedResources),
+		CPUMilli:          d.CPUMilli, MemoryBytes: d.MemoryBytes, Pods: d.Pods,
+	}
 }
