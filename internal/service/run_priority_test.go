@@ -56,7 +56,7 @@ func TestPriorityAdmissionOrdersClassesThenFIFO(t *testing.T) {
 	}
 }
 
-func TestPriorityAdmissionBackfillsOnlyWithinClassAndHonorsHeadWait(t *testing.T) {
+func TestPriorityAdmissionBlocksAllBackfillBehindPriorityHead(t *testing.T) {
 	clock := &fakeClock{now: time.Now()}
 	g := newWeightedAdmission(4)
 	g.now = clock.Now
@@ -70,20 +70,23 @@ func TestPriorityAdmissionBackfillsOnlyWithinClassAndHonorsHeadWait(t *testing.T
 	head := priorityWaiter(g, 2, model.PriorityHigh, clock.now, periapsis.L)
 	normal := priorityWaiter(g, 3, model.PriorityNormal, clock.now, periapsis.S)
 	small := priorityWaiter(g, 4, model.PriorityHigh, clock.now, periapsis.S)
-	if granted(g, head) || granted(g, normal) || !granted(g, small) {
-		t.Fatal("backfill crossed priority class or lost same-class backfill")
+	if granted(g, head) || granted(g, normal) || granted(g, small) {
+		t.Fatal("priority head allowed same-class or lower-class backfill")
 	}
-	small.release()
 	clock.now = clock.now.Add(20 * time.Minute)
 	later := priorityWaiter(g, 5, model.PriorityHigh, clock.now, periapsis.S)
 	if granted(g, later) || granted(g, normal) {
 		t.Fatal("head-wait bound did not drain higher class")
 	}
 	release()
-	if !granted(g, head) {
-		t.Fatal("head failed to start after drain")
+	if !granted(g, head) || !granted(g, small) || granted(g, normal) {
+		t.Fatal("head and fitting same-class work failed to start after drain")
 	}
 	head.release()
+	if !granted(g, later) || !granted(g, normal) {
+		t.Fatal("remaining work failed to start after the priority head")
+	}
+	small.release()
 	later.release()
 	normal.release()
 }

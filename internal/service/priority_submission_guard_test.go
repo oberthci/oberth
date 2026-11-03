@@ -195,7 +195,7 @@ func TestPriorityBackfillPreservesNumericHeadAndAggregateDemand(t *testing.T) {
 		headCPU, headMemory, candidateCPU, candidateMemory int64
 		want                                               bool
 	}{
-		{"CPU fits", 5000, 1 << 30, 1000, 1 << 30, true},
+		{"CPU fits but priority backfill is disabled", 5000, 1 << 30, 1000, 1 << 30, false},
 		{"CPU exceeds", 7000, 1 << 30, 1000, 1 << 30, false},
 		{"memory exceeds", 1000, 15 << 30, 1000, 1 << 30, false},
 	} {
