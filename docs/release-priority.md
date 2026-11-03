@@ -17,23 +17,25 @@ path records tag refs. Pipelines cannot set queue priority. Only an unscoped
 administrator can configure RC patterns or explicitly bump a waiting run.
 
 Both durable claiming and weighted admission sort by effective priority,
-then original admission sequence and queue sequence. The dispatcher can look
+then base priority, original admission sequence and queue sequence. The dispatcher can look
 past ordinary waiting claims to expose higher priority work, with bounded
 extra claims. This does not create extra weight, run permits or capacity.
 Already admitted work is not preempted.
 
-A waiting higher class prevents lower-class backfill. Within a class the
-existing bounded backfill still applies: the default 20-minute head-wait
-window permits fitting work before draining for a blocked head; zero selects
-strict FIFO. Repository concurrency groups, VM-capacity parking, disk-floor
+A waiting higher class prevents lower-class backfill. For v0.17.82, no backfill is allowed behind a high or highest head,
+including an aged head. Normal heads retain the existing bounded backfill:
+the default 20-minute head-wait window permits fitting work before draining;
+zero selects strict FIFO. The planned EASY reservation rule will replace
+this conservative priority-head guard. Repository concurrency groups, VM-capacity parking, disk-floor
 holds and run-count/size limits still apply.
 
-At 60 minutes, normal and high work join `highest` using their original FIFO
-position. New releases can no longer leapfrog an older aged branch. This
-bounds priority-based bypass, not elapsed time to execution: work already
-holding resources and earlier highest-priority work must finish or be cleaned
-up. A release can still wait when all capacity is in use, when older aged
-work leads the highest class, or on its repository concurrency group.
+At 60 minutes, normal and high work join effective `highest`. Within that
+class, base `highest` precedes aged `high`, then aged `normal`; each base class
+retains its original FIFO position. A newly accepted explicit `highest` can
+therefore lead an aged normal backlog when capacity frees. Aging does not
+guarantee a time bound if base-highest work keeps arriving. Existing resource
+holders and earlier base-highest work must finish or be cleaned up, and
+repository concurrency groups still apply.
 
 An administrator can use MCP `run_priority` with a full run ID, priority `high`
 or `highest`, and a reason to expedite an unadmitted run. The operation is
@@ -70,8 +72,8 @@ fields. Historical audit records are unchanged.
 A tag burst can still delay a promotion: they share `highest` FIFO, and another
 tag can become the repository's oldest waiter as its predecessor is admitted.
 The cap limits concurrent automatic boosts, not total burst duration. Release
-priority also skips only the youngest 60 minutes of branch backlog; older
-branches retain their aged FIFO place. After deployment, inspect `run_get`
+priority precedes aged branch work at the same effective class; older
+branches retain FIFO within their base class. After deployment, inspect `run_get`
 priority reasons and the admission view on the next tag before attributing the
 reported load incident entirely to priority classification.
 
@@ -79,3 +81,28 @@ An oversized tag that loses its boost still occupies its repository's oldest
 waiting-tag slot until admission or termination. The next tag does not inherit
 a boost while that older tag waits; it can age or receive an explicit admin
 bump. See the README's pre-deploy grant checks for existing revoked records.
+
+Submission priority may only raise the automatic class: natural `highest`
+(promotion or eligible oldest tag), admin override, accepted `high`/`highest`
+request, RC pattern, then normal. Refused, invalid and `normal` requests leave
+that classification and its reason intact; refusals appear in `priority_refusal`.
+
+Accepted priority, admin bumps and automatic RC/tag/promotion runs are protected
+from ordinary branch supersession. Every push matching an RC pattern queues
+independently, so repeated RC pushes all run. Accepting priority cancels nothing
+unless the push explicitly includes `-o oberth.supersede=true`. That option is
+honoured even on a priority push, inside the same branch and schedule entry;
+protected work may be replaced only by its requester or an unscoped admin.
+Promotion attempts and pending publications keep their separate guards.
+
+`schedule_trigger force` bypasses the busy/paused check. A forced normal run
+replaces only unprotected runs in its branch and entry; protected runs remain,
+and a priority schedule submission queues independently. Force does not grant
+protected supersession. Cancellation still requires the existing admin/force
+permissions for tag, release, promotion and concurrency-group work; being the
+priority requester adds no admin authority.
+
+Restart requeue, trusted preflight recovery and eligible one-shot infrastructure
+retry preserve protected work's priority and admission sequence alongside newer
+normal siblings. Recovery can replace only its own queue place and preserves
+all existing retry, publication, cleanup and execution-evidence checks.

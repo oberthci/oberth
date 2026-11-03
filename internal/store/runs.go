@@ -232,14 +232,14 @@ RETURNING `+runColumns,
 	if err != nil {
 		return model.EnqueueRunResult{}, err
 	}
-	// A priority submission accepts independent work and never cancels siblings.
+	// Priority submissions queue independently unless supersession is explicit.
 	if value.Priority.Rank() > 0 && spec.Priority == "" {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO run_priority_requests(run_id,requested,accepted,reason,actor,refusal) VALUES(?,'',?,?,?,'')`, id, value.Priority, value.PriorityReason, spec.Actor); err != nil {
 			return model.EnqueueRunResult{}, err
 		}
 		value.PriorityRequestedBy = spec.Actor
 	}
-	supersede := value.Priority.Rank() == 0 || inheritedAdmissionSequence > 0
+	supersede := spec.Supersede || value.Priority.Rank() == 0 || inheritedAdmissionSequence > 0
 	explicit := spec.Supersede || inheritedAdmissionSequence > 0
 	admin := inheritedAdmissionSequence > 0
 	if spec.Supersede {
