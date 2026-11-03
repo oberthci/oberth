@@ -363,12 +363,12 @@ func TestParseServeOptionsAcceptsValidPushBannerURL(t *testing.T) {
 	t.Parallel()
 	options, err := parseServeOptions([]string{
 		"--argo-namespace", "argo-pipelines",
-		"--push-banner-url", "https://watch.oberth.ci/runs",
+		"--push-banner-url", "https://example.com/runs",
 	}, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if options.pushBannerURL != "https://watch.oberth.ci/runs" {
+	if options.pushBannerURL != "https://example.com/runs" {
 		t.Fatalf("push banner URL = %q", options.pushBannerURL)
 	}
 }

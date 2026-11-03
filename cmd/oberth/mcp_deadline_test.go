@@ -52,6 +52,7 @@ func TestMCPDeadlineDerivesToolTimeoutAndHonorsOverride(t *testing.T) {
 }
 
 func TestMCPTimeoutFlag(t *testing.T) {
+	t.Setenv("OBERTH_MCP_URL", "https://example.invalid/mcp")
 	t.Setenv("OBERTH_TOKEN", "deadline-test-token")
 	for _, args := range [][]string{{"--timeout", "90s"}, {"--timeout=90s"}} {
 		cfg, err := parseMCPFlags("mcp call", args, 0)

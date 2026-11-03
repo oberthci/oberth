@@ -275,7 +275,7 @@ func TestReleaseScriptWebsitePublishFailsClosed(t *testing.T) {
 		{"extra route", "not the reviewed oberth.ci Worker configuration", func(f *websiteScriptFixture) {
 			f.write("secrets/cloudflare-oberth-workers-token/CLOUDFLARE_API_TOKEN", []byte(websiteFixtureToken), 0o400)
 			config, _ := os.ReadFile(filepath.Join(f.root, "website", "wrangler.jsonc"))
-			f.write("website/wrangler.jsonc", bytes.Replace(config, []byte(`"pattern": "www.oberth.ci"`), []byte(`"pattern": "watch.oberth.ci"`), 1), 0o600)
+			f.write("website/wrangler.jsonc", bytes.Replace(config, []byte(`"pattern": "www.oberth.ci"`), []byte(`"pattern": "example.com"`), 1), 0o600)
 		}},
 		{"script binding", "not the reviewed oberth.ci Worker configuration", func(f *websiteScriptFixture) {
 			f.write("secrets/cloudflare-oberth-workers-token/CLOUDFLARE_API_TOKEN", []byte(websiteFixtureToken), 0o400)

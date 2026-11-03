@@ -300,16 +300,20 @@ func TestMCPParseFlagsURL(t *testing.T) {
 	}
 }
 
-func TestMCPParseFlagsDefault(t *testing.T) {
+func TestMCPRequiresConfiguredEndpoint(t *testing.T) {
 	t.Setenv("OBERTH_TOKEN", "env-token")
 	t.Setenv("OBERTH_MCP_URL", "")
-
-	result, err := parseMCPFlags("test", nil, 0)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	t.Setenv("OBERTH_BASE_URL", "")
+	original := mcpHTTPClientFunc
+	mcpHTTPClientFunc = func(string) (*http.Client, error) {
+		t.Fatal("unconfigured CLI attempted network access")
+		return nil, nil
 	}
-	if result.URL != mcpDefaultURL {
-		t.Errorf("expected default URL %q, got %q", mcpDefaultURL, result.URL)
+	t.Cleanup(func() { mcpHTTPClientFunc = original })
+
+	err := runMCPTools(t.Context(), nil, &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "OBERTH_BASE_URL") || !strings.Contains(err.Error(), "OBERTH_MCP_URL") || !strings.Contains(err.Error(), "--url") {
+		t.Fatalf("missing endpoint error = %v", err)
 	}
 }
 
@@ -394,8 +398,8 @@ func TestMCPToolsEndToEnd(t *testing.T) {
 }
 
 func TestClassifyMCPTransportExplainsUnresolvedLocalNames(t *testing.T) {
-	err := classifyMCPTransport(&net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{Err: "no such host", Name: "tuxbox.local", IsNotFound: true}})
-	if !strings.Contains(err.Error(), `cannot resolve "tuxbox.local"`) || !strings.Contains(err.Error(), mdnsdial.Hint) {
+	err := classifyMCPTransport(&net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{Err: "no such host", Name: "example-node.local", IsNotFound: true}})
+	if !strings.Contains(err.Error(), `cannot resolve "example-node.local"`) || !strings.Contains(err.Error(), mdnsdial.Hint) {
 		t.Fatalf("a .local resolution failure is not explained: %v", err)
 	}
 	err = classifyMCPTransport(&net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{Err: "no such host", Name: "example.invalid", IsNotFound: true}})

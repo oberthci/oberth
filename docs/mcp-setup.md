@@ -56,7 +56,7 @@ A scope is an upstream name as `oberth upstream list` shows it; repeat
 Change or remove the limit later; the token and key stay valid:
 
 ```bash
-kubectl exec -n oberth deploy/oberth -- oberth uplink scope --set github,skipops laptop@work
+kubectl exec -n oberth deploy/oberth -- oberth uplink scope --set github,acme laptop@work
 kubectl exec -n oberth deploy/oberth -- oberth uplink scope --clear laptop@work
 ```
 
@@ -893,3 +893,8 @@ backoff remains visible while the run is running.
 already equal to the intended SHA does not itself mark a pending ledger row
 passed. Pending list entries and timeout replies are refreshed before return;
 a real commit between separate reads can advance status and its update time.
+
+The CLI requires `--url`, `OBERTH_MCP_URL`, or `OBERTH_BASE_URL` (with
+`/mcp` appended). There is no hosted default. `OBERTH_TOKEN_COMMAND` and
+`OBERTH_CA_CERT` follow the installer environment; explicit flags take
+precedence. An unconfigured endpoint fails before any network request.

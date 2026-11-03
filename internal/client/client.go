@@ -44,7 +44,9 @@ func FromEnv() Config {
 
 func (config Config) Configured() bool { return config.BaseURL != "" }
 
-func (config Config) resolveToken(ctx context.Context) (string, error) {
+// ResolveToken shares credential precedence between REST and MCP clients.
+// The caller's context bounds execution of an operator-configured command.
+func (config Config) ResolveToken(ctx context.Context) (string, error) {
 	if config.Token != "" {
 		return config.Token, nil
 	}
@@ -98,7 +100,7 @@ func New(ctx context.Context, config Config) (*Client, error) {
 	if base.Scheme == "http" && !isLoopback(base.Hostname()) {
 		return nil, errors.New("client: use https:// — the token would be transmitted in cleartext")
 	}
-	token, err := config.resolveToken(ctx)
+	token, err := config.ResolveToken(ctx)
 	if err != nil {
 		return nil, err
 	}
