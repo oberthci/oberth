@@ -6,8 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oberthci/oberth/internal/model"
 	"github.com/sigstore/rekor/pkg/generated/models"
+
+	"github.com/oberthci/oberth/internal/model"
 )
 
 type cancelEnumerationVerifier struct{ cancel context.CancelFunc }
