@@ -14,6 +14,12 @@ BRAND_DIGESTS = {
         'ae87e18457eeee44eb012a45dfc3b261413407941de02c96064bff4f442d30bb',
     },
 }
+# Retain the distinctive-fragment rule without publishing its label.
+FRAGMENT_DIGESTS = {
+    5: {
+        'de3fa92e1bec4d9540740be90cee4f04c71c93f3a329d6f4caf5b46493b3cda4',
+    },
+}
 INSTANCE_DIGESTS = {
     6: {
         '38a5015a3b8ccd8f080fe05a085be6395a210e4dad37390c42f647f1329afe4a',
@@ -73,6 +79,13 @@ def forbidden(data, allow_legacy=False):
 def forbidden_view(data, allow_legacy):
     if WORKSTATION_PATH.search(data):
         return True
+    words = list(WORD.finditer(data))
+    for word in words:
+        value = word[0]
+        for length, hashes in FRAGMENT_DIGESTS.items():
+            if any(digest(value[i:i + length]) in hashes
+                   for i in range(len(value) - length + 1)):
+                return True
     # Product spelling is forbidden inside longer words, including when its
     # pieces straddle separators inside those words.
     for span in BRAND_SPAN.finditer(data):
@@ -81,7 +94,6 @@ def forbidden_view(data, allow_legacy):
             if any(digest(value[i:i + length]) in hashes
                    for i in range(len(value) - length + 1)):
                 return True
-    words = list(WORD.finditer(data))
     instances = {length: set(hashes) for length, hashes in INSTANCE_DIGESTS.items()}
     if not allow_legacy:
         for length, hashes in LEGACY_DIGESTS.items():

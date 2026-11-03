@@ -24,8 +24,10 @@ class NameCheckTests(unittest.TestCase):
         # Synthetic labels exercise the same policy without publishing real ones.
         self.brand = 'retiredbrand'
         self.instance = 'oldnode'
+        self.fragment = 'oldpiece'
         digest = lambda value: hashlib.sha256(value.encode()).hexdigest()
         policy = patch.multiple(gate, create=True,
+                                FRAGMENT_DIGESTS={len(self.fragment): {digest(self.fragment)}},
                                 BRAND_DIGESTS={len(self.brand): {digest(self.brand)}},
                                 INSTANCE_DIGESTS={len(self.instance): {digest(self.instance)}})
         policy.start()
@@ -35,6 +37,7 @@ class NameCheckTests(unittest.TestCase):
         subprocess.run(['git', *args], cwd=self.root, env=self.env, check=True, capture_output=True)
 
     def write(self, name, body, tracked=True):
+        (self.root / name).parent.mkdir(parents=True, exist_ok=True)
         (self.root / name).write_bytes(body)
         if tracked:
             self.git('add', '--', name)
@@ -141,6 +144,24 @@ class NameCheckTests(unittest.TestCase):
     def test_missing_git_metadata_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory, self.assertRaises(subprocess.CalledProcessError):
             gate.check(directory)
+
+
+    def test_distinctive_fragment_in_tracked_file_types_fails(self):
+        for name in ('fixture.go', 'fixture.sh', 'fixture.py', 'fixture.txt',
+                     'fixture.yaml', 'fixture.bin', 'fixture'):
+            for fragment in (self.fragment, self.fragment.upper(), self.fragment.title()):
+                with self.subTest(name=name, fragment=fragment):
+                    self.write(name, b'\0prefix-' + fragment.encode() + b'-suffix')
+                    self.assertEqual(gate.check(self.root), 1)
+                    self.write(name, b'generic content')
+
+    def test_distinctive_fragment_in_dynamic_expression_fails(self):
+        self.write('fixture.py', ('value = f"prefix{suffix}' + self.fragment + '"').encode())
+        self.assertEqual(gate.check(self.root), 1)
+
+    def test_distinctive_fragment_has_no_checker_path_bypass(self):
+        self.write('hack/check-generic-names.py', self.fragment.encode())
+        self.assertEqual(gate.check(self.root), 1)
 
 
 if __name__ == '__main__':
