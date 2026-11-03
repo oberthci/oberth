@@ -17,7 +17,7 @@ path records tag refs. Pipelines cannot set queue priority. Only an unscoped
 administrator can configure RC patterns or explicitly bump a waiting run.
 
 Both durable claiming and weighted admission sort by effective priority,
-then base priority, original admission sequence and queue sequence. The dispatcher can look
+then original admission sequence and queue sequence. The dispatcher can look
 past ordinary waiting claims to expose higher priority work, with bounded
 extra claims. This does not create extra weight, run permits or capacity.
 Already admitted work is not preempted.
@@ -36,13 +36,21 @@ Repository concurrency groups, VM-capacity parking, pressure, disk-floor holds
 and run-count/size limits still apply. P95 predictions are estimates, not enforced
 runtime deadlines; running work is never preempted.
 
-At 60 minutes, normal and high work join effective `highest`. Within that
-class, base `highest` precedes aged `high`, then aged `normal`; each base class
-retains its original FIFO position. A newly accepted explicit `highest` can
-therefore lead an aged normal backlog when capacity frees. Aging does not
-guarantee a time bound if base-highest work keeps arriving. Existing resource
-holders and earlier base-highest work must finish or be cleaned up, and
-repository concurrency groups still apply.
+Aging moves a run up one class only. At 60 minutes a `normal` run becomes
+effective `high`, with the reason `aged: normal run waited at least 60
+minutes`; `high` work does not age further and nothing ages into `highest`,
+so a backed-up queue cannot turn every run `highest` and empty the manual
+priority line: promotions, the oldest waiting tag release and explicit
+administrator `highest` bumps always precede aged work. Within a class the
+order stays FIFO by admission sequence, and the aged run keeps its original
+position, so every `high` run accepted after it waits behind it. Against
+`high` arrivals its wait is therefore bounded by 60 minutes plus the `high`
+work accepted before it. Aging never lifts a run above `highest`, so sustained
+`highest` arrivals (promotions from any identity holding a promote grant, tag
+releases, explicit admin bumps) can extend the wait of aged and `high` work
+without limit; before this change aged work joined `highest` FIFO instead.
+Existing resource holders must finish or be cleaned up, and repository
+concurrency groups still apply.
 
 An administrator can use MCP `run_priority` with a full run ID, priority `high`
 or `highest`, and a reason to expedite an unadmitted run. The operation is
@@ -72,7 +80,7 @@ or XL re-enables the boost within that maximum. Local MCP grant/revoke wakes
 and refreshes waiting work; in-pod CLI/external changes are polled within 15
 seconds, with refresh deferred during DB contention. Neither revocation nor
 an ordinary priority change preempts admitted work or disables promotions,
-explicit bumps or starvation aging. The opt-out is durable in the existing
+explicit bumps or aging. The opt-out is durable in the existing
 size-grant record; no migration or new priority class is needed. Audit events
 include `automatic_tag_priority_enabled` and its previous value alongside size
 fields. Historical audit records are unchanged.
@@ -80,8 +88,8 @@ fields. Historical audit records are unchanged.
 A tag burst can still delay a promotion: they share `highest` FIFO, and another
 tag can become the repository's oldest waiter as its predecessor is admitted.
 The cap limits concurrent automatic boosts, not total burst duration. Release
-priority precedes aged branch work at the same effective class; older
-branches retain FIFO within their base class. After deployment, inspect `run_get`
+priority is `highest` and precedes aged branch work, which never leaves `high`;
+within `high`, aged and RC branches share one FIFO. After deployment, inspect `run_get`
 priority reasons and the admission view on the next tag before attributing the
 reported load incident entirely to priority classification.
 

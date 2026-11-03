@@ -59,9 +59,12 @@ func TestQueuePriorityClassificationAndFIFO(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The active view lists the queue head first; the run list shows the
+	// same queue bottom-up, with the head as its lowest queued row.
 	for i, id := range want {
-		if active[i].ID != id || flat[i].ID != id || active[i].QueuePosition != int64(i+1) || flat[i].QueuePosition != int64(i+1) {
-			t.Fatalf("queue views disagree at %d: active=%+v flat=%+v", i, active[i], flat[i])
+		last := len(want) - 1 - i
+		if active[i].ID != id || flat[last].ID != id || active[i].QueuePosition != int64(i+1) || flat[last].QueuePosition != int64(i+1) {
+			t.Fatalf("queue views disagree at %d: active=%+v flat=%+v", i, active[i], flat[last])
 		}
 		if pos, err := s.QueuedRunPosition(ctx, id); err != nil || pos != int64(i+1) {
 			t.Fatalf("position %s=%d, %v", id, pos, err)
@@ -113,8 +116,8 @@ func TestQueuePriorityStarvationAtBoundary(t *testing.T) {
 		t.Fatalf("starved claim: %+v %v", got, err)
 	}
 	priority, reason := got.EffectivePriority(now)
-	if priority != model.PriorityHighest || !strings.Contains(reason, "starvation") {
-		t.Fatalf("starved display=%s/%s", priority, reason)
+	if priority != model.PriorityHigh || !strings.Contains(reason, "aged") || strings.Contains(reason, "highest") {
+		t.Fatalf("aged display=%s/%s", priority, reason)
 	}
 }
 
@@ -206,8 +209,8 @@ func TestQueuePriorityRestartRefireRetainsWaitAndBump(t *testing.T) {
 		t.Fatal(err)
 	}
 	p, _ := copy.EffectivePriority(now)
-	if p != model.PriorityHighest || !copy.QueuedAt.Equal(run.QueuedAt) {
-		t.Fatalf("restart reset starvation clock: %+v", copy)
+	if p != model.PriorityHigh || !copy.QueuedAt.Equal(run.QueuedAt) {
+		t.Fatalf("restart reset aging clock: %+v", copy)
 	}
 	// A separately bumped item retains its explicit administrator reason.
 	bumped, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/bump", strings.Repeat("b", 40)))
@@ -273,6 +276,16 @@ func TestQueuePriorityMigrationFromV33ClassifiesExistingWork(t *testing.T) {
 	}
 }
 
+// queueBottom is the lowest queued row of a run list: the run admitted next.
+func queueBottom(runs []model.Run) model.Run {
+	for i := len(runs) - 1; i >= 0; i-- {
+		if runs[i].QueuePosition > 0 {
+			return runs[i]
+		}
+	}
+	return model.Run{}
+}
+
 func TestQueuePriorityHighAgesWithoutLosingFIFOToNormals(t *testing.T) {
 	now := time.Now()
 	s := testStore(t, &now)
@@ -293,7 +306,7 @@ func TestQueuePriorityHighAgesWithoutLosingFIFOToNormals(t *testing.T) {
 	now = now.Add(time.Hour)
 	for i, want := range []string{high.ID, normal.ID} {
 		flat, err := s.ListRecentRuns(ctx, model.RunListFilter{})
-		if err != nil || flat[0].ID != want || flat[0].QueuePosition != 1 {
+		if head := queueBottom(flat); err != nil || head.ID != want || head.QueuePosition != 1 {
 			t.Fatalf("aged queue view at %d: %+v %v", i, flat, err)
 		}
 		next, err := s.ClaimNextRun(ctx)
@@ -301,7 +314,7 @@ func TestQueuePriorityHighAgesWithoutLosingFIFOToNormals(t *testing.T) {
 			t.Fatalf("aged claim at %d: %+v %v", i, next, err)
 		}
 		p, _ := next.EffectivePriority(now)
-		if p != model.PriorityHighest {
+		if p != model.PriorityHigh {
 			t.Fatalf("aged %s priority=%s", want, p)
 		}
 		if _, err := s.MarkRunAdmitted(ctx, next.ID); err != nil {
@@ -370,7 +383,7 @@ func TestQueuePriorityTagsIndependentOfSizeGrantsAndBranchSignals(t *testing.T) 
 		}
 	}
 	flat, err := s.ListRecentRuns(ctx, model.RunListFilter{})
-	if err != nil || flat[0].ID != tag.ID {
+	if err != nil || flat[len(flat)-1].ID != tag.ID {
 		t.Fatalf("granted list order: %+v %v", flat, err)
 	}
 	claimed, err := s.ClaimNextRun(ctx)
@@ -438,7 +451,7 @@ func TestQueuePriorityTagsIndependentOfSizeGrantsAndBranchSignals(t *testing.T) 
 	}
 }
 
-func TestQueuePriorityReleaseStreamPrecedesAgedNormalByBaseClass(t *testing.T) {
+func TestQueuePriorityReleaseStreamPrecedesAgedNormal(t *testing.T) {
 	now := time.Now().UTC()
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
@@ -488,7 +501,7 @@ func TestQueuePriorityReleaseStreamPrecedesAgedNormalByBaseClass(t *testing.T) {
 	if err != nil || aged.ID != old.ID {
 		t.Fatalf("aged branch did not follow the tag stream: %+v %v", aged, err)
 	}
-	if priority, _ := aged.EffectivePriority(now); priority != model.PriorityHighest {
+	if priority, _ := aged.EffectivePriority(now); priority != model.PriorityHigh {
 		t.Fatalf("aging lost at the 60-minute boundary: %s", priority)
 	}
 }

@@ -10,8 +10,10 @@ import (
 
 func TestLatestPerRefHTTPIsOptInAndPagesQueuedHeads(t *testing.T) {
 	server, backend := testServer(t)
-	backend.runPage = []model.Run{{ID: "new", QueueSequence: 4, Status: model.RunQueued}, {ID: "other", QueueSequence: 2, Status: model.RunQueued}}
-	request := httptest.NewRequest(http.MethodGet, "/api/runs?latest_per_ref=1&limit=2", nil)
+	// Queued heads ride along on every first page; only the terminal head
+	// counts against the limit and names the cursor for the older page.
+	backend.runPage = []model.Run{{ID: "new", QueueSequence: 4, Status: model.RunQueued}, {ID: "other", QueueSequence: 2, Status: model.RunPassed}}
+	request := httptest.NewRequest(http.MethodGet, "/api/runs?latest_per_ref=1&limit=1", nil)
 	request.Header.Set("Authorization", "Bearer valid-token")
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
