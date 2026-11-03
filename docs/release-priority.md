@@ -22,7 +22,7 @@ past ordinary waiting claims to expose higher priority work, with bounded
 extra claims. This does not create extra weight, run permits or capacity.
 Already admitted work is not preempted.
 
-A waiting higher class prevents lower-class backfill. For v0.17.82, no backfill is allowed behind a high or highest head,
+A waiting higher class prevents lower-class backfill. For v0.17.81, no backfill is allowed behind a high or highest head,
 including an aged head. Normal heads retain the existing bounded backfill:
 the default 20-minute head-wait window permits fitting work before draining;
 zero selects strict FIFO. The planned EASY reservation rule will replace
@@ -45,17 +45,18 @@ the aging threshold. These are unscoped-admin capabilities.
 
 A repository with no size-grant record defaults to automatic tag priority up
 to size L. After exact checkout resolves size, an oversized tag (for example,
-XL without an XL grant) uses normal order and the existing bounded backfill
-window. Its admission/scheduling priority reason explains the withheld boost.
+XL without an XL grant) falls back to an admin override, then an accepted
+submission priority, then normal order. Normal heads keep the existing bounded
+backfill window. Its admission/scheduling priority reason explains the fallback.
 Tag execution still keeps its reviewed release.yaml size without requiring a
 grant. Priority before checkout is provisional; durable queue positions do not
 incorporate the gate's resolved size. Polling/admin refresh preserves the size
 cap. If the size-limit lookup fails, automatic urgency is withheld at every
 size, with a public reason and server warning (`reason=size_limit_unavailable`).
-The release continues in normal order; a later successful refresh can restore
-its eligible boost. This advisory lookup never fails release execution.
-An XL grant permits automatic urgency at XL; an explicit admin bump and
-60-minute aging are independent of this automatic size restriction.
+The release keeps any explicit priority or continues in normal order; a later
+successful refresh can restore its eligible boost. This advisory lookup never fails release execution.
+An XL grant permits automatic urgency at XL; an explicit admin bump, accepted
+submission priority and 60-minute aging are independent of this automatic size restriction.
 
 Admin `size_revoke` / `oberth size revoke <repo>` disables automatic tag
 priority as well as returning the size maximum to L. It works even if a grant
