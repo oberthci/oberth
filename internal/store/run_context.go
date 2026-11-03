@@ -8,10 +8,14 @@ import (
 // Compare durable acceptance order, not priority, admission order or the
 // current page. Keep this read-side signal separate from SupersededBy, which
 // records an actual cancellation/replacement and can outlive its successor.
+// Match enqueue's branch/schedule lane; tags and promotion attempts are independent.
 const runSupersededSQL = `EXISTS (
  SELECT 1 FROM runs AS newer
- WHERE newer.repo_id = runs.repo_id AND newer.ref_kind = runs.ref_kind
+ WHERE runs.ref_kind = 'branch' AND runs.trigger != 'promotion'
+   AND newer.trigger != 'promotion'
+   AND newer.repo_id = runs.repo_id AND newer.ref_kind = runs.ref_kind
    AND newer.ref = runs.ref AND newer.queue_sequence > runs.queue_sequence
+   AND newer.schedule_entry = runs.schedule_entry
    AND newer.status IN ('queued', 'running')
 )`
 

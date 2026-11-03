@@ -9,6 +9,102 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
+func TestRunRepositoryContextSupersededLanes(t *testing.T) {
+	for _, tc := range []struct {
+		name, firstTrigger, newerTrigger, firstEntry, newerEntry string
+		firstTag, newerTag, want                                 bool
+	}{
+		{name: "push then nightly on main", firstTrigger: "push", newerTrigger: "schedule", newerEntry: "nightly"},
+		{name: "nightly then push on main", firstTrigger: "schedule", newerTrigger: "push", firstEntry: "nightly"},
+		{name: "different schedule entries", firstTrigger: "schedule", newerTrigger: "schedule", firstEntry: "nightly", newerEntry: "weekly"},
+		{name: "same schedule entry", firstTrigger: "schedule", newerTrigger: "schedule", firstEntry: "nightly", newerEntry: "nightly", want: true},
+		{name: "same push lane", firstTrigger: "push", newerTrigger: "push", want: true},
+		{name: "ordinary triggers share a lane", firstTrigger: "push", newerTrigger: "branch", want: true},
+		{name: "legacy unnamed schedule shares push lane", firstTrigger: "schedule", newerTrigger: "push", want: true},
+		{name: "push then promotion", firstTrigger: "push", newerTrigger: "promotion"},
+		{name: "promotion then push", firstTrigger: "promotion", newerTrigger: "push"},
+		{name: "independent promotion attempts", firstTrigger: "promotion", newerTrigger: "promotion"},
+		{name: "independent tag attempts", firstTrigger: "tag", newerTrigger: "tag", firstTag: true, newerTag: true},
+		{name: "branch then tag", firstTrigger: "push", newerTrigger: "tag", newerTag: true},
+		{name: "tag then branch", firstTrigger: "tag", newerTrigger: "push", firstTag: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now()
+			s := testStore(t, &now)
+			repo := createRepo(t, s)
+			// Reproduce a newer nightly run at an older SHA than the push head.
+			spec := testRunSpec(repo.ID, "main", strings.Repeat("b", 40))
+			spec.Trigger, spec.ScheduleEntry = tc.firstTrigger, tc.firstEntry
+			if tc.firstTag {
+				spec.RefKind = model.RefTag
+			}
+			first, err := s.EnqueueRun(t.Context(), spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			spec.SHA = strings.Repeat("a", 40)
+			spec.Trigger, spec.ScheduleEntry, spec.RefKind = tc.newerTrigger, tc.newerEntry, model.RefBranch
+			if tc.newerTag {
+				spec.RefKind = model.RefTag
+			}
+			newer, err := s.EnqueueRun(t.Context(), spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			firstRead, err := s.ResolveRunID(t.Context(), first.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.want {
+				if firstRead.Status != model.RunInterrupted || firstRead.SupersededBy != newer.ID {
+					t.Fatalf("enqueue did not supersede same-lane run: %+v", firstRead)
+				}
+			} else if firstRead.Status != model.RunQueued || firstRead.SupersededBy != "" {
+				t.Fatalf("enqueue changed independent run: %+v", firstRead)
+			}
+			if firstRead.Superseded != tc.want {
+				t.Errorf("older run superseded=%t, want %t", firstRead.Superseded, tc.want)
+			}
+			newerRead, err := s.ResolveRunID(t.Context(), newer.ID)
+			if err != nil || newerRead.Superseded {
+				t.Fatalf("newest run superseded: %+v, %v", newerRead, err)
+			}
+			for _, view := range []string{"all", "active", "history", "latest"} {
+				t.Run(view, func(t *testing.T) {
+					filter := model.RunListFilter{Terminal: view == "history", LatestPerRef: view == "latest"}
+					list := func() ([]model.Run, error) {
+						if view == "active" {
+							return s.ListActiveRuns(t.Context(), filter)
+						}
+						return s.ListRecentRuns(t.Context(), filter)
+					}
+					rows, err := list()
+					if err != nil {
+						t.Fatal(err)
+					}
+					for _, row := range rows {
+						if want := row.ID == first.ID && tc.want; row.Superseded != want {
+							t.Errorf("run %s superseded=%t, want %t", row.ID, row.Superseded, want)
+						}
+					}
+					filter.Superseded = true
+					rows, err = list()
+					if err != nil {
+						t.Fatal(err)
+					}
+					wantCount := 0
+					if tc.want && (view == "all" || view == "history") {
+						wantCount = 1
+					}
+					if len(rows) != wantCount || (wantCount == 1 && rows[0].ID != first.ID) {
+						t.Fatalf("superseded filter returned %+v, want %d rows", rows, wantCount)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestRunRepositoryContextSupersededRule(t *testing.T) {
 	for _, tc := range []struct {
 		name, status                            string
@@ -31,7 +127,9 @@ func TestRunRepositoryContextSupersededRule(t *testing.T) {
 			s := testStore(t, &now)
 			repo := createRepo(t, s)
 			spec := testRunSpec(repo.ID, "feature/context", strings.Repeat("a", 40))
-			spec.Trigger = "promotion" // Independent attempts avoid enqueue-time cancellation.
+			if _, err := s.SetQueuePriorityPatterns(t.Context(), "admin", []string{"feature/*"}); err != nil {
+				t.Fatal(err)
+			}
 			first, err := s.EnqueueRun(t.Context(), spec)
 			if err != nil {
 				t.Fatal(err)
@@ -84,7 +182,6 @@ func TestRunRepositoryContextFilterBeforeLimit(t *testing.T) {
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
 	spec := testRunSpec(repo.ID, "feature/context", strings.Repeat("a", 40))
-	spec.Trigger = "promotion"
 	old, err := s.EnqueueRun(t.Context(), spec)
 	if err != nil {
 		t.Fatal(err)

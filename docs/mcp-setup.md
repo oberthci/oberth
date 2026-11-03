@@ -509,13 +509,17 @@ after the reservation is released. Declared demand is the CPU, memory and Pod
 reservation, including helpers/headroom, rather than measured usage. Scoped
 uplinks continue to omit global queue positions.
 
-`superseded` is true when a run with a greater accepted run sequence is queued
-or running for the same repository, ref kind and ref. It is independent of
-priority, SHA equality, admission order, schedule entry and page boundaries.
-A newer terminal run does not qualify. Branches and tags with the same spelling
-are separate refs. This is a live read observation, distinct from durable
+`superseded` is true for a branch run when a run with a greater accepted run
+sequence is queued or running in the same lane: repository, ref kind, ref and
+schedule entry, as in enqueue supersession. Named schedules are independent of
+ordinary branch pushes and of other schedule entries. Legacy unnamed schedules
+share the ordinary branch lane. Tags and promotion attempts never qualify and
+cannot supersede branch work. A newer terminal run does not qualify.
+The signal is independent of priority, SHA equality, admission order and page
+boundaries. Priority-protected runs and runs with pending publications can
+still match. This is a live read observation, distinct from durable
 `SupersededBy` cancellation history; it does not compare with an upstream branch
-head and does not mean that a protected run is safe to cancel.
+head or guarantee that a matching run is safe to cancel.
 
 Use `run_list({"superseded":true})` or `/api/runs?superseded=true` to find
 matching runs in one read, optionally with `repo`, `ref` and `view`. Omitted or

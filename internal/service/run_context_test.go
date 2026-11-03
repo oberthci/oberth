@@ -35,15 +35,19 @@ func runContextJSON(t *testing.T, value any) map[string]any {
 
 func TestRunRepositoryContextSurfaces(t *testing.T) {
 	f := newControlFixture(t)
+	// Protected branch work stays active beside a newer run in the same lane.
+	if _, err := f.store.SetQueuePriorityPatterns(t.Context(), "admin", []string{"feature/*"}); err != nil {
+		t.Fatal(err)
+	}
 	ctx := t.Context()
-	old, err := storetest.EnqueueRun(f.store, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/context", SHA: strings.Repeat("a", 40), Actor: "reader", Trigger: "promotion"})
+	old, err := storetest.EnqueueRun(f.store, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/context", SHA: strings.Repeat("a", 40), Actor: "reader", Trigger: "push"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.store.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	newer, err := storetest.EnqueueRun(f.store, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: old.Ref, SHA: strings.Repeat("b", 40), Actor: "reader", Trigger: "promotion"})
+	newer, err := storetest.EnqueueRun(f.store, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: old.Ref, SHA: strings.Repeat("b", 40), Actor: "reader", Trigger: "push"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,11 +135,14 @@ func TestRunRepositoryContextSurfaces(t *testing.T) {
 
 func TestRunRepositoryContextUnknownAndScope(t *testing.T) {
 	f := newScopeFixture(t)
-	old, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.visible.ID, RefKind: model.RefBranch, Ref: "feature/context", SHA: strings.Repeat("a", 40), Actor: "reader", Trigger: "promotion"})
+	if _, err := f.store.SetQueuePriorityPatterns(t.Context(), "admin", []string{"feature/*"}); err != nil {
+		t.Fatal(err)
+	}
+	old, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.visible.ID, RefKind: model.RefBranch, Ref: "feature/context", SHA: strings.Repeat("a", 40), Actor: "reader", Trigger: "push"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.visible.ID, RefKind: model.RefBranch, Ref: old.Ref, SHA: strings.Repeat("b", 40), Actor: "reader", Trigger: "promotion"}); err != nil {
+	if _, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.visible.ID, RefKind: model.RefBranch, Ref: old.Ref, SHA: strings.Repeat("b", 40), Actor: "reader", Trigger: "push"}); err != nil {
 		t.Fatal(err)
 	}
 	for _, view := range []string{"all", "active", "history"} {
@@ -181,14 +188,18 @@ func TestRunRepositoryContextUnknownAndScope(t *testing.T) {
 
 func TestRunRepositoryContextHTTPFilter(t *testing.T) {
 	f := newControlFixture(t)
+	// Protected branch work stays active beside a newer run in the same lane.
+	if _, err := f.store.SetQueuePriorityPatterns(t.Context(), "admin", []string{"feature/*"}); err != nil {
+		t.Fatal(err)
+	}
 	reader := f.api(t)
 	// A nonmatching run remains ahead globally even when the filter hides it.
-	if _, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/other", SHA: strings.Repeat("c", 40), Actor: "reader", Trigger: "promotion"}); err != nil {
+	if _, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/other", SHA: strings.Repeat("c", 40), Actor: "reader", Trigger: "push"}); err != nil {
 		t.Fatal(err)
 	}
 	var runs []model.Run
 	for i := 0; i < 2; i++ {
-		run, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/context", SHA: strings.Repeat(string(rune('a'+i)), 40), Actor: "reader", Trigger: "promotion"})
+		run, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/context", SHA: strings.Repeat(string(rune('a'+i)), 40), Actor: "reader", Trigger: "push"})
 		if err != nil {
 			t.Fatal(err)
 		}
