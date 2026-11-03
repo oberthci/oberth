@@ -111,7 +111,7 @@ func TokenCredentialByDigest(database *store.Store, ctx context.Context, digest 
 	if err != nil {
 		return model.TokenCredential{}, err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	var value model.TokenCredential
 	var created int64
 	var activated, used, revoked, expiry sql.NullInt64
