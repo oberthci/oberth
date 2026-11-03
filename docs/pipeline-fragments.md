@@ -120,11 +120,18 @@ annotation.
 
 `oberth validate` cannot resolve fragments: it runs against a checkout with no
 access to the server's git cache. It reports each reference by name and exits
-non-zero rather than passing a document it did not fully check.
+non-zero rather than passing a document it did not fully check. Admission
+requires the complete document after expansion from the pinned versions;
+skipping a fragment could also skip checks on the consumer's own templates,
+including the refusal of cache mounts on KVM leaves.
+
+The deprecated `--allow-unresolved-fragments` flag is still accepted for
+compatibility, but it no longer permits a successful result with unresolved
+fragments. It cannot bypass admission.
 
 ```
 oberth validate                                # names unresolved references, exits non-zero
-oberth validate --allow-unresolved-fragments   # checks the rest, fragment contents unchecked
+oberth validate --allow-unresolved-fragments   # also exits non-zero if fragments cannot resolve offline
 ```
 
 On the server:
