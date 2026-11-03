@@ -400,7 +400,7 @@ func TestReleaseHeartbeatNonzeroExitRetiresBackgroundDescendant(t *testing.T) {
 }
 
 func TestReleaseActionCommandAllowsExactlyThePipelineActions(t *testing.T) {
-	actions := []string{"build", "publish-r2", "publish-images", "package-chart", "publish-chart", "verify", "finalize"}
+	actions := []string{"build", "publish-images", "package-chart", "publish-chart", "verify", "finalize"}
 	for _, action := range actions {
 		command, err := releaseActionCommand(context.Background(), action)
 		if err != nil {
@@ -409,6 +409,9 @@ func TestReleaseActionCommandAllowsExactlyThePipelineActions(t *testing.T) {
 		if command.Path != repositoryReleaseScript || len(command.Args) != 2 || command.Args[0] != repositoryReleaseScript || command.Args[1] != action {
 			t.Fatalf("release action %q command = path %q args %v", action, command.Path, command.Args)
 		}
+	}
+	if command, err := releaseActionCommand(context.Background(), "publish-r2"); err == nil || command != nil {
+		t.Fatalf("retired heartbeat release action = %#v, %v", command, err)
 	}
 	if command, err := releaseActionCommand(context.Background(), "validate"); err == nil || command != nil {
 		t.Fatalf("unknown heartbeat release action = %#v, %v", command, err)
