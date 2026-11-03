@@ -116,10 +116,9 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 		t.Fatal("static Git qualification missing")
 	}
 
-	// Declared weight matches the build.yaml size annotation.
-	size, err := argoworkflow.DeclaredSize(built)
-	if err != nil || size != pipeline.L {
-		t.Fatalf("declared size = %q,%v; want L", size, err)
+	// Every run uses its container declarations for resource admission.
+	if strings.Contains(string(loadPipeline(t, "build.yaml")), "oberth.ci/size:") {
+		t.Fatal("own CI must declare resources rather than a size weight")
 	}
 
 	if built.Spec.ActiveDeadlineSeconds == nil || *built.Spec.ActiveDeadlineSeconds != 7200 {

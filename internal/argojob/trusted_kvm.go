@@ -153,7 +153,7 @@ func appendTrustedKVM(workflow *wfv1.Workflow, config Config, request Request) e
 		Container: &corev1.Container{
 			Image: intent.Recipe.HarnessImage, Command: []string{"/usr/local/bin/oberth-kvm-harness"}, Args: []string{"--intent", base64.RawURLEncoding.EncodeToString(encoded)}, WorkingDir: "/trusted",
 			Env:             []corev1.EnvVar{{Name: "OBERTH_KVM", Value: "1"}},
-			Resources:       corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2"), corev1.ResourceMemory: resource.MustParse("4Gi"), corev1.ResourceName(kvmDeviceResource): resource.MustParse("1")}, Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2"), corev1.ResourceMemory: resource.MustParse("4Gi"), corev1.ResourceName(kvmDeviceResource): resource.MustParse("1")}},
+			Resources:       corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1"), corev1.ResourceMemory: resource.MustParse("4Gi"), corev1.ResourceName(kvmDeviceResource): resource.MustParse("1")}, Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("2"), corev1.ResourceMemory: resource.MustParse("4Gi"), corev1.ResourceName(kvmDeviceResource): resource.MustParse("1")}},
 			VolumeMounts:    []corev1.VolumeMount{{Name: trustedKVMArtifacts, MountPath: ArtifactsMountPath, SubPath: artifactsSubPath, ReadOnly: true}, {Name: trustedKVMPrivate, MountPath: "/trusted"}},
 			SecurityContext: nonrootContainerSecurity(nonrootUID), TerminationMessagePath: "/dev/termination-log", TerminationMessagePolicy: corev1.TerminationMessageReadFile,
 		},

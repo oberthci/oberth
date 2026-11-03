@@ -448,6 +448,8 @@ func (seeder *SourceSeeder) createSeedPod(ctx context.Context, name, claimName s
 						corev1.ResourceCPU:    resource.MustParse("100m"),
 						corev1.ResourceMemory: resource.MustParse("64Mi"),
 					},
+					// Limits have no prior declaration or exact-step measurement; qualification is pending.
+					Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("332m"), corev1.ResourceMemory: resource.MustParse("128Mi")},
 				},
 			}},
 			Volumes: []corev1.Volume{{

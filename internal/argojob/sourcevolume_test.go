@@ -219,6 +219,7 @@ func TestSeedPodHoldsNoServiceAccountToken(t *testing.T) {
 		t.Fatal("the CI seed pod received a priority override")
 	}
 	container := created.Spec.Containers[0]
+	assertBoundedControlContainer(t, container)
 	if container.SecurityContext == nil || container.SecurityContext.ReadOnlyRootFilesystem == nil ||
 		!*container.SecurityContext.ReadOnlyRootFilesystem {
 		t.Fatal("the seed pod's root filesystem is writable")
