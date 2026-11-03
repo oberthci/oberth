@@ -132,8 +132,10 @@ The complete customer-shaped scenario on a disposable environment
      annotations:
        oberth.ci/secret-paths: oberth/data/r2-upload
    ```
-   Add a release step that wraps its command with `envconsul` to fetch the
-   secret, or that asserts the credentialed ServiceAccount token is mounted.
+   Add a release step that wraps its command with
+   `oberth secretstore exec --dir /tmp/release-secrets --path oberth/data/r2-upload -- COMMAND`
+   to fetch the secret into private files on verified tmpfs. See
+   [release secret delivery](argo-secret-delivery.md) for the file layout.
    Use `oberth access allow <repo> <step> oberth/data/r2-upload` to grant
    access. Push a tag, and watch the release run go green. Inspect the
    Workflow and its task Pods in the Argo namespace (`argo.namespace`,

@@ -36,10 +36,10 @@ marked **deadline-bound** carry an external clock.
   classes and per-template measured history are implemented. Keep numeric Pod
   resources in repository YAML and compare suggestions with the declared
   budget; see [measured requests](docs/measured-requests.md).
-- **Adaptive GOMAXPROCS** (from #755): auto-derive GOMAXPROCS from the Job's
+- **Adaptive GOMAXPROCS** (from #755): auto-derive GOMAXPROCS from the Workflow Pod's
   cgroup quota. The admission load guard half of the original entry shipped
   in v0.10.57 as size-weighted scheduler admission.
-- **Branch-Job egress policy option** (from #691 residual): the inline
+- **Branch Workflow egress policy option** (from #691 residual): the inline
   pinned-tool pattern requires egress, and branch Workflow Pods hold no secrets — but
   an optional chart NetworkPolicy restricting branch-pipeline egress to declared
   tool endpoints would add defense-in-depth against exfiltration of source
@@ -86,9 +86,8 @@ reframed for the Argo execution engine where they still apply:
   dashboard issues panel (from #803).
 - **Per-identity CI scoreboard** (from #790): aggregate pass/fail by uplink
   identity over the runs store; `GET /api/identities` + dashboard panel.
-- **Ingress discovery endpoint** (from #725/#809 residual): NodePorts are
-  fixed and knowable, which retired the old resolve-before-push dance; a
-  read-only endpoint serving the SSH host public key and TLS fingerprint
+- **Ingress discovery endpoint** (from #725/#809 residual): Service type and
+  client address are configured at installation; a read-only endpoint serving the SSH host public key and TLS fingerprint
   would still simplify strict-host-key bootstrap for new workstations.
 
 ## Promotion and publication
