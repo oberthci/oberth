@@ -111,11 +111,12 @@ func (s *Store) kvmRetryAllowedTx(ctx context.Context, tx *sql.Tx, run model.Run
 	}
 	var siblings int
 	// A newer terminal push must not be replaced either. Operator-created manual
-	// attempts have their own admission order; automatic recovery keeps this one.
+	// attempts have their own admission order; protected recovery keeps its own
+	// place and enqueue limits supersession to that admission sequence.
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE repo_id=? AND ref_kind=? AND ref=? AND id!=? AND schedule_entry=? AND (status IN ('queued','running') OR queue_sequence>?)`, run.RepoID, run.RefKind, run.Ref, run.ID, run.ScheduleEntry, run.QueueSequence).Scan(&siblings); err != nil {
 		return err
 	}
-	if siblings != 0 {
+	if siblings != 0 && !run.PriorityProtected {
 		return ErrInvalidState
 	}
 	if run.RefKind == model.RefTag {
