@@ -23,7 +23,7 @@ func TestOpenBaoPipelinePhasesPreserveTestsAndStopOnFailure(t *testing.T) {
 		if leaf.Name != "test-openbao" {
 			continue
 		}
-		if leaf.ActiveDeadlineSeconds == nil || leaf.ActiveDeadlineSeconds.IntValue() != 780 || leaf.Script.Resources.Limits.Memory().Value() != 1<<30 || leaf.Script.Resources.Limits.Cpu().MilliValue() != 2000 {
+		if leaf.ActiveDeadlineSeconds == nil || leaf.ActiveDeadlineSeconds.IntValue() != 780 || leaf.Script.Resources.Limits.Memory().Value() != 1600<<20 || leaf.Script.Resources.Limits.Cpu().MilliValue() != 2000 {
 			t.Fatal("outer resources changed")
 		}
 		script = leaf.Script.Source
