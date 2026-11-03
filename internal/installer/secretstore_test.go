@@ -173,7 +173,7 @@ func TestValidateOrgNameRejectsControlChars(t *testing.T) {
 }
 
 func TestValidateOrgNameAcceptsValid(t *testing.T) {
-	for _, name := range []string{"oberthci", "skip-ops", "my.org", "org_name", "MixedCase123", "a"} {
+	for _, name := range []string{"oberthci", "example-org", "my.org", "org_name", "MixedCase123", "a"} {
 		if err := ValidateOrgName(name); err != nil {
 			t.Errorf("ValidateOrgName(%q) = %v; want nil", name, err)
 		}
