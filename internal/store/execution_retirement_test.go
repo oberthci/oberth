@@ -46,7 +46,9 @@ func TestLegacyExecutionGrantSurvivesCapabilityUpgrade(t *testing.T) {
 	}
 }
 
-const executionRetirementDowngradeSQL = resourceCeilingDowngradeSQL + `
+const executionRetirementDowngradeSQL = resourceCeilingDowngradeSQL + executionRetirementTriggersDowngradeSQL
+
+const executionRetirementTriggersDowngradeSQL = `
 DROP TRIGGER IF EXISTS vm_executions_retired_insert;
 DROP TRIGGER IF EXISTS vm_executions_retired_update;
 DROP TRIGGER IF EXISTS vm_executions_retired_delete;

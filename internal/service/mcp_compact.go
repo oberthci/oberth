@@ -14,6 +14,7 @@ import (
 // the truncation marker added outside that budget. Occurrence history lives in
 // Body; Occurrences itself is a numeric count and remains exact.
 type issueReadOptions struct {
+	issueObservationOptions
 	Fields    []string `json:"fields"`
 	BodyLimit *int     `json:"body_limit"`
 }
@@ -68,6 +69,7 @@ func limitIssueBody(body string, limit int) string {
 
 func issueFieldValues(issue api.IssueResponse) map[string]any {
 	return map[string]any{
+		"work_status": issue.WorkStatus, "stale": issue.Stale,
 		"revision": issue.Revision, "id": issue.ID, "lock": issue.Lock, "upstream": issue.Upstream,
 		"kind": issue.Kind, "title": issue.Title, "body": issue.Body,
 		"state": issue.State, "repo_id": issue.RepoID, "branch": issue.Branch,

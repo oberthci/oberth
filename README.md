@@ -325,15 +325,22 @@ priority. Declared workflows never fall back to sizes. See
 | `promote_status` | Wait for a promotion record to become terminal |
 | `issue_create` | Create a manual issue, optionally under one upstream |
 | `issue_get` | Get an issue by ID |
-| `issue_update` | Update an issue title and body |
+| `issue_update` | Update an issue title, body or work status |
 | `issue_close` | Close an issue (history is kept) |
 | `issue_reopen` | Reopen a manual issue, preserving its ID and history |
 | `issue_delete` | Delete an accidentally created manual issue |
-| `issue_list` | List issue IDs and states (pages of 50) |
+| `issue_list` | List issue metadata and computed stale state, with work-status filtering (pages of 50) |
 | `issue_lock` | Acquire or renew a five-minute caller-owned issue lock |
+
 | `access_list` | Show all secret access grants for a repo |
 | `access_allow` | Grant a repo+step access to a named secret |
 | `access_revoke` | Revoke a secret access grant |
+
+Issues also coordinate workspace work with `todo`, `active`, `waiting` and
+`review` statuses. Set one with `oberth issues update --id ID --work-status active`;
+filter with `oberth issues --work-status active`. Staleness is computed from the
+last update, with a shorter window for active work. See
+[issue lifecycle](docs/issue-lifecycle.md) for server flags and read overrides.
 
 Authenticated `GET` endpoints (`/api/runs`, `/api/repos`, `/api/issues`,
 `/api/status`) serve the same state; `/healthz`, `/livez`, and `/readyz` are

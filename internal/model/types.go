@@ -599,7 +599,24 @@ const (
 
 func (s IssueState) Valid() bool { return s == IssueOpen || s == IssueClosed }
 
+// IssueWorkStatus coordinates work independently of the open/closed lifecycle.
+type IssueWorkStatus string
+
+const (
+	IssueTodo    IssueWorkStatus = "todo"
+	IssueActive  IssueWorkStatus = "active"
+	IssueWaiting IssueWorkStatus = "waiting"
+	IssueReview  IssueWorkStatus = "review"
+)
+
+func (s IssueWorkStatus) Valid() bool {
+	return s == IssueTodo || s == IssueActive || s == IssueWaiting || s == IssueReview
+}
+
 type Issue struct {
+	WorkStatus IssueWorkStatus `json:"work_status"`
+	// Stale is a transient service observation; reading never updates the issue.
+	Stale    bool  `json:"stale"`
 	Revision int64 `json:"revision"`
 	// Lock is transient API observation, populated after visibility checks.
 	Lock           *IssueLock `json:"lock"`
@@ -632,6 +649,7 @@ type ManualIssueSpec struct {
 }
 
 type IssuePatch struct {
+	WorkStatus         *IssueWorkStatus
 	ExpectedBodySHA256 string
 	ExpectedRevision   *int64
 	Title              *string
@@ -642,12 +660,13 @@ type IssuePatch struct {
 }
 
 type IssueListFilter struct {
-	RepoID   int64
-	Kind     IssueKind
-	State    IssueState
-	Query    string
-	BeforeID int64
-	Limit    int
+	WorkStatus IssueWorkStatus
+	RepoID     int64
+	Kind       IssueKind
+	State      IssueState
+	Query      string
+	BeforeID   int64
+	Limit      int
 	// UpstreamIDs, when non-nil, keeps only issues of these upstreams: CI
 	// issues by their repository, manual issues by the upstream they are
 	// filed under. An empty slice matches none, and workspace-global manual

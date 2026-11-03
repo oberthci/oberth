@@ -65,3 +65,28 @@ func TestCompatibilityIssuePageAliasesStayEqual(t *testing.T) {
 		t.Fatal("preferred alias lost older pages", string(raw), err)
 	}
 }
+
+func TestIssuesCLIWorkspaceFiltersEveryPage(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.URL.Query().Get("work_status") != "active" || r.URL.Query().Get("stale_after") != "2h" || r.URL.Query().Get("active_stale_after") != "5m" {
+			t.Errorf("filters lost: %s", r.URL)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("before") == "1" {
+			_, _ = w.Write([]byte(`{"Issues":[{"ID":1,"work_status":"active","stale":true}],"total":2}`))
+		} else {
+			_, _ = w.Write([]byte(`{"Issues":[{"ID":2,"work_status":"active","stale":false}],"NextBefore":1,"total":2}`))
+		}
+	}))
+	defer server.Close()
+	configure(t, server)
+	var out bytes.Buffer
+	if err := runIssues(t.Context(), []string{"--work-status", "active", "--stale-after", "2h", "--active-stale-after", "5m"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 || !strings.Contains(out.String(), "active") || !strings.Contains(out.String(), "true") {
+		t.Fatalf("requests=%d output=%s", requests, out.String())
+	}
+}

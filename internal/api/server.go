@@ -87,12 +87,15 @@ func ValidRunView(view string) bool {
 }
 
 type IssueFilter struct {
-	Repository string
-	Kind       string
-	State      string
-	Query      string
-	BeforeID   int
-	Limit      int
+	WorkStatus       string
+	StaleAfter       string
+	ActiveStaleAfter string
+	Repository       string
+	Kind             string
+	State            string
+	Query            string
+	BeforeID         int
+	Limit            int
 }
 
 // GrantFilter constrains the read-only grants view.
@@ -688,14 +691,30 @@ func (server *Server) handleIssue(writer http.ResponseWriter, request *http.Requ
 		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid issue ID"})
 		return
 	}
-	arguments, _ := json.Marshal(map[string]any{"id": id})
-	value, err := server.tools.CallTool(request.Context(), actorFrom(request.Context()), "issue_get", arguments)
+	arguments := map[string]any{"id": id}
+	for _, name := range []string{"stale_after", "active_stale_after"} {
+		if raw := request.URL.Query().Get(name); raw != "" {
+			arguments[name] = raw
+		}
+	}
+	encoded, _ := json.Marshal(arguments)
+	value, err := server.tools.CallTool(request.Context(), actorFrom(request.Context()), "issue_get", encoded)
 	server.writeView(writer, value, err)
 }
 
 func issueFilter(request *http.Request) (IssueFilter, error) {
 	query := request.URL.Query()
-	filter := IssueFilter{Repository: query.Get("repo"), Kind: query.Get("kind"), State: query.Get("state"), Query: query.Get("query"), Limit: 50}
+	filter := IssueFilter{WorkStatus: query.Get("work_status"), StaleAfter: query.Get("stale_after"), ActiveStaleAfter: query.Get("active_stale_after"), Repository: query.Get("repo"), Kind: query.Get("kind"), State: query.Get("state"), Query: query.Get("query"), Limit: 50}
+	if filter.WorkStatus != "" && !model.IssueWorkStatus(filter.WorkStatus).Valid() {
+		return IssueFilter{}, errors.New("invalid issue work status")
+	}
+	for _, raw := range []string{filter.StaleAfter, filter.ActiveStaleAfter} {
+		if raw != "" {
+			if value, err := time.ParseDuration(raw); err != nil || value <= 0 {
+				return IssueFilter{}, errors.New("invalid issue stale window")
+			}
+		}
+	}
 	if filter.Kind != "" && filter.Kind != "manual" && filter.Kind != "ci" {
 		return IssueFilter{}, errors.New("invalid issue kind")
 	}

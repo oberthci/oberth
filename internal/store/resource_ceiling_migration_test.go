@@ -9,10 +9,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/testdb"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
-const resourceCeilingDowngradeSQL = `DROP TABLE IF EXISTS resource_ceilings; DELETE FROM schema_migrations WHERE version>=48;`
+const resourceCeilingDowngradeSQL = testdb.PostV48Downgrade + `DROP TABLE IF EXISTS resource_ceilings; DELETE FROM schema_migrations WHERE version>=48;`
 
 func TestStage2ResourceCeilingMigration(t *testing.T) {
 	ctx := t.Context()

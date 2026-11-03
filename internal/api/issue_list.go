@@ -16,7 +16,9 @@ type IssueListPage struct {
 	Counts     model.IssueCounts `json:"counts"`
 }
 type IssueListSummary struct {
-	Revision    int64 `json:"revision"`
+	WorkStatus  model.IssueWorkStatus `json:"work_status"`
+	Stale       bool                  `json:"stale"`
+	Revision    int64                 `json:"revision"`
 	ID          int64
 	RepoID      int64
 	Kind        model.IssueKind
