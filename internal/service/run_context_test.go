@@ -35,7 +35,7 @@ func runContextJSON(t *testing.T, value any) map[string]any {
 
 func TestRunRepositoryContextSurfaces(t *testing.T) {
 	f := newControlFixture(t)
-	// Protected branch work stays active beside a newer run in the same lane.
+	// Priority-selected work stays active beside a newer run in the same lane.
 	if _, err := f.store.SetQueuePriorityPatterns(t.Context(), "admin", []string{"feature/*"}); err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestRunRepositoryContextUnknownAndScope(t *testing.T) {
 
 func TestRunRepositoryContextHTTPFilter(t *testing.T) {
 	f := newControlFixture(t)
-	// Protected branch work stays active beside a newer run in the same lane.
+	// Priority-selected work stays active beside a newer run in the same lane.
 	if _, err := f.store.SetQueuePriorityPatterns(t.Context(), "admin", []string{"feature/*"}); err != nil {
 		t.Fatal(err)
 	}
