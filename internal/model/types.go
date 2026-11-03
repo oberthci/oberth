@@ -402,6 +402,7 @@ func (s PromotionStatus) Valid() bool {
 func (s PromotionStatus) Terminal() bool { return s.Valid() && s != PromotionPending }
 
 type Promotion struct {
+	Train        *PromotionTrain `json:"train,omitempty"`
 	ID           string
 	Sequence     int64
 	RepoID       int64
@@ -437,6 +438,7 @@ type PromotionPage struct {
 }
 
 type PromotionSpec struct {
+	Train        *PromotionTrain
 	RepoID       int64
 	SourceBranch string
 	SourceSHA    string

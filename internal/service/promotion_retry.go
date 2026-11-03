@@ -83,11 +83,15 @@ func (service *API) admitPromotionRetry(ctx context.Context, actor api.Actor, fa
 	if err != nil {
 		return model.Repository{}, model.Run{}, model.Promotion{}, err
 	}
+	if failed.Train != nil {
+		candidate, promotion, err := service.admitPromotionTrain(ctx, actor, repository, failed.Train, failed.TargetRef, failed.ID, mode)
+		return repository, candidate, promotion, err
+	}
 	candidate, err := service.runs.ResolveRun(ctx, repository.ID, failed.SourceSHA)
 	if err != nil {
 		return model.Repository{}, model.Run{}, model.Promotion{}, fmt.Errorf("resolve promotion source %s: %w", failed.SourceSHA, err)
 	}
-	if !sameOID(candidate.SHA, failed.SourceSHA) || candidate.Status != model.RunPassed {
+	if !sameOID(candidate.SHA, failed.SourceSHA) {
 		return model.Repository{}, model.Run{}, model.Promotion{}, fmt.Errorf("%w: the newest run for %s is %s (%s), not green; rerun it before retrying promotion %s",
 			ErrInvalidInput, failed.SourceSHA, candidate.ID, candidate.Status, failed.ID)
 	}

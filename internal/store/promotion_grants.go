@@ -131,14 +131,14 @@ WHERE repo_id = ? AND source_sha = ? AND target_ref = ?
   AND revoked_at IS NULL AND consumed_at IS NULL AND expires_at > ?
   AND NOT EXISTS (
       SELECT 1 FROM promotions
-      WHERE promotions.grant_id = promotion_grants.id AND promotions.status IN ('pending', 'passed')
+      WHERE ((promotions.train_json='' AND promotions.grant_id = promotion_grants.id) OR EXISTS(SELECT 1 FROM promotion_train_grants g WHERE g.promotion_id=promotions.id AND g.grant_id=promotion_grants.id AND g.included=1)) AND promotions.status IN ('pending', 'passed')
   )
 ORDER BY created_at LIMIT 1`, repoID, strings.ToLower(sha), target, now))
 	if errors.Is(err, sql.ErrNoRows) {
 		var holder string
 		holderErr := s.reader().QueryRowContext(ctx, `
 SELECT promotions.id FROM promotion_grants
-JOIN promotions ON promotions.grant_id = promotion_grants.id AND promotions.status = 'pending'
+JOIN promotions ON ((promotions.train_json='' AND promotions.grant_id = promotion_grants.id) OR EXISTS(SELECT 1 FROM promotion_train_grants g WHERE g.promotion_id=promotions.id AND g.grant_id=promotion_grants.id AND g.included=1)) AND promotions.status = 'pending'
 WHERE promotion_grants.repo_id = ? AND promotion_grants.source_sha = ? AND promotion_grants.target_ref = ?
   AND promotion_grants.revoked_at IS NULL AND promotion_grants.consumed_at IS NULL AND promotion_grants.expires_at > ?
 LIMIT 1`, repoID, strings.ToLower(sha), target, now).Scan(&holder)

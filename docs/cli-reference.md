@@ -586,6 +586,14 @@ Usage of preflight upstreams:
 ## oberth promotion
 
 ```text
+Usage: oberth promotion create --branch <target> [--sha <sha> | --sources-file <json-file>] [--repo <repository>] [--skip-conflicting] [--json]
+         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+Choose exactly one of --sha or --sources-file.
+sources-file contains 1..32 ordered {"sha":"...","ref":"feature/one"} objects in a JSON array.
+Each source must be an exactly tested green branch commit. A train merges in order and runs CI once before publishing.
+Example sources.json (replace with your three tested SHAs):
+[{"sha":"1111111111111111111111111111111111111111"},{"sha":"2222222222222222222222222222222222222222"},{"sha":"3333333333333333333333333333333333333333"}]
+oberth promotion create --repo codeberg/acme/widgets --branch main --sources-file sources.json
 Usage: oberth promotion retry <promotion-id> [--json] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
 ```
 
@@ -593,6 +601,19 @@ Usage: oberth promotion retry <promotion-id> [--json] [--url <mcp-url>] [--token
 
 ```text
 Usage: oberth promotion retry <promotion-id> [--json] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+```
+
+## oberth promotion create
+
+```text
+Usage: oberth promotion create --branch <target> [--sha <sha> | --sources-file <json-file>] [--repo <repository>] [--skip-conflicting] [--json]
+         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+Choose exactly one of --sha or --sources-file.
+sources-file contains 1..32 ordered {"sha":"...","ref":"feature/one"} objects in a JSON array.
+Each source must be an exactly tested green branch commit. A train merges in order and runs CI once before publishing.
+Example sources.json (replace with your three tested SHAs):
+[{"sha":"1111111111111111111111111111111111111111"},{"sha":"2222222222222222222222222222222222222222"},{"sha":"3333333333333333333333333333333333333333"}]
+oberth promotion create --repo codeberg/acme/widgets --branch main --sources-file sources.json
 ```
 
 ## oberth publication

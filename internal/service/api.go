@@ -19,6 +19,7 @@ import (
 	"k8s.io/utils/clock"
 
 	"github.com/oberthci/oberth/internal/api"
+	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/pushretry"
 	"github.com/oberthci/oberth/internal/runlog"
@@ -618,16 +619,20 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		}
 		return service.sync(ctx, actor, arguments.Repo, arguments.SHA, arguments.Branch, requestedPriority(actor, arguments.PriorityRequest))
 	case "promote":
-		var arguments struct {
-			model.PriorityRequest
-			Repo   string `json:"repo"`
-			SHA    string `json:"sha"`
-			Branch string `json:"branch"`
-		}
+		var arguments promotionArguments
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		promotion, err := service.promote(ctx, actor, arguments.Repo, arguments.SHA, arguments.Branch, requestedPriority(actor, arguments.PriorityRequest))
+		if (arguments.SHA != "") == (arguments.Sources != nil) || arguments.SkipConflicting && arguments.Sources == nil {
+			return nil, refuse(ErrInvalidInput, "provide either sha or sources; skip_conflicting requires sources")
+		}
+		var promotion model.Promotion
+		var err error
+		if arguments.Sources != nil {
+			promotion, err = service.promoteTrain(ctx, actor, arguments)
+		} else {
+			promotion, err = service.promote(ctx, actor, arguments.Repo, arguments.SHA, arguments.Branch, requestedPriority(actor, arguments.PriorityRequest))
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -2436,37 +2441,12 @@ func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName
 // not spend it. retryOf and mode record a promote_retry lineage.
 func (service *API) admitPromotion(ctx context.Context, actor api.Actor, repository model.Repository, candidate model.Run,
 	target, retryOf, mode string) (model.Promotion, error) {
-	if repository.ArchivedAt != nil {
-		return model.Promotion{}, store.ErrRepositoryArchived
+	if err := checkPromotionSource(repository, candidate); err != nil {
+		return model.Promotion{}, err
 	}
-	if candidate.RefKind != model.RefBranch || candidate.Status != model.RunPassed || !sameOID(candidate.TestedSHA, candidate.SHA) {
-		return model.Promotion{}, refuse(ErrInvalidInput, "promotion source must be the exactly tested green branch commit")
-	}
-	var grantID string
-	if retryOf != "" && mode == model.PromotionRetryAuto {
-		original, err := service.promotions.Promotion(ctx, retryOf)
-		if err != nil {
-			return model.Promotion{}, err
-		}
-		grantID = original.GrantID
-		if grantID == "" && !actor.Admin {
-			return model.Promotion{}, refuse(ErrForbidden, "automatic promotion retry lost its original authority")
-		}
-	} else if !actor.Admin {
-		if service.promotionGrants == nil {
-			return model.Promotion{}, refuse(ErrForbidden, "promote requires an admin uplink or a promotion grant")
-		}
-		grant, matchErr := service.promotionGrants.MatchingPromotionGrant(ctx, repository.ID, candidate.SHA, target)
-		if errors.Is(matchErr, store.ErrInvalidState) {
-			return model.Promotion{}, refuse(fmt.Errorf("%w: %s", ErrForbidden, matchErr.Error()), "matching promotion grant is held by a pending promotion; inspect promotion_list")
-		}
-		if errors.Is(matchErr, store.ErrNotFound) {
-			return model.Promotion{}, refuse(ErrForbidden, "no matching promotion grant; request one from an admin with promote_grant")
-		}
-		if matchErr != nil {
-			return model.Promotion{}, fmt.Errorf("match promotion grant: %w", matchErr)
-		}
-		grantID = grant.ID
+	grantID, err := service.promotionSourceGrant(ctx, actor, repository, candidate, target, retryOf, mode, 0)
+	if err != nil {
+		return model.Promotion{}, err
 	}
 	promotion, err := service.promotions.AppendPromotion(ctx, model.PromotionSpec{
 		RepoID: repository.ID, SourceBranch: candidate.Ref, SourceSHA: candidate.SHA,
@@ -2499,15 +2479,43 @@ func (service *API) planAdmittedPromotion(ctx context.Context, actor api.Actor, 
 		defer cancelCleanup()
 		result = service.cleanupTerminalPromotionWorkspace(cleanupCtx, result)
 	}()
-	plan, reused, err := service.reusablePromotionPlan(ctx, repository, promotion)
-	if err == nil && !reused {
-		plan, err = service.git.PreparePromotion(ctx, service.cacheInputFor(ctx, repository), candidate.SHA, target, workspaceSource)
+	var plan gitcache.MergeCandidate
+	var err error
+	var resolvedTrain *model.PromotionTrain
+	if promotion.Train != nil {
+		if _, err = service.resolvePromotionTrainSources(ctx, repository, promotion.Train); err == nil {
+			planner, ok := service.git.(promotionTrainGit)
+			if !ok {
+				err = refuse(ErrUnavailable, "promotion train preparation")
+			} else {
+				var prepared gitcache.PromotionTrainCandidate
+				prepared, err = planner.PreparePromotionTrain(ctx, service.cacheInputFor(ctx, repository), promotion.Train.Sources, target, workspaceSource, promotion.Train.SkipConflicting)
+				plan = prepared.MergeCandidate
+				resolvedTrain = &model.PromotionTrain{Sources: prepared.Sources, SkipConflicting: promotion.Train.SkipConflicting, TreeSHA: prepared.TreeSHA}
+				if err != nil && len(prepared.Sources) == len(promotion.Train.Sources) {
+					resolvedTrain.TreeSHA = ""
+					if recorder, ok := service.promotions.(promotionTrainPlanner); ok {
+						if recorded, recordErr := recorder.PlanPromotionTrain(ctx, promotion.ID, "", "", resolvedTrain); recordErr != nil {
+							err = errors.Join(err, recordErr)
+						} else {
+							promotion = recorded
+						}
+					}
+				}
+			}
+		}
+	} else {
+		var reused bool
+		plan, reused, err = service.reusablePromotionPlan(ctx, repository, promotion)
+		if err == nil && !reused {
+			plan, err = service.git.PreparePromotion(ctx, service.cacheInputFor(ctx, repository), candidate.SHA, target, workspaceSource)
+		}
 	}
 	if err != nil {
 		return service.failAdmittedPromotion(ctx, promotion, "prepare promotion: "+err.Error(), "")
 	}
 	if !validOID(plan.MergedSHA) ||
-		(plan.TargetUnborn && (plan.BaseSHA != "" || !plan.FastForward)) ||
+		(plan.TargetUnborn && (plan.BaseSHA != "" || promotion.Train == nil && !plan.FastForward)) ||
 		(!plan.TargetUnborn && !validOID(plan.BaseSHA)) {
 		return service.failAdmittedPromotion(ctx, promotion, "promotion plan contains invalid object IDs", "")
 	}
@@ -2523,7 +2531,19 @@ func (service *API) planAdmittedPromotion(ctx context.Context, actor api.Actor, 
 	if err := service.checkPromotionRelease(ctx, repository, plan.MergedSHA, planBase); err != nil {
 		return service.failAdmittedPromotion(ctx, promotion, err.Error(), "")
 	}
-	planned, err := service.promotions.PlanPromotion(ctx, promotion.ID, planBase, plan.MergedSHA)
+	var planned model.Promotion
+	if promotion.Train != nil {
+		recorder, ok := service.promotions.(promotionTrainPlanner)
+		if !ok {
+			return service.failAdmittedPromotion(ctx, promotion, "promotion train records unavailable", "")
+		}
+		if plan.FastForward {
+			return service.failAdmittedPromotion(ctx, promotion, "promotion train requires merged CI", "")
+		}
+		planned, err = recorder.PlanPromotionTrain(ctx, promotion.ID, planBase, plan.MergedSHA, resolvedTrain)
+	} else {
+		planned, err = service.promotions.PlanPromotion(ctx, promotion.ID, planBase, plan.MergedSHA)
+	}
 	if err != nil {
 		return service.failAdmittedPromotion(ctx, promotion, "record promotion plan: "+err.Error(), "")
 	}
@@ -2645,7 +2665,7 @@ func (service *API) prepareWaitPromotion(ctx context.Context, id string, request
 		if err != nil {
 			return PromotionWaitResponse{}, err
 		}
-		return PromotionWaitResponse{Promotion: promotion, Repo: repo, Ref: promotion.SourceBranch, RetriedAs: retriedAs}, nil
+		return PromotionWaitResponse{SourceCount: promotion.SourceCount(), Promotion: promotion, Repo: repo, Ref: promotion.SourceBranch, RetriedAs: retriedAs}, nil
 	}
 	return func(ctx context.Context) (PromotionWaitResponse, error) {
 		timer := time.NewTimer(time.Until(deadline))
@@ -2673,7 +2693,7 @@ func (service *API) prepareWaitPromotion(ctx context.Context, id string, request
 				if promotion.Status.Terminal() {
 					return terminal(ctx, promotion)
 				}
-				response := PromotionWaitResponse{Promotion: promotion, Repo: repo, Ref: promotion.SourceBranch}
+				response := PromotionWaitResponse{SourceCount: promotion.SourceCount(), Promotion: promotion, Repo: repo, Ref: promotion.SourceBranch}
 				response.StillRunning = true
 				return response, nil
 			case <-changed:

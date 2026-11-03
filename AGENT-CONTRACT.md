@@ -131,7 +131,8 @@ receive event ID. Audit failure prevents an unaudited upstream deletion.
   Git, static Oberth, the `oberth-git-ssh` alias and a CA bundle, UID/GID 65534.
   No shell or OpenSSH is present. Git's GIT_SSH points at the native pinned-key
   transport with GIT_SSH_VARIANT=simple; GIT_SSH_COMMAND is never inherited.
-  Promotion retains conservative path conflicts and uses native Git plumbing.
+  Single-source promotion retains conservative path conflicts and uses native Git plumbing.
+  Ordered merge trains use native three-way merges and always test the combined result.
   Removed backend/shadow flags, chart settings, status fields and counters
   are not accepted. See docs/gitcache.md for explicit values migration.
   The cache init
@@ -2656,6 +2657,8 @@ alone is never evidence that missing migrations ran.
 | v51 | Issue workspace coordination | Add constrained todo/active/waiting/review work status and include real status changes in metadata revisions; staleness remains computed on reads | Database restore |
 | v52 | Run list order | Rebuild the v40 covering index idempotently; widen `runs_latest_ref_idx` to cover status, start, finish, queue time and ID, so the grouped latest-per-ref list ranks every head from one covering scan | Database restore |
 
+| v53 | Promotion trains | Persist ordered sources, conflict decisions and merged tree SHA, with retry identity and per-source grant reservations; legacy promotions remain unchanged | Database restore |
+
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding
 entry in this table.
@@ -3280,3 +3283,31 @@ list fields for privacy; all other existing names and envelopes remain.
 Any removal requires a later major version after an announced deprecation
 window of at least 90 days and one stable minor release. No removal date is
 announced here. See [the compatibility policy](docs/api-compatibility.md).
+
+### Ordered promotion trains
+
+`promote` accepts either `sha` or `sources: [{sha, ref?}, ...]` (1..32 unique
+full commit SHAs), plus one target `branch` and optional `repo`. Each source
+passes the same exactly tested green branch eligibility function as single-source
+promotion. A supplied ref must match that tested branch. A train waits in the
+existing repository/target queue, then fetches the current target once, merges
+sources in order in one temporary checkout and runs one promotion CI job on the
+final commit. Native Git must merge cleanly; failed CI never publishes the target.
+Trains always test, including one-source, already-contained and unborn targets.
+
+Conflicts identify the 1-based source index, SHA and paths before any run starts.
+`skip_conflicting: true` aborts that source's merge and continues; all-conflicting
+trains fail without a run. Operational Git errors are never skipped. The existing
+promotion error/reason line retains skipped source evidence even after success.
+The durable `train` object and admission/plan audit actions retain requested source
+order, skipped flags/paths and the final `tree_sha` (Git tree object); `result_sha`
+continues to identify the tested commit. `source_count` on `promote_status` and
+`promotion_list` counts requested sources, including skipped ones; legacy rows
+report 1. Automatic retries preserve every original grant, and both retry modes
+recheck all sources, merge afresh and run CI. Trusted preflight restart recovery
+retains the already planned tree and full train evidence. Every included grant
+must remain valid through delivery; skipped grants are released and not consumed.
+
+Authenticated `POST /api/promotions` accepts the same body and returns `{id}`.
+`oberth promotion create --sources-file sources.json --branch main --repo <repo>`
+calls the same MCP operation. See [promotion trains](docs/promotion-trains.md).
