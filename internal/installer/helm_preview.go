@@ -54,7 +54,10 @@ func previewHelmUpgrade(ctx context.Context, cfg Config, deps Deps, openbao Open
 	}
 
 	// Only preview when upgrading an existing release.
-	_, exists := findHelmRelease(ctx, deps, "oberth", ns)
+	_, exists, err := findHelmRelease(ctx, deps, "oberth", ns)
+	if err != nil {
+		return err
+	}
 	if !exists {
 		return nil // fresh install — no existing objects to conflict with
 	}
@@ -85,9 +88,8 @@ func previewHelmUpgrade(ctx context.Context, cfg Config, deps Deps, openbao Open
 
 	raw, err := deps.RunHelm(ctx, args)
 	if err == nil {
-		// Preview succeeded — no conflicts.
-		clear(raw)
-		return nil
+		defer clear(raw)
+		return printHelmValueChanges(ctx, deps, ns, raw)
 	}
 
 	// Parse SSA conflicts from the error.

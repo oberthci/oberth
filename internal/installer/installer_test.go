@@ -886,7 +886,7 @@ func TestExecuteDarwinNodeListFailureStillLoadsKindImages(t *testing.T) {
 			// HelmWithKubeArgs; match on substrings instead of exact prefixes.
 			command := strings.Join(args, " ")
 			switch {
-			case strings.Contains(command, "list -n openbao -o json") || strings.Contains(command, "list -n oberth -o json"):
+			case strings.Contains(command, "list -n "):
 				return []byte("[]"), nil
 			case strings.Contains(command, "show values oberth-charts/oberth"):
 				return []byte("image:\n  ref: private.example/oberth:latest\n"), nil
@@ -1131,9 +1131,12 @@ func TestDryRunZeroWrites(t *testing.T) {
 	}
 	deps := Deps{
 		Output: &buf,
-		RunHelm: func(_ context.Context, _ []string) ([]byte, error) {
+		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if args[0] != "list" {
+				t.Fatalf("dry-run attempted mutation: %v", args)
+			}
 			helmCalls++
-			return nil, nil
+			return []byte(`[]`), nil
 		},
 		KubeClient:  fake.NewClientset(node, readyArgoControllerPod()),
 		RestConfig:  &rest.Config{Host: "https://127.0.0.1:6443"},
@@ -1143,8 +1146,8 @@ func TestDryRunZeroWrites(t *testing.T) {
 	if err := Run(context.Background(), cfg, deps); err != nil {
 		t.Fatal(err)
 	}
-	if helmCalls != 0 {
-		t.Fatalf("dry-run called helm %d times, want 0", helmCalls)
+	if helmCalls != 1 {
+		t.Fatalf("dry-run called helm %d times, want one read-only release lookup", helmCalls)
 	}
 	output := buf.String()
 	if !strings.Contains(output, "Dry-run plan") {
@@ -1305,7 +1308,6 @@ func TestOberthHelmArgs(t *testing.T) {
 				// defaults; pinned unconditionally (#662).
 				"--set", "argo.goProxy.port=8444",
 				// Promotion grant lifetime (#826).
-				"--set", "promotion.grantMaxLifetime=24h",
 				"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
 				"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
 				"--set", "secretstore.enabled=true",
@@ -1327,7 +1329,6 @@ func TestOberthHelmArgs(t *testing.T) {
 				// Go module proxy pins (#662).
 				"--set", "argo.goProxy.port=8444",
 				// Promotion grant lifetime (#826).
-				"--set", "promotion.grantMaxLifetime=24h",
 				"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
 				"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
 				"--set", "secretstore.enabled=true",
@@ -1497,7 +1498,6 @@ func TestOberthHelmArgsWithoutSecretStore(t *testing.T) {
 		// Go module proxy pins (#662).
 		"--set", "argo.goProxy.port=8444",
 		// Promotion grant lifetime (#826).
-		"--set", "promotion.grantMaxLifetime=24h",
 		"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
 		"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
 		"--version", "0.10.54",
@@ -1527,13 +1527,11 @@ func TestOberthHelmArgsWithRekor(t *testing.T) {
 		// Go module proxy pins (#662).
 		"--set", "argo.goProxy.port=8444",
 		// Promotion grant lifetime (#826).
-		"--set", "promotion.grantMaxLifetime=24h",
 		"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
 		"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
 		"--set", "auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",
 		"--set", "auditAnchor.rekorInsecureHTTP=true",
 		"--set-string", "auditAnchor.rekorPublicKey=" + publicKeyPEM,
-		"--set-string", "auditAnchor.acceptWitnessGenesis=",
 		"--version", "0.10.54",
 		"--reuse-values",
 	}
@@ -1733,9 +1731,12 @@ func TestDryRunFullPlanRendersAllPhases(t *testing.T) {
 	helmCalls := 0
 	deps := Deps{
 		Output: &buf,
-		RunHelm: func(_ context.Context, _ []string) ([]byte, error) {
+		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if args[0] != "list" {
+				t.Fatalf("dry-run attempted mutation: %v", args)
+			}
 			helmCalls++
-			return nil, nil
+			return []byte(`[]`), nil
 		},
 		KubeClient:  fake.NewClientset(node, readyArgoControllerPod()),
 		RestConfig:  &rest.Config{Host: "https://127.0.0.1:6443"},
@@ -1745,8 +1746,8 @@ func TestDryRunFullPlanRendersAllPhases(t *testing.T) {
 	if err := Run(context.Background(), cfg, deps); err != nil {
 		t.Fatal(err)
 	}
-	if helmCalls != 0 {
-		t.Fatalf("dry-run called helm %d times, want 0", helmCalls)
+	if helmCalls != 1 {
+		t.Fatalf("dry-run called helm %d times, want one read-only release lookup", helmCalls)
 	}
 	output := buf.String()
 	for _, want := range []string{
@@ -1787,7 +1788,7 @@ func TestDryRunDevSecretStorePlan(t *testing.T) {
 	}
 	deps := Deps{
 		Output:      &buf,
-		RunHelm:     func(_ context.Context, _ []string) ([]byte, error) { return nil, nil },
+		RunHelm:     func(_ context.Context, _ []string) ([]byte, error) { return []byte(`[]`), nil },
 		KubeClient:  fake.NewClientset(node, readyArgoControllerPod()),
 		RestConfig:  &rest.Config{Host: "https://127.0.0.1:6443"},
 		ContextName: "kind-test",
@@ -1822,7 +1823,7 @@ func TestDryRunPlainPlanOmitsOptionalPhases(t *testing.T) {
 	}
 	deps := Deps{
 		Output:      &buf,
-		RunHelm:     func(_ context.Context, _ []string) ([]byte, error) { return nil, nil },
+		RunHelm:     func(_ context.Context, _ []string) ([]byte, error) { return []byte(`[]`), nil },
 		KubeClient:  fake.NewClientset(node, readyArgoControllerPod()),
 		RestConfig:  &rest.Config{Host: "https://127.0.0.1:6443"},
 		ContextName: "default",
@@ -1870,7 +1871,7 @@ func TestInstallOberthExistingKindReleaseSkipsImagePreparation(t *testing.T) {
 	if !result.AlreadyInstalled {
 		t.Fatal("existing release should be reported as already installed")
 	}
-	if len(helmCalls) != 1 || strings.Join(helmCalls[0], " ") != "list -n oberth -o json" {
+	if len(helmCalls) != 1 || strings.Join(helmCalls[0], " ") != "list -n oberth -o json -a" {
 		t.Fatalf("helm calls = %v, want only release lookup", helmCalls)
 	}
 }
@@ -2298,7 +2299,10 @@ func TestFindHelmRelease(t *testing.T) {
 				return []byte(`[{"name":"openbao","namespace":"openbao","status":"deployed","chart":"openbao-0.28.6"}]`), nil
 			},
 		}
-		release, exists := findHelmRelease(ctx, deps, "openbao", "openbao")
+		release, exists, err := findHelmRelease(ctx, deps, "openbao", "openbao")
+		if err != nil {
+			t.Fatal(err)
+		}
 		if !exists {
 			t.Fatal("should find existing release")
 		}
@@ -2314,7 +2318,7 @@ func TestFindHelmRelease(t *testing.T) {
 				return []byte(`[]`), nil
 			},
 		}
-		if _, exists := findHelmRelease(ctx, deps, "openbao", "openbao"); exists {
+		if _, exists, err := findHelmRelease(ctx, deps, "openbao", "openbao"); exists || err != nil {
 			t.Fatal("should not find missing release")
 		}
 	})
@@ -2326,8 +2330,8 @@ func TestFindHelmRelease(t *testing.T) {
 				return nil, errors.New("namespace not found")
 			},
 		}
-		if _, exists := findHelmRelease(ctx, deps, "openbao", "openbao"); exists {
-			t.Fatal("helm error should report not exists")
+		if _, exists, err := findHelmRelease(ctx, deps, "openbao", "openbao"); exists || err == nil {
+			t.Fatal("helm failure must be distinguished from absence")
 		}
 	})
 }
@@ -2475,13 +2479,11 @@ func TestInstallOberthReconcilesRekorAtInstalledVersion(t *testing.T) {
 				// Go module proxy pins (#662).
 				"--set", "argo.goProxy.port=8444",
 				// Promotion grant lifetime (#826).
-				"--set", "promotion.grantMaxLifetime=24h",
 				"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
 				"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
 				"--set", "auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",
 				"--set", "auditAnchor.rekorInsecureHTTP=true",
 				"--set-string", "auditAnchor.rekorPublicKey=" + publicKeyPEM,
-				"--set-string", "auditAnchor.acceptWitnessGenesis=",
 				"--version", tc.installedVersion,
 				"--reuse-values",
 			}
@@ -2634,13 +2636,11 @@ func TestInstallOberthRekorUpgradeAllowsUnknownInstalledVersion(t *testing.T) {
 		// Go module proxy pins (#662).
 		"--set", "argo.goProxy.port=8444",
 		// Promotion grant lifetime (#826).
-		"--set", "promotion.grantMaxLifetime=24h",
 		"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
 		"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
 		"--set", "auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",
 		"--set", "auditAnchor.rekorInsecureHTTP=true",
 		"--set-string", "auditAnchor.rekorPublicKey=" + publicKeyPEM,
-		"--set-string", "auditAnchor.acceptWitnessGenesis=",
 		"--version", "0.10.58",
 		"--reuse-values",
 	}
@@ -4827,7 +4827,7 @@ func TestK3sAutoNetworkPolicySetsFlag(t *testing.T) {
 	var buf bytes.Buffer
 	deps := Deps{
 		Output:      &buf,
-		RunHelm:     func(_ context.Context, _ []string) ([]byte, error) { return nil, nil },
+		RunHelm:     func(_ context.Context, _ []string) ([]byte, error) { return []byte(`[]`), nil },
 		KubeClient:  fake.NewClientset(node, readyArgoControllerPod()),
 		RestConfig:  &rest.Config{Host: "https://127.0.0.1:6443"},
 		ContextName: "default",

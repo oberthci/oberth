@@ -312,7 +312,10 @@ func inspectRestoreTarget(ctx context.Context, cfg RestoreConfig, deps backupDep
 	if target.Server, err = inspectServerDeployment(ctx, deps.Deps, cfg.Namespace); err != nil {
 		return target, openBaoExec{}, err
 	}
-	release, found := findHelmRelease(ctx, deps.Deps, "oberth", cfg.Namespace)
+	release, found, err := findHelmRelease(ctx, deps.Deps, "oberth", cfg.Namespace)
+	if err != nil {
+		return target, openBaoExec{}, err
+	}
 	if !found {
 		return target, openBaoExec{}, fmt.Errorf("no oberth Helm release in namespace %s; install Oberth on the target first (oberth setup)", cfg.Namespace)
 	}

@@ -192,7 +192,13 @@ type Config struct {
 	// NetworkPolicy controls pipeline egress NetworkPolicy enforcement:
 	// "auto" (default) enables on all CNIs except k3s's built-in kube-router
 	// (which has a DNAT incompatibility), "true" forces on, "false" forces off.
-	NetworkPolicy string
+	NetworkPolicy           string
+	PushBannerURL           string
+	PushBannerURLSet        bool
+	AcceptWitnessGenesisSet bool
+	existingRelease         bool
+	installValuesRequested  bool
+	liveInstallValues       map[string]any
 	// ServiceType is the Oberth Service type: NodePort, LoadBalancer or
 	// ClusterIP. Empty means NodePort on a fresh install and whatever the
 	// existing release has on an upgrade.
@@ -477,10 +483,11 @@ type Deps struct {
 
 // ClusterInfo describes the target Kubernetes cluster.
 type ClusterInfo struct {
-	Context string
-	Server  string
-	Engine  string // "k3s", "kind", "k0s", "minikube", "unknown"
-	IsLocal bool
+	NodesUnavailable bool
+	Context          string
+	Server           string
+	Engine           string // "k3s", "kind", "k0s", "minikube", "unknown"
+	IsLocal          bool
 }
 
 // OpenBaoResult describes the outcome of the OpenBao install phase.
@@ -687,7 +694,13 @@ func (cfg *Config) Validate() error {
 	default:
 		return fmt.Errorf("--network-policy must be auto, true, or false, got %q", cfg.NetworkPolicy)
 	}
-	if cfg.AcceptWitnessGenesis != "" && !cfg.InstallRekor {
+	if cfg.PushBannerURL != "" {
+		parsed, err := url.Parse(cfg.PushBannerURL)
+		if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" {
+			return errors.New("--push-banner-url must be an absolute HTTPS URL without credentials or a fragment")
+		}
+	}
+	if (cfg.AcceptWitnessGenesis != "" || cfg.AcceptWitnessGenesisSet) && !cfg.InstallRekor {
 		return errors.New("--accept-witness-genesis requires --install-rekor")
 	}
 	if cfg.AcceptWitnessGenesis != "" {
@@ -707,6 +720,7 @@ func (cfg *Config) Validate() error {
 
 // Run executes the full install flow.
 func Run(ctx context.Context, cfg Config, deps Deps) error {
+	cfg.installValuesRequested = explicitInstallValues(cfg)
 	if err := captureBaoEnvironment(&deps); err != nil {
 		return err
 	}
@@ -752,13 +766,9 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 		_, _ = fmt.Fprintln(deps.Output, "EVALUATION MODE — not for production. Dev OpenBao state does not survive pod restart.")
 	}
 
-	// Resolve auto network policy based on cluster engine before the dry-run
-	// plan so it accurately reflects the install decision.
-	if cfg.NetworkPolicy == "auto" && cfg.WatchAdoptionPlan == "" {
-		if cluster.Engine == "k3s" {
-			cfg.NetworkPolicy = "false"
-		} else {
-			cfg.NetworkPolicy = "true"
+	if cfg.WatchAdoptionPlan == "" {
+		if err := resolveInstallRerunValues(ctx, &cfg, deps, cluster); err != nil {
+			return err
 		}
 	}
 
@@ -779,15 +789,7 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	// LoadBalancer Service on k3s makes servicelb take host ports 2222 and
 	// 443 on the node, invisibly (#049): default fresh installs to NodePort
 	// and keep an existing release's choice unless one is requested.
-	if cfg.ServiceType == "" && cfg.WatchAdoptionPlan == "" && !cfg.DryRun {
-		ns := cfg.Namespace
-		if ns == "" {
-			ns = DefaultNamespace
-		}
-		if _, exists := findHelmRelease(ctx, deps, "oberth", ns); !exists {
-			cfg.ServiceType = "NodePort"
-		}
-	}
+
 	if cfg.ServiceType == "LoadBalancer" && cluster.Engine == "k3s" {
 		_, _ = fmt.Fprintln(deps.Output, "NOTE: service type LoadBalancer on k3s: servicelb binds the Service ports (2222 and 443 by default) on the node's own address; SSH or HTTPS to those host ports reaches Oberth.")
 	}
@@ -902,23 +904,27 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 		for _, warn := range produceWarnings {
 			_, _ = fmt.Fprintf(deps.Output, "WARNING: %s\n", warn)
 		}
+		if err := checkProducedIdentities(cfg.liveInstallValues, "perRepoIdentities", len(produced), produceErr); err != nil {
+			return err
+		}
+		if identityRunner == nil || produceErr != nil {
+			if err := checkProducedIdentities(cfg.liveInstallValues, "perStepIdentities", 0, produceErr); err != nil {
+				return err
+			}
+		}
 		if produceErr != nil {
 			_, _ = fmt.Fprintf(deps.Output, "WARNING: could not read per-repo identities: %v\n", produceErr)
 		} else if len(produced) > 0 {
 			cfg.PerRepoIdentities = produced
-		}
-		// Warn loudly when producing zero identities but the live release
-		// carries non-empty argo.perRepoIdentities — existing ServiceAccounts
-		// persist only via --reuse-values and new grants will not be
-		// provisioned. (#260 gap 6)
-		if len(cfg.PerRepoIdentities) == 0 {
-			warnPerRepoIdentityDelta(ctx, deps, ns)
 		}
 		// Per-step identities (issue #623, finding 3). Only produce when the
 		// per-repo producer succeeded (prune-safety: an empty per-step list
 		// from a producer failure must never reach the chart or the sync).
 		if len(cfg.PerStepIdentities) == 0 && identityRunner != nil && produceErr == nil {
 			stepIds, stepErr := ProducePerStepIdentities(ctx, identityRunner, deps.ContextName, ns)
+			if err := checkProducedIdentities(cfg.liveInstallValues, "perStepIdentities", len(stepIds), stepErr); err != nil {
+				return err
+			}
 			if stepErr != nil {
 				_, _ = fmt.Fprintf(deps.Output, "WARNING: could not read per-step identities: %v\n", stepErr)
 			} else if len(stepIds) > 0 {
@@ -1103,6 +1109,7 @@ func DetectCluster(ctx context.Context, deps Deps) (ClusterInfo, error) {
 	nodes, err := deps.KubeClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		info.Engine = "unknown"
+		info.NodesUnavailable = true
 		return info, nil
 	}
 	info.Engine = DetectEngine(nodes.Items)
@@ -1195,7 +1202,10 @@ func InstallOpenBao(ctx context.Context, cfg Config, deps Deps) (OpenBaoResult, 
 		return result, fmt.Errorf("add OpenBao helm repo: %w", err)
 	}
 
-	release, exists := findHelmRelease(ctx, deps, "openbao", ns)
+	release, exists, err := findHelmRelease(ctx, deps, "openbao", ns)
+	if err != nil {
+		return result, err
+	}
 	result.InstalledVersion = chartVersionFromRelease(release.Chart, "openbao")
 	result.TargetVersion = cfg.OpenBaoChartVersion
 	if result.TargetVersion == "" {
@@ -1350,7 +1360,10 @@ func InstallRekorStack(ctx context.Context, cfg Config, deps Deps) (RekorResult,
 	}
 	result.LogPublicKeyPEM = cfg.rekorPublicKey
 
-	release, exists := findHelmRelease(ctx, deps, "rekor", ns)
+	release, exists, err := findHelmRelease(ctx, deps, "rekor", ns)
+	if err != nil {
+		return result, err
+	}
 	result.InstalledVersion = chartVersionFromRelease(release.Chart, "rekor")
 	result.TargetVersion = cfg.RekorChartVersion
 	if result.TargetVersion == "" {
@@ -1538,10 +1551,14 @@ func InstallOberth(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoRe
 		}
 	}
 
-	release, exists := findHelmRelease(ctx, deps, "oberth", ns)
+	release, exists, err := findHelmRelease(ctx, deps, "oberth", ns)
+	if err != nil {
+		return result, err
+	}
 	if cfg.WatchAdoptionPlan != "" && !exists {
 		return result, errors.New("watch adoption requires an existing Oberth release")
 	}
+	cfg.existingRelease = exists
 	result.InstalledVersion = chartVersionFromRelease(release.Chart, "oberth")
 	result.TargetVersion = cfg.ChartVersion
 
@@ -1553,12 +1570,15 @@ func InstallOberth(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoRe
 		action = actionUpgrade
 		result.Upgraded = true
 	}
-	if action == actionSkip && (cfg.InstallRekor || cfg.wantsSecretStore()) {
+	if action == actionSkip && (cfg.InstallRekor || cfg.wantsSecretStore() || cfg.installValuesRequested || explicitInstallValues(cfg)) {
 		// Adding or hardening an optional service is a values change even when
 		// the chart version is already current. Reconcile at the installed
 		// version so an older installer cannot downgrade a newer deployment.
 		if canonicalChartVersion(result.InstalledVersion) == "" {
-			subject := "Rekor values"
+			subject := "requested values"
+			if cfg.InstallRekor {
+				subject = "Rekor values"
+			}
 			if cfg.wantsSecretStore() {
 				subject = "secret store values"
 			}
@@ -1724,7 +1744,9 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 	if bannerHost == "" {
 		bannerHost = pushBannerHost(cfg.TLSExtraIPs, cfg.TLSExtraDNSNames)
 	}
-	if bannerHost != "" {
+	if cfg.PushBannerURL != "" || cfg.PushBannerURLSet {
+		args = append(args, "--set-string", "pushBannerURL="+strings.ReplaceAll(strings.ReplaceAll(cfg.PushBannerURL, `\`, `\\`), ",", `\,`))
+	} else if !cfg.existingRelease && bannerHost != "" {
 		args = append(args, "--set-string", "pushBannerURL=https://"+URLHost(bannerHost)+":"+defaultClientHTTPSPort(cfg.ServiceType)+"/runs")
 	}
 	args = append(args, argoOberthHelmValues(cfg, openbao)...)
@@ -1797,16 +1819,11 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 			"--set", "auditAnchor.rekorInsecureHTTP=true",
 			"--set-string", "auditAnchor.rekorPublicKey="+rekor.LogPublicKeyPEM,
 		)
-		if cfg.AcceptWitnessGenesis != "" {
+		if cfg.AcceptWitnessGenesis != "" || cfg.AcceptWitnessGenesisSet {
 			args = append(args, "--set-string", "auditAnchor.acceptWitnessGenesis="+cfg.AcceptWitnessGenesis)
-		} else {
-			// One-shot hygiene: --reuse-values would otherwise carry a previous
-			// retrofit's acknowledgment into every future upgrade forever.
-			args = append(args, "--set-string", "auditAnchor.acceptWitnessGenesis=")
 		}
 	}
-	// Pipeline egress NetworkPolicy: pin explicitly on every install/upgrade.
-	// --reuse-values discards new chart defaults, so this must be explicit.
+	// Override the live network policy only for an explicit choice or a fresh install.
 	if cfg.NetworkPolicy == "true" || cfg.NetworkPolicy == "false" {
 		args = append(args, "--set", "networkPolicy.enabled="+cfg.NetworkPolicy)
 	}
@@ -1838,25 +1855,26 @@ type helmRelease struct {
 	Chart string `json:"chart"`
 }
 
-// findHelmRelease looks the named release up via `helm list -o json`. Helm
-// failures and unparseable output are treated as release-absent: the callers
-// recover through `helm upgrade --install`, which is correct for both a
-// genuinely missing release and a namespace helm cannot list yet.
-func findHelmRelease(ctx context.Context, deps Deps, name, namespace string) (helmRelease, bool) {
-	out, err := deps.RunHelm(ctx, []string{"list", "-n", namespace, "-o", "json"})
+// findHelmRelease distinguishes a missing release from an unreadable release.
+// Include pending and failed revisions so their safety checks cannot be skipped.
+func findHelmRelease(ctx context.Context, deps Deps, name, namespace string) (helmRelease, bool, error) {
+	if deps.RunHelm == nil {
+		return helmRelease{}, false, errors.New("helm runner is required to inspect releases")
+	}
+	out, err := deps.RunHelm(ctx, []string{"list", "-n", namespace, "-o", "json", "-a"})
 	if err != nil {
-		return helmRelease{}, false
+		return helmRelease{}, false, fmt.Errorf("list Helm releases in %s: %w", namespace, err)
 	}
 	var releases []helmRelease
 	if err := json.Unmarshal(out, &releases); err != nil {
-		return helmRelease{}, false
+		return helmRelease{}, false, fmt.Errorf("decode Helm release list: %w", err)
 	}
 	for _, r := range releases {
 		if r.Name == name {
-			return r, true
+			return r, true, nil
 		}
 	}
-	return helmRelease{}, false
+	return helmRelease{}, false, nil
 }
 
 // chartVersionFromRelease extracts the chart version from a helm release
@@ -2536,35 +2554,6 @@ func resolveHelmKubeArgs(rules *clientcmd.ClientConfigLoadingRules, contextName,
 	}
 	return []string{"--kubeconfig", k3sFallbackPath},
 		fmt.Sprintf("context %s (from %s)", resolved, k3sFallbackPath), nil
-}
-
-// warnPerRepoIdentityDelta checks the live Helm release's argo.perRepoIdentities
-// and warns loudly when it is non-empty but the produce returned zero. Existing
-// ServiceAccounts persist only via --reuse-values; grants added since the last
-// successful produce will not be provisioned and those releases will fail at
-// pod admission. (#260 gap 6)
-func warnPerRepoIdentityDelta(ctx context.Context, deps Deps, namespace string) {
-	if deps.RunHelm == nil {
-		return
-	}
-	out, err := deps.RunHelm(ctx, []string{"get", "values", "oberth", "-n", namespace, "-o", "json"})
-	if err != nil {
-		// No release yet (fresh install) or helm error — skip silently.
-		return
-	}
-	var values struct {
-		Argo struct {
-			PerRepoIdentities []string `json:"perRepoIdentities"`
-		} `json:"argo"`
-	}
-	if err := json.Unmarshal(out, &values); err != nil {
-		return
-	}
-	if len(values.Argo.PerRepoIdentities) == 0 {
-		return
-	}
-	_, _ = fmt.Fprintf(deps.Output, "WARNING: per-repo identity produce returned 0 identities, but the live release carries %d (argo.perRepoIdentities).\n", len(values.Argo.PerRepoIdentities))
-	_, _ = fmt.Fprintf(deps.Output, "WARNING: existing per-repo ServiceAccounts persist only via --reuse-values; grants added since the last successful produce will NOT be provisioned and those releases will fail at pod admission.\n")
 }
 
 // pushBannerHost returns the first usable host for the push banner URL.

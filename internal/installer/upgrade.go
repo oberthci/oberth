@@ -332,7 +332,10 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	}
 
 	// Detect current version from the Helm release.
-	release, exists := findHelmRelease(ctx, deps, "oberth", cfg.Namespace)
+	release, exists, err := findHelmRelease(ctx, deps, "oberth", cfg.Namespace)
+	if err != nil {
+		return UpgradeResult{}, err
+	}
 	if !exists {
 		return UpgradeResult{}, fmt.Errorf("no Oberth Helm release found in namespace %s; run oberth install first", cfg.Namespace)
 	}
@@ -485,6 +488,20 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	pki := prepared.pki
 	pki.configure(&cfg)
 
+	previewArgs, previewFlags := upgradeHelmArgs(cfg, chart, imageRef, compatibility)
+	previewArgs = append(previewArgs, previewFlags...)
+	previewArgs = append(previewArgs, "--dry-run=server", "--no-hooks", "--output=json")
+	previewRaw, previewErr := deps.RunHelm(ctx, previewArgs)
+	if previewErr != nil {
+		clear(previewRaw)
+		return result, fmt.Errorf("preview upgrade before writes: %w", previewErr)
+	}
+	previewErr = printHelmValueChanges(ctx, deps, cfg.Namespace, previewRaw, prepared.revision)
+	clear(previewRaw)
+	if previewErr != nil {
+		return result, previewErr
+	}
+
 	if cfg.WaitIdle {
 		if err := waitForUpgradeIdle(ctx, cfg, deps); err != nil {
 			return result, err
@@ -635,8 +652,6 @@ func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string, compatibility ba
 		"--set-string", "compatibility.witnessKeyInfo="+compatibility.WitnessKeyInfo,
 		// Keep the existing proxy enablement and mapping from reused values.
 		"--set", "argo.goProxy.port=8444",
-		// Retain the explicit promotion grant lifetime safety pin (#826).
-		"--set", "promotion.grantMaxLifetime=24h",
 		// Preserve the administrator's enablement through reused configuration.
 		// An absent enabled key renders false; a present value remains subject
 		// to the chart's boolean schema. Only the reviewed image pins override

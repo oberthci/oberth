@@ -79,6 +79,7 @@ func deployedUpgradeRevision(ctx context.Context, namespace string, deps Deps) (
 
 type preparedUpgradeValues struct {
 	pki           *upgradeServerPKI
+	revision      string
 	compatibility backupCompatibility
 	storedValues  string // cleaned user snapshot; empty keeps ordinary Helm reuse
 	migrated      string // stripped legacy key/value, empty when no migration is needed
@@ -195,11 +196,11 @@ func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, cha
 	if _, err := deps.RunHelm(ctx, args); err != nil {
 		return preparedUpgradeValues{}, &ErrSchemaValidation{Detail: fmt.Sprintf("stored configuration/overrides do not render against the target chart; no upgrade applied. Export installed values with helm get values --all, remove/migrate unsupported keys in an explicit values file, and reconcile with helm upgrade --reset-values --values CLEANED_FILE (preserving compatibility.*) before retrying: %v", err)}
 	}
-	prepared := preparedUpgradeValues{pki: pki, compatibility: compat, migrated: migrated, cleanup: cleanup}
+	prepared := preparedUpgradeValues{pki: pki, revision: revision, compatibility: compat, migrated: migrated, cleanup: cleanup}
 	if migrated != "" {
 		prepared.storedValues = path
 		if deps.Output != nil {
-			_, _ = fmt.Fprintf(deps.Output, "Dropped stored inert legacy %s for this upgrade; the prior Helm revision retains its original value for rollback.\n", migrated)
+			_, _ = fmt.Fprintf(deps.Output, "Dropped stored inert legacy %s for this upgrade; the prior Helm revision retains its original value for inspection.\n", migrated)
 		}
 	}
 	keepSnapshot = true

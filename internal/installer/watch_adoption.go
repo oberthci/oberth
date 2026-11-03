@@ -349,7 +349,10 @@ func requireWatchRevision(ctx context.Context, deps Deps, p watchAdoptionPlan) e
 	if !time.Now().Before(p.ExpiresAt) {
 		return errors.New("watch adoption plan expired before the next effect")
 	}
-	release, exists := findHelmRelease(ctx, deps, "oberth", p.Namespace)
+	release, exists, err := findHelmRelease(ctx, deps, "oberth", p.Namespace)
+	if err != nil {
+		return err
+	}
 	revision, err := strconv.ParseInt(strings.Trim(string(release.Revision), `"`), 10, 64)
 	if !exists || err != nil || revision != p.ReleaseRevision || release.Namespace != p.Namespace || release.Status != "deployed" {
 		return errors.New("watch adoption requires the reviewed existing deployed Oberth release revision")

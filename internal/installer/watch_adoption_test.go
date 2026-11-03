@@ -61,7 +61,7 @@ func watchFixture(t *testing.T) (Config, Deps, *fake.Clientset, watchAdoptionPla
 		// SSA preview from previewHelmUpgrade: --dry-run=server without --take-ownership.
 		// This is a read-only conflict check; return success (no conflicts).
 		if args[0] == "upgrade" && strings.Contains(joined, "--dry-run=server") && !strings.Contains(joined, "--take-ownership") {
-			return json.Marshal(map[string]any{"name": "oberth", "namespace": "oberth", "version": 72, "manifest": "", "chart": map[string]any{"metadata": map[string]any{"name": "oberth", "version": "0.16.25"}}})
+			return json.Marshal(map[string]any{"name": "oberth", "namespace": "oberth", "version": 72, "config": map[string]any{}, "manifest": "", "chart": map[string]any{"metadata": map[string]any{"name": "oberth", "version": "0.16.25"}}})
 		}
 		// Adoption preview: --dry-run=server with --take-ownership.
 		if args[0] != "upgrade" || !strings.Contains(joined, "--dry-run=server") || !strings.Contains(joined, "--no-hooks") || !strings.Contains(joined, "--take-ownership") || !strings.Contains(joined, "--reuse-values") {

@@ -30,6 +30,11 @@ func controllerUpgradeFixture(t *testing.T) (UpgradeConfig, Deps, *[][]string) {
 	deps.RunHelm = func(_ context.Context, args []string) ([]byte, error) {
 		calls = append(calls, slices.Clone(args))
 		switch args[0] {
+		case "upgrade":
+			if slices.Contains(args, "--dry-run=server") {
+				return []byte(`{"config":{}}`), nil
+			}
+			return nil, nil
 		case "history":
 			return []byte(`[{"revision":82,"status":"deployed"}]`), nil
 		case "version":

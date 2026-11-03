@@ -80,9 +80,9 @@ func TestPreviewHelmUpgradePassesOnCleanPreview(t *testing.T) {
 				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.17.11"}]`), nil
 			}
 			if strings.Contains(joined, "--dry-run=server") {
-				return []byte(`{"name":"oberth","namespace":"oberth"}`), nil
+				return []byte(`{"name":"oberth","namespace":"oberth","config":{}}`), nil
 			}
-			return nil, nil
+			return []byte(`{}`), nil
 		},
 	}
 	cfg := Config{Namespace: "oberth"}
@@ -288,7 +288,7 @@ func TestPreviewHelmUpgradePlansSecretStoreValues(t *testing.T) {
 					strconv.Quote(liveCA) + `,"transit":{"enabled":true}}}`), nil
 			case strings.Contains(joined, "--dry-run=server"):
 				preview = joined
-				return []byte(`{}`), nil
+				return []byte(`{"config":{}}`), nil
 			}
 			return nil, nil
 		},
@@ -324,10 +324,10 @@ func TestPreviewHelmUpgradePlansDevSecretStoreAddress(t *testing.T) {
 			case strings.HasPrefix(joined, "list"):
 				return []byte(`[{"name":"oberth","namespace":"oberth","status":"deployed","chart":"oberth-0.17.26"}]`), nil
 			case strings.HasPrefix(joined, "get values"):
-				t.Fatal("dev mode needs no live trust anchor")
+				return []byte(`{}`), nil // full values are read only to print the change plan
 			case strings.Contains(joined, "--dry-run=server"):
 				preview = joined
-				return []byte(`{}`), nil
+				return []byte(`{"config":{}}`), nil
 			}
 			return nil, nil
 		},
@@ -353,7 +353,7 @@ func TestPreviewPlansRekorURLAndPreservesLivePublicKey(t *testing.T) {
 			return []byte(`{"auditAnchor":{"rekorPublicKey":"existing-public-key"}}`), nil
 		}
 		preview = joined
-		return nil, nil
+		return []byte(`{"config":{}}`), nil
 	}}
 	if err := previewHelmUpgrade(t.Context(), Config{InstallRekor: true, RekorNamespace: "logs"}, deps, OpenBaoResult{}, ""); err != nil {
 		t.Fatal(err)

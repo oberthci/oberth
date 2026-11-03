@@ -110,7 +110,10 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 		return result, fmt.Errorf("add Argo helm repo: %w", err)
 	}
 
-	release, exists := findHelmRelease(ctx, deps, "argo-workflows", ns)
+	release, exists, err := findHelmRelease(ctx, deps, "argo-workflows", ns)
+	if err != nil {
+		return result, err
+	}
 	result.InstalledVersion = chartVersionFromRelease(release.Chart, "argo-workflows")
 	result.TargetVersion = cfg.ArgoChartVersion
 	if result.TargetVersion == "" {
@@ -266,11 +269,14 @@ func argoOberthHelmValues(cfg Config, openbao OpenBaoResult) []string {
 	// a new chart's values.yaml, so an unpinned new value stays absent on
 	// every upgraded install.
 	if cfg.wantsSecretStore() {
-		values = append(values,
-			"--set", "argo.vault.credentialedRole="+defaultCredentialedRole,
-			"--set", "argo.ciSecrets.vaultRole="+defaultCISecretsRole,
-		)
+		if strings.TrimSpace(cfg.ArgoVaultCredentialedRole) == "" && valueAt(cfg.liveInstallValues, "argo", "vault", "credentialedRole") == nil {
+			values = append(values, "--set", "argo.vault.credentialedRole="+defaultCredentialedRole)
+		}
+		if valueAt(cfg.liveInstallValues, "argo", "ciSecrets", "vaultRole") == nil {
+			values = append(values, "--set", "argo.ciSecrets.vaultRole="+defaultCISecretsRole)
+		}
 	}
+
 	// The installer issues the OpenBao serving certificate from a CA of its
 	// own, so a release-tier pipeline has no way to verify that endpoint unless
 	// the installer hands the anchor on. It does so only for the exact endpoint
@@ -301,9 +307,5 @@ func argoOberthHelmValues(cfg Config, openbao OpenBaoResult) []string {
 	values = append(values,
 		"--set", "argo.goProxy.port=8444",
 	)
-	// Pin promotion.grantMaxLifetime explicitly: `helm upgrade --reuse-values`
-	// never consults the new chart's values.yaml, so an unpinned new value
-	// stays absent on every upgraded install (#826).
-	values = append(values, "--set", "promotion.grantMaxLifetime=24h")
 	return values
 }

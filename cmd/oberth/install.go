@@ -72,6 +72,7 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 	flags.StringVar(&cfg.ArgoControllerProfile, "argo-controller-profile", "", "install the verified nonroot-static-v1 controller profile (requires the managed pinned chart)")
 	flags.StringVar(&cfg.ArgoVaultAddress, "argo-vault-address", "",
 		"OpenBao/Vault base URL injected into credentialed pipeline containers as VAULT_ADDR (https only)")
+	flags.StringVar(&cfg.PushBannerURL, "push-banner-url", "", "push feedback URL; omitted preserves the live URL, explicit empty clears it")
 	flags.StringVar(&cfg.ServiceType, "service-type", "",
 		"Oberth Service type: NodePort (default for a fresh install; clients use NodePorts 30022/30443), "+
 			"LoadBalancer (on k3s, servicelb also takes host ports 2222 and 443 on the node) or ClusterIP; "+
@@ -121,6 +122,14 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 		return fmt.Errorf("%w: install accepts flags only, no positional arguments", errUsage)
 	}
 
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "push-banner-url" {
+			cfg.PushBannerURLSet = true
+		}
+		if f.Name == "accept-witness-genesis" {
+			cfg.AcceptWitnessGenesisSet = true
+		}
+	})
 	cfg.Timeout = *timeout
 	cfg.BinaryVersion = version
 	cfg.SecretStoreUndecided = !cfg.InstallSecretStore && !cfg.InstallSecretStoreDev && cfg.WatchAdoptionPlan == ""

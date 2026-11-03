@@ -74,7 +74,7 @@ func TestOberthHelmArgsWithWitnessGenesis(t *testing.T) {
 		}
 	})
 
-	t.Run("without flag emits empty pin", func(t *testing.T) {
+	t.Run("without flag preserves pending acknowledgement", func(t *testing.T) {
 		cfg := Config{
 			Namespace:    "oberth",
 			ChartVersion: "v0.10.54",
@@ -92,8 +92,8 @@ func TestOberthHelmArgsWithWitnessGenesis(t *testing.T) {
 				break
 			}
 		}
-		if !found {
-			t.Fatalf("args missing empty pin --set-string auditAnchor.acceptWitnessGenesis=:\n%v", args)
+		if found {
+			t.Fatalf("args must not clear a pending acknowledgement --set-string auditAnchor.acceptWitnessGenesis=:\n%v", args)
 		}
 	})
 }

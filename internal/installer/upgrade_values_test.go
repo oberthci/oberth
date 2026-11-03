@@ -258,7 +258,7 @@ func TestRunUpgradeRetriesFailedShadowMigration(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			stop := errors.New("stop at Helm apply")
 			var output bytes.Buffer
-			reads, histories, applies := 0, 0, 0
+			reads, histories, applies, previews := 0, 0, 0, 0
 			snapshot := ""
 			deps := Deps{
 				Output:     &output,
@@ -295,6 +295,10 @@ func TestRunUpgradeRetriesFailedShadowMigration(t *testing.T) {
 						}
 						return nil, nil
 					case "upgrade":
+						if slices.Contains(args, "--dry-run=server") {
+							previews++
+							return []byte(`{"config":{}}`), nil
+						}
 						applies++
 						if dryRun || !slices.Contains(args, "--reset-values") || slices.Contains(args, "--reset-then-reuse-values") || args[slices.Index(args, "--values")+1] != snapshot {
 							t.Fatalf("retry would reuse deployed shadow: %v", args)
@@ -318,7 +322,7 @@ func TestRunUpgradeRetriesFailedShadowMigration(t *testing.T) {
 					t.Fatalf("incorrect migration preview: %s; reads=%d applies=%d err=%v", output.String(), reads, applies, err)
 				}
 			} else {
-				if !errors.Is(err, stop) || reads != 2 || applies != 1 {
+				if !errors.Is(err, stop) || reads != 3 || applies != 1 || previews != 1 {
 					t.Fatalf("retry did not apply migration: reads=%d applies=%d err=%v", reads, applies, err)
 				}
 				if _, err := os.Stat(snapshot); !errors.Is(err, os.ErrNotExist) {

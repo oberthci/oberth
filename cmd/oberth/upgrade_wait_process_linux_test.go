@@ -97,6 +97,7 @@ case "$*" in
    if [ "$OBERTH_TEST_ALREADY" = yes ]; then chart=oberth-0.17.52; else chart=oberth-0.17.51; fi
    printf '[{"name":"oberth","revision":1,"chart":"%s","status":"deployed"}]\n' "$chart" ;;
  *"show values "*) printf 'image:\n  ref: example.invalid/oberth@sha256:1111111111111111111111111111111111111111111111111111111111111111\n' ;;
+ *"upgrade oberth "*"--dry-run=server"*) printf '{"config":{}}\n' ;;
  *"upgrade oberth "*) : > "$OBERTH_TEST_UPGRADE_MARKER"; echo 'fixture Helm upgrade refusal' >&2; exit 73 ;;
  *) echo 'unexpected fixture Helm command' >&2; exit 91 ;;
 esac
