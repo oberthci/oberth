@@ -104,6 +104,9 @@ func newPressureCheck(config AdmissionPressureConfig) *pressureCheck {
 		config.Logf = log.Printf
 	}
 	if config.Enabled {
+		if config.Mode == PressureObserve {
+			config.Logf("admission pressure warning: legacy mode observe is overridden by enabled avg10 enforcement; set admission.pressure.enabled=false or --admission-pressure-enabled=false for budget-only admission")
+		}
 		config.Mode = PressureEnforce
 		config.Hysteresis = 10
 	}

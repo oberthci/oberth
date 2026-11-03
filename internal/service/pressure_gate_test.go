@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -314,6 +315,19 @@ func TestHostPressureStarvationOnePerPassAndSettleWindow(t *testing.T) {
 	f.advance(15 * time.Second)
 	if !second.granted || third.granted {
 		t.Fatal("starvation must admit only one run in the next window")
+	}
+}
+
+func TestHostPressureLegacyObserveStartupWarning(t *testing.T) {
+	for _, mode := range []string{"", PressureEnforce, PressureObserve} {
+		c := DefaultAdmissionPressureConfig()
+		c.Mode = mode
+		var logs bytes.Buffer
+		c.Logf = func(format string, args ...any) { fmt.Fprintf(&logs, format, args...) }
+		newPressureCheck(c)
+		if warned := strings.Contains(logs.String(), "observe"); warned != (mode == PressureObserve) {
+			t.Fatalf("mode=%q warning=%q", mode, logs.String())
+		}
 	}
 }
 
