@@ -19,6 +19,10 @@ func upgradeHasTLSFlags(cfg UpgradeConfig) bool {
 // Plan and check everything on the read-only path, including --dry-run.
 // The caller commits this plan only after chart validation and queue waiting.
 func prepareUpgradeServerPKI(ctx context.Context, cfg *UpgradeConfig, deps Deps, values map[string]any) (*upgradeServerPKI, error) {
+	// Ordinary upgrades preserve TLS through Helm reuse and need no PKI access.
+	if !upgradeHasTLSFlags(*cfg) {
+		return nil, nil
+	}
 	// Reuse the selected deployed revision, including when the latest failed.
 	raw, err := json.Marshal(values)
 	if err != nil {
