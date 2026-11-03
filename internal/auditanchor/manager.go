@@ -350,7 +350,7 @@ func (manager *Manager) AllowMutation(ctx context.Context) (result error) {
 			return err
 		}
 		if ctx.Err() != nil {
-			return errors.Join(err, ctx.Err())
+			return errors.Join(contention, err, ctx.Err())
 		}
 		if timedOut && timeouts >= 3 {
 			return err

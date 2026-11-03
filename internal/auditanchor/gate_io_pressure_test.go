@@ -120,6 +120,23 @@ func TestMutationGateSlowVerificationRetriesAreBounded(t *testing.T) {
 	}
 }
 
+func TestMutationGateDeadlineRetainsEarlierContention(t *testing.T) {
+	manager, _, _, _ := concurrentGateManager(t, "local")
+	manager.gateTimeout = testtimeout.Scale(200 * time.Millisecond)
+	slow := &slowGateStore{AnchorStore: manager.store, before: func(ctx context.Context, attempt int) error {
+		if attempt == 1 {
+			return store.ErrAuditVerificationBusy
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}}
+	manager.store = slow
+	err := manager.AllowMutation(t.Context())
+	if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, store.ErrAuditVerificationBusy) || slow.calls != 2 {
+		t.Fatalf("deadline lost earlier contention: attempts=%d err=%v", slow.calls, err)
+	}
+}
+
 func TestMutationGateDetectsCorruptionAfterSlowVerification(t *testing.T) {
 	for _, mode := range []string{"local", "timestamp+witness"} {
 		t.Run(mode, func(t *testing.T) {
