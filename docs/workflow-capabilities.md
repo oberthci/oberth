@@ -70,8 +70,8 @@ to work. The inactive pilot remains retired under Schema 45.
 Migrations 45/46/47 retire the inactive pilot, add the capability grant table,
 and establish the staged upgrade boundary without retiring the live VM journal.
 Back up the database and drain VM work before upgrading. The upgrade refuses
-uncleaned execution records, outstanding capacity slots, and running legacy VM
-Workflows. Keep the old binary available to finish cleanup before retrying.
+uncleaned execution records, outstanding capacity slots, pending cleanup obligations, and all running runs. The running-run check is
+conservative because resource-template VM Workflows need not have a journal row. Keep the old binary available to finish cleanup before retrying.
 Already-upgraded installations retain normal legacy restart recovery.
 
 Stage 2 requires operators to provision resource/device capacity, accounts and

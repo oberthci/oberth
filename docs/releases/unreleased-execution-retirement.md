@@ -11,8 +11,9 @@ RBAC and resource capacity before migrating their pipelines.
 Migrations 45/46/47 retire only the inactive pilot, create an empty capability
 table, and establish a guarded upgrade boundary. Live execution journals and
 capacity remain writable. The upgrade refuses VM work in flight; use the old
-binary to finish cleanup, then retry with a database backup. Startup checks
-legacy resource Workflows before accepting an upgrade. Existing grants alone
+binary to finish cleanup, then retry with a database backup. Store startup also refuses every running run and pending cleanup obligation,
+conservatively covering resource Workflows without a VM journal row. The
+migration cannot consult Kubernetes; existing runtime cleanup and RBAC remain. Existing grants alone
 do not block this staged upgrade because their runtime and permissions remain.
 Schemas 39–44 are the real predecessor migrations from priority, integration
 and replay-C; this branch carries their schemas to keep the ledger contiguous.

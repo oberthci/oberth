@@ -104,6 +104,17 @@ func TestPublicationRetryMigrationPreservesV37PendingIntent(t *testing.T) {
 	if _, err = s.db.Exec(`UPDATE schema_migrations SET applied_at=123 WHERE version=37`); err != nil {
 		t.Fatal(err)
 	}
+	blocked, err := OpenAdminClient(t.Context(), path, Options{})
+	if blocked != nil {
+		_ = blocked.Close()
+	}
+	if !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("running historical fixture bypassed execution upgrade guard: %v", err)
+	}
+	// Drain the run without changing the pending publication's immutable intent.
+	if _, err = s.db.Exec(`UPDATE runs SET status='interrupted',finished_at=updated_at WHERE id=?`, run.ID); err != nil {
+		t.Fatal(err)
+	}
 	if err = s.Close(); err != nil {
 		t.Fatal(err)
 	}
