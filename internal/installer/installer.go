@@ -187,8 +187,8 @@ type Config struct {
 	// created, must not be replaced by a stale one in a file.
 	ValuesFiles []string
 	// NetworkPolicy controls pipeline egress NetworkPolicy enforcement:
-	// "auto" (default) enables on all CNIs except k3s's built-in kube-router
-	// (which has a DNAT incompatibility), "true" forces on, "false" forces off.
+	// "auto" enables for a new release, including k3s, and preserves a live
+	// release's choice. "true" forces on; "false" explicitly disables isolation.
 	NetworkPolicy           string
 	PushBannerURL           string
 	PushBannerURLSet        bool
@@ -971,7 +971,7 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 		tw.RegisterContent(item.Name, "secret store", item.Status+" ready")
 	}
 	if cfg.NetworkPolicy == "false" {
-		tw.RegisterContent("Network policy", "disabled (kube-router)", "⚠ warn")
+		tw.RegisterContent("Network policy", "disabled (configured)", "⚠ warn")
 	}
 	tw.WriteHeader()
 
@@ -1029,7 +1029,7 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 
 	// Network policy warning row.
 	if cfg.NetworkPolicy == "false" {
-		tw.WriteRow("Network policy", "disabled (kube-router)", "⚠ warn")
+		tw.WriteRow("Network policy", "disabled (configured)", "⚠ warn")
 	}
 
 	// Close the table visually — AppendRow will erase and redraw the border

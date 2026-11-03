@@ -2148,6 +2148,12 @@ trust assumptions and complete invalidation rules.
   re-synced, an already-running credentialed step whose token was obtained
   before the revocation can still read the path; new runs are blocked by
   Oberth's own admission gate.
+- Fresh installs enable pipeline `networkPolicy.enabled`, including on k3s,
+  which provides a NetworkPolicy controller. Reruns preserve the stored choice.
+  An explicit or stored disabled policy prints a prominent installer warning;
+  `--network-policy=true` restores the chart policy. The operator must supply
+  an enforcing CNI; the installer never silently disables the policy based on
+  the Kubernetes distribution.
 - The server-namespace Role grants only ConfigMap access: collection
   create/get/list/watch and update of `oberth-secret-access` by exact name.
   It grants no Pod, `pods/log` or `pods/exec` access. The separate pipeline

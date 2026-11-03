@@ -4802,8 +4802,7 @@ func TestValidateExistingKindClusterRejectsMixedBindings(t *testing.T) {
 }
 
 // TestK3sAutoNetworkPolicySetsFlag proves the k3s auto-detection path sets
-// NetworkPolicy to "false" when the cluster engine is k3s. The disclosure
-// is shown only in the component table row (not as a separate warning).
+// NetworkPolicy to "true": k3s includes a NetworkPolicy controller.
 func TestK3sAutoNetworkPolicySetsFlag(t *testing.T) {
 	t.Parallel()
 	node := &corev1.Node{
@@ -4825,10 +4824,9 @@ func TestK3sAutoNetworkPolicySetsFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 	output := buf.String()
-	// The dry-run plan must show the NetworkPolicy disabled in the Oberth
-	// helm args (networkPolicy.enabled=false).
-	if !strings.Contains(output, "networkPolicy.enabled=false") {
-		t.Fatalf("k3s auto path must set networkPolicy.enabled=false; output:\n%s", output)
+	// The dry-run plan must keep pipeline isolation enabled.
+	if !strings.Contains(output, "networkPolicy.enabled=true") {
+		t.Fatalf("k3s auto path must set networkPolicy.enabled=true; output:\n%s", output)
 	}
 }
 

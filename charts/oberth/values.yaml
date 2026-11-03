@@ -543,14 +543,11 @@ secretCreatePolicy:
 # breaks Argo's emissary on CNIs that enforce NetworkPolicy (Calico, Cilium,
 # modern kindnet). RBAC is the access control boundary for the API server.
 #
-# Disable on clusters without a NetworkPolicy-capable CNI.
+# Requires a NetworkPolicy-capable CNI; k3s includes an enforcing controller.
 networkPolicy:
-  # Enabled by default for pipeline egress isolation: default-deny egress with
-  # targeted allowlist for DNS, HTTPS, and the secret store. On k3s with the
-  # built-in kube-router NetworkPolicy controller this MUST be set false — its
-  # DNAT handling causes TCP RST on repeated ClusterIP connections, which breaks
-  # Argo's emissary executor (POST workflowtaskresult CRs to the API server).
-  # The installer detects k3s and pins false automatically.
+  # Default-deny pipeline egress with targeted DNS, HTTPS and store allowlists.
+  # Fresh installs keep this enabled, including on k3s. Existing explicit
+  # choices are preserved; disabling isolation produces an installer warning.
   enabled: true
   # Extra in-namespace egress for sidecar services the pipeline needs on
   # non-standard ports, such as a Docker API shim backing Testcontainers.

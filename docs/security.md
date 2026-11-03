@@ -131,11 +131,12 @@
   arbitrary filesystem scan.
 - Pipeline egress is deny-by-default on clusters with a conforming NetworkPolicy
   CNI (Cilium, Calico). DNS, HTTPS (port 443), and the secret store are
-  allowlisted; the cloud metadata endpoint (169.254.169.254) is blocked. On k3s
-  with the built-in kube-router NetworkPolicy controller, the installer disables
-  enforcement automatically and prints a warning, because kube-router's DNAT
-  handling causes TCP RST on repeated ClusterIP connections, breaking Argo's
-  emissary executor.
+  allowlisted; the cloud metadata endpoint (169.254.169.254) is blocked. k3s includes a
+  NetworkPolicy controller and fresh installs keep enforcement enabled there.
+  Reruns preserve an operator's stored choice; an explicitly or previously
+  disabled policy produces a prominent warning. Clusters must provide an
+  enforcing CNI; selecting the Kubernetes distribution alone does not prove
+  that an operator has left its controller enabled.
 - SQLite accepts only the immutable fresh-schema identity; incompatible or newer
   databases fail before startup recovery.
 

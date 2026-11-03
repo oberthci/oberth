@@ -31,20 +31,16 @@ func resolveInstallRerunValues(ctx context.Context, cfg *Config, deps Deps, clus
 		}
 	}
 	if cfg.NetworkPolicy == "auto" {
-		if cfg.existingRelease {
-			live, ok := valueAt(cfg.liveInstallValues, "networkPolicy", "enabled").(bool)
-			if ok && cluster.Engine != "unknown" && live != (cluster.Engine != "k3s") && deps.Output != nil {
-				_, _ = fmt.Fprintln(deps.Output, "NOTE: detected network-policy default differs from the live value; keeping it. Use --network-policy=true or false to change it.")
-			}
-		} else {
+		if !cfg.existingRelease {
 			if cluster.NodesUnavailable && cluster.Engine == "unknown" {
 				return errors.New("cannot detect network policy without node access; specify --network-policy=true or false")
 			}
 			cfg.NetworkPolicy = "true"
-			if cluster.Engine == "k3s" {
-				cfg.NetworkPolicy = "false"
-			}
 		}
+	}
+	live, hasLive := valueAt(cfg.liveInstallValues, "networkPolicy", "enabled").(bool)
+	if deps.Output != nil && (cfg.NetworkPolicy == "false" || (cfg.NetworkPolicy == "auto" && hasLive && !live)) {
+		_, _ = fmt.Fprintln(deps.Output, "WARNING: pipeline NetworkPolicy is disabled by the explicit or stored configuration; pipeline egress is not isolated by the chart. Use --network-policy=true with an enforcing CNI. k3s includes a NetworkPolicy controller.")
 	}
 	if !cfg.existingRelease && cfg.ServiceType == "" {
 		cfg.ServiceType = "NodePort"
