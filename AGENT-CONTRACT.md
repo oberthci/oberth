@@ -78,6 +78,17 @@ operator's responsibility; Helm rollback alone cannot undo a migration.
 
 ### Persistent data
 
+Production server PKI names are additive across installs and upgrades. Omitting
+`--tls-extra-dns-name` or `--tls-extra-ip` preserves both the existing role
+permissions and the deployed TLS names. `oberth preflight pki` checks the role
+against the deployed configuration and the public certificate currently served;
+it requires `BAO_TOKEN` and supports `--namespace`, `--openbao-namespace`, and
+`--context`. Both install and upgrade accept `--tls-remove-dns-name` and
+`--tls-remove-ip`, but refuse removal while the public leaf still carries that
+SAN. Retire the name from the served certificate before revoking its permission.
+PKI upgrades refresh the tunnel CA pin; after CA replacement, other clients
+pinning the old CA must refresh their trust anchors.
+
 The upstream default branch cannot be deleted through a receive or receive
 replay, including by an administrator. Authenticated uplinks retain deletion
 access to other branches within their existing repository scope, as part of

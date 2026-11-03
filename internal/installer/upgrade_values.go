@@ -78,6 +78,7 @@ func deployedUpgradeRevision(ctx context.Context, namespace string, deps Deps) (
 }
 
 type preparedUpgradeValues struct {
+	pki           *upgradeServerPKI
 	compatibility backupCompatibility
 	storedValues  string // cleaned user snapshot; empty keeps ordinary Helm reuse
 	migrated      string // stripped legacy key/value, empty when no migration is needed
@@ -138,6 +139,10 @@ func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, cha
 	if err != nil {
 		return preparedUpgradeValues{}, err
 	}
+	pki, err := prepareUpgradeServerPKI(ctx, &cfg, deps, values)
+	if err != nil {
+		return preparedUpgradeValues{}, err
+	}
 	migrated, err := migrateUpgradeShadow(values)
 	if err != nil {
 		return preparedUpgradeValues{}, err
@@ -177,7 +182,7 @@ func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, cha
 				args = append(args, flags[i], flags[i+1])
 			}
 			i++
-		case "--set", "--set-string", "--version":
+		case "--set", "--set-string", "--set-json", "--version":
 			args = append(args, flags[i], flags[i+1])
 			i++
 		default:
@@ -187,7 +192,7 @@ func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, cha
 	if _, err := deps.RunHelm(ctx, args); err != nil {
 		return preparedUpgradeValues{}, &ErrSchemaValidation{Detail: fmt.Sprintf("stored configuration/overrides do not render against the target chart; no upgrade applied. Export installed values with helm get values --all, remove/migrate unsupported keys in an explicit values file, and reconcile with helm upgrade --reset-values --values CLEANED_FILE (preserving compatibility.*) before retrying: %v", err)}
 	}
-	prepared := preparedUpgradeValues{compatibility: compat, migrated: migrated, cleanup: cleanup}
+	prepared := preparedUpgradeValues{pki: pki, compatibility: compat, migrated: migrated, cleanup: cleanup}
 	if migrated != "" {
 		prepared.storedValues = path
 		if deps.Output != nil {

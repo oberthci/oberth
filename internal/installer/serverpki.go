@@ -62,6 +62,12 @@ func serverPKINames(cfg Config) (dnsNames, ips []string) {
 // names, or is close to expiry, is replaced, which changes what clients pin;
 // the installer refreshes the pins it manages itself.
 func ensureServerPKI(ctx context.Context, cfg Config, store openBaoExec, token string, mounts map[string]baoMount) (caPEM string, replaced bool, err error) {
+	if err := validateServerTLSFlags(&cfg); err != nil {
+		return "", false, err
+	}
+	if err := checkServerPKIRemovals(ctx, cfg, Deps{RunCommand: store.run, ContextName: store.contextName}); err != nil {
+		return "", false, err
+	}
 	if mount, exists := mounts[defaultServerPKIMount+"/"]; exists {
 		if mount.Type != "pki" {
 			return "", false, fmt.Errorf("mount %s already exists with type %q, not pki", defaultServerPKIMount, mount.Type)
@@ -70,7 +76,17 @@ func ensureServerPKI(ctx context.Context, cfg Config, store openBaoExec, token s
 		return "", false, fmt.Errorf("enable server PKI mount: %w%s", err, commandOutputSuffix(out))
 	}
 
-	dnsNames, ips := serverPKINames(cfg)
+	rolePath := defaultServerPKIMount + "/roles/" + defaultServerPKIRole
+	haveRole, err := store.readData(ctx, token, rolePath)
+	if err != nil {
+		return "", false, err
+	}
+	// Flags add addresses. An omitted flag must not revoke an existing name
+	// or narrow the replacement CA while a running server still requests it.
+	dnsNames, cidrs, err := mergedServerPKINames(cfg, haveRole)
+	if err != nil {
+		return "", false, err
+	}
 	current, err := store.readData(ctx, token, defaultServerPKIMount+"/issuer/default")
 	if err != nil && !strings.Contains(err.Error(), "no default issuer") {
 		return "", false, err
@@ -89,16 +105,7 @@ func ensureServerPKI(ctx context.Context, cfg Config, store openBaoExec, token s
 		replaced = true
 	}
 
-	var cidrs []string
-	for _, ip := range ips {
-		cidrs = append(cidrs, hostCIDR(net.ParseIP(ip)).String())
-	}
-	rolePath := defaultServerPKIMount + "/roles/" + defaultServerPKIRole
 	wantRole := serverPKIRole(dnsNames, cidrs)
-	haveRole, err := store.readData(ctx, token, rolePath)
-	if err != nil {
-		return "", false, err
-	}
 	if !serverPKIRoleMatches(haveRole, wantRole) {
 		if err := store.writeJSON(ctx, token, rolePath, wantRole); err != nil {
 			return "", false, err
@@ -252,6 +259,9 @@ func scalarString(value any) string {
 }
 
 func anyStrings(value any) []string {
+	if items, ok := value.([]string); ok {
+		return slices.Clone(items)
+	}
 	items, _ := value.([]any)
 	out := make([]string, 0, len(items))
 	for _, item := range items {

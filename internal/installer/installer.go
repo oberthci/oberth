@@ -179,8 +179,10 @@ type Config struct {
 	// is the one TLS failure no trust anchor can repair, so naming the address
 	// is a deployment decision rather than something a client works around.
 	// Ignored when the chart adopts an existing TLS Secret.
-	TLSExtraDNSNames []string
-	TLSExtraIPs      []string
+	TLSExtraDNSNames  []string
+	TLSExtraIPs       []string
+	TLSRemoveDNSNames []string
+	TLSRemoveIPs      []string
 
 	// ValuesFiles are helm values files applied to the Oberth release, in the
 	// order given, so a deployment can express its own settings at install time
@@ -533,6 +535,9 @@ type RekorResult struct {
 
 // Validate checks Config for invalid flag combinations and applies defaults.
 func (cfg *Config) Validate() error {
+	if err := validateServerTLSFlags(cfg); err != nil {
+		return err
+	}
 	if err := ValidClientAccess(cfg.ClientAccess); err != nil {
 		return fmt.Errorf("--client-access: %w", err)
 	}
@@ -763,6 +768,9 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	// (and prints it as the Ready URL), so the certificate must carry it.
 	if cfg.WatchAdoptionPlan == "" {
 		cfg.TLSExtraDNSNames, cfg.TLSExtraIPs = certificateNamesForClientHost(clientReachableHost(deps), cfg.TLSExtraDNSNames, cfg.TLSExtraIPs)
+	}
+	if err := preserveServerTLSNames(ctx, &cfg, deps); err != nil {
+		return err
 	}
 
 	// Identity preflight: verify OpenBao bundles and server certificate SANs.
@@ -1675,6 +1683,11 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 	}
 	for index, address := range cfg.TLSExtraIPs {
 		args = append(args, "--set-string", fmt.Sprintf("tls.extraIPs[%d]=%s", index, address))
+	}
+	if len(cfg.TLSRemoveDNSNames)+len(cfg.TLSRemoveIPs) > 0 {
+		dns, _ := json.Marshal(append([]string{}, cfg.TLSExtraDNSNames...))
+		ips, _ := json.Marshal(append([]string{}, cfg.TLSExtraIPs...))
+		args = append(args, "--set-json", "tls.extraDNSNames="+string(dns), "--set-json", "tls.extraIPs="+string(ips))
 	}
 	// Derive pushBannerURL from the node address already known at TLS SAN
 	// time so git-push feedback includes a clickable watch link (UX-21).

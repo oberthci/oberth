@@ -96,6 +96,9 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 			"in-cluster names; a client reaching the server on any other name hits a hostname mismatch "+
 			"that no trust anchor can fix. A macOS kind install adds localhost automatically")
 	var tlsExtraIPs stringList
+	var tlsRemoveDNSNames, tlsRemoveIPs stringList
+	flags.Var(&tlsRemoveDNSNames, "tls-remove-dns-name", "remove a permitted DNS name; refused while the served certificate contains it (repeatable)")
+	flags.Var(&tlsRemoveIPs, "tls-remove-ip", "remove a permitted IP; refused while the served certificate contains it (repeatable)")
 	flags.Var(&tlsExtraIPs, "tls-extra-ip",
 		"additional IP address the generated server certificate is issued for (repeatable); an address "+
 			"reached as an IP needs an IP SAN, because a DNS name never matches one. A macOS kind "+
@@ -126,6 +129,8 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 	cfg.CredentialedSecretPaths = credentialedSecretPaths
 	cfg.TLSExtraDNSNames = tlsExtraDNSNames
 	cfg.TLSExtraIPs = tlsExtraIPs
+	cfg.TLSRemoveDNSNames = tlsRemoveDNSNames
+	cfg.TLSRemoveIPs = tlsRemoveIPs
 	cfg.AlsoUpstreams = alsoUpstreams
 	cfg.ValuesFiles = valuesFiles
 

@@ -17,6 +17,8 @@ func runPreflight(ctx context.Context, arguments []string, output io.Writer) err
 		return fmt.Errorf("%w: preflight drift", errUsage)
 	}
 	switch arguments[0] {
+	case "pki":
+		return runPreflightPKI(ctx, arguments[1:], output)
 	case "upstreams":
 		return runPreflightUpstreams(arguments[1:], output)
 	case "drift":

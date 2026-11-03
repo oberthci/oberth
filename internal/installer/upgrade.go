@@ -48,7 +48,14 @@ type UpgradeConfig struct {
 	UserSet               []string // --set: repeatable key=value pairs
 	ArgoControllerProfile string   // explicit supported controller transition; empty preserves existing profile
 	BinarySchemaVersion   int      // set by the caller to store.LatestMigrationVersion()
-	storedValues          string   // internal schema-validated legacy migration snapshot
+	TLSExtraDNSNames      []string
+	TLSExtraIPs           []string
+	TLSRemoveDNSNames     []string
+	TLSRemoveIPs          []string
+	OpenBaoNamespace      string
+	serverCACert          string
+	serverPKI             bool
+	storedValues          string // internal schema-validated legacy migration snapshot
 }
 
 // ErrPinnedKeyOverride is returned when a user --set or --values file
@@ -83,6 +90,9 @@ var upgradePinnedKeys = map[string]bool{
 	"compatibility.schemaIdentity": true,
 	"compatibility.auditDomain":    true,
 	"compatibility.witnessKeyInfo": true,
+	"tls.extraDNSNames":            true,
+	"tls.extraIPs":                 true,
+	"tls.pki":                      true,
 }
 
 // UpgradePinnedKeys returns the set of pinned keys for tests.
@@ -106,6 +116,12 @@ type UpgradeResult struct {
 // ValidateUpgrade checks UpgradeConfig for invalid flag combinations and
 // applies defaults.
 func (cfg *UpgradeConfig) ValidateUpgrade() error {
+	tls := Config{Namespace: cfg.Namespace, TLSExtraDNSNames: cfg.TLSExtraDNSNames, TLSExtraIPs: cfg.TLSExtraIPs,
+		TLSRemoveDNSNames: cfg.TLSRemoveDNSNames, TLSRemoveIPs: cfg.TLSRemoveIPs}
+	if err := validateServerTLSFlags(&tls); err != nil {
+		return err
+	}
+	cfg.TLSExtraIPs, cfg.TLSRemoveIPs = tls.TLSExtraIPs, tls.TLSRemoveIPs
 	if cfg.ArgoControllerProfile != "" && cfg.ArgoControllerProfile != "nonroot-static-v1" {
 		return errors.New("unsupported Argo controller profile")
 	}
@@ -175,7 +191,7 @@ func isPinnedUpgradeKey(key string) bool {
 		return true
 	}
 	for pinned := range upgradePinnedKeys {
-		if strings.HasPrefix(pinned, key+".") {
+		if strings.HasPrefix(pinned, key+".") || strings.HasPrefix(key, pinned+".") {
 			return true
 		}
 	}
@@ -330,6 +346,8 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	retryFailed := false
 	if cmp == 0 {
 		switch {
+		case status == "deployed" && upgradeHasTLSFlags(cfg):
+			// Explicit TLS changes require the same-version reconciliation path.
 		case status == "deployed" && cfg.ArgoControllerProfile != "":
 		// Explicit supported profile reconciliation is not a same-version no-op.
 		case status == "deployed" && (len(cfg.UserValues) > 0 || len(cfg.UserSet) > 0):
@@ -390,6 +408,9 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		if err != nil {
 			return result, err
 		}
+		if _, err := prepareUpgradeServerPKI(ctx, &cfg, deps, values); err != nil {
+			return result, err
+		}
 		result.Migrated, err = migrateUpgradeShadow(values)
 		if err != nil {
 			return result, err
@@ -437,6 +458,8 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	cfg.storedValues = prepared.storedValues
 	result.Migrated = prepared.migrated
 	compatibility := prepared.compatibility
+	pki := prepared.pki
+	pki.configure(&cfg)
 
 	if cfg.WaitIdle {
 		if err := waitForUpgradeIdle(ctx, cfg, deps); err != nil {
@@ -447,6 +470,16 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	if profile != nil {
 		if err := profile.apply(ctx, cfg, deps); err != nil {
 			return result, fmt.Errorf("argo controller profile transition incomplete: %w", err)
+		}
+	}
+	if pki != nil {
+		ca, replaced, err := ensureServerPKI(ctx, pki.config, pki.store, pki.token, map[string]baoMount{defaultServerPKIMount + "/": {Type: "pki"}})
+		if err != nil {
+			return result, fmt.Errorf("reconcile server PKI before upgrade: %w", err)
+		}
+		cfg.serverCACert = ca
+		if replaced {
+			_, _ = fmt.Fprintln(w, "Server CA replaced; clients pinning the previous CA must refresh their trust anchor.")
 		}
 	}
 
@@ -598,6 +631,14 @@ func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string, compatibility ba
 	// User --set values come after pins and values files.
 	for _, kv := range cfg.UserSet {
 		args = append(args, "--set", kv)
+	}
+	if cfg.serverPKI {
+		dns, _ := json.Marshal(append([]string{}, cfg.TLSExtraDNSNames...))
+		ips, _ := json.Marshal(append([]string{}, cfg.TLSExtraIPs...))
+		args = append(args, "--set-json", "tls.extraDNSNames="+string(dns), "--set-json", "tls.extraIPs="+string(ips))
+		if cfg.serverCACert != "" {
+			args = append(args, "--set-string", "watchTunnel.originCACert="+cfg.serverCACert)
+		}
 	}
 	// Only pin --version for published charts; a local path IS the version.
 	if cfg.ChartOverride == "" && cfg.BinaryVersion != "" {
@@ -784,6 +825,9 @@ func printUpgradeDryRun(w io.Writer, cfg UpgradeConfig, result UpgradeResult, re
 		_, _ = fmt.Fprintf(w, "  Wait for %s runs in the selected live daemon queue (--wait-idle; --wait-timeout=%s).\n", upgradeWaitSelection(cfg), cfg.WaitTimeout)
 	}
 	_, _ = fmt.Fprintln(w, "  Verify Helm >= 3.14, read installed values (including defaults), pin compatibility identities, and validate stored values against the target chart schema before applying changes.")
+	if cfg.serverPKI {
+		_, _ = fmt.Fprintln(w, "  Merge server PKI role names before rollout; replace the CA only when needed and refresh the tunnel CA pin. Other clients must refresh their trust anchor if the CA changes.")
+	}
 	step := 1
 
 	chart := cfg.ChartOverride
@@ -799,7 +843,9 @@ func printUpgradeDryRun(w io.Writer, cfg UpgradeConfig, result UpgradeResult, re
 	case retryFailed:
 		_, _ = fmt.Fprintf(w, "  %d. Retry FAILED Helm release at %s (same-version forward repair)\n", step, displayVersion(result.TargetVersion))
 	case result.PreviousVersion != "" && canonicalChartVersion(result.PreviousVersion) == canonicalChartVersion(result.TargetVersion):
-		if len(cfg.UserValues) > 0 || len(cfg.UserSet) > 0 {
+		if upgradeHasTLSFlags(cfg) {
+			_, _ = fmt.Fprintf(w, "  %d. Reconcile server PKI names at %s\n", step, displayVersion(result.TargetVersion))
+		} else if len(cfg.UserValues) > 0 || len(cfg.UserSet) > 0 {
 			_, _ = fmt.Fprintf(w, "  %d. Re-apply --values/--set at %s\n", step, displayVersion(result.TargetVersion))
 		} else {
 			_, _ = fmt.Fprintf(w, "  %d. Reconcile the Argo controller profile at %s\n", step, displayVersion(result.TargetVersion))

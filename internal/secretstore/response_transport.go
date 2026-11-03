@@ -3,19 +3,24 @@ package secretstore
 import (
 	"bytes"
 	"context"
+	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
+	"syscall"
+	"unicode"
 
 	vaultapi "github.com/hashicorp/vault/api"
 )
 
 // boundedSecretStoreTransport enforces endpoint-specific decoded response
-// ceilings before the Vault SDK can parse or copy a body. Error bodies are
-// never read: a non-success response retains only its HTTP status, so a store
-// cannot reflect request plaintext/ciphertext into durable Oberth errors.
+// ceilings before the Vault SDK can parse or copy a body. Only PKI issuance
+// errors may include bounded diagnostics. All other error bodies are discarded
+// so request plaintext/ciphertext cannot be reflected into durable errors.
 type boundedSecretStoreTransport struct {
 	base          http.RoundTripper
 	responseLimit func(string) int64
@@ -32,6 +37,24 @@ func (transport boundedSecretStoreTransport) RoundTrip(request *http.Request) (*
 		return nil, &secretStoreResponseStatusError{statusCode: statusCode}
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusBadRequest {
+		if isPKIIssuePath(request.URL.Path) {
+			body, readErr := io.ReadAll(io.LimitReader(response.Body, 1025))
+			_ = response.Body.Close()
+			defer clear(body)
+			var payload struct {
+				Errors []string `json:"errors"`
+			}
+			detail := ""
+			if readErr == nil && len(body) <= 1024 && json.Unmarshal(body, &payload) == nil {
+				detail = strings.Map(func(r rune) rune {
+					if unicode.IsControl(r) {
+						return ' '
+					}
+					return r
+				}, strings.Join(payload.Errors, "; "))
+			}
+			return nil, &StatusError{Code: response.StatusCode, Detail: detail}
+		}
 		_ = response.Body.Close()
 		response.Body = http.NoBody
 		response.ContentLength = 0
@@ -58,6 +81,27 @@ func (transport boundedSecretStoreTransport) RoundTrip(request *http.Request) (*
 	response.ContentLength = int64(len(body))
 	response.Header.Del("Content-Encoding")
 	return response, nil
+}
+
+func isPKIIssuePath(path string) bool {
+	parts := strings.Split(strings.TrimPrefix(path, "/v1/"), "/")
+	return len(parts) == 3 && pkiSegment.MatchString(parts[0]) && parts[1] == "issue" && pkiSegment.MatchString(parts[2])
+}
+
+// StatusError is a sanitized HTTP failure. Detail is populated only for a
+// bounded PKI issuance errors[] response, never login, KV or Transit responses.
+type StatusError struct {
+	Op     string
+	Code   int
+	Detail string
+}
+
+func (err *StatusError) Error() string {
+	message := fmt.Sprintf("secret store %s failed: HTTP %d %s", err.Op, err.Code, http.StatusText(err.Code))
+	if err.Detail != "" {
+		message += ": " + err.Detail
+	}
+	return message
 }
 
 func secretStoreResponseLimit(path string) int64 {
@@ -107,13 +151,17 @@ func (err *secretStoreResponseStatusError) Error() string {
 }
 
 func sanitizeSecretStoreHTTPError(operation string, err error) error {
+	var typedStatus *StatusError
+	if errors.As(err, &typedStatus) {
+		return &StatusError{Op: operation, Code: typedStatus.Code, Detail: typedStatus.Detail}
+	}
 	var statusErr *secretStoreResponseStatusError
 	if errors.As(err, &statusErr) {
-		return fmt.Errorf("secret store %s failed: HTTP %d %s", operation, statusErr.statusCode, http.StatusText(statusErr.statusCode))
+		return &StatusError{Op: operation, Code: statusErr.statusCode}
 	}
 	var responseErr *vaultapi.ResponseError
 	if errors.As(err, &responseErr) {
-		return fmt.Errorf("secret store %s failed: HTTP %d %s", operation, responseErr.StatusCode, http.StatusText(responseErr.StatusCode))
+		return &StatusError{Op: operation, Code: responseErr.StatusCode}
 	}
 	var limitErr *secretStoreResponseLimitError
 	if errors.As(err, &limitErr) {
@@ -129,14 +177,25 @@ func sanitizeSecretStoreHTTPError(operation string, err error) error {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return fmt.Errorf("secret store %s failed: %w", operation, context.DeadlineExceeded)
 	}
+	var unknownCA x509.UnknownAuthorityError
+	var networkErr net.Error
+	switch {
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return errors.New("secret store " + operation + " failed: connection refused")
+	case errors.As(err, &unknownCA):
+		return errors.New("secret store " + operation + " failed: unknown CA")
+	case errors.As(err, &networkErr) && networkErr.Timeout():
+		return errors.New("secret store " + operation + " failed: timeout")
+	}
 	return errors.New("secret store " + operation + " failed: transport error")
 }
 
 func secretStoreRetryPolicy(ctx context.Context, response *http.Response, err error) (bool, error) {
+	var typedStatus *StatusError
 	var statusErr *secretStoreResponseStatusError
 	var limitErr *secretStoreResponseLimitError
 	var readErr *secretStoreResponseReadError
-	if errors.As(err, &statusErr) || errors.As(err, &limitErr) || errors.As(err, &readErr) {
+	if errors.As(err, &typedStatus) || errors.As(err, &statusErr) || errors.As(err, &limitErr) || errors.As(err, &readErr) {
 		return false, nil
 	}
 	return vaultapi.DefaultRetryPolicy(ctx, response, err)
