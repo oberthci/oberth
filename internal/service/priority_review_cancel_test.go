@@ -3,10 +3,11 @@ package service
 import (
 	"context"
 	"errors"
-	"github.com/oberthci/oberth/internal/api"
-	"github.com/oberthci/oberth/internal/model"
 	"strings"
 	"testing"
+
+	"github.com/oberthci/oberth/internal/api"
+	"github.com/oberthci/oberth/internal/model"
 )
 
 // A claim may reveal external-state work after the initial read. Exercise the

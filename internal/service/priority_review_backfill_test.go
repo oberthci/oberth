@@ -1,10 +1,11 @@
 package service
 
 import (
-	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/periapsis"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
 func TestPriorityReviewNoBackfillBehindPriorityHead(t *testing.T) {

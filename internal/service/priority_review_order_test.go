@@ -1,9 +1,10 @@
 package service
 
 import (
-	"github.com/oberthci/oberth/internal/model"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/model"
 )
 
 func TestPriorityReviewExplicitHighestBeforeAgedWork(t *testing.T) {

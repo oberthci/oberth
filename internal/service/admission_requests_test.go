@@ -1,16 +1,18 @@
 package service
 
 import (
-	"k8s.io/utils/ptr"
 	"strings"
 	"testing"
 
+	"k8s.io/utils/ptr"
+
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	pipeline "github.com/oberthci/oberth/pkg/periapsis"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 func TestDeclaredAdmissionTwoMeasuredRunsFit(t *testing.T) {
