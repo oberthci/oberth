@@ -2,9 +2,9 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -106,6 +106,37 @@ func TestResourceRetentionOldestFirstBoundedAndIndependentOfPrimary(t *testing.T
 	s, run, at := resourceStoreFixture(t)
 	old := at.Add(-resourceUsageMaxAge - time.Hour)
 	seedResourceRows(t, s, run.ID, old, resourceUsageSweepRows+2)
+	// Timestamp order must differ from insertion order. Groups of three also
+	// put equal timestamps across the 100-row delete and 1,000-row sweep caps.
+	if _, err := s.db.Exec(`UPDATE step_resource_usage SET last_observed_at=?+(?-rowid)/3`, unixNano(old), resourceUsageSweepRows+2); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	snapshot := func() []resourceUsageCandidate {
+		t.Helper()
+		rows, err := s.reader().QueryContext(ctx, `SELECT rowid,last_observed_at FROM step_resource_usage ORDER BY last_observed_at,rowid`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var values []resourceUsageCandidate
+		for rows.Next() {
+			var v resourceUsageCandidate
+			if err := rows.Scan(&v.id, &v.at); err != nil {
+				t.Fatal(err)
+			}
+			values = append(values, v)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return values
+	}
+	expected := snapshot()
+	if len(expected) != resourceUsageSweepRows+2 {
+		t.Fatal("retention fixture row count", len(expected))
+	}
 	// Occupy the sole primary connection without taking a file write lock.
 	// Cleanup must proceed using its own writer, not wait for this pool slot.
 	primary, err := s.db.Conn(t.Context())
@@ -116,10 +147,8 @@ func TestResourceRetentionOldestFirstBoundedAndIndependentOfPrimary(t *testing.T
 	// The production one-second budget may expire under race instrumentation
 	// or host load. Check ordering/caps after every partial sweep and allow
 	// bounded catch-up instead of requiring all 1,000 deletes in one budget.
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
-	total := int64(0)
-	for pass := 0; pass < 20 && total < resourceUsageSweepRows+2; pass++ {
+	total := 0
+	for pass := 0; pass < 20 && total < len(expected); pass++ {
 		deleted, err := s.PruneResourceUsage(ctx)
 		if err != nil && !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatal("sweep/connection isolation", deleted, err)
@@ -127,15 +156,25 @@ func TestResourceRetentionOldestFirstBoundedAndIndependentOfPrimary(t *testing.T
 		if deleted < 0 || deleted > resourceUsageSweepRows {
 			t.Fatal("sweep cap", deleted)
 		}
-		total += deleted
-		var count int
-		var oldest sql.NullInt64
-		if err := s.reader().QueryRowContext(ctx, `SELECT count(*),min(last_observed_at) FROM step_resource_usage`).Scan(&count, &oldest); err != nil {
-			t.Fatal(err)
+		remaining := snapshot()
+		observedTotal := len(expected) - len(remaining)
+		observedDeleted := int64(observedTotal - total)
+		// SQLite may commit a DELETE before cancellation makes ExecContext
+		// return a deadline error instead of its RowsAffected result. Only
+		// that final batch can be missing from the acknowledged count.
+		if observedDeleted < deleted || observedDeleted > resourceUsageSweepRows ||
+			(err == nil && observedDeleted != deleted) || observedDeleted-deleted > resourceUsageDeleteBatch {
+			t.Fatal("sweep count", observedDeleted, deleted, err)
 		}
-		if count != resourceUsageSweepRows+2-int(total) || (count > 0 && (!oldest.Valid || oldest.Int64 != unixNano(old)+total)) {
-			t.Fatal("partial sweep was not oldest first", count, oldest, total)
+		if observedDeleted != deleted {
+			t.Logf("deadline after committed batch: acknowledged=%d persisted=%d", deleted, observedDeleted)
 		}
+		// Verify every surviving row, including the rowid tie-breaker. The
+		// persisted suffix is authoritative even when the last count is lost.
+		if !slices.Equal(remaining, expected[observedTotal:]) {
+			t.Fatal("partial sweep was not oldest first", len(remaining), observedTotal, deleted, err)
+		}
+		total = observedTotal
 	}
 	if total != resourceUsageSweepRows+2 {
 		t.Fatal("bounded backlog did not drain while primary pool slot held", total)
