@@ -288,7 +288,7 @@ func run(ctx context.Context, intent vmrunner.KVMIntent, artifactRoot, privateRo
 	defer func() {
 		_ = syscall.Kill(-qemu.Process.Pid, syscall.SIGKILL)
 		if !joined {
-			<-done
+			_ = <-done
 		}
 	}()
 	var results []vmrunner.KVMCaseResult
@@ -296,7 +296,7 @@ func run(ctx context.Context, intent vmrunner.KVMIntent, artifactRoot, privateRo
 		select {
 		case <-ctx.Done():
 			return vmrunner.KVMReport{}, ctx.Err()
-		case <-done:
+		case _ = <-done:
 			joined = true
 			return vmrunner.KVMReport{}, errors.New("guest exited before cases completed")
 		default:
