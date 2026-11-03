@@ -29,8 +29,8 @@ func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	if err := validateMigrations(migrations, latestMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
-	if latestMigrationVersion != 47 {
-		t.Fatalf("latest migration version = %d, want 47", latestMigrationVersion)
+	if latestMigrationVersion != 48 {
+		t.Fatalf("latest migration version = %d, want 48", latestMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)
@@ -955,6 +955,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"queue_priority_patterns",
 		"receive_events",
 		"repositories",
+		"resource_ceilings",
 		"restart_step_timings",
 		"restart_workflow_timings",
 		"run_admission_timings",

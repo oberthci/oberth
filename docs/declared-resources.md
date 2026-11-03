@@ -7,32 +7,43 @@ behavior for missing declarations stay unchanged.
 
 ## Administrator ceilings
 
-The existing durable `size_grants` record selects numeric **per-container**
-ceilings. This is independent of the size annotation in the pipeline and applies
-to every fresh submission, including releases and protected preparation.
+Each repository has an administrator-owned numeric **per-container** ceiling,
+expressed as Kubernetes `requests` and `limits`. Workflow size annotations and
+usage history cannot select or raise it. It applies to every fresh submission,
+including releases and preparation, before server helper injection.
 
-| Administrator maximum | CPU | Memory | Ephemeral storage |
-| --- | ---: | ---: | ---: |
-| L, including no active grant | 4 | 8Gi | 16Gi |
-| XL | 8 | 16Gi | 32Gi |
+The default is 4 CPU, 8Gi memory and 16Gi ephemeral-storage for each tier. Request
+and limit ceilings can differ; each must be positive and requests cannot exceed
+limits. Global declaration maxima remain 8 CPU, 16Gi memory and 32Gi storage.
+A CPU limit ceiling does not require a workflow to declare a CPU limit.
 
-Both requests and limits must fit. L uses half of the existing global maxima;
-XL reaches those global maxima. These are declaration ceilings, not a claim
-about host capacity or measured usage. They do not add limits to a container
-that omitted them. VM allocations retain their separate grants and bounds.
-A step with no limit remains unbounded, as it is today. The ceiling validates
-explicit declarations per container; it does not cap a whole workflow's resource
-use or account for simultaneous containers. Stage C adds aggregate CPU/memory
-admission as a coarse ceiling, as described below. The existing server workflow
-timeout also bounds explicit step deadlines; positive integer step deadlines are
-required when declared.
+For example:
 
-An administrator can select XL with `oberth size grant repo-01 --max XL`.
-`size_grant_get` returns the numeric `resource_ceiling` alongside the existing
-grant record. Revocation returns to L for new submissions. Each fresh submission
-reads its own repository ID's grant; a read error refuses submission. The
-decision is snapshotted for validation, audit and submission. Already running
-workflows retain their resources; restart reconstruction does not resize them.
+```sh
+oberth resource grant repo-01 --requests-cpu 1500m --requests-memory 2Gi --limits-cpu 4 --limits-memory 5Gi
+oberth resource get repo-01
+oberth resource revoke repo-01
+```
+
+The corresponding MCP tools are `resource_grant`, `resource_grant_get` and
+`resource_revoke`. Grant arguments contain `repo`, `requests` and `limits`; each
+tier is an object of Kubernetes quantity strings. CPU and memory are required;
+ephemeral-storage defaults to 16Gi when omitted. Mutations require an admin and
+are audited atomically. Revocation restores defaults for new submissions.
+Lookup failures refuse submission. Validation, audit and submission share the
+same snapshot; running workflows retain their declarations.
+
+Migration 48 copies existing size grants exactly: L becomes 4 CPU / 8Gi / 16Gi,
+and XL becomes 8 CPU / 16Gi / 32Gi, in both requests and limits. Actor, timestamps
+and revocations are preserved. Absent and revoked grants use defaults. After
+upgrade, size grants control only deprecated size admission and tag-priority
+policy; use resource grants for numeric ceilings. A later size change cannot
+overwrite a custom numeric grant. Older binaries refuse the newer schema;
+rollback requires restoring the pre-upgrade database backup.
+
+Ceilings validate declarations, independently of the whole-workflow host budget.
+They do not insert limits or requests. The server workflow timeout also bounds
+explicit positive integer step deadlines.
 
 Ceilings cover requests and limits on containers, scripts, container sets,
 repository-authored init/sidecar containers, template defaults and nested inline
@@ -42,7 +53,7 @@ limit are refused. The rejection identifies the repository, template/container,
 resource, declared value and administrator ceiling, for example:
 
 ```
-repo repo-01 template step-abc12345: resources.requests.cpu 5 exceeds administrator L ceiling 4; an administrator must change the size grant, or reduce the declaration in git
+repo repo-01 template step-abc12345: resources.requests.cpu 5 exceeds administrator resource ceiling 4; an administrator must change the resource grant, or reduce the declaration in git
 ```
 
 The check runs in the trusted submission build before server helper injection
@@ -119,18 +130,21 @@ review overshoot, Kubernetes capacity and platform headroom when tuning it.
 existing request values that were never measured before relying on increased
 concurrency; low requests paired with high limits now reserve less capacity.
 
-Both requests and a positive effective memory limit are still required on every
-container for numeric admission. Request-only containers retain the existing
-legacy size path and memory-limit notice. Missing, zero or unknown requests,
-including helper requests, also retain legacy size admission; undeclared work
-earns no reduced reservation. Admission does not insert requests or limits.
-VM guest demand retains its existing conservative request/limit envelope and
-launcher reserve. The same max(fixed, proportional) headroom applies to the combined host envelope.
+A workflow with CPU/memory requests must have positive requests and a
+positive effective memory limit on every container, including authored helpers.
+Partial requests and unbounded graphs are refused before submission.
+A reservation that cannot fit the host budget, including helper and headroom
+reserves, is refused rather than using a size class.
+Workflows without CPU/memory requests, including limits-only workflows,
+retain size admission and receive a deprecation warning in the run message,
+with guidance to commit measured requests/limits in git. Admission inserts no
+requests or limits. Disabling declared admission refuses new declared runs;
+it does not send those runs back to size admission.
 
 Status messages report the total reservation, including helper and memory
 headroom reserves. The numeric budget, IO/run ceiling, legacy size weights,
-repository groups and VM quotas remain coarse admission controls. Full graph,
+and repository groups remain coarse admission controls. Full graph,
 recovery and rollout details are in [declared admission](declared-admission.md).
 Existing sealed demand is restored without recalculating it from current git;
-helper and run reserves use the restoring server's settings. No schema
-migration is required.
+helper and run reserves use the restoring server's settings. Numeric resource
+ceilings require migration 48.

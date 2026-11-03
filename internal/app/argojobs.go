@@ -511,6 +511,7 @@ func (jobs *ArgoJobs) auditSubmission(ctx context.Context, request service.Workf
 	automount := workflow.Spec.AutomountServiceAccountToken != nil && *workflow.Spec.AutomountServiceAccountToken
 	details := map[string]any{
 		"resource_maximum": submission.ResourceMaximum,
+		"resource_ceiling": submission.ResourceCeiling,
 		"repo":             request.Repository.Name, "upstream_org": request.UpstreamOrg,
 		"ref": request.Run.Ref,
 		// "sha" is the commit the Workflow actually executes (submission.SHA,

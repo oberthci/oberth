@@ -548,9 +548,11 @@ func vaultAddressRequiresPinnedAnchor(address string) bool {
 type Request struct {
 	Capability    *argoworkflow.Capability
 	DemandReceipt *argoworkflow.DemandReceipt
-	// ResourceMaximum is selected from the server's durable repository grant,
-	// never from pipeline annotations. Empty is legacy reconstruction only.
-	ResourceMaximum  pipeline.Size
+	// ResourceMaximum supports legacy reconstruction and callers without numeric grants.
+	ResourceMaximum pipeline.Size
+	// ResourceCeiling is the fresh server-owned repository grant snapshot.
+	// Workflow annotations and usage history cannot select or raise it.
+	ResourceCeiling  *corev1.ResourceRequirements
 	ResourceFallback model.ResourceAdmissionFallback
 	PodDemand        *argoworkflow.PodDemand
 	VMIDemandReceipt *argoworkflow.VMIDemandReceipt
@@ -694,7 +696,11 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 			return nil, errors.New("argojob: declared resource graph changed after reservation")
 		}
 	}
-	if request.ResourceMaximum != "" {
+	if request.ResourceCeiling != nil {
+		if err := argoworkflow.ValidateResourceRequirementsWithCapability(workflow, request.Repo, *request.ResourceCeiling, int64(config.WorkflowTimeout/time.Second), request.Capability); err != nil {
+			return nil, err
+		}
+	} else if request.ResourceMaximum != "" {
 		if err := argoworkflow.ValidateResourceCeilingWithCapability(workflow, request.Repo, request.ResourceMaximum, int64(config.WorkflowTimeout/time.Second), request.Capability); err != nil {
 			return nil, err
 		}

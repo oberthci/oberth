@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
 )
 
 // RunSourceBinding comes exclusively from the durable run and server-selected
@@ -212,4 +213,54 @@ func (r *VMIDemandReceipt) Verify(other *VMIDemandReceipt) error {
 		return errors.New("argoworkflow: VMI demand receipt source, trigger or resolved graph changed after reservation")
 	}
 	return nil
+}
+
+// HasResourceRequests distinguishes legacy (including limits-only) documents
+// from measured or partially requested ones. Partial requests must be completed
+// in git. The receipt holds already-resolved fragments.
+func (r *VMIDemandReceipt) HasResourceRequests() bool {
+	if r == nil || r.pods == nil {
+		return false
+	}
+	declared := false
+	check := func(resources corev1.ResourceRequirements) {
+		for _, name := range []corev1.ResourceName{corev1.ResourceCPU, corev1.ResourceMemory} {
+			if _, ok := resources.Requests[name]; ok {
+				declared = true
+			}
+		}
+	}
+	var walk func(*wfv1.Template, int)
+	walk = func(t *wfv1.Template, depth int) {
+		if t == nil || depth > MaxIdentityWalkDepth {
+			return
+		}
+		if t.Container != nil {
+			check(t.Container.Resources)
+		}
+		if t.Script != nil {
+			check(t.Script.Resources)
+		}
+		if t.ContainerSet != nil {
+			for _, c := range t.ContainerSet.Containers {
+				check(c.Resources)
+			}
+		}
+		for _, c := range t.InitContainers {
+			check(c.Resources)
+		}
+		for _, c := range t.Sidecars {
+			check(c.Resources)
+		}
+		for _, call := range invocations(t) {
+			if call.inline != nil {
+				walk(call.inline, depth+1)
+			}
+		}
+	}
+	walk(r.pods.Spec.TemplateDefaults, 0)
+	for i := range r.pods.Spec.Templates {
+		walk(&r.pods.Spec.Templates[i], 0)
+	}
+	return declared
 }

@@ -33,7 +33,7 @@ func (service *API) sizeGrantTool(ctx context.Context, actor api.Actor, name, re
 		if err != nil {
 			return nil, err
 		}
-		ceiling, err := argoworkflow.ResourceCeilingForSize(current)
+		ceiling, err := service.resourceCeilingForGrant(ctx, repository.ID, current)
 		if err != nil {
 			return nil, err
 		}
@@ -74,9 +74,16 @@ func (service *API) sizeGrantTool(ctx context.Context, actor api.Actor, name, re
 	if grant.RevokedAt == nil {
 		current = grant.MaxSize
 	}
-	ceiling, err := argoworkflow.ResourceCeilingForSize(current)
+	ceiling, err := service.resourceCeilingForGrant(ctx, repository.ID, current)
 	if err != nil {
 		return nil, err
 	}
 	return map[string]any{"repo": repoName, "max_size": current, "resource_ceiling": ceiling, "grant": grant}, nil
+}
+
+func (s *API) resourceCeilingForGrant(ctx context.Context, repoID int64, size pipeline.Size) (any, error) {
+	if grants, ok := s.sizeGrants.(ResourceGrantStore); ok {
+		return grants.ResourceCeiling(ctx, repoID)
+	}
+	return argoworkflow.ResourceCeilingForSize(size)
 }

@@ -101,3 +101,31 @@ func TestResourceCoverageIncludesRootNestedRepeatedAndDynamicCalls(t *testing.T)
 		t.Fatalf("calls: %+v", got)
 	}
 }
+
+func TestNumericResourceCeilingPreservesOperatorCapability(t *testing.T) {
+	wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Entrypoint: "step-abc12345", Templates: []wfv1.Template{resourceLeaf("step-abc12345", "1", "128Mi")}}}
+	name := corev1.ResourceName("devices.example.test/worker")
+	wf.Spec.Templates[0].Container.Resources.Requests[name] = resource.MustParse("1")
+	wf.Spec.Templates[0].Container.Resources.Limits = corev1.ResourceList{name: resource.MustParse("1")}
+	sizeCeiling, _ := ResourceCeilingForSize(pipeline.L)
+	ceiling := ResourceRequirementsForCeiling(sizeCeiling)
+	capability := capabilityPolicyForTest(t).Capability
+	if err := ValidateResourceRequirements(wf, "repo-01", ceiling, 3600); err == nil {
+		t.Fatal("ungranted extended resource accepted")
+	}
+	if err := ValidateResourceRequirementsWithCapability(wf, "repo-01", ceiling, 3600, capability); err != nil {
+		t.Fatal(err)
+	}
+	wf.Spec.Templates[0].Container.Resources.Limits[name] = resource.MustParse("3")
+	if err := ValidateResourceRequirementsWithCapability(wf, "repo-01", ceiling, 3600, capability); err == nil {
+		t.Fatal("operator ceiling bypassed")
+	}
+	wf.Spec.Templates[0].Container.Resources.Limits[name] = resource.MustParse("1")
+	wf.Spec.Templates[0].Container.Resources.Requests[corev1.ResourceCPU] = resource.MustParse("5")
+	if err := ValidateResourceRequirementsWithCapability(wf, "repo-01", ceiling, 3600, capability); err == nil {
+		t.Fatal("numeric ceiling bypassed by operator grant")
+	}
+	if len(ceiling.Requests) != 3 || len(ceiling.Limits) != 3 {
+		t.Fatal("administrator ceiling mutated")
+	}
+}

@@ -39,8 +39,8 @@ const maxPodGraphWork = 4096
 var errPodGraph = errors.New("declared resource graph cannot be bounded; use static calls or positive workflow parallelism")
 var errPodUndeclared = errors.New("pod has undeclared CPU/memory requests")
 
-// ErrMemoryUnbounded keeps request-only containers on legacy admission. A
-// reservation is not a runtime bound; never infer or insert a missing limit.
+// ErrMemoryUnbounded refuses numeric admission for request-only containers.
+// A reservation is not a runtime bound; never infer or insert a missing limit.
 var ErrMemoryUnbounded = errors.New("pod lacks a positive declared memory limit")
 
 type podGraph struct {
@@ -451,8 +451,7 @@ func declaredPodPeak(wf *wfv1.Workflow, resourcePods bool) (*PodDemand, error) {
 	if wf.Spec.OnExit != "" || len(wf.Spec.Hooks) != 0 {
 		return nil, errPodGraph
 	}
-	// Keep the previous legacy path for sequences without any effective
-	// parallelism limit. This change only enables their bounded analysis.
+	// Sequences require an effective parallelism limit for bounded analysis.
 	if err != nil || g.sequence && !g.limited && parallelism == 0 {
 		return boundedPodPeak(wf, resourcePods)
 	}

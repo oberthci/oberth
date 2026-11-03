@@ -146,6 +146,7 @@ func TestArchivedRepositoryRefusesNewGrants(t *testing.T) {
 	grants := []struct{ tool, args string }{
 		{"kubevirt_grant", `{"repo":"oberth"}`},
 		{"size_grant", `{"repo":"oberth","max":"L"}`},
+		{"resource_grant", `{"repo":"oberth","requests":{"cpu":"1","memory":"1Gi"},"limits":{"cpu":"2","memory":"2Gi"}}`},
 		{"promote_grant", `{"repo":"oberth","sha":"` + sha + `","branch":"main","expires":"1h"}`},
 		{"access_allow", `{"repo":"oberth","step":"publish","secret":"registry"}`},
 	}

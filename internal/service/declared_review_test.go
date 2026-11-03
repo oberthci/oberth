@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
@@ -47,7 +46,7 @@ spec:
 	return KubeVirtResources{Receipt: receipt}, err
 }
 
-func TestDeclaredGraphAndBudgetFallbackReachSubmission(t *testing.T) {
+func TestDeclaredGraphAndBudgetAreRefusedBeforeSubmission(t *testing.T) {
 	for _, graph := range []bool{false, true} {
 		t.Run(map[bool]string{false: "budget", true: "graph"}[graph], func(t *testing.T) {
 			f := newConcurrencyFixture(t, pipeline.M, 3)
@@ -64,31 +63,21 @@ func TestDeclaredGraphAndBudgetFallbackReachSubmission(t *testing.T) {
 			done := make(chan error, 1)
 			go func() { done <- f.scheduler.Run(ctx) }()
 			defer func() { close(jobs.release); cancel(); <-done }()
-			select {
-			case id := <-jobs.admitted:
-				if id != run.ID || !strings.Contains(f.scheduler.ResourceAdmissionMessage(id), "legacy size") {
-					t.Fatal("fallback was refused or lost its notice")
-				}
-			case <-time.After(testStartTimeout(10 * time.Second)):
-				t.Fatal("fallback never reached submission")
+			failed := awaitRunStatus(t, f, run.ID, model.RunFailed)
+			want := "numeric budget"
+			if graph {
+				want = "graph"
 			}
-		})
-	}
-}
+			if !strings.Contains(failed.Error, want) {
+				t.Fatalf("wrong refusal: %s", failed.Error)
+			}
+			select {
+			case <-jobs.admitted:
+				t.Fatal("unsafe declared workflow submitted")
+			default:
+			}
 
-func TestDeclaredBudgetFallbackAdmitsAndExplains(t *testing.T) {
-	g := newWeightedAdmission(6)
-	r := g.reserve(1)
-	release := acquireRequestWithinBudget(t, r, admissionRequest{RunID: strings.Repeat("a", 32), Size: pipeline.S, Pods: &argoworkflow.PodDemand{CPUMilli: 8000, MemoryBytes: 16 << 30, Pods: 2}})
-	defer release()
-	if r.pods != nil || r.weight != 1 || r.fallback != model.ResourceFallbackBudget {
-		t.Fatalf("not legacy: %+v", r)
-	}
-	api := &API{admission: &Scheduler{admission: g}}
-	runs := []model.Run{{ID: r.runID, DisplayReason: "Priority normal: ordinary run."}}
-	api.applyResourceMessages(t.Context(), runs)
-	if !strings.Contains(runs[0].ResourceMessage, "legacy size") || runs[0].DisplayReason != "Priority normal: ordinary run." {
-		t.Fatal("fallback notice missing or replaced reason")
+		})
 	}
 }
 

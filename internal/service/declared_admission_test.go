@@ -42,15 +42,14 @@ func TestDeclaredAdmissionMixedLegacyAndKillSwitch(t *testing.T) {
 	g.mu.Unlock()
 }
 
-func TestDeclaredAdmissionFallsBackForOversizeAndRetainsCopiedDemand(t *testing.T) {
+func TestDeclaredAdmissionRejectsOversizeAndRetainsCopiedDemand(t *testing.T) {
 	g := newWeightedAdmission(6)
 	oversize := &argoworkflow.PodDemand{CPUMilli: 8000, MemoryBytes: 1 << 30, Pods: 1}
 	legacy := g.reserve(1)
 	releaseLegacy, err := legacy.acquireRequest(t.Context(), admissionRequest{Size: pipeline.S, Pods: oversize})
-	if err != nil || legacy.pods != nil || legacy.weight != 1 {
-		t.Fatalf("oversize fallback: %v", err)
+	if err == nil || releaseLegacy != nil || legacy.weight != 0 {
+		t.Fatalf("oversize was not refused: %v", err)
 	}
-	releaseLegacy()
 
 	d := &argoworkflow.PodDemand{CPUMilli: 1000, MemoryBytes: 1 << 30, Pods: 1}
 	r := g.reserve(2)

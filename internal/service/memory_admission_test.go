@@ -10,8 +10,8 @@ import (
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
-func TestMemoryLimitFallbackUsesLegacyAdmissionAndVisibleNotice(t *testing.T) {
-	for _, shape := range []string{"request-only", "init", "sidecar", "all-limited", "undeclared", "init-undeclared", "sidecar-undeclared", "sidecar-memory-undeclared"} {
+func TestMemoryLimitRefusalAndUndeclaredLegacyNotice(t *testing.T) {
+	for _, shape := range []string{"limits-only", "request-only", "init", "sidecar", "all-limited", "undeclared", "init-undeclared", "sidecar-undeclared", "sidecar-memory-undeclared"} {
 		t.Run(shape, func(t *testing.T) {
 			limit := "        limits: {memory: 32Mi}\n"
 			if shape == "request-only" || shape == "undeclared" {
@@ -44,7 +44,7 @@ spec:
       resources:
         requests: {cpu: 100m, memory: 16Mi}
 ` + limit + helpers)
-			if shape == "undeclared" {
+			if shape == "undeclared" || shape == "limits-only" {
 				source = []byte(strings.Replace(string(source), "{cpu: 100m, memory: 16Mi}", "{}", 1))
 			}
 			resolved, err := argoworkflow.ResolveRunSource(source, nil, argoworkflow.RunSourceBinding{RunID: strings.Repeat("a", 32), RepositoryID: 1, SHA: strings.Repeat("b", 40), File: ".oberth/build.yaml", Trigger: argoworkflow.RunTriggerBranch})
@@ -56,7 +56,20 @@ spec:
 				t.Fatal(err)
 			}
 			g := newWeightedAdmission(6)
-			pods, reason := g.selectDeclaredDemand(receipt)
+			pods, reason, selectionErr := g.selectDeclaredDemand(receipt)
+			if shape != "all-limited" && shape != "undeclared" && shape != "limits-only" {
+				want := "memory limit"
+				if strings.Contains(shape, "undeclared") {
+					want = "incomplete CPU/memory requests"
+				}
+				if selectionErr == nil || !strings.Contains(selectionErr.Error(), want) || pods != nil || reason != "" {
+					t.Fatalf("unbounded declared container was not refused correctly: %v", selectionErr)
+				}
+				return
+			}
+			if selectionErr != nil {
+				t.Fatal(selectionErr)
+			}
 			r := g.reserve(1)
 			release := acquireRequestWithinBudget(t, r, admissionRequest{RunID: strings.Repeat("a", 32), Size: pipeline.S, Pods: pods, Fallback: reason})
 			defer release()
@@ -66,12 +79,10 @@ spec:
 				if pods == nil || reason != "" || r.pods == nil || r.weight != 0 {
 					t.Fatal("bounded pod lost numeric admission")
 				}
-			} else if strings.Contains(shape, "undeclared") {
-				if pods != nil || r.pods != nil || r.weight != 1 || !strings.Contains(runs[0].ResourceMessage, "requests") || strings.Contains(runs[0].ResourceMessage, "memory limit") {
-					t.Fatalf("missing requests received wrong notice: %+v %q", pods, runs[0].ResourceMessage)
+			} else {
+				if pods != nil || r.pods != nil || r.weight != 1 || !strings.Contains(runs[0].ResourceMessage, "deprecated") || !strings.Contains(runs[0].ResourceMessage, "requests") {
+					t.Fatalf("undeclared workflow lost legacy admission and warning: %+v %q", pods, runs[0].ResourceMessage)
 				}
-			} else if pods != nil || r.pods != nil || r.weight != 1 || !strings.Contains(runs[0].ResourceMessage, "memory limit") || !strings.Contains(runs[0].ResourceMessage, "legacy size") {
-				t.Fatalf("unbounded pod escaped legacy fallback and notice: %+v %q", pods, runs[0].ResourceMessage)
 			}
 			if runs[0].DisplayReason != "Priority normal: ordinary run." {
 				t.Fatal("fallback changed display reason")

@@ -49,10 +49,64 @@ func ValidateResourceCeilingWithCapability(wf *wfv1.Workflow, repo string, maxim
 	if err != nil {
 		return err
 	}
-	limits := map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse(ceiling.CPU), corev1.ResourceMemory: resource.MustParse(ceiling.Memory), corev1.ResourceEphemeralStorage: resource.MustParse(ceiling.EphemeralStorage)}
+	return validateResourceRequirements(wf, repo, ResourceRequirementsForCeiling(ceiling), string(maximum), deadlineSeconds, capability)
+}
+
+// ResourceRequirementsForCeiling is the upgrade mapping from historical grants.
+func ResourceRequirementsForCeiling(c ResourceCeiling) corev1.ResourceRequirements {
+	values := corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(c.CPU), corev1.ResourceMemory: resource.MustParse(c.Memory), corev1.ResourceEphemeralStorage: resource.MustParse(c.EphemeralStorage)}
+	return corev1.ResourceRequirements{Requests: values.DeepCopy(), Limits: values.DeepCopy()}
+}
+
+// ValidateAdministratorResources checks independent request/limit ceilings. A
+// CPU limit ceiling does not require workflows to declare a CPU limit.
+func ValidateAdministratorResources(c corev1.ResourceRequirements) error {
+	global, _ := ResourceCeilingForSize(pipeline.XL)
+	bounds := ResourceRequirementsForCeiling(global)
+	if len(c.Claims) != 0 {
+		return errors.New("resource ceiling cannot contain claims")
+	}
+	for _, values := range []corev1.ResourceList{c.Requests, c.Limits} {
+		for _, name := range []corev1.ResourceName{corev1.ResourceCPU, corev1.ResourceMemory, corev1.ResourceEphemeralStorage} {
+			q, ok := values[name]
+			if !ok || q.Sign() <= 0 || q.Cmp(bounds.Limits[name]) > 0 {
+				return fmt.Errorf("administrator resource ceiling requires positive %s within %s", name, bounds.Limits.Name(name, resource.DecimalSI).String())
+			}
+		}
+		if len(values) != 3 {
+			return errors.New("administrator resource ceiling supports CPU, memory and ephemeral-storage only")
+		}
+	}
+	for name, request := range c.Requests {
+		if request.Cmp(c.Limits[name]) > 0 {
+			return fmt.Errorf("administrator requests.%s exceeds limits.%s", name, name)
+		}
+	}
+	return nil
+}
+
+func ValidateResourceRequirements(wf *wfv1.Workflow, repo string, ceiling corev1.ResourceRequirements, deadlineSeconds int64) error {
+	return ValidateResourceRequirementsWithCapability(wf, repo, ceiling, deadlineSeconds, nil)
+}
+
+// ValidateResourceRequirementsWithCapability also enforces operator-owned extended-resource grants.
+func ValidateResourceRequirementsWithCapability(wf *wfv1.Workflow, repo string, ceiling corev1.ResourceRequirements, deadlineSeconds int64, capability *Capability) error {
+	if err := capability.Validate(); err != nil {
+		return err
+	}
+	if err := ValidateAdministratorResources(ceiling); err != nil {
+		return err
+	}
+	return validateResourceRequirements(wf, repo, ceiling, "resource", deadlineSeconds, capability)
+}
+
+func validateResourceRequirements(wf *wfv1.Workflow, repo string, ceiling corev1.ResourceRequirements, maximum string, deadlineSeconds int64, capability *Capability) error {
+	ceiling = *ceiling.DeepCopy()
 	if capability != nil {
 		for name, count := range capability.ExtendedResources {
-			limits[corev1.ResourceName(name)] = *resource.NewQuantity(count, resource.DecimalSI)
+			quantity := *resource.NewQuantity(count, resource.DecimalSI)
+			ceiling.Requests[corev1.ResourceName(name)] = quantity
+			ceiling.Limits[corev1.ResourceName(name)] = quantity
 		}
 	}
 	check := func(location string, r corev1.ResourceRequirements) error {
@@ -67,7 +121,10 @@ func ValidateResourceCeilingWithCapability(wf *wfv1.Workflow, repo string, maxim
 			slices.Sort(names)
 			for _, name := range names {
 				q := tier.values[name]
-				bound, ok := limits[name]
+				bound, ok := ceiling.Requests[name]
+				if tier.name == "limits" {
+					bound, ok = ceiling.Limits[name]
+				}
 				if !ok {
 					return fmt.Errorf("repo %s %s: resource %s is not admitted", repo, location, name)
 				}
@@ -75,7 +132,7 @@ func ValidateResourceCeilingWithCapability(wf *wfv1.Workflow, repo string, maxim
 					return fmt.Errorf("repo %s %s: resources.%s.%s must not be negative", repo, location, tier.name, name)
 				}
 				if q.Cmp(bound) > 0 {
-					return fmt.Errorf("repo %s %s: resources.%s.%s %s exceeds administrator %s ceiling %s; an administrator must change the size grant, or reduce the declaration in git", repo, location, tier.name, name, q.String(), maximum, bound.String())
+					return fmt.Errorf("repo %s %s: resources.%s.%s %s exceeds administrator %s ceiling %s; an administrator must change the resource grant, or reduce the declaration in git", repo, location, tier.name, name, q.String(), maximum, bound.String())
 				}
 			}
 		}

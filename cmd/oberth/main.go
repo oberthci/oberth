@@ -117,7 +117,8 @@ Commands:
   uplink        Manage uplink identities
   access        Manage secret access grants
   kubevirt      Manage repository VMI grants
-  size          Manage repository admission size grants (default max L; XL needs a grant)
+  resource      Manage repository CPU/memory request and limit ceilings
+  size          Manage legacy admission size and tag priority policy
   admission     Show the server's admission reservations, or release a stale one
   secretstore   Verify and inspect the secret store
   mcp           Call Oberth MCP tools
@@ -167,6 +168,8 @@ Commands:
 		return runAccess(ctx, arguments[1:], output)
 	case "kubevirt":
 		return runKubeVirtGrant(ctx, arguments[1:], output)
+	case "resource":
+		return runResourceGrant(ctx, arguments[1:], output)
 	case "size":
 		return runSizeGrant(ctx, arguments[1:], output)
 	case "admission":

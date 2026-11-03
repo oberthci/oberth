@@ -304,14 +304,12 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 	}
 	reservation.pods = nil
 	reservation.fallback = request.Fallback
-	if request.Pods != nil && !gate.resources.Disabled {
-		if gate.demandFitsBudget(request.Pods) {
-			pods := *request.Pods
-			pods.ExtendedResources = maps.Clone(request.Pods.ExtendedResources)
-			reservation.pods = &pods
-		} else {
-			reservation.fallback = model.ResourceFallbackBudget
-		}
+	if request.Pods != nil {
+		pods := *request.Pods
+		pods.ExtendedResources = maps.Clone(request.Pods.ExtendedResources)
+		reservation.pods = &pods
+	} else if reservation.fallback == "" {
+		reservation.fallback = model.ResourceFallbackRequests
 	}
 	reservation.priorityMaximum = request.PriorityMaximum
 	reservation.priorityLookupFailed = request.PriorityLookupFailed

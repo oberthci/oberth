@@ -171,7 +171,7 @@ func newScopeFixture(t *testing.T) *scopeFixture {
 	fixture.service, err = NewAPI(APIConfig{
 		Runs: database, History: database, Repositories: database, Issues: database,
 		Promotions: database, Logs: logs, Artifacts: kept, Auditor: database,
-		SecretAccess: database, KubeVirtGrants: database, WorkflowCapabilities: database, PromotionGrants: database, RepositoryRemover: database,
+		SecretAccess: database, KubeVirtGrants: database, SizeGrants: database, WorkflowCapabilities: database, PromotionGrants: database, RepositoryRemover: database,
 		KVMPreflights: database, Health: fixture.health, Signals: NewSignals(), RunCancels: database, RunReruns: database,
 		MaximumWait: testTimeout(50 * time.Millisecond), PromotionWorkspaceRoot: filepath.Join(root, "promotion-work"),
 		SecretStoreVerifier: func(context.Context, api.SecretStoreVerifyRequest) (api.SecretStoreVerifyResponse, error) {
@@ -432,6 +432,7 @@ func TestScopedUplinkCannotTellHiddenFromMissing(t *testing.T) {
 		{"kubevirt_grant_get", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
 		{"size_grant_get", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
 		{"workflow_capability_get", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
+		{"resource_grant_get", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
 		{"access_list", map[string]any{"repo": hiddenRepo, "pending": true}, map[string]any{"repo": missingRepo, "pending": true}},
 	}
 	for _, pair := range pairs {
@@ -496,6 +497,8 @@ func TestScopedAdminCannotActOutsideItsUpstream(t *testing.T) {
 		"repo_remove":                {"repo": hiddenRepo},
 		"promote_grant":              {"repo": hiddenRepo, "sha": fixture.runs["codeberg"][0].SHA, "branch": "main", "expires": "1h"},
 		"promote_grant_revoke":       {"id": fixture.grants["codeberg"].ID},
+		"resource_revoke":            {"repo": hiddenRepo},
+		"resource_grant":             {"repo": hiddenRepo, "requests": map[string]string{"cpu": "1", "memory": "1Gi"}, "limits": map[string]string{"cpu": "2", "memory": "2Gi"}},
 	} {
 		value, err := fixture.call(scopedAdmin, tool, arguments)
 		fixture.assertNoLeak(t, tool, value, err, selectorOf(arguments))
@@ -686,6 +689,7 @@ var toolScopeBehaviour = map[string]string{
 	"run_resources":      "lookup",
 	"kubevirt_grant_get": "lookup",
 	"size_grant_get":     "lookup",
+	"resource_grant_get": "lookup",
 	"system_status":      "filtered",
 	"sync":               "mutation", "promote": "mutation", "promote_retry": "mutation", "publish_retry": "mutation", "run_retry": "mutation", "run_rerun": "mutation",
 	"run_cancel":          "mutation",
@@ -695,7 +699,7 @@ var toolScopeBehaviour = map[string]string{
 	"issue_close": "mutation", "issue_reopen": "mutation", "issue_delete": "mutation",
 	"issue_lock": "mutation", "access_allow": "mutation", "access_revoke": "mutation",
 	"kubevirt_grant": "mutation", "kubevirt_revoke": "mutation",
-	"size_grant": "mutation", "size_revoke": "mutation",
+	"size_grant": "mutation", "size_revoke": "mutation", "resource_grant": "mutation", "resource_revoke": "mutation",
 	"priority_grant": "refused", "priority_grant_list": "refused", "priority_grant_revoke": "refused",
 	"workflow_capability_grant": "mutation", "workflow_capability_revoke": "mutation", "workflow_capability_get": "lookup",
 	"queue_priority_config": "refused", "queue_priority_get": "refused", "run_priority": "refused",
