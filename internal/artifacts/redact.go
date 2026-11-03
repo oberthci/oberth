@@ -1,102 +1,26 @@
-// Package artifacts provides the redaction gate for run artifact collection.
-//
-// When PR#16 (run artifacts) merges, every file collected from a pipeline's
-// $OBERTH_ARTIFACTS directory must pass through ScanForSecrets before it is
-// persisted to the server's /data PVC. This package exists as a pre-merge
-// hardening measure: the scanning infrastructure is reviewed and tested
-// independently, so the artifact PR can import it as a dependency rather
-// than building redaction in-band.
-//
-// The redaction set is the same configured-secret set the log writer uses
-// (internal/redact), ensuring that any value the log masks is also caught
-// in an artifact. A file that matches is refused — fail-closed, not
-// redact-in-place — because silently rewriting artifact contents would
-// create a correctness hazard (test reports, coverage data, plan files).
+// Package artifacts collects bounded run artifacts and refuses secret material.
+// Every complete member is scanned before any member is written. Matching files
+// are refused rather than rewritten, preserving artifact hashes and semantics.
 package artifacts
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
-	"os"
 	"strings"
 )
-
-// maxScanBytes bounds the prefix of each file scanned for secrets. Files
-// larger than this are scanned only in their first maxScanBytes; the
-// alternative (refusing all large files) would break legitimate large
-// artifacts like coverage databases.
-const maxScanBytes = 64 << 20 // 64 MiB
-
-// ScanForSecrets reads a file and reports whether it contains any of the
-// given secret patterns. It returns a non-nil error naming the matched
-// pattern index (not the value) if a match is found. An empty pattern
-// list always passes. The file is read in streaming fashion and only the
-// first maxScanBytes are scanned.
-//
-// The patterns are the same redaction set the log masking writer uses;
-// callers should pass the server's configured redact list.
-func ScanForSecrets(path string, patterns []string) error {
-	if len(patterns) == 0 {
-		return nil
-	}
-	// Filter out empty patterns (same guard as redactOutput in command.go).
-	var active [][]byte
-	for _, p := range patterns {
-		if p != "" {
-			active = append(active, []byte(p))
-		}
-	}
-	if len(active) == 0 {
-		return nil
-	}
-	// path is always under the server's controlled artifact staging directory;
-	// it is never user-supplied input.
-	file, err := os.Open(path) //nolint:gosec
-	if err != nil {
-		return fmt.Errorf("artifact redaction scan: %w", err)
-	}
-	defer func() { _ = file.Close() }()
-	return scanReader(io.LimitReader(file, maxScanBytes), active)
-}
-
-// ScanReaderForSecrets is the io.Reader variant for testing and for scanning
-// in-memory buffers (e.g. tar entries before extraction).
-func ScanReaderForSecrets(r io.Reader, patterns []string) error {
-	var active [][]byte
-	for _, p := range patterns {
-		if p != "" {
-			active = append(active, []byte(p))
-		}
-	}
-	if len(active) == 0 {
-		return nil
-	}
-	return scanReader(io.LimitReader(r, maxScanBytes), active)
-}
 
 // ErrSecretDetected is returned when a secret pattern is found in an artifact.
 var ErrSecretDetected = errors.New("artifact contains secret material")
 
-func scanReader(r io.Reader, patterns [][]byte) error {
-	// Use a scanner with a large buffer to handle long lines. The scan is
-	// line-oriented so partial matches across line boundaries are not a
-	// concern for the typical secret patterns (tokens, keys, passwords)
-	// which are single-line values.
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 256<<10), 1<<20) // 1 MiB max line
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		for _, pattern := range patterns {
-			if bytes.Contains(line, pattern) {
-				return fmt.Errorf("%w: matched pattern of length %d", ErrSecretDetected, len(pattern))
-			}
+// scanBytesForSecrets checks the complete member already held by Extract's
+// bounded staging buffer. There is no independent scan ceiling or line limit,
+// and patterns may include newlines. Errors never include the secret value.
+func scanBytesForSecrets(body []byte, patterns []string) error {
+	for _, pattern := range patterns {
+		if pattern != "" && bytes.Contains(body, []byte(pattern)) {
+			return fmt.Errorf("%w: matched pattern of length %d", ErrSecretDetected, len(pattern))
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("artifact redaction scan: %w", err)
 	}
 	return nil
 }

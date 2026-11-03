@@ -542,6 +542,14 @@ trust assumptions and complete invalidation rules.
   `draining`; messages say "head waiting 7m/20m, backfilling" or "draining for
   head", and the `admission` view adds `max_head_wait_seconds` and each
   reservation's `backfilled`.
+  A head blocked by declared CPU/memory drains immediately: later backfill
+  cannot spend its missing numeric capacity. Admission state and queue messages
+  report reserved CPU and memory against the configured budgets, including
+  legacy weights' equivalent shares; scoped views omit shared usage. Head-wait
+  persistence coalesces by commit, retains clears across a full wake channel,
+  and logs/retries failed writes. Priority overrides park their reservation
+  during persistence, release the admission mutex for SQLite, then re-evaluate
+  grants immediately.
   `oberth.ci/size-by-trigger: "branch=M,promotion=XL,schedule=XL"` sets the
   weight per run trigger: comma-separated `trigger=size` pairs, triggers
   `branch`, `promotion`, `schedule` (build.yaml) and `tag` (release.yaml),
@@ -1850,6 +1858,18 @@ trust assumptions and complete invalidation rules.
   are redacted in-Pod by the oberth
   credential chain (`oberth secretstore exec` or `materialize`), which wraps
   each credentialed step's stdout and stderr with redact.NewWriter.
+  This wrapper is the value-based masking boundary. The server does not hold
+  pipeline secret values and does not mask arbitrary issue bodies, comments,
+  or manually supplied log text. CI issue excerpts inherit masking only from
+  the wrapped source stream; callers must keep secrets out of issue text.
+  Empty optional values are allowed. Nonempty values shorter than three bytes
+  (including after trailing-newline trimming) refuse child execution, avoiding
+  both an output-matching oracle and unmasked short credentials. Exact values
+  of three bytes or more remain masked; the eight-byte threshold applies only
+  to extracted multiline fragments. Artifact collection scans every byte of
+  every bounded member for configured patterns and structural private-key
+  markers before writing any member; there is no line-length or 64 MiB scan
+  cutoff. It refuses a matching collection without altering its contents.
 - Every push, sync, promotion, and issue mutation is attributed to the acting
   uplink in the same durable transaction as the state change where applicable.
 - Required VM tests use the closed `.oberth/tests.yaml` version-1 contract:

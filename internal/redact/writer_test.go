@@ -155,10 +155,9 @@ func TestWriterMasksPEMLineEncodedAsBase64(t *testing.T) {
 }
 
 func TestWriterMergesOverlappingPatterns(t *testing.T) {
-	// "AB" starts at index 1, "BCDE" starts at index 2. Without merging,
-	// redacting "AB" alone leaks "CDE" from the longer overlapping pattern.
+	// "ABC" overlaps "BCDE"; the entire union must be masked.
 	var output bytes.Buffer
-	writer := NewWriter(&output, [][]byte{[]byte("AB"), []byte("BCDE")})
+	writer := NewWriter(&output, [][]byte{[]byte("ABC"), []byte("BCDE")})
 	if _, err := writer.Write([]byte("XABCDEY")); err != nil {
 		t.Fatal(err)
 	}
@@ -174,8 +173,8 @@ func TestWriterMergesOverlappingPatterns(t *testing.T) {
 func TestWriterMergesMultipleOverlapping(t *testing.T) {
 	// Three overlapping patterns forming one contiguous region.
 	var output bytes.Buffer
-	writer := NewWriter(&output, [][]byte{[]byte("AB"), []byte("BC"), []byte("CD")})
-	if _, err := writer.Write([]byte("0ABCD1")); err != nil {
+	writer := NewWriter(&output, [][]byte{[]byte("ABC"), []byte("BCD"), []byte("CDE")})
+	if _, err := writer.Write([]byte("0ABCDE1")); err != nil {
 		t.Fatal(err)
 	}
 	if err := writer.Close(); err != nil {
@@ -227,7 +226,6 @@ func TestWriterRedactsShortValues(t *testing.T) {
 	}{
 		{"5-byte", "abc12", "token=abc12 done", "token=*** done"},
 		{"3-byte", "key", "the key is key!", "the *** is ***!"},
-		{"1-byte", "X", "AXB", "A***B"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var output bytes.Buffer
@@ -242,6 +240,22 @@ func TestWriterRedactsShortValues(t *testing.T) {
 				t.Fatalf("output = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestWriterRefusesOneAndTwoByteSecretsWithoutOutput(t *testing.T) {
+	for _, value := range []string{"X", "XY", "X\n\n"} {
+		var output bytes.Buffer
+		writer := NewWriter(&output, [][]byte{[]byte(value)})
+		if n, err := writer.Write([]byte("unrelated output")); n != 0 || err == nil {
+			t.Fatalf("short secret accepted: n=%d err=%v", n, err)
+		}
+		if err := writer.Close(); err == nil {
+			t.Fatal("close hid invalid secret configuration")
+		}
+		if output.Len() != 0 {
+			t.Fatal("short secret created a masking oracle")
+		}
 	}
 }
 
@@ -275,5 +289,21 @@ func TestWriterShortLineFragmentNotRegistered(t *testing.T) {
 	}
 	if got := output2.String(); got != "config: v=1 is fine" {
 		t.Fatalf("short line fragment caused false-positive redaction: %q", got)
+	}
+}
+
+func TestWriterAllowsNewlineOnlyOptionalValues(t *testing.T) {
+	for _, value := range []string{"", "\n", "\r", "\r\n", "\n\n\n"} {
+		var output bytes.Buffer
+		writer := NewWriter(&output, [][]byte{[]byte(value)})
+		if _, err := writer.Write([]byte("optional value")); err != nil {
+			t.Fatalf("newline-only value refused: %v", err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if output.String() != "optional value" {
+			t.Fatalf("output = %q", output.String())
+		}
 	}
 }

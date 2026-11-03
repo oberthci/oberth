@@ -73,6 +73,7 @@ func (scheduler *Scheduler) AdmissionState() *model.AdmissionState {
 	defer gate.mu.Unlock()
 	configuration := gate.capacityConfig
 	state := &model.AdmissionState{
+		NumericBudget: gate.numericBudgetLocked(),
 		Configuration: &configuration,
 		Pressure:      gate.pressureStateLocked(),
 		Capacity:      gate.capacity, Used: gate.used, Runs: gate.runs, MaxRuns: gate.maxRuns,

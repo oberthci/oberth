@@ -12,6 +12,21 @@ import (
 
 var ErrClosed = errors.New("redacting writer is closed")
 
+// ErrShortSecret refuses a masking oracle without allowing the value through.
+var ErrShortSecret = errors.New("secret values must contain at least 3 bytes after trimming trailing newlines")
+
+// ValidateSecrets runs before a credentialed child starts. Empty optional
+// values remain valid; one- and two-byte values must not become output patterns.
+func ValidateSecrets(values [][]byte) error {
+	for _, value := range values {
+		trimmed := bytes.TrimRight(value, "\r\n")
+		if len(trimmed) > 0 && len(trimmed) < 3 {
+			return ErrShortSecret
+		}
+	}
+	return nil
+}
+
 // minEncodedLen is the minimum length of an encoded pattern to register.
 // Patterns shorter than this risk false-positive redactions.
 const minEncodedLen = 16
@@ -28,9 +43,13 @@ type Writer struct {
 	secrets     [][]byte
 	buffer      []byte
 	closed      bool
+	configErr   error
 }
 
 func NewWriter(destination io.Writer, values [][]byte) *Writer {
+	if err := ValidateSecrets(values); err != nil {
+		return &Writer{destination: destination, configErr: err}
+	}
 	secrets := make([][]byte, 0, len(values))
 	seen := map[string]bool{}
 	addSecret := func(value []byte) {
@@ -76,6 +95,9 @@ func NewWriter(destination io.Writer, values [][]byte) *Writer {
 }
 
 func (writer *Writer) Write(body []byte) (int, error) {
+	if writer.configErr != nil {
+		return 0, writer.configErr
+	}
 	if writer.closed {
 		return 0, ErrClosed
 	}
@@ -88,6 +110,9 @@ func (writer *Writer) Write(body []byte) (int, error) {
 }
 
 func (writer *Writer) Flush() error {
+	if writer.configErr != nil {
+		return writer.configErr
+	}
 	if writer.closed {
 		return ErrClosed
 	}

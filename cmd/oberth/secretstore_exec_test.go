@@ -484,6 +484,22 @@ func TestEmitSecretFetchMarkerEmptyFetch(t *testing.T) {
 
 // --- #249: short secret redaction tests ---
 
+func TestSecretWrappersRefuseShortValuesBeforeStartingChild(t *testing.T) {
+	for _, materialize := range []bool{false, true} {
+		var output bytes.Buffer
+		var err error
+		command := []string{"/bin/sh", "-c", "printf child-started"}
+		if materialize {
+			err = executeMaterialize(t.TempDir(), nil, command, [][]byte{[]byte("XY")}, &output, &output)
+		} else {
+			err = execChild(t.TempDir(), command, []namedSecret{{path: "signing/password", value: []byte("XY")}}, &output, &output)
+		}
+		if err == nil || output.Len() != 0 {
+			t.Fatalf("child started with short secret: err=%v output=%q", err, output.String())
+		}
+	}
+}
+
 func TestExecChildRedactsShortSecret(t *testing.T) {
 	dir := t.TempDir()
 	secret := []byte("abc12") // 5 bytes, well below the old 8-byte threshold
@@ -495,7 +511,7 @@ func TestExecChildRedactsShortSecret(t *testing.T) {
 	}
 
 	var stdout bytes.Buffer
-	err := execChild(dir, []string{script}, [][]byte{secret}, &stdout, io.Discard)
+	err := execChild(dir, []string{script}, []namedSecret{{path: "signing/password", value: secret}}, &stdout, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -637,5 +653,39 @@ func TestExecNoSwapWarningWhenInactive(t *testing.T) {
 
 	if strings.Contains(stderr.String(), "swap") {
 		t.Fatalf("unexpected swap warning when swap is inactive: %q", stderr.String())
+	}
+}
+
+func TestMaterializeShortValueErrorNamesSecret(t *testing.T) {
+	var output bytes.Buffer
+	path := "signing/password"
+	err := executeMaterialize(t.TempDir(), []materializeMapping{{variable: "SIGNING_PASSWORD", relative: path}}, []string{"/bin/sh", "-c", "printf child-started"}, [][]byte{[]byte("XY")}, &output, &output)
+	if err == nil || !strings.Contains(err.Error(), path) || strings.Contains(err.Error(), "XY") || output.Len() != 0 {
+		t.Fatalf("invalid secret error = %v, output bytes = %d", err, output.Len())
+	}
+}
+
+func TestExecChildShortValueErrorNamesSecret(t *testing.T) {
+	var output bytes.Buffer
+	path := "oberth/data/release/signing/password"
+	err := execChild(t.TempDir(), []string{"/bin/sh", "-c", "printf child-started"}, []namedSecret{{path: path, value: []byte("XY")}}, &output, &output)
+	if err == nil || !strings.Contains(err.Error(), path) || strings.Contains(err.Error(), "XY") || output.Len() != 0 {
+		t.Fatalf("invalid secret error = %v, output bytes = %d", err, output.Len())
+	}
+}
+
+func TestSecretWrappersAllowNewlineOnlyOptionalValues(t *testing.T) {
+	for _, materialize := range []bool{false, true} {
+		var output bytes.Buffer
+		command := []string{"/bin/sh", "-c", "printf child-started"}
+		var err error
+		if materialize {
+			err = executeMaterialize(t.TempDir(), nil, command, [][]byte{[]byte("\n")}, &output, &output)
+		} else {
+			err = execChild(t.TempDir(), command, []namedSecret{{path: "signing/password", value: []byte("\n")}}, &output, &output)
+		}
+		if err != nil || output.String() != "child-started" {
+			t.Fatalf("optional value: err=%v output=%q", err, output.String())
+		}
 	}
 }

@@ -29,8 +29,10 @@ type weightedAdmission struct {
 	now func() time.Time
 	// headEvents carries head-wait origins to persist and clear, so a
 	// restarted server keeps the head's wait origin. Sends never block.
-	headEvents chan headEvent
-	used       int
+	headEvents      chan headEvent
+	headPending     map[headWaitKey]headEvent
+	priorityChanges map[string]bool
+	used            int
 	// maxRuns, when positive, caps how many runs hold a grant at once. The
 	// scheduler mirrors its dispatch ceiling here: runs parked on their own
 	// concurrency group stop counting against the dispatch loop, so the loop
@@ -488,7 +490,7 @@ func (gate *weightedAdmission) grantLocked() {
 			index++
 			continue
 		}
-		if !reservation.prepared {
+		if !reservation.prepared || gate.priorityChanges[reservation.runID] {
 			// A claim whose size is still unknown holds its place at the
 			// head. Behind a known head it is simply not a candidate yet.
 			if head == nil {
@@ -734,6 +736,8 @@ func (gate *weightedAdmission) blockerLocked(reservation *admissionReservation) 
 		blocker.FullDrain = true
 	case (gate.maxRuns > 0 && gate.runs >= gate.maxRuns) || (gate.resources.IORuns > 0 && gate.runs >= gate.resources.IORuns):
 		blocker.RunCeiling = true
+	case gate.numericBlockedLocked(reservation):
+		blocker.NumericBudget = gate.numericBudgetLocked()
 	}
 	gate.backfillStateLocked(reservation, blocker)
 	return blocker
@@ -762,7 +766,7 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 	if reservation == nil {
 		return nil
 	}
-	result := &model.AdmissionObservation{State: "preparing", Used: gate.used, Capacity: gate.capacity}
+	result := &model.AdmissionObservation{State: "preparing", Used: gate.used, Capacity: gate.capacity, NumericBudget: gate.numericBudgetLocked()}
 	if reservation.prepared {
 		result.DeclaredResources = reservation.declaredResources()
 		result.State = "waiting"

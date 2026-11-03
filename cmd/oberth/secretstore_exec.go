@@ -157,7 +157,7 @@ func runSecretStoreExec(ctx context.Context, arguments []string, standardOut, er
 	// Validate path presence and collect secret bytes for redaction.
 	// Empty values are accepted: cosign password can be an empty string for
 	// unencrypted keys, matching the secretstore client (client.go) contract.
-	var secrets [][]byte
+	var secrets []namedSecret
 	localNames := make(map[string]struct{}, len(paths))
 	for _, kvPath := range paths {
 		localName := filepath.Base(kvPath)
@@ -172,8 +172,8 @@ func runSecretStoreExec(ctx context.Context, arguments []string, standardOut, er
 			zeroFetchedSecrets(fetched)
 			return fmt.Errorf("path %q returned no keys", kvPath)
 		}
-		for _, value := range values {
-			secrets = append(secrets, value)
+		for key, value := range values {
+			secrets = append(secrets, namedSecret{path: kvPath + "/" + key, value: value})
 		}
 	}
 
@@ -295,9 +295,30 @@ func validateSecretSegment(kind, value string) error {
 	return nil
 }
 
+type namedSecret struct {
+	path  string
+	value []byte
+}
+
+// secretValues validates before a child can start and reports only coordinates.
+func secretValues(secrets []namedSecret) ([][]byte, error) {
+	values := make([][]byte, 0, len(secrets))
+	for _, secret := range secrets {
+		if err := redact.ValidateSecrets([][]byte{secret.value}); err != nil {
+			return nil, fmt.Errorf("secret %q: %w", secret.path, err)
+		}
+		values = append(values, secret.value)
+	}
+	return values, nil
+}
+
 // execChild strips credential env, sets OBERTH_SECRETSTORE_DIR, wraps
 // stdout/stderr in redaction, and execs the command.
-func execChild(directory string, command []string, secrets [][]byte, standardOut, errorOut io.Writer) error {
+func execChild(directory string, command []string, secrets []namedSecret, standardOut, errorOut io.Writer) error {
+	values, err := secretValues(secrets)
+	if err != nil {
+		return err
+	}
 	stripped := map[string]struct{}{secretExecStoreDirEnv: {}}
 	environment := make([]string, 0, len(os.Environ())+1)
 	for _, entry := range os.Environ() {
@@ -312,8 +333,8 @@ func execChild(directory string, command []string, secrets [][]byte, standardOut
 	}
 	environment = append(environment, secretExecStoreDirEnv+"="+directory)
 
-	stdoutRedactor := redact.NewWriter(standardOut, secrets)
-	stderrRedactor := redact.NewWriter(errorOut, secrets)
+	stdoutRedactor := redact.NewWriter(standardOut, values)
+	stderrRedactor := redact.NewWriter(errorOut, values)
 
 	// #nosec G204,G702 -- the command IS the pipeline step; Oberth's admission
 	// gate decides which images and commands may run, and this process only
@@ -490,6 +511,17 @@ func validateMaterializeRelative(relative string) error {
 
 // executeMaterialize runs the real command with mapped variables stripped.
 func executeMaterialize(directory string, mappings []materializeMapping, command []string, secrets [][]byte, standardOut, errorOut io.Writer) error {
+	named := make([]namedSecret, 0, len(secrets))
+	for i, value := range secrets {
+		path := fmt.Sprintf("value %d", i+1)
+		if i < len(mappings) {
+			path = mappings[i].relative
+		}
+		named = append(named, namedSecret{path: path, value: value})
+	}
+	if _, err := secretValues(named); err != nil {
+		return err
+	}
 	stripped := map[string]struct{}{secretExecStoreDirEnv: {}}
 	for _, entry := range mappings {
 		stripped[entry.variable] = struct{}{}

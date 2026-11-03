@@ -6,6 +6,9 @@ const source = readFileSync(process.env.DASHBOARD_SCRIPT || new URL('../internal
 const sandbox = vm.createContext({URLSearchParams, console, Map, Set, Date, location:{pathname:'/runs'}, document:{body:{dataset:{version:'test'}},getElementById(){return null}}, localStorage:{getItem(){return null},setItem(){}}, setInterval(){},clearInterval(){}});
 vm.runInContext(source.slice(0, source.indexOf('/* ---------- events ---------- */')), sandbox);
 const run = code => vm.runInContext(code, sandbox);
+const numericCapacity = run(`capacityStatusCard({configuration:{max_concurrent_jobs:4,source:'config'},used:0,capacity:8,numeric_budget:{cpu_used_milli:7000,cpu_budget_milli:8000,memory_used_bytes:1073741824,memory_budget_bytes:17179869184}})`);
+assert.match(numericCapacity, /CPU 7000m\/8000m/, 'capacity card must expose numeric CPU budget even when weight use is zero');
+assert.match(numericCapacity, /memory/, 'capacity card must expose the memory budget');
 run(`
   let html='', requests=[], listNext='', flatPaging=false;
   replaceApp=value=>{html=value};
