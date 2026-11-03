@@ -23,6 +23,10 @@ const (
 )
 
 type receiveReservation struct {
+	ActorFingerprint string            `json:"actor_fingerprint,omitempty"`
+	Priority         string            `json:"priority,omitempty"`
+	PriorityReason   string            `json:"priority_reason,omitempty"`
+	Supersede        bool              `json:"supersede,omitempty"`
 	Version          int               `json:"version"`
 	ID               string            `json:"id"`
 	Repo             string            `json:"repo"`
@@ -90,7 +94,7 @@ func (c *Cache) Receive(ctx context.Context, input, actor, protocol string, stdi
 		}
 		return admission, nil
 	}, func() error {
-		return c.serveLocked(ctx, path, ReceivePack, protocol, stdin, stdout, stderr)
+		return c.run(ctx, commandSpec{dir: path, args: c.serviceArgs(ReceivePack, path), stdin: stdin, stdout: stdout, stderr: stderr, env: map[string]string{"GIT_PROTOCOL": protocol, "OBERTH_RECEIVE_OUTBOX": c.outboxRoot, "OBERTH_RECEIVE_REPO": identity}})
 	}, handler)
 }
 
@@ -158,6 +162,14 @@ func (c *Cache) receiveTransactionSerialized(
 	}
 
 	receiveErr := receive()
+	// The pre-receive hook saves push options before Git moves refs. Reload the
+	// same reservation so finalization and crash replay carry identical intent.
+	recorded, readErr := c.readReservation(identity)
+	if readErr != nil {
+		lock.Unlock()
+		return errors.Join(receiveErr, readErr)
+	}
+	reservation.Priority, reservation.PriorityReason, reservation.Supersede = recorded.Priority, recorded.PriorityReason, recorded.Supersede
 	// The server-owned pre-finalize gate runs after receive-pack has applied
 	// ref updates and before finalization records the delta in the durable
 	// outbox. A gate failure (e.g. audit chain tampered during the pack
@@ -209,6 +221,7 @@ func (c *Cache) reserveReceiveAtMostLocked(ctx context.Context, identity, path, 
 		Version:          receiveReservationVersion,
 		ID:               id,
 		Repo:             identity,
+		ActorFingerprint: ReceiveFingerprint(ctx),
 		Actor:            actor,
 		State:            receiveReserved,
 		Before:           before,
@@ -384,7 +397,9 @@ func (c *Cache) replayRepoSerialized(ctx context.Context, identity, path string,
 	for reservation.Next < len(reservation.Updates) {
 		index := reservation.Next
 		event := ReceiveEvent{
+			Priority: reservation.Priority, PriorityReason: reservation.PriorityReason, Supersede: reservation.Supersede,
 			ID:               fmt.Sprintf("%s:%d", reservation.ID, index),
+			ActorFingerprint: reservation.ActorFingerprint,
 			Actor:            reservation.Actor,
 			Repo:             reservation.Repo,
 			Update:           reservation.Updates[index],

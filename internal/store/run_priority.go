@@ -52,14 +52,17 @@ const automaticTagPrioritySQL = `(` + priorityTagReleaseSQL + ` AND ` + tagPrior
 const naturalHighestSQL = `(trigger='promotion' OR ` + automaticTagPrioritySQL + `)`
 const overridePrioritySQL = `(SELECT priority FROM run_priority_overrides WHERE run_id=id)`
 const rcPatternSQL = `(SELECT pattern FROM queue_priority_patterns WHERE ref_kind='branch' AND ref GLOB pattern ORDER BY pattern LIMIT 1)`
-const basePrioritySQL = `CASE WHEN ` + naturalHighestSQL + ` THEN 'highest' WHEN ` + overridePrioritySQL + ` IS NOT NULL THEN ` + overridePrioritySQL + ` WHEN ` + rcPatternSQL + ` IS NOT NULL THEN 'high' ELSE 'normal' END`
-const priorityReasonSQL = `CASE WHEN trigger='promotion' THEN 'promotion run' WHEN ` + automaticTagPrioritySQL + ` THEN '` + model.TagReleasePriorityReason + `' WHEN ` + overridePrioritySQL + ` IS NOT NULL THEN 'admin bump: ' || (SELECT reason FROM run_priority_overrides WHERE run_id=id) WHEN ` + rcPatternSQL + ` IS NOT NULL THEN 'release-candidate pattern: ' || ` + rcPatternSQL + ` WHEN ` + priorityTagReleaseSQL + ` THEN CASE WHEN NOT ` + tagPriorityEnabledSQL + ` THEN 'tag/release automatic priority disabled by size_revoke' ELSE 'tag/release waiting behind an earlier tag of this repository' END ELSE 'ordinary run' END`
+
+// A submission request may only raise the automatic class. Refused and normal
+// requests remain audit metadata; they never replace classification or its reason.
+const basePrioritySQL = `CASE WHEN ` + naturalHighestSQL + ` THEN 'highest' WHEN ` + overridePrioritySQL + ` IS NOT NULL THEN ` + overridePrioritySQL + ` WHEN ` + requestedPrioritySQL + ` IS NOT NULL THEN ` + requestedPrioritySQL + ` WHEN ` + rcPatternSQL + ` IS NOT NULL THEN 'high' ELSE 'normal' END`
+const priorityReasonSQL = `CASE WHEN trigger='promotion' THEN 'promotion run' WHEN ` + automaticTagPrioritySQL + ` THEN '` + model.TagReleasePriorityReason + `' WHEN ` + overridePrioritySQL + ` IS NOT NULL THEN 'admin bump: ' || (SELECT reason FROM run_priority_overrides WHERE run_id=id) WHEN ` + requestedPrioritySQL + ` IS NOT NULL THEN 'submission priority: ' || (SELECT reason FROM run_priority_requests WHERE run_id=id) WHEN ` + rcPatternSQL + ` IS NOT NULL THEN 'release-candidate pattern: ' || ` + rcPatternSQL + ` WHEN ` + priorityTagReleaseSQL + ` THEN CASE WHEN NOT ` + tagPriorityEnabledSQL + ` THEN 'tag/release automatic priority disabled by size_revoke' ELSE 'tag/release waiting behind an earlier tag of this repository' END ELSE 'ordinary run' END`
 
 // priorityOrderSQL shares the effective class with the in-memory gate. The
 // clock is rendered from an int64, never request text, and is fixed per query.
 func priorityOrderSQL(now time.Time) string {
 	base := basePrioritySQL
-	return `CASE WHEN (` + base + `)='highest' OR ((` + base + `) IN ('normal','high') AND queued_at <= ` + fmt.Sprint(unixNano(now)) + ` - 3600000000000) THEN 2 WHEN (` + base + `)='high' THEN 1 ELSE 0 END DESC, admission_sequence, queue_sequence`
+	return `CASE WHEN (` + base + `)='highest' OR ((` + base + `) IN ('normal','high') AND queued_at <= ` + fmt.Sprint(unixNano(now)) + ` - 3600000000000) THEN 2 WHEN (` + base + `)='high' THEN 1 ELSE 0 END DESC, CASE (` + base + `) WHEN 'highest' THEN 2 WHEN 'high' THEN 1 ELSE 0 END DESC, admission_sequence, queue_sequence`
 }
 
 func (s *Store) QueuePriorityPatterns(ctx context.Context) ([]string, error) {
@@ -104,6 +107,9 @@ func (s *Store) SetQueuePriorityPatterns(ctx context.Context, actor string, patt
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := protectAutomaticPrioritiesTx(ctx, tx); err != nil {
+		return nil, err
+	}
 	previous, err := queuePriorityPatterns(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -115,6 +121,9 @@ func (s *Store) SetQueuePriorityPatterns(ctx context.Context, actor string, patt
 		if _, err = tx.ExecContext(ctx, `INSERT INTO queue_priority_patterns(pattern) VALUES(?)`, p); err != nil {
 			return nil, err
 		}
+	}
+	if err := protectAutomaticPrioritiesTx(ctx, tx); err != nil {
+		return nil, err
 	}
 	details, _ := json.Marshal(map[string]any{"rc_patterns": patterns, "previous_rc_patterns": previous, "starvation_minutes": 60})
 	if _, err = s.appendAuditAction(ctx, tx, model.AuditActionSpec{Actor: actor, Action: "queue.priority.config", ResourceType: "queue", ResourceID: "priority", Details: string(details)}, unixNano(s.now())); err != nil {
@@ -177,6 +186,9 @@ func (s *Store) inheritQueuePriorityTx(ctx context.Context, tx *sql.Tx, previous
 		return model.Run{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO run_priority_overrides(run_id,priority,reason,actor,updated_at) SELECT ?,priority,reason,actor,updated_at FROM run_priority_overrides WHERE run_id=?`, next.ID, previous.ID); err != nil {
+		return model.Run{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO run_priority_requests(run_id,requested,accepted,reason,actor,refusal) SELECT ?,requested,accepted,reason,actor,refusal FROM run_priority_requests WHERE run_id=? ON CONFLICT(run_id) DO UPDATE SET requested=excluded.requested,accepted=excluded.accepted,reason=excluded.reason,actor=excluded.actor,refusal=excluded.refusal`, next.ID, previous.ID); err != nil {
 		return model.Run{}, err
 	}
 	return scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id=?`, next.ID))

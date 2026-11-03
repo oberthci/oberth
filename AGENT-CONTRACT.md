@@ -455,17 +455,33 @@ trust assumptions and complete invalidation rules.
   re-enables it within the maximum. Existing revoked records also opt out.
   Local MCP grant/revoke refreshes waiters immediately; CLI changes are polled.
   Explicit admin bumps, promotions and aging remain independent. Branch
-  names/flags/triggers cannot claim automatic release priority. `high` is for
-  administrator RC globs, otherwise `normal`. Repositories/pipelines cannot
-  supply priority. Both durable claims
+  names/flags/triggers cannot claim automatic release priority. `high` also
+  covers administrator RC globs, otherwise the default is `normal`.
+  Submission priority is requested with `git push -o oberth.priority=high|highest`
+  or optional MCP `priority` on promote, rerun, retry, schedule_trigger and sync.
+  Unscoped admins may request it directly; other identities need an unexpired
+  `priority_grant {identity,max_class,expires}`. Push admin authority uses its
+  authenticated key fingerprint, which survives receive replay; an identity
+  alias cannot inherit another key's admin role or wider scope.
+  A refusal keeps the run normal,
+  records its reason and never rejects the push. Repository schedules can set a
+  default priority but cron still requires a grant for `oberth:scheduler`.
+  Priority submissions never cancel existing work; once accepted, priority runs
+  survive supersession. Explicit cancellation or `oberth.supersede=true` needs
+  the requester or an unscoped admin. Schema v39 stores grants and request
+  provenance, including lasting supersession protection for automatic priority.
+  Both durable claims
   and weighted admission sort by effective class, then original admission FIFO.
   Normal and high work waiting 60 minutes join `highest` with their original FIFO place;
   automatic restart refires preserve its wait and explicit admin bump. Existing
   grants are never preempted. Backfill/head-wait rules apply within each class;
-  a waiting higher class prevents lower-class backfill. Group/VM parking still
+  a waiting higher class prevents lower-class backfill. Priority backfill must
+  also leave enough declared demand and run slots for the head alongside all
+  backfilled work. Group/VM parking still
   releases weight and lets unrelated work proceed. Bounded extra priority claims
   let higher classes reach the gate past ordinary waiting dispatch slots.
-  `priority_class` and `priority_reason` are run projections; active
+  `priority_class`, `priority_reason` and `priority_requested_by` are run projections;
+  `priority_refusal` explains refused requests and queue views show positions; active
   `display_reason` and the dashboard run-detail priority badge also explain them.
   Unscoped-admin MCP `queue_priority_config {rc_patterns}` atomically replaces
   up to 16 case-sensitive globs (1..256 bytes, `*`/`?` match slash; `[]` disables).
@@ -942,7 +958,7 @@ trust assumptions and complete invalidation rules.
   it encodes the same result object. Authenticated tool refusal text keeps its
   stable error class and may append only an explicitly public service reason.
   Raw dependency chains stay masked; scoped missing/hidden equivalence remains.
-- MCP exposes 67 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 70 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, read-only `run_resources` (captured history and reviewed git resource suggestions), `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`, `run_kvm_preflight`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, issue
   create/get/get_many/update/append/close/reopen/delete/list/lock/unlock/close_many,
@@ -950,7 +966,7 @@ trust assumptions and complete invalidation rules.
   `access_dismiss` and `kubevirt_grant_list`, admin-only `kubevirt_grant` and
   `kubevirt_revoke`, read-only `kubevirt_grant_get`, admin-only `size_grant`
   and `size_revoke`, read-only `size_grant_get` (#1021), admin-only
-  unscoped `admission_release` (#1099), `queue_priority_config`, `queue_priority_get`, `run_priority`, `repo_usage`, `repo_list`, `repo_remove`, `repo_archive`, `repo_unarchive`, `run_list`,
+  unscoped `admission_release` (#1099), `queue_priority_config`, `queue_priority_get`, `run_priority`, `priority_grant`, `priority_grant_list`, `priority_grant_revoke`, `repo_usage`, `repo_list`, `repo_remove`, `repo_archive`, `repo_unarchive`, `run_list`,
   admin-only `audit_list` (#1104; verified entries, never available to a scoped uplink;
   `GET /api/audit` shares its filters, response and restrictions),
   `schedule_list` (also `GET /api/schedules`, with the same repository scope) plus admin-only audited `schedule_pause`, `schedule_resume` and `schedule_trigger` (#1106; pause state is the audit chain, trigger goes through `EnqueueCI`),
@@ -2776,6 +2792,7 @@ alone is never evidence that missing migrations ran.
 | v36 | v0.17.74 / #1216 stage 1 | Server-observed, UID/container-bound sampled step resource usage and bounded repository/time/step indexes; no ingestion API or admission change | Database restore |
 | v37 | Unreleased (#1216 measurement) | Guard version-2 container telemetry and add the global observation-age retention index; preserve version-1 observations | Database restore |
 | v38 | Upstream publication retry | Persist bounded attempts, retry deadlines and audited owner progress without changing the pushed object or promotion plan | Database restore |
+| v39 | Submission priority | Persist expiring identity grants, audited priority requests and supersession protection; existing priority ordering remains compatible | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding

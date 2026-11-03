@@ -82,7 +82,7 @@ func (s *Store) RetryRun(ctx context.Context, request model.RunRetryRequest) (mo
 	if active != 0 {
 		return model.EnqueueRunResult{}, fmt.Errorf("%w: ref already has an active run", ErrInvalidState)
 	}
-	spec, err := validateRunSpec(model.RunSpec{RepoID: previous.RepoID, RefKind: previous.RefKind,
+	spec, err := validateRunSpec(model.RunSpec{PriorityRequest: request.PriorityRequest, RepoID: previous.RepoID, RefKind: previous.RefKind,
 		Ref: previous.Ref, SHA: previous.SHA, Actor: request.Actor, Release: previous.Release, Credentialed: previous.Release && previous.Credentialed, Trigger: previous.Trigger, ScheduleEntry: previous.ScheduleEntry,
 		TestedSHA: previous.TestedSHA, BaseSHA: previous.BaseSHA})
 	if err != nil {

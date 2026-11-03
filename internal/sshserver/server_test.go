@@ -688,18 +688,19 @@ func newSigner(t *testing.T) ssh.Signer {
 }
 
 type fakeGit struct {
-	mu           sync.Mutex
-	ensureCalls  int
-	refs         map[string]string
-	afterReceive map[string]string
-	service      gitcache.Service
-	protocol     string
-	repo         string
-	stale        bool
-	serveStarted chan struct{}
-	serveRelease chan struct{}
-	serveOnce    sync.Once
-	replayCalled bool
+	receiveFingerprint string
+	mu                 sync.Mutex
+	ensureCalls        int
+	refs               map[string]string
+	afterReceive       map[string]string
+	service            gitcache.Service
+	protocol           string
+	repo               string
+	stale              bool
+	serveStarted       chan struct{}
+	serveRelease       chan struct{}
+	serveOnce          sync.Once
+	replayCalled       bool
 }
 
 type completionObservingChannel struct {
@@ -782,6 +783,7 @@ func (f *fakeGit) Receive(ctx context.Context, input, actor, protocol string, _ 
 	_, _, repo, _ := gitcache.ParseRepoPath(input)
 	f.repo = repo
 	f.service = gitcache.ReceivePack
+	f.receiveFingerprint = gitcache.ReceiveFingerprint(ctx)
 	f.protocol = protocol
 	before := cloneRefs(f.refs)
 	if f.afterReceive != nil {
@@ -908,5 +910,28 @@ func TestReceiveFailureSuppressesWatchLine(t *testing.T) {
 	}
 	if !strings.Contains(output, "durable delivery failed") {
 		t.Fatalf("delivery error not surfaced to the pusher: %q", output)
+	}
+}
+
+func TestReceiveBindsAuthenticatedFingerprintToPush(t *testing.T) {
+	t.Parallel()
+	signer := newSigner(t)
+	git := &fakeGit{}
+	server := authorizedServer(t, signer, git)
+	client, stop := startServer(t, server, signer)
+	defer stop()
+	session, err := client.NewSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = session.Close() }()
+	if err = session.Run("git-receive-pack 'example.git'"); err != nil {
+		t.Fatal(err)
+	}
+	git.mu.Lock()
+	fingerprint := git.receiveFingerprint
+	git.mu.Unlock()
+	if fingerprint != ssh.FingerprintSHA256(signer.PublicKey()) {
+		t.Fatalf("receive lost authenticated key: %q", fingerprint)
 	}
 }

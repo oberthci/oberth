@@ -380,6 +380,8 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		default:
 			return service.secretStoreSyncReceipt(ctx, actor, raw)
 		}
+	case "priority_grant", "priority_grant_list", "priority_grant_revoke":
+		return service.priorityGrantTool(ctx, actor, name, raw)
 	case "queue_priority_config", "queue_priority_get", "run_priority":
 		return service.queuePriorityTool(ctx, actor, name, raw)
 	case "admission_release":
@@ -465,12 +467,13 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		return service.readRunResources(ctx, raw)
 	case "run_retry":
 		var arguments struct {
+			model.PriorityRequest
 			ID string `json:"id"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		return service.retryRun(ctx, actor, arguments.ID)
+		return service.retryRun(ctx, actor, arguments.ID, requestedPriority(actor, arguments.PriorityRequest))
 	case "run_cancel":
 		var arguments struct {
 			ID     string `json:"id"`
@@ -483,6 +486,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		return service.cancelRun(ctx, actor, arguments.ID, arguments.Reason, arguments.Force)
 	case "run_rerun":
 		var arguments struct {
+			model.PriorityRequest
 			ID     string `json:"id"`
 			Reason string `json:"reason"`
 			Force  bool   `json:"force"`
@@ -490,7 +494,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		return service.rerunRun(ctx, actor, arguments.ID, arguments.Reason, arguments.Force)
+		return service.rerunRun(ctx, actor, arguments.ID, arguments.Reason, arguments.Force, requestedPriority(actor, arguments.PriorityRequest))
 	case "run_purge":
 		if !actor.Admin || actor.Scoped() {
 			return nil, refuse(ErrForbidden, "run_purge requires an unscoped admin uplink")
@@ -575,6 +579,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		return prepared(ctx)
 	case "sync":
 		var arguments struct {
+			model.PriorityRequest
 			Repo   string `json:"repo"`
 			SHA    string `json:"sha"`
 			Branch string `json:"branch"`
@@ -582,9 +587,10 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		return service.sync(ctx, actor, arguments.Repo, arguments.SHA, arguments.Branch)
+		return service.sync(ctx, actor, arguments.Repo, arguments.SHA, arguments.Branch, requestedPriority(actor, arguments.PriorityRequest))
 	case "promote":
 		var arguments struct {
+			model.PriorityRequest
 			Repo   string `json:"repo"`
 			SHA    string `json:"sha"`
 			Branch string `json:"branch"`
@@ -592,7 +598,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		promotion, err := service.promote(ctx, actor, arguments.Repo, arguments.SHA, arguments.Branch)
+		promotion, err := service.promote(ctx, actor, arguments.Repo, arguments.SHA, arguments.Branch, requestedPriority(actor, arguments.PriorityRequest))
 		if err != nil {
 			return nil, err
 		}
@@ -1399,6 +1405,7 @@ func (service *API) status(ctx context.Context, repositoryName, selector, actor 
 func (service *API) statusForRun(ctx context.Context, repository model.Repository, run model.Run) (StatusResponse, error) {
 	presented := service.presentationRun(ctx, run)
 	response := StatusResponse{
+		Priority: presented.Priority, PriorityReason: presented.PriorityReason, PriorityRequestedBy: presented.PriorityRequestedBy, PriorityRefusal: presented.PriorityRefusal,
 		Repository: repository, Run: run, Repo: repository.Name, Ref: run.Ref,
 		SHA: run.SHA, RunID: run.ID, Status: wireRunStatus(visibleRun(run).Status), Burns: map[string]string{},
 		DisplayStatus:    presented.DisplayStatus,
@@ -2240,7 +2247,7 @@ func validSHASelector(value string) bool {
 	return true
 }
 
-func (service *API) sync(ctx context.Context, actor api.Actor, repositoryName, selector, branch string) (model.Run, error) {
+func (service *API) sync(ctx context.Context, actor api.Actor, repositoryName, selector, branch string, priority ...model.PriorityRequest) (model.Run, error) {
 	if service.git == nil || service.auditor == nil {
 		return model.Run{}, refuse(ErrUnavailable, "sync")
 	}
@@ -2307,6 +2314,21 @@ func (service *API) sync(ctx context.Context, actor api.Actor, repositoryName, s
 		return model.Run{}, fmt.Errorf("%w: sync refuses the default branch %q — use promote to integrate",
 			ErrInvalidInput, repository.DefaultBranch)
 	}
+	if request := firstPriority(priority); request.Priority != "" {
+		requester, ok := service.enqueues.(interface {
+			RequestRunPriority(context.Context, string, string, model.PriorityRequest) (model.Run, error)
+		})
+		if !ok {
+			return model.Run{}, refuse(ErrUnavailable, "sync priority")
+		}
+		run, err = requester.RequestRunPriority(ctx, actor.Identity, run.ID, requestedPriority(actor, request))
+		if err != nil {
+			return model.Run{}, err
+		}
+		if err = service.notifyPriorityChange(ctx); err != nil {
+			return model.Run{}, err
+		}
+	}
 	if err := auditedGitMutation(ctx, service.auditor, actor.Identity, "sync.branch", "run", run.ID,
 		map[string]any{"repo": repository.Name, "branch": run.Ref, "sha": run.SHA},
 		func() error {
@@ -2317,7 +2339,7 @@ func (service *API) sync(ctx context.Context, actor api.Actor, repositoryName, s
 	return run, nil
 }
 
-func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName, selector, target string) (result model.Promotion, resultErr error) {
+func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName, selector, target string, priority ...model.PriorityRequest) (result model.Promotion, resultErr error) {
 	// Fast-path rejection: a non-admin uplink without grant capability is
 	// rejected before any state is read, preserving the original behavior and
 	// the TestPromoteRejectsNonAdmin contract.
@@ -2341,7 +2363,7 @@ func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName
 	if err != nil {
 		return model.Promotion{}, err
 	}
-	return service.planOrQueuePromotion(ctx, actor, repository, candidate, target, promotion)
+	return service.planOrQueuePromotion(ctx, actor, repository, candidate, target, promotion, priority...)
 }
 
 // admitPromotion authorizes and durably admits one promotion of a green
@@ -2391,7 +2413,7 @@ func (service *API) admitPromotion(ctx context.Context, actor api.Actor, reposit
 // planAdmittedPromotion prepares an admitted promotion against the target's
 // current head, then publishes a fast-forward or enqueues the merged run.
 func (service *API) planAdmittedPromotion(ctx context.Context, actor api.Actor, repository model.Repository, candidate model.Run,
-	target string, promotion model.Promotion) (result model.Promotion, resultErr error) {
+	target string, promotion model.Promotion, priority ...model.PriorityRequest) (result model.Promotion, resultErr error) {
 	if err := os.MkdirAll(service.promotionWorkspaceRoot, 0o750); err != nil {
 		return service.failAdmittedPromotion(ctx, promotion, "create promotion workspace root: "+err.Error(), "")
 	}
@@ -2472,7 +2494,8 @@ func (service *API) planAdmittedPromotion(ctx context.Context, actor api.Actor, 
 	}
 
 	enqueued, attached, err := service.promotionRuns.EnqueueAdmittedPromotionRun(ctx, model.RunSpec{
-		RepoID: repository.ID, RefKind: model.RefBranch,
+		PriorityRequest: requestedPriority(actor, firstPriority(priority)),
+		RepoID:          repository.ID, RefKind: model.RefBranch,
 		Ref: promotionRunRef(target, plan.MergedSHA), SHA: plan.MergedSHA,
 		Actor: actor.Identity, Trigger: "promotion", TestedSHA: plan.MergedSHA, BaseSHA: plan.BaseSHA,
 	}, promotion.ID)
@@ -2875,7 +2898,7 @@ func MutatingTool(name string) bool {
 		"access_allow", "access_revoke",
 		"kubevirt_grant", "kubevirt_revoke",
 		"size_grant", "size_revoke",
-		"admission_release", "queue_priority_config", "run_priority",
+		"admission_release", "queue_priority_config", "run_priority", "priority_grant", "priority_grant_revoke",
 		"repo_remove", "repo_archive", "repo_unarchive",
 		"secretstore_sync_receipt",
 		"promote_grant", "promote_grant_revoke",

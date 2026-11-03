@@ -516,7 +516,11 @@ function rowMessage(run, tooltip = false) {
   if (run.priority_class && run.display_reason === `Priority ${run.priority_class}: ${run.priority_reason}.`) run = {...run, display_reason: ""};
   const message = (tooltip ? queueDetail(run) : displayRunStatus(run) === "queued" ? queueReason(run) : runMessage(run))
     || (run.Release ? "release" : run.Trigger === "schedule" && run.ScheduleEntry ? `schedule: ${run.ScheduleEntry}` : "");
-  return [message, run.resource_message].filter(Boolean).join(" ");
+  return [run.priority_class && run.priority_class !== "normal" || run.priority_refusal ? prioritySummary(run) : "", message, run.resource_message].filter(Boolean).join(" ");
+}
+function prioritySummary(run) {
+  const position = run.QueuePosition || run.Scheduling?.queue_position;
+  return [`priority ${run.priority_class || "normal"}`, run.priority_requested_by ? `requested by ${run.priority_requested_by}` : "", run.priority_reason, position ? `queue position ${position}` : "", run.priority_refusal].filter(Boolean).join(" · ");
 }
 function runMessageCell(run) {
   const message = rowMessage(run);
@@ -1239,6 +1243,7 @@ async function renderRunDetailView(detail, seq) {
         <span>sha <span class="sha cpy" data-copy-text="${esc(run.SHA)}" title="${esc(run.SHA)} — click to copy">${esc(shortSha(run.SHA))}</span></span>
         <span class="cpy" data-copy-text="${esc(run.ID)}" title="${esc(run.ID)} — click to copy">run ${esc(shortId(run.ID))} ⧉</span>
         <span>trigger ${esc(run.Trigger || "--")}</span>
+        <span class="priority-detail">${esc(prioritySummary(run))}</span>
         <span>${esc(run.RefKind === "tag" ? "tag" : "branch")}</span>
         <span>queued ${esc(fmtTime(run.QueuedAt))}</span>
         ${run.FinishedAt ? `<span>finished ${esc(fmtTime(run.FinishedAt))}</span>` : ""}

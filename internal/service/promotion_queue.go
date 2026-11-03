@@ -64,7 +64,7 @@ func queuedPromotionMessage(ahead model.Promotion, target string) string {
 // promotions merged onto the same base would otherwise race, and the second
 // fail with "upstream moved" once the first publishes.
 func (service *API) planOrQueuePromotion(ctx context.Context, actor api.Actor, repository model.Repository, candidate model.Run,
-	target string, promotion model.Promotion) (model.Promotion, error) {
+	target string, promotion model.Promotion, priority ...model.PriorityRequest) (model.Promotion, error) {
 	predecessor, err := service.pendingPromotionAhead(ctx, promotion)
 	if err != nil {
 		return service.failAdmittedPromotion(ctx, promotion, "check promotions queued ahead: "+err.Error(), "")
@@ -92,11 +92,11 @@ func (service *API) planOrQueuePromotion(ctx context.Context, actor api.Actor, r
 			defer service.promotionProgress.Delete(promotion.ID)
 			defer cancelWait()
 			defer stopAfter()
-			service.planQueuedPromotion(waitCtx, planCtx, actor, repository, candidate, target, promotion, progress)
+			service.planQueuedPromotion(waitCtx, planCtx, actor, repository, candidate, target, promotion, progress, priority...)
 		}(promotion)
 		return promotion, nil
 	}
-	return service.planAdmittedPromotion(ctx, actor, repository, candidate, target, promotion)
+	return service.planAdmittedPromotion(ctx, actor, repository, candidate, target, promotion, priority...)
 }
 
 // planQueuedPromotion waits until no promotion admitted earlier to the same
@@ -106,7 +106,7 @@ func (service *API) planOrQueuePromotion(ctx context.Context, actor api.Actor, r
 // promotion pending with no plan; owner-startup recovery interrupts it, the
 // same as any promotion that never recorded its plan.
 func (service *API) planQueuedPromotion(ctx, planCtx context.Context, actor api.Actor, repository model.Repository, candidate model.Run,
-	target string, promotion model.Promotion, progress *liveness.Heartbeat) {
+	target string, promotion model.Promotion, progress *liveness.Heartbeat, priority ...model.PriorityRequest) {
 	deadline := time.Now().Add(promotionQueueMaxWait)
 	for {
 		// Read the signal channel before durable state, so a transition
@@ -121,7 +121,7 @@ func (service *API) planQueuedPromotion(ctx, planCtx context.Context, actor api.
 				// Queue waiting is complete. Merge planning and delivery may wait
 				// indefinitely on external services without making liveness red.
 				service.promotionProgress.Delete(promotion.ID)
-				_, _ = service.planAdmittedPromotion(planCtx, actor, repository, candidate, target, promotion)
+				_, _ = service.planAdmittedPromotion(planCtx, actor, repository, candidate, target, promotion, priority...)
 				return
 			}
 		}

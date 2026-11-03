@@ -74,7 +74,7 @@ func (schedules *Schedules) InspectSchedule(ctx context.Context, repository mode
 		}
 	}
 	for _, entry := range file.Entries {
-		item := service.ScheduleEntryView{Name: entry.Name, Cron: entry.Cron, Branch: entry.Branch}
+		item := service.ScheduleEntryView{Priority: entry.Priority, Name: entry.Name, Cron: entry.Cron, Branch: entry.Branch}
 		if next, nextErr := entry.Next(now); nextErr == nil {
 			item.NextAt = next.UTC().Format(time.RFC3339)
 		}
@@ -120,7 +120,7 @@ func (schedules *Schedules) PlanScheduleTrigger(ctx context.Context, repository 
 	if err != nil {
 		return service.SchedulePlan{}, fmt.Errorf("resolve branch for %q: %w", name, err)
 	}
-	return service.SchedulePlan{Repository: repository, Qualified: qualified, Entry: name, Branch: branch, SHA: sha}, nil
+	return service.SchedulePlan{PriorityRequest: model.PriorityRequest{Priority: entry.Priority, PriorityReason: "schedule default: " + name}, Repository: repository, Qualified: qualified, Entry: name, Branch: branch, SHA: sha}, nil
 }
 
 // EnqueueSchedule queues a planned manual run through the scheduler's own
@@ -130,5 +130,5 @@ func (schedules *Schedules) EnqueueSchedule(ctx context.Context, plan service.Sc
 	if schedules.config.Enqueuer == nil {
 		return model.EnqueueRunResult{}, errors.New("schedule enqueue is unavailable")
 	}
-	return schedules.enqueue(ctx, plan.Repository, plan.Branch, plan.SHA, plan.Entry, actor)
+	return schedules.enqueue(ctx, plan.Repository, plan.Branch, plan.SHA, plan.Entry, actor, plan.PriorityRequest)
 }

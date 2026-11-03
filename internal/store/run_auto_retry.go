@@ -59,11 +59,13 @@ func (s *Store) autoRetryPreStepTx(ctx context.Context, tx *sql.Tx, source model
 	}
 	var eligible bool
 	err := tx.QueryRowContext(ctx, `SELECT
-  NOT EXISTS(SELECT 1 FROM runs WHERE repo_id=? AND ref_kind=? AND ref=? AND schedule_entry=? AND queue_sequence>?)
+  (? OR (
+    NOT EXISTS(SELECT 1 FROM runs WHERE repo_id=? AND ref_kind=? AND ref=? AND schedule_entry=? AND queue_sequence>?)
+    AND NOT EXISTS(SELECT 1 FROM runs WHERE repo_id=? AND ref_kind=? AND ref=? AND schedule_entry=? AND status IN ('queued','running'))
+  ))
   AND NOT EXISTS(SELECT 1 FROM step_results WHERE run_id=? AND (started_at IS NOT NULL OR finished_at IS NOT NULL OR status NOT IN ('pending','queued')))
-  AND NOT EXISTS(SELECT 1 FROM runs WHERE repo_id=? AND ref_kind=? AND ref=? AND schedule_entry=? AND status IN ('queued','running'))
   AND NOT EXISTS(SELECT 1 FROM publications WHERE run_id=?)
-  AND NOT EXISTS(SELECT 1 FROM run_cancellations WHERE run_id=? AND completed_at IS NULL)`, source.RepoID, source.RefKind, source.Ref, source.ScheduleEntry, source.QueueSequence, source.ID, source.RepoID, source.RefKind, source.Ref, source.ScheduleEntry, source.ID, source.ID).Scan(&eligible)
+  AND NOT EXISTS(SELECT 1 FROM run_cancellations WHERE run_id=? AND completed_at IS NULL)`, source.PriorityProtected, source.RepoID, source.RefKind, source.Ref, source.ScheduleEntry, source.QueueSequence, source.RepoID, source.RefKind, source.Ref, source.ScheduleEntry, source.ID, source.ID, source.ID).Scan(&eligible)
 	if err != nil {
 		return source, fmt.Errorf("check automatic infrastructure retry: %w", err)
 	}
@@ -74,7 +76,13 @@ func (s *Store) autoRetryPreStepTx(ctx context.Context, tx *sql.Tx, source model
 	if err != nil {
 		return source, err
 	}
-	next, err := s.enqueueRunTx(ctx, tx, model.RunSpec{RepoID: source.RepoID, RefKind: source.RefKind, Ref: source.Ref, SHA: source.SHA, Actor: source.Actor, Trigger: source.Trigger, ScheduleEntry: source.ScheduleEntry, TestedSHA: source.TestedSHA, BaseSHA: source.BaseSHA}, id, now, 0)
+	// Protected recovery retains only its own queue place. The inherited
+	// sequence also fences enqueue's supersession away from every sibling.
+	var inheritedSequence int64
+	if source.PriorityProtected {
+		inheritedSequence = source.AdmissionSequence
+	}
+	next, err := s.enqueueRunTx(ctx, tx, model.RunSpec{RepoID: source.RepoID, RefKind: source.RefKind, Ref: source.Ref, SHA: source.SHA, Actor: source.Actor, Trigger: source.Trigger, ScheduleEntry: source.ScheduleEntry, TestedSHA: source.TestedSHA, BaseSHA: source.BaseSHA}, id, now, inheritedSequence)
 	if err != nil {
 		return source, fmt.Errorf("enqueue automatic infrastructure retry: %w", err)
 	}

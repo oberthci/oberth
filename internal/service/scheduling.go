@@ -49,7 +49,12 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 	defer func() {
 		result.AgeSeconds = int64(clock.Since(observed) / time.Second)
 		if run.Priority != "" {
-			result.Message = run.PriorityMessage(observed) + " " + result.Message
+			priority, _ := run.EffectivePriority(observed)
+			prefix := run.PriorityMessage(observed)
+			if priority != model.PriorityNormal && (result.State == "queued" || result.State == "waiting") {
+				prefix = fmt.Sprintf("priority %s: next when capacity frees. %s", priority, prefix)
+			}
+			result.Message = prefix + " " + result.Message
 		}
 	}()
 	if isPendingCreate(run) {

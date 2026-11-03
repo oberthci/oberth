@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/oberthci/oberth/internal/gitcache"
+	"github.com/oberthci/oberth/internal/model"
 )
 
 // ReceiveHandler is the narrow adapter passed to gitcache.Receive and
@@ -35,12 +36,14 @@ func (handler *ReceiveHandler) dispatch(ctx context.Context, event gitcache.Rece
 	switch {
 	case strings.HasPrefix(ref, "refs/heads/"):
 		return handler.Pushes.Branch(ctx, BranchPush{
-			EventID: event.ID, Repository: event.Repo, Branch: strings.TrimPrefix(ref, "refs/heads/"),
+			PriorityRequest: model.PriorityRequest{RequesterFingerprint: event.ActorFingerprint, Priority: model.RunPriority(event.Priority), PriorityReason: event.PriorityReason, Supersede: event.Supersede},
+			EventID:         event.ID, Repository: event.Repo, Branch: strings.TrimPrefix(ref, "refs/heads/"),
 			OldOID: event.Update.OldSHA, NewOID: event.Update.NewSHA, Actor: event.Actor,
 		})
 	case strings.HasPrefix(ref, "refs/tags/"):
 		return handler.Pushes.Tag(ctx, TagPush{
-			EventID: event.ID, Repository: event.Repo, Tag: strings.TrimPrefix(ref, "refs/tags/"),
+			PriorityRequest: model.PriorityRequest{RequesterFingerprint: event.ActorFingerprint, Priority: model.RunPriority(event.Priority), PriorityReason: event.PriorityReason, Supersede: event.Supersede},
+			EventID:         event.ID, Repository: event.Repo, Tag: strings.TrimPrefix(ref, "refs/tags/"),
 			OldOID: event.Update.OldSHA, NewOID: event.Update.NewSHA, Actor: event.Actor,
 			ReleaseAdmissionSHA: event.ReleaseAdmission.SHA,
 		})
@@ -85,6 +88,11 @@ func describePushResult(event gitcache.ReceiveEvent, result PushResult) string {
 		line := fmt.Sprintf("ref accepted · run %s queued (%s)", shortRunID(result.Run.ID), target)
 		if kind == "tag" {
 			line = fmt.Sprintf("release tag accepted · release run %s queued (%s)", shortRunID(result.Run.ID), target)
+		}
+		if result.Run.PriorityRefusal != "" {
+			line += " · " + result.Run.PriorityRefusal
+		} else if result.Run.Priority != "" && result.Run.Priority != model.PriorityNormal {
+			line += " · priority " + string(result.Run.Priority) + ": next when capacity frees"
 		}
 		if result.Duplicate {
 			line += " · replay of an already-recorded push"

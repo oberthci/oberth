@@ -173,10 +173,13 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'R5B
 run(`state.repos=[{ID:1,Name:'ours'}];`);
 const badgeRow = run(`runRow({ID:'labels',RepoID:1,Ref:'v1',RefKind:'tag',Status:'passed',Release:true,Trigger:'schedule',ScheduleEntry:'nightly',priority_class:'highest',priority_reason:'urgent',ConcurrencyGroup:'deploy',Scheduling:{admission:{group:'deploy'}}})`);
 assert.ok(badgeRow.includes('<div class="repo-name">ours</div>'));
-assert.ok(!badgeRow.includes('class="v4b') && !badgeRow.includes('priority') && !badgeRow.includes('nightly') && !badgeRow.includes('deploy'),'list/history repo cell has no inline labels');
+assert.ok(!badgeRow.includes('class="v4b') && !badgeRow.includes('nightly') && !badgeRow.includes('deploy'),'list/history rows have no inline badges');
+assert.ok(badgeRow.includes('priority highest') && badgeRow.includes('urgent'),'priority is visible in list/history messages');
+assert.ok(run(`prioritySummary({priority_class:'high',priority_reason:'urgent',priority_requested_by:'operator<unsafe>',QueuePosition:2})`).includes('requested by operator<unsafe>'));
+assert.ok(run(`runRow({ID:'priority',RepoID:1,Ref:'main',Status:'queued',priority_class:'high',priority_requested_by:'operator<unsafe>',QueuePosition:2})`).includes('operator&lt;unsafe&gt;'),'requester metadata is escaped');
 assert.equal(run(`runMessageCell({Status:'passed',Release:true})`),'release');
 assert.equal(run(`runMessageCell({Status:'passed',Trigger:'schedule',ScheduleEntry:'nightly<unsafe>'})`),'schedule: nightly&lt;unsafe&gt;');
-assert.equal(run(`runMessageCell({Status:'passed',priority_class:'highest',ConcurrencyGroup:'deploy'})`),'');
+assert.equal(run(`runMessageCell({Status:'passed',priority_class:'highest',ConcurrencyGroup:'deploy'})`),'priority highest');
 for(const extra of [`display_reason:'existing reason'`, `Error:'existing reason'`, `FailedStep:'test'`, `Reason:'existing reason'`]) {
   assert.equal(run(`runMessageCell({Status:'failed',Release:true,Trigger:'schedule',ScheduleEntry:'nightly',${extra}})`), extra.startsWith('FailedStep')?'failed at test':'existing reason');
 }

@@ -194,6 +194,10 @@ func testDatabaseCancellationContinuesLiveDispatch(t *testing.T, failure error) 
 			done, _ := startDeadlineScheduler(t, fixture.scheduler)
 			old := fixture.branch(t, fixture.beacon, "supersede-db", "a")
 			awaitDeadlineCreated(t, fixture.engine, done)
+			// CreateCI announces creation before MarkRunSubmitted commits. An
+			// earlier supersession uses the worker's post-create cleanup path,
+			// bypassing the observed-cancellation operation under test.
+			awaitDeadlineSubmitted(t, fixture.store, old.ID, done)
 			database.mu.Lock()
 			before := database.calls[operation]
 			database.failures[operation] = 2
@@ -442,4 +446,29 @@ func awaitDeadlineCreated(t *testing.T, engine *groupEngine, done <-chan error) 
 		t.Fatal("live dispatch did not converge")
 	}
 	return ""
+}
+
+// Wait for the durable submission boundary before injecting cancellation faults.
+func awaitDeadlineSubmitted(t *testing.T, database *store.Store, id string, done <-chan error) {
+	t.Helper()
+	timer := time.NewTimer(testStartTimeout(15 * time.Second))
+	defer timer.Stop()
+	tick := time.NewTicker(5 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case err := <-done:
+			t.Fatalf("scheduler stopped before submission: %v", err)
+		case <-timer.C:
+			t.Fatal("Workflow creation did not reach durable submission")
+		case <-tick.C:
+			run, err := database.Run(t.Context(), id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if run.Status == model.RunRunning && run.Phase == "running" && run.JobName != "" {
+				return
+			}
+		}
+	}
 }

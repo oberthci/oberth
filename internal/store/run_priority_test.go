@@ -102,8 +102,11 @@ func TestQueuePriorityStarvationAtBoundary(t *testing.T) {
 	}
 	now = now.Add(time.Nanosecond)
 	next, err = s.NextQueuedRun(ctx)
-	if err != nil || next.ID != normal.ID {
-		t.Fatalf("starved run behind release: %+v %v", next, err)
+	if err != nil || next.ID != tag.ID {
+		t.Fatalf("base highest lost to aged normal: %+v %v", next, err)
+	}
+	if got, err := s.ClaimNextRun(ctx); err != nil || got.ID != tag.ID {
+		t.Fatalf("release claim: %+v %v", got, err)
 	}
 	got, err := s.ClaimNextRun(ctx)
 	if err != nil || got.ID != normal.ID {
@@ -214,12 +217,13 @@ func TestQueuePriorityRestartRefireRetainsWaitAndBump(t *testing.T) {
 	if _, err = s.BumpRunPriority(ctx, "admin", bumped.ID, model.PriorityHighest, "release blocker"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.ClaimNextRun(ctx); err != nil {
-		t.Fatal(err)
-	} // aged original is FIFO first
 	claimed, err := s.ClaimNextRun(ctx)
 	if err != nil || claimed.ID != bumped.ID {
-		t.Fatalf("bump claim=%+v %v", claimed, err)
+		t.Fatalf("base highest bump lost to aged normal: %+v %v", claimed, err)
+	}
+	aged, err := s.ClaimNextRun(ctx)
+	if err != nil || aged.ID != copy.ID {
+		t.Fatalf("aged original lost its FIFO place: %+v %v", aged, err)
 	}
 	retry, err := s.RequeueStrandedRun(ctx, bumped.ID)
 	if err != nil {
@@ -434,7 +438,7 @@ func TestQueuePriorityTagsIndependentOfSizeGrantsAndBranchSignals(t *testing.T) 
 	}
 }
 
-func TestQueuePriorityReleaseStreamKeepsSixtyMinuteFairnessBound(t *testing.T) {
+func TestQueuePriorityReleaseStreamPrecedesAgedNormalByBaseClass(t *testing.T) {
 	now := time.Now().UTC()
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
@@ -445,7 +449,7 @@ func TestQueuePriorityReleaseStreamKeepsSixtyMinuteFairnessBound(t *testing.T) {
 	}
 	origin := now
 	now = origin.Add(45 * time.Minute)
-	var firstTag string
+	var tags []string
 	for i := 0; i < 20; i++ {
 		spec := testRunSpec(repo.ID, fmt.Sprintf("v1.%d", i), strings.Repeat("b", 40))
 		spec.RefKind, spec.Trigger, spec.Release = model.RefTag, "tag", true
@@ -457,21 +461,35 @@ func TestQueuePriorityReleaseStreamKeepsSixtyMinuteFairnessBound(t *testing.T) {
 		if err != nil || tag.Priority != want {
 			t.Fatalf("ungranted release %d: %+v %v", i, tag, err)
 		}
-		if i == 0 {
-			firstTag = tag.ID
-		}
+		tags = append(tags, tag.ID)
 	}
 	now = origin.Add(time.Hour - time.Nanosecond)
 	next, err := s.NextQueuedRun(ctx)
-	if err != nil || next.ID != firstTag {
+	if err != nil || next.ID != tags[0] {
 		t.Fatalf("release did not overtake younger-than-60m branch: %+v %v", next, err)
 	}
 	now = origin.Add(time.Hour)
-	for _, read := range []func(context.Context) (model.Run, error){s.NextQueuedRun, s.ClaimNextRun} {
-		next, err := read(ctx)
-		if err != nil || next.ID != old.ID {
-			t.Fatalf("tag stream starved old branch at boundary: %+v %v", next, err)
+	for _, tagID := range tags {
+		for _, read := range []func(context.Context) (model.Run, error){s.NextQueuedRun, s.ClaimNextRun} {
+			next, err := read(ctx)
+			if err != nil || next.ID != tagID {
+				t.Fatalf("base highest tag stream lost order to aged normal: %+v %v", next, err)
+			}
 		}
+		// Admission releases the automatic boost for the next waiting tag.
+		if _, err := s.MarkRunAdmitted(ctx, tagID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.FinishRun(ctx, tagID, model.RunResult{Status: model.RunPassed}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	aged, err := s.ClaimNextRun(ctx)
+	if err != nil || aged.ID != old.ID {
+		t.Fatalf("aged branch did not follow the tag stream: %+v %v", aged, err)
+	}
+	if priority, _ := aged.EffectivePriority(now); priority != model.PriorityHighest {
+		t.Fatalf("aging lost at the 60-minute boundary: %s", priority)
 	}
 }
 

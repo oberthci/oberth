@@ -29,8 +29,8 @@ func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	if err := validateMigrations(migrations, latestMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
-	if latestMigrationVersion != 38 {
-		t.Fatalf("latest migration version = %d, want 38", latestMigrationVersion)
+	if latestMigrationVersion != 39 {
+		t.Fatalf("latest migration version = %d, want 39", latestMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)
@@ -948,6 +948,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"issues",
 		"kubevirt_grants",
 		"pending_token_credentials",
+		"priority_grants",
 		"promotion_grants",
 		"promotions",
 		"publications",
@@ -957,6 +958,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"run_admission_timings",
 		"run_cancellations",
 		"run_priority_overrides",
+		"run_priority_requests",
 		"run_timings",
 		"runs",
 		"schedule_fires",
@@ -1057,6 +1059,8 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 	})
 
 	expectedColumns := map[string][]string{
+		"priority_grants":           {"identity", "max_class", "expires", "granted_by"},
+		"run_priority_requests":     {"run_id", "requested", "accepted", "reason", "actor", "refusal"},
 		"queue_priority_patterns":   {"pattern"},
 		"run_priority_overrides":    {"run_id", "priority", "reason", "actor", "updated_at"},
 		"schedule_fires":            {"repo", "entry", "fired_at", "outcome", "last_fired_at"},

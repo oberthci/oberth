@@ -1036,6 +1036,7 @@ func (c *Cache) serviceArgs(service Service, path string) []string {
 		// it along with every refs/* namespace, then explicitly unhide the two
 		// public namespaces. Git rejects attempts to update a hidden ref.
 		args = append(args,
+			"-c", "receive.advertisePushOptions=true",
 			"-c", "receive.hideRefs=HEAD",
 			"-c", "receive.hideRefs=refs/",
 			"-c", "receive.hideRefs=!refs/heads/",

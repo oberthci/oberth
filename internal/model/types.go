@@ -131,11 +131,14 @@ type Run struct {
 	// ResourceMessage is advice, separate from the exact status vocabulary.
 	ResourceMessage string `json:"resource_message,omitempty"`
 
-	EarlierAttempts int         `json:"earlier_attempts,omitempty"`
-	AutoRetryOf     string      `json:"auto_retry_of,omitempty"`
-	AutoRetriedBy   string      `json:"auto_retried_by,omitempty"`
-	Priority        RunPriority `json:"priority_class"`
-	PriorityReason  string      `json:"priority_reason"`
+	EarlierAttempts     int         `json:"earlier_attempts,omitempty"`
+	AutoRetryOf         string      `json:"auto_retry_of,omitempty"`
+	AutoRetriedBy       string      `json:"auto_retried_by,omitempty"`
+	Priority            RunPriority `json:"priority_class"`
+	PriorityReason      string      `json:"priority_reason"`
+	PriorityRequestedBy string      `json:"priority_requested_by,omitempty"`
+	PriorityRefusal     string      `json:"priority_refusal,omitempty"`
+	PriorityProtected   bool        `json:"-"`
 	// The explicit admin fallback survives a withheld automatic tag boost.
 	PriorityOverride       RunPriority `json:"-"`
 	PriorityOverrideReason string      `json:"-"`
@@ -181,6 +184,7 @@ type Run struct {
 }
 
 type RunSpec struct {
+	PriorityRequest
 	RepoID        int64
 	RefKind       RefKind
 	Ref           string

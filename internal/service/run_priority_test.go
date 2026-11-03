@@ -56,7 +56,7 @@ func TestPriorityAdmissionOrdersClassesThenFIFO(t *testing.T) {
 	}
 }
 
-func TestPriorityAdmissionBackfillsOnlyWithinClassAndHonorsHeadWait(t *testing.T) {
+func TestPriorityAdmissionBlocksAllBackfillBehindPriorityHead(t *testing.T) {
 	clock := &fakeClock{now: time.Now()}
 	g := newWeightedAdmission(4)
 	g.now = clock.Now
@@ -70,20 +70,23 @@ func TestPriorityAdmissionBackfillsOnlyWithinClassAndHonorsHeadWait(t *testing.T
 	head := priorityWaiter(g, 2, model.PriorityHigh, clock.now, periapsis.L)
 	normal := priorityWaiter(g, 3, model.PriorityNormal, clock.now, periapsis.S)
 	small := priorityWaiter(g, 4, model.PriorityHigh, clock.now, periapsis.S)
-	if granted(g, head) || granted(g, normal) || !granted(g, small) {
-		t.Fatal("backfill crossed priority class or lost same-class backfill")
+	if granted(g, head) || granted(g, normal) || granted(g, small) {
+		t.Fatal("priority head allowed same-class or lower-class backfill")
 	}
-	small.release()
 	clock.now = clock.now.Add(20 * time.Minute)
 	later := priorityWaiter(g, 5, model.PriorityHigh, clock.now, periapsis.S)
 	if granted(g, later) || granted(g, normal) {
 		t.Fatal("head-wait bound did not drain higher class")
 	}
 	release()
-	if !granted(g, head) {
-		t.Fatal("head failed to start after drain")
+	if !granted(g, head) || !granted(g, small) || granted(g, normal) {
+		t.Fatal("head and fitting same-class work failed to start after drain")
 	}
 	head.release()
+	if !granted(g, later) || !granted(g, normal) {
+		t.Fatal("remaining work failed to start after the priority head")
+	}
+	small.release()
 	later.release()
 	normal.release()
 }
@@ -104,11 +107,14 @@ func TestPriorityAdmissionStarvationReordersExistingWaiters(t *testing.T) {
 	}
 	clock.now = clock.now.Add(time.Nanosecond)
 	release()
-	if !granted(g, normal) || granted(g, highest) {
-		t.Fatal("starved normal did not precede newer highest work")
+	if !granted(g, highest) || granted(g, normal) {
+		t.Fatal("base highest lost to aged normal")
+	}
+	highest.release()
+	if !granted(g, normal) {
+		t.Fatal("aged normal did not follow base highest")
 	}
 	normal.release()
-	highest.release()
 }
 
 func TestQueuePriorityToolsAdminOnlyAuditedAndGated(t *testing.T) {
@@ -498,22 +504,22 @@ func TestPriorityReleaseStreamPreservesAgingAndResourceBounds(t *testing.T) {
 	}
 	clock.now = origin.Add(time.Hour)
 	promotion.release()
-	if !granted(g, normal) {
-		t.Fatal("continuous releases starved aged normal")
-	}
-	g.mu.Lock()
-	used, runs := g.used, g.runs
-	g.mu.Unlock()
-	if used != 4 || runs != 1 {
-		t.Fatalf("capacity exceeded: weight=%d runs=%d", used, runs)
-	}
-	normal.release()
 	for _, candidate := range later {
-		if !granted(g, candidate) {
-			t.Fatal("highest-class FIFO changed after starvation guard")
+		if !granted(g, candidate) || granted(g, normal) {
+			t.Fatal("base highest FIFO lost to aged normal")
+		}
+		g.mu.Lock()
+		used, runs := g.used, g.runs
+		g.mu.Unlock()
+		if used != 4 || runs != 1 {
+			t.Fatalf("capacity exceeded: weight=%d runs=%d", used, runs)
 		}
 		candidate.release()
 	}
+	if !granted(g, normal) {
+		t.Fatal("aged normal did not follow base highest work")
+	}
+	normal.release()
 }
 
 func TestPriorityReleaseAdmissionWithoutGrantAndBranchTransportSignals(t *testing.T) {

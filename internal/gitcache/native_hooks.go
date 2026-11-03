@@ -32,6 +32,9 @@ func ReceiveHookInvocation(ctx context.Context, arguments []string, input io.Rea
 			err = errors.New("invalid pre-receive arguments")
 		} else {
 			err = cache.nativePreReceive(ctx, input)
+			if err == nil {
+				err = recordNativePushOptions()
+			}
 		}
 	} else if len(arguments) != 4 {
 		err = errors.New("invalid update arguments")

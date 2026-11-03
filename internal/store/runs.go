@@ -20,7 +20,8 @@ queue_sequence, COALESCE(admission_sequence, queue_sequence), id, repo_id, ref_k
 phase, job_name, tested_sha, base_sha, failed_burn, failed_step, error,
 status, reason, superseded_by, queued_at, started_at, finished_at, created_at, updated_at,
 concurrency_group, schedule_entry, ` + basePrioritySQL + `, ` + priorityReasonSQL + `,
-COALESCE(` + overridePrioritySQL + `,''), COALESCE((SELECT reason FROM run_priority_overrides WHERE run_id=id),'')`
+COALESCE(` + overridePrioritySQL + `,''), COALESCE((SELECT reason FROM run_priority_overrides WHERE run_id=id),''),
+COALESCE((SELECT actor FROM run_priority_overrides WHERE run_id=id),(SELECT actor FROM run_priority_requests WHERE run_id=id),''), COALESCE((SELECT refusal FROM run_priority_requests WHERE run_id=id),''), NOT (` + supersessionEligibleSQL + `)`
 
 // ErrRunCursorNotFound lets clients restart paging without exposing a missing run ID.
 var ErrRunCursorNotFound = fmt.Errorf("%w: cursor run no longer retained; restart from the first page", ErrNotFound)
@@ -144,9 +145,9 @@ func (s *Store) requeueStrandedRunTx(ctx context.Context, tx *sql.Tx, run model.
 		return model.Run{}, ErrRequeueIneligible
 	}
 	// A newer push may already have replayed into the queue while this
-	// process was starting; requeueing the older SHA behind it would
-	// supersede the newer work backwards. The branch keeps exactly its
-	// newest active run.
+	// process was starting. Ordinary work keeps only its newest active run.
+	// Protected priority work retains its place alongside newer normal pushes;
+	// recovery replaces only the stranded source, never those siblings.
 	var activeSiblings int
 	if err := tx.QueryRowContext(ctx, `
 SELECT COUNT(*) FROM runs
@@ -154,7 +155,7 @@ WHERE repo_id = ? AND ref_kind = 'branch' AND ref = ? AND id != ? AND schedule_e
   AND status IN ('queued', 'running')`, run.RepoID, run.Ref, run.ID, run.ScheduleEntry).Scan(&activeSiblings); err != nil {
 		return model.Run{}, fmt.Errorf("check active branch siblings: %w", err)
 	}
-	if activeSiblings > 0 {
+	if activeSiblings > 0 && !run.PriorityProtected {
 		return model.Run{}, ErrRequeueIneligible
 	}
 	// The copy starts uncredentialed: credential mounting is a per-run
@@ -206,6 +207,53 @@ func (s *Store) enqueueRunTx(ctx context.Context, tx *sql.Tx, spec model.RunSpec
 	if err := requireRepositoryActive(ctx, tx, spec.RepoID); err != nil {
 		return model.EnqueueRunResult{}, err
 	}
+	accepted, priorityReason, refusal, err := s.submissionPriorityTx(ctx, tx, spec, now)
+	if err != nil {
+		return model.EnqueueRunResult{}, err
+	}
+
+	row := tx.QueryRowContext(ctx, `
+INSERT INTO runs(
+    id, repo_id, ref_kind, ref, sha, actor, release, credentialed, trigger, phase,
+    tested_sha, base_sha, schedule_entry, status, queued_at, created_at, updated_at
+)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, 'queued', ?, ?, ?)
+RETURNING `+runColumns,
+		id, spec.RepoID, spec.RefKind, spec.Ref, spec.SHA, spec.Actor, spec.Release,
+		spec.Credentialed, spec.Trigger, spec.TestedSHA, spec.BaseSHA, spec.ScheduleEntry, now, now, now)
+	value, err := scanRun(row)
+	if err != nil {
+		return model.EnqueueRunResult{}, fmt.Errorf("insert run: %w", err)
+	}
+	if err := s.recordSubmissionPriorityTx(ctx, tx, spec, id, accepted, priorityReason, refusal, now); err != nil {
+		return model.EnqueueRunResult{}, err
+	}
+	value, err = scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id=?`, id))
+	if err != nil {
+		return model.EnqueueRunResult{}, err
+	}
+	// Priority submissions queue independently unless supersession is explicit.
+	if value.Priority.Rank() > 0 && spec.Priority == "" {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO run_priority_requests(run_id,requested,accepted,reason,actor,refusal) VALUES(?,'',?,?,?,'')`, id, value.Priority, value.PriorityReason, spec.Actor); err != nil {
+			return model.EnqueueRunResult{}, err
+		}
+		value.PriorityRequestedBy = spec.Actor
+	}
+	supersede := spec.Supersede || value.Priority.Rank() == 0 || inheritedAdmissionSequence > 0
+	explicit := spec.Supersede || inheritedAdmissionSequence > 0
+	admin := inheritedAdmissionSequence > 0
+	if spec.Supersede {
+		allowed, err := priorityAdminTx(ctx, tx, spec)
+		if err != nil {
+			return model.EnqueueRunResult{}, err
+		}
+		admin = admin || allowed
+	}
+	guard := ` AND (` + supersessionEligibleSQL + ` OR (? AND (COALESCE((SELECT actor FROM run_priority_overrides WHERE run_id=runs.id),(SELECT actor FROM run_priority_requests WHERE run_id=runs.id),actor)=? OR ?)))`
+	if inheritedAdmissionSequence > 0 {
+		// Recovery replaces only its stranded source, preserving every newer push.
+		guard += ` AND COALESCE(admission_sequence,queue_sequence)=` + fmt.Sprint(inheritedAdmissionSequence)
+	}
 	var cancellations []model.RunCancellation
 	// Supersession stays inside a branch and its schedule entry. Named
 	// schedules are independent of other entries and ordinary branch pushes.
@@ -214,17 +262,17 @@ func (s *Store) enqueueRunTx(ctx context.Context, tx *sql.Tx, spec model.RunSpec
 	// and must neither supersede nor be superseded by a client push. A pending
 	// publication also owns its run until the external mutation terminalizes;
 	// newer work stays queued behind that durable obligation.
-	if spec.RefKind == model.RefBranch && spec.Trigger != "promotion" {
+	if spec.RefKind == model.RefBranch && spec.Trigger != "promotion" && supersede {
 		rows, err := tx.QueryContext(ctx, `
 SELECT id, job_name, phase FROM runs
-WHERE repo_id = ? AND ref_kind = 'branch' AND ref = ? AND schedule_entry = ?
+WHERE id != ? AND repo_id = ? AND ref_kind = 'branch' AND ref = ? AND schedule_entry = ?
   AND trigger != 'promotion'
   AND NOT EXISTS (
       SELECT 1 FROM publications
       WHERE publications.run_id = runs.id AND publications.status = 'pending'
   )
   AND status IN ('queued', 'running') AND (status = 'running' OR job_name != '')
-ORDER BY queue_sequence`, spec.RepoID, spec.Ref, spec.ScheduleEntry)
+ `+guard+` ORDER BY queue_sequence`, id, spec.RepoID, spec.Ref, spec.ScheduleEntry, explicit, spec.Actor, admin)
 		if err != nil {
 			return model.EnqueueRunResult{}, fmt.Errorf("find running superseded runs: %w", err)
 		}
@@ -252,19 +300,6 @@ ORDER BY queue_sequence`, spec.RepoID, spec.Ref, spec.ScheduleEntry)
 		}
 	}
 
-	row := tx.QueryRowContext(ctx, `
-INSERT INTO runs(
-    id, repo_id, ref_kind, ref, sha, actor, release, credentialed, trigger, phase,
-    tested_sha, base_sha, schedule_entry, status, queued_at, created_at, updated_at
-)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, 'queued', ?, ?, ?)
-RETURNING `+runColumns,
-		id, spec.RepoID, spec.RefKind, spec.Ref, spec.SHA, spec.Actor, spec.Release,
-		spec.Credentialed, spec.Trigger, spec.TestedSHA, spec.BaseSHA, spec.ScheduleEntry, now, now, now)
-	value, err := scanRun(row)
-	if err != nil {
-		return model.EnqueueRunResult{}, fmt.Errorf("insert run: %w", err)
-	}
 	admissionSequence := value.QueueSequence
 	if inheritedAdmissionSequence > 0 {
 		admissionSequence = inheritedAdmissionSequence
@@ -276,7 +311,7 @@ RETURNING `+runColumns,
 	if err := registerRunIssueWork(ctx, tx, value, now); err != nil {
 		return model.EnqueueRunResult{}, err
 	}
-	if spec.RefKind == model.RefBranch && spec.Trigger != "promotion" {
+	if spec.RefKind == model.RefBranch && spec.Trigger != "promotion" && supersede {
 		if _, err := tx.ExecContext(ctx, `
 UPDATE runs
 SET status = 'interrupted', phase = 'interrupted', reason = ?, superseded_by = ?,
@@ -287,8 +322,8 @@ WHERE id != ? AND repo_id = ? AND ref_kind = 'branch' AND ref = ? AND schedule_e
       SELECT 1 FROM publications
       WHERE publications.run_id = runs.id AND publications.status = 'pending'
   )
-  AND status IN ('queued', 'running')`,
-			"superseded by newer run", id, now, now, id, spec.RepoID, spec.Ref, spec.ScheduleEntry); err != nil {
+  AND status IN ('queued', 'running')`+guard,
+			"superseded by newer run", id, now, now, id, spec.RepoID, spec.Ref, spec.ScheduleEntry, explicit, spec.Actor, admin); err != nil {
 			return model.EnqueueRunResult{}, fmt.Errorf("supersede earlier runs: %w", err)
 		}
 		for _, cancellation := range cancellations {
@@ -1269,7 +1304,7 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 		&value.SHA, &value.Actor, &release, &credentialed, &value.Trigger, &value.Phase, &value.JobName,
 		&value.TestedSHA, &value.BaseSHA, &value.FailedBurn, &value.FailedStep, &value.Error,
 		&value.Status, &value.Reason, &value.SupersededBy, &queued, &started, &finished,
-		&created, &updated, &value.ConcurrencyGroup, &value.ScheduleEntry, &value.Priority, &value.PriorityReason, &value.PriorityOverride, &value.PriorityOverrideReason,
+		&created, &updated, &value.ConcurrencyGroup, &value.ScheduleEntry, &value.Priority, &value.PriorityReason, &value.PriorityOverride, &value.PriorityOverrideReason, &value.PriorityRequestedBy, &value.PriorityRefusal, &value.PriorityProtected,
 	}
 	if err := row.Scan(append(dest, extra...)...); err != nil {
 		return model.Run{}, err
