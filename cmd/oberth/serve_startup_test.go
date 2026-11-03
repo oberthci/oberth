@@ -18,6 +18,7 @@ import (
 	"github.com/oberthci/oberth/internal/auditanchor"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/testdb"
 )
 
 type staticStartupContinuity struct {
@@ -626,18 +627,7 @@ func seedPreviousV2Database(t *testing.T, path string) (model.AuditHead, string)
 	if _, err := raw.Exec(`
 PRAGMA foreign_keys = OFF;
 BEGIN IMMEDIATE;
-
-
-
-DROP TRIGGER IF EXISTS vm_suite_executions_retired_insert;
-DROP TRIGGER IF EXISTS vm_suite_executions_retired_update;
-DROP TRIGGER IF EXISTS vm_suite_executions_retired_delete;
-DROP TRIGGER IF EXISTS vm_suite_resources_retired_insert;
-DROP TRIGGER IF EXISTS vm_suite_resources_retired_update;
-DROP TRIGGER IF EXISTS vm_suite_resources_retired_delete;
-DELETE FROM schema_migrations WHERE version=39;
-
-
+` + testdb.PostV38Downgrade + `
 DROP TABLE IF EXISTS trusted_applies;
 DROP TABLE IF EXISTS trusted_plans;
 DROP TABLE IF EXISTS secret_access;
@@ -805,18 +795,7 @@ func seedLegacyV1Database(t *testing.T, path string, actionCount int) {
 	if _, err := raw.Exec(`
 PRAGMA foreign_keys = OFF;
 BEGIN IMMEDIATE;
-
-
-
-DROP TRIGGER IF EXISTS vm_suite_executions_retired_insert;
-DROP TRIGGER IF EXISTS vm_suite_executions_retired_update;
-DROP TRIGGER IF EXISTS vm_suite_executions_retired_delete;
-DROP TRIGGER IF EXISTS vm_suite_resources_retired_insert;
-DROP TRIGGER IF EXISTS vm_suite_resources_retired_update;
-DROP TRIGGER IF EXISTS vm_suite_resources_retired_delete;
-DELETE FROM schema_migrations WHERE version=39;
-
-
+` + testdb.PostV38Downgrade + `
 DROP INDEX runs_latest_ref_idx;
 DROP INDEX runs_passed_tested_sha_idx;
 CREATE TABLE step_results_v1 (

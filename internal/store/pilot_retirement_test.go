@@ -6,29 +6,10 @@ import (
 	"testing"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/testdb"
 )
 
-const pilotRetirementDowngradeSQL = executionRetirementDowngradeSQL + `
-DROP TRIGGER IF EXISTS issues_metadata_revision;
-ALTER TABLE issues DROP COLUMN revision;
-ALTER TABLE token_credentials DROP COLUMN expires_at;
-DROP TABLE IF EXISTS priority_grants;
-DROP TABLE IF EXISTS run_priority_requests;
-DROP TABLE IF EXISTS restart_workflow_timings;
-DROP TABLE IF EXISTS restart_step_timings;
-DROP TRIGGER IF EXISTS publications_tag_tuple_insert;
-DROP INDEX IF EXISTS publications_tag_tuple_idx;
-DELETE FROM schema_migrations WHERE version>=39;
-
-DROP TRIGGER IF EXISTS vm_suite_executions_retired_insert;
-DROP TRIGGER IF EXISTS vm_suite_executions_retired_update;
-DROP TRIGGER IF EXISTS vm_suite_executions_retired_delete;
-DROP TRIGGER IF EXISTS vm_suite_resources_retired_insert;
-DROP TRIGGER IF EXISTS vm_suite_resources_retired_update;
-DROP TRIGGER IF EXISTS vm_suite_resources_retired_delete;
-DROP TABLE IF EXISTS workflow_capability_grants;
-DELETE FROM schema_migrations WHERE version>=45;
-`
+const pilotRetirementDowngradeSQL = executionRetirementDowngradeSQL + testdb.PostV38Downgrade
 
 func TestPilotRetirementPreservesReadOnlyHistory(t *testing.T) {
 	ctx := t.Context()
