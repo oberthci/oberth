@@ -249,7 +249,7 @@ call the proxy hostname directly.
 | `size_revoke` | Return a repository to `L` and disable automatic tag priority, even if never granted (admin-only, audited) |
 | `size_grant_get` | Read a repository's maximum admission size (`max_size`) and grant state: `never_granted`, `granted`, or `revoked` |
 | `queue_priority_config` | Replace administrator RC globs with `rc_patterns` (e.g. `["rc/*", "release/*"]`); `[]` disables; unscoped admin, audited |
-| `queue_priority_get` | Read RC patterns and the 60-minute normal/high starvation threshold; unscoped admin |
+| `queue_priority_get` | Read RC patterns and the 60-minute threshold after which a normal run ages into high; unscoped admin |
 | `priority_grant` | Allow `identity` to request priority up to `max_class` (`high` or `highest`) until RFC3339 `expires`; unscoped admin, audited |
 | `priority_grant_list` | List priority grants and expiry; unscoped admin |
 | `priority_grant_revoke` | Revoke an identity's grant for future submissions; accepted builds keep their priority; unscoped admin, audited |
@@ -837,8 +837,11 @@ waiting work immediately; CLI/external changes are polled. New size audits
 include `automatic_tag_priority_enabled` and
 `previous_automatic_tag_priority_enabled`; historical audit rows are unchanged.
 Configured RC branches are `high`; other runs are `normal`.
-Both normal and high runs waiting 60 minutes join `highest` in their original
-FIFO position. Plan/apply triggers receive no automatic priority: their cancel
+A normal run waiting 60 minutes joins `high` in its original FIFO position,
+with the reason `aged: normal run waited at least 60 minutes`; nothing ages
+into `highest`, so explicit `highest` bumps, promotions and the oldest waiting
+tag release always lead. High runs accepted after an aged run wait behind it,
+which bounds its wait. Plan/apply triggers receive no automatic priority: their cancel
 restrictions protect external state and do not establish queue urgency. Running
 work keeps its resources. Backfill and head-wait bounds apply within each class. Local admin
 RC configuration and bumps wake dispatch immediately; aging and external
@@ -886,7 +889,7 @@ publication warnings and force requirement. Removing an RC pattern does not
 remove supersession protection from a build already classified as priority.
 
 The queue orders highest, high, then normal, with acceptance order within each
-class and the existing starvation bound. A waiting priority head still needs
+class; a normal run ages into high after 60 minutes at its own position. A waiting priority head still needs
 the declared budget and pressure gate. Measured backfill may finish before the
 earlier of the head's reserved start and the remaining head-wait window. If
 running durations are unknown, measured short work may use existing capacity

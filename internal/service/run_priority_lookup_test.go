@@ -151,8 +151,8 @@ func TestPrioritySizeLookupRefreshWithholdsBoostAndRecovers(t *testing.T) {
 	if explicit.Priority != model.PriorityHigh || explicit.PriorityReason != "admin bump: intentional expedite" {
 		t.Fatalf("lookup failure discarded explicit bump: %+v", explicit)
 	}
-	if p, _ := aged.EffectivePriority(time.Now()); p != model.PriorityHighest {
-		t.Fatal("lookup failure disabled starvation aging")
+	if p, _ := aged.EffectivePriority(time.Now()); p != model.PriorityHigh {
+		t.Fatal("lookup failure disabled aging")
 	}
 	state.unavailable.Store(false)
 	check(model.PriorityHighest, "oldest waiting")
