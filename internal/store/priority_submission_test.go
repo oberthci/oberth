@@ -89,7 +89,7 @@ func TestPrioritySubmissionKeepsRunningSameBranch(t *testing.T) {
 	if _, err = s.MarkRunAdmitted(t.Context(), original.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.SetRunJobName(t.Context(), original.ID, "existing-workflow"); err != nil {
+	if _, err = s.SetRunWorkflowName(t.Context(), original.ID, "existing-workflow"); err != nil {
 		t.Fatal(err)
 	}
 	admin := true
@@ -100,7 +100,7 @@ func TestPrioritySubmissionKeepsRunningSameBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := s.Run(t.Context(), original.ID)
-	if err != nil || got.Status != model.RunRunning || got.StartedAt == nil || got.JobName != "existing-workflow" || got.SupersededBy != "" || len(urgent.Cancellations) != 0 {
+	if err != nil || got.Status != model.RunRunning || got.StartedAt == nil || got.WorkflowName != "existing-workflow" || got.SupersededBy != "" || len(urgent.Cancellations) != 0 {
 		t.Fatalf("priority submission changed running work: %+v %v", got, err)
 	}
 	if pending, err := s.PendingRunCancellations(t.Context()); err != nil || len(pending) != 0 {

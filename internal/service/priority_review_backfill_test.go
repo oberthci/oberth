@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // Short work may backfill every class; long work cannot consume capacity
@@ -17,16 +17,16 @@ func TestPriorityReviewBackfillPolicyForAllClasses(t *testing.T) {
 			g := newWeightedAdmission(6)
 			g.now, g.maxHeadWait = clock.Now, 20*time.Minute
 			long := g.reserve(1)
-			acquireRequestWithinBudget(t, long, admissionRequest{Size: periapsis.L, Estimate: time.Hour})
+			acquireRequestWithinBudget(t, long, admissionRequest{Size: pipeline.L, Estimate: time.Hour})
 			t.Cleanup(long.release)
 			short := g.reserve(2)
-			acquireRequestWithinBudget(t, short, admissionRequest{Size: periapsis.S, Estimate: 10 * time.Minute})
+			acquireRequestWithinBudget(t, short, admissionRequest{Size: pipeline.S, Estimate: 10 * time.Minute})
 			t.Cleanup(short.release)
-			head := priorityWaiter(g, 3, priority, clock.now, periapsis.L)
+			head := priorityWaiter(g, 3, priority, clock.now, pipeline.L)
 			t.Cleanup(head.cancel)
-			delaying := priorityWaiter(g, 4, priority, clock.now, periapsis.S, 30*time.Minute)
+			delaying := priorityWaiter(g, 4, priority, clock.now, pipeline.S, 30*time.Minute)
 			t.Cleanup(delaying.cancel)
-			safe := priorityWaiter(g, 5, priority, clock.now, periapsis.S, time.Minute)
+			safe := priorityWaiter(g, 5, priority, clock.now, pipeline.S, time.Minute)
 			t.Cleanup(safe.cancel)
 			if granted(g, head) || granted(g, delaying) || !granted(g, safe) {
 				t.Fatal("admission lost safe backfill or admitted a candidate that delays the head")

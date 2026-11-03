@@ -493,7 +493,7 @@ func awaitDeadlineSubmitted(t *testing.T, database *store.Store, id string, done
 			if err != nil {
 				t.Fatal(err)
 			}
-			if run.Status == model.RunRunning && run.Phase == "running" && run.JobName != "" {
+			if run.Status == model.RunRunning && run.Phase == "running" && run.WorkflowName != "" {
 				return
 			}
 		}

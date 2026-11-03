@@ -12,7 +12,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	pipeline "github.com/oberthci/oberth/pkg/periapsis"
+	pipeline "github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestDeclaredAdmissionTwoMeasuredRunsFit(t *testing.T) {

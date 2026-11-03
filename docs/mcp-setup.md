@@ -905,5 +905,5 @@ Issue metadata writes can pass `expected_revision` from a prior read; mismatch
 is a conflict, while omission preserves last-write-wins. See
 [conditional metadata updates](issue-lifecycle.md).
 
-The current MCP surface has **68 tools**, including administrator-only
+The current MCP surface has **71 tools**, including administrator-only
 `publication_abandon`.

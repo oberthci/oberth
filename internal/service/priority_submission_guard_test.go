@@ -11,7 +11,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestPriorityGuardSupersession(t *testing.T) {
@@ -38,13 +38,13 @@ func TestPriorityGuardBackfillCannotDelayHead(t *testing.T) {
 	g := newWeightedAdmission(4)
 	g.maxHeadWait = 20 * time.Minute
 	holder := g.reserve(1)
-	release, err := holder.acquire(context.Background(), periapsis.M)
+	release, err := holder.acquire(context.Background(), pipeline.M)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer release()
-	head := priorityWaiter(g, 2, model.PriorityHighest, time.Now(), periapsis.L)
-	small := priorityWaiter(g, 3, model.PriorityHighest, time.Now(), periapsis.M)
+	head := priorityWaiter(g, 2, model.PriorityHighest, time.Now(), pipeline.L)
+	small := priorityWaiter(g, 3, model.PriorityHighest, time.Now(), pipeline.M)
 	if granted(g, small) {
 		t.Fatal("backfill leaves too little capacity for the priority head")
 	}
@@ -59,7 +59,7 @@ func TestPriorityGuardBackfillCannotDelayHead(t *testing.T) {
 func TestPriorityGuardSubmissionLeavesExistingRunsAndStartsNext(t *testing.T) {
 	f := newGroupFixture(t, 2)
 	for _, ref := range []string{"busy", "normal-a", "normal-b", "urgent"} {
-		f.engine.declare(ref, "", periapsis.L)
+		f.engine.declare(ref, "", pipeline.L)
 	}
 	running := f.branch(t, f.terraform, "busy", "a")
 	f.start(t)
@@ -204,10 +204,10 @@ func TestPriorityBackfillPreservesNumericHeadAndAggregateDemand(t *testing.T) {
 			g := newWeightedAdmission(8)
 			g.now, g.maxHeadWait = clock.Now, 20*time.Minute
 			running := g.reserve(1)
-			acquireRequestWithinBudget(t, running, admissionRequest{Size: periapsis.M, Estimate: 30 * time.Minute,
+			acquireRequestWithinBudget(t, running, admissionRequest{Size: pipeline.M, Estimate: 30 * time.Minute,
 				Pods: &argoworkflow.PodDemand{CPUMilli: 4000, MemoryBytes: 4 << 30, Pods: 1}})
 			t.Cleanup(running.release)
-			head := pending(t, g, 2, admissionRequest{Size: periapsis.M,
+			head := pending(t, g, 2, admissionRequest{Size: pipeline.M,
 				Pods: &argoworkflow.PodDemand{CPUMilli: tc.headCPU, MemoryBytes: tc.headMemory, Pods: 1}})
 			t.Cleanup(head.cancel)
 			if granted(g, head) {
@@ -217,7 +217,7 @@ func TestPriorityBackfillPreservesNumericHeadAndAggregateDemand(t *testing.T) {
 			head.priority = model.PriorityHighest
 			g.mu.Unlock()
 			clock.now = clock.now.Add(21 * time.Minute)
-			candidate := pendingPriority(t, g, 3, model.PriorityHighest, admissionRequest{Size: periapsis.M, Estimate: time.Hour,
+			candidate := pendingPriority(t, g, 3, model.PriorityHighest, admissionRequest{Size: pipeline.M, Estimate: time.Hour,
 				Pods: &argoworkflow.PodDemand{CPUMilli: tc.candidateCPU, MemoryBytes: tc.candidateMemory, Pods: 1}})
 			t.Cleanup(candidate.cancel)
 			if got := granted(g, candidate); got != tc.want {
@@ -228,13 +228,13 @@ func TestPriorityBackfillPreservesNumericHeadAndAggregateDemand(t *testing.T) {
 	g := newWeightedAdmission(4)
 	g.maxHeadWait = 20 * time.Minute
 	running := g.reserve(1)
-	acquireRequestWithinBudget(t, running, admissionRequest{Size: periapsis.M, Estimate: time.Hour})
+	acquireRequestWithinBudget(t, running, admissionRequest{Size: pipeline.M, Estimate: time.Hour})
 	t.Cleanup(running.release)
-	head := priorityWaiter(g, 2, model.PriorityHighest, time.Now(), periapsis.L)
+	head := priorityWaiter(g, 2, model.PriorityHighest, time.Now(), pipeline.L)
 	t.Cleanup(head.cancel)
-	first := priorityWaiter(g, 3, model.PriorityHighest, time.Now(), periapsis.S, 2*time.Hour)
+	first := priorityWaiter(g, 3, model.PriorityHighest, time.Now(), pipeline.S, 2*time.Hour)
 	t.Cleanup(first.cancel)
-	second := priorityWaiter(g, 4, model.PriorityHighest, time.Now(), periapsis.S, 2*time.Hour)
+	second := priorityWaiter(g, 4, model.PriorityHighest, time.Now(), pipeline.S, 2*time.Hour)
 	t.Cleanup(second.cancel)
 	if !granted(g, first) || granted(g, second) {
 		t.Fatal("aggregate backfills failed to preserve the priority head")
@@ -251,7 +251,7 @@ func TestPrioritySubmissionReasonCannotImpersonateAutomaticTagClass(t *testing.T
 	r := f.scheduler.admission.reserveRun(enqueued.Run)
 	f.scheduler.admission.mu.Lock()
 	r.prepared = true
-	r.size = periapsis.XL
+	r.size = pipeline.XL
 	p := r.priorityRun().Priority
 	f.scheduler.admission.mu.Unlock()
 	if p != model.PriorityHighest {

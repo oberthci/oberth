@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestSchedulerPressureBlocksSecondRunWithinBudget(t *testing.T) {
-	fixture := newConcurrencyFixture(t, periapsis.M, 2)
+	fixture := newConcurrencyFixture(t, pipeline.M, 2)
 	gate := fixture.scheduler.admission
 	config := DefaultAdmissionPressureConfig()
 	// PSI lags pod startup: repeated samples stay moderate after the grant.
