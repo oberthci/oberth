@@ -13,6 +13,7 @@ import (
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
+	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
@@ -169,6 +170,10 @@ func executeValidate(target validateTarget, output io.Writer) error {
 		}
 
 		if err := argoworkflow.Admit(workflow, argoworkflow.Policy{RunnerImagePrefixes: target.imagePrefixes, KubeVirt: target.kubeVirt, ContainerDiskPrefixes: target.containerDiskPrefixes, VMIBudget: target.kubeVirtBudget}); err != nil {
+			report.problem("admission %s: %v", entry.file, err)
+			continue
+		}
+		if err := argojob.ValidateDocument(workflow, entry.trigger); err != nil {
 			report.problem("admission %s: %v", entry.file, err)
 			continue
 		}
