@@ -38,6 +38,7 @@ import (
 	"github.com/oberthci/oberth/internal/goproxy"
 	"github.com/oberthci/oberth/internal/liveness"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/retirement"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/secretstore"
 	"github.com/oberthci/oberth/internal/service"
@@ -795,6 +796,12 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
+	removalCheck := app.LegacyRemovalCheck{Catalog: database, Git: git, Fragments: fragmentLoader}
+	if retirement.LegacyExecutionRemoved {
+		if err := removalCheck.Check(ctx); err != nil {
+			return err
+		}
+	}
 	artifactStore, err := artifacts.Open(filepath.Join(options.dataRoot, "artifacts"))
 	if err != nil {
 		return err
@@ -1289,7 +1296,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	}()
 	defer func() { stopTokenWarnings(); <-tokenWarningsDone }()
 	stopBootstrap()
-	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, withRepositoryRemoval(newAdminGateServerWithTokenPolicy(anchors.AllowMutation, options.database, scheduler.NotifyQueue, options.uplinkTokenPolicy, queueSnapshot.current), anchors.AllowMutation, options.database, database, git), activateScheduler, accessReconciler, schedules, ciIssues, retention, logger, controlAPI.Shutdown, httpAPI.BeginDrain)
+	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, withLegacyRemovalCheck(withRepositoryRemoval(newAdminGateServerWithTokenPolicy(anchors.AllowMutation, options.database, scheduler.NotifyQueue, options.uplinkTokenPolicy, queueSnapshot.current), anchors.AllowMutation, options.database, database, git), options.database, removalCheck.Check), activateScheduler, accessReconciler, schedules, ciIssues, retention, logger, controlAPI.Shutdown, httpAPI.BeginDrain)
 }
 
 type startupContinuity interface {

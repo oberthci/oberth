@@ -16,6 +16,8 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
+
+	"github.com/oberthci/oberth/internal/retirement"
 )
 
 // canonicalGARPrefix is the canonical Google Artifact Registry prefix for
@@ -391,6 +393,11 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	if err := checkUpgradeLegacyResources(ctx, cfg, deps); err != nil {
 		return result, err
 	}
+	if retirement.LegacyExecutionRemoved && semver.Compare(canonicalChartVersion(cfg.BinaryVersion), "v0.17.83-0") >= 0 {
+		if err := checkUpgradeLegacyRepositories(ctx, cfg, deps); err != nil {
+			return result, err
+		}
+	}
 
 	profile, cleanupProfile, err := prepareUpgradeControllerProfile(ctx, cfg, deps)
 	if err != nil {
@@ -499,6 +506,11 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	// Recheck after preview/drain, immediately before the first live write.
 	if err := checkUpgradeLegacyResources(ctx, cfg, deps); err != nil {
 		return result, err
+	}
+	if retirement.LegacyExecutionRemoved && semver.Compare(canonicalChartVersion(cfg.BinaryVersion), "v0.17.83-0") >= 0 {
+		if err := checkUpgradeLegacyRepositories(ctx, cfg, deps); err != nil {
+			return result, err
+		}
 	}
 
 	if profile != nil {
