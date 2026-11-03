@@ -15,9 +15,10 @@ import (
 	"strings"
 	"time"
 
+	_ "modernc.org/sqlite"
+
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
-	_ "modernc.org/sqlite"
 )
 
 type run struct {
@@ -77,7 +78,7 @@ func main() {
 	}
 	s, err := store.InspectCurrent(ctx, path, store.Options{})
 	must(err)
-	defer s.Close()
+	defer func() { must(s.Close()) }()
 	runs, err := s.ListActiveRuns(ctx, model.RunListFilter{})
 	must(err)
 	values := make([]run, 0, len(runs))
@@ -86,10 +87,10 @@ func main() {
 	}
 	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
 	must(err)
-	defer db.Close()
+	defer func() { must(db.Close()) }()
 	rows, err := db.QueryContext(ctx, "SELECT version, applied_at FROM schema_migrations ORDER BY version")
 	must(err)
-	defer rows.Close()
+	defer func() { must(rows.Close()) }()
 	ledger := []migration{}
 	for rows.Next() {
 		var m migration
@@ -112,12 +113,12 @@ func main() {
 func seed(ctx context.Context, path string) {
 	s, err := store.OpenAdminClient(ctx, path, store.Options{})
 	must(err)
-	defer s.Close()
+	defer func() { must(s.Close()) }()
 	root := filepath.Join(filepath.Dir(path), "fixtures")
 	repoPath := filepath.Join(root, "sample")
-	must(os.MkdirAll(repoPath, 0750))
+	must(os.MkdirAll(repoPath, 0750)) // #nosec G703 -- The CLI caller chooses the isolated fixture directory.
 	git := func(args ...string) string {
-		cmd := exec.Command("/usr/bin/git", append([]string{"-C", repoPath}, args...)...)
+		cmd := exec.Command("/usr/bin/git", append([]string{"-C", repoPath}, args...)...) // #nosec G204 -- Commands are fixed below; only the caller-selected fixture directory varies.
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			panic(fmt.Sprintf("git fixture: %v: %s", err, out))
@@ -125,8 +126,8 @@ func seed(ctx context.Context, path string) {
 		return strings.TrimSpace(string(out))
 	}
 	git("init", "--initial-branch=main")
-	must(os.WriteFile(filepath.Join(repoPath, "README"), []byte("Oberth local upgrade fixture\n"), 0640))
-	must(os.MkdirAll(filepath.Join(repoPath, ".oberth"), 0750))
+	must(os.WriteFile(filepath.Join(repoPath, "README"), []byte("Oberth local upgrade fixture\n"), 0600))
+	must(os.MkdirAll(filepath.Join(repoPath, ".oberth"), 0750)) // #nosec G703 -- Pipeline files belong beneath the caller-selected fixture directory.
 	if len(os.Args) != 4 {
 		panic("seed requires the signed release runner image")
 	}
@@ -145,14 +146,14 @@ spec:
         command: [/usr/local/bin/oberth, version]
 `, os.Args[3])
 	for _, file := range []string{"build.yaml", "release.yaml"} {
-		must(os.WriteFile(filepath.Join(repoPath, ".oberth", file), []byte(pipeline), 0640))
+		must(os.WriteFile(filepath.Join(repoPath, ".oberth", file), []byte(pipeline), 0600))
 	}
 	git("add", "README", ".oberth")
 	git("-c", "user.name=Oberth fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "Create local fixture")
 	sha := git("rev-parse", "HEAD")
 	// Populate the native cache so exact-SHA checkouts never fetch an upstream.
 	cache := filepath.Join(filepath.Dir(path), "git", "local", "fixtures", "sample.git")
-	must(os.MkdirAll(filepath.Dir(cache), 0750))
+	must(os.MkdirAll(filepath.Dir(cache), 0750)) // #nosec G703 -- The local cache belongs beside the caller-selected fixture database.
 	upstreamRepo := filepath.Join(root, "sample.git")
 	git("clone", "--bare", repoPath, upstreamRepo)
 	git("clone", "--bare", upstreamRepo, cache)
@@ -217,7 +218,7 @@ func setWorkflowName(ctx context.Context, s *store.Store, id, name string) (mode
 func refill(ctx context.Context, path string) {
 	s, err := store.OpenAdminClient(ctx, path, store.Options{})
 	must(err)
-	defer s.Close()
+	defer func() { must(s.Close()) }()
 	active, err := s.ListActiveRuns(ctx, model.RunListFilter{})
 	must(err)
 	if len(active) != 3 {
@@ -240,10 +241,10 @@ func refill(ctx context.Context, path string) {
 func diagnose(ctx context.Context, path string) {
 	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
 	must(err)
-	defer db.Close()
+	defer func() { must(db.Close()) }()
 	rows, err := db.QueryContext(ctx, "SELECT id,status,phase,error FROM runs ORDER BY queue_sequence")
 	must(err)
-	defer rows.Close()
+	defer func() { must(rows.Close()) }()
 	for rows.Next() {
 		var id, status, phase, message string
 		must(rows.Scan(&id, &status, &phase, &message))
