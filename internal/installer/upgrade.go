@@ -394,6 +394,10 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		return result, err
 	}
 
+	if err := checkUpgradeLegacyResources(ctx, cfg, deps); err != nil {
+		return result, err
+	}
+
 	profile, cleanupProfile, err := prepareUpgradeControllerProfile(ctx, cfg, deps)
 	if err != nil {
 		return result, err
@@ -496,6 +500,11 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		if err := waitForUpgradeIdle(ctx, cfg, deps); err != nil {
 			return result, err
 		}
+	}
+
+	// Recheck after preview/drain, immediately before the first live write.
+	if err := checkUpgradeLegacyResources(ctx, cfg, deps); err != nil {
+		return result, err
 	}
 
 	if profile != nil {

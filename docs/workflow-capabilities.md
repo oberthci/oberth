@@ -69,7 +69,9 @@ to work. The inactive pilot remains retired under Schema 45.
 
 Migrations 45/46/47 retire the inactive pilot, add the capability grant table,
 and establish the staged upgrade boundary without retiring the live VM journal.
-Back up the database before upgrading. Work in flight remains journaled and
+Back up the database before upgrading. The v0.17.83 CLI requires legacy
+preflight Workflows and Oberth-owned VMs to be absent before upgrade; see the
+[retirement upgrade procedure](retirement-upgrade.md). Work in flight remains journaled and
 reaches the same owner recovery used after a restart. Startup cancellation
 cleanup retries external deletion failures with two-minute attempt budgets and
 backoff capped at five seconds. The process stays alive and unready, with
