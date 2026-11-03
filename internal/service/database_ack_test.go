@@ -128,11 +128,11 @@ func TestDatabaseDeadlineLostTransitionAcksConverge(t *testing.T) {
 			case "RequeueStrandedRun":
 				fixture.setWorkflowName(t, run.ID, "known-job")
 				successor, err := database.RequeueStrandedRun(ctx, run.ID)
-				if err != nil || successor.ID == "" || successor.ID == run.ID {
+				if err != nil || successor.ID != run.ID || successor.Status != model.RunQueued {
 					t.Fatal(successor, err)
 				}
 				old, err := fixture.store.Run(t.Context(), run.ID)
-				if err != nil || old.SupersededBy != successor.ID {
+				if err != nil || old.SupersededBy != "" || old.Status != model.RunQueued {
 					t.Fatal(old, err)
 				}
 			case "BeginPublication":

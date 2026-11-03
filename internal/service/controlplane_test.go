@@ -2271,23 +2271,16 @@ func TestSchedulerShutdownCancelsAndJoinsWorkers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if finished.Status != model.RunInterrupted || finished.SupersededBy == "" {
-		t.Fatalf("shutdown run = %#v, want interrupted and superseded by its requeue", finished)
-	}
-	requeued, err := fixture.store.Run(context.Background(), finished.SupersededBy)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if requeued.Status != model.RunQueued || requeued.Ref != finished.Ref || requeued.SHA != finished.SHA {
-		t.Fatalf("requeued run = %#v, want queued copy of the shutdown run", requeued)
+	if finished.Status != model.RunQueued || finished.SupersededBy != "" || finished.ID != enqueued.ID || finished.Ref != running.Ref || finished.SHA != running.SHA || finished.QueueSequence != running.QueueSequence || finished.Reason != store.RestartRequeueReason {
+		t.Fatalf("shutdown run = %#v, want the original run reset to queued", finished)
 	}
 	pending, err := fixture.store.PendingRunCancellations(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(pending) != 1 || pending[0].RunID != enqueued.ID || pending[0].WorkflowName != workflowName ||
-		pending[0].SupersededBy != requeued.ID {
-		t.Fatalf("pending obligations = %#v, want the canceled Job %q owned by the requeue", pending, workflowName)
+	if len(pending) != 1 || pending[0].RunID != enqueued.ID || pending[0].WorkflowName != jobName ||
+		pending[0].SupersededBy != "" {
+		t.Fatalf("pending obligations = %#v, want the canceled Job %q owned by the requeue", pending, jobName)
 	}
 }
 

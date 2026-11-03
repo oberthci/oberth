@@ -1009,11 +1009,8 @@ ORDER BY queue_sequence`)
 			continue
 		}
 		if _, requeueErr := s.requeueStrandedRunTx(ctx, tx, active, now); requeueErr == nil {
-			// The enqueue's supersede interrupted this run with a link to
-			// its replacement and recorded a no-Job cancellation obligation.
-			// Owner startup proves the claiming worker is gone (the same
-			// argument as the pass above), so that obligation terminalizes
-			// here instead of lingering unexecutable (issue #270).
+			// This owner has not submitted a Workflow. Startup proves the
+			// old worker is gone, so an empty-name cleanup obligation is done.
 			if _, err := tx.ExecContext(ctx, `
 UPDATE run_cancellations
 SET completed_at = ?

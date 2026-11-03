@@ -22,9 +22,9 @@ type adoptedRun struct {
 // Workflow adoption keeps the durable run classification; the engine checks
 // the exact trigger, source and credential-bearing spec before resuming it.
 func workflowRunAdoptable(run model.Run) bool {
-	// Argo admits tag pipelines only through the durable release capability.
-	// Historical non-release tag Jobs keep the conservative legacy fallback.
-	return run.RefKind == model.RefBranch || (run.RefKind == model.RefTag && run.Release)
+	// Keep the persisted trigger and credential classification. The engine's
+	// exact Workflow binding checks apply to ordinary tags as well as releases.
+	return run.RefKind == model.RefBranch || run.RefKind == model.RefTag
 }
 
 func (scheduler *Scheduler) withoutPendingPreflight(ctx context.Context, run model.Run) (bool, error) {

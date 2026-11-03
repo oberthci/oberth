@@ -658,6 +658,11 @@ DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_t
 ALTER TABLE runs DROP COLUMN admission_sequence;
 ALTER TABLE runs DROP COLUMN credentialed;
 ALTER TABLE runs DROP COLUMN concurrency_group;
+-- Remove restart recovery additions when reconstructing the predecessor.
+DROP TRIGGER IF EXISTS publications_tag_tuple_insert;
+DROP INDEX IF EXISTS publications_tag_tuple_idx;
+DROP TABLE IF EXISTS restart_step_timings;
+DROP TABLE IF EXISTS restart_workflow_timings;
 DROP TRIGGER publications_guard_update;
 ALTER TABLE publications DROP COLUMN attempts;
 ALTER TABLE publications DROP COLUMN retry_after;
@@ -891,6 +896,11 @@ DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_t
 ALTER TABLE runs DROP COLUMN admission_sequence;
 ALTER TABLE runs DROP COLUMN credentialed;
 ALTER TABLE runs DROP COLUMN concurrency_group;
+-- Remove restart recovery additions when reconstructing the predecessor.
+DROP TRIGGER IF EXISTS publications_tag_tuple_insert;
+DROP INDEX IF EXISTS publications_tag_tuple_idx;
+DROP TABLE IF EXISTS restart_step_timings;
+DROP TABLE IF EXISTS restart_workflow_timings;
 DROP TRIGGER publications_guard_update;
 ALTER TABLE publications DROP COLUMN attempts;
 ALTER TABLE publications DROP COLUMN retry_after;

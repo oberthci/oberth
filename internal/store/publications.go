@@ -39,6 +39,21 @@ func (s *Store) BeginPublication(ctx context.Context, spec model.PublicationSpec
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// A tag publication is identified by its repository, tag and immutable
+	// result SHA. Reopening the same intent is idempotent even after delivery;
+	// another run cannot acquire a second external side effect for that tuple.
+	if spec.RefKind == model.RefTag {
+		existing, lookupErr := scanPublication(tx.QueryRowContext(ctx, `SELECT `+publicationColumns+` FROM publications WHERE repo_id=? AND ref_kind='tag' AND ref=? AND lower(result_sha)=lower(?) ORDER BY (run_id=?) DESC,sequence LIMIT 1`, spec.RepoID, spec.Ref, spec.ResultSHA, spec.RunID))
+		if lookupErr == nil {
+			if existing.RunID == spec.RunID && existing.PromotionID == spec.PromotionID && existing.Actor == spec.Actor && (!spec.PreviousKnown || (existing.PreviousKnown && strings.EqualFold(existing.PreviousSHA, spec.PreviousSHA))) {
+				return existing, nil
+			}
+			return model.Publication{}, fmt.Errorf("%w: tag %s at %s already has publication %s", ErrInvalidState, spec.Ref, spec.ResultSHA, existing.ID)
+		}
+		if !errors.Is(lookupErr, sql.ErrNoRows) {
+			return model.Publication{}, lookupErr
+		}
+	}
 	var run model.Run
 	if spec.RunID != "" {
 		run, err = scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id = ?`, spec.RunID))

@@ -29,8 +29,8 @@ func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	if err := validateMigrations(migrations, latestMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
-	if latestMigrationVersion != 42 {
-		t.Fatalf("latest migration version = %d, want 42", latestMigrationVersion)
+	if latestMigrationVersion != 40 {
+		t.Fatalf("latest migration version = %d, want 40", latestMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)
@@ -955,6 +955,8 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"queue_priority_patterns",
 		"receive_events",
 		"repositories",
+		"restart_step_timings",
+		"restart_workflow_timings",
 		"run_admission_timings",
 		"run_cancellations",
 		"run_priority_overrides",
@@ -998,6 +1000,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"publications_pending_idx",
 		"publications_promotion_idx",
 		"publications_run_idx",
+		"publications_tag_tuple_idx",
 		"receive_events_repo_idx",
 		"receive_events_run_idx",
 		"repository_archive_actions_idx",
@@ -1040,6 +1043,9 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"promotions_no_delete",
 		"publications_guard_update",
 		"publications_no_delete",
+		"publications_tag_tuple_insert",
+		"restart_step_timing_immutable",
+		"restart_workflow_timing_immutable",
 		"run_schedule_entry_immutable",
 		"run_timing_claim",
 		"run_timing_grant",

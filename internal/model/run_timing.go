@@ -11,8 +11,9 @@ const TimingVersion = 1
 const MaxTimingTasks = 2048
 const MaxStepTimingBytes = 16 << 10
 
-// A durable run ID is an execution attempt. Re-fires have a new ID, even when
-// their admission sequence is inherited; a resumed Workflow keeps its ID.
+// A durable run ID survives unexecuted owner restarts. First-observed
+// milestones and admission episodes remain; Workflow/step evidence describes
+// the current restart attempt, with older bindings retained in the store.
 type RunTiming struct {
 	Version             int               `json:"version"`
 	RunID               string            `json:"run_id"`

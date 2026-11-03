@@ -88,10 +88,10 @@ func TestWorkflowCreateRecoveryParkedGroupMateRequeuesInEitherOrder(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !current.Preempted() || current.SupersededBy == "" {
+			if current.Status != model.RunQueued || current.SupersededBy != "" {
 				t.Fatalf("never-posted run failed instead of requeueing: %+v", current)
 			}
-			replacement, err := f.store.Run(t.Context(), current.SupersededBy)
+			replacement, err := f.store.Run(t.Context(), parked.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -211,7 +211,7 @@ func TestWorkflowCreateRecoveryAbsentWorkflowRequiresContractToSettle(t *testing
 			}
 			state := scheduler.AdmissionState()
 			if contract == "none" {
-				if !current.Preempted() || current.SupersededBy == "" || state.Used != 0 || scheduler.pendingCreateCount() != 0 {
+				if current.Status != model.RunQueued || current.SupersededBy != "" || state.Used != 0 || scheduler.pendingCreateCount() != 0 {
 					t.Fatalf("no-contract run quarantined or failed: %+v state=%+v", current, state)
 				}
 				return

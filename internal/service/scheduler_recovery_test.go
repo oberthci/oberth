@@ -196,7 +196,7 @@ func TestCompensationPathRecordsRealResultWhenJobCompleted(t *testing.T) {
 
 // TestCompensationPathRequeuesWhenJobStillRunning: shutdown compensation for
 // an ordinary branch run whose Job has no terminal result supersedes it with
-// a fresh queued copy (issue #270). The Job's deletion is owned by the
+// the same queued run. The Job's deletion is owned by the
 // durable obligation — executed by the successor's startup cancellation pass
 // in the upgrade case — never inline during shutdown.
 func TestCompensationPathRequeuesWhenJobStillRunning(t *testing.T) {
@@ -235,10 +235,10 @@ func TestCompensationPathRequeuesWhenJobStillRunning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Status != model.RunInterrupted || recovered.SupersededBy == "" {
-		t.Fatalf("run = %#v, want interrupted and superseded by its requeue", recovered)
+	if recovered.Status != model.RunQueued || recovered.SupersededBy != "" {
+		t.Fatalf("run = %#v, want queued under the same ID", recovered)
 	}
-	requeued, err := fixture.store.Run(context.Background(), recovered.SupersededBy)
+	requeued, err := fixture.store.Run(context.Background(), run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,16 +254,13 @@ func TestCompensationPathRequeuesWhenJobStillRunning(t *testing.T) {
 	}
 	// execute() replaces the fixture Job name with its deterministic one;
 	// the obligation must carry the run's actual JobName.
-	if len(pending) != 1 || pending[0].RunID != run.ID || pending[0].WorkflowName != recovered.WorkflowName ||
-		pending[0].WorkflowName == "" || pending[0].SupersededBy != requeued.ID {
+	if len(pending) != 1 || pending[0].RunID != run.ID || pending[0].WorkflowName == "" || pending[0].SupersededBy != "" || pending[0].Reason != "owner_restart" {
 		t.Fatalf("pending obligations = %#v, want the stranded Job (%q) owned by the requeue", pending, recovered.WorkflowName)
 	}
 }
 
-// TestCompensationPathInterruptsIneligibleTagRun pins the conservative legacy
-// shutdown contract for release-tier work: a tag run is deleted inline and
-// terminalized as interrupted, never re-fired automatically.
-func TestCompensationPathInterruptsIneligibleTagRun(t *testing.T) {
+// Tag work resets behind the same durable cancellation fence as branches.
+func TestCompensationPathRequeuesTagRun(t *testing.T) {
 	t.Parallel()
 	fixture := newRecoveryFixture(t)
 	enqueued, err := storetest.EnqueueRun(fixture.store, context.Background(), model.RunSpec{
@@ -306,11 +303,15 @@ func TestCompensationPathInterruptsIneligibleTagRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Status != model.RunInterrupted || recovered.SupersededBy != "" || recovered.Error != "scheduler stopped" {
-		t.Fatalf("tag run = %#v, want terminally interrupted without requeue", recovered)
+	if recovered.Status != model.RunQueued || recovered.SupersededBy != "" || recovered.Error != "" {
+		t.Fatalf("tag run = %#v, want queued under the original ID", recovered)
 	}
-	if len(jobs.deleted) != 1 || jobs.deleted[0] != recovered.WorkflowName || recovered.WorkflowName == "" {
-		t.Fatalf("deleted = %v, want exactly the run's Job %q", jobs.deleted, recovered.WorkflowName)
+	if len(jobs.deleted) != 0 {
+		t.Fatalf("deleted inline: %v", jobs.deleted)
+	}
+	pending, err := fixture.store.PendingRunCancellations(t.Context())
+	if err != nil || len(pending) != 1 || pending[0].RunID != run.ID || pending[0].WorkflowName == "" {
+		t.Fatalf("missing cleanup fence: %+v %v", pending, err)
 	}
 }
 
@@ -413,7 +414,7 @@ func TestStartupReconciliationFinishesRunWhoseJobCompleted(t *testing.T) {
 
 // TestStartupReconciliationRequeuesRunWithVanishedJob: a stranded ordinary
 // branch run whose Job cannot report a terminal result is superseded by a
-// fresh queued copy (issue #270) instead of dying terminally interrupted.
+// same queued run instead of dying terminally interrupted.
 // The stranded Job's deletion is executed by the cancellation pass, not
 // inline, and must happen before the replacement can be claimed.
 func TestStartupReconciliationRequeuesRunWithVanishedJob(t *testing.T) {
@@ -495,10 +496,10 @@ func TestStartupReconciliationRequeuesRunWithVanishedJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Status != model.RunInterrupted || recovered.SupersededBy == "" {
-		t.Fatalf("reconciled run = %#v, want interrupted and superseded by its requeue", recovered)
+	if recovered.Status != model.RunQueued || recovered.SupersededBy != "" {
+		t.Fatalf("reconciled run = %#v, want queued under the same ID", recovered)
 	}
-	requeued, err := database.Run(ctx, recovered.SupersededBy)
+	requeued, err := database.Run(ctx, enqueued.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -507,7 +508,7 @@ func TestStartupReconciliationRequeuesRunWithVanishedJob(t *testing.T) {
 		requeued.Actor != recovered.Actor {
 		t.Fatalf("requeued run = %#v, want queued copy of %#v", requeued, recovered)
 	}
-	// Reconciliation must NOT delete inline: the durable supersede obligation
+	// Reconciliation must NOT delete inline: the durable restart obligation
 	// owns the deletion and stays pending until the cancellation pass.
 	if len(jobs.deleted) != 0 {
 		t.Fatalf("deleted before cancellation pass = %v, want none", jobs.deleted)
@@ -517,8 +518,8 @@ func TestStartupReconciliationRequeuesRunWithVanishedJob(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(pending) != 1 || pending[0].RunID != enqueued.ID ||
-		pending[0].WorkflowName != "oberth-vanished-job" || pending[0].Reason != "superseded" ||
-		pending[0].SupersededBy != requeued.ID {
+		pending[0].WorkflowName != "oberth-vanished-job" || pending[0].Reason != "owner_restart" ||
+		pending[0].SupersededBy != "" {
 		t.Fatalf("pending cancellations = %#v, want superseded obligation for the stranded Job", pending)
 	}
 	if err := scheduler.completePendingCancellationsWithGate(ctx, scheduler.requireMutation); err != nil {
@@ -536,11 +537,9 @@ func TestStartupReconciliationRequeuesRunWithVanishedJob(t *testing.T) {
 	}
 }
 
-// TestStartupReconciliationTerminalizesIneligibleStrandedRun pins the legacy
-// conservative path for work the restart requeue must never re-fire: a tag
-// (release-tier) run with a vanished Job is deleted inline and terminally
-// interrupted, exactly as before issue #270.
-func TestStartupReconciliationTerminalizesIneligibleStrandedRun(t *testing.T) {
+// A tag with no durable results or publication resets under its original ID
+// after its old Workflow has been cleaned.
+func TestStartupReconciliationResetsUnobservedTag(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	root := t.TempDir()
@@ -605,14 +604,18 @@ func TestStartupReconciliationTerminalizesIneligibleStrandedRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recovered.Status != model.RunInterrupted || recovered.SupersededBy != "" {
-		t.Fatalf("reconciled tag run = %#v, want terminally interrupted without requeue", recovered)
+	if recovered.Status != model.RunQueued || recovered.SupersededBy != "" {
+		t.Fatalf("reconciled tag run = %#v, want queued under the original ID", recovered)
 	}
-	if recovered.Error != "job not in terminal state at restart; result unrecoverable" {
+	if recovered.Error != "" || recovered.Reason != store.RestartRequeueReason {
 		t.Fatalf("reconciled tag run error = %q", recovered.Error)
 	}
-	if len(jobs.deleted) != 1 || jobs.deleted[0] != "oberth-tag-job" {
-		t.Fatalf("deleted = %v, want [oberth-tag-job]", jobs.deleted)
+	if len(jobs.deleted) != 0 {
+		t.Fatalf("deleted inline = %v, want durable cleanup", jobs.deleted)
+	}
+	pending, err := database.PendingRunCancellations(ctx)
+	if err != nil || len(pending) != 1 || pending[0].RunID != enqueued.ID || pending[0].WorkflowName != "oberth-tag-job" {
+		t.Fatalf("pending cleanup = %+v, %v", pending, err)
 	}
 }
 

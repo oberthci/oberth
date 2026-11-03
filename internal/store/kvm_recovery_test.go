@@ -65,7 +65,7 @@ func TestKVMRestartDefersOwnerRequeueUntilCleanupAndRetriesOnce(t *testing.T) {
 	mustPilot(t, s.RecoverOwnerState(t.Context()))
 	claimed, err = s.ClaimNextRun(t.Context())
 	mustPilot(t, err)
-	if claimed.ID == next.ID || claimed.AdmissionSequence != source.AdmissionSequence {
+	if claimed.ID != next.ID || claimed.AdmissionSequence != source.AdmissionSequence {
 		t.Fatalf("restart did not inherit order: %+v", claimed)
 	}
 	intent.RunID = claimed.ID

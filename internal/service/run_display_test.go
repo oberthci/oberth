@@ -135,7 +135,7 @@ func TestRunViewsAddDisplayStatusAndReasonToDefaultList(t *testing.T) {
 	}
 }
 
-func TestRestartRefireDisplaysCancelledWithSuccessor(t *testing.T) {
+func TestRestartResetDisplaysQueuedUnderOriginalID(t *testing.T) {
 	fixture := newControlFixture(t)
 	ctx := context.Background()
 	original, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: "restart-display", Repository: fixture.repo,
@@ -158,9 +158,8 @@ func TestRestartRefireDisplaysCancelledWithSuccessor(t *testing.T) {
 		t.Fatal(err)
 	}
 	run := value.(RunDetailResponse).Run
-	want := "server restart, re-queued as " + shortRunID(replacement.ID)
-	if run.DisplayStatus != "superseded" || run.DisplayReason != want || run.SupersededBy != replacement.ID {
-		t.Fatalf("restart presentation = %+v, want %q", run, want)
+	if run.DisplayStatus != "queued" || run.Reason != store.RestartRequeueReason || run.SupersededBy != "" || replacement.ID != original.ID {
+		t.Fatalf("restart presentation = %+v", run)
 	}
 }
 

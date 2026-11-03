@@ -109,9 +109,9 @@ type RunQueueStore interface {
 	FinishRun(context.Context, string, model.RunResult) (model.Run, error)
 	PutStepResult(context.Context, model.StepResult) (model.StepResult, error)
 	RunningRunsWithJobs(context.Context) ([]model.Run, error)
-	// RequeueStrandedRun supersedes one stranded running run with a fresh
-	// queued copy of the same spec (issue #270); store.ErrRequeueIneligible
-	// signals the caller must terminalize instead.
+	// RequeueStrandedRun resets one unexecuted stranded run under the same ID;
+	// the durable cancellation ledger fences any old Workflow before another claim.
+	// store.ErrRequeueIneligible signals the caller must terminalize instead.
 	RequeueStrandedRun(context.Context, string) (model.Run, error)
 }
 

@@ -97,7 +97,7 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 				t.Fatal(err)
 			}
 			run, err := fixture.store.ClaimNextRun(context.Background())
-			if err != nil || run.ID != replacement.ID || run.AdmissionSequence != previous.AdmissionSequence || run.QueueSequence == previous.QueueSequence {
+			if err != nil || run.ID != replacement.ID || run.AdmissionSequence != previous.AdmissionSequence || run.QueueSequence != previous.QueueSequence || run.ID != previous.ID {
 				t.Fatalf("re-fired fixture lost its admission order: previous=%#v run=%#v err=%v", previous, run, err)
 			}
 			if err := fixture.store.SetRunConcurrencyGroup(context.Background(), run.ID, "build"); err != nil {
@@ -189,7 +189,7 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 			if current.SupersededBy != "" || current.WorkflowName != "oberth-adopt" || current.QueueSequence != run.QueueSequence || current.AdmissionSequence != run.AdmissionSequence {
 				t.Fatalf("finalized run = %#v", current)
 			}
-			if counts, err := fixture.store.CountRuns(context.Background()); err != nil || counts.Total != 2 {
+			if counts, err := fixture.store.CountRuns(context.Background()); err != nil || counts.Total != 1 {
 				t.Fatalf("adoption enqueued another run: counts=%#v err=%v", counts, err)
 			}
 			if pending, err := fixture.store.PendingRunCancellations(context.Background()); err != nil || len(pending) != 0 {
@@ -225,7 +225,7 @@ func TestAdoptionMissingWorkflowRequeuesButReadFailureDoesNot(t *testing.T) {
 			t.Fatal(lookupErr)
 		}
 		if readErr == nil {
-			if err != nil || current.Status != model.RunInterrupted || current.SupersededBy == "" {
+			if err != nil || current.Status != model.RunQueued || current.SupersededBy != "" {
 				t.Fatalf("missing recovery: %#v, %v", current, err)
 			}
 		} else if err == nil || current.Status != model.RunRunning || current.SupersededBy != "" {
@@ -463,8 +463,8 @@ func TestNonAdoptingEngineKeepsPromotionAndReleaseRecovery(t *testing.T) {
 		}
 		fixture.setWorkflowName(t, run.ID, "oberth-legacy")
 		jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}
-		// A legacy engine exposes no adoption capability. Preserve its
-		// conservative recovery and all original deletion/refire assertions.
+		// A legacy engine exposes no adoption capability. Release runs
+		// reset behind cleanup; promotion work uses its separate retry path.
 		scheduler := fixture.scheduler(t, struct{ JobController }{jobs})
 		if err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(model.Run, pipeline.Size) error { return errors.New("out-of-scope adoption") }); err != nil {
 			t.Fatal(err)
@@ -473,7 +473,11 @@ func TestNonAdoptingEngineKeepsPromotionAndReleaseRecovery(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if current.Status != model.RunInterrupted || current.SupersededBy != "" || len(jobs.adopted) != 0 || len(jobs.deleted) != 1 {
+		wantStatus, wantDeletes := model.RunInterrupted, 1
+		if release {
+			wantStatus, wantDeletes = model.RunQueued, 0
+		}
+		if current.Status != wantStatus || current.SupersededBy != "" || len(jobs.adopted) != 0 || len(jobs.deleted) != wantDeletes {
 			t.Fatalf("legacy recovery changed: %#v adopted=%v deleted=%v", current, jobs.adopted, jobs.deleted)
 		}
 	}

@@ -524,6 +524,9 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 	if err := scheduler.recoverOwnedWorkspaces(workerCtx); err != nil {
 		return err
 	}
+	if err := scheduler.recoverInterruptedPromotions(workerCtx); err != nil {
+		return err
+	}
 	scheduler.dispatchProgress.Beat()
 	dispatchCtx := withDispatchProgress(workerCtx, &scheduler.dispatchProgress)
 	workers.Add(1)
@@ -801,6 +804,22 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	if err != nil {
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("load run repository upstream: %w", err))
 	}
+	restarted := run.Reason == store.RestartRequeueReason || strings.HasPrefix(run.Reason, store.RestartRequeueReason+"; ")
+	if restarted {
+		// ClaimNextRun fences this owner behind the old Workflow's confirmed
+		// cleanup. Recreate only this run's scratch directory; retained logs
+		// and publication evidence live outside it.
+		path, pathErr := runWorkspacePath(scheduler.workspaceRoot, run.ID)
+		if pathErr != nil {
+			return scheduler.finishInfrastructureFailure(ctx, run, repository, pathErr)
+		}
+		if err := scheduler.workspaces.remove(path); err != nil {
+			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("prepare restarted run workspace: %w", err))
+		}
+		if err := os.Remove(scheduler.createAdmissionPath(run.ID)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
+		}
+	}
 	// Only fresh execution initializes empty evidence. Recovery/adoption and
 	// create settlement never manufacture an empty journal for missing history.
 	if run.WorkflowName == "" && run.StartedAt == nil {
@@ -819,6 +838,9 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
 	}
 	logFile, err := scheduler.logs.Create(run.ID)
+	if restarted && errors.Is(err, os.ErrExist) {
+		logFile, _, _, err = scheduler.logs.Resume(run.ID)
+	}
 	if err != nil {
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("create run log: %w", err))
 	}
@@ -1274,10 +1296,10 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 				waitErr = nil
 			} else {
 				// Job not terminal, absent, or state unreadable at shutdown.
-				// Requeue-with-supersede when eligible (issue #270): the durable
+				// Reset under the same ID when eligible: the durable
 				// obligation owns the Job deletion, and whichever process next
 				// runs a cancellation pass — the successor's startup in the
-				// upgrade case — executes it before the replacement is claimed.
+				// upgrade case — executes it before the run is claimed again.
 				if requeued, requeueErr := scheduler.database().RequeueStrandedRun(finalizeCtx, run.ID); requeueErr == nil {
 					_ = logFile.Close()
 					scheduler.signals.NotifyRun(run.ID)
@@ -1835,12 +1857,9 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 		} else {
 			requeued, requeueErr := scheduler.database().RequeueStrandedRun(ctx, run.ID)
 			if requeueErr == nil {
-				// The stranded Job's deletion is now owned by the durable
-				// supersede obligation the requeue recorded; the cancellation
-				// pass that runs immediately after reconciliation executes it
-				// before any new claim can start the replacement run
-				// (issue #270). The obligation must stay pending here, so the
-				// loop tail's CompleteRunCancellation is skipped.
+				// The same run stays queued behind its prior Workflow's durable
+				// cleanup obligation. Do not complete that obligation here;
+				// the cancellation pass must observe deletion first.
 				scheduler.signals.NotifyRun(run.ID)
 				scheduler.signals.NotifyRun(requeued.ID)
 				cleanupCtx, cancelCleanup := boundedWorkspaceCleanupContext(ctx)
@@ -2188,4 +2207,19 @@ func (scheduler *Scheduler) queuePublicationRetry(id string) {
 		scheduler.publicationSet[id] = struct{}{}
 		scheduler.publicationIDs = append(scheduler.publicationIDs, id)
 	}
+}
+
+func (scheduler *Scheduler) recoverInterruptedPromotions(ctx context.Context) error {
+	hook := scheduler.promotionRetrier.Load()
+	if hook == nil || hook.retrier == nil {
+		return nil
+	}
+	recovery, ok := hook.retrier.(interface{ RecoverInterruptedPromotions(context.Context) error })
+	if !ok {
+		return nil
+	}
+	_, err := retryDatabase(ctx, "RecoverInterruptedPromotions", func(ctx context.Context) (struct{}, error) {
+		return struct{}{}, recovery.RecoverInterruptedPromotions(ctx)
+	})
+	return err
 }

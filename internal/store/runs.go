@@ -56,18 +56,21 @@ func (s *Store) RunsByIDs(ctx context.Context, ids []string) (map[string]model.R
 	return result, nil
 }
 
-// ErrRequeueIneligible marks a stranded run that restart recovery must
-// terminalize instead of re-firing: promotion CI, tag or release or
-// credentialed work, a run owned by a pending publication, or a branch that
-// already has newer active work (issue #270).
+// ErrRequeueIneligible marks work whose execution/publication evidence or
+// newer work prevents an automatic restart reset.
 var ErrRequeueIneligible = errors.New("store: stranded run is not eligible for restart requeue")
 
-// RequeueStrandedRun supersedes one still-running stranded run with a fresh
-// queued copy of the same spec (issue #270). The supersede inside the enqueue
-// marks the old run interrupted with a link to its replacement and records
-// the durable Job cancellation obligation; the scheduler's cancellation pass
-// executes that deletion before any new claim can start the replacement.
+// RestartRequeueReason is server-owned and identifies an in-place restart.
+const RestartRequeueReason = "re-queued after restart"
+
+// RequeueStrandedRun retains the existing scheduler interface.
 func (s *Store) RequeueStrandedRun(ctx context.Context, runID string) (model.Run, error) {
+	return s.ResetStrandedRunToQueued(ctx, runID)
+}
+
+// ResetStrandedRunToQueued preserves the run ID and both ordering sequences.
+// It records any prior Workflow cleanup obligation atomically with the reset.
+func (s *Store) ResetStrandedRunToQueued(ctx context.Context, runID string) (model.Run, error) {
 	if strings.TrimSpace(runID) == "" {
 		return model.Run{}, fmt.Errorf("%w: run ID is required", ErrInvalid)
 	}
@@ -105,56 +108,58 @@ SELECT COUNT(*) FROM publications WHERE run_id = ? AND status = 'pending'`, run.
 	return requeued, nil
 }
 
-// requeueStrandedRunTx enqueues a fresh copy of a stranded run inside the
-// caller's transaction. The caller has already excluded pending-publication
-// owners; this helper owns the trigger-class and newer-work guards.
+// requeueStrandedRunTx is shared by scheduler reconciliation and owner startup.
 func (s *Store) requeueStrandedRunTx(ctx context.Context, tx *sql.Tx, run model.Run, now int64) (model.Run, error) {
-	// Credentialed is NOT an exclusion: on branch runs it only records that
-	// the ci-secrets tier was mounted, and the requeued copy re-earns it
-	// through the scheduler's own pipelineCredentialed admission. Release
-	// (tag-tier) work stays excluded.
-	if run.RefKind != model.RefBranch || run.Trigger == "promotion" || run.Release {
+	if run.Status != model.RunRunning || run.Trigger == "promotion" || (run.RefKind != model.RefBranch && run.RefKind != model.RefTag) {
 		return model.Run{}, ErrRequeueIneligible
 	}
-	// A newer push may already have replayed into the queue while this
-	// process was starting. Ordinary work keeps only its newest active run.
-	// Protected priority work retains its place alongside newer normal pushes;
-	// recovery replaces only the stranded source, never those siblings.
-	var activeSiblings int
-	if err := tx.QueryRowContext(ctx, `
-SELECT COUNT(*) FROM runs
-WHERE repo_id = ? AND ref_kind = 'branch' AND ref = ? AND id != ? AND schedule_entry = ?
-  AND status IN ('queued', 'running')`, run.RepoID, run.Ref, run.ID, run.ScheduleEntry).Scan(&activeSiblings); err != nil {
-		return model.Run{}, fmt.Errorf("check active branch siblings: %w", err)
+	if err := requireRepositoryActive(ctx, tx, run.RepoID); err != nil {
+		if errors.Is(err, ErrRepositoryArchived) {
+			return model.Run{}, ErrRequeueIneligible
+		}
+		return model.Run{}, err
 	}
-	if activeSiblings > 0 && !run.PriorityProtected {
+	var safe bool
+	if err := tx.QueryRowContext(ctx, `SELECT
+ NOT EXISTS(SELECT 1 FROM step_results WHERE run_id=?)
+ AND NOT EXISTS(SELECT 1 FROM publications WHERE run_id=?)
+ AND NOT EXISTS(SELECT 1 FROM runs WHERE repo_id=? AND ref_kind=? AND ref=? AND schedule_entry=? AND id!=? AND status IN ('queued','running'))`, run.ID, run.ID, run.RepoID, run.RefKind, run.Ref, run.ScheduleEntry, run.ID).Scan(&safe); err != nil {
+		return model.Run{}, err
+	}
+	if !safe {
 		return model.Run{}, ErrRequeueIneligible
 	}
-	// The copy starts uncredentialed: credential mounting is a per-run
-	// admission decision the scheduler re-derives, never inherited state.
-	spec, err := validateRunSpec(model.RunSpec{
-		RepoID: run.RepoID, RefKind: run.RefKind, Ref: run.Ref, SHA: run.SHA,
-		Actor: run.Actor, Release: run.Release, Credentialed: false,
-		Trigger: run.Trigger, ScheduleEntry: run.ScheduleEntry, TestedSHA: run.TestedSHA, BaseSHA: run.BaseSHA,
-	})
+	if run.RefKind == model.RefTag {
+		if err := requireUnpublishedTagTx(ctx, tx, run); err != nil {
+			if errors.Is(err, ErrInvalidState) {
+				return model.Run{}, ErrRequeueIneligible
+			}
+			return model.Run{}, err
+		}
+	}
+	if run.WorkflowName != "" {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO run_cancellations(run_id,job_name,superseded_by,reason,created_at,completed_at)
+  VALUES(?,?,'','owner_restart',?,NULL)
+  ON CONFLICT(run_id) DO UPDATE SET job_name=excluded.job_name,superseded_by='',reason='owner_restart',created_at=excluded.created_at,completed_at=NULL`, run.ID, run.WorkflowName, now); err != nil {
+			return model.Run{}, err
+		}
+	}
+	// Preserve prior timing evidence while closing the abandoned admission episode.
+	if _, err := tx.ExecContext(ctx, `UPDATE run_admission_timings SET closed_at=? WHERE run_id=? AND closed_at IS NULL`, now, run.ID); err != nil {
+		return model.Run{}, err
+	}
+	reason := RestartRequeueReason
+	if run.AutoRetryOf != "" {
+		reason += "; " + autoRetryOfPrefix + run.AutoRetryOf
+	}
+	reset, err := scanRun(tx.QueryRowContext(ctx, `UPDATE runs SET status='queued',phase='queued',job_name='',credentialed=0,started_at=NULL,finished_at=NULL,error='',failed_burn='',failed_step='',reason=?,updated_at=? WHERE id=? AND status='running' RETURNING `+runColumns, reason, now, run.ID))
 	if err != nil {
 		return model.Run{}, err
 	}
-	id, err := randomID()
-	if err != nil {
-		return model.Run{}, fmt.Errorf("generate requeued run id: %w", err)
-	}
-	result, err := s.enqueueRunTx(ctx, tx, spec, id, now, run.AdmissionSequence)
-	if err != nil {
-		return model.Run{}, fmt.Errorf("requeue stranded run %s: %w", run.ID, err)
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE runs SET reason = 're-queued after restart' WHERE id = ? AND superseded_by = ?`, run.ID, result.ID); err != nil {
-		return model.Run{}, fmt.Errorf("record restart requeue reason: %w", err)
-	}
-	if err := s.inheritAutoRetryTx(ctx, tx, run, &result.Run); err != nil {
+	if _, err = s.appendAuditAction(ctx, tx, model.AuditActionSpec{Actor: "oberth", Action: "run.restart", ResourceType: "run", ResourceID: run.ID, Details: `{"reason":"owner restart","same_id":true}`}, now); err != nil {
 		return model.Run{}, err
 	}
-	return s.inheritQueuePriorityTx(ctx, tx, run, result.Run)
+	return reset, nil
 }
 
 func validateRunSpec(spec model.RunSpec) (model.RunSpec, error) {
@@ -1285,8 +1290,9 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 	if err := scanRowNotFound(row, "Run", append(dest, extra...)...); err != nil {
 		return model.Run{}, err
 	}
-	value.AutoRetryOf = strings.TrimPrefix(value.Reason, autoRetryOfPrefix)
-	if value.AutoRetryOf == value.Reason {
+	retryReason := strings.TrimPrefix(value.Reason, RestartRequeueReason+"; ")
+	value.AutoRetryOf = strings.TrimPrefix(retryReason, autoRetryOfPrefix)
+	if value.AutoRetryOf == retryReason {
 		value.AutoRetryOf = ""
 	}
 	value.AutoRetriedBy = strings.TrimPrefix(value.Reason, autoRetriedByPrefix)

@@ -2355,7 +2355,16 @@ func (service *API) admitPromotion(ctx context.Context, actor api.Actor, reposit
 		return model.Promotion{}, refuse(ErrInvalidInput, "promotion source must be the exactly tested green branch commit")
 	}
 	var grantID string
-	if !actor.Admin {
+	if retryOf != "" && mode == model.PromotionRetryAuto {
+		original, err := service.promotions.Promotion(ctx, retryOf)
+		if err != nil {
+			return model.Promotion{}, err
+		}
+		grantID = original.GrantID
+		if grantID == "" && !actor.Admin {
+			return model.Promotion{}, refuse(ErrForbidden, "automatic promotion retry lost its original authority")
+		}
+	} else if !actor.Admin {
 		if service.promotionGrants == nil {
 			return model.Promotion{}, refuse(ErrForbidden, "promote requires an admin uplink or a promotion grant")
 		}

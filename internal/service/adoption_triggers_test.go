@@ -458,7 +458,7 @@ func TestAdoptedTriggerPublicationRecoversPushBeforeLedgerFinalization(t *testin
 	}
 }
 
-func TestMissingPromotionTagAndReleaseStayIneligibleForRefire(t *testing.T) {
+func TestMissingWorkflowResetsTagsAndInterruptsPromotions(t *testing.T) {
 	for _, kind := range []string{"promotion", "tag", "release"} {
 		t.Run(kind, func(t *testing.T) {
 			fixture, run, promotion := slice2RecoveryRun(t, kind)
@@ -469,7 +469,11 @@ func TestMissingPromotionTagAndReleaseStayIneligibleForRefire(t *testing.T) {
 				t.Fatal(err)
 			}
 			final, err := fixture.store.Run(context.Background(), run.ID)
-			if err != nil || final.Status != model.RunInterrupted || final.SupersededBy != "" || final.ID != run.ID || len(jobs.adopted) != 1 || len(jobs.deleted) != 1 || jobs.created != 0 || jobs.releaseCreated != 0 {
+			wantStatus, wantDeleted := model.RunQueued, 0
+			if kind == "promotion" {
+				wantStatus, wantDeleted = model.RunInterrupted, 1
+			}
+			if err != nil || final.Status != wantStatus || final.SupersededBy != "" || final.ID != run.ID || len(jobs.adopted) != 1 || len(jobs.deleted) != wantDeleted || jobs.created != 0 || jobs.releaseCreated != 0 {
 				t.Fatalf("missing fallback: %+v %v", final, err)
 			}
 			if counts, err := fixture.store.CountRuns(context.Background()); err != nil || counts.Total != 1 {
@@ -522,7 +526,7 @@ func TestNewPromotionTagAndReleaseKeepWorkflowAndWorkspaceOnShutdown(t *testing.
 	}
 }
 
-func TestLegacyNonReleaseTagKeepsFallbackWithoutInferringRelease(t *testing.T) {
+func TestLegacyNonReleaseTagAdoptsWithoutInferringRelease(t *testing.T) {
 	fixture := newRecoveryFixture(t)
 	ctx := context.Background()
 	enqueued, err := storetest.EnqueueRun(fixture.store, ctx, model.RunSpec{RepoID: fixture.repo.ID, RefKind: model.RefTag, Ref: "v1.0.0", SHA: adoptionTagObjectSHA, TestedSHA: adoptionTestedSHA, Actor: "agent@host", Trigger: "tag"})
@@ -535,11 +539,16 @@ func TestLegacyNonReleaseTagKeepsFallbackWithoutInferringRelease(t *testing.T) {
 	fixture.setWorkflowName(t, enqueued.ID, "legacy-tag-job")
 	jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}
 	scheduler := fixture.scheduler(t, jobs)
-	if err = scheduler.reconcileStrandedRunsWithGate(ctx, scheduler.requireMutation, func(model.Run, pipeline.Size) error { return errors.New("legacy tag adopted") }); err != nil {
+	if err = scheduler.reconcileStrandedRunsWithGate(ctx, scheduler.requireMutation, func(adopted model.Run, _ pipeline.Size) error {
+		if adopted.ID != enqueued.ID || adopted.Release {
+			t.Fatalf("wrong adoption: %+v", adopted)
+		}
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 	final, err := fixture.store.Run(ctx, enqueued.ID)
-	if err != nil || final.Release || final.Status != model.RunInterrupted || final.SupersededBy != "" || len(jobs.adopted) != 0 || len(jobs.deleted) != 1 {
+	if err != nil || final.Release || final.Status != model.RunRunning || final.SupersededBy != "" || len(jobs.adopted) != 1 || len(jobs.deleted) != 0 {
 		t.Fatalf("legacy tag rebound: %+v %v", final, err)
 	}
 }

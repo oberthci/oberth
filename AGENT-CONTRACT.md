@@ -2860,6 +2860,8 @@ alone is never evidence that missing migrations ran.
 | v40 | Bearer token expiry | Nullable absolute expiry; existing credentials retain their lifetime | Database restore |
 | v41 | Issue metadata revision | Positive revision; advances only for real title, state or scope changes | Database restore |
 | v42 | Publication abandon (#1320) | Immutable abandoned outbox verdict and audited owner termination | Database restore |
+| v43 | Restart timing history | Preserve immutable Workflow and step timing per restart episode while retaining the run ID, queue position and original timing records | Database restore |
+| v44 | Tag publication identity | Guard one publication owner per repository, tag and result SHA; preserve existing duplicate history | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding

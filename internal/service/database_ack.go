@@ -37,6 +37,9 @@ func (database schedulerDatabase) RequeueStrandedRun(ctx context.Context, id str
 		if candidate.ID != "" {
 			current, err := database.SchedulerStore.Run(ctx, candidate.ID)
 			if err == nil {
+				if current.Status == model.RunRunning {
+					return current, fmt.Errorf("%w: restart reset acknowledgement is ambiguous while run remains active", store.ErrInvalidState)
+				}
 				return current, nil
 			}
 			if !errors.Is(err, store.ErrNotFound) {

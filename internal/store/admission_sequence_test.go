@@ -86,7 +86,7 @@ func TestRestartRefireKeepsOriginalAdmissionOrderAndHistoryCursor(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if copy.QueueSequence <= b.QueueSequence || copy.AdmissionSequence != a.AdmissionSequence || b.AdmissionSequence != b.QueueSequence {
+	if copy.ID != a.ID || copy.QueueSequence != a.QueueSequence || copy.AdmissionSequence != a.AdmissionSequence || b.AdmissionSequence != b.QueueSequence {
 		t.Fatalf("restart changed FIFO order: A=%+v B=%+v copy=%+v", a.Run, b.Run, copy)
 	}
 	if _, err := s.RequeueStrandedRun(ctx, a.ID); !errors.Is(err, ErrRequeueIneligible) {
@@ -130,11 +130,11 @@ func TestRestartRefireKeepsOriginalAdmissionOrderAndHistoryCursor(t *testing.T) 
 	// History cursors stay on unique queue_sequence even when the default
 	// run list presents a queue block ordered by admission_sequence (#1122).
 	history, err := s.ListRecentRuns(ctx, model.RunListFilter{Limit: 2, Terminal: true})
-	if err != nil || len(history) != 2 || history[0].ID != copy.ID || history[1].ID != b.ID {
+	if err != nil || len(history) != 2 || history[0].ID != b.ID || history[1].ID != copy.ID {
 		t.Fatalf("history page = %v, %v", runIDs(history), err)
 	}
 	older, err := s.ListRecentRuns(ctx, model.RunListFilter{Limit: 2, Terminal: true, Before: history[1].QueueSequence})
-	if err != nil || len(older) != 1 || older[0].ID != a.ID {
+	if err != nil || len(older) != 0 {
 		t.Fatalf("older history page = %v, %v", runIDs(older), err)
 	}
 }

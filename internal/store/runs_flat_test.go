@@ -184,7 +184,7 @@ func TestStrandedRequeueRecordsCauseAndDoesNotFileIssue(t *testing.T) {
 		t.Fatal(err)
 	}
 	old, err = s.Run(t.Context(), old.ID)
-	if err != nil || old.Reason != "re-queued after restart" || old.SupersededBy != copy.ID {
+	if err != nil || old.Reason != "re-queued after restart" || old.SupersededBy != "" || old.ID != copy.ID || old.Status != model.RunQueued {
 		t.Fatalf("restart %+v, %v", old, err)
 	}
 	if _, err = s.OpenCIIssue(t.Context(), repo.ID, "main"); !errors.Is(err, ErrNotFound) {

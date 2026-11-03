@@ -254,12 +254,12 @@ func TestPilotJournalUnknownCreateSurvivesRestartAndRetainsSharedCapacity(t *tes
 	if len(pending) != 1 || !pending[0].Cleaning {
 		t.Fatalf("lost cleanup after restart: %#v", pending)
 	}
-	// Owner startup queues a distinct retry for the interrupted run. Claim
-	// that existing queue entry before asking vmIntent to create another run;
-	// it must not inherit or release the old execution's cleanup reservation.
+	// Owner startup queues the same run ID. Claim that existing queue entry
+	// before asking vmIntent to create another run; the old execution's
+	// cleanup reservation must remain held.
 	retry, err := s.ClaimNextRun(ctx)
 	mustPilot(t, err)
-	if retry.ID == f.plan.Spec.RunID || retry.Ref != "pilot" || retry.TestedSHA != f.plan.Spec.CandidateSHA {
+	if retry.ID != f.plan.Spec.RunID || retry.Ref != "pilot" || retry.TestedSHA != f.plan.Spec.CandidateSHA {
 		t.Fatalf("unexpected startup retry: %#v", retry)
 	}
 	legacy := vmIntent(t, s, repo, "legacy")
@@ -422,7 +422,7 @@ DELETE FROM schema_migrations WHERE version>=14;`)
 	mustPilot(t, err)
 	retry, err := s.ClaimNextRun(ctx)
 	mustPilot(t, err)
-	if retry.ID == legacy.Spec.RunID || retry.Ref != "legacy" || retry.TestedSHA != legacy.Spec.CandidateSHA {
+	if retry.ID != legacy.Spec.RunID || retry.Ref != "legacy" || retry.TestedSHA != legacy.Spec.CandidateSHA {
 		t.Fatalf("unexpected migrated startup retry: %#v", retry)
 	}
 	plan := pilotPlan(vmIntent(t, s, repo, "pilot"))
