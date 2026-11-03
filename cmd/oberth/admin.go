@@ -1672,10 +1672,7 @@ func uplinkKeyFingerprint(source string, input io.Reader) (string, error) {
 
 // upstreamKeyDirectory is where the pod holds its upstream SSH identities.
 func upstreamKeyDirectory() string {
-	{
-		return identityRoot + "/upstream"
-	}
-	return "/etc/oberth/upstream-key"
+	return identityRoot + "/upstream"
 }
 
 // warnUplinkSharesUpstreamKey warns when an uplink is registered with the
