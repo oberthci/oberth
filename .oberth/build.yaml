@@ -2168,6 +2168,7 @@ spec:
   # ---- test-openbao burn (#803) ----
   # Real OpenBao integration test: starts a dev server, applies rendered
   # per-repo/per-step policies, and asserts ACL isolation with real reads.
+  # Both setup helpers also run over verified TLS with real Transit keys and denied reads.
   # Cold private caches fetch verified Go modules as well as the pinned OpenBao download.
   - name: test-openbao
     activeDeadlineSeconds: 780
@@ -2208,7 +2209,7 @@ spec:
         export GOTOOLCHAIN=local
         export GOWORK=off
         export GOENV=off
-        # Bound compiler concurrency and per-process GC within the 1 GiB leaf.
+        # Bound compiler concurrency and per-process GC within the 2 GiB leaf.
         export GOMAXPROCS=2
         export GOMEMLIMIT=256MiB
         printf 'openbao-phase=compile\n'
@@ -2219,7 +2220,7 @@ spec:
         printf 'openbao-phase=test\n'
         cd /work/src/internal/installer
         "$BAO_DIR/installer.test" -test.count=1 -test.v -test.timeout=120s \
-          -test.run='TestPolicyIsolation'
+          -test.run='^(TestPolicyIsolation.*|TestSetupSecretStoreOpenBao)$'
         printf 'openbao-phase=complete\n'
       env:
       - name: PATH
@@ -2240,10 +2241,12 @@ spec:
         value: "/tmp/private-gobuild"
       - name: GIT_TERMINAL_PROMPT
         value: "0"
+      # Local race compilation peaked at 1.28 GiB RSS; reserve headroom for
+      # the compiler/linker and parent processes. Confirm CI cgroup peaks.
       resources:
         requests:
           cpu: 1251m
-          memory: 512Mi
+          memory: 2Gi
         limits:
-          cpu: 2000m
-          memory: 1600Mi
+          cpu: "2"
+          memory: 2Gi
