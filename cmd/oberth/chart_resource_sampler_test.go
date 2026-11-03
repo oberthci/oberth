@@ -95,11 +95,29 @@ func TestChartResourceSamplerOptInRestrictedToServerAndExactNodes(t *testing.T) 
 	}
 }
 func TestChartResourceSamplerRequiresEndpointAndCA(t *testing.T) {
-	for _, extra := range [][]string{nil, {"--set", "argo.resourceSampler.nodes.node-a=https://node-a.example:10250"}} {
-		args := []string{"template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@" + testImageDigest, "--set", "argo.resourceSampler.enabled=true"}
-		args = append(args, extra...)
-		if raw, err := exec.Command("helm", args...).CombinedOutput(); err == nil || !bytes.Contains(raw, []byte("argo.resourceSampler")) {
-			t.Fatalf("incomplete sampler accepted: %v %s", err, raw)
-		}
+	for _, test := range []struct {
+		name   string
+		extra  []string
+		fields []string
+	}{
+		{"missing endpoints and CA", nil, []string{"nodes", "caCert"}},
+		{"missing CA", []string{"--set", "argo.resourceSampler.nodes.node-a=https://node-a.example:10250"}, []string{"caCert"}},
+		{"missing endpoints", []string{"--set-string", "argo.resourceSampler.caCert=public-test-ca"}, []string{"nodes"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			args := []string{"template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@" + testImageDigest, "--set", "argo.resourceSampler.enabled=true"}
+			args = append(args, test.extra...)
+			raw, err := exec.Command("helm", args...).CombinedOutput()
+			if err == nil || !bytes.Contains(raw, []byte("schema")) {
+				t.Fatalf("incomplete sampler must fail schema validation: %v %s", err, raw)
+			}
+			// Helm 3 reports dotted paths; Helm 4 reports JSON pointers.
+			diagnostic := strings.ReplaceAll(string(raw), "/", ".")
+			for _, field := range test.fields {
+				if !strings.Contains(diagnostic, "argo.resourceSampler."+field) {
+					t.Errorf("missing field %s is absent from schema diagnostic: %s", field, raw)
+				}
+			}
+		})
 	}
 }
