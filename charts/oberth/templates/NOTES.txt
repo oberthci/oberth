@@ -43,7 +43,9 @@ Then set auditAnchor.acceptWitnessGenesis to that exact value for one restart.
 {{- if hasKey .Values "watchTunnel" }}
 WARNING: retired watchTunnel values are ignored. The connector must be managed
 outside Oberth. This upgrade removes the chart connector and its cloudflared
-PriorityClass. The external connector must already own ingress and use an
+PriorityClass. BEFORE upgrading an owning release, annotate needed live objects
+helm.sh/resource-policy=keep and verify the annotations. The external connector
+must already own ingress and use an
 externally managed PriorityClass or omit priorityClassName. See the staged
 rollout procedure in docs/ownership-handoff.md. The checked upgrade path requires
 --ownership-handoff proof before removing core ownership.

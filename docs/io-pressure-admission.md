@@ -69,10 +69,8 @@ distinguishes the system-wide `/proc/pressure` interface from per-cgroup
 values, while sandboxed runtimes can virtualize them. Qualify the actual runtime
 by reading the CPU and IO files in the Oberth pod and on its node at nearly the
 same time; compare the cumulative `total` values as well as the averages.
-Node-wide PSI was verified on k3s/containerd: reading the Oberth pod's procfs
-through `/proc/<pid>/root/proc/pressure` matched the host averages and cumulative
-`total` values; the pod cgroup CPU total differed. This verifies that runtime's
-source scope, not a load ceiling. Do not use the pod's cgroup directory as a
+Store comparisons in the installation's operator records. A match establishes
+source scope, not a load ceiling. Do not use a Pod cgroup directory as the
 node-pressure source.
 
 If a runtime virtualizes or hides these files, a reviewed chart override can

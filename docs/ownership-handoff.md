@@ -12,6 +12,42 @@ write. A missing, stale, wrong-cluster or wrong-revision receipt refuses the
 upgrade. This is separate from the legacy execution retirement check. Direct
 Helm or Kubernetes writes bypass the installer; use this checked upgrade path.
 
+
+## Keep live resources before upgrading
+
+The new chart omits the former connector resources. **Before upgrading the
+release that still owns them, annotate every live object that must survive with
+`helm.sh/resource-policy=keep`.** Inventory the old release manifest and include
+the connector Deployment, its ConfigMaps and origin-CA object, ServiceAccount,
+any referenced chart-owned credentials/RBAC, and its PriorityClass. Preserve
+objects needed for rollback as well as the currently serving path.
+
+Create a private, reviewed `retained-objects.yaml` containing the exact kind,
+name and namespace identities from that manifest; include cluster-scoped
+objects without a namespace. Annotate and read back each selected live object:
+
+```sh
+kubectl --context "$CONTEXT" annotate --overwrite -f retained-objects.yaml \
+  helm.sh/resource-policy=keep
+kubectl --context "$CONTEXT" get -f retained-objects.yaml \
+  -o 'custom-columns=KIND:.kind,NAMESPACE:.metadata.namespace,NAME:.metadata.name,KEEP:.metadata.annotations.helm\.sh/resource-policy'
+```
+
+Every selected object's KEEP value must be `keep` before proceeding. Helm 4's
+[upgrade removal path](https://github.com/helm/helm/blob/v4.3.1/pkg/kube/client.go#L606-L631)
+reads live annotations before deleting resources omitted by the target chart.
+Qualify the installed Helm version's behavior in a rehearsal. Do not delete the
+owning release or alter its stored manifest to bypass the handoff checks.
+
+Retention does not create an external owner or prove traffic. Complete the
+independent ownership/traffic handoff below and retain its required receipt.
+Keep the old objects until the external owner no longer depends on them, then
+remove them explicitly under that owner's maintenance procedure. Do not revoke
+the old authentication roles, token source or trust material while still in use.
+The product does not create replacements or automatically clean up retained
+external resources. These instructions are upgrade compatibility, not a bundled
+connector or website deployment feature.
+
 ## Move ownership before removal
 
 1. Record the source Helm revision and save its rendered manifest and values in

@@ -129,7 +129,7 @@ single-upstream-only by design).
   `latest/VERSION` advanced to v0.10.56. Remaining: a macOS `oberth
   version` smoke on real hardware, docs standardization on the
   `.sigstore.json` bundle (no bare `.sig` anywhere), the public
-  download-and-verify procedure in README/website, and `latest/VERSION`
+  download-and-verify procedure in the README, and `latest/VERSION`
   monotonic convergence observed across two sequential tags.
 - **OpenBao HA qualification** (OBERTH-RELEASE-005 residual): qualify raft HA,
   StorageClass behavior, unseal-share custody, root-token rotation, snapshots
