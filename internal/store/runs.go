@@ -154,6 +154,33 @@ func (s *Store) requeueStrandedRunTx(ctx context.Context, tx *sql.Tx, run model.
 			return model.Run{}, err
 		}
 	}
+	return s.resetRunAfterRestartTx(ctx, tx, run, now)
+}
+
+// A claim is persisted as running before weighted admission. Owner startup
+// proves the claiming worker is gone. Restore that claim for every trigger,
+// including promotion, without creating a new run or interrupting its promotion.
+// The deterministic Workflow name is recorded before admission, so its presence
+// alone does not imply submission or authorize a Kubernetes deletion.
+func (s *Store) recoverWaitingRunTx(ctx context.Context, tx *sql.Tx, run model.Run, now int64) (bool, error) {
+	if run.Status != model.RunRunning || run.Phase != "waiting" || run.StartedAt != nil {
+		return false, nil
+	}
+	var safe bool
+	if err := tx.QueryRowContext(ctx, `SELECT
+ NOT EXISTS(SELECT 1 FROM step_results WHERE run_id=?)
+ AND NOT EXISTS(SELECT 1 FROM publications WHERE run_id=?)
+ AND NOT EXISTS(SELECT 1 FROM vm_executions WHERE run_id=?)`, run.ID, run.ID, run.ID).Scan(&safe); err != nil {
+		return false, err
+	}
+	if !safe {
+		return false, nil
+	}
+	_, err := s.resetRunAfterRestartTx(ctx, tx, run, now)
+	return err == nil, err
+}
+
+func (s *Store) resetRunAfterRestartTx(ctx context.Context, tx *sql.Tx, run model.Run, now int64) (model.Run, error) {
 	// Preserve prior timing evidence while closing the abandoned admission episode.
 	if _, err := tx.ExecContext(ctx, `UPDATE run_admission_timings SET closed_at=? WHERE run_id=? AND closed_at IS NULL`, now, run.ID); err != nil {
 		return model.Run{}, err

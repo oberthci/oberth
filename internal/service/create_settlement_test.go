@@ -221,6 +221,11 @@ func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForSettlement(t *testi
 				if err != nil {
 					t.Fatal(err)
 				}
+				// A possible Workflow POST always follows durable admission.
+				run, err = f.store.MarkRunAdmitted(t.Context(), run.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
 				demand := argoworkflow.VMIDemand{}
 				if i == 0 {
 					demand = argoworkflow.VMIDemand{VMs: 1, Cores: 1, MemoryBytes: 1 << 30}

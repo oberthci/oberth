@@ -2794,6 +2794,10 @@ func TestRestartRecoveryWithPromotionRun(t *testing.T) {
 	if _, err := s.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
+	// This fixture represents work that reached admission.
+	if _, err := s.MarkRunAdmitted(ctx, enqueued.ID); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -2806,7 +2810,7 @@ func TestRestartRecoveryWithPromotionRun(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = s.Close() })
 
-	// The no-job promotion run should be interrupted.
+	// The admitted no-job promotion run should be interrupted.
 	recovered, err := s.Run(ctx, enqueued.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -3004,6 +3008,9 @@ func TestRestartRecoveryRunningPromotionWithWorkflowName(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := s.SetRunWorkflowName(ctx, enqueued.ID, "prom-job-restart"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkRunAdmitted(ctx, enqueued.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
