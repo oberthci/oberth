@@ -104,6 +104,31 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
   assert.deepEqual(ids(), ['waiting-hidden','queued-normal-late','queued-high-second-hidden','queued-high-next','running-late-hidden','running-early','passed-newest','failed-middle','passed-older'],
     'F3: queue bottom-up by position, then running newest start first, then finished newest finish first');
   assert.ok(!run('runPageFull(f3Page)'), 'F3: queued and running rows never count toward the terminal page limit');
+  // A scoped viewer sees no queue positions: the active view's order (the
+  // server's admission order) decides, never the queue time, so an older
+  // normal run still sits above a newer high run that is admitted next.
+  run(`
+    const f3Scoped=[
+      makeRun('scoped-passed',{Ref:'s1',StartedAt:f3Time(0),FinishedAt:f3Time(50)}),
+      makeRun('scoped-normal-old',{Ref:'s2',Status:'queued',StartedAt:null,FinishedAt:null,QueuedAt:f3Time(20)}),
+      makeRun('scoped-high-new',{Ref:'s3',Status:'queued',StartedAt:null,FinishedAt:null,QueuedAt:f3Time(25),priority_class:'high'}),
+    ];
+    const f3ScopedHidden=makeRun('scoped-normal-hidden',{Ref:'s4',Status:'queued',StartedAt:null,FinishedAt:null,QueuedAt:f3Time(22)});
+    api=async path=>{
+      if(path==='/api/repos')return [{ID:1,Name:'ours',UpstreamID:1}];
+      if(path==='/api/runs/counts')return {Total:4,ByRepo:{1:4}};
+      const query=new URL(path,'https://example.test').searchParams;
+      if(query.get('view')==='active')return [f3Scoped[2],f3Scoped[1],f3ScopedHidden];
+      return {body:f3Scoped,next:''};
+    };
+  `);
+  await run('renderRuns(0)');
+  assert.deepEqual(ids(), ['scoped-normal-hidden','scoped-normal-old','scoped-high-new','scoped-passed'],
+    'F3: without positions the queue follows the active view order, not queue time');
+  run(`api=async path=>{ if(path==='/api/repos')return [{ID:1,Name:'ours',UpstreamID:1}]; if(path==='/api/runs/counts')return {Total:3,ByRepo:{1:3}}; const query=new URL(path,'https://example.test').searchParams; if(query.get('view')==='active')return []; return {body:f3Scoped,next:''}; };`);
+  await run('renderRuns(0)');
+  assert.deepEqual(ids(), ['scoped-normal-old','scoped-high-new','scoped-passed'],
+    'F3: without positions or an active view the server row order stands');
   run('api=apiFixture;');
   console.log('F3 passed: queued runs never render below running or finished runs');
 }

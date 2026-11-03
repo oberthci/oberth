@@ -41,11 +41,14 @@ so a backed-up queue cannot turn every run `highest` and empty the manual
 priority line: promotions, the oldest waiting tag release and explicit
 administrator `highest` bumps always precede aged work. Within a class the
 order stays FIFO by admission sequence, and the aged run keeps its original
-position, so every `high` run accepted after it waits behind it. That bounds
-its wait: 60 minutes plus the `high` work accepted before it and whatever
-`highest` work is ahead, which only explicit administrator or release intent
-can extend. Existing resource holders must finish or be cleaned up, and
-repository concurrency groups still apply.
+position, so every `high` run accepted after it waits behind it. Against
+`high` arrivals its wait is therefore bounded by 60 minutes plus the `high`
+work accepted before it. Aging never lifts a run above `highest`, so sustained
+`highest` arrivals (promotions from any identity holding a promote grant, tag
+releases, explicit admin bumps) can extend the wait of aged and `high` work
+without limit; before this change aged work joined `highest` FIFO instead.
+Existing resource holders must finish or be cleaned up, and repository
+concurrency groups still apply.
 
 An administrator can use MCP `run_priority` with a full run ID, priority `high`
 or `highest`, and a reason to expedite an unadmitted run. The operation is

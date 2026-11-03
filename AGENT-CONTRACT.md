@@ -497,8 +497,13 @@ trust assumptions and complete invalidation rules.
   provenance, including lasting supersession protection for automatic priority.
   Both durable claims
   and weighted admission sort by effective class, then original admission FIFO.
-  Normal and high work waiting 60 minutes join `highest` with their original FIFO place;
-  automatic restart refires preserve its wait and explicit admin bump. Existing
+  A normal run waiting 60 minutes ages into `high` with its original FIFO
+  place and the reason `aged: normal run waited at least 60 minutes`; high
+  work does not age and nothing ages into `highest`, so promotions, the oldest
+  waiting tag release and explicit `highest` bumps always lead. High runs
+  accepted after an aged run wait behind it; sustained `highest` arrivals can
+  still delay it without limit. Automatic restart refires preserve its wait
+  and explicit admin bump. Existing
   grants are never preempted. Backfill/head-wait rules preserve the head's
   priority reservation.
   v0.17.81 refuses every backfill behind an effective high/highest head,
@@ -1293,14 +1298,18 @@ trust assumptions and complete invalidation rules.
   freed; a reservation its owner released meanwhile is reported as not found
   and not audited. The same grant pass admits the runs behind it.
 - Run list views (#1122): `/api/runs`, MCP `run_list`, `oberth runs` and the
-  dashboard use one default order. The first page carries every not-yet-
-  admitted run, capped at 500, by effective priority then admission order (`admission_sequence`,
-  then `queue_sequence`), preserving restart FIFO order; below it, admitted
-  and terminal runs sort by `started_at` descending, breaking ties by ID.
-  A terminal run that was never admitted sorts by `finished_at`. The dated
-  portion pages by that fixed (time, ID) key, using the last run's sequence
-  or ID as the external cursor; an admission between page loads cannot move
-  an already-seen run onto the next page. The whole queue, including claimed
+  dashboard use one default order in three groups, top to bottom. The queue
+  first: every not-yet-admitted run, capped at 500, read bottom-up so the run
+  admitted next (highest effective class, then earliest `admission_sequence`,
+  then `queue_sequence`, preserving restart FIFO order) is its lowest row.
+  Then running runs, capped at 500, most recently started first. Then
+  terminal runs, most recently finished first (`COALESCE(finished_at,
+  started_at, queued_at)` descending, ties by ID). Only terminal rows count
+  against the page limit, and only they page, by that fixed (end time, ID)
+  key with the last run's sequence or ID as the external cursor; no limit or
+  page lists a queued or running run below a finished one, and a run that
+  finishes between page loads cannot land on an older page. `latest_per_ref=1`
+  groups each ref's newest run the same way. The whole queue, including claimed
   but unadmitted runs, has one numbering computed before repository/ref filters.
   Each queued run carries its scheduling reason; filtered lists keep global positions;
   scoped uplinks see no global position (#073). `started_at` is recorded when
@@ -2594,6 +2603,7 @@ alone is never evidence that missing migrations ran.
 | v46 | Operator capabilities | Empty repository-bound authority for operator ServiceAccounts, resource kinds and extended resources; no conversion of historical grants | Database restore |
 | v47 | Deferred execution retirement | Preserve writable execution journals, interlocks and grant authority so owner recovery can settle work in flight | Database restore |
 | v48 | #1216 stage 2 | Independent per-repository numeric request/limit ceilings, migrated exactly from size grants with grant and revocation provenance | Database restore |
+| v49 | Run list order | Widen `runs_latest_ref_idx` to cover status, start, finish, queue time and ID, so the grouped latest-per-ref list ranks every head from one covering scan | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding

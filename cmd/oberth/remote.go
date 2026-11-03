@@ -221,10 +221,13 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 	return nil
 }
 
+// datedRunCount counts the rows that count against the page limit: terminal
+// runs only, as the server's RunPageFull does. Queued and running rows ride
+// along on the first page and never make it full.
 func datedRunCount(runs []remoteRun) int {
 	count := 0
 	for _, run := range runs {
-		if run.StartedAt != nil || run.FinishedAt != nil || run.Status == "passed" || run.Status == "failed" || run.Status == "interrupted" {
+		if run.Status == "passed" || run.Status == "failed" || run.Status == "interrupted" {
 			count++
 		}
 	}
@@ -309,8 +312,8 @@ func runCursor(run remoteRun) string {
 }
 
 // cursorMovedBack accepts a different cursor as progress. The default list
-// sorts by admission time, so its queue sequence can increase across older
-// pages; a repeated cursor still detects an older server without paging.
+// pages terminal runs by end time, so its queue sequence can increase across
+// older pages; a repeated cursor still detects an older server without paging.
 func cursorMovedBack(previous, next string) bool {
 	return next != previous
 }

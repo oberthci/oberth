@@ -433,16 +433,21 @@ function runListGroup(run) {
   return displayRunStatus(run) === "queued" || !run.StartedAt ? 0 : 1;
 }
 function isTerminalRun(run) { return ["passed", "failed", "interrupted"].includes(run.Status); }
+/* A scoped viewer sees no queue positions. The active view then supplies
+   the queue order: it lists waiting runs in the server's admission order, so
+   its index, reversed, is the same bottom-up queue. Without either, the
+   server's own row order stands; the queue is never re-sorted by time. */
 function orderRuns(runs) {
   const queued = runs.filter(run => runListGroup(run) === 0);
   const positioned = queued.length > 0 && queued.every(run => run.QueuePosition > 0 || run.Scheduling?.queue_position > 0);
-  const position = run => run.QueuePosition || run.Scheduling?.queue_position || 0;
+  const activeIndex = new Map(state.activeRuns.map((run, index) => [run.ID, index + 1]));
+  const position = run => positioned ? run.QueuePosition || run.Scheduling?.queue_position : activeIndex.get(run.ID) || 0;
   const stamp = value => { const parsed = Date.parse(value || ""); return Number.isFinite(parsed) ? parsed : 0; };
   return runs.map((run, index) => ({ run, index })).sort((a, b) => {
     const group = runListGroup(a.run) - runListGroup(b.run);
     if (group) return group;
     let key = 0;
-    if (runListGroup(a.run) === 0) key = positioned ? position(b.run) - position(a.run) : stamp(b.run.QueuedAt) - stamp(a.run.QueuedAt);
+    if (runListGroup(a.run) === 0) key = position(a.run) && position(b.run) ? position(b.run) - position(a.run) : 0;
     else if (runListGroup(a.run) === 1) key = stamp(b.run.StartedAt) - stamp(a.run.StartedAt);
     else key = stamp(b.run.FinishedAt || b.run.StartedAt || b.run.QueuedAt) - stamp(a.run.FinishedAt || a.run.StartedAt || a.run.QueuedAt);
     return key || a.index - b.index;
