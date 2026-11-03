@@ -212,17 +212,6 @@ DELETE FROM schema_migrations WHERE version >= 16;`); err != nil {
 	if hasRunsColumn(t, raw, "concurrency_group") {
 		t.Fatal("the v15 reconstruction still has the concurrency_group column")
 	}
-	// The staged upgrade refuses active resource Workflows conservatively.
-	blocked, err := OpenAdminClient(ctx, path, Options{})
-	if blocked != nil {
-		_ = blocked.Close()
-	}
-	if !errors.Is(err, ErrInvalidState) {
-		t.Fatalf("in-flight upgrade was accepted: %v", err)
-	}
-	if _, err = raw.ExecContext(ctx, `UPDATE runs SET status='interrupted',finished_at=updated_at WHERE id=?`, running.ID); err != nil {
-		t.Fatal(err)
-	}
 	if err := raw.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +232,7 @@ DELETE FROM schema_migrations WHERE version >= 16;`); err != nil {
 	for _, want := range []struct {
 		id     string
 		status model.RunStatus
-	}{{finished.ID, model.RunFailed}, {running.ID, model.RunInterrupted}, {queued.ID, model.RunQueued}} {
+	}{{finished.ID, model.RunFailed}, {running.ID, model.RunRunning}, {queued.ID, model.RunQueued}} {
 		value, err := migrated.Run(ctx, want.id)
 		if err != nil || value.Status != want.status || value.ConcurrencyGroup != "" {
 			t.Fatalf("run %s after upgrade = status %s group %q, %v; want %s and ungrouped", want.id, value.Status, value.ConcurrencyGroup, err, want.status)

@@ -69,10 +69,12 @@ to work. The inactive pilot remains retired under Schema 45.
 
 Migrations 45/46/47 retire the inactive pilot, add the capability grant table,
 and establish the staged upgrade boundary without retiring the live VM journal.
-Back up the database and drain VM work before upgrading. The upgrade refuses
-uncleaned execution records, outstanding capacity slots, pending cleanup obligations, and all running runs. The running-run check is
-conservative because resource-template VM Workflows need not have a journal row. Keep the old binary available to finish cleanup before retrying.
-Already-upgraded installations retain normal legacy restart recovery.
+Back up the database before upgrading. Work in flight remains journaled and
+reaches the same owner recovery used after a restart. Startup cancellation
+cleanup retries external deletion failures with two-minute attempt budgets and
+backoff capped at five seconds. The process stays alive and unready, with
+`recovery_pending=true` in its logs, until cleanup succeeds. Permanent database
+invariant failures remain fatal. See the [staged upgrade procedure](releases/unreleased-execution-retirement.md).
 
 Stage 2 requires operators to provision resource/device capacity, accounts and
 RBAC, grant the replacement capability, move guest and suite gates into their

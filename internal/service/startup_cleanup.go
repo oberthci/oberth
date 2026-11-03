@@ -2,11 +2,18 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log"
 	"time"
 )
 
 const startupCleanupAttemptBudget = 2 * time.Minute
+
+// Only external deletion failures are retryable at the startup boundary.
+// Store invariant and schema failures retain their fatal behavior.
+type pendingJobDeletionError struct{ error }
+
+func (e *pendingJobDeletionError) Unwrap() error { return e.error }
 
 // Startup cleanup is idempotent and owns durable obligations. A temporarily
 // unavailable deletion API must leave the server alive and unready, rather
@@ -27,6 +34,10 @@ func (scheduler *Scheduler) waitForStartupCleanup(ctx context.Context, operation
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		var pending *pendingJobDeletionError
+		if !errors.As(err, &pending) {
+			return err
 		}
 		total := scheduler.databaseRetryCount.Add(1)
 		if now := time.Now(); !now.Before(nextLog) {

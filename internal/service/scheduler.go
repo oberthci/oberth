@@ -421,7 +421,7 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 		if err := runDispatchExternal(ctx, func(ctx context.Context) error {
 			return scheduler.jobs.Delete(ctx, cancellation.JobName, cancellation.RunID)
 		}); err != nil {
-			return fmt.Errorf("delete superseded Job %s: %w", cancellation.JobName, err)
+			return fmt.Errorf("delete superseded Job %s: %w", cancellation.JobName, &pendingJobDeletionError{err})
 		}
 		if err := scheduler.database().CompleteObservedRunCancellation(ctx, cancellation); err != nil {
 			return fmt.Errorf("complete cancellation for run %s: %w", cancellation.RunID, err)
