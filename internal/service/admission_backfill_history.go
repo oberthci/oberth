@@ -21,10 +21,11 @@ func (s *Scheduler) restoreBackfillHistory(ctx context.Context, run model.Run, r
 	}
 }
 
-// Use the same bounded, retained step observations as run_resources. A sample
-// is a whole workflow span, never a sum of parallel step durations. Classes
-// separate release, promotion, schedule and branch workflows. Missing terminal
-// timestamps and truncated history cannot supply a backfill prediction.
+// Use bounded run_resources history, falling back to durable run timestamps
+// when a run's step observations have been pruned. A sample is a whole workflow
+// span, never a sum of parallel step durations. Classes separate release,
+// promotion, schedule and branch workflows. Incomplete retained observations
+// and truncated history cannot supply a backfill prediction.
 func (s *Scheduler) measuredBackfillDuration(ctx context.Context, run model.Run) time.Duration {
 	reader, ok := s.store.(RunResourceReader)
 	if !ok {
@@ -59,7 +60,12 @@ func (s *Scheduler) measuredBackfillDuration(ctx context.Context, run model.Run)
 		if previous.Status != model.RunPassed || durationClass(previous) != durationClass(run) {
 			continue
 		}
-		v := spans[previous.ID]
+		v, observed := spans[previous.ID]
+		if !observed && previous.StartedAt != nil && previous.FinishedAt != nil {
+			// Run rows outlive the globally capped step telemetry. Missing
+			// observations must not erase otherwise complete workflow samples.
+			v.start, v.end = *previous.StartedAt, *previous.FinishedAt
+		}
 		if v.incomplete || v.start.IsZero() || !v.end.After(v.start) {
 			continue
 		}

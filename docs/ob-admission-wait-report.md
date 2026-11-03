@@ -22,14 +22,14 @@ can use only the ends-before test, protecting every higher-class waiter ahead. A
 unknown or already overrun running work is never assumed to release capacity.
 Zero `maxHeadWait` keeps strict FIFO.
 
-Duration samples come from the retained step observations used by
-`run_resources`, grouped into whole workflow spans for each repository's
-branch, release, promotion or schedule history. Known run startup/teardown
-extends those spans. The history read selects the newest 30 passed runs of
-the requested workflow class before reading their retained observations.
-At least five distinct complete measured runs are required;
-fewer samples count as unmeasured. Truncated history and incomplete terminal timestamps
-provide no estimate. These are p95 forecasts, not execution deadlines: an
+Duration samples use the newest 30 passed runs of each repository's requested
+workflow class: branch, release, promotion or schedule. Retained step
+observations from `run_resources` supply whole workflow spans, extended by
+known run startup/teardown. When a run has no retained observations, its durable
+`StartedAt` and `FinishedAt` supply the sample if both form a positive duration.
+At least five distinct complete run samples are required; fewer samples count
+as unmeasured. Incomplete retained observations remain unusable, and truncated
+history provides no estimate. These are p95 forecasts, not execution deadlines: an
 overrun can still delay the head. An expired reservation stops new backfill
 until that head starts; its deadline cannot move later while it remains head.
 A head displaced by a different waiter gets a fresh forecast when it returns,
