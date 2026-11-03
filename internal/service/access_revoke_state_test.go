@@ -7,9 +7,10 @@ import (
 	"log"
 	"testing"
 
+	"k8s.io/client-go/kubernetes/fake"
+
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/store"
-	"k8s.io/client-go/kubernetes/fake"
 )
 
 type missingRevocationReadback struct{ SecretAccessStore }
