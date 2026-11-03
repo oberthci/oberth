@@ -89,3 +89,41 @@ func TestRunResourcesUsesIndexedReadPoolWithoutWriterTransaction(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func TestRunResourcesFiltersWorkflowClassBeforeLimit(t *testing.T) {
+	at := time.Now().UTC()
+	s := testStore(t, &at)
+	repo := createRepo(t, s)
+	ids := make(map[string]string)
+	for i, class := range []string{"release", "promotion", "schedule", "branch"} {
+		run, err := s.EnqueueRun(t.Context(), testRunSpec(repo.ID, class, strings.Repeat(string(rune('a'+i)), 40)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		release, trigger := 0, class
+		if class == "release" {
+			release, trigger = 1, "promotion"
+		}
+		if _, err := s.db.Exec(`UPDATE runs SET status='passed',release=?,trigger=? WHERE id=?`, release, trigger, run.ID); err != nil {
+			t.Fatal(err)
+		}
+		ids[class] = run.ID
+	}
+	// A busy branch history must not evict the last release before class filtering.
+	for i := 0; i < 35; i++ {
+		run, err := s.EnqueueRun(t.Context(), testRunSpec(repo.ID, "busy", strings.Repeat("e", 40)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.db.Exec(`UPDATE runs SET status='passed' WHERE id=?`, run.ID); err != nil {
+			t.Fatal(err)
+		}
+		ids["branch"] = run.ID
+	}
+	for _, class := range []string{"release", "promotion", "schedule", "branch"} {
+		got, err := s.RunResources(t.Context(), repo.ID, RunResourceFilter{Ref: "any", Runs: 1, DurationClass: class})
+		if err != nil || len(got.Runs) != 1 || got.Runs[0].ID != ids[class] {
+			t.Fatalf("%s history = %+v, %v; want %s", class, got.Runs, err, ids[class])
+		}
+	}
+}

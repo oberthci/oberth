@@ -71,7 +71,7 @@ func TestPriorityAdmissionMeasuredBackfillDuringDrain(t *testing.T) {
 	}
 	defer release()
 	head := priorityWaiter(g, 2, model.PriorityHigh, clock.now, periapsis.L)
-	normal := priorityWaiter(g, 3, model.PriorityNormal, clock.now, periapsis.S)
+	normal := priorityWaiter(g, 3, model.PriorityNormal, clock.now, periapsis.M)
 	small := priorityWaiter(g, 4, model.PriorityHigh, clock.now, periapsis.S, 5*time.Minute)
 	if granted(g, head) || granted(g, normal) || !granted(g, small) {
 		t.Fatal("unmeasured backfill started or measured backfill was lost")

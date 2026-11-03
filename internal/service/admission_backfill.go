@@ -93,14 +93,10 @@ func (gate *weightedAdmission) backfillEnabledLocked(head *admissionReservation)
 
 // backfillFitsLocked is the single EASY rule, for every priority class and
 // on both sides of maxHeadWait. The caller checks current capacity first.
-// A measured candidate must finish strictly before the reserved head start,
-// or leave room for the head at that time while still running.
+// A candidate must finish strictly before the reserved head start, or leave
+// room for the head at that time. Unmeasured candidates use coexistence only.
 func (gate *weightedAdmission) backfillFitsLocked(head, candidate *admissionReservation, now time.Time) bool {
 	candidate.backfillMessage = "held: would delay head"
-	if candidate.estimate <= 0 {
-		candidate.backfillMessage += " (no measured p95 duration)"
-		return false
-	}
 	projection := gate.backfillProjectionLocked()
 	var completions []time.Time
 	for _, r := range projection.reservations {
@@ -122,7 +118,7 @@ func (gate *weightedAdmission) backfillFitsLocked(head, candidate *admissionRese
 		if !now.Before(deadline) {
 			return false
 		}
-		if now.Add(candidate.estimate).Before(deadline) {
+		if candidate.estimate > 0 && now.Add(candidate.estimate).Before(deadline) {
 			candidate.backfillMessage = fmt.Sprintf("backfilled: ends before head can start (p95 %s < %s)",
 				backfillDuration(candidate.estimate), backfillDuration(deadline.Sub(now)))
 			return true

@@ -76,11 +76,11 @@ func TestEASYRejectsUnknownAndDelayingRuns(t *testing.T) {
 	}
 }
 
-func TestEASYUnknownDurationNeverBackfillsBeforeDrainEither(t *testing.T) {
+func TestEASYUnknownDurationCannotDelayHeadBeforeDrain(t *testing.T) {
 	g, _, _ := easyGate(t)
 	head := pending(t, g, 2, easyRequest("head", 8200, time.Hour))
 	t.Cleanup(head.cancel)
-	r := pending(t, g, 3, easyRequest("no-samples", 1100, 0))
+	r := pending(t, g, 3, easyRequest("no-samples", 4000, 0))
 	t.Cleanup(r.cancel)
 	if granted(g, r) {
 		t.Fatal("unmeasured run backfilled before drain")
@@ -230,9 +230,13 @@ type easyHistoryStore struct {
 	SchedulerStore
 	history store.RunResourceHistory
 	err     error
+	filter  *store.RunResourceFilter
 }
 
-func (s easyHistoryStore) RunResources(context.Context, int64, store.RunResourceFilter) (store.RunResourceHistory, error) {
+func (s easyHistoryStore) RunResources(_ context.Context, _ int64, filter store.RunResourceFilter) (store.RunResourceHistory, error) {
+	if s.filter != nil {
+		*s.filter = filter
+	}
 	return s.history, s.err
 }
 
@@ -282,5 +286,34 @@ func TestEASYHistoryRejectsMissingIncompleteAndOtherWorkflowClasses(t *testing.T
 				t.Fatalf("duration = %s, want %s", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestEASYUnmeasuredCandidatesUseCoexistence(t *testing.T) {
+	for _, drain := range []time.Duration{0, 21 * time.Minute} {
+		for _, cpu := range []int64{1100, 4000} {
+			t.Run(fmt.Sprintf("%s/%d", drain, cpu), func(t *testing.T) {
+				g, clock, _ := easyGate(t)
+				head := pending(t, g, 2, easyRequest("head", 8200, time.Hour))
+				t.Cleanup(head.cancel)
+				clock.now = clock.now.Add(drain)
+				candidate := pending(t, g, 3, easyRequest("unmeasured", cpu, 0))
+				t.Cleanup(candidate.cancel)
+				if got, want := granted(g, candidate), cpu == 1100; got != want {
+					t.Fatalf("unmeasured coexistence = %v, want %v", got, want)
+				}
+			})
+		}
+	}
+}
+
+func TestEASYHistoryRequestsWorkflowClass(t *testing.T) {
+	for _, run := range []model.Run{{Release: true}, {Trigger: "promotion"}, {Trigger: "schedule"}, {Trigger: "push"}} {
+		var filter store.RunResourceFilter
+		s := &Scheduler{store: easyHistoryStore{filter: &filter}}
+		s.measuredBackfillDuration(t.Context(), run)
+		if filter.DurationClass != durationClass(run) {
+			t.Errorf("filter class = %q, want %q", filter.DurationClass, durationClass(run))
+		}
 	}
 }
