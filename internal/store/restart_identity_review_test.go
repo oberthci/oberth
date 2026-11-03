@@ -206,6 +206,15 @@ func requireRestartNoError(t *testing.T, err error) {
 }
 
 func TestRestartMigrationsUpgradeV38WithoutLosingReleaseIntent(t *testing.T) {
+	testRestartMigrationsUpgradePreservesReleaseIntent(t, integrationDowngradeSQL, 38)
+}
+
+func TestRestartMigrationsUpgradeV42WithoutLosingReleaseIntent(t *testing.T) {
+	testRestartMigrationsUpgradePreservesReleaseIntent(t, restartRecoveryDowngradeSQL, 42)
+}
+
+func testRestartMigrationsUpgradePreservesReleaseIntent(t *testing.T, downgrade string, version int) {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "v38.db")
 	s, err := Open(context.Background(), path, Options{})
 	requireRestartNoError(t, err)
@@ -216,8 +225,13 @@ func TestRestartMigrationsUpgradeV38WithoutLosingReleaseIntent(t *testing.T) {
 	requireRestartNoError(t, err)
 	publication, err := s.BeginPublication(t.Context(), model.PublicationSpec{RepoID: repo.ID, RunID: run.ID, RefKind: model.RefTag, Ref: run.Ref, ResultSHA: run.SHA, Actor: run.Actor})
 	requireRestartNoError(t, err)
-	_, err = s.db.Exec(integrationDowngradeSQL)
+	_, err = s.db.Exec(downgrade)
 	requireRestartNoError(t, err)
+	var ledgerRows, ledgerVersion int
+	requireRestartNoError(t, s.db.QueryRow(`SELECT count(*), max(version) FROM schema_migrations`).Scan(&ledgerRows, &ledgerVersion))
+	if ledgerRows != version || ledgerVersion != version {
+		t.Fatalf("historical ledger = %d rows through %d, want %d", ledgerRows, ledgerVersion, version)
+	}
 	requireRestartNoError(t, s.Close())
 	upgraded, err := Open(context.Background(), path, Options{})
 	requireRestartNoError(t, err)

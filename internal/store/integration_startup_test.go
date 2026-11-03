@@ -43,7 +43,7 @@ func TestRejectDiscardedWorkspaceDatabase(t *testing.T) {
 }
 
 // This fixture retains the priority tables and ledger entry at v39, while
-// removing only the three integration migrations.
+// removing every later migration.
 func TestUpgradePriorityV39Database(t *testing.T) {
 	for _, opener := range []struct {
 		name string
@@ -55,7 +55,7 @@ func TestUpgradePriorityV39Database(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = s.db.ExecContext(t.Context(), publicationAbandonDowngradeSQL+`
+			_, err = s.db.ExecContext(t.Context(), restartRecoveryDowngradeSQL+publicationAbandonDowngradeSQL+`
 DROP TRIGGER issues_metadata_revision;
 ALTER TABLE issues DROP COLUMN revision;
 ALTER TABLE token_credentials DROP COLUMN expires_at;
@@ -77,8 +77,8 @@ VALUES('operator', 'high', 999999999999999999, 'admin');`)
 			if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil {
 				t.Fatal(err)
 			}
-			if version != 42 {
-				t.Fatalf("version=%d, want 42", version)
+			if version != 44 {
+				t.Fatalf("version=%d, want 44", version)
 			}
 			if err := s.db.QueryRow(`SELECT count(*) FROM priority_grants WHERE identity='operator'`).Scan(&grants); err != nil || grants != 1 {
 				t.Fatalf("priority grant not preserved: %d %v", grants, err)
