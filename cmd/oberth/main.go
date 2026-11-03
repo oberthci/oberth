@@ -68,7 +68,7 @@ func main() {
 	}
 }
 
-const usageCommands = "admin, wait-idle, git-ssh, audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, schedules, fragments, artifacts, runs, run, promotion, publication, log, repos, issues, status, uplink, access, kubevirt, size, admission, secretstore, mcp, preflight, or version"
+const usageCommands = "admin, wait-idle, git-ssh, audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, schedules, fragments, artifacts, runs, run, promotion, publication, log, repos, issues, status, uplink, access, kubevirt, resource, size, admission, secretstore, mcp, preflight, or version"
 
 func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.Writer) (resultErr error) {
 	defer func() {
@@ -76,6 +76,12 @@ func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.
 			_, resultErr = fmt.Fprintln(output, resultErr.Error())
 		}
 	}()
+	if len(arguments) == 2 && (arguments[1] == "--help" || arguments[1] == "-h") {
+		if children, ok := commandGroups[arguments[0]]; ok {
+			_, err := fmt.Fprintf(output, "Usage: oberth %s <%s> [flags]\nUse oberth %s <command> --help for command flags.\n", arguments[0], children, arguments[0])
+			return err
+		}
+	}
 	var err error
 	ctx, err = withCommandProtocol(ctx)
 	if err != nil {
@@ -126,6 +132,12 @@ Commands:
   version       Print version information
 `)
 		return err
+	case "git-ssh":
+		if len(arguments) == 2 && (arguments[1] == "--help" || arguments[1] == "-h") {
+			_, err := io.WriteString(output, gitSSHHelp)
+			return err
+		}
+		return fmt.Errorf("%w: git-ssh is invoked by Git", errUsage)
 	case "audit":
 		return runAudit(ctx, arguments[1:], output)
 	case "admin":
@@ -193,6 +205,10 @@ Commands:
 	case "restore":
 		return runRestore(ctx, arguments[1:], input, output)
 	case "version":
+		if len(arguments) == 2 && (arguments[1] == "--help" || arguments[1] == "-h") {
+			_, err := fmt.Fprintln(output, "Usage: oberth version [--schema]\nPrint build information, or the database schema version.")
+			return err
+		}
 		// AI-CONTRACT: the default (no-flag) output format is consumed by
 		// .oberth/release.sh verify_binary_version() which requires exactly
 		// 4 space-separated fields: "oberth $tag commit=$commit date=$date".

@@ -21,6 +21,11 @@ func runPreflightUpstreams(arguments []string, output io.Writer) error {
 	flags.SetOutput(io.Discard)
 	inventory := flags.String("inventory", "", "complete old-server upstream list metadata file")
 	if err := flags.Parse(arguments); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			flags.SetOutput(output)
+			flags.Usage()
+			return nil
+		}
 		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if *inventory == "" || flags.NArg() != 0 {

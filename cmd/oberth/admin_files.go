@@ -25,6 +25,10 @@ func runAdmin(ctx context.Context, arguments []string, output io.Writer) error {
 	case "retirement-check":
 		return runRetirementCheck(ctx, arguments[1:], output)
 	case "read-file":
+		if len(arguments) == 2 && (arguments[1] == "--help" || arguments[1] == "-h") {
+			_, err := fmt.Fprintln(output, "Usage: oberth admin read-file <public-identity-path> [fallback-path]\nRead allowed public identity files inside the Oberth pod.")
+			return err
+		}
 		if len(arguments) < 2 {
 			return fmt.Errorf("%w: admin read-file requires at least one absolute path", errUsage)
 		}
