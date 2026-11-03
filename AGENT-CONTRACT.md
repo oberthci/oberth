@@ -499,10 +499,14 @@ trust assumptions and complete invalidation rules.
   and weighted admission sort by effective class, then original admission FIFO.
   Normal and high work waiting 60 minutes join `highest` with their original FIFO place;
   automatic restart refires preserve its wait and explicit admin bump. Existing
-  grants are never preempted. Backfill/head-wait rules apply within each class;
-  a waiting higher class prevents lower-class backfill. Priority backfill must
-  also leave enough declared demand and run slots for the head alongside all
-  backfilled work. Group/VM parking still
+  grants are never preempted. Backfill/head-wait rules preserve the head's
+  priority reservation.
+  v0.17.81 refuses every backfill behind an effective high/highest head,
+  including an aged normal head. In this v0.17.82 trial, measured EASY backfill
+  admits later work only when its measured p95 ends strictly before the head
+  reservation, or it shares the head's effective and base priority classes
+  and leaves enough declared demand and run slots
+  for the head alongside all surviving grants. Group/VM parking still
   releases weight and lets unrelated work proceed. Bounded extra priority claims
   let higher classes reach the gate past ordinary waiting dispatch slots.
   `priority_class`, `priority_reason` and `priority_requested_by` are run projections;
