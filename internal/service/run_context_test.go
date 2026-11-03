@@ -78,8 +78,19 @@ func TestRunRepositoryContextSurfaces(t *testing.T) {
 				t.Fatal(err)
 			}
 			rows := runContextJSON(t, value)["runs"].([]any)
-			assert(t, rows[0].(map[string]any), false)
-			if rows[1].(map[string]any)["superseded"] != false {
+			if len(rows) != 2 {
+				t.Fatalf("run count=%d, want 2", len(rows))
+			}
+			oldIndex, newIndex := 0, 1
+			if view == "all" {
+				oldIndex, newIndex = 1, 0
+			}
+			oldRow, newRow := rows[oldIndex].(map[string]any), rows[newIndex].(map[string]any)
+			if oldRow["ID"] != old.ID || newRow["ID"] != newer.ID {
+				t.Fatalf("unexpected %s queue order: %#v", view, rows)
+			}
+			assert(t, oldRow, false)
+			if newRow["superseded"] != false {
 				t.Error("newest run is superseded")
 			}
 		})
@@ -109,7 +120,21 @@ func TestRunRepositoryContextSurfaces(t *testing.T) {
 				t.Fatal(err)
 			}
 			if rows, ok := value.([]any); ok {
-				assert(t, rows[0].(map[string]any), false)
+				if len(rows) != 2 {
+					t.Fatalf("run count=%d, want 2", len(rows))
+				}
+				oldIndex, newIndex := 0, 1
+				if path == "/api/runs" {
+					oldIndex, newIndex = 1, 0
+				}
+				oldRow, newRow := rows[oldIndex].(map[string]any), rows[newIndex].(map[string]any)
+				if oldRow["ID"] != old.ID || newRow["ID"] != newer.ID {
+					t.Fatalf("unexpected %s queue order: %#v", path, rows)
+				}
+				assert(t, oldRow, false)
+				if newRow["superseded"] != false {
+					t.Error("newest run is superseded")
+				}
 			} else {
 				assert(t, value.(map[string]any)["Run"].(map[string]any), false)
 			}
