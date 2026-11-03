@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 type advertisedWriter struct {
@@ -64,7 +66,9 @@ func TestStalledUploadAllowsConcurrentFetchCheckoutAndModuleRead(t *testing.T) {
 	}
 	for name, op := range operations {
 		t.Run(name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+			// The restricted static runtime can spend several seconds reaping
+			// each Git child. A locked reader still cannot finish before cleanup.
+			ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(30*time.Second))
 			defer cancel()
 			completed := make(chan error, 1)
 			go func() { completed <- op(ctx) }()
@@ -75,6 +79,12 @@ func TestStalledUploadAllowsConcurrentFetchCheckoutAndModuleRead(t *testing.T) {
 				}
 			case <-ctx.Done():
 				t.Fatal("stalled upload blocks independent read")
+			}
+			select {
+			case err := <-done:
+				done <- err
+				t.Fatalf("upload ended before its input was released: %v", err)
+			default:
 			}
 		})
 	}
@@ -144,7 +154,7 @@ func TestStalledReceiveAllowsReadersWithoutRefreshingItsSnapshot(t *testing.T) {
 	<-started
 	// An upstream advance must not be attributed to this actor's still-open receive.
 	r.commit(t, "upstream advanced", "new\\n")
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(30*time.Second))
 	defer cancel()
 	readDone := make(chan error, 1)
 	go func() {
