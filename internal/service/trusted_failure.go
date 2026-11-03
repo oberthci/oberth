@@ -11,7 +11,7 @@ import (
 
 // ErrPreflightDeadline identifies the execution watchdog, rather than a shorter
 // database or Kubernetes RPC timeout.
-var ErrPreflightDeadline = errors.New(model.ExecutionDeadlineMessage + " Trusted preflight deadline exceeded.")
+var ErrPreflightDeadline = errors.New(model.ExecutionDeadlineMessage + " Trusted preflight deadline exceeded.") //nolint:staticcheck // ST1005: Preserve the public ExecutionDeadlineMessage presentation label.
 
 // TrustedPreflightFailure retains the observed Workflow outcome across cleanup.
 // It does not replace the journal's receipt or authorize publication.

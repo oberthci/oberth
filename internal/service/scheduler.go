@@ -1031,7 +1031,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			cancelState()
 			if errors.Is(err, ErrPreflightDeadline) && ctx.Err() == nil {
 				reservation.release()
-				return scheduler.finishTrustedPreflightFailure(ctx, run, JobResult{Status: model.RunFailed, Phase: "infrastructure"}, errors.New(model.ExecutionDeadlineMessage+" Trusted preflight timed out; Kubernetes cleanup may still be pending."))
+				return scheduler.finishTrustedPreflightFailure(ctx, run, JobResult{Status: model.RunFailed, Phase: "infrastructure"}, errors.New(model.ExecutionDeadlineMessage+" Trusted preflight timed out; Kubernetes cleanup may still be pending.")) //nolint:staticcheck // ST1005: Preserve the public ExecutionDeadlineMessage presentation label.
 			}
 			current, readErr := scheduler.database().Run(ctx, run.ID)
 			if readErr == nil && current.Preempted() && current.JobName == "" {

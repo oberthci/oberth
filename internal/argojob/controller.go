@@ -444,7 +444,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 		if watchdog != nil {
 			watchdog.Stop()
 		}
-		if context.Cause(ctx) == watchdogFailure {
+		if errors.Is(context.Cause(ctx), watchdogFailure) {
 			cleanup, stop := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
 			defer stop()
 			retErr = errors.Join(watchdogFailure, controller.Cancel(cleanup, name, runID))
