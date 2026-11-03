@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"slices"
@@ -193,16 +194,27 @@ func checkServerPKIRole(ctx context.Context, cfg Config, deps Deps, store openBa
 	dns, ips := serverPKINames(cfg)
 	// Include the currently served SANs: an omitted CLI flag cannot hide drift.
 	leafPEM, err := readPodServerCert(ctx, cfg, deps)
-	if err != nil {
-		return fmt.Errorf("read served certificate for PKI preflight: %w", err)
+	if err == nil {
+		leaf, parseErr := parseCertificatePEM(leafPEM)
+		err = parseErr
+		if err == nil {
+			dns = unionNames(dns, leaf.DNSNames)
+			for _, ip := range leaf.IPAddresses {
+				ips = append(ips, ip.String())
+			}
+		}
 	}
-	leaf, err := parseCertificatePEM(leafPEM)
 	if err != nil {
-		return err
-	}
-	dns = unionNames(dns, leaf.DNSNames)
-	for _, ip := range leaf.IPAddresses {
-		ips = append(ips, ip.String())
+		if len(cfg.TLSRemoveDNSNames)+len(cfg.TLSRemoveIPs) > 0 {
+			return fmt.Errorf("read served certificate for PKI preflight before TLS name removal: %w", err)
+		}
+		// Removal checks above require a readable leaf. With no removal,
+		// allow repair of a server that cannot start with its current role.
+		w := deps.Output
+		if w == nil {
+			w = io.Discard
+		}
+		_, _ = fmt.Fprintf(w, "WARNING: cannot read the served certificate for PKI preflight: %v; checking role permissions against expected TLS names only.\n", err)
 	}
 	if missing := missingPKINames(role, dns, unionNames(ips, nil)); len(missing) > 0 {
 		return fmt.Errorf("server PKI role %s is missing names: %s; inspect: bao read %s/roles/%s; reconcile with oberth install --upgrade --install-secretstore and the listed flags", defaultServerPKIRole, strings.Join(missing, "; "), defaultServerPKIMount, defaultServerPKIRole)

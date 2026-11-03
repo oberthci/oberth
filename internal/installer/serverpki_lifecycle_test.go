@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -96,6 +97,74 @@ func TestServerPKIRemovesOnlyUnservedNames(t *testing.T) {
 	write := runner.callsByCommand()["write oberth-pki/roles/oberth-server -"].stdin
 	if strings.Contains(write, "retired.example.com") || strings.Contains(write, "192.0.2.2/32") || !strings.Contains(write, "ci.example.com") || !strings.Contains(write, "192.0.2.1/32") {
 		t.Fatalf("role removal did not preserve the other names: %s", write)
+	}
+}
+
+func TestPKIPreflightWarnsWhenServedCertificateIsUnreadable(t *testing.T) {
+	t.Setenv(baoTokenEnvVar, "test-token")
+	for _, invalidPEM := range []bool{false, true} {
+		for _, permitsNames := range []bool{false, true} {
+			for _, repair := range []bool{false, true} {
+				t.Run(fmt.Sprintf("invalid-pem=%t/permits-names=%t/repair=%t", invalidPEM, permitsNames, repair), func(t *testing.T) {
+					var dns, ips []string
+					if permitsNames {
+						dns, ips = []string{"ci.example.com"}, []string{"192.0.2.1"}
+					}
+					deps, runner := pkiLifecycleDeps(t, dns, ips)
+					var output bytes.Buffer
+					deps.Output = &output
+					deps.RunCommand = func(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error) {
+						if slices.Contains(args, "deploy/oberth") {
+							if invalidPEM {
+								return []byte("unreadable certificate"), nil
+							}
+							return nil, errors.New("server is crash looping")
+						}
+						return runner.run(ctx, stdin, name, args...)
+					}
+					cfg := Config{Namespace: DefaultNamespace, serverPKI: true, InstallSecretStore: repair,
+						TLSExtraDNSNames: []string{"ci.example.com"}, TLSExtraIPs: []string{"192.0.2.1"}}
+					err := preflightServerIdentities(t.Context(), &cfg, deps, true)
+					if permitsNames || repair {
+						if err != nil {
+							t.Fatalf("unreadable leaf blocked preflight/repair: %v", err)
+						}
+					} else if err == nil || !strings.Contains(err.Error(), "missing names") || !strings.Contains(err.Error(), "ci.example.com") || !strings.Contains(err.Error(), "192.0.2.1") {
+						t.Fatalf("role/expected-name mismatch must still fail: %v", err)
+					}
+					if !strings.Contains(output.String(), "WARNING:") || !strings.Contains(output.String(), "expected TLS names only") {
+						t.Fatalf("missing unreadable leaf warning: %s", output.String())
+					}
+					for _, call := range runner.calls {
+						if !strings.HasPrefix(call.command, "read ") {
+							t.Fatalf("preflight wrote to OpenBao: %s", call.command)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestServerPKIRemovalFailsClosedWhenServedCertificateIsUnreadable(t *testing.T) {
+	for _, invalidPEM := range []bool{false, true} {
+		for _, cfg := range []Config{
+			{TLSRemoveDNSNames: []string{"retired.example.com"}},
+			{TLSRemoveIPs: []string{"192.0.2.2"}},
+		} {
+			store := openBaoExec{run: func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
+				if !slices.Contains(args, "deploy/oberth") {
+					t.Fatalf("OpenBao touched before removal refusal: %v", args)
+				}
+				if invalidPEM {
+					return []byte("unreadable certificate"), nil
+				}
+				return nil, errors.New("server is crash looping")
+			}}
+			if _, _, err := ensureServerPKI(t.Context(), cfg, store, "test-token", nil); err == nil {
+				t.Fatal("removal accepted without checking the served certificate")
+			}
+		}
 	}
 }
 
