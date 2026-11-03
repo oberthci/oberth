@@ -1327,13 +1327,14 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 	if err := scanRowNotFound(row, "Run", append(dest, extra...)...); err != nil {
 		return model.Run{}, err
 	}
-	retryReason := strings.TrimPrefix(value.Reason, RestartRequeueReason+"; ")
+	lineageReason := strings.TrimSuffix(value.Reason, "; "+PolicyRefreshWaitingReason)
+	retryReason := strings.TrimPrefix(lineageReason, RestartRequeueReason+"; ")
 	value.AutoRetryOf = strings.TrimPrefix(retryReason, autoRetryOfPrefix)
 	if value.AutoRetryOf == retryReason {
 		value.AutoRetryOf = ""
 	}
-	value.AutoRetriedBy = strings.TrimPrefix(value.Reason, autoRetriedByPrefix)
-	if value.AutoRetriedBy == value.Reason {
+	value.AutoRetriedBy = strings.TrimPrefix(lineageReason, autoRetriedByPrefix)
+	if value.AutoRetriedBy == lineageReason {
 		value.AutoRetriedBy = ""
 	}
 	value.Release = release != 0

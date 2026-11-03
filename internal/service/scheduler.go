@@ -17,6 +17,7 @@ import (
 
 	"log"
 
+	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/gitoid"
 	"github.com/oberthci/oberth/internal/liveness"
 	"github.com/oberthci/oberth/internal/model"
@@ -858,7 +859,13 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		return scheduler.finishPreCreateInfrastructureFailure(ctx, run, repository, &checkoutPreparationFailure{cause: err})
 	}
 	scheduler.timingMilestone(ctx, run.ID, "checkout-ready")
-	requirement, err := scheduler.trustedRequirement(ctx, repository, run.ID, checkoutSHA)
+	requirement, stopped, err := scheduler.awaitTrustedRequirement(ctx, repository, run.ID, checkoutSHA, require)
+	if stopped {
+		return nil
+	}
+	if errors.Is(err, errMutationBlocked) {
+		return err
+	}
 	if err != nil {
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
 	}
@@ -1050,6 +1057,10 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			_ = logFile.Close()
 			return nil
 		}
+		if errors.Is(err, errMutationBlocked) {
+			_ = logFile.Close()
+			return err
+		}
 		if err != nil {
 			_ = logFile.Close()
 			journal := scheduler.store.(vmrunner.KVMJournal)
@@ -1088,7 +1099,15 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			}
 			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("trusted preflight: %w", err))
 		}
-		fresh, err := scheduler.trustedRequirement(ctx, repository, run.ID, checkoutSHA)
+		fresh, stopped, err := scheduler.awaitTrustedRequirement(gitcache.WithFreshPolicy(ctx), repository, run.ID, checkoutSHA, require)
+		if stopped {
+			_ = logFile.Close()
+			return nil
+		}
+		if errors.Is(err, errMutationBlocked) {
+			_ = logFile.Close()
+			return err
+		}
 		if err == nil {
 			err = scheduler.trustedReceipt(ctx, repository, run, fresh)
 		}
@@ -1751,11 +1770,29 @@ func (scheduler *Scheduler) deliverPublicationWithGate(
 		return model.PublicationFinalization{}, err
 	}
 	if policyErr != nil {
+		var unavailable *vmrunner.PolicyRefreshUnavailable
+		if errors.As(policyErr, &unavailable) {
+			// Policy availability is not a failed build or a push attempt. Keep
+			// the durable outbox pending and release the global delivery permit.
+			if publication.RunID != "" {
+				if _, err := scheduler.setPolicyWaiting(ctx, publication.RunID, true); err != nil {
+					return finalization, err
+				}
+				scheduler.signals.NotifyRun(publication.RunID)
+			}
+			scheduler.queuePublicationRetry(publication.ID)
+			return scheduler.loadPublicationFinalization(ctx, publication)
+		}
 		finalization, err := scheduler.database().FinalizePublication(ctx, publication.ID, model.PublicationFailed, policyErr.Error())
 		if err != nil {
 			return model.PublicationFinalization{}, err
 		}
 		return finalization, scheduler.finishPublication(ctx, repository, finalization)
+	}
+	if publication.RunID != "" {
+		if _, err := scheduler.setPolicyWaiting(ctx, publication.RunID, false); err != nil {
+			return finalization, err
+		}
 	}
 	publicationInput := repository.Name
 	if upstream, upstreamErr := scheduler.database().Upstream(ctx, repository.UpstreamID); upstreamErr == nil {

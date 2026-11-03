@@ -9,11 +9,108 @@ import (
 	"testing"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/vmrunner"
 )
 
 const requiredTestContract = "version: 1\nprofile: ebpf-offline-amd64-v1\nartifact: ebpf/secret_monitor.o\n"
+
+func TestTrustedPolicyPublicationOutageStaysPending(t *testing.T) {
+	ctx := t.Context()
+	fixture := newControlFixture(t, JobResult{Status: model.RunPassed})
+	git := &policyTestGit{controlGit: fixture.git}
+	fixture.scheduler.git = git
+	fixture.scheduler.jobs = &policyChangingJobs{fakeJobs: fixture.jobs, afterBuild: func() { git.baselineErr = errors.New("oberth git-ssh: transport refused or upstream unavailable") }}
+	queued, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: "publication-policy-outage", Repository: fixture.repo, Branch: "feature/test", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.scheduler.ProcessNext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	run, err := fixture.store.Run(ctx, queued.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != model.RunRunning || run.Phase != "publishing" || !strings.Contains(run.Reason, store.PolicyRefreshWaitingReason) || len(fixture.git.syncedBranches) != 0 {
+		t.Fatalf("publication policy outage failed or published run: %#v", run)
+	}
+	view := presentationRun(run)
+	observation := (&API{}).observeScheduling(ctx, run, nil, false)
+	if view.DisplayStatus != "waiting" || view.DisplayReason != store.PolicyRefreshWaitingReason || observation.State != "waiting" || !strings.Contains(observation.Message, store.PolicyRefreshWaitingReason) {
+		t.Fatalf("waiting cause hidden: %#v, %#v", view, observation)
+	}
+	git.baselineErr = nil
+	publications, err := fixture.store.PendingPublications(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(publications) != 1 || publications[0].RunID != run.ID {
+		t.Fatalf("pending publications = %#v", publications)
+	}
+	publication := publications[0]
+	if publication.Attempts != 0 {
+		t.Fatalf("policy outage consumed push attempts: %#v", publication)
+	}
+	if _, err := fixture.scheduler.DeliverPublication(ctx, publication.ID); err != nil {
+		t.Fatal(err)
+	}
+	run, err = fixture.store.Run(ctx, queued.ID)
+	if err != nil || run.Status != model.RunPassed || strings.Contains(run.Reason, store.PolicyRefreshWaitingReason) || len(fixture.git.syncedBranches) != 1 {
+		t.Fatalf("publication did not resume: %#v %v", run, err)
+	}
+}
+
+func TestTrustedPolicyRefreshWaitsAndResumes(t *testing.T) {
+	for _, shutdown := range []bool{false, true} {
+		t.Run(map[bool]string{false: "recovers", true: "shutdown"}[shutdown], func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			fixture := newControlFixture(t, JobResult{Status: model.RunPassed})
+			git := &policyTestGit{controlGit: fixture.git, baselineErr: errors.New("oberth git-ssh: transport refused or upstream unavailable")}
+			fixture.scheduler.git = git
+			queued, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: "policy-outage", Repository: fixture.repo, Branch: "feature/test", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			waits := 0
+			fixture.scheduler.capacityWait = func(context.Context) error {
+				waits++
+				run, err := fixture.store.Run(ctx, queued.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if run.Status != model.RunRunning || run.Phase != "waiting" || !strings.Contains(run.Reason, "upstream-policy-refresh-unavailable") || run.FinishedAt != nil || len(fixture.jobs.createdCI) != 0 || len(fixture.git.syncedBranches) != 0 {
+					t.Fatalf("outage did not stay waiting: %#v", run)
+				}
+				if shutdown {
+					cancel()
+					return ctx.Err()
+				}
+				git.baselineErr = nil
+				return nil
+			}
+			if err := fixture.scheduler.ProcessNext(ctx); err != nil {
+				t.Fatal(err)
+			}
+			run, err := fixture.store.Run(t.Context(), queued.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if waits != 1 {
+				t.Fatalf("waits = %d, want 1; run = %#v", waits, run)
+			}
+			if shutdown {
+				if run.Status != model.RunRunning || run.FinishedAt != nil {
+					t.Fatalf("shutdown failed waiting run: %#v", run)
+				}
+			} else if run.Status != model.RunPassed || strings.Contains(run.Reason, "upstream-policy-refresh-unavailable") || len(fixture.jobs.createdCI) != 1 {
+				t.Fatalf("recovered policy did not resume: %#v", run)
+			}
+		})
+	}
+}
 
 type policyTestGit struct {
 	*controlGit
@@ -164,6 +261,11 @@ func TestTrustedPolicyRefusesBuildWithoutProtectedExecutor(t *testing.T) {
 			git := &policyTestGit{controlGit: fixture.git, candidate: test.candidate, baseline: test.baseline,
 				candidateErr: test.candidateErr, baselineErr: test.baselineErr}
 			fixture.scheduler.git = git
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if test.baselineErr != nil {
+				fixture.scheduler.capacityWait = func(context.Context) error { cancel(); return ctx.Err() }
+			}
 			queued, err := fixture.scheduler.EnqueueCI(context.Background(), CIRequest{
 				EventID: "trusted-policy", Repository: fixture.repo, Branch: "feature/test",
 				SHA: strings.Repeat("a", 40), Actor: "agent@host",
@@ -171,17 +273,25 @@ func TestTrustedPolicyRefusesBuildWithoutProtectedExecutor(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := fixture.scheduler.ProcessNext(context.Background()); err != nil {
+			if err := fixture.scheduler.ProcessNext(ctx); err != nil {
 				t.Fatal(err)
 			}
 			run, err := fixture.store.Run(context.Background(), queued.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if run.Status != model.RunFailed || len(fixture.jobs.createdCI) != 0 || len(fixture.git.syncedBranches) != 0 {
+			wantStatus := model.RunFailed
+			if test.baselineErr != nil {
+				wantStatus = model.RunRunning
+			}
+			if run.Status != wantStatus || len(fixture.jobs.createdCI) != 0 || len(fixture.git.syncedBranches) != 0 {
 				t.Fatalf("required/unreadable policy ran or published: status=%s builds=%d pushes=%v", run.Status, len(fixture.jobs.createdCI), fixture.git.syncedBranches)
 			}
-			if !strings.Contains(run.Error, "trusted test") {
+			if test.baselineErr != nil {
+				if run.Phase != "waiting" || run.FinishedAt != nil || !strings.Contains(run.Reason, "upstream-policy-refresh-unavailable") {
+					t.Fatalf("unavailable upstream did not stay waiting: %#v", run)
+				}
+			} else if !strings.Contains(run.Error, "trusted test") {
 				t.Fatalf("missing actionable failure: %q", run.Error)
 			}
 		})

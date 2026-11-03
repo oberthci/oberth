@@ -1656,6 +1656,10 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 			visible.DisplayReason = message
 		}
 	}
+	if run.Status == model.RunRunning && (run.Reason == store.PolicyRefreshWaitingReason || strings.HasSuffix(run.Reason, "; "+store.PolicyRefreshWaitingReason)) {
+		visible.DisplayStatus = "waiting"
+		visible.DisplayReason = store.PolicyRefreshWaitingReason
+	}
 	return visible
 }
 
