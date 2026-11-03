@@ -414,7 +414,10 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 		if err != nil {
 			return err
 		}
-		if run.WorkflowName == "" {
+		// Same-ID restart recovery clears the run's current Workflow name.
+		// The cancellation ledger still owns the prior Workflow until deletion
+		// completes; only an empty ledger name denotes a preflight cancellation.
+		if cancellation.WorkflowName == "" {
 			if canceler, ok := scheduler.trusted.(interface {
 				CancelPreflight(context.Context, string) error
 			}); ok {
