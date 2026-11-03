@@ -15,7 +15,7 @@ func PutHistoricalStepResult(database *store.Store, ctx context.Context, result 
 	if err != nil {
 		return model.StepResult{}, err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	var diagnostic any
 	if result.Termination != nil {
 		body, err := json.Marshal(result.Termination)
