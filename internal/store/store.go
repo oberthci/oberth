@@ -792,6 +792,18 @@ func (s *Store) migrate(ctx context.Context, expectedLegacyHead *model.AuditHead
 		if applied[item.version] || item.version > targetVersion {
 			continue
 		}
+		if item.version == publicationAbandonMigrationVersion {
+			var table, parent string
+			var rowID sql.NullInt64
+			var foreignKey int
+			err := tx.QueryRowContext(ctx, `SELECT "table", rowid, parent, fkid FROM pragma_foreign_key_check('publications') LIMIT 1`).Scan(&table, &rowID, &parent, &foreignKey)
+			if err == nil {
+				return fmt.Errorf("%w: migration 41 refused: publications has orphaned foreign keys; run PRAGMA foreign_key_check on a copy and repair the source database before retrying", ErrSchemaIncompatible)
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("check publications foreign keys before migration 41: %w", err)
+			}
+		}
 		if item.rawApply != nil {
 			// Connection-level migration: commit the current transaction,
 			// run the migration with direct db access (for PRAGMA changes
