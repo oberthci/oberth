@@ -122,11 +122,21 @@ func (s *Store) requeueStrandedRunTx(ctx context.Context, tx *sql.Tx, run model.
 	var safe bool
 	if err := tx.QueryRowContext(ctx, `SELECT
  NOT EXISTS(SELECT 1 FROM step_results WHERE run_id=?)
- AND NOT EXISTS(SELECT 1 FROM publications WHERE run_id=?)
- AND NOT EXISTS(SELECT 1 FROM runs WHERE repo_id=? AND ref_kind=? AND ref=? AND schedule_entry=? AND id!=? AND status IN ('queued','running'))`, run.ID, run.ID, run.RepoID, run.RefKind, run.Ref, run.ScheduleEntry, run.ID).Scan(&safe); err != nil {
+ AND NOT EXISTS(SELECT 1 FROM publications WHERE run_id=?)`, run.ID, run.ID).Scan(&safe); err != nil {
 		return model.Run{}, err
 	}
 	if !safe {
+		return model.Run{}, ErrRequeueIneligible
+	}
+	// Protected priority work retains its place beside newer active siblings.
+	// Evidence/publication exclusions above apply to every run.
+	var activeSiblings int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs
+ WHERE repo_id=? AND ref_kind=? AND ref=? AND schedule_entry=? AND id!=?
+ AND status IN ('queued','running')`, run.RepoID, run.RefKind, run.Ref, run.ScheduleEntry, run.ID).Scan(&activeSiblings); err != nil {
+		return model.Run{}, fmt.Errorf("check active restart siblings: %w", err)
+	}
+	if activeSiblings > 0 && !run.PriorityProtected {
 		return model.Run{}, ErrRequeueIneligible
 	}
 	if run.RefKind == model.RefTag {
