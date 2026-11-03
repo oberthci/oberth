@@ -16,6 +16,9 @@
 # to the same ServiceAccount (see -argo-executor-tokens and
 # -argo-release-tokens below). cmd/oberth/chart_argo_role_frozen_test.go
 # renders this Role and compares it with the v0.17.9 fixture.
+# Known over-grant (#1316 RBAC-2): PVC update has no production caller.
+# PVC list is also retained by this freeze; review cleanup list ownership and
+# remove unused verbs at the next deliberate field-manager migration.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -41,8 +44,8 @@ rules:
   # A Pod may only mount PersistentVolumeClaims in its own namespace, so the
   # checkout on the server's volume cannot be handed to a pipeline that runs
   # here. The server instead creates a claim per run and fills it through a
-  # short-lived Pod over the exec stream — the same transport release secrets
-  # travel on, and the only one that needs no credential in this namespace.
+  # short-lived Pod over the exec stream. Pipeline secrets instead use
+  # projected identity tokens and envconsul.
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
     verbs: ["create", "get", "list", "update", "delete"]
