@@ -274,7 +274,7 @@ func publicationAuditDetails(repository model.Repository, publication model.Publ
 }
 
 // retryPublicationFailure queues a transient outage without holding a delivery
-// permit or worker across backoff. Attempts are reserved before each mutation;
+// permit or background task across backoff. Attempts are reserved before each mutation;
 // a failed initial remote read also consumes one attempt.
 func retryPublicationFailure(ctx context.Context, publications PublicationStore, publication model.Publication, failure error) (model.PublicationFinalization, error) {
 	finalizeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)

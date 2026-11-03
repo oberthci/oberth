@@ -1882,7 +1882,7 @@ func runComponents(
 		goProxyShutdownErr = shutdownHTTP(shutdownCtx, goProxyServer)
 	}
 	workers.Wait()
-	// The scheduler (a worker) can start API background work, an automatic
+	// The scheduler (a background task) can start API background work, an automatic
 	// moved-promotion retry, so the API shuts down after it has stopped.
 	// Shutdown refuses later background starts, cancels queued-promotion
 	// waits and waits, bounded, before the store closes.

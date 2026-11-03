@@ -478,7 +478,7 @@ func (health Health) probeVCS(ctx context.Context, upstreams []model.Upstream) [
 	return results
 }
 
-// probeVCSConcurrent probes every upstream concurrently with a bounded worker
+// probeVCSConcurrent probes every upstream concurrently with a bounded background task
 // pool and one aggregate deadline, so one unreachable forge cannot block the
 // response while the others return fast.
 func (health Health) probeVCSConcurrent(ctx context.Context, upstreams []model.Upstream) []UpstreamStatus {

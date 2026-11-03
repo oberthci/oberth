@@ -59,7 +59,7 @@ func TestTokenUseQueueSurvivesWriterSaturationAndCancelsOnShutdown(t *testing.T)
 	if _, err := s.AuthenticatedUplinkByDigest(ctx, make([]byte, 32)); err != nil {
 		t.Fatalf("telemetry occupied authentication readers: %v", err)
 	}
-	// Close must cancel the worker before waiting for SQLite to close; keep
+	// Close must cancel the background task before waiting for SQLite to close; keep
 	// the writer held until that cancellation has actually completed.
 	closed := make(chan error, 1)
 	go func() { closed <- s.Close() }()
@@ -136,7 +136,7 @@ func TestTokenUseDedupePreservesColdTokenAndUseTime(t *testing.T) {
 	if len(s.tokenUses) != 1 || tokenUsePending(s) != 2 || s.tokenUseQueueDrops.Load() != 0 {
 		t.Fatalf("hot token crowded out cold use: queued=%d pending=%d drops=%d", len(s.tokenUses), tokenUsePending(s), s.tokenUseQueueDrops.Load())
 	}
-	// Move the worker clock after both uses: the stored values must retain
+	// Move the background task clock after both uses: the stored values must retain
 	// observed use time despite the writer stall, rather than commit time.
 	clock.Store(usedAt.Add(90 * time.Second).UnixNano())
 	if err := tx.Rollback(); err != nil {

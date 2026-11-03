@@ -7,7 +7,7 @@ server:
   updateStrategyType: OnDelete
   priorityClassName: oberth-oberth-platform-openbao
   resources:
-    # Initial sizing from a coordinator-supplied idle sample and margin;
+    # Initial sizing from a administrator idle sample and margin;
     # UNMEASURED UNDER LOAD. No new CPU/memory limits.
     requests:
       cpu: 100m

@@ -61,7 +61,7 @@ active snapshots. Cleanup attempts every candidate and logs per-entry failures
 without disabling later backups; space checks remain mandatory. Workstation
 verification uses its private working volume, and generic inspection/verification
 honors TMPDIR. The isolated maintenance writer/verifier explicitly retain their
-qualified private /tmp and 128 MiB protocol.
+qualified private scratch storage and 128 MiB protocol.
 
 Default-limit requests omit the new flag for old-server compatibility. A custom
 limit may retry an unknown-flag response without the flag only if the old
@@ -258,7 +258,7 @@ trust assumptions and complete invalidation rules.
   capped at one hour before expiry; an expired or not-yet-valid leaf is always
   unready. Successful renewal clears the error. Administrator metrics expose
   expiry, renewal failure and its bounded diagnostic. Renewal and secret-store
-  probe workers are canceled and joined before server teardown completes.
+  probe tasks are canceled and joined before server teardown completes.
 - Upstream Git authentication is supplied by the configured Secret. Oberth does
   not mint a replacement when one is configured. Per-upstream deploy keys are
   additional data keys (`<keyFile>-<name>` / `<keyFile>-<name>.pub`) of that
@@ -1059,8 +1059,7 @@ trust assumptions and complete invalidation rules.
   This is the complete tool surface. Issues are first-class in Oberth;
   manual and CI issues retain their current write surface and scoped access.
   The owner decision of 2026-11-03 drops the external-tracker migration.
-  Work statuses and a server-computed stale flag are planned in the separately
-  owned AI-workspace change; they are not fields in this version. See
+  Work statuses and a server-computed stale flag are not implemented. See
   [CI and manual issue scope](docs/ci-issue-scope.md).
   `issue_create` takes a `title`, a `body` and an optional `upstream`;
   without one it creates a global manual
@@ -1168,7 +1167,7 @@ trust assumptions and complete invalidation rules.
   Five attempts are allowed, with backoff of 2, 4, 8 and 16 minutes (about
   thirty minutes total, excluding I/O). Schema v38 persists the attempt count
   before external mutation, next-attempt time and owner progress message;
-  canonical audit intents bind the retry state. Waiting holds no worker or
+  canonical audit intents bind the retry state. Waiting holds no background task or
   delivery permit. Dispatch ticks and owner-startup recovery resume due work.
   A remote ref read precedes every mutation decision. After a lost
   finalization reply, recovery can confirm an already-delivered result during
@@ -1456,7 +1455,7 @@ trust assumptions and complete invalidation rules.
   offending step instead of filling the PVC unchecked. Progress-marker write
   failures are surfaced rather than swallowed: a run whose durable progress
   record is degraded is never reported as green.
-- Job CPU, memory, and ephemeral storage are bounded. `/tmp` uses a size-limited
+- Job CPU, memory, and ephemeral storage are bounded. Private scratch uses a size-limited
   `emptyDir`; persistent source state and the split CI/release caches retain the
   fixed PVC and node-path topology.
 
@@ -1574,7 +1573,7 @@ trust assumptions and complete invalidation rules.
   not authorize database retries. Trusted startup cleanup logs pending failures
   and continues with its durable obligations intact. Owner shutdown stops
   retries between attempts and leaves in-flight detached cleanup/finalization
-  to finish. The create-settlement worker keeps its own bounded attempts/backoff.
+  to finish. The create-settlement background task keeps its own bounded attempts/backoff.
   Invalid immutable/admission bindings, missing required recovery capabilities,
   schema/corruption and other non-transient failures keep their fatal behavior;
   a joined invariant error cannot be hidden by a concurrent DB deadline.
@@ -1712,7 +1711,7 @@ trust assumptions and complete invalidation rules.
   as a non-admin and needs a grant that is still active; its current scope
   must still cover the repository, and uplinks sharing the identity but
   disagreeing on scope stop it. Only admission (a store transaction) runs in
-  the failing run's worker or request, so `promote_status` reports the retry
+  the failing run's background task or request, so `promote_status` reports the retry
   at once; merge preparation and any fast-forward delivery run in the
   background and hold no admission reservation or delivery permit of the
   work that failed. `promote_retry {id}`
@@ -1738,7 +1737,7 @@ trust assumptions and complete invalidation rules.
   out) and leaves the promotion pending with no plan, which owner-startup
   recovery interrupts like any promotion that never recorded its plan;
   nothing touches the store after the API's shutdown returns. The API shuts
-  down after the scheduler's workers stop, and refuses background work
+  down after the scheduler's background tasks stop, and refuses background work
   (queued waits, automatic moved-promotion retries) from then on. A plan
   already under way when the bounded shutdown wait times out keeps running
   to its own bounded end and is logged. promote,
@@ -2181,7 +2180,7 @@ trust assumptions and complete invalidation rules.
   No chown or fsGroup change is made. Main remains tokenless; Argo's existing
   executor token remains scoped to its init/wait. Source and shared tool inputs,
   including their executor mirrors, remain read-only; the selected leaf has no
-  host cache mount. TMPDIR/GOTMPDIR are `/tmp` and Go/tool caches are ephemeral
+  host cache mount. TMPDIR/GOTMPDIR point to private scratch and Go/tool caches are ephemeral
   within that bounded private Pod volume. Collected artifacts retain their
   separate existing run-owned mount. Actual PostgreSQL startup and Chromium's
   namespace/seccomp sandbox require separate execution proof; this interface
@@ -2700,7 +2699,7 @@ Before the next release, configure/retain `argo.releaseWIF.roles.<role>.service_
 for all three roles. The current server already supplies the required ADC;
 this revision requires no new environment variable or preliminary server rollout.
 See [publication prerequisites](.oberth/bootstrap.md#publication-prerequisites)
-for the exact coordinator handoff and placeholders.
+for the exact administrator handoff and placeholders.
 
 ### Layered trust enforcement
 
@@ -3066,7 +3065,7 @@ replay v29 and v30 in order on restore.
 Controller profile verification failures keep all new admission paused. Unscoped
 status exposes the fixed verifier `controller_profile.reason` (never raw API
 errors); unchanged failure logs are limited to once per 30 seconds. Recovery
-clears the reason and resumes admission without changing existing workers.
+clears the reason and resumes admission without changing existing background tasks.
 
 Live-log SSE streams revalidate their original bearer credential every 30 seconds
 with a five-second authentication deadline. Revocation, rotation, lookup failure

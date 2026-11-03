@@ -31,7 +31,7 @@ func runPreflightUpstreams(arguments []string, output io.Writer) error {
 	if *inventory == "" || flags.NArg() != 0 {
 		return fmt.Errorf("%w: preflight upstreams --inventory FILE", errUsage)
 	}
-	file, err := os.Open(*inventory) // #nosec G304 -- explicit coordinator-supplied metadata file, bounded below.
+	file, err := os.Open(*inventory) // #nosec G304 -- explicit administrator metadata file, bounded below.
 	if err != nil {
 		return err
 	}

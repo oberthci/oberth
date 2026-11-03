@@ -68,7 +68,7 @@ const (
 // decides trust is here, not in the repository document.
 type Config struct {
 	// ExecutorScratchSizeLimit bounds Argo emissary output and control files.
-	// Empty selects 1Gi; this is separate from the test container /tmp.
+	// Empty selects 1Gi; this is separate from the test container private scratch.
 	ExecutorScratchSizeLimit string
 
 	// NonrootProfile selects an exact built-in verification policy, not an
@@ -1293,11 +1293,11 @@ func applyServerBounds(workflow *wfv1.Workflow, config Config) {
 //
 // The Argo-path security baseline runs as UID 0 with RunAsNonRoot false,
 // drops all Linux capabilities, sets a read-only root filesystem with a
-// writable /tmp emptyDir, and applies RuntimeDefault seccomp. Tightening to
+// writable private scratch emptyDir, and applies RuntimeDefault seccomp. Tightening to
 // a non-root UID (65534) is a separate, riskier follow-up that needs real
 // step execution validated against the toolchain and the PVC's ownership.
 //
-// ReadOnlyRootFilesystem requires the writable /tmp emptyDir below because
+// ReadOnlyRootFilesystem requires the writable private scratch emptyDir below because
 // the Go toolchain writes temporary files there.
 const (
 	stepTmpVolumeName = "oberth-tmp"
@@ -1459,7 +1459,7 @@ const (
 	// mount and for the same reason: the repository never names this volume,
 	// never chooses the node directory behind it, and cannot opt out of it.
 	//
-	// It sits beside /work/src rather than under /tmp because /tmp is the
+	// It sits beside /work/src rather than under private scratch because private scratch is the
 	// emptyDir that makes the read-only root filesystem survivable, and
 	// applyServerSecurity reserves that exact path.
 	CacheVolumeName = "oberth-cache"
@@ -1501,10 +1501,10 @@ const (
 	// Standard mount paths from the workspace VCT. Each is a subPath of the
 	// "work" claim, shared across every step in the same Argo Workflow.
 	//
-	// The tools, trivy-cache, and release paths live under /tmp, which
+	// The tools, trivy-cache, and release paths live under private scratch, which
 	// applyServerSecurity already mounts as a writable emptyDir. A subPath
 	// mount from the VCT takes precedence at its specific directory while the
-	// emptyDir backs everything else under /tmp.
+	// emptyDir backs everything else under private scratch.
 	WorkspaceToolsMountPath      = "/tmp/oberth-tools"
 	WorkspaceTrivyCacheMountPath = "/tmp/oberth-trivy"
 	WorkspaceReleaseMountPath    = "/tmp/oberth-release"

@@ -81,5 +81,5 @@ The READY packet must include the old/new recipe, closure/provenance, all three
 byte hashes per architecture, OCI index/platform digests, readback verification,
 `test-static-git-runtime` run ID, SBOMs/scans/control receipts and review outcome.
 Retain the prior signed server release and its substrate for exact rollback.
-Workers do not publish, alter grants, or run cluster/VM tests locally; use the
-existing approved CI/build path and coordinate publication with the owner.
+Publishing, grant changes and cluster/VM qualification use the existing approved
+CI/build path and require deployment-owner authorization.

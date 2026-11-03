@@ -246,7 +246,7 @@ func TestOberthReleasePipelineIsAdmissible(t *testing.T) {
 		"release-verify":         "release-publish-public && release-publish-kvm-harness && (release-publish-homebrew.Succeeded || release-publish-homebrew.Failed || release-publish-homebrew.Errored)",
 		"release-runtime":        "release-verify",
 		"release-finalize":       "release-runtime",
-		// #649: the oberth.ci Worker publishes after the signed artifacts
+		// #649: the oberth.ci publisher publishes after the signed artifacts
 		// verified; a tokenless leaf then reads the public bytes back.
 	})
 }
@@ -732,7 +732,7 @@ func TestOberthReleaseScriptReadsStoreFieldNames(t *testing.T) {
 		"cosign-secret/COSIGN_PASSWORD": true, // optional at runtime, named here so a rename is visible
 		"cosign-secret/COSIGN_PUB":      true,
 		"homebrew-tap-key/SSH_KEY":      true,
-		// #649: the scoped oberth.ci Worker deploy token (Terraform
+		// #649: the scoped oberth.ci publisher deploy token (Terraform
 		// operator-owned public artifact token configuration).
 		"cloudflare-oberth-workers-token/CLOUDFLARE_API_TOKEN": true,
 	}

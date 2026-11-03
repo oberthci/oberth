@@ -18,7 +18,7 @@ import (
 )
 
 // Prepare under the gate lock so tests control every admission/release without
-// sleeps, blocked worker goroutines or access to live reservation fields.
+// sleeps, blocked background task goroutines or access to live reservation fields.
 func priorityWaiter(g *weightedAdmission, seq int64, p model.RunPriority, at time.Time, size pipeline.Size, estimates ...time.Duration) *admissionReservation {
 	r := g.reserveRun(model.Run{ID: string(rune('a' + seq)), QueueSequence: seq, AdmissionSequence: seq, Priority: p, QueuedAt: at})
 	g.mu.Lock()

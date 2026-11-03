@@ -12,10 +12,8 @@ ordinary verified database/audit backups remain the history preservation path.
 | Mutation coordination | Keep five-minute locks, lock-aware writes and metadata revisions. |
 | Body updates | Keep transactional `expected_body_sha256` conflict checks and bounded body append. |
 | History | Keep closed records; close/reopen do not delete issue history. |
-| Work statuses and stale | Planned in the separately owned AI-workspace change; not implemented on this branch. |
+| Work statuses and stale | Not implemented. |
 
-The planned work status and computed stale flag are additive issue fields.
-This branch does not define their enum, timing rules or storage contract on
-behalf of the worker implementing them. Current `issue_append` appends to the
+Current `issue_append` appends to the
 body; it is not a discussion thread. Pipeline filesystem workspace isolation
 is a separate subsystem from issue/work tracking.

@@ -1,6 +1,6 @@
 // Optional rendered-page regression, using synthetic read-only API responses.
 // PLAYWRIGHT_MODULE=/path/to/playwright/index.mjs PLAYWRIGHT_CHANNEL=chrome \
-// DASHBOARD_EVIDENCE_DIR=/tmp/fix/dashboard-runs-evidence node hack/test-dashboard-runs-browser.mjs
+// DASHBOARD_EVIDENCE_DIR=private scratch node hack/test-dashboard-runs-browser.mjs
 import assert from 'node:assert/strict';
 import {readFileSync, mkdirSync, writeFileSync} from 'node:fs';
 import {createServer} from 'node:http';

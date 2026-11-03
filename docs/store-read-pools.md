@@ -15,18 +15,18 @@ writer again. Private immutable inspection handles retain their existing
 connection policy.
 
 Bearer authentication reads current identity, scope and revocation before
-enqueueing any due token-use timestamp update. One Store-owned background worker
+enqueueing any due token-use timestamp update. One Store-owned background background task
 performs UPDATE-only writes on the serialized writer, with the existing active
 and unrevoked predicates. It never acquires authentication admission or readers,
 including after a no-op. The queue holds at most 64 distinct tokens plus one in
 flight; pending IDs are deduplicated. It records accepted use time rather than
-worker completion time. Failed writes start a global one-minute cooldown;
+background task completion time. Failed writes start a global one-minute cooldown;
 arrivals and queued uses are discarded during that cooldown. Saturation and
 shutdown can also drop telemetry. Fixed counters for attempts, failures, queue
 drops and cooldown drops are published through the administrator metrics endpoint.
 The timestamp is best-effort; authentication never waits for its writer slot or
 commit, including first use and the one-minute refresh boundary. Store close
-cancels and joins the worker before closing SQLite. Cancellation interrupts a
+cancels and joins the background task before closing SQLite. Cancellation interrupts a
 pool-slot wait; an external SQLite busy wait may still last to its busy timeout.
 
 The primary still performs startup PRAGMAs, migrations and schema/protocol
@@ -49,7 +49,7 @@ go test ./internal/store -run '^$' \
 
 The test-only driver records successful `BeginTx` through commit/rollback;
 connection acquisition and BEGIN wait are excluded. Four ordinary-reader
-workers exercise repositories, recent runs, priority patterns and queue peeks.
+background tasks exercise repositories, recent runs, priority patterns and queue peeks.
 `max-held-ns` covers every measured transaction; `p95-held-ns` uses at most the
 last 1,024 samples. `reader-calls` includes warm-up; `writer-wait-ns` is the
 writer pool's cumulative connection wait, not transaction hold time. Results

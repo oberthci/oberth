@@ -51,15 +51,15 @@ before upgrading the chart that removes these objects.
 
 ## Required release split
 
-The v0.17.84 laptop input is preparatory: it adds the live, read-only
+The v0.17.84 release is preparatory: it adds the live, read-only
 `oberth admin retirement-check`, keeps legacy execution/recovery, and requires
 the connector/site handoff on the relevant upgrades. Retirement inventory never
 runs at server startup. Upstream outages, archived repositories and new legacy
 branches refuse only a requested retirement verification.
 
-The original final-removal commit `03728183` is deliberately excluded. A later
+Final execution removal is excluded from this release. A later
 published release may remove the old engine after a published preparatory release
 has been installed, dependent repositories have migrated, and the live drain,
 cleanup and backup receipts are accepted. See [the release sequence](../legacy-removal.md).
-This input adds no database migration: versions 1–48 remain unchanged; 49 and 50
-belong to other inputs, and any future migration here must begin at 51.
+This input adds no database migration: versions 1–48 remain unchanged; 49–51
+are reserved; the next new migration is 52.

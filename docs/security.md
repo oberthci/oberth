@@ -34,7 +34,7 @@
   RuntimeDefault, dropALL, read-only root and no privilege escalation. A fixed
   server initializer uses UID0 only to prepare fresh per-Pod scratch directories;
   it has no token, PVC or host mount and never changes shared ownership. Selected
-  leaves consume source/tools read-only and use bounded ephemeral `/tmp` caches.
+  leaves consume source/tools read-only and use bounded ephemeral private scratch caches.
   This is separate from trusted VM execution. Browser sandbox compatibility
   still needs proof under the actual runtime; no capabilities, unconfined
   seccomp or sandbox-disabling flags are granted by this mode.

@@ -73,7 +73,7 @@ Helm or Kubernetes writes bypass the installer; use this checked upgrade path.
      -o jsonpath='{.metadata.uid}'
    ```
 
-   Commands are examples for the coordinator to run; product tests use only
+   Commands are examples for the administrator to run; product tests use only
    mocked Kubernetes and Helm. Protect rendered manifests because they may
    contain credentials. Hash the raw manifest bytes, including the final newline.
 
@@ -128,7 +128,7 @@ external operations records; it contains no tokens. It is a trusted operator
 attestation of traffic and publishing, not an automated remote-site proof.
 
 Run a dry-run with the receipt, review the rendered core changes, then apply the
-same upgrade under the coordinator's authorization. Keep the external connector
+same upgrade under the administrator's authorization. Keep the external connector
 and site owner operating after the core removes its old resources. Never roll
 back by overwriting the external resources with the old core release. Use the
 saved configuration and your routing rollback procedure if verification fails;

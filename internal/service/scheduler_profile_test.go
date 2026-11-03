@@ -71,7 +71,7 @@ func TestSchedulerPausesAdmissionWithoutStoppingExistingWork(t *testing.T) {
 		t.Fatal("new job admitted while profile unverified")
 	default:
 	}
-	// An active worker can finish while new admission waits for verification.
+	// An active background task can finish while new admission waits for verification.
 	close(jobs.release)
 	awaitRunStatus(t, fixture, initialRun, model.RunPassed)
 	select {

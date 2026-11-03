@@ -125,10 +125,10 @@ deadline, and a pinned read can retain growing WAL pages until it finishes.
 
 Workstation backup/restore verification uses its private work directory;
 standalone store inspection/verification honors `TMPDIR`. On systems where
-`/tmp` is a small tmpfs, choose a disk-backed directory with room for several
+private scratch is a small tmpfs, choose a disk-backed directory with room for several
 database copies, for example `TMPDIR=/large/private-temp oberth restore ...`.
 Encrypted outputs remain exclusive 0600 files; failed output streams are removed.
-The separate source-built maintenance utility still pins its qualified `/tmp`
+The separate source-built maintenance utility still pins its qualified private scratch
 private tmpfs and fixed 128 MiB bound; ambient TMPDIR cannot redirect it.
 
 Disconnected in-pod stdout returns a write error through deferred cleanup,

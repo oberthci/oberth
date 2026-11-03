@@ -28,6 +28,6 @@ var scale = func() time.Duration {
 func Scale(base time.Duration) time.Duration { return base * scale }
 
 // Start bounds expected asynchronous progress (startup, acquisition, completion
-// or shutdown). The 30-second floor lets a loaded host schedule the worker;
+// or shutdown). The 30-second floor lets a loaded host schedule the background task;
 // successful operations return immediately without waiting out this budget.
 func Start(base time.Duration) time.Duration { return max(Scale(base), 30*time.Second) }

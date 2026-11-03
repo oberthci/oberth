@@ -161,7 +161,7 @@ complete a case.
 Workspace cache mode #1093: `TestWorkspaceCacheMountsOnlyTheCache` builds a
 `work`-VCT pipeline with delivered artifacts and proves a
 `workspace-mounts: cache` leaf (with and without `workspace-env: none`) gets
-only the read-only source, per-Pod `/tmp` and the writable `/work/cache`, the
+only the read-only source, per-Pod private scratch and the writable `/work/cache`, the
 three cache variables, no tool/Trivy/artifact defaults, while a sibling keeps
 every default. `TestWorkspaceCacheStaysOnItsTier` proves CI and release cache
 leaves mount only their own root and never reference the other, and a release
@@ -174,7 +174,7 @@ credentialed release leaves, Pod-leaf placement and every container shape;
 leaf on the release tier.
 `TestAdmitWorkspaceMountsValues` refuses unknown values; `TestAdmitKVMRefusesWorkspaceCache`
 and `TestAdmitNonrootRefusesWorkspaceCache` refuse `cache` on leaves that take no
-host cache; `TestTrivyGuardWorkspaceCache` treats `/tmp` as private and
+host cache; `TestTrivyGuardWorkspaceCache` isolates scratch storage per Pod and
 `/work/cache` as shared for cache leaves.
 
 Parallel CI race groups: `TestOberthRaceGroupsCoverEveryPackageExactlyOnce`

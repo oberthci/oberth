@@ -290,7 +290,7 @@ argo:
     nodes: {} # e.g. example-node: https://example-node.example:10250
     caCert: "" # public kubelet serving CA PEM, not a private key
   # Emissary retains stdout/stderr and control files here until Pod cleanup.
-  # Separate from the test leaf /tmp; applies to nonroot and trusted KVM leaves.
+  # Separate from the test leaf private scratch; applies to nonroot and trusted KVM leaves.
   executorScratchSizeLimit: 1Gi
   # Public administrator capabilities only; empty disables release federation.
   # Tokens/private keys must never be supplied here. See docs/release-wif.md.

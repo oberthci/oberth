@@ -29,13 +29,13 @@ triggers). Oberth sets metadata, forces the ServiceAccount identity by trigger
 tier, and injects the source checkout into every container template. Each DAG
 task runs in its own container with its own exit code and named log slice.
 CPU, memory, and ephemeral storage have requests and limits;
-the writable `/tmp` `emptyDir` cannot exceed the same ephemeral-storage limit.
+the writable private scratch `emptyDir` cannot exceed the same ephemeral-storage limit.
 The shared PVC has a fixed requested capacity, while the intentionally
 persistent CI/release host caches remain separate node-provisioned paths.
 
 The Job name is deterministic and persisted before Kubernetes creation. Create
 is idempotent only for the identical intended Job. Graceful shutdown cancels and
-joins active workers; owner startup turns every interrupted Job intent into a
+joins active background tasks; owner startup turns every interrupted Job intent into a
 durable deletion obligation before serving new work.
 
 Workspace paths are deterministic database-owned resources. Run and promotion

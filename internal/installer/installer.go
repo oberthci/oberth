@@ -241,7 +241,7 @@ type Config struct {
 	// (e.g., "github.com/acme"). When set, onboarding uses it
 	// instead of prompting.
 	ForgeURL string
-	// UplinkIdentity is the uplink identity (e.g., "admin@laptop") from the
+	// UplinkIdentity is the uplink identity (e.g., "admin@workstation") from the
 	// TUI wizard. When set alongside SSHPublicKeyPath, onboarding uses it
 	// instead of prompting.
 	UplinkIdentity string

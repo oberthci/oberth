@@ -31,12 +31,12 @@ The token is never stored or recoverable. If lost, create a new uplink.
 ### Limit an uplink to some upstreams
 
 An uplink normally sees every repository. `--scope` limits it to the
-repositories of named upstreams, for example a work laptop that may see the
+repositories of named upstreams, for example a development machine that may see the
 `github` upstream and nothing else:
 
 ```bash
 kubectl exec -i -n oberth deploy/oberth -- \
-  oberth uplink add --scope github - laptop@work < laptop.pub
+  oberth uplink add --scope github - developer@work < developer.pub
 ```
 
 A scope is an upstream name as `oberth upstream list` shows it; repeat
@@ -56,8 +56,8 @@ A scope is an upstream name as `oberth upstream list` shows it; repeat
 Change or remove the limit later; the token and key stay valid:
 
 ```bash
-kubectl exec -n oberth deploy/oberth -- oberth uplink scope --set github,acme laptop@work
-kubectl exec -n oberth deploy/oberth -- oberth uplink scope --clear laptop@work
+kubectl exec -n oberth deploy/oberth -- oberth uplink scope --set github,acme developer@work
+kubectl exec -n oberth deploy/oberth -- oberth uplink scope --clear developer@work
 ```
 
 `oberth uplink list` shows each uplink's scope (`all` when unscoped), and
@@ -551,7 +551,7 @@ Authenticated `GET` endpoints serve the same state as a web dashboard:
 | `/api/status` | System health summary |
 
 Unauthenticated: `/healthz` (compatibility/startup), `/livez` (local writer and
-worker progress), and `/readyz` (startup and serving readiness).
+background task progress), and `/readyz` (startup and serving readiness).
 
 ## Notes
 

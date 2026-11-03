@@ -53,7 +53,7 @@ type Options struct {
 	// BackupMaxBytes bounds backup/verification only; zero selects 1 GiB.
 	BackupMaxBytes int64
 	// SnapshotTempDir selects private inspection/verification staging. Empty
-	// honors TMPDIR; the isolated maintenance utility explicitly pins /tmp.
+	// honors TMPDIR; the isolated maintenance utility explicitly pins private scratch.
 	SnapshotTempDir string
 	Protocol        ProtocolConfig
 
@@ -951,10 +951,10 @@ WHERE reason = 'owner_restart' AND completed_at IS NULL
   )`, now); err != nil {
 		return fmt.Errorf("retire legacy Workflow restart cancellations: %w", err)
 	}
-	// A supersede or cancel can win after ClaimNextRun but before the worker
-	// publishes its deterministic Job name. The live worker may still be checking out in that
+	// A supersede or cancel can win after ClaimNextRun but before the background task
+	// publishes its deterministic Job name. The live background task may still be checking out in that
 	// window, so ordinary startup recovery must leave the empty-name obligation
-	// pending. Owner startup proves that worker is gone and can terminalize the
+	// pending. Owner startup proves that background task is gone and can terminalize the
 	// no-Job cancellation without issuing an unbound Kubernetes deletion.
 	if _, err := tx.ExecContext(ctx, `
 UPDATE run_cancellations
@@ -1010,7 +1010,7 @@ ORDER BY queue_sequence`)
 		}
 		if _, requeueErr := s.requeueStrandedRunTx(ctx, tx, active, now); requeueErr == nil {
 			// This owner has not submitted a Workflow. Startup proves the
-			// old worker is gone, so an empty-name cleanup obligation is done.
+			// old background task is gone, so an empty-name cleanup obligation is done.
 			if _, err := tx.ExecContext(ctx, `
 UPDATE run_cancellations
 SET completed_at = ?

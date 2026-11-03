@@ -233,7 +233,7 @@ spec:
     container:
       image: "golang:1.26-trixie@sha256:..."
       workingDir: /work/src
-      command: ["/tmp/oberth-tools/bin/go"]
+      command: ["/usr/local/go/bin/go"]
       args: ["vet", "./..."]
       # ... env and volumeMounts
 ```
@@ -431,7 +431,7 @@ unauthenticated.
   chain always runs and is verified at startup, on every cycle, and before
   every mutation. By default (`auditAnchor.tsaURL` and `auditAnchor.rekorURL`
   empty) no external service is contacted — Rekor and public TSAs are free
-  services with no SLA, and a kind-on-a-laptop install should never depend on
+  services with no SLA, and a local kind install should never depend on
   them. Opting in layers on: RFC 3161 timestamps from an independent TSA →
   linked Rekor witnesses under a stable identity derived from the SSH host
   key → immutable Kubernetes continuity records the server can create but

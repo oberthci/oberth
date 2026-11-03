@@ -687,7 +687,7 @@ func (worker *stepLogFollower) reportUnknownTermination() {
 }
 
 // Prefer actual observed termination over a later unavailable Pod snapshot.
-// Workers are joined before this call; durable cursors also cover adoption.
+// background tasks are joined before this call; durable cursors also cover adoption.
 func (logs *stepLogFollowers) applyDiagnostics(completion *Completion) {
 	for i := range completion.Steps {
 		step := &completion.Steps[i]

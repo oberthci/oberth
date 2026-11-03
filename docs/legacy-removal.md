@@ -1,6 +1,6 @@
 # Finishing the execution-engine retirement
 
-The preparatory **release** (the v0.17.84 input on `fix/ob-84-laptop`)
+The preparatory **release** (v0.17.84)
 exposes `oberth admin retirement-check` through the live daemon's private,
 peer-authorized admin socket. It retains the old execution and recovery engine.
 The final removal (`03728183` from the original series) is excluded and must

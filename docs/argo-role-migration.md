@@ -25,8 +25,8 @@ pipeline identities. Run from a checkout containing this tool, with Go matching
 pipeline namespace and Helm release namespace can differ. For example:
 
 ```sh
-go build -o /tmp/oberth-migrate-argo-role ./hack/migrate-argo-role
-/tmp/oberth-migrate-argo-role \
+go build -o ./oberth-migrate-argo-role ./hack/migrate-argo-role
+./oberth-migrate-argo-role \
   --context=my-cluster \
   --namespace=oberth-argo \
   --role=oberth-argo \

@@ -133,7 +133,8 @@ The complete customer-shaped scenario on a disposable environment
        oberth.ci/secret-paths: oberth/data/r2-upload
    ```
    Add a release step that wraps its command with
-   `oberth secretstore exec --dir /tmp/release-secrets --path oberth/data/r2-upload -- COMMAND`
+   `oberth secretstore exec --dir "$release_secrets_dir" --path oberth/data/r2-upload -- COMMAND`
+   with `release_secrets_dir` set to a private directory created by `mktemp -d`.
    to fetch the secret into private files on verified tmpfs. See
    [release secret delivery](argo-secret-delivery.md) for the file layout.
    Use `oberth access allow <repo> <step> oberth/data/r2-upload` to grant

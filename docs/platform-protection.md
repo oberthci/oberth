@@ -42,8 +42,8 @@ the ordinary release lifecycle. Never remove a class still referenced by a Pod
 or workload template. Historical charts may reject the platformProtection key;
 prepare compatible values explicitly for a downgrade.
 
-The initial requests derive from a **coordinator-supplied idle sample** and a
-coordinator instruction to choose a margin. They are **unmeasured under load**,
+The initial requests derive from a **recorded idle sample** and an
+administrator instruction to choose a margin. They are **unmeasured under load**,
 not owner-approved resource envelopes or measured peaks. The deployment handoff
 records the sample, margins and schedulable-capacity cost. Qualify busy load and
 startup/recovery before changing sizing or introducing limits. The overlays add

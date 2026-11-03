@@ -692,7 +692,7 @@ func TestRestartRecoveryRetainsBranchWorkflows(t *testing.T) {
 	// recovery: its ID and queue ordering remain stable, and the no-Job
 	// cancellation obligation terminalizes
 	// inside the recovery transaction because owner startup proves the
-	// claiming worker is gone.
+	// claiming background task is gone.
 	noJobRun, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/no-job", "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"))
 	if err != nil {
 		t.Fatal(err)

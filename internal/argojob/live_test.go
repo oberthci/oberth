@@ -248,9 +248,9 @@ func TestLiveBranchSubmissionCannotReachTheCredentialedServiceAccount(t *testing
 // baseline with a step that actually writes.
 //
 // The other live workflows only echo, so they would pass with a read-only root
-// that was never exercised. This one writes to /tmp (which must succeed,
+// that was never exercised. This one writes to private scratch (which must succeed,
 // because the Go toolchain writes to os.TempDir() on every build) and then to
-// the root filesystem (which must fail). Without the writable /tmp the
+// the root filesystem (which must fail). Without the writable private scratch the
 // baseline would break every real pipeline; without the read-only root it
 // would not be a baseline.
 func TestLiveReadOnlyRootFilesystemIsRealAndTmpIsWritable(t *testing.T) {
@@ -631,7 +631,7 @@ func truncate(value string, limit int) string {
 }
 
 // liveFilesystemDocument probes the forced filesystem baseline from inside a
-// real step: /tmp must be writable, the root filesystem must not be.
+// real step: private scratch must be writable, the root filesystem must not be.
 const liveFilesystemDocument = `
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow

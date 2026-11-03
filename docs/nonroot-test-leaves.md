@@ -45,7 +45,7 @@ infrastructure; it introduces no Secret or new token permission.
 
 The required mount gates process startup. Authenticated Argo4.0.8 synchronously
 GETs and parses that same configuration in its controller constructor and exits
-on failure before starting workers. This causal dependency permits equal-second
+on failure before starting background tasks. This causal dependency permits equal-second
 API/process timestamps; a later-created ConfigMap still rejects. This reasoning
 assumes trusted installation, immutable content-addressed names never deleted
 and reused, and trusted cluster clocks/infrastructure. Read-only verification
@@ -68,8 +68,8 @@ this check, and a version label alone is not execution proof.
 One fixed initializer uses the administrator-owned, digest-pinned source-seed
 image. It runs as UID 0 with dropALL, RuntimeDefault, read-only root and no
 privilege escalation, and prepares only fresh per-Pod EmptyDirs. It has no source,
-PVC, host path or token mount. It makes the short test `/tmp`, Argo control files,
-executor `/tmp` subpath 0 and optional script staging writable, then exits. It does
+PVC, host path or token mount. It makes the short test scratch directory, Argo control files,
+executor scratch subpath 0 and optional script staging writable, then exits. It does
 not chown shared data or set fsGroup. Main and normal Argo init/wait then run as
 65534 with the same restrictions. Argo's existing executor token mounts stay
 confined to its init/wait; main remains tokenless. The fake-controller contract
@@ -82,7 +82,7 @@ stays root-owned and unavailable to main, so main cannot replace subpath 0.
 
 Selected leaves read source and shared tool inputs without write access, including
 Argo's mirrored input mounts. They have no persistent host cache mount.
-TMPDIR/GOTMPDIR are `/tmp`, GOCACHE is `/tmp/gobuild`, GOMODCACHE is `/tmp/gomod`,
+TMPDIR/GOTMPDIR and the GOCACHE/GOMODCACHE directories use private scratch,
 and HOME/XDG caches also use this per-Pod scratch. Its 8Gi bound and Argo's separate
 control/staging bounds prevent unbounded writable storage. The Argo emissary
 `var-run-argo` EmptyDir retains stdout/stderr and control files until Pod cleanup;
@@ -90,7 +90,7 @@ it defaults to 1Gi. Administrators can set `argo.executorScratchSizeLimit` in th
 chart (`serve --argo-executor-scratch-size-limit`, a positive Kubernetes quantity).
 This limit also applies to the protected trusted KVM leaf and is checked by its
 Pod attestation. Trusted KVM Pods created before a sizeLimit change fail recovery
-attestation and must be re-run under the new limit. It is separate from `/tmp`
+attestation and must be re-run under the new limit. It is separate from private scratch
 and CPU/memory step requests: reducing
 a test's resource requests does not reduce its retained log output. Server log
 collection limits do not cap emissary's on-disk copy. Size executor scratch for
