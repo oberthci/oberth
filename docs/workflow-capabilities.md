@@ -44,6 +44,9 @@ allowlist supports `create`, `get`, `delete`, and `apply`.
 
 The server assigns the operator identity and its resource executor. It refuses
 shared pipeline, executor, secret-store and per-repository secret identities.
+Container, script and helper steps keep the tokenless pipeline identity. Only
+the admitted resource template's argoexec containers receive the operator token;
+any other container that mounts it causes token delivery to be refused.
 Operator capability workflows cannot also consume secret-store or WIF grants.
 Grant scope and identity are checked again before create, adoption and executor
 token delivery. Revocation prevents new authorization; it does not delete
