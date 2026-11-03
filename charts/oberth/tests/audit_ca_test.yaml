@@ -1,0 +1,46 @@
+suite: audit transport CA rotation restarts the server
+templates:
+  - deployment.yaml
+set:
+  image.ref: example.invalid/oberth@sha256:1111111111111111111111111111111111111111111111111111111111111111
+tests:
+  - it: rolls the server onto rekor ca-one
+    set:
+      auditAnchor.rekorURL: https://rekor.example.com
+      auditAnchor.rekorCA: ca-one
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/audit-rekor-ca"]
+          value: "ed658f722bd79064d89e4bfd72b1e43fffae50e966528477fead1df68948eb51"
+  - it: rolls the server onto rekor ca-two
+    set:
+      auditAnchor.rekorURL: https://rekor.example.com
+      auditAnchor.rekorCA: ca-two
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/audit-rekor-ca"]
+          value: "968bca989676c59889882d8fa5f7966c6378105bc8070fba5ba603d3b3753f43"
+  - it: omits the rekor checksum when the CA is removed
+    asserts:
+      - notExists:
+          path: spec.template.metadata.annotations["checksum/audit-rekor-ca"]
+  - it: rolls the server onto tsa ca-one
+    set:
+      auditAnchor.tsaURL: https://tsa.example.com
+      auditAnchor.tsaCA: ca-one
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/audit-tsa-ca"]
+          value: "ed658f722bd79064d89e4bfd72b1e43fffae50e966528477fead1df68948eb51"
+  - it: rolls the server onto tsa ca-two
+    set:
+      auditAnchor.tsaURL: https://tsa.example.com
+      auditAnchor.tsaCA: ca-two
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["checksum/audit-tsa-ca"]
+          value: "968bca989676c59889882d8fa5f7966c6378105bc8070fba5ba603d3b3753f43"
+  - it: omits the tsa checksum when the CA is removed
+    asserts:
+      - notExists:
+          path: spec.template.metadata.annotations["checksum/audit-tsa-ca"]
