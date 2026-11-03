@@ -230,7 +230,7 @@ func TestKubeVirtAmbiguousCreateRetainsUnboundIntent(t *testing.T) {
 			return
 		}
 		close(arrived)
-		<-finish // The API may still create after the caller has timed out.
+		<-finish // The API may still create after the caller stops waiting.
 		object.SetUID("late-created")
 		object.SetCreationTimestamp(metav1.Now())
 		w.Header().Set("Content-Type", "application/json")
@@ -244,15 +244,49 @@ func TestKubeVirtAmbiguousCreateRetainsUnboundIntent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	config := transportConfig()
-	config.RequestTimeout = 25 * time.Millisecond
-	backend, err := NewKubeVirtBackend(client, config)
+	backend, err := NewKubeVirtBackend(client, transportConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
-	instance, err := backend.CreateVMI(context.Background(), "pipeline", validSpec())
-	<-arrived
-	if err == nil || instance.Name == "" || instance.SpecIdentity != SpecIdentity(validSpec()) || instance.UID != "" {
+	// Cancel only after the API has received the request. A short timer can
+	// otherwise expire before dispatch and leave an arrival wait blocked.
+	progress, stop := context.WithTimeout(t.Context(), time.Minute)
+	defer stop()
+	call, cancel := context.WithCancel(progress)
+	defer cancel()
+	type createResult struct {
+		instance VMInstance
+		err      error
+	}
+	created := make(chan createResult, 1)
+	go func() {
+		instance, err := backend.CreateVMI(call, "pipeline", validSpec())
+		created <- createResult{instance: instance, err: err}
+	}()
+	var result createResult
+	received := false
+	select {
+	case <-arrived:
+	case result = <-created:
+		received = true
+		select {
+		case <-arrived:
+		default:
+			t.Fatalf("create returned before the API received it: %v", result.err)
+		}
+	case <-progress.Done():
+		t.Fatal("mock API did not receive the create request")
+	}
+	cancel()
+	if !received {
+		select {
+		case result = <-created:
+		case <-progress.Done():
+			t.Fatal("create did not return after caller cancellation")
+		}
+	}
+	instance, err := result.instance, result.err
+	if err == nil || errors.Is(err, ErrCreateRefused) || instance.Name == "" || instance.SpecIdentity != SpecIdentity(validSpec()) || instance.UID != "" {
 		t.Fatalf("ambiguous create lost its intent or invented ownership: %#v, %v", instance, err)
 	}
 	if err := backend.DeleteVMI(context.Background(), "pipeline", instance); err == nil {
