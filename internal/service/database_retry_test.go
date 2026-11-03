@@ -100,7 +100,7 @@ func awaitDeadlineRun(t *testing.T, fixture *recoveryFixture, id string, done <-
 	}
 }
 
-// Exercise actual Run startup, dispatch, submitted worker and finalization;
+// Exercise actual Run startup, dispatch, submitted background task and finalization;
 // checking only adapter returns would miss a fatal completion-channel escape.
 func TestDatabaseDeadlineSchedulerConverges(t *testing.T) {
 	operations := []string{"RunningRunsWithJobs", "PendingRunCancellations", "PendingPublications", "RunWorkspaceCleanupCandidates", "PromotionWorkspaceCleanupCandidates", "ClaimNextRun", "Run", "Repository", "Upstream", "SetRunWorkflowName", "SetRunConcurrencyGroup", "SetRunCredentialed", "MarkRunAdmitted", "MarkRunSubmitted", "PutStepResult", "FinishRun", "CompleteSupersededRunCancellationWithoutJob", "RunWorkspaceCleanupEligible"}
@@ -124,7 +124,7 @@ func TestDatabaseDeadlineSchedulerConverges(t *testing.T) {
 					t.Fatalf("DB stall changed execution result: %+v", run)
 				}
 				// Terminal commit can precede cleanup; wait for both injected failures to be
-				// retried before asserting convergence of the worker's completion path.
+				// retried before asserting convergence of the background task's completion path.
 				deadline := time.NewTimer(testStartTimeout(10 * time.Second))
 				defer deadline.Stop()
 				for database.count(operation) < 3 {
@@ -215,7 +215,7 @@ func testDatabaseCancellationContinuesLiveDispatch(t *testing.T, failure error) 
 			old := fixture.branch(t, fixture.exampleService, "supersede-db", "a")
 			awaitDeadlineCreated(t, fixture.engine, done)
 			// CreateCI announces creation before MarkRunSubmitted commits. An
-			// earlier supersession uses the worker's post-create cleanup path,
+			// earlier supersession uses the background task's post-create cleanup path,
 			// bypassing the observed-cancellation operation under test.
 			awaitDeadlineSubmitted(t, fixture.store, old.ID, done)
 			select {
@@ -454,7 +454,7 @@ func TestDatabaseDeadlineFatalInvariantCancelsOtherRetryingWorkers(t *testing.T)
 	scheduler.maxConcurrent = 2
 	scheduler.store = &deadlineJoinStore{Store: fixture.store, blocked: make(chan struct{})}
 	// This deadline is a watchdog, not the expected completion. A fatal invariant
-	// must cancel the other worker's retry scope before joining it.
+	// must cancel the other background task's retry scope before joining it.
 	ctx, cancel := context.WithTimeout(t.Context(), testStartTimeout(2*time.Second))
 	defer cancel()
 	if err := scheduler.Run(ctx); !errors.Is(err, store.ErrInvalidState) {

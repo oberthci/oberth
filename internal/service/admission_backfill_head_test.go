@@ -11,6 +11,8 @@ func TestEASYEarlyReturnPreservesWaitingHeadForecast(t *testing.T) {
 	for _, reason := range []string{"unprepared claim", "pressure deferral"} {
 		t.Run(reason, func(t *testing.T) {
 			g, clock, running := easyGate(t)
+			// Exercise forecast persistence before the separate drain cap.
+			g.maxHeadWait = 40 * time.Minute
 			head := pending(t, g, 2, easyRequest("head", 8200, 0))
 			t.Cleanup(head.cancel)
 			safe := pending(t, g, 3, easyRequest("safe", 1100, time.Minute))

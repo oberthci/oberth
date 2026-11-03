@@ -17,7 +17,7 @@ package argojob
 // configuration is read out of the immutable run workspace — the exact bytes
 // the seeder copies into the run's read-only source claim — so the admitted
 // text and the executed text cannot diverge, and a config file outside that
-// checkout (writable /tmp, another volume) is refused outright because
+// checkout (writable private scratch, another volume) is refused outright because
 // nothing could vouch for its content.
 //
 // The Vault policy bound to the tier's ServiceAccount remains the
@@ -125,7 +125,7 @@ func admitEnvconsulConfigFile(templateName, configArg string, allowed map[string
 // the source checkout, refusing anything that resolves outside it. Pipeline
 // containers run with workingDir /work/src, so a relative path and the
 // /work/src-anchored absolute spelling name the same file; every other
-// absolute path — /tmp most importantly, which is a writable emptyDir an
+// absolute path — private scratch most importantly, which is a writable emptyDir an
 // earlier container in the same pod could have filled — is refused.
 func sourceRelativePath(configArg string) (string, error) {
 	trimmed := strings.TrimSpace(configArg)

@@ -8,8 +8,8 @@
 {{- end }}
 {{- /* External audit anchoring is opt-in: dependent knobs without their URL
 would render a pod the server refuses to start, so fail at template time. */}}
-{{- if and (not .Values.auditAnchor.tsaURL) (or .Values.auditAnchor.rootsSecret .Values.auditAnchor.tsaCA) }}
-{{- fail "auditAnchor.rootsSecret and auditAnchor.tsaCA require auditAnchor.tsaURL" }}
+{{- if and (not .Values.auditAnchor.tsaURL) .Values.auditAnchor.tsaCA }}
+{{- fail "auditAnchor.tsaCA requires auditAnchor.tsaURL" }}
 {{- end }}
 {{- if and (not .Values.auditAnchor.rekorURL) .Values.auditAnchor.rekorCA }}
 {{- fail "auditAnchor.rekorCA requires auditAnchor.rekorURL" }}
@@ -307,9 +307,8 @@ spec:
             {{- end }}
             - --audit-anchor-interval={{ .Values.auditAnchor.interval }}
             - --audit-anchor-max-age={{ .Values.auditAnchor.maxAge }}
-            {{- if .Values.auditAnchor.rootsSecret }}
-            - --audit-tsa-roots=/etc/oberth/audit-tsa/{{ .Values.auditAnchor.rootsKey }}
-            {{- end }}
+            - --audit-gate-timeout={{ .Values.auditAnchor.gateTimeout | default "2m" }}
+            - --audit-gate-verify-timeout={{ .Values.auditAnchor.verifyTimeout | default "45s" }}
             {{- if .Values.auditAnchor.rekorCA }}
             - --audit-rekor-ca=/etc/oberth/audit-rekor-ca/ca.crt
             {{- end }}
@@ -522,11 +521,6 @@ spec:
               mountPath: {{ .Values.cache.releaseRoot }}
             - name: identities
               mountPath: /run/oberth-identities
-            {{- if .Values.auditAnchor.rootsSecret }}
-            - name: audit-tsa-roots
-              mountPath: /etc/oberth/audit-tsa
-              readOnly: true
-            {{- end }}
             {{- if .Values.auditAnchor.rekorCA }}
             - name: audit-rekor-ca
               mountPath: /etc/oberth/audit-rekor-ca
@@ -608,14 +602,6 @@ spec:
           emptyDir:
             medium: Memory
             sizeLimit: 16Mi
-        {{- if .Values.auditAnchor.rootsSecret }}
-        - name: audit-tsa-roots
-          secret:
-            secretName: {{ .Values.auditAnchor.rootsSecret }}
-            items:
-              - key: {{ .Values.auditAnchor.rootsKey }}
-                path: {{ .Values.auditAnchor.rootsKey }}
-        {{- end }}
         {{- if .Values.auditAnchor.rekorCA }}
         - name: audit-rekor-ca
           configMap:

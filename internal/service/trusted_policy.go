@@ -246,7 +246,7 @@ func (scheduler *Scheduler) recoverDatabasePreflight(ctx context.Context, id str
 	total := scheduler.databaseRetryCount.Add(1)
 	log.Printf("WARN: scheduler database operation=TrustedPreflight retry_pending=true retries_total=%d", total)
 	// This is a composite Kubernetes cleanup, not a DB statement. It must
-	// retain its own recovery budget and must not hold a worker forever.
+	// retain its own recovery budget and must not hold a background task forever.
 	recoveryCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	err := scheduler.RetryRecovery(recoveryCtx, "RecoverTrustedRun", func(ctx context.Context) error {

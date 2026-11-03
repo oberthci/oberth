@@ -1,6 +1,6 @@
 package store
 
-const pilotRetirementMigrationVersion = 45
+const pilotRetirementMigrationVersion = 46
 
 // The inactive pilot has no execution path. Preserve its journal for export and
 // investigation, but prevent old tooling from treating it as a live authority.

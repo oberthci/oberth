@@ -5,7 +5,7 @@ set -eu
 source_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 script=${1:-$source_root/hack/install-static-git-packages.sh}
 scratch=$(mktemp -d)
-trap 'rm -rf "$scratch"' EXIT HUP INT TERM
+trap 'find "$scratch" -delete' EXIT HUP INT TERM
 apk_fixture=$scratch/apk
 export apk_test_log="$scratch/args"
 server_path=/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin

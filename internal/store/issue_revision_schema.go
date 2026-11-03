@@ -1,6 +1,6 @@
 package store
 
-const issueRevisionMigrationVersion = 41
+const issueRevisionMigrationVersion = 42
 const issueRevisionSchema = `
 ALTER TABLE issues ADD COLUMN revision INTEGER NOT NULL DEFAULT 1
  CHECK(typeof(revision)='integer' AND revision>0);

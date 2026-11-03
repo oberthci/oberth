@@ -49,14 +49,10 @@ BusyBox image must match the selected Linux architecture; the default fixture
 image is arm64. `--image`/`--platform` support other local targets. Missing
 tools or a failed container are errors, not skips or successful evidence.
 
-On 2026-10-28 a Linux/arm64 Go 1.26.10 release-flag build on v0.17.61
-measured roughly 45–48MiB wrapper RSS without memory pressure, including
-reclaimable executable pages. Argo plus the wrapper peaked at 139–141MiB in
-a 256Mi cgroup; this motivated the 256Mi eligibility floor. The 32Mi short
-script passed 10/10 admitted runs; the identical forced-wrapper runs were
-OOMKilled/137 10/10. These are synthetic local measurements, not a capture
-of a production Pod. Even an empty command can hide the regression because
-Linux reclaims executable pages aggressively under pressure.
+Qualify wrapper overhead with the intended architecture and workload. Include
+short scripts with retained memory as well as empty commands, since reclaimable
+executable pages can hide overhead. Keep measurements in operator records;
+local fixtures do not establish production Pod memory requirements.
 
 The wrapper forwards catchable signals to the child process group, except
 SIGCHLD and Go runtime SIGURG, like emissary. SIGKILL and SIGSTOP cannot be
@@ -77,26 +73,14 @@ matching SourceSeeder's commands. It also times two empty execs as a control.
 It creates no cluster resources and changes no RBAC. Use an isolated Pod/PVC;
 never point it at a running server or real source checkout.
 
-On 2026-10-27, ten local kind v1.37.0 samples with the chart-pinned BusyBox 1.37,
-a fresh local-path PVC, UID/GID 65534, no capabilities, a read-only root and a
-1 CPU/128 MiB limit measured the 51,576,994-byte Linux/amd64 release-flag build:
-
-| Operation | Median | Range |
-| --- | --- | --- |
-| Stream and hash | 0.315 s | 0.301–1.604 s |
-| SHA-256 readback | 0.230 s | 0.219–0.241 s |
-| Total binary seed addition | 0.552 s | 0.529–1.831 s |
-| Two empty execs | 0.139 s | 0.127–0.150 s |
-| Addition minus empty-exec control | 0.415 s | 0.380–1.694 s |
-
-Every readback matched. Each sample removed the prior file before timing,
-as production creates a new per-run file. OS/storage caches were warm after
-the first sample. The amd64 binary was copied, not executed on the arm64 node.
-These measurements include kubectl startup and the local API exec transport;
-they exclude Pod scheduling, PVC provisioning and source archive delivery.
-Production uses the existing Go exec client rather than kubectl processes;
-network latency, remote PVC storage and CPU contention can change the cost.
-Run the shipped harness from example-node's server network to measure that deployment.
+Record stream/hash time, readback time, total delivery addition and the empty-exec
+control separately. Include architecture, binary size, image, storage backend,
+resource envelope and cache state with the samples. Verify every readback and
+remove the previous fixture file between samples. The harness includes kubectl
+startup and API transport; it excludes scheduling, PVC provisioning and source
+archive delivery. Production uses the Go exec client, so qualify from the
+installation's server network with its own representative storage and load.
+Store resulting timings in external operator records.
 
 ## External sampler coverage (#1216)
 
@@ -175,7 +159,7 @@ container/volume storage lookups also cap each relevant list at 128; a pass
 visits at most 4,096
 uncached container candidates and writes batches of at most 256. Index/observation cost
 and extra VM API reads are the added overhead; production CPU/RSS/IO cost has
-not been qualified on example-node.
+must be qualified for the target installation.
 
 Storage remains one upserted JSON row per run/node/Pod UID/runtime container ID,
 not one row per poll. Existing incarnations remain updatable at the 4,096-row

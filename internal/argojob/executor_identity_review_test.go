@@ -194,6 +194,7 @@ func TestExecutorIdentityMarkerCreatedDuringDeliveryIsNotClobbered(t *testing.T)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	command := strings.Replace(executorIdentityDeliveryCommand, executorTokenDir, ".", 1)
+	command = strings.Replace(command, `rm -rf "$stage"`, `find "$stage" -delete`, 1)
 	reader, writer, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)

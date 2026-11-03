@@ -109,8 +109,8 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config) error {
 	return result
 }
 
-func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv1.Workflow, delivered map[types.UID]bool) error {
-	if controller.kube == nil || controller.seeder == nil {
+func (controller *Controller) deliverExecutorTokensWithStartup(ctx context.Context, wf *wfv1.Workflow, delivered map[types.UID]bool, startup *workflowStartup) error {
+	if wf.Status.Phase.Completed() || controller.kube == nil || (controller.seeder == nil && startup == nil) {
 		return nil
 	}
 	capability, err := controller.boundCapability(ctx, wf, 0)
@@ -120,9 +120,20 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 	pods, err := controller.kube.CoreV1().Pods(wf.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "workflows.argoproj.io/workflow=" + wf.Name})
 	if err != nil {
 		if ctx.Err() == nil && retryExecutorIdentityRead(err) {
+			if startup != nil {
+				return startup.readFailure(time.Now())
+			}
 			return nil
 		}
 		return identityFailure("pod_list", err)
+	}
+	if startup != nil {
+		if err := startup.observe(wf, pods.Items, delivered, time.Now()); err != nil {
+			return err
+		}
+	}
+	if controller.seeder == nil {
+		return nil
 	}
 	for i := range pods.Items {
 		pod := &pods.Items[i]

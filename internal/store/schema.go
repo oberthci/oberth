@@ -1144,6 +1144,7 @@ CREATE INDEX runs_admission_idx ON runs(status, admission_sequence, queue_sequen
 	{version: containerResourceUsageMigrationVersion, sql: `CREATE INDEX step_resource_usage_retention_idx ON step_resource_usage(last_observed_at);`},
 	{version: publicationRetryMigrationVersion, sql: publicationRetrySchema},
 	{version: prioritySubmissionMigrationVersion, sql: prioritySubmissionSchema},
+	{version: releaseV83MigrationVersion, sql: releaseV83RunListSchema},
 	{version: tokenExpiryMigrationVersion, sql: tokenExpirySchema},
 	{version: issueRevisionMigrationVersion, sql: issueRevisionSchema},
 	{version: publicationAbandonMigrationVersion, sql: publicationAbandonSchema},

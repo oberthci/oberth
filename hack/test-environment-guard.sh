@@ -6,7 +6,7 @@ set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+trap 'find "$work" -delete' EXIT
 
 guard="$root/examples/environment-guard/check.sh"
 payload="$work/environ.txt"

@@ -31,7 +31,7 @@ if isolationCapture != nil { isolationCapture(pod.DeepCopy()) }
 Run `TestOberthIsolationControllerCapture`, then run the retained Kubernetes
 validator against every `*-submitted.json`. Both must pass. Copy the input,
 before-patch and submitted JSON, recording fresh checksums and validator output.
-Do not edit expected Pods manually to make tests pass. Use `/var/tmp` for build
+Do not edit expected Pods manually to make tests pass. Use a separate scratch directory for build
 scratch and cap Go concurrency; no live API or module-cache edits are needed.
 
 The normal regression checks that current Build output still equals the

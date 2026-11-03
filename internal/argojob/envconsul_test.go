@@ -160,7 +160,7 @@ func TestEnvconsulAdmitsDeclaredSecretFlag(t *testing.T) {
 }
 
 // TestEnvconsulRefusesConfigOutsideSource proves a -config path outside the
-// immutable checkout is refused: /tmp is a writable emptyDir an earlier
+// immutable checkout is refused: private scratch is a writable emptyDir an earlier
 // container of the same pod could have filled, so nothing can vouch for a
 // file there.
 func TestEnvconsulRefusesConfigOutsideSource(t *testing.T) {

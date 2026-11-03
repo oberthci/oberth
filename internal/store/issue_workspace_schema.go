@@ -1,6 +1,6 @@
 package store
 
-const issueWorkspaceMigrationVersion = 50
+const issueWorkspaceMigrationVersion = 51
 
 const issueWorkspaceSchema = `
 ALTER TABLE issues ADD COLUMN work_status TEXT NOT NULL DEFAULT 'todo'

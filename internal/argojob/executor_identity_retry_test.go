@@ -273,6 +273,7 @@ func TestExecutorIdentityWaitSurvivesTransientDelivery(t *testing.T) {
 
 func TestExecutorIdentityDeliveryCommandIsAtomicAndReplaySafe(t *testing.T) {
 	command := strings.Replace(executorIdentityDeliveryCommand, executorTokenDir, ".", 1)
+	command = strings.Replace(command, `rm -rf "$stage"`, `find "$stage" -delete`, 1)
 	invoke := func(dir, payload string) error {
 		cmd := exec.Command("sh", "-c", command)
 		cmd.Dir, cmd.Stdin = dir, strings.NewReader(payload)

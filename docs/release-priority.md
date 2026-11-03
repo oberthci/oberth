@@ -31,7 +31,10 @@ Work in the same effective and base priority classes may also coexist if the
 head still fits with all surviving grants at its reserved start. Lower classes
 cannot use coexistence and occupy room needed by higher-class waiters.
 Unmeasured candidates can use only proven coexistence. At the head-wait limit,
-new backfill stops and existing grants drain; zero selects strict FIFO.
+new backfill stops and existing grants drain for up to five additional minutes.
+After that cap, available-capacity backfill and claims resume without a p95
+promise. All reservations still count and the head is considered first; this
+can extend its wait. Zero selects strict FIFO and disables the escape.
 Repository concurrency groups, VM-capacity parking, pressure, disk-floor holds
 and run-count/size limits still apply. P95 predictions are estimates, not enforced
 runtime deadlines; running work is never preempted.

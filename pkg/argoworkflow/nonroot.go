@@ -111,7 +111,7 @@ func DeclaredNonrootTemplates(workflow *wfv1.Workflow) ([]string, error) {
 			return nil, fmt.Errorf("argoworkflow: nonroot template %q cannot receive parameter inputs", name)
 		}
 		// A nonroot leaf never mounts the persistent host cache (the server
-		// moves its Go caches into the private /tmp volume), so a request to
+		// moves its Go caches into the private scratch volume), so a request to
 		// keep only that cache would be silently void. Refuse it instead.
 		if tmpl.Metadata.Annotations[WorkspaceMountsAnnotation] == WorkspaceMountsCache {
 			return nil, fmt.Errorf("argoworkflow: nonroot template %q cannot use %s: cache; nonroot leaves take no host cache mount",

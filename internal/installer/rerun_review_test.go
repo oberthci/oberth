@@ -1,8 +1,10 @@
 package installer
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"slices"
 	"strings"
@@ -243,5 +245,35 @@ func TestRerunEachLiveSettingRequiresAnExplicitOverride(t *testing.T) {
 		if effective != want {
 			t.Fatalf("grant lifetime explicit=%v got=%q want=%q", explicit, effective, want)
 		}
+	}
+}
+
+func TestDisabledNetworkPolicyIsProminent(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprint(existing), func(t *testing.T) {
+			var out bytes.Buffer
+			cfg := Config{NetworkPolicy: "false"}
+			if existing {
+				cfg.NetworkPolicy = "auto"
+			}
+			deps := Deps{Output: &out, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+				if args[0] == "list" {
+					if existing {
+						return []byte(`[{"name":"oberth","status":"deployed"}]`), nil
+					}
+					return []byte(`[]`), nil
+				}
+				return []byte(`{"networkPolicy":{"enabled":false}}`), nil
+			}}
+			if err := resolveInstallRerunValues(t.Context(), &cfg, deps, ClusterInfo{Engine: "k3s"}); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(out.String(), "WARNING: pipeline NetworkPolicy is disabled") {
+				t.Fatalf("disabled isolation was not disclosed: %q", out.String())
+			}
+			if existing && cfg.NetworkPolicy != "auto" {
+				t.Fatal("operator's stored value was overwritten")
+			}
+		})
 	}
 }

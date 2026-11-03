@@ -28,7 +28,7 @@ type sample struct {
 }
 
 // Heartbeat's zero value is unarmed, for loops that start after recovery. Once
-// armed, only real progress renews it. Reads never acquire a worker's lock.
+// armed, only real progress renews it. Reads never acquire a background task's lock.
 type Heartbeat struct {
 	state atomic.Pointer[sample]
 	// Now is immutable after first use; nil uses the monotonic process clock.

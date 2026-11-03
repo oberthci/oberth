@@ -177,7 +177,7 @@ func (s *installScreen) start(w *wizard) tea.Cmd {
 }
 
 // listen delivers the next message of one run's channel. The channel is
-// captured here, never read from the screen on the worker goroutine.
+// captured here, never read from the screen on the background task goroutine.
 func listen(ch chan tea.Msg) tea.Cmd {
 	return func() tea.Msg {
 		msg, ok := <-ch

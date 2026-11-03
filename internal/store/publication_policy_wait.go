@@ -8,7 +8,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-const publicationPolicyWaitMigrationVersion = 49
+const publicationPolicyWaitMigrationVersion = 50
 
 // Keep availability state separate from the immutable, audited push intent.
 const publicationPolicyWaitSchema = `CREATE TABLE publication_policy_waits (

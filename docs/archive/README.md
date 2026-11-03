@@ -6,5 +6,8 @@ named in each file. They do not qualify the current release.
 
 Current operation starts with [backup and restore](../backup-restore.md),
 [architecture](../architecture.md), [security](../security.md), and CLI help.
-The `v073-from67-*` instance migration notes remain pending the separate
-instance-documentation cleanup in issue #1292.
+Instance-specific qualification and migration notes are excluded from the public
+operations guides. Superseded design proposals are retained here as historical
+context, including the [operator-owned VM runner proposal](kubevirt-runner-design.md).
+Use [workflow capabilities](../workflow-capabilities.md) and
+[KubeVirt VMs](../kubevirt-vms.md) for the implemented contracts.

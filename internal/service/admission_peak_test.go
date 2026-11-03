@@ -210,7 +210,7 @@ func TestAdmissionPeakRunGetReportsDeclaredAndPeak(t *testing.T) {
 	}
 }
 
-func TestBoundedBackfillStreamDrainsForHead(t *testing.T) {
+func TestBoundedBackfillStreamDrainsThenResumes(t *testing.T) {
 	g, clock, running := easyGate(t)
 	g.mu.Lock()
 	running.estimate = 0
@@ -218,14 +218,22 @@ func TestBoundedBackfillStreamDrainsForHead(t *testing.T) {
 	head := pending(t, g, 2, easyRequest("head", 11000, time.Hour))
 	t.Cleanup(head.cancel)
 	start := clock.now
-	grants := 0
+	beforeDrain, afterCap := 0, 0
 	for minute := 0; minute < 30; minute++ {
 		clock.now = start.Add(time.Duration(minute) * time.Minute)
 		r := pending(t, g, int64(minute+3), easyRequest("stream", 1100, time.Minute))
-		if granted(g, r) {
-			grants++
-			if minute >= 19 {
-				t.Fatalf("backfill at %dm cannot finish strictly within 20m bound", minute)
+		// The one-minute estimate must finish strictly before minute 20.
+		// No new grants enter during draining; the cap reopens spare capacity.
+		wantGranted := minute < 19 || minute >= 25
+		if got := granted(g, r); got != wantGranted {
+			r.cancel()
+			t.Fatalf("backfill at %dm: granted=%t, want %t", minute, got, wantGranted)
+		}
+		if wantGranted {
+			if minute < 19 {
+				beforeDrain++
+			} else {
+				afterCap++
 			}
 			clock.now = clock.now.Add(time.Minute)
 			r.release()
@@ -233,8 +241,8 @@ func TestBoundedBackfillStreamDrainsForHead(t *testing.T) {
 			r.cancel()
 		}
 	}
-	if grants == 0 {
-		t.Fatal("nothing used the initial backfill window")
+	if beforeDrain != 19 || afterCap != 5 {
+		t.Fatalf("stream grants before drain=%d after cap=%d", beforeDrain, afterCap)
 	}
 	clock.now = start.Add(30 * time.Minute)
 	running.release()

@@ -73,6 +73,16 @@ curl -fsSL https://oberth.ci/install.sh | sh
 oberth install --install-secretstore
 ```
 
+Both the server namespace (`oberth` by default) and pipeline namespace
+(`oberth-argo`) require the Pod Security Admission `privileged` level, or no
+PSA enforcement. The server's root cache initializer and the server/pipeline
+`hostPath` caches are incompatible with `baseline` and `restricted`.
+The installer checks both namespaces before writes and labels newly created
+ones `pod-security.kubernetes.io/enforce=privileged`. It never weakens an
+existing namespace policy. When using Helm directly, have the namespace
+administrator create or label both namespaces with that value first; an
+unlabelled namespace may still inherit a restrictive cluster default.
+
 `oberth setup` walks through the same install step by step. It lists the
 SSH key pairs in `~/.ssh`, can connect further organizations with the same
 upstream key (`--also-upstream codeberg.org/acme`), and asks which address
@@ -104,6 +114,11 @@ came only from the old chart defaults. Upgrade overrides cannot change those
 identities. Stored user values and requested overrides are checked against the
 target chart's schema before the Oberth or Argo controller upgrade begins;
 unknown keys are reported and refused rather than silently removed.
+
+Older Helm 4 installations whose Argo Role rules are owned by a legacy kubectl
+manager can use the [explicit Role ownership migration](docs/argo-role-migration.md)
+before an upgrade. It preserves permissions and unrelated ownership. PVC update
+and list remain required for source-claim adoption and cleanup.
 
 When a target chart removes a configured key, export the installed values,
 remove or migrate the unsupported keys in an explicit values file, and reconcile
@@ -218,7 +233,7 @@ spec:
     container:
       image: "golang:1.26-trixie@sha256:..."
       workingDir: /work/src
-      command: ["/tmp/oberth-tools/bin/go"]
+      command: ["/usr/local/go/bin/go"]
       args: ["vet", "./..."]
       # ... env and volumeMounts
 ```
@@ -311,35 +326,90 @@ existing size grants; later size changes affect only legacy admission and tag
 priority. Declared workflows never fall back to sizes. See
 [declared resources](docs/declared-resources.md).
 
-## MCP tools (18)
+## MCP tools
+
+The authenticated `tools/list` response is the authoritative registry.
+List it with `oberth mcp tools`; available operations are:
 
 | Tool | Description |
 |------|-------------|
-| `status` | CI status for a SHA or branch, including the failed step |
-| `logs` | One named step's log output for a SHA |
-| `run_get` | One exact durable run and its named step results by run ID |
-| `run_logs` | One exact burn/step log by durable run ID |
-| `wait` | Long-poll until a SHA reaches a terminal state |
-| `sync` | Park a WIP branch upstream without a green gate (not completion evidence) |
-| `promote` | Green-gate a SHA, merge with target branch, push without force |
-| `promote_status` | Wait for a promotion record to become terminal |
-| `issue_create` | Create a manual issue, optionally under one upstream |
-| `issue_get` | Get an issue by ID |
-| `issue_update` | Update an issue title, body or work status |
-| `issue_close` | Close an issue (history is kept) |
-| `issue_reopen` | Reopen a manual issue, preserving its ID and history |
-| `issue_delete` | Delete an accidentally created manual issue |
-| `issue_list` | List issue metadata and computed stale state, with work-status filtering (pages of 50) |
-| `issue_lock` | Acquire or renew a five-minute caller-owned issue lock |
-| `access_list` | Show all secret access grants for a repo |
-| `access_allow` | Grant a repo+step access to a named secret |
-| `access_revoke` | Revoke a secret access grant |
-
-Issues also coordinate workspace work with `todo`, `active`, `waiting` and
-`review` statuses. Set one with `oberth issues update --id ID --work-status active`;
-filter with `oberth issues --work-status active`. Staleness is computed from the
-last update, with a shorter window for active work. See
-[issue lifecycle](docs/issue-lifecycle.md) for server flags and read overrides.
+| `status` | Return concise CI status for a full SHA, short SHA, or branch, including the failed step. |
+| `logs` | Return one named step log for a SHA, optionally filtered server-side. Prefer a pattern over retrieving a whole step: counts are lower bounds unless scan_complete is true; continue has_more pages with next_byte_offset as byte_offset and offset:0. |
+| `run_kvm_preflight` | Deprecated; retained for legacy VM pipelines. Read bounded immutable KVM preflight evidence for one full run ID or unique hexadecimal prefix (at least 8 characters). Receipt validity and cleanup are historical evidence, not publication eligibility; parent status is separate. A known run without a preflight returns present=false. |
+| `run_get` | Return one run by full durable ID or unique hexadecimal prefix (at least 8 characters). Default: full run, step results and versioned retained timing; missing timing is unknown. display_status is one of queued, running, passed, failed, infra-retried, superseded or cancelled; display_reason names the cause. Raw Status, Phase and Scheduling.state stay machine-readable. Set summary:true for id/repo/ref/sha, size/declared_resources, queue_position when available, superseded, status/phase/failed_burn/failed_step/error and compact steps (burn, name, status, started_at, finished_at), omitting retained Timing, the full repository record and diagnostics. |
+| `run_resources` | Read captured per-template resource history and numeric declarations at the newest selected SHA. Git remains the source of truth. Each step reports sizing_acceptance: five comparable terminal runs must contain complete CPU/memory/storage/duration and known limits together. Suggestions use p95/max; incomplete, mixed-condition or censored history gets no suggestion. YAML includes paste-ready ordinary pod resources and activeDeadlineSeconds. No logs, commands, environment or image details. |
+| `run_retry` | Queue a fresh attempt for the newest interrupted or infrastructure-failed run, retaining repository, ref, SHA and release admission. Workflow-level failures without a failed step qualify. Tag/release retries require an admin, an unchanged tag object and complete credential-aware terminal observations for the entire tag history (or proof of no Workflow intent). Started secret-store/WIF work, old plans, missing evidence, a moved tag or an older source need run_rerun with force. Pending Workflow deletion is refused even with force. Test failures, older runs, promotion/plan/apply runs, published tags and refs with an active run are refused. The caller is recorded as actor. |
+| `publication_abandon` | Abandon one pending upstream publication by its full publication ID. Requires an unscoped admin uplink and a reason. Atomically marks the publication abandoned and its run failed/abandoned (and its promotion failed), with the administrator in the audit chain. Never pushes; earlier pushes may already be visible upstream. Abandoned intents cannot be retried with publish_retry. An in-flight delivery settles before this operation; terminal publications are refused. |
+| `run_cancel` | Cancel one queued or running run (a claimed run that has not started is queued). The run becomes interrupted with phase cancelled and a reason naming the caller; a claimed run's Workflow is deleted and its admission released, and it is never re-fired. Cancelling a terminal run is refused. Non-admin uplinks may cancel only branch-push runs outside a concurrency group; admins may cancel any run but must set force for tag/release and apply runs, whose publication may be left partial. Cancelling promotion CI fails the promotion without merging. Audited. |
+| `run_rerun` | Rerun a failed or interrupted run at the same SHA and ref, linked to the original (rerun_of), for what run_retry refuses: a failed step such as a flaky test, a run that is no longer the newest of its ref, and tag/release test failures. SHA-keyed status, wait and promote then follow the newest run for that SHA. Refused while the ref has an active run, when a branch has moved past the run's SHA, and for promotion (use promote_retry), plan and apply runs. A run that passed every step and failed only in upstream publication is not re-executed: its publication is retried as publish_retry does (mode publish_retry, action publication_retry). Responses name the started action and include run_status/run_phase; no-work refusals say nothing started. Non-admin uplinks may rerun branch-push runs; tag/release runs need an admin; force-free replay requires the newest source, an unchanged tag object, current credential-aware plans and complete terminal observations for every tag attempt (or no Workflow intent). Secret-store/WIF starts, incomplete observation, legacy plans, older sources, moved tags and unknown evidence require force. Pending Workflow deletion is refused even with force. A tag that is already published or green is refused, so it is never published twice. Audited as run.rerun. |
+| `run_purge` | Purge retained logs, artifacts, or both for one terminal run. Requires an unscoped admin uplink and a reason. Active runs, release evidence, promotion evidence, open-issue evidence and active grants are protected. Run and step history stays visible; every purge is audited. |
+| `artifacts` | List the files a run kept: test reports, coverage output, anything the pipeline copied to OBERTH_ARTIFACTS. Cheap; call this before artifact_get. |
+| `artifact_get` | Return one artifact's contents by run ID and name, optionally filtered server-side. Prefer a pattern over retrieving a whole file: the response reports total and matched line counts so a narrowed read is never mistaken for a complete one. |
+| `run_logs` | Return one exact burn/step log by full run ID or unique hexadecimal prefix (at least 8 characters), optionally filtered server-side. Active steps without retained output return an actionable pending error. Log discovery/filtering scan at most 4 MiB each per call and stop head pages early on limit. total_scanned_bytes includes both phases; scan_limit_bytes is the aggregate cap (4 MiB terminal, 8 MiB active). Pattern scans allow one concurrent call per bearer token and two globally; waiting shares the 10-second read budget. When has_more is true, continue with next_byte_offset as byte_offset, retaining tail/pattern/context and resetting offset to zero. Counts are lower bounds unless scan_complete is true; bytes is exact only when bytes_exact is true. withheld_bytes/withheld_lines report omitted data. Lines above 64 KiB are omitted and counted. |
+| `wait` | Long-poll until a SHA or exact run reaches a terminal state; timeout returns still-running cleanly. Timeout defaults to 600 seconds and cannot exceed 600; larger values are rejected. The CLI allows at least 60 seconds, or the tool timeout plus 30 seconds, unless --timeout overrides its client deadline. Pass id alone to wait for one run by full ID or unique prefix of at least 8 hex characters. When trigger is set, waits for a run with that trigger (e.g. 'release' for a tag-push run). |
+| `sync` | Park the exact SHA's WIP branch upstream without a green gate; this is not completion or promotion evidence. Rejects promotion, release, plan, and apply runs. When the SHA has branch-trigger runs on multiple distinct branches, the explicit branch argument is required. |
+| `promote` | Green-gate and publish a SHA without force. |
+| `promotion_list` | Recover durable promotion IDs by exact repository/source SHA/status. Read-only, newest admission first; pass next_before (or next_cursor for a scoped uplink) as before for older records. Status comes from the committed promotion row, as in promote_status; remote ref equality alone never marks a pending record passed. |
+| `promote_status` | Wait for an append-only promotion record to become terminal. A failed or interrupted promotion that was retried names its successor in retried_as. Timeout defaults to 600 seconds and cannot exceed 600; larger values are rejected. The CLI allows at least 60 seconds, or the tool timeout plus 30 seconds, unless --timeout overrides its client deadline. |
+| `promote_retry` | Retry a failed or interrupted promotion: a new promotion of the same repository, source SHA and target, merged onto the target's current head and re-tested like promote. After a transient push-only failure, an unchanged target reuses the exact tested SHA without repeating CI. Same authorization as promote; a grant is consumed only by a delivered promotion, so the original grant authorizes the retry. Refused while a promotion of the same tuple is pending or delivered, or when the source SHA's newest run is not green. Audited as promotion.retry. |
+| `issue_create` | Create a manual issue, installation-wide or filed under one upstream. Uplinks scoped to that upstream see it; an uplink scoped to one upstream files there by default. |
+| `issue_get` | Get an issue by ID. Full record by default for compatibility. Optional fields selects only named fields; body_limit caps retained body/occurrence-history bytes with an explicit truncated N bytes marker. The numeric occurrences count remains exact. Read-only; does not renew locks. |
+| `issue_get_many` | Get 1..50 issues in request order, each with issue or error (not_found or response_limit). Full records by default. Optional fields and body_limit apply to each issue before the 256 KiB structured JSON budget; body_limit truncates body/occurrence history with a truncated N bytes marker, keeping numeric occurrences exact. Use compact options or issue_get for response_limit IDs. Read-only; does not renew locks. |
+| `issue_update` | Update work_status (todo, active, waiting, review), title and body, or move a manual issue to an upstream (empty or global means installation-wide, admin only). A non-admin can move only a visible issue to an upstream in scope. expected_revision atomically checks the current metadata revision; a mismatch is a conflict. Revision advances only for real title, state, work_status or upstream changes, not body edits. When expected_body_sha256 is set, the server checks the existing body hash inside the write transaction and rejects a mismatch. Returns only id, state, updated_at, occurrences, appended_bytes (zero); use issue_get to read content. |
+| `issue_append` | Append text to an issue body with a dated separator, without replacing the existing content. Use for CI investigation updates without re-sending the existing body. Returns only id, state, updated_at, occurrences, appended_bytes (UTF-8 bytes of text, excluding separator); use issue_get to read content. |
+| `issue_close` | Close an issue without deleting its history. Returns only id, state, updated_at, occurrences, appended_bytes (zero); use issue_get to read content. |
+| `issue_reopen` | Reopen a manual issue without changing its ID or history. Already-open manual issues are unchanged; CI issues cannot be reopened manually. |
+| `issue_delete` | Delete an accidentally created manual issue. |
+| `issue_list` | List issue metadata, newest creation ID first (not latest updated), with total and faceted state/kind counts. Filters apply before pagination; counts exclude the cursor. Returns work_status and computed stale for open issues past their window. Defaults to all issues, 50 per page; pass next_before as before with the same filters until absent for a complete queue scan. |
+| `issue_unlock` | Break an issue lock, recording its previous owner. Admin only; visibility and audit gate enforced. |
+| `issue_close_many` | Close 1..50 unique issues with a reason and per-ID results. Admin only; active locks remain enforced, one audit action per closure. |
+| `issue_lock` | Acquire or renew the caller-owned five-minute issue lock. |
+| `uplink_list` | List public uplink identities and usage. Unscoped admin only. No tokens are returned. |
+| `uplink_revoke` | Revoke an uplink SSH key and bearer immediately. Unscoped admin only; audited; the last active unscoped admin cannot be revoked. |
+| `uplink_rotate` | Finish rotation to an already registered active replacement key with identical identity, admin status and scope, atomically revoking the selected old credential. Unscoped admin only. Issue the replacement through uplink add first; no key material crosses MCP. |
+| `access_dismiss` | Dismiss one stale pending declaration. Unscoped admin only. Copy its exact repository key from access_list; legacy or orphaned keys are supported. Scoped uplinks are refused. Audited; later admission can observe it again. |
+| `kubevirt_grant_list` | Deprecated; retained for legacy VM pipelines. List active KubeVirt grants for every repository. Unscoped admin only. |
+| `access_list` | List secret access grants for a repository. |
+| `access_allow` | Grant a step access to a secret path. Requires admin uplink. |
+| `access_revoke` | Revoke a step's access to a secret path. Requires admin uplink. |
+| `workflow_capability_grant` | Grant operator-owned Kubernetes access and extended resources to one registered repository. The operator owns the ServiceAccount, RBAC and namespace quota. Administrator only; audited. Existing technology-specific grants confer no authority here. |
+| `workflow_capability_revoke` | Revoke a repository's operator capability. New submissions and restart adoption refuse the revoked authority. Running Kubernetes workloads remain operator-owned. Administrator only; audited. |
+| `workflow_capability_get` | Read the repository's current or revoked operator capability within the caller's upstream scope. |
+| `kubevirt_grant` | Deprecated; retained for legacy VM pipelines. Grant a registered repository permission to submit narrowly admitted KubeVirt VMI templates and KVM device leaves (oberth.ci/kvm-templates, including guest-test lanes), with a VMI budget shared across its admitted runs. The budget bounds VMI creates only; KVM leaves declare no VMI demand. Unset budget fields default to 2 VMs, 6 cores, 12Gi; the server's cluster ceiling still caps the budget at admission. Granting an active grant again with a different budget replaces it. Admin uplink required; audited. |
+| `kubevirt_revoke` | Deprecated; retained for legacy VM pipelines. Revoke a repository's KubeVirt permission for VMI templates and KVM device leaves. New submissions fail closed; running workflows continue. Admin uplink required; audited. |
+| `kubevirt_grant_get` | Deprecated; retained for legacy VM pipelines. Read a repository's KubeVirt grant, which authorizes both VMI templates and KVM device leaves (oberth.ci/kvm-templates), and its VMI budget shared across admitted runs. |
+| `resource_grant` | Set a repository's per-container CPU, memory and ephemeral-storage ceilings, expressed as requests and limits. Does not change workflow declarations or legacy size/priority policy. Admin only; audited. |
+| `resource_revoke` | Revoke a numeric resource ceiling to the defaults (requests/limits: 4 CPU, 8Gi memory, 16Gi ephemeral-storage). Admin only; audited. |
+| `resource_grant_get` | Read the repository's numeric resource ceiling and grant provenance. Applies to every fresh submission, including releases. |
+| `size_grant` | Raise (or set) the largest admission size a repository's branch, promotion and schedule runs may declare. The default without a grant is L; XL reserves the whole host and makes every other repository wait for a full drain. Re-enables automatic tag priority: only the oldest waiting tag per repository qualifies, and only within this size maximum. Ungranted repositories default to enabled within L. Admin uplink required; audited. |
+| `size_revoke` | Return a repository to maximum L and disable its automatic tag priority, even if never granted. Explicit admin bumps, promotions and 60-minute aging of normal runs into high still apply; running work continues. Admin uplink required; audited. |
+| `size_grant_get` | Read legacy admission size and priority policy, plus the independent numeric resource ceiling. Use resource_grant to change request/limit ceilings. |
+| `queue_priority_config` | Replace administrator RC branch globs (case-sensitive * and ? match slash); [] disables RC priority. Applies to queued runs immediately. A normal run waiting 60 minutes ages into high (reason aged) at its own queue position; nothing ages into highest. Unscoped admin only; audited. |
+| `queue_priority_get` | Read administrator RC globs and the aging threshold after which a normal run joins high. Unscoped admin only. |
+| `priority_grant` | Allow an identity to request submission priority up to max_class until expires (RFC3339). Unscoped admin only; audited. |
+| `priority_grant_list` | List submission priority grants, including expiry. Unscoped admin only. |
+| `priority_grant_revoke` | Revoke an identity's submission priority grant. Accepted runs keep their priority. Unscoped admin only; audited. |
+| `run_priority` | Bump one run awaiting resource admission to high or highest priority. Cannot lower priority or preempt admitted work. Unscoped admin only; audited, reason required. |
+| `admission_release` | Release one admission reservation no owner will release: typically a granted reservation still held for a run that is already terminal because its owner hung or was lost (also an ungranted one of a terminal run, or a retained one while a stopping scheduler drains). A live run's reservation is refused (use run_cancel). The run's Workflow is deleted first as proof; a granted run with no recorded Workflow (a trusted preflight) needs force, as does a failed deletion. Admin uplink required, unscoped only; audited. system_status lists every reservation. |
+| `repo_usage` | Report bounded outside-step kubelet/cAdvisor usage by repository and step: per-container app/init/helper/VM launcher p50/p95/max, pod storage peaks and per-run pod overlap; requests, paired used/request ratios and per-step peaks grouped by observed Workflow size class (S/M/L/XL or unknown). Peaks are sampled lower bounds; missing/killed samples remain unknown. Does not change admission. |
+| `repo_list` | List registered repositories with their upstream and probe state. |
+| `repo_archive` | Archive a repository, retaining all history and refusing new work. Requires an unscoped admin; refuses in-flight runs and pending promotions. Drops the Git cache. |
+| `repo_unarchive` | Unarchive a repository and allow new work again. Requires an unscoped admin. |
+| `repo_remove` | Remove a repository mapping and its Git cache. Requires admin uplink. Refuses if runs are in-flight or promotions are pending. |
+| `run_list` | List the queue first, with the run admitted next at its bottom, then running runs newest start first, then terminal runs newest finish first. Queued and running runs are never dropped by the limit or pushed below finished runs. Every run that has not started has display_status queued with display_reason naming what it waits for. superseded:true finds branch runs with newer queued/running work in the same repository/ref/schedule-entry lane, excluding tags and promotion attempts. Priority-protected runs and runs with pending publications can still match; review before explicit admin run_cancel. A full terminal page returns next_before (or next_cursor for a scoped uplink); pass it as before with the same filters for older runs until it is absent. |
+| `audit_list` | List verified audit-chain entries newest first. Admin uplink required; a scoped uplink gets no audit rows. Each entry carries its chain position (id, sha256, previous_sha256) and is recomputed against the chain's hash before it is returned. A full page returns next_before; pass it as before for older entries. |
+| `schedule_list` | List the schedules declared in repositories' .oberth/schedule.yaml with their cron, next run, last outcome and any pause. A scoped uplink sees its own repositories. |
+| `schedule_pause` | Pause one schedule entry: a due tick records outcome paused instead of firing. Requires admin uplink; audited as schedule.pause. |
+| `schedule_resume` | Resume a paused schedule entry. It fires once at its next tick if it came due while paused. Requires admin uplink; audited as schedule.resume. |
+| `schedule_trigger` | Run one schedule entry now: queues a trigger=schedule run at the entry's branch head through the normal CI admission path, as the caller. Refused while the repository has active runs, or the entry is paused, unless force is set (a forced normal-priority run supersedes only unprotected active runs of the same branch and entry; protected priority/RC runs are preserved, and a priority submission queues independently; other entries and ordinary pushes remain independent). Requires admin uplink; audited as schedule.trigger. |
+| `system_status` | Return system health: database, upstreams, cluster, audit, and version. |
+| `publish_retry` | Retry the upstream publication for a branch or tag run whose burns all passed but whose upstream push failed. Input is one full run ID or unique hexadecimal prefix of at least 8 characters. Refuses when the run is not in a publishing-failed or upstream publication infrastructure-failed state, or when the cached Git object no longer matches the record. Transient server/transport failures retry automatically up to five attempts over about thirty minutes. Responses name the actual action and include run_status/run_phase from the same committed snapshot as publication status. A pending response says publication is queued and names the publication and run IDs; poll run_get or wait for the run while finalization is recovered. A promotion (or its CI run) is retried with promote_retry instead, which reuses a tested push-only candidate when its target is unchanged, or merges onto the current head and re-tests. |
+| `secretstore_plan` | Compute the policy/role diff that `oberth secretstore sync` would apply based on current approved grants. Admin uplink required. Read-only: the server never receives an admin Bao token. Returns per-repo policy names and paths; never secret values. |
+| `secretstore_sync_receipt` | Record a secretstore.sync materialization receipt in the audit chain. Admin uplink required. The server recomputes the plan digest and records status current or stale. Posted by `oberth secretstore sync` after a successful sync. |
+| `secretstore_verify` | Verify real secret-store login and KV reads using configured server or release-tier trust. Admin uplink required. Returns paths/key counts, optionally field names; never secret values. Does not change infrastructure or grants. |
+| `promote_grant` | Create a time-bounded promotion grant authorizing any non-admin uplink to promote an exact (repository, SHA, target) tuple. Admin uplink required. The grant is single-use: consumed atomically when a matching promotion succeeds. |
+| `promote_grant_revoke` | Revoke an active promotion grant. Admin uplink required. Already-consumed or already-revoked grants are refused. |
+| `promote_grant_list` | List promotion grants with optional repository, SHA, and status filters. Read-only. |
 
 Authenticated `GET` endpoints (`/api/runs`, `/api/repos`, `/api/issues`,
 `/api/status`) serve the same state; `/healthz`, `/livez`, and `/readyz` are
@@ -361,7 +431,7 @@ unauthenticated.
   chain always runs and is verified at startup, on every cycle, and before
   every mutation. By default (`auditAnchor.tsaURL` and `auditAnchor.rekorURL`
   empty) no external service is contacted — Rekor and public TSAs are free
-  services with no SLA, and a kind-on-a-laptop install should never depend on
+  services with no SLA, and a local kind install should never depend on
   them. Opting in layers on: RFC 3161 timestamps from an independent TSA →
   linked Rekor witnesses under a stable identity derived from the SSH host
   key → immutable Kubernetes continuity records the server can create but
@@ -451,6 +521,8 @@ the exact annotated tag only after the run is green.
 
 
 ## Documentation
+
+- [CLI command reference](docs/cli-reference.md) — rendered help for every command and subcommand
 
 - [docs/mcp-setup.md](docs/mcp-setup.md) — connect Claude Code or any MCP client
 - [docs/architecture.md](docs/architecture.md) — run lifecycle and recovery

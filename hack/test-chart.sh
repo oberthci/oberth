@@ -151,7 +151,14 @@ grep -A4 '^    - name: https$' "$desired_service_manifest" | grep -q '^      por
 grep -A5 '^    - name: https$' "$desired_service_manifest" | grep -q '^      nodePort: 30443$'
 grep -q '^  name: oberth$' "$manifest"
 sed -n '/# Source: oberth\/templates\/pvc.yaml/,/^---$/p' "$manifest" | grep -q '^    helm.sh/resource-policy: keep$'
-sed -n '/resources: \["pods"\]/,/verbs:/p' "$manifest" | grep -q 'verbs: \["get", "list", "watch", "patch"\]'
+# Server namespace access is limited to ConfigMaps. Exec belongs exclusively
+# to the pipeline Role for source seeding.
+if sed -n '/# Source: oberth\/templates\/rbac.yaml/,/^---$/p' "$manifest" | grep -Eq '"pods(/log|/exec)?"'; then
+  echo 'server namespace Role grants unused pod access' >&2
+  exit 1
+fi
+sed -n '/# Source: oberth\/templates\/rbac-argo.yaml/,/^---$/p' "$manifest" | grep -q 'resources: \["pods/exec"\]'
+test "$(grep -c 'resources: \["pods/exec"\]' "$manifest")" -eq 1
 # ConfigMap least privilege: the collection rule is read/create/watch only
 # (watch feeds the secret-access reconciler and cannot be name-scoped
 # portably); in-place mutation exists solely as a resourceNames-scoped update
@@ -414,9 +421,8 @@ fi
 if render --set upstream.keyFile=. >/dev/null 2>&1; then
   exit 1
 fi
-if render --set upstream.keySecret=shared --set upstream.knownHostsSecret=shared >/dev/null 2>&1; then
-  exit 1
-fi
+# Retired Secret names are inert compatibility values, including equal names.
+render --set upstream.keySecret=shared --set upstream.knownHostsSecret=shared >/dev/null
 if render --set persistence.size=9Gi >/dev/null 2>&1; then
   exit 1
 fi
@@ -454,6 +460,7 @@ fi
 render --set networkPolicy.enabled=true --show-only templates/networkpolicy.yaml >"$netpol_manifest"
 grep -Fq 'kubernetes.io/metadata.name: openbao' "$netpol_manifest"
 grep -Fq 'port: 8200' "$netpol_manifest"
+grep -Fq 'kubernetes.io/metadata.name: "kube-system"' "$netpol_manifest"
 # NetworkPolicy: alternate namespace.
 render --set networkPolicy.enabled=true \
   --set networkPolicy.vault.namespace=vault \
@@ -466,15 +473,23 @@ render --set networkPolicy.enabled=true \
   --set-json 'networkPolicy.vault={"externalCIDRs":["10.0.1.5/32"],"port":8200}' \
   --show-only templates/networkpolicy.yaml >"$ext_netpol"
 grep -Fq 'cidr: 10.0.1.5/32' "$ext_netpol"
-# Structural assertion: external vault mode must not emit a namespaceSelector
-# rule. Strip YAML comments first — the template's documentation legitimately
-# names the field, and helm template preserves comments in rendered output.
-if grep -v '^[[:space:]]*#' "$ext_netpol" | grep -Fq 'namespaceSelector'; then
-  echo "networkpolicy: external vault mode must not render a namespaceSelector rule" >&2
+# External vault mode removes only the store namespace rule. The DNS
+# namespace restriction must remain in force independently.
+grep -Fq 'kubernetes.io/metadata.name: "kube-system"' "$ext_netpol"
+if grep -Fq 'kubernetes.io/metadata.name: openbao' "$ext_netpol"; then
+  echo "networkpolicy: external vault mode must not retain the store namespace rule" >&2
   exit 1
 fi
 # NetworkPolicy: enabled by default (resource rendered).
 render --show-only templates/networkpolicy.yaml | grep -q 'NetworkPolicy'
+# Pipeline ingress isolates listeners by default; either opt-out suppresses it.
+render --show-only templates/pipeline-ingress-networkpolicy.yaml | grep -q 'name: oberth-pipeline-ingress'
+for disabled in networkPolicy.enabled=false networkPolicy.pipelineIngress.enabled=false; do
+  if render --set "$disabled" --show-only templates/pipeline-ingress-networkpolicy.yaml 2>/dev/null | grep -q 'kind: NetworkPolicy'; then
+    echo "pipeline ingress unexpectedly rendered with $disabled" >&2
+    exit 1
+  fi
+done
 # NetworkPolicy: explicitly disabled suppresses the resource.
 if render --set networkPolicy.enabled=false --show-only templates/networkpolicy.yaml 2>/dev/null | grep -q 'NetworkPolicy'; then
   exit 1

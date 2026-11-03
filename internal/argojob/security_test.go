@@ -102,7 +102,7 @@ func TestBuildForcesTheContainerSecurityBaselineEverywhere(t *testing.T) {
 		if security.Capabilities != nil && len(security.Capabilities.Add) > 0 {
 			t.Errorf("%s adds capabilities: %v", where, security.Capabilities.Add)
 		}
-		// A read-only root is only safe because /tmp is writable: the Go
+		// A read-only root is only safe because private scratch is writable: the Go
 		// toolchain writes to os.TempDir() on every build.
 		writableTmp := false
 		for _, mount := range container.VolumeMounts {
@@ -153,7 +153,7 @@ func TestBuildProvidesAWritableTmpVolume(t *testing.T) {
 		if volume.EmptyDir == nil {
 			t.Fatalf("%s is not an emptyDir: %+v", stepTmpVolumeName, volume)
 		}
-		// Issue #440: the injected /tmp emptyDir must carry a bounded
+		// Issue #440: the injected private scratch emptyDir must carry a bounded
 		// SizeLimit to prevent node-disk exhaustion.
 		if volume.EmptyDir.SizeLimit == nil || volume.EmptyDir.SizeLimit.IsZero() {
 			t.Fatalf("%s emptyDir has no SizeLimit; an uncapped emptyDir can exhaust node disk", stepTmpVolumeName)

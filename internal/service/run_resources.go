@@ -141,8 +141,7 @@ func (s *API) readRunResources(ctx context.Context, raw json.RawMessage) (any, e
 			continue
 		}
 		if r.Truncated {
-			step.Suggested = nil
-			step.NoSuggestion = append(step.NoSuggestion, "history row limit reached; narrow the run selection")
+			step.RefuseSizing("history row limit reached; narrow the run selection")
 		}
 		r.Steps = append(r.Steps, step)
 	}

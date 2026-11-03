@@ -155,6 +155,9 @@ func TestNonrootArgoAcceptsPlatformProtectionReuse(t *testing.T) {
 	if err := yaml.Unmarshal(body, &overlay); err != nil {
 		t.Fatal(err)
 	}
+	if _, ok := overlay["controller"].(map[string]any)["resources"]; ok {
+		t.Fatal("priority overlay must not impose our installation's resource sizing")
+	}
 	for _, profile := range []bool{false, true} {
 		values := map[string]any{}
 		if profile {

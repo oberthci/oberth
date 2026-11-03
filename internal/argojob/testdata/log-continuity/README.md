@@ -1,6 +1,6 @@
 # Failed-init status regression
 
-Minimized from the coordinator-provided Workflow and Pod status dumps for
+Minimized from the administrator-provided Workflow and Pod status dumps for
 2a1971bf and 105ea601 (2026-10-30). Only ownership, node identity and container
 status fields remain. There are no environment, command, image, network or
 credential values. Main is Waiting/PodInitializing with no container ID;

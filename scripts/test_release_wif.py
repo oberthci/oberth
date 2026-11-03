@@ -14,7 +14,7 @@ from unittest.mock import patch
 import urllib.parse
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('wif', ROOT / 'scripts/release-wif-credential.py')
+spec = importlib.util.spec_from_file_location('wif', ROOT / 'scripts/oberth-release-wif-credential.py')
 wif = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(wif)
 

@@ -137,6 +137,8 @@ Flags:
   --ca-file <path>     PEM CA certificate for TLS verification
   --timeout <duration> Client deadline override (e.g. 90s or 11m); by default
                        at least 60s, or the tool timeout plus 30s for long polls
+  --reconnect-window <duration>  Read reconnect window across server restarts
+  -o <path>           Alias for --output
   --args-file <path>   Read tool arguments JSON from a file (or "-" for stdin);
                        bypasses the shell argv length ceiling for large payloads
   --output <path>      artifact_get only: stream the artifact's exact bytes to
@@ -324,7 +326,7 @@ func parseMCPFlags(name string, arguments []string, wantPositional int) (mcpFlag
 		return result, err
 	}
 	if help {
-		return result, commandHelpError{usage: "Usage: oberth " + name + " [--url URL] [--token-file PATH] [--ca-file PATH] [--timeout DURATION] [--reconnect-window DURATION]"}
+		return result, commandFlagHelp(flags, "Usage: oberth "+name+" [arguments] [flags]")
 	}
 	flags.Visit(func(f *flag.Flag) {
 		if f.Name == "timeout" {

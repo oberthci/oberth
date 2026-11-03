@@ -40,7 +40,7 @@ this adds no server/chart RBAC and performs no cleanup itself.
    path rechecks the inventory. Restart ordinary submissions after verifying
    readiness and recovery.
 
-Schema 47 still preserves the live legacy journals and recovery engine in this
+Schema 48 still preserves the live legacy journals and recovery engine in this
 candidate. This gate adds protection at replacement time; it does not complete
 Stage 2 removal or migrate a repository's VM-based pipeline. Direct Helm/image
 replacement bypasses the CLI guard and must follow the same drain and absence

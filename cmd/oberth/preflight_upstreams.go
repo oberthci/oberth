@@ -21,12 +21,17 @@ func runPreflightUpstreams(arguments []string, output io.Writer) error {
 	flags.SetOutput(io.Discard)
 	inventory := flags.String("inventory", "", "complete old-server upstream list metadata file")
 	if err := flags.Parse(arguments); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			flags.SetOutput(output)
+			flags.Usage()
+			return nil
+		}
 		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if *inventory == "" || flags.NArg() != 0 {
 		return fmt.Errorf("%w: preflight upstreams --inventory FILE", errUsage)
 	}
-	file, err := os.Open(*inventory) // #nosec G304 -- explicit coordinator-supplied metadata file, bounded below.
+	file, err := os.Open(*inventory) // #nosec G304 -- explicit administrator metadata file, bounded below.
 	if err != nil {
 		return err
 	}

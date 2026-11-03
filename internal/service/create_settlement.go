@@ -167,7 +167,7 @@ func (scheduler *Scheduler) restoreCreateGrant(run model.Run, grant *admissionRe
 }
 
 // registerCreateCleanup never waits for Kubernetes, including on startup,
-// push and cancellation paths. Failed local restores are owned by the worker.
+// push and cancellation paths. Failed local restores are owned by the background task.
 func (scheduler *Scheduler) registerCreateCleanup(run model.Run, grant *admissionReservation, persisted bool) {
 	// Serialize local restoration and registration so concurrent wake/cancel
 	// callers cannot repeat its admission side effects.
@@ -208,7 +208,7 @@ func createSettlementBackoff(attempt int) time.Duration {
 	return min(5*time.Second*time.Duration(1<<min(max(attempt-1, 0), 6)), 5*time.Minute)
 }
 
-// One shared worker, one due run per tick. Per-attempt API/DB work is bounded;
+// One shared background task, one due run per tick. Per-attempt API/DB work is bounded;
 // retries have no total deadline. An outage holds that grant, never the server.
 func (scheduler *Scheduler) runCreateCleanup(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)

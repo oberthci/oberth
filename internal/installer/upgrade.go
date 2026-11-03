@@ -16,6 +16,8 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
+
+	"github.com/oberthci/oberth/internal/retirement"
 )
 
 // canonicalGARPrefix is the canonical Google Artifact Registry prefix for
@@ -27,6 +29,7 @@ const DefaultUpgradeWaitTimeout = 2 * time.Hour
 
 // UpgradeConfig holds options for the upgrade command.
 type UpgradeConfig struct {
+	OwnershipHandoff      string        // operator-verified connector/site handoff receipt
 	WaitTimeout           time.Duration // independent queue-observation limit
 	WaitFor               string        // all or critical; a nonempty selection enables waiting
 	WaitIdle              bool          // optional advisory queue drain; ordinary upgrades adopt in-flight work
@@ -45,7 +48,6 @@ type UpgradeConfig struct {
 	TLSRemoveDNSNames     []string
 	TLSRemoveIPs          []string
 	OpenBaoNamespace      string
-	serverCACert          string
 	serverPKI             bool
 	storedValues          string // internal schema-validated legacy migration snapshot
 }
@@ -391,6 +393,14 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	if err := checkUpgradeLegacyResources(ctx, cfg, deps); err != nil {
 		return result, err
 	}
+	if err := checkUpgradeOwnership(ctx, cfg, deps, currentVersion); err != nil {
+		return result, err
+	}
+	if retirement.LegacyExecutionRemoved && semver.Compare(canonicalChartVersion(cfg.BinaryVersion), "v0.17.83-0") >= 0 {
+		if err := checkUpgradeLegacyRepositories(ctx, cfg, deps); err != nil {
+			return result, err
+		}
+	}
 
 	profile, cleanupProfile, err := prepareUpgradeControllerProfile(ctx, cfg, deps)
 	if err != nil {
@@ -500,6 +510,14 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	if err := checkUpgradeLegacyResources(ctx, cfg, deps); err != nil {
 		return result, err
 	}
+	if err := checkUpgradeOwnership(ctx, cfg, deps, currentVersion); err != nil {
+		return result, err
+	}
+	if retirement.LegacyExecutionRemoved && semver.Compare(canonicalChartVersion(cfg.BinaryVersion), "v0.17.83-0") >= 0 {
+		if err := checkUpgradeLegacyRepositories(ctx, cfg, deps); err != nil {
+			return result, err
+		}
+	}
 
 	if profile != nil {
 		if err := profile.apply(ctx, cfg, deps); err != nil {
@@ -507,11 +525,10 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		}
 	}
 	if pki != nil {
-		ca, replaced, err := ensureServerPKI(ctx, pki.config, pki.store, pki.token, map[string]baoMount{defaultServerPKIMount + "/": {Type: "pki"}})
+		_, replaced, err := ensureServerPKI(ctx, pki.config, pki.store, pki.token, map[string]baoMount{defaultServerPKIMount + "/": {Type: "pki"}})
 		if err != nil {
 			return result, fmt.Errorf("reconcile server PKI before upgrade: %w", err)
 		}
-		cfg.serverCACert = ca
 		if replaced {
 			_, _ = fmt.Fprintln(w, "Server CA replaced; clients pinning the previous CA must refresh their trust anchor.")
 		}
@@ -645,10 +662,6 @@ func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string, compatibility ba
 		"--set-string", "compatibility.witnessKeyInfo="+compatibility.WitnessKeyInfo,
 		// Keep the existing proxy enablement and mapping from reused values.
 		"--set", "argo.goProxy.port=8444",
-		// Preserve the administrator's enablement through reused configuration.
-		// An absent enabled key renders false; a present value remains subject
-		// to the chart's boolean schema. Only the reviewed image pins override
-		// stored connector configuration (#671).
 	)
 	if cfg.ArgoControllerProfile != "" {
 		args = append(args, "--set-string", "argo.controllerProfile="+cfg.ArgoControllerProfile)
@@ -666,9 +679,6 @@ func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string, compatibility ba
 		dns, _ := json.Marshal(append([]string{}, cfg.TLSExtraDNSNames...))
 		ips, _ := json.Marshal(append([]string{}, cfg.TLSExtraIPs...))
 		args = append(args, "--set-json", "tls.extraDNSNames="+string(dns), "--set-json", "tls.extraIPs="+string(ips))
-		if cfg.serverCACert != "" {
-			args = append(args, "--set-string", "watchTunnel.originCACert="+cfg.serverCACert)
-		}
 	}
 	// Only pin --version for published charts; a local path IS the version.
 	if cfg.ChartOverride == "" && cfg.BinaryVersion != "" {

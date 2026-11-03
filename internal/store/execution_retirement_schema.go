@@ -1,6 +1,6 @@
 package store
 
-const executionRetirementMigrationVersion = 47
+const executionRetirementMigrationVersion = 48
 
 // Stage 2 retirement is deferred. No live journal, capacity slot, grant or
 // cancellation is removed or frozen. A Recreate upgrade must reach owner

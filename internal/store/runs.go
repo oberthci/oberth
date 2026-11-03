@@ -900,8 +900,8 @@ SELECT completed_at FROM run_cancellations WHERE run_id = ? AND job_name = ?`, r
 }
 
 // CompleteSupersededRunCancellationWithoutJob closes the narrow race in which
-// a worker is superseded or cancelled after claim but exits before publishing
-// its deterministic Job name. Callers invoke this only after that exact worker has
+// a background task is superseded or cancelled after claim but exits before publishing
+// its deterministic Job name. Callers invoke this only after that exact background task has
 // returned; the durable predicates make every earlier or unrelated call a
 // no-op.
 func (s *Store) CompleteSupersededRunCancellationWithoutJob(ctx context.Context, runID string) error {

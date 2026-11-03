@@ -111,7 +111,7 @@ class SourceTests(unittest.TestCase):
             verifier.verify_source(self.root, self.sha, 'v1.2.3')
 
     def test_dirty_wif_helper_is_rejected(self):
-        helper = 'scripts/release-wif-credential.py'
+        helper = 'scripts/oberth-release-wif-credential.py'
         self.assertIn(helper, verifier.SOURCE_FILES)
         self.git('update-index', '--assume-unchanged', helper)
         (self.root / helper).write_text('attacker helper')

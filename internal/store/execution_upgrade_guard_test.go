@@ -39,7 +39,7 @@ func TestExecutionUpgradePreservesInFlightWorkForRecovery(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if _, err = s.db.Exec(resourceCeilingDowngradeSQL + `DELETE FROM schema_migrations WHERE version=47`); err != nil {
+			if _, err = s.db.Exec(resourceCeilingDowngradeSQL + `DELETE FROM schema_migrations WHERE version=48`); err != nil {
 				t.Fatal(err)
 			}
 			candidate, err := OpenAdminClient(ctx, path, Options{})
@@ -50,7 +50,7 @@ func TestExecutionUpgradePreservesInFlightWorkForRecovery(t *testing.T) {
 				t.Fatalf("busy upgrade must reach owner recovery for %s: %v", scenario, err)
 			}
 			var applied int
-			if err = s.db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE version=47`).Scan(&applied); err != nil || applied != 1 {
+			if err = s.db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE version=48`).Scan(&applied); err != nil || applied != 1 {
 				t.Fatalf("compatible upgrade not recorded: %d %v", applied, err)
 			}
 			// Migration must not mark an unobserved external object as cleaned
@@ -84,7 +84,7 @@ func TestExecutionUpgradeAllowsDrainedGrantsAndLaterRecovery(t *testing.T) {
 	if _, err = s.SetKubeVirtGrant(ctx, repo.ID, "admin", true, KubeVirtBudget{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.db.Exec(resourceCeilingDowngradeSQL + `DELETE FROM schema_migrations WHERE version=47`); err != nil {
+	if _, err = s.db.Exec(resourceCeilingDowngradeSQL + `DELETE FROM schema_migrations WHERE version=48`); err != nil {
 		t.Fatal(err)
 	}
 	_ = s.Close()

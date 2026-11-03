@@ -427,7 +427,7 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 					preflightErr = errors.Join(preflightErr, fmt.Errorf("%w: %w", errPreflightCancellationPending, err))
 				}
 			}
-			continue // The live owner or terminal cleanup worker confirms absence.
+			continue // The live owner or terminal cleanup background task confirms absence.
 		}
 		if isPendingCreate(run) || scheduler.ownsCreateCleanup(run.ID) {
 			scheduler.registerCreateCleanup(run, nil, isPendingCreate(run))
@@ -609,7 +609,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 			if !scheduler.dispatchSlotAvailable(active) {
 				available, err := scheduler.priorityDispatchAvailable(dispatchCtx, active)
 				if store.IsTransientLockError(err) {
-					break // Keep workers alive; retry on the next notification or poll.
+					break // Keep background tasks alive; retry on the next notification or poll.
 				}
 				if err != nil {
 					join()

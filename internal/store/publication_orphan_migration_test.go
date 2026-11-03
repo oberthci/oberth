@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestV41MigrationRejectsOrphanPublicationAtV38(t *testing.T) {
+func TestV43MigrationRejectsOrphanPublicationAtV38(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "orphan-v38.sqlite")
 	s, err := OpenAdminClient(t.Context(), path, Options{})
 	if err != nil {
@@ -35,7 +35,7 @@ func TestV41MigrationRejectsOrphanPublicationAtV38(t *testing.T) {
 	if got != nil {
 		_ = got.Close()
 	}
-	if !errors.Is(err, ErrSchemaIncompatible) || !strings.Contains(err.Error(), "migration 42") || !strings.Contains(err.Error(), "PRAGMA foreign_key_check") || !strings.Contains(err.Error(), "publications") {
+	if !errors.Is(err, ErrSchemaIncompatible) || !strings.Contains(err.Error(), "migration 43") || !strings.Contains(err.Error(), "PRAGMA foreign_key_check") || !strings.Contains(err.Error(), "publications") {
 		t.Fatalf("orphan upgrade must fail with actionable integrity diagnosis: %v", err)
 	}
 	var version, count int

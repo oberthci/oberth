@@ -25,10 +25,10 @@ evidence without collecting artifacts from a live workspace; artifact collection
 requires an actually terminal Workflow.
 
 Definite rejection and foreign-name refusal never route through Delete. An
-uncertain POST uses v0.17.72's shared create-settlement worker. A failed delete
+uncertain POST uses v0.17.72's shared create-settlement background task. A failed delete
 after successful creation/submission-record failure also transfers to that
-worker when the engine supports settlement. Its run and admission stay retained
-while Kubernetes is unavailable; unrelated runs can progress and the worker's
+background task when the engine supports settlement. Its run and admission stay retained
+while Kubernetes is unavailable; unrelated runs can progress and the background task's
 error never exits the scheduler. Only confirmed cleanup settles it, without an
 automatic execution retry. Existing ownership checks remain mandatory.
 

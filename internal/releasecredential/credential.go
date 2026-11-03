@@ -16,7 +16,7 @@ import (
 )
 
 const Registry = "europe-west4-docker.pkg.dev"
-const helper = "/work/src/scripts/release-wif-credential.py"
+const helper = "/work/src/scripts/oberth-release-wif-credential.py"
 
 // FromEnvironment selects exactly one authentication mode. A configured WIF
 // failure cannot read the legacy operand, even when that file exists.

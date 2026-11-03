@@ -69,7 +69,13 @@ func main() {
 	}
 }
 
+const releaseSupportUsage = "oberth-release-support semver-compare LEFT RIGHT | normalize-tree DIR CREATED | chart-index-state INDEX VERSION DIGEST URL | chart-index-rebase INDEX REPOSITORY OUTPUT | registry-digest REF CREDENTIAL_SOURCE_JSON | registry-token ACTION SOURCE_JSON OUTPUT | r2-auth TOKEN_FILE ACCOUNT_ID BUCKET PREFIX OUTPUT | heartbeat LABEL ./.oberth/release.sh ACTION (build|publish-images|package-chart|publish-chart|verify|finalize)"
+
 func run(ctx context.Context, arguments []string, output io.Writer) error {
+	if len(arguments) == 1 && (arguments[0] == "--help" || arguments[0] == "-h") {
+		_, err := fmt.Fprintln(output, "Usage: "+releaseSupportUsage)
+		return err
+	}
 	switch {
 	case len(arguments) == 3 && arguments[0] == "semver-compare":
 		if !semver.IsValid(arguments[1]) || !semver.IsValid(arguments[2]) {
@@ -107,7 +113,7 @@ func run(ctx context.Context, arguments []string, output io.Writer) error {
 	case len(arguments) >= 4 && arguments[0] == "heartbeat":
 		return runReleaseHeartbeat(ctx, arguments[1], arguments[2], arguments[3:], output, releaseHeartbeatInterval)
 	default:
-		return errors.New("usage: oberth-release-support semver-compare LEFT RIGHT | normalize-tree DIR CREATED | chart-index-state INDEX VERSION DIGEST URL | chart-index-rebase INDEX REPOSITORY OUTPUT | registry-digest REF CREDENTIAL_SOURCE_JSON | registry-token ACTION SOURCE_JSON OUTPUT | r2-auth TOKEN_FILE ACCOUNT_ID BUCKET PREFIX OUTPUT | heartbeat LABEL ./.oberth/release.sh ACTION (build|publish-r2|publish-images|package-chart|publish-chart|verify|finalize)")
+		return errors.New("usage: " + releaseSupportUsage)
 	}
 }
 
@@ -259,8 +265,6 @@ func releaseActionCommand(ctx context.Context, action string) (*exec.Cmd, error)
 	switch action {
 	case "build":
 		return exec.CommandContext(ctx, repositoryReleaseScript, "build"), nil
-	case "publish-r2":
-		return exec.CommandContext(ctx, repositoryReleaseScript, "publish-r2"), nil
 	case "publish-images":
 		return exec.CommandContext(ctx, repositoryReleaseScript, "publish-images"), nil
 	case "package-chart":

@@ -20,7 +20,7 @@ import (
 	"github.com/oberthci/oberth/internal/storetest"
 )
 
-// Upstream-scoped uplinks (#073): a work laptop scoped to github must get only
+// Upstream-scoped uplinks (#073): a work workstation scoped to github must get only
 // github content and github counts, and nothing it receives, errors
 // included, may name or count what lies on codeberg.
 

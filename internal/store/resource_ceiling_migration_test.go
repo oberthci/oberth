@@ -13,7 +13,7 @@ import (
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
-const resourceCeilingDowngradeSQL = testdb.PostV48Downgrade + `DROP TABLE IF EXISTS resource_ceilings; DELETE FROM schema_migrations WHERE version>=48;`
+const resourceCeilingDowngradeSQL = testdb.PostV49Downgrade + `DROP TABLE IF EXISTS resource_ceilings; DELETE FROM schema_migrations WHERE version>=49;`
 
 func TestStage2ResourceCeilingMigration(t *testing.T) {
 	ctx := t.Context()
@@ -54,8 +54,8 @@ func TestStage2ResourceCeilingMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	var previous, versions int
-	if err = s.db.QueryRowContext(ctx, `SELECT MAX(version), COUNT(*) FROM schema_migrations`).Scan(&previous, &versions); err != nil || previous != 47 || versions != 47 {
-		t.Fatalf("upgrade must start from contiguous v47: max=%d count=%d err=%v", previous, versions, err)
+	if err = s.db.QueryRowContext(ctx, `SELECT MAX(version), COUNT(*) FROM schema_migrations`).Scan(&previous, &versions); err != nil || previous != 48 || versions != 48 {
+		t.Fatalf("upgrade must start from contiguous v48: max=%d count=%d err=%v", previous, versions, err)
 	}
 	if err = s.migrate(ctx, nil); err != nil {
 		t.Fatal(err)

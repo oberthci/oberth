@@ -24,6 +24,10 @@ func TestUpgradeRefusesLegacyResourcesBeforeMutation(t *testing.T) {
 					t.Errorf("preflight mutated API: %s %s", r.Method, r.URL.Path)
 				}
 				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Path == "/api/v1/namespaces/kube-system" {
+					_, _ = io.WriteString(w, `{"apiVersion":"v1","kind":"Namespace","metadata":{"name":"kube-system","uid":"cluster-uid"}}`)
+					return
+				}
 				if r.URL.Path == "/apis/argoproj.io/v1alpha1" {
 					if scenario == "discovery unavailable" {
 						http.Error(w, "unavailable", http.StatusServiceUnavailable)
@@ -107,6 +111,9 @@ func TestUpgradeRefusesLegacyResourcesBeforeMutation(t *testing.T) {
 				case "list":
 					return []byte(`[{"name":"oberth","chart":"oberth-0.17.80","status":"deployed","revision":1}]`), nil
 				case "get":
+					if args[1] == "manifest" {
+						return []byte{}, nil
+					}
 					if args[1] == "values" {
 						return []byte(`{"argo":{"namespace":"custom-pipelines"}}`), nil
 					}
@@ -120,7 +127,12 @@ func TestUpgradeRefusesLegacyResourcesBeforeMutation(t *testing.T) {
 				mutations++
 				return nil, fmt.Errorf("unexpected command")
 			}}
-			_, err = RunUpgrade(t.Context(), UpgradeConfig{Namespace: "oberth", BinaryVersion: "0.17.83", DryRun: scenario != "apply preflight"}, deps)
+			receipt := handoffFixture(t, "")
+			receipt["source_namespace"] = "oberth"
+			receipt["source_revision"] = "1"
+			receipt["connector"] = map[string]any{"mode": "unused", "reason": "fixture has no connector"}
+			receipt["site"] = map[string]any{"mode": "unused", "reason": "fixture has no site"}
+			_, err = RunUpgrade(t.Context(), UpgradeConfig{Namespace: "oberth", BinaryVersion: "0.17.83", OwnershipHandoff: writeHandoff(t, receipt), DryRun: scenario != "apply preflight"}, deps)
 			if requests == 0 || mutations != 0 {
 				t.Fatalf("requests=%d mutations=%d error=%v", requests, mutations, err)
 			}

@@ -24,7 +24,8 @@ type weightedAdmission struct {
 	// weights is the operator's weight per size (#1021).
 	weights SizeWeights
 	// maxHeadWait bounds new backfill. At the limit, admission drains
-	// existing holders for the head without granting more followers.
+	// existing holders for the head without granting more followers until
+	// maxDrainDuration expires and available-capacity backfill resumes.
 	// Zero disables backfill (strict FIFO).
 	maxHeadWait time.Duration
 	// now is the gate's clock; nil is time.Now.

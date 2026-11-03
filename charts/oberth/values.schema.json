@@ -17,7 +17,6 @@
     "resources",
     "podAnnotations",
     "podLabels",
-    "secretCreatePolicy",
     "compatibility"
   ],
   "properties": {
@@ -287,6 +286,12 @@
         "maxAge": {
           "$ref": "#/definitions/duration"
         },
+        "gateTimeout": {
+          "$ref": "#/definitions/duration"
+        },
+        "verifyTimeout": {
+          "$ref": "#/definitions/duration"
+        },
         "rootsSecret": {
           "$ref": "#/definitions/optionalKubernetesName"
         },
@@ -528,11 +533,9 @@
       }
     },
     "secretCreatePolicy": {
-      "type": "object",
+      "description": "Retired compatibility key: accepted and ignored. Kubernetes Secret creation is not supported.",
+      "type": ["object", "null"],
       "additionalProperties": false,
-      "required": [
-        "enabled"
-      ],
       "properties": {
         "enabled": {
           "type": "boolean"
@@ -550,6 +553,25 @@
         "enabled": {
           "type": "boolean",
           "description": "Create a NetworkPolicy in the pipeline namespace restricting egress. Disable on clusters without a NetworkPolicy-capable CNI."
+        },
+        "dnsNamespace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+          "description": "DNS resolver Pod namespace. Default kube-system, including old reused values."
+        },
+        "dnsAnyDestination": {
+          "type": "boolean",
+          "description": "Explicitly allow DNS to any destination for host-networked/node-local resolvers. Default false."
+        },
+        "pipelineIngress": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"}
+          },
+          "description": "Restrict pipeline listeners to same-namespace Pods and this release's server Pod. Default true, including old reused values."
         },
         "vault": {
           "type": "object",

@@ -143,7 +143,7 @@ func waitSlice2Cleanup(t *testing.T, paths []string) {
 }
 
 // slice2Owner joins every scheduler before its fixture store can close, even
-// when an assertion fails. The closed latch also exposes worker errors without
+// when an assertion fails. The closed latch also exposes background task errors without
 // consuming a one-shot result needed by teardown.
 type slice2Owner struct {
 	cancel   context.CancelFunc
@@ -260,7 +260,7 @@ func TestStartupAdoptsPromotionTagAndReleaseAcrossRepeatedRestarts(t *testing.T)
 				if final.Status != model.RunPassed {
 					t.Fatalf("run = %#v, want passed", final)
 				}
-				// Run joins adopted workers, including terminal workspace cleanup.
+				// Run joins adopted background tasks, including terminal workspace cleanup.
 				// Assert after that barrier instead of racing a filesystem poll.
 				for _, path := range paths {
 					if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
@@ -352,7 +352,7 @@ func TestAdoptedPromotionRechecksMovedMainBeforePublication(t *testing.T) {
 			t.Fatalf("blocked cleanup already removed %s: %v", path, err)
 		}
 	}
-	// Run joins adopted workers, including both terminal workspace removals.
+	// Run joins adopted background tasks, including both terminal workspace removals.
 	owner.stop(t)
 	for _, path := range paths {
 		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
@@ -499,7 +499,7 @@ func TestNewPromotionTagAndReleaseKeepWorkflowAndWorkspaceOnShutdown(t *testing.
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			done := make(chan error, 1)
-			// Exercise the newly created worker tail (not only adopted shutdown).
+			// Exercise the newly created background task tail (not only adopted shutdown).
 			go func() { done <- scheduler.executeAndCleanup(ctx, run) }()
 			waitSlice2Worker(t, done, jobs.waitEntered)
 			cancel()

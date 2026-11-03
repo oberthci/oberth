@@ -33,7 +33,7 @@ are audited atomically. Revocation restores defaults for new submissions.
 Lookup failures refuse submission. Validation, audit and submission share the
 same snapshot; running workflows retain their declarations.
 
-Migration 48 copies existing size grants exactly: L becomes 4 CPU / 8Gi / 16Gi,
+Migration 49 copies existing size grants exactly: L becomes 4 CPU / 8Gi / 16Gi,
 and XL becomes 8 CPU / 16Gi / 32Gi, in both requests and limits. Actor, timestamps
 and revocations are preserved. Absent and revoked grants use defaults. After
 upgrade, size grants control only deprecated size admission and tag-priority
@@ -96,7 +96,7 @@ finalization use the same code.
 After deployment, run branch CI, inspect its resource history, then commit any
 resource/deadline changes in the owning workflow alongside the code change.
 For example, `oberth run resources --repo repo-01 --step step-abc12345 --yaml`.
-The anonymised laptop table remains unchanged and cannot supply suggestions
+The anonymised comparison table remains unchanged and cannot supply suggestions
 where attempt identity is ambiguous.
 
 ## Admission reservation
@@ -147,4 +147,4 @@ and repository groups remain coarse admission controls. Full graph,
 recovery and rollout details are in [declared admission](declared-admission.md).
 Existing sealed demand is restored without recalculating it from current git;
 helper and run reserves use the restoring server's settings. Numeric resource
-ceilings require migration 48.
+ceilings require migration 49.

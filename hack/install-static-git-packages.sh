@@ -33,7 +33,7 @@ esac
 # shellcheck disable=SC2086
 if [ "$#" -eq 2 ]; then
   # CI has a read-only root filesystem. Install the exact toolchain under its
-  # private /tmp; no package script, chroot, host mount or capability is needed.
+  # private scratch; no package script, chroot, host mount or capability is needed.
   # shellcheck disable=SC2086
   /sbin/apk --root "$2" --initdb --no-scripts --keys-dir /etc/apk/keys \
     --repositories-file /etc/apk/repositories add --no-cache $APK_PACKAGES

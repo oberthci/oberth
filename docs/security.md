@@ -34,7 +34,7 @@
   RuntimeDefault, dropALL, read-only root and no privilege escalation. A fixed
   server initializer uses UID0 only to prepare fresh per-Pod scratch directories;
   it has no token, PVC or host mount and never changes shared ownership. Selected
-  leaves consume source/tools read-only and use bounded ephemeral `/tmp` caches.
+  leaves consume source/tools read-only and use bounded ephemeral private scratch caches.
   This is separate from trusted VM execution. Browser sandbox compatibility
   still needs proof under the actual runtime; no capabilities, unconfined
   seccomp or sandbox-disabling flags are granted by this mode.
@@ -131,11 +131,24 @@
   arbitrary filesystem scan.
 - Pipeline egress is deny-by-default on clusters with a conforming NetworkPolicy
   CNI (Cilium, Calico). DNS, HTTPS (port 443), and the secret store are
-  allowlisted; the cloud metadata endpoint (169.254.169.254) is blocked. On k3s
-  with the built-in kube-router NetworkPolicy controller, the installer disables
-  enforcement automatically and prints a warning, because kube-router's DNAT
-  handling causes TCP RST on repeated ClusterIP connections, breaking Argo's
-  emissary executor.
+  allowlisted; the cloud metadata endpoint (169.254.169.254) is blocked. k3s includes a
+  NetworkPolicy controller and fresh installs keep enforcement enabled there.
+  Reruns preserve an operator's stored choice; an explicitly or previously
+  disabled policy produces a prominent warning. Clusters must provide an
+  enforcing CNI; selecting the Kubernetes distribution alone does not prove
+  that an operator has left its controller enabled.
+- DNS egress (UDP/TCP 53) targets resolver Pods in
+  `networkPolicy.dnsNamespace` (default `kube-system`). For host-networked or
+  node-local resolvers, explicitly set `networkPolicy.dnsAnyDestination=true`;
+  this restores unrestricted DNS destinations. Configure this before upgrade
+  if the resolver is not represented by ordinary Pods in the selected namespace.
+- Pipeline ingress allows only Pods in the pipeline namespace and this
+  release's server Pod (both its namespace and identity labels must match).
+  `networkPolicy.pipelineIngress.enabled=false` explicitly disables this
+  listener isolation; `networkPolicy.enabled=false` disables both directions.
+  Upgrade manifests apply the new ingress and DNS defaults even when old
+  reused values omit these keys. These are additive Kubernetes policies;
+  unrelated administrator policies can grant additional access.
 - SQLite accepts only the immutable fresh-schema identity; incompatible or newer
   databases fail before startup recovery.
 

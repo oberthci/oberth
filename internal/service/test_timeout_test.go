@@ -34,7 +34,7 @@ func testTimeout(base time.Duration) time.Duration {
 // testStartTimeout bounds expected asynchronous progress, including startup,
 // acquisition, completion and shutdown. These guards fail on expiry rather than
 // deliberately waiting it out; allow at least 30s for a loaded host to schedule
-// the worker. The floor adds no delay when the expected event arrives promptly.
+// the background task. The floor adds no delay when the expected event arrives promptly.
 func testStartTimeout(base time.Duration) time.Duration {
 	return max(testTimeout(base), 30*time.Second)
 }

@@ -18,7 +18,7 @@ and closes the connection. Retry those connections; a server-side lookup
 failure does not indicate that the client key needs to be registered again.
 
 Git CLI is the only backend. There is no in-process Git implementation,
-comparison worker or shadow telemetry. Retired `--git-backend`,
+comparison background task or shadow telemetry. Retired `--git-backend`,
 `--gitcache-shadow` and OBERTH_GITCACHE_SHADOW settings have no runtime role.
 For upgrade/install/restore value reuse, the chart accepts and ignores exactly
 `gitBackend: cli` and `gitcache.shadow: false`. `go-git`, newly supplied
@@ -27,7 +27,7 @@ For upgrade/install/restore value reuse, the chart accepts and ignores exactly
 removing that key from a private snapshot used for both schema preflight and
 application, with an explicit diagnostic. All other user configuration remains
 subject to the target schema; the original Helm revision remains untouched
-for exact rollback. This migration does not enable a shadow worker.
+for exact rollback. This migration does not enable a shadow background task.
 
 The scratch server image contains static Git 2.56.0 (zlib only), static Oberth,
 `oberth-git-ssh -> oberth`, and the pinned Alpine CA bundle. It has no shell,
@@ -66,10 +66,10 @@ builds the same pinned C recipe as Dockerfile's git-build stage, then runs the
 complete tagged CLI suite on the already allowed, digest-pinned Go runner.
 The built scratch-like payload is mounted read-only; Oberth's verified nonroot
 profile assigns real UID/GID 65534. A static, single-threaded CI launcher uses
-Landlock to expose only payload/fixture/tmp/proc/dev reads and permit execution
+Landlock to expose only payload, fixture, scratch, procfs and device reads and permit execution
 only of candidate Git, Oberth and the test executable. The runner's templates
 and interpreters cannot mask missing runtime dependencies; PATH has no shell.
-Git object/quarantine moves remain allowed within non-executable `/tmp`.
+Git object/quarantine moves remain allowed within non-executable private scratch.
 Landlock ABI 2 or newer and the already enabled `nonroot-static-v1` controller
 profile are required: unavailable restrictions fail closed. No image-prefix,
 privilege, capability or security-context exception is introduced. The full
