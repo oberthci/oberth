@@ -2126,15 +2126,15 @@ trust assumptions and complete invalidation rules.
   re-synced, an already-running credentialed step whose token was obtained
   before the revocation can still read the path; new runs are blocked by
   Oberth's own admission gate.
-- Kubernetes access is namespace-scoped, with one documented exception: when
-  `secretstore.enabled` is set, the chart may create a `system:auth-delegator`
-  ClusterRoleBinding for the Oberth ServiceAccount so OpenBao validates login
-  tokens via TokenReview without a stored reviewer JWT
-  (`secretstore.createAuthDelegatorBinding`), and the namespace Role gains
-  `pods/exec` create for the in-memory secret delivery. Job pods receive no
-  service-account token, run as UID/GID 0 with all Linux capabilities dropped
-  (`Capabilities.Drop: ["ALL"]`), have bounded resources and deadlines, never
-  retry, and are garbage-collected after completion. Argo-authored workflows
+- The server-namespace Role grants only ConfigMap access: collection
+  create/get/list/watch and update of `oberth-secret-access` by exact name.
+  It grants no Pod, `pods/log` or `pods/exec` access. The separate pipeline
+  namespace Role grants `pods/exec` create only for source seeding into
+  run-scoped volumes. Pipeline secrets arrive through projected identity
+  tokens and envconsul, not through the exec stream. The optional
+  `secretstore.createAuthDelegatorBinding` ClusterRoleBinding lets OpenBao
+  validate login tokens through TokenReview without a stored reviewer JWT.
+  Argo-authored workflows
   may select named plain container/script leaves with the static annotation
   `oberth.ci/nonroot-templates: test-one,test-two`. In this initial mode the
   entire workflow must be uncredentialed, with no templateDefaults, and selected

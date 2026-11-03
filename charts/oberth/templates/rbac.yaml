@@ -7,12 +7,6 @@ metadata:
     {{- include "oberth.labels" . | nindent 4 }}
 rules:
   - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list", "watch", "patch"]
-  - apiGroups: [""]
-    resources: ["pods/log"]
-    verbs: ["get"]
-  - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["create", "get", "list", "watch"]
   # The secret-access grants ConfigMap is the only ConfigMap the server may
@@ -26,15 +20,7 @@ rules:
     resources: ["configmaps"]
     resourceNames: ["oberth-secret-access"]
     verbs: ["update"]
-  {{- if .Values.secretstore.enabled }}
-  # Store-sourced release secrets are delivered into the running release Pod
-  # over the exec subresource so their values never exist in etcd or on node
-  # disk. Runner Pod names are run-scoped, so resourceNames cannot restrict
-  # this; the namespace contains only Oberth's own Pods.
-  - apiGroups: [""]
-    resources: ["pods/exec"]
-    verbs: ["create"]
-  {{- end }}
+
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

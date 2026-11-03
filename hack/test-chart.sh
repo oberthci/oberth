@@ -151,7 +151,14 @@ grep -A4 '^    - name: https$' "$desired_service_manifest" | grep -q '^      por
 grep -A5 '^    - name: https$' "$desired_service_manifest" | grep -q '^      nodePort: 30443$'
 grep -q '^  name: oberth$' "$manifest"
 sed -n '/# Source: oberth\/templates\/pvc.yaml/,/^---$/p' "$manifest" | grep -q '^    helm.sh/resource-policy: keep$'
-sed -n '/resources: \["pods"\]/,/verbs:/p' "$manifest" | grep -q 'verbs: \["get", "list", "watch", "patch"\]'
+# Server namespace access is limited to ConfigMaps. Exec belongs exclusively
+# to the pipeline Role for source seeding.
+if sed -n '/# Source: oberth\/templates\/rbac.yaml/,/^---$/p' "$manifest" | grep -Eq '"pods(/log|/exec)?"'; then
+  echo 'server namespace Role grants unused pod access' >&2
+  exit 1
+fi
+sed -n '/# Source: oberth\/templates\/rbac-argo.yaml/,/^---$/p' "$manifest" | grep -q 'resources: \["pods/exec"\]'
+test "$(grep -c 'resources: \["pods/exec"\]' "$manifest")" -eq 1
 # ConfigMap least privilege: the collection rule is read/create/watch only
 # (watch feeds the secret-access reconciler and cannot be name-scoped
 # portably); in-place mutation exists solely as a resourceNames-scoped update
