@@ -1359,7 +1359,7 @@ spec:
           cpu: 1250m
           memory: 8Gi
         limits:
-          cpu: 5000m
+          cpu: 4000m
           memory: 9728Mi
   - name: release-sign-binaries
     metadata:

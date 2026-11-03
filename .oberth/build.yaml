@@ -852,7 +852,7 @@ spec:
           cpu: 1996m
           memory: 2867000Ki
         limits:
-          cpu: 5000m
+          cpu: 4000m
           memory: 8Gi
   # ---- parallel race-test burns ----
   # Each package runs once: dedicated store/service/gitcache groups and the
