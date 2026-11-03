@@ -41,6 +41,7 @@ check_default() {
 check_default
 # New policy defaults must also apply when old --reuse-values omit their keys.
 grep -Fq 'kubernetes.io/metadata.name: "kube-system"' "$work/rendered.yaml"
+grep -Fq 'name: oberth-pipeline-ingress' "$work/rendered.yaml"
 
 # The reset-then-reuse path merges new defaults with the old release's values.
 "$helm_tool" template oberth "$chart" --is-upgrade --namespace oberth \

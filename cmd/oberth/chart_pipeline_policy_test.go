@@ -45,3 +45,32 @@ func TestChartPipelineDNSIsolation(t *testing.T) {
 		})
 	}
 }
+
+func TestChartPipelineIngressIsolation(t *testing.T) {
+	for _, enabled := range []bool{true, false} {
+		var extra []string
+		if !enabled {
+			extra = []string{"--set", "networkPolicy.pipelineIngress.enabled=false"}
+		}
+		policies, server := renderGoProxyPolicies(t, 8444, extra...)
+		pipeline := chartPolicyEndpoint{namespace: "pipeline-system"}
+		for _, tc := range []struct {
+			name    string
+			source  chartPolicyEndpoint
+			allowed bool
+		}{
+			{"pipeline peer", pipeline, true},
+			{"this release server", server, true},
+			{"unrelated server namespace pod", chartPolicyEndpoint{namespace: server.namespace}, false},
+			{"server labels in another namespace", chartPolicyEndpoint{namespace: "other-system", labels: server.labels}, false},
+			{"unrelated namespace pod", chartPolicyEndpoint{namespace: "other-system"}, false},
+			{"external client", chartPolicyEndpoint{}, false},
+		} {
+			for _, port := range []int32{80, 8444, 3000} {
+				if got := chartPolicyAllows(t, policies, networkingv1.PolicyTypeIngress, tc.source, pipeline, port); got != (!enabled || tc.allowed) {
+					t.Errorf("enabled=%v %s port=%d allowed=%v", enabled, tc.name, port, got)
+				}
+			}
+		}
+	}
+}

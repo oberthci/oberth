@@ -142,6 +142,13 @@
   node-local resolvers, explicitly set `networkPolicy.dnsAnyDestination=true`;
   this restores unrestricted DNS destinations. Configure this before upgrade
   if the resolver is not represented by ordinary Pods in the selected namespace.
+- Pipeline ingress allows only Pods in the pipeline namespace and this
+  release's server Pod (both its namespace and identity labels must match).
+  `networkPolicy.pipelineIngress.enabled=false` explicitly disables this
+  listener isolation; `networkPolicy.enabled=false` disables both directions.
+  Upgrade manifests apply the new ingress and DNS defaults even when old
+  reused values omit these keys. These are additive Kubernetes policies;
+  unrelated administrator policies can grant additional access.
 - SQLite accepts only the immutable fresh-schema identity; incompatible or newer
   databases fail before startup recovery.
 

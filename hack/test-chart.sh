@@ -482,6 +482,14 @@ if grep -Fq 'kubernetes.io/metadata.name: openbao' "$ext_netpol"; then
 fi
 # NetworkPolicy: enabled by default (resource rendered).
 render --show-only templates/networkpolicy.yaml | grep -q 'NetworkPolicy'
+# Pipeline ingress isolates listeners by default; either opt-out suppresses it.
+render --show-only templates/pipeline-ingress-networkpolicy.yaml | grep -q 'name: oberth-pipeline-ingress'
+for disabled in networkPolicy.enabled=false networkPolicy.pipelineIngress.enabled=false; do
+  if render --set "$disabled" --show-only templates/pipeline-ingress-networkpolicy.yaml 2>/dev/null | grep -q 'kind: NetworkPolicy'; then
+    echo "pipeline ingress unexpectedly rendered with $disabled" >&2
+    exit 1
+  fi
+done
 # NetworkPolicy: explicitly disabled suppresses the resource.
 if render --set networkPolicy.enabled=false --show-only templates/networkpolicy.yaml 2>/dev/null | grep -q 'NetworkPolicy'; then
   exit 1

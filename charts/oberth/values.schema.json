@@ -549,6 +549,14 @@
           "type": "boolean",
           "description": "Explicitly allow DNS to any destination for host-networked/node-local resolvers. Default false."
         },
+        "pipelineIngress": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"}
+          },
+          "description": "Restrict pipeline listeners to same-namespace Pods and this release's server Pod. Default true, including old reused values."
+        },
         "vault": {
           "type": "object",
           "additionalProperties": false,

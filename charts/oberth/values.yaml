@@ -551,6 +551,9 @@ networkPolicy:
   # Explicit escape hatch for host-networked or node-local DNS resolvers.
   # This permits DNS to any destination; keep false for ordinary CoreDNS Pods.
   dnsAnyDestination: false
+  # Isolate listeners to pipeline peers and this release's server Pod.
+  pipelineIngress:
+    enabled: true
   # Extra in-namespace egress for sidecar services the pipeline needs on
   # non-standard ports, such as a Docker API shim backing Testcontainers.
   # Both are scoped to the pipeline namespace and grant nothing outside it.
