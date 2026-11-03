@@ -60,7 +60,7 @@ official v0.73.0 image. Every credentialed leaf checks all five pins.
 
 GAR actions use release-only Workload Identity Federation (WIF), selected by
 `oberth.ci/release-wif-role` on the admitted leaf. The public
-`scripts/release-wif-credential.py` helper exchanges the projected JWT at Google
+`scripts/oberth-release-wif-credential.py` helper exchanges the projected JWT at Google
 STS, impersonates the administrator-configured source principal, then delegates
 to the matching Oberth principal. Final accounts below belong to
 `skipopsmain.iam.gserviceaccount.com`; source placeholders refer to full service

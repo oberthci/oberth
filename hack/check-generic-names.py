@@ -114,8 +114,10 @@ def check(root):
     bad = []
     for path in filter(None, paths):
         name = path.decode()
-        if (forbidden(path) or
-                forbidden((root / name).read_bytes(), allow_legacy=name in LEGACY_FILES)):
+        data = (root / name).read_bytes()
+        owns_publication_pins = name != 'scripts/oberth-release-wif-credential.py' or b"Oberth project's publication identities" in data
+        if (not owns_publication_pins or forbidden(path) or
+                forbidden(data, allow_legacy=name in LEGACY_FILES)):
             bad.append(path.decode(errors='replace'))
     if bad:
         print('Non-generic names or workstation paths found in tracked files:', file=sys.stderr)

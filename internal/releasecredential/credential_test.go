@@ -41,6 +41,19 @@ func TestModeFailsClosedBeforeLegacyRead(t *testing.T) {
 	}
 }
 
+func TestWIFUsesProjectOwnedHelper(t *testing.T) {
+	t.Setenv("OBERTH_RELEASE_WIF", "1")
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "/run/oberth-gar/adc.json")
+	auth, err := FromEnvironment(t.Context(), "wif")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, ok := auth.(*credential)
+	if !ok || c.script != "/work/src/scripts/oberth-release-wif-credential.py" {
+		t.Fatalf("WIF helper must name its project ownership: %+v", auth)
+	}
+}
+
 func TestHelperPipeAndRenewal(t *testing.T) {
 	script := filepath.Join(t.TempDir(), "helper.py")
 	body := `import json,os,stat,sys

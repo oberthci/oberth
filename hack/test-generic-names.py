@@ -44,6 +44,14 @@ class NameCheckTests(unittest.TestCase):
         self.write('scratch.txt', self.brand.encode(), tracked=False)
         self.assertEqual(gate.check(self.root), 0)
 
+    def test_project_publication_pins_have_explicit_ownership(self):
+        (self.root / 'scripts').mkdir()
+        name = 'scripts/oberth-release-wif-credential.py'
+        self.write(name, b'"""Unqualified registry defaults."""\n')
+        self.assertEqual(gate.check(self.root), 1)
+        self.write(name, b'"""Oberth project\'s publication identities; forks replace them."""\n')
+        self.assertEqual(gate.check(self.root), 0)
+
     def test_mixed_case_substrings_and_binary_contents_fail(self):
         for body in (self.brand.upper().encode(),
                      b'prefix-' + self.brand.title().encode() + b'-suffix',

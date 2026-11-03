@@ -609,7 +609,7 @@ prepare_registry_auth() {
 			mkdir -p "$wif_config_dir/bin"
 			cat >"$wif_config_dir/bin/docker-credential-oberth-wif" <<'WIFHELPER'
 #!/bin/sh
-exec /usr/bin/python3 -I -S -B /work/src/scripts/release-wif-credential.py "$@"
+exec /usr/bin/python3 -I -S -B /work/src/scripts/oberth-release-wif-credential.py "$@"
 WIFHELPER
 			chmod 0700 "$wif_config_dir/bin/docker-credential-oberth-wif"
 			printf '{"credHelpers":{"%s":"oberth-wif"}}\n' "$gar_host" >"$wif_config_dir/config.json"

@@ -1,6 +1,10 @@
 #!/usr/bin/python3
 """Docker credential protocol: projected JWT -> STS -> configured source -> Oberth role.
 
+The registry, project number and fixed second-hop targets are the Oberth project's publication identities,
+not generic server defaults. Forks must replace these reviewed pins with their
+own publication identities and requalify the release pipeline.
+
 Only the credential-helper pipe receives credentials. No credentials are cached,
 written to files, passed in arguments, or included in diagnostics.
 """

@@ -2661,7 +2661,7 @@ it. The push banner remains an optional, display-only dashboard URL.
 
 ## Keyless GAR publication and verification (#557)
 
-The repository-owned credential helper (`scripts/release-wif-credential.py`)
+The repository-owned credential helper (`scripts/oberth-release-wif-credential.py`)
 serves all three WIF roles via an exact audience allowlist and
 administrator-configured first-hop accounts. The helper derives the active
 role from the `audience` field of the Oberth-projected ADC at
@@ -2782,7 +2782,7 @@ WIF and every other nonempty value fails closed.
 
 Both Go publisher binaries are rebuilt from admitted source and re-pinned in
 `.oberth/pins/bootstrap-tools.sha256`. Publisher source verification includes
-`scripts/release-wif-credential.py` before any credential is consumed.
+`scripts/oberth-release-wif-credential.py` before any credential is consumed.
 
 ### Protected controller prerequisite and upgrade (#887)
 
