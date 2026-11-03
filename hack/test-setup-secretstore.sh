@@ -15,7 +15,7 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 script=$root/scripts/setup-secretstore.sh
 
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+trap 'find "$work" -delete' EXIT
 bin=$work/bin
 mkdir -p "$bin"
 
@@ -25,6 +25,15 @@ cat >"$bin/bao" <<'MOCK'
 set -eu
 state="$MOCK_STATE"
 printf 'bao %s\n' "$*" >>"$state/calls.log"
+if [ "$*" = "${MOCK_FAIL_COMMAND:-}" ]; then
+  printf '%s' "${MOCK_FAIL_OUTPUT:-}" >&2
+  exit "${MOCK_FAIL_EXIT:-2}"
+fi
+absent() { printf 'No value found at %s\n' "$path" >&2; exit 2; }
+absent_mount() {
+  printf 'Error reading %s: Error making API request.\n\nCode: 400. Errors:\n\n* %s at %s/\n' "$path" "$1" "${path##*/}" >&2
+  exit 2
+}
 cmd="${1:-}"; shift || true
 case "$cmd" in
   token) exit 0 ;;
@@ -37,9 +46,15 @@ case "$cmd" in
     cat "$state/audit.json"
     exit 0 ;;
   auth)
+    if [ "${1:-}" = "list" ]; then
+      python3 -c 'import json, pathlib, sys; p = pathlib.Path(sys.argv[1]); print(json.dumps({"kubernetes/": {"type": p.read_text().strip()}} if p.exists() else {}))' "$state/auth-type"
+    fi
     if [ "${1:-}" = "enable" ]; then printf 'kubernetes\n' >"$state/auth-type"; fi
     exit 0 ;;
   secrets)
+    if [ "${1:-}" = "list" ]; then
+      python3 -c 'import json, pathlib, sys; p = pathlib.Path(sys.argv[1]); print(json.dumps({mount + "/": {"type": (p / name).read_text().strip()} for mount, name in [("oberth", "kv-type"), ("oberth-transit", "transit-type")] if (p / name).exists()}))' "$state"
+    fi
     if [ "${1:-}" = "enable" ]; then
       case "$*" in
         *" -path=oberth-transit transit") printf 'transit\n' >"$state/transit-type" ;;
@@ -52,27 +67,31 @@ case "$cmd" in
     for argument in "$@"; do
       case "$argument" in -field=*) field="${argument#-field=}" ;; *) path="$argument" ;; esac
     done
+    role_prefix=role-
+    case "$path" in
+      auth/*/role/*) [ "${path##*/}" = oberth-ci ] || role_prefix="${path##*/}-" ;;
+    esac
     case "$field:$path" in
-      type:sys/auth/*) [ -f "$state/auth-type" ] && cat "$state/auth-type" || exit 1 ;;
-      kubernetes_host:auth/*/config) [ -f "$state/config-host" ] && cat "$state/config-host" || exit 1 ;;
-      type:sys/mounts/oberth-transit) [ -f "$state/transit-type" ] && cat "$state/transit-type" || exit 1 ;;
-      type:sys/mounts/*) [ -f "$state/kv-type" ] && cat "$state/kv-type" || exit 1 ;;
+      type:sys/auth/*) [ -f "$state/auth-type" ] && cat "$state/auth-type" || absent_mount 'No auth engine' ;;
+      kubernetes_host:auth/*/config) [ -f "$state/config-host" ] && cat "$state/config-host" || absent ;;
+      type:sys/mounts/oberth-transit) [ -f "$state/transit-type" ] && cat "$state/transit-type" || absent_mount 'No secret engine mount' ;;
+      type:sys/mounts/*) [ -f "$state/kv-type" ] && cat "$state/kv-type" || absent_mount 'No secret engine mount' ;;
       options:sys/mounts/*)
-        [ -f "$state/kv-version" ] || exit 1
+        [ -f "$state/kv-version" ] || absent_mount 'No secret engine mount'
         printf 'map[version:%s]\n' "$(cat "$state/kv-version")" ;;
-      bound_service_account_names:auth/*/role/*) [ -f "$state/role-names" ] && cat "$state/role-names" || exit 1 ;;
-      bound_service_account_namespaces:auth/*/role/*) [ -f "$state/role-namespaces" ] && cat "$state/role-namespaces" || exit 1 ;;
-      token_policies:auth/*/role/*) [ -f "$state/role-policies" ] && cat "$state/role-policies" || exit 1 ;;
-      token_no_default_policy:auth/*/role/*) [ -f "$state/role-no-default" ] && cat "$state/role-no-default" || exit 1 ;;
-      token_ttl:auth/*/role/*) [ -f "$state/role-ttl" ] && cat "$state/role-ttl" || exit 1 ;;
-      token_max_ttl:auth/*/role/*) [ -f "$state/role-max-ttl" ] && cat "$state/role-max-ttl" || exit 1 ;;
-      type:oberth-transit/keys/*) [ -f "$state/transit-key-type" ] && cat "$state/transit-key-type" || exit 1 ;;
-      derived:oberth-transit/keys/*) [ -f "$state/transit-derived" ] && cat "$state/transit-derived" || exit 1 ;;
-      exportable:oberth-transit/keys/*) [ -f "$state/transit-exportable" ] && cat "$state/transit-exportable" || exit 1 ;;
-      allow_plaintext_backup:oberth-transit/keys/*) [ -f "$state/transit-plaintext-backup" ] && cat "$state/transit-plaintext-backup" || exit 1 ;;
-      supports_encryption:oberth-transit/keys/*) [ -f "$state/transit-supports-encryption" ] && cat "$state/transit-supports-encryption" || exit 1 ;;
-      supports_decryption:oberth-transit/keys/*) [ -f "$state/transit-supports-decryption" ] && cat "$state/transit-supports-decryption" || exit 1 ;;
-      *) exit 1 ;;
+      bound_service_account_names:auth/*/role/*) [ -f "$state/${role_prefix}names" ] && cat "$state/${role_prefix}names" || absent ;;
+      bound_service_account_namespaces:auth/*/role/*) [ -f "$state/${role_prefix}namespaces" ] && cat "$state/${role_prefix}namespaces" || absent ;;
+      token_policies:auth/*/role/*) [ -f "$state/${role_prefix}policies" ] && cat "$state/${role_prefix}policies" || absent ;;
+      token_no_default_policy:auth/*/role/*) [ -f "$state/${role_prefix}no-default" ] && cat "$state/${role_prefix}no-default" || absent ;;
+      token_ttl:auth/*/role/*) [ -f "$state/${role_prefix}ttl" ] && cat "$state/${role_prefix}ttl" || absent ;;
+      token_max_ttl:auth/*/role/*) [ -f "$state/${role_prefix}max-ttl" ] && cat "$state/${role_prefix}max-ttl" || absent ;;
+      type:oberth-transit/keys/*) [ -f "$state/transit-key-type" ] && cat "$state/transit-key-type" || absent ;;
+      derived:oberth-transit/keys/*) [ -f "$state/transit-derived" ] && cat "$state/transit-derived" || absent ;;
+      exportable:oberth-transit/keys/*) [ -f "$state/transit-exportable" ] && cat "$state/transit-exportable" || absent ;;
+      allow_plaintext_backup:oberth-transit/keys/*) [ -f "$state/transit-plaintext-backup" ] && cat "$state/transit-plaintext-backup" || absent ;;
+      supports_encryption:oberth-transit/keys/*) [ -f "$state/transit-supports-encryption" ] && cat "$state/transit-supports-encryption" || absent ;;
+      supports_decryption:oberth-transit/keys/*) [ -f "$state/transit-supports-decryption" ] && cat "$state/transit-supports-decryption" || absent ;;
+      *) absent ;;
     esac ;;
   write)
     target="${1:-}"; shift || true
@@ -82,14 +101,16 @@ case "$cmd" in
           case "$argument" in kubernetes_host=*) printf '%s\n' "${argument#kubernetes_host=}" >"$state/config-host" ;; esac
         done ;;
       auth/*/role/*)
+        role_prefix=role-
+        [ "${target##*/}" = oberth-ci ] || role_prefix="${target##*/}-"
         for argument in "$@"; do
           case "$argument" in
-            bound_service_account_names=*) printf '[%s]\n' "${argument#*=}" >"$state/role-names" ;;
-            bound_service_account_namespaces=*) printf '[%s]\n' "${argument#*=}" >"$state/role-namespaces" ;;
-            token_policies=*) printf '[%s]\n' "${argument#*=}" >"$state/role-policies" ;;
-            token_no_default_policy=*) printf '%s\n' "${argument#*=}" >"$state/role-no-default" ;;
-            token_ttl=*) printf '%s\n' "${argument#*=}" >"$state/role-ttl" ;;
-            token_max_ttl=*) printf '%s\n' "${argument#*=}" >"$state/role-max-ttl" ;;
+            bound_service_account_names=*) printf '[%s]\n' "${argument#*=}" >"$state/${role_prefix}names" ;;
+            bound_service_account_namespaces=*) printf '[%s]\n' "${argument#*=}" >"$state/${role_prefix}namespaces" ;;
+            token_policies=*) printf '[%s]\n' "${argument#*=}" >"$state/${role_prefix}policies" ;;
+            token_no_default_policy=*) printf '%s\n' "${argument#*=}" >"$state/${role_prefix}no-default" ;;
+            token_ttl=*) printf '%s\n' "${argument#*=}" >"$state/${role_prefix}ttl" ;;
+            token_max_ttl=*) printf '%s\n' "${argument#*=}" >"$state/${role_prefix}max-ttl" ;;
           esac
         done ;;
       oberth-transit/keys/*)
@@ -104,7 +125,12 @@ case "$cmd" in
   policy)
     sub="${1:-}"; name="${2:-}"
     if [ "$sub" = "read" ]; then
-      [ -f "$state/policy-$name" ] && cat "$state/policy-$name" || exit 1
+      if [ -f "$state/policy-$name" ]; then
+        cat "$state/policy-$name"
+      else
+        printf 'No policy named: %s\n' "$name" >&2
+        exit 2
+      fi
     elif [ "$sub" = "write" ]; then
       cat >"$state/policy-$name"
     fi
@@ -420,6 +446,109 @@ check '[ "$status" != 0 ]' "missing audit device must refuse the full setup"
 check '! calls_contain "bao auth enable"' "audit preflight must precede auth mutation"
 check '! calls_contain "bao write"' "audit preflight must precede store writes"
 check '! calls_contain "bao policy write"' "audit preflight must precede policy writes"
+
+# Both shipped helpers must discover all three absent mounts from checked JSON
+# lists, without relying on the CLI's different missing-mount read diagnostics.
+for candidate in "$root/scripts/setup-secretstore.sh" "$root/website/public/setup-secretstore.sh"; do
+  script=$candidate
+  begin "fresh-mounts-${candidate#"$root"/}"
+  fresh_state
+  run_script
+  check '[ "$status" = 0 ]' 'fresh store must configure successfully'
+  check 'calls_contain "bao auth list -format=json"' 'auth discovery must use JSON'
+  check 'calls_contain "bao secrets list -format=json"' 'secrets discovery must use JSON'
+  check '[ -f "$MOCK_STATE/auth-type" ] && [ -f "$MOCK_STATE/kv-type" ] && [ -f "$MOCK_STATE/transit-type" ]' 'fresh setup must enable auth, KV and Transit'
+  check '! calls_contain "bao read -field=type sys/"' 'mount discovery must not probe absent mount paths'
+  for kind in auth secrets; do
+    for failure in denied silent partial invalid null array missing-type empty-type wrong-type; do
+      case "$failure" in
+        denied) error_exit=2; error_output='Code: 403 permission denied' ;;
+        silent) error_exit=1; error_output='' ;;
+        partial) error_exit=2; error_output='{}' ;;
+        invalid) error_exit=0; error_output='invalid json' ;;
+        null) error_exit=0; error_output='null' ;;
+        array) error_exit=0; error_output='[]' ;;
+        missing-type) error_exit=0; error_output='{"kubernetes/":{}}' ;;
+        empty-type) error_exit=0; error_output='{"kubernetes/":{"type":""}}' ;;
+        wrong-type) error_exit=0; error_output='{"kubernetes/":{"type":42}}' ;;
+      esac
+      begin "mount-list-${candidate#"$root"/}-$kind-$failure"
+      fresh_state
+      MOCK_FAIL_COMMAND="$kind list -format=json" MOCK_FAIL_OUTPUT="$error_output" MOCK_FAIL_EXIT="$error_exit" \
+        run_script --force --force-auth-config
+      check '[ "$status" != 0 ]' 'unverified mount list must abort even with force flags'
+      check 'calls_contain "bao $kind list -format=json"' 'must reach targeted list'
+      check '! calls_contain "bao secrets enable"' 'failed list must not enable a secret engine'
+      if [ "$kind" = auth ]; then
+        check '! calls_contain "bao auth enable"' 'failed auth list must not enable auth'
+      fi
+    done
+  done
+done
+script=$root/scripts/setup-secretstore.sh
+
+# Failed reads must never become permission to replace an existing object,
+# including when the operator deliberately selected a force flag.
+for candidate in "$root/scripts/setup-secretstore.sh" "$root/website/public/setup-secretstore.sh"; do
+  saved_script=$script
+  script=$candidate
+  for target in config policy role credentialed-policy credentialed-role ci-policy ci-role; do
+    case "$target" in
+      config) read_command='read -field=kubernetes_host auth/kubernetes/config'; mutation='bao write auth/kubernetes/config ' ;;
+      policy) read_command='policy read oberth-ci'; mutation='bao policy write oberth-ci ' ;;
+      role) read_command='read -field=bound_service_account_names auth/kubernetes/role/oberth-ci'; mutation='bao write auth/kubernetes/role/oberth-ci ' ;;
+      credentialed-policy) read_command='policy read oberth-argo-credentialed'; mutation='bao policy write oberth-argo-credentialed ' ;;
+      credentialed-role) read_command='read -field=bound_service_account_names auth/kubernetes/role/oberth-argo-credentialed'; mutation='bao write auth/kubernetes/role/oberth-argo-credentialed ' ;;
+      ci-policy) read_command='policy read oberth-argo-ci-secrets'; mutation='bao policy write oberth-argo-ci-secrets ' ;;
+      ci-role) read_command='read -field=bound_service_account_names auth/kubernetes/role/oberth-argo-ci-secrets'; mutation='bao write auth/kubernetes/role/oberth-argo-ci-secrets ' ;;
+    esac
+    case "$candidate:$target" in */scripts/*:credentialed-*|*/scripts/*:ci-*) continue ;; esac
+    for failure in forbidden timeout tls malformed unknown silent wrong-absence empty-success; do
+      case "$failure" in
+        forbidden) error_exit=2; error_output='Error reading: Code: 403 permission denied' ;;
+        timeout) error_exit=2; error_output='context deadline exceeded' ;;
+        tls) error_exit=2; error_output='Error reading: tls: failed to verify certificate: x509: certificate signed by unknown authority' ;;
+        malformed) error_exit=2; error_output='Error reading: invalid character after object key in JSON response' ;;
+        unknown) error_exit=37; error_output='unexpected CLI failure' ;;
+        silent) error_exit=1; error_output='' ;;
+        wrong-absence) error_exit=2; error_output='No value found at another/path' ;;
+        empty-success) error_exit=0; error_output='' ;;
+      esac
+      begin "read-error-${candidate#"$root"/}-$target-$failure"
+      fresh_state
+      # Seed a matching server configuration; the public variant's extra
+      # tiers may be replaced with --force, but an unreadable target may not.
+      script=$root/scripts/setup-secretstore.sh
+      run_script
+      check '[ "$status" = 0 ]' 'fixture setup must succeed'
+      script=$candidate
+      : >"$MOCK_STATE/calls.log"
+      MOCK_FAIL_COMMAND="$read_command" MOCK_FAIL_OUTPUT="$error_output" MOCK_FAIL_EXIT="$error_exit" \
+        run_script --force --force-auth-config
+      check '[ "$status" != 0 ]' 'unverified read must abort even with force flags'
+      check 'calls_contain "bao $read_command"' 'must reach the targeted read'
+      if calls_contain "$mutation"; then
+        check false 'failed read must not authorize replacement'
+      fi
+      check 'contains "reading"' 'failure must identify the read error'
+      # F1's reported reproduction uses no force flags. Exercise that path
+      # directly for the server's config, policy and role. The public extra
+      # tiers above also exercise failed reads with explicit replacement flags.
+      if [ "$candidate" = "$root/scripts/setup-secretstore.sh" ]; then
+        : >"$MOCK_STATE/calls.log"
+        MOCK_FAIL_COMMAND="$read_command" MOCK_FAIL_OUTPUT="$error_output" MOCK_FAIL_EXIT="$error_exit" \
+          run_script
+        check '[ "$status" != 0 ]' 'unverified read must abort without force flags'
+        check 'calls_contain "bao $read_command"' 'must reach the targeted unforced read'
+        if calls_contain "$mutation"; then
+          check false 'failed unforced read must not authorize replacement'
+        fi
+        check 'contains "reading"' 'unforced failure must identify the read error'
+      fi
+    done
+  done
+  script=$saved_script
+done
 
 if [ "$failures" != 0 ]; then
   printf '%d setup-secretstore contract check(s) failed\n' "$failures" >&2

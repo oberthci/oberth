@@ -1,0 +1,76 @@
+suite: per-repository CI secret-store verification
+release:
+  name: oberth
+  namespace: server-system
+templates:
+  - templates/rbac-argo-ci-tokens.yaml
+set:
+  image.ref: example.invalid/oberth@sha256:1111111111111111111111111111111111111111111111111111111111111111
+tests:
+  - it: grants no authority without configured CI identities
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: accepts legacy null CI identities without granting authority
+    set:
+      argo.perRepoCIIdentities: null
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: keeps release identities out of CI token authority
+    set:
+      argo.perRepoIdentities:
+        - release-one
+      argo.perRepoCIIdentities: []
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: permits only token creation for the exact CI identities in the pipeline namespace
+    set:
+      argo.namespace: pipeline-system
+      argo.perRepoIdentities:
+        - release-one
+      argo.perRepoCIIdentities:
+        - ci-one
+        - ci-two
+    documentIndex: 0
+    asserts:
+      - hasDocuments:
+          count: 2
+      - isKind:
+          of: Role
+      - equal:
+          path: metadata.namespace
+          value: pipeline-system
+      - equal:
+          path: rules
+          value:
+            - apiGroups: [""]
+              resources: ["serviceaccounts/token"]
+              resourceNames: ["ci-one", "ci-two"]
+              verbs: ["create"]
+  - it: binds CI-only verification authority to the server across namespaces
+    set:
+      argo.namespace: pipeline-system
+      argo.perRepoIdentities: null
+      argo.perRepoCIIdentities:
+        - ci-one
+    documentIndex: 1
+    asserts:
+      - isKind:
+          of: RoleBinding
+      - equal:
+          path: metadata.namespace
+          value: pipeline-system
+      - equal:
+          path: subjects
+          value:
+            - kind: ServiceAccount
+              name: oberth
+              namespace: server-system
+      - equal:
+          path: roleRef
+          value:
+            apiGroup: rbac.authorization.k8s.io
+            kind: Role
+            name: oberth-argo-ci-tokens

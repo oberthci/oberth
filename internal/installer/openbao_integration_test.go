@@ -29,7 +29,7 @@ import (
 
 // baoDevServer starts OpenBao in dev mode and returns the root token and
 // address. The caller must call the returned cleanup function.
-func baoDevServer(t *testing.T) (rootToken, addr string, cleanup func()) {
+func baoDevServer(t *testing.T, configPaths ...string) (rootToken, addr string, cleanup func()) {
 	t.Helper()
 	baoPath := os.Getenv("BAO_PATH")
 	if baoPath == "" {
@@ -55,6 +55,9 @@ func baoDevServer(t *testing.T) (rootToken, addr string, cleanup func()) {
 		"-dev-listen-address="+fmt.Sprintf("127.0.0.1:%d", port),
 		"-dev-no-store-token",
 	)
+	for _, path := range configPaths {
+		cmd.Args = append(cmd.Args, "-config="+path)
+	}
 	cmd.Env = append(os.Environ(), "BAO_DEV_ROOT_TOKEN_ID="+rootToken)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard

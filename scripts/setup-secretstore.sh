@@ -174,34 +174,63 @@ run() {
   fi
 }
 
-# read_field prints one field of a store path. Distinguishes confirmed
-# absence from permission, transport, or parse errors. The empty-output
-# check catches both the "No value found" text absence and the mock CLI
-# pattern (exit 1, no output) that older bao/vault versions also produce.
-# A non-zero exit with substantive stderr (permission denied, network
-# failure, parse error) aborts — those are real errors, not absence.
+# Reads authorize later mutations only after a value or explicit path-specific
+# absence is verified. Exit 2 also covers permission denied, transport and
+# server errors; neither the status alone nor empty output proves absence.
 read_field() {
   local _rf_out _rf_exit
-  _rf_out="$("$CLI" read -field="$1" "$2" 2>&1)" && { printf '%s' "$_rf_out"; return 0; }
-  _rf_exit=$?
-  # Confirmed absence: exit 2 is the documented Vault/OpenBao code.
-  if [ "$_rf_exit" -eq 2 ]; then
+  if _rf_out="$("$CLI" read -field="$1" "$2" 2>&1)"; then
+    [ -n "$_rf_out" ] || fail "reading $2 field=$1 returned an empty value; refusing setup"
+    printf '%s' "$_rf_out"
+    return 0
+  else
+    _rf_exit=$?
+  fi
+  if [ "$_rf_exit" -eq 2 ] && [ "$_rf_out" = "No value found at $2" ]; then
     return 0
   fi
-  # Empty output or the explicit absence string — treat as not-found. Older
-  # CLI versions and field-level reads exit 1 for a missing path or field.
-  case "$_rf_out" in
-    "") return 0 ;;
-    *"No value found"*|*"no value found"*) return 0 ;;
-  esac
-  # Check for permission-denied and transport errors that must not be silent.
-  case "$_rf_out" in
-    *"permission denied"*|*"Code: 403"*|*"connection refused"*|*"no such host"*|*"certificate"*|*"x509"*)
-      fail "reading $2 field=$1 failed (exit $_rf_exit): $_rf_out" ;;
-  esac
-  # For other non-zero exits with output, treat as absence with a warning.
-  # This preserves compatibility with varied CLI exit-code conventions.
-  return 0
+  fail "reading $2 field=$1 failed (exit $_rf_exit): $_rf_out"
+}
+
+# Mount reads use different absence diagnostics from object reads. Only a
+# successful, valid mount inventory can authorize enabling an absent mount.
+read_mount_type() {
+  local _mt_out _mt_exit
+  if _mt_out="$("$CLI" "$1" list -format=json 2>&1)"; then
+    :
+  else
+    _mt_exit=$?
+    fail "listing $1 mounts failed (exit $_mt_exit): $_mt_out"
+  fi
+  python3 -c '
+import json, sys
+try:
+    mounts = json.load(sys.stdin)
+    if not isinstance(mounts, dict):
+        raise ValueError()
+    for mount in mounts.values():
+        if not isinstance(mount, dict) or not isinstance(mount.get("type"), str) or not mount["type"].strip():
+            raise ValueError()
+    if sys.argv[1] in mounts:
+        print(mounts[sys.argv[1]]["type"])
+except (ValueError, TypeError):
+    sys.exit(1)
+' "$2/" <<< "$_mt_out" || fail "invalid $1 mount list JSON; refusing setup"
+}
+
+read_policy() {
+  local _rp_out _rp_exit
+  if _rp_out="$("$CLI" policy read "$1" 2>&1)"; then
+    [ -n "$_rp_out" ] || fail "reading policy $1 returned empty output; refusing setup"
+    printf '%s' "$_rp_out"
+    return 0
+  else
+    _rp_exit=$?
+  fi
+  if [ "$_rp_exit" -eq 2 ] && [ "$_rp_out" = "No policy named: $1" ]; then
+    return 0
+  fi
+  fail "reading policy $1 failed (exit $_rp_exit): $_rp_out"
 }
 
 # --- audit preflight (read-only; before any store mutation) ------------------
@@ -289,10 +318,7 @@ note "TokenReview endpoint the secret store will call: $KUBERNETES_HOST"
 log "the secret store must be able to REACH this URL; override with --kubernetes-host if not"
 
 # --- 1. Kubernetes auth method ----------------------------------------------
-AUTH_TYPE="$(read_field type "sys/auth/$MOUNT")"
-if [ -z "$AUTH_TYPE" ]; then
-  AUTH_TYPE="$("$CLI" auth list 2>/dev/null | awk -v mount="$MOUNT/" '$1 == mount { print $2 }')"
-fi
+AUTH_TYPE="$(read_mount_type auth "$MOUNT")"
 if [ -n "$AUTH_TYPE" ]; then
   [ "$AUTH_TYPE" = "kubernetes" ] || fail "auth mount $MOUNT/ already exists with type '$AUTH_TYPE', not 'kubernetes'; pick a dedicated mount: --mount oberth-kubernetes"
   note "auth method already enabled at $MOUNT/ — keeping it"
@@ -322,10 +348,7 @@ else
 fi
 
 # --- 3. KV v2 mount for Oberth secrets ---------------------------------------
-KV_TYPE="$(read_field type "sys/mounts/$KV_PREFIX")"
-if [ -z "$KV_TYPE" ] && "$CLI" secrets list 2>/dev/null | awk -v mount="$KV_PREFIX/" '$1 == mount { found = 1 } END { exit !found }'; then
-  KV_TYPE="$("$CLI" secrets list 2>/dev/null | awk -v mount="$KV_PREFIX/" '$1 == mount { print $2 }')"
-fi
+KV_TYPE="$(read_mount_type secrets "$KV_PREFIX")"
 if [ -n "$KV_TYPE" ]; then
   case "$KV_TYPE" in
     kv|kv-v2|generic) : ;;
@@ -345,10 +368,7 @@ fi
 
 # --- 4. trusted-plan Transit engine and non-exportable key -------------------
 if [ "$TRANSIT_ENABLED" = "true" ]; then
-  TRANSIT_TYPE="$(read_field type "sys/mounts/$TRANSIT_MOUNT")"
-  if [ -z "$TRANSIT_TYPE" ] && "$CLI" secrets list 2>/dev/null | awk -v mount="$TRANSIT_MOUNT/" '$1 == mount { found = 1 } END { exit !found }'; then
-    TRANSIT_TYPE="$("$CLI" secrets list 2>/dev/null | awk -v mount="$TRANSIT_MOUNT/" '$1 == mount { print $2 }')"
-  fi
+  TRANSIT_TYPE="$(read_mount_type secrets "$TRANSIT_MOUNT")"
   if [ -n "$TRANSIT_TYPE" ]; then
     [ "$TRANSIT_TYPE" = "transit" ] || fail "secrets mount $TRANSIT_MOUNT/ already exists with type '$TRANSIT_TYPE', not transit"
     note "Transit mount $TRANSIT_MOUNT/ already exists — keeping it"
@@ -422,7 +442,7 @@ POLICYEOF
 )"
   POLICY_DESCRIPTION="KV read only; Transit disabled"
 fi
-HAVE_POLICY="$("$CLI" policy read "$POLICY" 2>/dev/null || true)"
+HAVE_POLICY="$(read_policy "$POLICY")"
 if [ -n "$HAVE_POLICY" ] && [ "$(printf '%s' "$HAVE_POLICY")" = "$(printf '%s' "$WANT_POLICY")" ]; then
   note "policy $POLICY already matches — unchanged"
 elif [ -n "$HAVE_POLICY" ] && [ "$FORCE" != "true" ]; then
