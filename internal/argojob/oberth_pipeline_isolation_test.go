@@ -72,6 +72,7 @@ var (
 	}
 	oberthBuildIsolatedLeaves = map[string]bool{
 		"generic-names":           true,
+		"contract-guard":          true,
 		"test-static-git-runtime": true,
 		"shellcheck":              true, "chart": true, "security": true, "release-diagnostic": true, "test-openbao": true,
 		"vpt-build-and-fetch": true, "vpt-copy-trivy": true, "vpt-verify": true,

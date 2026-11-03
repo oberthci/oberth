@@ -131,6 +131,7 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 	assertBurnGraph(t, built, "ci", map[string]string{
 		"setup":                    "",
 		"generic-names":            "",
+		"contract-guard":           "",
 		"lint":                     "setup",
 		"test-store":               "setup",
 		"test-service":             "setup",

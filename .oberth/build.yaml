@@ -86,6 +86,8 @@ spec:
   - name: ci
     dag:
       tasks:
+      - name: contract-guard
+        template: contract-guard
       - name: setup
         template: setup
       - name: generic-names
@@ -1900,3 +1902,27 @@ spec:
         limits:
           cpu: "2"
           memory: 1Gi
+
+  - name: contract-guard
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    automountServiceAccountToken: false
+    activeDeadlineSeconds: 300
+    container:
+      image: golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd
+      imagePullPolicy: IfNotPresent
+      workingDir: /work/src
+      command: [/usr/bin/python3]
+      args: [-I, -B, .oberth/contracts/check.py, --self-test]
+      env:
+      - name: PYTHONDONTWRITEBYTECODE
+        value: "1"
+      resources:
+        requests:
+          cpu: "1"
+          memory: 256Mi
+        limits:
+          cpu: "1"
+          memory: 256Mi
