@@ -1182,6 +1182,11 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    volumes:
+    - name: store-test-tmp
+      emptyDir:
+        medium: Memory
+        sizeLimit: 768Mi
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -1197,6 +1202,7 @@ spec:
           GOTOOLCHAIN=local \
           GOWORK=off \
           OBERTH_TEST_TIMEOUT_SCALE=4 \
+          OBERTH_TEST_STORE_TMPDIR=/tmp/oberth-store-tests \
           GOENV=off \
           GOPATH=/tmp/bootstrap-private/gopath \
           GOMODCACHE=/tmp/bootstrap-private/gomod \
@@ -1229,6 +1235,8 @@ spec:
       - name: PATH
         value: /usr/bin:/bin
       volumeMounts:
+      - name: store-test-tmp
+        mountPath: /tmp/oberth-store-tests
       - name: bootstrap-test-tools
         mountPath: /tmp/oberth-tools
         subPath: release-test
@@ -1236,11 +1244,13 @@ spec:
       - name: bootstrap-node-inputs
         mountPath: /tmp/oberth-node-inputs
         readOnly: true
+      # The 8Gi envelope includes the store-only 768Mi tmpfs. Other packages
+      # and Go build caches keep their normal temporary paths.
       # Historical unbounded race run reached 8Gi. Serialize packages and
       # bound Go workers and set a memory target above; remeasure this workload on the next release.
       resources:
         requests:
-          cpu: 1250m
+          cpu: 1000m
           memory: 8Gi
         limits:
           cpu: 4000m
