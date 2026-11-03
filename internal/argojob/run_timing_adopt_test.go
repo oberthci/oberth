@@ -95,7 +95,7 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	terminal, first, pod, at := diagnosticFixture()
+	terminal, first, pod, at := diagnosticFixtureAt(time.Now().UTC().Add(-time.Minute))
 	terminal.CreationTimestamp = metav1.NewTime(at.Add(-10 * time.Minute))
 	terminal.Annotations[runIDAnnotation] = run.ID
 	terminal.Annotations[identityAnnotation] = strings.Repeat("a", 64)

@@ -1,8 +1,8 @@
-PASS /tmp/fix/ob-review-1398-controller/isolation/container-submitted.json
-PASS /tmp/fix/ob-review-1398-controller/isolation/containerset-submitted.json
-PASS /tmp/fix/ob-review-1398-controller/isolation/dedicated-tools-submitted.json
-PASS /tmp/fix/ob-review-1398-controller/isolation/inline-dag-submitted.json
-PASS /tmp/fix/ob-review-1398-controller/isolation/inline-steps-submitted.json
-PASS /tmp/fix/ob-review-1398-controller/isolation/none-submitted.json
-PASS /tmp/fix/ob-review-1398-controller/isolation/script-submitted.json
-PASS /tmp/fix/ob-review-1398-controller/isolation/sidecars-submitted.json
+PASS /tmp/oberth-round44-evidence/isolation/container-submitted.json
+PASS /tmp/oberth-round44-evidence/isolation/containerset-submitted.json
+PASS /tmp/oberth-round44-evidence/isolation/dedicated-tools-submitted.json
+PASS /tmp/oberth-round44-evidence/isolation/inline-dag-submitted.json
+PASS /tmp/oberth-round44-evidence/isolation/inline-steps-submitted.json
+PASS /tmp/oberth-round44-evidence/isolation/none-submitted.json
+PASS /tmp/oberth-round44-evidence/isolation/script-submitted.json
+PASS /tmp/oberth-round44-evidence/isolation/sidecars-submitted.json

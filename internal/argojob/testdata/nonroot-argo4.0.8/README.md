@@ -89,8 +89,8 @@ passed the retained Kubernetes validator. Isolation inputs now explicitly declar
 256Mi so the measured-leaf architecture and inherited pool checks still exercise
 wrapped Pods. No expected Pod was assembled or edited by hand.
 
-Executor-token diagnostics recapture (#1398, 2026-11-03) uses current Build
-outputs with the progress-reporting waiter. The same pinned controller and
-unchanged capture hooks generated all 18 submitted Pods; Kubernetes v1.35.7
-ValidatePodCreate accepted each one. The expected Pods were copied directly
-from those captures. The exact legacy waiter remains accepted for existing Pods.
+CX-OB-1398-REBASE (2026-11-03) recaptured current deadline-bounded Build
+outputs with the replay token waiter. The authenticated v4.0.8 controller ran
+its real operation with the retained fake-client helpers and capture-only
+hooks. All 27 submitted Pods passed the retained Kubernetes v1.35.7 validator.
+No expected Pod was edited manually and no live cluster was used.

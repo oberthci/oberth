@@ -15,6 +15,7 @@ import (
  "github.com/argoproj/argo-workflows/v4/util/logging"
 )
 
+var isolationCapture func(*corev1.Pod)
 
 func TestOberthIsolationControllerCapture(t *testing.T) {
  dir := os.Getenv("OBERTH_ISOLATION_PROOF_DIR"); require.NotEmpty(t,dir)

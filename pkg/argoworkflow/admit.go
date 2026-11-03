@@ -41,6 +41,9 @@ const (
 // Policy is the administrator-owned admission boundary for repository YAML.
 type Policy struct {
 	Capability *Capability
+	// ServerDeadline permits an omitted deadline only for a server that injects
+	// its own bound before submission and enforces a separate watchdog.
+	ServerDeadline bool
 	// Only ResolveRunSource may attach a source-bound, server-owned context.
 	runVMISource *ResolvedRunSource
 	// RunnerImagePrefixes is the administrator's image allowlist.
@@ -85,7 +88,7 @@ func Admit(workflow *wfv1.Workflow, policy Policy) error {
 		problems = append(problems, validateExtendedPeak(workflow, policy.Capability))
 	}
 	problems = append(problems, admitMetadata(workflow)...)
-	problems = append(problems, admitSpec(&workflow.Spec)...)
+	problems = append(problems, admitSpec(&workflow.Spec, policy.ServerDeadline)...)
 	if policy.KubeVirt && len(policy.ContainerDiskPrefixes) != 0 {
 		if err := validateContainerDiskPrefixes(policy.ContainerDiskPrefixes); err != nil {
 			problems = append(problems, fmt.Errorf("argoworkflow: %w", err))
@@ -166,7 +169,7 @@ func admitMetadata(workflow *wfv1.Workflow) []error {
 	return problems
 }
 
-func admitSpec(spec *wfv1.WorkflowSpec) []error {
+func admitSpec(spec *wfv1.WorkflowSpec, serverDeadline bool) []error {
 	var problems []error
 	if strings.TrimSpace(spec.Entrypoint) == "" {
 		problems = append(problems, errors.New("argoworkflow: spec.entrypoint is required"))
@@ -219,7 +222,7 @@ func admitSpec(spec *wfv1.WorkflowSpec) []error {
 	if spec.Suspend != nil && *spec.Suspend {
 		problems = append(problems, errors.New("argoworkflow: spec.suspend would hold a queue slot indefinitely"))
 	}
-	if spec.ActiveDeadlineSeconds == nil || *spec.ActiveDeadlineSeconds <= 0 {
+	if (spec.ActiveDeadlineSeconds == nil && !serverDeadline) || (spec.ActiveDeadlineSeconds != nil && *spec.ActiveDeadlineSeconds <= 0) {
 		// The examples corpus demonstrates no acquisition timeout on
 		// synchronization mutexes; a workflow that blocks on a held mutex
 		// forever would occupy a scheduler slot forever. A positive workflow

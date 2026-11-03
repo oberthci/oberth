@@ -86,3 +86,37 @@ func currentDeadlineNodes(workflow *wfv1.Workflow) map[string]bool {
 	}
 	return nodes
 }
+
+// Leave Argo time to record deadline node statuses and diagnostics before the
+// fallback watchdog requests deletion. Unstarted workflows remain bounded too.
+func watchdogBudget(budget time.Duration) time.Duration {
+	return budget + max(2*time.Minute, budget/10)
+}
+
+func watchdogOrigin(workflow *wfv1.Workflow) (time.Time, string) {
+	if !workflow.Status.StartedAt.IsZero() {
+		return workflow.Status.StartedAt.UTC().Truncate(time.Second), "workflow_started_at"
+	}
+	return workflow.CreationTimestamp.UTC(), "workflow_created_at"
+}
+
+func observeServerDeadline(workflow *wfv1.Workflow, result *model.ExecutionObservation, budget time.Duration, now time.Time) {
+	budget = watchdogBudget(budget)
+	origin, clock := watchdogOrigin(workflow)
+	deadline := &model.ExecutionDeadline{BudgetSeconds: int64(budget / time.Second), Clock: clock}
+	if !workflow.CreationTimestamp.IsZero() {
+		created := workflow.CreationTimestamp.UTC()
+		deadline.CreatedAt = &created
+	}
+	if !workflow.Status.StartedAt.IsZero() {
+		started := workflow.Status.StartedAt.UTC()
+		deadline.StartedAt = &started
+	}
+	if !origin.IsZero() {
+		expires := origin.Add(budget)
+		remaining := max(int64(0), int64(expires.Sub(now)/time.Second))
+		deadline.ExpiresAt, deadline.RemainingSeconds = &expires, &remaining
+		deadline.Elapsed = !now.Before(expires)
+	}
+	result.ServerDeadline = deadline
+}

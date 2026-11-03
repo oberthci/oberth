@@ -14,6 +14,7 @@ import (
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
+	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/trustedharness"
 	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
@@ -105,6 +106,27 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.WorkflowReq
 	if err != nil {
 		return err
 	}
+	source, err := readArgoSource(job.SourceDir, pipeline.TriggerCI)
+	if err != nil {
+		return err
+	}
+	blueprint, err := argoworkflow.Decode(source)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	duration := p.jobs.config.ExecutionTimeout(model.CanonicalRepoKey(job.UpstreamName, job.UpstreamOrg, job.Repository.Name), blueprint.Spec.ActiveDeadlineSeconds)
+	if duration > vmrunner.MaxDeadline {
+		duration = vmrunner.MaxDeadline
+	}
+	parent := ctx
+	ctx, cancel := context.WithDeadline(ctx, now.Add(duration))
+	defer cancel()
+	defer func() {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) && parent.Err() == nil {
+			retErr = errors.Join(service.ErrPreflightDeadline, retErr)
+		}
+	}()
 	// Approval is checked BEFORE fetching/executing any suite-selected content.
 	bundle, err := p.fetch(ctx, recipe.SuiteURL, recipe.SuiteSHA256, vmrunner.MaxSuiteBundleBytes)
 	if err != nil {
@@ -115,18 +137,9 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.WorkflowReq
 		return err
 	}
 	inventory, count := suite.Inventory()
-	source, err := readArgoSource(job.SourceDir, pipeline.TriggerCI)
-	if err != nil {
-		return err
-	}
 	sum := sha256.Sum256(source)
 	if job.UpstreamOrg == "" {
 		job.UpstreamOrg = job.UpstreamName
-	}
-	now := time.Now().UTC()
-	duration := p.jobs.config.WorkflowTimeout
-	if duration <= 0 || duration > vmrunner.MaxDeadline {
-		duration = vmrunner.MaxDeadline
 	}
 	intent := vmrunner.KVMIntent{RunID: job.Run.ID, RepoID: job.Repository.ID, Repository: model.CanonicalRepoKey(job.UpstreamName, job.UpstreamOrg, job.Repository.Name), CandidateSHA: requirement.CandidateSHA, BaselineSHA: requirement.BaselineSHA, Contract: *requirement.Contract, Recipe: recipe, Namespace: p.jobs.controller.Namespace(), WorkflowName: job.WorkflowName + "-trusted", WorkflowSpecDigest: hex.EncodeToString(sum[:]), InventoryDigest: inventory, CaseCount: count, AdmittedAt: now, Deadline: now.Add(duration)}
 	submission, err := p.request(job, intent)
@@ -179,8 +192,6 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.WorkflowReq
 	if execution.Submitted || execution.Cleaned {
 		return errors.New("trusted preflight already has a lifecycle; retry with a fresh run")
 	}
-	ctx, cancel := context.WithDeadline(ctx, intent.Deadline)
-	defer cancel()
 	watched := make(chan struct{})
 	defer func() { cancel(); <-watched }()
 	go func() {
@@ -496,4 +507,23 @@ func (p *TrustedPreflights) Size(_ context.Context, job service.WorkflowRequest)
 func trustedMismatchCleanupUID(uid string, err error) bool {
 	var mismatch interface{ WorkflowSpecMismatch() bool }
 	return uid != "" && errors.As(err, &mismatch) && mismatch.WorkflowSpecMismatch()
+}
+
+// CancelPreflight requests deletion without waiting for Pod finalizers. The
+// journal retains VM capacity and the absence-readback obligation independently.
+func (p *TrustedPreflights) CancelPreflight(ctx context.Context, id string) error {
+	execution, err := p.store.KVMPreflight(ctx, id)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil || execution.Cleaned || !execution.Submitted || execution.Rejected {
+		return err
+	}
+	controller, ok := p.controller.(interface {
+		CancelTrustedKVM(context.Context, vmrunner.KVMIntent, string) error
+	})
+	if !ok {
+		return errors.New("trusted cancellation controller unavailable")
+	}
+	return controller.CancelTrustedKVM(ctx, execution.Intent, execution.WorkflowUID)
 }

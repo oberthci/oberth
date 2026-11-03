@@ -216,6 +216,9 @@ type Config struct {
 	// WorkflowTimeout caps the document's own spec.activeDeadlineSeconds.
 	WorkflowTimeout time.Duration
 
+	// PerRepoWorkflowTimeout holds administrator caps keyed by upstream/org/repo.
+	PerRepoWorkflowTimeout map[string]time.Duration
+
 	// TTLSeconds is how long a finished Workflow object is retained.
 	TTLSeconds int32
 
@@ -293,6 +296,14 @@ func (config *Config) applyDefaults() {
 
 // Validate rejects a configuration that could not produce a safe submission.
 func (config Config) Validate() error {
+	if config.WorkflowTimeout > 0 && (config.WorkflowTimeout < time.Second || config.WorkflowTimeout%time.Second != 0) {
+		return errors.New("argojob: workflow timeout must use whole positive seconds")
+	}
+	for repo, cap := range config.PerRepoWorkflowTimeout {
+		if len(strings.Split(repo, "/")) != 3 || cap < time.Second || cap%time.Second != 0 {
+			return fmt.Errorf("argojob: repository deadline cap %q must name upstream/org/repo and whole positive seconds", repo)
+		}
+	}
 	if config.ExecutorScratchSizeLimit != "" {
 		quantity, err := resource.ParseQuantity(config.ExecutorScratchSizeLimit)
 		if err != nil || quantity.Sign() <= 0 || quantity.Cmp(resource.MustParse("1Pi")) > 0 {
@@ -771,6 +782,7 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	}
 	policy := argoworkflow.Policy{
 		Capability:          request.Capability,
+		ServerDeadline:      true,
 		RunnerImagePrefixes: config.RunnerImagePrefixes, KubeVirt: request.KubeVirtGranted, ContainerDiskPrefixes: config.ContainerDiskPrefixes,
 		VMIBudget: request.KubeVirtBudget, VMICeiling: config.KubeVirtCeiling,
 	}
@@ -857,6 +869,7 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	if request.Capability != nil {
 		workflow.Annotations[capabilityAnnotation] = capabilityBinding(request.RepositoryID, request.Capability)
 	}
+	applyExecutionDeadline(workflow, config, canonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo))
 	applyServerBounds(workflow, config)
 	applyServerSecurity(workflow)
 	injectServerVolumes(workflow, config, request, credentialed)

@@ -682,3 +682,20 @@ func (controller *Controller) TrustedKVMRefusal(ctx context.Context, request Req
 	terminated := status.State.Terminated
 	return &vmrunner.KVMTerminationRecord{ImageID: status.ImageID, ContainerID: status.ContainerID, PodUID: string(pod.UID), WorkflowUID: workflowUID, ExitCode: terminated.ExitCode, Signal: terminated.Signal, RestartCount: status.RestartCount, StartedAt: terminated.StartedAt.Time, FinishedAt: terminated.FinishedAt.Time}, nil
 }
+
+// CancelTrustedKVM accepts termination of the journal-bound workflow and Pods.
+// It never declares cleanup complete: finalizers may still keep them present.
+func (controller *Controller) CancelTrustedKVM(ctx context.Context, intent vmrunner.KVMIntent, expectedUID string) error {
+	workflow, err := controller.workflows.Get(ctx, intent.WorkflowName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if workflow.Namespace != intent.Namespace || workflow.Namespace != controller.config.Namespace || workflow.Annotations[runIDAnnotation] != intent.RunID || workflow.Annotations[trustedKVMAnnotation] != vmrunner.KVMIntentDigest(intent) || workflow.UID == "" || (expectedUID != "" && string(workflow.UID) != expectedUID) {
+		return errors.New("argojob: refusing foreign trusted Workflow cancellation")
+	}
+	_, err = controller.cleanTrustedKVMOnce(ctx, intent.WorkflowName, intent.RunID, workflow.UID)
+	return err
+}
