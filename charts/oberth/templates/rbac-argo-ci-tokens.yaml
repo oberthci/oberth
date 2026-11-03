@@ -1,0 +1,36 @@
+{{- with .Values.argo.perRepoCIIdentities }}
+# CI-tier secret-store verification requests short-lived tokens only for
+# installer-provisioned per-repository CI identities. Keep this permission in
+# its own Role so upgrades leave the frozen Argo Role's co-owned rules intact.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "oberth.fullname" $ }}-argo-ci-tokens
+  namespace: {{ $.Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" $ | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    resourceNames:
+      {{- range . }}
+      - {{ . | quote }}
+      {{- end }}
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "oberth.fullname" $ }}-argo-ci-tokens
+  namespace: {{ $.Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" $ | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "oberth.serviceAccountName" $ }}
+    namespace: {{ $.Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "oberth.fullname" $ }}-argo-ci-tokens
+{{- end }}

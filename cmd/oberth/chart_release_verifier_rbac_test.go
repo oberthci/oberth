@@ -14,14 +14,15 @@ import (
 	"k8s.io/apimachinery/pkg/util/yaml"
 )
 
-// Issue #478: preflight must mint tokens for the release identities provisioned
-// by the installer, without granting arbitrary ServiceAccount impersonation.
+// Issues #478/#1316: verification may mint tokens only for the release and
+// CI identities provisioned by the installer, without granting arbitrary
+// ServiceAccount impersonation.
 func TestChartReleaseVerifierTokenRequestRBAC(t *testing.T) {
 	var defaultRules []rbacv1.PolicyRule
 	for _, tc := range []struct {
 		name, serverNamespace, pipelineNamespace, serverAccount string
 		values                                                  []string
-		wantShared, wantPerRepo                                 []string
+		wantShared, wantPerRepo, wantCI                         []string
 	}{
 		{
 			name: "default shared identity", serverNamespace: "default", pipelineNamespace: "oberth-argo", serverAccount: "oberth",
@@ -29,7 +30,7 @@ func TestChartReleaseVerifierTokenRequestRBAC(t *testing.T) {
 		},
 		{
 			name: "legacy absent list", serverNamespace: "default", pipelineNamespace: "oberth-argo", serverAccount: "oberth",
-			values: []string{"argo.perRepoIdentities=null"}, wantShared: []string{"oberth-argo-credentialed"},
+			values: []string{"argo.perRepoIdentities=null", "argo.perRepoCIIdentities=null"}, wantShared: []string{"oberth-argo-credentialed"},
 		},
 		{
 			name: "per-repo release identities leave existing Role unchanged", serverNamespace: "default", pipelineNamespace: "oberth-argo", serverAccount: "oberth",
@@ -39,6 +40,7 @@ func TestChartReleaseVerifierTokenRequestRBAC(t *testing.T) {
 			},
 			wantShared:  []string{"oberth-argo-credentialed"},
 			wantPerRepo: []string{"oberth-argo-repo-one-123456", "oberth-argo-repo-two-abcdef"},
+			wantCI:      []string{"oberth-argo-ci-repo-one-654321"},
 		},
 		{
 			name: "explicit release identities", serverNamespace: "server-system", pipelineNamespace: "pipeline-system", serverAccount: "alternate-oberth",
@@ -49,6 +51,13 @@ func TestChartReleaseVerifierTokenRequestRBAC(t *testing.T) {
 			},
 			wantShared:  []string{"shared-release"},
 			wantPerRepo: []string{"oberth-argo-repo-one-123456", "oberth-argo-repo-two-abcdef"},
+			wantCI:      []string{"oberth-argo-ci-repo-one-654321"},
+		},
+		{
+			name: "CI identities without release identities", serverNamespace: "server-system", pipelineNamespace: "pipeline-system", serverAccount: "alternate-oberth",
+			values: []string{"argo.namespace=pipeline-system", "argo.perRepoIdentities=null",
+				"argo.perRepoCIIdentities[0]=ci-one", "argo.perRepoCIIdentities[1]=ci-two"},
+			wantShared: []string{"oberth-argo-credentialed"}, wantCI: []string{"ci-one", "ci-two"},
 		},
 	} {
 		// The default and populated render must keep the established Role's
@@ -105,12 +114,14 @@ func TestChartReleaseVerifierTokenRequestRBAC(t *testing.T) {
 							wantNames = []string{"oberth-argo-executor", "oberth-argo-vm-launcher"}
 						case tc.serverAccount + "-argo-release-tokens":
 							wantNames = tc.wantPerRepo
+						case tc.serverAccount + "-argo-ci-tokens":
+							wantNames = tc.wantCI
 						default:
 							t.Fatalf("unexpected token Role %s", role.Name)
 						}
 						if !slices.Equal(rule.APIGroups, []string{""}) || !slices.Equal(rule.Resources, []string{"serviceaccounts/token"}) ||
 							!slices.Equal(rule.Verbs, []string{"create"}) || !slices.Equal(rule.ResourceNames, wantNames) {
-							t.Fatalf("token rule = %+v; want create only for exact release accounts %v", rule, wantNames)
+							t.Fatalf("token rule = %+v; want create only for exact accounts %v", rule, wantNames)
 						}
 					}
 				}
@@ -128,6 +139,9 @@ func TestChartReleaseVerifierTokenRequestRBAC(t *testing.T) {
 			if len(tc.wantPerRepo) > 0 {
 				wantRoleNames = append(wantRoleNames, tc.serverAccount+"-argo-release-tokens")
 			}
+			if len(tc.wantCI) > 0 {
+				wantRoleNames = append(wantRoleNames, tc.serverAccount+"-argo-ci-tokens")
+			}
 			if tokenRules != len(wantRoleNames) {
 				t.Fatalf("got %d token rules, want %d (one per token Role)", tokenRules, len(wantRoleNames))
 			}
@@ -136,7 +150,7 @@ func TestChartReleaseVerifierTokenRequestRBAC(t *testing.T) {
 				if !ok {
 					t.Fatalf("missing Role %s", name)
 				}
-				if name == tc.serverAccount+"-argo-release-tokens" && len(role.Rules) != 1 {
+				if (name == tc.serverAccount+"-argo-release-tokens" || name == tc.serverAccount+"-argo-ci-tokens") && len(role.Rules) != 1 {
 					t.Fatalf("per-repo Role has %d rules, want only TokenRequest", len(role.Rules))
 				}
 				if name == tc.serverAccount+"-argo-executor-tokens" && len(role.Rules) != 2 {
@@ -154,6 +168,9 @@ func TestChartReleaseVerifierTokenRequestRBAC(t *testing.T) {
 			}
 			if len(tc.wantPerRepo) == 0 && (roles[tc.serverAccount+"-argo-release-tokens"].Name != "" || bindings[tc.serverAccount+"-argo-release-tokens"].Name != "") {
 				t.Fatal("empty per-repo list created a token Role or binding")
+			}
+			if len(tc.wantCI) == 0 && (roles[tc.serverAccount+"-argo-ci-tokens"].Name != "" || bindings[tc.serverAccount+"-argo-ci-tokens"].Name != "") {
+				t.Fatal("empty CI list created a token Role or binding")
 			}
 			if tc.serverAccount == "oberth" && slices.Equal(tc.wantShared, []string{"oberth-argo-credentialed"}) {
 				if defaultRules == nil {
