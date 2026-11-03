@@ -14,8 +14,9 @@ import (
 
 type lostDatabaseAck struct {
 	*store.Store
-	operation string
-	writes    atomic.Int64
+	operation      string
+	writes         atomic.Int64
+	committedClaim *model.Run
 }
 
 func (s *lostDatabaseAck) lost(operation string, err error) error {
@@ -28,6 +29,11 @@ func (s *lostDatabaseAck) lost(operation string, err error) error {
 	return err
 }
 func (s *lostDatabaseAck) ClaimNextRun(ctx context.Context) (model.Run, error) {
+	if s.committedClaim != nil {
+		v := *s.committedClaim
+		s.committedClaim = nil
+		return v, s.lost("ClaimNextRun", nil)
+	}
 	v, e := s.Store.ClaimNextRun(ctx)
 	return v, s.lost("ClaimNextRun", e)
 }
@@ -66,12 +72,20 @@ func TestDatabaseDeadlineLostClaimAckKeepsExactRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Commit outside the short attempt budget so host scheduling under -race
+	// cannot replace the intended lost-ack fault with a pre-commit timeout.
+	// The fixture exposes this result once. Replaying the write would invoke
+	// the live store again, claim the second run and fail the assertions below.
+	committed, err := fixture.store.ClaimNextRun(t.Context())
+	if err != nil || committed.ID != first.ID {
+		t.Fatalf("commit original claim: %+v %v", committed, err)
+	}
 	scheduler := fixture.scheduler(t, &recoveryJobs{})
-	fault := &lostDatabaseAck{Store: fixture.store, operation: "ClaimNextRun"}
+	fault := &lostDatabaseAck{Store: fixture.store, operation: "ClaimNextRun", committedClaim: &committed}
 	scheduler.store = fault
 	run, err := scheduler.database().ClaimNextRun(deadlineScope(t.Context(), scheduler))
-	if err != nil || run.ID != first.ID || fault.writes.Load() != 1 {
-		t.Fatalf("lost original claim: %+v %v writes=%d", run, err, fault.writes.Load())
+	if err != nil || run.ID != first.ID || fault.writes.Load() != 1 || scheduler.DatabaseRetries() != 1 {
+		t.Fatalf("lost original claim: %+v %v writes=%d retries=%d", run, err, fault.writes.Load(), scheduler.DatabaseRetries())
 	}
 	remaining, err := fixture.store.Run(t.Context(), second.ID)
 	if err != nil || remaining.Status != model.RunQueued {
