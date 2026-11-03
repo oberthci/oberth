@@ -878,6 +878,12 @@ func TestMCPToolCountMatchesDocumented(t *testing.T) {
 	if !strings.Contains(string(contract), expected) {
 		t.Fatalf("AGENT-CONTRACT.md does not contain %q — tool count drifted from code", expected)
 	}
+	for _, definition := range definitions {
+		name := definition["name"].(string)
+		if !strings.Contains(string(contract), "`"+name+"`") {
+			t.Errorf("registered tool missing from AGENT-CONTRACT.md: %s", name)
+		}
+	}
 }
 
 func TestMCPToolSurfaceMatchesContract(t *testing.T) {

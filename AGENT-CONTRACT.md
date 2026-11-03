@@ -1000,9 +1000,13 @@ trust assumptions and complete invalidation rules.
 - MCP exposes 77 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, read-only `run_resources` (captured history and reviewed git resource suggestions), `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`, `run_kvm_preflight`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, `publication_abandon`, issue
-  create/get/get_many/update/append/close/reopen/delete/list/lock/unlock/close_many,
+  `issue_create`, `issue_get`, `issue_get_many`, `issue_update`, `issue_append`,
+  `issue_close`, `issue_reopen`, `issue_delete`, `issue_list`, `issue_lock`,
+  `issue_unlock`, `issue_close_many`,
   secret-access list/allow/revoke, unscoped-admin-only uplink list/revoke/rotate,
-  `access_dismiss`, admin-only `workflow_capability_grant` and
+  `access_dismiss`, deprecated admin-only `kubevirt_grant` / `kubevirt_revoke`,
+  unscoped-admin-only `kubevirt_grant_list`, read-only `kubevirt_grant_get`,
+  admin-only `workflow_capability_grant` and
   `workflow_capability_revoke`, read-only `workflow_capability_get`, admin-only
   `resource_grant` / `resource_revoke`, read-only `resource_grant_get`, admin-only `size_grant`
   and `size_revoke`, read-only `size_grant_get` (#1021), admin-only
@@ -1075,6 +1079,24 @@ trust assumptions and complete invalidation rules.
   `counts` for open/closed (retaining the kind filter) and manual/ci
   (retaining the state filter). Repository, query and uplink scope constrain
   every count; scoped uplinks never receive installation-wide totals (#1124).
+- The retained legacy VM tools remain available during the preparatory release:
+  `kubevirt_grant` and `kubevirt_revoke` are audited administrator mutations;
+  `kubevirt_grant_get` reads a repository's current grant and shared VMI budget;
+  `kubevirt_grant_list` is a read-only list of active grants for unscoped admins.
+  Legacy KVM/VMI admission fails closed without an active repository grant.
+  Grants bound VMI concurrency, cores and memory and do not become generic
+  workflow capabilities. Archived repositories refuse new `kubevirt_grant`
+  mutations; existing grants remain readable and revocable. Revocation blocks
+  new submissions while existing workflows retain their cleanup authority.
+- `issue_append` takes `id` and `text` and appends bounded text with a dated
+  separator to the existing body under the issue lock rules. It does not
+  replace the body or create a discussion thread. Its compact response is
+  `id`, `state`, `updated_at`, `occurrences` and `appended_bytes` (UTF-8 bytes
+  of text, excluding the separator); read content with `issue_get`.
+- `issue_close` takes a single `id`, preserves its history, and enforces the
+  same issue lock rules. Its compact response has the same fields as
+  `issue_append`, with `appended_bytes: 0`. Unlike admin-only
+  `issue_close_many`, it does not take a reason parameter.
 - `issue_get_many` accepts 1..50 unique positive `ids`, validated before reads.
   Its `results` preserve request order, each containing `id` and either a full
   `issue` (the existing `issue_get` wire record) or `error`: `not_found` or
