@@ -299,6 +299,7 @@ type WorkspaceGit interface {
 }
 
 type CIRequest struct {
+	model.PriorityRequest
 	EventID       string
 	Repository    model.Repository
 	Branch        string
@@ -312,6 +313,7 @@ type CIRequest struct {
 }
 
 type ReleaseRequest struct {
+	model.PriorityRequest
 	EventID    string
 	Repository model.Repository
 	Tag        string
@@ -499,6 +501,7 @@ type Health interface {
 }
 
 type BranchPush struct {
+	model.PriorityRequest
 	EventID    string
 	Repository string
 	Branch     string
@@ -508,6 +511,7 @@ type BranchPush struct {
 }
 
 type TagPush struct {
+	model.PriorityRequest
 	EventID             string
 	Repository          string
 	Tag                 string
@@ -528,6 +532,10 @@ type PushResult struct {
 }
 
 type StatusResponse struct {
+	Priority            model.RunPriority `json:"priority_class"`
+	PriorityReason      string            `json:"priority_reason"`
+	PriorityRequestedBy string            `json:"priority_requested_by,omitempty"`
+	PriorityRefusal     string            `json:"priority_refusal,omitempty"`
 	// ResourceMessage is advice, separate from the exact status vocabulary.
 	ResourceMessage string `json:"resource_message,omitempty"`
 

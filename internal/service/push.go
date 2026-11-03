@@ -78,7 +78,7 @@ func (ingestor *PushIngestor) Branch(ctx context.Context, push BranchPush) (Push
 	if !sameOID(peeled.ObjectSHA, push.NewOID) || !sameOID(peeled.CommitSHA, push.NewOID) {
 		return PushResult{}, errors.New("service: accepted branch commit no longer resolves exactly")
 	}
-	enqueued, err := ingestor.branches.EnqueueCI(ctx, CIRequest{
+	enqueued, err := ingestor.branches.EnqueueCI(ctx, CIRequest{PriorityRequest: push.PriorityRequest,
 		EventID:    push.EventID,
 		Repository: repository,
 		Branch:     push.Branch,
@@ -196,7 +196,7 @@ func (ingestor *PushIngestor) Tag(ctx context.Context, push TagPush) (PushResult
 			Reason: "upstream tag already exists at a different object",
 		}, nil
 	}
-	enqueued, err := ingestor.releases.AdmitRelease(ctx, ReleaseRequest{
+	enqueued, err := ingestor.releases.AdmitRelease(ctx, ReleaseRequest{PriorityRequest: push.PriorityRequest,
 		EventID:    push.EventID,
 		Repository: repository,
 		Tag:        push.Tag,

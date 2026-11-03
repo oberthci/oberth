@@ -18,7 +18,8 @@ import (
 )
 
 const (
-	identityExtension = "oberth.identity"
+	identityExtension    = "oberth.identity"
+	fingerprintExtension = "oberth.fingerprint"
 	// scopeExtension carries an upstream-scoped key's upstream names,
 	// newline-separated (#073). Absent for an unscoped key.
 	scopeExtension = "oberth.scope"
@@ -54,8 +55,9 @@ type ScopedIdentityResolver interface {
 
 // sessionActor is the authenticated uplink a session acts as.
 type sessionActor struct {
-	identity string
-	scope    []string
+	fingerprint string
+	identity    string
+	scope       []string
 }
 
 // UpdateHandler consumes durable, actor-bound receive events. Event IDs remain
@@ -193,7 +195,7 @@ func New(config Config) (*Server, error) {
 			if !found || identity == "" {
 				return nil, errors.New("public key is not registered")
 			}
-			extensions := map[string]string{identityExtension: identity}
+			extensions := map[string]string{identityExtension: identity, fingerprintExtension: fingerprint}
 			if len(scope) > 0 {
 				for _, upstream := range scope {
 					if upstream == "" || strings.ContainsAny(upstream, "\n\r") {
@@ -335,7 +337,7 @@ func (s *Server) handleConn(ctx context.Context, connection net.Conn) error {
 		return fmt.Errorf("set authenticated SSH request deadline: %w", err)
 	}
 	defer func() { _ = serverConn.Close() }()
-	actor := sessionActor{identity: serverConn.Permissions.Extensions[identityExtension]}
+	actor := sessionActor{identity: serverConn.Permissions.Extensions[identityExtension], fingerprint: serverConn.Permissions.Extensions[fingerprintExtension]}
 	if scope := serverConn.Permissions.Extensions[scopeExtension]; scope != "" {
 		actor.scope = strings.Split(scope, "\n")
 	}
@@ -498,7 +500,7 @@ func (s *Server) runGit(ctx context.Context, actor sessionActor, protocol string
 		// Receive owns preparation under the same repository lock as durable
 		// replay, reservation, ref publication, and callbacks. Refreshing here
 		// could move refs before a crashed reservation is recovered.
-		if err := s.git.Receive(ctx, repoInput, actor.identity, protocol, channel, channel, stderr, guardedHandler); err != nil {
+		if err := s.git.Receive(gitcache.WithReceiveFingerprint(ctx, actor.fingerprint), repoInput, actor.identity, protocol, channel, channel, stderr, guardedHandler); err != nil {
 			return err
 		}
 		if s.pushBannerURL != "" {

@@ -262,7 +262,8 @@ func (scheduler *Scheduler) enqueueCI(ctx context.Context, request CIRequest, fi
 	event := receiveSpec(request.EventID, request.Actor, request.Repository.ID, model.RefBranch, request.Branch,
 		request.OldSHA, request.SHA, request.SHA, "queued")
 	spec := model.RunSpec{
-		RepoID: request.Repository.ID, RefKind: model.RefBranch, Ref: request.Branch,
+		PriorityRequest: request.PriorityRequest,
+		RepoID:          request.Repository.ID, RefKind: model.RefBranch, Ref: request.Branch,
 		SHA: request.SHA, Actor: request.Actor, Trigger: trigger, ScheduleEntry: request.ScheduleEntry, TestedSHA: testedSHA, BaseSHA: request.BaseSHA,
 	}
 	var result model.ScheduleEnqueueResult
@@ -293,7 +294,8 @@ func (scheduler *Scheduler) AdmitRelease(ctx context.Context, request ReleaseReq
 	event := receiveSpec(request.EventID, request.Actor, request.Repository.ID, model.RefTag, request.Tag,
 		request.OldSHA, request.ObjectSHA, request.CommitSHA, "queued")
 	enqueued, err := scheduler.database().EnqueueReceiveEvent(ctx, event, model.RunSpec{
-		RepoID: request.Repository.ID, RefKind: model.RefTag, Ref: request.Tag,
+		PriorityRequest: request.PriorityRequest,
+		RepoID:          request.Repository.ID, RefKind: model.RefTag, Ref: request.Tag,
 		SHA: request.ObjectSHA, Actor: request.Actor, Release: true, Credentialed: true, Trigger: "tag", TestedSHA: request.CommitSHA,
 	})
 	if err != nil {

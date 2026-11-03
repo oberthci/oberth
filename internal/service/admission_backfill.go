@@ -101,6 +101,9 @@ func (gate *weightedAdmission) backfillOpenLocked(head *admissionReservation, no
 // finish before the head's bound. A run without history is admitted only
 // while the bound has not passed (which backfillOpenLocked already checks).
 func (gate *weightedAdmission) backfillFitsLocked(head, candidate *admissionReservation, now time.Time) bool {
+	if !gate.priorityHeadFitsAlongsideLocked(head, candidate) {
+		return false
+	}
 	if candidate.estimate <= 0 {
 		return true
 	}

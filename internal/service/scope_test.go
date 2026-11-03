@@ -687,6 +687,7 @@ var toolScopeBehaviour = map[string]string{
 	"issue_lock": "mutation", "access_allow": "mutation", "access_revoke": "mutation",
 	"kubevirt_grant": "mutation", "kubevirt_revoke": "mutation",
 	"size_grant": "mutation", "size_revoke": "mutation",
+	"priority_grant": "refused", "priority_grant_list": "refused", "priority_grant_revoke": "refused",
 	"queue_priority_config": "refused", "queue_priority_get": "refused", "run_priority": "refused",
 	"admission_release": "refused",
 	"repo_remove":       "mutation", "promote_grant": "mutation", "promote_grant_revoke": "mutation",

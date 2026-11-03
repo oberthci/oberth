@@ -64,7 +64,7 @@ func RunRerunPolicy(run model.Run, admin, force, safe bool) (string, error) {
 // flaky test), a run that is not the newest of its ref, and tag/release runs.
 // A run whose steps all passed and whose publication alone failed is not
 // re-executed: its publication is retried exactly as publish_retry does.
-func (service *API) rerunRun(ctx context.Context, actor api.Actor, id, reason string, force bool) (api.RunRerunResponse, error) {
+func (service *API) rerunRun(ctx context.Context, actor api.Actor, id, reason string, force bool, priority ...model.PriorityRequest) (api.RunRerunResponse, error) {
 	if strings.TrimSpace(id) == "" {
 		return api.RunRerunResponse{}, fmt.Errorf("%w: run ID is required", ErrInvalidInput)
 	}
@@ -124,7 +124,7 @@ func (service *API) rerunRun(ctx context.Context, actor api.Actor, id, reason st
 			tagCheck = check
 		}
 	}
-	result, err := service.runReruns.RerunRun(ctx, model.RunRerunRequest{
+	result, err := service.runReruns.RerunRun(ctx, model.RunRerunRequest{PriorityRequest: requestedPriority(actor, firstPriority(priority)),
 		RunID: source.ID, Actor: actor.Identity, Reason: reason, Force: force, ReplayAudit: audit,
 		Authorize: func(current model.Run, evidence model.RunReplayEvidence) (string, error) {
 			safe := false
@@ -152,6 +152,7 @@ func (service *API) rerunRun(ctx context.Context, actor api.Actor, id, reason st
 	enqueued := result.Enqueued
 	service.signals.NotifyRun(enqueued.ID)
 	response := api.RunRerunResponse{
+		Priority: enqueued.Priority, PriorityReason: enqueued.PriorityReason, PriorityRequestedBy: enqueued.PriorityRequestedBy, PriorityRefusal: enqueued.PriorityRefusal,
 		Mode: rerunModeRun, RunID: enqueued.ID, RerunOf: source.ID, Status: string(enqueued.Status),
 		Action: "rerun", Message: "Full rerun started as new run " + enqueued.ID, RunStatus: string(visibleRun(enqueued.Run).Status), RunPhase: enqueued.Phase,
 		Ref: enqueued.Ref, SHA: enqueued.SHA, Warning: result.Warning,

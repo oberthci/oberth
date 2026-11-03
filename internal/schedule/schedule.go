@@ -9,6 +9,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/oberthci/oberth/internal/cron"
+	"github.com/oberthci/oberth/internal/model"
 )
 
 const FileName = ".oberth/schedule.yaml"
@@ -23,6 +24,7 @@ type Limits struct {
 }
 
 type Entry struct {
+	Priority model.RunPriority
 	Name     string
 	Cron     string
 	Branch   string
@@ -45,9 +47,10 @@ type document struct {
 }
 
 type documentEntry struct {
-	Name   string `json:"name"`
-	Cron   string `json:"cron"`
-	Branch string `json:"branch,omitempty"`
+	Priority model.RunPriority `json:"priority,omitempty"`
+	Name     string            `json:"name"`
+	Cron     string            `json:"cron"`
+	Branch   string            `json:"branch,omitempty"`
 }
 
 func Parse(raw []byte, limits Limits, now time.Time) (File, error) {
@@ -83,6 +86,9 @@ func Parse(raw []byte, limits Limits, now time.Time) (File, error) {
 			return File{}, fmt.Errorf("schedule: entry %q is declared more than once", name)
 		}
 		seen[name] = true
+		if entry.Priority != "" && entry.Priority != model.PriorityNormal && entry.Priority != model.PriorityHigh && entry.Priority != model.PriorityHighest {
+			return File{}, fmt.Errorf("schedule: entry %q has invalid priority", name)
+		}
 		if err := validBranch(entry.Branch); err != nil {
 			return File{}, fmt.Errorf("schedule: entry %q: %w", name, err)
 		}
@@ -109,7 +115,7 @@ func Parse(raw []byte, limits Limits, now time.Time) (File, error) {
 			continue
 		}
 		file.Entries = append(file.Entries, Entry{
-			Name: name, Cron: entry.Cron, Branch: strings.TrimSpace(entry.Branch), schedule: compiled,
+			Priority: entry.Priority, Name: name, Cron: entry.Cron, Branch: strings.TrimSpace(entry.Branch), schedule: compiled,
 		})
 	}
 	return file, nil

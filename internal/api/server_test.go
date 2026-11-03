@@ -680,14 +680,14 @@ func TestMCPToolInputsMatchContract(t *testing.T) {
 		"run_get":            {"id", "summary"},
 		"run_resources":      {"burn", "format", "include_failed", "last", "ref", "repo", "run", "step"},
 		"artifact_get":       {"context", "id", "limit", "name", "offset", "pattern", "tail"},
-		"run_retry":          {"id"},
+		"run_retry":          {"id", "priority", "priority_reason"},
 		"run_cancel":         {"force", "id", "reason"},
 		"run_purge":          {"id", "reason", "what"},
 		"run_kvm_preflight":  {"id"},
 		"run_logs":           {"burn", "byte_offset", "context", "id", "limit", "offset", "pattern", "step", "tail"},
 		"wait":               {"id", "repo", "sha", "timeout", "trigger"},
-		"sync":               {"branch", "repo", "sha"},
-		"promote":            {"branch", "repo", "sha"},
+		"sync":               {"branch", "priority", "priority_reason", "repo", "sha"},
+		"promote":            {"branch", "priority", "priority_reason", "repo", "sha"},
 		"issue_list":         {"before", "kind", "limit", "query", "repo", "state"},
 		"issue_get":          {"body_limit", "fields", "id"},
 		"issue_get_many":     {"body_limit", "fields", "ids"},
@@ -828,7 +828,7 @@ func TestMCPToolCountMatchesDocumented(t *testing.T) {
 	t.Parallel()
 	// The documented count in docs/mcp-setup.md must match the registered
 	// tool count. A mismatch means the table drifted from the code.
-	const documented = 67
+	const documented = 70
 	definitions := toolDefinitions()
 	if len(definitions) != documented {
 		t.Fatalf("registered %d tools, documented %d in docs/mcp-setup.md — update the table", len(definitions), documented)
@@ -853,7 +853,7 @@ func TestMCPToolSurfaceMatchesContract(t *testing.T) {
 		"uplink_list", "uplink_revoke", "uplink_rotate", "access_dismiss", "kubevirt_grant_list",
 		"access_list", "access_allow", "access_revoke",
 		"kubevirt_grant", "kubevirt_revoke", "kubevirt_grant_get",
-		"size_grant", "size_revoke", "size_grant_get", "queue_priority_config", "queue_priority_get", "run_priority", "admission_release",
+		"size_grant", "size_revoke", "size_grant_get", "queue_priority_config", "queue_priority_get", "priority_grant", "priority_grant_list", "priority_grant_revoke", "run_priority", "admission_release",
 		"repo_usage", "repo_list", "repo_archive", "repo_unarchive", "repo_remove", "run_list", "audit_list", "schedule_list", "schedule_pause", "schedule_resume", "schedule_trigger", "system_status", "publish_retry", "secretstore_plan", "secretstore_sync_receipt", "secretstore_verify",
 		"promote_grant", "promote_grant_revoke", "promote_grant_list",
 	}

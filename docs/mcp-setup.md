@@ -239,6 +239,9 @@ call the proxy hostname directly.
 | `size_grant_get` | Read a repository's maximum admission size (`max_size`) and grant state: `never_granted`, `granted`, or `revoked` |
 | `queue_priority_config` | Replace administrator RC globs with `rc_patterns` (e.g. `["rc/*", "release/*"]`); `[]` disables; unscoped admin, audited |
 | `queue_priority_get` | Read RC patterns and the 60-minute normal/high starvation threshold; unscoped admin |
+| `priority_grant` | Allow `identity` to request priority up to `max_class` (`high` or `highest`) until RFC3339 `expires`; unscoped admin, audited |
+| `priority_grant_list` | List priority grants and expiry; unscoped admin |
+| `priority_grant_revoke` | Revoke an identity's grant for future submissions; accepted builds keep their priority; unscoped admin, audited |
 | `run_priority` | Bump a waiting run using exact `run_id`, `priority` (`high` or `highest`) and `reason`; unscoped admin, audited |
 | `admission_release` | Release one admission reservation no owner will release, typically a granted one held for a terminal run whose owner hung; deletes the Workflow first as proof, `force` without it (admin-only, unscoped, audited) |
 
@@ -816,14 +819,56 @@ are allowed; brackets and backslashes are refused. The default list is empty;
 `{"rc_patterns":[]}` disables RC classification. Changes also cover already
 waiting runs. `queue_priority_get {}` returns the list and `starvation_minutes`.
 
+Request priority when submitting a build with
+`git push -o oberth.priority=highest` (or `high`). MCP `promote`, `run_rerun`,
+`run_retry`, `schedule_trigger`, and `sync` accept optional `priority` and
+`priority_reason` fields. `sync` publishes an existing branch result rather
+than creating a build: its priority request applies to that build only while
+it is still waiting for admission. A terminal or already-admitted sync build
+reports a priority refusal and the sync keeps its existing behavior.
+
+Unscoped admins may request either class. Other identities, including scoped
+admins, need a matching unexpired `priority_grant` from an unscoped admin.
+Push authorization uses the authenticated key, so a scoped or ordinary key
+cannot inherit privileges from another admin key sharing its identity.
+An example grant is
+`{"identity":"builder","max_class":"high","expires":"2027-01-01T00:00:00Z"}`.
+A refused request runs at normal priority with `priority_refusal` visible to
+the pusher and in run views. Every explicit request is audited with its actor,
+reason, requested class, accepted class and refusal. Grant expiry or revocation
+does not change priority already accepted.
+
+A schedule entry can declare `priority: high` (or `highest`, or `normal`) in
+`.oberth/schedule.yaml`. Manual triggers may override it. Cron defaults are
+requested as `oberth:scheduler`, which needs its own priority grant; repository
+schedule files cannot give themselves queue authority.
+
+Priority submissions never cancel or preempt existing work. Priority runs are
+protected from supersession, including later pushes to the same branch. A
+newer ordinary push queues behind them. The requester can explicitly replace
+its priority work with a normal push using `-o oberth.supersede=true`; an
+unscoped admin may do so for any requester. Explicit cancellation likewise
+requires the priority requester or an unscoped admin, with the existing
+publication warnings and force requirement. Removing an RC pattern does not
+remove supersession protection from a build already classified as priority.
+
+The queue orders highest, high, then normal, with acceptance order within each
+class and the existing starvation bound. A waiting priority head still needs
+the declared budget and pressure gate. Backfill within its class is allowed
+only when all backfilled work together leaves enough budget and run slots for
+the head once existing work frees capacity. The existing head-wait bound also
+applies. Ordinary queues keep their existing behavior.
+
 For an urgent individual run, call `run_priority` with
 `{"run_id":"<exact ID>","priority":"highest","reason":"release blocker"}`.
 Only `high` and `highest` are accepted, and the class must rise. Admitted and
 terminal runs refuse. Both changes are audited with the administrator's identity.
 Automatic restart refires retain the wait and bump; manual retries get a new
-queue place. Run views include `priority_class`, `priority_reason`, and active
+queue place. Run views include `priority_class`, `priority_reason`, `priority_requested_by`,
+`priority_refusal`, queue position, and active
 `display_reason`; the dashboard run-detail badge shows the class with the
-reason on hover. List and history rows do not show priority badges.
+reason on hover. Run details also show requester, reason and queue position;
+list and history messages include priority information without adding badges.
 Active `display_reason` is explicitly the priority message unless a more specific
 scheduling/preflight reason replaces it. Terminal `display_reason` describes the
 terminal cause; `priority_class` and `priority_reason` remain separate fields.

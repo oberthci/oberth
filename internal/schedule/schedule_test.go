@@ -263,3 +263,15 @@ func TestDuePendingCursorDoesNotDependOnNext(t *testing.T) {
 		t.Fatalf("successful cursor invented a pending occurrence: %v", names(due))
 	}
 }
+
+func TestScheduleSubmissionPriorityDefault(t *testing.T) {
+	for _, priority := range []string{"normal", "high", "highest"} {
+		file, err := Parse([]byte("schedules:\n  - name: nightly\n    cron: '0 * * * *'\n    priority: "+priority+"\n"), Limits{}, time.Now())
+		if err != nil || len(file.Entries) != 1 || string(file.Entries[0].Priority) != priority {
+			t.Fatalf("priority %s: %+v %v", priority, file, err)
+		}
+	}
+	if _, err := Parse([]byte("schedules:\n  - name: nightly\n    cron: '0 * * * *'\n    priority: urgent\n"), Limits{}, time.Now()); err == nil {
+		t.Fatal("invalid priority accepted")
+	}
+}
