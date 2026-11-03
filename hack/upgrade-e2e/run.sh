@@ -162,9 +162,11 @@ bao write auth/kubernetes/role/oberth-ci bound_service_account_names=oberth boun
   --set singleNamespace=true --set server.enabled=false --set createAggregateRoles=false \
   --set controller.clusterWorkflowTemplates.enabled=false --set workflow.serviceAccount.create=false --set workflow.rbac.create=false \
   --set crds.install=true --set crds.keep=true --set crds.full=false \
+  --set controller.workflowDefaults.spec.suspend=true \
   --set 'controller.extraEnv[0].name=POD_NAMES' --set-string 'controller.extraEnv[0].value=v1' --wait --timeout 180s
 # A fresh server intentionally fails readiness until a local upstream exists.
-"$helm" install oberth "$chart" -n oberth --values "$here/values.yaml"
+"$helm" install oberth "$chart" -n oberth --values "$here/values.yaml" \
+  --set-string "runnerImagePrefixes[0]=${published%@sha256:*}"
 booted=false
 for ((i=0;i<60;i++)); do
   if k -n oberth logs deploy/oberth -c oberth 2>/dev/null | rg -q 'ready for bootstrap'; then booted=true; break; fi
@@ -175,6 +177,8 @@ k -n oberth scale deploy/oberth --replicas=0
 k -n oberth wait --for=delete pod -l app.kubernetes.io/name=oberth --timeout=100s
 fixture_pod() {
   local name=$1 mode=$2
+  local extra=
+  [[ $mode != seed ]] || extra=", $published"
   cat <<YAML | k create -f -
 apiVersion: v1
 kind: Pod
@@ -193,7 +197,7 @@ spec:
       image: $fixture_image
       imagePullPolicy: Never
       command: [/fixture]
-      args: [$mode, /data/oberth.sqlite]
+      args: [$mode, /data/oberth.sqlite$extra]
       volumeMounts:
         - name: data
           mountPath: /data
@@ -220,29 +224,74 @@ k -n oberth delete pod fixture-seed --wait=true
 k -n oberth scale deploy/oberth --replicas=1
 k -n oberth rollout status deploy/oberth --timeout=150s
 snapshot() {
-  local phase=$1
+  local phase=$1 key=${2:-${1%-restart}}
   fixture_pod "fixture-$phase" snapshot
   k -n oberth logs "fixture-$phase" >"$evidence/state-$phase.json"
-  jq -e '.Total==5 and (.Runs|length)==5 and ([.Runs[]|select(.Status=="running")]|length)==1 and ([.Runs[]|select(.Status=="queued")]|length)==4 and ([.Runs[].Priority]|unique|sort)==["high","highest","normal"]' "$evidence/state-$phase.json" >/dev/null
+  jq -e '.Total>=5 and (.Runs|length)==5 and ([.Runs[]|select(.Status=="running")]|length)==1 and ([.Runs[]|select(.Status=="queued")]|length)==4 and ([.Runs[].Priority]|unique|sort)==["high","highest","normal"]' "$evidence/state-$phase.json" >/dev/null
   k -n oberth delete pod "fixture-$phase" --wait=true
   k get priorityclasses -o json | jq -S '[.items[] | select(.metadata.labels."app.kubernetes.io/instance"=="oberth") | {name:.metadata.name,uid:.metadata.uid,value,globalDefault,preemptionPolicy}] | sort_by(.name)' >"$evidence/priorities-$phase.json"
   jq -e 'length>0' "$evidence/priorities-$phase.json" >/dev/null
   k -n oberth get pods -l app.kubernetes.io/name=oberth -o json >"$evidence/pods-$phase.json"
   jq -e '.items|length==1 and all(.[]; .status.phase=="Running" and all(.status.containerStatuses[]; .ready==true and .restartCount==0))' "$evidence/pods-$phase.json" >/dev/null
   local expected_image=$published
-  local key=${phase%-restart}
   [[ $key == baseline ]] || expected_image=${candidate_refs[$key]}
   jq -e --arg img "$expected_image" '.items[0].spec.containers[] | select(.name=="oberth") | .image==$img' "$evidence/pods-$phase.json" >/dev/null
   k -n oberth exec deploy/oberth -c oberth -- /usr/local/bin/oberth version >"$evidence/version-$phase.txt"
   local expected_version=v$from
   [[ $key == baseline ]] || expected_version=${candidate_versions[$key]}
   rg -F "$expected_version" "$evidence/version-$phase.txt" >/dev/null
-  k -n oberth-argo get workflow oberth-e2e-running -o json | jq '{uid:.metadata.uid,phase:.status.phase}' >"$evidence/workflow-$phase.json"
+  k -n oberth-argo get workflow "$running_workflow" -o json | jq '{uid:.metadata.uid,phase:.status.phase}' >"$evidence/workflow-$phase.json"
   jq -e '.phase=="Running"' "$evidence/workflow-$phase.json" >/dev/null
   k -n oberth get deploy oberth -o jsonpath='{.spec.template.spec.priorityClassName}' >"$evidence/pod-priority-$phase.txt"
 }
+running_workflow=oberth-e2e-running
+# Release the holder and observe real daemon admission, in priority order. The
+# controller suspends generated Workflows, keeping build containers idle. Keep
+# the second admitted Workflow as the next holder, then replenish two waiters.
+# Each subsequent upgrade compares with this explicit, newly frozen checkpoint.
+schedule_probe() {
+  local phase=$1 key=$2 expected id job
+  for expected in highest high; do
+    id=$(jq -er --arg p "$expected" '.Runs[]|select(.Status=="queued" and .Priority==$p)|.ID' "$evidence/state-$phase.json")
+    k -n oberth-argo delete workflow "$running_workflow" --wait=true
+    job=
+    for ((attempt=0;attempt<90;attempt++)); do
+      job=$(k -n oberth-argo get workflows -l "oberth.ci/run=$id" -o json | jq -r '.items[0].metadata.name // empty')
+      [[ -z $job ]] || break
+      sleep 2
+    done
+    if [[ -z $job ]]; then
+      fixture_pod "diagnose-$phase" diagnose
+      k -n oberth logs "diagnose-$phase" >"$evidence/queue-error-$phase.jsonl"
+      echo "scheduler did not admit $expected run $id" >&2; return 1
+    fi
+    k -n oberth-argo wait --for=jsonpath='{.status.phase}'=Running "workflow/$job" --timeout=60s
+    k -n oberth-argo get workflow "$job" -o json | jq '{name:.metadata.name,uid:.metadata.uid,run:.metadata.labels."oberth.ci/run",phase:.status.phase}' >"$evidence/admitted-$phase-$expected.json"
+    fixture_pod "admission-$phase-$expected" snapshot
+    k -n oberth logs "admission-$phase-$expected" >"$evidence/admission-state-$phase-$expected.json"
+    jq -e --arg id "$id" --arg job "$job" 'any(.Runs[]; .ID==$id and .Status=="running" and .Job==$job and .Started!=null)' "$evidence/admission-state-$phase-$expected.json" >/dev/null
+    k -n oberth delete pod "admission-$phase-$expected" --wait=true
+    k -n oberth-argo get pods -l "workflows.argoproj.io/workflow=$job" -o json | jq -e '.items|length==0' >/dev/null
+    running_workflow=$job
+  done
+  k -n oberth scale deploy/oberth --replicas=0
+  k -n oberth wait --for=delete pod -l app.kubernetes.io/name=oberth --timeout=100s
+  fixture_pod "refill-$phase" refill
+  k -n oberth delete pod "refill-$phase" --wait=true
+  k -n oberth scale deploy/oberth --replicas=1
+  k -n oberth rollout status deploy/oberth --timeout=150s
+  snapshot "$phase-ready" "$key"
+  # Compare the ledger across the deliberate queue mutations too. Strip only
+  # the trailing run payload, retaining every integer timestamp byte for byte.
+  for point in "$phase" "$phase-ready"; do
+    sed -E 's/,"Runs":.*$/,"Runs":[],"Total":0}/' "$evidence/state-$point.json" >"$evidence/ledger-$point.json"
+  done
+  "$private/fixture-baseline" verify "$evidence/ledger-$phase.json" "$evidence/ledger-$phase-ready.json" \
+    "$(jq '.Ledger|length' "$evidence/state-$phase.json")" 0
+}
 snapshot baseline
-previous=baseline
+schedule_probe baseline baseline
+previous=baseline-ready
 for version in "${versions[@]}"; do
   started=$(date +%s%N)
   printf '%s\n' "$started" >"$evidence/upgrade-start-$version.txt"
@@ -254,18 +303,20 @@ for version in "${versions[@]}"; do
   "$private/fixture-baseline" verify "$evidence/state-$previous.json" "$evidence/state-$version.json" "$expected_schema" "$started"
   for artifact in priorities workflow pod-priority; do
     ext=json; [[ $artifact != pod-priority ]] || ext=txt
-    cmp "$evidence/$artifact-baseline.$ext" "$evidence/$artifact-$version.$ext"
+    cmp "$evidence/$artifact-$previous.$ext" "$evidence/$artifact-$version.$ext"
   done
+  schedule_probe "$version" "$version"
   # Restart the same target once more to detect migration replays or drift.
   k -n oberth rollout restart deploy/oberth
   k -n oberth rollout status deploy/oberth --timeout=180s
   snapshot "$version-restart"
-  "$private/fixture-baseline" verify "$evidence/state-$version.json" "$evidence/state-$version-restart.json" "$expected_schema" "$started"
+  "$private/fixture-baseline" verify "$evidence/state-$version-ready.json" "$evidence/state-$version-restart.json" "$expected_schema" "$started"
   for artifact in priorities workflow pod-priority; do
     ext=json; [[ $artifact != pod-priority ]] || ext=txt
-    cmp "$evidence/$artifact-baseline.$ext" "$evidence/$artifact-$version-restart.$ext"
+    cmp "$evidence/$artifact-$version-ready.$ext" "$evidence/$artifact-$version-restart.$ext"
   done
-  previous=$version-restart
+  schedule_probe "$version-restart" "$version"
+  previous=$version-restart-ready
 done
 k -n oberth get secrets -o json | jq -e '[.items[]|select(.type!="helm.sh/release.v1")]|length==0' >/dev/null
-printf 'PASS: release signature, behavioral red/green, five durable runs, ledger timestamps, priority classes, Workflow UID, upgrades and repeat restarts\n'
+printf 'PASS: release signature, behavioral red/green, five durable runs, ledger timestamps, priority classes, Workflow UID, upgrades, repeat restarts and live priority admission\n'
