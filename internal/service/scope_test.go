@@ -170,7 +170,7 @@ func newScopeFixture(t *testing.T) *scopeFixture {
 	fixture.service, err = NewAPI(APIConfig{
 		Runs: database, History: database, Repositories: database, Issues: database,
 		Promotions: database, Logs: logs, Artifacts: kept, Auditor: database,
-		SecretAccess: database, KubeVirtGrants: database, PromotionGrants: database, RepositoryRemover: database,
+		SecretAccess: database, KubeVirtGrants: database, WorkflowCapabilities: database, PromotionGrants: database, RepositoryRemover: database,
 		KVMPreflights: database, Health: fixture.health, Signals: NewSignals(), RunCancels: database, RunReruns: database,
 		MaximumWait: testTimeout(50 * time.Millisecond), PromotionWorkspaceRoot: filepath.Join(root, "promotion-work"),
 		SecretStoreVerifier: func(context.Context, api.SecretStoreVerifyRequest) (api.SecretStoreVerifyResponse, error) {
@@ -430,6 +430,7 @@ func TestScopedUplinkCannotTellHiddenFromMissing(t *testing.T) {
 		{"access_list", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
 		{"kubevirt_grant_get", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
 		{"size_grant_get", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
+		{"workflow_capability_get", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
 		{"access_list", map[string]any{"repo": hiddenRepo, "pending": true}, map[string]any{"repo": missingRepo, "pending": true}},
 	}
 	for _, pair := range pairs {
@@ -485,13 +486,15 @@ func TestScopedAdminCannotActOutsideItsUpstream(t *testing.T) {
 	fixture := newScopeFixture(t)
 	hiddenRepo := "codeberg/exampleorg/" + hiddenRepoName
 	for tool, arguments := range map[string]map[string]any{
-		"access_allow":         {"repo": hiddenRepo, "step": "deploy", "secret": "oberth/data/x"},
-		"access_revoke":        {"repo": hiddenRepo, "step": "release", "secret": "oberth/data/codeberg/token"},
-		"kubevirt_grant":       {"repo": hiddenRepo},
-		"kubevirt_revoke":      {"repo": hiddenRepo},
-		"repo_remove":          {"repo": hiddenRepo},
-		"promote_grant":        {"repo": hiddenRepo, "sha": fixture.runs["codeberg"][0].SHA, "branch": "main", "expires": "1h"},
-		"promote_grant_revoke": {"id": fixture.grants["codeberg"].ID},
+		"access_allow":               {"repo": hiddenRepo, "step": "deploy", "secret": "oberth/data/x"},
+		"access_revoke":              {"repo": hiddenRepo, "step": "release", "secret": "oberth/data/codeberg/token"},
+		"kubevirt_grant":             {"repo": hiddenRepo},
+		"kubevirt_revoke":            {"repo": hiddenRepo},
+		"workflow_capability_grant":  {"repo": hiddenRepo, "service_account": "operator", "resource_kinds": []string{"batch/jobs"}},
+		"workflow_capability_revoke": {"repo": hiddenRepo},
+		"repo_remove":                {"repo": hiddenRepo},
+		"promote_grant":              {"repo": hiddenRepo, "sha": fixture.runs["codeberg"][0].SHA, "branch": "main", "expires": "1h"},
+		"promote_grant_revoke":       {"id": fixture.grants["codeberg"].ID},
 	} {
 		value, err := fixture.call(scopedAdmin, tool, arguments)
 		fixture.assertNoLeak(t, tool, value, err, selectorOf(arguments))
