@@ -1,5 +1,12 @@
 Oberth {{ .Chart.AppVersion }} — {{ .Values.service.type }} Service, {{ if eq .Values.service.type "ClusterIP" }}internal SSH port {{ .Values.service.sshPort }} and HTTPS/MCP port {{ .Values.service.httpsPort }}; no NodePorts are allocated{{ else }}SSH port {{ .Values.service.sshPort }} on NodePort {{ .Values.service.sshNodePort }}, HTTPS/MCP NodePort {{ .Values.service.httpsNodePort }}{{ end }}.
 
+Pod Security Admission: both {{ .Release.Namespace }} (server) and
+{{ .Values.argo.namespace }} (pipelines) require privileged or unenforced PSA.
+The hostPath caches and root cache initializer cannot run under baseline or
+restricted. Set pod-security.kubernetes.io/enforce=privileged on both namespaces
+before applying the chart. An unlabelled namespace can inherit cluster defaults.
+The installer preflights existing namespaces and labels only newly created ones.
+
 1. Register the upstream (interactive — generates and persists the deploy key):
 
      kubectl exec -it -n {{ .Release.Namespace }} deploy/{{ include "oberth.fullname" . }} -- \

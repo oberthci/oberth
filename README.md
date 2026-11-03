@@ -73,6 +73,16 @@ curl -fsSL https://oberth.ci/install.sh | sh
 oberth install --install-secretstore
 ```
 
+Both the server namespace (`oberth` by default) and pipeline namespace
+(`oberth-argo`) require the Pod Security Admission `privileged` level, or no
+PSA enforcement. The server's root cache initializer and the server/pipeline
+`hostPath` caches are incompatible with `baseline` and `restricted`.
+The installer checks both namespaces before writes and labels newly created
+ones `pod-security.kubernetes.io/enforce=privileged`. It never weakens an
+existing namespace policy. When using Helm directly, have the namespace
+administrator create or label both namespaces with that value first; an
+unlabelled namespace may still inherit a restrictive cluster default.
+
 `oberth setup` walks through the same install step by step. It lists the
 SSH key pairs in `~/.ssh`, can connect further organizations with the same
 upstream key (`--also-upstream codeberg.org/acme`), and asks which address

@@ -763,6 +763,9 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	}
 
 	cfg.serverPKI = cfg.serverPKI || cfg.InstallSecretStore
+	if err := preflightPodSecurity(ctx, cfg, deps, false); err != nil {
+		return err
+	}
 
 	// The installer's own access path is the NodePorts (30022/30443). A
 	// LoadBalancer Service on k3s makes servicelb take host ports 2222 and
@@ -791,6 +794,11 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 
 	if cfg.DryRun {
 		return printDryRunPlan(cfg, deps.Output, cluster)
+	}
+	// Helm --create-namespace cannot attach PSA labels. Create only missing
+	// server/pipeline namespaces ourselves, with the required policy explicit.
+	if err := preflightPodSecurity(ctx, cfg, deps, true); err != nil {
+		return err
 	}
 
 	// Before anything is installed: naming an address the kept TLS identity will
