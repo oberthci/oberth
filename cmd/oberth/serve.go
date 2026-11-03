@@ -242,7 +242,7 @@ func runServe(ctx context.Context, arguments []string, output io.Writer) error {
 
 func parseServeOptions(arguments []string, output io.Writer) (serveOptions, error) {
 	options := serveOptions{declaredAdmission: service.DefaultDeclaredAdmissionConfig()}
-	var extendedResourceBudgets string
+	var extendedResourceBudgets, legacyResourceCharges string
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.DurationVar(&options.uplinkTokenPolicy.DefaultTTL, "uplink-token-default-ttl", model.DefaultUplinkTokenTTL, "default lifetime for new uplink bearer tokens (90 days)")
 	flags.DurationVar(&options.uplinkTokenPolicy.MaxTTL, "uplink-token-max-ttl", model.MaximumUplinkTokenTTL, "maximum new uplink bearer lifetime (hard ceiling 8760h / 365 days)")
@@ -272,6 +272,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.Float64Var(&options.kubernetesQPS, "kubernetes-client-qps", 50, "Kubernetes API requests per second per server client")
 	flags.IntVar(&options.kubernetesBurst, "kubernetes-client-burst", 100, "Kubernetes API burst allowance per server client")
 	flags.IntVar(&options.maxConcurrent, "max-concurrent-jobs", 3, "maximum concurrent Jobs (boot default)")
+	flags.StringVar(&legacyResourceCharges, "admission-legacy-resources", "{}", "JSON map of sizes S/M/L/XL to fixed cpu_milli and memory_bytes charges; missing sizes default to 1000/2Gi, 2000/4Gi, 3000/8Gi, 6000/16Gi")
 	flags.StringVar(&extendedResourceBudgets, "admission-extended-resources", "{}", "JSON map of qualified extended-resource names to integer capacity; no implicit capacity")
 	flags.BoolVar(&options.declaredAdmission.Disabled, "disable-declared-admission", false, "administrator kill switch: refuse new declared runs; undeclared workflows retain deprecated size admission")
 	flags.Int64Var(&options.declaredAdmission.CPUMilli, "admission-cpu-millis", 8000, "CPU budget for declared workflow and VM demand, excluding platform reserve")
@@ -386,6 +387,9 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	}
 	if err := json.Unmarshal([]byte(extendedResourceBudgets), &options.declaredAdmission.ExtendedResources); err != nil {
 		return serveOptions{}, err
+	}
+	if err := json.Unmarshal([]byte(legacyResourceCharges), &options.declaredAdmission.LegacyResources); err != nil {
+		return serveOptions{}, fmt.Errorf("parse legacy resource charges: %w", err)
 	}
 	if err := options.declaredAdmission.Validate(); err != nil {
 		return serveOptions{}, err

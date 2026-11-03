@@ -48,6 +48,9 @@ func runtimeCapacityFixture(t *testing.T, jobs int) (*Scheduler, *capacityAudit)
 
 func TestRuntimeCapacityPlatformProtectionFiniteXLFourSharesAfterRaise(t *testing.T) {
 	s, _ := runtimeCapacityFixture(t, 4)
+	// Isolate the live weight-cap change: fixed XL+M charges also need
+	// numeric room (20Gi), independently of the configured weight budget.
+	s.admission.resources.CPUMilli, s.admission.resources.MemoryBytes = 24000, 96<<30
 	s.admission.weights = SizeWeights{S: 1, M: 2, L: 3, XL: 8}
 	writeCapacity(t, s, "2")
 	s.refreshRuntimeCapacity(t.Context())

@@ -480,7 +480,7 @@ function queueSizeTitle(run) {
   const admission = admissionOf(run);
   if (admission?.declared_resources) return "declared CPU/memory requests, including executor reserve";
   if (!admission?.size) return "";
-  return `declared size ${admission.size}${admission.capacity > 0 ? ` · admission weight ${admission.weight} of ${admission.capacity}` : ""}`;
+  return `legacy size ${admission.size}${admission.legacy_resources ? ` · fixed reservation ${admission.legacy_resources.cpu_milli}m CPU, ${admission.legacy_resources.memory_bytes} memory bytes` : ""}${admission.capacity > 0 ? ` · admission weight ${admission.weight} of ${admission.capacity}` : ""}`;
 }
 function queueReason(run) {
   const a = admissionOf(run), s = run.Scheduling?.state, b = a?.blocked_by;
@@ -936,6 +936,8 @@ function summaryLines(detail) {
   else if (kind === "warn") lines.push(`[infra error, retried] ${runMessage(run)}`);
   else if (kind === "cancel") lines.push(`[${status}] ${runMessage(run)}`);
   else lines.push(`[queued] queued behind earlier work for this repository`);
+  const legacy = detail.Scheduling?.admission?.legacy_resources;
+  if (legacy) lines.push(`[legacy size ${detail.Scheduling.admission.size}] fixed reservation: ${legacy.cpu_milli}m CPU, ${legacy.memory_bytes} memory bytes; using size admission`);
   const execution = detail.Scheduling?.execution;
   if (execution) {
     if (["deadline_exceeded", "deadline_elapsed", "terminal_observed"].includes(execution.state)) lines.push(`[execution] ${detail.Scheduling.message}`);

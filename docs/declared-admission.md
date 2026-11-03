@@ -20,10 +20,26 @@ new declared runs; it does not convert them to size admission.
 Legacy workflows without CPU/memory requests, including limits-only documents,
 retain size admission, with a deprecation warning in `resource_message`
 directing the repository to commit measured
-requests/limits in git. Their combined weight reserves the same fraction of
-both host budgets when sharing with declared work. A legacy whole-budget XL
-retains its existing exclusion. The warning survives submission and restart
+requests/limits in git. Each run reserves a fixed CPU/memory amount by size,
+independent of host budgets and configured weights: S 1 CPU/2Gi, M 2 CPU/4Gi,
+L 3 CPU/8Gi, XL 6 CPU/16Gi. These whole-run charges include their safety margin;
+declared-run executor and memory headroom additions do not apply. Administrators
+can override them with `--admission-legacy-resources`, for example
+`'{"L":{"cpu_milli":4000,"memory_bytes":10737418240}}'`, or the chart's
+`admission.legacyResources` map in the same format. Omitted sizes retain defaults.
+Both fields must be positive, with CPU at most 1000000 millis and memory at most
+2^50 bytes; a size whose charge exceeds the host budget is refused before waiting.
+Size weights, FIFO/backfill, pressure and run caps still apply independently.
+A legacy whole-budget XL retains its existing exclusion. The warning survives submission and restart
 through immutable timing metadata; `display_reason` keeps its existing meaning.
+
+`system_status.admission.reservations`, admission blockers and per-run admission
+observations expose `legacy_resources: {cpu_milli, memory_bytes}` for prepared
+size-admitted runs. Declared runs expose `declared_resources` instead; claims
+still preparing have neither field. The dashboard labels legacy sizing and its
+fixed reservation in run details and queued-size tooltips. These are reservations,
+not measurements or Kubernetes resource requests. Size-admitted trusted contract
+runs are also marked legacy even when their source contains declarations.
 
 ## Resource accounting
 

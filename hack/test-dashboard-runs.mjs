@@ -6,6 +6,9 @@ const source = readFileSync(process.env.DASHBOARD_SCRIPT || new URL('../internal
 const sandbox = vm.createContext({URLSearchParams, console, Map, Set, Date, location:{pathname:'/runs'}, document:{body:{dataset:{version:'test'}},getElementById(){return null}}, localStorage:{getItem(){return null},setItem(){}}, setInterval(){},clearInterval(){}});
 vm.runInContext(source.slice(0, source.indexOf('/* ---------- events ---------- */')), sandbox);
 const run = code => vm.runInContext(code, sandbox);
+const legacyTitle = run(`queueSizeTitle({Scheduling:{admission:{size:'L',weight:3,capacity:8,legacy_resources:{cpu_milli:3000,memory_bytes:8589934592}}}})`);
+assert.match(legacyTitle, /legacy size L/, 'queued legacy runs must be identifiable');
+assert.match(legacyTitle, /fixed reservation 3000m CPU/, 'legacy tooltip must show its fixed charge');
 const numericCapacity = run(`capacityStatusCard({configuration:{max_concurrent_jobs:4,source:'config'},used:0,capacity:8,numeric_budget:{cpu_used_milli:7000,cpu_budget_milli:8000,memory_used_bytes:1073741824,memory_budget_bytes:17179869184}})`);
 assert.match(numericCapacity, /CPU 7000m\/8000m/, 'capacity card must expose numeric CPU budget even when weight use is zero');
 assert.match(numericCapacity, /memory/, 'capacity card must expose the memory budget');

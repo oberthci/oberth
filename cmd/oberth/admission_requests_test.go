@@ -52,3 +52,19 @@ func TestServeMemoryHeadroomPercent(t *testing.T) {
 		}
 	}
 }
+
+func TestServeLegacyResourceCharges(t *testing.T) {
+	options, err := parseServeOptions([]string{"--argo-namespace=argo", `--admission-legacy-resources={"L":{"cpu_milli":4500,"memory_bytes":10737418240}}`}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	charge := options.declaredAdmission.LegacyResources["L"]
+	if charge.CPUMilli != 4500 || charge.MemoryBytes != 10<<30 {
+		t.Fatalf("custom charge lost: %+v", charge)
+	}
+	for _, value := range []string{`no-json`, `{"XXL":{"cpu_milli":1000,"memory_bytes":1}}`, `{"L":{"cpu_milli":0,"memory_bytes":1}}`, `{"L":{"cpu_milli":1000}}`, `{"L":{"cpu_milli":1.5,"memory_bytes":1}}`} {
+		if _, err := parseServeOptions([]string{"--argo-namespace=argo", "--admission-legacy-resources=" + value}, io.Discard); err == nil {
+			t.Fatalf("invalid legacy charge accepted: %s", value)
+		}
+	}
+}

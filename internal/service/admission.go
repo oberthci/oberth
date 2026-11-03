@@ -302,6 +302,14 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 		reservation.cancel()
 		return nil, err
 	}
+	if request.Pods == nil {
+		charge := gate.resources.legacyCharge(size)
+		if charge.CPUMilli > gate.resources.CPUMilli || charge.MemoryBytes > gate.resources.MemoryBytes {
+			gate.mu.Unlock()
+			reservation.cancel()
+			return nil, fmt.Errorf("service: legacy size %s fixed charge exceeds the numeric budget; reduce the size or raise the administrator budget", size)
+		}
+	}
 	reservation.pods = nil
 	reservation.fallback = request.Fallback
 	if request.Pods != nil {
@@ -609,7 +617,7 @@ func (gate *weightedAdmission) canGrantLocked(reservation *admissionReservation)
 		}
 	}
 	if !gate.usesDeclarations(reservation) && gate.weights.wholeBudget(reservation.size) {
-		return gate.runs == 0 && gate.used == 0
+		return gate.runs == 0 && gate.used == 0 && gate.numericFitsLocked(reservation)
 	}
 	if !gate.numericFitsLocked(reservation) {
 		return false
@@ -713,6 +721,7 @@ func (gate *weightedAdmission) headBlockerLocked() *admissionReservation {
 func (gate *weightedAdmission) blockerLocked(reservation *admissionReservation) *model.AdmissionBlocker {
 	blocker := &model.AdmissionBlocker{
 		DeclaredResources: reservation.declaredResources(),
+		LegacyResources:   reservation.legacyResources(),
 		RunID:             reservation.runID, RepoID: reservation.repoID, Repo: reservation.repo, Ref: reservation.ref,
 		Size: string(reservation.size), Weight: reservation.weight, Used: gate.used, Capacity: gate.capacity,
 		WaitingSince: reservation.preparedAt,
@@ -759,6 +768,7 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 	result.BackfillMessage = reservation.backfillMessage
 	if reservation.prepared {
 		result.DeclaredResources = reservation.declaredResources()
+		result.LegacyResources = reservation.legacyResources()
 		result.State = "waiting"
 		result.VMCapacity = reservation.vmParked
 		result.KubeVirtCapacity = gate.kubeVirtBlockedLocked(reservation)

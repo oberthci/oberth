@@ -95,6 +95,13 @@ admission:
     memoryHeadroomBytes: 1073741824
     memoryHeadroomPercent: 10
     ioRuns: 0
+  # Fixed whole-run charges for legacy size admission, independent of budgets
+  # and size weights. Missing sizes retain server defaults. No pod mutation.
+  legacyResources:
+    S: {cpu_milli: 1000, memory_bytes: 2147483648}
+    M: {cpu_milli: 2000, memory_bytes: 4294967296}
+    L: {cpu_milli: 3000, memory_bytes: 8589934592}
+    XL: {cpu_milli: 6000, memory_bytes: 17179869184}
   # Mounted directory is re-read every 5s; direct ConfigMap edits need no restart.
   # Null initializes the runtime value from the boot maxConcurrentJobs above.
   runtimeCapacity:

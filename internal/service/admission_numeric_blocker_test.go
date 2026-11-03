@@ -52,6 +52,8 @@ func TestNumericBackfillDoesNotConsumeBlockedHeadsBudget(t *testing.T) {
 	g := newWeightedAdmission(8)
 	g.maxHeadWait = time.Minute
 	g.weights.L = 4
+	// The head needs 4000m by explicit charge, independently of its weight.
+	g.resources.LegacyResources = map[pipeline.Size]model.LegacyResourceCharge{pipeline.L: {CPUMilli: 4000, MemoryBytes: 8 << 30}}
 	release := acquireRequestWithinBudget(t, g.reserve(1), admissionRequest{Size: pipeline.XL, Pods: &argoworkflow.PodDemand{CPUMilli: 4900, MemoryBytes: 1 << 30, Pods: 1}})
 	defer release()
 	head := priorityWaiter(g, 2, model.PriorityNormal, time.Now(), pipeline.L)
