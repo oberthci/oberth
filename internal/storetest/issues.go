@@ -22,7 +22,7 @@ func UpsertCIIssue(database *store.Store, ctx context.Context, actor string, rep
 	if err != nil {
 		return model.Issue{}, err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return model.Issue{}, err
