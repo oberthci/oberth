@@ -266,9 +266,11 @@ func IsExecutionDeadlineReason(message string) bool {
 	}
 }
 
-// Pressure values are host-wide PSI percentages averaged over sixty seconds.
+// Pressure values are host-wide PSI percentages over ten and sixty seconds.
 // CPU full is undefined at host scope and is reported as zero.
 type PressureResource struct {
+	SomeAvg10 float64 `json:"some_avg10"`
+	FullAvg10 float64 `json:"full_avg10"`
 	SomeAvg60 float64 `json:"some_avg60"`
 	FullAvg60 float64 `json:"full_avg60"`
 }
@@ -278,6 +280,12 @@ type PressureSample struct {
 	Memory PressureResource `json:"memory"`
 }
 type AdmissionPressure struct {
+	CPUSomeAvg10      float64         `json:"cpu_some_avg10,omitempty"`
+	IOSomeAvg10       float64         `json:"io_some_avg10,omitempty"`
+	HardCPU           float64         `json:"hard_cpu,omitempty"`
+	HardIO            float64         `json:"hard_io,omitempty"`
+	MaxWaitSeconds    int64           `json:"max_wait_seconds,omitempty"`
+	Fallback          string          `json:"fallback,omitempty"`
 	Mode              string          `json:"mode"`
 	ThresholdExceeded bool            `json:"threshold_exceeded"`
 	Enabled           bool            `json:"enabled"`
@@ -293,6 +301,9 @@ type AdmissionPressure struct {
 	Deferred          int             `json:"deferred"`
 }
 type PressureDeferral struct {
+	Avg10Gate       bool      `json:"avg10_gate,omitempty"`
+	CPUAvg10        float64   `json:"cpu_avg10,omitempty"`
+	IOAvg10         float64   `json:"io_avg10,omitempty"`
 	Redacted        bool      `json:"redacted,omitempty"`
 	Resource        string    `json:"resource"`
 	Avg60           float64   `json:"avg60,omitempty"`
@@ -310,6 +321,9 @@ func (p *PressureDeferral) Public() *PressureDeferral {
 func (p *PressureDeferral) Reason() string {
 	if p.Redacted {
 		return "deferred: host " + p.Resource + " pressure"
+	}
+	if p.Avg10Gate {
+		return fmt.Sprintf("deferred: %s pressure gate (host PSI some avg10: cpu %.1f%%, io %.1f%%)", p.Resource, p.CPUAvg10, p.IOAvg10)
 	}
 	return fmt.Sprintf("deferred: %s pressure %.1f%%", p.Resource, p.Avg60)
 }

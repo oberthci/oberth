@@ -274,11 +274,18 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.maxConcurrentFile, "max-concurrent-jobs-file", "", "mounted ConfigMap key to reload max concurrent Jobs without restart; invalid or missing keeps the last good value")
 	flags.StringVar(&options.admissionSizeWeights, "admission-size-weights", service.DefaultSizeWeights.String(), "admission weight per size as S=..,M=..,L=..,XL=..; XL=0 is the whole budget (an XL run runs alone), a positive XL lets XL share the host; the budget is --max-concurrent-jobs M runs (#1021)")
 	flags.DurationVar(&options.admissionMaxHeadWait, "admission-max-head-wait", service.DefaultMaxHeadWait, "bounded backfill (#1085): while the admission queue head does not fit, later runs that fit are admitted beside it until it has waited this long; then the budget drains for it (0 = strict FIFO)")
-	flags.StringVar(&options.admissionPressure.Mode, "admission-pressure-mode", service.PressureObserve, "host PSI policy: observe (report only) or enforce (hold new grants)")
-	flags.Float64Var(&options.admissionPressure.IOFullAvg60Max, "admission-pressure-io-full-avg60-max", 30, "host IO full PSI avg60 threshold; holds grants only in enforce mode (0 = disabled)")
-	flags.Float64Var(&options.admissionPressure.CPUSomeAvg60Max, "admission-pressure-cpu-some-avg60-max", 0, "host CPU some PSI avg60 threshold; holds grants only in enforce mode (0 = disabled)")
-	flags.Float64Var(&options.admissionPressure.Hysteresis, "admission-pressure-hysteresis", 10, "percentage points below each enabled threshold required to resume grants")
-	flags.DurationVar(&options.admissionPressure.MaxDefer, "admission-pressure-max-defer", 20*time.Minute, "maximum pressure deferral per eligible run; other admission gates still apply")
+	defaults := service.DefaultAdmissionPressureConfig()
+	flags.BoolVar(&options.admissionPressure.Enabled, "admission-pressure-enabled", defaults.Enabled, "gate new runs by host CPU and IO some PSI avg10")
+	flags.Float64Var(&options.admissionPressure.CPUSomeAvg10, "admission-pressure-cpu-some-avg10", defaults.CPUSomeAvg10, "CPU some PSI avg10 threshold in percent")
+	flags.Float64Var(&options.admissionPressure.IOSomeAvg10, "admission-pressure-io-some-avg10", defaults.IOSomeAvg10, "IO some PSI avg10 threshold in percent")
+	flags.Float64Var(&options.admissionPressure.HardCPU, "admission-pressure-hard-cpu", defaults.HardCPU, "hard CPU some PSI avg10 limit for starvation admission")
+	flags.Float64Var(&options.admissionPressure.HardIO, "admission-pressure-hard-io", defaults.HardIO, "hard IO some PSI avg10 limit for starvation admission")
+	flags.Int64Var(&options.admissionPressure.MaxWaitSeconds, "admission-pressure-max-wait-seconds", defaults.MaxWaitSeconds, "head queue wait before admission below hard PSI limits")
+	flags.StringVar(&options.admissionPressure.Mode, "admission-pressure-mode", service.PressureEnforce, "legacy avg60 mode; enabled avg10 admission always enforces")
+	flags.Float64Var(&options.admissionPressure.IOFullAvg60Max, "admission-pressure-io-full-avg60-max", 0, "legacy IO full PSI avg60 threshold; ignored by enabled avg10 admission")
+	flags.Float64Var(&options.admissionPressure.CPUSomeAvg60Max, "admission-pressure-cpu-some-avg60-max", 0, "legacy CPU some PSI avg60 threshold; ignored by enabled avg10 admission")
+	flags.Float64Var(&options.admissionPressure.Hysteresis, "admission-pressure-hysteresis", 10, "legacy avg60 recovery margin; avg10 admission always uses 10 points")
+	flags.DurationVar(&options.admissionPressure.MaxDefer, "admission-pressure-max-defer", 20*time.Minute, "legacy avg60 deferral bound; avg10 admission uses max-wait-seconds and hard limits")
 
 	flags.Int64Var(&options.admissionDiskFloorBytes, "admission-disk-floor-bytes", 0, "opt-in disk-space admission floor in bytes (0 = disabled); when enabled and free bytes on /data are below this floor, admission is held until disk frees up (#673)")
 	flags.StringVar(&options.ciCacheRoot, "ci-cache-root", "/var/cache/oberth/ci", "CI host cache root")
@@ -371,6 +378,9 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	options.sizeWeights = weights
 	if options.admissionPressure.Mode == "" {
 		return serveOptions{}, errors.New("serve: --admission-pressure-mode must be observe or enforce")
+	}
+	if !options.admissionPressure.Enabled {
+		options.admissionPressure.IOFullAvg60Max, options.admissionPressure.CPUSomeAvg60Max = 0, 0
 	}
 	if err := options.admissionPressure.Validate(); err != nil {
 		return serveOptions{}, fmt.Errorf("serve: --admission-pressure: %w", err)

@@ -16,7 +16,7 @@ if test "$bao_digest" != 175c5cea2d36b68d348eca872044656bd8740c4dbe26b7dc8eb7c74
   exit 1
 fi
 work=$(mktemp -d)
-trap 'rm -rf -- "$work"' EXIT
+trap 'find "$work" -delete' EXIT
 
 render() {
   "$helm_tool" template oberth "$chart" --namespace oberth "$@"

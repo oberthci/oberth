@@ -218,10 +218,22 @@ spec:
             - --admission-disk-floor-bytes={{ $admission.diskFloorBytes }}
             {{- end }}
             {{- $pressure := $admission.pressure | default dict }}
-            {{- $pressureMode := $pressure.mode | default "observe" }}
+            {{- $pressureEnabled := true }}
+            {{- if hasKey $pressure "enabled" }}{{- $pressureEnabled = $pressure.enabled }}{{- end }}
+            {{- $hostPressure := merge (deepCopy $pressure) (dict "enabled" true "cpuSomeAvg10" 40 "ioSomeAvg10" 25 "hardCpu" 70 "hardIo" 50 "maxWaitSeconds" 1200) }}
+            {{- if or (lt (float64 $hostPressure.hardCpu) (float64 $hostPressure.cpuSomeAvg10)) (lt (float64 $hostPressure.hardIo) (float64 $hostPressure.ioSomeAvg10)) }}
+            {{- fail "admission.pressure hard limits must be at least the soft thresholds" }}
+            {{- end }}
+            - {{ printf "--admission-pressure-enabled=%v" $pressureEnabled | quote }}
+            - {{ printf "--admission-pressure-cpu-some-avg10=%v" $hostPressure.cpuSomeAvg10 | quote }}
+            - {{ printf "--admission-pressure-io-some-avg10=%v" $hostPressure.ioSomeAvg10 | quote }}
+            - {{ printf "--admission-pressure-hard-cpu=%v" $hostPressure.hardCpu | quote }}
+            - {{ printf "--admission-pressure-hard-io=%v" $hostPressure.hardIo | quote }}
+            - {{ printf "--admission-pressure-max-wait-seconds=%v" $hostPressure.maxWaitSeconds | quote }}
+            {{- $pressureMode := $pressure.mode | default "enforce" }}
             {{- if not (has $pressureMode (list "observe" "enforce")) }}{{- fail "admission.pressure.mode must be observe or enforce" }}{{- end }}
             - {{ printf "--admission-pressure-mode=%s" $pressureMode | quote }}
-            {{- $ioMax := 30 }}
+            {{- $ioMax := 0 }}
             {{- if hasKey $pressure "ioFullAvg60Max" }}{{- $ioMax = $pressure.ioFullAvg60Max }}{{- end }}
             {{- $cpuMax := 0 }}
             {{- if hasKey $pressure "cpuSomeAvg60Max" }}{{- $cpuMax = $pressure.cpuSomeAvg60Max }}{{- end }}
