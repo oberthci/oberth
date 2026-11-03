@@ -521,7 +521,9 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	if err := scheduler.completePendingCancellationsWithGate(workerCtx, scheduler.awaitMutation); err != nil {
+	if err := scheduler.waitForStartupCleanup(workerCtx, "cancellations", func(ctx context.Context) error {
+		return scheduler.completePendingCancellationsWithGate(ctx, scheduler.awaitMutation)
+	}); err != nil {
 		return err
 	}
 	if err := scheduler.recoverPendingPublicationsWithGate(workerCtx, scheduler.awaitMutation); err != nil {

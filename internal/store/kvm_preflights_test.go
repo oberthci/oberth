@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"path/filepath"
@@ -318,38 +317,21 @@ func TestKVMJournalMigration20PreservesLegacyExecution(t *testing.T) {
  DROP TABLE saved_executions; DROP TABLE IF EXISTS step_resource_usage; DROP INDEX IF EXISTS runs_latest_ref_idx; DROP TABLE IF EXISTS run_priority_overrides; DROP TABLE IF EXISTS queue_priority_patterns; DELETE FROM schema_migrations WHERE version>=34; ALTER TABLE step_results DROP COLUMN memory_peak_bytes; DELETE FROM schema_migrations WHERE version=33; ALTER TABLE schedule_fires DROP COLUMN last_fired_at; DELETE FROM schema_migrations WHERE version=32; DROP TRIGGER run_schedule_entry_immutable; ALTER TABLE runs DROP COLUMN schedule_entry; DELETE FROM schema_migrations WHERE version=31; DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings; DROP INDEX runs_admission_idx; ALTER TABLE runs DROP COLUMN admission_sequence; DROP TABLE kubevirt_grants; DROP TABLE uplink_scopes; ALTER TABLE issues DROP COLUMN scope_upstream_id; ALTER TABLE step_results DROP COLUMN termination_json; DELETE FROM schema_migrations WHERE version>=20;`)
 	requireStoreNoError(t, err)
 	requireStoreNoError(t, s.Close())
-	blocked, err := Open(ctx, path, Options{Now: func() time.Time { return now }})
-	if blocked != nil {
-		_ = blocked.Close()
-	}
-	if !errors.Is(err, ErrInvalidState) {
-		t.Fatalf("upgrade with ambiguous VM accepted: %v", err)
-	}
-	raw, err := sql.Open("sqlite", path)
+	s, err = Open(ctx, path, Options{Now: func() time.Time { return now }})
 	requireStoreNoError(t, err)
-	defer func() { _ = raw.Close() }()
+	defer func() { _ = s.Close() }()
+	// The full upgrade retains ambiguous ownership for runtime recovery.
 	var submitted, cleaned int
 	var slot string
-	requireStoreNoError(t, raw.QueryRow(`SELECT submitted,cleaned FROM vm_executions WHERE run_id=?`, legacy.Spec.RunID).Scan(&submitted, &cleaned))
-	requireStoreNoError(t, raw.QueryRow(`SELECT run_id FROM vm_capacity_slots WHERE slot=1`).Scan(&slot))
-	if submitted != 1 || cleaned != 0 || slot != legacy.Spec.RunID {
-		t.Fatalf("refused upgrade lost ambiguous ownership: submitted=%d cleaned=%d slot=%s", submitted, cleaned, slot)
-	}
-	// Exercise v20's journal conversion independently inside a rolled-back
-	// transaction; the full upgrade intentionally cannot cross schema 47 yet.
-	tx, err := raw.BeginTx(ctx, nil)
-	requireStoreNoError(t, err)
-	defer func() { _ = tx.Rollback() }()
-	_, err = tx.ExecContext(ctx, migrations[19].sql)
-	requireStoreNoError(t, err)
+
 	var kind, intentJSON string
-	requireStoreNoError(t, tx.QueryRow(`SELECT execution_kind,intent_json,submitted,cleaned FROM vm_executions WHERE run_id=?`, legacy.Spec.RunID).Scan(&kind, &intentJSON, &submitted, &cleaned))
+	requireStoreNoError(t, s.db.QueryRow(`SELECT execution_kind,intent_json,submitted,cleaned FROM vm_executions WHERE run_id=?`, legacy.Spec.RunID).Scan(&kind, &intentJSON, &submitted, &cleaned))
 	var intent vmrunner.ExecutionIntent
 	requireStoreNoError(t, json.Unmarshal([]byte(intentJSON), &intent))
 	if kind != "vm" || submitted != 1 || cleaned != 0 || intent.Spec.RunID != legacy.Spec.RunID {
 		t.Fatalf("v20 lost legacy state: kind=%s submitted=%d cleaned=%d intent=%+v", kind, submitted, cleaned, intent)
 	}
-	requireStoreNoError(t, tx.QueryRow(`SELECT run_id FROM vm_capacity_slots WHERE slot=1`).Scan(&slot))
+	requireStoreNoError(t, s.db.QueryRow(`SELECT run_id FROM vm_capacity_slots WHERE slot=1`).Scan(&slot))
 	if slot != legacy.Spec.RunID {
 		t.Fatal("v20 lost capacity")
 	}

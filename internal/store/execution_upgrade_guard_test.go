@@ -1,13 +1,11 @@
 package store
 
 import (
-	"errors"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
-func TestExecutionUpgradeRefusesInFlightWork(t *testing.T) {
+func TestExecutionUpgradePreservesInFlightWorkForRecovery(t *testing.T) {
 	for _, scenario := range []string{"execution", "capacity", "running", "cleanup"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := t.Context()
@@ -48,13 +46,29 @@ func TestExecutionUpgradeRefusesInFlightWork(t *testing.T) {
 			if candidate != nil {
 				_ = candidate.Close()
 			}
-			if !errors.Is(err, ErrInvalidState) || !strings.Contains(err.Error(), "drain") {
-				t.Fatalf("upgrade accepted %s work or returned an unclear error: %v", scenario, err)
+			if err != nil {
+				t.Fatalf("busy upgrade must reach owner recovery for %s: %v", scenario, err)
 			}
 			var applied int
-			if err = s.db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE version=47`).Scan(&applied); err != nil || applied != 0 {
-				t.Fatalf("refused migration was recorded: %d %v", applied, err)
+			if err = s.db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE version=47`).Scan(&applied); err != nil || applied != 1 {
+				t.Fatalf("compatible upgrade not recorded: %d %v", applied, err)
 			}
+			// Migration must not mark an unobserved external object as cleaned
+			// or finish a run/cancellation on the strength of schema work alone.
+			var executions, slots, running, cleanup int
+			err = s.db.QueryRow(`SELECT
+                (SELECT COUNT(*) FROM vm_executions WHERE cleaned=0),
+                (SELECT COUNT(*) FROM vm_capacity_slots),
+                (SELECT COUNT(*) FROM runs WHERE status='running'),
+                (SELECT COUNT(*) FROM run_cancellations WHERE completed_at IS NULL)`).Scan(&executions, &slots, &running, &cleanup)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := map[string]int{"execution": executions, "capacity": slots, "running": running, "cleanup": cleanup}
+			if got[scenario] != 1 {
+				t.Fatalf("upgrade lost %s obligation: %+v", scenario, got)
+			}
+
 		})
 	}
 }

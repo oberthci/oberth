@@ -969,7 +969,7 @@ trust assumptions and complete invalidation rules.
   it encodes the same result object. Authenticated tool refusal text keeps its
   stable error class and may append only an explicitly public service reason.
   Raw dependency chains stay masked; scoped missing/hidden equivalence remains.
-- MCP exposes 70 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 73 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, read-only `run_resources` (captured history and reviewed git resource suggestions), `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`, `run_kvm_preflight`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, issue
   create/get/get_many/update/append/close/reopen/delete/list/lock/unlock/close_many,
@@ -2538,7 +2538,7 @@ alone is never evidence that missing migrations ran.
 | v44 | Tag publication identity | Prevent duplicate tag publication tuples | Database restore |
 | v45 | Pilot retirement | Preserve inactive pilot journals as read-only history; remove them from execution decisions | Database restore |
 | v46 | Operator capabilities | Empty repository-bound authority for operator ServiceAccounts, resource kinds and extended resources; no conversion of historical grants | Database restore |
-| v47 | Staged execution upgrade | Refuse VM work in flight at upgrade; retain legacy journals, interlocks and grant authority until Stage 2 | Database restore |
+| v47 | Deferred execution retirement | Preserve writable execution journals, interlocks and grant authority so owner recovery can settle work in flight | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding
@@ -3125,7 +3125,7 @@ The source receipt pins exact source, fragments and run binding across sizing
 and submission. Ordinary workflows retain the existing admission behavior.
 
 Schema 46 starts capability authority empty. Schema 47 keeps legacy execution,
-capacity and KubeVirt grants writable while guarding the upgrade boundary.
+capacity and KubeVirt grants writable so startup can recover work in flight.
 The old `OBERTH_KVM`/`OBERTH_GUEST_TEST`, guest-test and `.oberth/tests.yaml`
 paths are deprecated and retained, including publication gates, recovery,
 cleanup, existing grants and chart RBAC. Operators must migrate and qualify
