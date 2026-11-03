@@ -107,6 +107,12 @@ func (database schedulerDatabase) Publication(ctx context.Context, id string) (m
 	})
 }
 
+func (database schedulerDatabase) SetPublicationPolicyWaiting(ctx context.Context, id string, waiting bool) (time.Time, error) {
+	return retryDatabase(ctx, "SetPublicationPolicyWaiting", func(ctx context.Context) (time.Time, error) {
+		return database.SchedulerStore.SetPublicationPolicyWaiting(ctx, id, waiting)
+	})
+}
+
 func (database schedulerDatabase) PendingPublications(ctx context.Context) ([]model.Publication, error) {
 	return retryDatabase(ctx, "PendingPublications", func(ctx context.Context) ([]model.Publication, error) {
 		return database.SchedulerStore.PendingPublications(ctx)

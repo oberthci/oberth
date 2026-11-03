@@ -12,7 +12,7 @@ import (
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
-const resourceCeilingDowngradeSQL = `DROP TABLE IF EXISTS resource_ceilings; DELETE FROM schema_migrations WHERE version>=48;`
+const resourceCeilingDowngradeSQL = `DROP TRIGGER IF EXISTS publication_policy_wait_cleanup; DROP TABLE IF EXISTS publication_policy_waits; DROP TABLE IF EXISTS resource_ceilings; DELETE FROM schema_migrations WHERE version>=48;`
 
 func TestStage2ResourceCeilingMigration(t *testing.T) {
 	ctx := t.Context()
