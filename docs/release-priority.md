@@ -30,7 +30,11 @@ that time. Lower effective or base classes must finish before that start;
 they cannot use coexistence and occupy room needed by higher-class waiters.
 Unmeasured candidates can use only the coexistence test. The default
 20-minute head wait marks draining; this same rule still permits safe backfill
-during draining. Zero selects strict FIFO. Repository concurrency groups,
+during draining. Draining is now capped at five additional minutes: once the
+head has waited 25 minutes with defaults, work fitting current capacity may
+backfill without a p95 promise. The head is still considered first when capacity
+frees, but this escape can extend its wait. No active reservation is discarded.
+Zero selects strict FIFO and disables this escape. Repository concurrency groups,
 VM-capacity parking, pressure, disk-floor holds and run-count/size limits
 still apply. P95 predictions are estimates, not enforced runtime deadlines.
 

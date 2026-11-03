@@ -464,6 +464,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 	}()
 	var boundDeadline time.Time
 	observingSince := time.Now()
+	startup := &workflowStartup{observingSince: observingSince}
 	session := controller.resourceSession(ctx, runID)
 	defer session.finish()
 	if retained < 0 {
@@ -495,7 +496,9 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 	timed := map[string]bool{}
 	boundTiming := false
 	for {
-		workflow, err := controller.workflows.Get(ctx, name, metav1.GetOptions{})
+		readCtx, cancelRead := context.WithTimeout(ctx, executorIdentityAttemptTimeout)
+		workflow, err := controller.workflows.Get(readCtx, name, metav1.GetOptions{})
+		cancelRead()
 		if err != nil {
 			if apierrors.IsNotFound(err) {
 				return Completion{}, fmt.Errorf("argojob: Workflow %s disappeared before completing", name)
@@ -556,7 +559,15 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			live.observe(workflow)
 		}
 		session.update(workflow)
-		if err := controller.deliverExecutorTokens(ctx, workflow, delivered); err != nil {
+		// Bound the entire pass, including reads before an identity waiter exists.
+		// Individual token/exec retries retain their shorter attempt budgets.
+		deliveryCtx, cancelDelivery := context.WithTimeout(ctx, startupObservationTimeout)
+		deliveryErr := controller.deliverExecutorTokensWithStartup(deliveryCtx, workflow, delivered, startup)
+		if deliveryCtx.Err() != nil && ctx.Err() == nil {
+			deliveryErr = startupObservationExpired
+		}
+		cancelDelivery()
+		if err := deliveryErr; err != nil {
 			// Preserve observed execution evidence; a delivery error on a later
 			// Pod must not make already executed steps look like a pre-step failure.
 			return completionFor(workflow), err

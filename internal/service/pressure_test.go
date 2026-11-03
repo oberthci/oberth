@@ -256,7 +256,7 @@ func TestPressureTimeoutDoesNotJumpHigherPriorityOrGroupHead(t *testing.T) {
 
 func TestPressureTimeoutPreservesBackfillDrain(t *testing.T) {
 	f := pressureTestGate()
-	f.gate.maxHeadWait = time.Minute
+	f.gate.maxHeadWait = 20 * time.Minute // 21m is draining, before its 25m cap.
 	running := f.prepare(1, model.PriorityNormal, "", pipeline.M, time.Minute)
 	head := f.prepare(2, model.PriorityNormal, "", pipeline.XL)
 	f.sample.IO.FullAvg60 = 80

@@ -12,8 +12,17 @@ import (
 )
 
 // DefaultMaxHeadWait marks when the queue reports draining for its head.
-// Backfill must preserve the head's reservation.
+// Backfill preserves the head's reservation until the bounded drain expires.
 const DefaultMaxHeadWait = 20 * time.Minute
+
+// Do not idle spare resources indefinitely behind unknown/overrun grants.
+// This never releases their budget: all current resource and pressure checks
+// still apply, and the head is considered first on every admission pass.
+const maxDrainDuration = 5 * time.Minute
+
+func (gate *weightedAdmission) drainExpiredLocked(head *admissionReservation, now time.Time) bool {
+	return gate.maxHeadWait > 0 && !head.headSince.IsZero() && now.Sub(head.headSince) >= gate.maxHeadWait+maxDrainDuration
+}
 
 // headWaitKey identifies a run's head-wait origin across a restart: a
 // requeued run is a copy with a new ID but the same repository, ref and
@@ -134,10 +143,14 @@ func (gate *weightedAdmission) backfillEnabledLocked(head *admissionReservation)
 }
 
 // backfillFitsLocked is the single EASY rule, for every priority class and
-// on both sides of maxHeadWait. The caller checks current capacity first.
+// until the drain limit. The caller checks current capacity first.
 // A candidate must finish strictly before the reserved head start, or leave
 // room for the head at that time. Unmeasured candidates use coexistence only.
 func (gate *weightedAdmission) backfillFitsLocked(head, candidate *admissionReservation, now time.Time) bool {
+	if gate.drainExpiredLocked(head, now) {
+		candidate.backfillMessage = "backfilled: drain limit reached; using available capacity while the head waits"
+		return true
+	}
 	candidate.backfillMessage = "held: would delay head"
 	projection := gate.backfillProjectionLocked()
 	var completions []time.Time
@@ -233,7 +246,7 @@ func (gate *weightedAdmission) backfillStateLocked(head *admissionReservation, b
 	blocker.HeadSince = head.headSince
 	blocker.HeadWaitSeconds = int64(now.Sub(head.headSince) / time.Second)
 	blocker.MaxHeadWaitSeconds = int64(gate.maxHeadWait / time.Second)
-	if now.Sub(head.headSince) < gate.maxHeadWait {
+	if now.Sub(head.headSince) < gate.maxHeadWait || gate.drainExpiredLocked(head, now) {
 		blocker.Backfilling = true
 	} else {
 		blocker.Draining = true

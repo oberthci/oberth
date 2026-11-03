@@ -975,7 +975,7 @@ Usage of serve:
   -admission-io-runs int
         coarse simultaneous run ceiling for IO; 0 retains the existing run ceiling
   -admission-max-head-wait duration
-        time before admission reports draining for the head; measured p95 backfill may continue if it preserves the predicted head start (0 = strict FIFO) (default 20m0s)
+        time before admission reports draining; p95 backfill preserves the head start until a further 5m drain limit restores available-capacity backfill (0 = strict FIFO) (default 20m0s)
   -admission-memory-bytes int
         memory budget for declared workflow and VM demand, excluding platform reserve (default 17179869184)
   -admission-memory-headroom-bytes int

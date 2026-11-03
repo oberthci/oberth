@@ -402,6 +402,8 @@ func TestEASYDeadlineResetsOnlyWhenHeadChanges(t *testing.T) {
 	for _, displaced := range []bool{false, true} {
 		t.Run(fmt.Sprint(displaced), func(t *testing.T) {
 			g, clock, running := easyGate(t)
+			// Exercise forecast persistence before the separate drain cap.
+			g.maxHeadWait = 40 * time.Minute
 			head := pending(t, g, 2, easyRequest("original", 8200, time.Hour))
 			t.Cleanup(head.cancel)
 			safe := pending(t, g, 3, easyRequest("first", 1100, time.Minute))

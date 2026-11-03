@@ -854,8 +854,11 @@ the same effective and base priority classes may also coexist when the head
 still fits alongside the candidate and all surviving grants at that start.
 Lower classes cannot use this coexistence exception. Work without enough
 measurement samples can use only same-class coexistence. These rules still
-apply while the queue reports draining after the head-wait bound; running work
-is never preempted.
+apply while the queue reports draining after the head-wait bound. A further
+five-minute drain limit restores available-capacity backfill, including work
+without a usable p95 forecast; the head remains first at each admission pass.
+All active reservations still count, and running work is never preempted. See
+[admission waits](ob-admission-wait-report.md) for startup deadlines and cleanup.
 
 For an urgent individual run, call `run_priority` with
 `{"run_id":"<exact ID>","priority":"highest","reason":"release blocker"}`.
