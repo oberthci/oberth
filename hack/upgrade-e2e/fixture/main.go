@@ -118,7 +118,7 @@ func seed(ctx context.Context, path string) {
 	repoPath := filepath.Join(root, "sample")
 	must(os.MkdirAll(repoPath, 0750)) // #nosec G703 -- The CLI caller chooses the isolated fixture directory.
 	git := func(args ...string) string {
-		cmd := exec.Command("/usr/bin/git", append([]string{"-C", repoPath}, args...)...) // #nosec G204 -- Commands are fixed below; only the caller-selected fixture directory varies.
+		cmd := exec.Command("/usr/bin/git", append([]string{"-C", repoPath}, args...)...) // #nosec G204,G702 -- Commands are fixed below; only the caller-selected fixture directory varies.
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			panic(fmt.Sprintf("git fixture: %v: %s", err, out))
@@ -126,7 +126,7 @@ func seed(ctx context.Context, path string) {
 		return strings.TrimSpace(string(out))
 	}
 	git("init", "--initial-branch=main")
-	must(os.WriteFile(filepath.Join(repoPath, "README"), []byte("Oberth local upgrade fixture\n"), 0600))
+	must(os.WriteFile(filepath.Join(repoPath, "README"), []byte("Oberth local upgrade fixture\n"), 0600)) // #nosec G703 -- The CLI caller chooses where its fixture repository is created.
 	must(os.MkdirAll(filepath.Join(repoPath, ".oberth"), 0750)) // #nosec G703 -- Pipeline files belong beneath the caller-selected fixture directory.
 	if len(os.Args) != 4 {
 		panic("seed requires the signed release runner image")
@@ -146,7 +146,7 @@ spec:
         command: [/usr/local/bin/oberth, version]
 `, os.Args[3])
 	for _, file := range []string{"build.yaml", "release.yaml"} {
-		must(os.WriteFile(filepath.Join(repoPath, ".oberth", file), []byte(pipeline), 0600))
+		must(os.WriteFile(filepath.Join(repoPath, ".oberth", file), []byte(pipeline), 0600)) // #nosec G703 -- The pipeline is written beneath the caller-selected fixture directory.
 	}
 	git("add", "README", ".oberth")
 	git("-c", "user.name=Oberth fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "Create local fixture")

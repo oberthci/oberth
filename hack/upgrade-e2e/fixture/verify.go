@@ -37,7 +37,7 @@ func verifyCommand(args []string) {
 		panic("usage: fixture verify BEFORE AFTER EXPECTED_VERSION UPGRADE_START_NS")
 	}
 	read := func(path string) snapshotState {
-		data, err := os.ReadFile(path) // #nosec G304 -- The CLI explicitly accepts snapshot input files from its caller.
+		data, err := os.ReadFile(path) // #nosec G304,G703 -- The CLI explicitly accepts snapshot input files from its caller.
 		must(err)
 		var s snapshotState
 		must(json.Unmarshal(data, &s))
