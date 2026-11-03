@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -475,7 +476,10 @@ func (gate *weightedAdmission) grantLocked() {
 	// head is the first prepared, unparked waiter that does not fit.
 	var head *admissionReservation
 	defer func() {
-		if head == nil {
+		// An earlier unprepared or pressure-held claim can end this pass
+		// before it reaches the existing head. Keep that waiting head's
+		// forecast so an overrun cannot move its reservation later.
+		if gate.backfillHead != nil && !slices.Contains(gate.waiters, gate.backfillHead) {
 			gate.setBackfillHeadLocked(nil)
 		}
 	}()
