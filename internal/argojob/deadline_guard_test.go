@@ -67,13 +67,13 @@ func TestDeadlineGuardRepositoryCapsAndShorterDocuments(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			config := testConfig()
-			config.PerRepoWorkflowTimeout = map[string]time.Duration{"codeberg/skipops/oberth": tc.cap}
 			source := strings.Replace(greedyDocument, "999999", tc.declared, 1)
 			if tc.declared == "" {
 				source = strings.Replace(greedyDocument, "  activeDeadlineSeconds: 999999\n", "", 1)
 			}
 			request := testRequest(periapsis.TriggerCI, source)
 			request.UpstreamName = "codeberg"
+			config.PerRepoWorkflowTimeout = map[string]time.Duration{canonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo): tc.cap}
 			got, err := Build(config, request)
 			if err != nil {
 				t.Fatal(err)
