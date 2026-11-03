@@ -31,35 +31,39 @@ func easyGate(t *testing.T) (*weightedAdmission, *fakeClock, *admissionReservati
 	return g, clock, running
 }
 
+// easyForecastGate keeps the 30-minute running forecast inside the window, so
+// EASY safety cases exercise forecast/coexistence checks before draining.
+func easyForecastGate(t *testing.T) (*weightedAdmission, *fakeClock, *admissionReservation) {
+	g, clock, running := easyGate(t)
+	g.maxHeadWait = time.Hour
+	return g, clock, running
+}
+
 func TestEASYDrainingSnapshot(t *testing.T) {
 	g, clock, _ := easyGate(t)
 	head := pending(t, g, 2, easyRequest("head", 8200, time.Hour))
 	t.Cleanup(head.cancel)
-	g.mu.Lock()
-	head.priority = model.PriorityHighest
-	g.mu.Unlock()
 	clock.now = clock.now.Add(21 * time.Minute)
-	kick(g)
 	for i, cpu := range []int64{1100, 2450} {
 		r := pending(t, g, int64(3+i), easyRequest("short", cpu, 5*time.Minute))
 		t.Cleanup(r.cancel)
-		if !granted(g, r) {
-			t.Fatalf("%dm short run held during drain; 9m remain until head can start", cpu)
-		}
-		view := (&Scheduler{admission: g}).AdmissionSnapshot(r.sequence)
-		if view.BackfillMessage != "backfilled: ends before head can start (p95 5m < 9m)" {
-			t.Fatalf("backfill explanation = %q", view.BackfillMessage)
+		if granted(g, r) {
+			t.Fatal("draining admitted a measured short candidate")
 		}
 	}
-	if !g.spareWeightForClaim(4) {
-		t.Fatal("draining prevented claiming another measured candidate")
+	if g.spareWeightForClaim(4) {
+		t.Fatal("draining claimed another backfill candidate")
+	}
+	view := (&Scheduler{admission: g}).AdmissionState()
+	if view.Blocker == nil || !view.Blocker.Draining || view.Blocker.Backfilling {
+		t.Fatalf("drain state: %+v", view.Blocker)
 	}
 }
 
 func TestEASYRejectsUnknownAndDelayingRuns(t *testing.T) {
 	for _, duration := range []time.Duration{0, 9 * time.Minute, time.Hour} {
 		t.Run(duration.String(), func(t *testing.T) {
-			g, clock, _ := easyGate(t)
+			g, clock, _ := easyForecastGate(t)
 			head := pending(t, g, 2, easyRequest("head", 8200, time.Hour))
 			t.Cleanup(head.cancel)
 			clock.now = clock.now.Add(21 * time.Minute)
@@ -77,7 +81,7 @@ func TestEASYRejectsUnknownAndDelayingRuns(t *testing.T) {
 }
 
 func TestEASYUnknownDurationCannotDelayHeadBeforeDrain(t *testing.T) {
-	g, _, _ := easyGate(t)
+	g, _, _ := easyForecastGate(t)
 	head := pending(t, g, 2, easyRequest("head", 8200, time.Hour))
 	t.Cleanup(head.cancel)
 	r := pending(t, g, 3, easyRequest("no-samples", 4000, 0))
@@ -89,7 +93,7 @@ func TestEASYUnknownDurationCannotDelayHeadBeforeDrain(t *testing.T) {
 
 func TestEASYForecastUsesEnoughCompletionsAndRunSlots(t *testing.T) {
 	for _, slots := range []int{0, 2} {
-		g, clock, _ := easyGate(t)
+		g, clock, _ := easyForecastGate(t)
 		g.maxRuns = slots
 		other := pending(t, g, 2, easyRequest("other", 3000, 45*time.Minute))
 		t.Cleanup(other.cancel)
@@ -116,8 +120,8 @@ func TestEASYForecastUsesEnoughCompletionsAndRunSlots(t *testing.T) {
 	}
 }
 
-func TestEASYPressureHoldsSafeDrainingBackfill(t *testing.T) {
-	g, clock, _ := easyGate(t)
+func TestEASYPressureHoldsSafeBackfill(t *testing.T) {
+	g, clock, _ := easyForecastGate(t)
 	head := pending(t, g, 2, easyRequest("head", 8200, time.Hour))
 	t.Cleanup(head.cancel)
 	clock.now = clock.now.Add(21 * time.Minute)
@@ -140,7 +144,7 @@ func TestEASYPressureHoldsSafeDrainingBackfill(t *testing.T) {
 }
 
 func TestEASYCoexistenceIncludesMemoryAndExecutorReserves(t *testing.T) {
-	g, clock, _ := easyGate(t)
+	g, clock, _ := easyForecastGate(t)
 	h := easyRequest("head", 8200, time.Hour)
 	h.Pods.MemoryBytes = 40 << 30
 	head := pending(t, g, 2, h)
@@ -156,7 +160,7 @@ func TestEASYCoexistenceIncludesMemoryAndExecutorReserves(t *testing.T) {
 }
 
 func TestEASYCoexistencePreservesHeadVMCapacity(t *testing.T) {
-	g, clock, _ := easyGate(t)
+	g, clock, _ := easyForecastGate(t)
 	vm := &KubeVirtResources{Demand: argoworkflow.VMIDemand{VMs: 1, Cores: 1, MemoryBytes: 1 << 30},
 		Limit: argoworkflow.VMIDemand{VMs: 1, Cores: 1, MemoryBytes: 1 << 30}}
 	h := easyRequest("vm-head", 8200, time.Hour)
@@ -175,7 +179,7 @@ func TestEASYCoexistencePreservesHeadVMCapacity(t *testing.T) {
 
 func TestEASYHeadStartTimeInvariant(t *testing.T) {
 	simulate := func(backfill bool) time.Time {
-		g, clock, running := easyGate(t)
+		g, clock, running := easyForecastGate(t)
 		head := pending(t, g, 2, easyRequest("head", 8200, time.Hour))
 		t.Cleanup(head.cancel)
 		clock.now = clock.now.Add(21 * time.Minute)
@@ -207,7 +211,7 @@ func TestEASYHeadStartTimeInvariant(t *testing.T) {
 
 func TestEASYAggregateReservationsAndUnknownRunning(t *testing.T) {
 	for _, unknown := range []bool{false, true} {
-		g, clock, running := easyGate(t)
+		g, clock, running := easyForecastGate(t)
 		if unknown {
 			g.mu.Lock()
 			running.estimate = 0
@@ -305,13 +309,13 @@ func TestEASYHistoryRejectsMissingIncompleteAndOtherWorkflowClasses(t *testing.T
 }
 
 func TestEASYUnmeasuredCandidatesUseCoexistence(t *testing.T) {
-	for _, drain := range []time.Duration{0, 21 * time.Minute} {
+	for _, elapsed := range []time.Duration{0, 21 * time.Minute} {
 		for _, cpu := range []int64{1100, 4000} {
-			t.Run(fmt.Sprintf("%s/%d", drain, cpu), func(t *testing.T) {
-				g, clock, _ := easyGate(t)
+			t.Run(fmt.Sprintf("%s/%d", elapsed, cpu), func(t *testing.T) {
+				g, clock, _ := easyForecastGate(t)
 				head := pending(t, g, 2, easyRequest("head", 8200, time.Hour))
 				t.Cleanup(head.cancel)
-				clock.now = clock.now.Add(drain)
+				clock.now = clock.now.Add(elapsed)
 				candidate := pending(t, g, 3, easyRequest("unmeasured", cpu, 0))
 				t.Cleanup(candidate.cancel)
 				if got, want := granted(g, candidate), cpu == 1100; got != want {
@@ -336,7 +340,7 @@ func TestEASYHistoryRequestsWorkflowClass(t *testing.T) {
 func TestEASYLowerClassCannotDelaySecondHigherWaiter(t *testing.T) {
 	for _, duration := range []time.Duration{0, time.Hour, time.Minute} {
 		t.Run(duration.String(), func(t *testing.T) {
-			g, clock, _ := easyGate(t)
+			g, clock, _ := easyForecastGate(t)
 			h1 := pendingPriority(t, g, 2, model.PriorityHighest, easyRequest("H1", 5500, time.Hour))
 			t.Cleanup(h1.cancel)
 			h2 := pendingPriority(t, g, 3, model.PriorityHighest, easyRequest("H2", 5000, time.Hour))
@@ -355,7 +359,7 @@ func TestEASYLowerClassCannotDelaySecondHigherWaiter(t *testing.T) {
 }
 
 func TestEASYAgedNormalCannotCoexistBehindBaseHighest(t *testing.T) {
-	g, clock, _ := easyGate(t)
+	g, clock, _ := easyForecastGate(t)
 	head := pendingPriority(t, g, 2, model.PriorityHighest, easyRequest("explicit", 8200, time.Hour))
 	t.Cleanup(head.cancel)
 	r := g.reserveRun(model.Run{ID: "aged", QueueSequence: 3, Priority: model.PriorityNormal, QueuedAt: clock.now.Add(-time.Hour)})
@@ -401,7 +405,7 @@ func TestEASYHistoryRequiresMinimumMeasuredRuns(t *testing.T) {
 func TestEASYDeadlineResetsOnlyWhenHeadChanges(t *testing.T) {
 	for _, displaced := range []bool{false, true} {
 		t.Run(fmt.Sprint(displaced), func(t *testing.T) {
-			g, clock, running := easyGate(t)
+			g, clock, running := easyForecastGate(t)
 			head := pending(t, g, 2, easyRequest("original", 8200, time.Hour))
 			t.Cleanup(head.cancel)
 			safe := pending(t, g, 3, easyRequest("first", 1100, time.Minute))
@@ -446,7 +450,7 @@ func TestEASYDeadlineResetsOnlyWhenHeadChanges(t *testing.T) {
 }
 
 func TestEASYMessagesUseConservativeWholeMinutes(t *testing.T) {
-	g, clock, _ := easyGate(t)
+	g, clock, _ := easyForecastGate(t)
 	head := pendingPriority(t, g, 2, model.PriorityHighest, easyRequest("head", 8200, time.Hour))
 	t.Cleanup(head.cancel)
 	clock.now = clock.now.Add(20*time.Minute + 2*time.Second)

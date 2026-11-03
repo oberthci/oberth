@@ -12,15 +12,20 @@ path: slow tests, repeated downloads, startup gaps or retries in the last holder
 The scheduler already releases weight before slow finalization/publication once
 the Workflow is terminal or its deletion has been accepted.
 
-Measured backfill can use spare capacity before and after `maxHeadWait`,
-normally **20 minutes**. The scheduler projects the earliest head start by
-releasing enough running reservations at their measured p95 finish times.
-A candidate must fit now and finish strictly before that reserved start, or
-leave capacity for the head alongside it at that time. All other surviving
-grants count, including earlier backfills. Lower effective or base classes
-can use only the ends-before test, protecting every higher-class waiter ahead. An unmeasured candidate can use only the coexistence test;
-unknown or already overrun running work is never assumed to release capacity.
-Zero `maxHeadWait` keeps strict FIFO.
+Bounded backfill can use spare capacity before `maxHeadWait`, normally
+**20 minutes**. At and after the limit, no new backfill is admitted or claimed;
+existing grants drain for the head. The durable first head-wait origin survives
+restarts and priority displacement. Zero `maxHeadWait` keeps strict FIFO.
+
+The scheduler projects the earliest head start by releasing enough running
+reservations at their measured p95 finish times. A measured candidate must fit
+now and finish strictly before the earlier of that reservation and the remaining
+head-wait window. If running durations are unknown, a measured short candidate
+may use existing capacity when it finishes within the window; unknown holders
+are never projected free. Same effective and base priority classes may also
+coexist if the head still fits alongside all surviving grants at its reserved
+start. Lower classes cannot use coexistence, protecting higher-class waiters.
+Unmeasured candidates use only proven coexistence, never a guessed duration.
 
 Duration samples use the newest 30 passed runs of each repository's requested
 workflow class: branch, release, promotion or schedule. Retained step

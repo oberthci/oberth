@@ -11,8 +11,8 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-// DefaultMaxHeadWait marks when the queue reports draining for its head.
-// Backfill must preserve the head's reservation.
+// DefaultMaxHeadWait bounds the window for new backfill. After it expires,
+// existing grants drain for the head; running work is never preempted.
 const DefaultMaxHeadWait = 20 * time.Minute
 
 // headWaitKey identifies a run's head-wait origin across a restart: a
@@ -130,15 +130,25 @@ func (gate *weightedAdmission) emitHeadLocked(event headEvent) {
 // backfillEnabledLocked reports whether runs behind this head may still be
 // admitted beside it.
 func (gate *weightedAdmission) backfillEnabledLocked(head *admissionReservation) bool {
-	return gate.maxHeadWait > 0 && !head.headSince.IsZero()
+	return gate.maxHeadWait > 0 && !head.headSince.IsZero() && gate.clock().Before(head.headSince.Add(gate.maxHeadWait))
 }
 
-// backfillFitsLocked is the single EASY rule, for every priority class and
-// on both sides of maxHeadWait. The caller checks current capacity first.
+// backfillFitsLocked preserves a measured head start within maxHeadWait.
+// The caller checks current capacity first. Without a running-work forecast,
+// measured candidates may finish within the remaining head-wait window.
 // A candidate must finish strictly before the reserved head start, or leave
 // room for the head at that time. Unmeasured candidates use coexistence only.
 func (gate *weightedAdmission) backfillFitsLocked(head, candidate *admissionReservation, now time.Time) bool {
 	candidate.backfillMessage = "held: would delay head"
+	bound := head.headSince.Add(gate.maxHeadWait)
+	if !gate.backfillEnabledLocked(head) {
+		candidate.backfillMessage = "held: draining for head"
+		return false
+	}
+	// A forecast overrun cannot extend the continuous head's reservation.
+	if !head.backfillDeadline.IsZero() && !now.Before(head.backfillDeadline) {
+		return false
+	}
 	projection := gate.backfillProjectionLocked()
 	var completions []time.Time
 	for _, r := range projection.reservations {
@@ -154,13 +164,17 @@ func (gate *weightedAdmission) backfillFitsLocked(head, candidate *admissionRese
 		}
 		// Later backfills cannot move an existing reservation into the future.
 		if head.backfillDeadline.IsZero() || finish.Before(head.backfillDeadline) {
-			head.backfillDeadline = finish
+			head.backfillDeadline = minTime(finish, bound)
 		}
 		deadline := head.backfillDeadline
 		if !now.Before(deadline) {
 			return false
 		}
 		if candidate.estimate > 0 && now.Add(candidate.estimate).Before(deadline) {
+			if bound.Before(finish) {
+				candidate.backfillMessage = "backfilled: measured finish within remaining head-wait window"
+				return true
+			}
 			candidate.backfillMessage = fmt.Sprintf("backfilled: ends before head can start (p95 %dm < %dm)",
 				(candidate.estimate-1)/time.Minute+1, deadline.Sub(now)/time.Minute)
 			return true
@@ -189,8 +203,25 @@ func (gate *weightedAdmission) backfillFitsLocked(head, candidate *admissionRese
 		}
 		return false
 	}
+	// Unknown or overrun holders stay charged. No capacity is projected free;
+	// only a measured short candidate may use capacity that already fits now.
+	// Keep the first window even if a subsequent forecast moves later.
+	if head.backfillDeadline.IsZero() {
+		head.backfillDeadline = bound
+	}
+	if candidate.estimate > 0 && now.Add(candidate.estimate).Before(head.backfillDeadline) {
+		candidate.backfillMessage = "backfilled: measured finish within remaining head-wait window"
+		return true
+	}
 	candidate.backfillMessage += " (running p95 finish unknown)"
 	return false
+}
+
+func minTime(a, b time.Time) time.Time {
+	if a.Before(b) {
+		return a
+	}
+	return b
 }
 
 // Unknown, retained and overrun work is never assumed to finish now. Treating
@@ -356,7 +387,7 @@ func (scheduler *Scheduler) admissionHistory(ctx context.Context, run model.Run)
 
 // backfillClaimsOpenLocked reports whether the dispatch loop may claim past
 // runs that are waiting only because they are the head or were passed over
-// as backfill candidates, including while draining. A claim still
+// as backfill candidates, before draining begins. A claim still
 // preparing could itself fit, so none may be in flight; the waiting claims
 // are bounded by the budget's M-run count, and the caller's run, budget and
 // disk checks still apply.

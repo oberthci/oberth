@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 // RunScheduling is an ephemeral read-only observation, never execution evidence.
@@ -79,8 +81,8 @@ type AdmissionBlocker struct {
 	// Measured backfill: HeadSince is when this run started waiting
 	// at the head (it survives a restart), HeadWaitSeconds how long it has,
 	// and MaxHeadWaitSeconds the drain threshold. Backfilling is set before
-	// the threshold, Draining after it. Either phase permits measured work
-	// preserving the head's predicted start. All zero when disabled.
+	// the threshold, Draining at and after it. Draining stops new backfill.
+	// All zero when disabled.
 	HeadSince          time.Time `json:"head_since,omitzero"`
 	HeadWaitSeconds    int64     `json:"head_wait_seconds,omitempty"`
 	MaxHeadWaitSeconds int64     `json:"max_head_wait_seconds,omitempty"`
@@ -349,8 +351,12 @@ func (p *PressureDeferral) Reason() string {
 // declared requests/VM host demand, server helpers and memory headroom.
 // Aggregate host usage is deliberately not included.
 type DeclaredResources struct {
-	ExtendedResources map[string]int64 `json:"extended_resources,omitempty"`
-	CPUMilli          int64            `json:"cpu_milli"`
-	MemoryBytes       int64            `json:"memory_bytes"`
-	Pods              int64            `json:"pods"`
+	// Raw declarations and concurrent envelope, before helpers/headroom.
+	// A missing total is unknown (dynamic, unsupported, or historical).
+	DeclaredTotal     *argoworkflow.PodRequests `json:"declared_total,omitempty"`
+	Peak              *argoworkflow.PodRequests `json:"peak,omitempty"`
+	ExtendedResources map[string]int64          `json:"extended_resources,omitempty"`
+	CPUMilli          int64                     `json:"cpu_milli"`
+	MemoryBytes       int64                     `json:"memory_bytes"`
+	Pods              int64                     `json:"pods"`
 }

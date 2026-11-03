@@ -23,8 +23,8 @@ type weightedAdmission struct {
 	capacityConfig model.AdmissionCapacityConfig
 	// weights is the operator's weight per size (#1021).
 	weights SizeWeights
-	// maxHeadWait marks draining in the admission view. Measured EASY backfill
-	// remains possible while draining when it preserves the head reservation.
+	// maxHeadWait bounds new backfill. At the limit, admission drains
+	// existing holders for the head without granting more followers.
 	// Zero disables backfill (strict FIFO).
 	maxHeadWait time.Duration
 	// now is the gate's clock; nil is time.Now.
@@ -307,6 +307,7 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 	if request.Pods != nil {
 		pods := *request.Pods
 		pods.ExtendedResources = maps.Clone(request.Pods.ExtendedResources)
+		pods.DeclaredTotal = request.Pods.DeclaredTotal.Clone()
 		reservation.pods = &pods
 	} else if reservation.fallback == "" {
 		reservation.fallback = model.ResourceFallbackRequests
@@ -442,8 +443,8 @@ func (reservation *admissionReservation) retain() {
 // grantLocked admits waiters in claim order. An unsized claim at the head
 // holds its place, and so does a sized head that does not fit, which is what
 // keeps heavy runs (and XL, which needs the whole node) from starving. EASY
-// backfill lets measured work use spare capacity while preserving the head's
-// predicted start, including while draining after maxHeadWait.
+// backfill lets measured work use spare capacity within maxHeadWait, preserving
+// the head's predicted start when running durations are known.
 //
 // A run parked on its concurrency group is the one exception. It is not
 // waiting for the node but for another run of its own repository, so it is

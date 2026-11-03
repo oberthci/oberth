@@ -52,8 +52,8 @@ type SchedulerConfig struct {
 	MaxConcurrentFile string
 	MaxRunLogBytes    int64
 	MutationGate      func(context.Context) error
-	// MaxHeadWait marks draining for the head; safe EASY backfill may continue
-	// if it preserves the predicted head start. Zero is strict FIFO; serve
+	// MaxHeadWait bounds new backfill; at the limit existing grants drain
+	// for the head. Zero is strict FIFO; serve
 	// defaults it to DefaultMaxHeadWait.
 	MaxHeadWait time.Duration
 	// SizeWeights is the operator's admission weight per size (#1021); the
