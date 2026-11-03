@@ -2919,12 +2919,12 @@ does not carry an installation-specific audience-to-source-account allowlist.
 | `image-reader` | `oberth-release-reader` | `<release-reader>` |
 | `chart-writer` | `oberth-release-charts` | `<chart-publisher>` |
 
-All pools use provider `tuxbox` under project `138624361369`.
+The provider ID and project number in each audience must identify the
+configured WIF trust binding.
 
 Oberth's helper additionally performs the existing matching delegation (#875):
-image-writer to `oberth-release-publisher@skipopsmain.iam.gserviceaccount.com`,
-image-reader to `oberth-release-reader@skipopsmain.iam.gserviceaccount.com`, and
-chart-writer to `oberth-chart-publisher@skipopsmain.iam.gserviceaccount.com`.
+image-writer to the release publisher, image-reader to the release reader,
+and chart-writer to the chart publisher.
 The validated audience fixes the final hop. ADC names the configured
 first-hop principal; its URL must pass strict syntax validation and cannot
 override the Oberth target. Both IAM requests
@@ -2934,7 +2934,7 @@ stay in memory, and second-hop refusal never falls back to the first token or
 static keys. This consumes existing matching TokenCreator and repository IAM,
 without widening either. The helper uses the configured source exchange for
 Oberth's repositories.
-Real source account emails live only in tuxbox installation configuration.
+Real source account emails live only in installation configuration.
 Before the next release, configure/retain `argo.releaseWIF.roles.<role>.service_account`
 for all three roles. The current server already supplies the required ADC;
 this revision requires no new environment variable or preliminary server rollout.
@@ -3463,3 +3463,62 @@ successfully recorded finishes. Helm rollback alone fails schema-too-new and
 requires a pre-upgrade database restore; see [schema 37](docs/schema37-upgrade-note.md).
 Full scopes, exclusions and overhead:
 [external sampler coverage](docs/step-resource-usage.md#external-sampler-coverage-1216).
+
+## TRIZ contract
+
+- **Main useful function (MUF)**: the one thing the system is for. A security
+  component delivers a secret to an authorized process and denies other readers.
+  A build service preserves the integrity of source, checks and released artifacts.
+  A website supports a correct fit / not-fit decision by its intended reader.
+- **Harmful function**: the system does something it should not (silent
+  bypass, expired cert, corrupt bytes). **Insufficient**: it does the right
+  thing weakly (rotation only in one mode). **Excessive**: it does more than
+  the function needs (repeated caveats, redundant compatibility code).
+- **Contradiction**: improving A worsens B (technical), or X must be A and
+  not-A (physical). Naming the contradiction is the first step of any change
+  that adds a mode, flag, alias, profile or escape valve.
+- **Separation**: how a physical contradiction is resolved without compromise:
+  in space (different places), in time (different moments), by condition
+  (different inputs), or by system level (move it up or down). A compromise
+  ("enforce by default, but allow off") is not a resolution; it is the
+  contradiction left open with a flag on it.
+- **Ideality**: useful functions divided by harmful functions plus cost. A
+  change that adds a part must say which function it adds or which harm it
+  removes.
+- **Resource**: something already in the system that can carry a function for
+  free (the DEK envelope already carries `kv_version`; a platform evidence
+  record already carries its observed status).
+- **Trimming**: remove a part and name what carries its function afterwards.
+- **Guard**: the test, lint, generator or schema that makes a rule mechanical.
+
+
+The contract guard runs in `.oberth/build.yaml` as `contract-guard`.
+Canonical owner: the shared Wire contract schema repository.
+Generator: `gen/contracts/generate.py` in that repository.
+The emitted guard is a build artifact. Regenerate it from the owner when
+changing rules; review repository baselines separately.
+
+| Law or rule | Guard and registry |
+| --- | --- |
+| 1. One owner per fact | `.oberth/contracts/check.py`: confession wording, generator exception |
+| 2. Claimed equals measured | retired claims; `.oberth/contracts/generated-files.json` runs registered generators in check mode |
+| 3. A mode needs a contradiction and separation | env, annotation and flag registry: `surface-registry.json`; chart settings are registered as values |
+| 4. Every deprecation has a sunset | `deprecations.yaml`: required fields and date/version expiry; unregistered compatibility wording ratchet |
+| 5. Scratch is not record | path and content residue ratchet across tracked source and documentation |
+| 6. Composition roots | 200-line function span ratchet; parser/AST imports in Go tests prohibited |
+| 7. Secret hygiene | unsafe and zeroing patterns outside secret/hygiene packages ratcheted |
+| 8. Test seams | test/skip/insecure/development env reads ratcheted |
+| 9. Lifecycle on the default profile | review requires the qualified test cell; no live qualification is implied by this lint |
+| 10. Gates have setters | literal Go test gates require a pipeline setter and a lane in skip diagnostics |
+| 11. Specific, explained suppression | suppression and broad security-exclusion ratchets |
+
+Existing findings are recorded as exact content fingerprints and per-rule
+counts in `.oberth/contracts/baseline.json`. A removed finding cannot be
+replaced by a different violation. New surfaces require a documentation anchor
+and a qualified test cell. Empty registries record no approved exceptions;
+existing debt remains visible in the baseline, not silently grandfathered by
+file or directory. Reduce the baseline when removing debt.
+
+The review checklist is `.gitea/pull_request_template.md`; issues use
+`.gitea/ISSUE_TEMPLATE/contract.md`. Incorrect answers about copied facts,
+unmeasured claims or missing sunsets block promotion.
