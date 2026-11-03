@@ -1,9 +1,10 @@
 package store
 
 import (
-	"github.com/oberthci/oberth/internal/model"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/model"
 )
 
 func TestUplinkRemovalClearsPendingCredential(t *testing.T) {
