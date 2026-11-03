@@ -860,7 +860,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		return scheduler.finishPreCreateInfrastructureFailure(ctx, run, repository, &checkoutPreparationFailure{cause: err})
 	}
 	scheduler.timingMilestone(ctx, run.ID, "checkout-ready")
-	requirement, stopped, err := scheduler.awaitTrustedRequirement(ctx, repository, run.ID, checkoutSHA, require)
+	requirement, stopped, err := scheduler.awaitTrustedRequirement(gitcache.WithBurstPolicy(ctx), repository, run.ID, checkoutSHA, require)
 	if stopped {
 		return nil
 	}

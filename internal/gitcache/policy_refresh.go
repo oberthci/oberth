@@ -15,19 +15,26 @@ import (
 const policyRefreshTTL = 2 * time.Second
 const policyFailureTTL = 5 * time.Second
 const policyRefreshAttempts = 4
+const policyReadTimeout = 30 * time.Second
 
-type freshPolicyKey struct{}
+type burstPolicyKey struct{}
 
-// WithFreshPolicy requires a fetch begun during this call, or one completed by
-// an overlapping caller. Publication must never rely on the burst cache TTL.
+// WithBurstPolicy opts initial admission into bounded successful snapshot reuse.
+// Other policy readers require a fetch begun after their request by default.
+func WithBurstPolicy(ctx context.Context) context.Context {
+	return context.WithValue(ctx, burstPolicyKey{}, true)
+}
+
+// WithFreshPolicy overrides any inherited burst reuse. Only a refresh started
+// after this reader requested authority may satisfy the read.
 func WithFreshPolicy(ctx context.Context) context.Context {
-	return context.WithValue(ctx, freshPolicyKey{}, true)
+	return context.WithValue(ctx, burstPolicyKey{}, false)
 }
 
 type policyRefresh struct {
-	remote, ref, sha string
-	completed        time.Time
-	err              error
+	remote, ref, sha   string
+	started, completed time.Time
+	err                error
 }
 
 // The repository lock is the flight gate: queued readers reuse its result,
@@ -51,8 +58,8 @@ func (c *Cache) refreshPolicyLocked(ctx context.Context, input, path string, req
 		if previous.err != nil {
 			ttl = policyFailureTTL
 		}
-		fresh, _ := ctx.Value(freshPolicyKey{}).(bool)
-		if previous.remote == remote && time.Since(previous.completed) < ttl && (!fresh || previous.err != nil || previous.completed.After(requested)) {
+		burst, _ := ctx.Value(burstPolicyKey{}).(bool)
+		if previous.remote == remote && time.Since(previous.completed) < ttl && (burst || previous.err != nil || previous.started.After(requested)) {
 			if previous.err != nil {
 				return "", previous.err
 			}
@@ -64,7 +71,7 @@ func (c *Cache) refreshPolicyLocked(ctx context.Context, input, path string, req
 	}
 	// Invalidate first: an unsuccessful refresh cannot resurrect old authority.
 	c.policyRefreshes.Delete(path)
-	result := policyRefresh{remote: remote}
+	result := policyRefresh{remote: remote, started: time.Now()}
 	for attempt := 1; attempt <= policyRefreshAttempts; attempt++ {
 		result.ref, result.sha, result.err = c.fetchPolicyLocked(ctx, path)
 		if result.err == nil || !transientPolicyTransport(result.err) || ctx.Err() != nil || attempt == policyRefreshAttempts {
