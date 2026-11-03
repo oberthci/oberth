@@ -262,7 +262,7 @@ func validAdminOperation(operation string) bool {
 	for _, prefix := range []string{"upstream.identity."} {
 		if suffix, ok := strings.CutPrefix(operation, prefix); ok && len(suffix) > 0 && len(suffix) <= 253 {
 			for _, c := range suffix {
-				if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '.') {
+				if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' && c != '.' {
 					return false
 				}
 			}
