@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 // TestMain gives the whole test binary a throwaway home directory. Onboarding
@@ -22,12 +24,15 @@ func TestMain(m *testing.M) {
 		"HOME":            home,
 		"XDG_CONFIG_HOME": filepath.Join(home, ".config"),
 		"XDG_CACHE_HOME":  filepath.Join(home, ".cache"),
+		"KUBECONFIG":      "",
 	} {
 		if err := os.Setenv(key, value); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
 	}
+	// client-go caches this path before TestMain changes the environment.
+	clientcmd.RecommendedHomeFile = filepath.Join(home, ".kube", "config")
 	code := m.Run()
 	_ = os.RemoveAll(home)
 	os.Exit(code)
