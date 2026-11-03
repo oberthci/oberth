@@ -1,21 +1,29 @@
 # Oberth local upgrade rehearsal
 
-Run `bash hack/upgrade-e2e/run.sh` from this checkout. Requires Docker, k3d,
+Run from this checkout, for example:
+
+```bash
+bash hack/upgrade-e2e/run.sh --from 0.17.81 \
+  --candidate fix/ob-82-rc --candidate fix/ob-83-rc
+```
+
+`--from` and the ordered `--candidate` list are required. They can also be set
+with `FROM_VERSION` and whitespace-separated `CANDIDATES`. Requires Docker, k3d,
 Go, kubectl, Helm 3, cosign, jq, curl and ripgrep. Set `E2E_HELM` if the Helm 3 executable is not named `helm`.
 An optional `E2E_WRAPPER` executable receives the rehearsal command and its
 arguments; unset it to run directly.
 The script creates its own Docker cluster and private kubeconfig, then deletes
 both on success or failure. It never selects an existing cluster.
 
-The script downloads the published v0.17.81 chart and signed release record,
+The script downloads the requested published chart and signed release record,
 checks the public key against its pinned SHA-256, verifies the record's signature,
 and verifies the chart digest and server image reference against that record.
 Transparency-log verification is disabled for this pinned-key blob signature;
 this rehearsal does not establish publication time or transparency inclusion.
 
-It builds candidate cba75ca7 and the `fix/ob-83-rc` head, if present. Override
-`CANDIDATE_83` with a commit to repeat an exact trial, or `E2E_REPO` to select the
-source repository. Each ref is resolved once and recorded in `sources.txt`.
+It builds each candidate in order. Use exact commit arguments to repeat a
+trial, or `E2E_REPO` to select the source repository. Application versions come
+from each candidate chart. Each ref is resolved once and recorded in `sources.txt`.
 Candidate images replace only the server executable in the published runtime.
 The script refuses that shortcut if the candidate changes any Dockerfile or
 static Git substrate input. The imported containerd manifest digest becomes the chart image reference; no
@@ -25,7 +33,7 @@ A regression assertion must fail on the published source and pass unchanged on
 each candidate. Focused store tests also exercise migration replay protection and
 queue classification. All builds and checks inherit the optional wrapper.
 
-The v0.17.81 store API seeds a local Git repository, four queued runs spanning
+The published store API seeds a local Git repository, four queued runs spanning
 normal, high and highest priority, and one running branch run bound to a real
 Argo Workflow. Its suspension occupies the sole execution slot without running
 build containers. The fixture bypasses push authentication and normal Workflow

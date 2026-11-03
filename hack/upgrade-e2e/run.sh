@@ -2,6 +2,21 @@
 # Rehearse the published Oberth release -> exact local candidates in Docker.
 set -euo pipefail
 umask 077
+from=${FROM_VERSION:-}
+read -r -a candidates <<< "${CANDIDATES:-}"
+while (($#)); do
+  case $1 in
+    --from) from=${2:?--from requires a version}; shift 2 ;;
+    --candidate) candidates+=("${2:?--candidate requires a ref}"); shift 2 ;;
+    --help) echo 'Usage: run.sh --from VERSION --candidate REF [--candidate REF ...]'; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+from=${from#v}
+[[ $from =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && ${#candidates[@]} -gt 0 ]] || {
+  echo 'Supply --from VERSION and at least one --candidate REF' >&2; exit 2;
+}
+export FROM_VERSION=$from CANDIDATES="${candidates[*]}"
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo=${E2E_REPO:-}
 if [[ -z $repo ]]; then
@@ -47,56 +62,63 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 fetch() { curl --fail --silent --show-error --location --proto '=https' --max-time 90 "$1" -o "$2"; }
-release=https://releases.oberth.ci/oberth/v0.17.81
+release=https://releases.oberth.ci/oberth/v$from
 for file in cosign.pub release.json release.json.sigstore.json; do fetch "$release/$file" "$evidence/$file"; done
 printf '%s  %s\n' 036dd71c9d3c07a19bff06d4392874014573f695620ac8554d9df175094c4a31 "$evidence/cosign.pub" | sha256sum -c -
 cosign verify-blob --key "$evidence/cosign.pub" --insecure-ignore-tlog \
   --bundle "$evidence/release.json.sigstore.json" "$evidence/release.json"
-jq -e '.component=="oberth" and .version=="v0.17.81" and .chart.version=="0.17.81"' "$evidence/release.json" >/dev/null
+jq -e --arg v "$from" '.component=="oberth" and .version==("v"+$v) and .chart.version==$v' "$evidence/release.json" >/dev/null
 base=$(jq -er '.source.sha' "$evidence/release.json")
 published=$(jq -er '.images.server.ref' "$evidence/release.json")
-[[ $base =~ ^[0-9a-f]{40}$ && $published =~ ^europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth@sha256:[0-9a-f]{64}$ ]]
-fetch https://charts.oberth.ci/oberth-0.17.81.tgz "$evidence/oberth-0.17.81.tgz"
+[[ $base =~ ^[0-9a-f]{40}$ && $published =~ ^[a-zA-Z0-9./:_-]+@sha256:[0-9a-f]{64}$ ]]
+chart="$evidence/oberth-$from.tgz"
+fetch "https://charts.oberth.ci/oberth-$from.tgz" "$chart"
 chart_hash=$(jq -er '.chart.digest | sub("^sha256:"; "")' "$evidence/release.json")
-printf '%s  %s\n' "$chart_hash" "$evidence/oberth-0.17.81.tgz" | sha256sum -c -
-"$helm" show values "$evidence/oberth-0.17.81.tgz" >"$private/published-values.yaml"
+printf '%s  %s\n' "$chart_hash" "$chart" | sha256sum -c -
+"$helm" show values "$chart" >"$private/published-values.yaml"
 # A signed record must bind the image actually used by the published chart.
 rg -F "ref: $published" "$private/published-values.yaml" >/dev/null
-sha82=$(git -C "$repo" rev-parse 'cba75ca7^{commit}')
-sha83=$(git -C "$repo" rev-parse --verify "${CANDIDATE_83:-refs/heads/fix/ob-83-rc}^{commit}" 2>/dev/null || true)
-printf 'origin/main=%s\npublished=%s\ncandidate82=%s\ncandidate83=%s\n' \
-  "$(git -C "$repo" rev-parse refs/remotes/origin/main)" "$base" "$sha82" "${sha83:-absent}" >"$evidence/sources.txt"
+declare -A candidate_shas=() candidate_versions=()
+versions=()
+printf 'published=%s\nfrom=%s\n' "$base" "$from" >"$evidence/sources.txt"
+for i in "${!candidates[@]}"; do
+  version="candidate-$((i+1))"
+  versions+=("$version")
+  candidate_shas[$version]=$(git -C "$repo" rev-parse --verify "${candidates[$i]}^{commit}")
+  printf '%s=%s\n' "$version" "${candidate_shas[$version]}" >>"$evidence/sources.txt"
+done
 source_tree() {
   mkdir -p "$private/source-$1"
   git -C "$repo" archive "$2" | tar -x -C "$private/source-$1"
   cp "$here/admission_test.go.txt" "$private/source-$1/internal/service/upgrade_e2e_test.go"
 }
-source_tree 81 "$base"
-source_tree 82 "$sha82"
-if [[ -n $sha83 ]]; then source_tree 83 "$sha83"; fi
+source_tree baseline "$base"
+for version in "${versions[@]}"; do source_tree "$version" "${candidate_shas[$version]}"; done
 # Red must be a behavioral assertion, never a compilation/tooling failure.
-if (cd "$private/source-81" && go test -p=2 -parallel=2 -count=1 ./internal/service -run '^TestUpgradeE2EMeasuredBackfillBehindHighest$' -timeout 2m) >"$evidence/backfill-red-81.log" 2>&1; then
-  echo 'v0.17.81 unexpectedly accepted the regression test' >&2; exit 1
+if (cd "$private/source-baseline" && go test -p=2 -parallel=2 -count=1 ./internal/service -run '^TestUpgradeE2EMeasuredBackfillBehindHighest$' -timeout 2m) >"$evidence/backfill-red-baseline.log" 2>&1; then
+  echo "v$from unexpectedly accepted the regression test" >&2; exit 1
 fi
-rg -F 'measured short run must backfill without delaying the highest-priority head' "$evidence/backfill-red-81.log" >/dev/null
-for version in 82 ${sha83:+83}; do
+rg -F 'measured short run must backfill without delaying the highest-priority head' "$evidence/backfill-red-baseline.log" >/dev/null
+for version in "${versions[@]}"; do
   (cd "$private/source-$version" && go test -p=2 -parallel=2 -count=1 ./internal/service -run '^TestUpgradeE2EMeasuredBackfillBehindHighest$' -timeout 2m) >"$evidence/backfill-green-$version.log" 2>&1
   (cd "$private/source-$version" && go test -p=2 -parallel=2 -count=1 ./internal/store -run '^(TestMigrationDefinitionsRejectDuplicateVersions|TestExistingV24MigrationLedgerPreservedWithoutReplay|TestQueuePriorityClassificationAndFIFO)$' -timeout 2m) >"$evidence/store-$version.log" 2>&1
   # Only the server binary changes. Refuse reuse if any runtime substrate
   # input differs; this is a local rehearsal image, not a release build.
-  candidate=$sha82; [[ $version != 83 ]] || candidate=$sha83
+  candidate=${candidate_shas[$version]}
+  candidate_versions[$version]=$("$helm" show chart "$private/source-$version/charts/oberth" | awk '$1=="appVersion:" {gsub(/"/, "", $2); print $2}')
+  [[ ${candidate_versions[$version]} =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
   git -C "$repo" diff --exit-code "$base" "$candidate" -- Dockerfile internal/staticgit hack/build-static-git.sh hack/static-git-no-shell.patch hack/install-static-git-packages.sh >"$evidence/substrate-$version.diff"
-  (cd "$private/source-$version" && go build -p=2 -trimpath -buildvcs=false -ldflags "-s -w -X main.version=v0.17.$version-e2e-${candidate:0:8}" -o "$private/oberth-$version" ./cmd/oberth)
+  (cd "$private/source-$version" && go build -p=2 -trimpath -buildvcs=false -ldflags "-s -w -X main.version=${candidate_versions[$version]}-e2e-${candidate:0:8}" -o "$private/oberth-$version" ./cmd/oberth)
 done
-mkdir -p "$private/source-81/hack/upgrade-e2e/fixture"
-cp "$here/fixture/main.go" "$private/source-81/hack/upgrade-e2e/fixture/"
-(cd "$private/source-81" && go build -p=2 -trimpath -buildvcs=false -o "$private/fixture" ./hack/upgrade-e2e/fixture)
+mkdir -p "$private/source-baseline/hack/upgrade-e2e/fixture"
+cp "$here/fixture/main.go" "$private/source-baseline/hack/upgrade-e2e/fixture/"
+(cd "$private/source-baseline" && go build -p=2 -trimpath -buildvcs=false -o "$private/fixture" ./hack/upgrade-e2e/fixture)
 docker pull "$published"
 printf 'FROM %s\nCOPY --chmod=0755 fixture /fixture\nENTRYPOINT ["/fixture"]\n' "$published" >"$private/Dockerfile.fixture"
-printf '*\n!fixture\n!oberth-82\n!oberth-83\n' >"$private/.dockerignore"
+printf '*\n!fixture\n!oberth-candidate-*\n' >"$private/.dockerignore"
 images+=("$fixture_image")
 docker build -f "$private/Dockerfile.fixture" -t "$fixture_image" "$private"
-for version in 82 ${sha83:+83}; do
+for version in "${versions[@]}"; do
   img="oberth-upgrade-e2e:$version-$$"; images+=("$img")
   printf 'FROM %s\nCOPY --chmod=0755 oberth-%s /usr/local/bin/oberth\n' "$published" "$version" >"$private/Dockerfile.$version"
   docker build -f "$private/Dockerfile.$version" -t "$img" "$private"
@@ -111,7 +133,7 @@ k3d kubeconfig get "$cluster" >"$KUBECONFIG"
 k3d image import -c "$cluster" "${images[@]}"
 # Helm requires immutable server references. Tag containerd's actual imported
 # manifest digest locally; no registry upload or schema exception is needed.
-for version in 82 ${sha83:+83}; do
+for version in "${versions[@]}"; do
   local_tag="docker.io/library/oberth-upgrade-e2e:$version-$$"
   digest=$(docker exec "k3d-$cluster-server-0" ctr images ls | awk -v ref="$local_tag" '$1==ref {print $3}')
   [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]]
@@ -137,7 +159,7 @@ bao write auth/kubernetes/role/oberth-ci bound_service_account_names=oberth boun
   --set crds.install=true --set crds.keep=true --set crds.full=false \
   --set 'controller.extraEnv[0].name=POD_NAMES' --set-string 'controller.extraEnv[0].value=v1' --wait --timeout 180s
 # A fresh server intentionally fails readiness until a local upstream exists.
-"$helm" install oberth "$evidence/oberth-0.17.81.tgz" -n oberth --values "$here/values.yaml"
+"$helm" install oberth "$chart" -n oberth --values "$here/values.yaml"
 booted=false
 for ((i=0;i<60;i++)); do
   if k -n oberth logs deploy/oberth -c oberth 2>/dev/null | rg -q 'ready for bootstrap'; then booted=true; break; fi
@@ -202,22 +224,25 @@ snapshot() {
   k -n oberth get pods -l app.kubernetes.io/name=oberth -o json >"$evidence/pods-$phase.json"
   jq -e '.items|length==1 and all(.[]; .status.phase=="Running" and all(.status.containerStatuses[]; .ready==true and .restartCount==0))' "$evidence/pods-$phase.json" >/dev/null
   local expected_image=$published
-  [[ $phase == 81 ]] || expected_image=${candidate_refs[${phase%%-*}]}
+  local key=${phase%-restart}
+  [[ $key == baseline ]] || expected_image=${candidate_refs[$key]}
   jq -e --arg img "$expected_image" '.items[0].spec.containers[] | select(.name=="oberth") | .image==$img' "$evidence/pods-$phase.json" >/dev/null
   k -n oberth exec deploy/oberth -c oberth -- /usr/local/bin/oberth version >"$evidence/version-$phase.txt"
-  rg -F "v0.17.${phase%%-*}" "$evidence/version-$phase.txt" >/dev/null
+  local expected_version=v$from
+  [[ $key == baseline ]] || expected_version=${candidate_versions[$key]}
+  rg -F "$expected_version" "$evidence/version-$phase.txt" >/dev/null
   k -n oberth-argo get workflow oberth-e2e-running -o json | jq '{uid:.metadata.uid,phase:.status.phase}' >"$evidence/workflow-$phase.json"
   jq -e '.phase=="Running"' "$evidence/workflow-$phase.json" >/dev/null
   k -n oberth get deploy oberth -o jsonpath='{.spec.template.spec.priorityClassName}' >"$evidence/pod-priority-$phase.txt"
 }
-snapshot 81
-for version in 82 ${sha83:+83}; do
+snapshot baseline
+for version in "${versions[@]}"; do
   "$helm" upgrade oberth "$private/source-$version/charts/oberth" -n oberth --reuse-values \
     --set-string "image.ref=${candidate_refs[$version]}" --set image.pullPolicy=Never --wait --timeout 180s
   snapshot "$version"
   for artifact in state priorities workflow pod-priority; do
     ext=json; [[ $artifact != pod-priority ]] || ext=txt
-    cmp "$evidence/$artifact-81.$ext" "$evidence/$artifact-$version.$ext"
+    cmp "$evidence/$artifact-baseline.$ext" "$evidence/$artifact-$version.$ext"
   done
   # Restart the same target once more to detect migration replays or drift.
   k -n oberth rollout restart deploy/oberth
@@ -225,7 +250,7 @@ for version in 82 ${sha83:+83}; do
   snapshot "$version-restart"
   for artifact in state priorities workflow pod-priority; do
     ext=json; [[ $artifact != pod-priority ]] || ext=txt
-    cmp "$evidence/$artifact-81.$ext" "$evidence/$artifact-$version-restart.$ext"
+    cmp "$evidence/$artifact-baseline.$ext" "$evidence/$artifact-$version-restart.$ext"
   done
 done
 k -n oberth get secrets -o json | jq -e '[.items[]|select(.type!="helm.sh/release.v1")]|length==0' >/dev/null
