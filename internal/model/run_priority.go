@@ -29,8 +29,8 @@ func (p RunPriority) Rank() int {
 	}
 }
 
-// EffectivePriority ages normal and high work into the highest class, where
-// original FIFO position precedes newer releases. Admission/end freezes aging.
+// EffectivePriority ages normal and high work into the highest class. Ties
+// use base class before FIFO position. Admission/end freezes aging.
 func (run Run) EffectivePriority(now time.Time) (RunPriority, string) {
 	priority, reason := run.Priority, run.PriorityReason
 	if priority == "" {

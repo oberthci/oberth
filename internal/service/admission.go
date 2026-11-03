@@ -246,6 +246,10 @@ func admissionBeforeAt(a, b *admissionReservation, now time.Time) bool {
 	if ap != bp {
 		return ap.Rank() > bp.Rank()
 	}
+	// Within an effective class, explicit/automatic urgency precedes aging.
+	if ar, br := a.priorityRun().Priority.Rank(), b.priorityRun().Priority.Rank(); ar != br {
+		return ar > br
+	}
 	if a.order != b.order {
 		return a.order < b.order
 	}

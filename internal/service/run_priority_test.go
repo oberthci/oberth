@@ -104,11 +104,14 @@ func TestPriorityAdmissionStarvationReordersExistingWaiters(t *testing.T) {
 	}
 	clock.now = clock.now.Add(time.Nanosecond)
 	release()
-	if !granted(g, normal) || granted(g, highest) {
-		t.Fatal("starved normal did not precede newer highest work")
+	if !granted(g, highest) || granted(g, normal) {
+		t.Fatal("base highest lost to aged normal")
+	}
+	highest.release()
+	if !granted(g, normal) {
+		t.Fatal("aged normal did not follow base highest")
 	}
 	normal.release()
-	highest.release()
 }
 
 func TestQueuePriorityToolsAdminOnlyAuditedAndGated(t *testing.T) {
@@ -498,22 +501,22 @@ func TestPriorityReleaseStreamPreservesAgingAndResourceBounds(t *testing.T) {
 	}
 	clock.now = origin.Add(time.Hour)
 	promotion.release()
-	if !granted(g, normal) {
-		t.Fatal("continuous releases starved aged normal")
-	}
-	g.mu.Lock()
-	used, runs := g.used, g.runs
-	g.mu.Unlock()
-	if used != 4 || runs != 1 {
-		t.Fatalf("capacity exceeded: weight=%d runs=%d", used, runs)
-	}
-	normal.release()
 	for _, candidate := range later {
-		if !granted(g, candidate) {
-			t.Fatal("highest-class FIFO changed after starvation guard")
+		if !granted(g, candidate) || granted(g, normal) {
+			t.Fatal("base highest FIFO lost to aged normal")
+		}
+		g.mu.Lock()
+		used, runs := g.used, g.runs
+		g.mu.Unlock()
+		if used != 4 || runs != 1 {
+			t.Fatalf("capacity exceeded: weight=%d runs=%d", used, runs)
 		}
 		candidate.release()
 	}
+	if !granted(g, normal) {
+		t.Fatal("aged normal did not follow base highest work")
+	}
+	normal.release()
 }
 
 func TestPriorityReleaseAdmissionWithoutGrantAndBranchTransportSignals(t *testing.T) {

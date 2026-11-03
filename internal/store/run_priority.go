@@ -62,7 +62,7 @@ const priorityReasonSQL = `CASE WHEN trigger='promotion' THEN 'promotion run' WH
 // clock is rendered from an int64, never request text, and is fixed per query.
 func priorityOrderSQL(now time.Time) string {
 	base := basePrioritySQL
-	return `CASE WHEN (` + base + `)='highest' OR ((` + base + `) IN ('normal','high') AND queued_at <= ` + fmt.Sprint(unixNano(now)) + ` - 3600000000000) THEN 2 WHEN (` + base + `)='high' THEN 1 ELSE 0 END DESC, admission_sequence, queue_sequence`
+	return `CASE WHEN (` + base + `)='highest' OR ((` + base + `) IN ('normal','high') AND queued_at <= ` + fmt.Sprint(unixNano(now)) + ` - 3600000000000) THEN 2 WHEN (` + base + `)='high' THEN 1 ELSE 0 END DESC, CASE (` + base + `) WHEN 'highest' THEN 2 WHEN 'high' THEN 1 ELSE 0 END DESC, admission_sequence, queue_sequence`
 }
 
 func (s *Store) QueuePriorityPatterns(ctx context.Context) ([]string, error) {
