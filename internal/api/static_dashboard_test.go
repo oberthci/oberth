@@ -69,7 +69,7 @@ func TestRunDetailKeepsQueuedStagesPending(t *testing.T) {
 	if !strings.Contains(row, `sk === "cancel" ? "⊘" : "◌"`) {
 		t.Fatal("queued rows can repaint with a finished glyph")
 	}
-	if !strings.Contains(source, `case "queued": case "waiting": case "pending": return "pending";`) {
+	if !strings.Contains(source, `case "queued": case "pending": return "pending";`) {
 		t.Fatal("queued steps are not classed as pending")
 	}
 }
@@ -189,8 +189,9 @@ func TestDashboardFoldsExecutorLines(t *testing.T) {
 	}
 }
 
-// The dashboard renders one flat list with grey queued/waiting pills and
-// plain-language reasons; queue position and head styling stay out of the rows.
+// The dashboard renders one flat list with one grey queued pill for every
+// run that has not started and the server's plain-language reason; queue
+// position and head styling stay out of the rows.
 func TestRunsPageIsOneFlatFilteredList(t *testing.T) {
 	t.Parallel()
 	script, ok := staticAssets["app.js"]
@@ -232,14 +233,19 @@ func TestRunsPageIsOneFlatFilteredList(t *testing.T) {
 		}
 	}
 	table := section("function runRow(", "\nasync function renderRuns(")
-	for _, want := range []string{"queuePhase(run)", "queueSize(run)", "queueSizeTitle(run)", `title="${esc(rowMessage(run, true))}"`, "runMessageCell(run)", "runTimeLabel(run)"} {
+	for _, want := range []string{"const status = displayRunStatus(run), queued = status === \"queued\";", "queueSize(run)", "queueSizeTitle(run)", `title="${esc(rowMessage(run, true))}"`, "runMessageCell(run)", "runTimeLabel(run)"} {
 		if !strings.Contains(table, want) {
 			t.Fatalf("flat runs table is missing %s", want)
 		}
 	}
-	for _, want := range []string{"queueReason(run)", "waiting for capacity (${b.size}", "waiting behind ${b.repo}/${b.ref} (${b.size})", "waiting for group ${a.group}", "waiting for KubeVirt capacity (repository VM grant)"} {
+	for _, want := range []string{"queueReason(run)", `return run.display_reason || run.Scheduling?.message || "awaiting scheduler";`} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("plain-language queue status is missing %s", want)
+		}
+	}
+	for _, gone := range []string{`"waiting" ? "waiting"`, `case "waiting":`, `"deadline-exceeded"`, `"infra-pending"`, `queuePhase(`} {
+		if strings.Contains(source, gone) {
+			t.Fatalf("a second not-started or failed status survives: %s", gone)
 		}
 	}
 	// The status page also labels the audit-chain head; only the runs table

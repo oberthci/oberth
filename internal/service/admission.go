@@ -764,7 +764,7 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 	if reservation == nil {
 		return nil
 	}
-	result := &model.AdmissionObservation{State: "preparing", Used: gate.used, Capacity: gate.capacity, NumericBudget: gate.numericBudgetLocked()}
+	result := &model.AdmissionObservation{State: "preparing", Used: gate.used, Capacity: gate.capacity, Runs: gate.runs, MaxRuns: gate.maxRuns, NumericBudget: gate.numericBudgetLocked()}
 	result.BackfillMessage = reservation.backfillMessage
 	if reservation.prepared {
 		result.DeclaredResources = reservation.declaredResources()

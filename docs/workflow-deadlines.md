@@ -56,15 +56,17 @@ for clients that render a live countdown.
 An elapsed clock alone yields `state: deadline_elapsed`: no deadline kill is
 inferred. Recognized controller deadline messages or a current-attempt owned Pod's
 `DeadlineExceeded` reason yield `state: deadline_exceeded`,
-`reason: DeadlineExceeded`, and `display_status: deadline-exceeded`.
+`reason: DeadlineExceeded`, and `display_reason: Execution deadline exceeded.`
+(the display status stays `running` until the store finalizes the run, then
+`failed`; the deadline is a reason, never a status of its own).
 Exit 143 alone does not establish the cause. Free-form controller text stays
 withheld; only fixed vocabulary and timestamps are returned. The canonical
 terminal error preserves the deadline presentation after durable finalization,
 including retained exact controller messages from earlier versions.
 
 The durable run can still say `running` while the execution observation says
-`Failed` and `deadline-exceeded`: final logs, diagnostics, cleanup or database
-finalization may lag behind execution. The display label is not a durable
+`Failed` and `deadline_exceeded`: final logs, diagnostics, cleanup or database
+finalization may lag behind execution. The display reason is not a durable
 terminal result. Long-poll completion and publication safety use recorded
 terminal state and evidence.
 

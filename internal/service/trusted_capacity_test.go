@@ -111,7 +111,7 @@ func TestTrustedCapacityRetryBoundaries(t *testing.T) {
 			f.scheduler.capacityWait = func(context.Context) error {
 				waited = true
 				parked, err := f.store.Run(ctx, run.ID)
-				if err != nil || parked.StartedAt != nil || displayRunStatus(parked) != "queued" {
+				if err != nil || parked.StartedAt != nil || model.DisplayRunStatus(parked) != "queued" {
 					t.Fatalf("parked run remains visible as admitted: %+v, %v", parked, err)
 				}
 				reader := f.api(t)
@@ -160,7 +160,7 @@ func TestTrustedCapacityRetryBoundaries(t *testing.T) {
 					t.Fatalf("retry: %v %v calls%d", stopped, err, executor.calls)
 				}
 				readmitted, lookupErr := f.store.Run(ctx, run.ID)
-				if lookupErr != nil || readmitted.StartedAt == nil || displayRunStatus(readmitted) != "running" {
+				if lookupErr != nil || readmitted.StartedAt == nil || model.DisplayRunStatus(readmitted) != "running" {
 					t.Fatalf("reacquired run lacks admission time: %+v, %v", readmitted, lookupErr)
 				}
 				if len(git.reads) < 4 {

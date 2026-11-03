@@ -35,7 +35,7 @@ func TestDisplayRunStatusSeparatesPrestartAndTerminalCauses(t *testing.T) {
 		{"infrastructure error", model.Run{Status: model.RunFailed, Error: "controller unavailable"}, "failed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := displayRunStatus(tc.run); got != tc.want {
+			if got := model.DisplayRunStatus(tc.run); got != tc.want {
 				t.Fatalf("display status = %q, want %q", got, tc.want)
 			}
 			if projected := presentationRun(tc.run); projected.DisplayStatus != tc.want {

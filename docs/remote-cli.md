@@ -106,8 +106,9 @@ delivered. Follow the new ID with `promote_status`. When delivery finds the
 target moved, the server already retries on its own (at most twice in a
 row), and `promote_status` on the failed promotion names the retry in
 `retried_as`.
-`oberth runs` and `oberth run` use one pre-admission label, `queued`, with
-the scheduling reason. The default list puts the whole queue first, with the
+`oberth runs`, `oberth runs --active` and `oberth run` use one pre-admission
+label, `queued`, with the server's `display_reason` naming what the run waits
+for, such as `next in line` or `waiting for CPU budget`. The default list puts the whole queue first, with the
 run admitted next at its bottom, then running runs newest start first, then
 terminal runs newest finish first. A trusted
 preflight is `running`. Supersession, explicit cancellation and restart all
