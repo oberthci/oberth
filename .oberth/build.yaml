@@ -1032,7 +1032,7 @@ spec:
   # parallel burn below; exclude it from rest to avoid running that suite twice.
   # The package-union contract covers new packages.
   # All groups keep the race detector and uncached execution. The explicit
-  # twenty-minute timeout provides headroom; independent Pods bound contention.
+  # measured per-package timeouts provide headroom; independent Pods bound contention.
   # Give each group a bounded two-CPU lane; workflow parallelism remains two.
   - name: deadcode
     automountServiceAccountToken: false
@@ -1098,7 +1098,7 @@ spec:
   # parallel burn below; exclude it from rest to avoid running that suite twice.
   # The package-union contract covers new packages.
   # All groups keep the race detector and uncached execution. The explicit
-  # twenty-minute timeout provides headroom; independent Pods bound contention.
+  # measured per-package timeouts provide headroom; independent Pods bound contention.
   # Give each group a bounded two-CPU lane; workflow parallelism remains two.
   - name: test-store
     automountServiceAccountToken: false
@@ -1166,6 +1166,8 @@ spec:
 
   - name: test-service
     automountServiceAccountToken: false
+    # Maximum observed race-lane wall time multiplied by 1.5, rounded up.
+    activeDeadlineSeconds: 1328
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1230,6 +1232,8 @@ spec:
 
   - name: test-rest
     automountServiceAccountToken: false
+    # Maximum observed race-lane wall time multiplied by 1.5, rounded up.
+    activeDeadlineSeconds: 1749
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src

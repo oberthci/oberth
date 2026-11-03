@@ -119,10 +119,10 @@ else:
 			if err := json.Unmarshal(output, &actual); err != nil {
 				t.Fatal(err)
 			}
-			timeout := "-timeout=20m"
-			if group == "store" {
-				timeout = "-timeout=35m"
-			}
+			timeout := map[string]string{
+				"store": "-timeout=35m", "service": "-timeout=1328s",
+				"rest": "-timeout=1749s", "gitcache": "-timeout=20m",
+			}[group]
 			want := []string{"test", "-race", "-v", "-count=1", "-p=2", timeout}
 			for _, pkg := range packages {
 				owner := "rest"
@@ -154,6 +154,11 @@ func TestOberthSplitStagesUseTheRaceGroupLauncher(t *testing.T) {
 				continue
 			}
 			found = true
+			if seconds, measured := map[string]int32{"service": 1328, "rest": 1749}[group]; measured {
+				if template.ActiveDeadlineSeconds == nil || template.ActiveDeadlineSeconds.IntVal != seconds {
+					t.Fatalf("%s step deadline = %v, want %d seconds", group, template.ActiveDeadlineSeconds, seconds)
+				}
+			}
 			container := template.Container
 			wantCommand := []string{"/usr/bin/python3"}
 			wantArgs := []string{"-I", "-S", "-B", ".oberth/test-packages.py", group}
