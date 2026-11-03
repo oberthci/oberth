@@ -491,12 +491,21 @@ trust assumptions and complete invalidation rules.
   provenance, including lasting supersession protection for automatic priority.
   Both durable claims
   and weighted admission sort by effective class, then original admission FIFO.
-  Normal and high work waiting 60 minutes join `highest` with their original FIFO place;
-  automatic restart refires preserve its wait and explicit admin bump. Existing
-  grants are never preempted. Backfill/head-wait rules apply within each class;
-  a waiting higher class prevents lower-class backfill. Priority backfill must
-  also leave enough declared demand and run slots for the head alongside all
-  backfilled work. Group/VM parking still
+  A normal run waiting 60 minutes ages into `high` with its original FIFO
+  place and the reason `aged: normal run waited at least 60 minutes`; high
+  work does not age and nothing ages into `highest`, so promotions, the oldest
+  waiting tag release and explicit `highest` bumps always lead. High runs
+  accepted after an aged run wait behind it; sustained `highest` arrivals can
+  still delay it without limit. Automatic restart refires preserve its wait
+  and explicit admin bump. Existing
+  grants are never preempted. Backfill/head-wait rules preserve the head's
+  priority reservation.
+  v0.17.81 refuses every backfill behind an effective high/highest head,
+  including an aged normal head. From v0.17.82, measured EASY backfill
+  admits later work only when its measured p95 ends strictly before the head
+  reservation, or it shares the head's effective and base priority classes
+  and leaves enough declared demand and run slots
+  for the head alongside all surviving grants. Group/VM parking still
   releases weight and lets unrelated work proceed. Bounded extra priority claims
   let higher classes reach the gate past ordinary waiting dispatch slots.
   `priority_class`, `priority_reason` and `priority_requested_by` are run projections;
@@ -1269,14 +1278,18 @@ trust assumptions and complete invalidation rules.
   freed; a reservation its owner released meanwhile is reported as not found
   and not audited. The same grant pass admits the runs behind it.
 - Run list views (#1122): `/api/runs`, MCP `run_list`, `oberth runs` and the
-  dashboard use one default order. The first page carries every not-yet-
-  admitted run, capped at 500, by effective priority then admission order (`admission_sequence`,
-  then `queue_sequence`), preserving restart FIFO order; below it, admitted
-  and terminal runs sort by `started_at` descending, breaking ties by ID.
-  A terminal run that was never admitted sorts by `finished_at`. The dated
-  portion pages by that fixed (time, ID) key, using the last run's sequence
-  or ID as the external cursor; an admission between page loads cannot move
-  an already-seen run onto the next page. The whole queue, including claimed
+  dashboard use one default order in three groups, top to bottom. The queue
+  first: every not-yet-admitted run, capped at 500, read bottom-up so the run
+  admitted next (highest effective class, then earliest `admission_sequence`,
+  then `queue_sequence`, preserving restart FIFO order) is its lowest row.
+  Then running runs, capped at 500, most recently started first. Then
+  terminal runs, most recently finished first (`COALESCE(finished_at,
+  started_at, queued_at)` descending, ties by ID). Only terminal rows count
+  against the page limit, and only they page, by that fixed (end time, ID)
+  key with the last run's sequence or ID as the external cursor; no limit or
+  page lists a queued or running run below a finished one, and a run that
+  finishes between page loads cannot land on an older page. `latest_per_ref=1`
+  groups each ref's newest run the same way. The whole queue, including claimed
   but unadmitted runs, has one numbering computed before repository/ref filters.
   Each queued run carries its scheduling reason; filtered lists keep global positions;
   scoped uplinks see no global position (#073). `started_at` is recorded when
@@ -2832,6 +2845,7 @@ alone is never evidence that missing migrations ran.
 | v37 | Unreleased (#1216 measurement) | Guard version-2 container telemetry and add the global observation-age retention index; preserve version-1 observations | Database restore |
 | v38 | Upstream publication retry | Persist bounded attempts, retry deadlines and audited owner progress without changing the pushed object or promotion plan | Database restore |
 | v39 | Submission priority | Persist expiring identity grants, audited priority requests and supersession protection; existing priority ordering remains compatible | Database restore |
+
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding

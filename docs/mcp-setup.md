@@ -814,7 +814,8 @@ A normal run waiting 60 minutes joins `high` in its original FIFO position,
 with the reason `aged: normal run waited at least 60 minutes`; nothing ages
 into `highest`, so explicit `highest` bumps, promotions and the oldest waiting
 tag release always lead. High runs accepted after an aged run wait behind it,
-which bounds its wait. Plan/apply triggers receive no automatic priority: their cancel
+which bounds its wait against high arrivals; sustained `highest` arrivals can
+still delay it. Plan/apply triggers receive no automatic priority: their cancel
 restrictions protect external state and do not establish queue urgency. Running
 work keeps its resources. Backfill and head-wait bounds apply within each class. Local admin
 RC configuration and bumps wake dispatch immediately; aging and external
