@@ -845,6 +845,26 @@ type schemaIdentityQuerier interface {
 }
 
 func (s *Store) verifySchemaIdentity(ctx context.Context, querier schemaIdentityQuerier) error {
+	// The discarded workspace build reused v39 for unrelated schema. Never
+	// try to repair that lineage by recording the current migrations over it.
+	var comments, expiry, v39 int
+	if err := querier.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_schema WHERE type='table' AND name='issue_comments'`).Scan(&comments); err != nil {
+		return fmt.Errorf("check discarded schema: %w", err)
+	}
+	if comments != 0 {
+		return fmt.Errorf("%w: issue_comments identifies a discarded workspace database; restore a v38 backup before starting Oberth", ErrSchemaIncompatible)
+	}
+	if err := querier.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version=39`).Scan(&v39); err != nil {
+		return fmt.Errorf("check token expiry migration: %w", err)
+	}
+	if v39 != 0 {
+		if err := querier.QueryRowContext(ctx, `SELECT count(*) FROM pragma_table_info('token_credentials') WHERE name='expires_at'`).Scan(&expiry); err != nil {
+			return fmt.Errorf("check token expiry column: %w", err)
+		}
+		if expiry != 1 {
+			return fmt.Errorf("%w: migration v39 is recorded but token_credentials.expires_at is missing; restore a v38 backup before starting Oberth", ErrSchemaIncompatible)
+		}
+	}
 	var identityTables int
 	if err := querier.QueryRowContext(ctx, `
 SELECT count(*) FROM sqlite_schema
