@@ -22,7 +22,7 @@ past ordinary waiting claims to expose higher priority work, with bounded
 extra claims. This does not create extra weight, run permits or capacity.
 Already admitted work is not preempted.
 
-In v0.17.83, EASY replaces v0.17.82's ban on backfill behind priority
+In v0.17.82, EASY replaces v0.17.81's ban on backfill behind priority
 heads. Backfill candidates are considered in priority/FIFO order. Work from
 the head's class may use spare capacity if its p95 duration ends strictly
 before the head's predicted start, or the head still fits with it running at
