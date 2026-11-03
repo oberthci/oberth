@@ -1413,7 +1413,7 @@ func (tokens gatedAdminTokens) CreateTokenCredential(ctx context.Context, spec m
 	if err := tokens.Gate(ctx, "uplink.token.create"); err != nil {
 		return model.TokenCredential{}, err
 	}
-	return tokens.Store.CreateTokenCredentialWithPolicy(ctx, spec, tokens.Policy)
+	return tokens.CreateTokenCredentialWithPolicy(ctx, spec, tokens.Policy)
 }
 
 func (tokens gatedAdminTokens) ActivateTokenCredential(ctx context.Context, id string) (model.TokenCredential, error) {
