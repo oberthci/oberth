@@ -12,7 +12,7 @@ import (
 const PolicyRefreshWaitingReason = "upstream-policy-refresh-unavailable"
 
 // SetRunPolicyWaiting is idempotent, preserves restart/retry lineage, and may
-// only annotate a claimed run before submission or during publication. A
+// annotate an active claimed run, including checks after preflight. A
 // concurrent cancellation wins without losing its terminal reason.
 func (s *Store) SetRunPolicyWaiting(ctx context.Context, id string, waiting bool) (model.Run, error) {
 	current, err := s.Run(ctx, id)
@@ -37,7 +37,7 @@ func (s *Store) SetRunPolicyWaiting(ctx context.Context, id string, waiting bool
 	}
 	value, err := scanRun(s.db.QueryRowContext(ctx, `
 UPDATE runs SET reason = ?, updated_at = ?
-WHERE id = ? AND status = 'running' AND phase IN ('waiting', 'publishing') AND reason = ?
+WHERE id = ? AND status = 'running' AND reason = ?
 RETURNING `+runColumns, reason, unixNano(s.now()), id, current.Reason))
 	if errors.Is(err, sql.ErrNoRows) {
 		return s.Run(ctx, id)
