@@ -397,3 +397,50 @@ func TestEASYHistoryRequiresMinimumMeasuredRuns(t *testing.T) {
 		})
 	}
 }
+
+func TestEASYDeadlineResetsOnlyWhenHeadChanges(t *testing.T) {
+	for _, displaced := range []bool{false, true} {
+		t.Run(fmt.Sprint(displaced), func(t *testing.T) {
+			g, clock, running := easyGate(t)
+			head := pending(t, g, 2, easyRequest("original", 8200, time.Hour))
+			t.Cleanup(head.cancel)
+			safe := pending(t, g, 3, easyRequest("first", 1100, time.Minute))
+			if !granted(g, safe) {
+				t.Fatal("initial safe backfill held")
+			}
+			safe.release()
+			original := head.backfillDeadline
+			if original.IsZero() {
+				t.Fatal("head has no reservation")
+			}
+			var urgent *admissionReservation
+			if displaced {
+				urgent = pendingPriority(t, g, 4, model.PriorityHighest, easyRequest("urgent", 8200, time.Hour))
+				t.Cleanup(urgent.cancel)
+				if !head.backfillDeadline.IsZero() {
+					t.Error("displaced head kept its deadline")
+				}
+			}
+			clock.now = original.Add(time.Minute)
+			// A later forecast may not extend the reservation of a head
+			// that continuously held its place, but a returning head is new.
+			g.mu.Lock()
+			running.estimate = 2 * time.Hour
+			g.mu.Unlock()
+			if urgent != nil {
+				urgent.cancel()
+			}
+			later := pending(t, g, 5, easyRequest("later", 1100, time.Minute))
+			t.Cleanup(later.cancel)
+			if got := granted(g, later); got != displaced {
+				t.Fatalf("displaced=%v: later backfill=%v", displaced, got)
+			}
+			if displaced && !head.backfillDeadline.After(original) {
+				t.Fatal("returning head did not get a fresh reservation")
+			}
+			if !displaced && !head.backfillDeadline.Equal(original) {
+				t.Fatal("continuous head reservation moved later")
+			}
+		})
+	}
+}

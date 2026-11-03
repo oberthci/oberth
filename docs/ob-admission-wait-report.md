@@ -28,7 +28,11 @@ branch, release, promotion or schedule history. Known run startup/teardown
 extends those spans. At least five distinct complete measured runs are required;
 fewer samples count as unmeasured. Truncated history and incomplete terminal timestamps
 provide no estimate. These are p95 forecasts, not execution deadlines: an
-overrun can still delay the head. The scheduler does not preempt running work.
+overrun can still delay the head. An expired reservation stops new backfill
+until that head starts; its deadline cannot move later while it remains head.
+A head displaced by a different waiter gets a fresh forecast when it returns,
+while retaining its original durable wait origin. The scheduler does not
+preempt running work.
 
 **Higher-priority waiters sort ahead of a normal-priority XL.** They can take
 freed weight and extend the drain. An

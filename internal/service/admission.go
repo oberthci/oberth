@@ -29,8 +29,10 @@ type weightedAdmission struct {
 	now func() time.Time
 	// headEvents carries head-wait origins to persist and clear, so a
 	// restarted server keeps the head's wait origin. Sends never block.
-	headEvents chan headEvent
-	used       int
+	// backfillHead owns the forecast only while continuously at the head.
+	backfillHead *admissionReservation
+	headEvents   chan headEvent
+	used         int
 	// maxRuns, when positive, caps how many runs hold a grant at once. The
 	// scheduler mirrors its dispatch ceiling here: runs parked on their own
 	// concurrency group stop counting against the dispatch loop, so the loop
@@ -472,6 +474,11 @@ func (reservation *admissionReservation) retain() {
 func (gate *weightedAdmission) grantLocked() {
 	// head is the first prepared, unparked waiter that does not fit.
 	var head *admissionReservation
+	defer func() {
+		if head == nil {
+			gate.setBackfillHeadLocked(nil)
+		}
+	}()
 	now := gate.clock()
 	if gate.pressure != nil {
 		gate.pressure.starvationGranted = false
@@ -502,6 +509,7 @@ func (gate *weightedAdmission) grantLocked() {
 		if !gate.canGrantLocked(reservation) {
 			if head == nil {
 				head = reservation
+				gate.setBackfillHeadLocked(head)
 				gate.markHeadLocked(head, now)
 				if !gate.backfillEnabledLocked(head) {
 					return

@@ -63,6 +63,22 @@ func (gate *weightedAdmission) clock() time.Time {
 	return time.Now()
 }
 
+// A displaced head gets a fresh forecast when it returns, while its durable
+// wait origin remains unchanged. Overruns cannot extend a continuous head's
+// reservation and therefore stop new backfill until that head starts.
+func (gate *weightedAdmission) setBackfillHeadLocked(head *admissionReservation) {
+	if gate.backfillHead == head {
+		return
+	}
+	if gate.backfillHead != nil {
+		gate.backfillHead.backfillDeadline = time.Time{}
+	}
+	gate.backfillHead = head
+	if head != nil {
+		head.backfillDeadline = time.Time{}
+	}
+}
+
 // markHeadLocked dates the first time a reservation waits at the head and
 // asks for the origin to be persisted.
 func (gate *weightedAdmission) markHeadLocked(head *admissionReservation, now time.Time) {
