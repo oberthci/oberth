@@ -11,6 +11,8 @@ import (
 )
 
 type RunResourceFilter struct {
+	// DurationClass filters workflow history before applying the run limit.
+	DurationClass     string
 	IncludePromotions bool
 	Ref               string
 	RunID             string
@@ -62,6 +64,18 @@ func (s *Store) RunResources(ctx context.Context, repoID int64, f RunResourceFil
 			query += ` AND ref=?`
 			args = append(args, f.Ref)
 		}
+	}
+	switch f.DurationClass {
+	case "":
+	case "release":
+		query += ` AND release=1`
+	case "promotion", "schedule":
+		query += ` AND release=0 AND trigger=?`
+		args = append(args, f.DurationClass)
+	case "branch":
+		query += ` AND release=0 AND trigger NOT IN ('promotion','schedule')`
+	default:
+		return out, ErrInvalid
 	}
 	if !f.IncludeFailed {
 		query += ` AND status='passed'`

@@ -12,15 +12,32 @@ path: slow tests, repeated downloads, startup gaps or retries in the last holder
 The scheduler already releases weight before slow finalization/publication once
 the Workflow is terminal or its deletion has been accepted.
 
-Same-priority backfill is bounded by `maxHeadWait`, normally **20 minutes**.
-After that window closes, admission stops at the blocked XL: same- or
-lower-priority small runs behind it wait even when enough weight is free for
-them. That idle capacity is the intended drain for the XL; speeding unrelated
-CI does not remove it. Extending the window lets small runs through longer but
-also delays the XL.
+Measured backfill can use spare capacity before and after `maxHeadWait`,
+normally **20 minutes**. The scheduler projects the earliest head start by
+releasing enough running reservations at their measured p95 finish times.
+A candidate must fit now and finish strictly before that reserved start, or
+leave capacity for the head alongside it at that time. All other surviving
+grants count, including earlier backfills. Lower effective or base classes
+can use only the ends-before test, protecting every higher-class waiter ahead. An unmeasured candidate can use only the coexistence test;
+unknown or already overrun running work is never assumed to release capacity.
+Zero `maxHeadWait` keeps strict FIFO.
+
+Duration samples use the newest 30 passed runs of each repository's requested
+workflow class: branch, release, promotion or schedule. Retained step
+observations from `run_resources` supply whole workflow spans, extended by
+known run startup/teardown. When a run has no retained observations, its durable
+`StartedAt` and `FinishedAt` supply the sample if both form a positive duration.
+At least five distinct complete run samples are required; fewer samples count
+as unmeasured. Incomplete retained observations remain unusable, and truncated
+history provides no estimate. These are p95 forecasts, not execution deadlines: an
+overrun can still delay the head. An expired reservation stops new backfill
+until that head starts; its deadline cannot move later while it remains head.
+A head displaced by a different waiter gets a fresh forecast when it returns,
+while retaining its original durable wait origin. The scheduler does not
+preempt running work.
 
 **Higher-priority waiters sort ahead of a normal-priority XL.** They can take
-freed weight and extend the drain even after its backfill window closes. An
+freed weight and extend the drain. An
 admin bump can prevent lower-priority overtaking; normal/high work ages to
 `highest` after 60 minutes using its original FIFO position. Existing holders
 and earlier highest-priority work still have to finish. See

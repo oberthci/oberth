@@ -2,15 +2,17 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"sort"
 	"time"
 
 	"github.com/oberthci/oberth/internal/liveness"
 	"github.com/oberthci/oberth/internal/model"
 )
 
-// DefaultMaxHeadWait is how long a queue head that does not fit lets later
-// runs be backfilled beside it before the budget drains for it (#1085).
+// DefaultMaxHeadWait marks when the queue reports draining for its head.
+// Backfill must preserve the head's reservation.
 const DefaultMaxHeadWait = 20 * time.Minute
 
 // headWaitKey identifies a run's head-wait origin across a restart: a
@@ -54,13 +56,6 @@ type HeadWaitStore interface {
 	ClearAdmissionHeadWait(ctx context.Context, repoID int64, refKind model.RefKind, ref, sha string) error
 }
 
-// RunDurationEstimator predicts a run's duration from the repository's
-// history of the same class (#1085); ok is false without enough history. The
-// prediction is advisory: it only narrows which runs are backfilled.
-type RunDurationEstimator interface {
-	RunDurationEstimate(ctx context.Context, repoID int64, class string) (time.Duration, bool, error)
-}
-
 // durationClass is the history a run is estimated from: release (tag) runs,
 // promotions, schedules and branch runs are separate classes, so a release
 // is never predicted from branch CI.
@@ -84,6 +79,22 @@ func (gate *weightedAdmission) clock() time.Time {
 		return gate.now()
 	}
 	return time.Now()
+}
+
+// A displaced head gets a fresh forecast when it returns, while its durable
+// wait origin remains unchanged. Overruns cannot extend a continuous head's
+// reservation and therefore stop new backfill until that head starts.
+func (gate *weightedAdmission) setBackfillHeadLocked(head *admissionReservation) {
+	if gate.backfillHead == head {
+		return
+	}
+	if gate.backfillHead != nil {
+		gate.backfillHead.backfillDeadline = time.Time{}
+	}
+	gate.backfillHead = head
+	if head != nil {
+		head.backfillDeadline = time.Time{}
+	}
 }
 
 // markHeadLocked dates the first time a reservation waits at the head and
@@ -116,38 +127,113 @@ func (gate *weightedAdmission) emitHeadLocked(event headEvent) {
 	}
 }
 
-// backfillOpenLocked reports whether runs behind this head may still be
+// backfillEnabledLocked reports whether runs behind this head may still be
 // admitted beside it.
-func (gate *weightedAdmission) backfillOpenLocked(head *admissionReservation, now time.Time) bool {
-	return !gate.numericBlockedLocked(head) && gate.maxHeadWait > 0 && !head.headSince.IsZero() && now.Sub(head.headSince) < gate.maxHeadWait
+func (gate *weightedAdmission) backfillEnabledLocked(head *admissionReservation) bool {
+	return gate.maxHeadWait > 0 && !head.headSince.IsZero()
 }
 
-// backfillFitsLocked reports whether a run that fits the spare weight may be
-// backfilled: when history predicts its duration, it must be predicted to
-// finish before the head's bound. A run without history is admitted only
-// while the bound has not passed (which backfillOpenLocked already checks).
+// backfillFitsLocked is the single EASY rule, for every priority class and
+// on both sides of maxHeadWait. The caller checks current capacity first.
+// A candidate must finish strictly before the reserved head start, or leave
+// room for the head at that time. Unmeasured candidates use coexistence only.
 func (gate *weightedAdmission) backfillFitsLocked(head, candidate *admissionReservation, now time.Time) bool {
-	if !gate.priorityHeadFitsAlongsideLocked(head, candidate) || gate.numericBlockedLocked(head) {
-		// Spare weight cannot bypass priority or CPU/memory headroom guards.
+	candidate.backfillMessage = "held: would delay head"
+	projection := gate.backfillProjectionLocked()
+	var completions []time.Time
+	for _, r := range projection.reservations {
+		if finish, ok := expectedFinish(r, now); ok {
+			completions = append(completions, finish)
+		}
+	}
+	sort.Slice(completions, func(i, j int) bool { return completions[i].Before(completions[j]) })
+	for _, finish := range completions {
+		projection.finishBy(finish, now)
+		if !projection.canGrantLocked(head) || !projection.kubeVirtFitsLocked(head) {
+			continue
+		}
+		// Later backfills cannot move an existing reservation into the future.
+		if head.backfillDeadline.IsZero() || finish.Before(head.backfillDeadline) {
+			head.backfillDeadline = finish
+		}
+		deadline := head.backfillDeadline
+		if !now.Before(deadline) {
+			return false
+		}
+		if candidate.estimate > 0 && now.Add(candidate.estimate).Before(deadline) {
+			candidate.backfillMessage = fmt.Sprintf("backfilled: ends before head can start (p95 %dm < %dm)",
+				(candidate.estimate-1)/time.Minute+1, deadline.Sub(now)/time.Minute)
+			return true
+		}
+		// Coexistence protects only this head. A lower effective or base
+		// class must finish first, so it cannot occupy room needed by any
+		// higher-class waiter ahead of it when the head starts.
+		if candidate.effectivePriority(now) != head.effectivePriority(now) ||
+			candidate.priorityRun().Priority != head.priorityRun().Priority {
+			return false
+		}
+		// Rebuild at the reserved time, including every surviving grant. This
+		// checks aggregate backfills, mixed declarations/weights, XL exclusion,
+		// memory, executor allowances and both run ceilings through one path.
+		projection = gate.backfillProjectionLocked()
+		projection.finishBy(deadline, now)
+		projection.used += candidate.weight
+		projection.runs++
+		// numericFitsLocked accounts only grants; use a copy of the candidate.
+		held := *candidate
+		held.granted, held.released = true, false
+		projection.reservations[candidate.sequence] = &held
+		if projection.canGrantLocked(head) && projection.kubeVirtFitsLocked(head) {
+			candidate.backfillMessage = "backfilled: head still fits at its reserved start"
+			return true
+		}
 		return false
 	}
-	if candidate.estimate <= 0 {
-		return true
+	candidate.backfillMessage += " (running p95 finish unknown)"
+	return false
+}
+
+// Unknown, retained and overrun work is never assumed to finish now. Treating
+// max(0, p95-elapsed) as an immediate release would create fictitious capacity.
+func expectedFinish(r *admissionReservation, now time.Time) (time.Time, bool) {
+	finish := r.grantedAt.Add(r.estimate)
+	return finish, r.estimate > 0 && !r.grantedAt.IsZero() && !r.retained && finish.After(now)
+}
+
+func (gate *weightedAdmission) backfillProjectionLocked() *weightedAdmission {
+	p := &weightedAdmission{resources: gate.resources, capacity: gate.capacity, weights: gate.weights,
+		maxRuns: gate.maxRuns, reservations: make(map[int64]*admissionReservation)}
+	for seq, r := range gate.reservations {
+		if r.granted && !r.released {
+			p.reservations[seq] = r
+			p.used += r.weight
+			p.runs++
+		}
 	}
-	return !now.Add(candidate.estimate).After(head.headSince.Add(gate.maxHeadWait))
+	return p
+}
+
+func (gate *weightedAdmission) finishBy(deadline, now time.Time) {
+	for seq, r := range gate.reservations {
+		if finish, ok := expectedFinish(r, now); ok && !finish.After(deadline) {
+			delete(gate.reservations, seq)
+			gate.used -= r.weight
+			gate.runs--
+		}
+	}
 }
 
 // backfillStateLocked describes the head's backfill window for the
 // admission view and messages.
 func (gate *weightedAdmission) backfillStateLocked(head *admissionReservation, blocker *model.AdmissionBlocker) {
-	if gate.maxHeadWait <= 0 || head.headSince.IsZero() || !gate.priorityHeadFitsAlongsideLocked(head, nil) {
+	if gate.maxHeadWait <= 0 || head.headSince.IsZero() {
 		return
 	}
 	now := gate.clock()
 	blocker.HeadSince = head.headSince
 	blocker.HeadWaitSeconds = int64(now.Sub(head.headSince) / time.Second)
 	blocker.MaxHeadWaitSeconds = int64(gate.maxHeadWait / time.Second)
-	if gate.backfillOpenLocked(head, now) {
+	if now.Sub(head.headSince) < gate.maxHeadWait {
 		blocker.Backfilling = true
 	} else {
 		blocker.Draining = true
@@ -265,24 +351,18 @@ func (scheduler *Scheduler) admissionHistory(ctx context.Context, run model.Run)
 			since = recorded
 		}
 	}
-	var estimate time.Duration
-	if estimator, ok := scheduler.store.(RunDurationEstimator); ok {
-		if predicted, found, err := estimator.RunDurationEstimate(ctx, run.RepoID, durationClass(run)); err == nil && found {
-			estimate = predicted
-		}
-	}
-	return since, estimate
+	return since, scheduler.measuredBackfillDuration(ctx, run)
 }
 
 // backfillClaimsOpenLocked reports whether the dispatch loop may claim past
 // runs that are waiting only because they are the head or were passed over
-// as backfill candidates, while the head's window is open. A claim still
+// as backfill candidates, including while draining. A claim still
 // preparing could itself fit, so none may be in flight; the waiting claims
 // are bounded by the budget's M-run count, and the caller's run, budget and
 // disk checks still apply.
 func (gate *weightedAdmission) backfillClaimsOpenLocked(waiting int) bool {
 	head := gate.headBlockerLocked()
-	if head == nil || !gate.backfillOpenLocked(head, gate.clock()) {
+	if head == nil || !gate.backfillEnabledLocked(head) {
 		return false
 	}
 	if limit := gate.capacity / max(gate.weights.M, 1); waiting > limit {

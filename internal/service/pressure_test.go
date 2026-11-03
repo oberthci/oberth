@@ -40,11 +40,14 @@ func pressureTestGate() *pressureFixture {
 	return f
 }
 
-func (f *pressureFixture) prepare(id int64, priority model.RunPriority, group string, size periapsis.Size) *admissionReservation {
+func (f *pressureFixture) prepare(id int64, priority model.RunPriority, group string, size periapsis.Size, estimates ...time.Duration) *admissionReservation {
 	r := f.gate.reservePriorityRun(id, id, model.Run{ID: fmt.Sprint(id), Priority: priority, QueuedAt: f.now, RepoID: 1})
 	f.gate.mu.Lock()
 	defer f.gate.mu.Unlock()
 	r.prepared, r.preparedAt = true, f.now
+	if len(estimates) > 0 {
+		r.estimate = estimates[0]
+	}
 	r.size, r.weight = size, f.gate.weights.of(size, f.gate.capacity)
 	r.groupName = group
 	if group != "" {
@@ -254,17 +257,17 @@ func TestPressureTimeoutDoesNotJumpHigherPriorityOrGroupHead(t *testing.T) {
 func TestPressureTimeoutPreservesBackfillDrain(t *testing.T) {
 	f := pressureTestGate()
 	f.gate.maxHeadWait = time.Minute
-	running := f.prepare(1, model.PriorityNormal, "", periapsis.M)
+	running := f.prepare(1, model.PriorityNormal, "", periapsis.M, time.Minute)
 	head := f.prepare(2, model.PriorityNormal, "", periapsis.XL)
 	f.sample.IO.FullAvg60 = 80
 	f.advance(time.Second)
-	small := f.prepare(3, model.PriorityNormal, "", periapsis.S)
+	small := f.prepare(3, model.PriorityNormal, "", periapsis.S, 30*time.Second)
 	if small.pressureSince.IsZero() {
 		t.Fatal("fixture did not reach pressure gate during backfill window")
 	}
 	f.advance(21 * time.Minute)
 	if small.granted || head.granted {
-		t.Fatal("pressure timeout bypassed closed backfill window")
+		t.Fatal("pressure timeout bypassed an overrun head reservation")
 	}
 	f.gate.mu.Lock()
 	f.gate.releaseLocked(running)

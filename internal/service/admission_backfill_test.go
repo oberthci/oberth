@@ -25,7 +25,12 @@ func backfillGate(clock *fakeClock) *weightedAdmission {
 // pending starts an acquire that may wait and returns its reservation.
 func pending(t *testing.T, gate *weightedAdmission, sequence int64, request admissionRequest) *admissionReservation {
 	t.Helper()
-	reservation := gate.reserve(sequence)
+	return pendingPriority(t, gate, sequence, model.PriorityNormal, request)
+}
+
+func pendingPriority(t *testing.T, gate *weightedAdmission, sequence int64, priority model.RunPriority, request admissionRequest) *admissionReservation {
+	t.Helper()
+	reservation := gate.reserveRun(model.Run{ID: request.RunID, QueueSequence: sequence, Priority: priority, QueuedAt: gate.clock()})
 	go func() { _, _ = reservation.acquireRequest(context.Background(), request) }()
 	deadline := time.Now().Add(testStartTimeout(admissionAcquireBudget))
 	for {
@@ -61,12 +66,12 @@ func TestXLHeadBackfillsRunsThatFit(t *testing.T) {
 	clock := &fakeClock{now: time.Date(2026, 10, 20, 15, 0, 0, 0, time.UTC)}
 	gate := backfillGate(clock)
 	scheduler := &Scheduler{admission: gate}
-	release := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "running-l", Size: periapsis.L})
+	release := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "running-l", Size: periapsis.L, Estimate: 20 * time.Minute})
 	defer release()
 	head := pending(t, gate, 2, admissionRequest{RunID: "ebpf", RepoID: 5, Repo: "exampleorg-ebpf", Ref: "promotion/main/1", Size: periapsis.XL,
 		RefKind: model.RefBranch, SHA: strings.Repeat("a", 40)})
-	small := pending(t, gate, 3, admissionRequest{RunID: "docs", Size: periapsis.S})
-	medium := pending(t, gate, 4, admissionRequest{RunID: "cli", Size: periapsis.M})
+	small := pending(t, gate, 3, admissionRequest{RunID: "docs", Size: periapsis.S, Estimate: 5 * time.Minute})
+	medium := pending(t, gate, 4, admissionRequest{RunID: "cli", Size: periapsis.M, Estimate: 5 * time.Minute})
 	if granted(gate, head) || !granted(gate, small) || !granted(gate, medium) {
 		t.Fatalf("head %v small %v medium %v; want the S and M backfilled beside the waiting XL", head.granted, small.granted, medium.granted)
 	}
@@ -103,16 +108,14 @@ func TestXLHeadBackfillsRunsThatFit(t *testing.T) {
 	behind.cancel()
 }
 
-// No starvation: under a steady stream of small runs the head starts within
-// maxHeadWait plus the longest admitted backfill's duration, because nothing
-// is backfilled once the bound has passed, and runs whose history predicts
-// they would end after the bound are not backfilled at all.
+// A steady stream cannot delay the head beyond the running work's measured
+// finish. Runs without measurements stay held; measured short work backfills.
 func TestHeadStartsWithinTheBoundUnderASteadyStream(t *testing.T) {
 	start := time.Date(2026, 10, 20, 15, 0, 0, 0, time.UTC)
 	clock := &fakeClock{now: start}
 	gate := backfillGate(clock)
 	first := gate.reserve(1)
-	acquireRequestWithinBudget(t, first, admissionRequest{RunID: "first", Size: periapsis.M})
+	acquireRequestWithinBudget(t, first, admissionRequest{RunID: "first", Size: periapsis.M, Estimate: 6 * time.Minute})
 	head := pending(t, gate, 2, admissionRequest{RunID: "head", Size: periapsis.XL})
 
 	type running struct {
@@ -164,8 +167,8 @@ func TestHeadStartsWithinTheBoundUnderASteadyStream(t *testing.T) {
 	if lastBackfill.IsZero() {
 		t.Fatal("nothing was backfilled while the head waited")
 	}
-	if limit := start.Add(gate.maxHeadWait + duration); headStarted.After(limit) {
-		t.Fatalf("head started at %s, after the bound plus the longest backfill (%s)", headStarted.Sub(start), limit.Sub(start))
+	if want := start.Add(6 * time.Minute); !headStarted.Equal(want) {
+		t.Fatalf("head started at %s, want running finish %s", headStarted.Sub(start), want.Sub(start))
 	}
 }
 
@@ -245,8 +248,8 @@ func TestPassedOverCandidateDoesNotFreezeBackfillClaims(t *testing.T) {
 	}
 	preparing.cancel()
 	clock.now = clock.now.Add(21 * time.Minute)
-	if gate.spareWeightForClaim(3) {
-		t.Fatal("claimed past the head after its bound")
+	if !gate.spareWeightForClaim(3) {
+		t.Fatal("drain prevented looking for a measured safe candidate")
 	}
 	long.cancel()
 	head.cancel()
@@ -273,9 +276,9 @@ func TestNoHeadOriginWithoutBackfill(t *testing.T) {
 func TestRegrantWithoutAHeadClearsBackfilled(t *testing.T) {
 	clock := &fakeClock{now: time.Date(2026, 10, 20, 15, 0, 0, 0, time.UTC)}
 	gate := backfillGate(clock)
-	releaseRunning := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "running", Size: periapsis.M})
+	releaseRunning := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "running", Size: periapsis.M, Estimate: 20 * time.Minute})
 	head := pending(t, gate, 2, admissionRequest{RunID: "head", Size: periapsis.XL})
-	small := pending(t, gate, 3, admissionRequest{RunID: "small", Size: periapsis.S})
+	small := pending(t, gate, 3, admissionRequest{RunID: "small", Size: periapsis.S, Estimate: 5 * time.Minute})
 	if !granted(gate, small) || !small.backfilled {
 		t.Fatal("the S run was not backfilled")
 	}

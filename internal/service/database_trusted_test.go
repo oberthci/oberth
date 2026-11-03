@@ -15,6 +15,7 @@ import (
 
 type deadlinePreflight struct {
 	*protectedFixture
+	executedRunID string
 	executed      atomic.Int64
 	recovered     atomic.Int64
 	failure       error
@@ -22,7 +23,9 @@ type deadlinePreflight struct {
 }
 
 func (p *deadlinePreflight) Execute(ctx context.Context, job JobRequest, requirement vmrunner.Requirement, output io.Writer) error {
-	p.executed.Add(1)
+	if job.Run.ID == p.executedRunID {
+		p.executed.Add(1)
+	}
 	if err := p.protectedFixture.Execute(ctx, job, requirement, output); err == nil {
 		return nil
 	}
@@ -64,6 +67,9 @@ func testDatabasePreflightRetainsUntilCleanup(t *testing.T, failure error) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// KVM restart recovery may enqueue and execute a separate retry before
+	// the poll below observes the parent terminalizing. Count this parent only.
+	executor.executedRunID = queued.ID
 	done, _ := startDeadlineScheduler(t, fixture.scheduler)
 	timer := time.NewTimer(testStartTimeout(15 * time.Second))
 	defer timer.Stop()

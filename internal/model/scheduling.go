@@ -21,6 +21,7 @@ type RunScheduling struct {
 
 type AdmissionObservation struct {
 	NumericBudget     *NumericBudget     `json:"numeric_budget,omitempty"`
+	BackfillMessage   string             `json:"backfill_message,omitempty"`
 	DeclaredResources *DeclaredResources `json:"declared_resources,omitempty"`
 
 	Pressure         *PressureDeferral `json:"pressure,omitempty"`
@@ -75,11 +76,11 @@ type AdmissionBlocker struct {
 	Used         int       `json:"used"`
 	Capacity     int       `json:"capacity"`
 	WaitingSince time.Time `json:"waiting_since"`
-	// Bounded backfill (#1085): HeadSince is when this run started waiting
+	// Measured backfill: HeadSince is when this run started waiting
 	// at the head (it survives a restart), HeadWaitSeconds how long it has,
-	// and MaxHeadWaitSeconds the bound. Backfilling is set while later runs
-	// that fit are still admitted beside it, Draining once the bound passed
-	// and the budget drains for it. All zero when backfill is disabled.
+	// and MaxHeadWaitSeconds the drain threshold. Backfilling is set before
+	// the threshold, Draining after it. Either phase permits measured work
+	// preserving the head's predicted start. All zero when disabled.
 	HeadSince          time.Time `json:"head_since,omitzero"`
 	HeadWaitSeconds    int64     `json:"head_wait_seconds,omitempty"`
 	MaxHeadWaitSeconds int64     `json:"max_head_wait_seconds,omitempty"`

@@ -195,32 +195,49 @@ func TestPriorityBackfillPreservesNumericHeadAndAggregateDemand(t *testing.T) {
 		headCPU, headMemory, candidateCPU, candidateMemory int64
 		want                                               bool
 	}{
-		{"CPU fits but priority backfill is disabled", 5000, 1 << 30, 1000, 1 << 30, false},
+		{"CPU fits", 5000, 1 << 30, 1000, 1 << 30, true},
 		{"CPU exceeds", 7000, 1 << 30, 1000, 1 << 30, false},
-		{"memory exceeds", 1000, 15 << 30, 1000, 1 << 30, false},
+		{"memory exceeds", 1000, 13 << 30, 1000, 3 << 30, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			clock := &fakeClock{now: time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)}
 			g := newWeightedAdmission(8)
-			g.resources = DefaultDeclaredAdmissionConfig()
-			head := &admissionReservation{priority: model.PriorityHighest, pods: &argoworkflow.PodDemand{CPUMilli: tc.headCPU, MemoryBytes: tc.headMemory, Pods: 1}}
-			candidate := &admissionReservation{sequence: 2, pods: &argoworkflow.PodDemand{CPUMilli: tc.candidateCPU, MemoryBytes: tc.candidateMemory, Pods: 1}}
+			g.now, g.maxHeadWait = clock.Now, 20*time.Minute
+			running := g.reserve(1)
+			acquireRequestWithinBudget(t, running, admissionRequest{Size: periapsis.M, Estimate: 30 * time.Minute,
+				Pods: &argoworkflow.PodDemand{CPUMilli: 4000, MemoryBytes: 4 << 30, Pods: 1}})
+			t.Cleanup(running.release)
+			head := pending(t, g, 2, admissionRequest{Size: periapsis.M,
+				Pods: &argoworkflow.PodDemand{CPUMilli: tc.headCPU, MemoryBytes: tc.headMemory, Pods: 1}})
+			t.Cleanup(head.cancel)
+			if granted(g, head) {
+				t.Fatal("fixture head must wait before backfill")
+			}
 			g.mu.Lock()
-			got := g.priorityHeadFitsAlongsideLocked(head, candidate)
+			head.priority = model.PriorityHighest
 			g.mu.Unlock()
-			if got != tc.want {
+			clock.now = clock.now.Add(21 * time.Minute)
+			candidate := pendingPriority(t, g, 3, model.PriorityHighest, admissionRequest{Size: periapsis.M, Estimate: time.Hour,
+				Pods: &argoworkflow.PodDemand{CPUMilli: tc.candidateCPU, MemoryBytes: tc.candidateMemory, Pods: 1}})
+			t.Cleanup(candidate.cancel)
+			if got := granted(g, candidate); got != tc.want {
 				t.Fatalf("head fits alongside = %v, want %v", got, tc.want)
 			}
 		})
 	}
 	g := newWeightedAdmission(4)
-	head := &admissionReservation{priority: model.PriorityHighest, size: periapsis.L, weight: 3}
-	candidate := &admissionReservation{sequence: 3, size: periapsis.S, weight: 1}
-	g.reservations[2] = &admissionReservation{sequence: 2, size: periapsis.S, weight: 1, granted: true, backfilled: true}
-	g.mu.Lock()
-	fits := g.priorityHeadFitsAlongsideLocked(head, candidate)
-	g.mu.Unlock()
-	if fits {
-		t.Fatal("multiple backfills together delay the priority head")
+	g.maxHeadWait = 20 * time.Minute
+	running := g.reserve(1)
+	acquireRequestWithinBudget(t, running, admissionRequest{Size: periapsis.M, Estimate: time.Hour})
+	t.Cleanup(running.release)
+	head := priorityWaiter(g, 2, model.PriorityHighest, time.Now(), periapsis.L)
+	t.Cleanup(head.cancel)
+	first := priorityWaiter(g, 3, model.PriorityHighest, time.Now(), periapsis.S, 2*time.Hour)
+	t.Cleanup(first.cancel)
+	second := priorityWaiter(g, 4, model.PriorityHighest, time.Now(), periapsis.S, 2*time.Hour)
+	t.Cleanup(second.cancel)
+	if !granted(g, first) || granted(g, second) {
+		t.Fatal("aggregate backfills failed to preserve the priority head")
 	}
 }
 
