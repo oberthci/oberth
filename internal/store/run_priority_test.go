@@ -116,8 +116,8 @@ func TestQueuePriorityStarvationAtBoundary(t *testing.T) {
 		t.Fatalf("starved claim: %+v %v", got, err)
 	}
 	priority, reason := got.EffectivePriority(now)
-	if priority != model.PriorityHighest || !strings.Contains(reason, "starvation") {
-		t.Fatalf("starved display=%s/%s", priority, reason)
+	if priority != model.PriorityHigh || !strings.Contains(reason, "aged") || strings.Contains(reason, "highest") {
+		t.Fatalf("aged display=%s/%s", priority, reason)
 	}
 }
 
@@ -209,8 +209,8 @@ func TestQueuePriorityRestartRefireRetainsWaitAndBump(t *testing.T) {
 		t.Fatal(err)
 	}
 	p, _ := copy.EffectivePriority(now)
-	if p != model.PriorityHighest || !copy.QueuedAt.Equal(run.QueuedAt) {
-		t.Fatalf("restart reset starvation clock: %+v", copy)
+	if p != model.PriorityHigh || !copy.QueuedAt.Equal(run.QueuedAt) {
+		t.Fatalf("restart reset aging clock: %+v", copy)
 	}
 	// A separately bumped item retains its explicit administrator reason.
 	bumped, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, "feature/bump", strings.Repeat("b", 40)))
@@ -314,7 +314,7 @@ func TestQueuePriorityHighAgesWithoutLosingFIFOToNormals(t *testing.T) {
 			t.Fatalf("aged claim at %d: %+v %v", i, next, err)
 		}
 		p, _ := next.EffectivePriority(now)
-		if p != model.PriorityHighest {
+		if p != model.PriorityHigh {
 			t.Fatalf("aged %s priority=%s", want, p)
 		}
 		if _, err := s.MarkRunAdmitted(ctx, next.ID); err != nil {
@@ -451,7 +451,7 @@ func TestQueuePriorityTagsIndependentOfSizeGrantsAndBranchSignals(t *testing.T) 
 	}
 }
 
-func TestQueuePriorityReleaseStreamPrecedesAgedNormalByBaseClass(t *testing.T) {
+func TestQueuePriorityReleaseStreamPrecedesAgedNormal(t *testing.T) {
 	now := time.Now().UTC()
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
@@ -501,7 +501,7 @@ func TestQueuePriorityReleaseStreamPrecedesAgedNormalByBaseClass(t *testing.T) {
 	if err != nil || aged.ID != old.ID {
 		t.Fatalf("aged branch did not follow the tag stream: %+v %v", aged, err)
 	}
-	if priority, _ := aged.EffectivePriority(now); priority != model.PriorityHighest {
+	if priority, _ := aged.EffectivePriority(now); priority != model.PriorityHigh {
 		t.Fatalf("aging lost at the 60-minute boundary: %s", priority)
 	}
 }

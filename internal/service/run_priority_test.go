@@ -667,8 +667,14 @@ func TestPrioritySizeCapPreservesAdminBumpsPromotionsAndAging(t *testing.T) {
 		if got := r.effectivePriority(now); got != tc.want {
 			t.Fatalf("size cap for %q=%s", tc.reason, got)
 		}
-		if got := r.effectivePriority(now.Add(time.Hour)); got != model.PriorityHighest {
-			t.Fatalf("size cap disabled aging for %q", tc.reason)
+		// A capped tag waits as normal work and ages into high like any
+		// normal run; bumps and promotions keep highest.
+		aged := tc.want
+		if aged == model.PriorityNormal {
+			aged = model.PriorityHigh
+		}
+		if got := r.effectivePriority(now.Add(time.Hour)); got != aged {
+			t.Fatalf("aging for %q=%s, want %s", tc.reason, got, aged)
 		}
 	}
 }

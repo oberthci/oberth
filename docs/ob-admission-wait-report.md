@@ -38,9 +38,9 @@ preempt running work.
 
 **Higher-priority waiters sort ahead of a normal-priority XL.** They can take
 freed weight and extend the drain. An
-admin bump can prevent lower-priority overtaking; normal/high work ages to
-`highest` after 60 minutes using its original FIFO position. Existing holders
-and earlier highest-priority work still have to finish. See
+admin bump can prevent lower-priority overtaking; normal work ages to `high`
+after 60 minutes using its original FIFO position, never into `highest`.
+Existing holders and earlier highest-priority work still have to finish. See
 [priority and aging](release-priority.md).
 
 For an incident, inspect the `system_status` blocker, `Draining`, holders and
