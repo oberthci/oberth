@@ -1291,10 +1291,7 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	flags := flag.NewFlagSet("uplink add", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path (in-pod; requires the live admin daemon)")
-	defaultCertificate := "/etc/oberth/tls/tls.crt"
-	{
-		defaultCertificate = identityRoot + "/server/tls.crt"
-	}
+	defaultCertificate := identityRoot + "/server/tls.crt"
 	certificatePath := flags.String("tls-cert", defaultCertificate, "HTTPS certificate path (in-pod; requires the live admin daemon)")
 	ttl := flags.String("ttl", "", "bearer token lifetime (positive Go duration; default and maximum come from the live server)")
 	isAdmin := flags.Bool("admin", false, "Grant admin privileges (required for access_allow/access_revoke)")
