@@ -160,8 +160,11 @@ func TestMigration16AddsAnUngroupedConcurrencyGroupToExistingRuns(t *testing.T) 
 	if claimed, err := s.ClaimNextRun(ctx); err != nil || claimed.ID != running.ID {
 		t.Fatalf("claim the running run = %#v, %v", claimed, err)
 	}
-	// A durable Job name keeps the run "running" across the reopen, for the
-	// scheduler's startup reconciliation, so the upgrade meets a live run.
+	// Model an admitted live Workflow so startup preserves its binding rather
+	// than restoring an unadmitted waiting claim to the queue.
+	if _, err := s.MarkRunAdmitted(ctx, running.ID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.SetRunWorkflowName(ctx, running.ID, "oberth-oberth-running"); err != nil {
 		t.Fatal(err)
 	}
