@@ -197,34 +197,37 @@ run() {
   fi
 }
 
-# read_field prints one field of a store path. Distinguishes confirmed
-# absence from permission, transport, or parse errors. The empty-output
-# check catches both the "No value found" text absence and the mock CLI
-# pattern (exit 1, no output) that older bao/vault versions also produce.
-# A non-zero exit with substantive stderr (permission denied, network
-# failure, parse error) aborts — those are real errors, not absence.
+# Reads authorize later mutations only after a value or explicit path-specific
+# absence is verified. Exit 2 also covers permission denied, transport and
+# server errors; neither the status alone nor empty output proves absence.
 read_field() {
   local _rf_out _rf_exit
-  _rf_out="$("$CLI" read -field="$1" "$2" 2>&1)" && { printf '%s' "$_rf_out"; return 0; }
-  _rf_exit=$?
-  # Confirmed absence: exit 2 is the documented Vault/OpenBao code.
-  if [ "$_rf_exit" -eq 2 ]; then
+  if _rf_out="$("$CLI" read -field="$1" "$2" 2>&1)"; then
+    [ -n "$_rf_out" ] || fail "reading $2 field=$1 returned an empty value; refusing setup"
+    printf '%s' "$_rf_out"
+    return 0
+  else
+    _rf_exit=$?
+  fi
+  if [ "$_rf_exit" -eq 2 ] && [ "$_rf_out" = "No value found at $2" ]; then
     return 0
   fi
-  # Empty output or the explicit absence string — treat as not-found. Older
-  # CLI versions and field-level reads exit 1 for a missing path or field.
-  case "$_rf_out" in
-    "") return 0 ;;
-    *"No value found"*|*"no value found"*) return 0 ;;
-  esac
-  # Check for permission-denied and transport errors that must not be silent.
-  case "$_rf_out" in
-    *"permission denied"*|*"Code: 403"*|*"connection refused"*|*"no such host"*|*"certificate"*|*"x509"*)
-      fail "reading $2 field=$1 failed (exit $_rf_exit): $_rf_out" ;;
-  esac
-  # For other non-zero exits with output, treat as absence with a warning.
-  # This preserves compatibility with varied CLI exit-code conventions.
-  return 0
+  fail "reading $2 field=$1 failed (exit $_rf_exit): $_rf_out"
+}
+
+read_policy() {
+  local _rp_out _rp_exit
+  if _rp_out="$("$CLI" policy read "$1" 2>&1)"; then
+    [ -n "$_rp_out" ] || fail "reading policy $1 returned empty output; refusing setup"
+    printf '%s' "$_rp_out"
+    return 0
+  else
+    _rp_exit=$?
+  fi
+  if [ "$_rp_exit" -eq 2 ] && [ "$_rp_out" = "No policy named: $1" ]; then
+    return 0
+  fi
+  fail "reading policy $1 failed (exit $_rp_exit): $_rp_out"
 }
 
 # --- audit preflight (read-only; before any store mutation) ------------------
@@ -445,7 +448,7 @@ POLICYEOF
 )"
   POLICY_DESCRIPTION="KV read only; Transit disabled"
 fi
-HAVE_POLICY="$("$CLI" policy read "$POLICY" 2>/dev/null || true)"
+HAVE_POLICY="$(read_policy "$POLICY")"
 if [ -n "$HAVE_POLICY" ] && [ "$(printf '%s' "$HAVE_POLICY")" = "$(printf '%s' "$WANT_POLICY")" ]; then
   note "policy $POLICY already matches — unchanged"
 elif [ -n "$HAVE_POLICY" ] && [ "$FORCE" != "true" ]; then
@@ -513,7 +516,7 @@ path "auth/token/revoke-self" {
 }
 CREDPOLICYEOF
 )"
-HAVE_CRED_POLICY="$("$CLI" policy read "$CREDENTIALED_POLICY" 2>/dev/null || true)"
+HAVE_CRED_POLICY="$(read_policy "$CREDENTIALED_POLICY")"
 if [ -n "$HAVE_CRED_POLICY" ] && [ "$(printf '%s' "$HAVE_CRED_POLICY")" = "$(printf '%s' "$WANT_CRED_POLICY")" ]; then
   note "policy $CREDENTIALED_POLICY already matches — unchanged"
 elif [ -n "$HAVE_CRED_POLICY" ] && [ "$FORCE" != "true" ]; then
@@ -587,7 +590,7 @@ path "auth/token/revoke-self" {
 }
 CIPOLICYEOF
 )"
-HAVE_CI_POLICY="$("$CLI" policy read "$CI_SECRETS_POLICY" 2>/dev/null || true)"
+HAVE_CI_POLICY="$(read_policy "$CI_SECRETS_POLICY")"
 if [ -n "$HAVE_CI_POLICY" ] && [ "$(printf '%s' "$HAVE_CI_POLICY")" = "$(printf '%s' "$WANT_CI_POLICY")" ]; then
   note "policy $CI_SECRETS_POLICY already matches — unchanged"
 elif [ -n "$HAVE_CI_POLICY" ] && [ "$FORCE" != "true" ]; then
