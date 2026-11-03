@@ -95,13 +95,12 @@ func TestFlatRunsListQueueThenRunningThenFinishedAndPageByEndTime(t *testing.T) 
 	c := finish("c", "c")
 	firstQueued := enqueue("queued-1", "d")
 	secondQueued := enqueue("queued-2", "e")
-	// The queue reads bottom-up: the run admitted next is the lowest queued
-	// row. The limit counts only the finished rows.
+	// The queue follows claim order. The limit counts only finished rows.
 	first, err := s.ListRecentRuns(ctx, model.RunListFilter{Limit: 2})
-	if err != nil || strings.Join(runIDs(first), ",") != strings.Join([]string{secondQueued.ID, firstQueued.ID, c.ID, b.ID}, ",") {
+	if err != nil || strings.Join(runIDs(first), ",") != strings.Join([]string{firstQueued.ID, secondQueued.ID, c.ID, b.ID}, ",") {
 		t.Fatalf("flat first page = %v, %v", runIDs(first), err)
 	}
-	if first[0].QueuePosition != 2 || first[1].QueuePosition != 1 {
+	if first[0].QueuePosition != 1 || first[1].QueuePosition != 2 {
 		t.Fatalf("queue positions = %d, %d", first[0].QueuePosition, first[1].QueuePosition)
 	}
 	// Admission moves the run into the running group, between the queue and
@@ -164,7 +163,7 @@ func TestFlatRunsGlobalQueuePositionsAndCounts(t *testing.T) {
 	if err != nil || len(rows) != 2 {
 		t.Fatalf("rows: %+v, %v", rows, err)
 	}
-	for i, want := range []int64{4, 2} {
+	for i, want := range []int64{2, 4} {
 		if rows[i].QueuePosition != want {
 			t.Fatalf("position %+v, want %d", rows[i], want)
 		}

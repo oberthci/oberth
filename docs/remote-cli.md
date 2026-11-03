@@ -113,18 +113,18 @@ waits for: `next in line`, `waiting for CPU budget (12.5 of 40 CPU free)`,
 `host IO pressure (42%)`, `concurrency group deploy busy (held by run ...)`,
 `waiting for admission`. Admission records the start, so an admitted run is
 `running` from the grant on. The default list puts the whole queue first, with the
-run admitted next at its bottom, then running runs newest start first, then
+run admitted next at its top (effective priority, then FIFO), then running runs newest start first, then
 terminal runs newest finish first. A trusted
-preflight is `running`. Supersession, explicit cancellation and restart all
-display as `cancelled`, with a reason naming the newer SHA, actor or retry
-action. `--json` keeps the underlying `Status` field and adds
+preflight is `running`. A replaced interrupted run displays `superseded`;
+explicit cancellation and interruption without a successor display `cancelled`.
+The reason identifies the successor, actor or retry action. `--json` keeps the underlying `Status` field and adds
 `display_status` and `display_reason`. Successful releases display `passed`;
 `release` is a separate kind. The `status`/`wait` MCP tool's legacy
 `status: "delivered"` remains an alias of `passed`, alongside
 `display_status: "passed"`.
 
-The limit counts admitted/terminal rows; queued rows are additional on page 1.
-`--all` follows the server cursor through dated pages. If a cursor run was
+The limit counts terminal rows; queued and running rows are additional on page 1.
+`--all` follows the server cursor through terminal pages. If a cursor run was
 pruned, restart from the first page. Queue positions are global even when a
 repository or ref filter is used, and withheld for scoped uplinks. The deprecated
 `oberth runs --active` compatibility view stays unpaged and uses the same server

@@ -65,7 +65,7 @@ type RunFilter struct {
 	// scoped uplink gets instead of a global sequence (#073).
 	BeforeRun string
 	// View selects the list: "" or "all" lists the queue (the run admitted
-	// next at its bottom), then running runs newest start first, then
+	// next at its top), then running runs newest start first, then
 	// terminal runs newest finish first; "history" keeps the old
 	// terminal-only paging; "active" is the unpaged compatibility view of
 	// non-terminal runs.

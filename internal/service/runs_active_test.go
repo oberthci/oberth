@@ -123,14 +123,14 @@ func TestActiveRunsOrderAndWaitReasons(t *testing.T) {
 	}
 
 	// The history view holds the finished run only; the default has one
-	// queue bottom-up (next admission lowest), then running, then finished.
+	// in claim order, then running, then finished.
 	history, err := service.Runs(ctx, api.Actor{Identity: "agent@host"}, api.RunFilter{View: api.RunViewHistory, Limit: 50})
 	if err != nil || len(history.([]model.Run)) != 1 || history.([]model.Run)[0].ID != done.ID {
 		t.Fatalf("history = %#v, %v", history, err)
 	}
 	all, err := service.Runs(ctx, api.Actor{Identity: "agent@host"}, api.RunFilter{Limit: 50})
-	if err != nil || len(all.([]model.Run)) != 6 || all.([]model.Run)[0].ID != queued.ID ||
-		all.([]model.Run)[3].ID != vm.ID || all.([]model.Run)[4].ID != holder.ID || all.([]model.Run)[5].ID != done.ID {
+	if err != nil || len(all.([]model.Run)) != 6 || all.([]model.Run)[3].ID != queued.ID ||
+		all.([]model.Run)[0].ID != vm.ID || all.([]model.Run)[4].ID != holder.ID || all.([]model.Run)[5].ID != done.ID {
 		t.Fatalf("default list = %#v, %v", all, err)
 	}
 
@@ -154,7 +154,7 @@ func TestActiveRunsOrderAndWaitReasons(t *testing.T) {
 }
 
 // The default and explicit all views return the same queue-first list, read
-// bottom-up with the claimed run at position 1 as the lowest row. A bounded
+// in claim order with the claimed run at position 1 first. A bounded
 // first page carries the whole queue even when it exceeds limit.
 func TestRunListDefaultViewCarriesWholeQueue(t *testing.T) {
 	fixture := newControlFixture(t)
@@ -185,12 +185,12 @@ func TestRunListDefaultViewCarriesWholeQueue(t *testing.T) {
 			t.Fatalf("run_list %s = %+v", arguments, page)
 		}
 		for index, run := range runs {
-			if want := int64(len(runs) - index); run.DisplayStatus != "queued" || run.Scheduling == nil || run.Scheduling.QueuePosition != want {
+			if want := int64(index + 1); run.DisplayStatus != "queued" || run.Scheduling == nil || run.Scheduling.QueuePosition != want {
 				t.Fatalf("queue position %d: %+v", want, run)
 			}
 		}
 	}
-	if got := list(`{}`).Runs.([]model.Run); len(got) != 3 || got[2].Ref != "feature/one" || got[0].Ref != "feature/three" {
+	if got := list(`{}`).Runs.([]model.Run); len(got) != 3 || got[0].Ref != "feature/one" || got[2].Ref != "feature/three" {
 		t.Fatalf("default list = %+v", got)
 	}
 }

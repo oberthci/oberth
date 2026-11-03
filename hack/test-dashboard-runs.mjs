@@ -101,12 +101,12 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
     };
   `);
   await run('renderRuns(0)');
-  assert.deepEqual(ids(), ['waiting-hidden','queued-normal-late','queued-high-second-hidden','queued-high-next','running-late-hidden','running-early','passed-newest','failed-middle','passed-older'],
-    'F3: queue bottom-up by position, then running newest start first, then finished newest finish first');
+  assert.deepEqual(ids(), ['queued-high-next','queued-high-second-hidden','queued-normal-late','waiting-hidden','running-late-hidden','running-early','passed-newest','failed-middle','passed-older'],
+    'F3: queue in claim order by position, then running newest start first, then finished newest finish first');
   assert.ok(!run('runPageFull(f3Page)'), 'F3: queued and running rows never count toward the terminal page limit');
   // A scoped viewer sees no queue positions: the active view's order (the
   // server's admission order) decides, never the queue time, so an older
-  // normal run still sits above a newer high run that is admitted next.
+  // normal run still sits below a newer high run that is admitted next.
   run(`
     const f3Scoped=[
       makeRun('scoped-passed',{Ref:'s1',StartedAt:f3Time(0),FinishedAt:f3Time(50)}),
@@ -123,7 +123,7 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
     };
   `);
   await run('renderRuns(0)');
-  assert.deepEqual(ids(), ['scoped-normal-hidden','scoped-normal-old','scoped-high-new','scoped-passed'],
+  assert.deepEqual(ids(), ['scoped-high-new','scoped-normal-old','scoped-normal-hidden','scoped-passed'],
     'F3: without positions the queue follows the active view order, not queue time');
   run(`api=async path=>{ if(path==='/api/repos')return [{ID:1,Name:'ours',UpstreamID:1}]; if(path==='/api/runs/counts')return {Total:3,ByRepo:{1:3}}; const query=new URL(path,'https://example.test').searchParams; if(query.get('view')==='active')return []; return {body:f3Scoped,next:''}; };`);
   await run('renderRuns(0)');
@@ -147,8 +147,8 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
     };
   `);
   await run('renderRuns(0)');
-  assert.deepEqual(ids(), ['scoped-claimed-normal','scoped-high-unclaimed','scoped-started'],
-    'F3: a claimed normal run sits above the unclaimed high run the gate admits first; both are queued rows');
+  assert.deepEqual(ids(), ['scoped-high-unclaimed','scoped-claimed-normal','scoped-started'],
+    'F3: a claimed normal run sits below the unclaimed high run the gate admits first; both are queued rows');
   assert.ok(!/waiting<\/span>/.test(run('html')), 'F3: the claimed run is a queued pill, not waiting');
   run('api=apiFixture;');
   console.log('F3 passed: queued runs never render below running or finished runs');
@@ -302,3 +302,34 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'V1'
   assert.equal(run(`displayRunStatus({Status:'running', StartedAt:'2026-11-03T10:00:00Z', display_status:'running', Phase:'infrastructure-pending'})`), 'running');
   console.log('V1 passed: one queued status, reasons on the message line');
 }
+
+// Every list view preserves effective priority, including claimed work and
+// aged normal work, even when a scoped viewer has no global queue positions.
+run('var claimListPath="";');
+for (const latest of [false, true]) {
+  for (const scoped of [false, true]) {
+    sandbox.claimOrderScoped = scoped;
+    sandbox.claimOrderLatest = latest;
+    run(`{
+      changeRunRepo('all'); state.filter=claimOrderLatest?'all':'queued'; state.activeRuns=[];
+      claimListPath='';
+      const claimOrderRows=[
+        makeRun('claim-high-first',{Ref:'q1',Status:'queued',StartedAt:null,FinishedAt:null,QueuePosition:1,priority_class:'high'}),
+        makeRun('claim-aged',{Ref:'q2',Status:'queued',StartedAt:null,FinishedAt:null,QueuePosition:2,priority_class:'high',priority_reason:'aged: normal run waited at least 60 minutes'}),
+        makeRun('claim-high-last',{Ref:'q3',Status:'queued',StartedAt:null,FinishedAt:null,QueuePosition:3,priority_class:'high'}),
+        makeRun('claim-normal',{Ref:'q4',Status:'waiting',StartedAt:null,FinishedAt:null,QueuePosition:4,display_status:'queued'}),
+      ].map(row=>claimOrderScoped?{...row,QueuePosition:0}:row);
+      api=async path=>{
+        if(path==='/api/repos')return [{ID:1,Name:'ours',UpstreamID:1}];
+        if(path==='/api/runs/counts')return {Total:4,ByRepo:{1:4}};
+        if(path.includes('view=active'))return claimOrderRows;
+        claimListPath=path;
+        return {body:claimOrderLatest?[claimOrderRows[2],claimOrderRows[0]]:claimOrderRows,next:''};
+      };
+    }`);
+    await run('renderRuns(state.routeSeq)');
+    assert.deepEqual(ids(), ['claim-high-first','claim-aged','claim-high-last','claim-normal'], `claim order: latest=${latest}, scoped=${scoped}`);
+    assert.equal(new URL(run('claimListPath'),'https://example.test').searchParams.has('latest_per_ref'), latest, 'exercise both flat and latest-per-ref requests');
+  }
+}
+console.log('Queued groups preserve scheduler priority and FIFO in flat, latest-per-ref and scoped views');

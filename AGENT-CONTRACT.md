@@ -1279,9 +1279,10 @@ trust assumptions and complete invalidation rules.
   and not audited. The same grant pass admits the runs behind it.
 - Run list views (#1122): `/api/runs`, MCP `run_list`, `oberth runs` and the
   dashboard use one default order in three groups, top to bottom. The queue
-  first: every not-yet-admitted run, capped at 500, read bottom-up so the run
-  admitted next (highest effective class, then earliest `admission_sequence`,
-  then `queue_sequence`, preserving restart FIFO order) is its lowest row.
+  first: every not-yet-admitted run, capped at 500, in scheduler claim order:
+  highest effective class first, then earliest `admission_sequence`, then
+  `queue_sequence`, preserving restart FIFO order. High work, including aged
+  normal runs, precedes normal work in every view.
   Then running runs, capped at 500, most recently started first. Then
   terminal runs, most recently finished first (`COALESCE(finished_at,
   started_at, queued_at)` descending, ties by ID). Only terminal rows count
@@ -2879,7 +2880,7 @@ alone is never evidence that missing migrations ran.
 | v37 | Unreleased (#1216 measurement) | Guard version-2 container telemetry and add the global observation-age retention index; preserve version-1 observations | Database restore |
 | v38 | Upstream publication retry | Persist bounded attempts, retry deadlines and audited owner progress without changing the pushed object or promotion plan | Database restore |
 | v39 | Submission priority | Persist expiring identity grants, audited priority requests and supersession protection; existing priority ordering remains compatible | Database restore |
-
+| v40 | Run list order | Widen the latest-per-ref index to cover grouped page ranking | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding

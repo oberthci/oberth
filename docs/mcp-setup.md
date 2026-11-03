@@ -487,10 +487,8 @@ required.
 ## Run list views
 
 `run_list` and `/api/runs` take an optional `view`. Omitted or `all`, the
-list reads like time flowing upward in three groups: the queue, with the run
-admitted next at its bottom (highest effective class and earliest queue
-position closest to the running runs, exactly the scheduler's admission
-order); running runs, most recently started first; then terminal runs, most
+list has three groups: the queue in scheduler claim order (highest effective
+priority first, including aged high work, then FIFO within each class); running runs, most recently started first; then terminal runs, most
 recently finished first, with passed and failed interleaved by finish time.
 The first page carries every queued and running run; the page limit counts
 only terminal rows, so no limit or page ever drops a queued or running run or
@@ -502,9 +500,9 @@ page. `latest_per_ref=1` keeps the same grouping for each ref's newest run.
 - `history` keeps only terminal runs (passed, failed, interrupted), with legacy
   sequence paging via `before`/`next_before`/`next_cursor`.
 - `active` is deprecated; it still returns every queued, waiting and running
-  run in one unpaged list (at most 500), in scheduling order: started runs (oldest start first), then
-  claimed runs in admission order (the weighted gate's FIFO), then unclaimed
-  queued runs in accepted order. Each run that has not started carries
+  run in one unpaged list (at most 500): started runs oldest start first,
+  then claimed and unclaimed queued runs together in scheduler claim order
+  (effective priority, then FIFO). Each run that has not started carries
   `Scheduling` with its state, message, queue or admission position, size,
   weight, used/capacity and concurrency group, so a run blocking the head of
   the queue, or one waiting on its group or VM capacity, says so.

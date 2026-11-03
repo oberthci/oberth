@@ -24,7 +24,7 @@ func runListGroup(run model.Run) int {
 // TestRunListNeverSortsQueuedBelowRunningOrFinished reproduces a run list
 // where queued runs, accepted before several runs started and finished, used
 // to sort among the finished rows. Every view, limit and page must list the
-// queue (next admission lowest), then running runs, then finished runs.
+// queue (next admission first), then running runs, then finished runs.
 func TestRunListNeverSortsQueuedBelowRunningOrFinished(t *testing.T) {
 	now := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
 	s := testStore(t, &now)
@@ -88,9 +88,8 @@ func TestRunListNeverSortsQueuedBelowRunningOrFinished(t *testing.T) {
 	now = now.Add(5 * time.Minute)
 	finish(alpha, model.RunPassed)
 
-	// The queue reads bottom-up in the scheduler's admission order: high
-	// class FIFO at the bottom, normal class FIFO above it.
-	wantQueue := []string{queuedNormalSecond.ID, queuedNormalFirst.ID, queuedHighSecond.ID, queuedHighFirst.ID}
+	// The queue follows scheduler claim order: high FIFO, then normal FIFO.
+	wantQueue := []string{queuedHighFirst.ID, queuedHighSecond.ID, queuedNormalFirst.ID, queuedNormalSecond.ID}
 	wantRunning := []string{runningLate.ID, runningEarly.ID}
 	wantTerminal := []string{alpha.ID, gamma.ID, beta.ID}
 	for _, latest := range []bool{false, true} {
@@ -111,7 +110,7 @@ func TestRunListNeverSortsQueuedBelowRunningOrFinished(t *testing.T) {
 			if got := runIDs(first); strings.Join(got, ",") != strings.Join(want, ",") {
 				t.Fatalf("%s limit %d first page = %v, want %v", name, limit, got, want)
 			}
-			for i, want := range []int64{4, 3, 2, 1} {
+			for i, want := range []int64{1, 2, 3, 4} {
 				if first[i].QueuePosition != want {
 					t.Fatalf("%s limit %d queue position of %s = %d, want %d", name, limit, first[i].Ref, first[i].QueuePosition, want)
 				}
@@ -138,8 +137,8 @@ func TestRunListNeverSortsQueuedBelowRunningOrFinished(t *testing.T) {
 			}
 		}
 	}
-	// The listed queue order is the real admission order, bottom-up.
-	for i := len(wantQueue) - 1; i >= 0; i-- {
+	// The listed queue order is the real admission order.
+	for i := range wantQueue {
 		claimed, err := s.ClaimNextRun(ctx)
 		if err != nil || claimed.ID != wantQueue[i] {
 			t.Fatalf("admission order diverged from the list at %d: %+v, %v", i, claimed, err)
@@ -184,11 +183,11 @@ func TestRunListGroupsAreMonotonicWithRepositoryFilter(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := []string{queued.ID, claimed.ID, finished.ID}
+		want := []string{claimed.ID, queued.ID, finished.ID}
 		if got := runIDs(rows); strings.Join(got, ",") != strings.Join(want, ",") {
 			t.Fatalf("latest=%v filtered list = %v, want %v", latest, got, want)
 		}
-		if rows[0].QueuePosition != 3 || rows[1].QueuePosition != 1 {
+		if rows[0].QueuePosition != 1 || rows[1].QueuePosition != 3 {
 			t.Fatalf("latest=%v global queue positions = %d, %d", latest, rows[0].QueuePosition, rows[1].QueuePosition)
 		}
 		scoped, err := s.ListRecentRuns(ctx, model.RunListFilter{LatestPerRef: latest, RepoIDs: []int64{other.ID}, Limit: 1})
@@ -221,7 +220,7 @@ func TestRunListKeepsClaimedUnstartedRunsInTheQueue(t *testing.T) {
 	if _, err := s.MarkRunAdmitted(ctx, running.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.SetRunWorkflowName(ctx, running.ID, "wf-"+running.ID); err != nil {
+	if _, err := s.SetRunJobName(ctx, running.ID, "wf-"+running.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.MarkRunSubmitted(ctx, running.ID); err != nil {
@@ -251,20 +250,19 @@ func TestRunListKeepsClaimedUnstartedRunsInTheQueue(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// The queue bottom-up: the claimed run is admitted next, so it is the
-		// lowest queued row, right above the running run.
-		want := []string{queued.ID, claimed.ID, running.ID, finished.ID}
+		// The claimed run is next in claim order, followed by unclaimed work.
+		want := []string{claimed.ID, queued.ID, running.ID, finished.ID}
 		if got := runIDs(runs); strings.Join(got, ",") != strings.Join(want, ",") {
 			t.Fatalf("latest=%v list = %v, want %v", latest, got, want)
 		}
-		if runs[1].Status != model.RunRunning || runs[1].StartedAt != nil || runs[1].Phase != "waiting" || !runs[1].ClaimedUnstarted() {
-			t.Fatalf("claimed run is not the raw running/unstarted record: %+v", runs[1])
+		if runs[0].Status != model.RunRunning || runs[0].StartedAt != nil || runs[0].Phase != "waiting" || !runs[0].ClaimedUnstarted() {
+			t.Fatalf("claimed run is not the raw running/unstarted record: %+v", runs[0])
 		}
-		if model.DisplayRunStatus(runs[1]) != model.DisplayQueued || runListGroup(runs[1]) != 0 {
-			t.Fatalf("claimed run must display queued in the queue group: %+v", runs[1])
+		if model.DisplayRunStatus(runs[0]) != model.DisplayQueued || runListGroup(runs[0]) != 0 {
+			t.Fatalf("claimed run must display queued in the queue group: %+v", runs[0])
 		}
-		if runs[1].QueuePosition != 1 || runs[0].QueuePosition != 2 {
-			t.Fatalf("queue positions = %d, %d; want claimed 1, queued 2", runs[1].QueuePosition, runs[0].QueuePosition)
+		if runs[0].QueuePosition != 1 || runs[1].QueuePosition != 2 {
+			t.Fatalf("queue positions = %d, %d; want claimed 1, queued 2", runs[0].QueuePosition, runs[1].QueuePosition)
 		}
 	}
 }

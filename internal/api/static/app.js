@@ -430,7 +430,7 @@ async function loadActiveRuns() {
   }
 }
 /* The server lists runs in three groups: the queue with the run admitted
-   next at its bottom, running runs newest start first, then terminal runs
+   next at its top, running runs newest start first, then terminal runs
    newest finish first. Active runs fetched separately (older attempts hidden
    behind a newer head) are merged into their group, never stacked on top. */
 function runListGroup(run) {
@@ -440,7 +440,7 @@ function runListGroup(run) {
 function isTerminalRun(run) { return ["passed", "failed", "interrupted"].includes(run.Status); }
 /* A scoped viewer sees no queue positions. The active view then supplies
    the queue order: it lists waiting runs in the server's admission order, so
-   its index, reversed, is the same bottom-up queue. Without either, the
+   its index is the same claim order. Without either, the
    server's own row order stands; the queue is never re-sorted by time. */
 function orderRuns(runs) {
   const queued = runs.filter(run => runListGroup(run) === 0);
@@ -452,7 +452,7 @@ function orderRuns(runs) {
     const group = runListGroup(a.run) - runListGroup(b.run);
     if (group) return group;
     let key = 0;
-    if (runListGroup(a.run) === 0) key = position(a.run) && position(b.run) ? position(b.run) - position(a.run) : 0;
+    if (runListGroup(a.run) === 0) key = position(a.run) && position(b.run) ? position(a.run) - position(b.run) : 0;
     else if (runListGroup(a.run) === 1) key = stamp(b.run.StartedAt) - stamp(a.run.StartedAt);
     else key = stamp(b.run.FinishedAt || b.run.StartedAt || b.run.QueuedAt) - stamp(a.run.FinishedAt || a.run.StartedAt || a.run.QueuedAt);
     return key || a.index - b.index;

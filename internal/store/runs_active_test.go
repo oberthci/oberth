@@ -100,13 +100,13 @@ func TestListActiveRunsOrdersByStartThenAdmissionThenQueue(t *testing.T) {
 		t.Fatalf("ref-filtered active = %v, %v", runIDs(byRef), err)
 	}
 
-	// The default list has one queue bottom-up (the run admitted next lowest),
+	// The default list has one queue in claim order,
 	// then running runs newest start first, then finished runs.
 	all, err := s.ListRecentRuns(ctx, model.RunListFilter{Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantAll := []string{queuedSecond.ID, hidden.ID, queuedFirst.ID, waiting.ID, runningLate.ID, runningEarly.ID, finished.ID}
+	wantAll := []string{waiting.ID, queuedFirst.ID, hidden.ID, queuedSecond.ID, runningLate.ID, runningEarly.ID, finished.ID}
 	if got := runIDs(all); strings.Join(got, ",") != strings.Join(wantAll, ",") {
 		t.Fatalf("recent order = %v, want %v", got, wantAll)
 	}
@@ -204,7 +204,7 @@ func TestQueueOrderIsMonotoneAcrossClaimedAndUnclaimedClasses(t *testing.T) {
 			}
 			return queue
 		}
-		for name, queue := range map[string][]model.Run{"active": queueOf(active, false), "flat": queueOf(flat, true), "latest-per-ref": queueOf(latest, true)} {
+		for name, queue := range map[string][]model.Run{"active": queueOf(active, false), "flat": queueOf(flat, false), "latest-per-ref": queueOf(latest, false)} {
 			if got := runIDs(queue); strings.Join(got, ",") != strings.Join(wantAdmission, ",") {
 				t.Fatalf("%s: %s queue in admission order = %v, want %v", label, name, got, wantAdmission)
 			}
