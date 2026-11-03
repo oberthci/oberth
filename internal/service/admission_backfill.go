@@ -170,6 +170,12 @@ func (scheduler *Scheduler) runHeadEvents(ctx context.Context) {
 	defer pulse.Stop()
 	sweep := time.NewTicker(time.Hour)
 	defer sweep.Stop()
+	// Retry failed writes independently of the heartbeat and hourly cleanup.
+	// A nil channel disables the timer once every pending event is durable.
+	retry := time.NewTimer(30 * time.Second)
+	retry.Stop()
+	defer retry.Stop()
+	var retryC <-chan time.Time
 	if canSweep {
 		if err := sweeper.SweepAdmissionHeadWaits(ctx); err != nil {
 			log.Printf("WARN: admission head-wait sweep: %v", err)
@@ -182,6 +188,9 @@ func (scheduler *Scheduler) runHeadEvents(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-pulse.C:
+			continue
+		case <-retryC:
+			retryC = nil
 		case <-sweep.C:
 			// Heads whose run ended without being abandoned through the gate
 			// (an interrupted promotion or tag) leave rows behind.
@@ -234,6 +243,16 @@ func (scheduler *Scheduler) runHeadEvents(ctx context.Context) {
 				}
 				gate.mu.Unlock()
 			}
+		}
+		gate.mu.Lock()
+		pending := len(gate.headPending) > 0
+		gate.mu.Unlock()
+		if pending && retryC == nil {
+			retry.Reset(30 * time.Second)
+			retryC = retry.C
+		} else if !pending && retryC != nil {
+			retry.Stop()
+			retryC = nil
 		}
 	}
 }
