@@ -26,7 +26,7 @@ import (
 // A pipeline that declares a heavier size then trades concurrency for
 // per-run resources proportionally, instead of collapsing the server to one.
 func newWeightedAdmissionForJobs(maxConcurrentJobs int) *weightedAdmission {
-	return newWeightedAdmissionForJobsWeights(maxConcurrentJobs, DefaultSizeWeights)
+	return newWeightedAdmission(max(1, maxConcurrentJobs) * DefaultSizeWeights.M)
 }
 
 // reserve records FIFO claim order before exact-SHA checkout and static
@@ -123,4 +123,12 @@ func (scheduler *Scheduler) seedHistoricalSteps(ctx context.Context, database *s
 
 func readPressureDirectory(root string) (model.PressureSample, error) {
 	return readPressureSources(root, true)
+}
+
+// Historical gate tests exercise the pre-numeric compatibility semantics in
+// isolation. The deployed scheduler only constructs newWorkflowAdmissionForJobs.
+func newWeightedAdmissionForJobsWeights(jobs int, weights SizeWeights) *weightedAdmission {
+	gate := newWeightedAdmission(max(1, jobs) * weights.M)
+	gate.weights = weights
+	return gate
 }

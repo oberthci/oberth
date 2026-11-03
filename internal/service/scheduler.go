@@ -38,6 +38,7 @@ var errPreflightCancellationPending = errors.New("trusted preflight cancellation
 type mutationRequirement func(context.Context) error
 
 type SchedulerConfig struct {
+	// DeclaredAdmission is deprecated and ignored; Kubernetes places step pods.
 	DeclaredAdmission DeclaredAdmissionConfig
 	Store             SchedulerStore
 	Git               WorkspaceGit
@@ -53,16 +54,13 @@ type SchedulerConfig struct {
 	MaxConcurrentFile string
 	MaxRunLogBytes    int64
 	MutationGate      func(context.Context) error
-	// MaxHeadWait bounds new backfill; at the limit existing grants drain
-	// for the head. Zero is strict FIFO; serve
-	// defaults it to DefaultMaxHeadWait.
+	// MaxHeadWait is deprecated and ignored; resource drain/backfill is removed.
 	MaxHeadWait time.Duration
-	// SizeWeights is the operator's admission weight per size (#1021); the
-	// zero value selects DefaultSizeWeights.
+	// StalledRunTimeout bounds granted runs before submission. Zero is ten minutes.
+	StalledRunTimeout time.Duration
+	// SizeWeights is deprecated and ignored. Kubernetes places pods by their requests.
 	SizeWeights SizeWeights
-	// AdmissionDiskFloorBytes is an opt-in disk-space admission floor (#673).
-	// When positive, admission is held until the filesystem containing
-	// WorkspaceRoot has at least this many free bytes. Default 0 = disabled.
+	// AdmissionDiskFloorBytes is deprecated and ignored by workflow admission.
 	AdmissionDiskFloorBytes int64
 	AdmissionPressure       AdmissionPressureConfig
 }
@@ -88,6 +86,7 @@ type Scheduler struct {
 	admission          *weightedAdmission
 	priorityMu         sync.Mutex // serialize durable priority refresh snapshots
 	maxRunLogBytes     int64
+	stalledRunTimeout  time.Duration
 	mutationGate       func(context.Context) error
 	wake               chan struct{}
 	publicationWake    chan struct{}
@@ -141,6 +140,16 @@ func (scheduler *Scheduler) retryMovedPromotion(ctx context.Context, finalizatio
 }
 
 func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
+	if config.StalledRunTimeout < 0 {
+		return nil, errors.New("service: admission stall timeout must be nonnegative")
+	}
+	if config.StalledRunTimeout == 0 {
+		config.StalledRunTimeout = 10 * time.Minute
+	}
+	config.AdmissionPressure.HardOnly = true
+	if !config.AdmissionPressure.Enabled {
+		config.AdmissionPressure.IOFullAvg60Max, config.AdmissionPressure.CPUSomeAvg60Max, config.AdmissionPressure.MaxDefer = 0, 0, 0
+	}
 	if err := config.AdmissionPressure.Validate(); err != nil {
 		return nil, fmt.Errorf("admission pressure: %w", err)
 	}
@@ -150,14 +159,8 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 	if config.MaxConcurrent <= 0 {
 		config.MaxConcurrent = 3
 	}
-	if config.SizeWeights == (SizeWeights{}) {
-		config.SizeWeights = DefaultSizeWeights
-	}
-	if err := config.SizeWeights.Validate(); err != nil {
-		return nil, fmt.Errorf("service: admission size weights: %w", err)
-	}
-	if _, err := admissionCapacityBudget(config.MaxConcurrent, config.SizeWeights, false); err != nil {
-		return nil, err
+	if config.MaxConcurrent > 64 {
+		return nil, errors.New("service: maximum concurrent runs must be in 1..64")
 	}
 	if config.MaxRunLogBytes <= 0 {
 		config.MaxRunLogBytes = runlog.DefaultRunLimitBytes
@@ -186,48 +189,21 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 		auditor: config.Auditor, signals: signals,
 		workspaces: workspaces, workspaceRoot: workspaceRoot, maxConcurrent: config.MaxConcurrent,
 		capacityFile:   config.MaxConcurrentFile,
-		admission:      newWeightedAdmissionForJobsWeights(config.MaxConcurrent, config.SizeWeights),
-		maxRunLogBytes: config.MaxRunLogBytes, mutationGate: mutationGate,
+		admission:      newWorkflowAdmissionForJobs(config.MaxConcurrent),
+		maxRunLogBytes: config.MaxRunLogBytes, mutationGate: mutationGate, stalledRunTimeout: config.StalledRunTimeout,
 		wake: make(chan struct{}, 1), publicationWake: make(chan struct{}, 1),
 		createWake: make(chan struct{}, 1), createPending: make(map[string]*pendingCreate),
 		publicationSet: make(map[string]struct{}), deliveryPermit: deliveryPermit, capacityWait: waitTrustedCapacity,
 	}
 	scheduler.workspaces.owners = scheduler.database()
-	// Runs parked on their concurrency group (#658) do not hold a dispatch
-	// slot, so the gate carries its own run ceiling, and a newly parked run
-	// wakes the dispatch loop to claim past it. The ceiling is the weight
-	// budget (#1021): M runs still fill it at maxConcurrentJobs, while S runs
-	// (weight 1) pack two per M slot. A grant wakes the loop too, so it can
-	// claim into weight a small run left spare.
-	scheduler.admission.maxRuns = scheduler.admission.capacity
-	config.DeclaredAdmission = config.DeclaredAdmission.withHeadroomDefaults()
-	if config.DeclaredAdmission.CPUMilli == 0 {
-		config.DeclaredAdmission.CPUMilli = DefaultDeclaredAdmissionConfig().CPUMilli
-	}
-	if config.DeclaredAdmission.MemoryBytes == 0 {
-		config.DeclaredAdmission.MemoryBytes = DefaultDeclaredAdmissionConfig().MemoryBytes
-	}
-	if err := config.DeclaredAdmission.ValidateForSizeWeights(config.SizeWeights); err != nil {
-		return nil, err
-	}
-	scheduler.admission.resources = config.DeclaredAdmission
+	// Group/VM parked claims release their dispatch slots. The admission gate
+	// independently enforces the administrator's workflow ceiling. Kubernetes
+	// decides whether each step pod fits its node by the declared requests.
+	scheduler.admission.maxRuns = config.MaxConcurrent
 	scheduler.admission.capacityConfig = model.AdmissionCapacityConfig{MaxConcurrentJobs: config.MaxConcurrent, BootDefault: config.MaxConcurrent, Source: "boot", File: config.MaxConcurrentFile}
 	scheduler.admission.pressure = newPressureCheck(config.AdmissionPressure)
 	scheduler.admission.onPark = scheduler.signalQueue
 	scheduler.admission.onGrant = scheduler.signalQueue
-	if config.MaxHeadWait > 0 {
-		scheduler.admission.maxHeadWait = config.MaxHeadWait
-	}
-	if _, ok := config.Store.(HeadWaitStore); ok {
-		scheduler.admission.headEvents = make(chan headEvent, 256)
-	}
-	// Opt-in disk floor (#673): when positive, admission holds until the
-	// filesystem has enough free bytes.
-	if config.AdmissionDiskFloorBytes > 0 {
-		scheduler.admission.diskFloor = newDiskFloorCheck(
-			workspaceRoot, config.AdmissionDiskFloorBytes,
-		)
-	}
 	return scheduler, nil
 }
 
@@ -901,22 +877,25 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		return nil
 	}
 	jobRequest := WorkflowRequest{WorkflowName: workflowName, Run: run, Repository: repository, SourceDir: sourceDir, UpstreamName: upstream.Name, UpstreamOrg: upstream.Org()}
-	size, err := scheduler.pipelineSize(ctx, jobRequest)
-	if err != nil {
-		_ = logFile.Close()
-		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("read pipeline resource size: %w", err))
-	}
-	if requirement.Contract != nil {
-		if sized, ok := scheduler.trusted.(interface {
-			Size(context.Context, WorkflowRequest) (pipeline.Size, error)
-		}); ok {
-			preflightSize, sizeErr := sized.Size(ctx, jobRequest)
-			if sizeErr != nil {
-				_ = logFile.Close()
-				return scheduler.finishInfrastructureFailure(ctx, run, repository, sizeErr)
-			}
-			if sizeRank(preflightSize) > sizeRank(size) {
-				size = preflightSize
+	size := pipeline.M // Historical wire metadata; it has no admission effect.
+	if !scheduler.admission.workflowOnly {
+		size, err = scheduler.pipelineSize(ctx, jobRequest)
+		if err != nil {
+			_ = logFile.Close()
+			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("read pipeline resource size: %w", err))
+		}
+		if requirement.Contract != nil {
+			if sized, ok := scheduler.trusted.(interface {
+				Size(context.Context, WorkflowRequest) (pipeline.Size, error)
+			}); ok {
+				preflightSize, sizeErr := sized.Size(ctx, jobRequest)
+				if sizeErr != nil {
+					_ = logFile.Close()
+					return scheduler.finishInfrastructureFailure(ctx, run, repository, sizeErr)
+				}
+				if sizeRank(preflightSize) > sizeRank(size) {
+					size = preflightSize
+				}
 			}
 		}
 	}
@@ -958,7 +937,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
 		}
 	}
-	if pods == nil {
+	if !scheduler.admission.workflowOnly && pods == nil {
 		if err := scheduler.authorizeRunSize(ctx, run, repository, size); err != nil {
 			_ = logFile.Close()
 			return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
@@ -1022,8 +1001,14 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		_ = logFile.Close()
 		return err
 	}
-	if err := scheduler.awaitAdmission(ctx); err != nil {
+	admissionCtx, stopAdmission := context.WithTimeout(ctx, scheduler.stalledRunTimeout)
+	err = scheduler.awaitAdmission(admissionCtx)
+	stopAdmission()
+	if err != nil {
 		_ = logFile.Close()
+		if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("resource admission expired: no scheduled pod or progress for %s", scheduler.stalledRunTimeout))
+		}
 		return err
 	}
 	current, err = scheduler.database().MarkRunAdmitted(ctx, run.ID)
@@ -1449,6 +1434,13 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 			deleteErr := scheduler.jobs.Delete(deleteCtx, workflowName, run.ID)
 			cancelDelete()
 			if deleteErr != nil {
+				var expired interface{ AdmissionExpiryReason() string }
+				if errors.As(waitErr, &expired) {
+					if _, ok := scheduler.jobs.(JobCreateSettler); ok {
+						scheduler.deferCreateCleanup(finalizeCtx, run, workflowName, reservation, waitErr)
+						return nil
+					}
+				}
 				// The admission stays held with the run: the next member of
 				// its concurrency group must not start beside a Workflow that
 				// may still be alive.

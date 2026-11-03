@@ -251,12 +251,16 @@ func TestPriorityDispatchClaimsPastLowerClassWaitersAndRefreshesBumps(t *testing
 	}
 }
 
-func TestSchedulerReleaseCandidateOvertakesAlreadyClaimedBranchQueue(t *testing.T) {
-	f := newGroupFixture(t, 2)
+func TestSchedulerReleaseCandidateOvertakesQueuedBranchesAtWorkflowCeiling(t *testing.T) {
+	f := newGroupFixture(t, 1)
 	f.engine.declare("running", "", pipeline.L) // 3/4 used
 	f.engine.declare("ordinary-a", "", pipeline.L)
 	f.engine.declare("ordinary-b", "", pipeline.L)
 	f.engine.declare("rc/v1", "", pipeline.S)
+	for _, ref := range []string{"running", "ordinary-a", "ordinary-b"} {
+		f.engine.declareCPU(ref, 5900)
+	}
+	f.engine.declareCPU("rc/v1", 1900)
 	if _, err := f.store.SetQueuePriorityPatterns(t.Context(), "admin", []string{"rc/*"}); err != nil {
 		t.Fatal(err)
 	}
@@ -267,31 +271,15 @@ func TestSchedulerReleaseCandidateOvertakesAlreadyClaimedBranchQueue(t *testing.
 	}
 	ordinaryA := f.branch(t, f.terraform, "ordinary-a", "b")
 	ordinaryB := f.branch(t, f.exampleService, "ordinary-b", "c")
-	// Wait until an ordinary L has filled dispatch while awaiting weight.
-	deadline := time.Now().Add(testStartTimeout(10 * time.Second))
-	for {
-		a := f.scheduler.AdmissionSnapshot(ordinaryA.QueueSequence)
-		if a != nil && a.State == "waiting" {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("ordinary run never reached weighted wait")
-		}
-		time.Sleep(testTimeout(time.Millisecond))
-	}
 	rc := f.branch(t, f.exampleService, "rc/v1", "d")
+	f.engine.finish(t, running.ID)
 	if created := f.awaitCreated(t, 1); !created[rc.ID] {
 		t.Fatalf("higher-class RC did not overtake branches: %v", created)
 	}
-	// Existing work keeps its resources; only RC fits the remaining weight.
-	f.scheduler.admission.mu.Lock()
-	used := f.scheduler.admission.used
-	f.scheduler.admission.mu.Unlock()
-	if used != 4 {
-		t.Fatalf("priority bypassed weighted budget: used=%d", used)
+	if state := f.scheduler.AdmissionState(); state.Runs != 1 || state.MaxRuns != 1 || state.NumericBudget != nil {
+		t.Fatalf("priority bypassed the workflow ceiling: %+v", state)
 	}
 	f.engine.finish(t, rc.ID)
-	f.engine.finish(t, running.ID)
 	if created := f.awaitCreated(t, 1); !created[ordinaryA.ID] {
 		t.Fatalf("ordinary FIFO lost: %v", created)
 	}
@@ -412,9 +400,12 @@ func TestPrioritySchedulerSurvivesBusyReadsAndResumesDispatch(t *testing.T) {
 			f := newGroupFixture(t, 2)
 			busy := &busyPriorityStore{Store: f.store, observed: make(chan string, 1)}
 			f.scheduler.store = busy
-			f.engine.declare("running", "", pipeline.L)
-			f.engine.declare("waiting", "", pipeline.L)
+			f.engine.declare("running", "serial", pipeline.L)
+			f.engine.declare("waiting", "serial", pipeline.L)
 			f.engine.declare("rc/v1", "", pipeline.S)
+			f.engine.declareCPU("running", 5900)
+			f.engine.declareCPU("waiting", 5900)
+			f.engine.declareCPU("rc/v1", 1900)
 			if _, err := f.store.SetQueuePriorityPatterns(t.Context(), "admin", []string{"rc/*"}); err != nil {
 				t.Fatal(err)
 			}
@@ -422,21 +413,13 @@ func TestPrioritySchedulerSurvivesBusyReadsAndResumesDispatch(t *testing.T) {
 			f.start(t)
 			f.awaitCreated(t, 1)
 			waiting := f.branch(t, f.terraform, "waiting", "b")
-			deadline := time.Now().Add(testStartTimeout(10 * time.Second))
-			for {
-				if snapshot := f.scheduler.AdmissionSnapshot(waiting.QueueSequence); snapshot != nil && snapshot.State == "waiting" {
-					break
-				}
-				if time.Now().After(deadline) {
-					t.Fatal("ordinary run never waited for weight")
-				}
-				time.Sleep(testTimeout(5 * time.Millisecond))
-			}
+			f.awaitParked(t, waiting, running.ID)
 			if operation == "refresh" {
 				busy.refreshBusy.Store(true)
 			} else {
 				busy.peekBusy.Store(true)
 			}
+			rc := f.branch(t, f.terraform, "rc/v1", "c")
 			f.scheduler.NotifyQueue()
 			select {
 			case got := <-busy.observed:
@@ -446,7 +429,6 @@ func TestPrioritySchedulerSurvivesBusyReadsAndResumesDispatch(t *testing.T) {
 			case <-time.After(testStartTimeout(10 * time.Second)):
 				t.Fatal("busy read was not exercised")
 			}
-			rc := f.branch(t, f.terraform, "rc/v1", "c")
 			if created := f.awaitCreated(t, 1); !created[rc.ID] {
 				t.Fatalf("dispatch did not recover after busy %s: %v", operation, created)
 			}

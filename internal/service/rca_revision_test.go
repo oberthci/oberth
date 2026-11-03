@@ -123,7 +123,7 @@ func TestRCARevisionNoRetryAfterWorkflowMayHaveRun(t *testing.T) {
 				if err := fixture.store.CompleteObservedRunCancellation(t.Context(), cancellations[0]); err != nil {
 					t.Fatal(err)
 				}
-				done, err := scheduler.settleCreateAttempt(t.Context(), &pendingCreate{runID: run.ID, persisted: true, confirmed: true, grant: &admissionReservation{}})
+				done, err := scheduler.settleCreateAttempt(t.Context(), &pendingCreate{runID: run.ID, persisted: true, confirmed: true, grant: &admissionReservation{gate: scheduler.admission}})
 				if err != nil || !done {
 					t.Fatal(done, err)
 				}
@@ -240,7 +240,7 @@ func testRCACreateCleanupOutage(t *testing.T, knownCreate bool) {
 	if err != nil || !isPendingCreate(pending) || pending.AutoRetriedBy != "" {
 		t.Fatal("uncertain run not retained", pending, err)
 	}
-	if state := scheduler.AdmissionState(); state.Used == 0 {
+	if state := scheduler.AdmissionState(); state.Runs == 0 {
 		t.Fatal("uncertain grant released")
 	}
 }

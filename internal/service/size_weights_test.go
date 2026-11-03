@@ -40,87 +40,41 @@ func TestParseSizeWeightsValidates(t *testing.T) {
 	}
 }
 
-// With the defaults the gate behaves exactly as before: XL is the whole budget.
-func TestDefaultWeightsKeepXLExclusive(t *testing.T) {
-	gate := newWeightedAdmissionForJobsWeights(8, DefaultSizeWeights)
-	if gate.capacity != 16 {
-		t.Fatalf("capacity = %d, want 16", gate.capacity)
+// Size weights remain parseable for upgrade compatibility, but neither a
+// whole-budget nor a finite XL weight may change numeric admission.
+func TestDeprecatedWeightsDoNotChangeNumericAdmission(t *testing.T) {
+	for _, weights := range []SizeWeights{DefaultSizeWeights, {S: 1, M: 2, L: 3, XL: 11}} {
+		gate := newWorkflowAdmissionForJobs(8)
+		gate.weights = weights
+		if gate.capacity != 8 || gate.maxRuns != 8 {
+			t.Fatal("run ceiling changed by weights", gate.capacity, gate.maxRuns)
+		}
+		var releases []func()
+		for i := int64(1); i <= 8; i++ {
+			releases = append(releases, acquireRequestWithinBudget(t, gate.reserve(i), admissionRequest{Size: pipeline.XL}))
+		}
+		budget := gate.numericBudgetLocked()
+		if gate.used != 0 || gate.runs != 8 || budget != nil {
+			t.Fatalf("numeric ledger = %+v, runs %d weights %d", budget, gate.runs, gate.used)
+		}
+		for _, release := range releases {
+			release()
+		}
 	}
-	release := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "xl", Size: pipeline.XL})
-	defer release()
-	if used, _ := gateUsage(gate); used != 16 {
-		t.Fatalf("XL used %d, want the whole budget 16", used)
-	}
-	beside := gate.reserve(2)
-	ready := make(chan func(), 1)
-	go acquireRequestForTest(beside, admissionRequest{RunID: "s", Size: pipeline.S}, ready)
-	awaitWaiting(t, beside)
-	if blocker := (&Scheduler{admission: gate}).AdmissionBlocker(); beside.granted || blocker == nil || !blocker.FullDrain && blocker.RunID != "s" {
-		t.Fatalf("an S run was admitted beside a whole-budget XL: %#v", blocker)
-	}
-	beside.cancel()
-}
-
-// XL=11 of a 16 budget shares the host: an L (3) fits beside it, a second L
-// would not (17), and the queue head names the configured weight.
-func TestFiniteXLWeightSharesTheHost(t *testing.T) {
-	weights := SizeWeights{S: 1, M: 2, L: 3, XL: 11}
-	gate := newWeightedAdmissionForJobsWeights(8, weights)
-	// Exercise finite weights without a tighter numeric resource limit.
-	gate.resources.CPUMilli, gate.resources.MemoryBytes = 32000, 64<<30
-	scheduler := &Scheduler{admission: gate}
-	releaseXL := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "xl", Repo: "ebpf", Ref: "main", Size: pipeline.XL})
-	defer releaseXL()
-	releaseL := acquireRequestWithinBudget(t, gate.reserve(2), admissionRequest{RunID: "l", Size: pipeline.L})
-	defer releaseL()
-	if used, runs := gateUsage(gate); used != 14 || runs != 2 {
-		t.Fatalf("used %d runs %d, want 14 and 2", used, runs)
-	}
-	second := gate.reserve(3)
-	ready := make(chan func(), 1)
-	go acquireRequestForTest(second, admissionRequest{RunID: "l2", Repo: "cli", Ref: "feature/x", Size: pipeline.L}, ready)
-	awaitWaiting(t, second)
-	if blocker := scheduler.AdmissionBlocker(); blocker == nil || blocker.FullDrain || blocker.Reason() != "L, needs 3 weight; 14/16 used" {
-		t.Fatalf("blocker = %#v", blocker)
-	}
-	releaseL()
-	awaitAcquired(t, ready)()
-
-	// An XL waiting for weight says its configured weight, not a drain.
-	head := newWeightedAdmissionForJobsWeights(8, weights)
-	head.resources.CPUMilli, head.resources.MemoryBytes = 32000, 64<<30
-	hold := acquireRequestWithinBudget(t, head.reserve(1), admissionRequest{RunID: "m", Size: pipeline.L})
-	defer hold()
-	for index := int64(2); index <= 3; index++ {
-		acquireRequestWithinBudget(t, head.reserve(index), admissionRequest{RunID: "m", Size: pipeline.M})
-	}
-	xl := head.reserve(4)
-	go acquireRequestForTest(xl, admissionRequest{RunID: "xl", Repo: "ebpf", Ref: "main", Size: pipeline.XL}, make(chan func(), 1))
-	awaitWaiting(t, xl)
-	blocker := (&Scheduler{admission: head}).AdmissionBlocker()
-	if blocker == nil || blocker.FullDrain || !strings.HasPrefix(blocker.Reason(), "XL · 11w") {
-		t.Fatalf("finite XL blocker = %#v (%s)", blocker, blocker.Reason())
-	}
-	xl.cancel()
 }
 
 // With S heavier than 1 the dispatch loop must not claim into spare weight
 // no S run can use: 15 of 16 used leaves no room for an S of weight 2.
-func TestSpareClaimNeedsRoomForAnSRun(t *testing.T) {
-	gate := newWeightedAdmissionForJobsWeights(4, SizeWeights{S: 2, M: 4, L: 5, XL: 0}) // budget 16
-	// Leave enough numeric capacity to test the minimum spare weight alone.
-	gate.resources.CPUMilli, gate.resources.MemoryBytes = 32000, 64<<30
-	for index, size := range []pipeline.Size{pipeline.L, pipeline.L, pipeline.L} {
-		acquireRequestWithinBudget(t, gate.reserve(int64(index+1)), admissionRequest{RunID: "l", Size: size})
+func TestSpareClaimUsesRunCeilingRegardlessOfSizeWeights(t *testing.T) {
+	gate := newWorkflowAdmissionForJobs(4)
+	for i := int64(1); i <= 3; i++ {
+		acquireRequestWithinBudget(t, gate.reserve(i), admissionRequest{Size: pipeline.L})
 	}
-	if used, runs := gateUsage(gate); used != 15 || runs != 3 {
-		t.Fatalf("used %d runs %d", used, runs)
-	}
-	if gate.spareWeightForClaim(3) {
-		t.Fatal("claimed into 1 spare weight with S weighing 2")
-	}
-	gate.weights.S = 1
 	if !gate.spareWeightForClaim(3) {
-		t.Fatal("did not claim into spare weight an S run can use")
+		t.Fatal("size weights prevented claiming into a free numeric slot")
+	}
+	acquireRequestWithinBudget(t, gate.reserve(4), admissionRequest{Size: pipeline.XL})
+	if gate.spareWeightForClaim(4) {
+		t.Fatal("claimed past admin run ceiling")
 	}
 }

@@ -170,7 +170,7 @@ func TestWorkflowCreateBrownoutTenMinutesDoesNotStopServerOrOtherRuns(t *testing
 				for _, grant := range state.Reservations {
 					if grant.RunID == pending.ID {
 						found = true
-						if grant.Weight != 2 || grant.Size != "M" {
+						if grant.Weight != 0 || grant.DeclaredResources != nil || grant.Size != "" {
 							t.Fatalf("pending grant changed: %+v", grant)
 						}
 					}
@@ -207,6 +207,8 @@ func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForSettlement(t *testi
 			f := newControlFixture(t, JobResult{Status: model.RunFailed, Phase: "infrastructure"})
 			jobs := &pendingCreateJobs{fakeJobs: f.jobs}
 			f.scheduler.jobs = jobs
+			f.scheduler.maxConcurrent = 3
+			f.scheduler.admission = newWorkflowAdmissionForJobs(3)
 			var runs []model.Run
 			for i := range 2 {
 				queued, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: fmt.Sprintf("restart-%d", i), Repository: f.repo, Branch: fmt.Sprintf("feature/restart-%d", i), SHA: strings.Repeat("c", 40), Actor: "pusher"})
@@ -230,7 +232,7 @@ func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForSettlement(t *testi
 				if i == 0 {
 					demand = argoworkflow.VMIDemand{VMs: 1, Cores: 1, MemoryBytes: 1 << 30}
 				}
-				if err := f.scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S, demand); err != nil {
+				if err := f.scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S, demand, &argoworkflow.PodDemand{CPUMilli: 900, MemoryBytes: 1 << 30, Pods: 1}); err != nil {
 					t.Fatal(err)
 				}
 				if marked {
@@ -277,7 +279,7 @@ func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForSettlement(t *testi
 				t.Fatalf("unacknowledged recovery bypassed adoption: %d", jobs.adoptCalls.Load())
 			}
 			state := f.scheduler.AdmissionState()
-			if state.Used != 2 || state.Runs != 2 || f.scheduler.pendingCreateCount() != 2 {
+			if state.NumericBudget != nil || state.Runs != 2 || f.scheduler.pendingCreateCount() != 2 {
 				t.Fatalf("restart did not restore exact pending contracts: %+v", state)
 			}
 			f.scheduler.admission.mu.Lock()
@@ -344,7 +346,7 @@ func TestWorkflowCreateProcessNextAndCancelNeverSettleInline(t *testing.T) {
 	if !current.Cancelled() || !isPendingCreate(current) {
 		t.Fatalf("cancel lost durable pending marker: %+v", current)
 	}
-	if f.scheduler.AdmissionState().Used != 2 {
+	if f.scheduler.AdmissionState().NumericBudget != nil {
 		t.Fatal("cancel released uncertain grant")
 	}
 }
@@ -432,7 +434,7 @@ func TestWorkflowCreatePendingPersistenceFailureIsRetriedWithoutFatal(t *testing
 	if err := f.scheduler.ProcessNext(t.Context()); err != nil {
 		t.Fatal("pending persistence failure reached scheduler", err)
 	}
-	if f.scheduler.AdmissionState().Used != 2 {
+	if f.scheduler.AdmissionState().NumericBudget != nil {
 		t.Fatal("persistence outage freed grant")
 	}
 	db.fail = false
@@ -474,7 +476,7 @@ func TestWorkflowCreatePendingPushAndResolvedCancelStayLocal(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if calls != 0 || f.scheduler.AdmissionState().Used != 2 {
+			if calls != 0 || f.scheduler.AdmissionState().NumericBudget != nil {
 				t.Fatal("push/cancel settled inline or released grant")
 			}
 			f.scheduler.settleOneCreate(t.Context())
@@ -482,7 +484,7 @@ func TestWorkflowCreatePendingPushAndResolvedCancelStayLocal(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !run.Preempted() || isPendingCreate(run) || f.scheduler.pendingCreateCount() != 0 || f.scheduler.AdmissionState().Used != 0 {
+			if !run.Preempted() || isPendingCreate(run) || f.scheduler.pendingCreateCount() != 0 || f.scheduler.AdmissionState().Runs != 0 {
 				t.Fatalf("settled preemption lost state or still pending: %+v", run)
 			}
 		})

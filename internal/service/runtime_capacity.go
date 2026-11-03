@@ -91,7 +91,7 @@ func (scheduler *Scheduler) capacityReloadError(err error) {
 	current := gate.capacityConfig.MaxConcurrentJobs
 	gate.mu.Unlock()
 	if changed {
-		log.Printf("WARN: admission capacity: %v; retaining %d M jobs", err, current)
+		log.Printf("WARN: admission capacity: %v; retaining %d concurrent runs", err, current)
 	}
 }
 
@@ -108,7 +108,10 @@ func (scheduler *Scheduler) refreshRuntimeCapacity(ctx context.Context) {
 	gate := scheduler.admission
 	gate.mu.Lock()
 	previous := gate.capacityConfig
-	budget, validationErr := admissionCapacityBudget(jobs, gate.weights, true)
+	budget, validationErr := jobs, error(nil)
+	if !gate.workflowOnly {
+		budget, validationErr = admissionCapacityBudget(jobs, gate.weights, true)
+	}
 	gate.mu.Unlock()
 	if err == nil {
 		err = validationErr
@@ -145,14 +148,14 @@ func (scheduler *Scheduler) refreshRuntimeCapacity(ctx context.Context) {
 	// Granted/retained reservations keep the exact weight they hold. Waiting
 	// weights must be repriced, including whole-budget XL and clamped L weights.
 	for _, waiter := range gate.waiters {
-		if waiter.prepared && !gate.usesDeclarations(waiter) {
+		if !gate.workflowOnly && waiter.prepared && !gate.usesDeclarations(waiter) {
 			waiter.weight = gate.weights.of(waiter.size, budget)
 		}
 	}
 	gate.grantLocked()
 	gate.mu.Unlock()
 	scheduler.signalQueue()
-	log.Printf("admission capacity: %d M jobs, weight budget %d, source=file", jobs, budget)
+	log.Printf("admission capacity: %d concurrent runs, source=file", jobs)
 }
 
 func (scheduler *Scheduler) watchRuntimeCapacity(ctx context.Context, ticks <-chan time.Time) {

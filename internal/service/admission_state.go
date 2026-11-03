@@ -37,8 +37,8 @@ func (gate *weightedAdmission) reservationStateLocked(reservation *admissionRese
 
 func (gate *weightedAdmission) reservationViewLocked(reservation *admissionReservation) model.AdmissionReservation {
 	view := model.AdmissionReservation{
-		DeclaredResources: reservation.declaredResources(),
-		LegacyResources:   reservation.legacyResources(),
+		DeclaredResources: gate.reportedResourcesLocked(reservation),
+		LegacyResources:   gate.reportedLegacyResourcesLocked(reservation),
 		RunID:             reservation.runID, RepoID: reservation.repoID, Repo: reservation.repo, Ref: reservation.ref,
 		Size: string(reservation.size), Weight: reservation.weight, Group: reservation.groupName,
 		Pressure: gate.pressureWaitLocked(reservation),
@@ -48,6 +48,9 @@ func (gate *weightedAdmission) reservationViewLocked(reservation *admissionReser
 		if name, err := deterministicWorkflowName(reservation.repo, reservation.runID); err == nil {
 			view.Workflow = name
 		}
+	}
+	if gate.workflowOnly {
+		view.Size = ""
 	}
 	switch view.State {
 	case "granted", "retained":
@@ -80,6 +83,9 @@ func (scheduler *Scheduler) AdmissionState() *model.AdmissionState {
 		Capacity:      gate.capacity, Used: gate.used, Runs: gate.runs, MaxRuns: gate.maxRuns,
 		MaxHeadWaitSeconds: int64(gate.maxHeadWait / time.Second),
 		Reservations:       []model.AdmissionReservation{}, Groups: []model.AdmissionGroup{},
+	}
+	if gate.workflowOnly {
+		state.Used = gate.runs
 	}
 	sequences := make([]int64, 0, len(gate.reservations))
 	for sequence := range gate.reservations {

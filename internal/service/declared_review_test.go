@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
@@ -46,7 +47,7 @@ spec:
 	return KubeVirtResources{Receipt: receipt}, err
 }
 
-func TestDeclaredGraphAndBudgetAreRefusedBeforeSubmission(t *testing.T) {
+func TestDeclaredGraphAndBudgetDoNotGateKubernetesSubmission(t *testing.T) {
 	for _, graph := range []bool{false, true} {
 		t.Run(map[bool]string{false: "budget", true: "graph"}[graph], func(t *testing.T) {
 			f := newConcurrencyFixture(t, pipeline.M, 3)
@@ -63,18 +64,16 @@ func TestDeclaredGraphAndBudgetAreRefusedBeforeSubmission(t *testing.T) {
 			done := make(chan error, 1)
 			go func() { done <- f.scheduler.Run(ctx) }()
 			defer func() { close(jobs.release); cancel(); <-done }()
-			failed := awaitRunStatus(t, f, run.ID, model.RunFailed)
-			want := "numeric budget"
-			if graph {
-				want = "graph"
-			}
-			if !strings.Contains(failed.Error, want) {
-				t.Fatalf("wrong refusal: %s", failed.Error)
-			}
 			select {
 			case <-jobs.admitted:
-				t.Fatal("unsafe declared workflow submitted")
-			default:
+			case <-time.After(testStartTimeout(5 * time.Second)):
+				t.Fatal("historical graph or numeric budget blocked Kubernetes submission")
+			}
+			if current, err := f.store.Run(t.Context(), run.ID); err != nil || current.Status != model.RunRunning {
+				t.Fatalf("submitted workflow did not stay active: %+v %v", current, err)
+			}
+			if state := f.scheduler.AdmissionState(); state.Runs != 1 || state.NumericBudget != nil {
+				t.Fatalf("application CPU/memory pool survived: %+v", state)
 			}
 
 		})
@@ -90,7 +89,7 @@ func TestFallbackSurvivesUncertainCreateRecovery(t *testing.T) {
 				t.Fatal(err)
 			}
 			r, err := f.scheduler.restoreCreateGrant(run, nil)
-			if err != nil || r.fallback != reason || r.pods != nil || r.weight != 2 {
+			if err != nil || r.fallback != reason || r.pods != nil || r.weight != 0 {
 				t.Fatalf("restored fallback: %+v %v", r, err)
 			}
 		})

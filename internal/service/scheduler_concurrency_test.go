@@ -89,20 +89,16 @@ func (jobs *concurrentJobs) TerminalResult(context.Context, string) (JobResult, 
 // traded away to buy the lower bound back.
 func TestSchedulerCreatesJobsConcurrentlyForOneRepository(t *testing.T) {
 	const maxConcurrentJobs = 3
-	// Concurrency the operator's configured ceiling actually delivers per
-	// declared size. maxConcurrentJobs is the ceiling; a pipeline heavier than
-	// the default trades concurrency for per-run resources proportionally,
-	// and one lighter than the default packs into the weight budget the
-	// ceiling implies (2 x maxConcurrentJobs, #1021).
+	// Undeclared work retains one default numeric share, independent of size.
 	sizes := []struct {
 		declared pipeline.Size
 		expected int
 	}{
 		{declared: "", expected: maxConcurrentJobs},
-		{declared: pipeline.S, expected: 2 * maxConcurrentJobs},
+		{declared: pipeline.S, expected: maxConcurrentJobs},
 		{declared: pipeline.M, expected: maxConcurrentJobs},
-		{declared: pipeline.L, expected: 2},
-		{declared: pipeline.XL, expected: 1},
+		{declared: pipeline.L, expected: maxConcurrentJobs},
+		{declared: pipeline.XL, expected: maxConcurrentJobs},
 	}
 	for _, size := range sizes {
 		t.Run(fmt.Sprintf("size=%s", size.declared.Effective()), func(t *testing.T) {

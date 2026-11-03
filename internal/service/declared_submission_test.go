@@ -37,7 +37,7 @@ spec:
 	return KubeVirtResources{Receipt: receipt}, err
 }
 
-func TestDeclaredSubmissionIgnoresSizeGrantAndKillSwitchRefusesIt(t *testing.T) {
+func TestDeclaredSubmissionIgnoresLegacySizeGrantAndDeclaredKillSwitch(t *testing.T) {
 	for _, disabled := range []bool{false, true} {
 		t.Run(map[bool]string{false: "declared", true: "disabled"}[disabled], func(t *testing.T) {
 			fixture := newConcurrencyFixture(t, pipeline.XL, 3)
@@ -52,13 +52,6 @@ func TestDeclaredSubmissionIgnoresSizeGrantAndKillSwitchRefusesIt(t *testing.T) 
 			done := make(chan error, 1)
 			go func() { done <- fixture.scheduler.Run(ctx) }()
 			defer func() { close(jobs.release); cancel(); <-done }()
-			if disabled {
-				failed := awaitRunStatus(t, fixture, run.ID, model.RunFailed)
-				if !strings.Contains(failed.Error, "declared resource admission is disabled") {
-					t.Fatal(failed.Error)
-				}
-				return
-			}
 			select {
 			case id := <-jobs.admitted:
 				if id != run.ID {
@@ -66,8 +59,8 @@ func TestDeclaredSubmissionIgnoresSizeGrantAndKillSwitchRefusesIt(t *testing.T) 
 				}
 				fixture.scheduler.admission.mu.Lock()
 				for _, r := range fixture.scheduler.admission.reservations {
-					if r.runID == run.ID && (r.pods == nil || r.pods.CPUMilli != 1000 || r.weight != 0) {
-						t.Error("declaration did not own admission")
+					if r.runID == run.ID && (r.pods != nil || r.weight != 0 || !r.granted) {
+						t.Error("workflow slot did not own admission")
 					}
 				}
 				fixture.scheduler.admission.mu.Unlock()
@@ -78,7 +71,7 @@ func TestDeclaredSubmissionIgnoresSizeGrantAndKillSwitchRefusesIt(t *testing.T) 
 	}
 }
 
-func TestDeclaredCreateContractRestoresNumericReservationWithKillSwitch(t *testing.T) {
+func TestDeclaredCreateContractRestoresOneWorkflowSlotWithLegacyKillSwitch(t *testing.T) {
 	f := newConcurrencyFixture(t, pipeline.M, 3)
 	run := model.Run{ID: strings.Repeat("a", 32), WorkflowName: "step-abc12345", SHA: strings.Repeat("b", 40), RepoID: f.repo.ID, QueueSequence: 1}
 	d := &argoworkflow.PodDemand{CPUMilli: 6000, MemoryBytes: 8 << 30, Pods: 2}
@@ -90,13 +83,13 @@ func TestDeclaredCreateContractRestoresNumericReservationWithKillSwitch(t *testi
 	if err != nil || r.pods == nil || !r.pods.Equal(*d) || r.weight != 0 || !r.retained {
 		t.Fatalf("restored grant: %+v %v", r, err)
 	}
-	// Already submitted declarations must remain reserved when a kill switch
-	// sends NEW work back to legacy sizes, even if the old annotation was S.
+	// The old sealed contract remains bound for ownership, but counts as one
+	// workflow slot; its former CPU/memory pool and kill switch are ignored.
 	f.scheduler.admission.mu.Lock()
 	fits := f.scheduler.admission.canGrantLocked(&admissionReservation{size: pipeline.M, weight: 2})
 	f.scheduler.admission.mu.Unlock()
-	if fits {
-		t.Fatal("kill switch undercounted already-running declared work")
+	if !fits {
+		t.Fatal("historical CPU/memory contract blocked a free workflow slot")
 	}
 	changed := *d
 	changed.CPUMilli++

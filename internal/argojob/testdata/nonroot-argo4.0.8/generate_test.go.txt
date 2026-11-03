@@ -1,0 +1,10 @@
+package argojob
+import ("encoding/json";"os";"path/filepath";"testing")
+func TestExportNonrootControllerInputs(t *testing.T) {
+ dir:=os.Getenv("OBERTH_NONROOT_FIXTURE_DIR");if dir=="" {t.Fatal("proof directory required")}
+ for _,shape:=range []string{"container","script"} {
+  wf:=nonrootBuiltWithScratch(t,shape=="script","128Mi")
+  body,err:=json.MarshalIndent(wf,"","  ");if err!=nil {t.Fatal(err)}
+  if err=os.WriteFile(filepath.Join(dir,shape+".json"),body,0600);err!=nil {t.Fatal(err)}
+ }
+}

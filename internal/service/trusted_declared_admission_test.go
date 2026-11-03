@@ -34,7 +34,7 @@ func (p *checkingDeclaredPreflight) Size(context.Context, WorkflowRequest) (pipe
 }
 func (p *checkingDeclaredPreflight) Execute(ctx context.Context, job WorkflowRequest, requirement vmrunner.Requirement, output io.Writer) error {
 	p.calls++
-	if job.PodDemand != nil || job.Size != p.size {
+	if job.PodDemand != nil || job.Size != pipeline.M {
 		p.t.Errorf("trusted request: demand=%+v size=%s, want legacy %s", job.PodDemand, job.Size, p.size)
 	}
 	p.scheduler.admission.mu.Lock()
@@ -42,7 +42,7 @@ func (p *checkingDeclaredPreflight) Execute(ctx context.Context, job WorkflowReq
 	for _, r := range p.scheduler.admission.reservations {
 		if r.runID == job.Run.ID {
 			found = true
-			if r.pods != nil || r.size != p.size || r.weight != p.scheduler.admission.weights.of(p.size, p.scheduler.admission.capacity) || !r.granted {
+			if r.pods != nil || r.size != pipeline.M || r.weight != 0 || !r.granted {
 				p.t.Errorf("trusted reservation: demand=%+v size=%s weight=%d granted=%v", r.pods, r.size, r.weight, r.granted)
 			}
 		}
@@ -57,7 +57,7 @@ func (p *checkingDeclaredPreflight) Execute(ctx context.Context, job WorkflowReq
 	return p.protectedFixture.Execute(ctx, job, requirement, output)
 }
 
-func TestTrustedDeclaredRunKeepsPreflightSizeAdmission(t *testing.T) {
+func TestTrustedDeclaredRunUsesWorkflowSlotWithoutSizeOrBudgetAdmission(t *testing.T) {
 	for _, mode := range []string{"release", "branch", "disabled", "capacity retry", "ungranted XL"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
@@ -89,12 +89,6 @@ func TestTrustedDeclaredRunKeepsPreflightSizeAdmission(t *testing.T) {
 			run, err := f.store.Run(ctx, queued.ID)
 			if err != nil {
 				t.Fatal(err)
-			}
-			if mode == "ungranted XL" {
-				if run.Status != model.RunFailed || executor.calls != 0 || !strings.Contains(run.Error, "size") {
-					t.Fatalf("ungranted trusted preflight bypassed size authorization: calls=%d run=%+v", executor.calls, run)
-				}
-				return
 			}
 			wantCalls := 1
 			if mode == "capacity retry" {

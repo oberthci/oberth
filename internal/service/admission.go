@@ -17,6 +17,9 @@ import (
 )
 
 type weightedAdmission struct {
+	// workflowOnly delegates pod placement to Kubernetes. Historical weighted
+	// helpers remain for isolated compatibility tests; serving uses only slots.
+	workflowOnly   bool
 	resources      DeclaredAdmissionConfig
 	mu             sync.Mutex
 	capacity       int
@@ -182,14 +185,15 @@ func newWeightedAdmission(capacity int) *weightedAdmission {
 	}
 }
 
-// newWeightedAdmissionForJobsWeights is newWeightedAdmissionForJobs with the
-// operator's size weights: the budget is maxConcurrentJobs M runs.
-func newWeightedAdmissionForJobsWeights(maxConcurrentJobs int, weights SizeWeights) *weightedAdmission {
+// newWorkflowAdmissionForJobs bounds workflow count. Kubernetes alone decides
+// whether each step pod fits its node by its requests.
+func newWorkflowAdmissionForJobs(maxConcurrentJobs int) *weightedAdmission {
 	if maxConcurrentJobs < 1 {
 		maxConcurrentJobs = 1
 	}
-	gate := newWeightedAdmission(maxConcurrentJobs * weights.M)
-	gate.weights = weights
+	gate := newWeightedAdmission(maxConcurrentJobs)
+	gate.workflowOnly = true
+	gate.maxRuns = maxConcurrentJobs
 	return gate
 }
 
@@ -253,7 +257,7 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if !request.Size.Valid() {
+	if !reservation.gate.workflowOnly && !request.Size.Valid() {
 		reservation.cancel()
 		return nil, fmt.Errorf("service: invalid resource size %q", request.Size)
 	}
@@ -317,14 +321,14 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 		pods.ExtendedResources = maps.Clone(request.Pods.ExtendedResources)
 		pods.DeclaredTotal = request.Pods.DeclaredTotal.Clone()
 		reservation.pods = &pods
-	} else if reservation.fallback == "" {
+	} else if !gate.workflowOnly && reservation.fallback == "" {
 		reservation.fallback = model.ResourceFallbackRequests
 	}
 	reservation.priorityMaximum = request.PriorityMaximum
 	reservation.priorityLookupFailed = request.PriorityLookupFailed
-	reservation.weight = gate.weights.of(size, gate.capacity)
-	if gate.usesDeclarations(reservation) {
-		reservation.weight = 0
+	reservation.weight = 0
+	if !gate.workflowOnly && !gate.usesDeclarations(reservation) {
+		reservation.weight = gate.weights.of(size, gate.capacity)
 	}
 	if request.Group != "" {
 		reservation.group = concurrencyGroupKey(request.RepoID, request.Group)
@@ -575,7 +579,7 @@ func (gate *weightedAdmission) spareWeightForClaim(unparked int) bool {
 		// over, so one more claim may be the run that fits.
 		extra = waiting
 	}
-	if waiting-extra > 0 || unparked > gate.runs+extra || unparked >= gate.capacity {
+	if waiting-extra > 0 || unparked > gate.runs+extra || (!gate.workflowOnly && unparked >= gate.capacity) {
 		return false
 	}
 	if gate.maxRuns > 0 && gate.runs >= gate.maxRuns {
@@ -583,6 +587,9 @@ func (gate *weightedAdmission) spareWeightForClaim(unparked int) bool {
 	}
 	if gate.diskFloor != nil && !gate.diskFloor.freeAboveFloor() {
 		return false
+	}
+	if gate.workflowOnly {
+		return true
 	}
 	// Room for at least one S run, at the configured S weight.
 	return gate.used+gate.weights.S <= gate.capacity
@@ -598,6 +605,9 @@ func (gate *weightedAdmission) spareWeightForClaim(unparked int) bool {
 // hard "one L at a time" rule instead pinned every L-declaring repository to a
 // single run no matter what the operator configured.
 func (gate *weightedAdmission) canGrantLocked(reservation *admissionReservation) bool {
+	if gate.workflowOnly {
+		return gate.maxRuns <= 0 || gate.runs < gate.maxRuns
+	}
 	if gate.maxRuns > 0 && gate.runs >= gate.maxRuns {
 		return false
 	}
@@ -721,8 +731,8 @@ func (gate *weightedAdmission) headBlockerLocked() *admissionReservation {
 
 func (gate *weightedAdmission) blockerLocked(reservation *admissionReservation) *model.AdmissionBlocker {
 	blocker := &model.AdmissionBlocker{
-		DeclaredResources: reservation.declaredResources(),
-		LegacyResources:   reservation.legacyResources(),
+		DeclaredResources: gate.reportedResourcesLocked(reservation),
+		LegacyResources:   gate.reportedLegacyResourcesLocked(reservation),
 		RunID:             reservation.runID, RepoID: reservation.repoID, Repo: reservation.repo, Ref: reservation.ref,
 		Size: string(reservation.size), Weight: reservation.weight, Used: gate.used, Capacity: gate.capacity,
 		WaitingSince: reservation.preparedAt,
@@ -731,12 +741,18 @@ func (gate *weightedAdmission) blockerLocked(reservation *admissionReservation) 
 	switch {
 	case gate.diskFloor != nil && !gate.diskFloor.freeAboveFloor():
 		blocker.DiskFloor = true
-	case !gate.usesDeclarations(reservation) && gate.weights.wholeBudget(reservation.size):
+	case !gate.workflowOnly && !gate.usesDeclarations(reservation) && gate.weights.wholeBudget(reservation.size):
 		blocker.FullDrain = true
-	case (gate.maxRuns > 0 && gate.runs >= gate.maxRuns) || (gate.resources.IORuns > 0 && gate.runs >= gate.resources.IORuns):
+	case (gate.maxRuns > 0 && gate.runs >= gate.maxRuns) || (!gate.workflowOnly && gate.resources.IORuns > 0 && gate.runs >= gate.resources.IORuns):
 		blocker.RunCeiling = true
-	case gate.numericBlockedLocked(reservation):
+		if gate.workflowOnly {
+			blocker.Used, blocker.Capacity = gate.runs, gate.maxRuns
+		}
+	case !gate.workflowOnly && gate.numericBlockedLocked(reservation):
 		blocker.NumericBudget = gate.numericBudgetLocked()
+	}
+	if gate.workflowOnly {
+		blocker.Size = ""
 	}
 	gate.backfillStateLocked(reservation, blocker)
 	return blocker
@@ -766,14 +782,19 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 		return nil
 	}
 	result := &model.AdmissionObservation{State: "preparing", Used: gate.used, Capacity: gate.capacity, Runs: gate.runs, MaxRuns: gate.maxRuns, NumericBudget: gate.numericBudgetLocked()}
+	if gate.workflowOnly {
+		result.Used = gate.runs
+	}
 	result.BackfillMessage = reservation.backfillMessage
 	if reservation.prepared {
-		result.DeclaredResources = reservation.declaredResources()
-		result.LegacyResources = reservation.legacyResources()
+		result.DeclaredResources = gate.reportedResourcesLocked(reservation)
+		result.LegacyResources = gate.reportedLegacyResourcesLocked(reservation)
 		result.State = "waiting"
 		result.VMCapacity = reservation.vmParked
 		result.KubeVirtCapacity = gate.kubeVirtBlockedLocked(reservation)
-		result.Size = string(reservation.size)
+		if !gate.workflowOnly {
+			result.Size = string(reservation.size)
+		}
 		result.Weight = reservation.weight
 		result.Group = reservation.groupName
 	}

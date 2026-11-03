@@ -176,7 +176,7 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 				if order != run.AdmissionSequence {
 					t.Fatalf("adopted admission order = %d, want persisted %d", order, run.AdmissionSequence)
 				}
-				if used != scheduler.admission.weights.of(pipeline.L, scheduler.admission.capacity) || runs != 1 || groups != 1 {
+				if used != 0 || scheduler.AdmissionState().NumericBudget != nil || runs != 1 || groups != 1 {
 					t.Fatalf("admission used/runs/groups = %d/%d/%d", used, runs, groups)
 				}
 				close(jobs.waitBlocks)
@@ -506,7 +506,7 @@ func TestAdoptionPreemptedBeforeWaitRetainsAdmissionOnDeleteFailure(t *testing.T
 	scheduler.admission.mu.Lock()
 	used, runs, held := scheduler.admission.used, scheduler.admission.runs, scheduler.admission.groups[concurrencyGroupKey(run.RepoID, run.ConcurrencyGroup)]
 	scheduler.admission.mu.Unlock()
-	if used == 0 || runs != 1 || held != reservation || !reservation.retained {
+	if used != 0 || scheduler.AdmissionState().Runs == 0 || runs != 1 || held != reservation || !reservation.retained {
 		t.Fatalf("live Workflow lost admission: %d/%d held=%p", used, runs, held)
 	}
 }

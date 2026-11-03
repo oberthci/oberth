@@ -1,154 +1,74 @@
-# Admission from reviewed declarations
+# Workflow admission and Kubernetes placement
 
-Git owns resource values. Oberth never derives admission demand directly from
-observed usage or modifies a workflow's requests or limits. Commit reviewed
-measurements from `oberth run resources` in the workflow.
+Oberth submits workflows up to the administrator's concurrent-workflow ceiling.
+Kubernetes places each step Pod using its CPU, memory, and extended-resource
+requests. A Pod remains Pending when no eligible node can satisfy those requests.
+Oberth does not reserve a second CPU/memory pool or pack workflows by size class.
 
-An ordinary workflow with CPU/memory requests uses numeric admission. Each
-container must declare positive CPU and memory requests and a positive memory limit,
-directly or through template defaults. This includes scripts, container sets,
-init containers and sidecars. CPU limits are optional. Its S/M/L/XL annotation
-does not determine the reservation or require a size grant.
+Commit measured requests in the workflow. Explicit positive requests and limits
+are preserved. A missing CPU request receives 2 CPU and a missing memory request
+receives 2Gi, unless a declared limit or template default already supplies the
+request. Limits are not added. These defaults apply to repository containers,
+scripts, container-set members, init containers, sidecars, and inline templates.
+Server-owned helpers retain their existing resource requirements.
 
-Partial declarations, unsupported graphs without a provable bound, and demand
-that exceeds the configured budget are refused before submission. The error
-identifies the missing declaration or budget and directs the operator to change
-git declarations/parallelism or administrator settings. They never use the
-legacy size fallback. An administrator disabling declared admission refuses
-new declared runs; it does not convert them to size admission.
+The existing PSI hard-limit valve can hold new workflow grants under host CPU or
+IO pressure. Hard pressure cannot be bypassed by release/tag priority, an idle
+host, or a starvation timer. Disabling the configurable PSI valve leaves the
+administrator's workflow ceiling in control of admission. PSI availability is
+reported through the existing observation fields; unavailable PSI retains the
+existing fail-open behavior.
 
-Legacy workflows without CPU/memory requests, including limits-only documents,
-retain size admission, with a deprecation warning in `resource_message`
-directing the repository to commit measured
-requests/limits in git. Each run reserves a fixed CPU/memory amount by size,
-independent of host budgets and configured weights: S 1 CPU/2Gi, M 2 CPU/4Gi,
-L 3 CPU/8Gi, XL 6 CPU/16Gi. These whole-run charges include their safety margin;
-declared-run executor and memory headroom additions do not apply. Administrators
-can override them with `--admission-legacy-resources`, for example
-`'{"L":{"cpu_milli":4000,"memory_bytes":10737418240}}'`, or the chart's
-`admission.legacyResources` map in the same format. Omitted sizes retain defaults.
-Both fields must be positive, with CPU at most 1000000 millis and memory at most
-2^50 bytes. Startup rejects a configured charge exceeding the host budget,
-naming its size and CPU or memory dimension. With XL=0, the exclusive XL charge
-is capped at the host budget in each dimension, so it can still run alone on
-smaller hosts. Admission and status report the same capped charge. A shared XL
-(positive XL weight) keeps its full fixed charge. An omitted size whose default
-charge exceeds the budget is refused before waiting, except for exclusive XL.
-Size weights, FIFO/backfill, pressure and run caps still apply independently.
-A legacy whole-budget XL retains its existing exclusion. The warning survives submission and restart
-through immutable timing metadata; `display_reason` keeps its existing meaning.
+Credential authorization, source validation, repository concurrency groups,
+per-container security grants, and dedicated VM authorization/cleanup remain
+separate safeguards. They do not form a global CPU/memory packing budget.
 
-Fixed charges can lower legacy concurrency on small budgets. On the default
-8 CPU / 16Gi budget, two L runs plus an M have weight 8/8 but reserve 20Gi
-(8Gi + 8Gi + 4Gi), so the M waits. Administrators can lower
-`admission.legacyResources` to reviewed charges or raise the numeric budgets.
+## Upgrade note
 
-`system_status.admission.reservations`, admission blockers and per-run admission
-observations expose `legacy_resources: {cpu_milli, memory_bytes}` for prepared
-size-admitted runs. Declared runs expose `declared_resources` instead; claims
-still preparing have neither field. The dashboard labels legacy sizing and its
-fixed reservation in run details and queued-size tooltips. These are reservations,
-not measurements or Kubernetes resource requests. Size-admitted trusted contract
-runs are also marked legacy even when their source contains declarations.
+Existing installs can retain their current chart values and server arguments
+while upgrading. The following values are accepted for compatibility but no
+longer affect workflow admission:
 
-## Resource accounting
+| Existing setting | Upgrade behavior |
+| --- | --- |
+| `oberth.ci/size`, `oberth.ci/size-by-trigger` | Historical annotations do not select a weight or reserve capacity. |
+| `--admission-size-weights` | S/M/L/XL weights are ignored. |
+| `--admission-cpu-millis`, `--admission-memory-bytes` | The declared CPU/memory pool is removed. Kubernetes decides whether a Pod fits. |
+| `--admission-memory-headroom-bytes`, `--admission-memory-headroom-percent` | No application memory headroom reservation. |
+| `--admission-extended-resources` | No application capacity ledger; Kubernetes schedules granted extended-resource requests. |
+| `--disable-declared-admission` | Does not refuse workflows with declarations. |
+| `--admission-io-runs` | Use the single workflow ceiling instead. |
+| `--admission-max-head-wait` | Resource drain/backfill forecasts are removed. There is no resource-size head to drain for. |
+| `--admission-disk-floor-bytes` | No additional admission capacity knob; normal bounded storage and write-failure handling remain. |
+| PSI soft thresholds, observation mode, max wait/defer settings | The enabled serving valve enforces only its configurable hard CPU/IO thresholds; no soft-pressure drain, settling delay, or starvation grant. |
 
-The graph reserves independent upper bounds on concurrent CPU and memory
-requests. Memory limits remain Kubernetes runtime ceilings. Kubernetes schedules
-pods by their actual requests and queues Pending pods when capacity is unavailable.
-The administrator's per-container numeric request/limit ceilings also apply at
-trusted submission and release preflight; see [declared resources](declared-resources.md).
+The corresponding historical `admission.declaredResources` and size-weight chart
+values are ignored by the upgraded server. Keep `maxConcurrentJobs` (and its
+runtime ConfigMap override) and `admission.pressure.enabled`, `hardCpu`, and
+`hardIo` configured for the install. A ceiling of 10 admits at most 10 workflows,
+including granted workflows whose Pods are Pending. Raising it does not change
+requests or limits on existing Pods.
 
-Static DAG and step graphs account for independent calls, dependency ordering,
-nested and inline templates, container sets and authored helpers. Init demand
-uses a conservative scheduling envelope, including restartable init containers.
-Conditions are assumed to run. Successful dependencies and terminal-state OR
-groups for one predecessor establish ordering; mixed-task OR, negation and
-early-start dependencies earn no ordering credit. Mutable item counts earn no
-reductions beyond enforced parallelism.
+A new request default is applied only when submitting a new workflow; an
+already-submitted workflow is adopted without rewriting its Pods. Recovery
+counts existing and uncertain workflows against the workflow ceiling until
+ownership-checked cleanup is accepted or absence is confirmed.
 
-Workflow `parallelism` caps concurrent workflow pods. A steps/DAG template limit
-caps its concurrent child invocations within that invocation. Nested limits
-retain each child's full envelope. Dynamic loops require an applicable bound.
-Unsupported graphs with a workflow bound reserve the largest possible pod per
-slot. Unbounded sequences, hooks and exit handlers without a supported bound
-are refused. Analysis has explicit size, depth and work bounds.
+The existing reason line reports the administrator ceiling, host pressure, or
+recognized Kubernetes scheduling reasons such as `Insufficient cpu` and
+`Insufficient memory`. Arbitrary event text is withheld. No new run statuses or
+UI layouts are introduced.
 
-Operator views distinguish the request sum from the concurrent reservation.
-In `run_get`, inspect `scheduling.admission.declared_resources`; in
-`system_status`, inspect each admission reservation's `declared_resources`:
+## Bounded startup and cleanup
 
-- `declared_total` sums every statically expanded pod invocation, including
-  sequential steps and all static loop iterations before parallelism limits.
-- `peak` is the independent CPU, memory, pod and extended-resource concurrency
-  envelope used for admission, before server allowances.
-- The outer `cpu_milli`, `memory_bytes`, `pods` and `extended_resources` are the
-  charged reservation, including the server allowances described below.
+The intentionally gated executor identity holder binds the credential lifetime
+to the owned Workflow. The real step's token waiter retries issuance once after
+two minutes, then fails after another two minutes without readiness. A workflow
+with no scheduled Pod or execution progress fails after ten minutes by default;
+`--admission-stall-timeout` configures that bound. Pending Pods can wait for
+Kubernetes capacity within this deadline.
 
-A missing `declared_total` means unknown, never zero: dynamic loops, graphs beyond
-analysis bounds, VM lifetime accounting and older saved reservations may lack
-it. New totals survive the sealed create record and restart adoption. Completed
-runs retain their raw peak and optional total in timing `resources.pod_demand`.
-Totals are diagnostic and never determine admission or change a saved peak.
-
-Each peak concurrent executor pod adds 100m CPU and 256Mi memory. Each declared
-run also reserves the larger of a fixed minimum (default 1Gi) and a percentage
-(default 10%) of the concurrent memory request envelope. The percentage rounds
-up to whole bytes before executor reserves. These are administrator-owned
-allowances, not pod mutations or usage estimates. Budgets must exclude platform
-reserve and external workloads.
-
-For example, two runs each requesting 20Gi with one executor pod reserve
-2 × (20Gi + max(1Gi, 2Gi) + 256Mi) = 44.5Gi and fit a 48Gi budget. Their memory
-limits may be higher. This is a coarse packing margin; it does not guarantee
-that all containers can simultaneously use their full limits.
-
-Trusted contract runs retain size admission, even with declarations. Their
-reservation uses the larger main-document and trusted-preflight size, including
-the server leaf minimum, and preserves the existing size authorization policy. Capacity
-retries retain that reservation. Numeric admission for these runs must wait
-until the preflight and main-document demand are both declared and charged.
-
-## Queue and IO controls
-
-IO is not inferred from CPU or memory declarations. The coarse run cap,
-disk-space floor and host IO-pressure gate remain in force for declared and
-legacy work. A positive IO run cap can only narrow concurrency. Existing queue
-priority, FIFO ordering within priority, bounded backfill, repository groups,
-cancellation and uncertain-create ownership remain in force. Backfill stops at
-`max_head_wait_seconds` (20 minutes by default), using the persisted first head-wait
-origin across restarts and priority displacement. Before that limit, measured
-candidates must finish before the earlier of the predicted head start and the
-remaining head-wait window. When running durations are unknown, a measured
-candidate may use existing spare capacity only if it finishes within that
-window. Same-class coexistence still requires proof the head fits beside all
-surviving grants at its reserved start. Unmeasured candidates cannot use a
-fixed duration guess. Estimates are forecasts; running work is never preempted.
-
-| Server flag | Chart value | Default |
-| --- | --- | --- |
-| `--admission-cpu-millis` | `admission.declaredResources.cpuMillis` | 8000 |
-| `--admission-memory-bytes` | `admission.declaredResources.memoryBytes` | 17179869184 |
-| `--admission-memory-headroom-bytes` | `admission.declaredResources.memoryHeadroomBytes` | 1073741824 |
-| `--admission-memory-headroom-percent` | `admission.declaredResources.memoryHeadroomPercent` | 10 |
-| `--admission-io-runs` | `admission.declaredResources.ioRuns` | 0, retain existing run cap |
-| `--disable-declared-admission` | `admission.declaredResources.disabled` | false |
-
-Unset headroom settings keep their defaults independently of custom budgets;
-explicit zero disables that component. Both must be zero to disable headroom.
-
-## Upgrade and recovery limits
-
-Migration 49 copies historical size grants into numeric per-container ceilings,
-including grant/revocation provenance. Fresh numeric grants are independent of
-legacy size and tag-priority policy. Existing reservations restore their sealed
-demand without recalculating it from current git, even with declared admission
-disabled; helper and headroom reserves use the restoring server's settings.
-Submission verifies the immutable source and resolved fragments against the
-reservation before creating a Workflow.
-
-Review older low requests paired with high limits before relying on increased
-concurrency. Representative measurements, actual scheduler overlap, Pending
-handling/deadlines, queue fairness under load and platform pressure survival
-still need live acceptance. This change neither creates measurements nor
-changes Kubernetes or Argo deadline behavior.
+A deadline does not release a workflow slot while an unconfirmed owned workload
+may still be alive. Cleanup retries in the background, preserving the fixed
+failure reason. Once owned cleanup is accepted or absence is confirmed, the
+slot is released; scratch-file cleanup can retry independently.

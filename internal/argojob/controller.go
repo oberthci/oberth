@@ -212,6 +212,10 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 	// source in place (finding 2, issue #29).
 	existing, getErr := controller.workflows.Get(ctx, request.Name, metav1.GetOptions{})
 	if getErr == nil {
+		if policy := existing.Annotations[requestDefaultsAnnotation]; policy != "" && policy != requestDefaultsPolicy {
+			return "", errors.New("argojob: existing workflow has an unknown request-default policy")
+		}
+		request.omitRequestDefaults = existing.Annotations[requestDefaultsAnnotation] == ""
 		request.omitStepUsage = !workflowHasStepUsage(existing) && existing.Annotations[usageMemoryPolicyAnnotation] != usageMemoryPolicy
 		request.legacyStepUsage = !request.omitStepUsage && existing.Annotations[usageMemoryPolicyAnnotation] != usageMemoryPolicy
 		request, err = controller.refreshNonroot(ctx, request)
@@ -464,7 +468,6 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 	}()
 	var boundDeadline time.Time
 	observingSince := time.Now()
-	startup := &workflowStartup{observingSince: observingSince}
 	session := controller.resourceSession(ctx, runID)
 	defer session.finish()
 	if retained < 0 {
@@ -492,6 +495,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 	defer ticker.Stop()
 	var budgetBreachErr error
 	delivered := map[types.UID]bool{}
+	var admissionWatch admissionProgress
 	var readFailingSince time.Time
 	timed := map[string]bool{}
 	boundTiming := false
@@ -559,14 +563,16 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			live.observe(workflow)
 		}
 		session.update(workflow)
-		// Bound the entire pass, including reads before an identity waiter exists.
-		// Individual token/exec retries retain their shorter attempt budgets.
-		deliveryCtx, cancelDelivery := context.WithTimeout(ctx, startupObservationTimeout)
-		deliveryErr := controller.deliverExecutorTokensWithStartup(deliveryCtx, workflow, delivered, startup)
-		if deliveryCtx.Err() != nil && ctx.Err() == nil {
-			deliveryErr = startupObservationExpired
+		if err := controller.checkAdmissionProgress(ctx, workflow, &admissionWatch, delivered); err != nil {
+			return completionFor(workflow), err
 		}
-		cancelDelivery()
+		// Bound reads and identity transport even when no waiter observation exists.
+		deliveryCtx, stopDelivery := context.WithTimeout(ctx, admissionObservationTimeout)
+		deliveryErr := controller.deliverExecutorTokens(deliveryCtx, workflow, delivered)
+		if deliveryCtx.Err() != nil && ctx.Err() == nil {
+			deliveryErr = &admissionProgressError{reason: "Kubernetes executor identity observation unavailable for 2m", identity: true}
+		}
+		stopDelivery()
 		if err := deliveryErr; err != nil {
 			// Preserve observed execution evidence; a delivery error on a later
 			// Pod must not make already executed steps look like a pre-step failure.

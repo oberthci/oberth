@@ -1362,7 +1362,7 @@ func stepResult(status model.StepStatus) model.StepResult {
 	return model.StepResult{Stage: "test", Step: "unit", Status: status, ExitCode: map[bool]int{true: 0, false: 1}[status == model.StepPassed]}
 }
 
-func TestSchedulerPassesStaticSizeIntoJobCreation(t *testing.T) {
+func TestSchedulerDoesNotUseStaticSizeForWorkflowAdmission(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{
 		Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)},
 	})
@@ -1377,7 +1377,7 @@ func TestSchedulerPassesStaticSizeIntoJobCreation(t *testing.T) {
 	if err := fixture.scheduler.ProcessNext(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(fixture.jobs.createdCI) != 1 || fixture.jobs.createdCI[0].Run.ID != enqueued.ID || fixture.jobs.createdCI[0].Size != pipeline.L {
+	if len(fixture.jobs.createdCI) != 1 || fixture.jobs.createdCI[0].Run.ID != enqueued.ID || fixture.jobs.createdCI[0].Size != pipeline.M {
 		t.Fatalf("created requests = %#v", fixture.jobs.createdCI)
 	}
 }

@@ -160,7 +160,7 @@ func TestWorkflowCreateRestoreFailureRegistersAndRetries(t *testing.T) {
 	conflict.cancel()
 	now = now.Add(5 * time.Second)
 	scheduler.settleOneCreate(t.Context())
-	if calls != 1 || scheduler.AdmissionState().Used != 1 {
+	if calls != 1 || scheduler.AdmissionState().NumericBudget != nil {
 		t.Fatal("restored run not charged before observation")
 	}
 	finish = true
@@ -170,7 +170,7 @@ func TestWorkflowCreateRestoreFailureRegistersAndRetries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if current.Status != model.RunFailed || scheduler.pendingCreateCount() != 0 || scheduler.AdmissionState().Used != 0 {
+	if current.Status != model.RunFailed || scheduler.pendingCreateCount() != 0 || scheduler.AdmissionState().Runs != 0 {
 		t.Fatalf("restored run did not settle/release: %+v", current)
 	}
 	if _, err := os.Stat(scheduler.createAdmissionPath(run.ID)); !os.IsNotExist(err) {
@@ -192,7 +192,7 @@ func TestWorkflowCreateConcurrentRegistrationHasOneGrant(t *testing.T) {
 	}
 	workers.Wait()
 	state := scheduler.AdmissionState()
-	if scheduler.pendingCreateCount() != 1 || state.Runs != 1 || state.Used != 1 {
+	if scheduler.pendingCreateCount() != 1 || state.Runs != 1 || state.NumericBudget != nil {
 		t.Fatalf("concurrent registration duplicated admission: %+v", state)
 	}
 }

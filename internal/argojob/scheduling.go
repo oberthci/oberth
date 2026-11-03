@@ -95,6 +95,9 @@ func (controller *Controller) ObserveScheduling(ctx context.Context, name, runID
 		}
 		reason := podSchedulingReason(pod)
 		result.Pods = append(result.Pods, reason)
+		if reason.Reason == "Unschedulable" && (strings.Contains(reason.Message, "Insufficient cpu") || strings.Contains(reason.Message, "Insufficient memory")) {
+			result.Message = reason.Message
+		}
 		if reason.Reason == "DeadlineExceeded" && deadlineNodes[pod.Annotations["workflows.argoproj.io/node-id"]] {
 			markDeadlineExceeded(result)
 		}
@@ -144,12 +147,12 @@ func podSchedulingReason(pod corev1.Pod) model.SchedulingReason {
 			if condition.Reason == "Unschedulable" {
 				result.Reason = "Unschedulable"
 				switch {
+				case strings.Contains(condition.Message, "Insufficient cpu") && strings.Contains(condition.Message, "Insufficient memory"):
+					result.Message = "Pending: Insufficient cpu and memory; pod requests " + podRequest(pod, corev1.ResourceCPU) + " CPU and " + podRequest(pod, corev1.ResourceMemory) + " memory."
 				case strings.Contains(condition.Message, "Insufficient cpu"):
-					result.Message = "Scheduler reports insufficient CPU: the pod requests " +
-						podRequest(pod, corev1.ResourceCPU) + " CPU; compare with node allocatable (kubectl describe nodes)."
+					result.Message = "Pending: Insufficient cpu; pod requests " + podRequest(pod, corev1.ResourceCPU) + " CPU."
 				case strings.Contains(condition.Message, "Insufficient memory"):
-					result.Message = "Scheduler reports insufficient memory: the pod requests " +
-						podRequest(pod, corev1.ResourceMemory) + " memory; compare with node allocatable (kubectl describe nodes)."
+					result.Message = "Pending: Insufficient memory; pod requests " + podRequest(pod, corev1.ResourceMemory) + " memory."
 				case strings.Contains(condition.Message, "unbound immediate PersistentVolumeClaims"):
 					result.Message = "Scheduler reports an unbound persistent volume claim."
 				}

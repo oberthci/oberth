@@ -46,7 +46,7 @@ func TestWorkflowSpecMismatchStaysRunLocalUntilCleanup(t *testing.T) {
 	if err != nil || current.Status != model.RunRunning || !strings.Contains(current.Error, "Workflow spec mismatch") {
 		t.Fatalf("mismatch diagnostic or pending ownership lost: %+v %v", current, err)
 	}
-	if f.scheduler.AdmissionState().Used != 2 {
+	if f.scheduler.AdmissionState().NumericBudget != nil {
 		t.Fatal("owned Workflow released capacity before cleanup")
 	}
 	other, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "after-mismatch", Repository: f.repo, Branch: "feature/other", SHA: strings.Repeat("b", 40), Actor: "pusher"})
@@ -76,7 +76,7 @@ func TestWorkflowSpecMismatchStaysRunLocalUntilCleanup(t *testing.T) {
 	if err != nil || !strings.Contains(current.Error, "Workflow spec mismatch") || !strings.Contains(current.Error, "cleanup confirmed") {
 		t.Fatalf("settlement lost the named failure: %+v %v", current, err)
 	}
-	if f.scheduler.AdmissionState().Used != 0 {
+	if f.scheduler.AdmissionState().Runs != 0 {
 		t.Fatal("confirmed cleanup retained capacity")
 	}
 	if pending, err := f.store.PendingRunCancellations(t.Context()); err != nil || len(pending) != 0 {

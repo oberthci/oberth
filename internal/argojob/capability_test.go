@@ -107,7 +107,7 @@ func TestCapabilityBuildBindsOperatorIdentityAndRefusesEscapes(t *testing.T) {
 	}
 }
 
-func TestCapabilityBuildRequiresBoundedReservedExtendedDemand(t *testing.T) {
+func TestCapabilityBuildRequiresOperatorGrantWithoutGlobalNumericReservation(t *testing.T) {
 	source := greedyDocument + `        resources:
           requests: {cpu: '1', memory: 128Mi, devices.example.test/worker: '1'}
           limits: {memory: 128Mi, devices.example.test/worker: '1'}
@@ -127,14 +127,14 @@ func TestCapabilityBuildRequiresBoundedReservedExtendedDemand(t *testing.T) {
 		t.Fatalf("reserved extended resources: %v", err)
 	}
 	r.PodDemand = nil
-	if _, err = Build(testConfig(), r); err == nil {
-		t.Fatal("extended resource submission bypassed numeric reservation")
+	if _, err = Build(testConfig(), r); err != nil {
+		t.Fatal("authorized device requests incorrectly required a global numeric reservation", err)
 	}
-	// A missing CPU/memory declaration must never downgrade extended demand
-	// into the legacy size-only path.
+	// Independent operator capability proofs still require complete bounded
+	// declarations; removing host packing cannot relax device authorization.
 	r = requestWithCapability(t, strings.Replace(source, "cpu: '1', memory: 128Mi, ", "", 1), operatorCapability())
 	if _, err = Build(testConfig(), r); err == nil {
-		t.Fatal("undeclared extended workflow fell back to legacy admission")
+		t.Fatal("incomplete operator capability proof was accepted")
 	}
 }
 

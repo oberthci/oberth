@@ -124,6 +124,29 @@ func waitText(seconds int64) string {
 // Reason is the parenthesized why of a blocked admission, e.g.
 // "XL, needs a full drain".
 func (blocker AdmissionBlocker) Reason() string {
+	if blocker.Weight == 0 && blocker.Size == "" {
+		switch {
+		case blocker.DiskFloor:
+			return "waiting for disk space"
+		case blocker.RunCeiling:
+			if blocker.Used <= 0 {
+				return "waiting for a workflow slot"
+			}
+			return fmt.Sprintf("%d runs running", blocker.Used)
+		case blocker.Pressure != nil:
+			switch blocker.Pressure.Resource {
+			case "io":
+				return "host IO pressure"
+			case "cpu":
+				return "host CPU pressure"
+			case "cpu+io":
+				return "host CPU and IO pressure"
+			default:
+				return "waiting for host pressure to settle"
+			}
+		}
+	}
+
 	if b := blocker.NumericBudget; b != nil {
 		return fmt.Sprintf("%s, CPU %dm/%dm used; memory %d/%d bytes used", blocker.Size, b.CPUUsedMilli, b.CPUBudgetMilli, b.MemoryUsedBytes, b.MemoryBudgetBytes)
 	}

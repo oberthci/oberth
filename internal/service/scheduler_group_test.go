@@ -17,6 +17,7 @@ import (
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
@@ -27,6 +28,7 @@ const terraformState = "terraform-state"
 // and it independently checks the property the scheduler must guarantee: no
 // two Jobs of one repository's group ever exist at the same time.
 type groupEngine struct {
+	numericCPU map[string]int64
 	mu         sync.Mutex
 	groups     map[string]string // run ref -> declared group
 	groupErrs  map[string]error  // run ref -> document refusal
@@ -59,7 +61,7 @@ type groupEngineJob struct {
 
 func newGroupEngine() *groupEngine {
 	return &groupEngine{
-		groups: map[string]string{}, groupErrs: map[string]error{}, sizes: map[string]pipeline.Size{},
+		numericCPU: map[string]int64{}, groups: map[string]string{}, groupErrs: map[string]error{}, sizes: map[string]pipeline.Size{},
 		jobs: map[string]*groupEngineJob{}, byRun: map[string]*groupEngineJob{},
 		executing: map[string]string{}, created: make(chan string, 64), deleteErrs: map[string]error{},
 	}
@@ -788,4 +790,39 @@ func renderStatus(t *testing.T, status StatusResponse) string {
 		t.Fatal(err)
 	}
 	return string(encoded)
+}
+
+// Explicit numeric declarations for scenarios that need a full-pool head.
+// A size annotation alone no longer creates that resource demand.
+func (engine *groupEngine) declareCPU(ref string, milli int64) {
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+	engine.numericCPU[ref] = milli
+}
+
+func (engine *groupEngine) PipelineDemandReceipt(_ context.Context, req WorkflowRequest) (*argoworkflow.DemandReceipt, error) {
+	engine.mu.Lock()
+	cpu := engine.numericCPU[req.Run.Ref]
+	engine.mu.Unlock()
+	if cpu == 0 {
+		return nil, nil
+	}
+	source := []byte(fmt.Sprintf(`apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  activeDeadlineSeconds: 3600
+  entrypoint: test
+  templates:
+  - name: test
+    container:
+      image: example.invalid/runner@sha256:%s
+      resources:
+        requests: {cpu: %dm, memory: 1Gi}
+        limits: {memory: 1Gi}
+`, strings.Repeat("a", 64), cpu))
+	resolved, err := argoworkflow.ResolveRunSource(source, nil, argoworkflow.RunSourceBinding{RunID: req.Run.ID, RepositoryID: req.Repository.ID, SHA: req.Run.SHA, File: ".oberth/build.yaml", Trigger: argoworkflow.RunTriggerBranch})
+	if err != nil {
+		return nil, err
+	}
+	return resolved.Receipt(argoworkflow.Policy{RunnerImagePrefixes: []string{"example.invalid/"}})
 }

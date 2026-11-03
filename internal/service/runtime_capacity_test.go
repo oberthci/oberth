@@ -353,6 +353,9 @@ func TestRuntimeCapacityWatchReopensConfigMapSymlink(t *testing.T) {
 func TestRuntimeCapacityRunUsesOverrideBeyondBootDispatchLimit(t *testing.T) {
 	f := newConcurrencyFixture(t, pipeline.M, 1)
 	s := f.scheduler
+	// A run-ceiling increase does not create CPU or memory. Declare small
+	// demands so all three runs fit the unchanged numeric pool.
+	s.jobs = declaredJobs{f.jobs}
 	s.capacityFile = filepath.Join(t.TempDir(), "capacity")
 	s.admission.capacityConfig.File = s.capacityFile
 	writeCapacity(t, s, "2")
@@ -387,6 +390,9 @@ func TestRuntimeCapacityRunUsesOverrideBeyondBootDispatchLimit(t *testing.T) {
 	case <-f.jobs.admitted:
 	case <-time.After(testStartTimeout(10 * time.Second)):
 		t.Fatal("live raise did not wake scheduler")
+	}
+	if b := s.AdmissionState(); b.NumericBudget != nil || b.Runs != 3 {
+		t.Fatalf("run ceiling changed numeric resources: %+v", b)
 	}
 }
 

@@ -143,6 +143,9 @@ func (g *weightedAdmission) usesDeclarations(r *admissionReservation) bool {
 }
 
 func (g *weightedAdmission) numericFitsLocked(candidate *admissionReservation) bool {
+	if g.workflowOnly {
+		return true
+	}
 	cpu, memory := g.resources.CPUMilli, g.resources.MemoryBytes
 	extended := maps.Clone(g.resources.ExtendedResources)
 	charge := func(r *admissionReservation) bool {
@@ -175,6 +178,9 @@ func (g *weightedAdmission) numericFitsLocked(candidate *admissionReservation) b
 }
 
 func (g *weightedAdmission) numericBudgetLocked() *model.NumericBudget {
+	if g.workflowOnly {
+		return nil
+	}
 	b := &model.NumericBudget{CPUBudgetMilli: g.resources.CPUMilli, MemoryBudgetBytes: g.resources.MemoryBytes}
 	for _, r := range g.reservations {
 		if !r.granted || r.released {
@@ -194,10 +200,16 @@ func (g *weightedAdmission) numericBudgetLocked() *model.NumericBudget {
 }
 
 func (g *weightedAdmission) numericBlockedLocked(r *admissionReservation) bool {
+	if g.workflowOnly {
+		return false
+	}
 	return (r.pods != nil || !g.weights.wholeBudget(r.size)) && g.used+r.weight <= g.capacity && !g.numericFitsLocked(r)
 }
 
 func (g *weightedAdmission) validatePodDemand(d *argoworkflow.PodDemand) error {
+	if g.workflowOnly {
+		return nil
+	}
 	if d == nil {
 		return nil
 	}
@@ -224,6 +236,9 @@ func (g *weightedAdmission) demandFitsBudget(d *argoworkflow.PodDemand) bool {
 }
 
 func (g *weightedAdmission) selectDeclaredDemand(receipt *argoworkflow.DemandReceipt) (*argoworkflow.PodDemand, model.ResourceAdmissionFallback, error) {
+	if g.workflowOnly {
+		return nil, "", nil
+	}
 	if receipt == nil {
 		return nil, model.ResourceFallbackRequests, nil
 	}
@@ -254,7 +269,10 @@ func (s *Scheduler) ResourceAdmissionMessage(runID string) string {
 	defer g.mu.Unlock()
 	for _, r := range g.reservations {
 		if r.runID == runID {
-			message := r.fallback.Message()
+			message := ""
+			if !g.workflowOnly {
+				message = r.fallback.Message()
+			}
 			if r.pods != nil {
 				message = strings.TrimSpace(message + " " + r.pods.ConcurrencyMessage())
 			}

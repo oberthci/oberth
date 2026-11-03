@@ -145,6 +145,7 @@ type serveOptions struct {
 	admissionPressure       service.AdmissionPressureConfig
 	admissionSizeWeights    string
 	admissionMaxHeadWait    time.Duration
+	admissionStallTimeout   time.Duration
 	sizeWeights             service.SizeWeights
 	ciCacheRoot             string
 	releaseCacheRoot        string
@@ -277,33 +278,34 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.IntVar(&options.retentionKeepNewest, "retention-keep-newest", 1, "terminal runs retained per repository/ref during automatic sweeps")
 	flags.Float64Var(&options.kubernetesQPS, "kubernetes-client-qps", 50, "Kubernetes API requests per second per server client")
 	flags.IntVar(&options.kubernetesBurst, "kubernetes-client-burst", 100, "Kubernetes API burst allowance per server client")
-	flags.IntVar(&options.maxConcurrent, "max-concurrent-jobs", 3, "maximum concurrent Jobs (boot default)")
-	flags.StringVar(&legacyResourceCharges, "admission-legacy-resources", "{}", "JSON map of sizes S/M/L/XL to fixed cpu_milli and memory_bytes charges; missing sizes default to 1000/2Gi, 2000/4Gi, 3000/8Gi, 6000/16Gi")
-	flags.StringVar(&extendedResourceBudgets, "admission-extended-resources", "{}", "JSON map of qualified extended-resource names to integer capacity; no implicit capacity")
-	flags.BoolVar(&options.declaredAdmission.Disabled, "disable-declared-admission", false, "administrator kill switch: refuse new declared runs; undeclared workflows retain deprecated size admission")
-	flags.Int64Var(&options.declaredAdmission.CPUMilli, "admission-cpu-millis", 8000, "CPU budget for declared workflow and VM demand, excluding platform reserve")
-	flags.Int64Var(&options.declaredAdmission.MemoryBytes, "admission-memory-bytes", 17179869184, "memory budget for declared workflow and VM demand, excluding platform reserve")
-	flags.Int64Var(options.declaredAdmission.MemoryHeadroomBytes, "admission-memory-headroom-bytes", 1073741824, "minimum memory headroom per declared run; combined with proportional headroom using the larger value")
-	flags.Int64Var(options.declaredAdmission.MemoryHeadroomPercent, "admission-memory-headroom-percent", 10, "memory headroom as a percentage of declared run memory, excluding executor reserves (0..100); combined with the fixed minimum using the larger value")
-	flags.IntVar(&options.declaredAdmission.IORuns, "admission-io-runs", 0, "coarse simultaneous run ceiling for IO; 0 retains the existing run ceiling")
+	flags.IntVar(&options.maxConcurrent, "max-concurrent-jobs", 3, "maximum concurrent workflows (boot default)")
+	flags.StringVar(&legacyResourceCharges, "admission-legacy-resources", "{}", "deprecated compatibility option; ignored by workflow admission")
+	flags.StringVar(&extendedResourceBudgets, "admission-extended-resources", "{}", "deprecated compatibility option; ignored by workflow admission")
+	flags.BoolVar(&options.declaredAdmission.Disabled, "disable-declared-admission", false, "deprecated compatibility option; ignored by workflow admission")
+	flags.Int64Var(&options.declaredAdmission.CPUMilli, "admission-cpu-millis", 8000, "deprecated compatibility option; ignored by workflow admission")
+	flags.Int64Var(&options.declaredAdmission.MemoryBytes, "admission-memory-bytes", 17179869184, "deprecated compatibility option; ignored by workflow admission")
+	flags.Int64Var(options.declaredAdmission.MemoryHeadroomBytes, "admission-memory-headroom-bytes", 1073741824, "deprecated compatibility option; ignored by workflow admission")
+	flags.Int64Var(options.declaredAdmission.MemoryHeadroomPercent, "admission-memory-headroom-percent", 10, "deprecated compatibility option; ignored by workflow admission")
+	flags.IntVar(&options.declaredAdmission.IORuns, "admission-io-runs", 0, "deprecated compatibility option; ignored by workflow admission")
 
 	flags.StringVar(&options.maxConcurrentFile, "max-concurrent-jobs-file", "", "mounted ConfigMap key to reload max concurrent Jobs without restart; invalid or missing keeps the last good value")
-	flags.StringVar(&options.admissionSizeWeights, "admission-size-weights", service.DefaultSizeWeights.String(), "admission weight per size as S=..,M=..,L=..,XL=..; XL=0 is the whole budget (an XL run runs alone), a positive XL lets XL share the host; the budget is --max-concurrent-jobs M runs (#1021)")
-	flags.DurationVar(&options.admissionMaxHeadWait, "admission-max-head-wait", service.DefaultMaxHeadWait, "maximum head-wait window for measured admission backfill; then drain for up to 5m before available-capacity backfill resumes (0 = strict FIFO)")
+	flags.StringVar(&options.admissionSizeWeights, "admission-size-weights", service.DefaultSizeWeights.String(), "deprecated compatibility option; ignored; Kubernetes places step pods")
+	flags.DurationVar(&options.admissionStallTimeout, "admission-stall-timeout", 10*time.Minute, "fail a granted run with no scheduled pod or progress for this duration")
+	flags.DurationVar(&options.admissionMaxHeadWait, "admission-max-head-wait", service.DefaultMaxHeadWait, "deprecated compatibility option; ignored by workflow admission")
 	defaults := service.DefaultAdmissionPressureConfig()
-	flags.BoolVar(&options.admissionPressure.Enabled, "admission-pressure-enabled", defaults.Enabled, "gate new runs by host CPU and IO some PSI avg10")
-	flags.Float64Var(&options.admissionPressure.CPUSomeAvg10, "admission-pressure-cpu-some-avg10", defaults.CPUSomeAvg10, "CPU some PSI avg10 threshold in percent")
-	flags.Float64Var(&options.admissionPressure.IOSomeAvg10, "admission-pressure-io-some-avg10", defaults.IOSomeAvg10, "IO some PSI avg10 threshold in percent")
-	flags.Float64Var(&options.admissionPressure.HardCPU, "admission-pressure-hard-cpu", defaults.HardCPU, "hard CPU some PSI avg10 limit for starvation admission")
-	flags.Float64Var(&options.admissionPressure.HardIO, "admission-pressure-hard-io", defaults.HardIO, "hard IO some PSI avg10 limit for starvation admission")
-	flags.Int64Var(&options.admissionPressure.MaxWaitSeconds, "admission-pressure-max-wait-seconds", defaults.MaxWaitSeconds, "pressure deferral wait before admission below hard PSI limits")
-	flags.StringVar(&options.admissionPressure.Mode, "admission-pressure-mode", service.PressureEnforce, "legacy avg60 mode; enabled avg10 admission always enforces")
-	flags.Float64Var(&options.admissionPressure.IOFullAvg60Max, "admission-pressure-io-full-avg60-max", 0, "legacy IO full PSI avg60 threshold; ignored by enabled avg10 admission")
-	flags.Float64Var(&options.admissionPressure.CPUSomeAvg60Max, "admission-pressure-cpu-some-avg60-max", 0, "legacy CPU some PSI avg60 threshold; ignored by enabled avg10 admission")
-	flags.Float64Var(&options.admissionPressure.Hysteresis, "admission-pressure-hysteresis", 10, "legacy avg60 recovery margin; avg10 admission always uses 10 points")
-	flags.DurationVar(&options.admissionPressure.MaxDefer, "admission-pressure-max-defer", 20*time.Minute, "legacy avg60 deferral bound; avg10 admission uses max-wait-seconds and hard limits")
+	flags.BoolVar(&options.admissionPressure.Enabled, "admission-pressure-enabled", defaults.Enabled, "hold new workflow grants at the hard host CPU/IO PSI limits")
+	flags.Float64Var(&options.admissionPressure.CPUSomeAvg10, "admission-pressure-cpu-some-avg10", defaults.CPUSomeAvg10, "deprecated compatibility option; ignored by workflow admission")
+	flags.Float64Var(&options.admissionPressure.IOSomeAvg10, "admission-pressure-io-some-avg10", defaults.IOSomeAvg10, "deprecated compatibility option; ignored by workflow admission")
+	flags.Float64Var(&options.admissionPressure.HardCPU, "admission-pressure-hard-cpu", defaults.HardCPU, "hard host CPU some PSI avg10 percentage for new workflow grants")
+	flags.Float64Var(&options.admissionPressure.HardIO, "admission-pressure-hard-io", defaults.HardIO, "hard host IO some PSI avg10 percentage for new workflow grants")
+	flags.Int64Var(&options.admissionPressure.MaxWaitSeconds, "admission-pressure-max-wait-seconds", defaults.MaxWaitSeconds, "deprecated compatibility option; ignored by workflow admission")
+	flags.StringVar(&options.admissionPressure.Mode, "admission-pressure-mode", service.PressureEnforce, "deprecated compatibility option; ignored by workflow admission")
+	flags.Float64Var(&options.admissionPressure.IOFullAvg60Max, "admission-pressure-io-full-avg60-max", 0, "deprecated compatibility option; ignored by workflow admission")
+	flags.Float64Var(&options.admissionPressure.CPUSomeAvg60Max, "admission-pressure-cpu-some-avg60-max", 0, "deprecated compatibility option; ignored by workflow admission")
+	flags.Float64Var(&options.admissionPressure.Hysteresis, "admission-pressure-hysteresis", 10, "deprecated compatibility option; ignored by workflow admission")
+	flags.DurationVar(&options.admissionPressure.MaxDefer, "admission-pressure-max-defer", 20*time.Minute, "deprecated compatibility option; ignored by workflow admission")
 
-	flags.Int64Var(&options.admissionDiskFloorBytes, "admission-disk-floor-bytes", 0, "opt-in disk-space admission floor in bytes (0 = disabled); when enabled and free bytes on /data are below this floor, admission is held until disk frees up (#673)")
+	flags.Int64Var(&options.admissionDiskFloorBytes, "admission-disk-floor-bytes", 0, "storage retention floor in bytes; ignored by workflow admission")
 	flags.StringVar(&options.ciCacheRoot, "ci-cache-root", "/var/cache/oberth/ci", "CI host cache root")
 	flags.StringVar(&options.releaseCacheRoot, "release-cache-root", "/var/cache/oberth/release", "release host cache root")
 	flags.StringVar(&options.secretStoreAddress, "secretstore-address", "", "OpenBao API base URL for store-sourced release secrets (HTTPS)")
@@ -405,31 +407,16 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	if err := validateServeOptions(options); err != nil {
 		return serveOptions{}, err
 	}
-	if err := json.Unmarshal([]byte(extendedResourceBudgets), &options.declaredAdmission.ExtendedResources); err != nil {
-		return serveOptions{}, err
-	}
-	if err := json.Unmarshal([]byte(legacyResourceCharges), &options.declaredAdmission.LegacyResources); err != nil {
-		return serveOptions{}, fmt.Errorf("parse legacy resource charges: %w", err)
-	}
-	weights, err := service.ParseSizeWeights(options.admissionSizeWeights)
-	if err != nil {
-		return serveOptions{}, fmt.Errorf("serve: --admission-size-weights: %w", err)
-	}
-	options.sizeWeights = weights
-	if err := options.declaredAdmission.ValidateForSizeWeights(weights); err != nil {
-		return serveOptions{}, err
-	}
-	if options.admissionPressure.Mode == "" {
-		return serveOptions{}, errors.New("serve: --admission-pressure-mode must be observe or enforce")
-	}
+	// Historical resource budgets and size weights are accepted but ignored.
+	options.admissionPressure.HardOnly = true
 	if !options.admissionPressure.Enabled {
 		options.admissionPressure.IOFullAvg60Max, options.admissionPressure.CPUSomeAvg60Max = 0, 0
 	}
 	if err := options.admissionPressure.Validate(); err != nil {
 		return serveOptions{}, fmt.Errorf("serve: --admission-pressure: %w", err)
 	}
-	if options.admissionMaxHeadWait < 0 {
-		return serveOptions{}, errors.New("serve: --admission-max-head-wait must be zero (strict FIFO) or positive")
+	if options.admissionStallTimeout <= 0 {
+		return serveOptions{}, errors.New("serve: --admission-stall-timeout must be positive")
 	}
 	return options, nil
 }
@@ -889,13 +876,10 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		SizeWeights:             options.sizeWeights,
 		DeclaredAdmission:       options.declaredAdmission,
 		MaxHeadWait:             options.admissionMaxHeadWait,
+		StalledRunTimeout:       options.admissionStallTimeout,
 	})
 	if err != nil {
 		return err
-	}
-	if budget := options.maxConcurrent * options.sizeWeights.M; options.sizeWeights.XL > budget {
-		logger.Printf("admission: XL weight %d exceeds the budget %d (%d jobs x M weight %d); XL runs are admitted at %d, alone",
-			options.sizeWeights.XL, budget, options.maxConcurrent, options.sizeWeights.M, budget)
 	}
 	retention.AcquirePurge = scheduler.AcquireEvidencePurge
 	writerProgress := &liveness.Heartbeat{}

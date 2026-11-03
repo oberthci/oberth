@@ -69,11 +69,11 @@ func TestRetainedReservationIsListedAndReleasable(t *testing.T) {
 	awaitWaiting(t, waiter)
 
 	state := scheduler.AdmissionState()
-	if state.Used != 2 || state.Capacity != 2 || len(state.Reservations) != 2 {
+	if state.NumericBudget != nil || state.Capacity != 1 || len(state.Reservations) != 2 {
 		t.Fatalf("state = %#v", state)
 	}
 	retained, waiting := state.Reservations[0], state.Reservations[1]
-	if retained.RunID != stale.ID || retained.State != "retained" || retained.Weight != 2 || retained.Since.IsZero() || retained.Workflow == "" {
+	if retained.RunID != stale.ID || retained.State != "retained" || retained.Weight != 0 || retained.Since.IsZero() || retained.Workflow == "" {
 		t.Fatalf("retained view = %#v", retained)
 	}
 	if waiting.RunID != "waiting-run" || waiting.State != "waiting" || waiting.Position != 1 {
@@ -96,7 +96,7 @@ func TestRetainedReservationIsListedAndReleasable(t *testing.T) {
 	scheduler.jobs = fixture.jobs
 	control := &API{history: fixture.store, admission: scheduler}
 	released, err := control.releaseAdmission(ctx, api.Actor{Identity: "admin@host", Admin: true}, stale.ID[:8], false)
-	if err != nil || !released.Verified || released.State != "retained" || released.Weight != 2 {
+	if err != nil || !released.Verified || released.State != "retained" || released.Weight != 0 {
 		t.Fatalf("release = %#v, %v", released, err)
 	}
 	awaitAcquired(t, waiterReady)()
@@ -166,14 +166,14 @@ func TestReleaseOfAGrantWithoutAWorkflowNameNeedsForce(t *testing.T) {
 		!strings.Contains(err.Error(), "force") {
 		t.Fatalf("unforced release without a Workflow name = %v", err)
 	}
-	if state := scheduler.AdmissionState(); state.Used != 2 || len(auditor.actions) != 0 {
+	if state := scheduler.AdmissionState(); state.NumericBudget != nil || len(auditor.actions) != 0 {
 		t.Fatalf("refused release changed state: used %d, audit %d", state.Used, len(auditor.actions))
 	}
 	released, err := scheduler.ReleaseAdmission(ctx, preflight.ID, "admin@host", true)
 	if err != nil || released.Verified || released.Warning == "" {
 		t.Fatalf("forced release = %#v, %v", released, err)
 	}
-	if state := scheduler.AdmissionState(); state.Used != 0 || len(state.Reservations) != 0 {
+	if state := scheduler.AdmissionState(); state.Runs != 0 || len(state.Reservations) != 0 {
 		t.Fatalf("state after forced release = %#v", state)
 	}
 	if len(auditor.actions) != 1 || !strings.Contains(auditor.actions[0].Details, `"verified":false`) {

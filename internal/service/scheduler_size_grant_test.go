@@ -28,11 +28,11 @@ func awaitRunStatus(t *testing.T, fixture *concurrencyFixture, runID string, wan
 	}
 }
 
-// TestUngrantedXLIsRefusedWithoutHoldingTheQueue is #1021 part 1: a
+// TestLegacyXLAnnotationDoesNotRequireAWorkflowAdmissionGrant is #1021 part 1: a
 // repository without an XL grant that declares XL is refused before it takes
 // any weight, with the command that would grant it, and another repository's
 // run queued behind it is admitted at once instead of waiting for a drain.
-func TestUngrantedXLIsRefusedWithoutHoldingTheQueue(t *testing.T) {
+func TestLegacyXLAnnotationDoesNotRequireAWorkflowAdmissionGrant(t *testing.T) {
 	fixture := newConcurrencyFixture(t, pipeline.M, 3)
 	jobs := newConcurrentJobs(pipeline.M, 4)
 	fixture.scheduler.jobs = sizedByBranch{jobs}
@@ -64,35 +64,19 @@ func TestUngrantedXLIsRefusedWithoutHoldingTheQueue(t *testing.T) {
 		<-finished
 	}()
 
-	refused := awaitRunStatus(t, fixture, heavy, model.RunFailed)
-	if refused.Phase != "infrastructure" || !strings.Contains(refused.Error, "may run at most L") ||
-		!strings.Contains(refused.Error, "oberth size grant oberth --max XL") {
-		t.Fatalf("refused run = phase %q, error %q", refused.Phase, refused.Error)
-	}
-	select {
-	case admitted := <-jobs.admitted:
-		if admitted != light {
-			t.Fatalf("admitted %s, want the other repository's run %s", admitted, light)
+	created := map[string]bool{}
+	for len(created) < 2 {
+		select {
+		case id := <-jobs.admitted:
+			created[id] = true
+		case <-time.After(testStartTimeout(10 * time.Second)):
+			t.Fatal("a historical size grant blocked workflow submission")
 		}
-	case <-time.After(testStartTimeout(10 * time.Second)):
-		t.Fatal("the other repository's run was not admitted")
+	}
+	if !created[heavy] || !created[light] || fixture.scheduler.AdmissionState().NumericBudget != nil {
+		t.Fatalf("Kubernetes placement still depends on size: %v", created)
 	}
 
-	// With the grant, the same declaration is admitted.
-	if _, err := fixture.store.SetSizeGrant(context.Background(), fixture.repo.ID, "admin@host", pipeline.XL); err != nil {
-		t.Fatal(err)
-	}
-	if err := fixture.scheduler.authorizeRunSize(context.Background(), refused, fixture.repo, pipeline.XL); err != nil {
-		t.Fatalf("granted XL refused: %v", err)
-	}
-	// A tag run keeps its reviewed release.yaml size without a grant.
-	if err := fixture.scheduler.authorizeRunSize(context.Background(), model.Run{RepoID: other.ID, Release: true}, other, pipeline.XL); err != nil {
-		t.Fatalf("release XL refused: %v", err)
-	}
-	if err := fixture.scheduler.authorizeRunSize(context.Background(), model.Run{RepoID: other.ID, Trigger: "promotion"}, other, pipeline.XL); err == nil ||
-		!strings.Contains(err.Error(), "promotion run") {
-		t.Fatalf("ungranted promotion XL = %v", err)
-	}
 }
 
 // TestTagRunsAreNotSizeGated pins the deliberate exemption: the XL size grant

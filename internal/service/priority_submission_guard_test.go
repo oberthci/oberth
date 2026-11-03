@@ -57,9 +57,10 @@ func TestPriorityGuardBackfillCannotDelayHead(t *testing.T) {
 }
 
 func TestPriorityGuardSubmissionLeavesExistingRunsAndStartsNext(t *testing.T) {
-	f := newGroupFixture(t, 2)
+	f := newGroupFixture(t, 1)
 	for _, ref := range []string{"busy", "normal-a", "normal-b", "urgent"} {
 		f.engine.declare(ref, "", pipeline.L)
+		f.engine.declareCPU(ref, 5900)
 	}
 	running := f.branch(t, f.terraform, "busy", "a")
 	f.start(t)
@@ -68,7 +69,6 @@ func TestPriorityGuardSubmissionLeavesExistingRunsAndStartsNext(t *testing.T) {
 	}
 	a := f.branch(t, f.terraform, "normal-a", "b")
 	b := f.branch(t, f.exampleService, "normal-b", "c")
-	f.awaitAdmission(t, a, "normal waiting", func(o *model.AdmissionObservation) bool { return o != nil && o.State == "waiting" })
 	before := map[string]model.Run{}
 	for _, r := range []model.Run{running, a, b} {
 		got, err := f.store.Run(t.Context(), r.ID)

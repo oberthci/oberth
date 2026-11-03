@@ -11,19 +11,9 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-// DefaultMaxHeadWait bounds the window for new backfill. After it expires,
-// existing grants drain for at most maxDrainDuration before backfill resumes.
-// Running work is never preempted and all live grants remain charged.
+// DefaultMaxHeadWait marks when the queue reports draining for its head.
+// Backfill must preserve the head's reservation.
 const DefaultMaxHeadWait = 20 * time.Minute
-
-// Do not idle spare resources indefinitely behind unknown/overrun grants.
-// This never releases their budget: all current resource and pressure checks
-// still apply, and the head is considered first on every admission pass.
-const maxDrainDuration = 5 * time.Minute
-
-func (gate *weightedAdmission) drainExpiredLocked(head *admissionReservation, now time.Time) bool {
-	return gate.maxHeadWait > 0 && !head.headSince.IsZero() && now.Sub(head.headSince) >= gate.maxHeadWait+maxDrainDuration
-}
 
 // headWaitKey identifies a run's head-wait origin across a restart: a
 // requeued run is a copy with a new ID but the same repository, ref and
@@ -140,29 +130,15 @@ func (gate *weightedAdmission) emitHeadLocked(event headEvent) {
 // backfillEnabledLocked reports whether runs behind this head may still be
 // admitted beside it.
 func (gate *weightedAdmission) backfillEnabledLocked(head *admissionReservation) bool {
-	return gate.maxHeadWait > 0 && !head.headSince.IsZero() && (gate.clock().Before(head.headSince.Add(gate.maxHeadWait)) || gate.drainExpiredLocked(head, gate.clock()))
+	return !gate.workflowOnly && gate.maxHeadWait > 0 && !head.headSince.IsZero()
 }
 
-// backfillFitsLocked preserves a measured head start within maxHeadWait.
-// The caller checks current capacity first. Without a running-work forecast,
-// measured candidates may finish within the remaining head-wait window.
+// backfillFitsLocked is the single EASY rule, for every priority class and
+// on both sides of maxHeadWait. The caller checks current capacity first.
 // A candidate must finish strictly before the reserved head start, or leave
 // room for the head at that time. Unmeasured candidates use coexistence only.
 func (gate *weightedAdmission) backfillFitsLocked(head, candidate *admissionReservation, now time.Time) bool {
-	if gate.drainExpiredLocked(head, now) {
-		candidate.backfillMessage = "backfilled: drain limit reached; using available capacity while the head waits"
-		return true
-	}
 	candidate.backfillMessage = "held: would delay head"
-	bound := head.headSince.Add(gate.maxHeadWait)
-	if !gate.backfillEnabledLocked(head) {
-		candidate.backfillMessage = "held: draining for head"
-		return false
-	}
-	// A forecast overrun cannot extend the continuous head's reservation.
-	if !head.backfillDeadline.IsZero() && !now.Before(head.backfillDeadline) {
-		return false
-	}
 	projection := gate.backfillProjectionLocked()
 	var completions []time.Time
 	for _, r := range projection.reservations {
@@ -178,17 +154,13 @@ func (gate *weightedAdmission) backfillFitsLocked(head, candidate *admissionRese
 		}
 		// Later backfills cannot move an existing reservation into the future.
 		if head.backfillDeadline.IsZero() || finish.Before(head.backfillDeadline) {
-			head.backfillDeadline = minTime(finish, bound)
+			head.backfillDeadline = finish
 		}
 		deadline := head.backfillDeadline
 		if !now.Before(deadline) {
 			return false
 		}
 		if candidate.estimate > 0 && now.Add(candidate.estimate).Before(deadline) {
-			if bound.Before(finish) {
-				candidate.backfillMessage = "backfilled: measured finish within remaining head-wait window"
-				return true
-			}
 			candidate.backfillMessage = fmt.Sprintf("backfilled: ends before head can start (p95 %dm < %dm)",
 				(candidate.estimate-1)/time.Minute+1, deadline.Sub(now)/time.Minute)
 			return true
@@ -217,25 +189,8 @@ func (gate *weightedAdmission) backfillFitsLocked(head, candidate *admissionRese
 		}
 		return false
 	}
-	// Unknown or overrun holders stay charged. No capacity is projected free;
-	// only a measured short candidate may use capacity that already fits now.
-	// Keep the first window even if a subsequent forecast moves later.
-	if head.backfillDeadline.IsZero() {
-		head.backfillDeadline = bound
-	}
-	if candidate.estimate > 0 && now.Add(candidate.estimate).Before(head.backfillDeadline) {
-		candidate.backfillMessage = "backfilled: measured finish within remaining head-wait window"
-		return true
-	}
 	candidate.backfillMessage += " (running p95 finish unknown)"
 	return false
-}
-
-func minTime(a, b time.Time) time.Time {
-	if a.Before(b) {
-		return a
-	}
-	return b
 }
 
 // Unknown, retained and overrun work is never assumed to finish now. Treating
@@ -278,7 +233,7 @@ func (gate *weightedAdmission) backfillStateLocked(head *admissionReservation, b
 	blocker.HeadSince = head.headSince
 	blocker.HeadWaitSeconds = int64(now.Sub(head.headSince) / time.Second)
 	blocker.MaxHeadWaitSeconds = int64(gate.maxHeadWait / time.Second)
-	if now.Sub(head.headSince) < gate.maxHeadWait || gate.drainExpiredLocked(head, now) {
+	if now.Sub(head.headSince) < gate.maxHeadWait {
 		blocker.Backfilling = true
 	} else {
 		blocker.Draining = true
@@ -401,7 +356,7 @@ func (scheduler *Scheduler) admissionHistory(ctx context.Context, run model.Run)
 
 // backfillClaimsOpenLocked reports whether the dispatch loop may claim past
 // runs that are waiting only because they are the head or were passed over
-// as backfill candidates, before draining begins or after the drain cap. A claim still
+// as backfill candidates, including while draining. A claim still
 // preparing could itself fit, so none may be in flight; the waiting claims
 // are bounded by the budget's M-run count, and the caller's run, budget and
 // disk checks still apply.

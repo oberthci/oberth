@@ -112,6 +112,7 @@ func buildArgoEngine(
 		CICacheRoot:            options.ciCacheRoot,
 		ReleaseCacheRoot:       options.releaseCacheRoot,
 		WorkflowTimeout:        options.argoWorkflowTimeout,
+		StalledRunTimeout:      options.admissionStallTimeout,
 		PerRepoWorkflowTimeout: repoTimeouts,
 		// #nosec G115 -- validateServeOptions bounds argoWorkflowTTL to a positive int32.
 		TTLSeconds:          int32(options.argoWorkflowTTL),

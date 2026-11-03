@@ -119,28 +119,28 @@ func TestRunCancelQueuedRunIsNeverClaimed(t *testing.T) {
 	}
 }
 
-// Cancelling a waiting XL head releases its reservation at once: the next
-// grant pass admits the runs it blocked, of its own group and of other
-// repositories alike.
+// Cancelling a parked group waiter withdraws its claim at once. After the
+// active group holder completes, the next member must not remain behind a
+// cancelled reservation. Other repositories keep their workflow slots.
 func TestRunCancelWaitingRunReleasesItsAdmissionReservation(t *testing.T) {
-	fixture := newGroupFixture(t, 10)
-	fixture.engine.declare("busy", "", pipeline.L)
+	fixture := newGroupFixture(t, 3)
+	fixture.engine.declare("busy", kubevirtGroup, pipeline.L)
 	fixture.engine.declare("feat-kv", kubevirtGroup, pipeline.XL)
 	fixture.engine.declare("feat-kv-2", kubevirtGroup, pipeline.S)
 	fixture.engine.declare("small", "", pipeline.S)
-	holder := fixture.branch(t, fixture.exampleService, "busy", "a")
+	holder := fixture.branch(t, fixture.terraform, "busy", "a")
 	head := fixture.branch(t, fixture.terraform, "feat-kv", "b")
 	member := fixture.branch(t, fixture.terraform, "feat-kv-2", "c")
 	small := fixture.branch(t, fixture.exampleService, "small", "d")
 	fixture.start(t)
-	if created := fixture.awaitCreated(t, 1); !created[holder.ID] {
+	if created := fixture.awaitCreated(t, 2); !created[holder.ID] || !created[small.ID] {
 		t.Fatalf("created %v; want only the holder", created)
 	}
 	fixture.awaitAdmission(t, head, "waiting XL head", func(snapshot *model.AdmissionObservation) bool {
-		return snapshot != nil && snapshot.State == "waiting" && snapshot.Position == 1
+		return snapshot != nil && snapshot.State == "waiting" && snapshot.GroupHolder == holder.ID
 	})
 	fixture.awaitAdmission(t, member, "waiting behind the head in its group", func(snapshot *model.AdmissionObservation) bool {
-		return snapshot != nil && snapshot.GroupAhead == head.ID
+		return snapshot != nil && snapshot.GroupHolder == holder.ID
 	})
 
 	// A non-admin may not cancel a concurrency-group member; nothing changes.
@@ -152,9 +152,6 @@ func TestRunCancelWaitingRunReleasesItsAdmissionReservation(t *testing.T) {
 	response := mustRunCancel(t, fixture.control, cancelAdmin, map[string]any{"id": head.ID, "reason": "wrong size"})
 	if response.PreviousState != "waiting" || response.Workflow != "deleted" || response.Warning != "" {
 		t.Fatalf("waiting cancel response = %#v", response)
-	}
-	if created := fixture.awaitCreated(t, 2); !created[member.ID] || !created[small.ID] {
-		t.Fatalf("after the cancel the grant pass admitted %v; want %s and %s", created, member.ID, small.ID)
 	}
 	if snapshot := fixture.scheduler.AdmissionSnapshot(head.QueueSequence); snapshot != nil {
 		t.Fatalf("cancelled head still holds a reservation: %#v", snapshot)
@@ -169,9 +166,12 @@ func TestRunCancelWaitingRunReleasesItsAdmissionReservation(t *testing.T) {
 	if fixture.engine.wasCreated(head.ID) {
 		t.Fatal("a cancelled waiting run created its Workflow")
 	}
-	for _, run := range []model.Run{holder, member, small} {
-		fixture.engine.finish(t, run.ID)
+	fixture.engine.finish(t, holder.ID)
+	if created := fixture.awaitCreated(t, 1); !created[member.ID] {
+		t.Fatalf("cancelled waiter held the next group member: %v", created)
 	}
+	fixture.engine.finish(t, member.ID)
+	fixture.engine.finish(t, small.ID)
 	fixture.assertNothingCreated(t)
 	fixture.assertNoCIIssue(t, fixture.terraform, "feat-kv")
 	fixture.engine.assertNoViolations(t)
@@ -181,7 +181,7 @@ func TestRunCancelWaitingRunReleasesItsAdmissionReservation(t *testing.T) {
 // result over the cancel, and its weight passes on only once the Workflow is
 // gone.
 func TestRunCancelRunningRunDeletesItsWorkflowAndKeepsTheCancel(t *testing.T) {
-	fixture := newGroupFixture(t, 3)
+	fixture := newGroupFixture(t, 1)
 	fixture.engine.declare("busy", "", pipeline.M)
 	fixture.engine.declare("heavy", "", pipeline.XL)
 	running := fixture.branch(t, fixture.exampleService, "busy", "a")
@@ -190,9 +190,9 @@ func TestRunCancelRunningRunDeletesItsWorkflowAndKeepsTheCancel(t *testing.T) {
 	if created := fixture.awaitCreated(t, 1); !created[running.ID] {
 		t.Fatalf("created %v; want the running run", created)
 	}
-	fixture.awaitAdmission(t, next, "XL waiting for the running run", func(snapshot *model.AdmissionObservation) bool {
-		return snapshot != nil && snapshot.State == "waiting"
-	})
+	if queued, err := fixture.store.Run(t.Context(), next.ID); err != nil || queued.Status != model.RunQueued {
+		t.Fatalf("workflow ceiling did not retain the queued run: %+v %v", queued, err)
+	}
 	submitted := fixture.awaitRunStarted(t, running.ID)
 
 	response := mustRunCancel(t, fixture.control, cancelAgent, map[string]any{"id": running.ID, "reason": "stuck test"})

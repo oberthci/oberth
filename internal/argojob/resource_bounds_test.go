@@ -71,8 +71,8 @@ func TestResourceBoundsBuildUsesTrustedMaximumAndHonorsExactValues(t *testing.T)
 	if e != nil {
 		t.Fatal(e)
 	}
-	if !reflect.DeepEqual(wf.Spec.Templates[0].Container.Resources, corev1.ResourceRequirements{}) {
-		t.Fatal("undeclared resources changed")
+	if r := wf.Spec.Templates[0].Container.Resources; r.Requests.Cpu().MilliValue() != 2000 || r.Requests.Memory().Value() != 2<<30 || len(r.Limits) != 0 {
+		t.Fatal("undeclared resources lack conservative Kubernetes requests")
 	}
 }
 func TestResourceBoundsPriorityAndPodPatchesCannotBypass(t *testing.T) {

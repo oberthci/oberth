@@ -42,7 +42,7 @@ type pendingCreate struct {
 }
 
 func isPendingCreate(run model.Run) bool {
-	return run.Phase == "infrastructure-pending" || strings.HasPrefix(run.Error, pendingCreateMessage) || run.Error == store.WorkflowSpecMismatchPendingMessage
+	return run.Phase == "infrastructure-pending" || strings.HasPrefix(run.Error, pendingCreateMessage) || store.WorkflowCleanupReason(run.Error)
 }
 func (scheduler *Scheduler) createTime() time.Time {
 	if scheduler.createNow != nil {
@@ -154,8 +154,10 @@ func (scheduler *Scheduler) restoreCreateGrant(run model.Run, grant *admissionRe
 				return nil, err
 			}
 			scheduler.admission.mu.Lock()
-			scheduler.admission.used += scheduler.admission.capacity - grant.weight
-			grant.weight = scheduler.admission.capacity
+			if !scheduler.admission.workflowOnly {
+				scheduler.admission.used += scheduler.admission.capacity - grant.weight
+				grant.weight = scheduler.admission.capacity
+			}
 			scheduler.admission.mu.Unlock()
 		}
 	}
@@ -186,7 +188,7 @@ func (scheduler *Scheduler) registerCreateCleanup(run model.Run, grant *admissio
 	}
 	// A nil grant is an owned, retryable restore failure, never a dropped run.
 	reason := ""
-	if run.Error == store.WorkflowSpecMismatchPendingMessage {
+	if store.WorkflowCleanupReason(run.Error) {
 		reason = run.Error
 	}
 	scheduler.createPending[run.ID] = &pendingCreate{runID: run.ID, reason: reason, grant: restored, persisted: persisted, next: now, since: now}
@@ -347,8 +349,13 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 	}
 	if run.Status == model.RunRunning {
 		message := "workflow create outcome uncertain; cleanup confirmed absence"
-		if run.Error == store.WorkflowSpecMismatchPendingMessage {
+		switch run.Error {
+		case store.WorkflowSpecMismatchPendingMessage:
 			message = "Workflow spec mismatch; cleanup confirmed absence"
+		case store.ExecutorIdentityPendingMessage:
+			message = "executor identity readiness deadline exceeded after one issuance retry; cleanup confirmed absence"
+		case store.AdmissionStalledPendingMessage:
+			message = "resource admission expired: no scheduled pod or progress; cleanup confirmed absence"
 		}
 		if err := scheduler.finishInfrastructureFailure(ctx, run, model.Repository{}, errors.New(message)); err != nil {
 			return false, err
@@ -365,6 +372,9 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 			return false, nil
 		}
 	}
+	// Exact external absence and the durable verdict are established. Scratch
+	// cleanup can retry independently; it must not keep CPU/memory reserved.
+	pending.grant.releaseAfterCleanup()
 	cleanupCtx, cancel := context.WithTimeout(ctx, workspaceCleanupTimeout)
 	err = scheduler.workspaces.cleanupRun(cleanupCtx, run.ID)
 	cancel()
@@ -381,6 +391,16 @@ func (scheduler *Scheduler) deferCreateCleanup(ctx context.Context, run model.Ru
 	grant.retain()
 	reason := ""
 	for _, failure := range failures {
+		var expired interface{ AdmissionExpiryReason() string }
+		if errors.As(failure, &expired) {
+			switch expired.AdmissionExpiryReason() {
+			case "identity":
+				reason = store.ExecutorIdentityPendingMessage
+			case "stalled":
+				reason = store.AdmissionStalledPendingMessage
+			}
+			run.Error = reason
+		}
 		var mismatch interface{ WorkflowSpecMismatch() bool }
 		if errors.As(failure, &mismatch) && mismatch.WorkflowSpecMismatch() {
 			reason = store.WorkflowSpecMismatchPendingMessage

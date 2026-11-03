@@ -102,7 +102,7 @@ func TestWorkflowCreateRecoveryParkedGroupMateRequeuesInEitherOrder(t *testing.T
 				t.Fatal(err)
 			}
 			state := scheduler.AdmissionState()
-			if adopted != 1 || scheduler.pendingCreateCount() != 0 || state.Used != 1 || state.Runs != 1 || len(state.Groups) != 1 || state.Groups[0].Holder != holder.ID || jobs.settleCalls != 0 {
+			if adopted != 1 || scheduler.pendingCreateCount() != 0 || state.NumericBudget != nil || state.Runs != 1 || len(state.Groups) != 1 || state.Groups[0].Holder != holder.ID || jobs.settleCalls != 0 {
 				t.Fatalf("placeholder took a grant/quarantine or displaced sibling: adopted=%d pending=%d state=%+v settles=%d", adopted, scheduler.pendingCreateCount(), state, jobs.settleCalls)
 			}
 			if len(jobs.deleted) != 1 || jobs.deleted[0] != parked.WorkflowName {
@@ -163,7 +163,7 @@ func TestWorkflowCreateRecoveryWaitingExistingWorkflowAdoptsBeforeCleanup(t *tes
 				t.Fatalf("adoption failed to mark original run submitted: %+v", current)
 			}
 			if _, err := os.Stat(scheduler.createAdmissionPath(run.ID)); !os.IsNotExist(err) {
-				t.Fatalf("adoption leaked acknowledged create contract: %v", err)
+				t.Fatalf("adoption retained an obsolete admission contract: %v", err)
 			}
 
 			cancel()
@@ -211,16 +211,12 @@ func TestWorkflowCreateRecoveryAbsentWorkflowRequiresContractToSettle(t *testing
 			}
 			state := scheduler.AdmissionState()
 			if contract == "none" {
-				if current.Status != model.RunQueued || current.SupersededBy != "" || state.Used != 0 || scheduler.pendingCreateCount() != 0 {
+				if current.Status != model.RunQueued || current.SupersededBy != "" || state.Runs != 0 || scheduler.pendingCreateCount() != 0 {
 					t.Fatalf("no-contract run quarantined or failed: %+v state=%+v", current, state)
 				}
 				return
 			}
-			wantWeight := 1
-			if contract == "corrupt" {
-				wantWeight = state.Capacity
-			}
-			if current.Status != model.RunRunning || scheduler.pendingCreateCount() != 1 || state.Used != wantWeight {
+			if current.Status != model.RunRunning || scheduler.pendingCreateCount() != 1 || state.NumericBudget != nil {
 				t.Fatalf("possible POST requeued or contract not reserved: %+v state=%+v", current, state)
 			}
 			scheduler.settleOneCreate(t.Context())

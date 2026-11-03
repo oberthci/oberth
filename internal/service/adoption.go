@@ -72,7 +72,7 @@ func (gate *weightedAdmission) adopt(run model.Run, size pipeline.Size, demand a
 		copy.DeclaredTotal = pods[0].DeclaredTotal.Clone()
 		peak = &copy
 	}
-	if !size.Valid() || (run.ConcurrencyGroup != "" && !argoworkflow.ValidConcurrencyGroup(run.ConcurrencyGroup)) {
+	if (!gate.workflowOnly && !size.Valid()) || (run.ConcurrencyGroup != "" && !argoworkflow.ValidConcurrencyGroup(run.ConcurrencyGroup)) {
 		return nil, fmt.Errorf("%w: invalid adopted resource contract", ErrAdoptionRefused)
 	}
 	resources := KubeVirtResources{Demand: demand, Limit: argoworkflow.VMIBudgetLimit().DemandLimit()}
@@ -107,7 +107,7 @@ func (gate *weightedAdmission) adopt(run model.Run, size pipeline.Size, demand a
 		group: group, groupName: run.ConcurrencyGroup, prepared: true, granted: true, submitted: true, kubeVirt: resources,
 		claimedAt: now, preparedAt: now, grantedAt: now, ready: make(chan struct{}),
 	}
-	if peak != nil {
+	if gate.workflowOnly || peak != nil {
 		reservation.weight = 0
 	}
 	close(reservation.ready)

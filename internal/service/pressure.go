@@ -27,6 +27,8 @@ const (
 // for existing in-process callers; serve and the chart use the avg10 gate.
 // Source and Logf permit deterministic tests without observing the test host.
 type AdmissionPressureConfig struct {
+	// HardOnly is forced by workflow admission. Legacy soft/defer fields are ignored.
+	HardOnly        bool
 	Enabled         bool
 	CPUSomeAvg10    float64
 	IOSomeAvg10     float64
@@ -47,6 +49,17 @@ func DefaultAdmissionPressureConfig() AdmissionPressureConfig {
 }
 
 func (c AdmissionPressureConfig) Validate() error {
+	if c.HardOnly {
+		if !c.Enabled {
+			return nil
+		}
+		for _, value := range []float64{c.HardCPU, c.HardIO} {
+			if math.IsNaN(value) || math.IsInf(value, 0) || value <= 10 || value > 100 {
+				return errors.New("hard pressure limits must be finite percentages in (10,100]")
+			}
+		}
+		return nil
+	}
 	if c.Enabled {
 		for _, v := range []float64{c.CPUSomeAvg10, c.IOSomeAvg10, c.HardCPU, c.HardIO} {
 			if math.IsNaN(v) || math.IsInf(v, 0) || v <= 10 || v > 100 {
@@ -91,6 +104,15 @@ type pressureCheck struct {
 }
 
 func newPressureCheck(config AdmissionPressureConfig) *pressureCheck {
+	if config.HardOnly {
+		if !config.Enabled {
+			return nil
+		}
+		config.Mode = PressureEnforce
+		config.CPUSomeAvg10, config.IOSomeAvg10 = config.HardCPU, config.HardIO
+		config.MaxWaitSeconds = 0
+		config.IOFullAvg60Max, config.CPUSomeAvg60Max, config.MaxDefer = 0, 0, 0
+	}
 	if config.Mode == "" {
 		config.Mode = PressureEnforce
 	}
@@ -131,6 +153,9 @@ func (p *pressureCheck) refresh(now time.Time) {
 	if err != nil {
 		p.state.Sample = nil
 		p.state.Fallback = "PSI unavailable; budget-only admission"
+		if p.config.HardOnly {
+			p.state.Fallback = "PSI unavailable; workflow ceiling admission"
+		}
 		p.ioHeld, p.cpuHeld = false, false
 		if !p.warned {
 			p.config.Logf("admission PSI unavailable; pressure check fails open: %v", err)
@@ -141,8 +166,12 @@ func (p *pressureCheck) refresh(now time.Time) {
 		p.state.Fallback = ""
 		p.state.Sample = &sample
 		if p.config.Enabled {
-			p.ioHeld = pressureLatch(p.ioHeld, sample.IO.SomeAvg10, p.config.IOSomeAvg10, 10)
-			p.cpuHeld = pressureLatch(p.cpuHeld, sample.CPU.SomeAvg10, p.config.CPUSomeAvg10, 10)
+			cpu, io := p.config.CPUSomeAvg10, p.config.IOSomeAvg10
+			if p.config.HardOnly {
+				cpu, io = p.config.HardCPU, p.config.HardIO
+			}
+			p.ioHeld = pressureLatch(p.ioHeld, sample.IO.SomeAvg10, io, 10)
+			p.cpuHeld = pressureLatch(p.cpuHeld, sample.CPU.SomeAvg10, cpu, 10)
 		} else {
 			p.ioHeld = pressureLatch(p.ioHeld, sample.IO.FullAvg60, p.config.IOFullAvg60Max, p.config.Hysteresis)
 			p.cpuHeld = pressureLatch(p.cpuHeld, sample.CPU.SomeAvg60, p.config.CPUSomeAvg60Max, p.config.Hysteresis)
@@ -174,7 +203,7 @@ func (p *pressureCheck) settledSample() bool {
 }
 
 func (p *pressureCheck) settling() bool {
-	return p.config.Enabled && p.state.Available && !p.settledSample() &&
+	return !p.config.HardOnly && p.config.Enabled && p.state.Available && !p.settledSample() &&
 		(p.state.Sample.CPU.SomeAvg10 >= 15 || p.state.Sample.IO.SomeAvg10 >= 10)
 }
 
@@ -236,6 +265,14 @@ func (gate *weightedAdmission) deferPressureLocked(r *admissionReservation, now 
 	p := gate.pressure
 	if p == nil || !p.state.Holding {
 		return false
+	}
+	if p.config.HardOnly {
+		if r.pressureSince.IsZero() {
+			r.pressureSince = now
+			p.deferrals++
+		}
+		r.pressureDeferred = true
+		return true
 	}
 	if p.config.Enabled {
 		if gate.pressureBypassLocked(r, now) {

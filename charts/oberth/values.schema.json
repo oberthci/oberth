@@ -24,8 +24,16 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "defaultTTL": {"type": "string", "minLength": 1, "description": "New uplink bearer lifetime; positive Go duration, at most maxTTL. Default 2160h (90 days)."},
-        "maxTTL": {"type": "string", "minLength": 1, "description": "Maximum new uplink bearer lifetime; positive Go duration, hard ceiling 8760h (365 days)."}
+        "defaultTTL": {
+          "type": "string",
+          "minLength": 1,
+          "description": "New uplink bearer lifetime; positive Go duration, at most maxTTL. Default 2160h (90 days)."
+        },
+        "maxTTL": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Maximum new uplink bearer lifetime; positive Go duration, hard ceiling 8760h (365 days)."
+        }
       }
     },
     "platformProtection": {
@@ -112,27 +120,10 @@
       "additionalProperties": false,
       "properties": {
         "declaredResources": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "disabled": {"type": "boolean"},
-            "cpuMillis": {"type": "integer", "minimum": 1, "maximum": 1000000},
-            "memoryBytes": {"type": "integer", "minimum": 1, "maximum": 1125899906842624},
-            "memoryHeadroomBytes": {"type": "integer", "minimum": 0, "maximum": 1125899906842624},
-            "memoryHeadroomPercent": {"type": "integer", "minimum": 0, "maximum": 100},
-            "ioRuns": {"type": "integer", "minimum": 0, "maximum": 64},
-            "extendedResources": {"type":"object","maxProperties":32,"additionalProperties":{"type":"integer","minimum":1,"maximum":1000000}}
-          }
+          "description": "Deprecated compatibility value; ignored. Kubernetes schedules pods by their requests."
         },
         "legacyResources": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "S": {"type":"object","additionalProperties":false,"required":["cpu_milli","memory_bytes"],"properties":{"cpu_milli":{"type":"integer","minimum":1,"maximum":1000000},"memory_bytes":{"type":"integer","minimum":1,"maximum":1125899906842624}}},
-            "M": {"type":"object","additionalProperties":false,"required":["cpu_milli","memory_bytes"],"properties":{"cpu_milli":{"type":"integer","minimum":1,"maximum":1000000},"memory_bytes":{"type":"integer","minimum":1,"maximum":1125899906842624}}},
-            "L": {"type":"object","additionalProperties":false,"required":["cpu_milli","memory_bytes"],"properties":{"cpu_milli":{"type":"integer","minimum":1,"maximum":1000000},"memory_bytes":{"type":"integer","minimum":1,"maximum":1125899906842624}}},
-            "XL": {"type":"object","additionalProperties":false,"required":["cpu_milli","memory_bytes"],"properties":{"cpu_milli":{"type":"integer","minimum":1,"maximum":1000000},"memory_bytes":{"type":"integer","minimum":1,"maximum":1125899906842624}}}
-          }
+          "description": "Deprecated compatibility value; ignored. Kubernetes places pods by their requests."
         },
         "runtimeCapacity": {
           "type": "object",
@@ -159,48 +150,52 @@
         "pressure": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Host some PSI avg10 gates new grants by default. Missing PSI fails open to budget-only admission.",
+          "description": "PSI hard-limit safety valve; missing PSI retains the workflow ceiling.",
           "properties": {
-            "enabled": {"type": "boolean"},
-            "cpuSomeAvg10": {"type": "number", "exclusiveMinimum": 10, "maximum": 100},
-            "ioSomeAvg10": {"type": "number", "exclusiveMinimum": 10, "maximum": 100},
-            "hardCpu": {"type": "number", "exclusiveMinimum": 10, "maximum": 100},
-            "hardIo": {"type": "number", "exclusiveMinimum": 10, "maximum": 100},
-            "maxWaitSeconds": {"type": "integer", "minimum": 1},
-            "mode": {"type": "string", "enum": ["observe", "enforce"], "description": "Legacy avg60 mode; enabled avg10 admission always enforces."},
-            "ioFullAvg60Max": {"type": "number", "minimum": 0, "maximum": 100},
-            "cpuSomeAvg60Max": {"type": "number", "minimum": 0, "maximum": 100},
-            "hysteresis": {"type": "number", "minimum": 0, "maximum": 100, "description": "Percentage points below each enabled threshold; must be below that threshold."},
-            "maxDefer": {"type": "string", "pattern": "^(0|([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+)$", "description": "Positive Go duration when enabled; only bypasses pressure, never other admission rules."}
+            "enabled": {
+              "type": "boolean"
+            },
+            "cpuSomeAvg10": {
+              "description": "Deprecated compatibility value; ignored by the hard-limit valve."
+            },
+            "ioSomeAvg10": {
+              "description": "Deprecated compatibility value; ignored by the hard-limit valve."
+            },
+            "hardCpu": {
+              "type": "number",
+              "exclusiveMinimum": 10,
+              "maximum": 100
+            },
+            "hardIo": {
+              "type": "number",
+              "exclusiveMinimum": 10,
+              "maximum": 100
+            },
+            "maxWaitSeconds": {
+              "description": "Deprecated compatibility value; ignored by the hard-limit valve."
+            },
+            "mode": {
+              "description": "Deprecated compatibility value; ignored by the hard-limit valve."
+            },
+            "ioFullAvg60Max": {
+              "description": "Deprecated compatibility value; ignored by the hard-limit valve."
+            },
+            "cpuSomeAvg60Max": {
+              "description": "Deprecated compatibility value; ignored by the hard-limit valve."
+            },
+            "hysteresis": {
+              "description": "Deprecated compatibility value; ignored by the hard-limit valve."
+            },
+            "maxDefer": {
+              "description": "Deprecated compatibility value; ignored by the hard-limit valve."
+            }
           }
         },
         "maxHeadWait": {
-          "type": "string",
-          "pattern": "^(0|([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))+)$",
-          "description": "Bounded backfill bound as a Go duration (e.g. 20m); 0s is strict FIFO."
+          "description": "Deprecated compatibility value; ignored. Kubernetes schedules pods by their requests."
         },
         "sizeWeights": {
-          "type": "object",
-          "additionalProperties": false,
-          "description": "Admission weight per size. XL 0 = the whole budget (runs alone).",
-          "properties": {
-            "S": {
-              "type": "integer",
-              "minimum": 1
-            },
-            "M": {
-              "type": "integer",
-              "minimum": 1
-            },
-            "L": {
-              "type": "integer",
-              "minimum": 1
-            },
-            "XL": {
-              "type": "integer",
-              "minimum": 0
-            }
-          }
+          "description": "Deprecated compatibility value; ignored. Kubernetes schedules pods by their requests."
         }
       }
     },
@@ -534,7 +529,10 @@
     },
     "secretCreatePolicy": {
       "description": "Retired compatibility key: accepted and ignored. Kubernetes Secret creation is not supported.",
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "additionalProperties": false,
       "properties": {
         "enabled": {
@@ -569,7 +567,9 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "enabled": {"type": "boolean"}
+            "enabled": {
+              "type": "boolean"
+            }
           },
           "description": "Restrict pipeline listeners to same-namespace Pods and this release's server Pod. Default true, including old reused values."
         },
@@ -933,7 +933,9 @@
         },
         "containerDiskPrefixes": {
           "type": "array",
-          "items": {"type": "string"},
+          "items": {
+            "type": "string"
+          },
           "description": "Active until the VM runtime is removed; afterwards accepted and ignored for upgrades carrying saved VM values."
         },
         "kubevirtCeiling": {

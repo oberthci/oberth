@@ -75,7 +75,7 @@ func TestSchedulingObservationIsBoundedAndReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(observation.Nodes) != 16 || !observation.Truncated || len(observation.Pods) != 1 || observation.Pods[0].Reason != "Unschedulable" || !strings.HasPrefix(observation.Pods[0].Message, "Scheduler reports insufficient CPU") {
+	if len(observation.Nodes) != 16 || !observation.Truncated || len(observation.Pods) != 1 || observation.Message != observation.Pods[0].Message || observation.Pods[0].Reason != "Unschedulable" || !strings.HasPrefix(observation.Pods[0].Message, "Pending: Insufficient cpu") {
 		t.Fatalf("observation = %#v", observation)
 	}
 	body, _ := json.Marshal(observation)

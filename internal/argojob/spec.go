@@ -216,6 +216,10 @@ type Config struct {
 	// WorkflowTimeout caps the document's own spec.activeDeadlineSeconds.
 	WorkflowTimeout time.Duration
 
+	// StalledRunTimeout bounds an admitted workflow without a scheduled pod or progress.
+	// Zero selects ten minutes.
+	StalledRunTimeout time.Duration
+
 	// PerRepoWorkflowTimeout holds administrator caps keyed by upstream/org/repo.
 	PerRepoWorkflowTimeout map[string]time.Duration
 
@@ -296,6 +300,9 @@ func (config *Config) applyDefaults() {
 
 // Validate rejects a configuration that could not produce a safe submission.
 func (config Config) Validate() error {
+	if config.StalledRunTimeout < 0 {
+		return errors.New("argojob: stalled run timeout must be nonnegative")
+	}
 	if config.WorkflowTimeout > 0 && (config.WorkflowTimeout < time.Second || config.WorkflowTimeout%time.Second != 0) {
 		return errors.New("argojob: workflow timeout must use whole positive seconds")
 	}
@@ -569,6 +576,8 @@ type Request struct {
 	VMIDemandReceipt *argoworkflow.VMIDemandReceipt
 	// omitStepUsage preserves already-running legacy specs during recovery.
 	omitStepUsage bool
+	// Only recovery of an already-submitted workflow can omit current defaults.
+	omitRequestDefaults bool
 	// legacyStepUsage reconstructs already-submitted pre-floor wrappers only;
 	// new submissions must never opt out of the instrumentation memory guard.
 	legacyStepUsage bool
@@ -693,9 +702,6 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	if request.Capability != nil && request.RepositoryID <= 0 {
 		return nil, errors.New("argojob: workflow capability requires a durable repository binding")
 	}
-	if extended && (request.PodDemand == nil || request.ResourceFallback != "") {
-		return nil, errors.New("argojob: extended resources require a numeric reservation without fallback")
-	}
 	delete(workflow.Annotations, podDemandAnnotation)
 	delete(workflow.Annotations, resourceFallbackAnnotation)
 	if request.PodDemand != nil {
@@ -809,6 +815,18 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 		identity,
 	); err != nil {
 		return nil, err
+	}
+	// Admission and receipt verification inspect the immutable authored graph.
+	// Default only afterwards, before any server-owned helper is injected.
+	applyRequestDefaults(workflow, request.omitRequestDefaults)
+	if request.ResourceCeiling != nil {
+		if err := argoworkflow.ValidateResourceRequirementsWithCapability(workflow, request.Repo, *request.ResourceCeiling, int64(config.WorkflowTimeout/time.Second), request.Capability); err != nil {
+			return nil, err
+		}
+	} else if request.ResourceMaximum != "" {
+		if err := argoworkflow.ValidateResourceCeilingWithCapability(workflow, request.Repo, request.ResourceMaximum, int64(config.WorkflowTimeout/time.Second), request.Capability); err != nil {
+			return nil, err
+		}
 	}
 	// Reject duplicate normalized (burn, step) keys before the Workflow is
 	// created. The planner's PlannedSteps performs the same check for `oberth

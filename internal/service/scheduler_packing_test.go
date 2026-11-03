@@ -78,7 +78,7 @@ func runPacking(t *testing.T, maxConcurrentJobs, expected int, branches []string
 	defer poll.Stop()
 	for {
 		state := fixture.scheduler.AdmissionState()
-		if state.Runs != expected || state.Used != state.Capacity {
+		if state.Runs != expected || state.MaxRuns != maxConcurrentJobs || state.NumericBudget != nil {
 			t.Fatalf("packing did not fill exactly the budget: %+v", state)
 		}
 		run, err := fixture.store.Run(ctx, waiting.ID)
@@ -89,7 +89,7 @@ func runPacking(t *testing.T, maxConcurrentJobs, expected int, branches []string
 		if run.Status == model.RunQueued && !fixture.scheduler.dispatchSlotAvailable(expected) {
 			return admitted
 		}
-		if snapshot != nil && snapshot.State == "waiting" && snapshot.Used+snapshot.Weight > snapshot.Capacity {
+		if snapshot != nil && snapshot.State == "waiting" && snapshot.BlockedBy != nil && snapshot.BlockedBy.RunCeiling {
 			return admitted
 		}
 		select {
@@ -104,28 +104,20 @@ func runPacking(t *testing.T, maxConcurrentJobs, expected int, branches []string
 	}
 }
 
-// TestSmallRunsPackIntoTheWeightBudget is #1021's acceptance: with
-// maxConcurrentJobs=10 and sufficient numeric capacity, the weight budget is
-// 20, so twenty S runs run together
-// where the old run ceiling stopped at ten, and the run past the budget waits.
-func TestSmallRunsPackIntoTheWeightBudget(t *testing.T) {
-	branches := make([]string, 21)
-	for index := range branches {
-		branches[index] = fmt.Sprintf("s-%d", index)
+// All sizes share the same default numeric reservation and hard run ceiling.
+func TestSmallRunsRespectAdminCeiling(t *testing.T) {
+	branches := make([]string, 11)
+	for i := range branches {
+		branches[i] = fmt.Sprintf("s-%d", i)
 	}
-	admitted := runPacking(t, 10, 20, branches)
-	if admitted != 20 {
-		t.Fatalf("admitted %d S runs together, want 20 (the weight budget)", admitted)
+	if admitted := runPacking(t, 10, 10, branches); admitted != 10 {
+		t.Fatalf("admitted %d runs, want 10", admitted)
 	}
 }
 
-// TestMixedSizesRespectTheWeightBudget keeps the budget honest once runs may
-// outnumber maxConcurrentJobs: 4 L (12) + 3 M (6) + 2 S (2) is exactly 20, and
-// the S queued behind them must wait.
-func TestMixedSizesRespectTheWeightBudget(t *testing.T) {
-	branches := []string{"l-0", "l-1", "l-2", "l-3", "m-0", "m-1", "m-2", "s-0", "s-1", "s-2"}
-	admitted := runPacking(t, 10, 9, branches)
-	if admitted != 9 {
-		t.Fatalf("admitted %d runs, want 9 (weight 20 of 20, the tenth waits)", admitted)
+func TestMixedSizesUseNumericDefaultsAndAdminCeiling(t *testing.T) {
+	branches := []string{"l-0", "l-1", "l-2", "l-3", "m-0", "m-1", "m-2", "s-0", "s-1", "s-2", "s-3"}
+	if admitted := runPacking(t, 10, 10, branches); admitted != 10 {
+		t.Fatalf("admitted %d runs, want 10", admitted)
 	}
 }

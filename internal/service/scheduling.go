@@ -84,6 +84,9 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 	if isPendingCreate(run) {
 		result.State = "infra-pending"
 		result.Message = "Workflow creation outcome is uncertain; background cleanup is pending."
+		if run.Error == store.ExecutorIdentityPendingMessage || run.Error == store.AdmissionStalledPendingMessage {
+			result.Message = run.Error
+		}
 		return result, reason
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -100,6 +103,14 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 	}
 	if run.Status == model.RunQueued {
 		result.State = "queued"
+		if service.scope == nil {
+			if observer, ok := service.admission.(interface{ QueuedAdmissionMessage() string }); ok {
+				if message := observer.QueuedAdmissionMessage(); message != "" {
+					result.Message = message
+					return result
+				}
+			}
+		}
 		result.Message = "Awaiting scheduler claim; queue position follows priority then FIFO, not an execution estimate."
 		if observer, ok := service.admission.(admissionBlockerObserver); ok {
 			if blocker = service.visibleBlocker(observer.AdmissionBlocker()); blocker != nil {
@@ -254,10 +265,15 @@ func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
 		return fmt.Sprintf("Waiting for concurrency group %q behind run %s of the same repository, "+
 			"which is queued ahead in the group.", admission.Group, admission.GroupAhead)
 	case admission.Pressure != nil:
+		if admission.Weight == 0 && admission.Size == "" {
+			return (model.AdmissionBlocker{Pressure: admission.Pressure}).Reason()
+		}
 		if admission.Pressure.Redacted || admission.Pressure.Avg10Gate {
 			return admission.Pressure.Reason()
 		}
 		return fmt.Sprintf("Deferred: %s pressure %.1f%% (host PSI avg60); bounded by %ds per run.", admission.Pressure.Resource, admission.Pressure.Avg60, admission.Pressure.MaxDeferSeconds)
+	case admission.Weight == 0 && admission.BlockedBy != nil && admission.BlockedBy.Size == "" && admission.BlockedBy.RunCeiling:
+		return admission.BlockedBy.Reason()
 	case admission.HeadOfQueue && admission.BlockedBy != nil && admission.BlockedBy.Backfilling:
 		return fmt.Sprintf("At the head of the weighted resource admission queue (%s); %s smaller runs that fit beside it.",
 			admission.BlockedBy.Reason(), admission.BlockedBy.Backfill())
@@ -272,6 +288,8 @@ func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
 			return "Waiting for an IO/run concurrency slot."
 		}
 		return fmt.Sprintf("Waiting for admission reservation (declared requests/VM demand plus helper and memory headroom reserves): %dm CPU, %d memory bytes.", admission.DeclaredResources.CPUMilli, admission.DeclaredResources.MemoryBytes)
+	case admission.Weight == 0 && admission.NumericBudget == nil:
+		return "Waiting for a workflow slot."
 	case admission.BlockedBy != nil:
 		return "Waiting in the weighted resource admission queue, " + blockedBehindMessage(admission.BlockedBy)
 	default:

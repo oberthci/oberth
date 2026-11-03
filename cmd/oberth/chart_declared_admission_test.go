@@ -6,80 +6,34 @@ import (
 	"testing"
 )
 
-func TestChartDeclaredAdmissionBudgetsAndSingleKillSwitch(t *testing.T) {
-	base := []string{"template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@" + testImageDigest}
-	for _, custom := range []bool{false, true} {
-		args := append([]string{}, base...)
-		want := []string{"--disable-declared-admission=false", "--admission-cpu-millis=8000", "--admission-memory-bytes=17179869184", "--admission-io-runs=0", "--admission-memory-headroom-bytes=1073741824", "--admission-memory-headroom-percent=10"}
-		if custom {
-			args = append(args, "--set", "admission.declaredResources.disabled=true,admission.declaredResources.cpuMillis=4000,admission.declaredResources.memoryBytes=4294967296,admission.declaredResources.memoryHeadroomBytes=2147483648,admission.declaredResources.memoryHeadroomPercent=25,admission.declaredResources.ioRuns=2")
-			want = []string{"--disable-declared-admission=true", "--admission-cpu-millis=4000", "--admission-memory-bytes=4294967296", "--admission-io-runs=2", "--admission-memory-headroom-bytes=2147483648", "--admission-memory-headroom-percent=25"}
-		}
-		out, err := exec.Command("helm", args...).CombinedOutput()
+func TestChartIgnoresRetiredAdmissionBudgetsAndKillSwitch(t *testing.T) {
+	for _, value := range []string{"admission.declaredResources.disabled=true", "admission.declaredResources.cpuMillis=0", "admission.declaredResources.memoryHeadroomPercent=-1", "admission.declaredResources=null"} {
+		out, err := exec.Command("helm", "template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@"+testImageDigest, "--set", value).CombinedOutput()
 		if err != nil {
-			t.Fatalf("chart render failed: %v", err)
+			t.Fatalf("legacy value affected upgrade: %s %v %s", value, err, out)
 		}
-		if strings.Count(string(out), "kind: PriorityClass") != 3 || strings.Count(string(out), "value: 1000000") != 3 {
-			t.Error("platform recovery priorities must be enabled by default")
+		text := string(out)
+		if strings.Count(text, "kind: PriorityClass") != 3 || strings.Count(text, "value: 1000000") != 3 {
+			t.Error("platform recovery priorities must remain enabled")
 		}
-		for _, flag := range want {
-			if !strings.Contains(string(out), flag) {
-				t.Errorf("missing %s", flag)
+		for _, flag := range []string{"--disable-declared-admission", "--admission-cpu-millis", "--admission-memory-bytes", "--admission-memory-headroom", "--admission-io-runs"} {
+			if strings.Contains(text, flag) {
+				t.Fatal("retired global budget rendered", flag)
 			}
-		}
-	}
-	// Explicit zero disables headroom; absent reused values retain the default.
-	for _, tc := range []struct{ value, want string }{
-		{"admission.declaredResources.memoryHeadroomBytes=0", "0"},
-		{"admission.declaredResources.memoryHeadroomBytes=null", "1073741824"},
-		{"admission.declaredResources=null", "1073741824"},
-	} {
-		args := append(append([]string{}, base...), "--set", tc.value)
-		out, err := exec.Command("helm", args...).CombinedOutput()
-		if err != nil || !strings.Contains(string(out), "--admission-memory-headroom-bytes="+tc.want+"\n") {
-			t.Fatalf("headroom %s: %v, missing %s", tc.value, err, tc.want)
-		}
-	}
-	for _, tc := range []struct{ value, want string }{
-		{"admission.declaredResources.memoryHeadroomPercent=0", "0"},
-		{"admission.declaredResources.memoryHeadroomPercent=null", "10"},
-		{"admission.declaredResources=null", "10"},
-	} {
-		args := append(append([]string{}, base...), "--set", tc.value)
-		out, err := exec.Command("helm", args...).CombinedOutput()
-		if err != nil || !strings.Contains(string(out), "--admission-memory-headroom-percent="+tc.want+"\n") {
-			t.Fatalf("headroom percent %s: %v, missing %s", tc.value, err, tc.want)
-		}
-	}
-
-	for _, bad := range []string{"cpuMillis=0", "memoryBytes=0", "ioRuns=-1", "ioRuns=65", "memoryHeadroomBytes=-1", "memoryHeadroomBytes=1125899906842625", "memoryHeadroomBytes=1.5", "memoryHeadroomPercent=-1", "memoryHeadroomPercent=101", "memoryHeadroomPercent=1.5"} {
-		args := append(append([]string{}, base...), "--set", "admission.declaredResources."+bad)
-		if err := exec.Command("helm", args...).Run(); err == nil {
-			t.Fatalf("invalid administrator setting accepted: %s", bad)
 		}
 	}
 }
 
-func TestChartLegacyResourceCharges(t *testing.T) {
+func TestChartIgnoresLegacyResourceCharges(t *testing.T) {
 	base := []string{"template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@" + testImageDigest}
-	for _, tc := range []struct{ value, want string }{
-		{"", `\"L\":{\"cpu_milli\":3000,\"memory_bytes\":8589934592}`},
-		{"admission.legacyResources.L.cpu_milli=4500,admission.legacyResources.L.memory_bytes=10737418240", `\"L\":{\"cpu_milli\":4500,\"memory_bytes\":10737418240}`},
-		{"admission.legacyResources=null", `--admission-legacy-resources={}`},
-	} {
+	for _, value := range []string{"", "admission.legacyResources.L.cpu_milli=4500,admission.legacyResources.L.memory_bytes=10737418240", "admission.legacyResources=null", "admission.legacyResources.L.memory_bytes=-1", "admission.legacyResources.XXL.cpu_milli=1000"} {
 		args := append([]string{}, base...)
-		if tc.value != "" {
-			args = append(args, "--set", tc.value)
+		if value != "" {
+			args = append(args, "--set", value)
 		}
 		out, err := exec.Command("helm", args...).CombinedOutput()
-		if err != nil || !strings.Contains(string(out), tc.want) {
-			t.Fatalf("legacy charges %q: %v, missing %s", tc.value, err, tc.want)
-		}
-	}
-	for _, bad := range []string{"L.cpu_milli=0", "L.cpu_milli=1000001", "L.memory_bytes=-1", "L.memory_bytes=1.5", "XXL.cpu_milli=1000", "L.memory_bytes=1125899906842625"} {
-		args := append(append([]string{}, base...), "--set", "admission.legacyResources."+bad)
-		if err := exec.Command("helm", args...).Run(); err == nil {
-			t.Fatalf("invalid charge accepted: %s", bad)
+		if err != nil || strings.Contains(string(out), "--admission-legacy-resources") {
+			t.Fatalf("retired chart charges affect deployment: %q %v", value, err)
 		}
 	}
 }

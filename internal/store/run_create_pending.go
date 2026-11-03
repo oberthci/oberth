@@ -11,6 +11,14 @@ import (
 )
 
 const WorkflowSpecMismatchPendingMessage = "Workflow spec mismatch; cleanup pending"
+const ExecutorIdentityPendingMessage = "Executor identity readiness deadline exceeded after one issuance retry; cleanup pending"
+const AdmissionStalledPendingMessage = "Resource admission expired: no scheduled pod or progress; cleanup pending"
+
+// WorkflowCleanupReason admits only server-authored fixed reasons. Transport
+// errors and untrusted controller messages cannot become durable public text.
+func WorkflowCleanupReason(reason string) bool {
+	return reason == WorkflowSpecMismatchPendingMessage || reason == ExecutorIdentityPendingMessage || reason == AdmissionStalledPendingMessage
+}
 
 // MarkRunCreatePending retains an uncertain submission and re-arms its cleanup
 // atomically, even if cancel/supersede already completed an earlier NotFound.
@@ -20,7 +28,7 @@ func (s *Store) MarkRunCreatePending(ctx context.Context, id, workflowName strin
 	if strings.TrimSpace(id) == "" || strings.TrimSpace(workflowName) == "" {
 		return fmt.Errorf("%w: run ID and Job name required", ErrInvalid)
 	}
-	if len(reason) > 1 || (len(reason) == 1 && reason[0] != "" && reason[0] != WorkflowSpecMismatchPendingMessage) {
+	if len(reason) > 1 || (len(reason) == 1 && reason[0] != "" && !WorkflowCleanupReason(reason[0])) {
 		return fmt.Errorf("%w: unsupported Workflow cleanup reason", ErrInvalid)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -40,8 +48,11 @@ func (s *Store) MarkRunCreatePending(ctx context.Context, id, workflowName strin
 	}
 	now := unixNano(s.now())
 	message := "Workflow create outcome uncertain; cleanup pending"
-	if run.Error == WorkflowSpecMismatchPendingMessage || (len(reason) == 1 && reason[0] == WorkflowSpecMismatchPendingMessage) {
-		message = WorkflowSpecMismatchPendingMessage
+	if WorkflowCleanupReason(run.Error) {
+		message = run.Error
+	}
+	if len(reason) == 1 && WorkflowCleanupReason(reason[0]) {
+		message = reason[0]
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE runs SET phase=CASE WHEN status='running' THEN 'infrastructure-pending' ELSE phase END, error=?, updated_at=? WHERE id=?`, message, now, id); err != nil {
 		return err
@@ -76,7 +87,7 @@ func (s *Store) CompleteObservedRunCancellation(ctx context.Context, observed mo
 	if changed == 1 {
 		// A cancelled/superseded run keeps its classification, but must not keep
 		// displaying "cleanup pending" after the exact obligation is completed.
-		if _, err := tx.ExecContext(ctx, `UPDATE runs SET error=reason, updated_at=? WHERE id=? AND status='interrupted' AND error IN ('Workflow create outcome uncertain; cleanup pending', ?)`, unixNano(s.now()), observed.RunID, WorkflowSpecMismatchPendingMessage); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE runs SET error=reason, updated_at=? WHERE id=? AND status='interrupted' AND error IN ('Workflow create outcome uncertain; cleanup pending', ?, ?, ?)`, unixNano(s.now()), observed.RunID, WorkflowSpecMismatchPendingMessage, ExecutorIdentityPendingMessage, AdmissionStalledPendingMessage); err != nil {
 			return err
 		}
 		return tx.Commit()

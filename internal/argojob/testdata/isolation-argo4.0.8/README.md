@@ -92,3 +92,11 @@ with explicit executor helper resources and the replay token waiter. The authent
 its real operation with retained fake-client helpers and capture-only hooks.
 All 27 submitted Pods passed the retained Kubernetes v1.35.7 validator.
 No expected Pod was edited manually and no live cluster was used.
+
+The 2026-11-04 Kubernetes placement update recaptured the current Build inputs
+after conservative request defaults (2 CPU and 2Gi memory where requests are
+missing, honoring existing limits and template defaults). The authenticated
+v4.0.8 controller ran with capture-only hooks and upstream fake clients. All
+27 submitted Pods across these fixture sets passed the retained Kubernetes
+v1.35.7 validator. Existing isolation, executor identity and nonroot negative
+controls remain intact. No expected Pod was edited manually or live API used.

@@ -12,7 +12,7 @@ import (
 // alone, including the head of a free group.
 func TestWaitingAdmissionMessageNamesTheGroupAndTheRun(t *testing.T) {
 	const holder, ahead = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	const weightOnly = "Waiting in the weighted resource admission queue."
+	const weightOnly = "Waiting for a workflow slot."
 	for _, tc := range []struct {
 		admission model.AdmissionObservation
 		want      []string

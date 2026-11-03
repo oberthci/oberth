@@ -33,7 +33,7 @@ func (fixture *groupFixture) awaitAdmission(t *testing.T, run model.Run, what st
 // same group and of other repositories, kept waiting behind a run that no
 // longer existed until the server restarted. Superseding it must withdraw the
 // reservation at once, so the next grant pass admits the runs it blocked.
-func TestSupersedingAWaitingXLHeadReleasesItsReservationOnTheNextGrantPass(t *testing.T) {
+func TestSupersedingActiveWorkflowReleasesGroupAndSlotWithoutDrain(t *testing.T) {
 	fixture := newGroupFixture(t, 10)
 	fixture.engine.declare("busy", "", pipeline.L)
 	fixture.engine.declare("feat-kv", kubevirtGroup, pipeline.XL)
@@ -45,18 +45,12 @@ func TestSupersedingAWaitingXLHeadReleasesItsReservationOnTheNextGrantPass(t *te
 	small := fixture.branch(t, fixture.exampleService, "small", "d")
 	fixture.start(t)
 
-	if created := fixture.awaitCreated(t, 1); !created[holder.ID] {
-		t.Fatalf("created %v; want only the L holder", created)
+	created := fixture.awaitCreated(t, 3)
+	if !created[holder.ID] || !created[head.ID] || !created[small.ID] {
+		t.Fatalf("size classes prevented Kubernetes submission: %v", created)
 	}
-	fixture.awaitAdmission(t, head, "waiting XL at the queue head", func(snapshot *model.AdmissionObservation) bool {
-		return snapshot != nil && snapshot.State == "waiting" && snapshot.Size == string(pipeline.XL) && snapshot.Position == 1 &&
-			snapshot.Used == 3 && snapshot.Capacity == 20
-	})
-	fixture.awaitAdmission(t, member, "waiting behind the XL head in its group", func(snapshot *model.AdmissionObservation) bool {
-		return snapshot != nil && snapshot.State == "waiting" && snapshot.GroupAhead == head.ID
-	})
-	fixture.awaitAdmission(t, small, "waiting behind the XL head", func(snapshot *model.AdmissionObservation) bool {
-		return snapshot != nil && snapshot.State == "waiting"
+	fixture.awaitAdmission(t, member, "waiting behind active workflow in its group", func(snapshot *model.AdmissionObservation) bool {
+		return snapshot != nil && snapshot.State == "waiting" && snapshot.GroupHolder == head.ID
 	})
 	fixture.assertNothingCreated(t)
 
@@ -65,8 +59,8 @@ func TestSupersedingAWaitingXLHeadReleasesItsReservationOnTheNextGrantPass(t *te
 	if superseded.Status != model.RunInterrupted || superseded.SupersededBy != newer.ID {
 		t.Fatalf("superseded head = status %s superseded_by %q", superseded.Status, superseded.SupersededBy)
 	}
-	created := fixture.awaitCreated(t, 2)
-	if !created[member.ID] || !created[small.ID] {
+	created = fixture.awaitCreated(t, 1)
+	if !created[member.ID] {
 		t.Fatalf("after the supersede the grant pass admitted %v; want the group member %s and the small run %s", created, member.ID, small.ID)
 	}
 	if snapshot := fixture.scheduler.AdmissionSnapshot(head.QueueSequence); snapshot != nil {
