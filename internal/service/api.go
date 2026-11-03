@@ -1487,7 +1487,7 @@ func (service *API) status(ctx context.Context, repositoryName, selector, actor 
 		(runErr != nil || run.RefKind == model.RefBranch) {
 		response, refErr := service.statusForBranchRef(ctx, repositoryName, selector, actor)
 		if refErr == nil && runErr == nil && response.Repository.ID != repository.ID {
-			return StatusResponse{}, fmt.Errorf("%w: %q", ErrAmbiguousRepository, selector)
+			return StatusResponse{}, service.ambiguousRepositories(ctx, selector, []model.Repository{repository, response.Repository})
 		}
 		// A missing or unreadable current ref is not evidence that its old
 		// branch run is current. Historical evidence remains addressable by SHA.
@@ -1593,15 +1593,17 @@ func (service *API) statusForBranchRef(ctx context.Context, repositoryName, sele
 	}
 	var matched model.Repository
 	var matchedSHA string
+	var matches []model.Repository
 	for _, repository := range repositories {
 		sha, refErr := service.refs.RefSHA(ctx, service.cacheInputFor(ctx, repository), strings.TrimPrefix(selector, "refs/heads/"))
 		if refErr != nil {
 			continue
 		}
-		if matched.ID != 0 {
-			return StatusResponse{}, fmt.Errorf("%w: %q", ErrAmbiguousRepository, selector)
-		}
+		matches = append(matches, repository)
 		matched, matchedSHA = repository, sha
+	}
+	if len(matches) > 1 {
+		return StatusResponse{}, service.ambiguousRepositories(ctx, selector, matches)
 	}
 	if matched.ID == 0 {
 		return StatusResponse{}, fmt.Errorf("%w: run selector %q", store.ErrNotFound, selector)
@@ -3038,6 +3040,7 @@ func (service *API) resolveRunWith(ctx context.Context, repositoryName, selector
 	}
 	var matchedRepository model.Repository
 	var matchedRun model.Run
+	var matches []model.Repository
 	for _, repository := range repositories {
 		run, resolveErr := resolve(ctx, repository.ID, selector)
 		if errors.Is(resolveErr, store.ErrNotFound) {
@@ -3046,10 +3049,11 @@ func (service *API) resolveRunWith(ctx context.Context, repositoryName, selector
 		if resolveErr != nil {
 			return model.Repository{}, model.Run{}, resolveErr
 		}
-		if matchedRepository.ID != 0 {
-			return model.Repository{}, model.Run{}, fmt.Errorf("%w: %q", ErrAmbiguousRepository, selector)
-		}
+		matches = append(matches, repository)
 		matchedRepository, matchedRun = repository, run
+	}
+	if len(matches) > 1 {
+		return model.Repository{}, model.Run{}, service.ambiguousRepositories(ctx, selector, matches)
 	}
 	if matchedRepository.ID == 0 {
 		return model.Repository{}, model.Run{}, fmt.Errorf("%w: run selector %q", store.ErrNotFound, selector)

@@ -1462,7 +1462,7 @@ func runAccessList(ctx context.Context, arguments []string, output io.Writer) er
 	flags := flag.NewFlagSet("access list", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path (in-pod; requires the live admin daemon)")
-	repo := flags.String("repo", "", "filter by repository name")
+	repo := flags.String("repo", "", "filter by repository name; use upstream/org/name when ambiguous")
 	revoked := flags.Bool("revoked", false, "include revoked grants")
 	jsonOutput := flags.Bool("json", false, "emit grants as a JSON array (machine-readable)")
 	if err := flags.Parse(arguments); err != nil {

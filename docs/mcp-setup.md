@@ -970,3 +970,11 @@ use a longer prefix or the full ID. This also applies to ID pagination cursors,
 `run_priority`, `admission_release`, `promote_status`, and `promote_retry`.
 Issue IDs and grant IDs are decimal integers and must be supplied in full.
 Publication IDs (for `publication_abandon`) remain exact IDs.
+
+Repository arguments accept the fully qualified `upstream/org/name` form, for
+example `codeberg/acme/widget`. A bare `widget` or `acme/widget` is accepted only
+when unique among repositories visible to the caller. Ambiguity errors list
+all visible fully qualified candidates; pass one as `repo` to `promote`,
+`status`, `sync`, `wait`, or other repository-taking tools. The same form works
+with CLI `--repo` options and MCP JSON arguments. When an omitted repository
+makes a SHA or branch ambiguous, the error lists candidates as well.

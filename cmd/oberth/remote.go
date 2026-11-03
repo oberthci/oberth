@@ -122,7 +122,7 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 	}
 	flags := flag.NewFlagSet("runs", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	repo := flags.String("repo", "", "only this repository")
+	repo := flags.String("repo", "", "only this repository; use upstream/org/name when ambiguous")
 	ref := flags.String("ref", "", "only this branch or tag")
 	limit := flags.Int("limit", 20, "runs per page (at most 100)")
 	before := flags.String("before", "", "only runs older than this cursor (printed after a full page)")

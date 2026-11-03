@@ -505,6 +505,9 @@ func toolDefinitions() []map[string]any {
 		return map[string]any{"type": "integer", "description": "Timeout seconds; omitted or zero defaults to 600; values above 600 are rejected", "minimum": 0, "maximum": 600, "default": 600}
 	}
 	object := func(properties map[string]any, required ...string) map[string]any {
+		if repo, ok := properties["repo"].(map[string]any); ok {
+			repo["description"] = fmt.Sprint(repo["description"]) + "; use upstream/org/name when ambiguous (for example codeberg/acme/widget). Ambiguity errors list fully qualified visible candidates."
+		}
 		schema := map[string]any{"type": "object", "properties": properties, "additionalProperties": false}
 		if len(required) > 0 {
 			schema["required"] = required

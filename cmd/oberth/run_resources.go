@@ -15,7 +15,7 @@ import (
 func runRunResources(ctx context.Context, arguments []string, output io.Writer) error {
 	flags := flag.NewFlagSet("run resources", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	repo := flags.String("repo", "", "registered repository (optional with --run)")
+	repo := flags.String("repo", "", "registered repository (optional with --run); use upstream/org/name when ambiguous")
 	run := flags.String("run", "", "exact run ID or unique prefix")
 	ref := flags.String("ref", "", "exact ref; default includes default branch and its promotion runs; any includes all refs")
 	stage := flags.String("burn", "", "optional burn")
