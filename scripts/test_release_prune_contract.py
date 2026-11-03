@@ -5,6 +5,7 @@ Structural contract test verifying the prune block exists in release.sh with
 the correct converged-set definition, fail-closed semantics, and
 AGENT-CONTRACT documentation. (#703/#719)
 """
+import ast
 import unittest
 from pathlib import Path
 
@@ -35,18 +36,22 @@ class PruneContractTests(unittest.TestCase):
         """The converged set must include the Oberth-specific fixed aliases."""
         script = (ROOT / '.oberth/release.sh').read_text()
         # Oberth uses SHA256SUMS.sigstore.json (cosign bundle), not .sig.
-        # No release.json or release.json.sig.
+        # Signed release.json metadata and its Sigstore bundle are also fixed aliases.
         self.assertIn('"VERSION", "SHA256SUMS", "SHA256SUMS.sigstore.json", "cosign.pub"', script)
 
-    def test_prune_does_not_include_cli_artifacts(self):
-        """The converged set must not include non-Oberth artifacts."""
+    def test_prune_fixed_aliases_match_signed_release_contract(self):
+        """Keep the signed release record; reject retired detached signatures."""
         script = (ROOT / '.oberth/release.sh').read_text()
-        # Find the inline python prune script section.
         prune_start = script.index('list-type=2&prefix=oberth/latest/')
-        prune_section = script[prune_start - 500:prune_start + 2000]
-        # Oberth does not ship release.json or SHA256SUMS.sig.
-        self.assertNotIn('"release.json"', prune_section)
-        self.assertNotIn('"SHA256SUMS.sig"', prune_section)
+        fixed_start = script.index('fixed = ', prune_start) + len('fixed = ')
+        fixed_end = script.index('\n', fixed_start)
+        fixed = ast.literal_eval(script[fixed_start:fixed_end])
+        self.assertEqual(fixed, {
+            'VERSION', 'SHA256SUMS', 'SHA256SUMS.sigstore.json', 'cosign.pub',
+            'release.json', 'release.json.sigstore.json',
+        })
+        self.assertNotIn('SHA256SUMS.sig', fixed)
+        self.assertNotIn('release.json.sig', fixed)
 
     def test_prune_uses_r2_curl_config(self):
         """The prune must use the same R2 credential config as finalize."""
