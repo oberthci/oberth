@@ -3,9 +3,10 @@ package service
 import (
 	"context"
 	"fmt"
-	"github.com/oberthci/oberth/internal/model"
 	"sort"
 	"strings"
+
+	"github.com/oberthci/oberth/internal/model"
 )
 
 // Callers supply only repositories visible to the actor, including when no

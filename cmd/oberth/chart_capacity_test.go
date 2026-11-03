@@ -2,9 +2,10 @@ package main
 
 import (
 	"os/exec"
-	"sigs.k8s.io/yaml"
 	"strings"
 	"testing"
+
+	"sigs.k8s.io/yaml"
 )
 
 func TestChartAdmissionCapacity(t *testing.T) {

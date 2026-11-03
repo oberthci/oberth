@@ -1177,18 +1177,17 @@ func (service *API) readRun(ctx context.Context, actor api.Actor, id string, sum
 		return nil, fmt.Errorf("load run steps: %w", err)
 	}
 	run = service.runAdmissionContext(ctx, run, true)
-	response := RunDetailResponse{Run: service.presentationRun(ctx, run), Steps: steps, Scheduling: service.scheduling(ctx, run, steps)}
-	applyExecutionDisplay(&response.Run, response.Scheduling)
-	if response.Run.DisplayStatus == "queued" && response.Scheduling != nil {
-		response.Run.DisplayReason = response.Scheduling.Message
-	}
 	if summary {
-		response.Run.Repo, err = service.repositoryIdentity(ctx, run.RepoID)
+		shown := service.presentationRun(ctx, run)
+		run.Repo, err = service.repositoryIdentity(ctx, run.RepoID)
 		if err != nil {
 			return nil, err
 		}
-		return summarizeRun(response.Run, steps), nil
+		run.DisplayStatus, run.DisplayReason = shown.DisplayStatus, shown.DisplayReason
+		return summarizeRun(run, steps), nil
 	}
+	response := RunDetailResponse{Run: service.presentationRun(ctx, run), Steps: steps, Scheduling: service.scheduling(ctx, run, steps)}
+	applyExecutionDisplay(&response.Run, response.Scheduling)
 	response.RerunOf = service.runRerunOf(ctx, run.ID)
 	if reader, ok := service.history.(RunTimingReader); ok {
 		timing, timingErr := reader.RunTiming(ctx, run.ID)
@@ -3355,7 +3354,7 @@ func (service *API) publishRetry(ctx context.Context, actor api.Actor, id string
 		return api.PublishRetryResponse{}, fmt.Errorf("%w: run or promotion ID is required", ErrInvalidInput)
 	}
 
-	run, runErr := model.Run{}, error(store.ErrNotFound)
+	run, runErr := model.Run{}, store.ErrNotFound
 	if service.history != nil {
 		run, runErr = service.resolveReadRunID(ctx, id)
 	}

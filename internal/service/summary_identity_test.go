@@ -1,16 +1,21 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 
+	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
-func TestSummaryIdentityMatchesDetail(t *testing.T) {
+func TestSummaryIdentityUsesExistingPresentation(t *testing.T) {
 	f := newScopeFixture(t)
 	for _, run := range f.runs["github"] {
-		detail, err := f.call(scopedActor, "run_get", map[string]any{"id": run.ID})
+		current, err := f.store.Run(t.Context(), run.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -23,7 +28,7 @@ func TestSummaryIdentityMatchesDetail(t *testing.T) {
 		if err := json.Unmarshal(encoded, &got); err != nil {
 			t.Fatal(err)
 		}
-		shown := detail.(RunDetailResponse).Run
+		shown := f.service.presentationRun(t.Context(), current)
 		for key, want := range map[string]string{"repo": "github/oberthci/oberth", "ref": run.Ref, "sha": run.SHA, "display_status": shown.DisplayStatus, "display_reason": shown.DisplayReason} {
 			if got[key] != want {
 				t.Errorf("%s=%v want %q", key, got[key], want)
@@ -64,5 +69,47 @@ func TestPromotionResponseIdentity(t *testing.T) {
 				t.Fatalf("%s identity: %s", tool, encoded)
 			}
 		}
+	}
+}
+
+type summarySchedulingProbe struct{ calls int }
+
+func (p *summarySchedulingProbe) ObserveScheduling(context.Context, model.Run) (*model.ExecutionObservation, error) {
+	p.calls++
+	return nil, errors.New("summary must not query Kubernetes")
+}
+func TestSummaryDoesNotPollExecution(t *testing.T) {
+	f := newControlFixture(t)
+	run, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/compact", SHA: strings.Repeat("a", 40), Actor: "reader", Trigger: "branch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.ClaimNextRun(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	controlBefore := f.api(t)
+	beforeRaw, _ := json.Marshal(map[string]any{"id": run.ID, "summary": true})
+	value, err := controlBefore.CallTool(t.Context(), api.Actor{Identity: "reader"}, "run_get", beforeRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := value.(RunSummaryResponse); got.Status != model.RunRunning {
+		t.Fatalf("summary changed durable status: %+v", got)
+	}
+	if _, err := f.store.SetRunWorkflowName(t.Context(), run.ID, "summary-workflow"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.MarkRunSubmitted(t.Context(), run.ID); err != nil {
+		t.Fatal(err)
+	}
+	control := f.api(t)
+	probe := &summarySchedulingProbe{}
+	control.schedulingObserver = probe
+	raw, _ := json.Marshal(map[string]any{"id": run.ID, "summary": true})
+	if _, err := control.CallTool(t.Context(), api.Actor{Identity: "reader"}, "run_get", raw); err != nil {
+		t.Fatal(err)
+	}
+	if probe.calls != 0 {
+		t.Fatal("compact summary queried execution state")
 	}
 }

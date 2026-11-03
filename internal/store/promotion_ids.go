@@ -26,7 +26,7 @@ func (s *Store) ResolvePromotionIDIn(ctx context.Context, id string, repoIDs []i
 	if err != nil {
 		return model.Promotion{}, fmt.Errorf("resolve promotion ID: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var matches []string
 	for rows.Next() {
 		var match string

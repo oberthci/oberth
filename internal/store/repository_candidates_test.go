@@ -2,10 +2,11 @@ package store
 
 import (
 	"errors"
-	"github.com/oberthci/oberth/internal/model"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/model"
 )
 
 func TestRepositoryAmbiguityListsQualifiedCandidates(t *testing.T) {

@@ -7,11 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oberthci/oberth/internal/api"
-	"github.com/oberthci/oberth/internal/model"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/oberthci/oberth/internal/api"
+	"github.com/oberthci/oberth/internal/model"
 )
 
 type capacityNodes struct {
