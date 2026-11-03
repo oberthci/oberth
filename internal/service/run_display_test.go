@@ -186,13 +186,15 @@ func TestDefaultRunListNumbersClaimedAndUnclaimedTogether(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The queue reads bottom-up: the claimed run is admitted next, so it is
+	// the lowest queued row and position 1.
 	runs := value.([]model.Run)
-	if len(runs) != 2 || runs[0].ID != first.ID || runs[1].ID != second.ID {
+	if len(runs) != 2 || runs[0].ID != second.ID || runs[1].ID != first.ID {
 		t.Fatalf("queue order = %+v", runs)
 	}
 	for i, run := range runs {
-		if run.DisplayStatus != "queued" || run.Scheduling == nil || run.Scheduling.QueuePosition != int64(i+1) || run.DisplayReason == "" {
-			t.Fatalf("queue position %d = %+v", i+1, run)
+		if want := int64(len(runs) - i); run.DisplayStatus != "queued" || run.Scheduling == nil || run.Scheduling.QueuePosition != want || run.DisplayReason == "" {
+			t.Fatalf("queue position %d = %+v", want, run)
 		}
 	}
 	filteredValue, err := service.Runs(ctx, actor, api.RunFilter{Ref: second.Ref})

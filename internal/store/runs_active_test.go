@@ -94,13 +94,13 @@ func TestListActiveRunsOrdersByStartThenAdmissionThenQueue(t *testing.T) {
 		t.Fatalf("ref-filtered active = %v, %v", runIDs(byRef), err)
 	}
 
-	// The default list has one queue in accepted order, then started and
-	// finished runs in descending admission time.
+	// The default list has one queue bottom-up (the run admitted next lowest),
+	// then running runs newest start first, then finished runs.
 	all, err := s.ListRecentRuns(ctx, model.RunListFilter{Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantAll := []string{waiting.ID, queuedFirst.ID, hidden.ID, queuedSecond.ID, finished.ID, runningLate.ID, runningEarly.ID}
+	wantAll := []string{queuedSecond.ID, hidden.ID, queuedFirst.ID, waiting.ID, runningLate.ID, runningEarly.ID, finished.ID}
 	if got := runIDs(all); strings.Join(got, ",") != strings.Join(wantAll, ",") {
 		t.Fatalf("recent order = %v, want %v", got, wantAll)
 	}

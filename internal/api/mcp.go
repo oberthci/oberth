@@ -575,13 +575,13 @@ func toolDefinitions() []map[string]any {
 		tool("repo_archive", "Archive a repository, retaining all history and refusing new work. Requires an unscoped admin; refuses in-flight runs and pending promotions. Drops the Git cache.", object(map[string]any{"repo": stringProperty("Repository name")}, "repo")),
 		tool("repo_unarchive", "Unarchive a repository and allow new work again. Requires an unscoped admin.", object(map[string]any{"repo": stringProperty("Repository name")}, "repo")),
 		tool("repo_remove", "Remove a repository mapping and its Git cache. Requires admin uplink. Refuses if runs are in-flight or promotions are pending.", object(map[string]any{"repo": stringProperty("Repository name")}, "repo")),
-		tool("run_list", "List the whole bounded queue first in position order, then admitted and terminal runs by admission time, newest first. A full dated page returns next_before (or next_cursor for a scoped uplink); pass it as before with the same filters for older runs until it is absent.", object(map[string]any{
+		tool("run_list", "List the queue first, with the run admitted next at its bottom, then running runs newest start first, then terminal runs newest finish first. Queued and running runs are never dropped by the limit or pushed below finished runs. A full terminal page returns next_before (or next_cursor for a scoped uplink); pass it as before with the same filters for older runs until it is absent.", object(map[string]any{
 			"repo":   stringProperty("Filter by repository name"),
 			"ref":    stringProperty("Filter by branch or tag ref"),
-			"limit":  integerProperty("Maximum dated runs per page (default 50, max 100); the first page also carries the whole bounded queue"),
+			"limit":  integerProperty("Maximum terminal runs per page (default 50, max 100); the first page also carries every queued and running run"),
 			"before": map[string]any{"type": []string{"integer", "string"}, "description": "Exclusive cursor: next_before (a run sequence) or next_cursor (a run ID) from the previous page"},
 			"view": map[string]any{"type": "string", "enum": []string{"all", "active", "history"}, "default": "all",
-				"description": "all: queue first, then admitted/terminal runs by admission time (default). history: terminal runs only with legacy paging. active: deprecated compatibility view of non-terminal runs in scheduling order, unpaged and capped at 500"},
+				"description": "all: queue, then running runs, then terminal runs newest finish first (default). history: terminal runs only with legacy paging. active: deprecated compatibility view of non-terminal runs in scheduling order, unpaged and capped at 500"},
 		})),
 		tool("audit_list", "List verified audit-chain entries newest first. Admin uplink required; a scoped uplink gets no audit rows. Each entry carries its chain position (id, sha256, previous_sha256) and is recomputed against the chain's hash before it is returned. A full page returns next_before; pass it as before for older entries.", object(map[string]any{
 			"action": stringProperty("Action prefix, e.g. backup. or secret_access."),
