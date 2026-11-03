@@ -160,7 +160,9 @@ func admitCapabilityResource(location string, r *wfv1.ResourceTemplate, capabili
 	// Only server-generated DNS/UID values can be substituted into an opaque
 	// manifest. Arbitrary parameters could inject YAML and replace its envelope.
 	static := strings.NewReplacer("{{workflow.name}}", "name", "{{workflow.namespace}}", "namespace", "{{workflow.uid}}", "uid").Replace(r.Manifest)
-	if strings.Contains(static, "{{") || strings.Contains(static, "}}") {
+	// Closing JSON objects can contain adjacent braces; only an opening
+	// template delimiter can begin an unapproved Argo substitution.
+	if strings.Contains(static, "{{") {
 		return refuse("resource manifest contains a dynamic expression outside the server-owned workflow identity")
 	}
 
@@ -182,30 +184,49 @@ func admitCapabilityResource(location string, r *wfv1.ResourceTemplate, capabili
 	if !bytes.HasPrefix(bytes.TrimSpace(encoded), []byte("{")) {
 		return refuse("resource manifest must be an object")
 	}
-	var object struct {
-		APIVersion string `json:"apiVersion"`
-		Kind       string `json:"kind"`
-		Metadata   struct {
-			Namespace    string `json:"namespace"`
-			Name         string `json:"name"`
-			GenerateName string `json:"generateName"`
-		} `json:"metadata"`
+	// Decode by exact keys. encoding/json's struct matching folds both ASCII
+	// and Unicode (for example Kind and nameſpace), unlike Kubernetes.
+	var object, metadata map[string]json.RawMessage
+	if json.Unmarshal(encoded, &object) != nil || rejectEnvelopeCaseVariants(object, "apiVersion", "kind", "metadata") != nil || json.Unmarshal(object["metadata"], &metadata) != nil || rejectEnvelopeCaseVariants(metadata, "namespace", "name", "generateName") != nil {
+		return refuse("invalid or case-variant resource envelope keys")
 	}
-	if err = json.Unmarshal(encoded, &object); err != nil {
-		return refuse("invalid resource envelope")
+	var apiVersion, kind, namespace, name, generateName string
+	for _, field := range []struct {
+		raw         json.RawMessage
+		destination *string
+	}{
+		{object["apiVersion"], &apiVersion}, {object["kind"], &kind},
+		{metadata["namespace"], &namespace}, {metadata["name"], &name}, {metadata["generateName"], &generateName},
+	} {
+		if len(field.raw) != 0 && json.Unmarshal(field.raw, field.destination) != nil {
+			return refuse("invalid resource envelope")
+		}
 	}
-	if object.Metadata.Namespace != "" && object.Metadata.Namespace != capability.Namespace {
+	if namespace != "" && namespace != capability.Namespace {
 		return refuse("resource namespace differs from the operator capability")
 	}
-	if object.Metadata.Name == "" && object.Metadata.GenerateName == "" {
+	if name == "" && generateName == "" {
 		return refuse("resource requires a name or generateName")
 	}
 	for _, entry := range capability.ResourceKinds {
-		if entry.APIVersion == object.APIVersion && entry.Kind == object.Kind && slices.Contains(entry.Actions, r.Action) {
+		if entry.APIVersion == apiVersion && entry.Kind == kind && slices.Contains(entry.Actions, r.Action) {
 			return nil
 		}
 	}
 	return refuse("resource API version, kind or action is not granted")
+}
+
+// Unknown spec/status fields remain operator-defined. Only the envelope keys
+// used for authorization have reserved spellings, including optional fields.
+func rejectEnvelopeCaseVariants(object map[string]json.RawMessage, keys ...string) error {
+	for key := range object {
+		for _, exact := range keys {
+			if key != exact && strings.EqualFold(key, exact) {
+				return errors.New("case-variant resource envelope key")
+			}
+		}
+	}
+	return nil
 }
 
 func admitExtendedResources(location string, resources corev1.ResourceRequirements, c *Capability) []error {

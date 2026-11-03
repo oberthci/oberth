@@ -145,3 +145,35 @@ func TestCapabilityIdentitySeparatesResourceAuthority(t *testing.T) {
 		})
 	}
 }
+
+func TestCapabilityResourceEnvelopeRejectsAmbiguousKeys(t *testing.T) {
+	for _, test := range []struct{ name, manifest string }{
+		{"unicode kind", "apiVersion: tasks.example.test/v1\nkind: Pod\nKind: Task\nmetadata: {name: x, namespace: pipelines}"},
+		{"unicode namespace", "apiVersion: tasks.example.test/v1\nkind: Task\nmetadata: {name: x, namespace: kube-system, nameſpace: pipelines}"},
+		{"ascii kind", "apiVersion: tasks.example.test/v1\nKind: Task\nmetadata: {name: x}"},
+		{"ascii apiVersion", "APIVersion: tasks.example.test/v1\nkind: Task\nmetadata: {name: x}"},
+		{"ascii metadata", "apiVersion: tasks.example.test/v1\nkind: Task\nMetadata: {name: x}"},
+		{"ascii namespace", "apiVersion: tasks.example.test/v1\nkind: Task\nmetadata: {name: x, Namespace: pipelines}"},
+		{"ascii name", "apiVersion: tasks.example.test/v1\nkind: Task\nmetadata: {Name: x}"},
+		{"ascii generateName", "apiVersion: tasks.example.test/v1\nkind: Task\nmetadata: {GenerateName: x}"},
+		{"yaml duplicate", "apiVersion: tasks.example.test/v1\nkind: Pod\nkind: Task\nmetadata: {name: x}"},
+		{"json duplicate", `{"apiVersion":"tasks.example.test/v1","kind":"Pod","kind":"Task","metadata":{"name":"x"}}`},
+		{"json nested duplicate", `{"apiVersion":"tasks.example.test/v1","kind":"Task","metadata":{"name":"x","namespace":"other","namespace":"pipelines"}}`},
+		{"opaque duplicate", `{"apiVersion":"tasks.example.test/v1","kind":"Task","metadata":{"name":"x"},"spec":{"duplicate":1,"duplicate":2}}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			resource := &wfv1.ResourceTemplate{Action: "create", Manifest: test.manifest}
+			if err := admitCapabilityResource("test", resource, capabilityPolicyForTest(t).Capability); err == nil {
+				t.Fatal("ambiguous resource envelope accepted")
+			}
+		})
+	}
+	for _, manifest := range []string{
+		"apiVersion: tasks.example.test/v1\nkind: Task\nmetadata: {name: x, namespace: pipelines}\nspec: {PascalCase: opaque, metadata: {Name: opaque}}",
+		`{"apiVersion":"tasks.example.test/v1","kind":"Task","metadata":{"generateName":"x-"},"spec":{"PascalCase":"opaque"}}`,
+	} {
+		if err := admitCapabilityResource("test", &wfv1.ResourceTemplate{Action: "create", Manifest: manifest}, capabilityPolicyForTest(t).Capability); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
