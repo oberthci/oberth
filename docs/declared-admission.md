@@ -78,9 +78,9 @@ Existing source validity, grants and per-container ceilings still apply.
 Each concurrent pod also reserves 100m CPU and 256Mi memory for server/executor
 helpers. Each declared run also holds max(fixed bytes, a percentage of its
 concurrent memory request envelope), defaulting to max(1Gi, 10%), for usage above
-requests. The percentage is rounded up to whole bytes before executor reserves. This is capacity held aside, not a
-mutation of pod requests. Deployment
-executor defaults must fit this allowance; review them before release. CPU and
+requests. The percentage is rounded up to whole bytes before executor reserves.
+This is capacity held aside, not a mutation of pod requests. Deployment executor
+defaults must fit this allowance; review them before release. CPU and
 memory budgets must exclude platform reserve and other external work. Declared
 VM host demand is included in these budgets. They are administrator settings,
 not detected host capacity or measurements.
@@ -111,7 +111,7 @@ remain enforced. No request or limit is inserted into the manifest.
 
 Ordinary-container requests should represent reviewed, measured maximum peaks.
 Kubernetes queues pods by requests and enforces limits; the host admission budget
-and fixed run headroom provide a coarse packing ceiling rather than reserving
+and run headroom provide a coarse packing ceiling rather than reserving
 every possible limit simultaneously. Proportional headroom scales with large
 runs while the fixed minimum covers small ones. Two 20Gi-request / 30Gi-limit
 runs, each with one executor pod, reserve 2 × (20Gi + max(1Gi, 2Gi) + 256Mi) =

@@ -125,7 +125,7 @@ legacy size path and memory-limit notice. Missing, zero or unknown requests,
 including helper requests, also retain legacy size admission; undeclared work
 earns no reduced reservation. Admission does not insert requests or limits.
 VM guest demand retains its existing conservative request/limit envelope and
-launcher reserve. The fixed run reserve applies to the combined host envelope.
+launcher reserve. The same max(fixed, proportional) headroom applies to the combined host envelope.
 
 Status messages report the total reservation, including helper and memory
 headroom reserves. The numeric budget, IO/run ceiling, legacy size weights,
