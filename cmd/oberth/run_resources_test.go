@@ -46,3 +46,21 @@ func TestRunResourcesJSONOverridesFormat(t *testing.T) {
 		t.Fatalf("--json did not select JSON: %s", &out)
 	}
 }
+
+func TestRunResourcesCLIPreservesSizingAcceptance(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"steps":[{"template":"compile","sizing_acceptance":{"status":"censored","sufficient":false,"required_runs":5,"comparable_complete_runs":4,"cohorts":1,"censored_attempts":1,"reasons":["memory limit reached"]}}]}`))
+	}))
+	defer server.Close()
+	t.Setenv("OBERTH_BASE_URL", server.URL)
+	t.Setenv("OBERTH_TOKEN", "fixture")
+	for _, format := range []string{"json", "yaml"} {
+		var out strings.Builder
+		if err := runRunResources(t.Context(), []string{"--repo=fixture", "--format=" + format}, &out); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), "sizing_acceptance") || !strings.Contains(out.String(), "censored") || !strings.Contains(out.String(), "memory limit reached") {
+			t.Fatal(out.String())
+		}
+	}
+}

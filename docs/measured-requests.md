@@ -75,8 +75,24 @@ including helpers; shared PVC storage is excluded. Main-container IO read/write
 bytes and pod PSI stall nanoseconds are reported separately. Unknown is never
 zero. Sampled peaks remain lower bounds, including killed attempts.
 
-Suggestions require **five distinct terminal runs** with memory, average CPU,
-ephemeral and duration data. Named constants in `internal/measured/report.go`
+Every JSON/YAML step reports `sizing_acceptance`: `status` (`sufficient`,
+`insufficient`, `non_comparable` or `censored`), `sufficient`, `required_runs`,
+`comparable_complete_runs`, `cohorts`, `censored_attempts` and explicit `reasons`.
+The CLI and MCP use the same report. Suggestions require **five distinct
+terminal runs with all required measurements together**: memory, average/peak
+CPU, ephemeral storage, duration and known historical CPU/memory/storage limits.
+Retries in one run count once. Separate partial histories for different metrics
+cannot be combined into five complete runs.
+
+Comparable means the same normalized step and owning repository with unchanged
+observed request/limit vectors and workflow size. Mixed conditions refuse advice;
+unknown historical limits are never replaced by today's declarations. An explicit
+zero limit means known unlimited; an absent limit means unknown. This comparison
+cannot prove equivalent inputs or hardware, so operator review still matters.
+Any limit-censored observation, OOM or deadline kill refuses the entire suggestion,
+including reductions. External sampled peaks retain their lower-bound warning.
+
+Named constants in `internal/measured/report.go`
 implement these rules for both the tool and the offline table:
 
 | Field | Suggestion |
