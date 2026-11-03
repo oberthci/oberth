@@ -282,8 +282,9 @@ func run(ctx context.Context, intent vmrunner.KVMIntent, artifactRoot, privateRo
 	if e = qemu.Start(); e != nil {
 		return vmrunner.KVMReport{}, e
 	}
-	done := make(chan error, 1)
-	go func() { done <- qemu.Wait() }()
+	type processResult struct{ err error }
+	done := make(chan processResult, 1)
+	go func() { done <- processResult{err: qemu.Wait()} }()
 	joined := false
 	defer func() {
 		_ = syscall.Kill(-qemu.Process.Pid, syscall.SIGKILL)
@@ -316,10 +317,10 @@ func run(ctx context.Context, intent vmrunner.KVMIntent, artifactRoot, privateRo
 		return vmrunner.KVMReport{}, e
 	}
 	select {
-	case e = <-done:
+	case result := <-done:
 		joined = true
-		if e != nil {
-			return vmrunner.KVMReport{}, e
+		if result.err != nil {
+			return vmrunner.KVMReport{}, result.err
 		}
 	case <-ctx.Done():
 		return vmrunner.KVMReport{}, ctx.Err()
