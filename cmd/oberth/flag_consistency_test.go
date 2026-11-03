@@ -8,8 +8,9 @@ import (
 
 func TestSharedFlagSyntax(t *testing.T) {
 	t.Setenv("OBERTH_TOKEN", "fixture")
-	config, err := parseMCPFlags("fixture", []string{"arg", "-url=http://fixture.invalid/mcp"}, 1)
-	if err != nil || config.URL != "http://fixture.invalid/mcp" {
+	// Keep the syntax fixture valid under the shared HTTPS transport policy.
+	config, err := parseMCPFlags("fixture", []string{"arg", "-url=https://fixture.invalid/mcp"}, 1)
+	if err != nil || config.URL != "https://fixture.invalid/mcp" {
 		t.Fatalf("single dash or trailing flag rejected: %+v %v", config, err)
 	}
 	options, err := parseCancelOptions([]string{"run", "--force=false"}, false)
