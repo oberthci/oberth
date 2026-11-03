@@ -86,3 +86,17 @@ func currentDeadlineNodes(workflow *wfv1.Workflow) map[string]bool {
 	}
 	return nodes
 }
+
+// The server clock includes controller startup and mutex waits. Keep it
+// separate from Argo's start clock so clients never conflate their anchors.
+func observeServerDeadline(workflow *wfv1.Workflow, result *model.ExecutionObservation, budget time.Duration, now time.Time) {
+	deadline := &model.ExecutionDeadline{BudgetSeconds: int64(budget / time.Second), Clock: "workflow_created_at"}
+	if !workflow.CreationTimestamp.IsZero() {
+		origin := workflow.CreationTimestamp.UTC()
+		expires := origin.Add(budget)
+		remaining := max(int64(0), int64(expires.Sub(now)/time.Second))
+		deadline.CreatedAt, deadline.ExpiresAt, deadline.RemainingSeconds = &origin, &expires, &remaining
+		deadline.Elapsed = !now.Before(expires)
+	}
+	result.ServerDeadline = deadline
+}

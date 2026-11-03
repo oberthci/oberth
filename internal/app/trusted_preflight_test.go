@@ -38,6 +38,8 @@ type protectedControllerFixture struct {
 	createErr            error
 	failed               bool
 	waitErr              error
+	waitUntilDeadline    bool
+	cleanupErr           error
 	infrastructureReason string
 	waitRunID            string
 	cleaned              bool
@@ -103,8 +105,12 @@ func (c *protectedControllerFixture) Create(_ context.Context, r argojob.Request
 	c.request = r
 	return r.Name, c.createErr
 }
-func (c *protectedControllerFixture) Wait(_ context.Context, _ string, runID string, _ io.Writer) (argojob.Completion, error) {
+func (c *protectedControllerFixture) Wait(ctx context.Context, _ string, runID string, _ io.Writer) (argojob.Completion, error) {
 	c.waitRunID = runID
+	if c.waitUntilDeadline {
+		<-ctx.Done()
+		return argojob.Completion{}, ctx.Err()
+	}
 	completion := argojob.Completion{Succeeded: !c.failed, Infrastructure: c.infrastructureReason != "", Reason: c.infrastructureReason}
 	if c.failed {
 		completion.Name, completion.Phase = "trusted", "Failed"
@@ -130,8 +136,8 @@ func (c *protectedControllerFixture) TrustedKVMWorkflowUID(ctx context.Context, 
 	return "workflow-uid", nil
 }
 func (c *protectedControllerFixture) CleanupTrustedKVM(context.Context, string, string, string) error {
-	c.cleaned = true
-	return nil
+	c.cleaned = c.cleanupErr == nil
+	return c.cleanupErr
 }
 func (c *protectedControllerFixture) TrustedKVMReceipt(_ context.Context, r argojob.Request, uid string) (vmrunner.KVMReceipt, error) {
 	intent := *r.TrustedKVM
@@ -142,7 +148,7 @@ func (c *protectedControllerFixture) TrustedKVMReceipt(_ context.Context, r argo
 func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 	// Every scenario owns its controller, grant loader, workspace and database.
 	t.Parallel()
-	for _, scenario := range []string{"pass", "pass empty org", "workflow failed", "workflow observation failed", "infrastructure failed", "infrastructure observation failed", "definite create refusal", "uncertain create", "recover absent", "unapproved", "guest granted", "guest revoked", "guest recover"} {
+	for _, scenario := range []string{"deadline no report", "missing deadline", "repository deadline cap", "pass", "pass empty org", "workflow failed", "workflow observation failed", "infrastructure failed", "infrastructure observation failed", "definite create refusal", "uncertain create", "recover absent", "unapproved", "guest granted", "guest revoked", "guest recover"} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
 			org, wantRepo := "org", "upstream/org/repo"
@@ -172,6 +178,25 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 			}
 			if scenario == "uncertain create" || scenario == "recover absent" || scenario == "guest recover" {
 				controller.createErr = errors.New("transport uncertainty")
+			}
+			if scenario == "deadline no report" {
+				controller.waitUntilDeadline = true
+				controller.cleanupErr = errors.New("pod remains terminating")
+				fixture.jobs.config.WorkflowTimeout = time.Second
+			}
+			if scenario == "missing deadline" {
+				path := filepath.Join(fixture.sourceDir, ".oberth", "build.yaml")
+				source, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				source = []byte(strings.Replace(string(source), "  activeDeadlineSeconds: 3600\n", "", 1))
+				if err := os.WriteFile(path, source, 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if scenario == "repository deadline cap" {
+				fixture.jobs.config.PerRepoWorkflowTimeout = map[string]time.Duration{"upstream/org/repo": 10 * time.Minute}
 			}
 			fixture.jobs.controller = controller
 			fixture.jobs.config.KVMEnabled = true
@@ -258,6 +283,25 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 			state, getErr := database.KVMPreflight(ctx, run.ID)
 			if getErr != nil {
 				t.Fatalf("preflight did not journal: execute=%v journal=%v", err, getErr)
+			}
+			if scenario == "deadline no report" {
+				if !errors.Is(err, service.ErrPreflightDeadline) || state.Refusal == nil || state.Refusal.Code != "deadline" || state.Cleaned || state.Receipt != nil {
+					t.Fatalf("deadline lost watchdog failure or cleanup obligation: %v %+v", err, state)
+				}
+				if state.Intent.Deadline.Sub(state.Intent.AdmittedAt) != time.Second {
+					t.Fatal("workflow budget differs from watchdog")
+				}
+				return
+			}
+			if scenario == "missing deadline" || scenario == "repository deadline cap" {
+				want := 30 * time.Minute
+				if scenario == "repository deadline cap" {
+					want = 10 * time.Minute
+				}
+				if err != nil || state.Intent.Deadline.Sub(state.Intent.AdmittedAt) != want || !state.Cleaned {
+					t.Fatalf("wrong preflight deadline: %v %+v want %v", err, state, want)
+				}
+				return
 			}
 			if state.Intent.Repository != wantRepo || controller.request.TrustedKVM.Repository != wantRepo {
 				t.Fatalf("journal/submission repository changed: journal=%q submitted=%q want=%q", state.Intent.Repository, controller.request.TrustedKVM.Repository, wantRepo)

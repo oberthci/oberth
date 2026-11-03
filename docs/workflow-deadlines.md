@@ -1,7 +1,12 @@
 # Workflow deadlines and delayed status
 
 A repository's `spec.activeDeadlineSeconds` is retained on the submitted Argo
-Workflow, capped by the administrator's `--argo-workflow-timeout` ceiling.
+Workflow, capped by the administrator's `--argo-workflow-timeout` ceiling
+(default 12 hours). An omitted deadline receives a 30-minute server default.
+The repeatable administrator flag `--argo-repo-workflow-timeout
+forge/org/repo=20m` caps that canonical repository independently; a repository
+cannot raise its cap, and caps never raise the global ceiling. Explicit zero
+or negative deadlines remain invalid.
 Oberth's branch CI declares 5400 seconds. Retrying an ambiguous submission
 adopts the same object; it does not recreate the Workflow or reset its clock.
 
@@ -15,10 +20,12 @@ workflow and template suspension are refused.
 
 Templates may also declare `activeDeadlineSeconds` and `timeout`; these fields
 survive submission. Argo constrains ordinary step Pods by the workflow time
-remaining and any shorter template deadline. There is no universal separate
-Oberth per-step timeout. Individual commands can have their own bounds, such
-as the branch lint watchdog and Go test timeout. This change adds no timeout,
-watchdog, cancellation, resubmission or admission behavior.
+remaining and any shorter template deadline. Every step, including VM resource steps, shares the bounded workflow lifetime.
+A server watchdog independently bounds observation from Workflow creation,
+including an unstarted Workflow or a hung init container. Restart and retry
+use the same creation timestamp; they do not restart this budget. The watchdog
+requests ownership-checked deletion when it expires. Individual commands may
+also have shorter bounds.
 
 Detailed MCP `status` / `run_get`, the run-detail API, `oberth run`, and the
 dashboard's run detail expose an ephemeral execution observation, bounded by
@@ -26,6 +33,8 @@ the existing two-second observation budget. It remains available after steps
 have progressed. The observation uses one exact Workflow GET and at most one
 scoped Pod LIST of 16 items, with ownership checks; it does not read logs.
 Run-list and live-log refreshes do not gain execution polling.
+`Scheduling.execution.server_deadline` shows the independent watchdog with
+`clock: workflow_created_at`, including before Argo records a start timestamp.
 
 `Scheduling.execution.deadline` (`scheduling` on MCP status) includes:
 
@@ -51,11 +60,26 @@ including retained exact controller messages from earlier versions.
 The durable run can still say `running` while the execution observation says
 `Failed` and `deadline-exceeded`: final logs, diagnostics, cleanup or database
 finalization may lag behind execution. The display label is not a durable
-terminal result; long-poll completion, admission release and release/replay
-safety continue to use the existing recorded state and evidence.
+terminal result. Long-poll completion and publication safety use recorded
+terminal state and evidence.
 
 For run `81745dce`, operator evidence confirmed that test-store/test-rest
 received exit 143 at 10:33:40Z, three seconds after Workflow creation
 09:03:37Z + 5400 seconds. The reported two-hour running interval was a stale
 control-plane display, not missing deadline enforcement. The new clock and
 lag fields make that distinction visible without changing execution.
+
+Trusted preflights use the same document/default/repository/global limits,
+with an additional six-hour hard ceiling. Their journaled absolute deadline
+starts at preflight admission and covers source producers, trusted suites and
+init containers. The API and dashboard expose it as `execution.deadline` with
+`clock: preflight_admitted_at`. A server deadline failure records a failed run
+and releases its weighted admission even if Kubernetes cleanup remains pending.
+`run_cancel` releases preflight admission before requesting deletion of the
+journal-bound preflight Workflow and its owned Pods. It reports the preflight
+as `deleted` when deletion requests were accepted, or `pending` on a failure;
+accepted deletion does not promise that Pod finalizers have finished.
+The VM journal retains its separate capacity slot and cleanup obligation until
+absence is confirmed, preventing an unobserved VM from being treated as gone.
+The executor identity init container logs its initial wait, progress every 30
+seconds and receipt, without logging credential contents.

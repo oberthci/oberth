@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import vm from 'node:vm';
+const source = readFileSync(process.env.DASHBOARD_SCRIPT || new URL('../internal/api/static/app.js', import.meta.url), 'utf8');
+const context = vm.createContext({URLSearchParams, console, Map, Set, Date, location:{pathname:'/runs'}, document:{body:{dataset:{version:'test'}},getElementById(){return null}}, localStorage:{getItem(){return null},setItem(){}}, setInterval(){},clearInterval(){}});
+vm.runInContext(source.slice(0,source.indexOf('/* ---------- events ---------- */')),context);
+const lines = vm.runInContext(`summaryLines({Run:{ID:'run',Status:'running'},Steps:[],Scheduling:{state:'preflight',message:'Trusted preflight',execution:{state:'preflight',deadline:{clock:'preflight_admitted_at',budget_seconds:60,expires_at:'2026-11-03T12:00:00Z',remaining_seconds:42}}}})`,context);
+assert.ok(lines.some(line => typeof line === 'string' && line.includes('[deadline] 2026-11-03T12:00:00Z') && line.includes('42s remaining') && line.includes('Preflight admission')));
+console.log('Preflight absolute deadline and admission clock are visible.');
+const vmLines = vm.runInContext(`summaryLines({Run:{ID:'run',Status:'running'},Steps:[],Scheduling:{execution:{state:'observed',server_deadline:{clock:'workflow_created_at',expires_at:'2026-11-03T13:00:00Z',remaining_seconds:55}}}})`,context);
+assert.ok(vmLines.some(line => typeof line === 'string' && line.includes('[server watchdog] 2026-11-03T13:00:00Z') && line.includes('55s remaining') && line.includes('Workflow creation')));
+console.log('VM server watchdog deadline is visible before Workflow start.');

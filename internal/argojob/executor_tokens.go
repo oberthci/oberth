@@ -30,7 +30,7 @@ const executorTokenVolume = "exec-sa-token"
 const executorTokenDir = "/var/run/secrets/kubernetes.io/serviceaccount"
 
 // #nosec G101 -- fixed runtime path/command, not credential material.
-const executorTokenWaitCommand = "until test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do sleep 1; done"
+const executorTokenWaitCommand = "echo 'oberth: waiting for executor identity from server' >&2; elapsed=0; until test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do sleep 1; elapsed=$((elapsed + 1)); if test $((elapsed % 30)) -eq 0; then echo 'oberth: still waiting for executor identity from server' >&2; fi; done; echo 'oberth: executor identity received' >&2"
 
 // Argo adds a Secret-backed executor volume before applying the server-owned
 // pod patch. Replace that volume with tmpfs and wait for a Pod-bound TokenRequest

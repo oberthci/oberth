@@ -433,7 +433,21 @@ func (controller *Controller) WaitResumed(ctx context.Context, name, runID strin
 	return controller.wait(ctx, name, runID, destination, events, retained, binding)
 }
 
-func (controller *Controller) wait(ctx context.Context, name, runID string, destination io.Writer, events []runprogress.Event, retained int64, binding Adoption) (Completion, error) {
+func (controller *Controller) wait(ctx context.Context, name, runID string, destination io.Writer, events []runprogress.Event, retained int64, binding Adoption) (result Completion, retErr error) {
+	parent := ctx
+	ctx, cancelWatchdog := context.WithCancelCause(ctx)
+	watchdogFailure := fmt.Errorf("%s Server watchdog expired: %w", model.ExecutionDeadlineMessage, context.DeadlineExceeded)
+	watchdog := time.AfterFunc(controller.config.ExecutionTimeout("", nil), func() { cancelWatchdog(watchdogFailure) })
+	defer func() {
+		watchdog.Stop()
+		if context.Cause(ctx) == watchdogFailure {
+			cleanup, stop := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
+			defer stop()
+			retErr = errors.Join(watchdogFailure, controller.Cancel(cleanup, name, runID))
+		}
+		cancelWatchdog(nil)
+	}()
+	deadlineBound := false
 	session := controller.resourceSession(ctx, runID)
 	defer session.finish()
 	if retained < 0 {
@@ -492,6 +506,20 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 		}
 		if binding.UID != "" && !binding.matches(workflow) {
 			return Completion{}, errors.New("argojob: adopted Workflow identity changed")
+		}
+		if !deadlineBound && !workflow.Status.Phase.Completed() {
+			budget := controller.config.ExecutionTimeout("", workflow.Spec.ActiveDeadlineSeconds)
+			origin := workflow.CreationTimestamp.Time
+			if origin.IsZero() {
+				origin = time.Now()
+			}
+			remaining := time.Until(origin.Add(budget))
+			deadlineBound = true
+			if remaining <= 0 {
+				cancelWatchdog(watchdogFailure)
+				return Completion{}, watchdogFailure
+			}
+			watchdog.Reset(remaining)
 		}
 		// Observe already-created Pods before identity delivery can block on a
 		// later Pod: early step output must not wait behind that setup RPC.

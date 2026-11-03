@@ -145,7 +145,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 				return result
 			case "admitted":
 				if run.StartedAt == nil {
-					if service.submittedKVMPreflight(ctx, run) {
+					if service.observeKVMPreflight(ctx, run, result) {
 						result.State = "preflight"
 						result.Message = "Trusted KVM preflight submitted; awaiting its result and cleanup before workflow submission."
 						return result
@@ -159,7 +159,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 		}
 	}
 	if run.StartedAt == nil {
-		if service.submittedKVMPreflight(ctx, run) {
+		if service.observeKVMPreflight(ctx, run, result) {
 			result.State = "preflight"
 			result.Message = "Trusted KVM preflight submitted; awaiting its result and cleanup before workflow submission."
 			return result
@@ -168,7 +168,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 		result.Message = "Waiting for workflow submission."
 		return result
 	}
-	if service.submittedKVMPreflight(ctx, run) {
+	if service.observeKVMPreflight(ctx, run, result) {
 		result.State = "preflight"
 		result.Message = "Trusted KVM preflight submitted; awaiting its result and cleanup before workflow submission."
 		return result
@@ -192,12 +192,21 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 	return result
 }
 
-func (service *API) submittedKVMPreflight(ctx context.Context, run model.Run) bool {
+func (service *API) observeKVMPreflight(ctx context.Context, run model.Run, result *model.RunScheduling) bool {
 	if service.kvmPreflights == nil || run.JobName != "" || run.Status != model.RunRunning {
 		return false
 	}
 	preflight, err := service.kvmPreflights.KVMPreflight(ctx, run.ID)
-	return err == nil && preflight.Submitted && !preflight.Rejected && !preflight.Cleaned
+	if err != nil || !preflight.Submitted || preflight.Rejected || preflight.Cleaned {
+		return false
+	}
+	now := service.schedulingClock().Now()
+	started, expires := preflight.Intent.AdmittedAt, preflight.Intent.Deadline
+	remaining := max(int64(0), int64(expires.Sub(now)/time.Second))
+	result.Execution = &model.ExecutionObservation{State: "preflight", Deadline: &model.ExecutionDeadline{
+		BudgetSeconds: int64(expires.Sub(started) / time.Second), Clock: "preflight_admitted_at", StartedAt: &started, ExpiresAt: &expires, RemainingSeconds: &remaining, Elapsed: !now.Before(expires),
+	}}
+	return true
 }
 
 // waitingAdmissionMessage names the concurrency group and the exact run a
@@ -299,4 +308,8 @@ func applyExecutionDisplay(run *model.Run, scheduling *model.RunScheduling) {
 	case "deadline_elapsed", "terminal_observed":
 		run.DisplayReason = scheduling.Message
 	}
+}
+
+func (service *API) submittedKVMPreflight(ctx context.Context, run model.Run) bool {
+	return service.observeKVMPreflight(ctx, run, &model.RunScheduling{})
 }
