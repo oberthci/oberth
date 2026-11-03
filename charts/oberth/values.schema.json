@@ -17,7 +17,6 @@
     "resources",
     "podAnnotations",
     "podLabels",
-    "secretCreatePolicy",
     "compatibility"
   ],
   "properties": {
@@ -518,11 +517,9 @@
       }
     },
     "secretCreatePolicy": {
-      "type": "object",
+      "description": "Retired compatibility key: accepted and ignored. Kubernetes Secret creation is not supported.",
+      "type": ["object", "null"],
       "additionalProperties": false,
-      "required": [
-        "enabled"
-      ],
       "properties": {
         "enabled": {
           "type": "boolean"

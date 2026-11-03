@@ -53,9 +53,6 @@ are worse than allowing the override.
 {{- end -}}
 {{- end -}}
 {{- end -}}
-{{- if eq .Values.upstream.keySecret .Values.upstream.knownHostsSecret -}}
-{{- fail "upstream key and known_hosts Secrets must be distinct" -}}
-{{- end -}}
 {{- $persistenceSize := .Values.persistence.size -}}
 {{- $persistenceUnits := regexFind "(Gi|Ti)$" $persistenceSize -}}
 {{- $persistenceAmount := int (regexFind "^[0-9]+" $persistenceSize) -}}

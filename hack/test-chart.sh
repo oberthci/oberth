@@ -421,9 +421,8 @@ fi
 if render --set upstream.keyFile=. >/dev/null 2>&1; then
   exit 1
 fi
-if render --set upstream.keySecret=shared --set upstream.knownHostsSecret=shared >/dev/null 2>&1; then
-  exit 1
-fi
+# Retired Secret names are inert compatibility values, including equal names.
+render --set upstream.keySecret=shared --set upstream.knownHostsSecret=shared >/dev/null
 if render --set persistence.size=9Gi >/dev/null 2>&1; then
   exit 1
 fi

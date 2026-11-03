@@ -526,9 +526,6 @@ resources:
     memory: 1Gi
     ephemeral-storage: 2Gi
 
-secretCreatePolicy:
-  enabled: false
-
 # Egress isolation for the pipeline namespace (argo.namespace). Denies all
 # egress by default, then allows DNS (port 53), HTTPS (port 443/6443), and
 # the secret store for release credentials.
