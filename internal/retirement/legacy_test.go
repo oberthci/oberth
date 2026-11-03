@@ -7,6 +7,7 @@ import (
 
 func TestLegacyRemovalRefusesDeclarations(t *testing.T) {
 	for _, fixture := range []struct{ path, body, name string }{
+		{".oberth/build.yaml", "metadata: {annotations: {oberth.ci/cleanup-verdict: 60s}}", "cleanup-verdict"},
 		{".oberth/tests.yaml", "version: 2\n", "tests.yaml"},
 		{".oberth/build.yaml", "metadata: {annotations: {oberth.ci/kvm-templates: main}}", "kvm-templates"},
 		{".oberth/release.yaml", "metadata: {annotations: {oberth.ci/guest-test-templates: main}}", "guest-test-templates"},

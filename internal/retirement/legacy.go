@@ -54,7 +54,7 @@ func CheckSource(path string, body []byte, operatorCapability bool) ([]string, e
 		case map[string]any:
 			for key, child := range value {
 				switch key {
-				case "oberth.ci/kvm-templates", "oberth.ci/guest-test-templates", "oberth.ci/trusted-tests-entrypoint":
+				case "oberth.ci/kvm-templates", "oberth.ci/guest-test-templates", "oberth.ci/trusted-tests-entrypoint", "oberth.ci/cleanup-verdict":
 					return fmt.Errorf("legacy declaration %s must migrate before execution removal", key)
 				case "name":
 					if child == "OBERTH_KVM" || child == "OBERTH_GUEST_TEST" {
