@@ -127,8 +127,8 @@ type Config struct {
 	InstallSecretStoreDev bool
 	// SecretStoreUndecided is set by the CLI when neither
 	// --install-secretstore nor --install-secretstore-dev was passed. When
-	// true, Run proposes the choice interactively (or defaults to production
-	// mode in a non-interactive session).
+	// true, Run keeps an existing store or proposes production mode
+	// interactively. A fresh non-interactive install requires an explicit flag.
 	SecretStoreUndecided bool
 	// InstallRekor additionally installs a local Rekor transparency-log
 	// stack — MySQL + Trillian log server/signer + Rekor server — as the
@@ -281,19 +281,52 @@ func (cfg Config) wantsSecretStore() bool {
 
 // promptSecretStoreChoice proposes installing OpenBao when no explicit
 // --install-secretstore or --install-secretstore-dev flag was passed. In an
-// interactive terminal it presents a three-option menu; in a non-interactive
-// session it skips with guidance (credentials printed during production
+// interactive terminal it offers production setup or cancellation; a fresh
+// non-interactive session fails with guidance (credentials printed during production
 // setup must never land in CI logs or transcripts unsolicited).
 func promptSecretStoreChoice(ctx context.Context, cfg *Config, deps Deps) error {
-	interactive := deps.IsTerminal != nil && deps.IsTerminal() && deps.Input != nil
-	if !interactive {
-		_, _ = fmt.Fprintln(deps.Output, "No secret store selected. Re-run with --install-secretstore to enable release secret management.")
+	if cfg.wantsSecretStore() {
 		return nil
 	}
+	// Read the live release before prompting. A re-run must neither reinstall
+	// OpenBao nor silently turn its PKI mode off. Listing failures are errors,
+	// not evidence that this is a fresh install.
+	if deps.RunHelm != nil {
+		ns := cfg.Namespace
+		if ns == "" {
+			ns = DefaultNamespace
+		}
+		out, err := deps.RunHelm(ctx, []string{"list", "-n", ns, "-a", "-o", "json"})
+		if err != nil {
+			return fmt.Errorf("inspect existing secret-store configuration: %w", err)
+		}
+		var releases []helmRelease
+		if err := json.Unmarshal(out, &releases); err != nil {
+			return fmt.Errorf("inspect existing release: %w", err)
+		}
+		for _, release := range releases {
+			if release.Name != "oberth" {
+				continue
+			}
+			live, err := readLiveHelmValuesSubset(ctx, deps, ns)
+			if err != nil {
+				return fmt.Errorf("read existing secret-store configuration: %w", err)
+			}
+			if strings.TrimSpace(live.Secretstore.Address) == "" {
+				return errors.New("existing Oberth release has no secretstore.address; configure its OpenBao connection or pass --install-secretstore")
+			}
+			cfg.serverPKI = live.TLS.PKI.Enabled
+			return nil
+		}
+	}
+	interactive := deps.IsTerminal != nil && deps.IsTerminal() && deps.Input != nil
+	if !interactive {
+		return errors.New("OpenBao is required for server identities; re-run with --install-secretstore (or --install-secretstore-dev for evaluation)")
+	}
 
-	_, _ = fmt.Fprintln(deps.Output, "\nInstall OpenBao for release secret management?")
+	_, _ = fmt.Fprintln(deps.Output, "\nInstall OpenBao for server identities and pipeline secrets?")
 	_, _ = fmt.Fprintln(deps.Output, "  [1] Production mode (persistent storage, verified TLS) (Recommended)")
-	_, _ = fmt.Fprintln(deps.Output, "  [2] Skip — no secret store (branch CI only, releases will not work)")
+	_, _ = fmt.Fprintln(deps.Output, "  [2] Cancel installation")
 
 	var chosen bool
 	for attempt := 0; attempt < 3; attempt++ {
@@ -307,8 +340,7 @@ func promptSecretStoreChoice(ctx context.Context, cfg *Config, deps Deps) error 
 			cfg.InstallSecretStore = true
 			chosen = true
 		case "2":
-			_, _ = fmt.Fprintln(deps.Output, "Warning: releases will not work without a secret store. Re-run with --install-secretstore later to add one.")
-			return nil
+			return errors.New("installation cancelled; OpenBao is required for server identities")
 		default:
 			_, _ = fmt.Fprintln(deps.Output, "Please enter 1 or 2.")
 			continue
@@ -316,8 +348,7 @@ func promptSecretStoreChoice(ctx context.Context, cfg *Config, deps Deps) error 
 		break
 	}
 	if !chosen {
-		_, _ = fmt.Fprintln(deps.Output, "Warning: releases will not work without a secret store. Re-run with --install-secretstore later to add one.")
-		return nil
+		return errors.New("no secret store selected; re-run with --install-secretstore")
 	}
 
 	ns, err := promptValidNamespace(ctx, deps, "OpenBao namespace", cfg.OpenBaoNamespace)
@@ -745,7 +776,7 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 		}
 	}
 
-	cfg.serverPKI = cfg.InstallSecretStore
+	cfg.serverPKI = cfg.serverPKI || cfg.InstallSecretStore
 
 	// The installer's own access path is the NodePorts (30022/30443). A
 	// LoadBalancer Service on k3s makes servicelb take host ports 2222 and
