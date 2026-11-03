@@ -961,3 +961,10 @@ explicitly. This credential-safety change also applies to older scripts.
 MCP and REST both refuse plain HTTP except to
 `localhost`, `127.0.0.1`, or `::1`, before resolving credentials. Redirects
 cannot downgrade HTTPS to HTTP.
+
+Run and promotion ID arguments accept a full hexadecimal ID or a unique prefix
+of at least 8 characters. Ambiguous prefixes list the matching visible full IDs;
+use a longer prefix or the full ID. This also applies to ID pagination cursors,
+`run_priority`, `admission_release`, `promote_status`, and `promote_retry`.
+Issue IDs and grant IDs are decimal integers and must be supplied in full.
+Publication IDs (for `publication_abandon`) remain exact IDs.

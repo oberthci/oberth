@@ -42,7 +42,7 @@ func (service *API) promoteRetry(ctx context.Context, actor api.Actor, id string
 	if service.git == nil || service.promotions == nil || service.promotionRuns == nil || service.enqueues == nil || service.auditor == nil {
 		return api.PromoteRetryResponse{}, refuse(ErrUnavailable, "promotion")
 	}
-	failed, err := service.promotions.Promotion(ctx, strings.TrimSpace(id))
+	failed, err := service.resolveReadPromotionID(ctx, id)
 	if err != nil {
 		return api.PromoteRetryResponse{}, err
 	}

@@ -32,7 +32,7 @@ func (service *API) promotionList(ctx context.Context, args promotionListArgumen
 	}
 	filter := model.PromotionListFilter{SourceSHA: args.SourceSHA, Status: args.Status, Before: args.Before.Sequence, Limit: args.Limit}
 	if args.Before.ID != "" {
-		cursor, err := service.promotions.Promotion(ctx, args.Before.ID)
+		cursor, err := service.resolveReadPromotionID(ctx, args.Before.ID)
 		switch {
 		case err == nil:
 			filter.Before = cursor.Sequence

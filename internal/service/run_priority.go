@@ -65,6 +65,18 @@ func (service *API) queuePriorityTool(ctx context.Context, actor api.Actor, name
 	if err := decodeTool(raw, &args); err != nil {
 		return nil, err
 	}
+	history := service.history
+	if history == nil {
+		history, _ = service.runs.(RunHistory)
+	}
+	if history == nil {
+		return nil, refuse(ErrUnavailable, "run ID resolution")
+	}
+	selected, err := history.ResolveRunID(ctx, args.RunID)
+	if err != nil {
+		return nil, err
+	}
+	args.RunID = selected.ID
 	bump := service.queuePriorities.BumpRunPriority
 	if guarded, ok := service.enqueues.(interface {
 		BumpRunPriority(context.Context, string, string, model.RunPriority, string) (model.Run, error)
