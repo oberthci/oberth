@@ -215,6 +215,32 @@ read_field() {
   fail "reading $2 field=$1 failed (exit $_rf_exit): $_rf_out"
 }
 
+# Mount reads use different absence diagnostics from object reads. Only a
+# successful, valid mount inventory can authorize enabling an absent mount.
+read_mount_type() {
+  local _mt_out _mt_exit
+  if _mt_out="$("$CLI" "$1" list -format=json 2>&1)"; then
+    :
+  else
+    _mt_exit=$?
+    fail "listing $1 mounts failed (exit $_mt_exit): $_mt_out"
+  fi
+  python3 -c '
+import json, sys
+try:
+    mounts = json.load(sys.stdin)
+    if not isinstance(mounts, dict):
+        raise ValueError()
+    for mount in mounts.values():
+        if not isinstance(mount, dict) or not isinstance(mount.get("type"), str) or not mount["type"].strip():
+            raise ValueError()
+    if sys.argv[1] in mounts:
+        print(mounts[sys.argv[1]]["type"])
+except (ValueError, TypeError):
+    sys.exit(1)
+' "$2/" <<< "$_mt_out" || fail "invalid $1 mount list JSON; refusing setup"
+}
+
 read_policy() {
   local _rp_out _rp_exit
   if _rp_out="$("$CLI" policy read "$1" 2>&1)"; then
@@ -315,10 +341,7 @@ note "TokenReview endpoint the secret store will call: $KUBERNETES_HOST"
 log "the secret store must be able to REACH this URL; override with --kubernetes-host if not"
 
 # --- 1. Kubernetes auth method ----------------------------------------------
-AUTH_TYPE="$(read_field type "sys/auth/$MOUNT")"
-if [ -z "$AUTH_TYPE" ]; then
-  AUTH_TYPE="$("$CLI" auth list 2>/dev/null | awk -v mount="$MOUNT/" '$1 == mount { print $2 }')"
-fi
+AUTH_TYPE="$(read_mount_type auth "$MOUNT")"
 if [ -n "$AUTH_TYPE" ]; then
   [ "$AUTH_TYPE" = "kubernetes" ] || fail "auth mount $MOUNT/ already exists with type '$AUTH_TYPE', not 'kubernetes'; pick a dedicated mount: --mount oberth-kubernetes"
   note "auth method already enabled at $MOUNT/ — keeping it"
@@ -348,10 +371,7 @@ else
 fi
 
 # --- 3. KV v2 mount for Oberth secrets ---------------------------------------
-KV_TYPE="$(read_field type "sys/mounts/$KV_PREFIX")"
-if [ -z "$KV_TYPE" ] && "$CLI" secrets list 2>/dev/null | awk -v mount="$KV_PREFIX/" '$1 == mount { found = 1 } END { exit !found }'; then
-  KV_TYPE="$("$CLI" secrets list 2>/dev/null | awk -v mount="$KV_PREFIX/" '$1 == mount { print $2 }')"
-fi
+KV_TYPE="$(read_mount_type secrets "$KV_PREFIX")"
 if [ -n "$KV_TYPE" ]; then
   case "$KV_TYPE" in
     kv|kv-v2|generic) : ;;
@@ -371,10 +391,7 @@ fi
 
 # --- 4. trusted-plan Transit engine and non-exportable key -------------------
 if [ "$TRANSIT_ENABLED" = "true" ]; then
-  TRANSIT_TYPE="$(read_field type "sys/mounts/$TRANSIT_MOUNT")"
-  if [ -z "$TRANSIT_TYPE" ] && "$CLI" secrets list 2>/dev/null | awk -v mount="$TRANSIT_MOUNT/" '$1 == mount { found = 1 } END { exit !found }'; then
-    TRANSIT_TYPE="$("$CLI" secrets list 2>/dev/null | awk -v mount="$TRANSIT_MOUNT/" '$1 == mount { print $2 }')"
-  fi
+  TRANSIT_TYPE="$(read_mount_type secrets "$TRANSIT_MOUNT")"
   if [ -n "$TRANSIT_TYPE" ]; then
     [ "$TRANSIT_TYPE" = "transit" ] || fail "secrets mount $TRANSIT_MOUNT/ already exists with type '$TRANSIT_TYPE', not transit"
     note "Transit mount $TRANSIT_MOUNT/ already exists — keeping it"

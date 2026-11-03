@@ -15,7 +15,7 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 script=$root/scripts/setup-secretstore.sh
 
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+trap 'find "$work" -delete' EXIT
 bin=$work/bin
 mkdir -p "$bin"
 
@@ -30,6 +30,10 @@ if [ "$*" = "${MOCK_FAIL_COMMAND:-}" ]; then
   exit "${MOCK_FAIL_EXIT:-2}"
 fi
 absent() { printf 'No value found at %s\n' "$path" >&2; exit 2; }
+absent_mount() {
+  printf 'Error reading %s: Error making API request.\n\nCode: 400. Errors:\n\n* %s at %s/\n' "$path" "$1" "${path##*/}" >&2
+  exit 2
+}
 cmd="${1:-}"; shift || true
 case "$cmd" in
   token) exit 0 ;;
@@ -42,9 +46,15 @@ case "$cmd" in
     cat "$state/audit.json"
     exit 0 ;;
   auth)
+    if [ "${1:-}" = "list" ]; then
+      python3 -c 'import json, pathlib, sys; p = pathlib.Path(sys.argv[1]); print(json.dumps({"kubernetes/": {"type": p.read_text().strip()}} if p.exists() else {}))' "$state/auth-type"
+    fi
     if [ "${1:-}" = "enable" ]; then printf 'kubernetes\n' >"$state/auth-type"; fi
     exit 0 ;;
   secrets)
+    if [ "${1:-}" = "list" ]; then
+      python3 -c 'import json, pathlib, sys; p = pathlib.Path(sys.argv[1]); print(json.dumps({mount + "/": {"type": (p / name).read_text().strip()} for mount, name in [("oberth", "kv-type"), ("oberth-transit", "transit-type")] if (p / name).exists()}))' "$state"
+    fi
     if [ "${1:-}" = "enable" ]; then
       case "$*" in
         *" -path=oberth-transit transit") printf 'transit\n' >"$state/transit-type" ;;
@@ -57,20 +67,24 @@ case "$cmd" in
     for argument in "$@"; do
       case "$argument" in -field=*) field="${argument#-field=}" ;; *) path="$argument" ;; esac
     done
+    role_prefix=role-
+    case "$path" in
+      auth/*/role/*) [ "${path##*/}" = oberth-ci ] || role_prefix="${path##*/}-" ;;
+    esac
     case "$field:$path" in
-      type:sys/auth/*) [ -f "$state/auth-type" ] && cat "$state/auth-type" || absent ;;
+      type:sys/auth/*) [ -f "$state/auth-type" ] && cat "$state/auth-type" || absent_mount 'No auth engine' ;;
       kubernetes_host:auth/*/config) [ -f "$state/config-host" ] && cat "$state/config-host" || absent ;;
-      type:sys/mounts/oberth-transit) [ -f "$state/transit-type" ] && cat "$state/transit-type" || absent ;;
-      type:sys/mounts/*) [ -f "$state/kv-type" ] && cat "$state/kv-type" || absent ;;
+      type:sys/mounts/oberth-transit) [ -f "$state/transit-type" ] && cat "$state/transit-type" || absent_mount 'No secret engine mount' ;;
+      type:sys/mounts/*) [ -f "$state/kv-type" ] && cat "$state/kv-type" || absent_mount 'No secret engine mount' ;;
       options:sys/mounts/*)
-        [ -f "$state/kv-version" ] || absent
+        [ -f "$state/kv-version" ] || absent_mount 'No secret engine mount'
         printf 'map[version:%s]\n' "$(cat "$state/kv-version")" ;;
-      bound_service_account_names:auth/*/role/*) [ -f "$state/role-names" ] && cat "$state/role-names" || absent ;;
-      bound_service_account_namespaces:auth/*/role/*) [ -f "$state/role-namespaces" ] && cat "$state/role-namespaces" || absent ;;
-      token_policies:auth/*/role/*) [ -f "$state/role-policies" ] && cat "$state/role-policies" || absent ;;
-      token_no_default_policy:auth/*/role/*) [ -f "$state/role-no-default" ] && cat "$state/role-no-default" || absent ;;
-      token_ttl:auth/*/role/*) [ -f "$state/role-ttl" ] && cat "$state/role-ttl" || absent ;;
-      token_max_ttl:auth/*/role/*) [ -f "$state/role-max-ttl" ] && cat "$state/role-max-ttl" || absent ;;
+      bound_service_account_names:auth/*/role/*) [ -f "$state/${role_prefix}names" ] && cat "$state/${role_prefix}names" || absent ;;
+      bound_service_account_namespaces:auth/*/role/*) [ -f "$state/${role_prefix}namespaces" ] && cat "$state/${role_prefix}namespaces" || absent ;;
+      token_policies:auth/*/role/*) [ -f "$state/${role_prefix}policies" ] && cat "$state/${role_prefix}policies" || absent ;;
+      token_no_default_policy:auth/*/role/*) [ -f "$state/${role_prefix}no-default" ] && cat "$state/${role_prefix}no-default" || absent ;;
+      token_ttl:auth/*/role/*) [ -f "$state/${role_prefix}ttl" ] && cat "$state/${role_prefix}ttl" || absent ;;
+      token_max_ttl:auth/*/role/*) [ -f "$state/${role_prefix}max-ttl" ] && cat "$state/${role_prefix}max-ttl" || absent ;;
       type:oberth-transit/keys/*) [ -f "$state/transit-key-type" ] && cat "$state/transit-key-type" || absent ;;
       derived:oberth-transit/keys/*) [ -f "$state/transit-derived" ] && cat "$state/transit-derived" || absent ;;
       exportable:oberth-transit/keys/*) [ -f "$state/transit-exportable" ] && cat "$state/transit-exportable" || absent ;;
@@ -87,14 +101,16 @@ case "$cmd" in
           case "$argument" in kubernetes_host=*) printf '%s\n' "${argument#kubernetes_host=}" >"$state/config-host" ;; esac
         done ;;
       auth/*/role/*)
+        role_prefix=role-
+        [ "${target##*/}" = oberth-ci ] || role_prefix="${target##*/}-"
         for argument in "$@"; do
           case "$argument" in
-            bound_service_account_names=*) printf '[%s]\n' "${argument#*=}" >"$state/role-names" ;;
-            bound_service_account_namespaces=*) printf '[%s]\n' "${argument#*=}" >"$state/role-namespaces" ;;
-            token_policies=*) printf '[%s]\n' "${argument#*=}" >"$state/role-policies" ;;
-            token_no_default_policy=*) printf '%s\n' "${argument#*=}" >"$state/role-no-default" ;;
-            token_ttl=*) printf '%s\n' "${argument#*=}" >"$state/role-ttl" ;;
-            token_max_ttl=*) printf '%s\n' "${argument#*=}" >"$state/role-max-ttl" ;;
+            bound_service_account_names=*) printf '[%s]\n' "${argument#*=}" >"$state/${role_prefix}names" ;;
+            bound_service_account_namespaces=*) printf '[%s]\n' "${argument#*=}" >"$state/${role_prefix}namespaces" ;;
+            token_policies=*) printf '[%s]\n' "${argument#*=}" >"$state/${role_prefix}policies" ;;
+            token_no_default_policy=*) printf '%s\n' "${argument#*=}" >"$state/${role_prefix}no-default" ;;
+            token_ttl=*) printf '%s\n' "${argument#*=}" >"$state/${role_prefix}ttl" ;;
+            token_max_ttl=*) printf '%s\n' "${argument#*=}" >"$state/${role_prefix}max-ttl" ;;
           esac
         done ;;
       oberth-transit/keys/*)
@@ -430,6 +446,46 @@ check '[ "$status" != 0 ]' "missing audit device must refuse the full setup"
 check '! calls_contain "bao auth enable"' "audit preflight must precede auth mutation"
 check '! calls_contain "bao write"' "audit preflight must precede store writes"
 check '! calls_contain "bao policy write"' "audit preflight must precede policy writes"
+
+# Both shipped helpers must discover all three absent mounts from checked JSON
+# lists, without relying on the CLI's different missing-mount read diagnostics.
+for candidate in "$root/scripts/setup-secretstore.sh" "$root/website/public/setup-secretstore.sh"; do
+  script=$candidate
+  begin "fresh-mounts-${candidate#"$root"/}"
+  fresh_state
+  run_script
+  check '[ "$status" = 0 ]' 'fresh store must configure successfully'
+  check 'calls_contain "bao auth list -format=json"' 'auth discovery must use JSON'
+  check 'calls_contain "bao secrets list -format=json"' 'secrets discovery must use JSON'
+  check '[ -f "$MOCK_STATE/auth-type" ] && [ -f "$MOCK_STATE/kv-type" ] && [ -f "$MOCK_STATE/transit-type" ]' 'fresh setup must enable auth, KV and Transit'
+  check '! calls_contain "bao read -field=type sys/"' 'mount discovery must not probe absent mount paths'
+  for kind in auth secrets; do
+    for failure in denied silent partial invalid null array missing-type empty-type wrong-type; do
+      case "$failure" in
+        denied) error_exit=2; error_output='Code: 403 permission denied' ;;
+        silent) error_exit=1; error_output='' ;;
+        partial) error_exit=2; error_output='{}' ;;
+        invalid) error_exit=0; error_output='invalid json' ;;
+        null) error_exit=0; error_output='null' ;;
+        array) error_exit=0; error_output='[]' ;;
+        missing-type) error_exit=0; error_output='{"kubernetes/":{}}' ;;
+        empty-type) error_exit=0; error_output='{"kubernetes/":{"type":""}}' ;;
+        wrong-type) error_exit=0; error_output='{"kubernetes/":{"type":42}}' ;;
+      esac
+      begin "mount-list-${candidate#"$root"/}-$kind-$failure"
+      fresh_state
+      MOCK_FAIL_COMMAND="$kind list -format=json" MOCK_FAIL_OUTPUT="$error_output" MOCK_FAIL_EXIT="$error_exit" \
+        run_script --force --force-auth-config
+      check '[ "$status" != 0 ]' 'unverified mount list must abort even with force flags'
+      check 'calls_contain "bao $kind list -format=json"' 'must reach targeted list'
+      check '! calls_contain "bao secrets enable"' 'failed list must not enable a secret engine'
+      if [ "$kind" = auth ]; then
+        check '! calls_contain "bao auth enable"' 'failed auth list must not enable auth'
+      fi
+    done
+  done
+done
+script=$root/scripts/setup-secretstore.sh
 
 # Failed reads must never become permission to replace an existing object,
 # including when the operator deliberately selected a force flag.
