@@ -44,6 +44,9 @@ func TestPlainPKIUpgradeNeedsNoBaoToken(t *testing.T) {
 					case "show":
 						return []byte("image:\n  ref: " + image + "\n"), nil
 					case "upgrade":
+						if slices.Contains(args, "--dry-run=server") {
+							return []byte(`{"config":{}}`), nil
+						}
 						if dryRun || !slices.Contains(args, "--reset-then-reuse-values") || strings.Contains(strings.Join(args, " "), "tls.") {
 							t.Fatalf("plain upgrade must reuse live TLS values: %v", args)
 						}
