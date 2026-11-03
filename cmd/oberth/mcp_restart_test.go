@@ -193,17 +193,23 @@ func TestMCPReconnectWindowFlag(t *testing.T) {
 
 func TestMCPReconnectHonorsOriginalDeadline(t *testing.T) {
 	var calls atomic.Int32
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.Copy(io.Discard, r.Body)
-		calls.Add(1)
-		w.WriteHeader(http.StatusServiceUnavailable)
-	}))
-	defer server.Close()
-	defer withTestMCPClient(t, server)()
+	// Keep TLS setup out of the caller's short reconnect budget. Real TLS
+	// reconnects are covered by TestMCPReadReconnectAcrossRestart.
+	requestClient := &http.Client{Transport: idleRoundTrip(func(r *http.Request) (*http.Response, error) {
+		status := http.StatusServiceUnavailable
+		if calls.Add(1) > 1 {
+			// Stop promptly if a regression retries after the original deadline.
+			status = http.StatusBadRequest
+		}
+		return &http.Response{StatusCode: status, Header: make(http.Header), Body: http.NoBody, Request: r}, nil
+	})}
+	original := mcpHTTPClientFunc
+	mcpHTTPClientFunc = func(string) (*http.Client, error) { return requestClient, nil }
+	t.Cleanup(func() { mcpHTTPClientFunc = original })
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
 	defer cancel()
-	_, err := mcpRequest(ctx, mcpFlagResult{mcpConfig: mcpConfig{URL: server.URL, Token: "fixture-token"}}, mcpMethodToolsCall, toolsCallParams{Name: "wait"})
-	if err == nil || calls.Load() != 1 {
+	_, err := mcpRequest(ctx, mcpFlagResult{mcpConfig: mcpConfig{URL: "https://example.invalid/mcp", Token: "fixture-token"}}, mcpMethodToolsCall, toolsCallParams{Name: "wait"})
+	if !errors.Is(err, context.DeadlineExceeded) || calls.Load() != 1 {
 		t.Fatalf("err=%v calls=%d", err, calls.Load())
 	}
 }
