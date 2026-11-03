@@ -39,10 +39,17 @@ func queuedDisplayReason(scheduling *model.RunScheduling, blocker *model.Admissi
 	case "preflight":
 		return "KVM preflight running"
 	case "waiting":
-		if admission == nil || admission.State == "admitted" {
+		switch {
+		case admission == nil:
+			// No reservation is known for the claimed run (just claimed,
+			// or the gate is being rebuilt after a restart): that is not
+			// proof of admission.
+			return "waiting for admission"
+		case admission.State == "admitted":
 			return "admitted, starting the workflow"
+		default:
+			return waitingReason(admission)
 		}
-		return waitingReason(admission)
 	default:
 		return "awaiting scheduler"
 	}
@@ -70,6 +77,10 @@ func waitingReason(admission *model.AdmissionObservation) string {
 	behind := ""
 	if blocker != nil && !admission.HeadOfQueue {
 		behind = ", " + behindBlocker(blocker)
+		if admission.Pressure == nil && blocker.Pressure != nil || blocker.RunCeiling {
+			// The head's cause is this run's cause too; name it once.
+			behind = ", behind " + blocker.Repo + "/" + blocker.Ref
+		}
 	}
 	if pressure != nil {
 		return pressureReason(pressure) + behind

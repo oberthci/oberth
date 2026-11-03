@@ -18,11 +18,12 @@ const MaxActiveRuns = 500
 // restriction, in the order the scheduler works through them:
 //
 //  1. runs whose Workflow has started, oldest start first;
-//  2. claimed runs not yet started (preparing, waiting for admission, or
-//     admitted and awaiting submission), in admission order: the weighted
-//     admission gate reserves and grants by effective class then FIFO, the
-//     same priority/FIFO order ClaimNextRun claims in;
-//  3. unclaimed queued runs, by effective priority then ascending admission_sequence.
+//  2. every run that has not started, claimed or not, as one queue in the
+//     scheduler's own order (priorityOrderSQL: effective class, then
+//     admission_sequence, then queue_sequence), the same order ClaimNextRun
+//     claims in and the weighted gate grants in. A claimed normal run never
+//     lists ahead of an unclaimed high run the gate will admit first; the
+//     flat and latest-per-ref lists number this same queue.
 //
 // Before, Limit and Terminal are ignored: the view is one bounded list.
 func (s *Store) ListActiveRuns(ctx context.Context, filter model.RunListFilter) ([]model.Run, error) {
@@ -37,11 +38,7 @@ WITH queue AS (
 SELECT `+runReadColumns+`, COALESCE(queue_position, 0) FROM runs LEFT JOIN queue ON runs.id = queue.queued_id
 WHERE status IN ('queued', 'running')
   AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+supersededRunRestriction(filter)+`
-ORDER BY CASE
-    WHEN status = 'running' AND started_at IS NOT NULL THEN 0
-    WHEN status = 'running' THEN 1
-    ELSE 2
-  END, started_at, `+priorityOrder+`
+ORDER BY CASE WHEN status = 'running' AND started_at IS NOT NULL THEN 0 ELSE 1 END, started_at, `+priorityOrder+`
 LIMIT ?`, append(args, MaxActiveRuns)...) // #nosec G202 -- the restriction is a fixed column and ? placeholders from repoRestriction.
 	if err != nil {
 		return nil, fmt.Errorf("list active runs: %w", err)
