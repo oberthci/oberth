@@ -300,7 +300,7 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 	}
 	// Gate on reconciler health: a credentialed submission must not proceed
 	// when the access reconciler has never successfully read the ConfigMap.
-	if (request.Run.Credentialed || request.Run.Release) && jobs.secretAccess != nil && jobs.reconcilerHealthy != nil && !jobs.reconcilerHealthy.ReconcileHealthy() {
+	if (trigger == periapsis.TriggerRelease || request.Run.Credentialed || request.Run.Release) && jobs.secretAccess != nil && jobs.reconcilerHealthy != nil && !jobs.reconcilerHealthy.ReconcileHealthy() {
 		jobs.mu.Unlock()
 		return fmt.Errorf("app: access reconciler has not completed initial reconciliation; credentialed admission is blocked for %s", request.Repository.Name)
 	}
