@@ -3,7 +3,9 @@
 import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -13,6 +15,8 @@ TARGETS = ('test', 'test-gitcache-backends')
 
 class MakeEntrypointTests(unittest.TestCase):
     def setUp(self):
+        if shutil.which('make') is None:
+            self.skipTest('make is not installed; Make entrypoint checks require make')
         self.env = {key: value for key, value in os.environ.items()
                     if key not in ('MAKEFLAGS', 'MFLAGS', 'MAKEOVERRIDES', 'MAKELEVEL')}
 
@@ -47,6 +51,22 @@ class MakeEntrypointTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('Error 17', result.stderr)
             self.assertIn('GOWORK=off ./hack/test-gitcache.sh', log.read_text())
+
+
+class MakeAvailabilityTests(unittest.TestCase):
+    def test_missing_make_reports_skip(self):
+        # Use an empty search path so this also works on development hosts
+        # that normally have make; invoke Python by its absolute path.
+        with tempfile.TemporaryDirectory() as directory:
+            result = subprocess.run([
+                sys.executable, '-I', '-B', str(Path(__file__).resolve()),
+                'MakeEntrypointTests', '-v',
+            ], cwd=ROOT, env=dict(os.environ, PATH=directory),
+                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('skipped', result.stderr)
+        self.assertIn('make is not installed', result.stderr)
+        self.assertIn('skipped=2', result.stderr)
 
 
 if __name__ == '__main__':

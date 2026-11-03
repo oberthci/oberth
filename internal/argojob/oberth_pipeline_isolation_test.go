@@ -60,6 +60,7 @@ var (
 	oberthBuildToolWriters = map[string]bool{
 		"tools-dir": true, "link-go": true, "install-golangci-lint": true, "install-deadcode": true, "install-helm": true,
 		"fetch-shellcheck": true, "verify-shellcheck": true, "decompress-shellcheck": true, "install-shellcheck": true,
+		"fetch-helm-unittest": true, "verify-helm-unittest": true, "install-helm-unittest": true,
 	}
 	oberthBuildCachedGoLeaves = map[string]bool{
 		"vet": true, "golangci-lint-run": true, "deadcode": true,
@@ -71,7 +72,8 @@ var (
 		"build-darwin-amd64": true, "build-darwin-arm64": true,
 	}
 	oberthBuildIsolatedLeaves = map[string]bool{
-		"generic-names":           true,
+		"generic-names":  true,
+		"chart-unittest": true, "test-chart-schema": true, "test-make-entrypoints": true, "test-release-prune-contract": true,
 		"test-static-git-runtime": true,
 		"shellcheck":              true, "chart": true, "security": true, "release-diagnostic": true, "test-openbao": true,
 		"vpt-build-and-fetch": true, "vpt-copy-trivy": true, "vpt-verify": true,

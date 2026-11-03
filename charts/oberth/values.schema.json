@@ -780,12 +780,13 @@
           "additionalProperties": false,
           "properties": {
             "serviceAccount": {
-              "$ref": "#/definitions/kubernetesName"
+              "$ref": "#/definitions/optionalKubernetesName",
+              "description": "Empty selects oberth-argo-ci-secrets for this release only; deprecated. Omit the key or set the default explicitly before the next chart release."
             },
             "vaultRole": {
               "type": "string",
-              "minLength": 1,
-              "pattern": "^[A-Za-z0-9._-]+$"
+              "pattern": "^$|^[A-Za-z0-9._-]+$",
+              "description": "Empty selects oberth-argo-ci-secrets for this release only; deprecated. Omit the key or set the default explicitly before the next chart release."
             }
           }
         },
@@ -895,18 +896,18 @@
           "description": "Positive Kubernetes quantity for per-Pod emissary scratch on nonroot and trusted KVM leaves. Defaults to 1Gi; the server validates the quantity at startup."
         },
         "vmLauncherServiceAccount": {
-          "type": "string"
+          "type": "string",
+          "description": "Active until the VM runtime is removed; afterwards accepted and ignored for upgrades carrying saved VM values."
         },
         "containerDiskPrefixes": {
           "type": "array",
-          "items": {
-            "type": "string"
-          }
+          "items": {"type": "string"},
+          "description": "Active until the VM runtime is removed; afterwards accepted and ignored for upgrades carrying saved VM values."
         },
         "kubevirtCeiling": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Cluster-wide ceiling on every KubeVirt grant's per-run VMI budget.",
+          "description": "Active until the VM runtime is removed; sets the cluster-wide KubeVirt ceiling. Afterwards accepted and ignored for upgrades carrying saved ceilings.",
           "properties": {
             "maxVMs": {
               "type": "integer",

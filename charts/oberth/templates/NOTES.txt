@@ -44,3 +44,7 @@ rollout procedure in docs/releases/unreleased-execution-retirement.md.
 The VM execution path, guest-test injection and .oberth/tests.yaml are deprecated
 but remain supported while repository pipelines migrate to workflow capabilities.
 Existing KubeVirt grants and VM chart permissions remain effective.
+
+Deprecation: empty argo.ciSecrets.serviceAccount and argo.ciSecrets.vaultRole
+strings still select oberth-argo-ci-secrets for this release only. Before the
+next chart release, omit those overrides or set the default name explicitly.

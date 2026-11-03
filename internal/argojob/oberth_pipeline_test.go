@@ -129,27 +129,63 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 	// Every burn build.yaml declares for the CI trigger is present, with the
 	// same dependency edges.
 	assertStageGraph(t, built, "ci", map[string]string{
-		"setup":                    "",
-		"generic-names":            "",
-		"lint":                     "setup",
-		"test-store":               "setup",
-		"test-service":             "setup",
-		"test-rest":                "setup",
-		"test-gitcache":            "setup",
-		"build-static-git-runtime": "setup",
-		"test-static-git-runtime":  "build-static-git-runtime",
-		"test-archive-history":     "setup",
-		"test-openbao":             "setup",
-		"security":                 "setup",
-		"shellcheck":               "setup",
-		"chart":                    "setup",
-		"release-diagnostic":       "setup",
-		"verify-publisher-tools":   "setup",
-		"build-amd64":              "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart",
-		"build-arm64":              "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart",
-		"build-darwin-amd64":       "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart",
-		"build-darwin-arm64":       "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart",
+		"setup":                       "",
+		"generic-names":               "",
+		"lint":                        "setup",
+		"test-store":                  "setup",
+		"test-service":                "setup",
+		"test-rest":                   "setup",
+		"test-gitcache":               "setup",
+		"build-static-git-runtime":    "setup",
+		"test-static-git-runtime":     "build-static-git-runtime",
+		"test-archive-history":        "setup",
+		"test-openbao":                "setup",
+		"security":                    "setup",
+		"shellcheck":                  "setup",
+		"chart":                       "setup",
+		"chart-unittest":              "setup",
+		"test-chart-schema":           "setup",
+		"test-make-entrypoints":       "setup",
+		"test-release-prune-contract": "setup",
+		"release-diagnostic":          "setup",
+		"verify-publisher-tools":      "setup",
+		"build-amd64":                 "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart && chart-unittest && test-chart-schema && test-make-entrypoints && test-release-prune-contract",
+		"build-arm64":                 "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart && chart-unittest && test-chart-schema && test-make-entrypoints && test-release-prune-contract",
+		"build-darwin-amd64":          "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart && chart-unittest && test-chart-schema && test-make-entrypoints && test-release-prune-contract",
+		"build-darwin-arm64":          "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart && chart-unittest && test-chart-schema && test-make-entrypoints && test-release-prune-contract",
 	})
+}
+
+// Keep the regression files executable in CI as well as required in the DAG.
+func TestOberthBuildPipelineRunsChartRegressions(t *testing.T) {
+	var workflow wfv1.Workflow
+	if err := yaml.Unmarshal(loadPipeline(t, "build.yaml"), &workflow); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][]string{
+		"chart-unittest":              {"/tmp/oberth-tools/bin/untt-linux-amd64", "--strict", "charts/oberth"},
+		"test-chart-schema":           {"/usr/bin/python3", "-I", "-B", "scripts/test_chart_schema.py", "-v"},
+		"test-make-entrypoints":       {"/usr/bin/python3", "-I", "-B", "scripts/test_make_entrypoints.py", "-v"},
+		"test-release-prune-contract": {"/usr/bin/python3", "-I", "-B", "scripts/test_release_prune_contract.py", "-v"},
+	}
+	for _, template := range workflow.Spec.Templates {
+		expected, ok := want[template.Name]
+		if !ok {
+			continue
+		}
+		if template.Container == nil {
+			t.Errorf("%s has no regression command", template.Name)
+			continue
+		}
+		command := append(append([]string{}, template.Container.Command...), template.Container.Args...)
+		if !reflect.DeepEqual(command, expected) {
+			t.Errorf("%s command = %v, want %v", template.Name, command, expected)
+		}
+		delete(want, template.Name)
+	}
+	for name := range want {
+		t.Errorf("missing regression gate %s", name)
+	}
 }
 
 // TestOberthReleasePipelineIsAdmissible proves the release document clears the

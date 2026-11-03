@@ -126,6 +126,18 @@ spec:
       - name: chart
         template: chart
         depends: setup
+      - name: chart-unittest
+        template: chart-unittest
+        depends: setup
+      - name: test-chart-schema
+        template: test-chart-schema
+        depends: setup
+      - name: test-make-entrypoints
+        template: test-make-entrypoints
+        depends: setup
+      - name: test-release-prune-contract
+        template: test-release-prune-contract
+        depends: setup
       - name: release-diagnostic
         template: release-diagnostic
         depends: setup
@@ -134,16 +146,16 @@ spec:
         depends: setup
       - name: build-amd64
         template: build-amd64
-        depends: "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart"
+        depends: "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart && chart-unittest && test-chart-schema && test-make-entrypoints && test-release-prune-contract"
       - name: build-arm64
         template: build-arm64
-        depends: "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart"
+        depends: "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart && chart-unittest && test-chart-schema && test-make-entrypoints && test-release-prune-contract"
       - name: build-darwin-amd64
         template: build-darwin-amd64
-        depends: "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart"
+        depends: "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart && chart-unittest && test-chart-schema && test-make-entrypoints && test-release-prune-contract"
       - name: build-darwin-arm64
         template: build-darwin-arm64
-        depends: "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart"
+        depends: "lint && test-store && test-service && test-rest && test-gitcache && test-static-git-runtime && test-archive-history && chart && chart-unittest && test-chart-schema && test-make-entrypoints && test-release-prune-contract"
 
   # Refuse retired branding in every tracked file, including fixtures and docs.
   - name: generic-names
@@ -165,7 +177,7 @@ spec:
           cpu: '1'
           memory: 256Mi
 
-  # ---- setup stage (9 sequential steps) ----
+  # ---- setup stage (12 sequential steps) ----
   # Maps to: Test("setup", repositorySteps(inlineToolchainSteps()...)...)
   #
   # trivy and cosign are NOT installed here:
@@ -183,6 +195,12 @@ spec:
         template: install-deadcode
     - - name: install-helm
         template: install-helm
+    - - name: fetch-helm-unittest
+        template: fetch-helm-unittest
+    - - name: verify-helm-unittest
+        template: verify-helm-unittest
+    - - name: install-helm-unittest
+        template: install-helm-unittest
     - - name: fetch-shellcheck
         template: fetch-shellcheck
     - - name: verify-shellcheck
@@ -477,6 +495,98 @@ spec:
         limits:
           cpu: 2000m
           memory: 4Gi
+
+  # Pinned helm-unittest binary; fetch, verification and extraction have separate statuses.
+  - name: fetch-helm-unittest
+    automountServiceAccountToken: false
+    container:
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
+      workingDir: /work/src
+      command: ["/usr/bin/curl"]
+      args:
+      - "--fail"
+      - "--location"
+      - "--no-progress-meter"
+      - "--show-error"
+      - "--connect-timeout"
+      - "10"
+      - "--max-time"
+      - "90"
+      - "--retry"
+      - "2"
+      - "--retry-all-errors"
+      - "--proto"
+      - "=https"
+      - "--proto-redir"
+      - "=https"
+      - "--tlsv1.2"
+      - "--output"
+      - "/tmp/oberth-tools/helm-unittest-linux-amd64-1.2.1.tgz"
+      - "https://github.com/helm-unittest/helm-unittest/releases/download/v1.2.1/helm-unittest-linux-amd64-1.2.1.tgz"
+      env:
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: HOME
+        value: "/tmp"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+      resources:
+        requests:
+          cpu: "1"
+          memory: "256Mi"
+        limits:
+          cpu: "1"
+          memory: "256Mi"
+
+  - name: verify-helm-unittest
+    automountServiceAccountToken: false
+    container:
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
+      workingDir: /work/src
+      command: ["/usr/bin/sha256sum"]
+      args: ["-c", ".oberth/pins/helm-unittest.sha256"]
+      env:
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: HOME
+        value: "/tmp"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+      resources:
+        requests:
+          cpu: "1"
+          memory: "256Mi"
+        limits:
+          cpu: "1"
+          memory: "256Mi"
+
+  - name: install-helm-unittest
+    automountServiceAccountToken: false
+    container:
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
+      workingDir: /work/src
+      command: ["/bin/tar"]
+      args: ["--no-same-owner", "-xzf", "/tmp/oberth-tools/helm-unittest-linux-amd64-1.2.1.tgz", "-C", "/tmp/oberth-tools/bin", "untt-linux-amd64"]
+      env:
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: HOME
+        value: "/tmp"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+      resources:
+        requests:
+          cpu: "1"
+          memory: "256Mi"
+        limits:
+          cpu: "1"
+          memory: "256Mi"
 
   # [fetch-shellcheck] download shellcheck v0.10.0 static binary from upstream release
   - name: fetch-shellcheck
@@ -1493,6 +1603,116 @@ spec:
         limits:
           cpu: 2000m
           memory: 4Gi
+
+  # Focused regression gates measured locally with one Go worker (BusyBox time -v).
+  # Peak RSS / wall time: unittest 38 MiB / 0.21s, schema 55 MiB / 2.86s,
+  # Make 20 MiB / 0.11s, prune 20 MiB / 0.04s. Reserve 1 CPU and 256Mi per
+  # leaf, allowing headroom for the Python parent and its Helm child.
+  - name: chart-unittest
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
+      workingDir: /work/src
+      command: ["/tmp/oberth-tools/bin/untt-linux-amd64"]
+      args: ["--strict", "charts/oberth"]
+      env:
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: HOME
+        value: "/tmp"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+        readOnly: true
+      resources:
+        requests:
+          cpu: "1"
+          memory: "256Mi"
+        limits:
+          cpu: "1"
+          memory: "256Mi"
+
+  - name: test-chart-schema
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
+      workingDir: /work/src
+      command: ["/usr/bin/python3"]
+      args: ["-I", "-B", "scripts/test_chart_schema.py", "-v"]
+      env:
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: HOME
+        value: "/tmp"
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+        readOnly: true
+      resources:
+        requests:
+          cpu: "1"
+          memory: "256Mi"
+        limits:
+          cpu: "1"
+          memory: "256Mi"
+
+  - name: test-make-entrypoints
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
+      workingDir: /work/src
+      command: ["/usr/bin/python3"]
+      args: ["-I", "-B", "scripts/test_make_entrypoints.py", "-v"]
+      env:
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: HOME
+        value: "/tmp"
+      resources:
+        requests:
+          cpu: "1"
+          memory: "256Mi"
+        limits:
+          cpu: "1"
+          memory: "256Mi"
+
+  - name: test-release-prune-contract
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
+      workingDir: /work/src
+      command: ["/usr/bin/python3"]
+      args: ["-I", "-B", "scripts/test_release_prune_contract.py", "-v"]
+      env:
+      - name: PATH
+        value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
+      - name: HOME
+        value: "/tmp"
+      resources:
+        requests:
+          cpu: "1"
+          memory: "256Mi"
+        limits:
+          cpu: "1"
+          memory: "256Mi"
 
   # ---- build-amd64 burn (single step) ----
   # Maps to: Build("build-amd64", repositorySteps(
