@@ -10,13 +10,15 @@ import sys
 # SHA-256 of lowercase alphanumeric labels. Keep the labels themselves out of
 # public source, including the gate and its negative controls.
 BRAND_DIGESTS = {
-    6: {
-        '8a62e967fcd6dfa5d75308c37808b4668a7faf1cdb06e09ac0a7161827603887',
-    },
     10: {
         'ae87e18457eeee44eb012a45dfc3b261413407941de02c96064bff4f442d30bb',
     },
 }
+# Short retired identifiers are matched within individual tokens: joining
+# ordinary prose words can otherwise produce accidental matches.
+IDENTIFIER_DIGESTS = {'8a62e967fcd6dfa5d75308c37808b4668a7faf1cdb06e09ac0a7161827603887'}
+IDENTIFIER_TOKEN = re.compile(rb"[A-Za-z0-9]+")
+
 INSTANCE_DIGESTS = {
     6: {
         '38a5015a3b8ccd8f080fe05a085be6395a210e4dad37390c42f647f1329afe4a',
@@ -64,6 +66,13 @@ def digest(value):
 
 
 def forbidden(data, allow_legacy=False):
+    decoded = HEX_ESCAPE.sub(lambda m: bytes([int(m[1] or m[2], 16)]), data)
+    for view in (decoded, LITERAL_JOIN.sub(b'', decoded)):
+        for token in IDENTIFIER_TOKEN.findall(view):
+            token = token.lower()
+            if any(digest(token[i:i + 6]) in IDENTIFIER_DIGESTS
+                   for i in range(len(token) - 5)):
+                return True
     data = normalize(data)
     joined = LITERAL_JOIN.sub(b'', data)
     # Inspect both views: joining a list of complete labels must not hide one

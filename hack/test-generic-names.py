@@ -154,9 +154,13 @@ class NameCheckTests(unittest.TestCase):
 class RetiredProtocolNameTests(unittest.TestCase):
     def test_retired_protocol_name_is_rejected_across_identifiers(self):
         label = bytes([98, 101, 97, 99, 111, 110])
-        for value in (label, label.upper(), b'Capture' + label.title() + b'Artifact'):
+        for value in (label, label.upper(), b'Capture' + label.title() + b'Artifact',
+                      b'prefix' + label + b'suffix', b'PREFIX' + label.upper() + b'SUFFIX'):
             with self.subTest(value=value):
                 self.assertTrue(gate.forbidden(value))
+
+    def test_prose_word_boundaries_do_not_form_a_retired_identifier(self):
+        self.assertFalse(gate.forbidden(b'The receipt can be a container result.'))
 
 
 if __name__ == '__main__':
