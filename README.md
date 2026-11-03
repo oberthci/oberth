@@ -331,7 +331,6 @@ priority. Declared workflows never fall back to sizes. See
 | `issue_delete` | Delete an accidentally created manual issue |
 | `issue_list` | List issue metadata and computed stale state, with work-status filtering (pages of 50) |
 | `issue_lock` | Acquire or renew a five-minute caller-owned issue lock |
-
 | `access_list` | Show all secret access grants for a repo |
 | `access_allow` | Grant a repo+step access to a named secret |
 | `access_revoke` | Revoke a secret access grant |
