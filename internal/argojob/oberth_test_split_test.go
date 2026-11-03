@@ -124,7 +124,9 @@ else:
 			case "store":
 				timeout = "-timeout=55m"
 			case "service":
-				timeout = "-timeout=45m"
+				timeout = "-timeout=49m"
+			case "rest":
+				timeout = "-timeout=55m"
 			}
 			want := []string{"test", "-race", "-v", "-count=1", "-p=2", timeout}
 			for _, pkg := range packages {
@@ -157,6 +159,11 @@ func TestOberthSplitStagesUseTheRaceGroupLauncher(t *testing.T) {
 				continue
 			}
 			found = true
+			if seconds, measured := map[string]int32{"store": 3300, "service": 2940, "rest": 3300}[group]; measured {
+				if template.ActiveDeadlineSeconds == nil || template.ActiveDeadlineSeconds.IntVal != seconds {
+					t.Fatalf("%s step deadline = %v, want %d seconds", group, template.ActiveDeadlineSeconds, seconds)
+				}
+			}
 			container := template.Container
 			wantCommand := []string{"/usr/bin/python3"}
 			wantArgs := []string{"-I", "-S", "-B", ".oberth/test-packages.py", group}

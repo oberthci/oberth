@@ -69,7 +69,8 @@ spec:
   entrypoint: ci
   # Bound repository-local fan-out; keep node CPU available to other workflows.
   parallelism: 2
-  activeDeadlineSeconds: 5400
+  # Keep the enlarged race step budgets inside the overall CI deadline.
+  activeDeadlineSeconds: 7200
 
   volumeClaimTemplates:
   - metadata:
@@ -1032,7 +1033,7 @@ spec:
   # parallel burn below; exclude it from rest to avoid running that suite twice.
   # The package-union contract covers new packages.
   # All groups keep the race detector and uncached execution. The explicit
-  # twenty-minute timeout provides headroom; independent Pods bound contention.
+  # measured per-package timeouts provide headroom; independent Pods bound contention.
   # Give each group a bounded two-CPU lane; workflow parallelism remains two.
   - name: deadcode
     automountServiceAccountToken: false
@@ -1098,10 +1099,12 @@ spec:
   # parallel burn below; exclude it from rest to avoid running that suite twice.
   # The package-union contract covers new packages.
   # All groups keep the race detector and uncached execution. The explicit
-  # twenty-minute timeout provides headroom; independent Pods bound contention.
+  # measured per-package timeouts provide headroom; independent Pods bound contention.
   # Give each group a bounded two-CPU lane; workflow parallelism remains two.
   - name: test-store
     automountServiceAccountToken: false
+    # Maximum observed race duration times 1.5, rounded up to minutes.
+    activeDeadlineSeconds: 3300
     volumes:
     - name: store-test-tmp
       emptyDir:
@@ -1179,6 +1182,8 @@ spec:
 
   - name: test-service
     automountServiceAccountToken: false
+    # Maximum observed race duration times 1.5, rounded up to minutes.
+    activeDeadlineSeconds: 2940
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1243,6 +1248,8 @@ spec:
 
   - name: test-rest
     automountServiceAccountToken: false
+    # Maximum observed race duration times 1.5, rounded up to minutes.
+    activeDeadlineSeconds: 3300
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1630,8 +1637,8 @@ spec:
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
-      command: ["/tmp/oberth-tools/bin/untt-linux-amd64"]
-      args: ["--strict", "charts/oberth"]
+      command: ["/bin/sh"]
+      args: ["hack/test-chart-unittest.sh"]
       env:
       - name: PATH
         value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"

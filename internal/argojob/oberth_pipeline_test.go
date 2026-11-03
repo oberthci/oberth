@@ -122,8 +122,8 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 		t.Fatalf("declared size = %q,%v; want L", size, err)
 	}
 
-	if built.Spec.ActiveDeadlineSeconds == nil || *built.Spec.ActiveDeadlineSeconds != 5400 {
-		t.Fatalf("own-CI deadline = %v, want 5400 seconds", built.Spec.ActiveDeadlineSeconds)
+	if built.Spec.ActiveDeadlineSeconds == nil || *built.Spec.ActiveDeadlineSeconds != 7200 {
+		t.Fatalf("own-CI deadline = %v, want 7200 seconds", built.Spec.ActiveDeadlineSeconds)
 	}
 
 	// Every burn build.yaml declares for the CI trigger is present, with the
@@ -163,7 +163,7 @@ func TestOberthBuildPipelineRunsChartRegressions(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string][]string{
-		"chart-unittest":              {"/tmp/oberth-tools/bin/untt-linux-amd64", "--strict", "charts/oberth"},
+		"chart-unittest":              {"/bin/sh", "hack/test-chart-unittest.sh"},
 		"test-chart-schema":           {"/usr/bin/python3", "-I", "-B", "scripts/test_chart_schema.py", "-v"},
 		"test-make-entrypoints":       {"/usr/bin/python3", "-I", "-B", "scripts/test_make_entrypoints.py", "-v"},
 		"test-release-prune-contract": {"/usr/bin/python3", "-I", "-B", "scripts/test_release_prune_contract.py", "-v"},
