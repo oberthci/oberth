@@ -26,7 +26,7 @@ func (jobs *ArgoJobs) SetArtifacts(collector ArtifactCollector, store ArtifactSt
 	jobs.artifactLimit = limit
 }
 
-func (jobs *ArgoJobs) collectArtifacts(ctx context.Context, workflowName, runID string, trigger periapsis.Trigger) string {
+func (jobs *ArgoJobs) collectArtifacts(ctx context.Context, workflowName, runID string, trigger periapsis.Trigger, diagnostics ...[]byte) string {
 	if jobs.artifacts == nil {
 		return ""
 	}
@@ -46,7 +46,14 @@ func (jobs *ArgoJobs) collectArtifacts(ctx context.Context, workflowName, runID 
 	if collectErr != nil {
 		archive = nil
 	}
-	if collectErr != nil {
+	if len(diagnostics) > 0 && len(diagnostics[0]) > 0 {
+		var err error
+		archive, err = appendVMIDiagnosticArtifact(archive, diagnostics[0], jobs.artifactLimit)
+		if err != nil {
+			return "store: VMI diagnostic archive unavailable"
+		}
+	}
+	if collectErr != nil && len(archive) == 0 {
 		return fmt.Sprintf("collect: %v", collectErr)
 	}
 
@@ -58,6 +65,9 @@ func (jobs *ArgoJobs) collectArtifacts(ctx context.Context, workflowName, runID 
 	}
 	details := map[string]any{"bytes": len(archive), "stored": true}
 	jobs.auditArtifacts(ctx, runID, details)
+	if collectErr != nil {
+		return fmt.Sprintf("collect: %v; VMI diagnostics retained", collectErr)
+	}
 	return ""
 }
 

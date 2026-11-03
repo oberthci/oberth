@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"reflect"
 	"sort"
 	"sync"
 	"time"
@@ -18,7 +19,9 @@ import (
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/oberthci/oberth/internal/model"
@@ -70,26 +73,48 @@ var errRunLogBudget = errors.New("argojob: aggregate run log budget exceeded")
 
 // Controller submits Workflows and supervises them to a terminal result.
 type Controller struct {
-	capabilities     func(context.Context, int64) (*argoworkflow.Capability, error)
-	restartedAt      time.Time
-	profileVerifyMu  sync.Mutex
-	profileMu        sync.Mutex
-	profileStatus    model.ControllerProfileStatus
-	profileBackoff   time.Duration
-	profileLogAt     time.Time
-	timings          TimingRecorder
-	resourceSource   ResourceUsageSource
-	resourceRecorder ResourceUsageRecorder
-	workflows        WorkflowClient
-	kube             kubernetes.Interface
-	logs             PodLogReader
-	followLogs       PodLogFollower
-	logIdentity      podLogIdentityReader
-	logPod           func(context.Context, string, string) (*corev1.Pod, error)
-	seeder           *SourceSeeder
-	config           Config
-	interval         time.Duration
-	readGrace        time.Duration
+	capabilities      func(context.Context, int64) (*argoworkflow.Capability, error)
+	restartedAt       time.Time
+	vmiQuotaMu        sync.Mutex
+	profileVerifyMu   sync.Mutex
+	profileMu         sync.Mutex
+	profileStatus     model.ControllerProfileStatus
+	profileBackoff    time.Duration
+	profileLogAt      time.Time
+	timings           TimingRecorder
+	resourceSource    ResourceUsageSource
+	resourceRecorder  ResourceUsageRecorder
+	workflows         WorkflowClient
+	kube              kubernetes.Interface
+	logs              PodLogReader
+	followLogs        PodLogFollower
+	logIdentity       podLogIdentityReader
+	logPod            func(context.Context, string, string) (*corev1.Pod, error)
+	seeder            *SourceSeeder
+	config            Config
+	vmi               dynamic.Interface
+	vmiCreate         func(context.Context, string, *unstructured.Unstructured) (*unstructured.Unstructured, error)
+	vmiCleanupFailure func(context.Context, string, error)
+	interval          time.Duration
+	readGrace         time.Duration
+}
+
+// WithVMIClient enables the run cleanup backstop for admitted VM resources.
+func (controller *Controller) WithVMIClient(client dynamic.Interface) *Controller {
+	controller.vmi = client
+	return controller
+}
+
+// WithVMICleanupFailure records failures of the optional cleanup backstop.
+func (controller *Controller) WithVMICleanupFailure(observe func(context.Context, string, error)) {
+	controller.vmiCleanupFailure = observe
+}
+
+func (controller *Controller) reportVMICleanupFailure(ctx context.Context, runID string, err error) {
+	log.Print("WARN: VMI cleanup backstop failed; see run audit for details")
+	if controller.vmiCleanupFailure != nil {
+		controller.vmiCleanupFailure(ctx, runID, err)
+	}
 }
 
 // NewController builds the engine. client may be nil when logs are supplied
@@ -150,6 +175,22 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 	if err := controller.verifyCapabilityGrant(ctx, request.RepositoryID, request.Capability); err != nil {
 		return "", err
 	}
+	attemptedCreate := false
+	definitelyRejected := false
+	if request.TrustedKVM != nil {
+		defer func() {
+			if resultErr != nil && (!attemptedCreate || definitelyRejected) {
+				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+				defer cancel()
+				if err := controller.confirmTrustedKVMNoCreate(cleanupCtx, request.Name); err == nil {
+					resultErr = errors.Join(ErrTrustedKVMCreateRefused, resultErr)
+				}
+			}
+		}()
+		if _, err := Build(controller.config, request); err != nil {
+			return "", err
+		}
+	}
 
 	var err error
 	request, err = controller.refreshNonroot(ctx, request)
@@ -207,7 +248,7 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 		return "", &beforeWorkflowCreateFailure{cause: err}
 	}
 	controller.timingMilestone(ctx, request.RunID, "source-seed-started")
-	volume, err := controller.seeder.seed(ctx, request.Name, request.SourceDir, credentialed, true)
+	volume, err := controller.seeder.seed(ctx, request.Name, request.SourceDir, credentialed, request.TrustedKVM == nil)
 	if err != nil {
 		return "", &beforeWorkflowCreateFailure{cause: err}
 	}
@@ -241,10 +282,12 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 		controller.seeder.DeleteClaim(context.WithoutCancel(ctx), volume.ClaimName)
 		return "", saErr
 	}
+	attemptedCreate = true
 	for _, warning := range stepUsageMemoryWarnings(intended) {
 		log.Printf("WARN: %s", warning)
 	}
 	created, rejected, createErr := controller.createWorkflowWithRetry(ctx, request, intended)
+	definitelyRejected = rejected
 	if createErr != nil {
 		if rejected {
 			controller.seeder.DeleteClaim(context.WithoutCancel(ctx), volume.ClaimName)
@@ -365,6 +408,11 @@ func sameSubmission(existing, intended *wfv1.Workflow) error {
 	}
 	if existingIdentity != intendedIdentity {
 		return fmt.Errorf("argojob: Workflow %s exists with a different spec than this run's source produces", intended.Name)
+	}
+	if binding := intended.Annotations[trustedKVMAnnotation]; binding != "" {
+		if existing.Annotations[trustedKVMAnnotation] != binding || !reflect.DeepEqual(existing.Spec, intended.Spec) {
+			return errors.New("argojob: existing Workflow differs from trusted KVM server spec")
+		}
 	}
 	if binding := intended.Annotations[nonrootProfileAnnotation]; binding != "" {
 		// Quantity encodings and internal caches can change in Kubernetes
@@ -488,6 +536,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 			preserveObservedExitCodes(&completion, workflow)
 			preserveRecordedExitCodes(&completion, events)
 			controller.collectRestartStepDiagnostics(ctx, settled, &completion, binding.RestartedAt)
+			controller.collectVMIFailure(ctx, settled, &completion, budget)
 			if publishErr := controller.publishLogs(ctx, settled, reporter, budget, live); publishErr != nil && budgetBreachErr == nil {
 				budgetBreachErr = publishErr
 			}
@@ -498,6 +547,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 					budgetBreachErr = err
 				}
 			}
+			controller.cleanupVerdict(ctx, settled, runID, budget, &completion)
 			completion.classifyRestartCut()
 			reporter.finish(budget)
 			if err := controller.retireExecutorIdentity(ctx, settled); err != nil {
@@ -689,9 +739,11 @@ func (controller *Controller) terminalState(ctx context.Context, name, wantedRun
 	completion := completionFor(settled)
 	completion.ObservationComplete = completion.ObservationComplete && completeRead
 	controller.retainWorkflowTiming(ctx, settled)
+	controller.collectVMIFailure(ctx, settled, &completion, nil)
 	preserveObservedExitCodes(&completion, workflow)
 	preserveRecordedExitCodes(&completion, events)
 	controller.collectRestartStepDiagnostics(ctx, settled, &completion, binding.RestartedAt)
+	controller.cleanupVerdict(ctx, settled, runID, nil, &completion)
 	completion.classifyRestartCut()
 	return &completion, nil
 }
@@ -717,6 +769,7 @@ func (controller *Controller) Owns(ctx context.Context, name string) (bool, erro
 func (controller *Controller) Cancel(ctx context.Context, name, runID string) error {
 	workflow, err := controller.workflows.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
+		controller.cleanupVMIsBestEffort(ctx, name, runID)
 		return nil
 	}
 	if err != nil {
@@ -735,7 +788,24 @@ func (controller *Controller) Cancel(ctx context.Context, name, runID string) er
 	if err != nil && !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
 		return fmt.Errorf("argojob: delete Workflow %s: %w", name, err)
 	}
+	controller.cleanupVMIsForObservedWorkflow(ctx, workflow, runID)
 	return nil
+}
+
+func (controller *Controller) cleanupVMIsForObservedWorkflow(ctx context.Context, workflow *wfv1.Workflow, runID string) {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if err := controller.cleanupVMIsForWorkflow(cleanupCtx, workflow, runID); err != nil {
+		controller.reportVMICleanupFailure(cleanupCtx, runID, err)
+	}
+}
+
+func (controller *Controller) cleanupVMIsBestEffort(ctx context.Context, name, runID string) {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if err := controller.CleanupVMIs(cleanupCtx, name, runID); err != nil {
+		controller.reportVMICleanupFailure(cleanupCtx, runID, err)
+	}
 }
 
 // progressReporter turns repeated status observations into the monotonic

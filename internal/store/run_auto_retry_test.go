@@ -188,3 +188,28 @@ func TestAutoRetryAuditFailureRollsBackFailureAndEnqueueTogether(t *testing.T) {
 		t.Fatal("orphan retry committed", count, err)
 	}
 }
+
+func TestRCARevisionKVMRestartPreservesSpentAutoRetryBudget(t *testing.T) {
+	now := time.Now().UTC()
+	s := testStore(t, &now)
+	intent := kvmIntent(t, s)
+	original := intent.RunID
+	failed, err := s.FinishRun(t.Context(), original, autoRetryResult())
+	if err != nil || failed.AutoRetriedBy == "" {
+		t.Fatal(failed, err)
+	}
+	child, err := s.ClaimNextRun(t.Context())
+	if err != nil || child.ID != failed.AutoRetriedBy {
+		t.Fatal(child, err)
+	}
+	intent.RunID, intent.WorkflowName = child.ID, "trusted-"+child.ID
+	reserveRestartPreflight(t, s, intent, true)
+	next, err := s.RecoverKVMPreflight(t.Context(), child.ID)
+	if err != nil || next.ID == "" || next.AutoRetryOf != original {
+		t.Fatal("KVM recovery reset retry budget", next, err)
+	}
+	exhausted, err := s.FinishRun(t.Context(), next.ID, autoRetryResult())
+	if err != nil || exhausted.AutoRetriedBy != "" {
+		t.Fatal("KVM successor retried again", exhausted, err)
+	}
+}

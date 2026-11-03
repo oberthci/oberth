@@ -193,6 +193,9 @@ func (g *weightedAdmission) selectDeclaredDemand(receipt *argoworkflow.DemandRec
 	if errors.Is(err, argoworkflow.ErrMemoryUnbounded) {
 		return nil, model.ResourceFallbackMemory
 	}
+	if errors.Is(err, argoworkflow.ErrVMHostUndeclared) {
+		return nil, model.ResourceFallbackVM
+	}
 	if err != nil {
 		return nil, model.ResourceFallbackGraph
 	}

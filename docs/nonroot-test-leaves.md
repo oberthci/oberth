@@ -88,7 +88,9 @@ control/staging bounds prevent unbounded writable storage. The Argo emissary
 `var-run-argo` EmptyDir retains stdout/stderr and control files until Pod cleanup;
 it defaults to 1Gi. Administrators can set `argo.executorScratchSizeLimit` in the
 chart (`serve --argo-executor-scratch-size-limit`, a positive Kubernetes quantity).
-This limit is separate from `/tmp`
+This limit also applies to the protected trusted KVM leaf and is checked by its
+Pod attestation. Trusted KVM Pods created before a sizeLimit change fail recovery
+attestation and must be re-run under the new limit. It is separate from `/tmp`
 and CPU/memory step requests: reducing
 a test's resource requests does not reduce its retained log output. Server log
 collection limits do not cap emissary's on-disk copy. Size executor scratch for
@@ -135,7 +137,7 @@ separate acceptance work. Chromium additionally needs proven user namespace,
 clone/seccomp and kernel compatibility under the real RuntimeDefault container;
 UID65534 alone is insufficient. No SYS_ADMIN, privilege escalation, unconfined
 seccomp or `--no-sandbox` workaround is part of this capability. None of these
-source tests proves deployed browser coverage.
+source tests proves KubeVirt, guest enforcement or deployed browser coverage.
 
 ## Explicit profile transition on an existing installation
 
@@ -153,7 +155,8 @@ values, verifies the exact upstream Argo chart1.0.24 archive digest, and applies
 only the built-in public profile overlay to the existing Argo release. It waits
 for the same strict live controller/configuration proof used by submission
 admission before upgrading Oberth and setting `argo.controllerProfile`.
-Unrelated identities stay in reused values. Final success requires the controller proof and Oberth profile value
+The existing KVM recipe, harness pin and unrelated identities stay in reused
+values. Final success requires the controller proof and Oberth profile value
 and serving flag to agree after rollout.
 
 This is a two-release forward transition, not an atomic transaction. Failure
@@ -211,12 +214,12 @@ process-local cumulative `read_failures_total` counter. Raw Kubernetes error bod
 are omitted. Verification recovery clears the blocked state automatically.
 
 Server Kubernetes clients default to QPS 50 and burst 100, with headroom for eight
-concurrent jobs. Configure these with chart values
+concurrent jobs and trusted-preflight polling. Configure these with chart values
 `kubernetesClient.qps` / `kubernetesClient.burst`, or server flags
 `--kubernetes-client-qps` / `--kubernetes-client-burst`. QPS must be finite and
 positive; burst must be a positive integer. For a fractional QPS Helm override,
 use a values file or `--set-json` so the value remains numeric. The same settings
-apply to the Kubernetes and Argo Workflow clients.
+apply to the Kubernetes, Argo Workflow, and KubeVirt clients.
 
 An invalid controller profile also pauses all new admission, including ordinary
 workflows, until verification succeeds. `controller_profile.reason` identifies

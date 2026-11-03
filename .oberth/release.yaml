@@ -6,7 +6,7 @@
 # controls every server since v0.16.6 honours (#567): it declares
 # oberth.ci/workspace-mounts: none and oberth.ci/workspace-env: none, and every
 # leaf except the seven credentialed ones (release-sign-binaries, release-publish-images,
-# release-publish-homebrew, release-publish-chart,
+# release-publish-kvm-harness, release-publish-homebrew, release-publish-chart,
 # release-verify, release-public-artifacts) declares
 # automountServiceAccountToken: false. The release-public-artifacts leaves already
 # required v0.16.6, so the bootstrap leaves' former v0.16.5 admission
@@ -126,6 +126,9 @@ spec:
       - name: release-publish-images
         template: release-publish-images
         depends: release-build
+      - name: release-publish-kvm-harness
+        template: release-publish-kvm-harness
+        depends: release-build
       - name: release-publish-homebrew
         template: release-publish-homebrew
         depends: release-publish-public
@@ -144,7 +147,7 @@ spec:
         depends: release-publish-chart
       - name: release-verify
         template: release-verify
-        depends: release-publish-public && (release-publish-homebrew.Succeeded
+        depends: release-publish-public && release-publish-kvm-harness && (release-publish-homebrew.Succeeded
           || release-publish-homebrew.Failed || release-publish-homebrew.Errored)
       - name: release-runtime
         template: release-runtime
@@ -2049,6 +2052,97 @@ spec:
         limits:
           cpu: '1'
           memory: 320Mi
+  - name: release-publish-kvm-harness
+    metadata:
+      annotations:
+        oberth.ci/release-wif-role: image-writer
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 3600
+    retryStrategy:
+      limit: 2
+      retryPolicy: OnFailure
+      backoff:
+        duration: 30s
+        factor: 2
+    container:
+      image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
+      workingDir: /work/src
+      command:
+      - /run/oberth/bin/oberth
+      args:
+      - secretstore
+      - exec
+      - --dir=/run/oberth-secrets/release
+      - --path=oberth/data/release/cosign-secret
+      - --
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          OBERTH_RELEASE_WIF="${OBERTH_RELEASE_WIF:-}" \
+          GOOGLE_APPLICATION_CREDENTIALS=/run/oberth-gar/adc.json \
+          GOBIN=/tmp/oberth-tools/bin \
+          OBERTH_SECRETSTORE_DIR="$OBERTH_SECRETSTORE_DIR" \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - ./.oberth/release.sh
+      - publish-kvm-harness
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: true
+      - name: bootstrap-output
+        mountPath: /tmp/oberth-release
+      resources:
+        requests:
+          cpu: '4'
+          memory: 8Gi
+        limits:
+          cpu: '4'
+          memory: 8Gi
+    initContainers:
+    - name: verify-publisher-tools
+      image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          /usr/bin/python3 -I -S -B /work/src/.oberth/verify-release-tools.py
+      volumeMounts:
+      - name: bootstrap-tools
+        mountPath: /tmp/oberth-tools
+        readOnly: true
+      resources:
+        requests:
+          cpu: '1'
+          memory: 256Mi
+        limits:
+          cpu: '1'
+          memory: 256Mi
   - name: release-public-artifacts
     inputs:
       parameters:

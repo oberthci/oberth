@@ -226,6 +226,15 @@ call the proxy hostname directly.
 | `uplink_revoke` | Unscoped admin-only audited SSH and bearer revocation; protects the last active admin |
 | `uplink_rotate` | Unscoped admin-only handoff to an already-issued matching replacement key, atomically revoking the old key |
 | `access_dismiss` | Unscoped-admin-only exact pending-declaration dismissal |
+| `run_kvm_preflight` | Deprecated; read the retained trusted preflight journal for one run |
+| `kubevirt_grant` | Deprecated; audited administrator grant for the existing bounded VM path |
+| `kubevirt_revoke` | Deprecated; revoke a repository's old VM grant |
+| `kubevirt_grant_get` | Deprecated; read one repository's old VM grant |
+| `kubevirt_grant_list` | Deprecated; list old VM grants within the caller's scope |
+| `secretstore_sync_receipt` | Record the receipt for a reviewed secret-store synchronization plan |
+| `promote_grant` | Issue an audited grant for a source SHA and promotion target |
+| `promote_grant_revoke` | Revoke a promotion grant |
+| `promote_grant_list` | List promotion grants within the caller's scope |
 | `workflow_capability_grant` | Audited administrator grant for operator-owned namespaced resource access and extended resources |
 | `workflow_capability_revoke` | Revoke the repository's operator capability; blocks new authorization |
 | `workflow_capability_get` | Read the repository's current operator capability |
@@ -875,9 +884,9 @@ passed. Pending list entries and timeout replies are refreshed before return;
 a real commit between separate reads can advance status and its update time.
 
 The CLI uses `--url`, `OBERTH_MCP_URL`, or `OBERTH_BASE_URL` (with
-`/mcp` appended). There is no hosted default. `OBERTH_TOKEN_COMMAND` and
+`/mcp` appended). `OBERTH_TOKEN_COMMAND` and
 `OBERTH_CA_CERT` follow the installer environment; explicit flags take
-precedence. An unconfigured endpoint fails before any network request.
+precedence. Older scripts retain the deprecated implicit endpoint below.
 
 The implicit hosted MCP endpoint remains available for older scripts with a
 stderr deprecation warning. Set an explicit URL or load the installer-provided

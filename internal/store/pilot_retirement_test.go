@@ -9,6 +9,17 @@ import (
 )
 
 const pilotRetirementDowngradeSQL = executionRetirementDowngradeSQL + `
+DROP TRIGGER IF EXISTS issues_metadata_revision;
+ALTER TABLE issues DROP COLUMN revision;
+ALTER TABLE token_credentials DROP COLUMN expires_at;
+DROP TABLE IF EXISTS priority_grants;
+DROP TABLE IF EXISTS run_priority_requests;
+DROP TABLE IF EXISTS restart_workflow_timings;
+DROP TABLE IF EXISTS restart_step_timings;
+DROP TRIGGER IF EXISTS publications_tag_tuple_insert;
+DROP INDEX IF EXISTS publications_tag_tuple_idx;
+DELETE FROM schema_migrations WHERE version>=39;
+
 DROP TRIGGER IF EXISTS vm_suite_executions_retired_insert;
 DROP TRIGGER IF EXISTS vm_suite_executions_retired_update;
 DROP TRIGGER IF EXISTS vm_suite_executions_retired_delete;

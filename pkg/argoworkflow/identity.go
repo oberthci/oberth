@@ -21,8 +21,6 @@ import (
 // standing between a branch push and a release credential is that Oberth
 // decides the ServiceAccount server-side. ForceIdentity is that decision.
 type Identity struct {
-	// ResourceServiceAccountName is the operator-owned executor identity for
-	// admitted resource templates; it receives only operator-provided RBAC.
 	ResourceServiceAccountName string
 	// Namespace is where the Workflow object and all its pods are created.
 	Namespace string
@@ -41,6 +39,9 @@ type Identity struct {
 	// added to the executor container, never to main), which is what makes a
 	// tokenless step container possible at all.
 	ExecutorServiceAccountName string
+	// VMLauncherServiceAccountName is mounted only into admitted VMI resource
+	// templates. It has VMI permissions and must never be the shared executor.
+	VMLauncherServiceAccountName string
 	// AutomountServiceAccountToken controls whether the step container
 	// receives a ServiceAccount token. False for branch-tier runs: with no
 	// token file, an in-pod Vault login cannot even be attempted, so the tier
@@ -67,6 +68,14 @@ func (identity Identity) Validate() error {
 	if messages := k8svalidation.IsDNS1123Subdomain(identity.ExecutorServiceAccountName); len(messages) != 0 {
 		problems = append(problems, fmt.Errorf("argoworkflow: executor ServiceAccount %q is not a DNS-1123 subdomain: %s",
 			identity.ExecutorServiceAccountName, strings.Join(messages, ", ")))
+	}
+	if identity.VMLauncherServiceAccountName != "" {
+		if messages := k8svalidation.IsDNS1123Subdomain(identity.VMLauncherServiceAccountName); len(messages) != 0 {
+			problems = append(problems, fmt.Errorf("argoworkflow: VM-launcher ServiceAccount %q is invalid: %s", identity.VMLauncherServiceAccountName, strings.Join(messages, ", ")))
+		}
+		if identity.VMLauncherServiceAccountName == identity.ServiceAccountName || identity.VMLauncherServiceAccountName == identity.ExecutorServiceAccountName {
+			problems = append(problems, errors.New("argoworkflow: VM-launcher ServiceAccount must differ from pipeline and shared executor ServiceAccounts"))
+		}
 	}
 	// A shared executor identity would hand every step container the
 	// Kubernetes API access the executor needs for its own bookkeeping.
@@ -174,7 +183,13 @@ func ForceIdentity(workflow *wfv1.Workflow, identity Identity) error {
 			template.Executor = &wfv1.ExecutorConfig{ServiceAccountName: identity.ResourceServiceAccountName}
 			continue
 		}
-		return fmt.Errorf("argoworkflow: resource template %q requires a server-assigned operator ServiceAccount", template.Name)
+		if identity.VMLauncherServiceAccountName == "" {
+			return fmt.Errorf("argoworkflow: VMI resource template %q requires a server-assigned VM-launcher ServiceAccount", template.Name)
+		}
+		if template.Executor == nil {
+			template.Executor = &wfv1.ExecutorConfig{}
+		}
+		template.Executor.ServiceAccountName = identity.VMLauncherServiceAccountName
 	}
 	return nil
 }

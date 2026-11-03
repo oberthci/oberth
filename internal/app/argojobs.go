@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"reflect"
 	"strings"
@@ -13,12 +14,14 @@ import (
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
@@ -48,6 +51,10 @@ type SecretAccessLoader interface {
 	ActiveSecretGrants(ctx context.Context, repoID int64) (map[string]map[string]bool, error)
 }
 
+type KubeVirtGrantLoader interface {
+	ActiveKubeVirtGrant(context.Context, int64) (store.KubeVirtBudget, bool, error)
+}
+
 // ReconcilerHealthChecker reports whether the access reconciler has completed
 // at least one successful reconciliation. Credentialed admission must not
 // proceed before the initial reconcile succeeds, because a transient initial
@@ -69,11 +76,12 @@ type DeclarationRecorder interface {
 // gate, store, and audit chain need no knowledge of which engine ran a run.
 type ArgoJobs struct {
 	capabilityGrants  func(context.Context, int64) (*argoworkflow.Capability, error)
-	resourceBlobs     service.RepositoryBlobReader
+	resourceBlobs     vmrunner.PolicyGit
 	controller        argoControl
 	auditor           service.Auditor
 	config            argojob.Config
 	secretAccess      SecretAccessLoader
+	kubeVirtGrants    KubeVirtGrantLoader
 	declarations      DeclarationRecorder
 	fragments         FragmentLoader
 	collector         ArtifactCollector
@@ -156,6 +164,11 @@ func NewArgoJobs(controller argoControl, config argojob.Config, auditor service.
 		return nil, err
 	}
 	jobs := &ArgoJobs{controller: controller, auditor: auditor, config: config, secretAccess: secretAccess, fragments: fragments, intents: map[string]argoIntent{}}
+	if observable, ok := controller.(interface {
+		WithVMICleanupFailure(func(context.Context, string, error))
+	}); ok {
+		observable.WithVMICleanupFailure(jobs.auditVMICleanupFailure)
+	}
 	return jobs, nil
 }
 
@@ -177,6 +190,11 @@ func (jobs *ArgoJobs) SetWorkflowCapabilityLoader(load func(context.Context, int
 	}); ok {
 		controller.WithWorkflowCapabilityLoader(load)
 	}
+}
+
+// SetKubeVirtGrantLoader enables live, repository-scoped VM admission checks.
+func (jobs *ArgoJobs) SetKubeVirtGrantLoader(loader KubeVirtGrantLoader) {
+	jobs.kubeVirtGrants = loader
 }
 
 // SetIdentityStore wires the live identity store after construction.
@@ -231,7 +249,7 @@ func (jobs *ArgoJobs) PipelineConcurrencyGroup(_ context.Context, request servic
 	if err != nil {
 		return "", fmt.Errorf("app: read repository concurrency contract: %w", err)
 	}
-	group, err := argoworkflow.DeclaredConcurrencyGroup(workflow)
+	group, err := argoworkflow.RunConcurrencyGroup(workflow)
 	if err != nil {
 		return "", fmt.Errorf("app: read repository concurrency contract: %w", err)
 	}
@@ -358,7 +376,10 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 	}
 	var fragments map[argoworkflow.FragmentKey]argoworkflow.Fragment
 	if request.DemandReceipt != nil {
-		fragments = request.DemandReceipt.Fragments()
+		request.VMIDemandReceipt = request.DemandReceipt
+	}
+	if request.VMIDemandReceipt != nil {
+		fragments = request.VMIDemandReceipt.Fragments()
 	} else {
 		fragments, err = loadFragments(ctx, jobs.fragments, source, trigger, request.Run.RefKind, request.Run.Trigger)
 		if err != nil {
@@ -376,7 +397,7 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 	submission := argojob.Request{
 		PodDemand:        request.PodDemand,
 		ResourceFallback: request.ResourceFallback,
-		DemandReceipt:    request.DemandReceipt,
+		VMIDemandReceipt: request.VMIDemandReceipt,
 		PipelineFile:     pipelineFile,
 		RunID:            request.Run.ID, RepositoryID: request.Repository.ID, Name: request.JobName,
 		Repo: request.Repository.Name, UpstreamName: request.UpstreamName, UpstreamOrg: request.UpstreamOrg,
@@ -388,7 +409,17 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.JobRequest, tr
 	if jobs.capabilityGrants != nil {
 		submission.Capability, err = jobs.capabilityGrants(ctx, request.Repository.ID)
 		if err != nil {
-			return fmt.Errorf("app: load workflow capability: %w", err)
+			return err
+		}
+	}
+	if jobs.kubeVirtGrants != nil {
+		budget, granted, loadErr := jobs.kubeVirtGrants.ActiveKubeVirtGrant(ctx, request.Repository.ID)
+		if loadErr != nil {
+			return fmt.Errorf("app: load KubeVirt grant for %s: %w", request.Repository.Name, loadErr)
+		}
+		submission.KubeVirtGranted = granted
+		if granted {
+			submission.KubeVirtBudget = kubeVirtBudget(budget)
 		}
 	}
 	if err := jobs.bindResourceMaximum(ctx, &submission); err != nil {
@@ -502,12 +533,19 @@ func (jobs *ArgoJobs) auditSubmission(ctx context.Context, request service.JobRe
 		"declared_secret_paths":           declared,
 		"fragments":                       fragments,
 	}
-	if submission.DemandReceipt != nil {
-		details["demand_receipt"] = submission.DemandReceipt.Summary()
+	if submission.VMIDemandReceipt != nil {
+		details["vmi_demand_receipt"] = submission.VMIDemandReceipt.Summary()
 	}
 	if binding := workflow.Annotations["oberth.ci/verified-controller-profile"]; binding != "" {
 		details["controller_profile"] = binding
 		details["nonroot_templates"] = workflow.Annotations[argoworkflow.NonrootTemplatesAnnotation]
+	}
+	if leaves := workflow.Annotations[argoworkflow.KVMTemplatesAnnotation]; leaves != "" {
+		details["kvm_templates"] = leaves
+		details["guest_test_templates"] = workflow.Annotations[argoworkflow.GuestTestTemplatesAnnotation]
+		details["kubevirt_granted"] = submission.KubeVirtGranted
+		details["repo_id"] = request.Repository.ID
+		details["run_trigger"] = string(submission.RunTrigger)
 	}
 	if policy := workflow.Annotations["oberth.ci/release-wif-policy-sha256"]; policy != "" {
 		details["release_wif_policy_sha256"] = policy
@@ -627,8 +665,7 @@ func (jobs *ArgoJobs) Adopt(ctx context.Context, run model.Run) (periapsis.Size,
 		sha = run.SHA
 	}
 	binding, found, err := controller.Adopt(ctx, argojob.AdoptionRequest{
-		RepositoryID: run.RepoID,
-		Name:         run.JobName, RunID: run.ID, Ref: run.Ref, SHA: sha,
+		RepositoryID: run.RepoID, Name: run.JobName, RunID: run.ID, Ref: run.Ref, SHA: sha,
 		Group: run.ConcurrencyGroup, Trigger: trigger, RunTrigger: kind, ScheduleEntry: run.ScheduleEntry,
 	})
 	if errors.Is(err, argojob.ErrAdoptionRefused) {
@@ -734,7 +771,7 @@ func (jobs *ArgoJobs) wait(ctx context.Context, name string, destination io.Writ
 	// error (log budget breach, executor identity retirement). Partial evidence
 	// from a running Workflow must not trigger live artifact collection.
 	if completion.Terminal || completion.Succeeded {
-		if reason := jobs.collectArtifacts(context.WithoutCancel(ctx), name, intent.runID, intent.trigger); reason != "" {
+		if reason := jobs.collectArtifacts(context.WithoutCancel(ctx), name, intent.runID, intent.trigger, completion.VMIDiagnostics); reason != "" {
 			jobs.recordArtifactFailure(context.WithoutCancel(ctx), intent.runID, reason)
 		}
 	}
@@ -821,6 +858,20 @@ func (jobs *ArgoJobs) TerminalResult(ctx context.Context, name string) (service.
 		return service.JobResult{}, service.ErrJobNotTerminal
 	}
 	return jobs.result(*completion), nil
+}
+
+func (jobs *ArgoJobs) auditVMICleanupFailure(ctx context.Context, runID string, cleanupErr error) {
+	details, err := json.Marshal(map[string]string{"error": cleanupErr.Error()})
+	if err != nil {
+		return
+	}
+	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if _, err := jobs.auditor.AppendAuditAction(auditCtx, model.AuditActionSpec{
+		Actor: "oberth", Action: "ci.argo.vmi.cleanup-failed", ResourceType: "run", ResourceID: runID, Details: string(details),
+	}); err != nil {
+		log.Printf("WARN: audit VMI cleanup failure for run %s: %v", runID, err)
+	}
 }
 
 // Owns reports whether this engine created the named object. The dispatcher
@@ -995,6 +1046,17 @@ func (jobs *ArgoJobs) ObserveScheduling(ctx context.Context, run model.Run) (*mo
 		sha = run.SHA
 	}
 	return observer.ObserveScheduling(ctx, run.JobName, run.ID, sha)
+}
+
+// kubeVirtBudget converts a stored grant budget to the admission policy's
+// form. Unset stored fields take the grant defaults.
+func kubeVirtBudget(budget store.KubeVirtBudget) argoworkflow.VMIBudget {
+	budget = budget.WithDefaults()
+	return argoworkflow.VMIBudget{
+		MaxVMs:    budget.MaxVMs,
+		MaxCores:  budget.MaxCores,
+		MaxMemory: *resource.NewQuantity(budget.MaxMemoryBytes, resource.BinarySI),
+	}
 }
 
 // AwaitAdmission shares the controller's profile outage gate with the scheduler.

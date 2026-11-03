@@ -38,6 +38,13 @@ orphaned observations.
 Admission clears old bare-name observations only when the catalog name is
 unambiguous.
 
+`kubevirt_grant_list {}` returns active grants across all repositories.
+`repo_list` and `/api/repos` also include optional `KubeVirtGrant` metadata
+for active grants only. A per-repository grant lookup failure omits
+that optional metadata without failing the repository listing. Scoped admins
+cannot see or change other upstreams. No new cluster permissions or schema migrations are
+needed.
+
 These tools use existing database and audit authority only. They require no
 new chart values or Kubernetes RBAC.
 

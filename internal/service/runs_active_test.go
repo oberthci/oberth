@@ -43,6 +43,13 @@ func TestActiveRunsOrderAndWaitReasons(t *testing.T) {
 			release()
 		}
 	}()
+	// 1: oldest; admitted, then parked on trusted VM capacity.
+	vm := enqueue("feature/vm")
+	vmReservation := gate.reserve(vm.QueueSequence)
+	cleanup = append(cleanup, acquireRequestWithinBudget(t, vmReservation, groupRequest(vm.ID, vm.RepoID, periapsis.M, "")))
+	if err := vmReservation.parkVM(); err != nil {
+		t.Fatal(err)
+	}
 	// 2: holds concurrency group "deploy" and has started.
 	holder := enqueue("feature/holder")
 	cleanup = append(cleanup, acquireRequestWithinBudget(t, gate.reserve(holder.QueueSequence), groupRequest(holder.ID, holder.RepoID, periapsis.M, "deploy")))
@@ -90,14 +97,18 @@ func TestActiveRunsOrderAndWaitReasons(t *testing.T) {
 	for _, entry := range active {
 		order = append(order, entry.Ref)
 	}
-	want := "feature/holder,feature/grouped,feature/head,feature/queued"
+	want := "feature/holder,feature/vm,feature/grouped,feature/head,feature/queued"
 	if strings.Join(order, ",") != want {
 		t.Fatalf("active order = %v, want %s", order, want)
 	}
 	if active[0].Status != model.RunRunning || active[0].Scheduling != nil {
 		t.Fatalf("started run = %#v", active[0])
 	}
-	groupEntry, headEntry, queuedEntry := active[1], active[2], active[3]
+	vmEntry, groupEntry, headEntry, queuedEntry := active[1], active[2], active[3], active[4]
+	if vmEntry.Status != model.RunWaiting || vmEntry.Scheduling == nil || vmEntry.Scheduling.Admission == nil ||
+		!vmEntry.Scheduling.Admission.VMCapacity || !strings.Contains(vmEntry.Scheduling.Message, "trusted VM capacity") {
+		t.Fatalf("VM-parked run lost its reason: %#v", vmEntry.Scheduling)
+	}
 	if groupEntry.Scheduling == nil || groupEntry.Scheduling.Admission == nil || groupEntry.Scheduling.Admission.Group != "deploy" ||
 		groupEntry.Scheduling.Admission.GroupHolder != holder.ID || !strings.Contains(groupEntry.Scheduling.Message, `concurrency group "deploy"`) {
 		t.Fatalf("group waiter lost its reason: %#v", groupEntry.Scheduling)
@@ -107,7 +118,7 @@ func TestActiveRunsOrderAndWaitReasons(t *testing.T) {
 		!strings.Contains(headEntry.Scheduling.Message, "Need 3 weight; 2/4 used") {
 		t.Fatalf("queue head lost its weight: %#v %#v", headEntry.Scheduling, admission)
 	}
-	if queuedEntry.ID != queued.ID || queuedEntry.Scheduling == nil || queuedEntry.Scheduling.State != "queued" || queuedEntry.Scheduling.QueuePosition != 3 {
+	if queuedEntry.ID != queued.ID || queuedEntry.Scheduling == nil || queuedEntry.Scheduling.State != "queued" || queuedEntry.Scheduling.QueuePosition != 4 {
 		t.Fatalf("queued run = %#v", queuedEntry.Scheduling)
 	}
 
@@ -118,8 +129,8 @@ func TestActiveRunsOrderAndWaitReasons(t *testing.T) {
 		t.Fatalf("history = %#v, %v", history, err)
 	}
 	all, err := service.Runs(ctx, api.Actor{Identity: "agent@host"}, api.RunFilter{Limit: 50})
-	if err != nil || len(all.([]model.Run)) != 5 || all.([]model.Run)[0].ID != grouped.ID ||
-		all.([]model.Run)[2].ID != queued.ID || all.([]model.Run)[3].ID != done.ID {
+	if err != nil || len(all.([]model.Run)) != 6 || all.([]model.Run)[0].ID != vm.ID ||
+		all.([]model.Run)[3].ID != queued.ID || all.([]model.Run)[4].ID != done.ID {
 		t.Fatalf("default list = %#v, %v", all, err)
 	}
 

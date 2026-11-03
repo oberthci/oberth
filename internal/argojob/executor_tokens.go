@@ -155,7 +155,7 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 				continue
 			}
 		}
-		resourceAccount := ""
+		resourceAccount := controller.config.VMLauncherServiceAccount
 		if capability != nil {
 			resourceAccount = capability.ServiceAccount
 		}
@@ -164,6 +164,15 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 			return identityFailure("target_validation", err)
 		}
 		serviceAccount := controller.config.ExecutorServiceAccount
+		if launcher && capability == nil {
+			if err := controller.ensureVMIForResourcePod(ctx, wf, pod); err != nil {
+				if errors.Is(err, errResourceDeletePending) {
+					continue
+				}
+				return identityFailure("launcher_provision", err)
+			}
+			serviceAccount = controller.config.VMLauncherServiceAccount
+		}
 		if launcher && capability != nil {
 			serviceAccount = capability.ServiceAccount
 		}
@@ -334,7 +343,7 @@ func (controller *Controller) retireExecutorIdentity(ctx context.Context, wf *wf
 	if controller.kube == nil || wf.UID == "" {
 		return nil
 	}
-	accounts := []string{controller.config.ExecutorServiceAccount}
+	accounts := []string{controller.config.ExecutorServiceAccount, controller.config.VMLauncherServiceAccount}
 	if wf.Annotations[capabilityAnnotation] != "" {
 		accounts = append(accounts, wf.Spec.ServiceAccountName)
 	}

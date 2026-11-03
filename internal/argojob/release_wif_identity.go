@@ -24,7 +24,7 @@ func (config Config) validateReleaseWIFStepAccounts() error {
 			if !slices.Contains(config.ReleaseTagRoutes[repo], grant.StepRoutes[leaf]) {
 				return fmt.Errorf("argojob: release WIF step %q must bind an existing exact release tag route", leaf)
 			}
-			if sa == config.PipelineServiceAccount || sa == config.CredentialedServiceAccount || sa == config.CISecretsServiceAccount || sa == config.ExecutorServiceAccount {
+			if sa == config.PipelineServiceAccount || sa == config.CredentialedServiceAccount || sa == config.CISecretsServiceAccount || sa == config.ExecutorServiceAccount || sa == config.VMLauncherServiceAccount {
 				return fmt.Errorf("argojob: release WIF step %q cannot use shared ServiceAccount %q", leaf, sa)
 			}
 			for _, identities := range []map[string]PerRepoIdentityConfig{config.PerRepoIdentities, config.PerRepoCIIdentities} {

@@ -217,7 +217,7 @@ func (gate *weightedAdmission) preparePressureWaitsLocked(now time.Time) {
 			r.pressureSince = time.Time{}
 			continue
 		}
-		if !r.prepared {
+		if !r.prepared || r.vmParked || gate.kubeVirtBlockedLocked(r) {
 			continue
 		}
 		if holder, ahead := gate.groupBlockerLocked(r); holder != "" || ahead != "" {

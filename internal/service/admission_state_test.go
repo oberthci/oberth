@@ -147,7 +147,7 @@ func TestReleaseOfAGrantWithoutAWorkflowNameNeedsForce(t *testing.T) {
 	auditor := &recordingAuditor{next: fixture.store}
 	scheduler.auditor = auditor
 	ctx := context.Background()
-	preflight, err := scheduler.EnqueueCI(ctx, CIRequest{EventID: "preflight", Repository: fixture.repo, Branch: "feature/resource",
+	preflight, err := scheduler.EnqueueCI(ctx, CIRequest{EventID: "preflight", Repository: fixture.repo, Branch: "feature/kvm",
 		SHA: strings.Repeat("c", 40), Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
@@ -160,7 +160,7 @@ func TestReleaseOfAGrantWithoutAWorkflowNameNeedsForce(t *testing.T) {
 		t.Fatal(err)
 	}
 	reservation := scheduler.admission.reserveRun(claimed)
-	acquireRequestWithinBudget(t, reservation, admissionRequest{RunID: preflight.ID, RepoID: fixture.repo.ID, Repo: fixture.repo.Name, Ref: "feature/resource", Size: periapsis.M})
+	acquireRequestWithinBudget(t, reservation, admissionRequest{RunID: preflight.ID, RepoID: fixture.repo.ID, Repo: fixture.repo.Name, Ref: "feature/kvm", Size: periapsis.M})
 
 	if _, err := scheduler.ReleaseAdmission(ctx, preflight.ID, "admin@host", false); !errors.Is(err, ErrAdmissionReleaseRefused) ||
 		!strings.Contains(err.Error(), "force") {

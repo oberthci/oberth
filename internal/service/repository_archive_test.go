@@ -126,12 +126,15 @@ func TestArchivedRepositoryRefusesNewGrants(t *testing.T) {
 	fixture := newControlFixture(t)
 	ctx := context.Background()
 	service, err := NewAPI(APIConfig{Runs: fixture.store, Repositories: fixture.store, History: fixture.store,
-		SizeGrants: fixture.store, PromotionGrants: fixture.store, SecretAccess: fixture.store})
+		KubeVirtGrants: fixture.store, SizeGrants: fixture.store, PromotionGrants: fixture.store, SecretAccess: fixture.store})
 	if err != nil {
 		t.Fatal(err)
 	}
 	admin := api.Actor{Identity: "admin@host", Fingerprint: "SHA256:admin", Admin: true}
 	// Grants issued while active stay revocable after archive.
+	if _, err := service.CallTool(ctx, admin, "kubevirt_grant", json.RawMessage(`{"repo":"oberth"}`)); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := service.CallTool(ctx, admin, "size_grant", json.RawMessage(`{"repo":"oberth","max":"XL"}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -140,6 +143,7 @@ func TestArchivedRepositoryRefusesNewGrants(t *testing.T) {
 	}
 	sha := strings.Repeat("b", 40)
 	grants := []struct{ tool, args string }{
+		{"kubevirt_grant", `{"repo":"oberth"}`},
 		{"size_grant", `{"repo":"oberth","max":"L"}`},
 		{"promote_grant", `{"repo":"oberth","sha":"` + sha + `","branch":"main","expires":"1h"}`},
 		{"access_allow", `{"repo":"oberth","step":"publish","secret":"registry"}`},
@@ -168,7 +172,7 @@ func TestArchivedRepositoryRefusesNewGrants(t *testing.T) {
 	if err != nil || value.(map[string]any)["state"] != "granted" {
 		t.Fatalf("refused size_grant changed the existing grant: %v %v", value, err)
 	}
-	for _, revoke := range []string{"size_revoke"} {
+	for _, revoke := range []string{"kubevirt_revoke", "size_revoke"} {
 		if _, err := service.CallTool(ctx, admin, revoke, json.RawMessage(`{"repo":"oberth"}`)); err != nil {
 			t.Fatalf("%s on archived repository = %v", revoke, err)
 		}

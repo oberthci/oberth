@@ -11,6 +11,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 func TestRestartCutAdoptionPersistsRetryableWithoutTestIssue(t *testing.T) {
@@ -144,7 +145,7 @@ func TestRestartCutLocalLogFailureUsesPinnedReobserve(t *testing.T) {
 			scheduler.logs = logs
 			// A direct resumed owner isolates the post-Wait local-index failure from
 			// startup and proves that the capability is used even when Wait returned nil.
-			reservation, err := scheduler.admission.adopt(run, "M")
+			reservation, err := scheduler.admission.adopt(run, "M", argoworkflow.VMIDemand{})
 			if err != nil {
 				t.Fatal(err)
 			}

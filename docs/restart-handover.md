@@ -5,9 +5,9 @@ eligible Argo Workflows under their existing run IDs; it does not create a secon
 Workflow or repeat a publication. Running branch runs are adopted. Promotion,
 tag and release runs are adopted where the server supports it (#1172 slice 2);
 otherwise their Workflow is deleted and the run is recorded `interrupted`, as
-before. Resource Workflows additionally require a current operator capability
-binding. Drain retired execution paths before upgrading. Admission and audit
-checks still apply, and schema
+before. Branch runs with a pending trusted KVM preflight are not adopted: KVM
+preflights keep their separate cleanup-and-interrupt recovery until conductor
+reattachment is available. Admission and audit checks still apply, and schema
 rollback still requires the documented restore procedure.
 
 Live Argo output is retained as each pod writes it. In-process reconnects use
@@ -62,7 +62,7 @@ not a total per-tick limit. Jitter reduces synchronized retries across runs.
 Only recognized transport/API failures at identity-delivery stages are labelled
 `infrastructure`. Policy, quota, ownership, target, invalid token/CA response,
 remote exit and unclassified errors remain hard `job` failures. Fixed safe
-validation diagnostics stay actionable; raw
+validation diagnostics and the VMI over-grant reason stay actionable; raw
 transport/server response text stays out of public errors and logs. A real
 terminal CI result takes precedence, and ownership-checked Workflow deletion
 must succeed before an observation failure terminalizes the run. Unsuccessful
@@ -162,9 +162,10 @@ the database closes.
 
 `oberth mcp call` reconnects only for an explicit list of pure reads: `wait`,
 `status`, `logs`, `system_status`, `run_get`, `run_logs`, `run_list`,
-`artifacts`, `artifact_get`, `promote_status`,
+`run_kvm_preflight`, `artifacts`, `artifact_get`, `promote_status`,
 `promotion_list`, `promote_grant_list`, `repo_list`, `issue_get`,
-`issue_get_many`, `issue_list`, `access_list`, `workflow_capability_get`, `size_grant_get`, `uplink_list`, `audit_list` and
+`issue_get_many`, `issue_list`, `access_list`, `kubevirt_grant_get`,
+`kubevirt_grant_list`, `size_grant_get`, `uplink_list`, `audit_list` and
 `schedule_list`, plus protocol initialization, ping and tool listing. A test
 proves none of them is behind the server's audit mutation gate. Authenticated
 JSON GETs used by CLI status/run views also reconnect. Retries preserve the

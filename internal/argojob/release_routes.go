@@ -12,6 +12,7 @@ import (
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/schedule"
+	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
@@ -40,7 +41,7 @@ func validReleaseRouteFile(file string) bool {
 		return false
 	}
 	name := strings.TrimSuffix(strings.TrimPrefix(file, ".oberth/"), ".yaml")
-	return len(k8svalidation.IsDNS1123Label(name)) == 0 && !slices.Contains([]string{argoworkflow.BuildFile, argoworkflow.FragmentFile, schedule.FileName}, file)
+	return len(k8svalidation.IsDNS1123Label(name)) == 0 && !slices.Contains([]string{argoworkflow.BuildFile, argoworkflow.FragmentFile, schedule.FileName, vmrunner.ContractFile}, file)
 }
 
 func (routes ReleaseTagRoutes) Validate() error {

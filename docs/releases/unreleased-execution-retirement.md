@@ -1,25 +1,25 @@
-# Execution capability retirement
+# Staged workflow capability migration
 
-Oberth runs and gates Argo Workflows. Resource objects, their lifecycle and
-cleanup, and workload test gates now belong to repository Workflows using
-[operator-owned workflow capabilities](../workflow-capabilities.md).
+Oberth adds [operator-owned workflow capabilities](../workflow-capabilities.md)
+without deleting the deprecated VM execution path. Existing `OBERTH_KVM`,
+`OBERTH_GUEST_TEST`, guest-test and `.oberth/tests.yaml` release gates, CLI flags,
+MCP tools, chart RBAC, cleanup and preflight recovery remain functional.
+KubeVirt grants retain their bounded authority and remain revocable; they never
+become generic capability grants. Operators provision new capability accounts,
+RBAC and resource capacity before migrating their pipelines.
 
-This breaks the MCP API: `run_kvm_preflight`, `kubevirt_grant`,
-`kubevirt_revoke`, `kubevirt_grant_get` and `kubevirt_grant_list` are removed.
-Use `workflow_capability_grant`, `workflow_capability_get` and
-`workflow_capability_revoke` for explicitly granted generic access.
-The direct execution CLI commands and flags are removed.
+Migrations 45/46/47 retire only the inactive pilot, create an empty capability
+table, and establish a guarded upgrade boundary. Live execution journals and
+capacity remain writable. The upgrade refuses VM work in flight; use the old
+binary to finish cleanup, then retry with a database backup. Startup checks
+legacy resource Workflows before accepting an upgrade. Existing grants alone
+do not block this staged upgrade because their runtime and permissions remain.
+Schemas 39–44 are the real predecessor migrations from priority, integration
+and replay-C; this branch carries their schemas to keep the ledger contiguous.
+Rollback requires the pre-upgrade database restore described in
+[backup and restore](../backup-restore.md).
 
-Before upgrading, back up the database, drain old runs, confirm external
-resource cleanup, and validate replacement repository Workflows. Existing
-execution, capacity and grant rows remain as read-only historical evidence;
-the upgrade neither claims cleanup nor converts old grants into new authority.
-Migrations 45/46/47 retire the pilot, add an empty capability table and retire
-execution journals. Combining unshipped migration branches requires assigning
-unique contiguous versions before release. Rollback requires the pre-upgrade
-database restore, as described in [backup and restore](../backup-restore.md).
-
-Reused `vm`, `trustedTests` and retired Argo execution values are accepted and
-ignored with a warning. The instance connector also moves outside Oberth;
-transfer its ownership before upgrading a release that used it. Retained chart
-values do not enable those removed features.
+The website and tunnel removal is a separate final commit. Hold that commit
+until connector ownership and the site pipeline have moved outside the chart.
+No deployment values are changed by this work. Merging the earlier staged
+capability commits alone preserves existing chart-managed website/tunnel use.

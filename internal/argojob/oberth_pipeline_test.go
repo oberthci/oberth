@@ -43,7 +43,7 @@ func loadPipeline(t *testing.T, name string) []byte {
 func oberthConfig() Config {
 	config := wifTestConfig()
 	config.PerRepoIdentities = map[string]PerRepoIdentityConfig{"github/acme/oberth": {ServiceAccountName: "oberth-per-repo"}}
-	config.ReleaseWIF.Repositories = map[string]ReleaseWIFRepository{"github/acme/oberth": {ServiceAccountName: "oberth-per-repo", Templates: map[string]string{"release-publish-images": "image-writer", "release-publish-chart": "chart-writer", "release-verify": "image-reader"}}}
+	config.ReleaseWIF.Repositories = map[string]ReleaseWIFRepository{"github/acme/oberth": {ServiceAccountName: "oberth-per-repo", Templates: map[string]string{"release-publish-images": "image-writer", "release-publish-kvm-harness": "image-writer", "release-publish-chart": "chart-writer", "release-verify": "image-reader"}}}
 	// Oberth's own pipeline uses golang: for toolchain steps and aquasec/trivy:
 	// for the security scan (the official image, pinned by digest).
 	config.RunnerImagePrefixes = []string{"golang:", "debian:", "aquasec/trivy:"}
@@ -197,6 +197,7 @@ func TestOberthReleasePipelineIsAdmissible(t *testing.T) {
 		"release-verify-publisher-tools": "release-setup && release-scan",
 		"release-sign-binaries":          "release-build",
 		"release-publish-images":         "release-build",
+		"release-publish-kvm-harness":    "release-build",
 		"release-publish-homebrew":       "release-publish-public",
 		"release-package-chart":          "release-publish-images",
 		"release-publish-chart":          "release-sign-binaries && release-package-chart",
@@ -206,7 +207,7 @@ func TestOberthReleasePipelineIsAdmissible(t *testing.T) {
 		// "release-publish-chart && release-publish-homebrew" once
 		// the secret is seeded and the step passes.
 		"release-publish-public": "release-publish-chart",
-		"release-verify":         "release-publish-public && (release-publish-homebrew.Succeeded || release-publish-homebrew.Failed || release-publish-homebrew.Errored)",
+		"release-verify":         "release-publish-public && release-publish-kvm-harness && (release-publish-homebrew.Succeeded || release-publish-homebrew.Failed || release-publish-homebrew.Errored)",
 		"release-runtime":        "release-verify",
 		"release-finalize":       "release-runtime",
 		// #649: the oberth.ci Worker publishes after the signed artifacts
@@ -336,11 +337,12 @@ func TestOberthReleasePublisherUsesPrivateChildDir(t *testing.T) {
 		t.Fatalf("admit release.yaml: %v", err)
 	}
 	wantPaths := map[string][]string{
-		"release-sign-binaries":    {"--path=oberth/data/release/cosign-secret"},
-		"release-publish-homebrew": {"--path=oberth/data/release/homebrew-tap-key"},
-		"release-publish-images":   {"--path=oberth/data/release/cosign-secret"},
-		"release-publish-chart":    {"--path=oberth/data/release/cosign-secret"},
-		"release-public-artifacts": {"--path=oberth/data/release/cloudflare-oberth-workers-token"},
+		"release-sign-binaries":       {"--path=oberth/data/release/cosign-secret"},
+		"release-publish-homebrew":    {"--path=oberth/data/release/homebrew-tap-key"},
+		"release-publish-images":      {"--path=oberth/data/release/cosign-secret"},
+		"release-publish-kvm-harness": {"--path=oberth/data/release/cosign-secret"},
+		"release-publish-chart":       {"--path=oberth/data/release/cosign-secret"},
+		"release-public-artifacts":    {"--path=oberth/data/release/cloudflare-oberth-workers-token"},
 	}
 	seen := map[string]bool{}
 	secretVolume := false

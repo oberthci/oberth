@@ -19,6 +19,9 @@ func TestChartDeclaredAdmissionBudgetsAndSingleKillSwitch(t *testing.T) {
 		if err != nil {
 			t.Fatalf("chart render failed: %v", err)
 		}
+		if strings.Count(string(out), "kind: PriorityClass") != 3 || strings.Count(string(out), "value: 1000000") != 3 {
+			t.Error("platform recovery priorities must be enabled by default")
+		}
 		for _, flag := range want {
 			if !strings.Contains(string(out), flag) {
 				t.Errorf("missing %s", flag)

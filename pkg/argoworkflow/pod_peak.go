@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -36,8 +35,6 @@ func (d PodDemand) Valid() bool {
 }
 
 const maxPodGraphWork = 4096
-
-var successfulDependency = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*(\.Succeeded)?$`)
 
 var errPodGraph = errors.New("declared resource graph cannot be bounded; use static calls or positive workflow parallelism")
 var errPodUndeclared = errors.New("pod has undeclared CPU/memory requests")

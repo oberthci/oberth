@@ -29,6 +29,20 @@ func TestAdmitWorkspaceMountsValues(t *testing.T) {
 	}
 }
 
+// A KVM leaf takes no host-backed mount, so the persistent cache is refused
+// there with an error that names the reason rather than the generic one.
+func TestAdmitKVMRefusesWorkspaceCache(t *testing.T) {
+	wf := kvmDocument(t)
+	templateByNameMut(wf, "kernel-test").Metadata.Annotations[WorkspaceMountsAnnotation] = WorkspaceMountsCache
+	_, err := DeclaredKVMTemplates(wf)
+	if err == nil || !strings.Contains(err.Error(), "take no host cache mount") {
+		t.Fatalf("err=%v", err)
+	}
+	if err := Admit(wf, Policy{}); err == nil {
+		t.Fatal("admission accepted a KVM cache leaf")
+	}
+}
+
 // Nonroot leaves move their Go caches into a private /tmp volume and never
 // mount the host cache; a cache request would be silently void, so it is
 // refused. none stays admitted.

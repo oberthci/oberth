@@ -35,6 +35,7 @@ import (
 	"github.com/oberthci/oberth/internal/containerimage"
 	"github.com/oberthci/oberth/internal/goproxy"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
@@ -115,7 +116,12 @@ type Config struct {
 	// Argo requires it whenever a step container's token is withheld, and it
 	// mounts this identity's token into the executor container only. That is
 	// what lets a branch-tier step container run with no token at all.
-	ExecutorServiceAccount string
+	ExecutorServiceAccount   string
+	VMLauncherServiceAccount string
+	ContainerDiskPrefixes    []string
+	// KubeVirtCeiling is the administrator's cluster-wide cap on every
+	// repository grant's VMI budget. Zero selects the hard limit.
+	KubeVirtCeiling argoworkflow.VMIBudget
 
 	// RunnerImagePrefixes is the same administrator allowlist the Go path
 	// applies to a declared RunnerImage.
@@ -258,6 +264,18 @@ type Config struct {
 	ReleaseWIF *ReleaseWIFConfig
 	// ReleaseTagRoutes selects release-only files from an administrator snapshot.
 	ReleaseTagRoutes ReleaseTagRoutes
+
+	// KVMEnabled gates server-injected KVM device access for annotated leaves.
+	// When true, leaves declared in oberth.ci/kvm-templates receive
+	// devices.kubevirt.io/kvm: "1" (request == limit) and OBERTH_KVM=1.
+	// When false and a workflow declares KVM leaves, admission fails with an
+	// infrastructure-class error rather than silently running TCG.
+	// Default: false (must be explicitly enabled via vm.kvm.enabled chart value).
+	KVMEnabled bool
+
+	// TrustedKVMGroup is the operator-provided device group for protected suites.
+	// Zero leaves trusted suite execution unavailable; never infer a host GID.
+	TrustedKVMGroup int64
 }
 
 func (config *Config) applyDefaults() {
@@ -286,6 +304,9 @@ func (config Config) Validate() error {
 			return errors.New("argojob: executor scratch size limit must be a positive Kubernetes quantity no larger than 1Pi")
 		}
 	}
+	if config.TrustedKVMGroup < 0 || config.TrustedKVMGroup > 2147483647 {
+		return errors.New("argojob: trusted KVM group must be a positive supported GID, or zero when disabled")
+	}
 	if err := config.ReleaseTagRoutes.Validate(); err != nil {
 		return err
 	}
@@ -312,6 +333,9 @@ func (config Config) Validate() error {
 		"ci-secrets ServiceAccount":   config.CISecretsServiceAccount,
 		"executor ServiceAccount":     config.ExecutorServiceAccount,
 	}
+	if config.VMLauncherServiceAccount != "" {
+		accounts["VM-launcher ServiceAccount"] = config.VMLauncherServiceAccount
+	}
 	for name, account := range accounts {
 		if messages := k8svalidation.IsDNS1123Subdomain(account); len(messages) != 0 {
 			problems = append(problems, fmt.Errorf("argojob: %s %q is invalid: %s",
@@ -336,6 +360,16 @@ func (config Config) Validate() error {
 	}
 	if err := periapsis.ValidateRunnerImagePrefixes(config.RunnerImagePrefixes); err != nil {
 		problems = append(problems, fmt.Errorf("argojob: %w", err))
+	}
+	if len(config.ContainerDiskPrefixes) > 0 {
+		if err := argoworkflow.ValidateContainerDiskPrefixes(config.ContainerDiskPrefixes); err != nil {
+			problems = append(problems, fmt.Errorf("argojob: %w", err))
+		}
+	}
+	if !config.KubeVirtCeiling.IsZero() {
+		if err := config.KubeVirtCeiling.Validate(); err != nil {
+			problems = append(problems, fmt.Errorf("argojob: KubeVirt ceiling: %w", err))
+		}
 	}
 	if config.VaultAddress != "" && !strings.HasPrefix(config.VaultAddress, "https://") {
 		// The pod authenticates to Vault with its ServiceAccount token and
@@ -517,21 +551,28 @@ func vaultAddressRequiresPinnedAnchor(address string) bool {
 
 // Request is one run's submission intent.
 type Request struct {
-	Capability *argoworkflow.Capability
+	Capability    *argoworkflow.Capability
+	DemandReceipt *argoworkflow.DemandReceipt
 	// ResourceMaximum is selected from the server's durable repository grant,
 	// never from pipeline annotations. Empty is legacy reconstruction only.
 	ResourceMaximum  periapsis.Size
 	ResourceFallback model.ResourceAdmissionFallback
 	PodDemand        *argoworkflow.PodDemand
-	DemandReceipt    *argoworkflow.DemandReceipt
+	VMIDemandReceipt *argoworkflow.VMIDemandReceipt
 	// omitStepUsage preserves already-running legacy specs during recovery.
 	omitStepUsage bool
 	// legacyStepUsage reconstructs already-submitted pre-floor wrappers only;
 	// new submissions must never opt out of the instrumentation memory guard.
 	legacyStepUsage bool
-	nonrootProof    *nonrootProof
-	RunID           string
-	RepositoryID    int64
+	KubeVirtGranted bool
+	// KubeVirtBudget is the repository grant's VMI budget; zero
+	// selects the default. Config.KubeVirtCeiling caps it.
+	KubeVirtBudget argoworkflow.VMIBudget
+	nonrootProof   *nonrootProof
+	// TrustedKVM is a server-created, journaled preflight admission.
+	TrustedKVM   *vmrunner.KVMIntent
+	RunID        string
+	RepositoryID int64
 	// Name is the durable, deterministic object name the scheduler already
 	// persisted for this run. Both engines use it, so recovery can find the
 	// object without knowing which engine created it.
@@ -603,6 +644,11 @@ type Request struct {
 // legacy-chain step fetches.
 func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	config.applyDefaults()
+	if request.TrustedKVM != nil {
+		if err := prepareTrustedKVMRequest(config, &request); err != nil {
+			return nil, err
+		}
+	}
 	// When the caller supplies a snapshot, overlay it onto the config copy.
 	// Config is received by value, so this does not mutate the original.
 	// All identity lookups in perrepo.go read these map fields, which are
@@ -645,7 +691,7 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	delete(workflow.Annotations, podDemandAnnotation)
 	delete(workflow.Annotations, resourceFallbackAnnotation)
 	if request.PodDemand != nil {
-		peak, e := argoworkflow.DeclaredPodPeak(workflow)
+		peak, e := argoworkflow.DeclaredHostPeak(workflow, request.effectiveRunTrigger())
 		if request.Capability != nil {
 			peak, e = argoworkflow.DeclaredCapabilityPeak(workflow)
 		}
@@ -655,6 +701,11 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	}
 	if request.ResourceMaximum != "" {
 		if err := argoworkflow.ValidateResourceCeilingWithCapability(workflow, request.Repo, request.ResourceMaximum, int64(config.WorkflowTimeout/time.Second), request.Capability); err != nil {
+			return nil, err
+		}
+	}
+	if request.TrustedKVM != nil {
+		if err := admitTrustedKVMSource(workflow); err != nil {
 			return nil, err
 		}
 	}
@@ -682,6 +733,14 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	credentialed := len(declaredPaths) > 0
 	if request.Capability != nil && (credentialed || len(wifLeaves) > 0) {
 		return nil, errors.New("argojob: operator capabilities cannot be combined with secret or WIF identities")
+	}
+	if names, err := argoworkflow.DeclaredKVMTemplates(workflow); err != nil {
+		return nil, err
+	} else if len(names) != 0 && (request.Trigger != periapsis.TriggerCI || credentialed || len(wifLeaves) > 0) {
+		return nil, errors.New("argojob: KVM leaves require a credential-free CI workflow")
+	}
+	if request.Capability == nil && (credentialed || len(wifLeaves) > 0) && hasVMIResources(workflow) {
+		return nil, errors.New("argojob: VMI resource templates are refused in credentialed workflows")
 	}
 
 	// Refuse a credentialed run the deployment cannot possibly credential, at
@@ -711,7 +770,8 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	}
 	policy := argoworkflow.Policy{
 		Capability:          request.Capability,
-		RunnerImagePrefixes: config.RunnerImagePrefixes,
+		RunnerImagePrefixes: config.RunnerImagePrefixes, KubeVirt: request.KubeVirtGranted, ContainerDiskPrefixes: config.ContainerDiskPrefixes,
+		VMIBudget: request.KubeVirtBudget, VMICeiling: config.KubeVirtCeiling,
 	}
 	receipt, err := resolved.Receipt(policy)
 	if err != nil {
@@ -722,10 +782,15 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 			return nil, err
 		}
 	}
+	if request.VMIDemandReceipt != nil {
+		if err := request.VMIDemandReceipt.Verify(receipt); err != nil {
+			return nil, err
+		}
+	}
 	// Prepare admits and binds in one call so the order cannot be got wrong.
 	if err := argoworkflow.Prepare(
 		workflow,
-		policy,
+		resolved.Policy(policy),
 		identity,
 	); err != nil {
 		return nil, err
@@ -829,16 +894,29 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	if err := applyNonrootLeaves(workflow, config, request); err != nil {
 		return nil, err
 	}
+	if err := applyKVMLeaves(workflow, config); err != nil {
+		return nil, err
+	}
 
 	// Stamp before wrapping so producer inputs cannot inherit a stale
 	// document default instead of the durable run's trigger.
 	if err := resolved.BindParameters(workflow, request.effectiveRunTrigger()); err != nil {
 		return nil, err
 	}
+	if request.TrustedKVM != nil {
+		if err := appendTrustedKVM(workflow, config, request); err != nil {
+			return nil, err
+		}
+	}
 	if err := projectExecutorTokens(workflow, config); err != nil {
 		return nil, err
 	}
 
+	if request.Capability == nil {
+		if err := projectVMICreateGuard(workflow, config, request, receipt); err != nil {
+			return nil, err
+		}
+	}
 	if err := wrapStepUsage(workflow, request.legacyStepUsage); err != nil {
 		return nil, err
 	}
@@ -1022,6 +1100,7 @@ func (config Config) identityFor(trigger periapsis.Trigger, hasSecretPaths bool)
 			Namespace:                    config.Namespace,
 			ServiceAccountName:           config.PipelineServiceAccount,
 			ExecutorServiceAccountName:   config.ExecutorServiceAccount,
+			VMLauncherServiceAccountName: config.VMLauncherServiceAccount,
 			AutomountServiceAccountToken: false,
 		}, nil
 	}
@@ -1051,6 +1130,15 @@ func (config Config) identityFor(trigger periapsis.Trigger, hasSecretPaths bool)
 	default:
 		return argoworkflow.Identity{}, fmt.Errorf("argojob: no credentialed identity exists for trigger %q", trigger)
 	}
+}
+
+func hasVMIResources(workflow *wfv1.Workflow) bool {
+	for _, template := range workflow.Spec.Templates {
+		if template.Resource != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // vaultRoleFor selects the OpenBao Kubernetes-auth role a credentialed run's
@@ -2289,7 +2377,9 @@ func (request Request) validate() error {
 		switch {
 		case !request.RunTrigger.Valid():
 			problems = append(problems, fmt.Errorf("argojob: run trigger %q is invalid", request.RunTrigger))
-		case request.RunTrigger.Tier() != request.Trigger:
+		case request.RunTrigger.Tier() != request.Trigger && (request.TrustedKVM == nil || request.RunTrigger != argoworkflow.RunTriggerTag):
+			// The one crossing is the trusted preflight: it runs build.yaml
+			// under the CI tier to gate a tag's release delivery.
 			problems = append(problems, fmt.Errorf("argojob: run trigger %q does not run under the %s tier", request.RunTrigger, request.Trigger))
 		}
 	}

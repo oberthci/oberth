@@ -124,7 +124,7 @@ func TestMCPRefusalReasonsAndScope(t *testing.T) {
 				t.Fatal("promotion revealed an out-of-scope repository")
 			}
 
-			for _, tool := range []string{"promote_grant_list", "size_grant_get"} {
+			for _, tool := range []string{"promote_grant_list", "size_grant_get", "kubevirt_grant_get"} {
 				hidden := resultCall(t, server, tool, map[string]any{"repo": hiddenRepoName})
 				missing := resultCall(t, server, tool, map[string]any{"repo": "does-not-exist"})
 				if !hidden.IsError || fmt.Sprint(hidden.Content) != fmt.Sprint(missing.Content) {
@@ -387,7 +387,7 @@ func TestMCPRealCollectionSchemas(t *testing.T) {
 		"issue_close_many": {"ids": []int64{f.global.ID}, "reason": "schema test"},
 		"artifacts":        {"id": f.runs["github"][0].ID}, "schedule_list": {},
 		"uplink_list": {}, "audit_list": {}, "access_list": {},
-		"promote_grant_list": {},
+		"kubevirt_grant_list": {}, "promote_grant_list": {},
 	}
 	for name, args := range cases {
 		t.Run(name, func(t *testing.T) { validateResult(t, schemas[name], resultCall(t, server, name, args)) })

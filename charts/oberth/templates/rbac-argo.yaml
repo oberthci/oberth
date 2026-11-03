@@ -111,7 +111,7 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["serviceaccounts/token"]
-    resourceNames: [{{ .Values.argo.executorServiceAccount | quote }}]
+    resourceNames: [{{ .Values.argo.executorServiceAccount | quote }}, {{ .Values.argo.vmLauncherServiceAccount | default "oberth-argo-vm-launcher" | quote }}]
     verbs: ["create"]
   - apiGroups: [""]
     resources: ["configmaps"]
@@ -170,6 +170,72 @@ roleRef:
   kind: Role
   name: {{ include "oberth.fullname" $ }}-argo-release-tokens
 {{- end }}
+---
+# The server verifies run ownership and pins observed UIDs for VM cleanup.
+# Keep these permissions separate from the frozen Argo Role.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "oberth.fullname" . }}-argo-vmi-cleanup
+  namespace: {{ .Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["kubevirt.io"]
+    resources: ["virtualmachineinstances"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: ["cdi.kubevirt.io"]
+    resources: ["datavolumes"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "oberth.fullname" . }}-argo-vmi-cleanup
+  namespace: {{ .Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "oberth.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "oberth.fullname" . }}-argo-vmi-cleanup
+---
+# Failure evidence reads only Events in the pipeline namespace. Keep the
+# established Roles unchanged to avoid field-manager upgrade conflicts.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "oberth.fullname" . }}-argo-vmi-diagnostics
+  namespace: {{ .Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "oberth.fullname" . }}-argo-vmi-diagnostics
+  namespace: {{ .Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "oberth.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "oberth.fullname" . }}-argo-vmi-diagnostics
 {{- if .Values.argo.controllerProfile }}
 ---
 # Read-only replacement evidence for evicted controller history (#1214).

@@ -54,6 +54,7 @@ type Completion struct {
 	ObservationComplete bool
 	ObservedNodes       int
 	ReplayAttempts      []StepResult
+	VMIDiagnostics      []byte
 	Name                string
 	Succeeded           bool
 	Infrastructure      bool

@@ -67,7 +67,7 @@ func TestParallelismNoticeSurvivesCreateRecovery(t *testing.T) {
 	f := newConcurrencyFixture(t, periapsis.M, 3)
 	run := model.Run{ID: strings.Repeat("a", 32), JobName: "step-abc12345", SHA: strings.Repeat("b", 40), RepoID: f.repo.ID, QueueSequence: 1}
 	d := &argoworkflow.PodDemand{CPUMilli: 4000, MemoryBytes: 4 << 30, Pods: 4, Assumptions: argoworkflow.PodPeakDynamic | argoworkflow.PodPeakNested}
-	if err := f.scheduler.recordCreateAdmission(run, run.JobName, periapsis.M, d); err != nil {
+	if err := f.scheduler.recordCreateAdmission(run, run.JobName, periapsis.M, argoworkflow.VMIDemand{}, d); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.scheduler.restoreCreateGrant(run, nil); err != nil {

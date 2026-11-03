@@ -22,6 +22,34 @@ func TestExecutorScratchDefaultAndOverride(t *testing.T) {
 			pod := nonrootApplyControllerFixture(t, nonrootControllerFixture(t, shape+"-before-patch.json"), wf)
 			assertExecutorScratch(t, pod, want)
 		}
+		config, request := trustedKVMRequest(t)
+		config.ExecutorScratchSizeLimit = size
+		config.applyDefaults()
+		wf, err := Build(config, request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wf.UID = "workflow-uid"
+		wf.Status.StartedAt.Time = request.TrustedKVM.AdmittedAt
+		for i := range wf.Spec.Templates {
+			leaf := &wf.Spec.Templates[i]
+			if leaf.Name == trustedKVMTemplate {
+				pod := trustedKVMMaterializedPod(t, wf, leaf)
+				assertExecutorScratch(t, pod, want)
+				node := wf.Status.Nodes[wf.Name+"-trusted"]
+				if err := verifyTrustedKVMPod(wf, leaf, pod, &node, config); err != nil {
+					t.Fatal(err)
+				}
+				for j := range pod.Spec.Volumes {
+					if pod.Spec.Volumes[j].Name == "var-run-argo" {
+						pod.Spec.Volumes[j].EmptyDir.SizeLimit = nil
+					}
+				}
+				if err := verifyTrustedKVMPod(wf, leaf, pod, &node, config); err == nil {
+					t.Fatal("trusted attestation accepted an unbounded executor volume")
+				}
+			}
+		}
 	}
 }
 

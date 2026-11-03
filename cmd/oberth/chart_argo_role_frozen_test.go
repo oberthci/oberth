@@ -117,7 +117,7 @@ func TestChartArgoExecutorRulesLiveInTheirOwnRole(t *testing.T) {
 	docs := renderArgoRBAC(t)
 	role := findChartRBACDoc(t, docs, "Role", "oberth-argo-executor-tokens")
 	want := []map[string]any{
-		{"apiGroups": []any{""}, "resources": []any{"serviceaccounts/token"}, "resourceNames": []any{"oberth-argo-executor"}, "verbs": []any{"create"}},
+		{"apiGroups": []any{""}, "resources": []any{"serviceaccounts/token"}, "resourceNames": []any{"oberth-argo-executor", "oberth-argo-vm-launcher"}, "verbs": []any{"create"}},
 		{"apiGroups": []any{""}, "resources": []any{"configmaps"}, "resourceNames": []any{"kube-root-ca.crt"}, "verbs": []any{"get"}},
 	}
 	if got, wantCanonical := canonicalRules(t, role.Rules), canonicalRules(t, want); got != wantCanonical {
@@ -148,6 +148,45 @@ func TestChartArgoExecutorRulesLiveInTheirOwnRole(t *testing.T) {
 	}
 }
 
+func TestChartVMLauncherHasOnlyVMIAndTaskResultRoles(t *testing.T) {
+	out, err := exec.Command("helm", "template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@"+testImageDigest, "-s", "templates/argo-identities.yaml").Output()
+	if err != nil {
+		t.Fatalf("render VM launcher identity: %v", err)
+	}
+	decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(out), 4096)
+	var docs []chartRBACDoc
+	for {
+		var doc chartRBACDoc
+		err := decoder.Decode(&doc)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if doc.Kind != "" {
+			docs = append(docs, doc)
+		}
+	}
+	role := findChartRBACDoc(t, docs, "Role", "oberth-argo-vm-launcher")
+	want := []map[string]any{{"apiGroups": []any{"kubevirt.io"}, "resources": []any{"virtualmachineinstances"}, "verbs": []any{"get", "list", "watch"}}}
+	if got := canonicalRules(t, role.Rules); got != canonicalRules(t, want) {
+		t.Fatalf("VM launcher Role rules = %s", got)
+	}
+	shared := findChartRBACDoc(t, docs, "Role", "oberth-argo-executor")
+	for _, rule := range shared.Rules {
+		for _, resource := range toStrings(rule["resources"]) {
+			if resource == "virtualmachineinstances" {
+				t.Fatalf("shared executor received VMI permission: %v", rule)
+			}
+		}
+	}
+	binding := findChartRBACDoc(t, docs, "RoleBinding", "oberth-argo-vm-launcher-taskresults")
+	if binding.RoleRef["name"] != "oberth-argo-executor" {
+		t.Fatalf("task result binding = %v", binding.RoleRef)
+	}
+}
+
 func toStrings(value any) []string {
 	items, _ := value.([]any)
 	out := make([]string, 0, len(items))
@@ -157,4 +196,81 @@ func toStrings(value any) []string {
 		}
 	}
 	return out
+}
+
+func TestChartVMICreateGuardPermissionsAreSeparateAndBounded(t *testing.T) {
+	out, err := exec.Command("helm", "template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@"+testImageDigest, "-s", "templates/rbac-vmi-reservations.yaml").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(out), 4096)
+	var docs []chartRBACDoc
+	for {
+		var doc chartRBACDoc
+		err = decoder.Decode(&doc)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if doc.Kind != "" {
+			docs = append(docs, doc)
+		}
+	}
+	role := findChartRBACDoc(t, docs, "Role", "oberth-vmi-reservations")
+	want := []map[string]any{
+		{"apiGroups": []any{"kubevirt.io"}, "resources": []any{"virtualmachineinstances"}, "verbs": []any{"create", "get"}},
+		{"apiGroups": []any{""}, "resources": []any{"configmaps"}, "resourceNames": []any{"oberth-vmi-reservations"}, "verbs": []any{"get", "update"}},
+	}
+	if role.Metadata.Namespace != "oberth-argo" || canonicalRules(t, role.Rules) != canonicalRules(t, want) {
+		t.Fatalf("quota Role: %+v", role)
+	}
+	binding := findChartRBACDoc(t, docs, "RoleBinding", "oberth-vmi-reservations")
+	if binding.RoleRef["name"] != "oberth-vmi-reservations" || binding.RoleRef["kind"] != "Role" {
+		t.Fatalf("quota binding: %+v", binding)
+	}
+	frozen := findChartRBACDoc(t, renderArgoRBAC(t), "RoleBinding", "oberth-argo")
+	if canonicalRules(t, binding.Subjects) != canonicalRules(t, frozen.Subjects) {
+		t.Fatal("quota authority was granted to another identity")
+	}
+	ledgerYAML, err := exec.Command("helm", "template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@"+testImageDigest, "-s", "templates/vmi-reservations.yaml").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ledger map[string]any
+	if err = yaml.NewYAMLOrJSONDecoder(bytes.NewReader(ledgerYAML), 4096).Decode(&ledger); err != nil {
+		t.Fatal(err)
+	}
+	metadata := ledger["metadata"].(map[string]any)
+	if ledger["kind"] != "ConfigMap" || metadata["name"] != "oberth-vmi-reservations" || metadata["namespace"] != "oberth-argo" {
+		t.Fatalf("wrong pre-created ledger: %v", ledger)
+	}
+	if metadata["labels"].(map[string]any)["oberth.ci/role"] != "vmi-reservations" || metadata["annotations"].(map[string]any)["helm.sh/resource-policy"] != "keep" {
+		t.Fatal("ledger identity/lifetime not pinned")
+	}
+	if _, owned := ledger["data"]; owned {
+		t.Fatal("Helm must not own/reset mutable ledger data")
+	}
+	if _, owned := metadata["annotations"].(map[string]any)["oberth.ci/vmi-ledger-initialized"]; owned {
+		t.Fatal("Helm must not own/reset the initialization marker")
+	}
+
+}
+
+func TestChartCleanupPermissionsStayOnServer(t *testing.T) {
+	docs := renderArgoRBAC(t)
+	role := findChartRBACDoc(t, docs, "Role", "oberth-argo-vmi-cleanup")
+	want := []map[string]any{
+		{"apiGroups": []any{"kubevirt.io"}, "resources": []any{"virtualmachineinstances"}, "verbs": []any{"get", "list", "delete"}},
+		{"apiGroups": []any{"cdi.kubevirt.io"}, "resources": []any{"datavolumes"}, "verbs": []any{"get", "list", "delete"}},
+		{"apiGroups": []any{""}, "resources": []any{"persistentvolumeclaims"}, "verbs": []any{"get", "list", "delete"}},
+	}
+	if got := canonicalRules(t, role.Rules); got != canonicalRules(t, want) {
+		t.Fatalf("cleanup Role=%s", got)
+	}
+	binding := findChartRBACDoc(t, docs, "RoleBinding", role.Metadata.Name)
+	if len(binding.Subjects) != 1 || binding.Subjects[0]["name"] != "oberth" {
+		t.Fatalf("cleanup permission escaped server identity: %+v", binding.Subjects)
+	}
 }

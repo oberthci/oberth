@@ -1,4 +1,5 @@
 {{- $runtimeCapacity := (.Values.admission).runtimeCapacity | default dict -}}
+{{- $trustedTests := .Values.trustedTests | default dict -}}
 {{- if not .Values.secretstore.enabled }}
 {{- fail "OpenBao is required for server and upstream identities; configure secretstore.enabled" }}
 {{- end }}
@@ -47,6 +48,14 @@ template time rather than producing a broken deployment (#662). */}}
 {{- $schemaIdentity := required "compatibility.schemaIdentity must preserve the existing database identity on upgrade" $compatibility.schemaIdentity -}}
 {{- $auditDomain := required "compatibility.auditDomain must preserve the existing audit-chain domain on upgrade" $compatibility.auditDomain -}}
 {{- $witnessKeyInfo := required "compatibility.witnessKeyInfo must preserve the existing witness identity on upgrade" $compatibility.witnessKeyInfo -}}
+{{- $trustedVM := .Values.vm | default dict -}}
+{{- $trustedKVM := $trustedVM.kvm | default dict -}}
+{{- if and $trustedTests.recipes (le (int64 ($trustedTests.kvmSupplementalGroup | default 0)) 0) }}
+{{- fail "trustedTests.recipes requires an explicit positive trustedTests.kvmSupplementalGroup" }}
+{{- end }}
+{{- if and $trustedTests.recipes (not $trustedKVM.enabled) }}
+{{- fail "trustedTests.recipes requires vm.kvm.enabled" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -74,6 +83,9 @@ spec:
         {{- end }}
         {{- if .Values.argo.releaseWIF }}
         checksum/release-wif: {{ .Values.argo.releaseWIF | toJson | sha256sum | quote }}
+        {{- end }}
+        {{- if $trustedTests.recipes }}
+        checksum/trusted-recipes: {{ $trustedTests.recipes | toJson | sha256sum | quote }}
         {{- end }}
         {{- if (.Values.argo.resourceSampler).enabled }}
         checksum/resource-sampler: {{ .Values.argo.resourceSampler | toJson | sha256sum | quote }}
@@ -346,6 +358,11 @@ spec:
             - --argo-credentialed-serviceaccount={{ .Values.argo.credentialedServiceAccount | default "oberth-argo-credentialed" }}
             - --argo-ci-secrets-serviceaccount={{ (.Values.argo.ciSecrets).serviceAccount | default "oberth-argo-ci-secrets" }}
             - --argo-executor-serviceaccount={{ .Values.argo.executorServiceAccount }}
+            - --argo-vm-launcher-serviceaccount={{ .Values.argo.vmLauncherServiceAccount | default "oberth-argo-vm-launcher" }}
+            - "--argo-container-disk-prefixes={{ join "," (.Values.argo.containerDiskPrefixes | default list) }}"
+            - --argo-kubevirt-max-vms={{ (.Values.argo.kubevirtCeiling).maxVMs | default 8 }}
+            - --argo-kubevirt-max-cores={{ (.Values.argo.kubevirtCeiling).maxCores | default 24 }}
+            - --argo-kubevirt-max-memory={{ (.Values.argo.kubevirtCeiling).maxMemory | default "48Gi" }}
             - --argo-workflow-timeout={{ .Values.argo.workflowTimeout }}
             {{- if (.Values.argo.resourceSampler).enabled }}
             - --argo-resource-sampler-config=/etc/oberth/resource-sampler/config.json
@@ -380,6 +397,15 @@ spec:
             - --argo-goproxy-repository-prefix={{ $goProxy.repositoryPrefix | default "" }}
             - --argo-goproxy-upstream={{ $goProxy.upstream }}
             - --argo-goproxy-organization={{ $goProxy.organization }}
+            {{- end }}
+            {{- $vm := .Values.vm | default dict -}}
+            {{- $vmKVM := $vm.kvm | default dict -}}
+            {{- if $vmKVM.enabled }}
+            - --vm-kvm-enabled=true
+            {{- end }}
+            {{- if $trustedTests.recipes }}
+            - --trusted-tests-recipes=/etc/oberth/trusted-tests/recipes.json
+            - --trusted-tests-kvm-group={{ $trustedTests.kvmSupplementalGroup }}
             {{- end }}
             {{- $promotion := .Values.promotion | default dict -}}
             {{- $grantMaxLifetime := $promotion.grantMaxLifetime | default "24h" -}}
@@ -477,6 +503,11 @@ spec:
               mountPath: /etc/oberth/resource-sampler
               readOnly: true
             {{- end }}
+            {{- if $trustedTests.recipes }}
+            - name: trusted-test-recipes
+              mountPath: /etc/oberth/trusted-tests
+              readOnly: true
+            {{- end }}
             - name: data
               mountPath: /data
             - name: ci-cache
@@ -538,6 +569,11 @@ spec:
         - name: resource-sampler
           configMap:
             name: {{ include "oberth.fullname" . }}-resource-sampler
+        {{- end }}
+        {{- if $trustedTests.recipes }}
+        - name: trusted-test-recipes
+          configMap:
+            name: {{ include "oberth.fullname" . }}-trusted-tests
         {{- end }}
         {{- if .Values.argo.releaseTagRoutes }}
         - name: release-tag-routes

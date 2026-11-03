@@ -1,28 +1,19 @@
 package main
 
 import (
-	"bytes"
-	"os/exec"
+	"os"
+	"strings"
 	"testing"
 )
 
-func TestChartIgnoresRetiredExecutionValues(t *testing.T) {
-	args := []string{"template", "product", "../../charts/oberth", "--namespace", "ci", "--set-string", "image.ref=example.invalid/oberth@" + goProxyDigest}
-	baseline, err := exec.Command("helm", args...).CombinedOutput()
+func TestLegacyExecutionDeprecationIsDocumented(t *testing.T) {
+	body, err := os.ReadFile("../../docs/workflow-capabilities.md")
 	if err != nil {
-		t.Fatalf("baseline: %v\n%s", err, baseline)
+		t.Fatal(err)
 	}
-	args = append(args, "--set", "vm.kvm.enabled=true", "--set-json", `trustedTests={"recipes":[{"obsolete":true}]}`, "--set-string", "argo.vmLauncherServiceAccount=old-launcher", "--set-json", `argo.containerDiskPrefixes=["obsolete.invalid/"]`, "--set", "argo.kubevirtCeiling.maxVMs=99")
-	upgraded, err := exec.Command("helm", args...).CombinedOutput()
-	if err != nil {
-		t.Fatalf("reused retired values rejected: %v\n%s", err, upgraded)
-	}
-	if !bytes.Equal(baseline, upgraded) {
-		t.Fatal("retired values changed the rendered workload or permissions")
-	}
-	for _, name := range []string{"kubevirt.io", "argo-vm-launcher", "trusted-test-recipes", "vm-kvm-enabled", "vmi-reservations"} {
-		if bytes.Contains(baseline, []byte(name)) {
-			t.Errorf("retired execution substrate remains: %s", name)
+	for _, term := range []string{"deprecated", "OBERTH_KVM", "OBERTH_GUEST_TEST", ".oberth/tests.yaml", "KubeVirt"} {
+		if !strings.Contains(string(body), term) {
+			t.Errorf("compatibility contract missing %s", term)
 		}
 	}
 }

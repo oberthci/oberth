@@ -38,8 +38,6 @@ WARNING: retired watchTunnel values are ignored. The connector must be managed
 outside Oberth. Migrate its ownership before upgrading this release.
 {{- end }}
 
-{{- if or (hasKey .Values "vm") (hasKey .Values "trustedTests") (hasKey .Values.argo "vmLauncherServiceAccount") (hasKey .Values.argo "containerDiskPrefixes") (hasKey .Values.argo "kubevirtCeiling") }}
-WARNING: retired VM/trustedTests execution values are ignored. Drain old runs
-and migrate their pipelines before upgrading. Pipelines own their resource
-creation and cleanup; operators supply capability grants, RBAC and quotas.
-{{- end }}
+The VM execution path, guest-test injection and .oberth/tests.yaml are deprecated
+but remain supported while repository pipelines migrate to workflow capabilities.
+Existing KubeVirt grants and VM chart permissions remain effective.

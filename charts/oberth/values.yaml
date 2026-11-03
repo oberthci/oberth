@@ -78,6 +78,7 @@ admission:
   # Budgets include declared VM host demand and exclude platform reserve.
   # Zero IO cap retains the run cap.
   declaredResources:
+    extendedResources: {}
     disabled: false
     cpuMillis: 8000
     memoryBytes: 17179869184
@@ -87,8 +88,6 @@ admission:
     memoryHeadroomBytes: 1073741824
     memoryHeadroomPercent: 10
     ioRuns: 0
-    # Explicit integer capacity for qualified extended-resource names.
-    extendedResources: {}
   # Mounted directory is re-read every 5s; direct ConfigMap edits need no restart.
   # Null initializes the runtime value from the boot maxConcurrentJobs above.
   runtimeCapacity:
@@ -343,6 +342,19 @@ argo:
   # executorServiceAccount runs Argo's own init and wait containers. Argo
   # mounts its token into the executor container only.
   executorServiceAccount: "oberth-argo-executor"
+  # Only admitted VMI resource templates receive this executor identity.
+  vmLauncherServiceAccount: "oberth-argo-vm-launcher"
+  # Empty refuses containerDisk images even for repositories with a VM grant.
+  containerDiskPrefixes: []
+  # Cluster-wide ceiling on every repository KubeVirt grant's per-run VMI
+  # budget (concurrent VMIs, cores, memory). A grant defaults to
+  # 2 VMs, 6 cores and 12Gi; `oberth kubevirt grant <repo> --max-vms ...`
+  # raises it, never above these values. Lower them to fit your nodes.
+  kubevirtCeiling:
+    maxVMs: 8
+    maxCores: 24
+    maxMemory: 48Gi
+
   # Per-repo Vault identities. Each entry creates a ServiceAccount in
   # argo.namespace whose name doubles as the Vault role and policy name.
   # The installer populates this list from the repo registry + grants;
@@ -480,6 +492,16 @@ secretstore:
   # managed elsewhere.
   createAuthDelegatorBinding: true
 
+# Server-injected KVM device access for annotated leaves. Requires the
+# KubeVirt device plugin (devices.kubevirt.io/kvm) on the node. When enabled,
+# leaves declared in oberth.ci/kvm-templates receive the device resource and
+# OBERTH_KVM=1. When disabled (default), a workflow declaring KVM leaves fails
+# at admission with an infrastructure-class error rather than silently running
+# TCG. This is Lane A (coverage acceleration) under the ordinary trust model.
+vm:
+  kvm:
+    enabled: false
+
 cache:
   ciRoot: /var/cache/oberth/ci
   releaseRoot: /var/cache/oberth/release
@@ -537,3 +559,11 @@ networkPolicy:
 podAnnotations: {}
 podLabels: {}
 
+# Public operator policy for protected host-side test suites. Each recipe binds
+# suite_sha256, guest_sha256, harness_image (OCI @sha256), suite_url and guest_url
+# (public HTTPS, no credentials/query). Empty keeps the feature disabled.
+trustedTests:
+  recipes: []
+  # Operator must set the actual positive KVM device GID before adding recipes.
+  # Zero disables trusted suite execution; no host-specific group is assumed.
+  kvmSupplementalGroup: 0

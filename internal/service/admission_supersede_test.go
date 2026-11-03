@@ -8,7 +8,7 @@ import (
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
-const resourceGroup = "resource-work"
+const kubevirtGroup = "kubevirt"
 
 // awaitAdmission waits until the run's reservation satisfies accept.
 func (fixture *groupFixture) awaitAdmission(t *testing.T, run model.Run, what string, accept func(*model.AdmissionObservation) bool) *model.AdmissionObservation {
@@ -36,8 +36,8 @@ func (fixture *groupFixture) awaitAdmission(t *testing.T, run model.Run, what st
 func TestSupersedingAWaitingXLHeadReleasesItsReservationOnTheNextGrantPass(t *testing.T) {
 	fixture := newGroupFixture(t, 10)
 	fixture.engine.declare("busy", "", periapsis.L)
-	fixture.engine.declare("feat-kv", resourceGroup, periapsis.XL)
-	fixture.engine.declare("feat-kv-2", resourceGroup, periapsis.S)
+	fixture.engine.declare("feat-kv", kubevirtGroup, periapsis.XL)
+	fixture.engine.declare("feat-kv-2", kubevirtGroup, periapsis.S)
 	fixture.engine.declare("small", "", periapsis.S)
 	holder := fixture.branch(t, fixture.exampleService, "busy", "a")
 	head := fixture.branch(t, fixture.terraform, "feat-kv", "b")

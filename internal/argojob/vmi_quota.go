@@ -1,0 +1,662 @@
+package argojob
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
+	"slices"
+	"strings"
+	"time"
+
+	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
+	"k8s.io/utils/ptr"
+	"sigs.k8s.io/yaml"
+
+	"github.com/oberthci/oberth/pkg/argoworkflow"
+)
+
+const (
+	vmiQuotaAnnotation      = "oberth.ci/vmi-quota"
+	vmiRepositoryLabel      = "oberth.ci/repository-id"
+	vmiOperationAnnotation  = "oberth.ci/vmi-operation"
+	vmiCreateHashAnnotation = "oberth.ci/vmi-create-sha256"
+	vmiQuotaConfigMap       = "oberth-vmi-reservations"
+	maxVMIClaims            = 2048
+	vmiLedgerInitialized    = "oberth.ci/vmi-ledger-initialized"
+	vmiAPIRequestTimeout    = 20 * time.Second
+	vmiPendingGracePeriod   = 5 * time.Minute
+)
+
+var errVMIOverGrant = errors.New("VMI create refused over grant or workflow peak")
+
+// Public, server-generated and included in the immutable submission identity.
+// Existing grants/defaults are unchanged; a running workflow retains its
+// admitted limit, just as it does after grant revocation today.
+type vmiQuotaBinding struct {
+	RepositoryID int64                          `json:"repository_id"`
+	Limit        argoworkflow.VMIDemand         `json:"limit"`
+	Peak         argoworkflow.VMIDemand         `json:"peak"`
+	Receipt      *argoworkflow.VMIDemandSummary `json:"receipt,omitempty"`
+}
+
+type vmiClaim struct {
+	CleanupWorkflow string                 `json:"cleanup_workflow,omitempty"`
+	CleanupRun      string                 `json:"cleanup_run,omitempty"`
+	ReservedAt      time.Time              `json:"reserved_at"`
+	RepositoryID    int64                  `json:"repository_id"`
+	PodName         string                 `json:"pod_name"`
+	PodUID          types.UID              `json:"pod_uid"`
+	WorkflowUID     types.UID              `json:"workflow_uid"`
+	Name            string                 `json:"name"`
+	Hash            string                 `json:"hash"`
+	Demand          argoworkflow.VMIDemand `json:"demand"`
+	UID             types.UID              `json:"uid,omitempty"`
+	Closed          bool                   `json:"closed,omitempty"`
+}
+
+type vmiLedger struct {
+	Version int                 `json:"version"`
+	Claims  map[string]vmiClaim `json:"claims"`
+}
+
+// Argo resource creates become gets; deletes become harmless version calls.
+// Only Oberth performs mutations at the token barrier. The launcher account
+// has neither create nor delete permission.
+func projectVMICreateGuard(wf *wfv1.Workflow, config Config, request Request, receipt *argoworkflow.VMIDemandReceipt) error {
+	if !argoworkflow.DeclaresVMIResources(wf) {
+		return nil
+	}
+	if _, authored := wf.Annotations[vmiQuotaAnnotation]; authored {
+		return errors.New("argojob: VMI quota binding is server-owned")
+	}
+	if request.RepositoryID <= 0 {
+		return errors.New("argojob: VMI creation requires the registered repository ID")
+	}
+	grant, ceiling := request.KubeVirtBudget, config.KubeVirtCeiling
+	if grant.IsZero() {
+		grant = argoworkflow.DefaultVMIBudget()
+	}
+	if ceiling.IsZero() {
+		ceiling = argoworkflow.VMIBudgetLimit()
+	}
+	summary := receipt.Summary()
+	binding := vmiQuotaBinding{RepositoryID: request.RepositoryID, Limit: grant.Within(ceiling).DemandLimit(), Peak: summary.Demand}
+	if summary.Valid() {
+		binding.Receipt = &summary
+	}
+	encoded, err := json.Marshal(binding)
+	if err != nil {
+		return err
+	}
+	wf.Annotations[vmiQuotaAnnotation] = string(encoded)
+	for i := range wf.Spec.Templates {
+		t := &wf.Spec.Templates[i]
+		if t.Resource == nil || (t.Resource.Action != "create" && t.Resource.Action != "delete") {
+			continue
+		}
+		command := []string{"argoexec", "resource", "get"}
+		if t.Resource.Action == "delete" {
+			command = []string{"argoexec", "version"}
+		}
+		patch := map[string]any{}
+		if t.PodSpecPatch != "" {
+			if err := json.Unmarshal([]byte(t.PodSpecPatch), &patch); err != nil {
+				return err
+			}
+		}
+		containers, _ := patch["containers"].([]any)
+		found := false
+		for _, item := range containers {
+			if c, ok := item.(map[string]any); ok && c["name"] == "main" {
+				c["command"] = command
+				c["args"] = []string{}
+				found = true
+			}
+		}
+		if !found {
+			containers = append(containers, map[string]any{"name": "main", "command": command, "args": []string{}})
+		}
+		patch["containers"] = containers
+		body, err := json.Marshal(patch)
+		if err != nil {
+			return err
+		}
+		t.PodSpecPatch = string(body)
+	}
+	return nil
+}
+
+// Argo wraps main in emissary after applying podSpecPatch. Accept only its
+// logging flags followed by the exact get command, or the unwrapped command.
+func guardedVMIGetCommand(command, args []string) bool {
+	return guardedResourceCommand(command, args, []string{"argoexec", "resource", "get"})
+}
+
+func guardedResourceCommand(command, args, want []string) bool {
+	if len(args) != 0 {
+		return false
+	}
+	if slices.Equal(command, want) {
+		return true
+	}
+	if len(command) < 5 || command[0] != "/var/run/argo/argoexec" || command[1] != "emissary" {
+		return false
+	}
+	i := 2
+	for i < len(command) && command[i] != "--" {
+		if i+1 >= len(command) || (command[i] != "--loglevel" && command[i] != "--log-format" && command[i] != "--gloglevel") {
+			return false
+		}
+		i += 2
+	}
+	return i < len(command) && slices.Equal(command[i+1:], want)
+}
+
+func guardedResourceTemplate(wf *wfv1.Workflow, pod *corev1.Pod) *wfv1.Template {
+	node, ok := wf.Status.Nodes[pod.Annotations["workflows.argoproj.io/node-id"]]
+	if !ok {
+		return nil
+	}
+	for i := range wf.Spec.Templates {
+		t := &wf.Spec.Templates[i]
+		if t.Name == node.TemplateName && t.Resource != nil {
+			return t
+		}
+	}
+	return nil
+}
+
+// Called at the resource Pod's token barrier, before its executor can run.
+func (c *Controller) ensureVMIForResourcePod(ctx context.Context, wf *wfv1.Workflow, pod *corev1.Pod) error {
+	ctx, cancel := context.WithTimeout(ctx, vmiAPIRequestTimeout)
+	defer cancel()
+	t := guardedResourceTemplate(wf, pod)
+	if t != nil && t.Resource.Action == "delete" {
+		return c.ensureResourceDelete(ctx, wf, pod, t)
+	}
+	if t == nil || t.Resource.Action != "create" {
+		return nil
+	}
+	if c.kube == nil || c.vmi == nil || c.vmiCreate == nil || pod.UID == "" || wf.UID == "" {
+		return errors.New("argojob: VMI create guard is unavailable")
+	}
+	if wf.Namespace != c.config.Namespace || pod.Namespace != wf.Namespace {
+		return errors.New("argojob: VMI create namespace mismatch")
+	}
+	owned := false
+	for _, owner := range pod.OwnerReferences {
+		if owner.UID == wf.UID && owner.Kind == "Workflow" && owner.Controller != nil && *owner.Controller {
+			owned = true
+		}
+	}
+	if !owned {
+		return errors.New("argojob: VMI create Pod is not owned by the Workflow")
+	}
+	if err := c.verifyOwnership(wf, ""); err != nil {
+		return err
+	}
+	patched := false
+	for _, main := range pod.Spec.Containers {
+		if main.Name == "main" && main.Image == argoworkflow.NonrootExecutorImage && guardedVMIGetCommand(main.Command, main.Args) {
+			patched = true
+		}
+	}
+	if !patched {
+		return errors.New("argojob: VMI create Pod lacks the server-owned get guard; drain legacy VM workflows before upgrading")
+	}
+	var binding vmiQuotaBinding
+	if err := json.Unmarshal([]byte(wf.Annotations[vmiQuotaAnnotation]), &binding); err != nil || binding.RepositoryID <= 0 || !validVMIDemand(binding.Limit) || !validVMIDemand(binding.Peak) || !binding.Peak.Fits(binding.Limit) {
+		return errors.New("argojob: invalid server VMI quota binding")
+	}
+	if err := argoworkflow.ValidateVMIResource(t.Resource, c.config.ContainerDiskPrefixes); err != nil {
+		return err
+	}
+	op, err := argoworkflow.VMIOperation(t.Resource)
+	if err != nil {
+		return err
+	}
+	if !op.Demand.Fits(binding.Peak) {
+		return errors.New("argojob: VMI create exceeds the workflow reservation")
+	}
+	raw, err := yaml.YAMLToJSONStrict([]byte(strings.ReplaceAll(t.Resource.Manifest, "{{workflow.name}}", wf.Name)))
+	if err != nil {
+		return err
+	}
+	object := &unstructured.Unstructured{}
+	if err := json.Unmarshal(raw, &object.Object); err != nil {
+		return err
+	}
+	object.SetNamespace(wf.Namespace)
+	object.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: wf.Name, UID: wf.UID, Controller: ptr.To(true)}})
+	labels := object.GetLabels()
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	labels[vmiRepositoryLabel] = fmt.Sprint(binding.RepositoryID)
+	object.SetLabels(labels)
+	digest := sha256.Sum256(raw)
+	hash := hex.EncodeToString(digest[:])
+	object.SetAnnotations(map[string]string{vmiCreateHashAnnotation: hash, vmiOperationAnnotation: string(pod.UID)})
+	keyHash := sha256.Sum256([]byte(pod.UID))
+	key := hex.EncodeToString(keyHash[:])
+	desired := vmiClaim{PodName: pod.Name, PodUID: pod.UID, RepositoryID: binding.RepositoryID, WorkflowUID: wf.UID, Name: object.GetName(), Hash: hash, Demand: op.Demand}
+	if _, declared := wf.Annotations[argoworkflow.CleanupVerdictAnnotation]; declared {
+		desired.CleanupWorkflow, desired.CleanupRun = wf.Name, wf.Annotations[runIDAnnotation]
+	}
+	claim, fresh, err := c.reserveVMIClaim(ctx, key, desired, binding)
+	if err != nil {
+		return fmt.Errorf("argojob: VMI %s repository %d template %s: %w", desired.Name, desired.RepositoryID, t.Name, err)
+	}
+	client := c.vmi.Resource(vmiResource).Namespace(wf.Namespace)
+	if !fresh {
+		if claim.Closed {
+			return errors.New("argojob: prior VMI create is closed")
+		}
+		observed, err := client.Get(ctx, claim.Name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("argojob: unresolved VMI create intent retained; refusing another create: %w", err)
+		}
+		if (claim.UID != "" && claim.UID != observed.GetUID()) || !matchesCreatedVMI(observed, wf, desired) {
+			return errors.New("argojob: existing VMI differs from the reserved create")
+		}
+		return c.finishVMIClaim(ctx, key, observed.GetUID(), false)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	created, err := c.vmiCreate(ctx, wf.Namespace, object)
+	if err != nil {
+		// Only explicit rejections prove no object was created. Transport errors,
+		// cancellations, timeouts and 5xx keep the durable pending slot, including
+		// across restart. They never earn a retry or an absence-based refund.
+		if apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err) || apierrors.IsInvalid(err) || apierrors.IsBadRequest(err) || apierrors.IsNotFound(err) || apierrors.IsAlreadyExists(err) {
+			closeCtx, closeCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			closeErr := c.finishVMIClaim(closeCtx, key, "", true)
+			closeCancel()
+			if closeErr != nil {
+				return errors.Join(err, closeErr)
+			}
+		}
+		return fmt.Errorf("argojob: guarded VMI create: %w", err)
+	}
+	if !matchesCreatedVMI(created, wf, desired) {
+		return errors.New("argojob: VMI create returned an unexpected identity; pending slot retained")
+	}
+	return c.finishVMIClaim(ctx, key, created.GetUID(), false)
+}
+
+func matchesCreatedVMI(object *unstructured.Unstructured, wf *wfv1.Workflow, claim vmiClaim) bool {
+	return claim.WorkflowUID == wf.UID && matchesVMIClaim(object, wf.Namespace, claim)
+}
+
+func matchesVMIClaim(object *unstructured.Unstructured, namespace string, claim vmiClaim) bool {
+	if object == nil || object.GetUID() == "" || object.GetName() != claim.Name || object.GetNamespace() != namespace || object.GetAnnotations()[vmiCreateHashAnnotation] != claim.Hash || object.GetAnnotations()[vmiOperationAnnotation] != string(claim.PodUID) || object.GetLabels()[vmiRepositoryLabel] != fmt.Sprint(claim.RepositoryID) {
+		return false
+	}
+	for _, owner := range object.GetOwnerReferences() {
+		if owner.APIVersion == "argoproj.io/v1alpha1" && owner.UID == claim.WorkflowUID && owner.Kind == "Workflow" && owner.Controller != nil && *owner.Controller {
+			return true
+		}
+	}
+	return false
+}
+
+func validVMIDemand(d argoworkflow.VMIDemand) bool {
+	return d.VMs > 0 && d.Cores > 0 && d.MemoryBytes > 0 && d.Fits(argoworkflow.VMIBudgetLimit().DemandLimit())
+}
+
+func addVMIDemand(a, b argoworkflow.VMIDemand) argoworkflow.VMIDemand {
+	add := func(a, b int64) int64 {
+		if b > math.MaxInt64-a {
+			return math.MaxInt64
+		}
+		return a + b
+	}
+	a.VMs = int(min(int64(math.MaxInt), add(int64(a.VMs), int64(b.VMs))))
+	a.Cores = int(min(int64(math.MaxInt), add(int64(a.Cores), int64(b.Cores))))
+	a.MemoryBytes = add(a.MemoryBytes, b.MemoryBytes)
+	return a
+}
+
+func readVMILedger(cm *corev1.ConfigMap) (vmiLedger, error) {
+	var ledger vmiLedger
+	if cm.Labels["oberth.ci/role"] != "vmi-reservations" || len(cm.Data["reservations.json"]) > 1<<20 {
+		return ledger, errors.New("argojob: invalid VMI reservation ledger")
+	}
+	if err := json.Unmarshal([]byte(cm.Data["reservations.json"]), &ledger); err != nil || ledger.Version != 1 || ledger.Claims == nil || len(ledger.Claims) > maxVMIClaims {
+		return ledger, errors.New("argojob: unreadable VMI reservation ledger")
+	}
+	for _, r := range ledger.Claims {
+		if r.RepositoryID <= 0 || r.WorkflowUID == "" || r.PodUID == "" || r.PodName == "" || r.Name == "" || len(r.Hash) != 64 || !validVMIDemand(r.Demand) {
+			return ledger, errors.New("argojob: invalid VMI reservation claim")
+		}
+	}
+	return ledger, nil
+}
+
+// Helm owns only metadata; mutable data and this initialization marker are
+// server-owned fields, so upgrades/rollbacks cannot replay an empty ledger.
+func (c *Controller) getVMILedger(ctx context.Context) (*corev1.ConfigMap, error) {
+	client := c.kube.CoreV1().ConfigMaps(c.config.Namespace)
+	for range 8 {
+		cm, err := client.Get(ctx, vmiQuotaConfigMap, metav1.GetOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("argojob: read chart-provisioned VMI ledger: %w", err)
+		}
+		if cm.Labels["oberth.ci/role"] != "vmi-reservations" {
+			return nil, errors.New("argojob: invalid VMI ledger metadata")
+		}
+		if cm.Annotations[vmiLedgerInitialized] == "1" {
+			return cm, nil
+		}
+		if cm.Annotations[vmiLedgerInitialized] != "" {
+			return nil, errors.New("argojob: unknown VMI ledger initialization version")
+		}
+		if cm.Data == nil {
+			cm.Data = map[string]string{}
+		}
+		if _, exists := cm.Data["reservations.json"]; !exists {
+			if len(cm.Data) != 0 {
+				return nil, errors.New("argojob: invalid initial VMI ledger")
+			}
+			cm.Data["reservations.json"] = `{"version":1,"claims":{}}`
+		} else if _, err = readVMILedger(cm); err != nil {
+			return nil, err
+		}
+		if cm.Annotations == nil {
+			cm.Annotations = map[string]string{}
+		}
+		cm.Annotations[vmiLedgerInitialized] = "1"
+		updated, err := client.Update(ctx, cm, metav1.UpdateOptions{})
+		if apierrors.IsConflict(err) {
+			continue
+		}
+		return updated, err
+	}
+	return nil, errors.New("argojob: VMI ledger initialization conflicts exhausted")
+}
+
+func (c *Controller) updateVMILedger(ctx context.Context, cm *corev1.ConfigMap, ledger vmiLedger) error {
+	body, err := json.Marshal(ledger)
+	if err != nil {
+		return err
+	}
+	if len(body) > 1<<20 {
+		return errors.New("argojob: VMI reservation ledger is full")
+	}
+	cm.Data["reservations.json"] = string(body)
+	_, err = c.kube.CoreV1().ConfigMaps(c.config.Namespace).Update(ctx, cm, metav1.UpdateOptions{})
+	return err
+}
+
+// Reconcile claims even when their original caller never came back. Persist
+// matching live UIDs before making an admission decision; confirmed deletion
+// can then refund the slot. Pending intents expire only after the resource Pod
+// is absent from a complete API list AND a grace period far beyond the bounded
+// POST timeout. A zero timestamp gets a fresh grace period, never an instant
+// refund. Unknown/partial state cannot prove a Pod or VMI absent.
+func reconcileVMIClaims(ledger *vmiLedger, actual map[string]*unstructured.Unstructured, pods *corev1.PodList, namespace string, now time.Time) bool {
+	present := map[types.UID]bool{}
+	for _, pod := range pods.Items {
+		present[pod.UID] = true
+	}
+	changed := false
+	for key, old := range ledger.Claims {
+		claim := old
+		if !claim.Closed {
+			if claim.ReservedAt.IsZero() {
+				claim.ReservedAt = now
+			}
+			object := actual[claim.Name]
+			switch {
+			case object != nil && claim.UID != "" && claim.UID != object.GetUID():
+				claim.Closed = true // A different UID proves the confirmed one is gone.
+			case object != nil && matchesVMIClaim(object, namespace, claim):
+				claim.UID = object.GetUID()
+			case object == nil && claim.UID != "":
+				claim.Closed = true
+			case claim.UID == "" && pods.Continue == "" && !present[claim.PodUID] && now.Sub(claim.ReservedAt) > vmiPendingGracePeriod:
+				claim.Closed = true
+			}
+		}
+		if claim.Closed && claim.CleanupWorkflow == "" && pods.Continue == "" && !present[claim.PodUID] {
+			delete(ledger.Claims, key)
+			changed = true
+		} else if claim != old {
+			ledger.Claims[key] = claim
+			changed = true
+		}
+	}
+	return changed
+}
+
+func maxVMIDemand(a, b argoworkflow.VMIDemand) argoworkflow.VMIDemand {
+	return argoworkflow.VMIDemand{VMs: max(a.VMs, b.VMs), Cores: max(a.Cores, b.Cores), MemoryBytes: max(a.MemoryBytes, b.MemoryBytes)}
+}
+
+// The server-owned claim is a floor even when the live fields parse cleanly.
+// Never let a reduced/edited live value refund a still-active admitted claim.
+func liveVMIClaimDemand(object *unstructured.Unstructured, ledger vmiLedger, namespace string) argoworkflow.VMIDemand {
+	var declared argoworkflow.VMIDemand
+	for _, claim := range ledger.Claims {
+		if !claim.Closed && claim.UID == object.GetUID() && matchesVMIClaim(object, namespace, claim) {
+			declared = maxVMIDemand(declared, claim.Demand)
+		}
+	}
+	return declared
+}
+
+// Only an exact live identity may use a template-declared fallback. Pending
+// claims are reconciled durably before accounting. A changed UID/hash/operation
+// or owner never borrows an old claim's smaller demand. Unknown objects still
+// consume their repository's full grant (or the legacy per-instance maximum).
+func liveVMIClaimFallback(object *unstructured.Unstructured, ledger vmiLedger, namespace string, limit argoworkflow.VMIDemand) argoworkflow.VMIDemand {
+	declared := liveVMIClaimDemand(object, ledger, namespace)
+	if declared.VMs > 0 {
+		// A grant may have shrunk since the original claim was admitted.
+		return argoworkflow.VMIDemand{VMs: min(declared.VMs, limit.VMs), Cores: min(declared.Cores, limit.Cores), MemoryBytes: min(declared.MemoryBytes, limit.MemoryBytes)}
+	}
+	if object.GetLabels()[vmiRepositoryLabel] != "" {
+		return limit
+	}
+	return argoworkflow.VMIInstanceLimit()
+}
+
+// ResourceVersion CAS serializes pending claims across processes. No create
+// reaches the API until its demand is durably reserved. One malformed live
+// object or conflicting pending operation is charged conservatively to its
+// repository; it never aborts inspection of unrelated repositories.
+func (c *Controller) reserveVMIClaim(ctx context.Context, key string, want vmiClaim, binding vmiQuotaBinding) (vmiClaim, bool, error) {
+	c.vmiQuotaMu.Lock()
+	defer c.vmiQuotaMu.Unlock()
+	for range 8 {
+		cm, err := c.getVMILedger(ctx)
+		if err != nil {
+			return vmiClaim{}, false, err
+		}
+		ledger, err := readVMILedger(cm)
+		if err != nil {
+			return vmiClaim{}, false, err
+		}
+		pods, err := c.kube.CoreV1().Pods(c.config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "workflows.argoproj.io/workflow", Limit: 2048})
+		if err != nil {
+			return vmiClaim{}, false, err
+		}
+		objects, err := c.vmi.Resource(vmiResource).Namespace(c.config.Namespace).List(ctx, metav1.ListOptions{Limit: 2048})
+		if err != nil {
+			return vmiClaim{}, false, err
+		}
+		if objects.GetContinue() != "" || len(objects.Items) > 2048 {
+			return vmiClaim{}, false, errors.New("argojob: too many live VMIs for bounded quota inspection")
+		}
+		actual := map[string]*unstructured.Unstructured{}
+		for i := range objects.Items {
+			object := &objects.Items[i]
+			actual[object.GetName()] = object
+		}
+		// Cleanup UIDs outlive resource Pods and early disposal. Release their
+		// receipts only after the original Workflow is independently gone.
+		receiptsChanged := false
+		presentPods := map[types.UID]bool{}
+		for _, pod := range pods.Items {
+			presentPods[pod.UID] = true
+		}
+		checked := map[types.UID]bool{}
+		gone := map[types.UID]bool{}
+		for key, claim := range ledger.Claims {
+			if claim.CleanupWorkflow == "" || !claim.Closed || pods.Continue != "" || presentPods[claim.PodUID] || c.workflows == nil {
+				continue
+			}
+			if !checked[claim.WorkflowUID] {
+				workflow, readErr := c.workflows.Get(ctx, claim.CleanupWorkflow, metav1.GetOptions{})
+				// An unreadable Workflow retains its receipts. It must not
+				// deny unrelated repositories a reservation.
+				gone[claim.WorkflowUID] = apierrors.IsNotFound(readErr) || (readErr == nil && workflow.UID != claim.WorkflowUID)
+				checked[claim.WorkflowUID] = true
+			}
+			if gone[claim.WorkflowUID] {
+				claim.CleanupWorkflow, claim.CleanupRun = "", ""
+				ledger.Claims[key] = claim
+				receiptsChanged = true
+			}
+		}
+		if reconciled := reconcileVMIClaims(&ledger, actual, pods, c.config.Namespace, time.Now().UTC()); reconciled || receiptsChanged {
+			err = c.updateVMILedger(ctx, cm, ledger)
+			if err != nil && !apierrors.IsConflict(err) {
+				return vmiClaim{}, false, err
+			}
+			continue // Durable repair, including on an eventual over-grant refusal.
+		}
+		if old, ok := ledger.Claims[key]; ok {
+			if old.PodName != want.PodName || old.RepositoryID != want.RepositoryID || old.WorkflowUID != want.WorkflowUID || old.Name != want.Name || old.Hash != want.Hash || old.Demand != want.Demand || old.CleanupWorkflow != want.CleanupWorkflow || old.CleanupRun != want.CleanupRun {
+				return vmiClaim{}, false, errors.New("argojob: VMI create intent changed")
+			}
+			return old, false, nil
+		}
+		// Closed receipts may have been pruned. A stale observer must not start
+		// another POST after its resource Pod has gone or been replaced.
+		currentPod, err := c.kube.CoreV1().Pods(c.config.Namespace).Get(ctx, want.PodName, metav1.GetOptions{})
+		if err != nil {
+			return vmiClaim{}, false, err
+		}
+		if currentPod.UID != want.PodUID || currentPod.DeletionTimestamp != nil {
+			return vmiClaim{}, false, errors.New("argojob: VMI create operation Pod is gone or replaced")
+		}
+		var repoUsed, workflowUsed argoworkflow.VMIDemand
+		for _, object := range actual {
+			repo := object.GetLabels()[vmiRepositoryLabel]
+			if repo != "" && repo != fmt.Sprint(want.RepositoryID) {
+				continue
+			}
+			demand, parseErr := liveVMIDemand(object)
+			if parseErr != nil {
+				// An exact claim can bound missing fields or ambiguous memory.
+				// Present unreadable counts and known oversize values cannot
+				// borrow it; identity mismatches also keep conservative fallback.
+				claims := ledger
+				if errors.Is(parseErr, errLiveVMIOverLimit) || errors.Is(parseErr, errLiveVMIUnreadableCount) {
+					// Oversized or unreadable present counts cannot borrow a
+					// smaller claim; readable siblings remain charged too.
+					claims = vmiLedger{}
+				}
+				fallback := liveVMIClaimFallback(object, claims, c.config.Namespace, binding.Limit)
+				demand = maxVMIDemand(demand, fallback)
+			}
+			demand = maxVMIDemand(demand, liveVMIClaimDemand(object, ledger, c.config.Namespace))
+			repoUsed = addVMIDemand(repoUsed, demand)
+			for _, owner := range object.GetOwnerReferences() {
+				if owner.UID == want.WorkflowUID && owner.Kind == "Workflow" {
+					workflowUsed = addVMIDemand(workflowUsed, demand)
+					break
+				}
+			}
+		}
+		for _, claim := range ledger.Claims {
+			if claim.Closed {
+				continue
+			}
+			if object := actual[claim.Name]; matchesVMIClaim(object, c.config.Namespace, claim) && object.GetUID() == claim.UID {
+				continue
+			}
+			// Mismatch stays charged to the claim's repo; only that operation's
+			// own retry is refused. It cannot deny service to every other repo.
+			if claim.RepositoryID == want.RepositoryID {
+				repoUsed = addVMIDemand(repoUsed, claim.Demand)
+			}
+			if claim.WorkflowUID == want.WorkflowUID {
+				workflowUsed = addVMIDemand(workflowUsed, claim.Demand)
+			}
+		}
+		if len(ledger.Claims) >= maxVMIClaims {
+			return vmiClaim{}, false, errors.New("argojob: VMI reservation ledger is full")
+		}
+		if !addVMIDemand(repoUsed, want.Demand).Fits(binding.Limit) || !addVMIDemand(workflowUsed, want.Demand).Fits(binding.Peak) {
+			return vmiClaim{}, false, fmt.Errorf("argojob: %w: repository used=%+v requested=%+v limit=%+v workflow used=%+v peak=%+v", errVMIOverGrant, repoUsed, want.Demand, binding.Limit, workflowUsed, binding.Peak)
+		}
+		want.ReservedAt = time.Now().UTC()
+		ledger.Claims[key] = want
+		err = c.updateVMILedger(ctx, cm, ledger)
+		if apierrors.IsConflict(err) {
+			continue
+		}
+		if err != nil {
+			return vmiClaim{}, false, err
+		}
+		return want, true, nil
+	}
+	return vmiClaim{}, false, errors.New("argojob: VMI reservation conflicts exhausted")
+}
+
+func (c *Controller) finishVMIClaim(ctx context.Context, key string, uid types.UID, closed bool) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	c.vmiQuotaMu.Lock()
+	defer c.vmiQuotaMu.Unlock()
+	for range 8 {
+		cm, err := c.getVMILedger(ctx)
+		if err != nil {
+			return err
+		}
+		ledger, err := readVMILedger(cm)
+		if err != nil {
+			return err
+		}
+		claim, ok := ledger.Claims[key]
+		if !ok {
+			return errors.New("argojob: VMI create lost its persistent reservation")
+		}
+		if claim.UID != "" && claim.UID != uid {
+			return errors.New("argojob: VMI reservation UID changed")
+		}
+		claim.UID, claim.Closed = uid, closed
+		ledger.Claims[key] = claim
+		err = c.updateVMILedger(ctx, cm, ledger)
+		if apierrors.IsConflict(err) {
+			continue
+		}
+		return err
+	}
+	return errors.New("argojob: VMI reservation completion conflicts exhausted")
+}
+
+// WithVMICreateClient uses exactly one POST. Automatic POST retries would leave
+// more than one potentially in-flight create behind one durable claim after a
+// transport failure, invalidating absence/recovery proofs when a name is reused.
+func (c *Controller) WithVMICreateClient(client rest.Interface) *Controller {
+	c.vmiCreate = func(ctx context.Context, namespace string, object *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+		result := &unstructured.Unstructured{}
+		err := client.Post().AbsPath("/apis/kubevirt.io/v1/namespaces", namespace, "virtualmachineinstances").MaxRetries(0).Timeout(vmiAPIRequestTimeout).Body(object).Do(ctx).Into(result)
+		return result, err
+	}
+	return c
+}

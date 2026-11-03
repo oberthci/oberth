@@ -12,6 +12,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/vmrunner"
 )
 
 func TestDisplayRunStatusSeparatesPrestartAndTerminalCauses(t *testing.T) {
@@ -40,6 +41,30 @@ func TestDisplayRunStatusSeparatesPrestartAndTerminalCauses(t *testing.T) {
 				t.Fatalf("presentation = %+v", projected)
 			}
 		})
+	}
+}
+
+func TestRunDisplayReasonsCoverTerminalCausesAndTrustedPreflight(t *testing.T) {
+	started := time.Now().UTC()
+	service := &API{kvmPreflights: kvmReadFake{value: vmrunner.KVMExecution{Submitted: true}}}
+	preflight := service.presentationRun(t.Context(), model.Run{ID: "preflight", Status: model.RunRunning, StartedAt: &started})
+	if preflight.DisplayStatus != "running" || preflight.Phase != "preflight" {
+		t.Fatalf("trusted preflight presentation = %+v", preflight)
+	}
+	if scheduling := service.scheduling(t.Context(), preflight, nil); scheduling == nil || scheduling.State != "preflight" {
+		t.Fatalf("trusted preflight scheduling = %+v", scheduling)
+	}
+	for _, tc := range []struct {
+		run  model.Run
+		want string
+	}{
+		{model.Run{Status: model.RunInterrupted, Phase: model.PhaseCancelled, Reason: "cancelled by owner: no longer needed"}, "cancelled by owner: no longer needed"},
+		{model.Run{Status: model.RunInterrupted, Reason: "oberth restarted"}, "server restart, retry needed"},
+		{model.Run{Status: model.RunFailed, Error: "controller unavailable"}, "run failed: controller unavailable"},
+	} {
+		if got := presentationRun(tc.run).DisplayReason; got != tc.want {
+			t.Fatalf("display reason for %+v = %q, want %q", tc.run, got, tc.want)
+		}
 	}
 }
 
@@ -235,6 +260,7 @@ func TestDisplayReasonUsesDurableCauseNotSHAOrTextHeuristics(t *testing.T) {
 	for _, tc := range []struct{ reason, phase, want string }{
 		{"superseded by newer run", "interrupted", "superseded by aaaaaaaa"},
 		{"re-queued after restart", "interrupted", "server restart, re-queued as bbbbbbbbbbbb"},
+		{store.KVMRestartRetryReason, "interrupted", "server restart, re-queued as bbbbbbbbbbbb"},
 		{"cancelled by owner: restart later", "cancelled", "cancelled by owner: restart later"},
 		{"scheduler stopped", "interrupted", "server restart, retry needed"},
 		{"unrelated reason", "interrupted", "server restart, retry needed"},
@@ -268,11 +294,14 @@ func TestDisplayReasonUsesDurableCauseNotSHAOrTextHeuristics(t *testing.T) {
 
 func TestScopedDisplayDoesNotLinkHiddenSuccessor(t *testing.T) {
 	service := &API{scope: &repoScope{}}
-	for _, reason := range []string{"superseded by newer run", "re-queued after restart"} {
+	for _, reason := range []string{"superseded by newer run", "re-queued after restart", store.KVMRestartRetryReason} {
 		run := model.Run{Status: model.RunInterrupted, Reason: reason, SupersededBy: strings.Repeat("b", 32)}
 		got := service.presentationRunWithSuccessor(t.Context(), run, nil)
 		if got.SupersededBy != "" || strings.Contains(got.DisplayReason, "bbbb") || got.DisplayStatus != "superseded" {
 			t.Fatalf("hidden successor leaked: %+v", got)
+		}
+		if reason == store.KVMRestartRetryReason && got.DisplayReason != "server restart, re-queued" {
+			t.Fatalf("hidden trusted retry reason = %q", got.DisplayReason)
 		}
 	}
 }
@@ -342,20 +371,5 @@ func TestPromotionRestartDisplaysRetryNeededWithoutCIIssue(t *testing.T) {
 	}
 	if _, err = recovered.OpenCIIssue(ctx, f.repo.ID, "feature/restart"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("restart CI issue: %v", err)
-	}
-}
-
-func TestRunDisplayReasonsCoverTerminalCauses(t *testing.T) {
-	for _, tc := range []struct {
-		run  model.Run
-		want string
-	}{
-		{model.Run{Status: model.RunInterrupted, Phase: model.PhaseCancelled, Reason: "cancelled by owner: no longer needed"}, "cancelled by owner: no longer needed"},
-		{model.Run{Status: model.RunInterrupted, Reason: "oberth restarted"}, "server restart, retry needed"},
-		{model.Run{Status: model.RunFailed, Error: "controller unavailable"}, "run failed: controller unavailable"},
-	} {
-		if got := presentationRun(tc.run).DisplayReason; got != tc.want {
-			t.Fatalf("display reason for %+v = %q, want %q", tc.run, got, tc.want)
-		}
 	}
 }

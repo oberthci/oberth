@@ -138,16 +138,16 @@ func TestAuditSubmissionRecordsTheAdmittedConcurrencyGroup(t *testing.T) {
 	}
 }
 
-// Resource resources do not imply a concurrency group (#1173).
-func TestPipelineConcurrencyGroupOnlyUsesDeclaredResourceGroup(t *testing.T) {
-	resourcePipeline := func(annotations string) string {
-		return groupedPipeline(annotations) + `    - name: resource
+// VMI resources do not imply a concurrency group (#1173).
+func TestPipelineConcurrencyGroupOnlyUsesDeclaredVMIGroup(t *testing.T) {
+	vmiPipeline := func(annotations string) string {
+		return groupedPipeline(annotations) + `    - name: vm
       resource:
         action: get
         setOwnerReference: true
         manifest: |
-          apiVersion: example.invalid/v1
-          kind: Task
+          apiVersion: kubevirt.io/v1
+          kind: VirtualMachineInstance
           metadata:
             name: "{{workflow.name}}-vm"
             labels:
@@ -157,17 +157,17 @@ func TestPipelineConcurrencyGroupOnlyUsesDeclaredResourceGroup(t *testing.T) {
 	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
 	for _, tc := range []struct{ annotations, want string }{
 		{"", ""},
-		{"    oberth.ci/concurrency-group: resource-work\n", "resource-work"},
-		// Any valid declared group is allowed alongside Resource resources.
+		{"    oberth.ci/concurrency-group: kubevirt\n", "kubevirt"},
+		// Any valid declared group is allowed alongside VMI resources.
 		{"    oberth.ci/concurrency-group: other\n", "other"},
 	} {
 		dir := t.TempDir()
-		writePipeline(t, dir, "build.yaml", resourcePipeline(tc.annotations))
+		writePipeline(t, dir, "build.yaml", vmiPipeline(tc.annotations))
 		group, err := jobs.PipelineConcurrencyGroup(context.Background(), service.JobRequest{
 			Run: model.Run{Ref: "main"}, Repository: model.Repository{Name: "example-web"}, SourceDir: dir,
 		})
 		if err != nil || group != tc.want {
-			t.Fatalf("Resource pipeline %q group = %q, %v; want %q", tc.annotations, group, err, tc.want)
+			t.Fatalf("VMI pipeline %q group = %q, %v; want %q", tc.annotations, group, err, tc.want)
 		}
 	}
 }

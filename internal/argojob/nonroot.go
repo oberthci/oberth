@@ -35,7 +35,7 @@ const (
 // mount. It prepares fresh per-Pod EmptyDirs, never shared storage ownership.
 func applyNonrootLeaves(workflow *wfv1.Workflow, config Config, request Request) error {
 	names, err := argoworkflow.DeclaredNonrootTemplates(workflow)
-	if err != nil || len(names) == 0 {
+	if err != nil || (len(names) == 0 && request.TrustedKVM == nil) {
 		return err
 	}
 	proof := request.nonrootProof

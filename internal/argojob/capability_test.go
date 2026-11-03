@@ -75,6 +75,7 @@ func TestCapabilityBuildBindsOperatorIdentityAndRefusesEscapes(t *testing.T) {
 	for _, tc := range []struct{ name, account, namespace string }{
 		{"foreign namespace", c.ServiceAccount, "other"},
 		{"shared executor", testExecutorAcct, testNamespace},
+		{"legacy VM launcher", "vm-launcher", testNamespace},
 		{"shared pipeline", testPipelineAcct, testNamespace},
 		{"shared secret identity", testCredentialedAcct, testNamespace},
 		{"shared CI identity", testCISecretsAcct, testNamespace},
@@ -84,6 +85,7 @@ func TestCapabilityBuildBindsOperatorIdentityAndRefusesEscapes(t *testing.T) {
 			grant := operatorCapability()
 			grant.ServiceAccount, grant.Namespace = tc.account, tc.namespace
 			config := testConfig()
+			config.VMLauncherServiceAccount = "vm-launcher"
 			config.PerRepoIdentities = map[string]PerRepoIdentityConfig{"other/repo": {ServiceAccountName: "other-repo-secret"}}
 			if _, err := Build(config, requestWithCapability(t, operatorResourceDocument, grant)); err == nil {
 				t.Fatal("unsafe operator identity accepted")
@@ -152,6 +154,23 @@ func TestCapabilityDemandBindingRetainsAllGrantedDimensions(t *testing.T) {
 		stampPodDemand(wf, demand)
 		if _, err := readPodDemand(wf); err == nil {
 			t.Fatal("unqualified or reserved resource survived recovery")
+		}
+	}
+}
+
+func TestCapabilityResourceKeepsOperatorLifecycle(t *testing.T) {
+	r := requestWithCapability(t, operatorResourceDocument, operatorCapability())
+	r.KubeVirtGranted = true // A repository can retain its old grant while migrating.
+	wf, err := Build(testConfig(), r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wf.Annotations[vmiQuotaAnnotation] != "" {
+		t.Error("generic capability was routed through legacy VMI quota")
+	}
+	for _, template := range wf.Spec.Templates {
+		if template.Resource != nil && strings.Contains(template.PodSpecPatch, `"command":["argoexec","resource","get"]`) {
+			t.Error("generic create was rewritten as a legacy broker get")
 		}
 	}
 }

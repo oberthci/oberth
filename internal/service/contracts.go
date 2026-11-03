@@ -17,6 +17,7 @@ import (
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
@@ -243,6 +244,11 @@ type WorkflowCapabilityStore interface {
 	SetWorkflowCapabilityGrant(context.Context, int64, string, *argoworkflow.Capability) (store.WorkflowCapabilityGrant, error)
 }
 
+type KubeVirtGrantStore interface {
+	KubeVirtGrant(context.Context, int64) (store.KubeVirtGrant, error)
+	SetKubeVirtGrant(context.Context, int64, string, bool, store.KubeVirtBudget) (store.KubeVirtGrant, error)
+}
+
 // PromotionGrantStore is the narrow contract for promotion grant operations.
 // Non-admin uplinks must present a matching grant to promote; admin uplinks
 // retain direct authority.
@@ -291,16 +297,9 @@ type DeliveryGit interface {
 	PreparePromotion(context.Context, string, string, string, string) (gitcache.MergeCandidate, error)
 }
 
-// RepositoryBlobReader reads exact candidate objects and the private upstream
-// default branch used for release policy. Reads never use a mutable checkout.
-type RepositoryBlobReader interface {
-	ReadOptionalBlob(context.Context, string, string, string, int) ([]byte, bool, error)
-	ReadDefaultBlob(context.Context, string, string, int) (string, []byte, bool, error)
-}
-
 type WorkspaceGit interface {
 	PublicationGit
-	RepositoryBlobReader
+	vmrunner.PolicyGit
 	Checkout(context.Context, string, string, string) error
 }
 
@@ -371,13 +370,14 @@ type LogStore interface {
 }
 
 type JobRequest struct {
+	DemandReceipt    *argoworkflow.DemandReceipt
 	ResourceFallback model.ResourceAdmissionFallback
 	PodDemand        *argoworkflow.PodDemand
-	// DemandReceipt carries the exact graph reserved before submission.
-	DemandReceipt *argoworkflow.DemandReceipt
-	JobName       string
-	Run           model.Run
-	Repository    model.Repository
+	// VMIDemandReceipt carries the exact graph reserved before submission.
+	VMIDemandReceipt *argoworkflow.VMIDemandReceipt
+	JobName          string
+	Run              model.Run
+	Repository       model.Repository
 	// UpstreamName is the registered name of the repository's upstream,
 	// resolved by the scheduler for all credentialed runs. Used to
 	// construct canonical per-repo identity keys.
@@ -653,5 +653,6 @@ type PromotionWaitResponse struct {
 // so the frontend never has to derive per-repo status from a global window.
 type RepoView struct {
 	model.Repository
-	LatestRuns []model.Run `json:"LatestRuns"`
+	LatestRuns    []model.Run          `json:"LatestRuns"`
+	KubeVirtGrant *store.KubeVirtGrant `json:"KubeVirtGrant,omitempty"`
 }

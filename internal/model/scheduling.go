@@ -24,13 +24,15 @@ type AdmissionObservation struct {
 	BackfillMessage   string             `json:"backfill_message,omitempty"`
 	DeclaredResources *DeclaredResources `json:"declared_resources,omitempty"`
 
-	Pressure *PressureDeferral `json:"pressure,omitempty"`
-	State    string            `json:"state"`
-	Position int               `json:"position,omitempty"`
-	Size     string            `json:"size,omitempty"`
-	Weight   int               `json:"weight,omitempty"`
-	Used     int               `json:"used"`
-	Capacity int               `json:"capacity"`
+	Pressure         *PressureDeferral `json:"pressure,omitempty"`
+	KubeVirtCapacity bool              `json:"kubevirt_capacity,omitempty"`
+	VMCapacity       bool              `json:"vm_capacity,omitempty"`
+	State            string            `json:"state"`
+	Position         int               `json:"position,omitempty"`
+	Size             string            `json:"size,omitempty"`
+	Weight           int               `json:"weight,omitempty"`
+	Used             int               `json:"used"`
+	Capacity         int               `json:"capacity"`
 	// Group is the repository-declared concurrency group the run was admitted
 	// or is waiting under (#658). GroupHolder names the run of the same
 	// repository currently holding that group; GroupAhead names the earlier run
@@ -45,7 +47,7 @@ type AdmissionObservation struct {
 	// BlockedBy names the run at the head of the admission queue that every
 	// later run waits behind (#1021): the first claimed run that does not
 	// fit. HeadOfQueue marks the run that is itself that run; BlockedBy then
-	// describes it. Nil when the run is parked on its group
+	// describes it. Nil when the run is parked on its group or VM capacity
 	// or nothing blocks the queue.
 	BlockedBy   *AdmissionBlocker `json:"blocked_by,omitempty"`
 	HeadOfQueue bool              `json:"head_of_queue,omitempty"`
@@ -226,7 +228,8 @@ type NumericBudget struct {
 
 // AdmissionReservation is one claimed run's place in the gate. State is
 // preparing (checkout and static reads still running), waiting (for weight),
-// group (parked on its concurrency group), granted, or retained (granted, and kept held after its owner
+// group (parked on its concurrency group), vm (parked on trusted VM
+// capacity), granted, or retained (granted, and kept held after its owner
 // stopped on an error that may have left its Workflow running).
 type AdmissionReservation struct {
 	DeclaredResources *DeclaredResources `json:"declared_resources,omitempty"`

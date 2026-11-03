@@ -55,6 +55,7 @@ const grantPolicySyncAdvisory = "Grant recorded; the identity map refreshes auto
 	"Until then, access fails closed."
 
 type APIConfig struct {
+	WorkflowCapabilities      WorkflowCapabilityStore
 	ResourceCoverages         ResourceCoverageReader
 	RunResources              RunResourceReader
 	ResourceDeclarations      ResourceDeclarationReader
@@ -63,6 +64,7 @@ type APIConfig struct {
 	UplinkLifecycle           UplinkLifecycle
 	DeclarationDismissal      DeclarationDismissal
 	IssueLifecycle            IssueLifecycle
+	KVMPreflights             KVMPreflightReader
 	SchedulingObserver        SchedulingObserver
 	Admission                 AdmissionObserver
 	Runs                      RunResolver
@@ -85,7 +87,7 @@ type APIConfig struct {
 	PromotionWorkspaceRoot    string
 	RemoveWorkspace           func(string) error
 	SecretAccess              SecretAccessStore
-	WorkflowCapabilities      WorkflowCapabilityStore
+	KubeVirtGrants            KubeVirtGrantStore
 	SizeGrants                SizeGrantStore
 	QueuePriorities           QueuePriorityStore
 	SecretStoreVerifier       SecretStoreVerifier
@@ -109,6 +111,7 @@ type APIConfig struct {
 }
 
 type API struct {
+	workflowCapabilities      WorkflowCapabilityStore
 	resourceCoverages         ResourceCoverageReader
 	runResources              RunResourceReader
 	resourceDeclarations      ResourceDeclarationReader
@@ -119,6 +122,7 @@ type API struct {
 	uplinkLifecycle           UplinkLifecycle
 	declarationDismissal      DeclarationDismissal
 	issueLifecycle            IssueLifecycle
+	kvmPreflights             KVMPreflightReader
 	schedulingObserver        SchedulingObserver
 	admission                 AdmissionObserver
 	runs                      RunResolver
@@ -142,7 +146,7 @@ type API struct {
 	promotionWorkspaceRoot    string
 	workspaces                *workspaceLifecycle
 	secretAccess              SecretAccessStore
-	workflowCapabilities      WorkflowCapabilityStore
+	kubeVirtGrants            KubeVirtGrantStore
 	sizeGrants                SizeGrantStore
 	queuePriorities           QueuePriorityStore
 	secretStoreVerifier       SecretStoreVerifier
@@ -225,6 +229,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		releasePreflight: config.ReleasePreflight,
 		uplinkLifecycle:  config.UplinkLifecycle, declarationDismissal: config.DeclarationDismissal,
 		issueLifecycle:     config.IssueLifecycle,
+		kvmPreflights:      config.KVMPreflights,
 		schedulingObserver: config.SchedulingObserver, admission: config.Admission,
 		resourceCoverages: config.ResourceCoverages, runResources: config.RunResources, resourceDeclarations: config.ResourceDeclarations,
 		resources: config.Resources, runs: config.Runs, history: config.History, runRetries: config.RunRetries, repositories: config.Repositories,
@@ -233,6 +238,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		health: config.Health, signals: signals, maximumWait: maximumWait, mutationGate: mutationGate,
 		promotionWorkspaceRoot: promotionWorkspaceRoot, workspaces: workspaces,
 		secretAccess: config.SecretAccess, secretAccessReconciler: config.SecretAccessReconciler,
+		kubeVirtGrants:       config.KubeVirtGrants,
 		workflowCapabilities: config.WorkflowCapabilities,
 		sizeGrants:           config.SizeGrants,
 		queuePriorities:      config.QueuePriorities,
@@ -361,6 +367,9 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		return service.uplinkLifecycleTool(ctx, actor, name, raw)
 	case "access_dismiss":
 		return service.dismissAccess(ctx, actor, raw)
+	case "kubevirt_grant_list":
+		return service.listKubeVirtGrants(ctx, actor, raw)
+	// Issue lifecycle administration (#1103).
 	case "issue_unlock", "issue_close_many":
 		return service.issueLifecycleTool(ctx, actor, name, raw)
 	case "secretstore_verify", "secretstore_plan", "secretstore_sync_receipt":
@@ -435,6 +444,17 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		}
 		filter.ByteOffset = arguments.ByteOffset
 		return service.logsFor(ctx, arguments.Repo, arguments.SHA, arguments.Step, filter)
+	case "run_kvm_preflight":
+		var arguments struct {
+			ID string `json:"id"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(arguments.ID) == "" {
+			return nil, fmt.Errorf("%w: run ID is required", ErrInvalidInput)
+		}
+		return service.readKVMPreflight(ctx, arguments.ID)
 	case "run_get":
 		var arguments struct {
 			ID      string `json:"id"`
@@ -793,6 +813,33 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, err
 		}
 		return service.workflowCapabilityTool(ctx, actor, name, arguments.Repo, nil)
+	case "kubevirt_grant":
+		var arguments struct {
+			Repo      string `json:"repo"`
+			MaxVMs    int    `json:"max_vms"`
+			MaxCores  int    `json:"max_cores"`
+			MaxMemory string `json:"max_memory"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		budget := store.KubeVirtBudget{MaxVMs: arguments.MaxVMs, MaxCores: arguments.MaxCores}
+		if arguments.MaxMemory != "" {
+			bytes, err := store.ParseKubeVirtMemory(arguments.MaxMemory)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %w", ErrInvalidInput, err)
+			}
+			budget.MaxMemoryBytes = bytes
+		}
+		return service.kubeVirtGrantTool(ctx, actor, name, arguments.Repo, budget)
+	case "kubevirt_revoke", "kubevirt_grant_get":
+		var arguments struct {
+			Repo string `json:"repo"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		return service.kubeVirtGrantTool(ctx, actor, name, arguments.Repo, store.KubeVirtBudget{})
 	case "size_grant", "size_revoke", "size_grant_get":
 		var arguments struct {
 			Repo string `json:"repo"`
@@ -1308,6 +1355,12 @@ func (service *API) Repositories(ctx context.Context, actor api.Actor) (any, err
 	views := make([]RepoView, len(repos))
 	for i, repo := range repos {
 		views[i] = RepoView{Repository: repo, LatestRuns: runsByRepo[repo.ID]}
+		if service.kubeVirtGrants != nil {
+			grant, err := service.kubeVirtGrants.KubeVirtGrant(ctx, repo.ID)
+			if err == nil && grant.RevokedAt == nil {
+				views[i].KubeVirtGrant = &grant
+			}
+		}
 	}
 	return service.stripScopedSequences(views), nil
 }
@@ -1620,7 +1673,7 @@ func runDisplayReason(run model.Run) string {
 	switch {
 	case run.Phase == model.PhaseCancelled:
 		return run.Reason
-	case run.SupersededBy != "" && (run.Reason == "re-queued after restart"):
+	case run.SupersededBy != "" && (run.Reason == "re-queued after restart" || run.Reason == store.KVMRestartRetryReason):
 		return "server restart, re-queued as " + shortRunID(run.SupersededBy)
 	case run.SupersededBy != "" && run.Reason == "superseded by newer run":
 		return "superseded by newer run"
@@ -1688,11 +1741,14 @@ func (service *API) presentationRuns(ctx context.Context, runs []model.Run) (res
 func (service *API) presentationRunWithSuccessor(ctx context.Context, run model.Run, successors map[string]model.Run) model.Run {
 	run = service.withAdmissionPriority(run)
 	visible := presentationRunAt(run, service.schedulingClock().Now())
+	if run.Status == model.RunRunning && run.StartedAt != nil && service.submittedKVMPreflight(ctx, run) {
+		visible.Phase = "preflight"
+	}
 	successor, ok := successors[run.SupersededBy]
 	if !ok {
 		if service.scope != nil && run.SupersededBy != "" {
 			visible.SupersededBy = ""
-			if run.Reason == "re-queued after restart" {
+			if run.Reason == "re-queued after restart" || run.Reason == store.KVMRestartRetryReason {
 				visible.DisplayReason = "server restart, re-queued"
 			}
 		}
@@ -2864,7 +2920,7 @@ func MutatingTool(name string) bool {
 		return true
 	case "sync", "promote", "promote_retry", "publish_retry", "run_retry", "run_rerun", "run_cancel", "run_purge", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
 		"access_allow", "access_revoke",
-		"workflow_capability_grant", "workflow_capability_revoke",
+		"kubevirt_grant", "kubevirt_revoke", "workflow_capability_grant", "workflow_capability_revoke",
 		"size_grant", "size_revoke",
 		"admission_release", "queue_priority_config", "run_priority", "priority_grant", "priority_grant_revoke",
 		"repo_remove", "repo_archive", "repo_unarchive",

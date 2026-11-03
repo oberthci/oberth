@@ -41,7 +41,7 @@ func TestReleaseRoutesUseOneDocumentForEveryRead(t *testing.T) {
 	if plan, err := jobs.PlannedSteps(t.Context(), request); err != nil || len(plan) != 1 || plan[0].Step != "deploy" {
 		t.Fatalf("plan=%+v err=%v", plan, err)
 	}
-	if resources, err := jobs.PipelineDemandReceipt(t.Context(), request); err != nil || resources == nil {
+	if resources, err := jobs.PipelineKubeVirt(t.Context(), request); err != nil || resources != (service.KubeVirtResources{}) {
 		t.Fatalf("resources=%+v err=%v", resources, err)
 	}
 	if credentialed, err := jobs.PipelineCredentialed(t.Context(), request); err != nil || credentialed {

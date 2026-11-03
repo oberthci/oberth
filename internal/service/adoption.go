@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
@@ -24,6 +25,23 @@ func workflowRunAdoptable(run model.Run) bool {
 	// Argo admits tag pipelines only through the durable release capability.
 	// Historical non-release tag Jobs keep the conservative legacy fallback.
 	return run.RefKind == model.RefBranch || (run.RefKind == model.RefTag && run.Release)
+}
+
+func (scheduler *Scheduler) withoutPendingPreflight(ctx context.Context, run model.Run) (bool, error) {
+	journal, ok := scheduler.store.(vmrunner.KVMJournal)
+	if !ok {
+		return true, nil
+	}
+	pending, err := retryDatabase(ctx, "PendingKVMPreflights", journal.PendingKVMPreflights)
+	if err != nil {
+		return false, fmt.Errorf("load pending preflights before adoption: %w", err)
+	}
+	for _, execution := range pending {
+		if execution.Intent.RunID == run.ID {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // adoptionFailure names the exact Workflow startup could not adopt, so the
@@ -44,7 +62,7 @@ func adoptionFailure(adopter JobAdopter, run model.Run, err error) error {
 
 // adopt restores grants for work already running, even if the new owner's
 // configured capacity is smaller. New admissions wait until it has drained.
-func (gate *weightedAdmission) adopt(run model.Run, size periapsis.Size, pods ...*argoworkflow.PodDemand) (*admissionReservation, error) {
+func (gate *weightedAdmission) adopt(run model.Run, size periapsis.Size, demand argoworkflow.VMIDemand, pods ...*argoworkflow.PodDemand) (*admissionReservation, error) {
 	var peak *argoworkflow.PodDemand
 	if len(pods) > 0 && pods[0] != nil {
 		if !pods[0].Valid() {
@@ -56,6 +74,10 @@ func (gate *weightedAdmission) adopt(run model.Run, size periapsis.Size, pods ..
 	if !size.Valid() || (run.ConcurrencyGroup != "" && !argoworkflow.ValidConcurrencyGroup(run.ConcurrencyGroup)) {
 		return nil, fmt.Errorf("%w: invalid adopted resource contract", ErrAdoptionRefused)
 	}
+	resources := KubeVirtResources{Demand: demand, Limit: argoworkflow.VMIBudgetLimit().DemandLimit()}
+	if err := resources.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrAdoptionRefused, err)
+	}
 	order := run.AdmissionSequence
 	if order <= 0 {
 		order = run.QueueSequence
@@ -63,7 +85,7 @@ func (gate *weightedAdmission) adopt(run model.Run, size periapsis.Size, pods ..
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
 	if previous, ok := gate.reservations[run.QueueSequence]; ok {
-		if previous.runID != run.ID || previous.order != order || !previous.granted || previous.size != size.Effective() || previous.groupName != run.ConcurrencyGroup || previous.repoID != run.RepoID || !samePodDemand(previous.pods, peak) {
+		if previous.runID != run.ID || previous.order != order || !previous.granted || previous.size != size.Effective() || previous.groupName != run.ConcurrencyGroup || previous.repoID != run.RepoID || previous.kubeVirt.Demand != demand || !samePodDemand(previous.pods, peak) {
 			return nil, fmt.Errorf("%w: conflicting adopted admission", ErrAdoptionRefused)
 		}
 		return previous, nil
@@ -81,7 +103,7 @@ func (gate *weightedAdmission) adopt(run model.Run, size periapsis.Size, pods ..
 		gate: gate, sequence: run.QueueSequence, order: order, runID: run.ID, repoID: run.RepoID,
 		ref: run.Ref, refKind: run.RefKind, sha: run.SHA,
 		size: size.Effective(), weight: gate.weights.of(size.Effective(), gate.capacity),
-		group: group, groupName: run.ConcurrencyGroup, prepared: true, granted: true, submitted: true,
+		group: group, groupName: run.ConcurrencyGroup, prepared: true, granted: true, submitted: true, kubeVirt: resources,
 		claimedAt: now, preparedAt: now, grantedAt: now, ready: make(chan struct{}),
 	}
 	if peak != nil {

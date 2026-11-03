@@ -69,6 +69,9 @@ func identityFailure(stage string, err error) *executorIdentityError {
 	}
 
 	failure := &executorIdentityError{stage: stage, reason: reason, attempts: 1, cause: err}
+	if stage == "launcher_provision" && errors.Is(err, errVMIOverGrant) {
+		failure.reason, failure.public = "vmi_over_grant", errVMIOverGrant.Error()
+	}
 	if stage == "target_validation" || stage == "identity_pod" {
 		switch err.Error() {
 		case "executor token target is not memory-backed", "ephemeral container can access executor identity", "executor identity waiter was modified", "pipeline container can access executor identity", "executor identity waiter missing", "executor identity target owner changed", "executor identity target has no UID", "executor identity target changed during exec", "executor identity lifetime Pod has unexpected ownership or configuration", "executor identity owner changed":
@@ -213,7 +216,7 @@ func (controller *Controller) reconcileExecutorIdentity(ctx context.Context, wor
 	}
 	account := controller.config.ExecutorServiceAccount
 	if launcher {
-		account = ""
+		account = controller.config.VMLauncherServiceAccount
 		if workflow.Annotations[capabilityAnnotation] != "" {
 			account = workflow.Spec.ServiceAccountName
 		}

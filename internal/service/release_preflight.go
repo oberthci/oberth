@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/vmrunner"
 )
 
 // ReleasePreflighter observes declarations and public capabilities only.
@@ -25,7 +26,7 @@ type ReleasePreflightResult struct {
 const releasePreflightFile = ".oberth/release.yaml"
 const releasePreflightLimit = 1 << 20
 
-func releasePreflight(ctx context.Context, git RepositoryBlobReader, checker ReleasePreflighter, request JobRequest, base string, defaultBase bool) (ReleasePreflightResult, error) {
+func releasePreflight(ctx context.Context, git vmrunner.PolicyGit, checker ReleasePreflighter, request JobRequest, base string, defaultBase bool) (ReleasePreflightResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	repo := model.CanonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repository.Name)
@@ -120,7 +121,7 @@ func (service *API) checkPromotionRelease(ctx context.Context, repository model.
 	if service.releasePreflight == nil {
 		return nil
 	}
-	git, ok := service.git.(RepositoryBlobReader)
+	git, ok := service.git.(vmrunner.PolicyGit)
 	if !ok {
 		return fmt.Errorf("release preflight Git reader unavailable")
 	}

@@ -16,6 +16,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
@@ -135,7 +136,7 @@ func TestPressureCPUGateOptionalAndIndependent(t *testing.T) {
 }
 
 func TestPressureMaximumDeferralAdmitsButPreservesOtherGates(t *testing.T) {
-	for _, guard := range []string{"none", "weight", "whole-budget", "run-ceiling", "disk-floor", "group"} {
+	for _, guard := range []string{"none", "weight", "whole-budget", "run-ceiling", "disk-floor", "group", "vm"} {
 		t.Run(guard, func(t *testing.T) {
 			f := pressureTestGate()
 			f.sample.IO.FullAvg60 = 80
@@ -160,6 +161,8 @@ func TestPressureMaximumDeferralAdmitsButPreservesOtherGates(t *testing.T) {
 			case "group":
 				r.group = "1/group"
 				f.gate.groups[r.group] = &admissionReservation{runID: "owner"}
+			case "vm":
+				r.vmParked = true
 			}
 			f.advance(20*time.Minute - time.Nanosecond)
 			if r.granted {
@@ -179,6 +182,7 @@ func TestPressureMaximumDeferralAdmitsButPreservesOtherGates(t *testing.T) {
 			f.gate.runs = 0
 			f.gate.diskFloor = nil
 			delete(f.gate.groups, r.group)
+			r.vmParked = false
 			f.advance(time.Second)
 			if !r.granted || f.gate.pressure.bypasses != 1 {
 				t.Fatal("guard recovery did not allow bounded pressure bypass", guard)
@@ -320,7 +324,7 @@ func TestPressureUnavailableFailsOpenWarnsOnceAndResetsEpisode(t *testing.T) {
 func TestPressureAdoptionPreservesExistingWorkflowGrant(t *testing.T) {
 	f := pressureTestGate()
 	f.sample.IO.FullAvg60 = 80
-	r, err := f.gate.adopt(model.Run{ID: "existing", QueueSequence: 1, RepoID: 1}, periapsis.M)
+	r, err := f.gate.adopt(model.Run{ID: "existing", QueueSequence: 1, RepoID: 1}, periapsis.M, argoworkflow.VMIDemand{})
 	if err != nil || !r.granted || !r.submitted {
 		t.Fatal("pressure held adoption of running work", err)
 	}

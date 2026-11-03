@@ -5,11 +5,11 @@ import (
 	"testing"
 )
 
-func TestOnlyGenericExecutionCapabilityToolsRemain(t *testing.T) {
+func TestGenericAndDeprecatedExecutionToolsRemain(t *testing.T) {
 	names := ToolNames()
 	for _, name := range []string{"kubevirt_grant", "kubevirt_revoke", "kubevirt_grant_get", "kubevirt_grant_list", "run_kvm_preflight"} {
-		if slices.Contains(names, name) {
-			t.Errorf("retired execution authority remains exposed: %s", name)
+		if !slices.Contains(names, name) {
+			t.Errorf("deprecated execution tool was removed: %s", name)
 		}
 	}
 	for _, name := range []string{"workflow_capability_grant", "workflow_capability_revoke", "workflow_capability_get", "run_cancel"} {

@@ -8,8 +8,8 @@ extended resources. Ordinary CI requires no such grant.
 The operator creates the ServiceAccount in the configured execution namespace,
 its least-privilege resource RBAC, Argo task-result permissions, and namespace
 ResourceQuota. The server needs permission to request tokens for that exact
-account. The chart does not grant technology-specific permissions or create
-the operator's infrastructure. Kubernetes API discovery must identify every
+account. For new capability workflows, operators provide their infrastructure and
+resource permissions. The deprecated VM path retains its existing chart RBAC. Kubernetes API discovery must identify every
 allowed kind as namespaced; missing or cluster-scoped kinds are refused.
 
 For example, the MCP `workflow_capability_grant` arguments are:
@@ -59,12 +59,23 @@ server's capacity. Unbounded graphs, missing budgets or declarations cannot
 fall back to size admission for extended resources. Kubernetes still enforces
 actual device availability and namespace quota.
 
-Before upgrading from VM support, drain old runs, confirm external cleanup,
-and move test gates and object lifecycle into repository Workflows. Validate
-those destination pipelines before deploying the retirement. Schema 47 retains
-old execution journals, capacity rows and grants as read-only history without
-inventing cleanup or transferring authority. Export history before a later
-operator-managed archival migration. Old `vm`, `trustedTests`, and Argo VM
-Helm values are accepted but ignored with a warning; removed direct CLI flags
-are no longer accepted. `.oberth/tests.yaml` has no special meaning. Rollback
-requires the documented database restore procedure, not only an older image.
+The old VM path is deprecated and its deletion is deferred. `OBERTH_KVM`,
+`OBERTH_GUEST_TEST`, guest-test injection, `.oberth/tests.yaml` suite and release
+publication gates, VM launcher RBAC, cleanup and restart recovery remain active.
+Existing KubeVirt grants retain their original bounded authority; they do not
+authorize generic resources or select an operator identity. New capability
+grants are separate and start empty. Legacy chart values and CLI flags continue
+to work. The inactive pilot remains retired under Schema 45.
+
+Migrations 45/46/47 retire the inactive pilot, add the capability grant table,
+and establish the staged upgrade boundary without retiring the live VM journal.
+Back up the database and drain VM work before upgrading. The upgrade refuses
+uncleaned execution records, outstanding capacity slots, and running legacy VM
+Workflows. Keep the old binary available to finish cleanup before retrying.
+Already-upgraded installations retain normal legacy restart recovery.
+
+Stage 2 requires operators to provision resource/device capacity, accounts and
+RBAC, grant the replacement capability, move guest and suite gates into their
+repository Workflows, and prove cleanup before removing the deprecated path.
+That deletion is deliberately absent from this release. Rollback requires the
+documented database restore procedure, not only an older image.

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/vmrunner"
 )
 
 // SecretStoreReleasePlan reports effective public identities from the default
@@ -24,7 +25,7 @@ type releasePlanner interface {
 
 func (service *API) addReleasePlans(ctx context.Context, response *SecretStorePlanResponse) {
 	planner, ok := service.releasePreflight.(releasePlanner)
-	git, gitOK := service.git.(RepositoryBlobReader)
+	git, gitOK := service.git.(vmrunner.PolicyGit)
 	resolver, resolverOK := service.runs.(upstreamResolver)
 	if !ok || !gitOK || !resolverOK {
 		response.Text += "\nrelease identities: unavailable (release planner or Git reader not configured)"

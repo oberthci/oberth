@@ -17,7 +17,7 @@ func TestReleaseWIFConsumerRoleAndCleanEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]string{"release-publish-images": "image-writer", "release-publish-chart": "chart-writer", "release-verify": "image-reader"}
+	want := map[string]string{"release-publish-images": "image-writer", "release-publish-kvm-harness": "image-writer", "release-publish-chart": "chart-writer", "release-verify": "image-reader"}
 	for _, leaf := range wf.Spec.Templates {
 		role, ok := want[leaf.Name]
 		if !ok {
@@ -90,7 +90,7 @@ func TestAcceptedReleaseWIFExchangeFixtures(t *testing.T) {
 }
 
 func TestReleaseWIFInvalidMarkerNeverUsesLegacyKeys(t *testing.T) {
-	for _, action := range []string{"publish-images", "publish-chart", "verify"} {
+	for _, action := range []string{"publish-images", "publish-chart", "verify", "publish-kvm-harness"} {
 		t.Run(action, func(t *testing.T) {
 			f := newReleaseRuntimeFixture(t)
 			f.env = []string{"OBERTH_RELEASE_WIF=invalid"}
@@ -106,7 +106,7 @@ func TestReleaseWIFInvalidMarkerNeverUsesLegacyKeys(t *testing.T) {
 }
 
 func TestReleaseWIFConfigHasNoCredentialFiles(t *testing.T) {
-	for _, action := range []string{"publish-images", "publish-chart", "verify"} {
+	for _, action := range []string{"publish-images", "publish-chart", "verify", "publish-kvm-harness"} {
 		t.Run(action, func(t *testing.T) {
 			f := newReleaseRuntimeFixture(t)
 			source, err := os.ReadFile(f.script)
@@ -120,7 +120,7 @@ func TestReleaseWIFConfigHasNoCredentialFiles(t *testing.T) {
 				t.Fatal("missing action dispatch")
 			}
 			script := string(source[:index]) + `
-prepare_registry_auth
+if [ "$action" = publish-kvm-harness ]; then prepare_kvm_registry_auth; else prepare_registry_auth; fi
 test "$gar_key" = wif
 test "$DOCKER_CONFIG/config.json" = "$HELM_REGISTRY_CONFIG"
 test ! -e "$cred_dir/.gar-token"

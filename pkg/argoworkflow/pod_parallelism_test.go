@@ -258,6 +258,16 @@ func TestPodParallelismSequencesAndInvalidBounds(t *testing.T) {
 	}
 }
 
+func TestPodParallelismPreservesVMAndLauncherDemand(t *testing.T) {
+	wf := hostVMWorkflow(t)
+	wf.Spec.Templates[0].Parallelism = podLimit(4)
+	wf.Spec.Templates[0].Steps[1].Steps[0].WithParam = "[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]"
+	d, err := DeclaredHostPeak(wf, RunTriggerBranch)
+	if err != nil || d == nil || d.CPUMilli != 5500+VMILauncherCPUMilli || d.MemoryBytes != (8<<30)+VMILauncherMemoryBytes || d.Pods != 4 {
+		t.Fatalf("VM launcher or worker count lost: %+v %v", d, err)
+	}
+}
+
 func TestPodParallelismAbsentPreservesLegacySequenceFallback(t *testing.T) {
 	root := parallelFanout("steps", "sequence", 18)
 	wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Entrypoint: "root", Templates: []wfv1.Template{root, declaredLeaf("leaf", "1", "1Gi")}}}

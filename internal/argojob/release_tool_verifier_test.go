@@ -82,6 +82,7 @@ func TestBootstrapRetainsTestsAndSeparatesPublisherAuthority(t *testing.T) {
 			name, role string
 		}{
 			{"release-publish-images", "image-writer"},
+			{"release-publish-kvm-harness", "image-writer"},
 			{"release-publish-chart", "chart-writer"},
 		} {
 			if template.Name != publisher.name {
@@ -98,8 +99,9 @@ func TestBootstrapRetainsTestsAndSeparatesPublisherAuthority(t *testing.T) {
 			}
 		}
 	}
-	if seenTests != 5 || credentialed != 6 {
-		t.Fatalf("retained tests=%d credentialed leaves=%d, want 5 and 6", seenTests, credentialed)
+	// 6 original credentialed leaves + release-publish-kvm-harness = 7
+	if seenTests != 5 || credentialed != 7 {
+		t.Fatalf("retained tests=%d credentialed leaves=%d, want 5 and 7", seenTests, credentialed)
 	}
 }
 
@@ -253,7 +255,7 @@ func TestBootstrapExecutedEnvironmentIgnoresSharedCachesAndCredentials(t *testin
 		tested++
 	}
 	// Bootstrap, Node test runtime, artifact publishing and image tooling wrappers.
-	if tested != 31 {
-		t.Fatalf("executed %d wrappers, want all 31", tested)
+	if tested != 32 {
+		t.Fatalf("executed %d wrappers, want all 32", tested)
 	}
 }

@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -154,7 +153,7 @@ func TestScopedPrefixesNeverUseGlobalResolverFallback(t *testing.T) {
 	f := newScopeFixture(t)
 	// Hide the store's scoped-resolution capability. Its global resolver
 	// reports ambiguity, which must never become a scoped existence oracle.
-	f.service.history = ambiguousRunHistory{RunHistory: f.store}
+	f.service.history = ambiguousKVMHistory{RunHistory: f.store}
 	for _, id := range []string{f.runs["github"][0].ID[:8], f.runs["codeberg"][0].ID[:8], strings.Repeat("f", 8)} {
 		if _, err := f.call(scopedActor, "run_get", map[string]string{"id": id}); !errors.Is(err, ErrUnavailable) {
 			t.Fatalf("fallback prefix %s: %v", id, err)
@@ -198,10 +197,4 @@ func TestWaitByRunIDPinsOriginalAttempt(t *testing.T) {
 	if err != nil || value.(WaitResponse).Run.ID != run.ID || value.(WaitResponse).StillRunning {
 		t.Fatalf("wait followed a later attempt: %#v, %v", value, err)
 	}
-}
-
-type ambiguousRunHistory struct{ RunHistory }
-
-func (h ambiguousRunHistory) ResolveRunID(context.Context, string) (model.Run, error) {
-	return model.Run{}, store.ErrAmbiguous
 }

@@ -217,10 +217,10 @@ func TestAdmissionHistoryReadsTheDurableOrigin(t *testing.T) {
 	ctx := context.Background()
 	sha := strings.Repeat("b", 40)
 	origin := time.Now().Add(-10 * time.Minute).UTC().Truncate(time.Microsecond)
-	if err := fixture.store.RecordAdmissionHeadWait(ctx, fixture.repo.ID, model.RefBranch, "feature/resource", sha, origin); err != nil {
+	if err := fixture.store.RecordAdmissionHeadWait(ctx, fixture.repo.ID, model.RefBranch, "feature/kvm", sha, origin); err != nil {
 		t.Fatal(err)
 	}
-	since, _ := fixture.scheduler.admissionHistory(ctx, model.Run{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/resource", SHA: sha})
+	since, _ := fixture.scheduler.admissionHistory(ctx, model.Run{RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/kvm", SHA: sha})
 	if !since.Equal(origin) {
 		t.Fatalf("origin = %s, want %s", since, origin)
 	}

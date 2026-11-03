@@ -11,6 +11,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
@@ -122,7 +123,7 @@ func TestExecutorIdentityAdoptedFailureKeepsClassification(t *testing.T) {
 			if err := file.Close(); err != nil {
 				t.Fatal(err)
 			}
-			reservation, err := scheduler.admission.adopt(run, periapsis.M)
+			reservation, err := scheduler.admission.adopt(run, periapsis.M, argoworkflow.VMIDemand{})
 			if err != nil {
 				t.Fatal(err)
 			}

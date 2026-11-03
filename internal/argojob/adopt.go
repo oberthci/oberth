@@ -25,11 +25,11 @@ type Adoption struct {
 	Fallback    model.ResourceAdmissionFallback
 	Pods        argoworkflow.PodDemand
 	RestartedAt time.Time
-
-	Size       periapsis.Size
-	UID        types.UID
-	Identity   string
-	SpecSHA256 string
+	KubeVirt    argoworkflow.VMIDemand
+	Size        periapsis.Size
+	UID         types.UID
+	Identity    string
+	SpecSHA256  string
 }
 
 // ErrAdoptionRefused marks a Workflow that exists but must not be observed as
@@ -52,10 +52,6 @@ func (controller *Controller) Adopt(ctx context.Context, request AdoptionRequest
 	}
 	if err != nil {
 		return Adoption{}, false, fmt.Errorf("argojob: read Workflow for adoption: %w", err)
-	}
-	resources, extended := argoworkflow.CapabilityUsage(workflow)
-	if (resources || extended) && workflow.Annotations[capabilityAnnotation] == "" {
-		return Adoption{}, false, fmt.Errorf("%w: resource Workflow lacks a current operator capability binding; drain legacy resource workflows before upgrading", ErrAdoptionRefused)
 	}
 	if workflow.Annotations[capabilityAnnotation] != "" {
 		if request.RepositoryID <= 0 {
@@ -87,13 +83,44 @@ func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request Adop
 	if !argoworkflow.ScheduleEntryMatches(workflow, request.RunTrigger, request.ScheduleEntry) {
 		return Adoption{}, fmt.Errorf("argojob: Workflow %s adoption schedule entry mismatch", request.Name)
 	}
-	group, err := argoworkflow.DeclaredConcurrencyGroup(workflow)
-	if err != nil || group != request.Group {
+	if workflow.Annotations[capabilityAnnotation] == "" && argoworkflow.DeclaresVMIResources(workflow) && workflow.Annotations[vmiQuotaAnnotation] == "" {
+		return Adoption{}, errors.New("argojob: legacy VMI Workflow lacks a server quota binding; drain legacy VMI workflows before upgrading")
+	}
+	group, err := argoworkflow.RunConcurrencyGroup(workflow)
+	// Pre-#1173 submissions persisted this implicit group without annotating
+	// the Workflow. Preserve that existing holder during recovery only.
+	legacyGroup := group == "" && request.Group == argoworkflow.KubeVirtConcurrencyGroup && argoworkflow.DeclaresVMIResources(workflow)
+	if err != nil || (group != request.Group && !legacyGroup) {
 		return Adoption{}, fmt.Errorf("argojob: Workflow %s adoption group mismatch", request.Name)
 	}
 	size, err := argoworkflow.DeclaredSizeFor(workflow, request.RunTrigger)
 	if err != nil {
 		return Adoption{}, err
+	}
+	var demand argoworkflow.VMIDemand
+	if workflow.Annotations[capabilityAnnotation] == "" {
+		demand, err = argoworkflow.DeclaredVMIDemand(workflow)
+	}
+	if err != nil {
+		return Adoption{}, err
+	}
+	if workflow.Annotations[capabilityAnnotation] == "" && argoworkflow.DeclaresVMIResources(workflow) {
+		var quota vmiQuotaBinding
+		if json.Unmarshal([]byte(workflow.Annotations[vmiQuotaAnnotation]), &quota) != nil {
+			return Adoption{}, errors.New("argojob: VMI Workflow has an invalid server quota binding")
+		}
+		if quota.Receipt != nil {
+			r := quota.Receipt
+			if !r.Valid() || r.Binding.RunID != request.RunID || r.Binding.RepositoryID != quota.RepositoryID || r.Binding.SHA != request.SHA || r.Binding.Trigger != request.RunTrigger || r.Binding.ScheduleEntry != request.ScheduleEntry || r.Demand != quota.Peak {
+				return Adoption{}, errors.New("argojob: VMI Workflow has an invalid run demand receipt")
+			}
+			// This is the server-admitted, source/resolution-bound peak, not a
+			// new analysis of a fresh checkout or a now-moved fragment tag.
+			demand = r.Demand
+		}
+		if quota.RepositoryID <= 0 || !validVMIDemand(quota.Limit) || quota.Peak != demand || !demand.Fits(quota.Limit) {
+			return Adoption{}, errors.New("argojob: VMI Workflow has an invalid server quota binding")
+		}
 	}
 
 	specHash, err := adoptionSpecHash(workflow)
@@ -112,18 +139,29 @@ func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request Adop
 	if err != nil {
 		return Adoption{}, err
 	}
-	return Adoption{Fallback: fallback, Pods: peak, RestartedAt: controller.restartedAt, Size: size, UID: workflow.UID, Identity: identity, SpecSHA256: specHash}, nil
+	return Adoption{Fallback: fallback, Pods: peak, RestartedAt: controller.restartedAt, KubeVirt: demand, Size: size, UID: workflow.UID, Identity: identity, SpecSHA256: specHash}, nil
 }
 
 // Argo's status and API metadata change while it runs. Its live spec must stay
 // fixed, even if a replacement keeps the original identity annotation.
 func adoptionSpecHash(workflow *wfv1.Workflow) (string, error) {
+	if binding := workflow.Annotations[capabilityAnnotation]; binding != "" {
+		body, err := json.Marshal(struct {
+			Spec                            wfv1.WorkflowSpec
+			PodDemand, Fallback, Capability string
+		}{workflow.Spec, workflow.Annotations[podDemandAnnotation], workflow.Annotations[resourceFallbackAnnotation], binding})
+		if err != nil {
+			return "", err
+		}
+		digest := sha256.Sum256(body)
+		return hex.EncodeToString(digest[:]), nil
+	}
 	body, err := json.Marshal(struct {
-		Spec       wfv1.WorkflowSpec `json:"spec"`
-		PodDemand  string            `json:"pod_demand,omitempty"`
-		Fallback   string            `json:"resource_fallback,omitempty"`
-		Capability string            `json:"capability,omitempty"`
-	}{workflow.Spec, workflow.Annotations[podDemandAnnotation], workflow.Annotations[resourceFallbackAnnotation], workflow.Annotations[capabilityAnnotation]})
+		Spec      wfv1.WorkflowSpec `json:"spec"`
+		VMIQuota  string            `json:"vmi_quota,omitempty"`
+		PodDemand string            `json:"pod_demand,omitempty"`
+		Fallback  string            `json:"resource_fallback,omitempty"`
+	}{workflow.Spec, workflow.Annotations[vmiQuotaAnnotation], workflow.Annotations[podDemandAnnotation], workflow.Annotations[resourceFallbackAnnotation]})
 	if err != nil {
 		return "", fmt.Errorf("argojob: encode adopted Workflow spec: %w", err)
 	}

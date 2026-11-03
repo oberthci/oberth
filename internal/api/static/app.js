@@ -486,7 +486,10 @@ function queueSizeTitle(run) {
 }
 function queueReason(run) {
   const a = admissionOf(run), s = run.Scheduling?.state, b = a?.blocked_by;
+  if (s === "preflight") return "KVM preflight running";
   if (!a || s === "preparing") return "preparing to run";
+  if (a.kubevirt_capacity) return "waiting for KubeVirt capacity (repository VM grant)";
+  if (a.vm_capacity) return "waiting for trusted VM capacity";
   if (a.disk_floor?.below_floor) return "waiting for disk space";
   if (a.group_holder || a.group_ahead) return `waiting for group ${a.group}`;
   const pressure = a.pressure || b?.pressure;
@@ -1257,7 +1260,7 @@ async function renderRunDetailView(detail, seq) {
         <div class="sl-h"><span>STEPS · ${stepCount}${run.Release ? " · RELEASE" : ""}</span></div>
         <button class="v4row summary${selected ? "" : " sel"}" data-select-step=""><span class="ic ${kind === "pass" ? "g" : kind === "fail" ? "r" : kind === "run" ? "o" : "d"}">≡</span><span class="nm">Run summary</span><span class="dur">${esc(fmtDur(seconds))}</span></button>
         <div class="sl-sep"></div>
-        ${orderSteps(steps).map(row => stepRow(row, selected ? selectedKey : "")).join("") || `<div class="empty">No step results recorded yet.</div>`}
+        ${orderSteps(steps).map(row => stepRow(row, selected ? selectedKey : "")).join("") || `<div class="empty">${run.Phase === "preflight" ? "Trusted KVM preflight running — steps appear after submission." : "No step results recorded yet."}</div>`}
       </div>
       <div class="logp">
         <div class="log-h" id="logHead">${selected ? `${statusIcon(selected.Status)}<span class="nm">${esc(stepKey(selected))}</span><span class="v4b ${statusKind(selected.Status) === "pass" ? "pass" : statusKind(selected.Status) === "fail" ? "fail" : statusKind(selected.Status) === "run" ? "run" : "dim"}">${esc(statusLabel(selected.Status).toUpperCase())}</span>` : `<span class="ic ${kind === "pass" ? "g" : kind === "fail" ? "r" : kind === "run" ? "o" : "d"}">≡</span><span class="nm">Run summary</span><span class="v4b ${kind === "pass" ? "pass" : kind === "fail" ? "fail" : kind === "run" ? "run" : "dim"}">${esc(phaseLabel)} · ${esc(fmtDur(seconds))}</span>`}</div>

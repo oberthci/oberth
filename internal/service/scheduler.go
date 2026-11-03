@@ -23,6 +23,7 @@ import (
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
@@ -41,6 +42,7 @@ type SchedulerConfig struct {
 	Logs              LogStore
 	Jobs              JobController
 	ReleaseJobs       ReleaseJobController
+	TrustedPreflight  TrustedPreflight
 	Auditor           Auditor
 	Signals           *Signals
 	WorkspaceRoot     string
@@ -73,6 +75,7 @@ type Scheduler struct {
 	logs               LogStore
 	jobs               JobController
 	releaseJobs        ReleaseJobController
+	trusted            TrustedPreflight
 	auditor            Auditor
 	signals            *Signals
 	workspaces         *workspaceLifecycle
@@ -92,6 +95,7 @@ type Scheduler struct {
 	publicationIDs     []string
 	publicationSet     map[string]struct{}
 	deliveryPermit     chan struct{}
+	capacityWait       func(context.Context) error
 	// promotionRetrier re-promotes a promotion whose delivery found its
 	// target moved (#1097); nil leaves such a promotion failed.
 	promotionRetrier atomic.Pointer[promotionRetrierHook]
@@ -175,15 +179,15 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 	deliveryPermit <- struct{}{}
 	scheduler := &Scheduler{
 		store: config.Store, git: config.Git, logs: config.Logs, jobs: config.Jobs,
-		releaseJobs: config.ReleaseJobs,
-		auditor:     config.Auditor, signals: signals,
+		releaseJobs: config.ReleaseJobs, trusted: config.TrustedPreflight,
+		auditor: config.Auditor, signals: signals,
 		workspaces: workspaces, workspaceRoot: workspaceRoot, maxConcurrent: config.MaxConcurrent,
 		capacityFile:   config.MaxConcurrentFile,
 		admission:      newWeightedAdmissionForJobsWeights(config.MaxConcurrent, config.SizeWeights),
 		maxRunLogBytes: config.MaxRunLogBytes, mutationGate: mutationGate,
 		wake: make(chan struct{}, 1), publicationWake: make(chan struct{}, 1),
 		createWake: make(chan struct{}, 1), createPending: make(map[string]*pendingCreate),
-		publicationSet: make(map[string]struct{}), deliveryPermit: deliveryPermit,
+		publicationSet: make(map[string]struct{}), deliveryPermit: deliveryPermit, capacityWait: waitTrustedCapacity,
 	}
 	scheduler.workspaces.owners = scheduler.database()
 	// Runs parked on their concurrency group (#658) do not hold a dispatch
@@ -474,6 +478,9 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		}
 		return err
 	}
+	if err := scheduler.recoverTrustedPreflights(workerCtx); err != nil {
+		return err
+	}
 	var adopted []adoptedRun
 	defer func() {
 		for _, run := range adopted {
@@ -481,17 +488,20 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		}
 	}()
 	if err := scheduler.reconcileStrandedRunsWithGate(workerCtx, scheduler.awaitMutation, func(run model.Run, size periapsis.Size) error {
+		demand, err := scheduler.adoptedKubeVirtDemand(run)
+		if err != nil {
+			return err
+		}
 		var pods *argoworkflow.PodDemand
 		if reader, ok := scheduler.jobs.(interface {
 			AdoptedPodDemand(model.Run) (*argoworkflow.PodDemand, error)
 		}); ok {
-			var err error
 			pods, err = reader.AdoptedPodDemand(run)
 			if err != nil {
 				return err
 			}
 		}
-		reservation, err := scheduler.admission.adopt(run, size, pods)
+		reservation, err := scheduler.admission.adopt(run, size, demand, pods)
 		if err != nil {
 			return err
 		}
@@ -675,7 +685,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 // dispatchSlotAvailable reports whether the dispatch loop may claim another
 // run while active claimed runs are in flight.
 //
-// A run waiting on its concurrency group (#658) waits for another run of its
+// A run parked on VM capacity (#278) or its concurrency group (#658) waits for another run of its
 // own repository, not for node resources, and holds no admission weight. If
 // it also held a dispatch slot, one repository with a few queued runs in one
 // group could fill every slot and stall unrelated repositories: exactly the
@@ -808,6 +818,10 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		return scheduler.finishPreCreateInfrastructureFailure(ctx, run, repository, &checkoutPreparationFailure{cause: err})
 	}
 	scheduler.timingMilestone(ctx, run.ID, "checkout-ready")
+	requirement, err := scheduler.trustedRequirement(ctx, repository, run.ID, checkoutSHA)
+	if err != nil {
+		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
+	}
 	logFile, err := scheduler.logs.Create(run.ID)
 	if err != nil {
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("create run log: %w", err))
@@ -817,7 +831,12 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		_ = logFile.Close()
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
 	}
-	current, err := scheduler.database().SetRunJobName(ctx, run.ID, jobName)
+	var current model.Run
+	if requirement.Contract == nil {
+		current, err = scheduler.database().SetRunJobName(ctx, run.ID, jobName)
+	} else {
+		current, err = scheduler.database().Run(ctx, run.ID)
+	}
 	if err != nil {
 		_ = logFile.Close()
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("persist deterministic Job intent: %w", err))
@@ -835,6 +854,20 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	if err != nil {
 		_ = logFile.Close()
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("read pipeline resource size: %w", err))
+	}
+	if requirement.Contract != nil {
+		if sized, ok := scheduler.trusted.(interface {
+			Size(context.Context, JobRequest) (periapsis.Size, error)
+		}); ok {
+			preflightSize, sizeErr := sized.Size(ctx, jobRequest)
+			if sizeErr != nil {
+				_ = logFile.Close()
+				return scheduler.finishInfrastructureFailure(ctx, run, repository, sizeErr)
+			}
+			if sizeRank(preflightSize) > sizeRank(size) {
+				size = preflightSize
+			}
+		}
 	}
 	// Priority is advisory: an unavailable grant read withholds the boost,
 	// never the release's execution or publication.
@@ -857,13 +890,17 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		jobRequest.ConcurrencyGroup = group
 	}
 
-	receipt, err := scheduler.pipelineDemandReceipt(ctx, jobRequest)
+	kubeVirt, err := scheduler.pipelineKubeVirt(ctx, jobRequest)
 	if err != nil {
 		_ = logFile.Close()
-		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("read pipeline resource demand: %w", err))
+		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("read pipeline KubeVirt demand: %w", err))
 	}
-	jobRequest.DemandReceipt = receipt
-	pods, fallback := scheduler.admission.selectDeclaredDemand(receipt)
+	jobRequest.VMIDemandReceipt = kubeVirt.Receipt
+	var pods *argoworkflow.PodDemand
+	var fallback model.ResourceAdmissionFallback
+	if requirement.Contract == nil {
+		pods, fallback = scheduler.admission.selectDeclaredDemand(kubeVirt.Receipt)
+	}
 	if pods == nil {
 		if err := scheduler.authorizeRunSize(ctx, run, repository, size); err != nil {
 			_ = logFile.Close()
@@ -876,7 +913,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	headSince, estimate := scheduler.admissionHistory(ctx, run)
 	releaseAdmission, err := reservation.acquireRequest(ctx, admissionRequest{
 		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref, Size: size, Group: group, Pods: pods, Fallback: fallback,
-		RefKind: run.RefKind, SHA: run.SHA, HeadSince: headSince, Estimate: estimate, PriorityMaximum: priorityMaximum, PriorityLookupFailed: priorityErr != nil,
+		RefKind: run.RefKind, SHA: run.SHA, HeadSince: headSince, Estimate: estimate, KubeVirt: &kubeVirt, PriorityMaximum: priorityMaximum, PriorityLookupFailed: priorityErr != nil,
 	})
 	if errors.Is(err, errAdmissionAbandoned) {
 		// Superseded or cancelled while waiting: the reservation is already
@@ -960,6 +997,45 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		_ = logFile.Close()
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
 	}
+	if requirement.Contract != nil {
+		stopped, err := scheduler.executeTrustedWithCapacity(ctx, jobRequest, requirement, logFile, reservation, require)
+		if stopped {
+			_ = logFile.Close()
+			return nil
+		}
+		if err != nil {
+			_ = logFile.Close()
+			journal := scheduler.store.(vmrunner.KVMJournal)
+			stateCtx, cancelState := boundedWorkspaceCleanupContext(ctx)
+			state, stateErr := retryDatabase(stateCtx, "KVMPreflight", func(ctx context.Context) (vmrunner.KVMExecution, error) { return journal.KVMPreflight(ctx, run.ID) })
+			cancelState()
+			if (stateErr != nil && !errors.Is(stateErr, store.ErrNotFound)) || (stateErr == nil && !state.Cleaned) {
+				reservation.retain()
+				if recoverablePreflightError(err) && ctx.Err() == nil {
+					return scheduler.recoverDatabasePreflight(ctx, run.ID, reservation)
+				}
+				return errors.Join(err, stateErr)
+			}
+			// Owner shutdown loses the observer, not the durable recovery obligation.
+			// Keep the parent running so startup can clean and settle it atomically.
+			if ctx.Err() != nil {
+				return nil
+			}
+			var observed *TrustedPreflightFailure
+			if errors.As(err, &observed) {
+				return scheduler.finishTrustedPreflightFailure(ctx, run, observed.Result, err)
+			}
+			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("trusted preflight: %w", err))
+		}
+		fresh, err := scheduler.trustedRequirement(ctx, repository, run.ID, checkoutSHA)
+		if err == nil {
+			err = scheduler.trustedReceipt(ctx, repository, run, fresh)
+		}
+		if err != nil {
+			_ = logFile.Close()
+			return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
+		}
+	}
 	if !run.Credentialed && scheduler.pipelineCredentialed(ctx, jobRequest) {
 		if credErr := scheduler.database().SetRunCredentialed(ctx, run.ID); credErr != nil {
 			_ = logFile.Close()
@@ -970,6 +1046,13 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	if err = require(ctx); err != nil {
 		_ = logFile.Close()
 		return err
+	}
+	if requirement.Contract != nil {
+		current, err = scheduler.database().SetRunJobName(ctx, run.ID, jobName)
+	}
+	if err != nil {
+		_ = logFile.Close()
+		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("persist deterministic Job intent: %w", err))
 	}
 	if current.Status != model.RunRunning {
 		_ = logFile.Close()
@@ -991,7 +1074,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	}
 
 	if _, ok := scheduler.jobs.(JobCreateSettler); ok {
-		if err := scheduler.recordResourceAdmission(run, jobName, size, pods, fallback); err != nil {
+		if err := scheduler.recordResourceAdmission(run, jobName, size, kubeVirt.Demand, pods, fallback); err != nil {
 			_ = logFile.Close()
 			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("record Workflow admission contract: %w", err))
 		}
@@ -1022,7 +1105,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		// Definite rejection/foreign-name refusal never goes through Delete.
 		// Native uncertain POSTs were registered above with the shared settler.
 		var before interface{ BeforeWorkflowCreate() bool }
-		if errors.As(err, &before) && before.BeforeWorkflowCreate() {
+		if requirement.Contract == nil && errors.As(err, &before) && before.BeforeWorkflowCreate() {
 			return scheduler.finishPreCreateInfrastructureFailure(ctx, run, repository, err)
 		}
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("create Job: %w", err))
@@ -1602,6 +1685,17 @@ func (scheduler *Scheduler) deliverPublicationWithGate(
 	if err := require(ctx); err != nil {
 		return model.PublicationFinalization{}, err
 	}
+	policyErr := scheduler.requirePublicationTestPolicy(ctx, repository, publication)
+	if err := require(ctx); err != nil {
+		return model.PublicationFinalization{}, err
+	}
+	if policyErr != nil {
+		finalization, err := scheduler.database().FinalizePublication(ctx, publication.ID, model.PublicationFailed, policyErr.Error())
+		if err != nil {
+			return model.PublicationFinalization{}, err
+		}
+		return finalization, scheduler.finishPublication(ctx, repository, finalization)
+	}
 	publicationInput := repository.Name
 	if upstream, upstreamErr := scheduler.database().Upstream(ctx, repository.UpstreamID); upstreamErr == nil {
 		publicationInput = upstream.QualifiedRepo(repository.Name)
@@ -1701,28 +1795,40 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 			continue
 		}
 		if adopter, ok := scheduler.jobs.(JobAdopter); ok && workflowRunAdoptable(run) {
-			size, found, err := adopter.Adopt(ctx, run)
+			eligible, err := scheduler.withoutPendingPreflight(ctx, run)
 			if err != nil {
-				return adoptionFailure(adopter, run, err)
+				return err
 			}
-			if found {
-				if adopt == nil {
-					return errors.New("service: adoption requires a worker dispatcher")
-				}
-				if err := adopt(run, size); err != nil {
+			if eligible {
+				size, found, err := adopter.Adopt(ctx, run)
+				if err != nil {
 					return adoptionFailure(adopter, run, err)
 				}
-				continue
+				if found {
+					if adopt == nil {
+						return errors.New("service: adoption requires a worker dispatcher")
+					}
+					if err := adopt(run, size); err != nil {
+						return adoptionFailure(adopter, run, err)
+					}
+					continue
+				}
 			}
 		}
 		if _, canSettle := scheduler.jobs.(JobCreateSettler); canSettle && run.Phase == "waiting" {
-			_, contractErr := scheduler.readCreateAdmission(run)
-			// File absence is the pre-feature/never-submitted path. An
-			// unreadable or corrupt file still denotes a possible POST;
-			// registration conservatively restores that unknown contract.
-			if !errors.Is(contractErr, os.ErrNotExist) {
-				scheduler.registerCreateCleanup(run, nil, false)
-				continue
+			eligible, err := scheduler.withoutPendingPreflight(ctx, run)
+			if err != nil {
+				return err
+			}
+			if eligible {
+				_, contractErr := scheduler.readCreateAdmission(run)
+				// File absence is the pre-feature/never-submitted path. An
+				// unreadable or corrupt file still denotes a possible POST;
+				// registration conservatively restores that unknown contract.
+				if !errors.Is(contractErr, os.ErrNotExist) {
+					scheduler.registerCreateCleanup(run, nil, false)
+					continue
+				}
 			}
 		}
 		reconciled, termErr := scheduler.jobs.TerminalResult(ctx, run.JobName)

@@ -2538,7 +2538,7 @@ alone is never evidence that missing migrations ran.
 | v44 | Tag publication identity | Prevent duplicate tag publication tuples | Database restore |
 | v45 | Pilot retirement | Preserve inactive pilot journals as read-only history; remove them from execution decisions | Database restore |
 | v46 | Operator capabilities | Empty repository-bound authority for operator ServiceAccounts, resource kinds and extended resources; no conversion of historical grants | Database restore |
-| v47 | Execution retirement | Preserve old execution, capacity and technology-specific grant rows as read-only history; no runtime authority or automatic cleanup | Database restore |
+| v47 | Staged execution upgrade | Refuse VM work in flight at upgrade; retain legacy journals, interlocks and grant authority until Stage 2 | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding
@@ -3124,11 +3124,10 @@ missing declarations or capacity never fall back to size-based admission.
 The source receipt pins exact source, fragments and run binding across sizing
 and submission. Ordinary workflows retain the existing admission behavior.
 
-Schema 46 starts capability authority empty. Schema 47 preserves historical
-execution, capacity and technology-specific grant rows as read-only data; no
-runtime decision consults them. Retiring code does not prove external cleanup.
-Before upgrade, operators must drain old execution and move object lifecycle,
-cleanup and test gates into repository Workflows. Old Helm execution keys are
-ignored with a warning. Oberth no longer reads `.oberth/tests.yaml`, starts
-trusted preflight Workflows, publishes harness images, or manages VM objects.
-See [workflow capabilities](docs/workflow-capabilities.md) for the operator contract.
+Schema 46 starts capability authority empty. Schema 47 keeps legacy execution,
+capacity and KubeVirt grants writable while guarding the upgrade boundary.
+The old `OBERTH_KVM`/`OBERTH_GUEST_TEST`, guest-test and `.oberth/tests.yaml`
+paths are deprecated and retained, including publication gates, recovery,
+cleanup, existing grants and chart RBAC. Operators must migrate and qualify
+replacement pipelines before the later Stage 2 deletion. Schema 45 retires
+only the inactive pilot. See [workflow capabilities](docs/workflow-capabilities.md).
