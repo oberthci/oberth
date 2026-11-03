@@ -22,9 +22,10 @@ type RunScheduling struct {
 }
 
 type AdmissionObservation struct {
-	NumericBudget     *NumericBudget     `json:"numeric_budget,omitempty"`
-	BackfillMessage   string             `json:"backfill_message,omitempty"`
-	DeclaredResources *DeclaredResources `json:"declared_resources,omitempty"`
+	NumericBudget     *NumericBudget        `json:"numeric_budget,omitempty"`
+	BackfillMessage   string                `json:"backfill_message,omitempty"`
+	DeclaredResources *DeclaredResources    `json:"declared_resources,omitempty"`
+	LegacyResources   *LegacyResourceCharge `json:"legacy_resources,omitempty"`
 
 	Pressure         *PressureDeferral `json:"pressure,omitempty"`
 	KubeVirtCapacity bool              `json:"kubevirt_capacity,omitempty"`
@@ -58,8 +59,9 @@ type AdmissionObservation struct {
 // AdmissionBlocker is the claimed run at the head of the weighted admission
 // queue that does not fit, which holds back every run claimed after it.
 type AdmissionBlocker struct {
-	NumericBudget     *NumericBudget     `json:"numeric_budget,omitempty"`
-	DeclaredResources *DeclaredResources `json:"declared_resources,omitempty"`
+	NumericBudget     *NumericBudget        `json:"numeric_budget,omitempty"`
+	DeclaredResources *DeclaredResources    `json:"declared_resources,omitempty"`
+	LegacyResources   *LegacyResourceCharge `json:"legacy_resources,omitempty"`
 
 	Pressure *PressureDeferral `json:"pressure,omitempty"`
 	RunID    string            `json:"run_id"`
@@ -220,13 +222,21 @@ type AdmissionState struct {
 	Blocker            *AdmissionBlocker      `json:"blocker,omitempty"`
 }
 
-// NumericBudget includes declared Pod/helper requests and the equivalent
-// CPU/memory share reserved by legacy size weights. It is not measured usage.
+// NumericBudget includes declared Pod/helper requests and fixed CPU/memory
+// charges for legacy sizes. It is not measured usage.
 type NumericBudget struct {
 	CPUUsedMilli      int64 `json:"cpu_used_milli"`
 	CPUBudgetMilli    int64 `json:"cpu_budget_milli"`
 	MemoryUsedBytes   int64 `json:"memory_used_bytes"`
 	MemoryBudgetBytes int64 `json:"memory_budget_bytes"`
+}
+
+// LegacyResourceCharge is the fixed reservation for a run using size admission.
+// It includes the entire numeric charge, without declared-run helper/headroom
+// additions, and does not describe Kubernetes requests or measured usage.
+type LegacyResourceCharge struct {
+	CPUMilli    int64 `json:"cpu_milli"`
+	MemoryBytes int64 `json:"memory_bytes"`
 }
 
 // AdmissionReservation is one claimed run's place in the gate. State is
@@ -235,7 +245,8 @@ type NumericBudget struct {
 // capacity), granted, or retained (granted, and kept held after its owner
 // stopped on an error that may have left its Workflow running).
 type AdmissionReservation struct {
-	DeclaredResources *DeclaredResources `json:"declared_resources,omitempty"`
+	DeclaredResources *DeclaredResources    `json:"declared_resources,omitempty"`
+	LegacyResources   *LegacyResourceCharge `json:"legacy_resources,omitempty"`
 
 	Pressure *PressureDeferral `json:"pressure,omitempty"`
 	RunID    string            `json:"run_id"`

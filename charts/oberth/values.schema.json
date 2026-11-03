@@ -125,6 +125,16 @@
             "extendedResources": {"type":"object","maxProperties":32,"additionalProperties":{"type":"integer","minimum":1,"maximum":1000000}}
           }
         },
+        "legacyResources": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "S": {"type":"object","additionalProperties":false,"required":["cpu_milli","memory_bytes"],"properties":{"cpu_milli":{"type":"integer","minimum":1,"maximum":1000000},"memory_bytes":{"type":"integer","minimum":1,"maximum":1125899906842624}}},
+            "M": {"type":"object","additionalProperties":false,"required":["cpu_milli","memory_bytes"],"properties":{"cpu_milli":{"type":"integer","minimum":1,"maximum":1000000},"memory_bytes":{"type":"integer","minimum":1,"maximum":1125899906842624}}},
+            "L": {"type":"object","additionalProperties":false,"required":["cpu_milli","memory_bytes"],"properties":{"cpu_milli":{"type":"integer","minimum":1,"maximum":1000000},"memory_bytes":{"type":"integer","minimum":1,"maximum":1125899906842624}}},
+            "XL": {"type":"object","additionalProperties":false,"required":["cpu_milli","memory_bytes"],"properties":{"cpu_milli":{"type":"integer","minimum":1,"maximum":1000000},"memory_bytes":{"type":"integer","minimum":1,"maximum":1125899906842624}}}
+          }
+        },
         "runtimeCapacity": {
           "type": "object",
           "additionalProperties": false,

@@ -59,3 +59,27 @@ func TestChartDeclaredAdmissionBudgetsAndSingleKillSwitch(t *testing.T) {
 		}
 	}
 }
+
+func TestChartLegacyResourceCharges(t *testing.T) {
+	base := []string{"template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@" + testImageDigest}
+	for _, tc := range []struct{ value, want string }{
+		{"", `\"L\":{\"cpu_milli\":3000,\"memory_bytes\":8589934592}`},
+		{"admission.legacyResources.L.cpu_milli=4500,admission.legacyResources.L.memory_bytes=10737418240", `\"L\":{\"cpu_milli\":4500,\"memory_bytes\":10737418240}`},
+		{"admission.legacyResources=null", `--admission-legacy-resources={}`},
+	} {
+		args := append([]string{}, base...)
+		if tc.value != "" {
+			args = append(args, "--set", tc.value)
+		}
+		out, err := exec.Command("helm", args...).CombinedOutput()
+		if err != nil || !strings.Contains(string(out), tc.want) {
+			t.Fatalf("legacy charges %q: %v, missing %s", tc.value, err, tc.want)
+		}
+	}
+	for _, bad := range []string{"L.cpu_milli=0", "L.cpu_milli=1000001", "L.memory_bytes=-1", "L.memory_bytes=1.5", "XXL.cpu_milli=1000", "L.memory_bytes=1125899906842625"} {
+		args := append(append([]string{}, base...), "--set", "admission.legacyResources."+bad)
+		if err := exec.Command("helm", args...).Run(); err == nil {
+			t.Fatalf("invalid charge accepted: %s", bad)
+		}
+	}
+}
