@@ -58,6 +58,7 @@ type Cache struct {
 	preFinalizeGate       func(context.Context) error
 	locks                 sync.Map
 	receiveLocks          sync.Map
+	policyRefreshes       sync.Map // cache path -> policyRefresh; guarded by repoLock
 }
 
 // New validates static configuration without contacting an upstream.

@@ -26,6 +26,15 @@ type Requirement struct {
 	Contract     *Contract
 }
 
+// PolicyRefreshUnavailable means upstream authority could not be read. The
+// scheduler may wait, but must never treat this as an absent requirement.
+type PolicyRefreshUnavailable struct{ Cause error }
+
+func (e *PolicyRefreshUnavailable) Error() string {
+	return fmt.Sprintf("refresh upstream trusted test policy: %v", e.Cause)
+}
+func (e *PolicyRefreshUnavailable) Unwrap() error { return e.Cause }
+
 // ResolveRequirement refuses removal or changes to published requirements,
 // except paired pins authorized against current operator recipes.
 // Read failures are errors, never evidence of absence.
@@ -45,7 +54,7 @@ func ResolveRequirement(ctx context.Context, git PolicyGit, repository, candidat
 	}
 	baselineSHA, baselineBody, baselineExists, err := git.ReadDefaultBlob(ctx, repository, ContractFile, MaxContractBytes)
 	if err != nil {
-		return Requirement{}, fmt.Errorf("refresh upstream trusted test policy: %w", err)
+		return Requirement{}, &PolicyRefreshUnavailable{Cause: err}
 	}
 	if (baselineSHA != "" && !gitoid.Valid(baselineSHA)) || (baselineExists && baselineSHA == "") {
 		return Requirement{}, errors.New("upstream trusted test policy has no exact commit identity")

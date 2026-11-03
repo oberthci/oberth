@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/oberthci/oberth/internal/boundedio"
 )
@@ -29,10 +30,11 @@ func (c *Cache) ReadOptionalBlob(ctx context.Context, input, sha, file string, l
 	return c.readOptionalBlobLocked(ctx, path, sha, file, limit)
 }
 
-// ReadDefaultBlob performs a successful fresh upstream fetch. Unlike Ensure,
-// it has no stale-cache fallback, and reads the private upstream tracking ref,
-// never the publicly pushable default branch in the local cache.
+// ReadDefaultBlob shares a recent successful upstream snapshot during a burst.
+// It has no stale-cache fallback after a failed refresh and reads only private
+// tracking refs. Publication callers use WithFreshPolicy to bypass the TTL.
 func (c *Cache) ReadDefaultBlob(ctx context.Context, input, file string, limit int) (string, []byte, bool, error) {
+	requested := time.Now()
 	if err := validatePolicyPath(file, limit); err != nil {
 		return "", nil, false, err
 	}
@@ -54,30 +56,39 @@ func (c *Cache) ReadDefaultBlob(ctx context.Context, input, file string, limit i
 	if err := c.configureRemote(ctx, input, path); err != nil {
 		return "", nil, false, err
 	}
-	if err := c.fetchTracking(ctx, path); err != nil {
-		return "", nil, false, fmt.Errorf("refresh required upstream policy: %w", err)
-	}
-	refs, err := c.capture(ctx, path, "for-each-ref", "--count=1", upstreamRefPrefix)
-	if err != nil {
-		return "", nil, false, err
-	}
-	if strings.TrimSpace(refs) == "" {
-		return "", nil, false, nil // Successful fetch proved a genuinely unborn baseline.
-	}
-	branch, err := c.discoverDefaultBranch(ctx, path)
-	if err != nil {
-		return "", nil, false, err
-	}
-	sha, err := c.capture(ctx, path, "rev-parse", "--verify", upstreamRefPrefix+"heads/"+branch+"^{commit}")
-	if err != nil {
-		return "", nil, false, fmt.Errorf("resolve required upstream policy: %w", err)
-	}
-	sha = strings.TrimSpace(sha)
-	if err := ValidateSHA(sha); err != nil {
+	sha, err := c.refreshPolicyLocked(ctx, input, path, requested)
+	if err != nil || sha == "" {
 		return "", nil, false, err
 	}
 	body, exists, err := c.readOptionalBlobLocked(ctx, path, sha, file, limit)
 	return sha, body, exists, err
+}
+
+func (c *Cache) fetchPolicyLocked(ctx context.Context, path string) (string, string, error) {
+	if err := c.fetchTracking(ctx, path); err != nil {
+		return "", "", fmt.Errorf("refresh required upstream policy: %w", err)
+	}
+	refs, err := c.capture(ctx, path, "for-each-ref", "--count=1", upstreamRefPrefix)
+	if err != nil {
+		return "", "", err
+	}
+	if strings.TrimSpace(refs) == "" {
+		return "", "", nil // Successful fetch proved a genuinely unborn baseline.
+	}
+	branch, err := c.discoverDefaultBranch(ctx, path)
+	if err != nil {
+		return "", "", err
+	}
+	ref := upstreamRefPrefix + "heads/" + branch
+	sha, err := c.capture(ctx, path, "rev-parse", "--verify", ref+"^{commit}")
+	if err != nil {
+		return "", "", fmt.Errorf("resolve required upstream policy: %w", err)
+	}
+	sha = strings.TrimSpace(sha)
+	if err := ValidateSHA(sha); err != nil {
+		return "", "", err
+	}
+	return ref, sha, nil
 }
 
 func validatePolicyRead(sha, file string, limit int) error {

@@ -10,7 +10,7 @@ import (
 
 func TestDefaultPolicyRequiresFreshUpstreamAndRegularBlob(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := WithFreshPolicy(context.Background())
 	repository := newTestRepository(t)
 	cache := newTestCache(t, repository.upstream)
 	if _, err := cache.Ensure(ctx, "example"); err != nil {
@@ -49,7 +49,7 @@ func TestDefaultPolicyRequiresFreshUpstreamAndRegularBlob(t *testing.T) {
 
 func TestDefaultPolicyIgnoresLocallyPushedMain(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := WithFreshPolicy(context.Background())
 	repository := newTestRepository(t)
 	sha := repository.commitFile(t, "required", "policy.yaml", "upstream policy\n")
 	cache := newTestCache(t, repository.upstream)
@@ -71,7 +71,7 @@ func TestDefaultPolicyIgnoresLocallyPushedMain(t *testing.T) {
 
 func TestDefaultPolicyProvesUnbornBaselineWithoutIgnoringCandidate(t *testing.T) {
 	t.Parallel()
-	ctx := context.Background()
+	ctx := WithFreshPolicy(context.Background())
 	root := t.TempDir()
 	upstream := filepath.Join(root, "empty.git")
 	runGit(t, "", "init", "--bare", "--initial-branch=main", upstream)

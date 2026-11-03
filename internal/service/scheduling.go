@@ -3,11 +3,13 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"k8s.io/utils/clock"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/store"
 )
 
 type SchedulingObserver interface {
@@ -60,6 +62,11 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 			result.Message = prefix + " " + result.Message
 		}
 	}()
+	if run.Reason == store.PolicyRefreshWaitingReason || strings.HasSuffix(run.Reason, "; "+store.PolicyRefreshWaitingReason) {
+		result.State = "waiting"
+		result.Message = store.PolicyRefreshWaitingReason + ": waiting for upstream trusted test policy; no publication is allowed."
+		return result
+	}
 	if isPendingCreate(run) {
 		result.State = "infra-pending"
 		result.Message = "Workflow creation outcome is uncertain; background cleanup is pending."
