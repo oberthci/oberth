@@ -137,6 +137,13 @@ func TestUpgradeRefusesLegacyResourcesBeforeMutation(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), "legacy-owned") || !strings.Contains(err.Error(), "upgrade refused") {
 					t.Fatalf("legacy owner not named before upgrade: %v", err)
 				}
+				if scenario == "completed preflight" {
+					for _, detail := range []string{"Completed preflight Workflows", "argo.workflowTTL", "default 1 hour", "current server"} {
+						if !strings.Contains(err.Error(), detail) {
+							t.Errorf("completed preflight refusal must explain %q: %v", detail, err)
+						}
+					}
+				}
 			}
 		})
 	}

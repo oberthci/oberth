@@ -14,6 +14,9 @@ pages across namespaces, because the historical backend could use a separate
 namespace, checking `oberth.ci/tier=vm-runner`, `oberth.ci/vm-spec` and
 `oberth.ci/vm-identity`. Unrelated objects do not block the upgrade. Completed
 or terminating objects still count until the API confirms their absence.
+Completed preflight Workflows are retained for `argo.workflowTTL` (default
+3600 seconds, or 1 hour); wait for TTL collection or deletion by the current
+server before retrying. A delayed TTL controller can extend that wait.
 API/permission/decoding failures are refusals, not empty inventories. An absent
 API group is distinguished through discovery from failure to list an advertised
 resource. The operator kubeconfig needs discovery and these read permissions;

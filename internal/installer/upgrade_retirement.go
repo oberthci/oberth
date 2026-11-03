@@ -96,7 +96,11 @@ func checkUpgradeLegacyResources(ctx context.Context, cfg UpgradeConfig, deps De
 				}
 				if len(names) != 0 {
 					slices.Sort(names)
-					return fmt.Errorf("upgrade refused: legacy executions still exist: %s; keep the current server running, stop new submissions, finish or cancel these runs and wait for confirmed resource deletion before retrying; see docs/retirement-upgrade.md", strings.Join(names, ", "))
+					retention := ""
+					if resource == "workflows" {
+						retention = " Completed preflight Workflows also count: wait for argo.workflowTTL collection (default 1 hour) or deletion by the current server."
+					}
+					return fmt.Errorf("upgrade refused: legacy executions still exist: %s; keep the current server running, stop new submissions, finish or cancel these runs and wait for confirmed resource deletion before retrying.%s See docs/retirement-upgrade.md", strings.Join(names, ", "), retention)
 				}
 				cursor = objects.GetContinue()
 				if cursor == "" {
