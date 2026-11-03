@@ -39,7 +39,7 @@ func requestUplinkTokenPolicy(ctx context.Context, socket, databasePath string) 
 	if err != nil {
 		return model.UplinkTokenPolicy{}, fmt.Errorf("read live uplink token policy: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		return model.UplinkTokenPolicy{}, fmt.Errorf("live uplink token policy unavailable: HTTP %d", response.StatusCode)
 	}

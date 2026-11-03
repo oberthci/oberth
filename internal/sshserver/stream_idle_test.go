@@ -2,10 +2,11 @@ package sshserver
 
 import (
 	"context"
-	"github.com/oberthci/oberth/internal/gitcache"
 	"io"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/gitcache"
 )
 
 type idleStreamGit struct {

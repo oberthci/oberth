@@ -2,8 +2,9 @@ package main
 
 import (
 	"context"
-	"github.com/oberthci/oberth/internal/model"
 	"net/http"
+
+	"github.com/oberthci/oberth/internal/model"
 )
 
 // newAdminGateServer serves the live daemon's private admin socket. Besides

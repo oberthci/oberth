@@ -32,7 +32,7 @@ func parseOperatorFlags(flags *flag.FlagSet, arguments []string) ([]string, bool
 		}
 		optionArgs = append(optionArgs, arg)
 		boolean, ok := f.Value.(interface{ IsBoolFlag() bool })
-		if !inline && !(ok && boolean.IsBoolFlag()) {
+		if !inline && (!ok || !boolean.IsBoolFlag()) {
 			if i+1 >= len(arguments) {
 				return nil, false, fmt.Errorf("%w: %s requires a value", errUsage, flagSpelling(name))
 			}

@@ -7,11 +7,12 @@ import (
 	"errors"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/pipeline"
-	corev1 "k8s.io/api/core/v1"
 )
 
 type resourceGrantAudit struct {

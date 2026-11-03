@@ -1291,10 +1291,7 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 	flags := flag.NewFlagSet("uplink add", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path (in-pod; requires the live admin daemon)")
-	defaultCertificate := "/etc/oberth/tls/tls.crt"
-	{
-		defaultCertificate = identityRoot + "/server/tls.crt"
-	}
+	defaultCertificate := identityRoot + "/server/tls.crt"
 	certificatePath := flags.String("tls-cert", defaultCertificate, "HTTPS certificate path (in-pod; requires the live admin daemon)")
 	ttl := flags.String("ttl", "", "bearer token lifetime (positive Go duration; default and maximum come from the live server)")
 	isAdmin := flags.Bool("admin", false, "Grant admin privileges (required for access_allow/access_revoke)")
@@ -1416,7 +1413,7 @@ func (tokens gatedAdminTokens) CreateTokenCredential(ctx context.Context, spec m
 	if err := tokens.Gate(ctx, "uplink.token.create"); err != nil {
 		return model.TokenCredential{}, err
 	}
-	return tokens.Store.CreateTokenCredentialWithPolicy(ctx, spec, tokens.Policy)
+	return tokens.CreateTokenCredentialWithPolicy(ctx, spec, tokens.Policy)
 }
 
 func (tokens gatedAdminTokens) ActivateTokenCredential(ctx context.Context, id string) (model.TokenCredential, error) {
@@ -1672,10 +1669,7 @@ func uplinkKeyFingerprint(source string, input io.Reader) (string, error) {
 
 // upstreamKeyDirectory is where the pod holds its upstream SSH identities.
 func upstreamKeyDirectory() string {
-	{
-		return identityRoot + "/upstream"
-	}
-	return "/etc/oberth/upstream-key"
+	return identityRoot + "/upstream"
 }
 
 // warnUplinkSharesUpstreamKey warns when an uplink is registered with the

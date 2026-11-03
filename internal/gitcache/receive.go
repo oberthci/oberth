@@ -489,14 +489,20 @@ func (c *Cache) readReservation(repo string) (receiveReservation, error) {
 	}
 	// Keep corrupt evidence in place. Bound the read before JSON decoding;
 	// a malformed record must not consume startup memory without a limit.
-	info, err := os.Lstat(path)
+	root, err := os.OpenRoot(c.outboxRoot)
+	if err != nil {
+		return receiveReservation{}, err
+	}
+	defer func() { _ = root.Close() }()
+	name := filepath.Base(path)
+	info, err := root.Lstat(name)
 	if err != nil {
 		return receiveReservation{}, err
 	}
 	if !info.Mode().IsRegular() || info.Size() > 8<<20 {
 		return receiveReservation{}, fmt.Errorf("%w: repository %s has an invalid outbox file", ErrCorruptReceiveReservation, repo)
 	}
-	file, err := os.Open(path) //nolint:gosec -- reservationPath proves containment.
+	file, err := root.Open(name)
 	if err != nil {
 		return receiveReservation{}, err
 	}

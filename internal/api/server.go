@@ -825,6 +825,7 @@ func writeJSON(writer http.ResponseWriter, status int, value any) {
 	}
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(status)
+	// #nosec G705 -- marshalCompatible uses json.Marshal with HTML escaping on every success path; the response is application/json.
 	_, _ = writer.Write(append(raw, '\n'))
 }
 

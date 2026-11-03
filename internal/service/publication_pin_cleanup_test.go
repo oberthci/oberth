@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/oberthci/oberth/internal/api"
 	"strings"
 	"testing"
+
+	"github.com/oberthci/oberth/internal/api"
 
 	"github.com/oberthci/oberth/internal/model"
 )
@@ -27,7 +28,7 @@ func TestAbandonPublicationReleasesExactPromotionPinAfterCommit(t *testing.T) {
 	f.scheduler.git = &promotionPinGit{controlGit: f.git, release: func(ctx context.Context, repo, target, sha string) error {
 		state, err := f.store.PublicationState(ctx, pub.ID)
 		if err != nil || state.Publication.Status != model.PublicationAbandoned {
-			return fmt.Errorf("cleanup before commit: %+v %v", state, err)
+			return fmt.Errorf("cleanup before commit: %+v %w", state, err)
 		}
 		upstream, err := f.store.Upstream(ctx, f.repo.UpstreamID)
 		if err != nil {

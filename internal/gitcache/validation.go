@@ -3,11 +3,12 @@ package gitcache
 import (
 	"errors"
 	"fmt"
-	"github.com/oberthci/oberth/internal/gitoid"
 	"net/url"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/oberthci/oberth/internal/gitoid"
 )
 
 var (

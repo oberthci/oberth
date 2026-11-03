@@ -49,7 +49,7 @@ func CreateUpstream(database *store.Store, ctx context.Context, spec model.Upstr
 	if err != nil {
 		return model.Upstream{}, err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	stamp := fixtureNow(fixture).UnixNano()
 	result, err := db.ExecContext(ctx, `INSERT INTO upstreams(name,kind,base_url,key_name,created_at,updated_at) VALUES(?,?,?,?,?,?)`, spec.Name, spec.Kind, spec.BaseURL, spec.KeyName, stamp, stamp)
 	if err != nil {
@@ -96,7 +96,7 @@ func LatestRunForRef(database *store.Store, ctx context.Context, repoID int64, r
 	if err != nil {
 		return model.Run{}, err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	var id string
 	if err = db.QueryRowContext(ctx, `SELECT id FROM runs WHERE repo_id=? AND ref=? ORDER BY queue_sequence DESC LIMIT 1`, repoID, ref).Scan(&id); err != nil {
 		return model.Run{}, fixtureNotFound(err)
@@ -111,7 +111,7 @@ func TokenCredentialByDigest(database *store.Store, ctx context.Context, digest 
 	if err != nil {
 		return model.TokenCredential{}, err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	var value model.TokenCredential
 	var created int64
 	var activated, used, revoked, expiry sql.NullInt64
@@ -137,7 +137,7 @@ func RevokeTokenCredential(database *store.Store, ctx context.Context, id string
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	var identity, fingerprint string
 	if err = db.QueryRowContext(ctx, `SELECT identity,fingerprint FROM uplinks WHERE token_credential_id=?`, id).Scan(&identity, &fingerprint); err != nil {
 		return fixtureNotFound(err)
@@ -153,7 +153,7 @@ func ReleaseIssueLock(database *store.Store, ctx context.Context, id int64, owne
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	var acquired int64
 	if err = db.QueryRowContext(ctx, `DELETE FROM issue_locks WHERE issue_id=? AND owner=? RETURNING acquired_at`, id, owner).Scan(&acquired); errors.Is(err, sql.ErrNoRows) {
 		return store.ErrLockNotOwned
@@ -171,7 +171,7 @@ func ConsumePromotionGrant(database *store.Store, ctx context.Context, id, promo
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	now := fixtureNow(fixture).UnixNano()
 	result, err := db.ExecContext(ctx, `UPDATE promotion_grants SET consumed_by=?,consumed_at=? WHERE id=? AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at>?`, promotionID, now, id, now)
 	if err != nil {

@@ -36,7 +36,7 @@ func (service *API) abandonPublication(ctx context.Context, actor api.Actor, raw
 		return api.PublicationAbandonResponse{}, fmt.Errorf("%w: publication ID and abandon reason are required", ErrInvalidInput)
 	}
 	if err := store.ValidateCancelReason(args.Reason); err != nil {
-		return api.PublicationAbandonResponse{}, fmt.Errorf("%w: %v", ErrInvalidInput, err)
+		return api.PublicationAbandonResponse{}, fmt.Errorf("%w: %w", ErrInvalidInput, err)
 	}
 	owner, ok := service.enqueues.(publicationAbandoner)
 	if !ok {

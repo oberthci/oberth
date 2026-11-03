@@ -315,7 +315,7 @@ func (scheduler *Scheduler) recoverTrustedWorkflowMismatch(ctx context.Context, 
 				journal := scheduler.store.(vmrunner.KVMJournal)
 				state, readErr := retryDatabase(ctx, "KVMPreflight", func(ctx context.Context) (vmrunner.KVMExecution, error) { return journal.KVMPreflight(ctx, run.ID) })
 				if readErr == nil && state.Cleaned {
-					if err := scheduler.finishInfrastructureFailure(ctx, run, repository, errors.New("Workflow spec mismatch; trusted cleanup confirmed absence")); err != nil {
+					if err := scheduler.finishInfrastructureFailure(ctx, run, repository, errors.New("trusted Workflow spec mismatch; cleanup confirmed absence")); err != nil {
 						return err
 					}
 					reservation.releaseAfterCleanup()

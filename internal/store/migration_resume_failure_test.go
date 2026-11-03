@@ -6,10 +6,11 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
-	"modernc.org/sqlite"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"modernc.org/sqlite"
 )
 
 type resumeFailDriver struct{ next atomic.Int32 }

@@ -2,6 +2,7 @@ package gitcache
 
 import (
 	"context"
+
 	"golang.org/x/sync/semaphore"
 )
 

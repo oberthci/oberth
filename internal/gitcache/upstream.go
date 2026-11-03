@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/oberthci/oberth/internal/boundedio"
 	"os"
 	"strings"
+
+	"github.com/oberthci/oberth/internal/boundedio"
 )
 
 // SyncBranch force-publishes an exact branch SHA and verifies the remote ref.

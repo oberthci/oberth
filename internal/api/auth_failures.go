@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -99,7 +100,7 @@ func (limiter *authFailureLimiter) checkLimit(peer string, failure bool, limit i
 func (server *Server) logAuthFailure(request *http.Request, reason string) {
 	// Fixed reasons and a parsed IP only: credentials, headers, URLs and
 	// backend error strings never enter authentication failure logs.
-	log.Printf("api: authentication failure: reason=%s peer=%s", reason, authPeer(request))
+	log.Printf("api: authentication failure: reason=%s peer=%s", strconv.Quote(reason), strconv.Quote(authPeer(request)))
 }
 
 func (server *Server) recordAuthFailure(writer http.ResponseWriter, request *http.Request, reason string) bool {

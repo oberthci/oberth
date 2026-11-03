@@ -3,9 +3,10 @@ package storetest
 import (
 	"context"
 	"encoding/json"
+	"time"
+
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
-	"time"
 )
 
 // PutHistoricalStepResult reconstructs retained evidence for read/legacy fixtures.
@@ -15,7 +16,7 @@ func PutHistoricalStepResult(database *store.Store, ctx context.Context, result 
 	if err != nil {
 		return model.StepResult{}, err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	var diagnostic any
 	if result.Termination != nil {
 		body, err := json.Marshal(result.Termination)

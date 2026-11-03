@@ -1,10 +1,11 @@
 package sshserver
 
 import (
-	"golang.org/x/crypto/ssh"
 	"io"
 	"sync"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 // Stream progress, rather than SSH keepalives or traffic on another channel,

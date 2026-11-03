@@ -3,8 +3,9 @@ package resourcesampler
 import (
 	"time"
 
-	"github.com/oberthci/oberth/internal/model"
 	corev1 "k8s.io/api/core/v1"
+
+	"github.com/oberthci/oberth/internal/model"
 )
 
 // Observe does not trust metric labels alone: UID, current container incarnation

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -196,6 +197,10 @@ func requestLiveAdminMutationGate(ctx context.Context, operation, databasePath s
 }
 
 func listenAdminSocket(ctx context.Context, path string) (net.Listener, error) {
+	uid := os.Geteuid()
+	if uid < 0 || uint64(uid) > math.MaxUint32 {
+		return nil, errors.New("daemon UID is outside the Unix credential range")
+	}
 	if path == defaultAdminSocket {
 		directory := filepath.Dir(path)
 		if err := os.Mkdir(directory, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
@@ -205,6 +210,7 @@ func listenAdminSocket(ctx context.Context, path string) (net.Listener, error) {
 		if err != nil || !info.IsDir() || !adminPathOwned(info) {
 			return nil, errors.New("admin socket directory must be owned by the daemon user and must not be a symlink")
 		}
+		// #nosec G302 -- This owner-only directory needs its execute bit for traversal; regular-file permission limits do not apply.
 		if err := os.Chmod(directory, 0o700); err != nil {
 			return nil, err
 		}
@@ -225,7 +231,7 @@ func listenAdminSocket(ctx context.Context, path string) (net.Listener, error) {
 		_ = removeStaleAdminSocket(path)
 		return nil, fmt.Errorf("restrict admin socket permissions: %w", err)
 	}
-	return &adminPeerListener{Listener: listener, uid: uint32(os.Geteuid())}, nil
+	return &adminPeerListener{Listener: listener, uid: uint32(uid)}, nil
 }
 
 func validateAdminSocket(path string) error {
@@ -256,7 +262,7 @@ func validAdminOperation(operation string) bool {
 	for _, prefix := range []string{"upstream.identity."} {
 		if suffix, ok := strings.CutPrefix(operation, prefix); ok && len(suffix) > 0 && len(suffix) <= 253 {
 			for _, c := range suffix {
-				if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '.') {
+				if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' && c != '.' {
 					return false
 				}
 			}
