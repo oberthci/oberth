@@ -4,6 +4,7 @@ package installer
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"net/http"
@@ -34,7 +35,7 @@ func TestSetupSecretStoreOpenBao(t *testing.T) {
 			if err := os.WriteFile(config, []byte(fmt.Sprintf("audit \"file\" \"oberth\" {\n  options { file_path = %q }\n}\n", filepath.Join(dir, "audit.log"))), 0600); err != nil {
 				t.Fatal(err)
 			}
-			rootToken, addr, cleanup := baoDevServer(t, config)
+			rootToken, addr, baoCA, cleanup := baoDevServerWithTLS(t, true, config)
 			defer cleanup()
 			// Use only the public certificate from a disposable TLS fixture as the
 			// cluster CA. No Kubernetes access or kubeconfig is needed.
@@ -52,6 +53,7 @@ func TestSetupSecretStoreOpenBao(t *testing.T) {
 				}
 			}
 			env = append(env, "BAO_ADDR="+addr, "VAULT_ADDR="+addr,
+				"BAO_CACERT="+baoCA, "VAULT_CACERT="+baoCA,
 				"KUBERNETES_SERVICE_HOST=127.0.0.1", "IN_CLUSTER_CA="+caPath)
 			run := func(token, program string, args ...string) ([]byte, error) {
 				t.Helper()
@@ -73,7 +75,7 @@ func TestSetupSecretStoreOpenBao(t *testing.T) {
 				}
 			}
 			setup := func(token string, flags ...string) ([]byte, error) {
-				args := []string{filepath.Join("../..", script), "--cli", baoPath, "--disable-transit"}
+				args := []string{filepath.Join("../..", script), "--cli", baoPath}
 				return run(token, "bash", append(args, flags...)...)
 			}
 			t.Run("fresh", func(t *testing.T) {
@@ -81,7 +83,7 @@ func TestSetupSecretStoreOpenBao(t *testing.T) {
 				if err != nil {
 					t.Fatalf("fresh setup: %v\n%s", err, out)
 				}
-				for _, want := range []string{"enabling Kubernetes auth at kubernetes/", "enabling KV v2 secrets mount at oberth/"} {
+				for _, want := range []string{"enabling Kubernetes auth at kubernetes/", "enabling KV v2 secrets mount at oberth/", "enabling Transit mount at oberth-transit/", "creating non-exportable Transit key trusted-plan-artifacts"} {
 					if !strings.Contains(string(out), want) {
 						t.Errorf("fresh setup omitted %q: %s", want, out)
 					}
@@ -93,40 +95,109 @@ func TestSetupSecretStoreOpenBao(t *testing.T) {
 			}
 			t.Run("existing", func(t *testing.T) {
 				out, err := setup(rootToken)
-				if err != nil || strings.Contains(string(out), "» enabling ") || strings.Contains(string(out), "» writing ") {
+				if err != nil || strings.Contains(string(out), "» enabling ") || strings.Contains(string(out), "» writing ") || strings.Contains(string(out), "» creating ") {
 					t.Fatalf("existing setup must be a no-op: %v\n%s", err, out)
 				}
 			})
-			// Permit writes but deny the preceding config read: an unsuccessful
-			// read must never authorize replacement, even with both force flags.
-			baoWritePolicy(t, addr, rootToken, "setup-denied-read", `
+			// Exercise the actual key, including encryption/decryption over verified TLS.
+			t.Run("transit", func(t *testing.T) {
+				out, err := run(rootToken, baoPath, "read", "-format=json", "oberth-transit/keys/trusted-plan-artifacts")
+				var key struct {
+					Data map[string]any `json:"data"`
+				}
+				if err != nil || json.Unmarshal(out, &key) != nil {
+					t.Fatalf("read Transit key: %v", err)
+				}
+				for field, want := range map[string]any{
+					"type": "aes256-gcm96", "derived": false, "exportable": false,
+					"allow_plaintext_backup": false, "supports_encryption": true, "supports_decryption": true,
+				} {
+					if key.Data[field] != want {
+						t.Errorf("Transit key %s = %v, want %v", field, key.Data[field], want)
+					}
+				}
+				const plaintext = "b2JlcnRoLWZpeHR1cmU="
+				out, err = run(rootToken, baoPath, "write", "-field=ciphertext", "oberth-transit/encrypt/trusted-plan-artifacts", "plaintext="+plaintext)
+				if err != nil {
+					t.Fatalf("Transit encrypt: %v", err)
+				}
+				out, err = run(rootToken, baoPath, "write", "-field=plaintext", "oberth-transit/decrypt/trusted-plan-artifacts", "ciphertext="+strings.TrimSpace(string(out)))
+				if err != nil || strings.TrimSpace(string(out)) != plaintext {
+					t.Fatalf("Transit round trip failed: %v", err)
+				}
+			})
+			// Compare the stored data, excluding changing response metadata.
+			snapshot := func(path string) string {
+				t.Helper()
+				out, err := run(rootToken, baoPath, "read", "-format=json", path)
+				var response struct {
+					Data map[string]any `json:"data"`
+				}
+				if err != nil || json.Unmarshal(out, &response) != nil || response.Data == nil {
+					t.Fatalf("snapshot %s failed: %v", path, err)
+				}
+				data, err := json.Marshal(response.Data)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return string(data)
+			}
+			// Permit updates but deny the preceding read. Neither force flag may
+			// turn a failed auth-config or policy read into a replacement write.
+			for _, denied := range []struct{ name, path, diagnostic string }{
+				{"auth-config", "auth/kubernetes/config", "reading auth/kubernetes/config"},
+				{"policy", "sys/policies/acl/oberth-ci", "reading policy oberth-ci"},
+			} {
+				policy := `
 path "sys/audit" { capabilities = ["read", "sudo"] }
 path "sys/auth" { capabilities = ["read"] }
 path "sys/mounts" { capabilities = ["read"] }
 path "auth/token/lookup-self" { capabilities = ["read"] }
-path "auth/kubernetes/config" { capabilities = ["update"] }
-`)
-			const deniedToken = "oberth-setup-denied-read-fixture"
-			status, _ := baoHTTP(t, "POST", addr, "/v1/auth/token/create", rootToken,
-				strings.NewReader(`{"id":"`+deniedToken+`","policies":["setup-denied-read"],"no_default_policy":true}`))
-			if status != http.StatusOK {
-				t.Fatalf("create restricted fixture identity: status %d", status)
-			}
-			for _, force := range []bool{false, true} {
-				t.Run(fmt.Sprintf("existing-denied-read-force-%t", force), func(t *testing.T) {
-					flags := []string{"--kubernetes-host", "https://other-cluster.example"}
-					if force {
-						flags = append(flags, "--force", "--force-auth-config")
-					}
-					out, err := setup(deniedToken, flags...)
-					if err == nil || !strings.Contains(string(out), "reading auth/kubernetes/config") || !strings.Contains(string(out), "Code: 403") || strings.Contains(string(out), "writing auth/kubernetes/config") {
-						t.Fatalf("denied read must stop setup before write: %v\n%s", err, out)
-					}
-					out, err = run(rootToken, baoPath, "read", "-field=kubernetes_host", "auth/kubernetes/config")
-					if err != nil || strings.TrimSpace(string(out)) != "https://kubernetes.default.svc" {
-						t.Fatalf("existing cluster config changed: %v\n%s", err, out)
-					}
-				})
+path "auth/kubernetes/config" { capabilities = ["read", "update"] }
+path "sys/mounts/oberth" { capabilities = ["read"] }
+path "oberth-transit/keys/trusted-plan-artifacts" { capabilities = ["read"] }
+path "sys/policies/acl/oberth-ci" { capabilities = ["read", "update"] }
+path "auth/kubernetes/role/oberth-ci" { capabilities = ["read", "update"] }
+`
+				policy = strings.Replace(policy,
+					fmt.Sprintf("path %q { capabilities = [\"read\", \"update\"] }", denied.path),
+					fmt.Sprintf("path %q { capabilities = [\"update\"] }", denied.path), 1)
+				policyPath := filepath.Join(dir, "denied-read.hcl")
+				if err := os.WriteFile(policyPath, []byte(policy), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := run(rootToken, baoPath, "policy", "write", "setup-denied-read", policyPath); err != nil {
+					t.Fatalf("write fixture policy: %v", err)
+				}
+				deniedToken := "oberth-setup-denied-" + denied.name + "-fixture"
+				if _, err := run(rootToken, baoPath, "token", "create", "-id="+deniedToken, "-policy=setup-denied-read", "-no-default-policy"); err != nil {
+					t.Fatalf("create restricted fixture identity: %v", err)
+				}
+				for _, force := range []bool{false, true} {
+					t.Run(fmt.Sprintf("existing-denied-%s-read-force-%t", denied.name, force), func(t *testing.T) {
+						paths := []string{"sys/policies/acl/oberth-ci", "auth/kubernetes/role/oberth-ci", "auth/kubernetes/config"}
+						before := make(map[string]string)
+						for _, path := range paths {
+							before[path] = snapshot(path)
+						}
+						var flags []string
+						if denied.name == "auth-config" {
+							flags = append(flags, "--kubernetes-host", "https://other-cluster.example")
+						}
+						if force {
+							flags = append(flags, "--force", "--force-auth-config")
+						}
+						out, err := setup(deniedToken, flags...)
+						if err == nil || !strings.Contains(string(out), denied.diagnostic) || !strings.Contains(string(out), "Code: 403") {
+							t.Fatalf("denied read must stop setup: %v\n%s", err, out)
+						}
+						for _, path := range paths {
+							if snapshot(path) != before[path] {
+								t.Errorf("failed read changed %s", path)
+							}
+						}
+					})
+				}
 			}
 		})
 	}
