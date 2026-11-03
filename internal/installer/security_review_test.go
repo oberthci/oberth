@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -108,5 +109,21 @@ func TestDefaultChildCommandsDoNotInheritAdminTokens(t *testing.T) {
 	out, err := DefaultRunCommand(t.Context(), nil, "sh", "-c", `test -z "$BAO_TOKEN" && test -z "$VAULT_TOKEN"`)
 	if err != nil {
 		t.Fatalf("child inherited token: %v (%d output bytes)", err, len(out))
+	}
+}
+
+func TestFailedOpenBaoInitClearsBothCapturedStreams(t *testing.T) {
+	combined := []byte(`{"root_token":"fixture-root","unseal_keys_b64":["fixture-key"]}`)
+	stderr := []byte("fixture-sensitive-stderr")
+	childErr := &exec.ExitError{Stderr: stderr}
+	client := openBaoExec{run: func(context.Context, []byte, string, ...string) ([]byte, error) {
+		return combined, errors.Join(errors.New("command failed"), childErr)
+	}}
+	result, err := client.operatorInit(t.Context())
+	if err == nil || result.RootToken != "fixture-root" || len(result.UnsealKeysB64) != 1 {
+		t.Fatalf("failed init lost parsed credentials: err=%v", err)
+	}
+	if !bytes.Equal(combined, make([]byte, len(combined))) || !bytes.Equal(stderr, make([]byte, len(stderr))) {
+		t.Fatal("failed init retained captured credential bytes")
 	}
 }

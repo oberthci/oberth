@@ -12,7 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
+	"os/exec"
 	"regexp"
 	"sort"
 	"strings"
@@ -147,6 +147,10 @@ func (b openBaoExec) status(ctx context.Context) (baoStatus, error) {
 func (b openBaoExec) operatorInit(ctx context.Context) (baoInitResult, error) {
 	out, err := b.bao(ctx, nil, "operator", "init", "-key-shares=1", "-key-threshold=1", "-format=json")
 	defer clear(out)
+	var exitError *exec.ExitError
+	if errors.As(err, &exitError) {
+		defer clear(exitError.Stderr)
+	}
 	var result baoInitResult
 	parseErr := parseBaoJSON(out, &result)
 	if err != nil {
