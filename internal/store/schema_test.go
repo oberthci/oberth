@@ -29,8 +29,8 @@ func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	if err := validateMigrations(migrations, latestMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
-	if latestMigrationVersion != 53 {
-		t.Fatalf("latest migration version = %d, want 53", latestMigrationVersion)
+	if latestMigrationVersion != 54 {
+		t.Fatalf("latest migration version = %d, want 54", latestMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)
@@ -1045,6 +1045,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"promotion_grants_guard_update",
 		"promotion_grants_no_delete",
 		"promotion_train_identity_immutable",
+		"promotions_branch_ci_immutable",
 		"promotions_guard_update",
 		"promotions_no_delete",
 		"publication_policy_wait_cleanup",
@@ -1096,7 +1097,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"repositories":              {"id", "name", "upstream_id", "default_branch", "created_at", "updated_at"},
 		"runs":                      {"queue_sequence", "id", "repo_id", "ref_kind", "ref", "sha", "actor", "release", "trigger", "phase", "job_name", "tested_sha", "base_sha", "failed_burn", "failed_step", "error", "status", "reason", "superseded_by", "queued_at", "started_at", "finished_at", "created_at", "updated_at", "credentialed", "concurrency_group", "admission_sequence", "schedule_entry"},
 		"step_results":              {"run_id", "burn", "step", "ordinal", "status", "exit_code", "log_start", "log_end", "started_at", "finished_at", "recorded_at", "declared_size", "max_rss_bytes", "user_cpu_ns", "system_cpu_ns", "termination_json", "memory_peak_bytes"},
-		"promotions":                {"sequence", "id", "repo_id", "source_branch", "source_sha", "target_ref", "previous_sha", "result_sha", "actor", "status", "run_id", "error", "created_at", "updated_at", "grant_id", "train_json", "train_key"},
+		"promotions":                {"sequence", "id", "repo_id", "source_branch", "source_sha", "target_ref", "previous_sha", "result_sha", "actor", "status", "run_id", "error", "created_at", "updated_at", "grant_id", "train_json", "train_key", "branch_ci_skipped"},
 		"promotion_train_grants":    {"promotion_id", "grant_id", "included"},
 		"promotion_grants":          {"id", "repo_id", "source_sha", "target_ref", "issuer", "issuer_fingerprint", "note", "created_at", "expires_at", "revoked_by", "revoked_at", "consumed_by", "consumed_at"},
 		"issues":                    {"id", "repo_id", "kind", "branch", "title", "body", "state", "occurrences", "created_at", "updated_at", "closed_at", "ci_origin", "ci_work_sequence", "ci_work_id", "scope_upstream_id", "revision", "work_status"},

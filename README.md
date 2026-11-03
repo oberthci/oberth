@@ -26,9 +26,11 @@ Website: [oberth.ci](https://oberth.ci)
 - **Issues** — a red run files exactly one issue per repository and branch;
   repeated reds update it, green auto-closes it. Five-minute uplink-owned
   locks keep two agents off the same issue.
-- **Promotion** — `promote` green-gates an exact SHA, merges with the target
-  locally, runs CI on the merged tree when the target diverged, and pushes
-  without force. A moved target fails the promotion; records are append-only.
+- **Promotion** — `promote` accepts a green branch SHA or an authorized
+  [parked SHA](docs/park-promotion.md) and merges with the target locally.
+  Parked sources always run merged-tree CI; green branch sources rerun CI when
+  needed. The push never forces. A moved target fails the promotion; records
+  are append-only.
 - **Release** — a tag runs the release burn only if its commit is reachable
   from the default branch, with exactly the secrets the repository declares,
   intersected with the administrator allowlist. After every burn is green,
@@ -170,9 +172,9 @@ MCP client (full walkthrough in [docs/mcp-setup.md](docs/mcp-setup.md)):
    branch's single CI issue, without locking it. Other branch runs and promotions
    file no CI issue; tag/release filing is not supported. Nothing lives only on
    the box.
-4. **Promote** — `promote <sha> <branch>` verifies the SHA is green, merges
-   locally, proves the merged tree when the target diverged, and pushes
-   without force.
+4. **Promote** — `promote <sha> <branch>` verifies a green branch SHA or
+   authorizes a parked SHA, merges locally, proves the merged tree for parked
+   sources or a divergent target, and pushes without force.
 5. **Release** — a tag reachable from the default branch runs the release
    Workflow. The presence of declared secret-store paths in the
    `oberth.ci/secret-paths` annotation selects the credentialed
@@ -348,7 +350,7 @@ List it with `oberth mcp tools`; available operations are:
 | `run_logs` | Return one exact burn/step log by full run ID or unique hexadecimal prefix (at least 8 characters), optionally filtered server-side. Active steps without retained output return an actionable pending error. Log discovery/filtering scan at most 4 MiB each per call and stop head pages early on limit. total_scanned_bytes includes both phases; scan_limit_bytes is the aggregate cap (4 MiB terminal, 8 MiB active). Pattern scans allow one concurrent call per bearer token and two globally; waiting shares the 10-second read budget. When has_more is true, continue with next_byte_offset as byte_offset, retaining tail/pattern/context and resetting offset to zero. Counts are lower bounds unless scan_complete is true; bytes is exact only when bytes_exact is true. withheld_bytes/withheld_lines report omitted data. Lines above 64 KiB are omitted and counted. |
 | `wait` | Long-poll until a SHA or exact run reaches a terminal state; timeout returns still-running cleanly. Timeout defaults to 600 seconds and cannot exceed 600; larger values are rejected. The CLI allows at least 60 seconds, or the tool timeout plus 30 seconds, unless --timeout overrides its client deadline. Pass id alone to wait for one run by full ID or unique prefix of at least 8 hex characters. When trigger is set, waits for a run with that trigger (e.g. 'release' for a tag-push run). |
 | `sync` | Park the exact SHA's WIP branch upstream without a green gate; this is not completion or promotion evidence. Rejects promotion, release, plan, and apply runs. When the SHA has branch-trigger runs on multiple distinct branches, the explicit branch argument is required. |
-| `promote` | Green-gate and publish without force. Provide sha for one source, or 1..32 ordered sources for a merge train: all must be exactly tested green branch commits. Trains wait in the existing target queue, merge onto its current head and run CI once before publishing. Conflicts name source and paths; skip_conflicting drops them and records the reason. Example: {"repo":"codeberg/acme/widgets","branch":"main","sources":[{"sha":"1111111111111111111111111111111111111111"},{"sha":"2222222222222222222222222222222222222222"},{"sha":"3333333333333333333333333333333333333333"}]} |
+| `promote` | Green-gate and publish without force. Provide sha for one source, or 1..32 ordered sources for a merge train: sources must be exactly tested green branch commits or authorized park refs. Parked sources always run full merged-tree CI, with skipped branch CI recorded. Trains wait in the existing target queue, merge onto its current head and run CI once before publishing. Conflicts name source and paths; skip_conflicting drops them and records the reason. Example: {"repo":"codeberg/acme/widgets","branch":"main","sources":[{"sha":"1111111111111111111111111111111111111111"},{"sha":"2222222222222222222222222222222222222222"},{"sha":"3333333333333333333333333333333333333333"}]} |
 | `promotion_list` | Recover durable promotion IDs by exact repository/source SHA/status. Read-only, newest admission first; pass next_before (or next_cursor for a scoped uplink) as before for older records. Status comes from the committed promotion row, as in promote_status; remote ref equality alone never marks a pending record passed. |
 | `promote_status` | Wait for an append-only promotion record to become terminal. A failed or interrupted promotion that was retried names its successor in retried_as. Timeout defaults to 600 seconds and cannot exceed 600; larger values are rejected. The CLI allows at least 60 seconds, or the tool timeout plus 30 seconds, unless --timeout overrides its client deadline. |
 | `promote_retry` | Retry a failed or interrupted promotion: a new promotion of the same repository, source SHA and target, merged onto the target's current head and re-tested like promote. After a transient push-only failure, an unchanged target reuses the exact tested SHA without repeating CI. Same authorization as promote; a grant is consumed only by a delivered promotion, so the original grant authorizes the retry. Refused while a promotion of the same tuple is pending or delivered, or when the source SHA's newest run is not green. Audited as promotion.retry. |

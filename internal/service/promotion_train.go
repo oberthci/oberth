@@ -31,16 +31,33 @@ type promotionTrainPlanner interface {
 	PlanPromotionTrain(context.Context, string, string, string, *model.PromotionTrain) (model.Promotion, error)
 }
 
-// checkPromotionSource is shared by single-source, train and retry admission.
-// A future source policy belongs here so every promotion form applies it.
-func checkPromotionSource(repository model.Repository, candidate model.Run) error {
+// checkPromotionSource applies the same policy to single sources, trains and retries.
+func (service *API) checkPromotionSource(ctx context.Context, repository model.Repository, candidate model.Run, target string) (bool, bool, error) {
 	if repository.ArchivedAt != nil {
-		return store.ErrRepositoryArchived
+		return false, false, store.ErrRepositoryArchived
 	}
-	if candidate.RefKind != model.RefBranch || candidate.Status != model.RunPassed || !sameOID(candidate.TestedSHA, candidate.SHA) {
-		return refuse(ErrInvalidInput, "promotion source must be the exactly tested green branch commit")
+	if greenBranchCandidate(candidate) {
+		return false, false, nil
 	}
-	return nil
+	policy, err := readPromotionPolicy(ctx, service.git, service.cacheInputFor(ctx, repository))
+	if err != nil {
+		return false, false, err
+	}
+	resolver, ok := service.git.(parkSourceResolver)
+	if !ok {
+		return false, false, refuse(ErrInvalidInput, "promotion source must be the exactly tested green branch commit")
+	}
+	ref, err := resolver.ParkSource(ctx, service.cacheInputFor(ctx, repository), candidate.SHA, policy.ParkRefPrefix)
+	if err != nil {
+		return false, false, err
+	}
+	if ref == "" || !policy.parks(ref) || ref == repository.DefaultBranch {
+		return false, false, refuse(ErrInvalidInput, "promotion source must be the exactly tested green branch commit")
+	}
+	if policy.requiresBranchCI(target) {
+		return false, false, refuse(ErrForbidden, "target policy requires branch CI")
+	}
+	return true, policy.AllowWithoutBranchCI, nil
 }
 
 func (service *API) promoteTrain(ctx context.Context, actor api.Actor, args promotionArguments) (model.Promotion, error) {
@@ -68,7 +85,7 @@ func (service *API) promoteTrain(ctx context.Context, actor api.Actor, args prom
 			return model.Promotion{}, refuse(ErrInvalidInput, "promotion requires a full SHA for each source")
 		}
 	}
-	repository, _, err := service.resolveRun(ctx, args.Repo, args.Sources[0].SHA)
+	repository, _, err := service.resolvePromotionSource(ctx, args.Repo, args.Sources[0].SHA)
 	if err != nil {
 		return model.Promotion{}, err
 	}
@@ -83,7 +100,7 @@ func (service *API) promoteTrain(ctx context.Context, actor api.Actor, args prom
 	return service.planOrQueuePromotion(ctx, actor, repository, candidate, args.Branch, promotion, requestedPriority(actor, args.PriorityRequest))
 }
 
-func (service *API) resolvePromotionTrainSources(ctx context.Context, repository model.Repository, train *model.PromotionTrain) ([]model.Run, error) {
+func (service *API) resolvePromotionTrainSources(ctx context.Context, repository model.Repository, train *model.PromotionTrain, target string) ([]model.Run, error) {
 	if train == nil || len(train.Sources) == 0 || len(train.Sources) > model.MaxPromotionSources {
 		return nil, refuse(ErrInvalidInput, "promotion train requires 1..32 sources")
 	}
@@ -95,9 +112,9 @@ func (service *API) resolvePromotionTrainSources(ctx context.Context, repository
 			return nil, fmt.Errorf("%w: source %d requires a unique full SHA", ErrInvalidInput, i+1)
 		}
 		seen[key] = true
-		candidate, err := service.runs.ResolveRun(ctx, repository.ID, source.SHA)
+		_, candidate, err := service.resolvePromotionSource(ctx, service.cacheInputFor(ctx, repository), source.SHA)
 		if err == nil {
-			err = checkPromotionSource(repository, candidate)
+			_, _, err = service.checkPromotionSource(ctx, repository, candidate, target)
 		}
 		if err == nil && (!sameOID(candidate.SHA, source.SHA) || source.Ref != "" && strings.TrimPrefix(source.Ref, "refs/heads/") != strings.TrimPrefix(candidate.Ref, "refs/heads/")) {
 			err = refuse(ErrInvalidInput, "source SHA and ref must match the tested branch")
@@ -111,20 +128,26 @@ func (service *API) resolvePromotionTrainSources(ctx context.Context, repository
 }
 
 func (service *API) admitPromotionTrain(ctx context.Context, actor api.Actor, repository model.Repository, input *model.PromotionTrain, target, retryOf, mode string) (model.Run, model.Promotion, error) {
-	candidates, err := service.resolvePromotionTrainSources(ctx, repository, input)
+	candidates, err := service.resolvePromotionTrainSources(ctx, repository, input, target)
 	if err != nil {
 		return model.Run{}, model.Promotion{}, err
 	}
 	train := &model.PromotionTrain{SkipConflicting: input.SkipConflicting}
+	branchCISkipped := false
 	for i, candidate := range candidates {
-		grantID, err := service.promotionSourceGrant(ctx, actor, repository, candidate, target, retryOf, mode, i)
+		skipped, policyOptIn, err := service.checkPromotionSource(ctx, repository, candidate, target)
+		if err != nil {
+			return model.Run{}, model.Promotion{}, err
+		}
+		branchCISkipped = branchCISkipped || skipped
+		grantID, err := service.promotionSourceGrant(ctx, actor, repository, candidate, target, retryOf, mode, i, policyOptIn)
 		if err != nil {
 			return model.Run{}, model.Promotion{}, fmt.Errorf("promotion source %d (%s): %w", i+1, candidate.SHA, err)
 		}
 		train.Sources = append(train.Sources, model.PromotionSource{SHA: candidate.SHA, Ref: candidate.Ref, GrantID: grantID})
 	}
 	first := train.Sources[0]
-	promotion, err := service.promotions.AppendPromotion(ctx, model.PromotionSpec{RepoID: repository.ID, SourceBranch: first.Ref, SourceSHA: first.SHA, TargetRef: target, Actor: actor.Identity, GrantID: first.GrantID, RetryOf: retryOf, RetryMode: mode, Train: train})
+	promotion, err := service.promotions.AppendPromotion(ctx, model.PromotionSpec{RepoID: repository.ID, SourceBranch: first.Ref, SourceSHA: first.SHA, TargetRef: target, Actor: actor.Identity, GrantID: first.GrantID, RetryOf: retryOf, RetryMode: mode, Train: train, BranchCISkipped: branchCISkipped})
 	return candidates[0], promotion, err
 }
 
@@ -139,7 +162,7 @@ func (promotions scopedPromotions) PlanPromotionTrain(ctx context.Context, id, p
 	return planner.PlanPromotionTrain(ctx, id, previous, result, train)
 }
 
-func (service *API) promotionSourceGrant(ctx context.Context, actor api.Actor, repository model.Repository, candidate model.Run, target, retryOf, mode string, sourceIndex int) (string, error) {
+func (service *API) promotionSourceGrant(ctx context.Context, actor api.Actor, repository model.Repository, candidate model.Run, target, retryOf, mode string, sourceIndex int, policyOptIn bool) (string, error) {
 	var grantID string
 	if retryOf != "" && mode == model.PromotionRetryAuto {
 		original, err := service.promotions.Promotion(ctx, retryOf)
@@ -153,10 +176,10 @@ func (service *API) promotionSourceGrant(ctx context.Context, actor api.Actor, r
 			}
 			grantID = original.Train.Sources[sourceIndex].GrantID
 		}
-		if grantID == "" && !actor.Admin {
+		if grantID == "" && !actor.Admin && !policyOptIn {
 			return "", refuse(ErrForbidden, "automatic promotion retry lost its original authority")
 		}
-	} else if !actor.Admin {
+	} else if !actor.Admin && !policyOptIn {
 		if service.promotionGrants == nil {
 			return "", refuse(ErrForbidden, "promote requires an admin uplink or a promotion grant")
 		}

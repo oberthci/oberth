@@ -61,7 +61,7 @@ func (c *Cache) ReadDefaultBlob(ctx context.Context, input, file string, limit i
 		}
 	}()
 	if !c.isBare(ctx, path) {
-		return "", nil, false, errors.New("policy repository is not cached")
+		return "", nil, false, ErrPolicyRepositoryNotCached
 	}
 	if err := c.checkRepositoryActive(ctx, input); err != nil {
 		return "", nil, false, err

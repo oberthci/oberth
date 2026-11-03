@@ -37,7 +37,11 @@ func (service *API) promoteRetry(ctx context.Context, actor api.Actor, id string
 		return api.PromoteRetryResponse{}, fmt.Errorf("%w: promotion ID is required", ErrInvalidInput)
 	}
 	if !actor.Admin && service.promotionGrants == nil {
-		return api.PromoteRetryResponse{}, refuse(ErrForbidden, "promote_retry requires an admin uplink or a promotion grant")
+		_, policyOK := service.git.(promotionPolicyReader)
+		_, parkOK := service.git.(parkSourceResolver)
+		if !policyOK || !parkOK {
+			return api.PromoteRetryResponse{}, refuse(ErrForbidden, "promote_retry requires an admin uplink or a promotion grant")
+		}
 	}
 	if service.git == nil || service.promotions == nil || service.promotionRuns == nil || service.enqueues == nil || service.auditor == nil {
 		return api.PromoteRetryResponse{}, refuse(ErrUnavailable, "promotion")
@@ -87,11 +91,11 @@ func (service *API) admitPromotionRetry(ctx context.Context, actor api.Actor, fa
 		candidate, promotion, err := service.admitPromotionTrain(ctx, actor, repository, failed.Train, failed.TargetRef, failed.ID, mode)
 		return repository, candidate, promotion, err
 	}
-	candidate, err := service.runs.ResolveRun(ctx, repository.ID, failed.SourceSHA)
+	_, candidate, err := service.resolvePromotionSource(ctx, service.cacheInputFor(ctx, repository), failed.SourceSHA)
 	if err != nil {
 		return model.Repository{}, model.Run{}, model.Promotion{}, fmt.Errorf("resolve promotion source %s: %w", failed.SourceSHA, err)
 	}
-	if !sameOID(candidate.SHA, failed.SourceSHA) {
+	if !sameOID(candidate.SHA, failed.SourceSHA) || (!failed.BranchCISkipped && !greenBranchCandidate(candidate)) {
 		return model.Repository{}, model.Run{}, model.Promotion{}, fmt.Errorf("%w: the newest run for %s is %s (%s), not green; rerun it before retrying promotion %s",
 			ErrInvalidInput, failed.SourceSHA, candidate.ID, candidate.Status, failed.ID)
 	}
@@ -155,7 +159,7 @@ func (service *API) currentPromotionAuthority(ctx context.Context, failed model.
 			return api.Actor{}, fmt.Errorf("%w: uplinks named %s disagree on scope", ErrForbidden, failed.Actor)
 		}
 	}
-	if failed.GrantID == "" && !actor.Admin {
+	if failed.GrantID == "" && !actor.Admin && !failed.BranchCISkipped {
 		return api.Actor{}, fmt.Errorf("%w: uplink %s promoted %s as an admin and is no longer one", ErrForbidden, failed.Actor, failed.ID)
 	}
 	if failed.GrantID != "" {

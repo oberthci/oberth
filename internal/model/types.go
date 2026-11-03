@@ -402,22 +402,23 @@ func (s PromotionStatus) Valid() bool {
 func (s PromotionStatus) Terminal() bool { return s.Valid() && s != PromotionPending }
 
 type Promotion struct {
-	Train        *PromotionTrain `json:"train,omitempty"`
-	ID           string
-	Sequence     int64
-	RepoID       int64
-	SourceBranch string
-	SourceSHA    string
-	TargetRef    string
-	PreviousSHA  string
-	ResultSHA    string
-	Actor        string
-	Status       PromotionStatus
-	RunID        string
-	GrantID      string
-	Error        string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	BranchCISkipped bool
+	Train           *PromotionTrain `json:"train,omitempty"`
+	ID              string
+	Sequence        int64
+	RepoID          int64
+	SourceBranch    string
+	SourceSHA       string
+	TargetRef       string
+	PreviousSHA     string
+	ResultSHA       string
+	Actor           string
+	Status          PromotionStatus
+	RunID           string
+	GrantID         string
+	Error           string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 // PromotionListFilter uses exact scope filters and an exclusive sequence cursor.
@@ -438,15 +439,16 @@ type PromotionPage struct {
 }
 
 type PromotionSpec struct {
-	Train        *PromotionTrain
-	RepoID       int64
-	SourceBranch string
-	SourceSHA    string
-	TargetRef    string
-	PreviousSHA  string
-	ResultSHA    string
-	Actor        string
-	GrantID      string
+	BranchCISkipped bool
+	Train           *PromotionTrain
+	RepoID          int64
+	SourceBranch    string
+	SourceSHA       string
+	TargetRef       string
+	PreviousSHA     string
+	ResultSHA       string
+	Actor           string
+	GrantID         string
 	// RetryOf names the failed or interrupted promotion this one re-runs
 	// (#1097): the same repository, source SHA and target, merged afresh onto
 	// the target's current head and re-tested. Empty for a fresh promote.

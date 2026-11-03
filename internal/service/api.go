@@ -1689,6 +1689,12 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 	if run.Status == model.RunRunning && (run.Reason == store.PolicyRefreshWaitingReason || strings.HasSuffix(run.Reason, "; "+store.PolicyRefreshWaitingReason)) {
 		visible.DisplayReason = store.PolicyRefreshWaitingReason
 	}
+	if run.Trigger == "promotion" && strings.Contains(run.Reason, "promoted without branch CI") {
+		if visible.DisplayReason != "" {
+			visible.DisplayReason += "; "
+		}
+		visible.DisplayReason += "promoted without branch CI"
+	}
 	return visible
 }
 
@@ -2385,11 +2391,14 @@ func (service *API) sync(ctx context.Context, actor api.Actor, repositoryName, s
 }
 
 func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName, selector, target string, priority ...model.PriorityRequest) (result model.Promotion, resultErr error) {
-	// Fast-path rejection: a non-admin uplink without grant capability is
-	// rejected before any state is read, preserving the original behavior and
-	// the TestPromoteRejectsNonAdmin contract.
+	// Without either grant or repository-policy capability, only admins
+	// can request promotion.
 	if !actor.Admin && service.promotionGrants == nil {
-		return model.Promotion{}, refuse(ErrForbidden, "promote requires an admin uplink; mint one with: oberth uplink add --admin - <identity>@<host> < key.pub")
+		_, policyOK := service.git.(promotionPolicyReader)
+		_, parkOK := service.git.(parkSourceResolver)
+		if !policyOK || !parkOK {
+			return model.Promotion{}, refuse(ErrForbidden, "promote requires an admin uplink; mint one with: oberth uplink add --admin - <identity>@<host> < key.pub")
+		}
 	}
 	if service.git == nil || service.promotions == nil || service.promotionRuns == nil || service.enqueues == nil || service.auditor == nil {
 		return model.Promotion{}, refuse(ErrUnavailable, "promotion")
@@ -2400,7 +2409,7 @@ func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName
 	if !validOID(selector) {
 		return model.Promotion{}, refuse(ErrInvalidInput, "promotion requires a full SHA")
 	}
-	repository, candidate, err := service.resolveRun(ctx, repositoryName, selector)
+	repository, candidate, err := service.resolvePromotionSource(ctx, repositoryName, selector)
 	if err != nil {
 		return model.Promotion{}, err
 	}
@@ -2411,27 +2420,28 @@ func (service *API) promote(ctx context.Context, actor api.Actor, repositoryName
 	return service.planOrQueuePromotion(ctx, actor, repository, candidate, target, promotion, priority...)
 }
 
-// admitPromotion authorizes and durably admits one promotion of a green
-// candidate. Admin uplinks promote directly (the grant ID stays empty,
-// recorded as "direct" authority in the audit chain). Non-admin uplinks must
-// present a matching unexpired, unrevoked, unconsumed grant for the exact
+// admitPromotion authorizes and durably admits a green branch candidate or
+// an authorized parked source. Admins act directly; trusted repository opt-in
+// also authorizes a non-admin parked source. Otherwise non-admins need a
+// matching unexpired, unrevoked, unconsumed grant for the exact
 // (repository, SHA, target) that no pending promotion holds. The promotion
 // holds the grant until it terminalizes; the grant is consumed only with its
 // delivered publication (#1097), so a transient failure before delivery does
 // not spend it. retryOf and mode record a promote_retry lineage.
 func (service *API) admitPromotion(ctx context.Context, actor api.Actor, repository model.Repository, candidate model.Run,
 	target, retryOf, mode string) (model.Promotion, error) {
-	if err := checkPromotionSource(repository, candidate); err != nil {
+	skipped, policyOptIn, err := service.checkPromotionSource(ctx, repository, candidate, target)
+	if err != nil {
 		return model.Promotion{}, err
 	}
-	grantID, err := service.promotionSourceGrant(ctx, actor, repository, candidate, target, retryOf, mode, 0)
+	grantID, err := service.promotionSourceGrant(ctx, actor, repository, candidate, target, retryOf, mode, 0, policyOptIn)
 	if err != nil {
 		return model.Promotion{}, err
 	}
 	promotion, err := service.promotions.AppendPromotion(ctx, model.PromotionSpec{
 		RepoID: repository.ID, SourceBranch: candidate.Ref, SourceSHA: candidate.SHA,
 		TargetRef: target, Actor: actor.Identity, GrantID: grantID,
-		RetryOf: retryOf, RetryMode: mode,
+		RetryOf: retryOf, RetryMode: mode, BranchCISkipped: skipped,
 	})
 	if err != nil {
 		return model.Promotion{}, fmt.Errorf("admit promotion: %w", err)
@@ -2443,6 +2453,15 @@ func (service *API) admitPromotion(ctx context.Context, actor api.Actor, reposit
 // current head, then publishes a fast-forward or enqueues the merged run.
 func (service *API) planAdmittedPromotion(ctx context.Context, actor api.Actor, repository model.Repository, candidate model.Run,
 	target string, promotion model.Promotion, priority ...model.PriorityRequest) (result model.Promotion, resultErr error) {
+	if promotion.BranchCISkipped {
+		policy, err := readPromotionPolicy(ctx, service.git, service.cacheInputFor(ctx, repository))
+		if err != nil {
+			return service.failAdmittedPromotion(ctx, promotion, err.Error(), "")
+		}
+		if policy.requiresBranchCI(target) {
+			return service.failAdmittedPromotion(ctx, promotion, "target policy requires branch CI", "")
+		}
+	}
 	if err := os.MkdirAll(service.promotionWorkspaceRoot, 0o750); err != nil {
 		return service.failAdmittedPromotion(ctx, promotion, "create promotion workspace root: "+err.Error(), "")
 	}
@@ -2463,7 +2482,7 @@ func (service *API) planAdmittedPromotion(ctx context.Context, actor api.Actor, 
 	var err error
 	var resolvedTrain *model.PromotionTrain
 	if promotion.Train != nil {
-		if _, err = service.resolvePromotionTrainSources(ctx, repository, promotion.Train); err == nil {
+		if _, err = service.resolvePromotionTrainSources(ctx, repository, promotion.Train, target); err == nil {
 			planner, ok := service.git.(promotionTrainGit)
 			if !ok {
 				err = refuse(ErrUnavailable, "promotion train preparation")
@@ -2508,7 +2527,7 @@ func (service *API) planAdmittedPromotion(ctx context.Context, actor api.Actor, 
 	if plan.TargetUnborn {
 		planBase = zeroOID
 	}
-	if err := service.checkPromotionRelease(ctx, repository, plan.MergedSHA, planBase); err != nil {
+	if err := service.checkPromotionRelease(ctx, repository, plan.MergedSHA, plan.BaseSHA); err != nil {
 		return service.failAdmittedPromotion(ctx, promotion, err.Error(), "")
 	}
 	var planned model.Promotion
@@ -2533,7 +2552,7 @@ func (service *API) planAdmittedPromotion(ctx context.Context, actor api.Actor, 
 	// returns and before any enqueue, so no competing queue wake can claim
 	// unaudited work. A separate service-level auditPromotion call here
 	// would duplicate the action.
-	if plan.FastForward {
+	if plan.FastForward && !promotion.BranchCISkipped {
 		publication, err := service.promotions.BeginPublication(ctx, model.PublicationSpec{
 			RepoID: repository.ID, PromotionID: promotion.ID, RefKind: model.RefBranch, Ref: target,
 			PreviousSHA: planBase, PreviousKnown: true,

@@ -205,10 +205,10 @@ call the proxy hostname directly.
 | `artifact_get` | One artifact's contents by run ID and name, optionally filtered |
 | `wait` | Long-poll until a SHA or exact run ID reaches a terminal state |
 | `sync` | Park a WIP branch upstream without a green gate (not completion evidence) |
-| `promote` | Green-gate a SHA, merge with target branch, push without force |
+| `promote` | Promote a green branch SHA or an authorized parked SHA; parked sources always run merged-tree CI; push without force |
 | `promotion_list` | Recover durable promotion IDs by exact repo/full source SHA/status; bounded pages with an admission-sequence cursor |
 | `promote_status` | Wait for a promotion record to become terminal; a failed or interrupted promotion that was retried names its successor in `retried_as` |
-| `promote_retry` | Retry a failed or interrupted promotion (`id`): a new promotion of the same repo/source SHA/target, merged onto the target's current head and re-tested; a transient push-only failure reuses its exact tested SHA when the target is unchanged. Same authorization as `promote`; the original grant still authorizes it, because a grant is consumed only by a delivered promotion. Audited as `promotion.retry` |
+| `promote_retry` | Retry a failed or interrupted promotion (`id`): a new promotion of the same repo/source SHA/target, merged onto the target's current head and re-tested; for ordinary green branch sources, a transient push-only failure reuses its exact tested SHA when the target is unchanged; parked sources run promotion CI again. Same authorization as `promote`; the original grant still authorizes it, because a grant is consumed only by a delivered promotion. Audited as `promotion.retry` |
 | `publication_abandon` | Admin only, unscoped: abandon a pending publication by full publication `id` with a required `reason`. The audited transaction marks the intent `abandoned`, its run `failed/abandoned`, and its promotion failed. It never pushes; earlier ambiguous pushes may already be upstream. Terminal intents are refused and abandoned intents cannot be reactivated. CLI: `oberth publication abandon <publication-id> --reason "stop delivery"` |
 | `publish_retry` | Retry upstream publication for a branch or tag run whose burns passed but whose upstream push failed, including exhausted infrastructure failures. Transient errors get five durable attempts with 2/4/8/16-minute backoff, and pending responses say queued; a promotion is retried with `promote_retry` instead |
 | `issue_create` | Create a manual issue, installation-wide or filed under one `upstream` |
@@ -613,8 +613,10 @@ background task progress), and `/readyz` (startup and serving readiness).
   `repo` only when a short SHA or branch name is ambiguous.
 - `sync` parks a branch upstream for visibility. It is not integration or
   completion evidence.
-- `promote` requires explicit integration authority, an exact green SHA, and a
-  named target branch. It never force-pushes.
+- `promote` requires explicit integration authority, a full SHA, and a named
+  target branch. The source must be a green branch commit or an authorized
+  parked commit. Parked commits always run promotion CI, including a
+  fast-forward. It never force-pushes. See [park promotion](park-promotion.md).
 
 ### Long-poll tool timeouts
 

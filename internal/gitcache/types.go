@@ -16,6 +16,9 @@ import (
 // cache, because the cache belongs to a different identity.
 var ErrUpstreamRefused = errors.New("upstream resolution refused")
 
+// ErrPolicyRepositoryNotCached means no local public refs can establish provenance.
+var ErrPolicyRepositoryNotCached = errors.New("policy repository is not cached")
+
 // ErrPolicyUpstreamUnavailable marks only an exhausted temporary policy transport failure.
 var ErrPolicyUpstreamUnavailable = errors.New("temporary upstream policy transport unavailable")
 

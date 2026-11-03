@@ -117,10 +117,10 @@ func validateReceiveEventSpec(spec model.ReceiveEventSpec, queued bool) error {
 		if spec.Outcome != "queued" || !validOID(spec.ObjectSHA) || !validOID(spec.CommitSHA) {
 			return fmt.Errorf("%w: queued receive object IDs are invalid", ErrInvalid)
 		}
-	} else if spec.Outcome != "deleted" && spec.Outcome != "release_rejected" && spec.Outcome != "release_delivered" {
+	} else if spec.Outcome != "deleted" && spec.Outcome != "release_rejected" && spec.Outcome != "release_delivered" && spec.Outcome != "parked" {
 		return fmt.Errorf("%w: receive outcome is invalid", ErrInvalid)
 	}
-	if (spec.Outcome == "release_rejected" || spec.Outcome == "release_delivered") &&
+	if (spec.Outcome == "release_rejected" || spec.Outcome == "release_delivered" || spec.Outcome == "parked") &&
 		(!validOID(spec.ObjectSHA) || !validOID(spec.CommitSHA)) {
 		return fmt.Errorf("%w: terminal release object IDs are invalid", ErrInvalid)
 	}
