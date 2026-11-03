@@ -153,7 +153,7 @@ func ReleaseIssueLock(database *store.Store, ctx context.Context, id int64, owne
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	var acquired int64
 	if err = db.QueryRowContext(ctx, `DELETE FROM issue_locks WHERE issue_id=? AND owner=? RETURNING acquired_at`, id, owner).Scan(&acquired); errors.Is(err, sql.ErrNoRows) {
 		return store.ErrLockNotOwned
