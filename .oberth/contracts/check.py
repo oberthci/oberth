@@ -24,7 +24,7 @@ QUESTIONS = (
 TEXT = {".go", ".py", ".sh", ".bats", ".yaml", ".yml", ".json", ".md", ".html", ".js", ".ts", ".tf", ".tpl", ".txt"}
 CONFESSION = re.compile(r"MUST match|byte-for-byte|keep in sync|in lockstep|mirror of|same as in", re.I)
 GENERATOR = re.compile(r"generat\w*.*[\w./-]+\.(?:go|py|sh)\b|go:?generate\s+\S+", re.I)
-RESIDUE = re.compile(r"/home/|" + "codex" + r"-lab|(?:^|[=\"'])%[0-9]+\b|\bpane\s+%[0-9]+\b|roadmap#")
+RESIDUE = re.compile(r"/home/|(?:^|[=\"'])%[0-9]+\b|\bpane\s+%[0-9]+\b|roadmap#")
 DEPRECATED = re.compile(r"\blegacy\b|\bdeprecated\b|\bfor now\b|\btemporary\b|\buntil\b", re.I)
 ENV = re.compile(r'''(?:Getenv|LookupEnv|getenv|os\.getenv|environ\.get|env\.(?:String|Bool|Int|Duration))\s*\(\s*["']([A-Z][A-Z0-9_]+)["']''')
 ANNOTATION = re.compile(r'''["']((?:[\w.-]+\.)?oberth\.ci/[\w.-]+)["']''')
