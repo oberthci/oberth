@@ -115,3 +115,44 @@ func TestConfigureSecretStoreProvisionsServerPKI(t *testing.T) {
 		t.Fatal("the server policy must allow issuing its own leaf")
 	}
 }
+
+func TestServerPKIReinstallPreservesExistingNames(t *testing.T) {
+	for _, extra := range []string{"", "new.example.com"} {
+		t.Run(extra, func(t *testing.T) {
+			cfg := Config{Namespace: DefaultNamespace}
+			dns, _ := serverPKINames(cfg)
+			dns = append(dns, "ci.example.com")
+			role := serverPKIRole(dns, []string{"192.0.2.1/32"})
+			role["ttl"], role["max_ttl"] = 2592000, 2592000
+			roleJSON, _ := json.Marshal(map[string]any{"data": role})
+			issuerJSON, _ := json.Marshal(map[string]any{"data": map[string]any{"certificate": string(newTestServerCA(dns))}})
+			responses := freshStoreResponses()
+			responses["read -format=json oberth-pki/issuer/default"] = fakeBaoResponse{out: string(issuerJSON)}
+			responses["read -format=json oberth-pki/roles/oberth-server"] = fakeBaoResponse{out: string(roleJSON)}
+			runner := &fakeBaoRunner{t: t, responses: responses}
+			if extra != "" {
+				cfg.TLSExtraDNSNames = []string{extra}
+			}
+			_, replaced, err := ensureServerPKI(t.Context(), cfg, newOpenBaoExec(secretStoreTestDeps(runner, io.Discard), DefaultOpenBaoNamespace, "openbao-0"), "test-token", map[string]baoMount{"oberth-pki/": {Type: "pki"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls := runner.callsByCommand()
+			write, wrote := calls["write oberth-pki/roles/oberth-server -"]
+			if extra == "" {
+				if replaced || wrote {
+					t.Fatalf("unchanged reinstall replaced CA=%v or rewrote role=%v", replaced, wrote)
+				}
+			} else {
+				for _, name := range []string{"ci.example.com", extra, "192.0.2.1/32"} {
+					if !strings.Contains(write.stdin, name) {
+						t.Errorf("updated role omitted %s", name)
+					}
+				}
+				if !strings.Contains(calls["write -format=json oberth-pki/root/generate/internal -"].stdin, "ci.example.com") {
+					t.Error("replacement CA lost the existing DNS constraint")
+				}
+			}
+		})
+	}
+}

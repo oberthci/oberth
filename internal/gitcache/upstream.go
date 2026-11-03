@@ -82,6 +82,9 @@ func (c *Cache) DeleteBranch(ctx context.Context, input, branch string) error {
 		return err
 	}
 	ref := "refs/heads/" + branch
+	if err := c.allowBranchDeletion(ctx, path, ref); err != nil {
+		return err
+	}
 	// Check whether the branch exists upstream before pushing the deletion
 	// so a never-published branch completes silently.
 	output, err := c.capture(ctx, path, "ls-remote", "--heads", "upstream", ref)

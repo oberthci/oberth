@@ -68,7 +68,7 @@ func (client *Client) IssueServerCertificate(ctx context.Context, request Server
 	}
 	response, err := session.Logical().WriteWithContext(ctx, request.Mount+"/issue/"+request.Role, data)
 	if err != nil {
-		return IssuedServerCertificate{}, sanitizeSecretStoreHTTPError("server certificate issuance", err)
+		return IssuedServerCertificate{}, fmt.Errorf("issue server certificate with role %s for DNS %q and IPs %q (inspect: bao read %s/roles/%s): %w", request.Role, request.DNSNames, request.IPs, request.Mount, request.Role, sanitizeSecretStoreHTTPError("server certificate issuance", err))
 	}
 	if response == nil || response.Data == nil {
 		return IssuedServerCertificate{}, errors.New("server certificate issuance returned no data")

@@ -19,6 +19,7 @@ type PushConfig struct {
 	Receives     ReceiveRecorder
 	Branches     CIQueue
 	Releases     ReleaseAdmission
+	Auditor      Auditor
 }
 
 type PushIngestor struct {
@@ -28,6 +29,7 @@ type PushIngestor struct {
 	receives     ReceiveRecorder
 	branches     CIQueue
 	releases     ReleaseAdmission
+	auditor      Auditor
 }
 
 func NewPushIngestor(config PushConfig) (*PushIngestor, error) {
@@ -41,6 +43,7 @@ func NewPushIngestor(config PushConfig) (*PushIngestor, error) {
 		receives:     databaseReceives{config.Receives},
 		branches:     config.Branches,
 		releases:     config.Releases,
+		auditor:      config.Auditor,
 	}, nil
 }
 
@@ -53,12 +56,17 @@ func (ingestor *PushIngestor) Branch(ctx context.Context, push BranchPush) (Push
 		return PushResult{}, err
 	}
 	if deletionOID(push.NewOID) {
+		if repository.DefaultBranch == "" || push.Branch == repository.DefaultBranch {
+			return PushResult{}, fmt.Errorf("%w: cannot delete the default branch", ErrInvalidInput)
+		}
+		if err := auditedGitMutation(ctx, ingestor.auditor, push.Actor, "branch.delete", "repository", push.Repository,
+			map[string]any{"branch": push.Branch, "old_sha": push.OldOID, "event_id": push.EventID},
+			func() error { return ingestor.git.DeleteBranch(ctx, push.Repository, push.Branch) }); err != nil {
+			return PushResult{}, fmt.Errorf("propagate branch deletion upstream: %w", err)
+		}
 		duplicate, err := ingestor.receives.RecordReceiveEvent(ctx, receiveSpec(push.EventID, push.Actor, repository.ID, model.RefBranch, push.Branch, push.OldOID, "", "", "deleted"))
 		if err != nil {
 			return PushResult{}, err
-		}
-		if err := ingestor.git.DeleteBranch(ctx, push.Repository, push.Branch); err != nil {
-			return PushResult{}, fmt.Errorf("propagate branch deletion upstream: %w", err)
 		}
 		return PushResult{Repository: repository, Deleted: true, Duplicate: duplicate, Reason: "branch deletion requires no CI run"}, nil
 	}

@@ -202,7 +202,7 @@ func TestDatabaseDeadlineReplayRetriesStorageWithoutRepeatingGit(t *testing.T) {
 		scheduler := &Scheduler{}
 		receives := &replayDeadlineReceives{}
 		git := &stubPushGit{}
-		ingestor, err := NewPushIngestor(PushConfig{Repositories: stubPushRepositories{repository: model.Repository{ID: 1, Name: "repo", DefaultBranch: "main"}}, Discoverer: stubRepositoryDiscoverer{}, Git: git, Receives: receives})
+		ingestor, err := NewPushIngestor(PushConfig{Repositories: stubPushRepositories{repository: model.Repository{ID: 1, Name: "repo", DefaultBranch: "main"}}, Discoverer: stubRepositoryDiscoverer{}, Git: git, Receives: receives, Auditor: &deletionAuditor{}})
 		if err != nil {
 			t.Fatal(err)
 		}

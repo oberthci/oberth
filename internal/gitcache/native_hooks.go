@@ -94,6 +94,11 @@ func (c *Cache) nativePreReceive(ctx context.Context, input io.Reader) error {
 			return fmt.Errorf("receive exceeds %d ref updates", maximumReceiveRefUpdates)
 		}
 		branch := strings.HasPrefix(ref, "refs/heads/")
+		if branch && zeroHookOID(newSHA) {
+			if err := c.allowBranchDeletion(ctx, "", ref); err != nil {
+				return err
+			}
+		}
 		public := branch || strings.HasPrefix(ref, "refs/tags/")
 		existing, exists := current[ref]
 		if len(current) > maximumPublicRefs && (!branch || !zeroHookOID(newSHA) || !exists || old != existing) {
@@ -123,6 +128,9 @@ func (c *Cache) nativeUpdate(ctx context.Context, ref, old, newSHA string) error
 	if branch, ok := strings.CutPrefix(ref, "refs/heads/"); ok {
 		if err := ValidateBranch(branch); err != nil {
 			return err
+		}
+		if zeroHookOID(newSHA) {
+			return c.allowBranchDeletion(ctx, "", ref)
 		}
 		if !zeroHookOID(old) && !zeroHookOID(newSHA) {
 			head, err := c.capture(ctx, "", "symbolic-ref", "--quiet", "HEAD")
@@ -169,6 +177,19 @@ func (c *Cache) nativeUpdate(ctx context.Context, ref, old, newSHA string) error
 	}
 	if err := c.run(ctx, commandSpec{args: []string{"merge-base", "--is-ancestor", strings.TrimSpace(commit), releaseAdmissionRefPrefix + branch}}); err != nil {
 		return fmt.Errorf("tag commit is not reachable from the fresh upstream default branch — promote the commit to the default branch first (promote <sha> %s), then tag", branch)
+	}
+	return nil
+}
+
+// The cache HEAD is set from the upstream default branch, never from a push.
+// Check both receive hooks and direct upstream deletions, including replay.
+func (c *Cache) allowBranchDeletion(ctx context.Context, path, ref string) error {
+	head, err := c.capture(ctx, path, "symbolic-ref", "--quiet", "HEAD")
+	if err != nil || !strings.HasPrefix(strings.TrimSpace(head), "refs/heads/") {
+		return errors.New("cannot determine default branch; branch deletion refused")
+	}
+	if strings.TrimSpace(head) == ref {
+		return errors.New("cannot delete the default branch")
 	}
 	return nil
 }

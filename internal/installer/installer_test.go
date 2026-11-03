@@ -2994,7 +2994,7 @@ func TestPromptSecretStoreChoiceInteractiveExplicitProduction(t *testing.T) {
 	}
 }
 
-func TestPromptSecretStoreChoiceInteractiveSkip(t *testing.T) {
+func TestPromptSecretStoreChoiceInteractiveCancel(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
 	cfg := Config{}
@@ -3005,18 +3005,16 @@ func TestPromptSecretStoreChoiceInteractiveSkip(t *testing.T) {
 		IsTerminal: func() bool { return true },
 	}
 
-	if err := promptSecretStoreChoice(context.Background(), &cfg, deps); err != nil {
-		t.Fatal(err)
+	if err := promptSecretStoreChoice(context.Background(), &cfg, deps); err == nil || !strings.Contains(err.Error(), "installation cancelled") {
+		t.Fatalf("installation must stop on cancellation: %v", err)
 	}
 	if cfg.InstallSecretStore || cfg.InstallSecretStoreDev {
 		t.Fatal("choice 2 should not set either secret store flag")
 	}
-	if !strings.Contains(buf.String(), "Warning: releases will not work") {
-		t.Fatalf("skip should print warning, got:\n%s", buf.String())
-	}
+
 }
 
-func TestPromptSecretStoreChoiceNonInteractiveSkips(t *testing.T) {
+func TestPromptSecretStoreChoiceNonInteractiveRefuses(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
 	cfg := Config{}
@@ -3026,15 +3024,13 @@ func TestPromptSecretStoreChoiceNonInteractiveSkips(t *testing.T) {
 		IsTerminal: func() bool { return false },
 	}
 
-	if err := promptSecretStoreChoice(context.Background(), &cfg, deps); err != nil {
-		t.Fatal(err)
+	if err := promptSecretStoreChoice(context.Background(), &cfg, deps); err == nil || !strings.Contains(err.Error(), "--install-secretstore") {
+		t.Fatalf("installation must stop with explicit flag guidance: %v", err)
 	}
 	if cfg.InstallSecretStore || cfg.InstallSecretStoreDev {
 		t.Fatal("non-interactive must not auto-install a secret store")
 	}
-	if !strings.Contains(buf.String(), "--install-secretstore") {
-		t.Fatalf("non-interactive should print guidance, got:\n%s", buf.String())
-	}
+
 }
 
 func TestPromptSecretStoreChoiceNonInteractiveNilIsTerminal(t *testing.T) {
@@ -3046,15 +3042,13 @@ func TestPromptSecretStoreChoiceNonInteractiveNilIsTerminal(t *testing.T) {
 		Output: &buf,
 	}
 
-	if err := promptSecretStoreChoice(context.Background(), &cfg, deps); err != nil {
-		t.Fatal(err)
+	if err := promptSecretStoreChoice(context.Background(), &cfg, deps); err == nil || !strings.Contains(err.Error(), "--install-secretstore") {
+		t.Fatalf("installation must stop with explicit flag guidance: %v", err)
 	}
 	if cfg.InstallSecretStore || cfg.InstallSecretStoreDev {
-		t.Fatal("nil IsTerminal must be treated as non-interactive and skip")
+		t.Fatal("nil IsTerminal must be treated as non-interactive and refuse")
 	}
-	if !strings.Contains(buf.String(), "--install-secretstore") {
-		t.Fatalf("nil IsTerminal should print guidance, got:\n%s", buf.String())
-	}
+
 }
 
 func TestPromptSecretStoreChoiceNamespaceOverride(t *testing.T) {
@@ -3153,15 +3147,13 @@ func TestPromptSecretStoreChoiceExhaustsRetries(t *testing.T) {
 		IsTerminal: func() bool { return true },
 	}
 
-	if err := promptSecretStoreChoice(context.Background(), &cfg, deps); err != nil {
-		t.Fatal(err)
+	if err := promptSecretStoreChoice(context.Background(), &cfg, deps); err == nil || !strings.Contains(err.Error(), "--install-secretstore") {
+		t.Fatalf("exhausted retries must stop with explicit flag guidance: %v", err)
 	}
 	if cfg.InstallSecretStore || cfg.InstallSecretStoreDev {
-		t.Fatal("exhausted retries should skip, not install")
+		t.Fatal("exhausted retries must not install")
 	}
-	if !strings.Contains(buf.String(), "Warning: releases will not work") {
-		t.Fatalf("exhausted retries should print skip warning, got:\n%s", buf.String())
-	}
+
 }
 
 func TestIsValidDNS1123Label(t *testing.T) {
@@ -3325,7 +3317,7 @@ func TestRunPromptsWhenSecretStoreUndecided(t *testing.T) {
 	}
 	client := fake.NewClientset(node, oberthPod, readyArgoControllerPod())
 	var buf bytes.Buffer
-	// User chooses "2" (skip) so the install proceeds without OpenBao.
+	// Cancelling must stop the install before any product write.
 	deps := Deps{
 		Output:      &buf,
 		KubeClient:  client,
@@ -3348,16 +3340,14 @@ func TestRunPromptsWhenSecretStoreUndecided(t *testing.T) {
 		PollInterval: time.Millisecond,
 	}
 	cfg := Config{Timeout: time.Second, SecretStoreUndecided: true}
-	if err := Run(context.Background(), cfg, deps); err != nil {
-		t.Fatal(err)
+	if err := Run(context.Background(), cfg, deps); err == nil {
+		t.Fatal("cancelled install continued")
 	}
 	output := buf.String()
 	if !strings.Contains(output, "Install OpenBao") {
 		t.Fatalf("prompt must appear when SecretStoreUndecided is true, got:\n%s", output)
 	}
-	if !strings.Contains(output, "Warning: releases will not work") {
-		t.Fatalf("skip warning missing:\n%s", output)
-	}
+
 }
 
 // --- Secret-store mode split ---

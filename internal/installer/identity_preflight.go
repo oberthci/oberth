@@ -54,7 +54,9 @@ type liveHelmValuesSubset struct {
 		OriginCACert string `json:"originCACert"`
 	} `json:"watchTunnel"`
 	TLS struct {
-		PKI struct {
+		ExtraDNSNames []string `json:"extraDNSNames"`
+		ExtraIPs      []string `json:"extraIPs"`
+		PKI           struct {
 			Enabled bool `json:"enabled"`
 		} `json:"pki"`
 	} `json:"tls"`
@@ -313,7 +315,10 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 	// bundle's self-signed certificate is then unused, so its SAN checks,
 	// re-issue and origin pin below do not apply.
 	if cfg.serverPKI {
-		return nil
+		if !haveStore {
+			return errors.Join(errors.New("cannot check server PKI: set BAO_TOKEN and ensure the OpenBao pod is available"), podLookupErr)
+		}
+		return checkServerPKIRole(ctx, *cfg, deps, store, token, cfg.InstallSecretStore)
 	}
 
 	// -- SAN check: goproxy names required when goProxy is enabled --

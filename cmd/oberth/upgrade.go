@@ -29,6 +29,12 @@ func runUpgrade(ctx context.Context, arguments []string, output io.Writer) error
 	var cfg installer.UpgradeConfig
 	var kubeContext string
 	var userValues, userSet upgradeStringSlice
+	var tlsDNS, tlsIPs, removeDNS, removeIPs stringList
+	flags.Var(&tlsDNS, "tls-extra-dns-name", "add a server TLS DNS name (repeatable)")
+	flags.Var(&tlsIPs, "tls-extra-ip", "add a server TLS IP SAN (repeatable)")
+	flags.Var(&removeDNS, "tls-remove-dns-name", "remove a permitted DNS name; refused while served (repeatable)")
+	flags.Var(&removeIPs, "tls-remove-ip", "remove a permitted IP SAN; refused while served (repeatable)")
+	flags.StringVar(&cfg.OpenBaoNamespace, "openbao-namespace", "", "OpenBao namespace (default: openbao)")
 	flags.StringVar(&cfg.Namespace, "namespace", "", "Oberth namespace (default: oberth)")
 	flags.StringVar(&kubeContext, "context", "", "kubeconfig context to target (default: current-context)")
 	flags.StringVar(&cfg.ArgoControllerProfile, "argo-controller-profile", "", "explicitly reconcile the managed nonroot-static-v1 Argo profile and verify it before enabling server admission")
@@ -78,6 +84,8 @@ func runUpgrade(ctx context.Context, arguments []string, output io.Writer) error
 	cfg.BinaryVersion = version
 	cfg.UserValues = []string(userValues)
 	cfg.UserSet = []string(userSet)
+	cfg.TLSExtraDNSNames, cfg.TLSExtraIPs = tlsDNS, tlsIPs
+	cfg.TLSRemoveDNSNames, cfg.TLSRemoveIPs = removeDNS, removeIPs
 	cfg.BinarySchemaVersion = store.LatestMigrationVersion()
 
 	// Validate early so dev-build rejection does not require a cluster.
