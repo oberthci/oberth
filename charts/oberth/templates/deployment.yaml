@@ -247,15 +247,18 @@ spec:
             - --admission-size-weights=S={{ int .S }},M={{ int .M }},L={{ int .L }},XL={{ int .XL }}
             {{- end }}
             {{- $declaredInput := $admission.declaredResources | default dict }}
-            {{- $declared := merge (deepCopy $declaredInput) (dict "disabled" false "cpuMillis" 8000 "memoryBytes" 17179869184 "memoryHeadroomBytes" 1073741824 "ioRuns" 0) }}
-            {{- /* merge treats zero as empty; preserve an explicit zero headroom. */}}
-            {{- if and (hasKey $declaredInput "memoryHeadroomBytes") (ne $declaredInput.memoryHeadroomBytes nil) }}
-            {{- $_ := set $declared "memoryHeadroomBytes" $declaredInput.memoryHeadroomBytes }}
+            {{- $declared := merge (deepCopy $declaredInput) (dict "disabled" false "cpuMillis" 8000 "memoryBytes" 17179869184 "memoryHeadroomBytes" 1073741824 "memoryHeadroomPercent" 10 "ioRuns" 0) }}
+            {{- /* merge treats zero as empty; preserve explicit zero headroom settings. */}}
+            {{- range $key := list "memoryHeadroomBytes" "memoryHeadroomPercent" }}
+            {{- if and (hasKey $declaredInput $key) (ne (get $declaredInput $key) nil) }}
+            {{- $_ := set $declared $key (get $declaredInput $key) }}
+            {{- end }}
             {{- end }}
             - --disable-declared-admission={{ $declared.disabled }}
             - --admission-cpu-millis={{ int64 $declared.cpuMillis }}
             - --admission-memory-bytes={{ int64 $declared.memoryBytes }}
             - --admission-memory-headroom-bytes={{ int64 $declared.memoryHeadroomBytes }}
+            - --admission-memory-headroom-percent={{ int64 $declared.memoryHeadroomPercent }}
             - --admission-io-runs={{ int $declared.ioRuns }}
             - --ci-cache-root={{ .Values.cache.ciRoot }}
             - --release-cache-root={{ .Values.cache.releaseRoot }}

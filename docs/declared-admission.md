@@ -76,8 +76,9 @@ memory-limit notice in the run message. No memory or CPU limits are manufactured
 Existing source validity, grants and per-container ceilings still apply.
 
 Each concurrent pod also reserves 100m CPU and 256Mi memory for server/executor
-helpers. Each declared run also holds a configurable fixed memory reserve,
-defaulting to 1Gi, for usage above requests. This is capacity held aside, not a
+helpers. Each declared run also holds max(fixed bytes, a percentage of its
+concurrent memory request envelope), defaulting to max(1Gi, 10%), for usage above
+requests. The percentage is rounded up to whole bytes before executor reserves. This is capacity held aside, not a
 mutation of pod requests. Deployment
 executor defaults must fit this allowance; review them before release. CPU and
 memory budgets must exclude platform reserve and other external work. Declared
@@ -111,16 +112,19 @@ remain enforced. No request or limit is inserted into the manifest.
 Ordinary-container requests should represent reviewed, measured maximum peaks.
 Kubernetes queues pods by requests and enforces limits; the host admission budget
 and fixed run headroom provide a coarse packing ceiling rather than reserving
-every possible limit simultaneously. A fixed reserve is used instead of a 1.2
-multiplier so two 20Gi-request / 30Gi-limit runs, each with one executor pod, fit
-in 48Gi: each reserves 20Gi + 256Mi + 1Gi = 21.25Gi. Administrators should tune
-the allowance to observed overshoot and platform capacity. VM guest accounting
-continues to reserve its conservative request/limit envelope.
+every possible limit simultaneously. Proportional headroom scales with large
+runs while the fixed minimum covers small ones. Two 20Gi-request / 30Gi-limit
+runs, each with one executor pod, reserve 2 × (20Gi + max(1Gi, 2Gi) + 256Mi) =
+44.5Gi and fit a 48Gi budget. Administrators should tune both headroom settings
+to observed overshoot and platform capacity. VM guest accounting continues to
+reserve its conservative request/limit envelope; its combined host demand also
+receives run headroom. Review existing memory requests that were never measured
+before relying on the new admission behavior.
 A request-only pod container cannot earn numeric host credit: it falls back
 to legacy admission with a visible notice. Review and commit the missing limits
 in git to become eligible; Oberth does not fill them in. Existing running
 reservations restore their sealed demand rather than recomputing it from git;
-helper and fixed run reserves use the restoring server's settings.
+helper and run headroom reserves use the restoring server's settings.
 Both helper allowances must be checked against deployment defaults before rollout.
 VM workflows that exceed the default 8 CPU / 16Gi budget retain legacy admission;
 sharing those runs requires an administrator to raise the host budget to fit
@@ -129,7 +133,7 @@ operator rollout step.
 
 ## Administrator settings
 
-The defaults are 8 CPU, 16Gi memory, 1Gi fixed headroom per declared run, and
+The defaults are 8 CPU, 16Gi memory, max(1Gi, 10%) headroom per declared run, and
 the existing coarse run cap for IO. One administrator kill switch sends **new**
 work back to size admission.
 Existing declared reservations remain accounted through completion/recovery.
@@ -138,9 +142,13 @@ Existing declared reservations remain accounted through completion/recovery.
 | --- | --- | --- |
 | `--admission-cpu-millis` | `admission.declaredResources.cpuMillis` | 8000 |
 | `--admission-memory-bytes` | `admission.declaredResources.memoryBytes` | 17179869184 |
-| `--admission-memory-headroom-bytes` | `admission.declaredResources.memoryHeadroomBytes` | 1073741824 (1Gi); 0 disables |
+| `--admission-memory-headroom-bytes` | `admission.declaredResources.memoryHeadroomBytes` | 1073741824 (1Gi); 0 disables fixed minimum |
+| `--admission-memory-headroom-percent` | `admission.declaredResources.memoryHeadroomPercent` | 10 (integer 0..100); 0 disables proportional component |
 | `--admission-io-runs` | `admission.declaredResources.ioRuns` | 0, retain existing cap |
 | `--disable-declared-admission` | `admission.declaredResources.disabled` | false |
+
+Unset headroom settings use defaults independently of CPU/memory budgets;
+explicit zero is preserved. Both components must be zero to disable headroom.
 
 IO remains independent of CPU/memory fit. The coarse run ceiling, disk-space
 floor and existing host-pressure gate remain in force. A positive IO-run cap can

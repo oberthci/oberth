@@ -239,7 +239,7 @@ func runServe(ctx context.Context, arguments []string, output io.Writer) error {
 }
 
 func parseServeOptions(arguments []string, output io.Writer) (serveOptions, error) {
-	var options serveOptions
+	options := serveOptions{declaredAdmission: service.DefaultDeclaredAdmissionConfig()}
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	flags.StringVar(&options.dataRoot, "data", "/data", "persistent data root")
@@ -269,7 +269,8 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.BoolVar(&options.declaredAdmission.Disabled, "disable-declared-admission", false, "administrator kill switch: admit new runs by size class")
 	flags.Int64Var(&options.declaredAdmission.CPUMilli, "admission-cpu-millis", 8000, "CPU budget for declared workflow and VM demand, excluding platform reserve")
 	flags.Int64Var(&options.declaredAdmission.MemoryBytes, "admission-memory-bytes", 17179869184, "memory budget for declared workflow and VM demand, excluding platform reserve")
-	flags.Int64Var(&options.declaredAdmission.MemoryHeadroomBytes, "admission-memory-headroom-bytes", 1073741824, "fixed memory reserve per declared run for limit overshoot, in addition to executor reserves; 0 disables")
+	flags.Int64Var(options.declaredAdmission.MemoryHeadroomBytes, "admission-memory-headroom-bytes", 1073741824, "minimum memory headroom per declared run; combined with proportional headroom using the larger value")
+	flags.Int64Var(options.declaredAdmission.MemoryHeadroomPercent, "admission-memory-headroom-percent", 10, "memory headroom as a percentage of declared run memory, excluding executor reserves (0..100); combined with the fixed minimum using the larger value")
 	flags.IntVar(&options.declaredAdmission.IORuns, "admission-io-runs", 0, "coarse simultaneous run ceiling for IO; 0 retains the existing run ceiling")
 
 	flags.StringVar(&options.maxConcurrentFile, "max-concurrent-jobs-file", "", "mounted ConfigMap key to reload max concurrent Jobs without restart; invalid or missing keeps the last good value")

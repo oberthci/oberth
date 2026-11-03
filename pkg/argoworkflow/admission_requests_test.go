@@ -72,3 +72,34 @@ func TestRunDemandUsesConcurrentMemoryRequests(t *testing.T) {
 		t.Fatalf("undeclared step gained numeric credit: %+v, %v", d, err)
 	}
 }
+
+func TestPodHelpersReserveRequestsBelowLimits(t *testing.T) {
+	for _, kind := range []string{"sidecar", "init", "restartable-init"} {
+		t.Run(kind, func(t *testing.T) {
+			main := declaredLeaf("step-abc12345", "100m", "128Mi")
+			helper := wfv1.UserContainer{Container: *declaredLeaf("helper", "100m", "256Mi").Container}
+			helper.Resources.Limits[corev1.ResourceMemory] = resource.MustParse("2Gi")
+			want := int64(256 << 20)
+			switch kind {
+			case "sidecar":
+				main.Sidecars = []wfv1.UserContainer{helper}
+				want += 128 << 20
+			case "init":
+				main.InitContainers = []wfv1.UserContainer{helper}
+			case "restartable-init":
+				restart := corev1.ContainerRestartPolicyAlways
+				helper.RestartPolicy = &restart
+				main.InitContainers = []wfv1.UserContainer{helper}
+				want += 128 << 20
+			}
+			before := main.DeepCopy()
+			d, err := templatePodDemand(&main, nil, false)
+			if err != nil || d.MemoryBytes != want {
+				t.Fatalf("helper demand = %+v, %v; want %d request bytes", d, err, want)
+			}
+			if !reflect.DeepEqual(&main, before) {
+				t.Fatal("helper declarations changed")
+			}
+		})
+	}
+}

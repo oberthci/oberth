@@ -94,6 +94,7 @@
             "cpuMillis": {"type": "integer", "minimum": 1, "maximum": 1000000},
             "memoryBytes": {"type": "integer", "minimum": 1, "maximum": 1125899906842624},
             "memoryHeadroomBytes": {"type": "integer", "minimum": 0, "maximum": 1125899906842624},
+            "memoryHeadroomPercent": {"type": "integer", "minimum": 0, "maximum": 100},
             "ioRuns": {"type": "integer", "minimum": 0, "maximum": 64}
           }
         },

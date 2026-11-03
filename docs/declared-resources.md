@@ -97,17 +97,27 @@ per-container runtime ceilings enforced by Kubernetes; a larger limit does not
 increase ordinary-container admission demand. Kubernetes schedules pods using
 their requests and queues pods when node capacity is unavailable.
 
-Oberth adds 100m CPU and 256Mi memory per peak concurrent executor pod, plus a
-fixed memory reserve **once per declared run**. The default reserve is 1Gi,
-configured with `--admission-memory-headroom-bytes` or
-`admission.declaredResources.memoryHeadroomBytes` (bytes; zero disables it).
-A fixed reserve leaves room for limit overshoot without multiplying every
-measured request: a 1.2 multiplier on two 20Gi-request runs would consume all of
-a 48Gi budget before executor allowances. With the default fixed reserve and
-one executor pod per run, each instead reserves 21.25Gi; two reserve 42.5Gi.
-This allowance is a coarse packing margin, not a guarantee that simultaneous
-usage up to every limit fits. Administrators must review the reserve against
-observed overshoot, Kubernetes capacity and platform headroom.
+Oberth adds 100m CPU and 256Mi memory per peak concurrent executor pod, plus
+memory headroom **once per declared run**. Headroom is the larger of a fixed
+minimum (default 1Gi) and a percentage of the run's concurrent memory request
+envelope (default 10%), rounded up to whole bytes before adding executor
+reserves. Configure these independently with
+`--admission-memory-headroom-bytes` / `admission.declaredResources.memoryHeadroomBytes`
+and `--admission-memory-headroom-percent` /
+`admission.declaredResources.memoryHeadroomPercent` (integer 0..100).
+Unset settings use their defaults even when CPU or memory budgets are supplied;
+explicit zero disables that component. Both must be zero to disable headroom.
+
+Proportional headroom scales with large runs; the fixed minimum covers small
+ones. For two runs each requesting 20Gi with 30Gi of limits and one executor
+pod, each reserves 20Gi + max(1Gi, 2Gi) + 256Mi = 22.25Gi. Together they reserve
+44.5Gi and fit a 48Gi budget. The allowance is a coarse packing margin, not a
+guarantee that simultaneous usage up to every limit fits. Administrators should
+review overshoot, Kubernetes capacity and platform headroom when tuning it.
+
+**Upgrade note:** memory requests now determine admission demand. Review
+existing request values that were never measured before relying on increased
+concurrency; low requests paired with high limits now reserve less capacity.
 
 Both requests and a positive effective memory limit are still required on every
 container for numeric admission. Request-only containers retain the existing
