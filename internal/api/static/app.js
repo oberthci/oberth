@@ -349,9 +349,11 @@ async function api(url, opts = {}) {
   }
   // Discard the response if auth changed or route changed while we waited.
   if (state.authGen !== gen || (!opts.detached && state.routeSeq !== seq)) throw new Error("stale request");
-  if (response.status === 401) {
+  if (response.status === 401 || response.status === 429) {
     // Only show the prompt if auth generation has not changed since we sent.
-    if (state.authGen === gen) showTokenPrompt(hasToken() ? "Token rejected — enter a current uplink token." : "");
+    if (state.authGen === gen) showTokenPrompt(response.status === 429
+      ? "Too many authentication attempts. Wait one minute, then retry with a current uplink token."
+      : (hasToken() ? "Token rejected — enter a current uplink token." : ""));
     throw new Error("authentication required");
   }
   if (!response.ok) {
