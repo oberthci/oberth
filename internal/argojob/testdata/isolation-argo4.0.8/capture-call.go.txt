@@ -1,0 +1,2 @@
+	if isolationCapture != nil { isolationCapture(pod.DeepCopy()) }
+	if oberthWIFCapture != nil { oberthWIFCapture(pod.DeepCopy()) }

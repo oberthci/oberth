@@ -15,10 +15,10 @@
     },
     "annotations": {
       "oberth.ci/ref": "refs/tags/v1.0.0",
-      "oberth.ci/release-wif-policy-sha256": "50ada3ae06dae41ebc037332bddd3d7f5d3ae5b27d7cf9e918c5d85c9499b816",
+      "oberth.ci/release-wif-policy-sha256": "4332eff97f6643498bde8175258b28eec04da2c41b1b1423c4d42f05e775647f",
       "oberth.ci/run-id": "run-abc123",
       "oberth.ci/size": "L",
-      "oberth.ci/spec-identity": "148d9c39bdbd395ef4f77fa7ecb5537cdf20596728fbd8e2d5238aa9faf9e266",
+      "oberth.ci/spec-identity": "e7e33a824bc6f5de4ea5c68c494a2d648733862cae0560cc62d681c04fa02ec6",
       "oberth.ci/step-usage-memory-policy": "explicit-limit-256Mi-v1",
       "workflows.argoproj.io/pod-name-format": "v2"
     }

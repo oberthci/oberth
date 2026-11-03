@@ -21,9 +21,9 @@
       "oberth.ci/nonroot-templates": "test",
       "oberth.ci/ref": "refs/heads/main",
       "oberth.ci/run-id": "run-abc123",
-      "oberth.ci/spec-identity": "383d1e1ce874c70cf40a08a76702ef8b1180d30531fcdd1b6302bc1fec4e81c1",
+      "oberth.ci/spec-identity": "7944fdcb3d4e10326ccf5d616cb02485fb4cec3fd84c9e5c8bb2d933315e4237",
       "oberth.ci/step-usage-memory-policy": "explicit-limit-256Mi-v1",
-      "oberth.ci/verified-controller-profile": "nonroot-static-v1:9f3266af98f0e8b28f4098c906b2bff8d99fa1fdf36e6d396b5239ec2079a833",
+      "oberth.ci/verified-controller-profile": "nonroot-static-v1:b344c6c7fc4d5955564b01ab2de2751848265a1a848c012f525b925048121b7f",
       "workflows.argoproj.io/pod-name-format": "v2"
     }
   },
@@ -259,7 +259,7 @@
       {
         "name": "oberth-cache",
         "hostPath": {
-          "path": "/server/cache/ci/skipops-oberth-cd98a2b2d604",
+          "path": "/server/cache/ci/acme-oberth-770b6d7bba36",
           "type": "DirectoryOrCreate"
         }
       },
@@ -304,7 +304,7 @@
   },
   "status": {
     "phase": "Running",
-    "startedAt": "2026-11-03T07:00:50Z",
+    "startedAt": "2026-11-03T10:24:27Z",
     "finishedAt": null,
     "estimatedDuration": 1,
     "progress": "0/1",
@@ -317,7 +317,7 @@
         "templateName": "test",
         "templateScope": "local/oberth-oberth-run-abc1-aabbccddeeff",
         "phase": "Pending",
-        "startedAt": "2026-11-03T07:00:50Z",
+        "startedAt": "2026-11-03T10:24:27Z",
         "finishedAt": null,
         "estimatedDuration": 1,
         "progress": "0/1",

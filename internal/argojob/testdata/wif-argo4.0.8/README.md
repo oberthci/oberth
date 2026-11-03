@@ -100,3 +100,15 @@ outputs with the replay token waiter. The authenticated v4.0.8 controller ran
 its real operation with the retained fake-client helpers and capture-only
 hooks. All 27 submitted Pods passed the retained Kubernetes v1.35.7 validator.
 No expected Pod was edited manually and no live cluster was used.
+
+CX-OB-STACK-TRIAL (2026-11-03) recaptured current deadline-bounded Build
+outputs with the replay token waiter. The authenticated v4.0.8 controller ran
+its real operation with the retained fake-client helpers and capture-only
+hooks. All 27 submitted Pods passed the retained Kubernetes v1.35.7 validator.
+No expected Pod was edited manually and no live cluster was used.
+
+CX-OB-STACK-REPAIRS (2026-11-03) recaptured current deadline-bounded Build
+outputs with the replay token waiter. The authenticated v4.0.8 controller ran
+its real operation with the retained fake-client helpers and capture-only
+hooks. All 27 submitted Pods passed the retained Kubernetes v1.35.7 validator.
+No expected Pod was edited manually and no live cluster was used.
