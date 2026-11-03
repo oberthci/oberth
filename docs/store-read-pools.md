@@ -81,12 +81,21 @@ private tmpfs directory explicitly.
 The tmpfs is included in the existing container memory envelope: 4Gi for
 `test-store`, with a 2GiB Go heap target, and 8Gi for `release-test`, with its
 4GiB target. CPU requests are 971m and 1000m respectively, with limits of
-2 and 4 CPU. The store lane and full release race suite use a 35-minute
-per-package deadlock bound: 1.5× the largest measured whole-store race wall
-time on a loaded host (22.9 minutes, including scheduler pauses), rounded up
-to the next minute. The final passing store race run took 18.5 minutes.
-Other branch race lanes retain their 20-minute bounds. Go worker counts
-remain bounded.
+2 and 4 CPU. The store lane and full release race suite use a 55-minute
+per-package deadlock bound; the service lane uses 45 minutes. The combined
+v0.17.84 candidate's whole-package race measurements were 2,084.275 seconds
+for store and 1,765.448 seconds for service, with two package workers,
+GOMAXPROCS=2 and no scheduler pauses. The bounds apply the same 1.5× measured
+wall-time rule as the earlier store sizing, rounded up to five-minute
+increments. The earlier 35-minute store bound left less than 16 seconds of
+margin on this combined source, and service exceeded its earlier 20-minute
+branch bound.
+
+Other branch race lanes retain their 20-minute bounds. These package
+watchdogs allow slower deadlock detection; individual test contexts and
+assertions retain their existing bounds. Go worker counts remain bounded.
+Native wall times do not establish CI resource headroom: qualify the combined
+source under the declared container CPU, heap and tmpfs envelopes.
 
 The contention test first checks committed reads
 while holding an uncommitted writer transaction, with a generous scaled

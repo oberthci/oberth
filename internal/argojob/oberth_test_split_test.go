@@ -120,8 +120,11 @@ else:
 				t.Fatal(err)
 			}
 			timeout := "-timeout=20m"
-			if group == "store" {
-				timeout = "-timeout=35m"
+			switch group {
+			case "store":
+				timeout = "-timeout=55m"
+			case "service":
+				timeout = "-timeout=45m"
 			}
 			want := []string{"test", "-race", "-v", "-count=1", "-p=2", timeout}
 			for _, pkg := range packages {
