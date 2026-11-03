@@ -2,11 +2,12 @@ package store
 
 import (
 	"errors"
-	"github.com/oberthci/oberth/internal/model"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/model"
 )
 
 func TestIssueRevisionChangesOnlyForRealMetadataChanges(t *testing.T) {
