@@ -798,10 +798,10 @@ func (s *Store) migrate(ctx context.Context, expectedLegacyHead *model.AuditHead
 			var foreignKey int
 			err := tx.QueryRowContext(ctx, `SELECT "table", rowid, parent, fkid FROM pragma_foreign_key_check('publications') LIMIT 1`).Scan(&table, &rowID, &parent, &foreignKey)
 			if err == nil {
-				return fmt.Errorf("%w: migration 41 refused: publications has orphaned foreign keys; run PRAGMA foreign_key_check on a copy and repair the source database before retrying", ErrSchemaIncompatible)
+				return fmt.Errorf("%w: migration %d refused: publications has orphaned foreign keys; run PRAGMA foreign_key_check on a copy and repair the source database before retrying", ErrSchemaIncompatible, publicationAbandonMigrationVersion)
 			}
 			if !errors.Is(err, sql.ErrNoRows) {
-				return fmt.Errorf("check publications foreign keys before migration 41: %w", err)
+				return fmt.Errorf("check publications foreign keys before migration %d: %w", publicationAbandonMigrationVersion, err)
 			}
 		}
 		if item.rawApply != nil {
@@ -859,22 +859,22 @@ type schemaIdentityQuerier interface {
 func (s *Store) verifySchemaIdentity(ctx context.Context, querier schemaIdentityQuerier) error {
 	// The discarded workspace build reused v39 for unrelated schema. Never
 	// try to repair that lineage by recording the current migrations over it.
-	var comments, expiry, v39 int
+	var comments, expiry, expiryMigration int
 	if err := querier.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_schema WHERE type='table' AND name='issue_comments'`).Scan(&comments); err != nil {
 		return fmt.Errorf("check discarded schema: %w", err)
 	}
 	if comments != 0 {
 		return fmt.Errorf("%w: issue_comments identifies a discarded workspace database; restore a v38 backup before starting Oberth", ErrSchemaIncompatible)
 	}
-	if err := querier.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version=39`).Scan(&v39); err != nil {
+	if err := querier.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version=?`, tokenExpiryMigrationVersion).Scan(&expiryMigration); err != nil {
 		return fmt.Errorf("check token expiry migration: %w", err)
 	}
-	if v39 != 0 {
+	if expiryMigration != 0 {
 		if err := querier.QueryRowContext(ctx, `SELECT count(*) FROM pragma_table_info('token_credentials') WHERE name='expires_at'`).Scan(&expiry); err != nil {
 			return fmt.Errorf("check token expiry column: %w", err)
 		}
 		if expiry != 1 {
-			return fmt.Errorf("%w: migration v39 is recorded but token_credentials.expires_at is missing; restore a v38 backup before starting Oberth", ErrSchemaIncompatible)
+			return fmt.Errorf("%w: migration v%d is recorded but token_credentials.expires_at is missing; restore a v38 backup before starting Oberth", ErrSchemaIncompatible, tokenExpiryMigrationVersion)
 		}
 	}
 	var identityTables int

@@ -29,8 +29,8 @@ func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	if err := validateMigrations(migrations, latestMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
-	if latestMigrationVersion != 41 {
-		t.Fatalf("latest migration version = %d, want 41", latestMigrationVersion)
+	if latestMigrationVersion != 42 {
+		t.Fatalf("latest migration version = %d, want 42", latestMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)

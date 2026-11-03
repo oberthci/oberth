@@ -94,5 +94,5 @@ END;
 
 CREATE TRIGGER publications_no_delete BEFORE DELETE ON publications BEGIN
  SELECT RAISE(ABORT, 'publications are append-only'); END;
-DELETE FROM schema_migrations WHERE version>=41;
+DELETE FROM schema_migrations WHERE version>=42;
 `

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -9,7 +10,7 @@ import (
 
 func TestRejectDiscardedWorkspaceDatabase(t *testing.T) {
 	for _, tc := range []struct{ name, sql, message string }{
-		{"v39_without_expiry", `ALTER TABLE token_credentials DROP COLUMN expires_at`, "token_credentials.expires_at"},
+		{"recorded_expiry_without_column", `ALTER TABLE token_credentials DROP COLUMN expires_at`, "token_credentials.expires_at"},
 		{"comments_at_v38", integrationDowngradeSQL + `CREATE TABLE issue_comments(id INTEGER PRIMARY KEY)`, "issue_comments"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -36,6 +37,58 @@ func TestRejectDiscardedWorkspaceDatabase(t *testing.T) {
 				if !errors.Is(err, ErrSchemaIncompatible) || !strings.Contains(err.Error(), tc.message) || !strings.Contains(err.Error(), "v38 backup") {
 					t.Fatalf("discarded database must fail with recovery guidance, got %v", err)
 				}
+			}
+		})
+	}
+}
+
+// This fixture retains the priority tables and ledger entry at v39, while
+// removing only the three integration migrations.
+func TestUpgradePriorityV39Database(t *testing.T) {
+	for _, opener := range []struct {
+		name string
+		open func(context.Context, string, Options) (*Store, error)
+	}{{"owner", Open}, {"admin", OpenAdminClient}, {"current", OpenCurrent}} {
+		t.Run(opener.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "priority-v39.sqlite")
+			s, err := OpenAdminClient(t.Context(), path, Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = s.db.ExecContext(t.Context(), publicationAbandonDowngradeSQL+`
+DROP TRIGGER issues_metadata_revision;
+ALTER TABLE issues DROP COLUMN revision;
+ALTER TABLE token_credentials DROP COLUMN expires_at;
+DELETE FROM schema_migrations WHERE version>=40;
+INSERT INTO priority_grants(identity,max_class,expires,granted_by)
+VALUES('operator', 'high', 999999999999999999, 'admin');`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			s, err = opener.open(t.Context(), path, Options{})
+			if err != nil {
+				t.Fatalf("upgrade priority v39 database: %v", err)
+			}
+			defer s.Close()
+			var version, grants int
+			if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil {
+				t.Fatal(err)
+			}
+			if version != 42 {
+				t.Fatalf("version=%d, want 42", version)
+			}
+			if err := s.db.QueryRow(`SELECT count(*) FROM priority_grants WHERE identity='operator'`).Scan(&grants); err != nil || grants != 1 {
+				t.Fatalf("priority grant not preserved: %d %v", grants, err)
+			}
+			for _, query := range []string{`SELECT expires_at FROM token_credentials`, `SELECT revision FROM issues`, `SELECT * FROM run_priority_requests`} {
+				rows, err := s.db.Query(query)
+				if err != nil {
+					t.Fatal(err)
+				}
+				rows.Close()
 			}
 		})
 	}
