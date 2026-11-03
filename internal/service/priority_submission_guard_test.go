@@ -67,7 +67,7 @@ func TestPriorityGuardSubmissionLeavesExistingRunsAndStartsNext(t *testing.T) {
 		t.Fatal(got)
 	}
 	a := f.branch(t, f.terraform, "normal-a", "b")
-	b := f.branch(t, f.beacon, "normal-b", "c")
+	b := f.branch(t, f.exampleService, "normal-b", "c")
 	f.awaitAdmission(t, a, "normal waiting", func(o *model.AdmissionObservation) bool { return o != nil && o.State == "waiting" })
 	before := map[string]model.Run{}
 	for _, r := range []model.Run{running, a, b} {
@@ -78,7 +78,7 @@ func TestPriorityGuardSubmissionLeavesExistingRunsAndStartsNext(t *testing.T) {
 		before[r.ID] = got
 	}
 	admin := true
-	urgent, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{PriorityRequest: model.PriorityRequest{Priority: model.PriorityHighest, PriorityReason: "release blocker", UnscopedAdmin: &admin}, EventID: "priority-guard", Repository: f.beacon, Branch: "urgent", SHA: strings.Repeat("d", 40), Actor: "operator"})
+	urgent, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{PriorityRequest: model.PriorityRequest{Priority: model.PriorityHighest, PriorityReason: "release blocker", UnscopedAdmin: &admin}, EventID: "priority-guard", Repository: f.exampleService, Branch: "urgent", SHA: strings.Repeat("d", 40), Actor: "operator"})
 	if err != nil {
 		t.Fatal(err)
 	}

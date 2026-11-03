@@ -16,9 +16,9 @@ import (
 // switch; repositories opt into numeric admission by committing declarations.
 type DeclaredAdmissionConfig struct {
 	ExtendedResources map[string]int64
-	Disabled    bool
-	CPUMilli    int64
-	MemoryBytes int64
+	Disabled          bool
+	CPUMilli          int64
+	MemoryBytes       int64
 	// Headroom is max(fixed bytes, percentage of declared run memory). Nil
 	// selects the default independently of CPU/memory budgets; zero is explicit.
 	MemoryHeadroomBytes   *int64
