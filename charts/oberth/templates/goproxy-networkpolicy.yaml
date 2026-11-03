@@ -1,7 +1,9 @@
 {{- $goProxy := .Values.argo.goProxy | default dict -}}
 {{- if and $goProxy.enabled .Values.networkPolicy.enabled }}
-# Ingress policy allowing ONLY Argo pipeline pods to reach the Go module proxy
-# port on the Oberth server. The podSelector matches the server pod; the ingress
+# Ingress policy allowing only Argo pipeline pods to reach the Go module proxy
+# port, while preserving public SSH/HTTPS access. Selecting the server pod for
+# Ingress isolates all its ports, so the public listeners need explicit allows.
+# The podSelector matches the server pod; the proxy ingress
 # rule matches pods in the pipeline namespace carrying the oberth.ci/trigger
 # label (set by applyServerMetadata on every pipeline pod's PodMetadata).
 #
@@ -32,5 +34,12 @@ spec:
                 operator: Exists
       ports:
         - port: {{ $goProxy.port | default 8444 }}
+          protocol: TCP
+    # Keep the normal listeners reachable from any source. Named pod ports
+    # refer to the listeners, independently of Service and NodePort mappings.
+    - ports:
+        - port: ssh
+          protocol: TCP
+        - port: https
           protocol: TCP
 {{- end }}
