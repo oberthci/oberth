@@ -31,7 +31,7 @@ INSERT OR IGNORE INTO run_priority_requests(run_id,requested,accepted,reason,act
  SELECT id,'',` + basePrioritySQL + `,` + priorityReasonSQL + `,actor,'' FROM runs
  WHERE status IN ('queued','running') AND (` + basePrioritySQL + `) IN ('high','highest');`
 
-const requestedPrioritySQL = `(SELECT accepted FROM run_priority_requests WHERE run_id=id AND requested!='')`
+const requestedPrioritySQL = `(SELECT accepted FROM run_priority_requests WHERE run_id=id AND requested!='' AND accepted IN ('high','highest') AND refusal='')`
 
 // Explicit priority, including an admin bump, survives later pushes. RC runs
 // retain the administrator's existing live classification.
@@ -101,7 +101,7 @@ func (s *Store) ListPriorityGrants(ctx context.Context) ([]model.PriorityGrant, 
 }
 
 // Resolve permission in the same transaction as insertion and supersession.
-// Refusal changes only urgency; the accepted push still receives a normal run.
+// Refusal is visible metadata only; the accepted push keeps its automatic class.
 func (s *Store) submissionPriorityTx(ctx context.Context, tx *sql.Tx, spec model.RunSpec, now int64) (model.RunPriority, string, string, error) {
 	if spec.Priority == "" {
 		return "", "", "", nil
