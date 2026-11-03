@@ -21,7 +21,7 @@ func runGitSSH(ctx context.Context, arguments []string, input io.ReadCloser, out
 	defer done()
 	err = gitssh.Run(ctx, arguments, os.Getenv(gitssh.ConfigEnvironment), input, output, diagnostics)
 	if err != nil {
-		_, _ = fmt.Fprintln(diagnostics, "oberth git-ssh: transport refused or upstream Git service failed")
+		_, _ = fmt.Fprintln(diagnostics, gitssh.Diagnostic(err))
 	}
 	return gitssh.ExitCode(err)
 }

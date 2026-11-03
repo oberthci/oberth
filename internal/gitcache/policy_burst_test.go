@@ -71,7 +71,7 @@ func TestPolicyRefreshTransportClassification(t *testing.T) {
 		message   string
 		transient bool
 	}{
-		{"oberth git-ssh: transport refused or upstream unavailable", true},
+		{"oberth git-ssh: temporary transport failure", true},
 		{"connection reset by peer", true},
 		{"git command failed: exit status 128", false},
 		{"oberth git-ssh: transport refused or upstream: permission denied", false},
@@ -100,7 +100,7 @@ func (b *refusingPolicyUpstream) execute(ctx context.Context, spec commandSpec, 
 	b.mu.Unlock()
 	defer func() { b.mu.Lock(); b.active--; b.mu.Unlock() }()
 	if refuse {
-		return "", errors.New("git command failed: exit status 128: oberth git-ssh: transport refused or upstream unavailable")
+		return "", errors.New("git command failed: exit status 128: oberth git-ssh: temporary transport failure")
 	}
 	return b.gitBackend.execute(ctx, spec, capture)
 }
