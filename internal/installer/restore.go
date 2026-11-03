@@ -2,7 +2,7 @@ package installer
 
 // `oberth restore`: rebuild an installation's state from an `oberth backup`
 // archive onto a (typically fresh) install. It automates the hand restore of
-// example-node on 2026-10-16 (issues 038 and 048): validate the database offline,
+// an installation on 2026-10-16 (issues 038 and 048): validate the database offline,
 // write OpenBao state field-for-field and verify it by read-back, scale the
 // server to zero, swap the database on its volume keeping the previous one
 // aside, restore the secret-access table, remove Argo Workflows whose runs

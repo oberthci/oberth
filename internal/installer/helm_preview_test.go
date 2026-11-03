@@ -270,7 +270,7 @@ func TestOberthHelmArgsNoAtomicOnInstallPath(t *testing.T) {
 // A re-run of `oberth install --install-secretstore` against an existing
 // release previews before the OpenBao phase. The preview must render the
 // planned secret-store values, not an empty secretstore.address that the
-// chart schema rejects (observed on example-node, v0.17.26 setup retry).
+// chart schema rejects (observed on an installation, v0.17.26 setup retry).
 func TestPreviewHelmUpgradePlansSecretStoreValues(t *testing.T) {
 	t.Parallel()
 
