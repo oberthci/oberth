@@ -2,9 +2,10 @@ package store
 
 import (
 	"errors"
-	"github.com/oberthci/oberth/internal/model"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/model"
 )
 
 func TestTerminalRunStepEvidenceCannotBeRewritten(t *testing.T) {
