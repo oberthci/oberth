@@ -3473,7 +3473,6 @@ Full scopes, exclusions and overhead:
 
 The contract guard runs in `.oberth/build.yaml` as `contract-guard`.
 Canonical owner: Oberth.
-Generator: `gen/contracts/generate.py` (the selected contract profile).
 The emitted guard is a build artifact. Regenerate it from the owner when
 changing rules; review repository baselines separately.
 
