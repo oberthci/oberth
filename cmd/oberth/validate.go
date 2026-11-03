@@ -28,8 +28,8 @@ func runValidate(_ context.Context, arguments []string, output io.Writer) error 
 	maxVMs := flags.Int("kubevirt-max-vms", 0, "per-run VMI budget to validate against, as a KubeVirt grant would set it (default 2)")
 	maxCores := flags.Int("kubevirt-max-cores", 0, "per-run peak VMI cores to validate against (default 6)")
 	maxMemory := flags.String("kubevirt-max-memory", "", "per-run peak VMI memory to validate against (default 12Gi)")
-	allowUnresolved := flags.Bool("allow-unresolved-fragments", false,
-		"report fragment references without failing; their contents are still unchecked")
+	flags.Bool("allow-unresolved-fragments", false,
+		"deprecated: unresolved fragments still fail validation because admission requires their pinned contents")
 	flags.StringVar(&imagePrefixes, "runner-image-prefixes", strings.Join(pipeline.DefaultRunnerImagePrefixes, ","), "comma-separated allowlist of permitted runner image prefixes")
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -62,18 +62,16 @@ func runValidate(_ context.Context, arguments []string, output io.Writer) error 
 		}
 		target.kubeVirtBudget = argoworkflow.VMIBudget{MaxVMs: budget.MaxVMs, MaxCores: budget.MaxCores, MaxMemory: *resource.NewQuantity(budget.MaxMemoryBytes, resource.BinarySI)}
 	}
-	target.allowUnresolvedFragments = *allowUnresolved
 	return executeValidate(target, output)
 }
 
 // validateTarget names the locations every check derives from.
 type validateTarget struct {
-	allowUnresolvedFragments bool
-	repoRoot                 string   // the repository root
-	imagePrefixes            []string // administrator-allowed runner image prefixes
-	kubeVirt                 bool
-	containerDiskPrefixes    []string
-	kubeVirtBudget           argoworkflow.VMIBudget // zero: the default grant budget
+	repoRoot              string   // the repository root
+	imagePrefixes         []string // administrator-allowed runner image prefixes
+	kubeVirt              bool
+	containerDiskPrefixes []string
+	kubeVirtBudget        argoworkflow.VMIBudget // zero: the default grant budget
 }
 
 // resolveValidateTarget accepts the same spellings a developer reaches for:
@@ -160,18 +158,13 @@ func executeValidate(target validateTarget, output io.Writer) error {
 			continue
 		}
 		if len(references) != 0 {
+			// No offline fragment loader is configured here. Runtime admission
+			// runs after Resolve expands the pinned fragment contents; without
+			// them none of this document's admission checks can be certified.
 			for _, reference := range references {
-				if target.allowUnresolvedFragments {
-					report.line("  --  fragment %s not resolved locally; its contents are unchecked", reference)
-				} else {
-					report.problem("fragment %s cannot be resolved locally; the server resolves and admits it at push time. "+
-						"Re-run with --allow-unresolved-fragments to check the rest of this document", reference)
-				}
+				report.problem("fragment %s cannot be resolved offline; admission requires the fully resolved pipeline with pinned fragment contents. "+
+					"The server resolves and admits it at push time; --allow-unresolved-fragments cannot bypass admission", reference)
 			}
-			if !target.allowUnresolvedFragments {
-				continue
-			}
-			report.line("  ok  %d fragment reference(s), contents unchecked", len(references))
 			continue
 		}
 

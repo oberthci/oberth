@@ -69,6 +69,7 @@ func (gate *weightedAdmission) adopt(run model.Run, size pipeline.Size, demand a
 			return nil, fmt.Errorf("%w: invalid adopted pod demand", ErrAdoptionRefused)
 		}
 		copy := *pods[0]
+		copy.DeclaredTotal = pods[0].DeclaredTotal.Clone()
 		peak = &copy
 	}
 	if !size.Valid() || (run.ConcurrencyGroup != "" && !argoworkflow.ValidConcurrencyGroup(run.ConcurrencyGroup)) {

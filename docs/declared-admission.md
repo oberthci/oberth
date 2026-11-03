@@ -20,10 +20,36 @@ new declared runs; it does not convert them to size admission.
 Legacy workflows without CPU/memory requests, including limits-only documents,
 retain size admission, with a deprecation warning in `resource_message`
 directing the repository to commit measured
-requests/limits in git. Their combined weight reserves the same fraction of
-both host budgets when sharing with declared work. A legacy whole-budget XL
-retains its existing exclusion. The warning survives submission and restart
+requests/limits in git. Each run reserves a fixed CPU/memory amount by size,
+independent of host budgets and configured weights: S 1 CPU/2Gi, M 2 CPU/4Gi,
+L 3 CPU/8Gi, XL 6 CPU/16Gi. These whole-run charges include their safety margin;
+declared-run executor and memory headroom additions do not apply. Administrators
+can override them with `--admission-legacy-resources`, for example
+`'{"L":{"cpu_milli":4000,"memory_bytes":10737418240}}'`, or the chart's
+`admission.legacyResources` map in the same format. Omitted sizes retain defaults.
+Both fields must be positive, with CPU at most 1000000 millis and memory at most
+2^50 bytes. Startup rejects a configured charge exceeding the host budget,
+naming its size and CPU or memory dimension. With XL=0, the exclusive XL charge
+is capped at the host budget in each dimension, so it can still run alone on
+smaller hosts. Admission and status report the same capped charge. A shared XL
+(positive XL weight) keeps its full fixed charge. An omitted size whose default
+charge exceeds the budget is refused before waiting, except for exclusive XL.
+Size weights, FIFO/backfill, pressure and run caps still apply independently.
+A legacy whole-budget XL retains its existing exclusion. The warning survives submission and restart
 through immutable timing metadata; `display_reason` keeps its existing meaning.
+
+Fixed charges can lower legacy concurrency on small budgets. On the default
+8 CPU / 16Gi budget, two L runs plus an M have weight 8/8 but reserve 20Gi
+(8Gi + 8Gi + 4Gi), so the M waits. Administrators can lower
+`admission.legacyResources` to reviewed charges or raise the numeric budgets.
+
+`system_status.admission.reservations`, admission blockers and per-run admission
+observations expose `legacy_resources: {cpu_milli, memory_bytes}` for prepared
+size-admitted runs. Declared runs expose `declared_resources` instead; claims
+still preparing have neither field. The dashboard labels legacy sizing and its
+fixed reservation in run details and queued-size tooltips. These are reservations,
+not measurements or Kubernetes resource requests. Size-admitted trusted contract
+runs are also marked legacy even when their source contains declarations.
 
 ## Resource accounting
 
@@ -36,8 +62,10 @@ trusted submission and release preflight; see [declared resources](declared-reso
 Static DAG and step graphs account for independent calls, dependency ordering,
 nested and inline templates, container sets and authored helpers. Init demand
 uses a conservative scheduling envelope, including restartable init containers.
-Conditions are assumed to run; early-start and OR dependencies earn no ordering
-credit. Mutable item counts earn no reductions beyond enforced parallelism.
+Conditions are assumed to run. Successful dependencies and terminal-state OR
+groups for one predecessor establish ordering; mixed-task OR, negation and
+early-start dependencies earn no ordering credit. Mutable item counts earn no
+reductions beyond enforced parallelism.
 
 Workflow `parallelism` caps concurrent workflow pods. A steps/DAG template limit
 caps its concurrent child invocations within that invocation. Nested limits
@@ -45,6 +73,23 @@ retain each child's full envelope. Dynamic loops require an applicable bound.
 Unsupported graphs with a workflow bound reserve the largest possible pod per
 slot. Unbounded sequences, hooks and exit handlers without a supported bound
 are refused. Analysis has explicit size, depth and work bounds.
+
+Operator views distinguish the request sum from the concurrent reservation.
+In `run_get`, inspect `scheduling.admission.declared_resources`; in
+`system_status`, inspect each admission reservation's `declared_resources`:
+
+- `declared_total` sums every statically expanded pod invocation, including
+  sequential steps and all static loop iterations before parallelism limits.
+- `peak` is the independent CPU, memory, pod and extended-resource concurrency
+  envelope used for admission, before server allowances.
+- The outer `cpu_milli`, `memory_bytes`, `pods` and `extended_resources` are the
+  charged reservation, including the server allowances described below.
+
+A missing `declared_total` means unknown, never zero: dynamic loops, graphs beyond
+analysis bounds, VM lifetime accounting and older saved reservations may lack
+it. New totals survive the sealed create record and restart adoption. Completed
+runs retain their raw peak and optional total in timing `resources.pod_demand`.
+Totals are diagnostic and never determine admission or change a saved peak.
 
 Each peak concurrent executor pod adds 100m CPU and 256Mi memory. Each declared
 run also reserves the larger of a fixed minimum (default 1Gi) and a percentage
@@ -70,7 +115,15 @@ IO is not inferred from CPU or memory declarations. The coarse run cap,
 disk-space floor and host IO-pressure gate remain in force for declared and
 legacy work. A positive IO run cap can only narrow concurrency. Existing queue
 priority, FIFO ordering within priority, bounded backfill, repository groups,
-cancellation and uncertain-create ownership remain in force.
+cancellation and uncertain-create ownership remain in force. Backfill stops at
+`max_head_wait_seconds` (20 minutes by default), using the persisted first head-wait
+origin across restarts and priority displacement. Before that limit, measured
+candidates must finish before the earlier of the predicted head start and the
+remaining head-wait window. When running durations are unknown, a measured
+candidate may use existing spare capacity only if it finishes within that
+window. Same-class coexistence still requires proof the head fits beside all
+surviving grants at its reserved start. Unmeasured candidates cannot use a
+fixed duration guess. Estimates are forecasts; running work is never preempted.
 
 | Server flag | Chart value | Default |
 | --- | --- | --- |

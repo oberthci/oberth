@@ -66,6 +66,8 @@ func TestDefaultWeightsKeepXLExclusive(t *testing.T) {
 func TestFiniteXLWeightSharesTheHost(t *testing.T) {
 	weights := SizeWeights{S: 1, M: 2, L: 3, XL: 11}
 	gate := newWeightedAdmissionForJobsWeights(8, weights)
+	// Exercise finite weights without a tighter numeric resource limit.
+	gate.resources.CPUMilli, gate.resources.MemoryBytes = 32000, 64<<30
 	scheduler := &Scheduler{admission: gate}
 	releaseXL := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "xl", Repo: "ebpf", Ref: "main", Size: pipeline.XL})
 	defer releaseXL()
@@ -86,6 +88,7 @@ func TestFiniteXLWeightSharesTheHost(t *testing.T) {
 
 	// An XL waiting for weight says its configured weight, not a drain.
 	head := newWeightedAdmissionForJobsWeights(8, weights)
+	head.resources.CPUMilli, head.resources.MemoryBytes = 32000, 64<<30
 	hold := acquireRequestWithinBudget(t, head.reserve(1), admissionRequest{RunID: "m", Size: pipeline.L})
 	defer hold()
 	for index := int64(2); index <= 3; index++ {
@@ -105,6 +108,8 @@ func TestFiniteXLWeightSharesTheHost(t *testing.T) {
 // no S run can use: 15 of 16 used leaves no room for an S of weight 2.
 func TestSpareClaimNeedsRoomForAnSRun(t *testing.T) {
 	gate := newWeightedAdmissionForJobsWeights(4, SizeWeights{S: 2, M: 4, L: 5, XL: 0}) // budget 16
+	// Leave enough numeric capacity to test the minimum spare weight alone.
+	gate.resources.CPUMilli, gate.resources.MemoryBytes = 32000, 64<<30
 	for index, size := range []pipeline.Size{pipeline.L, pipeline.L, pipeline.L} {
 		acquireRequestWithinBudget(t, gate.reserve(int64(index+1)), admissionRequest{RunID: "l", Size: size})
 	}

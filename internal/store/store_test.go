@@ -50,6 +50,13 @@ func openTestStore(t *testing.T, path string, now *time.Time) *Store {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Disposable fixtures retain real file-backed WAL/locking semantics but do
+	// not need power-loss durability. This connection-local setting lives only
+	// in the test helper; production opens (including reopen tests) still use FULL.
+	if _, err := s.db.ExecContext(t.Context(), `PRAGMA synchronous = OFF`); err != nil {
+		_ = s.Close()
+		t.Fatal(err)
+	}
 	if _, err := s.ReconcileInconsistentPublications(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +144,16 @@ func testRunSpec(repoID int64, ref, sha string) model.RunSpec {
 
 func TestOpenAppliesMigrationsAndSQLitePragmas(t *testing.T) {
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
-	s := openTestStore(t, filepath.Join(t.TempDir(), "oberth.db"), &now)
+	// Exercise production initialization without the disposable-fixture override.
+	s, err := CreateGenesis(t.Context(), filepath.Join(t.TempDir(), "oberth.db"), Options{Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { requireStoreNoError(t, s.Close()) })
+	var synchronous int
+	if err := s.db.QueryRowContext(t.Context(), `PRAGMA synchronous`).Scan(&synchronous); err != nil || synchronous != 2 {
+		t.Fatalf("production synchronous=%d, want FULL (2): %v", synchronous, err)
+	}
 
 	var version int
 	if err := s.db.QueryRowContext(context.Background(), `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil {
@@ -662,6 +678,9 @@ func TestRestartRecoveryRetainsBranchWorkflows(t *testing.T) {
 	if _, err := s.SetRunWorkflowName(ctx, run.ID, "job-before-restart"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := s.MarkRunAdmitted(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -794,6 +813,9 @@ func TestRequeueStrandedRunReplacesOwnerRestartObligation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := s.SetRunWorkflowName(ctx, run.ID, "job-stranded"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkRunAdmitted(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
 	// A credentialed (ci-secrets tier) branch run is requeue-eligible; the
@@ -1933,6 +1955,9 @@ func TestOwnerRecoveryRetiresLegacyBranchRestartCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := s.SetRunWorkflowName(context.Background(), run.ID, "old-owner-workflow"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkRunAdmitted(context.Background(), run.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(`INSERT INTO run_cancellations(run_id,job_name,superseded_by,reason,created_at) VALUES(?,?,'','owner_restart',?)`, run.ID, "old-owner-workflow", unixNano(now)); err != nil {

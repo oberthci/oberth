@@ -195,7 +195,7 @@ call the proxy hostname directly.
 | `status` | CI status for a SHA or branch, including the failed step |
 | `logs` | One named step's log output for a SHA, optionally filtered |
 | `run_resources` | Read-only resource history, numeric git declarations and p95/max suggestions; repo or exact run, ref/default/any, last 1..100, include_failed, JSON or YAML; see [measured requests](measured-requests.md) |
-| `run_get` | One durable run and its steps by full run ID or unique 8+ character prefix; `summary:true` returns only status/failure and compact steps |
+| `run_get` | One durable run and its steps by full run ID or unique 8+ character prefix; `summary:true` returns repository/ref/SHA, admission context, superseded status, failure and compact steps |
 | `run_retry` | Requeue the newest interrupted or infrastructure-failed branch run using its same repo/ref/SHA; workflow-level failures without a failed step qualify, while test failures and older runs are refused |
 | `run_rerun` | Rerun a failed or interrupted run at the same SHA and ref (`id`, optional `reason`, admin-only `force`), linked by `rerun_of`: covers failed steps (flaky tests), non-newest runs and tag/release runs. Refused while the ref has an active run, once a branch moved past the SHA, for promotion/plan/apply runs, and for a tag that is already published or green or whose release failed only in publication (use `publish_retry` on that run). A publishing-only failure is re-pushed as `publish_retry` does instead of re-run. Non-admins: branch-push runs; tags need admin and `force`. Audited as `run.rerun` |
 | `run_cancel` | Cancel one queued, waiting or running run (audited; `id`, optional `reason`, admin-only `force`). The run becomes `interrupted` with phase `cancelled` and a reason naming the caller; a claimed run's Workflow is deleted and its admission released at once; it is never re-fired and opens no CI issue. Non-admins: branch-push runs outside a concurrency group only. Protected priority runs can be cancelled only by their requester or an unscoped admin; the existing run-cancel policy still applies. Admins: any run, with `force` for tag/release and apply runs. Cancelling promotion CI fails the promotion without merging. Terminal runs are refused |
@@ -373,7 +373,7 @@ step: a single step can exceed a model's context window.
 | `repo_list` | List registered repositories with upstream and probe state |
 | `repo_archive` / `repo_unarchive` | Archive or restore a repository, preserving history (unscoped admin only); archived repositories refuse new grants |
 | `repo_remove` | Remove a repository mapping and its Git cache (admin-only) |
-| `run_list` | List recent runs with optional repo/ref filter (bounded page) |
+| `run_list` | List runs with repository/ref/SHA, size/declared demand, queue position and superseded status; optional repo/ref and `superseded:true` filters (bounded page) |
 | `audit_list` | Admin-only: verified audit-chain entries newest first, filtered by action prefix, actor, repo and time range (paged) |
 | `schedule_list` | Schedules declared in `.oberth/schedule.yaml`: cron, next run, last outcome, pause (scoped uplinks see their repositories) |
 | `schedule_pause` | Admin-only: pause one schedule entry (audited `schedule.pause`) |
@@ -497,6 +497,38 @@ step execution or a terminal run. No cluster mutation or extra permissions are
 required.
 
 ## Run list views
+
+Run rows in `run_list` and `/api/runs` carry `Repo` (repository name),
+`Ref`, `SHA`, `size`, `declared_resources`, `QueuePosition` when available,
+and the boolean `superseded`. Full run detail carries the same context in
+`Run`; compact `run_get` uses `repo`, `ref`, `sha` and `queue_position`. Size
+and declared resources come from the current admission reservation, without polling
+Workflow/Pod state or reading a checkout. An unknown size is `""` and unknown
+demand is `null`, including before the scheduler has read the pipeline and
+after the reservation is released. Declared demand is the CPU, memory and Pod
+reservation, including helpers/headroom, rather than measured usage. Scoped
+uplinks continue to omit global queue positions.
+
+`superseded` is true for a branch run when a run with a greater accepted run
+sequence is queued or running in the same lane: repository, ref kind, ref and
+schedule entry, as in enqueue supersession. Named schedules are independent of
+ordinary branch pushes and of other schedule entries. Legacy unnamed schedules
+share the ordinary branch lane. Tags and promotion attempts never qualify and
+cannot supersede branch work. A newer terminal run does not qualify.
+The signal is independent of priority, SHA equality, admission order and page
+boundaries. Priority-protected runs and runs with pending publications can
+still match. This is a live read observation, distinct from durable
+`SupersededBy` cancellation history; it does not compare with an upstream branch
+head or guarantee that a matching run is safe to cancel.
+
+Use `run_list({"superseded":true})` or `/api/runs?superseded=true` to find
+matching runs in one read, optionally with `repo`, `ref` and `view`. Omitted or
+false leaves the list unfiltered. Filtering happens before the page limit,
+while queue positions retain their global rank. To inspect only active work,
+use `view:"active"`; results can include running work as well as queued work.
+Review each matching run and explicitly call the admin `run_cancel` tool with
+its ID and a reason. Listing never cancels work; existing priority/protection
+and cancellation authorization checks still apply.
 
 `run_list` and `/api/runs` take an optional `view`. Omitted or `all`, the
 first page carries the whole bounded queue in position order, then admitted
@@ -690,13 +722,14 @@ read tool acquires or renews locks, and neither changes stored content. This is
 live pagination, not a point-in-time snapshot.
 
 For a compact run read, use `run_get({"id":"<run ID or unique 8+ character prefix>","summary":true})`.
-It returns `id`, `status`, `phase`, `failed_burn`, `failed_step`, `error`, and
-`steps`. Each step contains `burn`, `name`, `status`, `started_at`, and
-`finished_at`; unknown times are null and an empty step list is `[]`. Burn
-names distinguish steps with the same name in different burns. This read omits
-retained timing, repository details, diagnostics, and telemetry and does not
-load the retained timing record. Omit `summary` or pass false for the existing
-full `Run`/`Steps`/`Repository` response. Authorization and upstream scope are
+It returns `id`, `repo` (repository name), `ref`, `sha`, `size`,
+`declared_resources`, `queue_position` when available, `superseded`, `status`,
+`phase`, `failed_burn`, `failed_step`, `error`, and `steps`. Each step contains
+`burn`, `name`, `status`, `started_at`, and `finished_at`; unknown times are null
+and an empty step list is `[]`. Burn names distinguish steps with the same name in different burns. This read omits
+retained timing, the full repository record, diagnostics, and telemetry. It
+does not load the retained timing record. Omit `summary` or pass false for
+the existing full `Run`/`Steps`/`Repository` response. Authorization and upstream scope are
 the same for compact and full reads.
 
 ### Server-side wait correlation
@@ -848,14 +881,14 @@ remove supersession protection from a build already classified as priority.
 
 The queue orders highest, high, then normal, with acceptance order within each
 class and the existing starvation bound. A waiting priority head still needs
-the declared budget and pressure gate. Measured EASY backfill admits later work
-when its measured p95 ends strictly before the head's reserved start. Work in
-the same effective and base priority classes may also coexist when the head
-still fits alongside the candidate and all surviving grants at that start.
-Lower classes cannot use this coexistence exception. Work without enough
-measurement samples can use only same-class coexistence. These rules still
-apply while the queue reports draining after the head-wait bound; running work
-is never preempted.
+the declared budget and pressure gate. Measured backfill may finish before the
+earlier of the head's reserved start and the remaining head-wait window. If
+running durations are unknown, measured short work may use existing capacity
+within that window. Same effective and base priority classes may also coexist
+when the head still fits alongside all surviving grants at its reserved start.
+Unmeasured candidates use only this proven coexistence; lower classes cannot.
+At `max_head_wait_seconds`, new backfill stops and existing grants drain for the
+head. Running work is never preempted.
 
 For an urgent individual run, call `run_priority` with
 `{"run_id":"<exact ID>","priority":"highest","reason":"release blocker"}`.

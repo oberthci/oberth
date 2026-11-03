@@ -128,6 +128,12 @@ type RepositorySpec struct {
 }
 
 type Run struct {
+	// Read-side identity and admission context; never part of the durable run row.
+	Repo              string
+	Superseded        bool               `json:"superseded"`
+	Size              string             `json:"size"`
+	DeclaredResources *DeclaredResources `json:"declared_resources"`
+
 	// ResourceMessage is advice, separate from the exact status vocabulary.
 	ResourceMessage string `json:"resource_message,omitempty"`
 
@@ -218,6 +224,7 @@ type RunResult struct {
 }
 
 type RunListFilter struct {
+	Superseded   bool
 	LatestPerRef bool
 	RepoID       int64
 	Ref          string

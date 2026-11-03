@@ -184,7 +184,7 @@ func TestHostKeyMismatchRefusesBeforeAuthentication(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(10*time.Second))
 	defer cancel()
 	err = Run(ctx, []string{"git@127.0.0.1", "git-upload-pack '/fixture'"}, config, io.NopCloser(strings.NewReader("")), io.Discard, io.Discard)
-	if err == nil || ExitCode(err) != 255 {
+	if err == nil || ExitCode(err) != 126 {
 		t.Fatalf("mismatch accepted: %v", err)
 	}
 	<-completed

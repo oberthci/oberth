@@ -242,7 +242,7 @@ func runServe(ctx context.Context, arguments []string, output io.Writer) error {
 
 func parseServeOptions(arguments []string, output io.Writer) (serveOptions, error) {
 	options := serveOptions{declaredAdmission: service.DefaultDeclaredAdmissionConfig()}
-	var extendedResourceBudgets string
+	var extendedResourceBudgets, legacyResourceCharges string
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.DurationVar(&options.uplinkTokenPolicy.DefaultTTL, "uplink-token-default-ttl", model.DefaultUplinkTokenTTL, "default lifetime for new uplink bearer tokens (90 days)")
 	flags.DurationVar(&options.uplinkTokenPolicy.MaxTTL, "uplink-token-max-ttl", model.MaximumUplinkTokenTTL, "maximum new uplink bearer lifetime (hard ceiling 8760h / 365 days)")
@@ -272,6 +272,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.Float64Var(&options.kubernetesQPS, "kubernetes-client-qps", 50, "Kubernetes API requests per second per server client")
 	flags.IntVar(&options.kubernetesBurst, "kubernetes-client-burst", 100, "Kubernetes API burst allowance per server client")
 	flags.IntVar(&options.maxConcurrent, "max-concurrent-jobs", 3, "maximum concurrent Jobs (boot default)")
+	flags.StringVar(&legacyResourceCharges, "admission-legacy-resources", "{}", "JSON map of sizes S/M/L/XL to fixed cpu_milli and memory_bytes charges; missing sizes default to 1000/2Gi, 2000/4Gi, 3000/8Gi, 6000/16Gi")
 	flags.StringVar(&extendedResourceBudgets, "admission-extended-resources", "{}", "JSON map of qualified extended-resource names to integer capacity; no implicit capacity")
 	flags.BoolVar(&options.declaredAdmission.Disabled, "disable-declared-admission", false, "administrator kill switch: refuse new declared runs; undeclared workflows retain deprecated size admission")
 	flags.Int64Var(&options.declaredAdmission.CPUMilli, "admission-cpu-millis", 8000, "CPU budget for declared workflow and VM demand, excluding platform reserve")
@@ -282,7 +283,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 
 	flags.StringVar(&options.maxConcurrentFile, "max-concurrent-jobs-file", "", "mounted ConfigMap key to reload max concurrent Jobs without restart; invalid or missing keeps the last good value")
 	flags.StringVar(&options.admissionSizeWeights, "admission-size-weights", service.DefaultSizeWeights.String(), "admission weight per size as S=..,M=..,L=..,XL=..; XL=0 is the whole budget (an XL run runs alone), a positive XL lets XL share the host; the budget is --max-concurrent-jobs M runs (#1021)")
-	flags.DurationVar(&options.admissionMaxHeadWait, "admission-max-head-wait", service.DefaultMaxHeadWait, "time before admission reports draining for the head; measured p95 backfill may continue if it preserves the predicted head start (0 = strict FIFO)")
+	flags.DurationVar(&options.admissionMaxHeadWait, "admission-max-head-wait", service.DefaultMaxHeadWait, "maximum head-wait window for new admission backfill; after it expires, drain existing grants for the head (0 = strict FIFO)")
 	defaults := service.DefaultAdmissionPressureConfig()
 	flags.BoolVar(&options.admissionPressure.Enabled, "admission-pressure-enabled", defaults.Enabled, "gate new runs by host CPU and IO some PSI avg10")
 	flags.Float64Var(&options.admissionPressure.CPUSomeAvg10, "admission-pressure-cpu-some-avg10", defaults.CPUSomeAvg10, "CPU some PSI avg10 threshold in percent")
@@ -387,14 +388,17 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	if err := json.Unmarshal([]byte(extendedResourceBudgets), &options.declaredAdmission.ExtendedResources); err != nil {
 		return serveOptions{}, err
 	}
-	if err := options.declaredAdmission.Validate(); err != nil {
-		return serveOptions{}, err
+	if err := json.Unmarshal([]byte(legacyResourceCharges), &options.declaredAdmission.LegacyResources); err != nil {
+		return serveOptions{}, fmt.Errorf("parse legacy resource charges: %w", err)
 	}
 	weights, err := service.ParseSizeWeights(options.admissionSizeWeights)
 	if err != nil {
 		return serveOptions{}, fmt.Errorf("serve: --admission-size-weights: %w", err)
 	}
 	options.sizeWeights = weights
+	if err := options.declaredAdmission.ValidateForSizeWeights(weights); err != nil {
+		return serveOptions{}, err
+	}
 	if options.admissionPressure.Mode == "" {
 		return serveOptions{}, errors.New("serve: --admission-pressure-mode must be observe or enforce")
 	}

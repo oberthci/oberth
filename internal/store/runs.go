@@ -154,6 +154,33 @@ func (s *Store) requeueStrandedRunTx(ctx context.Context, tx *sql.Tx, run model.
 			return model.Run{}, err
 		}
 	}
+	return s.resetRunAfterRestartTx(ctx, tx, run, now)
+}
+
+// A claim is persisted as running before weighted admission. Owner startup
+// proves the claiming worker is gone. Restore that claim for every trigger,
+// including promotion, without creating a new run or interrupting its promotion.
+// The deterministic Workflow name is recorded before admission, so its presence
+// alone does not imply submission or authorize a Kubernetes deletion.
+func (s *Store) recoverWaitingRunTx(ctx context.Context, tx *sql.Tx, run model.Run, now int64) (bool, error) {
+	if run.Status != model.RunRunning || run.Phase != "waiting" || run.StartedAt != nil {
+		return false, nil
+	}
+	var safe bool
+	if err := tx.QueryRowContext(ctx, `SELECT
+ NOT EXISTS(SELECT 1 FROM step_results WHERE run_id=?)
+ AND NOT EXISTS(SELECT 1 FROM publications WHERE run_id=?)
+ AND NOT EXISTS(SELECT 1 FROM vm_executions WHERE run_id=?)`, run.ID, run.ID, run.ID).Scan(&safe); err != nil {
+		return false, err
+	}
+	if !safe {
+		return false, nil
+	}
+	_, err := s.resetRunAfterRestartTx(ctx, tx, run, now)
+	return err == nil, err
+}
+
+func (s *Store) resetRunAfterRestartTx(ctx context.Context, tx *sql.Tx, run model.Run, now int64) (model.Run, error) {
 	// Preserve prior timing evidence while closing the abandoned admission episode.
 	if _, err := tx.ExecContext(ctx, `UPDATE run_admission_timings SET closed_at=? WHERE run_id=? AND closed_at IS NULL`, now, run.ID); err != nil {
 		return model.Run{}, err
@@ -516,7 +543,7 @@ func (s *Store) ResolveRunIDIn(ctx context.Context, id string, repoIDs []int64) 
 		return model.Run{}, fmt.Errorf("%w: run ID must be 8 to 32 hexadecimal characters", ErrInvalid)
 	}
 	if len(id) == 32 && repoIDs == nil {
-		return s.Run(ctx, id)
+		return s.readRunContext(ctx, id)
 	}
 	restriction, restrictionArgs := repoRestriction("repo_id", repoIDs)
 	// Hex IDs sort below 'g', so this range uses the existing primary key.
@@ -548,7 +575,7 @@ func (s *Store) ResolveRunIDIn(ctx context.Context, id string, repoIDs []int64) 
 		}
 		return model.Run{}, fmt.Errorf("%w: run ID %q", ErrNotFound, id)
 	case 1:
-		return s.Run(ctx, matches[0])
+		return s.readRunContext(ctx, matches[0])
 	default:
 		return model.Run{}, fmt.Errorf("%w: run ID prefix %q matches: %s; use the full run ID", ErrAmbiguous, id, strings.Join(matches, ", "))
 	}
@@ -1011,9 +1038,9 @@ func (s *Store) ListRecentRuns(ctx context.Context, filter model.RunListFilter) 
 	restriction, restrictionArgs := repoRestriction("repo_id", filter.RepoIDs)
 	args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref, filter.Before, filter.Before, filter.Terminal}, restrictionArgs...)
 	rows, err := s.reader().QueryContext(ctx, `
-SELECT `+runColumns+` FROM runs
+SELECT `+runReadColumns+` FROM runs
 WHERE (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?) AND (? <= 0 OR queue_sequence < ?)
-  AND (? = 0 OR status NOT IN ('queued', 'running'))`+restriction+`
+  AND (? = 0 OR status NOT IN ('queued', 'running'))`+restriction+supersededRunRestriction(filter)+`
 ORDER BY queue_sequence DESC LIMIT ?`, append(args, pageLimit(filter.Limit))...) // #nosec G202 -- the restriction is a fixed column and ? placeholders from repoRestriction.
 	if err != nil {
 		return nil, fmt.Errorf("list recent runs: %w", err)
@@ -1021,7 +1048,7 @@ ORDER BY queue_sequence DESC LIMIT ?`, append(args, pageLimit(filter.Limit))...)
 	defer func() { _ = rows.Close() }()
 	runs := make([]model.Run, 0)
 	for rows.Next() {
-		value, err := scanRun(rows)
+		value, err := scanReadRun(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan run: %w", err)
 		}
@@ -1055,8 +1082,8 @@ WITH queue AS (
   SELECT *, ROW_NUMBER() OVER (ORDER BY `+priorityOrder+`) AS queue_position FROM runs
   WHERE status = 'queued' OR (status = 'running' AND started_at IS NULL)
 )
-SELECT `+runColumns+`, queue_position FROM queue AS runs
-WHERE (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+`
+SELECT `+runReadColumns+`, queue_position FROM queue AS runs
+WHERE (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+supersededRunRestriction(filter)+`
 ORDER BY `+priorityOrder+` LIMIT ?`, append(args, MaxActiveRuns)...) // #nosec G202 -- fixed columns and parameterized restriction.
 			if err != nil {
 				return nil, fmt.Errorf("list queued runs: %w", err)
@@ -1065,7 +1092,7 @@ ORDER BY `+priorityOrder+` LIMIT ?`, append(args, MaxActiveRuns)...) // #nosec G
 			queued := make([]model.Run, 0)
 			for rows.Next() {
 				var position int64
-				value, scanErr := scanRun(rows, &position)
+				value, scanErr := scanReadRun(rows, &position)
 				value.QueuePosition = position
 				if scanErr != nil {
 					return nil, fmt.Errorf("scan queued run: %w", scanErr)
@@ -1104,11 +1131,11 @@ ORDER BY `+priorityOrder+` LIMIT ?`, append(args, MaxActiveRuns)...) // #nosec G
 	args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref,
 		beforeID, beforeTime, beforeTime, beforeID}, restrictionArgs...)
 	rows, err := tx.QueryContext(ctx, `
-SELECT `+runColumns+` FROM runs
+SELECT `+runReadColumns+` FROM runs
 WHERE NOT (status = 'queued' OR (status = 'running' AND started_at IS NULL))
   AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)
   AND (? = '' OR COALESCE(started_at, finished_at) < ?
-       OR (COALESCE(started_at, finished_at) = ? AND id < ?))`+restriction+`
+       OR (COALESCE(started_at, finished_at) = ? AND id < ?))`+restriction+supersededRunRestriction(filter)+`
 ORDER BY COALESCE(started_at, finished_at) DESC, id DESC
 LIMIT ?`, append(args, pageLimit(filter.Limit))...) // #nosec G202 -- fixed columns and parameterized restriction.
 	if err != nil {
@@ -1116,7 +1143,7 @@ LIMIT ?`, append(args, pageLimit(filter.Limit))...) // #nosec G202 -- fixed colu
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
-		value, scanErr := scanRun(rows)
+		value, scanErr := scanReadRun(rows)
 		if scanErr != nil {
 			return nil, fmt.Errorf("scan admitted run: %w", scanErr)
 		}
@@ -1300,13 +1327,14 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 	if err := scanRowNotFound(row, "Run", append(dest, extra...)...); err != nil {
 		return model.Run{}, err
 	}
-	retryReason := strings.TrimPrefix(value.Reason, RestartRequeueReason+"; ")
+	lineageReason := strings.TrimSuffix(value.Reason, "; "+PolicyRefreshWaitingReason)
+	retryReason := strings.TrimPrefix(lineageReason, RestartRequeueReason+"; ")
 	value.AutoRetryOf = strings.TrimPrefix(retryReason, autoRetryOfPrefix)
 	if value.AutoRetryOf == retryReason {
 		value.AutoRetryOf = ""
 	}
-	value.AutoRetriedBy = strings.TrimPrefix(value.Reason, autoRetriedByPrefix)
-	if value.AutoRetriedBy == value.Reason {
+	value.AutoRetriedBy = strings.TrimPrefix(lineageReason, autoRetriedByPrefix)
+	if value.AutoRetriedBy == lineageReason {
 		value.AutoRetriedBy = ""
 	}
 	value.Release = release != 0

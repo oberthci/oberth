@@ -114,7 +114,7 @@ func TestEASYDurableReleaseForecastBackfillsSnapshot(t *testing.T) {
 	if granted(g, head) || !granted(g, candidate) {
 		t.Fatal("durable release forecast did not admit the safe short backfill")
 	}
-	if got := s.AdmissionSnapshot(candidate.sequence).BackfillMessage; got != "backfilled: ends before head can start (p95 5m < 44m)" {
+	if got := s.AdmissionSnapshot(candidate.sequence).BackfillMessage; got != "backfilled: measured finish within remaining head-wait window" {
 		t.Fatalf("backfill message = %q", got)
 	}
 }

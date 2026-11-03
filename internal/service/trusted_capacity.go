@@ -7,6 +7,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/vmrunner"
@@ -77,7 +78,10 @@ func (scheduler *Scheduler) executeTrustedWithCapacity(ctx context.Context, job 
 			return true, nil
 		}
 		// Reverify live policy and audit only a changed decision or pin pair.
-		fresh, err := scheduler.trustedRequirement(ctx, job.Repository, job.Run.ID, requirement.CandidateSHA)
+		fresh, stopped, err := scheduler.awaitTrustedRequirement(gitcache.WithFreshPolicy(ctx), job.Repository, job.Run.ID, requirement.CandidateSHA, require)
+		if stopped {
+			return true, nil
+		}
 		if err != nil {
 			return false, err
 		}

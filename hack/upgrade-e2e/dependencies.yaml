@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: oberth
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: oberth-argo
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: identity-store
+  namespace: oberth
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: oberth-e2e-identity-store
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: identity-store
+    namespace: oberth
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: identity-store
+  namespace: oberth
+  labels:
+    app: identity-store
+spec:
+  serviceAccountName: identity-store
+  containers:
+    - name: identity-store
+      image: ghcr.io/openbao/openbao@sha256:5b2486ab0fb90bbc788cc345b0a08616dfb375873ee8be5df3a2fd4d378a67e0
+      command: ["/bin/sh", "-ec"]
+      args:
+        - |
+          export HOME=/tmp
+          # Evaluation-only in-memory store. Its generated login stays inside
+          # the container; never collect this log or its CLI token-helper file.
+          exec bao server -dev -dev-listen-address=0.0.0.0:8200 >/tmp/server.log 2>&1
+      securityContext:
+        runAsUser: 100
+        runAsGroup: 1000
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+      readinessProbe:
+        httpGet:
+          path: /v1/sys/health
+          port: 8200
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          cpu: "1"
+          memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: identity-store
+  namespace: oberth
+spec:
+  selector:
+    app: identity-store
+  ports:
+    - port: 8200
+      targetPort: 8200

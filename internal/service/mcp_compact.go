@@ -102,16 +102,23 @@ func wireIssueMutation(issue model.Issue, appendedBytes int) api.IssueMutationRe
 	}
 }
 
-// RunSummaryResponse deliberately excludes retained Timing, repository data,
+// RunSummaryResponse deliberately excludes retained Timing, full repository data,
 // diagnostics and telemetry. Unknown step times remain null.
 type RunSummaryResponse struct {
-	ID          string           `json:"id"`
-	Status      model.RunStatus  `json:"status"`
-	Phase       string           `json:"phase"`
-	FailedStage string           `json:"failed_burn"`
-	FailedStep  string           `json:"failed_step"`
-	Error       string           `json:"error"`
-	Steps       []RunStepSummary `json:"steps"`
+	Repo              string                   `json:"repo"`
+	Ref               string                   `json:"ref"`
+	SHA               string                   `json:"sha"`
+	Size              string                   `json:"size"`
+	DeclaredResources *model.DeclaredResources `json:"declared_resources"`
+	QueuePosition     int64                    `json:"queue_position,omitempty"`
+	Superseded        bool                     `json:"superseded"`
+	ID                string                   `json:"id"`
+	Status            model.RunStatus          `json:"status"`
+	Phase             string                   `json:"phase"`
+	FailedStage       string                   `json:"failed_burn"`
+	FailedStep        string                   `json:"failed_step"`
+	Error             string                   `json:"error"`
+	Steps             []RunStepSummary         `json:"steps"`
 }
 
 type RunStepSummary struct {
@@ -125,6 +132,8 @@ type RunStepSummary struct {
 func summarizeRun(run model.Run, steps []model.StepResult) RunSummaryResponse {
 	response := RunSummaryResponse{
 		ID: run.ID, Status: run.Status, Phase: run.Phase,
+		Repo: run.Repo, Ref: run.Ref, SHA: run.SHA, Size: run.Size,
+		DeclaredResources: run.DeclaredResources, QueuePosition: run.QueuePosition, Superseded: run.Superseded,
 		FailedStage: run.FailedStage, FailedStep: run.FailedStep, Error: run.Error,
 		Steps: make([]RunStepSummary, len(steps)),
 	}

@@ -94,6 +94,10 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 	if _, err = db.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
+	// A submitted Workflow follows durable admission in the scheduler.
+	if _, err = db.MarkRunAdmitted(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
 
 	terminal, first, pod, at := diagnosticFixtureAt(time.Now().UTC().Add(-time.Minute))
 	terminal.CreationTimestamp = metav1.NewTime(at.Add(-10 * time.Minute))

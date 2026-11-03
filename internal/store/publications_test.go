@@ -316,6 +316,10 @@ func TestRestartTerminalizesPromotionWhoseRunningCIHasNoPublicationIntent(t *tes
 	if _, err := s.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
+	// This fixture represents work that reached admission.
+	if _, err := s.MarkRunAdmitted(ctx, enqueued.ID); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}

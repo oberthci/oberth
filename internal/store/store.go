@@ -992,6 +992,11 @@ ORDER BY queue_sequence`)
 		return fmt.Errorf("list active recovery runs: %w", err)
 	}
 	for _, active := range activeRuns {
+		if restored, err := s.recoverWaitingRunTx(ctx, tx, active, now); err != nil {
+			return fmt.Errorf("restore waiting run %s: %w", active.ID, err)
+		} else if restored {
+			continue
+		}
 		if active.WorkflowName != "" {
 			// Runs with a known Job name stay in "running" status so the
 			// scheduler's startup reconciliation can query K8s for their

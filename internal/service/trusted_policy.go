@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/pushretry"
 	"github.com/oberthci/oberth/internal/store"
@@ -58,7 +59,7 @@ func (scheduler *Scheduler) trustedRequirement(ctx context.Context, repository m
 
 // resolveTrustedRequirement refreshes and validates policy without auditing.
 // All progress boundaries, including capacity retries, use trustedRequirement
-// to durably record decision changes without caching any policy authority.
+// to durably record decision changes. Publication bypasses the burst cache.
 func (scheduler *Scheduler) resolveTrustedRequirement(ctx context.Context, repository model.Repository, candidateSHA string) (vmrunner.Requirement, error) {
 	upstream, err := scheduler.database().Upstream(ctx, repository.UpstreamID)
 	if err != nil {
@@ -186,7 +187,7 @@ func (scheduler *Scheduler) requirePublicationTestPolicy(ctx context.Context, re
 			}
 		}
 	}
-	requirement, err := scheduler.trustedRequirement(ctx, repository, run.ID, candidateSHA)
+	requirement, err := scheduler.trustedRequirement(gitcache.WithFreshPolicy(ctx), repository, run.ID, candidateSHA)
 	if err != nil || requirement.Contract == nil {
 		return err
 	}

@@ -1,0 +1,29 @@
+# Local evaluation only. No upstream credentials or external witnesses.
+maxConcurrentJobs: 1
+service:
+  type: ClusterIP
+upstream:
+  name: fixture
+  baseURL: ssh://git@fixture.invalid/fixtures
+secretstore:
+  address: http://identity-store.oberth.svc:8200
+  insecureHTTPForDev: true
+persistence:
+  size: 10Gi
+networkPolicy:
+  enabled: false
+admission:
+  runtimeCapacity:
+    enabled: true
+    maxConcurrentJobs: 1
+  pressure:
+    enabled: false
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+    ephemeral-storage: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+    ephemeral-storage: 1Gi

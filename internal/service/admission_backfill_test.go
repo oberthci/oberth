@@ -248,8 +248,8 @@ func TestPassedOverCandidateDoesNotFreezeBackfillClaims(t *testing.T) {
 	}
 	preparing.cancel()
 	clock.now = clock.now.Add(21 * time.Minute)
-	if !gate.spareWeightForClaim(3) {
-		t.Fatal("drain prevented looking for a measured safe candidate")
+	if gate.spareWeightForClaim(3) {
+		t.Fatal("claimed another backfill candidate during drain")
 	}
 	long.cancel()
 	head.cancel()

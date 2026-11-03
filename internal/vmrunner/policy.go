@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/gitoid"
 )
 
@@ -25,6 +26,15 @@ type Requirement struct {
 	BaselineSHA  string
 	Contract     *Contract
 }
+
+// PolicyRefreshUnavailable means upstream authority could not be read. The
+// scheduler may wait, but must never treat this as an absent requirement.
+type PolicyRefreshUnavailable struct{ Cause error }
+
+func (e *PolicyRefreshUnavailable) Error() string {
+	return fmt.Sprintf("refresh upstream trusted test policy: %v", e.Cause)
+}
+func (e *PolicyRefreshUnavailable) Unwrap() error { return e.Cause }
 
 // ResolveRequirement refuses removal or changes to published requirements,
 // except paired pins authorized against current operator recipes.
@@ -45,6 +55,9 @@ func ResolveRequirement(ctx context.Context, git PolicyGit, repository, candidat
 	}
 	baselineSHA, baselineBody, baselineExists, err := git.ReadDefaultBlob(ctx, repository, ContractFile, MaxContractBytes)
 	if err != nil {
+		if errors.Is(err, gitcache.ErrPolicyUpstreamUnavailable) {
+			return Requirement{}, &PolicyRefreshUnavailable{Cause: err}
+		}
 		return Requirement{}, fmt.Errorf("refresh upstream trusted test policy: %w", err)
 	}
 	if (baselineSHA != "" && !gitoid.Valid(baselineSHA)) || (baselineExists && baselineSHA == "") {

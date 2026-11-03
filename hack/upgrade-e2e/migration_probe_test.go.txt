@@ -1,0 +1,19 @@
+package store
+
+import (
+	"context"
+	"os"
+	"testing"
+)
+
+func TestUpgradeE2EAddedMigration(t *testing.T) {
+	s, err := OpenCurrent(context.Background(), os.Getenv("E2E_PROBE_DATABASE"), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var count int
+	if err := s.db.QueryRow("SELECT count(*) FROM upgrade_e2e_probe WHERE id=1").Scan(&count); err != nil || count != 1 {
+		t.Fatalf("probe migration: count=%d, err=%v", count, err)
+	}
+}

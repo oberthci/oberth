@@ -38,6 +38,7 @@ func (gate *weightedAdmission) reservationStateLocked(reservation *admissionRese
 func (gate *weightedAdmission) reservationViewLocked(reservation *admissionReservation) model.AdmissionReservation {
 	view := model.AdmissionReservation{
 		DeclaredResources: reservation.declaredResources(),
+		LegacyResources:   reservation.legacyResources(),
 		RunID:             reservation.runID, RepoID: reservation.repoID, Repo: reservation.repo, Ref: reservation.ref,
 		Size: string(reservation.size), Weight: reservation.weight, Group: reservation.groupName,
 		Pressure: gate.pressureWaitLocked(reservation),

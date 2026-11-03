@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -163,27 +162,7 @@ func TestResourceRetentionOldestFirstBoundedAndIndependentOfPrimary(t *testing.T
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	snapshot := func() []resourceUsageCandidate {
-		t.Helper()
-		rows, err := s.reader().QueryContext(ctx, `SELECT rowid,last_observed_at FROM step_resource_usage ORDER BY last_observed_at,rowid`)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer rows.Close()
-		var values []resourceUsageCandidate
-		for rows.Next() {
-			var v resourceUsageCandidate
-			if err := rows.Scan(&v.id, &v.at); err != nil {
-				t.Fatal(err)
-			}
-			values = append(values, v)
-		}
-		if err := rows.Err(); err != nil {
-			t.Fatal(err)
-		}
-		return values
-	}
-	expected := snapshot()
+	expected := resourceRetentionSnapshot(t, ctx, s)
 	if len(expected) != resourceUsageSweepRows+2 {
 		t.Fatal("retention fixture row count", len(expected))
 	}
@@ -200,31 +179,8 @@ func TestResourceRetentionOldestFirstBoundedAndIndependentOfPrimary(t *testing.T
 	total := 0
 	for pass := 0; pass < 20 && total < len(expected); pass++ {
 		deleted, err := s.PruneResourceUsage(ctx)
-		if err != nil && !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatal("sweep/connection isolation", deleted, err)
-		}
-		if deleted < 0 || deleted > resourceUsageSweepRows {
-			t.Fatal("sweep cap", deleted)
-		}
-		remaining := snapshot()
-		observedTotal := len(expected) - len(remaining)
-		observedDeleted := int64(observedTotal - total)
-		// SQLite may commit a DELETE before cancellation makes ExecContext
-		// return a deadline error instead of its RowsAffected result. Only
-		// that final batch can be missing from the acknowledged count.
-		if observedDeleted < deleted || observedDeleted > resourceUsageSweepRows ||
-			(err == nil && observedDeleted != deleted) || observedDeleted-deleted > resourceUsageDeleteBatch {
-			t.Fatal("sweep count", observedDeleted, deleted, err)
-		}
-		if observedDeleted != deleted {
-			t.Logf("deadline after committed batch: acknowledged=%d persisted=%d", deleted, observedDeleted)
-		}
-		// Verify every surviving row, including the rowid tie-breaker. The
-		// persisted suffix is authoritative even when the last count is lost.
-		if !slices.Equal(remaining, expected[observedTotal:]) {
-			t.Fatal("partial sweep was not oldest first", len(remaining), observedTotal, deleted, err)
-		}
-		total = observedTotal
+		remaining := resourceRetentionSnapshot(t, ctx, s)
+		total = checkResourceRetentionProgress(t, expected, remaining, total, deleted, err)
 	}
 	if total != resourceUsageSweepRows+2 {
 		t.Fatal("bounded backlog did not drain while primary pool slot held", total)

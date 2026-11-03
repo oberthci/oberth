@@ -23,6 +23,10 @@ func (jobs sizedByBranch) PipelineSize(_ context.Context, request WorkflowReques
 func runPacking(t *testing.T, maxConcurrentJobs, expected int, branches []string) (admitted int) {
 	t.Helper()
 	fixture := newConcurrencyFixture(t, pipeline.M, maxConcurrentJobs)
+	// Isolate weight packing: all candidate mixes fit the numeric budget.
+	// Default numeric limits are covered independently by the legacy tests.
+	fixture.scheduler.admission.resources.CPUMilli = 32000
+	fixture.scheduler.admission.resources.MemoryBytes = 64 << 30
 	jobs := newConcurrentJobs(pipeline.M, len(branches)+1)
 	fixture.scheduler.jobs = sizedByBranch{jobs}
 	fixture.scheduler.releaseJobs = sizedByBranch{jobs}
@@ -101,7 +105,8 @@ func runPacking(t *testing.T, maxConcurrentJobs, expected int, branches []string
 }
 
 // TestSmallRunsPackIntoTheWeightBudget is #1021's acceptance: with
-// maxConcurrentJobs=10 the weight budget is 20, so twenty S runs run together
+// maxConcurrentJobs=10 and sufficient numeric capacity, the weight budget is
+// 20, so twenty S runs run together
 // where the old run ceiling stopped at ten, and the run past the budget waits.
 func TestSmallRunsPackIntoTheWeightBudget(t *testing.T) {
 	branches := make([]string, 21)
