@@ -53,6 +53,8 @@ func (scheduler *Scheduler) runTerminalPreflightCleanup(ctx context.Context) {
 				log.Printf("WARN: terminal preflight cleanup parent unavailable run=%s: %v", id, err)
 				continue
 			}
+			// Main Workflow submission follows confirmed preflight cleanup, so
+			// a parent with JobName cannot own a pending preflight journal.
 			if !run.Status.Terminal() || run.JobName != "" {
 				continue // Never enumerate/cancel unrelated live executions.
 			}
