@@ -63,13 +63,7 @@ func TestBootstrapRetainsTestsAndSeparatesPublisherAuthority(t *testing.T) {
 		}
 		if templateUsesOberthSecretstore(&template) || template.Metadata.Annotations[argoworkflow.ReleaseWIFRoleAnnotation] != "" {
 			credentialed++
-			// The website leaf verifies its own source and staged inputs and
-			// installs wrangler offline before its secret exists; it never
-			// receives only verified, read-only publisher tools and inputs.
 			wantInit := []string{"verify-publisher-tools"}
-			if template.Name == "release-website" {
-				wantInit = []string{"verify-publisher-tools", "verify-website-inputs", "install-website-tools"}
-			}
 			var gotInit []string
 			for _, container := range template.InitContainers {
 				gotInit = append(gotInit, container.Name)
@@ -99,7 +93,7 @@ func TestBootstrapRetainsTestsAndSeparatesPublisherAuthority(t *testing.T) {
 				t.Errorf("%s must use its exact WIF role and fetch only signing material: %v", template.Name, paths)
 			}
 		}
-		if template.Name == "release-website" {
+		if template.Name == "release-public-artifacts" {
 			if template.Synchronization == nil || len(template.Synchronization.Mutexes) != 1 || template.Synchronization.Mutexes[0].Name != "oberth-release-finalize" {
 				t.Fatal("finalizers no longer share the fixed alias-publication mutex")
 			}
@@ -260,11 +254,8 @@ func TestBootstrapExecutedEnvironmentIgnoresSharedCachesAndCredentials(t *testin
 		})
 		tested++
 	}
-	// 25 bootstrap wrappers plus the five website templates of #649
-	// (fetch-node, verify-node, stage-website-packages, release-website,
-	// release-website-readback) plus four KVM harness templates of #278
-	// (fetch-apko, verify-apko, install-apko, release-publish-kvm-harness).
-	if tested != 34 {
-		t.Fatalf("executed %d wrappers, want all 34", tested)
+	// Bootstrap, Node test runtime, artifact publishing and image tooling wrappers.
+	if tested != 32 {
+		t.Fatalf("executed %d wrappers, want all 32", tested)
 	}
 }

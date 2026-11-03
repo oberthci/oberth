@@ -7,8 +7,8 @@
 # oberth.ci/workspace-mounts: none and oberth.ci/workspace-env: none, and every
 # leaf except the seven credentialed ones (release-sign-binaries, release-publish-images,
 # release-publish-kvm-harness, release-publish-homebrew, release-publish-chart,
-# release-verify, release-website) declares
-# automountServiceAccountToken: false. The release-website leaves already
+# release-verify, release-public-artifacts) declares
+# automountServiceAccountToken: false. The release-public-artifacts leaves already
 # required v0.16.6, so the bootstrap leaves' former v0.16.5 admission
 # compatibility bought nothing. internal/argojob/oberth_pipeline_test.go
 # (TestOberthPipelinesIsolateSharedWorkspace) checks the admitted Pods.
@@ -40,24 +40,10 @@
 #
 # All secrets retain exact store field names beneath OBERTH_SECRETSTORE_DIR.
 # Verification uses image-reader WIF and the committed public signing key.
-# Cloudflare upload, finalization and website deployment reuse one closed
-# release-website template. Candidate inputs and runtime receipts mount read-only;
-# public phases snapshot signed inputs into Pod-private scratch and never execute
-# candidate artifacts. The signers have no Cloudflare capability.
-#
-# Website publication (#649). The credential-free setup steps fetch-node,
-# verify-node and stage-website-packages stage only hash-checked inputs (the
-# pinned Node tarball and a content-addressed npm cache) in their own
-# bootstrap-website-inputs claim; npm runs there with lifecycle scripts off,
-# so no package code executes. The release-website leaf's init containers
-# re-verify the admitted source and those inputs, copy them into Pod-private
-# scratch and install wrangler offline against the committed lockfile's
-# sha512 integrity; only then does its main container fetch its single
-# credential (cloudflare-oberth-workers-token) and deploy the oberth.ci
-# Worker. The tokenless release-website-readback leaf proves the public URLs
-# serve the admitted bytes. Website templates declare
-# automountServiceAccountToken: false unless they are the credentialed leaf,
-# and none of them receives shared workspace mounts or environment.
+# Public artifact upload and finalization use a closed release-public-artifacts
+# template. Its init container verifies publisher tools before credentials are
+# fetched. Source and runtime receipts remain read-only across the boundary.
+# Node inputs are staged only for dashboard JavaScript tests.
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
@@ -103,7 +89,7 @@ spec:
         requests:
           storage: 1Gi
   - metadata:
-      name: bootstrap-website-inputs
+      name: bootstrap-node-inputs
     spec:
       accessModes:
       - ReadWriteOnce
@@ -153,7 +139,7 @@ spec:
         template: release-publish-chart
         depends: release-sign-binaries && release-package-chart
       - name: release-publish-public
-        template: release-website
+        template: release-public-artifacts
         arguments:
           parameters:
           - name: phase
@@ -167,22 +153,12 @@ spec:
         template: release-runtime
         depends: release-verify
       - name: release-finalize
-        template: release-website
+        template: release-public-artifacts
         arguments:
           parameters:
           - name: phase
             value: finalize
         depends: release-runtime
-      - name: release-website
-        template: release-website
-        arguments:
-          parameters:
-          - name: phase
-            value: publish-website
-        depends: release-finalize
-      - name: release-website-readback
-        template: release-website-readback
-        depends: release-website
   - name: release-setup
     steps:
     - - name: tools-dir
@@ -217,8 +193,6 @@ spec:
         template: fetch-node
     - - name: verify-node
         template: verify-node
-    - - name: stage-website-packages
-        template: stage-website-packages
     - - name: copy-test-tools
         template: copy-test-tools
   - name: tools-dir
@@ -908,14 +882,14 @@ spec:
       - =https
       - --tlsv1.2
       - --output
-      - /tmp/oberth-website-inputs/node.tar.gz
+      - /tmp/oberth-node-inputs/node.tar.gz
       - https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.gz
       env:
       - name: PATH
         value: /usr/bin:/bin
       volumeMounts:
-      - name: bootstrap-website-inputs
-        mountPath: /tmp/oberth-website-inputs
+      - name: bootstrap-node-inputs
+        mountPath: /tmp/oberth-node-inputs
         readOnly: false
       resources:
         requests:
@@ -964,8 +938,8 @@ spec:
       - name: PATH
         value: /usr/bin:/bin
       volumeMounts:
-      - name: bootstrap-website-inputs
-        mountPath: /tmp/oberth-website-inputs
+      - name: bootstrap-node-inputs
+        mountPath: /tmp/oberth-node-inputs
         readOnly: true
       resources:
         requests:
@@ -974,55 +948,6 @@ spec:
         limits:
           cpu: '1'
           memory: 320Mi
-  - name: stage-website-packages
-    automountServiceAccountToken: false
-    metadata:
-      annotations:
-        oberth.ci/workspace-mounts: none
-        oberth.ci/workspace-env: none
-    container:
-      image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
-      workingDir: /work/src
-      command:
-      - /bin/sh
-      - -c
-      args:
-      - |
-        set -eu
-        exec /usr/bin/env -i PATH=/usr/bin:/bin \
-          HOME=/tmp \
-          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
-          GOTOOLCHAIN=local \
-          GOWORK=off \
-          GOENV=off \
-          GOPATH=/tmp/bootstrap-private/gopath \
-          GOMODCACHE=/tmp/bootstrap-private/gomod \
-          GOCACHE=/tmp/bootstrap-private/gobuild \
-          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
-          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
-          GIT_TERMINAL_PROMPT=0 \
-          KUBEBUILDER_ASSETS= \
-          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
-          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
-          GOBIN=/tmp/oberth-tools/bin \
-          CGO_ENABLED=1 "$@"
-      - bootstrap-clean
-      - ./.oberth/release.sh
-      - stage-website-packages
-      env:
-      - name: PATH
-        value: /usr/bin:/bin
-      volumeMounts:
-      - name: bootstrap-website-inputs
-        mountPath: /tmp/oberth-website-inputs
-        readOnly: false
-      resources:
-        requests:
-          cpu: 1250m
-          memory: 733196Ki
-        limits:
-          cpu: '2'
-          memory: 1088Mi
   - name: release-lint
     steps:
     - - name: vet
@@ -1229,7 +1154,7 @@ spec:
           OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
           GOBIN=/tmp/oberth-tools/bin \
           OBERTH_ARCHIVE_PARITY_REPO=fixture \
-          OBERTH_TEST_NODE_ARCHIVE=/tmp/oberth-website-inputs/node.tar.gz \
+          OBERTH_TEST_NODE_ARCHIVE=/tmp/oberth-node-inputs/node.tar.gz \
           CGO_ENABLED=1 "$@"
       - bootstrap-clean
       - /bin/sh
@@ -1249,8 +1174,8 @@ spec:
         mountPath: /tmp/oberth-tools
         subPath: release-test
         readOnly: true
-      - name: bootstrap-website-inputs
-        mountPath: /tmp/oberth-website-inputs
+      - name: bootstrap-node-inputs
+        mountPath: /tmp/oberth-node-inputs
         readOnly: true
       resources:
         requests:
@@ -2218,11 +2143,11 @@ spec:
         limits:
           cpu: '1'
           memory: 256Mi
-  - name: release-website
+  - name: release-public-artifacts
     inputs:
       parameters:
       - name: phase
-        enum: [publish-public, finalize, publish-website]
+        enum: [publish-public, finalize]
     synchronization:
       mutexes:
       - name: oberth-release-finalize
@@ -2318,113 +2243,3 @@ spec:
         limits:
           cpu: '1'
           memory: 256Mi
-    - name: verify-website-inputs
-      image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
-      workingDir: /work/src
-      command:
-      - /bin/sh
-      - -c
-      args:
-      - |
-        set -eu
-        exec /usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp \
-          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
-          /usr/bin/python3 -I -S -B /work/src/.oberth/verify-website-inputs.py
-      volumeMounts:
-      - name: bootstrap-website-inputs
-        mountPath: /tmp/oberth-website-inputs
-        readOnly: true
-      resources:
-        requests:
-          cpu: 625m
-          memory: 1Gi
-        limits:
-          cpu: '1'
-          memory: 1Gi
-    - name: install-website-tools
-      image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
-      workingDir: /work/src
-      command:
-      - /bin/sh
-      - -c
-      args:
-      - |
-        set -eu
-        exec /usr/bin/env -i PATH=/usr/bin:/bin \
-          HOME=/tmp \
-          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
-          GOTOOLCHAIN=local \
-          GOWORK=off \
-          GOENV=off \
-          GOPATH=/tmp/bootstrap-private/gopath \
-          GOMODCACHE=/tmp/bootstrap-private/gomod \
-          GOCACHE=/tmp/bootstrap-private/gobuild \
-          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
-          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
-          GIT_TERMINAL_PROMPT=0 \
-          KUBEBUILDER_ASSETS= \
-          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
-          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
-          GOBIN=/tmp/oberth-tools/bin \
-          CGO_ENABLED=1 "$@"
-      - bootstrap-clean
-      - ./.oberth/release.sh
-      - install-website-tools
-      volumeMounts: []
-      resources:
-        requests:
-          cpu: 1250m
-          memory: 2Gi
-        limits:
-          cpu: '2'
-          memory: 2Gi
-  - name: release-website-readback
-    activeDeadlineSeconds: 1800
-    automountServiceAccountToken: false
-    metadata:
-      annotations:
-        oberth.ci/workspace-mounts: none
-        oberth.ci/workspace-env: none
-    container:
-      image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
-      workingDir: /work/src
-      command:
-      - /bin/sh
-      - -c
-      args:
-      - |
-        set -eu
-        exec /usr/bin/env -i PATH=/usr/bin:/bin \
-          HOME=/tmp \
-          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
-          GOTOOLCHAIN=local \
-          GOWORK=off \
-          GOENV=off \
-          GOPATH=/tmp/bootstrap-private/gopath \
-          GOMODCACHE=/tmp/bootstrap-private/gomod \
-          GOCACHE=/tmp/bootstrap-private/gobuild \
-          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
-          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
-          GIT_TERMINAL_PROMPT=0 \
-          KUBEBUILDER_ASSETS= \
-          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
-          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
-          GOBIN=/tmp/oberth-tools/bin \
-          CGO_ENABLED=1 "$@"
-      - bootstrap-clean
-      - /usr/bin/python3
-      - -I
-      - -S
-      - -B
-      - .oberth/website-readback.py
-      env:
-      - name: PATH
-        value: /usr/bin:/bin
-      volumeMounts: []
-      resources:
-        requests:
-          cpu: 625m
-          memory: 52888Ki
-        limits:
-          cpu: '1'
-          memory: 320Mi

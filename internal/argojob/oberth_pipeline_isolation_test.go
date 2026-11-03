@@ -27,13 +27,13 @@ import (
 // chain. Each one verifies its executables in an init container before the
 // secretstore in its main container can fetch anything.
 var oberthReleaseCredentialedLeaves = []string{
+	"release-public-artifacts",
 	"release-publish-chart",
 	"release-publish-homebrew",
 	"release-publish-images",
 	"release-publish-kvm-harness",
 	"release-sign-binaries",
 	"release-verify",
-	"release-website",
 }
 
 // Setup steps that populate the trusted publisher tools. No other release
