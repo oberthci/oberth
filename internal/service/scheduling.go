@@ -55,9 +55,13 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 	observed := clock.Now().UTC()
 	result = &model.RunScheduling{ObservedAt: observed, State: "unavailable", Message: "Scheduling observation is unavailable."}
 	var blocker *model.AdmissionBlocker
+	policyWaiting := run.Status == model.RunRunning && (run.Reason == store.PolicyRefreshWaitingReason || strings.HasSuffix(run.Reason, "; "+store.PolicyRefreshWaitingReason))
 	defer func() {
 		if model.DisplayRunStatus(run) == model.DisplayQueued {
 			reason = queuedDisplayReason(result, blocker)
+			if policyWaiting {
+				reason = store.PolicyRefreshWaitingReason
+			}
 		}
 		result.AgeSeconds = int64(clock.Since(observed) / time.Second)
 		if result.Admission != nil && result.Admission.BackfillMessage != "" {
@@ -72,7 +76,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 			result.Message = prefix + " " + result.Message
 		}
 	}()
-	if run.Status == model.RunRunning && (run.Reason == store.PolicyRefreshWaitingReason || strings.HasSuffix(run.Reason, "; "+store.PolicyRefreshWaitingReason)) {
+	if policyWaiting {
 		result.State = "waiting"
 		result.Message = store.PolicyRefreshWaitingReason + ": waiting for upstream trusted test policy; no publication is allowed."
 		return result, reason
