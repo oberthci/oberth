@@ -587,6 +587,10 @@
       "additionalProperties": false,
       "description": "Argo Workflows execution engine. Every pipeline runs as an Argo Workflow.",
       "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Retired compatibility setting, accepted for stored values and ignored. Pipelines always use Argo Workflows."
+        },
         "releaseTagRoutes": {
           "type": "object",
           "maxProperties": 256,

@@ -38,6 +38,7 @@ class ArgoSchemaTests(unittest.TestCase):
 
     def test_active_value_types_and_unknown_keys(self):
         cases = [
+            {'enabled': 'false'},
             {'ciSecrets': 17},
             {'ciSecrets': {'serviceAccount': 17}},
             {'ciSecrets': {'vaultRole': []}},
@@ -80,7 +81,7 @@ class ArgoSchemaTests(unittest.TestCase):
                 self.assert_schema_refuses(argo)
 
     def test_valid_boundaries_and_legacy_values_render(self):
-        cases = [{}, {'ciSecrets': None}, {'ciServiceAccount': 'legacy-pipeline'},
+        cases = [{}, {'enabled': True}, {'enabled': False}, {'ciSecrets': None}, {'ciServiceAccount': 'legacy-pipeline'},
                  {'ciSecretsServiceAccount': ''}, {'vault': {'ciSecretsRole': ''}},
                  {'ciSecrets': {'serviceAccount': 'ci-secrets', 'vaultRole': 'ci-role'},
                   'controllerProfile': 'nonroot-static-v1', 'resourceSampler': SAMPLER},
