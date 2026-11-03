@@ -20,13 +20,13 @@ ADC = '/run/oberth-gar/adc.json'
 TOKEN = '/run/oberth-gar/token'
 LIMIT = 65536
 
-# Exact audience allowlist. The existing server projects the first-hop account
-# from administrator-owned WIF configuration into a read-only ADC mount.
+# Fixed pool allowlist; provider names are deployment-owned. The server projects
+# the first-hop account from administrator-owned WIF configuration into a read-only ADC mount.
 # Source account permissions are enforced by Google, not a client-side pairing.
 ROLES = {
-    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-images/providers/oberth': 'image-writer',
-    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-reader/providers/oberth': 'image-reader',
-    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-charts/providers/oberth': 'chart-writer',
+    'oberth-release-images': 'image-writer',
+    'oberth-release-reader': 'image-reader',
+    'oberth-release-charts': 'chart-writer',
 }
 SOURCE_ACCOUNT_ERROR = ('missing or invalid ADC service_account_impersonation_url; '
                         'configure argo.releaseWIF.roles.<role>.service_account')
@@ -47,13 +47,13 @@ def source_iam(config):
 
 # Oberth's repositories already grant each matching Oberth principal access,
 # and each configured source principal TokenCreator on only that target. Keep
-# this second hop fixed by the validated audience, never ADC/env input (#875).
+# this second hop fixed by the validated pool, never ADC/env input (#875).
 OBERTH_ROLES = {
-    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-images/providers/oberth':
+    'oberth-release-images':
         'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/oberth-release-publisher@skipopsmain.iam.gserviceaccount.com:generateAccessToken',
-    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-reader/providers/oberth':
+    'oberth-release-reader':
         'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/oberth-release-reader@skipopsmain.iam.gserviceaccount.com:generateAccessToken',
-    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-charts/providers/oberth':
+    'oberth-release-charts':
         'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/oberth-chart-publisher@skipopsmain.iam.gserviceaccount.com:generateAccessToken',
 }
 
@@ -115,8 +115,13 @@ def credential(server):
         raise ValueError('unapproved ADC path')
     config = decode(read(ADC))
     audience = config.get('audience')
-    if audience not in ROLES:
+    match = re.fullmatch(
+        r'//iam\.googleapis\.com/projects/138624361369/locations/global/'
+        r'workloadIdentityPools/([a-z][a-z0-9-]*)/providers/[a-z][a-z0-9-]*',
+        audience) if isinstance(audience, str) else None
+    if match is None or match.group(1) not in ROLES:
         raise ValueError('unapproved audience')
+    pool = match.group(1)
     iam = source_iam(config)
     expected = {
         'type': 'external_account', 'audience': audience,
@@ -144,7 +149,7 @@ def credential(server):
         'scope': ['https://www.googleapis.com/auth/cloud-platform'], 'lifetime': '600s',
     }).encode('ascii'), {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + federated})
     source = token(impersonated.get('accessToken'))
-    delegated = post(OBERTH_ROLES[audience], json.dumps({
+    delegated = post(OBERTH_ROLES[pool], json.dumps({
         'scope': ['https://www.googleapis.com/auth/cloud-platform'], 'lifetime': '600s',
     }).encode('ascii'), {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + source})
     return {'Username': 'oauth2accesstoken', 'Secret': token(delegated.get('accessToken'))}

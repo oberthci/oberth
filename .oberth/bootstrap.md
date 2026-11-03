@@ -73,13 +73,15 @@ account emails held only in the operator installation configuration.
 | `release-verify` | `image-reader` / `oberth-release-reader` | `<release-reader>` | `oberth-release-reader` |
 
 Each audience is
-`//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/<pool>/providers/oberth`.
+`//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/<pool>/providers/<provider>`.
+The project and the three pools above are fixed. Provider names are owned by
+the deployment and must match `[a-z][a-z0-9-]*`; retain existing provider values.
 Admission binds the exact repository, release ServiceAccount, template and role;
 branch pipelines receive no WIF projection. The helper validates the fixed ADC
 at `/run/oberth-gar/adc.json` and projected token at `/run/oberth-gar/token`,
 requires `OBERTH_RELEASE_WIF=1`, and validates the ADC's first-hop URL against
 an exact Google IAM endpoint/account pattern. The final target
-is fixed by the validated audience. Both IAM requests use a 600-second lifetime.
+is fixed by the validated pool. Both IAM requests use a 600-second lifetime.
 Google enforces the existing matching TokenCreator and repository IAM bindings; the reader stays
 read-only. HTTPS uses verified TLS 1.3, without redirects or proxies. A failed
 exchange is fatal, with no fallback to another role or a static key.
@@ -105,7 +107,7 @@ Missing or malformed ADC source URLs refuse before network exchange with a
 safe diagnostic naming `service_account_impersonation_url` and the install key.
 The helper accepts any source account matching the strict endpoint pattern;
 Google's existing WIF and IAM bindings enforce first-hop role permissions.
-The final Oberth target remains fixed by the validated audience, and ADC cannot
+The final Oberth target remains fixed by the validated pool, and ADC cannot
 override it. Confirm intended exchanges and provider-enforced cross-role
 refusal in the next coordinator-authorized live release; offline tests cannot
 prove IAM bindings.
