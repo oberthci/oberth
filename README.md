@@ -115,6 +115,11 @@ identities. Stored user values and requested overrides are checked against the
 target chart's schema before the Oberth or Argo controller upgrade begins;
 unknown keys are reported and refused rather than silently removed.
 
+Older Helm 4 installations whose Argo Role rules are owned by a legacy kubectl
+manager can use the [explicit Role ownership migration](docs/argo-role-migration.md)
+before an upgrade. It preserves permissions and unrelated ownership. PVC update
+and list remain required for source-claim adoption and cleanup.
+
 When a target chart removes a configured key, export the installed values,
 remove or migrate the unsupported keys in an explicit values file, and reconcile
 with `helm upgrade ... --reset-values --values cleaned.yaml` before retrying.

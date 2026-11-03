@@ -21,9 +21,9 @@ import (
 // rules and broke that contract on the first upgrade of example-node (issue #813).
 // New permissions must be added as a new Role bound to the same
 // ServiceAccount. These tests pin both halves.
-// Known over-grant (#1316 RBAC-2): PVC update has no production caller.
-// Keep the historical list/update verbs here until a deliberate field-manager
-// migration can remove update and reassess cleanup ownership of list.
+// hack/migrate-argo-role explicitly transfers legacy rules ownership to Helm.
+// The permission fixture remains unchanged: contrary to #1316 RBAC-2,
+// SourceSeeder.AdoptClaim uses update and orphan cleanup uses list.
 
 type chartRBACDoc struct {
 	Kind     string `json:"kind"`

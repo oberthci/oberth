@@ -16,9 +16,10 @@
 # to the same ServiceAccount (see -argo-executor-tokens and
 # -argo-release-tokens below). cmd/oberth/chart_argo_role_frozen_test.go
 # renders this Role and compares it with the v0.17.9 fixture.
-# Known over-grant (#1316 RBAC-2): PVC update has no production caller.
-# PVC list is also retained by this freeze; review cleanup list ownership and
-# remove unused verbs at the next deliberate field-manager migration.
+# Explicit legacy ownership migration: hack/migrate-argo-role (see
+# docs/argo-role-migration.md). It changes only managed fields, not permissions.
+# Correction to #1316 RBAC-2: SourceSeeder.AdoptClaim uses PVC update to bind
+# claims to Workflows; SweepOrphanedSourceClaims uses list. Both remain required.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
