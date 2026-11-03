@@ -868,17 +868,17 @@
         },
         "vmLauncherServiceAccount": {
           "type": "string",
-          "description": "Retired; retained for upgrades carrying saved VM values. Remove during the VM migration."
+          "description": "Active until the VM runtime is removed; afterwards accepted and ignored for upgrades carrying saved VM values."
         },
         "containerDiskPrefixes": {
           "type": "array",
           "items": {"type": "string"},
-          "description": "Retired; retained for upgrades carrying saved VM values. Remove during the VM migration."
+          "description": "Active until the VM runtime is removed; afterwards accepted and ignored for upgrades carrying saved VM values."
         },
         "kubevirtCeiling": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Retired; retained for upgrades carrying saved KubeVirt ceilings. Remove during the VM migration.",
+          "description": "Active until the VM runtime is removed; sets the cluster-wide KubeVirt ceiling. Afterwards accepted and ignored for upgrades carrying saved ceilings.",
           "properties": {
             "maxVMs": {"type": "integer", "minimum": 1, "maximum": 16},
             "maxCores": {"type": "integer", "minimum": 1, "maximum": 64},
