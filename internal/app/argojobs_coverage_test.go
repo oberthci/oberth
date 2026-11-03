@@ -106,9 +106,49 @@ func TestCreateCI_ReconcilerUnhealthyBlocks(t *testing.T) {
 	checker := &fakeReconciler{healthy: false}
 	fixture.jobs.SetReconcilerHealth(checker)
 
-	err := fixture.jobs.CreateCI(context.Background(), fixture.request("wf-unhealthy", "run-unhealthy"))
+	request := fixture.request("wf-unhealthy", "run-unhealthy")
+	request.Run.Credentialed = true
+	err := fixture.jobs.CreateCI(context.Background(), request)
 	if err == nil || !strings.Contains(err.Error(), "initial reconciliation") {
 		t.Fatalf("expected reconciler health gate error, got: %v", err)
+	}
+}
+
+func TestCreateCIUncredentialedBypassesUnhealthyReconciler(t *testing.T) {
+	fixture := newRaceFixture(t)
+	fixture.jobs.SetReconcilerHealth(&fakeReconciler{healthy: false})
+	if err := fixture.jobs.CreateCI(t.Context(), fixture.request("plain", "plain-run")); err != nil {
+		t.Fatalf("plain CI blocked: %v", err)
+	}
+	if len(fixture.controller.created) != 1 {
+		t.Fatalf("created=%v", fixture.controller.created)
+	}
+}
+
+func TestCreateReleaseUnhealthyReconcilerBlocksWithoutCredentialedFlag(t *testing.T) {
+	fixture := newRaceFixture(t)
+	fixture.jobs.SetReconcilerHealth(&fakeReconciler{healthy: false})
+	request := fixture.request("release", "release-run")
+	request.Run.Release = true
+	if err := fixture.jobs.CreateRelease(t.Context(), request); err == nil || !strings.Contains(err.Error(), "initial reconciliation") {
+		t.Fatalf("release error = %v", err)
+	}
+	if len(fixture.controller.created) != 0 {
+		t.Fatal("release submitted")
+	}
+}
+
+func TestCreateCredentialedPromotionUnhealthyReconcilerBlocks(t *testing.T) {
+	fixture := newRaceFixture(t)
+	fixture.jobs.SetReconcilerHealth(&fakeReconciler{healthy: false})
+	request := fixture.request("promotion", "promotion-run")
+	request.Run.Trigger = "promotion"
+	request.Run.Credentialed = true
+	if err := fixture.jobs.CreateCI(t.Context(), request); err == nil || !strings.Contains(err.Error(), "credentialed admission is blocked") {
+		t.Fatalf("promotion error = %v", err)
+	}
+	if len(fixture.controller.created) != 0 {
+		t.Fatal("credentialed promotion submitted")
 	}
 }
 
