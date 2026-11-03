@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
 
+	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
@@ -21,7 +23,9 @@ func TestTrustedPolicyPublicationOutageStaysPending(t *testing.T) {
 	fixture := newControlFixture(t, JobResult{Status: model.RunPassed})
 	git := &policyTestGit{controlGit: fixture.git}
 	fixture.scheduler.git = git
-	fixture.scheduler.jobs = &policyChangingJobs{fakeJobs: fixture.jobs, afterBuild: func() { git.baselineErr = errors.New("oberth git-ssh: transport refused or upstream unavailable") }}
+	fixture.scheduler.jobs = &policyChangingJobs{fakeJobs: fixture.jobs, afterBuild: func() {
+		git.baselineErr = fmt.Errorf("%w: temporary SSH transport failure", gitcache.ErrPolicyUpstreamUnavailable)
+	}}
 	queued, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: "publication-policy-outage", Repository: fixture.repo, Branch: "feature/test", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +72,7 @@ func TestTrustedPolicyRefreshWaitsAndResumes(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			fixture := newControlFixture(t, JobResult{Status: model.RunPassed})
-			git := &policyTestGit{controlGit: fixture.git, baselineErr: errors.New("oberth git-ssh: transport refused or upstream unavailable")}
+			git := &policyTestGit{controlGit: fixture.git, baselineErr: fmt.Errorf("%w: temporary SSH transport failure", gitcache.ErrPolicyUpstreamUnavailable)}
 			fixture.scheduler.git = git
 			queued, err := fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: "policy-outage", Repository: fixture.repo, Branch: "feature/test", SHA: strings.Repeat("a", 40), Actor: "agent@host"})
 			if err != nil {
@@ -253,7 +257,7 @@ func TestTrustedPolicyRefusesBuildWithoutProtectedExecutor(t *testing.T) {
 		{name: "candidate deleted published requirement", baseline: []byte(requiredTestContract)},
 		{name: "candidate adds commands", candidate: []byte(requiredTestContract + "command: echo pass\n")},
 		{name: "candidate object unreadable", candidateErr: errors.New("object unavailable")},
-		{name: "upstream unavailable", baselineErr: errors.New("upstream unavailable")},
+		{name: "upstream unavailable", baselineErr: fmt.Errorf("%w: upstream unavailable", gitcache.ErrPolicyUpstreamUnavailable)},
 		{name: "invalid published requirement", baseline: []byte("version: 99\n")},
 	} {
 		t.Run(test.name, func(t *testing.T) {

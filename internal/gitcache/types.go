@@ -16,6 +16,9 @@ import (
 // cache, because the cache belongs to a different identity.
 var ErrUpstreamRefused = errors.New("upstream resolution refused")
 
+// ErrPolicyUpstreamUnavailable marks only an exhausted temporary policy transport failure.
+var ErrPolicyUpstreamUnavailable = errors.New("temporary upstream policy transport unavailable")
+
 // Service is one of the two Git smart-protocol programs exposed by Oberth.
 type Service string
 
