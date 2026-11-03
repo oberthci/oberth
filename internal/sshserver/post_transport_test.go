@@ -7,8 +7,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"github.com/oberthci/oberth/internal/gitcache"
-	"golang.org/x/crypto/ssh"
 	"io"
 	"net"
 	"os"
@@ -17,6 +15,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/ssh"
+
+	"github.com/oberthci/oberth/internal/gitcache"
 )
 
 func TestReceiveFinalizationOutlivesTransportIdleDeadline(t *testing.T) {
