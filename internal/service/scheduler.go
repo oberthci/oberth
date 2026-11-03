@@ -32,6 +32,7 @@ const maximumCIIssueTailBytes = 16 << 10
 const mutationGateRetryInterval = time.Second
 
 var errMutationBlocked = errors.New("service: mutation blocked by unavailable audit integrity")
+var errPreflightCancellationPending = errors.New("trusted preflight cancellation cleanup remains pending")
 
 type mutationRequirement func(context.Context) error
 
@@ -370,7 +371,14 @@ func (scheduler *Scheduler) completePendingCancellationsWithGate(ctx context.Con
 	if err != nil {
 		return fmt.Errorf("load pending run cancellations: %w", err)
 	}
-	return scheduler.completeCancellationsWithGate(ctx, pending, require)
+	err = scheduler.completeCancellationsWithGate(ctx, pending, require)
+	if errors.Is(err, errPreflightCancellationPending) {
+		// The API still reports pending deletion, but this external cleanup
+		// failure must not stop the owner or its periodic absence readback.
+		log.Printf("WARN: %v", err)
+		return nil
+	}
+	return err
 }
 
 func (scheduler *Scheduler) completeCancellations(ctx context.Context, cancellations []model.RunCancellation) error {
@@ -400,6 +408,7 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 	for _, current := range pending {
 		currentCancellations[current.RunID] = current
 	}
+	var preflightErr error
 	for _, cancellation := range cancellations {
 		beatDispatch(ctx)
 		current, pending := currentCancellations[cancellation.RunID]
@@ -416,10 +425,10 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 				CancelPreflight(context.Context, string) error
 			}); ok {
 				if err := canceler.CancelPreflight(ctx, run.ID); err != nil {
-					return err
+					preflightErr = errors.Join(preflightErr, fmt.Errorf("%w: %w", errPreflightCancellationPending, err))
 				}
 			}
-			continue // The live owner or startup recovery completes absence readback.
+			continue // The live owner or terminal cleanup worker confirms absence.
 		}
 		if isPendingCreate(run) || scheduler.ownsCreateCleanup(run.ID) {
 			scheduler.registerCreateCleanup(run, nil, isPendingCreate(run))
@@ -441,7 +450,7 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 			return fmt.Errorf("clean canceled run workspace %s: %w", cancellation.RunID, cleanupErr)
 		}
 	}
-	return nil
+	return preflightErr
 }
 
 // abandonAdmissions withdraws the ungranted admission reservations of runs a
@@ -558,6 +567,8 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 	}()
 	workers.Add(1)
 	go func() { defer workers.Done(); scheduler.runCreateCleanup(workerCtx) }()
+	workers.Add(1)
+	go func() { defer workers.Done(); scheduler.runTerminalPreflightCleanup(workerCtx) }()
 	completed := make(chan error, max(2*scheduler.maxConcurrent, len(adopted)))
 	active := len(adopted)
 	for _, adopted := range adopted {

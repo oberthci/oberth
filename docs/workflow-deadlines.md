@@ -86,5 +86,11 @@ as `deleted` when deletion requests were accepted, or `pending` on a failure;
 accepted deletion does not promise that Pod finalizers have finished.
 The VM journal retains its separate capacity slot and cleanup obligation until
 absence is confirmed, preventing an unobserved VM from being treated as gone.
+A separate worker checks terminal preflight journals every five seconds after
+their local execution owner returns. It retries ownership-checked cleanup and
+absence readback with a two-minute budget per attempt, so eventual object
+removal frees the VM slot without a server restart. Deletion errors remain
+pending without stopping the scheduler. Cleanup does not retry the run or
+change its terminal result, and never targets a running parent.
 The executor identity init container logs its initial wait, progress every 30
 seconds and receipt, without logging credential contents.
