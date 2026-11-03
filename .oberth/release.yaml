@@ -1127,13 +1127,15 @@ spec:
         mountPath: /tmp/oberth-tools
         subPath: golangci-lint-run
         readOnly: true
+      # Historical release-lint peak: 5,838,360,576 sampled bytes.
+      # Keep 8Gi for headroom; the analysis worker already uses a 2GiB Go memory target.
       resources:
         requests:
           cpu: 1250m
           memory: 8Gi
         limits:
           cpu: 4000m
-          memory: 8384Mi
+          memory: 8Gi
   - name: release-scan
     automountServiceAccountToken: false
     metadata:
@@ -1230,6 +1232,9 @@ spec:
           GOBIN=/tmp/oberth-tools/bin \
           OBERTH_ARCHIVE_PARITY_REPO=fixture \
           OBERTH_TEST_NODE_ARCHIVE=/tmp/oberth-website-inputs/node.tar.gz \
+          GOMAXPROCS=2 \
+          GOFLAGS='-p=1' \
+          GOMEMLIMIT=1GiB \
           CGO_ENABLED=1 "$@"
       - bootstrap-clean
       - /bin/sh
@@ -1239,6 +1244,7 @@ spec:
       - -race
       - -v
       - -count=1
+      - -parallel=2
       - -timeout=20m
       - ./...
       env:
@@ -1252,13 +1258,15 @@ spec:
       - name: bootstrap-website-inputs
         mountPath: /tmp/oberth-website-inputs
         readOnly: true
+      # Historical unbounded race run reached 8Gi. Serialize packages and
+      # bound Go workers and set a memory target above; remeasure this workload on the next release.
       resources:
         requests:
           cpu: 1250m
           memory: 8Gi
         limits:
           cpu: 4000m
-          memory: 12352Mi
+          memory: 8Gi
   - name: release-chart-test
     automountServiceAccountToken: false
     metadata:
@@ -1340,6 +1348,9 @@ spec:
           OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
           OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
           GOBIN=/tmp/oberth-tools/bin \
+          GOMAXPROCS=2 \
+          GOFLAGS='-p=1' \
+          GOMEMLIMIT=1GiB \
           CGO_ENABLED=1 "$@"
       - bootstrap-clean
       - ./.oberth/release.sh
@@ -1354,13 +1365,15 @@ spec:
         readOnly: true
       - name: bootstrap-output
         mountPath: /tmp/oberth-release
+      # Historical build peak: 6,770,733,056 sampled bytes; 8Gi leaves
+      # about 1.69Gi above that observation. Bound compiler workers and set a Go memory target above.
       resources:
         requests:
           cpu: 1250m
           memory: 8Gi
         limits:
           cpu: 4000m
-          memory: 9728Mi
+          memory: 8Gi
   - name: release-sign-binaries
     metadata:
       annotations:
