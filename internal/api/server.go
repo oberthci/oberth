@@ -283,6 +283,7 @@ func (server *Server) routes() {
 	server.mux.Handle("GET /api/runs/{run}/artifacts", server.requireAuth(http.HandlerFunc(server.handleRunArtifacts)))
 	server.mux.Handle("GET /api/runs/{run}/artifacts/{name...}", server.requireAuth(http.HandlerFunc(server.handleRunArtifactDownload)))
 	server.mux.Handle("GET /api/repos", server.requireAuth(http.HandlerFunc(server.handleRepos)))
+	server.mux.Handle("GET /api/issues/{id}", server.requireAuth(http.HandlerFunc(server.handleIssue)))
 	server.mux.Handle("GET /api/issues", server.requireAuth(http.HandlerFunc(server.handleIssues)))
 	server.mux.Handle("GET /api/grants", server.requireAuth(http.HandlerFunc(server.handleGrants)))
 	server.mux.Handle("GET /api/audit", server.requireAuth(http.HandlerFunc(server.handleAudit)))
@@ -675,6 +676,19 @@ func (server *Server) handleIssues(writer http.ResponseWriter, request *http.Req
 		return
 	}
 	value, err := server.views.Issues(request.Context(), actorFrom(request.Context()), filter)
+	server.writeView(writer, value, err)
+}
+
+// Reuse issue_get so dashboard details have the same scoped visibility checks
+// as other issue readers. Lists intentionally omit bodies.
+func (server *Server) handleIssue(writer http.ResponseWriter, request *http.Request) {
+	id, err := strconv.ParseInt(request.PathValue("id"), 10, 64)
+	if err != nil || id <= 0 {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid issue ID"})
+		return
+	}
+	arguments, _ := json.Marshal(map[string]any{"id": id})
+	value, err := server.tools.CallTool(request.Context(), actorFrom(request.Context()), "issue_get", arguments)
 	server.writeView(writer, value, err)
 }
 

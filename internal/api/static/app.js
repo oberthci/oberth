@@ -1393,14 +1393,28 @@ function changeIssueFilter(patch) {
   state.issueCursorHistory = [];
   route();
 }
-function openIssue(id, opener) {
-  const issue = (state.issuePage?.Issues || []).find(item => String(item.ID) === String(id));
+async function openIssue(id, opener) {
+  let issue = (state.issuePage?.Issues || []).find(item => String(item.ID) === String(id));
   if (!issue) return;
   state.issueOpener = opener || document.activeElement;
   const dialog = document.getElementById("issueDialog");
   document.getElementById("issueDialogTitle").textContent = `Issue #${issue.ID}`;
   document.getElementById("issueDialogMeta").textContent = `${issue.Kind} · ${issue.State} · ${issue.upstream || "workspace-global"}`;
-  document.getElementById("issueDialogContent").innerHTML = `
+  const requestID = state.issueDetailRequest = (state.issueDetailRequest || 0) + 1;
+  const content = document.getElementById("issueDialogContent");
+  content.textContent = "Loading issue…";
+  document.querySelector(".app").inert = true;
+  if (!dialog.open) dialog.showModal();
+  let detail;
+  try {
+    detail = await api(`/api/issues/${encodeURIComponent(issue.ID)}`);
+  } catch (err) {
+    if (state.issueDetailRequest === requestID && dialog.open) content.textContent = err.message;
+    return;
+  }
+  if (state.issueDetailRequest !== requestID || !dialog.open) return;
+  issue = { ...issue, Body: detail.body };
+  content.innerHTML = `
     <h3>${esc(issue.Title || "Untitled issue")}</h3>
     <p class="meta">${esc(issue.RepoID ? repoName(issue.RepoID) : (issue.upstream || "workspace-global"))} ${issue.Branch ? "/ " + esc(issue.Branch) : ""} · Oberth internal ledger</p>
     <dl class="kv-grid">
@@ -1416,10 +1430,9 @@ function openIssue(id, opener) {
     </dl>
     <h4>Body</h4>
     <div class="issue-body md">${issue.Body ? renderMarkdown(issue.Body) : esc("(empty)")}</div>`;
-  document.querySelector(".app").inert = true;
-  dialog.showModal();
 }
 function closeIssue() {
+  state.issueDetailRequest = (state.issueDetailRequest || 0) + 1;
   const dialog = document.getElementById("issueDialog");
   if (dialog?.open) dialog.close();
   document.querySelector(".app").inert = false;
