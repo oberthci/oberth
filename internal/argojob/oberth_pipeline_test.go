@@ -122,8 +122,8 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 		t.Fatalf("declared size = %q,%v; want L", size, err)
 	}
 
-	if built.Spec.ActiveDeadlineSeconds == nil || *built.Spec.ActiveDeadlineSeconds != 5400 {
-		t.Fatalf("own-CI deadline = %v, want 5400 seconds", built.Spec.ActiveDeadlineSeconds)
+	if built.Spec.ActiveDeadlineSeconds == nil || *built.Spec.ActiveDeadlineSeconds != 7200 {
+		t.Fatalf("own-CI deadline = %v, want 7200 seconds", built.Spec.ActiveDeadlineSeconds)
 	}
 
 	// Every burn build.yaml declares for the CI trigger is present, with the

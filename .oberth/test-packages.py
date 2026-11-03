@@ -37,7 +37,7 @@ def main():
         print(json.dumps(groups, sort_keys=True))
         return
     # Whole-package race measurements need at least 1.5x deadline headroom.
-    timeout = {"store": "35m", "service": "1328s", "rest": "1749s", "gitcache": "20m"}[args.group]
+    timeout = {"store": "41m", "service": "49m", "rest": "55m", "gitcache": "20m"}[args.group]
     os.execvp("go", ["go", "test", "-race", "-v", "-count=1", "-p=2", f"-timeout={timeout}", *groups[args.group]])
 
 

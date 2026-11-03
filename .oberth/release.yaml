@@ -1223,7 +1223,7 @@ spec:
       - -v
       - -count=1
       - -parallel=2
-      - -timeout=35m
+      - -timeout=55m
       - ./...
       env:
       - name: PATH

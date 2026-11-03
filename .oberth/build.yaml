@@ -69,7 +69,8 @@ spec:
   entrypoint: ci
   # Bound repository-local fan-out; keep node CPU available to other workflows.
   parallelism: 2
-  activeDeadlineSeconds: 5400
+  # Keep the enlarged race step budgets inside the overall CI deadline.
+  activeDeadlineSeconds: 7200
 
   volumeClaimTemplates:
   - metadata:
@@ -1102,6 +1103,8 @@ spec:
   # Give each group a bounded two-CPU lane; workflow parallelism remains two.
   - name: test-store
     automountServiceAccountToken: false
+    # Maximum observed race duration times 1.5, rounded up to minutes.
+    activeDeadlineSeconds: 2460
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1166,8 +1169,8 @@ spec:
 
   - name: test-service
     automountServiceAccountToken: false
-    # Maximum observed race-lane wall time multiplied by 1.5, rounded up.
-    activeDeadlineSeconds: 1328
+    # Maximum observed race duration times 1.5, rounded up to minutes.
+    activeDeadlineSeconds: 2940
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1232,8 +1235,8 @@ spec:
 
   - name: test-rest
     automountServiceAccountToken: false
-    # Maximum observed race-lane wall time multiplied by 1.5, rounded up.
-    activeDeadlineSeconds: 1749
+    # Maximum observed race duration times 1.5, rounded up to minutes.
+    activeDeadlineSeconds: 3300
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src

@@ -120,8 +120,8 @@ else:
 				t.Fatal(err)
 			}
 			timeout := map[string]string{
-				"store": "-timeout=35m", "service": "-timeout=1328s",
-				"rest": "-timeout=1749s", "gitcache": "-timeout=20m",
+				"store": "-timeout=41m", "service": "-timeout=49m",
+				"rest": "-timeout=55m", "gitcache": "-timeout=20m",
 			}[group]
 			want := []string{"test", "-race", "-v", "-count=1", "-p=2", timeout}
 			for _, pkg := range packages {
@@ -154,7 +154,7 @@ func TestOberthSplitStagesUseTheRaceGroupLauncher(t *testing.T) {
 				continue
 			}
 			found = true
-			if seconds, measured := map[string]int32{"service": 1328, "rest": 1749}[group]; measured {
+			if seconds, measured := map[string]int32{"store": 2460, "service": 2940, "rest": 3300}[group]; measured {
 				if template.ActiveDeadlineSeconds == nil || template.ActiveDeadlineSeconds.IntVal != seconds {
 					t.Fatalf("%s step deadline = %v, want %d seconds", group, template.ActiveDeadlineSeconds, seconds)
 				}
