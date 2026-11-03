@@ -191,17 +191,31 @@ const maximumIntervalCacheEntries = 1024
 // normalized masks and bound memory even when many different expressions arrive.
 func (schedule Schedule) Interval(_ time.Time) (time.Duration, error) {
 	intervalCache.Lock()
+	value, ok := intervalCache.values[schedule]
+	intervalCache.Unlock()
+	if ok {
+		return value.duration, value.err
+	}
+
+	// Calendar scans may be slow. Cached schedules and unrelated scans never
+	// wait on that computation under the global lock.
+	duration, err := schedule.calendarInterval()
+	intervalCache.Lock()
 	defer intervalCache.Unlock()
 	if value, ok := intervalCache.values[schedule]; ok {
 		return value.duration, value.err
 	}
-	duration, err := schedule.calendarInterval()
 	if len(intervalCache.values) >= maximumIntervalCacheEntries {
-		clear(intervalCache.values)
+		// Evict one arbitrary entry; a cold expression must not flush every hit.
+		for key := range intervalCache.values {
+			delete(intervalCache.values, key)
+			break
+		}
 	}
 	intervalCache.values[schedule] = intervalResult{duration, err}
 	return duration, err
 }
+
 func (schedule Schedule) calendarInterval() (time.Duration, error) {
 	var times []time.Duration
 	for hour := 0; hour < 24; hour++ {

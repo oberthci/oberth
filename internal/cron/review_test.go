@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -73,5 +74,32 @@ func TestCalendarIntervalCacheUsesNormalizedExpressionAndIgnoresFrom(t *testing.
 	intervalCache.Unlock()
 	if !ok {
 		t.Fatal("normalized schedule was not cached")
+	}
+}
+
+func TestIntervalCacheEvictsOnlyOneEntry(t *testing.T) {
+	intervalCache.Lock()
+	saved := intervalCache.values
+	intervalCache.values = make(map[Schedule]intervalResult)
+	for i := range maximumIntervalCacheEntries {
+		schedule, err := Parse(fmt.Sprintf("%d %d * * *", i%60, i/60))
+		if err != nil {
+			t.Fatal(err)
+		}
+		intervalCache.values[schedule] = intervalResult{duration: time.Hour}
+	}
+	intervalCache.Unlock()
+	defer func() { intervalCache.Lock(); intervalCache.values = saved; intervalCache.Unlock() }()
+	schedule, err := Parse("* * * * *")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := schedule.Interval(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	intervalCache.Lock()
+	defer intervalCache.Unlock()
+	if got := len(intervalCache.values); got != maximumIntervalCacheEntries {
+		t.Fatalf("cache retained %d entries, want bounded single-entry eviction", got)
 	}
 }
