@@ -39,11 +39,14 @@ func TestLiveReadsDoNotWaitForWriter(t *testing.T) {
 			_, err := s.RepositoryByName(ctx, "codeberg/codeberg.org/oberth")
 			return err
 		},
-		"bare mapping":  func(ctx context.Context) error { _, err := s.RepositoryByName(ctx, "oberth"); return err },
-		"flat run list": func(ctx context.Context) error { _, err := s.ListRecentRuns(ctx, model.RunListFilter{}); return err },
-		"run":           func(ctx context.Context) error { _, err := s.Run(ctx, run.ID); return err },
-		"summary":       func(ctx context.Context) error { _, err := s.Summary(ctx); return err },
-		"idle":          func(ctx context.Context) error { _, err := s.IdleQueueStatus(ctx); return err },
+		"bare mapping": func(ctx context.Context) error { _, err := s.RepositoryByName(ctx, "oberth"); return err },
+		"flat run list": func(ctx context.Context) error {
+			_, err := s.ListRecentRuns(ctx, model.RunListFilter{})
+			return err
+		},
+		"run":     func(ctx context.Context) error { _, err := s.Run(ctx, run.ID); return err },
+		"summary": func(ctx context.Context) error { _, err := s.Summary(ctx); return err },
+		"idle":    func(ctx context.Context) error { _, err := s.IdleQueueStatus(ctx); return err },
 		"pilot resources": func(ctx context.Context) error {
 			_, err := s.PilotResources(ctx, run.ID)
 			if errors.Is(err, ErrNotFound) {
@@ -109,12 +112,14 @@ func TestConcurrentStatusWritersAndReceiveLookups(t *testing.T) {
 		}
 		start := make(chan struct{})
 		ready := make(chan struct{}, writers)
-		errs := make(chan error, writers)
+		errs := make(chan error, writers+1)
+		lookupStarted := make(chan struct{})
 		var wg sync.WaitGroup
 		for _, id := range ids {
 			wg.Go(func() {
 				ready <- struct{}{}
 				<-start
+				<-lookupStarted
 				if _, err := s.SetRunWorkflowName(ctx, id, fmt.Sprintf("workflow-%d", round)); err != nil {
 					errs <- err
 					return
@@ -132,13 +137,58 @@ func TestConcurrentStatusWritersAndReceiveLookups(t *testing.T) {
 		}
 		close(start)
 		// These are the receive/ls-remote identity lookups and status list.
-		// The package harness bounds deadlocks; elapsed time is not a claim
-		// about database correctness or host scheduling latency.
-		_, upstreamErr := s.UpstreamByName(ctx, "codeberg")
-		lookup, repoErr := s.RepositoryByName(ctx, "codeberg/codeberg.org/oberth")
-		runs, listErr := s.ListRecentRuns(ctx, model.RunListFilter{})
+		// TestLiveReadsDoNotWaitForWriter catches writer-pool routing errors
+		// with a scaled bound. This generous bound diagnoses a deadlock here
+		// without treating host scheduling latency as a correctness failure.
+		heldCtx, stopHeld := context.WithTimeout(ctx, testtimeout.Scale(time.Minute))
+		_, upstreamErr := s.UpstreamByName(heldCtx, "codeberg")
+		lookup, repoErr := s.RepositoryByName(heldCtx, "codeberg/codeberg.org/oberth")
+		runs, listErr := s.ListRecentRuns(heldCtx, model.RunListFilter{})
+		stopHeld()
 		rollbackErr := tx.Rollback()
+		// Keep reading while the workers commit, append to the WAL and may
+		// auto-checkpoint. No writer starts until the first lookup succeeds.
+		writersDone := make(chan struct{})
+		readerDone := make(chan struct{})
+		concurrentLookups := 0
+		go func() {
+			defer close(readerDone)
+			lookup := func() error {
+				if _, err := s.UpstreamByName(ctx, "codeberg"); err != nil {
+					return err
+				}
+				if _, err := s.RepositoryByName(ctx, "codeberg/codeberg.org/oberth"); err != nil {
+					return err
+				}
+				_, err := s.ListRecentRuns(ctx, model.RunListFilter{})
+				return err
+			}
+			firstErr := lookup()
+			// Release workers on failure too, so all goroutines can be joined.
+			close(lookupStarted)
+			if firstErr != nil {
+				errs <- fmt.Errorf("round %d first concurrent lookup: %w", round, firstErr)
+				return
+			}
+			for {
+				if err := lookup(); err != nil {
+					errs <- fmt.Errorf("round %d lookup during commits: %w", round, err)
+					return
+				}
+				concurrentLookups++
+				select {
+				case <-writersDone:
+					return
+				default:
+				}
+			}
+		}()
 		wg.Wait()
+		close(writersDone)
+		<-readerDone
+		if concurrentLookups == 0 {
+			t.Errorf("round %d: no successful lookup after writers started", round)
+		}
 		close(errs)
 		for err := range errs {
 			t.Error(err)
@@ -169,7 +219,7 @@ func TestConcurrentStatusWritersAndReceiveLookups(t *testing.T) {
 			}
 		}
 	}
-	t.Logf("%d writers, %d status+step writes each; lookups completed while writer held in every round", writers, rounds)
+	t.Logf("%d writers, %d status+step writes each; lookups completed with writer held and alongside commits in every round", writers, rounds)
 }
 
 func TestLiveReaderPoolIsReadOnlyAndBounded(t *testing.T) {

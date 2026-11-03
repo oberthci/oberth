@@ -82,9 +82,13 @@ The tmpfs is included in the existing container memory envelope: 4Gi for
 `test-store`, with a 2GiB Go heap target, and 8Gi for `release-test`, with its
 4GiB target. CPU requests are 971m and 1000m respectively, with limits of
 2 and 4 CPU. Package execution retains the 20-minute deadlock bound and
-bounded Go worker counts. The contention test uses writer reservations and
-round barriers instead of a throughput deadline or a lookup latency assertion;
-it still performs all 16 × 32 status/step write pairs and checks every result.
+bounded Go worker counts. The contention test first checks committed reads
+while holding an uncommitted writer transaction, with a generous scaled
+one-minute deadlock bound. After releasing that transaction, it keeps the three
+receive/status lookups running until all writers finish. A successful initial
+lookup releases the writers, and every round requires a successful lookup after
+that release. It still performs all 16 × 32 status/step write pairs and checks
+every result, without a throughput deadline or lookup latency assertion.
 
 ## Telemetry-retention writer exception
 
