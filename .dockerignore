@@ -6,3 +6,13 @@ artifacts
 oberth.log
 coverage.out
 *.test
+# Keep local credentials and agent state out of every build stage and cache.
+**/*.pem
+**/*.key
+**/*.crt
+**/.env*
+**/*.kubeconfig
+**/.claude
+**/.codex
+docs
+handoffs
