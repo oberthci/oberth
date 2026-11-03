@@ -182,6 +182,20 @@ func (g *deadlineGit) PushPromotion(context.Context, string, string, string) err
 	return nil
 }
 
+// A create notification precedes the scheduler's post-create reread. Wait until
+// observation begins so supersession exercises the observed-cancellation path,
+// rather than legitimately completing inside the post-create cleanup branch.
+type deadlineObservingJobs struct {
+	*groupEngine
+	observing chan struct{}
+	once      sync.Once
+}
+
+func (jobs *deadlineObservingJobs) Wait(ctx context.Context, name string, output io.Writer) (JobResult, error) {
+	jobs.once.Do(func() { close(jobs.observing) })
+	return jobs.groupEngine.Wait(ctx, name, output)
+}
+
 func TestDatabaseDeadlineCancellationContinuesLiveDispatch(t *testing.T) {
 	testDatabaseCancellationContinuesLiveDispatch(t, context.DeadlineExceeded)
 }
@@ -192,6 +206,8 @@ func testDatabaseCancellationContinuesLiveDispatch(t *testing.T, failure error) 
 	for _, operation := range []string{"PendingRunCancellations", "Run", "CompleteObservedRunCancellation"} {
 		t.Run(operation, func(t *testing.T) {
 			fixture := newGroupFixture(t, 2)
+			jobs := &deadlineObservingJobs{groupEngine: fixture.engine, observing: make(chan struct{})}
+			fixture.scheduler.jobs = jobs
 			database := &deadlineFaultStore{Store: fixture.store, failures: make(map[string]int), calls: make(map[string]int), faultError: failure}
 			fixture.scheduler.store = database
 			fixture.scheduler.workspaces.owners = fixture.scheduler.database()
@@ -202,6 +218,13 @@ func testDatabaseCancellationContinuesLiveDispatch(t *testing.T, failure error) 
 			// earlier supersession uses the worker's post-create cleanup path,
 			// bypassing the observed-cancellation operation under test.
 			awaitDeadlineSubmitted(t, fixture.store, old.ID, done)
+			select {
+			case <-jobs.observing:
+			case err := <-done:
+				t.Fatalf("scheduler stopped before observing initial Workflow: %v", err)
+			case <-time.After(testStartTimeout(15 * time.Second)):
+				t.Fatal("initial Workflow observation did not start")
+			}
 			database.mu.Lock()
 			before := database.calls[operation]
 			database.failures[operation] = 2
