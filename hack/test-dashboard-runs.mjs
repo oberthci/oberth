@@ -127,8 +127,8 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
     'F3: without positions the queue follows the active view order, not queue time');
   run(`api=async path=>{ if(path==='/api/repos')return [{ID:1,Name:'ours',UpstreamID:1}]; if(path==='/api/runs/counts')return {Total:3,ByRepo:{1:3}}; const query=new URL(path,'https://example.test').searchParams; if(query.get('view')==='active')return []; return {body:f3Scoped,next:''}; };`);
   await run('renderRuns(0)');
-  assert.deepEqual(ids(), ['scoped-normal-old','scoped-high-new','scoped-passed'],
-    'F3: without positions or an active view the server row order stands');
+  assert.deepEqual(ids(), ['scoped-high-new','scoped-normal-old','scoped-passed'],
+    'F3: without positions or an active view priority leads, preserving server FIFO within each class');
   // A claimed normal run (raw running, not started) listed by the active
   // view after an unclaimed high run stays behind it: the scoped queue is
   // the server's claim order, never "claimed first".
@@ -333,3 +333,24 @@ for (const latest of [false, true]) {
   }
 }
 console.log('Queued groups preserve scheduler priority and FIFO in flat, latest-per-ref and scoped views');
+
+// A scoped poll can receive a newer priority bump in the heads while the
+// active request fails and retains its older queue order. Cached order must
+// never put a normal row between two priority rows.
+run(`{
+  changeRunRepo('all'); state.filter='all';
+  const high=makeRun('cache-high',{Ref:'cache/high',Status:'queued',StartedAt:null,FinishedAt:null,priority_class:'high'});
+  const normal=makeRun('cache-normal',{Ref:'cache/normal',Status:'queued',StartedAt:null,FinishedAt:null});
+  const bumped=makeRun('cache-bumped',{Ref:'cache/bumped',Status:'queued',StartedAt:null,FinishedAt:null,priority_class:'highest',priority_reason:'operator bump'});
+  state.activeRuns=[high,normal,{...bumped,priority_class:'normal'}];
+  state.activeRunsRepo='all'; state.activeRunsComplete=true;
+  api=async path=>{
+    if(path==='/api/repos')return [{ID:1,Name:'ours',UpstreamID:1}];
+    if(path==='/api/runs/counts')return {Total:3,ByRepo:{1:3}};
+    if(path.includes('view=active'))throw Object.assign(new Error('offline'),{status:503});
+    return {body:[bumped,normal],next:''};
+  };
+}`);
+await run('renderRuns(state.routeSeq)');
+assert.deepEqual(ids(), ['cache-bumped','cache-high','cache-normal'], 'a stale scoped active order must not interleave effective priority classes');
+console.log('Priority classes remain grouped when the scoped active request fails after a priority change');
