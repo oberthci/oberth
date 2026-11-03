@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -66,14 +68,62 @@ func seedResourceRows(t *testing.T, s *Store, runID string, at time.Time, n int)
 	if err := s.RecordStepResourceUsage(t.Context(), []model.StepResourceUsage{v}); err != nil {
 		t.Fatal(err)
 	}
+	var observation string
+	if err := s.db.QueryRow(`SELECT observation_json FROM step_resource_usage WHERE container_id=?`, v.ContainerID).Scan(&observation); err != nil {
+		t.Fatal(err)
+	}
+	// Keep the complete valid observation and change only its container ID.
+	// Parsing and rewriting this JSON in SQLite for each of 100,000 rows makes
+	// the race suite spend minutes constructing the retention fixture.
+	needle := `"container_id":"` + v.ContainerID + `"`
+	prefix, suffix, found := strings.Cut(observation, needle)
+	if !found || strings.Contains(suffix, needle) {
+		t.Fatal("resource fixture must contain exactly one container_id field")
+	}
+	prefix += `"container_id":"containerd://`
+	suffix = `"` + suffix
 	// Replicate valid observations with distinct IDs without making the cap
 	// fixture itself execute thousands of application transactions.
 	_, err := s.db.Exec(`WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<?)
 INSERT INTO step_resource_usage(run_id,repo_id,node_id,pod_uid,container_id,burn,step,last_observed_at,observation_json)
 SELECT run_id,repo_id,node_id,pod_uid,'containerd://'||printf('%064x',n),burn,step,last_observed_at+n,
-json_set(observation_json,'$.container_id','containerd://'||printf('%064x',n)) FROM step_resource_usage,seq WHERE container_id=?`, n-1, v.ContainerID)
+?||printf('%064x',n)||? FROM step_resource_usage,seq WHERE container_id=?`, n-1, prefix, suffix, v.ContainerID)
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSeedResourceRowsPreservesObservations(t *testing.T) {
+	s, run, at := resourceStoreFixture(t)
+	seedResourceRows(t, s, run.ID, at, 3)
+	rows, err := s.db.Query(`SELECT container_id,observation_json FROM step_resource_usage ORDER BY container_id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id, observation string
+		if err := rows.Scan(&id, &observation); err != nil {
+			t.Fatal(err)
+		}
+		var got model.StepResourceUsage
+		if err := json.Unmarshal([]byte(observation), &got); err != nil {
+			t.Fatal(err)
+		}
+		want := resourceRow(run.ID, at)
+		want.ContainerID = id
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("fixture changed observation fields: got %#v, want %#v", got, want)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{fmt.Sprintf("containerd://%064x", 1), fmt.Sprintf("containerd://%064x", 2), resourceRow(run.ID, at).ContainerID}
+	if !slices.Equal(ids, want) {
+		t.Fatalf("fixture IDs = %v, want %v", ids, want)
 	}
 }
 
