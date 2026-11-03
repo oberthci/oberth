@@ -185,8 +185,9 @@ func TestReinstallPreservesRuntimeTLSNames(t *testing.T) {
 }
 
 func TestUpgradePKIRejectsTLSOverrideBypasses(t *testing.T) {
+	values := map[string]any{"tls": map[string]any{"pki": map[string]any{"enabled": true}}}
 	for _, override := range []string{"tls.pki.enabled=false", "tls.pki.mount=other", "tls.extraDNSNames=other", "tls.extraIPs=192.0.2.2"} {
-		if err := checkPinnedKeyConflicts([]string{override}, nil); err == nil {
+		if err := checkUpgradePKIKeyConflicts(UpgradeConfig{UserSet: []string{override}}, values); err == nil {
 			t.Fatalf("TLS name policy bypass accepted: %s", override)
 		}
 	}

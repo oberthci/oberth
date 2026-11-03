@@ -65,6 +65,9 @@ type ErrPinnedKeyOverride struct {
 }
 
 func (e *ErrPinnedKeyOverride) Error() string {
+	if isPinnedUpgradeKey(e.Key, upgradePKIPinnedKeys) {
+		return fmt.Sprintf("refused: %q is pinned because server PKI is enabled on the live release; use --tls-extra-dns-name/--tls-extra-ip or --tls-remove-dns-name/--tls-remove-ip to change TLS names", e.Key)
+	}
 	return fmt.Sprintf("refused: %q is pinned by the upgrade and cannot be overridden via --set or --values", e.Key)
 }
 
@@ -90,9 +93,14 @@ var upgradePinnedKeys = map[string]bool{
 	"compatibility.schemaIdentity": true,
 	"compatibility.auditDomain":    true,
 	"compatibility.witnessKeyInfo": true,
-	"tls.extraDNSNames":            true,
-	"tls.extraIPs":                 true,
-	"tls.pki":                      true,
+}
+
+// Only a release already using server PKI needs TLS reconciliation through
+// the dedicated flags. Other releases retain ordinary Helm TLS overrides.
+var upgradePKIPinnedKeys = map[string]bool{
+	"tls.extraDNSNames": true,
+	"tls.extraIPs":      true,
+	"tls.pki":           true,
 }
 
 // UpgradePinnedKeys returns the set of pinned keys for tests.
@@ -162,12 +170,27 @@ func (cfg *UpgradeConfig) ValidateUpgrade() error {
 // checkPinnedKeyConflicts checks that user --set and --values do not attempt
 // to override installer-pinned keys.
 func checkPinnedKeyConflicts(userSet []string, userValues []string) error {
+	return checkUpgradePinnedKeyConflicts(userSet, userValues, upgradePinnedKeys)
+}
+
+func checkUpgradePKIKeyConflicts(cfg UpgradeConfig, values map[string]any) error {
+	// These are the selected deployed revision's stored values, before
+	// applying any user overrides (including attempts to disable PKI).
+	tls, _ := values["tls"].(map[string]any)
+	pki, _ := tls["pki"].(map[string]any)
+	if pki["enabled"] != true {
+		return nil
+	}
+	return checkUpgradePinnedKeyConflicts(cfg.UserSet, cfg.UserValues, upgradePKIPinnedKeys)
+}
+
+func checkUpgradePinnedKeyConflicts(userSet []string, userValues []string, pinnedKeys map[string]bool) error {
 	for _, kv := range userSet {
 		key, err := upgradeSetKey(kv)
 		if err != nil {
 			return err
 		}
-		if isPinnedUpgradeKey(key) {
+		if isPinnedUpgradeKey(key, pinnedKeys) {
 			return &ErrPinnedKeyOverride{Key: key}
 		}
 	}
@@ -176,7 +199,7 @@ func checkPinnedKeyConflicts(userSet []string, userValues []string) error {
 		if err != nil {
 			return fmt.Errorf("read values file %s: %w", path, err)
 		}
-		if err := checkValuesPinnedConflicts(data); err != nil {
+		if err := checkUpgradeValuesPinnedConflicts(data, pinnedKeys); err != nil {
 			return err
 		}
 	}
@@ -186,11 +209,11 @@ func checkPinnedKeyConflicts(userSet []string, userValues []string) error {
 // isPinnedUpgradeKey reports whether key (a dotted Helm value path) conflicts
 // with an installer-pinned key: either an exact match or a parent path that
 // would wipe a pinned subtree.
-func isPinnedUpgradeKey(key string) bool {
-	if upgradePinnedKeys[key] {
+func isPinnedUpgradeKey(key string, pinnedKeys map[string]bool) bool {
+	if pinnedKeys[key] {
 		return true
 	}
-	for pinned := range upgradePinnedKeys {
+	for pinned := range pinnedKeys {
 		if strings.HasPrefix(pinned, key+".") || strings.HasPrefix(key, pinned+".") {
 			return true
 		}
@@ -201,6 +224,10 @@ func isPinnedUpgradeKey(key string) bool {
 // checkValuesPinnedConflicts checks parsed YAML data for leaf keys that
 // collide with a pinned upgrade key.
 func checkValuesPinnedConflicts(data []byte) error {
+	return checkUpgradeValuesPinnedConflicts(data, upgradePinnedKeys)
+}
+
+func checkUpgradeValuesPinnedConflicts(data []byte, pinnedKeys map[string]bool) error {
 	var values map[string]any
 	if err := yaml.Unmarshal(data, &values); err != nil {
 		return fmt.Errorf("parse values YAML: %w", err)
@@ -208,7 +235,7 @@ func checkValuesPinnedConflicts(data []byte) error {
 	leafPaths := make(map[string]bool)
 	collectLeafKeyPaths(values, "", leafPaths)
 	for path := range leafPaths {
-		if isPinnedUpgradeKey(path) {
+		if isPinnedUpgradeKey(path, pinnedKeys) {
 			return &ErrPinnedKeyOverride{Key: path}
 		}
 	}
@@ -406,6 +433,9 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		}
 		values, err := readUpgradeStoredValues(ctx, cfg.Namespace, revision, deps)
 		if err != nil {
+			return result, err
+		}
+		if err := checkUpgradePKIKeyConflicts(cfg, values); err != nil {
 			return result, err
 		}
 		if _, err := prepareUpgradeServerPKI(ctx, &cfg, deps, values); err != nil {

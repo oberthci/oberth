@@ -139,6 +139,9 @@ func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, cha
 	if err != nil {
 		return preparedUpgradeValues{}, err
 	}
+	if err := checkUpgradePKIKeyConflicts(cfg, values); err != nil {
+		return preparedUpgradeValues{}, err
+	}
 	pki, err := prepareUpgradeServerPKI(ctx, &cfg, deps, values)
 	if err != nil {
 		return preparedUpgradeValues{}, err
