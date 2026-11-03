@@ -64,6 +64,18 @@ class NameCheckTests(unittest.TestCase):
         self.write('fixture.txt', gate.FORBIDDEN.encode(), tracked=False)
         self.assertEqual(gate.check(self.root), 1)
 
+    def test_runtime_assembled_literals_fail(self):
+        first, second = gate.PARTS
+        encoded = ''.join('\\x%02x' % ord(char) for char in first)
+        for source in (
+                'name = "".join((%r, %r))' % (first, second),
+                'name = %r + %r' % (first, second),
+                'name = "%s" "%s"' % (first, second),
+                'name = "".join(("%s", "%s"))' % (encoded, second)):
+            with self.subTest(source=source):
+                self.write('fixture.py', source.encode())
+                self.assertEqual(gate.check(self.root), 1)
+
     def test_seeded_checkout_with_different_owner_is_scoped_safe(self):
         self.write('fixture.txt', b'generic content')
         with patch.dict(os.environ, dict(self.env, GIT_TEST_ASSUME_DIFFERENT_OWNER='1'), clear=True):

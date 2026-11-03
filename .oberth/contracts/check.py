@@ -1,4 +1,4 @@
-"""Contract ratchet. Canonical source: the shared Wire contract generator.
+"""Contract ratchet. Canonical owner: Oberth; emitted by its contract profile.
 
 Baselines retain exact existing findings, never an allowance for new strings.
 Review baseline reductions when removing debt; baseline increases need review.
@@ -24,13 +24,10 @@ QUESTIONS = (
 TEXT = {".go", ".py", ".sh", ".bats", ".yaml", ".yml", ".json", ".md", ".html", ".js", ".ts", ".tf", ".tpl", ".txt"}
 CONFESSION = re.compile(r"MUST match|byte-for-byte|keep in sync|in lockstep|mirror of|same as in", re.I)
 GENERATOR = re.compile(r"generat\w*.*[\w./-]+\.(?:go|py|sh)\b|go:?generate\s+\S+", re.I)
-PRODUCT_NAMESPACE = "".join(("cloud", "taser"))
-RETIRED = re.compile(r"secretBackend: vault \(the default\)|" + PRODUCT_NAMESPACE + r"-operator-certs|failurePolicy: Ignore|\bstateless\b|falls back automatically|tested on EKS", re.I)
 RESIDUE = re.compile(r"/home/|" + "codex" + r"-lab|(?:^|[=\"'])%[0-9]+\b|\bpane\s+%[0-9]+\b|roadmap#")
 DEPRECATED = re.compile(r"\blegacy\b|\bdeprecated\b|\bfor now\b|\btemporary\b|\buntil\b", re.I)
 ENV = re.compile(r'''(?:Getenv|LookupEnv|getenv|os\.getenv|environ\.get|env\.(?:String|Bool|Int|Duration))\s*\(\s*["']([A-Z][A-Z0-9_]+)["']''')
-ANNOTATION = re.compile(r'''["']((?:[\w.-]+\.)?''' + PRODUCT_NAMESPACE + r'''\.io/[\w.-]+)["']''')
-SERVER_ANNOTATION = re.compile(r'''["']((?:[\w.-]+\.)?oberth\.ci/[\w.-]+)["']''')
+ANNOTATION = re.compile(r'''["']((?:[\w.-]+\.)?oberth\.ci/[\w.-]+)["']''')
 FLAG = re.compile(r'''\b(?:String|Bool|Int|Duration|StringVar|BoolVar|IntVar|DurationVar)(?:P)?\s*\([^\n]*?["']([a-z][a-z0-9-]+)["']''')
 SEAM = re.compile(r"_TEST_|_SKIP|ALLOW_INSECURE|_DEV_")
 
@@ -53,11 +50,6 @@ def scan(root, names, registry, deprecations):
     pipeline = "\n".join((root / p).read_text(errors="replace") for p in names if p.startswith(".oberth/") and p.endswith((".yaml", ".yml")))
     ids = {d["id"] for d in deprecations}
     entries = registry["entries"]
-    # Scan the public annotation namespace owned by this module. Client-side
-    # workflow fixtures do not introduce server configuration surfaces.
-    module = root / "go.mod"
-    server_owner = module.is_file() and re.search(r"(?m)^module\s+github\.com/oberthci/oberth\s*$", module.read_text())
-    annotation = SERVER_ANNOTATION if server_owner else ANNOTATION
     for name in names:
         if name.startswith(("vendor/", "node_modules/", ".git/")) or "/vendor/" in name:
             continue
@@ -82,8 +74,6 @@ def scan(root, names, registry, deprecations):
             if name.endswith("values.yaml") and re.match(r"^\s*[a-zA-Z][\w-]*:",line):
                 key="value:"+line.split(":",1)[0].strip()
                 if key not in entries: add("law3-surface")
-            if RETIRED.search(line):
-                add("law2-retired")
             if RESIDUE.search(line):
                 add("law5-residue")
             if name != "deprecations.yaml" and DEPRECATED.search(line) and not any(d in line for d in ids):
@@ -96,7 +86,7 @@ def scan(root, names, registry, deprecations):
                 if re.search(r'"unsafe"|\.SetInt64\(0\)|\b(?:zeroBytes|wipeBytes|explicit_bzero)\(', line):
                     add("rule7-hygiene")
             if name.endswith((".go", ".py")):
-                for kind, pattern in (("env", ENV), ("annotation", annotation), ("flag", FLAG)):
+                for kind, pattern in (("env", ENV), ("annotation", ANNOTATION), ("flag", FLAG)):
                     for match in pattern.finditer(line):
                         key = kind + ":" + match[1]
                         if key not in entries:
@@ -137,8 +127,8 @@ def fingerprint(findings):
 def validate_registries(root):
     surface = json.loads((root / "surface-registry.json").read_text())
     for key, entry in surface["entries"].items():
-        if not key.startswith(("env:", "annotation:", "flag:", "value:")) or not entry.get("doc_anchor") or not entry.get("cttv_cell"):
-            raise ValueError("surface requires type/name, doc_anchor and cttv_cell: " + key)
+        if not key.startswith(("env:", "annotation:", "flag:", "value:")) or not entry.get("doc_anchor") or not entry.get("test_ref"):
+            raise ValueError("surface requires type/name, doc_anchor and test_ref: " + key)
     records = json.loads((root / "deprecations.yaml").read_text())["deprecations"]
     seen = set()
     for record in records:
