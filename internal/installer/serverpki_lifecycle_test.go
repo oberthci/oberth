@@ -240,10 +240,13 @@ func TestUpgradeReconcilesPKIBeforeHelmAndDryRunNeverWrites(t *testing.T) {
 					if !rendered || runner.callsByCommand()["write oberth-pki/roles/oberth-server -"].stdin == "" {
 						t.Fatal("Helm applied before PKI reconciliation")
 					}
-					for _, name := range []string{"ci.example.com", "new.example.com", "192.0.2.1", "watchTunnel.originCACert="} {
+					for _, name := range []string{"ci.example.com", "new.example.com", "192.0.2.1"} {
 						if !strings.Contains(strings.Join(args, " "), name) {
 							t.Fatalf("upgrade dropped %s", name)
 						}
+					}
+					if strings.Contains(strings.Join(args, " "), "watchTunnel") {
+						t.Fatal("PKI reconciliation reintroduced the retired connector")
 					}
 					return nil, stop
 				default:

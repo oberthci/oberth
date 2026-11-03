@@ -48,7 +48,6 @@ type UpgradeConfig struct {
 	TLSRemoveDNSNames     []string
 	TLSRemoveIPs          []string
 	OpenBaoNamespace      string
-	serverCACert          string
 	serverPKI             bool
 	storedValues          string // internal schema-validated legacy migration snapshot
 }
@@ -526,11 +525,10 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		}
 	}
 	if pki != nil {
-		ca, replaced, err := ensureServerPKI(ctx, pki.config, pki.store, pki.token, map[string]baoMount{defaultServerPKIMount + "/": {Type: "pki"}})
+		_, replaced, err := ensureServerPKI(ctx, pki.config, pki.store, pki.token, map[string]baoMount{defaultServerPKIMount + "/": {Type: "pki"}})
 		if err != nil {
 			return result, fmt.Errorf("reconcile server PKI before upgrade: %w", err)
 		}
-		cfg.serverCACert = ca
 		if replaced {
 			_, _ = fmt.Fprintln(w, "Server CA replaced; clients pinning the previous CA must refresh their trust anchor.")
 		}
@@ -664,10 +662,6 @@ func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string, compatibility ba
 		"--set-string", "compatibility.witnessKeyInfo="+compatibility.WitnessKeyInfo,
 		// Keep the existing proxy enablement and mapping from reused values.
 		"--set", "argo.goProxy.port=8444",
-		// Preserve the administrator's enablement through reused configuration.
-		// An absent enabled key renders false; a present value remains subject
-		// to the chart's boolean schema. Only the reviewed image pins override
-		// stored connector configuration (#671).
 	)
 	if cfg.ArgoControllerProfile != "" {
 		args = append(args, "--set-string", "argo.controllerProfile="+cfg.ArgoControllerProfile)
@@ -685,9 +679,6 @@ func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string, compatibility ba
 		dns, _ := json.Marshal(append([]string{}, cfg.TLSExtraDNSNames...))
 		ips, _ := json.Marshal(append([]string{}, cfg.TLSExtraIPs...))
 		args = append(args, "--set-json", "tls.extraDNSNames="+string(dns), "--set-json", "tls.extraIPs="+string(ips))
-		if cfg.serverCACert != "" {
-			args = append(args, "--set-string", "watchTunnel.originCACert="+cfg.serverCACert)
-		}
 	}
 	// Only pin --version for published charts; a local path IS the version.
 	if cfg.ChartOverride == "" && cfg.BinaryVersion != "" {

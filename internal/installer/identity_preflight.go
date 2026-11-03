@@ -304,9 +304,9 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 
 	// A production secret store gets the server PKI (ensureServerPKI): the
 	// server serves a short-lived leaf from the name-constrained CA, issued
-	// for the current names at startup, and the tunnel pins that CA. The
+	// for the current names at startup, and clients trust that CA. The
 	// bundle's self-signed certificate is then unused, so its SAN checks,
-	// re-issue and origin pin below do not apply.
+	// re-issue and client trust checks below do not apply.
 	if cfg.serverPKI {
 		if !haveStore {
 			return errors.Join(errors.New("cannot check server PKI: set BAO_TOKEN and ensure the OpenBao pod is available"), podLookupErr)
