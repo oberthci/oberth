@@ -48,7 +48,6 @@ apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/size: L
     oberth.ci/secret-paths: oberth/data/release/cosign-secret,oberth/data/release/homebrew-tap-key,oberth/data/release/cloudflare-oberth-workers-token
 spec:
   entrypoint: release
@@ -239,7 +238,7 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 1250m
+          cpu: 1000m
           memory: 95368Ki
         limits:
           cpu: '2'
@@ -379,7 +378,7 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 1250m
+          cpu: 1000m
           memory: 36224Ki
         limits:
           cpu: '2'
@@ -605,7 +604,7 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 1250m
+          cpu: 1000m
           memory: 37828Ki
         limits:
           cpu: '2'
@@ -655,7 +654,7 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 1250m
+          cpu: 1000m
           memory: 36740Ki
         limits:
           cpu: '2'
@@ -826,7 +825,7 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 1250m
+          cpu: 1000m
           memory: 75584Ki
         limits:
           cpu: '2'
@@ -1002,7 +1001,7 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 1096m
+          cpu: 1000m
           memory: 4Gi
         limits:
           cpu: 3000m
@@ -1058,7 +1057,7 @@ spec:
       # Keep 8Gi for headroom; the analysis worker already uses a 2GiB Go memory target.
       resources:
         requests:
-          cpu: 1250m
+          cpu: 1000m
           memory: 8Gi
         limits:
           cpu: 4000m
@@ -1109,7 +1108,7 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: '4'
+          cpu: 1000m
           memory: 8Gi
         limits:
           cpu: '4'
@@ -1171,7 +1170,7 @@ spec:
       volumeMounts: []
       resources:
         requests:
-          cpu: 2500m
+          cpu: 1000m
           memory: 2039684Ki
         limits:
           cpu: '4'
@@ -1299,7 +1298,7 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 1250m
+          cpu: 1000m
           memory: 105072Ki
         limits:
           cpu: '2'
@@ -1357,7 +1356,7 @@ spec:
       # about 1.69Gi above that observation. Bound compiler workers and set a Go memory target above.
       resources:
         requests:
-          cpu: 1250m
+          cpu: 1000m
           memory: 8Gi
         limits:
           cpu: 4000m
@@ -1421,7 +1420,7 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: 1250m
+          cpu: 1000m
           memory: 201752Ki
         limits:
           cpu: '2'
@@ -1675,7 +1674,7 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: 1250m
+          cpu: 1000m
           memory: 222020Ki
         limits:
           cpu: '2'
@@ -1745,7 +1744,7 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: 1250m
+          cpu: 1000m
           memory: 147312Ki
         limits:
           cpu: '2'
@@ -1915,7 +1914,7 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 1250m
+          cpu: 1000m
           memory: 392100Ki
         limits:
           cpu: '2'
@@ -2298,7 +2297,7 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 1250m
+          cpu: 1000m
           memory: 2Gi
         limits:
           cpu: '2'

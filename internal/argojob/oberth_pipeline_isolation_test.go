@@ -70,6 +70,7 @@ var (
 		"test-archive-history":     true,
 		"build-amd64":              true, "build-arm64": true,
 		"build-darwin-amd64": true, "build-darwin-arm64": true,
+		"resource-guard": true,
 	}
 	oberthBuildIsolatedLeaves = map[string]bool{
 		"generic-names":  true,

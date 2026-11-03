@@ -84,6 +84,9 @@ func trustedKVMBuilt(t *testing.T) (Config, Request, *wfv1.Workflow, *wfv1.Templ
 func TestTrustedKVMBuildClosedLeafAndWrapper(t *testing.T) {
 	config, request, wf, leaf := trustedKVMBuilt(t)
 	assertOrdinaryWorkflowPriority(t, wf)
+	if leaf.Container.Resources.Requests.Cpu().MilliValue() > 1000 {
+		t.Fatal("trusted guest CPU requests must remain compressible within one core")
+	}
 	if wf.Spec.Entrypoint != trustedKVMWrapper || len(leaf.Container.VolumeMounts) != 2 || leaf.Container.Image != request.TrustedKVM.Recipe.HarnessImage || leaf.Container.WorkingDir != "/trusted" {
 		t.Fatalf("unexpected leaf: %#v", leaf)
 	}

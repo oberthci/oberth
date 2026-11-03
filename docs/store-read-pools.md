@@ -81,21 +81,26 @@ private tmpfs directory explicitly.
 The tmpfs is included in the existing container memory envelope: 4Gi for
 `test-store`, with a 2GiB Go heap target, and 8Gi for `release-test`, with its
 4GiB target. CPU requests are 971m and 1000m respectively, with limits of
-2 and 4 CPU. The store lane and full release race suite use a 55-minute
-per-package deadlock bound; the service lane uses 45 minutes. The combined
-v0.17.84 candidate's whole-package race measurements were 2,084.275 seconds
-for store and 1,765.448 seconds for service, with two package workers,
-GOMAXPROCS=2 and no scheduler pauses. The bounds apply the same 1.5× measured
-wall-time rule as the earlier store sizing, rounded up to five-minute
-increments. The earlier 35-minute store bound left less than 16 seconds of
-margin on this combined source, and service exceeded its earlier 20-minute
-branch bound.
+2 and 4 CPU. The branch store lane uses a 66-minute per-package deadlock
+bound; service uses 49 minutes and the remaining-package lane uses 55 minutes.
+The release race suite retains its independently configured 55-minute bound.
 
-Other branch race lanes retain their 20-minute bounds. These package
-watchdogs allow slower deadlock detection; individual test contexts and
-assertions retain their existing bounds. Go worker counts remain bounded.
-Native wall times do not establish CI resource headroom: qualify the combined
-source under the declared container CPU, heap and tmpfs envelopes.
+The successful whole-store command took 2,635.148 seconds on a loaded host,
+including scheduler pauses. Applying 1.5× wall-time headroom and rounding up to
+minutes gives 66 minutes. Earlier successful whole-group race runs took
+1,959.327 seconds for service and 2,172.592 seconds for the remaining packages,
+which give 49 and 55 minutes. The Git-cache lane retains its 20-minute bound.
+These package watchdogs allow slower deadlock detection; individual test
+contexts and assertions retain their existing bounds. Go worker counts remain
+bounded. Native wall times do not establish CI resource headroom: qualify the
+combined source under the declared container CPU, heap and tmpfs envelopes.
+
+An OOM, timeout or refused report makes a sampled peak a lower bound. Restore
+that step's own previous memory limit and deadline, or raise them; a sibling
+step cannot justify a reduction. For a successful uncensored run, use the
+maximum memory peak times 1.3 and maximum duration times 1.5, retaining the
+previous bounds after censored history. Kernel cgroup high-water marks and
+zero limit/OOM events are required before a local memory measurement qualifies.
 
 The contention test first checks committed reads
 while holding an uncommitted writer transaction, with a generous scaled

@@ -11,6 +11,10 @@ import (
 	"strings"
 	"testing"
 
+	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	"sigs.k8s.io/yaml"
+
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
@@ -122,9 +126,11 @@ else:
 			timeout := "-timeout=20m"
 			switch group {
 			case "store":
-				timeout = "-timeout=55m"
+				timeout = "-timeout=66m"
 			case "service":
-				timeout = "-timeout=45m"
+				timeout = "-timeout=49m"
+			case "rest":
+				timeout = "-timeout=55m"
 			}
 			want := []string{"test", "-race", "-v", "-count=1", "-p=2", timeout}
 			for _, pkg := range packages {
@@ -143,6 +149,55 @@ else:
 			}
 		})
 	}
+}
+
+func TestOberthRaceBudgetsPreserveKnownBounds(t *testing.T) {
+	var workflow wfv1.Workflow
+	if err := yaml.Unmarshal(loadPipeline(t, "build.yaml"), &workflow); err != nil {
+		t.Fatal(err)
+	}
+	// Store's successful whole-command wall maximum (2635.148s) requires
+	// 66 minutes. Service and rest retain their successful whole-group maxima
+	// (1959.327s and 2172.592s) times 1.5, rounded up to minutes. Censored
+	// memory samples cannot reduce old bounds.
+	want := map[string]int64{"test-store": 3960, "test-service": 2940, "test-rest": 3300}
+	for _, template := range workflow.Spec.Templates {
+		deadline, ok := want[template.Name]
+		if !ok {
+			continue
+		}
+		delete(want, template.Name)
+		if template.ActiveDeadlineSeconds == nil || template.ActiveDeadlineSeconds.IntValue() < int(deadline) {
+			t.Errorf("%s deadline = %v, need at least %ds", template.Name, template.ActiveDeadlineSeconds, deadline)
+		}
+		if template.Container == nil {
+			t.Fatalf("%s has no container", template.Name)
+		}
+		// The old service bound was 4Gi; the old rest bound was 6208Mi.
+		// An OOM at 2054Mi supplies no evidence to shrink either allocation.
+		floor := resource.MustParse("4Gi")
+		if template.Name == "test-rest" {
+			floor = resource.MustParse("6208Mi")
+		}
+		if template.Container.Resources.Limits.Memory().Cmp(floor) < 0 {
+			t.Errorf("%s memory limit = %s, below retained floor %s", template.Name, template.Container.Resources.Limits.Memory(), floor.String())
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing race templates: %v", want)
+	}
+	for _, template := range workflow.Spec.Templates {
+		if template.Name == "setup" {
+			for _, row := range template.Steps {
+				for _, step := range row.Steps {
+					if step.Template == "resource-guard" {
+						return
+					}
+				}
+			}
+		}
+	}
+	t.Fatal("resource guard must run during setup")
 }
 
 func TestOberthSplitStagesUseTheRaceGroupLauncher(t *testing.T) {
