@@ -4,11 +4,12 @@ import (
 	"context"
 	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	corev1 "k8s.io/api/core/v1"
 )
 
 // Every fresh submission snapshots its repository's administrator grant before
