@@ -198,7 +198,7 @@ call the proxy hostname directly.
 | `run_get` | One durable run and its steps by full run ID or unique 8+ character prefix; `summary:true` returns only status/failure and compact steps |
 | `run_retry` | Requeue the newest interrupted or infrastructure-failed branch run using its same repo/ref/SHA; workflow-level failures without a failed step qualify, while test failures and older runs are refused |
 | `run_rerun` | Rerun a failed or interrupted run at the same SHA and ref (`id`, optional `reason`, admin-only `force`), linked by `rerun_of`: covers failed steps (flaky tests), non-newest runs and tag/release runs. Refused while the ref has an active run, once a branch moved past the SHA, for promotion/plan/apply runs, and for a tag that is already published or green or whose release failed only in publication (use `publish_retry` on that run). A publishing-only failure is re-pushed as `publish_retry` does instead of re-run. Non-admins: branch-push runs; tags need admin and `force`. Audited as `run.rerun` |
-| `run_cancel` | Cancel one queued, waiting or running run (audited; `id`, optional `reason`, admin-only `force`). The run becomes `interrupted` with phase `cancelled` and a reason naming the caller; a claimed run's Workflow is deleted and its admission released at once; it is never re-fired and opens no CI issue. Non-admins: branch-push runs outside a concurrency group only. Admins: any run, with `force` for tag/release and apply runs. Cancelling promotion CI fails the promotion without merging. Terminal runs are refused |
+| `run_cancel` | Cancel one queued, waiting or running run (audited; `id`, optional `reason`, admin-only `force`). The run becomes `interrupted` with phase `cancelled` and a reason naming the caller; a claimed run's Workflow is deleted and its admission released at once; it is never re-fired and opens no CI issue. Non-admins: branch-push runs outside a concurrency group only. Protected priority runs can be cancelled only by their requester or an unscoped admin; the existing run-cancel policy still applies. Admins: any run, with `force` for tag/release and apply runs. Cancelling promotion CI fails the promotion without merging. Terminal runs are refused |
 | `run_purge` | Purge retained logs, artifacts or both for a terminal run; requires an unscoped admin uplink and `id`, `what`, `reason`. Active runs and protected release/promotion/issue/grant evidence are refused. Run/step history remains; audited purge markers identify the actor and date |
 | `run_logs` | One exact burn/step log by full run ID or unique 8+ character prefix, optionally filtered |
 | `artifacts` | The files a run kept, with size and modification time |
@@ -848,10 +848,14 @@ remove supersession protection from a build already classified as priority.
 
 The queue orders highest, high, then normal, with acceptance order within each
 class and the existing starvation bound. A waiting priority head still needs
-the declared budget and pressure gate. Backfill within its class is allowed
-only when all backfilled work together leaves enough budget and run slots for
-the head once existing work frees capacity. The existing head-wait bound also
-applies. Ordinary queues keep their existing behavior.
+the declared budget and pressure gate. Measured EASY backfill admits later work
+when its measured p95 ends strictly before the head's reserved start. Work in
+the same effective and base priority classes may also coexist when the head
+still fits alongside the candidate and all surviving grants at that start.
+Lower classes cannot use this coexistence exception. Work without enough
+measurement samples can use only same-class coexistence. These rules still
+apply while the queue reports draining after the head-wait bound; running work
+is never preempted.
 
 For an urgent individual run, call `run_priority` with
 `{"run_id":"<exact ID>","priority":"highest","reason":"release blocker"}`.

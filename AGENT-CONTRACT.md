@@ -502,7 +502,7 @@ trust assumptions and complete invalidation rules.
   grants are never preempted. Backfill/head-wait rules preserve the head's
   priority reservation.
   v0.17.81 refuses every backfill behind an effective high/highest head,
-  including an aged normal head. In this v0.17.82 trial, measured EASY backfill
+  including an aged normal head. From v0.17.82, measured EASY backfill
   admits later work only when its measured p95 ends strictly before the head
   reservation, or it shares the head's effective and base priority classes
   and leaves enough declared demand and run slots
