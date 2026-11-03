@@ -89,7 +89,7 @@ passed the retained Kubernetes validator. Isolation inputs now explicitly declar
 256Mi so the measured-leaf architecture and inherited pool checks still exercise
 wrapped Pods. No expected Pod was assembled or edited by hand.
 
-CX-OB-82-PVC-ALIAS (2026-11-03) recaptured both nonroot shapes after
+The 2026-11-03 recapture refreshed both nonroot shapes after
 source and artifacts were bound to one Pod volume. The authenticated Argo
 v4.0.8 controller ran the retained capture helper; both submitted Pods passed
 Kubernetes v1.35.7 ValidatePodCreate. Source and executor mirrors stay read-only;

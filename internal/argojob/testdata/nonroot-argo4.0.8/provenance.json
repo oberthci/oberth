@@ -19,5 +19,5 @@
   },
   "stage": "Before processPodSpecPatch, workflow/controller/workflowpod.go:405; observed submitted Pod after main emissary/volume rewriting at417-456.",
   "controller_profile": "nonroot-static-v1; exact executor digest and gloglevel0; raw before-Pods include separate hostile SC control. Persisted Workflows use supported profile and actual operate-to-Running fake API reconciliation.",
-  "recaptured_with": "2026-11-03 CX-OB-82-PVC-ALIAS; authenticated Argo v4.0.8 controller with retained nonroot capture helper; both submitted Pods pass Kubernetes v1.35.7 ValidatePodCreate"
+  "recaptured_with": "The 2026-11-03 recapture; authenticated Argo v4.0.8 controller with retained nonroot capture helper; both submitted Pods pass Kubernetes v1.35.7 ValidatePodCreate"
 }
