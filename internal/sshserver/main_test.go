@@ -2,9 +2,10 @@ package sshserver
 
 import (
 	"context"
-	"github.com/oberthci/oberth/internal/gitcache"
 	"os"
 	"testing"
+
+	"github.com/oberthci/oberth/internal/gitcache"
 )
 
 func TestMain(m *testing.M) {
