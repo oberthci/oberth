@@ -388,55 +388,53 @@ check '[ "$status" = 0 ]' "in-cluster run must succeed without kubectl (status=$
 check 'contains "https://kubernetes.default.svc"' "in-cluster mode must use the in-cluster API endpoint"
 check '! calls_contain "kubectl"' "in-cluster mode must not call kubectl"
 
-# --- 11. actual CLI-shaped audit preflight in both shipped helpers -----------
-# Execute each maintained preflight verbatim with the same mock CLI. Keeping
-# this extraction bounded also detects accidental divergence between copies.
-for candidate in "$root/scripts/setup-secretstore.sh"; do
-  preflight="$work/audit-preflight.sh"
-  {
-    printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'CLI=bao' \
-      'note() { printf "%s\n" "$*"; }' \
-      'fail() { printf "%s\n" "$*" >&2; exit 1; }'
-    sed -n '/^# --- audit preflight /,/^# --- end audit preflight /p' "$candidate"
-  } >"$preflight"
-  saved_script=$script
-  script=$preflight
-  chmod +x "$script"
-  begin "audit-preflight-${candidate#"$root"/}"
-  fresh_state
+# --- 11. actual CLI-shaped audit preflight -----------------------------------
+# Execute the maintained preflight verbatim with the same mock CLI.
+candidate=$root/scripts/setup-secretstore.sh
+preflight="$work/audit-preflight.sh"
+{
+  printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'CLI=bao' \
+    'note() { printf "%s\n" "$*"; }' \
+    'fail() { printf "%s\n" "$*" >&2; exit 1; }'
+  sed -n '/^# --- audit preflight /,/^# --- end audit preflight /p' "$candidate"
+} >"$preflight"
+saved_script=$script
+script=$preflight
+chmod +x "$script"
+begin "audit-preflight-${candidate#"$root"/}"
+fresh_state
+run_script
+check '[ "$status" = 0 ]' "pretty CLI JSON with a named file device must pass"
+check 'contains "file audit device already enabled"' "the actual preflight must run"
+check '! calls_contain "bao audit enable"' "existing audit must never be re-enabled"
+printf '%s\n' '{"stdout/":{"type":"file","options":{"file_path":"stdout"}}}' >"$MOCK_STATE/audit.json"
+run_script
+check '[ "$status" = 0 ]' "configured stdout audit must remain accepted"
+for absent in '{}' '{"socket/":{"type":"socket","options":{}}}' \
+  '{"discard/":{"type":"file","options":{"file_path":"discard"}}}' \
+  '{"null/":{"type":"file","options":{"file_path":"/dev/null"}}}' \
+  '{"empty/":{"type":"file","options":{"file_path":""}}}'; do
+  printf '%s\n' "$absent" >"$MOCK_STATE/audit.json"
   run_script
-  check '[ "$status" = 0 ]' "pretty CLI JSON with a named file device must pass"
-  check 'contains "file audit device already enabled"' "the actual preflight must run"
-  check '! calls_contain "bao audit enable"' "existing audit must never be re-enabled"
-  printf '%s\n' '{"stdout/":{"type":"file","options":{"file_path":"stdout"}}}' >"$MOCK_STATE/audit.json"
-  run_script
-  check '[ "$status" = 0 ]' "configured stdout audit must remain accepted"
-  for absent in '{}' '{"socket/":{"type":"socket","options":{}}}' \
-    '{"discard/":{"type":"file","options":{"file_path":"discard"}}}' \
-    '{"null/":{"type":"file","options":{"file_path":"/dev/null"}}}' \
-    '{"empty/":{"type":"file","options":{"file_path":""}}}'; do
-    printf '%s\n' "$absent" >"$MOCK_STATE/audit.json"
-    run_script
-    check '[ "$status" != 0 ]' "no effective file sink must refuse setup"
-    check 'contains "configure a file audit device"' "missing sink must give declarative guidance"
-    check '! calls_contain "bao audit enable"' "missing sink must not trigger API creation"
-  done
-  for malformed in 'invalid json' '[]' '{"bad":null}' \
-    '{"bad":{"type":"file","options":[]}}' \
-    '{"bad":{"type":"file","options":{"file_path":42}}}'; do
-    printf '%s\n' "$malformed" >"$MOCK_STATE/audit.json"
-    run_script
-    check '[ "$status" != 0 ]' "malformed audit response must refuse setup"
-    check 'contains "invalid audit device JSON"' "malformed data must not be reported absent"
-  done
-  touch "$MOCK_STATE/audit-read-error"
-  run_script
-  check '[ "$status" != 0 ]' "audit read failure must refuse setup"
-  check 'contains "synthetic audit permission denied"' "CLI error must be preserved"
-  check 'contains "could not list audit devices"' "read failure must not be reported absent"
-  check '! calls_contain "bao audit enable"' "errors must never trigger API creation"
-  script=$saved_script
+  check '[ "$status" != 0 ]' "no effective file sink must refuse setup"
+  check 'contains "configure a file audit device"' "missing sink must give declarative guidance"
+  check '! calls_contain "bao audit enable"' "missing sink must not trigger API creation"
 done
+for malformed in 'invalid json' '[]' '{"bad":null}' \
+  '{"bad":{"type":"file","options":[]}}' \
+  '{"bad":{"type":"file","options":{"file_path":42}}}'; do
+  printf '%s\n' "$malformed" >"$MOCK_STATE/audit.json"
+  run_script
+  check '[ "$status" != 0 ]' "malformed audit response must refuse setup"
+  check 'contains "invalid audit device JSON"' "malformed data must not be reported absent"
+done
+touch "$MOCK_STATE/audit-read-error"
+run_script
+check '[ "$status" != 0 ]' "audit read failure must refuse setup"
+check 'contains "synthetic audit permission denied"' "CLI error must be preserved"
+check 'contains "could not list audit devices"' "read failure must not be reported absent"
+check '! calls_contain "bao audit enable"' "errors must never trigger API creation"
+script=$saved_script
 
 begin "audit-before-mutation"
 fresh_state
@@ -449,100 +447,96 @@ check '! calls_contain "bao policy write"' "audit preflight must precede policy 
 
 # The shipped helper must discover all three absent mounts from checked JSON
 # lists, without relying on the CLI's different missing-mount read diagnostics.
-for candidate in "$root/scripts/setup-secretstore.sh"; do
-  script=$candidate
-  begin "fresh-mounts-${candidate#"$root"/}"
-  fresh_state
-  run_script
-  check '[ "$status" = 0 ]' 'fresh store must configure successfully'
-  check 'calls_contain "bao auth list -format=json"' 'auth discovery must use JSON'
-  check 'calls_contain "bao secrets list -format=json"' 'secrets discovery must use JSON'
-  check '[ -f "$MOCK_STATE/auth-type" ] && [ -f "$MOCK_STATE/kv-type" ] && [ -f "$MOCK_STATE/transit-type" ]' 'fresh setup must enable auth, KV and Transit'
-  check '! calls_contain "bao read -field=type sys/"' 'mount discovery must not probe absent mount paths'
-  for kind in auth secrets; do
-    for failure in denied silent partial invalid null array missing-type empty-type wrong-type; do
-      case "$failure" in
-        denied) error_exit=2; error_output='Code: 403 permission denied' ;;
-        silent) error_exit=1; error_output='' ;;
-        partial) error_exit=2; error_output='{}' ;;
-        invalid) error_exit=0; error_output='invalid json' ;;
-        null) error_exit=0; error_output='null' ;;
-        array) error_exit=0; error_output='[]' ;;
-        missing-type) error_exit=0; error_output='{"kubernetes/":{}}' ;;
-        empty-type) error_exit=0; error_output='{"kubernetes/":{"type":""}}' ;;
-        wrong-type) error_exit=0; error_output='{"kubernetes/":{"type":42}}' ;;
-      esac
-      begin "mount-list-${candidate#"$root"/}-$kind-$failure"
-      fresh_state
-      MOCK_FAIL_COMMAND="$kind list -format=json" MOCK_FAIL_OUTPUT="$error_output" MOCK_FAIL_EXIT="$error_exit" \
-        run_script --force --force-auth-config
-      check '[ "$status" != 0 ]' 'unverified mount list must abort even with force flags'
-      check 'calls_contain "bao $kind list -format=json"' 'must reach targeted list'
-      check '! calls_contain "bao secrets enable"' 'failed list must not enable a secret engine'
-      if [ "$kind" = auth ]; then
-        check '! calls_contain "bao auth enable"' 'failed auth list must not enable auth'
-      fi
-    done
+script=$candidate
+begin "fresh-mounts-${candidate#"$root"/}"
+fresh_state
+run_script
+check '[ "$status" = 0 ]' 'fresh store must configure successfully'
+check 'calls_contain "bao auth list -format=json"' 'auth discovery must use JSON'
+check 'calls_contain "bao secrets list -format=json"' 'secrets discovery must use JSON'
+check '[ -f "$MOCK_STATE/auth-type" ] && [ -f "$MOCK_STATE/kv-type" ] && [ -f "$MOCK_STATE/transit-type" ]' 'fresh setup must enable auth, KV and Transit'
+check '! calls_contain "bao read -field=type sys/"' 'mount discovery must not probe absent mount paths'
+for kind in auth secrets; do
+  for failure in denied silent partial invalid null array missing-type empty-type wrong-type; do
+    case "$failure" in
+      denied) error_exit=2; error_output='Code: 403 permission denied' ;;
+      silent) error_exit=1; error_output='' ;;
+      partial) error_exit=2; error_output='{}' ;;
+      invalid) error_exit=0; error_output='invalid json' ;;
+      null) error_exit=0; error_output='null' ;;
+      array) error_exit=0; error_output='[]' ;;
+      missing-type) error_exit=0; error_output='{"kubernetes/":{}}' ;;
+      empty-type) error_exit=0; error_output='{"kubernetes/":{"type":""}}' ;;
+      wrong-type) error_exit=0; error_output='{"kubernetes/":{"type":42}}' ;;
+    esac
+    begin "mount-list-${candidate#"$root"/}-$kind-$failure"
+    fresh_state
+    MOCK_FAIL_COMMAND="$kind list -format=json" MOCK_FAIL_OUTPUT="$error_output" MOCK_FAIL_EXIT="$error_exit" \
+      run_script --force --force-auth-config
+    check '[ "$status" != 0 ]' 'unverified mount list must abort even with force flags'
+    check 'calls_contain "bao $kind list -format=json"' 'must reach targeted list'
+    check '! calls_contain "bao secrets enable"' 'failed list must not enable a secret engine'
+    if [ "$kind" = auth ]; then
+      check '! calls_contain "bao auth enable"' 'failed auth list must not enable auth'
+    fi
   done
 done
 script=$root/scripts/setup-secretstore.sh
 
 # Failed reads must never become permission to replace an existing object,
 # including when the operator deliberately selected a force flag.
-for candidate in "$root/scripts/setup-secretstore.sh"; do
-  saved_script=$script
-  script=$candidate
-  for target in config policy role; do
-    case "$target" in
-      config) read_command='read -field=kubernetes_host auth/kubernetes/config'; mutation='bao write auth/kubernetes/config ' ;;
-      policy) read_command='policy read oberth-ci'; mutation='bao policy write oberth-ci ' ;;
-      role) read_command='read -field=bound_service_account_names auth/kubernetes/role/oberth-ci'; mutation='bao write auth/kubernetes/role/oberth-ci ' ;;
+saved_script=$script
+script=$candidate
+for target in config policy role; do
+  case "$target" in
+    config) read_command='read -field=kubernetes_host auth/kubernetes/config'; mutation='bao write auth/kubernetes/config ' ;;
+    policy) read_command='policy read oberth-ci'; mutation='bao policy write oberth-ci ' ;;
+    role) read_command='read -field=bound_service_account_names auth/kubernetes/role/oberth-ci'; mutation='bao write auth/kubernetes/role/oberth-ci ' ;;
+  esac
+  for failure in forbidden timeout tls malformed unknown silent wrong-absence empty-success; do
+    case "$failure" in
+      forbidden) error_exit=2; error_output='Error reading: Code: 403 permission denied' ;;
+      timeout) error_exit=2; error_output='context deadline exceeded' ;;
+      tls) error_exit=2; error_output='Error reading: tls: failed to verify certificate: x509: certificate signed by unknown authority' ;;
+      malformed) error_exit=2; error_output='Error reading: invalid character after object key in JSON response' ;;
+      unknown) error_exit=37; error_output='unexpected CLI failure' ;;
+      silent) error_exit=1; error_output='' ;;
+      wrong-absence) error_exit=2; error_output='No value found at another/path' ;;
+      empty-success) error_exit=0; error_output='' ;;
     esac
-    for failure in forbidden timeout tls malformed unknown silent wrong-absence empty-success; do
-      case "$failure" in
-        forbidden) error_exit=2; error_output='Error reading: Code: 403 permission denied' ;;
-        timeout) error_exit=2; error_output='context deadline exceeded' ;;
-        tls) error_exit=2; error_output='Error reading: tls: failed to verify certificate: x509: certificate signed by unknown authority' ;;
-        malformed) error_exit=2; error_output='Error reading: invalid character after object key in JSON response' ;;
-        unknown) error_exit=37; error_output='unexpected CLI failure' ;;
-        silent) error_exit=1; error_output='' ;;
-        wrong-absence) error_exit=2; error_output='No value found at another/path' ;;
-        empty-success) error_exit=0; error_output='' ;;
-      esac
-      begin "read-error-${candidate#"$root"/}-$target-$failure"
-      fresh_state
-      # Seed matching server configuration. An unreadable target must not
-      # authorize replacement even with --force.
-      script=$root/scripts/setup-secretstore.sh
-      run_script
-      check '[ "$status" = 0 ]' 'fixture setup must succeed'
-      script=$candidate
+    begin "read-error-${candidate#"$root"/}-$target-$failure"
+    fresh_state
+    # Seed matching server configuration. An unreadable target must not
+    # authorize replacement even with --force.
+    script=$root/scripts/setup-secretstore.sh
+    run_script
+    check '[ "$status" = 0 ]' 'fixture setup must succeed'
+    script=$candidate
+    : >"$MOCK_STATE/calls.log"
+    MOCK_FAIL_COMMAND="$read_command" MOCK_FAIL_OUTPUT="$error_output" MOCK_FAIL_EXIT="$error_exit" \
+      run_script --force --force-auth-config
+    check '[ "$status" != 0 ]' 'unverified read must abort even with force flags'
+    check 'calls_contain "bao $read_command"' 'must reach the targeted read'
+    if calls_contain "$mutation"; then
+      check false 'failed read must not authorize replacement'
+    fi
+    check 'contains "reading"' 'failure must identify the read error'
+    # F1's reported reproduction uses no force flags. Exercise that path
+    # directly for the server's config, policy and role.
+    if [ "$candidate" = "$root/scripts/setup-secretstore.sh" ]; then
       : >"$MOCK_STATE/calls.log"
       MOCK_FAIL_COMMAND="$read_command" MOCK_FAIL_OUTPUT="$error_output" MOCK_FAIL_EXIT="$error_exit" \
-        run_script --force --force-auth-config
-      check '[ "$status" != 0 ]' 'unverified read must abort even with force flags'
-      check 'calls_contain "bao $read_command"' 'must reach the targeted read'
+        run_script
+      check '[ "$status" != 0 ]' 'unverified read must abort without force flags'
+      check 'calls_contain "bao $read_command"' 'must reach the targeted unforced read'
       if calls_contain "$mutation"; then
-        check false 'failed read must not authorize replacement'
+        check false 'failed unforced read must not authorize replacement'
       fi
-      check 'contains "reading"' 'failure must identify the read error'
-      # F1's reported reproduction uses no force flags. Exercise that path
-      # directly for the server's config, policy and role.
-      if [ "$candidate" = "$root/scripts/setup-secretstore.sh" ]; then
-        : >"$MOCK_STATE/calls.log"
-        MOCK_FAIL_COMMAND="$read_command" MOCK_FAIL_OUTPUT="$error_output" MOCK_FAIL_EXIT="$error_exit" \
-          run_script
-        check '[ "$status" != 0 ]' 'unverified read must abort without force flags'
-        check 'calls_contain "bao $read_command"' 'must reach the targeted unforced read'
-        if calls_contain "$mutation"; then
-          check false 'failed unforced read must not authorize replacement'
-        fi
-        check 'contains "reading"' 'unforced failure must identify the read error'
-      fi
-    done
+      check 'contains "reading"' 'unforced failure must identify the read error'
+    fi
   done
-  script=$saved_script
 done
+script=$saved_script
 
 if [ "$failures" != 0 ]; then
   printf '%d setup-secretstore contract check(s) failed\n' "$failures" >&2
