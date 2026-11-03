@@ -15,7 +15,7 @@ if grep -Eq '^utilityImage:' "$fixture"; then
   exit 1
 fi
 work=$(mktemp -d)
-trap 'rm -rf -- "$work"' EXIT
+trap 'find "$work" -delete' EXIT
 legacy_chart=$work/legacy-values-chart
 cp -R -- "$chart" "$legacy_chart"
 chmod -R u+w "$legacy_chart"

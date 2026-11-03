@@ -114,9 +114,15 @@
         "pressure": {
           "type": "object",
           "additionalProperties": false,
-          "description": "Host PSI observation by default; explicit enforce holds new grants. Capacity/disk gates remain independent. Missing PSI is visible and fails open.",
+          "description": "Host some PSI avg10 gates new grants by default. Missing PSI fails open to budget-only admission.",
           "properties": {
-            "mode": {"type": "string", "enum": ["observe", "enforce"], "description": "observe reports only (default); enforce holds new grants."},
+            "enabled": {"type": "boolean"},
+            "cpuSomeAvg10": {"type": "number", "exclusiveMinimum": 10, "maximum": 100},
+            "ioSomeAvg10": {"type": "number", "exclusiveMinimum": 10, "maximum": 100},
+            "hardCpu": {"type": "number", "exclusiveMinimum": 10, "maximum": 100},
+            "hardIo": {"type": "number", "exclusiveMinimum": 10, "maximum": 100},
+            "maxWaitSeconds": {"type": "integer", "minimum": 1},
+            "mode": {"type": "string", "enum": ["observe", "enforce"], "description": "Legacy avg60 mode; enabled avg10 admission always enforces."},
             "ioFullAvg60Max": {"type": "number", "minimum": 0, "maximum": 100},
             "cpuSomeAvg60Max": {"type": "number", "minimum": 0, "maximum": 100},
             "hysteresis": {"type": "number", "minimum": 0, "maximum": 100, "description": "Percentage points below each enabled threshold; must be below that threshold."},

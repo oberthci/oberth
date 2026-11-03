@@ -213,7 +213,7 @@ func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
 		return fmt.Sprintf("Waiting for concurrency group %q behind run %s of the same repository, "+
 			"which is queued ahead in the group.", admission.Group, admission.GroupAhead)
 	case admission.Pressure != nil:
-		if admission.Pressure.Redacted {
+		if admission.Pressure.Redacted || admission.Pressure.Avg10Gate {
 			return admission.Pressure.Reason()
 		}
 		return fmt.Sprintf("Deferred: %s pressure %.1f%% (host PSI avg60); bounded by %ds per run.", admission.Pressure.Resource, admission.Pressure.Avg60, admission.Pressure.MaxDeferSeconds)

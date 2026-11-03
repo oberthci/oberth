@@ -93,18 +93,19 @@ admission:
     enabled: true
     maxConcurrentJobs: null
   diskFloorBytes: 0
-  # Observe host PSI by default: unqualified stall percentages must not stop
-  # every grant at upgrade. Explicit enforce mode holds only new grants.
-  # Both modes retain capacity/disk/ownership gates; unavailable PSI fails open.
+  # Host some PSI avg10 gates new runs; unavailable PSI falls back to budget.
   pressure:
-    mode: observe
-    ioFullAvg60Max: 30
+    enabled: true
+    cpuSomeAvg10: 30
+    ioSomeAvg10: 20
+    hardCpu: 50
+    hardIo: 40
+    maxWaitSeconds: 1200
+    # Legacy observation controls; avg10 admission uses fixed 10-point hysteresis.
+    mode: enforce
+    ioFullAvg60Max: 0
     cpuSomeAvg60Max: 0
-    # Percentage points; below each enabled threshold. Resume strictly below
-    # threshold minus hysteresis; maxDefer bypasses only this pressure gate.
     hysteresis: 10
-    # Each prepared, unparked waiter gets its own clock; this does not limit
-    # admission to one job per maxDefer. Capacity and priority still apply.
     maxDefer: "20m"
   # Bounded backfill (#1085): while the admission queue head does not fit
   # (an XL waiting for a full drain, say), later runs that fit the spare

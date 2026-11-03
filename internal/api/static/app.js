@@ -493,6 +493,7 @@ function queueReason(run) {
   if (a.disk_floor?.below_floor) return "waiting for disk space";
   if (a.group_holder || a.group_ahead) return `waiting for group ${a.group}`;
   const pressure = a.pressure || b?.pressure;
+  if (pressure?.avg10_gate && !pressure.redacted) return `deferred: ${pressure.resource} pressure gate (CPU ${Number(pressure.cpu_avg10 ?? 0).toFixed(1)}%, IO ${Number(pressure.io_avg10 ?? 0).toFixed(1)}%; some avg10)`;
   if (pressure) return pressure.redacted ? `deferred: host ${pressure.resource} pressure` : `deferred: ${pressure.resource} pressure ${Number(pressure.avg60).toFixed(1)}%`;
   if (a.declared_resources && b?.run_ceiling) return "waiting for an IO/run concurrency slot";
   if (a.declared_resources) return `waiting for declared CPU/memory capacity (${a.declared_resources.cpu_milli}m CPU, ${a.declared_resources.memory_bytes} memory bytes)`
@@ -1430,7 +1431,7 @@ function svcCard(name, value, sub, mood) {
 function pressureStatusCard(pressure) {
   if (!pressure) return "";
   const sample = pressure.sample;
-  const detail = sample ? `IO full ${Number(sample.io.full_avg60).toFixed(1)}% · CPU some ${Number(sample.cpu.some_avg60).toFixed(1)}% · memory full ${Number(sample.memory.full_avg60).toFixed(1)}% (avg60)` : "PSI unavailable; admission fails open";
+  const detail = pressure.cpu_some_avg10 && sample ? `CPU some ${Number(sample.cpu.some_avg10).toFixed(1)}% · IO some ${Number(sample.io.some_avg10).toFixed(1)}% (avg10)` : sample ? `IO full ${Number(sample.io.full_avg60).toFixed(1)}% · CPU some ${Number(sample.cpu.some_avg60).toFixed(1)}% · memory full ${Number(sample.memory.full_avg60).toFixed(1)}% (avg60)` : "PSI unavailable; budget-only admission (admission fails open)";
   const observing = pressure.mode === "observe";
   const value = observing ? "observation only" : pressure.holding ? `deferring new grants (${pressure.resource})` : pressure.available ? "no pressure hold" : "unavailable";
   const policy = observing ? " · PSI does not defer grants; other admission gates still apply" : "";

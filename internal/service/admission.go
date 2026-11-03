@@ -74,12 +74,14 @@ type admissionReservation struct {
 	runID                  string
 	// repoID, repo and ref identify the run when it blocks the queue head
 	// (#1021); preparedAt is when it started waiting for weight.
-	repoID           int64
-	repo             string
-	ref              string
-	preparedAt       time.Time
-	pressureSince    time.Time
-	pressureDeferred bool
+	repoID            int64
+	repo              string
+	ref               string
+	preparedAt        time.Time
+	pressureRelease   bool
+	pressurePromotion bool
+	pressureSince     time.Time
+	pressureDeferred  bool
 	// claimedAt and grantedAt date the reservation's other states for the
 	// admission view (#1099).
 	claimedAt time.Time
@@ -219,6 +221,7 @@ func (gate *weightedAdmission) reservePriorityRun(sequence, order int64, run mod
 	reservation := &admissionReservation{gate: gate, sequence: sequence, order: order, ready: make(chan struct{}), claimedAt: time.Now().UTC()}
 	reservation.runID, reservation.repoID, reservation.ref = run.ID, run.RepoID, run.Ref
 	reservation.refKind, reservation.sha = run.RefKind, run.SHA
+	reservation.pressureRelease, reservation.pressurePromotion = run.Release, run.Trigger == "promotion"
 	reservation.priority, reservation.priorityReason, reservation.queuedAt = run.Priority, run.PriorityReason, run.QueuedAt
 	reservation.priorityOverride, reservation.priorityOverrideReason = run.PriorityOverride, run.PriorityOverrideReason
 	gate.mu.Lock()
@@ -466,6 +469,9 @@ func (gate *weightedAdmission) grantLocked() {
 	// at the head again so the budget drains for it.
 	var head *admissionReservation
 	now := gate.clock()
+	if gate.pressure != nil {
+		gate.pressure.starvationGranted = false
+	}
 	gate.pressure.refresh(now)
 	gate.sortWaitersLocked()
 	gate.preparePressureWaitsLocked(now)
@@ -531,6 +537,14 @@ func (gate *weightedAdmission) grantLocked() {
 		close(reservation.ready)
 		if gate.onGrant != nil {
 			gate.onGrant()
+		}
+		if gate.pressure != nil && gate.pressure.config.Enabled {
+			gate.pressure.lastGrant = gate.clock()
+			// Refresh the hold even when no waiter remains, so the next pass
+			// and cached status both observe the settle window.
+			now = gate.clock()
+			gate.pressure.refresh(now)
+			gate.preparePressureWaitsLocked(now)
 		}
 	}
 }
