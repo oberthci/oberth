@@ -499,11 +499,17 @@ required.
 ## Run list views
 
 `run_list` and `/api/runs` take an optional `view`. Omitted or `all`, the
-first page carries the whole bounded queue in position order, then admitted
-and terminal runs newest admission time first. Later pages continue the
-dated runs by a stable time-and-ID cursor. A run cancelled before admission
-sorts by its end time. The page limit counts only dated rows; the queue is
-additional. A pruned cursor returns 404: restart from the first page.
+list reads like time flowing upward in three groups: the queue, with the run
+admitted next at its bottom (highest effective class and earliest queue
+position closest to the running runs, exactly the scheduler's admission
+order); running runs, most recently started first; then terminal runs, most
+recently finished first, with passed and failed interleaved by finish time.
+The first page carries every queued and running run; the page limit counts
+only terminal rows, so no limit or page ever drops a queued or running run or
+sorts it below a finished one. Later pages continue the terminal runs by a
+stable end-time-and-ID cursor. A run cancelled before admission is terminal
+and sorts by its end time. A pruned cursor returns 404: restart from the first
+page. `latest_per_ref=1` keeps the same grouping for each ref's newest run.
 
 - `history` keeps only terminal runs (passed, failed, interrupted), with legacy
   sequence paging via `before`/`next_before`/`next_cursor`.

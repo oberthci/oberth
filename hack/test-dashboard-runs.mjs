@@ -49,7 +49,7 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F1'
   assert.ok(ids().includes('scheduled-running'), 'F1: scheduled work hidden by a newer push must remain visible');
   assert.ok(ids().includes('publication-queued'), 'F1: a queued run outside the heads must remain visible');
   assert.equal(ids().filter(id=>id==='push-head').length,1,'active heads must not duplicate');
-  assert.ok(ids().indexOf('scheduled-running') < ids().indexOf('push-head'),'missing active runs precede heads');
+  assert.ok(ids().indexOf('push-head') < ids().indexOf('scheduled-running'),'a queued head precedes running work fetched from the active view');
   run(`state.runCursor='page-two';state.runCursorHistory=[0];requests=[];`);
   await run('renderRuns(0)');
   assert.ok(ids().includes('page-two-head') && ids().includes('scheduled-running') && ids().includes('push-head'),'F1: page two must include all active work, even heads from page one');
@@ -71,6 +71,41 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F2'
   await run('renderRuns(0)');
   assert.equal(run('state.runNext'),'opaque-flat-cursor','flat paging counts dated rows, not its extra queued rows');
   console.log('F2 passed: failed nightly, superseded and infra-retried filters; flat-list queue pagination');
+}
+if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3') {
+  // Queued runs accepted before several runs started and finished must never
+  // render among the finished rows, whatever order the page or the active
+  // view delivers them in: queue (next admission lowest), running, finished.
+  run(`
+    state.filter='all';flatPaging=false;changeRunRepo('all');state.runCursor=0;state.runCursorHistory=[];
+    const f3Time=minutes=>new Date(Date.UTC(2026,10,3,10,minutes)).toISOString();
+    const f3Page=[
+      makeRun('passed-newest',{Ref:'r1',StartedAt:f3Time(0),FinishedAt:f3Time(50)}),
+      makeRun('passed-older',{Ref:'r2',StartedAt:f3Time(5),FinishedAt:f3Time(40)}),
+      makeRun('queued-normal-late',{Ref:'r3',Status:'queued',StartedAt:null,FinishedAt:null,QueuedAt:f3Time(20),QueuePosition:3}),
+      makeRun('queued-high-next',{Ref:'r4',Status:'queued',StartedAt:null,FinishedAt:null,QueuedAt:f3Time(21),QueuePosition:1,priority_class:'high'}),
+      makeRun('failed-middle',{Ref:'r5',Status:'failed',StartedAt:f3Time(10),FinishedAt:f3Time(45)}),
+      makeRun('running-early',{Ref:'r6',Status:'running',StartedAt:f3Time(30),FinishedAt:null}),
+    ];
+    const f3Active=[
+      makeRun('running-late-hidden',{Ref:'r7',Status:'running',StartedAt:f3Time(35),FinishedAt:null}),
+      makeRun('waiting-hidden',{Ref:'r9',Status:'running',StartedAt:null,FinishedAt:null,QueuedAt:f3Time(23),QueuePosition:4,display_status:'queued'}),
+      makeRun('queued-high-second-hidden',{Ref:'r8',Status:'queued',StartedAt:null,FinishedAt:null,QueuedAt:f3Time(22),QueuePosition:2,priority_class:'high'}),
+    ];
+    api=async path=>{
+      if(path==='/api/repos')return [{ID:1,Name:'ours',UpstreamID:1}];
+      if(path==='/api/runs/counts')return {Total:9,ByRepo:{1:9}};
+      const query=new URL(path,'https://example.test').searchParams;
+      if(query.get('view')==='active')return [...f3Active,...f3Page.filter(row=>['queued','running'].includes(row.Status))];
+      return {body:f3Page,next:''};
+    };
+  `);
+  await run('renderRuns(0)');
+  assert.deepEqual(ids(), ['waiting-hidden','queued-normal-late','queued-high-second-hidden','queued-high-next','running-late-hidden','running-early','passed-newest','failed-middle','passed-older'],
+    'F3: queue bottom-up by position, then running newest start first, then finished newest finish first');
+  assert.ok(!run('runPageFull(f3Page)'), 'F3: queued and running rows never count toward the terminal page limit');
+  run('api=apiFixture;');
+  console.log('F3 passed: queued runs never render below running or finished runs');
 }
 if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'R4') {
   run(`

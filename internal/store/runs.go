@@ -1033,10 +1033,14 @@ ORDER BY queue_sequence DESC LIMIT ?`, append(args, pageLimit(filter.Limit))...)
 	return runs, nil
 }
 
-// listFlatRuns puts the entire bounded queue on the first page. The remaining
-// page uses a fixed (admission/end time, ID) cursor: a run admitted between
-// page loads cannot move onto an older page and appear twice. Both blocks
-// and the cursor are read from one snapshot so admission cannot duplicate a row.
+// listFlatRuns reads one list in three groups, top to bottom: the bounded
+// queue, with the run admitted next at its bottom; running runs, most recently
+// started first; then terminal runs, most recently finished first. The first
+// page carries every queued and running run; only the terminal rows count
+// against the page limit, so a limit never drops a queued or running run. Older
+// pages use a fixed (end time, ID) cursor over terminal runs: a run finishing
+// between page loads cannot move onto an older page and appear twice. All
+// groups and the cursor are read from one snapshot.
 func (s *Store) listFlatRuns(ctx context.Context, filter model.RunListFilter) ([]model.Run, error) {
 	tx, err := s.reader().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
@@ -1045,103 +1049,133 @@ func (s *Store) listFlatRuns(ctx context.Context, filter model.RunListFilter) ([
 	defer func() { _ = tx.Rollback() }()
 
 	restriction, restrictionArgs := repoRestriction("repo_id", filter.RepoIDs)
+	scopeArgs := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref}, restrictionArgs...)
+	collect := func(what string, rows *sql.Rows, err error, withPosition bool) ([]model.Run, error) {
+		if err != nil {
+			return nil, fmt.Errorf("list %s runs: %w", what, err)
+		}
+		defer func() { _ = rows.Close() }()
+		runs := make([]model.Run, 0)
+		for rows.Next() {
+			var value model.Run
+			var scanErr error
+			if withPosition {
+				var position int64
+				value, scanErr = scanRun(rows, &position)
+				value.QueuePosition = position
+			} else {
+				value, scanErr = scanRun(rows)
+			}
+			if scanErr != nil {
+				return nil, fmt.Errorf("scan %s run: %w", what, scanErr)
+			}
+			runs = append(runs, value)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("list %s runs: %w", what, err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("close %s runs: %w", what, err)
+		}
+		return runs, nil
+	}
 	runs := make([]model.Run, 0)
 	if filter.Before == 0 && filter.BeforeRun == "" {
-		queued, err := func() ([]model.Run, error) {
-			args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref}, restrictionArgs...)
-			priorityOrder := priorityOrderSQL(s.now())
-			rows, err := tx.QueryContext(ctx, `
+		priorityOrder := priorityOrderSQL(s.now())
+		// The queue is read in admission order (the order ClaimNextRun and the
+		// weighted gate use) and shown reversed: the next run to be admitted
+		// sits directly above the running runs.
+		rows, err := tx.QueryContext(ctx, `
 WITH queue AS (
   SELECT *, ROW_NUMBER() OVER (ORDER BY `+priorityOrder+`) AS queue_position FROM runs
-  WHERE status = 'queued' OR (status = 'running' AND started_at IS NULL)
+  WHERE `+queuedRunSQL+`
 )
 SELECT `+runColumns+`, queue_position FROM queue AS runs
 WHERE (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+`
-ORDER BY `+priorityOrder+` LIMIT ?`, append(args, MaxActiveRuns)...) // #nosec G202 -- fixed columns and parameterized restriction.
-			if err != nil {
-				return nil, fmt.Errorf("list queued runs: %w", err)
-			}
-			defer func() { _ = rows.Close() }()
-			queued := make([]model.Run, 0)
-			for rows.Next() {
-				var position int64
-				value, scanErr := scanRun(rows, &position)
-				value.QueuePosition = position
-				if scanErr != nil {
-					return nil, fmt.Errorf("scan queued run: %w", scanErr)
-				}
-				queued = append(queued, value)
-			}
-			if err := rows.Err(); err != nil {
-				return nil, fmt.Errorf("list queued runs: %w", err)
-			}
-			return queued, nil
-		}()
+ORDER BY `+priorityOrder+` LIMIT ?`, append(scopeArgs, MaxActiveRuns)...) // #nosec G202 -- fixed columns and parameterized restriction.
+		queued, err := collect("queued", rows, err, true)
 		if err != nil {
 			return nil, err
 		}
+		for i, j := 0, len(queued)-1; i < j; i, j = i+1, j-1 {
+			queued[i], queued[j] = queued[j], queued[i]
+		}
 		runs = append(runs, queued...)
+		rows, err = tx.QueryContext(ctx, `
+SELECT `+runColumns+` FROM runs
+WHERE status = 'running' AND started_at IS NOT NULL
+  AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+`
+ORDER BY started_at DESC, id DESC LIMIT ?`, append(scopeArgs, MaxActiveRuns)...) // #nosec G202 -- fixed columns and parameterized restriction.
+		running, err := collect("running", rows, err, false)
+		if err != nil {
+			return nil, err
+		}
+		runs = append(runs, running...)
 	}
 	var beforeTime int64
 	var beforeID string
 	if filter.BeforeRun != "" || filter.Before > 0 {
-		var cursor model.Run
-		var err error
-		if filter.BeforeRun != "" {
-			cursor, err = scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id = ?`, filter.BeforeRun))
-		} else {
-			cursor, err = scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE queue_sequence = ?`, filter.Before))
-		}
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrRunCursorNotFound
-		}
+		cursor, err := s.runListCursor(ctx, tx, filter)
 		if err != nil {
-			return nil, fmt.Errorf("read run list cursor: %w", err)
+			return nil, err
 		}
 		beforeID = cursor.ID
-		beforeTime = unixNano(runListTime(cursor))
+		beforeTime = unixNano(runEndTime(cursor))
 	}
-	args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref,
-		beforeID, beforeTime, beforeTime, beforeID}, restrictionArgs...)
+	args := append([]any{beforeID, beforeTime, beforeTime, beforeID}, scopeArgs...)
 	rows, err := tx.QueryContext(ctx, `
 SELECT `+runColumns+` FROM runs
-WHERE NOT (status = 'queued' OR (status = 'running' AND started_at IS NULL))
-  AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)
-  AND (? = '' OR COALESCE(started_at, finished_at) < ?
-       OR (COALESCE(started_at, finished_at) = ? AND id < ?))`+restriction+`
-ORDER BY COALESCE(started_at, finished_at) DESC, id DESC
+WHERE status NOT IN ('queued', 'running')
+  AND (? = '' OR `+runEndTimeSQL+` < ? OR (`+runEndTimeSQL+` = ? AND id < ?))
+  AND (? = 0 OR repo_id = ?) AND (? = '' OR ref = ?)`+restriction+`
+ORDER BY `+runEndTimeSQL+` DESC, id DESC
 LIMIT ?`, append(args, pageLimit(filter.Limit))...) // #nosec G202 -- fixed columns and parameterized restriction.
+	terminal, err := collect("terminal", rows, err, false)
 	if err != nil {
-		return nil, fmt.Errorf("list admitted runs: %w", err)
+		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		value, scanErr := scanRun(rows)
-		if scanErr != nil {
-			return nil, fmt.Errorf("scan admitted run: %w", scanErr)
-		}
-		runs = append(runs, value)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list admitted runs: %w", err)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, fmt.Errorf("close admitted runs: %w", err)
-	}
+	runs = append(runs, terminal...)
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit flat run list snapshot: %w", err)
 	}
 	return runs, nil
 }
 
-func runListTime(run model.Run) time.Time {
-	if run.StartedAt != nil {
-		return *run.StartedAt
-	}
+// queuedRunSQL selects the runs still waiting for admission: durable queued
+// runs and claimed runs whose Workflow has not started.
+const queuedRunSQL = `(status = 'queued' OR (status = 'running' AND started_at IS NULL))`
+
+// runEndTimeSQL orders terminal runs. Every terminal transition records
+// finished_at; the fallbacks keep the order total for any older row.
+const runEndTimeSQL = `COALESCE(finished_at, started_at, queued_at)`
+
+func runEndTime(run model.Run) time.Time {
 	if run.FinishedAt != nil {
 		return *run.FinishedAt
 	}
+	if run.StartedAt != nil {
+		return *run.StartedAt
+	}
 	return run.QueuedAt
+}
+
+// runListCursor resolves the page cursor, a run ID or a run sequence, to the
+// run itself; a pruned cursor asks the caller to restart from the first page.
+func (s *Store) runListCursor(ctx context.Context, tx *sql.Tx, filter model.RunListFilter) (model.Run, error) {
+	var cursor model.Run
+	var err error
+	if filter.BeforeRun != "" {
+		cursor, err = scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id = ?`, filter.BeforeRun))
+	} else {
+		cursor, err = scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE queue_sequence = ?`, filter.Before))
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Run{}, ErrRunCursorNotFound
+	}
+	if err != nil {
+		return model.Run{}, fmt.Errorf("read run list cursor: %w", err)
+	}
+	return cursor, nil
 }
 
 // CountRuns counts the retained runs, in total and per repository, so a

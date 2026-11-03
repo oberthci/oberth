@@ -424,15 +424,39 @@ async function loadActiveRuns() {
     state.activeRunsComplete = false;
   }
 }
+/* The server lists runs in three groups: the queue with the run admitted
+   next at its bottom, running runs newest start first, then terminal runs
+   newest finish first. Active runs fetched separately (older attempts hidden
+   behind a newer head) are merged into their group, never stacked on top. */
+function runListGroup(run) {
+  if (isTerminalRun(run)) return 2;
+  return displayRunStatus(run) === "queued" || !run.StartedAt ? 0 : 1;
+}
+function isTerminalRun(run) { return ["passed", "failed", "interrupted"].includes(run.Status); }
+function orderRuns(runs) {
+  const queued = runs.filter(run => runListGroup(run) === 0);
+  const positioned = queued.length > 0 && queued.every(run => run.QueuePosition > 0 || run.Scheduling?.queue_position > 0);
+  const position = run => run.QueuePosition || run.Scheduling?.queue_position || 0;
+  const stamp = value => { const parsed = Date.parse(value || ""); return Number.isFinite(parsed) ? parsed : 0; };
+  return runs.map((run, index) => ({ run, index })).sort((a, b) => {
+    const group = runListGroup(a.run) - runListGroup(b.run);
+    if (group) return group;
+    let key = 0;
+    if (runListGroup(a.run) === 0) key = positioned ? position(b.run) - position(a.run) : stamp(b.run.QueuedAt) - stamp(a.run.QueuedAt);
+    else if (runListGroup(a.run) === 1) key = stamp(b.run.StartedAt) - stamp(a.run.StartedAt);
+    else key = stamp(b.run.FinishedAt || b.run.StartedAt || b.run.QueuedAt) - stamp(a.run.FinishedAt || a.run.StartedAt || a.run.QueuedAt);
+    return key || a.index - b.index;
+  }).map(item => item.run);
+}
 function runsWithActive(source) {
   const seen = new Set(source.map(run => run.ID));
-  return [...state.activeRuns.filter(run => !seen.has(run.ID) && seen.add(run.ID)), ...source];
+  return orderRuns([...source, ...state.activeRuns.filter(run => !seen.has(run.ID) && seen.add(run.ID))]);
 }
 function runPageFull(source) {
-  // The flat first page includes the whole queue in addition to its dated
-  // page. Count exactly the admitted/terminal portion, as the API does.
-  const dated = source.filter(run => run.StartedAt || run.FinishedAt || ["passed", "failed", "interrupted"].includes(run.Status));
-  return (groupedRuns() ? source.length : dated.length) === runPageSize;
+  // Every first page includes the whole queue and all running runs in
+  // addition to its page of terminal runs. Count exactly the terminal
+  // portion, as the API does.
+  return source.filter(isTerminalRun).length === runPageSize;
 }
 function retainedRunCount(count) { return `${count} retained ${count === 1 ? "run" : "runs"}`; }
 /* Older servers have no counts route; the sidebar then counts the page. */
@@ -469,7 +493,7 @@ function repoCounts(runs) {
   }
   return counts;
 }
-/* ---------- one run list: the queue, then admission time ---------- */
+/* ---------- one run list: the queue, running, then finished ---------- */
 function admissionOf(run) { return run.Scheduling?.admission || null; }
 function queuePhase(run) {
   const status = displayRunStatus(run);

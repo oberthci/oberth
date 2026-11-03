@@ -107,8 +107,9 @@ target moved, the server already retries on its own (at most twice in a
 row), and `promote_status` on the failed promotion names the retry in
 `retried_as`.
 `oberth runs` and `oberth run` use one pre-admission label, `queued`, with
-the scheduling reason. The default list puts the whole queue first, then
-admitted and terminal runs by admission time, newest first. A trusted
+the scheduling reason. The default list puts the whole queue first, with the
+run admitted next at its bottom, then running runs newest start first, then
+terminal runs newest finish first. A trusted
 preflight is `running`. Supersession, explicit cancellation and restart all
 display as `cancelled`, with a reason naming the newer SHA, actor or retry
 action. `--json` keeps the underlying `Status` field and adds
