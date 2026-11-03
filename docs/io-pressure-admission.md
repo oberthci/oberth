@@ -9,10 +9,10 @@ from the execution node.
 admission:
   pressure:
     enabled: true
-    cpuSomeAvg10: 40
-    ioSomeAvg10: 25
-    hardCpu: 70
-    hardIo: 50
+    cpuSomeAvg10: 30
+    ioSomeAvg10: 20
+    hardCpu: 50
+    hardIo: 40
     maxWaitSeconds: 1200
 ```
 
@@ -22,17 +22,18 @@ The equivalent server flags are `--admission-pressure-enabled`,
 `--admission-pressure-max-wait-seconds`. Set `enabled: false` (or the first flag
 to `false`) for budget-only admission. New installations and upgrades default
 to enforcement. `enabled: true` selects the new policy even when reused chart
-values retain the earlier `mode: observe`; use `enabled: false` to opt out.
+values retain the earlier `mode: observe`. The server logs a startup warning
+for that explicit legacy setting; use `enabled: false` to opt out.
 
 Admission reads `/proc/pressure/cpu` and `/proc/pressure/io`, retaining both
 `some avg10` and `some avg60`. The gate uses **some avg10**, so it reacts to
-shorter contention waves than avg60. CPU must be strictly below 40% and IO
-strictly below 25%. Each resource has its own latch: after it blocks, it resumes
-only strictly below its threshold minus ten percentage points (CPU 30%, IO 15%
+shorter contention waves than avg60. CPU must be strictly below 30% and IO
+strictly below 20%. Each resource has its own latch: after it blocks, it resumes
+only strictly below its threshold minus ten percentage points (CPU 20%, IO 10%
 with the defaults). One recovering resource cannot clear the other's latch.
 
-These starting thresholds hold new work when CPU stalls occupy two fifths or IO
-stalls one quarter of recent wall time. They leave room for running work to
+These starting thresholds hold new work when CPU stalls occupy three tenths or IO
+stalls one fifth of recent wall time. They leave room for running work to
 drain, while ten-point hysteresis avoids repeated starts near the boundary.
 PSI measures stall time, not CPU utilization or the load average. The defaults
 need qualification against representative workloads; they cannot guarantee a
@@ -40,12 +41,20 @@ load-average ceiling, particularly when other processes share the host.
 
 A server-classified release or tag can bypass pressure only when no run holds
 an admission grant. Promotions and ordinary branch runs have no such bypass,
-regardless of their priority. The first eligible queue head that has waited
-**longer than** `maxWaitSeconds` can pass pressure only with CPU below `hardCpu`
-and IO below `hardIo` (70% and 50%). Its durable queue timestamp, rather than
-the start of a pressure episode, determines the wait. Budget, disk, run-count,
+regardless of their priority. The first eligible queue head deferred by pressure
+for **longer than** `maxWaitSeconds` can pass pressure only with CPU below
+`hardCpu` and IO below `hardIo` (50% and 40%). The clock starts at its first
+eligible pressure deferral, survives brief hysteresis recoveries, and excludes
+earlier waits for capacity, a VM, or queue position. At most one starvation
+grant is allowed per scheduling pass and per settle window. Budget, disk, run-count,
 VM, group, priority and backfill rules always apply. A blocked follower cannot
 use starvation to jump a fresh head. Other admission gates can exceed maxWait.
+
+After each grant, the next grant requires a pressure reading taken at least
+30 seconds later, allowing pod startup and PSI averages to settle. Consecutive
+grants can skip this window only while CPU some avg10 is strictly below 15%
+and IO some avg10 is strictly below 10%. Starvation grants always wait for the
+full window; an idle release/tag bypass also respects settling.
 
 The avg10 policy reads bounded procfs files before each grant, including multiple
 grants in one scheduling pass. Status and metrics use the last admission sample
@@ -60,7 +69,11 @@ distinguishes the system-wide `/proc/pressure` interface from per-cgroup
 values, while sandboxed runtimes can virtualize them. Qualify the actual runtime
 by reading the CPU and IO files in the Oberth pod and on its node at nearly the
 same time; compare the cumulative `total` values as well as the averages.
-Do not use the pod's cgroup directory as a node-pressure source.
+Node-wide PSI was verified on k3s/containerd: reading the Oberth pod's procfs
+through `/proc/<pid>/root/proc/pressure` matched the host averages and cumulative
+`total` values; the pod cgroup CPU total differed. This verifies that runtime's
+source scope, not a load ceiling. Do not use the pod's cgroup directory as a
+node-pressure source.
 
 If a runtime virtualizes or hides these files, a reviewed chart override can
 mount node `/proc/pressure` read-only over `/proc/pressure` in the server container:
@@ -85,7 +98,7 @@ not prove node pressure protection. Co-locate execution and server pods when
 using this single-host policy.
 
 Admin status exposes the sample, soft/hard thresholds, wait bound, holding
-resource (`cpu`, `io`, or `cpu+io`) and fallback reason. `oberth admission` and
+resource (`cpu`, `io`, `cpu+io`, or `settle`) and fallback reason. `oberth admission` and
 admin scheduling messages display CPU and IO numbers and the blocking pressure
 gate. Existing scoped and non-admin views retain the actionable resource reason
 without host-wide numbers.
