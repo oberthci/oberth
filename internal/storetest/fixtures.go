@@ -137,7 +137,7 @@ func RevokeTokenCredential(database *store.Store, ctx context.Context, id string
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	var identity, fingerprint string
 	if err = db.QueryRowContext(ctx, `SELECT identity,fingerprint FROM uplinks WHERE token_credential_id=?`, id).Scan(&identity, &fingerprint); err != nil {
 		return fixtureNotFound(err)
