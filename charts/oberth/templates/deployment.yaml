@@ -91,6 +91,13 @@ spec:
         checksum/resource-sampler: {{ .Values.argo.resourceSampler | toJson | sha256sum | quote }}
         {{- end }}
         checksum/per-repo-identities: {{ list .Values.argo.perRepoIdentities .Values.argo.perRepoCIIdentities | toJson | sha256sum | quote }}
+        # Audit clients load TLS roots at startup; rotate the Pod with the bundle.
+        {{- if .Values.auditAnchor.rekorCA }}
+        checksum/audit-rekor-ca: {{ .Values.auditAnchor.rekorCA | sha256sum | quote }}
+        {{- end }}
+        {{- if .Values.auditAnchor.tsaCA }}
+        checksum/audit-tsa-ca: {{ .Values.auditAnchor.tsaCA | sha256sum | quote }}
+        {{- end }}
         {{- if .Values.auditAnchor.rekorPublicKey }}
         checksum/audit-rekor-pubkey: {{ .Values.auditAnchor.rekorPublicKey | sha256sum | quote }}
         {{- end }}

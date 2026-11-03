@@ -12,10 +12,10 @@ build:
 
 test:
 	$(GOENV) go test -race -count=1 ./...
-	$(GOENV) ./hack/test-gitcache-backends.sh cli
+	$(GOENV) ./hack/test-gitcache.sh
 
 test-gitcache-backends:
-	$(GOENV) ./hack/test-gitcache-backends.sh
+	$(GOENV) ./hack/test-gitcache.sh
 
 lint:
 	$(GOENV) go vet ./...

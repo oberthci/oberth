@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""Exercise the active Argo values through Helm's actual schema validator."""
+import json
+from pathlib import Path
+import subprocess
+import tempfile
+import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+MAX_NAME = '.'.join(['a' * 63] * 3 + ['a' * 61])
+SAMPLER = {'enabled': True, 'interval': '15s',
+           'nodes': {'node-a': 'https://node-a.example.com:10250'},
+           'caCert': 'public-ca-fixture'}
+
+
+class ArgoSchemaTests(unittest.TestCase):
+    def render(self, argo, *overrides):
+        with tempfile.TemporaryDirectory() as directory:
+            values = Path(directory) / 'values.json'
+            values.write_text(json.dumps({'argo': argo}))
+            return subprocess.run([
+                'helm', 'template', 'oberth', str(ROOT / 'charts/oberth'),
+                '--set', 'image.ref=example.invalid/oberth@sha256:' + '1' * 64,
+                '-f', str(values), *overrides,
+            ], capture_output=True, text=True)
+
+    def assert_schema_refuses(self, argo, *overrides):
+        result = self.render(argo, *overrides)
+        self.assertNotEqual(result.returncode, 0, f'Helm accepted invalid values: {argo}')
+        self.assertIn('schema', result.stderr.lower(), result.stderr)
+
+    def test_string_false_cannot_enable_sampler(self):
+        self.assert_schema_refuses({'resourceSampler': SAMPLER},
+                                   '--set-string', 'argo.resourceSampler.enabled=false')
+        result = self.render({'resourceSampler': dict(SAMPLER, enabled=False)})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('name: oberth-resource-sampler', result.stdout)
+
+    def test_active_value_types_and_unknown_keys(self):
+        cases = [
+            {'ciSecrets': 17},
+            {'ciSecrets': {'serviceAccount': 17}},
+            {'ciSecrets': {'vaultRole': []}},
+            {'ciSecrets': {'servceAccount': 'typo'}},
+            {'controllerProfile': False},
+            {'controllerProfile': 'unknown'},
+            {'perRepoIdentities': 'repo'},
+            {'perRepoCIIdentities': [7]},
+            {'perStepIdentities': [{}]},
+            {'resourceSampler': {'enabled': 'false'}},
+            {'resourceSampler': {'interval': 15}},
+            {'resourceSampler': {'interval': 'not-a-duration'}},
+            {'resourceSampler': {'nodes': []}},
+            {'resourceSampler': {'nodes': {'node-a': 10250}}},
+            {'resourceSampler': {'nodes': {'node-a': 'http://node-a:10250'}}},
+            {'resourceSampler': {'caCert': []}},
+            {'resourceSampler': {'enabeld': True}},
+            {'piplineServiceAccount': 'typo'},
+        ]
+        for argo in cases:
+            with self.subTest(argo=argo):
+                self.assert_schema_refuses(argo)
+
+    def test_identity_and_sampler_bounds(self):
+        cases = [
+            {'ciSecrets': {'serviceAccount': 'bad/name'}},
+            {'ciSecrets': {'vaultRole': 'bad/name'}},
+            {'ciSecrets': {'vaultRole': ''}},
+            {'resourceSampler': {'nodes': {'node-' + str(n): 'https://node.example.com:10250'
+                                           for n in range(33)}}},
+            {'resourceSampler': {'nodes': {MAX_NAME + 'a': 'https://node.example.com:10250'}}},
+            {'resourceSampler': {'enabled': True, 'nodes': {}, 'caCert': 'public-ca-fixture'}},
+            {'resourceSampler': dict(SAMPLER, caCert='')},
+        ]
+        for key in ('perRepoIdentities', 'perRepoCIIdentities', 'perStepIdentities'):
+            cases.extend([{key: ['bad/name']}, {key: [MAX_NAME + 'a']},
+                          {key: ['duplicate', 'duplicate']}])
+        for argo in cases:
+            with self.subTest(argo=argo):
+                self.assert_schema_refuses(argo)
+
+    def test_valid_boundaries_and_legacy_values_render(self):
+        cases = [{}, {'ciSecrets': None}, {'ciServiceAccount': 'legacy-pipeline'},
+                 {'ciSecretsServiceAccount': ''}, {'vault': {'ciSecretsRole': ''}},
+                 {'ciSecrets': {'serviceAccount': 'ci-secrets', 'vaultRole': 'ci-role'},
+                  'controllerProfile': 'nonroot-static-v1', 'resourceSampler': SAMPLER},
+                 {'resourceSampler': dict(SAMPLER, nodes={
+                     'node-' + str(n): 'https://node.example.com:10250' for n in range(32)})},
+                 {'resourceSampler': dict(SAMPLER, interval='')},
+                 {'resourceSampler': dict(SAMPLER, interval='1s')},
+                 {'resourceSampler': dict(SAMPLER, interval='30s')},
+                 {'resourceSampler': dict(SAMPLER, interval='1.5s')},
+                 {'resourceSampler': dict(SAMPLER, interval='1s500ms')}]
+        for key in ('perRepoIdentities', 'perRepoCIIdentities', 'perStepIdentities'):
+            cases.append({key: [MAX_NAME]})
+        for argo in cases:
+            with self.subTest(argo=argo):
+                result = self.render(argo)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_retired_aliases_still_report_migration(self):
+        for argo in ({'ciSecretsServiceAccount': 'retired-account'},
+                     {'vault': {'ciSecretsRole': 'retired-role'}}):
+            with self.subTest(argo=argo):
+                result = self.render(argo)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('retired', result.stderr.lower(), result.stderr)
+
+
+if __name__ == '__main__':
+    unittest.main()
