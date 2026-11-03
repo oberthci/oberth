@@ -72,7 +72,7 @@ func oberthReleaseApprovedSecrets() map[string]bool {
 		"oberth/data/release/r2-upload-token":  true,
 		"oberth/data/release/cosign-secret":    true,
 		"oberth/data/release/homebrew-tap-key": true,
-		// The public artifact upload token, used only by release-public-artifacts (#649).
+		// The oberth.ci Worker deploy token, used only by release-website (#649).
 		"oberth/data/release/cloudflare-oberth-workers-token": true,
 	}
 }
@@ -212,6 +212,8 @@ func TestOberthReleasePipelineIsAdmissible(t *testing.T) {
 		"release-finalize":       "release-runtime",
 		// #649: the oberth.ci Worker publishes after the signed artifacts
 		// verified; a tokenless leaf then reads the public bytes back.
+		"release-website":          "release-finalize",
+		"release-website-readback": "release-website",
 	})
 }
 
@@ -342,7 +344,7 @@ func TestOberthReleasePublisherUsesPrivateChildDir(t *testing.T) {
 		"release-publish-images":      {"--path=oberth/data/release/cosign-secret"},
 		"release-publish-kvm-harness": {"--path=oberth/data/release/cosign-secret"},
 		"release-publish-chart":       {"--path=oberth/data/release/cosign-secret"},
-		"release-public-artifacts":    {"--path=oberth/data/release/cloudflare-oberth-workers-token"},
+		"release-website":             {"--path=oberth/data/release/cloudflare-oberth-workers-token"},
 	}
 	seen := map[string]bool{}
 	secretVolume := false
@@ -698,7 +700,7 @@ func TestOberthReleaseScriptReadsStoreFieldNames(t *testing.T) {
 		"cosign-secret/COSIGN_PUB":      true,
 		"homebrew-tap-key/SSH_KEY":      true,
 		// #649: the scoped oberth.ci Worker deploy token (Terraform
-		// operator-owned public artifact token configuration).
+		// output oberth_website_deploy_token in oberthci/terraform).
 		"cloudflare-oberth-workers-token/CLOUDFLARE_API_TOKEN": true,
 	}
 	seen := map[string]bool{}

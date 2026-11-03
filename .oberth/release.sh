@@ -53,6 +53,23 @@ esac
 runtime_receipt=${OBERTH_RUNTIME_RECEIPT:-/tmp/oberth-runtime-receipts/receipt}
 release_public_key=.oberth/pins/release-cosign.pub
 release_public_key_sha256=036dd71c9d3c07a19bff06d4392874014573f695620ac8554d9df175094c4a31
+# Website publication (#649). Node and wrangler execute only from Pod-private
+# scratch under $website_dir, written by the release-website leaf's own init
+# containers from hash-checked inputs; the credential-free setup steps stage
+# only those inputs (the pinned Node tarball and a content-addressed npm
+# cache) in $website_inputs.
+website_dir=${OBERTH_WEBSITE_DIR:-/tmp/oberth-website}
+website_inputs=${OBERTH_WEBSITE_INPUTS:-/tmp/oberth-website-inputs}
+website_node=$website_dir/node/bin/node
+website_npm=$website_dir/node/lib/node_modules/npm/bin/npm-cli.js
+website_app=$website_dir/app
+website_wrangler=$website_app/node_modules/wrangler/bin/wrangler.js
+website_site=$website_dir/site
+website_node_pin=.oberth/pins/node.sha256
+website_node_bin_pin=.oberth/pins/node-bin.sha256
+# The oberth Cloudflare account (public identifier, not a secret).
+website_account_id=0bc3ad9e8a1ef560fa5f1536d0696bc7
+website_home_owned=false
 
 fail() {
 	printf 'release: %s\n' "$*" >&2
@@ -83,6 +100,21 @@ case "$release_dir" in
 	*) fail "OBERTH_RELEASE_DIR must be a dedicated /tmp/oberth-release path" ;;
 esac
 [ ! -L "$release_dir" ] || fail "release directory must not be a symlink"
+case "$website_dir" in
+	/tmp/oberth-website|/tmp/oberth-website-test-*) ;;
+	*) fail "OBERTH_WEBSITE_DIR must be the Pod-private /tmp/oberth-website path" ;;
+esac
+case "$website_inputs" in
+	/tmp/oberth-website-inputs|/tmp/oberth-website-inputs-test-*) ;;
+	*) fail "OBERTH_WEBSITE_INPUTS must be the dedicated /tmp/oberth-website-inputs claim path" ;;
+esac
+case "$website_dir/$website_inputs/" in
+	*/../*|*/./*) fail "website directories must be normalized absolute paths" ;;
+esac
+if [ -L "$website_dir" ] || [ -L "$website_inputs" ]; then
+	fail "website directories must not be symlinks"
+fi
+
 # The release Job runs its steps as root while the /work/src checkout is
 # prepared with a different owner; git's safe.directory protection therefore
 # refuses every command in the checkout ("dubious ownership", exit 128).
@@ -108,6 +140,9 @@ cleanup() {
 	if [ "$registry_config_owned" = true ]; then
 		rm -rf -- "$cred_dir/.docker" "$cred_dir/.helm"
 		rm -f -- "$cred_dir/.gar-token"
+	fi
+	if [ "$website_home_owned" = true ]; then
+		rm -rf -- "$cred_dir/.wrangler-home"
 	fi
 }
 trap cleanup 0 1 2 15
@@ -491,13 +526,14 @@ cloudflare_phase() {
 	# Repository-owned DAG arguments are still explicitly closed: this token
 	# must never become an arbitrary release-command or artifact-execution hook.
 	case "$1" in
-		publish-public|finalize) ;;
+		publish-public|finalize|publish-website) ;;
 		*) fail "unsupported Cloudflare publication phase" ;;
 	esac
 	validate_source
 	case "$1" in
 		publish-public) stage_public_inputs; publish_public_release ;;
 		finalize) stage_public_inputs; finalize_release ;;
+		publish-website) publish_website ;;
 	esac
 }
 
@@ -1367,6 +1403,211 @@ for key in keys:
 
 # Print the reviewed digest from a one-line `sha256sum -c` pin, requiring the
 # exact production path so a pin cannot be retargeted at another file.
+pinned_digest() {
+	awk -v want="$2" '
+		NR == 1 && NF == 2 && length($1) == 64 && $1 ~ /^[0-9a-f]+$/ && $2 == want { digest = $1 }
+		END { if (NR != 1 || digest == "") exit 1; print digest }
+	' "$1"
+}
+
+require_pinned_file() {
+	file=$1
+	pin=$2
+	pin_path=$3
+	if [ ! -f "$file" ] || [ -L "$file" ]; then
+		fail "$file is missing or not a regular file"
+	fi
+	want_digest=$(pinned_digest "$pin" "$pin_path") || fail "$pin is malformed"
+	[ "$(sha256sum "$file" | cut -d ' ' -f 1)" = "$want_digest" ] || fail "$file differs from the reviewed pin $pin"
+}
+
+# The one wrangler version website/package.json declares, the lockfile
+# resolves, and the lockfile root records. Anything else fails closed.
+lockfile_wrangler_version() {
+	/usr/bin/python3 -I -S -B - website/package.json website/package-lock.json <<'PY'
+import json
+import re
+import sys
+
+with open(sys.argv[1], 'rb') as stream:
+    manifest = json.load(stream)
+with open(sys.argv[2], 'rb') as stream:
+    lock = json.load(stream)
+declared = manifest['devDependencies']['wrangler']
+if (not isinstance(declared, str) or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', declared)
+        or lock['packages']['']['devDependencies']['wrangler'] != declared
+        or lock['packages']['node_modules/wrangler']['version'] != declared):
+    sys.exit(1)
+print(declared)
+PY
+}
+
+# Extract the pinned Node runtime into Pod-private scratch and prove the
+# resulting executable is the reviewed one.
+unpack_pinned_node() {
+	require_pinned_file "$1" "$website_node_pin" /tmp/oberth-website-inputs/node.tar.gz
+	rm -rf -- "$website_dir/node"
+	mkdir -p "$website_dir/node"
+	tar -xzf "$1" -C "$website_dir/node" --no-same-owner --strip-components=1
+	require_pinned_file "$website_node" "$website_node_bin_pin" /tmp/oberth-website/node/bin/node
+}
+
+# npm with a fixed environment: no user or global configuration, the public
+# registry named explicitly, lifecycle scripts disabled, integrity from the
+# committed lockfile only.
+run_website_npm() (
+	cd "$website_app" || exit 1
+	# npm refuses one file for both levels; two empty Pod-private files.
+	: >"$website_dir/npmrc-user"
+	: >"$website_dir/npmrc-global"
+	HOME=$website_dir/home
+	npm_config_userconfig=$website_dir/npmrc-user
+	npm_config_globalconfig=$website_dir/npmrc-global
+	npm_config_update_notifier=false
+	export HOME npm_config_userconfig npm_config_globalconfig npm_config_update_notifier
+	exec "$website_node" "$website_npm" ci --ignore-scripts --no-audit --no-fund \
+		--registry=https://registry.npmjs.org/ --logs-dir="$website_dir/npm-logs" "$@"
+)
+
+website_wrangler_version() (
+	cd "$website_app" || exit 1
+	HOME=$website_dir/home
+	XDG_CONFIG_HOME=$website_dir/home/.config
+	WRANGLER_SEND_METRICS=false
+	WRANGLER_HIDE_BANNER=true
+	export HOME XDG_CONFIG_HOME WRANGLER_SEND_METRICS WRANGLER_HIDE_BANNER
+	"$website_node" "$website_wrangler" --version | tail -n 1 | tr -d '[:space:]'
+)
+
+# The release publishes exactly the reviewed Worker: this name, these two
+# custom domains, no workers.dev or preview URLs, static assets only (no
+# script, no bindings). A configuration change must move this check too.
+verify_website_config() {
+	/usr/bin/python3 -I -S -B - website/wrangler.jsonc <<'PY' || fail "website/wrangler.jsonc is not the reviewed oberth.ci Worker configuration"
+import json
+import sys
+
+
+def unique(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError()
+        result[key] = value
+    return result
+
+
+try:
+    with open(sys.argv[1], 'rb') as stream:
+        config = json.load(stream, object_pairs_hook=unique)
+except ValueError:
+    sys.exit(1)
+assets = config.get('assets') if isinstance(config, dict) else None
+if (not isinstance(config, dict) or not isinstance(assets, dict)
+        or not set(config) <= {'$schema', 'name', 'compatibility_date', 'workers_dev', 'preview_urls', 'assets', 'routes'}
+        or config.get('name') != 'oberth-ci'
+        or config.get('workers_dev') is not False or config.get('preview_urls') is not False
+        or config.get('routes') != [{'pattern': 'oberth.ci', 'custom_domain': True},
+                                    {'pattern': 'www.oberth.ci', 'custom_domain': True}]
+        or not set(assets) <= {'directory', 'not_found_handling', 'run_worker_first', 'html_handling'}
+        or assets.get('directory') != './public' or assets.get('run_worker_first') is not False):
+    sys.exit(1)
+PY
+}
+
+# Website staging and installation run before any secret exists in their Pod.
+require_credential_free_step() {
+	[ ! -e /var/run/secrets/kubernetes.io/serviceaccount/token ] || fail "website staging must run in a tokenless Pod"
+	[ -z "${OBERTH_SECRETSTORE_DIR:-}${COSIGN_KEY:-}${COSIGN_PASSWORD:-}${VAULT_TOKEN:-}${GOOGLE_APPLICATION_CREDENTIALS:-}${CLOUDFLARE_API_TOKEN:-}" ] || \
+		fail "website staging refuses credential environment"
+}
+
+# Credential-free setup step: stage the inputs the release-website leaf
+# re-verifies. Only npm from the pinned Node runs here, with lifecycle scripts
+# disabled; no package code executes. The claim keeps the tarball (from
+# fetch-node) and the content-addressed npm cache, nothing executable.
+stage_website_packages() {
+	validate_source
+	require_credential_free_step
+	[ -d "$website_inputs" ] || fail "the website inputs claim is not mounted at $website_inputs"
+	wrangler_version=$(lockfile_wrangler_version) || fail "website/package.json and package-lock.json must pin one exact wrangler version"
+	rm -rf -- "$website_dir"
+	mkdir -p "$website_dir/home" "$website_app"
+	cp "$website_inputs/node.tar.gz" "$website_dir/node.tar.gz"
+	unpack_pinned_node "$website_dir/node.tar.gz"
+	cp website/package.json website/package-lock.json "$website_app/"
+	rm -rf -- "$website_inputs/npm-cache"
+	run_website_npm --cache="$website_inputs/npm-cache"
+	[ -f "$website_wrangler" ] || fail "npm did not install wrangler $wrangler_version"
+	printf 'staged the npm cache for wrangler %s from the committed lockfile\n' "$wrangler_version"
+}
+
+# Final init container of release-website (no secret exists in the Pod yet):
+# verify-website-inputs copied the hash-checked tarball and the npm cache into
+# Pod-private scratch; install from them offline so every package is checked
+# against the lockfile's sha512 integrity.
+install_website_tools() {
+	validate_source
+	require_credential_free_step
+	wrangler_version=$(lockfile_wrangler_version) || fail "website/package.json and package-lock.json must pin one exact wrangler version"
+	if [ ! -f "$website_dir/node.tar.gz" ] || [ ! -d "$website_dir/npm-cache" ]; then
+		fail "verified website inputs are missing; verify-website-inputs must run first"
+	fi
+	unpack_pinned_node "$website_dir/node.tar.gz"
+	rm -rf -- "$website_app"
+	mkdir -p "$website_dir/home" "$website_app"
+	cp website/package.json website/package-lock.json "$website_app/"
+	run_website_npm --offline --cache="$website_dir/npm-cache"
+	installed_version=$(website_wrangler_version) || fail "installed wrangler does not run"
+	[ "$installed_version" = "$wrangler_version" ] || fail "installed wrangler reports $installed_version, the lockfile pins $wrangler_version"
+	printf 'installed wrangler %s offline from the lockfile-verified cache\n' "$installed_version"
+}
+
+# Credentialed: deploy the tagged website with the one scoped token. The token
+# reaches wrangler only through its documented environment interface (a shell
+# assignment from the memory-backed secret file, never argv); wrangler's home,
+# config and log files live on the same memory-backed mount.
+publish_website() {
+	validate_source
+	require_pinned_file "$website_node" "$website_node_bin_pin" /tmp/oberth-website/node/bin/node
+	if [ ! -f "$website_wrangler" ] || [ -L "$website_wrangler" ]; then
+		fail "wrangler is not installed; install-website-tools must run first"
+	fi
+	verify_website_config
+	rm -rf -- "$website_site"
+	mkdir -p "$website_site"
+	cp website/wrangler.jsonc "$website_site/wrangler.jsonc"
+	cp -R website/public "$website_site/public"
+	token_file=$secret_root/cloudflare-oberth-workers-token/CLOUDFLARE_API_TOKEN
+	test -s "$token_file" || fail "cloudflare-oberth-workers-token/CLOUDFLARE_API_TOKEN is missing"
+	ensure_cred_dir
+	wrangler_home=$cred_dir/.wrangler-home
+	rm -rf -- "$wrangler_home"
+	mkdir -m 0700 "$wrangler_home"
+	website_home_owned=true
+	if ! (
+		cd "$website_site" || exit 1
+		unset OBERTH_SECRETSTORE_DIR OBERTH_SECRET_ROOT OBERTH_CREDENTIAL_DIR
+		HOME=$wrangler_home
+		XDG_CONFIG_HOME=$wrangler_home/.config
+		WRANGLER_LOG_PATH=$wrangler_home/logs
+		WRANGLER_LOG_SANITIZE=true
+		WRANGLER_SEND_METRICS=false
+		WRANGLER_HIDE_BANNER=true
+		CLOUDFLARE_ACCOUNT_ID=$website_account_id
+		export HOME XDG_CONFIG_HOME WRANGLER_LOG_PATH WRANGLER_LOG_SANITIZE WRANGLER_SEND_METRICS WRANGLER_HIDE_BANNER CLOUDFLARE_ACCOUNT_ID
+		CLOUDFLARE_API_TOKEN=$(tr -d '[:space:]' <"$token_file")
+		[ -n "$CLOUDFLARE_API_TOKEN" ] || exit 1
+		export CLOUDFLARE_API_TOKEN
+		exec "$website_node" "$website_wrangler" deploy \
+			--config "$website_site/wrangler.jsonc" --autoconfig=false \
+			--tag "$tag" --message "oberth $tag ($sha)"
+	); then
+		fail "wrangler deploy of the oberth.ci Worker failed"
+	fi
+	printf 'deployed the oberth.ci Worker (oberth-ci) from %s (%s)\n' "$tag" "$sha"
+}
+
 # ---------------------------------------------------------------------------
 # KVM harness image publication (#278 Lane B).
 # KVM uses the same image-writer WIF role and fail-closed auth as server images.
@@ -1441,5 +1682,8 @@ case "$action" in
 	finalize) finalize_release ;;
 	publish-public) publish_public_release ;;
 	cloudflare-phase) cloudflare_phase "${2:-}" ;;
-	*) fail "usage: $0 validate|build|sign-binaries|publish-images|publish-kvm-harness|publish-homebrew|package-chart|publish-chart|publish-public|cloudflare-phase|verify|verify-public-runtime|finalize" ;;
+	stage-website-packages) stage_website_packages ;;
+	install-website-tools) install_website_tools ;;
+	publish-website) publish_website ;;
+	*) fail "usage: $0 validate|build|sign-binaries|publish-images|publish-kvm-harness|publish-homebrew|package-chart|publish-chart|publish-public|cloudflare-phase|verify|verify-public-runtime|finalize|stage-website-packages|install-website-tools|publish-website" ;;
 esac

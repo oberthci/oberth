@@ -1,5 +1,5 @@
 {{- if (.Values.platformProtection | default dict).enabled }}
-{{- range $component := list "oberth" "argo-controller" "openbao" }}
+{{- range $component := list "oberth" "cloudflared" "argo-controller" "openbao" }}
 ---
 apiVersion: scheduling.k8s.io/v1
 kind: PriorityClass

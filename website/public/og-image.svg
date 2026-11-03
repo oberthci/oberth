@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">Oberth — Agent-safe Git ingress</title>
+  <desc id="desc">Machine-speed code. Human-grade control.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1e1f29"/>
+      <stop offset="1" stop-color="#282a36"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="80%" cy="22%" r="64%">
+      <stop offset="0" stop-color="#bd93f9" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#bd93f9" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0V48" fill="none" stroke="#6272a4" stroke-opacity=".12"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+  <rect width="1200" height="630" fill="url(#grid)"/>
+
+  <g transform="translate(80 69)">
+    <path d="M27 0 52 49H2L27 0Z" fill="none" stroke="#bd93f9" stroke-width="4" stroke-linejoin="round"/>
+    <path d="m27 13 11 29h-7l-4-10-4 10h-7l11-29Z" fill="#bd93f9"/>
+    <text x="70" y="37" fill="#f8f8f2" font-family="ui-monospace, SFMono-Regular, monospace" font-size="34" font-weight="700">oberth</text>
+    <text x="928" y="34" text-anchor="end" fill="#f1fa8c" font-family="ui-monospace, SFMono-Regular, monospace" font-size="14" font-weight="700" letter-spacing="2">AGENT-SAFE GIT INGRESS</text>
+  </g>
+
+  <text x="80" y="245" fill="#f8f8f2" font-family="Inter, ui-sans-serif, sans-serif" font-size="67" font-weight="700" letter-spacing="-3">Machine-speed code.</text>
+  <text x="80" y="327" fill="#bd93f9" font-family="Inter, ui-sans-serif, sans-serif" font-size="67" font-weight="700" letter-spacing="-3">Human-grade control.</text>
+  <text x="84" y="385" fill="#b7b9ca" font-family="Inter, ui-sans-serif, sans-serif" font-size="23">Gate every push before it reaches upstream Git.</text>
+
+  <g transform="translate(80 463)" font-family="ui-monospace, SFMono-Regular, monospace" font-size="15" font-weight="600">
+    <rect width="1040" height="92" rx="12" fill="#21222c" stroke="#44475a"/>
+    <circle cx="28" cy="28" r="5" fill="#50fa7b"/>
+    <text x="45" y="34" fill="#a7b2df">git push</text>
+    <path d="M155 28h72" stroke="#6272a4"/>
+    <text x="244" y="34" fill="#ffb86c">preflight</text>
+    <path d="M352 28h72" stroke="#6272a4"/>
+    <text x="441" y="34" fill="#bd93f9">policy CI</text>
+    <path d="M543 28h72" stroke="#6272a4"/>
+    <text x="632" y="34" fill="#8be9fd">sync on green</text>
+    <text x="28" y="69" fill="#6272a4">stderr · Git refs · dashboard · MCP</text>
+    <text x="1012" y="69" text-anchor="end" fill="#f8f8f2">oberth.ci</text>
+  </g>
+</svg>

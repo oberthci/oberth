@@ -120,9 +120,9 @@ invoke Secretstore. The retired `gar-image-key`, `gar-reader-key`,
 must not be recreated. Legacy code documents only an explicit reviewed source
 rollback; it does not authorize restoring retired credentials or grants.
 
-The credentialed artifact leaf publishes signed objects to the
+The existing website-authorized leaf also publishes signed objects to the
 Oberth-owned `oberth-releases` bucket. Its fixed phases run public upload, then
-finalization after the credential-free runtime proof.
+finalization after the credential-free runtime proof, then website deployment.
 The signer leaves receive no Cloudflare token. Artifact snapshots are bounded,
 read-only at the source, signature-checked before upload, and never executed in
 the credentialed leaf. Finalization retains its shared mutex and conditional
@@ -141,9 +141,47 @@ tags, fetched-artifact verification, and deployment authorization remain
 separate gates. Local controller fixtures are construction evidence, not a
 claim of live Pod execution or an applied registry policy.
 
-## Dashboard test runtime
+## Website publication (#649)
 
-The tokenless fetch-node and verify-node steps stage the pinned Node archive in
-bootstrap-node-inputs. The release-test leaf mounts that claim read-only and
-verifies its private executable before running dashboard JavaScript tests.
-The artifact publisher has no Node tooling or site deployment authority.
+The oberth.ci Worker (`oberth-ci`, Workers Static Assets, custom domains
+oberth.ci and www.oberth.ci) is published by the release burn, not by hand.
+
+- `release-setup` gains three credential-free steps. `fetch-node` downloads
+  the official Node tarball named in `pins/node.url` into the dedicated
+  `bootstrap-website-inputs` claim, `verify-node` checks it against
+  `pins/node.sha256`, and `stage-website-packages` re-verifies a private copy,
+  extracts it, proves the executable against `pins/node-bin.sha256`, and runs
+  `npm ci --ignore-scripts` from the committed `website/package-lock.json`
+  with only the npm cache written back to the claim. No package code runs;
+  the claim holds only hash-checked or content-addressed inputs. These Pods
+  are tokenless (`automountServiceAccountToken: false`) and receive no shared
+  workspace mounts or environment.
+- `release-website` depends on `release-verify`. Its first init container,
+  `verify-website-inputs.py`, binds the publisher source (release.sh, the
+  verifier, the Node pins, the npm manifest and lockfile, `wrangler.jsonc`
+  and the exact `website/public` tree) to the admitted commit and tag, then
+  copies the tarball (hashed while copied) and the npm cache into Pod-private
+  `/tmp/oberth-website`. The second, `install-website-tools`, extracts Node,
+  re-proves the executable pin, installs wrangler with
+  `npm ci --offline --ignore-scripts` (every tarball re-verified against the
+  lockfile's sha512) and requires the lockfile's exact wrangler version.
+  Only then does the main container run `oberth secretstore exec` with its
+  single path, `oberth/data/release/cloudflare-oberth-workers-token` (field
+  `CLOUDFLARE_API_TOKEN`); it never receives a GAR key, the cosign secret or
+  the publisher tools claim. `release.sh publish-website` re-proves the Node
+  pin, refuses any `wrangler.jsonc` other than the reviewed Worker, and hands
+  the token to wrangler through its environment only, with wrangler's home,
+  config and logs on the memory-backed secret mount.
+- `release-website-readback` is tokenless. It re-asserts the #647 contract on
+  the admitted source (identical semantic audit preflight in both
+  `setup-secretstore.sh` copies, no pre-#647 grep) and polls, without cache
+  busting, until `https://oberth.ci/`, `https://www.oberth.ci/`, both
+  `/setup-secretstore.sh` URLs and `/install.sh` serve the admitted bytes
+  with their `_headers` content types (window 900 s, above the scripts'
+  300 s max-age). A stale edge copy is not publication.
+
+The deploy token is Terraform-owned (`oberthci/terraform`
+`website-deploy-token.tf`: account Workers Scripts Write, read-only Zone Read
+and Workers Routes Read on oberth.ci, no cache purge or DNS write). Its value
+reaches OpenBao only through the administrator's custody step and the
+release Pod only through `secretstore exec`.

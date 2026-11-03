@@ -33,10 +33,7 @@ chain head first:
 kubectl exec -n {{ .Release.Namespace }} deploy/{{ include "oberth.fullname" . }} -- /usr/local/bin/oberth audit head
 Then set auditAnchor.acceptWitnessGenesis to that exact value for one restart.
 
-{{- if hasKey .Values "watchTunnel" }}
-WARNING: retired watchTunnel values are ignored. The connector must be managed
-outside Oberth. Migrate its ownership before upgrading this release.
-{{- end }}
+
 
 The VM execution path, guest-test injection and .oberth/tests.yaml are deprecated
 but remain supported while repository pipelines migrate to workflow capabilities.
