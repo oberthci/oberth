@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/vmrunner"
 )
@@ -27,7 +28,7 @@ const releasePreflightFile = ".oberth/release.yaml"
 const releasePreflightLimit = 1 << 20
 
 func releasePreflight(ctx context.Context, git vmrunner.PolicyGit, checker ReleasePreflighter, request WorkflowRequest, base string, defaultBase bool) (ReleasePreflightResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(gitcache.WithFreshPolicy(ctx), 30*time.Second)
 	defer cancel()
 	repo := model.CanonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repository.Name)
 	sha := request.Run.TestedSHA

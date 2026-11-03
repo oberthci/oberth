@@ -22,7 +22,7 @@ func TestPolicyRefreshCacheAuthorityAndExpiry(t *testing.T) {
 	repository := newTestRepository(t)
 	first := repository.commitFile(t, "first policy", "policy.yaml", "first\n")
 	cache := newTestCache(t, repository.upstream)
-	ctx := t.Context()
+	ctx := WithBurstPolicy(t.Context())
 	cached, err := cache.Ensure(ctx, "example")
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +130,7 @@ func TestPolicyRefreshBurstSharesRetries(t *testing.T) {
 			for range runs {
 				go func() {
 					<-start
-					actual, body, exists, err := cache.ReadDefaultBlob(t.Context(), "example", "policy.yaml", 4096)
+					actual, body, exists, err := cache.ReadDefaultBlob(WithBurstPolicy(t.Context()), "example", "policy.yaml", 4096)
 					if refusals < 100 && err != nil {
 						results <- fmt.Errorf("read policy: %w", err)
 						return
