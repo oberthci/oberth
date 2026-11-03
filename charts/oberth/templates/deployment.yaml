@@ -220,7 +220,7 @@ spec:
             {{- $pressure := $admission.pressure | default dict }}
             {{- $pressureEnabled := true }}
             {{- if hasKey $pressure "enabled" }}{{- $pressureEnabled = $pressure.enabled }}{{- end }}
-            {{- $hostPressure := merge (deepCopy $pressure) (dict "enabled" true "cpuSomeAvg10" 40 "ioSomeAvg10" 25 "hardCpu" 70 "hardIo" 50 "maxWaitSeconds" 1200) }}
+            {{- $hostPressure := merge (deepCopy $pressure) (dict "enabled" true "cpuSomeAvg10" 30 "ioSomeAvg10" 20 "hardCpu" 50 "hardIo" 40 "maxWaitSeconds" 1200) }}
             {{- if or (lt (float64 $hostPressure.hardCpu) (float64 $hostPressure.cpuSomeAvg10)) (lt (float64 $hostPressure.hardIo) (float64 $hostPressure.ioSomeAvg10)) }}
             {{- fail "admission.pressure hard limits must be at least the soft thresholds" }}
             {{- end }}

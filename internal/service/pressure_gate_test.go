@@ -29,9 +29,9 @@ func TestPressureStarvationDoesNotCrossHardLimits(t *testing.T) {
 		cpu, io  float64
 		admitted bool
 	}{
-		{"below hard limits", 69.99, 49.99, true},
-		{"CPU hard boundary", 70, 30, false},
-		{"IO hard boundary", 45, 50, false},
+		{"below hard limits", 49.99, 39.99, true},
+		{"CPU hard boundary", 50, 30, false},
+		{"IO hard boundary", 45, 40, false},
 		{"both extreme", 90, 90, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -56,7 +56,7 @@ func TestHostPressureAvg10AndIndependentHysteresis(t *testing.T) {
 		cpu, io float64
 		blocked bool
 	}{
-		{"room", 39.99, 24.99, false}, {"cpu boundary", 40, 0, true}, {"io boundary", 0, 25, true},
+		{"room", 29.99, 19.99, false}, {"cpu boundary", 30, 0, true}, {"io boundary", 0, 20, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := hostPressureTestGate()
@@ -70,16 +70,16 @@ func TestHostPressureAvg10AndIndependentHysteresis(t *testing.T) {
 		})
 	}
 	f := hostPressureTestGate()
-	f.sample.CPU.SomeAvg10, f.sample.IO.SomeAvg10 = 40, 25
+	f.sample.CPU.SomeAvg10, f.sample.IO.SomeAvg10 = 30, 20
 	r := f.prepare(1, model.PriorityNormal, "", periapsis.M)
-	for _, values := range [][2]float64{{30, 15}, {29.99, 25}, {40, 14.99}, {30, 14.99}} {
+	for _, values := range [][2]float64{{20, 10}, {19.99, 20}, {30, 9.99}, {20, 9.99}} {
 		f.sample.CPU.SomeAvg10, f.sample.IO.SomeAvg10 = values[0], values[1]
 		f.advance(time.Second)
 		if r.granted {
 			t.Fatal("one resource cleared the other's hysteresis latch", values)
 		}
 	}
-	f.sample.CPU.SomeAvg10, f.sample.IO.SomeAvg10 = 29.99, 14.99
+	f.sample.CPU.SomeAvg10, f.sample.IO.SomeAvg10 = 19.99, 9.99
 	f.advance(time.Second)
 	if !r.granted {
 		t.Fatal("did not recover below both hysteresis boundaries")
@@ -151,7 +151,7 @@ func TestHostPressureUnavailableBudgetOnlyAndRecovery(t *testing.T) {
 
 func TestHostPressureStarvationOnlyHeadAndBudgetStillApply(t *testing.T) {
 	f := hostPressureTestGate()
-	f.sample.CPU.SomeAvg10 = 60
+	f.sample.CPU.SomeAvg10 = 45
 	head := f.prepare(1, model.PriorityHighest, "", periapsis.M)
 	behind := f.prepare(2, model.PriorityNormal, "", periapsis.M)
 	behind.queuedAt = f.now.Add(-time.Hour / 2)
@@ -172,7 +172,7 @@ func TestHostPressureConfigurationAndSampleValidation(t *testing.T) {
 	for _, mutate := range []func(*AdmissionPressureConfig){
 		func(c *AdmissionPressureConfig) { c.CPUSomeAvg10 = math.NaN() },
 		func(c *AdmissionPressureConfig) { c.IOSomeAvg10 = 10 },
-		func(c *AdmissionPressureConfig) { c.HardCPU = 39 },
+		func(c *AdmissionPressureConfig) { c.HardCPU = 29 },
 		func(c *AdmissionPressureConfig) { c.HardIO = math.Inf(1) },
 		func(c *AdmissionPressureConfig) { c.MaxWaitSeconds = 0 },
 	} {
@@ -229,6 +229,7 @@ func TestHostPressureEnabledOverridesLegacyObserve(t *testing.T) {
 	}
 }
 
+// Stable PSI models the kernel/startup delay instead of reacting to gate.runs.
 func TestHostPressureModerateAdmitsOnePerSettleWindow(t *testing.T) {
 	for _, values := range [][2]float64{{20, 0}, {15, 0}, {0, 10}} {
 		f := hostPressureTestGate()

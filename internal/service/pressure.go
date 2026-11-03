@@ -43,7 +43,7 @@ type AdmissionPressureConfig struct {
 }
 
 func DefaultAdmissionPressureConfig() AdmissionPressureConfig {
-	return AdmissionPressureConfig{Enabled: true, Mode: PressureEnforce, CPUSomeAvg10: 40, IOSomeAvg10: 25, HardCPU: 70, HardIO: 50, MaxWaitSeconds: 1200, Hysteresis: 10}
+	return AdmissionPressureConfig{Enabled: true, Mode: PressureEnforce, CPUSomeAvg10: 30, IOSomeAvg10: 20, HardCPU: 50, HardIO: 40, MaxWaitSeconds: 1200, Hysteresis: 10}
 }
 
 func (c AdmissionPressureConfig) Validate() error {

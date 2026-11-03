@@ -280,7 +280,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.Float64Var(&options.admissionPressure.IOSomeAvg10, "admission-pressure-io-some-avg10", defaults.IOSomeAvg10, "IO some PSI avg10 threshold in percent")
 	flags.Float64Var(&options.admissionPressure.HardCPU, "admission-pressure-hard-cpu", defaults.HardCPU, "hard CPU some PSI avg10 limit for starvation admission")
 	flags.Float64Var(&options.admissionPressure.HardIO, "admission-pressure-hard-io", defaults.HardIO, "hard IO some PSI avg10 limit for starvation admission")
-	flags.Int64Var(&options.admissionPressure.MaxWaitSeconds, "admission-pressure-max-wait-seconds", defaults.MaxWaitSeconds, "head queue wait before admission below hard PSI limits")
+	flags.Int64Var(&options.admissionPressure.MaxWaitSeconds, "admission-pressure-max-wait-seconds", defaults.MaxWaitSeconds, "pressure deferral wait before admission below hard PSI limits")
 	flags.StringVar(&options.admissionPressure.Mode, "admission-pressure-mode", service.PressureEnforce, "legacy avg60 mode; enabled avg10 admission always enforces")
 	flags.Float64Var(&options.admissionPressure.IOFullAvg60Max, "admission-pressure-io-full-avg60-max", 0, "legacy IO full PSI avg60 threshold; ignored by enabled avg10 admission")
 	flags.Float64Var(&options.admissionPressure.CPUSomeAvg60Max, "admission-pressure-cpu-some-avg60-max", 0, "legacy CPU some PSI avg60 threshold; ignored by enabled avg10 admission")

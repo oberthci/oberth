@@ -91,10 +91,10 @@ admission:
   # Host some PSI avg10 gates new runs; unavailable PSI falls back to budget.
   pressure:
     enabled: true
-    cpuSomeAvg10: 40
-    ioSomeAvg10: 25
-    hardCpu: 70
-    hardIo: 50
+    cpuSomeAvg10: 30
+    ioSomeAvg10: 20
+    hardCpu: 50
+    hardIo: 40
     maxWaitSeconds: 1200
     # Legacy observation controls; avg10 admission uses fixed 10-point hysteresis.
     mode: enforce

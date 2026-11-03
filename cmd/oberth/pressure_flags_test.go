@@ -10,13 +10,13 @@ import (
 
 func TestServePressureDefaultsAndValidation(t *testing.T) {
 	defaults, err := parseServeOptions([]string{"--argo-namespace", "argo-pipelines"}, io.Discard)
-	if err != nil || !defaults.admissionPressure.Enabled || defaults.admissionPressure.CPUSomeAvg10 != 40 || defaults.admissionPressure.IOSomeAvg10 != 25 || defaults.admissionPressure.HardCPU != 70 || defaults.admissionPressure.HardIO != 50 || defaults.admissionPressure.MaxWaitSeconds != 1200 || defaults.admissionPressure.Mode != "enforce" || defaults.admissionPressure.IOFullAvg60Max != 0 || defaults.admissionPressure.CPUSomeAvg60Max != 0 || defaults.admissionPressure.Hysteresis != 10 || defaults.admissionPressure.MaxDefer != 20*time.Minute {
+	if err != nil || !defaults.admissionPressure.Enabled || defaults.admissionPressure.CPUSomeAvg10 != 30 || defaults.admissionPressure.IOSomeAvg10 != 20 || defaults.admissionPressure.HardCPU != 50 || defaults.admissionPressure.HardIO != 40 || defaults.admissionPressure.MaxWaitSeconds != 1200 || defaults.admissionPressure.Mode != "enforce" || defaults.admissionPressure.IOFullAvg60Max != 0 || defaults.admissionPressure.CPUSomeAvg60Max != 0 || defaults.admissionPressure.Hysteresis != 10 || defaults.admissionPressure.MaxDefer != 20*time.Minute {
 		t.Fatal("bad pressure defaults", defaults.admissionPressure, err)
 	}
 	for _, args := range [][]string{
 		{"--admission-pressure-cpu-some-avg10=NaN"},
 		{"--admission-pressure-io-some-avg10=10"},
-		{"--admission-pressure-hard-cpu=39"},
+		{"--admission-pressure-hard-cpu=29"},
 		{"--admission-pressure-hard-io=Inf"},
 		{"--admission-pressure-max-wait-seconds=0"},
 		{"--admission-pressure-mode=typo"},
@@ -49,7 +49,7 @@ func TestChartPressureDefaultsOverridesAndExplicitZero(t *testing.T) {
 		set  []string
 		want []string
 	}{
-		{want: []string{"--admission-pressure-enabled=true", "--admission-pressure-cpu-some-avg10=40", "--admission-pressure-io-some-avg10=25", "--admission-pressure-hard-cpu=70", "--admission-pressure-hard-io=50", "--admission-pressure-max-wait-seconds=1200", "--admission-pressure-mode=enforce", "--admission-pressure-io-full-avg60-max=0", "--admission-pressure-cpu-some-avg60-max=0", "--admission-pressure-hysteresis=10", "--admission-pressure-max-defer=20m"}},
+		{want: []string{"--admission-pressure-enabled=true", "--admission-pressure-cpu-some-avg10=30", "--admission-pressure-io-some-avg10=20", "--admission-pressure-hard-cpu=50", "--admission-pressure-hard-io=40", "--admission-pressure-max-wait-seconds=1200", "--admission-pressure-mode=enforce", "--admission-pressure-io-full-avg60-max=0", "--admission-pressure-cpu-some-avg60-max=0", "--admission-pressure-hysteresis=10", "--admission-pressure-max-defer=20m"}},
 		{set: []string{"admission.pressure.enabled=false", "admission.pressure.ioFullAvg60Max=0", "admission.pressure.hysteresis=0", "admission.pressure.maxDefer=0s"}, want: []string{"--admission-pressure-enabled=false", "--admission-pressure-io-full-avg60-max=0", "--admission-pressure-hysteresis=0"}},
 		{set: []string{"admission.pressure.cpuSomeAvg10=45.5", "admission.pressure.ioSomeAvg10=30", "admission.pressure.hardCpu=75", "admission.pressure.hardIo=55", "admission.pressure.maxWaitSeconds=60"}, want: []string{"--admission-pressure-cpu-some-avg10=45.5", "--admission-pressure-io-some-avg10=30", "--admission-pressure-hard-cpu=75", "--admission-pressure-hard-io=55", "--admission-pressure-max-wait-seconds=60"}},
 		{set: []string{"admission.pressure.mode=enforce", "admission.pressure.ioFullAvg60Max=45.5", "admission.pressure.cpuSomeAvg60Max=70", "admission.pressure.hysteresis=5", "admission.pressure.maxDefer=7m"}, want: []string{"--admission-pressure-mode=enforce", "--admission-pressure-io-full-avg60-max=45.5", "--admission-pressure-cpu-some-avg60-max=70", "--admission-pressure-hysteresis=5", "--admission-pressure-max-defer=7m"}},
@@ -72,7 +72,7 @@ func TestChartPressureDefaultsOverridesAndExplicitZero(t *testing.T) {
 			}
 		}
 	}
-	for _, value := range []string{"admission.pressure.mode=typo", "admission.pressure.ioFullAvg60Max=-1", "admission.pressure.cpuSomeAvg60Max=101", "admission.pressure.maxDefer=soon", "admission.pressure.ioFullAvg60Max=5", "admission.pressure.cpuSomeAvg60Max=10", "admission.pressure.cpuSomeAvg10=10", "admission.pressure.ioSomeAvg10=101", "admission.pressure.hardCpu=39", "admission.pressure.hardIo=24", "admission.pressure.maxWaitSeconds=0"} {
+	for _, value := range []string{"admission.pressure.mode=typo", "admission.pressure.ioFullAvg60Max=-1", "admission.pressure.cpuSomeAvg60Max=101", "admission.pressure.maxDefer=soon", "admission.pressure.ioFullAvg60Max=5", "admission.pressure.cpuSomeAvg60Max=10", "admission.pressure.cpuSomeAvg10=10", "admission.pressure.ioSomeAvg10=101", "admission.pressure.hardCpu=29", "admission.pressure.hardIo=19", "admission.pressure.maxWaitSeconds=0"} {
 		if output, err := exec.Command("helm", "template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@"+goProxyDigest, "--set", value).CombinedOutput(); err == nil {
 			t.Fatalf("invalid pressure chart value accepted: %s %s", value, output)
 		}
