@@ -15,17 +15,19 @@ type DeclaredAdmissionConfig struct {
 	Disabled    bool
 	CPUMilli    int64
 	MemoryBytes int64
+	// Fixed memory allowance per declared run, in addition to executor reserves.
+	MemoryHeadroomBytes int64
 	// Zero retains the existing coarse run ceiling. IO is not inferred from CPU.
 	IORuns int
 }
 
 func DefaultDeclaredAdmissionConfig() DeclaredAdmissionConfig {
-	return DeclaredAdmissionConfig{CPUMilli: 8000, MemoryBytes: 16 << 30}
+	return DeclaredAdmissionConfig{CPUMilli: 8000, MemoryBytes: 16 << 30, MemoryHeadroomBytes: 1 << 30}
 }
 
 func (c DeclaredAdmissionConfig) Validate() error {
-	if c.CPUMilli <= 0 || c.CPUMilli > 1_000_000 || c.MemoryBytes <= 0 || c.MemoryBytes > 1<<50 || c.IORuns < 0 || c.IORuns > 64 {
-		return errors.New("declared admission requires positive CPU/memory budgets and an IO run ceiling in 0..64")
+	if c.CPUMilli <= 0 || c.CPUMilli > 1_000_000 || c.MemoryBytes <= 0 || c.MemoryBytes > 1<<50 || c.MemoryHeadroomBytes < 0 || c.MemoryHeadroomBytes > 1<<50 || c.IORuns < 0 || c.IORuns > 64 {
+		return errors.New("declared admission requires positive CPU/memory budgets, memory headroom in 0..2^50 bytes and an IO run ceiling in 0..64")
 	}
 	return nil
 }
@@ -42,6 +44,14 @@ func podCharge(d argoworkflow.PodDemand) argoworkflow.PodDemand {
 	return d
 }
 
+// runCharge holds fixed overshoot headroom once per run, independently of
+// workflow fan-out. Kubernetes still schedules pods by their actual requests.
+func (g *weightedAdmission) runCharge(d argoworkflow.PodDemand) argoworkflow.PodDemand {
+	d = podCharge(d)
+	d.MemoryBytes += g.resources.MemoryHeadroomBytes
+	return d
+}
+
 func (g *weightedAdmission) usesDeclarations(r *admissionReservation) bool {
 	return r.pods != nil
 }
@@ -51,7 +61,7 @@ func (g *weightedAdmission) numericFitsLocked(candidate *admissionReservation) b
 	legacy := 0
 	charge := func(r *admissionReservation) bool {
 		if g.usesDeclarations(r) {
-			d := podCharge(*r.pods)
+			d := g.runCharge(*r.pods)
 			if d.CPUMilli > cpu || d.MemoryBytes > memory {
 				return false
 			}
@@ -96,7 +106,7 @@ func (g *weightedAdmission) validatePodDemand(d *argoworkflow.PodDemand) error {
 }
 
 func (g *weightedAdmission) demandFitsBudget(d *argoworkflow.PodDemand) bool {
-	c := podCharge(*d)
+	c := g.runCharge(*d)
 	return c.CPUMilli <= g.resources.CPUMilli && c.MemoryBytes <= g.resources.MemoryBytes
 }
 
@@ -158,6 +168,6 @@ func (r *admissionReservation) declaredResources() *model.DeclaredResources {
 	if r.pods == nil {
 		return nil
 	}
-	d := podCharge(*r.pods)
+	d := r.gate.runCharge(*r.pods)
 	return &model.DeclaredResources{CPUMilli: d.CPUMilli, MemoryBytes: d.MemoryBytes, Pods: d.Pods}
 }

@@ -90,7 +90,7 @@ func TestDeclaredMemoryLimitsRequiredForEveryPodContainer(t *testing.T) {
 				if err != nil || demand == nil {
 					t.Fatalf("bounded pod lost numeric eligibility: %+v %v", demand, err)
 				}
-				if shape == "inherited-helper-limit" && demand.MemoryBytes != 64<<20 {
+				if shape == "inherited-helper-limit" && demand.MemoryBytes != 32<<20 {
 					t.Fatalf("inherited helper counted incorrectly: %+v", demand)
 				}
 			} else if demand != nil || err == nil || !strings.Contains(err.Error(), "memory limit") {

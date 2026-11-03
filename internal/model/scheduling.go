@@ -114,7 +114,7 @@ func waitText(seconds int64) string {
 // "XL, needs a full drain".
 func (blocker AdmissionBlocker) Reason() string {
 	if d := blocker.DeclaredResources; d != nil {
-		return fmt.Sprintf("declared requests %dm CPU, %d memory bytes", d.CPUMilli, d.MemoryBytes)
+		return fmt.Sprintf("declared reservation (requests/VM demand plus helper and memory headroom reserves) %dm CPU, %d memory bytes", d.CPUMilli, d.MemoryBytes)
 	}
 	switch {
 	case blocker.DiskFloor:
@@ -314,8 +314,9 @@ func (p *PressureDeferral) Reason() string {
 	return fmt.Sprintf("deferred: %s pressure %.1f%%", p.Resource, p.Avg60)
 }
 
-// DeclaredResources describes this run's bound scheduling requests, including
-// the server helper reserve. Aggregate host usage is deliberately not included.
+// DeclaredResources describes this run's admission reservation, including
+// declared requests/VM host demand, server helpers and memory headroom.
+// Aggregate host usage is deliberately not included.
 type DeclaredResources struct {
 	CPUMilli    int64 `json:"cpu_milli"`
 	MemoryBytes int64 `json:"memory_bytes"`

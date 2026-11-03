@@ -22,10 +22,10 @@ about host capacity or measured usage. They do not add limits to a container
 that omitted them. VM allocations retain their separate grants and bounds.
 A step with no limit remains unbounded, as it is today. The ceiling validates
 explicit declarations per container; it does not cap a whole workflow's resource
-use or account for simultaneous containers. Enforcement through aggregate
-CPU/memory admission comes with Stage C.
-The existing server workflow timeout also bounds explicit step deadlines;
-positive integer step deadlines are required when declared.
+use or account for simultaneous containers. Stage C adds aggregate CPU/memory
+admission as a coarse ceiling, as described below. The existing server workflow
+timeout also bounds explicit step deadlines; positive integer step deadlines are
+required when declared.
 
 An administrator can select XL with `oberth size grant repo-01 --max XL`.
 `size_grant_get` returns the numeric `resource_ceiling` alongside the existing
@@ -88,6 +88,39 @@ For example, `oberth run resources --repo repo-01 --step step-abc12345 --yaml`.
 The anonymised laptop table remains unchanged and cannot supply suggestions
 where attempt identity is ambiguous.
 
-Stage B changes no queue units, admission weights, run ceilings or scheduling
-clocks. Stage C is described in [declared admission](declared-admission.md); later queue
-work remains separate. No schema migration is required.
+## Admission reservation
+
+Eligible workflows reserve the maximum concurrent sum of declared memory
+**requests**, independently of CPU requests. Repositories should declare their
+reviewed, measured maximum peaks as memory requests. Memory limits remain
+per-container runtime ceilings enforced by Kubernetes; a larger limit does not
+increase ordinary-container admission demand. Kubernetes schedules pods using
+their requests and queues pods when node capacity is unavailable.
+
+Oberth adds 100m CPU and 256Mi memory per peak concurrent executor pod, plus a
+fixed memory reserve **once per declared run**. The default reserve is 1Gi,
+configured with `--admission-memory-headroom-bytes` or
+`admission.declaredResources.memoryHeadroomBytes` (bytes; zero disables it).
+A fixed reserve leaves room for limit overshoot without multiplying every
+measured request: a 1.2 multiplier on two 20Gi-request runs would consume all of
+a 48Gi budget before executor allowances. With the default fixed reserve and
+one executor pod per run, each instead reserves 21.25Gi; two reserve 42.5Gi.
+This allowance is a coarse packing margin, not a guarantee that simultaneous
+usage up to every limit fits. Administrators must review the reserve against
+observed overshoot, Kubernetes capacity and platform headroom.
+
+Both requests and a positive effective memory limit are still required on every
+container for numeric admission. Request-only containers retain the existing
+legacy size path and memory-limit notice. Missing, zero or unknown requests,
+including helper requests, also retain legacy size admission; undeclared work
+earns no reduced reservation. Admission does not insert requests or limits.
+VM guest demand retains its existing conservative request/limit envelope and
+launcher reserve. The fixed run reserve applies to the combined host envelope.
+
+Status messages report the total reservation, including helper and memory
+headroom reserves. The numeric budget, IO/run ceiling, legacy size weights,
+repository groups and VM quotas remain coarse admission controls. Full graph,
+recovery and rollout details are in [declared admission](declared-admission.md).
+Existing sealed demand is restored without recalculating it from current git;
+helper and run reserves use the restoring server's settings. No schema
+migration is required.

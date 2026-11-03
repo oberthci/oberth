@@ -49,8 +49,8 @@ spec:
 	release := acquireRequestWithinBudget(t, r, admissionRequest{RunID: strings.Repeat("a", 32), Size: periapsis.XL, Pods: d})
 	defer release()
 	charged := r.declaredResources()
-	if charged.CPUMilli != 8400 || charged.MemoryBytes != 25<<30 || charged.Pods != 4 {
-		t.Fatalf("lost executor allowance: %+v", charged)
+	if charged.CPUMilli != 8400 || charged.MemoryBytes != 26<<30 || charged.Pods != 4 {
+		t.Fatalf("lost executor allowance or run headroom: %+v", charged)
 	}
 	small := acquireRequestWithinBudget(t, g.reserve(2), admissionRequest{Size: periapsis.XL, Pods: &argoworkflow.PodDemand{CPUMilli: 1000, MemoryBytes: 1 << 30, Pods: 1}})
 	defer small()

@@ -4,10 +4,10 @@ Git remains the source of truth. A workflow whose reachable pod-producing steps
 all declare positive CPU and memory requests can use numeric admission at peak
 concurrency only when every container also has a positive memory limit, directly
 or inherited. This includes scripts, container-set members, init containers and
-sidecars. CPU reserves the request; memory reserves the higher of its request
-and declared limit, including inherited limits. On that numeric path,
-its size annotation no longer determines its reservation or requires a size
-grant. The administrator's per-container declaration ceilings
+sidecars. CPU and ordinary-container memory reserve their requests, including
+inherited requests. Memory limits remain Kubernetes runtime ceilings. On that
+numeric path, its size annotation no longer determines its reservation or
+requires a size grant. The administrator's per-container declaration ceilings
 still apply at trusted submission. No resource value, missing limit or retry is
 changed. An absent runtime limit remains unbounded and keeps legacy admission.
 
@@ -61,8 +61,8 @@ Conflicting loop sources use the full enforced bound, or legacy admission if
 there is no bound, so an ambiguous smaller count cannot reduce the reservation. Graph expansion and analysis have explicit size/depth/work
 bounds. A graph that cannot be bounded falls back to legacy size admission;
 so does a reservation that exceeds the configured numeric budget, including
-helper reserve. These cases never acquire a new numeric sizing refusal. A fixed
-notice appears in the existing run-message cell through `resource_message`,
+helper and run headroom reserves. These cases never acquire a new numeric
+sizing refusal. A fixed notice appears in the existing run-message cell through `resource_message`,
 without changing `display_reason`. Numeric admission shows the effective pod
 concurrency used as an upper bound. The notice explains full-bound dynamic
 fan-out, nested child envelopes, ignored conditions/early-start dependencies,
@@ -76,7 +76,9 @@ memory-limit notice in the run message. No memory or CPU limits are manufactured
 Existing source validity, grants and per-container ceilings still apply.
 
 Each concurrent pod also reserves 100m CPU and 256Mi memory for server/executor
-helpers. This is capacity held aside, not a mutation of pod requests. Deployment
+helpers. Each declared run also holds a configurable fixed memory reserve,
+defaulting to 1Gi, for usage above requests. This is capacity held aside, not a
+mutation of pod requests. Deployment
 executor defaults must fit this allowance; review them before release. CPU and
 memory budgets must exclude platform reserve and other external work. Declared
 VM host demand is included in these budgets. They are administrator settings,
@@ -106,26 +108,37 @@ per-instance memory ceiling and declared guest cores. Partial invalid declaratio
 still fail validation; guest-core bounds, image/identity policy and cell grants
 remain enforced. No request or limit is inserted into the manifest.
 
-Reserving memory limits avoids packing a known larger limit as a small request.
+Ordinary-container requests should represent reviewed, measured maximum peaks.
+Kubernetes queues pods by requests and enforces limits; the host admission budget
+and fixed run headroom provide a coarse packing ceiling rather than reserving
+every possible limit simultaneously. A fixed reserve is used instead of a 1.2
+multiplier so two 20Gi-request / 30Gi-limit runs, each with one executor pod, fit
+in 48Gi: each reserves 20Gi + 256Mi + 1Gi = 21.25Gi. Administrators should tune
+the allowance to observed overshoot and platform capacity. VM guest accounting
+continues to reserve its conservative request/limit envelope.
 A request-only pod container cannot earn numeric host credit: it falls back
 to legacy admission with a visible notice. Review and commit the missing limits
 in git to become eligible; Oberth does not fill them in. Existing running
-reservations restore their sealed cost rather than being silently resized.
+reservations restore their sealed demand rather than recomputing it from git;
+helper and fixed run reserves use the restoring server's settings.
 Both helper allowances must be checked against deployment defaults before rollout.
 VM workflows that exceed the default 8 CPU / 16Gi budget retain legacy admission;
 sharing those runs requires an administrator to raise the host budget to fit
-their declarations plus helper/launcher reserve. This is an operator rollout step.
+their declarations plus helper/launcher and run headroom reserves. This is an
+operator rollout step.
 
 ## Administrator settings
 
-The confirmed defaults are 8 CPU, 16Gi memory, and the existing coarse run cap
-for IO. One administrator kill switch sends **new** work back to size admission.
+The defaults are 8 CPU, 16Gi memory, 1Gi fixed headroom per declared run, and
+the existing coarse run cap for IO. One administrator kill switch sends **new**
+work back to size admission.
 Existing declared reservations remain accounted through completion/recovery.
 
 | Server flag | Chart value | Default |
 | --- | --- | --- |
 | `--admission-cpu-millis` | `admission.declaredResources.cpuMillis` | 8000 |
 | `--admission-memory-bytes` | `admission.declaredResources.memoryBytes` | 17179869184 |
+| `--admission-memory-headroom-bytes` | `admission.declaredResources.memoryHeadroomBytes` | 1073741824 (1Gi); 0 disables |
 | `--admission-io-runs` | `admission.declaredResources.ioRuns` | 0, retain existing cap |
 | `--disable-declared-admission` | `admission.declaredResources.disabled` | false |
 
@@ -136,8 +149,8 @@ repository groups, cancellation and uncertain-create ownership are retained.
 Oversized numeric demand falls back to its existing size class, with a run
 message explaining the choice. It neither waits forever for impossible numeric
 capacity nor refuses an otherwise valid pipeline merely for exceeding that
-budget. Admission messages expose this run's declared demand without adding
-run-row labels or exposing another repository's capacity usage.
+budget. Admission status messages expose this run's total reservation, including
+helper and memory headroom reserves, without adding run-row labels or exposing another repository's capacity usage.
 
 The same immutable source and fragment receipt supplies reservation and trusted
 submission. Submission refuses a changed resource graph. A server-owned numeric

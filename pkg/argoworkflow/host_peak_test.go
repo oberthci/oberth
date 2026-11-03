@@ -143,17 +143,17 @@ func vmiVersion() string {
 	return m.APIVersion
 }
 
-func TestMemoryReservationUsesHigherLimitAndInheritedLimit(t *testing.T) {
+func TestMemoryReservationUsesRequestWithDirectAndInheritedLimit(t *testing.T) {
 	wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Entrypoint: "step-abc12345", Templates: []wfv1.Template{declaredLeaf("step-abc12345", "1", "128Mi")}}}
 	wf.Spec.Templates[0].Container.Resources.Limits = corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("2Gi")}
 	d, err := DeclaredHostPeak(wf, RunTriggerBranch)
-	if err != nil || d == nil || d.MemoryBytes != 2<<30 {
-		t.Fatalf("memory limit ignored: %+v %v", d, err)
+	if err != nil || d == nil || d.MemoryBytes != 128<<20 {
+		t.Fatalf("memory request not reserved: %+v %v", d, err)
 	}
 	wf.Spec.TemplateDefaults = &wfv1.Template{Container: wf.Spec.Templates[0].Container.DeepCopy()}
 	wf.Spec.Templates[0].Container.Resources.Limits = nil
 	d, err = DeclaredHostPeak(wf, RunTriggerBranch)
-	if err != nil || d == nil || d.MemoryBytes != 2<<30 {
-		t.Fatalf("inherited memory limit ignored: %+v %v", d, err)
+	if err != nil || d == nil || d.MemoryBytes != 128<<20 {
+		t.Fatalf("memory request with inherited limit not reserved: %+v %v", d, err)
 	}
 }

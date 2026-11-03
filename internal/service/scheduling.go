@@ -230,7 +230,7 @@ func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
 		if admission.BlockedBy != nil && admission.BlockedBy.RunCeiling {
 			return "Waiting for an IO/run concurrency slot."
 		}
-		return fmt.Sprintf("Waiting for capacity for declared requests: %dm CPU, %d memory bytes.", admission.DeclaredResources.CPUMilli, admission.DeclaredResources.MemoryBytes)
+		return fmt.Sprintf("Waiting for admission reservation (declared requests/VM demand plus helper and memory headroom reserves): %dm CPU, %d memory bytes.", admission.DeclaredResources.CPUMilli, admission.DeclaredResources.MemoryBytes)
 	case admission.BlockedBy != nil:
 		return "Waiting in the weighted resource admission queue, " + blockedBehindMessage(admission.BlockedBy)
 	default:
