@@ -10,7 +10,6 @@ package goproxy
 
 import (
 	"archive/tar"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -51,6 +50,7 @@ type Handler struct {
 	repoForModule map[string]string
 	artifacts     *artifactCache
 	backendBudget time.Duration
+	archiveLimit  int64
 }
 
 // NewHandler builds a GOPROXY handler that resolves modules against the
@@ -241,12 +241,21 @@ func (h *Handler) versions(ctx context.Context, input, modulePath string) ([]str
 	return versions, nil
 }
 
-func (h *Handler) buildZip(ctx context.Context, input, modulePath, version, ref string) ([]byte, error) {
-	// Read the tar archive from git.
-	var tarBuf bytes.Buffer
-	if err := h.cache.ArchiveTar(ctx, input, ref, &tarBuf); err != nil {
-		return nil, moduleReadBuildError(err)
+func (h *Handler) buildZip(ctx context.Context, input, modulePath, version, ref string) (*moduleZip, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	reader, writer := io.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		err := h.cache.ArchiveTar(ctx, input, ref, writer)
+		_ = writer.CloseWithError(err)
+		done <- err
+	}()
+	defer func() { cancel(); _ = reader.CloseWithError(context.Canceled); <-done }()
+	limit := h.archiveLimit
+	if limit <= 0 {
+		limit = 512 << 20
 	}
+	bounded := &io.LimitedReader{R: proxyContextReader{ctx, reader}, N: limit + 1}
 
 	// Extract the tar to a temporary directory so we can build a canonical
 	// module zip with golang.org/x/mod/zip.CreateFromDir. This ensures the
@@ -260,16 +269,28 @@ func (h *Handler) buildZip(ctx context.Context, input, modulePath, version, ref 
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
 
-	tr := tar.NewReader(&tarBuf)
+	tr := tar.NewReader(bounded)
 	for {
 		if ctx.Err() != nil {
 			return nil, backendBuildError()
 		}
 		header, err := tr.Next()
 		if errors.Is(err, io.EOF) {
+			if _, err = io.Copy(io.Discard, bounded); err != nil {
+				return nil, moduleReadBuildError(err)
+			}
+			if bounded.N == 0 {
+				return nil, &proxyBuildError{class: "archive_too_large", status: http.StatusInternalServerError}
+			}
 			break
 		}
+		if bounded.N == 0 || (err == nil && header.Size > bounded.N-1) {
+			return nil, &proxyBuildError{class: "archive_too_large", status: http.StatusInternalServerError}
+		}
 		if err != nil {
+			if !errors.Is(err, tar.ErrHeader) && !errors.Is(err, io.ErrUnexpectedEOF) {
+				return nil, moduleReadBuildError(err)
+			}
 			return nil, &proxyBuildError{class: "archive_error", status: http.StatusInternalServerError}
 		}
 		// Only extract regular files; symlinks and directories are excluded
@@ -280,7 +301,7 @@ func (h *Handler) buildZip(ctx context.Context, input, modulePath, version, ref 
 		}
 		name := path.Clean(header.Name)
 		// Defense in depth: reject path traversal (git archive is trusted).
-		if strings.HasPrefix(name, "..") || strings.Contains(name, "/../") {
+		if !filepath.IsLocal(filepath.FromSlash(name)) || strings.HasPrefix(name, "..") || strings.Contains(name, "/../") {
 			continue
 		}
 		// Exclude vendor/ trees: Go module zips never include vendor/
@@ -297,7 +318,7 @@ func (h *Handler) buildZip(ctx context.Context, input, modulePath, version, ref 
 		if createErr != nil {
 			return nil, &proxyBuildError{class: "internal_error", status: http.StatusInternalServerError}
 		}
-		// #nosec G110 -- tar stream from git archive; size bounded by tree.
+		// #nosec G110 -- the aggregate archive and each entry are bounded above.
 		if _, cpErr := io.Copy(f, proxyContextReader{ctx, tr}); cpErr != nil {
 			_ = f.Close()
 			if ctx.Err() != nil {
@@ -314,16 +335,31 @@ func (h *Handler) buildZip(ctx context.Context, input, modulePath, version, ref 
 	// rules: nested module exclusion (subdirs with their own go.mod), vendor/
 	// tree exclusion, symlink exclusion, deterministic entry ordering, and
 	// canonical zip metadata (timestamps, permissions, compression).
-	var zipBuf bytes.Buffer
+	file, err := os.CreateTemp("", "goproxy-module-*.zip")
+	if err != nil {
+		return nil, &proxyBuildError{class: "internal_error", status: http.StatusInternalServerError}
+	}
+	zip := &moduleZip{File: file}
+	keep := false
+	defer func() {
+		if !keep {
+			_ = zip.Close()
+		}
+	}()
 	mv := module.Version{Path: modulePath, Version: version}
-	if err := modzip.CreateFromDir(proxyContextWriter{ctx, &zipBuf}, mv, dir); err != nil {
+	output := &proxyLimitWriter{writer: proxyContextWriter{ctx, file}, remaining: 500 << 20}
+	if err := modzip.CreateFromDir(output, mv, dir); err != nil {
 		if ctx.Err() != nil {
 			return nil, &proxyBuildError{class: "private_backend_unavailable", status: http.StatusServiceUnavailable}
 		}
 		return nil, &proxyBuildError{class: "zip_creation_error", status: http.StatusInternalServerError}
 	}
 
-	return zipBuf.Bytes(), nil
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	keep = true
+	return zip, nil
 }
 
 // isVendorPath reports whether name is inside a vendor/ directory.

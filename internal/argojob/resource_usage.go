@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"strings"
@@ -152,6 +153,9 @@ func (c *Controller) sampleResourceUsageWithState(ctx context.Context, wf *wfv1.
 	pods, err := c.kube.CoreV1().Pods(wf.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "workflows.argoproj.io/workflow=" + wf.Name, Limit: 2048})
 	if err != nil {
 		return err
+	}
+	if pods.Continue != "" || len(pods.Items) > 2048 {
+		return fmt.Errorf("resource sampler pod inventory truncated at 2048 entries")
 	}
 	byName := make(map[string]int, min(len(pods.Items), 2048))
 	for i := range pods.Items[:min(len(pods.Items), 2048)] {

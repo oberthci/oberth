@@ -221,6 +221,7 @@ spec:
             {{- end }}
             - {{ printf "--log-retention=%s" ($logRetention.maxAge | default "0s") | quote }}
             - {{ printf "--artifact-retention=%s" ($artifactRetention.maxAge | default "0s") | quote }}
+            - --run-log-limit-bytes={{ int64 ($logRetention.limitBytes | default 67108864) }}
             - --logs-budget-bytes={{ int64 ($logRetention.budgetBytes | default 0) }}
             - --artifacts-limit-bytes={{ $artifactLimit }}
             - --artifacts-budget-bytes={{ $artifactBudget }}

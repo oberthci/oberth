@@ -133,6 +133,7 @@ type serveOptions struct {
 	logRetention            time.Duration
 	artifactRetention       time.Duration
 	logsBudgetBytes         int64
+	runLogLimitBytes        int64
 	retentionInterval       time.Duration
 	retentionKeepNewest     int
 	maxConcurrent           int
@@ -262,6 +263,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.Int64Var(&options.artifactsBudgetBytes, "artifacts-budget-bytes", defaultArtifactsBudgetBytes, "total artifact storage before the oldest runs are evicted")
 	flags.DurationVar(&options.logRetention, "log-retention", 0, "maximum age of terminal run logs (0 disables age retention)")
 	flags.DurationVar(&options.artifactRetention, "artifact-retention", 0, "maximum age of terminal run artifacts (0 disables age retention)")
+	flags.Int64Var(&options.runLogLimitBytes, "run-log-limit-bytes", runlog.DefaultRunLimitBytes, "maximum retained log bytes per run")
 	flags.Int64Var(&options.logsBudgetBytes, "logs-budget-bytes", 0, "total retained log budget (0 disables size retention)")
 	flags.DurationVar(&options.retentionInterval, "retention-sweep-interval", 10*time.Minute, "interval between protected evidence retention sweeps")
 	flags.IntVar(&options.retentionKeepNewest, "retention-keep-newest", 1, "terminal runs retained per repository/ref during automatic sweeps")
@@ -402,7 +404,7 @@ func validateServeOptions(options serveOptions) error {
 	if math.IsNaN(options.kubernetesQPS) || math.IsInf(options.kubernetesQPS, 0) || options.kubernetesQPS <= 0 || options.kubernetesQPS > math.MaxFloat32 || options.kubernetesBurst <= 0 {
 		return errors.New("serve: Kubernetes client QPS must be finite and positive, and burst must be positive")
 	}
-	if options.logRetention < 0 || options.artifactRetention < 0 || options.logsBudgetBytes < 0 || options.artifactsBudgetBytes < 0 || options.artifactsLimitBytes <= 0 || options.retentionInterval <= 0 || options.retentionKeepNewest < 0 {
+	if options.logRetention < 0 || options.artifactRetention < 0 || options.logsBudgetBytes < 0 || options.runLogLimitBytes <= 0 || options.artifactsBudgetBytes < 0 || options.artifactsLimitBytes <= 0 || options.retentionInterval <= 0 || options.retentionKeepNewest < 0 {
 		return errors.New("serve: retention ages, budgets and keep count must be nonnegative; sweep interval and artifact collection limit must be positive")
 	}
 	root := filepath.Clean(options.dataRoot)
@@ -838,6 +840,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		Store: database, Git: git, Logs: logs, Jobs: argoJobs, ReleaseJobs: argoJobs, Auditor: database,
 		TrustedPreflight: trusted, Signals: signals, WorkspaceRoot: filepath.Join(options.dataRoot, "work"), MaxConcurrent: options.maxConcurrent,
 		MaxConcurrentFile:       options.maxConcurrentFile,
+		MaxRunLogBytes:          options.runLogLimitBytes,
 		MutationGate:            anchors.AllowMutation,
 		AdmissionDiskFloorBytes: options.admissionDiskFloorBytes,
 		AdmissionPressure:       options.admissionPressure,

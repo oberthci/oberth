@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/oberthci/oberth/internal/boundedio"
 )
 
 // ReceiveHookInvocation dispatches the two Git-owned hook symlinks to this
@@ -61,7 +63,9 @@ func newNativeHookCache() *Cache {
 }
 
 func (c *Cache) nativePreReceive(ctx context.Context, input io.Reader) error {
-	var output boundedGitInventory
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	output := boundedio.Buffer{Limit: 32 << 20, OnOverflow: cancel}
 	if err := c.run(ctx, commandSpec{args: []string{"for-each-ref", fmt.Sprintf("--count=%d", maximumPublicRefs+maximumReceiveRefUpdates+1), "--format=%(objectname) %(refname)", "refs/heads/", "refs/tags/"}, stdout: &output}); err != nil {
 		return errors.New("cannot inspect current public refs")
 	}

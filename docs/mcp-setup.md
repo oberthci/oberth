@@ -306,6 +306,7 @@ its policies and budgets are configured with the chart's `retention` values.
 | `retention.interval` | `10m` | `--retention-sweep-interval`: positive interval between sweeps, independent of artifact collection |
 | `retention.keepNewestPerRef` | `1` | `--retention-keep-newest`: newest terminal runs kept per repository/ref; `0` disables this extra protection |
 | `retention.logs.maxAge` | `0s` | `--log-retention`: age since run completion; `0s` disables age retention |
+| `retention.logs.limitBytes` | `67108864` | `--run-log-limit-bytes`: maximum retained bytes per run; exceeding it fails the run |
 | `retention.logs.budgetBytes` | `0` | `--logs-budget-bytes`: total log budget; `0` disables size retention |
 | `retention.artifacts.maxAge` | `0s` | `--artifact-retention`: age since run completion; `0s` disables age retention |
 | `retention.artifacts.limitBytes` | `268435456` (256 MiB) | `--artifacts-limit-bytes`: maximum collected artifact bytes per run |

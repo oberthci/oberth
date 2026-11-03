@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/oberthci/oberth/internal/boundedio"
 )
 
 const maxCapturedOutput = 64 << 10
@@ -395,10 +397,16 @@ func defaultTimeout(value time.Duration) time.Duration {
 // Unlike listRefs, this uses a direct buffer (not the 64 KB tail-buffer
 // capture path) so it can handle several thousand refs without truncation.
 func (c *Cache) listRefsAtMost(ctx context.Context, path string, maximum int, prefixes ...string) (map[string]string, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	countArg := fmt.Sprintf("--count=%d", maximum+1)
 	args := append([]string{"for-each-ref", countArg, "--format=%(refname) %(objectname)"}, prefixes...)
-	var buf bytes.Buffer
-	if err := c.run(ctx, commandSpec{dir: path, args: args, stdout: &buf, stderr: &buf}); err != nil {
+	buf := &boundedio.Buffer{Limit: maxRefsOutput, OnOverflow: cancel}
+	err := c.run(ctx, commandSpec{dir: path, args: args, stdout: buf, stderr: buf})
+	if buf.Err() != nil {
+		return nil, fmt.Errorf("ref output exceeds %d bytes; too many refs", maxRefsOutput)
+	}
+	if err != nil {
 		return nil, err
 	}
 	refs := make(map[string]string)

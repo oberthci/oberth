@@ -6,7 +6,7 @@ package gitcache
 // read the schedule feature depends on. Only the read primitive is taken;
 // the fragment-resolution feature itself (TagSHA, fragment.go) is not
 // integrated yet. When PR #13 lands, its copy of ReadBlob, validateBlobPath,
-// headBuffer, and errBlobTooLarge duplicates this file and one side must be
+// errBlobTooLarge duplicates this file and one side must be
 // dropped.
 
 import (
@@ -14,6 +14,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/oberthci/oberth/internal/boundedio"
 )
 
 var errBlobTooLarge = errors.New("blob exceeds the caller's limit")
@@ -41,21 +43,21 @@ func (c *Cache) ReadBlob(ctx context.Context, input, sha, file string, limit int
 		return nil, fmt.Errorf("repository %s is not cached", repo)
 	}
 
-	sink := &headBuffer{max: limit}
+	sink := &boundedio.Buffer{Limit: limit, LimitError: errBlobTooLarge}
 	if err := c.run(ctx, commandSpec{
 		dir:    path,
 		args:   []string{"cat-file", "blob", sha + ":" + file},
 		stdout: sink,
 	}); err != nil {
-		if errors.Is(sink.err, errBlobTooLarge) {
+		if errors.Is(sink.Err(), errBlobTooLarge) {
 			return nil, fmt.Errorf("%s in %s at %s exceeds the %d byte limit", file, repo, sha, limit)
 		}
 		return nil, fmt.Errorf("read %s in %s at %s: %w", file, repo, sha, err)
 	}
-	if sink.err != nil {
-		return nil, fmt.Errorf("read %s in %s at %s: %w", file, repo, sha, sink.err)
+	if sink.Err() != nil {
+		return nil, fmt.Errorf("read %s in %s at %s: %w", file, repo, sha, sink.Err())
 	}
-	return sink.data, nil
+	return sink.Bytes(), nil
 }
 
 func validateBlobPath(file string) error {
@@ -80,22 +82,4 @@ func validateBlobPath(file string) error {
 		}
 	}
 	return nil
-}
-
-type headBuffer struct {
-	data []byte
-	max  int
-	err  error
-}
-
-func (b *headBuffer) Write(value []byte) (int, error) {
-	if b.err != nil {
-		return 0, b.err
-	}
-	if len(b.data)+len(value) > b.max {
-		b.err = errBlobTooLarge
-		return 0, b.err
-	}
-	b.data = append(b.data, value...)
-	return len(value), nil
 }

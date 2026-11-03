@@ -15,6 +15,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/auditanchor"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/secretstore"
 	"github.com/oberthci/oberth/internal/store"
 )
@@ -442,6 +443,7 @@ func minimalValidServeOptions() serveOptions {
 		kubernetesQPS:           50,
 		kubernetesBurst:         100,
 		retentionInterval:       10 * time.Minute,
+		runLogLimitBytes:        runlog.DefaultRunLimitBytes,
 		artifactsLimitBytes:     defaultArtifactsLimitBytes,
 		dataRoot:                "/data",
 		database:                "/data/oberth.sqlite",

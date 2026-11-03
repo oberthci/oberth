@@ -76,6 +76,7 @@ func buildArgoEngine(
 	}
 	config := argojob.Config{
 		ReleaseWIF:                 wifConfig,
+		MaxRunLogBytes:             options.runLogLimitBytes,
 		ReleaseTagRoutes:           routes,
 		NonrootProfile:             options.argoControllerProfile,
 		ExecutorScratchSizeLimit:   options.argoExecutorScratchSizeLimit,
@@ -250,6 +251,7 @@ func validateArgoServeOptions(options serveOptions) error {
 	}
 	return argojob.Config{
 		ReleaseWIF:                 wifConfig,
+		MaxRunLogBytes:             options.runLogLimitBytes,
 		ReleaseTagRoutes:           routes,
 		NonrootProfile:             options.argoControllerProfile,
 		ExecutorScratchSizeLimit:   options.argoExecutorScratchSizeLimit,

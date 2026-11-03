@@ -18,6 +18,9 @@ import (
 	"github.com/oberthci/oberth/internal/runprogress"
 )
 
+// DefaultRunLimitBytes bounds retained output per run across execution engines.
+const DefaultRunLimitBytes int64 = 64 << 20
+
 const (
 	maxMarkerBytes   = 64 << 10
 	maxReadBytes     = 4 << 20

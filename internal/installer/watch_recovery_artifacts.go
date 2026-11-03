@@ -28,6 +28,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
+
+	"github.com/oberthci/oberth/internal/boundedio"
 )
 
 // Same public trust pin as .oberth/pins/release-cosign.pub. No caller key.
@@ -393,8 +395,8 @@ func watchRecoveryKubeconfig(c *rest.Config) ([]byte, error) {
 func runBoundedRecoveryHelm(ctx context.Context, binary string, args []string) ([]byte, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	stdout := &watchPreviewBuffer{limit: 8 << 20, cancel: cancel}
-	stderr := &watchPreviewBuffer{limit: 64 << 10, cancel: cancel}
+	stdout := &boundedio.Buffer{Limit: 8 << 20, OnOverflow: cancel}
+	stderr := &boundedio.Buffer{Limit: 64 << 10, OnOverflow: cancel}
 	defer func() { clear(stderr.Bytes()) }()
 	cmd := exec.CommandContext(ctx, binary, args...) // #nosec G204 -- exact hash-bound public binary and installer-built argv; no shell.
 	// Explicit flags and the frozen kubeconfig must not be overridden by

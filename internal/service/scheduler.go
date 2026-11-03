@@ -157,7 +157,7 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 		return nil, err
 	}
 	if config.MaxRunLogBytes <= 0 {
-		config.MaxRunLogBytes = 64 << 20
+		config.MaxRunLogBytes = runlog.DefaultRunLimitBytes
 	}
 	if strings.TrimSpace(config.WorkspaceRoot) == "" {
 		config.WorkspaceRoot = "/data/work"

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/oberthci/oberth/internal/boundedio"
 )
 
 // ReadOptionalBlob distinguishes an absent path from unreadable Git state and
@@ -97,14 +99,14 @@ func validatePolicyPath(file string, limit int) error {
 
 func (c *Cache) readOptionalBlobLocked(ctx context.Context, path, sha, file string, limit int) ([]byte, bool, error) {
 	// Literal pathspec prevents a policy filename from selecting multiple paths.
-	entry := &headBuffer{max: 4096}
+	entry := &boundedio.Buffer{Limit: 4096, LimitError: errBlobTooLarge}
 	if err := c.run(ctx, commandSpec{dir: path, args: []string{"ls-tree", "-z", sha, "--", ":(literal)" + file}, stdout: entry}); err != nil {
 		return nil, false, fmt.Errorf("inspect required policy tree: %w", err)
 	}
-	if len(entry.data) == 0 {
+	if len(entry.Bytes()) == 0 {
 		return nil, false, nil
 	}
-	records := bytes.Split(entry.data, []byte{0})
+	records := bytes.Split(entry.Bytes(), []byte{0})
 	if len(records) != 2 || len(records[1]) != 0 {
 		return nil, false, errors.New("policy path did not resolve to one tree entry")
 	}
@@ -113,9 +115,9 @@ func (c *Cache) readOptionalBlobLocked(ctx context.Context, path, sha, file stri
 	if !ok || name != file || len(fields) != 3 || (fields[0] != "100644" && fields[0] != "100755") || fields[1] != "blob" || ValidateSHA(fields[2]) != nil {
 		return nil, false, errors.New("policy must be a regular Git blob")
 	}
-	body := &headBuffer{max: limit}
+	body := &boundedio.Buffer{Limit: limit, LimitError: errBlobTooLarge}
 	if err := c.run(ctx, commandSpec{dir: path, args: []string{"cat-file", "blob", fields[2]}, stdout: body}); err != nil {
-		return nil, false, fmt.Errorf("read required policy: %w", errors.Join(err, body.err))
+		return nil, false, fmt.Errorf("read required policy: %w", errors.Join(err, body.Err()))
 	}
-	return body.data, true, body.err
+	return body.Bytes(), true, body.Err()
 }

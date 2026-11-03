@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/oberthci/oberth/internal/boundedio"
 )
 
 const upstreamRefPrefix = "refs/oberth/upstream/"
@@ -1045,13 +1047,16 @@ func (c *Cache) cleanReplacementRefsLocked(ctx context.Context, path string) err
 }
 
 func (c *Cache) listRefs(ctx context.Context, path string, prefixes ...string) (map[string]string, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	args := append([]string{"for-each-ref", "--format=%(refname) %(objectname)"}, prefixes...)
-	var buf bytes.Buffer
-	if err := c.run(ctx, commandSpec{dir: path, args: args, stdout: &buf, stderr: &buf}); err != nil {
-		return nil, err
+	buf := &boundedio.Buffer{Limit: maxRefsOutput, OnOverflow: cancel}
+	err := c.run(ctx, commandSpec{dir: path, args: args, stdout: buf, stderr: buf})
+	if buf.Err() != nil {
+		return nil, fmt.Errorf("ref output exceeds %d bytes; too many refs", maxRefsOutput)
 	}
-	if buf.Len() > maxRefsOutput {
-		return nil, fmt.Errorf("ref output exceeds %d bytes (%d bytes); too many refs", maxRefsOutput, buf.Len())
+	if err != nil {
+		return nil, err
 	}
 	refs := make(map[string]string)
 	for _, line := range strings.Split(strings.TrimSpace(buf.String()), "\n") {

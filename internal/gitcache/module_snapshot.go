@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/oberthci/oberth/internal/boundedio"
 )
 
 // All repository operations join the same fair queue. Context-aware readers
@@ -78,11 +80,11 @@ func (c *Cache) classifyModuleReadFailure(ctx context.Context, path, ref string,
 		return cause
 	}
 	query := ref + "^{commit}"
-	output := &headBuffer{max: 256}
+	output := &boundedio.Buffer{Limit: 256, LimitError: errBlobTooLarge}
 	if err := c.run(ctx, commandSpec{dir: path, args: []string{"cat-file", "--batch-check=%(objectname) %(objecttype)"}, stdin: strings.NewReader(query + "\n"), stdout: output}); err != nil {
 		return cause
 	}
-	if strings.TrimSpace(string(output.data)) == query+" missing" {
+	if strings.TrimSpace(string(output.Bytes())) == query+" missing" {
 		return fmt.Errorf("%w: %w", ErrModuleSourceMissing, cause)
 	}
 	return cause

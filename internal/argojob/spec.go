@@ -30,6 +30,7 @@ import (
 	"github.com/oberthci/oberth/internal/containerimage"
 	"github.com/oberthci/oberth/internal/goproxy"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
@@ -286,7 +287,7 @@ func (config *Config) applyDefaults() {
 		config.SourceSeedImage = defaultSourceSeedImage
 	}
 	if config.MaxRunLogBytes <= 0 {
-		config.MaxRunLogBytes = 64 << 20 // 64 MiB, matching the Go engine's default
+		config.MaxRunLogBytes = runlog.DefaultRunLimitBytes
 	}
 }
 

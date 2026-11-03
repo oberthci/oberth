@@ -53,7 +53,7 @@ keeps only a minimal status for `kubectl describe`, with the legacy step-array
 message still decoded from runs of older SDK versions. Byte ranges for every
 `[burn/step]` section let one named-step MCP read return exactly that step
 after Kubernetes reaps the pod. A run fails if retained output exceeds the
-fixed 64 MiB ceiling.
+configured per-run ceiling (`--run-log-limit-bytes`, 64 MiB by default).
 
 The Argo controller starts following pod nodes as soon as they are known,
 including Pending nodes whose containers can start before Argo publishes

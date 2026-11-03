@@ -792,21 +792,21 @@ if grep -Fq -- '--trusted-tests-kvm-group=' "$manifest"; then exit 1; fi
 
 # Retention defaults preserve log retention and the existing artifact budget.
 render >"$manifest"
-for flag in --log-retention=0s --artifact-retention=0s --logs-budget-bytes=0 \
+for flag in --log-retention=0s --artifact-retention=0s --logs-budget-bytes=0 --run-log-limit-bytes=67108864 \
   --artifacts-budget-bytes=4294967296 --artifacts-limit-bytes=268435456 \
   --retention-sweep-interval=10m --retention-keep-newest=1; do
   grep -Fq -- "$flag" "$manifest"
 done
-render --set retention.logs.maxAge=720h --set retention.logs.budgetBytes=123456 \
+render --set retention.logs.maxAge=720h --set retention.logs.budgetBytes=123456 --set retention.logs.limitBytes=1234 \
   --set retention.artifacts.maxAge=168h --set retention.artifacts.budgetBytes=0 \
   --set retention.artifacts.limitBytes=654321 --set retention.interval=5m \
   --set retention.keepNewestPerRef=0 >"$manifest"
-for flag in --log-retention=720h --artifact-retention=168h --logs-budget-bytes=123456 \
+for flag in --log-retention=720h --artifact-retention=168h --logs-budget-bytes=123456 --run-log-limit-bytes=1234 \
   --artifacts-budget-bytes=0 --artifacts-limit-bytes=654321 \
   --retention-sweep-interval=5m --retention-keep-newest=0; do
   grep -Fq -- "$flag" "$manifest"
 done
-for value in retention.logs.budgetBytes=-1 retention.artifacts.budgetBytes=-1 \
+for value in retention.logs.limitBytes=0 retention.logs.limitBytes=-1 retention.logs.budgetBytes=-1 retention.artifacts.budgetBytes=-1 \
   retention.artifacts.limitBytes=-1 retention.keepNewestPerRef=-1; do
   if render --set "$value" >/dev/null 2>&1; then
     echo "chart accepted negative retention setting: $value" >&2
@@ -821,7 +821,7 @@ chmod -R u+w -- "$old_retention_chart"
 awk '/^retention:/ { skip=1; next } skip && /^[^ #]/ { skip=0 } !skip { print }' \
   "$chart/values.yaml" >"$old_retention_chart/values.yaml"
 helm template oberth "$old_retention_chart" --set "image.ref=$server_image" >"$manifest"
-for flag in --log-retention=0s --artifact-retention=0s --logs-budget-bytes=0 \
+for flag in --log-retention=0s --artifact-retention=0s --logs-budget-bytes=0 --run-log-limit-bytes=67108864 \
   --artifacts-budget-bytes=4294967296 --artifacts-limit-bytes=268435456 \
   --retention-sweep-interval=10m --retention-keep-newest=1; do
   grep -Fq -- "$flag" "$manifest"

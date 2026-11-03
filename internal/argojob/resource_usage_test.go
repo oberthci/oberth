@@ -13,7 +13,11 @@ import (
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/resourcesampler"
@@ -42,6 +46,22 @@ func (r *resourceRecorder) RecordStepResourceUsage(_ context.Context, values []m
 type resourceSource struct {
 	calls int
 	fail  bool
+}
+
+func TestResourceSamplerRejectsTruncatedPodInventory(t *testing.T) {
+	wf, _, pod, _ := diagnosticFixture()
+	kube := fake.NewClientset()
+	kube.PrependReactor("list", "pods", func(ktesting.Action) (bool, runtime.Object, error) {
+		return true, &corev1.PodList{ListMeta: metav1.ListMeta{Continue: "more-pods"}, Items: []corev1.Pod{*pod}}, nil
+	})
+	recorder, source := &resourceRecorder{}, &resourceSource{}
+	c := &Controller{kube: kube, config: Config{Namespace: wf.Namespace}, resourceSource: source, resourceRecorder: recorder}
+	if err := c.sampleResourceUsage(t.Context(), wf, wf.Annotations[runIDAnnotation]); err == nil || !strings.Contains(err.Error(), "truncated") {
+		t.Fatalf("truncated inventory silently sampled: %v", err)
+	}
+	if source.calls != 0 || len(recorder.values) != 0 {
+		t.Fatal("incomplete pod inventory produced measurements")
+	}
 }
 
 func (*resourceSource) Interval() time.Duration { return time.Second }

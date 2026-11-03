@@ -62,6 +62,7 @@ retention:
   interval: "10m"
   keepNewestPerRef: 1
   logs:
+    limitBytes: 67108864
     maxAge: "0s"
     budgetBytes: 0
   artifacts:

@@ -22,6 +22,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	sigsyaml "sigs.k8s.io/yaml"
+
+	"github.com/oberthci/oberth/internal/boundedio"
 )
 
 const watchAdoptionSchema = "oberth.watch-adoption/v1"
@@ -108,29 +110,13 @@ func isWatchPreview(args []string) bool {
 	return flags["upgrade"] && flags["--dry-run=server"] && flags["--no-hooks"] && flags["--take-ownership"] && flags["--output=json"]
 }
 
-type watchPreviewBuffer struct {
-	buffer bytes.Buffer
-	limit  int
-	cancel context.CancelFunc
-}
-
-func (b *watchPreviewBuffer) Write(p []byte) (int, error) {
-	if len(p) > b.limit-b.buffer.Len() {
-		b.cancel()
-		return 0, errors.New("watch preview output exceeds bound")
-	}
-	return b.buffer.Write(p)
-}
-
-func (b *watchPreviewBuffer) Bytes() []byte { return b.buffer.Bytes() }
-
 // The mixed Helm release envelope stays bounded in process memory. Neither
 // errors nor output expose its values, manifests, or stderr to the caller.
 func runWatchPreview(ctx context.Context, args []string) ([]byte, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	stdout := &watchPreviewBuffer{limit: 8 << 20, cancel: cancel}
-	stderr := &watchPreviewBuffer{limit: 64 << 10, cancel: cancel}
+	stdout := &boundedio.Buffer{Limit: 8 << 20, OnOverflow: cancel}
+	stderr := &boundedio.Buffer{Limit: 64 << 10, OnOverflow: cancel}
 	defer func() { clear(stderr.Bytes()) }()
 	cmd := exec.CommandContext(ctx, "helm", args...) // #nosec G204 -- fixed executable and installer-constructed preview arguments.
 	cmd.Env = installerChildEnvironment()
