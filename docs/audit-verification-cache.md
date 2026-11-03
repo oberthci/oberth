@@ -8,6 +8,41 @@ latest checkpoint and its chain reference, the manager's prefix pin, external
 receipt verification when configured, and the final writer fence still run
 on every gate.
 
+## Deadlines under IO pressure
+
+An audit mutation gate has a total two-minute budget, including its wait for
+the serialized refresh lock, and a 45-second deadline for each fresh attempt.
+Configure these with `--audit-gate-timeout` and `--audit-gate-verify-timeout`,
+or the Helm values `auditAnchor.gateTimeout` and `auditAnchor.verifyTimeout`.
+Both must be positive. Caller cancellation and earlier caller deadlines still
+win; a total budget shorter than an attempt can end the gate before a retry.
+
+The prior 30-second total deadline was observed expiring on a loaded disk,
+with the same push succeeding seconds later. Those observations are censored
+at 30 seconds, not measurements of successful verification latency. The new
+45-second attempt default gives 1.5 times that observed lower bound; the total
+budget leaves room for two full attempts and a bounded final attempt. These
+defaults need confirmation against successful verification timings on the
+serving host under representative IO pressure.
+
+Deadline-only failures retry inside the gate, with exponential backoff from
+10ms to at most 250ms and at most three timed-out attempts. Ordinary verified
+append contention retains its existing retries within the total budget.
+Every attempt rebuilds local snapshots and external history; no timed-out
+verification grants permission. A corruption or changed-proof error is refused
+immediately, including an error joined with a timeout or append-contention
+signal. Cancellation is not retried. Exhausted deadlines return a distinct
+temporary-unavailability error, and Git push errors explicitly tell the client
+to retry. Retrying never bypasses verification.
+
+The server logs `audit_mutation_gate` records for timeouts, successful retries
+and successful attempts taking at least half the attempt budget. Each records
+the attempt number, elapsed verification time, attempt timeout and total budget.
+Use successful slow attempts to tune deadlines with headroom; timeout samples
+remain lower bounds. Lock waiting is part of the total budget but is not
+included in the per-attempt elapsed measurement. Shorter HTTP/client budgets
+may finish first and are not extended by these settings.
+
 ## Trust boundary
 
 The cache contains the last successfully fenced head ID and SHA-256, the

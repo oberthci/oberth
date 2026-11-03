@@ -306,6 +306,8 @@ spec:
             {{- end }}
             - --audit-anchor-interval={{ .Values.auditAnchor.interval }}
             - --audit-anchor-max-age={{ .Values.auditAnchor.maxAge }}
+            - --audit-gate-timeout={{ .Values.auditAnchor.gateTimeout | default "2m" }}
+            - --audit-gate-verify-timeout={{ .Values.auditAnchor.verifyTimeout | default "45s" }}
             {{- if .Values.auditAnchor.rekorCA }}
             - --audit-rekor-ca=/etc/oberth/audit-rekor-ca/ca.crt
             {{- end }}

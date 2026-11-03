@@ -276,6 +276,12 @@
         "maxAge": {
           "$ref": "#/definitions/duration"
         },
+        "gateTimeout": {
+          "$ref": "#/definitions/duration"
+        },
+        "verifyTimeout": {
+          "$ref": "#/definitions/duration"
+        },
         "rootsSecret": {
           "$ref": "#/definitions/optionalKubernetesName"
         },

@@ -165,6 +165,10 @@ auditAnchor:
   # with external anchoring enabled it is the checkpoint publication interval.
   interval: 10m
   maxAge: 30m
+  # Verification timeouts are transient refusals, never evidence of corruption.
+  # The total budget includes queueing, fresh attempts and bounded backoff.
+  gateTimeout: 2m
+  verifyTimeout: 45s
   rootsSecret: ""
   rootsKey: roots.pem
   # Optional PEM bundle pinning the Rekor HTTPS TLS trust anchors. Public CA

@@ -224,6 +224,8 @@ type serveOptions struct {
 	auditTSACA              string
 	auditAnchorInterval     time.Duration
 	auditAnchorMaxAge       time.Duration
+	auditGateTimeout        time.Duration
+	auditGateVerifyTimeout  time.Duration
 	acceptWitnessChainReset string
 	acceptWitnessGenesis    string
 }
@@ -361,6 +363,8 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.auditTSACA, "audit-tsa-ca", "", "optional PEM file pinning the TSA HTTPS TLS trust anchors")
 	flags.DurationVar(&options.auditAnchorInterval, "audit-anchor-interval", 10*time.Minute, "external audit checkpoint interval")
 	flags.DurationVar(&options.auditAnchorMaxAge, "audit-anchor-max-age", 30*time.Minute, "maximum checkpoint age allowed by readiness")
+	flags.DurationVar(&options.auditGateTimeout, "audit-gate-timeout", auditanchor.DefaultGateTimeout, "total audit mutation gate budget, including queueing and retries")
+	flags.DurationVar(&options.auditGateVerifyTimeout, "audit-gate-verify-timeout", auditanchor.DefaultGateVerifyTimeout, "deadline for each fresh audit mutation verification attempt")
 	flags.StringVar(&options.acceptWitnessChainReset, "accept-witness-chain-reset", "",
 		"one-shot acknowledgment: exact Rekor UUID of the latest published witness before a fresh genesis permanently abandons that chain")
 	flags.StringVar(&options.acceptWitnessGenesis, "accept-witness-genesis", "",
@@ -454,6 +458,9 @@ func validateServeOptions(options serveOptions) error {
 	}
 	if options.auditAnchorInterval <= 0 || options.auditAnchorMaxAge < options.auditAnchorInterval {
 		return errors.New("serve: audit anchor interval must be positive and max age must be at least the interval")
+	}
+	if options.auditGateTimeout <= 0 || options.auditGateVerifyTimeout <= 0 {
+		return errors.New("serve: audit gate and verification timeouts must be positive")
 	}
 	if options.auditTSAURL == "" && (options.auditTSARoots != "" || options.auditTSACA != "") {
 		return errors.New("serve: audit TSA trust flags require --audit-tsa-url")
@@ -667,6 +674,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		config := auditanchor.ManagerConfig{
 			Store: anchorStore, Continuity: continuity,
 			Interval: options.auditAnchorInterval, MaxAge: options.auditAnchorMaxAge, Logger: logger,
+			GateTimeout: options.auditGateTimeout, GateVerifyTimeout: options.auditGateVerifyTimeout,
 		}
 		if tsaClient != nil {
 			config.Authority = tsaClient

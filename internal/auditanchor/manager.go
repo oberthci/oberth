@@ -52,7 +52,10 @@ type managerLogger interface {
 	Printf(string, ...any)
 }
 
-const defaultGateTimeout = 30 * time.Second
+const (
+	DefaultGateTimeout       = 2 * time.Minute
+	DefaultGateVerifyTimeout = 45 * time.Second
+)
 
 var ErrWitnessUnavailable = errors.New("audit anchor: external witness unavailable")
 
@@ -64,28 +67,31 @@ var ErrWitnessUnavailable = errors.New("audit anchor: external witness unavailab
 // trusted local appends. No external service is contacted in local-only mode.
 // A Witness requires rollback-external Continuity.
 type ManagerConfig struct {
-	// GateTimeout bounds a mutation gate including its wait for refresh. Zero selects 30 seconds.
+	// GateTimeout bounds a mutation gate including its wait for refresh. Zero selects two minutes.
 	GateTimeout time.Duration
-	Store       AnchorStore
-	Authority   Authority
-	Witness     Witness
-	Continuity  Continuity
-	Interval    time.Duration
-	MaxAge      time.Duration
-	Now         func() time.Time
-	Logger      managerLogger
+	// GateVerifyTimeout bounds each fresh verification attempt. Zero selects 45 seconds.
+	GateVerifyTimeout time.Duration
+	Store             AnchorStore
+	Authority         Authority
+	Witness           Witness
+	Continuity        Continuity
+	Interval          time.Duration
+	MaxAge            time.Duration
+	Now               func() time.Time
+	Logger            managerLogger
 }
 
 type Manager struct {
-	store       AnchorStore
-	authority   Authority
-	witness     Witness
-	continuity  Continuity
-	interval    time.Duration
-	maxAge      time.Duration
-	gateTimeout time.Duration
-	now         func() time.Time
-	logger      managerLogger
+	store             AnchorStore
+	authority         Authority
+	witness           Witness
+	continuity        Continuity
+	interval          time.Duration
+	maxAge            time.Duration
+	gateTimeout       time.Duration
+	gateVerifyTimeout time.Duration
+	now               func() time.Time
+	logger            managerLogger
 
 	refreshMu              refreshMutex
 	mu                     sync.RWMutex
@@ -111,14 +117,20 @@ func NewManager(config ManagerConfig) (*Manager, error) {
 		return nil, errors.New("audit anchor: gate timeout must not be negative")
 	}
 	if config.GateTimeout == 0 {
-		config.GateTimeout = defaultGateTimeout
+		config.GateTimeout = DefaultGateTimeout
+	}
+	if config.GateVerifyTimeout < 0 {
+		return nil, errors.New("audit anchor: gate verification timeout must not be negative")
+	}
+	if config.GateVerifyTimeout == 0 {
+		config.GateVerifyTimeout = DefaultGateVerifyTimeout
 	}
 	if config.Now == nil {
 		config.Now = time.Now
 	}
 	return &Manager{
 		store: config.Store, authority: config.Authority, witness: config.Witness, continuity: config.Continuity, interval: config.Interval,
-		maxAge: config.MaxAge, gateTimeout: config.GateTimeout, now: config.Now, logger: config.Logger,
+		maxAge: config.MaxAge, gateTimeout: config.GateTimeout, gateVerifyTimeout: config.GateVerifyTimeout, now: config.Now, logger: config.Logger,
 	}, nil
 }
 
@@ -270,9 +282,14 @@ func (manager *Manager) Ready(ctx context.Context) error {
 // witness there is no rollback-external history to refresh; the gate then
 // verifies the local chain through the Store's process-local incremental cache
 // (and, when configured, the persisted signed checkpoint tip) on every mutation.
-func (manager *Manager) AllowMutation(ctx context.Context) error {
+func (manager *Manager) AllowMutation(ctx context.Context) (result error) {
 	ctx, cancel := context.WithTimeout(ctx, manager.gateTimeout)
 	defer cancel()
+	defer func() {
+		if verificationTimedOut(result) {
+			result = fmt.Errorf("%w: %w", ErrVerificationUnavailable, result)
+		}
+	}()
 	if err := manager.refreshMu.LockContext(ctx); err != nil {
 		return fmt.Errorf("audit anchor: mutation gate refresh wait: %w", err)
 	}
@@ -283,7 +300,7 @@ func (manager *Manager) AllowMutation(ctx context.Context) error {
 	// reconciled again, and this cache is discarded when the gate returns.
 	var reconciled []model.AuditWitness
 	haveReconciled := false
-	reconcile := func(history []model.AuditWitness) error {
+	reconcile := func(ctx context.Context, history []model.AuditWitness) error {
 		same := haveReconciled && len(history) == len(reconciled)
 		if same {
 			for i := range history {
@@ -304,12 +321,38 @@ func (manager *Manager) AllowMutation(ctx context.Context) error {
 	}
 	delay := 10 * time.Millisecond
 	var contention error
-	for {
-		err := manager.allowMutation(ctx, reconcile)
-		if !errors.Is(err, store.ErrAuditVerificationBusy) {
+	timeouts := 0
+	for attempt := 1; ; attempt++ {
+		attemptCtx, cancelAttempt := context.WithTimeout(ctx, manager.gateVerifyTimeout)
+		started := time.Now()
+		err := manager.allowMutation(attemptCtx, func(history []model.AuditWitness) error { return reconcile(attemptCtx, history) })
+		if err == nil {
+			err = attemptCtx.Err()
+		}
+		cancelAttempt()
+		elapsed := time.Since(started)
+		if err == nil {
+			if timeouts > 0 || elapsed >= manager.gateVerifyTimeout/2 {
+				manager.logGateVerification("verified", attempt, elapsed)
+			}
+			return nil
+		}
+		timedOut := verificationTimedOut(err)
+		if timedOut {
+			timeouts++
+			manager.logGateVerification("timeout", attempt, elapsed)
+		}
+		busy := errors.Is(err, store.ErrAuditVerificationBusy) && onlyVerificationTimeouts(err)
+		if !busy && !timedOut {
 			if contention != nil && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
 				return errors.Join(contention, err)
 			}
+			return err
+		}
+		if ctx.Err() != nil {
+			return errors.Join(err, ctx.Err())
+		}
+		if timedOut && timeouts >= 3 {
 			return err
 		}
 		contention = err

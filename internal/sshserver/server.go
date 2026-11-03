@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/oberthci/oberth/internal/auditanchor"
 	"github.com/oberthci/oberth/internal/gitcache"
 )
 
@@ -477,6 +478,9 @@ func (s *Server) runGit(ctx context.Context, actor sessionActor, protocol string
 
 	if command.service == gitcache.ReceivePack {
 		if err := s.mutationGate(ctx); err != nil {
+			if errors.Is(err, auditanchor.ErrVerificationUnavailable) {
+				return fmt.Errorf("audit verification temporarily unavailable; retry the push: %w", err)
+			}
 			return fmt.Errorf("audit integrity is unavailable; push rejected: %w", err)
 		}
 		// Git clients forward the remote side's raw SSH stderr, so these
@@ -494,6 +498,9 @@ func (s *Server) runGit(ctx context.Context, actor sessionActor, protocol string
 		}
 		guardedHandler := UpdateHandlerFunc(func(ctx context.Context, event gitcache.ReceiveEvent) error {
 			if err := s.mutationGate(ctx); err != nil {
+				if errors.Is(err, auditanchor.ErrVerificationUnavailable) {
+					return fmt.Errorf("audit verification temporarily unavailable after pack upload; retry the push: %w", err)
+				}
 				return fmt.Errorf("audit integrity check after pack upload: %w", err)
 			}
 			return handler.HandleReceive(ctx, event)

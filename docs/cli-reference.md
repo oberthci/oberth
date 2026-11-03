@@ -1080,6 +1080,10 @@ Usage of serve:
         external audit checkpoint interval (default 10m0s)
   -audit-anchor-max-age duration
         maximum checkpoint age allowed by readiness (default 30m0s)
+  -audit-gate-timeout duration
+        total audit mutation gate budget, including queueing and retries (default 2m0s)
+  -audit-gate-verify-timeout duration
+        deadline for each fresh audit mutation verification attempt (default 45s)
   -audit-rekor-ca string
         optional PEM file pinning the Rekor HTTPS TLS trust anchors
   -audit-rekor-insecure-http
