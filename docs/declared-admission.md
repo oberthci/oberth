@@ -28,10 +28,20 @@ can override them with `--admission-legacy-resources`, for example
 `'{"L":{"cpu_milli":4000,"memory_bytes":10737418240}}'`, or the chart's
 `admission.legacyResources` map in the same format. Omitted sizes retain defaults.
 Both fields must be positive, with CPU at most 1000000 millis and memory at most
-2^50 bytes; a size whose charge exceeds the host budget is refused before waiting.
+2^50 bytes. Startup rejects a configured charge exceeding the host budget,
+naming its size and CPU or memory dimension. With XL=0, the exclusive XL charge
+is capped at the host budget in each dimension, so it can still run alone on
+smaller hosts. Admission and status report the same capped charge. A shared XL
+(positive XL weight) keeps its full fixed charge. An omitted size whose default
+charge exceeds the budget is refused before waiting, except for exclusive XL.
 Size weights, FIFO/backfill, pressure and run caps still apply independently.
 A legacy whole-budget XL retains its existing exclusion. The warning survives submission and restart
 through immutable timing metadata; `display_reason` keeps its existing meaning.
+
+Fixed charges can lower legacy concurrency on small budgets. On the default
+8 CPU / 16Gi budget, two L runs plus an M have weight 8/8 but reserve 20Gi
+(8Gi + 8Gi + 4Gi), so the M waits. Administrators can lower
+`admission.legacyResources` to reviewed charges or raise the numeric budgets.
 
 `system_status.admission.reservations`, admission blockers and per-run admission
 observations expose `legacy_resources: {cpu_milli, memory_bytes}` for prepared

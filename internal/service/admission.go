@@ -303,7 +303,7 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 		return nil, err
 	}
 	if request.Pods == nil {
-		charge := gate.resources.legacyCharge(size)
+		charge := gate.legacyCharge(size)
 		if charge.CPUMilli > gate.resources.CPUMilli || charge.MemoryBytes > gate.resources.MemoryBytes {
 			gate.mu.Unlock()
 			reservation.cancel()

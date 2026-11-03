@@ -2,6 +2,7 @@ package main
 
 import (
 	"io"
+	"strings"
 	"testing"
 )
 
@@ -66,5 +67,36 @@ func TestServeLegacyResourceCharges(t *testing.T) {
 		if _, err := parseServeOptions([]string{"--argo-namespace=argo", "--admission-legacy-resources=" + value}, io.Discard); err == nil {
 			t.Fatalf("invalid legacy charge accepted: %s", value)
 		}
+	}
+}
+
+func TestServeLegacyResourceChargesExceedBudget(t *testing.T) {
+	for _, tc := range []struct {
+		value, dimension string
+	}{
+		{`{"L":{"cpu_milli":4001,"memory_bytes":8589934592}}`, "CPU"},
+		{`{"L":{"cpu_milli":4000,"memory_bytes":8589934593}}`, "memory"},
+	} {
+		_, err := parseServeOptions([]string{"--argo-namespace=argo", "--admission-cpu-millis=4000", "--admission-memory-bytes=8589934592", "--admission-legacy-resources=" + tc.value}, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), "L") || !strings.Contains(err.Error(), tc.dimension) || !strings.Contains(err.Error(), "budget") {
+			t.Fatalf("startup must name the oversized charge: %v", err)
+		}
+	}
+	for _, dimension := range []struct {
+		cpu, memory, name string
+	}{
+		{"4001", "8589934592", "CPU"},
+		{"4000", "8589934593", "memory"},
+	} {
+		args := []string{"--argo-namespace=argo", "--admission-cpu-millis=4000", "--admission-memory-bytes=8589934592", `--admission-legacy-resources={"XL":{"cpu_milli":` + dimension.cpu + `,"memory_bytes":` + dimension.memory + `}}`}
+		if _, err := parseServeOptions(args, io.Discard); err != nil {
+			t.Fatalf("exclusive XL configuration must be capped: %v", err)
+		}
+		if _, err := parseServeOptions(append(args, "--admission-size-weights=XL=4"), io.Discard); err == nil || !strings.Contains(err.Error(), "XL") || !strings.Contains(err.Error(), dimension.name) {
+			t.Fatalf("shared XL startup must name the oversized charge: %v", err)
+		}
+	}
+	if _, err := parseServeOptions([]string{"--argo-namespace=argo", "--admission-cpu-millis=4000", "--admission-memory-bytes=8589934592"}, io.Discard); err != nil {
+		t.Fatalf("default exclusive XL must allow a small budget: %v", err)
 	}
 }

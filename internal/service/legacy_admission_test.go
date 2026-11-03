@@ -73,6 +73,109 @@ func TestLegacyFixedChargeDoesNotGrowWithBudgetOrWeight(t *testing.T) {
 	}
 }
 
+func TestLegacyExclusiveXLOnSmallBudgets(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		cpu, memory int64
+		configured  bool
+	}{
+		{"8Gi", 8000, 8 << 30, false},
+		{"12Gi", 8000, 12 << 30, false},
+		{"small CPU", 2500, 32 << 30, false},
+		{"both small", 2500, 8 << 30, false},
+		{"configured XL", 2500, 8 << 30, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := newWeightedAdmission(8)
+			g.resources.CPUMilli, g.resources.MemoryBytes = tc.cpu, tc.memory
+			if tc.configured {
+				g.resources.LegacyResources = map[pipeline.Size]model.LegacyResourceCharge{pipeline.XL: {CPUMilli: 6000, MemoryBytes: 16 << 30}}
+			}
+			if err := g.resources.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			release := acquireRequestWithinBudget(t, g.reserve(1), admissionRequest{Size: pipeline.XL})
+			defer release()
+			state := (&Scheduler{admission: g}).AdmissionState()
+			cpu, memory := min(tc.cpu, 6000), min(tc.memory, 16<<30)
+			charge := state.Reservations[0].LegacyResources
+			if state.NumericBudget.CPUUsedMilli != cpu || state.NumericBudget.MemoryUsedBytes != memory || charge == nil || charge.CPUMilli != cpu || charge.MemoryBytes != memory {
+				t.Fatalf("exclusive charge must be bounded and reported consistently: budget=%+v charge=%+v", state.NumericBudget, charge)
+			}
+			beside := priorityWaiter(g, 2, model.PriorityNormal, time.Now(), pipeline.S)
+			defer beside.cancel()
+			if granted(g, beside) {
+				t.Fatal("S admitted beside exclusive XL")
+			}
+			release()
+			if !granted(g, beside) {
+				t.Fatal("S still blocked after XL releases")
+			}
+			beside.release()
+
+			// A positive XL weight does not earn the exclusive clamp.
+			g.weights.XL = 4
+			if release, err := g.reserve(3).acquireRequest(t.Context(), admissionRequest{Size: pipeline.XL}); err == nil || release != nil {
+				t.Fatal("oversized shared XL accepted")
+			}
+		})
+	}
+}
+
+func TestLegacyExclusiveXLRestoredOnSmallBudget(t *testing.T) {
+	g := newWeightedAdmission(8)
+	g.resources.CPUMilli, g.resources.MemoryBytes = 4000, 8<<30
+	r, err := g.adopt(model.Run{ID: "restored-xl", QueueSequence: 1}, pipeline.XL, argoworkflow.VMIDemand{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.retain()
+	r.release()
+	state := (&Scheduler{admission: g}).AdmissionState()
+	charge := state.Reservations[0].LegacyResources
+	if charge == nil || charge.CPUMilli != 4000 || charge.MemoryBytes != 8<<30 || state.NumericBudget.CPUUsedMilli != 4000 || state.NumericBudget.MemoryUsedBytes != 8<<30 {
+		t.Fatalf("restored XL charge exceeds the small budget: %+v, %+v", charge, state.NumericBudget)
+	}
+	beside := priorityWaiter(g, 2, model.PriorityNormal, time.Now(), pipeline.S)
+	defer beside.cancel()
+	if granted(g, beside) {
+		t.Fatal("retained XL lost exclusivity")
+	}
+	r.releaseAfterCleanup()
+	if !granted(g, beside) {
+		t.Fatal("S still blocked after XL cleanup")
+	}
+	beside.release()
+}
+
+func TestLegacyConfiguredChargeBudgetValidation(t *testing.T) {
+	for _, size := range []pipeline.Size{pipeline.S, pipeline.M, pipeline.L, pipeline.XL} {
+		for _, dimension := range []string{"CPU", "memory"} {
+			t.Run(string(size)+"/"+dimension, func(t *testing.T) {
+				c := DefaultDeclaredAdmissionConfig()
+				weights := DefaultSizeWeights
+				weights.XL = 4
+				c.CPUMilli, c.MemoryBytes = 2500, 8<<30
+				charge := model.LegacyResourceCharge{CPUMilli: c.CPUMilli, MemoryBytes: c.MemoryBytes}
+				c.LegacyResources = map[pipeline.Size]model.LegacyResourceCharge{size: charge}
+				if err := c.ValidateForSizeWeights(weights); err != nil {
+					t.Fatalf("exact budget rejected: %v", err)
+				}
+				if dimension == "CPU" {
+					charge.CPUMilli++
+				} else {
+					charge.MemoryBytes++
+				}
+				c.LegacyResources[size] = charge
+				err := c.ValidateForSizeWeights(weights)
+				if err == nil || !strings.Contains(err.Error(), string(size)) || !strings.Contains(err.Error(), dimension) || !strings.Contains(err.Error(), "budget") {
+					t.Fatalf("want size and dimension in budget error, got %v", err)
+				}
+			})
+		}
+	}
+}
+
 func TestLegacyFixedChargeDefaultsConfigurationAndLimits(t *testing.T) {
 	g := newWeightedAdmission(8)
 	g.weights.XL = 4

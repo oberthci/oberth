@@ -391,14 +391,14 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	if err := json.Unmarshal([]byte(legacyResourceCharges), &options.declaredAdmission.LegacyResources); err != nil {
 		return serveOptions{}, fmt.Errorf("parse legacy resource charges: %w", err)
 	}
-	if err := options.declaredAdmission.Validate(); err != nil {
-		return serveOptions{}, err
-	}
 	weights, err := service.ParseSizeWeights(options.admissionSizeWeights)
 	if err != nil {
 		return serveOptions{}, fmt.Errorf("serve: --admission-size-weights: %w", err)
 	}
 	options.sizeWeights = weights
+	if err := options.declaredAdmission.ValidateForSizeWeights(weights); err != nil {
+		return serveOptions{}, err
+	}
 	if options.admissionPressure.Mode == "" {
 		return serveOptions{}, errors.New("serve: --admission-pressure-mode must be observe or enforce")
 	}

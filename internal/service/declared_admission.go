@@ -64,7 +64,24 @@ func (c DeclaredAdmissionConfig) legacyCharge(size pipeline.Size) model.LegacyRe
 	}
 }
 
+// effectiveLegacyCharge bounds an exclusive XL reservation to the host budget.
+// Shared sizes keep their fixed charge, even when an adopted grant no longer fits.
+func (c DeclaredAdmissionConfig) effectiveLegacyCharge(size pipeline.Size, weights SizeWeights) model.LegacyResourceCharge {
+	charge := c.legacyCharge(size)
+	if weights.wholeBudget(size) {
+		charge.CPUMilli = min(charge.CPUMilli, c.CPUMilli)
+		charge.MemoryBytes = min(charge.MemoryBytes, c.MemoryBytes)
+	}
+	return charge
+}
+
 func (c DeclaredAdmissionConfig) Validate() error {
+	return c.ValidateForSizeWeights(DefaultSizeWeights)
+}
+
+// ValidateForSizeWeights checks configured charges against the budget using
+// the same exclusive XL policy as admission. Omitted sizes retain defaults.
+func (c DeclaredAdmissionConfig) ValidateForSizeWeights(weights SizeWeights) error {
 	for size, charge := range c.LegacyResources {
 		if size == "" || !size.Valid() || charge.CPUMilli <= 0 || charge.CPUMilli > 1_000_000 || charge.MemoryBytes <= 0 || charge.MemoryBytes > 1<<50 {
 			return errors.New("legacy admission charges require sizes S, M, L or XL, CPU in 1..1000000 millis and memory in 1..2^50 bytes")
@@ -77,7 +94,23 @@ func (c DeclaredAdmissionConfig) Validate() error {
 	if c.CPUMilli <= 0 || c.CPUMilli > 1_000_000 || c.MemoryBytes <= 0 || c.MemoryBytes > 1<<50 || fixed < 0 || fixed > 1<<50 || percent < 0 || percent > 100 || c.IORuns < 0 || c.IORuns > 64 {
 		return errors.New("declared admission requires positive CPU/memory budgets, memory headroom in 0..2^50 bytes and 0..100 percent and an IO run ceiling in 0..64")
 	}
+	for _, size := range []pipeline.Size{pipeline.S, pipeline.M, pipeline.L, pipeline.XL} {
+		if _, configured := c.LegacyResources[size]; !configured {
+			continue
+		}
+		charge := c.effectiveLegacyCharge(size, weights)
+		if charge.CPUMilli > c.CPUMilli {
+			return fmt.Errorf("legacy admission charge %s CPU %dm exceeds numeric CPU budget %dm", size, charge.CPUMilli, c.CPUMilli)
+		}
+		if charge.MemoryBytes > c.MemoryBytes {
+			return fmt.Errorf("legacy admission charge %s memory %d bytes exceeds numeric memory budget %d bytes", size, charge.MemoryBytes, c.MemoryBytes)
+		}
+	}
 	return nil
+}
+
+func (g *weightedAdmission) legacyCharge(size pipeline.Size) model.LegacyResourceCharge {
+	return g.resources.effectiveLegacyCharge(size, g.weights)
 }
 
 // Hold additional capacity for executor/init helpers without changing any Pod
@@ -113,7 +146,7 @@ func (g *weightedAdmission) numericFitsLocked(candidate *admissionReservation) b
 	cpu, memory := g.resources.CPUMilli, g.resources.MemoryBytes
 	extended := maps.Clone(g.resources.ExtendedResources)
 	charge := func(r *admissionReservation) bool {
-		legacy := g.resources.legacyCharge(r.size)
+		legacy := g.legacyCharge(r.size)
 		d := argoworkflow.PodDemand{CPUMilli: legacy.CPUMilli, MemoryBytes: legacy.MemoryBytes}
 		if g.usesDeclarations(r) {
 			d = g.runCharge(*r.pods)
@@ -152,7 +185,7 @@ func (g *weightedAdmission) numericBudgetLocked() *model.NumericBudget {
 			b.CPUUsedMilli += d.CPUMilli
 			b.MemoryUsedBytes += d.MemoryBytes
 		} else {
-			charge := g.resources.legacyCharge(r.size)
+			charge := g.legacyCharge(r.size)
 			b.CPUUsedMilli += charge.CPUMilli
 			b.MemoryUsedBytes += charge.MemoryBytes
 		}
@@ -244,7 +277,7 @@ func (r *admissionReservation) legacyResources() *model.LegacyResourceCharge {
 	if !r.prepared || r.pods != nil {
 		return nil
 	}
-	charge := r.gate.resources.legacyCharge(r.size)
+	charge := r.gate.legacyCharge(r.size)
 	return &charge
 }
 

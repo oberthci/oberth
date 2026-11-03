@@ -205,7 +205,7 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 	if config.DeclaredAdmission.MemoryBytes == 0 {
 		config.DeclaredAdmission.MemoryBytes = DefaultDeclaredAdmissionConfig().MemoryBytes
 	}
-	if err := config.DeclaredAdmission.Validate(); err != nil {
+	if err := config.DeclaredAdmission.ValidateForSizeWeights(config.SizeWeights); err != nil {
 		return nil, err
 	}
 	scheduler.admission.resources = config.DeclaredAdmission
