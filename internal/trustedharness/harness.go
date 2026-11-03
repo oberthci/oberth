@@ -288,7 +288,8 @@ func run(ctx context.Context, intent vmrunner.KVMIntent, artifactRoot, privateRo
 	defer func() {
 		_ = syscall.Kill(-qemu.Process.Pid, syscall.SIGKILL)
 		if !joined {
-			_ = <-done
+			waitErr := <-done
+			_ = waitErr // Cleanup has already killed the guest; only reaping remains.
 		}
 	}()
 	var results []vmrunner.KVMCaseResult
@@ -296,7 +297,8 @@ func run(ctx context.Context, intent vmrunner.KVMIntent, artifactRoot, privateRo
 		select {
 		case <-ctx.Done():
 			return vmrunner.KVMReport{}, ctx.Err()
-		case _ = <-done:
+		case waitErr := <-done:
+			_ = waitErr // Any exit before the cases finish is rejected below.
 			joined = true
 			return vmrunner.KVMReport{}, errors.New("guest exited before cases completed")
 		default:
