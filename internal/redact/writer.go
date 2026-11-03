@@ -20,7 +20,7 @@ var ErrShortSecret = errors.New("secret values must contain at least 3 bytes aft
 func ValidateSecrets(values [][]byte) error {
 	for _, value := range values {
 		trimmed := bytes.TrimRight(value, "\r\n")
-		if (len(value) > 0 && len(value) < 3) || (len(trimmed) > 0 && len(trimmed) < 3) {
+		if len(trimmed) > 0 && len(trimmed) < 3 {
 			return ErrShortSecret
 		}
 	}

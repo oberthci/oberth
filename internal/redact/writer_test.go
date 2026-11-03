@@ -291,3 +291,19 @@ func TestWriterShortLineFragmentNotRegistered(t *testing.T) {
 		t.Fatalf("short line fragment caused false-positive redaction: %q", got)
 	}
 }
+
+func TestWriterAllowsNewlineOnlyOptionalValues(t *testing.T) {
+	for _, value := range []string{"", "\n", "\r", "\r\n", "\n\n\n"} {
+		var output bytes.Buffer
+		writer := NewWriter(&output, [][]byte{[]byte(value)})
+		if _, err := writer.Write([]byte("optional value")); err != nil {
+			t.Fatalf("newline-only value refused: %v", err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if output.String() != "optional value" {
+			t.Fatalf("output = %q", output.String())
+		}
+	}
+}
