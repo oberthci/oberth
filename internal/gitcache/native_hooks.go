@@ -138,7 +138,7 @@ func (c *Cache) nativeUpdate(ctx context.Context, ref, old, newSHA string) error
 		}
 		if !zeroHookOID(old) && !zeroHookOID(newSHA) {
 			head, err := c.capture(ctx, "", "symbolic-ref", "--quiet", "HEAD")
-			// Failure to identify the protected branch cannot grant permission
+			// Failure to identify the default branch cannot grant permission
 			// to rewrite it. A detached or unreadable HEAD requires repair.
 			if err != nil || !strings.HasPrefix(strings.TrimSpace(head), "refs/heads/") {
 				return errors.New("default branch is unavailable; branch update refused")
