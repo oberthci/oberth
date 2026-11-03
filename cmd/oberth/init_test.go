@@ -210,7 +210,7 @@ func TestInitAllTemplatesUseAllowlistedImages(t *testing.T) {
 		t.Run(string(projType), func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
-			writeDetectedProjectFixture(t, dir, projectType(projType))
+			writeDetectedProjectFixture(t, dir, projType)
 			var output bytes.Buffer
 			if err := executeInit(dir, false, &output); err != nil {
 				t.Fatal(err)
