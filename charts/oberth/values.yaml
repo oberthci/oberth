@@ -80,6 +80,8 @@ promotion:
 # is held until the server's data filesystem has at least this many free bytes.
 # Default 0 = disabled. The proposal from #602/#673 is 160000000000 (160 GB).
 admission:
+  # Warning-only multiplier against Ready, schedulable node allocatable totals.
+  overcommitFactor: 1.0
   # Declarations opt each repository into numeric admission through git.
   # Budgets include declared VM host demand and exclude platform reserve.
   # Zero IO cap retains the run cap.

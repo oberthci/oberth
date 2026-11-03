@@ -111,6 +111,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "overcommitFactor": {"type": "number", "minimum": 1},
         "declaredResources": {
           "type": "object",
           "additionalProperties": false,

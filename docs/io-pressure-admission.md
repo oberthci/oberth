@@ -120,3 +120,25 @@ hysteresis and its own hard-limited queue-head starvation rule; legacy fields
 (including `mode: observe`) do not alter that rule. Existing direct Go callers that configure only the
 legacy fields retain their previous avg60 behavior. Update callers to
 `DefaultAdmissionPressureConfig()` to select the new policy.
+
+## Declared budgets and cluster allocatable
+
+At startup and on unscoped `system_status` reads, Oberth compares the declared
+CPU and memory budgets with the summed allocatable resources of Ready,
+schedulable Kubernetes nodes. `admission_capacity` reports both budgets, both
+totals, the node count, the overcommit factor, and warnings. The node query has a
+three-second deadline. An unavailable query produces an explicit warning;
+it never changes admission or readiness. Scoped status omits cluster capacity.
+The chart grants the server only `list` on nodes for this check.
+
+The warning threshold is allocatable × `admission.overcommitFactor`, default
+`1.0` (server flag `--admission-overcommit-factor`). Set a finite value at least
+`1.0` explicitly to opt into overcommit; for example `1.5` permits a 96 GiB
+budget on 64 GiB allocatable without warning. A 96 GiB budget on 61.8 GiB still
+warns at `1.5`. The factor affects warnings only: it neither raises nor clamps
+the configured admission budgets, reservations, or pod requests/limits.
+
+These totals are an upper bound, not a placement guarantee. Taints, affinity,
+per-node fragmentation, competing workloads, and platform reserve can reduce
+usable capacity. Size budgets for the execution nodes and retain platform
+headroom even when cluster totals pass the check.

@@ -1002,6 +1002,8 @@ Usage of serve:
         minimum memory headroom per declared run; combined with proportional headroom using the larger value (default 1073741824)
   -admission-memory-headroom-percent int
         memory headroom as a percentage of declared run memory, excluding executor reserves (0..100); combined with the fixed minimum using the larger value (default 10)
+  -admission-overcommit-factor float
+        opt-in multiplier for cluster allocatable CPU/memory sanity warnings (at least 1); does not change admission budgets (default 1)
   -admission-pressure-cpu-some-avg10 float
         CPU some PSI avg10 threshold in percent (default 30)
   -admission-pressure-cpu-some-avg60-max float

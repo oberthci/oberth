@@ -280,6 +280,7 @@ spec:
             {{- $_ := set $declared $key (get $declaredInput $key) }}
             {{- end }}
             {{- end }}
+            - --admission-overcommit-factor={{ $admission.overcommitFactor | default 1 }}
             - --disable-declared-admission={{ $declared.disabled }}
             - --admission-cpu-millis={{ int64 $declared.cpuMillis }}
             - --admission-memory-bytes={{ int64 $declared.memoryBytes }}

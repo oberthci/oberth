@@ -111,53 +111,54 @@ func (values *stringList) Set(value string) error {
 }
 
 type serveOptions struct {
-	issueStaleAfter         time.Duration
-	issueActiveStaleAfter   time.Duration
-	uplinkTokenPolicy       model.UplinkTokenPolicy
-	kubernetesQPS           float64
-	kubernetesBurst         int
-	dataRoot                string
-	database                string
-	sshListen               string
-	httpsListen             string
-	tlsCert                 string
-	tlsKey                  string
-	sshHostKey              string
-	upstreamKey             string
-	knownHosts              string
-	namespace               string
-	runnerImagePrefixes     string
-	scheduleMinInterval     time.Duration
-	scheduleMaxEntries      int
-	fragmentAllowlist       string
-	artifactsLimitBytes     int64
-	artifactsBudgetBytes    int64
-	logRetention            time.Duration
-	artifactRetention       time.Duration
-	logsBudgetBytes         int64
-	runLogLimitBytes        int64
-	retentionInterval       time.Duration
-	retentionKeepNewest     int
-	maxConcurrent           int
-	maxConcurrentFile       string
-	declaredAdmission       service.DeclaredAdmissionConfig
-	admissionDiskFloorBytes int64
-	admissionPressure       service.AdmissionPressureConfig
-	admissionSizeWeights    string
-	admissionMaxHeadWait    time.Duration
-	sizeWeights             service.SizeWeights
-	ciCacheRoot             string
-	releaseCacheRoot        string
-	secretStoreAddress      string
-	secretStoreAuthMount    string
-	secretStoreRole         string
-	secretStoreCACert       string
-	secretStoreSAToken      string
-	secretStorePaths        stringList
-	secretStoreKVMount      string
-	secretStoreTransitMount string
-	secretStoreTransitKey   string
-	secretStoreInsecureHTTP bool
+	issueStaleAfter           time.Duration
+	issueActiveStaleAfter     time.Duration
+	uplinkTokenPolicy         model.UplinkTokenPolicy
+	kubernetesQPS             float64
+	kubernetesBurst           int
+	dataRoot                  string
+	database                  string
+	sshListen                 string
+	httpsListen               string
+	tlsCert                   string
+	tlsKey                    string
+	sshHostKey                string
+	upstreamKey               string
+	knownHosts                string
+	namespace                 string
+	runnerImagePrefixes       string
+	scheduleMinInterval       time.Duration
+	scheduleMaxEntries        int
+	fragmentAllowlist         string
+	artifactsLimitBytes       int64
+	artifactsBudgetBytes      int64
+	logRetention              time.Duration
+	artifactRetention         time.Duration
+	logsBudgetBytes           int64
+	runLogLimitBytes          int64
+	retentionInterval         time.Duration
+	retentionKeepNewest       int
+	maxConcurrent             int
+	maxConcurrentFile         string
+	declaredAdmission         service.DeclaredAdmissionConfig
+	admissionOvercommitFactor float64
+	admissionDiskFloorBytes   int64
+	admissionPressure         service.AdmissionPressureConfig
+	admissionSizeWeights      string
+	admissionMaxHeadWait      time.Duration
+	sizeWeights               service.SizeWeights
+	ciCacheRoot               string
+	releaseCacheRoot          string
+	secretStoreAddress        string
+	secretStoreAuthMount      string
+	secretStoreRole           string
+	secretStoreCACert         string
+	secretStoreSAToken        string
+	secretStorePaths          stringList
+	secretStoreKVMount        string
+	secretStoreTransitMount   string
+	secretStoreTransitKey     string
+	secretStoreInsecureHTTP   bool
 
 	// Argo execution engine. Leaving argoNamespace empty leaves the engine
 	// off entirely, which is the default: every repository then runs on the
@@ -281,6 +282,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&legacyResourceCharges, "admission-legacy-resources", "{}", "JSON map of sizes S/M/L/XL to fixed cpu_milli and memory_bytes charges; missing sizes default to 1000/2Gi, 2000/4Gi, 3000/8Gi, 6000/16Gi")
 	flags.StringVar(&extendedResourceBudgets, "admission-extended-resources", "{}", "JSON map of qualified extended-resource names to integer capacity; no implicit capacity")
 	flags.BoolVar(&options.declaredAdmission.Disabled, "disable-declared-admission", false, "administrator kill switch: refuse new declared runs; undeclared workflows retain deprecated size admission")
+	flags.Float64Var(&options.admissionOvercommitFactor, "admission-overcommit-factor", 1, "opt-in multiplier for cluster allocatable CPU/memory sanity warnings (at least 1); does not change admission budgets")
 	flags.Int64Var(&options.declaredAdmission.CPUMilli, "admission-cpu-millis", 8000, "CPU budget for declared workflow and VM demand, excluding platform reserve")
 	flags.Int64Var(&options.declaredAdmission.MemoryBytes, "admission-memory-bytes", 17179869184, "memory budget for declared workflow and VM demand, excluding platform reserve")
 	flags.Int64Var(options.declaredAdmission.MemoryHeadroomBytes, "admission-memory-headroom-bytes", 1073741824, "minimum memory headroom per declared run; combined with proportional headroom using the larger value")
@@ -427,6 +429,9 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	}
 	if err := options.admissionPressure.Validate(); err != nil {
 		return serveOptions{}, fmt.Errorf("serve: --admission-pressure: %w", err)
+	}
+	if math.IsNaN(options.admissionOvercommitFactor) || math.IsInf(options.admissionOvercommitFactor, 0) || options.admissionOvercommitFactor < 1 {
+		return serveOptions{}, errors.New("serve: --admission-overcommit-factor must be finite and at least 1")
 	}
 	if options.admissionMaxHeadWait < 0 {
 		return serveOptions{}, errors.New("serve: --admission-max-head-wait must be zero (strict FIFO) or positive")
@@ -957,6 +962,9 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	health.Version = version
 	health.AdmissionBlocker = scheduler.AdmissionBlocker
 	health.Admission = scheduler.AdmissionState
+	capacityProbe := app.AdmissionCapacityProbe{Nodes: kube.CoreV1().Nodes(), CPUMilli: options.declaredAdmission.CPUMilli, MemoryBytes: options.declaredAdmission.MemoryBytes, OvercommitFactor: options.admissionOvercommitFactor, Log: log.Printf}
+	capacityProbe.Check(ctx)
+	health.AdmissionCapacity = capacityProbe.Check
 	health.DatabaseRetries = scheduler.DatabaseRetries
 	health.ControllerProfile = argoJobs.ControllerProfileStatus
 	health.SchemaVersion = store.LatestMigrationVersion()

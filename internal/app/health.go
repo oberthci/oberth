@@ -21,6 +21,7 @@ type ClusterProbe func(context.Context) error
 type VCSProbe func(context.Context, model.Upstream) error
 
 type Health struct {
+	AdmissionCapacity func(context.Context) *AdmissionCapacityStatus
 	ControllerProfile func() *model.ControllerProfileStatus
 	// ReadyGate checks process-local recovery state without network or store reads.
 	ReadyGate ClusterProbe
@@ -121,6 +122,7 @@ type AuditChainStatus struct {
 }
 
 type HealthStatus struct {
+	AdmissionCapacity *AdmissionCapacityStatus       `json:"admission_capacity,omitempty"`
 	DatabaseRetries   uint64                         `json:"database_retries_total,omitempty"`
 	ControllerProfile *model.ControllerProfileStatus `json:"controller_profile,omitempty"`
 	Storage           any                            `json:"storage,omitempty"`
@@ -224,6 +226,9 @@ func requiresSSHIdentity(upstreams []model.Upstream) bool {
 
 func (health Health) Status(ctx context.Context) (any, error) {
 	status := HealthStatus{Database: "unavailable", SchemaVersion: health.SchemaVersion, VCS: "unavailable", Cluster: "unavailable", Audit: "unavailable", AuditMode: health.AuditMode, Version: health.Version, SecretStore: health.SecretStore}
+	if health.AdmissionCapacity != nil {
+		status.AdmissionCapacity = health.AdmissionCapacity(ctx)
+	}
 	if health.DatabaseRetries != nil {
 		status.DatabaseRetries = health.DatabaseRetries()
 	}
