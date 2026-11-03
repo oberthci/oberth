@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"github.com/oberthci/oberth/internal/liveness"
@@ -23,9 +24,26 @@ type headWaitKey struct {
 }
 
 type headEvent struct {
-	key   headWaitKey
-	since time.Time
-	clear bool
+	coalesced bool
+	key       headWaitKey
+	since     time.Time
+	clear     bool
+	// A clear followed by a record must still delete the previous generation
+	// before inserting: the store deliberately keeps an existing first origin.
+	clearFirst bool
+}
+
+// coalesceHeadEvent composes changes for one key in emission order. Keep the
+// first origin within a generation and every clear that separates generations.
+func coalesceHeadEvent(previous, next headEvent) headEvent {
+	if next.clear || next.clearFirst {
+		return next
+	}
+	next.clearFirst = previous.clear || previous.clearFirst
+	if !previous.clear && !previous.since.IsZero() && (next.since.IsZero() || previous.since.Before(next.since)) {
+		next.since = previous.since
+	}
+	return next
 }
 
 // HeadWaitStore persists head-wait origins (#1085). The production store
@@ -82,18 +100,26 @@ func (gate *weightedAdmission) emitHeadLocked(event headEvent) {
 	if gate.headEvents == nil || event.key.RepoID <= 0 || event.key.SHA == "" {
 		return
 	}
+	if gate.headPending == nil {
+		gate.headPending = make(map[headWaitKey]headEvent)
+	}
+	event.coalesced = true
+	if previous, found := gate.headPending[event.key]; found {
+		event = coalesceHeadEvent(previous, event)
+	}
+	gate.headPending[event.key] = event
 	select {
 	case gate.headEvents <- event:
 	default:
-		// Persistence is best effort: a dropped event costs only the origin
-		// surviving a restart, never admission itself.
+		// The channel is only a wake-up. The latest change for every key stays
+		// in headPending, including clears, even when notifications coalesce.
 	}
 }
 
 // backfillOpenLocked reports whether runs behind this head may still be
 // admitted beside it.
 func (gate *weightedAdmission) backfillOpenLocked(head *admissionReservation, now time.Time) bool {
-	return gate.maxHeadWait > 0 && !head.headSince.IsZero() && now.Sub(head.headSince) < gate.maxHeadWait
+	return !gate.numericBlockedLocked(head) && gate.maxHeadWait > 0 && !head.headSince.IsZero() && now.Sub(head.headSince) < gate.maxHeadWait
 }
 
 // backfillFitsLocked reports whether a run that fits the spare weight may be
@@ -101,6 +127,11 @@ func (gate *weightedAdmission) backfillOpenLocked(head *admissionReservation, no
 // finish before the head's bound. A run without history is admitted only
 // while the bound has not passed (which backfillOpenLocked already checks).
 func (gate *weightedAdmission) backfillFitsLocked(head, candidate *admissionReservation, now time.Time) bool {
+	if gate.numericBlockedLocked(head) {
+		// Weight headroom does not imply CPU/memory headroom. Drain the numeric
+		// blocker before permitting later work to consume more of its budget.
+		return false
+	}
 	if candidate.estimate <= 0 {
 		return true
 	}
@@ -140,10 +171,13 @@ func (scheduler *Scheduler) runHeadEvents(ctx context.Context) {
 	sweep := time.NewTicker(time.Hour)
 	defer sweep.Stop()
 	if canSweep {
-		_ = sweeper.SweepAdmissionHeadWaits(ctx)
+		if err := sweeper.SweepAdmissionHeadWaits(ctx); err != nil {
+			log.Printf("WARN: admission head-wait sweep: %v", err)
+		}
 	}
 	for {
 		scheduler.headProgress.Beat()
+		var direct *headEvent
 		select {
 		case <-ctx.Done():
 			return
@@ -152,17 +186,54 @@ func (scheduler *Scheduler) runHeadEvents(ctx context.Context) {
 			// Heads whose run ended without being abandoned through the gate
 			// (an interrupted promotion or tag) leave rows behind.
 			if canSweep {
-				_ = sweeper.SweepAdmissionHeadWaits(ctx)
+				if err := sweeper.SweepAdmissionHeadWaits(ctx); err != nil {
+					log.Printf("WARN: admission head-wait sweep: %v", err)
+				}
 			}
 		case event := <-events:
+			if !event.coalesced {
+				direct = &event
+			}
+		}
+		gate := scheduler.admission
+		gate.mu.Lock()
+		batch := gate.headPending
+		gate.headPending = nil
+		gate.mu.Unlock()
+		if direct != nil {
+			if batch == nil {
+				batch = make(map[headWaitKey]headEvent)
+			}
+			if newer, found := batch[direct.key]; found {
+				batch[direct.key] = coalesceHeadEvent(*direct, newer)
+			} else {
+				batch[direct.key] = *direct
+			}
+		}
+		for _, event := range batch {
 			key := event.key
 			persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-			if event.clear {
-				_ = store.ClearAdmissionHeadWait(persistCtx, key.RepoID, key.RefKind, key.Ref, key.SHA)
-			} else {
-				_ = store.RecordAdmissionHeadWait(persistCtx, key.RepoID, key.RefKind, key.Ref, key.SHA, event.since)
+			var err error
+			if event.clear || event.clearFirst {
+				err = store.ClearAdmissionHeadWait(persistCtx, key.RepoID, key.RefKind, key.Ref, key.SHA)
+			}
+			if err == nil && !event.clear {
+				err = store.RecordAdmissionHeadWait(persistCtx, key.RepoID, key.RefKind, key.Ref, key.SHA, event.since)
 			}
 			cancel()
+			if err != nil {
+				log.Printf("WARN: admission head-wait persistence repo=%d clear=%t: %v", key.RepoID, event.clear, err)
+				gate.mu.Lock()
+				if gate.headPending == nil {
+					gate.headPending = make(map[headWaitKey]headEvent)
+				}
+				if newer, found := gate.headPending[key]; found {
+					gate.headPending[key] = coalesceHeadEvent(event, newer)
+				} else {
+					gate.headPending[key] = event
+				}
+				gate.mu.Unlock()
+			}
 		}
 	}
 }

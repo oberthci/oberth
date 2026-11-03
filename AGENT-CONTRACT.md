@@ -507,6 +507,14 @@ trust assumptions and complete invalidation rules.
   `draining`; messages say "head waiting 7m/20m, backfilling" or "draining for
   head", and the `admission` view adds `max_head_wait_seconds` and each
   reservation's `backfilled`.
+  A head blocked by declared CPU/memory drains immediately: later backfill
+  cannot spend its missing numeric capacity. Admission state and queue messages
+  report reserved CPU and memory against the configured budgets, including
+  legacy weights' equivalent shares; scoped views omit shared usage. Head-wait
+  persistence coalesces by commit, retains clears across a full wake channel,
+  and logs/retries failed writes. Priority overrides park their reservation
+  during persistence, release the admission mutex for SQLite, then re-evaluate
+  grants immediately.
   `oberth.ci/size-by-trigger: "branch=M,promotion=XL,schedule=XL"` sets the
   weight per run trigger: comma-separated `trigger=size` pairs, triggers
   `branch`, `promotion`, `schedule` (build.yaml) and `tag` (release.yaml),

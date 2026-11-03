@@ -927,7 +927,8 @@ function summaryLines(detail) {
   else if (status === "queued") {
     const scheduling = detail.Scheduling || {}, admission = scheduling.admission || {};
     lines.push(`[queued] ${scheduling.message || "Awaiting scheduler."}`);
-    if (admission.weight) lines.push(`capacity: need ${admission.weight} weight · ${admission.used}/${admission.capacity} used${admission.position ? ` · queue position ${admission.position}` : ""}`);
+    if (admission.numeric_budget) lines.push(`capacity: ${numericBudgetText(admission.numeric_budget)}${admission.position ? ` · queue position ${admission.position}` : ""}`);
+    else if (admission.weight) lines.push(`capacity: need ${admission.weight} weight · ${admission.used}/${admission.capacity} used${admission.position ? ` · queue position ${admission.position}` : ""}`);
   }
   else if (kind === "warn") lines.push(`[infra error, retried] ${runMessage(run)}`);
   else if (kind === "cancel") lines.push(`[${status}] ${runMessage(run)}`);
@@ -1436,10 +1437,14 @@ function pressureStatusCard(pressure) {
   const policy = observing ? " · PSI does not defer grants; other admission gates still apply" : "";
   return svcCard("host pressure", value, detail + policy, pressure.holding || pressure.threshold_exceeded || !pressure.available ? "warn" : "ok");
 }
+function numericBudgetText(budget) {
+  return `CPU ${budget.cpu_used_milli}m/${budget.cpu_budget_milli}m reserved · memory ${budget.memory_used_bytes}/${budget.memory_budget_bytes} bytes reserved`;
+}
 function capacityStatusCard(admission) {
   const config = admission?.configuration;
   if (!config) return "";
-  const detail = `${admission.used}/${admission.capacity} weight used · source ${config.source}${config.file ? ` (${config.file})` : ""}${config.error ? ` · keeping last good value: ${config.error}` : ""}`;
+  const budget = admission.numeric_budget ? numericBudgetText(admission.numeric_budget) : `${admission.used}/${admission.capacity} weight used`;
+  const detail = `${budget} · source ${config.source}${config.file ? ` (${config.file})` : ""}${config.error ? ` · keeping last good value: ${config.error}` : ""}`;
   return svcCard("admission capacity", `${config.max_concurrent_jobs} M jobs`, esc(detail), config.error ? "warn" : "ok");
 }
 function controllerProfileStatusCard(profile) {

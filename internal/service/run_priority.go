@@ -94,9 +94,8 @@ func (service *API) notifyPriorityChange(ctx context.Context) error {
 	return nil
 }
 
-// BumpRunPriority holds the admission gate through the durable bump and its
-// in-memory update. A weighted grant may precede started_at being persisted;
-// refuse that window too, rather than auditing a bump of already granted work.
+// BumpRunPriority parks only the affected reservation while persisting its
+// override. SQLite must not hold the admission mutex or stall other owners.
 func (scheduler *Scheduler) BumpRunPriority(ctx context.Context, actor, id string, priority model.RunPriority, reason string) (model.Run, error) {
 	state, ok := scheduler.store.(QueuePriorityStore)
 	if !ok {
@@ -106,14 +105,23 @@ func (scheduler *Scheduler) BumpRunPriority(ctx context.Context, actor, id strin
 	defer scheduler.priorityMu.Unlock()
 	gate := scheduler.admission
 	gate.mu.Lock()
-	defer gate.mu.Unlock()
 	for _, r := range gate.reservations {
 		if r.runID == id && r.granted {
+			gate.mu.Unlock()
 			return model.Run{}, fmt.Errorf("%w: run already holds an admission grant", store.ErrInvalidState)
 		}
 	}
+	if gate.priorityChanges == nil {
+		gate.priorityChanges = make(map[string]bool)
+	}
+	gate.priorityChanges[id] = true
+	gate.mu.Unlock()
 	run, err := state.BumpRunPriority(ctx, actor, id, priority, reason)
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	delete(gate.priorityChanges, id)
 	if err != nil {
+		gate.grantLocked()
 		return model.Run{}, err
 	}
 	for _, r := range gate.waiters {
@@ -122,7 +130,7 @@ func (scheduler *Scheduler) BumpRunPriority(ctx context.Context, actor, id strin
 			r.priorityOverride, r.priorityOverrideReason = run.PriorityOverride, run.PriorityOverrideReason
 		}
 	}
-	gate.sortWaitersLocked()
+	gate.grantLocked()
 	return run, nil
 }
 

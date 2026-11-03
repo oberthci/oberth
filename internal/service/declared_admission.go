@@ -85,6 +85,36 @@ func (g *weightedAdmission) numericFitsLocked(candidate *admissionReservation) b
 	return fits(cpu, g.resources.CPUMilli) && fits(memory, g.resources.MemoryBytes)
 }
 
+func (g *weightedAdmission) numericBudgetLocked() *model.NumericBudget {
+	b := &model.NumericBudget{CPUBudgetMilli: g.resources.CPUMilli, MemoryBudgetBytes: g.resources.MemoryBytes}
+	legacy := int64(0)
+	for _, r := range g.reservations {
+		if !r.granted || r.released {
+			continue
+		}
+		if r.pods != nil {
+			d := podCharge(*r.pods)
+			b.CPUUsedMilli += d.CPUMilli
+			b.MemoryUsedBytes += d.MemoryBytes
+		} else {
+			legacy += int64(r.weight)
+		}
+	}
+	share := func(budget int64) int64 {
+		// Ceil the combined legacy fraction once, exactly as numericFitsLocked.
+		n := new(big.Int).Mul(big.NewInt(budget), big.NewInt(legacy))
+		n.Add(n, big.NewInt(int64(g.capacity)-1))
+		return n.Quo(n, big.NewInt(int64(g.capacity))).Int64()
+	}
+	b.CPUUsedMilli += share(b.CPUBudgetMilli)
+	b.MemoryUsedBytes += share(b.MemoryBudgetBytes)
+	return b
+}
+
+func (g *weightedAdmission) numericBlockedLocked(r *admissionReservation) bool {
+	return (r.pods != nil || !g.weights.wholeBudget(r.size)) && g.used+r.weight <= g.capacity && !g.numericFitsLocked(r)
+}
+
 func (g *weightedAdmission) validatePodDemand(d *argoworkflow.PodDemand) error {
 	if d == nil || g.resources.Disabled {
 		return nil

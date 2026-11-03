@@ -20,6 +20,7 @@ type RunScheduling struct {
 }
 
 type AdmissionObservation struct {
+	NumericBudget     *NumericBudget     `json:"numeric_budget,omitempty"`
 	DeclaredResources *DeclaredResources `json:"declared_resources,omitempty"`
 
 	Pressure         *PressureDeferral `json:"pressure,omitempty"`
@@ -54,6 +55,7 @@ type AdmissionObservation struct {
 // AdmissionBlocker is the claimed run at the head of the weighted admission
 // queue that does not fit, which holds back every run claimed after it.
 type AdmissionBlocker struct {
+	NumericBudget     *NumericBudget     `json:"numeric_budget,omitempty"`
 	DeclaredResources *DeclaredResources `json:"declared_resources,omitempty"`
 
 	Pressure *PressureDeferral `json:"pressure,omitempty"`
@@ -113,6 +115,9 @@ func waitText(seconds int64) string {
 // Reason is the parenthesized why of a blocked admission, e.g.
 // "XL, needs a full drain".
 func (blocker AdmissionBlocker) Reason() string {
+	if b := blocker.NumericBudget; b != nil {
+		return fmt.Sprintf("%s, CPU %dm/%dm used; memory %d/%d bytes used", blocker.Size, b.CPUUsedMilli, b.CPUBudgetMilli, b.MemoryUsedBytes, b.MemoryBudgetBytes)
+	}
 	if d := blocker.DeclaredResources; d != nil {
 		return fmt.Sprintf("declared requests %dm CPU, %d memory bytes", d.CPUMilli, d.MemoryBytes)
 	}
@@ -197,6 +202,7 @@ type AdmissionCapacityConfig struct {
 // budget, every reservation it holds, and every concurrency group in use. It
 // is an ephemeral observation of one server process, never durable evidence.
 type AdmissionState struct {
+	NumericBudget *NumericBudget           `json:"numeric_budget,omitempty"`
 	Configuration *AdmissionCapacityConfig `json:"configuration,omitempty"`
 	Pressure      *AdmissionPressure       `json:"pressure,omitempty"`
 	Capacity      int                      `json:"capacity"`
@@ -208,6 +214,15 @@ type AdmissionState struct {
 	Reservations       []AdmissionReservation `json:"reservations"`
 	Groups             []AdmissionGroup       `json:"groups"`
 	Blocker            *AdmissionBlocker      `json:"blocker,omitempty"`
+}
+
+// NumericBudget includes declared Pod/helper requests and the equivalent
+// CPU/memory share reserved by legacy size weights. It is not measured usage.
+type NumericBudget struct {
+	CPUUsedMilli      int64 `json:"cpu_used_milli"`
+	CPUBudgetMilli    int64 `json:"cpu_budget_milli"`
+	MemoryUsedBytes   int64 `json:"memory_used_bytes"`
+	MemoryBudgetBytes int64 `json:"memory_budget_bytes"`
 }
 
 // AdmissionReservation is one claimed run's place in the gate. State is

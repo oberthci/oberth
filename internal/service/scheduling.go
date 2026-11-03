@@ -92,6 +92,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 			// pool of invisible work must not show (#073).
 			admission := *result.Admission
 			admission.Position, admission.Used, admission.Capacity, admission.DiskFloor = 0, 0, 0, nil
+			admission.NumericBudget = nil
 			admission.Pressure = admission.Pressure.Public()
 			if blocker := service.visibleBlocker(admission.BlockedBy); blocker != nil {
 				admission.BlockedBy = blocker
@@ -263,6 +264,7 @@ func (service *API) visibleBlocker(blocker *model.AdmissionBlocker) *model.Admis
 	scoped := *blocker
 	if service.scope != nil {
 		scoped.Used, scoped.Capacity = 0, 0
+		scoped.NumericBudget = nil
 	}
 	scoped.Pressure = scoped.Pressure.Public()
 	return &scoped
