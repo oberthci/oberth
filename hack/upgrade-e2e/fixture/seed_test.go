@@ -8,10 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oberthci/oberth/internal/app"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 func TestSeedPriorityRunsHaveRunnablePipelines(t *testing.T) {
@@ -34,14 +33,34 @@ func TestSeedPriorityRunsHaveRunnablePipelines(t *testing.T) {
 	if len(runs) != 5 {
 		t.Fatalf("active runs=%d, want 5", len(runs))
 	}
-	jobs := &app.ArgoJobs{}
 	for _, r := range runs {
 		if r.Status != model.RunQueued {
 			continue
 		}
-		size, err := jobs.PipelineSize(ctx, service.JobRequest{Run: r, SourceDir: filepath.Join(root, "fixtures", "sample")})
+		file, trigger := "build.yaml", argoworkflow.RunTriggerBranch
+		if r.Release {
+			file, trigger = "release.yaml", argoworkflow.RunTriggerTag
+		}
+		// Decode the same document and resource contract the scheduler reads.
+		// This fixture is also compiled against earlier published releases.
+		source, err := os.ReadFile(filepath.Join(root, "fixtures", "sample", ".oberth", file))
+		if err != nil {
+			t.Fatalf("%s pipeline source: %v", r.Priority, err)
+		}
+		workflow, err := argoworkflow.Decode(source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		size, err := argoworkflow.DeclaredSizeFor(workflow, trigger)
 		if err != nil || string(size) != "M" {
 			t.Fatalf("%s pipeline size=%q err=%v", r.Priority, size, err)
+		}
+		if len(workflow.Spec.Templates) != 1 {
+			t.Fatalf("%s templates=%d, want one runnable entrypoint", r.Priority, len(workflow.Spec.Templates))
+		}
+		entry := workflow.Spec.Templates[0]
+		if entry.Name != workflow.Spec.Entrypoint || entry.Container == nil || entry.Container.Image != os.Args[3] || strings.Join(entry.Container.Command, " ") != "/usr/local/bin/oberth version" {
+			t.Fatalf("%s entrypoint must run the signed release binary: %+v", r.Priority, entry)
 		}
 	}
 	upstream := filepath.Join(root, "fixtures", "sample.git")
