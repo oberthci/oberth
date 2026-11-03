@@ -107,6 +107,8 @@ func wireIssueMutation(issue model.Issue, appendedBytes int) api.IssueMutationRe
 // RunSummaryResponse deliberately excludes retained Timing, full repository data,
 // diagnostics and telemetry. Unknown step times remain null.
 type RunSummaryResponse struct {
+	DisplayStatus     string                   `json:"display_status"`
+	DisplayReason     string                   `json:"display_reason"`
 	Repo              string                   `json:"repo"`
 	Ref               string                   `json:"ref"`
 	SHA               string                   `json:"sha"`
@@ -134,6 +136,7 @@ type RunStepSummary struct {
 func summarizeRun(run model.Run, steps []model.StepResult) RunSummaryResponse {
 	response := RunSummaryResponse{
 		ID: run.ID, Status: run.Status, Phase: run.Phase,
+		DisplayStatus: run.DisplayStatus, DisplayReason: run.DisplayReason,
 		Repo: run.Repo, Ref: run.Ref, SHA: run.SHA, Size: run.Size,
 		DeclaredResources: run.DeclaredResources, QueuePosition: run.QueuePosition, Superseded: run.Superseded,
 		FailedStage: run.FailedStage, FailedStep: run.FailedStep, Error: run.Error,

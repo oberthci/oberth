@@ -59,6 +59,8 @@ type PromoteRetryResponse struct {
 // PromotionListResponse recovers durable admission IDs without exposing actor,
 // failure text or internal storage fields. Listing never starts a promotion.
 type PromotionListItem struct {
+	Repo         string `json:"repo"`
+	Ref          string `json:"ref"`
 	ID           string `json:"id"`
 	Sequence     int64  `json:"sequence"`
 	RepoID       int64  `json:"repo_id"`

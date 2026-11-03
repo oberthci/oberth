@@ -1177,12 +1177,19 @@ func (service *API) readRun(ctx context.Context, actor api.Actor, id string, sum
 		return nil, fmt.Errorf("load run steps: %w", err)
 	}
 	run = service.runAdmissionContext(ctx, run, true)
-	if summary {
-		return summarizeRun(run, steps), nil
-	}
-	response := RunDetailResponse{Run: service.presentationRun(ctx, run), Steps: steps, Scheduling: service.scheduling(ctx, run, steps),
-		RerunOf: service.runRerunOf(ctx, run.ID)}
+	response := RunDetailResponse{Run: service.presentationRun(ctx, run), Steps: steps, Scheduling: service.scheduling(ctx, run, steps)}
 	applyExecutionDisplay(&response.Run, response.Scheduling)
+	if response.Run.DisplayStatus == "queued" && response.Scheduling != nil {
+		response.Run.DisplayReason = response.Scheduling.Message
+	}
+	if summary {
+		response.Run.Repo, err = service.repositoryIdentity(ctx, run.RepoID)
+		if err != nil {
+			return nil, err
+		}
+		return summarizeRun(response.Run, steps), nil
+	}
+	response.RerunOf = service.runRerunOf(ctx, run.ID)
 	if reader, ok := service.history.(RunTimingReader); ok {
 		timing, timingErr := reader.RunTiming(ctx, run.ID)
 		if timingErr != nil {
@@ -2628,12 +2635,16 @@ func (service *API) prepareWaitPromotion(ctx context.Context, id string, request
 		return nil, err
 	}
 	id = promotion.ID
+	repo, err := service.repositoryIdentity(ctx, promotion.RepoID)
+	if err != nil {
+		return nil, err
+	}
 	terminal := func(ctx context.Context, promotion model.Promotion) (PromotionWaitResponse, error) {
 		retriedAs, err := service.promotionRetriedAs(ctx, promotion)
 		if err != nil {
 			return PromotionWaitResponse{}, err
 		}
-		return PromotionWaitResponse{Promotion: promotion, RetriedAs: retriedAs}, nil
+		return PromotionWaitResponse{Promotion: promotion, Repo: repo, Ref: promotion.SourceBranch, RetriedAs: retriedAs}, nil
 	}
 	return func(ctx context.Context) (PromotionWaitResponse, error) {
 		timer := time.NewTimer(time.Until(deadline))
@@ -2661,7 +2672,7 @@ func (service *API) prepareWaitPromotion(ctx context.Context, id string, request
 				if promotion.Status.Terminal() {
 					return terminal(ctx, promotion)
 				}
-				response := PromotionWaitResponse{Promotion: promotion}
+				response := PromotionWaitResponse{Promotion: promotion, Repo: repo, Ref: promotion.SourceBranch}
 				response.StillRunning = true
 				return response, nil
 			case <-changed:
