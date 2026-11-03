@@ -86,3 +86,8 @@ candidate images and does not qualify a release containing that migration.
 
 The observation window is bounded by the rehearsal and does not prove long-term
 crash freedom. Full suites remain pending CI.
+
+If a host wrapper suspends an in-flight fixture wait past its watch deadline,
+the runner performs a fresh status read and accepts only `Succeeded`. Failed,
+pending or unreadable fixture Pods still fail; no completion assertion is
+waived and no host guard is disabled.

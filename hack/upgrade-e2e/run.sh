@@ -212,8 +212,13 @@ spec:
         claimName: oberth-data
 YAML
   if ! k -n oberth wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$name" --timeout=60s; then
-    k -n oberth logs "$name" >"$evidence/$name-error.log" 2>&1 || true
-    return 1
+    # A suspended host-check process can resume after the watch deadline even
+    # though its Pod completed. Recheck the same required terminal condition.
+    if [[ $(k -n oberth get pod "$name" -o jsonpath='{.status.phase}') != Succeeded ]]; then
+      k -n oberth logs "$name" >"$evidence/$name-error.log" 2>&1 || true
+      return 1
+    fi
+    printf 'Confirmed pod/%s Succeeded after interrupted wait\n' "$name"
   fi
 }
 fixture_pod fixture-seed seed
