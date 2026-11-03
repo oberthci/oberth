@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/oberthci/oberth/internal/api"
 	"strings"
 	"testing"
+
+	"github.com/oberthci/oberth/internal/api"
 
 	"github.com/oberthci/oberth/internal/model"
 )
