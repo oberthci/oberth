@@ -2154,6 +2154,12 @@ trust assumptions and complete invalidation rules.
   `--network-policy=true` restores the chart policy. The operator must supply
   an enforcing CNI; the installer never silently disables the policy based on
   the Kubernetes distribution.
+- Chart cluster-scoped objects have explicit enabling values:
+  `secretstore.createAuthDelegatorBinding` (with `secretstore.enabled`) creates
+  the TokenReview ClusterRoleBinding; `argo.resourceSampler.enabled` creates
+  a node metrics ClusterRole and binding scoped to allowlisted node names;
+  `platformProtection.enabled` creates three platform PriorityClasses for the
+  server, Argo controller and OpenBao. The remaining access Roles are namespaced.
 - The server-namespace Role grants only ConfigMap access: collection
   create/get/list/watch and update of `oberth-secret-access` by exact name.
   It grants no Pod, `pods/log` or `pods/exec` access. The separate pipeline
