@@ -111,38 +111,3 @@ func (service *API) dismissAccess(ctx context.Context, actor api.Actor, raw json
 type DeclarationDismissal interface {
 	DismissGrantDeclaration(context.Context, string, string, string, string) error
 }
-
-func (service *API) listKubeVirtGrants(ctx context.Context, actor api.Actor, raw json.RawMessage) (any, error) {
-	if !actor.Admin {
-		return nil, refuse(ErrForbidden, "kubevirt_grant_list requires admin")
-	}
-	if err := requireUnscoped(actor, "kubevirt_grant_list"); err != nil {
-		return nil, err
-	}
-	var args struct{}
-	if err := decodeTool(raw, &args); err != nil {
-		return nil, err
-	}
-	if service.kubeVirtGrants == nil || service.repositories == nil {
-		return nil, refuse(ErrUnavailable, "KubeVirt grants")
-	}
-	repos, err := service.repositories.ListRepositories(ctx)
-	if err != nil {
-		return nil, err
-	}
-	grants := []map[string]any{}
-	for _, repo := range repos {
-		grant, err := service.kubeVirtGrants.KubeVirtGrant(ctx, repo.ID)
-		if errors.Is(err, store.ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		if grant.RevokedAt != nil {
-			continue
-		}
-		grants = append(grants, map[string]any{"repo": service.cacheInputFor(ctx, repo), "grant": grant})
-	}
-	return map[string]any{"grants": grants}, nil
-}

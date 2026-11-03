@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
 
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
 
@@ -290,8 +291,11 @@ func TestWorkflowCreateRetryBudgetBoundsPostAndRetryAfter(t *testing.T) {
 func TestWorkflowCreateRetryRechecksControllerProfile(t *testing.T) {
 	for _, adopt := range []bool{false, true} {
 		t.Run(fmt.Sprintf("adopt=%t", adopt), func(t *testing.T) {
-			config, request, _, _ := trustedKVMBuilt(t)
-			request = prepareTrustedTestRequest(t, config, request)
+			config := testConfig()
+			config.NonrootProfile = argoworkflow.NonrootStaticProfile
+			request := testRequest(periapsis.TriggerCI, nonrootTestDocument)
+			request.SourceVolume = SourceVolume{ClaimName: "run-source", SubPath: "src", ArtifactsSubPath: "artifacts"}
+			request = nonrootFixtureProof(request)
 			intended, err := Build(config, request)
 			if err != nil {
 				t.Fatal(err)
@@ -312,7 +316,7 @@ func TestWorkflowCreateRetryRechecksControllerProfile(t *testing.T) {
 			}
 			synctest.Test(t, func(t *testing.T) {
 				_, rejected, err := controller.createWorkflowWithRetry(t.Context(), request, intended)
-				if len(client.posts) != 1 || rejected || err == nil || !strings.Contains(err.Error(), "controller identity changed") || errors.Is(err, ErrTrustedKVMCreateRefused) {
+				if len(client.posts) != 1 || rejected || err == nil || !strings.Contains(err.Error(), "controller identity changed") {
 					t.Fatalf("profile change permitted retry/adoption or released uncertain grant: posts=%d rejected=%t err=%v", len(client.posts), rejected, err)
 				}
 			})

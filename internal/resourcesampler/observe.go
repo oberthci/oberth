@@ -16,14 +16,13 @@ import (
 type Binding struct {
 	TemplateName, FragmentRepository                                                   string
 	RunID, WorkflowName, WorkflowUID, Namespace, NodeID, NodeName, PodName, Burn, Step string
-	LauncherOwnerName, LauncherOwnerUID                                                string
 }
 
 // Observe does not trust metric labels alone: UID, current container incarnation
 // and the kubelet cgroup path must agree. CPU/memory/IO are main-container scope;
 // ephemeral storage and PSI are pod scope (including helpers), not PVC/VM disks.
 func Observe(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time) (model.StepResourceUsage, bool) {
-	v, ok := observe(b, pod, IndexSnapshot(snapshot), now, "main", "app", "workflow", false)
+	v, ok := observe(b, pod, IndexSnapshot(snapshot), now, "main", "app", "workflow")
 	return v, ok && (v.Samples > 0 || v.Terminal)
 }
 
@@ -31,16 +30,10 @@ func Observe(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time) (mode
 // wait), ordinary/restartable init helpers, and ephemeral containers. All use
 // the same UID, full runtime ID, freshness and cgroup checks as main.
 func ObserveContainers(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time) []model.StepResourceUsage {
-	return observeContainers(b, pod, snapshot, now, "workflow", false)
+	return observeContainers(b, pod, snapshot, now, "workflow")
 }
 
-// ObserveLauncher is called only after the controller verifies the complete
-// Workflow -> VMI -> Pod owner chain by UID. It measures launcher totals;
-// kubelet data cannot separate guest consumption from hypervisor overhead.
-func ObserveLauncher(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time) []model.StepResourceUsage {
-	return observeContainers(b, pod, snapshot, now, "vm-launcher", true)
-}
-func observeContainers(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time, podKind string, launcher bool) []model.StepResourceUsage {
+func observeContainers(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time, podKind string) []model.StepResourceUsage {
 	if pod == nil || len(pod.Status.ContainerStatuses)+len(pod.Status.InitContainerStatuses)+len(pod.Status.EphemeralContainerStatuses) > 128 || len(pod.Spec.Containers)+len(pod.Spec.InitContainers)+len(pod.Spec.EphemeralContainers) > 128 {
 		return nil
 	}
@@ -51,25 +44,22 @@ func observeContainers(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.T
 		statuses []corev1.ContainerStatus
 	}{{"app", pod.Status.ContainerStatuses}, {"init", pod.Status.InitContainerStatuses}, {"ephemeral", pod.Status.EphemeralContainerStatuses}} {
 		for _, status := range group.statuses {
-			if v, ok := observe(b, pod, snapshot, now, status.Name, group.kind, podKind, launcher); ok {
+			if v, ok := observe(b, pod, snapshot, now, status.Name, group.kind, podKind); ok {
 				out = append(out, v)
 			}
 		}
 	}
 	return out
 }
-func observe(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time, name, kind, podKind string, launcher bool) (model.StepResourceUsage, bool) {
-	if pod == nil || string(pod.UID) == "" || pod.Namespace != b.Namespace || pod.Name != b.PodName || pod.Spec.NodeName == "" || (!launcher && (pod.Annotations["workflows.argoproj.io/node-id"] != b.NodeID || pod.Annotations["workflows.argoproj.io/node-name"] != b.NodeName)) {
+func observe(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time, name, kind, podKind string) (model.StepResourceUsage, bool) {
+	if pod == nil || string(pod.UID) == "" || pod.Namespace != b.Namespace || pod.Name != b.PodName || pod.Spec.NodeName == "" || (pod.Annotations["workflows.argoproj.io/node-id"] != b.NodeID || pod.Annotations["workflows.argoproj.io/node-name"] != b.NodeName) {
 		return model.StepResourceUsage{}, false
 	}
 	owners := 0
 	for _, owner := range pod.OwnerReferences {
 		if owner.Controller != nil && *owner.Controller {
 			owners++
-			if launcher && (b.LauncherOwnerUID == "" || owner.APIVersion != "kubevirt.io/v1" || owner.Kind != "VirtualMachineInstance" || owner.Name != b.LauncherOwnerName || string(owner.UID) != b.LauncherOwnerUID) {
-				return model.StepResourceUsage{}, false
-			}
-			if !launcher && (owner.APIVersion != "argoproj.io/v1alpha1" || owner.Kind != "Workflow" || owner.Name != b.WorkflowName || owner.UID != types.UID(b.WorkflowUID)) {
+			if owner.APIVersion != "argoproj.io/v1alpha1" || owner.Kind != "Workflow" || owner.Name != b.WorkflowName || owner.UID != types.UID(b.WorkflowUID) {
 				return model.StepResourceUsage{}, false
 			}
 		}

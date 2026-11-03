@@ -27,7 +27,6 @@ type createAdmission struct {
 	RunID, JobName, SHA, Group string
 	RepoID                     int64
 	Size                       periapsis.Size
-	Demand                     argoworkflow.VMIDemand
 }
 
 type pendingCreate struct {
@@ -58,15 +57,15 @@ func runCreateAdmissionPath(root, id string) string {
 
 // Persist the server-admitted contract before POST. Recovery must never need a
 // Kubernetes read, a moving repository ref or a remote fragment to restore it.
-func (scheduler *Scheduler) recordCreateAdmission(run model.Run, name string, size periapsis.Size, demand argoworkflow.VMIDemand, pods ...*argoworkflow.PodDemand) error {
+func (scheduler *Scheduler) recordCreateAdmission(run model.Run, name string, size periapsis.Size, pods ...*argoworkflow.PodDemand) error {
 	var peak *argoworkflow.PodDemand
 	if len(pods) > 0 {
 		peak = pods[0]
 	}
-	return scheduler.recordResourceAdmission(run, name, size, demand, peak, "")
+	return scheduler.recordResourceAdmission(run, name, size, peak, "")
 }
 
-func (scheduler *Scheduler) recordResourceAdmission(run model.Run, name string, size periapsis.Size, demand argoworkflow.VMIDemand, peak *argoworkflow.PodDemand, fallback model.ResourceAdmissionFallback) error {
+func (scheduler *Scheduler) recordResourceAdmission(run model.Run, name string, size periapsis.Size, peak *argoworkflow.PodDemand, fallback model.ResourceAdmissionFallback) error {
 	target := scheduler.createAdmissionPath(run.ID)
 	if !pathWithin(scheduler.workspaceRoot, target) {
 		return errors.New("service: create admission escaped workspace")
@@ -74,7 +73,7 @@ func (scheduler *Scheduler) recordResourceAdmission(run model.Run, name string, 
 	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
 		return err
 	}
-	body, err := json.Marshal(createAdmission{Fallback: fallback, Pods: peak, RunID: run.ID, JobName: name, SHA: run.SHA, RepoID: run.RepoID, Group: run.ConcurrencyGroup, Size: size.Effective(), Demand: demand})
+	body, err := json.Marshal(createAdmission{Fallback: fallback, Pods: peak, RunID: run.ID, JobName: name, SHA: run.SHA, RepoID: run.RepoID, Group: run.ConcurrencyGroup, Size: size.Effective()})
 	if err != nil {
 		return err
 	}
@@ -117,9 +116,6 @@ func (scheduler *Scheduler) readCreateAdmission(run model.Run) (createAdmission,
 	if len(body) > 4096 || json.Unmarshal(body, &saved) != nil || saved.RunID != run.ID || saved.JobName != run.JobName || saved.RepoID != run.RepoID || saved.SHA != run.SHA || saved.Group != run.ConcurrencyGroup || !saved.Size.Valid() || saved.Size != saved.Size.Effective() {
 		return createAdmission{}, errors.New("service: pending create admission binding mismatch")
 	}
-	if err := (KubeVirtResources{Demand: saved.Demand, Limit: argoworkflow.VMIBudgetLimit().DemandLimit()}).Validate(); err != nil {
-		return createAdmission{}, err
-	}
 	if saved.Pods != nil && !saved.Pods.Valid() {
 		return createAdmission{}, errors.New("invalid saved workflow resource demand")
 	}
@@ -145,10 +141,9 @@ func (scheduler *Scheduler) restoreCreateGrant(run model.Run, grant *admissionRe
 			// Pre-feature/corrupt snapshots have no trustworthy resource contract.
 			// Keep the API available, conservatively reserve the ceiling, and warn.
 			saved.Size = periapsis.XL
-			saved.Demand = argoworkflow.VMIBudgetLimit().DemandLimit()
 			log.Printf("WARN: create_cleanup run=%q missing_admission_contract=true reserving_ceiling=true", run.ID)
 		}
-		grant, err = scheduler.admission.adopt(run, saved.Size, saved.Demand, saved.Pods)
+		grant, err = scheduler.admission.adopt(run, saved.Size, saved.Pods)
 		if err == nil {
 			scheduler.admission.mu.Lock()
 			grant.fallback = saved.Fallback
@@ -157,7 +152,7 @@ func (scheduler *Scheduler) restoreCreateGrant(run model.Run, grant *admissionRe
 		if err != nil {
 			// Conflicting historical groups are quarantined behind a full budget.
 			run.ConcurrencyGroup = ""
-			grant, err = scheduler.admission.adopt(run, periapsis.XL, argoworkflow.VMIBudgetLimit().DemandLimit())
+			grant, err = scheduler.admission.adopt(run, periapsis.XL)
 			if err != nil {
 				return nil, err
 			}

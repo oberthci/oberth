@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"maps"
 	"math/big"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 // DeclaredAdmissionConfig is administrator-owned. Disabled is the single kill
 // switch; repositories opt into numeric admission by committing declarations.
 type DeclaredAdmissionConfig struct {
+	ExtendedResources map[string]int64
 	Disabled    bool
 	CPUMilli    int64
 	MemoryBytes int64
@@ -42,6 +44,9 @@ func (c DeclaredAdmissionConfig) memoryHeadroom() (fixed, percent int64) {
 }
 
 func (c DeclaredAdmissionConfig) Validate() error {
+	if err := argoworkflow.ValidateExtendedResourceLimits(c.ExtendedResources); err != nil {
+		return err
+	}
 	fixed, percent := c.memoryHeadroom()
 	if c.CPUMilli <= 0 || c.CPUMilli > 1_000_000 || c.MemoryBytes <= 0 || c.MemoryBytes > 1<<50 || fixed < 0 || fixed > 1<<50 || percent < 0 || percent > 100 || c.IORuns < 0 || c.IORuns > 64 {
 		return errors.New("declared admission requires positive CPU/memory budgets, memory headroom in 0..2^50 bytes and 0..100 percent and an IO run ceiling in 0..64")
@@ -80,10 +85,17 @@ func (g *weightedAdmission) usesDeclarations(r *admissionReservation) bool {
 
 func (g *weightedAdmission) numericFitsLocked(candidate *admissionReservation) bool {
 	cpu, memory := g.resources.CPUMilli, g.resources.MemoryBytes
+	extended := maps.Clone(g.resources.ExtendedResources)
 	legacy := 0
 	charge := func(r *admissionReservation) bool {
 		if g.usesDeclarations(r) {
 			d := g.runCharge(*r.pods)
+			for name, count := range d.ExtendedResources {
+				if count > extended[name] {
+					return false
+				}
+				extended[name] -= count
+			}
 			if d.CPUMilli > cpu || d.MemoryBytes > memory {
 				return false
 			}
@@ -148,7 +160,13 @@ func (g *weightedAdmission) numericBlockedLocked(r *admissionReservation) bool {
 }
 
 func (g *weightedAdmission) validatePodDemand(d *argoworkflow.PodDemand) error {
-	if d == nil || g.resources.Disabled {
+	if d == nil {
+		return nil
+	}
+	if len(d.ExtendedResources) > 0 && (g.resources.Disabled || !g.demandFitsBudget(d)) {
+		return errors.New("extended resources require enabled numeric admission and sufficient explicit operator budgets")
+	}
+	if g.resources.Disabled {
 		return nil
 	}
 	if !d.Valid() {
@@ -159,19 +177,21 @@ func (g *weightedAdmission) validatePodDemand(d *argoworkflow.PodDemand) error {
 
 func (g *weightedAdmission) demandFitsBudget(d *argoworkflow.PodDemand) bool {
 	c := g.runCharge(*d)
+	for name, count := range c.ExtendedResources {
+		if count > g.resources.ExtendedResources[name] {
+			return false
+		}
+	}
 	return c.CPUMilli <= g.resources.CPUMilli && c.MemoryBytes <= g.resources.MemoryBytes
 }
 
-func (g *weightedAdmission) selectDeclaredDemand(receipt *argoworkflow.VMIDemandReceipt) (*argoworkflow.PodDemand, model.ResourceAdmissionFallback) {
+func (g *weightedAdmission) selectDeclaredDemand(receipt *argoworkflow.DemandReceipt) (*argoworkflow.PodDemand, model.ResourceAdmissionFallback) {
 	if g.resources.Disabled || receipt == nil {
 		return nil, ""
 	}
 	d, err := receipt.DeclaredPodDemand()
 	if errors.Is(err, argoworkflow.ErrMemoryUnbounded) {
 		return nil, model.ResourceFallbackMemory
-	}
-	if errors.Is(err, argoworkflow.ErrVMHostUndeclared) {
-		return nil, model.ResourceFallbackVM
 	}
 	if err != nil {
 		return nil, model.ResourceFallbackGraph
@@ -213,7 +233,7 @@ func samePodDemand(a, b *argoworkflow.PodDemand) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
 	}
-	return *a == *b
+	return a.Equal(*b)
 }
 
 func (r *admissionReservation) declaredResources() *model.DeclaredResources {
@@ -221,5 +241,5 @@ func (r *admissionReservation) declaredResources() *model.DeclaredResources {
 		return nil
 	}
 	d := r.gate.runCharge(*r.pods)
-	return &model.DeclaredResources{CPUMilli: d.CPUMilli, MemoryBytes: d.MemoryBytes, Pods: d.Pods}
+	return &model.DeclaredResources{ExtendedResources: maps.Clone(d.ExtendedResources), CPUMilli: d.CPUMilli, MemoryBytes: d.MemoryBytes, Pods: d.Pods}
 }

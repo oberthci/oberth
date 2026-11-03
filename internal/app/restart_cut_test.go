@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"reflect"
 	"testing"
 	"time"
 
@@ -25,13 +26,13 @@ type restartReadController struct {
 }
 
 func (c *restartReadController) WaitResumed(_ context.Context, name, runID string, _ io.Writer, _ []runprogress.Event, _ int64, binding argojob.Adoption) (argojob.Completion, error) {
-	if name != c.request.Name || runID != c.request.RunID || binding != c.binding {
+	if name != c.request.Name || runID != c.request.RunID || !reflect.DeepEqual(binding, c.binding) {
 		panic("adoption identity lost")
 	}
 	return c.observed, c.observationError
 }
 func (c *restartReadController) TerminalStateResumed(_ context.Context, name, runID string, binding argojob.Adoption, events []runprogress.Event) (*argojob.Completion, error) {
-	if name != c.request.Name || runID != c.request.RunID || binding != c.binding {
+	if name != c.request.Name || runID != c.request.RunID || !reflect.DeepEqual(binding, c.binding) {
 		panic("fallback adoption identity lost")
 	}
 	c.resumedReads++

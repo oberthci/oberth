@@ -88,22 +88,33 @@
       "additionalProperties": false,
       "properties": {
         "declaredResources": {
-          "type": "object", "additionalProperties": false,
+          "type": "object",
+          "additionalProperties": false,
           "properties": {
             "disabled": {"type": "boolean"},
             "cpuMillis": {"type": "integer", "minimum": 1, "maximum": 1000000},
             "memoryBytes": {"type": "integer", "minimum": 1, "maximum": 1125899906842624},
             "memoryHeadroomBytes": {"type": "integer", "minimum": 0, "maximum": 1125899906842624},
             "memoryHeadroomPercent": {"type": "integer", "minimum": 0, "maximum": 100},
-            "ioRuns": {"type": "integer", "minimum": 0, "maximum": 64}
+            "ioRuns": {"type": "integer", "minimum": 0, "maximum": 64},
+            "extendedResources": {"type":"object","maxProperties":32,"additionalProperties":{"type":"integer","minimum":1,"maximum":1000000}}
           }
         },
         "runtimeCapacity": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "enabled": { "type": "boolean" },
-            "maxConcurrentJobs": { "type": ["integer", "null"], "minimum": 1, "maximum": 64 }
+            "enabled": {
+              "type": "boolean"
+            },
+            "maxConcurrentJobs": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "maximum": 64
+            }
           }
         },
         "diskFloorBytes": {
@@ -139,10 +150,22 @@
           "additionalProperties": false,
           "description": "Admission weight per size. XL 0 = the whole budget (runs alone).",
           "properties": {
-            "S": {"type": "integer", "minimum": 1},
-            "M": {"type": "integer", "minimum": 1},
-            "L": {"type": "integer", "minimum": 1},
-            "XL": {"type": "integer", "minimum": 0}
+            "S": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "M": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "L": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "XL": {
+              "type": "integer",
+              "minimum": 0
+            }
           }
         }
       }
@@ -551,10 +574,28 @@
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["pattern", "file"],
+              "required": [
+                "pattern",
+                "file"
+              ],
               "properties": {
-                "pattern": {"type": "string", "minLength": 1, "maxLength": 256},
-                "file": {"type": "string", "pattern": "^\\.oberth/[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.yaml$", "not": {"enum": [".oberth/build.yaml", ".oberth/fragment.yaml", ".oberth/schedule.yaml", ".oberth/tests.yaml"]}}
+                "pattern": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "file": {
+                  "type": "string",
+                  "pattern": "^\\.oberth/[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.yaml$",
+                  "not": {
+                    "enum": [
+                      ".oberth/build.yaml",
+                      ".oberth/fragment.yaml",
+                      ".oberth/schedule.yaml",
+                      ".oberth/tests.yaml"
+                    ]
+                  }
+                }
               }
             }
           }
@@ -826,17 +867,14 @@
           "minLength": 1,
           "description": "Positive Kubernetes quantity for per-Pod emissary scratch on nonroot and trusted KVM leaves. Defaults to 1Gi; the server validates the quantity at startup."
         },
-        "vmLauncherServiceAccount": {"type": "string"},
-        "containerDiskPrefixes": {"type": "array", "items": {"type": "string"}},
+        "vmLauncherServiceAccount": {
+          "description": "Retired compatibility key. Ignored."
+        },
+        "containerDiskPrefixes": {
+          "description": "Retired compatibility key. Ignored."
+        },
         "kubevirtCeiling": {
-          "type": "object",
-          "additionalProperties": false,
-          "description": "Cluster-wide ceiling on every KubeVirt grant's per-run VMI budget.",
-          "properties": {
-            "maxVMs": {"type": "integer", "minimum": 1, "maximum": 16},
-            "maxCores": {"type": "integer", "minimum": 1, "maximum": 64},
-            "maxMemory": {"type": "string", "pattern": "^[1-9][0-9]*(Mi|Gi)$"}
-          }
+          "description": "Retired compatibility key. Ignored."
         },
         "workflowTimeout": {
           "type": "string"
@@ -941,28 +979,7 @@
       }
     },
     "vm": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "Server-injected VM capability switches. Does not grant any repository a device; it enables the server to inject one when the repository's annotation requests it.",
-      "properties": {
-        "kvm": {
-          "type": "object",
-          "additionalProperties": false,
-          "description": "KVM device injection for annotated leaves. Requires the KubeVirt device plugin on the node.",
-          "properties": {
-            "enabled": {
-              "type": "boolean",
-              "description": "When true, leaves declared in oberth.ci/kvm-templates receive devices.kubevirt.io/kvm: 1 and OBERTH_KVM=1. When false (default), such declarations fail at admission."
-            }
-          },
-          "required": [
-            "enabled"
-          ]
-        }
-      },
-      "required": [
-        "kvm"
-      ]
+      "description": "Retired compatibility key. Ignored; workflow execution capabilities are operator-managed."
     },
     "promotion": {
       "type": "object",
@@ -1137,59 +1154,7 @@
       }
     },
     "trustedTests": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "recipes"
-      ],
-      "properties": {
-        "recipes": {
-          "type": "array",
-          "maxItems": 128,
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "suite_sha256",
-              "guest_sha256",
-              "harness_image",
-              "suite_url",
-              "guest_url"
-            ],
-            "properties": {
-              "suite_sha256": {
-                "type": "string",
-                "pattern": "^[0-9a-f]{64}$"
-              },
-              "guest_sha256": {
-                "type": "string",
-                "pattern": "^[0-9a-f]{64}$"
-              },
-              "harness_image": {
-                "type": "string",
-                "maxLength": 512,
-                "pattern": "^[^@]+@sha256:[0-9a-f]{64}$"
-              },
-              "suite_url": {
-                "type": "string",
-                "maxLength": 2048,
-                "pattern": "^https://[^?@#]+$"
-              },
-              "guest_url": {
-                "type": "string",
-                "maxLength": 2048,
-                "pattern": "^https://[^?@#]+$"
-              }
-            }
-          }
-        },
-        "kvmSupplementalGroup": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 2147483647,
-          "description": "Actual operator-approved KVM device supplemental GID; positive when recipes are configured, zero when disabled."
-        }
-      }
+      "description": "Retired compatibility key. Ignored; workflow execution capabilities are operator-managed."
     },
     "retention": {
       "type": "object",

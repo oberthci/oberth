@@ -41,7 +41,7 @@ copy resets credential admission and re-earns grants through the ordinary path.
 It preserves source, schedule entry, actor and queue priority. No arbitrary build
 step is replayed from stderr or a client-side timeout.
 
-The one-retry marker survives restart requeue, KVM preflight restart recovery
+The one-retry marker survives restart requeue
 and manual retry/rerun. Human
 reasons carry its fast read-side projection; immutable `run.auto-retry-lineage`
 receipts preserve it if cancellation/supersession replaces the human reason.

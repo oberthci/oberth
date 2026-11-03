@@ -46,7 +46,7 @@ func readPodDemand(workflow *wfv1.Workflow) (*argoworkflow.PodDemand, error) {
 		return nil, nil
 	}
 	var d argoworkflow.PodDemand
-	if len(value) > 256 || json.Unmarshal([]byte(value), &d) != nil || !d.Valid() {
+	if len(value) > 16<<10 || json.Unmarshal([]byte(value), &d) != nil || !d.Valid() {
 		return nil, errors.New("invalid server-declared pod demand binding")
 	}
 	return &d, nil

@@ -18,13 +18,6 @@ import (
 	"github.com/oberthci/oberth/internal/testdb"
 )
 
-func requireStoreNoError(t *testing.T, err error) {
-	t.Helper()
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
 var storeTemplate testdb.Template
 
 func testStore(t *testing.T, now *time.Time) *Store {

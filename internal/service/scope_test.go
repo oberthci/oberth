@@ -170,8 +170,8 @@ func newScopeFixture(t *testing.T) *scopeFixture {
 	fixture.service, err = NewAPI(APIConfig{
 		Runs: database, History: database, Repositories: database, Issues: database,
 		Promotions: database, Logs: logs, Artifacts: kept, Auditor: database,
-		SecretAccess: database, KubeVirtGrants: database, PromotionGrants: database, RepositoryRemover: database,
-		KVMPreflights: database, Health: fixture.health, Signals: NewSignals(), RunCancels: database, RunReruns: database,
+		SecretAccess: database, PromotionGrants: database, RepositoryRemover: database,
+		Health: fixture.health, Signals: NewSignals(), RunCancels: database, RunReruns: database,
 		MaximumWait: testTimeout(50 * time.Millisecond), PromotionWorkspaceRoot: filepath.Join(root, "promotion-work"),
 		SecretStoreVerifier: func(context.Context, api.SecretStoreVerifyRequest) (api.SecretStoreVerifyResponse, error) {
 			return api.SecretStoreVerifyResponse{}, nil
@@ -400,7 +400,6 @@ func TestScopedUplinkCannotTellHiddenFromMissing(t *testing.T) {
 		{"run_logs", map[string]any{"id": hiddenRun.ID, "burn": "test", "step": "unit"}, map[string]any{"id": missingRunID, "burn": "test", "step": "unit"}},
 		{"artifacts", map[string]any{"id": hiddenRun.ID}, map[string]any{"id": missingRunID}},
 		{"artifact_get", map[string]any{"id": hiddenRun.ID, "name": "report"}, map[string]any{"id": missingRunID, "name": "report"}},
-		{"run_kvm_preflight", map[string]any{"id": hiddenRun.ID}, map[string]any{"id": missingRunID}},
 		{"status", map[string]any{"ref": hiddenRun.SHA}, map[string]any{"ref": missingSHA}},
 		{"status", map[string]any{"repo": hiddenRepo, "ref": hiddenRun.SHA}, map[string]any{"repo": missingRepo, "ref": hiddenRun.SHA}},
 		{"logs", map[string]any{"sha": hiddenRun.SHA, "step": "unit"}, map[string]any{"sha": missingSHA, "step": "unit"}},
@@ -428,7 +427,6 @@ func TestScopedUplinkCannotTellHiddenFromMissing(t *testing.T) {
 		{"promotion_list", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
 		{"promote_grant_list", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
 		{"access_list", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
-		{"kubevirt_grant_get", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
 		{"size_grant_get", map[string]any{"repo": hiddenRepo}, map[string]any{"repo": missingRepo}},
 		{"access_list", map[string]any{"repo": hiddenRepo, "pending": true}, map[string]any{"repo": missingRepo, "pending": true}},
 	}
@@ -487,8 +485,6 @@ func TestScopedAdminCannotActOutsideItsUpstream(t *testing.T) {
 	for tool, arguments := range map[string]map[string]any{
 		"access_allow":         {"repo": hiddenRepo, "step": "deploy", "secret": "oberth/data/x"},
 		"access_revoke":        {"repo": hiddenRepo, "step": "release", "secret": "oberth/data/codeberg/token"},
-		"kubevirt_grant":       {"repo": hiddenRepo},
-		"kubevirt_revoke":      {"repo": hiddenRepo},
 		"repo_remove":          {"repo": hiddenRepo},
 		"promote_grant":        {"repo": hiddenRepo, "sha": fixture.runs["codeberg"][0].SHA, "branch": "main", "expires": "1h"},
 		"promote_grant_revoke": {"id": fixture.grants["codeberg"].ID},
@@ -515,9 +511,6 @@ func TestScopedAdminCannotActOutsideItsUpstream(t *testing.T) {
 	// Inside the scope the admin still acts.
 	if _, err := fixture.call(scopedAdmin, "access_allow", map[string]any{"repo": "github/oberthci/oberth", "step": "deploy", "secret": "oberth/data/github/deploy"}); err != nil {
 		t.Fatalf("in-scope access_allow: %v", err)
-	}
-	if _, err := fixture.call(scopedAdmin, "kubevirt_grant", map[string]any{"repo": "github/oberthci/oberth"}); err != nil {
-		t.Fatalf("in-scope kubevirt_grant: %v", err)
 	}
 }
 
@@ -667,27 +660,25 @@ func (bareRunResolver) ResolveWaitRun(context.Context, int64, string, string) (m
 // refused outside the scope; "refused": installation-wide, never for a
 // scoped uplink.
 var toolScopeBehaviour = map[string]string{
-	"uplink_list": "refused", "uplink_revoke": "refused", "uplink_rotate": "refused", "access_dismiss": "refused", "kubevirt_grant_list": "refused",
-	"issue_unlock": "mutation", "issue_close_many": "mutation",
-	"status": "lookup", "logs": "lookup", "run_kvm_preflight": "lookup", "run_get": "lookup",
+	"uplink_list": "refused", "uplink_revoke": "refused", "uplink_rotate": "refused", "access_dismiss": "refused", "issue_unlock": "mutation", "issue_close_many": "mutation",
+	"status": "lookup", "logs": "lookup", "run_get": "lookup",
 	"artifacts": "lookup", "artifact_get": "lookup", "run_logs": "lookup", "wait": "lookup",
 	"promote_status": "lookup", "issue_get": "lookup", "issue_get_many": "lookup",
 	"run_list": "filtered", "promotion_list": "filtered", "issue_list": "filtered",
 	"access_list": "filtered", "repo_list": "filtered", "promote_grant_list": "filtered",
-	"repo_usage":         "lookup",
-	"run_resources":      "lookup",
-	"kubevirt_grant_get": "lookup",
-	"size_grant_get":     "lookup",
-	"system_status":      "filtered",
-	"sync":               "mutation", "promote": "mutation", "promote_retry": "mutation", "publish_retry": "mutation", "run_retry": "mutation", "run_rerun": "mutation",
+	"repo_usage":     "lookup",
+	"run_resources":  "lookup",
+	"size_grant_get": "lookup",
+	"system_status":  "filtered",
+	"sync":           "mutation", "promote": "mutation", "promote_retry": "mutation", "publish_retry": "mutation", "run_retry": "mutation", "run_rerun": "mutation",
 	"run_cancel":   "mutation",
 	"run_purge":    "refused",
 	"issue_create": "mutation", "issue_update": "mutation", "issue_append": "mutation",
 	"issue_close": "mutation", "issue_reopen": "mutation", "issue_delete": "mutation",
 	"issue_lock": "mutation", "access_allow": "mutation", "access_revoke": "mutation",
-	"kubevirt_grant": "mutation", "kubevirt_revoke": "mutation",
 	"size_grant": "mutation", "size_revoke": "mutation",
 	"priority_grant": "refused", "priority_grant_list": "refused", "priority_grant_revoke": "refused",
+	"workflow_capability_grant": "mutation", "workflow_capability_revoke": "mutation", "workflow_capability_get": "lookup",
 	"queue_priority_config": "refused", "queue_priority_get": "refused", "run_priority": "refused",
 	"admission_release": "refused",
 	"repo_remove":       "mutation", "promote_grant": "mutation", "promote_grant_revoke": "mutation",

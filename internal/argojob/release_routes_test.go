@@ -39,7 +39,7 @@ func TestReleaseTagRoutesResolveAndRefuse(t *testing.T) {
 }
 
 func TestReleaseTagRoutesInvalidConfiguration(t *testing.T) {
-	for _, file := range []string{"../../outside.yaml", "/tmp/file.yaml", ".oberth/../file.yaml", ".oberth/build.yaml", ".oberth/fragment.yaml", ".oberth/schedule.yaml", ".oberth/tests.yaml", ".oberth/nested/release.yaml", ".oberth/Bad.yaml", ".oberth/file.go"} {
+	for _, file := range []string{"../../outside.yaml", "/tmp/file.yaml", ".oberth/../file.yaml", ".oberth/build.yaml", ".oberth/fragment.yaml", ".oberth/schedule.yaml", ".oberth/nested/release.yaml", ".oberth/Bad.yaml", ".oberth/file.go"} {
 		if err := (ReleaseTagRoutes{"github/org/repo": {{Pattern: "deploy-*", File: file}}}).Validate(); err == nil {
 			t.Errorf("unsafe file accepted: %q", file)
 		}

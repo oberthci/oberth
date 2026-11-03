@@ -72,6 +72,9 @@ func (controller *Controller) createWorkflowWithRetry(ctx context.Context, reque
 		}
 	}
 	for {
+		if err := controller.verifyCapabilityGrant(retryCtx, request.RepositoryID, request.Capability); err != nil {
+			return nil, !ambiguous && attempts == 0, err
+		}
 		if err := retryCtx.Err(); err != nil {
 			return failure("deadline", errors.Join(lastErr, err), true)
 		}

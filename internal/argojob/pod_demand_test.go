@@ -18,7 +18,7 @@ func TestDeclaredPodSubmissionBindsExactDemandAndRejectsChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	d, err := readPodDemand(wf)
-	if err != nil || d == nil || *d != *r.PodDemand {
+	if err != nil || d == nil || !d.Equal(*r.PodDemand) {
 		t.Fatalf("submission binding: %+v %v", d, err)
 	}
 	source := string(r.Source)
@@ -87,7 +87,7 @@ func TestDeclaredPodAdoptionRestoresSealedDemand(t *testing.T) {
 	stampPodDemand(wf, &d)
 	c := &Controller{config: Config{Namespace: wf.Namespace}}
 	binding, err := c.bindAdoption(wf, req)
-	if err != nil || binding.Pods != d {
+	if err != nil || !binding.Pods.Equal(d) {
 		t.Fatalf("adoption: %+v %v", binding, err)
 	}
 	changed := wf.DeepCopy()
@@ -137,7 +137,7 @@ func TestParallelismChangeCannotReuseReservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d, err := readPodDemand(wf); err != nil || d == nil || *d != *r.PodDemand {
+	if d, err := readPodDemand(wf); err != nil || d == nil || !d.Equal(*r.PodDemand) {
 		t.Fatalf("wrong submission demand: %+v %v", d, err)
 	}
 	r.Source = []byte(strings.Replace(source, "parallelism: 4", "parallelism: 5", 1))

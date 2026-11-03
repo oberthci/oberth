@@ -629,13 +629,23 @@ BEGIN IMMEDIATE;
 
 
 
+DROP TRIGGER IF EXISTS vm_executions_retired_insert;
+DROP TRIGGER IF EXISTS vm_executions_retired_update;
+DROP TRIGGER IF EXISTS vm_executions_retired_delete;
+DROP TRIGGER IF EXISTS vm_capacity_slots_retired_insert;
+DROP TRIGGER IF EXISTS vm_capacity_slots_retired_update;
+DROP TRIGGER IF EXISTS vm_capacity_slots_retired_delete;
+DROP TRIGGER IF EXISTS kubevirt_grants_retired_insert;
+DROP TRIGGER IF EXISTS kubevirt_grants_retired_update;
+DROP TRIGGER IF EXISTS kubevirt_grants_retired_delete;
 DROP TRIGGER IF EXISTS vm_suite_executions_retired_insert;
 DROP TRIGGER IF EXISTS vm_suite_executions_retired_update;
 DROP TRIGGER IF EXISTS vm_suite_executions_retired_delete;
 DROP TRIGGER IF EXISTS vm_suite_resources_retired_insert;
 DROP TRIGGER IF EXISTS vm_suite_resources_retired_update;
 DROP TRIGGER IF EXISTS vm_suite_resources_retired_delete;
-DELETE FROM schema_migrations WHERE version=39;
+DROP TABLE IF EXISTS workflow_capability_grants;
+DELETE FROM schema_migrations WHERE version>=39;
 
 
 DROP TABLE IF EXISTS trusted_applies;
@@ -808,13 +818,23 @@ BEGIN IMMEDIATE;
 
 
 
+DROP TRIGGER IF EXISTS vm_executions_retired_insert;
+DROP TRIGGER IF EXISTS vm_executions_retired_update;
+DROP TRIGGER IF EXISTS vm_executions_retired_delete;
+DROP TRIGGER IF EXISTS vm_capacity_slots_retired_insert;
+DROP TRIGGER IF EXISTS vm_capacity_slots_retired_update;
+DROP TRIGGER IF EXISTS vm_capacity_slots_retired_delete;
+DROP TRIGGER IF EXISTS kubevirt_grants_retired_insert;
+DROP TRIGGER IF EXISTS kubevirt_grants_retired_update;
+DROP TRIGGER IF EXISTS kubevirt_grants_retired_delete;
 DROP TRIGGER IF EXISTS vm_suite_executions_retired_insert;
 DROP TRIGGER IF EXISTS vm_suite_executions_retired_update;
 DROP TRIGGER IF EXISTS vm_suite_executions_retired_delete;
 DROP TRIGGER IF EXISTS vm_suite_resources_retired_insert;
 DROP TRIGGER IF EXISTS vm_suite_resources_retired_update;
 DROP TRIGGER IF EXISTS vm_suite_resources_retired_delete;
-DELETE FROM schema_migrations WHERE version=39;
+DROP TABLE IF EXISTS workflow_capability_grants;
+DELETE FROM schema_migrations WHERE version>=39;
 
 
 DROP INDEX runs_latest_ref_idx;

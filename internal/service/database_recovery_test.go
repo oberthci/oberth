@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/vmrunner"
 )
 
 func TestDatabaseDeadlineLongRecoveryKeepsOperationBudget(t *testing.T) {
@@ -54,55 +53,6 @@ func TestDatabaseDeadlineCompositeExternalDeadlineNotRetried(t *testing.T) {
 	})
 }
 
-type recoveryInventory struct {
-	SchedulerStore
-	vmrunner.KVMJournal
-}
-
-func (recoveryInventory) PendingKVMPreflights(context.Context) ([]vmrunner.KVMExecution, error) {
-	return []vmrunner.KVMExecution{{}}, nil
-}
-
-type slowRecoveryPreflight struct {
-	TrustedPreflight
-	delay   time.Duration
-	failure error
-	calls   int
-}
-
-func (p *slowRecoveryPreflight) Recover(ctx context.Context) ([]string, error) {
-	p.calls++
-	select {
-	case <-time.After(p.delay):
-		return nil, p.failure
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-}
-func TestDatabaseDeadlineTrustedStartupRecoveryKeepsOwnBound(t *testing.T) {
-	for _, stuck := range []bool{false, true} {
-		t.Run(map[bool]string{false: "slow-progress", true: "stuck-cleanup"}[stuck], func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				executor := &slowRecoveryPreflight{delay: 11 * time.Second}
-				if stuck {
-					executor.delay = 2 * time.Minute
-					executor.failure = context.DeadlineExceeded
-				}
-				scheduler := &Scheduler{store: recoveryInventory{}, trusted: executor}
-				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
-				defer cancel()
-				start := time.Now()
-				if err := scheduler.recoverTrustedPreflights(deadlineScope(ctx, scheduler)); err != nil {
-					t.Fatal(err)
-				}
-				if executor.calls != 1 || time.Since(start) != executor.delay {
-					t.Fatalf("cleanup cut/replayed: calls=%d elapsed=%s", executor.calls, time.Since(start))
-				}
-			})
-		})
-	}
-}
-
 func TestDatabaseDeadlineShutdownPreservesInflightDetachedAttempt(t *testing.T) {
 	for _, failure := range []error{nil, deadlineBusyError(5)} {
 		synctest.Test(t, func(t *testing.T) {
@@ -133,30 +83,6 @@ func TestDatabaseDeadlineShutdownPreservesInflightDetachedAttempt(t *testing.T) 
 			}
 		})
 	}
-}
-
-func (p *slowRecoveryPreflight) RecoverRun(ctx context.Context, _ string) error {
-	p.calls++
-	select {
-	case <-time.After(p.delay):
-		return p.failure
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-func TestDatabaseDeadlineStuckRunCleanupReturnsWithGrantRetained(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		executor := &slowRecoveryPreflight{delay: 3 * time.Minute}
-		scheduler := &Scheduler{trusted: executor}
-		grant := &admissionReservation{retained: true}
-		start := time.Now()
-		if err := scheduler.recoverDatabasePreflight(t.Context(), "pending", grant); err != nil {
-			t.Fatal(err)
-		}
-		if executor.calls != 1 || time.Since(start) != 2*time.Minute || !grant.retained {
-			t.Fatalf("cleanup blocked/released: calls=%d elapsed=%s retained=%t", executor.calls, time.Since(start), grant.retained)
-		}
-	})
 }
 
 type settlementDeadlineStore struct {
@@ -214,19 +140,6 @@ func TestDatabaseDeadlineReplayRetriesStorageWithoutRepeatingGit(t *testing.T) {
 		})
 		if err != nil || replays != 1 || git.ensureCalls != 1 || len(git.deletedBranches) != 1 || receives.calls != 3 {
 			t.Fatalf("replay repeated external work: err=%v replays=%d ensure=%d deletes=%d db=%d", err, replays, git.ensureCalls, len(git.deletedBranches), receives.calls)
-		}
-	})
-}
-
-func TestDatabaseDeadlineTrustedRecoveryKeepsInvariantFailures(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		invariant := errors.New("immutable binding mismatch")
-		for _, failure := range []error{invariant, errors.Join(invariant, context.DeadlineExceeded), errors.Join(invariant, deadlineBusyError(5))} {
-			executor := &slowRecoveryPreflight{failure: failure}
-			scheduler := &Scheduler{trusted: executor}
-			if err := scheduler.recoverDatabasePreflight(t.Context(), "pending", &admissionReservation{retained: true}); !errors.Is(err, invariant) || executor.calls != 1 {
-				t.Fatalf("recovery hid/replayed invariant: %v calls=%d", err, executor.calls)
-			}
 		}
 	})
 }

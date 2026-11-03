@@ -43,10 +43,7 @@ import (
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/sshserver"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
-
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -55,52 +52,6 @@ import (
 type stringList []string
 
 var witnessChainResetUUIDPattern = regexp.MustCompile(`^(?:[0-9a-f]{64}|[0-9a-f]{80})$`)
-
-// The cluster ceiling caps every repository grant's concurrent VMI budget. A
-// grant still defaults to 2 VMs, 6 cores and 12Gi; the ceiling only bounds
-// what an administrator may raise a grant to on this cluster.
-const (
-	defaultKubeVirtCeilingVMs    = 8
-	defaultKubeVirtCeilingCores  = 24
-	defaultKubeVirtCeilingMemory = "48Gi"
-)
-
-// kubeVirtCeiling parses and validates the cluster ceiling flags. An unset
-// field (options built without flag parsing) takes the flag default.
-func kubeVirtCeiling(options serveOptions) (argoworkflow.VMIBudget, error) {
-	vms, cores, memoryValue := options.argoKubeVirtMaxVMs, options.argoKubeVirtMaxCores, strings.TrimSpace(options.argoKubeVirtMaxMemory)
-	if vms == 0 {
-		vms = defaultKubeVirtCeilingVMs
-	}
-	if cores == 0 {
-		cores = defaultKubeVirtCeilingCores
-	}
-	if memoryValue == "" {
-		memoryValue = defaultKubeVirtCeilingMemory
-	}
-	memory, err := resource.ParseQuantity(memoryValue)
-	if err != nil {
-		return argoworkflow.VMIBudget{}, fmt.Errorf("serve: --argo-kubevirt-max-memory: %w", err)
-	}
-	ceiling := argoworkflow.VMIBudget{MaxVMs: vms, MaxCores: cores, MaxMemory: memory}
-	if err := ceiling.Validate(); err != nil {
-		return argoworkflow.VMIBudget{}, fmt.Errorf("serve: KubeVirt ceiling: %w", err)
-	}
-	return ceiling, nil
-}
-
-// splitRunnerImagePrefixes parses the comma-separated allowlist flag; empty
-// items are dropped so a trailing comma cannot silently allow everything.
-func splitRunnerImagePrefixes(value string) []string {
-	var prefixes []string
-	for prefix := range strings.SplitSeq(value, ",") {
-		prefix = strings.TrimSpace(prefix)
-		if prefix != "" {
-			prefixes = append(prefixes, prefix)
-		}
-	}
-	return prefixes
-}
 
 func (values *stringList) String() string { return strings.Join(*values, ",") }
 func (values *stringList) Set(value string) error {
@@ -166,11 +117,6 @@ type serveOptions struct {
 	argoCredentialedAccount      string
 	argoCISecretsAccount         string
 	argoExecutorAccount          string
-	argoVMLauncherAccount        string
-	argoContainerDiskPrefixes    string
-	argoKubeVirtMaxVMs           int
-	argoKubeVirtMaxCores         int
-	argoKubeVirtMaxMemory        string
 	argoVaultAddress             string
 	argoVaultCredentialedRole    string
 	argoVaultCISecretsRole       string
@@ -197,14 +143,6 @@ type serveOptions struct {
 	// PKI engine: serve renews it in place before it expires.
 	serverLeafRenewal    *serverLeafRenewal
 	argoGoProxyNamespace goproxy.NamespaceConfig
-
-	// VM capability switches. KVM device injection is a server-owned
-	// infrastructure decision: a repository declares which leaves want it
-	// (oberth.ci/kvm-templates), but the device is only injected when this
-	// switch is on.
-	vmKVMEnabled       bool
-	trustedRecipesFile string
-	trustedKVMGroup    int64
 
 	// Promotion grant maximum lifetime. Default 24h, hard ceiling 168h (7 days).
 	promotionGrantMaxLifetime time.Duration
@@ -240,6 +178,7 @@ func runServe(ctx context.Context, arguments []string, output io.Writer) error {
 
 func parseServeOptions(arguments []string, output io.Writer) (serveOptions, error) {
 	options := serveOptions{declaredAdmission: service.DefaultDeclaredAdmissionConfig()}
+	var extendedResourceBudgets string
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	flags.StringVar(&options.dataRoot, "data", "/data", "persistent data root")
@@ -266,6 +205,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.Float64Var(&options.kubernetesQPS, "kubernetes-client-qps", 50, "Kubernetes API requests per second per server client")
 	flags.IntVar(&options.kubernetesBurst, "kubernetes-client-burst", 100, "Kubernetes API burst allowance per server client")
 	flags.IntVar(&options.maxConcurrent, "max-concurrent-jobs", 3, "maximum concurrent Jobs (boot default)")
+	flags.StringVar(&extendedResourceBudgets, "admission-extended-resources", "{}", "JSON map of qualified extended-resource names to integer capacity; no implicit capacity")
 	flags.BoolVar(&options.declaredAdmission.Disabled, "disable-declared-admission", false, "administrator kill switch: admit new runs by size class")
 	flags.Int64Var(&options.declaredAdmission.CPUMilli, "admission-cpu-millis", 8000, "CPU budget for declared workflow and VM demand, excluding platform reserve")
 	flags.Int64Var(&options.declaredAdmission.MemoryBytes, "admission-memory-bytes", 17179869184, "memory budget for declared workflow and VM demand, excluding platform reserve")
@@ -310,11 +250,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.argoCredentialedAccount, "argo-credentialed-serviceaccount", "oberth-argo-credentialed", "ServiceAccount for release templates with approved secrets; carries a projected token for OpenBao Kubernetes auth")
 	flags.StringVar(&options.argoCISecretsAccount, "argo-ci-secrets-serviceaccount", "oberth-argo-ci-secrets", "ServiceAccount for CI templates with approved upstream-scoped secrets; its Vault role never carries release grants")
 	flags.StringVar(&options.argoExecutorAccount, "argo-executor-serviceaccount", "oberth-argo-executor", "ServiceAccount for Argo's own executor containers; must differ from all pipeline identities")
-	flags.StringVar(&options.argoVMLauncherAccount, "argo-vm-launcher-serviceaccount", "oberth-argo-vm-launcher", "ServiceAccount used only by admitted VMI resource templates")
-	flags.StringVar(&options.argoContainerDiskPrefixes, "argo-container-disk-prefixes", "", "comma-separated administrator allowlist of VMI containerDisk repository prefixes")
-	flags.IntVar(&options.argoKubeVirtMaxVMs, "argo-kubevirt-max-vms", defaultKubeVirtCeilingVMs, "cluster-wide ceiling on any KubeVirt grant's concurrent VMIs (1..16)")
-	flags.IntVar(&options.argoKubeVirtMaxCores, "argo-kubevirt-max-cores", defaultKubeVirtCeilingCores, "cluster-wide ceiling on any KubeVirt grant's concurrent VMI cores across admitted runs (1..64)")
-	flags.StringVar(&options.argoKubeVirtMaxMemory, "argo-kubevirt-max-memory", defaultKubeVirtCeilingMemory, "cluster-wide ceiling on any KubeVirt grant's concurrent VMI memory across admitted runs (1Gi..256Gi)")
 	flags.StringVar(&options.argoVaultAddress, "argo-vault-address", "", "OpenBao API base URL injected into credentialed Argo containers as VAULT_ADDR (HTTPS)")
 	flags.StringVar(&options.argoVaultCredentialedRole, "argo-vault-credentialed-role", "", "OpenBao Kubernetes auth role for credentialed release pipelines; bound to the credentialed ServiceAccount and namespace")
 	flags.StringVar(&options.argoVaultCISecretsRole, "argo-vault-ci-secrets-role", "", "OpenBao Kubernetes auth role for CI pipelines with approved upstream-scoped secrets; bound to the CI-secrets ServiceAccount and namespace (empty refuses CI credentialed pipelines at admission)")
@@ -333,9 +268,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.DurationVar(&options.argoWorkflowTimeout, "argo-workflow-timeout", 12*time.Hour, "ceiling on a Workflow's own activeDeadlineSeconds")
 	flags.IntVar(&options.argoWorkflowTTL, "argo-workflow-ttl", 3600, "finished Workflow retention in seconds")
 	flags.StringVar(&options.argoResourceSamplerConfig, "argo-resource-sampler-config", "", "administrator-owned kubelet sampler JSON config; disabled when empty")
-	flags.BoolVar(&options.vmKVMEnabled, "vm-kvm-enabled", false, "enable server-injected KVM device access for annotated leaves (requires KubeVirt device plugin)")
-	flags.StringVar(&options.trustedRecipesFile, "trusted-tests-recipes", "", "public operator-approved trusted suite recipes JSON file (requires --vm-kvm-enabled)")
-	flags.Int64Var(&options.trustedKVMGroup, "trusted-tests-kvm-group", 0, "operator-approved positive /dev/kvm supplemental GID required for trusted suites; no default device group")
 	flags.DurationVar(&options.promotionGrantMaxLifetime, "promotion-grant-max-lifetime", 24*time.Hour, "maximum lifetime for promotion grants (default 24h, hard ceiling 168h)")
 	flags.DurationVar(&options.gitCommandTimeout, "git-timeout", 10*time.Minute, "Git command timeout")
 	flags.DurationVar(&options.gcInterval, "git-gc-interval", 24*time.Hour, "periodic Git GC interval")
@@ -369,6 +301,9 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	}
 	if err := validateServeOptions(options); err != nil {
 		return serveOptions{}, err
+	}
+	if err := json.Unmarshal([]byte(extendedResourceBudgets), &options.declaredAdmission.ExtendedResources); err != nil {
+		return serveOptions{}, fmt.Errorf("serve: --admission-extended-resources: %w", err)
 	}
 	if err := options.declaredAdmission.Validate(); err != nil {
 		return serveOptions{}, err
@@ -795,28 +730,16 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
-	argoJobs.SetKubeVirtGrantLoader(database)
+	argoJobs.SetWorkflowCapabilityLoader(database.ActiveWorkflowCapability)
 	logger.Printf("argo execution engine: namespace=%s pipeline-sa=%s credentialed-sa=%s ci-secrets-sa=%s executor-sa=%s",
 		options.argoNamespace, options.argoPipelineAccount, options.argoCredentialedAccount,
 		options.argoCISecretsAccount, options.argoExecutorAccount)
 	if len(options.secretStorePaths) > 0 {
 		logger.Printf("--secretstore-path values are used only by 'oberth secretstore verify' as default paths; admission uses the approval table exclusively")
 	}
-	recipes, err := readTrustedRecipes(options.trustedRecipesFile)
-	if err != nil {
-		return err
-	}
-	var trusted service.TrustedPreflight
-	if len(recipes) > 0 {
-		trusted, err = app.NewTrustedPreflights(argoJobs, database, recipes, filepath.Join(options.dataRoot, "work"), anchors.AllowMutation)
-		if err != nil {
-			return err
-		}
-	}
 	signals := service.NewSignals()
 	scheduler, err := service.NewScheduler(service.SchedulerConfig{
 		Store: database, Git: git, Logs: logs, Jobs: argoJobs, ReleaseJobs: argoJobs, Auditor: database,
-		TrustedPreflight: trusted, Signals: signals, WorkspaceRoot: filepath.Join(options.dataRoot, "work"), MaxConcurrent: options.maxConcurrent,
 		MaxConcurrentFile:       options.maxConcurrentFile,
 		MutationGate:            anchors.AllowMutation,
 		AdmissionDiskFloorBytes: options.admissionDiskFloorBytes,
@@ -1042,7 +965,6 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		ReleasePreflight:     argoJobs,
 		UplinkLifecycle:      database, DeclarationDismissal: database,
 		IssueLifecycle:     database,
-		KVMPreflights:      database,
 		SchedulingObserver: argoJobs, Admission: scheduler,
 		Runs: database, History: database, RunRetries: database, Repositories: database, Issues: database,
 		Promotions: database, PromotionRuns: database, Enqueues: scheduler, Git: git,
@@ -1050,7 +972,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		MutationGate:           anchors.AllowMutation,
 		PromotionWorkspaceRoot: filepath.Join(options.dataRoot, "work"),
 		SecretAccess:           database,
-		KubeVirtGrants:         database,
+		WorkflowCapabilities:   database,
 		SizeGrants:             database,
 		QueuePriorities:        database,
 		SecretStoreVerifier:    buildSecretStoreVerifier(options, kube),
@@ -2228,4 +2150,17 @@ func shutdownHTTP(ctx context.Context, server *http.Server) error {
 		return errors.Join(err, server.Close())
 	}
 	return nil
+}
+
+// splitRunnerImagePrefixes parses the comma-separated allowlist flag; empty
+// items are dropped so a trailing comma cannot silently allow everything.
+func splitRunnerImagePrefixes(value string) []string {
+	var prefixes []string
+	for prefix := range strings.SplitSeq(value, ",") {
+		prefix = strings.TrimSpace(prefix)
+		if prefix != "" {
+			prefixes = append(prefixes, prefix)
+		}
+	}
+	return prefixes
 }

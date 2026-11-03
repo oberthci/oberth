@@ -1,7 +1,6 @@
 package argoworkflow
 
 import (
-	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -85,7 +84,7 @@ func TestDeclaredMemoryLimitsRequiredForEveryPodContainer(t *testing.T) {
 				wf.Spec.Templates = append(wf.Spec.Templates, wfv1.Template{Name: wf.Spec.Entrypoint, Steps: []wfv1.ParallelSteps{{Steps: []wfv1.WorkflowStep{{Name: leaf.Name, Template: leaf.Name, WithParam: "{{inputs.parameters.items}}"}}}}})
 			}
 			before := wf.DeepCopy()
-			demand, err := DeclaredHostPeak(wf, RunTriggerBranch)
+			demand, err := DeclaredPodPeak(wf)
 			if wantNumeric {
 				if err != nil || demand == nil {
 					t.Fatalf("bounded pod lost numeric eligibility: %+v %v", demand, err)
@@ -98,86 +97,6 @@ func TestDeclaredMemoryLimitsRequiredForEveryPodContainer(t *testing.T) {
 			}
 			if !reflect.DeepEqual(wf, before) {
 				t.Fatal("declarations changed")
-			}
-		})
-	}
-}
-
-func TestVMIRequestMemoryBoundRejectsGuestOverride(t *testing.T) {
-	wf := hostVMWorkflow(t)
-	r := wf.Spec.Templates[1].Resource
-	var manifest map[string]any
-	if err := json.Unmarshal([]byte(r.Manifest), &manifest); err != nil {
-		t.Fatal(err)
-	}
-	domain := manifest["spec"].(map[string]any)["domain"].(map[string]any)
-	domain["memory"] = map[string]any{"guest": "64Gi"}
-	raw, err := json.Marshal(manifest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	r.Manifest = string(raw)
-	if err := admitVMIResource("step-11111111", r, []string{"example.invalid/"}); err == nil || !strings.Contains(err.Error(), "unapproved field") {
-		t.Fatalf("guest memory override admitted: %v", err)
-	}
-}
-
-func TestDeclaredVMGuestMemoryBoundAndLauncherContainerLimits(t *testing.T) {
-	for _, shape := range []string{"vmi-request-only", "vmi-memory-undeclared", "launcher-init", "launcher-sidecar", "ordinary-step", "all-limited", "launcher-helpers-limited"} {
-		t.Run(shape, func(t *testing.T) {
-			wf := hostVMWorkflow(t)
-			wf.Spec.Templates[2].Container.Resources.Limits = corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("1Gi")}
-			helper := wfv1.UserContainer{Container: *memoryLimitedLeaf("step-44444444").Container}
-			helper.Resources.Limits = nil
-			switch shape {
-			case "vmi-request-only", "vmi-memory-undeclared":
-				var m vmiManifest
-				if err := json.Unmarshal([]byte(wf.Spec.Templates[1].Resource.Manifest), &m); err != nil {
-					t.Fatal(err)
-				}
-				m.Spec.Domain.Resources.Limits.Memory = ""
-				if shape == "vmi-memory-undeclared" {
-					m.Spec.Domain.Resources.Requests.Memory = ""
-				}
-				raw, err := json.Marshal(m)
-				if err != nil {
-					t.Fatal(err)
-				}
-				wf.Spec.Templates[1].Resource.Manifest = string(raw)
-			case "launcher-init":
-				wf.Spec.Templates[1].InitContainers = []wfv1.UserContainer{helper}
-			case "launcher-sidecar":
-				wf.Spec.Templates[1].Sidecars = []wfv1.UserContainer{helper}
-			case "ordinary-step":
-				wf.Spec.Templates[2].Container.Resources.Limits = nil
-			case "launcher-helpers-limited":
-				helper.Resources.Limits = corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("32Mi")}
-				wf.Spec.Templates[1].InitContainers = []wfv1.UserContainer{helper}
-				wf.Spec.Templates[1].Sidecars = []wfv1.UserContainer{helper}
-			}
-			before := wf.DeepCopy()
-			if shape == "vmi-request-only" {
-				if err := admitVMIResource("step-11111111", wf.Spec.Templates[1].Resource, []string{"example.invalid/"}); err != nil {
-					t.Fatalf("request-only VMI refused by policy: %v", err)
-				}
-			}
-			demand, err := DeclaredHostPeak(wf, RunTriggerBranch)
-			if shape == "all-limited" || shape == "launcher-helpers-limited" || shape == "vmi-request-only" {
-				if err != nil || demand == nil {
-					t.Fatalf("bounded VM lost numeric eligibility: %+v %v", demand, err)
-				}
-				if shape == "vmi-request-only" && demand.MemoryBytes != (3<<30)+VMILauncherMemoryBytes {
-					t.Fatalf("request-only VMI did not reserve guest memory plus launcher: %+v", demand)
-				}
-			} else if shape == "vmi-memory-undeclared" {
-				if demand != nil || !errors.Is(err, ErrVMHostUndeclared) {
-					t.Fatalf("VMI without memory declaration gained numeric credit: %+v %v", demand, err)
-				}
-			} else if demand != nil || err == nil || !strings.Contains(err.Error(), "memory limit") {
-				t.Fatalf("unbounded VM pod gained numeric eligibility: %+v %v", demand, err)
-			}
-			if !reflect.DeepEqual(wf, before) {
-				t.Fatal("VM manifest changed")
 			}
 		})
 	}

@@ -125,7 +125,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 				return result
 			case "waiting":
 				result.Message = waitingAdmissionMessage(result.Admission)
-				if result.Admission.KubeVirtCapacity || result.Admission.Pressure != nil {
+				if result.Admission.Pressure != nil {
 					// This repository's grant is the blocker, independent of
 					// shared weight or other repositories' visibility.
 					return result
@@ -145,11 +145,6 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 				return result
 			case "admitted":
 				if run.StartedAt == nil {
-					if service.submittedKVMPreflight(ctx, run) {
-						result.State = "preflight"
-						result.Message = "Trusted KVM preflight submitted; awaiting its result and cleanup before workflow submission."
-						return result
-					}
 					result.State = "waiting"
 					result.Message = "Resource admission granted; waiting for workflow submission."
 					return result
@@ -159,18 +154,8 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 		}
 	}
 	if run.StartedAt == nil {
-		if service.submittedKVMPreflight(ctx, run) {
-			result.State = "preflight"
-			result.Message = "Trusted KVM preflight submitted; awaiting its result and cleanup before workflow submission."
-			return result
-		}
 		result.State = "waiting"
 		result.Message = "Waiting for workflow submission."
-		return result
-	}
-	if service.submittedKVMPreflight(ctx, run) {
-		result.State = "preflight"
-		result.Message = "Trusted KVM preflight submitted; awaiting its result and cleanup before workflow submission."
 		return result
 	}
 	if service.schedulingObserver == nil {
@@ -192,25 +177,11 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 	return result
 }
 
-func (service *API) submittedKVMPreflight(ctx context.Context, run model.Run) bool {
-	if service.kvmPreflights == nil || run.JobName != "" || run.Status != model.RunRunning {
-		return false
-	}
-	preflight, err := service.kvmPreflights.KVMPreflight(ctx, run.ID)
-	return err == nil && preflight.Submitted && !preflight.Rejected && !preflight.Cleaned
-}
-
 // waitingAdmissionMessage names the concurrency group and the exact run a
 // grouped run waits on (#658). The group is a validated [a-z0-9-] name and the
 // runs are server-issued IDs, so neither can carry arbitrary text.
 func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
 
-	if admission.KubeVirtCapacity {
-		return "KubeVirt capacity"
-	}
-	if admission.VMCapacity {
-		return "Waiting for trusted VM capacity; no weighted resources or concurrency group held."
-	}
 	switch {
 	case admission.DiskFloor != nil && admission.DiskFloor.BelowFloor:
 		return fmt.Sprintf("Waiting for disk space: %d bytes free, floor is %d bytes. "+

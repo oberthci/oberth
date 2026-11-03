@@ -885,24 +885,6 @@ func (s *Store) recoverInterruptedRuns(ctx context.Context) error {
 		return fmt.Errorf("begin owner startup recovery: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `
-INSERT INTO run_cancellations(run_id, job_name, superseded_by, reason, created_at)
-SELECT id, job_name, '', 'owner_restart', ?
-FROM runs
-WHERE status = 'running' AND job_name != ''
-  AND EXISTS (SELECT 1 FROM vm_executions
-              WHERE vm_executions.run_id = runs.id
-                AND execution_kind = 'kvm-preflight' AND cleaned = 0)
-  AND NOT EXISTS (
-      SELECT 1 FROM publications
-      WHERE publications.run_id = runs.id AND publications.status = 'pending'
-  )
-ON CONFLICT(run_id) DO UPDATE SET
-    job_name = excluded.job_name,
-    reason = 'owner_restart',
-    completed_at = NULL`, now); err != nil {
-		return fmt.Errorf("record orphan Job cancellations: %w", err)
-	}
 	// An earlier owner may have recorded the old unconditional restart
 	// deletion. A resumable Workflow is now owned by reconciliation;
 	// only explicit supersede/cancel obligations still authorize its deletion.
@@ -914,11 +896,6 @@ WHERE reason = 'owner_restart' AND completed_at IS NULL
       WHERE runs.id = run_cancellations.run_id AND status = 'running'
         AND phase != 'infrastructure-pending'
         AND job_name != ''
-        AND NOT EXISTS (
-            SELECT 1 FROM vm_executions
-            WHERE vm_executions.run_id = runs.id
-              AND execution_kind = 'kvm-preflight' AND cleaned = 0
-        )
   )`, now); err != nil {
 		return fmt.Errorf("retire legacy Workflow restart cancellations: %w", err)
 	}
@@ -967,16 +944,6 @@ ORDER BY queue_sequence`)
 			// Runs with a known Job name stay in "running" status so the
 			// scheduler's startup reconciliation can query K8s for their
 			// terminal state before deciding whether to interrupt.
-			continue
-		}
-		// A trusted preflight owns its empty-Job parent until identity-bound
-		// cleanup and durable recovery settle. Ordinary restart requeue would
-		// bypass that interlock and forget the one-retry budget.
-		var preflights int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM vm_executions WHERE run_id=? AND execution_kind='kvm-preflight'`, active.ID).Scan(&preflights); err != nil {
-			return err
-		}
-		if preflights != 0 {
 			continue
 		}
 		if _, requeueErr := s.requeueStrandedRunTx(ctx, tx, active, now); requeueErr == nil {

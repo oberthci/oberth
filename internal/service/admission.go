@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"maps"
 	"sort"
 	"strconv"
 	"sync"
@@ -106,7 +107,6 @@ type admissionReservation struct {
 	estimate time.Duration
 	// backfilled marks a grant made beside a waiting head.
 	backfilled bool
-	kubeVirt   KubeVirtResources
 	size       periapsis.Size
 	// priorityMaximum caps only automatic tag urgency, not release execution.
 	priorityMaximum      periapsis.Size
@@ -127,8 +127,6 @@ type admissionReservation struct {
 	// pass. Its weight and group stay held for the rest of this process
 	// instead of passing to the next run.
 	retained bool
-	// vmParked owns no weight, group or dispatch slot while durable VM capacity is busy.
-	vmParked bool
 	// abandoned marks an ungranted reservation withdrawn because its run was
 	// terminalized by someone other than its owner (a newer push, a restart
 	// requeue or an operator cancel) while it was still preparing or waiting.
@@ -154,7 +152,6 @@ type admissionRequest struct {
 	PriorityMaximum      periapsis.Size
 	PriorityLookupFailed bool
 	Group                string
-	KubeVirt             *KubeVirtResources
 	// RefKind and SHA key the durable head-wait origin; HeadSince is that
 	// origin when one was recorded before a restart; Estimate is the run's
 	// predicted duration from history (#1085).
@@ -290,12 +287,6 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 		reservation.cancel()
 		return nil, fmt.Errorf("service: invalid concurrency group %q", request.Group)
 	}
-	if request.KubeVirt != nil {
-		if err := request.KubeVirt.Validate(); err != nil {
-			reservation.cancel()
-			return nil, err
-		}
-	}
 	size := request.Size.Effective()
 	gate := reservation.gate
 	gate.mu.Lock()
@@ -306,10 +297,6 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 			return nil, errAdmissionAbandoned
 		}
 		return nil, context.Canceled
-	}
-	reservation.vmParked = false
-	if request.KubeVirt != nil {
-		reservation.kubeVirt = *request.KubeVirt
 	}
 	if request.RunID != "" {
 		reservation.runID = request.RunID
@@ -336,6 +323,7 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 	if request.Pods != nil && !gate.resources.Disabled {
 		if gate.demandFitsBudget(request.Pods) {
 			pods := *request.Pods
+			pods.ExtendedResources = maps.Clone(request.Pods.ExtendedResources)
 			reservation.pods = &pods
 		} else {
 			reservation.fallback = model.ResourceFallbackBudget
@@ -413,7 +401,7 @@ func (reservation *admissionReservation) cancel() {
 
 // abandon withdraws the reservation of a run that was terminalized while it
 // had not been granted: still preparing, waiting for weight, parked on its
-// concurrency group, or parked on VM capacity. Such a run owns no Workflow,
+// concurrency group. Such a run owns no Workflow,
 // so nothing has to be proved gone first. Its place at the head of the FIFO,
 // and its position ahead of later members of its group, end now rather than
 // when its owner happens to wake, so the same pass admits the runs it was
@@ -538,7 +526,7 @@ func (gate *weightedAdmission) grantLocked() {
 			reservation.backfilled = true
 		}
 		// Stop at the first otherwise eligible candidate. A pressure timeout
-		// never bypasses priority, group, VM, disk, weight or backfill rules.
+		// never bypasses priority, group, disk, weight or backfill rules.
 		if gate.deferPressureLocked(reservation, now) {
 			reservation.backfilled = false
 			reservation.backfillMessage = ""
@@ -574,7 +562,7 @@ func (gate *weightedAdmission) grantLocked() {
 // run past its MaxConcurrent ceiling: every claimed, unparked run holds its
 // grant, and the weight budget, the run ceiling and the disk floor all still
 // have room for at least an S run. unparked is the dispatch loop's count of
-// claimed runs not parked on a group or VM capacity.
+// claimed runs not parked on a group.
 func (gate *weightedAdmission) spareWeightForClaim(unparked int) bool {
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
@@ -665,16 +653,12 @@ func (gate *weightedAdmission) removeLocked(reservation *admissionReservation) {
 	}
 }
 
-// parkedLocked counts VM-capacity waiters and prepared waiters held back by their concurrency
+// parkedLocked counts prepared waiters held back by their concurrency
 // group: another run of the same repository holds it, or an earlier run of the
 // same group is waiting ahead of them.
 func (gate *weightedAdmission) parkedLocked() int {
 	parked := 0
 	for _, reservation := range gate.waiters {
-		if reservation.vmParked || gate.kubeVirtBlockedLocked(reservation) {
-			parked++
-			continue
-		}
 		if holder, ahead := gate.groupBlockerLocked(reservation); reservation.prepared && (holder != "" || ahead != "") {
 			parked++
 		}
@@ -682,7 +666,7 @@ func (gate *weightedAdmission) parkedLocked() int {
 	return parked
 }
 
-// groupParked reports claimed runs parked on VM capacity or their concurrency
+// groupParked reports claimed runs waiting on their concurrency
 // group. The dispatch loop does not count them against its ceiling.
 func (gate *weightedAdmission) groupParked() int {
 	gate.mu.Lock()
@@ -704,7 +688,7 @@ func (gate *weightedAdmission) groupBlockerLocked(reservation *admissionReservat
 		if candidate == reservation {
 			break
 		}
-		if candidate.prepared && !candidate.vmParked && candidate.group == reservation.group {
+		if candidate.prepared && candidate.group == reservation.group {
 			return "", candidate.runID
 		}
 	}
@@ -712,16 +696,13 @@ func (gate *weightedAdmission) groupBlockerLocked(reservation *admissionReservat
 }
 
 // headBlockerLocked returns the waiter that stops the grant pass: the first
-// claimed run in queue order that is prepared, not parked on its group or VM
+// claimed run in queue order that is prepared, not parked on its group
 // capacity, and still not granted. grantLocked has already admitted every
 // waiter it could, so that run is waiting on weight, the run ceiling or the
 // disk floor, and every unparked run claimed after it waits behind it. Nil
 // while the head is still preparing (its size is unknown) or nothing waits.
 func (gate *weightedAdmission) headBlockerLocked() *admissionReservation {
 	for _, reservation := range gate.waiters {
-		if reservation.vmParked || gate.kubeVirtBlockedLocked(reservation) {
-			continue
-		}
 		if !reservation.prepared {
 			return nil
 		}
@@ -783,8 +764,6 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 	if reservation.prepared {
 		result.DeclaredResources = reservation.declaredResources()
 		result.State = "waiting"
-		result.VMCapacity = reservation.vmParked
-		result.KubeVirtCapacity = gate.kubeVirtBlockedLocked(reservation)
 		result.Size = string(reservation.size)
 		result.Weight = reservation.weight
 		result.Group = reservation.groupName
@@ -801,7 +780,7 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 	}
 	result.Pressure = gate.pressureWaitLocked(reservation)
 	result.GroupHolder, result.GroupAhead = gate.groupBlockerLocked(reservation)
-	if reservation.prepared && !reservation.vmParked && !result.KubeVirtCapacity && result.GroupHolder == "" && result.GroupAhead == "" {
+	if reservation.prepared && result.GroupHolder == "" && result.GroupAhead == "" {
 		if head := gate.headBlockerLocked(); head == reservation {
 			result.HeadOfQueue = true
 			result.BlockedBy = gate.blockerLocked(head)
@@ -813,33 +792,6 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 		result.DiskFloor = gate.diskFloor.observation()
 	}
 	return result
-}
-
-// parkVM is permitted only after the durable journal proves this run owns no
-// execution. It preserves claim order but releases every scheduling permit.
-func (reservation *admissionReservation) parkVM() error {
-	gate := reservation.gate
-	gate.mu.Lock()
-	defer gate.mu.Unlock()
-	if !reservation.granted || reservation.released || reservation.canceled || reservation.retained {
-		return fmt.Errorf("service: cannot park inactive VM reservation")
-	}
-	reservation.granted = false
-	reservation.vmParked = true
-	reservation.delayed = true
-	reservation.ready = make(chan struct{})
-	gate.used -= reservation.weight
-	gate.runs--
-	if reservation.group != "" && gate.groups[reservation.group] == reservation {
-		delete(gate.groups, reservation.group)
-	}
-	gate.waiters = append(gate.waiters, reservation)
-	gate.sortWaitersLocked()
-	gate.grantLocked()
-	if gate.onPark != nil {
-		gate.onPark()
-	}
-	return nil
 }
 
 // Re-sort on every admission pass because starvation changes effective class.

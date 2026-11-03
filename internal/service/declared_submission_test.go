@@ -13,7 +13,7 @@ import (
 
 type declaredJobs struct{ *concurrentJobs }
 
-func (j declaredJobs) PipelineKubeVirt(_ context.Context, req JobRequest) (KubeVirtResources, error) {
+func (j declaredJobs) PipelineDemandReceipt(_ context.Context, req JobRequest) (*argoworkflow.DemandReceipt, error) {
 	source := []byte(`apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
@@ -31,10 +31,10 @@ spec:
 `)
 	resolved, err := argoworkflow.ResolveRunSource(source, nil, argoworkflow.RunSourceBinding{RunID: req.Run.ID, RepositoryID: req.Repository.ID, SHA: req.Run.SHA, File: ".oberth/build.yaml", Trigger: argoworkflow.RunTriggerBranch})
 	if err != nil {
-		return KubeVirtResources{}, err
+		return nil, err
 	}
 	receipt, err := resolved.Receipt(argoworkflow.Policy{RunnerImagePrefixes: []string{"example.invalid/"}})
-	return KubeVirtResources{Receipt: receipt}, err
+	return receipt, err
 }
 
 func TestDeclaredSubmissionIgnoresSizeGrantAndKillSwitchRestoresIt(t *testing.T) {
@@ -82,12 +82,12 @@ func TestDeclaredCreateContractRestoresNumericReservationWithKillSwitch(t *testi
 	f := newConcurrencyFixture(t, periapsis.M, 3)
 	run := model.Run{ID: strings.Repeat("a", 32), JobName: "step-abc12345", SHA: strings.Repeat("b", 40), RepoID: f.repo.ID, QueueSequence: 1}
 	d := &argoworkflow.PodDemand{CPUMilli: 6000, MemoryBytes: 8 << 30, Pods: 2}
-	if err := f.scheduler.recordCreateAdmission(run, run.JobName, periapsis.S, argoworkflow.VMIDemand{}, d); err != nil {
+	if err := f.scheduler.recordCreateAdmission(run, run.JobName, periapsis.S, d); err != nil {
 		t.Fatal(err)
 	}
 	f.scheduler.admission.resources.Disabled = true
 	r, err := f.scheduler.restoreCreateGrant(run, nil)
-	if err != nil || r.pods == nil || *r.pods != *d || r.weight != 0 || !r.retained {
+	if err != nil || r.pods == nil || !r.pods.Equal(*d) || r.weight != 0 || !r.retained {
 		t.Fatalf("restored grant: %+v %v", r, err)
 	}
 	// Already submitted declarations must remain reserved when a kill switch
@@ -100,7 +100,7 @@ func TestDeclaredCreateContractRestoresNumericReservationWithKillSwitch(t *testi
 	}
 	changed := *d
 	changed.CPUMilli++
-	if _, err := f.scheduler.admission.adopt(run, periapsis.S, argoworkflow.VMIDemand{}, &changed); err == nil {
+	if _, err := f.scheduler.admission.adopt(run, periapsis.S, &changed); err == nil {
 		t.Fatal("conflicting restored declaration accepted")
 	}
 }

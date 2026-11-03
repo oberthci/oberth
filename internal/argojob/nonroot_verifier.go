@@ -16,7 +16,6 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/utils/ptr"
 
-	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
@@ -36,24 +35,19 @@ func nonrootRequestIdentity(request Request) string {
 	}
 	// Explicit primitive fields avoid JSON's unsupported struct-keyed Fragment
 	// map and include actual fragment bytes (Fragment.Source normally has json:-).
-	trustedIntent := ""
-	if request.TrustedKVM != nil {
-		trustedIntent = vmrunner.KVMIntentDigest(*request.TrustedKVM)
-	}
-	var vmiReceipt *argoworkflow.VMIDemandSummary
-	if request.VMIDemandReceipt != nil && request.VMIDemandReceipt.Summary().Demand.VMs > 0 {
-		summary := request.VMIDemandReceipt.Summary()
-		vmiReceipt = &summary
+	var sourceReceipt *argoworkflow.RunSourceSummary
+	if request.DemandReceipt != nil {
+		summary := request.DemandReceipt.Summary()
+		sourceReceipt = &summary
 	}
 	identity := struct {
 		Principal       []string
 		Source          []byte
 		ApprovedSecrets map[string]bool
 		Fragments       map[string][]string
-		TrustedIntent   string                         `json:",omitempty"`
-		VMIReceipt      *argoworkflow.VMIDemandSummary `json:",omitempty"`
-	}{[]string{request.RunID, request.Name, request.Repo, request.UpstreamName, request.UpstreamOrg, request.Ref, request.SHA, string(request.Trigger), request.SourceDir}, request.Source, request.ApprovedSecrets, fragments, trustedIntent,
-		vmiReceipt}
+		SourceReceipt   *argoworkflow.RunSourceSummary `json:",omitempty"`
+	}{[]string{request.RunID, request.Name, request.Repo, request.UpstreamName, request.UpstreamOrg, request.Ref, request.SHA, string(request.Trigger), request.SourceDir}, request.Source, request.ApprovedSecrets, fragments,
+		sourceReceipt}
 	encoded, _ := json.Marshal(identity) // Only primitive serializable types.
 	digest := sha256.Sum256(encoded)
 	return hex.EncodeToString(digest[:])
@@ -71,7 +65,7 @@ func requestSelectsNonroot(request Request) (bool, error) {
 		return false, err
 	}
 	names, err := argoworkflow.DeclaredNonrootTemplates(workflow)
-	return len(names) != 0 || request.TrustedKVM != nil, err
+	return len(names) != 0, err
 }
 
 // PrepareNonroot establishes the request's private capability before the app's
@@ -109,7 +103,7 @@ func (controller *Controller) refreshNonroot(ctx context.Context, request Reques
 
 func (controller *Controller) expectedSourceVolume(request Request) SourceVolume {
 	volume := SourceVolume{ClaimName: sourceClaimName(request.Name), SubPath: "src", ArtifactsSubPath: artifactsSubPath}
-	if request.TrustedKVM == nil && !request.omitStepUsage {
+	if !request.omitStepUsage {
 		volume.BinarySubPath = binarySubPath
 	}
 	if controller.config.GoProxyCACertPEM != "" {

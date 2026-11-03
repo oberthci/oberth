@@ -308,28 +308,6 @@ func TestRestartCutSettlingReadCannotEraseKnownFailure(t *testing.T) {
 	}
 }
 
-func TestRestartCutHardCleanupVerdictWins(t *testing.T) {
-	for _, path := range []string{"wait", "terminal"} {
-		t.Run(path, func(t *testing.T) {
-			controller, wf, binding, _ := restartCutFixture(t, func(w *wfv1.Workflow, _ *wfv1.NodeStatus, p *corev1.Pod) {
-				p.Name = ""
-				w.Annotations[argoworkflow.CleanupVerdictAnnotation] = "invalid"
-			})
-			var result *Completion
-			var err error
-			if path == "wait" {
-				value, e := controller.WaitResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], io.Discard, nil, 0, binding)
-				result, err = &value, e
-			} else {
-				result, err = controller.TerminalStateResumed(t.Context(), wf.Name, wf.Annotations[runIDAnnotation], binding, nil)
-			}
-			if err != nil || result.Interrupted || result.Infrastructure || result.FailedStep != "cleanup-verdict" {
-				t.Fatal("restart hid hard cleanup failure", result, err)
-			}
-		})
-	}
-}
-
 func TestRestartCutConflictingExitEvidenceStaysRed(t *testing.T) {
 	for _, source := range []string{"journal", "earlier-snapshot"} {
 		t.Run(source, func(t *testing.T) {

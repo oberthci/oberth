@@ -69,9 +69,6 @@ func identityFailure(stage string, err error) *executorIdentityError {
 	}
 
 	failure := &executorIdentityError{stage: stage, reason: reason, attempts: 1, cause: err}
-	if stage == "launcher_provision" && errors.Is(err, errVMIOverGrant) {
-		failure.reason, failure.public = "vmi_over_grant", errVMIOverGrant.Error()
-	}
 	if stage == "target_validation" || stage == "identity_pod" {
 		switch err.Error() {
 		case "executor token target is not memory-backed", "ephemeral container can access executor identity", "executor identity waiter was modified", "pipeline container can access executor identity", "executor identity waiter missing", "executor identity target owner changed", "executor identity target has no UID", "executor identity target changed during exec", "executor identity lifetime Pod has unexpected ownership or configuration", "executor identity owner changed":
@@ -216,7 +213,10 @@ func (controller *Controller) reconcileExecutorIdentity(ctx context.Context, wor
 	}
 	account := controller.config.ExecutorServiceAccount
 	if launcher {
-		account = controller.config.VMLauncherServiceAccount
+		account = ""
+		if workflow.Annotations[capabilityAnnotation] != "" {
+			account = workflow.Spec.ServiceAccountName
+		}
 	}
 	if retireErr := controller.retireIdentityPod(ctx, workflow, account); retireErr != nil {
 		failure.cause = errors.Join(failure.cause, retireErr)
@@ -226,6 +226,11 @@ func (controller *Controller) reconcileExecutorIdentity(ctx context.Context, wor
 
 func (controller *Controller) execExecutorIdentity(ctx context.Context, workflow *wfv1.Workflow, original *corev1.Pod, launcher bool, payload []byte) error {
 	for attempt := 1; attempt <= executorIdentityAttempts; attempt++ {
+		if workflow.Annotations[capabilityAnnotation] != "" {
+			if _, err := controller.boundCapability(ctx, workflow, 0); err != nil {
+				return identityFailure("operator_capability", err)
+			}
+		}
 		attemptCtx, cancel := context.WithTimeout(ctx, executorIdentityAttemptTimeout)
 		started := time.Now()
 		pod, err := controller.executorIdentityTarget(attemptCtx, workflow, original, launcher)

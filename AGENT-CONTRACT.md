@@ -411,7 +411,7 @@ trust assumptions and complete invalidation rules.
   (pre-existing for default-mode leaves). So `cache` is refused on CI-tier
   leaves that run a credential chain, and admitted on release leaves,
   credentialed or not, because only tag runs write the release root. It is
-  also refused on KVM and nonroot leaves, which take no host cache mount. Any
+  also refused on nonroot leaves, which take no host cache mount. Any
   other value is refused by admission and `oberth validate`.
   `readonly` covers shared aliases and Argo wait mirrors. Authored read-only
   requests survive mount-path replacement and protect overlapping subpaths
@@ -561,13 +561,12 @@ trust assumptions and complete invalidation rules.
   An unknown trigger or size, a duplicate, a malformed entry, or a trigger
   the document never runs for (`tag` in build.yaml, any other in
   release.yaml) fails `oberth validate` and server admission (phase
-  `infrastructure`, before a Workflow exists). A trusted KVM preflight is
-  sized from build.yaml for the run's trigger (`promotion` for a tag run).
+  `infrastructure`, before a Workflow exists).
   A server that predates the annotation ignores it and uses `oberth.ci/size`,
   so a document keeps `oberth.ci/size` as its conservative fallback.
 - A named scheduled run durably records its resolved schedule entry in
   `runs.schedule_entry` (v31). Cron and manual
-  schedule triggers share that identity. Retry, rerun, trusted-preflight
+  schedule triggers share that identity. Retry, rerun,
   replacement, stranded-run requeue and Workflow adoption retain it. Legacy
   rows stay empty; no current file is used to guess their entry. Non-schedule
   runs cannot carry a nonempty entry. `oberth-schedule` is a reserved,
@@ -586,7 +585,7 @@ trust assumptions and complete invalidation rules.
   `ScheduleEntry`; status/wait expose
   `schedule_entry`. See [scheduled runs](docs/scheduled-runs.md).
 - XL takes an audited admin size grant (#1021). A branch, promotion or
-  schedule run whose resolved size (including its trusted preflight's)
+  schedule run whose resolved size
   exceeds its repository's maximum fails before it takes any weight (phase
   `infrastructure`, before a Workflow exists), with the grant command in its
   error; other repositories' runs are never held behind it. Without a grant
@@ -605,7 +604,7 @@ trust assumptions and complete invalidation rules.
   cap child invocations; nested children retain their full inner pod envelope.
   A leaf's limit never serializes its callers. Unknown dynamic inner fan-out
   needs its own limit or a workflow bound; otherwise admission stays legacy.
-  CPU requests, memory bounds, executor and VM launcher allowances are retained.
+  CPU requests, memory bounds, executor allowances are retained.
   `resource_message` reports the effective concurrency and fixed explanations
   for conservative bounds, without changing status reasons. The sealed demand
   and explanations survive creation recovery, adoption and timing history;
@@ -625,7 +624,7 @@ trust assumptions and complete invalidation rules.
   mutual-exclusion group scoped to the declaring repository: at most one run
   of a (repository, group) holds admission at a time, across branch,
   promotion and tag triggers, and members are admitted by priority, then claim FIFO.
-  VMI resource templates do not imply a concurrency group. Any valid declared
+  Resource templates do not imply a concurrency group. Any valid declared
   group is allowed. Run rows have no group badge; a queued run waiting on
   its group names it in the message column.
   The group never changes a run's weight or identity, XL keeps its
@@ -975,8 +974,8 @@ trust assumptions and complete invalidation rules.
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, issue
   create/get/get_many/update/append/close/reopen/delete/list/lock/unlock/close_many,
   secret-access list/allow/revoke, unscoped-admin-only uplink list/revoke/rotate,
-  `access_dismiss` and `kubevirt_grant_list`, admin-only `kubevirt_grant` and
-  `kubevirt_revoke`, read-only `kubevirt_grant_get`, admin-only `size_grant`
+  `access_dismiss`, admin-only `workflow_capability_grant` and
+  `workflow_capability_revoke`, read-only `workflow_capability_get`, admin-only `size_grant`
   and `size_revoke`, read-only `size_grant_get` (#1021), admin-only
   unscoped `admission_release` (#1099), `queue_priority_config`, `queue_priority_get`, `run_priority`, `priority_grant`, `priority_grant_list`, `priority_grant_revoke`, `repo_usage`, `repo_list`, `repo_remove`, `repo_archive`, `repo_unarchive`, `run_list`,
   admin-only `audit_list` (#1104; verified entries, never available to a scoped uplink;
@@ -990,14 +989,6 @@ trust assumptions and complete invalidation rules.
   `promotion.grantMaxLifetime`, default `24h`, hard ceiling `168h` / 7 days).
   The installer pins this value explicitly so `helm upgrade --reuse-values`
   carries the default.
-- MCP `run_kvm_preflight` reads bounded historical evidence by the same run ID
-  rules. It binds the immutable intent to the canonical run, repository ID,
-  current qualified repository and tested SHA, revalidates receipt/refusal and
-  lifecycle consistency, and never changes work or renews locks. Known runs
-  without preflights return `present: false`. Receipt validity, cleanup and
-  parent status are separate: cleanup alone is not success and historical
-  evidence grants no current publication authority. Current recipe changes
-  do not suppress otherwise valid historical receipts.
 - MCP `run_get` and `run_logs` accept the same full IDs and unique prefixes
   as the dashboard run views. ID prefix resolution is read-only; scheduler
   and mutation lookups still require exact durable IDs. `run_retry` and
@@ -1239,14 +1230,12 @@ trust assumptions and complete invalidation rules.
   owner will release. The practical case is a granted reservation still held
   for a run that is already terminal because its owner hung or was lost; an
   ungranted reservation of a terminal run qualifies too. A `retained`
-  reservation normally belongs to a stopping scheduler. A live owner can
-  also retain it while recovering an exact trusted preflight after a transient
-  DB failure; cleanup must be confirmed before that owner releases it. A reservation of an active owned run is
+  reservation belongs to a stopping scheduler or an uncertain Workflow create.
+  Cleanup must be confirmed before its owner releases it. A reservation of an active owned run is
   refused (use `run_cancel`), and so is one without a durable run unless
   `force`. Before a granted reservation is released the run's recorded
   Workflow is deleted through the engine and an accepted deletion is the
-  proof; a granted run with no recorded Workflow (a trusted KVM preflight
-  holds its grant before the name is recorded) cannot be proven gone, and
+  proof; a granted run with no recorded Workflow cannot be proven gone, and
   it, like a failed deletion, needs `force`, which releases unverified. The
   outcome is audited as `admission.release` (`run_id`, `state`, `weight`,
   `group`, `workflow`, `verified`, `force`) under the gate lock once the
@@ -1265,10 +1254,7 @@ trust assumptions and complete invalidation rules.
   but unadmitted runs, has one numbering computed before repository/ref filters.
   Each queued run carries its scheduling reason; filtered lists keep global positions;
   scoped uplinks see no global position (#073). `started_at` is recorded when
-  weighted admission is granted, including before a trusted KVM preflight;
-  a VM capacity refusal parks the run and clears that time until reacquisition.
-  Elapsed time includes preflight and resets at re-admission after a VM-capacity
-  park.
+  weighted admission is granted.
   Workflow submission preserves the admission time. `view=history` retains its
   terminal-only sequence paging; `view=active` remains an unpaged, bounded
   deprecated compatibility view. Repository/ref filters and uplink scope apply
@@ -1286,7 +1272,7 @@ trust assumptions and complete invalidation rules.
   | Durable cause | `display_status` | `display_reason` |
   | --- | --- | --- |
   | queued or claimed before admission | `queued` | scheduling observation |
-  | admitted, including trusted preflight | `running` | empty (phase is `preflight` while its VM executes) |
+  | admitted | `running` | empty |
   | passed CI / published release | `passed` | empty |
   | failed step or infrastructure | `failed` | failed phase and bounded cause; never empty |
   | upstream publication failure | `failed` | upstream rejection class, or upstream publication failure with transient cause |
@@ -1294,9 +1280,8 @@ trust assumptions and complete invalidation rules.
   | infrastructure failure automatically retried | `infra-retried` | `infra error, retried`; linked successor |
   | superseded (`reason='superseded by newer run'`) | `superseded` | `superseded by <short SHA>`; successor run remains linked |
   | restart re-fire (`reason='re-queued after restart'`; fallback when an adoptable branch Workflow is missing, #1172) | `superseded` | `server restart, re-queued as <run12>` |
-  | trusted preflight restart retry (`reason='retried once after trusted preflight owner restart'`, linked fresh attempt, #1172) | `superseded` | `server restart, re-queued as <run12>` |
   | explicit cancel | `cancelled` | `cancelled by <actor>: <reason>` |
-  | restart requiring an operator retry, including a trusted preflight whose automatic retry was spent or refused | `cancelled` | `server restart, retry needed` |
+  | restart requiring an operator retry | `cancelled` | `server restart, retry needed` |
 
   Raw status fields retain their values, but existing `display_status` values
   can change from `cancelled` to `superseded`, or `failed` to `infra-retried`.
@@ -1385,7 +1370,7 @@ trust assumptions and complete invalidation rules.
   including executor/wrapper overhead, stored/API-encoded as duration nanoseconds
   (divide by 1e9 for seconds). Missing counters remain independent nulls, including
   on cgroup v1, OOM/deadline kills that prevent reporting, missing Pods, skipped
-  steps, resource/ContainerSet templates, protected KVM workflows, image-only ENTRYPOINTs,
+  steps, resource/ContainerSet templates, image-only ENTRYPOINTs,
   custom termination-file paths or old workflows.
   No host-level aggregate fallback or deadline widening is allowed. Schema v33
   migrates each ambiguous legacy zero counter to NULL independently; positive
@@ -1426,7 +1411,7 @@ trust assumptions and complete invalidation rules.
   with no successor (`run_cancellations.reason = 'superseded'`, empty
   `superseded_by`): its admission reservation, weight and group position are
   withdrawn at once if ungranted, and its Workflow is deleted through the
-  normal Delete path (which also removes run-labelled VMIs); the owner then
+  normal Delete path; the owner then
   settles without recording a result, releasing a granted reservation only
   after the deletion was accepted. The record is terminal before the deletion
   finishes, exactly as for a supersede; a failed deletion stays a pending
@@ -1518,17 +1503,11 @@ trust assumptions and complete invalidation rules.
   and continues with its durable obligations intact. Owner shutdown stops
   retries between attempts and leaves in-flight detached cleanup/finalization
   to finish. The create-settlement worker keeps its own bounded attempts/backoff.
-  A transient parent-run observation retries without canceling the trusted
-  preflight; only authoritative terminal state or a hard read failure cancels it.
-  A trusted preflight that returned a DB failure is cleaned by exact run ID,
-  retaining its grant until journal cleanup and parent settlement succeed.
   Invalid immutable/admission bindings, missing required recovery capabilities,
   schema/corruption and other non-transient failures keep their fatal behavior;
   a joined invariant error cannot be hidden by a concurrent DB deadline.
 - A server stop or restart adopts an existing Argo Workflow for an active
-  branch, promotion, tag or release run without a pending trusted KVM
-  preflight (#1172, slices 1-4; trusted preflights recover separately, see
-  [trusted preflight restart recovery](docs/trusted-preflight-restart.md)). The
+  branch, promotion, tag or release run (#1172). The
   Workflow's run ID, ref, tested SHA, trigger, persisted concurrency group and
   namespace must match the run and configured engine. Its spec identity must
   be present; its UID, identity and live spec remain pinned during observation.
@@ -1592,18 +1571,7 @@ trust assumptions and complete invalidation rules.
   without that capability keeps its conservative fallback and never gains
   release/WIF authority from its ref name. A missing promotion/tag/release
   Workflow, or one that never acquired a Job name, is interrupted without
-  automatic re-fire. Pending trusted KVM
-  preflights and publication-owning runs keep their own recovery paths;
-  they are not adopted. A trusted preflight is never reattached: once its exact
-  cleanup completes at startup, the undelivered parent is interrupted and may
-  receive one fresh attempt under its original admission sequence, linked by
-  `superseded_by`. For a promotion parent that retry re-checks the admitting
-  actor's authority more strictly than the moved-target retry (#1097): uplinks
-  whose token credential is revoked or not yet activated do not vote, at least
-  one live uplink must remain, and every live one must share a scope that
-  covers the repository (and be an admin for a direct promotion). A dormant or
-  revoked credential therefore cannot keep a trusted retry alive, while the
-  moved-target retry still counts every uplink with that identity.
+  automatic re-fire.
   Publication ownership is durable and takes precedence over Workflow
   observation: recovery never submits or adopts that run again.
   A passing adopted promotion uses its immutable target/base/result through
@@ -1857,110 +1825,7 @@ trust assumptions and complete invalidation rules.
   cutoff. It refuses a matching collection without altering its contents.
 - Every push, sync, promotion, and issue mutation is attributed to the acting
   uplink in the same durable transaction as the state change where applicable.
-- Required VM tests use the closed `.oberth/tests.yaml` version-1 contract:
-  profile `ebpf-offline-amd64-v1`, artifact `ebpf/secret_monitor.o`, with no
-  repository-selected commands, images, identities, or credentials. The
-  scheduler reads the exact tested commit and a freshly fetched private
-  upstream default ref before build creation and publication. A candidate
-  cannot delete a published requirement. Unreadable policy fails closed,
-  including on publication recovery and fast-forward promotion. The legacy v1 profile still fails explicitly;
-  build success, VM shutdown and guest log markers cannot replace test evidence.
-- Lane B also decodes `.oberth/tests.yaml` version 2.
-  Its exact fields are `version: 2`, `profile: kvm-suite-amd64-v1`,
-  `suite_sha256`, `guest_sha256` (each 64 lowercase hexadecimal characters),
-  and `artifacts` (1–32 unique canonical relative file paths). It accepts no
-  commands, URLs, images, identities, resource overrides or version-1 fields.
-  Candidate/default-policy reconciliation preserves requirement presence and
-  every field, including the ordered artifact list, except an authorized paired
-  pin rotation: both `suite_sha256` and `guest_sha256` must change together and
-  their new pair must exactly match an operator-configured `trustedTests.recipes`
-  entry. Removal, half-pair changes, profile/version/artifact changes and
-  unapproved pairs fail closed. CI, publication recovery and fast-forward
-  promotion resolve the fresh upstream default contract and current executor
-  recipes; a prior green run cannot authorize a revoked pair. The full journaled
-  recipe is also rechecked before publication. Keeping an old recipe in the
-  allowlist permits rotating back to that pair; remove it to forbid that rollback.
-  The first rotation decision for each run appends
-  `trusted.pin_rotation.authorized` or `trusted.pin_rotation.refused` with the
-  repository, run, candidate/default SHAs and old/new pin pairs. Capacity,
-  post-preflight and publication/recovery rechecks still verify live policy,
-  but append another record only when the decision or pair changes, including
-  a refusal after recipe removal. Audit failure refuses progress. This records
-  authorization, not a completed promotion.
-- Lane B suite bundle format v1 is a bounded, uncompressed USTAR archive
-  (maximum 64 MiB and 1024 regular files). The verifier hashes the complete
-  archive against `suite_sha256` **before** parsing. Paths must be unique,
-  canonical and relative; links, special files and archive extensions are
-  refused. End padding may be zero bytes only. Exactly one `manifest.yaml`
-  (maximum 16 KiB) declares `version: 1`, the same closed `profile`,
-  `guest_sha256`, ordered `artifacts`, and 1–256 unique `cases` IDs. The
-  manifest has no command language. A verified inventory requires exactly
-  those case IDs, once each, all with outcome `passed`; missing, additional,
-  duplicate, skipped and failed cases refuse. The private verified-suite
-  value cannot be constructed from candidate-supplied case results.
-- The separate Lane B termination validator requires a prior server-recorded
-  namespace, Workflow name/UID, Pod name/UID, container ID, digest-pinned
-  harness reference and absolute admission/deadline times. It checks the
-  exact controlling Workflow owner, current successful Pod and current main
-  container termination, matching container IDs, exact resolved image digest,
-  exit zero, signal zero, restart count zero, and nonzero ordered kubelet
-  timestamps within the admitted deadline. Missing records and last-attempt
-  termination do not count. Unsupported image-ID encodings fail closed.
-  This validator does not establish the Pod's command, arguments or isolation;
-  the trusted controller additionally verifies the effective immutable template,
-  sidecars and mounts. Only the expected attested pinned harness can supply
-  the compact inventory report; guest/container text alone is never a verdict.
-- Lane B v2 execution requires an independent administrator recipe allowlist
-  (suite+guest digests, complete harness image digest, public HTTPS endpoints).
-  Empty recipes keep it disabled. Configured recipes require an explicit positive
-  operator KVM supplemental GID; trusted main runs as UID/GID 65534 with private
-  volume fsGroup 65534 and requested Strict supplemental-group policy. Deployment
-  must independently qualify kubelet/runtime support and unsupported-node refusal;
-  Pod-spec attestation does not prove effective groups on older kubelets. There
-  is no inferred device group or root fallback. The fixed approved static host `suite-driver`
-  owns assertions and host waitpid outcomes; guest output is untrusted input.
-  Candidate artifacts are privately snapshotted and enter only a pinned KVM
-  guest through read-only data transport. The server appends an isolated
-  trusted leaf after credential-free producers. Main CI/release delivery is
-  blocked until the v20 `vm_executions` receipt passes and exact owned resources
-  are gone. Release credentials and publication commands therefore follow
-  the suite gate. Publication rereads policy, exact recipe and actual normalized
-  kubelet evidence, including candidate/tag identity, inventory and artifact
-  digest. Uncertain creates/cleanup keep capacity; restart cleans and interrupts.
-  A failed preflight retains observed step results and indexed logs for
-  `run_get`/`run_logs` after cleanup. Command failures name the failed step;
-  Workflow/Pod failures retain their infrastructure reason. Uncertain cleanup
-  still retains capacity and cannot authorize publication (#1189).
-  Capacity refusal with no journal row parks without weighted/group/dispatch
-  permits and retries after rechecking mutation, cancellation and fresh policy.
-  Build.yaml may declare `oberth.ci/trusted-tests-entrypoint` as a literal local
-  producer template for the protected preflight only. Normal CI retains every
-  check; absent selection preserves the full entrypoint. The original complete
-  blueprint (including selection) remains digest-bound to the same run/tested
-  SHA and approved recipe; artifact snapshot/receipt checks are unchanged.
-  Producers can read the durable `oberth-trigger`, including tag preflights.
-  The receipt certifies preflight artifact bytes only: later release rebuilds
-  are not compared and require their own signed provenance/byte-identity policy.
-  Unbound startup submissions require 60 continuous seconds of exact Workflow,
-  source claim and seed/source-consuming Pod absence within a 90-second budget;
-  API errors retain the row, auxiliary presence resets the interval. Per-row
-  recovery failures cannot stop scheduler startup; a missing executor with
-  pending rows remains fatal. v20 SQL triggers retain journal identity, accepted
-  UID/evidence and irreversible cleanup against direct writes. QEMU always uses
-  `-sandbox on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=deny`.
-  `-no-shutdown` preserves QMP after guest poweroff; the suite releases its QMP
-  connection before returning, then the harness alone issues final quit and
-  requires successful host waitpid. Guest shutdown or socket EOF alone is not a
-  passing verdict.
-  See `docs/trusted-kvm-suites.md` for the closed producer protocol, packaging,
-  trust assumptions, baseline-change behavior and external rollout prerequisites.
-- VM lifecycle state uses the audited schema-v13 `vm_executions` journal.
-  Reserve immutable run/candidate/suite/image/profile identity before create;
-  bind the API-issued UID before treating the object as owned. An ambiguous
-  submitted create retains its durable obligation and capacity even after a
-  not-found observation. Cleanup requires observed absence of the exact VMI
-  and owned launchers. A cleaned lifecycle record is not a passing test result.
-- The inactive pilot implementation is retired. Schema v40 preserves the
+- The inactive pilot implementation is retired. Schema v39 preserves the
   schema-v14 `vm_suite_executions` and `vm_suite_resources` journals as read-only
   history for export and investigation; no execution path consults them.
   Existing capacity reservations remain intact because retiring code does not
@@ -2233,148 +2098,6 @@ trust assumptions and complete invalidation rules.
   separate existing run-owned mount. Actual PostgreSQL startup and Chromium's
   namespace/seccomp sandbox require separate execution proof; this interface
   alone does not establish either test suite's coverage.
-- Argo-authored workflows may select named plain container/script leaves for
-  server-injected KVM device access with the annotation
-  `oberth.ci/kvm-templates: leaf-one,leaf-two`. Each named leaf must be a plain
-  container or script leaf with `oberth.ci/workspace-mounts: none` (`cache`
-  is refused: no host cache mount on a KVM leaf),
-  `oberth.ci/workspace-env: none`, `automountServiceAccountToken: false`, no
-  `templateDefaults`, and must not be credentialed (no secret-paths, no release
-  WIF role, not also in `oberth.ci/nonroot-templates`). Repository-declared
-  `devices.kubevirt.io/*` resources are refused. `inputs.parameters` are allowed
-  (unlike nonroot leaves). All KVM leaves require an active administrator VM
-  grant, loaded by durable repository ID at submission, and a credential-free
-  CI workflow (branch, promotion or schedule; never release). Missing, revoked
-  or unreadable grants fail closed. KVM leaves declare no VMI demand: the
-  grant's VMI budget and the scheduler's KubeVirt capacity accounting (#1173)
-  neither count nor throttle them, and they are admitted as ordinary weighted
-  pods. Rollout: repositories that already declare `oberth.ci/kvm-templates`
-  fail closed at admission until an administrator `kubevirt_grant` exists for
-  them, and `oberth validate` refuses KVM leaves unless run with `--kubevirt`.
-  When `vm.kvm.enabled` is true on the server, each
-  declared leaf receives `devices.kubevirt.io/kvm: "1"` (request == limit) and
-  `OBERTH_KVM=1` in its environment. When the switch is false, a workflow
-  declaring KVM leaves fails at admission with an infrastructure-class error.
-  This is Lane A (coverage acceleration) under the ordinary trust model: same
-  pod, same deadline, kubelet exit code. It is not Lane B (trusted-suite
-  verdict). The consumer asserts `-accel kvm` only when `OBERTH_KVM=1` is
-  present; no TCG fallback is permitted with the env set.
-- A workflow may additionally name a subset of its KVM leaves in
-  `oberth.ci/guest-test-templates`. These leaves receive the server-owned
-  `OBERTH_GUEST_TEST=kvm-v1` marker for disposable guest test runners. Removing
-  this annotation does not bypass the VM grant required by all KVM leaves.
-  Submission audits include the declared leaves and granted capability.
-  Guest root does not grant host capabilities, host namespaces or host mounts;
-  results remain ordinary CI evidence. See `docs/guest-test-lanes.md` for the
-  networkless reference runner and the admission/grant rollout requirement.
-- Argo `resource:` templates are admitted only for an administrator-granted
-  repository, and only as top-level named `kubevirt.io/v1`
-  `VirtualMachineInstance` create/get/delete templates. The server validates
-  the complete inline manifest before Argo substitution, permits only the two
-  `{{workflow.name}}` slots for the VMI name and run label, and refuses carriage
-  returns and multiple YAML documents. Credentialed workflows cannot use VMIs.
-  `ForceIdentity` assigns a dedicated VM-launcher executor ServiceAccount to
-  these templates; ordinary templates retain the shared executor identity.
-  Oberth resolves each resource Pod to its Workflow node and VMI template,
-  then delivers a Pod-bound launcher token to the pinned Argo executor image.
-  The VM-launcher Role has only VMI get/list/watch/delete in the CI
-  namespace, and Oberth best-effort deletes run-labelled survivors after
-  workflow completion, failure or cancellation; cleanup failures are logged and audited
-  without blocking terminalization. This backstop owns deletion: a workflow
-  needs no delete step, and a run that fails before its VMI exists cleans up
-  without error (an optional exit-handler delete is not-found tolerant through
-  Argo's own `--ignore-not-found`; resource `flags` stay refused). The grant is stored by repository ID and audited;
-  `kubevirt_grant` / `kubevirt_revoke` (MCP) or `oberth kubevirt grant|revoke`
-  (in-pod CLI) control it. Each grant carries a repository VMI budget (VMI
-  concurrency, cores, memory; default 2 / 6 / 12Gi, bounds 16 / 64 /
-  256Gi, schema v25), set with `--max-vms/--max-cores/--max-memory` or the MCP
-  `max_vms/max_cores/max_memory` fields and audited with the previous budget.
-  Admission enforces, per run, the field-wise minimum of the grant and the server's
-  cluster ceiling (`argo.kubevirtCeiling`, default 8 / 24 / 48Gi), at most
-  three VMI templates per budgeted VM (or per declared create when proven
-  phase separation reduces the peak), and a VMI CPU request no larger than its
-  cores. The scheduler also accounts declared VMI demand across all admitted
-  runs of the repository. Runs whose combined demand fits are concurrent;
-  excess runs remain queued with reason `KubeVirt capacity`, holding no weight
-  or declared group and retaining FIFO order. Completion and accepted
-  cancel/supersede deletion release capacity. A run exceeding the grant by
-  itself still fails admission. Adopted branch Workflows restore their demand
-  from the verified live spec exactly once before new claims, even under a
-  reduced or revoked grant; existing usage drains before new work can fit.
-  Different repositories' grants still add up.
-  Reservation is the independent maximum of concurrent VMI count, cores and
-  memory. Only an explicit matching delete between create invocations proves
-  non-overlap; create-task completion and onExit cleanup are not barriers.
-  The context-free sizing API remains conservative. Run-aware sizing and final
-  submission share a durable run-trigger binding and exact policy-admitted
-  fragment resolution, pinned in a source/graph demand receipt. Unknown or
-  unsupported graphs retain summed demand. Resolved lifetime-neutral graphs
-  (including bounded get-only retries) may collapse; create/delete retries and
-  dynamic fan-out earn no credits. Terminal-state OR dependencies establish
-  ordering only: a later create must require a matching delete's Succeeded
-  status before it receives lifetime credit. Mixed top-level `&&`/`||` in
-  dependencies receives no credit; OR groups must be parenthesized. DAG names
-  and dependencies must also compile after the vendored, parity-tested pinned
-  Argo bare/legacy expansion and hyphen normalization, with typed boolean TaskResults. Keywords or other
-  compile errors force the sum; an Errored status cannot prove a gate passed
-  if compilation itself can fail before that gate. Failure, omission, skip,
-  uncertain or unproven conditional deletion and onExit never imply release. A
-  non-transitive lifetime relation falls back to the sum; its transitive closure
-  must never be used to invent deletion credits across omitted phases.
-  Partition exclusivity is limited to one immutable invocation scalar and safe
-  expression-tag string equalities, e.g.
-  `{{=inputs.parameters['partition'] == '0'}}`, whose binding is explicit and
-  whose resolved producer has an explicit Succeeded prerequisite on its DAG
-  consumer (or is provably unconditional in an earlier steps group). Mere
-  ancestry/bare/terminal dependencies are insufficient. Output-fed consumer
-  inputs with `default`, `value` or `valueFrom` receive no shared-scalar credit:
-  skipped/omitted producers, or successful producers emitting Argo's internal
-  absent-output sentinel, can activate different consumer fallbacks. Explicit
-  literal arguments remain supported. Raw output substitution, defaults alone,
-  independent selectors and arbitrary output expressions earn no exclusivity credits. Every authored `when` string is submitted unchanged;
-  repositories must adopt the safe form themselves. Within one authored `when`,
-  every fragment must parse before boolean folding: an unparsed operand remains
-  unsupported even under false-AND or true-OR. Ternary/coalesce, raw output
-  interpolation and other syntax outside the documented closed grammar earn no
-  proof. Only an absent/empty `when` bypasses evaluation; whitespace alone
-  errors in Argo and retains summed demand here. Authored guard bytes are never
-  rewritten. The analyzer executes no planner and is bounded to 4,096 shared
-  scan/expansion/scenario proof checks, 256 projected nodes and 32 partition
-  literals. A scenario with more than 16
-  enabled create invocations falls back to the sum before reachability analysis.
-  Repeated creates count separately in the lifetime projection, then each
-  demand dimension is capped at the sound per-template sum (fixed VMI names).
-  Demand is memoized per immutable resolved source, without caching or
-  bypassing policy admission. The peak remains
-  reserved for the entire workflow; this does not enable early slot release.
-  Oberth mediates repository resource creates before token delivery; submitted
-  resource Pods run get and their launcher account cannot create. A separate
-  server Role grants VMI create/get and fixed-name public quota-ledger get/update
-  and no ConfigMap create. The chart pre-creates a metadata-only ledger; server
-  data and its one-time initialization marker survive Helm upgrades/rollbacks.
-  ResourceVersion CAS, actual VMI inspection and durable pending claims enforce the admitted repository grant
-  and workflow peak across concurrent controllers/restarts. Live values are
-  floored by an exact active claim; present-but-unreadable CPU counts cannot use
-  that smaller fallback and charge the full grant, retaining readable siblings.
-  An oversized unlabeled VMI is charged to every repository and blocks all new
-  VMI creates until an administrator repairs or removes it. Repository identities
-  cannot directly create or mutate VMIs. One claim permits
-  one POST, without retries. Ambiguous POST failures retain capacity until an
-  observed matching UID resolves them, or the resource Pod UID is absent from
-  a complete list and the claim is more than five minutes old (the POST has a
-  twenty-second request timeout). Missing timestamps start a fresh grace period;
-  timeout/NotFound alone never refunds a pending claim. UID completion uses an
-  independent bounded context. Corrupt objects/mismatches are charged to their
-  own repository; unattributed unreadable legacy VMIs cost the per-VMI maximum.
-  No DB migration is needed. Drain legacy VMI workflows before upgrading;
-  adoption immediately refuses any VMI workflow without a quota binding. See
-  `docs/kubevirt-vms.md` for limits, RBAC and recovery.
-  `spec.domain.firmware.kernelBoot` is admitted only with a container
-  image that is digest-pinned under the containerDisk prefixes, an absolute
-  clean `kernelPath` (and optional `initrdPath`), and `kernelArgs` of at most
-  512 bytes in `[A-Za-z0-9._,:=/+-]`; every other firmware field and
-  `imagePullSecret` are refused. The administrator must configure a containerDisk
-  registry-prefix allowlist; an empty list refuses VMI creation.
 - Security-backported runner tools are rebuilt from immutable upstream release
   source, identify themselves as Oberth derivatives, and are bound to their
   patched module versions and exact binary digests by the image contract.
@@ -2809,6 +2532,8 @@ alone is never evidence that missing migrations ran.
 | v38 | Upstream publication retry | Persist bounded attempts, retry deadlines and audited owner progress without changing the pushed object or promotion plan | Database restore |
 | v39 | Submission priority | Persist expiring identity grants, audited priority requests and supersession protection; existing priority ordering remains compatible | Database restore |
 | v39 | Pilot retirement | Preserve inactive pilot journals as read-only history; remove them from execution decisions | Database restore |
+| v40 | Operator capabilities | Empty repository-bound authority for operator ServiceAccounts, resource kinds and extended resources; no conversion of historical grants | Database restore |
+| v41 | Execution retirement | Preserve old execution, capacity and technology-specific grant rows as read-only history; no runtime authority or automatic cleanup | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding
@@ -2883,12 +2608,6 @@ this revision requires no new environment variable or preliminary server rollout
 See [publication prerequisites](.oberth/bootstrap.md#publication-prerequisites)
 for the exact coordinator handoff and placeholders.
 
-The KVM runtime build explicitly directs apko's default enabled SBOM output to
-the existing writable release output directory (#874). Source/workspace mounts
-remain read-only, and the pinned apko binary, lockfile and package verification
-remain unchanged.
-
-
 ### Layered trust enforcement
 
 - **Google WIF** enforces namespace-bound ServiceAccount subject, exact
@@ -2915,9 +2634,6 @@ remain unchanged.
 
 - `release-publish-chart`: annotation `oberth.ci/release-wif-role: chart-writer`.
   Fetches only cosign-secret; Helm OCI uses the helper config without login.
-- `release-publish-kvm-harness`: annotation `oberth.ci/release-wif-role: image-writer`.
-  Shares image auth and fetches only cosign-secret.
-
 ### Security controls (all roles)
 
 OBERTH_RELEASE_WIF=1 required, ADC path fixed at `/run/oberth-gar/adc.json`,
@@ -2932,7 +2648,7 @@ credential-protocol pipe receives the access token.
 The legacy static-key authentication remains for an explicit reviewed source
 rollback. For each role, the rollback is exactly two edits in `release.yaml`:
 
-**image-writer rollback** (both release-publish-images and release-publish-kvm-harness):
+**image-writer rollback** (release-publish-images):
 1. Remove annotation `oberth.ci/release-wif-role: image-writer`
 2. Add `--path=oberth/data/release/gar-image-key` to secretstore exec args
    and `oberth/data/release/gar-image-key` to workflow-level secret-paths
@@ -2952,14 +2668,13 @@ uses its existing legacy auth path. An unconfigured server rejects an
 annotated WIF leaf before execution; there is no automatic fallback on an
 exchange failure.
 
-Oberth also annotates `release-publish-chart` as `chart-writer` and
-`release-publish-kvm-harness` as `image-writer`. All four leaves explicitly
+Oberth also annotates `release-publish-chart` as `chart-writer`. All three leaves explicitly
 preserve the server-injected WIF marker and ADC path across `env -i`.
 `release-verify` uses the committed public signing key without secretstore.
 Its rollback's second edit restores the structured `oberth secretstore exec
 --dir=/run/oberth-secrets/release --path=oberth/data/release/gar-reader-key --`
 wrapper and forwards `OBERTH_SECRETSTORE_DIR` to the existing clean shell,
-as well as restoring that workflow secret path. The other three leaves keep
+as well as restoring that workflow secret path. The other two leaves keep
 secretstore solely for signing material; their rollback restores the matching
 GAR key path to that existing wrapper and the workflow declaration.
 
@@ -2976,13 +2691,6 @@ Both Go publisher binaries are rebuilt from admitted source and re-pinned in
 `scripts/release-wif-credential.py` before any credential is consumed.
 
 ### Protected controller prerequisite and upgrade (#887)
-
-Server-appended trusted KVM leaves require the verified nonroot-static-v1
-controller before producer execution. The opaque request proof binds the full
-KVM intent, including approved recipe/inventory, and refreshes at existing
-seed/create/adoption boundaries. Build cannot authorize a protected request
-without this proof. Observer image, runtime-hook and custody predicates remain
-strict.
 
 An explicit `upgrade --argo-controller-profile=nonroot-static-v1` reconciles
 only the existing managed Argo profile and normal Oberth release, including an
@@ -3087,9 +2795,9 @@ suffixes never establish node pressure. Only a run whose failed
 steps all have infrastructure causes is reclassified. It retains step rows,
 clears run-level test attribution, permits eligible branch `run_retry`, and does
 not open/update/resolve repository CI-red issues. Argo's server-injected executor
-scratch defaults to 1Gi for nonroot and trusted KVM leaves and is configurable
+scratch defaults to 1Gi for nonroot leaves and is configurable
 through `argo.executorScratchSizeLimit` / `--argo-executor-scratch-size-limit`;
-the trusted observer enforces the configured bound. These
+the nonroot verifier enforces the configured bound. These
 records trust the Kubernetes API/kubelet and bind observation time separately
 from container event times; they are not independent execution attestations.
 
@@ -3134,10 +2842,7 @@ Admission replaces pending declaration observations from both immutable pipeline
 documents at the tested commit, including an empty snapshot. Malformed or
 unreadable documents preserve previous observations. `access_dismiss` is an
 audited unscoped-admin-only exact-tuple deletion; a
-later declaration can reappear. `kubevirt_grant_list` lists active grants for
-all repositories, unscoped-admin-only; repository views include optional active
-grant metadata and tolerate individual grant lookup failures. These additions
-require no schema or Kubernetes permission changes.
+later declaration can reappear. These additions require no schema or Kubernetes permission changes.
 
 ### Repository archive (#1102)
 
@@ -3145,7 +2850,7 @@ require no schema or Kubernetes permission changes.
 repository identity, runs, logs, artifacts, receipts, grants, issues and audit
 history. It refuses queued/running work, pending promotions/publications,
 unfinished cancellation cleanup and pending Git receive recovery. New runs and
-promotions are refused with `repository archived`, as are new `kubevirt_grant`,
+promotions are refused with `repository archived`, as are new `workflow_capability_grant`,
 `size_grant`, `promote_grant` and `access_allow` grants; existing grants stay
 readable and revocable. Schedules skip archived
 repositories before reading Git. Git refreshes/probes fail closed, and the
@@ -3234,17 +2939,6 @@ available observation cannot be replaced by a different attempt or rewritten.
 The timing reader requires only the durable database, including after TTL or a
 server restart; normal run authorization and retention/purge rules apply.
 
-Failed VM workflows also retain a bounded VMI snapshot before cleanup in the
-failed step's log and CI artifact `oberth/vmi-diagnostics.json`. It contains
-run-labelled/name-prefixed VMI identities, phase, typed conditions and up to 16
-recent UID-bound Events per VMI, for at most eight VMIs under one five-second
-budget. Free-form messages, manifests, guest data and addresses are excluded;
-unknown types/reasons remain `other`, and API/bound failures remain explicit.
-Artifacts pass the existing tier and secret gates; credentialed tiers are never
-persisted. A separate namespace Role grants Event LIST without changing the
-frozen Argo Role. This supports address-wait and resource-delete failure
-inspection without any repository-specific convention.
-
 An adopted branch Workflow (#1172) is observed under its original run ID and
 Workflow UID, so resumed observation re-collects the same node/Pod attempts:
 identical observations are idempotent, unknowns may still be upgraded, and a
@@ -3296,7 +2990,7 @@ pipe join; cancellation, lookup errors and child failure refuse before upgrade
 mutation, preserving context causality. CLI refusals and failures are nonzero.
 A same-version no-op exits zero with `Already running vX; no upgrade performed`;
 explicit dry-run/help also succeed.
-Existing Workflow adoption, preflight recovery and publication ownership rules
+Existing Workflow adoption and publication ownership rules
 are unchanged. See [restart handover](docs/restart-handover.md).
 
 **Host PSI admission:** `serve`/Helm default to `mode=observe`: PSI samples
@@ -3308,7 +3002,7 @@ upgrade. Capacity/disk/ownership gates remain independent. CPU
 `some avg60` is independently configurable and disabled by default; memory is
 observed only. The pressure gate runs after existing grant eligibility and stops
 the grant pass while held. All prepared, unparked waiters start independent 20m pressure clocks; expiry bypasses only
-pressure, preserving release/tag priority, groups, weights/XL, VM, disk floor and
+pressure, preserving release/tag priority, groups, weights/XL, disk floor and
 backfill drain rules. Existing/adopted work is never stopped. Invalid or missing
 PSI fails open with one warning per outage and later recovery; both zero thresholds
 disable reads. `/api/status`, scheduling reasons, dashboard and fixed-label
@@ -3390,12 +3084,11 @@ unknowns and OOM lower bounds cannot authorize smaller resources. Details:
 **External container measurements (#1216):** schema 37 guards version-2 telemetry
 JSON while preserving schema-36 tables and version-1 main rows; v37 also adds
 the global observation-age retention index. The opt-in sampler
-covers verified Workflow app/init/sidecar/ContainerSet/ephemeral containers and
-UID-bound VMI launchers, with Kubernetes lifetime timing and optional kubelet pod
+covers verified Workflow app/init/sidecar/ContainerSet/ephemeral containers,
+with Kubernetes lifetime timing and optional kubelet pod
 CPU/memory, rootfs/log and complete mounted-PVC usage. `repo_usage` adds separate
 container/pod quantiles and per-run overlap without changing main-only size
-comparisons or admission. Shared PVC usage is not additive across Pods; launcher
-totals cannot separate guest use from hypervisor cost. Existing 4,096-row/run,
+comparisons or admission. Shared PVC usage is not additive across Pods. Existing 4,096-row/run,
 8-KiB/row, bounded read/batch windows remain. Retention targets 90 days/100,000
 newest rows globally in oldest-first sweeps
 of at most 1,000 rows, with 100-row DELETE batches on a separate SQLite connection
@@ -3405,3 +3098,32 @@ successfully recorded finishes. Helm rollback alone fails schema-too-new and
 requires a pre-upgrade database restore; see [schema 37](docs/backup-restore.md).
 Full scopes, exclusions and overhead:
 [external sampler coverage](docs/step-resource-usage.md#external-sampler-coverage-1216).
+
+
+### Operator-owned workflow capabilities (#1294)
+
+Resource templates and qualified extended resources require an audited grant
+for the durable repository ID and execution namespace. The operator provides
+the ServiceAccount, namespaced RBAC, namespace ResourceQuota and any device
+capacity. Oberth does not create infrastructure for a particular workload.
+Resource admission checks a static, single-object envelope and explicit API
+version/kind/action allowlist. Kubernetes discovery must confirm namespaced
+scope before execution. Grants cannot combine operator authority with
+secret-store or WIF identities. The server fixes the resource executor identity
+and rechecks current grant authority before submission, token delivery and
+restart adoption. Repository YAML cannot choose or widen it.
+
+Extended-resource requests and limits must agree as positive integers. Their
+bounded graph peak is checked against the grant and explicit server capacity;
+missing declarations or capacity never fall back to size-based admission.
+The source receipt pins exact source, fragments and run binding across sizing
+and submission. Ordinary workflows retain the existing admission behavior.
+
+Schema 40 starts capability authority empty. Schema 41 preserves historical
+execution, capacity and technology-specific grant rows as read-only data; no
+runtime decision consults them. Retiring code does not prove external cleanup.
+Before upgrade, operators must drain old execution and move object lifecycle,
+cleanup and test gates into repository Workflows. Old Helm execution keys are
+ignored with a warning. Oberth no longer reads `.oberth/tests.yaml`, starts
+trusted preflight Workflows, publishes harness images, or manages VM objects.
+See [workflow capabilities](docs/workflow-capabilities.md) for the operator contract.

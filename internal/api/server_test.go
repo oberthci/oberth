@@ -683,7 +683,6 @@ func TestMCPToolInputsMatchContract(t *testing.T) {
 		"run_retry":          {"id", "priority", "priority_reason"},
 		"run_cancel":         {"force", "id", "reason"},
 		"run_purge":          {"id", "reason", "what"},
-		"run_kvm_preflight":  {"id"},
 		"run_logs":           {"burn", "byte_offset", "context", "id", "limit", "offset", "pattern", "step", "tail"},
 		"wait":               {"id", "repo", "sha", "timeout", "trigger"},
 		"sync":               {"branch", "priority", "priority_reason", "repo", "sha"},
@@ -847,10 +846,11 @@ func TestMCPToolCountMatchesDocumented(t *testing.T) {
 
 func TestMCPToolSurfaceMatchesContract(t *testing.T) {
 	want := []string{
-		"status", "logs", "run_kvm_preflight", "run_get", "run_resources", "run_retry", "run_cancel", "run_rerun", "run_purge", "artifacts", "artifact_get", "run_logs", "wait", "sync", "promote", "promotion_list", "promote_status", "promote_retry",
+		"status", "logs", "run_get", "run_resources", "run_retry", "run_cancel", "run_rerun", "run_purge", "artifacts", "artifact_get", "run_logs", "wait", "sync", "promote", "promotion_list", "promote_status", "promote_retry",
 		"issue_create", "issue_get", "issue_get_many", "issue_update", "issue_append", "issue_close", "issue_reopen",
 		"issue_delete", "issue_list", "issue_unlock", "issue_close_many", "issue_lock",
-		"uplink_list", "uplink_revoke", "uplink_rotate", "access_dismiss", "kubevirt_grant_list",
+		"uplink_list", "uplink_revoke", "uplink_rotate", "access_dismiss",
+		"workflow_capability_grant", "workflow_capability_revoke", "workflow_capability_get",
 		"access_list", "access_allow", "access_revoke",
 		"kubevirt_grant", "kubevirt_revoke", "kubevirt_grant_get",
 		"size_grant", "size_revoke", "size_grant_get", "queue_priority_config", "queue_priority_get", "priority_grant", "priority_grant_list", "priority_grant_revoke", "run_priority", "admission_release",

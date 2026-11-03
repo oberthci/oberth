@@ -95,6 +95,10 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 	if controller.kube == nil || controller.seeder == nil {
 		return nil
 	}
+	capability, err := controller.boundCapability(ctx, wf, 0)
+	if err != nil {
+		return identityFailure("operator_capability", err)
+	}
 	pods, err := controller.kube.CoreV1().Pods(wf.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "workflows.argoproj.io/workflow=" + wf.Name})
 	if err != nil {
 		if ctx.Err() == nil && retryExecutorIdentityRead(err) {
@@ -126,26 +130,24 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 			continue
 		}
 		// Only a resource Pod's main container can mount the executor token.
-		// Its node mapping must settle before selecting the launcher identity;
+		// Its node mapping must settle before selecting the operator identity;
 		// ordinary steps can receive their executor token immediately.
 		if nodeID := pod.Annotations["workflows.argoproj.io/node-id"]; nodeID != "" && mainMountsExecutorToken(pod) {
 			if _, ok := wf.Status.Nodes[nodeID]; !ok {
 				continue
 			}
 		}
-		launcher := resourcePodTemplate(wf, pod, controller.config.VMLauncherServiceAccount)
+		resourceAccount := ""
+		if capability != nil {
+			resourceAccount = capability.ServiceAccount
+		}
+		launcher := resourcePodTemplate(wf, pod, resourceAccount)
 		if err := validateExecutorTokenTarget(pod, controller.config.SourceSeedImage, launcher); err != nil {
 			return identityFailure("target_validation", err)
 		}
 		serviceAccount := controller.config.ExecutorServiceAccount
-		if launcher {
-			if err := controller.ensureVMIForResourcePod(ctx, wf, pod); err != nil {
-				if errors.Is(err, errResourceDeletePending) {
-					continue
-				}
-				return identityFailure("launcher_provision", err)
-			}
-			serviceAccount = controller.config.VMLauncherServiceAccount
+		if launcher && capability != nil {
+			serviceAccount = capability.ServiceAccount
 		}
 		// Bound tokens die with the workflow-owned identity Pod. The deadline covers the workflow,
 		// including queue/startup slack, without needing a long-lived token Secret.
@@ -211,9 +213,9 @@ func mainMountsExecutorToken(pod *corev1.Pod) bool {
 }
 
 // A controller-owned Pod node resolves to a named, admitted resource template.
-// A Pod annotation alone cannot select the launcher identity.
-func resourcePodTemplate(wf *wfv1.Workflow, pod *corev1.Pod, launcherSA string) bool {
-	if launcherSA == "" {
+// A Pod annotation alone cannot select the operator identity.
+func resourcePodTemplate(wf *wfv1.Workflow, pod *corev1.Pod, operatorSA string) bool {
+	if operatorSA == "" {
 		return false
 	}
 	node, ok := wf.Status.Nodes[pod.Annotations["workflows.argoproj.io/node-id"]]
@@ -222,7 +224,7 @@ func resourcePodTemplate(wf *wfv1.Workflow, pod *corev1.Pod, launcherSA string) 
 	}
 	for i := range wf.Spec.Templates {
 		t := &wf.Spec.Templates[i]
-		if t.Name == node.TemplateName && t.Resource != nil && t.Executor != nil && t.Executor.ServiceAccountName == launcherSA {
+		if t.Name == node.TemplateName && t.Resource != nil && t.Executor != nil && t.Executor.ServiceAccountName == operatorSA {
 			return true
 		}
 	}
@@ -314,7 +316,11 @@ func (controller *Controller) retireExecutorIdentity(ctx context.Context, wf *wf
 	if controller.kube == nil || wf.UID == "" {
 		return nil
 	}
-	for _, account := range []string{controller.config.ExecutorServiceAccount, controller.config.VMLauncherServiceAccount} {
+	accounts := []string{controller.config.ExecutorServiceAccount}
+	if wf.Annotations[capabilityAnnotation] != "" {
+		accounts = append(accounts, wf.Spec.ServiceAccountName)
+	}
+	for _, account := range accounts {
 		if account == "" {
 			continue
 		}

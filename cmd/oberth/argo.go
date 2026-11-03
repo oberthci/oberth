@@ -12,7 +12,6 @@ import (
 
 	wfclientset "github.com/argoproj/argo-workflows/v4/pkg/client/clientset/versioned"
 	"k8s.io/apimachinery/pkg/util/httpstream"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
@@ -70,10 +69,6 @@ func buildArgoEngine(
 	if err != nil {
 		return nil, err
 	}
-	kubeVirtCeiling, err := kubeVirtCeiling(options)
-	if err != nil {
-		return nil, err
-	}
 	config := argojob.Config{
 		ReleaseWIF:                 wifConfig,
 		ReleaseTagRoutes:           routes,
@@ -84,9 +79,6 @@ func buildArgoEngine(
 		CredentialedServiceAccount: options.argoCredentialedAccount,
 		CISecretsServiceAccount:    options.argoCISecretsAccount,
 		ExecutorServiceAccount:     options.argoExecutorAccount,
-		VMLauncherServiceAccount:   options.argoVMLauncherAccount,
-		ContainerDiskPrefixes:      splitRunnerImagePrefixes(options.argoContainerDiskPrefixes),
-		KubeVirtCeiling:            kubeVirtCeiling,
 		RunnerImagePrefixes:        splitRunnerImagePrefixes(options.runnerImagePrefixes),
 		VaultAddress:               options.argoVaultAddress,
 		VaultCredentialedRole:      options.argoVaultCredentialedRole,
@@ -110,24 +102,12 @@ func buildArgoEngine(
 		TTLSeconds:          int32(options.argoWorkflowTTL),
 		PerRepoIdentities:   perRepoIdentities,
 		PerRepoCIIdentities: buildPerRepoCIIdentities(perRepoIdentities),
-		KVMEnabled:          options.vmKVMEnabled,
-		TrustedKVMGroup:     options.trustedKVMGroup,
 	}
 	controller, err := argojob.NewController(
 		argoClient.ArgoprojV1alpha1().Workflows(options.argoNamespace), kube, config)
 	if err != nil {
 		return nil, err
 	}
-	vmiClient, err := dynamic.NewForConfig(restConfig)
-	if err != nil {
-		return nil, fmt.Errorf("configure KubeVirt cleanup client: %w", err)
-	}
-	controller.WithVMIClient(vmiClient)
-	vmiCreateClient, err := rest.UnversionedRESTClientFor(dynamic.ConfigFor(restConfig))
-	if err != nil {
-		return nil, fmt.Errorf("configure guarded VMI create client: %w", err)
-	}
-	controller.WithVMICreateClient(vmiCreateClient)
 	if recorder, ok := auditor.(argojob.TimingRecorder); ok {
 		controller.WithTimingRecorder(recorder)
 	}
@@ -244,10 +224,6 @@ func validateArgoServeOptions(options serveOptions) error {
 	if err != nil {
 		return err
 	}
-	kubeVirtCeiling, err := kubeVirtCeiling(options)
-	if err != nil {
-		return err
-	}
 	return argojob.Config{
 		ReleaseWIF:                 wifConfig,
 		ReleaseTagRoutes:           routes,
@@ -258,9 +234,6 @@ func validateArgoServeOptions(options serveOptions) error {
 		CredentialedServiceAccount: options.argoCredentialedAccount,
 		CISecretsServiceAccount:    options.argoCISecretsAccount,
 		ExecutorServiceAccount:     options.argoExecutorAccount,
-		VMLauncherServiceAccount:   options.argoVMLauncherAccount,
-		ContainerDiskPrefixes:      splitRunnerImagePrefixes(options.argoContainerDiskPrefixes),
-		KubeVirtCeiling:            kubeVirtCeiling,
 		RunnerImagePrefixes:        splitRunnerImagePrefixes(options.runnerImagePrefixes),
 		VaultAddress:               options.argoVaultAddress,
 		VaultCredentialedRole:      options.argoVaultCredentialedRole,
@@ -276,8 +249,6 @@ func validateArgoServeOptions(options serveOptions) error {
 		// silently mounting one tier's writable state into the other's steps.
 		CICacheRoot:      options.ciCacheRoot,
 		ReleaseCacheRoot: options.releaseCacheRoot,
-		KVMEnabled:       options.vmKVMEnabled,
-		TrustedKVMGroup:  options.trustedKVMGroup,
 	}.Validate()
 }
 

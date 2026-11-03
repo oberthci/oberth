@@ -237,7 +237,7 @@ func TestRunsPageIsOneFlatFilteredList(t *testing.T) {
 			t.Fatalf("flat runs table is missing %s", want)
 		}
 	}
-	for _, want := range []string{"queueReason(run)", "waiting for capacity (${b.size}", "waiting behind ${b.repo}/${b.ref} (${b.size})", "waiting for group ${a.group}", "waiting for KubeVirt capacity (repository VM grant)"} {
+	for _, want := range []string{"queueReason(run)", "waiting for capacity (${b.size}", "waiting behind ${b.repo}/${b.ref} (${b.size})", "waiting for group ${a.group}"} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("plain-language queue status is missing %s", want)
 		}

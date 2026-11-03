@@ -369,7 +369,7 @@ func (gate *weightedAdmission) backfillClaimsOpenLocked(waiting int) bool {
 		return false
 	}
 	for _, reservation := range gate.waiters {
-		if !reservation.vmParked && !reservation.prepared {
+		if !reservation.prepared {
 			return false
 		}
 	}

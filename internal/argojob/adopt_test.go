@@ -11,7 +11,9 @@ import (
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
@@ -66,6 +68,15 @@ func TestAdoptionBindsDurableRunAndSubmittedResources(t *testing.T) {
 	controller = &Controller{workflows: &flakyWorkflowClient{staticWorkflowClient: staticWorkflowClient{workflow: wf}, failures: 1}, config: Config{Namespace: wf.Namespace}}
 	if _, found, err := controller.Adopt(context.Background(), request); err == nil || found || errors.Is(err, ErrAdoptionRefused) {
 		t.Fatalf("read failure = %v, %v; want an unrefused error", found, err)
+	}
+}
+
+func TestAdoptionRequiresCurrentAuthorityForResourceWorkflows(t *testing.T) {
+	workflow, request := adoptionWorkflow()
+	workflow.Spec.Templates = append(workflow.Spec.Templates, wfv1.Template{Name: "resource", Resource: &wfv1.ResourceTemplate{Action: "create", Manifest: "apiVersion: example.invalid/v1\nkind: Task\nmetadata:\n  name: old-task\n"}})
+	controller := &Controller{workflows: &staticWorkflowClient{workflow: workflow}, config: Config{Namespace: workflow.Namespace}}
+	if _, found, err := controller.Adopt(t.Context(), request); found || !errors.Is(err, ErrAdoptionRefused) {
+		t.Fatalf("historical resource authority was adopted without a current capability: found=%t error=%v", found, err)
 	}
 }
 
@@ -182,58 +193,14 @@ func TestAdoptionAcceptsActualServerBuiltWorkflow(t *testing.T) {
 	}
 }
 
-func TestAdoptionRestoresKubeVirtDemandFromBoundWorkflow(t *testing.T) {
-	wf, request := adoptionWorkflow()
-	wf.Spec.Templates = append(wf.Spec.Templates, wfv1.Template{Name: "vm", Resource: &wfv1.ResourceTemplate{
-		Action: "create", Manifest: `apiVersion: kubevirt.io/v1
-kind: VirtualMachineInstance
-spec:
-  domain:
-    cpu:
-      cores: 3
-    resources:
-      requests:
-        memory: 2Gi
-`,
-	}})
-	wf.Annotations[vmiQuotaAnnotation] = `{"repository_id":7,"limit":{"VMs":2,"Cores":6,"MemoryBytes":12884901888},"peak":{"VMs":1,"Cores":3,"MemoryBytes":2147483648}}`
+type missingWorkflowClient struct{}
 
-	controller := &Controller{workflows: &staticWorkflowClient{workflow: wf}, config: Config{Namespace: wf.Namespace}}
-	binding, found, err := controller.Adopt(t.Context(), request)
-	want := argoworkflow.VMIDemand{VMs: 1, Cores: 3, MemoryBytes: 2 << 30}
-	if err != nil || !found || binding.KubeVirt != want {
-		t.Fatalf("adopted demand = %#v, %v, %v", binding.KubeVirt, found, err)
-	}
-	validQuota := wf.Annotations[vmiQuotaAnnotation]
-	wf.Annotations[vmiQuotaAnnotation] = "{}"
-	if _, found, err := controller.Adopt(t.Context(), request); found || !errors.Is(err, ErrAdoptionRefused) || !strings.Contains(err.Error(), "invalid server quota binding") {
-		t.Fatalf("invalid quota binding was adopted: %v %v", found, err)
-	}
-	wf.Annotations[vmiQuotaAnnotation] = validQuota
-	delete(wf.Annotations, argoworkflow.ConcurrencyGroupAnnotation)
-	request.Group = argoworkflow.KubeVirtConcurrencyGroup
-	if _, found, err := controller.Adopt(t.Context(), request); err != nil || !found {
-		t.Fatalf("legacy implicit group could not recover: %v, %v", found, err)
-	}
-	request.Group = "unrelated"
-	if _, _, err := controller.Adopt(t.Context(), request); err == nil {
-		t.Fatal("arbitrary undeclared recovery group accepted")
-	}
-	request.Group = ""
-	wf.Spec.Templates[len(wf.Spec.Templates)-1].Resource.Manifest = strings.ReplaceAll(wf.Spec.Templates[len(wf.Spec.Templates)-1].Resource.Manifest, "2Gi", "-1Gi")
-	if binding.matches(wf) {
-		t.Fatal("changed resource spec matched adoption binding")
-	}
-	if _, _, err := controller.Adopt(t.Context(), request); err == nil {
-		t.Fatal("invalid adopted resource demand accepted")
-	}
+func (missingWorkflowClient) Create(context.Context, *wfv1.Workflow, metav1.CreateOptions) (*wfv1.Workflow, error) {
+	return nil, errors.New("unexpected create")
 }
-
-func TestAdoptionRefusesLegacyVMIWorkflowImmediately(t *testing.T) {
-	wf, request := adoptionWorkflow()
-	wf.Spec.Templates = append(wf.Spec.Templates, wfv1.Template{Name: "vm", Resource: &wfv1.ResourceTemplate{Action: "create"}})
-	controller := &Controller{workflows: &staticWorkflowClient{workflow: wf}, config: Config{Namespace: wf.Namespace}}
-	if _, found, err := controller.Adopt(t.Context(), request); found || !errors.Is(err, ErrAdoptionRefused) || !strings.Contains(err.Error(), "drain legacy VMI workflows before upgrading") {
-		t.Fatalf("legacy workflow not refused early: found=%v error=%v", found, err)
-	}
+func (missingWorkflowClient) Get(_ context.Context, name string, _ metav1.GetOptions) (*wfv1.Workflow, error) {
+	return nil, apierrors.NewNotFound(schema.GroupResource{Group: "argoproj.io", Resource: "workflows"}, name)
+}
+func (missingWorkflowClient) Delete(context.Context, string, metav1.DeleteOptions) error {
+	return errors.New("unexpected delete")
 }

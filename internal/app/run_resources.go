@@ -10,11 +10,12 @@ import (
 	"github.com/oberthci/oberth/internal/measured"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
-	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
-func (jobs *ArgoJobs) SetResourceBlobs(blobs vmrunner.PolicyGit) { jobs.resourceBlobs = blobs }
+func (jobs *ArgoJobs) SetResourceBlobs(blobs service.RepositoryBlobReader) {
+	jobs.resourceBlobs = blobs
+}
 
 // ResourceDeclarations reads only the exact selected commit in the local git
 // cache. It returns numeric resource fields, never commands or complete specs.

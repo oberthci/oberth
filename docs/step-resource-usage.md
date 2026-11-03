@@ -8,8 +8,7 @@ currently performed. CPU durations are nanoseconds (divide by 1e9 for seconds).
 The server's single-architecture executable is streamed and SHA-256 verified
 once into each ordinary source PVC. Wrapped container/script Pod templates
 add `kubernetes.io/arch` matching the server's `runtime.GOARCH` through
-`podSpecPatch` strategic merge, preserving administrator workflow/parent selectors. Protected
-KVM workflows and unsupported leaves remain unwrapped. This adds no hostPath,
+`podSpecPatch` strategic merge, preserving administrator workflow/parent selectors. Unsupported leaves remain unwrapped. This adds no hostPath,
 capabilities, ServiceAccount token or RBAC.
 
 Instrumentation runs in the main container's cgroup and consumes its budget.
@@ -114,13 +113,6 @@ can survive a failed scrape with zero metric samples. A final killed observation
 merges without erasing earlier measurements. Missing start/finish times and
 unobserved/garbage-collected incarnations remain unknown.
 
-For workflows declaring VM resources, two additional bounded inventories can
-bind a launcher through Workflow controller UID -> VMI UID -> launcher controller
-UID. The VMI operation annotation must bind its original resource step Pod UID.
-All launcher containers use the same cgroup checks. These are launcher totals
-(including QEMU/guest consumption), not a measurement of guest versus hypervisor
-cost. Missing original resource Pods/VMIs leave that binding unknown.
-
 The existing `/stats/summary` response adds these optional storage/pod scopes:
 
 - Per-container writable-rootfs and log used-byte peaks, accepted only when the
@@ -154,12 +146,11 @@ also appear in the existing `run_get` measured observations. Resource peaks are
 not summed to invent simultaneous whole-run demand. Filters/truncation can make
 both the overlap and usage population incomplete; coverage is never claimed.
 
-The source cannot separate guest/hypervisor memory or CPU, inspect guest files,
-measure raw block-volume used space, attribute shared PVC use to a run, or recover
-missed peaks/GC'd containers. Platform Pods, independent source-seed/artifact
-helpers outside Workflow supervision and CDI importer Pods without the verified
-step/VMI chain are outside this collector. They still need separate observations;
-stage 2 remains blocked on representative, complete coverage.
+The source cannot inspect resources created by a Workflow, measure raw
+block-volume used space, attribute shared PVC use to a run, or recover missed
+peaks and garbage-collected containers. Platform Pods and independent helpers
+outside Workflow supervision require separate observations. Representative,
+complete coverage is still required before changing admission from telemetry.
 
 Collection overhead is bounded: default 15s (existing configurable 1–30s), two
 shared node HTTP GETs per interval, each at most 16 MiB; at most 32 configured
@@ -167,15 +158,13 @@ nodes, two concurrent fills, four seconds per fill and five seconds per run
 sampling pass. New scopes add no kubelet requests. A shared immutable index
 covers at most 65,536 retained metric lines and 4,096 summary Pods, avoiding a
 whole-node metric scan per container. Each pass reads at most 2,048 Workflow
-Pods; VM workflows additionally read at most 2,048 VMIs filtered by Workflow label and 2,048 launcher Pods.
-The launcher inventory still spans the namespace; owner UIDs remain authoritative.
+Pods.
 Pagination is deliberately not followed; coverage can be incomplete. Pods with
 more than 128 declared containers or container statuses are excluded;
 container/volume storage lookups also cap each relevant list at 128; a pass
 visits at most 4,096
 uncached container candidates and writes batches of at most 256. Index/observation cost
-and extra VM API reads are the added overhead; production CPU/RSS/IO cost has
-not been qualified on example-node.
+is added overhead; qualify production CPU/RSS/IO cost on the target installation.
 
 Storage remains one upserted JSON row per run/node/Pod UID/runtime container ID,
 not one row per poll. Existing incarnations remain updatable at the 4,096-row

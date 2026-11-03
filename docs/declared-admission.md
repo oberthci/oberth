@@ -85,7 +85,7 @@ memory budgets must exclude platform reserve and other external work. Declared
 VM host demand is included in these budgets. They are administrator settings,
 not detected host capacity or measurements.
 
-## VM host demand and memory policy
+## Operator resource access
 
 A VM reserves its declared CPU request, or its CPU limit when no request exists.
 VMI memory uses its positive declared request as a bound when no limit exists,

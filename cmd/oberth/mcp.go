@@ -510,11 +510,10 @@ func mcpRetryBody(ctx context.Context, request jsonRPCRequest, toolTimeout time.
 // again. Unknown tools fail closed.
 var mcpReconnectableTools = map[string]bool{
 	"wait": true, "status": true, "logs": true, "system_status": true,
-	"run_get": true, "run_logs": true, "run_resources": true, "run_list": true, "run_kvm_preflight": true,
-	"artifacts": true, "artifact_get": true,
+	"run_get": true, "run_logs": true, "run_resources": true, "run_list": true, "artifacts": true, "artifact_get": true,
 	"promote_status": true, "promotion_list": true, "promote_grant_list": true,
 	"repo_usage": true, "repo_list": true, "issue_get": true, "issue_get_many": true, "issue_list": true,
-	"access_list": true, "kubevirt_grant_get": true, "kubevirt_grant_list": true, "size_grant_get": true,
+	"access_list": true, "size_grant_get": true,
 	"uplink_list": true, "audit_list": true, "schedule_list": true,
 }
 

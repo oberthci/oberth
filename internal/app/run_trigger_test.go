@@ -78,7 +78,6 @@ func writeBuild(t *testing.T, document string) string {
 func TestPipelineSizeIsPerRunTrigger(t *testing.T) {
 	dir := writeBuild(t, perTriggerBuild)
 	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
-	preflight := &TrustedPreflights{}
 	for trigger, want := range map[string]periapsis.Size{
 		"branch":    periapsis.M,
 		"promotion": periapsis.XL,
@@ -93,19 +92,6 @@ func TestPipelineSizeIsPerRunTrigger(t *testing.T) {
 		if err != nil || size != want {
 			t.Fatalf("%s PipelineSize = %q, %v; want %q", trigger, size, err, want)
 		}
-		// The trusted preflight reads the same document and must not size a
-		// promotion's full gate as a branch run.
-		size, err = preflight.Size(context.Background(), request)
-		if err != nil || size != want {
-			t.Fatalf("%s preflight Size = %q, %v; want %q", trigger, size, err, want)
-		}
-	}
-	// A tag run's preflight of build.yaml gates a release: promotion's size.
-	size, err := preflight.Size(context.Background(), service.JobRequest{
-		Run: model.Run{Ref: "v1.0.0", Trigger: "tag", Release: true}, Repository: model.Repository{Name: "ebpf"}, SourceDir: dir,
-	})
-	if err != nil || size != periapsis.XL {
-		t.Fatalf("tag preflight Size = %q, %v; want XL", size, err)
 	}
 }
 

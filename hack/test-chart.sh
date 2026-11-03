@@ -686,30 +686,19 @@ render --set promotion=null >"$promotion_manifest"
 grep -Fq -- '--promotion-grant-max-lifetime=24h' "$promotion_manifest"
 rm -f "$promotion_manifest"
 
-# Reused pre-Lane-B values omit trustedTests entirely; empty stays disabled.
-trusted_legacy_manifest=$(mktemp)
-render --set trustedTests=null >"$trusted_legacy_manifest"
-if grep -Fq -- '--trusted-tests-recipes=' "$trusted_legacy_manifest"; then
-  echo "legacy values unexpectedly enabled trusted suites" >&2
-  exit 1
-fi
-rm -f "$trusted_legacy_manifest"
-
-# Device access is an explicit operator input; no root or guessed-GID fallback.
-trusted_recipe='[{"suite_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","guest_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","harness_image":"example.invalid/harness@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","suite_url":"https://example.invalid/suite","guest_url":"https://example.invalid/guest"}]'
-for group in 0 -1 2147483648 null; do
-  if render --set vm.kvm.enabled=true --set-json "trustedTests.recipes=$trusted_recipe" --set "trustedTests.kvmSupplementalGroup=$group" >/dev/null 2>&1; then
-    echo "trusted suites accepted missing/invalid device GID: $group" >&2
-    exit 1
-  fi
+# Retired VM configuration remains accepted during Helm value reuse, but none
+# of it may restore execution flags, identities, RBAC, or reservations.
+render >"$package_dir/retired-baseline.yaml"
+for group in 0 -1 1234 2147483648 null; do
+  render --set vm.kvm.enabled=true --set-json 'trustedTests.recipes=[{"obsolete":true}]' \
+    --set "trustedTests.kvmSupplementalGroup=$group" \
+    --set-string argo.vmLauncherServiceAccount=obsolete-launcher \
+    --set-json 'argo.containerDiskPrefixes=["obsolete.invalid/"]' \
+    --set argo.kubevirtCeiling.maxVMs=99 >"$package_dir/retired-values.yaml"
+  cmp "$package_dir/retired-baseline.yaml" "$package_dir/retired-values.yaml"
 done
-render --set vm.kvm.enabled=true --set-json "trustedTests.recipes=$trusted_recipe" --set trustedTests.kvmSupplementalGroup=1234 >"$manifest"
-grep -Fq -- '--trusted-tests-kvm-group=1234' "$manifest"
-render >"$manifest"
-if grep -Fq -- '--trusted-tests-kvm-group=' "$manifest"; then exit 1; fi
-# Old inactive values with recipes but no new key remain inactive.
-render --set trustedTests.kvmSupplementalGroup=null >"$manifest"
-if grep -Fq -- '--trusted-tests-kvm-group=' "$manifest"; then exit 1; fi
+render --set vm=null --set trustedTests=null >"$package_dir/retired-values.yaml"
+cmp "$package_dir/retired-baseline.yaml" "$package_dir/retired-values.yaml"
 
 # Retention defaults preserve log retention and the existing artifact budget.
 render >"$manifest"

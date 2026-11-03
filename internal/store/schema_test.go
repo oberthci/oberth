@@ -29,8 +29,8 @@ func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	if err := validateMigrations(migrations, latestMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
-	if latestMigrationVersion != 39 {
-		t.Fatalf("latest migration version = %d, want 39", latestMigrationVersion)
+	if latestMigrationVersion != 41 {
+		t.Fatalf("latest migration version = %d, want 41", latestMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)
@@ -979,6 +979,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"vm_executions",
 		"vm_suite_executions",
 		"vm_suite_resources",
+		"workflow_capability_grants",
 	})
 	assertSchemaObjects(t, store.db, "index", []string{
 		"audit_actions_page_idx",
@@ -1033,6 +1034,9 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"ci_issue_projection_monotonic",
 		"ci_issue_work_no_delete",
 		"ci_issue_work_no_update",
+		"kubevirt_grants_retired_delete",
+		"kubevirt_grants_retired_insert",
+		"kubevirt_grants_retired_update",
 		"promotion_grants_guard_update",
 		"promotion_grants_no_delete",
 		"promotions_guard_update",
@@ -1053,9 +1057,15 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"trusted_applies_no_delete",
 		"trusted_plans_guard_update",
 		"trusted_plans_no_delete",
+		"vm_capacity_slots_retired_delete",
+		"vm_capacity_slots_retired_insert",
+		"vm_capacity_slots_retired_update",
 		"vm_executions_guard_update",
 		"vm_executions_no_delete",
 		"vm_executions_no_replace",
+		"vm_executions_retired_delete",
+		"vm_executions_retired_insert",
+		"vm_executions_retired_update",
 		"vm_suite_executions_retired_delete",
 		"vm_suite_executions_retired_insert",
 		"vm_suite_executions_retired_update",

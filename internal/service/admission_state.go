@@ -24,8 +24,6 @@ func (gate *weightedAdmission) reservationStateLocked(reservation *admissionRese
 		return "retained"
 	case reservation.granted:
 		return "granted"
-	case reservation.vmParked || gate.kubeVirtBlockedLocked(reservation):
-		return "vm"
 	case !reservation.prepared:
 		return "preparing"
 	}
@@ -174,16 +172,14 @@ func (scheduler *Scheduler) ReleaseAdmission(ctx context.Context, runID, actor s
 	if view.State == "granted" || view.State == "retained" {
 		switch run.JobName {
 		case "":
-			// A granted run with no recorded Workflow name is either between
-			// its grant and the name being recorded, or in a trusted KVM
-			// preflight whose own Workflow is named elsewhere. Nothing here
-			// can prove that Workflow gone.
+			// Without a recorded Workflow name, there is no authoritative
+			// identity against which to prove cleanup.
 			if !force {
-				return model.AdmissionRelease{}, fmt.Errorf("%w: run %s holds a grant but has no recorded Workflow (a trusted preflight may still be running); "+
+				return model.AdmissionRelease{}, fmt.Errorf("%w: run %s holds a grant but has no recorded Workflow; "+
 					"its Workflow cannot be proven gone, so release it only with force", ErrAdmissionReleaseRefused, runID)
 			}
 			result.Verified = false
-			result.Warning = "released without proof: run " + runID + " has no recorded Workflow (a trusted preflight may still be running)"
+			result.Warning = "released without proof: run " + runID + " has no recorded Workflow"
 		default:
 			if deleteErr := scheduler.jobs.Delete(ctx, run.JobName, runID); deleteErr != nil {
 				if !force {
