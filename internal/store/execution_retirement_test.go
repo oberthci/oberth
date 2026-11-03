@@ -29,7 +29,7 @@ func TestExecutionRetirementPreservesInertHistory(t *testing.T) {
 			}
 		}
 	}
-	if _, err = s.db.Exec(`DELETE FROM schema_migrations WHERE version>=41`); err != nil {
+	if _, err = s.db.Exec(`DELETE FROM schema_migrations WHERE version>=47`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = s.db.Exec(`INSERT INTO vm_executions(run_id,execution_kind,intent_json,spec_identity,workflow_uid,submitted,created_at,updated_at)
@@ -86,5 +86,5 @@ DROP TRIGGER IF EXISTS vm_capacity_slots_retired_delete;
 DROP TRIGGER IF EXISTS kubevirt_grants_retired_insert;
 DROP TRIGGER IF EXISTS kubevirt_grants_retired_update;
 DROP TRIGGER IF EXISTS kubevirt_grants_retired_delete;
-DELETE FROM schema_migrations WHERE version>=41;
+DELETE FROM schema_migrations WHERE version>=47;
 `

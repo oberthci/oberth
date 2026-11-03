@@ -16,7 +16,7 @@ DROP TRIGGER IF EXISTS vm_suite_resources_retired_insert;
 DROP TRIGGER IF EXISTS vm_suite_resources_retired_update;
 DROP TRIGGER IF EXISTS vm_suite_resources_retired_delete;
 DROP TABLE IF EXISTS workflow_capability_grants;
-DELETE FROM schema_migrations WHERE version>=39;
+DELETE FROM schema_migrations WHERE version>=45;
 `
 
 func TestPilotRetirementPreservesReadOnlyHistory(t *testing.T) {

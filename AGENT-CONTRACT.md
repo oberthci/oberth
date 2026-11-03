@@ -1825,7 +1825,7 @@ trust assumptions and complete invalidation rules.
   cutoff. It refuses a matching collection without altering its contents.
 - Every push, sync, promotion, and issue mutation is attributed to the acting
   uplink in the same durable transaction as the state change where applicable.
-- The inactive pilot implementation is retired. Schema v39 preserves the
+- The inactive pilot implementation is retired. Schema v45 preserves the
   schema-v14 `vm_suite_executions` and `vm_suite_resources` journals as read-only
   history for export and investigation; no execution path consults them.
   Existing capacity reservations remain intact because retiring code does not
@@ -2530,10 +2530,15 @@ alone is never evidence that missing migrations ran.
 | v36 | v0.17.74 / #1216 stage 1 | Server-observed, UID/container-bound sampled step resource usage and bounded repository/time/step indexes; no ingestion API or admission change | Database restore |
 | v37 | Unreleased (#1216 measurement) | Guard version-2 container telemetry and add the global observation-age retention index; preserve version-1 observations | Database restore |
 | v38 | Upstream publication retry | Persist bounded attempts, retry deadlines and audited owner progress without changing the pushed object or promotion plan | Database restore |
-| v39 | Submission priority | Persist expiring identity grants, audited priority requests and supersession protection; existing priority ordering remains compatible | Database restore |
-| v39 | Pilot retirement | Preserve inactive pilot journals as read-only history; remove them from execution decisions | Database restore |
-| v40 | Operator capabilities | Empty repository-bound authority for operator ServiceAccounts, resource kinds and extended resources; no conversion of historical grants | Database restore |
-| v41 | Execution retirement | Preserve old execution, capacity and technology-specific grant rows as read-only history; no runtime authority or automatic cleanup | Database restore |
+| v39 | Priority submissions | Durable priority grants and run requests | Database restore |
+| v40 | Token expiry | Add optional credential expiry | Database restore |
+| v41 | Issue revisions | Guard metadata revisions | Database restore |
+| v42 | Publication abandonment | Preserve outbox history and add abandoned status | Database restore |
+| v43 | Restart timing | Append separate restart-attempt timing evidence | Database restore |
+| v44 | Tag publication identity | Prevent duplicate tag publication tuples | Database restore |
+| v45 | Pilot retirement | Preserve inactive pilot journals as read-only history; remove them from execution decisions | Database restore |
+| v46 | Operator capabilities | Empty repository-bound authority for operator ServiceAccounts, resource kinds and extended resources; no conversion of historical grants | Database restore |
+| v47 | Execution retirement | Preserve old execution, capacity and technology-specific grant rows as read-only history; no runtime authority or automatic cleanup | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding
@@ -3119,7 +3124,7 @@ missing declarations or capacity never fall back to size-based admission.
 The source receipt pins exact source, fragments and run binding across sizing
 and submission. Ordinary workflows retain the existing admission behavior.
 
-Schema 40 starts capability authority empty. Schema 41 preserves historical
+Schema 46 starts capability authority empty. Schema 47 preserves historical
 execution, capacity and technology-specific grant rows as read-only data; no
 runtime decision consults them. Retiring code does not prove external cleanup.
 Before upgrade, operators must drain old execution and move object lifecycle,

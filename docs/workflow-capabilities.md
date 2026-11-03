@@ -61,7 +61,7 @@ actual device availability and namespace quota.
 
 Before upgrading from VM support, drain old runs, confirm external cleanup,
 and move test gates and object lifecycle into repository Workflows. Validate
-those destination pipelines before deploying the retirement. Schema 41 retains
+those destination pipelines before deploying the retirement. Schema 47 retains
 old execution journals, capacity rows and grants as read-only history without
 inventing cleanup or transferring authority. Export history before a later
 operator-managed archival migration. Old `vm`, `trustedTests`, and Argo VM

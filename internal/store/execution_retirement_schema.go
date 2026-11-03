@@ -1,6 +1,6 @@
 package store
 
-const executionRetirementMigrationVersion = 41
+const executionRetirementMigrationVersion = 47
 
 // Preserve history without manufacturing cleanup or transferring authority.
 const executionRetirementSchema = `

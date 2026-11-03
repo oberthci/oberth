@@ -1,6 +1,6 @@
 package store
 
-const workflowCapabilityMigrationVersion = 40
+const workflowCapabilityMigrationVersion = 46
 
 // Existing technology-specific grants confer no generic Kubernetes authority.
 // Operators must explicitly grant the replacement against their own RBAC.

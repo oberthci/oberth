@@ -13,7 +13,7 @@ func TestWorkflowCapabilitiesStartEmptyAcrossUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := createRepo(t, s)
-	if _, err = s.db.Exec(executionRetirementDowngradeSQL+`DROP TABLE IF EXISTS workflow_capability_grants; DELETE FROM schema_migrations WHERE version>=40; INSERT INTO kubevirt_grants(repo_id,granted_by,granted_at) VALUES(?,'historical-admin',1)`, repo.ID); err != nil {
+	if _, err = s.db.Exec(executionRetirementDowngradeSQL+`DROP TABLE IF EXISTS workflow_capability_grants; DELETE FROM schema_migrations WHERE version>=46; INSERT INTO kubevirt_grants(repo_id,granted_by,granted_at) VALUES(?,'historical-admin',1)`, repo.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Close(); err != nil {
