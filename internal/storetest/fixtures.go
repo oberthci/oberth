@@ -171,7 +171,7 @@ func ConsumePromotionGrant(database *store.Store, ctx context.Context, id, promo
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	now := fixtureNow(fixture).UnixNano()
 	result, err := db.ExecContext(ctx, `UPDATE promotion_grants SET consumed_by=?,consumed_at=? WHERE id=? AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at>?`, promotionID, now, id, now)
 	if err != nil {
