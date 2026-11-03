@@ -10,13 +10,57 @@ import (
 )
 
 type deletionAuditor struct {
-	actions []model.AuditActionSpec
-	err     error
+	actions   []model.AuditActionSpec
+	err       error
+	errAction string
 }
 
 func (a *deletionAuditor) AppendAuditAction(_ context.Context, spec model.AuditActionSpec) (model.AuditAction, error) {
 	a.actions = append(a.actions, spec)
+	if a.errAction != "" && a.errAction != spec.Action {
+		return model.AuditAction{}, nil
+	}
 	return model.AuditAction{}, a.err
+}
+
+func TestBranchDeletionRecordsOnlySuccessfulAuditedOutcome(t *testing.T) {
+	for _, failure := range []string{"none", "missing auditor", "intent", "mutation", "outcome"} {
+		t.Run(failure, func(t *testing.T) {
+			git := &stubPushGit{}
+			receives := &stubReceiveRecorder{}
+			audit := &deletionAuditor{}
+			var auditor Auditor = audit
+			switch failure {
+			case "missing auditor":
+				auditor = nil
+			case "intent", "outcome":
+				audit.err = errors.New("audit unavailable")
+				if failure == "outcome" {
+					audit.errAction = "branch.delete.succeeded"
+				}
+			case "mutation":
+				git.deleteErr = errors.New("upstream unavailable")
+			}
+			ingestor, err := NewPushIngestor(PushConfig{
+				Repositories: stubPushRepositories{repository: model.Repository{ID: 1, Name: "repo", DefaultBranch: "main"}},
+				Discoverer:   stubRepositoryDiscoverer{}, Git: git, Receives: receives, Auditor: auditor,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := ingestor.Branch(t.Context(), BranchPush{EventID: "delete", Repository: "repo", Branch: "feature/retired",
+				Actor: "operator@host", OldOID: strings.Repeat("a", 40), NewOID: strings.Repeat("0", 40)})
+			if failure != "none" {
+				if err == nil || result.Deleted || len(receives.events) != 0 {
+					t.Fatalf("failed deletion recorded as deleted: result=%+v events=%v err=%v", result, receives.events, err)
+				}
+				return
+			}
+			if err != nil || !result.Deleted || len(receives.events) != 1 || receives.events[0].Outcome != "deleted" {
+				t.Fatalf("successful audited deletion not recorded: result=%+v events=%v err=%v", result, receives.events, err)
+			}
+		})
+	}
 }
 
 func TestBranchDeletionAuditsActorAndOldSHA(t *testing.T) {

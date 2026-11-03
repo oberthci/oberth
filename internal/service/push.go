@@ -59,14 +59,14 @@ func (ingestor *PushIngestor) Branch(ctx context.Context, push BranchPush) (Push
 		if repository.DefaultBranch == "" || push.Branch == repository.DefaultBranch {
 			return PushResult{}, fmt.Errorf("%w: cannot delete the default branch", ErrInvalidInput)
 		}
-		duplicate, err := ingestor.receives.RecordReceiveEvent(ctx, receiveSpec(push.EventID, push.Actor, repository.ID, model.RefBranch, push.Branch, push.OldOID, "", "", "deleted"))
-		if err != nil {
-			return PushResult{}, err
-		}
 		if err := auditedGitMutation(ctx, ingestor.auditor, push.Actor, "branch.delete", "repository", push.Repository,
 			map[string]any{"branch": push.Branch, "old_sha": push.OldOID, "event_id": push.EventID},
 			func() error { return ingestor.git.DeleteBranch(ctx, push.Repository, push.Branch) }); err != nil {
 			return PushResult{}, fmt.Errorf("propagate branch deletion upstream: %w", err)
+		}
+		duplicate, err := ingestor.receives.RecordReceiveEvent(ctx, receiveSpec(push.EventID, push.Actor, repository.ID, model.RefBranch, push.Branch, push.OldOID, "", "", "deleted"))
+		if err != nil {
+			return PushResult{}, err
 		}
 		return PushResult{Repository: repository, Deleted: true, Duplicate: duplicate, Reason: "branch deletion requires no CI run"}, nil
 	}
