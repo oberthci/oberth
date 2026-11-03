@@ -490,7 +490,7 @@ func TestScopedAdminCannotActOutsideItsUpstream(t *testing.T) {
 		"access_revoke":              {"repo": hiddenRepo, "step": "release", "secret": "oberth/data/codeberg/token"},
 		"kubevirt_grant":             {"repo": hiddenRepo},
 		"kubevirt_revoke":            {"repo": hiddenRepo},
-		"workflow_capability_grant":  {"repo": hiddenRepo, "service_account": "operator", "resource_kinds": []string{"batch/jobs"}},
+		"workflow_capability_grant":  {"repo": hiddenRepo, "capability": map[string]any{"namespace": "pipelines", "service_account": "operator-worker", "extended_resources": map[string]int{"devices.example.test/worker": 2}}},
 		"workflow_capability_revoke": {"repo": hiddenRepo},
 		"repo_remove":                {"repo": hiddenRepo},
 		"promote_grant":              {"repo": hiddenRepo, "sha": fixture.runs["codeberg"][0].SHA, "branch": "main", "expires": "1h"},
