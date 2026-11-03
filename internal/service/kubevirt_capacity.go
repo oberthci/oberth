@@ -146,3 +146,17 @@ func (scheduler *Scheduler) adoptedKubeVirtDemand(run model.Run) (argoworkflow.V
 	}
 	return argoworkflow.VMIDemand{}, nil
 }
+
+// Preflight admission is released on durable cancellation or deadline, even
+// when Kubernetes cleanup is pending. The VM journal still owns its VM slot.
+func (gate *weightedAdmission) releasePreflightRun(runID string) {
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	for _, reservation := range gate.reservations {
+		if reservation.runID == runID && reservation.granted && !reservation.submitted {
+			reservation.retained = false
+			gate.releaseLocked(reservation)
+			return
+		}
+	}
+}

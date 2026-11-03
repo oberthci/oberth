@@ -40,7 +40,7 @@ func (jobs *ArgoJobs) PipelineKubeVirt(ctx context.Context, request service.JobR
 	if err != nil {
 		return service.KubeVirtResources{}, err
 	}
-	policy := argoworkflow.Policy{RunnerImagePrefixes: jobs.config.RunnerImagePrefixes, ContainerDiskPrefixes: jobs.config.ContainerDiskPrefixes}
+	policy := argoworkflow.Policy{ServerDeadline: true, RunnerImagePrefixes: jobs.config.RunnerImagePrefixes, ContainerDiskPrefixes: jobs.config.ContainerDiskPrefixes}
 	workflow := resolved.Workflow()
 	kvm, err := argoworkflow.DeclaredKVMTemplates(workflow)
 	if err != nil {

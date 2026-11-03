@@ -32,6 +32,7 @@ const maximumCIIssueTailBytes = 16 << 10
 const mutationGateRetryInterval = time.Second
 
 var errMutationBlocked = errors.New("service: mutation blocked by unavailable audit integrity")
+var errPreflightCancellationPending = errors.New("trusted preflight cancellation cleanup remains pending")
 
 type mutationRequirement func(context.Context) error
 
@@ -370,7 +371,14 @@ func (scheduler *Scheduler) completePendingCancellationsWithGate(ctx context.Con
 	if err != nil {
 		return fmt.Errorf("load pending run cancellations: %w", err)
 	}
-	return scheduler.completeCancellationsWithGate(ctx, pending, require)
+	err = scheduler.completeCancellationsWithGate(ctx, pending, require)
+	if errors.Is(err, errPreflightCancellationPending) {
+		// The API still reports pending deletion, but this external cleanup
+		// failure must not stop the owner or its periodic absence readback.
+		log.Printf("WARN: %v", err)
+		return nil
+	}
+	return err
 }
 
 func (scheduler *Scheduler) completeCancellations(ctx context.Context, cancellations []model.RunCancellation) error {
@@ -400,11 +408,9 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 	for _, current := range pending {
 		currentCancellations[current.RunID] = current
 	}
+	var preflightErr error
 	for _, cancellation := range cancellations {
 		beatDispatch(ctx)
-		if strings.TrimSpace(cancellation.JobName) == "" {
-			continue
-		}
 		current, pending := currentCancellations[cancellation.RunID]
 		if !pending {
 			continue
@@ -413,6 +419,16 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 		run, err := scheduler.database().Run(ctx, cancellation.RunID)
 		if err != nil {
 			return err
+		}
+		if run.JobName == "" {
+			if canceler, ok := scheduler.trusted.(interface {
+				CancelPreflight(context.Context, string) error
+			}); ok {
+				if err := canceler.CancelPreflight(ctx, run.ID); err != nil {
+					preflightErr = errors.Join(preflightErr, fmt.Errorf("%w: %w", errPreflightCancellationPending, err))
+				}
+			}
+			continue // The live owner or terminal cleanup worker confirms absence.
 		}
 		if isPendingCreate(run) || scheduler.ownsCreateCleanup(run.ID) {
 			scheduler.registerCreateCleanup(run, nil, isPendingCreate(run))
@@ -434,14 +450,13 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 			return fmt.Errorf("clean canceled run workspace %s: %w", cancellation.RunID, cleanupErr)
 		}
 	}
-	return nil
+	return preflightErr
 }
 
 // abandonAdmissions withdraws the ungranted admission reservations of runs a
 // cancellation obligation has already terminalized. Only a terminal durable
-// record releases a reservation here; a granted one stays with its owner,
-// which releases it once the Workflow is terminal or its deletion was
-// accepted.
+// record releases a reservation here. Preflight admission releases immediately;
+// a submitted main Workflow keeps its reservation until deletion is accepted.
 func (scheduler *Scheduler) abandonAdmissions(ctx context.Context, cancellations []model.RunCancellation) {
 	for _, cancellation := range cancellations {
 		run, err := scheduler.database().Run(ctx, cancellation.RunID)
@@ -449,6 +464,9 @@ func (scheduler *Scheduler) abandonAdmissions(ctx context.Context, cancellations
 			continue
 		}
 		scheduler.admission.abandon(run.QueueSequence)
+		if run.JobName == "" {
+			scheduler.admission.releasePreflightRun(run.ID)
+		}
 	}
 }
 
@@ -549,6 +567,8 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 	}()
 	workers.Add(1)
 	go func() { defer workers.Done(); scheduler.runCreateCleanup(workerCtx) }()
+	workers.Add(1)
+	go func() { defer workers.Done(); scheduler.runTerminalPreflightCleanup(workerCtx) }()
 	completed := make(chan error, max(2*scheduler.maxConcurrent, len(adopted)))
 	active := len(adopted)
 	for _, adopted := range adopted {
@@ -1009,6 +1029,16 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			stateCtx, cancelState := boundedWorkspaceCleanupContext(ctx)
 			state, stateErr := retryDatabase(stateCtx, "KVMPreflight", func(ctx context.Context) (vmrunner.KVMExecution, error) { return journal.KVMPreflight(ctx, run.ID) })
 			cancelState()
+			if errors.Is(err, ErrPreflightDeadline) && ctx.Err() == nil {
+				reservation.release()
+				return scheduler.finishTrustedPreflightFailure(ctx, run, JobResult{Status: model.RunFailed, Phase: "infrastructure"}, errors.New(model.ExecutionDeadlineMessage+" Trusted preflight timed out; Kubernetes cleanup may still be pending.")) //nolint:staticcheck // ST1005: Preserve the public ExecutionDeadlineMessage presentation label.
+			}
+			current, readErr := scheduler.database().Run(ctx, run.ID)
+			if readErr == nil && current.Preempted() && current.JobName == "" {
+				reservation.release()
+				scheduler.signals.NotifyRun(run.ID)
+				return nil
+			}
 			if (stateErr != nil && !errors.Is(stateErr, store.ErrNotFound)) || (stateErr == nil && !state.Cleaned) {
 				reservation.retain()
 				if recoverablePreflightError(err) && ctx.Err() == nil {

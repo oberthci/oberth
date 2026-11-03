@@ -942,8 +942,10 @@ function summaryLines(detail) {
   if (execution) {
     if (["deadline_exceeded", "deadline_elapsed", "terminal_observed"].includes(execution.state)) lines.push(`[execution] ${detail.Scheduling.message}`);
     const deadline = execution.deadline;
-    if (deadline?.expires_at) lines.push(`[deadline] ${deadline.expires_at} · ${deadline.remaining_seconds ?? "unknown"}s remaining · clock: Workflow start`);
+    if (deadline?.expires_at) lines.push(`[deadline] ${deadline.expires_at} · ${deadline.remaining_seconds ?? "unknown"}s remaining · clock: ${deadline.clock === "preflight_admitted_at" ? "Preflight admission" : "Workflow start"}`);
     else if (deadline) lines.push(`[deadline] ${deadline.budget_seconds}s budget · Workflow start not observed`);
+    const serverDeadline = execution.server_deadline;
+    if (serverDeadline?.expires_at) lines.push(`[server watchdog] ${serverDeadline.expires_at} · ${serverDeadline.remaining_seconds ?? "unknown"}s remaining · clock: ${serverDeadline.clock === "workflow_started_at" ? "Workflow start" : "Workflow creation"}`);
     if (execution.reconciliation_lag_seconds != null) lines.push(`[execution] observed ${execution.phase} · finalization lag ${execution.reconciliation_lag_seconds}s`);
   }
   if (unreached) lines.push(`${unreached} declared step${unreached === 1 ? "" : "s"} not reached`);

@@ -178,6 +178,7 @@ type serveOptions struct {
 	argoReleaseWIFConfig         string
 	argoReleaseTagRoutesConfig   string
 	argoWorkflowTimeout          time.Duration
+	argoRepoWorkflowTimeouts     []string
 	argoWorkflowTTL              int
 	argoResourceSamplerConfig    string
 	// argoSourceStorageClass names the class for the per-run source claim the
@@ -330,6 +331,10 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.argoGoProxyNamespace.RepositoryPrefix, "argo-goproxy-repository-prefix", "", "Repository-name prefix within the configured owner")
 	flags.StringVar(&options.argoGoProxyNamespace.Upstream, "argo-goproxy-upstream", "", "Exact upstream owning private module repositories")
 	flags.StringVar(&options.argoGoProxyNamespace.Organization, "argo-goproxy-organization", "", "Exact organization owning private module repositories")
+	flags.Func("argo-repo-workflow-timeout", "administrator repository deadline cap: upstream/org/repo=30m (repeatable)", func(value string) error {
+		options.argoRepoWorkflowTimeouts = append(options.argoRepoWorkflowTimeouts, value)
+		return nil
+	})
 	flags.DurationVar(&options.argoWorkflowTimeout, "argo-workflow-timeout", 12*time.Hour, "ceiling on a Workflow's own activeDeadlineSeconds")
 	flags.IntVar(&options.argoWorkflowTTL, "argo-workflow-ttl", 3600, "finished Workflow retention in seconds")
 	flags.StringVar(&options.argoResourceSamplerConfig, "argo-resource-sampler-config", "", "administrator-owned kubelet sampler JSON config; disabled when empty")
