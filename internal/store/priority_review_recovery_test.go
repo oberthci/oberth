@@ -30,11 +30,12 @@ func TestPriorityReviewRecoveryKeepsOwnPlaceAndSiblings(t *testing.T) {
 				t.Fatal(err)
 			}
 			var next model.Run
-			if mode == "KVM" {
+			switch mode {
+			case "KVM":
 				next, err = s.RecoverKVMPreflight(t.Context(), source.ID)
-			} else if mode == "restart" {
+			case "restart":
 				next, err = s.ResetStrandedRunToQueued(t.Context(), source.ID)
-			} else {
+			default:
 				var failed model.Run
 				failed, err = s.FinishRun(t.Context(), source.ID, autoRetryResult())
 				if err == nil && failed.AutoRetriedBy != "" {
