@@ -81,8 +81,14 @@ private tmpfs directory explicitly.
 The tmpfs is included in the existing container memory envelope: 4Gi for
 `test-store`, with a 2GiB Go heap target, and 8Gi for `release-test`, with its
 4GiB target. CPU requests are 971m and 1000m respectively, with limits of
-2 and 4 CPU. Package execution retains the 20-minute deadlock bound and
-bounded Go worker counts. The contention test first checks committed reads
+2 and 4 CPU. The store lane and full release race suite use a 35-minute
+per-package deadlock bound: 1.5× the largest measured whole-store race wall
+time on a loaded host (22.9 minutes, including scheduler pauses), rounded up
+to the next minute. The final passing store race run took 18.5 minutes.
+Other branch race lanes retain their 20-minute bounds. Go worker counts
+remain bounded.
+
+The contention test first checks committed reads
 while holding an uncommitted writer transaction, with a generous scaled
 one-minute deadlock bound. After releasing that transaction, it keeps the three
 receive/status lookups running until all writers finish. A successful initial
