@@ -1321,17 +1321,45 @@ trust assumptions and complete invalidation rules.
   Detailed status/run reads can also expose an ephemeral Argo deadline and
   finalization-lag observation after steps have progressed. The clock is the
   submitted budget plus Argo's Workflow start, not weighted admission. Only
-  explicit controller/current-attempt Pod deadline evidence yields the display
-  label `deadline-exceeded`; elapsed time or exit 143 alone does not. Durable
-  terminal state, admission release and replay evidence are unchanged. See
-  [workflow-deadlines.md](docs/workflow-deadlines.md).
+  explicit controller/current-attempt Pod deadline evidence puts
+  `Execution deadline exceeded.` in `display_reason` (the run stays `running`
+  until the store finalizes it, then `failed`); elapsed time or exit 143
+  alone does not. Durable terminal state, admission release and replay
+  evidence are unchanged. See [workflow-deadlines.md](docs/workflow-deadlines.md).
   Durable `Status` values are unchanged and `RunStatus.Valid` still refuses
   the read-only `waiting` projection.
 
+  `display_status` is exactly one of seven values: `queued`, `running`,
+  `passed`, `failed`, `infra-retried`, `superseded`, `cancelled`
+  (`model.DisplayStatuses`; `model.DisplayRunStatus` is the only mapping,
+  and `TestEveryRawPhaseMapsToExactlyOneDisplayStatus` holds every raw
+  status, phase and projection to it). A status says what to do with the
+  run; anything finer is the reason line, never a second status. Every run
+  that has not started is `queued`: durable queued, claimed (`Status`
+  `waiting` on the wire, phase `waiting`/`preparing`/`preflight`), admitted
+  but not submitted. Its `display_reason` names what it waits for, in plain
+  words, computed once by the server for the list, detail, status, live-log
+  and active views, the CLI and the dashboard: `next in line`,
+  `position 3 in line, behind org/app/main (needs the whole host)`,
+  `preparing to run`, `waiting for CPU budget (12.5 of 40 CPU free)`,
+  `waiting for memory budget (8 GiB of 16 GiB free)`, `host IO pressure
+  (42%)`, `10 runs already running (limit 10)`, `concurrency group deploy
+  busy (held by run <run12>)`, `waiting for KubeVirt capacity (repository
+  VM grant)`, `waiting for trusted VM capacity`, `waiting for disk space
+  (... free, floor ...)`, `waiting for capacity (size M, 6 of 8 weight
+  used)`, `admitted, starting the workflow`, `KVM preflight running`;
+  a head-of-queue run adds `; smaller runs run meanwhile` or `; host
+  draining for it`. A scoped viewer sees no numbers, positions or other
+  repositories' runs (#073). `Scheduling.state`, `Scheduling.message` and
+  `Scheduling.admission` keep the raw observation for machines.
+
   | Durable cause | `display_status` | `display_reason` |
   | --- | --- | --- |
-  | queued or claimed before admission | `queued` | scheduling observation |
-  | admitted | `running` | empty |
+  | queued, claimed before admission, admitted before submission, trusted preflight | `queued` | what the run waits for (above) |
+  | admitted and started | `running` | empty |
+  | uncertain Workflow create (phase `infrastructure-pending`) | `running` | `Workflow create outcome uncertain; cleanup pending` |
+  | running past its execution deadline | `running` | `Execution deadline exceeded.` (plus priority prefix) |
+  | failed by its execution deadline | `failed` | `Execution deadline exceeded.` or the retained resource guidance |
   | passed CI / published release | `passed` | empty |
   | failed step or infrastructure | `failed` | failed phase and bounded cause; never empty |
   | upstream publication failure | `failed` | upstream rejection class, or upstream publication failure with transient cause |
@@ -1344,7 +1372,10 @@ trust assumptions and complete invalidation rules.
 
   Raw status fields retain their values, but existing `display_status` values
   can change from `cancelled` to `superseded`, or `failed` to `infra-retried`.
-  Clients must accept these display enum values. The display pair is additive
+  Clients must accept these display enum values. The former `waiting`
+  dashboard label and the `infra-pending` and `deadline-exceeded`
+  `display_status` values are gone: they are `queued`, `running` and
+  `failed`/`running` with the reason above. The display pair is additive
   on default API, MCP and CLI responses; retry
   and rerun eligibility still uses the durable cause. The `status`/`wait`
   tool's `status: "delivered"` remains the legacy alias of `passed` for every

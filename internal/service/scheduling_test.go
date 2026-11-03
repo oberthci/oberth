@@ -151,7 +151,7 @@ func TestSchedulingProjectionSkipsTerminalAndProgressedListRows(t *testing.T) {
 		}
 	}
 	for _, state := range []model.StepStatus{model.StepRunning, model.StepPassed, model.StepFailed, model.StepSkipped} {
-		if result := service.observeScheduling(t.Context(), model.Run{Status: model.RunRunning}, []model.StepResult{{Status: state}}, false); result != nil {
+		if result, _ := service.observeScheduling(t.Context(), model.Run{Status: model.RunRunning}, []model.StepResult{{Status: state}}, false); result != nil {
 			t.Fatalf("progressed=%#v", result)
 		}
 	}
@@ -376,7 +376,8 @@ func TestSchedulingDeadlineVisibleAfterProgressWithoutChangingDurableStatus(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.Status != "running" || status.DisplayStatus != "deadline-exceeded" || status.Scheduling.Execution.Reason != "DeadlineExceeded" {
+	// The deadline is the running run's reason, never a second status.
+	if status.Status != "running" || status.DisplayStatus != "running" || !strings.Contains(status.DisplayReason, model.ExecutionDeadlineMessage) || status.Scheduling.Execution.Reason != "DeadlineExceeded" {
 		t.Fatalf("status = %+v", status)
 	}
 	value, err := service.CallTool(ctx, api.Actor{Identity: "agent@host"}, "run_get", json.RawMessage(`{"id":"`+run.ID+`"}`))
@@ -384,7 +385,7 @@ func TestSchedulingDeadlineVisibleAfterProgressWithoutChangingDurableStatus(t *t
 		t.Fatal(err)
 	}
 	detail := value.(RunDetailResponse)
-	if detail.Run.DisplayStatus != "deadline-exceeded" || *detail.Scheduling.Execution.ReconciliationLagSeconds != 3080 {
+	if detail.Run.DisplayStatus != "running" || !strings.Contains(detail.Run.DisplayReason, model.ExecutionDeadlineMessage) || *detail.Scheduling.Execution.ReconciliationLagSeconds != 3080 {
 		t.Fatalf("detail = %+v", detail)
 	}
 	stored, err := fixture.store.Run(ctx, run.ID)
@@ -400,7 +401,7 @@ func TestSchedulingDeadlineVisibleAfterProgressWithoutChangingDurableStatus(t *t
 	}
 	terminal := run
 	terminal.Status, terminal.Error = model.RunFailed, "Step exceeded its deadline"
-	if got := presentationRun(terminal); got.DisplayStatus != "deadline-exceeded" {
-		t.Fatal("retained terminal deadline reason hidden")
+	if got := presentationRun(terminal); got.DisplayStatus != "failed" || got.DisplayReason != model.ExecutionDeadlineMessage {
+		t.Fatalf("retained terminal deadline reason hidden: %+v", got)
 	}
 }

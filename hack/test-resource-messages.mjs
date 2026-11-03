@@ -17,16 +17,16 @@ for (const [extra, prefix] of [[{},''],[{Trigger:'schedule',ScheduleEntry:'step-
 }
 context.row = {...base,Status:'interrupted',display_reason:'server restart, retry needed'};
 assert.equal(evaluate('runMessageCell(row)'),`<span class="retry-warning">server restart, retry needed ${notice}</span>`);
-context.row = {...base,Status:'queued',StartedAt:null,Scheduling:{state:'waiting',admission:{state:'waiting',size:'M'}}};
-assert.equal(evaluate('rowMessage(row)'),`waiting for capacity (M) ${notice}`);
+context.row = {...base,Status:'queued',StartedAt:null,display_reason:'waiting for capacity (size M, 6 of 8 weight used)',Scheduling:{state:'waiting',admission:{state:'waiting',size:'M'}}};
+assert.equal(evaluate('rowMessage(row)'),`waiting for capacity (size M, 6 of 8 weight used) ${notice}`);
 context.row = {...base,resource_message:'<step-abc12345>'};
 assert.equal(evaluate('runMessageCell(row)'),'&lt;step-abc12345&gt;');
 context.row = base;
 assert.ok(evaluate('summaryLines({Run:row,Steps:[]})').includes(notice),'run detail must show the separate notice');
 console.log('Resource message rows passed.');
 
-context.row = {...base,Status:'queued',StartedAt:null,Scheduling:{state:'waiting',admission:{size:'XL',declared_resources:{cpu_milli:1100,memory_bytes:1342177280,pods:1},head_of_queue:true,blocked_by:{backfilling:true}}}};
+context.row = {...base,Status:'queued',StartedAt:null,display_reason:'waiting for CPU budget (1 of 8 CPU free); smaller runs run meanwhile',Scheduling:{state:'waiting',admission:{size:'XL',declared_resources:{cpu_milli:1100,memory_bytes:1342177280,pods:1},head_of_queue:true,blocked_by:{backfilling:true}}}};
 assert.equal(evaluate('queueSize(row)'),'', 'declared admission must not show the ignored size annotation');
-assert.ok(evaluate('rowMessage(row)').includes('1100m CPU'));
-assert.ok(evaluate('rowMessage(row)').includes('smaller runs admitted meanwhile'));
+assert.ok(evaluate('rowMessage(row)').includes('waiting for CPU budget'));
+assert.ok(evaluate('rowMessage(row)').includes('smaller runs run meanwhile'));
 assert.ok(!evaluate('rowMessage(row)').includes('whole host'));

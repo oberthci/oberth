@@ -29,24 +29,34 @@ type queuedRunObserver interface {
 }
 
 func (service *API) scheduling(ctx context.Context, run model.Run, steps []model.StepResult) *model.RunScheduling {
-	return service.observeScheduling(ctx, run, steps, true)
+	scheduling, _ := service.observeScheduling(ctx, run, steps, true)
+	return scheduling
 }
 
 // List rows already carry a position computed over the complete durable queue.
-func (service *API) observeScheduling(ctx context.Context, run model.Run, steps []model.StepResult, lookupPosition bool) *model.RunScheduling {
+//
+// The second result is the display_reason of a run that has not started:
+// what it waits for, in plain words (see queuedDisplayReason). The
+// observation keeps its full message; the reason is the one line the
+// dashboard, CLI and MCP display fields show next to the queued status.
+func (service *API) observeScheduling(ctx context.Context, run model.Run, steps []model.StepResult, lookupPosition bool) (result *model.RunScheduling, reason string) {
 	run = service.withAdmissionPriority(run)
 	if !run.Status.Active() {
-		return nil
+		return nil, ""
 	}
 	for _, step := range steps {
 		if step.Status != model.StepPending && step.Status != model.StepQueued && !lookupPosition {
-			return nil
+			return nil, ""
 		}
 	}
 	clock := service.schedulingClock()
 	observed := clock.Now().UTC()
-	result := &model.RunScheduling{ObservedAt: observed, State: "unavailable", Message: "Scheduling observation is unavailable."}
+	result = &model.RunScheduling{ObservedAt: observed, State: "unavailable", Message: "Scheduling observation is unavailable."}
+	var blocker *model.AdmissionBlocker
 	defer func() {
+		if model.DisplayRunStatus(run) == model.DisplayQueued {
+			reason = queuedDisplayReason(result, blocker)
+		}
 		result.AgeSeconds = int64(clock.Since(observed) / time.Second)
 		if result.Admission != nil && result.Admission.BackfillMessage != "" {
 			result.Message += " " + result.Admission.BackfillMessage
@@ -63,7 +73,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 	if isPendingCreate(run) {
 		result.State = "infra-pending"
 		result.Message = "Workflow creation outcome is uncertain; background cleanup is pending."
-		return result
+		return result, reason
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
@@ -81,11 +91,11 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 		result.State = "queued"
 		result.Message = "Awaiting scheduler claim; queue position follows priority then FIFO, not an execution estimate."
 		if observer, ok := service.admission.(admissionBlockerObserver); ok {
-			if blocker := service.visibleBlocker(observer.AdmissionBlocker()); blocker != nil {
+			if blocker = service.visibleBlocker(observer.AdmissionBlocker()); blocker != nil {
 				result.Message += " " + blockedBehindMessage(blocker)
 			}
 		}
-		return result
+		return result, reason
 	}
 	if service.admission != nil {
 		result.Admission = service.admission.AdmissionSnapshot(run.QueueSequence)
@@ -100,6 +110,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 			// pool of invisible work must not show (#073).
 			admission := *result.Admission
 			admission.Position, admission.Used, admission.Capacity, admission.DiskFloor = 0, 0, 0, nil
+			admission.Runs, admission.MaxRuns = 0, 0
 			admission.NumericBudget = nil
 			admission.BackfillMessage = ""
 			admission.Pressure = admission.Pressure.Public()
@@ -122,13 +133,13 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 			switch result.Admission.State {
 			case "preparing":
 				result.Message = "Preparing the run before resource admission."
-				return result
+				return result, reason
 			case "waiting":
 				result.Message = waitingAdmissionMessage(result.Admission)
 				if result.Admission.KubeVirtCapacity || result.Admission.Pressure != nil {
 					// This repository's grant is the blocker, independent of
 					// shared weight or other repositories' visibility.
-					return result
+					return result, reason
 				}
 				if service.scope != nil && result.Admission.GroupHolder == "" && result.Admission.GroupAhead == "" {
 					// The group waits name runs of the same repository; any
@@ -142,17 +153,17 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 					result.Message += fmt.Sprintf(" Need %d weight; %d/%d used; queue position %d.",
 						result.Admission.Weight, result.Admission.Used, result.Admission.Capacity, result.Admission.Position)
 				}
-				return result
+				return result, reason
 			case "admitted":
 				if run.StartedAt == nil {
 					if service.observeKVMPreflight(ctx, run, result) {
 						result.State = "preflight"
 						result.Message = "Trusted KVM preflight submitted; awaiting its result and cleanup before workflow submission."
-						return result
+						return result, reason
 					}
 					result.State = "waiting"
 					result.Message = "Resource admission granted; waiting for workflow submission."
-					return result
+					return result, reason
 				}
 				result.Message = "Resource admission granted; execution progress has not been recorded."
 			}
@@ -162,34 +173,34 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 		if service.observeKVMPreflight(ctx, run, result) {
 			result.State = "preflight"
 			result.Message = "Trusted KVM preflight submitted; awaiting its result and cleanup before workflow submission."
-			return result
+			return result, reason
 		}
 		result.State = "waiting"
 		result.Message = "Waiting for workflow submission."
-		return result
+		return result, reason
 	}
 	if service.observeKVMPreflight(ctx, run, result) {
 		result.State = "preflight"
 		result.Message = "Trusted KVM preflight submitted; awaiting its result and cleanup before workflow submission."
-		return result
+		return result, reason
 	}
 	if service.schedulingObserver == nil {
-		return result
+		return result, reason
 	}
 	if run.WorkflowName == "" {
 		result.State = "startup"
 		result.Message = "No execution object name has been recorded; startup cause is unknown."
-		return result
+		return result, reason
 	}
 	execution, err := service.schedulingObserver.ObserveScheduling(ctx, run)
 	if err != nil || execution == nil {
 		result.Execution = &model.ExecutionObservation{State: "unavailable", Message: "Execution observation is unavailable."}
-		return result
+		return result, reason
 	}
 	result.Execution = execution
 	result.State = execution.State
 	result.Message = execution.Message
-	return result
+	return result, reason
 }
 
 func (service *API) observeKVMPreflight(ctx context.Context, run model.Run, result *model.RunScheduling) bool {
@@ -302,10 +313,9 @@ func applyExecutionDisplay(run *model.Run, scheduling *model.RunScheduling) {
 		return
 	}
 	switch scheduling.Execution.State {
-	case "deadline_exceeded":
-		run.DisplayStatus = "deadline-exceeded"
-		run.DisplayReason = scheduling.Message
-	case "deadline_elapsed", "terminal_observed":
+	case "deadline_exceeded", "deadline_elapsed", "terminal_observed":
+		// The run is still running until the store says otherwise; the
+		// deadline is its reason, not a second status (#1122).
 		run.DisplayReason = scheduling.Message
 	}
 }

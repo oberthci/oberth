@@ -33,6 +33,10 @@ type AdmissionObservation struct {
 	Weight           int               `json:"weight,omitempty"`
 	Used             int               `json:"used"`
 	Capacity         int               `json:"capacity"`
+	// Runs and MaxRuns are the run ceiling: how many runs hold a grant and
+	// how many may. Zero for a scoped viewer, like Used and Capacity.
+	Runs    int `json:"runs,omitempty"`
+	MaxRuns int `json:"max_runs,omitempty"`
 	// Group is the repository-declared concurrency group the run was admitted
 	// or is waiting under (#658). GroupHolder names the run of the same
 	// repository currently holding that group; GroupAhead names the earlier run

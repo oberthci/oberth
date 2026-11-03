@@ -508,7 +508,9 @@ func TestWorkflowCreatePendingStatusDoesNotCallKubernetes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.DisplayStatus != "infra-pending" || response.Run.Phase != "infrastructure-pending" || !strings.Contains(response.DisplayReason, "cleanup pending") || response.Scheduling.State != "infra-pending" {
+	// The uncertain create is the running run's reason; the raw phase and
+	// scheduling state stay machine-readable.
+	if response.DisplayStatus != "running" || response.Run.Phase != "infrastructure-pending" || !strings.Contains(response.DisplayReason, "cleanup pending") || response.Scheduling.State != "infra-pending" {
 		t.Fatalf("pending status hidden: %+v", response)
 	}
 }

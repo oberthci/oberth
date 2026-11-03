@@ -522,10 +522,21 @@ page. `latest_per_ref=1` keeps the same grouping for each ref's newest run.
   the queue, or one waiting on its group, says so.
 
 Every run response includes `display_status` and `display_reason`, while
-durable `Status` stays unchanged. Before weighted admission the display is
-`queued` with its scheduling reason. Admission records `started_at` and displays `running`. Terminal runs
-display `passed` (including published releases), `failed`, or
-`cancelled` with the superseding SHA, cancelling actor or restart action.
+durable `Status` stays unchanged. `display_status` is exactly one of
+`queued`, `running`, `passed`, `failed`, `infra-retried`, `superseded` and
+`cancelled`; everything finer is the reason line. Every run that has not
+started is `queued`: durable queued, claimed (raw `Status` `waiting`),
+admitted but not yet submitted, or in a trusted preflight. Its
+`display_reason` names what it waits for in plain words (`next in line`,
+`waiting for CPU budget (12.5 of 40 CPU free)`, `host IO pressure (42%)`,
+`10 runs already running (limit 10)`, `concurrency group deploy busy (held
+by run ...)`, `admitted, starting the workflow`, `KVM preflight running`);
+`Scheduling.state` and `Scheduling.message` keep the raw observation. Once
+started the run displays `running`; an uncertain Workflow create or an
+exceeded deadline is its reason, not a status. Terminal runs display
+`passed` (including published releases), `failed` (a deadline or memory
+kill is the reason), `infra-retried`, `superseded` with the superseding SHA,
+or `cancelled` with the cancelling actor or restart action.
 After a server restart, a
 running branch run whose Argo Workflow still exists is adopted first: it keeps
 its run ID and continues to its real result (#1172). Re-queueing remains the
