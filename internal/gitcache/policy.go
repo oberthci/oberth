@@ -33,10 +33,8 @@ func (c *Cache) ReadOptionalBlob(ctx context.Context, input, sha, file string, l
 // ReadDefaultBlob fetches current upstream authority and reads only private
 // tracking refs. Initial admission may opt into WithBurstPolicy snapshot reuse.
 // A failed refresh never falls back to a previously successful snapshot.
-func (c *Cache) ReadDefaultBlob(ctx context.Context, input, file string, limit int) (string, []byte, bool, error) {
+func (c *Cache) ReadDefaultBlob(ctx context.Context, input, file string, limit int) (sha string, body []byte, exists bool, err error) {
 	requested := time.Now()
-	ctx, cancel := context.WithTimeout(ctx, policyReadTimeout)
-	defer cancel()
 	if err := validatePolicyPath(file, limit); err != nil {
 		return "", nil, false, err
 	}
@@ -49,6 +47,19 @@ func (c *Cache) ReadDefaultBlob(ctx context.Context, input, file string, limit i
 		return "", nil, false, err
 	}
 	defer lock.Unlock()
+	// Queuing behind a repository operation does not consume the policy IO
+	// budget. Caller cancellation still bounds both the queue and the read.
+	callerCtx := ctx
+	ctx, cancel := context.WithTimeout(ctx, policyReadTimeout)
+	defer cancel()
+	defer func() {
+		if callerCtx.Err() != nil {
+			sha, body, exists, err = "", nil, false, callerCtx.Err()
+		} else if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			sha, body, exists = "", nil, false
+			err = fmt.Errorf("%w: %w", ErrPolicyUpstreamUnavailable, errors.Join(err, ctx.Err()))
+		}
+	}()
 	if !c.isBare(ctx, path) {
 		return "", nil, false, errors.New("policy repository is not cached")
 	}
@@ -58,11 +69,11 @@ func (c *Cache) ReadDefaultBlob(ctx context.Context, input, file string, limit i
 	if err := c.configureRemote(ctx, input, path); err != nil {
 		return "", nil, false, err
 	}
-	sha, err := c.refreshPolicyLocked(ctx, input, path, requested)
+	sha, err = c.refreshPolicyLocked(ctx, input, path, requested)
 	if err != nil || sha == "" {
 		return "", nil, false, err
 	}
-	body, exists, err := c.readOptionalBlobLocked(ctx, path, sha, file, limit)
+	body, exists, err = c.readOptionalBlobLocked(ctx, path, sha, file, limit)
 	return sha, body, exists, err
 }
 

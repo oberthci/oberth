@@ -1766,39 +1766,43 @@ func (scheduler *Scheduler) deliverPublicationWithGate(
 	if err := require(ctx); err != nil {
 		return model.PublicationFinalization{}, err
 	}
-	// The durable creation time bounds policy waiting across process restarts.
-	policyDeadline := publication.CreatedAt.Add(scheduler.trustedPolicyWaitLimit())
-	policyCtx, cancelPolicy := context.WithDeadline(ctx, policyDeadline)
-	policyErr := scheduler.requirePublicationTestPolicy(policyCtx, repository, publication)
-	cancelPolicy()
+	policyErr := scheduler.requirePublicationTestPolicy(ctx, repository, publication)
 	if ctx.Err() != nil {
 		return finalization, ctx.Err()
-	}
-	if !time.Now().Before(policyDeadline) {
-		policyErr = policyWaitFailure(policyErr)
 	}
 	if err := require(ctx); err != nil {
 		return model.PublicationFinalization{}, err
 	}
 	if policyErr != nil {
 		var unavailable *vmrunner.PolicyRefreshUnavailable
-		if errors.As(policyErr, &unavailable) && time.Now().Before(policyDeadline) {
-			// Policy availability is not a failed build or a push attempt. Keep
-			// the durable outbox pending and release the global delivery permit.
-			if publication.RunID != "" {
-				if _, err := scheduler.setPolicyWaiting(ctx, publication.RunID, true); err != nil {
-					return finalization, err
-				}
-				scheduler.signals.NotifyRun(publication.RunID)
+		if errors.As(policyErr, &unavailable) {
+			since, err := scheduler.database().SetPublicationPolicyWaiting(ctx, publication.ID, true)
+			if err != nil {
+				return finalization, err
 			}
-			scheduler.queuePublicationRetry(publication.ID)
-			return scheduler.loadPublicationFinalization(ctx, publication)
+			if !time.Now().Before(since.Add(scheduler.trustedPolicyWaitLimit())) {
+				policyErr = policyWaitFailure(policyErr)
+			} else {
+				// Policy availability is not a failed build or a push attempt. Keep
+				// the durable outbox pending and release the global delivery permit.
+				if publication.RunID != "" {
+					if _, err := scheduler.setPolicyWaiting(ctx, publication.RunID, true); err != nil {
+						return finalization, err
+					}
+					scheduler.signals.NotifyRun(publication.RunID)
+				}
+				scheduler.queuePublicationRetry(publication.ID)
+				return scheduler.loadPublicationFinalization(ctx, publication)
+			}
 		}
 		finalization, err := scheduler.database().FinalizePublication(ctx, publication.ID, model.PublicationFailed, policyErr.Error())
 		if err != nil {
 			return model.PublicationFinalization{}, err
 		}
 		return finalization, scheduler.finishPublication(ctx, repository, finalization)
+	}
+	if _, err := scheduler.database().SetPublicationPolicyWaiting(ctx, publication.ID, false); err != nil {
+		return finalization, err
 	}
 	if publication.RunID != "" {
 		if _, err := scheduler.setPolicyWaiting(ctx, publication.RunID, false); err != nil {

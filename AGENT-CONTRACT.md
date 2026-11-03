@@ -2594,6 +2594,7 @@ alone is never evidence that missing migrations ran.
 | v46 | Operator capabilities | Empty repository-bound authority for operator ServiceAccounts, resource kinds and extended resources; no conversion of historical grants | Database restore |
 | v47 | Deferred execution retirement | Preserve writable execution journals, interlocks and grant authority so owner recovery can settle work in flight | Database restore |
 | v48 | #1216 stage 2 | Independent per-repository numeric request/limit ceilings, migrated exactly from size grants with grant and revocation provenance | Database restore |
+| v49 | Publication policy availability | Persist the first unavailable policy read independently of publication age; clear on success or terminal status | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding

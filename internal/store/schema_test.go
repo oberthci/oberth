@@ -29,8 +29,8 @@ func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	if err := validateMigrations(migrations, latestMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
-	if latestMigrationVersion != 48 {
-		t.Fatalf("latest migration version = %d, want 48", latestMigrationVersion)
+	if latestMigrationVersion != 49 {
+		t.Fatalf("latest migration version = %d, want 49", latestMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)
@@ -951,6 +951,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"priority_grants",
 		"promotion_grants",
 		"promotions",
+		"publication_policy_waits",
 		"publications",
 		"queue_priority_patterns",
 		"receive_events",
@@ -1043,6 +1044,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"promotion_grants_no_delete",
 		"promotions_guard_update",
 		"promotions_no_delete",
+		"publication_policy_wait_cleanup",
 		"publications_guard_update",
 		"publications_no_delete",
 		"publications_tag_tuple_insert",
@@ -1074,6 +1076,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 	})
 
 	expectedColumns := map[string][]string{
+		"publication_policy_waits":  {"publication_id", "since"},
 		"priority_grants":           {"identity", "max_class", "expires", "granted_by"},
 		"run_priority_requests":     {"run_id", "requested", "accepted", "reason", "actor", "refusal"},
 		"restart_workflow_timings":  {"run_id", "epoch", "workflow_created_at", "workflow_json"},

@@ -262,6 +262,7 @@ type PromotionGrantStore interface {
 }
 
 type SchedulerStore interface {
+	SetPublicationPolicyWaiting(context.Context, string, bool) (time.Time, error)
 	Repository(context.Context, int64) (model.Repository, error)
 	// Upstream resolves a repository's registered upstream so release
 	// admission can bind the org identity for hierarchical secret path

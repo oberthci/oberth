@@ -114,6 +114,8 @@ DELETE FROM schema_migrations WHERE version>=39;
 // PostV44Downgrade removes later capability/retirement/ceiling objects before
 // reconstructed restart and priority fixtures replay the real migrations.
 const PostV44Downgrade = `
+DROP TRIGGER IF EXISTS publication_policy_wait_cleanup;
+DROP TABLE IF EXISTS publication_policy_waits;
 DROP TABLE IF EXISTS resource_ceilings;
 DROP TRIGGER IF EXISTS vm_suite_executions_retired_insert;
 DROP TRIGGER IF EXISTS vm_suite_executions_retired_update;

@@ -86,9 +86,6 @@ func (c *Cache) refreshPolicyLocked(ctx context.Context, input, path string, req
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				return "", fmt.Errorf("%w: %w", ErrPolicyUpstreamUnavailable, errors.Join(result.err, ctx.Err()))
-			}
 			return "", ctx.Err()
 		case <-timer.C:
 		}
