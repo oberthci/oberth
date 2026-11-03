@@ -508,6 +508,30 @@ func TestRunsAllFollowsPages(t *testing.T) {
 	}
 }
 
+// Running rows ride along on the first page and never count toward the
+// limit, so a page of one running and one passed run is not full and the
+// CLI must not invent a cursor or an extra --all request (#050).
+func TestRunsRunningRowsDoNotFillThePage(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"ID":"run-3","QueueSequence":3,"Status":"running","StartedAt":"2026-11-03T10:00:00Z"},{"ID":"run-2","QueueSequence":2,"Status":"passed","FinishedAt":"2026-11-03T09:00:00Z"}]`))
+	}))
+	defer server.Close()
+	configure(t, server)
+	for _, args := range [][]string{{"--limit", "2"}, {"--limit", "2", "--all"}} {
+		var out bytes.Buffer
+		requests = 0
+		if err := runRuns(context.Background(), args, &out); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(out.String(), "more:") || requests != 1 {
+			t.Fatalf("%v: requests=%d output:\n%s", args, requests, out.String())
+		}
+	}
+}
+
 // Against a server older than paging, which ignores ?before and repeats the
 // newest page, --all must stop instead of duplicating rows. Short-ID reads
 // go directly to the server and do not enumerate any page.
