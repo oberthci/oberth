@@ -156,7 +156,7 @@ spec:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
       command: ["/bin/sh", "-ec"]
-      args: ["/usr/bin/python3 -I -B hack/test-generic-names.py; exec /usr/bin/python3 -I -B hack/check-generic-names.py"]
+      args: ["/usr/bin/python3 -I -B hack/test-generic-names.py; /usr/bin/python3 -I -B hack/check-generic-names.py; /usr/bin/python3 -I -B hack/test-private-addresses.py; exec /usr/bin/python3 -I -B hack/check-private-addresses.py"]
       resources:
         requests:
           cpu: '1'

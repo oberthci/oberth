@@ -11,8 +11,8 @@ import (
 
 func TestIsLocalName(t *testing.T) {
 	for host, want := range map[string]bool{
-		"tuxbox.local": true, "TuxBox.Local.": true, "a.b.local": true,
-		"local": false, ".local": false, "tuxbox": false, "tuxbox.localdomain": false, "192.168.1.2": false,
+		"example-node.local": true, "example-node.Local.": true, "a.b.local": true,
+		"local": false, ".local": false, "example-node": false, "example-node.localdomain": false, "192.0.2.2": false,
 	} {
 		if got := IsLocalName(host); got != want {
 			t.Errorf("IsLocalName(%q) = %v, want %v", host, got, want)
@@ -21,9 +21,9 @@ func TestIsLocalName(t *testing.T) {
 }
 
 func TestParseAhostsDeduplicatesSocketTypes(t *testing.T) {
-	out := []byte("192.168.86.193  STREAM tuxbox.local\n192.168.86.193  DGRAM  \n192.168.86.193  RAW    \n10.42.0.1       STREAM \nfe80::1         STREAM \n\n")
+	out := []byte("192.0.2.193  STREAM example-node.local\n192.0.2.193  DGRAM  \n192.0.2.193  RAW    \n10.42.0.1       STREAM \nfe80::1         STREAM \n\n")
 	got := parseAhosts(out)
-	want := []string{"192.168.86.193", "10.42.0.1", "fe80::1"}
+	want := []string{"192.0.2.193", "10.42.0.1", "fe80::1"}
 	if len(got) != len(want) {
 		t.Fatalf("parseAhosts = %v, want %v", got, want)
 	}
@@ -35,10 +35,10 @@ func TestParseAhostsDeduplicatesSocketTypes(t *testing.T) {
 }
 
 func TestPreferLocalNetworksPutsLANBeforeBridge(t *testing.T) {
-	_, lan, _ := net.ParseCIDR("192.168.86.0/24")
-	ips := []net.IP{net.ParseIP("10.42.0.1"), net.ParseIP("192.168.86.193"), net.ParseIP("172.17.0.1")}
+	_, lan, _ := net.ParseCIDR("192.0.2.0/24")
+	ips := []net.IP{net.ParseIP("10.42.0.1"), net.ParseIP("192.0.2.193"), net.ParseIP("172.17.0.1")}
 	got := preferLocalNetworks(ips, []*net.IPNet{lan})
-	if got[0].String() != "192.168.86.193" || got[1].String() != "10.42.0.1" || got[2].String() != "172.17.0.1" {
+	if got[0].String() != "192.0.2.193" || got[1].String() != "10.42.0.1" || got[2].String() != "172.17.0.1" {
 		t.Fatalf("order = %v", got)
 	}
 }

@@ -366,7 +366,7 @@ func TestPlainHTTPIsRejectedForNonLoopbackHosts(t *testing.T) {
 	for _, base := range []string{
 		"http://oberth.example",
 		"http://10.0.0.1:8443",
-		"http://192.168.1.1",
+		"http://192.0.2.1",
 	} {
 		t.Setenv("OBERTH_BASE_URL", base)
 		_, err := New(t.Context(), FromEnv())
@@ -753,9 +753,9 @@ func TestARedirectWithinHTTPSIsStillFollowed(t *testing.T) {
 }
 
 func TestClassifyTransportExplainsUnresolvedLocalNames(t *testing.T) {
-	dnsErr := &net.DNSError{Err: "no such host", Name: "tuxbox.local", IsNotFound: true}
+	dnsErr := &net.DNSError{Err: "no such host", Name: "example-node.local", IsNotFound: true}
 	got := classifyTransport("/api/runs", &net.OpError{Op: "dial", Net: "tcp", Err: dnsErr})
-	if !strings.Contains(got.Error(), `cannot resolve "tuxbox.local"`) || !strings.Contains(got.Error(), mdnsdial.Hint) {
+	if !strings.Contains(got.Error(), `cannot resolve "example-node.local"`) || !strings.Contains(got.Error(), mdnsdial.Hint) {
 		t.Fatalf("a .local resolution failure is not explained: %v", got)
 	}
 }

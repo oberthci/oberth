@@ -31,8 +31,8 @@ func TestCertificateNamesForClientHost(t *testing.T) {
 		}
 	}
 	// Operator-supplied names keep their order; the advertised host is appended once.
-	dns, ips := certificateNamesForClientHost("localhost", []string{"tuxbox", "localhost"}, []string{"192.168.86.193"})
-	if !slices.Equal(dns, []string{"tuxbox", "localhost"}) || !slices.Equal(ips, []string{"192.168.86.193", "127.0.0.1"}) {
+	dns, ips := certificateNamesForClientHost("localhost", []string{"example-node", "localhost"}, []string{"192.0.2.193"})
+	if !slices.Equal(dns, []string{"example-node", "localhost"}) || !slices.Equal(ips, []string{"192.0.2.193", "127.0.0.1"}) {
 		t.Fatalf("got %v %v", dns, ips)
 	}
 }
@@ -45,7 +45,7 @@ func TestRotateCertificateAddsIPAddresses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rotated, err := rotateCertificate(cert, keyPEM, []string{"localhost"}, []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("192.168.86.193")})
+	rotated, err := rotateCertificate(cert, keyPEM, []string{"localhost"}, []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("192.0.2.193")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestRotateCertificateAddsIPAddresses(t *testing.T) {
 	if err := newCert.VerifyHostname("127.0.0.1"); err != nil {
 		t.Errorf("rotated cert does not cover 127.0.0.1: %v", err)
 	}
-	if err := newCert.VerifyHostname("192.168.86.193"); err != nil {
+	if err := newCert.VerifyHostname("192.0.2.193"); err != nil {
 		t.Errorf("rotated cert does not cover the node IP: %v", err)
 	}
 	if err := newCert.VerifyHostname("localhost"); err != nil {
@@ -72,7 +72,7 @@ func TestRotateCertificateAddsIPAddresses(t *testing.T) {
 
 // A restored or older identity that lacks the addresses clients use is
 // re-issued for them (same key) instead of only warning that it never will
-// be (observed on tuxbox: the restored certificate carried in-cluster names only).
+// be (observed on example-node: the restored certificate carried in-cluster names only).
 func TestPreflightRotatesForClientAddresses(t *testing.T) {
 	t.Setenv(baoTokenEnvVar, "test-root-token")
 	certPEM, keyPEM := testCertAndKey(t, []string{"oberth", "oberth.oberth.svc"})
@@ -104,8 +104,8 @@ func TestPreflightRotatesForClientAddresses(t *testing.T) {
 	}
 	cfg := Config{
 		InstallSecretStore: true,
-		TLSExtraDNSNames:   []string{"tuxbox", "localhost"},
-		TLSExtraIPs:        []string{"192.168.86.193", "127.0.0.1"},
+		TLSExtraDNSNames:   []string{"example-node", "localhost"},
+		TLSExtraIPs:        []string{"192.0.2.193", "127.0.0.1"},
 	}
 	if err := preflightServerIdentities(context.Background(), &cfg, deps, false); err != nil {
 		t.Fatalf("preflight: %v", err)
@@ -118,7 +118,7 @@ func TestPreflightRotatesForClientAddresses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, host := range []string{"tuxbox", "localhost", "192.168.86.193", "127.0.0.1", "oberth.oberth.svc"} {
+	for _, host := range []string{"example-node", "localhost", "192.0.2.193", "127.0.0.1", "oberth.oberth.svc"} {
 		if err := rotated.VerifyHostname(host); err != nil {
 			t.Errorf("rotated cert does not cover %s: %v", host, err)
 		}

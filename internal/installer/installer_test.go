@@ -1842,7 +1842,7 @@ func TestDryRunPlainPlanOmitsOptionalPhases(t *testing.T) {
 	// A non-kind engine keeps the plain plan free of the kind-only image
 	// preparation phase, so Oberth installation is genuinely the first step.
 	node := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{Name: "tuxbox"},
+		ObjectMeta: metav1.ObjectMeta{Name: "example-node"},
 		Status:     corev1.NodeStatus{NodeInfo: corev1.NodeSystemInfo{KubeletVersion: "v1.31.4+k3s1"}},
 	}
 	deps := Deps{
@@ -4374,10 +4374,10 @@ func TestGenerateSSHConfigBlockPathWithSpaces(t *testing.T) {
 func TestGenerateSSHConfigBlockRemoteHost(t *testing.T) {
 	t.Parallel()
 
-	block := GenerateSSHConfigBlock("192.168.1.208", "30022", "~/.ssh/oberth_key")
+	block := GenerateSSHConfigBlock("192.0.2.208", "30022", "~/.ssh/oberth_key")
 	for _, want := range []string{
 		"Host oberth",
-		"HostName 192.168.1.208",
+		"HostName 192.0.2.208",
 		"Port 30022",
 		"User git",
 		`IdentityFile "~/.ssh/oberth_key"`,
@@ -4418,7 +4418,7 @@ func TestSSHHostFromServer(t *testing.T) {
 		{name: "loopback IP", server: "https://127.0.0.1:6443", want: "localhost"},
 		{name: "localhost hostname", server: "https://localhost:6443", want: "localhost"},
 		{name: "ipv6 loopback", server: "https://[::1]:6443", want: "localhost"},
-		{name: "private IP", server: "https://192.168.1.208:6443", want: "192.168.1.208"},
+		{name: "documentation IP", server: "https://192.0.2.208:6443", want: "192.0.2.208"},
 		{name: "rfc1918 10 net", server: "https://10.0.0.5:6443", want: "10.0.0.5"},
 		{name: "empty server", server: "", want: "localhost"},
 		{name: "nil restconfig", server: "", want: "localhost"},
@@ -4513,7 +4513,7 @@ func TestOfferSSHConfigWritesFile(t *testing.T) {
 	}
 
 	// Write the block manually (simulating what offerSSHConfig does).
-	block := GenerateSSHConfigBlock("192.168.1.208", "30022", "/home/user/.ssh/id_ed25519")
+	block := GenerateSSHConfigBlock("192.0.2.208", "30022", "/home/user/.ssh/id_ed25519")
 	f, err := os.OpenFile(configPath, os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		t.Fatal(err)
@@ -4529,7 +4529,7 @@ func TestOfferSSHConfigWritesFile(t *testing.T) {
 	if !hasSSHHostBlock(data, "oberth") {
 		t.Fatal("config should now have oberth block")
 	}
-	if !strings.Contains(string(data), "HostName 192.168.1.208") {
+	if !strings.Contains(string(data), "HostName 192.0.2.208") {
 		t.Fatalf("config missing HostName:\n%s", data)
 	}
 	if !strings.Contains(string(data), `IdentityFile "/home/user/.ssh/id_ed25519"`) {
@@ -4679,7 +4679,7 @@ func TestCredentialedPolicyPathsAcceptsUpstreamPrefix(t *testing.T) {
 	t.Parallel()
 	paths, err := credentialedPolicyPaths("oberth", []string{
 		"oberth/upstream/acme/terraform/credentials",
-		"oberth/upstream/skipops/terraform/plan/gcp-sa",
+		"oberth/upstream/acme/terraform/plan/gcp-sa",
 		"oberth/data/release/cosign-secret",
 	})
 	if err != nil {
@@ -4687,7 +4687,7 @@ func TestCredentialedPolicyPathsAcceptsUpstreamPrefix(t *testing.T) {
 	}
 	want := []string{
 		"upstream/acme/terraform/credentials",
-		"upstream/skipops/terraform/plan/gcp-sa",
+		"upstream/acme/terraform/plan/gcp-sa",
 		"release/cosign-secret",
 	}
 	if len(paths) != len(want) {
@@ -4841,7 +4841,7 @@ func TestValidateExistingKindClusterRejectsMixedBindings(t *testing.T) {
 func TestK3sAutoNetworkPolicySetsFlag(t *testing.T) {
 	t.Parallel()
 	node := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{Name: "tuxbox"},
+		ObjectMeta: metav1.ObjectMeta{Name: "example-node"},
 		Status: corev1.NodeStatus{
 			NodeInfo: corev1.NodeSystemInfo{KubeletVersion: "v1.31.4+k3s1"},
 		},
@@ -4887,21 +4887,21 @@ func TestCredentialedPolicyWithNoGrantsMatchesBasePolicy(t *testing.T) {
 // upstream orgs produce separate per-org path rules, sorted and deduplicated.
 func TestCISecretsPolicyEnumeratesMultipleOrgs(t *testing.T) {
 	t.Parallel()
-	policy := OberthCISecretsPolicy("oberth", []string{"skipops", "oberthci", "oberthci"})
+	policy := OberthCISecretsPolicy("oberth", []string{"acme", "oberthci", "oberthci"})
 	if !strings.Contains(policy, `path "oberth/data/upstream/oberthci/*"`) {
 		t.Fatal("policy missing oberthci org rule")
 	}
-	if !strings.Contains(policy, `path "oberth/data/upstream/skipops/*"`) {
-		t.Fatal("policy missing skipops org rule")
+	if !strings.Contains(policy, `path "oberth/data/upstream/acme/*"`) {
+		t.Fatal("policy missing acme org rule")
 	}
 	if strings.Contains(policy, `path "oberth/data/upstream/*"`) {
 		t.Fatal("policy still uses static upstream/* wildcard")
 	}
-	// oberthci appears before skipops (sorted)
+	// acme appears before oberthci (sorted)
 	oberthciIdx := strings.Index(policy, "oberthci")
-	skipopsIdx := strings.Index(policy, "skipops")
-	if oberthciIdx > skipopsIdx {
-		t.Fatal("org rules are not sorted: oberthci should appear before skipops")
+	acmeIdx := strings.Index(policy, "acme")
+	if acmeIdx > oberthciIdx {
+		t.Fatal("org rules are not sorted: acme should appear before oberthci")
 	}
 	// Deduplicated: oberthci appears exactly once in path rules
 	if count := strings.Count(policy, `upstream/oberthci/*"`); count != 1 {
@@ -4941,14 +4941,14 @@ func TestCredentialedPolicyEmptyOrgsFailsClosed(t *testing.T) {
 // rules and exact grant paths coexist in the credentialed policy.
 func TestCredentialedPolicyWithOrgsAndGrants(t *testing.T) {
 	t.Parallel()
-	policy := OberthCredentialedPolicyWithGrants("oberth", []string{"oberthci", "skipops"}, []string{
+	policy := OberthCredentialedPolicyWithGrants("oberth", []string{"oberthci", "acme"}, []string{
 		"release/cosign-secret",
 	})
 	if !strings.Contains(policy, `upstream/oberthci/*`) {
 		t.Fatal("missing oberthci org rule")
 	}
-	if !strings.Contains(policy, `upstream/skipops/*`) {
-		t.Fatal("missing skipops org rule")
+	if !strings.Contains(policy, `upstream/acme/*`) {
+		t.Fatal("missing acme org rule")
 	}
 	if !strings.Contains(policy, `oberth/data/release/cosign-secret`) {
 		t.Fatal("missing grant path")
@@ -4965,15 +4965,15 @@ func TestUpstreamOrgsFromIdentities(t *testing.T) {
 	ids := []PerRepoIdentity{
 		{Upstream: "codeberg", Org: "oberthci", Repo: "oberth"},
 		{Upstream: "codeberg", Org: "oberthci", Repo: "acme-operator"},
-		{Upstream: "github", Org: "skipops", Repo: "terraform"},
+		{Upstream: "github", Org: "acme", Repo: "terraform"},
 		{Upstream: "local", Org: "", Repo: "empty-org"},
 	}
 	orgs := upstreamOrgsFromIdentities(ids)
 	if len(orgs) != 2 {
 		t.Fatalf("expected 2 unique orgs, got %d: %v", len(orgs), orgs)
 	}
-	if orgs[0] != "oberthci" || orgs[1] != "skipops" {
-		t.Fatalf("expected [oberthci skipops], got %v", orgs)
+	if orgs[0] != "acme" || orgs[1] != "oberthci" {
+		t.Fatalf("expected [acme oberthci], got %v", orgs)
 	}
 }
 

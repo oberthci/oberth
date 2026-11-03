@@ -91,7 +91,7 @@ oberth install --install-secretstore
 SSH key pairs in `~/.ssh`, can connect further organizations with the same
 upstream key (`--also-upstream codeberg.org/acme`), and asks which address
 clients use: for a VM or remote host choose the node's address
-(`--client-host 192.168.64.5`; NodePorts 30022/30443 listen on every node
+(`--client-host 192.0.2.5`; NodePorts 30022/30443 listen on every node
 address). It ends with the exact commands to clone from each organization,
 connect another one, and give another machine an uplink.
 
