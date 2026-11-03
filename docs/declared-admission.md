@@ -4,8 +4,8 @@ Git owns resource values. Oberth never derives admission demand directly from
 observed usage or modifies a workflow's requests or limits. Commit reviewed
 measurements from `oberth run resources` in the workflow.
 
-An ordinary workflow with CPU/memory declarations uses numeric admission. Every container
-must declare positive CPU and memory requests and a positive memory limit,
+An ordinary workflow with CPU/memory requests uses numeric admission. Each
+container must declare positive CPU and memory requests and a positive memory limit,
 directly or through template defaults. This includes scripts, container sets,
 init containers and sidecars. CPU limits are optional. Its S/M/L/XL annotation
 does not determine the reservation or require a size grant.
@@ -17,8 +17,9 @@ git declarations/parallelism or administrator settings. They never use the
 legacy size fallback. An administrator disabling declared admission refuses
 new declared runs; it does not convert them to size admission.
 
-Undeclared legacy workflows retain size admission, with a deprecation warning
-in `resource_message` directing the repository to commit measured
+Legacy workflows without CPU/memory requests, including limits-only documents,
+retain size admission, with a deprecation warning in `resource_message`
+directing the repository to commit measured
 requests/limits in git. Their combined weight reserves the same fraction of
 both host budgets when sharing with declared work. A legacy whole-budget XL
 retains its existing exclusion. The warning survives submission and restart
@@ -59,7 +60,7 @@ that all containers can simultaneously use their full limits.
 
 Trusted contract runs retain size admission, even with declarations. Their
 reservation uses the larger main-document and trusted-preflight size, including
-the server leaf minimum, and requires the corresponding size grant. Capacity
+the server leaf minimum, and preserves the existing size authorization policy. Capacity
 retries retain that reservation. Numeric admission for these runs must wait
 until the preflight and main-document demand are both declared and charged.
 

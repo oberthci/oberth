@@ -610,7 +610,8 @@ trust assumptions and complete invalidation rules.
   and explanations survive creation recovery, adoption and timing history;
   old reservations/history are not recalculated. See
   [declared admission](docs/declared-admission.md).
-- Declared workflows never fall back to size classes. Partial declarations,
+- Ordinary workflows declaring CPU/memory requests never fall back to size
+  classes. Partial requests,
   missing effective memory limits and demand above the host budget (including
   helper/headroom reserves) fail before submission. The declared-admission kill
   switch refuses new declared work; sealed existing reservations remain held.
@@ -619,8 +620,10 @@ trust assumptions and complete invalidation rules.
 - Numeric per-container resource ceilings are administered independently using
   `oberth resource grant/get/revoke` or `resource_grant`, `resource_grant_get`,
   `resource_revoke`. Grants contain separate requests/limits quantity maps.
-  Trusted contract runs retain the larger main/preflight size reservation and
-  its size authorization until both declared demands can be charged.
+  Limits-only workflows retain deprecated size admission until requests are
+  declared in git. Trusted contract runs retain the larger main/preflight size
+  reservation and existing size authorization policy until both declared demands
+  can be charged.
   Migration v48 copies historical size-grant ceilings and provenance, including
   revocations; later size changes affect only legacy admission and priority.
   Every fresh submission and release preflight reads and enforces the numeric

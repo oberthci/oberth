@@ -215,20 +215,18 @@ func (r *VMIDemandReceipt) Verify(other *VMIDemandReceipt) error {
 	return nil
 }
 
-// HasResourceDeclarations distinguishes legacy documents from partially sized
-// ones. Partial declarations must be completed in git rather than silently
-// restoring S/M/L/XL admission. The receipt holds already-resolved fragments.
-func (r *VMIDemandReceipt) HasResourceDeclarations() bool {
+// HasResourceRequests distinguishes legacy (including limits-only) documents
+// from measured or partially requested ones. Partial requests must be completed
+// in git. The receipt holds already-resolved fragments.
+func (r *VMIDemandReceipt) HasResourceRequests() bool {
 	if r == nil || r.pods == nil {
 		return false
 	}
 	declared := false
 	check := func(resources corev1.ResourceRequirements) {
-		for _, values := range []corev1.ResourceList{resources.Requests, resources.Limits} {
-			for _, name := range []corev1.ResourceName{corev1.ResourceCPU, corev1.ResourceMemory} {
-				if _, ok := values[name]; ok {
-					declared = true
-				}
+		for _, name := range []corev1.ResourceName{corev1.ResourceCPU, corev1.ResourceMemory} {
+			if _, ok := resources.Requests[name]; ok {
+				declared = true
 			}
 		}
 	}

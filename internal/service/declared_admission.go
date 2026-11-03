@@ -191,7 +191,7 @@ func (g *weightedAdmission) selectDeclaredDemand(receipt *argoworkflow.DemandRec
 		return nil, model.ResourceFallbackRequests, nil
 	}
 	d, err := receipt.DeclaredPodDemand()
-	if d == nil && !receipt.HasResourceDeclarations() {
+	if d == nil && !receipt.HasResourceRequests() {
 		return nil, model.ResourceFallbackRequests, nil
 	}
 	if err != nil {

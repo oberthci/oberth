@@ -11,7 +11,7 @@ import (
 )
 
 func TestMemoryLimitRefusalAndUndeclaredLegacyNotice(t *testing.T) {
-	for _, shape := range []string{"request-only", "init", "sidecar", "all-limited", "undeclared", "init-undeclared", "sidecar-undeclared", "sidecar-memory-undeclared"} {
+	for _, shape := range []string{"limits-only", "request-only", "init", "sidecar", "all-limited", "undeclared", "init-undeclared", "sidecar-undeclared", "sidecar-memory-undeclared"} {
 		t.Run(shape, func(t *testing.T) {
 			limit := "        limits: {memory: 32Mi}\n"
 			if shape == "request-only" || shape == "undeclared" {
@@ -44,7 +44,7 @@ spec:
       resources:
         requests: {cpu: 100m, memory: 16Mi}
 ` + limit + helpers)
-			if shape == "undeclared" {
+			if shape == "undeclared" || shape == "limits-only" {
 				source = []byte(strings.Replace(string(source), "{cpu: 100m, memory: 16Mi}", "{}", 1))
 			}
 			resolved, err := argoworkflow.ResolveRunSource(source, nil, argoworkflow.RunSourceBinding{RunID: strings.Repeat("a", 32), RepositoryID: 1, SHA: strings.Repeat("b", 40), File: ".oberth/build.yaml", Trigger: argoworkflow.RunTriggerBranch})
@@ -57,7 +57,7 @@ spec:
 			}
 			g := newWeightedAdmission(6)
 			pods, reason, selectionErr := g.selectDeclaredDemand(receipt)
-			if shape != "all-limited" && shape != "undeclared" {
+			if shape != "all-limited" && shape != "undeclared" && shape != "limits-only" {
 				want := "memory limit"
 				if strings.Contains(shape, "undeclared") {
 					want = "incomplete CPU/memory requests"
