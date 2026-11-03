@@ -1115,7 +1115,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	}
 	pushes, err := service.NewPushIngestor(service.PushConfig{
 		Repositories: database, Discoverer: upstreams, Git: git, Receives: database,
-		Branches: scheduler, Releases: scheduler,
+		Branches: scheduler, Releases: scheduler, Auditor: database,
 	})
 	if err != nil {
 		return err

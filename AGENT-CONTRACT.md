@@ -78,6 +78,14 @@ operator's responsibility; Helm rollback alone cannot undo a migration.
 
 ### Persistent data
 
+The upstream default branch cannot be deleted through a receive or receive
+replay, including by an administrator. Authenticated uplinks retain deletion
+access to other branches within their existing repository scope, as part of
+their push access. Each upstream deletion requires a durable `branch.delete.intent`
+audit record before Git runs and a `branch.delete.succeeded` or
+`branch.delete.failed` outcome, including the actor, branch, previous SHA and
+receive event ID. Audit failure prevents an unaudited upstream deletion.
+
 - One PVC mounted at `/data` stores `oberth.sqlite`, bare Git caches under
   `/data/git`, immutable run workspaces under `/data/work`, retained logs under
   `/data/logs`, and the accepted-push outbox.
