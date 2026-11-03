@@ -329,6 +329,9 @@ argo:
   # oberth/data/upstream/* only and never receives approval-table grants.
   # `oberth install --install-secretstore` and setup-secretstore.sh create
   # the matching OpenBao policy and role under these default names.
+  # Deprecated: explicit empty serviceAccount/vaultRole strings select the
+  # defaults for this release only. Before the next chart release, omit those
+  # overrides or set oberth-argo-ci-secrets explicitly.
   ciSecrets:
     serviceAccount: "oberth-argo-ci-secrets"
     vaultRole: "oberth-argo-ci-secrets"

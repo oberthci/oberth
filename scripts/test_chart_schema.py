@@ -65,7 +65,6 @@ class ArgoSchemaTests(unittest.TestCase):
         cases = [
             {'ciSecrets': {'serviceAccount': 'bad/name'}},
             {'ciSecrets': {'vaultRole': 'bad/name'}},
-            {'ciSecrets': {'vaultRole': ''}},
             {'resourceSampler': {'nodes': {'node-' + str(n): 'https://node.example.com:10250'
                                            for n in range(33)}}},
             {'resourceSampler': {'nodes': {MAX_NAME + 'a': 'https://node.example.com:10250'}}},
@@ -97,6 +96,16 @@ class ArgoSchemaTests(unittest.TestCase):
             with self.subTest(argo=argo):
                 result = self.render(argo)
                 self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_empty_ci_secret_names_preserve_defaults_for_one_release(self):
+        default = self.render({})
+        self.assertEqual(default.returncode, 0, default.stderr)
+        for ci_secrets in ({'serviceAccount': ''}, {'vaultRole': ''},
+                           {'serviceAccount': '', 'vaultRole': ''}):
+            with self.subTest(ciSecrets=ci_secrets):
+                result = self.render({'ciSecrets': ci_secrets})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, default.stdout)
 
     def test_retired_aliases_still_report_migration(self):
         for argo in ({'ciSecretsServiceAccount': 'retired-account'},
