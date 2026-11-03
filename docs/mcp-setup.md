@@ -908,10 +908,10 @@ The current MCP surface has **77 tools**, including administrator-only
 The CLI uses `--url`, `OBERTH_MCP_URL`, or `OBERTH_BASE_URL` (with
 `/mcp` appended). `OBERTH_TOKEN_COMMAND` and
 `OBERTH_CA_CERT` follow the installer environment; explicit flags take
-precedence. Older scripts retain the deprecated implicit endpoint below.
-
-The implicit hosted MCP endpoint remains available for older scripts with a
-stderr deprecation warning. Set an explicit URL or load the installer-provided
-environment to migrate. MCP and REST both refuse plain HTTP except to
+precedence. With no configured endpoint, the CLI refuses before reading a
+credential file, running a token command or creating a transport. There is no
+hosted fallback: load the installer-provided environment or set the URL
+explicitly. This credential-safety change also applies to older scripts.
+MCP and REST both refuse plain HTTP except to
 `localhost`, `127.0.0.1`, or `::1`, before resolving credentials. Redirects
 cannot downgrade HTTPS to HTTP.

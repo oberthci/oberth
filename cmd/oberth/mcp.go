@@ -363,8 +363,7 @@ func parseMCPFlags(name string, arguments []string, wantPositional int) (mcpFlag
 		result.URL = strings.TrimRight(environment.BaseURL, "/") + "/mcp"
 	}
 	if result.URL == "" {
-		result.URL = mcpLegacyDefaultURL
-		fmt.Fprintln(os.Stderr, "WARNING: the implicit hosted MCP URL is deprecated; set --url, OBERTH_MCP_URL, or OBERTH_BASE_URL")
+		return result, errors.New("set --url, OBERTH_MCP_URL, or OBERTH_BASE_URL to the operator's MCP server")
 	}
 	if result.CAFile == "" {
 		result.CAFile = environment.CACert

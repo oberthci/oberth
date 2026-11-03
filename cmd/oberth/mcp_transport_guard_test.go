@@ -4,7 +4,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"testing"
 )
@@ -24,30 +23,23 @@ func TestMCPRefusesCleartextBeforeCredentialsOrTransport(t *testing.T) {
 	}
 }
 
-func TestMCPLegacyDefaultWarns(t *testing.T) {
+func TestMCPRequiresConfiguredEndpointBeforeCredentialsOrTransport(t *testing.T) {
 	t.Setenv("OBERTH_MCP_URL", "")
 	t.Setenv("OBERTH_BASE_URL", "")
 	t.Setenv("OBERTH_TOKEN", "fixture")
-	oldStderr := os.Stderr
-	reader, writer, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
+	t.Setenv("OBERTH_TOKEN_COMMAND", "exit 99")
+	old := mcpHTTPClientFunc
+	mcpHTTPClientFunc = func(string) (*http.Client, error) {
+		t.Error("missing endpoint reached transport setup")
+		return nil, errors.New("transport reached")
 	}
-	os.Stderr = writer
-	t.Cleanup(func() { os.Stderr = oldStderr; _ = reader.Close(); _ = writer.Close() })
-	cfg, err := parseMCPFlags("test", nil, 0)
-	if err != nil || cfg.URL != mcpLegacyDefaultURL {
-		t.Fatalf("legacy default = %q: %v", cfg.URL, err)
-	}
-	_ = writer.Close()
-	os.Stderr = oldStderr
-	warning, err := io.ReadAll(reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, word := range []string{"deprecated", "--url", "OBERTH_MCP_URL", "OBERTH_BASE_URL"} {
-		if !strings.Contains(string(warning), word) {
-			t.Errorf("missing %q in warning %q", word, warning)
+	t.Cleanup(func() { mcpHTTPClientFunc = old })
+	for _, arguments := range [][]string{nil, {"--token-file", "/missing-token-file"}} {
+		err := runMCPTools(t.Context(), arguments, io.Discard)
+		for _, option := range []string{"--url", "OBERTH_MCP_URL", "OBERTH_BASE_URL"} {
+			if err == nil || !strings.Contains(err.Error(), option) {
+				t.Errorf("missing endpoint must name %s before reading a token: %v", option, err)
+			}
 		}
 	}
 }
