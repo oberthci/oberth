@@ -18,6 +18,10 @@ func (s *Store) listLatestRefRuns(ctx context.Context, filter model.RunListFilte
 		}
 		filter.Before = cursor.QueueSequence
 	}
+	// A latest-per-ref head cannot have a newer run of that same ref.
+	if filter.Superseded {
+		return []model.Run{}, nil
+	}
 	restriction, args := repoRestriction("repo_id", filter.RepoIDs)
 	params := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref}, args...)
 	params = append(params, filter.Before, filter.Before, pageLimit(filter.Limit))
@@ -34,7 +38,7 @@ func (s *Store) listLatestRefRuns(ctx context.Context, filter model.RunListFilte
 	for rows.Next() {
 		var earlier int
 		var position int64
-		run, err := scanRun(rows, &earlier, &position)
+		run, err := scanReadRun(rows, &earlier, &position)
 		if err != nil {
 			return nil, err
 		}
@@ -57,7 +61,7 @@ func latestRefQuery(restriction, priorityOrder string) string {
  SELECT id AS queued_run_id, ROW_NUMBER() OVER(ORDER BY ` + priorityOrder + `) AS queue_position
  FROM runs WHERE status='queued' OR (status='running' AND started_at IS NULL)
 )
- SELECT ` + runColumns + `,heads.earlier_attempts,COALESCE(queue.queue_position,0)
+ SELECT ` + runReadColumns + `,heads.earlier_attempts,COALESCE(queue.queue_position,0)
  FROM selected AS heads JOIN runs ON runs.queue_sequence=heads.head_sequence
  LEFT JOIN queue ON queue.queued_run_id=runs.id
  ORDER BY runs.queue_sequence DESC`
