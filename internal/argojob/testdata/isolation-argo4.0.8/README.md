@@ -86,3 +86,12 @@ unchanged; all 27 submitted Pods across isolation, WIF, nonroot and VMI cases
 passed the retained Kubernetes validator. Isolation inputs now explicitly declare
 256Mi so the measured-leaf architecture and inherited pool checks still exercise
 wrapped Pods. No expected Pod was assembled or edited by hand.
+
+The #1398 recapture (2026-11-03) uses the retained authenticated Argo v4.0.8
+controller and combined hooks after adding executor-token wait diagnostics.
+The shared hook declarations are retained in `capture-hook.go.txt`; copy this
+to `workflow/controller/zz_capture_hook.go` with the capture test. All eight
+new isolation Pods pass Kubernetes v1.35.7 validation, alongside the 18 fresh
+WIF and nonroot captures. These 26 current captures exclude the retired VMI
+path. No live controller, cluster mutation, or manually assembled expected Pod
+was used.

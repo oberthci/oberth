@@ -103,3 +103,9 @@ For reproduction, retain capture-hook.go.txt as a regular controller Go file
 alongside the two capture test files; its two callbacks are invoked immediately
 before PodSpecPatch processing. The provenance records the instrumented digest.
 These local construction checks make no claim about a live cluster or IAM.
+
+Executor-token diagnostics recapture (#1398, 2026-11-03) uses current Build
+outputs with the progress-reporting waiter. The same pinned controller and
+unchanged capture hooks generated all 18 submitted Pods; Kubernetes v1.35.7
+ValidatePodCreate accepted each one. The expected Pods were copied directly
+from those captures. The exact legacy waiter remains accepted for existing Pods.

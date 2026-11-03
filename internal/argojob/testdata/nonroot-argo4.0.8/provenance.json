@@ -8,17 +8,17 @@
   "capture_boundary": "immediately before var podSpecPatchs / processPodSpecPatch",
   "instrumented_sha256": "76d1a46beaa79d764320552eaeb8a40aa7c38057bf346a12b9e8846c621cc59a",
   "files": {
-    "container-before-patch.json": "7e90ae6bcde61f72a759e19c533ef29c712022b124eb7323f302f07531faafc7",
-    "container-submitted.json": "5745a569f4c19e61c1ac521e94c3ccee480857ee73d92626632f3122391471f8",
-    "script-before-patch.json": "7b8b14e3d87fb6b69468726a1a902ce2eaff327d9919060198012cc76398606c",
-    "script-submitted.json": "1494e69612fd8e374fd9cd4f4715bfb3bc4faca0bf0af23471b0c66f3b1f5550",
+    "container-before-patch.json": "e1f3686cdaf761339cb5588af5ef081c89cd5fc01982e152881ca3f72a8bb32e",
+    "container-submitted.json": "3e7a3a8386e260a3fc839635309a200a4d2886987bb878bb25f481bbb99c7e59",
+    "script-before-patch.json": "83b2e4aae297f55019f51c1b8083a5977c8c48f8cfa47a4c5e06295c199d8a64",
+    "script-submitted.json": "e3a1ee4337d08c0a7b8926ba81624712a0e5d6082922c3a82f8bc434a107e6ff",
     "controller-profile.json": "7ca0f2aff6cf39e67aa5996672363a3a7a8401449a794f32d5cf375e7267a4c0",
-    "container-persisted-workflow.json": "a1f60511a739d70314f16aadd9d5bdf4c306f3fabfa5fd229ce68c656cb3559b",
-    "script-persisted-workflow.json": "c7409f2b8e933b9117c5728fa5bbdb3bd435bc9d939209e67a34213ed19fc103",
+    "container-persisted-workflow.json": "c314efd1d074b82ca87c4354f51e48b4b376e2771181ee5f9dad1a679d76235d",
+    "script-persisted-workflow.json": "67d0ca2ab101902bbdc80eeaa3344bbdf8338924f5e1f7fda724ba82977e1581",
     "capture_test.go.txt": "2f75e2e64c0bbe5de567b8cec9bf31601cf62fcb8dfde6a92a5650d8f5f0cf22",
     "capture-hook.go.txt": "9068b7074cedb224bf5fd2612591016096b2c0091d5d53453e5971ca474a1986"
   },
   "stage": "Before processPodSpecPatch, workflow/controller/workflowpod.go:405; observed submitted Pod after main emissary/volume rewriting at417-456.",
   "controller_profile": "nonroot-static-v1; exact executor digest and gloglevel0; raw before-Pods include separate hostile SC control. Persisted Workflows use supported profile and actual operate-to-Running fake API reconciliation.",
-  "recaptured_with": "2026-11-03 #1292 generic repository identities; Go 1.26.10, pinned Argo v4.0.8 real controller with fake API clients and capture-only hooks; all 18 submitted Pods passed Kubernetes v1.35.7 ValidatePodCreate. No live deployment."
+  "recaptured_with": "2026-11-03 #1398 executor-token progress diagnostics; Go 1.26.10, pinned Argo v4.0.8 real controller with fake API clients and unchanged capture-only hooks; all 18 submitted Pods passed Kubernetes v1.35.7 ValidatePodCreate. No live deployment."
 }

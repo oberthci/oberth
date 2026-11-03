@@ -88,3 +88,9 @@ unchanged; all 27 submitted Pods across isolation, WIF, nonroot and VMI cases
 passed the retained Kubernetes validator. Isolation inputs now explicitly declare
 256Mi so the measured-leaf architecture and inherited pool checks still exercise
 wrapped Pods. No expected Pod was assembled or edited by hand.
+
+Executor-token diagnostics recapture (#1398, 2026-11-03) uses current Build
+outputs with the progress-reporting waiter. The same pinned controller and
+unchanged capture hooks generated all 18 submitted Pods; Kubernetes v1.35.7
+ValidatePodCreate accepted each one. The expected Pods were copied directly
+from those captures. The exact legacy waiter remains accepted for existing Pods.

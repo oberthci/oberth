@@ -30,7 +30,25 @@ const executorTokenVolume = "exec-sa-token"
 const executorTokenDir = "/var/run/secrets/kubernetes.io/serviceaccount"
 
 // #nosec G101 -- fixed runtime path/command, not credential material.
-const executorTokenWaitCommand = "until test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do sleep 1; done"
+const executorTokenWaitCommand = `trap 'printf "%s\n" "executor token wait terminated" >&2; exit 143' TERM
+trap 'printf "%s\n" "executor token wait interrupted" >&2; exit 130' INT
+printf '%s\n' 'waiting for executor token from Oberth' >&2
+waited_seconds=0
+until test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do
+  if ! sleep 1; then
+    printf '%s\n' 'executor token wait failed' >&2
+    exit 1
+  fi
+  waited_seconds=$((waited_seconds + 1))
+  if [ "$((waited_seconds % 30))" -eq 0 ]; then
+    printf 'still waiting for executor token from Oberth after %ss\n' "$waited_seconds" >&2
+  fi
+done
+printf '%s\n' 'executor token ready' >&2`
+
+// Existing Pods retain their exact server-authored waiter across an upgrade.
+// #nosec G101 -- fixed runtime path/command, not credential material.
+const legacyExecutorTokenWaitCommand = "until test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do sleep 1; done"
 
 // Argo adds a Secret-backed executor volume before applying the server-owned
 // pod patch. Replace that volume with tmpfs and wait for a Pod-bound TokenRequest
@@ -251,7 +269,7 @@ func validateExecutorTokenTarget(pod *corev1.Pod, image string, resourcePod bool
 	found := false
 	for _, container := range append(append([]corev1.Container{}, pod.Spec.InitContainers...), pod.Spec.Containers...) {
 		if container.Name == executorTokenWaiter {
-			if container.Image != image || len(container.Command) != 3 || container.Command[0] != "sh" || container.Command[1] != "-c" || len(container.Args) != 0 || container.Command[2] != executorTokenWaitCommand {
+			if container.Image != image || len(container.Command) != 3 || container.Command[0] != "sh" || container.Command[1] != "-c" || len(container.Args) != 0 || (container.Command[2] != executorTokenWaitCommand && container.Command[2] != legacyExecutorTokenWaitCommand) {
 				return errors.New("executor identity waiter was modified")
 			}
 			found = true
