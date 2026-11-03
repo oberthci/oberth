@@ -265,7 +265,7 @@ func TestSchedulerReleaseCandidateOvertakesAlreadyClaimedBranchQueue(t *testing.
 		t.Fatalf("initial creation=%v", created)
 	}
 	ordinaryA := f.branch(t, f.terraform, "ordinary-a", "b")
-	ordinaryB := f.branch(t, f.beacon, "ordinary-b", "c")
+	ordinaryB := f.branch(t, f.exampleService, "ordinary-b", "c")
 	// Wait until an ordinary L has filled dispatch while awaiting weight.
 	deadline := time.Now().Add(testStartTimeout(10 * time.Second))
 	for {
@@ -278,7 +278,7 @@ func TestSchedulerReleaseCandidateOvertakesAlreadyClaimedBranchQueue(t *testing.
 		}
 		time.Sleep(testTimeout(time.Millisecond))
 	}
-	rc := f.branch(t, f.beacon, "rc/v1", "d")
+	rc := f.branch(t, f.exampleService, "rc/v1", "d")
 	if created := f.awaitCreated(t, 1); !created[rc.ID] {
 		t.Fatalf("higher-class RC did not overtake branches: %v", created)
 	}

@@ -391,7 +391,7 @@ check '! calls_contain "kubectl"' "in-cluster mode must not call kubectl"
 # --- 11. actual CLI-shaped audit preflight in both shipped helpers -----------
 # Execute each maintained preflight verbatim with the same mock CLI. Keeping
 # this extraction bounded also detects accidental divergence between copies.
-for candidate in "$root/scripts/setup-secretstore.sh" "$root/website/public/setup-secretstore.sh"; do
+for candidate in "$root/scripts/setup-secretstore.sh"; do
   preflight="$work/audit-preflight.sh"
   {
     printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'CLI=bao' \

@@ -81,9 +81,9 @@ func TestBuildKubeVirtRequiresGrantAndRefusesCredentialed(t *testing.T) {
 	if got := wf.Spec.Executor.ServiceAccountName; got != config.ExecutorServiceAccount {
 		t.Fatalf("shared executor = %q", got)
 	}
-	credentialedSource := strings.Replace(kubeVirtWorkflow, "kind: Workflow\n", "kind: Workflow\nmetadata:\n  annotations:\n    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/test-secret\n", 1)
+	credentialedSource := strings.Replace(kubeVirtWorkflow, "kind: Workflow\n", "kind: Workflow\nmetadata:\n  annotations:\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
 	request.Source = []byte(credentialedSource)
-	request.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/test-secret": true}
+	request.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/test-secret": true}
 	if _, err := Build(config, request); err == nil || !strings.Contains(err.Error(), "refused in credentialed workflows") {
 		t.Fatalf("credentialed VMI = %v", err)
 	}
@@ -149,7 +149,7 @@ func TestFragmentSourcedVMIRefusesCredentialedWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := "oberth/upstream/skipops/oberth/test-secret"
+	path := "oberth/upstream/acme/oberth/test-secret"
 	request := fragmentRequest(t, consumingDocument("    oberth.ci/secret-paths: "+path+"\n", key.String()), map[argoworkflow.FragmentKey]argoworkflow.Fragment{key: fragment})
 	request.ApprovedSecrets = map[string]bool{path: true}
 	request.KubeVirtGranted = true

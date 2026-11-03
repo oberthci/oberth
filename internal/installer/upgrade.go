@@ -22,14 +22,6 @@ import (
 // Oberth release images. Published chart refs must resolve to this registry.
 const canonicalGARPrefix = "europe-west4-docker.pkg.dev/skipopsmain/oberth/"
 
-// watchTunnelImageDefault is the digest-pinned cloudflared image the chart
-// and installer pin by default. Update deliberately.
-const watchTunnelImageDefault = "docker.io/cloudflare/cloudflared:2026.10.6@sha256:004d843fa5fdc3103983fd580ee19fab4a8fa98add31f87249c1659e848c98e0"
-
-// watchTunnelOpenbaoImageDefault is the digest-pinned OpenBao image used by
-// the init container that fetches the connector token.
-const watchTunnelOpenbaoImageDefault = "quay.io/openbao/openbao:2.6.1@sha256:5b2486ab0fb90bbc788cc345b0a08616dfb375873ee8be5df3a2fd4d378a67e0"
-
 // DefaultUpgradeWaitTimeout bounds queue observation independently of rollout.
 const DefaultUpgradeWaitTimeout = 2 * time.Hour
 
@@ -88,8 +80,6 @@ var upgradePinnedKeys = map[string]bool{
 	"image.ref":                    true,
 	"argo.goProxy.enabled":         true,
 	"argo.goProxy.port":            true,
-	"watchTunnel.image":            true,
-	"watchTunnel.openbaoImage":     true,
 	"compatibility.schemaIdentity": true,
 	"compatibility.auditDomain":    true,
 	"compatibility.witnessKeyInfo": true,
@@ -647,8 +637,6 @@ func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string, compatibility ba
 		// An absent enabled key renders false; a present value remains subject
 		// to the chart's boolean schema. Only the reviewed image pins override
 		// stored connector configuration (#671).
-		"--set-string", "watchTunnel.image="+watchTunnelImageDefault,
-		"--set-string", "watchTunnel.openbaoImage="+watchTunnelOpenbaoImageDefault,
 	)
 	if cfg.ArgoControllerProfile != "" {
 		args = append(args, "--set-string", "argo.controllerProfile="+cfg.ArgoControllerProfile)

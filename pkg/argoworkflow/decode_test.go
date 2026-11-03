@@ -130,47 +130,47 @@ func TestDeclaredSecretPaths(t *testing.T) {
 func TestAuthorizeSecretPathsAllowsBothTriggers(t *testing.T) {
 	paths := []string{"oberth/data/release/cosign-secret"}
 	allowlist := []string{"oberth/data/release/cosign-secret"}
-	if err := AuthorizeSecretPaths(paths, allowlist, periapsis.TriggerRelease, "skipops", "oberth"); err != nil {
+	if err := AuthorizeSecretPaths(paths, allowlist, periapsis.TriggerRelease, "acme", "oberth"); err != nil {
 		t.Fatalf("allowlisted release path: %v", err)
 	}
 	// CI pipelines CANNOT declare system-namespace paths, even with an allowlist.
-	if err := AuthorizeSecretPaths(paths, allowlist, periapsis.TriggerCI, "skipops", "oberth"); err == nil {
+	if err := AuthorizeSecretPaths(paths, allowlist, periapsis.TriggerCI, "acme", "oberth"); err == nil {
 		t.Fatal("expected a system-namespace path to be refused for CI")
 	}
-	if err := AuthorizeSecretPaths(paths, nil, periapsis.TriggerRelease, "skipops", "oberth"); err == nil {
+	if err := AuthorizeSecretPaths(paths, nil, periapsis.TriggerRelease, "acme", "oberth"); err == nil {
 		t.Fatal("expected a non-allowlisted system path to be refused")
 	}
-	if err := AuthorizeSecretPaths(paths, nil, periapsis.TriggerCI, "skipops", "oberth"); err == nil {
+	if err := AuthorizeSecretPaths(paths, nil, periapsis.TriggerCI, "acme", "oberth"); err == nil {
 		t.Fatal("expected a system path to be refused for CI")
 	}
-	if err := AuthorizeSecretPaths(nil, nil, periapsis.TriggerCI, "skipops", "oberth"); err != nil {
+	if err := AuthorizeSecretPaths(nil, nil, periapsis.TriggerCI, "acme", "oberth"); err != nil {
 		t.Fatalf("declaring nothing is always fine: %v", err)
 	}
 	// Upstream-scoped paths are CI-eligible.
-	upstreamPaths := []string{"oberth/upstream/skipops/oberth/test-secret"}
-	if err := AuthorizeSecretPaths(upstreamPaths, nil, periapsis.TriggerCI, "skipops", "oberth"); err != nil {
+	upstreamPaths := []string{"oberth/upstream/acme/oberth/test-secret"}
+	if err := AuthorizeSecretPaths(upstreamPaths, nil, periapsis.TriggerCI, "acme", "oberth"); err != nil {
 		t.Fatalf("upstream-scoped CI path: %v", err)
 	}
-	if err := AuthorizeSecretPaths(upstreamPaths, nil, periapsis.TriggerRelease, "skipops", "oberth"); err != nil {
+	if err := AuthorizeSecretPaths(upstreamPaths, nil, periapsis.TriggerRelease, "acme", "oberth"); err != nil {
 		t.Fatalf("upstream-scoped release path: %v", err)
 	}
 }
 
 func TestAuthorizeSecretPathsScopesUpstreamNamespaceByRepository(t *testing.T) {
-	own := []string{"oberth/upstream/skipops/oberth/gar-sa-key"}
-	if err := AuthorizeSecretPaths(own, nil, periapsis.TriggerRelease, "skipops", "oberth"); err != nil {
+	own := []string{"oberth/upstream/acme/oberth/gar-sa-key"}
+	if err := AuthorizeSecretPaths(own, nil, periapsis.TriggerRelease, "acme", "oberth"); err != nil {
 		t.Fatalf("a repository's own upstream-scoped path (release): %v", err)
 	}
 	// Upstream-scoped paths also work for CI pipelines.
-	if err := AuthorizeSecretPaths(own, nil, periapsis.TriggerCI, "skipops", "oberth"); err != nil {
+	if err := AuthorizeSecretPaths(own, nil, periapsis.TriggerCI, "acme", "oberth"); err != nil {
 		t.Fatalf("a repository's own upstream-scoped path (CI): %v", err)
 	}
-	stolen := []string{"oberth/upstream/skipops/acme-ebpf/gar-sa-key"}
-	if err := AuthorizeSecretPaths(stolen, nil, periapsis.TriggerRelease, "skipops", "oberth"); err == nil {
+	stolen := []string{"oberth/upstream/acme/acme-ebpf/gar-sa-key"}
+	if err := AuthorizeSecretPaths(stolen, nil, periapsis.TriggerRelease, "acme", "oberth"); err == nil {
 		t.Fatal("expected another repository's scoped path to be refused")
 	}
 	foreignOrg := []string{"oberth/upstream/someone-else/oberth/gar-sa-key"}
-	if err := AuthorizeSecretPaths(foreignOrg, nil, periapsis.TriggerRelease, "skipops", "oberth"); err == nil {
+	if err := AuthorizeSecretPaths(foreignOrg, nil, periapsis.TriggerRelease, "acme", "oberth"); err == nil {
 		t.Fatal("expected another org's path to be refused")
 	}
 }

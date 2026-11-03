@@ -430,7 +430,7 @@ func TestVaultAddressRequiresPinnedAnchor(t *testing.T) {
 		// on vaultAddressRequiresPinnedAnchor.
 		"https://8.8.8.8:8200":         true,
 		"https://bao.example.com:8200": false,
-		"https://vault.skipops.ltd":    false,
+		"https://vault.acme.ltd":       false,
 		"":                             false,
 	} {
 		if got := vaultAddressRequiresPinnedAnchor(address); got != want {

@@ -86,7 +86,7 @@ func TestGroupAdmissionParkedRunDoesNotBlockLaterClaims(t *testing.T) {
 	awaitWaiting(t, parked)
 
 	// Another repository's M run, claimed after the parked run, is admitted.
-	releaseOther := acquireRequestWithinBudget(t, gate.reserve(3), groupRequest("beacon", 2, periapsis.M, ""))
+	releaseOther := acquireRequestWithinBudget(t, gate.reserve(3), groupRequest("example-service", 2, periapsis.M, ""))
 	if used, _ := gateUsage(gate); used != 4 {
 		t.Fatalf("used = %d, want the holder and the other repository only (4)", used)
 	}
@@ -281,7 +281,7 @@ func TestGroupAdmissionRetainedGrantKeepsItsGroupAndWeight(t *testing.T) {
 	// Retaining is only for a live grant: an ungranted or released
 	// reservation is unaffected, so nothing can be retained by accident.
 	unrelated := gate.reserve(3)
-	releaseUnrelated := acquireRequestWithinBudget(t, unrelated, groupRequest("beacon", 2, periapsis.M, ""))
+	releaseUnrelated := acquireRequestWithinBudget(t, unrelated, groupRequest("example-service", 2, periapsis.M, ""))
 	releaseUnrelated()
 	unrelated.retain()
 	if used, runs := gateUsage(gate); used != 2 || runs != 1 {

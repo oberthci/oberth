@@ -796,21 +796,6 @@ trust assumptions and complete invalidation rules.
   SHA256SUMS, SHA256SUMS.sigstore.json, cosign.pub} union {binaries from
   SHA256SUMS}); it fails closed on list failure, truncation, or any key
   outside the `oberth/latest/` prefix (#703/#719).
-- The same Release DAG publishes the oberth.ci website (#649): after
-  `release-verify`, the `release-website` leaf deploys the admitted
-  `website/` (Worker `oberth-ci`, custom domains oberth.ci and www.oberth.ci)
-  with exactly one credential, `oberth/data/release/cloudflare-oberth-workers-token`
-  (field `CLOUDFLARE_API_TOKEN`; Terraform-owned account token scoped to
-  Workers Scripts Write plus read-only Zone Read/Workers Routes Read on
-  oberth.ci), after its init containers bind the source to the admitted tag
-  and install Node (sha256 pins) and wrangler (lockfile sha512, offline,
-  scripts disabled) into Pod-private scratch. The tokenless
-  `release-website-readback` leaf then requires the public URLs to serve the
-  admitted bytes. Both maintained `setup-secretstore.sh` copies therefore
-  ship through the signed release: the canonical one embedded in the binary
-  and image, the public one on https://oberth.ci/setup-secretstore.sh. Their
-  semantic audit preflight blocks must stay byte-identical; the files as a
-  whole intentionally differ (the public copy adds the Argo tiers).
 
 ## Network and wire outputs
 
@@ -873,8 +858,8 @@ trust assumptions and complete invalidation rules.
   and an entry for an unregistered repository stays verbatim and inert.
   The `AddGrantCanonical` and `RemoveGrantCanonical` modify callbacks
   apply the same resolution before comparing: a qualified revoke
-  (`codeberg/acme/acme-beacon`) matches a bare-spelled
-  ConfigMap entry (`acme-beacon`), removing all canonical
+  (`codeberg/acme/acme-example-service`) matches a bare-spelled
+  ConfigMap entry (`acme-example-service`), removing all canonical
   duplicates; `AddGrantCanonical` deduplicates against canonical
   equivalents. Both preserve the original spelling of surviving entries.
   An ambiguous bare entry is never matched (fail-closed). A truly absent
@@ -2716,8 +2701,7 @@ the relevant tests, and the operator-facing documentation in the same change.
 `oberth upgrade` accepts `--values`/`-f` (repeatable values file) and `--set`
 (repeatable `key=value`) flags, forwarded to `helm upgrade` after the
 installer's own pinned arguments. Protected keys are `image.ref`,
-`argo.goProxy.enabled`, `argo.goProxy.port`, `watchTunnel.image`,
-`watchTunnel.openbaoImage`, and the three `compatibility.*` identity tokens.
+`argo.goProxy.enabled`, `argo.goProxy.port`, and the three `compatibility.*` identity tokens.
 They cannot be overridden via `--set` or `--values`. Setting a pinned key
 (or a parent path like `image`) returns `ErrPinnedKeyOverride` before any cluster mutation. Values files are
 parsed and their leaf keys checked for the same conflicts.
@@ -2848,87 +2832,13 @@ remote already contains the result, and report passed after atomic recovery.
 Terminal rows are immutable; independent reads may observe a real intervening
 commit, reflected by `updated_at`/`UpdatedAt`. Reads never finalize a publication.
 
-## Watch connector adoption and upgrade preservation (#671)
+## Operator-owned external ingress
 
-`watchTunnel.enabled` is administrator configuration, preserved by dedicated
-upgrades; absent means false and a present value must be boolean. Immutable
-cloudflared/OpenBao image pins remain protected. OpenBao and HTTPS origin public
-trust are distinct inputs. The optional origin certificate ConfigMap and its
-read-only connector mount are chart-owned; no private key or token is a value.
-
-Explicit `install --upgrade --skip-argo-workflows --watch-tunnel-adoption-plan`
-accepts only the expiring public four-object contract in
-[watch connector ownership](docs/watch-tunnel.md). It preflights every exact
-UID/RV/prior owner/public spec and target render before metadata-only CAS.
-Partial or unknown outcomes retain confirmed ownership and report the bounded
-public subset; no automatic retry, rollback, delete, recreation or general Helm
-ownership mutation override exists. A separate bounded, nonmutating server preview uses --take-ownership only together with --dry-run=server and --no-hooks; actual upgrade argv never includes it. A fresh independently reviewed plan is required for
-forward recovery. Secret-store and other service installation cannot be combined.
-
-Adoption is Linux-only and refuses cluster bootstrap, local chart/server-image
-overrides and network-policy changes. Only connector enablement and the two
-public trust bundles may be supplied as values; bounded validation precedes
-freezing them in a sealed memory file shared by preview and actual upgrade.
-Both installer paths pin the reviewed connector images. Every object is checked
-again after metadata changes, including objects retained by a forward-repair
-plan. Helm preview output is bounded during subprocess capture and failures
-are sanitized; token staging logs contain no token-derived digest.
-
-Connector resource labels contain application name and instance exactly once.
-The Deployment retains `cloudflared-watch` / `cloudflared-watch-oberth-v2` in
-resource labels, its immutable selector and Pod labels. Its ServiceAccount and
-public CA ConfigMaps retain the release name as their instance. Shared chart
-labels cannot overwrite these identities.
-
-The existing Helm server preview is a target-render check; it does not prove a
-subsequent server-side apply is conflict-free. V1 adoption still requires a
-deployed revision and does not authorize rewriting legacy field ownership or
-accepting a failed revision. V2 implements the reviewed forward recovery and
-the explicit post-handoff resume of the original failed72 attempt. Resume
-requires a fresh mode-bound plan hashing the prior failed-adoption
-plan and the one-row confirmed handoff receipt. It reconstructs the exact
-Deployment managedFields subtraction, binds the same UID/new RV and unchanged
-pre-effect specs/generation/public metadata, and requires every other object's
-RV/managedFields to remain exact. Resume performs force=false SSA qualification
-with no metadata patch or write. It verifies the fixed release signing key,
-signed successor installer/chart/checksums, original immutable plan/receipt,
-four original UIDs and fresh failed72 record UID/RV/history. Its maximum
-30-minute public plan binds current full metadata/managedFields/specs and
-separate rendered/defaulted targets. The sole permitted relinquishment is the
-legacy Update apps/v1 manager's fetch-token.args leaf. Full metadata UID/RV CAS
-preserves every other entry and spec; shared/atomic/unknown ownership refuses.
-When a resumed plan uses a newer chart, each prior and fresh rendered/defaulted
-target must carry the exact `helm.sh/chart` label for its plan's chart version;
-that single version-derived label is normalized only for prior/fresh target
-continuity. All other target metadata and the observed live metadata remain
-fully compared.
-All four real Force=false SSA DryRunAll requests precede the CAS and repeat
-after it, using the hash-bound Helm4.2.3 manager. Confirmed receipts survive
-later failure; uncertain outcomes stop without automatic retry or rollback.
-Both the recovery API client and sealed Helm kubeconfig derive from one frozen
-validated literal HTTPS credential. Impersonation and caller transport/auth
-hooks are refused; credential file reload and ambient proxy input are removed.
-The signed running installer binds the kernel executable inode, not a mutable
-installation pathname. The CAS index comes from the observed approved array;
-handoff replies preserve complete metadata except confirmed RV/fieldset change.
-The implementation and [regression catalog](docs/watch-csa-test-catalog.md)
-remain source-only and unqualified until separately admitted checks pass.
-There is no general failed-release or manager-transfer mode. A coordinated
-cutover requires the former writer to be quiescent; later drift is still
-detectable and refused. No source packet authorizes a live retry.
-
-V2 also binds the canonical public values digest before sealing and rechecks it
-on the sealed bytes before preparation. Only the three validated deployment
-protocol identities and four exact module-proxy namespace strings may extend
-the v1 connector-only whitelist; no security or enablement override is added.
-API patches 1.36.2 and 1.36.3 have separately pinned fixture tools, while each
-plan retains exact full API GitVersion equality at every effect boundary.
-Only the connector Deployment may retain the public
-`deployment.kubernetes.io/revision` annotation (canonical positive signed-64-bit
-decimal) and the exact `oberth.ci/source` value
-`github.com/oberthci/terraform//k8s/cloudflared-watch`. Their observed values
-remain bound by the complete metadata comparison and CAS; admitting these keys
-does not authorize changing or dropping them during the ownership handoff.
+The chart and installer manage Oberth and its CI dependencies. Operators own
+external ingress and connectors separately. Retired `watchTunnel` values are
+accepted for upgrade compatibility, ignored, and reported in Helm notes.
+Transfer connector ownership before upgrading a release that formerly managed
+it. The push banner remains an optional, display-only dashboard URL.
 
 ## Keyless GAR publication and verification (#557)
 
@@ -2951,12 +2861,12 @@ does not carry an installation-specific audience-to-source-account allowlist.
 | `image-reader` | `oberth-release-reader` | `<release-reader>` |
 | `chart-writer` | `oberth-release-charts` | `<chart-publisher>` |
 
-All pools use provider `tuxbox` under project `138624361369`.
+All pools use provider `<provider-name>` under project `<project-number>`.
 
 Oberth's helper additionally performs the existing matching delegation (#875):
-image-writer to `oberth-release-publisher@skipopsmain.iam.gserviceaccount.com`,
-image-reader to `oberth-release-reader@skipopsmain.iam.gserviceaccount.com`, and
-chart-writer to `oberth-chart-publisher@skipopsmain.iam.gserviceaccount.com`.
+image-writer to `oberth-release-publisher@<project-id>.iam.gserviceaccount.com`,
+image-reader to `oberth-release-reader@<project-id>.iam.gserviceaccount.com`, and
+chart-writer to `oberth-chart-publisher@<project-id>.iam.gserviceaccount.com`.
 The validated audience fixes the final hop. ADC names the configured
 first-hop principal; its URL must pass strict syntax validation and cannot
 override the Oberth target. Both IAM requests
@@ -2966,7 +2876,7 @@ stay in memory, and second-hop refusal never falls back to the first token or
 static keys. This consumes existing matching TokenCreator and repository IAM,
 without widening either. The helper uses the configured source exchange for
 Oberth's repositories.
-Real source account emails live only in tuxbox installation configuration.
+Real source account emails live only in operator installation configuration.
 Before the next release, configure/retain `argo.releaseWIF.roles.<role>.service_account`
 for all three roles. The current server already supplies the required ADC;
 this revision requires no new environment variable or preliminary server rollout.
@@ -3492,6 +3402,6 @@ of at most 1,000 rows, with 100-row DELETE batches on a separate SQLite connecti
 (one-second pass, 25ms busy wait; backlog may exceed targets until swept).
 Unchanged terminal rows are not rewritten and sessions suppress up to 4,096
 successfully recorded finishes. Helm rollback alone fails schema-too-new and
-requires a pre-upgrade database restore; see [schema 37](docs/schema37-upgrade-note.md).
+requires a pre-upgrade database restore; see [schema 37](docs/backup-restore.md).
 Full scopes, exclusions and overhead:
 [external sampler coverage](docs/step-resource-usage.md#external-sampler-coverage-1216).

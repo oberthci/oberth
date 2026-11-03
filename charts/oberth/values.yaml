@@ -33,7 +33,7 @@ replicaCount: 1
 maxConcurrentJobs: 3
 
 # Opt-in platform priority. Creates release/namespace-specific PriorityClasses
-# and assigns only the Oberth and cloudflared pod templates. Argo and OpenBao
+# and assigns only the Oberth pod template. Argo and OpenBao
 # are separate releases: see docs/platform-protection.md for their overlays.
 # Requests in those overlays are based on one idle sample, unmeasured under load.
 platformProtection:
@@ -275,7 +275,7 @@ argo:
   resourceSampler:
     enabled: false
     interval: 15s
-    nodes: {} # e.g. tuxbox: https://tuxbox.example:10250
+    nodes: {} # e.g. example-node: https://example-node.example:10250
     caCert: "" # public kubelet serving CA PEM, not a private key
   # Emissary retains stdout/stderr and control files here until Pod cleanup.
   # Separate from the test leaf /tmp; applies to nonroot and trusted KVM leaves.
@@ -554,30 +554,6 @@ networkPolicy:
   #   namespace: openbao       # in-cluster namespace (default)
   #   port: 8200               # store port (default)
   #   externalCIDRs: []        # for external stores: ["10.0.1.5/32"]
-
-# Watch tunnel connector (cloudflared) managed by oberth install/upgrade.
-# Disabled by default in the chart; the installer sets it when configured.
-# The connector token is fetched at runtime into a memory emptyDir via
-# OpenBao Kubernetes auth -- never a Secret, never etcd, never node disk.
-watchTunnel:
-  # Omitted enabled in a legacy reused-values map means false. Upgrades preserve
-  # an explicitly configured true or false value.
-  enabled: false
-  # Public trust anchor for the HTTPS Oberth origin configured on the tunnel.
-  # Never a private key. The origin configuration uses /etc/oberth-origin-ca/ca.crt.
-  originCACert: ""
-  # Digest-pinned cloudflared image. Update deliberately.
-  image: docker.io/cloudflare/cloudflared:2026.10.6@sha256:004d843fa5fdc3103983fd580ee19fab4a8fa98add31f87249c1659e848c98e0
-  # Digest-pinned OpenBao image for the init container that fetches the token.
-  openbaoImage: quay.io/openbao/openbao:2.6.1@sha256:5b2486ab0fb90bbc788cc345b0a08616dfb375873ee8be5df3a2fd4d378a67e0
-  # OpenBao endpoint and auth configuration (non-secret).
-  openbao:
-    address: "https://openbao.openbao.svc:8200"
-    authMount: kubernetes
-    role: cloudflared-watch
-    secretMount: oberth
-    secretPath: ops/cloudflared-watch-token
-    secretField: TUNNEL_TOKEN
 
 podAnnotations: {}
 podLabels: {}

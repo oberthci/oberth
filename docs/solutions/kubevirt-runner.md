@@ -341,7 +341,7 @@ inventory and a real process exit bound to the admitted inputs and VM UID.
 - ARM node support
 - Verified immutable guest/kernel/initramfs/helper packaging
 - PostgreSQL integration test suite
-- CTTV full-stack validation
+- example-web full-stack validation
 
 ### Success criteria
 

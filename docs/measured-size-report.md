@@ -54,5 +54,5 @@ TLS/token/RBAC/metric qualification. Collection failure leaves normal run views
 usable. Platform protection and a representative coverage window precede any
 later request policy or whole-run vector admission. See
 [the measured-requests design](../DESIGN-measured-requests.md),
-[platform protection](platform-protection-plan.md) and
+[platform protection](backup-restore.md) and
 [PSI observation/enforcement](io-pressure-admission.md).

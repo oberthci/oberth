@@ -54,7 +54,7 @@ func TestAuditListIsAdminOnlyAndReturnsChainPositions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	filtered, err := fixture.call(unscopedActor, "audit_list", map[string]any{"action": "repository.", "actor": "owner@tuxbox", "repo": "oberth"})
+	filtered, err := fixture.call(unscopedActor, "audit_list", map[string]any{"action": "repository.", "actor": "owner@example-node", "repo": "oberth"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestAuditListRepoFilterMatchesBareAndQualifiedNames(t *testing.T) {
 			t.Fatal(err)
 		}
 		action, err := fixture.store.AppendAuditAction(ctx, model.AuditActionSpec{
-			Actor: "owner@tuxbox", Action: "schedule.pause", ResourceType: "schedule", ResourceID: repo + "#nightly", Details: string(details),
+			Actor: "owner@example-node", Action: "schedule.pause", ResourceType: "schedule", ResourceID: repo + "#nightly", Details: string(details),
 		})
 		if err != nil {
 			t.Fatal(err)

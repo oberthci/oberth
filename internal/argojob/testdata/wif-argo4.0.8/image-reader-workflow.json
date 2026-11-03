@@ -15,10 +15,10 @@
     },
     "annotations": {
       "oberth.ci/ref": "refs/tags/v1.0.0",
-      "oberth.ci/release-wif-policy-sha256": "c166d883b302ffe2f946f218b6a5133faef5168ff8f4118d99b3837c273cfdf1",
+      "oberth.ci/release-wif-policy-sha256": "38a8f7b2f8009d709e49ed6016e73891e24b2dc9832fd4ea358e390ece331210",
       "oberth.ci/run-id": "run-abc123",
       "oberth.ci/size": "L",
-      "oberth.ci/spec-identity": "b32560dfb9d927106edb4b988bc7878dc357d6cab0baf07ca34963cf3f071815",
+      "oberth.ci/spec-identity": "852540d327c23a592412c6f6efff169f922cfc9aac991df1e67ce00b03501860",
       "oberth.ci/step-usage-memory-policy": "explicit-limit-256Mi-v1",
       "workflows.argoproj.io/pod-name-format": "v2"
     }
@@ -31,7 +31,7 @@
         "outputs": {},
         "metadata": {
           "annotations": {
-            "oberth.ci/release-wif-adc": "{\"audience\":\"//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/oberth-release-reader/providers/tuxbox\",\"credential_source\":{\"file\":\"/run/oberth-gar/token\"},\"service_account_impersonation_url\":\"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/image-reader@example-project.iam.gserviceaccount.com:generateAccessToken\",\"subject_token_type\":\"urn:ietf:params:oauth:token-type:jwt\",\"token_url\":\"https://sts.googleapis.com/v1/token\",\"type\":\"external_account\"}",
+            "oberth.ci/release-wif-adc": "{\"audience\":\"//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/oberth-release-reader/providers/example-node\",\"credential_source\":{\"file\":\"/run/oberth-gar/token\"},\"service_account_impersonation_url\":\"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/image-reader@example-project.iam.gserviceaccount.com:generateAccessToken\",\"subject_token_type\":\"urn:ietf:params:oauth:token-type:jwt\",\"token_url\":\"https://sts.googleapis.com/v1/token\",\"type\":\"external_account\"}",
             "oberth.ci/release-wif-role": "image-reader",
             "oberth.ci/step-usage-memory-warning": "usage instrumentation disabled: memory limit unspecified is below the explicit 256Mi instrumentation floor; usage remains unknown; resources are unchanged",
             "oberth.ci/workspace-env": "none",
@@ -125,7 +125,7 @@
               "sources": [
                 {
                   "serviceAccountToken": {
-                    "audience": "https://iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/oberth-release-reader/providers/tuxbox",
+                    "audience": "https://iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/oberth-release-reader/providers/example-node",
                     "expirationSeconds": 600,
                     "path": "token"
                   }

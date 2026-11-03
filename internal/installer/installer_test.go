@@ -1331,8 +1331,6 @@ func TestOberthHelmArgs(t *testing.T) {
 				"--set", "argo.goProxy.port=8444",
 				// Promotion grant lifetime (#826).
 				"--set", "promotion.grantMaxLifetime=24h",
-				"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
-				"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
 				"--set", "secretstore.enabled=true",
 				"--set", "secretstore.address=https://openbao.openbao.svc:8200",
 				"--set", "secretstore.role=oberth-ci",
@@ -1353,8 +1351,6 @@ func TestOberthHelmArgs(t *testing.T) {
 				"--set", "argo.goProxy.port=8444",
 				// Promotion grant lifetime (#826).
 				"--set", "promotion.grantMaxLifetime=24h",
-				"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
-				"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
 				"--set", "secretstore.enabled=true",
 				"--set", "secretstore.address=http://openbao.openbao.svc:8200",
 				"--set", "secretstore.role=oberth-ci",
@@ -1523,8 +1519,6 @@ func TestOberthHelmArgsWithoutSecretStore(t *testing.T) {
 		"--set", "argo.goProxy.port=8444",
 		// Promotion grant lifetime (#826).
 		"--set", "promotion.grantMaxLifetime=24h",
-		"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
-		"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
 		"--version", "0.10.54",
 		"--reuse-values",
 	}
@@ -1553,8 +1547,6 @@ func TestOberthHelmArgsWithRekor(t *testing.T) {
 		"--set", "argo.goProxy.port=8444",
 		// Promotion grant lifetime (#826).
 		"--set", "promotion.grantMaxLifetime=24h",
-		"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
-		"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
 		"--set", "auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",
 		"--set", "auditAnchor.rekorInsecureHTTP=true",
 		"--set-string", "auditAnchor.rekorPublicKey=" + publicKeyPEM,
@@ -1842,7 +1834,7 @@ func TestDryRunPlainPlanOmitsOptionalPhases(t *testing.T) {
 	// A non-kind engine keeps the plain plan free of the kind-only image
 	// preparation phase, so Oberth installation is genuinely the first step.
 	node := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{Name: "tuxbox"},
+		ObjectMeta: metav1.ObjectMeta{Name: "example-node"},
 		Status:     corev1.NodeStatus{NodeInfo: corev1.NodeSystemInfo{KubeletVersion: "v1.31.4+k3s1"}},
 	}
 	deps := Deps{
@@ -2488,8 +2480,6 @@ func TestInstallOberthReconcilesRekorAtInstalledVersion(t *testing.T) {
 				"--set", "argo.goProxy.port=8444",
 				// Promotion grant lifetime (#826).
 				"--set", "promotion.grantMaxLifetime=24h",
-				"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
-				"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
 				"--set", "auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",
 				"--set", "auditAnchor.rekorInsecureHTTP=true",
 				"--set-string", "auditAnchor.rekorPublicKey=" + publicKeyPEM,
@@ -2647,8 +2637,6 @@ func TestInstallOberthRekorUpgradeAllowsUnknownInstalledVersion(t *testing.T) {
 		"--set", "argo.goProxy.port=8444",
 		// Promotion grant lifetime (#826).
 		"--set", "promotion.grantMaxLifetime=24h",
-		"--set-string", "watchTunnel.image=" + watchTunnelImageDefault,
-		"--set-string", "watchTunnel.openbaoImage=" + watchTunnelOpenbaoImageDefault,
 		"--set", "auditAnchor.rekorURL=http://rekor-server.rekor.svc:80",
 		"--set", "auditAnchor.rekorInsecureHTTP=true",
 		"--set-string", "auditAnchor.rekorPublicKey=" + publicKeyPEM,
@@ -4669,7 +4657,7 @@ func TestCredentialedPolicyPathsAcceptsUpstreamPrefix(t *testing.T) {
 	t.Parallel()
 	paths, err := credentialedPolicyPaths("oberth", []string{
 		"oberth/upstream/acme/terraform/credentials",
-		"oberth/upstream/skipops/terraform/plan/gcp-sa",
+		"oberth/upstream/acme/terraform/plan/gcp-sa",
 		"oberth/data/release/cosign-secret",
 	})
 	if err != nil {
@@ -4677,7 +4665,7 @@ func TestCredentialedPolicyPathsAcceptsUpstreamPrefix(t *testing.T) {
 	}
 	want := []string{
 		"upstream/acme/terraform/credentials",
-		"upstream/skipops/terraform/plan/gcp-sa",
+		"upstream/acme/terraform/plan/gcp-sa",
 		"release/cosign-secret",
 	}
 	if len(paths) != len(want) {
@@ -4831,7 +4819,7 @@ func TestValidateExistingKindClusterRejectsMixedBindings(t *testing.T) {
 func TestK3sAutoNetworkPolicySetsFlag(t *testing.T) {
 	t.Parallel()
 	node := &corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{Name: "tuxbox"},
+		ObjectMeta: metav1.ObjectMeta{Name: "example-node"},
 		Status: corev1.NodeStatus{
 			NodeInfo: corev1.NodeSystemInfo{KubeletVersion: "v1.31.4+k3s1"},
 		},
@@ -4877,21 +4865,21 @@ func TestCredentialedPolicyWithNoGrantsMatchesBasePolicy(t *testing.T) {
 // upstream orgs produce separate per-org path rules, sorted and deduplicated.
 func TestCISecretsPolicyEnumeratesMultipleOrgs(t *testing.T) {
 	t.Parallel()
-	policy := OberthCISecretsPolicy("oberth", []string{"skipops", "oberthci", "oberthci"})
+	policy := OberthCISecretsPolicy("oberth", []string{"acme", "oberthci", "oberthci"})
 	if !strings.Contains(policy, `path "oberth/data/upstream/oberthci/*"`) {
 		t.Fatal("policy missing oberthci org rule")
 	}
-	if !strings.Contains(policy, `path "oberth/data/upstream/skipops/*"`) {
-		t.Fatal("policy missing skipops org rule")
+	if !strings.Contains(policy, `path "oberth/data/upstream/acme/*"`) {
+		t.Fatal("policy missing acme org rule")
 	}
 	if strings.Contains(policy, `path "oberth/data/upstream/*"`) {
 		t.Fatal("policy still uses static upstream/* wildcard")
 	}
-	// oberthci appears before skipops (sorted)
+	// acme appears before oberthci (sorted)
 	oberthciIdx := strings.Index(policy, "oberthci")
-	skipopsIdx := strings.Index(policy, "skipops")
-	if oberthciIdx > skipopsIdx {
-		t.Fatal("org rules are not sorted: oberthci should appear before skipops")
+	acmeIdx := strings.Index(policy, "acme")
+	if acmeIdx > oberthciIdx {
+		t.Fatal("org rules are not sorted: acme should appear before oberthci")
 	}
 	// Deduplicated: oberthci appears exactly once in path rules
 	if count := strings.Count(policy, `upstream/oberthci/*"`); count != 1 {
@@ -4931,14 +4919,14 @@ func TestCredentialedPolicyEmptyOrgsFailsClosed(t *testing.T) {
 // rules and exact grant paths coexist in the credentialed policy.
 func TestCredentialedPolicyWithOrgsAndGrants(t *testing.T) {
 	t.Parallel()
-	policy := OberthCredentialedPolicyWithGrants("oberth", []string{"oberthci", "skipops"}, []string{
+	policy := OberthCredentialedPolicyWithGrants("oberth", []string{"oberthci", "acme"}, []string{
 		"release/cosign-secret",
 	})
 	if !strings.Contains(policy, `upstream/oberthci/*`) {
 		t.Fatal("missing oberthci org rule")
 	}
-	if !strings.Contains(policy, `upstream/skipops/*`) {
-		t.Fatal("missing skipops org rule")
+	if !strings.Contains(policy, `upstream/acme/*`) {
+		t.Fatal("missing acme org rule")
 	}
 	if !strings.Contains(policy, `oberth/data/release/cosign-secret`) {
 		t.Fatal("missing grant path")
@@ -4955,15 +4943,15 @@ func TestUpstreamOrgsFromIdentities(t *testing.T) {
 	ids := []PerRepoIdentity{
 		{Upstream: "codeberg", Org: "oberthci", Repo: "oberth"},
 		{Upstream: "codeberg", Org: "oberthci", Repo: "acme-operator"},
-		{Upstream: "github", Org: "skipops", Repo: "terraform"},
+		{Upstream: "github", Org: "acme", Repo: "terraform"},
 		{Upstream: "local", Org: "", Repo: "empty-org"},
 	}
 	orgs := upstreamOrgsFromIdentities(ids)
 	if len(orgs) != 2 {
 		t.Fatalf("expected 2 unique orgs, got %d: %v", len(orgs), orgs)
 	}
-	if orgs[0] != "oberthci" || orgs[1] != "skipops" {
-		t.Fatalf("expected [oberthci skipops], got %v", orgs)
+	if orgs[0] != "acme" || orgs[1] != "oberthci" {
+		t.Fatalf("expected [acme oberthci], got %v", orgs)
 	}
 }
 

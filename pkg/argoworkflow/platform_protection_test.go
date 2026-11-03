@@ -12,7 +12,7 @@ import (
 func TestPlatformPriorityClassesCannotBeSelectedByCI(t *testing.T) {
 	mustAdmit(t, admissibleDocument, Policy{})
 	refuse(t, strings.Replace(admissibleDocument, "  entrypoint: main\n", "  entrypoint: main\n  priority: 1000000\n", 1), Policy{}, "spec.priority")
-	for _, component := range []string{"oberth", "cloudflared", "argo-controller", "openbao"} {
+	for _, component := range []string{"oberth", "argo-controller", "openbao"} {
 		class := "oberth-oberth-platform-" + component
 		t.Run(component, func(t *testing.T) {
 			t.Run("workflow", func(t *testing.T) {

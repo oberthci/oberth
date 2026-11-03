@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	BeaconTransportProfile = "beacon-transport-amd64-v2"
-	BeaconArtifact         = "bin/beacon"
+	BeaconTransportProfile = "example-service-transport-amd64-v2"
+	BeaconArtifact         = "bin/example-service"
 	MaxBeaconArtifactBytes = 64 << 20
 )
 
@@ -68,7 +68,7 @@ func ValidatePilotPlan(plan PilotPlan) error {
 		return errors.New("vmrunner: pilot artifact exceeds its byte bound")
 	}
 	if plan.Spec.Resources != (VMResources{CPUCores: 1, MemoryMiB: 512}) || plan.Spec.Deadline > 10*time.Minute {
-		return errors.New("vmrunner: Beacon pilot requires one CPU, 512MiB RAM root and at most ten minutes")
+		return errors.New("vmrunner: example-service pilot requires one CPU, 512MiB RAM root and at most ten minutes")
 	}
 	for _, namespace := range []string{plan.GuestNamespace, plan.ConductorNamespace, plan.ServerNamespace} {
 		if len(validation.IsDNS1123Label(namespace)) != 0 {

@@ -21,7 +21,7 @@ const (
 	fakeBearer = "oberth_fake_bearer_value_0000"
 )
 
-// keyPendingInstall plays the tuxbox run of #002: everything up, the uplink
+// keyPendingInstall plays the example-node run of #002: everything up, the uplink
 // minted, the forge has not accepted the generated upstream key.
 func keyPendingInstall(_ int, deps installer.InstallDeps) error {
 	credential := func(label, value string) {
@@ -74,7 +74,7 @@ func TestFirstRunEndToEnd(t *testing.T) {
 		cfg.SSHPublicKeyPath != host.pubKey || !cfg.InstallSecretStore || !cfg.Yes || cfg.CreateKind {
 		t.Fatalf("installer config not wired from the answers: %+v", cfg)
 	}
-	if strings.Join(cfg.TLSExtraIPs, ",") != "192.168.86.193" || strings.Join(cfg.TLSExtraDNSNames, ",") != "tuxbox" {
+	if strings.Join(cfg.TLSExtraIPs, ",") != "192.168.86.193" || strings.Join(cfg.TLSExtraDNSNames, ",") != "example-node" {
 		t.Fatalf("TLS names must default to the probed node: %v %v", cfg.TLSExtraDNSNames, cfg.TLSExtraIPs)
 	}
 
@@ -684,7 +684,7 @@ func TestBuildCommandLineYesRequiresConfirmedRemote(t *testing.T) {
 	if strings.Contains(BuildCommandLine(state), "--yes") {
 		t.Fatal("--yes must not be recommended when the cluster probe failed")
 	}
-	state.ClusterInfo = clusterInfoMsg{context: "k3s-tuxbox", isLocal: true}
+	state.ClusterInfo = clusterInfoMsg{context: "k3s-example-node", isLocal: true}
 	if strings.Contains(BuildCommandLine(state), "--yes") {
 		t.Fatal("--yes must not be recommended for a local cluster")
 	}

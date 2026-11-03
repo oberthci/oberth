@@ -76,15 +76,15 @@ func TestClientHostOverridesTheAPIServerHost(t *testing.T) {
 func TestAlsoUpstreamNameAvoidsNamesAndOrganizations(t *testing.T) {
 	t.Parallel()
 	used := map[string]bool{"codeberg": true}
-	orgs := map[string]bool{"exampleorg": true, "skipops": true}
+	orgs := map[string]bool{"exampleorg": true, "acme": true}
 	if got := alsoUpstreamName("ssh://git@github.com/oberthci", used, orgs); got != "github" {
 		t.Errorf("got %q, want github", got)
 	}
-	if got := alsoUpstreamName("ssh://git@codeberg.org/skipops", used, orgs); got != "codeberg-skipops" {
-		t.Errorf("got %q, want codeberg-skipops", got)
+	if got := alsoUpstreamName("ssh://git@codeberg.org/acme", used, orgs); got != "codeberg-acme" {
+		t.Errorf("got %q, want codeberg-acme", got)
 	}
-	used["codeberg-skipops"] = true
-	if got := alsoUpstreamName("ssh://git@codeberg.org/skipops", used, orgs); got != "codeberg-2" {
+	used["codeberg-acme"] = true
+	if got := alsoUpstreamName("ssh://git@codeberg.org/acme", used, orgs); got != "codeberg-2" {
 		t.Errorf("got %q, want codeberg-2", got)
 	}
 }
@@ -133,12 +133,12 @@ func TestConnectAlsoUpstreamsRegistersEachWithTheSameKey(t *testing.T) {
 	host := &fakeOberthHost{t: t}
 	var buf bytes.Buffer
 	deps := onboardingDeps(t, host, &buf, strings.NewReader(""), false)
-	cfg := Config{AlsoUpstreams: []string{"ssh://git@codeberg.org/exampleorg", "ssh://git@github.com/oberthci", "ssh://git@codeberg.org/skipops"}}
+	cfg := Config{AlsoUpstreams: []string{"ssh://git@codeberg.org/exampleorg", "ssh://git@github.com/oberthci", "ssh://git@codeberg.org/acme"}}
 	tw := newTableWriter(&buf, false)
 	got := connectAlsoUpstreams(context.Background(), cfg, deps, tw, []NextStepsUpstream{{Name: "github", BaseURL: "ssh://git@github.com/oberthci"}})
 	tw.WriteFooter()
 
-	if len(got) != 2 || got[0].Name != "codeberg" || got[1].Name != "codeberg-skipops" {
+	if len(got) != 2 || got[0].Name != "codeberg" || got[1].Name != "codeberg-acme" {
 		t.Fatalf("connected = %+v", got)
 	}
 	if len(host.addArgv) != 2 {
@@ -253,10 +253,10 @@ func TestSaveTokenFileKeepsADifferentToken(t *testing.T) {
 }
 
 func TestLocalNameWarning(t *testing.T) {
-	if w := LocalNameWarning("tuxbox.local"); !strings.Contains(w, "mDNS") || !strings.Contains(w, "LAN IP") {
+	if w := LocalNameWarning("example-node.local"); !strings.Contains(w, "mDNS") || !strings.Contains(w, "LAN IP") {
 		t.Errorf("warning %q", w)
 	}
-	for _, host := range []string{"", "localhost", "192.168.86.193", "tuxbox", "ci.example"} {
+	for _, host := range []string{"", "localhost", "192.168.86.193", "example-node", "ci.example"} {
 		if w := LocalNameWarning(host); w != "" {
 			t.Errorf("%q warned: %q", host, w)
 		}

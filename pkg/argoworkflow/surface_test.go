@@ -164,7 +164,7 @@ func surfaceRoots() map[string]surfaceRoot {
 		"Tolerations": {"node targeting is refused",
 			withSpec("  tolerations:\n    - operator: Exists\n")},
 		"NodeSelector": {"node targeting is refused",
-			withSpec("  nodeSelector:\n    kubernetes.io/hostname: tuxbox\n")},
+			withSpec("  nodeSelector:\n    kubernetes.io/hostname: example-node\n")},
 		"HostAliases": {"host aliases are refused",
 			withSpec("  hostAliases:\n    - ip: 127.0.0.1\n      hostnames: [vault]\n")},
 		"DNSConfig": {"spec.dnsConfig and spec.dnsPolicy are refused",

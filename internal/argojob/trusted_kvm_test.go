@@ -38,7 +38,7 @@ func trustedKVMRequest(t *testing.T) (Config, Request) {
 	request.UpstreamName = "codeberg"
 	digest := sha256.Sum256(request.Source)
 	now := time.Date(2026, 10, 13, 20, 0, 0, 0, time.UTC)
-	request.TrustedKVM = &vmrunner.KVMIntent{RunID: request.RunID, RepoID: 1, Repository: "codeberg/skipops/oberth", CandidateSHA: request.SHA, BaselineSHA: strings.Repeat("b", 40),
+	request.TrustedKVM = &vmrunner.KVMIntent{RunID: request.RunID, RepoID: 1, Repository: "codeberg/acme/oberth", CandidateSHA: request.SHA, BaselineSHA: strings.Repeat("b", 40),
 		Contract:  vmrunner.Contract{Version: 2, Profile: vmrunner.KVMSuiteAMD64Profile, SuiteSHA256: strings.Repeat("c", 64), GuestSHA256: strings.Repeat("d", 64), Artifacts: []string{"program"}},
 		Recipe:    vmrunner.KVMRecipe{SuiteSHA256: strings.Repeat("c", 64), GuestSHA256: strings.Repeat("d", 64), HarnessImage: "registry.example/harness@sha256:" + strings.Repeat("e", 64), SuiteURL: "https://example.org/suite", GuestURL: "https://example.org/guest"},
 		Namespace: config.Namespace, WorkflowName: request.Name, WorkflowSpecDigest: hex.EncodeToString(digest[:]), InventoryDigest: strings.Repeat("f", 64), CaseCount: 2, AdmittedAt: now, Deadline: now.Add(time.Minute)}
@@ -581,7 +581,7 @@ func TestTrustedKVMProducerSelectionStillAdmitsTheWholeBlueprint(t *testing.T) {
 
 func TestTrustedKVMRequestCanonicalRepositoryKey(t *testing.T) {
 	for _, tc := range []struct{ org, want string }{
-		{"skipops", "codeberg/skipops/oberth"}, {"", "codeberg/codeberg/oberth"},
+		{"acme", "codeberg/acme/oberth"}, {"", "codeberg/codeberg/oberth"},
 	} {
 		t.Run(tc.want, func(t *testing.T) {
 			config, request := trustedKVMRequest(t)

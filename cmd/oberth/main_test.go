@@ -219,7 +219,7 @@ func TestAdministrativeBootstrapRegistersUpstreamAndBoundToken(t *testing.T) {
 	var uplinkOutput bytes.Buffer
 	if err := runUplinkWithDependencies(ctx, []string{
 		"add", "--database", databasePath, "--tls-cert", certificatePath,
-		publicKeyPath, "codex@tuxbox",
+		publicKeyPath, "codex@example-node",
 	}, strings.NewReader(""), &uplinkOutput, uplinkDependencies{mutationGate: allowTestMutation}); err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestAdministrativeBootstrapRegistersUpstreamAndBoundToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if authenticated.Identity != "codex@tuxbox" || authenticated.Fingerprint != ssh.FingerprintSHA256(sshKey) {
+	if authenticated.Identity != "codex@example-node" || authenticated.Fingerprint != ssh.FingerprintSHA256(sshKey) {
 		t.Fatalf("authenticated = %+v", authenticated)
 	}
 }

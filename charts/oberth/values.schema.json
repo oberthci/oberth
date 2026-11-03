@@ -454,58 +454,7 @@
     "resources": {
       "$ref": "#/definitions/resources"
     },
-    "watchTunnel": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "originCACert": {
-          "type": "string",
-          "maxLength": 65536,
-          "description": "Public PEM CA for the HTTPS Oberth origin; empty uses public trust."
-        },
-        "enabled": {
-          "type": "boolean"
-        },
-        "image": {
-          "type": "string",
-          "minLength": 1
-        },
-        "openbaoImage": {
-          "type": "string",
-          "minLength": 1
-        },
-        "openbao": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "address": {
-              "type": "string",
-              "minLength": 1
-            },
-            "authMount": {
-              "type": "string",
-              "minLength": 1
-            },
-            "role": {
-              "type": "string",
-              "minLength": 1
-            },
-            "secretMount": {
-              "type": "string",
-              "minLength": 1
-            },
-            "secretPath": {
-              "type": "string",
-              "minLength": 1
-            },
-            "secretField": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        }
-      }
-    },
+    "watchTunnel": {"description": "Retired compatibility key. Ignored; connectors are managed outside Oberth."},
     "podAnnotations": {
       "type": "object",
       "additionalProperties": {

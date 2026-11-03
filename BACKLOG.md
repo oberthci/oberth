@@ -112,7 +112,7 @@ reframed for the Argo execution engine where they still apply:
 ## Distribution and adoption (OBERTH-RELEASE wave, updated 2026-08-09)
 
 Residuals from the OBERTH-RELEASE wave; full specifications live in the
-workspace issue files `issues/OBERTH-RELEASE-*.md`. Landed in v0.10.55:
+the release design. Landed in v0.10.55:
 `oberth init` (004), `oberth install` dev-evaluation core (005), the
 `oberthci/homebrew-tap` distribution point (002/013), and the clean-break
 Test/Build/Done rename (015). Landed in v0.10.56: multi-arch OCI release
@@ -162,6 +162,6 @@ single-upstream-only by design).
   reserve), size-mapped Job resources, per-step peak-RSS/CPU capture from
   wait4 rusage, measured-vs-declared divergence reporting, and
   `oberth suggest-sizes`. Full design:
-  `00_Architecture/oberth/ci-robustness-design.md`. Phase 1 alone is 5–7
+  the CI robustness design. Phase 1 alone is 5–7
   days; never preempt-kill or cgroup-freeze running steps, no parallel
   steps within a burn, no auto-retry.

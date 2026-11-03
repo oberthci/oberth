@@ -23,7 +23,7 @@ func ValidatePilotEndpoint(endpoint PilotEndpoint) error {
 	if err != nil || address.Port() == 0 || address.Addr().IsUnspecified() || address.Addr().IsMulticast() || address.Addr().Zone() != "" || address.String() != endpoint.Address {
 		return errors.New("vmrunner: invalid pilot endpoint")
 	}
-	if (endpoint.Attempt != InitialVMResource && endpoint.Attempt != RestartVMResource) || !boundedPilotID(endpoint.VMIUID) || !boundedPilotID(endpoint.LauncherUID) || endpoint.ServerName != "beacon.fixture" || !hexDigest(endpoint.CertificateSHA256) || !hexDigest(endpoint.FixtureGeneration) {
+	if (endpoint.Attempt != InitialVMResource && endpoint.Attempt != RestartVMResource) || !boundedPilotID(endpoint.VMIUID) || !boundedPilotID(endpoint.LauncherUID) || endpoint.ServerName != "example-service.fixture" || !hexDigest(endpoint.CertificateSHA256) || !hexDigest(endpoint.FixtureGeneration) {
 		return errors.New("vmrunner: incomplete pilot endpoint binding")
 	}
 	return nil
@@ -61,7 +61,7 @@ type PilotRestart struct {
 func PilotRestartIdentity(request PilotRestartRequest) string { return canonicalIdentity(request) }
 
 func ValidatePilotRestartRequest(plan PilotPlan, attempt ConductorAttempt, request PilotRestartRequest) error {
-	if request.Version != 1 || request.Type != "restart-beacon" || request.Execution != PilotIdentity(plan) || request.Attempt != ConductorAttemptIdentity(attempt) || request.Inventory != PilotInventoryIdentity(plan) || request.Sequence != 1 || request.Case != "restart-fresh-relay" || request.Old.Attempt != InitialVMResource {
+	if request.Version != 1 || request.Type != "restart-example-service" || request.Execution != PilotIdentity(plan) || request.Attempt != ConductorAttemptIdentity(attempt) || request.Inventory != PilotInventoryIdentity(plan) || request.Sequence != 1 || request.Case != "restart-fresh-relay" || request.Old.Attempt != InitialVMResource {
 		return errors.New("vmrunner: unbound restart operation")
 	}
 	return ValidatePilotEndpoint(request.Old)

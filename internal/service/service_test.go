@@ -26,7 +26,7 @@ func (stub stubUplinkAuthenticator) Authenticate(context.Context, string) (model
 
 func TestAuthenticatorAdapterReturnsBoundUplinkActor(t *testing.T) {
 	authenticator, err := NewAuthenticator(stubUplinkAuthenticator{value: model.AuthenticatedUplink{
-		Uplink: model.Uplink{Identity: "agent@tuxbox", Fingerprint: "SHA256:bound"},
+		Uplink: model.Uplink{Identity: "agent@example-node", Fingerprint: "SHA256:bound"},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -35,7 +35,7 @@ func TestAuthenticatorAdapterReturnsBoundUplinkActor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(actor, api.Actor{Identity: "agent@tuxbox", Fingerprint: "SHA256:bound"}) {
+	if !reflect.DeepEqual(actor, api.Actor{Identity: "agent@example-node", Fingerprint: "SHA256:bound"}) {
 		t.Fatalf("actor = %#v", actor)
 	}
 }
@@ -154,7 +154,7 @@ func TestLightweightTagIsRejectedAtReleaseAdmission(t *testing.T) {
 	}
 	result, err := ingestor.Tag(context.Background(), TagPush{
 		EventID: "receive-lw", Repository: "oberth", Tag: "v9.0.0",
-		NewOID: commit, Actor: "agent@tuxbox", ReleaseAdmissionSHA: admissionSHA,
+		NewOID: commit, Actor: "agent@example-node", ReleaseAdmissionSHA: admissionSHA,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -180,7 +180,7 @@ func TestTagAdmissionRequiresFreshDefaultBranchReachability(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	unreachable, err := ingestor.Tag(context.Background(), TagPush{EventID: "receive-1", Repository: "oberth", Tag: "v1.2.3", NewOID: tagOID, Actor: "agent@tuxbox", ReleaseAdmissionSHA: admissionSHA})
+	unreachable, err := ingestor.Tag(context.Background(), TagPush{EventID: "receive-1", Repository: "oberth", Tag: "v1.2.3", NewOID: tagOID, Actor: "agent@example-node", ReleaseAdmissionSHA: admissionSHA})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestTagAdmissionRequiresFreshDefaultBranchReachability(t *testing.T) {
 	}
 
 	git.reachable = true
-	reachable, err := ingestor.Tag(context.Background(), TagPush{EventID: "receive-2", Repository: "oberth", Tag: "v1.2.3", NewOID: tagOID, Actor: "agent@tuxbox", ReleaseAdmissionSHA: admissionSHA})
+	reachable, err := ingestor.Tag(context.Background(), TagPush{EventID: "receive-2", Repository: "oberth", Tag: "v1.2.3", NewOID: tagOID, Actor: "agent@example-node", ReleaseAdmissionSHA: admissionSHA})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestTagAdmissionRequiresFreshDefaultBranchReachability(t *testing.T) {
 
 	git.remoteExists, git.remoteSHA = true, tagOID
 	alreadyDelivered, err := ingestor.Tag(context.Background(), TagPush{
-		EventID: "receive-3", Repository: "oberth", Tag: "v1.2.3", NewOID: tagOID, Actor: "agent@tuxbox", ReleaseAdmissionSHA: admissionSHA,
+		EventID: "receive-3", Repository: "oberth", Tag: "v1.2.3", NewOID: tagOID, Actor: "agent@example-node", ReleaseAdmissionSHA: admissionSHA,
 	})
 	if err != nil || alreadyDelivered.Admitted || len(releases.requests) != 1 ||
 		!strings.Contains(alreadyDelivered.Reason, "already delivered") {
@@ -207,7 +207,7 @@ func TestTagAdmissionRequiresFreshDefaultBranchReachability(t *testing.T) {
 	}
 	git.remoteSHA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	conflict, err := ingestor.Tag(context.Background(), TagPush{
-		EventID: "receive-4", Repository: "oberth", Tag: "v1.2.3", NewOID: tagOID, Actor: "agent@tuxbox", ReleaseAdmissionSHA: admissionSHA,
+		EventID: "receive-4", Repository: "oberth", Tag: "v1.2.3", NewOID: tagOID, Actor: "agent@example-node", ReleaseAdmissionSHA: admissionSHA,
 	})
 	if err != nil || conflict.Admitted || len(releases.requests) != 1 ||
 		!strings.Contains(conflict.Reason, "different object") {
@@ -244,7 +244,7 @@ func TestDirectDefaultBranchReceiveUsesOrdinaryCIAdmission(t *testing.T) {
 	}
 	result, err := ingestor.Branch(context.Background(), BranchPush{
 		EventID: "receive-main", Repository: "oberth", Branch: "main",
-		OldOID: commit, NewOID: commit, Actor: "agent@tuxbox",
+		OldOID: commit, NewOID: commit, Actor: "agent@example-node",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -291,7 +291,7 @@ func TestWaitReturnsCleanTimeoutWithoutPolling(t *testing.T) {
 		t.Fatal(err)
 	}
 	started := time.Now()
-	value, err := service.CallTool(context.Background(), api.Actor{Identity: "agent@tuxbox"}, "wait", json.RawMessage(`{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`))
+	value, err := service.CallTool(context.Background(), api.Actor{Identity: "agent@example-node"}, "wait", json.RawMessage(`{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`))
 	if err != nil {
 		t.Fatal(err)
 	}

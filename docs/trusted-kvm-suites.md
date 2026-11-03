@@ -224,7 +224,7 @@ from `kvm-harness-image.txt`), not a tag or index digest.
 `prepare_kvm_registry_auth()` delegates to the shared `prepare_registry_auth`
 path, which installs the public Docker credential-helper mapping. The helper
 uses the `oberth-release-images` audience under project `138624361369`, provider
-`tuxbox`, and the release-only projected token. It exchanges through STS and
+`example-node`, and the release-only projected token. It exchanges through STS and
 the installation-configured `<release-publisher>` source account to the fixed
 `oberth-release-publisher@skipopsmain.iam.gserviceaccount.com` target, using
 600-second IAM tokens and the existing scoped delegation. Only the final token

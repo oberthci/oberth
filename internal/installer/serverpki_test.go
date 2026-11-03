@@ -46,7 +46,7 @@ func TestServerCACoversItsDNSNames(t *testing.T) {
 	if !serverCACovers(ca, []string{"oberth", "localhost"}) {
 		t.Fatal("CA must cover the names it was issued for")
 	}
-	if serverCACovers(ca, []string{"oberth", "tuxbox"}) {
+	if serverCACovers(ca, []string{"oberth", "example-node"}) {
 		t.Fatal("a new DNS name must require a new CA")
 	}
 	ca.PermittedIPRanges = []*net.IPNet{{IP: net.ParseIP("127.0.0.1").To4(), Mask: net.CIDRMask(32, 32)}}

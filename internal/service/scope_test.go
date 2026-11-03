@@ -61,7 +61,7 @@ func (stub *scopedHealthStub) ScopedStatus(_ context.Context, actor api.Actor) (
 var (
 	scopedActor   = api.Actor{Identity: "laptop@work", Fingerprint: "SHA256:laptop", Scope: []string{"github"}}
 	scopedAdmin   = api.Actor{Identity: "laptop-admin@work", Fingerprint: "SHA256:admin", Admin: true, Scope: []string{"github"}}
-	unscopedActor = api.Actor{Identity: "owner@tuxbox", Fingerprint: "SHA256:owner", Admin: true}
+	unscopedActor = api.Actor{Identity: "owner@example-node", Fingerprint: "SHA256:owner", Admin: true}
 )
 
 func sha(seed string) string { return strings.Repeat(seed, 40)[:40] }
@@ -100,7 +100,7 @@ func newScopeFixture(t *testing.T) *scopeFixture {
 		for index := range setup.runs {
 			enqueued, err := database.EnqueueRun(ctx, model.RunSpec{RepoID: setup.repo.ID, RefKind: model.RefBranch,
 				Ref: fmt.Sprintf("feature/%s-%d", upstream, index), SHA: sha(fmt.Sprintf("%c%d", setup.seeds[0], index)),
-				Actor: "owner@tuxbox", Trigger: "push"})
+				Actor: "owner@example-node", Trigger: "push"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -109,26 +109,26 @@ func newScopeFixture(t *testing.T) *scopeFixture {
 				t.Fatal(err)
 			}
 			fixture.runs[upstream] = append(fixture.runs[upstream], run)
-			issue, err := database.UpsertCIIssue(ctx, "owner@tuxbox", setup.repo.ID, run.Ref, "red "+upstream+" "+hiddenIssueText[:0]+run.Ref, "body")
+			issue, err := database.UpsertCIIssue(ctx, "owner@example-node", setup.repo.ID, run.Ref, "red "+upstream+" "+hiddenIssueText[:0]+run.Ref, "body")
 			if err != nil {
 				t.Fatal(err)
 			}
 			fixture.issues[upstream] = append(fixture.issues[upstream], issue)
 		}
-		manual, err := database.CreateManualIssue(ctx, "owner@tuxbox", model.ManualIssueSpec{
+		manual, err := database.CreateManualIssue(ctx, "owner@example-node", model.ManualIssueSpec{
 			Title: "manual " + upstream, Body: "filed under " + upstream, ScopeUpstreamID: setup.repo.UpstreamID})
 		if err != nil {
 			t.Fatal(err)
 		}
 		fixture.issues[upstream] = append(fixture.issues[upstream], manual)
 		promotion, err := database.AppendPromotion(ctx, model.PromotionSpec{RepoID: setup.repo.ID, SourceBranch: "feature/x",
-			SourceSHA: fixture.runs[upstream][0].SHA, TargetRef: "main", Actor: "owner@tuxbox"})
+			SourceSHA: fixture.runs[upstream][0].SHA, TargetRef: "main", Actor: "owner@example-node"})
 		if err != nil {
 			t.Fatal(err)
 		}
 		fixture.promoted[upstream] = promotion
 		grant, err := database.AppendPromotionGrant(ctx, model.PromotionGrantSpec{RepoID: setup.repo.ID,
-			SourceSHA: fixture.runs[upstream][1].SHA, TargetRef: "main", Issuer: "owner@tuxbox",
+			SourceSHA: fixture.runs[upstream][1].SHA, TargetRef: "main", Issuer: "owner@example-node",
 			IssuerFingerprint: "SHA256:owner", ExpiresAt: time.Now().Add(time.Hour)})
 		if err != nil {
 			t.Fatal(err)
@@ -138,7 +138,7 @@ func newScopeFixture(t *testing.T) *scopeFixture {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := database.Grant(ctx, qualified, "release", "oberth/data/"+upstream+"/token", "owner@tuxbox"); err != nil {
+		if _, err := database.Grant(ctx, qualified, "release", "oberth/data/"+upstream+"/token", "owner@example-node"); err != nil {
 			t.Fatal(err)
 		}
 		if err := database.RecordGrantDeclarations(ctx, qualified, setup.repo.Name+"-sha", []store.GrantDeclaration{{Step: "deploy", Path: "oberth/data/" + upstream + "/pending"}}); err != nil {
@@ -152,11 +152,11 @@ func newScopeFixture(t *testing.T) *scopeFixture {
 		t.Fatal(err)
 	}
 	// The secret upstream's manual issue body names the confidential project.
-	if _, err := database.CreateManualIssue(ctx, "owner@tuxbox", model.ManualIssueSpec{
+	if _, err := database.CreateManualIssue(ctx, "owner@example-node", model.ManualIssueSpec{
 		Title: hiddenIssueText, Body: hiddenIssueText, ScopeUpstreamID: fixture.codeberg.ID}); err != nil {
 		t.Fatal(err)
 	}
-	if fixture.global, err = database.CreateManualIssue(ctx, "owner@tuxbox", model.ManualIssueSpec{Title: "global " + hiddenIssueText, Body: "no upstream"}); err != nil {
+	if fixture.global, err = database.CreateManualIssue(ctx, "owner@example-node", model.ManualIssueSpec{Title: "global " + hiddenIssueText, Body: "no upstream"}); err != nil {
 		t.Fatal(err)
 	}
 	logs, err := runlog.Open(filepath.Join(root, "logs"))

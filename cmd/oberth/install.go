@@ -40,8 +40,6 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 	flags.BoolVar(&cfg.Upgrade, "upgrade", false,
 		"force helm upgrade of existing releases even when already up to date "+
 			"(re-runs auto-upgrade when a newer chart is targeted; this flag forces reconciliation)")
-	flags.StringVar(&cfg.WatchAdoptionPlan, "watch-tunnel-adoption-plan", "",
-		"reviewed public plan for UID/resourceVersion-bound adoption of the four watch connector objects; requires --upgrade --skip-argo-workflows")
 	flags.BoolVar(&cfg.InstallSecretStore, "install-secretstore", false,
 		"also install a production-mode OpenBao (persistent storage; verified TLS bootstrapped directly on its PVC; initialized and unsealed via kubectl exec, "+
 			"root token and unseal key printed once) and configure it as Oberth's release secret store")
@@ -125,7 +123,7 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 
 	cfg.Timeout = *timeout
 	cfg.BinaryVersion = version
-	cfg.SecretStoreUndecided = !cfg.InstallSecretStore && !cfg.InstallSecretStoreDev && cfg.WatchAdoptionPlan == ""
+	cfg.SecretStoreUndecided = !cfg.InstallSecretStore && !cfg.InstallSecretStoreDev
 	cfg.CredentialedSecretPaths = credentialedSecretPaths
 	cfg.TLSExtraDNSNames = tlsExtraDNSNames
 	cfg.TLSExtraIPs = tlsExtraIPs

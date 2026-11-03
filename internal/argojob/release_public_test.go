@@ -10,7 +10,7 @@ import (
 
 func TestCloudflarePublicationPhasesAreClosedAndOrdered(t *testing.T) {
 	workflow := builtOberthRelease(t)
-	leaf := releaseTemplate(t, workflow, "release-website")
+	leaf := releaseTemplate(t, workflow, "release-public-artifacts")
 	if len(leaf.Inputs.Parameters) != 1 || leaf.Inputs.Parameters[0].Name != "phase" {
 		t.Fatal("Cloudflare leaf must accept only one fixed phase parameter")
 	}
@@ -18,16 +18,15 @@ func TestCloudflarePublicationPhasesAreClosedAndOrdered(t *testing.T) {
 	for _, value := range leaf.Inputs.Parameters[0].Enum {
 		phases = append(phases, value.String())
 	}
-	if !reflect.DeepEqual(phases, []string{"publish-public", "finalize", "publish-website"}) {
+	if !reflect.DeepEqual(phases, []string{"publish-public", "finalize"}) {
 		t.Fatalf("unexpected Cloudflare phases: %v", phases)
 	}
 	want := map[string]struct{ phase, dependency string }{
 		"release-publish-public": {"publish-public", "release-publish-chart"},
 		"release-finalize":       {"finalize", "release-runtime"},
-		"release-website":        {"publish-website", "release-finalize"},
 	}
 	for _, task := range releaseTemplate(t, workflow, "release").DAG.Tasks {
-		if task.Template != "release-website" {
+		if task.Template != "release-public-artifacts" {
 			continue
 		}
 		expected, found := want[task.Name]

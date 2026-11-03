@@ -27,13 +27,13 @@ import (
 // chain. Each one verifies its executables in an init container before the
 // secretstore in its main container can fetch anything.
 var oberthReleaseCredentialedLeaves = []string{
+	"release-public-artifacts",
 	"release-publish-chart",
 	"release-publish-homebrew",
 	"release-publish-images",
 	"release-publish-kvm-harness",
 	"release-sign-binaries",
 	"release-verify",
-	"release-website",
 }
 
 // Setup steps that populate the trusted publisher tools. No other release
@@ -91,7 +91,7 @@ func buildOberthPipelineForIsolation(t *testing.T, trigger periapsis.Trigger, so
 	}
 	return buildOberthPipeline(config, Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
+		Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
 		Ref: ref, SHA: testSHA, Trigger: trigger,
 		Source: source, ApprovedSecrets: approved,
 		SourceVolume: SourceVolume{

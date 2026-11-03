@@ -11,7 +11,7 @@ func TestChartReleaseWIFPublicCapabilities(t *testing.T) {
 	policy := map[string]any{
 		"namespace":    "oberth-argo",
 		"roles":        map[string]any{"image-writer": map[string]string{"provider": "projects/123/locations/global/workloadIdentityPools/images/providers/issuer", "service_account": "publisher@example-project.iam.gserviceaccount.com"}},
-		"repositories": map[string]any{"github/skipops/oberth": map[string]any{"service_account_name": "oberth-per-repo", "templates": map[string]string{"release-publish-images": "image-writer"}}},
+		"repositories": map[string]any{"github/acme/oberth": map[string]any{"service_account_name": "oberth-per-repo", "templates": map[string]string{"release-publish-images": "image-writer"}}},
 	}
 	render := func(p map[string]any) (string, error) {
 		t.Helper()

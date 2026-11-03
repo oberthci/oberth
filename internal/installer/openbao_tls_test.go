@@ -84,8 +84,8 @@ func TestOpenBaoTLSBootstrapPodUsesPrecreatedPVCWithoutCredentials(t *testing.T)
 // until the install timed out.
 func TestOpenBaoDataPVCSelectsTheNodeTheBootstrapPodIsPinnedTo(t *testing.T) {
 	t.Parallel()
-	pinned := openBaoDataPVC("openbao", "tuxbox")
-	if got := pinned.Annotations[selectedNodeAnnotation]; got != "tuxbox" {
+	pinned := openBaoDataPVC("openbao", "example-node")
+	if got := pinned.Annotations[selectedNodeAnnotation]; got != "example-node" {
 		t.Fatalf("claim %s = %q, want the pinned node; a WaitForFirstConsumer class never provisions it",
 			selectedNodeAnnotation, got)
 	}

@@ -605,7 +605,7 @@ type Request struct {
 	// ApprovedSecrets is the set of secret paths this repository has active
 	// approval-table grants for. Build checks each declared path against
 	// this set. The map key is the full declared path (e.g.
-	// "oberth/upstream/skipops/oberth/test-secret"). Pre-loaded by the
+	// "oberth/upstream/acme/oberth/test-secret"). Pre-loaded by the
 	// caller via store.ActiveSecretGrants before calling Build.
 	//
 	// Must be non-nil. An empty map means no grants; a nil map is a

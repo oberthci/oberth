@@ -15,7 +15,6 @@ import (
  "github.com/argoproj/argo-workflows/v4/util/logging"
 )
 
-var oberthWIFCapture func(*corev1.Pod)
 
 func TestOberthWIFControllerCapture(t *testing.T) {
  dir:=os.Getenv("OBERTH_WIF_PROOF_DIR");require.NotEmpty(t,dir)

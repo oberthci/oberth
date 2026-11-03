@@ -72,6 +72,17 @@ class NameCheckTests(unittest.TestCase):
             self.assertIn(b'dubious ownership', refused.stderr)
             self.assertEqual(gate.check(self.root), 0)
 
+    def test_instance_names_in_any_tracked_file_are_rejected(self):
+        for pieces in [('tux', 'box'), ('skip', 'ops'), ('ct', 'tv'), ('bea', 'con'),
+                       ('codex-', 'lab'), ('demo-', 'lab'), ('watch.', 'oberth.ci')]:
+            with self.subTest(pieces=pieces):
+                self.write('example.txt', ''.join(pieces).encode())
+                self.assertEqual(gate.check(self.root), 1)
+
+    def test_official_distribution_and_compatibility_keys_remain_allowed(self):
+        self.write('example.txt', b'europe-west4-docker.pkg.dev/' + b'skip' + b'opsmain/oberth/oberth')
+        self.assertEqual(gate.check(self.root), 0)
+
     def test_missing_git_metadata_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory, self.assertRaises(subprocess.CalledProcessError):
             gate.check(directory)

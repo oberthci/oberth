@@ -128,7 +128,7 @@ func TestRunsServerSideRepoFilter(t *testing.T) {
 }
 
 // A repository name shared by several upstreams ("terraform" under github,
-// codeberg and skipops) is an ambiguous selector the API refuses with 409, so
+// codeberg and acme) is an ambiguous selector the API refuses with 409, so
 // the dashboard filters runs and issues by upstream/org/name and labels a
 // shared name org/name.
 func TestDashboardQualifiesSharedRepositoryNames(t *testing.T) {

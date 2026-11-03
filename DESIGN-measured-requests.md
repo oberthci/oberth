@@ -5,12 +5,12 @@
 behaviour. Target release: v0.17.74 (schema 36). No target operations or utilisation
 change are part of this patch. The R2 protection plan pairs reduced capacity
 with protection, qualifies system-critical recovery and measures cache pressure
-before choosing thresholds/first limits. See docs/schema36-upgrade-note.md for
+before choosing thresholds/first limits. See docs/backup-restore.md for
 the required new release/rollback qualification.
 
 ## Ship order and invariant
 
-**Protect the platform first:** [platform protection plan](docs/platform-protection-plan.md)
+**Protect the platform first:** [platform protection plan](docs/backup-restore.md)
 is the first independently committed deliverable. Qualify priorities, complete
 platform requests, host reservations, a memory eviction threshold and disk/IO
 headroom before increasing CI utilisation. Stage 1 can collect at today's caps.
@@ -32,7 +32,7 @@ Collection is disabled by default. The administrator enables
 
 ```json
 {
-  "nodes": {"tuxbox": "https://node-serving-certificate-name:10250"},
+  "nodes": {"example-node": "https://node-serving-certificate-name:10250"},
   "ca_file": "/etc/oberth/resource-sampler/ca.crt",
   "token_file": "/var/run/secrets/kubernetes.io/serviceaccount/token",
   "interval": "15s"

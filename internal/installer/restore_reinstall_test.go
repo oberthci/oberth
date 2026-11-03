@@ -24,7 +24,7 @@ func reinstallFixture(t *testing.T) (string, string, *fakeBackupCluster, *fakeBa
 	source.database, source.rawFiles = archiveBytes, raw
 	source.clusterUID = "source-cluster"
 	source.values["watchTunnel"] = map[string]any{"enabled": true}
-	source.values["tls"] = map[string]any{"extraDNSNames": []any{"tuxbox", "localhost"}, "extraIPs": []any{"127.0.0.1"}}
+	source.values["tls"] = map[string]any{"extraDNSNames": []any{"example-node", "localhost"}, "extraIPs": []any{"127.0.0.1"}}
 	seedSourceOpenBao(source.bao)
 	source.bao.kv["identities/oberth/oberth-upstream-key"] = map[string]any{"id_ed25519": "source-forge-private-canary"}
 	source.bao.kv["identities/oberth/server"] = map[string]any{"ssh_host_key": "source-host-key-canary"}

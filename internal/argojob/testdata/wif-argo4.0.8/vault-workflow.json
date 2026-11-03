@@ -16,11 +16,11 @@
     "annotations": {
       "oberth.ci/declared-secret-paths": "oberth/data/release/r2-upload-token",
       "oberth.ci/ref": "refs/tags/v1.0.0",
-      "oberth.ci/release-wif-policy-sha256": "6e106f070f957c0e03a28e3b97911a47a2631f4391f2f1b7ff2903f5d4cfdf28",
+      "oberth.ci/release-wif-policy-sha256": "4332eff97f6643498bde8175258b28eec04da2c41b1b1423c4d42f05e775647f",
       "oberth.ci/run-id": "run-abc123",
       "oberth.ci/secret-paths": "oberth/data/release/r2-upload-token",
       "oberth.ci/size": "L",
-      "oberth.ci/spec-identity": "29b2828e51a40fa92ddb640a84ff56fb53ed43ca92483be67f20acee10031754",
+      "oberth.ci/spec-identity": "46e7f5e1c99e277f1641c0ddd3db1b14fe59742080286f488b7ca6729afa8d22",
       "oberth.ci/step-usage-memory-policy": "explicit-limit-256Mi-v1",
       "workflows.argoproj.io/pod-name-format": "v2"
     }
@@ -33,7 +33,7 @@
         "outputs": {},
         "metadata": {
           "annotations": {
-            "oberth.ci/release-wif-adc": "{\"audience\":\"//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/oberth-release-images/providers/tuxbox\",\"credential_source\":{\"file\":\"/run/oberth-gar/token\"},\"service_account_impersonation_url\":\"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/image-writer@example-project.iam.gserviceaccount.com:generateAccessToken\",\"subject_token_type\":\"urn:ietf:params:oauth:token-type:jwt\",\"token_url\":\"https://sts.googleapis.com/v1/token\",\"type\":\"external_account\"}",
+            "oberth.ci/release-wif-adc": "{\"audience\":\"//iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/oberth-release-images/providers/example-node\",\"credential_source\":{\"file\":\"/run/oberth-gar/token\"},\"service_account_impersonation_url\":\"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/image-writer@example-project.iam.gserviceaccount.com:generateAccessToken\",\"subject_token_type\":\"urn:ietf:params:oauth:token-type:jwt\",\"token_url\":\"https://sts.googleapis.com/v1/token\",\"type\":\"external_account\"}",
             "oberth.ci/release-wif-role": "image-writer",
             "oberth.ci/step-usage-memory-warning": "usage instrumentation disabled: memory limit unspecified is below the explicit 256Mi instrumentation floor; usage remains unknown; resources are unchanged",
             "oberth.ci/workspace-env": "none",
@@ -150,7 +150,7 @@
               "sources": [
                 {
                   "serviceAccountToken": {
-                    "audience": "https://iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/oberth-release-images/providers/tuxbox",
+                    "audience": "https://iam.googleapis.com/projects/123/locations/global/workloadIdentityPools/oberth-release-images/providers/example-node",
                     "expirationSeconds": 600,
                     "path": "token"
                   }

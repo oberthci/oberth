@@ -20,7 +20,7 @@ import (
 
 var (
 	cancelAgent = api.Actor{Identity: "agent@host", Fingerprint: "SHA256:agent"}
-	cancelAdmin = api.Actor{Identity: "dima@tuxbox", Fingerprint: "SHA256:dima", Admin: true}
+	cancelAdmin = api.Actor{Identity: "dima@example-node", Fingerprint: "SHA256:dima", Admin: true}
 )
 
 func callRunCancel(t *testing.T, control *API, actor api.Actor, arguments map[string]any) (api.RunCancelResponse, error) {
@@ -85,7 +85,7 @@ func assertCancelled(t *testing.T, run model.Run, actor, reason string) {
 // A queued run is terminalized at once and never claimed.
 func TestRunCancelQueuedRunIsNeverClaimed(t *testing.T) {
 	fixture := newGroupFixture(t, 3)
-	queued := fixture.branch(t, fixture.beacon, "feature-q", "a")
+	queued := fixture.branch(t, fixture.exampleService, "feature-q", "a")
 
 	response := mustRunCancel(t, fixture.control, cancelAgent, map[string]any{"id": queued.ID[:8], "reason": "pushed by mistake"})
 	if response.RunID != queued.ID || response.PreviousState != "queued" || response.Workflow != "none" ||
@@ -96,14 +96,14 @@ func TestRunCancelQueuedRunIsNeverClaimed(t *testing.T) {
 	fixture.start(t)
 	fixture.assertNothingCreated(t)
 	assertCancelled(t, fixture.run(t, queued.ID), cancelAgent.Identity, "pushed by mistake")
-	fixture.assertNoCIIssue(t, fixture.beacon, "feature-q")
+	fixture.assertNoCIIssue(t, fixture.exampleService, "feature-q")
 
 	// run_get and run_list project who cancelled it and why.
 	detail := callGroupRunGet(t, fixture.control, queued.ID)
 	if detail.Run.Phase != model.PhaseCancelled || !strings.Contains(detail.Run.Reason, "agent@host: pushed by mistake") || detail.Scheduling != nil {
 		t.Fatalf("run_get of a cancelled run = %#v", detail)
 	}
-	raw, _ := json.Marshal(map[string]any{"repo": "beacon", "ref": "feature-q"})
+	raw, _ := json.Marshal(map[string]any{"repo": "example-service", "ref": "feature-q"})
 	value, err := fixture.control.CallTool(t.Context(), cancelAgent, "run_list", raw)
 	if err != nil {
 		t.Fatal(err)
@@ -127,10 +127,10 @@ func TestRunCancelWaitingRunReleasesItsAdmissionReservation(t *testing.T) {
 	fixture.engine.declare("feat-kv", kubevirtGroup, periapsis.XL)
 	fixture.engine.declare("feat-kv-2", kubevirtGroup, periapsis.S)
 	fixture.engine.declare("small", "", periapsis.S)
-	holder := fixture.branch(t, fixture.beacon, "busy", "a")
+	holder := fixture.branch(t, fixture.exampleService, "busy", "a")
 	head := fixture.branch(t, fixture.terraform, "feat-kv", "b")
 	member := fixture.branch(t, fixture.terraform, "feat-kv-2", "c")
-	small := fixture.branch(t, fixture.beacon, "small", "d")
+	small := fixture.branch(t, fixture.exampleService, "small", "d")
 	fixture.start(t)
 	if created := fixture.awaitCreated(t, 1); !created[holder.ID] {
 		t.Fatalf("created %v; want only the holder", created)
@@ -183,8 +183,8 @@ func TestRunCancelRunningRunDeletesItsWorkflowAndKeepsTheCancel(t *testing.T) {
 	fixture := newGroupFixture(t, 3)
 	fixture.engine.declare("busy", "", periapsis.M)
 	fixture.engine.declare("heavy", "", periapsis.XL)
-	running := fixture.branch(t, fixture.beacon, "busy", "a")
-	next := fixture.branch(t, fixture.beacon, "heavy", "b")
+	running := fixture.branch(t, fixture.exampleService, "busy", "a")
+	next := fixture.branch(t, fixture.exampleService, "heavy", "b")
 	fixture.start(t)
 	if created := fixture.awaitCreated(t, 1); !created[running.ID] {
 		t.Fatalf("created %v; want the running run", created)
@@ -216,7 +216,7 @@ func TestRunCancelRunningRunDeletesItsWorkflowAndKeepsTheCancel(t *testing.T) {
 	// The owner's late result never replaces the cancel.
 	time.Sleep(testTimeout(100 * time.Millisecond))
 	assertCancelled(t, fixture.run(t, running.ID), cancelAgent.Identity, "stuck test")
-	fixture.assertNoCIIssue(t, fixture.beacon, "busy")
+	fixture.assertNoCIIssue(t, fixture.exampleService, "busy")
 
 	// Idempotence: a second cancel is a clear refusal and changes nothing.
 	_, err := callRunCancel(t, fixture.control, cancelAgent, map[string]any{"id": running.ID})
@@ -251,7 +251,7 @@ func (fixture *groupFixture) awaitRunStarted(t *testing.T, id string) model.Run 
 // the partial-publication warning in the response and the audit chain.
 func TestRunCancelReleaseRunRequiresAdminAndForce(t *testing.T) {
 	fixture := newGroupFixture(t, 3)
-	release := fixture.tag(t, fixture.beacon, "v1.0.0", "a", "b")
+	release := fixture.tag(t, fixture.exampleService, "v1.0.0", "a", "b")
 	if _, err := callRunCancel(t, fixture.control, cancelAgent, map[string]any{"id": release.ID, "force": true}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("non-admin release cancel = %v", err)
 	}
@@ -333,10 +333,10 @@ func TestRunCancelPromotionFailsThePromotionWithoutMerging(t *testing.T) {
 		result   = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	)
 	enqueued, promotion, err := fixture.store.EnqueuePromotionRun(t.Context(), model.RunSpec{
-		RepoID: fixture.beacon.ID, RefKind: model.RefBranch, Ref: "promotion/main/bbbbbbbbbbbb",
+		RepoID: fixture.exampleService.ID, RefKind: model.RefBranch, Ref: "promotion/main/bbbbbbbbbbbb",
 		SHA: result, Actor: "agent@host", Trigger: "promotion", TestedSHA: result, BaseSHA: previous,
 	}, model.PromotionSpec{
-		RepoID: fixture.beacon.ID, SourceBranch: "feature/promote", SourceSHA: result,
+		RepoID: fixture.exampleService.ID, SourceBranch: "feature/promote", SourceSHA: result,
 		TargetRef: "main", PreviousSHA: previous, ResultSHA: result, Actor: "agent@host",
 	})
 	if err != nil {
@@ -356,7 +356,7 @@ func TestRunCancelPromotionFailsThePromotionWithoutMerging(t *testing.T) {
 	assertCancelled(t, fixture.awaitTerminal(t, enqueued.ID), cancelAdmin.Identity, "target frozen")
 	fixture.awaitNoPendingCancellations(t)
 	failed, err := fixture.store.Promotion(t.Context(), promotion.ID)
-	if err != nil || failed.Status != model.PromotionFailed || !strings.Contains(failed.Error, "cancelled by dima@tuxbox: target frozen") {
+	if err != nil || failed.Status != model.PromotionFailed || !strings.Contains(failed.Error, "cancelled by dima@example-node: target frozen") {
 		t.Fatalf("promotion after cancel = %#v, %v", failed, err)
 	}
 	if pending, err := fixture.store.PendingPublications(t.Context()); err != nil || len(pending) != 0 {
@@ -368,7 +368,7 @@ func TestRunCancelPromotionFailsThePromotionWithoutMerging(t *testing.T) {
 	if len(pushed) != 0 {
 		t.Fatalf("promotion cancel pushed %v", pushed)
 	}
-	if issue, err := fixture.store.OpenCIIssue(t.Context(), fixture.beacon.ID, "feature/promote"); !errors.Is(err, store.ErrNotFound) {
+	if issue, err := fixture.store.OpenCIIssue(t.Context(), fixture.exampleService.ID, "feature/promote"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("promotion cancel opened issue %#v (%v)", issue, err)
 	}
 }
@@ -380,14 +380,14 @@ func TestRunCancelPromotionFailsThePromotionWithoutMerging(t *testing.T) {
 func TestRunCancelIsNotRefiredAcrossARestart(t *testing.T) {
 	fixture := newGroupFixture(t, 3)
 	ctx := t.Context()
-	cancelled := fixture.branch(t, fixture.beacon, "feature-cancel", "a")
-	stranded := fixture.branch(t, fixture.beacon, "feature-stranded", "b")
+	cancelled := fixture.branch(t, fixture.exampleService, "feature-cancel", "a")
+	stranded := fixture.branch(t, fixture.exampleService, "feature-stranded", "b")
 	// A previous process claimed and submitted both, then died.
 	for _, run := range []model.Run{cancelled, stranded} {
 		if _, err := fixture.store.ClaimNextRun(ctx); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := fixture.store.SetRunJobName(ctx, run.ID, "oberth-beacon-"+run.ID[:8]); err != nil {
+		if _, err := fixture.store.SetRunJobName(ctx, run.ID, "oberth-example-service-"+run.ID[:8]); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := fixture.store.MarkRunSubmitted(ctx, run.ID); err != nil {
@@ -433,7 +433,7 @@ func TestRunCancelIsNotRefiredAcrossARestart(t *testing.T) {
 	}
 	fixture.awaitNoPendingCancellations(t)
 	fixture.assertNothingCreated(t)
-	runs, err := fixture.store.ListRecentRuns(ctx, model.RunListFilter{RepoID: fixture.beacon.ID, Ref: "feature-cancel"})
+	runs, err := fixture.store.ListRecentRuns(ctx, model.RunListFilter{RepoID: fixture.exampleService.ID, Ref: "feature-cancel"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,12 +442,12 @@ func TestRunCancelIsNotRefiredAcrossARestart(t *testing.T) {
 	}
 	assertCancelled(t, runs[0], cancelAgent.Identity, "abandon")
 	fixture.engine.mu.Lock()
-	deleted := slices.Contains(fixture.engine.deleted, cancelled.JobName) || slices.Contains(fixture.engine.deleted, "oberth-beacon-"+cancelled.ID[:8])
+	deleted := slices.Contains(fixture.engine.deleted, cancelled.JobName) || slices.Contains(fixture.engine.deleted, "oberth-example-service-"+cancelled.ID[:8])
 	fixture.engine.mu.Unlock()
 	if !deleted {
 		t.Fatal("the successor never deleted the cancelled run's Workflow")
 	}
-	fixture.assertNoCIIssue(t, fixture.beacon, "feature-cancel")
+	fixture.assertNoCIIssue(t, fixture.exampleService, "feature-cancel")
 	fixture.engine.finish(t, requeued.SupersededBy)
 	fixture.awaitTerminal(t, requeued.SupersededBy)
 	shutdown()

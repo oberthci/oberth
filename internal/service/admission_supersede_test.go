@@ -26,7 +26,7 @@ func (fixture *groupFixture) awaitAdmission(t *testing.T, run model.Run, what st
 	}
 }
 
-// The live tuxbox defect: an XL run of a concurrency group waits at the head
+// The live example-node defect: an XL run of a concurrency group waits at the head
 // of the FIFO admission queue while a smaller run holds weight. A newer push
 // supersedes it, and the durable record turns interrupted, but its in-memory
 // reservation stayed prepared at the head of the queue. Every later run, of the
@@ -39,10 +39,10 @@ func TestSupersedingAWaitingXLHeadReleasesItsReservationOnTheNextGrantPass(t *te
 	fixture.engine.declare("feat-kv", kubevirtGroup, periapsis.XL)
 	fixture.engine.declare("feat-kv-2", kubevirtGroup, periapsis.S)
 	fixture.engine.declare("small", "", periapsis.S)
-	holder := fixture.branch(t, fixture.beacon, "busy", "a")
+	holder := fixture.branch(t, fixture.exampleService, "busy", "a")
 	head := fixture.branch(t, fixture.terraform, "feat-kv", "b")
 	member := fixture.branch(t, fixture.terraform, "feat-kv-2", "c")
-	small := fixture.branch(t, fixture.beacon, "small", "d")
+	small := fixture.branch(t, fixture.exampleService, "small", "d")
 	fixture.start(t)
 
 	if created := fixture.awaitCreated(t, 1); !created[holder.ID] {

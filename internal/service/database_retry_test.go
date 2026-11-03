@@ -192,7 +192,7 @@ func testDatabaseCancellationContinuesLiveDispatch(t *testing.T, failure error) 
 			fixture.scheduler.store = database
 			fixture.scheduler.workspaces.owners = fixture.scheduler.database()
 			done, _ := startDeadlineScheduler(t, fixture.scheduler)
-			old := fixture.branch(t, fixture.beacon, "supersede-db", "a")
+			old := fixture.branch(t, fixture.exampleService, "supersede-db", "a")
 			awaitDeadlineCreated(t, fixture.engine, done)
 			// CreateCI announces creation before MarkRunSubmitted commits. An
 			// earlier supersession uses the worker's post-create cleanup path,
@@ -202,7 +202,7 @@ func testDatabaseCancellationContinuesLiveDispatch(t *testing.T, failure error) 
 			before := database.calls[operation]
 			database.failures[operation] = 2
 			database.mu.Unlock()
-			successor, err := fixture.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: fixture.beacon.ID, RefKind: model.RefBranch, Ref: "supersede-db", SHA: strings.Repeat("b", 40), Actor: "test", Trigger: "branch"})
+			successor, err := fixture.store.EnqueueRun(t.Context(), model.RunSpec{RepoID: fixture.exampleService.ID, RefKind: model.RefBranch, Ref: "supersede-db", SHA: strings.Repeat("b", 40), Actor: "test", Trigger: "branch"})
 			if err != nil {
 				t.Fatal(err)
 			}

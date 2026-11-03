@@ -28,7 +28,7 @@ func (input *conductorInput) Write(body []byte) (int, error) {
 func (input *conductorInput) Close() error { input.closed++; return nil }
 
 func testRestartRequest(plan PilotPlan, attempt ConductorAttempt) PilotRestartRequest {
-	return PilotRestartRequest{Version: 1, Type: "restart-beacon", Execution: PilotIdentity(plan), Attempt: ConductorAttemptIdentity(attempt), Inventory: PilotInventoryIdentity(plan), Sequence: 1, Case: "restart-fresh-relay", Old: PilotEndpoint{Attempt: InitialVMResource, VMIUID: "old-vmi", LauncherUID: "old-launcher", Address: "10.42.1.10:443", ServerName: "beacon.fixture", CertificateSHA256: strings.Repeat("1", 64), FixtureGeneration: strings.Repeat("2", 64)}}
+	return PilotRestartRequest{Version: 1, Type: "restart-example-service", Execution: PilotIdentity(plan), Attempt: ConductorAttemptIdentity(attempt), Inventory: PilotInventoryIdentity(plan), Sequence: 1, Case: "restart-fresh-relay", Old: PilotEndpoint{Attempt: InitialVMResource, VMIUID: "old-vmi", LauncherUID: "old-launcher", Address: "10.42.1.10:443", ServerName: "example-service.fixture", CertificateSHA256: strings.Repeat("1", 64), FixtureGeneration: strings.Repeat("2", 64)}}
 }
 
 func testRestartResponse(request PilotRestartRequest) PilotRestartResponse {

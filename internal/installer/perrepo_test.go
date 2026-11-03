@@ -37,7 +37,7 @@ func TestPerRepoNameDiffersForDifferentUpstreams(t *testing.T) {
 func TestPerRepoNameDiffersForDifferentOrgs(t *testing.T) {
 	t.Parallel()
 	a := PerRepoName("codeberg", "oberthci", "oberth")
-	b := PerRepoName("codeberg", "skipops", "oberth")
+	b := PerRepoName("codeberg", "acme", "oberth")
 	if a == b {
 		t.Fatalf("different orgs produced the same name: %q", a)
 	}
@@ -49,7 +49,7 @@ func TestPerRepoNameIsDNS1123Safe(t *testing.T) {
 		upstream, org, repo string
 	}{
 		{"codeberg", "oberthci", "oberth"},
-		{"github", "skipops", "acme-operator"},
+		{"github", "acme", "acme-operator"},
 		{"my.upstream", "my.org", "my.repo"},
 		{"UPPER", "CASE", "NAMES"},
 		{"a", "b", "c"},
@@ -140,10 +140,10 @@ func TestPerRepoPolicyContainsRevokeSelf(t *testing.T) {
 
 func TestPerRepoPolicyCrossRepoReadRefused(t *testing.T) {
 	t.Parallel()
-	// A per-repo policy for org "oberthci" must not grant access to org "skipops"
+	// A per-repo policy for org "oberthci" must not grant access to org "acme"
 	policy := PerRepoPolicy("oberth", "oberthci", "oberth", nil)
-	if strings.Contains(policy, "skipops") {
-		t.Fatalf("per-repo policy for oberthci must not reference skipops:\n%s", policy)
+	if strings.Contains(policy, "acme") {
+		t.Fatalf("per-repo policy for oberthci must not reference acme:\n%s", policy)
 	}
 	// The policy must not have the all-orgs wildcard
 	if strings.Contains(policy, `"oberth/data/upstream/*"`) {
@@ -336,7 +336,7 @@ func TestConfigurePerRepoIdentitiesWithGrants(t *testing.T) {
 func TestPerRepoIdentityNamesReturnsSorted(t *testing.T) {
 	t.Parallel()
 	ids := []PerRepoIdentity{
-		{Upstream: "github", Org: "skipops", Repo: "terraform"},
+		{Upstream: "github", Org: "acme", Repo: "terraform"},
 		{Upstream: "codeberg", Org: "oberthci", Repo: "oberth"},
 		{Upstream: "codeberg", Org: "oberthci", Repo: "acme-operator"},
 	}
@@ -413,8 +413,8 @@ func TestPerRepoCIPolicyHasNoGrants(t *testing.T) {
 func TestPerRepoCIPolicyNoCrossOrgAccess(t *testing.T) {
 	t.Parallel()
 	policy := PerRepoCIPolicy("oberth", "oberthci", "oberth")
-	if strings.Contains(policy, "skipops") {
-		t.Fatalf("CI policy for oberthci/oberth must not reference skipops:\n%s", policy)
+	if strings.Contains(policy, "acme") {
+		t.Fatalf("CI policy for oberthci/oberth must not reference acme:\n%s", policy)
 	}
 	if strings.Contains(policy, `"oberth/data/upstream/*"`) {
 		t.Fatalf("CI policy must not contain cross-org wildcard:\n%s", policy)
@@ -424,7 +424,7 @@ func TestPerRepoCIPolicyNoCrossOrgAccess(t *testing.T) {
 func TestPerRepoCIIdentityNamesReturnsSorted(t *testing.T) {
 	t.Parallel()
 	ids := []PerRepoIdentity{
-		{Upstream: "github", Org: "skipops", Repo: "terraform"},
+		{Upstream: "github", Org: "acme", Repo: "terraform"},
 		{Upstream: "codeberg", Org: "oberthci", Repo: "oberth"},
 	}
 	names := PerRepoCIIdentityNames(ids)

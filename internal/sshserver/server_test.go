@@ -216,7 +216,7 @@ func TestSuccessfulReceiveCallsUpdateHandlerWithAuthenticatedActor(t *testing.T)
 	server, err := New(Config{
 		HostSigner: newSigner(t),
 		Resolver: IdentityResolverFunc(func(fingerprint string) (string, bool, error) {
-			return "worker@tuxbox", fingerprint == ssh.FingerprintSHA256(clientSigner.PublicKey()), nil
+			return "worker@example-node", fingerprint == ssh.FingerprintSHA256(clientSigner.PublicKey()), nil
 		}),
 		Git: git,
 		OnUpdate: UpdateHandlerFunc(func(_ context.Context, event gitcache.ReceiveEvent) error {
@@ -250,7 +250,7 @@ func TestSuccessfulReceiveCallsUpdateHandlerWithAuthenticatedActor(t *testing.T)
 		t.Fatalf("SSH prepared receive outside the durable transaction %d times", ensureCalls)
 	}
 	for _, update := range updates {
-		if update.actor != "worker@tuxbox" || update.repo != "example" {
+		if update.actor != "worker@example-node" || update.repo != "example" {
 			t.Fatalf("callback lost authenticated identity: %+v", update)
 		}
 	}
@@ -366,7 +366,7 @@ func TestPushActorIsBoundAtSSHHandshake(t *testing.T) {
 	}
 
 	var identityMu sync.Mutex
-	identity := "first-agent@tuxbox"
+	identity := "first-agent@example-node"
 	resolver := IdentityResolverFunc(func(got string) (string, bool, error) {
 		identityMu.Lock()
 		defer identityMu.Unlock()
@@ -387,7 +387,7 @@ func TestPushActorIsBoundAtSSHHandshake(t *testing.T) {
 	client, stop := startServer(t, server, clientSigner)
 	defer stop()
 	identityMu.Lock()
-	identity = "later-api-session@tuxbox"
+	identity = "later-api-session@example-node"
 	identityMu.Unlock()
 
 	session, err := client.NewSession()
@@ -397,7 +397,7 @@ func TestPushActorIsBoundAtSSHHandshake(t *testing.T) {
 	if err := session.Run("git-receive-pack '/example.git'"); err != nil {
 		t.Fatal(err)
 	}
-	if actor := <-actors; actor != "first-agent@tuxbox" {
+	if actor := <-actors; actor != "first-agent@example-node" {
 		t.Fatalf("push actor = %q, want identity authenticated at SSH handshake", actor)
 	}
 }
@@ -825,7 +825,7 @@ func TestReceiveSessionEmitsRemoteBannerAndSessionNotices(t *testing.T) {
 	server, err := New(Config{
 		HostSigner: newSigner(t),
 		Resolver: IdentityResolverFunc(func(fingerprint string) (string, bool, error) {
-			return "worker@tuxbox", fingerprint == ssh.FingerprintSHA256(clientSigner.PublicKey()), nil
+			return "worker@example-node", fingerprint == ssh.FingerprintSHA256(clientSigner.PublicKey()), nil
 		}),
 		Git: git,
 		OnUpdate: UpdateHandlerFunc(func(context.Context, gitcache.ReceiveEvent) error {
@@ -855,7 +855,7 @@ func TestReceiveSessionEmitsRemoteBannerAndSessionNotices(t *testing.T) {
 		t.Fatal(err)
 	}
 	output := stderr.String()
-	uplink := strings.Index(output, "remote: [oberth] uplink worker@tuxbox\n")
+	uplink := strings.Index(output, "remote: [oberth] uplink worker@example-node\n")
 	notice := strings.Index(output, "remote: ref accepted · run queued (example)\n")
 	watch := strings.Index(output, "remote: watch: https://watch.example/runs\n")
 	if uplink < 0 || notice < 0 || watch < 0 {
@@ -879,7 +879,7 @@ func TestReceiveFailureSuppressesWatchLine(t *testing.T) {
 	server, err := New(Config{
 		HostSigner: newSigner(t),
 		Resolver: IdentityResolverFunc(func(fingerprint string) (string, bool, error) {
-			return "worker@tuxbox", fingerprint == ssh.FingerprintSHA256(clientSigner.PublicKey()), nil
+			return "worker@example-node", fingerprint == ssh.FingerprintSHA256(clientSigner.PublicKey()), nil
 		}),
 		Git: git,
 		OnUpdate: UpdateHandlerFunc(func(context.Context, gitcache.ReceiveEvent) error {
@@ -902,7 +902,7 @@ func TestReceiveFailureSuppressesWatchLine(t *testing.T) {
 		t.Fatal("failed receive returned success")
 	}
 	output := stderr.String()
-	if !strings.Contains(output, "remote: [oberth] uplink worker@tuxbox\n") {
+	if !strings.Contains(output, "remote: [oberth] uplink worker@example-node\n") {
 		t.Fatalf("identity banner missing: %q", output)
 	}
 	if strings.Contains(output, "remote: watch:") {

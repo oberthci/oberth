@@ -603,90 +603,11 @@ test "$(grep -c 'resources: \["serviceaccounts"\]' "$argo_vault_manifest")" -eq 
 grep -A1 'resources: \["serviceaccounts"\]' "$argo_vault_manifest" | \
   grep -q 'verbs: \["get"\]'
 
-# --- Watch tunnel connector (#671) -------------------------------------------
-# Default: watchTunnel.enabled=false — no connector resources rendered.
-if render --show-only templates/cloudflared-watch-sa.yaml 2>/dev/null | grep -q 'ServiceAccount'; then
-  exit 1
-fi
-if render --show-only templates/cloudflared-watch-deployment.yaml 2>/dev/null | grep -q 'Deployment'; then
-  exit 1
-fi
-if render --show-only templates/cloudflared-watch-cm.yaml 2>/dev/null | grep -q 'ConfigMap'; then
-  exit 1
-fi
-# Enabled: renders SA, ConfigMap, Deployment with the default digest-pinned images.
-watch_manifest=$(mktemp)
-trap 'rm -f "$watch_manifest"' EXIT
-render --set watchTunnel.enabled=true \
-  --set secretstore.enabled=true \
-  --set-file secretstore.caCert="$secretstore_ca" >"$watch_manifest"
-grep -q '^  name: cloudflared-watch$' "$watch_manifest"
-grep -q '# Source: oberth/templates/cloudflared-watch-sa.yaml' "$watch_manifest"
-grep -q '# Source: oberth/templates/cloudflared-watch-cm.yaml' "$watch_manifest"
-grep -q '# Source: oberth/templates/cloudflared-watch-deployment.yaml' "$watch_manifest"
-grep -q '^  name: cloudflared-watch-oberth-v2$' "$watch_manifest"
-grep -Fq 'medium: Memory' "$watch_manifest"
-grep -Fq 'automountServiceAccountToken: false' "$watch_manifest"
-grep -Fq 'readOnlyRootFilesystem: true' "$watch_manifest"
-grep -Fq 'runAsNonRoot: true' "$watch_manifest"
-grep -Fq -- '--management-diagnostics=false' "$watch_manifest"
-grep -Fq -- '--token-file' "$watch_manifest"
-# Digest pin required on both images.
-grep -q '@sha256:[0-9a-f]\{64\}' "$watch_manifest"
-# No Kubernetes Secret rendered for the connector (token is memory-only).
-if sed -n '/# Source: oberth\/templates\/cloudflared-watch/,/^---$/p' "$watch_manifest" | grep -q 'kind: Secret'; then
-  exit 1
-fi
-# Non-digest image must be rejected.
-if render --set watchTunnel.enabled=true --set watchTunnel.image=cloudflare/cloudflared:latest >/dev/null 2>&1; then
-  exit 1
-fi
-if render --set watchTunnel.enabled=true --set watchTunnel.openbaoImage=quay.io/openbao/openbao:latest >/dev/null 2>&1; then
-  exit 1
-fi
-# RBAC unchanged: the connector's SA has no RBAC bindings in the chart. The
-# only Role/ClusterRoleBinding templates are the existing ones for the server.
-rbac_before=$(render --show-only templates/rbac.yaml --show-only templates/rbac-argo.yaml 2>/dev/null)
-rbac_after=$(render --set watchTunnel.enabled=true --show-only templates/rbac.yaml --show-only templates/rbac-argo.yaml 2>/dev/null)
-test "$rbac_before" = "$rbac_after"
-# Legacy reused values: a release installed before watchTunnel existed has no
-# such key; --reuse-values never consults the new chart's values.yaml. Nulling
-# the block reproduces that shape; the template must render without error and
-# not emit any connector resource.
-legacy_watch=$(mktemp)
-render --set watchTunnel=null >"$legacy_watch"
-if grep -q 'cloudflared-watch' "$legacy_watch"; then
-  rm -f "$legacy_watch"
-  exit 1
-fi
-rm -f "$legacy_watch" "$watch_manifest"
-
-# Dedicated upgrades retain the stored enablement and pin only images. A
-# legacy image-only map has no enabled key and must remain disabled.
-watch_upgrade_chart=$package_dir/watch-upgrade-chart
-cp -R "$chart" "$watch_upgrade_chart"
-python3 - "$watch_upgrade_chart/values.yaml" <<'PY'
-from pathlib import Path
-import sys
-p = Path(sys.argv[1])
-raw = p.read_text()
-start = raw.index("watchTunnel:\n")
-end = raw.index("\npodAnnotations:", start)
-block = raw[start:end].replace("  enabled: false\n", "")
-p.write_text(raw[:start] + block + raw[end:])
-PY
-helm template oberth "$watch_upgrade_chart" --set "image.ref=$server_image" >"$package_dir/watch-absent.yaml"
-if grep -q 'name: cloudflared-watch' "$package_dir/watch-absent.yaml"; then exit 1; fi
-for invalid in 'watchTunnel.enabled=1' 'watchTunnel.enabled=invalid' 'watchTunnel=invalid'; do
-  if render --set "$invalid" >/dev/null 2>&1; then exit 1; fi
+# Retired instance connector settings are inert, including malformed old values.
+for retired in 'watchTunnel.enabled=true' 'watchTunnel.enabled=invalid' 'watchTunnel=invalid'; do
+  render --set "$retired" >"$package_dir/retired-connector.yaml"
+  if grep -q 'cloudflared' "$package_dir/retired-connector.yaml"; then exit 1; fi
 done
-render --set watchTunnel.enabled=false >"$package_dir/watch-false.yaml"
-if grep -q 'name: cloudflared-watch' "$package_dir/watch-false.yaml"; then exit 1; fi
-render --set watchTunnel.enabled=true --set-file secretstore.caCert="$secretstore_ca" \
-  --set-file watchTunnel.originCACert="$secretstore_ca" >"$package_dir/watch-origin.yaml"
-grep -Fq 'name: cloudflared-watch-oberth-origin-ca' "$package_dir/watch-origin.yaml"
-grep -Fq 'mountPath: /etc/oberth-origin-ca' "$package_dir/watch-origin.yaml"
-if render --set watchTunnel.enabled=true --set watchTunnel.originCACert=invalid >/dev/null 2>&1; then exit 1; fi
 
 helm package "$chart" --destination "$package_dir" >/dev/null
 set -- "$package_dir"/oberth-*.tgz

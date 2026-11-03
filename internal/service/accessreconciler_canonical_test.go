@@ -104,7 +104,7 @@ func TestReconcileSkipsAmbiguousBareEntryFailClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	upstream2, err := database.CreateUpstream(ctx, model.UpstreamSpec{
-		Name: "skipops", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/skipops",
+		Name: "acme", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/acme",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -150,7 +150,7 @@ func TestReconcileSkipsAmbiguousBareEntryFailClosed(t *testing.T) {
 // TestRemoveGrantCanonicalBareEntry verifies that a qualified revoke matches
 // a bare-spelled ConfigMap entry via canonical identity resolution (#689).
 func TestRemoveGrantCanonicalBareEntry(t *testing.T) {
-	cm := grantsConfigMap("20", `- {repo: acme-beacon, step: "*", secret: oberth/data/release/gar-sa-key}
+	cm := grantsConfigMap("20", `- {repo: acme-example-service, step: "*", secret: oberth/data/release/gar-sa-key}
 `)
 	reconciler, database := testAccessReconciler(t, cm)
 	ctx := context.Background()
@@ -162,7 +162,7 @@ func TestRemoveGrantCanonicalBareEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := database.CreateRepository(ctx, model.RepositorySpec{
-		Name: "acme-beacon", UpstreamID: upstream.ID, DefaultBranch: "main",
+		Name: "acme-example-service", UpstreamID: upstream.ID, DefaultBranch: "main",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestRemoveGrantCanonicalBareEntry(t *testing.T) {
 	}
 
 	// Revoke using the qualified name — must match the bare-spelled entry.
-	qualified := "codeberg/acme/acme-beacon"
+	qualified := "codeberg/acme/acme-example-service"
 	if err := reconciler.UpdateConfigMap(ctx, "admin@test",
 		reconciler.RemoveGrantCanonical(ctx, qualified, "*", "oberth/data/release/gar-sa-key")); err != nil {
 		t.Fatalf("RemoveGrantCanonical failed: %v", err)
@@ -200,9 +200,9 @@ func TestRemoveGrantCanonicalBareEntry(t *testing.T) {
 // a bare-spelled and a qualified entry exist for the same canonical tuple,
 // both are removed by a single revoke.
 func TestRemoveGrantCanonicalBareAndQualifiedDuplicates(t *testing.T) {
-	cm := grantsConfigMap("21", `- {repo: acme-beacon, step: "*", secret: oberth/data/release/gar-sa-key}
-- {repo: codeberg/acme/acme-beacon, step: "*", secret: oberth/data/release/gar-sa-key}
-- {repo: codeberg/acme/acme-beacon, step: "*", secret: oberth/data/release/r2-upload-token}
+	cm := grantsConfigMap("21", `- {repo: acme-example-service, step: "*", secret: oberth/data/release/gar-sa-key}
+- {repo: codeberg/acme/acme-example-service, step: "*", secret: oberth/data/release/gar-sa-key}
+- {repo: codeberg/acme/acme-example-service, step: "*", secret: oberth/data/release/r2-upload-token}
 `)
 	reconciler, database := testAccessReconciler(t, cm)
 	ctx := context.Background()
@@ -214,7 +214,7 @@ func TestRemoveGrantCanonicalBareAndQualifiedDuplicates(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := database.CreateRepository(ctx, model.RepositorySpec{
-		Name: "acme-beacon", UpstreamID: upstream.ID, DefaultBranch: "main",
+		Name: "acme-example-service", UpstreamID: upstream.ID, DefaultBranch: "main",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ func TestRemoveGrantCanonicalBareAndQualifiedDuplicates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	qualified := "codeberg/acme/acme-beacon"
+	qualified := "codeberg/acme/acme-example-service"
 	if err := reconciler.UpdateConfigMap(ctx, "admin@test",
 		reconciler.RemoveGrantCanonical(ctx, qualified, "*", "oberth/data/release/gar-sa-key")); err != nil {
 		t.Fatalf("RemoveGrantCanonical failed: %v", err)
@@ -260,7 +260,7 @@ func TestRemoveGrantCanonicalAmbiguousFailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	upstream2, err := database.CreateUpstream(ctx, model.UpstreamSpec{
-		Name: "skipops", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/skipops",
+		Name: "acme", Kind: "ssh", BaseURL: "ssh://git@codeberg.org/acme",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -317,7 +317,7 @@ func TestRemoveGrantCanonicalAbsentReturnsInvalidInput(t *testing.T) {
 // TestAddGrantCanonicalDedupeAgainstBareEntry verifies that a qualified add
 // beside an existing bare entry of the same canonical repo is a no-op.
 func TestAddGrantCanonicalDedupeAgainstBareEntry(t *testing.T) {
-	cm := grantsConfigMap("24", `- {repo: acme-beacon, step: "*", secret: oberth/data/release/gar-sa-key}
+	cm := grantsConfigMap("24", `- {repo: acme-example-service, step: "*", secret: oberth/data/release/gar-sa-key}
 `)
 	reconciler, database := testAccessReconciler(t, cm)
 	ctx := context.Background()
@@ -329,7 +329,7 @@ func TestAddGrantCanonicalDedupeAgainstBareEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := database.CreateRepository(ctx, model.RepositorySpec{
-		Name: "acme-beacon", UpstreamID: upstream.ID, DefaultBranch: "main",
+		Name: "acme-example-service", UpstreamID: upstream.ID, DefaultBranch: "main",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +339,7 @@ func TestAddGrantCanonicalDedupeAgainstBareEntry(t *testing.T) {
 	}
 
 	// Adding the same grant under its qualified name should be a no-op.
-	qualified := "codeberg/acme/acme-beacon"
+	qualified := "codeberg/acme/acme-example-service"
 	if err := reconciler.UpdateConfigMap(ctx, "admin@test",
 		reconciler.AddGrantCanonical(ctx, qualified, "*", "oberth/data/release/gar-sa-key")); err != nil {
 		t.Fatalf("AddGrantCanonical failed: %v", err)

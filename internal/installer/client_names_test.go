@@ -31,8 +31,8 @@ func TestCertificateNamesForClientHost(t *testing.T) {
 		}
 	}
 	// Operator-supplied names keep their order; the advertised host is appended once.
-	dns, ips := certificateNamesForClientHost("localhost", []string{"tuxbox", "localhost"}, []string{"192.168.86.193"})
-	if !slices.Equal(dns, []string{"tuxbox", "localhost"}) || !slices.Equal(ips, []string{"192.168.86.193", "127.0.0.1"}) {
+	dns, ips := certificateNamesForClientHost("localhost", []string{"example-node", "localhost"}, []string{"192.168.86.193"})
+	if !slices.Equal(dns, []string{"example-node", "localhost"}) || !slices.Equal(ips, []string{"192.168.86.193", "127.0.0.1"}) {
 		t.Fatalf("got %v %v", dns, ips)
 	}
 }
@@ -72,7 +72,7 @@ func TestRotateCertificateAddsIPAddresses(t *testing.T) {
 
 // A restored or older identity that lacks the addresses clients use is
 // re-issued for them (same key) instead of only warning that it never will
-// be (observed on tuxbox: the restored certificate carried in-cluster names only).
+// be (observed on example-node: the restored certificate carried in-cluster names only).
 func TestPreflightRotatesForClientAddresses(t *testing.T) {
 	t.Setenv(baoTokenEnvVar, "test-root-token")
 	certPEM, keyPEM := testCertAndKey(t, []string{"oberth", "oberth.oberth.svc"})
@@ -104,7 +104,7 @@ func TestPreflightRotatesForClientAddresses(t *testing.T) {
 	}
 	cfg := Config{
 		InstallSecretStore: true,
-		TLSExtraDNSNames:   []string{"tuxbox", "localhost"},
+		TLSExtraDNSNames:   []string{"example-node", "localhost"},
 		TLSExtraIPs:        []string{"192.168.86.193", "127.0.0.1"},
 	}
 	if err := preflightServerIdentities(context.Background(), &cfg, deps, false); err != nil {
@@ -118,7 +118,7 @@ func TestPreflightRotatesForClientAddresses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, host := range []string{"tuxbox", "localhost", "192.168.86.193", "127.0.0.1", "oberth.oberth.svc"} {
+	for _, host := range []string{"example-node", "localhost", "192.168.86.193", "127.0.0.1", "oberth.oberth.svc"} {
 		if err := rotated.VerifyHostname(host); err != nil {
 			t.Errorf("rotated cert does not cover %s: %v", host, err)
 		}
@@ -195,8 +195,6 @@ func TestPreflightStandsDownForServerPKI(t *testing.T) {
 	t.Setenv(baoTokenEnvVar, "test-root-token")
 	certPEM, keyPEM := testCertAndKeyShape(t, []string{"oberth"}, false)
 	liveValues := liveHelmValuesSubset{}
-	liveValues.WatchTunnel.Enabled = true
-	liveValues.WatchTunnel.OriginCACert = "stale"
 	liveValuesJSON, _ := json.Marshal(liveValues)
 	deps := Deps{
 		Output:     &bytes.Buffer{},
@@ -215,7 +213,7 @@ func TestPreflightStandsDownForServerPKI(t *testing.T) {
 	if err := preflightServerIdentities(context.Background(), &cfg, deps, false); err != nil {
 		t.Fatalf("preflight: %v", err)
 	}
-	if cfg.pendingCertRotation != nil || cfg.watchTunnelOriginCACert != "" {
+	if cfg.pendingCertRotation != nil {
 		t.Fatal("the bundle certificate must be left alone when the server PKI issues the leaf")
 	}
 }

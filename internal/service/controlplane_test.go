@@ -3515,7 +3515,7 @@ func TestRunsViewFiltersRepoAndRef(t *testing.T) {
 		Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)},
 	})
 	ctx := context.Background()
-	actor := api.Actor{Identity: "agent@tuxbox"}
+	actor := api.Actor{Identity: "agent@example-node"}
 
 	branchA := "feature/alpha"
 	branchB := "feature/beta"
@@ -3739,7 +3739,7 @@ func TestAuthenticatorAdminPropagation(t *testing.T) {
 
 	// Admin uplink.
 	adminAuth, err := NewAuthenticator(stubUplinkAuthenticator{value: model.AuthenticatedUplink{
-		Uplink: model.Uplink{Identity: "admin@tuxbox", Fingerprint: "SHA256:admin", Admin: true},
+		Uplink: model.Uplink{Identity: "admin@example-node", Fingerprint: "SHA256:admin", Admin: true},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -3754,7 +3754,7 @@ func TestAuthenticatorAdminPropagation(t *testing.T) {
 
 	// Non-admin uplink.
 	regularAuth, err := NewAuthenticator(stubUplinkAuthenticator{value: model.AuthenticatedUplink{
-		Uplink: model.Uplink{Identity: "agent@tuxbox", Fingerprint: "SHA256:agent", Admin: false},
+		Uplink: model.Uplink{Identity: "agent@example-node", Fingerprint: "SHA256:agent", Admin: false},
 	}})
 	if err != nil {
 		t.Fatal(err)

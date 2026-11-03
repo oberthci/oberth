@@ -158,7 +158,7 @@ spec:
 		Run: model.Run{
 			ID: "run-test-audit", Ref: "refs/tags/v1.0.0",
 			SHA: tagObjectSHA, TestedSHA: commitSHA,
-			Actor: "agent@tuxbox", Release: true,
+			Actor: "agent@example-node", Release: true,
 		},
 		Repository: model.Repository{Name: "oberth"},
 		SourceDir:  dir,

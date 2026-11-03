@@ -17,7 +17,7 @@ func TestWarnPerRepoIdentityDeltaPrintsWarning(t *testing.T) {
 		"argo": map[string]any{
 			"perRepoIdentities": []string{
 				"oberth-argo-codeberg-oberthci-oberth-abc123",
-				"oberth-argo-github-skipops-terraform-def456",
+				"oberth-argo-github-acme-terraform-def456",
 			},
 		},
 	}

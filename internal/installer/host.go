@@ -152,9 +152,7 @@ func Execute(ctx context.Context, cfg Config, deps InstallDeps) error {
 	if cfg.CreateKind && cfg.KubeconfigPath != "" {
 		return errors.New("choose either --kubeconfig for an existing cluster or --create-kind")
 	}
-	if cfg.WatchAdoptionPlan != "" && deps.GOOS != "linux" {
-		return errors.New("watch adoption requires an existing Linux cluster context; cluster bootstrap is forbidden")
-	}
+
 	if err := cfg.Validate(); err != nil {
 		return err
 	}

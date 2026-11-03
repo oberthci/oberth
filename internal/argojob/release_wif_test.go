@@ -15,15 +15,15 @@ import (
 
 func wifTestConfig() Config {
 	c := testConfig()
-	c.PerRepoIdentities = map[string]PerRepoIdentityConfig{"github/skipops/oberth": {ServiceAccountName: "oberth-per-repo"}}
+	c.PerRepoIdentities = map[string]PerRepoIdentityConfig{"github/acme/oberth": {ServiceAccountName: "oberth-per-repo"}}
 	c.ReleaseWIF = &ReleaseWIFConfig{
 		Namespace: c.Namespace,
 		Roles: map[string]ReleaseWIFRole{
-			"image-writer": {Provider: "projects/123/locations/global/workloadIdentityPools/oberth-release-images/providers/tuxbox", ServiceAccount: "image-writer@example-project.iam.gserviceaccount.com"},
-			"image-reader": {Provider: "projects/123/locations/global/workloadIdentityPools/oberth-release-reader/providers/tuxbox", ServiceAccount: "image-reader@example-project.iam.gserviceaccount.com"},
-			"chart-writer": {Provider: "projects/123/locations/global/workloadIdentityPools/oberth-release-charts/providers/tuxbox", ServiceAccount: "chart-writer@example-project.iam.gserviceaccount.com"},
+			"image-writer": {Provider: "projects/123/locations/global/workloadIdentityPools/oberth-release-images/providers/example-node", ServiceAccount: "image-writer@example-project.iam.gserviceaccount.com"},
+			"image-reader": {Provider: "projects/123/locations/global/workloadIdentityPools/oberth-release-reader/providers/example-node", ServiceAccount: "image-reader@example-project.iam.gserviceaccount.com"},
+			"chart-writer": {Provider: "projects/123/locations/global/workloadIdentityPools/oberth-release-charts/providers/example-node", ServiceAccount: "chart-writer@example-project.iam.gserviceaccount.com"},
 		},
-		Repositories: map[string]ReleaseWIFRepository{"github/skipops/oberth": {ServiceAccountName: "oberth-per-repo", Templates: map[string]string{"main": "image-writer"}}},
+		Repositories: map[string]ReleaseWIFRepository{"github/acme/oberth": {ServiceAccountName: "oberth-per-repo", Templates: map[string]string{"main": "image-writer"}}},
 	}
 	return c
 }
@@ -159,9 +159,9 @@ func TestReleaseWIFRejectsUnapprovedAuthority(t *testing.T) {
 			case "namespace":
 				c.ReleaseWIF.Namespace = "foreign"
 			case "ci-identity-alias":
-				c.PerRepoCIIdentities = map[string]PerRepoIdentityConfig{"github/skipops/oberth": {ServiceAccountName: "oberth-per-repo"}}
+				c.PerRepoCIIdentities = map[string]PerRepoIdentityConfig{"github/acme/oberth": {ServiceAccountName: "oberth-per-repo"}}
 			case "repo-identity-alias":
-				c.PerRepoIdentities["github/skipops/foreign"] = PerRepoIdentityConfig{ServiceAccountName: "oberth-per-repo"}
+				c.PerRepoIdentities["github/acme/foreign"] = PerRepoIdentityConfig{ServiceAccountName: "oberth-per-repo"}
 			case "ci":
 				r.Trigger = periapsis.TriggerCI
 			case "repo":
@@ -171,7 +171,7 @@ func TestReleaseWIFRejectsUnapprovedAuthority(t *testing.T) {
 			case "identity-missing":
 				c.PerRepoIdentities = nil
 			case "identity-changed":
-				c.PerRepoIdentities["github/skipops/oberth"] = PerRepoIdentityConfig{ServiceAccountName: "different"}
+				c.PerRepoIdentities["github/acme/oberth"] = PerRepoIdentityConfig{ServiceAccountName: "different"}
 			case "common-pool":
 				c.ReleaseWIF.Roles["image-reader"] = c.ReleaseWIF.Roles["image-writer"]
 			case "malicious-provider":

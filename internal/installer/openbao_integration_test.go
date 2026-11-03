@@ -132,12 +132,12 @@ func baoWritePolicy(t *testing.T, addr, rootToken, name, rules string) {
 func baoCreateToken(t *testing.T, addr, rootToken string, policies []string) string {
 	t.Helper()
 	payload, _ := json.Marshal(map[string]any{
-		"policies":             policies,
-		"ttl":                  "5m",
-		"no_default_policy":    true,
-		"no_parent":            true,
-		"renewable":            false,
-		"num_uses":             0,
+		"policies":          policies,
+		"ttl":               "5m",
+		"no_default_policy": true,
+		"no_parent":         true,
+		"renewable":         false,
+		"num_uses":          0,
 	})
 	status, result := baoHTTP(t, "POST", addr, "/v1/auth/token/create", rootToken, strings.NewReader(string(payload)))
 	if status != 200 {

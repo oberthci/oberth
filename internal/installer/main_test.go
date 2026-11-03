@@ -11,7 +11,7 @@ import (
 // and client-access paths write ~/.ssh/config and ~/.config/oberth, and many
 // tests run in parallel, where t.Setenv is unavailable. Without this, a test
 // that reaches one of those writers edits the operator's real files (seen on
-// tuxbox: ~/.config/oberth/ca.crt held a stubbed command's output).
+// example-node: ~/.config/oberth/ca.crt held a stubbed command's output).
 func TestMain(m *testing.M) {
 	home, err := os.MkdirTemp("", "oberth-installer-test-home-")
 	if err != nil {

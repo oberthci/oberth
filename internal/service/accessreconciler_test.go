@@ -508,7 +508,7 @@ func TestUpdateConfigMapAttribution(t *testing.T) {
 	ctx := context.Background()
 
 	// Allow with explicit actor — approved_by should carry the actor prefix.
-	if err := reconciler.UpdateConfigMap(ctx, "agent@tuxbox", AddGrant("terraform", "*", "terraform/credentials")); err != nil {
+	if err := reconciler.UpdateConfigMap(ctx, "agent@example-node", AddGrant("terraform", "*", "terraform/credentials")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -519,8 +519,8 @@ func TestUpdateConfigMapAttribution(t *testing.T) {
 	if len(grants) != 1 {
 		t.Fatalf("expected 1 grant, got %d", len(grants))
 	}
-	if !strings.HasPrefix(grants[0].ApprovedBy, "agent@tuxbox+configmap@rv=") {
-		t.Fatalf("approved_by = %q, want prefix agent@tuxbox+configmap@rv=", grants[0].ApprovedBy)
+	if !strings.HasPrefix(grants[0].ApprovedBy, "agent@example-node+configmap@rv=") {
+		t.Fatalf("approved_by = %q, want prefix agent@example-node+configmap@rv=", grants[0].ApprovedBy)
 	}
 
 	// Watcher-driven reconcile (no actor prefix) should use plain configmap@rv=N.
@@ -546,7 +546,7 @@ func TestUpdateConfigMapAttribution(t *testing.T) {
 	}
 	for _, g := range grants {
 		if g.Repo == "oberth" && g.Secret == "cosign-secret" {
-			if strings.Contains(g.ApprovedBy, "agent@tuxbox") {
+			if strings.Contains(g.ApprovedBy, "agent@example-node") {
 				t.Fatalf("watcher-path grant should not have actor prefix: approved_by = %q", g.ApprovedBy)
 			}
 			if !strings.HasPrefix(g.ApprovedBy, "configmap@rv=") {

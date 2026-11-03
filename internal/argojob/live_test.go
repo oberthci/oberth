@@ -515,7 +515,7 @@ func awaitRunPod(t *testing.T, ctx context.Context, cluster liveCluster, runID s
 
 func liveRequest(name string, trigger periapsis.Trigger, source string) Request {
 	return Request{
-		RunID: name, Name: name, Repo: "oberth", UpstreamOrg: "skipops",
+		RunID: name, Name: name, Repo: "oberth", UpstreamOrg: "acme",
 		Ref: "refs/heads/argo-live", SHA: testSHA, Trigger: trigger,
 		Source:          []byte(source),
 		SourceDir:       "/tmp/oberth-live-test-src",
