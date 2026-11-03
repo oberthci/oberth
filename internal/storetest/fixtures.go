@@ -96,7 +96,7 @@ func LatestRunForRef(database *store.Store, ctx context.Context, repoID int64, r
 	if err != nil {
 		return model.Run{}, err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	var id string
 	if err = db.QueryRowContext(ctx, `SELECT id FROM runs WHERE repo_id=? AND ref=? ORDER BY queue_sequence DESC LIMIT 1`, repoID, ref).Scan(&id); err != nil {
 		return model.Run{}, fixtureNotFound(err)
