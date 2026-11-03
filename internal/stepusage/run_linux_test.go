@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"testing"
 	"time"
@@ -92,7 +94,36 @@ func TestUsageRunnerHelper(t *testing.T) {
 	if os.Getenv("OBERTH_USAGE_TEST_HELPER") != "1" {
 		return
 	}
-	os.Exit(run([]string{"--", "/bin/sh", "-c", os.Getenv("OBERTH_USAGE_TEST_SCRIPT")}, os.Stdin, os.Stdout, os.Stderr, "testdata/v2", os.Getenv("OBERTH_USAGE_SELF"), os.Getenv("OBERTH_USAGE_TERMINATION")))
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Exit(run([]string{"--", exe, "-test.run=^TestUsageSignalChildHelper$"}, os.Stdin, os.Stdout, os.Stderr, "testdata/v2", os.Getenv("OBERTH_USAGE_SELF"), os.Getenv("OBERTH_USAGE_TERMINATION")))
+}
+
+// This child subscribes before announcing readiness and buffers a signal that
+// arrives before the receive. A shell trap followed by read has a gap: dash can
+// defer a trap received just before read until input arrives, hanging the test.
+func TestUsageSignalChildHelper(t *testing.T) {
+	if os.Getenv("OBERTH_USAGE_TEST_HELPER") != "1" {
+		return
+	}
+	number, err := strconv.Atoi(os.Getenv("OBERTH_USAGE_TEST_SIGNAL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sig := syscall.Signal(number)
+	if sig == syscall.SIGKILL {
+		// The killed-wrapper case leaves this child alive until group cleanup.
+		sig = syscall.SIGTERM
+	}
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, sig)
+	if _, err := fmt.Fprintln(os.Stdout, os.Getpid()); err != nil {
+		t.Fatal(err)
+	}
+	<-signals
+	os.Exit(42)
 }
 
 func TestRunForwardsSignalsAndKilledWrapperLeavesUnknown(t *testing.T) {
@@ -118,18 +149,8 @@ func TestRunForwardsSignalsAndKilledWrapperLeavesUnknown(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			input, hold, err := os.Pipe()
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() { _ = input.Close(); _ = hold.Close() }()
 			cmd := exec.CommandContext(ctx, exe, "-test.run=^TestUsageRunnerHelper$")
-			script := `trap 'exit 42' ` + tc.name + `; printf '%s\n' "$$"; read line`
-			if tc.signal == syscall.SIGKILL {
-				script = `printf '%s\n' "$$"; read line`
-			}
-			cmd.Env = append(os.Environ(), "OBERTH_USAGE_TEST_HELPER=1", "OBERTH_USAGE_SELF="+self, "OBERTH_USAGE_TERMINATION="+summary, "OBERTH_USAGE_TEST_SCRIPT="+script)
-			cmd.Stdin = input
+			cmd.Env = append(os.Environ(), "OBERTH_USAGE_TEST_HELPER=1", "OBERTH_USAGE_SELF="+self, "OBERTH_USAGE_TERMINATION="+summary, "OBERTH_USAGE_TEST_SIGNAL="+strconv.Itoa(int(tc.signal)))
 			// A SIGKILLed wrapper leaves a child briefly alive. Use a file,
 			// not an exec copier pipe whose EOF would depend on that child.
 			stderr, err := os.CreateTemp(root, "stderr")
@@ -146,7 +167,7 @@ func TestRunForwardsSignalsAndKilledWrapperLeavesUnknown(t *testing.T) {
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
-			// Readiness comes after installing the child's trap; no sleep races.
+			// Readiness comes after subscribing to the child's signal; no sleep races.
 			var pid int
 			if _, err := fmt.Fscanln(bufio.NewReader(output), &pid); err != nil || pid <= 0 {
 				_ = cmd.Process.Kill()

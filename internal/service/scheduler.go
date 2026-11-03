@@ -198,6 +198,7 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 	// (weight 1) pack two per M slot. A grant wakes the loop too, so it can
 	// claim into weight a small run left spare.
 	scheduler.admission.maxRuns = scheduler.admission.capacity
+	config.DeclaredAdmission = config.DeclaredAdmission.withHeadroomDefaults()
 	if config.DeclaredAdmission.CPUMilli == 0 {
 		config.DeclaredAdmission.CPUMilli = DefaultDeclaredAdmissionConfig().CPUMilli
 	}

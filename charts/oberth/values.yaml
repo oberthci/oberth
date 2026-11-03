@@ -81,6 +81,11 @@ admission:
     disabled: false
     cpuMillis: 8000
     memoryBytes: 17179869184
+    # Run headroom = max(fixed bytes, percent of declared memory requests).
+    # The separate executor reserve remains 256Mi per peak pod.
+    # Requests determine pod memory demand; limits remain runtime ceilings.
+    memoryHeadroomBytes: 1073741824
+    memoryHeadroomPercent: 10
     ioRuns: 0
   # Mounted directory is re-read every 5s; direct ConfigMap edits need no restart.
   # Null initializes the runtime value from the boot maxConcurrentJobs above.

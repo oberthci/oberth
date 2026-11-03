@@ -80,9 +80,11 @@ func containerDemand(c, defaults *corev1.Container) (PodDemand, error) {
 			if !set || limit.Sign() <= 0 {
 				return PodDemand{}, ErrMemoryUnbounded
 			}
-			if limit.Cmp(q) > 0 {
-				q = limit
+			if limit.CmpInt64(1<<40) > 0 {
+				return PodDemand{}, errPodGraph
 			}
+			// Requests are reviewed scheduling demand. Limits remain runtime
+			// ceilings; admission holds separate administrator-owned headroom.
 		}
 		if name == corev1.ResourceCPU {
 			if q.CmpInt64(1000) > 0 {
