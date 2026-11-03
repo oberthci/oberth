@@ -502,9 +502,9 @@ func (c *Cache) migratePromotionPins(ctx context.Context, path string) error {
 	return nil
 }
 
-// Remove only pins proven reachable from the refreshed target. Unpublished
+// Remove pins proven delivered or abandoned in the publication ledger. Other
 // candidates retain their object lifetime across restarts and retries.
-func (c *Cache) sweepDeliveredPromotionPins(ctx context.Context, path string) error {
+func (c *Cache) sweepDeliveredPromotionPins(ctx context.Context, input, path string) error {
 	pins, err := c.listRefs(ctx, path, promotionRefPrefix)
 	if err != nil {
 		return err
@@ -515,7 +515,14 @@ func (c *Cache) sweepDeliveredPromotionPins(ctx context.Context, path string) er
 		if split < 1 || suffix[split+1:] != sha {
 			return fmt.Errorf("invalid promotion pin %s", ref)
 		}
-		if c.isAncestor(ctx, path, sha, upstreamRefPrefix+"heads/"+suffix[:split]) {
+		remove := c.isAncestor(ctx, path, sha, upstreamRefPrefix+"heads/"+suffix[:split])
+		if !remove && c.promotionPinAbandoned != nil {
+			remove, err = c.promotionPinAbandoned(ctx, input, suffix[:split], sha)
+			if err != nil {
+				return fmt.Errorf("check abandoned promotion pin: %w", err)
+			}
+		}
+		if remove {
 			if err := c.deleteRef(ctx, path, ref, sha); err != nil {
 				return err
 			}

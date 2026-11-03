@@ -570,9 +570,11 @@ type PublicationSpec struct {
 // publication obligation and its owning run and/or promotion. Empty owner
 // records mean that kind of owner was not attached to the publication.
 type PublicationFinalization struct {
-	Publication Publication
-	Run         Run
-	Promotion   Promotion
+	// CleanupWarning reports post-commit local cleanup deferred to a later refresh.
+	CleanupWarning string `json:"-"`
+	Publication    Publication
+	Run            Run
+	Promotion      Promotion
 	// TargetMovedTo is set, only by the delivery that finalized it, when a
 	// promotion publication failed because the remote target held this
 	// head instead of the planned base (#1097). It is not persisted.

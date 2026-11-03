@@ -37,24 +37,25 @@ type materializeManifest struct {
 // Cache owns bare repositories under one persistent root.
 type Cache struct {
 	// Hook read-only children stay in the enclosing receive process group.
-	allowLocalUpstreams bool
-	hookChild           bool
-	backend             gitBackend
-	root                string
-	outboxRoot          string
-	globalConfig        string
-	upstream            func(string) (string, error)
-	qualify             func(string) (RepoQualification, error)
-	qualifyContext      func(context.Context, string) (RepoQualification, error)
-	gitBinary           string
-	timeout             time.Duration
-	env                 map[string]string
-	redact              []string
-	logger              Logger
-	repositoryGate      func(context.Context, string) error
-	preFinalizeGate     func(context.Context) error
-	locks               sync.Map
-	receiveLocks        sync.Map
+	allowLocalUpstreams   bool
+	hookChild             bool
+	backend               gitBackend
+	root                  string
+	outboxRoot            string
+	globalConfig          string
+	upstream              func(string) (string, error)
+	qualify               func(string) (RepoQualification, error)
+	qualifyContext        func(context.Context, string) (RepoQualification, error)
+	gitBinary             string
+	timeout               time.Duration
+	env                   map[string]string
+	redact                []string
+	logger                Logger
+	repositoryGate        func(context.Context, string) error
+	promotionPinAbandoned func(context.Context, string, string, string) (bool, error)
+	preFinalizeGate       func(context.Context) error
+	locks                 sync.Map
+	receiveLocks          sync.Map
 }
 
 // New validates static configuration without contacting an upstream.
@@ -94,20 +95,21 @@ func New(config Config) (*Cache, error) {
 		}
 	}
 	cache := &Cache{
-		allowLocalUpstreams: config.AllowLocalUpstreams,
-		root:                root,
-		outboxRoot:          outboxRoot,
-		globalConfig:        globalConfig,
-		upstream:            config.Upstream,
-		qualify:             config.RepoQualifier,
-		qualifyContext:      config.RepoQualifierContext,
-		gitBinary:           gitBinary,
-		timeout:             defaultTimeout(config.CommandTimeout),
-		env:                 cloneMap(config.Env),
-		redact:              append([]string(nil), config.Redact...),
-		logger:              logger,
-		preFinalizeGate:     config.PreFinalizeGate,
-		repositoryGate:      config.RepositoryGate,
+		allowLocalUpstreams:   config.AllowLocalUpstreams,
+		root:                  root,
+		outboxRoot:            outboxRoot,
+		globalConfig:          globalConfig,
+		upstream:              config.Upstream,
+		qualify:               config.RepoQualifier,
+		qualifyContext:        config.RepoQualifierContext,
+		gitBinary:             gitBinary,
+		timeout:               defaultTimeout(config.CommandTimeout),
+		env:                   cloneMap(config.Env),
+		redact:                append([]string(nil), config.Redact...),
+		logger:                logger,
+		preFinalizeGate:       config.PreFinalizeGate,
+		repositoryGate:        config.RepositoryGate,
+		promotionPinAbandoned: config.PromotionPinAbandoned,
 	}
 	cache.backend = &cliBackend{cache: cache}
 	return cache, nil
@@ -407,7 +409,7 @@ func (c *Cache) refresh(ctx context.Context, input, path string) (string, error)
 	if err := c.fetchTracking(ctx, path); err != nil {
 		return "", err
 	}
-	if err := c.sweepDeliveredPromotionPins(ctx, path); err != nil {
+	if err := c.sweepDeliveredPromotionPins(ctx, input, path); err != nil {
 		return "", err
 	}
 	if err := c.materialize(ctx, path, old); err != nil {

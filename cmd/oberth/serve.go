@@ -742,13 +742,14 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	upstreams := app.Upstreams{Catalog: database}
 	git, err := gitcache.New(gitcache.Config{
 		Root: filepath.Join(options.dataRoot, "git"), Upstream: upstreams.Remote,
-		CommandTimeout:       options.gitCommandTimeout,
-		Env:                  sshEnvironment,
-		Logger:               logger,
-		RepoQualifier:        upstreams.QualifyInput,
-		RepoQualifierContext: upstreams.QualifyInputContext,
-		RepositoryGate:       upstreams.RequireActive,
-		PreFinalizeGate:      anchors.AllowMutation,
+		CommandTimeout:        options.gitCommandTimeout,
+		Env:                   sshEnvironment,
+		Logger:                logger,
+		RepoQualifier:         upstreams.QualifyInput,
+		RepoQualifierContext:  upstreams.QualifyInputContext,
+		RepositoryGate:        upstreams.RequireActive,
+		PreFinalizeGate:       anchors.AllowMutation,
+		PromotionPinAbandoned: database.AbandonedPromotionPin,
 	})
 	if err != nil {
 		return err

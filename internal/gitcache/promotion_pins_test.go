@@ -138,3 +138,38 @@ func TestReleaseAbandonedPromotionPinIsLocalExactAndIdempotent(t *testing.T) {
 		t.Fatal("invalid SHA accepted")
 	}
 }
+
+func TestRefreshRetriesAbandonedPromotionPinCleanup(t *testing.T) {
+	r := newTestRepository(t)
+	c := newTestCache(t, r.upstream)
+	ready, err := c.Ensure(t.Context(), "example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	abandoned := r.featureCommit(t, "feature/cleanup", "abandoned\n")
+	runGit(t, r.work, "push", ready.Path, abandoned+":refs/heads/feature/cleanup")
+	ref := promotionRefPrefix + "main/" + abandoned
+	other := promotionRefPrefix + "release/" + abandoned
+	runGit(t, ready.Path, "update-ref", ref, abandoned)
+	runGit(t, ready.Path, "update-ref", other, abandoned)
+	c.promotionPinAbandoned = func(ctx context.Context, input, target, sha string) (bool, error) {
+		if input != "example" {
+			t.Fatalf("repository input: %s", input)
+		}
+		return target == "main" && sha == abandoned, nil
+	}
+	for range 2 {
+		if _, err = c.Ensure(t.Context(), "example"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := runGit(t, ready.Path, "for-each-ref", "--format=%(refname)", ref); got != "" {
+		t.Fatalf("abandoned pin survived refresh: %s", got)
+	}
+	if got := runGit(t, ready.Path, "rev-parse", other); got != abandoned {
+		t.Fatal("cleanup lost pending pin")
+	}
+	if got := runGit(t, r.upstream, "rev-parse", "refs/heads/main"); got != r.initialSHA {
+		t.Fatal("cleanup changed upstream")
+	}
+}

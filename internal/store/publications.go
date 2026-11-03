@@ -608,3 +608,21 @@ func pendingPublicationRows(ctx context.Context, querier publicationAuditQuerier
 	}
 	return query(legacyPublicationColumns + ", 0, 0")
 }
+
+// AbandonedPromotionPin verifies exact committed ownership before local cleanup.
+// A newer pending publication for the same target and object still owns the pin.
+func (s *Store) AbandonedPromotionPin(ctx context.Context, input, target, sha string) (bool, error) {
+	repository, err := s.RepositoryByName(ctx, input)
+	if err != nil {
+		return false, err
+	}
+	var abandoned bool
+	err = s.reader().QueryRowContext(ctx, `SELECT
+ EXISTS(SELECT 1 FROM publications WHERE repo_id=? AND ref_kind='branch' AND ref=? AND result_sha=? AND promotion_id IS NOT NULL AND status='abandoned')
+ AND NOT EXISTS(SELECT 1 FROM publications WHERE repo_id=? AND ref_kind='branch' AND ref=? AND result_sha=? AND promotion_id IS NOT NULL AND status='pending')`,
+		repository.ID, target, sha, repository.ID, target, sha).Scan(&abandoned)
+	if err != nil {
+		return false, fmt.Errorf("check abandoned promotion pin: %w", err)
+	}
+	return abandoned, nil
+}

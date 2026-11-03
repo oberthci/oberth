@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/oberthci/oberth/internal/api"
@@ -45,12 +46,16 @@ func (service *API) abandonPublication(ctx context.Context, actor api.Actor, raw
 	if err != nil {
 		return api.PublicationAbandonResponse{}, err
 	}
-	return api.PublicationAbandonResponse{
+	response := api.PublicationAbandonResponse{
 		Action: "publication_abandon", PublicationID: final.Publication.ID, Status: string(final.Publication.Status),
 		RunID: final.Run.ID, RunStatus: string(final.Run.Status), RunPhase: final.Run.Phase, PromotionID: final.Promotion.ID,
 		AbandonedBy: actor.Identity, Reason: final.Publication.Error,
 		Message: "Publication abandoned; no further push will be attempted. An earlier push may already have reached upstream; inspect the remote ref before taking further action.",
-	}, nil
+	}
+	if final.CleanupWarning != "" {
+		response.Message += " " + final.CleanupWarning
+	}
+	return response, nil
 }
 
 // AbandonPublication shares the delivery permit with publication push paths. Once it
@@ -89,18 +94,23 @@ func (scheduler *Scheduler) AbandonPublication(ctx context.Context, id, actor, r
 			// bounded context so a cancelled caller cannot strand the pin after commit.
 			cleanupCtx, cancel := boundedWorkspaceCleanupContext(ctx)
 			defer cancel()
-			repository, err := scheduler.store.Repository(cleanupCtx, final.Publication.RepoID)
-			if err != nil {
-				return final, fmt.Errorf("publication abandoned; resolve promotion pin repository: %w", err)
-			}
-			upstream, err := scheduler.store.Upstream(cleanupCtx, repository.UpstreamID)
-			if err != nil {
-				return final, fmt.Errorf("publication abandoned; resolve promotion pin upstream: %w", err)
-			}
-			if err := git.ReleasePromotionPin(cleanupCtx, upstream.QualifiedRepo(repository.Name), final.Publication.Ref, final.Publication.ResultSHA); err != nil {
-				return final, fmt.Errorf("publication abandoned; release promotion pin: %w", err)
+			if err := scheduler.releaseAbandonedPromotionPin(cleanupCtx, git, final.Publication); err != nil {
+				log.Printf("publication abandoned: publication=%s promotion pin cleanup failed: %v", final.Publication.ID, err)
+				final.CleanupWarning = "Warning: local promotion pin cleanup is pending; cleanup will retry on the next repository refresh."
 			}
 		}
 	}
 	return final, nil
+}
+
+func (scheduler *Scheduler) releaseAbandonedPromotionPin(ctx context.Context, git promotionPinReleaser, publication model.Publication) error {
+	repository, err := scheduler.store.Repository(ctx, publication.RepoID)
+	if err != nil {
+		return fmt.Errorf("resolve repository: %w", err)
+	}
+	upstream, err := scheduler.store.Upstream(ctx, repository.UpstreamID)
+	if err != nil {
+		return fmt.Errorf("resolve upstream: %w", err)
+	}
+	return git.ReleasePromotionPin(ctx, upstream.QualifiedRepo(repository.Name), publication.Ref, publication.ResultSHA)
 }
