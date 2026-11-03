@@ -24,9 +24,9 @@ LIMIT = 65536
 # from administrator-owned WIF configuration into a read-only ADC mount.
 # Source account permissions are enforced by Google, not a client-side pairing.
 ROLES = {
-    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-images/providers/tuxbox': 'image-writer',
-    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-reader/providers/tuxbox': 'image-reader',
-    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-charts/providers/tuxbox': 'chart-writer',
+    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-images/providers/oberth': 'image-writer',
+    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-reader/providers/oberth': 'image-reader',
+    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-charts/providers/oberth': 'chart-writer',
 }
 SOURCE_ACCOUNT_ERROR = ('missing or invalid ADC service_account_impersonation_url; '
                         'configure argo.releaseWIF.roles.<role>.service_account')
@@ -49,11 +49,11 @@ def source_iam(config):
 # and each configured source principal TokenCreator on only that target. Keep
 # this second hop fixed by the validated audience, never ADC/env input (#875).
 OBERTH_ROLES = {
-    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-images/providers/tuxbox':
+    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-images/providers/oberth':
         'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/oberth-release-publisher@skipopsmain.iam.gserviceaccount.com:generateAccessToken',
-    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-reader/providers/tuxbox':
+    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-reader/providers/oberth':
         'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/oberth-release-reader@skipopsmain.iam.gserviceaccount.com:generateAccessToken',
-    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-charts/providers/tuxbox':
+    '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-charts/providers/oberth':
         'https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/oberth-chart-publisher@skipopsmain.iam.gserviceaccount.com:generateAccessToken',
 }
 

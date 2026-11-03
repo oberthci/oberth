@@ -64,7 +64,7 @@ GAR actions use release-only Workload Identity Federation (WIF), selected by
 STS, impersonates the administrator-configured source principal, then delegates
 to the matching Oberth principal. Final accounts below belong to
 `skipopsmain.iam.gserviceaccount.com`; source placeholders refer to full service
-account emails held only in the tuxbox installation configuration.
+account emails held only in the operator installation configuration.
 
 | Release template | Role / audience pool | First-hop principal | Final principal |
 | --- | --- | --- | --- |
@@ -73,7 +73,7 @@ account emails held only in the tuxbox installation configuration.
 | `release-verify` | `image-reader` / `oberth-release-reader` | `<release-reader>` | `oberth-release-reader` |
 
 Each audience is
-`//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/<pool>/providers/tuxbox`.
+`//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/<pool>/providers/oberth`.
 Admission binds the exact repository, release ServiceAccount, template and role;
 branch pipelines receive no WIF projection. The helper validates the fixed ADC
 at `/run/oberth-gar/adc.json` and projected token at `/run/oberth-gar/token`,
@@ -85,7 +85,7 @@ read-only. HTTPS uses verified TLS 1.3, without redirects or proxies. A failed
 exchange is fatal, with no fallback to another role or a static key.
 
 Before the next release, the coordinator must retain/set these existing keys in
-**tuxbox-only** Helm values (`argo.releaseWIF.roles`) or the administrator JSON
+**operator-owned** Helm values (`argo.releaseWIF.roles`) or the administrator JSON
 file passed to `--argo-release-wif-config` (`roles`):
 
 | Role key | `service_account` value |

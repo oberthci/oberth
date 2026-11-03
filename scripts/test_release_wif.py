@@ -59,6 +59,14 @@ class ExchangeTests(unittest.TestCase):
             result = wif.credential(wif.REGISTRY)
         return result, post.call_args_list
 
+    def test_audiences_use_oberth_provider_identity(self):
+        expected = {
+            '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-' + pool + '/providers/oberth': role
+            for pool, role in [('images', 'image-writer'), ('reader', 'image-reader'), ('charts', 'chart-writer')]
+        }
+        self.assertEqual(wif.ROLES, expected)
+        self.assertEqual(set(wif.OBERTH_ROLES), set(expected))
+
     def test_adc_source_url_is_required_and_strict_before_network(self):
         for value in (None, '', 7, 'https://attacker.invalid/token',
                       _DEFAULT_IAM + '?delegates=other', _DEFAULT_IAM + '\n',
@@ -188,7 +196,7 @@ class ExchangeTests(unittest.TestCase):
     def test_unknown_pool_rejected(self):
         """A syntactically valid but unknown pool must be refused."""
         cfg = copy.deepcopy(CONFIG)
-        cfg['audience'] = '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-unknown/providers/tuxbox'
+        cfg['audience'] = '//iam.googleapis.com/projects/138624361369/locations/global/workloadIdentityPools/oberth-release-unknown/providers/oberth'
         with patch.dict(os.environ, {'OBERTH_RELEASE_WIF': '1', 'GOOGLE_APPLICATION_CREDENTIALS': wif.ADC}), \
                 patch.object(wif, 'read', return_value=json.dumps(cfg).encode()), \
                 patch.object(wif, 'post') as post:

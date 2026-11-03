@@ -138,7 +138,7 @@ func TestAuditHTTPMatchesMCPAndRefusesScopedOrNonAdmin(t *testing.T) {
 			}
 			continue
 		}
-		for _, query := range []string{"limit=2", "limit=1&before=3", "action=repository.&actor=owner%40tuxbox&repo=oberth&since=2000-01-01T00:00:00Z&until=2100-01-01T00:00:00Z"} {
+		for _, query := range []string{"limit=2", "limit=1&before=3", "action=repository.&actor=owner%40example-node&repo=oberth&since=2000-01-01T00:00:00Z&until=2100-01-01T00:00:00Z"} {
 			request = httptest.NewRequest(http.MethodGet, "/api/audit?"+query, nil)
 			request.Header.Set("Authorization", "Bearer test")
 			response = httptest.NewRecorder()
