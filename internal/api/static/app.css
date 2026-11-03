@@ -80,7 +80,7 @@ input,select{height:32px;border:1px solid var(--line);background:var(--panel);co
 .chip-count{color:var(--dim);font-size:11px}
 .runs-layout{display:grid;grid-template-columns:208px minmax(0,1fr);gap:14px;align-items:start;align-content:start}
 .runs-layout>*{min-width:0}
-.runs-toolbar{grid-column:1/-1;margin-bottom:0}
+.runs-toolbar{grid-column:2;margin-bottom:0}
 .runs-footer{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 16px;margin-top:10px}
 .runs-footer .meta{font-size:11px}
 .runs-footer .issue-pager{margin-top:0;margin-left:auto}
@@ -258,7 +258,7 @@ input,select{height:32px;border:1px solid var(--line);background:var(--panel);co
 @media (prefers-reduced-motion:reduce){.pill.run,.dot.live,.ic.run,.ic.o{animation:none;transform:none}*{transition:none !important}}
 @media (max-width:980px){
   .app{grid-template-rows:auto 1fr}.top{min-height:48px;flex-wrap:wrap;padding:8px 12px}.brand{flex:1 1 auto}.brand .sub{min-width:0;max-width:120px}.tabs{order:3;width:100%}.tab{flex:1;width:auto}.top-right{gap:8px;flex-wrap:wrap;justify-content:flex-end}.top-status{gap:6px}.status-divider{height:14px}
-  .runs-layout{grid-template-columns:minmax(0,1fr)}.repo-side{position:static}.toolbar select{flex-basis:100%;width:100%}.toolbar .count{margin-left:0;width:100%}
+  .runs-layout{grid-template-columns:minmax(0,1fr)}.runs-toolbar{grid-column:1/-1}.repo-side{position:static}.toolbar select{flex-basis:100%;width:100%}.toolbar .count{margin-left:0;width:100%}
   .screen{padding:12px}.trow,.repo-table .trow,.issues-table .issue-row{min-width:760px}.table{overflow:auto}
   .screen.wide{height:auto;min-height:calc(100vh - 48px)}
   .v4-body{grid-template-columns:1fr;overflow:visible}.slist{border-right:0;border-bottom:1px solid var(--line);border-radius:0;margin-bottom:0;max-height:45vh}.logp{overflow:visible}.rh1{gap:8px}.rh1 .time{gap:8px}
