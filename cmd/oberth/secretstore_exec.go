@@ -298,6 +298,9 @@ func validateSecretSegment(kind, value string) error {
 // execChild strips credential env, sets OBERTH_SECRETSTORE_DIR, wraps
 // stdout/stderr in redaction, and execs the command.
 func execChild(directory string, command []string, secrets [][]byte, standardOut, errorOut io.Writer) error {
+	if err := redact.ValidateSecrets(secrets); err != nil {
+		return err
+	}
 	stripped := map[string]struct{}{secretExecStoreDirEnv: {}}
 	environment := make([]string, 0, len(os.Environ())+1)
 	for _, entry := range os.Environ() {
@@ -490,6 +493,9 @@ func validateMaterializeRelative(relative string) error {
 
 // executeMaterialize runs the real command with mapped variables stripped.
 func executeMaterialize(directory string, mappings []materializeMapping, command []string, secrets [][]byte, standardOut, errorOut io.Writer) error {
+	if err := redact.ValidateSecrets(secrets); err != nil {
+		return err
+	}
 	stripped := map[string]struct{}{secretExecStoreDirEnv: {}}
 	for _, entry := range mappings {
 		stripped[entry.variable] = struct{}{}

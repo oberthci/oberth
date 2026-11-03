@@ -2,7 +2,6 @@ package artifacts
 
 import (
 	"archive/tar"
-	"bytes"
 	"compress/gzip"
 	"errors"
 	"fmt"
@@ -53,7 +52,7 @@ type stagedMember struct {
 
 // Extract judges the whole archive, then writes it under the run's directory.
 // scanPatterns is the redaction gate (#208): every staged member is scanned
-// with ScanReaderForSecrets before anything is written, and one match refuses
+// with scanBytesForSecrets before anything is written, and one match refuses
 // the entire collection — fail-closed, never redact-in-place. Persisting call
 // sites pass DefaultScanPatterns (or a superset); the parameter is part of the
 // signature so a new call site cannot silently skip the gate.
@@ -153,7 +152,7 @@ func judge(stream io.Reader, limit int64, scanPatterns []string) ([]stagedMember
 		// Redaction gate (#208): refuse the whole collection when any member
 		// contains secret material. Runs before any write, and the error names
 		// the member — never the matched content.
-		if err := ScanReaderForSecrets(bytes.NewReader(body), scanPatterns); err != nil {
+		if err := scanBytesForSecrets(body, scanPatterns); err != nil {
 			return nil, 0, fmt.Errorf("%w in member %q", err, header.Name)
 		}
 		staged = append(staged, stagedMember{name: name, body: body, mode: 0o640})

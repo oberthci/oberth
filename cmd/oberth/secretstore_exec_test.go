@@ -484,6 +484,22 @@ func TestEmitSecretFetchMarkerEmptyFetch(t *testing.T) {
 
 // --- #249: short secret redaction tests ---
 
+func TestSecretWrappersRefuseShortValuesBeforeStartingChild(t *testing.T) {
+	for _, materialize := range []bool{false, true} {
+		var output bytes.Buffer
+		var err error
+		command := []string{"/bin/sh", "-c", "printf child-started"}
+		if materialize {
+			err = executeMaterialize(t.TempDir(), nil, command, [][]byte{[]byte("XY")}, &output, &output)
+		} else {
+			err = execChild(t.TempDir(), command, [][]byte{[]byte("XY")}, &output, &output)
+		}
+		if err == nil || output.Len() != 0 {
+			t.Fatalf("child started with short secret: err=%v output=%q", err, output.String())
+		}
+	}
+}
+
 func TestExecChildRedactsShortSecret(t *testing.T) {
 	dir := t.TempDir()
 	secret := []byte("abc12") // 5 bytes, well below the old 8-byte threshold

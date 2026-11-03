@@ -785,12 +785,12 @@ func (remover scopedRemover) RemoveRepository(ctx context.Context, actor, name s
 	return remover.inner.RemoveRepository(ctx, actor, remover.scope.qualified(repository))
 }
 
-// redact strips global sequence numbers from what a scoped actor receives
+// stripScopedSequences strips global sequence numbers from what a scoped actor receives
 // (#073): a run's QueueSequence, a promotion's Sequence and a CI issue's
 // CIWorkSequence count every run, promotion and CI work item on the
 // installation, so they would reveal out-of-scope volume. The values stay intact inside the call; only the response loses
 // them. An unscoped call's value passes through unchanged.
-func (service *API) redact(value any) any {
+func (service *API) stripScopedSequences(value any) any {
 	if service.scope == nil {
 		return value
 	}
@@ -817,12 +817,12 @@ func (service *API) redact(value any) any {
 	case []RepoView:
 		views := make([]RepoView, len(typed))
 		for index, view := range typed {
-			view.LatestRuns = service.redact(view.LatestRuns).([]model.Run)
+			view.LatestRuns = service.stripScopedSequences(view.LatestRuns).([]model.Run)
 			views[index] = view
 		}
 		return views
 	case api.RunListResponse:
-		typed.Runs = service.redact(typed.Runs)
+		typed.Runs = service.stripScopedSequences(typed.Runs)
 		typed.NextBefore = 0
 		return typed
 	case model.Promotion:

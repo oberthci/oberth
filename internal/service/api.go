@@ -348,7 +348,7 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 		return nil, err
 	}
 	value, err = service.callTool(ctx, actor, name, raw)
-	return service.redact(value), err
+	return service.stripScopedSequences(value), err
 }
 
 func (service *API) callTool(ctx context.Context, actor api.Actor, name string, raw json.RawMessage) (any, error) {
@@ -996,7 +996,7 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 			runs[i].DisplayReason = runs[i].Scheduling.Message
 		}
 	}
-	return service.redact(runs), nil
+	return service.stripScopedSequences(runs), nil
 }
 
 // RunCounts is the dashboard's count of retained runs, in total and per
@@ -1137,7 +1137,7 @@ func (service *API) readRun(ctx context.Context, actor api.Actor, id string, sum
 			response.Repository = repository
 		}
 	}
-	return service.redact(response), nil
+	return service.stripScopedSequences(response), nil
 }
 
 // RunLog is the read-only dashboard view of one known step's bounded redacted
@@ -1332,7 +1332,7 @@ func (service *API) Repositories(ctx context.Context, actor api.Actor) (any, err
 			}
 		}
 	}
-	return service.redact(views), nil
+	return service.stripScopedSequences(views), nil
 }
 
 func (service *API) Issues(ctx context.Context, actor api.Actor, filter api.IssueFilter) (any, error) {
@@ -1344,7 +1344,7 @@ func (service *API) Issues(ctx context.Context, actor api.Actor, filter api.Issu
 	if err != nil {
 		return nil, err
 	}
-	return service.redact(page), nil
+	return service.stripScopedSequences(page), nil
 }
 
 func (service *API) Status(ctx context.Context, actor api.Actor) (any, error) {
