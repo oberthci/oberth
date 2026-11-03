@@ -1541,14 +1541,12 @@ func (service *API) statusFromRun(ctx context.Context, repository model.Reposito
 		}
 		response.Burns, response.ExitCode = wireBurns(response.Steps, run)
 	}
-	response.Scheduling = service.scheduling(ctx, run, response.Steps)
+	var queuedReason string
+	response.Scheduling, queuedReason = service.observeScheduling(ctx, run, response.Steps, true)
 	response.Run = presented
 	applyExecutionDisplay(&response.Run, response.Scheduling)
+	applyQueuedDisplay(&response.Run, response.Scheduling, queuedReason)
 	response.DisplayStatus, response.DisplayReason = response.Run.DisplayStatus, response.Run.DisplayReason
-	if presented.DisplayStatus == "queued" && response.Scheduling != nil {
-		response.DisplayReason = response.Scheduling.Message
-		response.Run.DisplayReason = response.DisplayReason
-	}
 	response.FailedStep = run.FailedStep
 	if service.issues != nil && run.RefKind == model.RefBranch {
 		issue, issueErr := service.issues.OpenCIIssue(ctx, repository.ID, run.Ref)
