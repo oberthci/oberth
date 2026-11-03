@@ -9,8 +9,10 @@ become generic capability grants. Operators provision new capability accounts,
 RBAC and resource capacity before migrating their pipelines.
 
 Migrations 45/46/47 retire only the inactive pilot, create an empty capability
-table, and reserve the deferred execution-retirement boundary. Schema 47 does
-not delete, freeze or require draining live work. A Recreate upgrade reaches
+table, and reserve the deferred execution-retirement boundary. Schema 47 itself
+does not delete, freeze or require draining live work; the v0.17.83 CLI requires
+legacy executions to be drained and their resources deleted before replacement
+(see the [retirement upgrade procedure](../retirement-upgrade.md)). A Recreate upgrade reaches
 normal owner recovery with all execution journals, capacity interlocks and
 pending cancellations intact. Existing Workflows are adopted or cleaned through
 the same ownership checks as a restart; migration itself never proves cleanup.
