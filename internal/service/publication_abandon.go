@@ -11,6 +11,10 @@ import (
 	"github.com/oberthci/oberth/internal/store"
 )
 
+type promotionPinReleaser interface {
+	ReleasePromotionPin(context.Context, string, string, string) error
+}
+
 type publicationAbandoner interface {
 	AbandonPublication(context.Context, string, string, string) (model.PublicationFinalization, error)
 }
@@ -79,5 +83,24 @@ func (scheduler *Scheduler) AbandonPublication(ctx context.Context, id, actor, r
 		return final, err
 	}
 	scheduler.signalQueue()
+	if final.Promotion.ID != "" {
+		if git, ok := scheduler.git.(promotionPinReleaser); ok {
+			// Abandonment stays committed if local cleanup fails. Use a separate,
+			// bounded context so a cancelled caller cannot strand the pin after commit.
+			cleanupCtx, cancel := boundedWorkspaceCleanupContext(ctx)
+			defer cancel()
+			repository, err := scheduler.store.Repository(cleanupCtx, final.Publication.RepoID)
+			if err != nil {
+				return final, fmt.Errorf("publication abandoned; resolve promotion pin repository: %w", err)
+			}
+			upstream, err := scheduler.store.Upstream(cleanupCtx, repository.UpstreamID)
+			if err != nil {
+				return final, fmt.Errorf("publication abandoned; resolve promotion pin upstream: %w", err)
+			}
+			if err := git.ReleasePromotionPin(cleanupCtx, upstream.QualifiedRepo(repository.Name), final.Publication.Ref, final.Publication.ResultSHA); err != nil {
+				return final, fmt.Errorf("publication abandoned; release promotion pin: %w", err)
+			}
+		}
+	}
 	return final, nil
 }

@@ -1,6 +1,7 @@
 package gitcache
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -94,5 +95,46 @@ func TestRefreshSweepsAlreadyDeliveredLegacyPromotionPin(t *testing.T) {
 	}
 	if got := runGit(t, ready.Path, "for-each-ref", "--format=%(refname)", "refs/oberth/"); strings.Contains(got, "promotions/") {
 		t.Fatalf("delivered legacy pin survives refresh: %s", got)
+	}
+}
+
+func TestReleaseAbandonedPromotionPinIsLocalExactAndIdempotent(t *testing.T) {
+	r := newTestRepository(t)
+	c := newTestCache(t, r.upstream)
+	ready, err := c.Ensure(t.Context(), "example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	abandoned := r.featureCommit(t, "feature/abandoned", "abandoned\n")
+	runGit(t, r.work, "push", ready.Path, abandoned+":refs/heads/feature/abandoned")
+	ref := promotionRefPrefix + "main/" + abandoned
+	other := promotionRefPrefix + "release/" + abandoned
+	runGit(t, ready.Path, "update-ref", ref, abandoned)
+	runGit(t, ready.Path, "update-ref", other, abandoned)
+	releaser, ok := any(c).(interface {
+		ReleasePromotionPin(context.Context, string, string, string) error
+	})
+	if !ok {
+		t.Fatal("cache cannot release an abandoned promotion pin")
+	}
+	for range 2 {
+		if err := releaser.ReleasePromotionPin(t.Context(), "example", "main", abandoned); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := runGit(t, ready.Path, "for-each-ref", "--format=%(refname)", ref); got != "" {
+		t.Fatalf("abandoned pin retained: %s", got)
+	}
+	if got := runGit(t, ready.Path, "rev-parse", other); got != abandoned {
+		t.Fatal("cleanup removed another promotion pin")
+	}
+	if got := runGit(t, r.upstream, "rev-parse", "refs/heads/main"); got != r.initialSHA {
+		t.Fatal("cleanup changed the upstream")
+	}
+	if err := releaser.ReleasePromotionPin(t.Context(), "example", "../main", abandoned); err == nil {
+		t.Fatal("invalid branch accepted")
+	}
+	if err := releaser.ReleasePromotionPin(t.Context(), "example", "main", "invalid"); err == nil {
+		t.Fatal("invalid SHA accepted")
 	}
 }
