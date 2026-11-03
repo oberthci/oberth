@@ -1121,22 +1121,26 @@ func (c *Cache) Serve(ctx context.Context, input string, service Service, protoc
 }
 
 func (c *Cache) serveLocked(ctx context.Context, path string, service Service, protocol string, stdin io.Reader, stdout, stderr io.Writer) error {
+	extra := map[string]string{}
+	if protocol != "" {
+		extra["GIT_PROTOCOL"] = protocol
+	}
+	return c.runTransport(ctx, commandSpec{
+		dir: path, args: c.serviceArgs(service, path),
+		stdin: stdin, stdout: stdout, stderr: stderr, env: extra,
+	})
+}
+
+func (c *Cache) runTransport(ctx context.Context, command commandSpec) error {
 	// Repository preparation precedes this point; durable finalization follows it.
-	if transport, ok := stdin.(interface {
+	if transport, ok := command.stdin.(interface {
 		BeginTransport()
 		EndTransport()
 	}); ok {
 		transport.BeginTransport()
 		defer transport.EndTransport()
 	}
-	extra := map[string]string{}
-	if protocol != "" {
-		extra["GIT_PROTOCOL"] = protocol
-	}
-	return c.run(ctx, commandSpec{
-		dir: path, args: c.serviceArgs(service, path),
-		stdin: stdin, stdout: stdout, stderr: stderr, env: extra,
-	})
+	return c.run(ctx, command)
 }
 
 func (c *Cache) serviceArgs(service Service, path string) []string {
