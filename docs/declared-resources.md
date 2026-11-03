@@ -130,11 +130,12 @@ review overshoot, Kubernetes capacity and platform headroom when tuning it.
 existing request values that were never measured before relying on increased
 concurrency; low requests paired with high limits now reserve less capacity.
 
-A workflow with CPU/memory declarations must have positive requests and a
+A workflow with CPU/memory requests must have positive requests and a
 positive effective memory limit on every container, including authored helpers.
-Partial declarations and unbounded graphs are refused before submission.
+Partial requests and unbounded graphs are refused before submission.
 A reservation that cannot fit the host budget, including helper and headroom
-reserves, is refused rather than using a size class. Undeclared legacy workflows
+reserves, is refused rather than using a size class.
+Workflows without CPU/memory requests, including limits-only workflows,
 retain size admission and receive a deprecation warning in the run message,
 with guidance to commit measured requests/limits in git. Admission inserts no
 requests or limits. Disabling declared admission refuses new declared runs;
@@ -146,4 +147,4 @@ and repository groups remain coarse admission controls. Full graph,
 recovery and rollout details are in [declared admission](declared-admission.md).
 Existing sealed demand is restored without recalculating it from current git;
 helper and run reserves use the restoring server's settings. Numeric resource
-ceilings require migration 40.
+ceilings require migration 48.
