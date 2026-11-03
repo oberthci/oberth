@@ -84,6 +84,7 @@ type pressureCheck struct {
 	state               model.AdmissionPressure
 	sampledAt           time.Time
 	lastGrant           time.Time
+	starvationGranted   bool
 	ioHeld, cpuHeld     bool
 	warned              bool
 	deferrals, bypasses uint64
@@ -199,12 +200,16 @@ func (gate *weightedAdmission) pressureWaitLocked(r *admissionReservation) *mode
 	return &model.PressureDeferral{Resource: p.state.Resource, Avg60: value, Since: r.pressureSince, MaxDeferSeconds: int64(p.config.MaxDefer / time.Second)}
 }
 
-// Give every prepared, unparked waiter its own clock, even when an earlier
-// pressure-held candidate ends the grant pass. Capacity/order still gate grants.
+// Legacy avg60 gives prepared waiters their own clocks. Avg10 starts a clock
+// only at an eligible pressure deferral and keeps it across brief PSI drops.
 func (gate *weightedAdmission) preparePressureWaitsLocked(now time.Time) {
 	p := gate.pressure
 	for _, r := range gate.waiters {
 		r.pressureDeferred = false
+		if p != nil && p.config.Enabled {
+			r.pressureDeferred = p.state.Holding && !r.pressureSince.IsZero()
+			continue
+		}
 		if p == nil || !p.state.Holding {
 			r.pressureSince = time.Time{}
 			continue
@@ -215,19 +220,12 @@ func (gate *weightedAdmission) preparePressureWaitsLocked(now time.Time) {
 		if holder, ahead := gate.groupBlockerLocked(r); holder != "" || ahead != "" {
 			continue
 		}
-		if p.config.Enabled && gate.pressureBypassLocked(r, now) {
-			continue
-		}
 		if r.pressureSince.IsZero() {
 			r.pressureSince = now
 			p.deferrals++
 			p.config.Logf("admission deferred: %s pressure; run=%s cpu_some_avg10=%.2f io_some_avg10=%.2f", p.state.Resource, r.runID, p.state.Sample.CPU.SomeAvg10, p.state.Sample.IO.SomeAvg10)
 		}
-		if p.config.Enabled {
-			r.pressureDeferred = true
-		} else {
-			r.pressureDeferred = now.Sub(r.pressureSince) < p.config.MaxDefer
-		}
+		r.pressureDeferred = now.Sub(r.pressureSince) < p.config.MaxDefer
 	}
 }
 
@@ -238,9 +236,17 @@ func (gate *weightedAdmission) deferPressureLocked(r *admissionReservation, now 
 	}
 	if p.config.Enabled {
 		if gate.pressureBypassLocked(r, now) {
+			if !gate.pressureIdleBypassLocked(r) {
+				p.starvationGranted = true
+			}
 			p.bypasses++
 			p.config.Logf("admission pressure bypass: run=%s idle_tag=%t cpu_some_avg10=%.2f io_some_avg10=%.2f", r.runID, gate.runs == 0 && !r.pressurePromotion && (r.pressureRelease || r.refKind == model.RefTag), p.state.Sample.CPU.SomeAvg10, p.state.Sample.IO.SomeAvg10)
 			return false
+		}
+		if r.pressureSince.IsZero() {
+			r.pressureSince = now
+			p.deferrals++
+			p.config.Logf("admission deferred: %s pressure; run=%s cpu_some_avg10=%.2f io_some_avg10=%.2f", p.state.Resource, r.runID, p.state.Sample.CPU.SomeAvg10, p.state.Sample.IO.SomeAvg10)
 		}
 		r.pressureDeferred = true
 		return true
@@ -261,8 +267,11 @@ func (gate *weightedAdmission) pressureBypassLocked(r *admissionReservation, now
 	if p.settling() {
 		return false
 	}
-	if gate.runs == 0 && !r.pressurePromotion && (r.pressureRelease || r.refKind == model.RefTag) {
+	if gate.pressureIdleBypassLocked(r) {
 		return true
+	}
+	if p.starvationGranted || !p.settledSample() {
+		return false
 	}
 	for _, other := range gate.waiters {
 		if other == r {
@@ -275,11 +284,12 @@ func (gate *weightedAdmission) pressureBypassLocked(r *admissionReservation, now
 			}
 		}
 	}
-	since := r.queuedAt
-	if since.IsZero() {
-		since = r.preparedAt
-	}
+	since := r.pressureSince
 	return !since.IsZero() && now.Sub(since).Seconds() > float64(p.config.MaxWaitSeconds) && p.state.Sample.CPU.SomeAvg10 < p.config.HardCPU && p.state.Sample.IO.SomeAvg10 < p.config.HardIO
+}
+
+func (gate *weightedAdmission) pressureIdleBypassLocked(r *admissionReservation) bool {
+	return gate.runs == 0 && !r.pressurePromotion && (r.pressureRelease || r.refKind == model.RefTag)
 }
 
 func (gate *weightedAdmission) pressureStateLocked() *model.AdmissionPressure {

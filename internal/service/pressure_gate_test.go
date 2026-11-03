@@ -160,7 +160,7 @@ func TestHostPressureStarvationOnlyHeadAndBudgetStillApply(t *testing.T) {
 		t.Fatal("expired follower bypassed fresh head")
 	}
 	// Once the head is old, its grant still consumes capacity.
-	head.queuedAt = f.now.Add(-21 * time.Minute)
+	head.pressureSince = f.now.Add(-21 * time.Minute)
 	behind.weight = f.gate.capacity
 	f.advance(time.Second)
 	if !head.granted || behind.granted {
@@ -262,5 +262,89 @@ func TestHostPressureIdleAdmitsBackToBack(t *testing.T) {
 		if !f.prepare(id, model.PriorityNormal, "", periapsis.S).granted {
 			t.Fatal("idle host did not clear immediately")
 		}
+	}
+}
+
+func TestHostPressureStarvationStartsAtPressureDeferral(t *testing.T) {
+	f := hostPressureTestGate()
+	// The old queue time may represent a long wait for budget or a VM.
+	f.sample.CPU.SomeAvg10 = 45
+	r := f.prepare(1, model.PriorityNormal, "", periapsis.S)
+	r.queuedAt = f.now.Add(-time.Hour)
+	f.advance(time.Second)
+	if r.granted {
+		t.Fatal("queue age incorrectly counted as pressure starvation")
+	}
+	// Keep the pressure clock across a brief hysteresis recovery while
+	// capacity prevents a grant, so a short dip cannot reset starvation.
+	f.gate.maxRuns = 1
+	f.gate.runs = 1
+	f.sample.CPU.SomeAvg10 = 0
+	f.advance(time.Second)
+	f.sample.CPU.SomeAvg10 = 45
+	f.advance(time.Second)
+	f.gate.runs = 0
+	f.advance(20*time.Minute - 3*time.Second)
+	if r.granted {
+		t.Fatal("starvation granted at the exact wait boundary")
+	}
+	f.advance(time.Second)
+	if !r.granted {
+		t.Fatal("first pressure deferral was lost across a brief recovery")
+	}
+}
+
+func TestHostPressureStarvationOnePerPassAndSettleWindow(t *testing.T) {
+	f := hostPressureTestGate()
+	f.sample.CPU.SomeAvg10 = 45
+	first := f.prepare(1, model.PriorityNormal, "", periapsis.S)
+	second := f.prepare(2, model.PriorityNormal, "", periapsis.S)
+	third := f.prepare(3, model.PriorityNormal, "", periapsis.S)
+	// Model waiters previously deferred at the head before priority changed.
+	second.pressureSince, third.pressureSince = f.now, f.now
+	f.advance(20*time.Minute + time.Second)
+	if !first.granted || second.granted || third.granted {
+		t.Fatalf("starvation admitted a backlog in one pass: runs=%d", f.gate.runs)
+	}
+	f.advance(15 * time.Second)
+	if second.granted {
+		t.Fatal("starvation admitted again before settling")
+	}
+	f.advance(15 * time.Second)
+	if !second.granted || third.granted {
+		t.Fatal("starvation must admit only one run in the next window")
+	}
+}
+
+func TestHostPressureStarvationOnlyOnceInLongPass(t *testing.T) {
+	f := hostPressureTestGate()
+	f.sample.CPU.SomeAvg10 = 45
+	first := f.prepare(1, model.PriorityNormal, "", periapsis.S)
+	second := f.prepare(2, model.PriorityNormal, "", periapsis.S)
+	first.pressureSince, second.pressureSince = f.now.Add(-21*time.Minute), f.now.Add(-21*time.Minute)
+	// A slow grant makes this one pass last longer than the settle window.
+	// Per-pass protection must still stop the second starvation grant.
+	f.gate.now = func() time.Time {
+		f.now = f.now.Add(31 * time.Second)
+		return f.now
+	}
+	f.advance(0)
+	if !first.granted || second.granted {
+		t.Fatal("a long pass admitted more than one starvation grant")
+	}
+}
+
+func TestHostPressureBudgetWaitDoesNotStartStarvation(t *testing.T) {
+	f := hostPressureTestGate()
+	running := f.prepare(1, model.PriorityNormal, "", periapsis.XL)
+	f.sample.CPU.SomeAvg10 = 45
+	waiting := f.prepare(2, model.PriorityNormal, "", periapsis.S)
+	f.advance(21 * time.Minute)
+	if !waiting.pressureSince.IsZero() {
+		t.Fatal("capacity wait incorrectly started pressure starvation")
+	}
+	running.cancel()
+	if waiting.granted || waiting.pressureSince.IsZero() {
+		t.Fatal("releasing capacity should start a pressure deferral")
 	}
 }

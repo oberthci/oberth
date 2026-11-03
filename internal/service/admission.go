@@ -469,6 +469,9 @@ func (gate *weightedAdmission) grantLocked() {
 	// at the head again so the budget drains for it.
 	var head *admissionReservation
 	now := gate.clock()
+	if gate.pressure != nil {
+		gate.pressure.starvationGranted = false
+	}
 	gate.pressure.refresh(now)
 	gate.sortWaitersLocked()
 	gate.preparePressureWaitsLocked(now)
