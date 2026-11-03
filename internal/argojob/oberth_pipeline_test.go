@@ -163,7 +163,7 @@ func TestOberthBuildPipelineRunsChartRegressions(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string][]string{
-		"chart-unittest":              {"/tmp/oberth-tools/bin/untt-linux-amd64", "--strict", "charts/oberth"},
+		"chart-unittest":              {"/bin/sh", "hack/test-chart-unittest.sh"},
 		"test-chart-schema":           {"/usr/bin/python3", "-I", "-B", "scripts/test_chart_schema.py", "-v"},
 		"test-make-entrypoints":       {"/usr/bin/python3", "-I", "-B", "scripts/test_make_entrypoints.py", "-v"},
 		"test-release-prune-contract": {"/usr/bin/python3", "-I", "-B", "scripts/test_release_prune_contract.py", "-v"},

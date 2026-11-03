@@ -1617,8 +1617,8 @@ spec:
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
-      command: ["/tmp/oberth-tools/bin/untt-linux-amd64"]
-      args: ["--strict", "charts/oberth"]
+      command: ["/bin/sh"]
+      args: ["hack/test-chart-unittest.sh"]
       env:
       - name: PATH
         value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
