@@ -205,6 +205,7 @@ func listenAdminSocket(ctx context.Context, path string) (net.Listener, error) {
 		if err != nil || !info.IsDir() || !adminPathOwned(info) {
 			return nil, errors.New("admin socket directory must be owned by the daemon user and must not be a symlink")
 		}
+		// #nosec G302 -- This owner-only directory needs its execute bit for traversal; regular-file permission limits do not apply.
 		if err := os.Chmod(directory, 0o700); err != nil {
 			return nil, err
 		}
