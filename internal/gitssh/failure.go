@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+
+	"golang.org/x/crypto/ssh"
 )
 
 // ErrTransportUnavailable identifies a temporary network or stream failure.
@@ -40,7 +42,8 @@ func temporaryIO(err error) bool {
 }
 
 func sessionFailure(err error, message string) error {
-	if temporaryIO(err) {
+	var channel *ssh.OpenChannelError
+	if temporaryIO(err) || (errors.As(err, &channel) && (channel.Reason == ssh.ResourceShortage || channel.Reason == ssh.ConnectionFailed)) {
 		return transportFailure(message)
 	}
 	return refusal(message)
