@@ -92,13 +92,34 @@ func (c *Controller) boundCapability(ctx context.Context, wf *wfv1.Workflow, rep
 	if err != nil {
 		return nil, fmt.Errorf("argojob: read workflow capability: %w", err)
 	}
-	if current == nil || capabilityBinding(binding.RepositoryID, current) != encoded || current.ServiceAccount != wf.Spec.ServiceAccountName || current.Namespace != wf.Namespace {
+	if current == nil || capabilityBinding(binding.RepositoryID, current) != encoded || !c.capabilityIdentityMatches(wf, current) || current.Namespace != wf.Namespace {
 		return nil, ErrWorkflowCapabilityChanged
 	}
 	if err := c.verifyCapabilityScope(ctx, current); err != nil {
 		return nil, err
 	}
 	return current, nil
+}
+
+// Recovery and token delivery must also reject the old workflow-wide operator
+// identity. Rebinding a persisted Workflow cannot remove tokens from live Pods.
+func (c *Controller) capabilityIdentityMatches(wf *wfv1.Workflow, grant *argoworkflow.Capability) bool {
+	if wf.Spec.ServiceAccountName != c.config.PipelineServiceAccount || wf.Spec.AutomountServiceAccountToken == nil || *wf.Spec.AutomountServiceAccountToken || wf.Spec.Executor == nil || wf.Spec.Executor.ServiceAccountName != c.config.ExecutorServiceAccount {
+		return false
+	}
+	valid := true
+	check := func(t *wfv1.Template) {
+		account := c.config.ExecutorServiceAccount
+		if t.Resource != nil {
+			account = grant.ServiceAccount
+		}
+		if t.ServiceAccountName != c.config.PipelineServiceAccount || t.AutomountServiceAccountToken == nil || *t.AutomountServiceAccountToken || (t.Executor != nil && t.Executor.ServiceAccountName != account) || (t.Resource != nil && t.Executor == nil) {
+			valid = false
+		}
+	}
+	walkTemplates(wf, check)
+	walkTemplate(wf.Spec.TemplateDefaults, check, 0)
+	return valid
 }
 
 func (config Config) validateCapability(c *argoworkflow.Capability) error {

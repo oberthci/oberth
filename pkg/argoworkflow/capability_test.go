@@ -113,3 +113,35 @@ func TestOperatorResourceExecutorRequiresNamedTemplate(t *testing.T) {
 		})
 	}
 }
+
+func TestCapabilityIdentitySeparatesResourceAuthority(t *testing.T) {
+	policy := capabilityPolicyForTest(t)
+	identity := testBranchIdentity()
+	identity.Namespace = policy.Capability.Namespace
+	identity.ResourceServiceAccountName = policy.Capability.ServiceAccount
+	for _, scenario := range []string{"valid", "pipeline", "executor", "automount", "missing binding", "foreign binding"} {
+		t.Run(scenario, func(t *testing.T) {
+			candidate := identity
+			switch scenario {
+			case "pipeline":
+				candidate.ServiceAccountName = candidate.ResourceServiceAccountName
+			case "executor":
+				candidate.ExecutorServiceAccountName = candidate.ResourceServiceAccountName
+			case "automount":
+				candidate.AutomountServiceAccountToken = true
+			case "missing binding":
+				candidate.ResourceServiceAccountName = ""
+			case "foreign binding":
+				candidate.ResourceServiceAccountName = "other-operator"
+			}
+			wf, err := Decode([]byte(capabilityResourceDocument))
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = Prepare(wf, policy, candidate)
+			if (err == nil) != (scenario == "valid") {
+				t.Fatalf("Prepare: %v", err)
+			}
+		})
+	}
+}

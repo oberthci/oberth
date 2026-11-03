@@ -778,7 +778,9 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 		return nil, err
 	}
 	if c := request.Capability; c != nil {
-		identity = argoworkflow.Identity{Namespace: c.Namespace, ServiceAccountName: c.ServiceAccount, ExecutorServiceAccountName: config.ExecutorServiceAccount, ResourceServiceAccountName: c.ServiceAccount, AutomountServiceAccountToken: true}
+		// Operator authority belongs only to admitted resource executors.
+		// Container, script and device leaves retain the tokenless pipeline identity.
+		identity.ResourceServiceAccountName = c.ServiceAccount
 	}
 	policy := argoworkflow.Policy{
 		Capability:          request.Capability,

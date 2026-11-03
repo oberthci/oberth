@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
+	"k8s.io/utils/ptr"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
@@ -20,11 +21,13 @@ func TestCapabilityResourceExecutorUsesLiveOperatorAuthority(t *testing.T) {
 	c, wf, pod, requests := executorRetryFixture(t)
 	grant := operatorCapability()
 	wf.Annotations[capabilityAnnotation] = capabilityBinding(7, grant)
-	wf.Spec.ServiceAccountName = grant.ServiceAccount
-	wf.Spec.Templates = []wfv1.Template{{Name: "task", Resource: &wfv1.ResourceTemplate{Action: "get"}, Executor: &wfv1.ExecutorConfig{ServiceAccountName: grant.ServiceAccount}}}
+	wf.Spec.ServiceAccountName = c.config.PipelineServiceAccount
+	wf.Spec.AutomountServiceAccountToken = ptr.To(false)
+	wf.Spec.Executor = &wfv1.ExecutorConfig{ServiceAccountName: c.config.ExecutorServiceAccount}
+	wf.Spec.Templates = []wfv1.Template{{Name: "task", ServiceAccountName: c.config.PipelineServiceAccount, AutomountServiceAccountToken: ptr.To(false), Resource: &wfv1.ResourceTemplate{Action: "get"}, Executor: &wfv1.ExecutorConfig{ServiceAccountName: grant.ServiceAccount}}}
 	wf.Status.Nodes = map[string]wfv1.NodeStatus{"task-node": {TemplateName: "task"}}
 	pod.Annotations = map[string]string{"workflows.argoproj.io/node-id": "task-node"}
-	pod.Spec.ServiceAccountName = grant.ServiceAccount
+	pod.Spec.ServiceAccountName = c.config.PipelineServiceAccount
 	pod.Spec.Containers[0].Image = argoworkflow.NonrootExecutorImage
 	pod.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{{Name: executorTokenVolume, MountPath: executorTokenDir}}
 	if _, err := c.kube.CoreV1().Pods(wf.Namespace).Update(t.Context(), pod, metav1.UpdateOptions{}); err != nil {
@@ -62,7 +65,7 @@ func TestCapabilityResourceExecutorUsesLiveOperatorAuthority(t *testing.T) {
 	if err := c.retireExecutorIdentity(t.Context(), wf); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.kube.CoreV1().Pods(wf.Namespace).Get(t.Context(), c.identityPodName(wf.UID, wf.Spec.ServiceAccountName), metav1.GetOptions{}); err == nil {
+	if _, err := c.kube.CoreV1().Pods(wf.Namespace).Get(t.Context(), c.identityPodName(wf.UID, "operator-task-runner"), metav1.GetOptions{}); err == nil {
 		t.Fatal("operator identity lifetime pod survived cleanup after revocation")
 	}
 }
