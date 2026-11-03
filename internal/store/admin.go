@@ -344,6 +344,17 @@ SELECT COUNT(*) FROM promotions WHERE repo_id = ? AND status = 'pending'`,
 			ErrInvalidState, name, pendingPromotions)
 	}
 
+	// Old KubeVirt grants remain authoritative during the staged migration.
+	// Preserve both active and revoked grant history instead of cascading it
+	// away or exposing a raw SQLite retirement-trigger error.
+	var legacyGrants int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM kubevirt_grants WHERE repo_id=?`, repoID).Scan(&legacyGrants); err != nil {
+		return RemovedRepository{}, fmt.Errorf("check legacy KubeVirt grant: %w", err)
+	}
+	if legacyGrants != 0 {
+		return RemovedRepository{}, fmt.Errorf("%w: repository %s has legacy KubeVirt grant history; archive the repository to preserve it", ErrInvalidState, name)
+	}
+
 	// Attempt deletion. FK constraints from runs, promotions, receive_events,
 	// publications, issues, ci_issue_work, ci_issue_projections, trusted_plans,
 	// and trusted_applies will fail the deletion if any immutable history exists.
