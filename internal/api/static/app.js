@@ -189,7 +189,7 @@ function runMessage(run) {
   return "";
 }
 /* Repository names repeat across upstreams (a "terraform" under github,
-   codeberg and skipops), and a bare name is then an ambiguous selector the
+   codeberg and acme), and a bare name is then an ambiguous selector the
    API refuses. The dashboard keys a repository by upstream/org/name — the
    qualified selector the API resolves — and labels a shared name org/name. */
 function upstreamOf(repo) {

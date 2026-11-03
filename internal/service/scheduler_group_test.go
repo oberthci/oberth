@@ -233,14 +233,14 @@ func (engine *groupEngine) assertNoViolations(t *testing.T) {
 }
 
 type groupFixture struct {
-	store     *store.Store
-	terraform model.Repository
-	beacon    model.Repository
-	engine    *groupEngine
-	scheduler *Scheduler
-	control   *API
-	git       *controlGit
-	stop      func()
+	store          *store.Store
+	terraform      model.Repository
+	exampleService model.Repository
+	engine         *groupEngine
+	scheduler      *Scheduler
+	control        *API
+	git            *controlGit
+	stop           func()
 }
 
 func newGroupFixture(t *testing.T, maxConcurrent int) *groupFixture {
@@ -260,7 +260,7 @@ func newGroupFixture(t *testing.T, maxConcurrent int) *groupFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	beacon, err := database.CreateRepository(ctx, model.RepositorySpec{Name: "beacon", UpstreamID: upstream.ID, DefaultBranch: "main"})
+	exampleService, err := database.CreateRepository(ctx, model.RepositorySpec{Name: "example-service", UpstreamID: upstream.ID, DefaultBranch: "main"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,12 +289,12 @@ func newGroupFixture(t *testing.T, maxConcurrent int) *groupFixture {
 	}
 	// These fixtures exercise admission mechanics with XL runs; XL takes a
 	// size grant since #1021.
-	for _, repository := range []model.Repository{terraform, beacon} {
+	for _, repository := range []model.Repository{terraform, exampleService} {
 		if _, err := database.SetSizeGrant(ctx, repository.ID, "admin@host", pipeline.XL); err != nil {
 			t.Fatal(err)
 		}
 	}
-	return &groupFixture{store: database, terraform: terraform, beacon: beacon, engine: engine, scheduler: scheduler, control: control, git: git}
+	return &groupFixture{store: database, terraform: terraform, exampleService: exampleService, engine: engine, scheduler: scheduler, control: control, git: git}
 }
 
 func (fixture *groupFixture) start(t *testing.T) {
@@ -430,7 +430,7 @@ func TestSchedulerSerializesAConcurrencyGroupAcrossTriggersWhileOtherRepositorie
 	}
 	planB := fixture.branch(t, fixture.terraform, "fix-b", "b")
 	apply := fixture.tag(t, fixture.terraform, "apply-1", "c", "d")
-	other := fixture.branch(t, fixture.beacon, "feature-x", "e")
+	other := fixture.branch(t, fixture.exampleService, "feature-x", "e")
 
 	created := fixture.awaitCreated(t, 1)
 	if !created[other.ID] {
@@ -457,7 +457,7 @@ func TestSchedulerSerializesAConcurrencyGroupAcrossTriggersWhileOtherRepositorie
 	if detail.Run.ConcurrencyGroup != terraformState || detail.Scheduling == nil || detail.Scheduling.Admission.Group != terraformState {
 		t.Fatalf("run_get of the waiting apply = %#v", detail)
 	}
-	if other := callGroupStatus(t, fixture.control, "beacon", other.SHA); other.ConcurrencyGroup != "" {
+	if other := callGroupStatus(t, fixture.control, "example-service", other.SHA); other.ConcurrencyGroup != "" {
 		t.Fatalf("an ungrouped run reports group %q", other.ConcurrencyGroup)
 	}
 
@@ -487,8 +487,8 @@ func TestSchedulerParkedGroupRunsDoNotHoldDispatchSlots(t *testing.T) {
 	planA := fixture.branch(t, fixture.terraform, "fix-a", "a")
 	planB := fixture.branch(t, fixture.terraform, "fix-b", "b")
 	planC := fixture.branch(t, fixture.terraform, "fix-c", "c")
-	otherX := fixture.branch(t, fixture.beacon, "feature-x", "d")
-	otherY := fixture.branch(t, fixture.beacon, "feature-y", "e")
+	otherX := fixture.branch(t, fixture.exampleService, "feature-x", "d")
+	otherY := fixture.branch(t, fixture.exampleService, "feature-y", "e")
 	fixture.start(t)
 
 	created := fixture.awaitCreated(t, 2)

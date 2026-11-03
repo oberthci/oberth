@@ -44,7 +44,9 @@ func FromEnv() Config {
 
 func (config Config) Configured() bool { return config.BaseURL != "" }
 
-func (config Config) resolveToken(ctx context.Context) (string, error) {
+// ResolveToken shares credential precedence between REST and MCP clients.
+// The caller's context bounds execution of an operator-configured command.
+func (config Config) ResolveToken(ctx context.Context) (string, error) {
 	if config.Token != "" {
 		return config.Token, nil
 	}
@@ -82,23 +84,11 @@ type Client struct {
 }
 
 func New(ctx context.Context, config Config) (*Client, error) {
-	if config.BaseURL == "" {
-		return nil, errors.New("client: set OBERTH_BASE_URL to the server's https address")
-	}
-	base, err := url.Parse(config.BaseURL)
+	base, err := ValidateServerURL(config.BaseURL)
 	if err != nil {
-		return nil, fmt.Errorf("client: OBERTH_BASE_URL is not a URL: %w", err)
+		return nil, err
 	}
-	if base.Scheme != "https" && base.Scheme != "http" {
-		return nil, fmt.Errorf("client: OBERTH_BASE_URL must be http or https, got %q", base.Scheme)
-	}
-	if base.Host == "" {
-		return nil, errors.New("client: OBERTH_BASE_URL has no host")
-	}
-	if base.Scheme == "http" && !isLoopback(base.Hostname()) {
-		return nil, errors.New("client: use https:// — the token would be transmitted in cleartext")
-	}
-	token, err := config.resolveToken(ctx)
+	token, err := config.ResolveToken(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -112,6 +102,28 @@ func New(ctx context.Context, config Config) (*Client, error) {
 		http:     &http.Client{Timeout: requestTimeout, Transport: transport, CheckRedirect: refuseSchemeDowngrade},
 		download: &http.Client{Transport: transport, CheckRedirect: refuseSchemeDowngrade},
 	}, nil
+}
+
+// ValidateServerURL applies the shared REST and MCP transport policy before
+// resolving credentials or constructing a transport.
+func ValidateServerURL(address string) (*url.URL, error) {
+	if address == "" {
+		return nil, errors.New("client: set OBERTH_BASE_URL to the server's https address")
+	}
+	base, err := url.Parse(address)
+	if err != nil {
+		return nil, fmt.Errorf("client: OBERTH_BASE_URL is not a URL: %w", err)
+	}
+	if base.Scheme != "https" && base.Scheme != "http" {
+		return nil, fmt.Errorf("client: OBERTH_BASE_URL must be http or https, got %q", base.Scheme)
+	}
+	if base.Host == "" {
+		return nil, errors.New("client: OBERTH_BASE_URL has no host")
+	}
+	if base.Scheme == "http" && !isLoopback(base.Hostname()) {
+		return nil, errors.New("client: use https:// — the token would be transmitted in cleartext")
+	}
+	return base, nil
 }
 
 // refuseSchemeDowngrade rejects any redirect that steps from https down to a

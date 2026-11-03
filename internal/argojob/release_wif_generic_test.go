@@ -16,12 +16,12 @@ func genericWIFConfig() Config {
 	c := wifTestConfig()
 	c.ReleaseWIF.Roles["artifact-deployer"] = c.ReleaseWIF.Roles["image-writer"]
 	delete(c.ReleaseWIF.Roles, "image-writer")
-	grant := c.ReleaseWIF.Repositories["github/skipops/oberth"]
+	grant := c.ReleaseWIF.Repositories["github/acme/oberth"]
 	grant.Templates["main"] = "artifact-deployer"
 	grant.StepServiceAccounts = map[string]string{"main": "release-step-main"}
 	grant.StepRoutes = map[string]ReleaseTagRoute{"main": {Pattern: "v*", File: argoworkflow.ReleaseFile}}
-	c.ReleaseTagRoutes = ReleaseTagRoutes{"github/skipops/oberth": {grant.StepRoutes["main"]}}
-	c.ReleaseWIF.Repositories["github/skipops/oberth"] = grant
+	c.ReleaseTagRoutes = ReleaseTagRoutes{"github/acme/oberth": {grant.StepRoutes["main"]}}
+	c.ReleaseWIF.Repositories["github/acme/oberth"] = grant
 	return c
 }
 
@@ -111,7 +111,7 @@ func TestGenericWIFRefusesIdentityMisuse(t *testing.T) {
 					wf.Spec.Templates[0].Container.Command = []string{"oberth", "secretstore", "exec", "--path", "oberth/data/release/signing", "--", "true"}
 				}
 			})
-			grant := c.ReleaseWIF.Repositories["github/skipops/oberth"]
+			grant := c.ReleaseWIF.Repositories["github/acme/oberth"]
 			switch kind {
 			case "branch":
 				r.Trigger = pipeline.TriggerCI
@@ -131,14 +131,14 @@ func TestGenericWIFRefusesIdentityMisuse(t *testing.T) {
 			case "shared-sa":
 				grant.StepServiceAccounts["main"] = c.PipelineServiceAccount
 			case "other-step":
-				c.PerStepIdentities = map[string]PerRepoIdentityConfig{"github/skipops/oberth/sibling": {ServiceAccountName: "release-step-main"}}
+				c.PerStepIdentities = map[string]PerRepoIdentityConfig{"github/acme/oberth/sibling": {ServiceAccountName: "release-step-main"}}
 			case "pinned-other-step":
 				grant.Templates["sibling"] = "artifact-deployer"
 				grant.StepServiceAccounts["sibling"] = "release-step-main"
 			case "unmapped-step":
 				grant.StepServiceAccounts["sibling"] = "other-step-sa"
 			}
-			c.ReleaseWIF.Repositories["github/skipops/oberth"] = grant
+			c.ReleaseWIF.Repositories["github/acme/oberth"] = grant
 			if _, err := Build(c, r); err == nil {
 				t.Fatal("misuse admitted")
 			}
@@ -149,9 +149,9 @@ func TestGenericWIFRefusesIdentityMisuse(t *testing.T) {
 func TestGenericWIFRoleBoundsAndSnapshot(t *testing.T) {
 	c := genericWIFConfig()
 	clone := c.ReleaseWIF.Clone()
-	grant := c.ReleaseWIF.Repositories["github/skipops/oberth"]
+	grant := c.ReleaseWIF.Repositories["github/acme/oberth"]
 	grant.StepServiceAccounts["main"] = "changed"
-	if clone.Repositories["github/skipops/oberth"].StepServiceAccounts["main"] != "release-step-main" {
+	if clone.Repositories["github/acme/oberth"].StepServiceAccounts["main"] != "release-step-main" {
 		t.Fatal("pinned mapping aliased caller")
 	}
 	c.ReleaseWIF = clone
@@ -173,9 +173,9 @@ func TestGenericWIFRepositoryWithoutAnySecretDerivedIdentity(t *testing.T) {
 	c.PerRepoIdentities = nil
 	c.PerRepoCIIdentities = nil
 	c.PerStepIdentities = nil
-	grant := c.ReleaseWIF.Repositories["github/skipops/oberth"]
+	grant := c.ReleaseWIF.Repositories["github/acme/oberth"]
 	grant.ServiceAccountName = ""
-	c.ReleaseWIF.Repositories["github/skipops/oberth"] = grant
+	c.ReleaseWIF.Repositories["github/acme/oberth"] = grant
 	r := genericWIFRequest(t, nil)
 	wf, err := Build(c, r)
 	if err != nil {
@@ -195,10 +195,10 @@ func TestWIFStepIdentityIsBoundToExactRoute(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			c := genericWIFConfig()
 			r := genericWIFRequest(t, nil)
-			grant := c.ReleaseWIF.Repositories["github/skipops/oberth"]
+			grant := c.ReleaseWIF.Repositories["github/acme/oberth"]
 			pin := ReleaseTagRoute{Pattern: "demo-*", File: ".oberth/demo.yaml"}
 			grant.StepRoutes["main"] = pin
-			c.ReleaseTagRoutes["github/skipops/oberth"] = []ReleaseTagRoute{pin, {Pattern: "other-*", File: pin.File}}
+			c.ReleaseTagRoutes["github/acme/oberth"] = []ReleaseTagRoute{pin, {Pattern: "other-*", File: pin.File}}
 			r.Ref, r.PipelineFile = "demo-1", pin.File
 			switch kind {
 			case "default-file":
@@ -220,7 +220,7 @@ func TestWIFStepIdentityIsBoundToExactRoute(t *testing.T) {
 			case "orphan-binding":
 				grant.StepRoutes["other"] = pin
 			}
-			c.ReleaseWIF.Repositories["github/skipops/oberth"] = grant
+			c.ReleaseWIF.Repositories["github/acme/oberth"] = grant
 			if _, err := Build(c, r); err == nil {
 				t.Fatal("dedicated identity escaped its exact file/pattern binding")
 			}
@@ -240,8 +240,8 @@ func TestWIFStepIdentityIsBoundToExactRoute(t *testing.T) {
 		t.Fatal("preflight authorized delivery without a tag")
 	}
 	snapshot := c.ReleaseWIF.Clone()
-	c.ReleaseWIF.Repositories["github/skipops/oberth"].StepRoutes["main"] = ReleaseTagRoute{Pattern: "*", File: ".oberth/other.yaml"}
-	if snapshot.Repositories["github/skipops/oberth"].StepRoutes["main"].File != argoworkflow.ReleaseFile {
+	c.ReleaseWIF.Repositories["github/acme/oberth"].StepRoutes["main"] = ReleaseTagRoute{Pattern: "*", File: ".oberth/other.yaml"}
+	if snapshot.Repositories["github/acme/oberth"].StepRoutes["main"].File != argoworkflow.ReleaseFile {
 		t.Fatal("route bindings alias caller")
 	}
 }

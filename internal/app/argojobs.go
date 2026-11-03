@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -74,6 +75,7 @@ type DeclarationRecorder interface {
 // contracts the Argo Workflow engine satisfies, so the scheduler, admission
 // gate, store, and audit chain need no knowledge of which engine ran a run.
 type ArgoJobs struct {
+	capabilityGrants  func(context.Context, int64) (*argoworkflow.Capability, error)
 	resourceBlobs     vmrunner.PolicyGit
 	controller        argoControl
 	auditor           service.Auditor
@@ -176,6 +178,17 @@ func (jobs *ArgoJobs) SetDeclarationRecorder(recorder DeclarationRecorder) {
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.declarations = recorder
+}
+
+// SetWorkflowCapabilityLoader wires durable operator authority before serving
+// requests. The controller independently rechecks it at Kubernetes effects.
+func (jobs *ArgoJobs) SetWorkflowCapabilityLoader(load func(context.Context, int64) (*argoworkflow.Capability, error)) {
+	jobs.capabilityGrants = load
+	if controller, ok := jobs.controller.(interface {
+		WithWorkflowCapabilityLoader(func(context.Context, int64) (*argoworkflow.Capability, error)) *argojob.Controller
+	}); ok {
+		controller.WithWorkflowCapabilityLoader(load)
+	}
 }
 
 // SetKubeVirtGrantLoader enables live, repository-scoped VM admission checks.
@@ -361,6 +374,9 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 		}
 	}
 	var fragments map[argoworkflow.FragmentKey]argoworkflow.Fragment
+	if request.DemandReceipt != nil {
+		request.VMIDemandReceipt = request.DemandReceipt
+	}
 	if request.VMIDemandReceipt != nil {
 		fragments = request.VMIDemandReceipt.Fragments()
 	} else {
@@ -388,6 +404,12 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 		SourceDir: request.SourceDir, ApprovedSecrets: approvedSecrets,
 		StepGrants: stepGrants,
 		Fragments:  fragments,
+	}
+	if jobs.capabilityGrants != nil {
+		submission.Capability, err = jobs.capabilityGrants(ctx, request.Repository.ID)
+		if err != nil {
+			return err
+		}
 	}
 	if jobs.kubeVirtGrants != nil {
 		budget, granted, loadErr := jobs.kubeVirtGrants.ActiveKubeVirtGrant(ctx, request.Repository.ID)
@@ -642,7 +664,7 @@ func (jobs *ArgoJobs) Adopt(ctx context.Context, run model.Run) (pipeline.Size, 
 		sha = run.SHA
 	}
 	binding, found, err := controller.Adopt(ctx, argojob.AdoptionRequest{
-		Name: run.WorkflowName, RunID: run.ID, Ref: run.Ref, SHA: sha,
+		RepositoryID: run.RepoID, Name: run.WorkflowName, RunID: run.ID, Ref: run.Ref, SHA: sha,
 		Group: run.ConcurrencyGroup, Trigger: trigger, RunTrigger: kind, ScheduleEntry: run.ScheduleEntry,
 	})
 	if errors.Is(err, argojob.ErrAdoptionRefused) {
@@ -654,7 +676,7 @@ func (jobs *ArgoJobs) Adopt(ctx context.Context, run model.Run) (pipeline.Size, 
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	if current, exists := jobs.intents[run.WorkflowName]; exists {
-		if current.runID != run.ID || current.cancelled || current.adoption == nil || *current.adoption != binding {
+		if current.runID != run.ID || current.cancelled || current.adoption == nil || !reflect.DeepEqual(*current.adoption, binding) {
 			return "", false, fmt.Errorf("%w: app: conflicting Workflow adoption intent", service.ErrAdoptionRefused)
 		}
 		return binding.Size, true, nil
@@ -663,7 +685,7 @@ func (jobs *ArgoJobs) Adopt(ctx context.Context, run model.Run) (pipeline.Size, 
 	return binding.Size, true, nil
 }
 
-// JobNamespace names the namespace the engine's Workflows live in.
+// WorkflowNamespace names the namespace the engine's Workflows live in.
 func (jobs *ArgoJobs) WorkflowNamespace() string {
 	return jobs.controller.Namespace()
 }

@@ -415,7 +415,7 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 		if err := runDispatchExternal(ctx, func(ctx context.Context) error {
 			return scheduler.jobs.Delete(ctx, cancellation.WorkflowName, cancellation.RunID)
 		}); err != nil {
-			return fmt.Errorf("delete superseded Job %s: %w", cancellation.WorkflowName, err)
+			return fmt.Errorf("delete superseded Job %s: %w", cancellation.WorkflowName, &pendingJobDeletionError{err})
 		}
 		if err := scheduler.database().CompleteObservedRunCancellation(ctx, cancellation); err != nil {
 			return fmt.Errorf("complete cancellation for run %s: %w", cancellation.RunID, err)
@@ -515,7 +515,9 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	if err := scheduler.completePendingCancellationsWithGate(workerCtx, scheduler.awaitMutation); err != nil {
+	if err := scheduler.waitForStartupCleanup(workerCtx, "cancellations", func(ctx context.Context) error {
+		return scheduler.completePendingCancellationsWithGate(ctx, scheduler.awaitMutation)
+	}); err != nil {
 		return err
 	}
 	if err := scheduler.recoverPendingPublicationsWithGate(workerCtx, scheduler.awaitMutation); err != nil {
@@ -1029,6 +1031,10 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			cancelState()
 			if (stateErr != nil && !errors.Is(stateErr, store.ErrNotFound)) || (stateErr == nil && !state.Cleaned) {
 				reservation.retain()
+				var mismatch interface{ WorkflowSpecMismatch() bool }
+				if errors.As(err, &mismatch) && mismatch.WorkflowSpecMismatch() {
+					return scheduler.recoverTrustedWorkflowMismatch(ctx, run, repository, reservation)
+				}
 				if recoverablePreflightError(err) && ctx.Err() == nil {
 					return scheduler.recoverDatabasePreflight(ctx, run.ID, reservation)
 				}
@@ -1112,7 +1118,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		var uncertain interface{ AmbiguousCreate() bool }
 		if errors.As(err, &uncertain) && uncertain.AmbiguousCreate() {
 			_ = logFile.Close()
-			scheduler.deferCreateCleanup(ctx, run, workflowName, reservation)
+			scheduler.deferCreateCleanup(ctx, run, workflowName, reservation, err)
 			return nil // The reconciler owns this grant, not the dispatcher.
 		}
 		if _, ok := scheduler.jobs.(JobAdopter); ok && workflowRunAdoptable(run) && ctx.Err() != nil {

@@ -104,14 +104,11 @@ type Config struct {
 	CreateKind             bool
 	UpstreamPrivateKeyPath string
 
-	DryRun            bool
-	Yes               bool
-	Upgrade           bool
-	WatchAdoptionPlan string
-	// Private prepared state comes only from the signed v2 artifact checks.
-	watchRecovery     *watchRecoveryPlan
-	watchChart        string
-	watchValuesSHA256 string
+	Dev        bool
+	Production bool
+	DryRun     bool
+	Yes        bool
+	Upgrade    bool
 	// InstallSecretStore additionally installs a PRODUCTION-mode OpenBao —
 	// standalone server with persistent storage — then initializes it
 	// (1 key share, threshold 1) and unseals it via kubectl exec, prints the
@@ -203,12 +200,6 @@ type Config struct {
 	// ClusterIP. Empty means NodePort on a fresh install and whatever the
 	// existing release has on an upgrade.
 	ServiceType string
-	// watchTunnelOriginCACert is set by the identity preflight when the server
-	// certificate was rotated (or its public key matches but its fingerprint
-	// differs from the live watchTunnel.originCACert pin). OberthHelmArgs uses
-	// it to update the pin in the same helm upgrade so cloudflared keeps
-	// working.
-	watchTunnelOriginCACert string
 	// pendingCertRotation holds the deferred certificate rotation state.
 	// Phase 1 of the identity preflight computes the rotation but does NOT
 	// write to OpenBao; phase 2 (commitServerIdentityRotation) writes after
@@ -510,6 +501,8 @@ type OpenBaoResult struct {
 	// positively provisioned or verified the exact managed Transit mount, key,
 	// policy, and Kubernetes role. It gates runtime enablement.
 	TrustedTransitVerified bool
+	// PKIEnabled retains live PKI enablement during a nonmutating Helm preview.
+	PKIEnabled bool
 	// ServerCACertPEM is the server PKI CA; non-empty enables tls.pki so the
 	// server issues its own short-lived leaf. Clients pin this certificate.
 	ServerCACertPEM string
@@ -537,7 +530,6 @@ type SecretStoreResult struct {
 
 // OberthResult describes the outcome of the Oberth install phase.
 type OberthResult struct {
-	WatchAdoption    []watchAdopted
 	AlreadyInstalled bool
 	// Upgraded reports that an existing release was moved to TargetVersion
 	// (or reconciled to apply explicitly requested values) instead of freshly
@@ -621,20 +613,11 @@ func (cfg *Config) Validate() error {
 		cfg.InstallSecretStore = true
 	}
 
-	if cfg.WatchAdoptionPlan != "" && (!cfg.Upgrade || !cfg.SkipArgo || cfg.InstallSecretStore || cfg.InstallSecretStoreDev || cfg.InstallRekor) {
-		return errors.New("watch adoption requires --upgrade --skip-argo-workflows and cannot install other services")
+	if cfg.Dev && cfg.Production {
+		return errors.New("--dev and --production are mutually exclusive")
 	}
-	if cfg.WatchAdoptionPlan != "" {
-		cfg.SecretStoreUndecided = false
-		if cfg.ChartPath != "" || cfg.ImageRef != "" || cfg.UtilityImage != "" {
-			return errors.New("watch adoption requires the published chart and its images; --chart, --image and --utility-image overrides are forbidden")
-		}
-		if cfg.NetworkPolicy != "" && cfg.NetworkPolicy != "auto" {
-			return errors.New("watch adoption must preserve the installed network policy")
-		}
-		if _, err := readWatchConfiguredValues(*cfg); err != nil {
-			return err
-		}
+	if cfg.Production {
+		return errors.New("production mode is not implemented yet; tracked in BACKLOG.md")
 	}
 	if cfg.InstallSecretStore && cfg.InstallSecretStoreDev {
 		return errors.New("--install-secretstore and --install-secretstore-dev are mutually exclusive")
@@ -712,9 +695,7 @@ func (cfg *Config) Validate() error {
 	if cfg.ChartVersion == "" && cfg.BinaryVersion != "" && cfg.BinaryVersion != "dev" && !strings.HasPrefix(cfg.BinaryVersion, "dev-") {
 		cfg.ChartVersion = cfg.BinaryVersion
 	}
-	if cfg.WatchAdoptionPlan != "" && canonicalChartVersion(cfg.ChartVersion) == "" {
-		return errors.New("watch adoption requires an exact published chart version")
-	}
+
 	return nil
 }
 
@@ -766,10 +747,8 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 		_, _ = fmt.Fprintln(deps.Output, "EVALUATION MODE — not for production. Dev OpenBao state does not survive pod restart.")
 	}
 
-	if cfg.WatchAdoptionPlan == "" {
-		if err := resolveInstallRerunValues(ctx, &cfg, deps, cluster); err != nil {
-			return err
-		}
+	if err := resolveInstallRerunValues(ctx, &cfg, deps, cluster); err != nil {
+		return err
 	}
 
 	// When no explicit secret-store flag was passed, resolve the decision
@@ -796,9 +775,7 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 
 	// The installer advertises clientReachableHost to the CLI and MCP clients
 	// (and prints it as the Ready URL), so the certificate must carry it.
-	if cfg.WatchAdoptionPlan == "" {
-		cfg.TLSExtraDNSNames, cfg.TLSExtraIPs = certificateNamesForClientHost(clientReachableHost(deps), cfg.TLSExtraDNSNames, cfg.TLSExtraIPs)
-	}
+	cfg.TLSExtraDNSNames, cfg.TLSExtraIPs = certificateNamesForClientHost(clientReachableHost(deps), cfg.TLSExtraDNSNames, cfg.TLSExtraIPs)
 	if err := preserveServerTLSNames(ctx, &cfg, deps); err != nil {
 		return err
 	}
@@ -813,33 +790,6 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	}
 
 	if cfg.DryRun {
-		displayValues := cfg.ValuesFiles
-		var closeValues func()
-		cfg, closeValues, err = freezeWatchValues(cfg)
-		if err != nil {
-			return err
-		}
-		defer closeValues()
-		var closeTarget func()
-		cfg, deps, closeTarget, err = prepareWatchRecovery(ctx, cfg, deps)
-		if err != nil {
-			return err
-		}
-		defer closeTarget()
-		// The adoption preview must use the same published image pin that the
-		// real install supplies after resolving the target chart. Otherwise
-		// --reuse-values could preview the old server image instead.
-		if cfg.WatchAdoptionPlan != "" && cfg.ImageRef == "" && cfg.ChartPath == "" && deps.KindClusterName == "" {
-			imageRef, _, err := resolveChartImageRef(ctx, deps, oberthRepoName+"/oberth", cfg.ChartVersion, false)
-			if err != nil {
-				return fmt.Errorf("resolve chart default image for adoption preview: %w", err)
-			}
-			cfg.ImageRef = imageRef
-		}
-		if err := adoptWatchTunnel(ctx, cfg, deps, true); err != nil {
-			return err
-		}
-		cfg.ValuesFiles = displayValues
 		return printDryRunPlan(cfg, deps.Output, cluster)
 	}
 
@@ -938,12 +888,12 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	// --- Helm SSA preview: detect field-ownership conflicts BEFORE any
 	// OpenBao write, Argo install, or cert rotation (#812 remediation 1) ---
 	// The preview uses the same Helm args the real upgrade will produce,
-	// with cfg.watchTunnelOriginCACert already set by the identity preflight
+	// after the identity preflight has computed any pending rotation
 	// (either from a pending rotation or from the idempotent pin). If the
 	// preview reports SSA conflicts, the installer refuses and prints the
 	// exact ownership-transfer commands. Nothing has been mutated at this
 	// point.
-	if err := previewHelmUpgrade(ctx, cfg, deps, openbao, ""); err != nil {
+	if err := previewHelmUpgrade(ctx, cfg, deps, openbao); err != nil {
 		return err
 	}
 
@@ -1067,10 +1017,7 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	quietOberthDeps := deps
 	quietOberthDeps.Output = io.Discard
 	oberthResult, err := InstallOberth(ctx, cfg, quietOberthDeps, openbao, rekor)
-	if len(oberthResult.WatchAdoption) > 0 {
-		publicReceipt, _ := json.Marshal(oberthResult.WatchAdoption)
-		_, _ = fmt.Fprintf(deps.Output, "Watch connector metadata commits: %s\n", publicReceipt)
-	}
+
 	if err != nil {
 		tw.WriteFooter()
 		return fmt.Errorf("install Oberth: %w", err)
@@ -1530,18 +1477,6 @@ func InstallOberth(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoRe
 		ns = DefaultNamespace
 	}
 	result := OberthResult{Namespace: ns}
-	var closeValues func()
-	cfg, closeValues, err := freezeWatchValues(cfg)
-	if err != nil {
-		return result, err
-	}
-	defer closeValues()
-	var closeTarget func()
-	cfg, deps, closeTarget, err = prepareWatchRecovery(ctx, cfg, deps)
-	if err != nil {
-		return result, err
-	}
-	defer closeTarget()
 	if cfg.InstallSecretStore {
 		if strings.TrimSpace(openbao.CACertPEM) == "" {
 			return result, errors.New("installer-managed production OpenBao requires a public CA certificate before installing Oberth")
@@ -1555,10 +1490,8 @@ func InstallOberth(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoRe
 	if err != nil {
 		return result, err
 	}
-	if cfg.WatchAdoptionPlan != "" && !exists {
-		return result, errors.New("watch adoption requires an existing Oberth release")
-	}
 	cfg.existingRelease = exists
+
 	result.InstalledVersion = chartVersionFromRelease(release.Chart, "oberth")
 	result.TargetVersion = cfg.ChartVersion
 
@@ -1595,8 +1528,6 @@ func InstallOberth(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoRe
 		return result, nil
 	}
 	switch {
-	case cfg.watchRecovery != nil:
-		// The source-pinned signature checks froze the exact published archive.
 	case strings.TrimSpace(cfg.ChartPath) != "":
 		// A local chart resolves from disk, so there is no repository to add.
 		// --image was assumed to name an image the node already has, which
@@ -1649,23 +1580,10 @@ func InstallOberth(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoRe
 		}
 	}
 
-	adopted, err := adoptWatchTunnelReceipt(ctx, cfg, deps, false)
-	result.WatchAdoption = adopted
-	if err != nil {
-		return result, err
+	if _, err := deps.RunHelm(ctx, OberthHelmArgs(cfg, openbao, rekor)); err != nil {
+		return result, fmt.Errorf("helm install Oberth: %w", err)
 	}
-	if err = requireWatchRecoveryBeforeHelm(ctx, cfg, deps); err != nil {
-		return result, err
-	}
-	helmOutput, helmErr := deps.RunHelm(ctx, OberthHelmArgs(cfg, openbao, rekor))
-	if cfg.WatchAdoptionPlan != "" {
-		clear(helmOutput)
-		if helmErr != nil {
-			return result, errors.New("normal Helm upgrade failed after watch adoption; retain ownership and prepare a fresh reviewed forward repair")
-		}
-	} else if helmErr != nil {
-		return result, fmt.Errorf("helm install Oberth: %w", helmErr)
-	}
+
 	return result, nil
 }
 
@@ -1704,9 +1622,7 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 	if local := strings.TrimSpace(cfg.ChartPath); local != "" {
 		chart = local
 	}
-	if cfg.watchChart != "" {
-		chart = cfg.watchChart
-	}
+
 	args := []string{
 		"upgrade", "--install", "oberth", chart,
 		"-n", ns, "--create-namespace",
@@ -1750,24 +1666,12 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 		args = append(args, "--set-string", "pushBannerURL=https://"+URLHost(bannerHost)+":"+defaultClientHTTPSPort(cfg.ServiceType)+"/runs")
 	}
 	args = append(args, argoOberthHelmValues(cfg, openbao)...)
-	args = append(args,
-		"--set-string", "watchTunnel.image="+watchTunnelImageDefault,
-		"--set-string", "watchTunnel.openbaoImage="+watchTunnelOpenbaoImageDefault,
-	)
-	// When the identity preflight rotated the server certificate and the live
-	// watchTunnel.originCACert pinned the old leaf, replace the pin so
-	// cloudflared keeps trusting the server after the upgrade.
-	if cfg.watchTunnelOriginCACert != "" {
-		args = append(args, "--set-string", "watchTunnel.originCACert="+cfg.watchTunnelOriginCACert)
-	}
-	if openbao.ServerCACertPEM != "" {
+	if openbao.PKIEnabled || openbao.ServerCACertPEM != "" {
 		args = append(args,
 			"--set", "tls.pki.enabled=true",
 			"--set-string", "tls.pki.mount="+defaultServerPKIMount,
 			"--set-string", "tls.pki.role="+defaultServerPKIRole,
 			"--set-string", "tls.pki.ttl="+defaultServerLeafTTL,
-			// The tunnel trusts the stable CA, not a leaf that renews monthly.
-			"--set-string", "watchTunnel.originCACert="+openbao.ServerCACertPEM,
 		)
 	}
 	if cfg.ServiceType != "" {
@@ -1828,7 +1732,7 @@ func OberthHelmArgs(cfg Config, openbao OpenBaoResult, rekor RekorResult) []stri
 		args = append(args, "--set", "networkPolicy.enabled="+cfg.NetworkPolicy)
 	}
 	// --version selects a published chart; a local path already IS the version.
-	if cfg.ChartVersion != "" && strings.TrimSpace(cfg.ChartPath) == "" && cfg.watchChart == "" {
+	if cfg.ChartVersion != "" && strings.TrimSpace(cfg.ChartPath) == "" {
 		args = append(args, "--version", helmChartVersion(cfg.ChartVersion))
 	}
 	// Idempotent re-runs and upgrades must not reset values a user set on a
@@ -2398,9 +2302,7 @@ func HelmWithKubeArgs(runHelm func(ctx context.Context, args []string) ([]byte, 
 // for diagnostics. This prevents helm stderr warnings (e.g. kubeconfig
 // permission notices on macOS) from corrupting parseable output.
 func DefaultRunHelm(ctx context.Context, args []string) ([]byte, error) {
-	if isWatchPreview(args) {
-		return runWatchPreview(ctx, args)
-	}
+
 	// #nosec G204 -- the command is the literal helm binary; every argument is
 	// constructed by this package from validated flags (no shell, no
 	// caller-controlled command word).

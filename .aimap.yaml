@@ -25,9 +25,9 @@ subsystems:
   execution:
     paths: [pkg/argoworkflow, internal/argojob]
     contract: Each push submits an Argo Workflow from the repository's .oberth/build.yaml or .oberth/release.yaml; the server sets metadata, forces ServiceAccount identity by trigger tier, and injects the source checkout.
-  vm_compatibility:
-    paths: [internal/vmrunner, internal/store/vm_executions.go, internal/store/kvm_preflights.go, internal/trustedharness, internal/store/vm_pilots.go, internal/service/trusted_policy.go, docs/trusted-vm-pilot.md]
-    contract: Historical VM pilot and KVM journals remain for compatibility pending removal in issues 1293 and 1294. The pilot is inactive; an empty trusted-recipe policy disables preflight execution. KubeVirt templates are documented separately in docs/kubevirt-vms.md.
+  workflow_capabilities:
+    paths: [pkg/argoworkflow/capability.go, internal/argojob/capability.go, internal/service/workflow_capability.go, internal/store/workflow_capability_grants.go, docs/workflow-capabilities.md]
+    contract: Administrator grants bind a repository to an operator-owned namespaced identity, explicit resource kinds and extended-resource ceilings; repository Workflows own objects, cleanup and test gates.
   control_plane:
     paths: [internal/api, internal/service, internal/app, internal/secretstore, cmd/oberth]
     contract: TLS 1.3 HTTPS/MCP and SSH compose the same durable identity and run state. Secret-store paths are authorized at admission and fetched in credentialed Pods by secretstore exec, never via etcd.

@@ -101,7 +101,7 @@ func TestDeclaredMemoryHeadroomRestoredAndReported(t *testing.T) {
 	}
 	defer r.release()
 	charged := r.declaredResources()
-	if charged.MemoryBytes != (5<<30)+2*executorMemoryBytes || *r.pods != *d {
+	if charged.MemoryBytes != (5<<30)+2*executorMemoryBytes || !r.pods.Equal(*d) {
 		t.Fatalf("restored reservation: %+v, sealed %+v", charged, r.pods)
 	}
 	observation := &model.AdmissionObservation{DeclaredResources: charged}

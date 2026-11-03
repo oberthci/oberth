@@ -27,7 +27,7 @@ func TestSetupSecretStoreOpenBao(t *testing.T) {
 	if _, err := exec.LookPath(baoPath); err != nil {
 		t.Skipf("bao binary not found: %v", err)
 	}
-	for _, script := range []string{"scripts/setup-secretstore.sh", "website/public/setup-secretstore.sh"} {
+	for _, script := range []string{"scripts/setup-secretstore.sh"} {
 		t.Run(script, func(t *testing.T) {
 			dir := t.TempDir()
 			config := filepath.Join(dir, "server.hcl")

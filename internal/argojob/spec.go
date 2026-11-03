@@ -546,6 +546,8 @@ func vaultAddressRequiresPinnedAnchor(address string) bool {
 
 // Request is one run's submission intent.
 type Request struct {
+	Capability    *argoworkflow.Capability
+	DemandReceipt *argoworkflow.DemandReceipt
 	// ResourceMaximum is selected from the server's durable repository grant,
 	// never from pipeline annotations. Empty is legacy reconstruction only.
 	ResourceMaximum  pipeline.Size
@@ -600,7 +602,7 @@ type Request struct {
 	// ApprovedSecrets is the set of secret paths this repository has active
 	// approval-table grants for. Build checks each declared path against
 	// this set. The map key is the full declared path (e.g.
-	// "oberth/upstream/skipops/oberth/test-secret"). Pre-loaded by the
+	// "oberth/upstream/acme/oberth/test-secret"). Pre-loaded by the
 	// caller via store.ActiveSecretGrants before calling Build.
 	//
 	// Must be non-nil. An empty map means no grants; a nil map is a
@@ -667,16 +669,33 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 		return nil, err
 	}
 	workflow := resolved.Workflow()
+	delete(workflow.Annotations, capabilityAnnotation)
+	resourceSteps, extended := argoworkflow.CapabilityUsage(workflow)
+	if !resourceSteps && !extended {
+		request.Capability = nil
+	}
+	if err := config.validateCapability(request.Capability); err != nil {
+		return nil, err
+	}
+	if request.Capability != nil && request.RepositoryID <= 0 {
+		return nil, errors.New("argojob: workflow capability requires a durable repository binding")
+	}
+	if extended && (request.PodDemand == nil || request.ResourceFallback != "") {
+		return nil, errors.New("argojob: extended resources require a numeric reservation without fallback")
+	}
 	delete(workflow.Annotations, podDemandAnnotation)
 	delete(workflow.Annotations, resourceFallbackAnnotation)
 	if request.PodDemand != nil {
 		peak, e := argoworkflow.DeclaredHostPeak(workflow, request.effectiveRunTrigger())
-		if e != nil || peak == nil || *peak != *request.PodDemand {
+		if request.Capability != nil {
+			peak, e = argoworkflow.DeclaredCapabilityPeak(workflow)
+		}
+		if e != nil || peak == nil || !peak.Equal(*request.PodDemand) {
 			return nil, errors.New("argojob: declared resource graph changed after reservation")
 		}
 	}
 	if request.ResourceMaximum != "" {
-		if err := argoworkflow.ValidateResourceCeiling(workflow, request.Repo, request.ResourceMaximum, int64(config.WorkflowTimeout/time.Second)); err != nil {
+		if err := argoworkflow.ValidateResourceCeilingWithCapability(workflow, request.Repo, request.ResourceMaximum, int64(config.WorkflowTimeout/time.Second), request.Capability); err != nil {
 			return nil, err
 		}
 	}
@@ -707,12 +726,15 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	// independently approved WIF leaf can select the per-repository identity
 	// and its own audience-scoped projection without any Vault wiring.
 	credentialed := len(declaredPaths) > 0
+	if request.Capability != nil && (credentialed || len(wifLeaves) > 0) {
+		return nil, errors.New("argojob: operator capabilities cannot be combined with secret or WIF identities")
+	}
 	if names, err := argoworkflow.DeclaredKVMTemplates(workflow); err != nil {
 		return nil, err
 	} else if len(names) != 0 && (request.Trigger != pipeline.TriggerCI || credentialed || len(wifLeaves) > 0) {
 		return nil, errors.New("argojob: KVM leaves require a credential-free CI workflow")
 	}
-	if (credentialed || len(wifLeaves) > 0) && hasVMIResources(workflow) {
+	if request.Capability == nil && (credentialed || len(wifLeaves) > 0) && hasVMIResources(workflow) {
 		return nil, errors.New("argojob: VMI resource templates are refused in credentialed workflows")
 	}
 
@@ -738,13 +760,22 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	if err != nil {
 		return nil, err
 	}
+	if c := request.Capability; c != nil {
+		identity = argoworkflow.Identity{Namespace: c.Namespace, ServiceAccountName: c.ServiceAccount, ExecutorServiceAccountName: config.ExecutorServiceAccount, ResourceServiceAccountName: c.ServiceAccount, AutomountServiceAccountToken: true}
+	}
 	policy := argoworkflow.Policy{
+		Capability:          request.Capability,
 		RunnerImagePrefixes: config.RunnerImagePrefixes, KubeVirt: request.KubeVirtGranted, ContainerDiskPrefixes: config.ContainerDiskPrefixes,
 		VMIBudget: request.KubeVirtBudget, VMICeiling: config.KubeVirtCeiling,
 	}
 	receipt, err := resolved.Receipt(policy)
 	if err != nil {
 		return nil, err
+	}
+	if request.DemandReceipt != nil {
+		if err := request.DemandReceipt.Verify(receipt); err != nil {
+			return nil, err
+		}
 	}
 	if request.VMIDemandReceipt != nil {
 		if err := request.VMIDemandReceipt.Verify(receipt); err != nil {
@@ -817,6 +848,9 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 
 	scopeSynchronization(workflow, request)
 	applyServerMetadata(workflow, config, request, declaredPaths, fragmentLock)
+	if request.Capability != nil {
+		workflow.Annotations[capabilityAnnotation] = capabilityBinding(request.RepositoryID, request.Capability)
+	}
 	applyServerBounds(workflow, config)
 	applyServerSecurity(workflow)
 	injectServerVolumes(workflow, config, request, credentialed)
@@ -873,8 +907,10 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 		return nil, err
 	}
 
-	if err := projectVMICreateGuard(workflow, config, request, receipt); err != nil {
-		return nil, err
+	if request.Capability == nil {
+		if err := projectVMICreateGuard(workflow, config, request, receipt); err != nil {
+			return nil, err
+		}
 	}
 	if err := wrapStepUsage(workflow, request.legacyStepUsage); err != nil {
 		return nil, err

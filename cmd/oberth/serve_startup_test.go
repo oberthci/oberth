@@ -629,16 +629,7 @@ func seedPreviousV2Database(t *testing.T, path string) (model.AuditHead, string)
 	if _, err := raw.Exec(`
 PRAGMA foreign_keys = OFF;
 BEGIN IMMEDIATE;
-` + testdb.PublicationV38Schema + `
-DROP TRIGGER IF EXISTS publications_tag_tuple_insert;
-DROP INDEX IF EXISTS publications_tag_tuple_idx;
-DROP TABLE IF EXISTS restart_step_timings;
-DROP TABLE IF EXISTS restart_workflow_timings;
-DROP TRIGGER issues_metadata_revision;
-ALTER TABLE issues DROP COLUMN revision;
-ALTER TABLE token_credentials DROP COLUMN expires_at;
-DROP TABLE IF EXISTS run_priority_requests; DROP TABLE IF EXISTS priority_grants;
-DELETE FROM schema_migrations WHERE version >= 39;
+` + testdb.PostV38Downgrade + `
 DROP TABLE IF EXISTS trusted_applies;
 DROP TABLE IF EXISTS trusted_plans;
 DROP TABLE IF EXISTS secret_access;
@@ -811,16 +802,7 @@ func seedLegacyV1Database(t *testing.T, path string, actionCount int) {
 	if _, err := raw.Exec(`
 PRAGMA foreign_keys = OFF;
 BEGIN IMMEDIATE;
-` + testdb.PublicationV38Schema + `
-DROP TRIGGER IF EXISTS publications_tag_tuple_insert;
-DROP INDEX IF EXISTS publications_tag_tuple_idx;
-DROP TABLE IF EXISTS restart_step_timings;
-DROP TABLE IF EXISTS restart_workflow_timings;
-DROP TRIGGER issues_metadata_revision;
-ALTER TABLE issues DROP COLUMN revision;
-ALTER TABLE token_credentials DROP COLUMN expires_at;
-DROP TABLE IF EXISTS run_priority_requests; DROP TABLE IF EXISTS priority_grants;
-DELETE FROM schema_migrations WHERE version >= 39;
+` + testdb.PostV38Downgrade + `
 DROP INDEX runs_latest_ref_idx;
 DROP INDEX runs_passed_tested_sha_idx;
 CREATE TABLE step_results_v1 (

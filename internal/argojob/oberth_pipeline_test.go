@@ -42,8 +42,8 @@ func loadPipeline(t *testing.T, name string) []byte {
 
 func oberthConfig() Config {
 	config := wifTestConfig()
-	config.PerRepoIdentities = map[string]PerRepoIdentityConfig{"github/skipops/oberth": {ServiceAccountName: "oberth-per-repo"}}
-	config.ReleaseWIF.Repositories = map[string]ReleaseWIFRepository{"github/skipops/oberth": {ServiceAccountName: "oberth-per-repo", Templates: map[string]string{"release-publish-images": "image-writer", "release-publish-kvm-harness": "image-writer", "release-publish-chart": "chart-writer", "release-verify": "image-reader"}}}
+	config.PerRepoIdentities = map[string]PerRepoIdentityConfig{"github/acme/oberth": {ServiceAccountName: "oberth-per-repo"}}
+	config.ReleaseWIF.Repositories = map[string]ReleaseWIFRepository{"github/acme/oberth": {ServiceAccountName: "oberth-per-repo", Templates: map[string]string{"release-publish-images": "image-writer", "release-publish-kvm-harness": "image-writer", "release-publish-chart": "chart-writer", "release-verify": "image-reader"}}}
 	// Oberth's own pipeline uses golang: for toolchain steps and aquasec/trivy:
 	// for the security scan (the official image, pinned by digest).
 	config.RunnerImagePrefixes = []string{"golang:", "debian:", "aquasec/trivy:"}
@@ -72,7 +72,7 @@ func oberthReleaseApprovedSecrets() map[string]bool {
 		"oberth/data/release/r2-upload-token":  true,
 		"oberth/data/release/cosign-secret":    true,
 		"oberth/data/release/homebrew-tap-key": true,
-		// The oberth.ci Worker deploy token, used only by release-website (#649).
+		// The public artifact upload token, used only by release-public-artifacts (#649).
 		"oberth/data/release/cloudflare-oberth-workers-token": true,
 	}
 }
@@ -82,7 +82,7 @@ func oberthReleaseApprovedSecrets() map[string]bool {
 func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 	built, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
+		Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
 		Ref: "refs/heads/main", SHA: testSHA, Trigger: pipeline.TriggerCI,
 		Source:          loadPipeline(t, "build.yaml"),
 		ApprovedSecrets: map[string]bool{},
@@ -158,7 +158,7 @@ func TestOberthBuildPipelineIsAdmissible(t *testing.T) {
 func TestOberthReleasePipelineIsAdmissible(t *testing.T) {
 	built, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
+		Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
 		Ref: "refs/tags/v0.1.0", SHA: testSHA, Trigger: pipeline.TriggerRelease,
 		Source:          loadPipeline(t, "release.yaml"),
 		ApprovedSecrets: oberthReleaseApprovedSecrets(),
@@ -212,8 +212,6 @@ func TestOberthReleasePipelineIsAdmissible(t *testing.T) {
 		"release-finalize":       "release-runtime",
 		// #649: the oberth.ci Worker publishes after the signed artifacts
 		// verified; a tokenless leaf then reads the public bytes back.
-		"release-website":          "release-finalize",
-		"release-website-readback": "release-website",
 	})
 }
 
@@ -225,7 +223,7 @@ func TestOberthReleasePipelineIsAdmissible(t *testing.T) {
 func TestOberthReleasePipelineOnBranchPushRefusesSystemPaths(t *testing.T) {
 	_, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
+		Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
 		Ref: "refs/heads/main", SHA: testSHA, Trigger: pipeline.TriggerCI,
 		Source:          releasePipelineWithoutWIF(t),
 		ApprovedSecrets: oberthReleaseApprovedSecrets(),
@@ -246,7 +244,7 @@ func TestOberthReleasePipelineOnBranchRefusedWithoutAllowlist(t *testing.T) {
 	// CI-ineligible regardless.
 	_, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
+		Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
 		Ref: "refs/heads/main", SHA: testSHA, Trigger: pipeline.TriggerCI,
 		Source:          releasePipelineWithoutWIF(t),
 		ApprovedSecrets: map[string]bool{},
@@ -330,7 +328,7 @@ func TestOberthReleasePipelineWrapsCredentialedStepsWithSecretstoreExec(t *testi
 func TestOberthReleasePublisherUsesPrivateChildDir(t *testing.T) {
 	built, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
+		Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
 		Ref: "refs/tags/v0.1.0", SHA: testSHA, Trigger: pipeline.TriggerRelease,
 		Source:          loadPipeline(t, "release.yaml"),
 		ApprovedSecrets: oberthReleaseApprovedSecrets(),
@@ -344,7 +342,7 @@ func TestOberthReleasePublisherUsesPrivateChildDir(t *testing.T) {
 		"release-publish-images":      {"--path=oberth/data/release/cosign-secret"},
 		"release-publish-kvm-harness": {"--path=oberth/data/release/cosign-secret"},
 		"release-publish-chart":       {"--path=oberth/data/release/cosign-secret"},
-		"release-website":             {"--path=oberth/data/release/cloudflare-oberth-workers-token"},
+		"release-public-artifacts":    {"--path=oberth/data/release/cloudflare-oberth-workers-token"},
 	}
 	seen := map[string]bool{}
 	secretVolume := false
@@ -458,7 +456,7 @@ func TestOberthPipelinesMountTheServerProvidedSource(t *testing.T) {
 		}
 		built, err := buildOberthPipeline(oberthConfig(), Request{
 			RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-			Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github", Ref: "refs/heads/main",
+			Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github", Ref: "refs/heads/main",
 			SHA: testSHA, Trigger: trigger, Source: loadPipeline(t, name),
 			// The claim the server seeded for this run, in the pipeline
 			// namespace. Before this existed the Workflow named the server's
@@ -624,7 +622,7 @@ func TestOberthPipelinesPinCompatibleGoToolchains(t *testing.T) {
 func TestOberthReleasePipelineScopesTokenToCredentialedTemplates(t *testing.T) {
 	workflow, err := buildOberthPipeline(oberthConfig(), Request{
 		RunID: "run-abc123", Name: "oberth-oberth-run-abc1-aabbccddeeff",
-		Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
+		Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
 		Ref: "refs/tags/v0.1.0", SHA: testSHA, Trigger: pipeline.TriggerRelease,
 		Source:          loadPipeline(t, "release.yaml"),
 		ApprovedSecrets: oberthReleaseApprovedSecrets(),
@@ -699,7 +697,7 @@ func TestOberthReleaseScriptReadsStoreFieldNames(t *testing.T) {
 		"cosign-secret/COSIGN_PUB":      true,
 		"homebrew-tap-key/SSH_KEY":      true,
 		// #649: the scoped oberth.ci Worker deploy token (Terraform
-		// output oberth_website_deploy_token in oberthci/terraform).
+		// operator-owned public artifact token configuration).
 		"cloudflare-oberth-workers-token/CLOUDFLARE_API_TOKEN": true,
 	}
 	seen := map[string]bool{}
@@ -854,7 +852,7 @@ func TestStaticGitQualificationUsesOnlyInstalledRunnerPrefixes(t *testing.T) {
 	if !found {
 		t.Fatal("static musl build template missing")
 	}
-	request := Request{RunID: "run-static-git", Name: "oberth-static-git", Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github", Ref: "refs/heads/main", SHA: testSHA, Trigger: pipeline.TriggerCI, Source: loadPipeline(t, "build.yaml")}
+	request := Request{RunID: "run-static-git", Name: "oberth-static-git", Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github", Ref: "refs/heads/main", SHA: testSHA, Trigger: pipeline.TriggerCI, Source: loadPipeline(t, "build.yaml")}
 	if _, err := Build(config, request); err == nil {
 		t.Fatal("nonroot qualification accepted without current controller proof")
 	}

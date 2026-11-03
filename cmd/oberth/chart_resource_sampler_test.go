@@ -87,7 +87,7 @@ func TestChartResourceSamplerOptInRestrictedToServerAndExactNodes(t *testing.T) 
 			t.Fatalf("sampler %s missing chart labels", doc.Kind)
 		}
 		if doc.Kind == "ConfigMap" && !strings.Contains(doc.Data["config.json"], `"interval":"15s"`) {
-			t.Fatal("tuxbox cadence is not 15s")
+			t.Fatal("example-node cadence is not 15s")
 		}
 	}
 	if objects != 3 {

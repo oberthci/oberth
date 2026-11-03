@@ -34,7 +34,7 @@ apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/credentials
+    oberth.ci/secret-paths: oberth/upstream/acme/oberth/credentials
 spec:
   entrypoint: main
   activeDeadlineSeconds: 600
@@ -49,7 +49,7 @@ spec:
 func ciEnvconsulRequest(t *testing.T, files map[string]string) Request {
 	t.Helper()
 	request := testRequest(pipeline.TriggerCI, ciEnvconsulDocument)
-	request.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/credentials": true}
+	request.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/credentials": true}
 	request.SourceDir = writeEnvconsulWorkspace(t, files)
 	return request
 }
@@ -70,7 +70,7 @@ func TestEnvconsulAdmitsDeclaredConfigPaths(t *testing.T) {
 		".oberth/envconsul.hcl": vaultOnlyHCL,
 		".oberth/envconsul/plan.hcl": `secret {
   no_prefix = true
-  path      = "oberth/data/upstream/skipops/oberth/credentials"
+  path      = "oberth/data/upstream/acme/oberth/credentials"
 }
 `,
 	})
@@ -91,7 +91,7 @@ func TestEnvconsulAdmitsLogicalKVSpelling(t *testing.T) {
 	request := ciEnvconsulRequest(t, map[string]string{
 		".oberth/envconsul.hcl": vaultOnlyHCL,
 		".oberth/envconsul/plan.hcl": `secret {
-  path = "oberth/upstream/skipops/oberth/credentials"
+  path = "oberth/upstream/acme/oberth/credentials"
 }
 `,
 	})
@@ -107,7 +107,7 @@ func TestEnvconsulRefusesUndeclaredConfigPath(t *testing.T) {
 	request := ciEnvconsulRequest(t, map[string]string{
 		".oberth/envconsul.hcl": vaultOnlyHCL,
 		".oberth/envconsul/plan.hcl": `secret {
-  path = "oberth/data/upstream/skipops/oberth/credentials"
+  path = "oberth/data/upstream/acme/oberth/credentials"
 }
 
 secret {
@@ -131,7 +131,7 @@ func TestEnvconsulRefusesUndeclaredSecretFlag(t *testing.T) {
 		`"-config", ".oberth/envconsul.hcl", "-config", ".oberth/envconsul/plan.hcl"`,
 		`"-secret=oberth/data/release/cosign-secret"`, 1)
 	request := testRequest(pipeline.TriggerCI, document)
-	request.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/credentials": true}
+	request.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/credentials": true}
 	_, err := Build(testConfig(), request)
 	if err == nil {
 		t.Fatal("an undeclared -secret flag was admitted")
@@ -145,14 +145,14 @@ func TestEnvconsulRefusesUndeclaredSecretFlag(t *testing.T) {
 // when it names a declared path, in either spelling.
 func TestEnvconsulAdmitsDeclaredSecretFlag(t *testing.T) {
 	for _, spelling := range []string{
-		"oberth/data/upstream/skipops/oberth/credentials",
-		"oberth/upstream/skipops/oberth/credentials",
+		"oberth/data/upstream/acme/oberth/credentials",
+		"oberth/upstream/acme/oberth/credentials",
 	} {
 		document := strings.Replace(ciEnvconsulDocument,
 			`"-config", ".oberth/envconsul.hcl", "-config", ".oberth/envconsul/plan.hcl"`,
 			`"-secret", "`+spelling+`"`, 1)
 		request := testRequest(pipeline.TriggerCI, document)
-		request.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/credentials": true}
+		request.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/credentials": true}
 		if _, err := Build(testConfig(), request); err != nil {
 			t.Fatalf("declared -secret %q was rejected: %v", spelling, err)
 		}
@@ -169,7 +169,7 @@ func TestEnvconsulRefusesConfigOutsideSource(t *testing.T) {
 			`"-config", ".oberth/envconsul.hcl", "-config", ".oberth/envconsul/plan.hcl"`,
 			`"-config", "`+outside+`"`, 1)
 		request := testRequest(pipeline.TriggerCI, document)
-		request.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/credentials": true}
+		request.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/credentials": true}
 		request.SourceDir = writeEnvconsulWorkspace(t, nil)
 		if _, err := Build(testConfig(), request); err == nil {
 			t.Fatalf("a -config outside the source checkout (%q) was admitted", outside)
@@ -185,10 +185,10 @@ func TestEnvconsulAdmitsAbsoluteSourcePath(t *testing.T) {
 		`"-config", ".oberth/envconsul.hcl", "-config", ".oberth/envconsul/plan.hcl"`,
 		`"-config", "/work/src/.oberth/envconsul/plan.hcl"`, 1)
 	request := testRequest(pipeline.TriggerCI, document)
-	request.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/credentials": true}
+	request.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/credentials": true}
 	request.SourceDir = writeEnvconsulWorkspace(t, map[string]string{
 		".oberth/envconsul/plan.hcl": `secret {
-  path = "oberth/data/upstream/skipops/oberth/credentials"
+  path = "oberth/data/upstream/acme/oberth/credentials"
 }
 `,
 	})
@@ -225,11 +225,11 @@ func TestEnvconsulRefusesMissingUnparseableOrDirectoryConfig(t *testing.T) {
 // refused with a clear admission error instead of a runtime login failure.
 func TestEnvconsulRefusesWithoutDeclaredAnnotation(t *testing.T) {
 	document := strings.Replace(ciEnvconsulDocument,
-		"    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/credentials\n", "", 1)
+		"    oberth.ci/secret-paths: oberth/upstream/acme/oberth/credentials\n", "", 1)
 	request := testRequest(pipeline.TriggerCI, document)
 	request.SourceDir = writeEnvconsulWorkspace(t, map[string]string{
 		".oberth/envconsul.hcl":      vaultOnlyHCL,
-		".oberth/envconsul/plan.hcl": `secret { path = "oberth/data/upstream/skipops/oberth/credentials" }`,
+		".oberth/envconsul/plan.hcl": `secret { path = "oberth/data/upstream/acme/oberth/credentials" }`,
 	})
 	_, err := Build(testConfig(), request)
 	if err == nil {
@@ -250,7 +250,7 @@ apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/credentials
+    oberth.ci/secret-paths: oberth/upstream/acme/oberth/credentials
 spec:
   entrypoint: main
   activeDeadlineSeconds: 600
@@ -265,7 +265,7 @@ spec:
                 args: ["-secret", "oberth/data/release/cosign-secret", "/bin/true"]
 `
 	request := testRequest(pipeline.TriggerCI, document)
-	request.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/credentials": true}
+	request.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/credentials": true}
 	_, err := Build(testConfig(), request)
 	if err == nil {
 		t.Fatal("an inline envconsul template fetching an undeclared path was admitted")
@@ -284,7 +284,7 @@ apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/credentials
+    oberth.ci/secret-paths: oberth/upstream/acme/oberth/credentials
 spec:
   entrypoint: main
   activeDeadlineSeconds: 600
@@ -299,7 +299,7 @@ spec:
                 args: ["secretstore", "exec", "--path", "oberth/data/release/cosign-secret", "--", "/bin/true"]
 `
 	request := testRequest(pipeline.TriggerCI, document)
-	request.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/credentials": true}
+	request.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/credentials": true}
 	_, err := Build(testConfig(), request)
 	if err == nil {
 		t.Fatal("an inline secretstore-exec template fetching an undeclared path was admitted")
@@ -316,7 +316,7 @@ func TestEnvconsulWithoutCredentialConfigurationIsAdmitted(t *testing.T) {
 	document := strings.Replace(ciEnvconsulDocument,
 		`"-config", ".oberth/envconsul.hcl", "-config", ".oberth/envconsul/plan.hcl", `, "", 1)
 	request := testRequest(pipeline.TriggerCI, document)
-	request.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/credentials": true}
+	request.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/credentials": true}
 	if _, err := Build(testConfig(), request); err != nil {
 		t.Fatalf("envconsul without credential configuration was rejected: %v", err)
 	}
@@ -326,12 +326,12 @@ func TestEnvconsulWithoutCredentialConfigurationIsAdmitted(t *testing.T) {
 // admission comparison rests on.
 func TestAllowedStoreSpellings(t *testing.T) {
 	allowed := allowedStoreSpellings([]string{
-		"oberth/upstream/skipops/oberth/credentials",
+		"oberth/upstream/acme/oberth/credentials",
 		"oberth/data/release/cosign-secret",
 	})
 	for _, spelling := range []string{
-		"oberth/upstream/skipops/oberth/credentials",
-		"oberth/data/upstream/skipops/oberth/credentials",
+		"oberth/upstream/acme/oberth/credentials",
+		"oberth/data/upstream/acme/oberth/credentials",
 		"oberth/data/release/cosign-secret",
 		"oberth/release/cosign-secret",
 	} {
@@ -340,7 +340,7 @@ func TestAllowedStoreSpellings(t *testing.T) {
 		}
 	}
 	for _, foreign := range []string{
-		"oberth/data/upstream/skipops/other/credentials",
+		"oberth/data/upstream/acme/other/credentials",
 		"oberth/data/release/gar-sa-key",
 		"oberth/metadata/release/cosign-secret",
 	} {

@@ -87,7 +87,7 @@ func TestDeclaredCreateContractRestoresNumericReservationWithKillSwitch(t *testi
 	}
 	f.scheduler.admission.resources.Disabled = true
 	r, err := f.scheduler.restoreCreateGrant(run, nil)
-	if err != nil || r.pods == nil || *r.pods != *d || r.weight != 0 || !r.retained {
+	if err != nil || r.pods == nil || !r.pods.Equal(*d) || r.weight != 0 || !r.retained {
 		t.Fatalf("restored grant: %+v %v", r, err)
 	}
 	// Already submitted declarations must remain reserved when a kill switch

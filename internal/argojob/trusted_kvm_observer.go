@@ -41,8 +41,15 @@ func (controller *Controller) trustedKVMWorkflow(ctx context.Context, request Re
 	if err != nil {
 		return nil, nil, err
 	}
-	if actual.UID == "" || actual.DeletionTimestamp != nil || actual.Name != expected.Name || actual.Namespace != expected.Namespace || actual.Annotations[runIDAnnotation] != request.RunID || actual.Annotations[trustedKVMAnnotation] != expected.Annotations[trustedKVMAnnotation] || actual.Annotations[nonrootProfileAnnotation] != expected.Annotations[nonrootProfileAnnotation] || !reflect.DeepEqual(actual.Spec, expected.Spec) {
-		return nil, nil, errors.New("argojob: trusted Workflow differs from admitted final server spec")
+	if actual.UID == "" || actual.DeletionTimestamp != nil || actual.Name != expected.Name || actual.Namespace != expected.Namespace {
+		return nil, nil, errors.New("argojob: trusted Workflow identity is unavailable")
+	}
+	if err := sameSubmission(actual, expected); err != nil {
+		var mismatch *workflowSpecMismatch
+		if errors.As(err, &mismatch) {
+			return actual, nil, err
+		}
+		return nil, nil, err
 	}
 	for i := range expected.Spec.Templates {
 		if expected.Spec.Templates[i].Name == trustedKVMTemplate {
@@ -52,11 +59,16 @@ func (controller *Controller) trustedKVMWorkflow(ctx context.Context, request Re
 	return nil, nil, errors.New("argojob: missing trusted leaf")
 }
 
-// TrustedKVMWorkflowUID binds only an API object whose actual spec matches the
-// rebuilt server submission, never an identity annotation supplied as evidence.
+// TrustedKVMWorkflowUID accepts an exactly admitted Workflow. An owned spec
+// mismatch returns its UID with an error solely for cleanup, never as evidence.
 func (controller *Controller) TrustedKVMWorkflowUID(ctx context.Context, request Request) (string, error) {
 	workflow, _, err := controller.trustedKVMWorkflow(ctx, request)
 	if err != nil {
+		// A nonempty UID with this classification authorizes cleanup only,
+		// never receipt acceptance. Foreign run/source identities return no UID.
+		if workflow != nil {
+			return string(workflow.UID), err
+		}
 		return "", err
 	}
 	return string(workflow.UID), nil

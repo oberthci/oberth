@@ -21,9 +21,9 @@ func (database schedulerDatabase) EnqueueReceiveEvent(ctx context.Context, event
 	})
 }
 
-func (database schedulerDatabase) MarkRunCreatePending(ctx context.Context, runID string, workflowName string) error {
+func (database schedulerDatabase) MarkRunCreatePending(ctx context.Context, runID string, workflowName string, reason ...string) error {
 	return retryDatabaseError(ctx, "MarkRunCreatePending", func(ctx context.Context) error {
-		return database.SchedulerStore.MarkRunCreatePending(ctx, runID, workflowName)
+		return database.SchedulerStore.MarkRunCreatePending(ctx, runID, workflowName, reason...)
 	})
 }
 
@@ -32,7 +32,7 @@ func (database schedulerDatabase) Run(ctx context.Context, id string) (model.Run
 }
 
 func (database schedulerDatabase) SetRunWorkflowName(ctx context.Context, runID string, workflowName string) (model.Run, error) {
-	return retryDatabase(ctx, "SetRunJobName", func(ctx context.Context) (model.Run, error) {
+	return retryDatabase(ctx, "SetRunWorkflowName", func(ctx context.Context) (model.Run, error) {
 		return database.SchedulerStore.SetRunWorkflowName(ctx, runID, workflowName)
 	})
 }

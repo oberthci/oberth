@@ -10,8 +10,8 @@ import (
 
 const (
 	ConductorResource = "conductor"
-	InitialVMResource = "beacon-0"
-	RestartVMResource = "beacon-1"
+	InitialVMResource = "example-service-0"
+	RestartVMResource = "example-service-1"
 	MaxPilotResources = 32
 )
 
@@ -75,7 +75,7 @@ func ValidatePilotResource(plan PilotPlan, intent ResourceIntent) error {
 		}
 	case "VirtualMachineInstance":
 		if (intent.Key != InitialVMResource && intent.Key != RestartVMResource) || intent.Namespace != plan.GuestNamespace || intent.Parent != "" {
-			return errors.New("vmrunner: only two sequential Beacon VM attempts are supported")
+			return errors.New("vmrunner: only two sequential example-service VM attempts are supported")
 		}
 	case "Pod":
 		if intent.Parent != ConductorResource && intent.Parent != InitialVMResource && intent.Parent != RestartVMResource {
@@ -89,8 +89,8 @@ func ValidatePilotResource(plan PilotPlan, intent ResourceIntent) error {
 			return errors.New("vmrunner: pilot Pod namespace differs from its parent")
 		}
 	case "Service":
-		if intent.Key != "beacon-endpoint" || intent.Namespace != plan.GuestNamespace || intent.Parent != "" {
-			return errors.New("vmrunner: only the admitted Beacon endpoint is supported")
+		if intent.Key != "example-service-endpoint" || intent.Namespace != plan.GuestNamespace || intent.Parent != "" {
+			return errors.New("vmrunner: only the admitted example-service endpoint is supported")
 		}
 	case "NetworkPolicy":
 		if intent.Parent != "" ||

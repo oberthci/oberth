@@ -785,7 +785,7 @@ func TestRoundTripTabwriterOutputThroughProducerParser(t *testing.T) {
 		{"codeberg/oberthci/oberth", "release", "oberth/data/release/cosign-secret"},
 		{"codeberg/oberthci/oberth", "release", "oberth/data/release/r2-upload-token"},
 		{"codeberg/oberthci/oberth", "*", "oberth/data/release/gar-reader-key"},
-		{"github/skipops/terraform", "*", "oberth/upstream/skipops/terraform/gcp-sa"},
+		{"github/acme/terraform", "*", "oberth/upstream/acme/terraform/gcp-sa"},
 	} {
 		if _, err := database.Grant(context.Background(), g.repo, g.step, g.secret, "admin@localhost"); err != nil {
 			t.Fatal(err)
@@ -809,7 +809,7 @@ func TestRoundTripTabwriterOutputThroughProducerParser(t *testing.T) {
 
 	assertIdentitySet(t, identities, map[string]int{
 		"codeberg/oberthci/oberth": 1,
-		"github/skipops/terraform": 1,
+		"github/acme/terraform":    1,
 	})
 	for _, id := range identities {
 		if id.Repo == "oberth" && id.Grants[0] != "oberth/data/release/gar-reader-key" {
@@ -832,7 +832,7 @@ func TestRoundTripJSONOutputThroughProducerParser(t *testing.T) {
 		{"codeberg/oberthci/oberth", "release", "oberth/data/release/cosign-secret"},
 		{"codeberg/oberthci/oberth", "release", "oberth/data/release/r2-upload-token"},
 		{"codeberg/oberthci/oberth", "*", "oberth/data/release/gar-reader-key"},
-		{"github/skipops/terraform", "*", "oberth/upstream/skipops/terraform/gcp-sa"},
+		{"github/acme/terraform", "*", "oberth/upstream/acme/terraform/gcp-sa"},
 	} {
 		if _, err := database.Grant(context.Background(), g.repo, g.step, g.secret, "admin@localhost"); err != nil {
 			t.Fatal(err)
@@ -856,7 +856,7 @@ func TestRoundTripJSONOutputThroughProducerParser(t *testing.T) {
 
 	assertIdentitySet(t, identities, map[string]int{
 		"codeberg/oberthci/oberth": 1,
-		"github/skipops/terraform": 1,
+		"github/acme/terraform":    1,
 	})
 
 	// The named-step rows are not lost: they round-trip to the per-step

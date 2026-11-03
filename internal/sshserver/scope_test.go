@@ -122,7 +122,7 @@ func TestScopedKeyServesTheCanonicalPath(t *testing.T) {
 			t.Errorf("authorizeScope(%q) = %q, %v; want %q", input, got, err, want)
 		}
 	}
-	if got, err := server.authorizeScope(sessionActor{identity: "owner@tuxbox"}, "oberth"); err != nil || got != "oberth" {
+	if got, err := server.authorizeScope(sessionActor{identity: "owner@example-node"}, "oberth"); err != nil || got != "oberth" {
 		t.Errorf("unscoped path rewritten to %q, %v", got, err)
 	}
 }

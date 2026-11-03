@@ -47,7 +47,7 @@ func TestConfiguredReportsWhetherAServerIsSet(t *testing.T) {
 func TestTokenComesFromTheEnvironment(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("OBERTH_TOKEN", secret)
-	got, err := FromEnv().resolveToken(t.Context())
+	got, err := FromEnv().ResolveToken(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestTokenComesFromTheEnvironment(t *testing.T) {
 func TestTokenCommandStdoutIsTrimmed(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("OBERTH_TOKEN_COMMAND", "printf '"+secret+"\\n\\n'")
-	got, err := FromEnv().resolveToken(t.Context())
+	got, err := FromEnv().ResolveToken(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestTokenCommandStdoutIsTrimmed(t *testing.T) {
 func TestTokenCommandFailureSurfacesItsOwnStderr(t *testing.T) {
 	clearEnv(t)
 	t.Setenv("OBERTH_TOKEN_COMMAND", "echo 'vault is locked' >&2; exit 3")
-	_, err := FromEnv().resolveToken(t.Context())
+	_, err := FromEnv().ResolveToken(t.Context())
 	if err == nil {
 		t.Fatal("a failing token command succeeded")
 	}
@@ -82,7 +82,7 @@ func TestTokenCommandFailureSurfacesItsOwnStderr(t *testing.T) {
 
 func TestAMissingTokenNamesTheEnvironmentVariable(t *testing.T) {
 	clearEnv(t)
-	_, err := FromEnv().resolveToken(t.Context())
+	_, err := FromEnv().ResolveToken(t.Context())
 	if err == nil {
 		t.Fatal("no token was accepted")
 	}
@@ -687,9 +687,9 @@ func TestARedirectWithinHTTPSIsStillFollowed(t *testing.T) {
 }
 
 func TestClassifyTransportExplainsUnresolvedLocalNames(t *testing.T) {
-	dnsErr := &net.DNSError{Err: "no such host", Name: "tuxbox.local", IsNotFound: true}
+	dnsErr := &net.DNSError{Err: "no such host", Name: "example-node.local", IsNotFound: true}
 	got := classifyTransport("/api/runs", &net.OpError{Op: "dial", Net: "tcp", Err: dnsErr})
-	if !strings.Contains(got.Error(), `cannot resolve "tuxbox.local"`) || !strings.Contains(got.Error(), mdnsdial.Hint) {
+	if !strings.Contains(got.Error(), `cannot resolve "example-node.local"`) || !strings.Contains(got.Error(), mdnsdial.Hint) {
 		t.Fatalf("a .local resolution failure is not explained: %v", got)
 	}
 }

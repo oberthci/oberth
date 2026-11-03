@@ -17,7 +17,7 @@
     "annotations": {
       "oberth.ci/ref": "refs/heads/main",
       "oberth.ci/run-id": "run-abc123",
-      "oberth.ci/spec-identity": "59b8543e0d516bc697251fa23973fe4effcc0e8ff21308b90105787da8ea34cb",
+      "oberth.ci/spec-identity": "278d9c565a96affb1e26313c3e504510e7b14a54232da168deb72639297eb4bd",
       "oberth.ci/step-usage-memory-policy": "explicit-limit-256Mi-v1",
       "oberth.ci/vmi-quota": "{\"repository_id\":7,\"limit\":{\"VMs\":2,\"Cores\":6,\"MemoryBytes\":12884901888},\"peak\":{\"VMs\":1,\"Cores\":2,\"MemoryBytes\":2147483648}}",
       "workflows.argoproj.io/pod-name-format": "v2"
@@ -40,7 +40,7 @@
         "executor": {
           "serviceAccountName": "vm-launcher"
         },
-        "podSpecPatch": "{\"$setElementOrder/initContainers\":[{\"name\":\"oberth-executor-token\"},{\"name\":\"init\"}],\"containers\":[{\"args\":[],\"command\":[\"argoexec\",\"resource\",\"get\"],\"name\":\"main\"}],\"initContainers\":[{\"command\":[\"sh\",\"-c\",\"until test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do sleep 1; done\"],\"image\":\"busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74\",\"name\":\"oberth-executor-token\",\"resources\":{},\"securityContext\":{\"allowPrivilegeEscalation\":false,\"capabilities\":{\"drop\":[\"ALL\"]},\"readOnlyRootFilesystem\":true,\"runAsGroup\":0,\"runAsNonRoot\":false,\"runAsUser\":0,\"seccompProfile\":{\"type\":\"RuntimeDefault\"}},\"volumeMounts\":[{\"mountPath\":\"/var/run/secrets/kubernetes.io/serviceaccount\",\"name\":\"exec-sa-token\"}]},{\"name\":\"init\"}],\"volumes\":[{\"emptyDir\":{\"medium\":\"Memory\",\"sizeLimit\":\"1Mi\"},\"name\":\"exec-sa-token\",\"secret\":null}]}"
+        "podSpecPatch": "{\"$setElementOrder/initContainers\":[{\"name\":\"oberth-executor-token\"},{\"name\":\"init\"}],\"containers\":[{\"args\":[],\"command\":[\"argoexec\",\"resource\",\"get\"],\"name\":\"main\"}],\"initContainers\":[{\"command\":[\"sh\",\"-c\",\"trap 'printf \\\"%s\\\\n\\\" \\\"executor token wait terminated\\\" \\u003e\\u00262; exit 143' TERM\\ntrap 'printf \\\"%s\\\\n\\\" \\\"executor token wait interrupted\\\" \\u003e\\u00262; exit 130' INT\\nprintf '%s\\\\n' 'waiting for executor token from Oberth' \\u003e\\u00262\\nwaited_seconds=0\\nuntil test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do\\n  if ! sleep 1; then\\n    printf '%s\\\\n' 'executor token wait failed' \\u003e\\u00262\\n    exit 1\\n  fi\\n  waited_seconds=$((waited_seconds + 1))\\n  if [ \\\"$((waited_seconds % 30))\\\" -eq 0 ]; then\\n    printf 'still waiting for executor token from Oberth after %ss\\\\n' \\\"$waited_seconds\\\" \\u003e\\u00262\\n  fi\\ndone\\nprintf '%s\\\\n' 'executor token ready' \\u003e\\u00262\"],\"image\":\"busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74\",\"name\":\"oberth-executor-token\",\"resources\":{},\"securityContext\":{\"allowPrivilegeEscalation\":false,\"capabilities\":{\"drop\":[\"ALL\"]},\"readOnlyRootFilesystem\":true,\"runAsGroup\":0,\"runAsNonRoot\":false,\"runAsUser\":0,\"seccompProfile\":{\"type\":\"RuntimeDefault\"}},\"volumeMounts\":[{\"mountPath\":\"/var/run/secrets/kubernetes.io/serviceaccount\",\"name\":\"exec-sa-token\"}]},{\"name\":\"init\"}],\"volumes\":[{\"emptyDir\":{\"medium\":\"Memory\",\"sizeLimit\":\"1Mi\"},\"name\":\"exec-sa-token\",\"secret\":null}]}"
       }
     ],
     "entrypoint": "vm",

@@ -50,9 +50,10 @@ func (s VMIDemandSummary) Valid() bool {
 // stay private and are copied at both boundaries, so sizing and submission use
 // one exact, policy-admitted resolution even if the source tag subsequently moves.
 type VMIDemandReceipt struct {
-	pods      *wfv1.Workflow
-	summary   VMIDemandSummary
-	fragments map[FragmentKey]Fragment
+	capability bool
+	pods       *wfv1.Workflow
+	summary    VMIDemandSummary
+	fragments  map[FragmentKey]Fragment
 }
 
 // DeclaredPodDemand analyzes the same immutable source and fragment resolution
@@ -60,6 +61,9 @@ type VMIDemandReceipt struct {
 func (r *VMIDemandReceipt) DeclaredPodDemand() (*PodDemand, error) {
 	if r == nil || r.pods == nil {
 		return nil, nil
+	}
+	if r.capability {
+		return DeclaredCapabilityPeak(r.pods.DeepCopy())
 	}
 	return DeclaredHostPeak(r.pods.DeepCopy(), r.summary.Binding.Trigger)
 }
@@ -190,17 +194,21 @@ func (r *ResolvedRunSource) Receipt(policy Policy) (*VMIDemandReceipt, error) {
 	if err := Admit(r.workflow, r.Policy(policy)); err != nil {
 		return nil, err
 	}
-	demand, err := r.demand()
+	var demand VMIDemand
+	var err error
+	if policy.Capability == nil {
+		demand, err = r.demand()
+	}
 	if err != nil {
 		return nil, err
 	}
 	summary := r.identity
 	summary.Demand = demand
-	return &VMIDemandReceipt{summary: summary, fragments: cloneVMIFragments(r.fragments), pods: r.workflow.DeepCopy()}, nil
+	return &VMIDemandReceipt{capability: policy.Capability != nil, summary: summary, fragments: cloneVMIFragments(r.fragments), pods: r.workflow.DeepCopy()}, nil
 }
 
 func (r *VMIDemandReceipt) Verify(other *VMIDemandReceipt) error {
-	if r == nil || other == nil || r.summary != other.summary {
+	if r == nil || other == nil || r.summary != other.summary || r.capability != other.capability {
 		return errors.New("argoworkflow: VMI demand receipt source, trigger or resolved graph changed after reservation")
 	}
 	return nil

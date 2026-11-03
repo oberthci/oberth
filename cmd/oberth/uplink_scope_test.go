@@ -33,10 +33,10 @@ func TestRunCursorFallsBackToTheRunID(t *testing.T) {
 func TestScopeFlagIsRepeatableAndCommaSeparated(t *testing.T) {
 	t.Parallel()
 	var scope []string
-	for _, value := range []string{"github, codeberg", "", "skipops"} {
+	for _, value := range []string{"github, codeberg", "", "acme"} {
 		scope = append(scope, splitScope(value)...)
 	}
-	if !slices.Equal(scope, []string{"github", "codeberg", "skipops"}) || scopeLabel(nil) != "all" || scopeLabel([]string{"a", "b"}) != "a,b" {
+	if !slices.Equal(scope, []string{"github", "codeberg", "acme"}) || scopeLabel(nil) != "all" || scopeLabel([]string{"a", "b"}) != "a,b" {
 		t.Fatalf("scope = %v", scope)
 	}
 }

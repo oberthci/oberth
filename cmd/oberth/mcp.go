@@ -18,12 +18,12 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/api"
+	"github.com/oberthci/oberth/internal/client"
 	"github.com/oberthci/oberth/internal/mdnsdial"
 	"github.com/oberthci/oberth/internal/restartretry"
 )
 
 const (
-	mcpDefaultURL      = "https://watch.oberth.ci/mcp"
 	mcpProtocolVersion = "2025-06-18"
 	mcpRequestTimeout  = 60 * time.Second
 	// mcpMaxResponseSize bounds one JSON-RPC reply. The server's inline text
@@ -47,11 +47,12 @@ const (
 
 // mcpConfig holds resolved MCP client configuration.
 type mcpConfig struct {
-	URL      string
-	Token    string
-	CAFile   string
-	Version  string
-	TokenEnv bool // true when token came from the environment
+	URL          string
+	Token        string
+	TokenCommand string
+	CAFile       string
+	Version      string
+	TokenEnv     bool // true when token came from the environment
 }
 
 // jsonRPCRequest is a JSON-RPC 2.0 request.
@@ -124,8 +125,11 @@ Commands:
   call      Call an MCP tool
 
 Environment:
-  OBERTH_MCP_URL    MCP server URL (default: https://watch.oberth.ci/mcp)
-  OBERTH_TOKEN      Bearer token for authentication
+  OBERTH_MCP_URL        MCP server URL (overrides OBERTH_BASE_URL)
+  OBERTH_BASE_URL       Server URL; /mcp is appended when no MCP URL is set
+  OBERTH_TOKEN          Bearer token for authentication
+  OBERTH_TOKEN_COMMAND  Command that prints a token when OBERTH_TOKEN is unset
+  OBERTH_CA_CERT        PEM CA certificate (overridden by --ca-file)
 
 Flags:
   --url <url>          MCP server URL
@@ -351,11 +355,19 @@ func parseMCPFlags(name string, arguments []string, wantPositional int) (mcpFlag
 	}
 
 	// Resolve URL.
+	environment := client.FromEnv()
 	if result.URL == "" {
 		result.URL = strings.TrimSpace(os.Getenv("OBERTH_MCP_URL"))
 	}
+	if result.URL == "" && environment.BaseURL != "" {
+		result.URL = strings.TrimRight(environment.BaseURL, "/") + "/mcp"
+	}
 	if result.URL == "" {
-		result.URL = mcpDefaultURL
+		result.URL = mcpLegacyDefaultURL
+		fmt.Fprintln(os.Stderr, "WARNING: the implicit hosted MCP URL is deprecated; set --url, OBERTH_MCP_URL, or OBERTH_BASE_URL")
+	}
+	if result.CAFile == "" {
+		result.CAFile = environment.CACert
 	}
 
 	// Resolve token.
@@ -377,10 +389,11 @@ func parseMCPFlags(name string, arguments []string, wantPositional int) (mcpFlag
 			return result, fmt.Errorf("token file %s is empty", tokenFile)
 		}
 	} else {
-		result.Token = strings.TrimSpace(os.Getenv("OBERTH_TOKEN"))
+		result.Token = environment.Token
+		result.TokenCommand = environment.TokenCommand
 	}
-	if result.Token == "" {
-		return result, errors.New("set OBERTH_TOKEN or use --token-file to authenticate")
+	if result.Token == "" && result.TokenCommand == "" {
+		return result, errors.New("set OBERTH_TOKEN, OBERTH_TOKEN_COMMAND, or use --token-file to authenticate")
 	}
 
 	result.Version = version
@@ -391,6 +404,9 @@ func parseMCPFlags(name string, arguments []string, wantPositional int) (mcpFlag
 // parsed response. It handles both direct JSON responses and SSE-framed
 // responses.
 func mcpRequest(ctx context.Context, cfg mcpFlagResult, method string, params any) (_ *jsonRPCResponse, resultErr error) {
+	if _, err := client.ValidateServerURL(cfg.URL); err != nil {
+		return nil, err
+	}
 	request := jsonRPCRequest{
 		JSONRPC: mcpJSONRPCVersion,
 		ID:      1,
@@ -409,6 +425,10 @@ func mcpRequest(ctx context.Context, cfg mcpFlagResult, method string, params an
 	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
+	cfg.Token, err = (client.Config{Token: cfg.Token, TokenCommand: cfg.TokenCommand}).ResolveToken(ctx)
+	if err != nil {
+		return nil, err
+	}
 	defer func() {
 		if resultErr != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) && parent.Err() == nil {
 			resultErr = mcpDeadlineError(limit, toolTimeout, resultErr)
@@ -475,11 +495,10 @@ func mcpRetryBody(ctx context.Context, request jsonRPCRequest, toolTimeout time.
 // again. Unknown tools fail closed.
 var mcpReconnectableTools = map[string]bool{
 	"wait": true, "status": true, "logs": true, "system_status": true,
-	"run_get": true, "run_logs": true, "run_resources": true, "run_list": true, "run_kvm_preflight": true,
-	"artifacts": true, "artifact_get": true,
+	"run_get": true, "run_logs": true, "run_resources": true, "run_list": true, "artifacts": true, "artifact_get": true,
 	"promote_status": true, "promotion_list": true, "promote_grant_list": true,
 	"repo_usage": true, "repo_list": true, "issue_get": true, "issue_get_many": true, "issue_list": true,
-	"access_list": true, "kubevirt_grant_get": true, "kubevirt_grant_list": true, "size_grant_get": true,
+	"access_list": true, "size_grant_get": true,
 	"uplink_list": true, "audit_list": true, "schedule_list": true,
 }
 
@@ -620,6 +639,16 @@ func mcpHTTPClient(caFile string) (*http.Client, error) {
 
 	return &http.Client{
 		Transport: cloned,
+		CheckRedirect: func(request *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("MCP: stopped after 10 redirects")
+			}
+			if len(via) > 0 && via[len(via)-1].URL.Scheme == "https" && request.URL.Scheme != "https" {
+				return errors.New("MCP: HTTPS redirect downgrade refused")
+			}
+			_, err := client.ValidateServerURL(request.URL.String())
+			return err
+		},
 	}, nil
 }
 

@@ -81,7 +81,7 @@ func TestMCPNeverRetriesMutationsOrPermanentErrors(t *testing.T) {
 				}))
 				defer server.Close()
 				defer withTestMCPClient(t, server)()
-				_, err := mcpRequest(t.Context(), mcpFlagResult{mcpConfig: mcpConfig{URL: server.URL}, timeout: time.Second}, mcpMethodToolsCall, toolsCallParams{Name: name})
+				_, err := mcpRequest(t.Context(), mcpFlagResult{mcpConfig: mcpConfig{URL: server.URL, Token: "fixture-token"}, timeout: time.Second}, mcpMethodToolsCall, toolsCallParams{Name: name})
 				if err == nil || calls.Load() != 1 {
 					t.Fatalf("err=%v calls=%d", err, calls.Load())
 				}
@@ -146,7 +146,7 @@ func TestMCPReconnectShrinksLongPollTimeout(t *testing.T) {
 			}))
 			defer server.Close()
 			defer withTestMCPClient(t, server)()
-			cfg := mcpFlagResult{mcpConfig: mcpConfig{URL: server.URL}, timeout: test.timeout}
+			cfg := mcpFlagResult{mcpConfig: mcpConfig{URL: server.URL, Token: "fixture-token"}, timeout: test.timeout}
 			_, err := mcpRequest(t.Context(), cfg, mcpMethodToolsCall, toolsCallParams{Name: "wait", Arguments: json.RawMessage(`{"sha":"abc","timeout":600}`)})
 			if err != nil || calls.Load() != 2 {
 				t.Fatalf("err=%v calls=%d", err, calls.Load())
@@ -178,6 +178,7 @@ func TestMCPRetryParamsKeepFittingAndOtherTools(t *testing.T) {
 }
 
 func TestMCPReconnectWindowFlag(t *testing.T) {
+	t.Setenv("OBERTH_MCP_URL", "https://example.invalid/mcp")
 	t.Setenv("OBERTH_TOKEN", "fixture-token")
 	cfg, err := parseMCPFlags("mcp call", []string{"--reconnect-window=5m", "status"}, -1)
 	if err != nil || cfg.reconnectWindow != 5*time.Minute {
@@ -201,7 +202,7 @@ func TestMCPReconnectHonorsOriginalDeadline(t *testing.T) {
 	defer withTestMCPClient(t, server)()
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
 	defer cancel()
-	_, err := mcpRequest(ctx, mcpFlagResult{mcpConfig: mcpConfig{URL: server.URL}}, mcpMethodToolsCall, toolsCallParams{Name: "wait"})
+	_, err := mcpRequest(ctx, mcpFlagResult{mcpConfig: mcpConfig{URL: server.URL, Token: "fixture-token"}}, mcpMethodToolsCall, toolsCallParams{Name: "wait"})
 	if err == nil || calls.Load() != 1 {
 		t.Fatalf("err=%v calls=%d", err, calls.Load())
 	}
@@ -225,7 +226,7 @@ func TestMCPMutationDoesNotRetryLostReplyOrHandover(t *testing.T) {
 			connection.Close()
 		}))
 		restore := withTestMCPClient(t, server)
-		response, err := mcpRequest(t.Context(), mcpFlagResult{mcpConfig: mcpConfig{URL: server.URL}, timeout: time.Second}, mcpMethodToolsCall, toolsCallParams{Name: "promote"})
+		response, err := mcpRequest(t.Context(), mcpFlagResult{mcpConfig: mcpConfig{URL: server.URL, Token: "fixture-token"}, timeout: time.Second}, mcpMethodToolsCall, toolsCallParams{Name: "promote"})
 		restore()
 		server.Close()
 		if calls.Load() != 1 {

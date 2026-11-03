@@ -391,7 +391,7 @@ check '! calls_contain "kubectl"' "in-cluster mode must not call kubectl"
 # --- 11. actual CLI-shaped audit preflight in both shipped helpers -----------
 # Execute each maintained preflight verbatim with the same mock CLI. Keeping
 # this extraction bounded also detects accidental divergence between copies.
-for candidate in "$root/scripts/setup-secretstore.sh" "$root/website/public/setup-secretstore.sh"; do
+for candidate in "$root/scripts/setup-secretstore.sh"; do
   preflight="$work/audit-preflight.sh"
   {
     printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' 'CLI=bao' \
@@ -447,9 +447,9 @@ check '! calls_contain "bao auth enable"' "audit preflight must precede auth mut
 check '! calls_contain "bao write"' "audit preflight must precede store writes"
 check '! calls_contain "bao policy write"' "audit preflight must precede policy writes"
 
-# Both shipped helpers must discover all three absent mounts from checked JSON
+# The shipped helper must discover all three absent mounts from checked JSON
 # lists, without relying on the CLI's different missing-mount read diagnostics.
-for candidate in "$root/scripts/setup-secretstore.sh" "$root/website/public/setup-secretstore.sh"; do
+for candidate in "$root/scripts/setup-secretstore.sh"; do
   script=$candidate
   begin "fresh-mounts-${candidate#"$root"/}"
   fresh_state
@@ -489,20 +489,15 @@ script=$root/scripts/setup-secretstore.sh
 
 # Failed reads must never become permission to replace an existing object,
 # including when the operator deliberately selected a force flag.
-for candidate in "$root/scripts/setup-secretstore.sh" "$root/website/public/setup-secretstore.sh"; do
+for candidate in "$root/scripts/setup-secretstore.sh"; do
   saved_script=$script
   script=$candidate
-  for target in config policy role credentialed-policy credentialed-role ci-policy ci-role; do
+  for target in config policy role; do
     case "$target" in
       config) read_command='read -field=kubernetes_host auth/kubernetes/config'; mutation='bao write auth/kubernetes/config ' ;;
       policy) read_command='policy read oberth-ci'; mutation='bao policy write oberth-ci ' ;;
       role) read_command='read -field=bound_service_account_names auth/kubernetes/role/oberth-ci'; mutation='bao write auth/kubernetes/role/oberth-ci ' ;;
-      credentialed-policy) read_command='policy read oberth-argo-credentialed'; mutation='bao policy write oberth-argo-credentialed ' ;;
-      credentialed-role) read_command='read -field=bound_service_account_names auth/kubernetes/role/oberth-argo-credentialed'; mutation='bao write auth/kubernetes/role/oberth-argo-credentialed ' ;;
-      ci-policy) read_command='policy read oberth-argo-ci-secrets'; mutation='bao policy write oberth-argo-ci-secrets ' ;;
-      ci-role) read_command='read -field=bound_service_account_names auth/kubernetes/role/oberth-argo-ci-secrets'; mutation='bao write auth/kubernetes/role/oberth-argo-ci-secrets ' ;;
     esac
-    case "$candidate:$target" in */scripts/*:credentialed-*|*/scripts/*:ci-*) continue ;; esac
     for failure in forbidden timeout tls malformed unknown silent wrong-absence empty-success; do
       case "$failure" in
         forbidden) error_exit=2; error_output='Error reading: Code: 403 permission denied' ;;
@@ -516,8 +511,8 @@ for candidate in "$root/scripts/setup-secretstore.sh" "$root/website/public/setu
       esac
       begin "read-error-${candidate#"$root"/}-$target-$failure"
       fresh_state
-      # Seed a matching server configuration; the public variant's extra
-      # tiers may be replaced with --force, but an unreadable target may not.
+      # Seed matching server configuration. An unreadable target must not
+      # authorize replacement even with --force.
       script=$root/scripts/setup-secretstore.sh
       run_script
       check '[ "$status" = 0 ]' 'fixture setup must succeed'
@@ -532,8 +527,7 @@ for candidate in "$root/scripts/setup-secretstore.sh" "$root/website/public/setu
       fi
       check 'contains "reading"' 'failure must identify the read error'
       # F1's reported reproduction uses no force flags. Exercise that path
-      # directly for the server's config, policy and role. The public extra
-      # tiers above also exercise failed reads with explicit replacement flags.
+      # directly for the server's config, policy and role.
       if [ "$candidate" = "$root/scripts/setup-secretstore.sh" ]; then
         : >"$MOCK_STATE/calls.log"
         MOCK_FAIL_COMMAND="$read_command" MOCK_FAIL_OUTPUT="$error_output" MOCK_FAIL_EXIT="$error_exit" \

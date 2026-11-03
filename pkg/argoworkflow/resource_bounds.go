@@ -36,11 +36,25 @@ func ResourceCeilingForSize(maximum pipeline.Size) (ResourceCeiling, error) {
 // ValidateResourceCeiling reads declarations only. It never defaults, clamps,
 // rounds or changes requests/limits. Call before server helper injection.
 func ValidateResourceCeiling(wf *wfv1.Workflow, repo string, maximum pipeline.Size, deadlineSeconds int64) error {
+	return ValidateResourceCeilingWithCapability(wf, repo, maximum, deadlineSeconds, nil)
+}
+
+// ValidateResourceCeilingWithCapability preserves the ordinary CPU/memory
+// ceilings while admitting only explicitly granted extended dimensions.
+func ValidateResourceCeilingWithCapability(wf *wfv1.Workflow, repo string, maximum pipeline.Size, deadlineSeconds int64, capability *Capability) error {
+	if err := capability.Validate(); err != nil {
+		return err
+	}
 	ceiling, err := ResourceCeilingForSize(maximum)
 	if err != nil {
 		return err
 	}
 	limits := map[corev1.ResourceName]resource.Quantity{corev1.ResourceCPU: resource.MustParse(ceiling.CPU), corev1.ResourceMemory: resource.MustParse(ceiling.Memory), corev1.ResourceEphemeralStorage: resource.MustParse(ceiling.EphemeralStorage)}
+	if capability != nil {
+		for name, count := range capability.ExtendedResources {
+			limits[corev1.ResourceName(name)] = *resource.NewQuantity(count, resource.DecimalSI)
+		}
+	}
 	check := func(location string, r corev1.ResourceRequirements) error {
 		for _, tier := range []struct {
 			name   string

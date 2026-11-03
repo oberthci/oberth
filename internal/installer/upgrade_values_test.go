@@ -139,7 +139,7 @@ func TestUpgradeSchemaPreflightUsesOnlyStoredOverridesAndCleansFiles(t *testing.
 				if slices.Contains(args, "--wait") || slices.Contains(args, "--timeout") || slices.Contains(args, "--reset-then-reuse-values") {
 					t.Fatal(args)
 				}
-				if !slices.Contains(args, "--is-upgrade") || !slices.Contains(args, "compatibility.schemaIdentity="+testUpgradeCompatibility.SchemaIdentity) || !slices.Contains(args, "watchTunnel.image="+watchTunnelImageDefault) {
+				if !slices.Contains(args, "--is-upgrade") || !slices.Contains(args, "compatibility.schemaIdentity="+testUpgradeCompatibility.SchemaIdentity) {
 					t.Fatal(args)
 				}
 				temporary = args[slices.Index(args, "--values")+1]

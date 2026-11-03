@@ -178,20 +178,20 @@ func TestSyncGrantPoliciesIdempotent(t *testing.T) {
 func TestSyncGrantPoliciesSharedPoliciesZeroStanzaWithIdentities(t *testing.T) {
 	t.Parallel()
 
-	name := PerRepoName("github", "skipops", "terraform")
-	ciName := PerRepoCIName("github", "skipops", "terraform")
+	name := PerRepoName("github", "acme", "terraform")
+	ciName := PerRepoCIName("github", "acme", "terraform")
 
 	responses := map[string]fakeBaoResponse{
 		// Shared policies: currently carry the org-union (pre-#456 shape).
 		// Sync must overwrite them with the zero-stanza shape.
-		"policy read " + defaultCredentialedPolicy:         {out: OberthCredentialedPolicyWithGrants(defaultKVPrefix, []string{"skipops"}, []string{"release/cosign-secret"})},
+		"policy read " + defaultCredentialedPolicy:         {out: OberthCredentialedPolicyWithGrants(defaultKVPrefix, []string{"acme"}, []string{"release/cosign-secret"})},
 		"policy write " + defaultCredentialedPolicy + " -": {out: "Success!"},
-		"policy read " + defaultCISecretsPolicy:            {out: OberthCISecretsPolicy(defaultKVPrefix, []string{"skipops"})},
+		"policy read " + defaultCISecretsPolicy:            {out: OberthCISecretsPolicy(defaultKVPrefix, []string{"acme"})},
 		"policy write " + defaultCISecretsPolicy + " -":    {out: "Success!"},
 		// Per-repo identities: matching, so no write needed.
-		"policy read " + name:                              {out: PerRepoPolicy(defaultKVPrefix, "skipops", "terraform", []string{"release/cosign-secret"})},
+		"policy read " + name:                              {out: PerRepoPolicy(defaultKVPrefix, "acme", "terraform", []string{"release/cosign-secret"})},
 		"read -format=json auth/kubernetes/role/" + name:   {out: `{"request_id":"1","data":{"bound_service_account_names":["` + name + `"],"bound_service_account_namespaces":["oberth-argo"],"token_policies":["` + name + `"],"token_no_default_policy":true,"token_ttl":1200,"token_max_ttl":1800}}`},
-		"policy read " + ciName:                            {out: PerRepoCIPolicy(defaultKVPrefix, "skipops", "terraform")},
+		"policy read " + ciName:                            {out: PerRepoCIPolicy(defaultKVPrefix, "acme", "terraform")},
 		"read -format=json auth/kubernetes/role/" + ciName: {out: `{"request_id":"1","data":{"bound_service_account_names":["` + ciName + `"],"bound_service_account_namespaces":["oberth-argo"],"token_policies":["` + ciName + `"],"token_no_default_policy":true,"token_ttl":1200,"token_max_ttl":1800}}`},
 		// No orphan per-step policies.
 		"list -format=json auth/kubernetes/role": {out: `[]`},
@@ -202,7 +202,7 @@ func TestSyncGrantPoliciesSharedPoliciesZeroStanzaWithIdentities(t *testing.T) {
 
 	identities := []PerRepoIdentity{{
 		Upstream: "github",
-		Org:      "skipops",
+		Org:      "acme",
 		Repo:     "terraform",
 		Grants:   []string{"oberth/data/release/cosign-secret"},
 	}}

@@ -20,7 +20,7 @@ type PerRepoIdentity struct {
 	// Upstream is the registered upstream name (e.g. "codeberg", "github").
 	Upstream string
 	// Org is the upstream org identity, the trailing segment of the base URL
-	// (e.g. "oberthci", "skipops").
+	// (e.g. "oberthci", "acme").
 	Org string
 	// Repo is the repository's bare name (e.g. "oberth", "acme-operator").
 	Repo string

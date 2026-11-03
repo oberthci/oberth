@@ -54,7 +54,7 @@ func TestAuditListIsAdminOnlyAndReturnsChainPositions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	filtered, err := fixture.call(unscopedActor, "audit_list", map[string]any{"action": "repository.", "actor": "owner@tuxbox", "repo": "oberth"})
+	filtered, err := fixture.call(unscopedActor, "audit_list", map[string]any{"action": "repository.", "actor": "owner@example-node", "repo": "oberth"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestAuditListRepoFilterMatchesBareAndQualifiedNames(t *testing.T) {
 			t.Fatal(err)
 		}
 		action, err := fixture.store.AppendAuditAction(ctx, model.AuditActionSpec{
-			Actor: "owner@tuxbox", Action: "schedule.pause", ResourceType: "schedule", ResourceID: repo + "#nightly", Details: string(details),
+			Actor: "owner@example-node", Action: "schedule.pause", ResourceType: "schedule", ResourceID: repo + "#nightly", Details: string(details),
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -138,7 +138,7 @@ func TestAuditHTTPMatchesMCPAndRefusesScopedOrNonAdmin(t *testing.T) {
 			}
 			continue
 		}
-		for _, query := range []string{"limit=2", "limit=1&before=3", "action=repository.&actor=owner%40tuxbox&repo=oberth&since=2000-01-01T00:00:00Z&until=2100-01-01T00:00:00Z"} {
+		for _, query := range []string{"limit=2", "limit=1&before=3", "action=repository.&actor=owner%40example-node&repo=oberth&since=2000-01-01T00:00:00Z&until=2100-01-01T00:00:00Z"} {
 			request = httptest.NewRequest(http.MethodGet, "/api/audit?"+query, nil)
 			request.Header.Set("Authorization", "Bearer test")
 			response = httptest.NewRecorder()

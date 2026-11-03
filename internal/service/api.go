@@ -24,6 +24,7 @@ import (
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 const promotionCompensationTimeout = 30 * time.Second
@@ -52,6 +53,7 @@ const grantPolicySyncAdvisory = "Grant recorded; the identity map refreshes auto
 	"Until then, access fails closed."
 
 type APIConfig struct {
+	WorkflowCapabilities      WorkflowCapabilityStore
 	ResourceCoverages         ResourceCoverageReader
 	RunResources              RunResourceReader
 	ResourceDeclarations      ResourceDeclarationReader
@@ -107,6 +109,7 @@ type APIConfig struct {
 }
 
 type API struct {
+	workflowCapabilities      WorkflowCapabilityStore
 	resourceCoverages         ResourceCoverageReader
 	runResources              RunResourceReader
 	resourceDeclarations      ResourceDeclarationReader
@@ -233,11 +236,12 @@ func NewAPI(config APIConfig) (*API, error) {
 		health: config.Health, signals: signals, maximumWait: maximumWait, mutationGate: mutationGate,
 		promotionWorkspaceRoot: promotionWorkspaceRoot, workspaces: workspaces,
 		secretAccess: config.SecretAccess, secretAccessReconciler: config.SecretAccessReconciler,
-		kubeVirtGrants:      config.KubeVirtGrants,
-		sizeGrants:          config.SizeGrants,
-		queuePriorities:     config.QueuePriorities,
-		secretStoreVerifier: config.SecretStoreVerifier,
-		repositoryArchiver:  config.RepositoryArchiver, changeRepositoryArchive: config.ChangeRepositoryArchive,
+		kubeVirtGrants:       config.KubeVirtGrants,
+		workflowCapabilities: config.WorkflowCapabilities,
+		sizeGrants:           config.SizeGrants,
+		queuePriorities:      config.QueuePriorities,
+		secretStoreVerifier:  config.SecretStoreVerifier,
+		repositoryArchiver:   config.RepositoryArchiver, changeRepositoryArchive: config.ChangeRepositoryArchive,
 		repositoryRemover: config.RepositoryRemover, removeGitCache: config.RemoveGitCache,
 		promotionGrants: config.PromotionGrants, promotionGrantMaxLifetime: promotionGrantMaxLifetime,
 		runCancels: config.RunCancels, retention: config.Retention, runReruns: config.RunReruns, schedules: config.Schedules, uplinks: config.Uplinks, background: &sync.WaitGroup{},
@@ -804,6 +808,26 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return service.accessListPending(ctx, arguments.Repo)
 		}
 		return service.accessList(ctx, arguments.Repo, arguments.Revoked)
+	case "workflow_capability_grant":
+		var arguments struct {
+			Repo       string                   `json:"repo"`
+			Capability *argoworkflow.Capability `json:"capability"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		if arguments.Capability == nil {
+			return nil, fmt.Errorf("%w: capability is required", ErrInvalidInput)
+		}
+		return service.workflowCapabilityTool(ctx, actor, name, arguments.Repo, arguments.Capability)
+	case "workflow_capability_revoke", "workflow_capability_get":
+		var arguments struct {
+			Repo string `json:"repo"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		return service.workflowCapabilityTool(ctx, actor, name, arguments.Repo, nil)
 	case "kubevirt_grant":
 		var arguments struct {
 			Repo      string `json:"repo"`
@@ -2887,7 +2911,7 @@ func MutatingTool(name string) bool {
 		return true
 	case "sync", "promote", "promote_retry", "publish_retry", "publication_abandon", "run_retry", "run_rerun", "run_cancel", "run_purge", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
 		"access_allow", "access_revoke",
-		"kubevirt_grant", "kubevirt_revoke",
+		"kubevirt_grant", "kubevirt_revoke", "workflow_capability_grant", "workflow_capability_revoke",
 		"size_grant", "size_revoke",
 		"admission_release", "queue_priority_config", "run_priority", "priority_grant", "priority_grant_revoke",
 		"repo_remove", "repo_archive", "repo_unarchive",

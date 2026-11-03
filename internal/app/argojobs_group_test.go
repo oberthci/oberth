@@ -68,7 +68,7 @@ func TestPipelineConcurrencyGroupReadsTheRunsOwnDocument(t *testing.T) {
 	ungrouped := t.TempDir()
 	writePipeline(t, ungrouped, "build.yaml", groupedPipeline(""))
 	if group, err := jobs.PipelineConcurrencyGroup(context.Background(), service.WorkflowRequest{
-		Run: model.Run{Ref: "main"}, Repository: model.Repository{Name: "beacon"}, SourceDir: ungrouped,
+		Run: model.Run{Ref: "main"}, Repository: model.Repository{Name: "example-service"}, SourceDir: ungrouped,
 	}); err != nil || group != "" {
 		t.Fatalf("undeclared group = %q, %v", group, err)
 	}
@@ -122,7 +122,7 @@ func TestAuditSubmissionRecordsTheAdmittedConcurrencyGroup(t *testing.T) {
 		{"", nil},
 	} {
 		request := service.WorkflowRequest{
-			Run:        model.Run{ID: "run-grouped", Ref: "fix-a", SHA: commit, Actor: "agent@tuxbox", ConcurrencyGroup: tc.group},
+			Run:        model.Run{ID: "run-grouped", Ref: "fix-a", SHA: commit, Actor: "agent@example-node", ConcurrencyGroup: tc.group},
 			Repository: model.Repository{Name: "terraform"}, SourceDir: dir, ConcurrencyGroup: tc.group,
 		}
 		if err := jobs.auditSubmission(context.Background(), request, submission); err != nil {
@@ -164,7 +164,7 @@ func TestPipelineConcurrencyGroupOnlyUsesDeclaredVMIGroup(t *testing.T) {
 		dir := t.TempDir()
 		writePipeline(t, dir, "build.yaml", vmiPipeline(tc.annotations))
 		group, err := jobs.PipelineConcurrencyGroup(context.Background(), service.WorkflowRequest{
-			Run: model.Run{Ref: "main"}, Repository: model.Repository{Name: "cttv"}, SourceDir: dir,
+			Run: model.Run{Ref: "main"}, Repository: model.Repository{Name: "example-web"}, SourceDir: dir,
 		})
 		if err != nil || group != tc.want {
 			t.Fatalf("VMI pipeline %q group = %q, %v; want %q", tc.annotations, group, err, tc.want)

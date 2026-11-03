@@ -279,34 +279,6 @@ func TestOtherCredentialedReleaseActionsRestrictedPath(t *testing.T) {
 	}
 }
 
-func TestCredentialedWebsiteRestrictedPath(t *testing.T) {
-	f := newWebsiteScriptFixture(t)
-	f.installed() // credential-free staging, using its existing offline fixture.
-	f.write("secrets/cloudflare-oberth-workers-token/CLOUDFLARE_API_TOKEN", []byte(websiteFixtureToken), 0400)
-	original := f.script
-	f.script = filepath.Join(f.root, "restricted-release.sh")
-	restrictedReleaseScript(t, original, f.script, false)
-	release, err := os.MkdirTemp("/tmp", "oberth-release-website-path-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(release) })
-	args := []string{"-i", "PATH=/usr/bin:/bin", "HOME=" + f.root, "OBERTH_TOOLS_DIR=" + f.root,
-		"OBERTH_RELEASE_TAG=" + runtimeFixtureTag, "OBERTH_RELEASE_SHA=" + runtimeFixtureSHA, "OBERTH_RELEASE_DIR=" + release,
-		"OBERTH_WEBSITE_DIR=" + f.websiteDir, "OBERTH_WEBSITE_INPUTS=" + f.inputs, "OBERTH_SECRETSTORE_DIR=" + filepath.Join(f.root, "secrets"),
-		"FIXTURE_ROOT=" + f.root, "FIXTURE_TRACE=" + f.trace, "FIXTURE_TOKEN=" + websiteFixtureToken,
-		"/bin/sh", f.script, "cloudflare-phase", "publish-website"}
-	command := exec.CommandContext(t.Context(), "/usr/bin/env", args...)
-	command.Dir = f.root
-	if out, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("restricted website: %v\n%s", err, out)
-	}
-	trace := f.log()
-	if !strings.Contains(trace, "deploy cwd=") || !strings.Contains(trace, "token=match") || strings.Contains(trace, websiteFixtureToken) {
-		t.Fatalf("incorrect deployment boundary: %s", trace)
-	}
-}
-
 func TestStaticScannerRejectsRelativeOrMissingGoBeforeDownload(t *testing.T) {
 	for _, tool := range []string{"go", "/missing/go"} {
 		t.Run(tool, func(t *testing.T) {

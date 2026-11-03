@@ -154,13 +154,13 @@ func TestMoreOrganizations(t *testing.T) {
 	st := newWizardState(Options{})
 	st.ForgeType, st.ForgeOrg = "github", "oberthci"
 	q := questionByID(t, "forge.more")
-	if err := q.save(st, []string{"codeberg.org/exampleorg, ssh://git@codeberg.org/skipops, codeberg.org/exampleorg"}); err != nil {
+	if err := q.save(st, []string{"codeberg.org/exampleorg, ssh://git@codeberg.org/acme, codeberg.org/exampleorg"}); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(st.Config.AlsoUpstreams, " "); got != "ssh://git@codeberg.org/exampleorg ssh://git@codeberg.org/skipops" {
+	if got := strings.Join(st.Config.AlsoUpstreams, " "); got != "ssh://git@codeberg.org/exampleorg ssh://git@codeberg.org/acme" {
 		t.Fatalf("AlsoUpstreams = %q", got)
 	}
-	if cmd := BuildCommandLine(st); !strings.Contains(cmd, "--also-upstream='codeberg.org/exampleorg'") || !strings.Contains(cmd, "--also-upstream='codeberg.org/skipops'") {
+	if cmd := BuildCommandLine(st); !strings.Contains(cmd, "--also-upstream='codeberg.org/exampleorg'") || !strings.Contains(cmd, "--also-upstream='codeberg.org/acme'") {
 		t.Errorf("equivalent command:\n%s", cmd)
 	}
 	if err := q.save(st, []string{"github.com/oberthci"}); err == nil {
@@ -333,8 +333,8 @@ func TestVerifyReportsUnresolvedClientHost(t *testing.T) {
 	previousDial := dialPort
 	t.Cleanup(func() { dialPort = previousDial })
 	for host, want := range map[string]string{
-		"tuxbox.local":   "cannot resolve tuxbox.local (" + mdnsdial.Hint + ")",
-		"ci.example.lan": "cannot resolve ci.example.lan: no such host; clients need it in DNS or /etc/hosts",
+		"example-node.local": "cannot resolve example-node.local (" + mdnsdial.Hint + ")",
+		"ci.example.lan":     "cannot resolve ci.example.lan: no such host; clients need it in DNS or /etc/hosts",
 	} {
 		dialPort = func(_ context.Context, address string) error {
 			name, _, _ := net.SplitHostPort(address)
@@ -355,8 +355,8 @@ func TestVerifyReportsUnresolvedClientHost(t *testing.T) {
 func TestClientHostLocalNameGivesWayToTheNodeAddress(t *testing.T) {
 	newTestHost(t)
 	st := newWizardState(Options{})
-	st.ClusterInfo = clusterInfoMsg{engine: "k3s", server: "https://tuxbox.local:6443", nodeName: "tuxbox", nodeIP: "192.168.86.193"}
-	st.Config.TLSExtraDNSNames = []string{"tuxbox.local", "ci.example"}
+	st.ClusterInfo = clusterInfoMsg{engine: "k3s", server: "https://example-node.local:6443", nodeName: "example-node", nodeIP: "192.168.86.193"}
+	st.Config.TLSExtraDNSNames = []string{"example-node.local", "ci.example"}
 	q := questionByID(t, "tls.client")
 	var values []string
 	for _, o := range q.options(st) {
@@ -365,7 +365,7 @@ func TestClientHostLocalNameGivesWayToTheNodeAddress(t *testing.T) {
 			t.Errorf("option %q detail %q", o.value, o.detail)
 		}
 	}
-	if strings.Join(values, ",") != "192.168.86.193,tuxbox,ci.example,tuxbox.local,localhost" {
+	if strings.Join(values, ",") != "192.168.86.193,example-node,ci.example,example-node.local,localhost" {
 		t.Fatalf("options %v", values)
 	}
 	if got := q.selected(st); got != "192.168.86.193" {
@@ -374,10 +374,10 @@ func TestClientHostLocalNameGivesWayToTheNodeAddress(t *testing.T) {
 	if strings.Contains(q.explain(st), "mDNS") {
 		t.Errorf("no warning while the node address is selected: %q", q.explain(st))
 	}
-	if err := q.save(st, []string{"tuxbox.local"}); err != nil {
+	if err := q.save(st, []string{"example-node.local"}); err != nil {
 		t.Fatal(err)
 	}
-	if q.selected(st) != "tuxbox.local" || !strings.Contains(q.explain(st), "cni0") {
+	if q.selected(st) != "example-node.local" || !strings.Contains(q.explain(st), "cni0") {
 		t.Errorf("an explicit .local answer stays and is warned about: %q %q", q.selected(st), q.explain(st))
 	}
 }

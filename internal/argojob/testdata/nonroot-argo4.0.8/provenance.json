@@ -6,18 +6,19 @@
   "source_file": "workflow/controller/workflowpod.go",
   "source_sha256": "97d059a8ffed7854760fa8c109f657a4d6be0e2496ed193ee1dd541118b8f763",
   "capture_boundary": "immediately before var podSpecPatchs / processPodSpecPatch",
-  "instrumented_sha256": "e94c816c3116278d8b6c363568ab3922aed0a178e6afcd83d6fd0a3270b0e8d4",
+  "instrumented_sha256": "76d1a46beaa79d764320552eaeb8a40aa7c38057bf346a12b9e8846c621cc59a",
   "files": {
-    "container-before-patch.json": "6a6701bd8920415a63928ea420d958d483e3f641ea23158bc9360006b738e616",
-    "container-submitted.json": "14598689823f57ca6d615050f8f26c5b90d720da3aa1afd934846c9929284ac8",
-    "script-before-patch.json": "1ac9de3413df82d8b77511ce0ff99234806a659a3be3a0e568fe8c9096ba55e2",
-    "script-submitted.json": "3127b656a79bf5e9285eca041b07e0d701e9ce0d37790bf4758543f2e9f3e219",
+    "container-before-patch.json": "e1f3686cdaf761339cb5588af5ef081c89cd5fc01982e152881ca3f72a8bb32e",
+    "container-submitted.json": "3e7a3a8386e260a3fc839635309a200a4d2886987bb878bb25f481bbb99c7e59",
+    "script-before-patch.json": "83b2e4aae297f55019f51c1b8083a5977c8c48f8cfa47a4c5e06295c199d8a64",
+    "script-submitted.json": "e3a1ee4337d08c0a7b8926ba81624712a0e5d6082922c3a82f8bc434a107e6ff",
     "controller-profile.json": "7ca0f2aff6cf39e67aa5996672363a3a7a8401449a794f32d5cf375e7267a4c0",
-    "container-persisted-workflow.json": "c2fbb27f31dd6b40bd573963395bc94a2bbcad8caa82d3480edc6e9fd10a137e",
-    "script-persisted-workflow.json": "070625cbf69c2b18439b9631f553bac237f29f19c39046e74001cae26eda39e3",
-    "capture_test.go.txt": "2f75e2e64c0bbe5de567b8cec9bf31601cf62fcb8dfde6a92a5650d8f5f0cf22"
+    "container-persisted-workflow.json": "c314efd1d074b82ca87c4354f51e48b4b376e2771181ee5f9dad1a679d76235d",
+    "script-persisted-workflow.json": "67d0ca2ab101902bbdc80eeaa3344bbdf8338924f5e1f7fda724ba82977e1581",
+    "capture_test.go.txt": "2f75e2e64c0bbe5de567b8cec9bf31601cf62fcb8dfde6a92a5650d8f5f0cf22",
+    "capture-hook.go.txt": "9068b7074cedb224bf5fd2612591016096b2c0091d5d53453e5971ca474a1986"
   },
   "stage": "Before processPodSpecPatch, workflow/controller/workflowpod.go:405; observed submitted Pod after main emissary/volume rewriting at417-456.",
   "controller_profile": "nonroot-static-v1; exact executor digest and gloglevel0; raw before-Pods include separate hostile SC control. Persisted Workflows use supported profile and actual operate-to-Running fake API reconciliation.",
-  "recaptured_with": "2026-10-28 round 44; Go 1.26.10; authenticated upstream Argo v4.0.8, retained combined capture overlay; all 27 submitted Pods pass Kubernetes v1.35.7 ValidatePodCreate"
+  "recaptured_with": "2026-11-03 #1398 executor-token progress diagnostics; Go 1.26.10, pinned Argo v4.0.8 real controller with fake API clients and unchanged capture-only hooks; all 18 submitted Pods passed Kubernetes v1.35.7 ValidatePodCreate. No live deployment."
 }

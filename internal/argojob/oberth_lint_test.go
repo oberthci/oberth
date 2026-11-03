@@ -23,7 +23,7 @@ func TestOberthLintKeepsDeadlineCacheAndToolIsolation(t *testing.T) {
 			config := oberthConfig()
 			config.CICacheRoot = cacheRoot
 			workflow, err := buildOberthPipeline(config, Request{
-				RunID: "run-lint", Name: "oberth-lint", Repo: "oberth", UpstreamOrg: "skipops", UpstreamName: "github",
+				RunID: "run-lint", Name: "oberth-lint", Repo: "oberth", UpstreamOrg: "acme", UpstreamName: "github",
 				Ref: "refs/heads/main", SHA: testSHA, Trigger: pipeline.TriggerCI, Source: loadPipeline(t, "build.yaml"), ApprovedSecrets: map[string]bool{},
 			})
 			if err != nil {

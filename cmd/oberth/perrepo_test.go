@@ -91,9 +91,9 @@ func TestBuildPerRepoIdentitiesMatchesArgojobKeyFormat(t *testing.T) {
 	t.Parallel()
 	store := fakePerRepoStore{
 		repos:     []model.Repository{{ID: 1, Name: "terraform", UpstreamID: 10}},
-		upstreams: []model.Upstream{{ID: 10, Name: "github", BaseURL: "ssh://git@github.com/skipops"}},
+		upstreams: []model.Upstream{{ID: 10, Name: "github", BaseURL: "ssh://git@github.com/acme"}},
 		grants: map[int64]map[string]map[string]bool{
-			1: {"*": {"oberth/upstream/skipops/terraform/plan/gcp-sa": true}},
+			1: {"*": {"oberth/upstream/acme/terraform/plan/gcp-sa": true}},
 		},
 	}
 
@@ -103,7 +103,7 @@ func TestBuildPerRepoIdentitiesMatchesArgojobKeyFormat(t *testing.T) {
 	}
 
 	// The key must match what argojob.canonicalRepoKey produces.
-	key := "github/skipops/terraform"
+	key := "github/acme/terraform"
 	if _, ok := result[key]; !ok {
 		t.Fatalf("expected key %q, got keys %v", key, keys(result))
 	}

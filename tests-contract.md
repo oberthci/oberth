@@ -133,7 +133,7 @@ same private effect engine: original six conflicts and actual FAILED72,
 corrected one conflict, persisted metadata-only subtraction, all-four SSA
 Force=false dry-runs and ordinary deployed73 convergence on the same UIDs.
 The synthetic fixture does not qualify signed released-installer admission or
-live rollout. [The catalog](docs/watch-csa-test-catalog.md) records that boundary,
+live rollout. [The catalog](docs/backup-restore.md) records that boundary,
 the remaining production proof and exact source-bound CPU2 custody/build gates.
 V5 source regressions additionally require one frozen API/Helm identity,
 impersonation/hook refusal, static public credential path-replacement binding,

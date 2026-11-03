@@ -114,13 +114,13 @@ func TestRunsCancelCLICancelsOnlyTheRefsActiveRuns(t *testing.T) {
 	t.Setenv("OBERTH_MCP_URL", server.URL)
 
 	var output strings.Builder
-	err := runRuns(context.Background(), []string{"cancel", "--repo", "beacon", "--ref", "feature-x", "--reason", "abandoned"}, &output)
+	err := runRuns(context.Background(), []string{"cancel", "--repo", "example-service", "--ref", "feature-x", "--reason", "abandoned"}, &output)
 	if !errors.Is(err, errMCPToolError) || !strings.Contains(err.Error(), "run cccc") {
 		t.Fatalf("runs cancel error = %v", err)
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if listed["repo"] != "beacon" || listed["ref"] != "feature-x" {
+	if listed["repo"] != "example-service" || listed["ref"] != "feature-x" {
 		t.Fatalf("run_list arguments = %v", listed)
 	}
 	if strings.Join(cancelled, ",") != "aaaa,bbbb,cccc" {
@@ -131,7 +131,7 @@ func TestRunsCancelCLICancelsOnlyTheRefsActiveRuns(t *testing.T) {
 			t.Fatalf("output %q lacks %q", output.String(), want)
 		}
 	}
-	if err := runRuns(context.Background(), []string{"cancel", "--repo", "beacon"}, &output); !errors.Is(err, errUsage) {
+	if err := runRuns(context.Background(), []string{"cancel", "--repo", "example-service"}, &output); !errors.Is(err, errUsage) {
 		t.Fatalf("runs cancel without --ref = %v", err)
 	}
 }

@@ -29,8 +29,8 @@ func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	if err := validateMigrations(migrations, latestMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
-	if latestMigrationVersion != 44 {
-		t.Fatalf("latest migration version = %d, want 44", latestMigrationVersion)
+	if latestMigrationVersion != 47 {
+		t.Fatalf("latest migration version = %d, want 47", latestMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)
@@ -981,6 +981,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"vm_executions",
 		"vm_suite_executions",
 		"vm_suite_resources",
+		"workflow_capability_grants",
 	})
 	assertSchemaObjects(t, store.db, "index", []string{
 		"audit_actions_page_idx",
@@ -1063,11 +1064,19 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"vm_executions_guard_update",
 		"vm_executions_no_delete",
 		"vm_executions_no_replace",
+		"vm_suite_executions_retired_delete",
+		"vm_suite_executions_retired_insert",
+		"vm_suite_executions_retired_update",
+		"vm_suite_resources_retired_delete",
+		"vm_suite_resources_retired_insert",
+		"vm_suite_resources_retired_update",
 	})
 
 	expectedColumns := map[string][]string{
 		"priority_grants":           {"identity", "max_class", "expires", "granted_by"},
 		"run_priority_requests":     {"run_id", "requested", "accepted", "reason", "actor", "refusal"},
+		"restart_workflow_timings":  {"run_id", "epoch", "workflow_created_at", "workflow_json"},
+		"restart_step_timings":      {"run_id", "epoch", "node_id", "workflow_uid", "pod_uid", "available", "ordinal", "timing_json"},
 		"queue_priority_patterns":   {"pattern"},
 		"run_priority_overrides":    {"run_id", "priority", "reason", "actor", "updated_at"},
 		"schedule_fires":            {"repo", "entry", "fired_at", "outcome", "last_fired_at"},

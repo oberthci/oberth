@@ -3,11 +3,8 @@ package store
 import "strings"
 
 // Historical fixtures reconstruct an older schema from a fresh database.
-// Remove integration and priority schemas before rebuilding historical fixtures.
-var integrationDowngradeSQL = restartRecoveryDowngradeSQL + publicationAbandonDowngradeSQL + `DROP TRIGGER issues_metadata_revision; ALTER TABLE issues DROP COLUMN revision; ALTER TABLE token_credentials DROP COLUMN expires_at;
-DROP TABLE IF EXISTS run_priority_requests;
-DROP TABLE IF EXISTS priority_grants;
-DELETE FROM schema_migrations WHERE version>=39;`
+// Remove all later schemas before reconstructing historical fixtures.
+var integrationDowngradeSQL = pilotRetirementDowngradeSQL
 
 var publicationRetryDowngradeSQL = integrationDowngradeSQL + `
 DROP TRIGGER publications_guard_update;

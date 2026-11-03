@@ -103,7 +103,7 @@ func awaitDeadlineRun(t *testing.T, fixture *recoveryFixture, id string, done <-
 // Exercise actual Run startup, dispatch, submitted worker and finalization;
 // checking only adapter returns would miss a fatal completion-channel escape.
 func TestDatabaseDeadlineSchedulerConverges(t *testing.T) {
-	operations := []string{"RunningRunsWithJobs", "PendingRunCancellations", "PendingPublications", "RunWorkspaceCleanupCandidates", "PromotionWorkspaceCleanupCandidates", "ClaimNextRun", "Run", "Repository", "Upstream", "SetRunJobName", "SetRunConcurrencyGroup", "SetRunCredentialed", "MarkRunAdmitted", "MarkRunSubmitted", "PutStepResult", "FinishRun", "CompleteSupersededRunCancellationWithoutJob", "RunWorkspaceCleanupEligible"}
+	operations := []string{"RunningRunsWithJobs", "PendingRunCancellations", "PendingPublications", "RunWorkspaceCleanupCandidates", "PromotionWorkspaceCleanupCandidates", "ClaimNextRun", "Run", "Repository", "Upstream", "SetRunWorkflowName", "SetRunConcurrencyGroup", "SetRunCredentialed", "MarkRunAdmitted", "MarkRunSubmitted", "PutStepResult", "FinishRun", "CompleteSupersededRunCancellationWithoutJob", "RunWorkspaceCleanupEligible"}
 	for _, operation := range operations {
 		for _, fault := range []struct {
 			name string
@@ -212,7 +212,7 @@ func testDatabaseCancellationContinuesLiveDispatch(t *testing.T, failure error) 
 			fixture.scheduler.store = database
 			fixture.scheduler.workspaces.owners = fixture.scheduler.database()
 			done, _ := startDeadlineScheduler(t, fixture.scheduler)
-			old := fixture.branch(t, fixture.beacon, "supersede-db", "a")
+			old := fixture.branch(t, fixture.exampleService, "supersede-db", "a")
 			awaitDeadlineCreated(t, fixture.engine, done)
 			// CreateCI announces creation before MarkRunSubmitted commits. An
 			// earlier supersession uses the worker's post-create cleanup path,
@@ -229,7 +229,7 @@ func testDatabaseCancellationContinuesLiveDispatch(t *testing.T, failure error) 
 			before := database.calls[operation]
 			database.failures[operation] = 2
 			database.mu.Unlock()
-			successor, err := storetest.EnqueueRun(fixture.store, t.Context(), model.RunSpec{RepoID: fixture.beacon.ID, RefKind: model.RefBranch, Ref: "supersede-db", SHA: strings.Repeat("b", 40), Actor: "test", Trigger: "branch"})
+			successor, err := storetest.EnqueueRun(fixture.store, t.Context(), model.RunSpec{RepoID: fixture.exampleService.ID, RefKind: model.RefBranch, Ref: "supersede-db", SHA: strings.Repeat("b", 40), Actor: "test", Trigger: "branch"})
 			if err != nil {
 				t.Fatal(err)
 			}

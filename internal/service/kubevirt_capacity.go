@@ -49,7 +49,8 @@ func (scheduler *Scheduler) pipelineKubeVirt(ctx context.Context, request Workfl
 	}
 	sizer, ok := engine.(PipelineKubeVirtSizer)
 	if !ok {
-		return KubeVirtResources{}, nil
+		receipt, err := scheduler.pipelineDemandReceipt(ctx, request)
+		return KubeVirtResources{Receipt: receipt}, err
 	}
 	resources, err := sizer.PipelineKubeVirt(ctx, request)
 	if err != nil {

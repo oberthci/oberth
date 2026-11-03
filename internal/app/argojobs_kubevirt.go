@@ -42,6 +42,21 @@ func (jobs *ArgoJobs) PipelineKubeVirt(ctx context.Context, request service.Work
 	}
 	policy := argoworkflow.Policy{RunnerImagePrefixes: jobs.config.RunnerImagePrefixes, ContainerDiskPrefixes: jobs.config.ContainerDiskPrefixes}
 	workflow := resolved.Workflow()
+	if jobs.capabilityGrants != nil {
+		capability, err := jobs.capabilityGrants(ctx, request.Repository.ID)
+		if err != nil {
+			return service.KubeVirtResources{}, err
+		}
+		resources, extended := argoworkflow.CapabilityUsage(workflow)
+		if capability != nil && (resources || extended) {
+			if capability.Namespace != jobs.config.Namespace {
+				return service.KubeVirtResources{}, fmt.Errorf("app: workflow capability belongs to a different execution namespace")
+			}
+			policy.Capability = capability
+			receipt, err := resolved.Receipt(policy)
+			return service.KubeVirtResources{Receipt: receipt}, err
+		}
+	}
 	kvm, err := argoworkflow.DeclaredKVMTemplates(workflow)
 	if err != nil {
 		return service.KubeVirtResources{}, err

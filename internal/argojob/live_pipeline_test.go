@@ -82,7 +82,7 @@ func TestLiveRepositoryBuildPipelineExecutes(t *testing.T) {
 	}
 	t.Logf("pipeline document: %s", pipelineFile)
 	request := Request{
-		RunID: runID, Name: runID, Repo: "oberth", UpstreamOrg: "skipops",
+		RunID: runID, Name: runID, Repo: "oberth", UpstreamOrg: "acme",
 		Ref: "refs/heads/argo-workflow-execution-engine", SHA: testSHA,
 		Trigger: pipeline.TriggerCI, Source: source,
 		// This repository's own working tree is the checkout under test.

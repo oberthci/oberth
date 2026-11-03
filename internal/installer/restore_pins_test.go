@@ -95,7 +95,7 @@ func TestRewriteKnownHostsTouchesOnlyThisServer(t *testing.T) {
 	current, _ := newEd25519HostKey(t)
 	old, older, github := newECDSAHostKey(t), newECDSAHostKey(t), newECDSAHostKey(t)
 	ours := map[string]bool{}
-	for _, spec := range []string{"[oberth.oberth.svc.cluster.local]:2222", "[oberth.oberth.svc]:2222", "[tuxbox]:30022",
+	for _, spec := range []string{"[oberth.oberth.svc.cluster.local]:2222", "[oberth.oberth.svc]:2222", "[example-node]:30022",
 		"oberth.example", "[2001:db8::5]:30022", "[::1]:30022", "[localhost]:30022", "[127.0.0.1]:30022"} {
 		ours[spec] = true
 	}
@@ -104,7 +104,7 @@ func TestRewriteKnownHostsTouchesOnlyThisServer(t *testing.T) {
 		knownHostsLine("github.com", github, ""),
 		knownHostsLine("[elsewhere.example]:2222", older, ""),
 		"@cert-authority " + knownHostsLine("[oberth.oberth.svc.cluster.local]:2222", old, ""),
-		"@revoked " + knownHostsLine("[tuxbox]:30022", old, ""),
+		"@revoked " + knownHostsLine("[example-node]:30022", old, ""),
 		knownHostsLine("[oberth.example]:2200", old, ""), // another port: not this server
 	}
 	mixed := knownHostsLine("[oberth.oberth.svc.cluster.local]:2222,gitlab.com", old, "")
@@ -112,12 +112,12 @@ func TestRewriteKnownHostsTouchesOnlyThisServer(t *testing.T) {
 		knownHostsLine("[::1]:30022", old, ""),
 		knownHostsLine("[localhost]:30022,[127.0.0.1]:30022", old, ""),
 	}
-	elsewhere := knownHostsLine("[tuxbox.lan]:30022", old, "")
+	elsewhere := knownHostsLine("[example-node.lan]:30022", old, "")
 	value := strings.Join(append(append(append([]string{}, untouched...), mixed, elsewhere), append(loopback,
 		knownHostsLine("[oberth.oberth.svc.cluster.local]:2222", old, "pins-comment-canary"),
 		knownHostsLine(hashedHost("[oberth.oberth.svc]:2222"), old, "")+"\r",
-		knownHostsLine("[tuxbox]:30022", old, ""),
-		knownHostsLine("[tuxbox]:30022", older, ""),
+		knownHostsLine("[example-node]:30022", old, ""),
+		knownHostsLine("[example-node]:30022", older, ""),
 		knownHostsLine("oberth.example", old, ""),
 		knownHostsLine("[2001:db8::5]:30022", old, ""),
 		"",
@@ -129,7 +129,7 @@ func TestRewriteKnownHostsTouchesOnlyThisServer(t *testing.T) {
 	want := strings.Join(append(append(append([]string{}, untouched...), mixed, elsewhere), append(loopback,
 		knownHostsLine("[oberth.oberth.svc.cluster.local]:2222", current, "pins-comment-canary"),
 		knownHostsLine(hashedHost("[oberth.oberth.svc]:2222"), current, "")+"\r",
-		knownHostsLine("[tuxbox]:30022", current, ""),
+		knownHostsLine("[example-node]:30022", current, ""),
 		knownHostsLine("oberth.example", current, ""),
 		knownHostsLine("[2001:db8::5]:30022", current, ""),
 		"",
@@ -137,11 +137,11 @@ func TestRewriteKnownHostsTouchesOnlyThisServer(t *testing.T) {
 	if result.out != want {
 		t.Fatalf("rewritten known_hosts:\n%s\nwant:\n%s", result.out, want)
 	}
-	if got := sortedUnique(result.rewrittenHosts); strings.Join(got, " ") != "[2001:db8::5]:30022 [oberth.oberth.svc.cluster.local]:2222 [oberth.oberth.svc]:2222 [tuxbox]:30022 oberth.example" {
+	if got := sortedUnique(result.rewrittenHosts); strings.Join(got, " ") != "[2001:db8::5]:30022 [example-node]:30022 [oberth.oberth.svc.cluster.local]:2222 [oberth.oberth.svc]:2222 oberth.example" {
 		t.Fatalf("rewritten hosts %v", got)
 	}
 	if strings.Join(sortedUnique(result.loopback), " ") != "[127.0.0.1]:30022 [::1]:30022 [localhost]:30022" ||
-		len(result.mixed) != 1 || strings.Join(result.oldKeys, " ") != "[oberth.example]:2200 [tuxbox.lan]:30022" {
+		len(result.mixed) != 1 || strings.Join(result.oldKeys, " ") != "[oberth.example]:2200 [example-node.lan]:30022" {
 		t.Fatalf("reported loopback %v mixed %v old key %v", result.loopback, result.mixed, result.oldKeys)
 	}
 	// Already current: nothing changes, byte for byte.
@@ -166,7 +166,7 @@ func TestSSHHostSpecsAndLoopback(t *testing.T) {
 		loopback bool
 	}{
 		{"Oberth.Example", 22, "oberth.example", false},
-		{"tuxbox", 30022, "[tuxbox]:30022", false},
+		{"example-node", 30022, "[example-node]:30022", false},
 		{"2001:db8::5", 30022, "[2001:db8::5]:30022", false},
 		{"::1", 30022, "[::1]:30022", true},
 		{"127.0.0.2", 22, "127.0.0.2", true},
@@ -226,9 +226,9 @@ func pinsFixture(t *testing.T, sourceCA, targetCA string, samePin bool) (string,
 	source.bao.kv["release/git-known-hosts"] = map[string]any{"known_hosts": strings.Join([]string{
 		knownHostsLine("github.com", github, ""),
 		knownHostsLine("[oberth.oberth.svc.cluster.local]:2222", pinnedKey, "pins-comment-canary"),
-		knownHostsLine("[tuxbox]:30022", pinnedKey, ""),
+		knownHostsLine("[example-node]:30022", pinnedKey, ""),
 		knownHostsLine("[localhost]:30022", pinnedKey, ""),
-		knownHostsLine("[tuxbox.lan]:30022", pinnedKey, ""),
+		knownHostsLine("[example-node.lan]:30022", pinnedKey, ""),
 		"",
 	}, "\n")}
 	source.bao.kv["release/ca-bundle"] = map[string]any{"ca.crt": sourceCA, "token": "pins-token-canary"}
@@ -260,7 +260,7 @@ func pinsFixture(t *testing.T, sourceCA, targetCA string, samePin bool) (string,
 	}
 	deployment := object.(*appsv1.Deployment).DeepCopy()
 	container := &deployment.Spec.Template.Spec.Containers[0]
-	container.Env = append(container.Env, corev1.EnvVar{Name: "OBERTH_TLS_NAMES", Value: "tuxbox,localhost,10.0.0.5"})
+	container.Env = append(container.Env, corev1.EnvVar{Name: "OBERTH_TLS_NAMES", Value: "example-node,localhost,10.0.0.5"})
 	if err := target.client.Tracker().Update(deployments, deployment, DefaultNamespace); err != nil {
 		t.Fatal(err)
 	}
@@ -296,9 +296,9 @@ func TestRestoreUpdatesSecretsPinningTheOldHostKey(t *testing.T) {
 
 	plan := runFixtureRestore(t, archive, target, RestoreConfig{DryRun: true})
 	for _, want := range []string{
-		"known_hosts pins of this server updated to its SSH host key: release/git-known-hosts (2 lines: [oberth.oberth.svc.cluster.local]:2222, [tuxbox]:30022)",
+		"known_hosts pins of this server updated to its SSH host key: release/git-known-hosts (2 lines: [example-node]:30022, [oberth.oberth.svc.cluster.local]:2222)",
 		"known_hosts lines for loopback names of this server, left as they are: release/git-known-hosts ([localhost]:30022)",
-		"known_hosts lines pinning the backup's SSH host key under other names, left as they are: release/git-known-hosts ([tuxbox.lan]:30022)",
+		"known_hosts lines pinning the backup's SSH host key under other names, left as they are: release/git-known-hosts ([example-node.lan]:30022)",
 		"still hold the backup's server CA (update them by hand): release/ca-bundle",
 	} {
 		if !strings.Contains(plan, want) {
@@ -314,7 +314,7 @@ func TestRestoreUpdatesSecretsPinningTheOldHostKey(t *testing.T) {
 	lines := strings.Split(restored, "\n")
 	if len(lines) != 6 || !strings.HasPrefix(lines[0], "github.com ") ||
 		lines[1] != knownHostsLine("[oberth.oberth.svc.cluster.local]:2222", hostKey, "pins-comment-canary") ||
-		lines[2] != knownHostsLine("[tuxbox]:30022", hostKey, "") ||
+		lines[2] != knownHostsLine("[example-node]:30022", hostKey, "") ||
 		strings.Contains(lines[3], base64.StdEncoding.EncodeToString(hostKey.Marshal())) {
 		t.Fatalf("restored known_hosts:\n%s", restored)
 	}

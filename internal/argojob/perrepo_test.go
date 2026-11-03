@@ -140,11 +140,11 @@ func TestBuildCIFallsBackToSharedWhenNoCIPerRepoIdentities(t *testing.T) {
 func TestBuildCIRefusesSharedFallbackWhenOtherReposHaveCIIdentities(t *testing.T) {
 	t.Parallel()
 	cfg := testConfigWithPerRepo() // has CI per-repo for codeberg/oberthci/oberth
-	path := "oberth/upstream/skipops/other-repo/test-secret"
+	path := "oberth/upstream/acme/other-repo/test-secret"
 	req := testRequest(pipeline.TriggerCI, perRepoCredentialedDocument(path))
 	req.Repo = "other-repo"
 	req.UpstreamName = "codeberg"
-	req.UpstreamOrg = "skipops"
+	req.UpstreamOrg = "acme"
 	req.ApprovedSecrets = map[string]bool{path: true}
 
 	_, err := Build(cfg, req)
@@ -180,11 +180,11 @@ func TestBuildCIRefusesSharedFallbackWhenOtherReposHaveCIIdentities(t *testing.T
 func TestBuildRefusesSharedFallbackWhenMultipleReposHaveGrants(t *testing.T) {
 	t.Parallel()
 	cfg := testConfigWithPerRepo()
-	path := "oberth/upstream/skipops/other-repo/test-secret"
+	path := "oberth/upstream/acme/other-repo/test-secret"
 	req := testRequest(pipeline.TriggerRelease, perRepoCredentialedDocument(path))
 	req.Repo = "other-repo"
 	req.UpstreamName = "codeberg"
-	req.UpstreamOrg = "skipops"
+	req.UpstreamOrg = "acme"
 	req.ApprovedSecrets = map[string]bool{path: true}
 	req.SourceVolume = SourceVolume{
 		ClaimName:      "test-claim",
@@ -224,11 +224,11 @@ func TestBuildRefusesSharedFallbackWhenMultipleReposHaveGrants(t *testing.T) {
 func TestBuildFallsBackToSharedIdentityForSingleRepo(t *testing.T) {
 	t.Parallel()
 	cfg := testConfig() // no PerRepoIdentities — single-repo case
-	path := "oberth/upstream/skipops/other-repo/test-secret"
+	path := "oberth/upstream/acme/other-repo/test-secret"
 	req := testRequest(pipeline.TriggerRelease, perRepoCredentialedDocument(path))
 	req.Repo = "other-repo"
 	req.UpstreamName = "codeberg"
-	req.UpstreamOrg = "skipops"
+	req.UpstreamOrg = "acme"
 	req.ApprovedSecrets = map[string]bool{path: true}
 	req.SourceVolume = SourceVolume{
 		ClaimName:      "test-claim",

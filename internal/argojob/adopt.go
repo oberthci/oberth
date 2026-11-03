@@ -38,6 +38,7 @@ type Adoption struct {
 var ErrAdoptionRefused = errors.New("argojob: Workflow refused for adoption")
 
 type AdoptionRequest struct {
+	RepositoryID                 int64
 	Name, RunID, Ref, SHA, Group string
 	Trigger                      pipeline.Trigger
 	RunTrigger                   argoworkflow.RunTrigger
@@ -51,6 +52,14 @@ func (controller *Controller) Adopt(ctx context.Context, request AdoptionRequest
 	}
 	if err != nil {
 		return Adoption{}, false, fmt.Errorf("argojob: read Workflow for adoption: %w", err)
+	}
+	if workflow.Annotations[capabilityAnnotation] != "" {
+		if request.RepositoryID <= 0 {
+			return Adoption{}, false, fmt.Errorf("%w: missing capability repository binding", ErrAdoptionRefused)
+		}
+		if _, err := controller.boundCapability(ctx, workflow, request.RepositoryID); err != nil {
+			return Adoption{}, false, fmt.Errorf("%w: %w", ErrAdoptionRefused, err)
+		}
 	}
 	binding, err := controller.bindAdoption(workflow, request)
 	if err != nil {
@@ -74,7 +83,7 @@ func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request Adop
 	if !argoworkflow.ScheduleEntryMatches(workflow, request.RunTrigger, request.ScheduleEntry) {
 		return Adoption{}, fmt.Errorf("argojob: Workflow %s adoption schedule entry mismatch", request.Name)
 	}
-	if argoworkflow.DeclaresVMIResources(workflow) && workflow.Annotations[vmiQuotaAnnotation] == "" {
+	if workflow.Annotations[capabilityAnnotation] == "" && argoworkflow.DeclaresVMIResources(workflow) && workflow.Annotations[vmiQuotaAnnotation] == "" {
 		return Adoption{}, errors.New("argojob: legacy VMI Workflow lacks a server quota binding; drain legacy VMI workflows before upgrading")
 	}
 	group, err := argoworkflow.RunConcurrencyGroup(workflow)
@@ -88,11 +97,14 @@ func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request Adop
 	if err != nil {
 		return Adoption{}, err
 	}
-	demand, err := argoworkflow.DeclaredVMIDemand(workflow)
+	var demand argoworkflow.VMIDemand
+	if workflow.Annotations[capabilityAnnotation] == "" {
+		demand, err = argoworkflow.DeclaredVMIDemand(workflow)
+	}
 	if err != nil {
 		return Adoption{}, err
 	}
-	if argoworkflow.DeclaresVMIResources(workflow) {
+	if workflow.Annotations[capabilityAnnotation] == "" && argoworkflow.DeclaresVMIResources(workflow) {
 		var quota vmiQuotaBinding
 		if json.Unmarshal([]byte(workflow.Annotations[vmiQuotaAnnotation]), &quota) != nil {
 			return Adoption{}, errors.New("argojob: VMI Workflow has an invalid server quota binding")
@@ -133,6 +145,17 @@ func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request Adop
 // Argo's status and API metadata change while it runs. Its live spec must stay
 // fixed, even if a replacement keeps the original identity annotation.
 func adoptionSpecHash(workflow *wfv1.Workflow) (string, error) {
+	if binding := workflow.Annotations[capabilityAnnotation]; binding != "" {
+		body, err := json.Marshal(struct {
+			Spec                            wfv1.WorkflowSpec
+			PodDemand, Fallback, Capability string
+		}{workflow.Spec, workflow.Annotations[podDemandAnnotation], workflow.Annotations[resourceFallbackAnnotation], binding})
+		if err != nil {
+			return "", err
+		}
+		digest := sha256.Sum256(body)
+		return hex.EncodeToString(digest[:]), nil
+	}
 	body, err := json.Marshal(struct {
 		Spec      wfv1.WorkflowSpec `json:"spec"`
 		VMIQuota  string            `json:"vmi_quota,omitempty"`

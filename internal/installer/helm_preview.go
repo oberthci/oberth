@@ -36,14 +36,7 @@ type ssaConflict struct {
 // with the object/field/manager list and the exact ownership-transfer command
 // so the operator can resolve it before re-running. The preview catches
 // conflicts before any OpenBao write, Argo install, or cert rotation.
-//
-// The sentinelOriginCACert parameter carries a placeholder origin CA cert
-// that differs from the live value, so the preview exercises .data.ca.crt
-// on the ConfigMap the same way the real upgrade would. When empty, the
-// preview uses whatever the current args produce (in Run, the identity
-// preflight has already set cfg.watchTunnelOriginCACert for a pending or
-// previously completed rotation, so the real field is exercised).
-func previewHelmUpgrade(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoResult, sentinelOriginCACert string) error {
+func previewHelmUpgrade(ctx context.Context, cfg Config, deps Deps, openbao OpenBaoResult) error {
 	if deps.RunHelm == nil {
 		return nil
 	}
@@ -76,9 +69,6 @@ func previewHelmUpgrade(ctx context.Context, cfg Config, deps Deps, openbao Open
 
 	// Build the same args the real upgrade will use, plus the preview flags.
 	previewCfg := cfg
-	if sentinelOriginCACert != "" {
-		previewCfg.watchTunnelOriginCACert = sentinelOriginCACert
-	}
 	rekor, err := plannedRekorResult(ctx, cfg, deps, ns)
 	if err != nil {
 		return err
@@ -275,13 +265,11 @@ func detectFailedHelmRevision(ctx context.Context, deps Deps, namespace string) 
 			return fmt.Errorf("the latest Helm revision for release \"oberth\" in namespace %q is "+
 				"in \"failed\" status; --reuse-values will take values from the previous deployed "+
 				"revision, not the failed one. This can silently drop values that were pinned only "+
-				"in the failed attempt (e.g. a rotated originCACert).\n\n"+
+				"in the failed attempt.\n\n"+
 				"To resolve:\n"+
 				"  1. Inspect the failed revision: helm history oberth -n %s\n"+
 				"  2. Repair forward: oberth upgrade --namespace %s (database migrations are forward-only).\n"+
-				"  3. Re-run the installer. The identity preflight re-derives watchTunnel.originCACert\n"+
-				"     from the OpenBao server leaf, so a pin that only lived in the failed attempt is\n"+
-				"     restored without a values file.\n\n"+
+				"  3. Review the retained settings and re-run the installer.\n\n"+
 				"the installer refuses to proceed on a failed latest revision to prevent "+
 				"a half-applied upgrade from being silently compounded",
 				namespace, namespace, namespace)
@@ -306,9 +294,7 @@ func plannedOpenBaoResult(ctx context.Context, cfg Config, deps Deps, ns string)
 	}
 	planned.CACertPEM = live.Secretstore.CACert
 	planned.TrustedTransitVerified = live.Secretstore.Transit.Enabled
-	if live.TLS.PKI.Enabled {
-		planned.ServerCACertPEM = live.WatchTunnel.OriginCACert
-	}
+	planned.PKIEnabled = live.TLS.PKI.Enabled
 	return planned, nil
 }
 

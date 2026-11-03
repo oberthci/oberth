@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"testing"
 
 	"github.com/oberthci/oberth/internal/argojob"
@@ -34,7 +35,7 @@ func (controller *adoptingArgoControl) Adopt(_ context.Context, request argojob.
 func (controller *adoptingArgoControl) WaitResumed(_ context.Context, name, runID string, _ io.Writer, events []runprogress.Event, retained int64, binding argojob.Adoption) (argojob.Completion, error) {
 	controller.resumed = true
 	controller.events, controller.retained = events, retained
-	if name != controller.request.Name || runID != controller.request.RunID || binding != controller.binding {
+	if name != controller.request.Name || runID != controller.request.RunID || !reflect.DeepEqual(binding, controller.binding) {
 		panic("adopted intent changed")
 	}
 	return argojob.Completion{Name: name, Succeeded: true}, controller.waitErr

@@ -127,13 +127,6 @@ func TestDeclaredSecretPaths(t *testing.T) {
 	}
 }
 
-// A leading `---` is legal YAML and idiomatic in plenty of repositories. The
-// earlier guard re-searched the source from position 0 for every separator it
-// found, so it always examined the FIRST one -- and with a leading separator
-// that one has nothing before it. Every later separator therefore reported
-// "no content before", the guard never fired, and UnmarshalStrict quietly
-// decoded document one and discarded the rest. The control was resting on which
-// document the YAML library happens to return rather than on the check.
 func TestDecodeRejectsSecondDocumentHiddenBehindALeadingSeparator(t *testing.T) {
 	t.Parallel()
 	source := []byte(`---

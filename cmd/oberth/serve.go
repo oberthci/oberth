@@ -241,6 +241,7 @@ func runServe(ctx context.Context, arguments []string, output io.Writer) error {
 
 func parseServeOptions(arguments []string, output io.Writer) (serveOptions, error) {
 	options := serveOptions{declaredAdmission: service.DefaultDeclaredAdmissionConfig()}
+	var extendedResourceBudgets string
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.DurationVar(&options.uplinkTokenPolicy.DefaultTTL, "uplink-token-default-ttl", model.DefaultUplinkTokenTTL, "default lifetime for new uplink bearer tokens (90 days)")
 	flags.DurationVar(&options.uplinkTokenPolicy.MaxTTL, "uplink-token-max-ttl", model.MaximumUplinkTokenTTL, "maximum new uplink bearer lifetime (hard ceiling 8760h / 365 days)")
@@ -270,6 +271,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.Float64Var(&options.kubernetesQPS, "kubernetes-client-qps", 50, "Kubernetes API requests per second per server client")
 	flags.IntVar(&options.kubernetesBurst, "kubernetes-client-burst", 100, "Kubernetes API burst allowance per server client")
 	flags.IntVar(&options.maxConcurrent, "max-concurrent-jobs", 3, "maximum concurrent Jobs (boot default)")
+	flags.StringVar(&extendedResourceBudgets, "admission-extended-resources", "{}", "JSON map of qualified extended-resource names to integer capacity; no implicit capacity")
 	flags.BoolVar(&options.declaredAdmission.Disabled, "disable-declared-admission", false, "administrator kill switch: admit new runs by size class")
 	flags.Int64Var(&options.declaredAdmission.CPUMilli, "admission-cpu-millis", 8000, "CPU budget for declared workflow and VM demand, excluding platform reserve")
 	flags.Int64Var(&options.declaredAdmission.MemoryBytes, "admission-memory-bytes", 17179869184, "memory budget for declared workflow and VM demand, excluding platform reserve")
@@ -375,6 +377,9 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 		return serveOptions{}, err
 	}
 	if err := validateServeOptions(options); err != nil {
+		return serveOptions{}, err
+	}
+	if err := json.Unmarshal([]byte(extendedResourceBudgets), &options.declaredAdmission.ExtendedResources); err != nil {
 		return serveOptions{}, err
 	}
 	if err := options.declaredAdmission.Validate(); err != nil {
@@ -818,6 +823,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		return err
 	}
 	argoJobs.SetKubeVirtGrantLoader(database)
+	argoJobs.SetWorkflowCapabilityLoader(database.ActiveWorkflowCapability)
 	logger.Printf("argo execution engine: namespace=%s pipeline-sa=%s credentialed-sa=%s ci-secrets-sa=%s executor-sa=%s",
 		options.argoNamespace, options.argoPipelineAccount, options.argoCredentialedAccount,
 		options.argoCISecretsAccount, options.argoExecutorAccount)
@@ -1074,6 +1080,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		PromotionWorkspaceRoot: filepath.Join(options.dataRoot, "work"),
 		SecretAccess:           database,
 		KubeVirtGrants:         database,
+		WorkflowCapabilities:   database,
 		SizeGrants:             database,
 		QueuePriorities:        database,
 		SecretStoreVerifier:    buildSecretStoreVerifier(options, kube),

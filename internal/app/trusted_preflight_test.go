@@ -32,7 +32,13 @@ import (
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
+type trustedSpecMismatchFixture struct{}
+
+func (*trustedSpecMismatchFixture) Error() string              { return "Workflow spec mismatch" }
+func (*trustedSpecMismatchFixture) WorkflowSpecMismatch() bool { return true }
+
 type protectedControllerFixture struct {
+	observerError error
 	*blockingController
 	preparer             *argojob.Controller
 	request              argojob.Request
@@ -115,6 +121,9 @@ func (c *protectedControllerFixture) Wait(_ context.Context, _ string, runID str
 	return completion, c.waitErr
 }
 func (c *protectedControllerFixture) TrustedKVMWorkflowUID(ctx context.Context, r argojob.Request) (string, error) {
+	if c.observerError != nil {
+		return "workflow-uid", c.observerError
+	}
 	if c.createErr != nil {
 		return "", errors.New("not observed")
 	}
@@ -143,7 +152,7 @@ func (c *protectedControllerFixture) TrustedKVMReceipt(_ context.Context, r argo
 func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 	// Every scenario owns its controller, grant loader, workspace and database.
 	t.Parallel()
-	for _, scenario := range []string{"pass", "pass empty org", "workflow failed", "workflow observation failed", "infrastructure failed", "infrastructure observation failed", "definite create refusal", "uncertain create", "recover absent", "unapproved", "guest granted", "guest revoked", "guest recover"} {
+	for _, scenario := range []string{"pass", "pass empty org", "workflow failed", "workflow observation failed", "infrastructure failed", "infrastructure observation failed", "definite create refusal", "uncertain create", "recover absent", "unapproved", "guest granted", "guest revoked", "guest recover", "owned spec mismatch", "owned spec mismatch during create"} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
 			org, wantRepo := "org", "upstream/org/repo"
@@ -167,6 +176,12 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 			}
 			if strings.HasPrefix(scenario, "infrastructure ") {
 				controller.infrastructureReason = `Evicted: Usage of EmptyDir volume "var-run-argo" exceeds the limit "1Gi".`
+			}
+			if strings.HasPrefix(scenario, "owned spec mismatch") {
+				controller.observerError = &trustedSpecMismatchFixture{}
+				if scenario == "owned spec mismatch during create" {
+					controller.createErr = controller.observerError
+				}
 			}
 			if scenario == "definite create refusal" {
 				controller.createErr = argojob.ErrTrustedKVMCreateRefused

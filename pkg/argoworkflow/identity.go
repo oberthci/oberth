@@ -21,6 +21,7 @@ import (
 // standing between a branch push and a release credential is that Oberth
 // decides the ServiceAccount server-side. ForceIdentity is that decision.
 type Identity struct {
+	ResourceServiceAccountName string
 	// Namespace is where the Workflow object and all its pods are created.
 	Namespace string
 	// ServiceAccountName is applied to every identity-bearing field in the
@@ -131,6 +132,9 @@ func Prepare(workflow *wfv1.Workflow, policy Policy, identity Identity) error {
 	if err := Admit(workflow, policy); err != nil {
 		return err
 	}
+	if identity.ResourceServiceAccountName != "" && (policy.Capability == nil || identity.ResourceServiceAccountName != policy.Capability.ServiceAccount || identity.ServiceAccountName != policy.Capability.ServiceAccount || identity.Namespace != policy.Capability.Namespace) {
+		return errors.New("argoworkflow: resource identity differs from the operator capability")
+	}
 	return ForceIdentity(workflow, identity)
 }
 
@@ -173,6 +177,10 @@ func ForceIdentity(workflow *wfv1.Workflow, identity Identity) error {
 	for index := range workflow.Spec.Templates {
 		template := &workflow.Spec.Templates[index]
 		if template.Resource == nil {
+			continue
+		}
+		if identity.ResourceServiceAccountName != "" {
+			template.Executor = &wfv1.ExecutorConfig{ServiceAccountName: identity.ResourceServiceAccountName}
 			continue
 		}
 		if identity.VMLauncherServiceAccountName == "" {

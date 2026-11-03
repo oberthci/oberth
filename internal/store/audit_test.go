@@ -37,7 +37,7 @@ func TestAuditChainRejectsHistoricalMutation(t *testing.T) {
 	ctx := context.Background()
 	for _, action := range []string{"push.branch.queued", "promotion.admit", "promotion.push.outcome"} {
 		if _, err := store.AppendAuditAction(ctx, model.AuditActionSpec{
-			Actor: "agent@tuxbox", Action: action, ResourceType: "test", ResourceID: action,
+			Actor: "agent@example-node", Action: action, ResourceType: "test", ResourceID: action,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -65,8 +65,8 @@ func TestExternalAnchorDetectsRecomputedHistory(t *testing.T) {
 	now := time.Date(2026, 8, 6, 13, 0, 0, 0, time.UTC)
 	store := testStore(t, &now)
 	ctx := context.Background()
-	firstSpec := model.AuditActionSpec{Actor: "agent@tuxbox", Action: "first", ResourceType: "test", ResourceID: "1", Details: `{}`}
-	secondSpec := model.AuditActionSpec{Actor: "agent@tuxbox", Action: "second", ResourceType: "test", ResourceID: "2", Details: `{}`}
+	firstSpec := model.AuditActionSpec{Actor: "agent@example-node", Action: "first", ResourceType: "test", ResourceID: "1", Details: `{}`}
+	secondSpec := model.AuditActionSpec{Actor: "agent@example-node", Action: "second", ResourceType: "test", ResourceID: "2", Details: `{}`}
 	first, err := store.AppendAuditAction(ctx, firstSpec)
 	if err != nil {
 		t.Fatal(err)

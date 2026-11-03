@@ -348,7 +348,8 @@ func (p *PressureDeferral) Reason() string {
 // declared requests/VM host demand, server helpers and memory headroom.
 // Aggregate host usage is deliberately not included.
 type DeclaredResources struct {
-	CPUMilli    int64 `json:"cpu_milli"`
-	MemoryBytes int64 `json:"memory_bytes"`
-	Pods        int64 `json:"pods"`
+	ExtendedResources map[string]int64 `json:"extended_resources,omitempty"`
+	CPUMilli          int64            `json:"cpu_milli"`
+	MemoryBytes       int64            `json:"memory_bytes"`
+	Pods              int64            `json:"pods"`
 }

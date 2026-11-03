@@ -80,7 +80,7 @@ spec:
 func testRequest(trigger pipeline.Trigger, source string) Request {
 	return Request{
 		RunID: "run-abc123", RepositoryID: 1, Name: "oberth-oberth-run-abc1-aabbccddeeff",
-		Repo: "oberth", UpstreamOrg: "skipops",
+		Repo: "oberth", UpstreamOrg: "acme",
 		Ref: "refs/heads/main", SHA: testSHA,
 		Trigger: trigger, Source: []byte(source),
 		ApprovedSecrets: map[string]bool{},
@@ -331,9 +331,9 @@ func TestBuildAuthorizesDeclaredSecretPaths(t *testing.T) {
 	}
 	// CI pipelines CAN declare upstream-scoped paths.
 	withUpstream := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/test-secret\n", 1)
+		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
 	ciUpstream := testRequest(pipeline.TriggerCI, withUpstream)
-	ciUpstream.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/test-secret": true}
+	ciUpstream.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/test-secret": true}
 	if _, err := Build(testConfig(), ciUpstream); err != nil {
 		t.Fatalf("upstream-scoped CI path: %v", err)
 	}
@@ -353,10 +353,10 @@ func TestBuildAuthorizesDeclaredSecretPaths(t *testing.T) {
 // identity the release role binds.
 func TestBuildGrantsCISecretsIdentityWithSecretPaths(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/test-secret\n", 1)
+		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
 
 	request := testRequest(pipeline.TriggerCI, withPaths)
-	request.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/test-secret": true}
+	request.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/test-secret": true}
 	credentialed, err := Build(testConfig(), request)
 	if err != nil {
 		t.Fatalf("build credentialed CI: %v", err)
@@ -416,9 +416,9 @@ func TestBuildGrantsCISecretsIdentityWithSecretPaths(t *testing.T) {
 // fall back to the release-tier role.
 func TestBuildRefusesCICredentialedWithoutCISecretsRole(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/test-secret\n", 1)
+		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
 	request := testRequest(pipeline.TriggerCI, withPaths)
-	request.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/test-secret": true}
+	request.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/test-secret": true}
 	config := testConfig()
 	config.VaultCISecretsRole = ""
 	_, err := Build(config, request)
@@ -498,9 +498,9 @@ func TestConfigRefusesASharedIdentity(t *testing.T) {
 // finding 11.
 func TestBuildRejectsCredentialedRunWithMissingVaultCoordinates(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/test-secret\n", 1)
+		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
 	request := testRequest(pipeline.TriggerCI, withPaths)
-	request.ApprovedSecrets = map[string]bool{"oberth/upstream/skipops/oberth/test-secret": true}
+	request.ApprovedSecrets = map[string]bool{"oberth/upstream/acme/oberth/test-secret": true}
 
 	// Missing address.
 	noAddr := testConfig()
@@ -869,7 +869,7 @@ func TestValidateRefusesAVaultCABundleThatIsNotAnAnchor(t *testing.T) {
 // secret path not in the approval table is rejected at admission.
 func TestBuildRejectsUnapprovedSecretPath(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/test-secret\n", 1)
+		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
 	request := testRequest(pipeline.TriggerCI, withPaths)
 	// ApprovedSecrets is set but empty — no grants.
 	request.ApprovedSecrets = map[string]bool{}
@@ -884,10 +884,10 @@ func TestBuildRejectsUnapprovedSecretPath(t *testing.T) {
 // present in the approval table is admitted.
 func TestBuildAdmitsApprovedSecretPath(t *testing.T) {
 	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/test-secret\n", 1)
+		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret\n", 1)
 	request := testRequest(pipeline.TriggerCI, withPaths)
 	request.ApprovedSecrets = map[string]bool{
-		"oberth/upstream/skipops/oberth/test-secret": true,
+		"oberth/upstream/acme/oberth/test-secret": true,
 	}
 	workflow, err := Build(testConfig(), request)
 	if err != nil {
@@ -963,10 +963,10 @@ func TestBuildRejectsUnapprovedReleaseSystemPath(t *testing.T) {
 func TestBuildRejectsCrossRepoUpstreamPathWithApprovalTable(t *testing.T) {
 	// Oberth trying to declare a path in terraform's namespace.
 	withPaths := strings.Replace(greedyDocument, "    oberth.ci/size: L\n",
-		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/skipops/terraform/stolen-secret\n", 1)
+		"    oberth.ci/size: L\n    oberth.ci/secret-paths: oberth/upstream/acme/terraform/stolen-secret\n", 1)
 	request := testRequest(pipeline.TriggerCI, withPaths)
 	request.ApprovedSecrets = map[string]bool{
-		"oberth/upstream/skipops/terraform/stolen-secret": true,
+		"oberth/upstream/acme/terraform/stolen-secret": true,
 	}
 	if _, err := Build(testConfig(), request); err == nil {
 		t.Fatal("expected a cross-repo upstream path to be rejected")
@@ -1819,13 +1819,13 @@ func TestPerStepGrantNilStepGrantsBackwardCompatible(t *testing.T) {
 // step. A branch run that declares only its upstream path must never select
 // that identity, because its token could then read the undeclared release path.
 func TestCINamedStepGrantKeepsCISecretsIdentity(t *testing.T) {
-	const upstreamPath = "oberth/upstream/skipops/oberth/test-secret"
+	const upstreamPath = "oberth/upstream/acme/oberth/test-secret"
 	const document = `
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/secret-paths: oberth/upstream/skipops/oberth/test-secret
+    oberth.ci/secret-paths: oberth/upstream/acme/oberth/test-secret
     oberth.ci/size: L
 spec:
   entrypoint: publish
@@ -1839,7 +1839,7 @@ spec:
           - secretstore
           - exec
           - --dir=/run/oberth-secrets
-          - --path=oberth/upstream/skipops/oberth/test-secret
+          - --path=oberth/upstream/acme/oberth/test-secret
           - --
           - publish.sh
 `
@@ -1875,7 +1875,7 @@ spec:
 // to the template that consumes the named-step-granted path. Issue #623.
 func TestPerStepIdentityAssignedToTemplate(t *testing.T) {
 	config := testConfig()
-	// canonicalRepoKey("", "skipops", "oberth") = "oberth" when UpstreamName is empty.
+	// canonicalRepoKey("", "acme", "oberth") = "oberth" when UpstreamName is empty.
 	config.PerRepoIdentities = map[string]PerRepoIdentityConfig{
 		"oberth": {ServiceAccountName: "oberth-argo-test-repo"},
 	}

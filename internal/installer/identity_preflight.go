@@ -41,7 +41,7 @@ func goProxyDNSNames(fullname, namespace string) []string {
 
 // liveHelmValuesSubset is the subset of a Helm release's values the identity
 // preflight and the Helm SSA preview inspect: goProxy enablement, the
-// watchTunnel origin certificate, and the deployed secret-store connection.
+// and the deployed secret-store connection.
 type liveHelmValuesSubset struct {
 	AuditAnchor struct {
 		RekorPublicKey string `json:"rekorPublicKey"`
@@ -51,10 +51,6 @@ type liveHelmValuesSubset struct {
 			Enabled bool `json:"enabled"`
 		} `json:"goProxy"`
 	} `json:"argo"`
-	WatchTunnel struct {
-		Enabled      bool   `json:"enabled"`
-		OriginCACert string `json:"originCACert"`
-	} `json:"watchTunnel"`
 	TLS struct {
 		ExtraDNSNames []string `json:"extraDNSNames"`
 		ExtraIPs      []string `json:"extraIPs"`
@@ -130,11 +126,6 @@ type pendingRotation struct {
 // is COMPUTED but NOT WRITTEN: the pending rotation is stored on cfg so the
 // caller can run a Helm SSA preview first, then call
 // commitServerIdentityRotation to apply the write.
-//
-// Idempotent origin pin (#812 remediation 2): even when no rotation is needed
-// in this run, if watchTunnel.enabled and the live originCACert parses to a
-// cert whose public key equals the OpenBao server leaf's key but whose
-// fingerprint differs, cfg.watchTunnelOriginCACert is set to the OpenBao leaf.
 func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryRun bool) error {
 	ns := cfg.Namespace
 	if ns == "" {
@@ -372,7 +363,7 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 
 	oldFingerprint := certSHA256Fingerprint(cert.Raw)
 
-	// Read live Helm values for goProxy and watchTunnel state.
+	// Read live Helm values for the module proxy.
 	liveValues, liveErr := readLiveHelmValuesSubset(ctx, deps, ns)
 	if liveErr != nil {
 		return fmt.Errorf("read live Helm values for the identity preflight: %w", liveErr)
@@ -410,18 +401,11 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 			missingIPs = append(missingIPs, ip)
 		}
 	}
-	// -- Idempotent origin pin (#812 remediation 2) --
-	// Even when the certificate covers all required names and no rotation is
-	// needed, the live watchTunnel.originCACert may pin a stale leaf (same
-	// public key, different fingerprint) from a prior rotation that completed
-	// in OpenBao but whose pin was never carried into the Helm values. Set
-	// cfg.watchTunnelOriginCACert unconditionally in that case.
 	// Certificates issued before the server certificate became its own
 	// name-constrained anchor cannot be pinned by BoringSSL clients (Claude
 	// Code); re-issue them with the same key.
 	needsAnchor := !cert.IsCA || cert.KeyUsage&x509.KeyUsageCertSign == 0 || !cert.PermittedDNSDomainsCritical
 	if len(missingNames) == 0 && len(missingIPs) == 0 && !needsAnchor {
-		idempotentOriginPin(cfg, liveValues, certPEM, cert, w)
 		return nil
 	}
 
@@ -429,7 +413,6 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 		if !goProxyMissing {
 			// Only client addresses are missing: the install still works,
 			// and warnCertificateNamesWillNotTakeEffect names them later.
-			idempotentOriginPin(cfg, liveValues, certPEM, cert, w)
 			return nil
 		}
 		return fmt.Errorf("the server certificate does not cover the goproxy service names (%s); "+
@@ -451,9 +434,7 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 			_, _ = fmt.Fprintf(w, "  Identity preflight: server certificate is not a name-constrained trust anchor\n")
 		}
 		_, _ = fmt.Fprintf(w, "  Identity preflight: would rotate server certificate to add the missing names\n")
-		if liveValues.WatchTunnel.Enabled && liveValues.WatchTunnel.OriginCACert != "" {
-			_, _ = fmt.Fprintf(w, "  Identity preflight: would update watchTunnel.originCACert with the rotated certificate\n")
-		}
+
 		return nil
 	}
 
@@ -488,27 +469,6 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 		store:            store,
 		token:            token,
 		namespace:        ns,
-	}
-
-	// Pre-set the origin pin using the PENDING new cert so the Helm SSA
-	// preview exercises the same .data.ca.crt field the real upgrade touches.
-	if liveValues.WatchTunnel.Enabled && liveValues.WatchTunnel.OriginCACert != "" {
-		originBlock, _ := pem.Decode([]byte(liveValues.WatchTunnel.OriginCACert))
-		if originBlock != nil {
-			originCert, originErr := x509.ParseCertificate(originBlock.Bytes)
-			if originErr == nil {
-				originPubDER, _, _ := parseCertPublicKey([]byte(liveValues.WatchTunnel.OriginCACert))
-				serverPubDER, _, _ := parseCertPublicKey(certPEM)
-				if originPubDER != nil && serverPubDER != nil && bytesEqual(originPubDER, serverPubDER) {
-					cfg.watchTunnelOriginCACert = string(newCertPEM)
-				} else {
-					originFP := certSHA256Fingerprint(originCert.Raw)
-					_, _ = fmt.Fprintf(w, "WARNING: watchTunnel.originCACert pins a different certificate "+
-						"(fingerprint %s, different key); the rotated server certificate will have a different key. "+
-						"Update the pin manually if needed.\n", originFP)
-				}
-			}
-		}
 	}
 
 	return nil
@@ -555,43 +515,6 @@ func commitServerIdentityRotation(ctx context.Context, cfg *Config, deps Deps) e
 	cfg.rotatedServerCertSHA256 = hex.EncodeToString(digest[:])
 
 	return nil
-}
-
-// idempotentOriginPin sets cfg.watchTunnelOriginCACert when the live
-// watchTunnel.originCACert has the same public key as the server certificate
-// but a different fingerprint. This covers the case where a prior run rotated
-// the certificate in OpenBao but the pin was never carried into Helm values
-// (e.g. because the Helm upgrade failed or was run without the values file).
-func idempotentOriginPin(cfg *Config, liveValues liveHelmValuesSubset, serverCertPEM []byte, serverCert *x509.Certificate, w io.Writer) {
-	if !liveValues.WatchTunnel.Enabled || liveValues.WatchTunnel.OriginCACert == "" {
-		return
-	}
-	originBlock, _ := pem.Decode([]byte(liveValues.WatchTunnel.OriginCACert))
-	if originBlock == nil {
-		return
-	}
-	originCert, originErr := x509.ParseCertificate(originBlock.Bytes)
-	if originErr != nil {
-		return
-	}
-
-	// Compare public keys: same key means the certs belong to the same identity.
-	originPubDER, _, _ := parseCertPublicKey([]byte(liveValues.WatchTunnel.OriginCACert))
-	serverPubDER, _, _ := parseCertPublicKey(serverCertPEM)
-	if originPubDER == nil || serverPubDER == nil || !bytesEqual(originPubDER, serverPubDER) {
-		return // different key — not our identity
-	}
-
-	originFP := certSHA256Fingerprint(originCert.Raw)
-	serverFP := certSHA256Fingerprint(serverCert.Raw)
-	if originFP == serverFP {
-		return // already in sync
-	}
-
-	// Same key, different fingerprint: the cert was rotated but the pin is stale.
-	cfg.watchTunnelOriginCACert = string(serverCertPEM)
-	_, _ = fmt.Fprintf(w, "Identity preflight: watchTunnel.originCACert updated to current server certificate "+
-		"(same key, fingerprint %s → %s)\n", originFP, serverFP)
 }
 
 // readPodServerCert reads the legacy Kubernetes certificate without exec. Newer

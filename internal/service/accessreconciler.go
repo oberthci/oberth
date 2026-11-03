@@ -525,8 +525,8 @@ func (r *AccessReconciler) AddGrantCanonical(ctx context.Context, repo, step, se
 // RemoveGrantCanonical returns a modify function that removes all grant entries
 // whose canonical (repo, step, secret) tuple matches the target. Each existing
 // entry's repo is resolved to its canonical form before comparison, so a
-// bare-spelled entry like "acme-beacon" matches the qualified
-// "codeberg/acme/acme-beacon". Ambiguous entries are preserved
+// bare-spelled entry like "acme-example-service" matches the qualified
+// "codeberg/acme/acme-example-service". Ambiguous entries are preserved
 // (fail-closed: they match neither candidate). All entries whose canonical
 // tuple matches are removed (bare and qualified duplicates both go). Surviving
 // entries preserve their original spelling. Returns ErrInvalidInput when the

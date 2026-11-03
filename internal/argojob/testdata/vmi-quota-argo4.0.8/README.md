@@ -32,3 +32,10 @@ unchanged; all 27 submitted Pods across isolation, WIF, nonroot and VMI cases
 passed the retained Kubernetes validator. Isolation inputs now explicitly declare
 256Mi so the measured-leaf architecture and inherited pool checks still exercise
 wrapped Pods. No expected Pod was assembled or edited by hand.
+
+The 2026-11-03 replay D fix defers legacy VMI deletion. Its current Workflow
+was recaptured through the same authenticated Argo v4.0.8 controller and retained
+hook in a writable scratch copy (Go 1.27.3 forbids module-cache overlays).
+The submitted Pod passes the retained Kubernetes v1.35.7 validator. The new
+executor-token waiter emits progress and honours cancellation; no live API,
+manual expected Pod edits, guest boot or KubeVirt admission was used.

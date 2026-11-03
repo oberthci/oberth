@@ -54,7 +54,7 @@ func testService(t *testing.T) *API {
 func TestSecretStorePlanFirstGrant(t *testing.T) {
 	now := time.Now()
 	grants := []store.SecretAccessGrant{
-		{ID: 1, Repo: "codeberg/acme/terraform", Step: "*", Secret: "terraform/credentials", ApprovedBy: "admin@tuxbox", ApprovedAt: now},
+		{ID: 1, Repo: "codeberg/acme/terraform", Step: "*", Secret: "terraform/credentials", ApprovedBy: "admin@example-node", ApprovedAt: now},
 	}
 	result := computeSecretStorePlan(grants)
 	if len(result.Repos) != 1 {
@@ -676,7 +676,7 @@ func TestSecretStorePlanPerRepoExcludesNamedStepPaths(t *testing.T) {
 	// A repo whose grants are all named keeps its per-repo entry (its
 	// ServiceAccount and zero-grant policy still exist) with no paths.
 	namedOnly := computeSecretStorePlan([]store.SecretAccessGrant{
-		{ID: 3, Repo: "codeberg/acme/cttv", Step: "release-publish-images", Secret: "release/gar-image-key", ApprovedBy: "admin", ApprovedAt: now},
+		{ID: 3, Repo: "codeberg/acme/example-web", Step: "release-publish-images", Secret: "release/gar-image-key", ApprovedBy: "admin", ApprovedAt: now},
 	})
 	if len(namedOnly.Repos) != 1 || len(namedOnly.Repos[0].Paths) != 0 || len(namedOnly.Repos[0].Steps) != 1 {
 		t.Fatalf("named-only repo must keep a per-repo entry with no paths and one step: %+v", namedOnly.Repos)

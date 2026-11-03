@@ -56,7 +56,7 @@ A scope is an upstream name as `oberth upstream list` shows it; repeat
 Change or remove the limit later; the token and key stay valid:
 
 ```bash
-kubectl exec -n oberth deploy/oberth -- oberth uplink scope --set github,skipops laptop@work
+kubectl exec -n oberth deploy/oberth -- oberth uplink scope --set github,acme laptop@work
 kubectl exec -n oberth deploy/oberth -- oberth uplink scope --clear laptop@work
 ```
 
@@ -194,7 +194,6 @@ call the proxy hostname directly.
 |------|-------------|
 | `status` | CI status for a SHA or branch, including the failed step |
 | `logs` | One named step's log output for a SHA, optionally filtered |
-| `run_kvm_preflight` | Bounded historical KVM intent, receipt/refusal and cleanup by exact run ID or unique 8+ character prefix |
 | `run_resources` | Read-only resource history, numeric git declarations and p95/max suggestions; repo or exact run, ref/default/any, last 1..100, include_failed, JSON or YAML; see [measured requests](measured-requests.md) |
 | `run_get` | One durable run and its steps by full run ID or unique 8+ character prefix; `summary:true` returns only status/failure and compact steps |
 | `run_retry` | Requeue the newest interrupted or infrastructure-failed branch run using its same repo/ref/SHA; workflow-level failures without a failed step qualify, while test failures and older runs are refused |
@@ -228,13 +227,21 @@ call the proxy hostname directly.
 | `uplink_revoke` | Unscoped admin-only audited SSH and bearer revocation; protects the last active admin |
 | `uplink_rotate` | Unscoped admin-only handoff to an already-issued matching replacement key, atomically revoking the old key |
 | `access_dismiss` | Unscoped-admin-only exact pending-declaration dismissal |
-| `kubevirt_grant_list` | Unscoped-admin-only listing of active grants across repositories |
+| `run_kvm_preflight` | Deprecated; read the retained trusted preflight journal for one run |
+| `kubevirt_grant` | Deprecated; audited administrator grant for the existing bounded VM path |
+| `kubevirt_revoke` | Deprecated; revoke a repository's old VM grant |
+| `kubevirt_grant_get` | Deprecated; read one repository's old VM grant |
+| `kubevirt_grant_list` | Deprecated; list old VM grants within the caller's scope |
+| `secretstore_sync_receipt` | Record the receipt for a reviewed secret-store synchronization plan |
+| `promote_grant` | Issue an audited grant for a source SHA and promotion target |
+| `promote_grant_revoke` | Revoke a promotion grant |
+| `promote_grant_list` | List promotion grants within the caller's scope |
+| `workflow_capability_grant` | Audited administrator grant for operator-owned namespaced resource access and extended resources |
+| `workflow_capability_revoke` | Revoke the repository's operator capability; blocks new authorization |
+| `workflow_capability_get` | Read the repository's current operator capability |
 | `access_list` | List secret access grants for a repository |
 | `access_allow` | Grant a step access to a secret path (admin-only) |
 | `access_revoke` | Revoke a step's access to a secret path (admin-only) |
-| `kubevirt_grant` | Grant a repository permission to run KubeVirt VMI templates (admin-only, audited) |
-| `kubevirt_revoke` | Revoke a repository's KubeVirt permission (admin-only, audited) |
-| `kubevirt_grant_get` | Read a repository's KubeVirt permission: `never_granted`, `granted`, or `revoked`; granted and revoked responses include the audit record |
 | `size_grant` | Set a repository's maximum admission size, `L` or `XL` (admin-only, audited); without a grant the maximum is `L`; re-enables the oldest waiting tag's automatic boost within that maximum |
 | `size_revoke` | Return a repository to `L` and disable automatic tag priority, even if never granted (admin-only, audited) |
 | `size_grant_get` | Read a repository's maximum admission size (`max_size`) and grant state: `never_granted`, `granted`, or `revoked` |
@@ -503,16 +510,14 @@ additional. A pruned cursor returns 404: restart from the first page.
   queued runs in accepted order. Each run that has not started carries
   `Scheduling` with its state, message, queue or admission position, size,
   weight, used/capacity and concurrency group, so a run blocking the head of
-  the queue, or one waiting on its group or VM capacity, says so.
+  the queue, or one waiting on its group, says so.
 
 Every run response includes `display_status` and `display_reason`, while
 durable `Status` stays unchanged. Before weighted admission the display is
-`queued` with its scheduling reason. Admission records `started_at`, so a
-trusted preflight displays `running` with phase `preflight`. Terminal runs
+`queued` with its scheduling reason. Admission records `started_at` and displays `running`. Terminal runs
 display `passed` (including published releases), `failed`, or
 `cancelled` with the superseding SHA, cancelling actor or restart action.
-Elapsed includes preflight; parking for VM capacity clears the admission time,
-which is set again when capacity is reacquired. After a server restart, a
+After a server restart, a
 running branch run whose Argo Workflow still exists is adopted first: it keeps
 its run ID and continues to its real result (#1172). Re-queueing remains the
 fallback when that Workflow is missing; such restart re-fires carry the durable
@@ -690,22 +695,6 @@ retained timing, repository details, diagnostics, and telemetry and does not
 load the retained timing record. Omit `summary` or pass false for the existing
 full `Run`/`Steps`/`Repository` response. Authorization and upstream scope are
 the same for compact and full reads.
-
-### Historical KVM preflight evidence
-
-`run_kvm_preflight {"id":"<run ID or unique 8+ character prefix>"}` is an
-authenticated read. It returns the canonical run ID, qualified repository,
-candidate SHA and parent status. A known run without a KVM preflight returns
-`present: false`; unknown or ambiguous run IDs remain errors.
-
-When present, `evidence` includes the validated immutable intent and its digest,
-submission/rejection/cleanup flags, and the receipt or bounded refusal.
-`receipt_valid` means the historical receipt matches that admission; it does
-not authorize publication or prove the parent run succeeded. `cleaned` without
-a receipt is unproven, and an interrupted parent remains interrupted even if
-its preflight receipt is valid. Current recipe changes do not hide historical
-evidence. Refusal termination data retains nonzero exit, signal and restart
-counts. This tool neither changes work nor acquires an issue lock.
 
 ### Server-side wait correlation
 
@@ -906,5 +895,16 @@ Issue metadata writes can pass `expected_revision` from a prior read; mismatch
 is a conflict, while omission preserves last-write-wins. See
 [conditional metadata updates](issue-lifecycle.md).
 
-The current MCP surface has **71 tools**, including administrator-only
+The current MCP surface has **73 tools**, including administrator-only
 `publication_abandon`.
+
+The CLI uses `--url`, `OBERTH_MCP_URL`, or `OBERTH_BASE_URL` (with
+`/mcp` appended). `OBERTH_TOKEN_COMMAND` and
+`OBERTH_CA_CERT` follow the installer environment; explicit flags take
+precedence. Older scripts retain the deprecated implicit endpoint below.
+
+The implicit hosted MCP endpoint remains available for older scripts with a
+stderr deprecation warning. Set an explicit URL or load the installer-provided
+environment to migrate. MCP and REST both refuse plain HTTP except to
+`localhost`, `127.0.0.1`, or `::1`, before resolving credentials. Redirects
+cannot downgrade HTTPS to HTTP.

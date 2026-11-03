@@ -93,7 +93,7 @@ type RunRetryStore interface {
 type RunQueueStore interface {
 	EnqueueReceiveEvent(context.Context, model.ReceiveEventSpec, model.RunSpec) (model.EnqueueRunResult, error)
 	ClaimNextRun(context.Context) (model.Run, error)
-	MarkRunCreatePending(context.Context, string, string) error
+	MarkRunCreatePending(context.Context, string, string, ...string) error
 	MarkRunSubmitted(context.Context, string) (model.Run, error)
 	MarkRunAdmitted(context.Context, string) (model.Run, error)
 	MarkRunParked(context.Context, string) (model.Run, error)
@@ -239,6 +239,11 @@ type SizeGrantStore interface {
 	SetSizeGrant(context.Context, int64, string, pipeline.Size) (store.SizeGrant, error)
 }
 
+type WorkflowCapabilityStore interface {
+	WorkflowCapabilityGrant(context.Context, int64) (store.WorkflowCapabilityGrant, error)
+	SetWorkflowCapabilityGrant(context.Context, int64, string, *argoworkflow.Capability) (store.WorkflowCapabilityGrant, error)
+}
+
 type KubeVirtGrantStore interface {
 	KubeVirtGrant(context.Context, int64) (store.KubeVirtGrant, error)
 	SetKubeVirtGrant(context.Context, int64, string, bool, store.KubeVirtBudget) (store.KubeVirtGrant, error)
@@ -365,11 +370,12 @@ type LogStore interface {
 }
 
 type WorkflowRequest struct {
+	DemandReceipt    *argoworkflow.DemandReceipt
 	ResourceFallback model.ResourceAdmissionFallback
 	PodDemand        *argoworkflow.PodDemand
 	// VMIDemandReceipt carries the exact graph reserved before submission.
 	VMIDemandReceipt *argoworkflow.VMIDemandReceipt
-	WorkflowName     string `json:"JobName"`
+	WorkflowName     string `json:"WorkflowName"`
 	Run              model.Run
 	Repository       model.Repository
 	// UpstreamName is the registered name of the repository's upstream,
@@ -442,7 +448,7 @@ var ErrAdoptionRefused = errors.New("service: Workflow refused for adoption")
 // and a Workflow that exists but must not be adopted wraps ErrAdoptionRefused.
 // WaitResumed uses the durable progress journal and the retained byte count.
 // On error it returns a nonzero result only if the exact Workflow was terminal.
-// JobNamespace names where the engine's Workflows live, for operator messages.
+// WorkflowNamespace names where the engine's Workflows live, for operator messages.
 type JobAdopter interface {
 	Adopt(context.Context, model.Run) (pipeline.Size, bool, error)
 	WaitResumed(context.Context, string, io.Writer, []runprogress.Event, int64) (JobResult, error)

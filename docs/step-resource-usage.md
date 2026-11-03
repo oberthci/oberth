@@ -96,7 +96,7 @@ These measurements include kubectl startup and the local API exec transport;
 they exclude Pod scheduling, PVC provisioning and source archive delivery.
 Production uses the existing Go exec client rather than kubectl processes;
 network latency, remote PVC storage and CPU contention can change the cost.
-Run the shipped harness from tuxbox's server network to measure that deployment.
+Run the shipped harness from example-node's server network to measure that deployment.
 
 ## External sampler coverage (#1216)
 
@@ -175,7 +175,7 @@ container/volume storage lookups also cap each relevant list at 128; a pass
 visits at most 4,096
 uncached container candidates and writes batches of at most 256. Index/observation cost
 and extra VM API reads are the added overhead; production CPU/RSS/IO cost has
-not been qualified on tuxbox.
+not been qualified on example-node.
 
 Storage remains one upserted JSON row per run/node/Pod UID/runtime container ID,
 not one row per poll. Existing incarnations remain updatable at the 4,096-row
@@ -220,7 +220,7 @@ version-2/non-main rows, so schema 37 prevents opening them. The migration appli
 even with sampling disabled and follows the existing forward-only backup/restore
 contract. Helm rollback alone stops the old server with schema-too-new; rollback
 requires restoring the pre-upgrade database backup. See the [schema-37
-upgrade/rollback note](archive/schema37-upgrade-note.md). No admission, authored requests, limits, weights or workload specs are
+upgrade/rollback note](backup-restore.md). No admission, authored requests, limits, weights or workload specs are
 changed. Low/unknown/OOM-censored observations cannot authorize smaller resources.
 
 The optional storage field shapes and pod-cgroup scope follow the pinned

@@ -81,7 +81,7 @@ func TestQualifyInScopeResolvesShortNamesWithinTheScope(t *testing.T) {
 		upstreams: []model.Upstream{
 			{ID: 1, Name: "github", BaseURL: "ssh://git@github.com/oberthci"},
 			{ID: 2, Name: "codeberg", BaseURL: "ssh://git@codeberg.org/exampleorg"},
-			{ID: 3, Name: "skipops", BaseURL: "ssh://git@codeberg.org/skipops"},
+			{ID: 3, Name: "acme", BaseURL: "ssh://git@codeberg.org/acme"},
 		},
 	}
 	resolver := Upstreams{Catalog: catalog}
@@ -105,10 +105,10 @@ func TestQualifyInScopeResolvesShortNamesWithinTheScope(t *testing.T) {
 	}
 	// Two in-scope upstreams: a registered repository decides; a new name
 	// that either could hold is refused rather than guessed.
-	if got, err := resolver.QualifyInScope("terraform", []string{"github", "skipops"}); err != nil || got != "github/oberthci/terraform" {
+	if got, err := resolver.QualifyInScope("terraform", []string{"github", "acme"}); err != nil || got != "github/oberthci/terraform" {
 		t.Errorf("registered short name across two scopes = %q, %v", got, err)
 	}
-	if got, err := resolver.QualifyInScope("brand-new", []string{"github", "skipops"}); err == nil {
+	if got, err := resolver.QualifyInScope("brand-new", []string{"github", "acme"}); err == nil {
 		t.Errorf("unregistered short name across two scopes = %q, want refused", got)
 	}
 }

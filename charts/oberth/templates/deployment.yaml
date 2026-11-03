@@ -285,6 +285,7 @@ spec:
             - --admission-memory-bytes={{ int64 $declared.memoryBytes }}
             - --admission-memory-headroom-bytes={{ int64 $declared.memoryHeadroomBytes }}
             - --admission-memory-headroom-percent={{ int64 $declared.memoryHeadroomPercent }}
+            - {{ printf "--admission-extended-resources=%s" (toJson ($declared.extendedResources | default dict)) | quote }}
             - --admission-io-runs={{ int $declared.ioRuns }}
             - --ci-cache-root={{ .Values.cache.ciRoot }}
             - --release-cache-root={{ .Values.cache.releaseRoot }}

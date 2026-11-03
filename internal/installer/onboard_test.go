@@ -783,7 +783,7 @@ func TestOrgFromBaseURL(t *testing.T) {
 	}{
 		{"ssh://git@github.com/exampletools", "exampletools"},
 		{"ssh://git@github.com/acme/", "acme"},
-		{"ssh://git@codeberg.org/skipops", "skipops"},
+		{"ssh://git@codeberg.org/acme", "acme"},
 		{"ssh://git@gitlab.com/group/subgroup", "subgroup"},
 		{"", ""},
 		{"ssh://git@github.com", ""},
