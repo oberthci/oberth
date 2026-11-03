@@ -5,6 +5,8 @@ import (
 	"math/big"
 	"strings"
 
+	"k8s.io/utils/ptr"
+
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
@@ -15,17 +17,26 @@ type DeclaredAdmissionConfig struct {
 	Disabled    bool
 	CPUMilli    int64
 	MemoryBytes int64
+	// Headroom is max(fixed bytes, percentage of declared run memory). Nil
+	// selects the default independently of CPU/memory budgets; zero is explicit.
+	MemoryHeadroomBytes   *int64
+	MemoryHeadroomPercent *int64
 	// Zero retains the existing coarse run ceiling. IO is not inferred from CPU.
 	IORuns int
 }
 
 func DefaultDeclaredAdmissionConfig() DeclaredAdmissionConfig {
-	return DeclaredAdmissionConfig{CPUMilli: 8000, MemoryBytes: 16 << 30}
+	return DeclaredAdmissionConfig{CPUMilli: 8000, MemoryBytes: 16 << 30, MemoryHeadroomBytes: ptr.To(int64(1 << 30)), MemoryHeadroomPercent: ptr.To(int64(10))}
+}
+
+func (c DeclaredAdmissionConfig) memoryHeadroom() (fixed, percent int64) {
+	return ptr.Deref(c.MemoryHeadroomBytes, 1<<30), ptr.Deref(c.MemoryHeadroomPercent, 10)
 }
 
 func (c DeclaredAdmissionConfig) Validate() error {
-	if c.CPUMilli <= 0 || c.CPUMilli > 1_000_000 || c.MemoryBytes <= 0 || c.MemoryBytes > 1<<50 || c.IORuns < 0 || c.IORuns > 64 {
-		return errors.New("declared admission requires positive CPU/memory budgets and an IO run ceiling in 0..64")
+	fixed, percent := c.memoryHeadroom()
+	if c.CPUMilli <= 0 || c.CPUMilli > 1_000_000 || c.MemoryBytes <= 0 || c.MemoryBytes > 1<<50 || fixed < 0 || fixed > 1<<50 || percent < 0 || percent > 100 || c.IORuns < 0 || c.IORuns > 64 {
+		return errors.New("declared admission requires positive CPU/memory budgets, memory headroom in 0..2^50 bytes and 0..100 percent and an IO run ceiling in 0..64")
 	}
 	return nil
 }
@@ -42,6 +53,19 @@ func podCharge(d argoworkflow.PodDemand) argoworkflow.PodDemand {
 	return d
 }
 
+// runCharge holds max(fixed, proportional) overshoot headroom once per run.
+// The percentage uses the declared memory, excluding executor reserves.
+// Kubernetes still schedules pods by their actual requests.
+func (g *weightedAdmission) runCharge(d argoworkflow.PodDemand) argoworkflow.PodDemand {
+	fixed, percent := g.resources.memoryHeadroom()
+	// Round up to whole bytes without multiplying the full demand first. For
+	// valid demand <= 2^60 and percent <= 100, all intermediates fit in int64.
+	proportional := d.MemoryBytes/100*percent + (d.MemoryBytes%100*percent+99)/100
+	d = podCharge(d)
+	d.MemoryBytes += max(fixed, proportional)
+	return d
+}
+
 func (g *weightedAdmission) usesDeclarations(r *admissionReservation) bool {
 	return r.pods != nil
 }
@@ -51,7 +75,7 @@ func (g *weightedAdmission) numericFitsLocked(candidate *admissionReservation) b
 	legacy := 0
 	charge := func(r *admissionReservation) bool {
 		if g.usesDeclarations(r) {
-			d := podCharge(*r.pods)
+			d := g.runCharge(*r.pods)
 			if d.CPUMilli > cpu || d.MemoryBytes > memory {
 				return false
 			}
@@ -93,7 +117,7 @@ func (g *weightedAdmission) numericBudgetLocked() *model.NumericBudget {
 			continue
 		}
 		if r.pods != nil {
-			d := podCharge(*r.pods)
+			d := g.runCharge(*r.pods)
 			b.CPUUsedMilli += d.CPUMilli
 			b.MemoryUsedBytes += d.MemoryBytes
 		} else {
@@ -126,7 +150,7 @@ func (g *weightedAdmission) validatePodDemand(d *argoworkflow.PodDemand) error {
 }
 
 func (g *weightedAdmission) demandFitsBudget(d *argoworkflow.PodDemand) bool {
-	c := podCharge(*d)
+	c := g.runCharge(*d)
 	return c.CPUMilli <= g.resources.CPUMilli && c.MemoryBytes <= g.resources.MemoryBytes
 }
 
@@ -188,6 +212,6 @@ func (r *admissionReservation) declaredResources() *model.DeclaredResources {
 	if r.pods == nil {
 		return nil
 	}
-	d := podCharge(*r.pods)
+	d := r.gate.runCharge(*r.pods)
 	return &model.DeclaredResources{CPUMilli: d.CPUMilli, MemoryBytes: d.MemoryBytes, Pods: d.Pods}
 }
