@@ -162,12 +162,13 @@ def check_adoption(root):
     for word in ("Main useful function", "Harmful function", "Contradiction", "Separation", "Ideality", "Resource", "Trimming", "Guard"):
         if word not in contract:
             raise ValueError("missing vocabulary: " + word)
-    template = (root / ".gitea/pull_request_template.md").read_text()
+    review = root / ".gitea" if (root / ".gitea/pull_request_template.md").is_file() else root
+    template = (review / "pull_request_template.md").read_text()
     if any(q not in template for q in QUESTIONS) or "blocks promotion" not in template:
         raise ValueError("missing review questions or blocking rule")
     if "contract-guard" not in (root / ".oberth/build.yaml").read_text():
         raise ValueError("guard is not wired into branch CI")
-    issue = (root / ".gitea/ISSUE_TEMPLATE/contract.md").read_text()
+    issue = (review / "ISSUE_TEMPLATE/contract.md").read_text()
     for field in ("Direction:", "Repo:", "Contradiction:", "Function:", "Verdict:", "Evidence:", "Impact:", "Resolution:", "Guard:", "Done when:", "Source:", "Priority:"):
         if field not in issue:
             raise ValueError("issue template missing " + field)
