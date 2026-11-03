@@ -2,8 +2,9 @@ package store
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -66,14 +67,62 @@ func seedResourceRows(t *testing.T, s *Store, runID string, at time.Time, n int)
 	if err := s.RecordStepResourceUsage(t.Context(), []model.StepResourceUsage{v}); err != nil {
 		t.Fatal(err)
 	}
+	var observation string
+	if err := s.db.QueryRow(`SELECT observation_json FROM step_resource_usage WHERE container_id=?`, v.ContainerID).Scan(&observation); err != nil {
+		t.Fatal(err)
+	}
+	// Keep the complete valid observation and change only its container ID.
+	// Parsing and rewriting this JSON in SQLite for each of 100,000 rows makes
+	// the race suite spend minutes constructing the retention fixture.
+	needle := `"container_id":"` + v.ContainerID + `"`
+	prefix, suffix, found := strings.Cut(observation, needle)
+	if !found || strings.Contains(suffix, needle) {
+		t.Fatal("resource fixture must contain exactly one container_id field")
+	}
+	prefix += `"container_id":"containerd://`
+	suffix = `"` + suffix
 	// Replicate valid observations with distinct IDs without making the cap
 	// fixture itself execute thousands of application transactions.
 	_, err := s.db.Exec(`WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<?)
 INSERT INTO step_resource_usage(run_id,repo_id,node_id,pod_uid,container_id,burn,step,last_observed_at,observation_json)
 SELECT run_id,repo_id,node_id,pod_uid,'containerd://'||printf('%064x',n),burn,step,last_observed_at+n,
-json_set(observation_json,'$.container_id','containerd://'||printf('%064x',n)) FROM step_resource_usage,seq WHERE container_id=?`, n-1, v.ContainerID)
+?||printf('%064x',n)||? FROM step_resource_usage,seq WHERE container_id=?`, n-1, prefix, suffix, v.ContainerID)
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSeedResourceRowsPreservesObservations(t *testing.T) {
+	s, run, at := resourceStoreFixture(t)
+	seedResourceRows(t, s, run.ID, at, 3)
+	rows, err := s.db.Query(`SELECT container_id,observation_json FROM step_resource_usage ORDER BY container_id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id, observation string
+		if err := rows.Scan(&id, &observation); err != nil {
+			t.Fatal(err)
+		}
+		var got model.StepResourceUsage
+		if err := json.Unmarshal([]byte(observation), &got); err != nil {
+			t.Fatal(err)
+		}
+		want := resourceRow(run.ID, at)
+		want.ContainerID = id
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("fixture changed observation fields: got %#v, want %#v", got, want)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{fmt.Sprintf("containerd://%064x", 1), fmt.Sprintf("containerd://%064x", 2), resourceRow(run.ID, at).ContainerID}
+	if !slices.Equal(ids, want) {
+		t.Fatalf("fixture IDs = %v, want %v", ids, want)
 	}
 }
 
@@ -113,27 +162,7 @@ func TestResourceRetentionOldestFirstBoundedAndIndependentOfPrimary(t *testing.T
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	snapshot := func() []resourceUsageCandidate {
-		t.Helper()
-		rows, err := s.reader().QueryContext(ctx, `SELECT rowid,last_observed_at FROM step_resource_usage ORDER BY last_observed_at,rowid`)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer rows.Close()
-		var values []resourceUsageCandidate
-		for rows.Next() {
-			var v resourceUsageCandidate
-			if err := rows.Scan(&v.id, &v.at); err != nil {
-				t.Fatal(err)
-			}
-			values = append(values, v)
-		}
-		if err := rows.Err(); err != nil {
-			t.Fatal(err)
-		}
-		return values
-	}
-	expected := snapshot()
+	expected := resourceRetentionSnapshot(t, ctx, s)
 	if len(expected) != resourceUsageSweepRows+2 {
 		t.Fatal("retention fixture row count", len(expected))
 	}
@@ -150,31 +179,8 @@ func TestResourceRetentionOldestFirstBoundedAndIndependentOfPrimary(t *testing.T
 	total := 0
 	for pass := 0; pass < 20 && total < len(expected); pass++ {
 		deleted, err := s.PruneResourceUsage(ctx)
-		if err != nil && !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatal("sweep/connection isolation", deleted, err)
-		}
-		if deleted < 0 || deleted > resourceUsageSweepRows {
-			t.Fatal("sweep cap", deleted)
-		}
-		remaining := snapshot()
-		observedTotal := len(expected) - len(remaining)
-		observedDeleted := int64(observedTotal - total)
-		// SQLite may commit a DELETE before cancellation makes ExecContext
-		// return a deadline error instead of its RowsAffected result. Only
-		// that final batch can be missing from the acknowledged count.
-		if observedDeleted < deleted || observedDeleted > resourceUsageSweepRows ||
-			(err == nil && observedDeleted != deleted) || observedDeleted-deleted > resourceUsageDeleteBatch {
-			t.Fatal("sweep count", observedDeleted, deleted, err)
-		}
-		if observedDeleted != deleted {
-			t.Logf("deadline after committed batch: acknowledged=%d persisted=%d", deleted, observedDeleted)
-		}
-		// Verify every surviving row, including the rowid tie-breaker. The
-		// persisted suffix is authoritative even when the last count is lost.
-		if !slices.Equal(remaining, expected[observedTotal:]) {
-			t.Fatal("partial sweep was not oldest first", len(remaining), observedTotal, deleted, err)
-		}
-		total = observedTotal
+		remaining := resourceRetentionSnapshot(t, ctx, s)
+		total = checkResourceRetentionProgress(t, expected, remaining, total, deleted, err)
 	}
 	if total != resourceUsageSweepRows+2 {
 		t.Fatal("bounded backlog did not drain while primary pool slot held", total)
