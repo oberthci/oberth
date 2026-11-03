@@ -1,10 +1,11 @@
 package main
 
 import (
-	"github.com/oberthci/oberth/internal/model"
 	"io"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/model"
 )
 
 func TestServerAcceptsUplinkTokenLifetimeConfiguration(t *testing.T) {
