@@ -619,6 +619,8 @@ trust assumptions and complete invalidation rules.
 - Numeric per-container resource ceilings are administered independently using
   `oberth resource grant/get/revoke` or `resource_grant`, `resource_grant_get`,
   `resource_revoke`. Grants contain separate requests/limits quantity maps.
+  Trusted contract runs retain the larger main/preflight size reservation and
+  its size authorization until both declared demands can be charged.
   Migration v48 copies historical size-grant ceilings and provenance, including
   revocations; later size changes affect only legacy admission and priority.
   Every fresh submission and release preflight reads and enforces the numeric

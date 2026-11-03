@@ -4,7 +4,7 @@ Git owns resource values. Oberth never derives admission demand directly from
 observed usage or modifies a workflow's requests or limits. Commit reviewed
 measurements from `oberth run resources` in the workflow.
 
-A workflow with CPU/memory declarations uses numeric admission. Every container
+An ordinary workflow with CPU/memory declarations uses numeric admission. Every container
 must declare positive CPU and memory requests and a positive memory limit,
 directly or through template defaults. This includes scripts, container sets,
 init containers and sidecars. CPU limits are optional. Its S/M/L/XL annotation
@@ -56,6 +56,12 @@ For example, two runs each requesting 20Gi with one executor pod reserve
 2 × (20Gi + max(1Gi, 2Gi) + 256Mi) = 44.5Gi and fit a 48Gi budget. Their memory
 limits may be higher. This is a coarse packing margin; it does not guarantee
 that all containers can simultaneously use their full limits.
+
+Trusted contract runs retain size admission, even with declarations. Their
+reservation uses the larger main-document and trusted-preflight size, including
+the server leaf minimum, and requires the corresponding size grant. Capacity
+retries retain that reservation. Numeric admission for these runs must wait
+until the preflight and main-document demand are both declared and charged.
 
 ## Queue and IO controls
 
