@@ -124,3 +124,45 @@ func TestFailureLimiterCapacityDoesNotRejectNewPrincipal(t *testing.T) {
 		t.Fatal("failure limiter exceeded its memory bound")
 	}
 }
+
+func TestFailureLimiterBoundsRotatingCredentialsByTransportPeer(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		server, _ := testServer(t)
+		server.auth = streamAuthFunc(func(_ context.Context, token string) (Actor, error) {
+			if token == "valid" {
+				return Actor{Identity: "operator", Admin: true}, nil
+			}
+			return Actor{}, ErrInvalidToken
+		})
+		call := func(peer, token string) *httptest.ResponseRecorder {
+			request := httptest.NewRequest(http.MethodGet, "/api/repos", nil)
+			request.RemoteAddr = peer
+			request.Header.Set("Authorization", "Bearer "+token)
+			request.Header.Set("X-Forwarded-For", token)
+			response := httptest.NewRecorder()
+			server.Handler().ServeHTTP(response, request)
+			return response
+		}
+		for i := 0; i < 100; i++ {
+			if response := call("192.0.2.1:1234", fmt.Sprintf("random-%d", i)); response.Code != 401 {
+				t.Fatalf("failure %d: %d", i, response.Code)
+			}
+		}
+		response := call("192.0.2.1:9999", "another-random-token")
+		if response.Code != 429 || response.Header().Get("Retry-After") == "" {
+			t.Fatalf("rotating token limit: %d, retry=%q", response.Code, response.Header().Get("Retry-After"))
+		}
+		for _, tc := range []struct {
+			peer, token string
+			want        int
+		}{{"192.0.2.1:1111", "valid", 200}, {"192.0.2.2:1111", "invalid", 401}} {
+			if got := call(tc.peer, tc.token).Code; got != tc.want {
+				t.Fatalf("independent request: %d, want %d", got, tc.want)
+			}
+		}
+		time.Sleep(time.Minute)
+		if got := call("192.0.2.1:2222", "after-window").Code; got != 401 {
+			t.Fatalf("expired source window: %d", got)
+		}
+	})
+}

@@ -131,6 +131,7 @@ const writeDeadlineMargin = 1 * time.Minute
 
 type Server struct {
 	authFailures          authFailureLimiter
+	authFailureSources    authFailureLimiter
 	metrics               func(io.Writer)
 	liveness              func() error
 	draining              atomic.Bool

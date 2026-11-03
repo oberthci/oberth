@@ -12,6 +12,7 @@ import (
 )
 
 const authFailureLimit = 10
+const authFailureSourceLimit = 100
 const authFailureWindow = time.Minute
 const maxAuthFailurePeers = 4096
 
@@ -51,6 +52,10 @@ func authFailurePrincipal(request *http.Request) string {
 }
 
 func (limiter *authFailureLimiter) check(peer string, failure bool) bool {
+	return limiter.checkLimit(peer, failure, authFailureLimit)
+}
+
+func (limiter *authFailureLimiter) checkLimit(peer string, failure bool, limit int) bool {
 	limiter.mu.Lock()
 	defer limiter.mu.Unlock()
 	now := time.Now()
@@ -61,7 +66,7 @@ func (limiter *authFailureLimiter) check(peer string, failure bool) bool {
 	if !now.Before(bucket.until) {
 		bucket = authFailureBucket{until: now.Add(authFailureWindow)}
 	}
-	if bucket.count >= authFailureLimit {
+	if bucket.count >= limit {
 		return true
 	}
 	if !failure {
@@ -98,7 +103,11 @@ func (server *Server) logAuthFailure(request *http.Request, reason string) {
 }
 
 func (server *Server) recordAuthFailure(writer http.ResponseWriter, request *http.Request, reason string) bool {
-	if server.authFailures.check(authFailurePrincipal(request), true) {
+	// The coarse source ceiling remains stable when a client rotates tokens.
+	// It counts failures only, so valid credentials behind an ingress still work.
+	sourceLimited := server.authFailureSources.checkLimit(authPeer(request), true, authFailureSourceLimit)
+	principalLimited := server.authFailures.check(authFailurePrincipal(request), true)
+	if sourceLimited || principalLimited {
 		writeAuthRateLimit(writer)
 		return true
 	}
