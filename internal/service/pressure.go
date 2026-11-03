@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	PressureObserve = "observe"
-	PressureEnforce = "enforce"
+	PressureObserve      = "observe"
+	PressureEnforce      = "enforce"
+	pressureSettleWindow = 30 * time.Second
 )
 
 // AdmissionPressureConfig observes host pressure and optionally gates new grants.
@@ -82,6 +83,7 @@ type pressureCheck struct {
 	config              AdmissionPressureConfig
 	state               model.AdmissionPressure
 	sampledAt           time.Time
+	lastGrant           time.Time
 	ioHeld, cpuHeld     bool
 	warned              bool
 	deferrals, bypasses uint64
@@ -143,7 +145,7 @@ func (p *pressureCheck) refresh(now time.Time) {
 		}
 	}
 	p.state.ThresholdExceeded = p.ioHeld || p.cpuHeld
-	p.state.Holding = p.state.ThresholdExceeded && p.config.Mode == PressureEnforce
+	p.state.Holding = (p.state.ThresholdExceeded || p.settling()) && p.config.Mode == PressureEnforce
 	p.state.Resource = ""
 	if p.ioHeld {
 		p.state.Resource = "io"
@@ -153,9 +155,23 @@ func (p *pressureCheck) refresh(now time.Time) {
 	if p.ioHeld && p.cpuHeld {
 		p.state.Resource = "cpu+io"
 	}
+	if p.state.Resource == "" && p.settling() {
+		p.state.Resource = "settle"
+	}
 	if wasHeld != p.state.Holding || wasExceeded != p.state.ThresholdExceeded || (!wasAvailable && p.state.Available) {
 		p.config.Logf("admission pressure transition: mode=%s available=%t threshold_exceeded=%t holding=%t resource=%s cpu_some_avg10=%.2f io_some_avg10=%.2f", p.state.Mode, p.state.Available, p.state.ThresholdExceeded, p.state.Holding, p.state.Resource, sample.CPU.SomeAvg10, sample.IO.SomeAvg10)
 	}
+}
+
+// Even a new avg10 read can lag pod startup. Only an idle reading may skip
+// settling; starvation grants always require a sample after the full window.
+func (p *pressureCheck) settledSample() bool {
+	return p.lastGrant.IsZero() || p.sampledAt.Sub(p.lastGrant) >= pressureSettleWindow
+}
+
+func (p *pressureCheck) settling() bool {
+	return p.config.Enabled && p.state.Available && !p.settledSample() &&
+		(p.state.Sample.CPU.SomeAvg10 >= 15 || p.state.Sample.IO.SomeAvg10 >= 10)
 }
 
 func pressureLatch(held bool, value, limit, hysteresis float64) bool {
@@ -242,6 +258,9 @@ func (gate *weightedAdmission) deferPressureLocked(r *admissionReservation, now 
 // checks all other gates first; priority alone never authorizes an idle bypass.
 func (gate *weightedAdmission) pressureBypassLocked(r *admissionReservation, now time.Time) bool {
 	p := gate.pressure
+	if p.settling() {
+		return false
+	}
 	if gate.runs == 0 && !r.pressurePromotion && (r.pressureRelease || r.refKind == model.RefTag) {
 		return true
 	}

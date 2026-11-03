@@ -13,14 +13,14 @@ func TestSchedulerPressureBlocksSecondRunWithinBudget(t *testing.T) {
 	fixture := newConcurrencyFixture(t, periapsis.M, 2)
 	gate := fixture.scheduler.admission
 	config := DefaultAdmissionPressureConfig()
-	// Sources run under the admission mutex. The first grant makes pressure
-	// high, even if the second candidate is in the same scheduling pass.
-	high := true
+	// PSI lags pod startup: repeated samples stay moderate after the grant.
+	// The gate must wait for settling rather than expect an immediate spike.
+	cpu := 20.0
+	offset := time.Duration(0)
+	gate.now = func() time.Time { return time.Now().Add(offset) }
 	config.Source = func() (model.PressureSample, error) {
 		var sample model.PressureSample
-		if gate.runs > 0 && high {
-			sample.CPU.SomeAvg10 = 60
-		}
+		sample.CPU.SomeAvg10 = cpu
 		return sample, nil
 	}
 	config.Logf = func(string, ...any) {}
@@ -74,9 +74,24 @@ func TestSchedulerPressureBlocksSecondRunWithinBudget(t *testing.T) {
 		case <-poll.C:
 		}
 	}
-	// A new low reading recovers without waiting for the running job to finish.
+	// The next poll still sees lagged moderate PSI and must keep waiting.
 	gate.mu.Lock()
-	high = false
+	offset = 15 * time.Second
+	gate.grantLocked()
+	if gate.runs != 1 {
+		t.Error("next poll admitted before the settle window")
+	}
+	// At 30 seconds the delayed pressure spike is finally visible.
+	offset = 30 * time.Second
+	cpu = 60
+	gate.grantLocked()
+	if gate.runs != 1 {
+		t.Error("settled high pressure admitted the second run")
+	}
+	gate.mu.Unlock()
+	// A later low reading recovers without finishing the running job.
+	gate.mu.Lock()
+	cpu = 19
 	gate.grantLocked()
 	gate.mu.Unlock()
 	select {

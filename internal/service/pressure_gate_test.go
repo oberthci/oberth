@@ -228,3 +228,39 @@ func TestHostPressureEnabledOverridesLegacyObserve(t *testing.T) {
 		t.Fatal("legacy observe disabled enabled host admission")
 	}
 }
+
+func TestHostPressureModerateAdmitsOnePerSettleWindow(t *testing.T) {
+	for _, values := range [][2]float64{{20, 0}, {15, 0}, {0, 10}} {
+		f := hostPressureTestGate()
+		f.sample.CPU.SomeAvg10, f.sample.IO.SomeAvg10 = values[0], values[1]
+		first := f.prepare(1, model.PriorityNormal, "", periapsis.S)
+		second := f.prepare(2, model.PriorityNormal, "", periapsis.S)
+		third := f.prepare(3, model.PriorityNormal, "", periapsis.S)
+		if !first.granted || second.granted || third.granted {
+			t.Fatalf("moderate PSI %v admitted a burst: runs=%d", values, f.gate.runs)
+		}
+		f.advance(15 * time.Second)
+		f.advance(15*time.Second - time.Nanosecond)
+		if second.granted || third.granted {
+			t.Fatal("grant before a sample at least 30 seconds after the last grant")
+		}
+		f.advance(time.Nanosecond)
+		if !second.granted || third.granted {
+			t.Fatal("settled sample must grant exactly one run")
+		}
+		f.advance(30 * time.Second)
+		if !third.granted {
+			t.Fatal("next settle window did not progress")
+		}
+	}
+}
+
+func TestHostPressureIdleAdmitsBackToBack(t *testing.T) {
+	f := hostPressureTestGate()
+	f.sample.CPU.SomeAvg10, f.sample.IO.SomeAvg10 = 14.99, 9.99
+	for id := int64(1); id <= 4; id++ {
+		if !f.prepare(id, model.PriorityNormal, "", periapsis.S).granted {
+			t.Fatal("idle host did not clear immediately")
+		}
+	}
+}

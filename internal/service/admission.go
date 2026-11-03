@@ -535,7 +535,11 @@ func (gate *weightedAdmission) grantLocked() {
 		if gate.onGrant != nil {
 			gate.onGrant()
 		}
-		if gate.pressure != nil && gate.pressure.config.Enabled && index < len(gate.waiters) {
+		if gate.pressure != nil && gate.pressure.config.Enabled {
+			gate.pressure.lastGrant = gate.clock()
+			// Refresh the hold even when no waiter remains, so the next pass
+			// and cached status both observe the settle window.
+			now = gate.clock()
 			gate.pressure.refresh(now)
 			gate.preparePressureWaitsLocked(now)
 		}
