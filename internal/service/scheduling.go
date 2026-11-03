@@ -62,7 +62,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 			result.Message = prefix + " " + result.Message
 		}
 	}()
-	if run.Reason == store.PolicyRefreshWaitingReason || strings.HasSuffix(run.Reason, "; "+store.PolicyRefreshWaitingReason) {
+	if run.Status == model.RunRunning && (run.Reason == store.PolicyRefreshWaitingReason || strings.HasSuffix(run.Reason, "; "+store.PolicyRefreshWaitingReason)) {
 		result.State = "waiting"
 		result.Message = store.PolicyRefreshWaitingReason + ": waiting for upstream trusted test policy; no publication is allowed."
 		return result
