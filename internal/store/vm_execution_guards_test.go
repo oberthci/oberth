@@ -21,10 +21,10 @@ func requireVMJournalGuard(t *testing.T, err error, message string) {
 func vmJournalSnapshot(t *testing.T, s *Store, runID string) []any {
 	t.Helper()
 	rows, err := s.db.Query(`SELECT * FROM vm_executions WHERE run_id=?`, runID)
-	mustPilot(t, err)
+	requireStoreNoError(t, err)
 	defer rows.Close()
 	columns, err := rows.Columns()
-	mustPilot(t, err)
+	requireStoreNoError(t, err)
 	values := make([]any, len(columns))
 	targets := make([]any, len(columns))
 	for i := range values {
@@ -33,7 +33,7 @@ func vmJournalSnapshot(t *testing.T, s *Store, runID string) []any {
 	if !rows.Next() {
 		t.Fatalf("missing journal row: %v", rows.Err())
 	}
-	mustPilot(t, rows.Scan(targets...))
+	requireStoreNoError(t, rows.Scan(targets...))
 	return values
 }
 
@@ -46,19 +46,19 @@ func TestVMJournalDatabaseIdentityGuards(t *testing.T) {
 			if kind == "vm" {
 				intent := vmIntent(t, s, createRepo(t, s), "guard")
 				_, err := s.ReserveVMExecution(context.Background(), intent)
-				mustPilot(t, err)
+				requireStoreNoError(t, err)
 				runID, otherKind = intent.Spec.RunID, "kvm-preflight"
 			} else {
 				intent := kvmIntent(t, s)
 				_, err := s.ReserveKVMPreflight(context.Background(), intent)
-				mustPilot(t, err)
+				requireStoreNoError(t, err)
 				runID, otherKind = intent.RunID, "vm"
 			}
 			before := vmJournalSnapshot(t, s, runID)
 			// REPLACE can conflict through the capacity index as well as run_id.
 			// A different valid run must not evict the active reservation.
 			repo, err := s.RepositoryByName(context.Background(), "oberth")
-			mustPilot(t, err)
+			requireStoreNoError(t, err)
 			other := vmIntent(t, s, repo, "other")
 			for _, cleaned := range []any{0, nil} {
 				// REPLACE substitutes NOT NULL DEFAULT 0 after BEFORE INSERT
@@ -91,9 +91,9 @@ func TestVMJournalDatabaseIdentityGuards(t *testing.T) {
 			requireVMJournalGuard(t, err, "VM executions are append-only")
 			_, err = s.db.Exec(`UPDATE vm_executions SET intent_json=intent_json,spec_identity=spec_identity,
                 execution_kind=execution_kind,updated_at=updated_at+1 WHERE run_id=?`, runID)
-			mustPilot(t, err)
+			requireStoreNoError(t, err)
 			_, err = s.db.Exec(`UPDATE vm_executions SET cleaning=1,cleaned=1 WHERE run_id=?`, runID)
-			mustPilot(t, err)
+			requireStoreNoError(t, err)
 			before = vmJournalSnapshot(t, s, runID)
 			for _, cleaned := range []any{0, nil} {
 				_, err = s.db.Exec(`UPDATE OR REPLACE vm_executions SET cleaned=? WHERE run_id=?`, cleaned, runID)
@@ -113,23 +113,23 @@ func TestKVMJournalDatabaseEvidenceGuards(t *testing.T) {
 			s := testStore(t, &now)
 			intent := kvmIntent(t, s)
 			_, err := s.ReserveKVMPreflight(context.Background(), intent)
-			mustPilot(t, err)
+			requireStoreNoError(t, err)
 			// Initial submission, UID binding and evidence recording remain possible.
 			_, err = s.db.Exec(`UPDATE vm_executions SET submitted=1 WHERE run_id=?`, intent.RunID)
-			mustPilot(t, err)
+			requireStoreNoError(t, err)
 			_, err = s.db.Exec(`UPDATE vm_executions SET workflow_uid='workflow-uid' WHERE run_id=?`, intent.RunID)
-			mustPilot(t, err)
+			requireStoreNoError(t, err)
 			var evidence []byte
 			if outcome == "receipt_json" {
 				evidence, err = json.Marshal(kvmReceipt(intent))
 			} else {
 				evidence, err = json.Marshal(vmrunner.KVMRefusal{Code: "observation_refused", ObservedAt: now})
 			}
-			mustPilot(t, err)
+			requireStoreNoError(t, err)
 			_, err = s.db.Exec(`UPDATE vm_executions SET `+outcome+`=? WHERE run_id=?`, string(evidence), intent.RunID)
-			mustPilot(t, err)
+			requireStoreNoError(t, err)
 			_, err = s.db.Exec(`UPDATE vm_executions SET workflow_uid=workflow_uid,`+outcome+`=`+outcome+`,cleaning=1,cleaned=1 WHERE run_id=?`, intent.RunID)
-			mustPilot(t, err)
+			requireStoreNoError(t, err)
 			before := vmJournalSnapshot(t, s, intent.RunID)
 			for _, field := range []string{"workflow_uid", outcome} {
 				for _, replacement := range []any{"", "replacement", nil} {
@@ -151,7 +151,7 @@ func TestKVMJournalDatabaseEvidenceGuards(t *testing.T) {
 				t.Fatal("replacement erased accepted evidence")
 			}
 			_, err = s.KVMPreflight(context.Background(), intent.RunID)
-			mustPilot(t, err)
+			requireStoreNoError(t, err)
 		})
 	}
 }

@@ -11,7 +11,6 @@ website/.wrangler/
 
 # Loose binary artifacts
 oberth-*
-!cmd/oberth-node-bridge/
 !cmd/oberth-kvm-harness/
 # Host service files shipped from deploy/systemd (issue 056).
 !deploy/systemd/oberth-*

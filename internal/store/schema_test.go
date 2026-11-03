@@ -1056,6 +1056,12 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"vm_executions_guard_update",
 		"vm_executions_no_delete",
 		"vm_executions_no_replace",
+		"vm_suite_executions_retired_delete",
+		"vm_suite_executions_retired_insert",
+		"vm_suite_executions_retired_update",
+		"vm_suite_resources_retired_delete",
+		"vm_suite_resources_retired_insert",
+		"vm_suite_resources_retired_update",
 	})
 
 	expectedColumns := map[string][]string{

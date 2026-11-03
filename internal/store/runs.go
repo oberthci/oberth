@@ -1388,10 +1388,8 @@ func (s *Store) SetRunCredentialed(ctx context.Context, id string) error {
 	if err := tx.QueryRowContext(ctx, `
 SELECT COUNT(*) FROM runs
 WHERE id=? AND status IN ('queued','running') AND credentialed=0
-  AND (EXISTS (SELECT 1 FROM vm_executions
-               WHERE run_id=runs.id AND (submitted=1 OR execution_kind='kvm-preflight') AND cleaned=0)
-       OR EXISTS (SELECT 1 FROM vm_suite_executions
-                  WHERE run_id=runs.id AND submitted=1 AND cleaned=0))`, id).Scan(&conflicts); err != nil {
+  AND EXISTS (SELECT 1 FROM vm_executions
+               WHERE run_id=runs.id AND (submitted=1 OR execution_kind='kvm-preflight') AND cleaned=0)`, id).Scan(&conflicts); err != nil {
 		return fmt.Errorf("check credential transition ownership: %w", err)
 	}
 	if conflicts != 0 {

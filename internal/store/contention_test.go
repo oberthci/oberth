@@ -44,20 +44,6 @@ func TestLiveReadsDoNotWaitForWriter(t *testing.T) {
 		"run":           func(ctx context.Context) error { _, err := s.Run(ctx, run.ID); return err },
 		"summary":       func(ctx context.Context) error { _, err := s.Summary(ctx); return err },
 		"idle":          func(ctx context.Context) error { _, err := s.IdleQueueStatus(ctx); return err },
-		"pilot resources": func(ctx context.Context) error {
-			_, err := s.PilotResources(ctx, run.ID)
-			if errors.Is(err, ErrNotFound) {
-				return nil
-			}
-			return err
-		},
-		"pilot receipt": func(ctx context.Context) error {
-			_, err := s.CompletedPilotReceipt(ctx, run.ID)
-			if errors.Is(err, ErrNotFound) {
-				return nil
-			}
-			return err
-		},
 	}
 	for name, check := range checks {
 		t.Run(name, func(t *testing.T) {

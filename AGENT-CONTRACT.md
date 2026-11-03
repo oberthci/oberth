@@ -198,8 +198,8 @@ failed gates and one-minute expiry force full verification. Startup and periodic
 cycles still scan the complete chain. Local prefix pins survive fresh cycles
 and failed gates, so a valid shorter history cannot clear a rollback refusal.
 Writable Store openers create an eight-connection read-only WAL pool after
-migration and recovery. Repository/upstream mappings, status/list queries and
-pilot read snapshots use it; they never reserve the single writer. SSH identity
+migration and recovery. Repository/upstream mappings and status/list queries
+use it; they never reserve the single writer. SSH identity
 and idle/readiness sampler pools open explicitly during daemon startup and keep
 their reserved capacity. Audit listings and chain/witness scan queries have a
 separate two-connection read-only pool so they cannot exhaust mapping slots;
@@ -1975,20 +1975,12 @@ trust assumptions and complete invalidation rules.
   submitted create retains its durable obligation and capacity even after a
   not-found observation. Cleanup requires observed absence of the exact VMI
   and owned launchers. A cleaned lifecycle record is not a passing test result.
-- The inactive Beacon transport foundation adds schema-v14
-  `vm_suite_executions`, `vm_suite_resources` and one `vm_capacity_slots`
-  capacity authority shared with the v13 lifecycle. Its immutable plan binds
-  candidate/suite and exact artifact/guest/conductor inputs. Per-resource
-  submit intents, API UIDs, one actual conductor container attempt and the
-  sole typed restart are audited before they can contribute evidence.
-  Credential promotion is refused while a submitted VM or pilot remains
-  uncleaned; the reverse ordering refuses VM/pilot submission. Ambiguous
-  creates and late owned children retain cleanup and capacity obligations.
-  A provisional eight-case result stream must match the actual process exit,
-  both host-bound endpoints and complete observed cleanup before it can become
-  a protected receipt. No scheduler capability or networked guest/conductor
-  execution adapter is enabled. See [trusted VM pilot](docs/trusted-vm-pilot.md)
-  for the implemented boundaries and remaining activation requirements.
+- The inactive pilot implementation is retired. Schema v40 preserves the
+  schema-v14 `vm_suite_executions` and `vm_suite_resources` journals as read-only
+  history for export and investigation; no execution path consults them.
+  Existing capacity reservations remain intact because retiring code does not
+  prove external resource cleanup. Operators with historical reservations must
+  verify cleanup before clearing them.
 - In-pod upstream/uplink administration has no bootstrap exception: schema,
   token, registration, and upstream-identity Secret mutations each pass the
   live daemon's fail-closed audit gate over its private mode-`0600` Unix socket.
@@ -2832,6 +2824,7 @@ alone is never evidence that missing migrations ran.
 | v37 | Unreleased (#1216 measurement) | Guard version-2 container telemetry and add the global observation-age retention index; preserve version-1 observations | Database restore |
 | v38 | Upstream publication retry | Persist bounded attempts, retry deadlines and audited owner progress without changing the pushed object or promotion plan | Database restore |
 | v39 | Submission priority | Persist expiring identity grants, audited priority requests and supersession protection; existing priority ordering remains compatible | Database restore |
+| v39 | Pilot retirement | Preserve inactive pilot journals as read-only history; remove them from execution decisions | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding
