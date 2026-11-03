@@ -1,6 +1,6 @@
 # Upgrading across execution retirements
 
-Starting with v0.17.83, `oberth upgrade` refuses to proceed while it can still
+Starting with v0.17.84, `oberth upgrade` refuses to proceed while it can still
 see a legacy KVM preflight Workflow or an Oberth-owned legacy VM/VMI. The error
 names the resource kind, namespace and name. This applies to dry-run previews,
 ordinary upgrades, same-version repairs and explicit same-version value changes;

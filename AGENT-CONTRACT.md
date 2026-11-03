@@ -61,7 +61,7 @@ active snapshots. Cleanup attempts every candidate and logs per-entry failures
 without disabling later backups; space checks remain mandatory. Workstation
 verification uses its private working volume, and generic inspection/verification
 honors TMPDIR. The isolated maintenance writer/verifier explicitly retain their
-qualified private /tmp and 128 MiB protocol.
+qualified private scratch storage and 128 MiB protocol.
 
 Default-limit requests omit the new flag for old-server compatibility. A custom
 limit may retry an unknown-flag response without the flag only if the old
@@ -258,7 +258,7 @@ trust assumptions and complete invalidation rules.
   capped at one hour before expiry; an expired or not-yet-valid leaf is always
   unready. Successful renewal clears the error. Administrator metrics expose
   expiry, renewal failure and its bounded diagnostic. Renewal and secret-store
-  probe workers are canceled and joined before server teardown completes.
+  probe tasks are canceled and joined before server teardown completes.
 - Upstream Git authentication is supplied by the configured Secret. Oberth does
   not mint a replacement when one is configured. Per-upstream deploy keys are
   additional data keys (`<keyFile>-<name>` / `<keyFile>-<name>.pub`) of that
@@ -1005,9 +1005,13 @@ trust assumptions and complete invalidation rules.
 - MCP exposes 77 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, read-only `run_resources` (captured history and reviewed git resource suggestions), `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`, `run_kvm_preflight`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, `publication_abandon`, issue
-  create/get/get_many/update/append/close/reopen/delete/list/lock/unlock/close_many,
+  `issue_create`, `issue_get`, `issue_get_many`, `issue_update`, `issue_append`,
+  `issue_close`, `issue_reopen`, `issue_delete`, `issue_list`, `issue_lock`,
+  `issue_unlock`, `issue_close_many`,
   secret-access list/allow/revoke, unscoped-admin-only uplink list/revoke/rotate,
-  `access_dismiss`, admin-only `workflow_capability_grant` and
+  `access_dismiss`, deprecated admin-only `kubevirt_grant` / `kubevirt_revoke`,
+  unscoped-admin-only `kubevirt_grant_list`, read-only `kubevirt_grant_get`,
+  admin-only `workflow_capability_grant` and
   `workflow_capability_revoke`, read-only `workflow_capability_get`, admin-only
   `resource_grant` / `resource_revoke`, read-only `resource_grant_get`, admin-only `size_grant`
   and `size_revoke`, read-only `size_grant_get` (#1021), admin-only
@@ -1094,6 +1098,24 @@ trust assumptions and complete invalidation rules.
   write issue timestamps, revisions, audit entries or locks. `fields` can select
   `work_status` and `stale`; the dashboard shows both. See
   [issue lifecycle](docs/issue-lifecycle.md).
+- The retained legacy VM tools remain available during the preparatory release:
+  `kubevirt_grant` and `kubevirt_revoke` are audited administrator mutations;
+  `kubevirt_grant_get` reads a repository's current grant and shared VMI budget;
+  `kubevirt_grant_list` is a read-only list of active grants for unscoped admins.
+  Legacy KVM/VMI admission fails closed without an active repository grant.
+  Grants bound VMI concurrency, cores and memory and do not become generic
+  workflow capabilities. Archived repositories refuse new `kubevirt_grant`
+  mutations; existing grants remain readable and revocable. Revocation blocks
+  new submissions while existing workflows retain their cleanup authority.
+- `issue_append` takes `id` and `text` and appends bounded text with a dated
+  separator to the existing body under the issue lock rules. It does not
+  replace the body or create a discussion thread. Its compact response is
+  `id`, `state`, `updated_at`, `occurrences` and `appended_bytes` (UTF-8 bytes
+  of text, excluding the separator); read content with `issue_get`.
+- `issue_close` takes a single `id`, preserves its history, and enforces the
+  same issue lock rules. Its compact response has the same fields as
+  `issue_append`, with `appended_bytes: 0`. Unlike admin-only
+  `issue_close_many`, it does not take a reason parameter.
 - `issue_get_many` accepts 1..50 unique positive `ids`, validated before reads.
   Its `results` preserve request order, each containing `id` and either a full
   `issue` (the existing `issue_get` wire record) or `error`: `not_found` or
@@ -1165,7 +1187,7 @@ trust assumptions and complete invalidation rules.
   Five attempts are allowed, with backoff of 2, 4, 8 and 16 minutes (about
   thirty minutes total, excluding I/O). Schema v38 persists the attempt count
   before external mutation, next-attempt time and owner progress message;
-  canonical audit intents bind the retry state. Waiting holds no worker or
+  canonical audit intents bind the retry state. Waiting holds no background task or
   delivery permit. Dispatch ticks and owner-startup recovery resume due work.
   A remote ref read precedes every mutation decision. After a lost
   finalization reply, recovery can confirm an already-delivered result during
@@ -1457,7 +1479,7 @@ trust assumptions and complete invalidation rules.
   offending step instead of filling the PVC unchecked. Progress-marker write
   failures are surfaced rather than swallowed: a run whose durable progress
   record is degraded is never reported as green.
-- Job CPU, memory, and ephemeral storage are bounded. `/tmp` uses a size-limited
+- Job CPU, memory, and ephemeral storage are bounded. Private scratch uses a size-limited
   `emptyDir`; persistent source state and the split CI/release caches retain the
   fixed PVC and node-path topology.
 
@@ -1575,7 +1597,7 @@ trust assumptions and complete invalidation rules.
   not authorize database retries. Trusted startup cleanup logs pending failures
   and continues with its durable obligations intact. Owner shutdown stops
   retries between attempts and leaves in-flight detached cleanup/finalization
-  to finish. The create-settlement worker keeps its own bounded attempts/backoff.
+  to finish. The create-settlement background task keeps its own bounded attempts/backoff.
   Invalid immutable/admission bindings, missing required recovery capabilities,
   schema/corruption and other non-transient failures keep their fatal behavior;
   a joined invariant error cannot be hidden by a concurrent DB deadline.
@@ -1713,7 +1735,7 @@ trust assumptions and complete invalidation rules.
   as a non-admin and needs a grant that is still active; its current scope
   must still cover the repository, and uplinks sharing the identity but
   disagreeing on scope stop it. Only admission (a store transaction) runs in
-  the failing run's worker or request, so `promote_status` reports the retry
+  the failing run's background task or request, so `promote_status` reports the retry
   at once; merge preparation and any fast-forward delivery run in the
   background and hold no admission reservation or delivery permit of the
   work that failed. `promote_retry {id}`
@@ -1739,7 +1761,7 @@ trust assumptions and complete invalidation rules.
   out) and leaves the promotion pending with no plan, which owner-startup
   recovery interrupts like any promotion that never recorded its plan;
   nothing touches the store after the API's shutdown returns. The API shuts
-  down after the scheduler's workers stop, and refuses background work
+  down after the scheduler's background tasks stop, and refuses background work
   (queued waits, automatic moved-promotion retries) from then on. A plan
   already under way when the bounded shutdown wait times out keeps running
   to its own bounded end and is logged. promote,
@@ -2149,15 +2171,27 @@ trust assumptions and complete invalidation rules.
   re-synced, an already-running credentialed step whose token was obtained
   before the revocation can still read the path; new runs are blocked by
   Oberth's own admission gate.
-- Kubernetes access is namespace-scoped, with one documented exception: when
-  `secretstore.enabled` is set, the chart may create a `system:auth-delegator`
-  ClusterRoleBinding for the Oberth ServiceAccount so OpenBao validates login
-  tokens via TokenReview without a stored reviewer JWT
-  (`secretstore.createAuthDelegatorBinding`), and the namespace Role gains
-  `pods/exec` create for the in-memory secret delivery. Job pods receive no
-  service-account token, run as UID/GID 0 with all Linux capabilities dropped
-  (`Capabilities.Drop: ["ALL"]`), have bounded resources and deadlines, never
-  retry, and are garbage-collected after completion. Argo-authored workflows
+- Fresh installs enable pipeline `networkPolicy.enabled`, including on k3s,
+  which provides a NetworkPolicy controller. Reruns preserve the stored choice.
+  An explicit or stored disabled policy prints a prominent installer warning;
+  `--network-policy=true` restores the chart policy. The operator must supply
+  an enforcing CNI; the installer never silently disables the policy based on
+  the Kubernetes distribution.
+- Chart cluster-scoped objects have explicit enabling values:
+  `secretstore.createAuthDelegatorBinding` (with `secretstore.enabled`) creates
+  the TokenReview ClusterRoleBinding; `argo.resourceSampler.enabled` creates
+  a node metrics ClusterRole and binding scoped to allowlisted node names;
+  `platformProtection.enabled` creates three platform PriorityClasses for the
+  server, Argo controller and OpenBao. The remaining access Roles are namespaced.
+- The server-namespace Role grants only ConfigMap access: collection
+  create/get/list/watch and update of `oberth-secret-access` by exact name.
+  It grants no Pod, `pods/log` or `pods/exec` access. The separate pipeline
+  namespace Role grants `pods/exec` create only for source seeding into
+  run-scoped volumes. Pipeline secrets arrive through projected identity
+  tokens and envconsul, not through the exec stream. The optional
+  `secretstore.createAuthDelegatorBinding` ClusterRoleBinding lets OpenBao
+  validate login tokens through TokenReview without a stored reviewer JWT.
+  Argo-authored workflows
   may select named plain container/script leaves with the static annotation
   `oberth.ci/nonroot-templates: test-one,test-two`. In this initial mode the
   entire workflow must be uncredentialed, with no templateDefaults, and selected
@@ -2170,7 +2204,7 @@ trust assumptions and complete invalidation rules.
   No chown or fsGroup change is made. Main remains tokenless; Argo's existing
   executor token remains scoped to its init/wait. Source and shared tool inputs,
   including their executor mirrors, remain read-only; the selected leaf has no
-  host cache mount. TMPDIR/GOTMPDIR are `/tmp` and Go/tool caches are ephemeral
+  host cache mount. TMPDIR/GOTMPDIR point to private scratch and Go/tool caches are ephemeral
   within that bounded private Pod volume. Collected artifacts retain their
   separate existing run-owned mount. Actual PostgreSQL startup and Chromium's
   namespace/seccomp sandbox require separate execution proof; this interface
@@ -2648,12 +2682,13 @@ commit, reflected by `updated_at`/`UpdatedAt`. Reads never finalize a publicatio
 The chart and installer manage Oberth and its CI dependencies. Operators own
 external ingress and connectors separately. Retired `watchTunnel` values are
 accepted for upgrade compatibility, ignored, and reported in Helm notes.
-Transfer connector ownership before upgrading a release that formerly managed
-it. The push banner remains an optional, display-only dashboard URL.
+Before upgrading a release that formerly managed a connector, annotate needed
+live resources `helm.sh/resource-policy=keep`, verify their retention and
+complete the [external ownership handoff](docs/ownership-handoff.md). The push banner remains an optional, display-only dashboard URL.
 
 ## Keyless GAR publication and verification (#557)
 
-The repository-owned credential helper (`scripts/release-wif-credential.py`)
+The repository-owned credential helper (`scripts/oberth-release-wif-credential.py`)
 serves all three WIF roles via an exact audience allowlist and
 administrator-configured first-hop accounts. The helper derives the active
 role from the `audience` field of the Oberth-projected ADC at
@@ -2692,7 +2727,7 @@ Before the next release, configure/retain `argo.releaseWIF.roles.<role>.service_
 for all three roles. The current server already supplies the required ADC;
 this revision requires no new environment variable or preliminary server rollout.
 See [publication prerequisites](.oberth/bootstrap.md#publication-prerequisites)
-for the exact coordinator handoff and placeholders.
+for the exact administrator handoff and placeholders.
 
 ### Layered trust enforcement
 
@@ -2774,7 +2809,7 @@ WIF and every other nonempty value fails closed.
 
 Both Go publisher binaries are rebuilt from admitted source and re-pinned in
 `.oberth/pins/bootstrap-tools.sha256`. Publisher source verification includes
-`scripts/release-wif-credential.py` before any credential is consumed.
+`scripts/oberth-release-wif-credential.py` before any credential is consumed.
 
 ### Protected controller prerequisite and upgrade (#887)
 
@@ -3058,7 +3093,7 @@ replay v29 and v30 in order on restore.
 Controller profile verification failures keep all new admission paused. Unscoped
 status exposes the fixed verifier `controller_profile.reason` (never raw API
 errors); unchanged failure logs are limited to once per 30 seconds. Recovery
-clears the reason and resumes admission without changing existing workers.
+clears the reason and resumes admission without changing existing background tasks.
 
 Live-log SSE streams revalidate their original bearer credential every 30 seconds
 with a five-second authentication deadline. Revocation, rotation, lookup failure

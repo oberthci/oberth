@@ -75,7 +75,7 @@ alone cannot establish whether an old failure was an API timeout, a
 kubelet/runtime exec delay or a lost response.
 
 On SIGTERM the server marks `/readyz` unavailable before cancelling scheduler
-workers. New HTTP/MCP requests receive 503 with `Retry-After: 1`; `/healthz` and
+background tasks. New HTTP/MCP requests receive 503 with `Retry-After: 1`; `/healthz` and
 `/livez` stay healthy during drain. Scheduler observers stop and adoption-capable
 Workflows continue in Kubernetes. Already accepted mutations retain their request contexts
 and can finish. HTTP connections share a 15-second graceful drain budget, after
@@ -109,7 +109,7 @@ remain required; keeping the endpoint routable does not authorize writes.
 
 Liveness is separate from readiness. `/healthz` keeps its always-OK compatibility
 behavior and remains the startup probe. `/livez` returns 503 only after more than
-five minutes without local writer or monitored worker progress. The chart checks
+five minutes without local writer or monitored background task progress. The chart checks
 it every 60 seconds, allows 15 seconds for TLS/HTTP scheduling, and requires three
 consecutive failures. A persistent local wedge normally restarts the pod about
 seven to eight and a half minutes after its last progress, including writer
@@ -128,7 +128,7 @@ fail readiness; one old busy sample never ages into a failure by itself.
 Success, a deadline, or another error class starts a fresh busy episode.
 Recovery clears the error. This uses existing migration metadata without
 changing its values, adding audit actions, or requiring a schema migration.
-HTTP probes read only process memory and never acquire the writer or worker
+HTTP probes read only process memory and never acquire the writer or background task
 locks.
 
 The scheduler dispatch loop is monitored after startup recovery, including idle
@@ -138,7 +138,7 @@ merge planning starts, then removed from the local queue checks. Explicit waits
 on Kubernetes admission, audit witnesses, upstream policy/ref reads and pushes,
 and the delivery permit are excluded from the dispatch window. A dependency
 outage alone must not restart the process; external planning/delivery operations
-are governed by their own contexts. This does not detect every possible worker
+are governed by their own contexts. This does not detect every possible background task
 fault during an external wait or before scheduler recovery completes. The
 writer is monitored throughout, and readiness still gates startup completion.
 Dispatch heartbeat values are stripped before handing work to automatic

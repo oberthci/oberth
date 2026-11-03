@@ -10,7 +10,14 @@ private scratch space. Set the following fields on the test's Pod template:
     annotations:
       oberth.ci/workspace-mounts: none
       oberth.ci/workspace-env: none
+  volumes:
+  - name: private-scratch
+    emptyDir:
+      sizeLimit: 1Gi
   container:
+    volumeMounts:
+    - name: private-scratch
+      mountPath: /work/private
     # Use your repository's approved digest-pinned image here.
     image: <approved-image>@sha256:<digest>
     command: ["/usr/local/go/bin/go"]
@@ -20,9 +27,9 @@ private scratch space. Set the following fields on the test's Pod template:
     - name: PATH
       value: /usr/local/go/bin:/usr/bin:/bin
     - name: GOCACHE
-      value: /tmp/gocache
+      value: /work/private/gocache
     - name: GOMODCACHE
-      value: /tmp/gomod
+      value: /work/private/gomod
 ```
 
 `automountServiceAccountToken: false` prevents the pipeline token from being
@@ -51,7 +58,7 @@ The only admitted template annotations are:
 test directory on the `work` claim. Server-reserved source, cache, artifact,
 token and secret volume names cannot be used to introduce alternate mounts. It is an opt-out of automatic mounts, not
 a claim that the Pod has no shared storage. Source remains read-only at
-`/work/src`; bounded per-Pod `/tmp` remains writable. Declare private cache
+`/work/src`; bounded per-Pod private scratch remains writable. Declare private cache
 locations when automatic caches are absent or read-only.
 
 The run's source and artifacts paths share one Pod volume for their PVC.
@@ -73,20 +80,27 @@ want isolation from the shared `work` volume but should not start cold:
     annotations:
       oberth.ci/workspace-mounts: cache
       oberth.ci/workspace-env: none
+  volumes:
+  - name: private-scratch
+    emptyDir:
+      sizeLimit: 1Gi
   container:
+    volumeMounts:
+    - name: private-scratch
+      mountPath: /work/private
     image: <approved-image>@sha256:<digest>
     command: ["/usr/local/go/bin/go"]
     args: ["test", "./..."]
     workingDir: /work/src
     env:
     - name: GOCACHE        # used only when the tier has no cache root
-      value: /tmp/gocache
+      value: /work/private/gocache
     - name: GOMODCACHE
-      value: /tmp/gomod
+      value: /work/private/gomod
 ```
 
 The leaf receives the read-only source at `/work/src`, the bounded per-Pod
-`/tmp`, and the writable cache at `/work/cache`, and nothing else
+scratch storage, and the writable cache at `/work/cache`, and nothing else
 automatic: no `work` subpaths (tools, per-run fallback caches, Trivy cache,
 release directory), no collected-artifact mount and no `OBERTH_ARTIFACTS`.
 The workspace tool defaults (`PATH`, `OBERTH_TOOLS_DIR`, `GOPATH`,
@@ -99,7 +113,7 @@ cache is mounted, whatever `oberth.ci/workspace-env` says, and they override
 authored values for those names. `workspace-env: none` together with `cache`
 therefore means "my own tool environment, the server's cache". When the
 run's tier has no cache root configured, there is no mount and none of the
-three is set; authored private locations such as `/tmp/gocache` then apply,
+three is set; authored private locations such as the configured private Go cache then apply,
 and the step simply starts cold.
 
 `cache` adds no mount and no authority that the default (no annotation) does
@@ -121,15 +135,15 @@ concurrent writers. Oberth's branch lint wrapper also keeps its versioned
 golangci-lint v2.12.2 result cache here: that pinned tool uses a Go-derived
 cache with local multi-process file locking. This requires the existing
 node-local filesystem, not an NFS cache. With no configured cache root, lint
-uses private `/tmp` instead. Tool binaries remain on the per-run claim. A
+uses private scratch instead. Tool binaries remain on the per-run claim. A
 Trivy `--cache-dir` inside `/work/cache` is treated as shared by the Trivy
 guard (unordered pairs are refused), and since concurrent runs of the same
-repository share the directory, keep Trivy's database in `/tmp`.
+repository share the directory, keep Trivy's database in private scratch.
 
 `cache` is refused on leaves that never take a host-backed mount:
 `oberth.ci/kvm-templates` leaves (which require `none`) and
-`oberth.ci/nonroot-templates` leaves (whose Go caches move to their private
-`/tmp`). Keep `none` for steps that must not see writable shared state, such
+`oberth.ci/nonroot-templates` leaves (whose Go caches move to their
+private scratch). Keep `none` for steps that must not see writable shared state, such
 as signing, publishing, credential handling, and fetching or verifying
 tools: a writable cache shared with every other build step of the
 repository is exactly such state.

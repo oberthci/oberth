@@ -26,7 +26,7 @@ logs, SSH identity Secrets, and external witness records remain separate.
 ## Execution and key custody
 
 Run only in a reviewed retained-process sandbox with a private 256 MiB tmpfs at
-`/tmp`, `MemorySwapMax=0`, an appropriate memory cap, no network, empty
+private scratch, `MemorySwapMax=0`, an appropriate memory cap, no network, empty
 capabilities, `NoNewPrivileges`, core dumps disabled, and positive process and
 cgroup cleanup. Mount only the exact database and WAL read-only under a fixed
 source directory. The utility independently checks tmpfs, its unified cgroup's
@@ -38,7 +38,7 @@ Use a dedicated RSA recipient of at least 3072 bits. Generate its private key
 only inside an owner-only recovery directory, with umask 077 and an exclusive
 0600 file; retain the public certificate and its SHA-256 separately. Never print
 key bytes or put them in command arguments or environment variables. The export
-worker receives only the public certificate. A separate verification worker may
+background task receives only the public certificate. A separate verification background task may
 read the exact private key through a read-only mount. Do not search for or reuse
 unrelated credentials. Same-host separate key storage does not protect against
 full host compromise; retain an independently protected recovery copy according

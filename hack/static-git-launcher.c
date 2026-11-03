@@ -61,7 +61,7 @@ int main(int argc, char **argv) {
     /* The only readable trees are the scratch-like payload, fixtures, private
      * temporary files and the same proc/dev interfaces as a scratch container.
      * In particular the runner's Git templates and interpreter files are hidden.
-     * ABI2 REFER allows Git's quarantine/object moves inside /tmp, without
+     * ABI2 REFER allows Git's quarantine/object moves inside private scratch, without
      * allowing execution there. Unsupported kernels refuse, never fall back. */
     const char *readable[] = {"/qualification", "/usr/local/bin", "/proc", "/dev"};
     for (unsigned int i = 0; i < sizeof(readable) / sizeof(readable[0]); i++) {

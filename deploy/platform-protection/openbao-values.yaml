@@ -6,9 +6,5 @@ server:
   # until auto-unseal or an operator unseals it. See the rollout instructions.
   updateStrategyType: OnDelete
   priorityClassName: oberth-oberth-platform-openbao
-  resources:
-    # Initial sizing from a coordinator-supplied idle sample and margin;
-    # UNMEASURED UNDER LOAD. No new CPU/memory limits.
-    requests:
-      cpu: 100m
-      memory: 64Mi
+  # Preserve the installation's existing resource requests and limits.
+  # Qualify sizing separately; this example changes priority only.

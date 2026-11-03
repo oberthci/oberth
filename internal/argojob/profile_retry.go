@@ -58,7 +58,7 @@ func (controller *Controller) ControllerProfileStatus() *model.ControllerProfile
 }
 
 // AwaitAdmission pauses new work while profile verification is unavailable.
-// Existing workers retain their contexts and cleanup/publication authority.
+// Existing background tasks retain their contexts and cleanup/publication authority.
 func (controller *Controller) AwaitAdmission(ctx context.Context) error {
 	status := controller.ControllerProfileStatus()
 	if status == nil || status.State == "verified" {

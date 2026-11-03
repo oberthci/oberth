@@ -43,7 +43,7 @@ After a successful write, read the returned revision rather than predicting it.
 Migration 41 adds the column and trigger. Upgrading from v0.17.82 advances
 schema 39 through 48; rollback requires restoring the verified pre-upgrade
 database and its matching identity/backup material. See the
-[v0.17.83 upgrade notes](releases/v0.17.83.md#upgrade-from-v01782).
+[v0.17.84 upgrade notes](releases/v0.17.84.md#upgrade-from-v01782-or-v01783).
 
 ## Workspace work status and stale observations
 

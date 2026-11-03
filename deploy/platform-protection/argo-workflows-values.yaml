@@ -3,9 +3,5 @@
 # with the rendered PriorityClasses for any other release/namespace.
 controller:
   priorityClassName: oberth-oberth-platform-argo-controller
-  resources:
-    # Initial sizing from a coordinator-supplied idle sample and margin;
-    # UNMEASURED UNDER LOAD. No new CPU/memory limits.
-    requests:
-      cpu: 25m
-      memory: 128Mi
+  # Preserve the installation's existing resource requests and limits.
+  # Qualify sizing separately; this example changes priority only.

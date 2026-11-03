@@ -43,7 +43,7 @@
 # write, and a warm build cache makes reinstalling them a few seconds anyway.
 #
 # Tool custody (#567): the setup burn is the only writer of those tools. Every
-# later leaf sees /tmp/oberth-tools read-only. The Go leaves (vet, lint, test-*,
+# later leaf sees private scratch read-only. The Go leaves (vet, lint, test-*,
 # build-*) do so through an explicit readOnly request on that mount, which the
 # server honours while keeping the persistent Go caches writable (the
 # `readonly` annotation would make those read-only too, and `none` would drop
@@ -210,7 +210,7 @@ spec:
     - - name: install-shellcheck
         template: install-shellcheck
 
-  # [tools-dir] /bin/mkdir -p /tmp/oberth-tools/bin
+  # [tools-dir] /bin/mkdir -p private scratch
   - name: tools-dir
     automountServiceAccountToken: false
     container:
@@ -966,7 +966,7 @@ spec:
           memory: 1472Mi
 
   # [golangci-lint-./...]
-  # Keep one analysis worker under load. Use 6GiB of the actual 8Gi limit
+  # Keep one analysis process under load. Use 6GiB of the actual 8Gi limit
   # for the Go runtime, leaving 2GiB headroom without the old 2GiB soft cap.
   # Internal --timeout is cooperative; the wrapper enforces a process deadline.
   - name: golangci-lint-run
@@ -1617,7 +1617,7 @@ spec:
           cpu: 2000m
           memory: 4Gi
 
-  # Focused regression gates measured locally with one Go worker (BusyBox time -v).
+  # Focused regression gates measured locally with one Go process (BusyBox time -v).
   # Peak RSS / wall time: unittest 38 MiB / 0.21s, schema 55 MiB / 2.86s,
   # Make 20 MiB / 0.11s, prune 20 MiB / 0.04s. Reserve 1 CPU and 256Mi per
   # leaf, allowing headroom for the Python parent and its Helm child.

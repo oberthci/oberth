@@ -47,6 +47,14 @@ class NameCheckTests(unittest.TestCase):
         self.write('scratch.txt', self.brand.encode(), tracked=False)
         self.assertEqual(gate.check(self.root), 0)
 
+    def test_project_publication_pins_have_explicit_ownership(self):
+        (self.root / 'scripts').mkdir()
+        name = 'scripts/oberth-release-wif-credential.py'
+        self.write(name, b'"""Unqualified registry defaults."""\n')
+        self.assertEqual(gate.check(self.root), 1)
+        self.write(name, b'"""Oberth project\'s publication identities; forks replace them."""\n')
+        self.assertEqual(gate.check(self.root), 0)
+
     def test_mixed_case_substrings_and_binary_contents_fail(self):
         for body in (self.brand.upper().encode(),
                      b'prefix-' + self.brand.title().encode() + b'-suffix',
@@ -162,6 +170,16 @@ class NameCheckTests(unittest.TestCase):
     def test_distinctive_fragment_has_no_checker_path_bypass(self):
         self.write('hack/check-generic-names.py', self.fragment.encode())
         self.assertEqual(gate.check(self.root), 1)
+class RetiredProtocolNameTests(unittest.TestCase):
+    def test_retired_protocol_name_is_rejected_across_identifiers(self):
+        label = bytes([98, 101, 97, 99, 111, 110])
+        for value in (label, label.upper(), b'Capture' + label.title() + b'Artifact',
+                      b'prefix' + label + b'suffix', b'PREFIX' + label.upper() + b'SUFFIX'):
+            with self.subTest(value=value):
+                self.assertTrue(gate.forbidden(value))
+
+    def test_prose_word_boundaries_do_not_form_a_retired_identifier(self):
+        self.assertFalse(gate.forbidden(b'The receipt can be a container result.'))
 
 
 if __name__ == '__main__':

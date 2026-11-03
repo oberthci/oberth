@@ -226,6 +226,8 @@ type serveOptions struct {
 	auditTSACA              string
 	auditAnchorInterval     time.Duration
 	auditAnchorMaxAge       time.Duration
+	auditGateTimeout        time.Duration
+	auditGateVerifyTimeout  time.Duration
 	acceptWitnessChainReset string
 	acceptWitnessGenesis    string
 }
@@ -287,7 +289,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 
 	flags.StringVar(&options.maxConcurrentFile, "max-concurrent-jobs-file", "", "mounted ConfigMap key to reload max concurrent Jobs without restart; invalid or missing keeps the last good value")
 	flags.StringVar(&options.admissionSizeWeights, "admission-size-weights", service.DefaultSizeWeights.String(), "admission weight per size as S=..,M=..,L=..,XL=..; XL=0 is the whole budget (an XL run runs alone), a positive XL lets XL share the host; the budget is --max-concurrent-jobs M runs (#1021)")
-	flags.DurationVar(&options.admissionMaxHeadWait, "admission-max-head-wait", service.DefaultMaxHeadWait, "maximum head-wait window for new admission backfill; after it expires, drain existing grants for the head (0 = strict FIFO)")
+	flags.DurationVar(&options.admissionMaxHeadWait, "admission-max-head-wait", service.DefaultMaxHeadWait, "maximum head-wait window for measured admission backfill; then drain for up to 5m before available-capacity backfill resumes (0 = strict FIFO)")
 	defaults := service.DefaultAdmissionPressureConfig()
 	flags.BoolVar(&options.admissionPressure.Enabled, "admission-pressure-enabled", defaults.Enabled, "gate new runs by host CPU and IO some PSI avg10")
 	flags.Float64Var(&options.admissionPressure.CPUSomeAvg10, "admission-pressure-cpu-some-avg10", defaults.CPUSomeAvg10, "CPU some PSI avg10 threshold in percent")
@@ -366,6 +368,8 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.auditTSACA, "audit-tsa-ca", "", "optional PEM file pinning the TSA HTTPS TLS trust anchors")
 	flags.DurationVar(&options.auditAnchorInterval, "audit-anchor-interval", 10*time.Minute, "external audit checkpoint interval")
 	flags.DurationVar(&options.auditAnchorMaxAge, "audit-anchor-max-age", 30*time.Minute, "maximum checkpoint age allowed by readiness")
+	flags.DurationVar(&options.auditGateTimeout, "audit-gate-timeout", auditanchor.DefaultGateTimeout, "total audit mutation gate budget, including queueing and retries")
+	flags.DurationVar(&options.auditGateVerifyTimeout, "audit-gate-verify-timeout", auditanchor.DefaultGateVerifyTimeout, "deadline for each fresh audit mutation verification attempt")
 	flags.StringVar(&options.acceptWitnessChainReset, "accept-witness-chain-reset", "",
 		"one-shot acknowledgment: exact Rekor UUID of the latest published witness before a fresh genesis permanently abandons that chain")
 	flags.StringVar(&options.acceptWitnessGenesis, "accept-witness-genesis", "",
@@ -474,6 +478,9 @@ func validateServeOptions(options serveOptions) error {
 	}
 	if options.auditAnchorInterval <= 0 || options.auditAnchorMaxAge < options.auditAnchorInterval {
 		return errors.New("serve: audit anchor interval must be positive and max age must be at least the interval")
+	}
+	if options.auditGateTimeout <= 0 || options.auditGateVerifyTimeout <= 0 {
+		return errors.New("serve: audit gate and verification timeouts must be positive")
 	}
 	if options.auditTSAURL == "" && (options.auditTSARoots != "" || options.auditTSACA != "") {
 		return errors.New("serve: audit TSA trust flags require --audit-tsa-url")
@@ -687,6 +694,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		config := auditanchor.ManagerConfig{
 			Store: anchorStore, Continuity: continuity,
 			Interval: options.auditAnchorInterval, MaxAge: options.auditAnchorMaxAge, Logger: logger,
+			GateTimeout: options.auditGateTimeout, GateVerifyTimeout: options.auditGateVerifyTimeout,
 		}
 		if tsaClient != nil {
 			config.Authority = tsaClient
@@ -815,6 +823,9 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
+	removalCheck := app.LegacyRemovalCheck{Catalog: database, Git: git, Fragments: fragmentLoader}
+	// Retirement inventory runs only through the authenticated admin route.
+	// Upstream availability and repository declarations must not gate startup.
 	artifactStore, err := artifacts.Open(filepath.Join(options.dataRoot, "artifacts"))
 	if err != nil {
 		return err
@@ -1310,7 +1321,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	}()
 	defer func() { stopTokenWarnings(); <-tokenWarningsDone }()
 	stopBootstrap()
-	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, withRepositoryRemoval(newAdminGateServerWithTokenPolicy(anchors.AllowMutation, options.database, scheduler.NotifyQueue, options.uplinkTokenPolicy, queueSnapshot.current), anchors.AllowMutation, options.database, database, git), activateScheduler, accessReconciler, schedules, ciIssues, retention, logger, controlAPI.Shutdown, httpAPI.BeginDrain)
+	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, withLegacyRemovalCheck(withRepositoryRemoval(newAdminGateServerWithTokenPolicy(anchors.AllowMutation, options.database, scheduler.NotifyQueue, options.uplinkTokenPolicy, queueSnapshot.current), anchors.AllowMutation, options.database, database, git), options.database, removalCheck.Check), activateScheduler, accessReconciler, schedules, ciIssues, retention, logger, controlAPI.Shutdown, httpAPI.BeginDrain)
 }
 
 type startupContinuity interface {
@@ -1892,7 +1903,7 @@ func runComponents(
 		goProxyShutdownErr = shutdownHTTP(shutdownCtx, goProxyServer)
 	}
 	workers.Wait()
-	// The scheduler (a worker) can start API background work, an automatic
+	// The scheduler (a background task) can start API background work, an automatic
 	// moved-promotion retry, so the API shuts down after it has stopped.
 	// Shutdown refuses later background starts, cancels queued-promotion
 	// waits and waits, bounded, before the store closes.

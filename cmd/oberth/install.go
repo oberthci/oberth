@@ -76,7 +76,7 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 			"LoadBalancer (on k3s, servicelb also takes host ports 2222 and 443 on the node) or ClusterIP; "+
 			"an upgrade keeps the release's current type unless this is set")
 	flags.StringVar(&cfg.NetworkPolicy, "network-policy", "",
-		"pipeline egress NetworkPolicy: auto (default: enable on conforming CNIs, disable on k3s+kube-router), "+
+		"pipeline egress NetworkPolicy: auto (default: enable, including k3s; preserve existing values), "+
 			"true (always enable), false (always disable)")
 	flags.StringVar(&cfg.ArgoVaultCredentialedRole, "argo-vault-credentialed-role", "",
 		"Kubernetes-auth role credentialed pipelines log in with; bind it to exactly "+

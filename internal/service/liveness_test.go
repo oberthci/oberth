@@ -35,7 +35,7 @@ func TestSchedulerLivenessDetectsStalledLocalDispatch(t *testing.T) {
 	fixture := newRecoveryFixture(t)
 	scheduler := fixture.scheduler(t, &recoveryJobs{})
 	// Boundary assertions must not spend their one-second virtual margin on
-	// wall-clock scheduling delay between the worker signal and the check.
+	// wall-clock scheduling delay between the background task signal and the check.
 	now := time.Now()
 	scheduler.dispatchProgress.Now = func() time.Time { return now }
 	stalled := &stalledClaimStore{SchedulerStore: scheduler.store, entered: make(chan struct{}), release: make(chan struct{})}
@@ -97,7 +97,7 @@ func TestAdmissionLivenessDetectsStalledPersistenceAndStops(t *testing.T) {
 
 type queuedLivenessPromotions struct {
 	PromotionRepository
-	calls    int // used by the initial call and then its sole queue worker
+	calls    int // used by the initial call and then its sole queue background task
 	entered  chan struct{}
 	external bool
 }
@@ -126,7 +126,7 @@ func TestPromotionLivenessTracksEachWorkerAndShutdownRemovesIt(t *testing.T) {
 	}
 	awaitLivenessSignal(t, stalled.entered)
 	// Other queues can remain healthy (e.g. waiting on external witnesses)
-	// without hiding this worker's lack of local progress.
+	// without hiding this background task's lack of local progress.
 	other := &liveness.Heartbeat{}
 	other.Suspend()
 	control.promotionProgress.Store("other", other)
@@ -389,7 +389,7 @@ func TestSchedulerLivenessIdleRunStaysLiveAcrossVirtualHour(t *testing.T) {
 	ticks := make(chan time.Time)
 	scheduler.dispatchTicks = ticks
 	idle := &idleLivenessStore{SchedulerStore: scheduler.store}
-	scheduler.store = idle // omit optional head-persistence worker to isolate dispatch
+	scheduler.store = idle // omit optional head-persistence background task to isolate dispatch
 	ctx, cancel := context.WithCancel(t.Context())
 	points := make(chan idleLivenessPoint)
 	scheduler.onDispatchIdle = func() {

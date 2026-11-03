@@ -14,6 +14,19 @@ SAMPLER = {'enabled': True, 'interval': '15s',
 
 
 class ArgoSchemaTests(unittest.TestCase):
+    def test_retired_secret_settings_are_optional_and_inert(self):
+        baseline = self.render({})
+        self.assertEqual(baseline.returncode, 0, baseline.stderr)
+        for settings in (
+            ['--set', 'secretCreatePolicy=null'],
+            ['--set', 'secretCreatePolicy.enabled=true'],
+            ['--set', 'upstream.keySecret=legacy', '--set', 'upstream.knownHostsSecret=legacy'],
+        ):
+            with self.subTest(settings=settings):
+                result = self.render({}, *settings)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, baseline.stdout)
+
     def render(self, argo, *overrides):
         with tempfile.TemporaryDirectory() as directory:
             values = Path(directory) / 'values.json'

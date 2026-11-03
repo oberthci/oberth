@@ -86,6 +86,7 @@ type Flags struct {
 	IdentityUnknown   bool `json:"identity_unknown"`
 }
 type Step struct {
+	SizingAcceptance           SizingAcceptance        `json:"sizing_acceptance"`
 	MemoryStepAttempts         int                     `json:"memory_step_peak_attempts"`
 	MemorySamplerAttempts      int                     `json:"memory_sampler_attempts"`
 	MemoryInsufficientAttempts int                     `json:"memory_insufficient_attempts"`
@@ -138,7 +139,7 @@ func (r Report) MCPToolText() string {
 }
 
 const Retention = "External samples retain at most 90 days / 100,000 container incarnations globally, asynchronously. There is no per-repo or release reservation: busy repositories can displace rare release history. Missing history is unknown. A step-reported memory peak is used only with exact retained attempt identity, and only for advice."
-const Semantics = "Read-only. Quantiles are across container attempts, not time samples; each metric reports its own count. Memory prefers an identity-bound step-reported cgroup peak (self-reported, advisory), retaining any higher external peak with at least four polls; otherwise sampler memory requires four polls per attempt. Any missing memory coverage, unknown limits or deadline kill suppresses suggestions. CPU average uses captured CPU time over its measured interval. Ephemeral and IO pressure are pod-scoped, once per main attempt; PVC bytes are excluded. External peaks are sampled lower bounds. Git is the source of truth; suggestions never change execution."
+const Semantics = "Read-only. Per-step sizing_acceptance requires five comparable distinct terminal runs with CPU, memory, storage, duration and known limits together; censored or mixed-condition histories get no suggestion. Quantiles are across container attempts, not time samples; each metric reports its own count. Memory prefers an identity-bound step-reported cgroup peak (self-reported, advisory), retaining any higher external peak with at least four polls; otherwise sampler memory requires four polls per attempt. Any missing memory coverage, unknown limits or deadline kill suppresses suggestions. CPU average uses captured CPU time over its measured interval. Ephemeral and IO pressure are pod-scoped, once per main attempt; PVC bytes are excluded. External peaks are sampled lower bounds. Git is the source of truth; suggestions never change execution."
 
 var fragmentName = regexp.MustCompile(`^frag-[0-9a-f]{8}-(.+)$`)
 var retrySuffix = regexp.MustCompile(`\([0-9]+\)$`)
@@ -208,6 +209,7 @@ func Build(values []Observation, declarations []Declaration) []Step {
 			s.OwnerRepository = s.Declared.OwnerRepository
 		}
 		populations := make([][]int64, 9)
+		var sizing sizingHistory
 		runs := map[string]bool{}
 		seen := map[string]bool{}
 		metricRuns := make([]map[string]bool, 5)
@@ -276,9 +278,11 @@ func Build(values []Observation, declarations []Declaration) []Step {
 				s.MemoryInsufficientAttempts++
 				s.Flags.LowSamples = true
 			}
+			censored := o.DeadlineKilled || v.Reason == "DeadlineExceeded" || v.Reason == "OOMKilled"
 			for _, p := range [][2]*int64{{memory, o.MemoryLimitBytes}, {v.MemoryPeakBytes, o.MemoryLimitBytes}, {v.CPUPeakNanoCores, o.CPULimitNanoCores}, {v.EphemeralStoragePeakBytes, o.EphemeralLimitBytes}} {
 				if p[0] != nil && p[1] != nil && *p[1] > 0 && *p[0] >= *p[1] {
 					s.Flags.LimitReached = true
+					censored = true
 				}
 			}
 			var duration, average *int64
@@ -301,6 +305,13 @@ func Build(values []Observation, declarations []Declaration) []Step {
 				}
 			}
 			metrics := []*int64{memory, average, v.CPUPeakNanoCores, v.EphemeralStoragePeakBytes, duration, v.IOReadBytes, v.IOWriteBytes, v.IOPressureSomeNS, v.IOPressureFullNS}
+			complete := true
+			for _, n := range []*int64{memory, average, v.CPUPeakNanoCores, v.EphemeralStoragePeakBytes, duration} {
+				if n == nil || *n < 0 {
+					complete = false
+				}
+			}
+			sizing.observe(o, complete, censored)
 			for i, n := range metrics {
 				if n != nil && *n >= 0 {
 					populations[i] = append(populations[i], *n)
@@ -348,6 +359,13 @@ func Build(values []Observation, declarations []Declaration) []Step {
 		if s.Flags.IdentityUnknown {
 			s.NoSuggestion = append(s.NoSuggestion, "template or owning repository is unknown or conflicting")
 		}
+		if sizing.count() < MinimumSamples {
+			s.NoSuggestion = append(s.NoSuggestion, fmt.Sprintf("need %d comparable terminal runs with CPU, memory, storage, duration and known limits together; have %d", MinimumSamples, sizing.count()))
+		}
+		if len(sizing.cohorts) > 1 {
+			s.NoSuggestion = append(s.NoSuggestion, "historical requests, limits or workflow sizes differ; select a comparable history before sizing")
+		}
+		s.SizingAcceptance = sizing.acceptance(s.NoSuggestion)
 		if len(s.NoSuggestion) == 0 {
 			cpu := roundMargin(*s.AverageCPUNanoCores.P95, RequestMarginPercent, 10_000_000, 10_000_000) / 1_000_000
 			s.Suggested = &Suggested{CPUMilli: cpu, MemoryRequestBytes: roundMargin(*s.MemoryPeakBytes.P95, RequestMarginPercent, 1<<20, 64<<20), MemoryLimitBytes: roundMargin(*s.MemoryPeakBytes.Max, LimitMarginPercent, 1<<20, 64<<20), EphemeralRequestBytes: roundMargin(*s.EphemeralBytes.Max, RequestMarginPercent, 1<<20, 64<<20), EphemeralLimitBytes: roundMargin(*s.EphemeralBytes.Max, LimitMarginPercent, 1<<20, 64<<20), ActiveDeadlineSeconds: satAdd(roundMargin(*s.DurationNS.Max, DeadlineMarginPercent, int64(time.Second), int64(time.Second))/int64(time.Second), DeadlineStartupSeconds)}

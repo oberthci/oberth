@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"github.com/oberthci/oberth/internal/auditanchor"
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/testtimeout"
 )
@@ -298,6 +299,47 @@ func TestAuditMutationGateRejectsReceiveButAllowsUpload(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "audit integrity is unavailable") {
 		t.Fatalf("receive-pack error = %q", stderr.String())
+	}
+}
+
+func TestAuditVerificationTimeoutTellsPusherToRetry(t *testing.T) {
+	for _, failedCall := range []int32{1, 2} {
+		t.Run(fmt.Sprint(failedCall), func(t *testing.T) {
+			clientSigner := newSigner(t)
+			var calls, mutations atomic.Int32
+			git := &fakeGit{refs: map[string]string{"refs/heads/main": shaA}, afterReceive: map[string]string{"refs/heads/main": shaB}}
+			server, err := New(Config{
+				HostSigner: newSigner(t),
+				Resolver: IdentityResolverFunc(func(fingerprint string) (string, bool, error) {
+					return "agent@host", fingerprint == ssh.FingerprintSHA256(clientSigner.PublicKey()), nil
+				}),
+				Git:      git,
+				OnUpdate: UpdateHandlerFunc(func(context.Context, gitcache.ReceiveEvent) error { mutations.Add(1); return nil }),
+				MutationGate: func(context.Context) error {
+					if calls.Add(1) >= failedCall {
+						return fmt.Errorf("%w: %w", auditanchor.ErrVerificationUnavailable, context.DeadlineExceeded)
+					}
+					return nil
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			client, stop := startServer(t, server, clientSigner)
+			defer stop()
+			receive, err := client.NewSession()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var stderr bytes.Buffer
+			receive.Stderr = &stderr
+			if err := receive.Run("git-receive-pack '/example.git'"); err == nil {
+				t.Fatal("unverified mutation accepted")
+			}
+			if !strings.Contains(stderr.String(), "retry the push") || strings.Contains(stderr.String(), "audit integrity") || mutations.Load() != 0 {
+				t.Fatalf("timeout must refuse without implying corruption: mutations=%d stderr=%q", mutations.Load(), stderr.String())
+			}
+		})
 	}
 }
 

@@ -21,7 +21,7 @@ server patch with Kubernetes strategic merge. It models only these subsequent
 v4.0.8 mutations at workflowpod.go:417–456, in order:
 
 1. Wrap the main command with the executor's emissary command and fixed log flags.
-2. Mount the wait executor's tmp-dir-argo at `/tmp`, using container index 0
+2. Mount the wait executor's tmp-dir-argo at private scratch, using container index 0
    as the kubelet-facing subpath.
 3. Append the shared `/var/run/argo` mount to main and wait.
 4. Apply workflow Pod labels through the template-resolution helper.

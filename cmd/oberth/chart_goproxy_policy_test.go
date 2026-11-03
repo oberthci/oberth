@@ -27,18 +27,19 @@ type chartPolicyEndpoint struct {
 
 // Render the whole chart so an allowance in any policy participates in the
 // union. Resolve named policy ports against the actual server container ports.
-func renderGoProxyPolicies(t *testing.T, proxyPort int32) ([]networkingv1.NetworkPolicy, chartPolicyEndpoint) {
+func renderGoProxyPolicies(t *testing.T, proxyPort int32, extra ...string) ([]networkingv1.NetworkPolicy, chartPolicyEndpoint) {
 	t.Helper()
-	out, err := exec.Command("helm", "template", "policy-test", "../../charts/oberth",
+	args := []string{"template", "policy-test", "../../charts/oberth",
 		"--namespace", "server-system",
-		"--set", "image.ref=example.invalid/oberth@"+goProxyDigest,
+		"--set", "image.ref=example.invalid/oberth@" + goProxyDigest,
 		"--set", "argo.namespace=pipeline-system",
 		"--set", "argo.goProxy.enabled=true",
 		"--set", fmt.Sprintf("argo.goProxy.port=%d", proxyPort),
 		"--set", "argo.goProxy.modulePrefix=go.example.test",
 		"--set", "argo.goProxy.upstream=forge",
 		"--set", "argo.goProxy.organization=example",
-	).CombinedOutput()
+	}
+	out, err := exec.CommandContext(t.Context(), "helm", append(args, extra...)...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("render chart: %v\n%s", err, out)
 	}

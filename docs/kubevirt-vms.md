@@ -274,7 +274,9 @@ Retain this ConfigMap across restarts and rollbacks. Never use Helm
 loses pending reservation state.
 The server's separate Role grants VMI create/get and only fixed-name ledger
 get/update; it has no ConfigMap create permission. The frozen Argo Role stays
-unchanged. No hostPath, new Pod privilege or pipeline create permission is added.
+unchanged; its [explicit ownership migration](argo-role-migration.md) preserves
+PVC update for source-claim adoption and list for orphan cleanup. No hostPath,
+new Pod privilege or pipeline create permission is added.
 
 **Drain legacy resource-based VMI workflows before upgrading.** Adoption now
 refuses a VMI Workflow without a server quota binding immediately. Old

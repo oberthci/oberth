@@ -63,7 +63,7 @@ func TestMutationGateDeadlineBoundsExternalWork(t *testing.T) {
 	continuity.reconcile = nil
 	// Give the lock-reuse probe a scaled normal gate budget so reader startup on
 	// a loaded host cannot obscure whether the expired attempt released it.
-	manager.gateTimeout = testtimeout.Start(defaultGateTimeout)
+	manager.gateTimeout = testtimeout.Start(DefaultGateTimeout)
 	if err := manager.AllowMutation(t.Context()); err != nil {
 		t.Fatalf("deadline failed to release refresh lock: %v", err)
 	}
@@ -105,10 +105,16 @@ func TestMutationGateDeadlineBoundsRefreshQueue(t *testing.T) {
 
 func TestMutationGateTimeoutDefaultAndValidation(t *testing.T) {
 	manager, _ := deadlineTestManager(t, 0)
-	if manager.gateTimeout != 30*time.Second {
+	if manager.gateTimeout != 2*time.Minute {
 		t.Fatalf("default gate timeout = %s", manager.gateTimeout)
+	}
+	if manager.gateVerifyTimeout != 45*time.Second {
+		t.Fatalf("default verification timeout = %s", manager.gateVerifyTimeout)
 	}
 	if _, err := NewManager(ManagerConfig{Store: manager.store, Interval: time.Minute, MaxAge: time.Hour, GateTimeout: -time.Second}); err == nil {
 		t.Fatal("negative timeout accepted")
+	}
+	if _, err := NewManager(ManagerConfig{Store: manager.store, Interval: time.Minute, MaxAge: time.Hour, GateVerifyTimeout: -time.Second}); err == nil {
+		t.Fatal("negative verification timeout accepted")
 	}
 }

@@ -41,7 +41,7 @@ func restrictedReleaseScript(t *testing.T, source, destination string, scanner b
 	for _, name := range []string{"go", "grype", "cosign", "crane", "helm", "trivy", "apko", "node", "npm", "npx", "wrangler"} {
 		fmt.Fprintf(&prelude, "%s() { printf 'forbidden bare tool: %s\\n' >&2; return 127; }\n", name, name)
 	}
-	body := strings.ReplaceAll(string(raw), "/work/src/scripts/release-wif-credential.py", filepath.Join(filepath.Dir(destination), "scripts", "release-wif-credential.py"))
+	body := strings.ReplaceAll(string(raw), "/work/src/scripts/oberth-release-wif-credential.py", filepath.Join(filepath.Dir(destination), "scripts", "oberth-release-wif-credential.py"))
 	body = strings.ReplaceAll(body, "ssh-keyscan -t ", `"$FIXTURE_ROOT/bin/ssh-keyscan" -t `)
 	body = strings.ReplaceAll(body, "ssh-keygen -lf ", `"$FIXTURE_ROOT/bin/ssh-keygen" -lf `)
 	if err := os.MkdirAll(filepath.Dir(destination), 0700); err != nil {
@@ -141,7 +141,7 @@ printf 'inert fixture image\n' >"$last"`)
 		t.Fatal(err)
 	}
 	f.absolute(filepath.Join(f.root, "bin/oberth-release-support"), strings.Replace(string(support), "{'publish-images':", "{'publish-kvm-harness': 'source-image-delegator', 'publish-images':", 1), 0700)
-	f.write("scripts/release-wif-credential.py", "import json,sys\nassert sys.argv[1:]==['get']\nassert sys.stdin.read().strip()=='europe-west4-docker.pkg.dev'\nprint(json.dumps({'Username':'oauth2accesstoken','Secret':'synthetic-wif-token'}))\n")
+	f.write("scripts/oberth-release-wif-credential.py", "import json,sys\nassert sys.argv[1:]==['get']\nassert sys.stdin.read().strip()=='europe-west4-docker.pkg.dev'\nprint(json.dumps({'Username':'oauth2accesstoken','Secret':'synthetic-wif-token'}))\n")
 	f.env = append(f.env, "GO="+filepath.Join(f.root, "bin/go"))
 	return f
 }

@@ -45,6 +45,11 @@ func runResourceGrant(ctx context.Context, arguments []string, output io.Writer)
 		repo, rest = rest[0], rest[1:]
 	}
 	if err := flags.Parse(rest); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			flags.SetOutput(output)
+			flags.Usage()
+			return nil
+		}
 		return fmt.Errorf("%w: %w", errUsage, err)
 	}
 	if repo == "" && flags.NArg() == 1 {

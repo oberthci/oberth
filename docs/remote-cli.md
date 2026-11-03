@@ -237,9 +237,9 @@ Run/log tool reads have a 10s server budget including scope and DB-pool waits;
 optional live scheduling observation has its existing 2s sub-budget. Bearer
 authentication has a separate 5s budget for fresh identity/scopes/revocation.
 A due `last_used_at` update is best-effort telemetry, queued to one background
-worker with at most 64 queued distinct tokens plus one in flight per Store.
+background task with at most 64 queued distinct tokens plus one in flight per Store.
 Pending IDs are deduplicated, so repeated use of one token cannot fill the queue.
-The worker records the accepted request's use time, not the delayed commit time,
+The background task records the accepted request's use time, not the delayed commit time,
 and does only an UPDATE; it never consumes authentication slots or readers.
 Authentication does not wait for telemetry's writer slot or commit. A full queue,
 failed update or shutdown can drop telemetry. A failed update suppresses all
@@ -257,7 +257,7 @@ conditional so concurrent requests write the timestamp at most once per minute.
 The administrator metrics endpoint exposes `oberth_token_use_attempts_total`,
 `oberth_token_use_failures_total`, `oberth_token_use_queue_drops_total` and
 `oberth_token_use_cooldown_drops_total`, without token identifiers.
-The worker is canceled and joined when the Store closes; a worker inside SQLite's
+The background task is canceled and joined when the Store closes; a background task inside SQLite's
 external busy wait may still take up to the busy timeout to return. Failed
 authority reads, including non-context database errors, fail closed with
 retryable HTTP 503. Only invalid credentials receive an invalid-token HTTP 401.

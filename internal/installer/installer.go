@@ -187,8 +187,8 @@ type Config struct {
 	// created, must not be replaced by a stale one in a file.
 	ValuesFiles []string
 	// NetworkPolicy controls pipeline egress NetworkPolicy enforcement:
-	// "auto" (default) enables on all CNIs except k3s's built-in kube-router
-	// (which has a DNAT incompatibility), "true" forces on, "false" forces off.
+	// "auto" enables for a new release, including k3s, and preserves a live
+	// release's choice. "true" forces on; "false" explicitly disables isolation.
 	NetworkPolicy           string
 	PushBannerURL           string
 	PushBannerURLSet        bool
@@ -241,7 +241,7 @@ type Config struct {
 	// (e.g., "github.com/acme"). When set, onboarding uses it
 	// instead of prompting.
 	ForgeURL string
-	// UplinkIdentity is the uplink identity (e.g., "admin@laptop") from the
+	// UplinkIdentity is the uplink identity (e.g., "admin@workstation") from the
 	// TUI wizard. When set alongside SSHPublicKeyPath, onboarding uses it
 	// instead of prompting.
 	UplinkIdentity string
@@ -763,6 +763,9 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	}
 
 	cfg.serverPKI = cfg.serverPKI || cfg.InstallSecretStore
+	if err := preflightPodSecurity(ctx, cfg, deps, false); err != nil {
+		return err
+	}
 
 	// The installer's own access path is the NodePorts (30022/30443). A
 	// LoadBalancer Service on k3s makes servicelb take host ports 2222 and
@@ -791,6 +794,11 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 
 	if cfg.DryRun {
 		return printDryRunPlan(cfg, deps.Output, cluster)
+	}
+	// Helm --create-namespace cannot attach PSA labels. Create only missing
+	// server/pipeline namespaces ourselves, with the required policy explicit.
+	if err := preflightPodSecurity(ctx, cfg, deps, true); err != nil {
+		return err
 	}
 
 	// Before anything is installed: naming an address the kept TLS identity will
@@ -971,7 +979,7 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 		tw.RegisterContent(item.Name, "secret store", item.Status+" ready")
 	}
 	if cfg.NetworkPolicy == "false" {
-		tw.RegisterContent("Network policy", "disabled (kube-router)", "⚠ warn")
+		tw.RegisterContent("Network policy", "disabled (configured)", "⚠ warn")
 	}
 	tw.WriteHeader()
 
@@ -1029,7 +1037,7 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 
 	// Network policy warning row.
 	if cfg.NetworkPolicy == "false" {
-		tw.WriteRow("Network policy", "disabled (kube-router)", "⚠ warn")
+		tw.WriteRow("Network policy", "disabled (configured)", "⚠ warn")
 	}
 
 	// Close the table visually — AppendRow will erase and redraw the border

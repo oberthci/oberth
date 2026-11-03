@@ -47,22 +47,6 @@ The resulting DNS subdomain fits the 253-character object-name limit. */ -}}
 {{- end -}}
 {{- end }}
 
-{{- define "oberth.tlsSecretName" -}}
-{{- if .Values.tls.existingSecret -}}
-{{ .Values.tls.existingSecret }}
-{{- else -}}
-{{ include "oberth.fullname" . }}-tls
-{{- end -}}
-{{- end }}
-
-{{- define "oberth.hostKeySecretName" -}}
-{{- if .Values.ssh.hostKey.existingSecret -}}
-{{ .Values.ssh.hostKey.existingSecret }}
-{{- else -}}
-{{ include "oberth.fullname" . }}-ssh-host-key
-{{- end -}}
-{{- end }}
-
 {{- /* --reuse-values may contain no utilityImage on pre-scratch releases.
 Keep this fallback in sync with values.yaml and containerimage.Utility. */ -}}
 {{- define "oberth.utilityImage" -}}

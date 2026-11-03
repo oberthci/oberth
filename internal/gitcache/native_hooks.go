@@ -138,7 +138,12 @@ func (c *Cache) nativeUpdate(ctx context.Context, ref, old, newSHA string) error
 		}
 		if !zeroHookOID(old) && !zeroHookOID(newSHA) {
 			head, err := c.capture(ctx, "", "symbolic-ref", "--quiet", "HEAD")
-			if err == nil && strings.TrimSpace(head) == ref {
+			// Failure to identify the default branch cannot grant permission
+			// to rewrite it. A detached or unreadable HEAD requires repair.
+			if err != nil || !strings.HasPrefix(strings.TrimSpace(head), "refs/heads/") {
+				return errors.New("default branch is unavailable; branch update refused")
+			}
+			if strings.TrimSpace(head) == ref {
 				if err := c.run(ctx, commandSpec{args: []string{"merge-base", "--is-ancestor", old, newSHA}}); err != nil {
 					return errors.New("non-fast-forward push to default branch")
 				}

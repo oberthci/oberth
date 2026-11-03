@@ -26,7 +26,7 @@ func TestOberthPipelinesFitLCeiling(t *testing.T) {
 }
 
 // Execute the real clean-environment bootstrap with a harmless observer. This
-// checks that worker/heap bounds reach Go after inherited environment is wiped.
+// checks that background task/heap bounds reach Go after inherited environment is wiped.
 func TestOberthReleaseGoWorkersAreBounded(t *testing.T) {
 	workflow, err := argoworkflow.Decode(loadPipeline(t, "release.yaml"))
 	if err != nil {

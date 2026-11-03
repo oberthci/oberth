@@ -95,6 +95,9 @@ func runUpstream(ctx context.Context, arguments []string, output io.Writer) erro
 			mutationGate: requestLiveAdminMutationGate,
 		})
 	}
+	if arguments[0] == "provide-key" && len(arguments) == 2 && (arguments[1] == "--help" || arguments[1] == "-h") {
+		return runUpstreamProvideKey(ctx, arguments[1:], nil, output, upstreamDependencies{})
+	}
 	// "upstream add" and "upstream provide-key" need a Kubernetes client.
 	// Try in-cluster config first (running inside the pod). When that fails,
 	// fall back to the host kubeconfig for "add" only; provide-key is pod-only.

@@ -34,13 +34,19 @@ spec:
   policyTypes:
     - Egress
   egress:
-    # DNS resolution (UDP and TCP). Targets any destination so the policy is
-    # not coupled to the CoreDNS ClusterIP or its namespace placement.
+    # Namespace-scoped DNS (UDP and TCP), independent of the resolver's IP.
+    # Host-networked/node-local resolvers need the explicit any-destination opt-out.
     - ports:
         - port: 53
           protocol: UDP
         - port: 53
           protocol: TCP
+      {{- if not .Values.networkPolicy.dnsAnyDestination }}
+      to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.dnsNamespace | default "kube-system" | quote }}
+      {{- end }}
     # HTTPS outbound: container registries, object storage, module proxy,
     # GitHub, Trivy DB, and the Kubernetes API server (Argo emissary).
     # No destination restriction — ipBlock cannot match cluster-internal IPs

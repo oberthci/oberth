@@ -12,7 +12,7 @@ TOOLS = frozenset(('cosign', 'helm', 'trivy', 'oberth-release-support', 'oberth-
 SOURCE_FILES = (
     '.oberth/release.sh', '.oberth/pins/bootstrap-tools.sha256',
                 '.oberth/pins/release-cosign.pub', '.oberth/verify-release-tools.py',
-    'scripts/release-wif-credential.py')
+    'scripts/oberth-release-wif-credential.py')
 
 
 class VerificationError(Exception):

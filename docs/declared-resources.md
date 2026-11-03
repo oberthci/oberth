@@ -96,7 +96,7 @@ finalization use the same code.
 After deployment, run branch CI, inspect its resource history, then commit any
 resource/deadline changes in the owning workflow alongside the code change.
 For example, `oberth run resources --repo repo-01 --step step-abc12345 --yaml`.
-The anonymised laptop table remains unchanged and cannot supply suggestions
+The anonymised comparison table remains unchanged and cannot supply suggestions
 where attempt identity is ambiguous.
 
 ## Admission reservation

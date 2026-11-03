@@ -14,7 +14,7 @@ import (
 // Kubernetes exec authorization, a public-path allowlist and the process UID govern access.
 func runAdmin(ctx context.Context, arguments []string, output io.Writer) error {
 	if len(arguments) == 1 && (arguments[0] == "--help" || arguments[0] == "-h") {
-		_, err := fmt.Fprintln(output, "Usage: oberth admin read-file <public-identity-path> [fallback-path]\nRead allowed public identity files inside the Oberth pod.")
+		_, err := fmt.Fprintln(output, "Usage: oberth admin read-file <public-identity-path> [fallback-path]\n       oberth admin retirement-check [--database path]\nRead allowed public identity files or check legacy-removal prerequisites inside the Oberth pod.")
 		return err
 	}
 
@@ -22,7 +22,13 @@ func runAdmin(ctx context.Context, arguments []string, output io.Writer) error {
 		return fmt.Errorf("%w: admin read-file <public-identity-path> [fallback-path]", errUsage)
 	}
 	switch arguments[0] {
+	case "retirement-check":
+		return runRetirementCheck(ctx, arguments[1:], output)
 	case "read-file":
+		if len(arguments) == 2 && (arguments[1] == "--help" || arguments[1] == "-h") {
+			_, err := fmt.Fprintln(output, "Usage: oberth admin read-file <public-identity-path> [fallback-path]\nRead allowed public identity files inside the Oberth pod.")
+			return err
+		}
 		if len(arguments) < 2 {
 			return fmt.Errorf("%w: admin read-file requires at least one absolute path", errUsage)
 		}

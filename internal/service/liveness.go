@@ -22,7 +22,7 @@ func (scheduler *Scheduler) Live() error {
 }
 
 // Live checks every queued promotion independently, so one busy queue cannot
-// mask a wedged worker in another. Planning/delivery use external services and
+// mask a wedged background task in another. Planning/delivery use external services and
 // are not included in the local queue-wait heartbeat.
 func (service *API) Live() error { return service.liveAt(time.Now()) }
 
@@ -40,7 +40,7 @@ func (service *API) liveAt(now time.Time) error {
 
 type dispatchProgressKey struct{}
 
-// Only the dispatch goroutine receives this context; run workers must never
+// Only the dispatch goroutine receives this context; run background tasks must never
 // renew or suspend the dispatch heartbeat on its behalf.
 func withDispatchProgress(ctx context.Context, heartbeat *liveness.Heartbeat) context.Context {
 	return context.WithValue(ctx, dispatchProgressKey{}, heartbeat)
@@ -98,7 +98,7 @@ func (scheduler *Scheduler) awaitDispatchAdmission(ctx context.Context) error {
 }
 
 // runDispatchExternal excludes one external call. Keep local DB work and
-// worker locks outside this scope so they can still time out as real wedges.
+// background task locks outside this scope so they can still time out as real wedges.
 func runDispatchExternal(ctx context.Context, operation func(context.Context) error) error {
 	resume := suspendDispatch(ctx)
 	defer resume()
@@ -106,7 +106,7 @@ func runDispatchExternal(ctx context.Context, operation func(context.Context) er
 }
 
 // WalkLiveness exposes only process-local progress snapshots to the background
-// logger; it never takes worker locks or probes dependencies.
+// logger; it never takes background task locks or probes dependencies.
 func (scheduler *Scheduler) WalkLiveness(visit func(string, *liveness.Heartbeat)) {
 	visit("scheduler", &scheduler.dispatchProgress)
 	visit("admission persistence", &scheduler.headProgress)

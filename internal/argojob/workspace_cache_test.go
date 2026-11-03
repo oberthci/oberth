@@ -249,7 +249,7 @@ func trivyLeafWithMode(name, cacheDir, mode string) wfv1.Template {
 	return tmpl
 }
 
-// cache leaves do not receive the work-VCT trivy mount, so /tmp caches are
+// cache leaves do not receive the work-VCT trivy mount, so private scratch caches are
 // private; but a --cache-dir inside the persistent cache is shared by every
 // leaf that keeps it (cache, readonly, or default) and needs an edge.
 func TestTrivyGuardWorkspaceCache(t *testing.T) {

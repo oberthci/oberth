@@ -31,12 +31,12 @@ The token is never stored or recoverable. If lost, create a new uplink.
 ### Limit an uplink to some upstreams
 
 An uplink normally sees every repository. `--scope` limits it to the
-repositories of named upstreams, for example a work laptop that may see the
+repositories of named upstreams, for example a development machine that may see the
 `github` upstream and nothing else:
 
 ```bash
 kubectl exec -i -n oberth deploy/oberth -- \
-  oberth uplink add --scope github - laptop@work < laptop.pub
+  oberth uplink add --scope github - developer@work < developer.pub
 ```
 
 A scope is an upstream name as `oberth upstream list` shows it; repeat
@@ -56,8 +56,8 @@ A scope is an upstream name as `oberth upstream list` shows it; repeat
 Change or remove the limit later; the token and key stay valid:
 
 ```bash
-kubectl exec -n oberth deploy/oberth -- oberth uplink scope --set github,acme laptop@work
-kubectl exec -n oberth deploy/oberth -- oberth uplink scope --clear laptop@work
+kubectl exec -n oberth deploy/oberth -- oberth uplink scope --set github,acme developer@work
+kubectl exec -n oberth deploy/oberth -- oberth uplink scope --clear developer@work
 ```
 
 `oberth uplink list` shows each uplink's scope (`all` when unscoped), and
@@ -211,7 +211,7 @@ call the proxy hostname directly.
 | `promote_retry` | Retry a failed or interrupted promotion (`id`): a new promotion of the same repo/source SHA/target, merged onto the target's current head and re-tested; a transient push-only failure reuses its exact tested SHA when the target is unchanged. Same authorization as `promote`; the original grant still authorizes it, because a grant is consumed only by a delivered promotion. Audited as `promotion.retry` |
 | `publication_abandon` | Admin only, unscoped: abandon a pending publication by full publication `id` with a required `reason`. The audited transaction marks the intent `abandoned`, its run `failed/abandoned`, and its promotion failed. It never pushes; earlier ambiguous pushes may already be upstream. Terminal intents are refused and abandoned intents cannot be reactivated. CLI: `oberth publication abandon <publication-id> --reason "stop delivery"` |
 | `publish_retry` | Retry upstream publication for a branch or tag run whose burns passed but whose upstream push failed, including exhausted infrastructure failures. Transient errors get five durable attempts with 2/4/8/16-minute backoff, and pending responses say queued; a promotion is retried with `promote_retry` instead |
-| `issue_create` | Create a manual issue, workspace-global or filed under one `upstream` |
+| `issue_create` | Create a manual issue, installation-wide or filed under one `upstream` |
 | `issue_get` | Get an issue by ID; optional `fields` and `body_limit` reduce the response |
 | `issue_get_many` | Get 1..50 issues in request order, with optional `fields`/`body_limit` and explicit missing/size-limit results |
 | `issue_update` | Update an issue title and body or move a manual issue with `upstream`; optional `expected_body_sha256` rejects the update on mismatch; returns a compact acknowledgment |
@@ -589,7 +589,7 @@ Authenticated `GET` endpoints serve the same state as a web dashboard:
 | `/api/status` | System health summary |
 
 Unauthenticated: `/healthz` (compatibility/startup), `/livez` (local writer and
-worker progress), and `/readyz` (startup and serving readiness).
+background task progress), and `/readyz` (startup and serving readiness).
 
 ## Notes
 
@@ -684,11 +684,11 @@ count.
 For the latest 5, 10, or 50 created issues, set `limit` accordingly (1..50).
 Ordering is descending issue ID, not most recently updated. Listing does not
 include bodies. `issue_get`, `issue_list`, and `/api/issues` show `upstream`
-(empty for a workspace-global manual issue).
+(empty for a installation-wide manual issue).
 
 To repair a mis-scoped manual issue without changing its ID, body, appends, or
 history, call `issue_update({"id":1094,"upstream":"github"})`. An admin may
-use an empty `upstream` or `"global"` to make it workspace-global. Other
+use an empty `upstream` or `"global"` to make it installation-wide. Other
 uplinks can only move visible issues to upstreams in their scope; CI issues
 cannot move. The CLI can call the same tool with
 `oberth mcp call issue_update '{"id":1094,"upstream":"github"}'`.
@@ -898,7 +898,10 @@ within that window. Same effective and base priority classes may also coexist
 when the head still fits alongside all surviving grants at its reserved start.
 Unmeasured candidates use only this proven coexistence; lower classes cannot.
 At `max_head_wait_seconds`, new backfill stops and existing grants drain for the
-head. Running work is never preempted.
+head. After five additional minutes (25 minutes with defaults), available-capacity
+backfill and claims resume even without a usable p95 forecast. All reservations
+still count; the head is checked first. This can extend its wait. Strict FIFO
+disables the escape. Running work is never preempted.
 
 For an urgent individual run, call `run_priority` with
 `{"run_id":"<exact ID>","priority":"highest","reason":"release blocker"}`.

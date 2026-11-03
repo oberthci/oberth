@@ -57,7 +57,7 @@ func concurrentGateManager(t *testing.T, mode string) (*Manager, *racingGateStor
 	}
 	t.Cleanup(func() { _ = database.Close() })
 	racing := &racingGateStore{AnchorStore: database}
-	config := ManagerConfig{Store: racing, Interval: time.Minute, MaxAge: time.Hour, GateTimeout: testtimeout.Start(defaultGateTimeout)}
+	config := ManagerConfig{Store: racing, Interval: time.Minute, MaxAge: time.Hour, GateTimeout: testtimeout.Start(DefaultGateTimeout)}
 	if strings.Contains(mode, "timestamp") {
 		config.Authority = &fakeAuthority{now: &now}
 	}
@@ -146,7 +146,7 @@ func TestMutationGateContentionHonorsDeadlineAndCancellation(t *testing.T) {
 			if !errors.Is(err, want) || !errors.Is(err, store.ErrAuditVerificationBusy) || time.Since(started) > testtimeout.Scale(3*time.Second) {
 				t.Fatalf("contention not bounded/classified: attempts=%d elapsed=%s err=%v", racing.calls, time.Since(started), err)
 			}
-			manager.gateTimeout = testtimeout.Start(defaultGateTimeout)
+			manager.gateTimeout = testtimeout.Start(DefaultGateTimeout)
 			racing.afterVerification = nil
 			if err := manager.AllowMutation(t.Context()); err != nil {
 				t.Fatalf("expired gate leaked lock or permission: %v", err)

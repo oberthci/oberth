@@ -1,0 +1,25 @@
+{{- $ingress := .Values.networkPolicy.pipelineIngress | default dict -}}
+{{- if and .Values.networkPolicy.enabled (or (not (hasKey $ingress "enabled")) $ingress.enabled) }}
+# Isolate pipeline listeners from unrelated namespaces and server peers.
+# A namespaceSelector and podSelector in the same peer are an intersection.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "oberth.fullname" . }}-pipeline-ingress
+  namespace: {{ required "argo.namespace is required" .Values.argo.namespace }}
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Release.Namespace | quote }}
+          podSelector:
+            matchLabels:
+              {{- include "oberth.selectorLabels" . | nindent 14 }}
+{{- end }}

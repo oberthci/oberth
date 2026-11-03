@@ -13,7 +13,7 @@ output claim, including through Argo's init and wait containers. The builder
 receives only its intended output claim and its copied tools.
 
 The old server still injects shared cache/artifact mounts. Commands replace
-their environment with `env -i` and use private `/tmp/bootstrap-private`
+their environment with `env -i` and use private bootstrap scratch
 caches, ignoring those mounts. Credentialed commands use system PATH and
 absolute publisher executable paths. An init container verifies publisher
 source blobs against the admitted commit/tag and checks all five executable
@@ -60,7 +60,7 @@ official v0.73.0 image. Every credentialed leaf checks all five pins.
 
 GAR actions use release-only Workload Identity Federation (WIF), selected by
 `oberth.ci/release-wif-role` on the admitted leaf. The public
-`scripts/release-wif-credential.py` helper exchanges the projected JWT at Google
+`scripts/oberth-release-wif-credential.py` helper exchanges the projected JWT at Google
 STS, impersonates the administrator-configured source principal, then delegates
 to the matching Oberth principal. Final accounts below belong to
 `skipopsmain.iam.gserviceaccount.com`; source placeholders refer to full service
@@ -86,7 +86,7 @@ Google enforces the existing matching TokenCreator and repository IAM bindings; 
 read-only. HTTPS uses verified TLS 1.3, without redirects or proxies. A failed
 exchange is fatal, with no fallback to another role or a static key.
 
-Before the next release, the coordinator must retain/set these existing keys in
+Before the next release, the administrator must retain/set these existing keys in
 **operator-owned** Helm values (`argo.releaseWIF.roles`) or the administrator JSON
 file passed to `--argo-release-wif-config` (`roles`):
 
@@ -109,7 +109,7 @@ The helper accepts any source account matching the strict endpoint pattern;
 Google's existing WIF and IAM bindings enforce first-hop role permissions.
 The final Oberth target remains fixed by the validated pool, and ADC cannot
 override it. Confirm intended exchanges and provider-enforced cross-role
-refusal in the next coordinator-authorized live release; offline tests cannot
+refusal in the next administrator-authorized live release; offline tests cannot
 prove IAM bindings.
 
 Only the final token reaches the private Docker credential-helper pipe.

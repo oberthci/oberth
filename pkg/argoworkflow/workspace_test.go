@@ -43,7 +43,7 @@ func TestAdmitKVMRefusesWorkspaceCache(t *testing.T) {
 	}
 }
 
-// Nonroot leaves move their Go caches into a private /tmp volume and never
+// Nonroot leaves move their Go caches into a private scratch volume and never
 // mount the host cache; a cache request would be silently void, so it is
 // refused. none stays admitted.
 func TestAdmitNonrootRefusesWorkspaceCache(t *testing.T) {

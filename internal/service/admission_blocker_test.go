@@ -29,7 +29,7 @@ func TestAnXLHeadIsNamedByEveryRunBehindIt(t *testing.T) {
 	awaitWaiting(t, head)
 	behind := gate.reserve(3)
 	behindReady := make(chan func(), 1)
-	go acquireRequestForTest(behind, blockerRequest("small", 3, "website", "feature/x", pipeline.S), behindReady)
+	go acquireRequestForTest(behind, blockerRequest("small", 3, "example-app", "feature/x", pipeline.S), behindReady)
 	awaitWaiting(t, behind)
 
 	const want = "blocked behind exampleorg-ebpf/promotion/main/335d751c79f3 (XL, needs a full drain)."

@@ -191,7 +191,7 @@ func TestValidateExamplesPassAdmission(t *testing.T) {
 }
 
 // TestReleaseExampleArtifactsOnSharedVolume validates that the go-project
-// release example writes build artifacts to a shared volume (not /tmp),
+// release example writes build artifacts to a shared volume (not private scratch),
 // and that the envconsul config file exists.
 func TestReleaseExampleArtifactsOnSharedVolume(t *testing.T) {
 	t.Parallel()
@@ -200,7 +200,7 @@ func TestReleaseExampleArtifactsOnSharedVolume(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(releaseYAML)
-	// Build output must go to the shared release subPath, not /tmp.
+	// Build output must go to the shared release subPath, not private scratch.
 	if strings.Contains(text, "-o\", \"/tmp/app-linux-amd64") {
 		t.Error("release-build still writes to /tmp (per-pod); must use shared volume")
 	}

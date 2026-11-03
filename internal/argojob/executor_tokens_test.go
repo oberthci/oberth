@@ -22,6 +22,11 @@ import (
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
+// Direct delivery tests isolate token transport from the Wait startup supervisor.
+func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv1.Workflow, delivered map[types.UID]bool) error {
+	return controller.deliverExecutorTokensWithStartup(ctx, wf, delivered, nil)
+}
+
 func TestExecutorIdentityDeliveryUsesSeparateBoundPodAndStdin(t *testing.T) {
 	config := testConfig()
 	config.applyDefaults()

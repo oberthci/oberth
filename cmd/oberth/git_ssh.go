@@ -13,6 +13,12 @@ import (
 )
 
 func runGitSSH(ctx context.Context, arguments []string, input io.ReadCloser, output, diagnostics io.Writer) int {
+	if len(arguments) == 1 && (arguments[0] == "--help" || arguments[0] == "-h") {
+		if _, err := io.WriteString(output, gitSSHHelp); err != nil {
+			return 1
+		}
+		return 0
+	}
 	done, err := bindGitSSHParent()
 	if err != nil {
 		_, _ = fmt.Fprintln(diagnostics, "oberth git-ssh: parent lifetime binding failed")

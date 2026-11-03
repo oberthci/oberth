@@ -26,7 +26,7 @@ import (
 // the same shared volume": a VCT mount, or the server-injected workspace
 // mount when workspace-mounts != none. Matching the --cache-dir string alone
 // would false-positive on a CLI repository whose Trivy leaves use
-// container-private /tmp (workspace-mounts: none).
+// container-private scratch (workspace-mounts: none).
 func trivyGuard(workflow *wfv1.Workflow) error {
 	entrypoint := strings.TrimSpace(workflow.Spec.Entrypoint)
 	if entrypoint == "" {
@@ -171,7 +171,7 @@ func extractTrivyCacheDir(template *wfv1.Template) string {
 //     whether the tier has a cache root configured, so it assumes it does.
 //
 // A cache dir is private when workspace-mounts is "none" or "cache" and the
-// path lands on the per-Pod emptyDir (/tmp), which is what repository-authored
+// path lands on the per-Pod emptyDir (private scratch), which is what repository-authored
 // Trivy leaves use: neither mode injects the work-VCT trivy-cache mount.
 func trivyCacheIsShared(template *wfv1.Template, cacheDir string, hasWorkVCT bool, workflow *wfv1.Workflow) bool {
 	workingDir := "/"

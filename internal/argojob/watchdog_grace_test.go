@@ -26,6 +26,8 @@ func TestDeadlineGuardArgoCompletesInsideWatchdogGrace(t *testing.T) {
 	workflow.Namespace = config.Namespace
 	workflow.CreationTimestamp = metav1.NewTime(time.Now().Add(-time.Hour))
 	workflow.Status.StartedAt = metav1.NewTime(time.Now().Add(-2 * time.Second))
+	// The older Workflow has real scheduled work; this test isolates its execution watchdog.
+	workflow.Status.Nodes["step"] = wfv1.NodeStatus{ID: "step", Type: wfv1.NodeTypePod, Phase: wfv1.NodeRunning, HostNodeName: "worker"}
 	workflow.Spec.ActiveDeadlineSeconds = ptr.To(int64(1))
 	client := wffake.NewSimpleClientset(workflow)
 	reads := 0

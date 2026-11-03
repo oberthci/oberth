@@ -12,8 +12,18 @@ import (
 )
 
 // DefaultMaxHeadWait bounds the window for new backfill. After it expires,
-// existing grants drain for the head; running work is never preempted.
+// existing grants drain for at most maxDrainDuration before backfill resumes.
+// Running work is never preempted and all live grants remain charged.
 const DefaultMaxHeadWait = 20 * time.Minute
+
+// Do not idle spare resources indefinitely behind unknown/overrun grants.
+// This never releases their budget: all current resource and pressure checks
+// still apply, and the head is considered first on every admission pass.
+const maxDrainDuration = 5 * time.Minute
+
+func (gate *weightedAdmission) drainExpiredLocked(head *admissionReservation, now time.Time) bool {
+	return gate.maxHeadWait > 0 && !head.headSince.IsZero() && now.Sub(head.headSince) >= gate.maxHeadWait+maxDrainDuration
+}
 
 // headWaitKey identifies a run's head-wait origin across a restart: a
 // requeued run is a copy with a new ID but the same repository, ref and
@@ -130,7 +140,7 @@ func (gate *weightedAdmission) emitHeadLocked(event headEvent) {
 // backfillEnabledLocked reports whether runs behind this head may still be
 // admitted beside it.
 func (gate *weightedAdmission) backfillEnabledLocked(head *admissionReservation) bool {
-	return gate.maxHeadWait > 0 && !head.headSince.IsZero() && gate.clock().Before(head.headSince.Add(gate.maxHeadWait))
+	return gate.maxHeadWait > 0 && !head.headSince.IsZero() && (gate.clock().Before(head.headSince.Add(gate.maxHeadWait)) || gate.drainExpiredLocked(head, gate.clock()))
 }
 
 // backfillFitsLocked preserves a measured head start within maxHeadWait.
@@ -139,6 +149,10 @@ func (gate *weightedAdmission) backfillEnabledLocked(head *admissionReservation)
 // A candidate must finish strictly before the reserved head start, or leave
 // room for the head at that time. Unmeasured candidates use coexistence only.
 func (gate *weightedAdmission) backfillFitsLocked(head, candidate *admissionReservation, now time.Time) bool {
+	if gate.drainExpiredLocked(head, now) {
+		candidate.backfillMessage = "backfilled: drain limit reached; using available capacity while the head waits"
+		return true
+	}
 	candidate.backfillMessage = "held: would delay head"
 	bound := head.headSince.Add(gate.maxHeadWait)
 	if !gate.backfillEnabledLocked(head) {
@@ -264,7 +278,7 @@ func (gate *weightedAdmission) backfillStateLocked(head *admissionReservation, b
 	blocker.HeadSince = head.headSince
 	blocker.HeadWaitSeconds = int64(now.Sub(head.headSince) / time.Second)
 	blocker.MaxHeadWaitSeconds = int64(gate.maxHeadWait / time.Second)
-	if now.Sub(head.headSince) < gate.maxHeadWait {
+	if now.Sub(head.headSince) < gate.maxHeadWait || gate.drainExpiredLocked(head, now) {
 		blocker.Backfilling = true
 	} else {
 		blocker.Draining = true
@@ -387,7 +401,7 @@ func (scheduler *Scheduler) admissionHistory(ctx context.Context, run model.Run)
 
 // backfillClaimsOpenLocked reports whether the dispatch loop may claim past
 // runs that are waiting only because they are the head or were passed over
-// as backfill candidates, before draining begins. A claim still
+// as backfill candidates, before draining begins or after the drain cap. A claim still
 // preparing could itself fit, so none may be in flight; the waiting claims
 // are bounded by the budget's M-run count, and the caller's run, budget and
 // disk checks still apply.

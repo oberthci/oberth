@@ -1,5 +1,12 @@
 Oberth {{ .Chart.AppVersion }} — {{ .Values.service.type }} Service, {{ if eq .Values.service.type "ClusterIP" }}internal SSH port {{ .Values.service.sshPort }} and HTTPS/MCP port {{ .Values.service.httpsPort }}; no NodePorts are allocated{{ else }}SSH port {{ .Values.service.sshPort }} on NodePort {{ .Values.service.sshNodePort }}, HTTPS/MCP NodePort {{ .Values.service.httpsNodePort }}{{ end }}.
 
+Pod Security Admission: both {{ .Release.Namespace }} (server) and
+{{ .Values.argo.namespace }} (pipelines) require privileged or unenforced PSA.
+The hostPath caches and root cache initializer cannot run under baseline or
+restricted. Set pod-security.kubernetes.io/enforce=privileged on both namespaces
+before applying the chart. An unlabelled namespace can inherit cluster defaults.
+The installer preflights existing namespaces and labels only newly created ones.
+
 1. Register the upstream (interactive — generates and persists the deploy key):
 
      kubectl exec -it -n {{ .Release.Namespace }} deploy/{{ include "oberth.fullname" . }} -- \
@@ -36,9 +43,12 @@ Then set auditAnchor.acceptWitnessGenesis to that exact value for one restart.
 {{- if hasKey .Values "watchTunnel" }}
 WARNING: retired watchTunnel values are ignored. The connector must be managed
 outside Oberth. This upgrade removes the chart connector and its cloudflared
-PriorityClass. The external connector must already own ingress and use an
+PriorityClass. BEFORE upgrading an owning release, annotate needed live objects
+helm.sh/resource-policy=keep and verify the annotations. The external connector
+must already own ingress and use an
 externally managed PriorityClass or omit priorityClassName. See the staged
-rollout procedure in docs/releases/unreleased-execution-retirement.md.
+rollout procedure in docs/ownership-handoff.md. The checked upgrade path requires
+--ownership-handoff proof before removing core ownership.
 {{- end }}
 
 The VM execution path, guest-test injection and .oberth/tests.yaml are deprecated

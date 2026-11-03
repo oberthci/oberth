@@ -20,6 +20,11 @@ FRAGMENT_DIGESTS = {
         'de3fa92e1bec4d9540740be90cee4f04c71c93f3a329d6f4caf5b46493b3cda4',
     },
 }
+# Short retired identifiers are matched within individual tokens: joining
+# ordinary prose words can otherwise produce accidental matches.
+IDENTIFIER_DIGESTS = {'8a62e967fcd6dfa5d75308c37808b4668a7faf1cdb06e09ac0a7161827603887'}
+IDENTIFIER_TOKEN = re.compile(rb"[A-Za-z0-9]+")
+
 INSTANCE_DIGESTS = {
     6: {
         '38a5015a3b8ccd8f080fe05a085be6395a210e4dad37390c42f647f1329afe4a',
@@ -67,6 +72,13 @@ def digest(value):
 
 
 def forbidden(data, allow_legacy=False):
+    decoded = HEX_ESCAPE.sub(lambda m: bytes([int(m[1] or m[2], 16)]), data)
+    for view in (decoded, LITERAL_JOIN.sub(b'', decoded)):
+        for token in IDENTIFIER_TOKEN.findall(view):
+            token = token.lower()
+            if any(digest(token[i:i + 6]) in IDENTIFIER_DIGESTS
+                   for i in range(len(token) - 5)):
+                return True
     data = normalize(data)
     joined = LITERAL_JOIN.sub(b'', data)
     # Inspect both views: joining a list of complete labels must not hide one
@@ -126,8 +138,10 @@ def check(root):
     bad = []
     for path in filter(None, paths):
         name = path.decode()
-        if (forbidden(path) or
-                forbidden((root / name).read_bytes(), allow_legacy=name in LEGACY_FILES)):
+        data = (root / name).read_bytes()
+        owns_publication_pins = name != 'scripts/oberth-release-wif-credential.py' or b"Oberth project's publication identities" in data
+        if (not owns_publication_pins or forbidden(path) or
+                forbidden(data, allow_legacy=name in LEGACY_FILES)):
             bad.append(path.decode(errors='replace'))
     if bad:
         print('Non-generic names or workstation paths found in tracked files:', file=sys.stderr)

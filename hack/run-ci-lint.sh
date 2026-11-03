@@ -1,5 +1,5 @@
 #!/bin/sh
-# golangci-lint's analysis workers do not share its --timeout context.
+# golangci-lint's analysis background tasks do not share its --timeout context.
 # Keep a process-group deadline outside the tool, with a bounded TERM grace.
 set -eu
 # The server supplies OBERTH_CACHE_DIR only with a repository/tier-scoped,

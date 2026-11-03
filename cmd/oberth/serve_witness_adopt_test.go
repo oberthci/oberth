@@ -456,6 +456,8 @@ func minimalValidServeOptions() serveOptions {
 		gcInterval:              24 * time.Hour,
 		auditAnchorInterval:     10 * time.Minute,
 		auditAnchorMaxAge:       30 * time.Minute,
+		auditGateTimeout:        auditanchor.DefaultGateTimeout,
+		auditGateVerifyTimeout:  auditanchor.DefaultGateVerifyTimeout,
 		argoNamespace:           "oberth-argo",
 		argoPipelineAccount:     "oberth-argo-pipeline",
 		argoCredentialedAccount: "oberth-argo-credentialed",
