@@ -1,0 +1,206 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/utils/ptr"
+
+	"github.com/oberthci/oberth/internal/argojob"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
+	"github.com/oberthci/oberth/pkg/pipeline"
+)
+
+// Exercise the CLI and the server's actual Build entrypoint with identical
+// documents. Approved paths and identities are fixture data, so a refusal must
+// come from document admission rather than unavailable server state.
+func TestValidateRuntimeAdmissionParity(t *testing.T) {
+	const secretPath = "oberth/upstream/acme/project/ci-secret"
+	const document = `apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  annotations:
+    oberth.ci/size: S
+spec:
+  entrypoint: unit
+  activeDeadlineSeconds: 600
+  templates:
+    - name: unit
+      container:
+        image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        command: [/bin/true]
+`
+	base, err := argoworkflow.Decode([]byte(document))
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential := func(wf *wfv1.Workflow) {
+		wf.Annotations[argoworkflow.SecretPathsAnnotation] = secretPath
+		wf.Spec.Templates[0].Container.Command = []string{"oberth", "secretstore", "exec", "--path=" + secretPath, "--", "/bin/true"}
+	}
+	mounts := func(wf *wfv1.Workflow, mode string) {
+		wf.Spec.Templates[0].Metadata.Annotations = map[string]string{argoworkflow.WorkspaceMountsAnnotation: mode}
+	}
+	trivy := func(wf *wfv1.Workflow, mode, cache, depends string, inline bool) {
+		leaf := wf.Spec.Templates[0].DeepCopy()
+		leaf.Name = "scan"
+		leaf.Metadata.Annotations = map[string]string{argoworkflow.WorkspaceMountsAnnotation: mode}
+		leaf.Container.Command = []string{"trivy", "fs", "--cache-dir", cache, "."}
+		a := wfv1.DAGTask{Name: "scan-a", Template: leaf.Name}
+		b := wfv1.DAGTask{Name: "scan-b", Template: leaf.Name, Depends: depends}
+		if inline {
+			a.Template, b.Template = "", ""
+			a.Inline, b.Inline = leaf.DeepCopy(), leaf.DeepCopy()
+		}
+		wf.Spec.Templates = []wfv1.Template{{Name: "unit", DAG: &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{a, b}}}}
+		if !inline {
+			wf.Spec.Templates = append(wf.Spec.Templates, *leaf)
+		}
+	}
+	for _, tc := range []struct {
+		name    string
+		trigger pipeline.Trigger
+		mutate  func(*wfv1.Workflow)
+		refusal string
+	}{
+		{"plain", pipeline.TriggerCI, func(*wfv1.Workflow) {}, ""},
+		{"tokenless-cache", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			mounts(wf, "cache")
+			wf.Spec.Templates[0].AutomountServiceAccountToken = ptr.To(false)
+		}, ""},
+		{"credentialed-ci-cache", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			credential(wf)
+			mounts(wf, "cache")
+		}, "cannot use oberth.ci/workspace-mounts: cache on the CI tier"},
+		{"credentialed-ci-none", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			credential(wf)
+			mounts(wf, "none")
+		}, ""},
+		{"credentialed-release-cache", pipeline.TriggerRelease, func(wf *wfv1.Workflow) {
+			credential(wf)
+			mounts(wf, "cache")
+		}, ""},
+		{"tokenless-credential-chain", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			credential(wf)
+			wf.Spec.Templates[0].AutomountServiceAccountToken = ptr.To(false)
+		}, "disables its service-account token but invokes a credential chain"},
+		{"workflow-token-opt-out", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			credential(wf)
+			wf.Spec.AutomountServiceAccountToken = ptr.To(false)
+			wf.Spec.Templates[0].AutomountServiceAccountToken = ptr.To(true)
+		}, "disables its service-account token but invokes a credential chain"},
+		{"defaults-token-opt-out", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			credential(wf)
+			wf.Spec.TemplateDefaults = &wfv1.Template{AutomountServiceAccountToken: ptr.To(false)}
+			wf.Spec.Templates[0].AutomountServiceAccountToken = ptr.To(true)
+		}, "disables its service-account token but invokes a credential chain"},
+		{"inline-parent-token-opt-out", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			credential(wf)
+			leaf := wf.Spec.Templates[0].DeepCopy()
+			leaf.AutomountServiceAccountToken = ptr.To(true)
+			wf.Spec.Templates = []wfv1.Template{{Name: "unit", AutomountServiceAccountToken: ptr.To(false),
+				DAG: &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{{Name: "exec", Inline: leaf}}}}}
+		}, "disables its service-account token but invokes a credential chain"},
+		{"script-credentialed-cache", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			credential(wf)
+			mounts(wf, "cache")
+			leaf := &wf.Spec.Templates[0]
+			leaf.Script = &wfv1.ScriptTemplate{Container: *leaf.Container, Source: "true"}
+			leaf.Container = nil
+		}, "cannot use oberth.ci/workspace-mounts: cache on the CI tier"},
+		{"containerset-isolation-with-defaults", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			mounts(wf, "cache")
+			wf.Spec.TemplateDefaults = &wfv1.Template{}
+			leaf := &wf.Spec.Templates[0]
+			leaf.Container.Name = "main"
+			leaf.ContainerSet = &wfv1.ContainerSetTemplate{Containers: []wfv1.ContainerNode{{Container: *leaf.Container}}}
+			leaf.Container = nil
+		}, "requests workspace isolation with templateDefaults"},
+		{"isolation-with-defaults", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			mounts(wf, "none")
+			wf.Spec.TemplateDefaults = &wfv1.Template{}
+		}, "requests workspace isolation with templateDefaults"},
+		{"controls-on-dag", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			trivy(wf, "none", "/tmp/trivy", "", false)
+			mounts(wf, "none")
+		}, "must declare workspace controls on each Pod leaf"},
+		{"controls-on-defaults", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			wf.Spec.TemplateDefaults = &wfv1.Template{Metadata: wfv1.Metadata{Annotations: map[string]string{argoworkflow.WorkspaceMountsAnnotation: "none"}}}
+		}, "workspace isolation must be declared on templates, not templateDefaults"},
+		{"mounts-on-defaults", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			wf.Spec.TemplateDefaults = &wfv1.Template{Container: wf.Spec.Templates[0].Container.DeepCopy()}
+			wf.Spec.TemplateDefaults.Container.VolumeMounts = []corev1.VolumeMount{{Name: "work", MountPath: "/work"}}
+		}, "templateDefaults volumeMounts are not admitted"},
+		{"trivy-unordered-shared", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			trivy(wf, "cache", argojob.CacheMountPath+"/trivy", "", false)
+		}, "but have no ordering edge between them"},
+		{"trivy-unordered-inline", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			trivy(wf, "cache", argojob.CacheMountPath+"/trivy", "", true)
+		}, "but have no ordering edge between them"},
+		{"trivy-ordered-shared", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			trivy(wf, "cache", argojob.CacheMountPath+"/trivy", "scan-a.Succeeded", false)
+		}, ""},
+		{"trivy-private-cache", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			trivy(wf, "cache", "/tmp/trivy", "", false)
+		}, ""},
+		{"trivy-no-workspace", pipeline.TriggerCI, func(wf *wfv1.Workflow) {
+			trivy(wf, "none", argojob.CacheMountPath+"/trivy", "", false)
+		}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wf := base.DeepCopy()
+			tc.mutate(wf)
+			source, err := json.Marshal(wf)
+			if err != nil {
+				t.Fatal(err)
+			}
+			config := argojob.Config{
+				Namespace: "pipelines", PipelineServiceAccount: "pipeline", CredentialedServiceAccount: "release",
+				CISecretsServiceAccount: "ci-secrets", ExecutorServiceAccount: "executor",
+				VaultAddress: "https://vault.example.com", VaultCredentialedRole: "release", VaultCISecretsRole: "ci-secrets",
+				PerRepoIdentities:   map[string]argojob.PerRepoIdentityConfig{"github/acme/project": {ServiceAccountName: "project-release"}},
+				PerRepoCIIdentities: map[string]argojob.PerRepoIdentityConfig{"github/acme/project": {ServiceAccountName: "project-ci"}},
+			}
+			request := argojob.Request{
+				RunID: "parity", RepositoryID: 1, Name: "parity", Repo: "project", UpstreamName: "github", UpstreamOrg: "acme",
+				Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), Trigger: tc.trigger, Source: source,
+				ApprovedSecrets: map[string]bool{secretPath: true},
+				SourceVolume:    argojob.SourceVolume{ClaimName: "source", SubPath: "src", BinarySubPath: "bin"},
+			}
+			root := writeConsumer(t, document)
+			file := "build.yaml"
+			if tc.trigger == pipeline.TriggerRelease {
+				file = "release.yaml"
+				request.Ref = "refs/tags/v1.0.0"
+			}
+			if err := os.WriteFile(filepath.Join(root, ".oberth", file), source, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, serverErr := argojob.Build(config, request)
+			var output bytes.Buffer
+			cliErr := runValidate(context.Background(), []string{root}, &output)
+			if tc.refusal == "" {
+				if serverErr != nil || cliErr != nil || !strings.Contains(output.String(), "result: PASS") {
+					t.Fatalf("valid control: server=%v, validate=%v\n%s", serverErr, cliErr, output.String())
+				}
+				return
+			}
+			if serverErr == nil || !strings.Contains(serverErr.Error(), tc.refusal) {
+				t.Fatalf("server refusal = %v, want %q", serverErr, tc.refusal)
+			}
+			if cliErr == nil || !strings.Contains(output.String(), "result: FAIL") || strings.Contains(output.String(), "result: PASS") {
+				t.Fatalf("server refused %v; validate must also refuse: %v\n%s", serverErr, cliErr, output.String())
+			}
+			if !strings.Contains(output.String(), serverErr.Error()) {
+				t.Fatalf("validate did not report the identical server refusal %q:\n%s", serverErr, output.String())
+			}
+		})
+	}
+}

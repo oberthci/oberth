@@ -177,13 +177,7 @@ func ForceIdentity(workflow *wfv1.Workflow, identity Identity) error {
 	}
 	// Resolve inherited opt-outs before normalizing nil pointers. A less
 	// privileged parent/default can never be widened by a nested template.
-	disabled := workflow.Spec.AutomountServiceAccountToken != nil && !*workflow.Spec.AutomountServiceAccountToken
-	if defaults := workflow.Spec.TemplateDefaults; defaults != nil && defaults.AutomountServiceAccountToken != nil && !*defaults.AutomountServiceAccountToken {
-		disabled = true
-	}
-	for i := range workflow.Spec.Templates {
-		inheritTokenOptOut(&workflow.Spec.Templates[i], disabled, 0)
-	}
+	InheritTokenOptOut(workflow)
 	if err := normalizeIdentity(reflect.ValueOf(workflow), identity, 0); err != nil {
 		return err
 	}
@@ -205,6 +199,19 @@ func ForceIdentity(workflow *wfv1.Workflow, identity Identity) error {
 		template.Executor.ServiceAccountName = identity.VMLauncherServiceAccountName
 	}
 	return nil
+}
+
+// InheritTokenOptOut propagates workflow, templateDefaults and inline-parent
+// token opt-outs to leaves without assigning a server identity. It never
+// re-enables a token, even when a nested template explicitly requests one.
+func InheritTokenOptOut(workflow *wfv1.Workflow) {
+	disabled := workflow.Spec.AutomountServiceAccountToken != nil && !*workflow.Spec.AutomountServiceAccountToken
+	if defaults := workflow.Spec.TemplateDefaults; defaults != nil && defaults.AutomountServiceAccountToken != nil && !*defaults.AutomountServiceAccountToken {
+		disabled = true
+	}
+	for i := range workflow.Spec.Templates {
+		inheritTokenOptOut(&workflow.Spec.Templates[i], disabled, 0)
+	}
 }
 
 func inheritTokenOptOut(template *wfv1.Template, disabled bool, depth int) {

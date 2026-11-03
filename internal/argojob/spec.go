@@ -858,11 +858,7 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	if err := admitEnvconsulSecretPaths(workflow, declaredPaths, request.SourceDir); err != nil {
 		return nil, err
 	}
-	normalizeContainerSetMounts(workflow)
-	if err := validateTemplateIsolation(workflow, request.Trigger); err != nil {
-		return nil, err
-	}
-	if err := trivyGuard(workflow); err != nil {
+	if err := normalizeAndValidateDocument(workflow, request.Trigger); err != nil {
 		return nil, err
 	}
 
