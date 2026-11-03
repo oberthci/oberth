@@ -11,7 +11,10 @@ import (
 
 func TestRemoteRunIDIsResolvedByServer(t *testing.T) {
 	requests := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests++; http.Error(w, "list forbidden", 403) }))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		http.Error(w, "list forbidden", http.StatusForbidden)
+	}))
 	defer server.Close()
 	api, err := client.New(context.Background(), client.Config{BaseURL: server.URL, Token: "fixture"})
 	if err != nil {
