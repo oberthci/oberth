@@ -246,6 +246,38 @@ assert.equal(run(`runMessageCell({Status:'passed',priority_class:'highest',Concu
 for(const extra of [`display_reason:'existing reason'`, `Error:'existing reason'`, `FailedStep:'test'`, `Reason:'existing reason'`]) {
   assert.equal(run(`runMessageCell({Status:'failed',Release:true,Trigger:'schedule',ScheduleEntry:'nightly',${extra}})`), extra.startsWith('FailedStep')?'failed at test':'existing reason');
 }
-assert.equal(run(`runMessageCell({Status:'queued',Release:true,Trigger:'schedule',ScheduleEntry:'nightly',Scheduling:{state:'waiting',admission:{group_holder:true,group:'deploy'}}})`),'waiting for group deploy');
+assert.equal(run(`runMessageCell({Status:'queued',Release:true,Trigger:'schedule',ScheduleEntry:'nightly',display_reason:'concurrency group deploy busy (held by run 0123456789ab)',Scheduling:{state:'waiting',admission:{group_holder:true,group:'deploy'}}})`),'concurrency group deploy busy (held by run 0123456789ab)');
+assert.equal(run(`runMessageCell({Status:'queued',Scheduling:{state:'queued',message:'Awaiting scheduler claim.'}})`),'Awaiting scheduler claim.','the scheduling message is the fallback reason');
 assert.ok(run(`releaseBadge({Release:true,priority_class:'highest',priority_reason:'urgent'})`).includes('highest priority'),'detail priority and reason remain available');
 console.log('R4B passed: label-free rows, empty-message fallbacks, existing reasons and detail badges');
+
+// One grey queued status for every run that has not started. The raw wire
+// status "waiting" and the scheduling states (preparing, waiting, admitted,
+// preflight) are reasons, never a pill of their own.
+if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'V1') {
+  const pills = html => [...html.matchAll(/<span class="pill ([a-z]+)"><span class="dot [a-z]+"><\/span>([^<]*)<\/span>/g)].map(m => [m[1], m[2]]);
+  const notStarted = [
+    {ID:'claimed', Status:'running', StartedAt:null, display_status:'queued', display_reason:'waiting for CPU budget (12.5 of 40 CPU free)', Scheduling:{state:'waiting', admission:{state:'waiting'}}},
+    {ID:'wire-waiting', Status:'waiting', StartedAt:null, display_status:'queued', display_reason:'host IO pressure (42%)', Scheduling:{state:'waiting'}},
+    {ID:'admitted', Status:'running', StartedAt:null, display_status:'queued', display_reason:'admitted, starting the workflow', Scheduling:{state:'waiting', admission:{state:'admitted'}}},
+    {ID:'preflight', Status:'running', StartedAt:null, display_status:'queued', display_reason:'KVM preflight running', Scheduling:{state:'preflight'}},
+    {ID:'durable', Status:'queued', StartedAt:null, display_status:'queued', display_reason:'next in line', Scheduling:{state:'queued', queue_position:1}},
+    {ID:'raw-only', Status:'waiting', StartedAt:null},
+  ];
+  sandbox.notStarted = notStarted;
+  const table = run('runsTable(notStarted)');
+  for (const [kind, label] of pills(table)) assert.deepEqual([kind, label], ['pending', 'queued'], 'V1: every not-started run is one grey queued pill');
+  assert.ok(!/waiting<\/span>/.test(table) && !table.includes('>admitted<') && !table.includes('>preflight<'), 'V1: no second not-started status');
+  for (const row of notStarted) if (row.display_reason) assert.ok(table.includes(row.display_reason), 'V1: the reason line shows ' + row.display_reason);
+  for (const row of notStarted) assert.equal(run(`runListGroup(notStarted.find(r => r.ID === '${row.ID}'))`), 0, 'V1: ' + row.ID + ' sorts in the queue group');
+  // The vocabulary is seven statuses; each has a known kind and label.
+  for (const status of ['queued', 'running', 'passed', 'failed', 'infra-retried', 'superseded', 'cancelled']) {
+    assert.notEqual(run(`statusKind('${status}')`), 'unknown', 'V1: ' + status + ' has a kind');
+  }
+  for (const gone of ['waiting', 'infra-pending', 'deadline-exceeded', 'interrupted']) {
+    assert.equal(run(`statusKind('${gone}')`), 'unknown', 'V1: ' + gone + ' is not a run status');
+  }
+  assert.equal(run(`displayRunStatus({Status:'failed', display_status:'failed', display_reason:'Execution deadline exceeded.'})`), 'failed');
+  assert.equal(run(`displayRunStatus({Status:'running', StartedAt:'2026-11-03T10:00:00Z', display_status:'running', Phase:'infrastructure-pending'})`), 'running');
+  console.log('V1 passed: one queued status, reasons on the message line');
+}

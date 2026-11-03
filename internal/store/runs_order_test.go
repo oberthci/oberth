@@ -197,3 +197,74 @@ func TestRunListGroupsAreMonotonicWithRepositoryFilter(t *testing.T) {
 		}
 	}
 }
+
+// A claimed run that has not started (durable status running, phase waiting,
+// no started_at; the wire's "waiting" projection) is a queued run: it lists
+// in the queue group, never among running or finished runs, in both views.
+func TestRunListKeepsClaimedUnstartedRunsInTheQueue(t *testing.T) {
+	now := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	s := testStore(t, &now)
+	repo := createRepo(t, s)
+	ctx := context.Background()
+	enqueue := func(ref, sha string) model.Run {
+		t.Helper()
+		run, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, ref, strings.Repeat(sha, 40)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return run.Run
+	}
+	running := enqueue("running", "a")
+	if claimed, err := s.ClaimNextRun(ctx); err != nil || claimed.ID != running.ID {
+		t.Fatalf("claim running = %+v, %v", claimed, err)
+	}
+	if _, err := s.MarkRunAdmitted(ctx, running.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetRunWorkflowName(ctx, running.ID, "wf-"+running.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkRunSubmitted(ctx, running.ID); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Minute)
+	finished := enqueue("finished", "b")
+	if claimed, err := s.ClaimNextRun(ctx); err != nil || claimed.ID != finished.ID {
+		t.Fatalf("claim finished = %+v, %v", claimed, err)
+	}
+	if _, err := s.MarkRunAdmitted(ctx, finished.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.FinishRun(ctx, finished.ID, model.RunResult{Status: model.RunPassed, Phase: "passed"}); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Minute)
+	claimed := enqueue("claimed", "c")
+	if got, err := s.ClaimNextRun(ctx); err != nil || got.ID != claimed.ID {
+		t.Fatalf("claim = %+v, %v", got, err)
+	}
+	now = now.Add(time.Minute)
+	queued := enqueue("queued", "d")
+
+	for _, latest := range []bool{false, true} {
+		runs, err := s.ListRecentRuns(ctx, model.RunListFilter{LatestPerRef: latest, Limit: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The queue bottom-up: the claimed run is admitted next, so it is the
+		// lowest queued row, right above the running run.
+		want := []string{queued.ID, claimed.ID, running.ID, finished.ID}
+		if got := runIDs(runs); strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Fatalf("latest=%v list = %v, want %v", latest, got, want)
+		}
+		if runs[1].Status != model.RunRunning || runs[1].StartedAt != nil || runs[1].Phase != "waiting" || !runs[1].ClaimedUnstarted() {
+			t.Fatalf("claimed run is not the raw running/unstarted record: %+v", runs[1])
+		}
+		if model.DisplayRunStatus(runs[1]) != model.DisplayQueued || runListGroup(runs[1]) != 0 {
+			t.Fatalf("claimed run must display queued in the queue group: %+v", runs[1])
+		}
+		if runs[1].QueuePosition != 1 || runs[0].QueuePosition != 2 {
+			t.Fatalf("queue positions = %d, %d; want claimed 1, queued 2", runs[1].QueuePosition, runs[0].QueuePosition)
+		}
+	}
+}

@@ -315,8 +315,14 @@ func renderActiveRuns(output io.Writer, runs []remoteActiveRun, now time.Time) e
 		if run.StartedAt != nil {
 			elapsed = now.Sub(*run.StartedAt).Truncate(time.Second).String()
 		}
+		// The active entry carries its observation beside the run; the
+		// reason is the same display_reason every other list shows.
+		row := run.remoteRun
+		if row.Scheduling == nil {
+			row.Scheduling = run.Scheduling
+		}
+		reason = displayRunReason(row)
 		if scheduling := run.Scheduling; scheduling != nil {
-			reason = scheduling.Message
 			if admission := scheduling.Admission; admission != nil {
 				if admission.Size != "" {
 					size = fmt.Sprintf("%s/%d", admission.Size, admission.Weight)
