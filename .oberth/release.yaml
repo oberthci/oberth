@@ -265,11 +265,11 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 1250m
+          memory: 95368Ki
         limits:
           cpu: '2'
-          memory: 4Gi
+          memory: 384Mi
   - name: verify-publisher-tools
     automountServiceAccountToken: false
     metadata:
@@ -303,11 +303,11 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: '1'
+          cpu: 625m
           memory: 256Mi
         limits:
           cpu: '1'
-          memory: 256Mi
+          memory: 512Mi
   - name: copy-trivy
     automountServiceAccountToken: false
     metadata:
@@ -353,11 +353,11 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: '1'
-          memory: 2Gi
+          cpu: 625m
+          memory: 258340Ki
         limits:
           cpu: '1'
-          memory: 2Gi
+          memory: 512Mi
   - name: link-go
     automountServiceAccountToken: false
     metadata:
@@ -405,11 +405,11 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 1250m
+          memory: 36224Ki
         limits:
           cpu: '2'
-          memory: 4Gi
+          memory: 320Mi
   - name: install-golangci-lint
     automountServiceAccountToken: false
     metadata:
@@ -455,11 +455,11 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 907m
+          memory: 2408764Ki
         limits:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 3000m
+          memory: 3584Mi
   - name: install-helm
     automountServiceAccountToken: false
     metadata:
@@ -514,11 +514,11 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 561m
+          memory: 2741492Ki
         limits:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 2000m
+          memory: 4032Mi
   - name: fetch-cosign
     automountServiceAccountToken: false
     metadata:
@@ -581,11 +581,11 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 100m
+          memory: 181696Ki
         limits:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 2000m
+          memory: 448Mi
   - name: verify-cosign
     automountServiceAccountToken: false
     metadata:
@@ -631,11 +631,11 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 1250m
+          memory: 37828Ki
         limits:
           cpu: '2'
-          memory: 4Gi
+          memory: 320Mi
   - name: install-cosign
     automountServiceAccountToken: false
     metadata:
@@ -681,11 +681,11 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 1250m
+          memory: 36740Ki
         limits:
           cpu: '2'
-          memory: 4Gi
+          memory: 320Mi
   - name: build-release-support
     automountServiceAccountToken: false
     metadata:
@@ -742,11 +742,11 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 467m
+          memory: 620572Ki
         limits:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 2000m
+          memory: 960Mi
   - name: build-release-image
     automountServiceAccountToken: false
     metadata:
@@ -803,11 +803,11 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 221m
+          memory: 619604Ki
         limits:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 2000m
+          memory: 960Mi
   - name: validate-tag
     automountServiceAccountToken: false
     metadata:
@@ -852,11 +852,11 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 1250m
+          memory: 75584Ki
         limits:
           cpu: '2'
-          memory: 4Gi
+          memory: 384Mi
   - name: fetch-node
     automountServiceAccountToken: false
     metadata:
@@ -919,11 +919,11 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: '1'
-          memory: 1Gi
+          cpu: 625m
+          memory: 97436Ki
         limits:
           cpu: '1'
-          memory: 1Gi
+          memory: 384Mi
   - name: verify-node
     automountServiceAccountToken: false
     metadata:
@@ -969,11 +969,11 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: '1'
-          memory: 1Gi
+          cpu: 625m
+          memory: 37356Ki
         limits:
           cpu: '1'
-          memory: 1Gi
+          memory: 320Mi
   - name: stage-website-packages
     automountServiceAccountToken: false
     metadata:
@@ -1018,11 +1018,11 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: '2'
-          memory: 2Gi
+          cpu: 1250m
+          memory: 733196Ki
         limits:
           cpu: '2'
-          memory: 2Gi
+          memory: 1088Mi
   - name: release-lint
     steps:
     - - name: vet
@@ -1075,11 +1075,11 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: '2'
+          cpu: 1096m
           memory: 4Gi
         limits:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 3000m
+          memory: 5952Mi
   - name: golangci-lint-run
     automountServiceAccountToken: false
     metadata:
@@ -1129,11 +1129,11 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: '4'
+          cpu: 1250m
           memory: 8Gi
         limits:
-          cpu: '4'
-          memory: 8Gi
+          cpu: 4000m
+          memory: 8384Mi
   - name: release-scan
     automountServiceAccountToken: false
     metadata:
@@ -1191,11 +1191,11 @@ spec:
       volumeMounts: []
       resources:
         requests:
-          cpu: '4'
-          memory: 8Gi
+          cpu: 2500m
+          memory: 2039684Ki
         limits:
           cpu: '4'
-          memory: 8Gi
+          memory: 3008Mi
   - name: release-test
     automountServiceAccountToken: false
     metadata:
@@ -1254,11 +1254,11 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: '4'
+          cpu: 1250m
           memory: 8Gi
         limits:
-          cpu: '4'
-          memory: 8Gi
+          cpu: 4000m
+          memory: 12352Mi
   - name: release-chart-test
     automountServiceAccountToken: false
     metadata:
@@ -1303,11 +1303,11 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 1250m
+          memory: 105072Ki
         limits:
           cpu: '2'
-          memory: 4Gi
+          memory: 384Mi
   - name: release-build
     automountServiceAccountToken: false
     metadata:
@@ -1356,11 +1356,11 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: '4'
+          cpu: 1250m
           memory: 8Gi
         limits:
-          cpu: '4'
-          memory: 8Gi
+          cpu: 5000m
+          memory: 9728Mi
   - name: release-sign-binaries
     metadata:
       annotations:
@@ -1420,8 +1420,8 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 1250m
+          memory: 201752Ki
         limits:
           cpu: '2'
           memory: 4Gi
@@ -1444,7 +1444,7 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: '1'
+          cpu: 625m
           memory: 256Mi
         limits:
           cpu: '1'
@@ -1508,8 +1508,8 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: '1'
-          memory: 1Gi
+          cpu: 625m
+          memory: 73308Ki
         limits:
           cpu: '1'
           memory: 1Gi
@@ -1532,7 +1532,7 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: '1'
+          cpu: 625m
           memory: 256Mi
         limits:
           cpu: '1'
@@ -1599,10 +1599,10 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: '4'
-          memory: 8Gi
+          cpu: 480m
+          memory: 3986416Ki
         limits:
-          cpu: '4'
+          cpu: 4000m
           memory: 8Gi
     initContainers:
     - name: verify-publisher-tools
@@ -1623,7 +1623,7 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: '1'
+          cpu: 625m
           memory: 256Mi
         limits:
           cpu: '1'
@@ -1674,8 +1674,8 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 1250m
+          memory: 222020Ki
         limits:
           cpu: '2'
           memory: 4Gi
@@ -1744,8 +1744,8 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 1250m
+          memory: 147312Ki
         limits:
           cpu: '2'
           memory: 4Gi
@@ -1768,7 +1768,7 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: '1'
+          cpu: 625m
           memory: 256Mi
         limits:
           cpu: '1'
@@ -1828,10 +1828,10 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 117m
+          memory: 2315772Ki
         limits:
-          cpu: '2'
+          cpu: 2000m
           memory: 4Gi
     initContainers:
     - name: verify-publisher-tools
@@ -1852,7 +1852,7 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: '1'
+          cpu: 625m
           memory: 256Mi
         limits:
           cpu: '1'
@@ -1914,8 +1914,8 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 1250m
+          memory: 392100Ki
         limits:
           cpu: '2'
           memory: 4Gi
@@ -1953,11 +1953,11 @@ spec:
       # OOM-killed this step (v0.17.38 release run ef637d76).
       resources:
         requests:
-          cpu: '1'
+          cpu: 250m
           memory: 2Gi
         limits:
-          cpu: '1'
-          memory: 2Gi
+          cpu: 1000m
+          memory: 3Gi
   - name: fetch-apko
     automountServiceAccountToken: false
     metadata:
@@ -2020,11 +2020,11 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: '1'
-          memory: 1Gi
+          cpu: 625m
+          memory: 63104Ki
         limits:
           cpu: '1'
-          memory: 1Gi
+          memory: 320Mi
   - name: verify-apko
     automountServiceAccountToken: false
     metadata:
@@ -2072,11 +2072,11 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: '1'
-          memory: 2Gi
+          cpu: 625m
+          memory: 81564Ki
         limits:
           cpu: '1'
-          memory: 2Gi
+          memory: 384Mi
   - name: install-apko
     automountServiceAccountToken: false
     metadata:
@@ -2122,11 +2122,11 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: '1'
-          memory: 2Gi
+          cpu: 625m
+          memory: 37864Ki
         limits:
           cpu: '1'
-          memory: 2Gi
+          memory: 320Mi
   - name: release-publish-kvm-harness
     metadata:
       annotations:
@@ -2189,10 +2189,10 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: '4'
-          memory: 8Gi
+          cpu: 950m
+          memory: 1350012Ki
         limits:
-          cpu: '4'
+          cpu: 4000m
           memory: 8Gi
     initContainers:
     - name: verify-publisher-tools
@@ -2213,7 +2213,7 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: '1'
+          cpu: 625m
           memory: 256Mi
         limits:
           cpu: '1'
@@ -2289,7 +2289,7 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: '2'
+          cpu: 1250m
           memory: 2Gi
         limits:
           cpu: '2'
@@ -2313,7 +2313,7 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: '1'
+          cpu: 625m
           memory: 256Mi
         limits:
           cpu: '1'
@@ -2336,7 +2336,7 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: '1'
+          cpu: 625m
           memory: 1Gi
         limits:
           cpu: '1'
@@ -2373,7 +2373,7 @@ spec:
       volumeMounts: []
       resources:
         requests:
-          cpu: '2'
+          cpu: 1250m
           memory: 2Gi
         limits:
           cpu: '2'
@@ -2423,8 +2423,8 @@ spec:
       volumeMounts: []
       resources:
         requests:
-          cpu: '1'
-          memory: 256Mi
+          cpu: 625m
+          memory: 52888Ki
         limits:
           cpu: '1'
-          memory: 256Mi
+          memory: 320Mi
