@@ -1011,6 +1011,10 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			cancelState()
 			if (stateErr != nil && !errors.Is(stateErr, store.ErrNotFound)) || (stateErr == nil && !state.Cleaned) {
 				reservation.retain()
+				var mismatch interface{ WorkflowSpecMismatch() bool }
+				if errors.As(err, &mismatch) && mismatch.WorkflowSpecMismatch() {
+					return scheduler.recoverTrustedWorkflowMismatch(ctx, run, repository, reservation)
+				}
 				if recoverablePreflightError(err) && ctx.Err() == nil {
 					return scheduler.recoverDatabasePreflight(ctx, run.ID, reservation)
 				}

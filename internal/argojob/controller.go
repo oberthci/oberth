@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"reflect"
 	"sort"
 	"sync"
 	"time"
@@ -410,8 +409,8 @@ func sameSubmission(existing, intended *wfv1.Workflow) error {
 		return fmt.Errorf("argojob: Workflow %s exists with a different spec than this run's source produces", intended.Name)
 	}
 	if binding := intended.Annotations[trustedKVMAnnotation]; binding != "" {
-		if existing.Annotations[trustedKVMAnnotation] != binding || !reflect.DeepEqual(existing.Spec, intended.Spec) {
-			return errors.New("argojob: existing Workflow differs from trusted KVM server spec")
+		if existing.Annotations[trustedKVMAnnotation] != binding || !apiequality.Semantic.DeepEqual(existing.Spec, intended.Spec) {
+			return &workflowSpecMismatch{}
 		}
 	}
 	if binding := intended.Annotations[nonrootProfileAnnotation]; binding != "" {

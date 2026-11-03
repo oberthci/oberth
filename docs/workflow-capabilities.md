@@ -79,3 +79,9 @@ RBAC, grant the replacement capability, move guest and suite gates into their
 repository Workflows, and prove cleanup before removing the deprecated path.
 That deletion is deliberately absent from this release. Rollback requires the
 documented database restore procedure, not only an older image.
+
+Trusted preflight observation uses semantic Kubernetes resource equality. An
+owned spec mismatch remains a run-local failure: Oberth binds its observed UID
+for cleanup only, retains admission and retries exact-run cleanup until absence
+is confirmed. Foreign run/source identities never authorize deletion. This
+preserves the original trusted observer path while Stage 2 deletion is deferred.

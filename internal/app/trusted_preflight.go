@@ -228,16 +228,17 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.JobRequest,
 		if submitted && !rejected && uid == "" {
 			var lookupErr error
 			uid, lookupErr = p.controller.TrustedKVMWorkflowUID(cleanupCtx, submission)
-			if lookupErr != nil {
+			if lookupErr != nil && !trustedMismatchCleanupUID(uid, lookupErr) {
 				retErr = errors.Join(retErr, fmt.Errorf("uncertain trusted create retains capacity: %w", lookupErr))
 				return
 			}
+
+		}
+		if uid != "" {
 			if e := p.store.BindKVMPreflight(cleanupCtx, intent.RunID, uid); e != nil {
 				retErr = errors.Join(retErr, e)
 				return
 			}
-		}
-		if uid != "" {
 			if e := p.controller.CleanupTrustedKVM(cleanupCtx, intent.WorkflowName, intent.RunID, uid); e != nil {
 				retErr = errors.Join(retErr, e)
 				return
@@ -429,7 +430,7 @@ func (p *TrustedPreflights) recoverOne(ctx context.Context, execution vmrunner.K
 			request.KubeVirtGranted = true
 			request.KubeVirtBudget = argoworkflow.VMIBudgetLimit()
 			uid, err = p.controller.TrustedKVMWorkflowUID(ctx, request)
-			if err != nil {
+			if err != nil && !trustedMismatchCleanupUID(uid, err) {
 				return fmt.Errorf("uncertain trusted create still requires reconciliation: %w", err)
 			}
 			if err := p.store.BindKVMPreflight(ctx, intent.RunID, uid); err != nil {
@@ -488,4 +489,11 @@ func (p *TrustedPreflights) Size(_ context.Context, job service.JobRequest) (per
 		size = periapsis.M
 	}
 	return size, nil
+}
+
+// An observer may bind an owned, altered Workflow solely for UID-pinned cleanup.
+// A foreign run/source never supplies a cleanup UID with this classification.
+func trustedMismatchCleanupUID(uid string, err error) bool {
+	var mismatch interface{ WorkflowSpecMismatch() bool }
+	return uid != "" && errors.As(err, &mismatch) && mismatch.WorkflowSpecMismatch()
 }

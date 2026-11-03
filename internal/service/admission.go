@@ -448,13 +448,20 @@ func (reservation *admissionReservation) release() {
 	gate.releaseLocked(reservation)
 }
 
+// releaseAfterCleanup clears a retained grant only after its owner has durable
+// proof that the external resources are gone. Clear and release under one lock.
+func (reservation *admissionReservation) releaseAfterCleanup() {
+	gate := reservation.gate
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	reservation.retained = false
+	gate.releaseLocked(reservation)
+}
+
 // retain keeps a granted reservation's weight and concurrency group held
-// until the process exits. The scheduler calls it only on the error paths
-// where a Workflow may still be running and the owner is about to stop
-// without having proved it terminal or deleted: passing the group on there
-// would let the next member of the group start beside a live one. Startup
-// reconciliation in the next process settles the Workflow; this process
-// admits nothing further against the held weight.
+// while a Workflow may still be running. Passing the group on before observed
+// cleanup would let its next member start beside a live Workflow. Exact-run
+// cleanup or startup reconciliation must confirm absence before release.
 func (reservation *admissionReservation) retain() {
 	gate := reservation.gate
 	gate.mu.Lock()

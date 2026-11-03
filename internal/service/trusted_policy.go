@@ -264,7 +264,7 @@ func (scheduler *Scheduler) recoverDatabasePreflight(ctx context.Context, id str
 	if err := scheduler.interruptRecoveredPreflight(ctx, id); err != nil {
 		return err
 	}
-	reservation.release()
+	reservation.releaseAfterCleanup()
 	return nil
 }
 
@@ -293,4 +293,41 @@ func (scheduler *Scheduler) interruptRecoveredPreflight(ctx context.Context, id 
 		scheduler.signalQueue()
 	}
 	return nil
+}
+
+// Keep an owned spec mismatch local to its run. Retry only exact-run cleanup;
+// no receipt, publication, replay or capacity release is authorized by an error.
+func (scheduler *Scheduler) recoverTrustedWorkflowMismatch(ctx context.Context, run model.Run, repository model.Repository, reservation *admissionReservation) error {
+	recoverer, ok := scheduler.trusted.(interface {
+		RecoverRun(context.Context, string) error
+	})
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		if ctx.Err() != nil {
+			return nil
+		}
+		if ok {
+			attempt, cancel := context.WithTimeout(ctx, 30*time.Second)
+			err := recoverer.RecoverRun(attempt, run.ID)
+			cancel()
+			if err == nil {
+				journal := scheduler.store.(vmrunner.KVMJournal)
+				state, readErr := retryDatabase(ctx, "KVMPreflight", func(ctx context.Context) (vmrunner.KVMExecution, error) { return journal.KVMPreflight(ctx, run.ID) })
+				if readErr == nil && state.Cleaned {
+					if err := scheduler.finishInfrastructureFailure(ctx, run, repository, errors.New("Workflow spec mismatch; trusted cleanup confirmed absence")); err != nil {
+						return err
+					}
+					reservation.releaseAfterCleanup()
+					return nil
+				}
+			}
+		}
+		log.Printf("WARN: Workflow spec mismatch cleanup pending run=%s; admission retained", run.ID)
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+		}
+	}
 }
