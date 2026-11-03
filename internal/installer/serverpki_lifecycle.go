@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"slices"
 	"strings"
 
@@ -223,7 +222,7 @@ func checkServerPKIRole(ctx context.Context, cfg Config, deps Deps, store openBa
 }
 
 func serverPKIAccess(ctx context.Context, cfg Config, deps Deps) (openBaoExec, string, error) {
-	token := os.Getenv(baoTokenEnvVar)
+	token := installerBaoToken(deps)
 	if token == "" {
 		return openBaoExec{}, "", errors.New("server PKI inspection requires BAO_TOKEN")
 	}
