@@ -346,9 +346,7 @@ func (g *podGraph) expand(t *wfv1.Template, depth int) (int, int, error) {
 				// Mixed-task OR, negation and early-start logic earn no credit.
 				deps[task.Name] = nil
 				if completed, ok := podCompletionDependencies(task.Depends); ok {
-					for _, dep := range completed {
-						deps[task.Name] = append(deps[task.Name], dep)
-					}
+					deps[task.Name] = append(deps[task.Name], completed...)
 				} else {
 					g.assumptions |= PodPeakConditions
 				}
