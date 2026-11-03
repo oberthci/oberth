@@ -107,6 +107,19 @@ class ArgoSchemaTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout, default.stdout)
 
+    def test_retired_vm_keys_remain_declared_for_saved_values(self):
+        schema = json.loads((ROOT / 'charts/oberth/values.schema.json').read_text())
+        argo = schema['properties']['argo']
+        self.assertIs(argo['additionalProperties'], False)
+        saved = {'kubevirtCeiling': {'maxVMs': 2, 'maxCores': 6, 'maxMemory': '12Gi'},
+                 'vmLauncherServiceAccount': 'legacy-vm-launcher',
+                 'containerDiskPrefixes': ['registry.example.com/disks/']}
+        result = self.render(saved)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for key in saved:
+            with self.subTest(key=key):
+                self.assertIn('retired', argo['properties'][key]['description'].lower())
+
     def test_retired_aliases_still_report_migration(self):
         for argo in ({'ciSecretsServiceAccount': 'retired-account'},
                      {'vault': {'ciSecretsRole': 'retired-role'}}):
