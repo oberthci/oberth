@@ -81,8 +81,8 @@ VALUES('operator', 'high', 999999999999999999, 'admin');`)
 			if err := s.db.QueryRow(`SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil {
 				t.Fatal(err)
 			}
-			if version != 48 {
-				t.Fatalf("version=%d, want 48", version)
+			if version != latestMigrationVersion {
+				t.Fatalf("version=%d, want %d", version, latestMigrationVersion)
 			}
 			if err := s.db.QueryRow(`SELECT count(*) FROM priority_grants WHERE identity='operator'`).Scan(&grants); err != nil || grants != 1 {
 				t.Fatalf("priority grant not preserved: %d %v", grants, err)
