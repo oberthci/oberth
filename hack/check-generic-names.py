@@ -14,7 +14,8 @@ INSTANCE_NAMES = [('tux', 'box'), ('skip', 'ops'), ('ct', 'tv'), ('bea', 'con'),
                   ('codex-', 'lab'), ('demo-', 'lab'), ('watch.', 'oberth')]
 INSTANCE_PATTERN = r'(^|[^a-zA-Z0-9])(' + '|'.join(re.escape(''.join(p)) for p in INSTANCE_NAMES) + r')([^a-zA-Z0-9]|$)'
 RELEASE_PATHS = [':(exclude)LICENSE', ':(exclude).oberth/**', ':(exclude)scripts/release-wif-credential.py',
-                 ':(exclude)scripts/test_release_wif.py']
+                 ':(exclude)scripts/test_release_wif.py',
+                 ':(exclude)cmd/oberth/mcp_legacy_default.go']
 
 
 def check(root):

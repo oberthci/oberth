@@ -382,7 +382,8 @@ func parseMCPFlags(name string, arguments []string, wantPositional int) (mcpFlag
 		result.URL = strings.TrimRight(environment.BaseURL, "/") + "/mcp"
 	}
 	if result.URL == "" {
-		return result, errors.New("set --url, OBERTH_MCP_URL, or OBERTH_BASE_URL to select the server")
+		result.URL = mcpLegacyDefaultURL
+		fmt.Fprintln(os.Stderr, "WARNING: the implicit hosted MCP URL is deprecated; set --url, OBERTH_MCP_URL, or OBERTH_BASE_URL")
 	}
 	if result.CAFile == "" {
 		result.CAFile = environment.CACert
@@ -422,6 +423,9 @@ func parseMCPFlags(name string, arguments []string, wantPositional int) (mcpFlag
 // parsed response. It handles both direct JSON responses and SSE-framed
 // responses.
 func mcpRequest(ctx context.Context, cfg mcpFlagResult, method string, params any) (_ *jsonRPCResponse, resultErr error) {
+	if _, err := client.ValidateServerURL(cfg.URL); err != nil {
+		return nil, err
+	}
 	request := jsonRPCRequest{
 		JSONRPC: mcpJSONRPCVersion,
 		ID:      1,
@@ -654,6 +658,16 @@ func mcpHTTPClient(caFile string) (*http.Client, error) {
 
 	return &http.Client{
 		Transport: cloned,
+		CheckRedirect: func(request *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("MCP: stopped after 10 redirects")
+			}
+			if len(via) > 0 && via[len(via)-1].URL.Scheme == "https" && request.URL.Scheme != "https" {
+				return errors.New("MCP: HTTPS redirect downgrade refused")
+			}
+			_, err := client.ValidateServerURL(request.URL.String())
+			return err
+		},
 	}, nil
 }
 

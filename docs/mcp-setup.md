@@ -874,7 +874,13 @@ already equal to the intended SHA does not itself mark a pending ledger row
 passed. Pending list entries and timeout replies are refreshed before return;
 a real commit between separate reads can advance status and its update time.
 
-The CLI requires `--url`, `OBERTH_MCP_URL`, or `OBERTH_BASE_URL` (with
+The CLI uses `--url`, `OBERTH_MCP_URL`, or `OBERTH_BASE_URL` (with
 `/mcp` appended). There is no hosted default. `OBERTH_TOKEN_COMMAND` and
 `OBERTH_CA_CERT` follow the installer environment; explicit flags take
 precedence. An unconfigured endpoint fails before any network request.
+
+The implicit hosted MCP endpoint remains available for older scripts with a
+stderr deprecation warning. Set an explicit URL or load the installer-provided
+environment to migrate. MCP and REST both refuse plain HTTP except to
+`localhost`, `127.0.0.1`, or `::1`, before resolving credentials. Redirects
+cannot downgrade HTTPS to HTTP.
