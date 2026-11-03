@@ -1102,21 +1102,12 @@ spec:
   # Give each group a bounded two-CPU lane; workflow parallelism remains two.
   - name: test-store
     automountServiceAccountToken: false
-    volumes:
-    - name: store-test-tmp
-      emptyDir:
-        medium: Memory
-        sizeLimit: 768Mi
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
       command: ["/usr/bin/python3"]
       args: ["-I", "-S", "-B", ".oberth/test-packages.py", "store"]
       env:
-      - name: OBERTH_TEST_STORE_TMPDIR
-        value: "/tmp/oberth-store-tests"
-      - name: GOMEMLIMIT
-        value: "2GiB"
       # Scale test fixture waits on loaded CI hosts.
       - name: OBERTH_TEST_TIMEOUT_SCALE
         value: "4"
@@ -1151,8 +1142,6 @@ spec:
       - name: GOLANGCI_LINT_CACHE
         value: "/tmp/oberth-tools/cache/golangci-lint"
       volumeMounts:
-      - name: store-test-tmp
-        mountPath: /tmp/oberth-store-tests
       - name: work
         mountPath: /tmp/oberth-tools
         subPath: tools
@@ -1166,8 +1155,6 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
-      # The 4Gi envelope includes up to 768Mi of store fixtures on tmpfs;
-      # leave room above the 2GiB Go heap target for the race detector.
       resources:
         requests:
           cpu: 971m

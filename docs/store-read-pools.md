@@ -57,35 +57,6 @@ reflect the local fixture, hardware and contention, not an installation-wide
 latency bound or a census of every write operation. Busy deadlines and external
 witness/admission gates remain independent of this routing change.
 
-## Disposable store test fixtures
-
-The store test helper sets SQLite `synchronous=OFF` on its private writer
-connection after opening it. Fixtures keep file-backed WAL, foreign keys and
-the production connection limits. Production initialization, migration,
-inspection and recovery tests that open stores directly retain `synchronous=FULL`.
-A regression test opens the same fixture file through the production entry
-point and checks that FULL is still selected there. This fixture optimization
-does not test power-loss durability.
-
-SQLite has no PostgreSQL `fsync`, `synchronous_commit` or `full_page_writes`
-settings. There is no new production setting or environment override.
-
-Branch `test-store` and release `release-test` mount a private 768Mi memory
-`emptyDir` and pass `OBERTH_TEST_STORE_TMPDIR` to the store test binary. Its
-test entry point sets both `TMPDIR` (for `os.MkdirTemp`) and `GOTMPDIR` (for
-Go 1.26 `testing.TempDir`). Other test binaries and the Go build cache keep
-their original directories. Without that variable, local tests keep their
-normal temporary directory; a caller with sufficient memory can select a
-private tmpfs directory explicitly.
-
-The tmpfs is included in the existing container memory envelope: 4Gi for
-`test-store`, with a 2GiB Go heap target, and 8Gi for `release-test`, with its
-4GiB target. CPU requests are 971m and 1000m respectively, with limits of
-2 and 4 CPU. Package execution retains the 20-minute deadlock bound and
-bounded Go worker counts. The contention test uses writer reservations and
-round barriers instead of a throughput deadline or a lookup latency assertion;
-it still performs all 16 × 32 status/step write pairs and checks every result.
-
 ## Telemetry-retention writer exception
 
 Resource-usage retention is the deliberate exception to the single primary

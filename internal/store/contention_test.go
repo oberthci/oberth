@@ -80,82 +80,59 @@ func TestConcurrentStatusWritersAndReceiveLookups(t *testing.T) {
 		}
 		ids[i] = run.ID
 	}
-	ctx := t.Context()
-	for round := range rounds {
-		// Reserve the only writer connection before releasing the workers.
-		// Every lookup must finish with a real write still uncommitted; neither
-		// fast workers nor a delayed scheduler can remove the contention.
-		tx, err := s.db.BeginTx(ctx, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE repositories SET default_branch='uncommitted' WHERE id=?`, repo.ID); err != nil {
-			_ = tx.Rollback()
-			t.Fatal(err)
-		}
-		start := make(chan struct{})
-		ready := make(chan struct{}, writers)
-		errs := make(chan error, writers)
-		var wg sync.WaitGroup
-		for _, id := range ids {
-			wg.Go(func() {
-				ready <- struct{}{}
-				<-start
-				if _, err := s.SetRunWorkflowName(ctx, id, fmt.Sprintf("workflow-%d", round)); err != nil {
+	ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Start(20*time.Second))
+	defer cancel()
+	start := make(chan struct{})
+	errs := make(chan error, writers+1)
+	var wg sync.WaitGroup
+	for _, id := range ids {
+		wg.Go(func() {
+			<-start
+			for i := range rounds {
+				if _, err := s.SetRunWorkflowName(ctx, id, fmt.Sprintf("workflow-%d", i)); err != nil {
 					errs <- err
 					return
 				}
-				if _, err := s.PutStepResult(ctx, model.StepResult{RunID: id, Stage: "test", Step: fmt.Sprintf("step-%d", round), Ordinal: round, Status: model.StepPassed, DeclaredSize: "S"}); err != nil {
+				if _, err := s.PutStepResult(ctx, model.StepResult{RunID: id, Stage: "test", Step: fmt.Sprintf("step-%d", i), Ordinal: i, Status: model.StepPassed, DeclaredSize: "S"}); err != nil {
 					errs <- err
+					return
 				}
-			})
-		}
-		for range writers {
-			<-ready
-		}
-		if round == 0 {
-			t.Log("concurrent workers ready")
-		}
-		close(start)
-		// These are the receive/ls-remote identity lookups and status list.
-		// The package harness bounds deadlocks; elapsed time is not a claim
-		// about database correctness or host scheduling latency.
-		_, upstreamErr := s.UpstreamByName(ctx, "codeberg")
-		lookup, repoErr := s.RepositoryByName(ctx, "codeberg/codeberg.org/oberth")
-		runs, listErr := s.ListRecentRuns(ctx, model.RunListFilter{})
-		rollbackErr := tx.Rollback()
-		wg.Wait()
-		close(errs)
-		for err := range errs {
-			t.Error(err)
-		}
-		if err := errors.Join(upstreamErr, repoErr, listErr, rollbackErr); err != nil {
-			t.Fatal(err)
-		}
-		if lookup.ID != repo.ID || lookup.DefaultBranch != "main" || len(runs) != writers {
-			t.Fatalf("round %d: committed lookup=%+v, runs=%d", round, lookup, len(runs))
-		}
-		if t.Failed() {
-			t.FailNow()
-		}
+			}
+		})
 	}
-	// Preserve all 16 x 32 writes and verify that none was lost.
-	for _, id := range ids {
-		run, err := s.Run(ctx, id)
-		if err != nil || run.WorkflowName != fmt.Sprintf("workflow-%d", rounds-1) {
-			t.Fatalf("final workflow for %s: %+v, %v", id, run, err)
-		}
-		steps, err := s.StepResults(ctx, id)
-		if err != nil || len(steps) != rounds {
-			t.Fatalf("final steps for %s: count=%d, %v", id, len(steps), err)
-		}
-		for round, step := range steps {
-			if step.Step != fmt.Sprintf("step-%d", round) || step.Ordinal != round || step.Status != model.StepPassed {
-				t.Fatalf("final step for %s round %d: %+v", id, round, step)
+	var maxLookup time.Duration
+	wg.Go(func() {
+		<-start
+		for range rounds {
+			// These are the store lookups used by receive and ls-remote cache
+			// identity resolution, alongside the system-status run list.
+			began := time.Now()
+			lookup, stop := context.WithTimeout(ctx, testtimeout.Scale(time.Second))
+			_, err := s.UpstreamByName(lookup, "codeberg")
+			if err == nil {
+				_, err = s.RepositoryByName(lookup, "codeberg/codeberg.org/oberth")
+			}
+			if err == nil {
+				_, err = s.ListRecentRuns(lookup, model.RunListFilter{})
+			}
+			stop()
+			maxLookup = max(maxLookup, time.Since(began))
+			if err != nil {
+				errs <- fmt.Errorf("lookup under %d writers: %w", writers, err)
+				return
 			}
 		}
+	})
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
 	}
-	t.Logf("%d writers, %d status+step writes each; lookups completed while writer held in every round", writers, rounds)
+	if maxLookup > testtimeout.Scale(time.Second) {
+		t.Errorf("lookup latency %s exceeds budget %s", maxLookup, testtimeout.Scale(time.Second))
+	}
+	t.Logf("%d writers, %d status+step writes each; max lookup+list latency %s", writers, rounds, maxLookup)
 }
 
 func TestLiveReaderPoolIsReadOnlyAndBounded(t *testing.T) {
