@@ -25,6 +25,7 @@ class NameCheckTests(unittest.TestCase):
         subprocess.run(['git', *args], cwd=self.root, env=self.env, check=True, capture_output=True)
 
     def write(self, name, body, tracked=True):
+        (self.root / name).parent.mkdir(parents=True, exist_ok=True)
         (self.root / name).write_bytes(body)
         if tracked:
             self.git('add', '--', name)
@@ -67,14 +68,39 @@ class NameCheckTests(unittest.TestCase):
     def test_runtime_assembled_literals_fail(self):
         first, second = gate.PARTS
         encoded = ''.join('\\x%02x' % ord(char) for char in first)
-        for source in (
-                'name = "".join((%r, %r))' % (first, second),
-                'name = %r + %r' % (first, second),
-                'name = "%s" "%s"' % (first, second),
-                'name = "".join(("%s", "%s"))' % (encoded, second)):
-            with self.subTest(source=source):
-                self.write('fixture.py', source.encode())
+        for name, source in (
+                ('fixture.py', 'name = "".join((%r, %r))' % (first, second)),
+                ('fixture.py', 'name = %r + %r' % (first, second)),
+                ('fixture.py', 'name = "%s" "%s"' % (first, second)),
+                ('fixture.py', 'name = "".join(("%s", "%s"))' % (encoded, second)),
+                ('fixture.go', 'package main\nvar name = "%s" + "%s"' % (first, second)),
+                ('fixture.sh', 'name="%s""%s"' % (first, second)),
+                ('fixture.py', 'name = f"%s{suffix}%s"' % (first, second))):
+            with self.subTest(name=name, source=source):
+                self.write(name, source.encode())
                 self.assertEqual(gate.check(self.root), 1)
+                self.write(name, b'generic content')
+
+    def test_distinctive_fragment_fails_in_all_tracked_file_types(self):
+        for name in ('fixture.go', 'fixture.sh', 'fixture.py', 'fixture.txt',
+                     'fixture.yaml', 'fixture.bin', 'fixture'):
+            for fragment in (gate.PARTS[1], gate.PARTS[1].upper(), gate.PARTS[1].title()):
+                with self.subTest(name=name, fragment=fragment):
+                    self.write(name, b'\0prefix-' + fragment.encode() + b'-suffix')
+                    self.assertEqual(gate.check(self.root), 1)
+                    self.write(name, b'generic content')
+
+    def test_only_the_checker_path_is_exempt_from_fragment_scan(self):
+        fragment = gate.PARTS[1].upper().encode()
+        self.write('hack/check-generic-names.py', fragment)
+        self.write('scratch.txt', fragment, tracked=False)
+        self.assertEqual(gate.check(self.root), 0)
+        for name in ('check-generic-names.py', 'other/check-generic-names.py',
+                     'hack/other.py'):
+            with self.subTest(name=name):
+                self.write(name, fragment)
+                self.assertEqual(gate.check(self.root), 1)
+                self.write(name, b'generic content')
 
     def test_seeded_checkout_with_different_owner_is_scoped_safe(self):
         self.write('fixture.txt', b'generic content')

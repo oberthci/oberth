@@ -54,9 +54,14 @@ def check(root):
                     for path in paths if path.endswith(b'.py') and (root / path.decode()).is_file())
     result = subprocess.run([*git, 'grep', '-i', '-l', '-E', '-e', PATTERN, '--', '.'],
                             cwd=root, capture_output=True)
-    if result.returncode not in (0, 1):
+    # The distinctive fragment also catches assembly in other languages and
+    # non-code files. Only this checker's definition is exempt from that scan.
+    fragment_result = subprocess.run(
+        [*git, 'grep', '-i', '-l', '-F', '-e', PARTS[1], '--', '.',
+         ':(top,exclude)hack/check-generic-names.py'], cwd=root, capture_output=True)
+    if any(scan.returncode not in (0, 1) for scan in (result, fragment_result)):
         raise RuntimeError('tracked-file name check could not run')
-    if bad_paths or assembled or result.returncode == 0:
+    if bad_paths or assembled or result.returncode == 0 or fragment_result.returncode == 0:
         print('Retired product name found in tracked files; use generic names.', file=sys.stderr)
         return 1
     return 0
