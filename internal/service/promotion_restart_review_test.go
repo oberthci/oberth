@@ -1,11 +1,12 @@
 package service
 
 import (
+	"testing"
+	"time"
+
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
-	"testing"
-	"time"
 )
 
 func TestStartupRetriesInterruptedPromotionUnderOriginalGrant(t *testing.T) {
