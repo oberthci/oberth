@@ -92,7 +92,7 @@ func requestLiveRepositoryRemoval(ctx context.Context, path, root, input string)
 	if err != nil {
 		return store.RemovedRepository{}, err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, maximumAdminGateError))
 		return store.RemovedRepository{}, fmt.Errorf("daemon repository removal: %s: %s", response.Status, body)
