@@ -113,7 +113,7 @@ func (gate *weightedAdmission) backfillFitsLocked(head, candidate *admissionRese
 // backfillStateLocked describes the head's backfill window for the
 // admission view and messages.
 func (gate *weightedAdmission) backfillStateLocked(head *admissionReservation, blocker *model.AdmissionBlocker) {
-	if gate.maxHeadWait <= 0 || head.headSince.IsZero() {
+	if gate.maxHeadWait <= 0 || head.headSince.IsZero() || !gate.priorityHeadFitsAlongsideLocked(head, nil) {
 		return
 	}
 	now := gate.clock()
