@@ -33,14 +33,10 @@ func ResourceCeilingForSize(maximum pipeline.Size) (ResourceCeiling, error) {
 	}
 }
 
-// ValidateResourceCeiling reads declarations only. It never defaults, clamps,
-// rounds or changes requests/limits. Call before server helper injection.
-func ValidateResourceCeiling(wf *wfv1.Workflow, repo string, maximum pipeline.Size, deadlineSeconds int64) error {
-	return ValidateResourceCeilingWithCapability(wf, repo, maximum, deadlineSeconds, nil)
-}
-
 // ValidateResourceCeilingWithCapability preserves the ordinary CPU/memory
-// ceilings while admitting only explicitly granted extended dimensions.
+// ceilings while admitting only explicitly granted extended dimensions. It
+// reads declarations without defaulting, clamping or changing resources. Call
+// before server helper injection; nil capability selects ordinary resources.
 func ValidateResourceCeilingWithCapability(wf *wfv1.Workflow, repo string, maximum pipeline.Size, deadlineSeconds int64, capability *Capability) error {
 	if err := capability.Validate(); err != nil {
 		return err
@@ -83,10 +79,6 @@ func ValidateAdministratorResources(c corev1.ResourceRequirements) error {
 		}
 	}
 	return nil
-}
-
-func ValidateResourceRequirements(wf *wfv1.Workflow, repo string, ceiling corev1.ResourceRequirements, deadlineSeconds int64) error {
-	return ValidateResourceRequirementsWithCapability(wf, repo, ceiling, deadlineSeconds, nil)
 }
 
 // ValidateResourceRequirementsWithCapability also enforces operator-owned extended-resource grants.

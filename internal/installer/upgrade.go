@@ -202,12 +202,6 @@ func isPinnedUpgradeKey(key string, pinnedKeys map[string]bool) bool {
 	return false
 }
 
-// checkValuesPinnedConflicts checks parsed YAML data for leaf keys that
-// collide with a pinned upgrade key.
-func checkValuesPinnedConflicts(data []byte) error {
-	return checkUpgradeValuesPinnedConflicts(data, upgradePinnedKeys)
-}
-
 func checkUpgradeValuesPinnedConflicts(data []byte, pinnedKeys map[string]bool) error {
 	var values map[string]any
 	if err := yaml.Unmarshal(data, &values); err != nil {
