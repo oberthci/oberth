@@ -19,9 +19,9 @@ func wifTestConfig() Config {
 	c.ReleaseWIF = &ReleaseWIFConfig{
 		Namespace: c.Namespace,
 		Roles: map[string]ReleaseWIFRole{
-			"image-writer": {Provider: "projects/123/locations/global/workloadIdentityPools/oberth-release-images/providers/tuxbox", ServiceAccount: "image-writer@example-project.iam.gserviceaccount.com"},
-			"image-reader": {Provider: "projects/123/locations/global/workloadIdentityPools/oberth-release-reader/providers/tuxbox", ServiceAccount: "image-reader@example-project.iam.gserviceaccount.com"},
-			"chart-writer": {Provider: "projects/123/locations/global/workloadIdentityPools/oberth-release-charts/providers/tuxbox", ServiceAccount: "chart-writer@example-project.iam.gserviceaccount.com"},
+			"image-writer": {Provider: "projects/123/locations/global/workloadIdentityPools/oberth-release-images/providers/example-node", ServiceAccount: "image-writer@example-project.iam.gserviceaccount.com"},
+			"image-reader": {Provider: "projects/123/locations/global/workloadIdentityPools/oberth-release-reader/providers/example-node", ServiceAccount: "image-reader@example-project.iam.gserviceaccount.com"},
+			"chart-writer": {Provider: "projects/123/locations/global/workloadIdentityPools/oberth-release-charts/providers/example-node", ServiceAccount: "chart-writer@example-project.iam.gserviceaccount.com"},
 		},
 		Repositories: map[string]ReleaseWIFRepository{"github/skipops/oberth": {ServiceAccountName: "oberth-per-repo", Templates: map[string]string{"main": "image-writer"}}},
 	}
