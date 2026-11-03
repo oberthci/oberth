@@ -117,3 +117,39 @@ func TestWorkspaceStatusMCPAndHTTP(t *testing.T) {
 		}
 	}
 }
+
+func TestServeWorkspaceInheritedActiveWindow(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name            string
+		args            []string
+		general, active time.Duration
+		wantErr         bool
+	}{
+		{name: "defaults", general: service.DefaultIssueStaleAfter, active: service.DefaultIssueActiveStaleAfter},
+		{name: "shorter general", args: []string{"--issue-stale-after", "30m"}, general: 30 * time.Minute, active: 30 * time.Minute},
+		{name: "seconds general", args: []string{"--issue-stale-after", "1s"}, general: time.Second, active: time.Second},
+		{name: "larger general", args: []string{"--issue-stale-after", "2h"}, general: 2 * time.Hour, active: time.Hour},
+		{name: "explicit shorter active", args: []string{"--issue-stale-after", "30m", "--issue-active-stale-after", "10m"}, general: 30 * time.Minute, active: 10 * time.Minute},
+		{name: "explicit default longer than general", args: []string{"--issue-stale-after", "30m", "--issue-active-stale-after", "1h"}, wantErr: true},
+		{name: "explicit zero active", args: []string{"--issue-stale-after", "30m", "--issue-active-stale-after", "0s"}, wantErr: true},
+		{name: "zero general", args: []string{"--issue-stale-after", "0s"}, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append([]string{"--argo-namespace", "argo"}, tc.args...)
+			options, err := parseServeOptions(args, io.Discard)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("accepted invalid explicit stale window")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if options.issueStaleAfter != tc.general || options.issueActiveStaleAfter != tc.active {
+				t.Fatalf("windows=%s/%s, want %s/%s", options.issueStaleAfter, options.issueActiveStaleAfter, tc.general, tc.active)
+			}
+		})
+	}
+}

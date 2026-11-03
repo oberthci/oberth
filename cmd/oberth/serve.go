@@ -383,6 +383,15 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	if flags.NArg() != 0 {
 		return serveOptions{}, fmt.Errorf("%w: serve accepts flags only", errUsage)
 	}
+	activeStaleExplicit := false
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "issue-active-stale-after" {
+			activeStaleExplicit = true
+		}
+	})
+	if !activeStaleExplicit {
+		options.issueActiveStaleAfter = min(options.issueActiveStaleAfter, options.issueStaleAfter)
+	}
 	if options.issueStaleAfter <= 0 || options.issueActiveStaleAfter <= 0 || options.issueActiveStaleAfter > options.issueStaleAfter {
 		return serveOptions{}, errors.New("serve: issue stale windows must be positive and active must not exceed general")
 	}

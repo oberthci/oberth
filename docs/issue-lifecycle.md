@@ -80,7 +80,10 @@ existing all-status behavior.
 An open issue is stale when the elapsed time since `updated_at` exceeds its
 window. Closed issues are never stale. The server defaults are seven days,
 and one hour for `active` issues. Configure them with `oberth serve
---issue-stale-after 168h --issue-active-stale-after 1h`. Reads accept
+--issue-stale-after 168h --issue-active-stale-after 1h`. If only the general
+server window is shortened below one hour, the inherited active window is
+capped to match. An explicitly longer active server window is rejected.
+Reads accept
 `stale_after` and `active_stale_after` duration strings (HTTP query parameters
 use the same names); the CLI list uses `--stale-after` and
 `--active-stale-after`. Windows must be positive; the active window cannot
