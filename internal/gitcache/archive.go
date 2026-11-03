@@ -12,9 +12,11 @@ var ErrArchivePendingReceive = errors.New("repository has a pending receive")
 
 func (c *Cache) checkRepositoryActive(ctx context.Context, input string) error {
 	if c.repositoryGate != nil {
-		return c.repositoryGate(ctx, input)
+		if err := c.repositoryGate(ctx, input); err != nil {
+			return err
+		}
 	}
-	return nil
+	return c.checkReceiveOutbox(input)
 }
 
 // ChangeRepositoryArchive serializes the catalog transition and cache removal

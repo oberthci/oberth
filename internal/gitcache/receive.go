@@ -291,6 +291,10 @@ func (c *Cache) ReplayPending(ctx context.Context, handler ReceiveHandler) error
 	}
 	var replayErrs []error
 	for _, item := range pending {
+		if item.State == "quarantined" {
+			c.logger.Printf("WARN: receive outbox repository=%q quarantined; original record retained; operator repair required", item.Repo)
+			continue
+		}
 		// item.Repo is the reservation identity (a valid repository input:
 		// bare for legacy flat reservations, upstream/org/repo for qualified
 		// ones), so path resolution and replay address exactly one cache.
@@ -305,7 +309,9 @@ func (c *Cache) ReplayPending(ctx context.Context, handler ReceiveHandler) error
 		}
 		err := c.replayRepoSerialized(ctx, item.Repo, path, handler)
 		receiveLock.Unlock()
-		if err != nil {
+		if errors.Is(err, ErrCorruptReceiveReservation) {
+			c.logger.Printf("WARN: receive outbox repository=%q quarantined; original record retained; operator repair required", item.Repo)
+		} else if err != nil {
 			replayErrs = append(replayErrs, fmt.Errorf("replay receive for %s: %w", item.Repo, err))
 		}
 	}
@@ -328,6 +334,13 @@ func (c *Cache) PendingReceives() ([]PendingReceive, error) {
 		// no "@" and round-trips unchanged.
 		identity := strings.ReplaceAll(strings.TrimSuffix(entry.Name(), ".json"), "@", "/")
 		reservation, err := c.readReservation(identity)
+		if errors.Is(err, ErrCorruptReceiveReservation) {
+			result = append(result, PendingReceive{Repo: identity, State: "quarantined"})
+			continue
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		} // another replay completed
 		if err != nil {
 			return nil, err
 		}
@@ -474,24 +487,38 @@ func (c *Cache) readReservation(repo string) (receiveReservation, error) {
 	if err != nil {
 		return receiveReservation{}, err
 	}
-	// reservationPath canonicalizes the repository name and proves containment
-	// under the configured outbox root before this variable-path read.
-	body, err := os.ReadFile(path) //nolint:gosec
+	// Keep corrupt evidence in place. Bound the read before JSON decoding;
+	// a malformed record must not consume startup memory without a limit.
+	info, err := os.Lstat(path)
 	if err != nil {
 		return receiveReservation{}, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > 8<<20 {
+		return receiveReservation{}, fmt.Errorf("%w: repository %s has an invalid outbox file", ErrCorruptReceiveReservation, repo)
+	}
+	file, err := os.Open(path) //nolint:gosec -- reservationPath proves containment.
+	if err != nil {
+		return receiveReservation{}, err
+	}
+	body, readErr := io.ReadAll(io.LimitReader(file, (8<<20)+1))
+	if err = errors.Join(readErr, file.Close()); err != nil {
+		return receiveReservation{}, err
+	}
+	if len(body) > 8<<20 {
+		return receiveReservation{}, fmt.Errorf("%w: repository %s outbox exceeds its bound", ErrCorruptReceiveReservation, repo)
 	}
 	var reservation receiveReservation
 	decoder := json.NewDecoder(strings.NewReader(string(body)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&reservation); err != nil {
-		return receiveReservation{}, fmt.Errorf("decode receive reservation for %s: %w", repo, err)
+		return receiveReservation{}, fmt.Errorf("%w: repository %s contains invalid JSON", ErrCorruptReceiveReservation, repo)
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		return receiveReservation{}, fmt.Errorf("receive reservation for %s has trailing data", repo)
+		return receiveReservation{}, fmt.Errorf("%w: repository %s contains trailing data", ErrCorruptReceiveReservation, repo)
 	}
 	if err := validateReservation(reservation, repo); err != nil {
-		return receiveReservation{}, err
+		return receiveReservation{}, fmt.Errorf("%w: repository %s has invalid reservation metadata", ErrCorruptReceiveReservation, repo)
 	}
 	return reservation, nil
 }
@@ -618,4 +645,23 @@ func newReceiveID() (string, error) {
 		return "", fmt.Errorf("generate receive reservation id: %w", err)
 	}
 	return hex.EncodeToString(value[:]), nil
+}
+
+// ErrCorruptReceiveReservation is repository-local. No caller may mutate that
+// cache until its original durable outbox record has been repaired.
+var ErrCorruptReceiveReservation = errors.New("corrupt receive outbox; repository quarantined")
+
+func (c *Cache) checkReceiveOutbox(input string) error {
+	if c.outboxRoot == "" {
+		return nil
+	}
+	repo, path, err := c.path(input)
+	if err != nil {
+		return err
+	}
+	_, err = c.readReservation(c.reservationIdentity(repo, path))
+	if err == nil || errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
 }

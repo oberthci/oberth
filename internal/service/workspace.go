@@ -54,7 +54,7 @@ func (lifecycle *workspaceLifecycle) cleanupRun(ctx context.Context, runID strin
 		return err
 	}
 	if err := lifecycle.remove(path); err != nil {
-		return fmt.Errorf("remove terminal run workspace %s: %w", runID, err)
+		return &workspaceRemovalError{fmt.Errorf("remove terminal run workspace %s: %w", runID, err)}
 	}
 	// Contract metadata lives outside the checkout, but has the same durable
 	// terminal-owner/pending-cancellation guard. Startup recovery retries this
@@ -78,7 +78,7 @@ func (lifecycle *workspaceLifecycle) cleanupPromotion(ctx context.Context, promo
 		return err
 	}
 	if err := lifecycle.remove(path); err != nil {
-		return fmt.Errorf("remove terminal promotion workspace %s: %w", promotionID, err)
+		return &workspaceRemovalError{fmt.Errorf("remove terminal promotion workspace %s: %w", promotionID, err)}
 	}
 	return nil
 }
@@ -133,7 +133,7 @@ func (lifecycle *workspaceLifecycle) recoverRuns(ctx context.Context) error {
 			return err
 		}
 		for _, id := range ids {
-			if err := lifecycle.cleanupRun(ctx, id); err != nil {
+			if err := lifecycle.cleanupRunDeferred(ctx, id); err != nil {
 				return err
 			}
 		}
@@ -152,7 +152,7 @@ func (lifecycle *workspaceLifecycle) recoverPromotions(ctx context.Context) erro
 			return err
 		}
 		for _, id := range ids {
-			if err := lifecycle.cleanupPromotion(ctx, id); err != nil {
+			if err := lifecycle.cleanupPromotionDeferred(ctx, id); err != nil {
 				return err
 			}
 		}
@@ -196,4 +196,39 @@ func validWorkspaceOwnerID(value string) bool {
 		}
 	}
 	return true
+}
+
+// Only filesystem removal failures are deferred. Ownership, path validation,
+// and database failures keep their normal fail-closed behavior.
+type workspaceRemovalError struct{ error }
+
+func deferWorkspaceRemoval(err error) error {
+	var removal *workspaceRemovalError
+	if errors.As(err, &removal) {
+		log.Printf("WARN: workspace cleanup pending: %v", err)
+		return nil
+	}
+	return err
+}
+func (lifecycle *workspaceLifecycle) cleanupRunDeferred(ctx context.Context, id string) error {
+	return deferWorkspaceRemoval(lifecycle.cleanupRun(ctx, id))
+}
+func (lifecycle *workspaceLifecycle) cleanupPromotionDeferred(ctx context.Context, id string) error {
+	return deferWorkspaceRemoval(lifecycle.cleanupPromotion(ctx, id))
+}
+func (scheduler *Scheduler) sweepWorkspaces(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		sweepCtx, cancel := context.WithTimeout(ctx, workspaceCleanupTimeout)
+		if err := scheduler.workspaces.recover(sweepCtx); err != nil && ctx.Err() == nil {
+			log.Printf("WARN: workspace sweep incomplete: %v", err)
+		}
+		cancel()
+	}
 }

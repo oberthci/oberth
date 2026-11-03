@@ -65,14 +65,29 @@ func TestWorkspaceCleanupFailureDoesNotRepaintTerminalRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	failedPath = filepath.Join(fixture.root, "work", enqueued.ID)
-	if err := scheduler.ProcessNext(ctx); !errors.Is(err, cleanupErr) {
-		t.Fatalf("cleanup error = %v, want %v", err, cleanupErr)
+	if err := scheduler.ProcessNext(ctx); err != nil {
+		t.Fatalf("cleanup stopped dispatch: %v", err)
 	}
 	finished, err := fixture.store.Run(ctx, enqueued.ID)
 	if err != nil || finished.Status != model.RunFailed {
 		t.Fatalf("run after cleanup failure = %#v, %v", finished, err)
 	}
 	assertWorkspaceExists(t, failedPath)
+
+	if err := scheduler.recoverOwnedWorkspaces(ctx); err != nil {
+		t.Fatalf("cleanup stopped startup: %v", err)
+	}
+	later, err := scheduler.EnqueueCI(ctx, CIRequest{EventID: "after-cleanup-failure", Repository: fixture.repo, Branch: "feature/later", SHA: "cccccccccccccccccccccccccccccccccccccccc", Actor: "agent@host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := scheduler.ProcessNext(ctx); err != nil {
+		t.Fatalf("subsequent dispatch: %v", err)
+	}
+	laterRun, err := fixture.store.Run(ctx, later.ID)
+	if err != nil || !laterRun.Status.Terminal() {
+		t.Fatalf("subsequent run did not complete: %#v %v", laterRun, err)
+	}
 
 	restarted, err := NewScheduler(SchedulerConfig{
 		Store: fixture.store, Git: fixture.git, Logs: fixture.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs,

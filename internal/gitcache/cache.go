@@ -1114,6 +1114,9 @@ func (c *Cache) Serve(ctx context.Context, input string, service Service, protoc
 		return err
 	}
 	defer lock.RUnlock()
+	if err := c.checkReceiveOutbox(input); err != nil {
+		return err
+	}
 	if !c.isBare(ctx, path) {
 		return fmt.Errorf("repository %s is not cached", repo)
 	}

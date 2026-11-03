@@ -571,13 +571,18 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err := store.SweepBackupStagingAtStartup(options.database); err != nil {
 		logger.Printf("WARNING: interrupted database snapshot cleanup incomplete; inspect/remove the named stale entry: %v", err)
 	}
-
-	restConfig, err := rest.InClusterConfig()
+	stopBootstrap, _, err := startBootstrapHealth(ctx, options.httpsListen)
+	if err != nil {
+		return fmt.Errorf("start bootstrap health: %w", err)
+	}
+	defer stopBootstrap()
+	var restConfig *rest.Config
+	err = inClusterConfigWithRetry(ctx, func() error { var err error; restConfig, err = rest.InClusterConfig(); return err })
 	if err != nil {
 		return fmt.Errorf("load in-cluster Kubernetes config: %w", err)
 	}
 	{
-		if err := bootstrapRuntimeIdentities(ctx, &options); err != nil {
+		if err := retryStartup(ctx, 2*time.Minute, time.Second, func(attempt context.Context) error { return bootstrapRuntimeIdentities(attempt, &options) }, transientIdentityStartup, logger); err != nil {
 			return fmt.Errorf("load OpenBao identities: %w", err)
 		}
 	}
@@ -590,7 +595,12 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
-	hostKey, err := readBoundedFile(options.sshHostKey, 1<<20)
+	var hostKey []byte
+	err = retryStartup(ctx, 6*time.Second, 2*time.Second, func(context.Context) error {
+		var err error
+		hostKey, err = readBoundedFile(options.sshHostKey, 1<<20)
+		return err
+	}, func(err error) bool { return errors.Is(err, os.ErrNotExist) }, logger)
 	if err != nil {
 		return fmt.Errorf("read SSH host key: %w", err)
 	}
@@ -1263,6 +1273,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		watchNonExpiringUplinkTokens(tokenWarningCtx, database.CountNonExpiringUplinkTokens, logger)
 	}()
 	defer func() { stopTokenWarnings(); <-tokenWarningsDone }()
+	stopBootstrap()
 	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, withRepositoryRemoval(newAdminGateServerWithTokenPolicy(anchors.AllowMutation, options.database, scheduler.NotifyQueue, options.uplinkTokenPolicy, queueSnapshot.current), anchors.AllowMutation, options.database, database, git), activateScheduler, accessReconciler, schedules, ciIssues, retention, logger, controlAPI.Shutdown, httpAPI.BeginDrain)
 }
 

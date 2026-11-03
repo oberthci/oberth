@@ -64,7 +64,7 @@ func readAppliedMigrations(ctx context.Context, q migrationQuerier) (map[int]boo
 			return nil, 0, fmt.Errorf("read applied migration: %w", err)
 		}
 		if version > latestMigrationVersion {
-			return nil, 0, fmt.Errorf("%w: database=%d binary=%d", ErrSchemaTooNew, version, latestMigrationVersion)
+			return nil, 0, fmt.Errorf("%w: database=%d binary=%d; see docs/upgrade-schema-v3.md", ErrSchemaTooNew, version, latestMigrationVersion)
 		}
 		if version < 1 || applied[version] {
 			return nil, 0, fmt.Errorf("%w: invalid or duplicate applied migration version %d", ErrSchemaIncompatible, version)

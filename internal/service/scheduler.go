@@ -422,7 +422,7 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 		}
 		scheduler.admission.releaseDeletedRun(cancellation.RunID)
 		cleanupCtx, cancelCleanup := boundedWorkspaceCleanupContext(ctx)
-		cleanupErr := scheduler.workspaces.cleanupRun(cleanupCtx, cancellation.RunID)
+		cleanupErr := scheduler.workspaces.cleanupRunDeferred(cleanupCtx, cancellation.RunID)
 		cancelCleanup()
 		if cleanupErr != nil {
 			return fmt.Errorf("clean canceled run workspace %s: %w", cancellation.RunID, cleanupErr)
@@ -526,6 +526,8 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 	}
 	scheduler.dispatchProgress.Beat()
 	dispatchCtx := withDispatchProgress(workerCtx, &scheduler.dispatchProgress)
+	workers.Add(1)
+	go func() { defer workers.Done(); scheduler.sweepWorkspaces(workerCtx) }()
 	scheduler.startupRecovered.Store(true)
 	defer scheduler.startupRecovered.Store(false)
 	if scheduler.onStartupRecovered != nil {
@@ -755,13 +757,13 @@ func (scheduler *Scheduler) executeAndCleanupReservedWithGate(
 		}
 	}
 	settleErr := scheduler.database().CompleteSupersededRunCancellationWithoutJob(cleanupCtx, run.ID)
-	cleanupErr := scheduler.workspaces.cleanupRun(cleanupCtx, run.ID)
+	cleanupErr := scheduler.workspaces.cleanupRunDeferred(cleanupCtx, run.ID)
 	if run.Trigger == "promotion" {
 		promotion, err := scheduler.database().PromotionByRun(cleanupCtx, run.ID)
 		if err != nil {
 			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("load promotion workspace owner for run %s: %w", run.ID, err))
 		} else {
-			cleanupErr = errors.Join(cleanupErr, scheduler.workspaces.cleanupPromotion(cleanupCtx, promotion.ID))
+			cleanupErr = errors.Join(cleanupErr, scheduler.workspaces.cleanupPromotionDeferred(cleanupCtx, promotion.ID))
 		}
 	}
 	return errors.Join(executeErr, settleErr, cleanupErr)
@@ -1602,12 +1604,12 @@ func (scheduler *Scheduler) recoverPublicationIDsWithGate(ctx context.Context, i
 		var cleanupErr error
 		if finalization.Run.ID != "" {
 			beatDispatch(ctx)
-			cleanupErr = scheduler.workspaces.cleanupRun(ctx, finalization.Run.ID)
+			cleanupErr = scheduler.workspaces.cleanupRunDeferred(ctx, finalization.Run.ID)
 			beatDispatch(ctx)
 		}
 		if finalization.Promotion.ID != "" {
 			beatDispatch(ctx)
-			cleanupErr = errors.Join(cleanupErr, scheduler.workspaces.cleanupPromotion(ctx, finalization.Promotion.ID))
+			cleanupErr = errors.Join(cleanupErr, scheduler.workspaces.cleanupPromotionDeferred(ctx, finalization.Promotion.ID))
 			beatDispatch(ctx)
 		}
 		if cleanupErr != nil {
@@ -1842,7 +1844,7 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 				scheduler.signals.NotifyRun(run.ID)
 				scheduler.signals.NotifyRun(requeued.ID)
 				cleanupCtx, cancelCleanup := boundedWorkspaceCleanupContext(ctx)
-				_ = scheduler.workspaces.cleanupRun(cleanupCtx, run.ID)
+				_ = scheduler.workspaces.cleanupRunDeferred(cleanupCtx, run.ID)
 				cancelCleanup()
 				continue
 			}
@@ -1880,10 +1882,10 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 		}
 		_ = scheduler.database().CompleteRunCancellation(ctx, run.ID, run.WorkflowName)
 		cleanupCtx, cancelCleanup := boundedWorkspaceCleanupContext(ctx)
-		_ = scheduler.workspaces.cleanupRun(cleanupCtx, run.ID)
+		_ = scheduler.workspaces.cleanupRunDeferred(cleanupCtx, run.ID)
 		if run.Trigger == "promotion" {
 			if promotion, promotionErr := scheduler.database().PromotionByRun(cleanupCtx, run.ID); promotionErr == nil {
-				_ = scheduler.workspaces.cleanupPromotion(cleanupCtx, promotion.ID)
+				_ = scheduler.workspaces.cleanupPromotionDeferred(cleanupCtx, promotion.ID)
 			}
 		}
 		cancelCleanup()

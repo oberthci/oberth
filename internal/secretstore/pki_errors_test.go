@@ -81,3 +81,17 @@ func TestPKIErrorBodyLimitAndEndpointIsolation(t *testing.T) {
 		}
 	}
 }
+
+func TestSanitizedTransportPreservesTransientClassification(t *testing.T) {
+	for _, tc := range []struct {
+		cause error
+		want  bool
+	}{
+		{syscall.ECONNREFUSED, true}, {context.DeadlineExceeded, true}, {x509.UnknownAuthorityError{}, false}, {&net.DNSError{IsTimeout: true}, true}, {errors.New("invalid request"), false},
+	} {
+		err := sanitizeSecretStoreHTTPError("startup", tc.cause)
+		if IsUnavailable(err) != tc.want {
+			t.Fatalf("%v retry=%v want=%v", err, IsUnavailable(err), tc.want)
+		}
+	}
+}

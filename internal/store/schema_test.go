@@ -1304,7 +1304,7 @@ func TestOpenRejectsLegacyAndFutureSchemaVersions(t *testing.T) {
 		{
 			name: "future schema", version: 99,
 			wantError:  ErrSchemaTooNew,
-			wantDetail: fmt.Sprintf("database=99 binary=%d", latestMigrationVersion),
+			wantDetail: fmt.Sprintf("database=99 binary=%d; see docs/upgrade-schema-v3.md", latestMigrationVersion),
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {

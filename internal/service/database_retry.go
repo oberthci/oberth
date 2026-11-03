@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -19,6 +20,7 @@ type databaseRetryKey struct{}
 type databaseRetryScope struct {
 	lifetime context.Context
 	owner    *Scheduler
+	maximum  time.Duration
 }
 
 // Retry only homogeneous transient storage failures. In particular, joining
@@ -72,6 +74,7 @@ func transientDatabaseAttemptError(err error, expired bool) bool {
 // A background owner keeps the exact storage continuation pending, rather than
 // replaying its surrounding Workflow creation, observation or Git mutation.
 // Single storage calls have fresh 10s budgets; backoff is capped at 5s.
+// Continuous contention fails after two minutes so it cannot look like progress.
 // Owner shutdown stops retries between attempts, never an in-flight detached
 // cleanup/finalization. Calls starting after shutdown use the original context.
 // No retry scope is installed on client request contexts.
@@ -91,9 +94,20 @@ func retryDatabaseClassified[T any](ctx context.Context, operation string, budge
 	if budget > 0 {
 		base = context.WithoutCancel(ctx)
 	}
+	maximum := scope.maximum
+	if maximum <= 0 {
+		maximum = 2 * time.Minute
+	}
+	base, cancelTotal := context.WithTimeout(base, maximum)
+	defer cancelTotal()
+	deadline, _ := base.Deadline()
 	delay := databaseRetryMinimum
 	var nextLog time.Time
 	for {
+		if !time.Now().Before(deadline) {
+			var value T
+			return value, fmt.Errorf("database operation %s exhausted retry budget %s: %w", operation, maximum, context.DeadlineExceeded)
+		}
 		// A storage call that ignores its deadline remains a local wedge.
 		// Suspend only the intentional retry sleep after a completed failure.
 		beatDispatch(ctx)
@@ -112,7 +126,7 @@ func retryDatabaseClassified[T any](ctx context.Context, operation string, budge
 			return value, scope.lifetime.Err()
 		}
 		if base.Err() != nil {
-			return value, base.Err()
+			return value, fmt.Errorf("database operation %s exhausted retry budget %s: %w", operation, maximum, base.Err())
 		}
 		if !transient(err, expired) {
 			return value, err
@@ -122,7 +136,7 @@ func retryDatabaseClassified[T any](ctx context.Context, operation string, budge
 			log.Printf("WARN: scheduler database operation=%s retry_pending=true retries_total=%d retry_in=%s error=%q", operation, total, delay, err)
 			nextLog = now.Add(30 * time.Second)
 		}
-		if err := waitDatabaseRetry(ctx, scope.lifetime, delay); err != nil {
+		if err := waitDatabaseRetry(ctx, scope.lifetime, min(delay, time.Until(deadline))); err != nil {
 			return value, err
 		}
 		delay = min(2*delay, databaseRetryMaximum)

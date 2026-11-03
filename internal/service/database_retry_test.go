@@ -499,3 +499,13 @@ func awaitDeadlineSubmitted(t *testing.T, database *store.Store, id string, done
 		}
 	}
 }
+
+func TestDatabaseRetryHasTotalBudget(t *testing.T) {
+	scheduler := &Scheduler{}
+	ctx := context.WithValue(t.Context(), databaseRetryKey{}, &databaseRetryScope{lifetime: t.Context(), owner: scheduler, maximum: 20 * time.Millisecond})
+	calls := 0
+	_, err := retryDatabaseClassified(ctx, "permanent contention", time.Second, func(context.Context) (int, error) { calls++; return 0, deadlineBusyError(5) }, transientDatabaseAttemptError)
+	if !errors.Is(err, context.DeadlineExceeded) || calls == 0 || calls > 2 {
+		t.Fatalf("unbounded retry: calls=%d err=%v", calls, err)
+	}
+}
