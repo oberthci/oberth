@@ -25,7 +25,7 @@ class ContractGuards(unittest.TestCase):
     def test_laws_and_structural_rules(self):
         cases = [
             ("a.go", "// MUST match another value", "law1-confession"),
-            ("a.md", "falls back automatically", "law2-retired"),
+            ("a.md", "| option | DEFAULT_MODE |", "law2-handtyped-table"),
             ("a.go", 'os.Getenv("NEW_MODE")', "law3-surface"),
             ("a.go", "// temporary workaround", "law4-unregistered"),
             ("a.md", "/home/example", "law5-residue"),
@@ -76,12 +76,18 @@ class ContractGuards(unittest.TestCase):
             with self.subTest(source=source):
                 self.assertIn('law5-residue', [r for r, _, _ in self.scan('a.md', source)])
 
-    def test_shared_namespace_rules_remain_enforced(self):
-        retired = CHECK.PRODUCT_NAMESPACE + '-operator-certs'
-        self.assertIn('law2-retired', [r for r, _, _ in self.scan('a.md', retired)])
-        annotation = '"' + CHECK.PRODUCT_NAMESPACE + '.io/new-mode"'
-        self.assertIn('law3-surface', [r for r, _, _ in self.scan('a.go', annotation)])
-        self.assertIn('law3-surface', [r for r, _, _ in self.scan('a.go', '"oberth.ci/new-mode"', module='github.com/oberthci/oberth')])
+    def test_build_annotation_requires_registration(self):
+        self.assertIn('law3-surface', [r for r, _, _ in self.scan('a.go', '"oberth.ci/new-mode"')])
+
+    def test_generic_registry_test_reference(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "deprecations.yaml").write_text('{"deprecations":[]}')
+            (root / "surface-registry.json").write_text('{"entries":{"annotation:oberth.ci/build-mode":{"doc_anchor":"build.md#mode","test_ref":"build admission"}}}')
+            CHECK.validate_registries(root)
+            (root / "surface-registry.json").write_text('{"entries":{"annotation:oberth.ci/build-mode":{"doc_anchor":"build.md#mode"}}}')
+            with self.assertRaisesRegex(ValueError, "test_ref"):
+                CHECK.validate_registries(root)
 
     def test_expired_sunset_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
