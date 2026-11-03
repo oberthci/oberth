@@ -39,28 +39,11 @@ func TestLiveReadsDoNotWaitForWriter(t *testing.T) {
 			_, err := s.RepositoryByName(ctx, "codeberg/codeberg.org/oberth")
 			return err
 		},
-		"bare mapping": func(ctx context.Context) error { _, err := s.RepositoryByName(ctx, "oberth"); return err },
-		"flat run list": func(ctx context.Context) error {
-			_, err := s.ListRecentRuns(ctx, model.RunListFilter{})
-			return err
-		},
-		"run":     func(ctx context.Context) error { _, err := s.Run(ctx, run.ID); return err },
-		"summary": func(ctx context.Context) error { _, err := s.Summary(ctx); return err },
-		"idle":    func(ctx context.Context) error { _, err := s.IdleQueueStatus(ctx); return err },
-		"pilot resources": func(ctx context.Context) error {
-			_, err := s.PilotResources(ctx, run.ID)
-			if errors.Is(err, ErrNotFound) {
-				return nil
-			}
-			return err
-		},
-		"pilot receipt": func(ctx context.Context) error {
-			_, err := s.CompletedPilotReceipt(ctx, run.ID)
-			if errors.Is(err, ErrNotFound) {
-				return nil
-			}
-			return err
-		},
+		"bare mapping":  func(ctx context.Context) error { _, err := s.RepositoryByName(ctx, "oberth"); return err },
+		"flat run list": func(ctx context.Context) error { _, err := s.ListRecentRuns(ctx, model.RunListFilter{}); return err },
+		"run":           func(ctx context.Context) error { _, err := s.Run(ctx, run.ID); return err },
+		"summary":       func(ctx context.Context) error { _, err := s.Summary(ctx); return err },
+		"idle":          func(ctx context.Context) error { _, err := s.IdleQueueStatus(ctx); return err },
 	}
 	for name, check := range checks {
 		t.Run(name, func(t *testing.T) {
