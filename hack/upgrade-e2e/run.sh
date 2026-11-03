@@ -110,17 +110,22 @@ for version in "${versions[@]}"; do
   git -C "$repo" diff --exit-code "$base" "$candidate" -- Dockerfile internal/staticgit hack/build-static-git.sh hack/static-git-no-shell.patch hack/install-static-git-packages.sh >"$evidence/substrate-$version.diff"
   (cd "$private/source-$version" && go build -p=2 -trimpath -buildvcs=false -ldflags "-s -w -X main.version=${candidate_versions[$version]}-e2e-${candidate:0:8}" -o "$private/oberth-$version" ./cmd/oberth)
 done
-mkdir -p "$private/source-baseline/hack/upgrade-e2e/fixture"
-cp "$here/fixture/main.go" "$private/source-baseline/hack/upgrade-e2e/fixture/"
-(cd "$private/source-baseline" && go build -p=2 -trimpath -buildvcs=false -o "$private/fixture" ./hack/upgrade-e2e/fixture)
+for version in baseline "${versions[@]}"; do
+  mkdir -p "$private/source-$version/hack/upgrade-e2e/fixture"
+  cp "$here"/fixture/*.go "$private/source-$version/hack/upgrade-e2e/fixture/"
+  (cd "$private/source-$version" && go test -p=2 -parallel=2 ./hack/upgrade-e2e/fixture && go build -p=2 -trimpath -buildvcs=false -o "$private/fixture-$version" ./hack/upgrade-e2e/fixture)
+done
+last=${versions[${#versions[@]}-1]}
+bash "$here/migration-probe.sh" "$private/source-$last" "$private/fixture-baseline" \
+  "$("$private/oberth-$last" version --schema)" "$published" "$evidence"
 docker pull "$published"
-printf 'FROM %s\nCOPY --chmod=0755 fixture /fixture\nENTRYPOINT ["/fixture"]\n' "$published" >"$private/Dockerfile.fixture"
-printf '*\n!fixture\n!oberth-candidate-*\n' >"$private/.dockerignore"
+printf 'FROM %s\nCOPY --chmod=0755 fixture-baseline /fixture\nENTRYPOINT ["/fixture"]\n' "$published" >"$private/Dockerfile.fixture"
+printf '*\n!fixture-*\n!oberth-candidate-*\n' >"$private/.dockerignore"
 images+=("$fixture_image")
 docker build -f "$private/Dockerfile.fixture" -t "$fixture_image" "$private"
 for version in "${versions[@]}"; do
   img="oberth-upgrade-e2e:$version-$$"; images+=("$img")
-  printf 'FROM %s\nCOPY --chmod=0755 oberth-%s /usr/local/bin/oberth\n' "$published" "$version" >"$private/Dockerfile.$version"
+  printf 'FROM %s\nCOPY --chmod=0755 oberth-%s /usr/local/bin/oberth\nCOPY --chmod=0755 fixture-%s /fixture\n' "$published" "$version" "$version" >"$private/Dockerfile.$version"
   docker build -f "$private/Dockerfile.$version" -t "$img" "$private"
   docker image inspect "$img" --format '{{.Id}}' >"$evidence/image-$version.txt"
 done
@@ -187,6 +192,7 @@ spec:
     - name: fixture
       image: $fixture_image
       imagePullPolicy: Never
+      command: [/fixture]
       args: [$mode, /data/oberth.sqlite]
       volumeMounts:
         - name: data
@@ -236,11 +242,17 @@ snapshot() {
   k -n oberth get deploy oberth -o jsonpath='{.spec.template.spec.priorityClassName}' >"$evidence/pod-priority-$phase.txt"
 }
 snapshot baseline
+previous=baseline
 for version in "${versions[@]}"; do
+  started=$(date +%s%N)
+  printf '%s\n' "$started" >"$evidence/upgrade-start-$version.txt"
   "$helm" upgrade oberth "$private/source-$version/charts/oberth" -n oberth --reuse-values \
     --set-string "image.ref=${candidate_refs[$version]}" --set image.pullPolicy=Never --wait --timeout 180s
+  fixture_image="oberth-upgrade-e2e:$version-$$"
+  expected_schema=$("$private/oberth-$version" version --schema)
   snapshot "$version"
-  for artifact in state priorities workflow pod-priority; do
+  "$private/fixture-baseline" verify "$evidence/state-$previous.json" "$evidence/state-$version.json" "$expected_schema" "$started"
+  for artifact in priorities workflow pod-priority; do
     ext=json; [[ $artifact != pod-priority ]] || ext=txt
     cmp "$evidence/$artifact-baseline.$ext" "$evidence/$artifact-$version.$ext"
   done
@@ -248,10 +260,12 @@ for version in "${versions[@]}"; do
   k -n oberth rollout restart deploy/oberth
   k -n oberth rollout status deploy/oberth --timeout=180s
   snapshot "$version-restart"
-  for artifact in state priorities workflow pod-priority; do
+  "$private/fixture-baseline" verify "$evidence/state-$version.json" "$evidence/state-$version-restart.json" "$expected_schema" "$started"
+  for artifact in priorities workflow pod-priority; do
     ext=json; [[ $artifact != pod-priority ]] || ext=txt
     cmp "$evidence/$artifact-baseline.$ext" "$evidence/$artifact-$version-restart.$ext"
   done
+  previous=$version-restart
 done
 k -n oberth get secrets -o json | jq -e '[.items[]|select(.type!="helm.sh/release.v1")]|length==0' >/dev/null
 printf 'PASS: release signature, behavioral red/green, five durable runs, ledger timestamps, priority classes, Workflow UID, upgrades and repeat restarts\n'

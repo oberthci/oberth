@@ -49,8 +49,12 @@ values. The test does not cover production TLS, networking or OpenBao recovery.
 In the Oberth namespace, Helm release metadata is the only Kubernetes Secret
 type permitted.
 
-After each Helm upgrade and another server restart, the script compares every
-migration version and original application timestamp, run ID, commit, sequence,
+After each Helm upgrade, the script checks that every existing migration row is
+unchanged and that each new version appears exactly once with an application
+time at or after upgrade start. The ledger must reach the target binary’s
+reported schema version. A repeat restart must leave every row unchanged.
+Snapshots use the target source’s store reader. Comparisons retain integer
+nanosecond precision. The script also compares every run ID, commit, sequence,
 status, phase and priority, the Workflow UID and running state, all release
 PriorityClass UIDs and scheduling settings, and the server Pod's class. Every
 observed server Pod must be ready with zero container restarts. The fixture
@@ -58,8 +62,13 @@ snapshot uses read-only access to the database. Evidence goes under
 a new temporary directory by default;
 set `E2E_EVIDENCE` to choose another directory.
 
-This release path currently has schema version 39 on all three sources. It
-checks that migrations already applied once retain their original ledger rows;
-it does not exercise a newly introduced schema migration. The observation window
-is bounded by the rehearsal and does not prove long-term crash freedom. Full
-suites remain pending CI.
+An additional isolated source mutation appends one real migration after the
+last candidate’s schema version. The ordinary migration engine applies it to a
+published-source fixture database, then reopens that database. The probe checks
+that the new row appears once, existing rows retain exact timestamps, the target
+reader accepts it, and the published reader refuses the newer schema. Evidence
+is named `migration-probe-*`. This source mutation is never used by the live
+candidate images and does not qualify a release containing that migration.
+
+The observation window is bounded by the rehearsal and does not prove long-term
+crash freedom. Full suites remain pending CI.

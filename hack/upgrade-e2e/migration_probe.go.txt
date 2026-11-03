@@ -1,0 +1,11 @@
+package store
+
+// This file is injected only into an archived source tree. It never changes
+// the exact candidates qualified by the live upgrade rehearsal.
+func init() {
+	migrations = append(migrations, migration{
+		version: latestMigrationVersion,
+		sql: `CREATE TABLE upgrade_e2e_probe (id INTEGER PRIMARY KEY);
+INSERT INTO upgrade_e2e_probe(id) VALUES(1);`,
+	})
+}

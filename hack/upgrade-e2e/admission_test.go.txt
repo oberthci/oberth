@@ -1,24 +1,27 @@
 package service
 
 import (
- "testing"
- "time"
- "github.com/oberthci/oberth/internal/model"
- "github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/internal/model"
+	"testing"
+	"time"
 )
 
 // The same test is copied unchanged into each release source. v0.17.81 holds
 // this measured lower-priority work; the candidate admits it before the head.
 func TestUpgradeE2EMeasuredBackfillBehindHighest(t *testing.T) {
- clock := &fakeClock{now:time.Date(2026,11,3,1,0,0,0,time.UTC)}
- gate := backfillGate(clock)
- running := gate.reserve(1)
- acquireRequestWithinBudget(t,running,admissionRequest{RunID:"running",Size:periapsis.M,Estimate:time.Hour})
- t.Cleanup(running.release)
- head := pending(t,gate,2,admissionRequest{RunID:"highest",Size:periapsis.XL,Estimate:time.Hour})
- t.Cleanup(head.cancel)
- gate.mu.Lock(); head.priority=model.PriorityHighest; gate.mu.Unlock()
- short := pending(t,gate,3,admissionRequest{RunID:"short",Size:periapsis.S,Estimate:time.Minute})
- t.Cleanup(short.cancel)
- if !granted(gate,short) || granted(gate,head) { t.Fatal("measured short run must backfill without delaying the highest-priority head") }
+	clock := &fakeClock{now: time.Date(2026, 11, 3, 1, 0, 0, 0, time.UTC)}
+	gate := backfillGate(clock)
+	running := gate.reserve(1)
+	acquireRequestWithinBudget(t, running, admissionRequest{RunID: "running", Size: "M", Estimate: time.Hour})
+	t.Cleanup(running.release)
+	head := pending(t, gate, 2, admissionRequest{RunID: "highest", Size: "XL", Estimate: time.Hour})
+	t.Cleanup(head.cancel)
+	gate.mu.Lock()
+	head.priority = model.PriorityHighest
+	gate.mu.Unlock()
+	short := pending(t, gate, 3, admissionRequest{RunID: "short", Size: "S", Estimate: time.Minute})
+	t.Cleanup(short.cancel)
+	if !granted(gate, short) || granted(gate, head) {
+		t.Fatal("measured short run must backfill without delaying the highest-priority head")
+	}
 }

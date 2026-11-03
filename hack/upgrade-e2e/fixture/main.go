@@ -1,5 +1,5 @@
 // Command fixture creates synthetic upgrade data using the release's own store
-// API. It is compiled against v0.17.81, never against the upgrade target.
+// API. Seed with the published source; snapshot with each target source.
 package main
 
 import (
@@ -19,13 +19,41 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+type run struct {
+	ID             string
+	Sequence       int64
+	Admission      int64
+	Repo           int64
+	Ref            string
+	SHA            string
+	Status         model.RunStatus
+	Phase          string
+	Job            string
+	Priority       model.RunPriority
+	PriorityReason string
+}
+
+type migration struct {
+	Version   int
+	AppliedAt int64
+}
+type snapshotState struct {
+	Ledger []migration
+	Runs   []run
+	Total  int
+}
+
 func must(err error) {
 	if err != nil {
 		panic(err)
 	}
 }
 func main() {
-	if len(os.Args) != 3 {
+	if len(os.Args) > 1 && os.Args[1] == "verify" {
+		verifyCommand(os.Args[2:])
+		return
+	}
+	if len(os.Args) < 3 || len(os.Args) > 4 {
 		panic("usage: fixture seed|snapshot DATABASE")
 	}
 	ctx := context.Background()
@@ -42,22 +70,9 @@ func main() {
 	defer s.Close()
 	runs, err := s.ListActiveRuns(ctx, model.RunListFilter{})
 	must(err)
-	type run struct {
-		ID             string
-		Sequence       int64
-		Admission      int64
-		Repo           int64
-		Ref            string
-		SHA            string
-		Status         model.RunStatus
-		Phase          string
-		Job            string
-		Priority       model.RunPriority
-		PriorityReason string
-	}
 	values := make([]run, 0, len(runs))
 	for _, r := range runs {
-		values = append(values, run{r.ID, r.QueueSequence, r.AdmissionSequence, r.RepoID, r.Ref, r.SHA, r.Status, r.Phase, r.JobName, r.Priority, r.PriorityReason})
+		values = append(values, run{r.ID, r.QueueSequence, r.AdmissionSequence, r.RepoID, r.Ref, r.SHA, r.Status, r.Phase, workflowName(r), r.Priority, r.PriorityReason})
 	}
 	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
 	must(err)
@@ -65,10 +80,6 @@ func main() {
 	rows, err := db.QueryContext(ctx, "SELECT version, applied_at FROM schema_migrations ORDER BY version")
 	must(err)
 	defer rows.Close()
-	type migration struct {
-		Version   int
-		AppliedAt int64
-	}
 	ledger := []migration{}
 	for rows.Next() {
 		var m migration
@@ -86,14 +97,10 @@ func main() {
 	}
 	var count int
 	must(db.QueryRowContext(ctx, "SELECT count(*) FROM runs").Scan(&count))
-	must(json.NewEncoder(os.Stdout).Encode(struct {
-		Ledger []migration
-		Runs   []run
-		Total  int
-	}{ledger, values, count}))
+	must(json.NewEncoder(os.Stdout).Encode(snapshotState{ledger, values, count}))
 }
 func seed(ctx context.Context, path string) {
-	s, err := store.Open(ctx, path, store.Options{})
+	s, err := store.OpenAdminClient(ctx, path, store.Options{})
 	must(err)
 	defer s.Close()
 	root := filepath.Join(filepath.Dir(path), "fixtures")
@@ -112,7 +119,7 @@ func seed(ctx context.Context, path string) {
 	git("add", "README")
 	git("-c", "user.name=Oberth fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "Create local fixture")
 	sha := git("rev-parse", "HEAD")
-	upstream, err := s.CreateUpstream(ctx, model.UpstreamSpec{Name: "local", Kind: "local", BaseURL: root})
+	upstream, err := s.RegisterUpstream(ctx, "upgrade-fixture", model.UpstreamSpec{Name: "local", Kind: "local", BaseURL: root})
 	must(err)
 	repo, err := s.CreateRepository(ctx, model.RepositorySpec{Name: "sample", UpstreamID: upstream.ID, DefaultBranch: "main"})
 	must(err)
@@ -128,7 +135,7 @@ func seed(ctx context.Context, path string) {
 	must(err)
 	_, err = s.MarkRunAdmitted(ctx, running.ID)
 	must(err)
-	_, err = s.SetRunJobName(ctx, running.ID, "oberth-e2e-running")
+	_, err = setWorkflowName(ctx, s, running.ID, "oberth-e2e-running")
 	must(err)
 	_, err = s.MarkRunSubmitted(ctx, running.ID)
 	must(err)
@@ -147,4 +154,25 @@ func seed(ctx context.Context, path string) {
 		"spec": map[string]any{"entrypoint": "hold", "serviceAccountName": "oberth-argo-executor", "templates": []any{map[string]any{"name": "hold", "suspend": map[string]any{"duration": "3600s"}}}},
 	}
 	must(json.NewEncoder(os.Stdout).Encode(workflow))
+}
+
+// These API names changed between releases; their persisted JSON field did not.
+func workflowName(r model.Run) string {
+	data, err := json.Marshal(r)
+	must(err)
+	var value struct {
+		Name string `json:"JobName"`
+	}
+	must(json.Unmarshal(data, &value))
+	return value.Name
+}
+func setWorkflowName(ctx context.Context, s *store.Store, id, name string) (model.Run, error) {
+	if v, ok := any(s).(interface {
+		SetRunWorkflowName(context.Context, string, string) (model.Run, error)
+	}); ok {
+		return v.SetRunWorkflowName(ctx, id, name)
+	}
+	return any(s).(interface {
+		SetRunJobName(context.Context, string, string) (model.Run, error)
+	}).SetRunJobName(ctx, id, name)
 }
