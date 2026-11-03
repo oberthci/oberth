@@ -15,7 +15,7 @@ import (
 func TestNormalizeClientHost(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ in, want, err string }{
-		{in: "192.168.64.5", want: "192.168.64.5"},
+		{in: "192.0.2.5", want: "192.0.2.5"},
 		{in: " Lab-VM.Local. ", want: "lab-vm.local"},
 		{in: "::1", want: "::1"},
 		{in: "0.0.0.0", err: "listen address"},
@@ -48,7 +48,7 @@ func TestValidateClientHostAndAlsoUpstreams(t *testing.T) {
 	if strings.Join(cfg.AlsoUpstreams, " ") != "ssh://git@codeberg.org/acme ssh://git@gitlab.com/beta" {
 		t.Errorf("AlsoUpstreams = %q", cfg.AlsoUpstreams)
 	}
-	kind := Config{CreateKind: true, ClientHost: "192.168.1.9"}
+	kind := Config{CreateKind: true, ClientHost: "192.0.2.9"}
 	if err := kind.Validate(); err == nil || !strings.Contains(err.Error(), "127.0.0.1 only") {
 		t.Errorf("a kind cluster must refuse a non-loopback client host, got %v", err)
 	}
@@ -63,8 +63,8 @@ func TestClientHostOverridesTheAPIServerHost(t *testing.T) {
 	if got := sshHostFromServer(deps); got != "localhost" {
 		t.Fatalf("loopback API host = %q, want localhost", got)
 	}
-	deps.ClientHost = "192.168.64.5"
-	if got := sshHostFromServer(deps); got != "192.168.64.5" {
+	deps.ClientHost = "192.0.2.5"
+	if got := sshHostFromServer(deps); got != "192.0.2.5" {
 		t.Fatalf("client host = %q", got)
 	}
 	deps.KindClusterName = "oberth"
@@ -92,7 +92,7 @@ func TestAlsoUpstreamNameAvoidsNamesAndOrganizations(t *testing.T) {
 func TestNextStepsNameEveryUpstreamAndHowToAddMore(t *testing.T) {
 	t.Parallel()
 	lines := NextSteps(NextStepsInput{
-		Host:      "192.168.64.5",
+		Host:      "192.0.2.5",
 		Context:   "default",
 		Namespace: "oberth",
 		Upstreams: []NextStepsUpstream{
@@ -103,13 +103,13 @@ func TestNextStepsNameEveryUpstreamAndHowToAddMore(t *testing.T) {
 	})
 	text := strings.Join(lines, "\n")
 	for _, want := range []string{
-		"git clone ssh://git@192.168.64.5:30022/github/oberthci/<repo>.git",
+		"git clone ssh://git@192.0.2.5:30022/github/oberthci/<repo>.git",
 		"git clone git@oberth:github/oberthci/<repo>.git",
 		"Finish codeberg (codeberg.org/exampleorg)",
 		"kubectl --context default exec -n oberth deploy/oberth -c oberth -- /usr/local/bin/oberth upstream add --yes --no-wait codeberg ssh://git@codeberg.org/exampleorg",
 		"oberth upstream add --yes github ssh://git@github.com/<org>",
 		"kubectl --context default exec -i -n oberth deploy/oberth -c oberth -- /usr/local/bin/oberth uplink add - you@laptop < you@laptop.pub",
-		"OBERTH_BASE_URL=https://192.168.64.5:30443",
+		"OBERTH_BASE_URL=https://192.0.2.5:30443",
 		"oberth runs --ref my-branch",
 	} {
 		if !strings.Contains(text, want) {
@@ -166,7 +166,7 @@ func TestNextStepsBracketIPv6(t *testing.T) {
 	if got := readyURL(Deps{ClientHost: "::1"}); got != "https://[::1]:30443/runs" {
 		t.Errorf("readyURL = %q", got)
 	}
-	if URLHost("192.168.1.2") != "192.168.1.2" || URLHost("lab") != "lab" {
+	if URLHost("192.0.2.2") != "192.0.2.2" || URLHost("lab") != "lab" {
 		t.Error("only IPv6 literals are bracketed")
 	}
 }
@@ -256,7 +256,7 @@ func TestLocalNameWarning(t *testing.T) {
 	if w := LocalNameWarning("example-node.local"); !strings.Contains(w, "mDNS") || !strings.Contains(w, "LAN IP") {
 		t.Errorf("warning %q", w)
 	}
-	for _, host := range []string{"", "localhost", "192.168.86.193", "example-node", "ci.example"} {
+	for _, host := range []string{"", "localhost", "192.0.2.193", "example-node", "ci.example"} {
 		if w := LocalNameWarning(host); w != "" {
 			t.Errorf("%q warned: %q", host, w)
 		}

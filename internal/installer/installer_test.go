@@ -4340,10 +4340,10 @@ func TestGenerateSSHConfigBlockPathWithSpaces(t *testing.T) {
 func TestGenerateSSHConfigBlockRemoteHost(t *testing.T) {
 	t.Parallel()
 
-	block := GenerateSSHConfigBlock("192.168.1.208", "30022", "~/.ssh/oberth_key")
+	block := GenerateSSHConfigBlock("192.0.2.208", "30022", "~/.ssh/oberth_key")
 	for _, want := range []string{
 		"Host oberth",
-		"HostName 192.168.1.208",
+		"HostName 192.0.2.208",
 		"Port 30022",
 		"User git",
 		`IdentityFile "~/.ssh/oberth_key"`,
@@ -4384,7 +4384,7 @@ func TestSSHHostFromServer(t *testing.T) {
 		{name: "loopback IP", server: "https://127.0.0.1:6443", want: "localhost"},
 		{name: "localhost hostname", server: "https://localhost:6443", want: "localhost"},
 		{name: "ipv6 loopback", server: "https://[::1]:6443", want: "localhost"},
-		{name: "private IP", server: "https://192.168.1.208:6443", want: "192.168.1.208"},
+		{name: "documentation IP", server: "https://192.0.2.208:6443", want: "192.0.2.208"},
 		{name: "rfc1918 10 net", server: "https://10.0.0.5:6443", want: "10.0.0.5"},
 		{name: "empty server", server: "", want: "localhost"},
 		{name: "nil restconfig", server: "", want: "localhost"},
@@ -4479,7 +4479,7 @@ func TestOfferSSHConfigWritesFile(t *testing.T) {
 	}
 
 	// Write the block manually (simulating what offerSSHConfig does).
-	block := GenerateSSHConfigBlock("192.168.1.208", "30022", "/home/user/.ssh/id_ed25519")
+	block := GenerateSSHConfigBlock("192.0.2.208", "30022", "/home/user/.ssh/id_ed25519")
 	f, err := os.OpenFile(configPath, os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		t.Fatal(err)
@@ -4495,7 +4495,7 @@ func TestOfferSSHConfigWritesFile(t *testing.T) {
 	if !hasSSHHostBlock(data, "oberth") {
 		t.Fatal("config should now have oberth block")
 	}
-	if !strings.Contains(string(data), "HostName 192.168.1.208") {
+	if !strings.Contains(string(data), "HostName 192.0.2.208") {
 		t.Fatalf("config missing HostName:\n%s", data)
 	}
 	if !strings.Contains(string(data), `IdentityFile "/home/user/.ssh/id_ed25519"`) {

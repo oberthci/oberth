@@ -14,7 +14,7 @@ func TestServerPKIFromEnvironment(t *testing.T) {
 	t.Setenv("OBERTH_SERVER_PKI_MOUNT", "oberth-pki")
 	t.Setenv("OBERTH_SERVER_PKI_ROLE", "oberth-server")
 	t.Setenv("OBERTH_SERVER_PKI_TTL", "720h")
-	t.Setenv("OBERTH_TLS_NAMES", "example-node,localhost,127.0.0.1,192.168.86.193")
+	t.Setenv("OBERTH_TLS_NAMES", "example-node,localhost,127.0.0.1,192.0.2.193")
 	pki, enabled := serverPKIFromEnvironment("oberth")
 	if !enabled {
 		t.Fatal("PKI must be on with a mount and role")
@@ -26,7 +26,7 @@ func TestServerPKIFromEnvironment(t *testing.T) {
 	if request.DNSNames[0] != "oberth" || !slices.Contains(request.DNSNames, "example-node") || !slices.Contains(request.DNSNames, "oberth-goproxy.oberth.svc") {
 		t.Fatalf("dns names = %v", request.DNSNames)
 	}
-	if !slices.Equal(request.IPs, []string{"127.0.0.1", "192.168.86.193"}) {
+	if !slices.Equal(request.IPs, []string{"127.0.0.1", "192.0.2.193"}) {
 		t.Fatalf("ips = %v", request.IPs)
 	}
 }

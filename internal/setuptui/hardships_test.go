@@ -115,26 +115,26 @@ func TestPlaceholderNeverLooksTyped(t *testing.T) {
 func TestClientHostChoice(t *testing.T) {
 	newTestHost(t)
 	st := newWizardState(Options{})
-	st.ClusterInfo = clusterInfoMsg{engine: "k3s", server: "https://127.0.0.1:6443", nodeName: "Lab-5be5", nodeIP: "192.168.64.5"}
+	st.ClusterInfo = clusterInfoMsg{engine: "k3s", server: "https://127.0.0.1:6443", nodeName: "Lab-5be5", nodeIP: "192.0.2.5"}
 	st.Config.TLSExtraDNSNames = []string{"lab.example"}
 	q := questionByID(t, "tls.client")
 	var values []string
 	for _, o := range q.options(st) {
 		values = append(values, o.value)
 	}
-	if strings.Join(values, ",") != "192.168.64.5,lab-5be5,lab.example,localhost" {
+	if strings.Join(values, ",") != "192.0.2.5,lab-5be5,lab.example,localhost" {
 		t.Fatalf("options %v", values)
 	}
 	if q.selected(st) != "localhost" {
 		t.Errorf("default must stay what the installer would advertise, got %q", q.selected(st))
 	}
-	if err := q.save(st, []string{"192.168.64.5"}); err != nil {
+	if err := q.save(st, []string{"192.0.2.5"}); err != nil {
 		t.Fatal(err)
 	}
-	if installConfig(st).ClientHost != "192.168.64.5" || !strings.Contains(BuildCommandLine(st), "--client-host='192.168.64.5'") {
+	if installConfig(st).ClientHost != "192.0.2.5" || !strings.Contains(BuildCommandLine(st), "--client-host='192.0.2.5'") {
 		t.Fatalf("client host not wired: %q / %s", installConfig(st).ClientHost, BuildCommandLine(st))
 	}
-	if clientHost(st) != "192.168.64.5" {
+	if clientHost(st) != "192.0.2.5" {
 		t.Errorf("finish screen host = %q", clientHost(st))
 	}
 	if err := q.save(st, []string{"10.9.9.9"}); err == nil {
@@ -355,7 +355,7 @@ func TestVerifyReportsUnresolvedClientHost(t *testing.T) {
 func TestClientHostLocalNameGivesWayToTheNodeAddress(t *testing.T) {
 	newTestHost(t)
 	st := newWizardState(Options{})
-	st.ClusterInfo = clusterInfoMsg{engine: "k3s", server: "https://example-node.local:6443", nodeName: "example-node", nodeIP: "192.168.86.193"}
+	st.ClusterInfo = clusterInfoMsg{engine: "k3s", server: "https://example-node.local:6443", nodeName: "example-node", nodeIP: "192.0.2.193"}
 	st.Config.TLSExtraDNSNames = []string{"example-node.local", "ci.example"}
 	q := questionByID(t, "tls.client")
 	var values []string
@@ -365,10 +365,10 @@ func TestClientHostLocalNameGivesWayToTheNodeAddress(t *testing.T) {
 			t.Errorf("option %q detail %q", o.value, o.detail)
 		}
 	}
-	if strings.Join(values, ",") != "192.168.86.193,example-node,ci.example,example-node.local,localhost" {
+	if strings.Join(values, ",") != "192.0.2.193,example-node,ci.example,example-node.local,localhost" {
 		t.Fatalf("options %v", values)
 	}
-	if got := q.selected(st); got != "192.168.86.193" {
+	if got := q.selected(st); got != "192.0.2.193" {
 		t.Errorf("a .local API host must not be preselected over the node address, got %q", got)
 	}
 	if strings.Contains(q.explain(st), "mDNS") {

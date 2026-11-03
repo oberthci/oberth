@@ -25,7 +25,7 @@ func TestConstrainedServerCertificateAnchorsOnlyItsOwnNames(t *testing.T) {
 		NotAfter:     time.Now().Add(time.Hour),
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		DNSNames:     []string{"oberth", "localhost"},
-		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("192.168.86.193")},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("192.0.2.193")},
 	}
 	ConstrainSelfSignedServerCertificate(tmpl)
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
@@ -38,7 +38,7 @@ func TestConstrainedServerCertificateAnchorsOnlyItsOwnNames(t *testing.T) {
 	}
 	roots := x509.NewCertPool()
 	roots.AddCert(server)
-	for _, host := range []string{"oberth", "localhost", "127.0.0.1", "192.168.86.193"} {
+	for _, host := range []string{"oberth", "localhost", "127.0.0.1", "192.0.2.193"} {
 		if _, err := server.Verify(x509.VerifyOptions{DNSName: host, Roots: roots}); err != nil {
 			t.Errorf("pinned server certificate must verify for %s: %v", host, err)
 		}
@@ -51,7 +51,7 @@ func TestConstrainedServerCertificateAnchorsOnlyItsOwnNames(t *testing.T) {
 	}
 	for _, child := range []*x509.Certificate{
 		{SerialNumber: big.NewInt(2), DNSNames: []string{"bank.example"}},
-		{SerialNumber: big.NewInt(3), IPAddresses: []net.IP{net.ParseIP("192.168.86.1")}},
+		{SerialNumber: big.NewInt(3), IPAddresses: []net.IP{net.ParseIP("192.0.2.1")}},
 	} {
 		child.NotBefore, child.NotAfter = time.Now().Add(-time.Minute), time.Now().Add(time.Hour)
 		child.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
