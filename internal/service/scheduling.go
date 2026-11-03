@@ -48,6 +48,9 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 	result := &model.RunScheduling{ObservedAt: observed, State: "unavailable", Message: "Scheduling observation is unavailable."}
 	defer func() {
 		result.AgeSeconds = int64(clock.Since(observed) / time.Second)
+		if result.Admission != nil && result.Admission.BackfillMessage != "" {
+			result.Message += " " + result.Admission.BackfillMessage
+		}
 		if run.Priority != "" {
 			priority, _ := run.EffectivePriority(observed)
 			prefix := run.PriorityMessage(observed)
@@ -97,6 +100,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 			// pool of invisible work must not show (#073).
 			admission := *result.Admission
 			admission.Position, admission.Used, admission.Capacity, admission.DiskFloor = 0, 0, 0, nil
+			admission.BackfillMessage = ""
 			admission.Pressure = admission.Pressure.Public()
 			if blocker := service.visibleBlocker(admission.BlockedBy); blocker != nil {
 				admission.BlockedBy = blocker
@@ -226,7 +230,7 @@ func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
 		return fmt.Sprintf("At the head of the weighted resource admission queue (%s); %s smaller runs that fit beside it.",
 			admission.BlockedBy.Reason(), admission.BlockedBy.Backfill())
 	case admission.HeadOfQueue && admission.BlockedBy != nil && admission.BlockedBy.Draining:
-		return fmt.Sprintf("At the head of the weighted resource admission queue (%s); %s: no later run is admitted until it starts.",
+		return fmt.Sprintf("At the head of the weighted resource admission queue (%s); %s: later runs require measured p95 backfill that preserves its reserved start.",
 			admission.BlockedBy.Reason(), admission.BlockedBy.Backfill())
 	case admission.HeadOfQueue && admission.BlockedBy != nil:
 		return fmt.Sprintf("At the head of the weighted resource admission queue (%s); every later run waits behind it.",

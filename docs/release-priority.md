@@ -22,12 +22,14 @@ past ordinary waiting claims to expose higher priority work, with bounded
 extra claims. This does not create extra weight, run permits or capacity.
 Already admitted work is not preempted.
 
-A waiting higher class prevents lower-class backfill. For v0.17.81, no backfill is allowed behind a high or highest head,
-including an aged head. Normal heads retain the existing bounded backfill:
-the default 20-minute head-wait window permits fitting work before draining;
-zero selects strict FIFO. The planned EASY reservation rule will replace
-this conservative priority-head guard. Repository concurrency groups, VM-capacity parking, disk-floor
-holds and run-count/size limits still apply.
+Backfill candidates are considered in priority/FIFO order. Measured work from
+the head's class or a lower class may use spare capacity only if its p95
+duration ends before the head's predicted start, or the head still fits with
+it running at that time. Missing samples prevent backfill. The default
+20-minute head wait marks draining; this same rule still permits safe backfill
+during draining. Zero selects strict FIFO. Repository concurrency groups,
+VM-capacity parking, pressure, disk-floor holds and run-count/size limits
+still apply. P95 predictions are estimates, not enforced runtime deadlines.
 
 At 60 minutes, normal and high work join effective `highest`. Within that
 class, base `highest` precedes aged `high`, then aged `normal`; each base class
@@ -46,8 +48,8 @@ the aging threshold. These are unscoped-admin capabilities.
 A repository with no size-grant record defaults to automatic tag priority up
 to size L. After exact checkout resolves size, an oversized tag (for example,
 XL without an XL grant) falls back to an admin override, then an accepted
-submission priority, then normal order. Normal heads keep the existing bounded
-backfill window. Its admission/scheduling priority reason explains the fallback.
+submission priority, then normal order. All heads use the same measured backfill
+rule. Its admission/scheduling priority reason explains the fallback.
 Tag execution still keeps its reviewed release.yaml size without requiring a
 grant. Priority before checkout is provisional; durable queue positions do not
 incorporate the gate's resolved size. Polling/admin refresh preserves the size

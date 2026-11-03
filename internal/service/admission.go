@@ -21,8 +21,8 @@ type weightedAdmission struct {
 	capacityConfig model.AdmissionCapacityConfig
 	// weights is the operator's weight per size (#1021).
 	weights SizeWeights
-	// maxHeadWait bounds bounded backfill (#1085): while the queue head has
-	// waited less than this, later runs that fit are admitted beside it.
+	// maxHeadWait marks draining in the admission view. Measured EASY backfill
+	// remains possible while draining when it preserves the head reservation.
 	// Zero disables backfill (strict FIFO).
 	maxHeadWait time.Duration
 	// now is the gate's clock; nil is time.Now.
@@ -94,7 +94,9 @@ type admissionReservation struct {
 	sha     string
 	// headSince is when this run first waited at the queue head (or the
 	// durable origin recorded before a restart); zero while it never has.
-	headSince time.Time
+	headSince        time.Time
+	backfillDeadline time.Time
+	backfillMessage  string
 	// estimate is the run's predicted duration from history, zero if none.
 	estimate time.Duration
 	// backfilled marks a grant made beside a waiting head.
@@ -457,11 +459,9 @@ func (reservation *admissionReservation) retain() {
 
 // grantLocked admits waiters in claim order. An unsized claim at the head
 // holds its place, and so does a sized head that does not fit, which is what
-// keeps heavy runs (and XL, which needs the whole node) from starving. Bounded
-// backfill (#1085) relaxes the second rule for a while: until the head has
-// waited maxHeadWait, later runs that fit the spare weight (and, when their
-// history predicts it, finish before the bound) are admitted beside it; after
-// the bound the pass ends at the head and the budget drains for it.
+// keeps heavy runs (and XL, which needs the whole node) from starving. EASY
+// backfill lets measured work use spare capacity while preserving the head's
+// predicted start, including while draining after maxHeadWait.
 //
 // A run parked on its concurrency group is the one exception. It is not
 // waiting for the node but for another run of its own repository, so it is
@@ -470,10 +470,7 @@ func (reservation *admissionReservation) retain() {
 // is passed over too, which keeps the group itself in claim order, and the
 // parked run regains its place in that order the moment its group is free.
 func (gate *weightedAdmission) grantLocked() {
-	// head is the first prepared, unparked waiter that does not fit. Before
-	// #1085 it ended the pass; now later waiters that fit may be backfilled
-	// beside it until it has waited maxHeadWait, after which the pass ends
-	// at the head again so the budget drains for it.
+	// head is the first prepared, unparked waiter that does not fit.
 	var head *admissionReservation
 	now := gate.clock()
 	if gate.pressure != nil {
@@ -484,6 +481,7 @@ func (gate *weightedAdmission) grantLocked() {
 	gate.preparePressureWaitsLocked(now)
 	for index := 0; index < len(gate.waiters); {
 		reservation := gate.waiters[index]
+		reservation.backfillMessage = ""
 		if reservation.vmParked || gate.kubeVirtBlockedLocked(reservation) {
 			index++
 			continue
@@ -505,7 +503,7 @@ func (gate *weightedAdmission) grantLocked() {
 			if head == nil {
 				head = reservation
 				gate.markHeadLocked(head, now)
-				if !gate.backfillOpenLocked(head, now) {
+				if !gate.backfillEnabledLocked(head) {
 					return
 				}
 			}
@@ -514,9 +512,9 @@ func (gate *weightedAdmission) grantLocked() {
 		}
 		reservation.backfilled = false
 		if head != nil {
-			// Backfill is confined to the head's class; lower classes wait
-			// for the higher class to drain even while its window is open.
-			if reservation.effectivePriority(now) != head.effectivePriority(now) {
+			// Traverse priority/FIFO order; a higher class never backfills
+			// behind a lower head. Lower classes use the same safety rule.
+			if reservation.effectivePriority(now).Rank() > head.effectivePriority(now).Rank() {
 				return
 			}
 			if !gate.backfillFitsLocked(head, reservation, now) {
@@ -528,11 +526,13 @@ func (gate *weightedAdmission) grantLocked() {
 		// Stop at the first otherwise eligible candidate. A pressure timeout
 		// never bypasses priority, group, VM, disk, weight or backfill rules.
 		if gate.deferPressureLocked(reservation, now) {
+			reservation.backfilled = false
+			reservation.backfillMessage = ""
 			return
 		}
 		gate.waiters = append(gate.waiters[:index], gate.waiters[index+1:]...)
 		reservation.granted = true
-		reservation.grantedAt = time.Now().UTC()
+		reservation.grantedAt = now.UTC()
 		gate.used += reservation.weight
 		gate.runs++
 		if reservation.group != "" {
@@ -763,6 +763,7 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 		return nil
 	}
 	result := &model.AdmissionObservation{State: "preparing", Used: gate.used, Capacity: gate.capacity}
+	result.BackfillMessage = reservation.backfillMessage
 	if reservation.prepared {
 		result.DeclaredResources = reservation.declaredResources()
 		result.State = "waiting"

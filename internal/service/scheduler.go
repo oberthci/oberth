@@ -51,10 +51,9 @@ type SchedulerConfig struct {
 	MaxConcurrentFile string
 	MaxRunLogBytes    int64
 	MutationGate      func(context.Context) error
-	// MaxHeadWait bounds bounded backfill (#1085): while the queue head that
-	// does not fit has waited less than this, later runs that fit are
-	// admitted beside it. Zero is strict FIFO; serve defaults it to
-	// DefaultMaxHeadWait.
+	// MaxHeadWait marks draining for the head; measured backfill may continue
+	// if it preserves the predicted head start. Zero is strict FIFO; serve
+	// defaults it to DefaultMaxHeadWait.
 	MaxHeadWait time.Duration
 	// SizeWeights is the operator's admission weight per size (#1021); the
 	// zero value selects DefaultSizeWeights.

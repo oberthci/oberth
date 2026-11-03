@@ -12,15 +12,24 @@ path: slow tests, repeated downloads, startup gaps or retries in the last holder
 The scheduler already releases weight before slow finalization/publication once
 the Workflow is terminal or its deletion has been accepted.
 
-Same-priority backfill is bounded by `maxHeadWait`, normally **20 minutes**.
-After that window closes, admission stops at the blocked XL: same- or
-lower-priority small runs behind it wait even when enough weight is free for
-them. That idle capacity is the intended drain for the XL; speeding unrelated
-CI does not remove it. Extending the window lets small runs through longer but
-also delays the XL.
+Measured backfill can use spare capacity before and after `maxHeadWait`,
+normally **20 minutes**. The scheduler projects the earliest head start by
+releasing enough running reservations at their measured p95 finish times.
+A candidate must fit now and finish strictly before that reserved start, or
+leave capacity for the head alongside it at that time. All other surviving
+grants count, including earlier backfills. An unmeasured candidate is held;
+unknown or already overrun running work is never assumed to release capacity.
+Zero `maxHeadWait` keeps strict FIFO.
+
+Duration samples come from the retained step observations used by
+`run_resources`, grouped into whole workflow spans for each repository's
+branch, release, promotion or schedule history. Known run startup/teardown
+extends those spans. Truncated history and incomplete terminal timestamps
+provide no estimate. These are p95 forecasts, not execution deadlines: an
+overrun can still delay the head. The scheduler does not preempt running work.
 
 **Higher-priority waiters sort ahead of a normal-priority XL.** They can take
-freed weight and extend the drain even after its backfill window closes. An
+freed weight and extend the drain. An
 admin bump can prevent lower-priority overtaking; normal/high work ages to
 `highest` after 60 minutes using its original FIFO position. Existing holders
 and earlier highest-priority work still have to finish. See

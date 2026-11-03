@@ -121,6 +121,7 @@ func (gate *weightedAdmission) adopt(run model.Run, size periapsis.Size, demand 
 
 func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run, require mutationRequirement, reservation *admissionReservation) error {
 	defer reservation.cancel()
+	scheduler.restoreBackfillHistory(ctx, run, reservation)
 	if err := require(ctx); err != nil {
 		reservation.retain()
 		return err

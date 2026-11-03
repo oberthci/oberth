@@ -18,11 +18,14 @@ import (
 
 // Prepare under the gate lock so tests control every admission/release without
 // sleeps, blocked worker goroutines or access to live reservation fields.
-func priorityWaiter(g *weightedAdmission, seq int64, p model.RunPriority, at time.Time, size periapsis.Size) *admissionReservation {
+func priorityWaiter(g *weightedAdmission, seq int64, p model.RunPriority, at time.Time, size periapsis.Size, estimates ...time.Duration) *admissionReservation {
 	r := g.reserveRun(model.Run{ID: string(rune('a' + seq)), QueueSequence: seq, AdmissionSequence: seq, Priority: p, QueuedAt: at})
 	g.mu.Lock()
 	r.prepared = true
 	r.preparedAt = g.clock()
+	if len(estimates) > 0 {
+		r.estimate = estimates[0]
+	}
 	r.size = size
 	r.weight = g.weights.of(size, g.capacity)
 	g.grantLocked()
@@ -56,37 +59,35 @@ func TestPriorityAdmissionOrdersClassesThenFIFO(t *testing.T) {
 	}
 }
 
-func TestPriorityAdmissionBlocksAllBackfillBehindPriorityHead(t *testing.T) {
+func TestPriorityAdmissionMeasuredBackfillDuringDrain(t *testing.T) {
 	clock := &fakeClock{now: time.Now()}
 	g := newWeightedAdmission(4)
 	g.now = clock.Now
 	g.maxHeadWait = 20 * time.Minute
 	holder := g.reserve(1)
-	release, err := holder.acquire(context.Background(), periapsis.M)
+	release, err := holder.acquireRequest(context.Background(), admissionRequest{Size: periapsis.M, Estimate: 30 * time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer release()
 	head := priorityWaiter(g, 2, model.PriorityHigh, clock.now, periapsis.L)
 	normal := priorityWaiter(g, 3, model.PriorityNormal, clock.now, periapsis.S)
-	small := priorityWaiter(g, 4, model.PriorityHigh, clock.now, periapsis.S)
-	if granted(g, head) || granted(g, normal) || granted(g, small) {
-		t.Fatal("priority head allowed same-class or lower-class backfill")
-	}
-	clock.now = clock.now.Add(20 * time.Minute)
-	later := priorityWaiter(g, 5, model.PriorityHigh, clock.now, periapsis.S)
-	if granted(g, later) || granted(g, normal) {
-		t.Fatal("head-wait bound did not drain higher class")
-	}
-	release()
-	if !granted(g, head) || !granted(g, small) || granted(g, normal) {
-		t.Fatal("head and fitting same-class work failed to start after drain")
-	}
-	head.release()
-	if !granted(g, later) || !granted(g, normal) {
-		t.Fatal("remaining work failed to start after the priority head")
+	small := priorityWaiter(g, 4, model.PriorityHigh, clock.now, periapsis.S, 5*time.Minute)
+	if granted(g, head) || granted(g, normal) || !granted(g, small) {
+		t.Fatal("unmeasured backfill started or measured backfill was lost")
 	}
 	small.release()
+	clock.now = clock.now.Add(20 * time.Minute)
+	later := priorityWaiter(g, 5, model.PriorityHigh, clock.now, periapsis.S, 5*time.Minute)
+	if !granted(g, later) || granted(g, normal) {
+		t.Fatal("drain lost safe measured backfill or admitted unmeasured work")
+	}
+	later.release()
+	release()
+	if !granted(g, head) {
+		t.Fatal("head failed to start after drain")
+	}
+	head.release()
 	later.release()
 	normal.release()
 }
@@ -566,7 +567,7 @@ func TestPriorityOversizedReleaseAllowsNormalBackfillAndSurvivesRefresh(t *testi
 			g.maxHeadWait = 20 * time.Minute
 			f.scheduler.admission = g
 			holder := g.reserve(-1)
-			releaseHolder, err := holder.acquire(ctx, periapsis.M)
+			releaseHolder, err := holder.acquireRequest(ctx, admissionRequest{Size: periapsis.M, Estimate: 30 * time.Minute})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -599,11 +600,11 @@ func TestPriorityOversizedReleaseAllowsNormalBackfillAndSurvivesRefresh(t *testi
 				}
 				time.Sleep(testTimeout(time.Millisecond))
 			}
-			// A fitting ordinary run after the XL head must backfill when the
-			// tag has no XL grant; an explicit XL grant may still force drain.
-			light := priorityWaiter(g, tag.QueueSequence+1, model.PriorityNormal, tag.QueuedAt, periapsis.S)
+			// Measured work that finishes before the XL head reservation may
+			// backfill regardless of the tag's priority classification.
+			light := priorityWaiter(g, tag.QueueSequence+1, model.PriorityNormal, tag.QueuedAt, periapsis.S, 5*time.Minute)
 			defer light.cancel()
-			if granted(g, light) != (maximum == periapsis.L) {
+			if !granted(g, light) {
 				t.Fatalf("normal backfill=%v with maximum %s", granted(g, light), maximum)
 			}
 			if err := f.scheduler.refreshPriorities(ctx); err != nil {
@@ -643,7 +644,7 @@ func TestPriorityOversizedReleaseAllowsNormalBackfillAndSurvivesRefresh(t *testi
 				}
 				kick(g)
 				if !granted(g, light) {
-					t.Fatal("lowered maximum failed to restore normal backfill")
+					t.Fatal("priority refresh lost safe measured backfill")
 				}
 			}
 		})

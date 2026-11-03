@@ -275,7 +275,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 
 	flags.StringVar(&options.maxConcurrentFile, "max-concurrent-jobs-file", "", "mounted ConfigMap key to reload max concurrent Jobs without restart; invalid or missing keeps the last good value")
 	flags.StringVar(&options.admissionSizeWeights, "admission-size-weights", service.DefaultSizeWeights.String(), "admission weight per size as S=..,M=..,L=..,XL=..; XL=0 is the whole budget (an XL run runs alone), a positive XL lets XL share the host; the budget is --max-concurrent-jobs M runs (#1021)")
-	flags.DurationVar(&options.admissionMaxHeadWait, "admission-max-head-wait", service.DefaultMaxHeadWait, "bounded backfill (#1085): while the admission queue head does not fit, later runs that fit are admitted beside it until it has waited this long; then the budget drains for it (0 = strict FIFO)")
+	flags.DurationVar(&options.admissionMaxHeadWait, "admission-max-head-wait", service.DefaultMaxHeadWait, "time before admission reports draining for the head; measured p95 backfill may continue if it preserves the predicted head start (0 = strict FIFO)")
 	defaults := service.DefaultAdmissionPressureConfig()
 	flags.BoolVar(&options.admissionPressure.Enabled, "admission-pressure-enabled", defaults.Enabled, "gate new runs by host CPU and IO some PSI avg10")
 	flags.Float64Var(&options.admissionPressure.CPUSomeAvg10, "admission-pressure-cpu-some-avg10", defaults.CPUSomeAvg10, "CPU some PSI avg10 threshold in percent")
