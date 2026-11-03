@@ -5,19 +5,18 @@ umask 077
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo=${E2E_REPO:-}
 if [[ -z $repo ]]; then
-  repo=$(git -C "$here" rev-parse --show-toplevel 2>/dev/null || printf '%s\n' "$HOME/work/oberth/oberth")
+  repo=$(git -C "$here" rev-parse --show-toplevel)
 fi
 repo=$(git -C "$repo" rev-parse --show-toplevel)
-lab=${CODEX_LAB:-$HOME/work/codex-lab}
-export PATH="$HOME/.local/bin:$lab/tools/envtest:$PATH"
-evidence=${E2E_EVIDENCE:-$lab/handoffs/CX-OB-UPGRADE-E2E/run-$(date -u +%Y%m%dT%H%M%SZ)}
+evidence=${E2E_EVIDENCE:-$(mktemp -d /tmp/oberth-upgrade-evidence.XXXXXXXX)}
 mkdir -p "$evidence"
 evidence=$(cd "$evidence" && pwd)
-if [[ ${E2E_UNDER_CHECK:-} != 1 ]]; then
-  exec python3 "$lab/local-check.py" --cwd "$repo" --log "$evidence/e2e.log" -- \
-    env E2E_UNDER_CHECK=1 E2E_EVIDENCE="$evidence" bash "$here/run.sh"
+# An optional executable wrapper receives the command and its arguments.
+if [[ -n ${E2E_WRAPPER:-} ]]; then
+  exec env -u E2E_WRAPPER "$E2E_WRAPPER" env E2E_REPO="$repo" E2E_EVIDENCE="$evidence" bash "$here/run.sh"
 fi
-for tool in k3d kubectl helm3 docker go jq cosign curl sha256sum git rg; do command -v "$tool" >/dev/null; done
+helm=${E2E_HELM:-helm}
+for tool in k3d kubectl "$helm" docker go jq cosign curl sha256sum git rg; do command -v "$tool" >/dev/null; done
 private=$(mktemp -d /tmp/oberth-upgrade-e2e.XXXXXXXX)
 cluster="ob-upgrade-$$"
 created=false
@@ -60,7 +59,7 @@ published=$(jq -er '.images.server.ref' "$evidence/release.json")
 fetch https://charts.oberth.ci/oberth-0.17.81.tgz "$evidence/oberth-0.17.81.tgz"
 chart_hash=$(jq -er '.chart.digest | sub("^sha256:"; "")' "$evidence/release.json")
 printf '%s  %s\n' "$chart_hash" "$evidence/oberth-0.17.81.tgz" | sha256sum -c -
-helm3 show values "$evidence/oberth-0.17.81.tgz" >"$private/published-values.yaml"
+"$helm" show values "$evidence/oberth-0.17.81.tgz" >"$private/published-values.yaml"
 # A signed record must bind the image actually used by the published chart.
 rg -F "ref: $published" "$private/published-values.yaml" >/dev/null
 sha82=$(git -C "$repo" rev-parse 'cba75ca7^{commit}')
@@ -132,13 +131,13 @@ printf '%s\n' 'path "oberth/data/identities/oberth/*" { capabilities = ["create"
   'path "auth/token/revoke-self" { capabilities = ["update"] }' | bao policy write oberth-e2e -
 bao write auth/kubernetes/role/oberth-ci bound_service_account_names=oberth bound_service_account_namespaces=oberth \
   token_policies=oberth-e2e token_no_default_policy=true token_ttl=10m token_max_ttl=15m
-helm3 install argo-workflows argo-workflows --repo https://argoproj.github.io/argo-helm --version 1.0.24 -n oberth-argo \
+"$helm" install argo-workflows argo-workflows --repo https://argoproj.github.io/argo-helm --version 1.0.24 -n oberth-argo \
   --set singleNamespace=true --set server.enabled=false --set createAggregateRoles=false \
   --set controller.clusterWorkflowTemplates.enabled=false --set workflow.serviceAccount.create=false --set workflow.rbac.create=false \
   --set crds.install=true --set crds.keep=true --set crds.full=false \
   --set 'controller.extraEnv[0].name=POD_NAMES' --set-string 'controller.extraEnv[0].value=v1' --wait --timeout 180s
 # A fresh server intentionally fails readiness until a local upstream exists.
-helm3 install oberth "$evidence/oberth-0.17.81.tgz" -n oberth --values "$here/values.yaml"
+"$helm" install oberth "$evidence/oberth-0.17.81.tgz" -n oberth --values "$here/values.yaml"
 booted=false
 for ((i=0;i<60;i++)); do
   if k -n oberth logs deploy/oberth -c oberth 2>/dev/null | rg -q 'ready for bootstrap'; then booted=true; break; fi
@@ -213,7 +212,7 @@ snapshot() {
 }
 snapshot 81
 for version in 82 ${sha83:+83}; do
-  helm3 upgrade oberth "$private/source-$version/charts/oberth" -n oberth --reuse-values \
+  "$helm" upgrade oberth "$private/source-$version/charts/oberth" -n oberth --reuse-values \
     --set-string "image.ref=${candidate_refs[$version]}" --set image.pullPolicy=Never --wait --timeout 180s
   snapshot "$version"
   for artifact in state priorities workflow pod-priority; do

@@ -1,8 +1,9 @@
 # Oberth local upgrade rehearsal
 
 Run `bash hack/upgrade-e2e/run.sh` from this checkout. Requires Docker, k3d,
-Go, kubectl, Helm 3, cosign, jq, curl and ripgrep. The default host check runner
-is `$HOME/work/codex-lab/local-check.py`; override its directory with `CODEX_LAB`.
+Go, kubectl, Helm 3, cosign, jq, curl and ripgrep. Set `E2E_HELM` if the Helm 3 executable is not named `helm`.
+An optional `E2E_WRAPPER` executable receives the rehearsal command and its
+arguments; unset it to run directly.
 The script creates its own Docker cluster and private kubeconfig, then deletes
 both on success or failure. It never selects an existing cluster.
 
@@ -22,7 +23,7 @@ registry upload is required. These images are for local testing only.
 
 A regression assertion must fail on the published source and pass unchanged on
 each candidate. Focused store tests also exercise migration replay protection and
-queue classification. All builds and checks execute inside `local-check.py`.
+queue classification. All builds and checks inherit the optional wrapper.
 
 The v0.17.81 store API seeds a local Git repository, four queued runs spanning
 normal, high and highest priority, and one running branch run bound to a real
@@ -46,7 +47,7 @@ status, phase and priority, the Workflow UID and running state, all release
 PriorityClass UIDs and scheduling settings, and the server Pod's class. Every
 observed server Pod must be ready with zero container restarts. The fixture
 snapshot uses read-only access to the database. Evidence goes under
-`$HOME/work/codex-lab/handoffs/CX-OB-UPGRADE-E2E/run-<UTC timestamp>` by default;
+a new temporary directory by default;
 set `E2E_EVIDENCE` to choose another directory.
 
 This release path currently has schema version 39 on all three sources. It
