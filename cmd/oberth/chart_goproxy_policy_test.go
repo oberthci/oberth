@@ -209,3 +209,48 @@ func TestChartGoProxyEffectiveIngressUnion(t *testing.T) {
 		})
 	}
 }
+
+func TestChartGoProxyEffectivePipelineAccess(t *testing.T) {
+	for _, proxyPort := range []int32{8444, 9444} {
+		t.Run(fmt.Sprint(proxyPort), func(t *testing.T) {
+			policies, server := renderGoProxyPolicies(t, proxyPort)
+			pipeline := chartPolicyEndpoint{namespace: "pipeline-system", labels: map[string]string{"oberth.ci/trigger": "branch"}}
+			for _, listener := range []string{"goproxy", "https", "ssh"} {
+				t.Run(listener, func(t *testing.T) {
+					port := server.ports[listener]
+					ingress := chartPolicyAllows(t, policies, networkingv1.PolicyTypeIngress, pipeline, server, port)
+					egress := chartPolicyAllows(t, policies, networkingv1.PolicyTypeEgress, pipeline, server, port)
+					want := listener == "goproxy"
+					if !ingress || egress != want || (ingress && egress) != want {
+						t.Errorf("pipeline to %s on %d: ingress=%v, egress=%v, want connection=%v", listener, port, ingress, egress, want)
+					}
+				})
+			}
+			// The namespace and pod selectors must apply together, and the
+			// instance label must distinguish other releases in the same namespace.
+			for _, target := range []struct {
+				name     string
+				endpoint chartPolicyEndpoint
+			}{
+				{"matching labels in another namespace", chartPolicyEndpoint{namespace: "other-system", labels: server.labels}},
+				{"other release in server namespace", chartPolicyEndpoint{namespace: server.namespace, labels: map[string]string{"app.kubernetes.io/name": "oberth", "app.kubernetes.io/instance": "other-release"}}},
+				{"unrelated pod in server namespace", chartPolicyEndpoint{namespace: server.namespace}},
+			} {
+				t.Run(target.name, func(t *testing.T) {
+					if chartPolicyAllows(t, policies, networkingv1.PolicyTypeEgress, pipeline, target.endpoint, proxyPort) {
+						t.Error("proxy egress escapes the configured server destination")
+					}
+				})
+			}
+			// Egress alone does not grant unlabeled pipeline pods proxy access.
+			unlabeled := chartPolicyEndpoint{namespace: pipeline.namespace}
+			if chartPolicyAllows(t, policies, networkingv1.PolicyTypeIngress, unlabeled, server, proxyPort) &&
+				chartPolicyAllows(t, policies, networkingv1.PolicyTypeEgress, unlabeled, server, proxyPort) {
+				t.Error("unlabeled pipeline pod can reach the proxy")
+			}
+			if !chartPolicyAllows(t, policies, networkingv1.PolicyTypeEgress, pipeline, chartPolicyEndpoint{}, 443) {
+				t.Error("ordinary outbound HTTPS was lost")
+			}
+		})
+	}
+}
