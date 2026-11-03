@@ -6,8 +6,6 @@ import (
 	"crypto/rand"
 	"encoding/pem"
 	"fmt"
-	"github.com/oberthci/oberth/internal/gitcache"
-	"golang.org/x/crypto/ssh"
 	"io"
 	"net"
 	"os"
@@ -17,6 +15,10 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/ssh"
+
+	"github.com/oberthci/oberth/internal/gitcache"
 )
 
 func TestStalledSSHUploadAllowsAnotherClone(t *testing.T) {
