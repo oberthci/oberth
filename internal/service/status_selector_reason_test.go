@@ -1,9 +1,10 @@
 package service
 
 import (
-	"github.com/oberthci/oberth/internal/model"
 	"strings"
 	"testing"
+
+	"github.com/oberthci/oberth/internal/model"
 )
 
 func TestQueuedStatusReasonMatchesAcrossSelectors(t *testing.T) {
