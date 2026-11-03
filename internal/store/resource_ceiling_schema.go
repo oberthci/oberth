@@ -1,6 +1,6 @@
 package store
 
-const resourceCeilingMigrationVersion = 48
+const resourceCeilingMigrationVersion = 49
 
 // Copy historical ceilings exactly, including grant provenance and revocations.
 // Absent and revoked grants retain the default ceiling for fresh submissions.

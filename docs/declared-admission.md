@@ -139,7 +139,7 @@ explicit zero disables that component. Both must be zero to disable headroom.
 
 ## Upgrade and recovery limits
 
-Migration 48 copies historical size grants into numeric per-container ceilings,
+Migration 49 copies historical size grants into numeric per-container ceilings,
 including grant/revocation provenance. Fresh numeric grants are independent of
 legacy size and tag-priority policy. Existing reservations restore their sealed
 demand without recalculating it from current git, even with declared admission

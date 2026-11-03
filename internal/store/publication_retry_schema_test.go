@@ -19,10 +19,10 @@ DELETE FROM schema_migrations WHERE version=38;
 	"DROP TRIGGER promotions_guard_update; CREATE TRIGGER promotions_guard_update" + strings.Split(strings.Split(migrations[18].sql, "CREATE TRIGGER promotions_guard_update")[1], "CREATE TRIGGER promotion_grants_no_delete")[0]
 
 // Reconstruct the v38 surface before replaying any earlier migration.
-const restartRecoveryDowngradeSQL = testdb.PostV44Downgrade + `
+const restartRecoveryDowngradeSQL = testdb.PostV45Downgrade + `
 DROP TRIGGER IF EXISTS publications_tag_tuple_insert;
 DROP INDEX IF EXISTS publications_tag_tuple_idx;
 DROP TABLE IF EXISTS restart_step_timings;
 DROP TABLE IF EXISTS restart_workflow_timings;
-DELETE FROM schema_migrations WHERE version >= 43;
+DELETE FROM schema_migrations WHERE version >= 44;
 `

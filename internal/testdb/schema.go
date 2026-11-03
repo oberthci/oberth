@@ -94,13 +94,13 @@ END;
 
 CREATE TRIGGER publications_no_delete BEFORE DELETE ON publications BEGIN
  SELECT RAISE(ABORT, 'publications are append-only'); END;
-DELETE FROM schema_migrations WHERE version>=42;
+DELETE FROM schema_migrations WHERE version>=43;
 
 `
 
 // PostV38Downgrade removes every later schema object before historical fixtures
 // drop referenced columns. Restore the outbox CHECK as well as its guards.
-const PostV38Downgrade = PostV44Downgrade + PublicationV38Schema + `
+const PostV38Downgrade = PostV45Downgrade + PublicationV38Schema + `
 DROP TRIGGER IF EXISTS issues_metadata_revision;
 ALTER TABLE issues DROP COLUMN revision;
 ALTER TABLE token_credentials DROP COLUMN expires_at;
@@ -108,12 +108,14 @@ DROP TABLE IF EXISTS run_priority_requests;
 DROP TABLE IF EXISTS priority_grants;
 DROP TABLE IF EXISTS restart_workflow_timings;
 DROP TABLE IF EXISTS restart_step_timings;
+DROP INDEX IF EXISTS runs_latest_ref_idx;
+CREATE INDEX runs_latest_ref_idx ON runs(repo_id, ref_kind, ref, queue_sequence DESC);
 DELETE FROM schema_migrations WHERE version>=39;
 `
 
-// PostV44Downgrade removes later capability/retirement/ceiling objects before
+// PostV45Downgrade removes later capability/retirement/ceiling objects before
 // reconstructed restart and priority fixtures replay the real migrations.
-const PostV44Downgrade = PostV48Downgrade + `
+const PostV45Downgrade = PostV49Downgrade + `
 DROP TABLE IF EXISTS resource_ceilings;
 DROP TRIGGER IF EXISTS vm_suite_executions_retired_insert;
 DROP TRIGGER IF EXISTS vm_suite_executions_retired_update;
@@ -122,12 +124,12 @@ DROP TRIGGER IF EXISTS vm_suite_resources_retired_insert;
 DROP TRIGGER IF EXISTS vm_suite_resources_retired_update;
 DROP TRIGGER IF EXISTS vm_suite_resources_retired_delete;
 DROP TABLE IF EXISTS workflow_capability_grants;
-DELETE FROM schema_migrations WHERE version>=45;
+DELETE FROM schema_migrations WHERE version>=46;
 `
 
-// PostV48Downgrade removes workspace and policy-wait additions and restores the
-// narrow latest-ref index before older fixtures replay the real migrations.
-const PostV48Downgrade = `
+// PostV49Downgrade removes work-status and policy-wait additions while keeping
+// the covering run-list index already installed by the small v0.17.83 release.
+const PostV49Downgrade = `
 DROP TRIGGER IF EXISTS issues_metadata_revision;
 ALTER TABLE issues DROP COLUMN work_status;
 CREATE TRIGGER issues_metadata_revision
@@ -136,7 +138,5 @@ CREATE TRIGGER issues_metadata_revision
  BEGIN UPDATE issues SET revision=revision+1 WHERE id=NEW.id; END;
 DROP TRIGGER IF EXISTS publication_policy_wait_cleanup;
 DROP TABLE IF EXISTS publication_policy_waits;
-DROP INDEX IF EXISTS runs_latest_ref_idx;
-CREATE INDEX runs_latest_ref_idx ON runs(repo_id, ref_kind, ref, queue_sequence DESC);
-DELETE FROM schema_migrations WHERE version>=49;
+DELETE FROM schema_migrations WHERE version>=50;
 `

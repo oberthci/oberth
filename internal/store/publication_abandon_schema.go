@@ -1,6 +1,6 @@
 package store
 
-const publicationAbandonMigrationVersion = 42
+const publicationAbandonMigrationVersion = 43
 
 // Rebuild only the outbox CHECK constraint; preserve intent identities and guards.
 const publicationAbandonSchema = `

@@ -68,9 +68,9 @@ publication gates, VM launcher RBAC, cleanup and restart recovery remain active.
 Existing KubeVirt grants retain their original bounded authority; they do not
 authorize generic resources or select an operator identity. New capability
 grants are separate and start empty. Legacy chart values and CLI flags continue
-to work. The inactive pilot remains retired under Schema 45.
+to work. The inactive pilot remains retired under Schema 46.
 
-Migrations 45/46/47 retire the inactive pilot, add the capability grant table,
+Migrations 46/47/48 retire the inactive pilot, add the capability grant table,
 and establish the staged upgrade boundary without retiring the live VM journal.
 Back up the database before upgrading. The v0.17.84 CLI requires legacy
 preflight Workflows and Oberth-owned VMs to be absent before upgrade; see the

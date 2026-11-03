@@ -869,10 +869,13 @@ func (s *Store) verifySchemaIdentity(ctx context.Context, querier schemaIdentity
 	if err := querier.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations WHERE version=?`, tokenExpiryMigrationVersion).Scan(&expiryMigration); err != nil {
 		return fmt.Errorf("check token expiry migration: %w", err)
 	}
+	if err := querier.QueryRowContext(ctx, `SELECT count(*) FROM pragma_table_info('token_credentials') WHERE name='expires_at'`).Scan(&expiry); err != nil {
+		return fmt.Errorf("check token expiry column: %w", err)
+	}
+	if err := s.verifyReleaseV83Schema(ctx, querier, expiryMigration, expiry); err != nil {
+		return err
+	}
 	if expiryMigration != 0 {
-		if err := querier.QueryRowContext(ctx, `SELECT count(*) FROM pragma_table_info('token_credentials') WHERE name='expires_at'`).Scan(&expiry); err != nil {
-			return fmt.Errorf("check token expiry column: %w", err)
-		}
 		if expiry != 1 {
 			return fmt.Errorf("%w: migration v%d is recorded but token_credentials.expires_at is missing; restore a v38 backup before starting Oberth", ErrSchemaIncompatible, tokenExpiryMigrationVersion)
 		}

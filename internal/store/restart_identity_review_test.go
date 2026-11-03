@@ -209,8 +209,8 @@ func TestRestartMigrationsUpgradeV38WithoutLosingReleaseIntent(t *testing.T) {
 	testRestartMigrationsUpgradePreservesReleaseIntent(t, integrationDowngradeSQL, 38)
 }
 
-func TestRestartMigrationsUpgradeV42WithoutLosingReleaseIntent(t *testing.T) {
-	testRestartMigrationsUpgradePreservesReleaseIntent(t, restartRecoveryDowngradeSQL, 42)
+func TestRestartMigrationsUpgradeV43WithoutLosingReleaseIntent(t *testing.T) {
+	testRestartMigrationsUpgradePreservesReleaseIntent(t, restartRecoveryDowngradeSQL, 43)
 }
 
 func testRestartMigrationsUpgradePreservesReleaseIntent(t *testing.T, downgrade string, version int) {

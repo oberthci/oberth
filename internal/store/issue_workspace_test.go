@@ -119,7 +119,7 @@ func TestIssueWorkspaceStatusFilteringAndCIProjection(t *testing.T) {
 	}
 }
 
-func TestIssueWorkspaceUpgradeFromV48PreservesIssueAndLock(t *testing.T) {
+func TestIssueWorkspaceUpgradeFromV49PreservesIssueAndLock(t *testing.T) {
 	now := time.Now().UTC()
 	s := testStore(t, &now)
 	issue, err := s.CreateManualIssue(t.Context(), "writer", model.ManualIssueSpec{Title: "existing", Body: "retained history"})
@@ -130,8 +130,8 @@ func TestIssueWorkspaceUpgradeFromV48PreservesIssueAndLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Reconstruct the actual v48 shape, then migrate through policy v49, workspace v50 and run-list v51.
-	if _, err = s.db.Exec(testdb.PostV48Downgrade); err != nil {
+	// Reconstruct the actual v49 shape, then migrate through policy v50, work status v51 and run-list v52.
+	if _, err = s.db.Exec(testdb.PostV49Downgrade); err != nil {
 		t.Fatal(err)
 	}
 	beforeAudit, err := s.VerifyAuditChain(t.Context())
@@ -148,8 +148,8 @@ func TestIssueWorkspaceUpgradeFromV48PreservesIssueAndLock(t *testing.T) {
 	}
 	defer func() { _ = s.Close() }()
 	var ledger string
-	if err = s.db.QueryRow(`SELECT group_concat(version, ',') FROM (SELECT version FROM schema_migrations WHERE version>=49 ORDER BY version)`).Scan(&ledger); err != nil || ledger != "49,50,51" {
-		t.Fatalf("upgrade ledger=%q, want policy 49, workspace 50 and run-list 51: %v", ledger, err)
+	if err = s.db.QueryRow(`SELECT group_concat(version, ',') FROM (SELECT version FROM schema_migrations WHERE version>=50 ORDER BY version)`).Scan(&ledger); err != nil || ledger != "50,51,52" {
+		t.Fatalf("upgrade ledger=%q, want policy 50, work status 51 and run-list 52: %v", ledger, err)
 	}
 	assertSchemaContains(t, s.db, "index", "runs_latest_ref_idx", "status", "started_at", "finished_at", "queued_at", "id")
 	got, err := s.Issue(t.Context(), issue.ID)

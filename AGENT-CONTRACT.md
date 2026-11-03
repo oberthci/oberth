@@ -639,7 +639,7 @@ trust assumptions and complete invalidation rules.
   declared in git. Trusted contract runs retain the larger main/preflight size
   reservation and existing size authorization policy until both declared demands
   can be charged.
-  Migration v48 copies historical size-grant ceilings and provenance, including
+  Migration v49 copies historical size-grant ceilings and provenance, including
   revocations; later size changes affect only legacy admission and priority.
   Every fresh submission and release preflight reads and enforces the numeric
   ceiling; lookup failure refuses submission. No workflow values are changed.
@@ -1920,7 +1920,7 @@ trust assumptions and complete invalidation rules.
   cutoff. It refuses a matching collection without altering its contents.
 - Every push, sync, promotion, and issue mutation is attributed to the acting
   uplink in the same durable transaction as the state change where applicable.
-- The inactive pilot implementation is retired. Schema v45 preserves the
+- The inactive pilot implementation is retired. Schema v46 preserves the
   schema-v14 `vm_suite_executions` and `vm_suite_resources` journals as read-only
   history for export and investigation; no execution path consults them.
   Existing capacity reservations remain intact because retiring code does not
@@ -2642,18 +2642,19 @@ alone is never evidence that missing migrations ran.
 | v37 | Unreleased (#1216 measurement) | Guard version-2 container telemetry and add the global observation-age retention index; preserve version-1 observations | Database restore |
 | v38 | Upstream publication retry | Persist bounded attempts, retry deadlines and audited owner progress without changing the pushed object or promotion plan | Database restore |
 | v39 | Submission priority | Persist expiring identity grants, audited priority requests and supersession protection; existing priority ordering remains compatible | Database restore |
-| v40 | Bearer token expiry | Nullable absolute expiry; existing credentials retain their lifetime | Database restore |
-| v41 | Issue metadata revision | Positive revision; advances only for real title, state or scope changes | Database restore |
-| v42 | Publication abandon (#1320) | Immutable abandoned outbox verdict and audited owner termination | Database restore |
-| v43 | Restart timing history | Preserve immutable Workflow and step timing per restart episode while retaining the run ID, queue position and original timing records | Database restore |
-| v44 | Tag publication identity | Guard one publication owner per repository, tag and result SHA; preserve existing duplicate history | Database restore |
-| v45 | Pilot retirement | Preserve inactive pilot journals as read-only history; remove them from execution decisions | Database restore |
-| v46 | Operator capabilities | Empty repository-bound authority for operator ServiceAccounts, resource kinds and extended resources; no conversion of historical grants | Database restore |
-| v47 | Deferred execution retirement | Preserve writable execution journals, interlocks and grant authority so owner recovery can settle work in flight | Database restore |
-| v48 | #1216 stage 2 | Independent per-repository numeric request/limit ceilings, migrated exactly from size grants with grant and revocation provenance | Database restore |
-| v49 | Publication policy availability | Persist the first unavailable policy read independently of publication age; clear on success or terminal status | Database restore |
-| v50 | Issue workspace coordination | Add constrained todo/active/waiting/review work status and include real status changes in metadata revisions; staleness remains computed on reads | Database restore |
-| v51 | Run list order | Widen `runs_latest_ref_idx` to cover status, start, finish, queue time and ID, so the grouped latest-per-ref list ranks every head from one covering scan | Database restore |
+| v40 | v0.17.83 run list order | Covering latest-ref index for grouped run lists; no bearer-expiry or issue schema change | Database restore |
+| v41 | Bearer token expiry | Nullable absolute expiry; existing credentials retain their lifetime | Database restore |
+| v42 | Issue metadata revision | Positive revision; advances only for real title, state or scope changes | Database restore |
+| v43 | Publication abandon (#1320) | Immutable abandoned outbox verdict and audited owner termination | Database restore |
+| v44 | Restart timing history | Preserve immutable Workflow and step timing per restart episode while retaining the run ID, queue position and original timing records | Database restore |
+| v45 | Tag publication identity | Guard one publication owner per repository, tag and result SHA; preserve existing duplicate history | Database restore |
+| v46 | Pilot retirement | Preserve inactive pilot journals as read-only history; remove them from execution decisions | Database restore |
+| v47 | Operator capabilities | Empty repository-bound authority for operator ServiceAccounts, resource kinds and extended resources; no conversion of historical grants | Database restore |
+| v48 | Deferred execution retirement | Preserve writable execution journals, interlocks and grant authority so owner recovery can settle work in flight | Database restore |
+| v49 | #1216 stage 2 | Independent per-repository numeric request/limit ceilings, migrated exactly from size grants with grant and revocation provenance | Database restore |
+| v50 | Publication policy availability | Persist the first unavailable policy read independently of publication age; clear on success or terminal status | Database restore |
+| v51 | Issue workspace coordination | Add constrained todo/active/waiting/review work status and include real status changes in metadata revisions; staleness remains computed on reads | Database restore |
+| v52 | Run list order | Rebuild the v40 covering index idempotently; widen `runs_latest_ref_idx` to cover status, start, finish, queue time and ID, so the grouped latest-per-ref list ranks every head from one covering scan | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding

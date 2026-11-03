@@ -10,7 +10,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-var publicationAbandonDowngradeSQL = strings.ReplaceAll(publicationAbandonSchema, ", 'abandoned'", "") + `DELETE FROM schema_migrations WHERE version=42;`
+var publicationAbandonDowngradeSQL = strings.ReplaceAll(publicationAbandonSchema, ", 'abandoned'", "") + `DELETE FROM schema_migrations WHERE version=43;`
 
 func TestPublicationAbandonMigrationRestartAndGuards(t *testing.T) {
 	ctx := t.Context()

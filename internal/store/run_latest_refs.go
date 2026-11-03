@@ -14,7 +14,7 @@ import (
 // needs no per-head row read (the wide error text sits before those columns),
 // which keeps the grouped latest-per-ref page as cheap as the
 // sequence-ordered one it replaces.
-const runListOrderMigrationVersion = 51
+const runListOrderMigrationVersion = 52
 const runListOrderSchema = `DROP INDEX IF EXISTS runs_latest_ref_idx;
 CREATE INDEX IF NOT EXISTS runs_latest_ref_idx ON runs(repo_id, ref_kind, ref, queue_sequence DESC, status, started_at, finished_at, queued_at, id);`
 
