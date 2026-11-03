@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oberthci/oberth/internal/gitssh"
 	"github.com/oberthci/oberth/internal/pushretry"
 )
 
@@ -97,10 +98,10 @@ func transientPolicyTransport(err error) bool {
 	// Explicit authentication/policy errors take precedence over ambiguous
 	// transport-wrapper wording. Exit status 128 alone is never retryable.
 	message := strings.ToLower(err.Error())
-	for _, permanent := range []string{"permission denied", "authentication failed", "access denied", "not authorized", "not allowed", "repository not found"} {
+	for _, permanent := range []string{gitssh.RefusalMessage, "oberth git-ssh: transport refused or upstream", "permission denied", "authentication failed", "access denied", "not authorized", "not allowed", "repository not found"} {
 		if strings.Contains(message, permanent) {
 			return false
 		}
 	}
-	return strings.Contains(message, "oberth git-ssh: transport refused or upstream") || pushretry.Transient(err)
+	return strings.Contains(message, gitssh.TemporaryFailureMessage) || pushretry.Transient(err)
 }
