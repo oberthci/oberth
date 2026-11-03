@@ -226,19 +226,12 @@ func TestEmitSecretFetchMarkerEmptyFetch(t *testing.T) {
 
 // --- #249: short secret redaction tests ---
 
-func TestSecretWrappersRefuseShortValuesBeforeStartingChild(t *testing.T) {
-	for _, materialize := range []bool{false, true} {
-		var output bytes.Buffer
-		var err error
-		command := []string{"/bin/sh", "-c", "printf child-started"}
-		if materialize {
-			err = executeMaterialize(t.TempDir(), nil, command, [][]byte{[]byte("XY")}, &output, &output)
-		} else {
-			err = execChild(t.TempDir(), command, []namedSecret{{path: "signing/password", value: []byte("XY")}}, &output, &output)
-		}
-		if err == nil || output.Len() != 0 {
-			t.Fatalf("child started with short secret: err=%v output=%q", err, output.String())
-		}
+func TestExecChildRefusesShortValuesBeforeStartingChild(t *testing.T) {
+	var output bytes.Buffer
+	command := []string{"/bin/sh", "-c", "printf child-started"}
+	err := execChild(t.TempDir(), command, []namedSecret{{path: "signing/password", value: []byte("XY")}}, &output, &output)
+	if err == nil || output.Len() != 0 {
+		t.Fatalf("child started with short secret: err=%v output=%q", err, output.String())
 	}
 }
 
@@ -370,15 +363,6 @@ func TestExecNoSwapWarningWhenInactive(t *testing.T) {
 	}
 }
 
-func TestMaterializeShortValueErrorNamesSecret(t *testing.T) {
-	var output bytes.Buffer
-	path := "signing/password"
-	err := executeMaterialize(t.TempDir(), []materializeMapping{{variable: "SIGNING_PASSWORD", relative: path}}, []string{"/bin/sh", "-c", "printf child-started"}, [][]byte{[]byte("XY")}, &output, &output)
-	if err == nil || !strings.Contains(err.Error(), path) || strings.Contains(err.Error(), "XY") || output.Len() != 0 {
-		t.Fatalf("invalid secret error = %v, output bytes = %d", err, output.Len())
-	}
-}
-
 func TestExecChildShortValueErrorNamesSecret(t *testing.T) {
 	var output bytes.Buffer
 	path := "oberth/data/release/signing/password"
@@ -388,18 +372,11 @@ func TestExecChildShortValueErrorNamesSecret(t *testing.T) {
 	}
 }
 
-func TestSecretWrappersAllowNewlineOnlyOptionalValues(t *testing.T) {
-	for _, materialize := range []bool{false, true} {
-		var output bytes.Buffer
-		command := []string{"/bin/sh", "-c", "printf child-started"}
-		var err error
-		if materialize {
-			err = executeMaterialize(t.TempDir(), nil, command, [][]byte{[]byte("\n")}, &output, &output)
-		} else {
-			err = execChild(t.TempDir(), command, []namedSecret{{path: "signing/password", value: []byte("\n")}}, &output, &output)
-		}
-		if err != nil || output.String() != "child-started" {
-			t.Fatalf("optional value: err=%v output=%q", err, output.String())
-		}
+func TestExecChildAllowsNewlineOnlyOptionalValues(t *testing.T) {
+	var output bytes.Buffer
+	command := []string{"/bin/sh", "-c", "printf child-started"}
+	err := execChild(t.TempDir(), command, []namedSecret{{path: "signing/password", value: []byte("\n")}}, &output, &output)
+	if err != nil || output.String() != "child-started" {
+		t.Fatalf("optional value: err=%v output=%q", err, output.String())
 	}
 }

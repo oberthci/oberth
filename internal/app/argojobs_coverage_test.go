@@ -117,7 +117,7 @@ func TestCreateWorkflow_ReconcilerUnhealthyBlocks(t *testing.T) {
 func TestCreateCIUncredentialedBypassesUnhealthyReconciler(t *testing.T) {
 	fixture := newRaceFixture(t)
 	fixture.jobs.SetReconcilerHealth(&fakeReconciler{healthy: false})
-	if err := fixture.jobs.CreateCI(t.Context(), fixture.request("plain", "plain-run")); err != nil {
+	if err := fixture.jobs.CreateWorkflow(t.Context(), fixture.request("plain", "plain-run")); err != nil {
 		t.Fatalf("plain CI blocked: %v", err)
 	}
 	if len(fixture.controller.created) != 1 {
@@ -144,7 +144,7 @@ func TestCreateCredentialedPromotionUnhealthyReconcilerBlocks(t *testing.T) {
 	request := fixture.request("promotion", "promotion-run")
 	request.Run.Trigger = "promotion"
 	request.Run.Credentialed = true
-	if err := fixture.jobs.CreateCI(t.Context(), request); err == nil || !strings.Contains(err.Error(), "credentialed admission is blocked") {
+	if err := fixture.jobs.CreateWorkflow(t.Context(), request); err == nil || !strings.Contains(err.Error(), "credentialed admission is blocked") {
 		t.Fatalf("promotion error = %v", err)
 	}
 	if len(fixture.controller.created) != 0 {

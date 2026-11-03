@@ -11,11 +11,11 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/periapsis"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func easyRequest(id string, cpu int64, duration time.Duration) admissionRequest {
-	return admissionRequest{RunID: id, Size: periapsis.M, Estimate: duration,
+	return admissionRequest{RunID: id, Size: pipeline.M, Estimate: duration,
 		Pods: &argoworkflow.PodDemand{CPUMilli: cpu - executorCPUMilli, MemoryBytes: 1 << 30, Pods: 1}}
 }
 
@@ -361,7 +361,7 @@ func TestEASYAgedNormalCannotCoexistBehindBaseHighest(t *testing.T) {
 	r := g.reserveRun(model.Run{ID: "aged", QueueSequence: 3, Priority: model.PriorityNormal, QueuedAt: clock.now.Add(-time.Hour)})
 	t.Cleanup(r.cancel)
 	g.mu.Lock()
-	r.prepared, r.size, r.weight, r.estimate = true, periapsis.S, 1, time.Hour
+	r.prepared, r.size, r.weight, r.estimate = true, pipeline.S, 1, time.Hour
 	r.pods = easyRequest("aged", 1100, time.Hour).Pods
 	g.grantLocked()
 	g.mu.Unlock()
