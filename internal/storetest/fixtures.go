@@ -49,7 +49,7 @@ func CreateUpstream(database *store.Store, ctx context.Context, spec model.Upstr
 	if err != nil {
 		return model.Upstream{}, err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	stamp := fixtureNow(fixture).UnixNano()
 	result, err := db.ExecContext(ctx, `INSERT INTO upstreams(name,kind,base_url,key_name,created_at,updated_at) VALUES(?,?,?,?,?,?)`, spec.Name, spec.Kind, spec.BaseURL, spec.KeyName, stamp, stamp)
 	if err != nil {
