@@ -1061,7 +1061,7 @@ ORDER BY queue_sequence DESC LIMIT ?`, append(args, pageLimit(filter.Limit))...)
 }
 
 // listFlatRuns reads one list in three groups, top to bottom: the bounded
-// queue, with the run admitted next at its bottom; running runs, most recently
+// queue in scheduler claim order (effective priority, then FIFO); running runs, most recently
 // started first; then terminal runs, most recently finished first. The first
 // page carries every queued and running run; only the terminal rows count
 // against the page limit, so a limit never drops a queued or running run. Older
@@ -1109,9 +1109,7 @@ func (s *Store) listFlatRuns(ctx context.Context, filter model.RunListFilter) ([
 	runs := make([]model.Run, 0)
 	if filter.Before == 0 && filter.BeforeRun == "" {
 		priorityOrder := priorityOrderSQL(s.now())
-		// The queue is read in admission order (the order ClaimNextRun and the
-		// weighted gate use) and shown reversed: the next run to be admitted
-		// sits directly above the running runs.
+		// Keep the queue in the same effective-priority and FIFO order as ClaimNextRun.
 		rows, err := tx.QueryContext(ctx, `
 WITH queue AS (
   SELECT *, ROW_NUMBER() OVER (ORDER BY `+priorityOrder+`) AS queue_position FROM runs
@@ -1123,9 +1121,6 @@ ORDER BY `+priorityOrder+` LIMIT ?`, append(scopeArgs, MaxActiveRuns)...) // #no
 		queued, err := collect("queued", rows, err, true)
 		if err != nil {
 			return nil, err
-		}
-		for i, j := 0, len(queued)-1; i < j; i, j = i+1, j-1 {
-			queued[i], queued[j] = queued[j], queued[i]
 		}
 		runs = append(runs, queued...)
 		rows, err = tx.QueryContext(ctx, `

@@ -19,7 +19,7 @@ const runListOrderSchema = `DROP INDEX IF EXISTS runs_latest_ref_idx;
 CREATE INDEX IF NOT EXISTS runs_latest_ref_idx ON runs(repo_id, ref_kind, ref, queue_sequence DESC, status, started_at, finished_at, queued_at, id);`
 
 // listLatestRefRuns lists each ref's newest run in the same three groups as
-// the flat list: queued heads with the run admitted next at the bottom,
+// the flat list: queued heads in scheduler claim order,
 // running heads most recently started first, then terminal heads most recently
 // finished first. The first page carries every queued and running head; only
 // terminal heads count against the page limit and page by a fixed (end time,
@@ -104,5 +104,5 @@ func latestRefQuery(restriction, priorityOrder string) string {
  SELECT ` + runReadColumns + `,page.earlier_attempts,COALESCE(queue.queue_position,0)
  FROM page JOIN runs ON runs.queue_sequence=page.head_sequence
  LEFT JOIN queue ON queue.queued_run_id=runs.id
- ORDER BY page.list_group, COALESCE(queue.queue_position,0) DESC, CASE page.list_group WHEN 1 THEN page.head_started_at ELSE page.end_time END DESC, page.head_id DESC`
+ ORDER BY page.list_group, COALESCE(queue.queue_position,0) ASC, CASE page.list_group WHEN 1 THEN page.head_started_at ELSE page.end_time END DESC, page.head_id DESC`
 }

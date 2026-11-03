@@ -531,10 +531,8 @@ its ID and a reason. Listing never cancels work; existing priority/protection
 and cancellation authorization checks still apply.
 
 `run_list` and `/api/runs` take an optional `view`. Omitted or `all`, the
-list reads like time flowing upward in three groups: the queue, with the run
-admitted next at its bottom (highest effective class and earliest queue
-position closest to the running runs, exactly the scheduler's admission
-order); running runs, most recently started first; then terminal runs, most
+list has three groups: the queue in scheduler claim order (highest effective
+priority first, including aged high work, then FIFO within each class); running runs, most recently started first; then terminal runs, most
 recently finished first, with passed and failed interleaved by finish time.
 The first page carries every queued and running run; the page limit counts
 only terminal rows, so no limit or page ever drops a queued or running run or

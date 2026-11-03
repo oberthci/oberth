@@ -63,8 +63,8 @@ func TestQueuePriorityAgingMovesOneClassAndKeepsFIFO(t *testing.T) {
 		t.Fatalf("run list = %v, %v", runIDs(flat), err)
 	}
 	for i, id := range want {
-		if row := flat[len(flat)-1-i]; row.ID != id || row.QueuePosition != int64(i+1) {
-			t.Fatalf("listed queue bottom-up at %d = %s (position %d), want %s", i, row.Ref, row.QueuePosition, id)
+		if row := flat[i]; row.ID != id || row.QueuePosition != int64(i+1) {
+			t.Fatalf("listed queue in claim order at %d = %s (position %d), want %s", i, row.Ref, row.QueuePosition, id)
 		}
 	}
 	for _, id := range want {

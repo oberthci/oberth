@@ -59,10 +59,9 @@ func TestQueuePriorityClassificationAndFIFO(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The active view lists the queue head first; the run list shows the
-	// same queue bottom-up, with the head as its lowest queued row.
+	// Both views list the queue in scheduler claim order.
 	for i, id := range want {
-		last := len(want) - 1 - i
+		last := i
 		if active[i].ID != id || flat[last].ID != id || active[i].QueuePosition != int64(i+1) || flat[last].QueuePosition != int64(i+1) {
 			t.Fatalf("queue views disagree at %d: active=%+v flat=%+v", i, active[i], flat[last])
 		}
@@ -276,9 +275,9 @@ func TestQueuePriorityMigrationFromV33ClassifiesExistingWork(t *testing.T) {
 	}
 }
 
-// queueBottom is the lowest queued row of a run list: the run admitted next.
-func queueBottom(runs []model.Run) model.Run {
-	for i := len(runs) - 1; i >= 0; i-- {
+// queueHead is the first queued row of a run list: the run admitted next.
+func queueHead(runs []model.Run) model.Run {
+	for i := range runs {
 		if runs[i].QueuePosition > 0 {
 			return runs[i]
 		}
@@ -306,7 +305,7 @@ func TestQueuePriorityHighAgesWithoutLosingFIFOToNormals(t *testing.T) {
 	now = now.Add(time.Hour)
 	for i, want := range []string{high.ID, normal.ID} {
 		flat, err := s.ListRecentRuns(ctx, model.RunListFilter{})
-		if head := queueBottom(flat); err != nil || head.ID != want || head.QueuePosition != 1 {
+		if head := queueHead(flat); err != nil || head.ID != want || head.QueuePosition != 1 {
 			t.Fatalf("aged queue view at %d: %+v %v", i, flat, err)
 		}
 		next, err := s.ClaimNextRun(ctx)
@@ -383,7 +382,7 @@ func TestQueuePriorityTagsIndependentOfSizeGrantsAndBranchSignals(t *testing.T) 
 		}
 	}
 	flat, err := s.ListRecentRuns(ctx, model.RunListFilter{})
-	if err != nil || flat[len(flat)-1].ID != tag.ID {
+	if err != nil || flat[0].ID != tag.ID {
 		t.Fatalf("granted list order: %+v %v", flat, err)
 	}
 	claimed, err := s.ClaimNextRun(ctx)
