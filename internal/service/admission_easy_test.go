@@ -25,7 +25,7 @@ func easyGate(t *testing.T) (*weightedAdmission, *fakeClock, *admissionReservati
 	g := backfillGate(clock)
 	g.resources.CPUMilli, g.resources.MemoryBytes = 11000, 48<<30
 	running := g.reserve(1)
-	acquireRequestWithinBudget(t, running, easyRequest("port-release", 6300, time.Hour))
+	acquireRequestWithinBudget(t, running, easyRequest("release", 6300, time.Hour))
 	t.Cleanup(running.release)
 	clock.now = clock.now.Add(30 * time.Minute)
 	return g, clock, running
@@ -95,7 +95,7 @@ func TestEASYForecastUsesEnoughCompletionsAndRunSlots(t *testing.T) {
 		t.Cleanup(other.cancel)
 		head := pending(t, g, 3, easyRequest("head", 8200, time.Hour))
 		t.Cleanup(head.cancel)
-		// Port ends in 30m but the surviving 3 CPU run still blocks head.
+		// Release ends in 30m but the surviving 3 CPU run still blocks head.
 		candidate := pending(t, g, 4, easyRequest("candidate", 1100, 35*time.Minute))
 		t.Cleanup(candidate.cancel)
 		if slots == 0 && !granted(g, candidate) {
