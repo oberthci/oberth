@@ -10,7 +10,40 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
+
+type retirementDeadlineRecorder struct {
+	*httptest.ResponseRecorder
+	deadline time.Time
+}
+
+func (w *retirementDeadlineRecorder) SetWriteDeadline(deadline time.Time) error {
+	w.deadline = deadline
+	return nil
+}
+
+func TestRetirementDeadlineIsRouteLocal(t *testing.T) {
+	const ordinary = 5 * time.Second
+	server := withLegacyRemovalCheck(&http.Server{Handler: http.NotFoundHandler(), WriteTimeout: ordinary}, "/fixture.sqlite", func(context.Context) error { return nil })
+	if server.WriteTimeout != ordinary {
+		t.Fatalf("shared write timeout widened to %v", server.WriteTimeout)
+	}
+	for _, path := range []string{"/", "/v1/retirement-check"} {
+		out := &retirementDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("X-Oberth-Admin-Database", "/fixture.sqlite")
+		start := time.Now()
+		server.Handler.ServeHTTP(out, request)
+		if path == "/" {
+			if !out.deadline.IsZero() {
+				t.Fatal("ordinary route deadline changed")
+			}
+		} else if out.deadline.Before(start.Add(3*time.Minute)) || out.deadline.After(time.Now().Add(3*time.Minute)) {
+			t.Fatalf("retirement deadline is not bounded to three minutes: %v", out.deadline)
+		}
+	}
+}
 
 // Lifecycle boundary: the live inventory is allowed only in the on-demand
 // admin handler, never as a synchronous prerequisite to starting listeners.

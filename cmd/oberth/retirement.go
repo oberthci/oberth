@@ -24,6 +24,13 @@ func withLegacyRemovalCheck(server *http.Server, path string, check func(context
 			http.Error(w, "retirement check unavailable", http.StatusServiceUnavailable)
 			return
 		}
+		// Only this read-only inventory needs a longer response budget. Keep
+		// the admin server's normal timeout on all other routes and requests.
+		// A writer without deadline support retains its existing server limit.
+		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(3 * time.Minute)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			http.Error(w, "retirement check deadline unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		if err := check(r.Context()); err != nil {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
@@ -33,7 +40,6 @@ func withLegacyRemovalCheck(server *http.Server, path string, check func(context
 		w.WriteHeader(http.StatusNoContent)
 	})
 	server.Handler = mux
-	server.WriteTimeout = 3 * time.Minute
 	return server
 }
 
