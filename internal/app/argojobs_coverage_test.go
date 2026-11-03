@@ -127,6 +127,12 @@ func TestCreateCIUncredentialedBypassesUnhealthyReconciler(t *testing.T) {
 
 func TestCreateReleaseUnhealthyReconcilerBlocksWithoutCredentialedFlag(t *testing.T) {
 	fixture := newRaceFixture(t)
+	// Classification reads the release pipeline before checking health.
+	source, err := os.ReadFile(filepath.Join(fixture.sourceDir, ".oberth", "build.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writePipeline(t, fixture.sourceDir, "release.yaml", string(source))
 	fixture.jobs.SetReconcilerHealth(&fakeReconciler{healthy: false})
 	request := fixture.request("release", "release-run")
 	request.Run.Release = true

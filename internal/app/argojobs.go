@@ -300,8 +300,8 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 	// Reserve an in-flight intent under the lock. If another create for the
 	// same name is already in flight, coordinate through the reservation
 	// rather than serializing the whole pipeline behind it. The lock is
-	// held only for the map check and the reconciler health gate (both
-	// in-memory), not for audit/seeding/controller calls.
+	// held only for the in-memory map check, not for source reads or
+	// audit/seeding/controller calls.
 	jobs.mu.Lock()
 	if existing, occupied := jobs.intents[request.WorkflowName]; occupied {
 		jobs.mu.Unlock()
@@ -309,12 +309,6 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 			return nil // same submission already in flight
 		}
 		return fmt.Errorf("app: Workflow %s is in flight for a different run %s", request.WorkflowName, existing.runID)
-	}
-	// Gate on reconciler health: a credentialed submission must not proceed
-	// when the access reconciler has never successfully read the ConfigMap.
-	if (trigger == pipeline.TriggerRelease || request.Run.Credentialed || request.Run.Release) && jobs.secretAccess != nil && jobs.reconcilerHealthy != nil && !jobs.reconcilerHealthy.ReconcileHealthy() {
-		jobs.mu.Unlock()
-		return fmt.Errorf("app: access reconciler has not completed initial reconciliation; credentialed admission is blocked for %s", request.Repository.Name)
 	}
 	jobs.intents[request.WorkflowName] = argoIntent{runID: request.Run.ID, trigger: trigger}
 	jobs.mu.Unlock()
@@ -353,26 +347,6 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 	if testedSHA == "" {
 		testedSHA = request.Run.SHA
 	}
-	// Pre-load approved secrets from the approval table.
-	var approvedSecrets map[string]bool
-	var stepGrants map[string]map[string]bool
-	if jobs.secretAccess != nil {
-		grants, loadErr := jobs.secretAccess.ActiveSecretGrants(ctx, request.Repository.ID)
-		if loadErr != nil {
-			return fmt.Errorf("app: load approved secrets for %s: %w", request.Repository.Name, loadErr)
-		}
-		approvedSecrets = make(map[string]bool)
-		stepGrants = make(map[string]map[string]bool)
-		for step, secrets := range grants {
-			for secret := range secrets {
-				approvedSecrets[secret] = true
-				if stepGrants[secret] == nil {
-					stepGrants[secret] = make(map[string]bool)
-				}
-				stepGrants[secret][step] = true
-			}
-		}
-	}
 	var fragments map[argoworkflow.FragmentKey]argoworkflow.Fragment
 	if request.DemandReceipt != nil {
 		request.VMIDemandReceipt = request.DemandReceipt
@@ -392,6 +366,53 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 	pipelineFile, err := jobs.runSourceFile(request)
 	if err != nil {
 		return err
+	}
+	// Classify the same resolved graph Build will admit, including inline
+	// templates and pinned fragments. Durable flags remain conservative:
+	// a release or a run already marked credentialed cannot downgrade itself.
+	resolved, err := argoworkflow.ResolveRunSource(source, fragments, argoworkflow.RunSourceBinding{
+		RunID: request.Run.ID, RepositoryID: request.Repository.ID, SHA: testedSHA,
+		File: pipelineFile, Trigger: kind, ScheduleEntry: request.Run.ScheduleEntry,
+	})
+	if err != nil {
+		return err
+	}
+	declaresCredentials, err := workflowCredentialed(resolved.Workflow())
+	if err != nil {
+		return err
+	}
+	credentialed := trigger == pipeline.TriggerRelease || request.Run.Credentialed || request.Run.Release || declaresCredentials
+	jobs.mu.Lock()
+	blocked := credentialed && jobs.secretAccess != nil && jobs.reconcilerHealthy != nil && !jobs.reconcilerHealthy.ReconcileHealthy()
+	jobs.mu.Unlock()
+	if blocked {
+		return fmt.Errorf("app: access reconciler has not completed initial reconciliation; credentialed admission is blocked for %s", request.Repository.Name)
+	}
+
+	// Uncredentialed runs carry an empty approval set and never read grants.
+	// Credentialed runs still require a loaded approval table, even when the
+	// reconciler is healthy; nil makes Build refuse a missing loader.
+	var approvedSecrets map[string]bool
+	if !credentialed {
+		approvedSecrets = make(map[string]bool)
+	}
+	var stepGrants map[string]map[string]bool
+	if credentialed && jobs.secretAccess != nil {
+		grants, loadErr := jobs.secretAccess.ActiveSecretGrants(ctx, request.Repository.ID)
+		if loadErr != nil {
+			return fmt.Errorf("app: load approved secrets for %s: %w", request.Repository.Name, loadErr)
+		}
+		approvedSecrets = make(map[string]bool)
+		stepGrants = make(map[string]map[string]bool)
+		for step, secrets := range grants {
+			for secret := range secrets {
+				approvedSecrets[secret] = true
+				if stepGrants[secret] == nil {
+					stepGrants[secret] = make(map[string]bool)
+				}
+				stepGrants[secret][step] = true
+			}
+		}
 	}
 	submission := argojob.Request{
 		PodDemand:        request.PodDemand,
@@ -986,6 +1007,10 @@ func (jobs *ArgoJobs) PipelineCredentialed(_ context.Context, request service.Wo
 		// non-credentialed is fail-safe (zero secrets, zero publication rights).
 		return false, fmt.Errorf("decode pipeline for credential detection: %w", err)
 	}
+	return workflowCredentialed(workflow)
+}
+
+func workflowCredentialed(workflow *wfv1.Workflow) (bool, error) {
 	paths, err := argoworkflow.DeclaredSecretPaths(workflow)
 	if err != nil {
 		return false, err
