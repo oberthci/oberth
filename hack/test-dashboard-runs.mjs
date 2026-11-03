@@ -129,6 +129,27 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
   await run('renderRuns(0)');
   assert.deepEqual(ids(), ['scoped-normal-old','scoped-high-new','scoped-passed'],
     'F3: without positions or an active view the server row order stands');
+  // A claimed normal run (raw running, not started) listed by the active
+  // view after an unclaimed high run stays behind it: the scoped queue is
+  // the server's claim order, never "claimed first".
+  run(`
+    const f3Claimed=[
+      makeRun('scoped-claimed-normal',{Ref:'s5',Status:'running',StartedAt:null,FinishedAt:null,QueuedAt:f3Time(20),display_status:'queued',display_reason:'waiting for CPU budget (2 of 8 CPU free)'}),
+      makeRun('scoped-high-unclaimed',{Ref:'s6',Status:'queued',StartedAt:null,FinishedAt:null,QueuedAt:f3Time(25),priority_class:'high',display_status:'queued',display_reason:'next in line'}),
+      makeRun('scoped-started',{Ref:'s7',Status:'running',StartedAt:f3Time(30),FinishedAt:null,display_status:'running'}),
+    ];
+    api=async path=>{
+      if(path==='/api/repos')return [{ID:1,Name:'ours',UpstreamID:1}];
+      if(path==='/api/runs/counts')return {Total:3,ByRepo:{1:3}};
+      const query=new URL(path,'https://example.test').searchParams;
+      if(query.get('view')==='active')return [f3Claimed[2],f3Claimed[1],f3Claimed[0]];
+      return {body:f3Claimed,next:''};
+    };
+  `);
+  await run('renderRuns(0)');
+  assert.deepEqual(ids(), ['scoped-claimed-normal','scoped-high-unclaimed','scoped-started'],
+    'F3: a claimed normal run sits above the unclaimed high run the gate admits first; both are queued rows');
+  assert.ok(!/waiting<\/span>/.test(run('html')), 'F3: the claimed run is a queued pill, not waiting');
   run('api=apiFixture;');
   console.log('F3 passed: queued runs never render below running or finished runs');
 }

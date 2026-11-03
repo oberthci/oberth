@@ -513,15 +513,15 @@ Every run response includes `display_status` and `display_reason`, while
 durable `Status` stays unchanged. `display_status` is exactly one of
 `queued`, `running`, `passed`, `failed`, `infra-retried`, `superseded` and
 `cancelled`; everything finer is the reason line. Every run that has not
-started is `queued`: durable queued, claimed (raw `Status` `waiting`),
-admitted but not yet submitted, or in a trusted preflight. Its
-`display_reason` names what it waits for in plain words (`next in line`,
-`waiting for CPU budget (12.5 of 40 CPU free)`, `host IO pressure (42%)`,
-`10 runs already running (limit 10)`, `concurrency group deploy busy (held
-by run ...)`, `admitted, starting the workflow`, `KVM preflight running`);
-`Scheduling.state` and `Scheduling.message` keep the raw observation. Once
-started the run displays `running`; an uncertain Workflow create or an
-exceeded deadline is its reason, not a status. Terminal runs display
+started is `queued`: durable queued, or claimed before admission (raw
+`Status` `waiting`). Its `display_reason` names what it waits for in plain
+words (`next in line`, `waiting for CPU budget (12.5 of 40 CPU free)`,
+`host IO pressure (42%)`, `10 runs already running (limit 10)`,
+`concurrency group deploy busy (held by run ...)`, `waiting for admission`);
+`Scheduling.state` and `Scheduling.message` keep the raw observation.
+Admission records `started_at`, so an admitted run, including a trusted
+preflight before Workflow submission, displays `running`; an uncertain
+Workflow create or an exceeded deadline is its reason, not a status. Terminal runs display
 `passed` (including published releases), `failed` (a deadline or memory
 kill is the reason), `infra-retried`, `superseded` with the superseding SHA,
 or `cancelled` with the cancelling actor or restart action.
