@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
@@ -51,7 +52,14 @@ func TestIssueGetManyOrderMissingAndReadOnly(t *testing.T) {
 	if !reflect.DeepEqual(reader.calls, []int64{2, 999, 1}) || len(got.Results) != 3 {
 		t.Fatalf("order/reads: %#v %#v", got, reader.calls)
 	}
-	if got.Results[0].Issue == nil || got.Results[0].Issue != wireIssue(reader.issues[2]) || got.Results[1].Error != "not_found" || got.Results[1].Issue != nil || got.Results[2].Issue == nil || got.Results[2].Issue != wireIssue(reader.issues[1]) {
+	expectedOpen := wireIssue(reader.issues[2])
+	// A zero updated_at is older than every configured stale window. Observation
+	// belongs to the returned record and must not mutate the backing reader.
+	expectedOpen.Stale = true
+	if reader.issues[2].Stale {
+		t.Fatal("read mutated stored observation")
+	}
+	if got.Results[0].Issue == nil || got.Results[0].Issue != expectedOpen || got.Results[1].Error != "not_found" || got.Results[1].Issue != nil || got.Results[2].Issue == nil || got.Results[2].Issue != wireIssue(reader.issues[1]) {
 		t.Fatalf("records: %#v", got)
 	}
 }
@@ -94,7 +102,7 @@ func TestIssueGetManyPropagatesFailureAndCancellation(t *testing.T) {
 	}
 }
 func TestIssueGetManyEncodedBudgetBoundary(t *testing.T) {
-	base := model.Issue{ID: 1, Kind: model.IssueManual, State: model.IssueOpen, Title: "exact"}
+	base := model.Issue{ID: 1, Kind: model.IssueManual, State: model.IssueOpen, Title: "exact", UpdatedAt: time.Now()}
 	wire := wireIssue(base)
 	encoded, _ := json.Marshal(api.IssueGetManyResponse{Results: []api.IssueGetManyResult{{ID: 1, Issue: &wire}}})
 	bodyLength := api.IssueGetManyMaximumBytes - len(encoded)

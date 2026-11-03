@@ -1154,5 +1154,6 @@ CREATE INDEX runs_admission_idx ON runs(status, admission_sequence, queue_sequen
 	{version: executionRetirementMigrationVersion, sql: executionRetirementSchema},
 	{version: resourceCeilingMigrationVersion, sql: resourceCeilingSchema},
 	{version: publicationPolicyWaitMigrationVersion, sql: publicationPolicyWaitSchema},
+	{version: issueWorkspaceMigrationVersion, sql: issueWorkspaceSchema},
 	{version: runListOrderMigrationVersion, sql: runListOrderSchema},
 }

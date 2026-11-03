@@ -709,10 +709,12 @@ func runRemoteStatus(ctx context.Context, arguments []string, output io.Writer) 
 }
 
 type remoteIssueSummary struct {
-	ID    int64
-	State string
-	Kind  string
-	Title string
+	WorkStatus string `json:"work_status"`
+	Stale      bool   `json:"stale"`
+	ID         int64
+	State      string
+	Kind       string
+	Title      string
 }
 
 type remoteIssuePage struct {
@@ -722,9 +724,32 @@ type remoteIssuePage struct {
 }
 
 func runIssues(ctx context.Context, arguments []string, output io.Writer) error {
-	flags, asJSON, err := remoteFlags("issues", arguments, output)
-	if err != nil || flags == nil {
-		return err
+	if len(arguments) > 0 && arguments[0] == "update" {
+		return runIssueWorkStatus(ctx, arguments[1:], output)
+	}
+	flags := flag.NewFlagSet("issues", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	asJSON := flags.Bool("json", false, "emit the server payload")
+	workStatus := flags.String("work-status", "", "filter todo, active, waiting or review")
+	staleAfter := flags.String("stale-after", "", "override the general stale window (duration)")
+	activeStaleAfter := flags.String("active-stale-after", "", "override the active stale window (duration)")
+	if err := parseCommandFlags(flags, arguments); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			flags.SetOutput(output)
+			flags.Usage()
+			return nil
+		}
+		return fmt.Errorf("%w: %w", errUsage, err)
+	}
+	if *workStatus != "" && !model.IssueWorkStatus(*workStatus).Valid() {
+		return fmt.Errorf("%w: invalid work status", errUsage)
+	}
+	for _, raw := range []string{*staleAfter, *activeStaleAfter} {
+		if raw != "" {
+			if value, err := time.ParseDuration(raw); err != nil || value <= 0 {
+				return fmt.Errorf("%w: stale windows must be positive durations", errUsage)
+			}
+		}
 	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("%w: issues takes no arguments; use the dashboard for individual issue detail", errUsage)
@@ -735,7 +760,7 @@ func runIssues(ctx context.Context, arguments []string, output io.Writer) error 
 	}
 	reportMode("server")
 	raw, err := collectIssuePages(ctx, func(ctx context.Context, before int64) (json.RawMessage, error) {
-		query := map[string]string{}
+		query := map[string]string{"work_status": *workStatus, "stale_after": *staleAfter, "active_stale_after": *activeStaleAfter}
 		if before > 0 {
 			query["before"] = strconv.FormatInt(before, 10)
 		}
@@ -766,12 +791,12 @@ func runIssues(ctx context.Context, arguments []string, output io.Writer) error 
 		_, err := fmt.Fprintf(output, "0 of %d\n", page.Total)
 		return err
 	}
-	if _, err := fmt.Fprintf(output, "%-6s %-8s %-8s %s\n", "ID", "STATE", "KIND", "TITLE"); err != nil {
+	if _, err := fmt.Fprintf(output, "%-6s %-8s %-8s %-8s %-5s %s\n", "ID", "STATE", "KIND", "WORK", "STALE", "TITLE"); err != nil {
 		return err
 	}
 	for _, issue := range page.Issues {
-		if _, err := fmt.Fprintf(output, "%-6d %-8s %-8s %s\n",
-			issue.ID, issue.State, issue.Kind, issue.Title); err != nil {
+		if _, err := fmt.Fprintf(output, "%-6d %-8s %-8s %-8s %-5t %s\n",
+			issue.ID, issue.State, issue.Kind, issue.WorkStatus, issue.Stale, issue.Title); err != nil {
 			return err
 		}
 	}
@@ -905,4 +930,39 @@ func renderExecutionClock(output io.Writer, scheduling *model.RunScheduling) err
 		return err
 	}
 	return nil
+}
+
+// runIssueWorkStatus uses the same authenticated, audited mutation path as MCP.
+func runIssueWorkStatus(ctx context.Context, arguments []string, output io.Writer) error {
+	flags := flag.NewFlagSet("issues update", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	id := flags.Int64("id", 0, "issue ID")
+	status := flags.String("work-status", "", "todo, active, waiting or review")
+	revision := flags.Int64("expected-revision", 0, "optional current metadata revision")
+	if err := parseCommandFlags(flags, arguments); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			flags.SetOutput(output)
+			flags.Usage()
+			return nil
+		}
+		return fmt.Errorf("%w: %w", errUsage, err)
+	}
+	revisionProvided := false
+	flags.Visit(func(value *flag.Flag) {
+		if value.Name == "expected-revision" {
+			revisionProvided = true
+		}
+	})
+	if flags.NArg() != 0 || *id <= 0 || !model.IssueWorkStatus(*status).Valid() || (revisionProvided && *revision <= 0) {
+		return fmt.Errorf("%w: issues update --id ID --work-status todo|active|waiting|review [--expected-revision N]", errUsage)
+	}
+	args := map[string]any{"id": *id, "work_status": *status}
+	if *revision > 0 {
+		args["expected_revision"] = *revision
+	}
+	encoded, err := json.Marshal(args)
+	if err != nil {
+		return err
+	}
+	return runMCPCall(ctx, []string{"issue_update", string(encoded)}, output)
 }

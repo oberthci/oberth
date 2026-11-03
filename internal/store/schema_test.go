@@ -29,8 +29,8 @@ func TestSchemaMigrationsAreContiguous(t *testing.T) {
 	if err := validateMigrations(migrations, latestMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
-	if latestMigrationVersion != 50 {
-		t.Fatalf("latest migration version = %d, want 50", latestMigrationVersion)
+	if latestMigrationVersion != 51 {
+		t.Fatalf("latest migration version = %d, want 51", latestMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)
@@ -1095,7 +1095,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"step_results":              {"run_id", "burn", "step", "ordinal", "status", "exit_code", "log_start", "log_end", "started_at", "finished_at", "recorded_at", "declared_size", "max_rss_bytes", "user_cpu_ns", "system_cpu_ns", "termination_json", "memory_peak_bytes"},
 		"promotions":                {"sequence", "id", "repo_id", "source_branch", "source_sha", "target_ref", "previous_sha", "result_sha", "actor", "status", "run_id", "error", "created_at", "updated_at", "grant_id"},
 		"promotion_grants":          {"id", "repo_id", "source_sha", "target_ref", "issuer", "issuer_fingerprint", "note", "created_at", "expires_at", "revoked_by", "revoked_at", "consumed_by", "consumed_at"},
-		"issues":                    {"id", "repo_id", "kind", "branch", "title", "body", "state", "occurrences", "created_at", "updated_at", "closed_at", "ci_origin", "ci_work_sequence", "ci_work_id", "scope_upstream_id", "revision"},
+		"issues":                    {"id", "repo_id", "kind", "branch", "title", "body", "state", "occurrences", "created_at", "updated_at", "closed_at", "ci_origin", "ci_work_sequence", "ci_work_id", "scope_upstream_id", "revision", "work_status"},
 		"issue_locks":               {"issue_id", "owner", "acquired_at", "expires_at"},
 		"audit_actions":             {"id", "actor", "action", "resource_type", "resource_id", "details", "previous_sha256", "sha256", "created_at"},
 		"audit_anchors":             {"id", "audit_id", "audit_sha256", "tsa_url", "receipt", "anchored_at", "created_at"},

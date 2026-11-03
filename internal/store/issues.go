@@ -16,7 +16,7 @@ import (
 
 const issueColumns = `
 id, repo_id, kind, branch, title, body, state, occurrences,
-ci_origin, ci_work_sequence, ci_work_id, created_at, updated_at, closed_at, scope_upstream_id, revision`
+ci_origin, ci_work_sequence, ci_work_id, created_at, updated_at, closed_at, scope_upstream_id, revision, work_status`
 
 func (s *Store) CloseCIIssue(ctx context.Context, actor string, issueID int64, resolution string) (model.Issue, error) {
 	resolution = strings.TrimSpace(resolution)
@@ -141,8 +141,11 @@ func (s *Store) UpdateIssue(ctx context.Context, actor string, id int64, patch m
 }
 
 func (s *Store) updateIssue(ctx context.Context, actor string, id int64, patch model.IssuePatch, manualOnly bool) (model.Issue, error) {
-	if strings.TrimSpace(actor) == "" || id <= 0 || (patch.Title == nil && patch.Body == nil && patch.State == nil && patch.ScopeUpstreamID == nil) {
+	if strings.TrimSpace(actor) == "" || id <= 0 || (patch.Title == nil && patch.Body == nil && patch.State == nil && patch.ScopeUpstreamID == nil && patch.WorkStatus == nil) {
 		return model.Issue{}, fmt.Errorf("%w: issue patch is empty", ErrInvalid)
+	}
+	if patch.WorkStatus != nil && !patch.WorkStatus.Valid() {
+		return model.Issue{}, fmt.Errorf("%w: issue work status is invalid", ErrInvalid)
 	}
 	if patch.Title != nil && strings.TrimSpace(*patch.Title) == "" {
 		return model.Issue{}, fmt.Errorf("%w: issue title is empty", ErrInvalid)
@@ -203,6 +206,10 @@ func (s *Store) updateIssue(ctx context.Context, actor string, id int64, patch m
 		updates = append(updates, "title = ?")
 		args = append(args, *patch.Title)
 	}
+	if patch.WorkStatus != nil {
+		updates = append(updates, "work_status = ?")
+		args = append(args, *patch.WorkStatus)
+	}
 	if patch.Body != nil {
 		updates = append(updates, "body = ?")
 		args = append(args, *patch.Body)
@@ -234,7 +241,7 @@ func (s *Store) updateIssue(ctx context.Context, actor string, id int64, patch m
 			return model.Issue{}, fmt.Errorf("release closed manual issue lock: %w", err)
 		}
 	}
-	details := map[string]any{"state": value.State}
+	details := map[string]any{"state": value.State, "work_status": value.WorkStatus}
 	if patch.ScopeUpstreamID != nil {
 		details["old_scope_upstream_id"] = oldScope
 		details["new_scope_upstream_id"] = value.ScopeUpstreamID
@@ -331,12 +338,17 @@ func (s *Store) ListIssues(ctx context.Context, filter model.IssueListFilter) (m
 	if filter.State != "" && !filter.State.Valid() {
 		return model.IssuePage{}, fmt.Errorf("%w: issue state is invalid", ErrInvalid)
 	}
+	if filter.WorkStatus != "" && !filter.WorkStatus.Valid() {
+		return model.IssuePage{}, fmt.Errorf("%w: issue work status is invalid", ErrInvalid)
+	}
 	limit := issuePageLimit(filter.Limit)
 	filter.Query = strings.TrimSpace(filter.Query)
 	// Counts omit the page cursor. Each facet retains the other selected
 	// facet, while repository, text and upstream scope constrain all counts.
 	restriction, restrictionArgs := repoRestriction(
 		"COALESCE((SELECT upstream_id FROM repositories WHERE id = issues.repo_id), scope_upstream_id)", filter.UpstreamIDs)
+	restriction += ` AND (? = '' OR work_status = ?)`
+	restrictionArgs = append(restrictionArgs, filter.WorkStatus, filter.WorkStatus)
 	countArgs := []any{filter.Kind, filter.Kind, filter.State, filter.State,
 		filter.Kind, filter.Kind, filter.Kind, filter.Kind,
 		filter.State, filter.State, filter.State, filter.State,
@@ -529,7 +541,7 @@ func scanIssue(row rowScanner) (model.Issue, error) {
 	if err := scanRowNotFound(row, "Issue", &value.ID, &repoID, &value.Kind, &value.Branch,
 		&value.Title, &value.Body, &value.State, &value.Occurrences,
 		&value.CIOrigin, &value.CIWorkSequence, &value.CIWorkID,
-		&created, &updated, &closed, &scopeUpstreamID, &value.Revision); err != nil {
+		&created, &updated, &closed, &scopeUpstreamID, &value.Revision, &value.WorkStatus); err != nil {
 		return model.Issue{}, err
 	}
 	value.RepoID = repoID.Int64

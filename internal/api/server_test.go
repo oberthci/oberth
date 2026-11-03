@@ -689,12 +689,12 @@ func TestMCPToolInputsMatchContract(t *testing.T) {
 		"wait":                {"id", "repo", "run_id", "sha", "timeout", "trigger"},
 		"sync":                {"branch", "priority", "priority_reason", "repo", "sha"},
 		"promote":             {"branch", "priority", "priority_reason", "repo", "sha"},
-		"issue_list":          {"before", "kind", "limit", "query", "repo", "state"},
-		"issue_get":           {"body_limit", "fields", "id"},
-		"issue_get_many":      {"body_limit", "fields", "ids"},
+		"issue_list":          {"active_stale_after", "before", "kind", "limit", "query", "repo", "stale_after", "state", "work_status"},
+		"issue_get":           {"active_stale_after", "body_limit", "fields", "id", "stale_after"},
+		"issue_get_many":      {"active_stale_after", "body_limit", "fields", "ids", "stale_after"},
 		"secretstore_verify":  {"expect", "keys", "paths", "release_tier", "repo", "tier", "timeout"},
 		"publication_abandon": {"id", "reason"},
-		"issue_update":        {"body", "expected_body_sha256", "expected_revision", "id", "title", "upstream"},
+		"issue_update":        {"body", "expected_body_sha256", "expected_revision", "id", "title", "upstream", "work_status"},
 	}
 	for _, definition := range toolDefinitions() {
 		name, ok := definition["name"].(string)

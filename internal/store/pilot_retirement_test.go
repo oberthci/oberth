@@ -9,7 +9,7 @@ import (
 	"github.com/oberthci/oberth/internal/testdb"
 )
 
-const pilotRetirementDowngradeSQL = executionRetirementDowngradeSQL + testdb.PostV38Downgrade
+const pilotRetirementDowngradeSQL = executionRetirementTriggersDowngradeSQL + testdb.PostV38Downgrade
 
 func TestPilotRetirementPreservesReadOnlyHistory(t *testing.T) {
 	ctx := t.Context()

@@ -53,6 +53,8 @@ const grantPolicySyncAdvisory = "Grant recorded; the identity map refreshes auto
 	"Until then, access fails closed."
 
 type APIConfig struct {
+	IssueStaleAfter           time.Duration
+	IssueActiveStaleAfter     time.Duration
 	WorkflowCapabilities      WorkflowCapabilityStore
 	ResourceCoverages         ResourceCoverageReader
 	RunResources              RunResourceReader
@@ -109,6 +111,9 @@ type APIConfig struct {
 }
 
 type API struct {
+	issueStaleAfter           time.Duration
+	issueActiveStaleAfter     time.Duration
+	issueObservedAt           time.Time
 	workflowCapabilities      WorkflowCapabilityStore
 	resourceCoverages         ResourceCoverageReader
 	runResources              RunResourceReader
@@ -177,6 +182,16 @@ type API struct {
 }
 
 func NewAPI(config APIConfig) (*API, error) {
+	if config.IssueStaleAfter == 0 {
+		config.IssueStaleAfter = DefaultIssueStaleAfter
+	}
+	if config.IssueActiveStaleAfter == 0 {
+		config.IssueActiveStaleAfter = min(DefaultIssueActiveStaleAfter, config.IssueStaleAfter)
+	}
+	if config.IssueStaleAfter <= 0 || config.IssueActiveStaleAfter <= 0 || config.IssueActiveStaleAfter > config.IssueStaleAfter {
+		return nil, fmt.Errorf("%w: issue stale windows must be positive and active must not exceed general", ErrInvalidInput)
+	}
+
 	if config.ResourceCoverages == nil {
 		config.ResourceCoverages, _ = config.History.(ResourceCoverageReader)
 	}
@@ -224,6 +239,7 @@ func NewAPI(config APIConfig) (*API, error) {
 	}
 	lifetime, stopLifetime := context.WithCancel(context.Background())
 	return &API{
+		issueStaleAfter: config.IssueStaleAfter, issueActiveStaleAfter: config.IssueActiveStaleAfter,
 		releasePreflight: config.ReleasePreflight,
 		uplinkLifecycle:  config.UplinkLifecycle, declarationDismissal: config.DeclarationDismissal,
 		issueLifecycle:     config.IssueLifecycle,
@@ -658,6 +674,10 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if err := arguments.validate(); err != nil {
 			return nil, err
 		}
+		service, err := service.withIssueObservation(arguments.issueObservationOptions)
+		if err != nil {
+			return nil, err
+		}
 		issue, err := service.issueGet(ctx, actor, arguments.ID)
 		if err != nil {
 			return nil, err
@@ -674,15 +694,20 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if err := arguments.validate(); err != nil {
 			return nil, err
 		}
+		service, err := service.withIssueObservation(arguments.issueObservationOptions)
+		if err != nil {
+			return nil, err
+		}
 		return service.issueGetMany(ctx, actor, arguments.IDs, arguments.issueReadOptions)
 	case "issue_update":
 		var arguments struct {
-			ID                 int64   `json:"id"`
-			Title              *string `json:"title"`
-			Body               *string `json:"body"`
-			Upstream           *string `json:"upstream"`
-			ExpectedBodySHA256 string  `json:"expected_body_sha256"`
-			ExpectedRevision   *int64  `json:"expected_revision"`
+			ID                 int64                  `json:"id"`
+			WorkStatus         *model.IssueWorkStatus `json:"work_status"`
+			Title              *string                `json:"title"`
+			Body               *string                `json:"body"`
+			Upstream           *string                `json:"upstream"`
+			ExpectedBodySHA256 string                 `json:"expected_body_sha256"`
+			ExpectedRevision   *int64                 `json:"expected_revision"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
@@ -692,7 +717,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if value, ok := fields["expected_revision"]; ok && (string(value) == "null" || arguments.ExpectedRevision == nil || *arguments.ExpectedRevision < 1) {
 			return nil, fmt.Errorf("%w: expected_revision must be a positive integer", ErrInvalidInput)
 		}
-		issue, err := service.issueUpdate(ctx, actor, arguments.ID, arguments.Title, arguments.Body, arguments.Upstream, arguments.ExpectedBodySHA256, arguments.ExpectedRevision)
+		issue, err := service.issueUpdate(ctx, actor, arguments.ID, arguments.Title, arguments.Body, arguments.Upstream, arguments.ExpectedBodySHA256, arguments.ExpectedRevision, arguments.WorkStatus)
 		if err != nil {
 			return nil, err
 		}
@@ -755,7 +780,9 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		return api.IssueDeleteResponse{ID: arguments.ID, Deleted: true}, nil
 	case "issue_list":
 		var arguments struct {
-			Repo   string `json:"repo"`
+			Repo       string `json:"repo"`
+			WorkStatus string `json:"work_status"`
+			issueObservationOptions
 			Kind   string `json:"kind"`
 			State  string `json:"state"`
 			Query  string `json:"query"`
@@ -775,7 +802,11 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if arguments.State == "all" {
 			arguments.State = ""
 		}
-		page, err := service.issueList(ctx, arguments.Repo, arguments.Kind, arguments.State, arguments.Query, arguments.Before, limit)
+		service, err := service.withIssueObservation(arguments.issueObservationOptions)
+		if err != nil {
+			return nil, err
+		}
+		page, err := service.issueList(ctx, arguments.Repo, arguments.Kind, arguments.State, arguments.Query, arguments.Before, limit, arguments.WorkStatus)
 		if err != nil {
 			return nil, err
 		}
@@ -1380,14 +1411,19 @@ func (service *API) Issues(ctx context.Context, actor api.Actor, filter api.Issu
 	if err != nil {
 		return nil, err
 	}
-	page, err := service.issueList(ctx, filter.Repository, filter.Kind, filter.State, filter.Query, int64(filter.BeforeID), filter.Limit)
+	service, err = service.withIssueObservation(issueObservationOptions{StaleAfter: filter.StaleAfter, ActiveStaleAfter: filter.ActiveStaleAfter})
+	if err != nil {
+		return nil, err
+	}
+	page, err := service.issueList(ctx, filter.Repository, filter.Kind, filter.State, filter.Query, int64(filter.BeforeID), filter.Limit, filter.WorkStatus)
 	if err != nil {
 		return nil, err
 	}
 	result := api.IssueListPage{Issues: make([]api.IssueListSummary, len(page.Issues)), NextBefore: page.NextBefore, Total: page.Total, Counts: page.Counts}
 	for i, issue := range page.Issues {
 		result.Issues[i] = api.IssueListSummary{
-			ID:          issue.ID,
+			ID:         issue.ID,
+			WorkStatus: issue.WorkStatus, Stale: issue.Stale,
 			Revision:    issue.Revision,
 			RepoID:      issue.RepoID,
 			Kind:        issue.Kind,
@@ -2705,17 +2741,17 @@ func (service *API) issueGet(ctx context.Context, _ api.Actor, id int64) (model.
 	if err := service.labelIssueScopes(ctx, issues); err != nil {
 		return model.Issue{}, err
 	}
-	return service.withIssueLock(ctx, issues[0])
+	return service.withIssueLock(ctx, service.observeIssue(issues[0]))
 }
 
-func (service *API) issueUpdate(ctx context.Context, actor api.Actor, id int64, title, body, upstream *string, expectedBodySHA256 string, expectedRevision *int64) (model.Issue, error) {
+func (service *API) issueUpdate(ctx context.Context, actor api.Actor, id int64, title, body, upstream *string, expectedBodySHA256 string, expectedRevision *int64, workStatus *model.IssueWorkStatus) (model.Issue, error) {
 	if service.issues == nil {
 		return model.Issue{}, refuse(ErrUnavailable, "issues")
 	}
-	if id <= 0 || (title == nil && body == nil && upstream == nil) {
-		return model.Issue{}, fmt.Errorf("%w: issue ID and title, body or upstream are required", ErrInvalidInput)
+	if id <= 0 || (title == nil && body == nil && upstream == nil && workStatus == nil) {
+		return model.Issue{}, fmt.Errorf("%w: issue ID and title, body, upstream or work_status are required", ErrInvalidInput)
 	}
-	patch := model.IssuePatch{Title: title, Body: body, ExpectedRevision: expectedRevision, ExpectedBodySHA256: expectedBodySHA256}
+	patch := model.IssuePatch{WorkStatus: workStatus, Title: title, Body: body, ExpectedRevision: expectedRevision, ExpectedBodySHA256: expectedBodySHA256}
 	if upstream != nil {
 		name := strings.TrimSpace(*upstream)
 		if actor.Admin && actor.Scoped() && (name == "" || strings.EqualFold(name, "global") || !actor.SeesUpstream(name)) {
@@ -2796,17 +2832,20 @@ func (service *API) issueDelete(ctx context.Context, actor api.Actor, id int64) 
 	return service.issues.DeleteManualIssue(ctx, actor.Identity, id)
 }
 
-func (service *API) issueList(ctx context.Context, repositoryName, kind, state, query string, before int64, limit int) (model.IssuePage, error) {
+func (service *API) issueList(ctx context.Context, repositoryName, kind, state, query string, before int64, limit int, workStatus string) (model.IssuePage, error) {
 	if service.issues == nil {
 		return model.IssuePage{}, refuse(ErrUnavailable, "issues")
 	}
-	filter := model.IssueListFilter{Kind: model.IssueKind(kind), State: model.IssueState(state), Query: query, BeforeID: before, Limit: limit}
+	filter := model.IssueListFilter{WorkStatus: model.IssueWorkStatus(workStatus), Kind: model.IssueKind(kind), State: model.IssueState(state), Query: query, BeforeID: before, Limit: limit}
 	if repositoryName != "" {
 		repository, err := service.runs.RepositoryByName(ctx, repositoryName)
 		if err != nil {
 			return model.IssuePage{}, err
 		}
 		filter.RepoID = repository.ID
+	}
+	if filter.WorkStatus != "" && !filter.WorkStatus.Valid() {
+		return model.IssuePage{}, fmt.Errorf("%w: issue work status", ErrInvalidInput)
 	}
 	if filter.Kind != "" && !filter.Kind.Valid() {
 		return model.IssuePage{}, fmt.Errorf("%w: issue kind", ErrInvalidInput)
@@ -2828,7 +2867,7 @@ func (service *API) issueList(ctx context.Context, repositoryName, kind, state, 
 		return model.IssuePage{}, err
 	}
 	for i := range page.Issues {
-		page.Issues[i], err = service.withIssueLock(ctx, page.Issues[i])
+		page.Issues[i], err = service.withIssueLock(ctx, service.observeIssue(page.Issues[i]))
 		if err != nil {
 			return model.IssuePage{}, err
 		}
@@ -2878,6 +2917,7 @@ func (service *API) labelIssueScopes(ctx context.Context, issues []model.Issue) 
 func wireIssue(issue model.Issue) api.IssueResponse {
 	return api.IssueResponse{
 		Lock: issue.Lock, Revision: issue.Revision,
+		WorkStatus: string(issue.WorkStatus), Stale: issue.Stale,
 		ID: issue.ID, Kind: string(issue.Kind), Title: issue.Title,
 		Body: issue.Body, State: string(issue.State),
 		Upstream: issue.Upstream,
@@ -2893,6 +2933,7 @@ func wireIssueList(page model.IssuePage) api.IssueListResponse {
 	issues := make([]api.IssueListItem, len(page.Issues))
 	for index, issue := range page.Issues {
 		item := api.IssueListItem{
+			WorkStatus: string(issue.WorkStatus), Stale: issue.Stale,
 			Revision:    issue.Revision,
 			Lock:        issue.Lock,
 			ID:          issue.ID,

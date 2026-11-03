@@ -111,6 +111,8 @@ func (values *stringList) Set(value string) error {
 }
 
 type serveOptions struct {
+	issueStaleAfter         time.Duration
+	issueActiveStaleAfter   time.Duration
 	uplinkTokenPolicy       model.UplinkTokenPolicy
 	kubernetesQPS           float64
 	kubernetesBurst         int
@@ -244,6 +246,8 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	options := serveOptions{declaredAdmission: service.DefaultDeclaredAdmissionConfig()}
 	var extendedResourceBudgets, legacyResourceCharges string
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
+	flags.DurationVar(&options.issueStaleAfter, "issue-stale-after", service.DefaultIssueStaleAfter, "open issue stale window since last update")
+	flags.DurationVar(&options.issueActiveStaleAfter, "issue-active-stale-after", service.DefaultIssueActiveStaleAfter, "active issue stale window since last update (no longer than issue-stale-after)")
 	flags.DurationVar(&options.uplinkTokenPolicy.DefaultTTL, "uplink-token-default-ttl", model.DefaultUplinkTokenTTL, "default lifetime for new uplink bearer tokens (90 days)")
 	flags.DurationVar(&options.uplinkTokenPolicy.MaxTTL, "uplink-token-max-ttl", model.MaximumUplinkTokenTTL, "maximum new uplink bearer lifetime (hard ceiling 8760h / 365 days)")
 	flags.SetOutput(io.Discard)
@@ -378,6 +382,9 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	}
 	if flags.NArg() != 0 {
 		return serveOptions{}, fmt.Errorf("%w: serve accepts flags only", errUsage)
+	}
+	if options.issueStaleAfter <= 0 || options.issueActiveStaleAfter <= 0 || options.issueActiveStaleAfter > options.issueStaleAfter {
+		return serveOptions{}, errors.New("serve: issue stale windows must be positive and active must not exceed general")
 	}
 	if err := options.uplinkTokenPolicy.Validate(); err != nil {
 		return serveOptions{}, err
@@ -1083,6 +1090,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		KVMPreflights:      database,
 		SchedulingObserver: argoJobs, Admission: scheduler,
 		Runs: database, History: database, RunRetries: database, Repositories: database, Issues: database,
+		IssueStaleAfter: options.issueStaleAfter, IssueActiveStaleAfter: options.issueActiveStaleAfter,
 		Promotions: database, PromotionRuns: database, Enqueues: scheduler, Git: git,
 		Refs: git, Logs: logs, Artifacts: artifactStore, Auditor: database, Health: health, Signals: signals,
 		MutationGate:           anchors.AllowMutation,

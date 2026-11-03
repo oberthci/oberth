@@ -1057,16 +1057,12 @@ trust assumptions and complete invalidation rules.
   precedence, explicit tag selectors and repository/ref ambiguity remain
   unchanged; unknown selectors keep not-found. This read-only selection does
   not fetch upstream or alter sync, promotion or trigger-filtered wait rules.
-  This is the complete tool surface. Issues serve the CI repair queue. The
-  repository-less manual issue surface is legacy compatibility pending export
-  and migration; see [CI issue scope](docs/ci-issue-scope.md). The read-only
-  `hack/export-issues.py` migration aid preserves complete visible manual history
-  without changing state, scope or locks. It does not replace a database backup
-  or prove external import. Existing write behavior remains until migration is
-  verified. `issue_create` takes a `title`, a `body`
-  and an optional `upstream`; without one it creates a legacy global manual
-  issue, except for an uplink scoped to exactly one upstream, which files
-  there (#073). Run selectors are resolved across the repositories the uplink
+  This is the complete tool surface. Issues serve the CI repair queue and
+  workspace coordination. Manual issues remain in Oberth, either workspace-global
+  or scoped to an upstream; no external-tracker cutover is required. See
+  [issue scope](docs/ci-issue-scope.md). `issue_create` takes a `title`, a `body`
+  and an optional `upstream`; without one it creates a global manual issue,
+  except for an uplink scoped to exactly one upstream, which files there (#073). Run selectors are resolved across the repositories the uplink
   may see without a repository input. `issue_list` accepts optional `repo`,
   `kind` (`manual` or `ci`), `state` (`open`, `closed`, or `all`), `query`
   (case-insensitive substring in title, body or branch), `limit`
@@ -1080,6 +1076,24 @@ trust assumptions and complete invalidation rules.
   `counts` for open/closed (retaining the kind filter) and manual/ci
   (retaining the state filter). Repository, query and uplink scope constrain
   every count; scoped uplinks never receive installation-wide totals (#1124).
+- Issue `work_status` is `todo` (the default), `active`, `waiting` or `review`,
+  independently of `state`. `issue_update` sets it through the existing scope,
+  lock, audit and expected-revision checks; real status changes advance revision.
+  `oberth issues update --id ID --work-status active` uses that same MCP path.
+  `issue_list`, `/api/issues` and `oberth issues --work-status active` filter
+  status before pagination, totals and every state/kind facet. CI projection,
+  repeat-red updates and eligible-green closure retain their existing behavior.
+- Issue reads return computed `stale`: an open issue whose last `updated_at`
+  is older than the applicable window. Closed issues are never stale. Defaults
+  are seven days, or one hour for `active`, configured with server flags
+  `--issue-stale-after` and `--issue-active-stale-after`. `issue_get`,
+  `issue_get_many`, `issue_list` and the matching HTTP views accept positive
+  duration overrides `stale_after` and `active_stale_after`. The active window
+  cannot exceed the general window; a shorter general override caps an inherited
+  active window. The CLI list uses matching hyphenated flags. Observations never
+  write issue timestamps, revisions, audit entries or locks. `fields` can select
+  `work_status` and `stale`; the dashboard shows both. See
+  [issue lifecycle](docs/issue-lifecycle.md).
 - `issue_get_many` accepts 1..50 unique positive `ids`, validated before reads.
   Its `results` preserve request order, each containing `id` and either a full
   `issue` (the existing `issue_get` wire record) or `error`: `not_found` or
@@ -2604,7 +2618,8 @@ alone is never evidence that missing migrations ran.
 | v47 | Deferred execution retirement | Preserve writable execution journals, interlocks and grant authority so owner recovery can settle work in flight | Database restore |
 | v48 | #1216 stage 2 | Independent per-repository numeric request/limit ceilings, migrated exactly from size grants with grant and revocation provenance | Database restore |
 | v49 | Publication policy availability | Persist the first unavailable policy read independently of publication age; clear on success or terminal status | Database restore |
-| v50 | Run list order | Widen `runs_latest_ref_idx` to cover status, start, finish, queue time and ID, so the grouped latest-per-ref list ranks every head from one covering scan | Database restore |
+| v50 | Issue workspace coordination | Add constrained todo/active/waiting/review work status and include real status changes in metadata revisions; staleness remains computed on reads | Database restore |
+| v51 | Run list order | Widen `runs_latest_ref_idx` to cover status, start, finish, queue time and ID, so the grouped latest-per-ref list ranks every head from one covering scan | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding

@@ -113,9 +113,7 @@ DELETE FROM schema_migrations WHERE version>=39;
 
 // PostV44Downgrade removes later capability/retirement/ceiling objects before
 // reconstructed restart and priority fixtures replay the real migrations.
-const PostV44Downgrade = `
-DROP TRIGGER IF EXISTS publication_policy_wait_cleanup;
-DROP TABLE IF EXISTS publication_policy_waits;
+const PostV44Downgrade = PostV48Downgrade + `
 DROP TABLE IF EXISTS resource_ceilings;
 DROP TRIGGER IF EXISTS vm_suite_executions_retired_insert;
 DROP TRIGGER IF EXISTS vm_suite_executions_retired_update;
@@ -125,4 +123,20 @@ DROP TRIGGER IF EXISTS vm_suite_resources_retired_update;
 DROP TRIGGER IF EXISTS vm_suite_resources_retired_delete;
 DROP TABLE IF EXISTS workflow_capability_grants;
 DELETE FROM schema_migrations WHERE version>=45;
+`
+
+// PostV48Downgrade removes workspace and policy-wait additions and restores the
+// narrow latest-ref index before older fixtures replay the real migrations.
+const PostV48Downgrade = `
+DROP TRIGGER IF EXISTS issues_metadata_revision;
+ALTER TABLE issues DROP COLUMN work_status;
+CREATE TRIGGER issues_metadata_revision
+ AFTER UPDATE OF title, state, scope_upstream_id ON issues
+ WHEN NEW.title IS NOT OLD.title OR NEW.state IS NOT OLD.state OR NEW.scope_upstream_id IS NOT OLD.scope_upstream_id
+ BEGIN UPDATE issues SET revision=revision+1 WHERE id=NEW.id; END;
+DROP TRIGGER IF EXISTS publication_policy_wait_cleanup;
+DROP TABLE IF EXISTS publication_policy_waits;
+DROP INDEX IF EXISTS runs_latest_ref_idx;
+CREATE INDEX runs_latest_ref_idx ON runs(repo_id, ref_kind, ref, queue_sequence DESC);
+DELETE FROM schema_migrations WHERE version>=49;
 `

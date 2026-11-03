@@ -22,7 +22,7 @@ const state = {
   logCache: new Map(),
   live: null, // assigned per-run by liveLogContent
   showExec: readShowExec(),
-  issueKind: "", issueState: "open", issueRepo: "", issueQuery: "", issueCursor: 0, issueCursorHistory: [],
+  issueWorkStatus: "", issueKind: "", issueState: "open", issueRepo: "", issueQuery: "", issueCursor: 0, issueCursorHistory: [],
   issuePage: null, issueOpener: null,
   lastList: "/runs",
   authGen: 0, // incremented on sign-out and token replacement
@@ -1366,13 +1366,14 @@ function issueListURL() {
   const query = new URLSearchParams({ limit: "50" });
   if (state.issueRepo) query.set("repo", state.issueRepo);
   if (state.issueKind) query.set("kind", state.issueKind);
+  if (state.issueWorkStatus) query.set("work_status", state.issueWorkStatus);
   if (state.issueState) query.set("state", state.issueState);
   if (state.issueQuery) query.set("query", state.issueQuery);
   if (state.issueCursor) query.set("before", String(state.issueCursor));
   return "/api/issues?" + query.toString();
 }
 function issueRow(issue) {
-  return `<button type="button" class="issue-row" data-open-issue="${esc(issue.ID)}" aria-label="Open internal issue ${esc(issue.ID)}: ${esc(issue.Title)}"><span class="sha">#${esc(issue.ID)}</span><span>${pill(issue.Kind, issue.Kind === "ci" ? "run" : "pending")}</span><span>${pill(issue.State, issue.State === "open" ? "fail" : "pass")}</span><span class="clip">${esc(issue.RepoID ? repoName(issue.RepoID) : (issue.upstream || "workspace"))}</span><span class="branch clip">${esc(issue.Branch || "--")}</span><span class="issue-title" title="${esc(issue.Title)}">${esc(issue.Title)}</span><span title="occurrences">×${esc(issue.Occurrences || 1)}</span><span title="updated ${esc(fmtTime(issue.UpdatedAt))}">${esc(ago(issue.UpdatedAt))}</span></button>`;
+  return `<button type="button" class="issue-row" data-open-issue="${esc(issue.ID)}" aria-label="Open internal issue ${esc(issue.ID)}: ${esc(issue.Title)}"><span class="sha">#${esc(issue.ID)}</span><span>${pill(issue.Kind, issue.Kind === "ci" ? "run" : "pending")}</span><span class="issue-state">${pill(issue.State, issue.State === "open" ? "fail" : "pass")} ${pill(issue.work_status || "todo", "pending")} ${issue.stale ? pill("stale", "fail") : ""}</span><span class="clip">${esc(issue.RepoID ? repoName(issue.RepoID) : (issue.upstream || "workspace"))}</span><span class="branch clip">${esc(issue.Branch || "--")}</span><span class="issue-title" title="${esc(issue.Title)}">${esc(issue.Title)}</span><span title="occurrences">×${esc(issue.Occurrences || 1)}</span><span title="updated ${esc(fmtTime(issue.UpdatedAt))}">${esc(ago(issue.UpdatedAt))}</span></button>`;
 }
 async function renderIssues(seq) {
   setChrome("issues", "/ issues");
@@ -1411,10 +1412,11 @@ async function renderIssues(seq) {
       <span class="status-divider"></span>
       ${states.map(([value, label]) => `<button class="chip ${state.issueState === value ? "on" : ""}" data-issue-state="${esc(value)}">${esc(label)} <span class="chip-count">${stateCount(value)}</span></button>`).join("")}
       <label>repo <select data-action="issue-repo"><option value="">all</option>${state.repos.map(repo => `<option value="${esc(repoKey(repo))}" ${state.issueRepo === repoKey(repo) ? "selected" : ""}>${esc(repoLabel(repo))}</option>`).join("")}</select></label>
+      <label>work <select data-action="issue-work-status"><option value="">all</option>${["todo", "active", "waiting", "review"].map(status => `<option value="${status}" ${state.issueWorkStatus === status ? "selected" : ""}>${status}</option>`).join("")}</select></label>
       <label>search <input type="search" data-action="issue-query" value="${esc(state.issueQuery)}" aria-label="Search issue title, body or branch"></label>
       <span class="count">${pageRange(issueStart, issues.length, total)}</span>
     </div>
-    ${issues.length ? `<div class="table issues-table"><div class="issue-row head static"><span>id</span><span>kind</span><span>state</span><span>repo</span><span>branch</span><span>title</span><span>seen</span><span>updated</span></div>${issues.map(issueRow).join("")}</div>` : '<div class="empty">No internal issues match these filters.</div>'}
+    ${issues.length ? `<div class="table issues-table"><div class="issue-row head static"><span>id</span><span>kind</span><span>state / work</span><span>repo</span><span>branch</span><span>title</span><span>seen</span><span>updated</span></div>${issues.map(issueRow).join("")}</div>` : '<div class="empty">No internal issues match these filters.</div>'}
     <div class="issue-pager">
       <button type="button" data-action="issue-newer" ${state.issueCursorHistory.length ? "" : "disabled"}>‹ newer</button>
       <button type="button" data-action="issue-older" ${page.NextBefore ? "" : "disabled"}>older ›</button>
@@ -1448,13 +1450,15 @@ async function openIssue(id, opener) {
     return;
   }
   if (state.issueDetailRequest !== requestID || !dialog.open) return;
-  issue = { ...issue, Body: detail.body };
+  issue = { ...issue, Body: detail.body, work_status: detail.work_status, stale: detail.stale };
+  document.getElementById("issueDialogMeta").textContent = `${issue.Kind} · ${issue.State} · ${issue.work_status || "todo"}${issue.stale ? " · stale" : ""} · ${issue.upstream || "workspace-global"}`;
   content.innerHTML = `
     <h3>${esc(issue.Title || "Untitled issue")}</h3>
     <p class="meta">${esc(issue.RepoID ? repoName(issue.RepoID) : (issue.upstream || "workspace-global"))} ${issue.Branch ? "/ " + esc(issue.Branch) : ""} · Oberth internal ledger</p>
     <dl class="kv-grid">
       <dt>kind</dt><dd>${esc(issue.Kind)}</dd>
       <dt>state</dt><dd>${esc(issue.State)}</dd>
+      <dt>work</dt><dd>${esc(issue.work_status || "todo")}${issue.stale ? " · stale" : ""}</dd>
       <dt>upstream</dt><dd>${esc(issue.upstream || "workspace-global")}</dd>
       <dt>occurrences</dt><dd>${esc(issue.Occurrences || 1)}</dd>
       ${issue.CIOrigin ? `<dt>ci origin</dt><dd>${esc(issue.CIOrigin)}</dd>` : ""}
@@ -1626,6 +1630,7 @@ document.addEventListener("click", event => {
 });
 document.addEventListener("change", event => {
   const target = event.target;
+  if (target instanceof HTMLSelectElement && target.dataset.action === "issue-work-status") changeIssueFilter({ issueWorkStatus: target.value });
   if (target instanceof HTMLSelectElement && target.dataset.action === "issue-repo") changeIssueFilter({ issueRepo: target.value });
   if (target instanceof HTMLInputElement && target.dataset.action === "issue-query") changeIssueFilter({ issueQuery: target.value.trim() });
 });

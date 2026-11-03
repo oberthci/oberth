@@ -167,6 +167,8 @@ type IssueCreateResponse struct {
 // IssueResponse is the complete issue record exposed to MCP clients. Internal
 // projection sequence and storage ownership fields stay behind the service.
 type IssueResponse struct {
+	WorkStatus  string           `json:"work_status"`
+	Stale       bool             `json:"stale"`
 	Revision    int64            `json:"revision"`
 	Lock        *model.IssueLock `json:"lock"`
 	ID          int64            `json:"id"`
@@ -211,6 +213,8 @@ type IssueGetManyResponse struct {
 }
 
 type IssueListItem struct {
+	WorkStatus  string           `json:"work_status"`
+	Stale       bool             `json:"stale"`
 	Revision    int64            `json:"revision"`
 	Lock        *model.IssueLock `json:"lock"`
 	ID          int64            `json:"id"`
@@ -574,18 +578,21 @@ func toolDefinitions() []map[string]any {
 		tool("issue_create", "Create a manual issue, workspace-global or filed under one upstream. Uplinks scoped to that upstream see it; an uplink scoped to one upstream files there by default.", object(map[string]any{"title": stringProperty("Issue title"), "body": stringProperty("Issue body"), "upstream": stringProperty("Upstream name to file the issue under (required for an uplink scoped to several upstreams)")}, "title", "body")),
 		tool("issue_get", "Get an issue by ID. Full record by default for compatibility. Optional fields selects only named fields; body_limit caps retained body/occurrence-history bytes with an explicit truncated N bytes marker. The numeric occurrences count remains exact. Read-only; does not renew locks.", object(issueReadProperties("id", integerProperty("Issue ID")), "id")),
 		tool("issue_get_many", "Get 1..50 issues in request order, each with issue or error (not_found or response_limit). Full records by default. Optional fields and body_limit apply to each issue before the 256 KiB structured JSON budget; body_limit truncates body/occurrence history with a truncated N bytes marker, keeping numeric occurrences exact. Use compact options or issue_get for response_limit IDs. Read-only; does not renew locks.", object(issueReadProperties("ids", map[string]any{"type": "array", "minItems": 1, "maxItems": 50, "uniqueItems": true, "items": map[string]any{"type": "integer", "minimum": 1}}), "ids")),
-		tool("issue_update", "Update an issue title and body, or move a manual issue to an upstream (empty or global means workspace-global, admin only). A non-admin can move only a visible issue to an upstream in scope. expected_revision atomically checks the current metadata revision; a mismatch is a conflict. Revision advances only for real title, state or upstream changes, not body edits. When expected_body_sha256 is set, the server checks the existing body hash inside the write transaction and rejects a mismatch. Returns only id, state, updated_at, occurrences, appended_bytes (zero); use issue_get to read content.", object(map[string]any{"id": integerProperty("Issue ID"), "title": stringProperty("Issue title (body optional)"), "body": stringProperty("Replacement issue body (title optional)"), "upstream": stringProperty("New upstream name, or empty/global for workspace-global (admin only)"), "expected_revision": map[string]any{"type": "integer", "minimum": 1, "description": "Optional current metadata revision; mismatch is a conflict; omitted means last-write-wins"}, "expected_body_sha256": stringProperty("Hex-encoded SHA-256 of the existing body; the server rejects the update on mismatch")}, "id")),
+		tool("issue_update", "Update work_status (todo, active, waiting, review), title and body, or move a manual issue to an upstream (empty or global means workspace-global, admin only). A non-admin can move only a visible issue to an upstream in scope. expected_revision atomically checks the current metadata revision; a mismatch is a conflict. Revision advances only for real title, state, work_status or upstream changes, not body edits. When expected_body_sha256 is set, the server checks the existing body hash inside the write transaction and rejects a mismatch. Returns only id, state, updated_at, occurrences, appended_bytes (zero); use issue_get to read content.", object(map[string]any{"id": integerProperty("Issue ID"), "title": stringProperty("Issue title (body optional)"), "body": stringProperty("Replacement issue body (title optional)"), "work_status": issueWorkStatusProperty(), "upstream": stringProperty("New upstream name, or empty/global for workspace-global (admin only)"), "expected_revision": map[string]any{"type": "integer", "minimum": 1, "description": "Optional current metadata revision; mismatch is a conflict; omitted means last-write-wins"}, "expected_body_sha256": stringProperty("Hex-encoded SHA-256 of the existing body; the server rejects the update on mismatch")}, "id")),
 		tool("issue_append", "Append text to an issue body with a dated separator, without replacing the existing content. Safer than issue_update for checkpoints on large issues: the caller never re-sends the existing body. Returns only id, state, updated_at, occurrences, appended_bytes (UTF-8 bytes of text, excluding separator); use issue_get to read content.", object(map[string]any{"id": integerProperty("Issue ID"), "text": stringProperty("Text to append")}, "id", "text")),
 		tool("issue_close", "Close an issue without deleting its history. Returns only id, state, updated_at, occurrences, appended_bytes (zero); use issue_get to read content.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
 		tool("issue_reopen", "Reopen a manual issue without changing its ID or history. Already-open manual issues are unchanged; CI issues cannot be reopened manually.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
 		tool("issue_delete", "Delete an accidentally created manual issue.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
-		tool("issue_list", "List issue metadata, newest creation ID first (not latest updated), with total and faceted state/kind counts. Filters apply before pagination; counts exclude the cursor. Defaults to all issues, 50 per page; pass next_before as before with the same filters until absent for a complete queue scan.", object(map[string]any{
-			"repo":   stringProperty("Exact repository name; global manual issues have no repository"),
-			"kind":   map[string]any{"type": "string", "enum": []string{"manual", "ci"}},
-			"state":  map[string]any{"type": "string", "enum": []string{"open", "closed", "all"}},
-			"query":  stringProperty("Case-insensitive substring in issue title, body or branch"),
-			"before": map[string]any{"type": "integer", "minimum": 0, "description": "Exclusive issue ID cursor; zero starts the first page"},
-			"limit":  map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "description": "Page size (default 50)"},
+		tool("issue_list", "List issue metadata, newest creation ID first (not latest updated), with total and faceted state/kind counts. Filters apply before pagination; counts exclude the cursor. Returns work_status and computed stale for open issues past their window. Defaults to all issues, 50 per page; pass next_before as before with the same filters until absent for a complete queue scan.", object(map[string]any{
+			"repo":               stringProperty("Exact repository name; global manual issues have no repository"),
+			"work_status":        issueWorkStatusProperty(),
+			"stale_after":        stringProperty("Positive duration overriding the general stale window (server default 168h)"),
+			"active_stale_after": stringProperty("Positive duration overriding the active stale window (server default 1h); must not exceed stale_after"),
+			"kind":               map[string]any{"type": "string", "enum": []string{"manual", "ci"}},
+			"state":              map[string]any{"type": "string", "enum": []string{"open", "closed", "all"}},
+			"query":              stringProperty("Case-insensitive substring in issue title, body or branch"),
+			"before":             map[string]any{"type": "integer", "minimum": 0, "description": "Exclusive issue ID cursor; zero starts the first page"},
+			"limit":              map[string]any{"type": "integer", "minimum": 1, "maximum": 50, "description": "Page size (default 50)"},
 		})),
 		// Issue lifecycle administration (#1103).
 		tool("issue_unlock", "Break an issue lock, recording its previous owner. Admin only; visibility and audit gate enforced.", object(map[string]any{"id": integerProperty("Issue ID")}, "id")),
@@ -704,13 +711,15 @@ func toolDefinitions() []map[string]any {
 // cannot be selected. Keep the schema and service validation on this list.
 var IssueReadFields = []string{
 	"revision",
-	"id", "lock", "upstream", "kind", "title", "body", "state", "repo_id",
+	"id", "lock", "upstream", "kind", "title", "body", "state", "work_status", "stale", "repo_id",
 	"branch", "occurrences", "ci_origin", "ci_work_id", "created_at", "updated_at",
 }
 
 func issueReadProperties(key string, value any) map[string]any {
 	return map[string]any{
-		key: value,
+		key:                  value,
+		"stale_after":        map[string]any{"type": "string", "description": "Positive duration overriding the general stale window"},
+		"active_stale_after": map[string]any{"type": "string", "description": "Positive duration overriding the active stale window; must not exceed stale_after"},
 		"fields": map[string]any{
 			"type": "array", "minItems": 1, "uniqueItems": true,
 			"items":       map[string]any{"type": "string", "enum": IssueReadFields},
@@ -721,4 +730,8 @@ func issueReadProperties(key string, value any) map[string]any {
 			"description": "Maximum retained UTF-8 body bytes, including occurrence history; marker added outside limit. Zero returns only a truncation marker for a nonempty body. Omit for unlimited body",
 		},
 	}
+}
+
+func issueWorkStatusProperty() map[string]any {
+	return map[string]any{"type": "string", "enum": []string{"todo", "active", "waiting", "review"}, "description": "Work coordination status, independent of open/closed"}
 }
