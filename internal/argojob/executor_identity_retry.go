@@ -218,7 +218,12 @@ func (controller *Controller) reconcileExecutorIdentity(ctx context.Context, wor
 	if launcher {
 		account = controller.config.VMLauncherServiceAccount
 		if workflow.Annotations[capabilityAnnotation] != "" {
-			account = workflow.Spec.ServiceAccountName
+			// Retire every persisted resource binding even if the grant was
+			// revoked or the target Pod changed during delivery.
+			if retireErr := controller.retireExecutorIdentity(ctx, workflow); retireErr != nil {
+				failure.cause = errors.Join(failure.cause, retireErr)
+			}
+			return failure
 		}
 	}
 	if retireErr := controller.retireIdentityPod(ctx, workflow, account); retireErr != nil {

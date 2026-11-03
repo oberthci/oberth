@@ -202,12 +202,6 @@ func isPinnedUpgradeKey(key string, pinnedKeys map[string]bool) bool {
 	return false
 }
 
-// checkValuesPinnedConflicts checks parsed YAML data for leaf keys that
-// collide with a pinned upgrade key.
-func checkValuesPinnedConflicts(data []byte) error {
-	return checkUpgradeValuesPinnedConflicts(data, upgradePinnedKeys)
-}
-
 func checkUpgradeValuesPinnedConflicts(data []byte, pinnedKeys map[string]bool) error {
 	var values map[string]any
 	if err := yaml.Unmarshal(data, &values); err != nil {
@@ -394,6 +388,10 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		return result, err
 	}
 
+	if err := checkUpgradeLegacyResources(ctx, cfg, deps); err != nil {
+		return result, err
+	}
+
 	profile, cleanupProfile, err := prepareUpgradeControllerProfile(ctx, cfg, deps)
 	if err != nil {
 		return result, err
@@ -496,6 +494,11 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		if err := waitForUpgradeIdle(ctx, cfg, deps); err != nil {
 			return result, err
 		}
+	}
+
+	// Recheck after preview/drain, immediately before the first live write.
+	if err := checkUpgradeLegacyResources(ctx, cfg, deps); err != nil {
+		return result, err
 	}
 
 	if profile != nil {

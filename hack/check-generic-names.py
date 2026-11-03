@@ -44,10 +44,9 @@ LEGACY_DIGESTS = {
         'eb5df3aaccdecd003675124859ce47d15a1137b20db078e45a0e66f21a9bf58f',
     },
 }
-# Legal attribution and the retained endpoint migration contract predate this
-# sweep. Only legacy labels are allowed here; host labels are always rejected.
-LEGACY_FILES = {'LICENSE', 'cmd/oberth/mcp_legacy_default.go',
-                'cmd/oberth/mcp_environment_test.go'}
+# Legal attribution and the negative control for the removed endpoint. Only
+# legacy labels are allowed here; host labels are always rejected.
+LEGACY_FILES = {'LICENSE', 'cmd/oberth/mcp_environment_test.go'}
 HEX_ESCAPE = re.compile(rb'\\(?:x([0-9a-f]{2})|u00([0-9a-f]{2}))', re.I)
 LITERAL_JOIN = re.compile(rb"[\"']\s*(?:[+,]\s*)?[\"']")
 WORD = re.compile(rb'[a-z0-9]+')

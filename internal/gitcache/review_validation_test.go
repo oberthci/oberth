@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -28,16 +27,16 @@ func TestReadDefaultBlobHonorsArchiveGate(t *testing.T) {
 }
 func TestCaptureSeparatesDiagnosticsAndRejectsTruncation(t *testing.T) {
 	c := newTestCache(t, "unused")
-	script := filepath.Join(t.TempDir(), "git")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nif [ \"$1\" = large ]; then head -c 70000 /dev/zero | tr '\\000' a; else echo result; echo diagnostic >&2; fi\n"), 0700); err != nil {
+	executable, err := os.Executable()
+	if err != nil {
 		t.Fatal(err)
 	}
-	c.gitBinary = script
-	got, err := c.capture(t.Context(), "", "small")
+	c.gitBinary = executable
+	got, err := c.capture(t.Context(), "", "internal-gitcache-fixture", "capture-small")
 	if err != nil || got != "result" {
 		t.Errorf("stdout polluted: %q %v", got, err)
 	}
-	if _, err := c.capture(t.Context(), "", "large"); err == nil {
+	if _, err := c.capture(t.Context(), "", "internal-gitcache-fixture", "capture-large"); err == nil {
 		t.Error("capture silently truncated stdout")
 	}
 }

@@ -18,7 +18,7 @@ func TestOberthPipelinesFitLCeiling(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err = argoworkflow.ValidateResourceCeiling(workflow, "oberth", pipeline.L, 86400); err != nil {
+			if err = argoworkflow.ValidateResourceCeilingWithCapability(workflow, "oberth", pipeline.L, 86400, nil); err != nil {
 				t.Fatalf("every pipeline leaf must fit 4 CPU / 8Gi: %v", err)
 			}
 		})

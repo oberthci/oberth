@@ -345,7 +345,13 @@ func (controller *Controller) retireExecutorIdentity(ctx context.Context, wf *wf
 	}
 	accounts := []string{controller.config.ExecutorServiceAccount, controller.config.VMLauncherServiceAccount}
 	if wf.Annotations[capabilityAnnotation] != "" {
-		accounts = append(accounts, wf.Spec.ServiceAccountName)
+		// Read the persisted resource bindings so revocation cannot prevent
+		// cleanup of already-issued operator tokens.
+		for _, template := range wf.Spec.Templates {
+			if template.Resource != nil && template.Executor != nil {
+				accounts = append(accounts, template.Executor.ServiceAccountName)
+			}
+		}
 	}
 	for _, account := range accounts {
 		if account == "" {

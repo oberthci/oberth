@@ -21,6 +21,8 @@ import (
 // standing between a branch push and a release credential is that Oberth
 // decides the ServiceAccount server-side. ForceIdentity is that decision.
 type Identity struct {
+	// ResourceServiceAccountName is mounted only into admitted operator resource
+	// executors, never ordinary step containers or the shared executor.
 	ResourceServiceAccountName string
 	// Namespace is where the Workflow object and all its pods are created.
 	Namespace string
@@ -68,6 +70,14 @@ func (identity Identity) Validate() error {
 	if messages := k8svalidation.IsDNS1123Subdomain(identity.ExecutorServiceAccountName); len(messages) != 0 {
 		problems = append(problems, fmt.Errorf("argoworkflow: executor ServiceAccount %q is not a DNS-1123 subdomain: %s",
 			identity.ExecutorServiceAccountName, strings.Join(messages, ", ")))
+	}
+	if identity.ResourceServiceAccountName != "" {
+		if messages := k8svalidation.IsDNS1123Subdomain(identity.ResourceServiceAccountName); len(messages) != 0 {
+			problems = append(problems, fmt.Errorf("argoworkflow: resource ServiceAccount is invalid: %s", strings.Join(messages, ", ")))
+		}
+		if identity.ResourceServiceAccountName == identity.ServiceAccountName || identity.ResourceServiceAccountName == identity.ExecutorServiceAccountName || identity.AutomountServiceAccountToken {
+			problems = append(problems, errors.New("argoworkflow: resource authority requires distinct pipeline and shared executor accounts with pipeline token automount disabled"))
+		}
 	}
 	if identity.VMLauncherServiceAccountName != "" {
 		if messages := k8svalidation.IsDNS1123Subdomain(identity.VMLauncherServiceAccountName); len(messages) != 0 {
@@ -132,8 +142,11 @@ func Prepare(workflow *wfv1.Workflow, policy Policy, identity Identity) error {
 	if err := Admit(workflow, policy); err != nil {
 		return err
 	}
-	if identity.ResourceServiceAccountName != "" && (policy.Capability == nil || identity.ResourceServiceAccountName != policy.Capability.ServiceAccount || identity.ServiceAccountName != policy.Capability.ServiceAccount || identity.Namespace != policy.Capability.Namespace) {
+	if identity.ResourceServiceAccountName != "" && (policy.Capability == nil || identity.ResourceServiceAccountName != policy.Capability.ServiceAccount || identity.Namespace != policy.Capability.Namespace) {
 		return errors.New("argoworkflow: resource identity differs from the operator capability")
+	}
+	if resources, _ := CapabilityUsage(workflow); resources && policy.Capability != nil && identity.ResourceServiceAccountName == "" {
+		return errors.New("argoworkflow: resource capability requires an operator executor identity")
 	}
 	return ForceIdentity(workflow, identity)
 }

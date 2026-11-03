@@ -66,7 +66,7 @@ func TestCapabilityBuildBindsOperatorIdentityAndRefusesEscapes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("granted resource workflow: %v", err)
 	}
-	if wf.Spec.ServiceAccountName != c.ServiceAccount || wf.Namespace != c.Namespace || wf.Spec.Templates[0].Executor == nil || wf.Spec.Templates[0].Executor.ServiceAccountName != c.ServiceAccount {
+	if wf.Spec.ServiceAccountName != testPipelineAcct || wf.Spec.AutomountServiceAccountToken == nil || *wf.Spec.AutomountServiceAccountToken || wf.Namespace != c.Namespace || wf.Spec.Templates[0].Executor == nil || wf.Spec.Templates[0].Executor.ServiceAccountName != c.ServiceAccount {
 		t.Fatalf("operator identity not bound: %+v", wf.Spec)
 	}
 	if wf.Annotations["oberth.ci/workflow-capability"] == "" {
@@ -172,5 +172,55 @@ func TestCapabilityResourceKeepsOperatorLifecycle(t *testing.T) {
 		if template.Resource != nil && strings.Contains(template.PodSpecPatch, `"command":["argoexec","resource","get"]`) {
 			t.Error("generic create was rewritten as a legacy broker get")
 		}
+	}
+}
+
+// Replay the captured controller Pod boundary with today's Build output. A
+// sibling resource must never change a container or script's ambient identity.
+func TestCapabilityKeepsOrdinaryControllerPodsTokenless(t *testing.T) {
+	for _, shape := range []string{"container", "script"} {
+		t.Run(shape, func(t *testing.T) {
+			wf, err := argoworkflow.Decode([]byte(nonrootTestDocument))
+			if err != nil {
+				t.Fatal(err)
+			}
+			resource, err := argoworkflow.Decode([]byte(operatorResourceDocument))
+			if err != nil {
+				t.Fatal(err)
+			}
+			wf.Spec.Templates = append(wf.Spec.Templates, resource.Spec.Templates[0])
+			if shape == "script" {
+				leaf := &wf.Spec.Templates[0]
+				leaf.Script = &wfv1.ScriptTemplate{Container: *leaf.Container, Source: "true"}
+				leaf.Script.Command = []string{"/bin/sh"}
+				leaf.Container = nil
+			}
+			encoded, err := json.Marshal(wf)
+			if err != nil {
+				t.Fatal(err)
+			}
+			config := testConfig()
+			config.NonrootProfile = argoworkflow.NonrootStaticProfile
+			r := requestWithCapability(t, string(encoded), operatorCapability())
+			r.SourceVolume = SourceVolume{ClaimName: "run-source", SubPath: "src", ArtifactsSubPath: "artifacts"}
+			built, err := Build(config, nonrootFixtureProof(r))
+			if err != nil {
+				t.Fatal(err)
+			}
+			pod := nonrootApplyControllerFixture(t, nonrootControllerFixture(t, shape+"-before-patch.json"), built)
+			if pod.Spec.ServiceAccountName != testPipelineAcct || pod.Spec.AutomountServiceAccountToken == nil || *pod.Spec.AutomountServiceAccountToken {
+				t.Errorf("ordinary Pod received operator identity or ambient token: account=%s automount=%v", pod.Spec.ServiceAccountName, pod.Spec.AutomountServiceAccountToken)
+			}
+			assertWIFPodIsolation(t, "sibling", pod.Spec)
+			for _, tmpl := range built.Spec.Templates {
+				want := config.ExecutorServiceAccount
+				if tmpl.Resource != nil {
+					want = r.Capability.ServiceAccount
+				}
+				if tmpl.Executor != nil && tmpl.Executor.ServiceAccountName != want {
+					t.Errorf("%s executor=%s, want %s", tmpl.Name, tmpl.Executor.ServiceAccountName, want)
+				}
+			}
+		})
 	}
 }

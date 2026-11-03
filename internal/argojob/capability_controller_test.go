@@ -39,12 +39,19 @@ func TestCapabilityAdoptionRechecksGrantRepositoryAndNamespaceScope(t *testing.T
 		t.Fatal(err)
 	}
 	wf.UID = "operator-workflow-uid"
-	for _, scenario := range []string{"valid", "revoked", "changed", "foreign repository", "missing account", "cluster scoped", "missing discovery", "read failure"} {
+	for _, scenario := range []string{"valid", "revoked", "changed", "foreign repository", "missing account", "cluster scoped", "missing discovery", "read failure", "old operator identity", "step token", "resource executor"} {
 		t.Run(scenario, func(t *testing.T) {
 			kube := operatorKubeClient(grant)
 			current := operatorCapability()
+			existing := wf.DeepCopy()
 			repoID := submission.RepositoryID
 			switch scenario {
+			case "old operator identity":
+				existing.Spec.ServiceAccountName = grant.ServiceAccount
+			case "step token":
+				*existing.Spec.Templates[0].AutomountServiceAccountToken = true
+			case "resource executor":
+				existing.Spec.Templates[0].Executor.ServiceAccountName = testExecutorAcct
 			case "revoked":
 				current = nil
 			case "changed":
@@ -60,7 +67,7 @@ func TestCapabilityAdoptionRechecksGrantRepositoryAndNamespaceScope(t *testing.T
 			case "missing discovery":
 				kube.Resources = nil
 			}
-			controller := &Controller{kube: kube, workflows: &staticWorkflowClient{workflow: wf}, config: testConfig()}
+			controller := &Controller{kube: kube, workflows: &staticWorkflowClient{workflow: existing}, config: testConfig()}
 			bindCapabilityLoader(t, controller, func(_ context.Context, id int64) (*argoworkflow.Capability, error) {
 				if id != repoID {
 					t.Fatalf("read grant for %d, want durable repository %d", id, repoID)

@@ -77,9 +77,6 @@ func TestProductCodeHasNoHostedInstanceURL(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			if filepath.Base(path) == "mcp_legacy_default.go" {
-				body = []byte(strings.ReplaceAll(string(body), mcpLegacyDefaultURL, ""))
-			}
 			if strings.Contains(string(body), "watch."+"oberth.ci") {
 				t.Errorf("hosted instance URL in %s", path)
 			}

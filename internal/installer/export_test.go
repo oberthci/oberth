@@ -259,3 +259,9 @@ func printProductionCredentials(w io.Writer, initResult baoInitResult, color boo
 func OberthCredentialedPolicy(kvPrefix string, upstreamOrgs []string) string {
 	return OberthCredentialedPolicyWithGrants(kvPrefix, upstreamOrgs, nil)
 }
+
+// checkValuesPinnedConflicts checks parsed YAML data for leaf keys that
+// collide with a pinned upgrade key.
+func checkValuesPinnedConflicts(data []byte) error {
+	return checkUpgradeValuesPinnedConflicts(data, upgradePinnedKeys)
+}

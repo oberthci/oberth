@@ -38,6 +38,7 @@ func TestFlagErrorsStayOutOfCommandOutput(t *testing.T) {
 
 func TestSharedFlagsPreserveStdinSentinel(t *testing.T) {
 	t.Setenv("OBERTH_TOKEN", "fixture")
+	t.Setenv("OBERTH_MCP_URL", "https://example.invalid/mcp")
 	config, err := parseMCPFlags("mcp call", []string{"status", "--args-file", "-"}, 1)
 	if err != nil || config.argsFile != "-" {
 		t.Fatalf("stdin sentinel rejected: %+v %v", config, err)

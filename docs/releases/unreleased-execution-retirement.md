@@ -9,8 +9,10 @@ become generic capability grants. Operators provision new capability accounts,
 RBAC and resource capacity before migrating their pipelines.
 
 Migrations 45/46/47 retire only the inactive pilot, create an empty capability
-table, and reserve the deferred execution-retirement boundary. Schema 47 does
-not delete, freeze or require draining live work. A Recreate upgrade reaches
+table, and reserve the deferred execution-retirement boundary. Schema 47 itself
+does not delete, freeze or require draining live work; the v0.17.83 CLI requires
+legacy executions to be drained and their resources deleted before replacement
+(see the [retirement upgrade procedure](../retirement-upgrade.md)). A Recreate upgrade reaches
 normal owner recovery with all execution journals, capacity interlocks and
 pending cancellations intact. Existing Workflows are adopted or cleaned through
 the same ownership checks as a restart; migration itself never proves cleanup.
@@ -22,8 +24,11 @@ and `ready=false`; readiness reports `scheduler recovery is pending`. Restore
 Kubernetes API access or the configured cleanup permissions if this persists;
 the durable obligations and interlocks remain in place during retries. Shutdown
 cancels the wait. Trusted-preflight cleanup retains its existing bounded recovery
-and journal/capacity protection. No admission-pause or manual drain is required
-before this compatible upgrade.
+and journal/capacity protection. Starting with v0.17.83, the CLI additionally
+refuses an upgrade while legacy preflight Workflows or Oberth-owned VMs remain.
+Drain those executions with the existing server before replacing it; ordinary
+non-legacy Workflows retain restart adoption. See the
+[retirement upgrade procedure](../retirement-upgrade.md).
 
 Schemas 39–44 are the predecessor migrations from priority, integration and
 replay-C. Submission priority uses the v0.17.82 implementation; schemas 40–44

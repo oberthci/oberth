@@ -120,3 +120,7 @@ func (scheduler *Scheduler) seedHistoricalSteps(ctx context.Context, database *s
 	fixture := &Scheduler{store: historicalStepStore{scheduler.store, database}, logs: scheduler.logs}
 	return fixture.persistSteps(ctx, runID, steps, index)
 }
+
+func readPressureDirectory(root string) (model.PressureSample, error) {
+	return readPressureSources(root, true)
+}
