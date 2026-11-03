@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/gitoid"
 )
 
@@ -54,7 +55,10 @@ func ResolveRequirement(ctx context.Context, git PolicyGit, repository, candidat
 	}
 	baselineSHA, baselineBody, baselineExists, err := git.ReadDefaultBlob(ctx, repository, ContractFile, MaxContractBytes)
 	if err != nil {
-		return Requirement{}, &PolicyRefreshUnavailable{Cause: err}
+		if errors.Is(err, gitcache.ErrPolicyUpstreamUnavailable) {
+			return Requirement{}, &PolicyRefreshUnavailable{Cause: err}
+		}
+		return Requirement{}, fmt.Errorf("refresh upstream trusted test policy: %w", err)
 	}
 	if (baselineSHA != "" && !gitoid.Valid(baselineSHA)) || (baselineExists && baselineSHA == "") {
 		return Requirement{}, errors.New("upstream trusted test policy has no exact commit identity")

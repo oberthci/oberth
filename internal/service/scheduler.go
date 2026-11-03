@@ -98,6 +98,7 @@ type Scheduler struct {
 	publicationSet     map[string]struct{}
 	deliveryPermit     chan struct{}
 	capacityWait       func(context.Context) error
+	policyWaitTimeout  time.Duration // tests may shorten the fixed production limit
 	// promotionRetrier re-promotes a promotion whose delivery found its
 	// target moved (#1097); nil leaves such a promotion failed.
 	promotionRetrier atomic.Pointer[promotionRetrierHook]
@@ -1765,13 +1766,23 @@ func (scheduler *Scheduler) deliverPublicationWithGate(
 	if err := require(ctx); err != nil {
 		return model.PublicationFinalization{}, err
 	}
-	policyErr := scheduler.requirePublicationTestPolicy(ctx, repository, publication)
+	// The durable creation time bounds policy waiting across process restarts.
+	policyDeadline := publication.CreatedAt.Add(scheduler.trustedPolicyWaitLimit())
+	policyCtx, cancelPolicy := context.WithDeadline(ctx, policyDeadline)
+	policyErr := scheduler.requirePublicationTestPolicy(policyCtx, repository, publication)
+	cancelPolicy()
+	if ctx.Err() != nil {
+		return finalization, ctx.Err()
+	}
+	if !time.Now().Before(policyDeadline) {
+		policyErr = policyWaitFailure(policyErr)
+	}
 	if err := require(ctx); err != nil {
 		return model.PublicationFinalization{}, err
 	}
 	if policyErr != nil {
 		var unavailable *vmrunner.PolicyRefreshUnavailable
-		if errors.As(policyErr, &unavailable) {
+		if errors.As(policyErr, &unavailable) && time.Now().Before(policyDeadline) {
 			// Policy availability is not a failed build or a push attempt. Keep
 			// the durable outbox pending and release the global delivery permit.
 			if publication.RunID != "" {
