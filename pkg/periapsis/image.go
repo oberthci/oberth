@@ -3,6 +3,8 @@ package periapsis
 import (
 	"fmt"
 	"strings"
+
+	"github.com/google/go-containerregistry/pkg/name"
 )
 
 const (
@@ -59,19 +61,72 @@ func ValidateRunnerImage(image string) error {
 	return nil
 }
 
-// RunnerImageAllowed reports whether image starts with one of the
-// administrator-permitted prefixes. An empty allowlist permits only the
-// built-in DefaultRunnerImagePrefixes.
+// RunnerImageAllowed compares normalized registries and repository boundaries.
+// Tags may still be narrowed by a tag prefix, but a registry port must never
+// be mistaken for a tag. Docker Hub short and fully qualified names agree.
 func RunnerImageAllowed(image string, prefixes []string) bool {
+	reference, err := name.ParseReference(image)
+	if err != nil {
+		return false
+	}
+	base, digest, _ := strings.Cut(image, "@")
+	canonical := reference.Context().Name()
+	if colon := strings.LastIndex(base, ":"); colon > strings.LastIndex(base, "/") {
+		canonical += base[colon:]
+	}
+	if digest != "" {
+		canonical += "@" + digest
+	}
 	if len(prefixes) == 0 {
 		prefixes = DefaultRunnerImagePrefixes
 	}
 	for _, prefix := range prefixes {
-		if prefix != "" && strings.HasPrefix(image, prefix) {
+		normalized, err := normalizedImagePrefix(prefix)
+		if err != nil || !strings.HasPrefix(canonical, normalized) {
+			continue
+		}
+		// A tag/digest prefix or a namespace ending in / is already bounded.
+		// A bare repository/namespace must end at a path or reference boundary.
+		if strings.HasSuffix(normalized, "/") || strings.Contains(normalized[strings.LastIndex(normalized, "/")+1:], ":") || strings.Contains(normalized, "@") ||
+			len(canonical) == len(normalized) || strings.ContainsAny(canonical[len(normalized):len(normalized)+1], "/:@") {
 			return true
 		}
 	}
 	return false
+}
+
+func normalizedImagePrefix(prefix string) (string, error) {
+	base, digest, hasDigest := strings.Cut(prefix, "@")
+	suffix := ""
+	if colon := strings.LastIndex(base, ":"); colon > strings.LastIndex(base, "/") {
+		suffix, base = base[colon:], base[:colon]
+	}
+	if hasDigest {
+		suffix += "@" + digest
+	}
+	if strings.HasSuffix(base, "/") {
+		base = strings.TrimSuffix(base, "/")
+		suffix = "/" + suffix
+		if !strings.Contains(base, "/") && strings.ContainsAny(base, ".:") {
+			registry, err := name.NewRegistry(base)
+			if err != nil {
+				return "", err
+			}
+			return registry.Name() + suffix, nil
+		}
+		// A trailing slash denotes a namespace, not an official image in
+		// Docker Hub's implicit library namespace (for example aquasec/).
+		repository, err := name.NewRepository(base + "/prefix-placeholder")
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSuffix(repository.Name(), "/prefix-placeholder") + suffix, nil
+	}
+	repository, err := name.NewRepository(base)
+	if err != nil {
+		return "", err
+	}
+	return repository.Name() + suffix, nil
 }
 
 // ValidateRunnerImagePrefixes rejects malformed administrator allowlist

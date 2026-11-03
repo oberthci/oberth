@@ -1,8 +1,43 @@
 package periapsis
 
 import (
+	"strings"
 	"testing"
 )
+
+func TestRunnerImageAllowlistUsesRegistryAndRepositoryBoundaries(t *testing.T) {
+	for _, test := range []struct {
+		image    string
+		prefixes []string
+		allowed  bool
+	}{
+		{"golang:5000/evil", nil, false},
+		{"ghcr.io/org-evil/x", []string{"ghcr.io/org"}, false},
+		{"ghcr.io/org/x", []string{"ghcr.io/org"}, true},
+		{"ghcr.io/org/x", []string{"ghcr.io/org/"}, true},
+		{"golang:1.26", nil, true},
+		{"docker.io/library/golang:1.26", nil, true},
+		{"index.docker.io/library/golang:1.26", []string{"docker.io/library/golang:"}, true},
+		{"golang:1.26", []string{"docker.io/library/golang:"}, true},
+		{"golang:1.25", []string{"golang:1.26"}, false},
+		{"golang:1.26-alpine", []string{"golang:1.26"}, true},
+		{"registry.example:5000/base/go:1", []string{"registry.example:5000/base/"}, true},
+		{"registry.example:5001/base/go:1", []string{"registry.example:5000/base/"}, false},
+		{"ghcr.io/org/x", []string{"ghcr.io/"}, true},
+		{"aquasec/trivy:1", []string{"aquasec/"}, true},
+		{"aquasec-evil/trivy:1", []string{"aquasec/"}, false},
+	} {
+		t.Run(test.image+strings.Join(test.prefixes, ","), func(t *testing.T) {
+			image := test.image + "@sha256:" + strings.Repeat("a", 64)
+			if err := ValidateRunnerImage(image); err != nil {
+				t.Fatal(err)
+			}
+			if got := RunnerImageAllowed(image, test.prefixes); got != test.allowed {
+				t.Fatalf("allowed=%v, want %v", got, test.allowed)
+			}
+		})
+	}
+}
 
 func TestRunnerImageAllowedAgainstPrefixes(t *testing.T) {
 	if !RunnerImageAllowed("golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", nil) {
