@@ -142,6 +142,9 @@ type Run struct {
 	// The explicit admin fallback survives a withheld automatic tag boost.
 	PriorityOverride       RunPriority `json:"-"`
 	PriorityOverrideReason string      `json:"-"`
+	// Only accepted explicit high/highest requests provide a tag fallback.
+	PriorityAccepted       RunPriority `json:"-"`
+	PriorityAcceptedReason string      `json:"-"`
 
 	ID            string
 	QueueSequence int64

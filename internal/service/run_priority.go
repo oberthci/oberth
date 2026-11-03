@@ -120,6 +120,7 @@ func (scheduler *Scheduler) BumpRunPriority(ctx context.Context, actor, id strin
 		if r.runID == id {
 			r.priority, r.priorityReason = run.Priority, run.PriorityReason
 			r.priorityOverride, r.priorityOverrideReason = run.PriorityOverride, run.PriorityOverrideReason
+			r.priorityAccepted, r.priorityAcceptedReason = run.PriorityAccepted, run.PriorityAcceptedReason
 		}
 	}
 	gate.sortWaitersLocked()
@@ -187,6 +188,7 @@ func (scheduler *Scheduler) refreshPriorities(ctx context.Context) error {
 			r.priorityLookupFailed = lookupFailed[run.RepoID]
 			r.priority, r.priorityReason = run.Priority, run.PriorityReason
 			r.priorityOverride, r.priorityOverrideReason = run.PriorityOverride, run.PriorityOverrideReason
+			r.priorityAccepted, r.priorityAcceptedReason = run.PriorityAccepted, run.PriorityAcceptedReason
 		}
 	}
 	gate.sortWaitersLocked()
@@ -260,6 +262,9 @@ func (r *admissionReservation) priorityRun() model.Run {
 		if r.priorityOverride != "" {
 			run.Priority = r.priorityOverride
 			run.PriorityReason = "admin bump: " + r.priorityOverrideReason
+		} else if r.priorityAccepted == model.PriorityHigh || r.priorityAccepted == model.PriorityHighest {
+			run.Priority = r.priorityAccepted
+			run.PriorityReason = "submission priority: " + r.priorityAcceptedReason
 		}
 	}
 	return run

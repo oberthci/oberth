@@ -32,6 +32,7 @@ INSERT OR IGNORE INTO run_priority_requests(run_id,requested,accepted,reason,act
  WHERE status IN ('queued','running') AND (` + basePrioritySQL + `) IN ('high','highest');`
 
 const requestedPrioritySQL = `(SELECT accepted FROM run_priority_requests WHERE run_id=id AND requested!='' AND accepted IN ('high','highest') AND refusal='')`
+const requestedPriorityReasonSQL = `(SELECT reason FROM run_priority_requests WHERE run_id=id AND requested!='' AND accepted IN ('high','highest') AND refusal='')`
 
 // Explicit priority, including an admin bump, survives later pushes. RC runs
 // retain the administrator's existing live classification.

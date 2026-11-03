@@ -70,6 +70,8 @@ type admissionReservation struct {
 	priorityReason         string
 	priorityOverride       model.RunPriority
 	priorityOverrideReason string
+	priorityAccepted       model.RunPriority
+	priorityAcceptedReason string
 	queuedAt               time.Time
 	runID                  string
 	// repoID, repo and ref identify the run when it blocks the queue head
@@ -224,6 +226,7 @@ func (gate *weightedAdmission) reservePriorityRun(sequence, order int64, run mod
 	reservation.pressureRelease, reservation.pressurePromotion = run.Release, run.Trigger == "promotion"
 	reservation.priority, reservation.priorityReason, reservation.queuedAt = run.Priority, run.PriorityReason, run.QueuedAt
 	reservation.priorityOverride, reservation.priorityOverrideReason = run.PriorityOverride, run.PriorityOverrideReason
+	reservation.priorityAccepted, reservation.priorityAcceptedReason = run.PriorityAccepted, run.PriorityAcceptedReason
 	gate.mu.Lock()
 	gate.reservations[sequence] = reservation
 	gate.waiters = append(gate.waiters, reservation)
