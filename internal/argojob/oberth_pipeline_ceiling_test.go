@@ -55,7 +55,11 @@ func TestOberthReleaseGoWorkersAreBounded(t *testing.T) {
 						env[key] = value
 					}
 				}
-				for key, want := range map[string]string{"GOMAXPROCS": "2", "GOFLAGS": "-p=1", "GOMEMLIMIT": "1GiB"} {
+				memoryLimit := "1GiB"
+				if name == "release-test" {
+					memoryLimit = "4GiB"
+				}
+				for key, want := range map[string]string{"GOMAXPROCS": "2", "GOFLAGS": "-p=1", "GOMEMLIMIT": memoryLimit} {
 					if env[key] != want {
 						t.Errorf("%s=%q, want %q after clean bootstrap", key, env[key], want)
 					}

@@ -1234,7 +1234,7 @@ spec:
           OBERTH_TEST_NODE_ARCHIVE=/tmp/oberth-website-inputs/node.tar.gz \
           GOMAXPROCS=2 \
           GOFLAGS='-p=1' \
-          GOMEMLIMIT=1GiB \
+          GOMEMLIMIT=4GiB \
           CGO_ENABLED=1 "$@"
       - bootstrap-clean
       - /bin/sh
