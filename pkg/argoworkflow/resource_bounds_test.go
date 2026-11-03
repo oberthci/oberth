@@ -39,7 +39,7 @@ func TestResourceBoundsDeadlineNegativeAndRequestLimitValidation(t *testing.T) {
 			case "grant":
 				maximum = pipeline.Size("invalid")
 			}
-			if err := ValidateResourceCeiling(wf, "repo-01", maximum, 3600); err == nil {
+			if err := ValidateResourceCeilingWithCapability(wf, "repo-01", maximum, 3600, nil); err == nil {
 				t.Fatal("invalid declaration accepted")
 			}
 		})
@@ -48,11 +48,11 @@ func TestResourceBoundsDeadlineNegativeAndRequestLimitValidation(t *testing.T) {
 func TestResourceBoundsRespectServerGrantWithoutMutatingDeclarations(t *testing.T) {
 	wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Entrypoint: "step-abc12345", Templates: []wfv1.Template{resourceLeaf("step-abc12345", "5", "1Gi")}}}
 	before := wf.DeepCopy()
-	err := ValidateResourceCeiling(wf, "repo-01", pipeline.L, 3600)
+	err := ValidateResourceCeilingWithCapability(wf, "repo-01", pipeline.L, 3600, nil)
 	if err == nil || !strings.Contains(err.Error(), "repo-01") || !strings.Contains(err.Error(), "step-abc12345") || !strings.Contains(err.Error(), "requests.cpu 5") || !strings.Contains(err.Error(), "ceiling 4") {
 		t.Fatalf("exact refusal: %v", err)
 	}
-	if err := ValidateResourceCeiling(wf, "repo-01", pipeline.XL, 3600); err != nil {
+	if err := ValidateResourceCeilingWithCapability(wf, "repo-01", pipeline.XL, 3600, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !wf.Spec.Templates[0].Container.Resources.Requests.Cpu().Equal(*before.Spec.Templates[0].Container.Resources.Requests.Cpu()) {
@@ -82,7 +82,7 @@ func TestResourceBoundsCoverDefaultsInlineSetsHelpersAndLimits(t *testing.T) {
 			case "limit":
 				wf.Spec.Templates[0].Container.Resources.Limits = corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("9Gi")}
 			}
-			if err := ValidateResourceCeiling(wf, "repo-01", pipeline.L, 3600); err == nil {
+			if err := ValidateResourceCeilingWithCapability(wf, "repo-01", pipeline.L, 3600, nil); err == nil {
 				t.Fatal("ceiling bypass")
 			}
 		})
@@ -110,7 +110,7 @@ func TestNumericResourceCeilingPreservesOperatorCapability(t *testing.T) {
 	sizeCeiling, _ := ResourceCeilingForSize(pipeline.L)
 	ceiling := ResourceRequirementsForCeiling(sizeCeiling)
 	capability := capabilityPolicyForTest(t).Capability
-	if err := ValidateResourceRequirements(wf, "repo-01", ceiling, 3600); err == nil {
+	if err := ValidateResourceRequirementsWithCapability(wf, "repo-01", ceiling, 3600, nil); err == nil {
 		t.Fatal("ungranted extended resource accepted")
 	}
 	if err := ValidateResourceRequirementsWithCapability(wf, "repo-01", ceiling, 3600, capability); err != nil {

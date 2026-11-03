@@ -330,10 +330,6 @@ func hostPressure() (model.PressureSample, error) {
 	return readPressureSources("/proc/pressure", false)
 }
 
-func readPressureDirectory(root string) (model.PressureSample, error) {
-	return readPressureSources(root, true)
-}
-
 // Memory/full rows are optional diagnostics for host admission. Only CPU and
 // IO some rows must be available to enforce the avg10 gate.
 func readPressureSources(root string, requireDiagnostics bool) (model.PressureSample, error) {

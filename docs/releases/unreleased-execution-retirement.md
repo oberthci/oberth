@@ -22,8 +22,11 @@ and `ready=false`; readiness reports `scheduler recovery is pending`. Restore
 Kubernetes API access or the configured cleanup permissions if this persists;
 the durable obligations and interlocks remain in place during retries. Shutdown
 cancels the wait. Trusted-preflight cleanup retains its existing bounded recovery
-and journal/capacity protection. No admission-pause or manual drain is required
-before this compatible upgrade.
+and journal/capacity protection. Starting with v0.17.83, the CLI additionally
+refuses an upgrade while legacy preflight Workflows or Oberth-owned VMs remain.
+Drain those executions with the existing server before replacing it; ordinary
+non-legacy Workflows retain restart adoption. See the
+[retirement upgrade procedure](../retirement-upgrade.md).
 
 Schemas 39–44 are the predecessor migrations from priority, integration and
 replay-C. Submission priority uses the v0.17.82 implementation; schemas 40–44

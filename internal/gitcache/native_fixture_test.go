@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -27,6 +28,19 @@ func runNativeFixture(arguments []string) int {
 		return child
 	}
 	switch arguments[0] {
+	case "capture-small":
+		if _, err := fmt.Fprintln(os.Stdout, "result"); err != nil {
+			return 2
+		}
+		if _, err := fmt.Fprintln(os.Stderr, "diagnostic"); err != nil {
+			return 2
+		}
+		return 0
+	case "capture-large":
+		if _, err := fmt.Fprint(os.Stdout, strings.Repeat("a", 70000)); err != nil {
+			return 2
+		}
+		return 0
 	case "sleep":
 		time.Sleep(time.Hour)
 		return 0

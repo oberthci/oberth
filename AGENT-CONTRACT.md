@@ -1052,8 +1052,14 @@ trust assumptions and complete invalidation rules.
   precedence, explicit tag selectors and repository/ref ambiguity remain
   unchanged; unknown selectors keep not-found. This read-only selection does
   not fetch upstream or alter sync, promotion or trigger-filtered wait rules.
-  This is the complete tool surface. `issue_create` takes a `title`, a `body`
-  and an optional `upstream`; without one it creates a workspace-global manual
+  This is the complete tool surface. Issues serve the CI repair queue. The
+  repository-less manual issue surface is legacy compatibility pending export
+  and migration; see [CI issue scope](docs/ci-issue-scope.md). The read-only
+  `hack/export-issues.py` migration aid preserves complete visible manual history
+  without changing state, scope or locks. It does not replace a database backup
+  or prove external import. Existing write behavior remains until migration is
+  verified. `issue_create` takes a `title`, a `body`
+  and an optional `upstream`; without one it creates a legacy global manual
   issue, except for an uplink scoped to exactly one upstream, which files
   there (#073). Run selectors are resolved across the repositories the uplink
   may see without a repository input. `issue_list` accepts optional `repo`,

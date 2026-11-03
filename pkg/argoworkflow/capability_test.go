@@ -113,3 +113,88 @@ func TestOperatorResourceExecutorRequiresNamedTemplate(t *testing.T) {
 		})
 	}
 }
+
+func TestCapabilityIdentitySeparatesResourceAuthority(t *testing.T) {
+	policy := capabilityPolicyForTest(t)
+	identity := testBranchIdentity()
+	identity.Namespace = policy.Capability.Namespace
+	identity.ResourceServiceAccountName = policy.Capability.ServiceAccount
+	for _, scenario := range []string{"valid", "pipeline", "executor", "automount", "missing binding", "foreign binding"} {
+		t.Run(scenario, func(t *testing.T) {
+			candidate := identity
+			switch scenario {
+			case "pipeline":
+				candidate.ServiceAccountName = candidate.ResourceServiceAccountName
+			case "executor":
+				candidate.ExecutorServiceAccountName = candidate.ResourceServiceAccountName
+			case "automount":
+				candidate.AutomountServiceAccountToken = true
+			case "missing binding":
+				candidate.ResourceServiceAccountName = ""
+			case "foreign binding":
+				candidate.ResourceServiceAccountName = "other-operator"
+			}
+			wf, err := Decode([]byte(capabilityResourceDocument))
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = Prepare(wf, policy, candidate)
+			if (err == nil) != (scenario == "valid") {
+				t.Fatalf("Prepare: %v", err)
+			}
+		})
+	}
+}
+
+func TestCapabilityResourceEnvelopeRejectsAmbiguousKeys(t *testing.T) {
+	for _, test := range []struct{ name, manifest string }{
+		{"unicode kind", "apiVersion: tasks.example.test/v1\nkind: Pod\nKind: Task\nmetadata: {name: x, namespace: pipelines}"},
+		{"unicode namespace", "apiVersion: tasks.example.test/v1\nkind: Task\nmetadata: {name: x, namespace: kube-system, nameſpace: pipelines}"},
+		{"ascii kind", "apiVersion: tasks.example.test/v1\nKind: Task\nmetadata: {name: x}"},
+		{"ascii apiVersion", "APIVersion: tasks.example.test/v1\nkind: Task\nmetadata: {name: x}"},
+		{"ascii metadata", "apiVersion: tasks.example.test/v1\nkind: Task\nMetadata: {name: x}"},
+		{"ascii namespace", "apiVersion: tasks.example.test/v1\nkind: Task\nmetadata: {name: x, Namespace: pipelines}"},
+		{"ascii name", "apiVersion: tasks.example.test/v1\nkind: Task\nmetadata: {Name: x}"},
+		{"ascii generateName", "apiVersion: tasks.example.test/v1\nkind: Task\nmetadata: {GenerateName: x}"},
+		{"yaml duplicate", "apiVersion: tasks.example.test/v1\nkind: Pod\nkind: Task\nmetadata: {name: x}"},
+		{"json duplicate", `{"apiVersion":"tasks.example.test/v1","kind":"Pod","kind":"Task","metadata":{"name":"x"}}`},
+		{"json nested duplicate", `{"apiVersion":"tasks.example.test/v1","kind":"Task","metadata":{"name":"x","namespace":"other","namespace":"pipelines"}}`},
+		{"opaque duplicate", `{"apiVersion":"tasks.example.test/v1","kind":"Task","metadata":{"name":"x"},"spec":{"duplicate":1,"duplicate":2}}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			resource := &wfv1.ResourceTemplate{Action: "create", Manifest: test.manifest}
+			if err := admitCapabilityResource("test", resource, capabilityPolicyForTest(t).Capability); err == nil {
+				t.Fatal("ambiguous resource envelope accepted")
+			}
+		})
+	}
+	for _, manifest := range []string{
+		"apiVersion: tasks.example.test/v1\nkind: Task\nmetadata: {name: x, namespace: pipelines}\nspec: {PascalCase: opaque, metadata: {Name: opaque}}",
+		`{"apiVersion":"tasks.example.test/v1","kind":"Task","metadata":{"generateName":"x-"},"spec":{"PascalCase":"opaque"}}`,
+	} {
+		if err := admitCapabilityResource("test", &wfv1.ResourceTemplate{Action: "create", Manifest: manifest}, capabilityPolicyForTest(t).Capability); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestCapabilityRefusesResourceTemplatesFromPinnedFragments(t *testing.T) {
+	for _, name := range []string{"frag-deadbeef-task", "frag-0123456789abcdef-main", "local-task"} {
+		t.Run(name, func(t *testing.T) {
+			wf, err := Decode([]byte(capabilityResourceDocument))
+			if err != nil {
+				t.Fatal(err)
+			}
+			wf.Spec.Templates[0].Name = name
+			wf.Spec.Entrypoint = name
+			err = Admit(wf, capabilityPolicyForTest(t))
+			if strings.HasPrefix(name, "frag-") {
+				if err == nil || !strings.Contains(err.Error(), "consuming repository") {
+					t.Fatalf("foreign resource inherited consumer authority: %v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
