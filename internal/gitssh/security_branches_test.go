@@ -14,8 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/oberthci/oberth/internal/testtimeout"
 	"golang.org/x/crypto/ssh"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 // A real SSH peer records whether refused inputs ever disclose an identity or
