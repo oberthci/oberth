@@ -9,13 +9,13 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"reflect"
 	"sort"
 	"sync"
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -342,19 +342,19 @@ func (controller *Controller) isSharedServiceAccount(name string) bool {
 		name == controller.config.ExecutorServiceAccount
 }
 
-func sameSubmission(existing, intended *wfv1.Workflow) error {
+// An owned but altered Workflow must be cleaned up before releasing its grant.
+// The named classification crosses the engine boundary without exposing a spec.
+type workflowSpecMismatch struct{}
 
-	if binding := intended.Annotations[nonrootProfileAnnotation]; binding != "" {
-		// Recovery cannot accept a forged identity annotation on old/root
-		// semantics. Compare the actual stored spec with current server output,
-		// including selected policies, source volumes and executor patch.
-		if existing.Annotations[nonrootProfileAnnotation] != binding || !reflect.DeepEqual(existing.Spec, intended.Spec) {
-			return errors.New("argojob: existing Workflow does not carry the verified nonroot policy and profile")
-		}
-	}
-	// Ordinary pipelines retain the legacy annotation-only identity check.
-	// Namespace Workflow-create RBAC is part of this trust boundary; only the
-	// nonroot cases above compare the actual stored spec.
+func (*workflowSpecMismatch) Error() string {
+	return "argojob: Workflow spec mismatch: verified policy or profile changed"
+}
+func (*workflowSpecMismatch) AmbiguousCreate() bool      { return true }
+func (*workflowSpecMismatch) WorkflowSpecMismatch() bool { return true }
+
+func sameSubmission(existing, intended *wfv1.Workflow) error {
+	// Establish the complete submission identity before classifying a mismatch
+	// as ours to clean up. A foreign run/source never enters cancellation.
 	existingRun, existingIdentity, ok := WorkflowMeta(existing)
 	if !ok {
 		return fmt.Errorf("argojob: Workflow %s already exists and is not an Oberth run", intended.Name)
@@ -366,6 +366,16 @@ func sameSubmission(existing, intended *wfv1.Workflow) error {
 	if existingIdentity != intendedIdentity {
 		return fmt.Errorf("argojob: Workflow %s exists with a different spec than this run's source produces", intended.Name)
 	}
+	if binding := intended.Annotations[nonrootProfileAnnotation]; binding != "" {
+		// Quantity encodings and internal caches can change in Kubernetes
+		// serialization. Compare semantic values while retaining the full
+		// policy, source-volume, executor-patch and controller-profile checks.
+		if existing.Annotations[nonrootProfileAnnotation] != binding || !apiequality.Semantic.DeepEqual(existing.Spec, intended.Spec) {
+			return &workflowSpecMismatch{}
+		}
+	}
+	// Ordinary pipelines retain the annotation-only identity check. Namespace
+	// Workflow-create RBAC remains part of that trust boundary.
 	return nil
 }
 

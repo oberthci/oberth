@@ -82,9 +82,8 @@ func (controller *Controller) createWorkflowWithRetry(ctx context.Context, reque
 			existing, err := controller.workflows.Get(retryCtx, intended.Name, metav1.GetOptions{})
 			if err == nil {
 				if err := sameSubmission(existing, intended); err != nil {
-					// A known foreign object owns this name. Never route this
-					// refusal into cleanup, whose ordinary cancellation fence
-					// is the run ID rather than the full submission spec.
+					// Foreign submission identities refuse cleanup; an owned
+					// altered spec retains its cleanup classification and grant.
 					return nil, false, err
 				}
 				if _, err := controller.refreshNonroot(retryCtx, request); err != nil {

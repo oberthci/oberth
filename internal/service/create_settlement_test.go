@@ -397,11 +397,11 @@ type deferredPendingStore struct {
 	fail bool
 }
 
-func (s *deferredPendingStore) MarkRunCreatePending(ctx context.Context, id, name string) error {
+func (s *deferredPendingStore) MarkRunCreatePending(ctx context.Context, id, name string, reason ...string) error {
 	if s.fail {
 		return context.DeadlineExceeded
 	}
-	return s.SchedulerStore.MarkRunCreatePending(ctx, id, name)
+	return s.SchedulerStore.MarkRunCreatePending(ctx, id, name, reason...)
 }
 func TestWorkflowCreatePendingPersistenceFailureIsRetriedWithoutFatal(t *testing.T) {
 	f := newControlFixture(t)

@@ -21,9 +21,9 @@ func (database schedulerDatabase) EnqueueReceiveEvent(ctx context.Context, event
 	})
 }
 
-func (database schedulerDatabase) MarkRunCreatePending(ctx context.Context, runID string, jobName string) error {
+func (database schedulerDatabase) MarkRunCreatePending(ctx context.Context, runID string, jobName string, reason ...string) error {
 	return retryDatabaseError(ctx, "MarkRunCreatePending", func(ctx context.Context) error {
-		return database.SchedulerStore.MarkRunCreatePending(ctx, runID, jobName)
+		return database.SchedulerStore.MarkRunCreatePending(ctx, runID, jobName, reason...)
 	})
 }
 

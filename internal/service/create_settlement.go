@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/periapsis"
 )
@@ -31,6 +32,7 @@ type createAdmission struct {
 
 type pendingCreate struct {
 	runID       string
+	reason      string
 	grant       *admissionReservation
 	persisted   bool
 	confirmed   bool
@@ -39,7 +41,7 @@ type pendingCreate struct {
 }
 
 func isPendingCreate(run model.Run) bool {
-	return run.Phase == "infrastructure-pending" || strings.HasPrefix(run.Error, pendingCreateMessage)
+	return run.Phase == "infrastructure-pending" || strings.HasPrefix(run.Error, pendingCreateMessage) || run.Error == store.WorkflowSpecMismatchPendingMessage
 }
 func (scheduler *Scheduler) createTime() time.Time {
 	if scheduler.createNow != nil {
@@ -188,7 +190,11 @@ func (scheduler *Scheduler) registerCreateCleanup(run model.Run, grant *admissio
 		scheduler.createPending = make(map[string]*pendingCreate)
 	}
 	// A nil grant is an owned, retryable restore failure, never a dropped run.
-	scheduler.createPending[run.ID] = &pendingCreate{runID: run.ID, grant: restored, persisted: persisted, next: now, since: now}
+	reason := ""
+	if run.Error == store.WorkflowSpecMismatchPendingMessage {
+		reason = run.Error
+	}
+	scheduler.createPending[run.ID] = &pendingCreate{runID: run.ID, reason: reason, grant: restored, persisted: persisted, next: now, since: now}
 	scheduler.signalCreateCleanup()
 }
 func (scheduler *Scheduler) signalCreateCleanup() {
@@ -290,7 +296,7 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 		return false, err
 	}
 	if !pending.persisted {
-		if err := scheduler.store.MarkRunCreatePending(ctx, run.ID, run.JobName); err != nil {
+		if err := scheduler.store.MarkRunCreatePending(ctx, run.ID, run.JobName, pending.reason); err != nil {
 			return false, err
 		}
 		pending.persisted = true
@@ -345,7 +351,11 @@ func (scheduler *Scheduler) settleCreateAttempt(ctx context.Context, pending *pe
 		return false, err
 	}
 	if run.Status == model.RunRunning {
-		if err := scheduler.finishInfrastructureFailure(ctx, run, model.Repository{}, errors.New("workflow create outcome uncertain; cleanup confirmed absence")); err != nil {
+		message := "workflow create outcome uncertain; cleanup confirmed absence"
+		if run.Error == store.WorkflowSpecMismatchPendingMessage {
+			message = "Workflow spec mismatch; cleanup confirmed absence"
+		}
+		if err := scheduler.finishInfrastructureFailure(ctx, run, model.Repository{}, errors.New(message)); err != nil {
 			return false, err
 		}
 	}
@@ -379,10 +389,18 @@ func (scheduler *Scheduler) pendingCreateCount() int {
 
 // The shared background owner retains capacity during uncertain create/delete
 // outcomes; API outages must not turn this run's cleanup into a component exit.
-func (scheduler *Scheduler) deferCreateCleanup(ctx context.Context, run model.Run, name string, grant *admissionReservation) {
+func (scheduler *Scheduler) deferCreateCleanup(ctx context.Context, run model.Run, name string, grant *admissionReservation, failures ...error) {
 	grant.retain()
+	reason := ""
+	for _, failure := range failures {
+		var mismatch interface{ WorkflowSpecMismatch() bool }
+		if errors.As(failure, &mismatch) && mismatch.WorkflowSpecMismatch() {
+			reason = store.WorkflowSpecMismatchPendingMessage
+			run.Error = reason
+		}
+	}
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	err := scheduler.database().MarkRunCreatePending(persistCtx, run.ID, name)
+	err := scheduler.database().MarkRunCreatePending(persistCtx, run.ID, name, reason)
 	cancel()
 	run.JobName = name
 	scheduler.registerCreateCleanup(run, grant, err == nil)

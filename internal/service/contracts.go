@@ -92,7 +92,7 @@ type RunRetryStore interface {
 type RunQueueStore interface {
 	EnqueueReceiveEvent(context.Context, model.ReceiveEventSpec, model.RunSpec) (model.EnqueueRunResult, error)
 	ClaimNextRun(context.Context) (model.Run, error)
-	MarkRunCreatePending(context.Context, string, string) error
+	MarkRunCreatePending(context.Context, string, string, ...string) error
 	MarkRunSubmitted(context.Context, string) (model.Run, error)
 	MarkRunAdmitted(context.Context, string) (model.Run, error)
 	MarkRunParked(context.Context, string) (model.Run, error)
