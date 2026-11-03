@@ -123,6 +123,13 @@ func (gate *weightedAdmission) backfillFitsLocked(head, candidate *admissionRese
 				backfillDuration(candidate.estimate), backfillDuration(deadline.Sub(now)))
 			return true
 		}
+		// Coexistence protects only this head. A lower effective or base
+		// class must finish first, so it cannot occupy room needed by any
+		// higher-class waiter ahead of it when the head starts.
+		if candidate.effectivePriority(now) != head.effectivePriority(now) ||
+			candidate.priorityRun().Priority != head.priorityRun().Priority {
+			return false
+		}
 		// Rebuild at the reserved time, including every surviving grant. This
 		// checks aggregate backfills, mixed declarations/weights, XL exclusion,
 		// memory, executor allowances and both run ceilings through one path.

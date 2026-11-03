@@ -24,9 +24,10 @@ Already admitted work is not preempted.
 
 In v0.17.83, EASY replaces v0.17.82's ban on backfill behind priority
 heads. Backfill candidates are considered in priority/FIFO order. Measured work from
-the head's class or a lower class may use spare capacity only if its p95
-duration ends before the head's predicted start, or the head still fits with
-it running at that time. Unmeasured candidates can use only the coexistence test. The default
+the head's class may use spare capacity if its p95 duration ends strictly
+before the head's predicted start, or the head still fits with it running at
+that time. Lower effective or base classes must finish before that start;
+they cannot use coexistence and occupy room needed by higher-class waiters. Unmeasured candidates can use only the coexistence test. The default
 20-minute head wait marks draining; this same rule still permits safe backfill
 during draining. Zero selects strict FIFO. Repository concurrency groups,
 VM-capacity parking, pressure, disk-floor holds and run-count/size limits

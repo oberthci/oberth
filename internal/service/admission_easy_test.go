@@ -317,3 +317,40 @@ func TestEASYHistoryRequestsWorkflowClass(t *testing.T) {
 		}
 	}
 }
+
+func TestEASYLowerClassCannotDelaySecondHigherWaiter(t *testing.T) {
+	for _, duration := range []time.Duration{0, time.Hour, time.Minute} {
+		t.Run(duration.String(), func(t *testing.T) {
+			g, clock, _ := easyGate(t)
+			h1 := pendingPriority(t, g, 2, model.PriorityHighest, easyRequest("H1", 5500, time.Hour))
+			t.Cleanup(h1.cancel)
+			h2 := pendingPriority(t, g, 3, model.PriorityHighest, easyRequest("H2", 5000, time.Hour))
+			t.Cleanup(h2.cancel)
+			candidate := pendingPriority(t, g, 4, model.PriorityNormal, easyRequest("normal", 1100, duration))
+			t.Cleanup(candidate.cancel)
+			if got, want := granted(g, candidate), duration == time.Minute; got != want {
+				t.Fatalf("lower-class backfill = %v, want %v (would occupy H2's room)", got, want)
+			}
+			if duration == time.Minute {
+				clock.now = clock.now.Add(time.Minute)
+				candidate.release()
+			}
+		})
+	}
+}
+
+func TestEASYAgedNormalCannotCoexistBehindBaseHighest(t *testing.T) {
+	g, clock, _ := easyGate(t)
+	head := pendingPriority(t, g, 2, model.PriorityHighest, easyRequest("explicit", 8200, time.Hour))
+	t.Cleanup(head.cancel)
+	r := g.reserveRun(model.Run{ID: "aged", QueueSequence: 3, Priority: model.PriorityNormal, QueuedAt: clock.now.Add(-time.Hour)})
+	t.Cleanup(r.cancel)
+	g.mu.Lock()
+	r.prepared, r.size, r.weight, r.estimate = true, periapsis.S, 1, time.Hour
+	r.pods = easyRequest("aged", 1100, time.Hour).Pods
+	g.grantLocked()
+	g.mu.Unlock()
+	if granted(g, r) {
+		t.Fatal("aged lower base class used coexistence behind explicit highest")
+	}
+}

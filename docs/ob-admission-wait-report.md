@@ -17,7 +17,8 @@ normally **20 minutes**. The scheduler projects the earliest head start by
 releasing enough running reservations at their measured p95 finish times.
 A candidate must fit now and finish strictly before that reserved start, or
 leave capacity for the head alongside it at that time. All other surviving
-grants count, including earlier backfills. An unmeasured candidate can use only the coexistence test;
+grants count, including earlier backfills. Lower effective or base classes
+can use only the ends-before test, protecting every higher-class waiter ahead. An unmeasured candidate can use only the coexistence test;
 unknown or already overrun running work is never assumed to release capacity.
 Zero `maxHeadWait` keeps strict FIFO.
 
