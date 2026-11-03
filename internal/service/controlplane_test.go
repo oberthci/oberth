@@ -1964,6 +1964,9 @@ func TestSchedulerCompletesSupersedeAndRestartCancellationObligations(t *testing
 	if _, err := fixture.store.SetRunWorkflowName(ctx, restart.ID, restartJob); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := fixture.store.MarkRunAdmitted(ctx, restart.ID); err != nil {
+		t.Fatal(err)
+	}
 	// This models a crash after the durable Job intent and before idempotent
 	// Create/observe. Owner recovery records the obligation even if no Job ever
 	// appeared; Delete is required to be idempotent.

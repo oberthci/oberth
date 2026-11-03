@@ -1,5 +1,14 @@
 # Run and promotion recovery
 
+Runs waiting for admission survive an owner restart under the same run ID,
+queue and admission sequences, queued time, and priority class. This applies
+to branch, tag, release, and promotion runs. Recovery releases the abandoned
+worker's claim so the new scheduler can admit the original run; a promotion
+keeps its pending record and original CI run. A deterministic Workflow name
+recorded before admission does not mean a Workflow was submitted. These runs
+need no Workflow deletion. Recovery still excludes durable execution and
+publication evidence from this path.
+
 An owner restart adopts a live branch or tag Workflow only after the engine
 verifies its existing run, specification, identity, and credential bindings.
 Release tags use the same adoption checks.

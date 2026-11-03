@@ -38,6 +38,9 @@ func TestOwnerRecoveryRetiresLegacyTriggerRestartDeletionButKeepsCancel(t *testi
 			if _, err = s.SetRunWorkflowName(ctx, run.ID, "workflow"); err != nil {
 				t.Fatal(err)
 			}
+			if _, err = s.MarkRunAdmitted(ctx, run.ID); err != nil {
+				t.Fatal(err)
+			}
 			if _, err = s.db.Exec(`INSERT INTO run_cancellations(run_id,job_name,superseded_by,reason,created_at) VALUES(?,?,'','owner_restart',?)`, run.ID, "workflow", unixNano(now)); err != nil {
 				t.Fatal(err)
 			}
