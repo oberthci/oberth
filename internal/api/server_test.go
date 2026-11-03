@@ -678,6 +678,7 @@ func TestMCPToolInputsMatchContract(t *testing.T) {
 		"status":              {"ref", "repo"},
 		"logs":                {"byte_offset", "context", "limit", "offset", "pattern", "repo", "sha", "step", "tail"},
 		"run_get":             {"id", "run_id", "summary"},
+		"run_list":            {"before", "limit", "ref", "repo", "superseded", "view"},
 		"run_resources":       {"burn", "format", "include_failed", "last", "ref", "repo", "run", "run_id", "step"},
 		"artifact_get":        {"context", "id", "limit", "name", "offset", "pattern", "run_id", "tail"},
 		"run_retry":           {"id", "priority", "priority_reason", "run_id"},

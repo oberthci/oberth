@@ -924,18 +924,19 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		return service.repoRemove(ctx, actor, arguments.Repo)
 	case "run_list":
 		var arguments struct {
-			Repo   string     `json:"repo"`
-			Ref    string     `json:"ref"`
-			Limit  int        `json:"limit"`
-			Before pageCursor `json:"before"`
-			View   string     `json:"view"`
+			Repo       string     `json:"repo"`
+			Superseded bool       `json:"superseded"`
+			Ref        string     `json:"ref"`
+			Limit      int        `json:"limit"`
+			Before     pageCursor `json:"before"`
+			View       string     `json:"view"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
 		if arguments.View == api.RunViewActive {
 			// One bounded, unpaged list: no limit or cursor applies.
-			runs, err := service.Runs(ctx, actor, api.RunFilter{Repository: arguments.Repo, Ref: arguments.Ref, View: arguments.View,
+			runs, err := service.Runs(ctx, actor, api.RunFilter{Superseded: arguments.Superseded, Repository: arguments.Repo, Ref: arguments.Ref, View: arguments.View,
 				Before: arguments.Before.Sequence, BeforeRun: arguments.Before.ID})
 			if err != nil {
 				return nil, err
@@ -951,7 +952,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if limit > 100 {
 			limit = 100
 		}
-		runs, err := service.Runs(ctx, actor, api.RunFilter{Repository: arguments.Repo, Ref: arguments.Ref, Limit: limit,
+		runs, err := service.Runs(ctx, actor, api.RunFilter{Superseded: arguments.Superseded, Repository: arguments.Repo, Ref: arguments.Ref, Limit: limit,
 			Before: arguments.Before.Sequence, BeforeRun: arguments.Before.ID, View: arguments.View})
 		if err != nil {
 			return nil, err
@@ -1012,7 +1013,7 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 	if filter.Before < 0 || service.scope != nil && filter.Before > 0 && filter.BeforeRun == "" {
 		return nil, fmt.Errorf("%w: before must be a positive run sequence, or a run ID for a scoped uplink", ErrInvalidInput)
 	}
-	storeFilter := model.RunListFilter{LatestPerRef: filter.LatestPerRef, Ref: filter.Ref, Limit: filter.Limit, Before: filter.Before, Terminal: filter.View == api.RunViewHistory}
+	storeFilter := model.RunListFilter{Superseded: filter.Superseded, LatestPerRef: filter.LatestPerRef, Ref: filter.Ref, Limit: filter.Limit, Before: filter.Before, Terminal: filter.View == api.RunViewHistory}
 	if strings.TrimSpace(filter.BeforeRun) != "" {
 		// A cursor that is both a sequence and a run-ID spelling is a run
 		// first; an unscoped caller falls back to the sequence (#073).
@@ -1144,6 +1145,7 @@ func (service *API) readRun(ctx context.Context, actor api.Actor, id string, sum
 	if err != nil {
 		return nil, fmt.Errorf("load run steps: %w", err)
 	}
+	run = service.runAdmissionContext(ctx, run, true)
 	if summary {
 		return summarizeRun(run, steps), nil
 	}
@@ -1706,7 +1708,7 @@ func (service *API) presentationRuns(ctx context.Context, runs []model.Run) (res
 		plain := *service
 		plain.resourceCoverages = nil
 		for i := range runs {
-			runs[i] = plain.presentationRun(ctx, runs[i])
+			runs[i] = service.runAdmissionContext(ctx, plain.presentationRun(ctx, runs[i]), false)
 		}
 		return runs, nil
 	}
@@ -1727,7 +1729,7 @@ func (service *API) presentationRuns(ctx context.Context, runs []model.Run) (res
 		}
 	}
 	for i := range runs {
-		runs[i] = service.presentationRunWithSuccessor(ctx, runs[i], successors)
+		runs[i] = service.runAdmissionContext(ctx, service.presentationRunWithSuccessor(ctx, runs[i], successors), false)
 	}
 	return runs, nil
 }
