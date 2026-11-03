@@ -146,15 +146,18 @@ func (b openBaoExec) status(ctx context.Context) (baoStatus, error) {
 // share. The result is the only copy of the credentials in existence.
 func (b openBaoExec) operatorInit(ctx context.Context) (baoInitResult, error) {
 	out, err := b.bao(ctx, nil, "operator", "init", "-key-shares=1", "-key-threshold=1", "-format=json")
-	if err != nil {
-		return baoInitResult{}, fmt.Errorf("bao operator init: %w%s", err, commandOutputSuffix(out))
-	}
+	defer clear(out)
 	var result baoInitResult
-	if err := parseBaoJSON(out, &result); err != nil {
-		return baoInitResult{}, fmt.Errorf("bao operator init: %w", err)
+	parseErr := parseBaoJSON(out, &result)
+	if err != nil {
+		return result, errors.New("bao operator init failed; any parsed credentials are delivered separately")
 	}
+	if parseErr != nil {
+		return result, errors.New("bao operator init returned an invalid credential response")
+	}
+
 	if result.RootToken == "" || len(result.UnsealKeysB64) == 0 {
-		return baoInitResult{}, errors.New("bao operator init returned no root token or unseal keys")
+		return result, errors.New("bao operator init returned no root token or unseal keys")
 	}
 	return result, nil
 }
@@ -349,24 +352,18 @@ func findOpenBaoPod(ctx context.Context, deps Deps, namespace string) (string, e
 	if !isPodRunning(pod) {
 		return "", fmt.Errorf("OpenBao pod %s/%s is not running", namespace, expectedOpenBaoPodName)
 	}
-	// Verify the pod is owned by the expected StatefulSet. Without this check
-	// an attacker who deleted the real pod and created one with the same name
-	// could receive the root token. When ownerReferences are absent (e.g. a
-	// bare pod from an older chart or a test fixture), the deterministic name
-	// lookup is already a significant improvement over label-based selection.
-	if len(pod.OwnerReferences) > 0 {
-		owned := false
-		for _, ref := range pod.OwnerReferences {
-			if ref.Kind == "StatefulSet" && ref.Name == expectedOpenBaoStatefulSet {
-				owned = true
-				break
-			}
-		}
-		if !owned {
-			return "", fmt.Errorf("OpenBao pod %s/%s is not owned by StatefulSet %s; refusing to exec into an unverified pod",
-				namespace, expectedOpenBaoPodName, expectedOpenBaoStatefulSet)
-		}
+	owner := metav1.GetControllerOf(pod)
+	if owner == nil || owner.APIVersion != "apps/v1" || owner.Kind != "StatefulSet" || owner.Name != expectedOpenBaoStatefulSet || owner.UID == "" {
+		return "", fmt.Errorf("OpenBao pod %s/%s lacks the expected StatefulSet controller; refusing unverified exec", namespace, pod.Name)
 	}
+	controller, err := deps.KubeClient.AppsV1().StatefulSets(namespace).Get(ctx, expectedOpenBaoStatefulSet, metav1.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("verify live OpenBao controller: %w", err)
+	}
+	if controller.UID == "" || controller.UID != owner.UID || controller.DeletionTimestamp != nil {
+		return "", errors.New("OpenBao pod controller UID does not match the live StatefulSet")
+	}
+
 	return pod.Name, nil
 }
 
@@ -458,13 +455,13 @@ func SetupProductionSecretStoreDeferred(ctx context.Context, cfg Config, interac
 	switch {
 	case !status.Initialized:
 		initResult, err := client.operatorInit(ctx)
-		if err != nil {
-			return SecretStoreResult{}, nil, err
+		if initResult.RootToken != "" || len(initResult.UnsealKeysB64) > 0 {
+			captured = &initResult
 		}
-		// Capture the credentials for deferred display instead of printing
-		// them now. The caller must guarantee these are displayed before the
-		// process exits.
-		captured = &initResult
+		if err != nil {
+			return SecretStoreResult{}, captured, err
+		}
+
 		rootToken = initResult.RootToken
 		unsealStatus, err := client.unseal(ctx, initResult.UnsealKeysB64[0])
 		if err != nil {
@@ -480,7 +477,7 @@ func SetupProductionSecretStoreDeferred(ctx context.Context, cfg Config, interac
 			openbao.Namespace, openbao.Namespace, client.pod)
 	default:
 		_, _ = fmt.Fprintln(interactiveDeps.Output, "OpenBao is already initialized and unsealed; skipping operator init (credentials were printed once at first initialization).")
-		rootToken = os.Getenv(baoTokenEnvVar)
+		rootToken = installerBaoToken(interactiveDeps)
 		if rootToken == "" && isInteractive(interactiveDeps) && interactiveDeps.ReadPassword != nil {
 			_, _ = fmt.Fprint(interactiveDeps.Output, "Root token (echo disabled): ")
 			tokenBytes, err := interactiveDeps.ReadPassword()
@@ -489,6 +486,7 @@ func SetupProductionSecretStoreDeferred(ctx context.Context, cfg Config, interac
 				return SecretStoreResult{}, nil, fmt.Errorf("read root token: %w", err)
 			}
 			rootToken = strings.TrimSpace(string(tokenBytes))
+			clear(tokenBytes)
 		}
 		if rootToken == "" {
 			_, _ = fmt.Fprintln(interactiveDeps.Output, "Cannot enable trusted Plan Transit: a re-run has no root token available to positively verify the managed mount, key, policy, and role.")
@@ -904,16 +902,9 @@ func exactSingletonString(value any, want string) bool {
 
 // OberthPolicy returns the HCL policy for Oberth's read-only secret access.
 func OberthPolicy(kvPrefix string, namespace ...string) string {
-	return fmt.Sprintf(`# Oberth release secrets: read-only, data endpoints only. No list, no
-# metadata, no write, no delete. Managed by oberth install.
-path "%s/data/*" {
-  capabilities = ["read"]
-}
-
-# Allow the fetch client to revoke its own short-lived login token.
-path "auth/token/revoke-self" {
-  capabilities = ["update"]
-}`, kvPrefix) + serverIdentityPolicy(kvPrefix, namespace...)
+	return `# Server identity access only. Pipelines use their own scoped roles.
+path "auth/token/revoke-self" { capabilities = ["update"] }
+` + serverIdentityPolicy(kvPrefix, namespace...)
 }
 
 // credentialedPolicyPaths converts approval-table path vocabulary into the
@@ -1078,6 +1069,11 @@ func ValidateRepoName(name string) error {
 // backslashes, newlines, and control characters would escape the string
 // boundary and inject arbitrary policy rules.
 func validateSecretPath(path string) error {
+	for _, segment := range strings.Split(path, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return errors.New("secret path must contain clean non-reserved segments")
+		}
+	}
 	if !secretPathPattern.MatchString(path) {
 		return fmt.Errorf("credentialed secret path %q contains characters outside [A-Za-z0-9._/-]; refusing to interpolate into Vault policy HCL", path)
 	}
@@ -1117,13 +1113,7 @@ func writeUpstreamOrgRules(builder *strings.Builder, kvPrefix string, upstreamOr
 // for trusted-plan envelopes. It grants no key-management, export, rotate,
 // backup, configuration, list, or wildcard Transit capability.
 func OberthProductionPolicy(kvPrefix, transitMount, transitKey string, namespace ...string) string {
-	return fmt.Sprintf(`# Oberth release secrets: read-only, data endpoints only. No list, no
-# metadata, no write, no delete. Managed by oberth install.
-path "%s/data/*" {
-  capabilities = ["read"]
-}
-
-# Trusted-plan envelope encryption/decryption through one non-exportable key.
+	return fmt.Sprintf(`# Trusted-plan envelope encryption/decryption through one non-exportable key.
 path "%s/encrypt/%s" {
   capabilities = ["update"]
 }
@@ -1135,7 +1125,7 @@ path "%s/decrypt/%s" {
 # Allow the client to revoke its own short-lived login token.
 path "auth/token/revoke-self" {
   capabilities = ["update"]
-}`, kvPrefix, transitMount, transitKey, transitMount, transitKey) + serverIdentityPolicy(kvPrefix, namespace...)
+}`, transitMount, transitKey, transitMount, transitKey) + serverIdentityPolicy(kvPrefix, namespace...)
 }
 
 func getClusterCA(ctx context.Context, deps Deps) (string, error) {

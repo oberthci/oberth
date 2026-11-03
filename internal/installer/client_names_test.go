@@ -96,7 +96,7 @@ func TestPreflightRotatesForClientAddresses(t *testing.T) {
 	}
 	deps := Deps{
 		Output:     &bytes.Buffer{},
-		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod()),
+		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand: runner,
 		RunHelm: func(context.Context, []string) ([]byte, error) {
 			return liveValuesJSON, nil
@@ -161,7 +161,7 @@ func TestPreflightReissuesLegacyLeafAsConstrainedAnchor(t *testing.T) {
 	liveValuesJSON, _ := json.Marshal(liveHelmValuesSubset{})
 	deps := Deps{
 		Output:     &bytes.Buffer{},
-		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod()),
+		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand: func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
 			if slices.Contains(args, "deploy/oberth") {
 				return certPEM, nil
@@ -200,7 +200,7 @@ func TestPreflightStandsDownForServerPKI(t *testing.T) {
 	liveValuesJSON, _ := json.Marshal(liveValues)
 	deps := Deps{
 		Output:     &bytes.Buffer{},
-		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod()),
+		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand: func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
 			if slices.Contains(args, "deploy/oberth") {
 				return certPEM, nil

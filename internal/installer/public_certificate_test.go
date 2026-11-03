@@ -79,7 +79,7 @@ func TestPreflightIdentityCrossCheckFailureRefuses(t *testing.T) {
 	}}
 	pr := &preflightRunner{t: t, baoRunner: runner, podCertFail: true}
 	var output bytes.Buffer
-	deps := Deps{KubeClient: fake.NewClientset(legacyDeployment(), runningOpenBaoPod()), RunCommand: pr.run, Output: &output}
+	deps := Deps{KubeClient: fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()), RunCommand: pr.run, Output: &output}
 	cfg := Config{InstallSecretStore: true}
 	err := preflightServerIdentities(t.Context(), &cfg, deps, false)
 	if err == nil || !strings.Contains(err.Error(), "cannot cross-check") || strings.Contains(output.String(), "cross-check skipped") {
@@ -94,7 +94,7 @@ func TestAbsentBaoCertificateStillChecksExistingRuntimeSANs(t *testing.T) {
 		"read -format=json " + defaultKVPrefix + "/data/identities/oberth/server": {out: "No value found", err: errors.New("exit 2")},
 	}}
 	deps := Deps{
-		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod()),
+		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		Output:     &bytes.Buffer{},
 		RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
 			if slices.Contains(args, "deploy/oberth") {
@@ -143,7 +143,7 @@ func TestStoppedRuntimeIdentityNamesRecoveryStep(t *testing.T) {
 		"read -format=json " + defaultKVPrefix + "/data/identities/oberth/server": {out: "No value found", err: errors.New("exit 2")},
 	}}
 	deps := Deps{
-		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod()),
+		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		Output:     &bytes.Buffer{},
 		RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
 			if slices.Contains(args, "deploy/oberth") {

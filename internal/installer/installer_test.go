@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
@@ -28,6 +29,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
+	"k8s.io/utils/ptr"
 )
 
 // fakeChartImageRef is the digest-pinned image reference returned by fake
@@ -1991,9 +1993,17 @@ func secretStoreTestDeps(runner *fakeBaoRunner, output io.Writer, objects ...k8s
 		ObjectMeta: metav1.ObjectMeta{Name: "kube-root-ca.crt", Namespace: "kube-public"},
 		Data:       map[string]string{"ca.crt": "-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n"},
 	}
+	for _, object := range objects {
+		if pod, ok := object.(*corev1.Pod); ok && pod.Name == expectedOpenBaoPodName && pod.Namespace != DefaultOpenBaoNamespace {
+			controller := runningOpenBaoStatefulSet()
+			controller.Namespace = pod.Namespace
+			objects = append(objects, controller)
+		}
+	}
+
 	return Deps{
 		Output:       output,
-		KubeClient:   fake.NewClientset(append([]k8sruntime.Object{ca}, objects...)...),
+		KubeClient:   fake.NewClientset(append([]k8sruntime.Object{ca, runningOpenBaoStatefulSet()}, objects...)...),
 		RestConfig:   &rest.Config{Host: "https://127.0.0.1:6443"},
 		RunCommand:   runner.run,
 		ContextName:  "test-ctx",
@@ -2024,13 +2034,18 @@ func runningOpenBaoPod() *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "openbao-0", Namespace: DefaultOpenBaoNamespace,
-			Labels: map[string]string{"app.kubernetes.io/instance": "openbao"},
+			OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "StatefulSet", Name: "openbao", UID: "openbao-controller-fixture", Controller: ptr.To(true)}},
+			Labels:          map[string]string{"app.kubernetes.io/instance": "openbao"},
 		},
 		Status: corev1.PodStatus{
 			Phase:      corev1.PodRunning,
 			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
 		},
 	}
+}
+
+func runningOpenBaoStatefulSet() *appsv1.StatefulSet {
+	return &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: "openbao", Namespace: DefaultOpenBaoNamespace, UID: "openbao-controller-fixture"}}
 }
 
 func TestConfigureSecretStoreFresh(t *testing.T) {
@@ -2089,7 +2104,7 @@ func TestConfigureSecretStoreFresh(t *testing.T) {
 		t.Fatal("policy was not written")
 	}
 	policyBody := strings.TrimPrefix(policyWrite.stdin, token+"\n")
-	if !strings.Contains(policyBody, `path "oberth/data/*"`) || !strings.Contains(policyBody, "auth/token/revoke-self") {
+	if !strings.Contains(policyBody, `path "oberth/data/identities/oberth/*"`) || !strings.Contains(policyBody, "auth/token/revoke-self") {
 		t.Fatalf("policy body incomplete:\n%s", policyBody)
 	}
 

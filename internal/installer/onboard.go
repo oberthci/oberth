@@ -701,7 +701,8 @@ func provideDeployKey(ctx context.Context, cfg Config, deps Deps, tw *tableWrite
 		return err
 	}
 	// #nosec G304 -- the operator explicitly names their own key file.
-	privateKey, err := os.ReadFile(expanded)
+	privateKey, err := readDeployKey(expanded)
+	defer clear(privateKey)
 	if err != nil {
 		erasePromptLines(w, color, 1)
 		tw.AppendRow("Deploy key", keyPath, "✗ error", false)
@@ -1931,4 +1932,28 @@ func isSSHKeyFile(path string, wantPub bool) bool {
 			strings.HasPrefix(firstLine, "sk-ecdsa-")
 	}
 	return strings.HasPrefix(firstLine, "-----BEGIN")
+}
+
+// readDeployKey bounds private material before allocation and clears partial
+// reads on failure. The successful caller owns and clears the returned bytes.
+func readDeployKey(path string) ([]byte, error) {
+	file, err := os.Open(path) // #nosec G304 -- Explicit operator-selected key path.
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	const limit = 1 << 20
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > limit {
+		return nil, errors.New("deploy key must be a regular file no larger than 1 MiB")
+	}
+	body, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil || len(body) > limit {
+		clear(body)
+		return nil, errors.New("deploy key read failed or exceeded 1 MiB")
+	}
+	return body, nil
 }

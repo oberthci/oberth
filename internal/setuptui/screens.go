@@ -215,11 +215,12 @@ type preflightDoneMsg struct {
 // reviewScreen shows every answer and the equivalent command, and re-checks
 // the answers before the install can start: resumed answers may be stale.
 type reviewScreen struct {
-	focus    focusRing
-	failing  *question
-	errMsg   string
-	checking bool
-	checked  bool
+	remoteConfirm bool
+	focus         focusRing
+	failing       *question
+	errMsg        string
+	checking      bool
+	checked       bool
 }
 
 func newReviewScreen() *reviewScreen {
@@ -229,6 +230,8 @@ func newReviewScreen() *reviewScreen {
 }
 
 func (r *reviewScreen) start(w *wizard) tea.Cmd {
+	r.remoteConfirm = false
+	w.state.remoteAcknowledged = false
 	r.failing, r.errMsg, r.checked = nil, "", false
 	if q, err := revalidate(w.questions, &w.state); err != nil {
 		r.failing = q
@@ -298,6 +301,14 @@ func (r *reviewScreen) proceed(w *wizard) tea.Cmd {
 	if r.checking || !r.checked {
 		return nil
 	}
+	if !w.opts.DryMode && !w.state.Config.Yes && !w.state.Config.CreateKind && !w.state.ClusterInfo.isLocal {
+		if !r.remoteConfirm {
+			r.remoteConfirm = true
+			r.errMsg = fmt.Sprintf("Target %s (%s) is remote. Confirm remote install to authorize changes.", w.state.ClusterInfo.context, w.state.ClusterInfo.server)
+			return nil
+		}
+		w.state.remoteAcknowledged = true
+	}
 	w.state.done[stepReview] = true
 	if w.opts.DryMode {
 		return w.quit(exitDry)
@@ -323,6 +334,9 @@ func (r *reviewScreen) frame(w *wizard) frameSpec {
 		button:    r.focus.button(),
 		disabled:  map[int]bool{buttonContinue: r.checking},
 		keys:      "↑/↓ pgup/pgdn scroll · ←/→ buttons · enter select · esc menu · ctrl+c quit",
+	}
+	if r.remoteConfirm {
+		spec.buttons[buttonContinue] = "Confirm remote install"
 	}
 	for i := stepCluster; i < stepReview; i++ {
 		head := fmt.Sprintf("%d. %s", int(i)+1, i.name())

@@ -297,6 +297,9 @@ func keyPathExists(values map[string]any, key string) bool {
 // the binary's version, upgrade the Helm release, wait for rollout, and
 // verify the new version.
 func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResult, error) {
+	if err := captureBaoEnvironment(&deps); err != nil {
+		return UpgradeResult{}, err
+	}
 	if err := cfg.ValidateUpgrade(); err != nil {
 		return UpgradeResult{}, err
 	}

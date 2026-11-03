@@ -14,7 +14,6 @@ import (
 	"io"
 	"math/big"
 	"net"
-	"os"
 	"os/exec"
 	"slices"
 	"strings"
@@ -44,6 +43,9 @@ func goProxyDNSNames(fullname, namespace string) []string {
 // preflight and the Helm SSA preview inspect: goProxy enablement, the
 // watchTunnel origin certificate, and the deployed secret-store connection.
 type liveHelmValuesSubset struct {
+	AuditAnchor struct {
+		RekorPublicKey string `json:"rekorPublicKey"`
+	} `json:"auditAnchor"`
 	Argo struct {
 		GoProxy struct {
 			Enabled bool `json:"enabled"`
@@ -162,7 +164,7 @@ func preflightServerIdentities(ctx context.Context, cfg *Config, deps Deps, dryR
 	w := deps.Output
 
 	// Resolve the admin token and OpenBao exec client.
-	token := os.Getenv(baoTokenEnvVar)
+	token := installerBaoToken(deps)
 	if token == "" && cfg.InstallSecretStoreDev {
 		token = devRootToken
 	}

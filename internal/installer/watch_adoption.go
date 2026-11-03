@@ -133,6 +133,7 @@ func runWatchPreview(ctx context.Context, args []string) ([]byte, error) {
 	stderr := &watchPreviewBuffer{limit: 64 << 10, cancel: cancel}
 	defer func() { clear(stderr.Bytes()) }()
 	cmd := exec.CommandContext(ctx, "helm", args...) // #nosec G204 -- fixed executable and installer-constructed preview arguments.
+	cmd.Env = installerChildEnvironment()
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	if err := cmd.Run(); err != nil {
 		clear(stdout.Bytes())

@@ -2,7 +2,11 @@ package installer
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"regexp"
 	"sort"
@@ -72,7 +76,11 @@ func previewHelmUpgrade(ctx context.Context, cfg Config, deps Deps, openbao Open
 	if sentinelOriginCACert != "" {
 		previewCfg.watchTunnelOriginCACert = sentinelOriginCACert
 	}
-	args := append(OberthHelmArgs(previewCfg, openbao, RekorResult{}),
+	rekor, err := plannedRekorResult(ctx, cfg, deps, ns)
+	if err != nil {
+		return err
+	}
+	args := append(OberthHelmArgs(previewCfg, openbao, rekor),
 		"--dry-run=server", "--no-hooks", "--output=json")
 
 	raw, err := deps.RunHelm(ctx, args)
@@ -268,7 +276,7 @@ func detectFailedHelmRevision(ctx context.Context, deps Deps, namespace string) 
 				"in the failed attempt (e.g. a rotated originCACert).\n\n"+
 				"To resolve:\n"+
 				"  1. Inspect the failed revision: helm history oberth -n %s\n"+
-				"  2. Roll back to the last deployed revision: helm rollback oberth <revision> -n %s\n"+
+				"  2. Repair forward: oberth upgrade --namespace %s (database migrations are forward-only).\n"+
 				"  3. Re-run the installer. The identity preflight re-derives watchTunnel.originCACert\n"+
 				"     from the OpenBao server leaf, so a pin that only lived in the failed attempt is\n"+
 				"     restored without a values file.\n\n"+
@@ -300,4 +308,34 @@ func plannedOpenBaoResult(ctx context.Context, cfg Config, deps Deps, ns string)
 		planned.ServerCACertPEM = live.WatchTunnel.OriginCACert
 	}
 	return planned, nil
+}
+
+func plannedRekorResult(ctx context.Context, cfg Config, deps Deps, ns string) (RekorResult, error) {
+	if !cfg.InstallRekor {
+		return RekorResult{}, nil
+	}
+	rekorNS := cfg.RekorNamespace
+	if rekorNS == "" {
+		rekorNS = DefaultRekorNamespace
+	}
+	result := RekorResult{Namespace: rekorNS, ServiceAddress: fmt.Sprintf("http://rekor-server.%s.svc:80", rekorNS), LogPublicKeyPEM: cfg.rekorPublicKey}
+	if result.LogPublicKeyPEM == "" {
+		live, err := readLiveHelmValuesSubset(ctx, deps, ns)
+		if err != nil {
+			return result, err
+		}
+		result.LogPublicKeyPEM = live.AuditAnchor.RekorPublicKey
+	}
+	if result.LogPublicKeyPEM == "" {
+		// Public-only sentinel for a key not provisioned yet. This result is used
+		// exclusively with Helm dry-run; real installation uses the Transit key.
+		curve := elliptic.P256()
+		public := &ecdsa.PublicKey{Curve: curve, X: curve.Params().Gx, Y: curve.Params().Gy}
+		der, err := x509.MarshalPKIXPublicKey(public)
+		if err != nil {
+			return result, err
+		}
+		result.LogPublicKeyPEM = string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}))
+	}
+	return result, nil
 }

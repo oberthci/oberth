@@ -416,6 +416,8 @@ func isValidDNS1123Label(s string) bool {
 
 // Deps holds injectable dependencies for testing.
 type Deps struct {
+	baoToken         string
+	baoTokenCaptured bool
 	// ClientConfigRoot overrides where this machine's CLI/MCP client files
 	// live (default ~/.config/oberth); tests point it at their own directory.
 	ClientConfigRoot func() (string, error)
@@ -705,6 +707,9 @@ func (cfg *Config) Validate() error {
 
 // Run executes the full install flow.
 func Run(ctx context.Context, cfg Config, deps Deps) error {
+	if err := captureBaoEnvironment(&deps); err != nil {
+		return err
+	}
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
@@ -2382,7 +2387,7 @@ func DefaultRunHelm(ctx context.Context, args []string) ([]byte, error) {
 	// constructed by this package from validated flags (no shell, no
 	// caller-controlled command word).
 	cmd := exec.CommandContext(ctx, "helm", args...)
-	cmd.Env = os.Environ()
+	cmd.Env = installerChildEnvironment()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

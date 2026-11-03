@@ -538,8 +538,8 @@ func installConfig(st *WizardState) installer.Config {
 	cfg.SSHPublicKeyPath = st.SSHKeyPath
 	cfg.ClientAccess = st.ClientAccess
 	cfg.SecretStoreUndecided = false
-	// The user confirmed on the review screen.
-	cfg.Yes = true
+	// The review flow records a separate acknowledgement for remote targets.
+	cfg.Yes = cfg.Yes || st.remoteAcknowledged
 	// Dev builds stamp BinaryVersion as "dev-<sha>"; let the installer pick
 	// the published chart instead of deriving a version from the stamp.
 	if strings.HasPrefix(cfg.BinaryVersion, "dev") {

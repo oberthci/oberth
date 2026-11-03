@@ -82,7 +82,8 @@ type installRecord struct {
 // a skin over `oberth install` — plus the choices that only the wizard
 // needs. No secret is ever held here: credentials live in the ceremony.
 type WizardState struct {
-	Config installer.Config
+	Config             installer.Config
+	remoteAcknowledged bool // Session-only explicit review acknowledgement; never persisted.
 
 	ClusterChoice  string // a context name, clusterChoiceFile or clusterChoiceKind
 	ClusterInfo    clusterInfoMsg

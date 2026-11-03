@@ -341,3 +341,26 @@ func TestPreviewHelmUpgradePlansDevSecretStoreAddress(t *testing.T) {
 		t.Fatalf("preview did not plan the dev OpenBao address:\n%s", preview)
 	}
 }
+
+func TestPreviewPlansRekorURLAndPreservesLivePublicKey(t *testing.T) {
+	var preview string
+	deps := Deps{Output: &bytes.Buffer{}, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+		joined := strings.Join(args, " ")
+		if strings.HasPrefix(joined, "list") {
+			return []byte(`[{"name":"oberth","status":"deployed"}]`), nil
+		}
+		if strings.HasPrefix(joined, "get values") {
+			return []byte(`{"auditAnchor":{"rekorPublicKey":"existing-public-key"}}`), nil
+		}
+		preview = joined
+		return nil, nil
+	}}
+	if err := previewHelmUpgrade(t.Context(), Config{InstallRekor: true, RekorNamespace: "logs"}, deps, OpenBaoResult{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"auditAnchor.rekorURL=http://rekor-server.logs.svc:80", "auditAnchor.rekorPublicKey=existing-public-key", "--dry-run=server"} {
+		if !strings.Contains(preview, want) {
+			t.Fatalf("preview missing %s: %s", want, preview)
+		}
+	}
+}

@@ -156,7 +156,7 @@ func TestPreflightLegacyBundleAbsentRefusesBeforeHelm(t *testing.T) {
 	var buf bytes.Buffer
 	deps := Deps{
 		Output:      &buf,
-		KubeClient:  fake.NewClientset(legacyDeployment(), runningOpenBaoPod()),
+		KubeClient:  fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand:  pr.run,
 		ContextName: "test-ctx",
 	}
@@ -196,7 +196,7 @@ func TestPreflightLegacyAllBundlesPresentCertCoversNames(t *testing.T) {
 	var buf bytes.Buffer
 	deps := Deps{
 		Output:     &buf,
-		KubeClient: fake.NewClientset(legacyDeployment(), runningOpenBaoPod()),
+		KubeClient: fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand: pr.run,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			helmCalls++
@@ -282,7 +282,7 @@ func TestPreflightCertLacksGoProxySANsRotates(t *testing.T) {
 	var buf bytes.Buffer
 	deps := Deps{
 		Output:     &buf,
-		KubeClient: fake.NewClientset(legacyDeployment(), runningOpenBaoPod()),
+		KubeClient: fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand: runner,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			if len(args) > 0 && args[0] == "get" {
@@ -381,7 +381,7 @@ func TestPreflightOpenBaoCertMismatchRefuses(t *testing.T) {
 	var buf bytes.Buffer
 	deps := Deps{
 		Output:     &buf,
-		KubeClient: fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "oberth-tls", Namespace: "oberth"}, Data: map[string][]byte{"tls.crt": podCertPEM}}),
+		KubeClient: fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet(), &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "oberth-tls", Namespace: "oberth"}, Data: map[string][]byte{"tls.crt": podCertPEM}}),
 		RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
 			if slices.Contains(args, "deploy/oberth") {
 				return nil, fmt.Errorf(`unknown command "admin"`)
@@ -451,7 +451,7 @@ func TestPreflightNeverIssuesNonGetKubeAction(t *testing.T) {
 	}}
 	pr := &preflightRunner{t: t, baoRunner: runner, podCertPEM: certPEM}
 
-	kube := fake.NewClientset(legacyDeployment(), runningOpenBaoPod())
+	kube := fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet())
 	var buf bytes.Buffer
 	deps := Deps{
 		Output:     &buf,
@@ -492,7 +492,7 @@ func TestPreflightDryRunLegacyAbsentBundleRefuses(t *testing.T) {
 	var buf bytes.Buffer
 	deps := Deps{
 		Output:      &buf,
-		KubeClient:  fake.NewClientset(legacyDeployment(), runningOpenBaoPod()),
+		KubeClient:  fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand:  pr.run,
 		ContextName: "test-ctx",
 	}
@@ -534,7 +534,7 @@ func TestPreflightDryRunMissingSANsPrintsPlanNoWrite(t *testing.T) {
 	var buf bytes.Buffer
 	deps := Deps{
 		Output:     &buf,
-		KubeClient: fake.NewClientset(legacyDeployment(), runningOpenBaoPod()),
+		KubeClient: fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand: pr.run,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			if len(args) > 0 && args[0] == "get" {
@@ -719,7 +719,7 @@ func TestPreflightSameKeyDifferentCertPassesCrossCheck(t *testing.T) {
 	var buf bytes.Buffer
 	deps := Deps{
 		Output:      &buf,
-		KubeClient:  fake.NewClientset(legacyDeployment(), runningOpenBaoPod()),
+		KubeClient:  fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand:  pr.run,
 		ContextName: "test-ctx",
 	}
@@ -754,7 +754,7 @@ func TestPreflightUnparseableBaoCertRefuses(t *testing.T) {
 	var buf bytes.Buffer
 	deps := Deps{
 		Output:      &buf,
-		KubeClient:  fake.NewClientset(legacyDeployment(), runningOpenBaoPod()),
+		KubeClient:  fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand:  pr.run,
 		ContextName: "test-ctx",
 	}
@@ -846,7 +846,7 @@ func TestPreflightCertWithOnlySvcNameNoRotation(t *testing.T) {
 	var buf bytes.Buffer
 	deps := Deps{
 		Output:     &buf,
-		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod()),
+		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
 			// Pod cert reads.
 			return certPEM, nil
@@ -943,7 +943,7 @@ func TestPreflightCertWithoutSvcNameRotatesAllFour(t *testing.T) {
 	var buf bytes.Buffer
 	deps := Deps{
 		Output:     &buf,
-		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod()),
+		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand: runner,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			if len(args) > 0 && args[0] == "get" {
@@ -995,7 +995,7 @@ func TestPreflightHelmErrorPropagates(t *testing.T) {
 
 	deps := Deps{
 		Output:     &bytes.Buffer{},
-		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod()),
+		KubeClient: fake.NewClientset(currentDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand: func(ctx context.Context, input []byte, name string, args ...string) ([]byte, error) {
 			for _, arg := range args {
 				if arg == "deploy/oberth" {
@@ -1114,7 +1114,7 @@ func TestPreflightClearsIdentityReadBuffers(t *testing.T) {
 	var buf bytes.Buffer
 	deps := Deps{
 		Output:     &buf,
-		KubeClient: fake.NewClientset(legacyDeployment(), runningOpenBaoPod()),
+		KubeClient: fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand: runner,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			if len(args) > 0 && args[0] == "get" {
@@ -1233,7 +1233,7 @@ func TestIdempotentOriginPinSameKeyDifferentFingerprint(t *testing.T) {
 	var buf bytes.Buffer
 	deps := Deps{
 		Output:     &buf,
-		KubeClient: fake.NewClientset(legacyDeployment(), runningOpenBaoPod()),
+		KubeClient: fake.NewClientset(legacyDeployment(), runningOpenBaoPod(), runningOpenBaoStatefulSet()),
 		RunCommand: pr.run,
 		RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 			if len(args) > 0 && args[0] == "get" {

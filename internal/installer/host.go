@@ -886,6 +886,7 @@ func DefaultRunCommand(ctx context.Context, input []byte, name string, args ...s
 	// #nosec G204 -- callers select a fixed executable and pass structured
 	// arguments; no shell interpolation occurs.
 	command := exec.CommandContext(ctx, name, args...)
+	command.Env = installerChildEnvironment()
 	if len(input) > 0 {
 		command.Stdin = bytes.NewReader(input)
 	}
@@ -932,6 +933,7 @@ func DefaultRunInteractive(ctx context.Context, name string, args ...string) err
 	// #nosec G204 -- callers select a fixed executable and pass structured
 	// arguments; no shell interpolation occurs.
 	command := exec.CommandContext(ctx, name, args...)
+	command.Env = installerChildEnvironment()
 	command.Stdin = os.Stdin
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
@@ -951,6 +953,7 @@ func StdinIsTerminal() bool {
 func DefaultRunCommandStream(ctx context.Context, output io.Writer, name string, args ...string) error {
 	// #nosec G204 -- fixed executable and structured arguments, as in DefaultRunCommand.
 	command := exec.CommandContext(ctx, name, args...)
+	command.Env = installerChildEnvironment()
 	command.Stdout, command.Stderr = output, output
 	command.WaitDelay = 5 * time.Second
 	return errors.Join(command.Run(), ctx.Err())

@@ -280,7 +280,7 @@ func serverPodFixture(name string) *corev1.Pod {
 
 func newFakeBackupCluster(t *testing.T, compat backupCompatibility, objects ...runtime.Object) *fakeBackupCluster {
 	t.Helper()
-	objects = append(objects, serverDeploymentFixture(compat), serverPodFixture("oberth-1"), runningOpenBaoPod())
+	objects = append(objects, serverDeploymentFixture(compat), serverPodFixture("oberth-1"), runningOpenBaoPod(), runningOpenBaoStatefulSet())
 	c := &fakeBackupCluster{
 		t:       t,
 		bao:     newFakeOpenBao(t),

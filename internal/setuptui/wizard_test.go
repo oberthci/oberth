@@ -71,7 +71,7 @@ func TestFirstRunEndToEnd(t *testing.T) {
 	}
 	cfg := fake.cfgs[0]
 	if cfg.ContextName != "default" || cfg.ForgeURL != "github.com/acme" || cfg.ClientAccess != "both" ||
-		cfg.SSHPublicKeyPath != host.pubKey || !cfg.InstallSecretStore || !cfg.Yes || cfg.CreateKind {
+		cfg.SSHPublicKeyPath != host.pubKey || !cfg.InstallSecretStore || cfg.Yes || cfg.CreateKind {
 		t.Fatalf("installer config not wired from the answers: %+v", cfg)
 	}
 	if strings.Join(cfg.TLSExtraIPs, ",") != "192.168.86.193" || strings.Join(cfg.TLSExtraDNSNames, ",") != "tuxbox" {
