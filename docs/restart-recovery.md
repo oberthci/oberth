@@ -24,7 +24,7 @@ grant. Revocation, expiry, failed CI steps, manual cancellation, and already
 published work prevent automatic retry. At most two successive automatic
 promotion retries are admitted by the service.
 
-Schema versions 39 and 40 add restart timing records and tag publication guards.
+Schema versions 43 and 44 add restart timing records and tag publication guards.
 They preserve existing run IDs, logs, audit records, timing and publication
 history. Use the normal forward upgrade process; do not downgrade a database
 that has applied these migrations.

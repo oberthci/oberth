@@ -30,20 +30,21 @@ Drain those executions with the existing server before replacing it; ordinary
 non-legacy Workflows retain restart adoption. See the
 [retirement upgrade procedure](../retirement-upgrade.md).
 
-Schemas 39–44 are the predecessor migrations from priority, integration and
-replay-C. Submission priority uses the v0.17.82 implementation; schemas 40–44
-remain carried here to keep the ledger contiguous.
+The v0.17.82 database is at schema 39. Migrations 40–44 persist bearer token
+expiry, issue metadata revisions, publication abandonment, restart timing and
+tag publication identity, respectively. Migration 48 adds independent numeric
+resource ceilings. Submission priority retains the v0.17.82 implementation.
+See the [complete v0.17.83 migration table](v0.17.83.md#upgrade-from-v01782).
 Rollback requires the pre-upgrade database restore described in
 [backup and restore](../backup-restore.md).
 
-The website and tunnel removal is a separate final commit. Hold that commit
-until connector ownership and the site pipeline have moved outside the chart.
-No deployment values are changed by this work. Merging the earlier staged
-capability commits alone preserves existing chart-managed website/tunnel use.
+The v0.17.83 candidate includes the website and chart tunnel-connector
+removal. Before upgrading, move connector ownership and the site pipeline
+outside the chart. Existing `watchTunnel` values are accepted but ignored; they
+do not retain chart ownership of the removed objects.
 
-Before releasing the final removal commit, move the connector to externally
-managed manifests and confirm its Pods serve traffic. Remove any reference to
-the chart's `cloudflared` PriorityClass from that connector, or provision an
+Move the connector to externally managed manifests and confirm its Pods serve
+traffic. Remove any reference to the chart's `cloudflared` PriorityClass from that connector, or provision an
 externally owned PriorityClass first. Confirm new connector Pods can be created
 with the resulting class and that the website pipeline has an external owner
 before upgrading the chart that removes these objects.
