@@ -80,6 +80,12 @@ func TestListActiveRunsOrdersByStartThenAdmissionThenQueue(t *testing.T) {
 	if got := runIDs(active); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("active order = %v, want %v", got, want)
 	}
+	// The not-started rows, claimed or not, are one queue in queue_position order.
+	for i, run := range active[2:] {
+		if run.QueuePosition != int64(i+1) {
+			t.Fatalf("queue position of %s = %d, want %d", run.Ref, run.QueuePosition, i+1)
+		}
+	}
 
 	// The uplink repository restriction applies to the active view.
 	scoped, err := s.ListActiveRuns(ctx, model.RunListFilter{RepoIDs: []int64{other.ID}})
@@ -147,4 +153,89 @@ func TestListRecentRunsTerminalPagination(t *testing.T) {
 	if rest, _ := s.ListRecentRuns(ctx, model.RunListFilter{Limit: 2, Terminal: true, Before: second[1].QueueSequence}); len(rest) != 0 {
 		t.Fatalf("history past the oldest = %v", runIDs(rest))
 	}
+}
+
+// The queue is one order in every view, claimed and unclaimed runs together,
+// exactly as the scheduler claims: a claimed normal run never lists ahead of
+// an unclaimed high run the gate admits first, and an aged run moves with
+// its effective class. Flat, latest-per-ref and active views agree.
+func TestQueueOrderIsMonotoneAcrossClaimedAndUnclaimedClasses(t *testing.T) {
+	now := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	s := testStore(t, &now)
+	repo := createRepo(t, s)
+	ctx := context.Background()
+	if _, err := s.SetQueuePriorityPatterns(ctx, "admin", []string{"rc/*"}); err != nil {
+		t.Fatal(err)
+	}
+	enqueue := func(ref, sha string) model.Run {
+		t.Helper()
+		result, err := s.EnqueueRun(ctx, testRunSpec(repo.ID, ref, strings.Repeat(sha, 40)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result.Run
+	}
+	rank := map[model.RunPriority]int{model.PriorityNormal: 0, model.PriorityHigh: 1, model.PriorityHighest: 2}
+	check := func(label string, wantAdmission []string) {
+		t.Helper()
+		active, err := s.ListActiveRuns(ctx, model.RunListFilter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		flat, err := s.ListRecentRuns(ctx, model.RunListFilter{Limit: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		latest, err := s.ListRecentRuns(ctx, model.RunListFilter{LatestPerRef: true, Limit: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		queueOf := func(runs []model.Run, bottomUp bool) []model.Run {
+			queue := []model.Run{}
+			for _, run := range runs {
+				if run.Status == model.RunQueued || run.ClaimedUnstarted() {
+					queue = append(queue, run)
+				}
+			}
+			if bottomUp {
+				for i, j := 0, len(queue)-1; i < j; i, j = i+1, j-1 {
+					queue[i], queue[j] = queue[j], queue[i]
+				}
+			}
+			return queue
+		}
+		for name, queue := range map[string][]model.Run{"active": queueOf(active, false), "flat": queueOf(flat, true), "latest-per-ref": queueOf(latest, true)} {
+			if got := runIDs(queue); strings.Join(got, ",") != strings.Join(wantAdmission, ",") {
+				t.Fatalf("%s: %s queue in admission order = %v, want %v", label, name, got, wantAdmission)
+			}
+			previousRank := rank[model.PriorityHighest] + 1
+			for i, run := range queue {
+				if run.QueuePosition != int64(i+1) {
+					t.Fatalf("%s: %s queue position of %s = %d, want %d", label, name, run.Ref, run.QueuePosition, i+1)
+				}
+				class, _ := run.EffectivePriority(now)
+				if rank[class] > previousRank {
+					t.Fatalf("%s: %s queue interleaves classes at %s (%s after a lower class)", label, name, run.Ref, class)
+				}
+				previousRank = rank[class]
+			}
+		}
+	}
+
+	claimed := enqueue("feature/claimed", "a") // normal, claimed before any high work arrives
+	if got, err := s.ClaimNextRun(ctx); err != nil || got.ID != claimed.ID {
+		t.Fatalf("claim = %+v, %v", got, err)
+	}
+	now = now.Add(time.Minute)
+	high := enqueue("rc/one", "b") // high: admitted before the claimed normal run
+	now = now.Add(time.Minute)
+	fresh := enqueue("feature/fresh", "c")
+	check("high arrives after a normal claim", []string{high.ID, claimed.ID, fresh.ID})
+
+	// An hour later the claimed run and the fresh one have aged into high;
+	// the queue is FIFO within the high class, still one order everywhere.
+	now = now.Add(61 * time.Minute)
+	check("aged", []string{claimed.ID, high.ID, fresh.ID})
+	later := enqueue("feature/later", "d")
+	check("fresh normal behind aged work", []string{claimed.ID, high.ID, fresh.ID, later.ID})
 }
