@@ -36,7 +36,9 @@ def main():
     if args.list:
         print(json.dumps(groups, sort_keys=True))
         return
-    os.execvp("go", ["go", "test", "-race", "-v", "-count=1", "-p=2", "-timeout=20m", *groups[args.group]])
+    # Whole-package race measurements need at least 1.5x deadline headroom.
+    timeout = "35m" if args.group == "store" else "20m"
+    os.execvp("go", ["go", "test", "-race", "-v", "-count=1", "-p=2", f"-timeout={timeout}", *groups[args.group]])
 
 
 if __name__ == "__main__":
