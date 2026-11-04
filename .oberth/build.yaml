@@ -2081,7 +2081,7 @@ spec:
   # Build helm, oberth-release-support, oberth-release-image and fetch cosign,
   # matching release.yaml's exact env -i, flags, and Go toolchain.
   - name: vpt-build-and-fetch
-    activeDeadlineSeconds: 600
+    activeDeadlineSeconds: 900 # remeasure: censored 600s pod deadline x1.5; includes startup and wait
     automountServiceAccountToken: false
     metadata:
       annotations:
