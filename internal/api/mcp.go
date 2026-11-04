@@ -59,20 +59,21 @@ type PromoteRetryResponse struct {
 // PromotionListResponse recovers durable admission IDs without exposing actor,
 // failure text or internal storage fields. Listing never starts a promotion.
 type PromotionListItem struct {
-	SourceCount  int    `json:"source_count"`
-	Repo         string `json:"repo"`
-	Ref          string `json:"ref"`
-	ID           string `json:"id"`
-	Sequence     int64  `json:"sequence"`
-	RepoID       int64  `json:"repo_id"`
-	SourceBranch string `json:"source_branch"`
-	SourceSHA    string `json:"source_sha"`
-	TargetRef    string `json:"target_ref"`
-	ResultSHA    string `json:"result_sha,omitempty"`
-	RunID        string `json:"run_id,omitempty"`
-	Status       string `json:"status"`
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
+	BranchCISkipped bool   `json:"branch_ci_skipped"`
+	SourceCount     int    `json:"source_count"`
+	Repo            string `json:"repo"`
+	Ref             string `json:"ref"`
+	ID              string `json:"id"`
+	Sequence        int64  `json:"sequence"`
+	RepoID          int64  `json:"repo_id"`
+	SourceBranch    string `json:"source_branch"`
+	SourceSHA       string `json:"source_sha"`
+	TargetRef       string `json:"target_ref"`
+	ResultSHA       string `json:"result_sha,omitempty"`
+	RunID           string `json:"run_id,omitempty"`
+	Status          string `json:"status"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
 }
 type PromotionListResponse struct {
 	Promotions []PromotionListItem `json:"promotions"`
