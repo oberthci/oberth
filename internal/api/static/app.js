@@ -517,7 +517,9 @@ function whenCell(run) {
   if (status === "queued") return "";
   const started = run.StartedAt, stamp = started || run.QueuedAt;
   const date = new Date(stamp || "");
-  const label = Number.isFinite(+date) ? `${started ? "started" : "queued"} at ${date.toDateString() === new Date().toDateString() ? date.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",hour12:false}) : date.toLocaleString()}` : "";
+  const time = Number.isFinite(+date) ? date.toLocaleTimeString("en-GB", {hour:"2-digit",minute:"2-digit",hourCycle:"h23"}) : "";
+  const stampText = date.toDateString() === new Date().toDateString() ? time : `${date.toLocaleDateString("en-US", {month:"short",day:"numeric"})} ${time}`;
+  const label = Number.isFinite(+date) ? `${started ? "started" : "queued"} at ${stampText}` : "";
   const duration = ["cancelled", "superseded"].includes(status) || !started ? "" : runListDuration(spanSeconds(started, run.FinishedAt, status === "running"));
   return `<span${status === "running" && started ? ` data-started="${esc(started)}"` : ""}>${esc(duration)}</span><span class="meta">${esc(label)}</span>`;
 }

@@ -20,10 +20,13 @@ func TestQueuedDisplayReasonNamesWhatTheRunWaitsFor(t *testing.T) {
 		blocker    *model.AdmissionBlocker
 		want       string
 	}{
-		{"no observation", nil, nil, "next in line"},
+		{"no observation", nil, nil, "in line"},
+		{"unknown state", &model.RunScheduling{State: "unavailable"}, nil, "in line"},
+		{"YAML group blocked", waiting(model.AdmissionObservation{Group: "e2e", GroupLimit: 2, GroupBlocked: true}), nil, "group e2e busy"},
+		{"YAML group available", waiting(model.AdmissionObservation{Group: "e2e", GroupLimit: 2, Size: "M"}), nil, "waiting for a slot (size M)"},
 		{"next in line", &model.RunScheduling{State: "queued", QueuePosition: 1}, nil, "next in line"},
 		{"third in line", &model.RunScheduling{State: "queued", QueuePosition: 3}, nil, "position 3 in line"},
-		{"scoped viewer, no position", &model.RunScheduling{State: "queued"}, nil, "next in line"},
+		{"scoped viewer, no position", &model.RunScheduling{State: "queued"}, nil, "in line"},
 		{"in line behind the head", &model.RunScheduling{State: "queued", QueuePosition: 2}, head, "position 2 in line · behind org/app/main"},
 		{"preparing", &model.RunScheduling{State: "preparing"}, nil, "starting"},
 		{"preflight", &model.RunScheduling{State: "preflight"}, nil, "KVM preflight"},

@@ -101,7 +101,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 	if hold, held := service.admissionHoldForRun(run); held {
 		result.State = "queued"
 		result.Message = hold.Message()
-		return result, strings.Replace(hold.Message(), "admission held", "queue held", 1)
+		return result, hold.ShortMessage()
 	}
 	if run.Status == model.RunQueued {
 		result.State = "queued"
@@ -360,7 +360,7 @@ func applyExecutionDisplay(run *model.Run, scheduling *model.RunScheduling) {
 		return
 	}
 	for _, pod := range scheduling.Execution.Pods {
-		if pod.Reason == "Unschedulable" && strings.HasPrefix(pod.Message, "pod pending: ") {
+		if pod.Phase == "Pending" && strings.HasPrefix(pod.Message, "pod pending: ") {
 			run.DisplayReason = displayFailureText(joinRunMessage(priorityPrefix(*run), pod.Message))
 			return
 		}

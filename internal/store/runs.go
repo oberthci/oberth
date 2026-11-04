@@ -20,7 +20,7 @@ const runColumns = `
 queue_sequence, COALESCE(admission_sequence, queue_sequence), id, repo_id, ref_kind, ref, sha, actor, release, credentialed, trigger,
 phase, job_name, tested_sha, base_sha, failed_burn, failed_step, error,
 status, reason, superseded_by, queued_at, started_at, finished_at, created_at, updated_at,
-concurrency_group, concurrency_limit, schedule_entry, issue_trailers, ` + basePrioritySQL + `, ` + priorityReasonSQL + `,
+concurrency_group, concurrency_limit, schedule_entry, issue_trailers, failure_cause, ` + basePrioritySQL + `, ` + priorityReasonSQL + `,
 COALESCE(` + overridePrioritySQL + `,''), COALESCE((SELECT reason FROM run_priority_overrides WHERE run_id=id),''),
 COALESCE(` + requestedPrioritySQL + `,''), COALESCE(` + requestedPriorityReasonSQL + `,''),
 COALESCE((SELECT actor FROM run_priority_overrides WHERE run_id=id),(SELECT actor FROM run_priority_requests WHERE run_id=id),''), COALESCE((SELECT refusal FROM run_priority_requests WHERE run_id=id),''), NOT (` + supersessionEligibleSQL + `)`
@@ -968,13 +968,13 @@ UPDATE runs
 SET status = ?, phase = ?,
     tested_sha = CASE WHEN ? = '' THEN tested_sha ELSE ? END,
     base_sha = CASE WHEN ? = '' THEN base_sha ELSE ? END,
-    failed_burn = ?, failed_step = ?, error = ?, reason = CASE WHEN ? = '' THEN reason ELSE reason || char(10) || 'oberth failure: ' || ? END, finished_at = ?, updated_at = ?
+    failed_burn = ?, failed_step = ?, error = ?, failure_cause = ?, finished_at = ?, updated_at = ?
 WHERE id = ? AND status IN ('queued', 'running')
 RETURNING `+runColumns,
 		result.Status, phase,
 		result.TestedSHA, result.TestedSHA,
 		result.BaseSHA, result.BaseSHA,
-		result.FailedStage, result.FailedStep, result.Error, result.FailureCause, result.FailureCause, now, now, id))
+		result.FailedStage, result.FailedStep, result.Error, result.FailureCause, now, now, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		var exists int
 		if lookupErr := tx.QueryRowContext(ctx, `SELECT count(*) FROM runs WHERE id = ?`, id).Scan(&exists); lookupErr != nil {
@@ -1365,7 +1365,7 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 		&value.SHA, &value.Actor, &release, &credentialed, &value.Trigger, &value.Phase, &value.WorkflowName,
 		&value.TestedSHA, &value.BaseSHA, &value.FailedStage, &value.FailedStep, &value.Error,
 		&value.Status, &value.Reason, &value.SupersededBy, &queued, &started, &finished,
-		&created, &updated, &value.ConcurrencyGroup, &value.ConcurrencyLimit, &value.ScheduleEntry, &issueTrailers, &value.Priority, &value.PriorityReason, &value.PriorityOverride, &value.PriorityOverrideReason, &value.PriorityAccepted, &value.PriorityAcceptedReason, &value.PriorityRequestedBy, &value.PriorityRefusal, &value.PriorityProtected,
+		&created, &updated, &value.ConcurrencyGroup, &value.ConcurrencyLimit, &value.ScheduleEntry, &issueTrailers, &value.FailureCause, &value.Priority, &value.PriorityReason, &value.PriorityOverride, &value.PriorityOverrideReason, &value.PriorityAccepted, &value.PriorityAcceptedReason, &value.PriorityRequestedBy, &value.PriorityRefusal, &value.PriorityProtected,
 	}
 	if err := scanRowNotFound(row, "Run", append(dest, extra...)...); err != nil {
 		return model.Run{}, err
@@ -1377,13 +1377,6 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 		}
 		if err := json.Unmarshal([]byte(issueTrailers), &value.IssueTrailers); err != nil {
 			return model.Run{}, fmt.Errorf("decode run issue trailers: %w", err)
-		}
-	}
-	// Decode only terminal server metadata; leave retry/operator provenance intact.
-	if value.Status == model.RunFailed {
-		if index := strings.LastIndex(value.Reason, "\noberth failure: "); index >= 0 {
-			value.FailureCause = value.Reason[index+len("\noberth failure: "):]
-			value.Reason = value.Reason[:index]
 		}
 	}
 	value.AutoRetryOf = automaticRetryOrigin(value.Reason)

@@ -213,7 +213,7 @@ type RunSpec struct {
 }
 
 type RunResult struct {
-	// FailureCause is server-classified summary metadata encoded alongside the existing reason.
+	// FailureCause is server-classified summary metadata in the dedicated failure_cause column.
 	// The complete error stays in Error. It never changes terminal status.
 	FailureCause string `json:"-"`
 

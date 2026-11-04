@@ -56,3 +56,13 @@ func TestAdmissionHoldClassesAndExpiry(t *testing.T) {
 		}
 	}
 }
+
+func TestAdmissionHoldShortMessageKeepsDetailVocabularySeparate(t *testing.T) {
+	hold := AdmissionHold{Reason: "release qualification", ExpiresAt: time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)}
+	if got := hold.ShortMessage(); got != "queue held by admin: release qualification, until 2026-11-04T12:00:00Z" {
+		t.Fatal(got)
+	}
+	if got := hold.Message(); got != "admission held by admin: release qualification, until 2026-11-04T12:00:00Z" {
+		t.Fatal(got)
+	}
+}

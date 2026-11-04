@@ -1114,14 +1114,12 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 	if err != nil {
 		return nil, err
 	}
-	observationCtx, cancelObservation := context.WithTimeout(ctx, 2*time.Second)
-	defer cancelObservation()
 	for i := range runs {
 		if service.scope != nil {
 			runs[i].QueuePosition = 0
 		}
-		if filter.View != api.RunViewHistory && runs[i].DisplayStatus == model.DisplayRunning && service.schedulingObserver != nil && observationCtx.Err() == nil {
-			runs[i].Scheduling, _ = service.observeScheduling(observationCtx, runs[i], nil, true)
+		if filter.View != api.RunViewHistory && runs[i].DisplayStatus == model.DisplayRunning {
+			runs[i].Scheduling = service.observeRunListStartup(ctx, runs[i])
 			applyExecutionDisplay(&runs[i], runs[i].Scheduling)
 		}
 		if filter.View != api.RunViewHistory && runs[i].DisplayStatus == model.DisplayQueued {

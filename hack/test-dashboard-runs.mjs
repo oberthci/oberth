@@ -368,7 +368,7 @@ sandbox.clockNow=clockNow;sandbox.yesterday=yesterday;
 assert.equal(run(`whenCell({display_status:'queued'})`),'');
 assert.match(run(`whenCell({display_status:'passed',StartedAt:clockNow,FinishedAt:new Date(clockNow.getTime()+62000)})`),/1m 2s/);
 assert.match(run(`whenCell({display_status:'passed',StartedAt:clockNow,FinishedAt:clockNow})`),/started at \d\d:\d\d/);
-assert.match(run(`whenCell({display_status:'passed',StartedAt:yesterday,FinishedAt:clockNow})`),new RegExp(yesterday.getFullYear()));
+assert.match(run(`whenCell({display_status:'passed',StartedAt:yesterday,FinishedAt:clockNow})`),/started at [A-Z][a-z]{2} \d{1,2} \d{2}:\d{2}/);
 assert.match(run(`whenCell({display_status:'running',StartedAt:clockNow})`),/data-started=/);
 assert.match(run(`whenCell({display_status:'cancelled',QueuedAt:clockNow})`),/queued at/);
 
@@ -391,7 +391,7 @@ for (const status of ['running','passed','failed','cancelled','superseded','infr
  sandbox.timeRun={display_status:status,StartedAt:clockNow.toISOString(),FinishedAt:status==='running'?null:new Date(clockNow.getTime()+62000).toISOString()};
  assert.match(run('whenCell(timeRun)'),/started at \d\d:\d\d/);
  sandbox.timeRun.StartedAt=yesterday.toISOString();
- assert.match(run('whenCell(timeRun)'),new RegExp(yesterday.getFullYear()));
+ assert.match(run('whenCell(timeRun)'),/started at [A-Z][a-z]{2} \d{1,2} \d{2}:\d{2}/);
  if (['cancelled','superseded'].includes(status)) assert.match(run('whenCell(timeRun)'),/^<span><\/span>/);
 }
 assert.match(run(`runRow({ID:'escaped',RepoID:1,Ref:'<script>',SHA:'sha"<unsafe>',Actor:'actor"<unsafe>',display_status:'failed',display_reason:'reason"<unsafe>'})`),/reason&quot;&lt;unsafe&gt;/);
@@ -399,3 +399,8 @@ console.log('Run-list contract passed: seven states, today/older start lines, li
 
 assert.equal(run(`runMessageCell({display_status:'passed',display_reason:'closes #1415, #1416 · schedule nightly'})`),'closes #1415, #1416 · schedule nightly');
 assert.equal(run(`runMessageCell({display_status:'passed',issue_trailers:[{issue:1,close:true}]})`),'','the client never fabricates a trailer message');
+
+const olderStart = new Date(2026,10,3,12,50);
+sandbox.olderStart=olderStart;
+assert.match(run(`whenCell({display_status:'failed',StartedAt:olderStart,FinishedAt:olderStart})`),/started at Nov 3 12:50<\/span>/);
+assert.doesNotMatch(run(`whenCell({display_status:'failed',StartedAt:olderStart,FinishedAt:olderStart})`),/2026|AM|PM|12:50:00/);

@@ -16,14 +16,17 @@ import (
 // scoped viewer gets "waiting for capacity" where an admin sees the numbers.
 func queuedDisplayReason(scheduling *model.RunScheduling, blocker *model.AdmissionBlocker) string {
 	if scheduling == nil {
-		return "next in line"
+		return "in line"
 	}
 	var reason string
 	switch scheduling.State {
 	case "infra-pending":
 		return "workflow create uncertain, cleanup pending"
 	case "queued":
-		reason = "next in line"
+		reason = "in line"
+		if scheduling.QueuePosition == 1 {
+			reason = "next in line"
+		}
 		if scheduling.QueuePosition > 1 {
 			reason = fmt.Sprintf("position %d in line", scheduling.QueuePosition)
 		}
@@ -40,7 +43,7 @@ func queuedDisplayReason(scheduling *model.RunScheduling, blocker *model.Admissi
 		}
 		return waitingReason(scheduling.Admission)
 	default:
-		return "next in line"
+		return "in line"
 	}
 	return displayFailureText(withWaitQualifier(reason, nil, blocker))
 }

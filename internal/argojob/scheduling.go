@@ -134,8 +134,13 @@ func safeWorkflowMessage(message string) string {
 	}
 }
 
-func podSchedulingReason(pod corev1.Pod) model.SchedulingReason {
-	result := model.SchedulingReason{Phase: safePhase(string(pod.Status.Phase))}
+func podSchedulingReason(pod corev1.Pod) (result model.SchedulingReason) {
+	defer func() {
+		if pod.Status.Phase == corev1.PodPending && result.Message != "" && !strings.HasPrefix(result.Message, "pod pending: ") {
+			result.Message = "pod pending: " + result.Message
+		}
+	}()
+	result = model.SchedulingReason{Phase: safePhase(string(pod.Status.Phase))}
 	if pod.Status.Reason == "DeadlineExceeded" {
 		result.Reason, result.Message = "DeadlineExceeded", model.ExecutionDeadlineMessage
 		return result
@@ -143,7 +148,7 @@ func podSchedulingReason(pod corev1.Pod) model.SchedulingReason {
 	for _, condition := range pod.Status.Conditions {
 		if condition.Type == corev1.PodScheduled && condition.Status == corev1.ConditionFalse {
 			result.Reason = "Unscheduled"
-			result.Message = "Pod has not been scheduled."
+			result.Message = "not scheduled"
 			if condition.Reason == "Unschedulable" {
 				result.Reason = "Unschedulable"
 				switch {
@@ -154,11 +159,11 @@ func podSchedulingReason(pod corev1.Pod) model.SchedulingReason {
 				case strings.Contains(condition.Message, "Insufficient memory"):
 					result.Message = "pod pending: insufficient memory (" + podRequest(pod, corev1.ResourceMemory) + " requested)"
 				case hasSchedulingPhrase(condition.Message, "Insufficient", "ephemeral-storage"):
-					result.Message = "Pending: Insufficient ephemeral-storage; pod requests " + podRequest(pod, corev1.ResourceEphemeralStorage) + " ephemeral storage."
+					result.Message = "insufficient ephemeral-storage; pod requests " + podRequest(pod, corev1.ResourceEphemeralStorage) + " ephemeral storage."
 				case hasSchedulingPhrase(condition.Message, "Too", "many", "pods"):
-					result.Message = "Pending: Too many pods; waiting for a pod slot."
+					result.Message = "too many pods; waiting for a pod slot"
 				case strings.Contains(condition.Message, "unbound immediate PersistentVolumeClaims"):
-					result.Message = "Scheduler reports an unbound persistent volume claim."
+					result.Message = "unbound persistent volume claim"
 				}
 			}
 			return result
@@ -170,13 +175,13 @@ func podSchedulingReason(pod corev1.Pod) model.SchedulingReason {
 				continue
 			}
 			result.Reason = safeWaitingReason(status.State.Waiting.Reason)
-			result.Message = "A container is waiting to start; free-form details withheld."
+			result.Message = "container is waiting to start; free-form details withheld"
 			return result
 		}
 	}
 	if pod.Status.Phase == corev1.PodPending {
 		result.Reason = "Pending"
-		result.Message = "Pod is pending; no more specific scheduling reason was observed."
+		result.Message = "no more specific scheduling reason was observed"
 	}
 	return result
 }

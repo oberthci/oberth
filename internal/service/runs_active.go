@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
@@ -12,7 +11,7 @@ import (
 
 // ActiveRun is one entry of the active run view: the run record, with the
 // same capitalized fields as an /api/runs entry and its curated scheduling
-// observation. Execution reads share one bounded budget across the list.
+// observation. Execution is observed only before any step has started.
 type ActiveRun struct {
 	model.Run
 	Scheduling *model.RunScheduling `json:"Scheduling,omitempty"`
@@ -43,9 +42,6 @@ func (service *API) activeRuns(ctx context.Context, filter api.RunFilter) (any, 
 	if err != nil {
 		return nil, err
 	}
-	// Bound live execution observations across the whole list, including slow controllers.
-	observationCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
 	observer := *service
 	started := make([]ActiveRun, 0, len(runs))
 	admitted := make([]ActiveRun, 0)
@@ -53,10 +49,8 @@ func (service *API) activeRuns(ctx context.Context, filter api.RunFilter) (any, 
 	for _, run := range runs {
 		entry := ActiveRun{Run: run}
 		if run.StartedAt != nil {
-			if observer.schedulingObserver != nil && observationCtx.Err() == nil {
-				entry.Scheduling, _ = observer.observeScheduling(observationCtx, run, nil, true)
-				applyExecutionDisplay(&entry.Run, entry.Scheduling)
-			}
+			entry.Scheduling = observer.observeRunListStartup(ctx, run)
+			applyExecutionDisplay(&entry.Run, entry.Scheduling)
 			started = append(started, entry)
 			continue
 		}

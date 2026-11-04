@@ -55,7 +55,7 @@ func TestConcurrencyGroupsScopedQueuedReasonHidesOtherRepositories(t *testing.T)
 	control := &API{admission: &Scheduler{admission: g}, scope: &repoScope{repos: map[int64]model.Repository{1: {ID: 1}}}}
 	observation, reason := control.observeScheduling(t.Context(), run, nil, false)
 	body, err := json.Marshal(observation)
-	if err != nil || strings.Contains(string(body), hidden) || strings.Contains(reason, hidden[:12]) || !strings.Contains(reason, "limit 1") || !strings.Contains(reason, "state") {
+	if err != nil || strings.Contains(string(body), hidden) || strings.Contains(reason, hidden[:12]) || reason != "group state busy" || observation.Admission == nil || observation.Admission.GroupLimit != 1 {
 		t.Fatal(string(body), reason, err)
 	}
 }

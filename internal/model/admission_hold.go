@@ -81,3 +81,8 @@ func (hold AdmissionHold) Snapshot(now time.Time) AdmissionHold {
 func (hold AdmissionHold) Message() string {
 	return fmt.Sprintf("admission held by admin: %s, until %s", hold.Reason, hold.ExpiresAt.UTC().Format(time.RFC3339Nano))
 }
+
+// ShortMessage is the list-facing hold explanation; Message retains detail vocabulary.
+func (hold AdmissionHold) ShortMessage() string {
+	return fmt.Sprintf("queue held by admin: %s, until %s", hold.Reason, hold.ExpiresAt.UTC().Format(time.RFC3339Nano))
+}

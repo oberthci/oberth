@@ -17,7 +17,7 @@ func TestRunListMessageContract(t *testing.T) {
 		run  model.Run
 		want string
 	}{
-		{"queued", model.Run{Status: model.RunQueued}, "next in line"},
+		{"queued", model.Run{Status: model.RunQueued}, "in line"},
 		{"tag boost", model.Run{Status: model.RunRunning, StartedAt: &now, Priority: model.PriorityHighest, PriorityReason: model.TagReleasePriorityReason}, ""},
 		{"aged", model.Run{Status: model.RunRunning, StartedAt: &now, Priority: model.PriorityHigh, PriorityReason: model.PriorityAgedReason}, "priority high (aged)"},
 		{"running", model.Run{Status: model.RunRunning, StartedAt: &now, Priority: "normal", PriorityReason: "ordinary run"}, ""},
@@ -118,7 +118,7 @@ func TestRunListWaitQualifierPrivacyAndClipping(t *testing.T) {
 func TestRunListPendingPodMessage(t *testing.T) {
 	now := time.Now()
 	run := presentationRun(model.Run{Status: model.RunRunning, StartedAt: &now})
-	applyExecutionDisplay(&run, &model.RunScheduling{Execution: &model.ExecutionObservation{Pods: []model.SchedulingReason{{Reason: "Unschedulable", Message: "pod pending: insufficient cpu (4 CPU requested)"}}}})
+	applyExecutionDisplay(&run, &model.RunScheduling{Execution: &model.ExecutionObservation{Pods: []model.SchedulingReason{{Phase: "Pending", Reason: "Unschedulable", Message: "pod pending: insufficient cpu (4 CPU requested)"}}}})
 	if run.DisplayReason != "pod pending: insufficient cpu (4 CPU requested)" {
 		t.Fatal(run.DisplayReason)
 	}

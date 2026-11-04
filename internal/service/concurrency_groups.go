@@ -27,10 +27,6 @@ func (scheduler *Scheduler) ConcurrencyGroups(ctx context.Context) ([]model.Admi
 	return scheduler.admissionState(definitions).Groups, nil
 }
 
-func concurrencyGroupReason(admission *model.AdmissionObservation) string {
-	return concurrencyGroupMessage(admission, true)
-}
-
 func concurrencyGroupMessage(admission *model.AdmissionObservation, abbreviated bool) string {
 	displayID := func(id string) string {
 		if abbreviated {

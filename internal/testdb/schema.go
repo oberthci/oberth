@@ -154,6 +154,7 @@ DELETE FROM schema_migrations WHERE version>=50;
 const PostIntegerMigrationsDowngrade = `
 DROP TRIGGER IF EXISTS run_issue_trailers_immutable;
 ALTER TABLE runs DROP COLUMN issue_trailers;
+ALTER TABLE runs DROP COLUMN failure_cause;
 DROP TABLE IF EXISTS deferred_branch_receives;
 DROP TABLE IF EXISTS queue_cap;
 DROP TABLE IF EXISTS concurrency_group_declarations;

@@ -76,7 +76,7 @@ func TestRunIssueTrailersTimestampMigrationPreservesRowsAndReceipts(t *testing.T
 		t.Fatal(err)
 	}
 	var count int
-	if err := s.db.QueryRow(`SELECT count(*) FROM pragma_table_info('runs') WHERE name='issue_trailers' AND dflt_value="''"`).Scan(&count); err != nil || count != 1 {
+	if err := s.db.QueryRow(`SELECT count(*) FROM pragma_table_info('runs') WHERE name IN ('issue_trailers','failure_cause') AND dflt_value="''"`).Scan(&count); err != nil || count != 2 {
 		t.Fatalf("column: %d %v", count, err)
 	}
 }
@@ -95,7 +95,29 @@ func TestFailureSummaryPreservesAutomaticRetryLineage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var rawReason, cause string
+	if err := s.db.QueryRow(`SELECT reason,failure_cause FROM runs WHERE id=?`, run.ID).Scan(&rawReason, &cause); err != nil {
+		t.Fatal(err)
+	}
+	if rawReason != reason || cause != result.FailureCause {
+		t.Fatalf("failure cause corrupted durable reason: %q, %q", rawReason, cause)
+	}
 	if result.Reason != reason || result.AutoRetryOf != origin || result.FailureCause != "infrastructure error: cpu limit 6 over ceiling 4" || result.Error != "full raw failure" {
 		t.Fatalf("summary changed lineage/evidence: %+v", result)
+	}
+}
+
+func TestFailureCauseDoesNotInterpretReasonText(t *testing.T) {
+	now := time.Now()
+	s := testStore(t, &now)
+	repo := createRepo(t, s)
+	run := cancelTestRun(t, s, repo, "feature/reason-text", "d")
+	reason := "operator context\noberth failure: legitimate reason text"
+	if _, err := s.db.Exec(`UPDATE runs SET reason=? WHERE id=?`, reason, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.FinishRun(t.Context(), run.ID, model.RunResult{Status: model.RunFailed, Error: "controller error", FailureCause: "infrastructure error: controller error"})
+	if err != nil || got.Reason != reason || got.FailureCause != "infrastructure error: controller error" {
+		t.Fatalf("reason interpreted: %+v %v", got, err)
 	}
 }

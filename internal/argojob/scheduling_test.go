@@ -176,10 +176,10 @@ func TestSchedulingObservationCapacityReasons(t *testing.T) {
 	for _, tc := range []struct {
 		message, want string
 	}{
-		{"0/3 nodes are available: 3 Insufficient ephemeral-storage.", "Pending: Insufficient ephemeral-storage; pod requests 3Gi ephemeral storage."},
-		{"0/1 nodes are available: 1 Too many pods.", "Pending: Too many pods; waiting for a pod slot."},
-		{"Insufficient ephemeral-storage-policy", "Pod has not been scheduled."},
-		{"Too many pods-required", "Pod has not been scheduled."},
+		{"0/3 nodes are available: 3 Insufficient ephemeral-storage.", "pod pending: insufficient ephemeral-storage; pod requests 3Gi ephemeral storage."},
+		{"0/1 nodes are available: 1 Too many pods.", "pod pending: too many pods; waiting for a pod slot"},
+		{"Insufficient ephemeral-storage-policy", "pod pending: not scheduled"},
+		{"Too many pods-required", "pod pending: not scheduled"},
 	} {
 		t.Run(tc.message, func(t *testing.T) {
 			const private = "SENSITIVE-command-env-token"
@@ -195,7 +195,7 @@ func TestSchedulingObservationCapacityReasons(t *testing.T) {
 			if len(observation.Pods) != 1 || observation.Pods[0].Message != tc.want {
 				t.Fatalf("pod capacity reason = %+v, want %q", observation.Pods, tc.want)
 			}
-			if strings.HasPrefix(tc.want, "Pending:") && observation.Message != tc.want {
+			if (strings.HasPrefix(tc.want, "pod pending: insufficient") || strings.HasPrefix(tc.want, "pod pending: too many")) && observation.Message != tc.want {
 				t.Fatalf("run reason = %q, want %q", observation.Message, tc.want)
 			}
 			body, err := json.Marshal(observation)
@@ -226,5 +226,33 @@ func TestUnschedulablePodReportsItsRequest(t *testing.T) {
 	got := podSchedulingReason(pod)
 	if got.Reason != "Unschedulable" || !strings.Contains(got.Message, "8Gi requested") {
 		t.Fatalf("reason = %+v", got)
+	}
+}
+
+func TestAllPendingPodMessagesUseUniformPrefix(t *testing.T) {
+	for _, kind := range []string{"unscheduled", "unknown capacity", "cpu", "memory", "ephemeral", "pod slots", "volume", "container", "generic", "deadline"} {
+		t.Run(kind, func(t *testing.T) {
+			pod := corev1.Pod{Status: corev1.PodStatus{Phase: corev1.PodPending}}
+			condition := corev1.PodCondition{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable"}
+			switch kind {
+			case "unscheduled":
+				condition.Reason = "Other"
+				pod.Status.Conditions = []corev1.PodCondition{condition}
+			case "unknown capacity":
+				condition.Message = "SENSITIVE unknown scheduler detail"
+				pod.Status.Conditions = []corev1.PodCondition{condition}
+			case "cpu", "memory", "ephemeral", "pod slots", "volume":
+				condition.Message = map[string]string{"cpu": "Insufficient cpu", "memory": "Insufficient memory", "ephemeral": "Insufficient ephemeral-storage", "pod slots": "Too many pods", "volume": "unbound immediate PersistentVolumeClaims"}[kind] + " SENSITIVE suffix"
+				pod.Status.Conditions = []corev1.PodCondition{condition}
+			case "container":
+				pod.Status.ContainerStatuses = []corev1.ContainerStatus{{State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ImagePullBackOff", Message: "SENSITIVE container message"}}}}
+			case "deadline":
+				pod.Status.Reason = "DeadlineExceeded"
+			}
+			got := podSchedulingReason(pod)
+			if !strings.HasPrefix(got.Message, "pod pending: ") || strings.Contains(got.Message, "SENSITIVE") {
+				t.Fatalf("unsafe/inconsistent Pending reason: %+v", got)
+			}
+		})
 	}
 }
