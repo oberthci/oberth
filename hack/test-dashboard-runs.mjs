@@ -396,3 +396,6 @@ for (const status of ['running','passed','failed','cancelled','superseded','infr
 }
 assert.match(run(`runRow({ID:'escaped',RepoID:1,Ref:'<script>',SHA:'sha"<unsafe>',Actor:'actor"<unsafe>',display_status:'failed',display_reason:'reason"<unsafe>'})`),/reason&quot;&lt;unsafe&gt;/);
 console.log('Run-list contract passed: seven states, today/older start lines, live timer and escaping');
+
+assert.equal(run(`runMessageCell({display_status:'passed',display_reason:'closes #1415, #1416 · schedule nightly'})`),'closes #1415, #1416 · schedule nightly');
+assert.equal(run(`runMessageCell({display_status:'passed',issue_trailers:[{issue:1,close:true}]})`),'','the client never fabricates a trailer message');

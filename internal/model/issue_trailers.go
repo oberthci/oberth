@@ -8,9 +8,9 @@ var ErrIssueTrailerPermanent = errors.New("issue trailer input rejected")
 
 // CommitIssueTrailer is a validated reference from a Git trailer block.
 type CommitIssueTrailer struct {
-	IssueID int64
-	SHA     string
-	Close   bool
+	IssueID int64  `json:"issue"`
+	SHA     string `json:"sha"`
+	Close   bool   `json:"close"`
 }
 
 // IssueTrailerWork binds processing to one delivered green publication.

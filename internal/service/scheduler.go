@@ -873,6 +873,9 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("checkout run workspace: %w", err))
 	}
 	scheduler.timingMilestone(ctx, run.ID, "checkout-ready")
+	if err := scheduler.recordRunIssueTrailers(ctx, run, upstream.QualifiedRepo(repository.Name), require); err != nil {
+		return err
+	}
 	requirement, stopped, err := scheduler.awaitTrustedRequirement(gitcache.WithBurstPolicy(ctx), repository, run.ID, checkoutSHA, require)
 	if stopped {
 		return nil

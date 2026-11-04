@@ -1764,8 +1764,8 @@ func joinRunMessage(first, second string) string {
 }
 
 func runDisplayReason(run model.Run) string {
-	if run.Status == model.RunPassed && run.Trigger == "schedule" && run.ScheduleEntry != "" {
-		return "schedule " + run.ScheduleEntry
+	if run.Status == model.RunPassed {
+		return passedRunDisplayReason(run)
 	}
 	if run.Status == model.RunFailed {
 		return failedRunDisplayReason(run)

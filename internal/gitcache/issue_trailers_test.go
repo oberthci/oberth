@@ -150,3 +150,51 @@ func TestGreenIssueTrailersMissingCacheIsRetryable(t *testing.T) {
 		t.Fatalf("missing cache: changes=%d err=%v", len(changes), err)
 	}
 }
+
+func TestCommitIssueTrailersUsesGitBlockWithoutClosurePolicy(t *testing.T) {
+	r := newTestRepository(t)
+	cases := []struct {
+		message string
+		want    []model.CommitIssueTrailer
+	}{
+		{"subject fixes #1", nil},
+		{"subject\n\nfixes #2 in prose", nil},
+		{"subject\n\nFixes: #3\n\nordinary prose after the apparent trailer", nil},
+		{"subject\n\nRefs: #4\nFixes: #4, #5\nCloses: #6", []model.CommitIssueTrailer{{IssueID: 4, Close: true}, {IssueID: 5, Close: true}, {IssueID: 6, Close: true}}},
+	}
+	c := newTestCache(t, r.upstream)
+	for _, tc := range cases {
+		sha := r.commit(t, tc.message, tc.message+"\n")
+		if _, err := c.Ensure(t.Context(), "example"); err != nil {
+			t.Fatal(err)
+		}
+		got, err := c.CommitIssueTrailers(t.Context(), "example", sha)
+		for i := range tc.want {
+			tc.want[i].SHA = sha
+		}
+		if err != nil || !reflect.DeepEqual(got, tc.want) {
+			t.Fatalf("message %q: %#v %v", tc.message, got, err)
+		}
+	}
+	if _, err := c.CommitIssueTrailers(t.Context(), "example", "--all"); err == nil {
+		t.Fatal("option accepted as SHA")
+	}
+}
+
+func TestCommitIssueTrailersRejectsOversizedBlock(t *testing.T) {
+	r := newTestRepository(t)
+	path := filepath.Join(t.TempDir(), "message")
+	if err := os.WriteFile(path, []byte("oversized\n\nRefs: "+strings.Repeat("#1 ", 22000)+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, r.work, "commit", "--allow-empty", "-F", path)
+	runGit(t, r.work, "push", "origin", "HEAD:main")
+	sha := runGit(t, r.work, "rev-parse", "HEAD")
+	c := newTestCache(t, r.upstream)
+	if _, err := c.Ensure(t.Context(), "example"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := c.CommitIssueTrailers(t.Context(), "example", sha); !errors.Is(err, model.ErrIssueTrailerPermanent) || len(got) != 0 {
+		t.Fatalf("oversized result: %d %v", len(got), err)
+	}
+}

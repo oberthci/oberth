@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -19,7 +20,7 @@ const runColumns = `
 queue_sequence, COALESCE(admission_sequence, queue_sequence), id, repo_id, ref_kind, ref, sha, actor, release, credentialed, trigger,
 phase, job_name, tested_sha, base_sha, failed_burn, failed_step, error,
 status, reason, superseded_by, queued_at, started_at, finished_at, created_at, updated_at,
-concurrency_group, concurrency_limit, schedule_entry, ` + basePrioritySQL + `, ` + priorityReasonSQL + `,
+concurrency_group, concurrency_limit, schedule_entry, issue_trailers, ` + basePrioritySQL + `, ` + priorityReasonSQL + `,
 COALESCE(` + overridePrioritySQL + `,''), COALESCE((SELECT reason FROM run_priority_overrides WHERE run_id=id),''),
 COALESCE(` + requestedPrioritySQL + `,''), COALESCE(` + requestedPriorityReasonSQL + `,''),
 COALESCE((SELECT actor FROM run_priority_overrides WHERE run_id=id),(SELECT actor FROM run_priority_requests WHERE run_id=id),''), COALESCE((SELECT refusal FROM run_priority_requests WHERE run_id=id),''), NOT (` + supersessionEligibleSQL + `)`
@@ -1355,6 +1356,7 @@ FROM step_results WHERE run_id = ? ORDER BY ordinal, burn, step`, runID)
 
 func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 	var value model.Run
+	var issueTrailers string
 	var release, credentialed int64
 	var queued, created, updated int64
 	var started, finished sql.NullInt64
@@ -1363,10 +1365,19 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 		&value.SHA, &value.Actor, &release, &credentialed, &value.Trigger, &value.Phase, &value.WorkflowName,
 		&value.TestedSHA, &value.BaseSHA, &value.FailedStage, &value.FailedStep, &value.Error,
 		&value.Status, &value.Reason, &value.SupersededBy, &queued, &started, &finished,
-		&created, &updated, &value.ConcurrencyGroup, &value.ConcurrencyLimit, &value.ScheduleEntry, &value.Priority, &value.PriorityReason, &value.PriorityOverride, &value.PriorityOverrideReason, &value.PriorityAccepted, &value.PriorityAcceptedReason, &value.PriorityRequestedBy, &value.PriorityRefusal, &value.PriorityProtected,
+		&created, &updated, &value.ConcurrencyGroup, &value.ConcurrencyLimit, &value.ScheduleEntry, &issueTrailers, &value.Priority, &value.PriorityReason, &value.PriorityOverride, &value.PriorityOverrideReason, &value.PriorityAccepted, &value.PriorityAcceptedReason, &value.PriorityRequestedBy, &value.PriorityRefusal, &value.PriorityProtected,
 	}
 	if err := scanRowNotFound(row, "Run", append(dest, extra...)...); err != nil {
 		return model.Run{}, err
+	}
+	if issueTrailers != "" {
+		value.IssueTrailersRecorded = true
+		if len(issueTrailers) > 64<<10 {
+			return model.Run{}, fmt.Errorf("%w: run issue trailer metadata exceeds limit", ErrInvalidState)
+		}
+		if err := json.Unmarshal([]byte(issueTrailers), &value.IssueTrailers); err != nil {
+			return model.Run{}, fmt.Errorf("decode run issue trailers: %w", err)
+		}
 	}
 	// Decode only terminal server metadata; leave retry/operator provenance intact.
 	if value.Status == model.RunFailed {

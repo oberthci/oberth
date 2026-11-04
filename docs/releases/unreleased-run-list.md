@@ -11,3 +11,10 @@ most one host-pressure or visible-blocker qualifier. Failures show a step or
 Oberth-classed cause. Full errors, priority provenance, resource coverage advice
 and detailed scheduling observations remain in run details. Statuses and run
 ordering are unchanged. No migration is needed for this presentation change.
+
+Passed rows also show `closes #N` / `refs #N` from the pinned commit's Git
+trailer block, optionally followed by a schedule name. Prose is never matched.
+The timestamped migration `20261104160000-run-issue-trailers` adds immutable
+per-run display metadata; old runs remain unknown. Displaying a trailer never
+closes an issue: closure still requires its existing repository policy and
+green default-branch publication.

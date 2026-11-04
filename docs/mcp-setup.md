@@ -588,7 +588,10 @@ words (`next in line`, `waiting for 9.9 CPU, 16 GiB`,
 `Scheduling.state` and `Scheduling.message` keep the raw observation.
 Admission records `started_at`, so an admitted run, including a trusted
 preflight before Workflow submission, displays `running`; an uncertain
-Workflow create or an exceeded deadline is its reason, not a status. Terminal runs display
+Workflow create or an exceeded deadline is its reason, not a status. Passed rows show `closes #N` or `refs #N` only from Git-parsed commit trailers,
+optionally followed by `schedule <entry>`. This display is independent of the
+repository policy authorizing closure; it cannot close issues by itself.
+Terminal runs display
 `passed` (including published releases), `failed` (a deadline or memory
 kill is the reason), `infra-retried`, `superseded` with the superseding SHA,
 or `cancelled` with the cancelling actor or restart action.

@@ -84,6 +84,38 @@ func (c *Cache) GreenIssueTrailers(ctx context.Context, input, previous, head st
 	return true, trailers, err
 }
 
+// CommitIssueTrailers reads only the pinned commit's Git-isolated trailer block.
+// Displaying references is independent of the policy that authorizes issue closure.
+func (c *Cache) CommitIssueTrailers(ctx context.Context, input, sha string) ([]model.CommitIssueTrailer, error) {
+	if err := ValidateSHA(sha); err != nil {
+		return nil, err
+	}
+	_, path, err := c.path(input)
+	if err != nil {
+		return nil, err
+	}
+	lock := c.repoLock(path)
+	if err := lock.RLockContext(ctx); err != nil {
+		return nil, err
+	}
+	defer lock.RUnlock()
+	if !c.isBare(ctx, path) {
+		return nil, errors.New("repository is not cached")
+	}
+	output, err := c.issueTrailerOutput(ctx, path, 64<<10, "log", "-1", "--format=%H%x00%(trailers:only,unfold)%x00", sha, "--")
+	if err != nil {
+		return nil, err
+	}
+	trailers, err := parseIssueTrailers(output)
+	if err != nil {
+		return nil, err
+	}
+	if len(trailers) > 256 {
+		return nil, fmt.Errorf("%w: too many commit issue references", model.ErrIssueTrailerPermanent)
+	}
+	return trailers, nil
+}
+
 func (c *Cache) issueTrailerOutput(ctx context.Context, path string, limit int, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

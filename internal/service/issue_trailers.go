@@ -81,3 +81,34 @@ func (scheduler *Scheduler) recoverIssueTrailers(ctx context.Context, require mu
 	}
 	return failures
 }
+
+// Display metadata is best effort and cannot change the run or issue verdict.
+func (scheduler *Scheduler) recordRunIssueTrailers(ctx context.Context, run model.Run, input string, require mutationRequirement) error {
+	if run.IssueTrailersRecorded {
+		return nil
+	}
+	git, ok := scheduler.git.(interface {
+		CommitIssueTrailers(context.Context, string, string) ([]model.CommitIssueTrailer, error)
+	})
+	if !ok {
+		return nil
+	}
+	database, ok := scheduler.store.(interface {
+		RecordRunIssueTrailers(context.Context, string, string, []model.CommitIssueTrailer) error
+	})
+	if !ok {
+		return nil
+	}
+	trailers, err := git.CommitIssueTrailers(ctx, input, run.SHA)
+	if err != nil {
+		log.Printf("run %s issue trailer display unavailable: %v", run.ID, err)
+		return nil
+	}
+	if err := require(ctx); err != nil {
+		return err
+	}
+	if err := database.RecordRunIssueTrailers(ctx, run.ID, run.SHA, trailers); err != nil {
+		log.Printf("run %s issue trailer display not recorded: %v", run.ID, err)
+	}
+	return nil
+}
