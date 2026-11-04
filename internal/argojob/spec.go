@@ -154,7 +154,8 @@ type Config struct {
 	// GoProxyURL is the HTTPS URL of the read-only Go module proxy the server
 	// runs for configured private modules (#662). It is injected into every
 	// pipeline container as the first entry in GOPROXY, followed by
-	// proxy.golang.org and direct. Empty disables the injection entirely.
+	// proxy.golang.org and direct unless the Workflow declares mirror-only.
+	// Empty disables injection and refuses a mirror-only declaration.
 	//
 	// The URL must be https:// — the same TLS requirement the Vault address
 	// enforces, for the same reason: module source travels over the wire.
@@ -692,6 +693,11 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 		return nil, err
 	}
 	workflow := resolved.Workflow()
+	if mirrorOnly, err := argoworkflow.DeclaredGoProxyMirrorOnly(workflow); err != nil {
+		return nil, err
+	} else if mirrorOnly && strings.TrimSpace(config.GoProxyURL) == "" {
+		return nil, fmt.Errorf("argojob: %s: mirror-only requires a configured Go module proxy", argoworkflow.GoProxyAnnotation)
+	}
 	delete(workflow.Annotations, capabilityAnnotation)
 	resourceSteps, extended := argoworkflow.CapabilityUsage(workflow)
 	if !resourceSteps && !extended {
@@ -2171,8 +2177,12 @@ func injectRunEnvironment(workflow *wfv1.Workflow, config Config, request Reques
 	// modules on the mirror. GONOSUMDB excludes the entire private namespace
 	// (including its root) while retaining public checksum verification.
 	if strings.TrimSpace(config.GoProxyURL) != "" {
+		proxy := config.GoProxyURL + ",https://proxy.golang.org|direct"
+		if workflow.Annotations[argoworkflow.GoProxyAnnotation] == argoworkflow.GoProxyMirrorOnly {
+			proxy = config.GoProxyURL
+		}
 		environment = append(environment,
-			corev1.EnvVar{Name: "GOPROXY", Value: config.GoProxyURL + ",https://proxy.golang.org|direct"},
+			corev1.EnvVar{Name: "GOPROXY", Value: proxy},
 			corev1.EnvVar{Name: "GONOPROXY", Value: "none"},
 			corev1.EnvVar{Name: "GONOSUMDB", Value: config.GoProxyModulePrefix},
 		)

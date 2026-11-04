@@ -19,10 +19,13 @@ import (
 	"time"
 
 	"golang.org/x/mod/sumdb/dirhash"
+
+	"github.com/oberthci/oberth/internal/gitcache"
 )
 
 const artifactModule = "go.example.test/issue764-fixture"
 const artifactOID = "0123456789abcdef0123456789abcdef01234567"
+const artifactOriginURL = "ssh://git@forge.example.test/owner/repository.git"
 const artifactMod = "module " + artifactModule + "\n\ngo 1.22\n"
 
 type artifactGit struct {
@@ -316,4 +319,13 @@ func TestImmutablePublicationCannotReplaceCommittedBytes(t *testing.T) {
 	if err != nil || string(data) != "first bytes" {
 		t.Fatalf("committed content was replaced: %q %v", data, err)
 	}
+}
+
+func (g *artifactGit) ModuleVersionSnapshot(ctx context.Context, repo, _, subdir, version string, _ bool) (gitcache.ModuleSnapshot, error) {
+	tag := version
+	if subdir != "" {
+		tag = subdir + "/" + version
+	}
+	source, stamp, err := g.ModuleTagSnapshot(ctx, repo, tag)
+	return gitcache.ModuleSnapshot{Commit: source, Time: stamp, Ref: "refs/tags/" + tag, URL: artifactOriginURL}, err
 }

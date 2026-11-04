@@ -4,18 +4,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/oberthci/oberth/internal/gitcache"
 )
-
-type modulePseudoVersionSnapshot interface {
-	ModulePseudoVersionSnapshot(context.Context, string, string, string, bool) (string, time.Time, error)
-}
-type pseudoSnapshot struct {
-	source    string
-	timestamp time.Time
-}
 
 // WithPseudoVersionsOnNonDefaultBranches expands the default-branch-only
 // policy to other public branches and tags already allowed by the module proxy.
@@ -25,23 +16,21 @@ func (h *Handler) WithPseudoVersionsOnNonDefaultBranches(allow bool) *Handler {
 	return h
 }
 
-func (h *Handler) pseudoSnapshot(ctx context.Context, repository, modulePath, version string) (pseudoSnapshot, error) {
-	backend, ok := h.cache.(modulePseudoVersionSnapshot)
+func (h *Handler) pseudoSnapshot(ctx context.Context, repository, modulePath, version string) (gitcache.ModuleSnapshot, error) {
+	location, _ := h.moduleLocation(modulePath)
+	backend, ok := h.cache.(moduleVersionSnapshot)
 	if !ok {
-		return pseudoSnapshot{}, backendBuildError()
+		return gitcache.ModuleSnapshot{}, backendBuildError()
 	}
-	return retryModuleBuild(ctx, h.backendBudget, func(attempt context.Context) (pseudoSnapshot, error) {
-		source, timestamp, err := backend.ModulePseudoVersionSnapshot(attempt, repository, modulePath, version, h.pseudoNonDefault)
+	return retryModuleBuild(ctx, h.backendBudget, func(attempt context.Context) (gitcache.ModuleSnapshot, error) {
+		snapshot, err := backend.ModuleVersionSnapshot(attempt, repository, modulePath, location.subdir, version, h.pseudoNonDefault)
 		if errors.Is(err, gitcache.ErrModulePseudoVersionUnavailable) {
-			return pseudoSnapshot{}, pseudoUnavailableError()
+			return gitcache.ModuleSnapshot{}, pseudoUnavailableError()
 		}
-		if err != nil {
-			return pseudoSnapshot{}, backendBuildError()
+		if err != nil || gitcache.ValidateSHA(snapshot.Commit) != nil {
+			return gitcache.ModuleSnapshot{}, backendBuildError()
 		}
-		if gitcache.ValidateSHA(source) != nil {
-			return pseudoSnapshot{}, backendBuildError()
-		}
-		return pseudoSnapshot{source, timestamp}, nil
+		return snapshot, nil
 	})
 }
 func pseudoUnavailableError() *proxyBuildError {

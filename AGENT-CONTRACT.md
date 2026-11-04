@@ -2481,7 +2481,7 @@ upstream with a different organization fail startup.
 
 **Private routing (#764):** classify the entire configured namespace
 (including its root) before parsing any request shape. Unknown private modules,
-unsupported nested modules, missing tags, malformed requests and unsupported
+missing module directories, missing tags, malformed requests and unsupported
 versions return 403. Backend unavailability returns 503 with `Retry-After: 1`;
 artifact-integrity and archive/zip failures return 500.
 Pseudo-version commit/time/base/reachability denials return terminal 403 with
@@ -2504,6 +2504,38 @@ pipeline mounts and network authority are unchanged. Corrupt entries fail
 closed without rebuilding from a possibly moved tag. `list` and `@latest`
 remain live queries that filter revoked versions; selected `@latest` info uses
 the same pinned metadata and rechecks denial before serving.
+
+New `.info` artifacts include Go `Origin` data: `VCS=git`, `URL` is the cached
+repository's configured upstream URL, and `Hash` is the full peeled commit SHA
+used for the `.mod` and lazy `.zip`. Tagged versions include
+`Ref=refs/tags/<version>`; pseudo-versions omit `Ref`. Annotated tags pin their
+commit rather than their tag object, preserving the published timestamp.
+`go mod download -json` and `go list -m -json` carry this Origin to verifiers.
+Published metadata, Origin and ETags remain immutable across tag/remote changes
+and restarts. Older artifacts without Origin remain readable and unchanged;
+there is no automatic backfill. Strict verifiers require metadata first
+published with Origin, including in Go's own cache. Existing h1 checksums,
+SHA-256 integrity checks and no-clobber publication remain in force.
+
+**Nested modules:** `<namespace>/<mapped-repository>/<subdir>` resolves inside
+the same mapped repository. The selected directory must have a `go.mod` whose
+module directive exactly matches the requested path; the repository need not
+have a root `go.mod`. Nested tags use `<subdir>/vX.Y.Z`, and discovery strips
+only that module's exact tag prefix. Origin includes `Subdir=<subdir>` and
+tagged `Ref=refs/tags/<subdir>/vX.Y.Z`; pseudo-versions still omit Ref. Go `/vN`
+module paths use the unversioned directory as the tag prefix/Origin.Subdir and
+allow a matching `go.mod` there or in its `vN` child; ambiguous layouts refuse.
+The lazy zip uses only the selected module directory, retaining canonical
+exclusions and inheriting the repository-root LICENSE when no module-local
+LICENSE exists. Cache/revocation keys already include the full module path,
+so siblings never share artifacts. A module-path mismatch is terminal 403
+(`module_path_mismatch`), without retry or public fallback.
+
+Nested pseudo-versions retain commit/time/default-branch checks and live warm
+revalidation. Base tags and opt-in tag-only reachability use that module's own
+`<subdir>/` namespace; root and sibling tags cannot authorize it. Unknown
+commits remain terminal 403, never fetched or negative-cached. Nested discovery
+without matching tags returns an empty list; `@latest` then refuses.
 
 At most two cold version fills execute per handler, with duplicate requests
 sharing one fill. Each fill gets two read-only attempts of at most 15 seconds
@@ -2559,6 +2591,17 @@ never include pseudo-versions, even if a Git tag is named like one.
   TLS/transport failures. Backend/policy read failures remain retryable 503.
 - Pipe after public proxy: fall through on any error, preserving public direct
   fallback for public modules.
+
+Repository YAML can opt a selected build/release Workflow into mirror-only
+resolution with `metadata.annotations["oberth.ci/goproxy"]: mirror-only`.
+Every pipeline container, including inline leaves on CI and release tiers,
+then receives `GOPROXY=<mirror>` exactly, with no public or direct fallback.
+Omission preserves the default chain above. Any other value (including empty)
+is refused with `oberth.ci/goproxy must be "mirror-only" when present`; server
+admission also refuses mirror-only without a configured mirror. This is a
+Workflow-wide declaration sourced only from repository YAML, with no hardcoded
+repository exceptions. The mirror serves mapped private modules only; public
+cache misses fail in mirror-only mode. Public sumdb policy is unchanged.
 
 **Environment injection:** `GOPROXY`, `GONOPROXY=none` and
 `GONOSUMDB=<configured module prefix>` into every pipeline container (CI and release),

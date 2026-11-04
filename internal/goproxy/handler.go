@@ -26,6 +26,8 @@ import (
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
 	modzip "golang.org/x/mod/zip"
+
+	"github.com/oberthci/oberth/internal/gitcache"
 )
 
 // GitCache is the minimal interface the handler needs from the git cache.
@@ -36,6 +38,11 @@ type GitCache interface {
 	ShowFile(ctx context.Context, input, ref, filePath string) ([]byte, error)
 	// ArchiveTar writes a tar archive of the tree at the given ref.
 	ArchiveTar(ctx context.Context, input, ref string, w io.Writer) error
+}
+
+// moduleRootLicense reads bounded Git blob bytes, including symlink link text.
+type moduleRootLicense interface {
+	ModuleRootLicense(context.Context, string, string) ([]byte, bool, error)
 }
 
 // Handler serves the GOPROXY protocol (/@v/list, .info, .mod, .zip) read-only.
@@ -143,13 +150,12 @@ func (h *Handler) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		privateUnavailable(w)
 		return
 	}
-	namespace, _ := module.UnescapePath(h.modulePrefix)
-	suffix := strings.TrimPrefix(modulePath, namespace+"/")
-	repoInput, ok := h.repoForModule[suffix]
-	if !ok || suffix == "" || strings.Contains(suffix, "/") {
+	location, ok := h.moduleLocation(modulePath)
+	if !ok {
 		privateUnavailable(w)
 		return
 	}
+	repoInput := location.repository
 
 	var version, extension string
 	if versionRequest != "list" && versionRequest != "@latest" {
@@ -237,9 +243,15 @@ func (h *Handler) versions(ctx context.Context, input, modulePath string) ([]str
 		return nil, err
 	}
 	var versions []string
+	location, _ := h.moduleLocation(modulePath)
+	prefix := ""
+	if location.subdir != "" {
+		prefix = location.subdir + "/"
+	}
 	for _, tag := range tags {
-		if supportedVersion(modulePath, tag) && !module.IsPseudoVersion(tag) {
-			versions = append(versions, tag)
+		version, ok := strings.CutPrefix(tag, prefix)
+		if ok && supportedVersion(modulePath, version) && !module.IsPseudoVersion(version) {
+			versions = append(versions, version)
 		}
 	}
 	sort.Slice(versions, func(i, j int) bool { return semver.Compare(versions[i], versions[j]) < 0 })
@@ -247,6 +259,15 @@ func (h *Handler) versions(ctx context.Context, input, modulePath string) ([]str
 }
 
 func (h *Handler) buildZip(ctx context.Context, input, modulePath, version, ref string) (*moduleZip, error) {
+	location, _ := h.moduleLocation(modulePath)
+	subdir := ""
+	if location.subdir != "" || location.major != "" {
+		var err error
+		subdir, _, err = h.moduleDirectory(ctx, input, modulePath, ref)
+		if err != nil {
+			return nil, err
+		}
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	reader, writer := io.Pipe()
 	done := make(chan struct{})
@@ -273,8 +294,14 @@ func (h *Handler) buildZip(ctx context.Context, input, modulePath, version, ref 
 		return nil, &proxyBuildError{class: "internal_error", status: http.StatusInternalServerError}
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, &proxyBuildError{class: "internal_error", status: http.StatusInternalServerError}
+	}
+	defer func() { _ = root.Close() }()
 
 	tr := tar.NewReader(bounded)
+	haveModuleLicense := false
 	for {
 		if ctx.Err() != nil {
 			return nil, backendBuildError()
@@ -298,6 +325,11 @@ func (h *Handler) buildZip(ctx context.Context, input, modulePath, version, ref 
 			}
 			return nil, &proxyBuildError{class: "archive_error", status: http.StatusInternalServerError}
 		}
+		if subdir != "" && path.Clean(header.Name) == subdir+"/LICENSE" && header.Typeflag != tar.TypeDir {
+			// Like Go, a local LICENSE entry suppresses inheritance even if
+			// the entry itself is excluded from the zip (such as a symlink).
+			haveModuleLicense = true
+		}
 		// Only extract regular files; symlinks and directories are excluded
 		// from module zips by spec and CreateFromDir handles this, but we
 		// never write non-regular entries to the temp dir in the first place.
@@ -312,14 +344,24 @@ func (h *Handler) buildZip(ctx context.Context, input, modulePath, version, ref 
 		// Exclude vendor/ trees: Go module zips never include vendor/
 		// content. CreateFromDir does not handle this (it is a VCS-layer
 		// concern), so we filter during extraction.
-		if isVendorPath(name) {
+		relative := name
+		if subdir != "" {
+			var inside bool
+			relative, inside = strings.CutPrefix(name, subdir+"/")
+			if !inside {
+				// Inherited LICENSE is read separately from the pinned Git
+				// blob, so archive attributes and entry types cannot alter it.
+				continue
+			}
+		}
+		if isVendorPath(relative) {
 			continue
 		}
-		target := filepath.Join(dir, filepath.FromSlash(name))
-		if mkErr := os.MkdirAll(filepath.Dir(target), 0o750); mkErr != nil {
+		target := filepath.FromSlash(name)
+		if mkErr := root.MkdirAll(filepath.Dir(target), 0o750); mkErr != nil {
 			return nil, &proxyBuildError{class: "internal_error", status: http.StatusInternalServerError}
 		}
-		f, createErr := os.Create(target) // #nosec G304 -- path from git archive (trusted), traversal checked above
+		f, createErr := root.Create(target)
 		if createErr != nil {
 			return nil, &proxyBuildError{class: "internal_error", status: http.StatusInternalServerError}
 		}
@@ -333,6 +375,25 @@ func (h *Handler) buildZip(ctx context.Context, input, modulePath, version, ref 
 		}
 		if err := f.Close(); err != nil {
 			return nil, &proxyBuildError{class: "internal_error", status: http.StatusInternalServerError}
+		}
+	}
+	moduleDir := filepath.Join(dir, filepath.FromSlash(subdir))
+	if subdir != "" && !haveModuleLicense {
+		backend, ok := h.cache.(moduleRootLicense)
+		if !ok {
+			return nil, backendBuildError()
+		}
+		data, present, err := backend.ModuleRootLicense(ctx, input, ref)
+		if errors.Is(err, gitcache.ErrModuleLicenseTooLarge) {
+			return nil, &proxyBuildError{class: "license_too_large", status: http.StatusInternalServerError}
+		}
+		if err != nil {
+			return nil, moduleReadBuildError(err)
+		}
+		if present {
+			if err := root.WriteFile(filepath.Join(filepath.FromSlash(subdir), "LICENSE"), data, 0600); err != nil {
+				return nil, &proxyBuildError{class: "internal_error", status: http.StatusInternalServerError}
+			}
 		}
 	}
 
@@ -353,7 +414,7 @@ func (h *Handler) buildZip(ctx context.Context, input, modulePath, version, ref 
 	}()
 	mv := module.Version{Path: modulePath, Version: version}
 	output := &proxyLimitWriter{writer: proxyContextWriter{ctx, file}, remaining: 500 << 20}
-	if err := modzip.CreateFromDir(output, mv, dir); err != nil {
+	if err := modzip.CreateFromDir(output, mv, moduleDir); err != nil {
 		if ctx.Err() != nil {
 			return nil, &proxyBuildError{class: "private_backend_unavailable", status: http.StatusServiceUnavailable}
 		}

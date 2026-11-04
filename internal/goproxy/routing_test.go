@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/gitcache"
 )
 
 // Faults come from the real handler's cache boundary, not a replacement HTTP
@@ -56,13 +58,17 @@ func routingFixture(t *testing.T, fail string) *Handler {
 }
 
 func TestPrivateRoutingAllShapes(t *testing.T) {
-	for _, module := range []string{"go.example.test", "go.example.test/unknown", "go.example.test/issue764-fixture/nested"} {
+	for _, module := range []string{"go.example.test", "go.example.test/unknown"} {
 		for _, request := range []string{"@latest", "@v/list", "@v/v1.0.0.info", "@v/v1.0.0.mod", "@v/v1.0.0.zip", "@v/unsupported", "invalid"} {
 			t.Run(module+"/"+request, func(t *testing.T) {
 				assertRoutingStatus(t, routingFixture(t, ""), "/"+module+"/"+request, http.StatusForbidden)
 			})
 		}
 	}
+	for _, request := range []string{"@latest", "@v/v1.0.0.info", "@v/v1.0.0.mod", "@v/v1.0.0.zip"} {
+		assertRoutingStatus(t, routingFixture(t, ""), "/go.example.test/issue764-fixture/nested/"+request, http.StatusForbidden)
+	}
+	assertRoutingStatus(t, routingFixture(t, ""), "/go.example.test/issue764-fixture/nested/@v/list", http.StatusOK)
 	for _, request := range []string{
 		"@v/v1.0.1.info", "@v/v1.0.1.mod", "@v/v1.0.1.zip", "@v/v1.0.info",
 		"@v/main.info", "@v/v2.0.0.info", "@v/v1.0.0+metadata.info",
@@ -135,4 +141,13 @@ func assertRoutingStatus(t *testing.T, handler http.Handler, path string, want i
 	if rec.Code != want {
 		t.Fatalf("%s status = %d, want %d: %s", path, rec.Code, want, rec.Body.String())
 	}
+}
+
+func (c routingCache) ModuleVersionSnapshot(ctx context.Context, repo, _, subdir, version string, _ bool) (gitcache.ModuleSnapshot, error) {
+	tag := version
+	if subdir != "" {
+		tag = subdir + "/" + version
+	}
+	source, stamp, err := c.ModuleTagSnapshot(ctx, repo, tag)
+	return gitcache.ModuleSnapshot{Commit: source, Time: stamp, Ref: "refs/tags/" + tag, URL: artifactOriginURL}, err
 }

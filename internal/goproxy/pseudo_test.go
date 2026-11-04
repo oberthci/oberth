@@ -74,8 +74,8 @@ func TestPseudoVersionArtifactsAndDiscovery(t *testing.T) {
 			t.Fatalf("%s: %d %s", ext, r.Code, r.Body)
 		}
 		if ext == ".info" {
-			var info map[string]string
-			if err = json.Unmarshal(r.Body.Bytes(), &info); err != nil || info["Version"] != pseudoVersion || info["Time"] != "2026-09-29T12:00:00Z" {
+			var info moduleInfo
+			if err = json.Unmarshal(r.Body.Bytes(), &info); err != nil || info.Version != pseudoVersion || info.Time.Format(time.RFC3339) != "2026-09-29T12:00:00Z" {
 				t.Fatalf("info=%v %v", info, err)
 			}
 		}
@@ -393,4 +393,12 @@ func TestRealGitPseudoVersionWithoutGoModIsTerminal(t *testing.T) {
 	if len(f.mirror.all()) == 0 || len(f.public.all()) != 0 || len(f.direct.all()) != 0 {
 		t.Fatal("missing go.mod escaped mirror")
 	}
+}
+
+func (g *pseudoGit) ModuleVersionSnapshot(ctx context.Context, repo, mod, subdir, version string, allow bool) (gitcache.ModuleSnapshot, error) {
+	if !module.IsPseudoVersion(version) {
+		return g.artifactGit.ModuleVersionSnapshot(ctx, repo, mod, subdir, version, allow)
+	}
+	source, stamp, err := g.ModulePseudoVersionSnapshot(ctx, repo, mod, version, allow)
+	return gitcache.ModuleSnapshot{Commit: source, Time: stamp, URL: artifactOriginURL}, err
 }

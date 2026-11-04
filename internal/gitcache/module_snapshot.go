@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/mod/module"
+
 	"github.com/oberthci/oberth/internal/boundedio"
 )
 
@@ -20,24 +22,62 @@ func (c *Cache) lockModuleRepository(ctx context.Context, path string) (func(), 
 	return lock.RUnlock, nil
 }
 
-// ModuleTagSnapshot resolves an exact public tag and its published timestamp
-// under the same repository lock. The object ID pins subsequent show/archive
-// reads even if a refresh changes the tag between operations.
-func (c *Cache) ModuleTagSnapshot(ctx context.Context, input, tag string) (string, time.Time, error) {
-	if err := ValidateTag(tag); err != nil {
-		return "", time.Time{}, err
-	}
+// ModuleSnapshot is a coherent identity selected under one repository read lock.
+// Later blob/archive reads must use Commit, never the mutable public Ref.
+type ModuleSnapshot struct {
+	Commit string
+	Time   time.Time
+	Ref    string
+	URL    string
+}
+
+// ModuleVersionSnapshot pins a tag or validates a pseudo-version together with
+// the upstream identity. A refresh cannot change the remote between selection
+// and provenance capture. No requested revision is fetched.
+func (c *Cache) ModuleVersionSnapshot(ctx context.Context, input, modulePath, subdir, version string, allowNonDefault bool) (ModuleSnapshot, error) {
 	_, path, err := c.modulePath(ctx, input)
 	if err != nil {
-		return "", time.Time{}, err
+		return ModuleSnapshot{}, err
 	}
 	unlock, err := c.lockModuleRepository(ctx, path)
 	if err != nil {
-		return "", time.Time{}, err
+		return ModuleSnapshot{}, err
 	}
 	defer unlock()
 	if !c.isBare(ctx, path) {
-		return "", time.Time{}, errors.New("module repository is not cached")
+		return ModuleSnapshot{}, errors.New("module repository is not cached")
+	}
+	var snapshot ModuleSnapshot
+	if module.IsPseudoVersion(version) {
+		snapshot.Commit, snapshot.Time, err = c.modulePseudoVersionSnapshot(ctx, path, modulePath, subdir, version, allowNonDefault)
+	} else {
+		tag := version
+		if subdir != "" {
+			tag = subdir + "/" + version
+		}
+		snapshot.Commit, snapshot.Time, err = c.moduleTagSnapshot(ctx, path, tag)
+		snapshot.Ref = "refs/tags/" + tag
+	}
+	if err != nil {
+		return ModuleSnapshot{}, err
+	}
+	snapshot.URL, err = c.moduleOriginURL(ctx, path)
+	if err != nil {
+		return ModuleSnapshot{}, err
+	}
+	return snapshot, nil
+}
+
+// ModuleTagSnapshot resolves an exact public tag and its published timestamp.
+func (c *Cache) ModuleTagSnapshot(ctx context.Context, input, tag string) (string, time.Time, error) {
+	snapshot, err := c.ModuleVersionSnapshot(ctx, input, "", "", tag, false)
+	return snapshot.Commit, snapshot.Time, err
+}
+
+// Called with the repository read lock held.
+func (c *Cache) moduleTagSnapshot(ctx context.Context, path, tag string) (string, time.Time, error) {
+	if err := ValidateTag(tag); err != nil {
+		return "", time.Time{}, err
 	}
 	ref := "refs/tags/" + tag
 	output, err := c.capture(ctx, path, "for-each-ref", "--format=%(refname)%00%(objectname)%00%(creatordate:iso-strict)", ref)
@@ -53,9 +93,42 @@ func (c *Cache) ModuleTagSnapshot(ctx context.Context, input, tag string) (strin
 			return "", time.Time{}, err
 		}
 		timestamp, err := time.Parse(time.RFC3339, fields[2])
-		return fields[1], timestamp, err
+		if err != nil {
+			return "", time.Time{}, err
+		}
+		commit, err := c.capture(ctx, path, "rev-parse", "--verify", fields[1]+"^{commit}")
+		if err != nil {
+			return "", time.Time{}, err
+		}
+		commit = strings.TrimSpace(commit)
+		return commit, timestamp, ValidateSHA(commit)
 	}
 	return "", time.Time{}, errors.New("exact module tag is not cached")
+}
+
+// ModuleOriginURL reads the mirrored repository's configured upstream without
+// fetching or resolving a public ref. Warm artifacts never call this method.
+func (c *Cache) ModuleOriginURL(ctx context.Context, input string) (string, error) {
+	_, path, err := c.modulePath(ctx, input)
+	if err != nil {
+		return "", err
+	}
+	unlock, err := c.lockModuleRepository(ctx, path)
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+	return c.moduleOriginURL(ctx, path)
+}
+
+// Called with the repository read lock held.
+func (c *Cache) moduleOriginURL(ctx context.Context, path string) (string, error) {
+	remote, err := c.capture(ctx, path, "remote", "get-url", "upstream")
+	if err != nil {
+		return "", err
+	}
+	remote = strings.TrimSpace(remote)
+	return remote, ValidateUpstream(remote)
 }
 
 func (c *Cache) modulePath(ctx context.Context, input string) (string, string, error) {

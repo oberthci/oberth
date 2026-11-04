@@ -69,6 +69,38 @@ timeouts. The #1204 report also records an isolated Kubernetes reproduction
 using four cold downloads of Oberth's actual 140-module graph, including the
 before/after EndpointSlice and listener evidence.
 
+## Mirror-only workflows
+
+Repositories can opt in through `metadata.annotations` in their selected
+`.oberth/build.yaml` or `.oberth/release.yaml` Workflow:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  annotations:
+    oberth.ci/goproxy: mirror-only
+spec:
+  # The repository's usual entrypoint and templates follow.
+```
+
+This sets `GOPROXY` to exactly the administrator's configured mirror URL in
+every pipeline container, including inline leaves, for CI and release runs.
+There is no public proxy or `direct` entry. The declaration is per Workflow,
+applies to all its steps, and is selected only from repository YAML; there are
+no repository-name exceptions. Omission keeps the default
+`<mirror>,https://proxy.golang.org|direct` chain. Other values, including an
+explicit empty value, are refused with the reason
+`oberth.ci/goproxy must be "mirror-only" when present`. Server admission refuses
+mirror-only when no Go module mirror is configured.
+
+Both modes replace repository-provided Go proxy environment values and retain
+`GONOPROXY=none` and `GONOSUMDB=<configured module prefix>`. Mirror-only restricts
+the Go resolver's source path; it is not a network isolation boundary against
+repository code changing its own environment. The mirror serves mapped private
+modules only, so uncached public dependencies fail in this mode. Public checksum
+database policy is unchanged.
+
 ## Immutable version artifacts
 
 The enabled proxy stores generated module artifacts under `<data>/goproxy`
@@ -92,6 +124,28 @@ remain readable.
 `golang.org/x/mod/zip` conversion and filtering. A changing tag cannot mix
 representations during a fill. Pseudo-versions use the same artifact store with
 additional live checks described below; bare branch names remain refused.
+
+Newly published `.info` metadata includes Go's `Origin` object. `VCS` is `git`,
+`URL` is the mirrored repository's configured upstream URL (including its SSH
+scheme/user when configured that way), and `Hash` is the full peeled commit SHA
+used for both `go.mod` and the zip. Tagged versions include
+`Ref: "refs/tags/<version>"` at the repository root; pseudo-versions omit `Ref`.
+Nested modules also include `Subdir`, as described below. Annotated tag object
+IDs are peeled to their commit, while the existing published timestamp is
+preserved. For example:
+
+```json
+{"Version":"v1.2.3","Time":"2026-11-04T09:00:00Z","Origin":{"VCS":"git","URL":"ssh://git@forge.example.test/owner/repository.git","Hash":"0123456789abcdef0123456789abcdef01234567","Ref":"refs/tags/v1.2.3"}}
+```
+
+`go mod download -json` and `go list -m -json` expose this Origin to commit
+verifiers. Origin is persisted with the immutable metadata; a tag move, remote
+URL change or restart cannot rewrite it or change the zip's pinned source.
+Existing cached metadata published before Origin support remains byte-for-byte
+unchanged, including its ETag, and therefore has no Origin. There is no automatic
+backfill or cache invalidation. Go's local module cache may also retain that
+older metadata. Strict verifiers need a version first published with Origin.
+The existing Go checksum checks and artifact digest verification are unchanged.
 
 Objects are addressed by SHA-256. All objects are synced before publishing an
 atomic, no-clobber manifest keyed by mapped repository, module path and version.
@@ -299,6 +353,47 @@ For API Service availability under database contention, see
 [readiness under database stalls](rca-run-recovery.md#readiness-under-database-stalls).
 The private proxy's independent readiness-bypass policy above is unchanged.
 
+## Nested modules
+
+A mapped repository can serve modules below its root, for example
+`go.example.test/wire/subdir`, with a matching module directive in
+`subdir/go.mod`. A root `go.mod` is optional. Only the first component below
+the configured namespace selects a repository; the remaining path stays inside
+that same repository and never selects another upstream.
+
+Tagged versions use Git tags such as `subdir/v1.2.3`. `@v/list` and `@latest`
+consider only that module's exact tag prefix and return ordinary module
+versions such as `v1.2.3`. A module with no matching tags has an empty list and
+no tagged `@latest`. Deeper directories work the same way. Go `/vN` module paths
+can place the matching `go.mod` in the unversioned directory or its `vN` child;
+two matching declarations are refused. The tag prefix and Origin.Subdir exclude
+the `/vN` path suffix, following Go's repository layout rules.
+
+For `go.example.test/wire/subdir@v1.2.3`, newly published metadata includes:
+
+```json
+{"Version":"v1.2.3","Time":"2026-11-04T09:00:00Z","Origin":{"VCS":"git","URL":"ssh://git@forge.example.test/owner/repository.git","Hash":"0123456789abcdef0123456789abcdef01234567","Ref":"refs/tags/subdir/v1.2.3","Subdir":"subdir"}}
+```
+
+Pseudo-versions use the same full repository commit and include `Subdir`, with
+no `Ref`. Their default-branch ancestry and live policy revalidation remain
+mandatory. A base-derived pseudo-version needs the module's own base tag, for
+example `subdir/v1.2.3`. When non-default-branch policy is enabled, only tags in
+that module's namespace can authorize tag-only commits; root and sibling tags
+cannot substitute. Unknown commits are refused with terminal 403 and are never
+fetched to satisfy a request.
+
+The `.mod` bytes come from the selected directory at the pinned commit. The zip
+contains that directory's module at `<module-path>@<version>/`, with canonical
+filtering of vendor trees, symlinks and descendant modules. Root and sibling
+source files are excluded. Go's repository-root LICENSE inheritance is preserved
+when the module has no local LICENSE. Artifacts remain keyed by full module path
+and version, so two sibling modules at the same version do not share metadata
+or zip content. Missing `go.mod` and mismatched module declarations return
+terminal 403 (`module_go_mod_missing` / `module_path_mismatch`), with no public
+fallback. Warm artifacts retain their original bytes and Origin after restart
+or tag movement.
+
 ## Pseudo-versions
 
 Mapped repositories can serve `.info`, `.mod` and `.zip` for a pseudo-version
@@ -337,7 +432,7 @@ HTTP/1.1 200 OK
 Content-Type: application/json
 Cache-Control: private, no-cache
 
-{"Time":"2026-11-04T09:00:00Z","Version":"v0.0.0-20261104090000-0123456789ab"}
+{"Version":"v0.0.0-20261104090000-0123456789ab","Time":"2026-11-04T09:00:00Z","Origin":{"VCS":"git","URL":"ssh://git@forge.example.test/owner/repository.git","Hash":"0123456789abcdef0123456789abcdef01234567"}}
 ```
 
 Use the same version with `.mod` or `.zip`, or run

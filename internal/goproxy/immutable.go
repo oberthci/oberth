@@ -21,10 +21,24 @@ import (
 	"github.com/oberthci/oberth/internal/gitcache"
 )
 
-// moduleTagSnapshot pins all representations to one immutable Git object.
+// moduleVersionSnapshot pins all representations and provenance together.
 // Public tag names are never used again after this resolution.
-type moduleTagSnapshot interface {
-	ModuleTagSnapshot(context.Context, string, string) (string, time.Time, error)
+type moduleVersionSnapshot interface {
+	ModuleVersionSnapshot(context.Context, string, string, string, string, bool) (gitcache.ModuleSnapshot, error)
+}
+
+type moduleOrigin struct {
+	VCS    string
+	URL    string
+	Hash   string
+	Ref    string `json:",omitempty"`
+	Subdir string `json:",omitempty"`
+}
+
+type moduleInfo struct {
+	Version string
+	Time    time.Time
+	Origin  moduleOrigin
 }
 
 type artifactObject struct {
@@ -60,7 +74,7 @@ func (h *Handler) WithArtifactCache(root string) (*Handler, error) {
 	if h.modulePrefix == "" {
 		return nil, errors.New("invalid module proxy namespace")
 	}
-	if _, ok := h.cache.(moduleTagSnapshot); !ok {
+	if _, ok := h.cache.(moduleVersionSnapshot); !ok {
 		return nil, errors.New("module proxy backend cannot pin immutable tags")
 	}
 	if root == "" {
@@ -296,7 +310,7 @@ func (h *Handler) serveImmutable(w http.ResponseWriter, r *http.Request, reposit
 		writeBuildError(w, err)
 		return
 	}
-	var pseudo pseudoSnapshot
+	var pseudo gitcache.ModuleSnapshot
 	isPseudo := module.IsPseudoVersion(version)
 	if isPseudo {
 		var err error
@@ -310,12 +324,12 @@ func (h *Handler) serveImmutable(w http.ResponseWriter, r *http.Request, reposit
 	entry, err := h.artifacts.get(ctx, repository, modulePath, version, "", budget, func(work context.Context) (string, map[string][]byte, error) {
 		return h.buildWithRetry(work, func(attempt context.Context) (string, map[string][]byte, error) {
 			if isPseudo {
-				return h.buildPinnedVersion(attempt, repository, version, pseudo.source, pseudo.timestamp)
+				return h.buildPinnedVersion(attempt, repository, modulePath, version, pseudo)
 			}
 			return h.buildVersion(attempt, repository, modulePath, version)
 		})
 	})
-	if err == nil && isPseudo && entry.Source != pseudo.source {
+	if err == nil && isPseudo && entry.Source != pseudo.Commit {
 		err = pseudoUnavailableError()
 	}
 	if err == nil && ext == ".zip" {
@@ -383,7 +397,7 @@ func (h *Handler) serveImmutable(w http.ResponseWriter, r *http.Request, reposit
 			writeBuildError(w, err)
 			return
 		}
-		if current.source != entry.Source {
+		if current.Commit != entry.Source {
 			pseudoUnavailable(w)
 			return
 		}
@@ -410,19 +424,26 @@ func (h *Handler) buildVersion(ctx context.Context, repository, modulePath, vers
 	if !found {
 		return "", nil, &proxyBuildError{class: "private_unavailable", status: http.StatusForbidden}
 	}
-	source, timestamp, err := h.cache.(moduleTagSnapshot).ModuleTagSnapshot(ctx, repository, version)
+	location, _ := h.moduleLocation(modulePath)
+	snapshot, err := h.cache.(moduleVersionSnapshot).ModuleVersionSnapshot(ctx, repository, modulePath, location.subdir, version, h.pseudoNonDefault)
 	if err != nil {
 		return "", nil, backendBuildError()
 	}
-	return h.buildPinnedVersion(ctx, repository, version, source, timestamp)
+	return h.buildPinnedVersion(ctx, repository, modulePath, version, snapshot)
 }
 
-func (h *Handler) buildPinnedVersion(ctx context.Context, repository, version, source string, timestamp time.Time) (string, map[string][]byte, error) {
-	mod, err := h.cache.ShowFile(ctx, repository, source, "go.mod")
-	if err != nil {
-		return "", nil, moduleReadBuildError(err)
+func (h *Handler) buildPinnedVersion(ctx context.Context, repository, modulePath, version string, snapshot gitcache.ModuleSnapshot) (string, map[string][]byte, error) {
+	source := snapshot.Commit
+	if gitcache.ValidateSHA(source) != nil || gitcache.ValidateUpstream(snapshot.URL) != nil || snapshot.URL == "" {
+		return "", nil, backendBuildError()
 	}
-	info, err := json.Marshal(map[string]string{"Version": version, "Time": timestamp.UTC().Format(time.RFC3339)})
+	_, mod, err := h.moduleDirectory(ctx, repository, modulePath, source)
+	if err != nil {
+		return "", nil, err
+	}
+	location, _ := h.moduleLocation(modulePath)
+	origin := moduleOrigin{VCS: "git", URL: snapshot.URL, Hash: source, Ref: snapshot.Ref, Subdir: location.subdir}
+	info, err := json.Marshal(moduleInfo{Version: version, Time: snapshot.Time.UTC(), Origin: origin})
 	if err != nil {
 		return "", nil, err
 	}
@@ -523,6 +544,9 @@ func writeBuildError(w http.ResponseWriter, err error) {
 			case "module_go_mod_missing":
 				w.Header().Set("Cache-Control", "no-store")
 				proxyError(w, failure.class, "module version unavailable: pinned commit has no go.mod", http.StatusForbidden)
+			case "module_path_mismatch":
+				w.Header().Set("Cache-Control", "no-store")
+				proxyError(w, failure.class, "module version unavailable: go.mod does not declare the requested module path or the module directory is ambiguous", http.StatusForbidden)
 			default:
 				privateUnavailable(w)
 			}
