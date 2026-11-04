@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 const DefaultStalledRunTimeout = 10 * time.Minute
@@ -19,6 +21,7 @@ const executorIdentityRetryAnnotation = "oberth.ci/executor-identity-retry-at"
 
 type admissionProgress struct {
 	lastProgress time.Time
+	scheduled    bool
 	identity     map[types.UID]identityWait
 }
 type identityWait struct {
@@ -63,12 +66,17 @@ func (p *admissionProgress) check(wf *wfv1.Workflow, pods []corev1.Pod, delivere
 		}
 	}
 	for _, node := range wf.Status.Nodes {
+		// Pod-node evidence survives Pod GC and observer restarts. Step-group
+		// state alone cannot establish that Kubernetes scheduled a workload.
+		if node.Type == wfv1.NodeTypePod && (node.HostNodeName != "" || node.Phase == wfv1.NodeSucceeded) {
+			p.scheduled = true
+		}
 		// Pending/Running node creation alone is not proof of a scheduled pod.
 		if node.Phase.Fulfilled(nil) && node.FinishedAt.After(p.lastProgress) && !node.FinishedAt.After(now) {
 			p.lastProgress = node.FinishedAt.Time
 		}
 	}
-	scheduled := false
+	capacityWait := false
 	live := map[types.UID]bool{}
 	if p.identity == nil {
 		p.identity = map[types.UID]identityWait{}
@@ -82,16 +90,17 @@ func (p *admissionProgress) check(wf *wfv1.Workflow, pods []corev1.Pod, delivere
 		if pod.Labels["oberth.ci/role"] == "executor-identity" {
 			continue
 		}
-		if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
-			continue
-		}
 		assigned := pod.Spec.NodeName != ""
 		for _, condition := range pod.Status.Conditions {
 			if condition.Type == corev1.PodScheduled && condition.Status == corev1.ConditionTrue {
 				assigned = true
 			}
 		}
-		scheduled = scheduled || assigned
+		p.scheduled = p.scheduled || assigned
+		if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+			continue
+		}
+		capacityWait = capacityWait || waitingForKubernetesCapacity(pod)
 		for _, status := range pod.Status.InitContainerStatuses {
 			if status.Name != executorTokenWaiter || status.State.Running == nil {
 				continue
@@ -129,7 +138,7 @@ func (p *admissionProgress) check(wf *wfv1.Workflow, pods []corev1.Pod, delivere
 			delete(p.identity, uid)
 		}
 	}
-	if scheduled {
+	if p.scheduled || capacityWait {
 		p.lastProgress = now
 		return nil
 	}
@@ -137,6 +146,30 @@ func (p *admissionProgress) check(wf *wfv1.Workflow, pods []corev1.Pod, delivere
 		return &admissionProgressError{reason: fmt.Sprintf("resource admission expired: no scheduled pod or progress for %s", timeout)}
 	}
 	return nil
+}
+
+// Only the scheduler's recognized capacity condition suspends the startup
+// clock. Scheduling gates, placement constraints and foreign Pods do not.
+func waitingForKubernetesCapacity(pod *corev1.Pod) bool {
+	if pod.Status.Phase != corev1.PodPending {
+		return false
+	}
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type != corev1.PodScheduled || condition.Status != corev1.ConditionFalse || condition.Reason != "Unschedulable" {
+			continue
+		}
+		fields := strings.Fields(condition.Message)
+		for i := 0; i+1 < len(fields); i++ {
+			if fields[i] != "Insufficient" {
+				continue
+			}
+			name := strings.TrimRight(fields[i+1], ".,;:")
+			if name == "cpu" || name == "memory" || (strings.Contains(name, "/") && len(validation.IsQualifiedName(name)) == 0) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (controller *Controller) checkAdmissionProgress(ctx context.Context, wf *wfv1.Workflow, progress *admissionProgress, delivered map[types.UID]bool) error {

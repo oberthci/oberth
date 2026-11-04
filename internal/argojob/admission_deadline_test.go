@@ -12,7 +12,9 @@ import (
 	wffake "github.com/argoproj/argo-workflows/v4/pkg/client/clientset/versioned/fake"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
 	"k8s.io/utils/ptr"
 )
 
@@ -78,11 +80,105 @@ func TestAdmissionDeadlineIgnoresHealthyScheduledWorkAndHonorsConfiguration(t *t
 	if err := watch.check(wf, nil, nil, now.Add(2*time.Minute), 3*time.Minute); err != nil {
 		t.Fatal("configured timeout ignored", err)
 	}
-	if err := watch.check(wf, nil, nil, now.Add(3*time.Minute), 3*time.Minute); err == nil {
-		t.Fatal("unscheduled work exceeded configured timeout")
+	if err := watch.check(wf, nil, nil, now.Add(time.Hour), 3*time.Minute); err != nil {
+		t.Fatal("workflow startup deadline restarted between steps", err)
+	}
+	unstarted := admissionProgress{}
+	wf.CreationTimestamp = metav1.NewTime(now)
+	if err := unstarted.check(wf, nil, nil, now.Add(3*time.Minute), 3*time.Minute); err == nil {
+		t.Fatal("unstarted workflow exceeded configured timeout")
 	}
 	if err := c.config.Validate(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAdmissionDeadlineLeavesCapacityWaitToKubernetes(t *testing.T) {
+	for _, message := range []string{"0/3 nodes are available: 3 Insufficient cpu.", "Insufficient memory", "Insufficient example.com/gpu"} {
+		t.Run(message, func(t *testing.T) {
+			_, wf, pod, _ := executorRetryFixture(t)
+			now := time.Now()
+			wf.CreationTimestamp = metav1.NewTime(now.Add(-time.Hour))
+			pod.Spec.NodeName = ""
+			pod.Status = corev1.PodStatus{Phase: corev1.PodPending, Conditions: []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable", Message: message}}}
+			watch := admissionProgress{}
+			for _, at := range []time.Time{now, now.Add(2 * time.Hour)} {
+				if err := watch.check(wf, []corev1.Pod{*pod}, nil, at, 10*time.Minute); err != nil {
+					t.Fatal("Kubernetes capacity wait failed workflow", err)
+				}
+			}
+			pod.Status.Conditions[0].Message = "node(s) had untolerated taint"
+			if err := watch.check(wf, []corev1.Pod{*pod}, nil, now.Add(2*time.Hour+10*time.Minute), 10*time.Minute); err == nil {
+				t.Fatal("non-capacity startup stall escaped deadline")
+			}
+		})
+	}
+}
+
+func TestAdmissionDeadlineCapacityPendingWorkflowCanCompleteAfterStartupBound(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		config := testConfig()
+		wf := schedulingWorkflow()
+		wf.Namespace = config.Namespace
+		wf.CreationTimestamp = metav1.NewTime(time.Now())
+		wf.Status.Phase, wf.Status.Nodes = wfv1.WorkflowRunning, nil
+		wf.Spec.ActiveDeadlineSeconds = ptr.To(int64(7200))
+		begin := time.Now()
+		client := wffake.NewSimpleClientset(wf)
+		client.PrependReactor("get", "workflows", func(ktesting.Action) (bool, runtime.Object, error) {
+			observed := wf.DeepCopy()
+			if time.Since(begin) >= 12*time.Minute {
+				observed.Status.Phase = wfv1.WorkflowSucceeded
+			}
+			return true, observed, nil
+		})
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "waiting", Namespace: wf.Namespace, UID: "waiting", Labels: map[string]string{"workflows.argoproj.io/workflow": wf.Name}, OwnerReferences: []metav1.OwnerReference{{UID: wf.UID, Kind: "Workflow", Controller: ptr.To(true)}}}, Status: corev1.PodStatus{Phase: corev1.PodPending, Conditions: []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable", Message: "0/3 nodes are available: 3 Insufficient cpu."}}}}
+		controller, err := NewController(client.ArgoprojV1alpha1().Workflows(config.Namespace), fake.NewClientset(pod), config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		controller.interval = time.Minute
+		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Minute)
+		defer cancel()
+		result, err := controller.Wait(ctx, wf.Name, wf.Annotations[runIDAnnotation], io.Discard)
+		if err != nil || !result.Succeeded || time.Since(begin) != 12*time.Minute {
+			t.Fatalf("capacity wait was not left to Kubernetes: elapsed=%s result=%+v err=%v", time.Since(begin), result, err)
+		}
+	})
+}
+
+func TestAdmissionDeadlineCapacityExemptionRequiresOwnedWorkloadPod(t *testing.T) {
+	for _, mode := range []string{"foreign", "holder", "gated", "wrong-condition"} {
+		t.Run(mode, func(t *testing.T) {
+			_, wf, pod, _ := executorRetryFixture(t)
+			now := time.Now()
+			wf.CreationTimestamp = metav1.NewTime(now.Add(-time.Hour))
+			pod.Spec.NodeName = ""
+			pod.Status = corev1.PodStatus{Phase: corev1.PodPending, Conditions: []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable", Message: "Insufficient cpu"}}}
+			switch mode {
+			case "foreign":
+				pod.OwnerReferences[0].UID = "foreign"
+			case "holder":
+				pod.Labels["oberth.ci/role"] = "executor-identity"
+			case "gated":
+				pod.Status.Conditions[0].Reason = "SchedulingGated"
+			case "wrong-condition":
+				pod.Status.Conditions[0].Type = corev1.PodReady
+			}
+			if err := new(admissionProgress).check(wf, []corev1.Pod{*pod}, nil, now, 10*time.Minute); err == nil {
+				t.Fatal("unrelated pod/condition kept unstarted workflow alive")
+			}
+		})
+	}
+}
+
+func TestAdmissionDeadlineRemembersScheduledPodAfterObserverRestart(t *testing.T) {
+	_, wf, _, _ := executorRetryFixture(t)
+	now := time.Now()
+	wf.CreationTimestamp = metav1.NewTime(now.Add(-time.Hour))
+	wf.Status.Nodes = wfv1.Nodes{"finished": {Type: wfv1.NodeTypePod, Phase: wfv1.NodeSucceeded, HostNodeName: "worker", FinishedAt: metav1.NewTime(now.Add(-time.Hour))}}
+	if err := new(admissionProgress).check(wf, nil, nil, now, 10*time.Minute); err != nil {
+		t.Fatal("workflow startup deadline restarted after completed step", err)
 	}
 }
 
