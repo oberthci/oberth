@@ -52,7 +52,7 @@ disables the cap. This setting lives in the database and survives restart.
 Use `system_status.queueCap` to read `maxNotStarted`, `notStarted`, `deferred`
 and the current reason.
 
-At the cap, branch pushes are accepted and mirrored upstream, with the reason
+At the cap, branch pushes are accepted into Oberth's Git cache, with the reason
 `branch run deferred: queue at N/M`; their CI runs are created later. Deferred
 receives keep the exact commit and actor, and create runs in arrival order when
 the count drops below the cap. The existing scheduler priority rules then apply
@@ -61,9 +61,13 @@ count toward the cap. Deferred receives have no run yet and are counted
 separately. Tags/releases, promotions and schedules bypass the cap and can take
 the count above it. Park refs continue to skip branch CI.
 
-Set `maxNotStarted` to 0 to drain the backlog without a depth limit. Deferred
-push mirroring happens before CI completes, through the existing branch mirror
-operation; it does not establish green CI evidence or authorize a promotion.
+Set `maxNotStarted` to 0 to drain the backlog without a depth limit. The accepted
+commit and durable receive journal stay local while run creation is deferred.
+Automatic upstream publication follows successful CI through the existing
+publication path, including the default branch's non-forced update. Explicit
+park and sync operations retain their existing policy and default-branch guards.
+A deferred SHA has no run yet; wait for run creation before using run-based
+commands such as `sync`.
 
 ## Automatic infrastructure recovery
 

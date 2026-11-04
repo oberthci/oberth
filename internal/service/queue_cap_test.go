@@ -43,7 +43,7 @@ func TestQueueCapAdminToolIsStrictAndGated(t *testing.T) {
 	}
 }
 
-func TestQueueCapDeferredPushMirroredAndVisibleWithoutRun(t *testing.T) {
+func TestQueueCapDeferredPushStaysLocalAndVisibleWithoutRun(t *testing.T) {
 	f := newControlFixture(t)
 	ctx := t.Context()
 	if _, err := f.store.SetQueueCap(ctx, "admin", 1); err != nil {
@@ -60,7 +60,7 @@ func TestQueueCapDeferredPushMirroredAndVisibleWithoutRun(t *testing.T) {
 	}
 	push := BranchPush{EventID: "deferred", Repository: f.repo.Name, Branch: "feature/deferred", NewOID: sha, Actor: "dev"}
 	result, err := ingestor.Branch(ctx, push)
-	if err != nil || result.Run != nil || result.Reason != "branch run deferred: queue at 1/1" || len(g.mirrored) != 1 {
+	if err != nil || result.Run != nil || result.Reason != "branch run deferred: queue at 1/1" || len(g.mirrored) != 0 {
 		t.Fatalf("deferred push: %+v mirrors=%v err=%v", result, g.mirrored, err)
 	}
 	result, err = ingestor.Branch(ctx, push)
@@ -107,6 +107,59 @@ func TestQueueCapDeferredPushMirroredAndVisibleWithoutRun(t *testing.T) {
 	runs := shown.([]model.Run)
 	if len(runs) != 1 || !strings.Contains(runs[0].DisplayReason, "branch run deferred:") || strings.Contains(runs[0].DisplayReason, "1/1") || strings.Contains(runs[0].Reason, "1/1") {
 		t.Fatalf("scoped drain reason: %+v", runs)
+	}
+	result, err = ingestor.Branch(ctx, push)
+	if err != nil || !result.Duplicate || result.Run == nil || result.Run.ID != runs[0].ID || len(g.mirrored) != 0 {
+		t.Fatalf("drained replay: %+v mirrors=%v err=%v", result, g.mirrored, err)
+	}
+}
+
+func TestQueueCapDeferralNeverPublishesUpstream(t *testing.T) {
+	for _, cell := range []struct {
+		name, branch, policy string
+		policyErr            error
+		withoutMirror        bool
+	}{
+		{name: "default branch", branch: "main"},
+		{name: "required branch CI", branch: "park/review", policy: "require_branch_ci: [park/*]\n"},
+		{name: "ordinary branch", branch: "feature/deferred"},
+		{name: "unavailable policy", branch: "feature/deferred", policyErr: errors.New("policy unavailable")},
+		{name: "adapter without mirror", branch: "feature/deferred", withoutMirror: true},
+	} {
+		t.Run(cell.name, func(t *testing.T) {
+			f := newControlFixture(t)
+			ctx := t.Context()
+			if _, err := f.store.SetQueueCap(ctx, "admin", 1); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.scheduler.EnqueueCI(ctx, CIRequest{EventID: "occupant", Repository: f.repo, Branch: "feature/occupant", SHA: strings.Repeat("b", 40), Actor: "dev"}); err != nil {
+				t.Fatal(err)
+			}
+			sha := strings.Repeat("a", 40)
+			g := &parkPushGit{stubPushGit: &stubPushGit{peeled: gitcache.PeeledObject{ObjectSHA: sha, CommitSHA: sha}}, policy: cell.policy, policyErr: cell.policyErr}
+			var acceptedGit PushGit = g
+			if cell.withoutMirror {
+				acceptedGit = g.stubPushGit
+			}
+			ingestor, err := NewPushIngestor(PushConfig{Repositories: f.store, Discoverer: stubRepositoryDiscoverer{}, Git: acceptedGit, Receives: f.store, Branches: f.scheduler, Auditor: f.store})
+			if err != nil {
+				t.Fatal(err)
+			}
+			push := BranchPush{EventID: "deferred", Repository: f.repo.Name, Branch: cell.branch, NewOID: sha, Actor: "dev"}
+			for attempt := range 2 {
+				result, err := ingestor.Branch(ctx, push)
+				if err != nil || result.Run != nil || result.Reason != "branch run deferred: queue at 1/1" || result.Duplicate != (attempt > 0) || len(g.mirrored) != 0 {
+					t.Fatalf("attempt %d: result=%+v mirrors=%v err=%v", attempt, result, g.mirrored, err)
+				}
+			}
+			cap, err := f.store.QueueCap(ctx)
+			if err != nil || cap.Deferred != 1 || cap.NotStarted != 1 {
+				t.Fatalf("deferral was not recorded exactly once: %+v %v", cap, err)
+			}
+			if _, err := f.store.LatestAuditActionByType(ctx, "branch.defer.mirror", "repository"); !errors.Is(err, store.ErrNotFound) {
+				t.Fatalf("deferral recorded an upstream mirror audit: %v", err)
+			}
+		})
 	}
 }
 

@@ -115,22 +115,6 @@ func (ingestor *PushIngestor) Branch(ctx context.Context, push BranchPush) (Push
 	if err != nil {
 		return PushResult{}, fmt.Errorf("enqueue accepted branch commit: %w", err)
 	}
-	if enqueued.DeferredReason != "" {
-		mirror, ok := ingestor.git.(interface {
-			SyncBranch(context.Context, string, string, string) error
-		})
-		if !ok {
-			return PushResult{}, refuse(ErrUnavailable, "deferred branch mirror")
-		}
-		// The durable admission decision is stored. If mirroring or its
-		// audit fails, the receive journal retries this idempotent operation;
-		// it never creates another deferral or run for the same event.
-		if err := auditedGitMutation(ctx, ingestor.auditor, push.Actor, "branch.defer.mirror", "repository", push.Repository,
-			map[string]any{"branch": push.Branch, "sha": peeled.CommitSHA, "event_id": push.EventID},
-			func() error { return mirror.SyncBranch(ctx, push.Repository, push.Branch, peeled.CommitSHA) }); err != nil {
-			return PushResult{}, fmt.Errorf("mirror deferred branch: %w", err)
-		}
-	}
 	return pushRunResult(repository, enqueued), nil
 }
 
