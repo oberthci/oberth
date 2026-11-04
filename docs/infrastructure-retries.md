@@ -53,6 +53,13 @@ budget was already used. The spent budget survives restart recovery and the
 existing `run_rerun` replay lineage. An explicit `run_retry` or a separate new
 push starts a new work item.
 
+A manual `run_rerun` in that lineage keeps the operator's reason. Its existing
+reason line reads `rerun of <id> (lineage: automatic retry of <origin>): <reason>`;
+omitting the reason leaves just the rerun and lineage. The `run.rerun` audit
+entry retains the operator's exact reason, and the separate immutable
+`run.auto-retry-lineage` entry retains the spent automatic budget. Reopening the
+database or recovering the run after a restart does not reset that budget.
+
 All retained progress attempts, terminal observations and persisted step rows
 are checked for failed steps, regardless of whether the run or step is
 infrastructure-classified. For an execution-deadline failure, any evidence of a

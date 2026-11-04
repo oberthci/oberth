@@ -3300,7 +3300,11 @@ Admission sequence, queued time and priority are inherited for every retry;
 the history sequence and run ID are new. The existing reason and `run.retry.auto`
 audit record `automatic retry of <id> after infrastructure failure: <reason>`.
 The automatic budget survives restart, legacy reasons and `run_rerun` replay
-lineage. Explicit `run_retry` creates a fresh manual request with ordinary
+lineage. A manual rerun in that lineage keeps the operator's text after the
+server-owned header `rerun of <id> (lineage: automatic retry of <origin>)`.
+Only that header determines the inherited budget; operator text cannot change
+the origin. Its reason and the lineage retain their separate audit receipts.
+Explicit `run_retry` creates a fresh manual request with ordinary
 presentation and its own single automatic-retry budget; it never inherits the
 automatic reason or lineage. No historical terminal backlog is retried and no
 new migration is required.
