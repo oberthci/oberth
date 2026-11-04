@@ -1017,6 +1017,11 @@ spec:
       command: ["/bin/sh"]
       args: ["hack/run-ci-lint.sh", "/tmp/oberth-tools/bin/golangci-lint", "run", "--timeout=10m", "--concurrency=1", "./..."]
       env:
+      # Keep compiler/analysis scratch separate from read-only tools and Pod-local storage.
+      - name: GOTMPDIR
+        value: /tmp/oberth-go-tmp
+      - name: TMPDIR
+        value: /tmp/oberth-go-tmp
       - name: GOMEMLIMIT
         value: "6GiB"
       - name: PATH
@@ -1047,6 +1052,9 @@ spec:
         value: "/tmp/oberth-tools/cache/golangci-lint"
       volumeMounts:
       - name: work
+        mountPath: /tmp/oberth-go-tmp
+        subPath: go-tmp/golangci-lint-run
+      - name: work
         mountPath: /tmp/oberth-tools
         subPath: tools
         readOnly: true
@@ -1063,11 +1071,11 @@ spec:
         requests:
           cpu: 1000m # measured request 4000m; retain the CI policy cap
           memory: 8Gi
-          ephemeral-storage: 195Mi
+          ephemeral-storage: 446Mi # remeasure: provisional; evicted sample 311308288 bytes x1.5, rounded up
         limits:
           cpu: 4000m
           memory: 8Gi
-          ephemeral-storage: 234Mi
+          ephemeral-storage: 446Mi # remeasure: provisional residual cap; compiler scratch now uses PVC
   # ---- parallel race-test burns ----
   # Each package runs once: dedicated store/service/gitcache groups and the
   # remainder discovered by go list ./.... Git-cache already has a required

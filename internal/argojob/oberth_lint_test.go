@@ -51,6 +51,23 @@ func TestOberthLintKeepsDeadlineCacheAndToolIsolation(t *testing.T) {
 				for _, variable := range container.Env {
 					env[variable.Name] = variable.Value
 				}
+				if env["GOTMPDIR"] == "" || env["GOTMPDIR"] != env["TMPDIR"] {
+					t.Error("lint compiler and child scratch must use an explicit private claim directory")
+				}
+				claimScratch := false
+				for _, mount := range container.VolumeMounts {
+					if mount.Name == "work" && mount.MountPath == env["GOTMPDIR"] && mount.SubPath == "go-tmp/golangci-lint-run" && !mount.ReadOnly {
+						claimScratch = true
+					}
+				}
+				if !claimScratch {
+					t.Error("lint scratch must use its own writable work-claim subpath, separate from trusted tools")
+				}
+				// The evicted attempt already sampled 311308288 local bytes.
+				// 1.5x, rounded up to Mi, is a provisional 446Mi, not a peak.
+				if container.Resources.Requests.StorageEphemeral().Value() < 446<<20 || container.Resources.Limits.StorageEphemeral().Value() < 446<<20 {
+					t.Error("lint local storage still lacks the observed censored sample's one-time headroom")
+				}
 				if env["GOMEMLIMIT"] != "6GiB" || container.Resources.Limits.Memory().Value() != 8<<30 {
 					t.Fatal("lint must leave memory headroom within the existing 8Gi limit")
 				}
