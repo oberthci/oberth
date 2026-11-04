@@ -995,6 +995,11 @@
           "type": "object",
           "description": "Credential-free Go module proxy for private modules (#662). Serves the GOPROXY protocol read-only from Oberth's git cache.",
           "properties": {
+            "allowNonDefaultBranchPseudoVersions": {
+              "type": "boolean",
+              "default": false,
+              "description": "Allow pseudo-versions from non-default public branches and tags already permitted by module proxy policy. Default restricts pseudo-versions to default-branch ancestry."
+            },
             "enabled": {
               "type": "boolean",
               "description": "Enable the read-only Go module proxy after configuring its owned namespace. Default: false."

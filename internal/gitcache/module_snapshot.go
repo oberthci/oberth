@@ -72,10 +72,13 @@ func (c *Cache) modulePath(ctx context.Context, input string) (string, string, e
 // Retrying the same read cannot reconstruct a pruned object or rebind its tag.
 var ErrModuleSourceMissing = errors.New("pinned module commit is not cached")
 
+// ErrModuleFileMissing means the pinned commit exists but the requested file does not.
+var ErrModuleFileMissing = errors.New("file is absent from the pinned module commit")
+
 // Called with the repository lock held, only after a failed pinned read. Use
 // cat-file's machine-readable missing response, never localized stderr or an
 // exit status that could also denote a transient process/filesystem failure.
-func (c *Cache) classifyModuleReadFailure(ctx context.Context, path, ref string, cause error) error {
+func (c *Cache) classifyModuleReadFailure(ctx context.Context, path, ref, filePath string, cause error) error {
 	if ctx.Err() != nil || ValidateSHA(ref) != nil {
 		return cause
 	}
@@ -86,6 +89,19 @@ func (c *Cache) classifyModuleReadFailure(ctx context.Context, path, ref string,
 	}
 	if strings.TrimSpace(string(output.Bytes())) == query+" missing" {
 		return fmt.Errorf("%w: %w", ErrModuleSourceMissing, cause)
+	}
+	fields := strings.Fields(string(output.Bytes()))
+	if filePath == "" || len(fields) != 2 || ValidateSHA(fields[0]) != nil || fields[1] != "commit" {
+		return cause
+	}
+	// Check the tree entry, not cat-file's path lookup: a missing stored blob
+	// is an IO failure even though cat-file would also report "missing".
+	output = &boundedio.Buffer{Limit: len(filePath) + 128, LimitError: errBlobTooLarge}
+	if err := c.run(ctx, commandSpec{dir: path, args: []string{"--literal-pathspecs", "ls-tree", "-z", "--full-tree", fields[0], "--", filePath}, stdout: output}); err != nil {
+		return cause
+	}
+	if len(output.Bytes()) == 0 {
+		return fmt.Errorf("%w: %w", ErrModuleFileMissing, cause)
 	}
 	return cause
 }

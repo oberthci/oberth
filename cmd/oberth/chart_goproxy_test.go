@@ -167,3 +167,19 @@ func TestChartGoProxyNetworkPolicyScoping(t *testing.T) {
 		t.Error("NetworkPolicy must use Exists operator for oberth.ci/trigger")
 	}
 }
+
+func TestChartGoProxyPseudoBranchesDefaultOff(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		args := []string{"template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@" + goProxyDigest, "--set", "argo.goProxy.enabled=true", "--set", "argo.goProxy.modulePrefix=go.example.test", "--set", "argo.goProxy.upstream=forge", "--set", "argo.goProxy.organization=example"}
+		if enabled {
+			args = append(args, "--set", "argo.goProxy.allowNonDefaultBranchPseudoVersions=true")
+		}
+		data, err := exec.Command("helm", args...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("chart: %v %s", err, data)
+		}
+		if strings.Contains(string(data), "--argo-goproxy-pseudo-non-default-branches=true") != enabled {
+			t.Fatalf("branch policy opt-in=%v absent or default widened", enabled)
+		}
+	}
+}

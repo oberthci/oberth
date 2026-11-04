@@ -2163,8 +2163,9 @@ func injectRunEnvironment(workflow *wfv1.Workflow, config Config, request Reques
 	// an unreachable upstream (#662).
 	//
 	// AI-CONTRACT: comma falls through only on 404/410. The private mirror
-	// returns neither for any private failure, including unknown modules and
-	// unsupported requests. Public misses return 404; the pipe after the
+	// returns neither for any private failure, including unknown modules,
+	// unsupported requests, pseudo-version policy denials and missing go.mod.
+	// These refusals are terminal 403. Public misses return 404; the pipe after the
 	// public proxy preserves its existing any-error direct fallback.
 	// GONOPROXY=none overrides ambient GOPRIVATE/GONOPROXY, keeping private
 	// modules on the mirror. GONOSUMDB excludes the entire private namespace

@@ -69,3 +69,19 @@ func TestGoProxyServeRequiresExplicitNamespaceAuthority(t *testing.T) {
 		t.Fatal("explicit proxy authority did not survive command parsing")
 	}
 }
+
+func TestGoProxyPseudoBranchesRequireAdminOptIn(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		args := []string{"--argo-namespace=argo-pipelines"}
+		if enabled {
+			args = append(args, "--argo-goproxy-pseudo-non-default-branches=true")
+		}
+		options, err := parseServeOptions(args, io.Discard)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if options.argoGoProxyPseudoNonDefault != enabled {
+			t.Fatalf("pseudo-version branch opt-in lost: enabled=%v", enabled)
+		}
+	}
+}

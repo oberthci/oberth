@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/mod/module"
+
 	"github.com/oberthci/oberth/internal/gitcache"
 )
 
@@ -294,12 +296,28 @@ func (h *Handler) serveImmutable(w http.ResponseWriter, r *http.Request, reposit
 		writeBuildError(w, err)
 		return
 	}
+	var pseudo pseudoSnapshot
+	isPseudo := module.IsPseudoVersion(version)
+	if isPseudo {
+		var err error
+		pseudo, err = h.pseudoSnapshot(ctx, repository, modulePath, version)
+		if err != nil {
+			writeBuildError(w, err)
+			return
+		}
+	}
 	budget := 2*h.backendBudget + time.Second
 	entry, err := h.artifacts.get(ctx, repository, modulePath, version, "", budget, func(work context.Context) (string, map[string][]byte, error) {
 		return h.buildWithRetry(work, func(attempt context.Context) (string, map[string][]byte, error) {
+			if isPseudo {
+				return h.buildPinnedVersion(attempt, repository, version, pseudo.source, pseudo.timestamp)
+			}
 			return h.buildVersion(attempt, repository, modulePath, version)
 		})
 	})
+	if err == nil && isPseudo && entry.Source != pseudo.source {
+		err = pseudoUnavailableError()
+	}
 	if err == nil && ext == ".zip" {
 		if _, exists := entry.Objects[".zip"]; !exists {
 			source := entry.Source
@@ -325,6 +343,10 @@ func (h *Handler) serveImmutable(w http.ResponseWriter, r *http.Request, reposit
 		}
 	}
 	if err != nil {
+		var failure *proxyBuildError
+		if isPseudo && errors.As(err, &failure) && failure.class == "pinned_source_missing" {
+			err = pseudoUnavailableError()
+		}
 		writeBuildError(w, err)
 		return
 	}
@@ -355,9 +377,20 @@ func (h *Handler) serveImmutable(w http.ResponseWriter, r *http.Request, reposit
 		writeBuildError(w, err)
 		return
 	}
+	if isPseudo {
+		current, err := h.pseudoSnapshot(ctx, repository, modulePath, version)
+		if err != nil {
+			writeBuildError(w, err)
+			return
+		}
+		if current.source != entry.Source {
+			pseudoUnavailable(w)
+			return
+		}
+	}
 	w.Header().Set("Content-Type", map[string]string{".info": "application/json", ".mod": "text/plain; charset=utf-8", ".zip": "application/zip"}[ext])
 	w.Header().Set("ETag", `"`+object.SHA256+`"`)
-	if strings.HasSuffix(r.URL.Path, "/@latest") {
+	if isPseudo || strings.HasSuffix(r.URL.Path, "/@latest") {
 		w.Header().Set("Cache-Control", "private, no-cache")
 	} else {
 		w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
@@ -381,6 +414,10 @@ func (h *Handler) buildVersion(ctx context.Context, repository, modulePath, vers
 	if err != nil {
 		return "", nil, backendBuildError()
 	}
+	return h.buildPinnedVersion(ctx, repository, version, source, timestamp)
+}
+
+func (h *Handler) buildPinnedVersion(ctx context.Context, repository, version, source string, timestamp time.Time) (string, map[string][]byte, error) {
 	mod, err := h.cache.ShowFile(ctx, repository, source, "go.mod")
 	if err != nil {
 		return "", nil, moduleReadBuildError(err)
@@ -429,6 +466,9 @@ type proxyBuildError struct {
 
 func (e *proxyBuildError) Error() string { return e.class }
 func moduleReadBuildError(err error) *proxyBuildError {
+	if errors.Is(err, gitcache.ErrModuleFileMissing) {
+		return &proxyBuildError{class: "module_go_mod_missing", status: http.StatusForbidden}
+	}
 	if errors.Is(err, gitcache.ErrModuleSourceMissing) {
 		return &proxyBuildError{class: "pinned_source_missing", status: http.StatusInternalServerError}
 	}
@@ -477,7 +517,15 @@ func writeBuildError(w http.ResponseWriter, err error) {
 		case http.StatusServiceUnavailable:
 			backendUnavailable(w)
 		case http.StatusForbidden:
-			privateUnavailable(w)
+			switch failure.class {
+			case "pseudo_version_unavailable":
+				pseudoUnavailable(w)
+			case "module_go_mod_missing":
+				w.Header().Set("Cache-Control", "no-store")
+				proxyError(w, failure.class, "module version unavailable: pinned commit has no go.mod", http.StatusForbidden)
+			default:
+				privateUnavailable(w)
+			}
 		default:
 			proxyError(w, failure.class, "module generation failed", failure.status)
 		}

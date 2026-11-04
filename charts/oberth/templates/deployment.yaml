@@ -354,6 +354,9 @@ spec:
             - --argo-goproxy-repository-prefix={{ $goProxy.repositoryPrefix | default "" }}
             - --argo-goproxy-upstream={{ $goProxy.upstream }}
             - --argo-goproxy-organization={{ $goProxy.organization }}
+            {{- if $goProxy.allowNonDefaultBranchPseudoVersions }}
+            - --argo-goproxy-pseudo-non-default-branches=true
+            {{- end }}
             {{- end }}
             {{- $vm := .Values.vm | default dict -}}
             {{- $vmKVM := $vm.kvm | default dict -}}
