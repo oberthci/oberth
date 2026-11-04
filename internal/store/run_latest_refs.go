@@ -46,13 +46,18 @@ func (s *Store) listLatestRefRuns(ctx context.Context, filter model.RunListFilte
 	if filter.Superseded {
 		return []model.Run{}, nil
 	}
+	statusSQL, statusArgs, err := runStatusRestriction(filter.Status)
+	if err != nil {
+		return nil, err
+	}
 	restriction, args := repoRestriction("repo_id", filter.RepoIDs)
 	params := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref}, args...)
+	params = append(params, statusArgs...)
 	params = append(params, beforeID, MaxActiveRuns, beforeID, beforeTime, beforeTime, beforeID, pageLimit(filter.Limit))
 	// Group using a narrow covering index: only sequences/counts are scanned,
 	// never historical errors/logs. Fetch the wide rows after selecting heads.
 	// Queue positions use the same global priority order as the flat list.
-	rows, err := tx.QueryContext(ctx, latestRefQuery(restriction, priorityOrderSQL(s.now())), params...) //nolint:gosec // Fixed query with placeholder-only scope restrictions.
+	rows, err := tx.QueryContext(ctx, latestRefQuery(restriction, priorityOrderSQL(s.now()), statusSQL), params...) //nolint:gosec // Fixed query with placeholder-only scope restrictions.
 	if err != nil {
 		return nil, fmt.Errorf("list latest refs: %w", err)
 	}
@@ -85,7 +90,13 @@ func (s *Store) listLatestRefRuns(ctx context.Context, filter model.RunListFilte
 // attempt of a ref whose head appeared earlier, and never carries active work.
 // The ranking reads the covering index only; the wide rows, with their
 // priority subqueries and queue positions, are fetched for the selected page.
-func latestRefQuery(restriction, priorityOrder string) string {
+func latestRefQuery(restriction, priorityOrder string, statusSQL ...string) string {
+	heads := "heads"
+	filtered := ""
+	if len(statusSQL) > 0 && statusSQL[0] != "" {
+		filtered = `, filtered_heads AS (SELECT heads.* FROM heads JOIN runs ON runs.queue_sequence=heads.head_sequence WHERE 1=1` + statusSQL[0] + `)`
+		heads = "filtered_heads"
+	}
 	return `WITH heads AS (
  SELECT MAX(queue_sequence) AS head_sequence, id AS head_id, COUNT(*)-1 AS earlier_attempts, started_at AS head_started_at,
   ` + runEndTimeSQL + ` AS end_time,
@@ -93,10 +104,10 @@ func latestRefQuery(restriction, priorityOrder string) string {
  FROM runs INDEXED BY runs_latest_ref_idx
  WHERE (?=0 OR repo_id=?) AND (?='' OR ref=?)` + restriction + `
  GROUP BY repo_id,ref_kind,ref
-), page AS (
- SELECT * FROM (SELECT * FROM heads WHERE list_group<2 AND ?='' ORDER BY head_sequence DESC LIMIT ?)
+)` + filtered + `, page AS (
+ SELECT * FROM (SELECT * FROM ` + heads + ` WHERE list_group<2 AND ?='' ORDER BY head_sequence DESC LIMIT ?)
  UNION ALL
- SELECT * FROM (SELECT * FROM heads WHERE list_group=2 AND (?='' OR end_time<? OR (end_time=? AND head_id<?)) ORDER BY end_time DESC, head_id DESC LIMIT ?)
+ SELECT * FROM (SELECT * FROM ` + heads + ` WHERE list_group=2 AND (?='' OR end_time<? OR (end_time=? AND head_id<?)) ORDER BY end_time DESC, head_id DESC LIMIT ?)
 ), queue AS MATERIALIZED (
  SELECT id AS queued_run_id, ROW_NUMBER() OVER(ORDER BY ` + priorityOrder + `) AS queue_position
  FROM runs WHERE ` + queuedRunSQL + `

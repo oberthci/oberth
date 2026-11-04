@@ -268,7 +268,7 @@ const priorityPollInterval = 15 * time.Second
 // priorityRun applies the exact-checkout size restriction every time priority
 // is used, including after polling/admin refresh. Aging still applies normally.
 func (r *admissionReservation) priorityRun() model.Run {
-	run := model.Run{Priority: r.priority, PriorityReason: r.priorityReason, QueuedAt: r.queuedAt}
+	run := model.Run{Priority: r.priority, PriorityReason: r.priorityReason, PriorityOverride: r.priorityOverride, PriorityOverrideReason: r.priorityOverrideReason, QueuedAt: r.queuedAt}
 	maximum := r.priorityMaximum
 	if maximum == "" {
 		maximum = store.DefaultMaxRunSize

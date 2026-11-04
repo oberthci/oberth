@@ -27,7 +27,13 @@ const MaxActiveRuns = 500
 //
 // Before, Limit and Terminal are ignored: the view is one bounded list.
 func (s *Store) ListActiveRuns(ctx context.Context, filter model.RunListFilter) ([]model.Run, error) {
+	statusSQL, statusArgs, err := runStatusRestriction(filter.Status)
+	if err != nil {
+		return nil, err
+	}
 	restriction, restrictionArgs := repoRestriction("repo_id", filter.RepoIDs)
+	restriction += statusSQL
+	restrictionArgs = append(restrictionArgs, statusArgs...)
 	args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref}, restrictionArgs...)
 	priorityOrder := priorityOrderSQL(s.now())
 	rows, err := s.reader().QueryContext(ctx, `

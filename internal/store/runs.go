@@ -1035,7 +1035,13 @@ func (s *Store) ListRecentRuns(ctx context.Context, filter model.RunListFilter) 
 	if !filter.Terminal {
 		return s.listFlatRuns(ctx, filter)
 	}
+	statusSQL, statusArgs, err := runStatusRestriction(filter.Status)
+	if err != nil {
+		return nil, err
+	}
 	restriction, restrictionArgs := repoRestriction("repo_id", filter.RepoIDs)
+	restriction += statusSQL
+	restrictionArgs = append(restrictionArgs, statusArgs...)
 	args := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref, filter.Before, filter.Before, filter.Terminal}, restrictionArgs...)
 	rows, err := s.reader().QueryContext(ctx, `
 SELECT `+runReadColumns+` FROM runs
@@ -1075,7 +1081,13 @@ func (s *Store) listFlatRuns(ctx context.Context, filter model.RunListFilter) ([
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	statusSQL, statusArgs, err := runStatusRestriction(filter.Status)
+	if err != nil {
+		return nil, err
+	}
 	restriction, restrictionArgs := repoRestriction("repo_id", filter.RepoIDs)
+	restriction += statusSQL
+	restrictionArgs = append(restrictionArgs, statusArgs...)
 	scopeArgs := append([]any{filter.RepoID, filter.RepoID, filter.Ref, filter.Ref}, restrictionArgs...)
 	collect := func(what string, rows *sql.Rows, err error, withPosition bool) ([]model.Run, error) {
 		if err != nil {
@@ -1356,12 +1368,8 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 	if err := scanRowNotFound(row, "Run", append(dest, extra...)...); err != nil {
 		return model.Run{}, err
 	}
-	lineageReason := strings.TrimSuffix(value.Reason, "; "+PolicyRefreshWaitingReason)
 	value.AutoRetryOf = automaticRetryOrigin(value.Reason)
-	value.AutoRetriedBy = strings.TrimPrefix(lineageReason, autoRetriedByPrefix)
-	if value.AutoRetriedBy == lineageReason {
-		value.AutoRetriedBy = ""
-	}
+	value.AutoRetriedBy = automaticRetrySuccessor(value.Reason)
 	value.Release = release != 0
 	value.Credentialed = credentialed != 0
 	value.QueuedAt = fromUnixNano(queued)

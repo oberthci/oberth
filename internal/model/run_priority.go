@@ -9,6 +9,7 @@ import (
 type RunPriority string
 
 const (
+	PriorityLow            RunPriority = "low"
 	PriorityNormal         RunPriority = "normal"
 	PriorityHigh           RunPriority = "high"
 	PriorityHighest        RunPriority = "highest"
@@ -22,6 +23,8 @@ const (
 
 func (p RunPriority) Rank() int {
 	switch p {
+	case PriorityLow:
+		return -1
 	case PriorityHighest:
 		return 2
 	case PriorityHigh:
@@ -35,8 +38,9 @@ func (p RunPriority) Rank() int {
 // up one class, into high, at its own queue position. It never ages work
 // into highest: promotions, the oldest waiting tag release and explicit
 // administrator bumps keep that class to themselves, so a backed-up queue
-// cannot turn every run "highest" and erase the priority line. Within a
-// class the order stays FIFO, which bounds the aged run's wait: every high
+// cannot turn every run "highest" and erase the priority line.
+// Explicit normal/low admin overrides do not age. Within a class the order
+// stays FIFO, which bounds the aged run's wait: every high
 // run accepted after it waits behind it. Admission/end freezes aging.
 func (run Run) EffectivePriority(now time.Time) (RunPriority, string) {
 	priority, reason := run.Priority, run.PriorityReason
@@ -47,6 +51,9 @@ func (run Run) EffectivePriority(now time.Time) (RunPriority, string) {
 		now = *run.StartedAt
 	} else if run.FinishedAt != nil {
 		now = *run.FinishedAt
+	}
+	if run.PriorityOverride == PriorityNormal || run.PriorityOverride == PriorityLow {
+		return priority, reason
 	}
 	if priority == PriorityNormal && !run.QueuedAt.IsZero() && now.Sub(run.QueuedAt) >= PriorityStarvationWait {
 		return PriorityHigh, PriorityAgedReason

@@ -19,6 +19,16 @@ const autoRetryOfPrefix = "automatic retry of "
 const autoRetryCauseSeparator = " after infrastructure failure: "
 const autoRetriedByPrefix = "infra error, retried as "
 
+// automaticRetrySuccessor is shared by row scans and display-status filtering.
+func automaticRetrySuccessor(reason string) string {
+	lineage := strings.TrimSuffix(reason, "; "+PolicyRefreshWaitingReason)
+	successor := strings.TrimPrefix(lineage, autoRetriedByPrefix)
+	if successor == lineage {
+		return ""
+	}
+	return successor
+}
+
 func (s *Store) inheritAutoRetryTx(ctx context.Context, tx *sql.Tx, previous model.Run, next *model.Run) error {
 	origin := previous.AutoRetryOf
 	if origin == "" && previous.AutoRetriedBy != "" {

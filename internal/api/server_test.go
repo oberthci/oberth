@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -582,7 +583,7 @@ func TestRunsViewCarriesRepoAndRefFilters(t *testing.T) {
 		t.Fatalf("status = %d", response.Code)
 	}
 	want := RunFilter{Repository: "oberth", Ref: "fix/dashboard-strip-log-prefix", Limit: 5}
-	if backend.runFilter != want {
+	if !reflect.DeepEqual(backend.runFilter, want) {
 		t.Fatalf("run filter = %#v, want %#v", backend.runFilter, want)
 	}
 }
@@ -678,7 +679,7 @@ func TestMCPToolInputsMatchContract(t *testing.T) {
 		"status":              {"ref", "repo"},
 		"logs":                {"byte_offset", "context", "limit", "offset", "pattern", "repo", "sha", "step", "tail"},
 		"run_get":             {"id", "run_id", "summary"},
-		"run_list":            {"before", "limit", "ref", "repo", "superseded", "view"},
+		"run_list":            {"before", "limit", "ref", "repo", "status", "superseded", "view"},
 		"run_resources":       {"burn", "format", "include_failed", "last", "ref", "repo", "run", "run_id", "step"},
 		"artifact_get":        {"context", "id", "limit", "name", "offset", "pattern", "run_id", "tail"},
 		"run_retry":           {"id", "priority", "priority_reason", "run_id"},

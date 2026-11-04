@@ -522,8 +522,11 @@ trust assumptions and complete invalidation rules.
   up to 16 case-sensitive globs (1..256 bytes, `*`/`?` match slash; `[]` disables).
   Defaults have no RC globs. `queue_priority_get {}` reads them and the fixed
   60-minute starvation threshold. `run_priority {run_id, priority, reason}` raises
-  one unadmitted run to `high`/`highest`; no lowering or preemption. Config and
-  bump mutations use the audit gate and atomically append `queue.priority.config`
+  one unadmitted run to `high`/`highest`, or pins it at `normal`/`low` with a
+  required reason. Explicit normal/low choices override automatic classification
+  and never age; ordinary normal runs still age into high. No granted work is
+  preempted, and non-admin rules are unchanged. Config and
+  priority mutations use the audit gate and atomically append `queue.priority.config`
   / `run.priority` with actor, previous value and reason. Waiting reservations
   refresh on notification and a 15-second poll; admin calls refresh local
   waiting reservations before returning. Schema v34 stores only admin patterns
@@ -1370,7 +1373,16 @@ trust assumptions and complete invalidation rules.
   Workflow submission preserves the admission time. `view=history` retains its
   terminal-only sequence paging; `view=active` remains an unpaged, bounded
   deprecated compatibility view. Repository/ref filters and uplink scope apply
-  to both.
+  to both. `run_list.status` accepts one existing display status or a non-empty
+  list (REST: repeated/comma-separated `status` query values). Filter before the
+  page bound using the same display classifier as presentation; preserve queue
+  positions, cursor formats, and latest-per-ref head selection. Never resurrect
+  an older matching attempt when the latest head does not match the status.
+  `run_logs {id, step}` infers a unique burn across recorded/active steps;
+  ambiguity names candidate burns instead of choosing the failed burn. Both
+  omitted still use the recorded failure. Promotion selectors accept unique
+  8+ character hex prefixes within the caller's scope and pin the full ID for
+  subsequent reads; ambiguous prefixes use the existing run ambiguity error.
   Detailed status/run reads can also expose an ephemeral Argo deadline and
   finalization-lag observation after steps have progressed. The clock is the
   submitted budget plus Argo's Workflow start, not weighted admission. Only
