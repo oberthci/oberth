@@ -47,10 +47,11 @@ hexadecimal prefix as `run_get`, is exclusive with `ref`, and can infer `repo`.
 Failed/incomplete runs are excluded unless `include_failed=true`, including for
 an exact run. This controls the displayed metric population, not the safety
 population. Independently, the server checks up to **100 latest matching
-terminal runs**, before the passed-only filter, with the same repository,
+terminal runs and 100 matching active runs**, before the passed-only filter, with the same repository,
 exact-run/ref/promotion selection. `last` limits displayed runs; it cannot hide
-a known recent failure. `safety_run_ids` and `safety_scope` identify that bounded
-check. Displayed terminal runs outside this window refuse advice rather than
+a known recent failure, including an eviction while its Workflow is still running.
+`safety_run_ids` and `safety_scope` identify that bounded check. Active-run overflow
+or displayed runs outside this window refuse advice rather than
 claiming an unbounded failure audit. Missing or expired measurements stay unknown. A step's own
 memory peak can supplement a retained, exactly matched container attempt for
 advice; other self-reported counters are not substituted.
@@ -112,7 +113,14 @@ their captured-counter interval; they are never recomputed over a Pod deadline.
 Nonzero/failed commands retain their measured maxima but do not prove completed
 workload coverage. A bound Pod disposition is persisted independently of runtime
 container IDs, so an evicted Pod can veto advice without any usage row or valid
-main termination. An executed terminal step without retained usage or Pod
+main termination. Before listing Pods, the collector also retains a bounded
+Workflow/node attempt inventory, including superseded retries. Pod UID is added
+only after ownership validation; an absent or foreign Pod supplies no invented
+identity, timestamp, failure cause or measurement. A successful retry cannot
+discharge another node's missing coverage. Incomplete/offloaded node inventories,
+legacy missing inventories and truncated reads remain unknown and refuse advice.
+Ordinary uncensored active attempts stay outside completed measurements without
+being treated as failed workloads. An executed terminal step without retained usage or Pod
 disposition is an explicit coverage gap. Skipped, unexecuted steps do not invent
 measurements or failures. Ordinary still-running telemetry stays outside terminal
 quantiles; known censor evidence is evaluated before that exclusion.
@@ -147,7 +155,10 @@ request can also raise its corresponding suggested limit. Missing baselines,
 known unlimited memory/storage, and a Pod-local aggregate limit that differs
 from the main-container limit refuse new restrictive advice. An unlimited
 resource does not become a guessed finite cap. Retaining a declaration does not
-certify that it is sufficient or measured. Recheck after cache, mount, workload
+certify that it is sufficient or measured. When a current declaration is available,
+an omitted memory or storage limit is unbounded or unknown; historical finite
+values cannot supply a new finite copyable limit. Omitted requests do not acquire
+that limit meaning. Recheck after cache, mount, workload
 or CPU-cap changes; a cache mount does not prove cold coverage or cache hits.
 
 Each step's `deadline_no_suggestion` explains this timing gap, even with no
@@ -186,9 +197,10 @@ automatic higher retry is performed.
 
 The tool reads through the database read pool, not the writer. Run selection uses
 existing repository/ref indexes, then primary-key run lookups of telemetry and
-step diagnostics. Display and safety each select at most 100 runs and read at
-most 10,000 main incarnations. Safety also bounds Pod dispositions and executed
-step inventory at 10,000 rows each; missing or truncated safety coverage refuses
+step diagnostics. Display selects at most 100 runs; safety selects at most 100
+terminal plus 100 active runs. Each reads at most 10,000 main incarnations.
+Safety also bounds Pod dispositions, executed step inventory and attempt rows at
+10,000 rows each; missing or truncated safety coverage refuses
 suggestions. No cluster query occurs on this read path. The storage
 operation has a five-second deadline and the entire service call ten seconds,
 including waiting for repository read locks. The query-plan test explains the
@@ -196,7 +208,12 @@ exact executed observation SQL and verifies run-ID primary-key lookups.
 It takes no write transaction. Optional coverage lives in versioned observation
 JSON, and old rows remain readable. An additive timestamped database migration
 stores independent Pod dispositions, bounded to 2,048 Pods per run and deleted
-with run retention. It does not store raw Pod messages, commands or environment.
+with run retention. A further additive timestamped migration stores the attempt
+inventory marker and at most 4,096 retained nodes per run, with at most 2,048 nodes
+in one collector snapshot. The marker records visibility and terminal Workflow
+observation, not metric sufficiency. Failure and bound Pod identity survive late
+or duplicate snapshots; dropped retry nodes are retained. These tables also
+cascade with run deletion. They do not store raw Pod messages, commands or environment.
 Use the normal pre-upgrade backup/restore process for database rollback; this
 does not require older CLI clients to understand the new fields.
 

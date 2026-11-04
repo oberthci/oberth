@@ -28,7 +28,7 @@ func TestMainRuntimeCannotSupplyPodDeadline(t *testing.T) {
 					v.PodFinishedAt = v.ContainerFinishedAt
 				}
 			}
-			declaration := Declaration{Stage: "step-12345678", Template: "step-abc12345", ActiveDeadlineSeconds: value(600)}
+			declaration := Declaration{Stage: "step-12345678", Template: "step-abc12345", ActiveDeadlineSeconds: value(600), Resources: map[string]map[string]string{"limits": {"memory": "1Gi", "ephemeral-storage": "512Mi"}}}
 			step := Build(rows, []Declaration{declaration})[0]
 			if step.Suggested == nil || !step.SizingAcceptance.Sufficient || step.Suggested.CPUMilli != 630 || step.Suggested.MemoryLimitBytes != 1<<30 || *step.DurationNS.Max != int64(10*time.Second) || *step.AverageCPUNanoCores.P95 != 500_000_000 {
 				t.Fatalf("resource advice or main runtime changed: %+v", step)
@@ -39,7 +39,7 @@ func TestMainRuntimeCannotSupplyPodDeadline(t *testing.T) {
 }
 
 func TestDeadlineAdviceNoDataAndCensoredHistory(t *testing.T) {
-	declaration := Declaration{Stage: "step-12345678", Template: "step-abc12345", ActiveDeadlineSeconds: value(600)}
+	declaration := Declaration{Stage: "step-12345678", Template: "step-abc12345", ActiveDeadlineSeconds: value(600), Resources: map[string]map[string]string{"limits": {"memory": "1Gi", "ephemeral-storage": "512Mi"}}}
 	for _, kind := range []string{"no-data", "missing-main-finish", "deadline", "oom", "limit"} {
 		t.Run(kind, func(t *testing.T) {
 			rows := observations()

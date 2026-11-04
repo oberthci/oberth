@@ -121,3 +121,10 @@ evidence, and incomplete or missing executed-attempt coverage can return
 `suggested: null`. Existing numeric measurements remain available. Suggestions
 that are emitted retain known resource-bound floors and explicitly remain
 provisional; no cold-run safety guarantee or numeric Pod deadline is introduced.
+
+The safety population also includes bounded active Workflow evidence. Ordinary
+unfinished telemetry is excluded from completed quantiles, while known failures
+and missing attempt coverage still refuse advice. Independent attempt inventory
+is stored through an additive migration; it adds no caller argument or run status.
+An omitted limit in an available current declaration cannot be replaced by a
+finite historical limit.

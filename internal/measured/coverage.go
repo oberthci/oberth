@@ -61,6 +61,9 @@ func (b resourceBaseline) apply(s *Suggested, d *Declaration) bool {
 		} {
 			raw, exists := d.Resources[p.section][p.name]
 			if !exists {
+				if p.limit {
+					return false
+				}
 				continue
 			}
 			q, err := resource.ParseQuantity(raw)
