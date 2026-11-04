@@ -84,11 +84,8 @@ func TestRunRepositoryContextSurfaces(t *testing.T) {
 				t.Fatalf("run count=%d, want 2", len(rows))
 			}
 			oldIndex, newIndex := 0, 1
-			if view == "all" {
-				oldIndex, newIndex = 1, 0
-			}
 			oldRow, newRow := rows[oldIndex].(map[string]any), rows[newIndex].(map[string]any)
-			if oldRow["ID"] != old.ID || newRow["ID"] != newer.ID {
+			if oldRow["ID"] != old.ID || newRow["ID"] != newer.ID || newRow["QueuePosition"] != float64(2) {
 				t.Fatalf("unexpected %s queue order: %#v", view, rows)
 			}
 			assert(t, oldRow, false)
@@ -126,11 +123,8 @@ func TestRunRepositoryContextSurfaces(t *testing.T) {
 					t.Fatalf("run count=%d, want 2", len(rows))
 				}
 				oldIndex, newIndex := 0, 1
-				if path == "/api/runs" {
-					oldIndex, newIndex = 1, 0
-				}
 				oldRow, newRow := rows[oldIndex].(map[string]any), rows[newIndex].(map[string]any)
-				if oldRow["ID"] != old.ID || newRow["ID"] != newer.ID {
+				if oldRow["ID"] != old.ID || newRow["ID"] != newer.ID || newRow["QueuePosition"] != float64(2) {
 					t.Fatalf("unexpected %s queue order: %#v", path, rows)
 				}
 				assert(t, oldRow, false)

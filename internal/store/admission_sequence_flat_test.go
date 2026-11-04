@@ -35,10 +35,14 @@ func TestRefiredFlatQueueUsesGlobalAdmissionPositions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if copy.ID != a.ID || copy.Status != model.RunQueued || copy.QueueSequence != a.QueueSequence || copy.AdmissionSequence != a.AdmissionSequence {
+		t.Fatalf("restart must preserve durable identity and both FIFO sequences: original=%+v reset=%+v", a, copy)
+	}
 	c := enqueue(repo.ID, "feature/c", "c")
-	// The re-fired run is next in claim order, preserving its original FIFO place.
+	// Restart recovery resets the original run in place. It stays first in
+	// claim order and must not leave a duplicate interrupted row in the list.
 	rows, err := s.ListRecentRuns(ctx, model.RunListFilter{})
-	if err != nil || len(rows) != 4 || rows[0].ID != copy.ID || rows[1].ID != b.ID || rows[2].ID != c.ID || rows[3].ID != a.ID || rows[3].Status != model.RunInterrupted || rows[3].QueuePosition != 0 {
+	if err != nil || len(rows) != 3 || rows[0].ID != a.ID || rows[1].ID != b.ID || rows[2].ID != c.ID || rows[0].Status != model.RunQueued || rows[0].QueueSequence != a.QueueSequence || rows[0].AdmissionSequence != a.AdmissionSequence {
 		t.Fatalf("flat FIFO order = %v, %v", runIDs(rows), err)
 	}
 	for i := 0; i < 3; i++ {
