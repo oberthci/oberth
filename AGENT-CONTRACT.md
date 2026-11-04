@@ -2424,9 +2424,10 @@ upstream with a different organization fail startup.
 unsupported nested modules, missing tags, malformed requests and unsupported
 versions return 403. Backend unavailability returns 503 with `Retry-After: 1`;
 artifact-integrity and archive/zip failures return 500.
-Pseudo-version commit/time/base/reachability denials explicitly return 410 with
-`Cache-Control: no-store`; Go can then try its next proxy. Other private failures
-never return 404 or 410. The dedicated listener passes requests
+Pseudo-version commit/time/base/reachability denials return terminal 403 with
+`Cache-Control: no-store`. A pinned commit without `go.mod` returns terminal 403
+with `module_go_mod_missing`, without retrying. Private failures never return
+404 or 410. The dedicated listener passes requests
 directly to the handler so a mux cannot redirect a malformed private path into
 another namespace. Canonical `.mod` and `.zip` bytes remain unchanged.
 
@@ -2473,13 +2474,17 @@ tags already allowed by the proxy; private retention/promotion refs never grant
 reachability. The conservative default requires default-branch ancestry even
 for tag-only commits. Cached symbolic HEAD determines the default branch; no
 branch name is assumed and no requested revision is fetched from a remote.
+Default-branch ancestry uses `merge-base --is-ancestor`, without listing refs.
+Opt-in branches use a one-ref query; tag-only eligibility uses the existing
+16 MiB bounded ref reader with cancellation on overflow.
 
 A pseudo-version needs a unique lowercase 12-hex commit abbreviation, exact
-committer timestamp in UTC and a canonical module-compatible version. Base-derived
+committer timestamp in UTC and a canonical module-compatible version. Noncommit
+prefix collisions are ignored; multiple matching commits are refused. Base-derived
 forms require the exact ancestor tag and a later commit. Annotated tags are peeled
 for that ancestry check; author/tagger timestamps are not pseudo-version times.
 A warmed manifest may never change its full source identity. Missing, ambiguous,
-unreachable, wrong-time/base or rebound revisions are 410, never negative-cached.
+unreachable, wrong-time/base or rebound revisions are terminal 403, never negative-cached.
 Policy IO failures are 503 and do not fall back to stale successful authority.
 Cached bytes and SHA-256 ETags stay immutable, but pseudo-version HTTP responses
 use `private, no-cache` to require fresh origin eligibility checks; ordinary Go
@@ -2490,11 +2495,10 @@ never include pseudo-versions, even if a Git tag is named like one.
 **GOPROXY ordering:** `<mirror>,https://proxy.golang.org|direct`
 - Comma after mirror: fall through only on 404/410.
 - Public module misses return 404, deliberately reaching the public proxy.
-- Ordinary private failures stop at the mirror, including TLS/transport failures.
-- Explicit pseudo-version denials return 410 and permit subsequent proxy/direct
-  lookup of those coordinates. Backend/policy read failures remain retryable 503.
+- All private failures stop at the mirror, including pseudo-version denials and
+  TLS/transport failures. Backend/policy read failures remain retryable 503.
 - Pipe after public proxy: fall through on any error, preserving public direct
-  fallback. Private pseudo-version 410 denials can also reach that leg.
+  fallback for public modules.
 
 **Environment injection:** `GOPROXY`, `GONOPROXY=none` and
 `GONOSUMDB=<configured module prefix>` into every pipeline container (CI and release),

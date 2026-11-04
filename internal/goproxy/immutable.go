@@ -466,6 +466,9 @@ type proxyBuildError struct {
 
 func (e *proxyBuildError) Error() string { return e.class }
 func moduleReadBuildError(err error) *proxyBuildError {
+	if errors.Is(err, gitcache.ErrModuleFileMissing) {
+		return &proxyBuildError{class: "module_go_mod_missing", status: http.StatusForbidden}
+	}
 	if errors.Is(err, gitcache.ErrModuleSourceMissing) {
 		return &proxyBuildError{class: "pinned_source_missing", status: http.StatusInternalServerError}
 	}
@@ -514,9 +517,15 @@ func writeBuildError(w http.ResponseWriter, err error) {
 		case http.StatusServiceUnavailable:
 			backendUnavailable(w)
 		case http.StatusForbidden:
-			privateUnavailable(w)
-		case http.StatusGone:
-			pseudoUnavailable(w)
+			switch failure.class {
+			case "pseudo_version_unavailable":
+				pseudoUnavailable(w)
+			case "module_go_mod_missing":
+				w.Header().Set("Cache-Control", "no-store")
+				proxyError(w, failure.class, "module version unavailable: pinned commit has no go.mod", http.StatusForbidden)
+			default:
+				privateUnavailable(w)
+			}
 		default:
 			proxyError(w, failure.class, "module generation failed", failure.status)
 		}

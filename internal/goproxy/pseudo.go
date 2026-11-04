@@ -45,11 +45,11 @@ func (h *Handler) pseudoSnapshot(ctx context.Context, repository, modulePath, ve
 	})
 }
 func pseudoUnavailableError() *proxyBuildError {
-	return &proxyBuildError{class: "pseudo_version_unavailable", status: http.StatusGone}
+	return &proxyBuildError{class: "pseudo_version_unavailable", status: http.StatusForbidden}
 }
 func pseudoUnavailable(w http.ResponseWriter) {
-	// 410 is an explicit pseudo-version refusal, not a cached absence. Go may
-	// try the next configured proxy; ordinary private misses retain 403.
+	// Private refusals must stop comma-separated GOPROXY fallback, including
+	// pseudo-version coordinates that contain private commit prefixes.
 	w.Header().Set("Cache-Control", "no-store")
-	proxyError(w, "pseudo_version_unavailable", "pseudo-version unavailable: commit must exist, have the exact timestamp and base, and be reachable from an allowed ref", http.StatusGone)
+	proxyError(w, "pseudo_version_unavailable", "pseudo-version unavailable: commit must exist, have the exact timestamp and base, and be reachable from an allowed ref", http.StatusForbidden)
 }

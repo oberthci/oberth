@@ -3,6 +3,8 @@ package gitcache
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -139,5 +141,118 @@ func TestModulePseudoVersionReachabilityAndTimestamp(t *testing.T) {
 	runGit(t, ready.Path, "update-ref", "-d", "refs/heads/"+repo.initialSHA[:12])
 	if _, _, err = resolver.ModulePseudoVersionSnapshot(t.Context(), "example", "go.example.test/module", fv, true); err == nil {
 		t.Fatal("force-pushed source remained available through cache pins")
+	}
+}
+
+func TestModulePseudoVersionThousandsOfRefs(t *testing.T) {
+	repo := newTestRepositoryWithBranch(t, "trunk")
+	cache := newTestCache(t, repo.upstream)
+	ready, err := cache.Ensure(t.Context(), "example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamp, err := strconv.ParseInt(runGit(t, repo.work, "show", "-s", "--format=%ct", repo.initialSHA), 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	version := module.PseudoVersion("v0", "", time.Unix(stamp, 0), repo.initialSHA[:12])
+	unrelated := runGit(t, repo.work, "commit-tree", "HEAD^{tree}", "-m", "unrelated")
+	seedCacheObject(t, repo.work, ready.Path, unrelated)
+	tagOnly := runGit(t, repo.work, "commit-tree", "HEAD^{tree}", "-m", "tag only")
+	seedCacheObject(t, repo.work, ready.Path, tagOnly)
+	seedPublicBranches(t, ready.Path, "many-branches", 6000, repo.initialSHA)
+	for _, allow := range []bool{false, true} {
+		if sha, _, err := cache.ModulePseudoVersionSnapshot(t.Context(), "example", "go.example.test/module", version, allow); err != nil || sha != repo.initialSHA {
+			t.Fatalf("default ancestry with thousands of refs, opt-in=%v: %s %v", allow, sha, err)
+		}
+	}
+	// Move default to unrelated history, keeping many other public branches.
+	runGit(t, ready.Path, "update-ref", "refs/heads/trunk", unrelated)
+	if _, _, err = cache.ModulePseudoVersionSnapshot(t.Context(), "example", "go.example.test/module", version, false); !errors.Is(err, ErrModulePseudoVersionUnavailable) {
+		t.Fatalf("default policy widened: %v", err)
+	}
+	if _, _, err = cache.ModulePseudoVersionSnapshot(t.Context(), "example", "go.example.test/module", version, true); err != nil {
+		t.Fatalf("many opt-in branches: %v", err)
+	}
+	// Tag-only ancestry must scan past thousands of ineligible tags without
+	// accepting the internal pin or truncating the eligible tag at the end.
+	stamp, err = strconv.ParseInt(runGit(t, ready.Path, "show", "-s", "--format=%ct", tagOnly), 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tagVersion := module.PseudoVersion("v0", "", time.Unix(stamp, 0), tagOnly[:12])
+	seedRefs(t, ready.Path, "refs/tags/ineligible", 6000, tagOnly)
+	if _, _, err = cache.ModulePseudoVersionSnapshot(t.Context(), "example", "go.example.test/module", tagVersion, true); !errors.Is(err, ErrModulePseudoVersionUnavailable) {
+		t.Fatalf("ineligible tags: %v", err)
+	}
+	runGit(t, ready.Path, "update-ref", "refs/tags/v1.2.3", tagOnly)
+	if _, _, err = cache.ModulePseudoVersionSnapshot(t.Context(), "example", "go.example.test/module", tagVersion, true); err != nil {
+		t.Fatalf("eligible tag after thousands of refs: %v", err)
+	}
+}
+
+type pseudoCollisionBackend struct {
+	gitBackend
+	source, collision, kind string
+	includeCommit           bool
+}
+
+func (b pseudoCollisionBackend) execute(ctx context.Context, spec commandSpec, capture bool) (string, error) {
+	if len(spec.args) == 2 && spec.args[0] == "rev-parse" && strings.HasPrefix(spec.args[1], "--disambiguate=") {
+		matches := b.collision + "\n"
+		if b.includeCommit {
+			matches += b.source + "\n"
+		}
+		return matches, nil
+	}
+	if len(spec.args) > 0 && spec.args[0] == "cat-file" && spec.stdin != nil {
+		query, err := io.ReadAll(spec.stdin)
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(string(query)) == b.collision {
+			_, err := fmt.Fprintf(spec.stdout, "%s %s\n", b.collision, b.kind)
+			return "", err
+		}
+		spec.stdin = strings.NewReader(string(query))
+	}
+	return b.gitBackend.execute(ctx, spec, capture)
+}
+
+func TestModulePseudoVersionCommitPrefixCollisions(t *testing.T) {
+	repo := newTestRepositoryWithBranch(t, "trunk")
+	cache := newTestCache(t, repo.upstream)
+	if _, err := cache.Ensure(t.Context(), "example"); err != nil {
+		t.Fatal(err)
+	}
+	stamp, err := strconv.ParseInt(runGit(t, repo.work, "show", "-s", "--format=%ct", repo.initialSHA), 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	version := module.PseudoVersion("v0", "", time.Unix(stamp, 0), repo.initialSHA[:12])
+	// Real 48-bit collisions are impractical fixtures. Only disambiguation and
+	// the colliding object's type are scripted; all other Git reads stay real.
+	collision := repo.initialSHA[:39] + "0"
+	if collision == repo.initialSHA {
+		collision = repo.initialSHA[:39] + "1"
+	}
+	backend := cache.backend
+	for _, kind := range []string{"blob", "tree", "tag", "commit"} {
+		for _, include := range []bool{false, true} {
+			if kind == "commit" && !include {
+				continue
+			}
+			t.Run(fmt.Sprintf("%s/commit=%v", kind, include), func(t *testing.T) {
+				cache.backend = pseudoCollisionBackend{gitBackend: backend, source: repo.initialSHA, collision: collision, kind: kind, includeCommit: include}
+				sha, _, err := cache.ModulePseudoVersionSnapshot(t.Context(), "example", "go.example.test/module", version, false)
+				if include && kind != "commit" {
+					if err != nil || sha != repo.initialSHA {
+						t.Fatalf("noncommit collision refused commit: %s %v", sha, err)
+					}
+				} else if !errors.Is(err, ErrModulePseudoVersionUnavailable) {
+					t.Fatalf("nonunique commit accepted: %s %v", sha, err)
+				}
+			})
+		}
 	}
 }

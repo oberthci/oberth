@@ -122,7 +122,7 @@ func TestPseudoVersionWarmPolicyImmutabilityAndRestart(t *testing.T) {
 		req := httptest.NewRequest("GET", "/"+artifactModule+"/@v/"+pseudoVersion+ext, nil)
 		req.Header.Set("If-None-Match", etags[ext])
 		h.ServeHTTP(r, req)
-		if r.Code != 410 || r.Header().Get("Cache-Control") != "no-store" || r.Header().Get("X-Oberth-GoProxy-Error") != "pseudo_version_unavailable" {
+		if r.Code != http.StatusForbidden || r.Header().Get("Cache-Control") != "no-store" || r.Header().Get("X-Oberth-GoProxy-Error") != "pseudo_version_unavailable" {
 			t.Fatalf("unreachable cached %s: %d %s", ext, r.Code, r.Body)
 		}
 	}
@@ -137,7 +137,7 @@ func TestPseudoVersionWarmPolicyImmutabilityAndRestart(t *testing.T) {
 		}
 	}
 	g.changed.Store(true)
-	if r := pseudoRequest(h, pseudoVersion, ".zip"); r.Code != 410 {
+	if r := pseudoRequest(h, pseudoVersion, ".zip"); r.Code != http.StatusForbidden {
 		t.Fatalf("rebound source served: %d %s", r.Code, r.Body)
 	}
 	g.changed.Store(false)
@@ -167,7 +167,7 @@ func TestPseudoVersionBranchPolicyAndConcurrentFill(t *testing.T) {
 	g := &pseudoGit{artifactGit: newArtifactGit()}
 	g.branchOnly.Store(true)
 	h := newPseudoHandler(t, g, root, false)
-	if r := pseudoRequest(h, pseudoVersion, ".zip"); r.Code != 410 {
+	if r := pseudoRequest(h, pseudoVersion, ".zip"); r.Code != http.StatusForbidden {
 		t.Fatal("default policy widened")
 	}
 	h = newPseudoHandler(t, g, root, true)
@@ -186,7 +186,7 @@ func TestPseudoVersionBranchPolicyAndConcurrentFill(t *testing.T) {
 		t.Fatalf("parallel zip builds=%d", g.archives.Load())
 	}
 	h = newPseudoHandler(t, g, root, false)
-	if r := pseudoRequest(h, pseudoVersion, ".zip"); r.Code != 410 {
+	if r := pseudoRequest(h, pseudoVersion, ".zip"); r.Code != http.StatusForbidden {
 		t.Fatal("cached opt-in bypassed later default-only policy")
 	}
 }
@@ -201,7 +201,7 @@ func (g *revokeDuringArchive) ArchiveTar(ctx context.Context, input, source stri
 func TestPseudoVersionRechecksPolicyBeforeWritingResponse(t *testing.T) {
 	g := &revokeDuringArchive{pseudoGit: &pseudoGit{artifactGit: newArtifactGit()}}
 	h := newPseudoHandler(t, g, t.TempDir(), false)
-	if r := pseudoRequest(h, pseudoVersion, ".zip"); r.Code != 410 || bytes.HasPrefix(r.Body.Bytes(), []byte("PK")) {
+	if r := pseudoRequest(h, pseudoVersion, ".zip"); r.Code != http.StatusForbidden || bytes.HasPrefix(r.Body.Bytes(), []byte("PK")) {
 		t.Fatalf("changed policy leaked zip: %d %s", r.Code, r.Body)
 	}
 	g.blocked.Store(false)
@@ -229,7 +229,7 @@ func TestGoResolverPseudoVersionDownloadAndSums(t *testing.T) {
 	}
 }
 
-func TestGoResolverPseudoVersionDenialFallbackIsExplicit(t *testing.T) {
+func TestGoResolverPseudoVersionDenialsStopFallback(t *testing.T) {
 	for _, outage := range []bool{false, true} {
 		t.Run(strings.ToLower(fmt.Sprint(outage)), func(t *testing.T) {
 			g := &pseudoGit{artifactGit: newArtifactGit()}
@@ -240,12 +240,8 @@ func TestGoResolverPseudoVersionDenialFallbackIsExplicit(t *testing.T) {
 			if err == nil {
 				t.Fatal("invalid pseudo downloaded")
 			}
-			if outage {
-				if len(f.public.all()) != 0 || len(f.direct.all()) != 0 {
-					t.Fatal("retryable backend error fell through")
-				}
-			} else if len(f.public.all()) == 0 {
-				t.Fatal("410 did not have documented fallback semantics")
+			if len(f.mirror.all()) == 0 || len(f.public.all()) != 0 || len(f.direct.all()) != 0 {
+				t.Fatalf("private pseudo denial escaped mirror: mirror=%v public=%v direct=%v", f.mirror.all(), f.public.all(), f.direct.all())
 			}
 		})
 	}
@@ -306,12 +302,12 @@ func TestRealGitPseudoVersionForcePushAndRestore(t *testing.T) {
 	}
 	git(repo.Path, "update-ref", "refs/heads/trunk", base)
 	for ext := range want {
-		if r := pseudoRequest(h, version, ext); r.Code != 410 {
+		if r := pseudoRequest(h, version, ext); r.Code != http.StatusForbidden {
 			t.Fatalf("force-push warm %s: %d %s", ext, r.Code, r.Body)
 		}
 	}
 	git(repo.Path, "update-ref", "refs/heads/feature", source)
-	if r := pseudoRequest(h, version, ".zip"); r.Code != 410 {
+	if r := pseudoRequest(h, version, ".zip"); r.Code != http.StatusForbidden {
 		t.Fatalf("default-only policy expanded: %d %s", r.Code, r.Body)
 	}
 	if r := pseudoRequest(newHandler(true), version, ".zip"); r.Code != 200 || !bytes.Equal(r.Body.Bytes(), want[".zip"]) {
@@ -324,5 +320,77 @@ func TestRealGitPseudoVersionForcePushAndRestore(t *testing.T) {
 		if r := pseudoRequest(h, version, ext); r.Code != 200 || !bytes.Equal(body, r.Body.Bytes()) {
 			t.Fatalf("restored %s changed: %d %s", ext, r.Code, r.Body)
 		}
+	}
+}
+
+func TestPseudoVersionDenialsNeverPermitFallback(t *testing.T) {
+	g := &pseudoGit{artifactGit: newArtifactGit()}
+	g.blocked.Store(true)
+	h := newPseudoHandler(t, g, t.TempDir(), false)
+	for _, version := range []string{pseudoVersion, "v2.0.0-20260929120000-0123456789ab"} {
+		for _, ext := range []string{".info", ".mod", ".zip"} {
+			r := pseudoRequest(h, version, ext)
+			if r.Code == http.StatusNotFound || r.Code == http.StatusGone {
+				t.Fatalf("private denial permits fallback: %s%s: %d", version, ext, r.Code)
+			}
+			if r.Code != http.StatusForbidden || r.Header().Get("Cache-Control") != "no-store" || r.Header().Get("Retry-After") != "" {
+				t.Fatalf("private denial is not terminal: %d %v", r.Code, r.Header())
+			}
+		}
+	}
+}
+
+type countedPseudoCache struct {
+	*gitcache.Cache
+	reads atomic.Int64
+}
+
+func (c *countedPseudoCache) ShowFile(ctx context.Context, input, ref, name string) ([]byte, error) {
+	c.reads.Add(1)
+	return c.Cache.ShowFile(ctx, input, ref, name)
+}
+
+func TestRealGitPseudoVersionWithoutGoModIsTerminal(t *testing.T) {
+	t.Setenv("GIT_AUTHOR_DATE", "2026-10-01T07:08:07Z")
+	t.Setenv("GIT_COMMITTER_DATE", "2026-10-01T07:08:07Z")
+	work := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", work, "-c", "user.name=test", "-c", "user.email=test@example.test"}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "-b", "trunk")
+	git("commit", "--allow-empty", "-m", "no module file")
+	source := git("rev-parse", "HEAD")
+	cache, err := gitcache.New(gitcache.Config{AllowLocalUpstreams: true, Root: t.TempDir(), Upstream: func(string) (string, error) { return work, nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = cache.Ensure(t.Context(), "example"); err != nil {
+		t.Fatal(err)
+	}
+	counted := &countedPseudoCache{Cache: cache}
+	h, err := NewHandler(counted, "go.example.test", map[string]string{"issue764-fixture": "example"}).WithArtifactCache(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	version := module.PseudoVersion("v0", "", time.Date(2026, 10, 1, 7, 8, 7, 0, time.UTC), source[:12])
+	for _, ext := range []string{".info", ".mod", ".zip"} {
+		before := counted.reads.Load()
+		r := pseudoRequest(h, version, ext)
+		if r.Code != http.StatusForbidden || !strings.Contains(r.Body.String(), "go.mod") || r.Header().Get("Retry-After") != "" || r.Header().Get("Cache-Control") != "no-store" || counted.reads.Load()-before != 1 {
+			t.Fatalf("missing go.mod retried or unclear: %d %v %s reads=%d", r.Code, r.Header(), r.Body, counted.reads.Load()-before)
+		}
+	}
+	f := newResolverFixture(t, h, http.StatusNotFound)
+	if output, err := f.run(t, "mod", "download", artifactModule+"@"+version); err == nil || !strings.Contains(output, "go.mod") {
+		t.Fatalf("missing go.mod download: %v %s", err, output)
+	}
+	if len(f.mirror.all()) == 0 || len(f.public.all()) != 0 || len(f.direct.all()) != 0 {
+		t.Fatal("missing go.mod escaped mirror")
 	}
 }

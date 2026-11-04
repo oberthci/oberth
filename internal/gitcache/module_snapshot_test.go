@@ -175,12 +175,30 @@ func TestPinnedModuleReadClassifiesOnlyConfirmedMissingCommit(t *testing.T) {
 	if err := cache.ArchiveTar(t.Context(), "example", missing, io.Discard); !errors.Is(err, ErrModuleSourceMissing) {
 		t.Fatalf("missing pinned archive not classified: %v", err)
 	}
-	if _, err := cache.ShowFile(t.Context(), "example", repository.initialSHA, "nonexistent-file"); err == nil || errors.Is(err, ErrModuleSourceMissing) {
+	if _, err := cache.ShowFile(t.Context(), "example", repository.initialSHA, "nonexistent-file"); !errors.Is(err, ErrModuleFileMissing) || errors.Is(err, ErrModuleSourceMissing) {
 		t.Fatalf("existing source misclassified missing: %v", err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if err := cache.ArchiveTar(ctx, "example", missing, io.Discard); !errors.Is(err, context.Canceled) || errors.Is(err, ErrModuleSourceMissing) {
 		t.Fatalf("cancellation became permanent: %v", err)
+	}
+}
+
+func TestModuleFileReadFailureDoesNotConfuseBrokenStorageWithAbsentPath(t *testing.T) {
+	repo := newTestRepository(t)
+	cache := newTestCache(t, repo.upstream)
+	ready, err := cache.Ensure(t.Context(), "example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob := runGitStdin(t, ready.Path, "missing-storage-fixture\n", "hash-object", "-w", "--stdin")
+	tree := runGitStdin(t, ready.Path, "100644 blob "+blob+"\tgo.mod\n", "mktree")
+	source := runGit(t, ready.Path, "-c", "user.name=test", "-c", "user.email=test@example.test", "commit-tree", tree, "-m", "storage fixture")
+	if err := os.Remove(filepath.Join(ready.Path, "objects", blob[:2], blob[2:])); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cache.ShowFile(t.Context(), "example", source, "go.mod"); err == nil || errors.Is(err, ErrModuleFileMissing) || errors.Is(err, ErrModuleSourceMissing) {
+		t.Fatalf("missing stored blob became a terminal absent path: %v", err)
 	}
 }

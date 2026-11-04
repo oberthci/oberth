@@ -72,8 +72,8 @@ func NewHandler(cache GitCache, namespace string, repoMap map[string]string) *Ha
 
 // ServeHTTP handles GOPROXY protocol requests.
 // AI-INVARIANT: classify the private namespace before parsing the protocol.
-// Ordinary private failures stop proxy fallback. Explicit pseudo-version
-// denials use 410 by policy; those allow Go to try its next configured proxy.
+// All private failures stop comma-separated proxy fallback. Pseudo-version
+// denials are terminal 403 responses, never public-cache misses (404/410).
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	observed := &observedResponse{ResponseWriter: w}
 	h.serveHTTP(observed, r)

@@ -54,9 +54,9 @@ A step can publish artifacts, perform other effects, or report both a refusal
 and a checksum failure. Such output cannot safely authorize another execution.
 The resolver chain retains its comma after the private mirror: replacing it with
 a pipe would allow private transport failures to fall through to public
-resolvers. TLS errors, checksum/integrity failures and ordinary private HTTP
-denials remain terminal. Explicit pseudo-version denials return 410 and permit
-Go to try its next proxy; see the pseudo-version policy below. A caller implementing its own dialer may bound retries with
+resolvers. TLS errors, checksum/integrity failures and all private HTTP
+denials, including pseudo-version refusals, remain terminal. A caller
+implementing its own dialer may bound retries with
 backoff for `ECONNREFUSED` before any TLS or request bytes are sent; this batch
 does not install a new dialer into the Go tool or change its retry policy.
 
@@ -354,12 +354,19 @@ successful policy decision. A restored eligible commit serves the original
 pinned bytes. Pseudo-version HTTP responses require revalidation; Go's own local
 module cache retains its usual immutable semantics.
 
+Default-branch reachability uses a direct ancestry check without listing refs.
+The opt-in branch check requests one matching ref; tag-only eligibility uses the
+existing 16 MiB bounded ref reader, which cancels Git on overflow. Noncommit
+objects sharing a revision prefix do not create ambiguity: exactly one matching
+commit is required.
+
 Missing, ambiguous, invalid-time/base and disallowed/rebound commits return
-**410 Gone**, `X-Oberth-GoProxy-Error: pseudo_version_unavailable` and
-`Cache-Control: no-store`. These refusals are not negative-cached. A 410 permits
-Go to try the next configured proxy, potentially sending the rejected module
-coordinates to that proxy and then a direct resolver. This is an intentional
-exception to the ordinary private 403 behavior. Backend failures return 503
+**403 Forbidden**, `X-Oberth-GoProxy-Error: pseudo_version_unavailable` and
+`Cache-Control: no-store`. These refusals are not negative-cached and stop Go's
+comma-separated proxy fallback, keeping private module paths and commit prefixes
+on the mirror. A pinned commit without `go.mod` also returns terminal 403 with
+error class `module_go_mod_missing` and a clear message, without retrying.
+Backend failures return 503
 with bounded retries and never reuse stale policy authority. Existing explicit
 administrator revocation markers still return terminal 403, and artifact
 corruption fails closed without rebuilding or rebinding a version.

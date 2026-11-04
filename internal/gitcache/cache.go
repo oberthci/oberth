@@ -1245,7 +1245,7 @@ func (c *Cache) ShowFile(ctx context.Context, input, ref, filePath string) ([]by
 		args:   []string{"show", "--end-of-options", ref + ":" + filePath, "--"},
 		stdout: &buf,
 	}); err != nil {
-		return nil, c.classifyModuleReadFailure(ctx, repoPath, ref, err)
+		return nil, c.classifyModuleReadFailure(ctx, repoPath, ref, filePath, err)
 	}
 	return buf.Bytes(), nil
 }
@@ -1274,7 +1274,7 @@ func (c *Cache) ArchiveTar(ctx context.Context, input, ref string, w io.Writer) 
 		stdout: w,
 	})
 	if err != nil {
-		return c.classifyModuleReadFailure(ctx, repoPath, ref, err)
+		return c.classifyModuleReadFailure(ctx, repoPath, ref, "", err)
 	}
 	return nil
 }

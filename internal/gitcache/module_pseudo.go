@@ -56,13 +56,25 @@ func (c *Cache) ModulePseudoVersionSnapshot(ctx context.Context, input, modulePa
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	ids := strings.Fields(matches)
-	if len(ids) != 1 || ValidateSHA(ids[0]) != nil || !strings.HasPrefix(ids[0], revision) {
-		return "", time.Time{}, ErrModulePseudoVersionUnavailable
+	var source string
+	for _, id := range strings.Fields(matches) {
+		if ValidateSHA(id) != nil || !strings.HasPrefix(id, revision) {
+			return "", time.Time{}, ErrModulePseudoVersionUnavailable
+		}
+		object, kind, err := c.modulePseudoObject(ctx, path, id)
+		if err != nil {
+			return "", time.Time{}, err
+		}
+		if kind != "commit" {
+			continue
+		}
+		if source != "" {
+			return "", time.Time{}, ErrModulePseudoVersionUnavailable
+		}
+		source = object
 	}
-	source, err := c.modulePseudoCommit(ctx, path, ids[0])
-	if err != nil {
-		return "", time.Time{}, err
+	if source == "" {
+		return "", time.Time{}, ErrModulePseudoVersionUnavailable
 	}
 	rawTime, err := c.capture(ctx, path, "show", "-s", "--format=%ct", source, "--")
 	if err != nil {
@@ -95,24 +107,43 @@ func (c *Cache) ModulePseudoVersionSnapshot(ctx context.Context, input, modulePa
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	args := []string{"for-each-ref", "--format=%(refname)", "--contains=" + source, "refs/heads/"}
-	if allowNonDefault {
-		args = append(args, "refs/tags/")
+	// Ancestry of the default branch needs no ref enumeration, so an old
+	// commit reachable from thousands of refs cannot overflow capture output.
+	defaultSource, err := c.modulePseudoCommit(ctx, path, "refs/heads/"+branch)
+	if err != nil && !errors.Is(err, ErrModulePseudoVersionUnavailable) {
+		return "", time.Time{}, err
 	}
-	refs, err := c.capture(ctx, path, args...)
+	if err == nil {
+		err = c.run(ctx, commandSpec{dir: path, args: []string{"merge-base", "--is-ancestor", source, defaultSource}})
+		if err == nil {
+			return source, timestamp, nil
+		}
+		if ctx.Err() != nil || !isExitCode(err, 1) {
+			return "", time.Time{}, err
+		}
+	}
+	if !allowNonDefault {
+		return "", time.Time{}, ErrModulePseudoVersionUnavailable
+	}
+	// Every public branch is eligible in opt-in mode; one matching object ID
+	// suffices regardless of how many branches contain the commit.
+	branchSource, err := c.capture(ctx, path, "for-each-ref", "--count=1", "--format=%(objectname)", "--contains="+source, "refs/heads/")
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	for _, ref := range strings.Split(refs, "\n") {
-		if ref == "refs/heads/"+branch {
-			return source, timestamp, nil
+	if branchSource != "" {
+		if err := ValidateSHA(branchSource); err != nil {
+			return "", time.Time{}, err
 		}
-		if !allowNonDefault {
-			continue
-		}
-		if strings.HasPrefix(ref, "refs/heads/") {
-			return source, timestamp, nil
-		}
+		return source, timestamp, nil
+	}
+	// Tags need module-version filtering. Use the existing 16 MiB bounded ref
+	// reader, with cancellation on overflow, rather than the 64 KiB capture.
+	refs, err := c.listRefs(ctx, path, "--contains="+source, "refs/tags/")
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	for ref := range refs {
 		tag, tagRef := strings.CutPrefix(ref, "refs/tags/")
 		if tagRef && module.CanonicalVersion(tag) == tag && !module.IsPseudoVersion(tag) && module.Check(modulePath, tag) == nil {
 			return source, timestamp, nil
@@ -122,19 +153,27 @@ func (c *Cache) ModulePseudoVersionSnapshot(ctx context.Context, input, modulePa
 }
 
 func (c *Cache) modulePseudoCommit(ctx context.Context, path, query string) (string, error) {
+	object, kind, err := c.modulePseudoObject(ctx, path, query)
+	if err != nil {
+		return "", err
+	}
+	if kind != "commit" {
+		return "", ErrModulePseudoVersionUnavailable
+	}
+	return object, nil
+}
+
+func (c *Cache) modulePseudoObject(ctx context.Context, path, query string) (string, string, error) {
 	output := &boundedio.Buffer{Limit: 512, LimitError: errBlobTooLarge}
 	if err := c.run(ctx, commandSpec{dir: path, args: []string{"cat-file", "--batch-check=%(objectname) %(objecttype)"}, stdin: strings.NewReader(query + "\n"), stdout: output}); err != nil {
-		return "", err
+		return "", "", err
 	}
 	fields := strings.Fields(string(output.Bytes()))
 	if len(fields) == 2 && (fields[1] == "missing" || fields[1] == "ambiguous") {
-		return "", ErrModulePseudoVersionUnavailable
+		return "", "", ErrModulePseudoVersionUnavailable
 	}
 	if len(fields) != 2 || ValidateSHA(fields[0]) != nil {
-		return "", errors.New("invalid module object response")
+		return "", "", errors.New("invalid module object response")
 	}
-	if fields[1] != "commit" {
-		return "", ErrModulePseudoVersionUnavailable
-	}
-	return fields[0], nil
+	return fields[0], fields[1], nil
 }
