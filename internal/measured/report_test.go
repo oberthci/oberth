@@ -15,7 +15,18 @@ func observations() []Observation {
 	var out []Observation
 	for i := range 5 {
 		v := model.StepResourceUsage{Version: 2, Source: "kubelet-cadvisor", RunID: fmt.Sprint(i), WorkflowName: "wf", PodName: fmt.Sprintf("wf-frag-1234abcd-step-abc12345-%d", i), PodUID: fmt.Sprint(i), ContainerID: fmt.Sprint(i), ContainerName: "main", ContainerKind: "app", PodKind: "workflow", Stage: "step-12345678", Step: "step-abc12345", Terminal: true, Samples: 4, SampledLowerBound: true, LastObservedAt: now, ContainerStartedAt: now.Add(-10 * time.Second), ContainerFinishedAt: now, CPUTimeNS: value(5e9), CPUTimeAt: now, CPUPeakNanoCores: value(1e9), MemoryPeakBytes: value(int64(i+1) * 100 << 20), EphemeralStoragePeakBytes: value(100 << 20)}
-		out = append(out, Observation{Usage: v, Template: "frag-1234abcd-step-abc12345", Owner: "repo-01", MemoryLimitBytes: value(1 << 30), CPULimitNanoCores: value(0), EphemeralLimitBytes: value(0)})
+		v.PodStartedAt, v.PodFinishedAt = v.ContainerStartedAt, v.ContainerFinishedAt
+		v.MemoryCoverage = model.MetricCoverage{Count: 4, FirstAt: v.ContainerStartedAt, LastAt: now}
+		v.CPUCoverage = v.MemoryCoverage
+		v.StorageCoverage = v.MemoryCoverage
+		code := int32(0)
+		v.ExitCode = &code
+		v.Reason = "Completed"
+		v.CPURequestNanoCores = value(0)
+		v.MemoryRequestBytes = value(0)
+		v.EphemeralRequestBytes = value(0)
+		v.PodEphemeralLimitBytes = value(512 << 20)
+		out = append(out, Observation{Usage: v, Template: "frag-1234abcd-step-abc12345", Owner: "repo-01", MemoryLimitBytes: value(1 << 30), CPULimitNanoCores: value(0), EphemeralLimitBytes: value(512 << 20)})
 	}
 	return out
 }

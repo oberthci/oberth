@@ -20,6 +20,7 @@ func TestMemorySparsePollsSuppressWholeSuggestion(t *testing.T) {
 			extra.Usage.PodUID = "6"
 			extra.Usage.ContainerID = "6"
 			extra.Usage.Samples = polls
+			extra.Usage.MemoryCoverage.Count = polls
 			rows = append(rows, extra)
 			got := Build(rows, nil)[0]
 			if got.Suggested != nil || !got.Flags.LowSamples || got.MemoryInsufficientAttempts != 1 {

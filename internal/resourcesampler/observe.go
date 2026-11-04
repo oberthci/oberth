@@ -96,6 +96,9 @@ func observe(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time, name,
 	}
 	v := model.StepResourceUsage{Version: 2, ContainerKind: kind, PodKind: podKind, Source: "kubelet-cadvisor", RunID: b.RunID, WorkflowName: b.WorkflowName, WorkflowUID: b.WorkflowUID, Namespace: b.Namespace, NodeID: b.NodeID, PodName: pod.Name, PodUID: string(pod.UID), NodeName: pod.Spec.NodeName, ContainerID: status.ContainerID, ContainerName: name, RestartCount: status.RestartCount, Stage: b.Stage, Step: b.Step, FirstObservedAt: now, LastObservedAt: now, SampledLowerBound: true}
 	v.TemplateName, v.FragmentRepository = b.TemplateName, b.FragmentRepository
+	// Match Kubernetes' effective aggregate limits, including restartable init
+	// containers. Pod-local usage is not a main-container-only metric.
+	v.PodEphemeralLimitBytes = number(ephemeralResource(pod, true), &v.Saturated)
 	declared := 0
 	for _, container := range containers {
 		if container.Name == name {
@@ -175,6 +178,7 @@ func observe(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time, name,
 			switch metric.Name {
 			case "container_memory_usage_bytes", "container_memory_max_usage_bytes":
 				maximum(&v.MemoryPeakBytes, n)
+				v.MemoryCoverage = sourceCoverage(v.MemoryCoverage, metric.At)
 			case "container_cpu_usage_seconds_total":
 				if l["cpu"] != "total" {
 					continue
@@ -182,6 +186,7 @@ func observe(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time, name,
 				if metric.At.After(v.CPUTimeAt) {
 					v.CPUTimeAt = metric.At
 					v.CPUTimeNS = number(metric.Value*1e9, &v.Saturated)
+					v.CPUCoverage = sourceCoverage(v.CPUCoverage, metric.At)
 				}
 			case "container_fs_reads_bytes_total", "container_fs_writes_bytes_total", "container_fs_reads_total", "container_fs_writes_total":
 				device := l["device"]
@@ -252,6 +257,7 @@ func observe(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time, name,
 			}
 			if fs := stats.EphemeralStorage; fs != nil && fs.UsedBytes != nil && fresh(fs.Time, now) {
 				v.EphemeralStoragePeakBytes = unsigned(*fs.UsedBytes, &v.Saturated)
+				v.StorageCoverage = sourceCoverage(v.StorageCoverage, fs.Time)
 				if fs.Time.After(v.SourceAt) {
 					v.SourceAt = fs.Time
 				}
@@ -330,16 +336,23 @@ func add(target **int64, n *int64, saturated *bool) {
 		**target += *n
 	}
 }
-func ephemeralRequest(pod *corev1.Pod) float64 {
+func ephemeralRequest(pod *corev1.Pod) float64 { return ephemeralResource(pod, false) }
+
+func ephemeralResource(pod *corev1.Pod, limits bool) float64 {
+	quantity := func(c corev1.Container) float64 {
+		q := c.Resources.Requests[corev1.ResourceEphemeralStorage]
+		if limits {
+			q = c.Resources.Limits[corev1.ResourceEphemeralStorage]
+		}
+		return q.AsApproximateFloat64()
+	}
 	sum := 0.0
 	for _, c := range pod.Spec.Containers {
-		q := c.Resources.Requests[corev1.ResourceEphemeralStorage]
-		sum += q.AsApproximateFloat64()
+		sum += quantity(c)
 	}
 	initPeak, restartable := 0.0, 0.0
 	for _, c := range pod.Spec.InitContainers {
-		q := c.Resources.Requests[corev1.ResourceEphemeralStorage]
-		n := q.AsApproximateFloat64()
+		n := quantity(c)
 		if c.RestartPolicy != nil && *c.RestartPolicy == corev1.ContainerRestartPolicyAlways {
 			restartable += n
 			initPeak = math.Max(initPeak, restartable)
@@ -348,7 +361,11 @@ func ephemeralRequest(pod *corev1.Pod) float64 {
 		}
 	}
 	q := pod.Spec.Overhead[corev1.ResourceEphemeralStorage]
-	return math.Max(sum+restartable, initPeak) + q.AsApproximateFloat64()
+	total := math.Max(sum+restartable, initPeak)
+	if limits && total == 0 {
+		return 0
+	}
+	return total + q.AsApproximateFloat64()
 }
 
 // Current cAdvisor cgroup paths use the full runtime container ID, never a
