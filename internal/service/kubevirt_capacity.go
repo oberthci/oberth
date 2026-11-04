@@ -98,7 +98,7 @@ func (gate *weightedAdmission) kubeVirtBlockedLocked(reservation *admissionReser
 		if earlier == reservation {
 			break
 		}
-		if earlier.repoID != reservation.repoID || !earlier.prepared || earlier.vmParked {
+		if earlier.repoID != reservation.repoID || !earlier.prepared || earlier.vmParked || gate.adminHeldLocked(earlier) {
 			continue
 		}
 		if holder, ahead := gate.groupBlockerLocked(earlier); holder != "" || ahead != "" {

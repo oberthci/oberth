@@ -148,7 +148,7 @@ func TestIssueWorkspaceUpgradeFromV49PreservesIssueAndLock(t *testing.T) {
 	}
 	defer func() { _ = s.Close() }()
 	var ledger string
-	if err = s.db.QueryRow(`SELECT group_concat(version, ',') FROM (SELECT version FROM schema_migrations WHERE version>=50 ORDER BY version)`).Scan(&ledger); err != nil || ledger != "50,51,52,53,54,55" {
+	if err = s.db.QueryRow(`SELECT group_concat(version, ',') FROM (SELECT version FROM schema_migrations WHERE version>=50 AND version<=55 ORDER BY version)`).Scan(&ledger); err != nil || ledger != "50,51,52,53,54,55" {
 		t.Fatalf("upgrade ledger=%q, want policy 50, work status 51, run-list 52, train 53, park 54 and trailers 55: %v", ledger, err)
 	}
 	assertSchemaContains(t, s.db, "index", "runs_latest_ref_idx", "status", "started_at", "finished_at", "queued_at", "id")

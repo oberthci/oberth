@@ -1,21 +1,22 @@
 package store
 
 type migration struct {
-	version  int
+	version  int    // legacy ID, or catalog position for timestamped migrations
+	id       string // immutable timestamp-and-slug ID; empty for legacy migrations
 	sql      string
 	apply    migrationFunc
 	rawApply connectionLevelMigration // runs outside the normal migration transaction
 }
 
-// LatestMigrationVersion returns the highest schema migration version this
-// binary will apply. The running server's version command reports it so the
-// installer can detect pending migrations before upgrading.
+// LatestMigrationVersion returns the number of migrations in this binary.
+// This preserves the numeric version/backup interface. Compatibility is checked
+// against individual IDs, not this count or the local receipt ordinals.
 func LatestMigrationVersion() int { return latestMigrationVersion }
 
 const (
 	admissionSequenceMigrationVersion = 28
 	repositoryArchiveMigrationVersion = 29
-	latestMigrationVersion            = issueTrailersMigrationVersion
+	lastIntegerMigrationVersion       = 55
 	latestRefMigrationVersion         = 35
 	// oberthSchemaIdentity is the fresh-deployment default. Existing deployments
 	// supply their original immutable identity through ProtocolConfig; bootstrap
@@ -28,7 +29,8 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 )`
 )
 
-var migrations = []migration{
+// Frozen integer catalog: add new SQL files under migrations/ instead.
+var legacyMigrations = []migration{
 	{
 		version: 1,
 		sql: `

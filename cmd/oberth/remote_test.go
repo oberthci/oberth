@@ -419,7 +419,10 @@ func TestRunsRejectsPositionalArgs(t *testing.T) {
 // --- #445: short run ID resolution ---
 
 func TestLogDelegatesShortRunIDResolution(t *testing.T) {
-	var requestedPath string
+	// The handler and test run in different goroutines. Receiving an HTTP
+	// response is not an explicit join for a handler-owned Go variable.
+	// Transfer the observation before writing the response instead.
+	requestedPaths := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/runs" {
 			w.Header().Set("Content-Type", "application/json")
@@ -427,7 +430,11 @@ func TestLogDelegatesShortRunIDResolution(t *testing.T) {
 			http.Error(w, "list forbidden", http.StatusForbidden)
 			return
 		}
-		requestedPath = r.URL.Path
+		select {
+		case requestedPaths <- r.URL.Path:
+		default:
+			t.Errorf("unexpected additional request: %s", r.URL.Path)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"run_id":"abcdef1234567890abcdef1234567890","burn":"ci","step":"test","output":"ok\n","total_lines":1}`))
 	}))
@@ -435,12 +442,20 @@ func TestLogDelegatesShortRunIDResolution(t *testing.T) {
 	configure(t, server)
 
 	var out bytes.Buffer
-	err := runRemoteLog(context.Background(), []string{"--burn", "ci", "--step", "test", "abcdef12"}, &out)
+	err := runRemoteLog(t.Context(), []string{"--burn", "ci", "--step", "test", "abcdef12"}, &out)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if requestedPath != "/api/runs/abcdef12/logs" {
-		t.Fatalf("short ID was not passed to the server; requested path = %q", requestedPath)
+	select {
+	case requestedPath := <-requestedPaths:
+		if requestedPath != "/api/runs/abcdef12/logs" {
+			t.Fatalf("short ID was not passed to the server; requested path = %q", requestedPath)
+		}
+	default:
+		t.Fatal("log returned without the server observing its request")
+	}
+	if out.String() != "ok\n" {
+		t.Fatalf("unexpected log output: %q", out.String())
 	}
 }
 

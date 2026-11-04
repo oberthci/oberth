@@ -55,6 +55,7 @@ type ToolService interface {
 }
 
 type RunFilter struct {
+	Status       model.RunStatusFilter
 	Superseded   bool
 	LatestPerRef bool
 	Repository   string
@@ -278,6 +279,7 @@ func (server *Server) routes() {
 		}
 		writeJSON(writer, http.StatusOK, map[string]string{"status": "ready"})
 	})
+	server.mux.Handle("POST /api/admission/hold", server.requireAuth(http.HandlerFunc(server.handleAdmissionHold)))
 	server.mux.Handle("POST /api/promotions", server.requireAuth(http.HandlerFunc(server.handlePromote)))
 	server.mux.Handle("POST /mcp", server.requireAuth(http.HandlerFunc(server.handleMCP)))
 	server.mux.Handle("GET /api/runs", server.requireAuth(http.HandlerFunc(server.handleRuns)))
@@ -372,6 +374,13 @@ func (server *Server) handleRuns(writer http.ResponseWriter, request *http.Reque
 		Ref:          query.Get("ref"),
 		Limit:        queryLimit(request, 100, 100),
 		View:         query.Get("view"),
+	}
+	for _, raw := range query["status"] {
+		filter.Status = append(filter.Status, strings.Split(raw, ",")...)
+	}
+	if err := filter.Status.Validate(); err != nil {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
 	}
 	if raw := query.Get("superseded"); raw != "" {
 		if raw != "true" && raw != "false" {

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -582,7 +583,7 @@ func TestRunsViewCarriesRepoAndRefFilters(t *testing.T) {
 		t.Fatalf("status = %d", response.Code)
 	}
 	want := RunFilter{Repository: "oberth", Ref: "fix/dashboard-strip-log-prefix", Limit: 5}
-	if backend.runFilter != want {
+	if !reflect.DeepEqual(backend.runFilter, want) {
 		t.Fatalf("run filter = %#v, want %#v", backend.runFilter, want)
 	}
 }
@@ -678,7 +679,7 @@ func TestMCPToolInputsMatchContract(t *testing.T) {
 		"status":              {"ref", "repo"},
 		"logs":                {"byte_offset", "context", "limit", "offset", "pattern", "repo", "sha", "step", "tail"},
 		"run_get":             {"id", "run_id", "summary"},
-		"run_list":            {"before", "limit", "ref", "repo", "superseded", "view"},
+		"run_list":            {"before", "limit", "ref", "repo", "status", "superseded", "view"},
 		"run_resources":       {"burn", "format", "include_failed", "last", "ref", "repo", "run", "run_id", "step"},
 		"artifact_get":        {"context", "id", "limit", "name", "offset", "pattern", "run_id", "tail"},
 		"run_retry":           {"id", "priority", "priority_reason", "run_id"},
@@ -831,7 +832,7 @@ func TestMCPToolCountMatchesDocumented(t *testing.T) {
 	t.Parallel()
 	// The documented count in docs/mcp-setup.md must match the registered
 	// tool count. A mismatch means the table drifted from the code.
-	const documented = 77
+	const documented = 78
 	definitions := toolDefinitions()
 	if len(definitions) != documented {
 		t.Fatalf("registered %d tools, documented %d in docs/mcp-setup.md — update the table", len(definitions), documented)
@@ -896,7 +897,7 @@ func TestMCPToolSurfaceMatchesContract(t *testing.T) {
 		"access_list", "access_allow", "access_revoke",
 		"workflow_capability_grant", "workflow_capability_revoke", "workflow_capability_get",
 		"kubevirt_grant", "kubevirt_revoke", "kubevirt_grant_get",
-		"resource_grant", "resource_revoke", "resource_grant_get", "size_grant", "size_revoke", "size_grant_get", "queue_priority_config", "queue_priority_get", "priority_grant", "priority_grant_list", "priority_grant_revoke", "run_priority", "admission_release",
+		"resource_grant", "resource_revoke", "resource_grant_get", "size_grant", "size_revoke", "size_grant_get", "queue_priority_config", "queue_priority_get", "priority_grant", "priority_grant_list", "priority_grant_revoke", "run_priority", "admission_hold", "admission_release",
 		"repo_usage", "repo_list", "repo_archive", "repo_unarchive", "repo_remove", "run_list", "audit_list", "schedule_list", "schedule_pause", "schedule_resume", "schedule_trigger", "system_status", "publish_retry", "secretstore_plan", "secretstore_sync_receipt", "secretstore_verify",
 		"promote_grant", "promote_grant_revoke", "promote_grant_list",
 	}

@@ -11,12 +11,12 @@ import (
 	"time"
 )
 
-func TestMigrationDefinitionsRejectDuplicateVersions(t *testing.T) {
+func TestMigrationDefinitionsRejectDuplicateIDs(t *testing.T) {
 	t.Parallel()
 	items := append([]migration(nil), migrations...)
 	items = append(items, migrations[len(migrations)-1])
 	err := validateMigrations(items, latestMigrationVersion)
-	if !errors.Is(err, ErrSchemaIncompatible) || !strings.Contains(err.Error(), fmt.Sprintf("duplicate migration version %d", latestMigrationVersion)) {
+	if !errors.Is(err, ErrSchemaIncompatible) || !strings.Contains(err.Error(), fmt.Sprintf("duplicate migration ID %q", migrations[len(migrations)-1].ID())) {
 		t.Fatalf("duplicate migration: %v", err)
 	}
 }

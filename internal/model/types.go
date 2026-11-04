@@ -225,6 +225,7 @@ type RunResult struct {
 }
 
 type RunListFilter struct {
+	Status       RunStatusFilter
 	Superseded   bool
 	LatestPerRef bool
 	RepoID       int64

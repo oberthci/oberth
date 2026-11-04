@@ -117,6 +117,17 @@ ORDER BY queue_sequence LIMIT 1`, source.RepoID, source.RefKind, source.Ref, sou
 	if err := s.inheritAutoRetryTx(ctx, tx, source, &enqueued.Run); err != nil {
 		return model.RunRerunResult{}, err
 	}
+	if enqueued.AutoRetryOf != "" {
+		// This is an operator action. Keep its reason distinct from the spent
+		// automatic-retry budget, whose immutable audit receipt was inherited.
+		enqueued.Reason = "rerun of " + source.ID + manualAutoRetryLineage + enqueued.AutoRetryOf + ")"
+		if request.Reason != "" {
+			enqueued.Reason += ": " + request.Reason
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE runs SET reason=? WHERE id=?`, enqueued.Reason, enqueued.ID); err != nil {
+			return model.RunRerunResult{}, fmt.Errorf("record manual rerun reason: %w", err)
+		}
+	}
 
 	detailsMap := replayAuditDetails(source.Release || source.RefKind == model.RefTag, request.ReplayAudit)
 	for key, value := range map[string]any{

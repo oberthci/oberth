@@ -386,6 +386,8 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		}
 	}
 	switch name {
+	case "admission_hold":
+		return service.admissionHoldTool(ctx, actor, raw)
 	// Credential and grant lifecycle (#1105).
 	case "uplink_list", "uplink_revoke", "uplink_rotate":
 		return service.uplinkLifecycleTool(ctx, actor, name, raw)
@@ -960,19 +962,20 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		return service.repoRemove(ctx, actor, arguments.Repo)
 	case "run_list":
 		var arguments struct {
-			Repo       string     `json:"repo"`
-			Superseded bool       `json:"superseded"`
-			Ref        string     `json:"ref"`
-			Limit      int        `json:"limit"`
-			Before     pageCursor `json:"before"`
-			View       string     `json:"view"`
+			Repo       string                `json:"repo"`
+			Status     model.RunStatusFilter `json:"status"`
+			Superseded bool                  `json:"superseded"`
+			Ref        string                `json:"ref"`
+			Limit      int                   `json:"limit"`
+			Before     pageCursor            `json:"before"`
+			View       string                `json:"view"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
 		if arguments.View == api.RunViewActive {
 			// One bounded, unpaged list: no limit or cursor applies.
-			runs, err := service.Runs(ctx, actor, api.RunFilter{Superseded: arguments.Superseded, Repository: arguments.Repo, Ref: arguments.Ref, View: arguments.View,
+			runs, err := service.Runs(ctx, actor, api.RunFilter{Status: arguments.Status, Superseded: arguments.Superseded, Repository: arguments.Repo, Ref: arguments.Ref, View: arguments.View,
 				Before: arguments.Before.Sequence, BeforeRun: arguments.Before.ID})
 			if err != nil {
 				return nil, err
@@ -988,7 +991,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if limit > 100 {
 			limit = 100
 		}
-		runs, err := service.Runs(ctx, actor, api.RunFilter{Superseded: arguments.Superseded, Repository: arguments.Repo, Ref: arguments.Ref, Limit: limit,
+		runs, err := service.Runs(ctx, actor, api.RunFilter{Status: arguments.Status, Superseded: arguments.Superseded, Repository: arguments.Repo, Ref: arguments.Ref, Limit: limit,
 			Before: arguments.Before.Sequence, BeforeRun: arguments.Before.ID, View: arguments.View})
 		if err != nil {
 			return nil, err
@@ -1036,6 +1039,9 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 	if service.history == nil {
 		return nil, refuse(ErrUnavailable, "run history")
 	}
+	if err := filter.Status.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidInput, err)
+	}
 	if !api.ValidRunView(filter.View) {
 		return nil, fmt.Errorf("%w: view must be all, active or history", ErrInvalidInput)
 	}
@@ -1049,7 +1055,7 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 	if filter.Before < 0 || service.scope != nil && filter.Before > 0 && filter.BeforeRun == "" {
 		return nil, fmt.Errorf("%w: before must be a positive run sequence, or a run ID for a scoped uplink", ErrInvalidInput)
 	}
-	storeFilter := model.RunListFilter{Superseded: filter.Superseded, LatestPerRef: filter.LatestPerRef, Ref: filter.Ref, Limit: filter.Limit, Before: filter.Before, Terminal: filter.View == api.RunViewHistory}
+	storeFilter := model.RunListFilter{Status: filter.Status, Superseded: filter.Superseded, LatestPerRef: filter.LatestPerRef, Ref: filter.Ref, Limit: filter.Limit, Before: filter.Before, Terminal: filter.View == api.RunViewHistory}
 	if strings.TrimSpace(filter.BeforeRun) != "" {
 		// A cursor that is both a sequence and a run-ID spelling is a run
 		// first; an unscoped caller falls back to the sequence (#073).
@@ -1264,9 +1270,28 @@ func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, sta
 		return nil, fmt.Errorf("load run steps: %w", err)
 	}
 	if strings.TrimSpace(stage) == "" {
-		stage = run.FailedStage
-		if strings.TrimSpace(step) == "" {
-			step = run.FailedStep
+		if strings.TrimSpace(step) != "" {
+			stages := map[string]bool{}
+			for _, result := range steps {
+				if result.Step == step {
+					stages[result.Stage] = true
+				}
+			}
+			candidates := make([]string, 0, len(stages))
+			for candidate := range stages {
+				candidates = append(candidates, candidate)
+			}
+			sort.Strings(candidates)
+			switch len(candidates) {
+			case 0:
+				return nil, fmt.Errorf("%w: no recorded step %q in this run", store.ErrNotFound, step)
+			case 1:
+				stage = candidates[0]
+			default:
+				return nil, fmt.Errorf("%w: step %q matches burns: %s; specify burn", ErrInvalidInput, step, strings.Join(candidates, ", "))
+			}
+		} else {
+			stage, step = run.FailedStage, run.FailedStep
 		}
 	}
 	if strings.TrimSpace(stage) == "" {
@@ -3009,7 +3034,7 @@ func MutatingTool(name string) bool {
 		"access_allow", "access_revoke",
 		"kubevirt_grant", "kubevirt_revoke", "workflow_capability_grant", "workflow_capability_revoke",
 		"size_grant", "size_revoke", "resource_grant", "resource_revoke",
-		"admission_release", "queue_priority_config", "run_priority", "priority_grant", "priority_grant_revoke",
+		"admission_release", "admission_hold", "queue_priority_config", "run_priority", "priority_grant", "priority_grant_revoke",
 		"repo_remove", "repo_archive", "repo_unarchive",
 		"secretstore_sync_receipt",
 		"promote_grant", "promote_grant_revoke",

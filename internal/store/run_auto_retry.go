@@ -13,11 +13,23 @@ import (
 )
 
 // These server-owned reasons preserve lineage without a schema migration.
-// Client-supplied rerun reasons are audit-only and never set these columns.
+// Manual reruns append the operator's reason after a server-owned lineage
+// header. Only that header can determine the inherited automatic budget.
 const legacyAutoRetryOfPrefix = "automatic infrastructure retry of "
 const autoRetryOfPrefix = "automatic retry of "
 const autoRetryCauseSeparator = " after infrastructure failure: "
 const autoRetriedByPrefix = "infra error, retried as "
+const manualAutoRetryLineage = " (lineage: automatic retry of "
+
+// automaticRetrySuccessor is shared by row scans and display-status filtering.
+func automaticRetrySuccessor(reason string) string {
+	lineage := strings.TrimSuffix(reason, "; "+PolicyRefreshWaitingReason)
+	successor := strings.TrimPrefix(lineage, autoRetriedByPrefix)
+	if successor == lineage {
+		return ""
+	}
+	return successor
+}
 
 func (s *Store) inheritAutoRetryTx(ctx context.Context, tx *sql.Tx, previous model.Run, next *model.Run) error {
 	origin := previous.AutoRetryOf
@@ -125,6 +137,15 @@ func (s *Store) autoRetryInfrastructureTx(ctx context.Context, tx *sql.Tx, sourc
 // Keep old receipts readable while the human reason now includes the cause.
 func automaticRetryOrigin(reason string) string {
 	reason = strings.TrimPrefix(strings.TrimSuffix(reason, "; "+PolicyRefreshWaitingReason), RestartRequeueReason+"; ")
+	if rest, ok := strings.CutPrefix(reason, "rerun of "); ok {
+		source, lineage, found := strings.Cut(rest, manualAutoRetryLineage)
+		origin, suffix, closed := strings.Cut(lineage, ")")
+		if found && closed && len(source) == 32 && len(origin) == 32 &&
+			strings.Trim(source+origin, "0123456789abcdef") == "" && (suffix == "" || strings.HasPrefix(suffix, ": ")) {
+			return origin
+		}
+		return ""
+	}
 	for _, prefix := range []string{autoRetryOfPrefix, legacyAutoRetryOfPrefix} {
 		if rest, ok := strings.CutPrefix(reason, prefix); ok {
 			id, _, _ := strings.Cut(rest, autoRetryCauseSeparator)

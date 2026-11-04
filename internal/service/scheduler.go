@@ -89,6 +89,7 @@ type Scheduler struct {
 	capacityFile       string
 	capacityReloadMu   sync.Mutex
 	admission          *weightedAdmission
+	holdMu             sync.Mutex
 	priorityMu         sync.Mutex // serialize durable priority refresh snapshots
 	maxRunLogBytes     int64
 	stalledRunTimeout  time.Duration
@@ -214,6 +215,15 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 	}
 	scheduler.admission.onPark = scheduler.signalQueue
 	scheduler.admission.onGrant = scheduler.signalQueue
+	if state, ok := config.Store.(admissionHoldStore); ok {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		hold, err := state.AdmissionHold(ctx)
+		cancel()
+		if err != nil {
+			return nil, fmt.Errorf("load admission hold: %w", err)
+		}
+		scheduler.admission.adminHold = hold
+	}
 	return scheduler, nil
 }
 
@@ -713,8 +723,12 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 // instead of stopping at MaxConcurrent runs. At most one such claim waits at a
 // time, so this never piles up checkouts behind a full budget.
 func (scheduler *Scheduler) dispatchSlotAvailable(active int) bool {
+	// Held claims cannot be replenished by ClaimNextRun. Exclude all of them
+	// so a new hold cannot strand its allowed classes behind earlier claims.
 	limit := scheduler.concurrentJobs()
-	parked := min(scheduler.admission.groupParked(), limit)
+	held, other := scheduler.admission.dispatchParked()
+	active = max(0, active-held)
+	parked := min(other, limit)
 	if active-parked < limit {
 		return true
 	}

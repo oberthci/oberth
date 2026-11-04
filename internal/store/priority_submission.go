@@ -28,8 +28,8 @@ CREATE TABLE IF NOT EXISTS run_priority_requests (
  refusal TEXT NOT NULL
 ) WITHOUT ROWID;
 INSERT OR IGNORE INTO run_priority_requests(run_id,requested,accepted,reason,actor,refusal)
- SELECT id,'',` + basePrioritySQL + `,` + priorityReasonSQL + `,actor,'' FROM runs
- WHERE status IN ('queued','running') AND (` + basePrioritySQL + `) IN ('high','highest');`
+ SELECT id,'',` + legacyBasePrioritySQL + `,` + legacyPriorityReasonSQL + `,actor,'' FROM runs
+ WHERE status IN ('queued','running') AND (` + legacyBasePrioritySQL + `) IN ('high','highest');`
 
 const requestedPrioritySQL = `(SELECT accepted FROM run_priority_requests WHERE run_id=id AND requested!='' AND accepted IN ('high','highest') AND refusal='')`
 const requestedPriorityReasonSQL = `(SELECT reason FROM run_priority_requests WHERE run_id=id AND requested!='' AND accepted IN ('high','highest') AND refusal='')`

@@ -246,6 +246,9 @@ func (scheduler *Scheduler) priorityDispatchAvailable(ctx context.Context, activ
 	candidate := &admissionReservation{gate: gate, sequence: next.QueueSequence, order: next.AdmissionSequence, priority: next.Priority, queuedAt: next.QueuedAt}
 	lower := false
 	for _, r := range gate.waiters {
+		if gate.adminHeldLocked(r) {
+			continue
+		}
 		rp := r.effectivePriority(gate.clock())
 		if rp.Rank() > p.Rank() || (rp.Rank() == p.Rank() && (p != model.PriorityHighest || !admissionBefore(candidate, r))) {
 			return false, nil
@@ -268,7 +271,7 @@ const priorityPollInterval = 15 * time.Second
 // priorityRun applies the exact-checkout size restriction every time priority
 // is used, including after polling/admin refresh. Aging still applies normally.
 func (r *admissionReservation) priorityRun() model.Run {
-	run := model.Run{Priority: r.priority, PriorityReason: r.priorityReason, QueuedAt: r.queuedAt}
+	run := model.Run{Priority: r.priority, PriorityReason: r.priorityReason, PriorityOverride: r.priorityOverride, PriorityOverrideReason: r.priorityOverrideReason, QueuedAt: r.queuedAt}
 	maximum := r.priorityMaximum
 	if maximum == "" {
 		maximum = store.DefaultMaxRunSize

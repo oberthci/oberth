@@ -235,6 +235,7 @@ type AdmissionCapacityConfig struct {
 // budget, every reservation it holds, and every concurrency group in use. It
 // is an ephemeral observation of one server process, never durable evidence.
 type AdmissionState struct {
+	Hold          *AdmissionHold           `json:"hold,omitempty"`
 	NumericBudget *NumericBudget           `json:"numeric_budget,omitempty"`
 	Configuration *AdmissionCapacityConfig `json:"configuration,omitempty"`
 	Pressure      *AdmissionPressure       `json:"pressure,omitempty"`

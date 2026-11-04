@@ -39,7 +39,8 @@ Repository concurrency groups, VM-capacity parking, pressure, disk-floor holds
 and run-count/size limits still apply. P95 predictions are estimates, not enforced
 runtime deadlines; running work is never preempted.
 
-Aging moves a run up one class only. At 60 minutes a `normal` run becomes
+Aging moves ordinary work up one class only. At 60 minutes a `normal` run without
+an explicit administrator override becomes
 effective `high`, with the reason `aged: normal run waited at least 60
 minutes`; `high` work does not age further and nothing ages into `highest`,
 so a backed-up queue cannot turn every run `highest` and empty the manual
@@ -55,9 +56,23 @@ without limit; before this change aged work joined `highest` FIFO instead.
 Existing resource holders must finish or be cleaned up, and repository
 concurrency groups still apply.
 
-An administrator can use MCP `run_priority` with a full run ID, priority `high`
-or `highest`, and a reason to expedite an unadmitted run. The operation is
-audited, cannot lower priority, and does not preempt running work.
+An unscoped administrator can use MCP `run_priority` with a full run ID or unique
+8+ character hex prefix and a required reason (1–512 bytes). `high`/`highest`
+retain their raise-only rules. `normal` and `low` pin a run awaiting admission
+at the selected class, including a tag or promotion that normally gets automatic
+urgency. An explicit `normal`/`low` override never ages: it stays at that class
+until another administrator change. Ordinary normal work still ages into high.
+Queue order is highest, high, normal, low, with FIFO within each effective class.
+The existing priority reason line shows the operator's reason; the atomic
+`run.priority` audit record includes actor, previous priority, selected priority
+and reason. Overrides survive restart and automatic refire. Non-admin rules are
+unchanged. Already granted/running work cannot be preempted.
+
+For example:
+
+```sh
+oberth mcp call run_priority '{"run_id":"01234567","priority":"low","reason":"Let ordinary work proceed"}'
+```
 `queue_priority_config` sets RC globs; `queue_priority_get` reports them and
 the aging threshold. These are unscoped-admin capabilities.
 

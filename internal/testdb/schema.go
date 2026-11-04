@@ -148,6 +148,16 @@ DROP TABLE IF EXISTS publication_policy_waits;
 DELETE FROM schema_migrations WHERE version>=50;
 `
 
+// PostIntegerMigrationsDowngrade restores the historical ledger shape in
+// fixtures derived from a current database. Receipt ordinals above 55 are local
+// applications of timestamp IDs, never integer migration definitions.
+const PostIntegerMigrationsDowngrade = `
+DROP TABLE IF EXISTS admission_holds;
+DELETE FROM schema_migrations WHERE version>55;
+DROP INDEX schema_migrations_id_unique;
+ALTER TABLE schema_migrations DROP COLUMN id;
+`
+
 // PostV52Downgrade reconstructs the schema before durable promotion trains.
 const PostV52Downgrade = PostV53Downgrade + `
 DROP TRIGGER IF EXISTS promotion_train_identity_immutable;
@@ -158,7 +168,7 @@ DELETE FROM schema_migrations WHERE version>=53;
 `
 
 // PostV54Downgrade removes green-trailer receipts before reconstructing park fixtures.
-const PostV54Downgrade = `
+const PostV54Downgrade = PostIntegerMigrationsDowngrade + `
 DROP TABLE IF EXISTS issue_trailer_publications;
 DELETE FROM schema_migrations WHERE version>=55;
 `

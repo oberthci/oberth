@@ -253,7 +253,8 @@ call the proxy hostname directly.
 | `priority_grant` | Allow `identity` to request priority up to `max_class` (`high` or `highest`) until RFC3339 `expires`; unscoped admin, audited |
 | `priority_grant_list` | List priority grants and expiry; unscoped admin |
 | `priority_grant_revoke` | Revoke an identity's grant for future submissions; accepted builds keep their priority; unscoped admin, audited |
-| `run_priority` | Bump a waiting run using exact `run_id`, `priority` (`high` or `highest`) and `reason`; unscoped admin, audited |
+| `run_priority` | Set a waiting run using exact `run_id`, `priority` (`low`, `normal`, `high` or `highest`) and `reason`; unscoped admin, audited |
+| `admission_hold` | Admin-only [admission hold](admission-hold.md) with allowed classes and bounded expiry; read through system_status admission.hold. |
 | `admission_release` | Release one admission reservation no owner will release, typically a granted one held for a terminal run whose owner hung; deletes the Workflow first as proof, `force` without it (admin-only, unscoped, audited) |
 
 For `access_allow` and `access_revoke`, `secret` is the exact path recorded in
@@ -273,9 +274,29 @@ among runs the caller is authorized to see. An ambiguous prefix returns the
 matching full IDs; use a longer prefix or the full 32-character ID. Responses
 always include that full ID.
 
-For `run_logs`, omitting `burn` defaults to the run's failed burn and, if `step`
-is also omitted, its failed step. Otherwise an omitted `step` defaults only
-when the selected burn has exactly one step.
+For `run_logs`, an explicit `step` without `burn` selects that step's burn if
+its name is unique across the run's recorded results or active progress. An
+ambiguous name lists the candidate burns and requires `burn`; an unknown name
+returns not-found. If both are omitted, the failed burn/step remains the default.
+An explicit burn without step defaults only when that burn has exactly one step.
+
+`run_list` accepts `status` as one existing display status or a non-empty list:
+`queued`, `running`, `passed`, `failed`, `cancelled`, `superseded`,
+or `infra-retried`. `repo` and `ref` remain
+optional exact filters. Filtering precedes the page limit; queue-first ordering,
+active-row limits and terminal cursors are unchanged. Send the same filters with
+the returned cursor. REST accepts repeated or comma-separated `status` values.
+
+```sh
+oberth mcp call run_list '{"status":"queued","repo":"project"}'
+oberth mcp call run_list '{"status":["failed","infra-retried"],"limit":25}'
+oberth mcp call run_logs '{"id":"01234567","step":"compile"}'
+```
+
+Promotion selectors use the same 8+ character unique-hex-prefix rule as runs,
+including `promote_status`, `promote_retry`, `publish_retry` and promotion-list
+cursors. Ambiguity is checked within the caller's visible repositories and names
+the matching full IDs. Long polls pin the resolved full ID on their first read.
 
 For an active Argo step, retained output may not exist until the step completes.
 `run_logs` and `logs` then return a `step log is pending` error with the run and
@@ -373,7 +394,7 @@ step: a single step can exceed a model's context window.
 | `repo_list` | List registered repositories with upstream and probe state |
 | `repo_archive` / `repo_unarchive` | Archive or restore a repository, preserving history (unscoped admin only); archived repositories refuse new grants |
 | `repo_remove` | Remove a repository mapping and its Git cache (admin-only) |
-| `run_list` | List runs with repository/ref/SHA, size/declared demand, queue position and superseded status; optional repo/ref and `superseded:true` filters (bounded page) |
+| `run_list` | List runs with repository/ref/SHA, size/declared demand, queue position and superseded status; optional repo/ref, display-status (one value or list) and `superseded:true` filters (bounded page) |
 | `audit_list` | Admin-only: verified audit-chain entries newest first, filtered by action prefix, actor, repo and time range (paged) |
 | `schedule_list` | Schedules declared in `.oberth/schedule.yaml`: cron, next run, last outcome, pause (scoped uplinks see their repositories) |
 | `schedule_pause` | Admin-only: pause one schedule entry (audited `schedule.pause`) |
@@ -960,7 +981,7 @@ Issue metadata writes can pass `expected_revision` from a prior read; mismatch
 is a conflict, while omission preserves last-write-wins. See
 [conditional metadata updates](issue-lifecycle.md).
 
-The current MCP surface has **77 tools**, including administrator-only
+The current MCP surface has **78 tools**, including administrator-only
 `publication_abandon`.
 
 The CLI uses `--url`, `OBERTH_MCP_URL`, or `OBERTH_BASE_URL` (with
