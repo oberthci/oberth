@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/oberthci/oberth/internal/testtimeout"
@@ -305,8 +306,10 @@ func TestMCPStreamClientDisconnectStopsOnlyObserver(t *testing.T) {
 }
 
 // This proxy's connection enforces an idle read deadline, modeling the edge
-// timeout independently of the longer origin/tool deadline. Both the old silent
-// JSON response and an initial-only SSE response fail; periodic SSE survives.
+// timeout independently of the longer origin/tool deadline. In-memory HTTP
+// connections let synctest advance deadlines only while all workers are blocked;
+// descheduling the runner cannot consume the proxy's idle allowance. Real TLS
+// and HTTP/2 flushing are also covered by TestMCPStreamTLSHeartbeatAndFinalRPC.
 type idleReadConn struct {
 	net.Conn
 	idle time.Duration
@@ -318,127 +321,157 @@ func (c idleReadConn) Read(p []byte) (int, error) {
 	}
 	return c.Conn.Read(p)
 }
+
+// A single HTTP connection is enough for each proxy fixture. Both Accept and
+// net.Pipe I/O block durably inside synctest, unlike operating-system sockets.
+type streamPipeListener struct {
+	connection chan net.Conn
+	done       chan struct{}
+}
+
+func (l *streamPipeListener) Accept() (net.Conn, error) {
+	select {
+	case conn := <-l.connection:
+		return conn, nil
+	case <-l.done:
+		return nil, net.ErrClosed
+	}
+}
+func (l *streamPipeListener) Close() error   { close(l.done); return nil }
+func (l *streamPipeListener) Addr() net.Addr { return &net.TCPAddr{} }
+
 func TestMCPStreamSurvivesProxyIdleDeadline(t *testing.T) {
 	t.Parallel()
 	for _, mode := range []string{"silent JSON", "initial SSE only", "heartbeat SSE"} {
 		t.Run(mode, func(t *testing.T) {
-			// End the successful long poll only after the proxy has actually
-			// received periodic frames. Wall time cannot prove that happened:
-			// a loaded runner may pause either side past a short deadline.
-			heartbeatsSeen := make(chan struct{})
-			backend := &streamingBackend{fakeBackend: &fakeBackend{}, prepare: func(context.Context, Actor, string, json.RawMessage) (PreparedLongPoll, error) {
-				return func(ctx context.Context) (any, error) {
-					if mode == "heartbeat SSE" {
-						select {
-						case <-heartbeatsSeen:
-							return map[string]bool{"still_running": true}, nil
-						case <-ctx.Done():
-							return nil, ctx.Err()
-						}
-					}
-					select {
-					case <-time.After(testtimeout.Scale(350 * time.Millisecond)):
-						return map[string]bool{"still_running": true}, nil
-					case <-ctx.Done():
-						return nil, ctx.Err()
-					}
-				}, nil
-			}}
-			server := streamTestServer(t, backend)
-			if mode == "initial SSE only" {
-				server.mcpHeartbeatInterval = testtimeout.Scale(time.Second)
-			}
-			handler := server.Handler()
-			if mode == "silent JSON" {
-				handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					select {
-					case <-time.After(testtimeout.Scale(350 * time.Millisecond)):
-						handlerResult := `{"jsonrpc":"2.0","id":"exact-request","result":{}}`
-						_, _ = io.WriteString(w, handlerResult)
-					case <-r.Context().Done():
-					}
-				})
-			}
-			origin := httptest.NewTLSServer(handler)
-			defer origin.Close()
-			transport := origin.Client().Transport.(*http.Transport).Clone()
-			defer transport.CloseIdleConnections()
-			transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-				conn, err := (&net.Dialer{}).DialContext(ctx, network, address)
-				if err != nil {
-					return nil, err
-				}
-				idle := testtimeout.Scale(100 * time.Millisecond)
-				if mode == "heartbeat SSE" {
-					// The frame handshake supplies the success condition. This
-					// remains a deadline, but is only a failure backstop under load.
-					idle = testtimeout.Start(5 * time.Second)
-				}
-				return idleReadConn{Conn: conn, idle: idle}, nil
-			}
-			proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				upstream := r.Clone(r.Context())
-				upstream.RequestURI = ""
-				upstream.URL.Scheme = "https"
-				upstream.URL.Host = strings.TrimPrefix(origin.URL, "https://")
-				response, err := transport.RoundTrip(upstream)
-				if err != nil {
-					w.WriteHeader(524)
-					return
-				}
-				defer response.Body.Close()
-				w.Header().Set("Content-Type", response.Header.Get("Content-Type"))
-				w.WriteHeader(response.StatusCode)
-				buffer := make([]byte, 4096)
-				var heartbeatBytes string
-				heartbeatCount := 0
-				for {
-					n, err := response.Body.Read(buffer)
-					if n > 0 {
-						if mode == "heartbeat SSE" && heartbeatCount < 3 {
-							heartbeatBytes += string(buffer[:n])
-							heartbeatCount = strings.Count(heartbeatBytes, ": keepalive\n\n")
-							if heartbeatCount >= 3 {
-								close(heartbeatsSeen)
+			synctest.Test(t, func(t *testing.T) {
+				// End the successful long poll only after the proxy has actually
+				// received periodic frames. Wall time cannot prove that happened:
+				// a loaded runner may pause either side past a short deadline.
+				heartbeatsSeen := make(chan struct{})
+				backend := &streamingBackend{fakeBackend: &fakeBackend{}, prepare: func(context.Context, Actor, string, json.RawMessage) (PreparedLongPoll, error) {
+					return func(ctx context.Context) (any, error) {
+						if mode == "heartbeat SSE" {
+							select {
+							case <-heartbeatsSeen:
+								return map[string]bool{"still_running": true}, nil
+							case <-ctx.Done():
+								return nil, ctx.Err()
 							}
 						}
-						if _, writeErr := w.Write(buffer[:n]); writeErr != nil {
-							return
-						}
-						if flushErr := http.NewResponseController(w).Flush(); flushErr != nil {
-							return
-						}
+						<-ctx.Done()
+						return nil, ctx.Err()
+					}, nil
+				}}
+				server := streamTestServer(t, backend)
+				server.mcpHeartbeatInterval = 10 * time.Millisecond
+				if mode == "initial SSE only" {
+					server.mcpHeartbeatInterval = time.Hour
+				}
+				handler := server.Handler()
+				if mode == "silent JSON" {
+					handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						<-r.Context().Done()
+					})
+				}
+				listener := &streamPipeListener{connection: make(chan net.Conn), done: make(chan struct{})}
+				originCtx, stopOrigin := context.WithCancel(t.Context())
+				origin := &http.Server{Handler: handler, ReadHeaderTimeout: time.Second, BaseContext: func(net.Listener) context.Context { return originCtx }}
+				serveDone := make(chan error, 1)
+				go func() { serveDone <- origin.Serve(listener) }()
+				defer func() {
+					stopOrigin()
+					_ = origin.Close()
+					if err := <-serveDone; !errors.Is(err, http.ErrServerClosed) {
+						t.Errorf("origin shutdown: %v", err)
 					}
+				}()
+				transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+					client, peer := net.Pipe()
+					select {
+					case listener.connection <- peer:
+						return idleReadConn{Conn: client, idle: 100 * time.Millisecond}, nil
+					case <-ctx.Done():
+						_ = client.Close()
+						_ = peer.Close()
+						return nil, ctx.Err()
+					}
+				}}
+				defer transport.CloseIdleConnections()
+				var proxyErr error
+				proxy := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					upstream := r.Clone(r.Context())
+					upstream.RequestURI = ""
+					upstream.URL.Scheme = "http"
+					upstream.URL.Host = "origin.test"
+					response, err := transport.RoundTrip(upstream)
 					if err != nil {
+						proxyErr = err
+						w.WriteHeader(524)
 						return
 					}
-				}
-			}))
-			defer proxy.Close()
-			req, _ := http.NewRequest(http.MethodPost, proxy.URL+"/mcp", strings.NewReader(waitRPC))
-			if mode == "heartbeat SSE" {
-				ctx, cancel := context.WithTimeout(req.Context(), testtimeout.Start(10*time.Second))
+					defer response.Body.Close()
+					w.Header().Set("Content-Type", response.Header.Get("Content-Type"))
+					w.WriteHeader(response.StatusCode)
+					buffer := make([]byte, 4096)
+					var heartbeatBytes string
+					heartbeatCount := 0
+					for {
+						n, err := response.Body.Read(buffer)
+						if n > 0 {
+							if mode == "heartbeat SSE" && heartbeatCount < 3 {
+								heartbeatBytes += string(buffer[:n])
+								heartbeatCount = strings.Count(heartbeatBytes, ": keepalive\n\n")
+								if heartbeatCount >= 3 {
+									close(heartbeatsSeen)
+								}
+							}
+							if _, writeErr := w.Write(buffer[:n]); writeErr != nil {
+								return
+							}
+							if flushErr := http.NewResponseController(w).Flush(); flushErr != nil {
+								return
+							}
+						}
+						if err != nil {
+							proxyErr = err
+							return
+						}
+					}
+				})
+				req := httptest.NewRequest(http.MethodPost, "http://proxy.test/mcp", strings.NewReader(waitRPC))
+				ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 				defer cancel()
 				req = req.WithContext(ctx)
-			}
-			req.Header.Set("Authorization", "Bearer valid-token")
-			req.Header.Set("Accept", "text/event-stream")
-			response, err := proxy.Client().Do(req)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer response.Body.Close()
-			body, err := io.ReadAll(response.Body)
-			if err != nil {
-				t.Fatal(err)
-			}
-			complete := strings.Contains(string(body), "event: message\n")
-			if complete != (mode == "heartbeat SSE") {
-				t.Fatalf("mode %s status%d complete%v body%s", mode, response.StatusCode, complete, body)
-			}
-			if mode == "silent JSON" && response.StatusCode != 524 {
-				t.Fatalf("silent response status%d, want524", response.StatusCode)
-			}
+				req.Header.Set("Authorization", "Bearer valid-token")
+				req.Header.Set("Accept", "text/event-stream")
+				response := httptest.NewRecorder()
+				started := time.Now()
+				proxy.ServeHTTP(response, req)
+				body := response.Body.Bytes()
+				if mode == "heartbeat SSE" {
+					if !errors.Is(proxyErr, io.EOF) || strings.Count(string(body), ": keepalive\n\n") < 3 || response.Code != http.StatusOK {
+						t.Fatalf("stream did not survive repeated idle resets: status=%d err=%v body=%s", response.Code, proxyErr, body)
+					}
+					_, data, _ := strings.Cut(string(body), "data: ")
+					var result rpcResponse
+					if err := json.Unmarshal([]byte(strings.TrimSpace(data)), &result); err != nil || result.Error != nil || string(result.ID) != `"exact-request"` || result.JSONRPC != "2.0" || !strings.Contains(data, `"still_running":true`) {
+						t.Fatalf("proxy lost the final RPC: err=%v body=%s", err, body)
+					}
+				} else {
+					var timeout net.Error
+					if !errors.As(proxyErr, &timeout) || !timeout.Timeout() || ctx.Err() != nil || time.Since(started) != 100*time.Millisecond {
+						t.Fatalf("proxy refused for a reason other than its idle deadline: %v", proxyErr)
+					}
+				}
+				complete := strings.Contains(string(body), "event: message\n")
+				if complete != (mode == "heartbeat SSE") {
+					t.Fatalf("mode %s status%d complete%v body%s", mode, response.Code, complete, body)
+				}
+				if mode == "silent JSON" && response.Code != 524 {
+					t.Fatalf("silent response status%d, want524", response.Code)
+				}
+			})
 		})
 	}
 }

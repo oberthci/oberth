@@ -15,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"golang.org/x/mod/sumdb/dirhash"
@@ -137,21 +138,29 @@ func TestImmutableArtifactsConcurrentMissProducesOneCompleteVersion(t *testing.T
 }
 
 func TestImmutableArtifactTimeoutIsRetryableAndNeverFallsThrough(t *testing.T) {
-	g := newArtifactGit()
-	g.slow.Store(true)
-	h := artifactHandler(t, g, t.TempDir())
-	h.backendBudget = 10 * time.Millisecond
-	r := artifactRequest(h, ".zip")
-	if r.Code != http.StatusServiceUnavailable || r.Header().Get("Retry-After") != "1" || strings.Contains(r.Body.String(), "private-backend-canary") || g.calls.Load() != 2 {
-		t.Fatalf("slow Git did not get two bounded attempts then retryable refusal: %d %s calls=%d", r.Code, r.Body, g.calls.Load())
-	}
-	if len(h.artifacts.flights) != 0 || len(h.artifacts.builds) != 0 {
-		t.Fatal("timed-out build leaked admission")
-	}
-	g.slow.Store(false)
-	if r := artifactRequest(h, ".zip"); r.Code != 200 {
-		t.Fatalf("negative result was cached: %d %s", r.Code, r.Body)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		// Backend expiry and retry backoff use virtual time. Filesystem and
+		// scheduler latency cannot spend the attempt budget before Git starts.
+		g := newArtifactGit()
+		g.slow.Store(true)
+		h := artifactHandler(t, g, t.TempDir())
+		h.backendBudget = 10 * time.Millisecond
+		started := time.Now()
+		r := artifactRequest(h, ".zip")
+		if r.Code != http.StatusServiceUnavailable || r.Header().Get("Retry-After") != "1" || strings.Contains(r.Body.String(), "private-backend-canary") || g.calls.Load() != 2 {
+			t.Fatalf("slow Git did not get two bounded attempts then retryable refusal: %d %s calls=%d", r.Code, r.Body, g.calls.Load())
+		}
+		if elapsed := time.Since(started); elapsed < 2*h.backendBudget || elapsed > 2*h.backendBudget+time.Second {
+			t.Fatalf("two expired attempts escaped the shared request budget: %s", elapsed)
+		}
+		if len(h.artifacts.flights) != 0 || len(h.artifacts.builds) != 0 {
+			t.Fatal("timed-out build leaked admission")
+		}
+		g.slow.Store(false)
+		if r := artifactRequest(h, ".zip"); r.Code != 200 {
+			t.Fatalf("negative result was cached: %d %s", r.Code, r.Body)
+		}
+	})
 }
 
 func TestImmutableArtifactCorruptionFailsClosedWithoutRegenerating(t *testing.T) {

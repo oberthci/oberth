@@ -95,8 +95,12 @@ func TestConcurrentStatusWritersAndReceiveLookups(t *testing.T) {
 		}
 		start := make(chan struct{})
 		ready := make(chan struct{}, writers)
-		errs := make(chan error, writers+1)
+		errs := make(chan error, 2*writers+1)
 		lookupStarted := make(chan struct{})
+		// Each status commit requests a read before its worker may write the
+		// step. This proves overlap without a reader spinning at a rate set by
+		// host scheduling, starving the very writers it is meant to observe.
+		lookupRequests := make(chan chan struct{})
 		var wg sync.WaitGroup
 		for _, id := range ids {
 			wg.Go(func() {
@@ -107,6 +111,9 @@ func TestConcurrentStatusWritersAndReceiveLookups(t *testing.T) {
 					errs <- err
 					return
 				}
+				observed := make(chan struct{})
+				lookupRequests <- observed
+				<-observed
 				if _, err := s.PutStepResult(ctx, model.StepResult{RunID: id, Stage: "test", Step: fmt.Sprintf("step-%d", round), Ordinal: round, Status: model.StepPassed, DeclaredSize: "S"}); err != nil {
 					errs <- err
 				}
@@ -151,26 +158,27 @@ func TestConcurrentStatusWritersAndReceiveLookups(t *testing.T) {
 			close(lookupStarted)
 			if firstErr != nil {
 				errs <- fmt.Errorf("round %d first concurrent lookup: %w", round, firstErr)
-				return
 			}
 			for {
-				if err := lookup(); err != nil {
-					errs <- fmt.Errorf("round %d lookup during commits: %w", round, err)
-					return
-				}
-				concurrentLookups++
 				select {
+				case observed := <-lookupRequests:
+					if err := lookup(); err != nil {
+						errs <- fmt.Errorf("round %d lookup during commits: %w", round, err)
+					} else {
+						concurrentLookups++
+					}
+					// Release this worker on failure too, so teardown can join it.
+					close(observed)
 				case <-writersDone:
 					return
-				default:
 				}
 			}
 		}()
 		wg.Wait()
 		close(writersDone)
 		<-readerDone
-		if concurrentLookups == 0 {
-			t.Errorf("round %d: no successful lookup after writers started", round)
+		if concurrentLookups != writers {
+			t.Errorf("round %d: lookups alongside commits = %d, want %d", round, concurrentLookups, writers)
 		}
 		close(errs)
 		for err := range errs {
