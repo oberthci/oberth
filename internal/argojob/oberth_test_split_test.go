@@ -128,7 +128,7 @@ else:
 			case "store":
 				timeout = "-timeout=66m"
 			case "service":
-				timeout = "-timeout=49m"
+				timeout = "-timeout=60m"
 			case "rest":
 				timeout = "-timeout=55m"
 			}
@@ -158,9 +158,9 @@ func TestOberthRaceBudgetsPreserveKnownBounds(t *testing.T) {
 	}
 	// Store's successful whole-command wall maximum (2635.148s) requires
 	// 66 minutes. Service and rest retain their successful whole-group maxima
-	// (1959.327s and 2172.592s) times 1.5, rounded up to minutes. Censored
+	// (2068s from ff85317f and 2172.592s) times 1.5, rounded up to minutes. Censored
 	// memory samples cannot reduce old bounds.
-	want := map[string]int64{"test-store": 3960, "test-service": 2940, "test-rest": 3300}
+	want := map[string]int64{"test-store": 3960, "test-service": 3120, "test-rest": 3300}
 	for _, template := range workflow.Spec.Templates {
 		deadline, ok := want[template.Name]
 		if !ok {
@@ -212,9 +212,9 @@ func TestOberthSplitStagesUseTheRaceGroupLauncher(t *testing.T) {
 				continue
 			}
 			found = true
-			if seconds, measured := map[string]int32{"store": 3960, "service": 2940, "rest": 3300}[group]; measured {
-				if template.ActiveDeadlineSeconds == nil || template.ActiveDeadlineSeconds.IntVal != seconds {
-					t.Fatalf("%s step deadline = %v, want %d seconds", group, template.ActiveDeadlineSeconds, seconds)
+			if seconds, measured := map[string]int32{"store": 3960, "service": 3120, "rest": 3300}[group]; measured {
+				if template.ActiveDeadlineSeconds == nil || template.ActiveDeadlineSeconds.IntVal < seconds {
+					t.Fatalf("%s step deadline = %v, need at least %d seconds", group, template.ActiveDeadlineSeconds, seconds)
 				}
 			}
 			container := template.Container

@@ -240,7 +240,7 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 1250m
+          cpu: 1000m # measured request 1250m; retain the CI policy cap
           memory: 64Mi
         limits:
           cpu: 2000m
@@ -383,7 +383,7 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 1250m
+          cpu: 1000m # measured request 1250m; retain the CI policy cap
           memory: 192Mi
         limits:
           cpu: 2000m
@@ -434,7 +434,7 @@ spec:
         readOnly: false
       resources: # remeasure: unmet need limits.cpu 4500m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
-          cpu: 3496m
+          cpu: 1000m # measured request 3496m; retain the CI policy cap
           memory: 3584Mi
         limits:
           cpu: 4000m
@@ -494,7 +494,7 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 1360m
+          cpu: 1000m # measured request 1360m; retain the CI policy cap
           memory: 4032Mi
         limits:
           cpu: 1520m
@@ -726,7 +726,7 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 1338m
+          cpu: 1000m # measured request 1338m; retain the CI policy cap
           memory: 960Mi
         limits:
           cpu: 1360m
@@ -788,7 +788,7 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 1333m
+          cpu: 1000m # measured request 1333m; retain the CI policy cap
           memory: 960Mi
         limits:
           cpu: 1350m
@@ -838,7 +838,7 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 1250m
+          cpu: 1000m # measured request 1250m; retain the CI policy cap
           memory: 128Mi
         limits:
           cpu: 2000m
@@ -957,7 +957,7 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 3113m
+          cpu: 1000m # measured request 3113m; retain the CI policy cap
           memory: 64Mi
         limits:
           cpu: 3113m
@@ -1017,7 +1017,7 @@ spec:
         readOnly: true
       resources: # remeasure: unmet need limits.cpu 4510m, requests.cpu 4158m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
-          cpu: 4000m
+          cpu: 1000m # measured request 4000m; retain the CI policy cap
           memory: 6016Mi
         limits:
           cpu: 4000m
@@ -1074,11 +1074,11 @@ spec:
       # Keep 8Gi for headroom; the analysis process already uses a 2GiB Go memory target.
       resources: # remeasure: unmet need limits.cpu 6010m, memory 8512Mi, requests.cpu 4062m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
-          cpu: 4000m
-          memory: 8192Mi
+          cpu: 1000m # measured request 4000m; retain the CI policy cap
+          memory: 8Gi
         limits:
           cpu: 4000m
-          memory: 8192Mi
+          memory: 8Gi
   - name: deadcode
     automountServiceAccountToken: false
     metadata:
@@ -1188,7 +1188,7 @@ spec:
       volumeMounts: []
       resources:
         requests:
-          cpu: 3591m
+          cpu: 1000m # measured request 3591m; retain the CI policy cap
           memory: 3072Mi
         limits:
           cpu: 4000m
@@ -1270,18 +1270,22 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 971m
+          cpu: 1000m # measured request 1595m; retain the CI policy cap
           memory: 4Gi
+          ephemeral-storage: 650Mi
         limits:
-          cpu: 2000m
+          cpu: 2950m
           memory: 4Gi
+          ephemeral-storage: 780Mi
+
+
   - name: release-test-service
     automountServiceAccountToken: false
     metadata:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
-    activeDeadlineSeconds: 2940
+    activeDeadlineSeconds: 3600
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -1330,11 +1334,15 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 958m
+          cpu: 1000m # measured request 1533m; retain the CI policy cap
           memory: 4Gi
+          ephemeral-storage: 488Mi
         limits:
-          cpu: 2000m
+          cpu: 2930m
           memory: 4Gi
+          ephemeral-storage: 585Mi
+
+
   - name: release-test-rest
     automountServiceAccountToken: false
     metadata:
@@ -1396,12 +1404,15 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 965m
-          memory: 4Gi
-        limits:
-          cpu: 3000m
+          cpu: 1000m # measured request 2249m; retain the CI policy cap
           memory: 6208Mi
+        limits:
+          cpu: 4000m
+          memory: 6208Mi
+
+  # The native Git cache suite is a binding source gate.
   - name: release-test-gitcache
+    activeDeadlineSeconds: 620
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -1451,11 +1462,14 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 416m
-          memory: 326160Ki
+          cpu: 796m
+          memory: 896Mi
+          ephemeral-storage: 222Mi
         limits:
-          cpu: 2000m
-          memory: 576Mi
+          cpu: 2000m # retain the two-processor race launcher budget
+          memory: 896Mi
+          ephemeral-storage: 267Mi
+
   - name: release-chart-test
     activeDeadlineSeconds: 60
     automountServiceAccountToken: false
@@ -1559,7 +1573,7 @@ spec:
       # about 1.69Gi above that observation. Bound compiler processes and set a Go memory target above.
       resources: # remeasure: unmet need limits.cpu 6010m, memory 9792Mi, requests.cpu 5494m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
-          cpu: 4000m
+          cpu: 1000m # measured request 4000m; retain the CI policy cap
           memory: 8192Mi
         limits:
           cpu: 4000m
@@ -1623,7 +1637,7 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: 1250m
+          cpu: 1000m # measured request 1250m; retain the CI policy cap
           memory: 320Mi
         limits:
           cpu: 2000m
@@ -1802,7 +1816,7 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: 1361m
+          cpu: 1000m # measured request 1361m; retain the CI policy cap
           memory: 5888Mi
         limits:
           cpu: 2090m
@@ -1878,7 +1892,7 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: 1250m
+          cpu: 1000m # measured request 1250m; retain the CI policy cap
           memory: 384Mi
         limits:
           cpu: 2000m
@@ -1948,7 +1962,7 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: 1096m
+          cpu: 1000m # measured request 1096m; retain the CI policy cap
           memory: 640Mi
         limits:
           cpu: 2000m
@@ -2405,7 +2419,7 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: 2785m
+          cpu: 1000m # measured request 2785m; retain the CI policy cap
           memory: 1984Mi
         limits:
           cpu: 2980m

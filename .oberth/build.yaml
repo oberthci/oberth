@@ -172,7 +172,7 @@ spec:
       args: ["/usr/bin/python3 -I -B hack/test-new-migration.py; /usr/bin/python3 -I -B hack/test-generic-names.py; /usr/bin/python3 -I -B hack/check-generic-names.py; /usr/bin/python3 -I -B hack/test-private-addresses.py; exec /usr/bin/python3 -I -B hack/check-private-addresses.py"]
       resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
-          cpu: 1470m
+          cpu: 1000m # measured request 1470m; retain the CI policy cap
           memory: 256Mi
         limits:
           cpu: 1500m
@@ -264,7 +264,7 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: '2'
+          cpu: 1000m # measured request 2; retain the CI policy cap
           memory: 128Mi
         limits:
           cpu: 2000m
@@ -321,7 +321,7 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: '2'
+          cpu: 1000m # measured request 2; retain the CI policy cap
           memory: 192Mi
         limits:
           cpu: 2000m
@@ -380,7 +380,7 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 1288m
+          cpu: 1000m # measured request 1288m; retain the CI policy cap
           memory: 2368Mi
         limits:
           cpu: 2000m
@@ -497,7 +497,7 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 2365m
+          cpu: 1000m # measured request 2365m; retain the CI policy cap
           memory: 2688Mi
           ephemeral-storage: 64Mi
         limits:
@@ -902,7 +902,7 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: '2'
+          cpu: 1000m # measured request 2; retain the CI policy cap
           memory: 512Mi
         limits:
           cpu: 2000m
@@ -1037,12 +1037,12 @@ spec:
         subPath: trivy-cache
       resources: # remeasure: unmet need limits.cpu 5830m, requests.cpu 4845m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
-          cpu: 4000m
-          memory: 5696Mi
+          cpu: 1000m # measured request 4000m; retain the CI policy cap
+          memory: 8Gi
           ephemeral-storage: 195Mi
         limits:
           cpu: 4000m
-          memory: 5696Mi
+          memory: 8Gi
           ephemeral-storage: 234Mi
   # ---- parallel race-test burns ----
   # Each package runs once: dedicated store/service/gitcache groups and the
@@ -1190,19 +1190,19 @@ spec:
       # leave room above the 2GiB Go heap target for the race detector.
       resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
-          cpu: 1595m
-          memory: 2432Mi
+          cpu: 1000m # measured request 1595m; retain the CI policy cap
+          memory: 4Gi
           ephemeral-storage: 650Mi
         limits:
           cpu: 2950m
-          memory: 2432Mi
+          memory: 4Gi
           ephemeral-storage: 780Mi
 
 
   - name: test-service
     automountServiceAccountToken: false
     # Maximum observed race duration times 1.5, rounded up to minutes.
-    activeDeadlineSeconds: 3593
+    activeDeadlineSeconds: 3600
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1258,12 +1258,12 @@ spec:
         subPath: trivy-cache
       resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
-          cpu: 1533m
-          memory: 2560Mi
+          cpu: 1000m # measured request 1533m; retain the CI policy cap
+          memory: 4Gi
           ephemeral-storage: 488Mi
         limits:
           cpu: 2930m
-          memory: 2560Mi
+          memory: 4Gi
           ephemeral-storage: 585Mi
 
 
@@ -1328,7 +1328,7 @@ spec:
         subPath: trivy-cache
       resources: # remeasure: unmet need limits.cpu 4340m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
-          cpu: 2249m
+          cpu: 1000m # measured request 2249m; retain the CI policy cap
           memory: 6208Mi
         limits:
           cpu: 4000m
@@ -1336,7 +1336,8 @@ spec:
 
   # The native Git cache suite is a binding source gate.
   - name: test-gitcache
-    activeDeadlineSeconds: 476
+    # Observed 413s; retain at least 1.5x execution headroom.
+    activeDeadlineSeconds: 620
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -1397,7 +1398,7 @@ spec:
           memory: 896Mi
           ephemeral-storage: 222Mi
         limits:
-          cpu: 1440m
+          cpu: 2000m # retain the two-processor race launcher budget
           memory: 896Mi
           ephemeral-storage: 267Mi
 
@@ -1459,14 +1460,15 @@ spec:
         subPath: trivy-cache
       resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
-          cpu: 2348m
+          cpu: 1000m # measured request 2348m; retain the CI policy cap
           memory: 7616Mi
         limits:
           cpu: 2990m
           memory: 7616Mi
 
   - name: test-static-git-runtime
-    activeDeadlineSeconds: 431
+    # Observed 294s; retain at least 1.5x execution headroom.
+    activeDeadlineSeconds: 441
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -1568,7 +1570,7 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 1989m
+          cpu: 1000m # measured request 1989m; retain the CI policy cap
           memory: 512Mi
           ephemeral-storage: 204Mi
         limits:
@@ -1617,7 +1619,7 @@ spec:
         value: "/tmp/oberth-trivy"
       resources:
         requests:
-          cpu: 1052m
+          cpu: 1000m # measured request 1052m; retain the CI policy cap
           memory: 3136Mi
         limits:
           cpu: 4000m
@@ -1651,7 +1653,7 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 1383m
+          cpu: 1000m # measured request 1383m; retain the CI policy cap
           memory: 192Mi
         limits:
           cpu: 2000m
@@ -1895,7 +1897,7 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 2660m
+          cpu: 1000m # measured request 2660m; retain the CI policy cap
           memory: 2176Mi
         limits:
           cpu: 3000m
@@ -1963,7 +1965,7 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 2614m
+          cpu: 1000m # measured request 2614m; retain the CI policy cap
           memory: 2432Mi
         limits:
           cpu: 2770m
@@ -2028,7 +2030,7 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 2614m
+          cpu: 1000m # measured request 2614m; retain the CI policy cap
           memory: 2432Mi
         limits:
           cpu: 2680m
@@ -2164,7 +2166,7 @@ spec:
         subPath: vpt-private
       resources:
         requests:
-          cpu: 1390m
+          cpu: 1000m # measured request 1390m; retain the CI policy cap
           memory: 4096Mi
           ephemeral-storage: 1121Mi
         limits:
@@ -2308,7 +2310,7 @@ spec:
       # the compiler/linker and parent processes. Confirm CI cgroup peaks.
       resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
-          cpu: 1951m
+          cpu: 1000m # measured request 1951m; retain the CI policy cap
           memory: 3136Mi
         limits:
           cpu: 2950m

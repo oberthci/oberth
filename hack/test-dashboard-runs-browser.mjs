@@ -140,7 +140,7 @@ try {
     assert.equal(await page.locator('.runs-table > [data-run-id="scheduled-running"] > div:last-child').textContent(),'schedule: nightly');
     assert.equal(await page.locator('.runs-table > [data-run-id="scheduled-running"] > div:last-child').getAttribute('title'),'schedule: nightly');
     assert.ok(!(await page.locator('.runs-table > .trow > div:last-child').allTextContents()).some(text=>text.startsWith('Priority ')));
-    assert.equal(await page.locator('.runs-table > [data-run-id="scheduled-queued"] > div:last-child').textContent(),'preparing to run');
+    assert.equal(await page.locator('.runs-table > [data-run-id="scheduled-queued"] > div:last-child').textContent(),'awaiting scheduler','a queued fixture without an admission observation uses the scheduler fallback');
     assert.equal(await page.locator('.repo-side .side-head').textContent(),'Retained runs');
     await capture('after-runs');
     if (width === 1440) {
@@ -183,7 +183,7 @@ try {
     await page.locator('#runHistory [data-run-id="old-superseded"]').first().waitFor();
     assert.equal(await page.locator('#runHistory .runs-table > [data-run-id]').count(), 2);
     assert.equal(await page.locator('#runHistory .repo-name .v4b').count(),0,'history rows have no inline badges');
-    assert.equal(await page.locator('#runHistory .runs-table > [data-run-id="old-failed"] > div:last-child').textContent(),'fixture failure','existing history message wins over schedule fallback');
+    assert.equal(await page.locator('#runHistory .runs-table > [data-run-id="old-failed"] > div:last-child').textContent(),'priority high · history priority fixture failure','history preserves priority and the existing failure message instead of the schedule fallback');
     delayOlder=true;
     await page.locator('[data-action="older-attempts"]').focus();
     await page.locator('[data-action="older-attempts"]').press('Enter');

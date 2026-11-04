@@ -3042,9 +3042,9 @@ records trust the Kubernetes API/kubelet and bind observation time separately
 from container event times; they are not independent execution attestations.
 
 The cold OpenBao CI leaf fixes compiler parallelism at 1, GOMAXPROCS 2 and a
-256 MiB per-process Go memory target within its unchanged 1 GiB container limit.
+256 MiB per-process Go memory target within its 3136Mi container limit.
 Download, cold compilation and execution have separate 45s/600s/120s bounds;
-the 780s outer deadline includes 15s cleanup margin. Download uses 40s plus 5s
+the 791s outer deadline leaves 26s cleanup margin. Download uses 40s plus 5s
 TERM-to-KILL, compilation 595s plus 5s TERM-to-KILL; verification/extraction
 are inside the download phase. Race instrumentation, all
 `TestPolicyIsolation` cases and the widened-policy negative control remain

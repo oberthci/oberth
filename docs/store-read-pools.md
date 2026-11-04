@@ -70,7 +70,7 @@ does not test power-loss durability.
 SQLite has no PostgreSQL `fsync`, `synchronous_commit` or `full_page_writes`
 settings. There is no new production setting or environment override.
 
-Branch `test-store` and release `release-test` mount a private 768Mi memory
+Branch `test-store` and release `release-test-store` mount a private 768Mi memory
 `emptyDir` and pass `OBERTH_TEST_STORE_TMPDIR` to the store test binary. Its
 test entry point sets both `TMPDIR` (for `os.MkdirTemp`) and `GOTMPDIR` (for
 Go 1.26 `testing.TempDir`). Other test binaries and the Go build cache keep
@@ -78,18 +78,20 @@ their original directories. Without that variable, local tests keep their
 normal temporary directory; a caller with sufficient memory can select a
 private tmpfs directory explicitly.
 
-The tmpfs is included in the existing container memory envelope: 4Gi for
-`test-store`, with a 2GiB Go heap target, and 8Gi for `release-test`, with its
-4GiB target. CPU requests are 971m and 1000m respectively, with limits of
-2 and 4 CPU. The branch store lane uses a 66-minute per-package deadlock
-bound; service uses 49 minutes and the remaining-package lane uses 55 minutes.
-The release race suite retains its independently configured 55-minute bound.
+The tmpfs is included in each store container's 4Gi memory envelope, with a
+2GiB Go heap target. Branch and release store leaves both request 1000m CPU
+and allow up to 2950m. Their per-package deadlock bound is 66 minutes; service
+uses 60 minutes and the remaining-package lane uses 55 minutes. Release race
+groups use the same resource declarations and deadlines as the branch groups.
 
 The successful whole-store command took 2,635.148 seconds on a loaded host,
 including scheduler pauses. Applying 1.5× wall-time headroom and rounding up to
-minutes gives 66 minutes. Earlier successful whole-group race runs took
-1,959.327 seconds for service and 2,172.592 seconds for the remaining packages,
-which give 49 and 55 minutes. The Git-cache lane retains its 20-minute bound.
+minutes gives 66 minutes. The remaining-package lane retains its 55-minute
+bound from a successful 2,172.592-second whole-group run. Service's newer
+2,068-second observation requires at least 3,102 seconds; both its inner and
+outer watchdogs now allow 60 minutes. The Git-cache package watchdog remains
+20 minutes, while its measured 413-second container run has a 620-second outer
+deadline. See the [v0.17.85 resource notes](releases/v0.17.85.md).
 These package watchdogs allow slower deadlock detection; individual test
 contexts and assertions retain their existing bounds. Go worker counts remain
 bounded. Native wall times do not establish CI resource headroom: qualify the

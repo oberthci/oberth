@@ -35,7 +35,7 @@ const server = createServer((req, res) => {
   }
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-const browser = await chromium.launch({headless: true, args: ['--no-sandbox']});
+const browser = await chromium.launch({headless: true, args: ['--no-sandbox'], ...(process.env.PLAYWRIGHT_CHANNEL ? {channel: process.env.PLAYWRIGHT_CHANNEL} : {})});
 const page = await browser.newPage();
 page.setDefaultTimeout(5000);
 const errors = [];
