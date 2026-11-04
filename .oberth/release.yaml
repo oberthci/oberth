@@ -306,10 +306,10 @@ spec:
       resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
           cpu: 625m
-          memory: 384Mi
+          memory: 704Mi
         limits:
           cpu: 1000m
-          memory: 384Mi
+          memory: 704Mi
   - name: copy-trivy
     automountServiceAccountToken: false
     metadata:
@@ -420,7 +420,7 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
-    activeDeadlineSeconds: 167
+    activeDeadlineSeconds: 168
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -701,7 +701,7 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
-    activeDeadlineSeconds: 92
+    activeDeadlineSeconds: 126
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -763,7 +763,7 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
-    activeDeadlineSeconds: 116
+    activeDeadlineSeconds: 132
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -932,7 +932,7 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 625m
+          cpu: 686m
           memory: 192Mi
         limits:
           cpu: 1000m
@@ -1092,17 +1092,17 @@ spec:
       resources: # remeasure: unmet need limits.cpu 4510m, requests.cpu 4158m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
           cpu: 4000m
-          memory: 5952Mi
+          memory: 6016Mi
         limits:
           cpu: 4000m
-          memory: 5952Mi
+          memory: 6016Mi
   - name: golangci-lint-run
     automountServiceAccountToken: false
     metadata:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
-    activeDeadlineSeconds: 551
+    activeDeadlineSeconds: 563
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -1222,7 +1222,7 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
-    activeDeadlineSeconds: 6098
+    activeDeadlineSeconds: 7401
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src

@@ -158,13 +158,13 @@ spec:
       workingDir: /work/src
       command: ["/bin/sh", "-ec"]
       args: ["/usr/bin/python3 -I -B hack/test-generic-names.py; exec /usr/bin/python3 -I -B hack/check-generic-names.py"]
-      resources:
+      resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
-          cpu: '1'
-          memory: 128Mi
+          cpu: 1470m
+          memory: 256Mi
         limits:
-          cpu: 1000m
-          memory: 128Mi
+          cpu: 1500m
+          memory: 256Mi
   # ---- setup burn (8 sequential steps) ----
   # Maps to: Test("setup", repositorySteps(inlineToolchainSteps()...)...)
   #
@@ -355,7 +355,7 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 594m
+          cpu: 1288m
           memory: 2368Mi
         limits:
           cpu: 2000m
@@ -790,7 +790,7 @@ spec:
         subPath: trivy-cache
       resources: # remeasure: fresh uncensored measurements required
         requests:
-          cpu: 287m
+          cpu: 360m
           memory: 3968Mi
         limits:
           cpu: 3000m
@@ -868,7 +868,7 @@ spec:
   # twenty-minute timeout provides headroom; independent Pods bound contention.
   # Give each group a bounded two-CPU lane; workflow parallelism remains two.
   - name: test-store
-    activeDeadlineSeconds: 2102
+    activeDeadlineSeconds: 2520
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -923,17 +923,17 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
-      resources:
+      resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
-          cpu: 1535m
+          cpu: 1595m
           memory: 2432Mi
           ephemeral-storage: 650Mi
         limits:
-          cpu: 2900m
+          cpu: 2950m
           memory: 2432Mi
           ephemeral-storage: 780Mi
   - name: test-service
-    activeDeadlineSeconds: 1671
+    activeDeadlineSeconds: 3593
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -988,18 +988,18 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
-      resources:
+      resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
           cpu: 1533m
-          memory: 2368Mi
+          memory: 2560Mi
           ephemeral-storage: 488Mi
         limits:
-          cpu: 2890m
-          memory: 2368Mi
+          cpu: 2930m
+          memory: 2560Mi
           ephemeral-storage: 585Mi
   - name: test-rest
     automountServiceAccountToken: false
-    activeDeadlineSeconds: 1889
+    activeDeadlineSeconds: 2288
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1057,14 +1057,14 @@ spec:
         subPath: trivy-cache
       resources: # remeasure: unmet need limits.cpu 4340m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
-          cpu: 1757m
+          cpu: 2249m
           memory: 6208Mi
         limits:
           cpu: 4000m
           memory: 6208Mi
   # The native Git cache suite is a binding source gate.
   - name: test-gitcache
-    activeDeadlineSeconds: 296
+    activeDeadlineSeconds: 476
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -1119,18 +1119,18 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
-      resources:
+      resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
           cpu: 796m
-          memory: 512Mi
+          memory: 896Mi
           ephemeral-storage: 222Mi
         limits:
           cpu: 1440m
-          memory: 512Mi
+          memory: 896Mi
           ephemeral-storage: 267Mi
   - name: build-static-git-runtime
     automountServiceAccountToken: false
-    activeDeadlineSeconds: 354
+    activeDeadlineSeconds: 452
     container:
       image: "golang:1.26.10-alpine3.23@sha256:a07f231c19b03e6106cf442f02a5bcf262147e744d15b7b5e4b6d81d420c70a0"
       workingDir: /work/src
@@ -1192,7 +1192,7 @@ spec:
           cpu: 2990m
           memory: 7616Mi
   - name: test-static-git-runtime
-    activeDeadlineSeconds: 266
+    activeDeadlineSeconds: 431
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -1231,11 +1231,11 @@ spec:
       resources:
         requests:
           cpu: 728m
-          memory: 256Mi
+          memory: 320Mi
           ephemeral-storage: 196Mi
         limits:
-          cpu: 1740m
-          memory: 256Mi
+          cpu: 1930m
+          memory: 320Mi
           ephemeral-storage: 235Mi
   # Every commit/file in the offline, real multi-pack source history.
   - name: test-archive-history
@@ -1294,11 +1294,11 @@ spec:
       resources:
         requests:
           cpu: 1989m
-          memory: 384Mi
+          memory: 512Mi
           ephemeral-storage: 204Mi
         limits:
           cpu: 2020m
-          memory: 384Mi
+          memory: 512Mi
           ephemeral-storage: 245Mi
   # ---- security burn (single step) ----
   # Maps to: Test("security", repositorySteps(
@@ -1341,7 +1341,7 @@ spec:
         value: "/tmp/oberth-trivy"
       resources:
         requests:
-          cpu: 502m
+          cpu: 1052m
           memory: 3136Mi
         limits:
           cpu: 4000m
@@ -1374,7 +1374,7 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 382m
+          cpu: 1383m
           memory: 192Mi
         limits:
           cpu: 2000m
@@ -1573,16 +1573,16 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 2261m
+          cpu: 2614m
           memory: 2432Mi
         limits:
-          cpu: 2360m
+          cpu: 2770m
           memory: 2432Mi
   # ---- build-darwin-arm64 burn (single step) ----
   # Branch verification of the darwin/arm64 release target (#699).
   - name: build-darwin-arm64
     automountServiceAccountToken: false
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 62
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1799,7 +1799,7 @@ spec:
         subPath: vpt-tools
       resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
-          cpu: 156m
+          cpu: 620m
           memory: 512Mi
         limits:
           cpu: 1000m
@@ -1827,17 +1827,17 @@ spec:
         readOnly: true
       resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
-          cpu: 100m
-          memory: 384Mi
+          cpu: 485m
+          memory: 640Mi
         limits:
           cpu: 1000m
-          memory: 384Mi
+          memory: 640Mi
   # ---- test-openbao burn (#803) ----
   # Real OpenBao integration test: starts a dev server, applies rendered
   # per-repo/per-step policies, and asserts ACL isolation with real reads.
   # Cold private caches fetch verified Go modules as well as the pinned OpenBao download.
   - name: test-openbao
-    activeDeadlineSeconds: 780
+    activeDeadlineSeconds: 791
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -1910,7 +1910,7 @@ spec:
       resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
           cpu: 1951m
-          memory: 2432Mi
+          memory: 3136Mi
         limits:
           cpu: 2950m
-          memory: 2432Mi
+          memory: 3136Mi
