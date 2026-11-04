@@ -1073,12 +1073,12 @@ spec:
         mountPath: /tmp/oberth-tools
         subPath: vet
         readOnly: true
-      resources:
+      resources: # remeasure: fresh uncensored measurements required
         requests:
           cpu: 1096m
           memory: 4Gi
         limits:
-          cpu: 3000m
+          cpu: 4510m
           memory: 5952Mi
   - name: golangci-lint-run
     automountServiceAccountToken: false
@@ -1129,13 +1129,13 @@ spec:
         readOnly: true
       # Historical release-lint peak: 5,838,360,576 sampled bytes.
       # Keep 8Gi for headroom; the analysis worker already uses a 2GiB Go memory target.
-      resources:
+      resources: # remeasure: fresh uncensored measurements required
         requests:
           cpu: 1250m
           memory: 8Gi
         limits:
-          cpu: 4000m
-          memory: 8Gi
+          cpu: 6010m
+          memory: 8474Mi
   - name: release-scan
     automountServiceAccountToken: false
     metadata:
@@ -1260,13 +1260,13 @@ spec:
         readOnly: true
       # Historical unbounded race run reached 8Gi. Serialize packages and
       # bound Go workers and set a memory target above; remeasure this workload on the next release.
-      resources:
+      resources: # remeasure: fresh uncensored measurements required
         requests:
           cpu: 1250m
           memory: 8Gi
         limits:
-          cpu: 4000m
-          memory: 8Gi
+          cpu: 6020m
+          memory: 12289Mi
   - name: release-chart-test
     automountServiceAccountToken: false
     metadata:
@@ -1964,13 +1964,13 @@ spec:
       # Six copies of the trusted tools go through the page cache; under
       # heavy node I/O, dirty pages outrun writeback and a 512Mi limit
       # OOM-killed this step (v0.17.38 release run ef637d76).
-      resources:
+      resources: # remeasure: fresh uncensored measurements required
         requests:
           cpu: 250m
           memory: 2Gi
         limits:
           cpu: 1000m
-          memory: 3Gi
+          memory: 4608Mi
   - name: fetch-apko
     automountServiceAccountToken: false
     metadata:

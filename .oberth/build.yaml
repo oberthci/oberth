@@ -362,6 +362,7 @@ spec:
 
   # [install-helm] go install helm v4.2.3
   - name: install-helm
+    activeDeadlineSeconds: 99
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -412,12 +413,13 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 118m
-          memory: 4Gi
+          cpu: 1000m
+          memory: 2001Mi
+          ephemeral-storage: 64Mi
         limits:
           cpu: 2000m
-          memory: 4Gi
-
+          memory: 4017Mi
+          ephemeral-storage: 64Mi
   # [fetch-shellcheck] download shellcheck v0.10.0 static binary from upstream release
   - name: fetch-shellcheck
     automountServiceAccountToken: false
@@ -785,19 +787,19 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
-      resources:
+      resources: # remeasure: fresh uncensored measurements required
         requests:
           cpu: 100m
           memory: 995420Ki
         limits:
           cpu: 3000m
-          memory: 1472Mi
-
+          memory: 5935Mi
   # [golangci-lint-./...]
   # Keep one analysis worker under load. Use 6GiB of the actual 8Gi limit
   # for the Go runtime, leaving 2GiB headroom without the old 2GiB soft cap.
   # Internal --timeout is cooperative; the wrapper enforces a process deadline.
   - name: golangci-lint-run
+    activeDeadlineSeconds: 436
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -849,11 +851,13 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 1996m
-          memory: 2867000Ki
+          cpu: 1000m
+          memory: 3365Mi
+          ephemeral-storage: 195Mi
         limits:
           cpu: 4000m
-          memory: 8Gi
+          memory: 8474Mi
+          ephemeral-storage: 234Mi
   # ---- parallel race-test burns ----
   # Each package runs once: dedicated store/service/gitcache groups and the
   # remainder discovered by go list ./.... Git-cache already has a required
@@ -863,6 +867,7 @@ spec:
   # twenty-minute timeout provides headroom; independent Pods bound contention.
   # Give each group a bounded two-CPU lane; workflow parallelism remains two.
   - name: test-store
+    activeDeadlineSeconds: 2102
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -919,14 +924,15 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 971m
-          memory: 4Gi
+          cpu: 1000m
+          memory: 1986Mi
+          ephemeral-storage: 650Mi
         limits:
           cpu: 2000m
-          memory: 4Gi
-
-
+          memory: 2383Mi
+          ephemeral-storage: 780Mi
   - name: test-service
+    activeDeadlineSeconds: 1671
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -983,13 +989,13 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 958m
-          memory: 4Gi
+          cpu: 1000m
+          memory: 1853Mi
+          ephemeral-storage: 488Mi
         limits:
           cpu: 2000m
-          memory: 4Gi
-
-
+          memory: 2311Mi
+          ephemeral-storage: 585Mi
   - name: test-rest
     automountServiceAccountToken: false
     container:
@@ -1047,16 +1053,16 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
-      resources:
+      resources: # remeasure: fresh uncensored measurements required
         requests:
           cpu: 965m
           memory: 4Gi
         limits:
           cpu: 3000m
           memory: 6208Mi
-
   # The native Git cache suite is a binding source gate.
   - name: test-gitcache
+    activeDeadlineSeconds: 296
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -1113,12 +1119,13 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 416m
-          memory: 326160Ki
+          cpu: 670m
+          memory: 348Mi
+          ephemeral-storage: 222Mi
         limits:
           cpu: 2000m
-          memory: 576Mi
-
+          memory: 470Mi
+          ephemeral-storage: 267Mi
   - name: build-static-git-runtime
     automountServiceAccountToken: false
     container:
@@ -1174,15 +1181,15 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
-      resources:
+      resources: # remeasure: fresh uncensored measurements required
         requests:
           cpu: 1350m
           memory: 4Gi
         limits:
           cpu: 2000m
-          memory: 6208Mi
-
+          memory: 7608Mi
   - name: test-static-git-runtime
+    activeDeadlineSeconds: 266
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -1220,14 +1227,16 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 377m
-          memory: 173340Ki
+          cpu: 610m
+          memory: 212Mi
+          ephemeral-storage: 196Mi
         limits:
           cpu: 2000m
-          memory: 448Mi
-
+          memory: 254Mi
+          ephemeral-storage: 235Mi
   # Every commit/file in the offline, real multi-pack source history.
   - name: test-archive-history
+    activeDeadlineSeconds: 104
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -1281,12 +1290,13 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 1194m
-          memory: 4Gi
+          cpu: 1000m
+          memory: 289Mi
+          ephemeral-storage: 204Mi
         limits:
           cpu: 2000m
-          memory: 4Gi
-
+          memory: 369Mi
+          ephemeral-storage: 245Mi
   # ---- security burn (single step) ----
   # Maps to: Test("security", repositorySteps(
   #   ctx.Scan.TrivyFS(".").Size(L))...).After("setup")
@@ -1673,6 +1683,7 @@ spec:
   # Build helm, oberth-release-support, oberth-release-image and fetch cosign,
   # matching release.yaml's exact env -i, flags, and Go toolchain.
   - name: vpt-build-and-fetch
+    activeDeadlineSeconds: 600
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -1757,12 +1768,13 @@ spec:
         subPath: vpt-private
       resources:
         requests:
-          cpu: 883m
-          memory: 2764340Ki
+          cpu: 1000m
+          memory: 3358Mi
+          ephemeral-storage: 1121Mi
         limits:
           cpu: 2000m
-          memory: 4Gi
-
+          memory: 4050Mi
+          ephemeral-storage: 1345Mi
   # Copy trivy from its pinned image (release.yaml copy-trivy).
   - name: vpt-copy-trivy
     automountServiceAccountToken: false
@@ -1892,10 +1904,10 @@ spec:
         value: "/tmp/private-gobuild"
       - name: GIT_TERMINAL_PROMPT
         value: "0"
-      resources:
+      resources: # remeasure: fresh uncensored measurements required
         requests:
           cpu: 1251m
           memory: 512Mi
         limits:
           cpu: 2000m
-          memory: 1600Mi
+          memory: 2401Mi
