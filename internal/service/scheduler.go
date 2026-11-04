@@ -1007,7 +1007,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	if err != nil {
 		_ = logFile.Close()
 		if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
-			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("resource admission expired: no scheduled pod or progress for %s", scheduler.stalledRunTimeout))
+			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("controller profile verification unavailable for %s before workflow submission", scheduler.stalledRunTimeout))
 		}
 		return err
 	}

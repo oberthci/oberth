@@ -31,7 +31,7 @@ func TestAdmissionLimitsGrantedBeforeSubmissionDeadlineReleasesReservation(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Status != model.RunFailed || !strings.Contains(run.Error, "no scheduled pod or progress") || len(f.jobs.createdCI) != 0 {
+	if run.Status != model.RunFailed || !strings.Contains(run.Error, "controller profile verification unavailable for") || strings.Contains(run.Error, "no scheduled pod") || len(f.jobs.createdCI) != 0 {
 		t.Fatalf("stalled grant was not settled: %+v", run)
 	}
 	state := f.scheduler.AdmissionState()
