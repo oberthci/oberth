@@ -62,9 +62,15 @@ func TestKubernetesPlacementDefaultsPreserveDeclarationsAndAllContainerShapes(t 
 		}
 		for i := range template.InitContainers {
 			check(&template.InitContainers[i].Container)
+			if r := template.InitContainers[i].Resources; r.Requests.Cpu().MilliValue() != 250 || r.Requests.Memory().Value() != 256<<20 {
+				t.Errorf("init defaults should be 250m/256Mi: %+v", r)
+			}
 		}
 		for i := range template.Sidecars {
 			check(&template.Sidecars[i].Container)
+			if r := template.Sidecars[i].Resources; r.Requests.Cpu().MilliValue() != 250 || r.Requests.Memory().Value() != 256<<20 {
+				t.Errorf("sidecar defaults should be 250m/256Mi: %+v", r)
+			}
 		}
 	})
 }
@@ -108,5 +114,36 @@ func TestKubernetesPlacementRetryPreservesAlreadySubmittedLegacyRequests(t *test
 	}
 	if !reflect.DeepEqual(before.Spec, client.stored.Spec) || len(seeds) != seedCount || len(client.posts) != 1 {
 		t.Fatal("legacy workflow or delivery footprint was rewritten")
+	}
+}
+
+func TestKubernetesPlacementRetryPreservesSubmittedV1HelperRequests(t *testing.T) {
+	config := seedTestConfig()
+	kube := fake.NewClientset()
+	runningSeedPods(kube)
+	client := &createRetryWorkflowClient{}
+	c, err := NewController(client, kube, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seeds []seedExecCall
+	c.WithSourceSeeder(NewSourceSeeder(kube, recordingExec(&seeds), config))
+	r := isolationControllerRequest(t, "sidecars")
+	r.SourceDir = writeCheckout(t)
+	r.legacyHelperRequestDefaults = true
+	if _, err := c.Create(t.Context(), r); err != nil {
+		t.Fatal(err)
+	}
+	before := client.stored.DeepCopy()
+	if before.Annotations[requestDefaultsAnnotation] != legacyRequestDefaultsPolicy || before.Spec.Templates[0].Sidecars[0].Resources.Requests.Cpu().MilliValue() != 2000 {
+		t.Fatal("fixture did not submit the v1 helper policy")
+	}
+	seedCount := len(seeds)
+	r.legacyHelperRequestDefaults = false
+	if _, err := c.Create(t.Context(), r); err != nil {
+		t.Fatal("upgrade retry changed the submitted v1 workflow", err)
+	}
+	if !reflect.DeepEqual(before.Spec, client.stored.Spec) || len(seeds) != seedCount || len(client.posts) != 1 {
+		t.Fatal("v1 workflow or delivery footprint was rewritten")
 	}
 }

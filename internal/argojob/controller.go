@@ -212,10 +212,12 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 	// source in place (finding 2, issue #29).
 	existing, getErr := controller.workflows.Get(ctx, request.Name, metav1.GetOptions{})
 	if getErr == nil {
-		if policy := existing.Annotations[requestDefaultsAnnotation]; policy != "" && policy != requestDefaultsPolicy {
+		policy := existing.Annotations[requestDefaultsAnnotation]
+		if policy != "" && policy != requestDefaultsPolicy && policy != legacyRequestDefaultsPolicy {
 			return "", errors.New("argojob: existing workflow has an unknown request-default policy")
 		}
-		request.omitRequestDefaults = existing.Annotations[requestDefaultsAnnotation] == ""
+		request.omitRequestDefaults = policy == ""
+		request.legacyHelperRequestDefaults = policy == legacyRequestDefaultsPolicy
 		request.omitStepUsage = !workflowHasStepUsage(existing) && existing.Annotations[usageMemoryPolicyAnnotation] != usageMemoryPolicy
 		request.legacyStepUsage = !request.omitStepUsage && existing.Annotations[usageMemoryPolicyAnnotation] != usageMemoryPolicy
 		request, err = controller.refreshNonroot(ctx, request)

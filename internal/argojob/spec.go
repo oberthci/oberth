@@ -577,7 +577,8 @@ type Request struct {
 	// omitStepUsage preserves already-running legacy specs during recovery.
 	omitStepUsage bool
 	// Only recovery of an already-submitted workflow can omit current defaults.
-	omitRequestDefaults bool
+	omitRequestDefaults         bool
+	legacyHelperRequestDefaults bool
 	// legacyStepUsage reconstructs already-submitted pre-floor wrappers only;
 	// new submissions must never opt out of the instrumentation memory guard.
 	legacyStepUsage bool
@@ -818,7 +819,7 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	}
 	// Admission and receipt verification inspect the immutable authored graph.
 	// Default only afterwards, before any server-owned helper is injected.
-	applyRequestDefaults(workflow, request.omitRequestDefaults)
+	applyRequestDefaultsPolicy(workflow, request.omitRequestDefaults, request.legacyHelperRequestDefaults)
 	if request.ResourceCeiling != nil {
 		if err := argoworkflow.ValidateResourceRequirementsWithCapability(workflow, request.Repo, *request.ResourceCeiling, int64(config.WorkflowTimeout/time.Second), request.Capability); err != nil {
 			return nil, err
