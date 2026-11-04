@@ -10,11 +10,36 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/oberthci/oberth/internal/model"
 )
 
-const mcpProtocolVersion = "2025-03-26"
+// Prefer the CLI's version while retaining the original HTTP compatibility
+// version. Supporting a new date requires an explicit compatibility review.
+const mcpProtocolVersion = "2025-06-18"
+
+func supportedMCPProtocol(version string) bool {
+	return version == "2025-03-26" || version == mcpProtocolVersion
+}
+
+func negotiateMCPProtocol(raw json.RawMessage) (string, error) {
+	var params struct {
+		ProtocolVersion string `json:"protocolVersion"`
+	}
+	if err := json.Unmarshal(raw, &params); err != nil {
+		return "", errors.New("initialize requires a protocolVersion date string")
+	}
+	if _, err := time.Parse(time.DateOnly, params.ProtocolVersion); err != nil {
+		return "", errors.New("initialize requires a protocolVersion date string")
+	}
+	if supportedMCPProtocol(params.ProtocolVersion) {
+		return params.ProtocolVersion, nil
+	}
+	// MCP negotiation returns a supported alternative. The client must inspect
+	// the result and disconnect if it cannot use that version.
+	return mcpProtocolVersion, nil
+}
 
 type rpcRequest struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -328,19 +353,40 @@ func (server *Server) handleMCP(writer http.ResponseWriter, request *http.Reques
 		writeRPC(writer, rpcResponse{JSONRPC: "2.0", ID: normalizeID(incoming.ID), Error: &rpcError{Code: -32600, Message: "invalid request"}})
 		return
 	}
+	// This endpoint has no session state. An initialize body's version is
+	// authoritative; subsequent requests carry their own selected version.
+	// Headerless direct callers retain the original 2025-03-26 behavior.
+	versions := request.Header.Values("MCP-Protocol-Version")
+	if len(versions) > 1 || (len(versions) == 1 && !supportedMCPProtocol(versions[0])) {
+		http.Error(writer, "unsupported MCP-Protocol-Version", http.StatusBadRequest)
+		return
+	}
 	if len(incoming.ID) == 0 {
+		if incoming.Method == "initialize" {
+			http.Error(writer, "initialize requires a request ID", http.StatusBadRequest)
+			return
+		}
+		// notifications/initialized acknowledges the client-side handshake;
+		// it neither invokes tools nor changes another HTTP request's state.
 		writer.WriteHeader(http.StatusAccepted)
 		return
 	}
 	response := rpcResponse{JSONRPC: "2.0", ID: incoming.ID}
 	switch incoming.Method {
 	case "initialize":
+		version, err := negotiateMCPProtocol(incoming.Params)
+		if err != nil {
+			response.Error = &rpcError{Code: -32602, Message: err.Error()}
+			break
+		}
 		response.Result = map[string]any{
-			"protocolVersion": mcpProtocolVersion,
+			"protocolVersion": version,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]string{"name": "oberth", "version": server.version},
 			"instructions":    "Use status/wait/logs for SHA-oriented CI, run_get/run_logs for exact promotion run IDs, sync only to park the selected exact WIP branch upstream without a green gate, and promote to merge, test, and push a target branch. Sync is not completion evidence. Use run_resources (CLI: oberth run resources --run <id> --yaml) after branch CI to compare captured resource usage with declarations and commit reviewed resources in git; Oberth never auto-sizes a step. Prefer issue_get/issue_get_many with fields/body_limit and run_get with summary:true for routine status reads; full records remain available. Filter logs with pattern/context/limit/tail rather than retrieving a whole step. Log reads scan bounded byte windows; counts are lower bounds unless scan_complete is true. When has_more is true, continue with next_byte_offset as byte_offset, offset=0 and the same tail/pattern/context, including after an empty window. offset skips only within the current scanned window; with tail that window can change during lookback. An empty incomplete page does not prove absence. A step named frag-<hash>-<template> came from another repository's pinned pipeline fragment, not from the repository under test, so a failure there is usually the pinned version rather than this commit. Authenticated JSON dashboard state is available at /api/runs, /api/repos, /api/issues, /api/grants, and /api/status.",
 		}
+	case "notifications/initialized":
+		response.Error = &rpcError{Code: -32600, Message: "notifications/initialized must not have a request ID"}
 	case "ping":
 		response.Result = map[string]any{}
 	case "tools/list":
