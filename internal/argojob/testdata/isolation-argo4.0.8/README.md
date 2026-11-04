@@ -100,3 +100,12 @@ v4.0.8 controller ran with capture-only hooks and upstream fake clients. All
 27 submitted Pods across these fixture sets passed the retained Kubernetes
 v1.35.7 validator. Existing isolation, executor identity and nonroot negative
 controls remain intact. No expected Pod was edited manually or live API used.
+
+The 2026-11-04 combined resource and placement recapture uses current Build
+inputs: undeclared main requests remain 2 CPU/2Gi, while repository init and
+sidecar defaults are 250m/256Mi. Unpinned executor control containers retain
+50m/64Mi requests with 500m/512Mi limits; pinned profiles retain their bound
+executor resources. The authenticated Argo v4.0.8 controller and retained
+capture helpers produced all 27 submitted Pods, which passed the retained
+Kubernetes v1.35.7 validator. Pod JSON was copied directly from that controller
+output, never hand-merged or assembled. No live API or credentials were used.

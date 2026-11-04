@@ -570,11 +570,15 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 		}
 		// Bound reads and identity transport even when no waiter observation exists.
 		deliveryCtx, stopDelivery := context.WithTimeout(ctx, admissionObservationTimeout)
-		deliveryErr := controller.deliverExecutorTokens(deliveryCtx, workflow, delivered)
+		identityReadUnavailable := false
+		deliveryErr := controller.deliverExecutorTokensObserved(deliveryCtx, workflow, delivered, func() { identityReadUnavailable = true })
 		if deliveryCtx.Err() != nil && ctx.Err() == nil {
 			deliveryErr = &admissionProgressError{reason: "Kubernetes executor identity observation unavailable for 2m", identity: true}
 		}
 		stopDelivery()
+		if deliveryErr == nil {
+			deliveryErr = admissionWatch.observeIdentityReads(identityReadUnavailable, time.Now())
+		}
 		if err := deliveryErr; err != nil {
 			// Preserve observed execution evidence; a delivery error on a later
 			// Pod must not make already executed steps look like a pre-step failure.

@@ -1,23 +1,24 @@
 {
   "module": "github.com/argoproj/argo-workflows/v4@v4.0.8",
   "commit": "570c470582fc7fe41b1963d8703111679cc3d25a",
-  "go": "go1.26.10",
+  "go": "go version go1.26.9 linux/amd64",
   "kubernetes_validator": "v1.35.7 ValidatePodCreate (defaulted, v1 to internal conversion)",
   "controller_source_sha256": "97d059a8ffed7854760fa8c109f657a4d6be0e2496ed193ee1dd541118b8f763",
   "files_sha256": {
-    "generate_test.go.txt": "bd66cdf049500723e210de8ebec46f21dd32a031a0fbd07aff377a318a0aaf73",
-    "vmi-before-patch.json": "30914a7d9b3c51ee6e5c8433afa8cdc611935bbadaa981ae8cbba4e181886d60",
-    "vmi-workflow.json": "f9d4751d411279cec7e0f5b481ccc3f33f1b62a7878e1e6421b756bc55c9c5af",
-    "capture_test.go.txt": "6befd88419c6208165b4449feee1c5bba4b6144c243d0b1e2155cb8a9b676065",
-    "vmi-submitted.json": "5eed10aebfbdb16e654a8b2d17cdcb2b2bbb30536c89009c8829ad5404a6466f",
+    "README.md": "5be9d72a0e8f7041491883a8c14b9767094595aea456f38c7f0425755ade6dc1",
+    "capture-call.go.txt": "4cb2988575ac294ad6cb5e5f45c8455927b551f31888964adbd69afca8eb3127",
     "capture-hook.go.txt": "4cb2988575ac294ad6cb5e5f45c8455927b551f31888964adbd69afca8eb3127",
-    "capture-call.go.txt": "4cb2988575ac294ad6cb5e5f45c8455927b551f31888964adbd69afca8eb3127"
+    "capture_test.go.txt": "6befd88419c6208165b4449feee1c5bba4b6144c243d0b1e2155cb8a9b676065",
+    "generate_test.go.txt": "bd66cdf049500723e210de8ebec46f21dd32a031a0fbd07aff377a318a0aaf73",
+    "vmi-before-patch.json": "965528deeb4822293dbbfd8b7d05ec7ef97b6fc0a56d8ddde97ef4fc44080788",
+    "vmi-submitted.json": "2181434ad087692af8123f7dca093b3d81f62c8f01b249eacbd714a880e3dd9c",
+    "vmi-workflow.json": "566235400c2c5d4f1b2a460240a21c631a6f8a0a9d76231e0c880f6decf8824b"
   },
   "Path": "github.com/argoproj/argo-workflows/v4",
   "Version": "v4.0.8",
   "Sum": "h1:qa2GNFSihNtvI/v9/dgwq84E1mrfbVb8eTXB6YMxMlY=",
   "GoModSum": "h1:WLJnjr1uNM+6dhpVdnJArvSq90FJ3bdRgHEsHVR00wM=",
-  "instrumented_sha256": "e94c816c3116278d8b6c363568ab3922aed0a178e6afcd83d6fd0a3270b0e8d4",
-  "recaptured_with": "2026-11-03 Oberth candidate; authenticated upstream Argo v4.0.8 with retained capture helpers; all 27 submitted Pods pass retained Kubernetes v1.35.7 ValidatePodCreate; no live cluster",
+  "instrumented_sha256": "60aea56e584566cb01a776fb6d93b7e726de0deb0656a339f96683910a74cd37",
+  "recaptured_with": "2026-11-04 combined workflow placement and helper bounds; authenticated Argo v4.0.8 controller with retained capture-only helpers; all 27 submitted Pods pass Kubernetes v1.35.7 validation; no live cluster",
   "source_sha256": "97d059a8ffed7854760fa8c109f657a4d6be0e2496ed193ee1dd541118b8f763"
 }

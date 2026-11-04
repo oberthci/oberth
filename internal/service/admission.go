@@ -26,10 +26,8 @@ type weightedAdmission struct {
 	capacityConfig model.AdmissionCapacityConfig
 	// weights is the operator's weight per size (#1021).
 	weights SizeWeights
-	// maxHeadWait bounds new backfill. At the limit, admission drains
-	// existing holders for the head without granting more followers until
-	// maxDrainDuration expires and available-capacity backfill resumes.
-	// Zero disables backfill (strict FIFO).
+	// Historical weighted-gate tests retain a head-wait bound. Serving workflow
+	// admission ignores resource drain and backfill.
 	maxHeadWait time.Duration
 	// now is the gate's clock; nil is time.Now.
 	now func() time.Time
@@ -306,7 +304,7 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 		reservation.cancel()
 		return nil, err
 	}
-	if request.Pods == nil {
+	if !gate.workflowOnly && request.Pods == nil {
 		charge := gate.legacyCharge(size)
 		if charge.CPUMilli > gate.resources.CPUMilli || charge.MemoryBytes > gate.resources.MemoryBytes {
 			gate.mu.Unlock()

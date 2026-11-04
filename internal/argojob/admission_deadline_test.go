@@ -182,6 +182,26 @@ func TestAdmissionDeadlineRemembersScheduledPodAfterObserverRestart(t *testing.T
 	}
 }
 
+func TestAdmissionDeadlineMissingWaiterDoesNotChargePriorCapacityWait(t *testing.T) {
+	_, wf, pod, _ := executorRetryFixture(t)
+	now := time.Now()
+	wf.CreationTimestamp = metav1.NewTime(now.Add(-time.Hour))
+	pod.CreationTimestamp = wf.CreationTimestamp
+	pod.Status = corev1.PodStatus{Phase: corev1.PodPending, Conditions: []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable", Message: "Insufficient cpu"}}}
+	if err := new(admissionProgress).check(wf, []corev1.Pod{*pod}, nil, now, 10*time.Minute); err != nil {
+		t.Fatal("capacity wait charged against identity readiness", err)
+	}
+	pod.Spec.NodeName = "worker"
+	pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionTrue, LastTransitionTime: metav1.NewTime(now)}}
+	watch := admissionProgress{} // reconstruct from durable scheduling evidence
+	if err := watch.check(wf, []corev1.Pod{*pod}, nil, now.Add(9*time.Minute), 10*time.Minute); err != nil {
+		t.Fatal("pre-scheduling wait consumed identity observation budget", err)
+	}
+	if err := watch.check(wf, []corev1.Pod{*pod}, nil, now.Add(10*time.Minute), 10*time.Minute); err == nil || !strings.Contains(err.Error(), "readiness not observed") {
+		t.Fatal("missed waiter event escaped its post-scheduling bound", err)
+	}
+}
+
 func TestAdmissionDeadlineRetrySurvivesObserverRestartAndIgnoresForeignPod(t *testing.T) {
 	_, wf, pod, _ := executorRetryFixture(t)
 	now := time.Now()

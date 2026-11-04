@@ -1011,47 +1011,49 @@ Usage of serve:
   -accept-witness-genesis string
         one-shot acknowledgment: exact current audit chain head as <auditID>:<sha256hex>; marks it as the witness genesis so external witnessing starts there, explicitly trusting all prior local history (enables Rekor on an existing deployment)
   -admission-cpu-millis int
-        CPU budget for declared workflow and VM demand, excluding platform reserve (default 8000)
+        deprecated compatibility option; ignored by workflow admission (default 8000)
   -admission-disk-floor-bytes int
-        opt-in disk-space admission floor in bytes (0 = disabled); when enabled and free bytes on /data are below this floor, admission is held until disk frees up (#673)
+        storage retention floor in bytes; ignored by workflow admission
   -admission-extended-resources string
-        JSON map of qualified extended-resource names to integer capacity; no implicit capacity (default "{}")
+        deprecated compatibility option; ignored by workflow admission (default "{}")
   -admission-io-runs int
-        coarse simultaneous run ceiling for IO; 0 retains the existing run ceiling
+        deprecated compatibility option; ignored by workflow admission
   -admission-legacy-resources string
-        JSON map of sizes S/M/L/XL to fixed cpu_milli and memory_bytes charges; missing sizes default to 1000/2Gi, 2000/4Gi, 3000/8Gi, 6000/16Gi (default "{}")
+        deprecated compatibility option; ignored by workflow admission (default "{}")
   -admission-max-head-wait duration
-        maximum head-wait window for measured admission backfill; then drain for up to 5m before available-capacity backfill resumes (0 = strict FIFO) (default 20m0s)
+        deprecated compatibility option; ignored by workflow admission (default 20m0s)
   -admission-memory-bytes int
-        memory budget for declared workflow and VM demand, excluding platform reserve (default 17179869184)
+        deprecated compatibility option; ignored by workflow admission (default 17179869184)
   -admission-memory-headroom-bytes int
-        minimum memory headroom per declared run; combined with proportional headroom using the larger value (default 1073741824)
+        deprecated compatibility option; ignored by workflow admission (default 1073741824)
   -admission-memory-headroom-percent int
-        memory headroom as a percentage of declared run memory, excluding executor reserves (0..100); combined with the fixed minimum using the larger value (default 10)
+        deprecated compatibility option; ignored by workflow admission (default 10)
   -admission-pressure-cpu-some-avg10 float
-        CPU some PSI avg10 threshold in percent (default 30)
+        deprecated compatibility option; ignored by workflow admission (default 30)
   -admission-pressure-cpu-some-avg60-max float
-        legacy CPU some PSI avg60 threshold; ignored by enabled avg10 admission
+        deprecated compatibility option; ignored by workflow admission
   -admission-pressure-enabled
-        gate new runs by host CPU and IO some PSI avg10 (default true)
+        hold new workflow grants at the hard host CPU/IO PSI limits (default true)
   -admission-pressure-hard-cpu float
-        hard CPU some PSI avg10 limit for starvation admission (default 50)
+        hard host CPU some PSI avg10 percentage for new workflow grants (default 50)
   -admission-pressure-hard-io float
-        hard IO some PSI avg10 limit for starvation admission (default 40)
+        hard host IO some PSI avg10 percentage for new workflow grants (default 40)
   -admission-pressure-hysteresis float
-        legacy avg60 recovery margin; avg10 admission always uses 10 points (default 10)
+        deprecated compatibility option; ignored by workflow admission (default 10)
   -admission-pressure-io-full-avg60-max float
-        legacy IO full PSI avg60 threshold; ignored by enabled avg10 admission
+        deprecated compatibility option; ignored by workflow admission
   -admission-pressure-io-some-avg10 float
-        IO some PSI avg10 threshold in percent (default 20)
+        deprecated compatibility option; ignored by workflow admission (default 20)
   -admission-pressure-max-defer duration
-        legacy avg60 deferral bound; avg10 admission uses max-wait-seconds and hard limits (default 20m0s)
+        deprecated compatibility option; ignored by workflow admission (default 20m0s)
   -admission-pressure-max-wait-seconds int
-        pressure deferral wait before admission below hard PSI limits (default 1200)
+        deprecated compatibility option; ignored by workflow admission (default 1200)
   -admission-pressure-mode string
-        legacy avg60 mode; enabled avg10 admission always enforces (default "enforce")
+        deprecated compatibility option; ignored by workflow admission (default "enforce")
   -admission-size-weights string
-        admission weight per size as S=..,M=..,L=..,XL=..; XL=0 is the whole budget (an XL run runs alone), a positive XL lets XL share the host; the budget is --max-concurrent-jobs M runs (#1021) (default "S=1,M=2,L=3,XL=0")
+        deprecated compatibility option; ignored; Kubernetes places step pods (default "S=1,M=2,L=3,XL=0")
+  -admission-stall-timeout duration
+        workflow startup bound for absent or non-capacity-stalled pods; Kubernetes capacity waits are exempt (default 10m0s)
   -argo-ci-secrets-serviceaccount string
         ServiceAccount for CI templates with approved upstream-scoped secrets; its Vault role never carries release grants (default "oberth-argo-ci-secrets")
   -argo-container-disk-prefixes string
@@ -1153,7 +1155,7 @@ Usage of serve:
   -database string
         SQLite database path (default "/data/oberth.sqlite")
   -disable-declared-admission
-        administrator kill switch: refuse new declared runs; undeclared workflows retain deprecated size admission
+        deprecated compatibility option; ignored by workflow admission
   -fragment-allowlist string
         comma-separated repositories usable as pipeline fragments; empty permits every registered repository
   -git-gc-interval duration
@@ -1177,7 +1179,7 @@ Usage of serve:
   -logs-budget-bytes int
         total retained log budget (0 disables size retention)
   -max-concurrent-jobs int
-        maximum concurrent Jobs (boot default) (default 3)
+        maximum concurrent workflows (boot default) (default 3)
   -max-concurrent-jobs-file string
         mounted ConfigMap key to reload max concurrent Jobs without restart; invalid or missing keeps the last good value
   -namespace string

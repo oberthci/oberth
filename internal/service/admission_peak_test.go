@@ -177,7 +177,7 @@ spec:
 	}
 }
 
-func TestAdmissionPeakRunGetReportsDeclaredAndPeak(t *testing.T) {
+func TestWorkflowSlotRunGetOmitsRetiredResourceLedger(t *testing.T) {
 	f := newControlFixture(t)
 	enqueued, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "peak-view", Repository: f.repo, Branch: "feature/peak", SHA: strings.Repeat("a", 40), Actor: "reader"})
 	if err != nil {
@@ -201,52 +201,44 @@ func TestAdmissionPeakRunGetReportsDeclaredAndPeak(t *testing.T) {
 		t.Fatal(err)
 	}
 	detail := value.(RunDetailResponse)
-	if detail.Scheduling == nil || detail.Scheduling.Admission == nil || detail.Scheduling.Admission.DeclaredResources == nil {
+	if detail.Scheduling == nil || detail.Scheduling.Admission == nil {
 		t.Fatalf("missing run admission: %+v", detail.Scheduling)
 	}
-	resources := detail.Scheduling.Admission.DeclaredResources
-	if resources.DeclaredTotal == nil || resources.DeclaredTotal.CPUMilli != 3000 || resources.Peak == nil || resources.Peak.CPUMilli != 1000 || resources.CPUMilli != 1100 {
-		t.Fatalf("raw total/peak/charged resources: %+v", resources)
+	admission := detail.Scheduling.Admission
+	if admission.DeclaredResources != nil || admission.NumericBudget != nil || admission.LegacyResources != nil || admission.Size != "" || admission.Weight != 0 || admission.Runs != 1 {
+		t.Fatalf("serving admission still exposes a resource ledger: %+v", admission)
 	}
 }
 
-func TestBoundedBackfillStreamDrainsThenResumes(t *testing.T) {
-	g, clock, running := easyGate(t)
-	g.mu.Lock()
-	running.estimate = 0
-	g.mu.Unlock()
-	head := pending(t, g, 2, easyRequest("head", 11000, time.Hour))
-	t.Cleanup(head.cancel)
+func TestWorkflowAdmissionStreamHasNoResourceDrain(t *testing.T) {
+	g := newWorkflowAdmissionForJobs(4)
+	clock := &fakeClock{now: time.Now()}
+	g.now = func() time.Time { return clock.now }
+	g.maxHeadWait = 20 * time.Minute // Retired settings cannot restore a drain.
+	for i, cpu := range []int64{18750, 4000, 12800} {
+		r := g.reserve(int64(i + 1))
+		acquireRequestWithinBudget(t, r, easyRequest("held", cpu, 0))
+		t.Cleanup(r.release)
+	}
 	start := clock.now
-	beforeDrain, afterCap := 0, 0
 	for minute := 0; minute < 30; minute++ {
 		clock.now = start.Add(time.Duration(minute) * time.Minute)
-		r := pending(t, g, int64(minute+3), easyRequest("stream", 1100, time.Minute))
-		// The one-minute estimate must finish strictly before minute 20.
-		// No new grants enter during draining; the cap reopens spare capacity.
-		wantGranted := minute < 19 || minute >= 25
-		if got := granted(g, r); got != wantGranted {
-			r.cancel()
-			t.Fatalf("backfill at %dm: granted=%t, want %t", minute, got, wantGranted)
+		r := pending(t, g, int64(4+2*minute), easyRequest("stream", 1100, time.Minute))
+		t.Cleanup(func() { r.cancel(); r.release() })
+		if !granted(g, r) {
+			t.Fatalf("resource drain stopped a workflow at minute %d", minute)
 		}
-		if wantGranted {
-			if minute < 19 {
-				beforeDrain++
-			} else {
-				afterCap++
-			}
-			clock.now = clock.now.Add(time.Minute)
-			r.release()
-		} else {
-			r.cancel()
+		view := (&Scheduler{admission: g}).AdmissionSnapshot(r.sequence)
+		if view.NumericBudget != nil || view.BackfillMessage != "" || view.Size != "" {
+			t.Fatal("resource packing leaked into serving admission", view)
 		}
-	}
-	if beforeDrain != 19 || afterCap != 5 {
-		t.Fatalf("stream grants before drain=%d after cap=%d", beforeDrain, afterCap)
-	}
-	clock.now = start.Add(30 * time.Minute)
-	running.release()
-	if !granted(g, head) {
-		t.Fatal("stream starved head after original holder released")
+		extra := pending(t, g, int64(5+2*minute), easyRequest("ceiling", 1100, time.Minute))
+		t.Cleanup(extra.cancel)
+		blocked := (&Scheduler{admission: g}).AdmissionBlocker()
+		if granted(g, extra) || blocked == nil || !blocked.RunCeiling || blocked.Backfilling || blocked.Draining || blocked.Reason() != "4 runs running" {
+			t.Fatalf("stream bypassed ceiling or fabricated a drain: %+v", blocked)
+		}
+		extra.cancel()
+		r.release()
 	}
 }

@@ -1,67 +1,38 @@
 # Host pressure admission
 
-Oberth gates new runs by both declared resource budgets and host CPU/IO pressure
-by default. Running and adopted workflows keep their grants. This gate is for a
-single shared host: on a multi-node installation, the server's node may differ
-from the execution node.
+Oberth bounds concurrent workflows and uses a configurable hard host CPU/IO
+pressure valve. Kubernetes places each step Pod by its requests; no declared
+CPU/memory pool or size-weight budget controls workflow placement. Running and
+adopted workflows keep their slots. This valve observes one shared host: on a
+multi-node installation, the server's node may differ from the execution node.
 
 ```yaml
 admission:
   pressure:
     enabled: true
-    cpuSomeAvg10: 30
-    ioSomeAvg10: 20
     hardCpu: 50
     hardIo: 40
-    maxWaitSeconds: 1200
 ```
 
-The equivalent server flags are `--admission-pressure-enabled`,
-`--admission-pressure-cpu-some-avg10`, `--admission-pressure-io-some-avg10`,
-`--admission-pressure-hard-cpu`, `--admission-pressure-hard-io`, and
-`--admission-pressure-max-wait-seconds`. Set `enabled: false` (or the first flag
-to `false`) for budget-only admission. New installations and upgrades default
-to enforcement. `enabled: true` selects the new policy even when reused chart
-values retain the earlier `mode: observe`. The server logs a startup warning
-for that explicit legacy setting; use `enabled: false` to opt out.
+The active flags are `--admission-pressure-enabled`,
+`--admission-pressure-hard-cpu` and `--admission-pressure-hard-io`. Disabling the
+valve leaves the administrator's concurrent-workflow ceiling in control.
+Historical soft thresholds, observation mode, max-wait/defer settings and avg60
+settings remain accepted but are ignored by serving admission.
 
-Admission reads `/proc/pressure/cpu` and `/proc/pressure/io`, retaining both
-`some avg10` and `some avg60`. The gate uses **some avg10**, so it reacts to
-shorter contention waves than avg60. CPU must be strictly below 30% and IO
-strictly below 20%. Each resource has its own latch: after it blocks, it resumes
-only strictly below its threshold minus ten percentage points (CPU 20%, IO 10%
-with the defaults). One recovering resource cannot clear the other's latch.
+Admission reads bounded `/proc/pressure/cpu` and `/proc/pressure/io` samples.
+Hard CPU and IO thresholds use **some avg10**, defaulting to 50% and 40%.
+Each resource has an independent latch and recovers strictly below its hard
+threshold minus ten percentage points. One recovering resource cannot clear
+the other's latch. Hard pressure has no idle, release/tag, priority or starvation
+bypass. There is no settle window or resource drain forecast.
 
-These starting thresholds hold new work when CPU stalls occupy three tenths or IO
-stalls one fifth of recent wall time. They leave room for running work to
-drain, while ten-point hysteresis avoids repeated starts near the boundary.
-PSI measures stall time, not CPU utilization or the load average. The defaults
-need qualification against representative workloads; they cannot guarantee a
-load-average ceiling, particularly when other processes share the host.
-
-A server-classified release or tag can bypass pressure only when no run holds
-an admission grant. Promotions and ordinary branch runs have no such bypass,
-regardless of their priority. The first eligible queue head deferred by pressure
-for **longer than** `maxWaitSeconds` can pass pressure only with CPU below
-`hardCpu` and IO below `hardIo` (50% and 40%). The clock starts at its first
-eligible pressure deferral, survives brief hysteresis recoveries, and excludes
-earlier waits for capacity, a VM, or queue position. At most one starvation
-grant is allowed per scheduling pass and per settle window. Budget, disk, run-count,
-VM, group, priority and backfill rules always apply. A blocked follower cannot
-use starvation to jump a fresh head. Other admission gates can exceed maxWait.
-
-After each grant, the next grant requires a pressure reading taken at least
-30 seconds later, allowing pod startup and PSI averages to settle. Consecutive
-grants can skip this window only while CPU some avg10 is strictly below 15%
-and IO some avg10 is strictly below 10%. Starvation grants always wait for the
-full window; an idle release/tag bypass also respects settling.
-
-The avg10 policy reads bounded procfs files before each grant, including multiple
-grants in one scheduling pass. Status and metrics use the last admission sample
-and never read procfs. The existing dispatch poll retries holds and source
-outages. Missing, malformed or invalid PSI fails open to budget-only admission;
-status says `PSI unavailable; budget-only admission`. One warning is logged per
-outage, and valid readings restore protection without restarting the server.
+PSI measures stall time, not CPU utilization or load average. These thresholds
+need qualification against representative workloads and cannot guarantee a
+load ceiling. Missing, malformed or unavailable PSI retains the existing
+fail-open behavior: status reports `PSI unavailable; workflow ceiling admission`.
+One warning is logged per outage; valid readings restore the valve. Status and
+metrics use the last admission sample and never read procfs themselves.
 
 The [Linux PSI documentation](https://docs.kernel.org/accounting/psi.html)
 distinguishes the system-wide `/proc/pressure` interface from per-cgroup
@@ -95,28 +66,14 @@ verified host source the availability fallback keeps the queue moving; it does
 not prove node pressure protection. Co-locate execution and server pods when
 using this single-host policy.
 
-Admin status exposes the sample, soft/hard thresholds, wait bound, holding
-resource (`cpu`, `io`, `cpu+io`, or `settle`) and fallback reason. `oberth admission` and
-admin scheduling messages display CPU and IO numbers and the blocking pressure
-gate. Existing scoped and non-admin views retain the actionable resource reason
-without host-wide numbers.
+Admin status and existing scheduling messages report CPU/IO observations and
+the holding resource (`cpu`, `io` or `cpu+io`). Scoped and non-admin views retain
+the actionable reason while withholding host-wide counts and measurements.
+No statuses or layouts are added.
 
-Authenticated admin metrics include:
-
-- `oberth_admission_pressure_avg10{resource="cpu|io|memory",kind="some|full"}`
-- `oberth_admission_pressure_avg60{resource="cpu|io|memory",kind="some|full"}`
-- `oberth_admission_pressure_enabled`, `_enforcing`, `_threshold_exceeded`,
-  `_available`, `_holding`, `_deferred`
-- `oberth_admission_pressure_deferrals_total`, `_bypasses_total`
-
-CPU full PSI is undefined at host scope and reported as zero. Memory and full
-averages are diagnostic; they do not control this policy. No run/repository
-metric labels are added. Counters reset on restart.
-
-The earlier avg60 flags and chart fields (`ioFullAvg60Max`, `cpuSomeAvg60Max`,
-`hysteresis`, `maxDefer`) remain accepted for compatibility. The public defaults
-set both legacy thresholds to zero. Enabled avg10 admission uses fixed ten-point
-hysteresis and its own hard-limited queue-head starvation rule; legacy fields
-(including `mode: observe`) do not alter that rule. Existing direct Go callers that configure only the
-legacy fields retain their previous avg60 behavior. Update callers to
-`DefaultAdmissionPressureConfig()` to select the new policy.
+Authenticated admin metrics retain the pressure avg10/avg60 samples, availability,
+enforcement/holding state and deferral/bypass counters. CPU full PSI is undefined
+at host scope and reported as zero. Memory and full averages remain diagnostic;
+they do not control this policy. No run/repository metric labels are added.
+Counters reset on restart. See the [workflow admission upgrade note](declared-admission.md)
+for the complete list of ignored settings and request defaults.

@@ -154,7 +154,7 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config) error {
 	return result
 }
 
-func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv1.Workflow, delivered map[types.UID]bool) error {
+func (controller *Controller) deliverExecutorTokensObserved(ctx context.Context, wf *wfv1.Workflow, delivered map[types.UID]bool, unavailable func()) error {
 	if wf.Status.Phase.Completed() || controller.kube == nil || controller.seeder == nil {
 		return nil
 	}
@@ -165,6 +165,9 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 	pods, err := controller.kube.CoreV1().Pods(wf.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "workflows.argoproj.io/workflow=" + wf.Name})
 	if err != nil {
 		if ctx.Err() == nil && retryExecutorIdentityRead(err) {
+			if unavailable != nil {
+				unavailable()
+			}
 			return nil
 		}
 		return identityFailure("pod_list", err)
@@ -233,6 +236,9 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 		holder, err := controller.executorIdentityPod(ctx, wf, serviceAccount)
 		if err != nil {
 			if ctx.Err() == nil && retryExecutorIdentityRead(err) {
+				if unavailable != nil {
+					unavailable()
+				}
 				continue
 			}
 			return identityFailure("identity_pod", err)
@@ -240,6 +246,9 @@ func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv
 		ca, err := controller.kube.CoreV1().ConfigMaps(wf.Namespace).Get(ctx, "kube-root-ca.crt", metav1.GetOptions{})
 		if err != nil {
 			if ctx.Err() == nil && retryExecutorIdentityRead(err) {
+				if unavailable != nil {
+					unavailable()
+				}
 				continue
 			}
 			return identityFailure("trust_anchor", err)

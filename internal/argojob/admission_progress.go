@@ -20,9 +20,12 @@ const executorReadinessTimeout = 2 * time.Minute
 const executorIdentityRetryAnnotation = "oberth.ci/executor-identity-retry-at"
 
 type admissionProgress struct {
-	lastProgress time.Time
-	scheduled    bool
-	identity     map[types.UID]identityWait
+	lastProgress             time.Time
+	scheduled                bool
+	identity                 map[types.UID]identityWait
+	readFailingSince         time.Time
+	identityReadFailingSince time.Time
+	unobservedIdentity       map[types.UID]time.Time
 }
 type identityWait struct {
 	since     time.Time
@@ -44,6 +47,20 @@ func (e *admissionProgressError) AdmissionExpiryReason() string {
 
 func (e *admissionProgressError) Error() string             { return e.reason }
 func (*admissionProgressError) InfrastructureFailure() bool { return true }
+
+func (p *admissionProgress) observeIdentityReads(unavailable bool, now time.Time) error {
+	if !unavailable {
+		p.identityReadFailingSince = time.Time{}
+		return nil
+	}
+	if p.identityReadFailingSince.IsZero() {
+		p.identityReadFailingSince = now
+	}
+	if now.Sub(p.identityReadFailingSince) >= admissionObservationTimeout {
+		return &admissionProgressError{reason: "Kubernetes executor identity observation unavailable for 2m", identity: true}
+	}
+	return nil
+}
 
 // The identity holder is intentionally never scheduled. It binds the token's
 // lifetime to the owned Workflow and is deleted during workflow cleanup.
@@ -78,8 +95,12 @@ func (p *admissionProgress) check(wf *wfv1.Workflow, pods []corev1.Pod, delivere
 	}
 	capacityWait := false
 	live := map[types.UID]bool{}
+	unobserved := map[types.UID]bool{}
 	if p.identity == nil {
 		p.identity = map[types.UID]identityWait{}
+	}
+	if p.unobservedIdentity == nil {
+		p.unobservedIdentity = map[types.UID]time.Time{}
 	}
 	for i := range pods {
 		pod := &pods[i]
@@ -101,6 +122,29 @@ func (p *admissionProgress) check(wf *wfv1.Workflow, pods []corev1.Pod, delivere
 			continue
 		}
 		capacityWait = capacityWait || waitingForKubernetesCapacity(pod)
+		running, complete := identityWaiterState(pod)
+		if assigned && !running && !complete && !delivered[pod.UID] {
+			for _, container := range pod.Spec.InitContainers {
+				if container.Name != executorTokenWaiter {
+					continue
+				}
+				unobserved[pod.UID] = true
+				since := p.unobservedIdentity[pod.UID]
+				if since.IsZero() {
+					since = now
+					// Charge time since scheduling, never time spent Pending for capacity.
+					for _, condition := range pod.Status.Conditions {
+						if condition.Type == corev1.PodScheduled && condition.Status == corev1.ConditionTrue && !condition.LastTransitionTime.IsZero() && !condition.LastTransitionTime.After(now) {
+							since = condition.LastTransitionTime.Time
+						}
+					}
+					p.unobservedIdentity[pod.UID] = since
+				}
+				if now.Sub(since) >= timeout {
+					return &admissionProgressError{reason: fmt.Sprintf("executor identity readiness not observed for %s after pod scheduling", timeout), identity: true}
+				}
+			}
+		}
 		for _, status := range pod.Status.InitContainerStatuses {
 			if status.Name != executorTokenWaiter || status.State.Running == nil {
 				continue
@@ -136,6 +180,11 @@ func (p *admissionProgress) check(wf *wfv1.Workflow, pods []corev1.Pod, delivere
 	for uid := range p.identity {
 		if !live[uid] {
 			delete(p.identity, uid)
+		}
+	}
+	for uid := range p.unobservedIdentity {
+		if !unobserved[uid] {
+			delete(p.unobservedIdentity, uid)
 		}
 	}
 	if p.scheduled || capacityWait {
@@ -182,17 +231,18 @@ func (controller *Controller) checkAdmissionProgress(ctx context.Context, wf *wf
 	if err != nil {
 		// Failed observations never count as progress. The caller settles failure
 		// through ownership-checked workflow deletion before releasing capacity.
-		if !progress.lastProgress.IsZero() && time.Since(progress.lastProgress) >= controller.config.stalledRunTimeout() {
-			return &admissionProgressError{reason: "resource admission observation deadline exceeded: pods unavailable"}
-		}
-		if progress.lastProgress.IsZero() {
-			progress.lastProgress = time.Now()
-		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		if progress.readFailingSince.IsZero() {
+			progress.readFailingSince = time.Now()
+		}
+		if time.Since(progress.readFailingSince) >= admissionObservationTimeout {
+			return &admissionProgressError{reason: "Kubernetes pod observation unavailable for 2m"}
+		}
 		return nil
 	}
+	progress.readFailingSince = time.Time{}
 	err = progress.check(wf, pods.Items, delivered, time.Now(), controller.config.stalledRunTimeout())
 	if err != nil {
 		return err

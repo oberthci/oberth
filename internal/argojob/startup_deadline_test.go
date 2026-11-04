@@ -65,7 +65,7 @@ func TestStartupDeadlineNoScheduledWorkload(t *testing.T) {
 				if scenario == "restart" {
 					want = 0
 				}
-				if err == nil || !strings.Contains(err.Error(), "no workload Pod scheduled") || time.Since(begin) != want {
+				if err == nil || !strings.Contains(err.Error(), "no scheduled pod or progress") || time.Since(begin) != want {
 					t.Fatalf("startup deadline: elapsed=%s want=%s, error=%v", time.Since(begin), want, err)
 				}
 				for _, action := range kube.Actions() {
@@ -101,11 +101,8 @@ func TestStartupDeadlineExecutorReadRetriesAreBoundedAcrossRestart(t *testing.T)
 				ctx, cancel := context.WithTimeout(t.Context(), 15*time.Minute)
 				defer cancel()
 				_, err := controller.Wait(ctx, wf.Name, "identity-run", io.Discard)
-				want := 10 * time.Minute
-				if age > 0 {
-					want = 0
-				}
-				if err == nil || !strings.Contains(err.Error(), "executor identity was not ready") || time.Since(begin) != want {
+				want := 2 * time.Minute
+				if err == nil || !strings.Contains(err.Error(), "Kubernetes executor identity observation unavailable") || time.Since(begin) != want {
 					t.Fatalf("unbounded identity retry: elapsed=%s error=%v", time.Since(begin), err)
 				}
 			})
@@ -209,7 +206,7 @@ func TestStartupDeadlineMissedWaiterAndLateStep(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 15*time.Minute)
 		defer cancel()
 		_, err := controller.Wait(ctx, wf.Name, "identity-run", io.Discard)
-		if err == nil || !strings.Contains(err.Error(), "executor identity was not ready") || time.Since(begin) != 10*time.Minute {
+		if err == nil || !strings.Contains(err.Error(), "executor identity readiness not observed") || time.Since(begin) != 10*time.Minute {
 			t.Fatalf("late Pod escaped deadline after earlier progress: %s %v", time.Since(begin), err)
 		}
 	})

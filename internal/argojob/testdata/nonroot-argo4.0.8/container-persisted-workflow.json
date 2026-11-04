@@ -20,8 +20,9 @@
     "annotations": {
       "oberth.ci/nonroot-templates": "test",
       "oberth.ci/ref": "refs/heads/main",
+      "oberth.ci/request-defaults": "2cpu-2Gi-helpers-250m-256Mi-v2",
       "oberth.ci/run-id": "run-abc123",
-      "oberth.ci/spec-identity": "fb09804f54a7b084c608cdb55c7ffe0193aaa410bd42b75e92a7c319fd087c5c",
+      "oberth.ci/spec-identity": "72562dee99155fbc7cd1bc831334701abbe683a5337860e3bfdc52194db085c4",
       "oberth.ci/step-usage-memory-policy": "explicit-limit-256Mi-v1",
       "oberth.ci/verified-controller-profile": "nonroot-static-v1:b344c6c7fc4d5955564b01ab2de2751848265a1a848c012f525b925048121b7f",
       "workflows.argoproj.io/pod-name-format": "v2"
@@ -102,7 +103,12 @@
               "value": "/tmp/cache"
             }
           ],
-          "resources": {},
+          "resources": {
+            "requests": {
+              "cpu": "2",
+              "memory": "2Gi"
+            }
+          },
           "volumeMounts": [
             {
               "name": "oberth-source",
@@ -205,7 +211,12 @@
               "value": "ordinary"
             }
           ],
-          "resources": {},
+          "resources": {
+            "requests": {
+              "cpu": "2",
+              "memory": "2Gi"
+            }
+          },
           "volumeMounts": [
             {
               "name": "oberth-tmp",
@@ -298,7 +309,7 @@
   },
   "status": {
     "phase": "Running",
-    "startedAt": "2026-11-03T17:32:52Z",
+    "startedAt": "2026-11-04T01:16:22Z",
     "finishedAt": null,
     "estimatedDuration": 1,
     "progress": "0/1",
@@ -311,7 +322,7 @@
         "templateName": "test",
         "templateScope": "local/oberth-oberth-run-abc1-aabbccddeeff",
         "phase": "Pending",
-        "startedAt": "2026-11-03T17:32:52Z",
+        "startedAt": "2026-11-04T01:16:22Z",
         "finishedAt": null,
         "estimatedDuration": 1,
         "progress": "0/1",

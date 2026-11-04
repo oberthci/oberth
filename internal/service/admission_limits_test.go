@@ -110,12 +110,14 @@ func TestAdmissionLimitsUnclaimedQueueReportsFullRunCeilingWithoutLeakingScope(t
 	}
 	api := &API{admission: &Scheduler{admission: g}}
 	run := model.Run{ID: "queued", RepoID: 1, Status: model.RunQueued}
-	if got := api.scheduling(t.Context(), run, nil).Message; got != "10 runs running" {
-		t.Fatalf("unclaimed row hides real blocker: %q", got)
+	observed, reason := api.observeScheduling(t.Context(), run, nil, true)
+	if observed.Message != "10 runs running" || reason != observed.Message {
+		t.Fatalf("unclaimed row hides real blocker: message=%q reason=%q", observed.Message, reason)
 	}
 	api.scope = &repoScope{repos: map[int64]model.Repository{1: {ID: 1}}}
-	if got := api.scheduling(t.Context(), run, nil).Message; strings.Contains(got, "10 runs") {
-		t.Fatal("scoped queue exposes shared run count", got)
+	observed, reason = api.observeScheduling(t.Context(), run, nil, true)
+	if strings.Contains(observed.Message, "10 runs") || strings.Contains(reason, "10 runs") {
+		t.Fatal("scoped queue exposes shared run count", observed.Message, reason)
 	}
 }
 

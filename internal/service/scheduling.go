@@ -58,7 +58,9 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 	policyWaiting := run.Status == model.RunRunning && (run.Reason == store.PolicyRefreshWaitingReason || strings.HasSuffix(run.Reason, "; "+store.PolicyRefreshWaitingReason))
 	defer func() {
 		if model.DisplayRunStatus(run) == model.DisplayQueued {
-			reason = queuedDisplayReason(result, blocker)
+			if reason == "" {
+				reason = queuedDisplayReason(result, blocker)
+			}
 			if policyWaiting {
 				reason = store.PolicyRefreshWaitingReason
 			}
@@ -107,7 +109,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 			if observer, ok := service.admission.(interface{ QueuedAdmissionMessage() string }); ok {
 				if message := observer.QueuedAdmissionMessage(); message != "" {
 					result.Message = message
-					return result
+					return result, message
 				}
 			}
 		}

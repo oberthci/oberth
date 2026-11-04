@@ -22,6 +22,11 @@ import (
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
+// Transport tests isolate credential delivery from the workflow supervisor.
+func (controller *Controller) deliverExecutorTokens(ctx context.Context, wf *wfv1.Workflow, delivered map[types.UID]bool) error {
+	return controller.deliverExecutorTokensObserved(ctx, wf, delivered, nil)
+}
+
 func TestExecutorIdentityDeliveryUsesSeparateBoundPodAndStdin(t *testing.T) {
 	config := testConfig()
 	config.applyDefaults()

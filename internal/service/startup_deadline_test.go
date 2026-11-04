@@ -77,7 +77,7 @@ func TestStartupDeadlineFailsAndReleasesOnlyAfterCleanup(t *testing.T) {
 				if err == nil || stored.Status != model.RunRunning || view == nil || view.State != "admitted" {
 					t.Fatalf("unsafe release without cleanup: %+v %+v %v", stored, view, err)
 				}
-			} else if err != nil || stored.Status != model.RunFailed || stored.Phase != "infrastructure" || !strings.Contains(stored.Error, "no workload Pod scheduled") || view != nil && view.State == "admitted" {
+			} else if err != nil || stored.Status != model.RunFailed || stored.Phase != "infrastructure" || !strings.Contains(stored.Error, "no scheduled pod or progress") || view != nil && view.State == "admitted" {
 				t.Fatalf("startup failure did not release and explain: %+v %+v %v", stored, view, err)
 			}
 			if len(jobs.deleted) != 1 {

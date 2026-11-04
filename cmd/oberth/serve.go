@@ -290,7 +290,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 
 	flags.StringVar(&options.maxConcurrentFile, "max-concurrent-jobs-file", "", "mounted ConfigMap key to reload max concurrent Jobs without restart; invalid or missing keeps the last good value")
 	flags.StringVar(&options.admissionSizeWeights, "admission-size-weights", service.DefaultSizeWeights.String(), "deprecated compatibility option; ignored; Kubernetes places step pods")
-	flags.DurationVar(&options.admissionStallTimeout, "admission-stall-timeout", 10*time.Minute, "fail a granted run with no scheduled pod or progress for this duration")
+	flags.DurationVar(&options.admissionStallTimeout, "admission-stall-timeout", 10*time.Minute, "workflow startup bound for absent or non-capacity-stalled pods; Kubernetes capacity waits are exempt")
 	flags.DurationVar(&options.admissionMaxHeadWait, "admission-max-head-wait", service.DefaultMaxHeadWait, "deprecated compatibility option; ignored by workflow admission")
 	defaults := service.DefaultAdmissionPressureConfig()
 	flags.BoolVar(&options.admissionPressure.Enabled, "admission-pressure-enabled", defaults.Enabled, "hold new workflow grants at the hard host CPU/IO PSI limits")
