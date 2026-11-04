@@ -50,7 +50,7 @@ type Retention struct {
 	mu             sync.Mutex
 	statusMu       sync.Mutex
 	status         RetentionStatus
-	resourceRetry  bool // protected by mu; SQLite contention is an expected skip
+	resourceRetry  bool // protected by mu; contention/pass exhaustion is an expected skip
 }
 
 func (r *Retention) now() time.Time {
@@ -260,11 +260,12 @@ func (r *Retention) Status(ctx context.Context) (any, error) {
 	return r.status, nil
 }
 
-// pruneResourceUsage is called with mu held. Expected SQLite contention is a
-// skip, not a retention-status error. Run schedules the pending retry.
+// pruneResourceUsage is called with mu held. SQLite contention and exhaustion
+// of the store's bounded pass are skips. Run schedules a short retry while the
+// caller remains live; cancellation and other failures still propagate.
 func (r *Retention) pruneResourceUsage(ctx context.Context) error {
 	_, err := r.Database.PruneResourceUsage(ctx)
-	r.resourceRetry = store.IsTransientLockError(err)
+	r.resourceRetry = ctx.Err() == nil && (store.IsTransientLockError(err) || errors.Is(err, context.DeadlineExceeded))
 	if r.resourceRetry {
 		return nil
 	}
@@ -287,7 +288,7 @@ func (r *Retention) run(ctx context.Context, interval, retryDelay time.Duration,
 		r.mu.Unlock()
 		retry.Stop()
 		if pending && ctx.Err() == nil {
-			logger.Printf("DEBUG: resource telemetry retention busy; skipped, retry in %s", retryDelay)
+			logger.Printf("DEBUG: resource telemetry retention busy or pass budget exhausted; skipped, retry in %s", retryDelay)
 			retry.Reset(retryDelay)
 		}
 	}

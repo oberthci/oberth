@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/oberthci/oberth/internal/api"
@@ -35,8 +36,16 @@ type retentionFixture struct {
 
 func newRetentionFixture(t *testing.T) *retentionFixture {
 	t.Helper()
+	return newRetentionFixtureWithClock(t, nil)
+}
+
+func newRetentionFixtureWithClock(t *testing.T, clock func() time.Time) *retentionFixture {
+	t.Helper()
 	f := &retentionFixture{root: t.TempDir(), now: time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)}
-	db, err := storetest.Open(context.Background(), filepath.Join(f.root, "oberth.sqlite"), store.Options{Now: func() time.Time { return f.now }})
+	if clock == nil {
+		clock = func() time.Time { return f.now }
+	}
+	db, err := storetest.Open(context.Background(), filepath.Join(f.root, "oberth.sqlite"), store.Options{Now: clock})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -666,6 +675,110 @@ func TestRetentionBusyIsSkippedAndRetriedWithoutEvidenceSweep(t *testing.T) {
 	<-done
 	if strings.Contains(out.String(), "retention sweep:") || strings.Contains(out.String(), "retention retry:") {
 		t.Fatal("busy skip logged as error", out.String())
+	}
+}
+
+func TestRetentionBudgetIsRetriedWithoutEvidenceSweep(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var expirePass bool
+		f := newRetentionFixtureWithClock(t, func() time.Time {
+			if expirePass {
+				expirePass = false
+				// PruneResourceUsage reads its clock after selection. Exhaust
+				// its real one-second pass budget before the DELETE, without
+				// cancelling the service or relying on host load.
+				time.Sleep(time.Second)
+				synctest.Wait()
+			}
+			return time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+		})
+		run := seedRetentionResourceUsage(t, f)
+		expirePass = true
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		out := &retentionRetryLog{ready: make(chan struct{}, 8)}
+		go func() { defer close(done); f.retention.run(ctx, time.Hour, 10*time.Millisecond, log.New(out, "", 0)) }()
+		defer func() { cancel(); <-done }()
+		select {
+		case <-out.ready:
+		case <-time.After(2 * time.Second):
+			t.Fatal("bounded telemetry pass did not schedule a short retry")
+		}
+		synctest.Wait()
+		if !f.retention.resourceRetry {
+			t.Fatal("bounded telemetry pass lost its pending retry")
+		}
+		value, err := f.retention.Status(t.Context())
+		if err != nil || value.(RetentionStatus).LastError != "" {
+			t.Fatal("bounded telemetry pass became a status error", value, err)
+		}
+		rows, _, err := f.retention.Database.StepResourceUsage(t.Context(), run.ID)
+		if err != nil || len(rows) != 1 {
+			t.Fatal("expired pass did not retain its backlog", len(rows), err)
+		}
+		// The retry must not depend on rescanning log/artifact evidence.
+		for _, name := range []string{"logs", "artifacts"} {
+			path := filepath.Join(f.root, name)
+			if err := os.Rename(path, path+"-saved"); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte("not a directory"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// Pending telemetry must drain on the short retry, rather than
+		// waiting for an hourly sweep or rescanning the broken evidence trees.
+		time.Sleep(20 * time.Millisecond)
+		synctest.Wait()
+		rows, _, err = f.retention.Database.StepResourceUsage(t.Context(), run.ID)
+		if err != nil || len(rows) != 0 {
+			t.Fatal("bounded telemetry backlog did not drain on retry", len(rows), err)
+		}
+		if f.retention.resourceRetry {
+			t.Fatal("successful telemetry pass left retry armed")
+		}
+		cancel()
+		<-done
+		if strings.Contains(out.String(), "retention sweep:") || strings.Contains(out.String(), "retention retry:") {
+			t.Fatal("telemetry retry failed or rescanned evidence", out.String())
+		}
+	})
+}
+
+func TestRetentionDatabaseFailureIsNotRetried(t *testing.T) {
+	f := newRetentionFixture(t)
+	seedRetentionResourceUsage(t, f)
+	if err := f.retention.Database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f.retention.resourceRetry = true
+	if err := f.retention.Sweep(t.Context()); err == nil || f.retention.resourceRetry {
+		t.Fatal("permanent database failure was swallowed or retried", err, f.retention.resourceRetry)
+	}
+	value, err := f.retention.Status(t.Context())
+	if err != nil || value.(RetentionStatus).LastError == "" {
+		t.Fatal("permanent database failure lost status error", value, err)
+	}
+}
+
+func TestRetentionCallerCancellationIsNotRetried(t *testing.T) {
+	f := newRetentionFixture(t)
+	seedRetentionResourceUsage(t, f)
+	for _, deadline := range []bool{false, true} {
+		t.Run(fmt.Sprint(deadline), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			want := context.Canceled
+			if deadline {
+				cancel()
+				ctx, cancel = context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+				want = context.DeadlineExceeded
+			}
+			cancel()
+			f.retention.resourceRetry = true
+			if err := f.retention.Sweep(ctx); !errors.Is(err, want) || f.retention.resourceRetry {
+				t.Fatal("caller cancellation was swallowed or retried", err, f.retention.resourceRetry)
+			}
+		})
 	}
 }
 
