@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/oberthci/oberth/internal/gitcache"
@@ -55,24 +56,53 @@ func TestTrustedPolicyPermanentFailureReleasesRun(t *testing.T) {
 }
 
 func TestTrustedPolicyWaitHasTotalDeadline(t *testing.T) {
+	for _, setupDelay := range []time.Duration{0, time.Second} {
+		t.Run(setupDelay.String(), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				testTrustedPolicyWaitHasTotalDeadline(t, setupDelay)
+			})
+		})
+	}
+}
+
+func testTrustedPolicyWaitHasTotalDeadline(t *testing.T, setupDelay time.Duration) {
+	t.Helper()
 	f := newControlFixture(t)
 	f.scheduler.policyWaitTimeout = 10 * time.Millisecond
 	f.scheduler.git = &policyTestGit{controlGit: f.git, baselineErr: fmt.Errorf("%w: connection reset", gitcache.ErrPolicyUpstreamUnavailable)}
-	f.scheduler.capacityWait = func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }
-	parent, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
-	defer cancel()
-	queued, err := f.scheduler.EnqueueCI(parent, CIRequest{EventID: "policy-deadline", Repository: f.repo, Branch: "feature/deadline", SHA: strings.Repeat("a", 40), Actor: "agent"})
+	waits := 0
+	f.scheduler.capacityWait = func(ctx context.Context) error {
+		waits++
+		timer := time.NewTimer(3 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	// Model slow fixture setup without spending real time or shortening the
+	// policy's own deadline. Enqueue work is not part of the policy wait.
+	time.Sleep(setupDelay)
+	queued, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "policy-deadline", Repository: f.repo, Branch: "feature/deadline", SHA: strings.Repeat("a", 40), Actor: "agent"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	parent, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	defer cancel()
+	started := time.Now()
 	if err := f.scheduler.ProcessNext(parent); err != nil {
 		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed != 10*time.Millisecond || waits != 4 {
+		t.Fatalf("policy deadline reset across retries: elapsed=%s waits=%d", elapsed, waits)
 	}
 	run, err := f.store.Run(t.Context(), queued.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Status != model.RunFailed || !strings.Contains(run.Error, "policy refresh deadline exceeded") || f.scheduler.AdmissionState().Used != 0 {
+	if run.Status != model.RunFailed || !strings.Contains(run.Error, "policy refresh deadline exceeded") || !strings.Contains(run.Error, "connection reset") || f.scheduler.AdmissionState().Used != 0 || len(f.jobs.createdCI) != 0 || len(f.git.syncedBranches) != 0 {
 		t.Fatalf("policy wait did not expire and release capacity: %#v", run)
 	}
 }
