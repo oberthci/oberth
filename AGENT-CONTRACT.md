@@ -2690,7 +2690,6 @@ alone is never evidence that missing migrations ran.
 | v50 | Publication policy availability | Persist the first unavailable policy read independently of publication age; clear on success or terminal status | Database restore |
 | v51 | Issue workspace coordination | Add constrained todo/active/waiting/review work status and include real status changes in metadata revisions; staleness remains computed on reads | Database restore |
 | v52 | Run list order | Rebuild the v40 covering index idempotently; widen `runs_latest_ref_idx` to cover status, start, finish, queue time and ID, so the grouped latest-per-ref list ranks every head from one covering scan | Database restore |
-
 | v53 | Promotion trains | Persist ordered sources, conflict decisions and merged tree SHA, with retry identity and per-source grant reservations; legacy promotions remain unchanged | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
