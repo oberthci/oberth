@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
-	"github.com/oberthci/oberth/internal/measured"
-	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/resourcesampler"
-	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/internal/storetest"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,10 +18,12 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
 	"k8s.io/utils/ptr"
-	"path/filepath"
-	"strings"
-	"testing"
-	"time"
+
+	"github.com/oberthci/oberth/internal/measured"
+	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/resourcesampler"
+	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type reviewSnapshot struct{ value resourcesampler.Snapshot }

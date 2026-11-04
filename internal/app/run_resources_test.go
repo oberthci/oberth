@@ -22,9 +22,10 @@ func TestCurrentDeclarationOmittedLimitsCannotAcquireFiniteAdvice(t *testing.T) 
 	for _, missing := range []string{"", "memory", "ephemeral-storage"} {
 		t.Run("missing-"+missing, func(t *testing.T) {
 			limits := "{memory: 2Gi, ephemeral-storage: 512Mi}"
-			if missing == "memory" {
+			switch missing {
+			case "memory":
 				limits = "{ephemeral-storage: 512Mi}"
-			} else if missing == "ephemeral-storage" {
+			case "ephemeral-storage":
 				limits = "{memory: 2Gi}"
 			}
 			b := &resourceBlobStub{source: []byte(fmt.Sprintf(`apiVersion: argoproj.io/v1alpha1

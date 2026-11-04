@@ -15,26 +15,27 @@ func (s *Store) readResourceAttemptSafety(ctx context.Context, repoID int64, pay
 		terminal[r.ID] = r.Status.Terminal()
 	}
 	manifests := map[string]model.ResourceAttemptInventory{}
-	rows, err := s.reader().QueryContext(ctx, `SELECT i.observation_json FROM json_each(?) selected CROSS JOIN resource_attempt_inventories i ON i.run_id=selected.value WHERE i.repo_id=? LIMIT ?`, string(payload), repoID, 2*measured.MaxRuns+1)
+	manifestRows, err := s.reader().QueryContext(ctx, `SELECT i.observation_json FROM json_each(?) selected CROSS JOIN resource_attempt_inventories i ON i.run_id=selected.value WHERE i.repo_id=? LIMIT ?`, string(payload), repoID, 2*measured.MaxRuns+1)
 	if err != nil {
 		return err
 	}
-	for rows.Next() {
+	defer func() { _ = manifestRows.Close() }()
+	for manifestRows.Next() {
 		var raw string
 		var i model.ResourceAttemptInventory
-		if err := rows.Scan(&raw); err != nil {
-			_ = rows.Close()
+		if err := manifestRows.Scan(&raw); err != nil {
+			_ = manifestRows.Close()
 			return err
 		}
 		if len(raw) > 1024 || json.Unmarshal([]byte(raw), &i) != nil || i.Validate() != nil {
-			_ = rows.Close()
+			_ = manifestRows.Close()
 			return fmt.Errorf("invalid stored attempt inventory")
 		}
 		manifests[i.RunID] = i
 		out.SafetyIncomplete = out.SafetyIncomplete || !i.Complete || (terminal[i.RunID] && !i.Terminal)
 	}
-	err = rows.Err()
-	_ = rows.Close()
+	err = manifestRows.Err()
+	_ = manifestRows.Close()
 	if err != nil {
 		return err
 	}
@@ -56,10 +57,11 @@ func (s *Store) readResourceAttemptSafety(ctx context.Context, repoID int64, pay
 		k := v.RunID + "\x00" + v.NodeID
 		usage[k] = append(usage[k], v)
 	}
-	rows, err = s.reader().QueryContext(ctx, `SELECT a.run_id,a.observation_json FROM json_each(?) selected CROSS JOIN resource_attempts a ON a.run_id=selected.value LIMIT ?`, string(payload), measured.MaxRows+1)
+	rows, err := s.reader().QueryContext(ctx, `SELECT a.run_id,a.observation_json FROM json_each(?) selected CROSS JOIN resource_attempts a ON a.run_id=selected.value LIMIT ?`, string(payload), measured.MaxRows+1)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = rows.Close() }()
 	count := 0
 	perRun := map[string]int{}
 	known := map[string]resourceAttemptBinding{}

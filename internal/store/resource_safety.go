@@ -17,6 +17,7 @@ func (s *Store) readResourceSafety(ctx context.Context, repoID int64, query, act
 		if err != nil {
 			return err
 		}
+		defer func() { _ = rows.Close() }()
 		count := 0
 		for rows.Next() {
 			run, err := scanRun(rows)
@@ -61,6 +62,7 @@ WHERE d.repo_id=? ORDER BY d.run_id,d.node_id,d.pod_uid LIMIT ?`, string(payload
 	if err != nil {
 		return err
 	}
+	defer func() { _ = rows.Close() }()
 	podCounts := map[string]int{}
 	for rows.Next() {
 		var raw string
@@ -106,6 +108,7 @@ WHERE d.repo_id=? ORDER BY d.run_id,d.node_id,d.pod_uid LIMIT ?`, string(payload
 	if err != nil {
 		return err
 	}
+	defer func() { _ = inventory.Close() }()
 	count := 0
 	for inventory.Next() {
 		var missing bool
