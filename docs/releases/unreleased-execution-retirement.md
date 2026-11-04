@@ -64,5 +64,5 @@ has been installed, dependent repositories have migrated, and the live drain,
 cleanup and backup receipts are accepted. See [the release sequence](../legacy-removal.md).
 The combined release preserves migrations 1–52, including publication policy
 waiting (50), issue work status (51) and the final run-list index rebuild (52),
-and adds promotion trains at 53. Execution retirement adds no migration;
-the next new migration is 54.
+and adds promotion trains at 53 and park promotion evidence at 54. Execution
+retirement adds no migration; the next new migration is 55.
