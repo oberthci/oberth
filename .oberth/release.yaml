@@ -1272,11 +1272,11 @@ spec:
         requests:
           cpu: 1000m # measured request 1595m; retain the CI policy cap
           memory: 4Gi
-          ephemeral-storage: 650Mi
+          ephemeral-storage: 3941Mi # remeasure: provisional release store sampled local bytes 2754265088 x1.5, rounded up
         limits:
           cpu: 2950m
           memory: 4Gi
-          ephemeral-storage: 780Mi
+          ephemeral-storage: 3941Mi # remeasure: provisional release store sampled local bytes 2754265088 x1.5, rounded up
 
 
   - name: release-test-service
@@ -1336,11 +1336,11 @@ spec:
         requests:
           cpu: 1000m # measured request 1533m; retain the CI policy cap
           memory: 4Gi
-          ephemeral-storage: 488Mi
+          ephemeral-storage: 5138Mi # remeasure: provisional release service sampled local bytes 3591286784 x1.5, rounded up
         limits:
           cpu: 2930m
           memory: 4Gi
-          ephemeral-storage: 585Mi
+          ephemeral-storage: 5138Mi # remeasure: provisional release service sampled local bytes 3591286784 x1.5, rounded up
 
 
   - name: release-test-rest
@@ -1464,11 +1464,11 @@ spec:
         requests:
           cpu: 796m
           memory: 896Mi
-          ephemeral-storage: 222Mi
+          ephemeral-storage: 2631Mi # remeasure: provisional release gitcache sampled local bytes 1838612480 x1.5, rounded up
         limits:
           cpu: 2000m # retain the two-processor race launcher budget
           memory: 896Mi
-          ephemeral-storage: 267Mi
+          ephemeral-storage: 2631Mi # remeasure: provisional release gitcache sampled local bytes 1838612480 x1.5, rounded up
 
   - name: release-chart-test
     activeDeadlineSeconds: 60

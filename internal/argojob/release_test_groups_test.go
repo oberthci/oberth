@@ -5,12 +5,15 @@ import (
 	"testing"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 // Release tests must have the same disjoint package partition, watchdogs and
-// resource envelope as branch CI. A single all-package Pod defeats isolation.
+// CPU/memory envelope as branch CI. Private release caches need their own local
+// storage bounds. A single all-package Pod defeats isolation.
 func TestOberthReleaseRaceGroupsMatchBranch(t *testing.T) {
 	branch, err := argoworkflow.Decode(loadPipeline(t, "build.yaml"))
 	if err != nil {
@@ -35,6 +38,10 @@ func TestOberthReleaseRaceGroupsMatchBranch(t *testing.T) {
 		t.Fatal("release-test must gate four isolated race groups")
 	}
 	pending := map[string]bool{"store": true, "service": true, "rest": true, "gitcache": true}
+	// Release run 49213f5af2a95359986a00356ca1f3fb retained these Pod-local
+	// sampled lower bounds (67/40/18 samples respectively). Use provisional
+	// 1.5x headroom rounded up to Mi; these are not certified cold peaks.
+	releaseLocalBytes := map[string]int64{"store": 2754265088, "service": 3591286784, "gitcache": 1838612480}
 	for _, task := range gate.DAG.Tasks {
 		if !pending[task.Name] || task.Template != "release-test-"+task.Name || task.Depends != "" || len(task.Dependencies) != 0 || task.ContinueOn != nil || task.When != "" {
 			t.Fatalf("unexpected or bypassable race group: %+v", task)
@@ -49,8 +56,16 @@ func TestOberthReleaseRaceGroupsMatchBranch(t *testing.T) {
 		if !reflect.DeepEqual(got.Container.Args[2:], command) {
 			t.Errorf("%s invocation = %v, want branch %v", task.Name, got.Container.Args[2:], command)
 		}
-		if !reflect.DeepEqual(got.ActiveDeadlineSeconds, want.ActiveDeadlineSeconds) || !reflect.DeepEqual(got.Container.Resources, want.Container.Resources) {
-			t.Errorf("%s must retain branch watchdog and resource profile", task.Name)
+		wantResources := want.Container.Resources.DeepCopy()
+		if observed, ok := releaseLocalBytes[task.Name]; ok {
+			const mib int64 = 1 << 20
+			bound := ((observed*3 + 2*mib - 1) / (2 * mib)) * mib
+			quantity := resource.MustParse(resource.NewQuantity(bound, resource.BinarySI).String())
+			wantResources.Requests[corev1.ResourceEphemeralStorage] = quantity
+			wantResources.Limits[corev1.ResourceEphemeralStorage] = quantity
+		}
+		if !reflect.DeepEqual(got.ActiveDeadlineSeconds, want.ActiveDeadlineSeconds) || !reflect.DeepEqual(got.Container.Resources, *wantResources) {
+			t.Errorf("%s must retain branch watchdog/CPU/memory and its release-only local storage bound", task.Name)
 		}
 		isolatedTools := false
 		for _, mount := range got.Container.VolumeMounts {
