@@ -30,11 +30,6 @@ type queuedRunObserver interface {
 	QueuedRunPosition(context.Context, string) (int64, error)
 }
 
-func (service *API) scheduling(ctx context.Context, run model.Run, steps []model.StepResult) *model.RunScheduling {
-	scheduling, _ := service.observeScheduling(ctx, run, steps, true)
-	return scheduling
-}
-
 // List rows already carry a position computed over the complete durable queue.
 //
 // The second result is the display_reason of a run that has not started:

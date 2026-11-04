@@ -29,17 +29,6 @@ type diskFloorCheck struct {
 	cacheTTL   time.Duration
 }
 
-// newDiskFloorCheck builds a check for the given path. A floorBytes of zero
-// means disabled: freeAboveFloor always returns true.
-func newDiskFloorCheck(path string, floorBytes int64) *diskFloorCheck {
-	ttl := 5 * time.Second
-	return &diskFloorCheck{
-		floorBytes: floorBytes,
-		path:       path,
-		cacheTTL:   ttl,
-	}
-}
-
 // freeAboveFloor reports whether the filesystem has enough free bytes.
 // Returns true when the check is disabled (floorBytes == 0).
 func (d *diskFloorCheck) freeAboveFloor() bool {

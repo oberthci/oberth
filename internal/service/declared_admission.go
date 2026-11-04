@@ -35,15 +35,6 @@ func DefaultDeclaredAdmissionConfig() DeclaredAdmissionConfig {
 	return DeclaredAdmissionConfig{CPUMilli: 8000, MemoryBytes: 16 << 30, MemoryHeadroomBytes: ptr.To(int64(1 << 30)), MemoryHeadroomPercent: ptr.To(int64(10))}
 }
 
-// withHeadroomDefaults also copies optional values so callers cannot mutate an
-// active scheduler's accounting through their original configuration pointers.
-func (c DeclaredAdmissionConfig) withHeadroomDefaults() DeclaredAdmissionConfig {
-	c.LegacyResources = maps.Clone(c.LegacyResources)
-	fixed, percent := c.memoryHeadroom()
-	c.MemoryHeadroomBytes, c.MemoryHeadroomPercent = ptr.To(fixed), ptr.To(percent)
-	return c
-}
-
 func (c DeclaredAdmissionConfig) memoryHeadroom() (fixed, percent int64) {
 	return ptr.Deref(c.MemoryHeadroomBytes, 1<<30), ptr.Deref(c.MemoryHeadroomPercent, 10)
 }

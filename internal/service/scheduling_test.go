@@ -82,7 +82,7 @@ func TestClaimedRunShowsCapacityWaitUntilSubmission(t *testing.T) {
 		return nil, nil
 	})}
 	run := model.Run{Status: model.RunRunning, QueueSequence: 2, QueuePosition: 1, WorkflowName: "reserved-workflow"}
-	observation := service.scheduling(t.Context(), run, nil)
+	observation, _ := service.observeScheduling(t.Context(), run, nil, true)
 	if observation.State != "waiting" || observation.Admission == nil || observation.Admission.Weight != 2 ||
 		observation.Admission.Used != 3 || observation.Admission.Capacity != 3 || observation.Admission.Position != 1 ||
 		!strings.Contains(observation.Message, "Need 2 weight; 3/3 used; queue position 1") {
@@ -91,7 +91,7 @@ func TestClaimedRunShowsCapacityWaitUntilSubmission(t *testing.T) {
 	releaseFirst()
 	releaseSecond := awaitAcquired(t, acquired)
 	defer releaseSecond()
-	observation = service.scheduling(t.Context(), run, nil)
+	observation, _ = service.observeScheduling(t.Context(), run, nil, true)
 	if observation.State != "waiting" || !strings.Contains(observation.Message, "waiting for workflow submission") {
 		t.Fatalf("admission alone started run: %#v", observation)
 	}
@@ -108,7 +108,7 @@ func TestSubmittedKVMPreflightHasDistinctSchedulingState(t *testing.T) {
 	}
 	check := func(want string) {
 		t.Helper()
-		observation := service.scheduling(ctx, run, nil)
+		observation, _ := service.observeScheduling(ctx, run, nil, true)
 		if observation == nil || observation.State != want || observation.Admission == nil || run.StartedAt != nil {
 			t.Fatalf("preflight state = %#v, run = %#v; want %s", observation, run, want)
 		}
@@ -146,7 +146,7 @@ func TestSchedulingProjectionSkipsTerminalAndProgressedListRows(t *testing.T) {
 		return nil, nil
 	})}
 	for _, state := range []model.RunStatus{model.RunPassed, model.RunFailed, model.RunInterrupted} {
-		if result := service.scheduling(t.Context(), model.Run{Status: state}, nil); result != nil {
+		if result, _ := service.observeScheduling(t.Context(), model.Run{Status: state}, nil, true); result != nil {
 			t.Fatalf("terminal=%#v", result)
 		}
 	}
@@ -161,7 +161,7 @@ func TestSchedulingProjectionStartupUnavailableAndContext(t *testing.T) {
 	service := &API{}
 	started := time.Now().UTC()
 	run := model.Run{Status: model.RunRunning, StartedAt: &started}
-	if result := service.scheduling(t.Context(), run, nil); result.State != "unavailable" {
+	if result, _ := service.observeScheduling(t.Context(), run, nil, true); result.State != "unavailable" {
 		t.Fatalf("nil observer=%#v", result)
 	}
 	calls := 0
@@ -173,11 +173,11 @@ func TestSchedulingProjectionStartupUnavailableAndContext(t *testing.T) {
 		}
 		return nil, errors.New("SECRET error")
 	})
-	if result := service.scheduling(t.Context(), run, nil); result.State != "startup" || calls != 0 {
+	if result, _ := service.observeScheduling(t.Context(), run, nil, true); result.State != "startup" || calls != 0 {
 		t.Fatalf("startup=%#v calls=%d", result, calls)
 	}
 	run.WorkflowName = "wf"
-	result := service.scheduling(t.Context(), run, []model.StepResult{{Status: model.StepQueued}, {Status: model.StepPending}})
+	result, _ := service.observeScheduling(t.Context(), run, []model.StepResult{{Status: model.StepQueued}, {Status: model.StepPending}}, true)
 	if result.Execution.State != "unavailable" || result.ObservedAt.IsZero() || result.AgeSeconds < 0 || calls != 1 {
 		t.Fatalf("unavailable=%#v calls=%d", result, calls)
 	}
@@ -193,7 +193,7 @@ func TestSchedulingProjectionStartupUnavailableAndContext(t *testing.T) {
 		}
 		return nil, ctx.Err()
 	})
-	service.scheduling(ctx, run, nil)
+	service.observeScheduling(ctx, run, nil, true)
 }
 
 func TestSchedulingAvailableInMCPStatusRunGetAndAPIRun(t *testing.T) {

@@ -55,17 +55,17 @@ func TestAnXLHeadIsNamedByEveryRunBehindIt(t *testing.T) {
 	// Unclaimed queued runs carry the same reason, and a scoped actor that
 	// cannot see the blocking repository does not learn about it.
 	api := &API{admission: scheduler}
-	queued := api.scheduling(context.Background(), model.Run{ID: "q", Status: model.RunQueued}, nil)
+	queued, _ := api.observeScheduling(context.Background(), model.Run{ID: "q", Status: model.RunQueued}, nil, true)
 	if !strings.HasSuffix(queued.Message, want) {
 		t.Fatalf("queued message = %q", queued.Message)
 	}
 	scoped := &API{admission: scheduler, scope: &repoScope{repos: map[int64]model.Repository{3: {ID: 3}}}}
-	if message := scoped.scheduling(context.Background(), model.Run{ID: "q", Status: model.RunQueued}, nil).Message; strings.Contains(message, "exampleorg-ebpf") {
-		t.Fatalf("scoped queued message leaks the blocker: %q", message)
+	if observed, _ := scoped.observeScheduling(context.Background(), model.Run{ID: "q", Status: model.RunQueued}, nil, true); strings.Contains(observed.Message, "exampleorg-ebpf") {
+		t.Fatalf("scoped queued message leaks the blocker: %q", observed.Message)
 	}
 	visible := &API{admission: scheduler, scope: &repoScope{repos: map[int64]model.Repository{2: {ID: 2}, 3: {ID: 3}}}}
-	if message := visible.scheduling(context.Background(), model.Run{ID: "w", Status: model.RunRunning, QueueSequence: 3}, nil).Message; !strings.HasSuffix(message, want) {
-		t.Fatalf("in-scope waiting message = %q", message)
+	if observed, _ := visible.observeScheduling(context.Background(), model.Run{ID: "w", Status: model.RunRunning, QueueSequence: 3}, nil, true); !strings.HasSuffix(observed.Message, want) {
+		t.Fatalf("in-scope waiting message = %q", observed.Message)
 	}
 
 	releaseRunning()

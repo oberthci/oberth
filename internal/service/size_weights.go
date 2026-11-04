@@ -3,8 +3,6 @@ package service
 import (
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
@@ -19,44 +17,6 @@ type SizeWeights struct {
 
 // DefaultSizeWeights is the behaviour before weights were configurable.
 var DefaultSizeWeights = SizeWeights{S: 1, M: 2, L: 3, XL: 0}
-
-// ParseSizeWeights reads "S=1,M=2,L=3,XL=0". Sizes it does not name keep
-// their default; an unknown size, a duplicate or a non-integer is refused.
-func ParseSizeWeights(value string) (SizeWeights, error) {
-	weights := DefaultSizeWeights
-	if strings.TrimSpace(value) == "" {
-		return weights, nil
-	}
-	seen := map[string]bool{}
-	for _, entry := range strings.Split(value, ",") {
-		key, raw, found := strings.Cut(entry, "=")
-		key, raw = strings.TrimSpace(key), strings.TrimSpace(raw)
-		if !found || key == "" || raw == "" {
-			return SizeWeights{}, fmt.Errorf("size weight %q is not SIZE=WEIGHT", strings.TrimSpace(entry))
-		}
-		if seen[key] {
-			return SizeWeights{}, fmt.Errorf("size weight %s is given more than once", key)
-		}
-		seen[key] = true
-		weight, err := strconv.Atoi(raw)
-		if err != nil {
-			return SizeWeights{}, fmt.Errorf("size weight %s=%q is not an integer", key, raw)
-		}
-		switch pipeline.Size(key) {
-		case pipeline.S:
-			weights.S = weight
-		case pipeline.M:
-			weights.M = weight
-		case pipeline.L:
-			weights.L = weight
-		case pipeline.XL:
-			weights.XL = weight
-		default:
-			return SizeWeights{}, fmt.Errorf("size weight names unknown size %q; sizes are S, M, L and XL", key)
-		}
-	}
-	return weights, weights.Validate()
-}
 
 // Validate requires every weight to be at least 1, except XL, which may be 0
 // (the whole budget), and S <= M <= L <= XL.

@@ -41,7 +41,7 @@ func TestKubernetesPlacementDefaultsPreserveDeclarationsAndAllContainerShapes(t 
 		{Name: "helpers", InitContainers: []wfv1.UserContainer{{Container: corev1.Container{Name: "init"}}}, Sidecars: []wfv1.UserContainer{{Container: corev1.Container{Name: "sidecar"}}}},
 		{Name: "inline", DAG: &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{{Inline: &wfv1.Template{Container: &corev1.Container{}}}}}},
 	}}}
-	applyRequestDefaults(wf, false)
+	applyRequestDefaultsPolicy(wf, false, false)
 	if !reflect.DeepEqual(declared, *before) {
 		t.Fatal("explicit resources changed")
 	}
@@ -80,7 +80,7 @@ func TestKubernetesPlacementDefaultsHonorTemplateAndLimitOnlyResources(t *testin
 		TemplateDefaults: &wfv1.Template{Container: &corev1.Container{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("250m"), corev1.ResourceMemory: resource.MustParse("256Mi")}}}},
 		Templates:        []wfv1.Template{{Container: &corev1.Container{}}, {Script: &wfv1.ScriptTemplate{Container: corev1.Container{Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m"), corev1.ResourceMemory: resource.MustParse("128Mi")}}}}}},
 	}}
-	applyRequestDefaults(wf, false)
+	applyRequestDefaultsPolicy(wf, false, false)
 	if r := wf.Spec.Templates[0].Container.Resources; r.Requests.Cpu().MilliValue() != 250 || r.Requests.Memory().Value() != 256<<20 {
 		t.Fatal("template declarations lost", r)
 	}

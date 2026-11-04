@@ -362,11 +362,11 @@ func TestPressureObservationsMetricsAndScopedRedaction(t *testing.T) {
 	}
 	service := &API{admission: scheduler}
 	run := model.Run{ID: "1", Status: model.RunRunning, QueueSequence: 1, RepoID: 1, WorkflowName: "reserved"}
-	if got := service.scheduling(t.Context(), run, nil); !strings.Contains(got.Message, "io pressure 61.2%") {
+	if got, _ := service.observeScheduling(t.Context(), run, nil, true); !strings.Contains(got.Message, "io pressure 61.2%") {
 		t.Fatal("missing run reason", got.Message)
 	}
 	service.scope = &repoScope{actor: api.Actor{Scope: []string{"forge"}}, repos: map[int64]model.Repository{1: {ID: 1}}} // Visible blocker must still hide host-wide pressure.
-	if got := service.scheduling(t.Context(), run, nil); got.Admission.Pressure == nil || !got.Admission.Pressure.Redacted || !strings.Contains(got.Message, "host io pressure") || strings.Contains(got.Message, "%") {
+	if got, _ := service.observeScheduling(t.Context(), run, nil, true); got.Admission.Pressure == nil || !got.Admission.Pressure.Redacted || !strings.Contains(got.Message, "host io pressure") || strings.Contains(got.Message, "%") {
 		t.Fatal("scoped run leaked host pressure", got)
 	}
 }
@@ -601,7 +601,7 @@ func TestPressureNonAdminAndMCPViewsKeepNonNumericReason(t *testing.T) {
 		}
 		run := claimed
 		run.WorkflowName = "reserved"
-		observed := view.scheduling(t.Context(), run, nil)
+		observed, _ := view.observeScheduling(t.Context(), run, nil, true)
 		if admin {
 			if !strings.Contains(observed.Message, "67.2%") {
 				t.Fatal("admin HTTP lost detail", observed.Message)

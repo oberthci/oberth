@@ -13,9 +13,6 @@ const requestDefaultsPolicy = "2cpu-2Gi-helpers-250m-256Mi-v2"
 // Fill only missing request dimensions before server helper injection. Existing
 // declarations, inherited template values, and Kubernetes' limits-only request
 // semantics take precedence. Limits and explicit positive requests never change.
-func applyRequestDefaults(wf *wfv1.Workflow, omit bool) {
-	applyRequestDefaultsPolicy(wf, omit, false)
-}
 
 func applyRequestDefaultsPolicy(wf *wfv1.Workflow, omit, legacyHelpers bool) {
 	delete(wf.Annotations, requestDefaultsAnnotation)

@@ -668,3 +668,35 @@ func TestRetentionBusyIsSkippedAndRetriedWithoutEvidenceSweep(t *testing.T) {
 		t.Fatal("busy skip logged as error", out.String())
 	}
 }
+
+// The historical floor remains observable even when evidence policies are
+// disabled. It is not a purge target or a workflow-admission capacity gate.
+func TestRetentionReportsDiskFloorWithEvidencePoliciesDisabled(t *testing.T) {
+	f := newRetentionFixture(t)
+	run := f.run(t, "feature/floor", "push", true)
+	const floor int64 = 1 << 62
+	f.retention.DiskFloorBytes = floor
+	if err := f.retention.Sweep(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	value, err := f.retention.Status(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := value.(RetentionStatus)
+	if status.DiskFloorBytes != floor || status.FreeBytes <= 0 || status.FreeBytes >= floor || !status.BelowFloor || status.LastSweep.IsZero() || status.LastError != "" {
+		t.Fatalf("disk floor observation lost: %+v", status)
+	}
+	f.retained(t, run.ID, true)
+	body, err := json.Marshal(status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if string(fields["disk_floor_bytes"]) != fmt.Sprint(floor) || string(fields["below_floor"]) != "true" {
+		t.Fatalf("status lost disk floor fields: %s", body)
+	}
+}

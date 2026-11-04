@@ -124,7 +124,7 @@ func TestAdmissionLimitsUnclaimedQueueReportsFullRunCeilingWithoutLeakingScope(t
 func TestAdmissionLimitsPendingCleanupShowsDeadlineReason(t *testing.T) {
 	for _, reason := range []string{store.ExecutorIdentityPendingMessage, store.AdmissionStalledPendingMessage} {
 		run := model.Run{ID: "pending", Status: model.RunRunning, Phase: "infrastructure-pending", Error: reason}
-		got := new(API).scheduling(t.Context(), run, nil)
+		got, _ := new(API).observeScheduling(t.Context(), run, nil, true)
 		if got.State != "infra-pending" || got.Message != reason {
 			t.Fatalf("pending cleanup hides deadline reason: %+v", got)
 		}

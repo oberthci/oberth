@@ -221,12 +221,9 @@ func TestLegacyFixedChargeDefaultsConfigurationAndLimits(t *testing.T) {
 	if err := g.resources.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	copied := g.resources.withHeadroomDefaults()
-	g.resources.LegacyResources[pipeline.L] = model.LegacyResourceCharge{CPUMilli: 1, MemoryBytes: 1}
-	if copied.legacyCharge(pipeline.L).CPUMilli != 4500 || copied.legacyCharge(pipeline.S).CPUMilli != 1000 {
-		t.Fatal("custom charges lost or aliased")
+	if g.resources.legacyCharge(pipeline.L).CPUMilli != 4500 || g.resources.legacyCharge(pipeline.S).CPUMilli != 1000 {
+		t.Fatal("custom charge or fallback lost")
 	}
-	g.resources = copied
 	r := g.reserve(2)
 	release := acquireRequestWithinBudget(t, r, admissionRequest{Size: pipeline.L})
 	state := (&Scheduler{admission: g}).AdmissionState()

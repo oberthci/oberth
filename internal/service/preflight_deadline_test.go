@@ -73,7 +73,7 @@ func TestPreflightDeadlineVisibleInAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := api.scheduling(t.Context(), run, nil)
+	got, _ := api.observeScheduling(t.Context(), run, nil, true)
 	if got.Execution == nil || got.Execution.Deadline == nil || got.Execution.Deadline.ExpiresAt == nil || !got.Execution.Deadline.ExpiresAt.Equal(intent.Deadline) {
 		t.Fatalf("API hid preflight deadline: %+v", got)
 	}

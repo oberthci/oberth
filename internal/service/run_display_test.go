@@ -52,7 +52,7 @@ func TestRunDisplayReasonsCoverTerminalCausesAndTrustedPreflight(t *testing.T) {
 	if preflight.DisplayStatus != "running" || preflight.Phase != "preflight" {
 		t.Fatalf("trusted preflight presentation = %+v", preflight)
 	}
-	if scheduling := service.scheduling(t.Context(), preflight, nil); scheduling == nil || scheduling.State != "preflight" {
+	if scheduling, _ := service.observeScheduling(t.Context(), preflight, nil, true); scheduling == nil || scheduling.State != "preflight" {
 		t.Fatalf("trusted preflight scheduling = %+v", scheduling)
 	}
 	for _, tc := range []struct {

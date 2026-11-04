@@ -153,27 +153,3 @@ func TestDeclaredMemoryHeadroomProportional(t *testing.T) {
 		}
 	}
 }
-
-func TestDeclaredMemoryHeadroomUnsetUsesDefaults(t *testing.T) {
-	c := DeclaredAdmissionConfig{CPUMilli: 12000, MemoryBytes: 48 << 30}
-	normalized := c.withHeadroomDefaults()
-	if *normalized.MemoryHeadroomBytes != 1<<30 || *normalized.MemoryHeadroomPercent != 10 {
-		t.Fatalf("custom budgets lost defaults: %+v", normalized)
-	}
-	// Each setting can be zero explicitly while the other remains unset.
-	c.MemoryHeadroomBytes = ptr.To(int64(0))
-	normalized = c.withHeadroomDefaults()
-	if *normalized.MemoryHeadroomBytes != 0 || *normalized.MemoryHeadroomPercent != 10 {
-		t.Fatal("explicit zero bytes lost or unset percent default missing")
-	}
-	*c.MemoryHeadroomBytes = 123
-	if *normalized.MemoryHeadroomBytes != 0 {
-		t.Fatal("caller mutated normalized configuration")
-	}
-	c.MemoryHeadroomBytes = nil
-	c.MemoryHeadroomPercent = ptr.To(int64(0))
-	normalized = c.withHeadroomDefaults()
-	if *normalized.MemoryHeadroomBytes != 1<<30 || *normalized.MemoryHeadroomPercent != 0 {
-		t.Fatal("unset bytes default missing or explicit zero percent lost")
-	}
-}

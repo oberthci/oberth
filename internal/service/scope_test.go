@@ -743,12 +743,12 @@ func TestScopedSchedulingHidesInstallationLoad(t *testing.T) {
 	scoped := &API{admission: busyAdmission{}, scope: &repoScope{}}
 	unscoped := &API{admission: busyAdmission{}}
 	run := model.Run{ID: "run", Status: model.RunRunning, QueueSequence: 5}
-	got := scoped.scheduling(context.Background(), run, nil)
+	got, _ := scoped.observeScheduling(context.Background(), run, nil, true)
 	if got.Admission.Position != 0 || got.Admission.Used != 0 || got.Admission.Capacity != 0 || got.Admission.DiskFloor != nil ||
 		got.Message != "Waiting for capacity." || got.Admission.Size != "M" {
 		t.Fatalf("scoped scheduling = %#v %#v", got, got.Admission)
 	}
-	if full := unscoped.scheduling(context.Background(), run, nil); full.Admission.Used != 7 || !strings.Contains(full.Message, "disk space") {
+	if full, _ := unscoped.observeScheduling(context.Background(), run, nil, true); full.Admission.Used != 7 || !strings.Contains(full.Message, "disk space") {
 		t.Fatalf("unscoped scheduling = %#v %#v", full, full.Admission)
 	}
 }
