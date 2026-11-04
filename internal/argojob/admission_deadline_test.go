@@ -94,7 +94,7 @@ func TestAdmissionDeadlineIgnoresHealthyScheduledWorkAndHonorsConfiguration(t *t
 }
 
 func TestAdmissionDeadlineLeavesCapacityWaitToKubernetes(t *testing.T) {
-	for _, message := range []string{"0/3 nodes are available: 3 Insufficient cpu.", "Insufficient memory", "Insufficient example.com/gpu"} {
+	for _, message := range []string{"0/3 nodes are available: 3 Insufficient cpu.", "Insufficient memory", "Insufficient example.com/gpu", "0/3 nodes are available: 3 Insufficient ephemeral-storage.", "0/1 nodes are available: 1 Too many pods."} {
 		t.Run(message, func(t *testing.T) {
 			_, wf, pod, _ := executorRetryFixture(t)
 			now := time.Now()
@@ -110,6 +110,22 @@ func TestAdmissionDeadlineLeavesCapacityWaitToKubernetes(t *testing.T) {
 			pod.Status.Conditions[0].Message = "node(s) had untolerated taint"
 			if err := watch.check(wf, []corev1.Pod{*pod}, nil, now.Add(2*time.Hour+10*time.Minute), 10*time.Minute); err == nil {
 				t.Fatal("non-capacity startup stall escaped deadline")
+			}
+		})
+	}
+}
+
+func TestAdmissionDeadlineNonCapacitySchedulingStallsRemainBounded(t *testing.T) {
+	for _, message := range []string{"Insufficient permissions", "Insufficient ephemeral-storage-policy", "Too many pods-required", "Too many pod", "NotToo many pods", "node(s) had untolerated taint"} {
+		t.Run(message, func(t *testing.T) {
+			_, wf, pod, _ := executorRetryFixture(t)
+			now := time.Now()
+			wf.CreationTimestamp = metav1.NewTime(now.Add(-time.Hour))
+			pod.Spec.NodeName = ""
+			pod.Status = corev1.PodStatus{Phase: corev1.PodPending, Conditions: []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable", Message: message}}}
+			err := new(admissionProgress).check(wf, []corev1.Pod{*pod}, nil, now, 10*time.Minute)
+			if err == nil || !strings.Contains(err.Error(), "no scheduled pod or progress") {
+				t.Fatal("non-capacity message suspended the startup deadline", err)
 			}
 		})
 	}

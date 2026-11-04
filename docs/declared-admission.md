@@ -73,8 +73,9 @@ two minutes, then fails after another two minutes without readiness. A workflow
 that has never scheduled a workload Pod and has no progress fails after ten
 minutes by default; `--admission-stall-timeout` configures that startup bound.
 An owned Pending Pod with the scheduler's `Unschedulable: Insufficient cpu`,
-`Insufficient memory`, or qualified extended-resource shortage suspends this
-clock. Kubernetes owns that capacity wait, including waits longer than ten
+`Insufficient memory`, `Insufficient ephemeral-storage`, `Too many pods`, or a
+qualified extended-resource shortage suspends this clock. Kubernetes owns that
+capacity wait, including waits longer than ten
 minutes. Scheduling gates and other non-capacity startup stalls remain bounded.
 This exemption applies to Oberth's startup clock; the workflow's declared
 execution deadline still applies.

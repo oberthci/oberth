@@ -209,11 +209,14 @@ func waitingForKubernetesCapacity(pod *corev1.Pod) bool {
 		}
 		fields := strings.Fields(condition.Message)
 		for i := 0; i+1 < len(fields); i++ {
+			if i+2 < len(fields) && fields[i] == "Too" && fields[i+1] == "many" && strings.TrimRight(fields[i+2], ".,;:") == "pods" {
+				return true
+			}
 			if fields[i] != "Insufficient" {
 				continue
 			}
 			name := strings.TrimRight(fields[i+1], ".,;:")
-			if name == "cpu" || name == "memory" || (strings.Contains(name, "/") && len(validation.IsQualifiedName(name)) == 0) {
+			if name == "cpu" || name == "memory" || name == "ephemeral-storage" || (strings.Contains(name, "/") && len(validation.IsQualifiedName(name)) == 0) {
 				return true
 			}
 		}
