@@ -145,6 +145,17 @@ type admissionReservation struct {
 // scheduler failure: the owner settles the run's cancellation and returns.
 var errAdmissionAbandoned = errors.New("service: admission abandoned: run is no longer active")
 
+// A live or retained grant can outlast its durable YAML definition. Conflicting
+// new work fails that run without taking down the scheduler or releasing holders.
+type concurrencyGroupConflict struct {
+	group                   string
+	limit, conflictingLimit int
+}
+
+func (conflict *concurrencyGroupConflict) Error() string {
+	return fmt.Sprintf("service: concurrency group %q limit %d conflicts with limit %d", conflict.group, conflict.limit, conflict.conflictingLimit)
+}
+
 // admissionRequest is what a claimed run knows once its immutable checkout has
 // been read: its declared size and, optionally, its shared group and limit.
 type admissionRequest struct {
@@ -335,7 +346,7 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 				limit, conflictingLimit := reservation.groupLimit, max(1, other.groupLimit)
 				gate.mu.Unlock()
 				reservation.cancel()
-				return nil, fmt.Errorf("service: concurrency group %q limit %d conflicts with limit %d", request.Group, limit, conflictingLimit)
+				return nil, &concurrencyGroupConflict{group: request.Group, limit: limit, conflictingLimit: conflictingLimit}
 			}
 		}
 	}

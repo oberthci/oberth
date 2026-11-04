@@ -664,6 +664,10 @@ trust assumptions and complete invalidation rules.
   immutable run's group and limit before granting it, and remembers the latest
   accepted build/release YAML declarations per repository. Conflicting limits
   are refused before execution, including after restart or while a group is idle.
+  Declaration keys are `(repository, release)`, not branch/ref/filename: accepted
+  YAML on one branch can clear or replace another branch's remembered declaration;
+  conflicting limits still refuse without replacing it. A live/retained gate
+  conflict fails only the incoming run as infrastructure, never the scheduler.
   An ungrouped declaration removes that pipeline's remembered definition.
   Live grants still constrain a changed definition until they finish.
   Members share at most N grants in priority/FIFO order, across branch, tag,
@@ -673,6 +677,9 @@ trust assumptions and complete invalidation rules.
   VM parking and adoption preserve the same ownership boundaries. On upgrade,
   already-running legacy members are adopted even if their combined count is
   above the newly shared limit; new work waits for them to drain.
+  Migration seeds only the latest active grouped run per repository/release slot;
+  terminal history cannot create an idle definition. VM readmission retains the
+  immutable YAML limit when reacquiring its group slot.
   The existing queued reason names the group, limit and current holders.
   There are no new run statuses, labels or layouts. `concurrency_groups` and
   `oberth admission groups` are read-only unscoped views; system status includes

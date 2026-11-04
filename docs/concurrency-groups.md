@@ -56,14 +56,33 @@ reflects YAML that the scheduler has read, not an unobserved repository edit.
 An accepted run whose YAML omits the group removes that pipeline's remembered
 definition. Existing unfinished runs retain their immutable contracts.
 
+Declarations are keyed by **repository and release mode**, not by branch,
+ref, commit or workflow filename. All non-release runs in a repository share
+one remembered declaration; release runs share the other. The latest accepted
+YAML observed by the scheduler wins within that slot. A branch whose YAML
+omits the group can therefore clear the definition remembered from another
+branch. A different group replaces that slot, while a different limit for the
+same group can be refused by another repository's definition or an unfinished
+run. Keep declarations consistent across branches and selected pipelines;
+rejected YAML never replaces an accepted definition.
+
 To change a shared limit, all remembered declarations must agree, and old
 unfinished members must drain first. When changing several pipelines, remove
 the annotations and run those pipelines to clear their old definitions before
 introducing the new matching limit. A rejected conflict leaves the earlier
 accepted definition intact. Removing a repository removes its declarations.
+If an old grant remains retained after its durable run has ended, a conflicting
+new limit fails only the new run as an infrastructure failure, with the group
+and both limits in its reason. The scheduler continues serving other work.
+Use the existing ownership-checked admission cleanup to settle the retained
+grant before retrying; changing YAML does not release it.
 
 Existing annotations keep their default limit of one and their trigger
 membership. Equal names in different repositories now intentionally share the
 limit. When upgrading with legacy runs already executing independently, Oberth
 adopts every existing grant and admits no additional member until their combined
 count is below the shared limit. It does not interrupt those runs.
+The migration seeds remembered declarations only from queued or running legacy
+runs, choosing the latest active grouped run per repository/release slot.
+Terminal history does not create an idle definition or block a new limit.
+After upgrade, newly accepted YAML definitions remain durable as described above.

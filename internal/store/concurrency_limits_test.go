@@ -69,6 +69,33 @@ func TestConcurrencyGroupMigrationPreservesLegacyGroupAndLedger(t *testing.T) {
 	if err = s.SetRunConcurrencyGroup(t.Context(), run.ID, "state"); err != nil {
 		t.Fatal(err)
 	}
+	for _, status := range []model.RunStatus{model.RunPassed, model.RunFailed, model.RunInterrupted} {
+		idleRepo, err := s.CreateRepository(t.Context(), model.RepositorySpec{Name: "idle-" + string(status), UpstreamID: repo.UpstreamID, DefaultBranch: "main"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		idle, err := s.EnqueueRun(t.Context(), testRunSpec(idleRepo.ID, "old", strings.Repeat("b", 40)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetRunConcurrencyGroup(t.Context(), idle.ID, "retired"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.FinishRun(t.Context(), idle.ID, model.RunResult{Status: status}); err != nil {
+			t.Fatal(err)
+		}
+		// A later ungrouped run must not revive an older terminal declaration.
+		newer, err := s.EnqueueRun(t.Context(), testRunSpec(idleRepo.ID, "new", strings.Repeat("c", 40)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetRunConcurrencyGroup(t.Context(), newer.ID, "", 1); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.FinishRun(t.Context(), newer.ID, model.RunResult{Status: model.RunPassed}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if _, err = s.db.Exec(`DROP TABLE concurrency_group_declarations; ALTER TABLE runs DROP COLUMN concurrency_limit; DELETE FROM schema_migrations WHERE id='20261104120123-concurrency-limits-971dc11f4a5530e149fd22d0d6847b46'`); err != nil {
 		t.Fatal(err)
 	}
@@ -92,6 +119,13 @@ func TestConcurrencyGroupMigrationPreservesLegacyGroupAndLedger(t *testing.T) {
 	}
 	if err = s.migrate(t.Context(), nil); err != nil {
 		t.Fatal(err)
+	}
+	next, err := s.EnqueueRun(t.Context(), testRunSpec(repo.ID, "new-limit", strings.Repeat("d", 40)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetRunConcurrencyGroup(t.Context(), next.ID, "retired", 2); err != nil {
+		t.Fatalf("terminal history blocked another repository's new limit: %v", err)
 	}
 }
 

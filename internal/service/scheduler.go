@@ -984,6 +984,10 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	}
 	if err != nil {
 		_ = logFile.Close()
+		var conflict *concurrencyGroupConflict
+		if errors.As(err, &conflict) {
+			return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
+		}
 		return err
 	}
 	defer releaseAdmission()

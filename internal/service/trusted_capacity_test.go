@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
@@ -71,6 +72,62 @@ func TestTrustedCapacityParkReleasesResourcesAndPreservesOrder(t *testing.T) {
 	releaseOther()
 	awaitAcquired(t, olderReady)()
 	awaitAcquired(t, laterReady)()
+}
+
+func TestTrustedCapacityReadmissionPreservesYAMLLimit(t *testing.T) {
+	for _, peerWhileParked := range []bool{false, true} {
+		t.Run(fmt.Sprint(peerWhileParked), func(t *testing.T) {
+			ctx := t.Context()
+			f := newControlFixture(t)
+			f.scheduler.admission = newWorkflowAdmissionForJobs(4)
+			raw := []byte("version: 2\nprofile: kvm-suite-amd64-v1\nsuite_sha256: " + strings.Repeat("a", 64) + "\nguest_sha256: " + strings.Repeat("b", 64) + "\nartifacts: [build/program]\n")
+			f.scheduler.git = &policyTestGit{controlGit: f.git, candidate: raw, baseline: raw}
+			executor := &capacityFixture{protectedFixture: &protectedFixture{store: f.store}}
+			f.scheduler.trusted = executor
+			if _, err := storetest.EnqueueRun(f.store, ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/shared-capacity", SHA: strings.Repeat("c", 40), TestedSHA: strings.Repeat("c", 40), Actor: "agent", Trigger: "branch"}); err != nil {
+				t.Fatal(err)
+			}
+			run, err := f.store.ClaimNextRun(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := f.store.SetRunConcurrencyGroup(ctx, run.ID, "state", 2); err != nil {
+				t.Fatal(err)
+			}
+			run, err = f.store.MarkRunAdmitted(ctx, run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			requirement, err := f.scheduler.trustedRequirement(ctx, f.repo, run.ID, run.TestedSHA)
+			if err != nil {
+				t.Fatal(err)
+			}
+			job := WorkflowRequest{Run: run, Repository: f.repo, Size: pipeline.M, ConcurrencyGroup: run.ConcurrencyGroup}
+			reservation := f.scheduler.admission.reserveRun(run)
+			defer acquireRequestWithinBudget(t, reservation, admissionRequest{RunID: run.ID, RepoID: f.repo.ID, Group: "state", GroupLimit: 2})()
+			admitPeer := func() {
+				peer := f.scheduler.admission.reserveRun(model.Run{ID: "peer", RepoID: f.repo.ID + 1, QueueSequence: run.QueueSequence + 1})
+				t.Cleanup(acquireRequestWithinBudget(t, peer, admissionRequest{RunID: "peer", RepoID: f.repo.ID + 1, Group: "state", GroupLimit: 2}))
+			}
+			f.scheduler.capacityWait = func(context.Context) error {
+				if peerWhileParked {
+					admitPeer()
+				}
+				return nil
+			}
+			stopped, err := f.scheduler.executeTrustedWithCapacity(ctx, job, requirement, io.Discard, reservation, func(context.Context) error { return nil })
+			if err != nil || stopped || executor.calls != 2 {
+				t.Fatalf("production readmission: stopped=%v err=%v calls=%d", stopped, err, executor.calls)
+			}
+			if !peerWhileParked {
+				admitPeer()
+			}
+			groups := f.scheduler.AdmissionState().Groups
+			if len(groups) != 1 || groups[0].Limit != 2 || len(groups[0].Holders) != 2 {
+				t.Fatalf("readmission lost the YAML contract: %+v", groups)
+			}
+		})
+	}
 }
 
 func TestTrustedCapacityRetryBoundaries(t *testing.T) {

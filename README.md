@@ -244,6 +244,25 @@ Each template is a container with its own exit code, timeout, and named log
 slice. Oberth reads the YAML statically at submission -- it never executes
 repository code in the server process.
 
+The workflow-level annotation `oberth.ci/size` (`S`, `M` -- the default --,
+`L`, `XL`) is the run's share of the host. By default the weights are S 1,
+M 2, L 3 of a budget of `maxConcurrentJobs` × 2, and `XL` takes the whole
+host and runs alone. The chart value `admission.sizeWeights` (server flag
+`--admission-size-weights`) changes them; a positive `XL` weight lets an XL
+run share the host with whatever fits beside it. While a run at the head of
+the admission queue waits for room, later runs that fit beside it are
+backfilled for up to `admission.maxHeadWait` (default 20m); after that the
+host drains for the head, so it never starves.
+
+For undeclared legacy workflows, `XL` needs an admin size grant (`oberth size grant <repo> --max XL`, or MCP
+`size_grant`); without one a repository's branch, promotion and schedule runs
+may declare at most `L`, and an XL declaration fails at admission instead of
+making every other repository wait for a full drain. The grant applies to
+branch, promotion and schedule runs only: tag/release runs are the
+credentialed tier and are not gated, so a reviewed release.yaml keeps its size. While a run waits at the
+head of the admission queue, the runs behind it say so: "blocked behind
+<repo>/<ref> (XL, needs a full drain)".
+
 `oberth.ci/concurrency-group: <name>` shares a concurrency limit across every
 repository declaring that name, including branch, tag/release and promotion
 runs. `oberth.ci/concurrency-limit: "2"` permits two holders; omitting it defaults
@@ -252,8 +271,8 @@ are refused before admission. Waiting runs keep their queued status and name
 the group, limit and current holders in their reason line.
 
 Groups reserve no CPU or memory. They compose with the global workflow-count
-ceiling, while Kubernetes places pods from their requests. Existing size labels
-and weights do not change group limits or reserve the host. Read definitions,
+ceiling, while Kubernetes places pods from their requests. Group declarations
+do not change size weights or size-grant policy. Read definitions,
 holders and waiters with `oberth admission groups`, MCP `concurrency_groups`, or
 `system_status.admission.groups`. Definitions and run contracts survive restart.
 See [concurrency groups](docs/concurrency-groups.md) for YAML examples and updates.

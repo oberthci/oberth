@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
@@ -44,6 +45,69 @@ func TestConcurrencyGroupsConflictDuringVMReadmission(t *testing.T) {
 }
 
 type twoMemberGroupEngine struct{ *groupEngine }
+
+func TestConcurrencyGroupRetainedLimitConflictDoesNotStopScheduler(t *testing.T) {
+	ctx := t.Context()
+	f := newGroupFixture(t, 4)
+	f.scheduler.disableInfrastructureAutoRetry = true
+	f.scheduler.jobs = twoMemberGroupEngine{f.engine}
+	f.scheduler.releaseJobs = twoMemberGroupEngine{f.engine}
+	stale := f.branch(t, f.terraform, "old-limit", "a")
+	if _, err := f.store.ClaimNextRun(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.SetRunConcurrencyGroup(ctx, stale.ID, "state", 1); err != nil {
+		t.Fatal(err)
+	}
+	held := f.scheduler.admission.reserveRun(stale)
+	acquireRequestWithinBudget(t, held, admissionRequest{RunID: stale.ID, RepoID: stale.RepoID, Group: "state", GroupLimit: 1})
+	held.retain()
+	if _, err := f.store.FinishRun(ctx, stale.ID, model.RunResult{Status: model.RunFailed, Phase: "job", Error: "observer lost"}); err != nil {
+		t.Fatal(err)
+	}
+	// Follow the documented YAML removal procedure after the durable run ends.
+	// The live retained grant still requires ownership-checked cleanup.
+	cleared := f.branch(t, f.terraform, "clear-definition", "b")
+	if err := f.store.SetRunConcurrencyGroup(ctx, cleared.ID, "", 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.FinishRun(ctx, cleared.ID, model.RunResult{Status: model.RunPassed}); err != nil {
+		t.Fatal(err)
+	}
+	f.engine.declare("new-limit", "state", pipeline.M)
+	conflict := f.branch(t, f.exampleService, "new-limit", "c")
+	done, _ := startDeadlineScheduler(t, f.scheduler)
+	deadline := time.NewTimer(testStartTimeout(15 * time.Second))
+	defer deadline.Stop()
+	for {
+		changed := f.scheduler.signals.Run(conflict.ID)
+		run := f.run(t, conflict.ID)
+		if run.Status.Terminal() {
+			if run.Status != model.RunFailed || run.Phase != "infrastructure" || !strings.Contains(run.Error, `concurrency group "state" limit 2 conflicts with limit 1`) {
+				t.Fatalf("conflict not reported as a run infrastructure failure: %+v", run)
+			}
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("group conflict stopped Scheduler.Run: %v", err)
+		case <-changed:
+		case <-deadline.C:
+			t.Fatal("group conflict did not settle")
+		}
+	}
+	if state := f.scheduler.AdmissionState(); len(state.Reservations) != 1 || state.Reservations[0].RunID != stale.ID || state.Reservations[0].State != "retained" {
+		t.Fatalf("conflict leaked a reservation or released the retained grant: %+v", state)
+	}
+	f.engine.declare("unrelated", "", pipeline.M)
+	next := f.branch(t, f.exampleService, "unrelated", "d")
+	if created := f.awaitCreated(t, 1); !created[next.ID] {
+		t.Fatalf("conflicting workflow was created or scheduler stopped: %v", created)
+	}
+	f.engine.finish(t, next.ID)
+	f.awaitTerminal(t, next.ID)
+	f.engine.assertNoViolations(t)
+}
 
 func (engine twoMemberGroupEngine) PipelineConcurrencyContract(ctx context.Context, request WorkflowRequest) (string, int, error) {
 	group, err := engine.PipelineConcurrencyGroup(ctx, request)

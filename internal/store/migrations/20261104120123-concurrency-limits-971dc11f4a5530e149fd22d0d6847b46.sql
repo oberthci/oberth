@@ -13,5 +13,5 @@ CREATE INDEX concurrency_group_declarations_name ON concurrency_group_declaratio
 INSERT INTO concurrency_group_declarations(repo_id,release,group_name,group_limit)
  SELECT repo_id,release,concurrency_group,1 FROM (
   SELECT repo_id,release,concurrency_group,row_number() OVER (PARTITION BY repo_id,release ORDER BY queue_sequence DESC) AS n
-  FROM runs WHERE concurrency_group<>''
+  FROM runs WHERE concurrency_group<>'' AND status IN ('queued','running')
  ) WHERE n=1;
