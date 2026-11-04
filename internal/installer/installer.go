@@ -291,7 +291,7 @@ func promptSecretStoreChoice(ctx context.Context, cfg *Config, deps Deps) error 
 		if ns == "" {
 			ns = DefaultNamespace
 		}
-		out, err := deps.RunHelm(ctx, []string{"list", "-n", ns, "-a", "-o", "json"})
+		out, err := deps.RunHelm(ctx, helmReleaseListArgs(ns))
 		if err != nil {
 			return fmt.Errorf("inspect existing secret-store configuration: %w", err)
 		}
@@ -1767,13 +1767,20 @@ type helmRelease struct {
 	Chart string `json:"chart"`
 }
 
+// Helm 4 removed list's -a/--all flag. Explicit status filters work with both
+// Helm 3 and Helm 4 and retain failed, pending and historical release states.
+func helmReleaseListArgs(namespace string) []string {
+	return []string{"list", "-n", namespace, "-o", "json",
+		"--deployed", "--failed", "--pending", "--superseded", "--uninstalling", "--uninstalled"}
+}
+
 // findHelmRelease distinguishes a missing release from an unreadable release.
 // Include pending and failed revisions so their safety checks cannot be skipped.
 func findHelmRelease(ctx context.Context, deps Deps, name, namespace string) (helmRelease, bool, error) {
 	if deps.RunHelm == nil {
 		return helmRelease{}, false, errors.New("helm runner is required to inspect releases")
 	}
-	out, err := deps.RunHelm(ctx, []string{"list", "-n", namespace, "-o", "json", "-a"})
+	out, err := deps.RunHelm(ctx, helmReleaseListArgs(namespace))
 	if err != nil {
 		return helmRelease{}, false, fmt.Errorf("list Helm releases in %s: %w", namespace, err)
 	}

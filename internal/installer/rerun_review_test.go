@@ -36,8 +36,10 @@ func TestReleaseLookupFailureCannotInstall(t *testing.T) {
 }
 func TestReleaseLookupIncludesPendingStates(t *testing.T) {
 	deps := Deps{RunHelm: func(_ context.Context, args []string) ([]byte, error) {
-		if !slices.Contains(args, "-a") && !slices.Contains(args, "--all") {
-			t.Error("release lookup excludes pending states")
+		for _, status := range []string{"--deployed", "--failed", "--pending", "--superseded", "--uninstalling", "--uninstalled"} {
+			if !slices.Contains(args, status) {
+				t.Errorf("release lookup excludes status filter %s", status)
+			}
 		}
 		return []byte(`[]`), nil
 	}}
