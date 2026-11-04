@@ -199,6 +199,7 @@ type Run struct {
 
 type RunSpec struct {
 	PriorityRequest
+	Reason        string
 	RepoID        int64
 	RefKind       RefKind
 	Ref           string

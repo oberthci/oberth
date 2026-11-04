@@ -18,17 +18,51 @@ const policyRefreshAttempts = 4
 const policyReadTimeout = 30 * time.Second
 
 type burstPolicyKey struct{}
+type cachedPolicyKey struct{}
 
 // WithBurstPolicy opts initial admission into bounded successful snapshot reuse.
 // Other policy readers require a fetch begun after their request by default.
 func WithBurstPolicy(ctx context.Context) context.Context {
-	return context.WithValue(ctx, burstPolicyKey{}, true)
+	return context.WithValue(context.WithValue(ctx, burstPolicyKey{}, true), cachedPolicyKey{}, false)
+}
+
+// WithCachedPolicy permits only local reads of a recent successful upstream
+// snapshot. Push admission has already refreshed upstream in Ensure; it must
+// not start another transport under its short policy-read deadline.
+func WithCachedPolicy(ctx context.Context) context.Context {
+	return context.WithValue(WithBurstPolicy(ctx), cachedPolicyKey{}, true)
 }
 
 // WithFreshPolicy overrides any inherited burst reuse. Only a refresh started
 // after this reader requested authority may satisfy the read.
 func WithFreshPolicy(ctx context.Context) context.Context {
-	return context.WithValue(ctx, burstPolicyKey{}, false)
+	return context.WithValue(context.WithValue(ctx, burstPolicyKey{}, false), cachedPolicyKey{}, false)
+}
+
+// rememberPushPolicyLocked retains only a successful upstream refresh, never
+// public refs or a decoded authorization decision. The ordinary policy reader
+// still validates the remote identity, private ref, age and regular blob.
+func (c *Cache) rememberPushPolicyLocked(ctx context.Context, path, branch string, started time.Time) {
+	burst, _ := ctx.Value(burstPolicyKey{}).(bool)
+	if !burst {
+		return
+	}
+	remote, err := c.capture(ctx, path, "remote", "get-url", "upstream")
+	if err != nil {
+		return
+	}
+	ref := upstreamRefPrefix + "heads/" + branch
+	sha, err := c.capture(ctx, path, "rev-parse", "--verify", ref+"^{commit}")
+	if err != nil {
+		refs, readErr := c.capture(ctx, path, "for-each-ref", "--count=1", upstreamRefPrefix)
+		if readErr != nil || strings.TrimSpace(refs) != "" {
+			return // Unreadable default state must not become an absent policy.
+		}
+		ref, sha = "", "" // The successful fetch proved an unborn upstream.
+	} else if ValidateSHA(strings.TrimSpace(sha)) != nil {
+		return
+	}
+	c.policyRefreshes.Store(path, policyRefresh{remote: remote, ref: ref, sha: strings.TrimSpace(sha), started: started, completed: time.Now()})
 }
 
 type policyRefresh struct {
@@ -63,11 +97,21 @@ func (c *Cache) refreshPolicyLocked(ctx context.Context, input, path string, req
 			if previous.err != nil {
 				return "", previous.err
 			}
-			sha, readErr := c.capture(ctx, path, "rev-parse", "--verify", previous.ref+"^{commit}")
-			if readErr == nil && strings.TrimSpace(sha) == previous.sha {
-				return previous.sha, nil
+			if previous.ref == "" && previous.sha == "" {
+				refs, readErr := c.capture(ctx, path, "for-each-ref", "--count=1", upstreamRefPrefix)
+				if readErr == nil && strings.TrimSpace(refs) == "" {
+					return "", nil
+				}
+			} else {
+				sha, readErr := c.capture(ctx, path, "rev-parse", "--verify", previous.ref+"^{commit}")
+				if readErr == nil && strings.TrimSpace(sha) == previous.sha {
+					return previous.sha, nil
+				}
 			}
 		}
+	}
+	if cachedOnly, _ := ctx.Value(cachedPolicyKey{}).(bool); cachedOnly {
+		return "", ErrPolicySnapshotUnavailable
 	}
 	// Invalidate first: an unsuccessful refresh cannot resurrect old authority.
 	c.policyRefreshes.Delete(path)

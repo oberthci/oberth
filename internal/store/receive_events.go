@@ -16,6 +16,12 @@ const receiveEventColumns = `
 id, actor, repo_id, ref_kind, ref, old_sha, object_sha, commit_sha,
 outcome, run_id, created_at`
 
+// ReceiveEvent reads the immutable admission outcome before replay considers
+// current policy. An accepted receive must keep its original decision.
+func (s *Store) ReceiveEvent(ctx context.Context, id string) (model.ReceiveEvent, error) {
+	return scanReceiveEvent(s.reader().QueryRowContext(ctx, `SELECT `+receiveEventColumns+` FROM receive_events WHERE id=?`, id))
+}
+
 // RecordReceiveEvent durably acknowledges a deletion or rejected release. The
 // event ID and its actor-bound audit record commit together, making replay a
 // no-op after the first successful callback.
@@ -111,7 +117,7 @@ func (s *Store) enqueueReceiveEventTx(ctx context.Context, tx *sql.Tx, event mod
 	if err := insertReceiveEvent(ctx, tx, event, enqueued.ID, now); err != nil {
 		return model.EnqueueRunResult{}, err
 	}
-	if err := s.appendReceiveAudit(ctx, tx, event, enqueued.ID, now); err != nil {
+	if err := s.appendReceiveAudit(ctx, tx, event, enqueued.ID, now, validatedRun.Reason); err != nil {
 		return model.EnqueueRunResult{}, err
 	}
 	return enqueued, nil
@@ -189,7 +195,7 @@ func (s *Store) appendReceiveAudit(ctx context.Context, tx *sql.Tx, spec model.R
 		"old_sha": spec.OldSHA, "object_sha": spec.ObjectSHA, "commit_sha": spec.CommitSHA,
 		"outcome": spec.Outcome, "run_id": runID,
 	}
-	if len(reason) > 0 {
+	if len(reason) > 0 && reason[0] != "" {
 		fields["reason"] = reason[0]
 	}
 	details, err := json.Marshal(fields)

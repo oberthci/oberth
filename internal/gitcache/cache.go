@@ -234,6 +234,10 @@ func (c *Cache) ensureReceiveLocked(ctx context.Context, input, repo, path strin
 }
 
 func (c *Cache) ensureLockedMayRecover(ctx context.Context, input, repo, path string, detectRecovery bool) (Repository, error) {
+	started := time.Now()
+	// A failed refresh must not leave an earlier successful policy snapshot
+	// usable by this admission attempt, even when Git can serve stale refs.
+	c.policyRefreshes.Delete(path)
 	if err := sweepReceiveQuarantines(path, time.Now()); err != nil {
 		c.logger.Printf("git receive quarantine cleanup failed: repository=%q error=%v", path, err)
 	}
@@ -312,6 +316,7 @@ func (c *Cache) ensureLockedMayRecover(ctx context.Context, input, repo, path st
 			}
 			return Repository{Path: path, Stale: true, DefaultBranch: branch}, nil
 		}
+		c.rememberPushPolicyLocked(ctx, path, branch, started)
 		return Repository{Path: path, DefaultBranch: branch}, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return Repository{}, fmt.Errorf("inspect cache for %s: %w", repo, err)
@@ -358,6 +363,7 @@ func (c *Cache) ensureLockedMayRecover(ctx context.Context, input, repo, path st
 	if err := os.Rename(temporary, path); err != nil {
 		return Repository{}, fmt.Errorf("publish cache for %s: %w", repo, err)
 	}
+	c.rememberPushPolicyLocked(ctx, path, branch, started)
 	return Repository{Path: path, DefaultBranch: branch}, nil
 }
 

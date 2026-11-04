@@ -230,12 +230,12 @@ func (s *Store) enqueueRunTx(ctx context.Context, tx *sql.Tx, spec model.RunSpec
 	row := tx.QueryRowContext(ctx, `
 INSERT INTO runs(
     id, repo_id, ref_kind, ref, sha, actor, release, credentialed, trigger, phase,
-    tested_sha, base_sha, schedule_entry, status, queued_at, created_at, updated_at
+    tested_sha, base_sha, schedule_entry, status, reason, queued_at, created_at, updated_at
 )
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, 'queued', ?, ?, ?)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, 'queued', ?, ?, ?, ?)
 RETURNING `+runColumns,
 		id, spec.RepoID, spec.RefKind, spec.Ref, spec.SHA, spec.Actor, spec.Release,
-		spec.Credentialed, spec.Trigger, spec.TestedSHA, spec.BaseSHA, spec.ScheduleEntry, now, now, now)
+		spec.Credentialed, spec.Trigger, spec.TestedSHA, spec.BaseSHA, spec.ScheduleEntry, spec.Reason, now, now, now)
 	value, err := scanRun(row)
 	if err != nil {
 		return model.EnqueueRunResult{}, fmt.Errorf("insert run: %w", err)

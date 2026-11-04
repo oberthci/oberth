@@ -22,6 +22,10 @@ var ErrPolicyRepositoryNotCached = errors.New("policy repository is not cached")
 // ErrPolicyUpstreamUnavailable marks only an exhausted temporary policy transport failure.
 var ErrPolicyUpstreamUnavailable = errors.New("temporary upstream policy transport unavailable")
 
+// ErrPolicySnapshotUnavailable means a local-only policy read has no recent
+// successful upstream snapshot. It never authorizes using candidate content.
+var ErrPolicySnapshotUnavailable = errors.New("recent upstream policy snapshot unavailable")
+
 // Service is one of the two Git smart-protocol programs exposed by Oberth.
 type Service string
 

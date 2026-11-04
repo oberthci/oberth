@@ -262,6 +262,7 @@ func (scheduler *Scheduler) enqueueCI(ctx context.Context, request CIRequest, fi
 		request.OldSHA, request.SHA, request.SHA, "queued")
 	spec := model.RunSpec{
 		PriorityRequest: request.PriorityRequest,
+		Reason:          request.Reason,
 		RepoID:          request.Repository.ID, RefKind: model.RefBranch, Ref: request.Branch,
 		SHA: request.SHA, Actor: request.Actor, Trigger: trigger, ScheduleEntry: request.ScheduleEntry, TestedSHA: testedSHA, BaseSHA: request.BaseSHA,
 	}

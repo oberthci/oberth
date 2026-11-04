@@ -361,7 +361,7 @@ func applyExecutionDisplay(run *model.Run, scheduling *model.RunScheduling) {
 	}
 	for _, pod := range scheduling.Execution.Pods {
 		if pod.Phase == "Pending" && strings.HasPrefix(pod.Message, "pod pending: ") {
-			run.DisplayReason = displayFailureText(joinRunMessage(priorityPrefix(*run), pod.Message))
+			run.DisplayReason = parkPolicyDisplayReason(*run, displayFailureText(joinRunMessage(priorityPrefix(*run), pod.Message)))
 			return
 		}
 	}
@@ -373,7 +373,7 @@ func applyExecutionDisplay(run *model.Run, scheduling *model.RunScheduling) {
 		if message == "" {
 			message = "awaiting finalization"
 		}
-		run.DisplayReason = displayFailureText(joinRunMessage(priorityPrefix(*run), message))
+		run.DisplayReason = parkPolicyDisplayReason(*run, displayFailureText(joinRunMessage(priorityPrefix(*run), message)))
 	}
 }
 

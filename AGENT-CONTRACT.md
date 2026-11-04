@@ -1032,9 +1032,15 @@ trust assumptions and complete invalidation rules.
   The existing reason line says `promoted without branch CI`; no status changes.
   Target branch-CI requirements survive admin/grant authority and are rechecked
   before planning and publication. See [park promotion](docs/park-promotion.md).
-  Push policy reads use two-second burst reuse and a two-second deadline; any
-  policy error falls back to branch CI. Promotion policy reads stay fresh and
-  fail closed. Single-source and train admission reject red branch evidence
+  Push policy reads locally reuse the successful repository refresh's private
+  upstream snapshot for two seconds, with a two-second deadline and no second
+  upstream transport. Initial cache fills also supply this snapshot; a proven
+  absent policy uses defaults. Failed refreshes invalidate prior authority.
+  Missing/expired snapshots and invalid/unreadable policies fall back to branch
+  CI with the cause in the existing run reason and receive audit, including
+  after queue-cap drain. Accepted receive replay preserves its original decision.
+  Promotion policy reads stay fresh and fail closed. Single-source and train
+  admission reject red branch evidence
   and share per-source park eligibility. Parked sources require `repo`.
   Receive-event ledger outcome `parked` records a mirrored park push with no
   branch run; it is separate from the unchanged run status vocabulary.

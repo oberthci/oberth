@@ -1731,7 +1731,7 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 	if run.Status.Active() {
 		visible.DisplayReason = joinRunMessage(priorityPrefix(visible), visible.DisplayReason)
 	}
-	visible.DisplayReason = displayFailureText(visible.DisplayReason)
+	visible.DisplayReason = parkPolicyDisplayReason(run, displayFailureText(visible.DisplayReason))
 	return visible
 }
 
@@ -1844,7 +1844,7 @@ func (service *API) presentationRunWithSuccessor(ctx context.Context, run model.
 	run = service.withAdmissionPriority(run)
 	visible := presentationRunAt(run, service.schedulingClock().Now())
 	if service.scope != nil && strings.HasPrefix(visible.Reason, "branch run deferred:") {
-		visible.Reason = "branch run deferred: waiting for queue capacity"
+		visible.Reason = parkPolicyDisplayReason(run, "branch run deferred: waiting for queue capacity")
 	}
 	if run.Status == model.RunRunning && run.StartedAt != nil && service.submittedKVMPreflight(ctx, run) {
 		visible.Phase = "preflight"

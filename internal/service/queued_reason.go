@@ -134,5 +134,5 @@ func applyQueuedDisplay(run *model.Run, scheduling *model.RunScheduling, reason 
 	if reason == "" {
 		reason = queuedDisplayReason(scheduling, nil)
 	}
-	run.DisplayReason = displayFailureText(joinRunMessage(priorityPrefix(*run), reason))
+	run.DisplayReason = parkPolicyDisplayReason(*run, displayFailureText(joinRunMessage(priorityPrefix(*run), reason)))
 }

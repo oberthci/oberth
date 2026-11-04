@@ -9,6 +9,7 @@ import (
 	"path"
 	"strings"
 	"time"
+	"unicode"
 
 	"go.yaml.in/yaml/v3"
 
@@ -19,6 +20,36 @@ import (
 
 const promotionPolicyFile = ".oberth/promotion.yaml"
 const defaultParkPrefix = "refs/heads/park/"
+const parkFallbackPrefix = "branch CI: park policy unavailable ("
+
+func boundedParkPolicyText(text string) string {
+	text = strings.Map(func(r rune) rune {
+		if !unicode.IsPrint(r) {
+			return ' '
+		}
+		return r
+	}, text)
+	chars := []rune(strings.Join(strings.Fields(text), " "))
+	if len(chars) > 512 {
+		return string(chars[:511]) + "…"
+	}
+	return string(chars)
+}
+
+// Keep the separately bounded fallback visible after scheduling updates and
+// ordinary display truncation, without copying global queue counts or a later
+// policy-wait annotation out of the durable reason.
+func parkPolicyDisplayReason(run model.Run, message string) string {
+	index := strings.Index(run.Reason, parkFallbackPrefix)
+	if index < 0 {
+		return message
+	}
+	clause := boundedParkPolicyText(strings.TrimSuffix(run.Reason[index:], "; "+store.PolicyRefreshWaitingReason))
+	if strings.Contains(message, clause) {
+		return message
+	}
+	return joinRunMessage(message, clause)
+}
 
 type promotionPolicy struct {
 	ParkRefPrefix        string   `yaml:"park_ref_prefix"`
@@ -42,10 +73,11 @@ func readPromotionPolicy(ctx context.Context, git any, repo string) (promotionPo
 	return readPromotionPolicyContext(ctx, git, repo)
 }
 
-// Push admission can reuse the recent upstream snapshot. Any error falls back
-// to ordinary CI; only promotion authorization requires a fresh successful read.
+// Push admission reuses the successful upstream refresh from Ensure, with no
+// second transport under this short deadline. Any error falls back to ordinary
+// CI; promotion authorization still requires a fresh successful read.
 func readPushPromotionPolicy(ctx context.Context, git any, repo string) (promotionPolicy, error) {
-	ctx, cancel := context.WithTimeout(gitcache.WithBurstPolicy(ctx), 2*time.Second)
+	ctx, cancel := context.WithTimeout(gitcache.WithCachedPolicy(ctx), 2*time.Second)
 	defer cancel()
 	return readPromotionPolicyContext(ctx, git, repo)
 }

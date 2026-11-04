@@ -956,7 +956,10 @@ list and history rows use only the server's `display_reason`, including an empty
 message. Ordinary running rows have no message. Explicit non-normal priorities
 and aging appear alongside a concise wait or execution cause; promotion and
 automatic tag boosts are implied by the ref. Messages are one line, at most 60
-characters; full error and scheduling evidence remains in run details.
+characters; full error and scheduling evidence remains in run details. A park
+policy fallback appends its separately bounded cause to that existing message,
+including after scheduling updates, so the combined line can contain up to 600
+characters. It never includes global queue counts in scoped views.
 Terminal `display_reason` describes the terminal cause; `priority_class` and
 `priority_reason` remain separate fields. List rows omit `resource_message`;
 `run_get` and `status` retain resource advice.

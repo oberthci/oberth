@@ -30,9 +30,10 @@ func (c *Cache) ReadOptionalBlob(ctx context.Context, input, sha, file string, l
 	return c.readOptionalBlobLocked(ctx, path, sha, file, limit)
 }
 
-// ReadDefaultBlob fetches current upstream authority and reads only private
-// tracking refs. Initial admission may opt into WithBurstPolicy snapshot reuse.
-// A failed refresh never falls back to a previously successful snapshot.
+// ReadDefaultBlob reads only private upstream tracking refs. Fresh readers
+// refresh upstream; WithBurstPolicy permits recent snapshot reuse, and
+// WithCachedPolicy requires it without opening a transport. A failed refresh
+// never falls back to a previously successful snapshot.
 func (c *Cache) ReadDefaultBlob(ctx context.Context, input, file string, limit int) (sha string, body []byte, exists bool, err error) {
 	requested := time.Now()
 	if err := validatePolicyPath(file, limit); err != nil {

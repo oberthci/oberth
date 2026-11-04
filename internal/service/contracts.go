@@ -307,6 +307,7 @@ type WorkspaceGit interface {
 
 type CIRequest struct {
 	model.PriorityRequest
+	Reason        string
 	EventID       string
 	Repository    model.Repository
 	Branch        string

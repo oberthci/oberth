@@ -55,10 +55,23 @@ Promotion authorization requires freshly fetched private upstream tracking state
 Changing the file on a candidate or pushing an untested local default branch
 cannot enable the opt-in or remove a requirement. Unreadable, malformed, unknown
 fields and multiple YAML documents refuse promotion. The file is limited to 16 KiB.
-Push admission reuses successful upstream snapshots for up to two seconds and
-bounds its policy read to two seconds. On any policy read or validation error,
-the push follows ordinary branch CI instead of parking; upstream availability
-cannot prevent CI enqueue. Candidate content never supplies the fallback policy.
+Push admission retains the private upstream snapshot from its successful
+repository refresh for up to two seconds. Its policy read uses that snapshot
+locally, with a two-second deadline, without starting a second upstream fetch.
+This also covers an initial cache fill and a successfully fetched baseline with
+no policy file, which uses the documented defaults. A failed refresh invalidates
+earlier authority; a missing or expired snapshot never becomes an absent policy.
+No longer-lived policy cache or background refresh is required. Promotion and
+publication still fetch fresh upstream policy.
+
+On any policy read or validation error, the push follows ordinary branch CI
+instead of parking. The created run's existing reason line and the queued receive
+audit record include `branch CI: park policy unavailable (<cause>)`. Queue-cap
+deferral retains that cause for the eventual run. The existing displayed reason
+keeps both the scheduling explanation and the separately bounded fallback cause;
+the combined line is at most 600 printable characters. Candidate content never
+supplies the fallback policy. Replaying an already recorded receive preserves
+its original park or queue decision, even if policy availability changes.
 
 ## Testing, publication and audit
 
@@ -72,6 +85,8 @@ The run uses the existing status vocabulary and reason line:
 `promoted without branch CI`. Promotion records expose `BranchCISkipped`;
 `promotion_list` exposes `branch_ci_skipped`. The admission audit action records
 `branch_ci_skipped`, and park receive receipts record `push.branch.parked`.
+The promotion flag means that authorization did not reuse a green branch run;
+it does not cancel a branch run already queued by an earlier policy fallback.
 Schema migration 54 adds an immutable boolean, defaulting to false for existing
 promotions; historical audit records are unchanged.
 

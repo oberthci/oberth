@@ -30,12 +30,18 @@ type PushIngestor struct {
 	branches     CIQueue
 	releases     ReleaseAdmission
 	auditor      Auditor
+	accepted     receiveEventReader
+}
+
+type receiveEventReader interface {
+	ReceiveEvent(context.Context, string) (model.ReceiveEvent, error)
 }
 
 func NewPushIngestor(config PushConfig) (*PushIngestor, error) {
 	if config.Repositories == nil || config.Discoverer == nil || config.Git == nil || config.Receives == nil {
 		return nil, errors.New("service: repository store/discoverer, push Git, and receive recorder are required")
 	}
+	accepted, _ := config.Receives.(receiveEventReader)
 	return &PushIngestor{
 		repositories: databaseRepositories{config.Repositories},
 		discoverer:   config.Discoverer,
@@ -44,6 +50,7 @@ func NewPushIngestor(config PushConfig) (*PushIngestor, error) {
 		branches:     config.Branches,
 		releases:     config.Releases,
 		auditor:      config.Auditor,
+		accepted:     accepted,
 	}, nil
 }
 
@@ -51,7 +58,7 @@ func (ingestor *PushIngestor) Branch(ctx context.Context, push BranchPush) (Push
 	if strings.TrimSpace(push.EventID) == "" || strings.TrimSpace(push.Repository) == "" || strings.TrimSpace(push.Branch) == "" || strings.TrimSpace(push.Actor) == "" {
 		return PushResult{}, fmt.Errorf("%w: event ID, repository, branch, and actor are required", ErrInvalidInput)
 	}
-	repository, err := ingestor.ensureRepository(ctx, push.Repository)
+	repository, err := ingestor.ensureRepository(gitcache.WithBurstPolicy(ctx), push.Repository)
 	if err != nil {
 		return PushResult{}, err
 	}
@@ -83,6 +90,27 @@ func (ingestor *PushIngestor) Branch(ctx context.Context, push BranchPush) (Push
 	if !sameOID(peeled.ObjectSHA, push.NewOID) || !sameOID(peeled.CommitSHA, push.NewOID) {
 		return PushResult{}, errors.New("service: accepted branch commit no longer resolves exactly")
 	}
+	if ingestor.accepted != nil {
+		event, readErr := retryDatabase(ctx, "ReceiveEvent", func(ctx context.Context) (model.ReceiveEvent, error) {
+			return ingestor.accepted.ReceiveEvent(ctx, push.EventID)
+		})
+		if readErr == nil {
+			if event.Actor != push.Actor || event.RepoID != repository.ID || event.RefKind != model.RefBranch || event.Ref != push.Branch ||
+				!sameOID(event.OldSHA, push.OldOID) || !sameOID(event.ObjectSHA, peeled.CommitSHA) || !sameOID(event.CommitSHA, peeled.CommitSHA) {
+				return PushResult{}, fmt.Errorf("%w: receive event ID was reused with different contents", store.ErrInvalidState)
+			}
+			switch event.Outcome {
+			case "parked":
+				return PushResult{Repository: repository, Duplicate: true, Reason: "park ref mirrored; branch CI skipped"}, nil
+			case "queued":
+				return ingestor.enqueueBranch(ctx, push, repository, peeled.CommitSHA, "")
+			default:
+				return PushResult{}, fmt.Errorf("%w: unexpected branch receive outcome", store.ErrInvalidState)
+			}
+		} else if !errors.Is(readErr, store.ErrNotFound) {
+			return PushResult{}, readErr
+		}
+	}
 	policy, policyErr := readPushPromotionPolicy(ctx, ingestor.git, push.Repository)
 	if policyErr == nil && policy.parks(push.Branch) && push.Branch != repository.DefaultBranch && !policy.requiresBranchCI(push.Branch) {
 		mirror, ok := ingestor.git.(interface {
@@ -99,18 +127,29 @@ func (ingestor *PushIngestor) Branch(ctx context.Context, push BranchPush) (Push
 		duplicate, err := ingestor.receives.RecordReceiveEvent(ctx, receiveSpec(push.EventID, push.Actor, repository.ID, model.RefBranch, push.Branch, push.OldOID, peeled.CommitSHA, peeled.CommitSHA, "parked"))
 		return PushResult{Repository: repository, Duplicate: duplicate, Reason: "park ref mirrored; branch CI skipped"}, err
 	}
+	reason := ""
+	if policyErr != nil {
+		// Keep the existing reason line bounded and printable. The error is
+		// server-side policy/read metadata, never candidate authorization.
+		reason = parkFallbackPrefix + boundedParkPolicyText(policyErr.Error()) + ")"
+	}
+	return ingestor.enqueueBranch(ctx, push, repository, peeled.CommitSHA, reason)
+}
+
+func (ingestor *PushIngestor) enqueueBranch(ctx context.Context, push BranchPush, repository model.Repository, sha, reason string) (PushResult, error) {
 	if ingestor.branches == nil {
 		return PushResult{}, refuse(ErrUnavailable, "CI queue")
 	}
 	enqueued, err := ingestor.branches.EnqueueCI(ctx, CIRequest{PriorityRequest: push.PriorityRequest,
+		Reason:     reason,
 		EventID:    push.EventID,
 		Repository: repository,
 		Branch:     push.Branch,
 		OldSHA:     push.OldOID,
-		SHA:        strings.ToLower(peeled.CommitSHA),
+		SHA:        strings.ToLower(sha),
 		Actor:      push.Actor,
 		Trigger:    "branch",
-		TestedSHA:  strings.ToLower(peeled.CommitSHA),
+		TestedSHA:  strings.ToLower(sha),
 	})
 	if err != nil {
 		return PushResult{}, fmt.Errorf("enqueue accepted branch commit: %w", err)

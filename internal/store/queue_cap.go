@@ -108,6 +108,10 @@ func (s *Store) deferBranchTx(ctx context.Context, tx *sql.Tx, event model.Recei
 		return "", nil
 	}
 	reason := fmt.Sprintf("branch run deferred: queue at %d/%d", cap.NotStarted, cap.MaxNotStarted)
+	auditReason := reason
+	if spec.Reason != "" {
+		auditReason += "; " + spec.Reason
+	}
 	body, err := json.Marshal(deferredBranchSpec{Run: spec, RequesterFingerprint: spec.RequesterFingerprint, Supersede: spec.Supersede})
 	if err != nil {
 		return "", err
@@ -119,7 +123,7 @@ func (s *Store) deferBranchTx(ctx context.Context, tx *sql.Tx, event model.Recei
 	if _, err := tx.ExecContext(ctx, `INSERT INTO deferred_branch_receives(event_id,run_spec,reason) VALUES(?,?,?)`, event.ID, string(body), reason); err != nil {
 		return "", err
 	}
-	if err := s.appendReceiveAudit(ctx, tx, event, "", now, reason); err != nil {
+	if err := s.appendReceiveAudit(ctx, tx, event, "", now, auditReason); err != nil {
 		return "", err
 	}
 	return reason, nil
@@ -181,6 +185,9 @@ func (s *Store) DrainDeferredBranch(ctx context.Context) (model.EnqueueRunResult
 	result, err := s.enqueueRunTx(ctx, tx, spec, runID, now, 0)
 	if err != nil {
 		return model.EnqueueRunResult{}, err
+	}
+	if spec.Reason != "" {
+		reason += "; " + spec.Reason
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE runs SET reason=? WHERE id=?`, reason, runID); err != nil {
 		return model.EnqueueRunResult{}, err
