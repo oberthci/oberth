@@ -337,6 +337,11 @@ spec:
       command: ["/usr/local/go/bin/go"]
       args: ["install", "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2"]
       env:
+      # Compiler and child scratch use the per-run PVC, separate from tool outputs.
+      - name: GOTMPDIR
+        value: /tmp/oberth-go-tmp
+      - name: TMPDIR
+        value: /tmp/oberth-go-tmp
       - name: GOBIN
         value: "/tmp/oberth-tools/bin"
       - name: PATH
@@ -367,6 +372,9 @@ spec:
         value: "/tmp/oberth-tools/cache/golangci-lint"
       volumeMounts:
       - name: work
+        mountPath: /tmp/oberth-go-tmp
+        subPath: go-tmp/install-golangci-lint
+      - name: work
         mountPath: /tmp/oberth-tools
         subPath: tools
       - name: work
@@ -378,7 +386,7 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
-      resources:
+      resources: # remeasure: PVC scratch placement; residual local demand remains unknown
         requests:
           cpu: 1000m # measured request 1288m; retain the CI policy cap
           memory: 2368Mi
@@ -395,6 +403,11 @@ spec:
       command: ["/usr/local/go/bin/go"]
       args: ["install", "golang.org/x/tools/cmd/deadcode@v0.49.0"]
       env:
+      # Compiler and child scratch use the per-run PVC, separate from tool outputs.
+      - name: GOTMPDIR
+        value: /tmp/oberth-go-tmp
+      - name: TMPDIR
+        value: /tmp/oberth-go-tmp
       - name: GOBIN
         value: "/tmp/oberth-tools/bin"
       - name: PATH
@@ -425,6 +438,9 @@ spec:
         value: "/tmp/oberth-tools/cache/golangci-lint"
       volumeMounts:
       - name: work
+        mountPath: /tmp/oberth-go-tmp
+        subPath: go-tmp/install-deadcode
+      - name: work
         mountPath: /tmp/oberth-tools
         subPath: tools
       - name: work
@@ -436,7 +452,7 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
-      resources:
+      resources: # remeasure: PVC scratch placement; residual local demand remains unknown
         requests:
           cpu: 1000m
           memory: "4Gi"
@@ -454,6 +470,11 @@ spec:
       command: ["/usr/local/go/bin/go"]
       args: ["install", "helm.sh/helm/v4/cmd/helm@v4.2.3"]
       env:
+      # Compiler and child scratch use the per-run PVC, separate from tool outputs.
+      - name: GOTMPDIR
+        value: /tmp/oberth-go-tmp
+      - name: TMPDIR
+        value: /tmp/oberth-go-tmp
       - name: GOBIN
         value: "/tmp/oberth-tools/bin"
       - name: PATH
@@ -484,6 +505,9 @@ spec:
         value: "/tmp/oberth-tools/cache/golangci-lint"
       volumeMounts:
       - name: work
+        mountPath: /tmp/oberth-go-tmp
+        subPath: go-tmp/install-helm
+      - name: work
         mountPath: /tmp/oberth-tools
         subPath: tools
       - name: work
@@ -499,11 +523,11 @@ spec:
         requests:
           cpu: 1000m # measured request 2365m; retain the CI policy cap
           memory: 2688Mi
-          ephemeral-storage: 64Mi
+          ephemeral-storage: 96Mi # remeasure: provisional residual cap, evicted 64Mi x1.5; compiler scratch on PVC
         limits:
           cpu: 2365m
           memory: 2688Mi
-          ephemeral-storage: 64Mi
+          ephemeral-storage: 96Mi # remeasure: provisional residual cap, evicted 64Mi x1.5; compiler scratch on PVC
 
   # Pinned helm-unittest binary; fetch, verification and extraction have separate statuses.
   - name: fetch-helm-unittest
