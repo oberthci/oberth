@@ -57,7 +57,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 				reason = queuedDisplayReason(result, blocker)
 			}
 			if policyWaiting {
-				reason = store.PolicyRefreshWaitingReason
+				reason = "waiting for upstream policy"
 			}
 		}
 		result.AgeSeconds = int64(clock.Since(observed) / time.Second)
@@ -101,7 +101,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 	if hold, held := service.admissionHoldForRun(run); held {
 		result.State = "queued"
 		result.Message = hold.Message()
-		return result, hold.Message()
+		return result, strings.Replace(hold.Message(), "admission held", "queue held", 1)
 	}
 	if run.Status == model.RunQueued {
 		result.State = "queued"
@@ -359,11 +359,21 @@ func applyExecutionDisplay(run *model.Run, scheduling *model.RunScheduling) {
 	if run.Phase == "publishing" || scheduling == nil || scheduling.Execution == nil {
 		return
 	}
+	for _, pod := range scheduling.Execution.Pods {
+		if pod.Reason == "Unschedulable" && strings.HasPrefix(pod.Message, "pod pending: ") {
+			run.DisplayReason = displayFailureText(joinRunMessage(priorityPrefix(*run), pod.Message))
+			return
+		}
+	}
 	switch scheduling.Execution.State {
 	case "deadline_exceeded", "deadline_elapsed", "terminal_observed":
 		// The run is still running until the store says otherwise; the
 		// deadline is its reason, not a second status (#1122).
-		run.DisplayReason = scheduling.Message
+		message := scheduling.Execution.Message
+		if message == "" {
+			message = "awaiting finalization"
+		}
+		run.DisplayReason = displayFailureText(joinRunMessage(priorityPrefix(*run), message))
 	}
 }
 

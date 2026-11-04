@@ -509,33 +509,28 @@ function repoCounts(runs) {
 }
 /* ---------- one run list: the queue, running, then finished ---------- */
 function admissionOf(run) { return run.Scheduling?.admission || null; }
-function queueSize(run) { return admissionOf(run)?.declared_resources ? "" : admissionOf(run)?.size || ""; }
-function queueSizeTitle(run) {
-  const admission = admissionOf(run);
-  if (admission?.declared_resources) return "declared CPU/memory requests, including executor reserve";
-  if (!admission?.size) return "";
-  return `legacy size ${admission.size}${admission.legacy_resources ? ` · fixed reservation ${admission.legacy_resources.cpu_milli}m CPU, ${admission.legacy_resources.memory_bytes} memory bytes` : ""}${admission.capacity > 0 ? ` · admission weight ${admission.weight} of ${admission.capacity}` : ""}`;
-}
-/* A queued run's reason line is the server's display_reason: what the run
-   waits for, in plain words, computed once for every surface (next in line,
-   waiting for CPU budget, host IO pressure, concurrency group busy, ...).
-   The raw scheduling state is never shown as a status of its own. */
-function queueReason(run) {
-  return run.display_reason || run.Scheduling?.message || "awaiting scheduler";
-}
+function queueReason(run) { return run.display_reason || ""; }
 function queueDetail(run) { return run.Scheduling?.message || runMessage(run); }
-function runTimeLabel(run) {
+function rowMessage(run) { return run.display_reason || ""; }
+function whenCell(run) {
   const status = displayRunStatus(run);
-  if (status === "queued") return `queued ${ago(run.QueuedAt)}`;
-  if (run.StartedAt) return `started ${ago(run.StartedAt)}`;
-  return `ended ${ago(run.FinishedAt || run.QueuedAt)}`;
+  if (status === "queued") return "";
+  const started = run.StartedAt, stamp = started || run.QueuedAt;
+  const date = new Date(stamp || "");
+  const label = Number.isFinite(+date) ? `${started ? "started" : "queued"} at ${date.toDateString() === new Date().toDateString() ? date.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit",hour12:false}) : date.toLocaleString()}` : "";
+  const duration = ["cancelled", "superseded"].includes(status) || !started ? "" : runListDuration(spanSeconds(started, run.FinishedAt, status === "running"));
+  return `<span${status === "running" && started ? ` data-started="${esc(started)}"` : ""}>${esc(duration)}</span><span class="meta">${esc(label)}</span>`;
 }
-function rowMessage(run, tooltip = false) {
-  if (run.priority_class && run.display_reason === `Priority ${run.priority_class}: ${run.priority_reason}.`) run = {...run, display_reason: ""};
-  const message = (tooltip ? queueDetail(run) : displayRunStatus(run) === "queued" ? queueReason(run) : runMessage(run))
-    || (run.Release ? "release" : run.Trigger === "schedule" && run.ScheduleEntry ? `schedule: ${run.ScheduleEntry}` : "");
-  return [run.priority_class && run.priority_class !== "normal" || run.priority_refusal ? prioritySummary(run) : "", message, run.resource_message].filter(Boolean).join(" ");
+function runListDuration(seconds) {
+  const sec = Math.max(0, Math.floor(seconds || 0));
+  return `${Math.floor(sec / 60)}m ${sec % 60}s`;
 }
+function tickRunTimers() {
+  document.querySelectorAll("[data-started]").forEach(cell => {
+    cell.textContent = runListDuration(spanSeconds(cell.dataset.started, null, true));
+  });
+}
+setInterval(tickRunTimers, 1000);
 function prioritySummary(run) {
   const position = run.QueuePosition || run.Scheduling?.queue_position;
   return [`priority ${run.priority_class || "normal"}`, run.priority_requested_by ? `requested by ${run.priority_requested_by}` : "", run.priority_reason, position ? `queue position ${position}` : "", run.priority_refusal].filter(Boolean).join(" · ");
@@ -549,11 +544,11 @@ function runMessageCell(run) {
   return run.display_reason === "server restart, retry needed" ? `<span class="retry-warning">${esc(message)}</span>` : esc(message);
 }
 function runRow(run) {
-    const status = displayRunStatus(run), queued = status === "queued";
-    return `<div class="trow" data-run-id="${esc(run.ID)}"><div class="status-cell run-status">${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}</div><div class="primary"><div class="repo-name">${esc(repoName(run.RepoID))}</div><div class="branch">${esc(run.RefKind === "tag" ? "tag " : "")}${esc(run.Ref)}</div></div><div class="sha">${esc(shortSha(run.SHA))}</div><div class="clip" title="${esc(run.Actor)}">${esc(run.Actor || "--")}</div><div class="nowrap" title="${esc(fmtTime(runWhen(run)))}">${esc(runTimeLabel(run))}<br><span class="meta"${queued ? ` title="${esc(queueSizeTitle(run))}"` : ""}>${queued ? esc(queueSize(run)) : esc(fmtDur(runDuration(run)))}</span></div><div class="clip" title="${esc(rowMessage(run, true))}">${runMessageCell(run)}</div></div>`;
+  const status = displayRunStatus(run);
+  return `<div class="trow" data-run-id="${esc(run.ID)}"><div class="status-cell run-status">${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}</div><div class="primary" title="${esc(`sha ${run.SHA || ""} · actor ${run.Actor || ""}`)}"><div class="repo-name">${esc(repoName(run.RepoID))}</div><div class="branch">${esc(run.RefKind === "tag" ? "tag " : "")}${esc(run.Ref)}</div></div><div class="when">${whenCell(run)}</div><div class="clip" title="${esc(rowMessage(run))}">${runMessageCell(run)}</div></div>`;
 }
 function runsTable(runs) {
-  return `<div class="table runs-table"><div class="trow head"><div>status</div><div>run</div><div>sha</div><div>actor</div><div>when</div><div>message</div></div>${runs.map(runRow).join("")}</div>`;
+  return `<div class="table runs-table"><div class="trow head"><div>status</div><div>run</div><div>when</div><div>message</div></div>${runs.map(runRow).join("")}</div>`;
 }
 /* History belongs to the individual run, including superseded runs. The
    API cursor is opaque (scoped uplinks get IDs rather than sequences). */
@@ -949,6 +944,7 @@ function summaryLines(detail) {
   else if (status === "queued") {
     const scheduling = detail.Scheduling || {}, admission = scheduling.admission || {};
     lines.push(`[queued] ${run.display_reason || scheduling.message || "awaiting scheduler"}`);
+    if (scheduling.message && scheduling.message !== run.display_reason) lines.push(`[scheduling] ${scheduling.message}`);
     if (admission.numeric_budget) lines.push(`capacity: ${numericBudgetText(admission.numeric_budget)}${admission.position ? ` · queue position ${admission.position}` : ""}`);
     else if (admission.weight) lines.push(`capacity: need ${admission.weight} weight · ${admission.used}/${admission.capacity} used${admission.position ? ` · queue position ${admission.position}` : ""}`);
   }
@@ -969,6 +965,7 @@ function summaryLines(detail) {
   }
   if (unreached) lines.push(`${unreached} declared step${unreached === 1 ? "" : "s"} not reached`);
   if (run.SupersededBy) lines.push({successor: run.SupersededBy, text: run.display_reason || `view successor ${shortSuccessor(run.SupersededBy)}`});
+  if (run.Reason && run.Reason !== run.display_reason && run.Reason !== run.Error) lines.push("", `reason: ${run.Reason}`);
   if (run.Error) lines.push("", `error: ${run.Error}`);
   const timed = steps.map(step => ({ step, seconds: spanSeconds(step.StartedAt, step.FinishedAt, false) })).filter(item => item.seconds > 0).sort((a, b) => b.seconds - a.seconds);
   if (timed.length) lines.push("", `slowest: ${timed.slice(0, 2).map(item => `${stepKey(item.step)} ${fmtDur(item.seconds)}`).join(" · ")}`);

@@ -90,7 +90,7 @@ func TestParallelismNoticeSurvivesTimingStoreRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if message := got[run.ID].Message(run.ID); !strings.Contains(message, "effective concurrency: 4 pods") {
+	if message := got[run.ID].Message(run.ID); !strings.Contains(message, "up to 4 pods at once") {
 		t.Fatalf("stored concurrency lost in batched read: %q", message)
 	}
 }

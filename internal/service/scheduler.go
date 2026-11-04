@@ -1545,7 +1545,7 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 	finished, err := scheduler.database().FinishRun(finalizeCtx, run.ID, model.RunResult{
 		AutoRetryInfrastructure: scheduler.infrastructureAutoRetry(run, jobResult),
 		TerminalObservation:     jobResult.TerminalObservation, Status: jobResult.Status, Phase: jobResult.Phase, TestedSHA: checkoutSHA, BaseSHA: jobResult.BaseSHA,
-		FailedStage: jobResult.FailedStage, FailedStep: jobResult.FailedStep, Error: jobResult.Error,
+		FailureCause: jobResult.FailureCause, FailedStage: jobResult.FailedStage, FailedStep: jobResult.FailedStep, Error: jobResult.Error,
 		FailureTail: failureTail,
 	})
 	if errors.Is(err, store.ErrInvalidState) {
@@ -1898,7 +1898,11 @@ func (scheduler *Scheduler) finishPublication(ctx context.Context, _ model.Repos
 func (scheduler *Scheduler) finishInfrastructureFailure(ctx context.Context, run model.Run, _ model.Repository, failure error) error {
 	defer forgetActiveLogIndex(scheduler.logs, run.ID)
 	result := JobResult{Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error()}
-	finished, err := scheduler.database().FinishRun(ctx, run.ID, model.RunResult{AutoRetryInfrastructure: scheduler.infrastructureAutoRetry(run, result), Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error()})
+	var cause interface{ RunFailureCause() string }
+	if errors.As(failure, &cause) {
+		result.FailureCause = displayFailureText(cause.RunFailureCause())
+	}
+	finished, err := scheduler.database().FinishRun(ctx, run.ID, model.RunResult{AutoRetryInfrastructure: scheduler.infrastructureAutoRetry(run, result), Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error(), FailureCause: result.FailureCause})
 	if errors.Is(err, store.ErrInvalidState) {
 		scheduler.signals.NotifyRun(run.ID)
 		return nil
@@ -2086,7 +2090,7 @@ func (scheduler *Scheduler) finalizeReconciledRun(ctx context.Context, run model
 	finished, err := scheduler.database().FinishRun(ctx, run.ID, model.RunResult{
 		AutoRetryInfrastructure: scheduler.infrastructureAutoRetry(run, jobResult),
 		TerminalObservation:     jobResult.TerminalObservation, Status: jobResult.Status, Phase: jobResult.Phase,
-		FailedStage: jobResult.FailedStage, FailedStep: jobResult.FailedStep,
+		FailureCause: jobResult.FailureCause, FailedStage: jobResult.FailedStage, FailedStep: jobResult.FailedStep,
 		Error: jobResult.Error,
 	})
 	if errors.Is(err, store.ErrInvalidState) {

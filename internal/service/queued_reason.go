@@ -16,168 +16,92 @@ import (
 // scoped viewer gets "waiting for capacity" where an admin sees the numbers.
 func queuedDisplayReason(scheduling *model.RunScheduling, blocker *model.AdmissionBlocker) string {
 	if scheduling == nil {
-		return "awaiting scheduler"
+		return "next in line"
 	}
-	admission := scheduling.Admission
+	var reason string
 	switch scheduling.State {
 	case "infra-pending":
-		return "workflow create outcome uncertain; cleanup pending"
+		return "workflow create uncertain, cleanup pending"
 	case "queued":
-		reason := "in line"
-		switch {
-		case scheduling.QueuePosition == 1:
-			reason = "next in line"
-		case scheduling.QueuePosition > 1:
+		reason = "next in line"
+		if scheduling.QueuePosition > 1 {
 			reason = fmt.Sprintf("position %d in line", scheduling.QueuePosition)
 		}
-		if blocker != nil {
-			reason += ", " + behindBlocker(blocker)
-		}
-		return reason
 	case "preparing":
-		return "preparing to run"
+		return "starting"
 	case "preflight":
-		return "KVM preflight running"
+		return "KVM preflight"
 	case "waiting":
-		switch {
-		case admission == nil:
-			// No reservation is known for the claimed run (just claimed,
-			// or the gate is being rebuilt after a restart): that is not
-			// proof of admission.
-			return "waiting for admission"
-		case admission.State == "admitted":
-			return "admitted, starting the workflow"
-		default:
-			return waitingReason(admission)
+		if scheduling.Admission == nil {
+			return "waiting for capacity"
 		}
+		if scheduling.Admission.State == "admitted" {
+			return "starting"
+		}
+		return waitingReason(scheduling.Admission)
 	default:
-		return "awaiting scheduler"
+		return "next in line"
 	}
+	return displayFailureText(withWaitQualifier(reason, nil, blocker))
 }
 
-// waitingReason names the one thing a claimed run waits for at the gate.
-func waitingReason(admission *model.AdmissionObservation) string {
+func waitingReason(a *model.AdmissionObservation) string {
+	reason := "waiting for capacity"
 	switch {
-	case admission.KubeVirtCapacity:
-		return "waiting for KubeVirt capacity (repository VM grant)"
-	case admission.VMCapacity:
-		return "waiting for trusted VM capacity"
-	case admission.DiskFloor != nil && admission.DiskFloor.BelowFloor:
-		return fmt.Sprintf("waiting for disk space (%s free, floor %s)", bytesText(admission.DiskFloor.FreeBytes), bytesText(admission.DiskFloor.FloorBytes))
-	case admission.GroupLimit > 0 && (admission.GroupBlocked || admission.GroupHolder != "" || admission.GroupAhead != ""):
-		return concurrencyGroupReason(admission)
-	case admission.GroupHolder != "":
-		return fmt.Sprintf("concurrency group %s busy (held by run %s)", admission.Group, shortRunID(admission.GroupHolder))
-	case admission.GroupAhead != "":
-		return fmt.Sprintf("concurrency group %s busy (run %s is ahead)", admission.Group, shortRunID(admission.GroupAhead))
+	case a.KubeVirtCapacity:
+		reason = "waiting for KubeVirt capacity"
+	case a.VMCapacity:
+		reason = "waiting for VM capacity"
+	case a.DiskFloor != nil && a.DiskFloor.BelowFloor:
+		reason = fmt.Sprintf("waiting for disk space (%s free)", bytesText(a.DiskFloor.FreeBytes))
+	case a.GroupLimit > 0 && a.GroupBlocked, a.GroupHolder != "", a.GroupAhead != "":
+		reason = "group " + a.Group + " busy"
+	case a.MaxRuns > 0 && a.Runs >= a.MaxRuns:
+		reason = fmt.Sprintf("%d runs already running (limit %d)", a.Runs, a.MaxRuns)
+	case a.BlockedBy != nil && a.BlockedBy.RunCeiling:
+		reason = "waiting for a run slot"
+	case a.DeclaredResources != nil:
+		reason = budgetReason(a.NumericBudget, a.DeclaredResources)
+	case a.Size != "":
+		reason = fmt.Sprintf("waiting for a slot (size %s)", a.Size)
 	}
-	blocker := admission.BlockedBy
-	pressure := admission.Pressure
+	blocker := a.BlockedBy
+	if a.HeadOfQueue {
+		blocker = nil
+	}
+	pressure := a.Pressure
+	if pressure == nil && a.BlockedBy != nil {
+		pressure = a.BlockedBy.Pressure
+	}
+	return displayFailureText(withWaitQualifier(reason, pressure, blocker))
+}
+
+func withWaitQualifier(reason string, pressure *model.PressureDeferral, blocker *model.AdmissionBlocker) string {
 	if pressure == nil && blocker != nil {
 		pressure = blocker.Pressure
 	}
-	behind := ""
-	if blocker != nil && !admission.HeadOfQueue {
-		behind = ", " + behindBlocker(blocker)
-		if admission.Pressure == nil && blocker.Pressure != nil || blocker.RunCeiling {
-			// The head's cause is this run's cause too; name it once.
-			behind = ", behind " + blocker.Repo + "/" + blocker.Ref
-		}
-	}
 	if pressure != nil {
-		return pressureReason(pressure) + behind
-	}
-	reason := "waiting for capacity"
-	switch {
-	case blocker != nil && blocker.RunCeiling && admission.MaxRuns > 0:
-		reason = fmt.Sprintf("%d runs already running (limit %d)", admission.Runs, admission.MaxRuns)
-	case blocker != nil && blocker.RunCeiling:
-		reason = "waiting for a run slot"
-	case admission.NumericBudget != nil && admission.DeclaredResources != nil:
-		reason = budgetReason(admission.NumericBudget, admission.DeclaredResources)
-	case admission.Capacity > 0 && admission.Weight > 0:
-		reason = fmt.Sprintf("waiting for capacity (size %s, %d of %d weight used)", admission.Size, admission.Used, admission.Capacity)
-	}
-	if admission.HeadOfQueue && blocker != nil {
-		switch {
-		case blocker.Backfilling:
-			reason += "; smaller runs run meanwhile"
-		case blocker.Draining:
-			reason += "; host draining for it"
+		if pressure.Resource == "io" || pressure.Resource == "cpu+io" {
+			return reason + " · host IO pressure"
+		}
+		if pressure.Resource == "cpu" {
+			return reason + " · host CPU pressure"
 		}
 	}
-	return reason + behind
+	// A redacted blocker has no identity; never invent a hidden repo/ref.
+	if blocker != nil && blocker.Repo != "" && blocker.Ref != "" {
+		return reason + " · behind " + blocker.Repo + "/" + blocker.Ref
+	}
+	return reason
 }
 
-// budgetReason names the budget the declared reservation does not fit, with
-// what is free of it: "waiting for CPU budget (12.5 of 40 CPU free)".
-func budgetReason(budget *model.NumericBudget, declared *model.DeclaredResources) string {
-	freeCPU, freeMemory := budget.CPUBudgetMilli-budget.CPUUsedMilli, budget.MemoryBudgetBytes-budget.MemoryUsedBytes
-	switch {
-	case declared.CPUMilli > freeCPU:
-		return fmt.Sprintf("waiting for CPU budget (%s of %s CPU free)", cpuText(freeCPU), cpuText(budget.CPUBudgetMilli))
-	case declared.MemoryBytes > freeMemory:
-		return fmt.Sprintf("waiting for memory budget (%s of %s free)", bytesText(freeMemory), bytesText(budget.MemoryBudgetBytes))
-	default:
-		return fmt.Sprintf("waiting for capacity (%s of %s CPU, %s of %s memory free)", cpuText(freeCPU), cpuText(budget.CPUBudgetMilli), bytesText(freeMemory), bytesText(budget.MemoryBudgetBytes))
-	}
-}
-
-// pressureReason reads "host IO pressure (42%)"; a scoped viewer sees no number.
-func pressureReason(pressure *model.PressureDeferral) string {
-	reason := "host " + pressureName(pressure.Resource) + " pressure"
-	switch {
-	case pressure.Redacted:
-		return reason
-	case pressure.Avg10Gate:
-		return fmt.Sprintf("%s (CPU %.0f%%, IO %.0f%%)", reason, pressure.CPUAvg10, pressure.IOAvg10)
-	default:
-		return fmt.Sprintf("%s (%.0f%%)", reason, pressure.Avg60)
-	}
-}
-
-func pressureName(resource string) string {
-	switch resource {
-	case "cpu":
-		return "CPU"
-	case "io":
-		return "IO"
-	case "cpu+io":
-		return "CPU and IO"
-	default:
-		return resource
-	}
-}
-
-// behindBlocker names the queue head every later run waits behind, in the
-// blocker's own terms: "behind org/repo/main (needs the whole host)".
-func behindBlocker(blocker *model.AdmissionBlocker) string {
-	why := ""
-	switch {
-	case blocker.FullDrain:
-		why = "needs the whole host"
-	case blocker.Pressure != nil:
-		why = pressureReason(blocker.Pressure)
-	case blocker.RunCeiling:
-		why = "waiting for a run slot"
-	case blocker.DiskFloor:
-		why = "waiting for disk space"
-	case blocker.NumericBudget != nil && blocker.DeclaredResources != nil:
-		why = fmt.Sprintf("needs %s CPU, %s memory", cpuText(blocker.DeclaredResources.CPUMilli), bytesText(blocker.DeclaredResources.MemoryBytes))
-	case blocker.Size != "" && blocker.Capacity > 0:
-		why = fmt.Sprintf("size %s, needs %d weight, %d of %d used", blocker.Size, blocker.Weight, blocker.Used, blocker.Capacity)
-	case blocker.Size != "":
-		why = "size " + blocker.Size
-	}
-	if why == "" {
-		return "behind " + blocker.Repo + "/" + blocker.Ref
-	}
-	return "behind " + blocker.Repo + "/" + blocker.Ref + " (" + why + ")"
+func budgetReason(_ *model.NumericBudget, resources *model.DeclaredResources) string {
+	return fmt.Sprintf("waiting for %s CPU, %s", cpuText(resources.CPUMilli), bytesText(resources.MemoryBytes))
 }
 
 // cpuText renders millicores as cores: 12500 -> "12.5", 40000 -> "40".
 func cpuText(milli int64) string {
-	return strings.TrimSuffix(strings.TrimRight(strconv.FormatFloat(float64(milli)/1000, 'f', 2, 64), "0"), ".")
+	return strings.TrimSuffix(strings.TrimRight(strconv.FormatFloat(float64(milli)/1000, 'f', 1, 64), "0"), ".")
 }
 
 // bytesText renders bytes in the largest binary unit with one decimal.
@@ -207,8 +131,5 @@ func applyQueuedDisplay(run *model.Run, scheduling *model.RunScheduling, reason 
 	if reason == "" {
 		reason = queuedDisplayReason(scheduling, nil)
 	}
-	if strings.HasPrefix(run.Reason, "branch run deferred:") {
-		reason += "; " + run.Reason
-	}
-	run.DisplayReason = reason
+	run.DisplayReason = displayFailureText(joinRunMessage(priorityPrefix(*run), reason))
 }

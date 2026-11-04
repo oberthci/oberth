@@ -388,7 +388,7 @@ func TestRunRerunKeepsOperatorReasonInAutomaticLineage(t *testing.T) {
 	if detail.Run.Reason != want || detail.RerunOf != failed.AutoRetriedBy || detail.Run.AutoRetryOf != first.ID {
 		t.Fatalf("manual rerun detail: %+v", detail)
 	}
-	if shown := presentationRun(detail.Run); shown.DisplayReason != want {
+	if shown := presentationRun(detail.Run); shown.Reason != want {
 		t.Fatalf("operator reason lost in presentation: %q", shown.DisplayReason)
 	}
 }

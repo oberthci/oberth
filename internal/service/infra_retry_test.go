@@ -129,7 +129,7 @@ func TestInfrastructureRetryWorkflowFailureAndLostExecutor(t *testing.T) {
 			}
 			if failed.AutoRetriedBy != "" {
 				retry, e := f.store.Run(t.Context(), failed.AutoRetriedBy)
-				if e != nil || !strings.Contains(presentationRun(retry).DisplayReason, "automatic retry of "+source.ID+" after infrastructure failure:") {
+				if e != nil || !strings.Contains(retry.Reason, "automatic retry of "+source.ID+" after infrastructure failure:") {
 					t.Fatalf("retry message missing: %+v %v", retry, e)
 				}
 			}

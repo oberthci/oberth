@@ -582,9 +582,9 @@ durable `Status` stays unchanged. `display_status` is exactly one of
 `cancelled`; everything finer is the reason line. Every run that has not
 started is `queued`: durable queued, or claimed before admission (raw
 `Status` `waiting`). Its `display_reason` names what it waits for in plain
-words (`next in line`, `waiting for CPU budget (12.5 of 40 CPU free)`,
-`host IO pressure (42%)`, `10 runs already running (limit 10)`,
-`concurrency group deploy busy (held by run ...)`, `waiting for admission`);
+words (`next in line`, `waiting for 9.9 CPU, 16 GiB`,
+`waiting for 1 CPU, 512 MiB · host IO pressure`, `10 runs already running (limit 10)`,
+`group deploy busy`, `starting`);
 `Scheduling.state` and `Scheduling.message` keep the raw observation.
 Admission records `started_at`, so an admitted run, including a trusted
 preflight before Workflow submission, displays `running`; an uncertain
@@ -949,10 +949,14 @@ queue place. Run views include `priority_class`, `priority_reason`, `priority_re
 `priority_refusal`, queue position, and active
 `display_reason`; the dashboard run-detail badge shows the class with the
 reason on hover. Run details also show requester, reason and queue position;
-list and history messages include priority information without adding badges.
-Active `display_reason` is explicitly the priority message unless a more specific
-scheduling/preflight reason replaces it. Terminal `display_reason` describes the
-terminal cause; `priority_class` and `priority_reason` remain separate fields.
+list and history rows use only the server's `display_reason`, including an empty
+message. Ordinary running rows have no message. Explicit non-normal priorities
+and aging appear alongside a concise wait or execution cause; promotion and
+automatic tag boosts are implied by the ref. Messages are one line, at most 60
+characters; full error and scheduling evidence remains in run details.
+Terminal `display_reason` describes the terminal cause; `priority_class` and
+`priority_reason` remain separate fields. List rows omit `resource_message`;
+`run_get` and `status` retain resource advice.
 
 `repo_usage` also exposes each step's `by_workflow_size` sampled peak groups
 (S/M/L/XL/unknown), `report_only:true` and explicit class semantics. Full run

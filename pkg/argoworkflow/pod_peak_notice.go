@@ -24,7 +24,7 @@ func (d PodDemand) ConcurrencyMessage() string {
 	if !d.Valid() {
 		return ""
 	}
-	parts := []string{fmt.Sprintf("Declared admission effective concurrency: %d pods (upper bound).", d.Pods)}
+	parts := []string{fmt.Sprintf("up to %d pods at once", d.Pods)}
 	if d.Assumptions&PodPeakDynamic != 0 {
 		parts = append(parts, "Dynamic fan-out uses the full parallelism bound because its item count is unknown or ambiguous.")
 	}

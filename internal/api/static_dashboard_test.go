@@ -233,14 +233,19 @@ func TestRunsPageIsOneFlatFilteredList(t *testing.T) {
 		}
 	}
 	table := section("function runRow(", "\nasync function renderRuns(")
-	for _, want := range []string{"const status = displayRunStatus(run), queued = status === \"queued\";", "queueSize(run)", "queueSizeTitle(run)", `title="${esc(rowMessage(run, true))}"`, "runMessageCell(run)", "runTimeLabel(run)"} {
+	for _, want := range []string{"whenCell(run)", `title="${esc(rowMessage(run))}"`, "runMessageCell(run)", "<div>when</div><div>message</div>"} {
 		if !strings.Contains(table, want) {
 			t.Fatalf("flat runs table is missing %s", want)
 		}
 	}
-	for _, want := range []string{"queueReason(run)", `return run.display_reason || run.Scheduling?.message || "awaiting scheduler";`} {
+	for _, unwanted := range []string{"queueSizeTitle", "prioritySummary", "resource_message", "<div>sha</div>", "<div>actor</div>"} {
+		if strings.Contains(table, unwanted) {
+			t.Fatalf("row retains %s", unwanted)
+		}
+	}
+	for _, want := range []string{"function whenCell(", "started", "setInterval(tickRunTimers, 1000)", "[data-started]"} {
 		if !strings.Contains(source, want) {
-			t.Fatalf("plain-language queue status is missing %s", want)
+			t.Fatalf("when cell is missing %s", want)
 		}
 	}
 	for _, gone := range []string{`"waiting" ? "waiting"`, `case "waiting":`, `"deadline-exceeded"`, `"infra-pending"`, `queuePhase(`} {

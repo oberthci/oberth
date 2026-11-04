@@ -66,7 +66,7 @@ func TestSchedulerResumesRunAfterDiskFloorClears(t *testing.T) {
 		}
 		detail := value.(RunDetailResponse)
 		if detail.Scheduling != nil && detail.Scheduling.State == "waiting" && detail.Scheduling.Admission != nil && detail.Scheduling.Admission.DiskFloor != nil {
-			if detail.Run.DisplayStatus != "queued" || detail.Run.StartedAt != nil || detail.Run.DisplayReason != "waiting for disk space (1 KiB free, floor 2 KiB)" || !detail.Scheduling.Admission.DiskFloor.BelowFloor {
+			if detail.Run.DisplayStatus != "queued" || detail.Run.StartedAt != nil || detail.Run.DisplayReason != "waiting for disk space (1 KiB free)" || !detail.Scheduling.Admission.DiskFloor.BelowFloor {
 				t.Fatalf("disk hold lost its queued reason: %+v, %+v", detail.Run, detail.Scheduling)
 			}
 			break

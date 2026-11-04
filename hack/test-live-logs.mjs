@@ -206,9 +206,9 @@ await run('awaitResult');
 assert.ok(run('renderedHTML').includes('fixture log'), 'a queued pod can emit before Argo publishes Running');
 
 // Empty row messages identify schedules, escaped; detail keeps its schedule badge.
-run(`const scheduleRun = {ID:'scroll-run', RepoID:1, Status:'passed', Ref:'main', Trigger:'schedule', ScheduleEntry:'nightly<unsafe>'};`);
-html = run(`runsTable([scheduleRun, {...scheduleRun, ID:'weekly-run', ScheduleEntry:'weekly-sweep'}])`);
-assert.ok(html.includes('schedule: nightly&lt;unsafe&gt;') && html.includes('schedule: weekly-sweep'));
+run(`const scheduleRun = {ID:'scroll-run', RepoID:1, Status:'passed', Ref:'main', Trigger:'schedule', ScheduleEntry:'nightly<unsafe>', display_reason:'schedule nightly<unsafe>'};`);
+html = run(`runsTable([scheduleRun, {...scheduleRun, ID:'weekly-run', ScheduleEntry:'weekly-sweep', display_reason:'schedule weekly-sweep'}])`);
+assert.ok(html.includes('schedule nightly&lt;unsafe&gt;') && html.includes('schedule weekly-sweep'));
 assert.ok(!html.includes('nightly<unsafe>'));
 assert.equal(run(`scheduleBadge({...scheduleRun, Trigger:'branch'})`), '');
 assert.equal(run(`scheduleBadge({...scheduleRun, ScheduleEntry:''})`), '');
@@ -344,7 +344,7 @@ assert.ok(!run(`pressureStatusCard({mode:'observe',available:true,threshold_exce
 
 // Avg10 host admission reports both signals and preserves scoped redaction.
 assert.equal(run(`queueReason({display_reason:'host CPU and IO pressure (CPU 45%, IO 31%)',Scheduling:{state:'waiting',admission:{pressure:{resource:'cpu+io',avg10_gate:true,cpu_avg10:45.25,io_avg10:30.5}}}})`), 'host CPU and IO pressure (CPU 45%, IO 31%)');
-assert.equal(run(`queueReason({Scheduling:{state:'waiting',message:'Waiting in the weighted resource admission queue.',admission:{pressure:{resource:'cpu+io',redacted:true}}}})`), 'Waiting in the weighted resource admission queue.', 'the scheduling message is the fallback when no reason was presented');
+assert.equal(run(`queueReason({Scheduling:{state:'waiting',message:'Waiting in the weighted resource admission queue.',admission:{pressure:{resource:'cpu+io',redacted:true}}}})`), '', 'long observations stay in detail when no server reason was presented');
 const avg10Card=run(`pressureStatusCard({cpu_some_avg10:40,available:true,holding:true,resource:'cpu',sample:{cpu:{some_avg10:60},io:{some_avg10:12}}})`);
 assert.ok(avg10Card.includes('CPU some 60.0%') && avg10Card.includes('IO some 12.0%') && avg10Card.includes('(avg10)'));
 assert.ok(run(`pressureStatusCard({available:false})`).includes('budget-only admission'));

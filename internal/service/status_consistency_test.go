@@ -240,7 +240,7 @@ func TestRetryResponsesDescribeActionAndDurableRun(t *testing.T) {
 					t.Fatal("trusted stale delivery return instead of durable outcome", response)
 				}
 				if outcome == "queued" {
-					if !strings.Contains(shown.DisplayReason, "retry 2/5") || shown.DisplayStatus != "running" {
+					if !strings.Contains(shown.Error, "retry 2/5") || shown.DisplayReason != "publishing to upstream" || shown.DisplayStatus != "running" {
 						t.Fatalf("publication progress hidden by queue priority: %+v", shown)
 					}
 				}
@@ -326,11 +326,11 @@ func TestAdmittedRerunErrorDoesNotClaimNothingStarted(t *testing.T) {
 
 func TestFailedRunDisplayCoversTransientAndPermanentPublication(t *testing.T) {
 	for _, tc := range []struct{ phase, message, want string }{
-		{"publishing", "remote: Internal Server Error", "transient"},
-		{"infrastructure", "upstream publication infrastructure failure: all 5 attempts exhausted", "transient"},
+		{"publishing", "remote: Internal Server Error", "upstream publication failed"},
+		{"infrastructure", "upstream publication infrastructure failure: all 5 attempts exhausted", "upstream publication failed"},
 		{"publishing", "non-fast-forward", "upstream rejected: non-fast-forward"},
 		{"publishing", "", "upstream publication failed"},
-		{"checkout", "object unavailable", "checkout failed"},
+		{"checkout", "object unavailable", "checkout error"},
 	} {
 		run := model.Run{Status: model.RunFailed, Phase: tc.phase, Error: tc.message}
 		got := presentationRun(run)

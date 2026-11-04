@@ -148,11 +148,11 @@ func podSchedulingReason(pod corev1.Pod) model.SchedulingReason {
 				result.Reason = "Unschedulable"
 				switch {
 				case strings.Contains(condition.Message, "Insufficient cpu") && strings.Contains(condition.Message, "Insufficient memory"):
-					result.Message = "Pending: Insufficient cpu and memory; pod requests " + podRequest(pod, corev1.ResourceCPU) + " CPU and " + podRequest(pod, corev1.ResourceMemory) + " memory."
+					result.Message = "pod pending: insufficient cpu and memory (" + podRequest(pod, corev1.ResourceCPU) + " CPU, " + podRequest(pod, corev1.ResourceMemory) + " requested)"
 				case strings.Contains(condition.Message, "Insufficient cpu"):
-					result.Message = "Pending: Insufficient cpu; pod requests " + podRequest(pod, corev1.ResourceCPU) + " CPU."
+					result.Message = "pod pending: insufficient cpu (" + podRequest(pod, corev1.ResourceCPU) + " CPU requested)"
 				case strings.Contains(condition.Message, "Insufficient memory"):
-					result.Message = "Pending: Insufficient memory; pod requests " + podRequest(pod, corev1.ResourceMemory) + " memory."
+					result.Message = "pod pending: insufficient memory (" + podRequest(pod, corev1.ResourceMemory) + " requested)"
 				case hasSchedulingPhrase(condition.Message, "Insufficient", "ephemeral-storage"):
 					result.Message = "Pending: Insufficient ephemeral-storage; pod requests " + podRequest(pod, corev1.ResourceEphemeralStorage) + " ephemeral storage."
 				case hasSchedulingPhrase(condition.Message, "Too", "many", "pods"):

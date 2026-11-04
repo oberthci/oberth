@@ -401,7 +401,7 @@ func TestSchedulingDeadlineVisibleAfterProgressWithoutChangingDurableStatus(t *t
 	}
 	terminal := run
 	terminal.Status, terminal.Error = model.RunFailed, "Step exceeded its deadline"
-	if got := presentationRun(terminal); got.DisplayStatus != "failed" || got.DisplayReason != model.ExecutionDeadlineMessage {
+	if got := presentationRun(terminal); got.DisplayStatus != "failed" || got.DisplayReason != "infrastructure error: deadline exceeded" {
 		t.Fatalf("retained terminal deadline reason hidden: %+v", got)
 	}
 }

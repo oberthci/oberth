@@ -60,7 +60,8 @@ workflows using the earlier uniform 2 CPU/2Gi default policy. Recovery
 counts existing and uncertain workflows against the workflow ceiling until
 ownership-checked cleanup is accepted or absence is confirmed.
 
-The existing reason line reports the administrator ceiling, `waiting for disk
+Resource coverage advice is detail-only; run lists omit `resource_message`.
+The concise server reason line reports the run ceiling, `waiting for disk
 space`, host pressure, or recognized Kubernetes scheduling reasons such as
 `Insufficient cpu` and
 `Insufficient memory`. Arbitrary event text is withheld. No new run statuses or

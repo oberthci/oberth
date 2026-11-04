@@ -11,7 +11,7 @@ func TestParallelismNoticeRetainedAndValidated(t *testing.T) {
 		name, demand, want string
 		valid              bool
 	}{
-		{"static", `{"cpu_milli":8000,"memory_bytes":25769803776,"pods":4}`, "effective concurrency: 4 pods", true},
+		{"static", `{"cpu_milli":8000,"memory_bytes":25769803776,"pods":4}`, "up to 4 pods at once", true},
 		{"dynamic", `{"cpu_milli":8000,"memory_bytes":25769803776,"pods":4,"assumptions":1}`, "item count is unknown", true},
 		{"nested", `{"cpu_milli":8000,"memory_bytes":25769803776,"pods":8,"assumptions":2}`, "full inner fan-out demand", true},
 		{"graph", `{"cpu_milli":8000,"memory_bytes":25769803776,"pods":4,"assumptions":4}`, "largest declared pod", true},

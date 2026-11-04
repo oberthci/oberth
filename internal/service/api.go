@@ -1114,9 +1114,15 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 	if err != nil {
 		return nil, err
 	}
+	observationCtx, cancelObservation := context.WithTimeout(ctx, 2*time.Second)
+	defer cancelObservation()
 	for i := range runs {
 		if service.scope != nil {
 			runs[i].QueuePosition = 0
+		}
+		if filter.View != api.RunViewHistory && runs[i].DisplayStatus == model.DisplayRunning && service.schedulingObserver != nil && observationCtx.Err() == nil {
+			runs[i].Scheduling, _ = service.observeScheduling(observationCtx, runs[i], nil, true)
+			applyExecutionDisplay(&runs[i], runs[i].Scheduling)
 		}
 		if filter.View != api.RunViewHistory && runs[i].DisplayStatus == model.DisplayQueued {
 			var reason string
@@ -1709,50 +1715,57 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 	visible := visibleRun(run)
 	visible.DisplayStatus = model.DisplayRunStatus(run)
 	visible.DisplayReason = runDisplayReason(run)
-	if run.Status == model.RunFailed && model.IsExecutionDeadlineReason(run.Error) {
-		// A deadline is why the run failed, not a second status.
-		visible.DisplayReason = model.ExecutionDeadlineMessage
-	}
-	if run.Status == model.RunFailed && model.IsResourceFailureMessage(run.Error) {
-		visible.DisplayReason = run.Error
+	if visible.DisplayStatus == model.DisplayQueued {
+		visible.DisplayReason = queuedDisplayReason(nil, nil)
 	}
 	if visible.DisplayStatus == model.DisplayInfraRetried {
-		visible.DisplayReason = "infra error, retried as " + shortRunID(run.AutoRetriedBy)
+		visible.DisplayReason = "retried as " + shortRunID(run.AutoRetriedBy)
 	}
-
 	if run.Priority != "" {
 		visible.Priority, visible.PriorityReason = run.EffectivePriority(now)
-		// Active display_reason intentionally describes queue priority. Scheduling
-		// presentation may replace it with a more specific wait/preflight reason;
-		// priority_class/reason remain available. Terminal causes keep their text.
-		if run.Status.Active() && run.AutoRetryOf == "" {
-			visible.DisplayReason = run.PriorityMessage(now)
-		}
 	}
 	if run.Status == model.RunRunning && isPendingCreate(run) {
-		visible.DisplayReason = pendingCreateMessage
+		visible.DisplayReason = "workflow create uncertain, cleanup pending"
 	}
 	if run.Status == model.RunRunning && run.Phase == "publishing" {
-		visible.DisplayReason = "upstream publication pending"
-		if message := displayFailureText(run.Error); message != "" {
-			visible.DisplayReason = message
-		}
+		visible.DisplayReason = "publishing to upstream"
 	}
-	if run.Status == model.RunRunning && (run.Reason == store.PolicyRefreshWaitingReason || strings.HasSuffix(run.Reason, "; "+store.PolicyRefreshWaitingReason)) {
-		visible.DisplayReason = store.PolicyRefreshWaitingReason
+	if run.Status.Active() {
+		visible.DisplayReason = joinRunMessage(priorityPrefix(visible), visible.DisplayReason)
 	}
-	if run.Trigger == "promotion" && strings.Contains(run.Reason, "promoted without branch CI") {
-		if visible.DisplayReason != "" {
-			visible.DisplayReason += "; "
-		}
-		visible.DisplayReason += "promoted without branch CI"
-	}
+	visible.DisplayReason = displayFailureText(visible.DisplayReason)
 	return visible
 }
 
+// priorityPrefix uses server-owned provenance, with structural boosts implied by ref.
+func priorityPrefix(run model.Run) string {
+	if run.Priority == "" || run.Priority == model.PriorityNormal || run.PriorityReason == "promotion run" || run.PriorityReason == model.TagReleasePriorityReason {
+		return ""
+	}
+	prefix := "priority " + string(run.Priority)
+	if run.PriorityReason == model.PriorityAgedReason {
+		return prefix + " (aged)"
+	}
+	reason := strings.TrimPrefix(strings.TrimPrefix(run.PriorityReason, "admin bump: "), "submission priority: ")
+	if model.DisplayRunStatus(run) == model.DisplayQueued {
+		return prefix
+	}
+	return joinRunMessage(prefix, reason)
+}
+
+func joinRunMessage(first, second string) string {
+	if first == "" {
+		return second
+	}
+	if second == "" {
+		return first
+	}
+	return first + " · " + second
+}
+
 func runDisplayReason(run model.Run) string {
-	if run.AutoRetryOf != "" && run.Status.Active() {
-		return run.Reason
+	if run.Status == model.RunPassed && run.Trigger == "schedule" && run.ScheduleEntry != "" {
+		return "schedule " + run.ScheduleEntry
 	}
 	if run.Status == model.RunFailed {
 		return failedRunDisplayReason(run)
@@ -1762,7 +1775,7 @@ func runDisplayReason(run model.Run) string {
 	}
 	switch {
 	case run.Phase == model.PhaseCancelled:
-		return run.Reason
+		return strings.TrimPrefix(run.Reason, "cancelled ")
 	case run.SupersededBy != "" && (run.Reason == "re-queued after restart" || run.Reason == store.KVMRestartRetryReason):
 		return "server restart, re-queued as " + shortRunID(run.SupersededBy)
 	case run.SupersededBy != "" && run.Reason == "superseded by newer run":
@@ -1791,8 +1804,8 @@ func (service *API) presentationRun(ctx context.Context, run model.Run) (result 
 // presentationRuns resolves every successor in one lookup for list views.
 func (service *API) presentationRuns(ctx context.Context, runs []model.Run) (result []model.Run, resultErr error) {
 	defer func() {
-		if resultErr == nil {
-			service.applyResourceMessages(ctx, result)
+		for i := range result {
+			result[i].ResourceMessage = ""
 		}
 	}()
 	batch, ok := service.history.(interface {
@@ -1801,6 +1814,7 @@ func (service *API) presentationRuns(ctx context.Context, runs []model.Run) (res
 	if !ok {
 		plain := *service
 		plain.resourceCoverages = nil
+		plain.admission = nil
 		for i := range runs {
 			runs[i] = service.runAdmissionContext(ctx, plain.presentationRun(ctx, runs[i]), false)
 		}

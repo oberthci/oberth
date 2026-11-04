@@ -42,7 +42,7 @@ func TestTrustedPolicyPublicationOutageStaysPending(t *testing.T) {
 	}
 	view := presentationRun(run)
 	observation, _ := (&API{}).observeScheduling(ctx, run, nil, false)
-	if view.DisplayStatus != model.DisplayRunning || view.DisplayReason != store.PolicyRefreshWaitingReason || observation.State != "waiting" || !strings.Contains(observation.Message, store.PolicyRefreshWaitingReason) {
+	if view.DisplayStatus != model.DisplayRunning || view.DisplayReason != "publishing to upstream" || observation.State != "waiting" || !strings.Contains(observation.Message, store.PolicyRefreshWaitingReason) {
 		t.Fatalf("waiting cause hidden: %#v, %#v", view, observation)
 	}
 	git.baselineErr = nil

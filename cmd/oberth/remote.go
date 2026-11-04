@@ -234,15 +234,7 @@ func datedRunCount(runs []remoteRun) int {
 	return count
 }
 
-func displayRunReason(run remoteRun) string {
-	message := run.Reason
-	if run.DisplayReason != "" {
-		message = run.DisplayReason
-	} else if run.Scheduling != nil && displayRunStatus(run) == "queued" {
-		message = run.Scheduling.Message
-	}
-	return strings.TrimSpace(message + " " + run.ResourceMessage)
-}
+func displayRunReason(run remoteRun) string { return run.DisplayReason }
 
 // remoteActiveRun is one /api/runs?view=active entry: the run, plus the
 // scheduling observation of a run that has not started.
@@ -412,17 +404,30 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 		if _, err := fmt.Fprintln(output, detail.Run.DisplayReason); err != nil {
 			return err
 		}
-	} else if detail.Run.Status == string(model.RunInterrupted) && detail.Run.Phase == model.PhaseCancelled {
+	}
+	if detail.Run.Reason != "" && detail.Run.Reason != detail.Run.DisplayReason && detail.Run.Reason != detail.Run.Error {
 		if _, err := fmt.Fprintln(output, detail.Run.Reason); err != nil {
 			return err
 		}
-	} else if reason := strings.TrimSpace(detail.Run.Error); reason != "" {
-		phase := detail.Run.Phase
-		if phase == "" {
-			phase = "unknown"
-		}
-		if _, err := fmt.Fprintf(output, "failed in %s: %s\n", phase, reason); err != nil {
-			return err
+	}
+	if reason := strings.TrimSpace(detail.Run.Error); reason != "" && reason != detail.Run.DisplayReason {
+		switch {
+		case detail.Run.Status == string(model.RunInterrupted) && detail.Run.Phase == model.PhaseCancelled:
+			if _, err := fmt.Fprintln(output, reason); err != nil {
+				return err
+			}
+		case detail.Run.Status == string(model.RunFailed):
+			phase := detail.Run.Phase
+			if phase == "" {
+				phase = "unknown"
+			}
+			if _, err := fmt.Fprintf(output, "failed in %s: %s\n", phase, reason); err != nil {
+				return err
+			}
+		default:
+			if _, err := fmt.Fprintf(output, "error: %s\n", reason); err != nil {
+				return err
+			}
 		}
 	}
 	if detail.Run.Actor != "" {

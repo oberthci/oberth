@@ -32,7 +32,7 @@ func TestPolicyWaitKeepsSharedDisplayStatusAndReason(t *testing.T) {
 			observation, reason := (&API{}).observeScheduling(t.Context(), run, nil, false)
 			view := presentationRun(run)
 			applyQueuedDisplay(&view, observation, reason)
-			if view.DisplayStatus != tc.status || view.DisplayReason != store.PolicyRefreshWaitingReason {
+			if view.DisplayStatus != tc.status || view.DisplayReason != map[string]string{"queued": "waiting for upstream policy", "running": "publishing to upstream"}[tc.status] {
 				t.Fatalf("policy wait lost shared status or cause: %#v", view)
 			}
 			if observation.State != "waiting" || observation.Message != store.PolicyRefreshWaitingReason+": waiting for upstream trusted test policy; no publication is allowed." {

@@ -105,7 +105,7 @@ func TestQueueCapDeferredPushStaysLocalAndVisibleWithoutRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	runs := shown.([]model.Run)
-	if len(runs) != 1 || !strings.Contains(runs[0].DisplayReason, "branch run deferred:") || strings.Contains(runs[0].DisplayReason, "1/1") || strings.Contains(runs[0].Reason, "1/1") {
+	if len(runs) != 1 || !strings.Contains(runs[0].Reason, "branch run deferred:") || strings.Contains(runs[0].DisplayReason, "1/1") || strings.Contains(runs[0].Reason, "1/1") {
 		t.Fatalf("scoped drain reason: %+v", runs)
 	}
 	result, err = ingestor.Branch(ctx, push)

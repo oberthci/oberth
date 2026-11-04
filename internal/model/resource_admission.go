@@ -18,15 +18,15 @@ func (r ResourceAdmissionFallback) Valid() bool {
 func (r ResourceAdmissionFallback) Message() string {
 	switch r {
 	case ResourceFallbackBudget:
-		return "Using deprecated legacy size admission; commit measured requests/limits in git: declared demand including helper reserve exceeds the numeric budget."
+		return "legacy size admission: commit measured requests/limits in git; declared demand including helper reserve exceeds the numeric budget."
 	case ResourceFallbackGraph:
-		return "Using deprecated legacy size admission; commit measured requests/limits in git: the declared resource graph cannot be bounded."
+		return "legacy size admission: commit measured requests/limits in git; the declared resource graph cannot be bounded."
 	case ResourceFallbackVM:
-		return "Using deprecated legacy size admission; commit measured requests/limits in git: VM CPU or memory declarations are unavailable."
+		return "legacy size admission: commit measured requests/limits in git; VM CPU or memory declarations are unavailable."
 	case ResourceFallbackMemory:
-		return "Using deprecated legacy size admission; commit measured requests/limits in git: a pod or VM container lacks a positive declared memory limit."
+		return "legacy size admission: commit measured requests/limits in git; a pod or VM container lacks a positive declared memory limit."
 	case ResourceFallbackRequests:
-		return "Using deprecated legacy size admission; commit measured requests/limits in git: a pod container lacks positive declared CPU/memory requests."
+		return "legacy size admission: commit measured requests/limits in git; a pod container lacks positive declared CPU/memory requests."
 	default:
 		return ""
 	}

@@ -40,7 +40,7 @@ func TestAdmissionHoldToolKeepsOrdinaryWorkQueued(t *testing.T) {
 		t.Fatalf("hold changed queued run: %+v %v", run, err)
 	}
 	shown, reason := control.observeScheduling(t.Context(), run, nil, false)
-	if shown.State != "queued" || !strings.Contains(shown.Message, "admission held by admin: release qualification, until ") || !strings.Contains(reason, "admission held by admin: release qualification, until ") {
+	if shown.State != "queued" || !strings.Contains(shown.Message, "admission held by admin: release qualification, until ") || !strings.Contains(reason, "queue held by admin: release qualification, until ") {
 		t.Fatalf("hold reason=%q observation=%+v", reason, shown)
 	}
 	value, err = control.Run(t.Context(), actor, run.ID)
@@ -48,7 +48,7 @@ func TestAdmissionHoldToolKeepsOrdinaryWorkQueued(t *testing.T) {
 		t.Fatal(err)
 	}
 	detail := value.(RunDetailResponse)
-	if detail.Run.DisplayStatus != model.DisplayQueued || detail.Run.DisplayReason != reason {
+	if detail.Run.DisplayStatus != model.DisplayQueued || detail.Run.DisplayReason != displayFailureText(reason) {
 		t.Fatal("hold missing from detail reason", detail.Run.DisplayStatus, detail.Run.DisplayReason)
 	}
 	value, err = control.CallTool(t.Context(), actor, "run_list", json.RawMessage(`{"status":"queued"}`))
@@ -56,7 +56,7 @@ func TestAdmissionHoldToolKeepsOrdinaryWorkQueued(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := value.(api.RunListResponse).Runs.([]model.Run)
-	if len(rows) != 1 || rows[0].DisplayStatus != model.DisplayQueued || rows[0].DisplayReason != reason {
+	if len(rows) != 1 || rows[0].DisplayStatus != model.DisplayQueued || rows[0].DisplayReason != displayFailureText(reason) {
 		t.Fatal("hold missing from list reason", rows)
 	}
 

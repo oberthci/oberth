@@ -967,13 +967,13 @@ UPDATE runs
 SET status = ?, phase = ?,
     tested_sha = CASE WHEN ? = '' THEN tested_sha ELSE ? END,
     base_sha = CASE WHEN ? = '' THEN base_sha ELSE ? END,
-    failed_burn = ?, failed_step = ?, error = ?, finished_at = ?, updated_at = ?
+    failed_burn = ?, failed_step = ?, error = ?, reason = CASE WHEN ? = '' THEN reason ELSE reason || char(10) || 'oberth failure: ' || ? END, finished_at = ?, updated_at = ?
 WHERE id = ? AND status IN ('queued', 'running')
 RETURNING `+runColumns,
 		result.Status, phase,
 		result.TestedSHA, result.TestedSHA,
 		result.BaseSHA, result.BaseSHA,
-		result.FailedStage, result.FailedStep, result.Error, now, now, id))
+		result.FailedStage, result.FailedStep, result.Error, result.FailureCause, result.FailureCause, now, now, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		var exists int
 		if lookupErr := tx.QueryRowContext(ctx, `SELECT count(*) FROM runs WHERE id = ?`, id).Scan(&exists); lookupErr != nil {
@@ -1367,6 +1367,13 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 	}
 	if err := scanRowNotFound(row, "Run", append(dest, extra...)...); err != nil {
 		return model.Run{}, err
+	}
+	// Decode only terminal server metadata; leave retry/operator provenance intact.
+	if value.Status == model.RunFailed {
+		if index := strings.LastIndex(value.Reason, "\noberth failure: "); index >= 0 {
+			value.FailureCause = value.Reason[index+len("\noberth failure: "):]
+			value.Reason = value.Reason[:index]
+		}
 	}
 	value.AutoRetryOf = automaticRetryOrigin(value.Reason)
 	value.AutoRetriedBy = automaticRetrySuccessor(value.Reason)

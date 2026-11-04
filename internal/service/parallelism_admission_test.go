@@ -61,7 +61,7 @@ spec:
 	api := &API{admission: &Scheduler{admission: g}}
 	runs := []model.Run{{ID: r.runID, DisplayReason: "Priority normal: ordinary run."}}
 	api.applyResourceMessages(t.Context(), runs)
-	if !strings.Contains(runs[0].ResourceMessage, "effective concurrency: 4 pods") || runs[0].DisplayReason != "Priority normal: ordinary run." {
+	if !strings.Contains(runs[0].ResourceMessage, "up to 4 pods at once") || runs[0].DisplayReason != "Priority normal: ordinary run." {
 		t.Fatalf("missing separate concurrency notice: %+v", runs[0])
 	}
 }
@@ -76,7 +76,7 @@ func TestParallelismNoticeSurvivesCreateRecovery(t *testing.T) {
 	if _, err := f.scheduler.restoreCreateGrant(run, nil); err != nil {
 		t.Fatal(err)
 	}
-	if message := f.scheduler.ResourceAdmissionMessage(run.ID); !strings.Contains(message, "effective concurrency: 4 pods") || !strings.Contains(message, "item count is unknown") || !strings.Contains(message, "full inner fan-out demand") {
+	if message := f.scheduler.ResourceAdmissionMessage(run.ID); !strings.Contains(message, "up to 4 pods at once") || !strings.Contains(message, "item count is unknown") || !strings.Contains(message, "full inner fan-out demand") {
 		t.Fatalf("restored concurrency missing: %q", message)
 	}
 }

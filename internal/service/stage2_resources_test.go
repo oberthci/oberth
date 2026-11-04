@@ -27,7 +27,7 @@ func TestStage2DeclaredBudgetNeverUsesSize(t *testing.T) {
 
 func TestStage2LegacyFallbackDeprecated(t *testing.T) {
 	message := model.ResourceFallbackRequests.Message()
-	if !strings.Contains(strings.ToLower(message), "deprecated") || !strings.Contains(message, "git") {
+	if !strings.Contains(strings.ToLower(message), "legacy size admission:") || !strings.Contains(message, "git") {
 		t.Fatalf("missing deprecation guidance: %s", message)
 	}
 }

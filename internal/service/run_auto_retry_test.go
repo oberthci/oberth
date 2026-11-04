@@ -94,7 +94,7 @@ func TestInfrastructureAutoRetryUsesAllFailureEvidence(t *testing.T) {
 func TestAutomaticRetryPresentationPreservesRawFailureAndShowsAmber(t *testing.T) {
 	raw := model.Run{ID: "old", Status: model.RunFailed, Phase: "infrastructure", Error: "executor identity failed", AutoRetriedBy: "new-retry"}
 	view := presentationRun(raw)
-	if view.Status != model.RunFailed || view.Error != raw.Error || view.DisplayStatus != "infra-retried" || !strings.Contains(view.DisplayReason, "infra error, retried") {
+	if view.Status != model.RunFailed || view.Error != raw.Error || view.DisplayStatus != "infra-retried" || !strings.Contains(view.DisplayReason, "retried as") {
 		t.Fatal("lost retry cause or raw status", view)
 	}
 	if got := presentationRun(model.Run{Status: model.RunInterrupted, SupersededBy: "new"}); got.Status != model.RunInterrupted || got.DisplayStatus != "superseded" {

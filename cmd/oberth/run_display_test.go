@@ -26,11 +26,11 @@ func TestCLIDisplayRunStatusCombinesCancelledCauses(t *testing.T) {
 		}
 	}
 	var output strings.Builder
-	if err := renderActiveRuns(&output, []remoteActiveRun{{remoteRun: remoteRun{ID: "run-id", Ref: "main", Status: "waiting"},
+	if err := renderActiveRuns(&output, []remoteActiveRun{{remoteRun: remoteRun{ID: "run-id", Ref: "main", Status: "waiting", DisplayReason: "waiting for capacity"},
 		Scheduling: &model.RunScheduling{Message: "Waiting for capacity."}}}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "queued") || strings.Contains(output.String(), "waiting  ") || !strings.Contains(output.String(), "Waiting for capacity.") {
+	if !strings.Contains(output.String(), "queued") || strings.Contains(output.String(), "waiting  ") || !strings.Contains(output.String(), "waiting for capacity") {
 		t.Fatalf("active output = %q", output.String())
 	}
 }

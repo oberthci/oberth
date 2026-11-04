@@ -154,7 +154,7 @@ func TestQueuePriorityToolsAdminOnlyAuditedAndGated(t *testing.T) {
 		t.Fatal(err)
 	}
 	shown := value.(model.Run)
-	if shown.Priority != model.PriorityHighest || !strings.Contains(shown.DisplayReason, "highest") || !strings.Contains(shown.DisplayReason, "release blocker") {
+	if shown.Priority != model.PriorityHighest || !strings.Contains(shown.DisplayReason, "highest") || !strings.Contains(shown.PriorityReason, "release blocker") {
 		t.Fatalf("bump display=%+v", shown)
 	}
 	denied := errors.New("audit gate refused")
@@ -357,11 +357,11 @@ func TestQueuePriorityToolRefusesGrantedBeforeStartIsPersisted(t *testing.T) {
 func TestPriorityPresentationUsesActivePriorityAndKeepsTerminalCause(t *testing.T) {
 	now := time.Now()
 	run := model.Run{Status: model.RunQueued, Priority: model.PriorityHigh, PriorityReason: "RC", QueuedAt: now}
-	if shown := presentationRunAt(run, now); shown.DisplayReason != "Priority high: RC." || shown.PriorityReason != "RC" {
+	if shown := presentationRunAt(run, now); shown.DisplayReason != "priority high · next in line" || shown.PriorityReason != "RC" {
 		t.Fatalf("active display=%+v", shown)
 	}
 	run.Status, run.Phase, run.Reason = model.RunInterrupted, model.PhaseCancelled, "cancelled by admin: obsolete"
-	if shown := presentationRunAt(run, now); shown.DisplayReason != run.Reason || shown.PriorityReason != "RC" {
+	if shown := presentationRunAt(run, now); shown.DisplayReason != strings.TrimPrefix(run.Reason, "cancelled ") || shown.PriorityReason != "RC" {
 		t.Fatalf("terminal display=%+v", shown)
 	}
 }

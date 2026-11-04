@@ -75,7 +75,7 @@ func TestSchedulingObservationIsBoundedAndReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(observation.Nodes) != 16 || !observation.Truncated || len(observation.Pods) != 1 || observation.Message != observation.Pods[0].Message || observation.Pods[0].Reason != "Unschedulable" || !strings.HasPrefix(observation.Pods[0].Message, "Pending: Insufficient cpu") {
+	if len(observation.Nodes) != 16 || !observation.Truncated || len(observation.Pods) != 1 || observation.Message != observation.Pods[0].Message || observation.Pods[0].Reason != "Unschedulable" || !strings.HasPrefix(observation.Pods[0].Message, "pod pending: insufficient cpu") {
 		t.Fatalf("observation = %#v", observation)
 	}
 	body, _ := json.Marshal(observation)
@@ -224,7 +224,7 @@ func TestUnschedulablePodReportsItsRequest(t *testing.T) {
 		}}},
 	}
 	got := podSchedulingReason(pod)
-	if got.Reason != "Unschedulable" || !strings.Contains(got.Message, "requests 8Gi memory") {
+	if got.Reason != "Unschedulable" || !strings.Contains(got.Message, "8Gi requested") {
 		t.Fatalf("reason = %+v", got)
 	}
 }

@@ -114,7 +114,7 @@ func TestParallelismNoticeRetainedWithWorkflowTiming(t *testing.T) {
 		t.Fatal("missing durable resource metadata")
 	}
 	retained := recorder.workflows[0]
-	if message := retained.Resources.Message(retained.RunID); !strings.Contains(message, "effective concurrency: 4 pods") {
+	if message := retained.Resources.Message(retained.RunID); !strings.Contains(message, "up to 4 pods at once") {
 		t.Fatalf("concurrency notice lost: %q", message)
 	}
 }

@@ -3,12 +3,10 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 const source = readFileSync(process.env.DASHBOARD_SCRIPT || new URL('../internal/api/static/app.js', import.meta.url), 'utf8');
-const sandbox = vm.createContext({URLSearchParams, console, Map, Set, Date, location:{pathname:'/runs'}, document:{body:{dataset:{version:'test'}},getElementById(){return null}}, localStorage:{getItem(){return null},setItem(){}}, setInterval(){},clearInterval(){}});
+const intervals = [];
+const sandbox = vm.createContext({URLSearchParams, console, Map, Set, Date, location:{pathname:'/runs'}, document:{body:{dataset:{version:'test'}},getElementById(){return null}}, localStorage:{getItem(){return null},setItem(){}}, setInterval(fn,ms){intervals.push({fn,ms});return intervals.length},clearInterval(){}});
 vm.runInContext(source.slice(0, source.indexOf('/* ---------- events ---------- */')), sandbox);
 const run = code => vm.runInContext(code, sandbox);
-const legacyTitle = run(`queueSizeTitle({Scheduling:{admission:{size:'L',weight:3,capacity:8,legacy_resources:{cpu_milli:3000,memory_bytes:8589934592}}}})`);
-assert.match(legacyTitle, /legacy size L/, 'queued legacy runs must be identifiable');
-assert.match(legacyTitle, /fixed reservation 3000m CPU/, 'legacy tooltip must show its fixed charge');
 const numericCapacity = run(`capacityStatusCard({configuration:{max_concurrent_jobs:4,source:'config'},used:0,capacity:8,numeric_budget:{cpu_used_milli:7000,cpu_budget_milli:8000,memory_used_bytes:1073741824,memory_budget_bytes:17179869184}})`);
 assert.match(numericCapacity, /CPU 7000m\/8000m/, 'capacity card must expose numeric CPU budget even when weight use is zero');
 assert.match(numericCapacity, /memory/, 'capacity card must expose the memory budget');
@@ -19,7 +17,7 @@ run(`
     const row={ID,RepoID:1,Ref:'main',RefKind:'branch',Status:'passed',StartedAt:'2026-11-01T10:00:00Z',FinishedAt:'2026-11-01T10:01:00Z',...extra};
     if(['running','queued'].includes(row.Status)) {
       row.priority_class ??= 'normal'; row.priority_reason ??= 'ordinary run';
-      row.display_reason ??= 'Priority '+row.priority_class+': '+row.priority_reason+'.';
+      row.display_reason ??= '';
     }
     return row;
   };
@@ -225,15 +223,14 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'R4'
 }
 
 if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'R5A') {
-  for (const [extra, expected] of [[{Trigger:'schedule',ScheduleEntry:'nightly'},'schedule: nightly'],[{Release:true},'release'],[{},''],[{Error:'execution failed'},'execution failed'],[{display_reason:'KVM preflight running'},'KVM preflight running']]) {
+  for (const [extra, expected] of [[{Trigger:'schedule',ScheduleEntry:'nightly'},''],[{Release:true},''],[{},''],[{Error:'execution failed'},''],[{display_reason:'KVM preflight'},'KVM preflight']]) {
     sandbox.rowExtra=extra;
     run(`rowFixture=makeRun('row-message',{Status:'running',FinishedAt:null,...rowExtra})`);
-    assert.equal(run('runMessageCell(rowFixture)'),expected,'R5A: priority-only display reason must not replace the row message fallback');
+    assert.equal(run('runMessageCell(rowFixture)'),expected,'server reason is authoritative');
     const tooltip=[...run('runRow(rowFixture)').matchAll(/<div class="clip" title="([^"]*)">/g)].at(-1)[1];
-    assert.equal(tooltip,expected,'R5A: tooltip uses the same priority suppression and fallback');
+    assert.equal(tooltip,expected,'tooltip shows the complete server message');
   }
-  assert.equal(run(`runMessage(makeRun('detail',{Status:'running'}))`),'Priority normal: ordinary run.','detail presentation keeps the original priority reason');
-  console.log('R5A passed: real active priority projection, row/tooltip fallbacks and preserved execution reasons');
+  console.log('R5A passed: server message only, including empty messages');
 }
 if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'R5B') {
   run(`
@@ -261,17 +258,17 @@ run(`state.repos=[{ID:1,Name:'ours'}];`);
 const badgeRow = run(`runRow({ID:'labels',RepoID:1,Ref:'v1',RefKind:'tag',Status:'passed',Release:true,Trigger:'schedule',ScheduleEntry:'nightly',priority_class:'highest',priority_reason:'urgent',ConcurrencyGroup:'deploy',Scheduling:{admission:{group:'deploy'}}})`);
 assert.ok(badgeRow.includes('<div class="repo-name">ours</div>'));
 assert.ok(!badgeRow.includes('class="v4b') && !badgeRow.includes('nightly') && !badgeRow.includes('deploy'),'list/history rows have no inline badges');
-assert.ok(badgeRow.includes('priority highest') && badgeRow.includes('urgent'),'priority is visible in list/history messages');
-assert.ok(run(`prioritySummary({priority_class:'high',priority_reason:'urgent',priority_requested_by:'operator<unsafe>',QueuePosition:2})`).includes('requested by operator<unsafe>'));
-assert.ok(run(`runRow({ID:'priority',RepoID:1,Ref:'main',Status:'queued',priority_class:'high',priority_requested_by:'operator<unsafe>',QueuePosition:2})`).includes('operator&lt;unsafe&gt;'),'requester metadata is escaped');
-assert.equal(run(`runMessageCell({Status:'passed',Release:true})`),'release');
-assert.equal(run(`runMessageCell({Status:'passed',Trigger:'schedule',ScheduleEntry:'nightly<unsafe>'})`),'schedule: nightly&lt;unsafe&gt;');
-assert.equal(run(`runMessageCell({Status:'passed',priority_class:'highest',ConcurrencyGroup:'deploy'})`),'priority highest');
+assert.ok(!badgeRow.includes('priority highest') && !badgeRow.includes('urgent'),'priority metadata stays in detail');
+assert.ok(run(`prioritySummary({priority_class:'high',priority_reason:'urgent',priority_requested_by:'operator<unsafe>',display_reason:'priority high · operator<unsafe>',QueuePosition:2})`).includes('requested by operator<unsafe>'));
+assert.ok(run(`runRow({ID:'priority',RepoID:1,Ref:'main',Status:'queued',priority_class:'high',priority_requested_by:'operator<unsafe>',display_reason:'priority high · operator<unsafe>',QueuePosition:2})`).includes('operator&lt;unsafe&gt;'),'requester metadata is escaped');
+assert.equal(run(`runMessageCell({Status:'passed',Release:true})`),'');
+assert.equal(run(`runMessageCell({Status:'passed',Trigger:'schedule',ScheduleEntry:'nightly<unsafe>',display_reason:'schedule nightly<unsafe>'})`),'schedule nightly&lt;unsafe&gt;');
+assert.equal(run(`runMessageCell({Status:'passed',priority_class:'highest',ConcurrencyGroup:'deploy'})`),'');
 for(const extra of [`display_reason:'existing reason'`, `Error:'existing reason'`, `FailedStep:'test'`, `Reason:'existing reason'`]) {
-  assert.equal(run(`runMessageCell({Status:'failed',Release:true,Trigger:'schedule',ScheduleEntry:'nightly',${extra}})`), extra.startsWith('FailedStep')?'failed at test':'existing reason');
+  assert.equal(run(`runMessageCell({Status:'failed',Release:true,Trigger:'schedule',ScheduleEntry:'nightly',${extra}})`), extra.startsWith('display_reason')?'existing reason':'');
 }
 assert.equal(run(`runMessageCell({Status:'queued',Release:true,Trigger:'schedule',ScheduleEntry:'nightly',display_reason:'concurrency group deploy busy (held by run 0123456789ab)',Scheduling:{state:'waiting',admission:{group_holder:true,group:'deploy'}}})`),'concurrency group deploy busy (held by run 0123456789ab)');
-assert.equal(run(`runMessageCell({Status:'queued',Scheduling:{state:'queued',message:'Awaiting scheduler claim.'}})`),'Awaiting scheduler claim.','the scheduling message is the fallback reason');
+assert.equal(run(`runMessageCell({Status:'queued',Scheduling:{state:'queued',message:'Awaiting scheduler claim.'}})`),'','detail observation does not become a row message');
 assert.ok(run(`releaseBadge({Release:true,priority_class:'highest',priority_reason:'urgent'})`).includes('highest priority'),'detail priority and reason remain available');
 console.log('R4B passed: label-free rows, empty-message fallbacks, existing reasons and detail badges');
 
@@ -357,3 +354,45 @@ run(`{
 await run('renderRuns(state.routeSeq)');
 assert.deepEqual(ids(), ['cache-bumped','cache-high','cache-normal'], 'a stale scoped active order must not interleave effective priority classes');
 console.log('Priority classes remain grouped when the scoped active request fails after a priority change');
+
+// Server messages are the entire row message, including empty messages.
+for (const status of ['queued','running','passed','failed','cancelled','superseded','infra-retried']) {
+ sandbox.contractRun={ID:'contract',RepoID:1,Ref:'main',Status:status,display_status:status,display_reason:`message ${status}`,resource_message:'hidden advice',priority_class:'highest',priority_reason:'hidden priority',Scheduling:{message:'hidden observation'}};
+ assert.equal(run('rowMessage(contractRun)'),`message ${status}`);
+ sandbox.contractRun.display_reason='';
+ assert.equal(run('rowMessage(contractRun)'),'');
+}
+assert.match(run('runsTable([])'),/<div>status<\/div><div>run<\/div><div>when<\/div><div>message<\/div>/);
+const clockNow=new Date(), yesterday=new Date(clockNow.getTime()-86400000);
+sandbox.clockNow=clockNow;sandbox.yesterday=yesterday;
+assert.equal(run(`whenCell({display_status:'queued'})`),'');
+assert.match(run(`whenCell({display_status:'passed',StartedAt:clockNow,FinishedAt:new Date(clockNow.getTime()+62000)})`),/1m 2s/);
+assert.match(run(`whenCell({display_status:'passed',StartedAt:clockNow,FinishedAt:clockNow})`),/started at \d\d:\d\d/);
+assert.match(run(`whenCell({display_status:'passed',StartedAt:yesterday,FinishedAt:clockNow})`),new RegExp(yesterday.getFullYear()));
+assert.match(run(`whenCell({display_status:'running',StartedAt:clockNow})`),/data-started=/);
+assert.match(run(`whenCell({display_status:'cancelled',QueuedAt:clockNow})`),/queued at/);
+
+// Exercise the installed interval with a fake clock and DOM cell, without a poll.
+const liveTimer = intervals.find(timer => timer.ms === 1000);
+assert.ok(liveTimer, 'live duration interval must be installed');
+const timerStart = Date.parse('2026-11-04T09:00:00Z');
+const timerCell = {dataset:{started:new Date(timerStart).toISOString()},textContent:''};
+sandbox.document.querySelectorAll = selector => {assert.equal(selector,'[data-started]');return [timerCell]};
+const savedNow = Date.now;
+try {
+ Date.now = () => timerStart + 61000;
+ liveTimer.fn();
+ assert.equal(timerCell.textContent,'1m 1s');
+ Date.now = () => timerStart + 62000;
+ liveTimer.fn();
+ assert.equal(timerCell.textContent,'1m 2s','timer advances without list polling');
+} finally { Date.now = savedNow }
+for (const status of ['running','passed','failed','cancelled','superseded','infra-retried']) {
+ sandbox.timeRun={display_status:status,StartedAt:clockNow.toISOString(),FinishedAt:status==='running'?null:new Date(clockNow.getTime()+62000).toISOString()};
+ assert.match(run('whenCell(timeRun)'),/started at \d\d:\d\d/);
+ sandbox.timeRun.StartedAt=yesterday.toISOString();
+ assert.match(run('whenCell(timeRun)'),new RegExp(yesterday.getFullYear()));
+ if (['cancelled','superseded'].includes(status)) assert.match(run('whenCell(timeRun)'),/^<span><\/span>/);
+}
+assert.match(run(`runRow({ID:'escaped',RepoID:1,Ref:'<script>',SHA:'sha"<unsafe>',Actor:'actor"<unsafe>',display_status:'failed',display_reason:'reason"<unsafe>'})`),/reason&quot;&lt;unsafe&gt;/);
+console.log('Run-list contract passed: seven states, today/older start lines, live timer and escaping');

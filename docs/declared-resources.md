@@ -76,8 +76,8 @@ remain unknown rather than reporting zero missing declarations.
 The existing run message reports the number of incomplete declarations and
 `oberth run resources --run <id> --include-failed`. This notice is returned in
 `resource_message`, separately from the exact status vocabulary in
-`display_reason`. The dashboard appends it to the message cell after its usual
-status, schedule or release message; restart-warning styling remains intact.
+`display_reason`. It appears in the run detail summary and CLI detail output.
+Run lists omit this advice and show only the concise server `display_reason`.
 No new run-row labels are added. Counts are
 stored as optional numeric metadata in existing workflow timing JSON and read
 in indexed batches, through the read pool. Old immutable timing records stay

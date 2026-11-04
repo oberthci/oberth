@@ -101,14 +101,14 @@ before choosing a qualified selector for shared names. Token changes and
 repository selection clear history; collapse, replacement requests and auth
 generation checks discard late responses.
 
-List and history rows show only repository and ref in the run column, without
-priority, release, schedule-entry or concurrency-group badges. A `display_reason`
-that exactly equals `Priority <priority_class>: <priority_reason>.` is treated as
-empty in row messages and tooltips. Other existing message text takes precedence;
-an empty message falls back to `release` for a release run, otherwise
-`schedule: <entry>` for a named scheduled run. Priority-only text is not shown;
-queued wait reasons, including group waits, are unchanged. The `release` filter
-remains, and run-detail badges and priority reasons are unchanged.
+List and history have four uniform columns: status, run, when and message.
+The run cell shows repository and ref, with SHA and actor on hover. The message
+is the server's complete `display_reason`, including empty messages, with its
+full text on hover. Resource advice and priority provenance stay in detail.
+Queued rows have no time text. Running durations tick each second; completed
+runs retain elapsed duration. Cancelled and superseded rows show only their
+start time, or queue time if they never started. Today's starts use HH:MM;
+earlier starts include the date. Successor and retry messages remain clickable.
 
 The old `latest per ref` and `show superseded` switches are removed; their saved
 localStorage values are ignored. Status, release and repository choices still

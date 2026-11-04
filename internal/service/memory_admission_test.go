@@ -80,7 +80,7 @@ spec:
 					t.Fatal("bounded pod lost numeric admission")
 				}
 			} else {
-				if pods != nil || r.pods != nil || r.weight != 1 || !strings.Contains(runs[0].ResourceMessage, "deprecated") || !strings.Contains(runs[0].ResourceMessage, "requests") {
+				if pods != nil || r.pods != nil || r.weight != 1 || !strings.Contains(runs[0].ResourceMessage, "legacy size admission:") || !strings.Contains(runs[0].ResourceMessage, "requests") {
 					t.Fatalf("undeclared workflow lost legacy admission and warning: %+v %q", pods, runs[0].ResourceMessage)
 				}
 			}

@@ -593,7 +593,7 @@ func TestRunsActivePrintsTheQueue(t *testing.T) {
 		query = r.URL.RawQuery
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[{"ID":"run-started","Ref":"main","Status":"running","StartedAt":"2026-10-20T11:59:00Z"},` +
-			`{"ID":"run-head","Ref":"feature/xl","Status":"waiting","Scheduling":{"state":"waiting","queue_position":4,"message":"Waiting in the weighted resource admission queue. Need 12 weight; 3/20 used; queue position 4.","admission":{"state":"waiting","position":4,"size":"XL","weight":12,"used":3,"capacity":20}}},` +
+			`{"ID":"run-head","Ref":"feature/xl","Status":"waiting","display_reason":"waiting for a slot (size XL)","Scheduling":{"state":"waiting","queue_position":4,"message":"Waiting in the weighted resource admission queue. Need 12 weight; 3/20 used; queue position 4.","admission":{"state":"waiting","position":4,"size":"XL","weight":12,"used":3,"capacity":20}}},` +
 			`{"ID":"run-queued","Ref":"feature/q","Status":"queued","Scheduling":{"state":"queued","message":"Awaiting scheduler claim.","queue_position":7}},{"ID":"run-scoped","Status":"queued","Scheduling":{"state":"queued"}}]`))
 	}))
 	defer server.Close()
@@ -610,7 +610,7 @@ func TestRunsActivePrintsTheQueue(t *testing.T) {
 	if started < 0 || head < started || queued < head {
 		t.Fatalf("order not preserved:\n%s", body)
 	}
-	for _, want := range []string{"XL/12", "Need 12 weight; 3/20 used", "4    run-head", "7    run-queued", "-    run-scoped"} {
+	for _, want := range []string{"XL/12", "waiting for a slot (size XL)", "4    run-head", "7    run-queued", "-    run-scoped"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("output missing %q:\n%s", want, body)
 		}

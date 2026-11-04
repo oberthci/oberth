@@ -401,6 +401,7 @@ type WorkflowRequest struct {
 }
 
 type JobResult struct {
+	FailureCause string `json:"-"`
 	// Includes earlier workflow attempts even when the latest display row is queued.
 	ObservedStepStart bool
 	// Reobserve pins a fallback terminal read to this observation's immutable

@@ -59,9 +59,9 @@ func TestRunDisplayReasonsCoverTerminalCausesAndTrustedPreflight(t *testing.T) {
 		run  model.Run
 		want string
 	}{
-		{model.Run{Status: model.RunInterrupted, Phase: model.PhaseCancelled, Reason: "cancelled by owner: no longer needed"}, "cancelled by owner: no longer needed"},
+		{model.Run{Status: model.RunInterrupted, Phase: model.PhaseCancelled, Reason: "cancelled by owner: no longer needed"}, "by owner: no longer needed"},
 		{model.Run{Status: model.RunInterrupted, Reason: "oberth restarted"}, "server restart, retry needed"},
-		{model.Run{Status: model.RunFailed, Error: "controller unavailable"}, "run failed: controller unavailable"},
+		{model.Run{Status: model.RunFailed, Error: "controller unavailable"}, "infrastructure error: controller unavailable"},
 	} {
 		if got := presentationRun(tc.run).DisplayReason; got != tc.want {
 			t.Fatalf("display reason for %+v = %q, want %q", tc.run, got, tc.want)
@@ -262,7 +262,7 @@ func TestDisplayReasonUsesDurableCauseNotSHAOrTextHeuristics(t *testing.T) {
 		{"superseded by newer run", "interrupted", "superseded by aaaaaaaa"},
 		{"re-queued after restart", "interrupted", "server restart, re-queued as bbbbbbbbbbbb"},
 		{store.KVMRestartRetryReason, "interrupted", "server restart, re-queued as bbbbbbbbbbbb"},
-		{"cancelled by owner: restart later", "cancelled", "cancelled by owner: restart later"},
+		{"cancelled by owner: restart later", "cancelled", "by owner: restart later"},
 		{"scheduler stopped", "interrupted", "server restart, retry needed"},
 		{"unrelated reason", "interrupted", "server restart, retry needed"},
 	} {
@@ -281,7 +281,7 @@ func TestDisplayReasonUsesDurableCauseNotSHAOrTextHeuristics(t *testing.T) {
 		run := model.Run{Status: model.RunRunning, Phase: phase, StartedAt: &now}
 		wantReason, wantUnadmitted := "", "queued"
 		if phase == "publishing" {
-			wantReason, wantUnadmitted = "upstream publication pending", "running"
+			wantReason, wantUnadmitted = "publishing to upstream", "running"
 		}
 		if got := presentationRun(run); got.DisplayStatus != "running" || got.DisplayReason != wantReason {
 			t.Fatalf("phase %s: %+v", phase, got)

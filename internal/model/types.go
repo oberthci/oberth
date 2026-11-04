@@ -128,6 +128,8 @@ type RepositorySpec struct {
 }
 
 type Run struct {
+	// FailureCause is private server-classified presentation metadata.
+	FailureCause string `json:"-"`
 	// Read-side identity and admission context; never part of the durable run row.
 	Repo              string
 	Superseded        bool               `json:"superseded"`
@@ -209,6 +211,10 @@ type RunSpec struct {
 }
 
 type RunResult struct {
+	// FailureCause is server-classified summary metadata encoded alongside the existing reason.
+	// The complete error stays in Error. It never changes terminal status.
+	FailureCause string `json:"-"`
+
 	// AutoRetryInfrastructure is set only by the scheduler after workload settlement and failure checks.
 	AutoRetryInfrastructure bool `json:"-"`
 

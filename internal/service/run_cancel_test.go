@@ -159,7 +159,7 @@ func TestRunCancelWaitingRunReleasesItsAdmissionReservation(t *testing.T) {
 	cancelled := fixture.awaitTerminal(t, head.ID)
 	assertCancelled(t, cancelled, cancelAdmin.Identity, "wrong size")
 	shown := fixture.control.presentationRun(t.Context(), cancelled)
-	if shown.StartedAt != nil || shown.DisplayStatus != "cancelled" || shown.DisplayReason != "cancelled by "+cancelAdmin.Identity+": wrong size" {
+	if shown.StartedAt != nil || shown.DisplayStatus != "cancelled" || shown.DisplayReason != "by "+cancelAdmin.Identity+": wrong size" {
 		t.Fatalf("cancel during admission: %+v", shown)
 	}
 	fixture.awaitNoPendingCancellations(t)

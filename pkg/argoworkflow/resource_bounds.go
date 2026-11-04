@@ -13,6 +13,15 @@ import (
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
+// ResourceCeilingError preserves the full refusal and a structured short cause.
+type ResourceCeilingError struct {
+	Detail string
+	Cause  string
+}
+
+func (e *ResourceCeilingError) Error() string           { return e.Detail }
+func (e *ResourceCeilingError) RunFailureCause() string { return "infrastructure error: " + e.Cause }
+
 // ResourceCeiling bounds each pipeline container's requests and limits. The
 // durable administrator grant selects the ceiling; pipeline size annotations
 // and resource history do not select or raise it. VM grants remain separate.
@@ -124,7 +133,10 @@ func validateResourceRequirements(wf *wfv1.Workflow, repo string, ceiling corev1
 					return fmt.Errorf("repo %s %s: resources.%s.%s must not be negative", repo, location, tier.name, name)
 				}
 				if q.Cmp(bound) > 0 {
-					return fmt.Errorf("repo %s %s: resources.%s.%s %s exceeds administrator %s ceiling %s; an administrator must change the resource grant, or reduce the declaration in git", repo, location, tier.name, name, q.String(), maximum, bound.String())
+					return &ResourceCeilingError{
+						Detail: fmt.Sprintf("repo %s %s: resources.%s.%s %s exceeds administrator %s ceiling %s; an administrator must change the resource grant, or reduce the declaration in git", repo, location, tier.name, name, q.String(), maximum, bound.String()),
+						Cause:  fmt.Sprintf("%s %s %s over ceiling %s", name, map[string]string{"requests": "request", "limits": "limit"}[tier.name], q.String(), bound.String()),
+					}
 				}
 			}
 		}
