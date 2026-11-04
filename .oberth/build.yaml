@@ -159,7 +159,7 @@ spec:
 
   # Refuse retired branding in every tracked file, including fixtures and docs.
   - name: generic-names
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 95 # remeasure: max(60s censored cap, 63s pod span) x1.5, rounded up
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -272,7 +272,7 @@ spec:
 
   # [link-go] symlink Go toolchain from image into shared tools directory
   - name: link-go
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 90 # remeasure: censored 60s pod deadline x1.5; includes startup and wait
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -868,7 +868,7 @@ spec:
   # catch. Style-only findings (cosmetic, e.g. backtick notation) are
   # excluded.
   - name: shellcheck
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 95 # remeasure: observed 63s pod span x1.5, rounded up
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -924,7 +924,7 @@ spec:
 
   # [go-vet-./...]
   - name: vet
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 93 # remeasure: observed 62s pod span x1.5; failed attempt retained
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -1630,7 +1630,7 @@ spec:
   #   oberth.Cmd("helm-contract", "./hack/test-chart.sh"))
   #   ...).After("lint")
   - name: chart
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 65 # remeasure: observed 43s pod span x1.5, rounded up
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -1909,7 +1909,7 @@ spec:
   # target set so a platform-specific type mismatch (e.g. syscall.Statfs_t.Bsize
   # int64 vs uint32) cannot pass CI and burn only at release time (#699).
   - name: build-darwin-amd64
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 65 # remeasure: observed 43s pod span x1.5, rounded up
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -1974,7 +1974,7 @@ spec:
   # ---- build-darwin-arm64 burn (single step) ----
   # Branch verification of the darwin/arm64 release target (#699).
   - name: build-darwin-arm64
-    activeDeadlineSeconds: 62
+    activeDeadlineSeconds: 75 # remeasure: observed 50s pod span x1.5
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"

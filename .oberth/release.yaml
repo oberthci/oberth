@@ -2138,7 +2138,7 @@ spec:
           cpu: 719m
           memory: 640Mi
   - name: copy-test-tools
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 143 # remeasure: observed 95s release pod span x1.5, rounded up
     automountServiceAccountToken: false
     metadata:
       annotations:
