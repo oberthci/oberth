@@ -84,6 +84,10 @@ func TestModuleRepositoryLockWaitHonorsContext(t *testing.T) {
 	lock.Lock()
 	defer lock.Unlock()
 	operations := map[string]func(context.Context) error{
+		"root license": func(ctx context.Context) error {
+			_, _, err := cache.ModuleRootLicense(ctx, "example", repository.initialSHA)
+			return err
+		},
 		"identity": func(ctx context.Context) error {
 			_, err := cache.ModuleVersionSnapshot(ctx, "example", "go.example.test/module", "", "v1.0.0", false)
 			return err
