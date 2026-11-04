@@ -149,7 +149,7 @@ func (s *API) readRunResources(ctx context.Context, raw json.RawMessage) (any, e
 			}
 		}
 	}
-	for _, step := range measured.BuildWithSafety(history.Observations, declarations, history.SafetyObservations, history.Dispositions) {
+	for _, step := range measured.BuildWithSafety(history.Observations, declarations, history.SafetyObservations, history.Dispositions, history.AttemptGaps) {
 		if a.Stage != "" && step.Stage != measured.NormalizeTemplate(a.Stage) {
 			continue
 		}

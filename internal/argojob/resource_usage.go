@@ -24,6 +24,7 @@ import (
 type ResourceUsageRecorder interface {
 	RecordStepResourceUsage(context.Context, []model.StepResourceUsage) error
 	RecordPodResourceDisposition(context.Context, model.PodResourceDisposition) error
+	RecordResourceAttempts(context.Context, model.ResourceAttemptInventory) error
 }
 type ResourceUsageSource interface {
 	Interval() time.Duration
@@ -113,7 +114,7 @@ func (c *Controller) resourceSession(ctx context.Context, runID string) *resourc
 	return s
 }
 func (s *resourceSession) update(wf *wfv1.Workflow) {
-	if s == nil || wf == nil || len(wf.Status.Nodes) > 2048 {
+	if s == nil || wf == nil {
 		return
 	}
 	s.mu.Lock()
@@ -137,6 +138,11 @@ func (s *resourceSession) snapshot() *wfv1.Workflow {
 	if wf == nil {
 		return nil
 	}
+	if len(wf.Status.Nodes) > 2048 {
+		// The sampler only reads metadata on this path and records incomplete
+		// inventory; avoid copying an oversized immutable Workflow response.
+		return wf
+	}
 	return wf.DeepCopy()
 }
 func (s *resourceSession) finish() {
@@ -148,7 +154,14 @@ func (s *resourceSession) finish() {
 }
 
 func (c *Controller) sampleResourceUsageWithState(ctx context.Context, wf *wfv1.Workflow, runID string, finished map[string]time.Time) error {
-	if c.verifyOwnership(wf, runID) != nil || wf.UID == "" || len(wf.Status.Nodes) > 2048 {
+	if c.verifyOwnership(wf, runID) != nil || wf.UID == "" {
+		return nil
+	}
+	inventory := resourceAttemptInventory(wf, runID)
+	if err := c.resourceRecorder.RecordResourceAttempts(ctx, inventory); err != nil {
+		return err
+	}
+	if len(wf.Status.Nodes) > 2048 {
 		return nil
 	}
 	pods, err := c.kube.CoreV1().Pods(wf.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "workflows.argoproj.io/workflow=" + wf.Name, Limit: 2048})
@@ -161,6 +174,16 @@ func (c *Controller) sampleResourceUsageWithState(ctx context.Context, wf *wfv1.
 	byName := make(map[string]int, min(len(pods.Items), 2048))
 	for i := range pods.Items[:min(len(pods.Items), 2048)] {
 		byName[pods.Items[i].Name] = i
+	}
+	for j := range inventory.Attempts {
+		a := &inventory.Attempts[j]
+		node := wf.Status.Nodes[a.NodeID]
+		if at, ok := byName[PodName(wf, node)]; ok && ownedResourcePod(wf, node, &pods.Items[at]) {
+			a.PodUID = string(pods.Items[at].UID)
+		}
+	}
+	if err := c.resourceRecorder.RecordResourceAttempts(ctx, inventory); err != nil {
+		return err
 	}
 	workflowSize := observedResourceWorkflowSize(wf)
 	var fragmentLock argoworkflow.Lock
@@ -225,8 +248,7 @@ func (c *Controller) sampleResourceUsageWithState(ctx context.Context, wf *wfv1.
 		}
 		// Validate ownership before requesting even a node scrape. Observe repeats
 		// all bindings and verifies each current container/cgroup incarnation.
-		owner := metav1.GetControllerOf(pod)
-		if owner == nil || owner.APIVersion != "argoproj.io/v1alpha1" || owner.Kind != "Workflow" || owner.UID != wf.UID || owner.Name != wf.Name || pod.Namespace != wf.Namespace || pod.Annotations["workflows.argoproj.io/node-id"] != node.ID || pod.Annotations["workflows.argoproj.io/node-name"] != node.Name || pod.Spec.NodeName == "" {
+		if !ownedResourcePod(wf, node, pod) {
 			continue
 		}
 		binding := resourcesampler.Binding{RunID: runID, WorkflowName: wf.Name, WorkflowUID: string(wf.UID), Namespace: wf.Namespace, NodeID: node.ID, NodeName: node.Name, PodName: step.PodName, Stage: step.Stage, Step: step.Step}

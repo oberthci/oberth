@@ -80,6 +80,9 @@ WHERE d.repo_id=? ORDER BY d.run_id,d.node_id,d.pod_uid LIMIT ?`, string(payload
 		out.SafetyIncomplete = true
 		out.Dispositions = out.Dispositions[:measured.MaxRows]
 	}
+	if err := s.readResourceAttemptSafety(ctx, repoID, payload, out); err != nil {
+		return err
+	}
 	// Executed steps without any usage/disposition must not vanish. We cannot
 	// safely reconstruct a missing template or Pod identity from a final step
 	// name, so this is an explicit report-wide uncertainty fence.

@@ -185,16 +185,20 @@ func key(stage, template string) string {
 	return NormalizeTemplate(stage) + "\x00" + NormalizeTemplate(template)
 }
 func Build(values []Observation, declarations []Declaration) []Step {
-	return build(values, declarations, nil, nil)
+	return build(values, declarations, nil, nil, nil)
 }
 
 // BuildWithSafety keeps the failure/coverage population separate from displayed
 // metric quantiles. A passed-only display option cannot erase known failures.
-func BuildWithSafety(values []Observation, declarations []Declaration, safety []Observation, dispositions []model.PodResourceDisposition) []Step {
-	return build(values, declarations, safety, dispositions)
+func BuildWithSafety(values []Observation, declarations []Declaration, safety []Observation, dispositions []model.PodResourceDisposition, attemptGaps ...[]model.ResourceAttemptGap) []Step {
+	var gaps []model.ResourceAttemptGap
+	for _, population := range attemptGaps {
+		gaps = append(gaps, population...)
+	}
+	return build(values, declarations, safety, dispositions, gaps)
 }
 
-func build(values []Observation, declarations []Declaration, safety []Observation, dispositions []model.PodResourceDisposition) []Step {
+func build(values []Observation, declarations []Declaration, safety []Observation, dispositions []model.PodResourceDisposition, gaps []model.ResourceAttemptGap) []Step {
 	groups := map[string][]Observation{}
 	for _, o := range values {
 		v := o.Usage
@@ -234,6 +238,14 @@ func build(values []Observation, declarations []Declaration, safety []Observatio
 			groups[k] = nil
 		}
 	}
+	gapGroups := map[string][]model.ResourceAttemptGap{}
+	for _, gap := range gaps {
+		k := key(gap.Stage, gap.Template)
+		gapGroups[k] = append(gapGroups[k], gap)
+		if _, exists := groups[k]; !exists {
+			groups[k] = nil
+		}
+	}
 	declared := map[string]*Declaration{}
 	for i := range declarations {
 		d := &declarations[i]
@@ -266,6 +278,14 @@ func build(values []Observation, declarations []Declaration, safety []Observatio
 				for _, d := range dispositionGroups[k] {
 					if d.Owner != "" {
 						s.OwnerRepository = d.Owner
+						break
+					}
+				}
+			}
+			if s.OwnerRepository == "" {
+				for _, gap := range gapGroups[k] {
+					if gap.Owner != "" {
+						s.OwnerRepository = gap.Owner
 						break
 					}
 				}
@@ -491,6 +511,9 @@ func build(values []Observation, declarations []Declaration, safety []Observatio
 			s.NoSuggestion = append(s.NoSuggestion, "historical requests, limits or workflow sizes differ; select a comparable history before sizing")
 		}
 		applySafety(&s, &sizing, safetyGroups[k], dispositionGroups[k], groups[k])
+		if len(gapGroups[k]) > 0 {
+			s.NoSuggestion = append(s.NoSuggestion, "server-observed attempt failed or lacks exact retained Pod/main coverage; another retry cannot supply it")
+		}
 		s.SizingAcceptance = sizing.acceptance(s.NoSuggestion)
 		if len(s.NoSuggestion) == 0 {
 			cpu := roundMargin(*s.AverageCPUNanoCores.P95, RequestMarginPercent, 10_000_000, 10_000_000) / 1_000_000

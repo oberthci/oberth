@@ -35,6 +35,7 @@ const runResourceObservationSQL = `SELECT u.observation_json,s.termination_json,
  ORDER BY u.last_observed_at DESC,u.run_id,u.node_id,u.pod_uid,u.container_id LIMIT ?`
 
 type RunResourceHistory struct {
+	AttemptGaps        []model.ResourceAttemptGap
 	SafetyObservations []measured.Observation
 	Dispositions       []model.PodResourceDisposition
 	SafetyRuns         []model.Run

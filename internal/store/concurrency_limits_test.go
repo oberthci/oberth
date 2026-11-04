@@ -96,7 +96,7 @@ func TestConcurrencyGroupMigrationPreservesLegacyGroupAndLedger(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err = s.db.Exec(`DROP TABLE IF EXISTS pod_resource_dispositions; DROP TRIGGER run_issue_trailers_immutable; ALTER TABLE runs DROP COLUMN issue_trailers; ALTER TABLE runs DROP COLUMN failure_cause; DROP TABLE deferred_branch_receives; DROP TABLE queue_cap; DROP TABLE concurrency_group_declarations; ALTER TABLE runs DROP COLUMN concurrency_limit; DELETE FROM schema_migrations WHERE id IN ('20261104120123-concurrency-limits-971dc11f4a5530e149fd22d0d6847b46','20261104130000-queue-cap','20261104160000-run-issue-trailers','20261104203255-pod-resource-dispositions-de9abcf59e57071e796e5aae3d614e3c')`); err != nil {
+	if _, err = s.db.Exec(`DROP TABLE IF EXISTS resource_attempts; DROP TABLE IF EXISTS resource_attempt_inventories; DROP TABLE IF EXISTS pod_resource_dispositions; DROP TRIGGER run_issue_trailers_immutable; ALTER TABLE runs DROP COLUMN issue_trailers; ALTER TABLE runs DROP COLUMN failure_cause; DROP TABLE deferred_branch_receives; DROP TABLE queue_cap; DROP TABLE concurrency_group_declarations; ALTER TABLE runs DROP COLUMN concurrency_limit; DELETE FROM schema_migrations WHERE id IN ('20261104120123-concurrency-limits-971dc11f4a5530e149fd22d0d6847b46','20261104130000-queue-cap','20261104160000-run-issue-trailers','20261104203255-pod-resource-dispositions-de9abcf59e57071e796e5aae3d614e3c','20261104220233-resource-attempt-inventory-53d49c721cd86410289f1448a4686d70')`); err != nil {
 		t.Fatal(err)
 	}
 	before := releaseSplitLedger(t, s.db)

@@ -68,6 +68,10 @@ func TestResourceSafetyIgnoresFailedDisplayFilterAndCatchesZeroRows(t *testing.T
 				if _, e = s.SetRunWorkflowName(t.Context(), r.ID, "workflow-test"); e != nil {
 					t.Fatal(e)
 				}
+				v := coveredResourceRow(r.ID, at)
+				if e = s.RecordResourceAttempts(t.Context(), model.ResourceAttemptInventory{RunID: v.RunID, WorkflowName: v.WorkflowName, WorkflowUID: v.WorkflowUID, Namespace: v.Namespace, Complete: true, Terminal: true, Attempts: []model.ResourceAttempt{{NodeID: v.NodeID, Stage: v.Stage, Step: v.Step, Template: v.TemplateName, Owner: v.FragmentRepository, Status: model.StepPassed, PodUID: v.PodUID}}}); e != nil {
+					t.Fatal(e)
+				}
 				if e = s.RecordStepResourceUsage(t.Context(), []model.StepResourceUsage{coveredResourceRow(r.ID, at)}); e != nil {
 					t.Fatal(e)
 				}
@@ -105,6 +109,9 @@ func TestResourceSafetyIgnoresFailedDisplayFilterAndCatchesZeroRows(t *testing.T
 						stage = "release-build"
 					}
 					f := model.PodResourceDisposition{RunID: r.ID, WorkflowName: "workflow-test", WorkflowUID: "11111111-1111-4111-8111-111111111111", Namespace: "argo", NodeID: "wf-1", PodName: "wf-1", PodUID: "22222222-2222-4222-8222-222222222222", Stage: stage, Step: template, Template: template, Owner: "repo-01", Reason: "Evicted", ObservedAt: at}
+					if e = s.RecordResourceAttempts(t.Context(), model.ResourceAttemptInventory{RunID: f.RunID, WorkflowName: f.WorkflowName, WorkflowUID: f.WorkflowUID, Namespace: f.Namespace, Complete: true, Terminal: true, Attempts: []model.ResourceAttempt{{NodeID: f.NodeID, Stage: f.Stage, Step: f.Step, Template: f.Template, Owner: f.Owner, Status: model.StepFailed, PodUID: f.PodUID}}}); e != nil {
+						t.Fatal(e)
+					}
 					if e = s.RecordPodResourceDisposition(t.Context(), f); e != nil {
 						t.Fatal(e)
 					}
@@ -118,7 +125,7 @@ func TestResourceSafetyIgnoresFailedDisplayFilterAndCatchesZeroRows(t *testing.T
 				if e != nil {
 					t.Fatal(e)
 				}
-				steps := measured.BuildWithSafety(h.Observations, nil, h.SafetyObservations, h.Dispositions)
+				steps := measured.BuildWithSafety(h.Observations, nil, h.SafetyObservations, h.Dispositions, h.AttemptGaps)
 				var advice *measured.Suggested
 				for _, step := range steps {
 					if step.Template == "compile" && step.Stage == "build" {

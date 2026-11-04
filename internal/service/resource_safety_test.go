@@ -62,6 +62,16 @@ func TestDefaultResourceAdviceUsesFailuresWithoutMetricRows(t *testing.T) {
 							v.ContainerFinishedAt, v.PodFinishedAt = time.Time{}, time.Time{}
 						}
 					}
+					attemptStatus := model.StepRunning
+					if v.Terminal {
+						attemptStatus = model.StepPassed
+					}
+					if v.Terminal && (v.Reason != "Completed" || (v.ExitCode != nil && *v.ExitCode != 0)) {
+						attemptStatus = model.StepFailed
+					}
+					if e = f.store.RecordResourceAttempts(t.Context(), model.ResourceAttemptInventory{RunID: v.RunID, WorkflowName: v.WorkflowName, WorkflowUID: v.WorkflowUID, Namespace: v.Namespace, Complete: true, Terminal: i < 5 || !strings.HasPrefix(kind, "active-"), Attempts: []model.ResourceAttempt{{NodeID: v.NodeID, Stage: v.Stage, Step: v.Step, Template: v.TemplateName, Status: attemptStatus, PodUID: v.PodUID}}}); e != nil {
+						t.Fatal(e)
+					}
 					if e = f.store.RecordStepResourceUsage(t.Context(), []model.StepResourceUsage{v}); e != nil {
 						t.Fatal(e)
 					}
@@ -98,6 +108,13 @@ func TestDefaultResourceAdviceUsesFailuresWithoutMetricRows(t *testing.T) {
 						template = "other"
 					}
 					d := model.PodResourceDisposition{RunID: r.ID, WorkflowName: "workflow-test", WorkflowUID: "11111111-1111-4111-8111-111111111111", Namespace: "argo", NodeID: "wf-1", PodName: "wf-1", PodUID: "22222222-2222-4222-8222-222222222222", Stage: "build", Step: template, Template: template, Owner: repo.Name, Reason: "Evicted", ObservedAt: at}
+					attemptStatus := model.StepFailed
+					if d.Reason == "Completed" {
+						attemptStatus = model.StepPassed
+					}
+					if err = f.store.RecordResourceAttempts(t.Context(), model.ResourceAttemptInventory{RunID: d.RunID, WorkflowName: d.WorkflowName, WorkflowUID: d.WorkflowUID, Namespace: d.Namespace, Complete: true, Terminal: !strings.HasPrefix(kind, "active-"), Attempts: []model.ResourceAttempt{{NodeID: d.NodeID, Stage: d.Stage, Step: d.Step, Template: d.Template, Status: attemptStatus, PodUID: d.PodUID}}}); err != nil {
+						t.Fatal(err)
+					}
 					if err = f.store.RecordPodResourceDisposition(t.Context(), d); err != nil {
 						t.Fatal(err)
 					}
