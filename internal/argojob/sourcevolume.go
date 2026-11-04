@@ -448,6 +448,9 @@ func (seeder *SourceSeeder) createSeedPod(ctx context.Context, name, claimName s
 						corev1.ResourceCPU:    resource.MustParse("100m"),
 						corev1.ResourceMemory: resource.MustParse("64Mi"),
 					},
+					// Checkout extraction runs inside this cgroup; its idle sleep
+					// footprint cannot size the cap. Direct qualification is pending.
+					Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("500m"), corev1.ResourceMemory: resource.MustParse("512Mi")},
 				},
 			}},
 			Volumes: []corev1.Volume{{

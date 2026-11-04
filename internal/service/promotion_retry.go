@@ -93,7 +93,7 @@ func (service *API) admitPromotionRetry(ctx context.Context, actor api.Actor, fa
 	}
 	_, candidate, err := service.resolvePromotionSource(ctx, service.cacheInputFor(ctx, repository), failed.SourceSHA)
 	if err != nil {
-		return model.Repository{}, model.Run{}, model.Promotion{}, fmt.Errorf("resolve promotion source %s: %w", failed.SourceSHA, err)
+		return model.Repository{}, model.Run{}, model.Promotion{}, fmt.Errorf("retry promotion %s: resolve promotion source %s: %w", failed.ID, failed.SourceSHA, err)
 	}
 	if !sameOID(candidate.SHA, failed.SourceSHA) || (!failed.BranchCISkipped && !greenBranchCandidate(candidate)) {
 		return model.Repository{}, model.Run{}, model.Promotion{}, fmt.Errorf("%w: the newest run for %s is %s (%s), not green; rerun it before retrying promotion %s",
@@ -101,6 +101,11 @@ func (service *API) admitPromotionRetry(ctx context.Context, actor api.Actor, fa
 	}
 	promotion, err := service.admitPromotion(ctx, actor, repository, candidate, failed.TargetRef, failed.ID, mode)
 	if err != nil {
+		// Keep eligibility centralized while adding the retry's actionable context.
+		if errors.Is(err, ErrInvalidInput) {
+			return model.Repository{}, model.Run{}, model.Promotion{}, fmt.Errorf("%w: the newest run for %s is %s (%s); rerun it before retrying promotion %s",
+				err, failed.SourceSHA, candidate.ID, candidate.Status, failed.ID)
+		}
 		if errors.Is(err, store.ErrInvalidState) {
 			return model.Repository{}, model.Run{}, model.Promotion{}, refuse(err,
 				"promotion retry conflicts with the current state; inspect promotion_list and promote_status")

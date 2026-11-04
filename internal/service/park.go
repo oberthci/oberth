@@ -104,7 +104,7 @@ func greenBranchCandidate(candidate model.Run) bool {
 
 func refuseRedBranchSource(run model.Run) error {
 	if run.RefKind == model.RefBranch && run.Trigger != "promotion" && !run.Release && (run.Status == model.RunFailed || run.Status == model.RunInterrupted) {
-		return refuse(ErrInvalidInput, "promotion source must be the exactly tested green branch commit; promotion source has a red branch run %s; rerun or fix it", run.ID)
+		return refuse(ErrInvalidInput, "promotion source must be the exactly tested green branch commit; promotion source has a red branch run %s (%s), the newest run for %s; rerun or fix it", run.ID, run.Status, run.SHA)
 	}
 	return nil
 }

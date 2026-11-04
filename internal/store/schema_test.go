@@ -88,10 +88,21 @@ func TestEveryMigrationDocumentedInAgentContract(t *testing.T) {
 	if !strings.Contains(contract, "## Schema migrations") {
 		t.Fatal("AGENT-CONTRACT.md missing '## Schema migrations' section")
 	}
+	// Markdown tables end at a blank line. A detached migration row must not
+	// satisfy this contract just because its version appears elsewhere.
+	section := strings.SplitN(contract, "## Schema migrations", 2)[1]
+	var table strings.Builder
+	for _, line := range strings.Split(section, "\n") {
+		if strings.HasPrefix(line, "|") {
+			table.WriteString(line + "\n")
+		} else if table.Len() != 0 {
+			break
+		}
+	}
 	for i := 1; i <= latestMigrationVersion; i++ {
-		marker := fmt.Sprintf("v%d", i)
-		if !strings.Contains(contract, marker) {
-			t.Errorf("AGENT-CONTRACT.md missing entry for migration %s", marker)
+		marker := fmt.Sprintf("| v%d |", i)
+		if !strings.Contains(table.String(), marker) {
+			t.Errorf("AGENT-CONTRACT.md migration v%d is missing from the contiguous schema table", i)
 		}
 	}
 }

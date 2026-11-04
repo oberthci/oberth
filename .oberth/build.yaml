@@ -63,7 +63,6 @@ apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
   annotations:
-    oberth.ci/size: L
     oberth.ci/nonroot-templates: test-static-git-runtime
 spec:
   entrypoint: ci
@@ -178,7 +177,7 @@ spec:
           cpu: '1'
           memory: 256Mi
 
-  # ---- setup stage (12 sequential steps) ----
+  # ---- setup stage (13 sequential steps) ----
   # Maps to: Test("setup", repositorySteps(inlineToolchainSteps()...)...)
   #
   # trivy and cosign are NOT installed here:
@@ -210,6 +209,8 @@ spec:
         template: decompress-shellcheck
     - - name: install-shellcheck
         template: install-shellcheck
+    - - name: resource-guard
+        template: resource-guard
 
   # [tools-dir] /bin/mkdir -p private scratch
   - name: tools-dir
@@ -261,7 +262,7 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: '2'
+          cpu: 1000m
           memory: 4Gi
         limits:
           cpu: '2'
@@ -317,7 +318,7 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: '2'
+          cpu: 1000m
           memory: 4Gi
         limits:
           cpu: '2'
@@ -433,7 +434,7 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: "2"
+          cpu: 1000m
           memory: "4Gi"
         limits:
           cpu: "2"
@@ -658,7 +659,7 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: '2'
+          cpu: 1000m
           memory: 4Gi
         limits:
           cpu: '2'
@@ -776,7 +777,7 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: '2'
+          cpu: 1000m
           memory: 4Gi
         limits:
           cpu: '2'
@@ -839,7 +840,7 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: '2'
+          cpu: 1000m
           memory: 4Gi
         limits:
           cpu: '2'
@@ -889,7 +890,7 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: '2'
+          cpu: 1000m
           memory: 320296Ki
         limits:
           cpu: '2'
@@ -1022,7 +1023,7 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 1996m
+          cpu: 1000m
           memory: 2867000Ki
         limits:
           cpu: 4000m
@@ -1032,8 +1033,8 @@ spec:
   # remainder discovered by go list ./.... Git-cache already has a required
   # parallel burn below; exclude it from rest to avoid running that suite twice.
   # The package-union contract covers new packages.
-  # All groups keep the race detector and uncached execution. The explicit
-  # measured per-package timeouts provide headroom; independent Pods bound contention.
+  # All groups keep the race detector and uncached execution.
+  # Whole-group watchdogs retain measured 1.5x wall-time headroom.
   # Give each group a bounded two-CPU lane; workflow parallelism remains two.
   - name: deadcode
     automountServiceAccountToken: false
@@ -1087,7 +1088,7 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: "4"
+          cpu: 1000m
           memory: "8Gi"
         limits:
           cpu: "4"
@@ -1098,13 +1099,13 @@ spec:
   # remainder discovered by go list ./.... Git-cache already has a required
   # parallel burn below; exclude it from rest to avoid running that suite twice.
   # The package-union contract covers new packages.
-  # All groups keep the race detector and uncached execution. The explicit
-  # measured per-package timeouts provide headroom; independent Pods bound contention.
+  # All groups keep the race detector and uncached execution.
+  # Whole-group watchdogs retain measured 1.5x wall-time headroom.
   # Give each group a bounded two-CPU lane; workflow parallelism remains two.
   - name: test-store
     automountServiceAccountToken: false
     # Maximum observed race duration times 1.5, rounded up to minutes.
-    activeDeadlineSeconds: 3300
+    activeDeadlineSeconds: 3960
     volumes:
     - name: store-test-tmp
       emptyDir:
@@ -1434,7 +1435,7 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 1350m
+          cpu: 1000m
           memory: 4Gi
         limits:
           cpu: 2000m
@@ -1539,7 +1540,7 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 1194m
+          cpu: 1000m
           memory: 4Gi
         limits:
           cpu: 2000m
@@ -2265,8 +2266,71 @@ spec:
       # the compiler/linker and parent processes. Confirm CI cgroup peaks.
       resources:
         requests:
-          cpu: 1251m
+          cpu: 1000m
           memory: 2Gi
         limits:
           cpu: "2"
           memory: 2Gi
+
+  - name: resource-guard
+    automountServiceAccountToken: false
+    container:
+      image: golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd
+      workingDir: /work/src
+      command:
+      - /usr/bin/python3
+      args:
+      - -B
+      - hack/check_workflow_resources.py
+      - --self-test
+      env:
+      - name: PATH
+        value: /tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin
+      - name: OBERTH_TOOLS_DIR
+        value: /tmp/oberth-tools
+      - name: HOME
+        value: /tmp
+      - name: GOPATH
+        value: /tmp/oberth-tools/gopath
+      - name: GOTOOLCHAIN
+        value: local
+      - name: GOWORK
+        value: 'off'
+      - name: GOENV
+        value: 'off'
+      - name: GOMODCACHE
+        value: /cache/gomod
+      - name: GOCACHE
+        value: /cache/gobuild
+      - name: GIT_TERMINAL_PROMPT
+        value: '0'
+      - name: KUBEBUILDER_ASSETS
+        value: ''
+      - name: TRIVY_CACHE_DIR
+        value: /tmp/oberth-trivy
+      - name: GOLANGCI_LINT_CACHE
+        value: /tmp/oberth-tools/cache/golangci-lint
+      - name: PYTHONPATH
+        value: /tmp/oberth-tools/python
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+        readOnly: true
+      - name: work
+        mountPath: /cache/gomod
+        subPath: gomod
+      - name: work
+        mountPath: /cache/gobuild
+        subPath: gobuild
+      - name: work
+        mountPath: /tmp/oberth-trivy
+        subPath: trivy-cache
+      resources: # resources: provisional, re-measure
+        requests:
+          cpu: 687m
+          memory: 425Mi
+        limits:
+          cpu: 3113m
+          memory: 460Mi
+    activeDeadlineSeconds: 300
