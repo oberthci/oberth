@@ -76,3 +76,11 @@ backfill and head-wait drains. Service tests reject non-admin/scoped changes and
 mutation-gate bypass. A running scheduler with a fake engine reproduces the
 release-candidate dispatch-ceiling problem: an S RC enters the remaining 1/4
 weight while older ordinary L claims wait, then normal work resumes in FIFO.
+
+Load-tolerant regressions use virtual time for MCP proxy idle deadlines,
+immutable module retry budgets and audit mutation gate expiry/cancellation.
+The proxy still parses real HTTP over in-memory connections; separate TLS
+and HTTP/2 tests retain transport coverage. Held-writer reads and per-commit
+handshakes cover all 16 × 32 status and step writes without a continuous reader
+loop. Global resource retention checks exact oldest-first persisted rows across
+bounded partial sweeps, then requires a completed no-op sweep of fresh rows.

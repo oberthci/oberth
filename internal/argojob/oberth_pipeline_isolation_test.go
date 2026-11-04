@@ -49,7 +49,7 @@ var oberthReleaseToolWriters = map[string]bool{
 // artifacts. They receive their own read-only tool copies, never the trusted
 // publisher tools.
 var oberthReleaseTestLeaves = map[string]bool{
-	"vet": true, "golangci-lint-run": true, "deadcode": true, "release-test": true, "release-chart-test": true,
+	"vet": true, "golangci-lint-run": true, "deadcode": true, "release-test-store": true, "release-test-service": true, "release-test-rest": true, "release-test-gitcache": true, "release-chart-test": true,
 	"release-build": true, "release-runtime": true, "release-scan": true,
 }
 
@@ -376,14 +376,14 @@ func TestOberthPipelinesIsolationRejectsDrift(t *testing.T) {
 		file, name, old, replacement string
 	}{
 		{"release.yaml", "test leaf takes the shared workspace",
-			"  - name: release-test\n    automountServiceAccountToken: false\n    metadata:\n      annotations:\n        oberth.ci/workspace-mounts: none\n",
-			"  - name: release-test\n    automountServiceAccountToken: false\n    metadata:\n      annotations:\n"},
+			"  - name: release-test-rest\n    automountServiceAccountToken: false\n    metadata:\n      annotations:\n        oberth.ci/workspace-mounts: none\n",
+			"  - name: release-test-rest\n    automountServiceAccountToken: false\n    metadata:\n      annotations:\n"},
 		{"release.yaml", "scanner keeps the Vault coordinates",
 			"  - name: release-scan\n    automountServiceAccountToken: false\n", "  - name: release-scan\n"},
 		{"release.yaml", "publisher loses its verifier",
 			"    initContainers:\n    - name: verify-publisher-tools\n", "    sidecars:\n    - name: verify-publisher-tools\n"},
 		{"release.yaml", "test leaf mounts trusted tools",
-			"      - name: bootstrap-test-tools\n        mountPath: /tmp/oberth-tools\n        subPath: release-test\n",
+			"      - name: bootstrap-test-tools\n        mountPath: /tmp/oberth-tools\n        subPath: release-test-rest\n",
 			"      - name: bootstrap-tools\n        mountPath: /tmp/oberth-tools\n"},
 		{"build.yaml", "Go leaf can write the tools",
 			"        subPath: tools\n        readOnly: true\n      - name: work\n        mountPath: /cache/gomod\n",

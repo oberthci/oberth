@@ -25,10 +25,13 @@ func TestBootstrapRetainsTestsAndSeparatesPublisherAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	tests := map[string][]string{
-		"vet":                {"/tmp/oberth-tools/bin/go", "vet", "./..."},
-		"golangci-lint-run":  {"/tmp/oberth-tools/bin/golangci-lint", "run", "--timeout=10m", "--concurrency=1", "./..."},
-		"release-test":       {"/bin/sh", "hack/with-test-node.sh", "/tmp/oberth-tools/bin/go", "test", "-race", "-v", "-count=1", "-parallel=2", "-timeout=55m", "./..."},
-		"release-chart-test": {"./hack/test-chart.sh"},
+		"vet":                   {"/tmp/oberth-tools/bin/go", "vet", "./..."},
+		"golangci-lint-run":     {"/tmp/oberth-tools/bin/golangci-lint", "run", "--timeout=10m", "--concurrency=1", "./..."},
+		"release-test-store":    {"/usr/bin/python3", "-I", "-S", "-B", ".oberth/test-packages.py", "store"},
+		"release-test-service":  {"/usr/bin/python3", "-I", "-S", "-B", ".oberth/test-packages.py", "service"},
+		"release-test-rest":     {"/bin/sh", "hack/with-test-node.sh", "/usr/bin/python3", "-I", "-S", "-B", ".oberth/test-packages.py", "rest"},
+		"release-test-gitcache": {"/bin/sh", "hack/test-gitcache.sh"},
+		"release-chart-test":    {"./hack/test-chart.sh"},
 		"release-scan": {"/usr/local/bin/trivy", "fs", "--cache-dir", "/tmp/oberth-trivy", "--no-progress", "--skip-check-update",
 			"--skip-vex-repo-update", "--skip-version-check", "--disable-telemetry", "--scanners", "vuln", "--exit-code", "1", "--severity", "HIGH,CRITICAL", "--skip-dirs", ".git", "."},
 	}
@@ -100,8 +103,8 @@ func TestBootstrapRetainsTestsAndSeparatesPublisherAuthority(t *testing.T) {
 		}
 	}
 	// 6 original credentialed leaves + release-publish-kvm-harness = 7
-	if seenTests != 5 || credentialed != 7 {
-		t.Fatalf("retained tests=%d credentialed leaves=%d, want 5 and 7", seenTests, credentialed)
+	if seenTests != len(tests) || credentialed != 7 {
+		t.Fatalf("retained tests=%d credentialed leaves=%d, want %d and 7", seenTests, credentialed, len(tests))
 	}
 }
 
@@ -259,7 +262,7 @@ func TestBootstrapExecutedEnvironmentIgnoresSharedCachesAndCredentials(t *testin
 		tested++
 	}
 	// Retain the deadcode gate with the remaining bootstrap and artifact wrappers.
-	if tested != 33 || !sawDeadcode {
-		t.Fatalf("executed %d wrappers (deadcode=%t), want all 33 including deadcode", tested, sawDeadcode)
+	if tested != 36 || !sawDeadcode {
+		t.Fatalf("executed %d wrappers (deadcode=%t), want all 36 including deadcode", tested, sawDeadcode)
 	}
 }

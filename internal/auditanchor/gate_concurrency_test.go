@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
@@ -125,32 +126,45 @@ func TestMutationGateConcurrentMutationsSurviveRepeatedHeadAdvances(t *testing.T
 func TestMutationGateContentionHonorsDeadlineAndCancellation(t *testing.T) {
 	for _, cancelEarly := range []bool{false, true} {
 		t.Run(map[bool]string{false: "deadline", true: "cancellation"}[cancelEarly], func(t *testing.T) {
-			manager, racing, database, _ := concurrentGateManager(t, "local")
-			manager.gateTimeout = testtimeout.Scale(150 * time.Millisecond)
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
-			racing.afterVerification = func(ctx context.Context) error {
-				err := appendGateAction(ctx, database)
-				if cancelEarly {
-					cancel()
-					return store.ErrAuditVerificationBusy
+			synctest.Test(t, func(t *testing.T) {
+				manager, racing, database, _ := concurrentGateManager(t, "local")
+				// Database work consumes no virtual time. Establish real head
+				// contention before letting the gate's own retry/deadline timers
+				// advance, even when the host pauses during verification.
+				manager.gateTimeout = 150 * time.Millisecond
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				racing.afterVerification = func(ctx context.Context) error {
+					if err := appendGateAction(ctx, database); err != nil {
+						return err
+					}
+					if cancelEarly {
+						cancel()
+						return store.ErrAuditVerificationBusy
+					}
+					return nil
 				}
-				return err
-			}
-			started := time.Now()
-			err := manager.AllowMutation(ctx)
-			want := context.DeadlineExceeded
-			if cancelEarly {
-				want = context.Canceled
-			}
-			if !errors.Is(err, want) || !errors.Is(err, store.ErrAuditVerificationBusy) || time.Since(started) > testtimeout.Scale(3*time.Second) {
-				t.Fatalf("contention not bounded/classified: attempts=%d elapsed=%s err=%v", racing.calls, time.Since(started), err)
-			}
-			manager.gateTimeout = testtimeout.Start(DefaultGateTimeout)
-			racing.afterVerification = nil
-			if err := manager.AllowMutation(t.Context()); err != nil {
-				t.Fatalf("expired gate leaked lock or permission: %v", err)
-			}
+				started := time.Now()
+				err := manager.AllowMutation(ctx)
+				want := context.DeadlineExceeded
+				if cancelEarly {
+					want = context.Canceled
+				}
+				if !errors.Is(err, want) || !errors.Is(err, store.ErrAuditVerificationBusy) || racing.calls == 0 {
+					t.Fatalf("contention not bounded/classified: attempts=%d elapsed=%s err=%v", racing.calls, time.Since(started), err)
+				}
+				// With virtual time these are exact deadline/cancellation contracts,
+				// rather than a three-second wall-clock performance assertion.
+				elapsed := time.Since(started)
+				if (!cancelEarly && elapsed != manager.gateTimeout) || (cancelEarly && elapsed != 0) {
+					t.Fatalf("gate did not honor its deadline/cancellation: elapsed=%s attempts=%d", elapsed, racing.calls)
+				}
+				manager.gateTimeout = testtimeout.Start(DefaultGateTimeout)
+				racing.afterVerification = nil
+				if err := manager.AllowMutation(t.Context()); err != nil {
+					t.Fatalf("expired gate leaked lock or permission: %v", err)
+				}
+			})
 		})
 	}
 }

@@ -42,21 +42,24 @@ func TestOberthCITestTimeoutScale(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	pending = map[string]bool{"release-test-store": true, "release-test-service": true, "release-test-rest": true, "release-test-gitcache": true}
 	for _, template := range workflow.Spec.Templates {
-		if template.Name != "release-test" {
+		if !pending[template.Name] {
 			continue
 		}
 		if template.Container == nil || len(template.Container.Args) < 2 {
-			t.Fatal("release-test lost its clean-environment wrapper")
+			t.Fatalf("%s lost its clean-environment wrapper", template.Name)
 		}
 		// Execute the actual env -i wrapper: setting the Kubernetes env alone
 		// would silently lose the scale before the Go test binary starts.
 		command := exec.CommandContext(t.Context(), "/bin/sh", "-c", template.Container.Args[0], "fixture", "/bin/sh", "-c", `test "$OBERTH_TEST_TIMEOUT_SCALE" = 4`)
 		command.Env = []string{"OBERTH_RELEASE_SHA=fixture", "OBERTH_RELEASE_TAG=v0.0.0", "OBERTH_TEST_TIMEOUT_SCALE=1"}
 		if output, err := command.CombinedOutput(); err != nil {
-			t.Fatalf("release-test child lost scale 4: %v: %s", err, output)
+			t.Fatalf("%s child lost scale 4: %v: %s", template.Name, err, output)
 		}
-		return
+		delete(pending, template.Name)
 	}
-	t.Fatal("missing release-test leaf")
+	if len(pending) != 0 {
+		t.Fatalf("missing release test leaves: %v", pending)
+	}
 }

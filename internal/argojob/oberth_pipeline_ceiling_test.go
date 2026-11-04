@@ -32,7 +32,7 @@ func TestOberthReleaseGoWorkersAreBounded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"release-test", "release-build"} {
+	for _, name := range []string{"release-test-store", "release-test-service", "release-test-rest", "release-test-gitcache", "release-build"} {
 		t.Run(name, func(t *testing.T) {
 			for _, leaf := range workflow.Spec.Templates {
 				if leaf.Name != name {
@@ -56,20 +56,12 @@ func TestOberthReleaseGoWorkersAreBounded(t *testing.T) {
 					}
 				}
 				memoryLimit := "1GiB"
-				if name == "release-test" {
-					memoryLimit = "4GiB"
+				if limit, ok := map[string]string{"release-test-store": "2GiB", "release-test-service": "2GiB", "release-test-rest": "4GiB", "release-test-gitcache": "256MiB"}[name]; ok {
+					memoryLimit = limit
 				}
 				for key, want := range map[string]string{"GOMAXPROCS": "2", "GOFLAGS": "-p=1", "GOMEMLIMIT": memoryLimit} {
 					if env[key] != want {
 						t.Errorf("%s=%q, want %q after clean bootstrap", key, env[key], want)
-					}
-				}
-				if name == "release-test" {
-					args := strings.Join(container.Args[1:], " ")
-					for _, flag := range []string{"-race", "-count=1", "-parallel=2", "./..."} {
-						if !strings.Contains(args, flag) {
-							t.Errorf("release test lost required %s: %s", flag, args)
-						}
 					}
 				}
 				return

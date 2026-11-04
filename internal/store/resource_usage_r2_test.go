@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -190,14 +191,47 @@ func TestResourceRetentionOldestFirstBoundedAndIndependentOfPrimary(t *testing.T
 func TestResourceRetentionGlobalTargetAndFreshRows(t *testing.T) {
 	s, run, at := resourceStoreFixture(t)
 	seedResourceRows(t, s, run.ID, at, resourceUsageRetainedRows+3)
-	n, err := s.PruneResourceUsage(t.Context())
-	if err != nil || n != 3 {
-		t.Fatal("global target not enforced", n, err)
+	expected := resourceRetentionSnapshot(t, t.Context(), s)
+	if len(expected) != resourceUsageRetainedRows+3 {
+		t.Fatal("retention fixture row count", len(expected))
 	}
-	n, err = s.PruneResourceUsage(t.Context())
-	if err != nil || n != 0 {
-		t.Fatal("fresh retained rows removed", n, err)
+	// Model a pass whose budget expired before it could make progress.
+	// This is a valid production outcome under scheduler or I/O contention.
+	expired, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	defer cancel()
+	n, err := s.PruneResourceUsage(expired)
+	if n != 0 || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("expired sweep was not bounded/classified", n, err)
 	}
+	// The one-second production budget is intentionally unchanged. Check
+	// persisted oldest-first progress after partial or expired passes, rather
+	// than requiring all three excess rows to disappear in one wall second.
+	total := 0
+	for pass := 0; pass < 20 && total < 3; pass++ {
+		n, err := s.PruneResourceUsage(t.Context())
+		remaining := resourceRetentionSnapshot(t, t.Context(), s)
+		total = checkResourceRetentionProgress(t, expected, remaining, total, n, err)
+		if total > 3 {
+			t.Fatal("fresh retained rows removed", total)
+		}
+	}
+	if total != 3 {
+		t.Fatal("global target not enforced after bounded catch-up", total)
+	}
+	// Require a completed no-op sweep, not just a timeout before selection.
+	// Every surviving row must still be the exact original newest suffix.
+	for range 20 {
+		n, err := s.PruneResourceUsage(t.Context())
+		remaining := resourceRetentionSnapshot(t, t.Context(), s)
+		total = checkResourceRetentionProgress(t, expected, remaining, total, n, err)
+		if total != 3 || n != 0 {
+			t.Fatal("fresh retained rows removed", total, n, err)
+		}
+		if err == nil {
+			return
+		}
+	}
+	t.Fatal("no completed sweep of fresh retained rows")
 }
 
 func TestResourceRetentionYieldsToPrimaryWriteLock(t *testing.T) {

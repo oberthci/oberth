@@ -187,7 +187,11 @@ newly listed package joins the remainder.
 CGO and processor limits; the existing graph and isolation contracts cover
 all four race burns and require each one before every cross-build.
 The Git-cache wrapper retains its static package contract before invoking its
-dedicated race group; that package must not also run in the remainder.
+dedicated race group; that package must not also run in the remainder. `TestOberthReleaseRaceGroupsMatchBranch`
+requires the release gate to fan out into those same four groups, with matching
+commands, watchdogs and resource envelopes and separate read-only tool copies.
+The launcher pins race detection, uncached execution and two parallel tests per
+package for both branch and release runs.
 
 Audit read surfaces (#1104): HTTP and MCP must agree on filtered entries and
 paging, and refuse scoped and non-admin callers. Status reads the latest backup

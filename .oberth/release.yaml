@@ -16,8 +16,8 @@
 # Do not rename a claim to `work`: the old server gives that reserved claim
 # implicit tools/cache/output mounts in every leaf. Tests instead receive their
 # own copied tools. Neither test Pods nor downloaded-artifact execution Pods
-# receive the trusted publisher-tools claim. The five original test commands
-# and their dependency gates are preserved.
+# receive the trusted publisher-tools claim. Lint, scanning and chart tests retain
+# their dependency gates; race tests use the same four package groups as CI.
 #
 # With workspace-mounts none the server injects neither the persistent
 # /work/cache hostPath nor /work/artifacts (older servers did); every executed
@@ -70,7 +70,8 @@ spec:
       - ReadWriteOnce
       resources:
         requests:
-          storage: 4Gi
+          # Ten isolated tool copies replace seven; retain per-copy headroom.
+          storage: 6Gi
   - metadata:
       name: bootstrap-output
     spec:
@@ -1175,12 +1176,26 @@ spec:
         limits:
           cpu: '4'
           memory: 3008Mi
+  # Keep the release gate while giving each branch race group its own Pod.
   - name: release-test
+    automountServiceAccountToken: false
+    dag:
+      tasks:
+      - name: store
+        template: release-test-store
+      - name: service
+        template: release-test-service
+      - name: rest
+        template: release-test-rest
+      - name: gitcache
+        template: release-test-gitcache
+  - name: release-test-store
     automountServiceAccountToken: false
     metadata:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 3960
     volumes:
     - name: store-test-tmp
       emptyDir:
@@ -1214,22 +1229,17 @@ spec:
           OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
           GOBIN=/tmp/oberth-tools/bin \
           OBERTH_ARCHIVE_PARITY_REPO=fixture \
-          OBERTH_TEST_NODE_ARCHIVE=/tmp/oberth-node-inputs/node.tar.gz \
           GOMAXPROCS=2 \
           GOFLAGS='-p=1' \
-          GOMEMLIMIT=4GiB \
+          GOMEMLIMIT=2GiB \
           CGO_ENABLED=1 "$@"
       - bootstrap-clean
-      - /bin/sh
-      - hack/with-test-node.sh
-      - /tmp/oberth-tools/bin/go
-      - test
-      - -race
-      - -v
-      - -count=1
-      - -parallel=2
-      - -timeout=55m
-      - ./...
+      - /usr/bin/python3
+      - -I
+      - -S
+      - -B
+      - .oberth/test-packages.py
+      - store
       env:
       - name: PATH
         value: /usr/bin:/bin
@@ -1238,22 +1248,196 @@ spec:
         mountPath: /tmp/oberth-store-tests
       - name: bootstrap-test-tools
         mountPath: /tmp/oberth-tools
-        subPath: release-test
+        subPath: release-test-store
+        readOnly: true
+      resources:
+        requests:
+          cpu: 971m
+          memory: 4Gi
+        limits:
+          cpu: 2000m
+          memory: 4Gi
+  - name: release-test-service
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 2940
+    container:
+      image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          OBERTH_TEST_TIMEOUT_SCALE=4 \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          OBERTH_ARCHIVE_PARITY_REPO=fixture \
+          GOMAXPROCS=2 \
+          GOFLAGS='-p=1' \
+          GOMEMLIMIT=2GiB \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - /usr/bin/python3
+      - -I
+      - -S
+      - -B
+      - .oberth/test-packages.py
+      - service
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-test-tools
+        mountPath: /tmp/oberth-tools
+        subPath: release-test-service
+        readOnly: true
+      resources:
+        requests:
+          cpu: 958m
+          memory: 4Gi
+        limits:
+          cpu: 2000m
+          memory: 4Gi
+  - name: release-test-rest
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 3300
+    container:
+      image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          OBERTH_TEST_TIMEOUT_SCALE=4 \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          OBERTH_ARCHIVE_PARITY_REPO=fixture \
+          OBERTH_TEST_NODE_ARCHIVE=/tmp/oberth-node-inputs/node.tar.gz \
+          GOMAXPROCS=2 \
+          GOFLAGS='-p=1' \
+          GOMEMLIMIT=4GiB \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - /bin/sh
+      - hack/with-test-node.sh
+      - /usr/bin/python3
+      - -I
+      - -S
+      - -B
+      - .oberth/test-packages.py
+      - rest
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-test-tools
+        mountPath: /tmp/oberth-tools
+        subPath: release-test-rest
         readOnly: true
       - name: bootstrap-node-inputs
         mountPath: /tmp/oberth-node-inputs
         readOnly: true
-      # The 8Gi envelope includes the store-only 768Mi tmpfs. Other packages
-      # and Go build caches keep their normal temporary paths.
-      # Historical unbounded race run reached 8Gi. Serialize packages and
-      # bound Go processes and set a memory target above; remeasure this workload on the next release.
       resources:
         requests:
-          cpu: 1000m
-          memory: 8Gi
+          cpu: 965m
+          memory: 4Gi
         limits:
-          cpu: 4000m
-          memory: 8Gi
+          cpu: 3000m
+          memory: 6208Mi
+  - name: release-test-gitcache
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
+      workingDir: /work/src
+      command:
+      - /bin/sh
+      - -c
+      args:
+      - |
+        set -eu
+        exec /usr/bin/env -i PATH=/tmp/oberth-tools/bin:/usr/local/go/bin:/usr/bin:/bin \
+          HOME=/tmp \
+          OBERTH_TOOLS_DIR=/tmp/oberth-tools \
+          GOTOOLCHAIN=local \
+          GOWORK=off \
+          OBERTH_TEST_TIMEOUT_SCALE=4 \
+          GOENV=off \
+          GOPATH=/tmp/bootstrap-private/gopath \
+          GOMODCACHE=/tmp/bootstrap-private/gomod \
+          GOCACHE=/tmp/bootstrap-private/gobuild \
+          GOLANGCI_LINT_CACHE=/tmp/bootstrap-private/lint \
+          TRIVY_CACHE_DIR=/tmp/oberth-trivy \
+          GIT_TERMINAL_PROMPT=0 \
+          KUBEBUILDER_ASSETS= \
+          OBERTH_RELEASE_SHA="$OBERTH_RELEASE_SHA" \
+          OBERTH_RELEASE_TAG="$OBERTH_RELEASE_TAG" \
+          GOBIN=/tmp/oberth-tools/bin \
+          OBERTH_ARCHIVE_PARITY_REPO=fixture \
+          GOMAXPROCS=2 \
+          GOFLAGS='-p=1' \
+          GOMEMLIMIT=256MiB \
+          CGO_ENABLED=1 "$@"
+      - bootstrap-clean
+      - /bin/sh
+      - hack/test-gitcache.sh
+      env:
+      - name: PATH
+        value: /usr/bin:/bin
+      volumeMounts:
+      - name: bootstrap-test-tools
+        mountPath: /tmp/oberth-tools
+        subPath: release-test-gitcache
+        readOnly: true
+      resources:
+        requests:
+          cpu: 416m
+          memory: 326160Ki
+        limits:
+          cpu: 2000m
+          memory: 576Mi
   - name: release-chart-test
     automountServiceAccountToken: false
     metadata:
@@ -1934,7 +2118,7 @@ spec:
       args:
       - |
         set -eu
-        for leaf in deadcode golangci-lint-run release-build release-chart-test release-runtime release-test vet; do
+        for leaf in deadcode golangci-lint-run release-build release-chart-test release-runtime release-test-store release-test-service release-test-rest release-test-gitcache vet; do
           /bin/mkdir -p "/test-tools/$leaf"
           /bin/cp -a /trusted-tools/bin "/test-tools/$leaf/bin"
           /bin/cp -a /trusted-tools/python "/test-tools/$leaf/python"
