@@ -1006,7 +1006,7 @@ trust assumptions and complete invalidation rules.
   it encodes the same result object. Authenticated tool refusal text keeps its
   stable error class and may append only an explicitly public service reason.
   Raw dependency chains stay masked; scoped missing/hidden equivalence remains.
-- MCP exposes 77 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 78 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, read-only `run_resources` (captured history and reviewed git resource suggestions), `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`, `run_kvm_preflight`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, `publication_abandon`, issue
   `issue_create`, `issue_get`, `issue_get_many`, `issue_update`, `issue_append`,
@@ -3327,15 +3327,32 @@ See [recovery, history and readiness semantics](docs/rca-run-recovery.md).
 The optional `--max-concurrent-jobs-file` is re-opened every five seconds, so
 projected ConfigMap symlink swaps take effect without restart. The boot flag
 remains the initial default. Accepted changes are audited before application;
-invalid/unreadable values, overflow, a positive XL weight larger than the new
-budget, or audit failure retain the last good configuration without pausing the
-queue. Budget is jobs times M weight. Held grants retain their weights and a
-whole-budget XL remains exclusive across increases. Pending weights, dispatch
-and run ceilings change together; lowering never cancels running work.
+invalid/unreadable values and audit failure retain the last good configuration.
+The server counts granted workflows and delegates pod placement to Kubernetes.
+Legacy size weights do not constrain this ceiling; one workflow is valid.
+Lowering never cancels running work, and raising wakes the queue.
 `system_status.admission.configuration` and the dashboard show effective jobs,
 source and reload errors; scoped views omit this host-wide configuration.
 The chart mounts `<fullname>-admission` read-only as a directory, without
 subPath or a pod-template checksum. See [runtime capacity](docs/runtime-admission-capacity.md).
+
+### Administrative admission hold
+
+`admission_hold` (MCP), `POST /api/admission/hold` and `oberth admission hold`
+require an unscoped admin and a reason. Allow classes are tag, release and
+promotion (default tag+release; empty allows none); a run matching any class
+remains eligible under ordinary resource constraints. The hold preserves queue
+sequence, priority/FIFO order and existing grants. It skips held claims before
+preparation, group and VM ordering so permitted work can reach admission.
+Hold settings and audit commit atomically, outside the gate mutex; new grants
+are fenced during the bounded write. Restart reloads the original absolute
+expiry. Default duration is two hours, hard cap twelve; expiry is evaluated at
+admission and reported as inactive, with normal idle dispatch waking within
+fifteen seconds. `system_status.admission.hold` shows settings and deadline;
+scoped status omits installation configuration. Existing queued reason text
+reports the hold; no status or UI layout is added. The hold applies to the
+Kubernetes-decides workflow gate, without restoring weight-based admission. See
+[admission hold](docs/admission-hold.md).
 
 ### Evicted controller replacement and visible admission holds (#1214)
 

@@ -87,13 +87,22 @@ func TestAdminPriorityMigrationPreservesOverridesAndAudit(t *testing.T) {
 		t.Fatal(err)
 	}
 	migrationID := "20261104030321-admin-run-priority-3253bc64cd6ece41cf5675e06457b29d"
-	// Restore the actual previous table shape and remove only this migration's
-	// receipt. Existing timestamp IDs and historical integer receipts stay put.
+	// Restore the previous table shape without this migration. Later timestamp
+	// IDs model independently applied migrations; compact their local receipt
+	// ordinals so the fixture remains a valid, contiguous ledger.
+	var ordinal int
+	if err = s.db.QueryRow(`SELECT version FROM schema_migrations WHERE id=?`, migrationID).Scan(&ordinal); err != nil {
+		t.Fatal(err)
+	}
 	legacy := strings.ReplaceAll(queuePrioritySchema, "run_priority_overrides", "run_priority_overrides_legacy")
 	_, err = s.db.Exec(legacy+`; INSERT INTO run_priority_overrides_legacy SELECT * FROM run_priority_overrides; DROP TABLE run_priority_overrides; ALTER TABLE run_priority_overrides_legacy RENAME TO run_priority_overrides; DELETE FROM schema_migrations WHERE id=?`, migrationID)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err = s.db.Exec(`UPDATE schema_migrations SET version=-version WHERE version>?; UPDATE schema_migrations SET version=-version-1 WHERE version<0`, ordinal); err != nil {
+		t.Fatal(err)
+	}
+
 	var actor, reason string
 	var at int64
 	if err = s.db.QueryRow(`SELECT actor,reason,updated_at FROM run_priority_overrides WHERE run_id=?`, queued.ID).Scan(&actor, &reason, &at); err != nil {

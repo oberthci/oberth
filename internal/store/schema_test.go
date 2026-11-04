@@ -960,6 +960,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 	assertFreshSchemaLedger(t, store.db)
 	assertSchemaObjects(t, store.db, "table", []string{
 		"admission_head_waits",
+		"admission_holds",
 		"audit_actions",
 		"audit_anchors",
 		"ci_issue_projections",

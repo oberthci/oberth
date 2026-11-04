@@ -416,3 +416,11 @@ func contextDeadline(t *testing.T) <-chan struct{} {
 	t.Cleanup(cancel)
 	return ctx.Done()
 }
+
+// groupParked reports claimed runs parked on VM capacity or their concurrency
+// group. The dispatch loop does not count them against its ceiling.
+func (gate *weightedAdmission) groupParked() int {
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	return gate.parkedLocked()
+}

@@ -20,6 +20,8 @@ type weightedAdmission struct {
 	// workflowOnly delegates pod placement to Kubernetes. Historical weighted
 	// helpers remain for isolated compatibility tests; serving uses only slots.
 	workflowOnly   bool
+	adminHold      model.AdmissionHold
+	holdUpdating   bool
 	resources      DeclaredAdmissionConfig
 	mu             sync.Mutex
 	capacity       int
@@ -463,6 +465,12 @@ func (reservation *admissionReservation) retain() {
 // is passed over too, which keeps the group itself in claim order, and the
 // parked run regains its place in that order the moment its group is free.
 func (gate *weightedAdmission) grantLocked() {
+	if gate.holdUpdating {
+		return
+	}
+	if gate.backfillHead != nil && gate.adminHeldLocked(gate.backfillHead) {
+		gate.setBackfillHeadLocked(nil)
+	}
 	// head is the first prepared, unparked waiter that does not fit.
 	var head *admissionReservation
 	defer func() {
@@ -483,7 +491,7 @@ func (gate *weightedAdmission) grantLocked() {
 	for index := 0; index < len(gate.waiters); {
 		reservation := gate.waiters[index]
 		reservation.backfillMessage = ""
-		if reservation.vmParked || gate.kubeVirtBlockedLocked(reservation) {
+		if gate.adminHeldLocked(reservation) || reservation.vmParked || gate.kubeVirtBlockedLocked(reservation) {
 			index++
 			continue
 		}
@@ -603,6 +611,9 @@ func (gate *weightedAdmission) spareWeightForClaim(unparked int) bool {
 // hard "one L at a time" rule instead pinned every L-declaring repository to a
 // single run no matter what the operator configured.
 func (gate *weightedAdmission) canGrantLocked(reservation *admissionReservation) bool {
+	if gate.adminHeldLocked(reservation) {
+		return false
+	}
 	// Disk floor hold (#673): when enabled and the filesystem is below the
 	// configured floor, hold all new admissions until disk frees up. The
 	// check uses a cached statfs result (sub-microsecond syscall, 5 s TTL)
@@ -659,13 +670,13 @@ func (gate *weightedAdmission) removeLocked(reservation *admissionReservation) {
 	}
 }
 
-// parkedLocked counts VM-capacity waiters and prepared waiters held back by their concurrency
+// parkedLocked counts admin-held and VM-capacity waiters, and prepared waiters held back by their concurrency
 // group: another run of the same repository holds it, or an earlier run of the
 // same group is waiting ahead of them.
 func (gate *weightedAdmission) parkedLocked() int {
 	parked := 0
 	for _, reservation := range gate.waiters {
-		if reservation.vmParked || gate.kubeVirtBlockedLocked(reservation) {
+		if gate.adminHeldLocked(reservation) || reservation.vmParked || gate.kubeVirtBlockedLocked(reservation) {
 			parked++
 			continue
 		}
@@ -674,14 +685,6 @@ func (gate *weightedAdmission) parkedLocked() int {
 		}
 	}
 	return parked
-}
-
-// groupParked reports claimed runs parked on VM capacity or their concurrency
-// group. The dispatch loop does not count them against its ceiling.
-func (gate *weightedAdmission) groupParked() int {
-	gate.mu.Lock()
-	defer gate.mu.Unlock()
-	return gate.parkedLocked()
 }
 
 // groupBlockerLocked names what a waiting grouped reservation waits for: the
@@ -698,7 +701,7 @@ func (gate *weightedAdmission) groupBlockerLocked(reservation *admissionReservat
 		if candidate == reservation {
 			break
 		}
-		if candidate.prepared && !candidate.vmParked && candidate.group == reservation.group {
+		if candidate.prepared && !gate.adminHeldLocked(candidate) && !candidate.vmParked && candidate.group == reservation.group {
 			return "", candidate.runID
 		}
 	}
@@ -713,7 +716,7 @@ func (gate *weightedAdmission) groupBlockerLocked(reservation *admissionReservat
 // while the head is still preparing (its size is unknown) or nothing waits.
 func (gate *weightedAdmission) headBlockerLocked() *admissionReservation {
 	for _, reservation := range gate.waiters {
-		if reservation.vmParked || gate.kubeVirtBlockedLocked(reservation) {
+		if gate.adminHeldLocked(reservation) || reservation.vmParked || gate.kubeVirtBlockedLocked(reservation) {
 			continue
 		}
 		if !reservation.prepared {

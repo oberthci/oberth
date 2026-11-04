@@ -279,6 +279,7 @@ func (server *Server) routes() {
 		}
 		writeJSON(writer, http.StatusOK, map[string]string{"status": "ready"})
 	})
+	server.mux.Handle("POST /api/admission/hold", server.requireAuth(http.HandlerFunc(server.handleAdmissionHold)))
 	server.mux.Handle("POST /api/promotions", server.requireAuth(http.HandlerFunc(server.handlePromote)))
 	server.mux.Handle("POST /mcp", server.requireAuth(http.HandlerFunc(server.handleMCP)))
 	server.mux.Handle("GET /api/runs", server.requireAuth(http.HandlerFunc(server.handleRuns)))

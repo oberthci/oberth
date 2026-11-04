@@ -246,6 +246,9 @@ func (scheduler *Scheduler) priorityDispatchAvailable(ctx context.Context, activ
 	candidate := &admissionReservation{gate: gate, sequence: next.QueueSequence, order: next.AdmissionSequence, priority: next.Priority, queuedAt: next.QueuedAt}
 	lower := false
 	for _, r := range gate.waiters {
+		if gate.adminHeldLocked(r) {
+			continue
+		}
 		rp := r.effectivePriority(gate.clock())
 		if rp.Rank() > p.Rank() || (rp.Rank() == p.Rank() && (p != model.PriorityHighest || !admissionBefore(candidate, r))) {
 			return false, nil

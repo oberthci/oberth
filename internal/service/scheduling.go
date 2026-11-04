@@ -98,6 +98,11 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 			}
 		}
 	}
+	if hold, held := service.admissionHoldForRun(run); held {
+		result.State = "queued"
+		result.Message = hold.Message()
+		return result, hold.Message()
+	}
 	if run.Status == model.RunQueued {
 		result.State = "queued"
 		if service.scope == nil {

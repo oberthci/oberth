@@ -386,6 +386,8 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		}
 	}
 	switch name {
+	case "admission_hold":
+		return service.admissionHoldTool(ctx, actor, raw)
 	// Credential and grant lifecycle (#1105).
 	case "uplink_list", "uplink_revoke", "uplink_rotate":
 		return service.uplinkLifecycleTool(ctx, actor, name, raw)
@@ -3032,7 +3034,7 @@ func MutatingTool(name string) bool {
 		"access_allow", "access_revoke",
 		"kubevirt_grant", "kubevirt_revoke", "workflow_capability_grant", "workflow_capability_revoke",
 		"size_grant", "size_revoke", "resource_grant", "resource_revoke",
-		"admission_release", "queue_priority_config", "run_priority", "priority_grant", "priority_grant_revoke",
+		"admission_release", "admission_hold", "queue_priority_config", "run_priority", "priority_grant", "priority_grant_revoke",
 		"repo_remove", "repo_archive", "repo_unarchive",
 		"secretstore_sync_receipt",
 		"promote_grant", "promote_grant_revoke",

@@ -73,13 +73,23 @@ Check legacy-removal prerequisites through the private in-pod admin socket.
 
 ```text
 Usage: oberth admission [--json] | oberth admission release <run-id> [--force] [--json]
+       oberth admission hold on|off --reason <reason> [--allow tag,release,promotion] [--duration 2h] [--json]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+```
+
+## oberth admission hold
+
+```text
+Usage: oberth admission hold on|off --reason <reason> [--allow tag,release,promotion] [--duration 2h] [--json]
+         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+Default allow: tag,release. Default duration: 2h; maximum: 12h. --allow '' holds all new admission.
 ```
 
 ## oberth admission release
 
 ```text
 Usage: oberth admission [--json] | oberth admission release <run-id> [--force] [--json]
+       oberth admission hold on|off --reason <reason> [--allow tag,release,promotion] [--duration 2h] [--json]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
 ```
 
