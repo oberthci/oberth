@@ -187,7 +187,7 @@ func (s *Store) resetRunAfterRestartTx(ctx context.Context, tx *sql.Tx, run mode
 	}
 	reason := RestartRequeueReason
 	if run.AutoRetryOf != "" {
-		reason += "; " + autoRetryOfPrefix + run.AutoRetryOf
+		reason += "; " + strings.TrimPrefix(strings.TrimSuffix(run.Reason, "; "+PolicyRefreshWaitingReason), RestartRequeueReason+"; ")
 	}
 	reset, err := scanRun(tx.QueryRowContext(ctx, `UPDATE runs SET status='queued',phase='queued',job_name='',credentialed=0,started_at=NULL,finished_at=NULL,error='',failed_burn='',failed_step='',reason=?,updated_at=? WHERE id=? AND status='running' RETURNING `+runColumns, reason, now, run.ID))
 	if err != nil {
@@ -987,8 +987,8 @@ RETURNING `+runColumns,
 	if err != nil {
 		return model.Run{}, fmt.Errorf("finish run: %w", err)
 	}
-	if result.AutoRetryPreStep {
-		value, err = s.autoRetryPreStepTx(ctx, tx, value, now)
+	if result.AutoRetryInfrastructure {
+		value, err = s.autoRetryInfrastructureTx(ctx, tx, value, result.TerminalObservation, now)
 		if err != nil {
 			return model.Run{}, err
 		}
@@ -1362,11 +1362,7 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 		return model.Run{}, err
 	}
 	lineageReason := strings.TrimSuffix(value.Reason, "; "+PolicyRefreshWaitingReason)
-	retryReason := strings.TrimPrefix(lineageReason, RestartRequeueReason+"; ")
-	value.AutoRetryOf = strings.TrimPrefix(retryReason, autoRetryOfPrefix)
-	if value.AutoRetryOf == retryReason {
-		value.AutoRetryOf = ""
-	}
+	value.AutoRetryOf = automaticRetryOrigin(value.Reason)
 	value.AutoRetriedBy = strings.TrimPrefix(lineageReason, autoRetriedByPrefix)
 	if value.AutoRetriedBy == lineageReason {
 		value.AutoRetriedBy = ""

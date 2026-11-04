@@ -194,8 +194,13 @@ func TestWorkflowCreateBrownoutTenMinutesDoesNotStopServerOrOtherRuns(t *testing
 			if pendingRows, err := f.store.PendingRunCancellations(t.Context()); err != nil || len(pendingRows) != 0 {
 				t.Fatalf("settled row still pending: %+v %v", pendingRows, err)
 			}
-			if _, err := f.store.RetryRun(t.Context(), model.RunRetryRequest{RunID: pending.ID, Actor: "operator"}); err != nil {
-				t.Fatal("settled infrastructure not retryable", err)
+			finished, err := f.store.Run(t.Context(), pending.ID)
+			if err != nil || finished.AutoRetriedBy == "" {
+				t.Fatal("settled infrastructure not automatically retried", finished, err)
+			}
+			retry, err := f.store.Run(t.Context(), finished.AutoRetriedBy)
+			if err != nil || retry.AutoRetryOf != pending.ID || retry.AdmissionSequence != pending.AdmissionSequence {
+				t.Fatal("settled retry lost source/place", retry, err)
 			}
 		})
 	}

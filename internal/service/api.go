@@ -1673,7 +1673,7 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 		// Active display_reason intentionally describes queue priority. Scheduling
 		// presentation may replace it with a more specific wait/preflight reason;
 		// priority_class/reason remain available. Terminal causes keep their text.
-		if run.Status.Active() {
+		if run.Status.Active() && run.AutoRetryOf == "" {
 			visible.DisplayReason = run.PriorityMessage(now)
 		}
 	}
@@ -1699,6 +1699,9 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 }
 
 func runDisplayReason(run model.Run) string {
+	if run.AutoRetryOf != "" && run.Status.Active() {
+		return run.Reason
+	}
 	if run.Status == model.RunFailed {
 		return failedRunDisplayReason(run)
 	}

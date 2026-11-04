@@ -1159,6 +1159,8 @@ Usage of serve:
         optional PEM file containing pinned TSA trust roots
   -audit-tsa-url string
         RFC 3161 timestamp authority HTTPS URL (empty disables external timestamps)
+  -auto-retry-infrastructure
+        automatically retry eligible infrastructure failures once at their original queue position (default true)
   -ci-cache-root string
         CI host cache root (default "/var/cache/oberth/ci")
   -data string

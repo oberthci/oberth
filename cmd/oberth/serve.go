@@ -138,6 +138,7 @@ type serveOptions struct {
 	runLogLimitBytes        int64
 	retentionInterval       time.Duration
 	retentionKeepNewest     int
+	autoRetryInfrastructure bool
 	maxConcurrent           int
 	maxConcurrentFile       string
 	declaredAdmission       service.DeclaredAdmissionConfig
@@ -289,6 +290,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.Int64Var(options.declaredAdmission.MemoryHeadroomPercent, "admission-memory-headroom-percent", 10, "deprecated compatibility option; ignored by workflow admission")
 	flags.IntVar(&options.declaredAdmission.IORuns, "admission-io-runs", 0, "deprecated compatibility option; ignored by workflow admission")
 
+	flags.BoolVar(&options.autoRetryInfrastructure, "auto-retry-infrastructure", true, "automatically retry eligible infrastructure failures once at their original queue position")
 	flags.StringVar(&options.maxConcurrentFile, "max-concurrent-jobs-file", "", "mounted ConfigMap key to reload max concurrent Jobs without restart; invalid or missing keeps the last good value")
 	flags.StringVar(&options.admissionSizeWeights, "admission-size-weights", service.DefaultSizeWeights.String(), "deprecated compatibility option; ignored; Kubernetes places step pods")
 	flags.DurationVar(&options.admissionStallTimeout, "admission-stall-timeout", 10*time.Minute, "workflow startup bound for absent or non-capacity-stalled pods; Kubernetes capacity waits are exempt")
@@ -870,15 +872,16 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	scheduler, err := service.NewScheduler(service.SchedulerConfig{
 		Store: database, Git: git, Logs: logs, Jobs: argoJobs, ReleaseJobs: argoJobs, Auditor: database,
 		TrustedPreflight: trusted, Signals: signals, WorkspaceRoot: filepath.Join(options.dataRoot, "work"), MaxConcurrent: options.maxConcurrent,
-		MaxConcurrentFile:       options.maxConcurrentFile,
-		MaxRunLogBytes:          options.runLogLimitBytes,
-		MutationGate:            anchors.AllowMutation,
-		AdmissionDiskFloorBytes: options.admissionDiskFloorBytes,
-		AdmissionPressure:       options.admissionPressure,
-		SizeWeights:             options.sizeWeights,
-		DeclaredAdmission:       options.declaredAdmission,
-		MaxHeadWait:             options.admissionMaxHeadWait,
-		StalledRunTimeout:       options.admissionStallTimeout,
+		DisableInfrastructureAutoRetry: !options.autoRetryInfrastructure,
+		MaxConcurrentFile:              options.maxConcurrentFile,
+		MaxRunLogBytes:                 options.runLogLimitBytes,
+		MutationGate:                   anchors.AllowMutation,
+		AdmissionDiskFloorBytes:        options.admissionDiskFloorBytes,
+		AdmissionPressure:              options.admissionPressure,
+		SizeWeights:                    options.sizeWeights,
+		DeclaredAdmission:              options.declaredAdmission,
+		MaxHeadWait:                    options.admissionMaxHeadWait,
+		StalledRunTimeout:              options.admissionStallTimeout,
 	})
 	if err != nil {
 		return err

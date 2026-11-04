@@ -70,3 +70,9 @@ type RunRerunResult struct {
 	Enqueued EnqueueRunResult
 	Warning  string
 }
+
+// IsInfrastructureRunFailure is the terminal failure class accepted by run_retry.
+// Cancellation/interruption and publication replay have separate policies.
+func IsInfrastructureRunFailure(status RunStatus, phase, failedStep string) bool {
+	return status == RunFailed && (phase == "infrastructure" || phase == "job") && failedStep == ""
+}

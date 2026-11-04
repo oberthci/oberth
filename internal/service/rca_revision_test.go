@@ -49,7 +49,7 @@ func (s *rcaRevisionStore) Repository(ctx context.Context, id int64) (model.Repo
 	return s.Store.Repository(ctx, id)
 }
 
-func TestRCARevisionRetryRequiresPositivePreCreateProof(t *testing.T) {
+func TestRCARevisionDefiniteCreateFailureRetriesWithoutDeletingName(t *testing.T) {
 	for _, kind := range []string{"known-source-outage", "hard-policy", "unknown-create", "infra-without-absence-proof"} {
 		t.Run(kind, func(t *testing.T) {
 			fixture := newRecoveryFixture(t)
@@ -71,10 +71,10 @@ func TestRCARevisionRetryRequiresPositivePreCreateProof(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if (current.AutoRetriedBy != "") != (kind == "known-source-outage") || len(jobs.deleted) != 0 {
+			if current.AutoRetriedBy == "" || len(jobs.deleted) != 0 {
 				t.Fatal("unsafe retry/cleanup", current, jobs.deleted)
 			}
-			if kind == "known-source-outage" {
+			if current.AutoRetriedBy != "" {
 				child, err := fixture.store.Run(t.Context(), current.AutoRetriedBy)
 				if err != nil || child.Status != model.RunQueued || child.AutoRetryOf != run.ID {
 					t.Fatal("missing atomic child", child, err)
@@ -84,15 +84,15 @@ func TestRCARevisionRetryRequiresPositivePreCreateProof(t *testing.T) {
 	}
 }
 
-func TestRCARevisionNoRetryAfterWorkflowMayHaveRun(t *testing.T) {
+func TestRCARevisionRetryRequiresSettledWorkAndNoTestFailure(t *testing.T) {
 	for _, kind := range []string{"submitted-write-failed", "completed-while-down", "create-settlement"} {
 		t.Run(kind, func(t *testing.T) {
 			fixture := newRecoveryFixture(t)
 			run := fixture.enqueueAndClaim(t, "feature/"+kind, strings.Repeat("a", 40))
 			jobs := &rcaCreateFailure{}
 			scheduler := fixture.scheduler(t, jobs)
-			// Explicit empty history makes the call-site fence, not missing data,
-			// the reason these post-create cases cannot authorize automatic replay.
+			// Explicit empty history permits settled infrastructure recovery; an
+			// observed test failure still cannot authorize replay.
 			if err := scheduler.logs.(*runlog.Store).InitializeStepProgress(run.ID); err != nil {
 				t.Fatal(err)
 			}
@@ -129,11 +129,16 @@ func TestRCARevisionNoRetryAfterWorkflowMayHaveRun(t *testing.T) {
 				}
 			}
 			current, err := fixture.store.Run(t.Context(), run.ID)
-			if err != nil || current.Status != model.RunFailed || current.AutoRetriedBy != "" {
-				t.Fatal("post-create work replayed", current, err)
+			wantRetry := kind != "completed-while-down"
+			if err != nil || current.Status != model.RunFailed || (current.AutoRetriedBy != "") != wantRetry {
+				t.Fatal("settled infrastructure/test failure classification", current, err)
 			}
 			counts, err := fixture.store.CountRuns(t.Context())
-			if err != nil || counts.Total != 1 {
+			wantCount := int64(1)
+			if wantRetry {
+				wantCount = 2
+			}
+			if err != nil || int64(counts.Total) != wantCount {
 				t.Fatal("unexpected replacement", counts, err)
 			}
 		})

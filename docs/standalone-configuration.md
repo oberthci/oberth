@@ -43,3 +43,14 @@ administrator-owned `go.example.test` namespace and registered `forge/example`
 upstream can map `go.example.test/wire` to `sample-wire` using repository prefix
 `sample-`; supplying the same suffix under a different upstream never qualifies
 that repository.
+
+## Automatic infrastructure recovery
+
+`autoRetryInfrastructure` defaults to true in Helm; the server equivalent is
+`--auto-retry-infrastructure=true`. Failed steps, including infrastructure-classified
+step failures, and execution deadlines after any step started or passed are
+excluded. Eligible branch infrastructure failures get
+one fresh attempt at their original admission position and priority. The budget
+cannot be raised beyond one retry. Set the value to false in administrator-owned
+upgrade values for manual-only recovery. See [eligibility, audit records and
+upgrade behavior](infrastructure-retries.md).
