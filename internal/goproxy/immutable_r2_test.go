@@ -12,11 +12,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/oberthci/oberth/internal/gitcache"
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func TestImmutableMetadataDoesNotBuildZip(t *testing.T) {
@@ -43,9 +45,29 @@ func TestImmutableMetadataDoesNotBuildZip(t *testing.T) {
 	}
 }
 
+// Done is evaluated when getObjects selects between this waiter's context and
+// the shared flight, after looking up that flight under the cache mutex.
+type artifactWaiterContext struct {
+	context.Context
+	waiting chan struct{}
+	once    sync.Once
+}
+
+func (ctx *artifactWaiterContext) Done() <-chan struct{} {
+	ctx.once.Do(func() { close(ctx.waiting) })
+	return ctx.Context.Done()
+}
+
 func TestSharedArtifactFillSurvivesFirstWaiterCancellation(t *testing.T) {
 	h := artifactHandler(t, newArtifactGit(), t.TempDir())
+	// Coordination and durable object/manifest publication are fixture progress,
+	// not a one-second latency contract. Bound the whole operation as well.
+	budget := testtimeout.Start(time.Second)
+	ctx, finish := context.WithTimeout(t.Context(), budget)
+	defer finish()
 	started, release := make(chan struct{}), make(chan struct{})
+	releaseBuild := sync.OnceFunc(func() { close(release) })
+	defer releaseBuild()
 	var calls atomic.Int64
 	build := func(ctx context.Context) (string, map[string][]byte, error) {
 		calls.Add(1)
@@ -57,25 +79,46 @@ func TestSharedArtifactFillSurvivesFirstWaiterCancellation(t *testing.T) {
 		}
 		return artifactOID, map[string][]byte{".info": []byte("info"), ".mod": []byte(artifactMod)}, nil
 	}
-	leaderCtx, cancel := context.WithCancel(t.Context())
+	leaderCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	leader := make(chan error, 1)
 	go func() {
-		_, err := h.artifacts.get(leaderCtx, "repo", artifactModule, "v1.0.0", "", time.Second, build)
+		_, err := h.artifacts.get(leaderCtx, "repo", artifactModule, "v1.0.0", "", budget, build)
 		leader <- err
 	}()
-	<-started
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal("shared fill did not start", ctx.Err())
+	}
 	follower := make(chan error, 1)
+	followerCtx := &artifactWaiterContext{Context: ctx, waiting: make(chan struct{})}
 	go func() {
-		_, err := h.artifacts.get(t.Context(), "repo", artifactModule, "v1.0.0", "", time.Second, build)
+		_, err := h.artifacts.get(followerCtx, "repo", artifactModule, "v1.0.0", "", budget, build)
 		follower <- err
 	}()
-	cancel()
-	if err := <-leader; err == nil {
-		t.Fatal("leader cancellation ignored")
+	select {
+	case <-followerCtx.waiting:
+	case <-ctx.Done():
+		t.Fatal("follower did not join shared fill", ctx.Err())
 	}
-	close(release)
-	if err := <-follower; err != nil {
-		t.Fatal("leader canceled follower's fill", err)
+	cancel()
+	select {
+	case err := <-leader:
+		if err == nil {
+			t.Fatal("leader cancellation ignored")
+		}
+	case <-ctx.Done():
+		t.Fatal("leader cancellation did not return", ctx.Err())
+	}
+	releaseBuild()
+	select {
+	case err := <-follower:
+		if err != nil {
+			t.Fatal("shared fill failed for follower after leader cancellation", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("follower did not finish shared fill", ctx.Err())
 	}
 	if calls.Load() != 1 {
 		t.Fatal("follower regenerated shared fill")
