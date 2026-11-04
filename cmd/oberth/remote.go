@@ -173,7 +173,7 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 	limit := flags.Int("limit", 20, "runs per page (at most 100)")
 	before := flags.String("before", "", "only runs older than this cursor (printed after a full page)")
 	all := flags.Bool("all", false, "follow pages to the oldest run")
-	active := flags.Bool("active", false, "only queued, waiting and running runs, in scheduling order, with queue position and wait reason")
+	active := flags.Bool("active", false, "only queued and running runs, in scheduling order, with queue position and wait reason")
 	asJSON := flags.Bool("json", false, "emit the server's payload unchanged")
 	if err := flags.Parse(arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -266,10 +266,13 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 	return nil
 }
 
+// datedRunCount counts the rows that count against the page limit: terminal
+// runs only, as the server's RunPageFull does. Queued and running rows ride
+// along on the first page and never make it full.
 func datedRunCount(runs []remoteRun) int {
 	count := 0
 	for _, run := range runs {
-		if run.StartedAt != nil || run.FinishedAt != nil || run.Status == "passed" || run.Status == "failed" || run.Status == "interrupted" {
+		if run.Status == "passed" || run.Status == "failed" || run.Status == "interrupted" {
 			count++
 		}
 	}
@@ -312,8 +315,14 @@ func renderActiveRuns(output io.Writer, runs []remoteActiveRun, now time.Time) e
 		if run.StartedAt != nil {
 			elapsed = now.Sub(*run.StartedAt).Truncate(time.Second).String()
 		}
+		// The active entry carries its observation beside the run; the
+		// reason is the same display_reason every other list shows.
+		row := run.remoteRun
+		if row.Scheduling == nil {
+			row.Scheduling = run.Scheduling
+		}
+		reason = displayRunReason(row)
 		if scheduling := run.Scheduling; scheduling != nil {
-			reason = scheduling.Message
 			if admission := scheduling.Admission; admission != nil {
 				if admission.Size != "" {
 					size = fmt.Sprintf("%s/%d", admission.Size, admission.Weight)
@@ -354,8 +363,8 @@ func runCursor(run remoteRun) string {
 }
 
 // cursorMovedBack accepts a different cursor as progress. The default list
-// sorts by admission time, so its queue sequence can increase across older
-// pages; a repeated cursor still detects an older server without paging.
+// pages terminal runs by end time, so its queue sequence can increase across
+// older pages; a repeated cursor still detects an older server without paging.
 func cursorMovedBack(previous, next string) bool {
 	return next != previous
 }

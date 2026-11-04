@@ -123,14 +123,14 @@ func TestActiveRunsOrderAndWaitReasons(t *testing.T) {
 	}
 
 	// The history view holds the finished run only; the default has one
-	// queue-first list followed by admitted runs in admission-time order.
+	// in claim order, then running, then finished.
 	history, err := service.Runs(ctx, api.Actor{Identity: "agent@host"}, api.RunFilter{View: api.RunViewHistory, Limit: 50})
 	if err != nil || len(history.([]model.Run)) != 1 || history.([]model.Run)[0].ID != done.ID {
 		t.Fatalf("history = %#v, %v", history, err)
 	}
 	all, err := service.Runs(ctx, api.Actor{Identity: "agent@host"}, api.RunFilter{Limit: 50})
-	if err != nil || len(all.([]model.Run)) != 6 || all.([]model.Run)[0].ID != vm.ID ||
-		all.([]model.Run)[3].ID != queued.ID || all.([]model.Run)[4].ID != done.ID {
+	if err != nil || len(all.([]model.Run)) != 6 || all.([]model.Run)[3].ID != queued.ID ||
+		all.([]model.Run)[0].ID != vm.ID || all.([]model.Run)[4].ID != holder.ID || all.([]model.Run)[5].ID != done.ID {
 		t.Fatalf("default list = %#v, %v", all, err)
 	}
 
@@ -153,8 +153,9 @@ func TestActiveRunsOrderAndWaitReasons(t *testing.T) {
 	}
 }
 
-// The default and explicit all views return the same queue-first list. A
-// bounded first page carries the whole queue even when it exceeds limit.
+// The default and explicit all views return the same queue-first list, read
+// in claim order with the claimed run at position 1 first. A bounded
+// first page carries the whole queue even when it exceeds limit.
 func TestRunListDefaultViewCarriesWholeQueue(t *testing.T) {
 	fixture := newControlFixture(t)
 	ctx := context.Background()
@@ -183,13 +184,13 @@ func TestRunListDefaultViewCarriesWholeQueue(t *testing.T) {
 		if len(runs) != 3 || page.NextBefore != 0 || page.NextCursor != "" {
 			t.Fatalf("run_list %s = %+v", arguments, page)
 		}
-		for position, run := range runs {
-			if run.DisplayStatus != "queued" || run.Scheduling == nil || run.Scheduling.QueuePosition != int64(position+1) {
-				t.Fatalf("queue position %d: %+v", position+1, run)
+		for index, run := range runs {
+			if want := int64(index + 1); run.DisplayStatus != "queued" || run.Scheduling == nil || run.Scheduling.QueuePosition != want {
+				t.Fatalf("queue position %d: %+v", want, run)
 			}
 		}
 	}
-	if got := list(`{}`).Runs.([]model.Run); len(got) != 3 || got[0].Ref != "feature/one" {
+	if got := list(`{}`).Runs.([]model.Run); len(got) != 3 || got[0].Ref != "feature/one" || got[2].Ref != "feature/three" {
 		t.Fatalf("default list = %+v", got)
 	}
 }

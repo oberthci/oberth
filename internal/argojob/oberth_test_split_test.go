@@ -119,7 +119,11 @@ else:
 			if err := json.Unmarshal(output, &actual); err != nil {
 				t.Fatal(err)
 			}
-			want := []string{"test", "-race", "-v", "-count=1", "-p=2", "-timeout=20m"}
+			timeout := "-timeout=20m"
+			if group == "store" {
+				timeout = "-timeout=35m"
+			}
+			want := []string{"test", "-race", "-v", "-count=1", "-p=2", timeout}
 			for _, pkg := range packages {
 				owner := "rest"
 				for _, dedicated := range []string{"store", "service", "gitcache"} {

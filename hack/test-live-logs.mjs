@@ -217,22 +217,25 @@ await run('awaitResult');
 assert.ok(run('renderedHTML').includes('title="schedule entry">nightly&lt;unsafe&gt;'));
 assert.ok(run(`summaryLines({Run:scheduleRun,Steps:[]}).join(' ')`).includes('schedule=nightly<unsafe>'));
 
-assert.equal(run(`statusKind('deadline-exceeded')`), 'fail');
-const deadlineSummary = run(`summaryLines({Run:{ID:'deadline',Status:'running',display_status:'deadline-exceeded'},Steps:[],Scheduling:{message:'Execution deadline exceeded.',execution:{state:'deadline_exceeded',phase:'Failed',reconciliation_lag_seconds:3080,deadline:{budget_seconds:5400,expires_at:'2026-10-30T10:33:37Z',remaining_seconds:0}}}}).join(' ')`);
-for (const text of ['deadline-exceeded', 'Execution deadline exceeded', '3080s', '0s remaining', 'clock: Workflow start']) assert.ok(deadlineSummary.includes(text), text);
+// The deadline is a running run's reason, never a status of its own.
+assert.equal(run(`statusKind('deadline-exceeded')`), 'unknown');
+assert.equal(run(`displayRunStatus({Status:'running',StartedAt:'2026-10-30T09:00:00Z',display_status:'running',display_reason:'Execution deadline exceeded.'})`), 'running');
+const deadlineSummary = run(`summaryLines({Run:{ID:'deadline',Status:'running',display_status:'running',display_reason:'Execution deadline exceeded.'},Steps:[],Scheduling:{message:'Execution deadline exceeded.',execution:{state:'deadline_exceeded',phase:'Failed',reconciliation_lag_seconds:3080,deadline:{budget_seconds:5400,expires_at:'2026-10-30T10:33:37Z',remaining_seconds:0}}}}).join(' ')`);
+for (const text of ['[running]', 'Execution deadline exceeded', '3080s', '0s remaining', 'clock: Workflow start']) assert.ok(deadlineSummary.includes(text), text);
 assert.ok(!deadlineSummary.includes('[queued]'));
-run(`state.step='build / compile'; state.stepRunID='scroll-run'; termReads=0; stepReads=0; awaitResult=renderRunDetailView({Run:{ID:'scroll-run',RepoID:1,Status:'running',display_status:'deadline-exceeded',StartedAt:new Date().toISOString(),Ref:'fix/live'},Steps:[{Burn:'build',Step:'compile',Status:'running',Ordinal:0}]},0);`);
+run(`state.step='build / compile'; state.stepRunID='scroll-run'; termReads=0; stepReads=0; awaitResult=renderRunDetailView({Run:{ID:'scroll-run',RepoID:1,Status:'running',display_status:'running',display_reason:'Execution deadline exceeded.',StartedAt:new Date().toISOString(),Ref:'fix/live'},Steps:[{Burn:'build',Step:'compile',Status:'running',Ordinal:0}]},0);`);
 await run('awaitResult');
 assert.ok(run('renderedHTML').includes('fixture log') && run('renderedHTML').includes('live output'), 'an execution display label must not stop durable-running log refresh');
 console.log('live log dashboard checks passed');
 
 // Host pressure is a scheduling hold, distinct from running-work failures.
-assert.equal(run(`queueReason({Scheduling:{state:'waiting',admission:{state:'waiting',pressure:{resource:'io',avg60:42.25}}}})`), 'deferred: io pressure 42.3%');
-assert.equal(run(`queueReason({Scheduling:{state:'waiting',admission:{state:'waiting',blocked_by:{pressure:{resource:'cpu',avg60:75},size:'M'}}}})`), 'deferred: cpu pressure 75.0%');
+// The server computes the reason once; the dashboard shows display_reason.
+assert.equal(run(`queueReason({display_reason:'host IO pressure (42%)',Scheduling:{state:'waiting',admission:{state:'waiting',pressure:{resource:'io',avg60:42.25}}}})`), 'host IO pressure (42%)');
+assert.equal(run(`queueReason({display_reason:'host CPU pressure (75%), behind org/app/main',Scheduling:{state:'waiting',admission:{state:'waiting',blocked_by:{pressure:{resource:'cpu',avg60:75},size:'M'}}}})`), 'host CPU pressure (75%), behind org/app/main');
 assert.equal(run(`pressureStatusCard(null)`), '', 'scoped status omits host PSI');
 assert.ok(run(`pressureStatusCard({available:false})`).includes('admission fails open'));
 assert.ok(run(`pressureStatusCard({available:true,holding:true,resource:'io',sample:{io:{full_avg60:40},cpu:{some_avg60:20},memory:{full_avg60:5}}})`).includes('deferring new grants'));
-assert.equal(run(`queueReason({Scheduling:{state:'waiting',admission:{state:'waiting',pressure:{resource:'io',redacted:true}}}})`), 'deferred: host io pressure');
+assert.equal(run(`queueReason({display_reason:'host IO pressure',Scheduling:{state:'waiting',admission:{state:'waiting',pressure:{resource:'io',redacted:true}}}})`), 'host IO pressure');
 
 // RCA run-list vocabulary is additive: raw failure/cancellation states survive.
 assert.equal(run(`displayRunStatus({Status:'failed',auto_retried_by:'retry'})`), 'infra-retried');
@@ -340,10 +343,10 @@ assert.ok(run(`pressureStatusCard({mode:'observe',available:true,threshold_excee
 assert.ok(!run(`pressureStatusCard({mode:'observe',available:true,threshold_exceeded:true,holding:false,resource:'io'})`).includes('deferring new grants'));
 
 // Avg10 host admission reports both signals and preserves scoped redaction.
-assert.equal(run(`queueReason({Scheduling:{state:'waiting',admission:{pressure:{resource:'cpu+io',avg10_gate:true,cpu_avg10:45.25,io_avg10:30.5}}}})`), 'deferred: cpu+io pressure gate (CPU 45.3%, IO 30.5%; some avg10)');
-assert.equal(run(`queueReason({Scheduling:{state:'waiting',admission:{pressure:{resource:'cpu+io',redacted:true}}}})`), 'deferred: host cpu+io pressure');
+assert.equal(run(`queueReason({display_reason:'host CPU and IO pressure (CPU 45%, IO 31%)',Scheduling:{state:'waiting',admission:{pressure:{resource:'cpu+io',avg10_gate:true,cpu_avg10:45.25,io_avg10:30.5}}}})`), 'host CPU and IO pressure (CPU 45%, IO 31%)');
+assert.equal(run(`queueReason({Scheduling:{state:'waiting',message:'Waiting in the weighted resource admission queue.',admission:{pressure:{resource:'cpu+io',redacted:true}}}})`), 'Waiting in the weighted resource admission queue.', 'the scheduling message is the fallback when no reason was presented');
 const avg10Card=run(`pressureStatusCard({cpu_some_avg10:40,available:true,holding:true,resource:'cpu',sample:{cpu:{some_avg10:60},io:{some_avg10:12}}})`);
 assert.ok(avg10Card.includes('CPU some 60.0%') && avg10Card.includes('IO some 12.0%') && avg10Card.includes('(avg10)'));
 assert.ok(run(`pressureStatusCard({available:false})`).includes('budget-only admission'));
 
-assert.equal(run(`queueReason({Scheduling:{state:'waiting',admission:{pressure:{resource:'cpu',avg10_gate:true,cpu_avg10:60}}}})`), 'deferred: cpu pressure gate (CPU 60.0%, IO 0.0%; some avg10)');
+assert.equal(run(`queueReason({display_reason:'host CPU pressure (CPU 60%, IO 0%)',Scheduling:{state:'waiting',admission:{pressure:{resource:'cpu',avg10_gate:true,cpu_avg10:60}}}})`), 'host CPU pressure (CPU 60%, IO 0%)');

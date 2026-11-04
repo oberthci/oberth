@@ -64,9 +64,11 @@ type RunFilter struct {
 	// BeforeRun pages to runs older than this run, by ID: the cursor a
 	// scoped uplink gets instead of a global sequence (#073).
 	BeforeRun string
-	// View selects the list: "" or "all" puts the queue first, followed by
-	// dated runs; "history" keeps the old terminal-only paging; "active" is
-	// the unpaged compatibility view of non-terminal runs.
+	// View selects the list: "" or "all" lists the queue (the run admitted
+	// next at its top), then running runs newest start first, then
+	// terminal runs newest finish first; "history" keeps the old
+	// terminal-only paging; "active" is the unpaged compatibility view of
+	// non-terminal runs.
 	View string
 }
 
@@ -394,7 +396,7 @@ func (server *Server) handleRuns(writer http.ResponseWriter, request *http.Reque
 	}
 	value, err := server.views.Runs(request.Context(), actorFrom(request.Context()), filter)
 	// The body remains a plain array. The default first page also carries
-	// the whole bounded queue, so only its admitted/finished portion counts
+	// every queued and running run, so only its terminal portion counts
 	// against the page limit.
 	if runs, ok := value.([]model.Run); ok && err == nil && RunPageFull(runs, filter) {
 		last := runs[len(runs)-1]
@@ -407,17 +409,19 @@ func (server *Server) handleRuns(writer http.ResponseWriter, request *http.Reque
 	server.writeView(writer, value, err)
 }
 
-// RunPageFull reports whether the time-ordered part of a run page is full.
+// RunPageFull reports whether the paged part of a run page is full. The
+// default and latest-per-ref lists carry every queued and running run in
+// addition to their page of terminal runs, so only terminal rows count.
 func RunPageFull(runs []model.Run, filter RunFilter) bool {
 	if len(runs) == 0 || filter.View == RunViewActive {
 		return false
 	}
-	if filter.LatestPerRef || filter.View == RunViewHistory {
+	if filter.View == RunViewHistory {
 		return len(runs) == filter.Limit
 	}
 	count := 0
 	for _, run := range runs {
-		if run.StartedAt != nil || run.FinishedAt != nil || run.Status.Terminal() {
+		if run.Status.Terminal() {
 			count++
 		}
 	}

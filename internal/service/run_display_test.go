@@ -34,7 +34,7 @@ func TestDisplayRunStatusSeparatesPrestartAndTerminalCauses(t *testing.T) {
 		{"infrastructure error", model.Run{Status: model.RunFailed, Error: "controller unavailable"}, "failed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := displayRunStatus(tc.run); got != tc.want {
+			if got := model.DisplayRunStatus(tc.run); got != tc.want {
 				t.Fatalf("display status = %q, want %q", got, tc.want)
 			}
 			if projected := presentationRun(tc.run); projected.DisplayStatus != tc.want {
@@ -186,13 +186,14 @@ func TestDefaultRunListNumbersClaimedAndUnclaimedTogether(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The claimed run is first in claim order, at position 1.
 	runs := value.([]model.Run)
 	if len(runs) != 2 || runs[0].ID != first.ID || runs[1].ID != second.ID {
 		t.Fatalf("queue order = %+v", runs)
 	}
 	for i, run := range runs {
-		if run.DisplayStatus != "queued" || run.Scheduling == nil || run.Scheduling.QueuePosition != int64(i+1) || run.DisplayReason == "" {
-			t.Fatalf("queue position %d = %+v", i+1, run)
+		if want := int64(i + 1); run.DisplayStatus != "queued" || run.Scheduling == nil || run.Scheduling.QueuePosition != want || run.DisplayReason == "" {
+			t.Fatalf("queue position %d = %+v", want, run)
 		}
 	}
 	filteredValue, err := service.Runs(ctx, actor, api.RunFilter{Ref: second.Ref})

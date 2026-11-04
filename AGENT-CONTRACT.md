@@ -491,12 +491,21 @@ trust assumptions and complete invalidation rules.
   provenance, including lasting supersession protection for automatic priority.
   Both durable claims
   and weighted admission sort by effective class, then original admission FIFO.
-  Normal and high work waiting 60 minutes join `highest` with their original FIFO place;
-  automatic restart refires preserve its wait and explicit admin bump. Existing
-  grants are never preempted. Backfill/head-wait rules apply within each class;
-  a waiting higher class prevents lower-class backfill. Priority backfill must
-  also leave enough declared demand and run slots for the head alongside all
-  backfilled work. Group/VM parking still
+  A normal run waiting 60 minutes ages into `high` with its original FIFO
+  place and the reason `aged: normal run waited at least 60 minutes`; high
+  work does not age and nothing ages into `highest`, so promotions, the oldest
+  waiting tag release and explicit `highest` bumps always lead. High runs
+  accepted after an aged run wait behind it; sustained `highest` arrivals can
+  still delay it without limit. Automatic restart refires preserve its wait
+  and explicit admin bump. Existing
+  grants are never preempted. Backfill/head-wait rules preserve the head's
+  priority reservation.
+  v0.17.81 refuses every backfill behind an effective high/highest head,
+  including an aged normal head. From v0.17.82, measured EASY backfill
+  admits later work only when its measured p95 ends strictly before the head
+  reservation, or it shares the head's effective and base priority classes
+  and leaves enough declared demand and run slots
+  for the head alongside all surviving grants. Group/VM parking still
   releases weight and lets unrelated work proceed. Bounded extra priority claims
   let higher classes reach the gate past ordinary waiting dispatch slots.
   `priority_class`, `priority_reason` and `priority_requested_by` are run projections;
@@ -1269,14 +1278,19 @@ trust assumptions and complete invalidation rules.
   freed; a reservation its owner released meanwhile is reported as not found
   and not audited. The same grant pass admits the runs behind it.
 - Run list views (#1122): `/api/runs`, MCP `run_list`, `oberth runs` and the
-  dashboard use one default order. The first page carries every not-yet-
-  admitted run, capped at 500, by effective priority then admission order (`admission_sequence`,
-  then `queue_sequence`), preserving restart FIFO order; below it, admitted
-  and terminal runs sort by `started_at` descending, breaking ties by ID.
-  A terminal run that was never admitted sorts by `finished_at`. The dated
-  portion pages by that fixed (time, ID) key, using the last run's sequence
-  or ID as the external cursor; an admission between page loads cannot move
-  an already-seen run onto the next page. The whole queue, including claimed
+  dashboard use one default order in three groups, top to bottom. The queue
+  first: every not-yet-admitted run, capped at 500, in scheduler claim order:
+  highest effective class first, then earliest `admission_sequence`, then
+  `queue_sequence`, preserving restart FIFO order. High work, including aged
+  normal runs, precedes normal work in every view.
+  Then running runs, capped at 500, most recently started first. Then
+  terminal runs, most recently finished first (`COALESCE(finished_at,
+  started_at, queued_at)` descending, ties by ID). Only terminal rows count
+  against the page limit, and only they page, by that fixed (end time, ID)
+  key with the last run's sequence or ID as the external cursor; no limit or
+  page lists a queued or running run below a finished one, and a run that
+  finishes between page loads cannot land on an older page. `latest_per_ref=1`
+  groups each ref's newest run the same way. The whole queue, including claimed
   but unadmitted runs, has one numbering computed before repository/ref filters.
   Each queued run carries its scheduling reason; filtered lists keep global positions;
   scoped uplinks see no global position (#073). `started_at` is recorded when
@@ -1291,17 +1305,48 @@ trust assumptions and complete invalidation rules.
   Detailed status/run reads can also expose an ephemeral Argo deadline and
   finalization-lag observation after steps have progressed. The clock is the
   submitted budget plus Argo's Workflow start, not weighted admission. Only
-  explicit controller/current-attempt Pod deadline evidence yields the display
-  label `deadline-exceeded`; elapsed time or exit 143 alone does not. Durable
-  terminal state, admission release and replay evidence are unchanged. See
-  [workflow-deadlines.md](docs/workflow-deadlines.md).
+  explicit controller/current-attempt Pod deadline evidence puts
+  `Execution deadline exceeded.` in `display_reason` (the run stays `running`
+  until the store finalizes it, then `failed`); elapsed time or exit 143
+  alone does not. Durable terminal state, admission release and replay
+  evidence are unchanged. See [workflow-deadlines.md](docs/workflow-deadlines.md).
   Durable `Status` values are unchanged and `RunStatus.Valid` still refuses
   the read-only `waiting` projection.
 
+  `display_status` is exactly one of seven values: `queued`, `running`,
+  `passed`, `failed`, `infra-retried`, `superseded`, `cancelled`
+  (`model.DisplayStatuses`; `model.DisplayRunStatus` is the only mapping,
+  and `TestEveryRawPhaseMapsToExactlyOneDisplayStatus` holds every raw
+  status, phase and projection to it). A status says what to do with the
+  run; anything finer is the reason line, never a second status. Every run
+  that has not started is `queued`: durable queued, or claimed before
+  admission (`Status` `waiting` on the wire, phase `waiting` or
+  `preparing`). Admission records `started_at`, so an admitted run,
+  including a trusted preflight before Workflow submission, is `running`.
+  A queued run's `display_reason` names what it waits for, in plain
+  words, computed once by the server for the list, detail, status, live-log
+  and active views, the CLI and the dashboard: `next in line`,
+  `position 3 in line, behind org/app/main (needs the whole host)`,
+  `preparing to run`, `waiting for CPU budget (12.5 of 40 CPU free)`,
+  `waiting for memory budget (8 GiB of 16 GiB free)`, `host IO pressure
+  (42%)`, `10 runs already running (limit 10)`, `concurrency group deploy
+  busy (held by run <run12>)`, `waiting for KubeVirt capacity (repository
+  VM grant)`, `waiting for trusted VM capacity`, `waiting for disk space
+  (... free, floor ...)`, `waiting for capacity (size M, 6 of 8 weight
+  used)`, `waiting for admission` (claimed, no reservation known yet) and,
+  briefly at the grant before admission is recorded, `admitted, starting
+  the workflow` or `KVM preflight running`; a head-of-queue run adds `; smaller runs run meanwhile` or `; host
+  draining for it`. A scoped viewer sees no numbers, positions or other
+  repositories' runs (#073). `Scheduling.state`, `Scheduling.message` and
+  `Scheduling.admission` keep the raw observation for machines.
+
   | Durable cause | `display_status` | `display_reason` |
   | --- | --- | --- |
-  | queued or claimed before admission | `queued` | scheduling observation |
-  | admitted, including trusted preflight | `running` | empty (phase is `preflight` while its VM executes) |
+  | queued, claimed before admission | `queued` | what the run waits for (above) |
+  | admitted (including a trusted preflight before Workflow submission) and started | `running` | empty |
+  | uncertain Workflow create (phase `infrastructure-pending`) | `running` | `Workflow create outcome uncertain; cleanup pending` |
+  | running past its execution deadline | `running` | `Execution deadline exceeded.` (plus priority prefix) |
+  | failed by its execution deadline | `failed` | `Execution deadline exceeded.` or the retained resource guidance |
   | passed CI / published release | `passed` | empty |
   | failed step or infrastructure | `failed` | failed phase and bounded cause; never empty |
   | upstream publication failure | `failed` | upstream rejection class, or upstream publication failure with transient cause |
@@ -1315,7 +1360,10 @@ trust assumptions and complete invalidation rules.
 
   Raw status fields retain their values, but existing `display_status` values
   can change from `cancelled` to `superseded`, or `failed` to `infra-retried`.
-  Clients must accept these display enum values. The display pair is additive
+  Clients must accept these display enum values. The former `waiting`
+  dashboard label and the `infra-pending` and `deadline-exceeded`
+  `display_status` values are gone: they are `queued`, `running` and
+  `failed`/`running` with the reason above. The display pair is additive
   on default API, MCP and CLI responses; retry
   and rerun eligibility still uses the durable cause. The `status`/`wait`
   tool's `status: "delivered"` remains the legacy alias of `passed` for every
@@ -2832,6 +2880,7 @@ alone is never evidence that missing migrations ran.
 | v37 | Unreleased (#1216 measurement) | Guard version-2 container telemetry and add the global observation-age retention index; preserve version-1 observations | Database restore |
 | v38 | Upstream publication retry | Persist bounded attempts, retry deadlines and audited owner progress without changing the pushed object or promotion plan | Database restore |
 | v39 | Submission priority | Persist expiring identity grants, audited priority requests and supersession protection; existing priority ordering remains compatible | Database restore |
+| v40 | Run list order | Widen the latest-per-ref index to cover grouped page ranking | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding

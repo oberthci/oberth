@@ -19,10 +19,10 @@ type ActiveRun struct {
 }
 
 // activeRuns lists every non-terminal run in scheduling order: started runs
-// (oldest start first) and admitted runs awaiting submission, then claimed
-// runs in admission order (preparing, or waiting on weight, group, VM
-// capacity or disk), then unclaimed queued runs in accepted order. The list
-// is bounded by store.MaxActiveRuns and never paged.
+// (oldest start first), then every run that has not started, claimed or
+// not, as one queue in the scheduler's claim order (effective class, then
+// FIFO), the same order the flat list numbers. The list is bounded by
+// store.MaxActiveRuns and never paged.
 func (service *API) activeRuns(ctx context.Context, filter api.RunFilter) (any, error) {
 	if filter.Before != 0 || strings.TrimSpace(filter.BeforeRun) != "" {
 		return nil, fmt.Errorf("%w: before does not apply to the active view, which is not paged", ErrInvalidInput)
@@ -57,10 +57,9 @@ func (service *API) activeRuns(ctx context.Context, filter api.RunFilter) (any, 
 			continue
 		}
 		// A run not yet started has no Workflow, so no step results.
-		entry.Scheduling = observer.observeScheduling(ctx, run, nil, false)
-		if entry.DisplayStatus == "queued" && entry.Scheduling != nil {
-			entry.DisplayReason = entry.Scheduling.Message
-		}
+		var reason string
+		entry.Scheduling, reason = observer.observeScheduling(ctx, run, nil, false)
+		applyQueuedDisplay(&entry.Run, entry.Scheduling, reason)
 		if run.Status == model.RunRunning && entry.Scheduling != nil &&
 			entry.Scheduling.Admission != nil && entry.Scheduling.Admission.State == "admitted" {
 			admitted = append(admitted, entry)

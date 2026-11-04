@@ -13,6 +13,8 @@ const (
 	PriorityHigh           RunPriority = "high"
 	PriorityHighest        RunPriority = "highest"
 	PriorityStarvationWait             = time.Hour
+	// PriorityAgedReason explains a normal run raised into high by waiting.
+	PriorityAgedReason = "aged: normal run waited at least 60 minutes"
 	// TagReleasePriorityReason identifies the automatic boost, so size limits
 	// never downgrade an explicit admin bump or a promotion.
 	TagReleasePriorityReason = "tag/release run: oldest waiting server-classified tag ref"
@@ -29,8 +31,13 @@ func (p RunPriority) Rank() int {
 	}
 }
 
-// EffectivePriority ages normal and high work into the highest class. Ties
-// use base class before FIFO position. Admission/end freezes aging.
+// EffectivePriority ages a normal run that has waited PriorityStarvationWait
+// up one class, into high, at its own queue position. It never ages work
+// into highest: promotions, the oldest waiting tag release and explicit
+// administrator bumps keep that class to themselves, so a backed-up queue
+// cannot turn every run "highest" and erase the priority line. Within a
+// class the order stays FIFO, which bounds the aged run's wait: every high
+// run accepted after it waits behind it. Admission/end freezes aging.
 func (run Run) EffectivePriority(now time.Time) (RunPriority, string) {
 	priority, reason := run.Priority, run.PriorityReason
 	if priority == "" {
@@ -41,8 +48,8 @@ func (run Run) EffectivePriority(now time.Time) (RunPriority, string) {
 	} else if run.FinishedAt != nil {
 		now = *run.FinishedAt
 	}
-	if (priority == PriorityNormal || priority == PriorityHigh) && !run.QueuedAt.IsZero() && now.Sub(run.QueuedAt) >= PriorityStarvationWait {
-		return PriorityHighest, fmt.Sprintf("starvation guard: %s run waited at least 60 minutes", priority)
+	if priority == PriorityNormal && !run.QueuedAt.IsZero() && now.Sub(run.QueuedAt) >= PriorityStarvationWait {
+		return PriorityHigh, PriorityAgedReason
 	}
 	return priority, reason
 }

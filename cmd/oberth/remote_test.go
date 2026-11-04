@@ -506,6 +506,30 @@ func TestRunsAllFollowsPages(t *testing.T) {
 	}
 }
 
+// Running rows ride along on the first page and never count toward the
+// limit, so a page of one running and one passed run is not full and the
+// CLI must not invent a cursor or an extra --all request (#050).
+func TestRunsRunningRowsDoNotFillThePage(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"ID":"run-3","QueueSequence":3,"Status":"running","StartedAt":"2026-11-03T10:00:00Z"},{"ID":"run-2","QueueSequence":2,"Status":"passed","FinishedAt":"2026-11-03T09:00:00Z"}]`))
+	}))
+	defer server.Close()
+	configure(t, server)
+	for _, args := range [][]string{{"--limit", "2"}, {"--limit", "2", "--all"}} {
+		var out bytes.Buffer
+		requests = 0
+		if err := runRuns(context.Background(), args, &out); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(out.String(), "more:") || requests != 1 {
+			t.Fatalf("%v: requests=%d output:\n%s", args, requests, out.String())
+		}
+	}
+}
+
 // Against a server older than paging, which ignores ?before and repeats the
 // newest page, --all and short-ID resolution must stop instead of looping
 // or counting each run once per repeated page (review finding).
@@ -621,13 +645,13 @@ func TestLogSummaryReportsIncompleteCountsAndContinuation(t *testing.T) {
 }
 
 func TestRunDetailShowsDeadlineAndFinalizationLag(t *testing.T) {
-	payload := `{"Run":{"ID":"deadline","Status":"running","display_status":"deadline-exceeded","display_reason":"Execution deadline exceeded.","SHA":"abc","Ref":"main"},"Steps":[],"Scheduling":{"message":"Execution deadline exceeded.","execution":{"phase":"Failed","reconciliation_lag_seconds":3080,"deadline":{"budget_seconds":5400,"clock":"workflow_started_at","expires_at":"2026-10-30T10:33:37Z","remaining_seconds":0,"elapsed":true}}}}`
+	payload := `{"Run":{"ID":"deadline","Status":"running","display_status":"running","display_reason":"Execution deadline exceeded.","SHA":"abc","Ref":"main"},"Steps":[],"Scheduling":{"message":"Execution deadline exceeded.","execution":{"phase":"Failed","reconciliation_lag_seconds":3080,"deadline":{"budget_seconds":5400,"clock":"workflow_started_at","expires_at":"2026-10-30T10:33:37Z","remaining_seconds":0,"elapsed":true}}}}`
 	configure(t, remoteServer(t, payload))
 	var output bytes.Buffer
 	if err := runRunDetail(t.Context(), []string{"deadline"}, &output); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"deadline-exceeded", "Execution deadline exceeded", "2026-10-30T10:33:37Z", "0s remaining", "clock: Workflow start", "finalization lag: 3080s"} {
+	for _, want := range []string{"running", "Execution deadline exceeded", "2026-10-30T10:33:37Z", "0s remaining", "clock: Workflow start", "finalization lag: 3080s"} {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("missing %q: %s", want, output.String())
 		}

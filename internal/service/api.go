@@ -997,9 +997,10 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 		if service.scope != nil {
 			runs[i].QueuePosition = 0
 		}
-		if filter.View != api.RunViewHistory && runs[i].DisplayStatus == "queued" {
-			runs[i].Scheduling = service.observeScheduling(ctx, runs[i], nil, false)
-			runs[i].DisplayReason = runs[i].Scheduling.Message
+		if filter.View != api.RunViewHistory && runs[i].DisplayStatus == model.DisplayQueued {
+			var reason string
+			runs[i].Scheduling, reason = service.observeScheduling(ctx, runs[i], nil, false)
+			applyQueuedDisplay(&runs[i], runs[i].Scheduling, reason)
 		}
 	}
 	return service.stripScopedSequences(runs), nil
@@ -1115,7 +1116,8 @@ func (service *API) readRun(ctx context.Context, actor api.Actor, id string, sum
 	if summary {
 		return summarizeRun(run, steps), nil
 	}
-	response := RunDetailResponse{Run: service.presentationRun(ctx, run), Steps: steps, Scheduling: service.scheduling(ctx, run, steps),
+	scheduling, queuedReason := service.observeScheduling(ctx, run, steps, true)
+	response := RunDetailResponse{Run: service.presentationRun(ctx, run), Steps: steps, Scheduling: scheduling,
 		RerunOf: service.runRerunOf(ctx, run.ID)}
 	applyExecutionDisplay(&response.Run, response.Scheduling)
 	if reader, ok := service.history.(RunTimingReader); ok {
@@ -1125,9 +1127,7 @@ func (service *API) readRun(ctx context.Context, actor api.Actor, id string, sum
 		}
 		response.Timing = &timing
 	}
-	if response.Run.DisplayStatus == "queued" && response.Scheduling != nil {
-		response.Run.DisplayReason = response.Scheduling.Message
-	}
+	applyQueuedDisplay(&response.Run, response.Scheduling, queuedReason)
 	if service.retention != nil && run.Status.Terminal() {
 		response.Purges, err = service.retention.Database.RunEvidencePurges(ctx, run.ID)
 		if err != nil {
@@ -1264,10 +1264,9 @@ func (service *API) RunLogLive(ctx context.Context, actor api.Actor, id string, 
 	}
 	terminal := run.Status.Terminal()
 	presented := service.presentationRun(ctx, run)
-	if presented.DisplayStatus == "queued" {
-		if scheduling := service.scheduling(ctx, run, nil); scheduling != nil {
-			presented.DisplayReason = scheduling.Message
-		}
+	if presented.DisplayStatus == model.DisplayQueued {
+		scheduling, reason := service.observeScheduling(ctx, run, nil, true)
+		applyQueuedDisplay(&presented, scheduling, reason)
 	}
 	response := LiveLogResponse{RunID: run.ID, Status: string(visibleRun(run).Status), DisplayStatus: presented.DisplayStatus, DisplayReason: presented.DisplayReason}
 	// Status and purge checks above still run on idle refreshes, but an
@@ -1422,14 +1421,12 @@ func (service *API) statusForRun(ctx context.Context, repository model.Repositor
 		response.Steps = steps
 		response.Burns, response.ExitCode = wireBurns(response.Steps, run)
 	}
-	response.Scheduling = service.scheduling(ctx, run, response.Steps)
+	var queuedReason string
+	response.Scheduling, queuedReason = service.observeScheduling(ctx, run, response.Steps, true)
 	response.Run = presented
 	applyExecutionDisplay(&response.Run, response.Scheduling)
+	applyQueuedDisplay(&response.Run, response.Scheduling, queuedReason)
 	response.DisplayStatus, response.DisplayReason = response.Run.DisplayStatus, response.Run.DisplayReason
-	if presented.DisplayStatus == "queued" && response.Scheduling != nil {
-		response.DisplayReason = response.Scheduling.Message
-		response.Run.DisplayReason = response.DisplayReason
-	}
 	response.FailedStep = run.FailedStep
 	if service.issues != nil && run.RefKind == model.RefBranch {
 		issue, issueErr := service.issues.OpenCIIssue(ctx, repository.ID, run.Ref)
@@ -1544,14 +1541,12 @@ func (service *API) statusFromRun(ctx context.Context, repository model.Reposito
 		}
 		response.Burns, response.ExitCode = wireBurns(response.Steps, run)
 	}
-	response.Scheduling = service.scheduling(ctx, run, response.Steps)
+	var queuedReason string
+	response.Scheduling, queuedReason = service.observeScheduling(ctx, run, response.Steps, true)
 	response.Run = presented
 	applyExecutionDisplay(&response.Run, response.Scheduling)
+	applyQueuedDisplay(&response.Run, response.Scheduling, queuedReason)
 	response.DisplayStatus, response.DisplayReason = response.Run.DisplayStatus, response.Run.DisplayReason
-	if presented.DisplayStatus == "queued" && response.Scheduling != nil {
-		response.DisplayReason = response.Scheduling.Message
-		response.Run.DisplayReason = response.DisplayReason
-	}
 	response.FailedStep = run.FailedStep
 	if service.issues != nil && run.RefKind == model.RefBranch {
 		issue, issueErr := service.issues.OpenCIIssue(ctx, repository.ID, run.Ref)
@@ -1573,30 +1568,14 @@ func wireRunStatus(status model.RunStatus) string {
 	return string(status)
 }
 
+// visibleRun keeps the legacy wire projection: a claimed run that has not
+// started reports Status waiting. Its display_status is queued, from
+// model.DisplayRunStatus, the one raw-to-display mapping.
 func visibleRun(run model.Run) model.Run {
-	if run.Status == model.RunRunning && run.StartedAt == nil && run.Phase != "publishing" {
+	if run.ClaimedUnstarted() {
 		run.Status = model.RunWaiting
 	}
 	return run
-}
-
-func displayRunStatus(run model.Run) string {
-	switch {
-	case run.Status == model.RunRunning && isPendingCreate(run):
-		return "infra-pending"
-	case run.Status == model.RunQueued, run.Status == model.RunWaiting:
-		return string(model.RunQueued)
-	case run.Status == model.RunRunning && run.StartedAt == nil && run.Phase != "publishing":
-		return string(model.RunQueued)
-	case run.Status == model.RunInterrupted && run.Phase == model.PhaseCancelled:
-		return model.PhaseCancelled
-	case run.Status == model.RunInterrupted && run.SupersededBy != "":
-		return "superseded"
-	case run.Status == model.RunInterrupted:
-		return model.PhaseCancelled
-	default:
-		return string(run.Status)
-	}
 }
 
 func presentationRun(run model.Run) model.Run {
@@ -1605,16 +1584,16 @@ func presentationRun(run model.Run) model.Run {
 
 func presentationRunAt(run model.Run, now time.Time) model.Run {
 	visible := visibleRun(run)
-	visible.DisplayStatus = displayRunStatus(run)
+	visible.DisplayStatus = model.DisplayRunStatus(run)
 	visible.DisplayReason = runDisplayReason(run)
 	if run.Status == model.RunFailed && model.IsExecutionDeadlineReason(run.Error) {
-		visible.DisplayStatus, visible.DisplayReason = "deadline-exceeded", model.ExecutionDeadlineMessage
+		// A deadline is why the run failed, not a second status.
+		visible.DisplayReason = model.ExecutionDeadlineMessage
 	}
 	if run.Status == model.RunFailed && model.IsResourceFailureMessage(run.Error) {
 		visible.DisplayReason = run.Error
 	}
-	if run.Status == model.RunFailed && run.AutoRetriedBy != "" {
-		visible.DisplayStatus = "infra-retried"
+	if visible.DisplayStatus == model.DisplayInfraRetried {
 		visible.DisplayReason = "infra error, retried as " + shortRunID(run.AutoRetriedBy)
 	}
 

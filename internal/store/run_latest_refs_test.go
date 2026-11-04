@@ -16,6 +16,13 @@ func TestLatestRefHeadsCountAllAttemptsAndDoNotResurrectOnOlderPages(t *testing.
 	old := autoRetrySource(t, s, repo.ID, "feature/a")
 	middle := autoRetrySource(t, s, repo.ID, "feature/b")
 	newest := autoRetrySource(t, s, repo.ID, "feature/a")
+	// Terminal heads page by finish time; a queued head is never paged out.
+	for _, id := range []string{middle.ID, newest.ID} {
+		now = now.Add(time.Minute)
+		if _, err := s.FinishRun(t.Context(), id, model.RunResult{Status: model.RunFailed}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	heads, err := s.ListRecentRuns(t.Context(), model.RunListFilter{LatestPerRef: true, Limit: 1})
 	if err != nil || len(heads) != 1 || heads[0].ID != newest.ID || heads[0].EarlierAttempts != 1 {
 		t.Fatal("wrong latest ref", heads, err)

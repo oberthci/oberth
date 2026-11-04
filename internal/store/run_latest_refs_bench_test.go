@@ -51,12 +51,12 @@ func TestLatestRefLargeHistoryPreservesExactHeadsAndCounts(t *testing.T) {
 		}
 	}
 	t.Logf("50k rows / 2k refs / 2KiB errors: %s", time.Since(start))
-	rows, err := s.db.QueryContext(t.Context(), "EXPLAIN QUERY PLAN "+latestRefQuery("", priorityOrderSQL(s.now())), 0, 0, "", "", 0, 0, 100)
+	rows, err := s.db.QueryContext(t.Context(), "EXPLAIN QUERY PLAN "+latestRefQuery("", priorityOrderSQL(s.now())), 0, 0, "", "", "", MaxActiveRuns, "", 0, 0, "", 100)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer rows.Close()
-	found := false
+	found, ranked := false, false
 	for rows.Next() {
 		var id, parent, unused int
 		var detail string
@@ -65,6 +65,9 @@ func TestLatestRefLargeHistoryPreservesExactHeadsAndCounts(t *testing.T) {
 		}
 		if strings.Contains(detail, "COVERING INDEX runs_latest_ref_idx") {
 			found = true
+		}
+		if strings.Contains(detail, "SEARCH runs USING INTEGER PRIMARY KEY") {
+			ranked = true
 		}
 		if strings.Contains(detail, "TEMP B-TREE FOR GROUP BY") {
 			t.Fatal("grouping sorts history", detail)
@@ -75,6 +78,9 @@ func TestLatestRefLargeHistoryPreservesExactHeadsAndCounts(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("history scan is not covered by the ref index")
+	}
+	if !ranked {
+		t.Fatal("page rows are not fetched by primary key after ranking")
 	}
 }
 

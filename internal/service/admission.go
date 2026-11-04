@@ -259,10 +259,9 @@ func admissionBeforeAt(a, b *admissionReservation, now time.Time) bool {
 	if ap != bp {
 		return ap.Rank() > bp.Rank()
 	}
-	// Within an effective class, explicit/automatic urgency precedes aging.
-	if ar, br := a.priorityRun().Priority.Rank(), b.priorityRun().Priority.Rank(); ar != br {
-		return ar > br
-	}
+	// Within an effective class the order is FIFO: an aged normal run joins
+	// high at its own position, so every high run accepted after it waits
+	// behind it. That bounds its wait without lifting it above highest.
 	if a.order != b.order {
 		return a.order < b.order
 	}
@@ -778,7 +777,7 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 	if reservation == nil {
 		return nil
 	}
-	result := &model.AdmissionObservation{State: "preparing", Used: gate.used, Capacity: gate.capacity, NumericBudget: gate.numericBudgetLocked()}
+	result := &model.AdmissionObservation{State: "preparing", Used: gate.used, Capacity: gate.capacity, Runs: gate.runs, MaxRuns: gate.maxRuns, NumericBudget: gate.numericBudgetLocked()}
 	result.BackfillMessage = reservation.backfillMessage
 	if reservation.prepared {
 		result.DeclaredResources = reservation.declaredResources()
@@ -842,7 +841,7 @@ func (reservation *admissionReservation) parkVM() error {
 	return nil
 }
 
-// Re-sort on every admission pass because starvation changes effective class.
+// Re-sort on every admission pass because aging changes effective class.
 func (gate *weightedAdmission) sortWaitersLocked() {
 	now := gate.clock()
 	sort.SliceStable(gate.waiters, func(i, j int) bool { return admissionBeforeAt(gate.waiters[i], gate.waiters[j], now) })

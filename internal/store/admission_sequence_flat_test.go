@@ -36,8 +36,9 @@ func TestRefiredFlatQueueUsesGlobalAdmissionPositions(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := enqueue(repo.ID, "feature/c", "c")
+	// The re-fired run is next in claim order, preserving its original FIFO place.
 	rows, err := s.ListRecentRuns(ctx, model.RunListFilter{})
-	if err != nil || len(rows) < 3 || rows[0].ID != copy.ID || rows[1].ID != b.ID || rows[2].ID != c.ID {
+	if err != nil || len(rows) != 4 || rows[0].ID != copy.ID || rows[1].ID != b.ID || rows[2].ID != c.ID || rows[3].ID != a.ID || rows[3].Status != model.RunInterrupted || rows[3].QueuePosition != 0 {
 		t.Fatalf("flat FIFO order = %v, %v", runIDs(rows), err)
 	}
 	for i := 0; i < 3; i++ {

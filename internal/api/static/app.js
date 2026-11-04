@@ -131,15 +131,15 @@ function renderMarkdown(raw) {
 function statusKind(status) {
   switch (String(status || "").toLowerCase()) {
     case "passed": case "delivered": return "pass";
-    case "failed": case "timed_out": case "deadline-exceeded": return "fail";
+    case "failed": case "timed_out": return "fail";
     case "running": return "run";
  case "infra-retried": return "warn";
     /* "queued" is Argo made a Pod for this and it has not started; "pending"
        is the pipeline declares this and execution has not reached it. Both
        read as not-yet-started to the eye, so they share a kind and a glyph —
        the label keeps them apart wherever the difference matters. */
-    case "queued": case "waiting": case "pending": return "pending";
-    case "interrupted": case "superseded": case "cancelled": case "skipped": return "cancel";
+    case "queued": case "pending": return "pending";
+    case "superseded": case "cancelled": case "skipped": return "cancel";
     default: return "unknown";
   }
 }
@@ -165,11 +165,14 @@ function bigIcon(status) {
   const glyph = { pass: "✓", fail: "✗", cancel: "⊘", run: "◠", pending: "◌", warn: "↻", unknown: "?" }[kind] || "?";
   return `<span class="ic ${cls}">${glyph}</span>`;
 }
+/* display_status is the server's one raw-to-display mapping (seven values:
+   queued, running, passed, failed, infra-retried, superseded, cancelled).
+   The fallback mirrors it for rows that carry only raw fields; the raw wire
+   status "waiting" (claimed, not started) is one of the queued rows. */
 function displayRunStatus(run) {
+  if (run.display_status) return run.display_status;
   if (run.auto_retried_by) return "infra-retried";
- if (run.SupersededBy && run.Status === "interrupted" && run.Phase !== "cancelled") return "superseded";
- if (run.display_status) return run.display_status;
-  if (run.Status === "interrupted") return "cancelled";
+  if (run.Status === "interrupted") return run.SupersededBy && run.Phase !== "cancelled" ? "superseded" : "cancelled";
   if (run.Status === "waiting" || run.Status === "queued" || (run.Status === "running" && !run.StartedAt)) return "queued";
   return run.Status;
 }
@@ -426,15 +429,50 @@ async function loadActiveRuns() {
     state.activeRunsComplete = false;
   }
 }
+/* The server lists runs in three groups: the queue with the run admitted
+   next at its top, running runs newest start first, then terminal runs
+   newest finish first. Active runs fetched separately (older attempts hidden
+   behind a newer head) are merged into their group, never stacked on top. */
+function runListGroup(run) {
+  if (isTerminalRun(run)) return 2;
+  return displayRunStatus(run) === "queued" || !run.StartedAt ? 0 : 1;
+}
+function isTerminalRun(run) { return ["passed", "failed", "interrupted"].includes(run.Status); }
+/* A scoped viewer sees no queue positions. The active view then supplies
+   the queue order: it lists waiting runs in the server's admission order, so
+   its index is the same claim order. Without either, the
+   server's own FIFO order stands within each effective class. A failed
+   active fetch can leave an older class order cached, so current priority
+   always leads the position tie-break; the queue is never sorted by time. */
+function orderRuns(runs) {
+  const queued = runs.filter(run => runListGroup(run) === 0);
+  const positioned = queued.length > 0 && queued.every(run => run.QueuePosition > 0 || run.Scheduling?.queue_position > 0);
+  const activeIndex = new Map(state.activeRuns.map((run, index) => [run.ID, index + 1]));
+  const position = run => positioned ? run.QueuePosition || run.Scheduling?.queue_position : activeIndex.get(run.ID) || 0;
+  const priorityRank = run => run.priority_class === "highest" ? 2 : run.priority_class === "high" ? 1 : 0;
+  const stamp = value => { const parsed = Date.parse(value || ""); return Number.isFinite(parsed) ? parsed : 0; };
+  return runs.map((run, index) => ({ run, index })).sort((a, b) => {
+    const group = runListGroup(a.run) - runListGroup(b.run);
+    if (group) return group;
+    let key = 0;
+    if (runListGroup(a.run) === 0) {
+      key = priorityRank(b.run) - priorityRank(a.run);
+      if (!key) key = position(a.run) && position(b.run) ? position(a.run) - position(b.run) : 0;
+    }
+    else if (runListGroup(a.run) === 1) key = stamp(b.run.StartedAt) - stamp(a.run.StartedAt);
+    else key = stamp(b.run.FinishedAt || b.run.StartedAt || b.run.QueuedAt) - stamp(a.run.FinishedAt || a.run.StartedAt || a.run.QueuedAt);
+    return key || a.index - b.index;
+  }).map(item => item.run);
+}
 function runsWithActive(source) {
   const seen = new Set(source.map(run => run.ID));
-  return [...state.activeRuns.filter(run => !seen.has(run.ID) && seen.add(run.ID)), ...source];
+  return orderRuns([...source, ...state.activeRuns.filter(run => !seen.has(run.ID) && seen.add(run.ID))]);
 }
 function runPageFull(source) {
-  // The flat first page includes the whole queue in addition to its dated
-  // page. Count exactly the admitted/terminal portion, as the API does.
-  const dated = source.filter(run => run.StartedAt || run.FinishedAt || ["passed", "failed", "interrupted"].includes(run.Status));
-  return (groupedRuns() ? source.length : dated.length) === runPageSize;
+  // Every first page includes the whole queue and all running runs in
+  // addition to its page of terminal runs. Count exactly the terminal
+  // portion, as the API does.
+  return source.filter(isTerminalRun).length === runPageSize;
 }
 function retainedRunCount(count) { return `${count} retained ${count === 1 ? "run" : "runs"}`; }
 /* Older servers have no counts route; the sidebar then counts the page. */
@@ -471,12 +509,8 @@ function repoCounts(runs) {
   }
   return counts;
 }
-/* ---------- one run list: the queue, then admission time ---------- */
+/* ---------- one run list: the queue, running, then finished ---------- */
 function admissionOf(run) { return run.Scheduling?.admission || null; }
-function queuePhase(run) {
-  const status = displayRunStatus(run);
-  return status === "queued" && run.Scheduling?.state === "waiting" ? "waiting" : status;
-}
 function queueSize(run) { return admissionOf(run)?.declared_resources ? "" : admissionOf(run)?.size || ""; }
 function queueSizeTitle(run) {
   const admission = admissionOf(run);
@@ -484,26 +518,12 @@ function queueSizeTitle(run) {
   if (!admission?.size) return "";
   return `declared size ${admission.size}${admission.capacity > 0 ? ` · admission weight ${admission.weight} of ${admission.capacity}` : ""}`;
 }
+/* A queued run's reason line is the server's display_reason: what the run
+   waits for, in plain words, computed once for every surface (next in line,
+   waiting for CPU budget, host IO pressure, concurrency group busy, ...).
+   The raw scheduling state is never shown as a status of its own. */
 function queueReason(run) {
-  const a = admissionOf(run), s = run.Scheduling?.state, b = a?.blocked_by;
-  if (s === "preflight") return "KVM preflight running";
-  if (!a || s === "preparing") return "preparing to run";
-  if (a.kubevirt_capacity) return "waiting for KubeVirt capacity (repository VM grant)";
-  if (a.vm_capacity) return "waiting for trusted VM capacity";
-  if (a.disk_floor?.below_floor) return "waiting for disk space";
-  if (a.group_holder || a.group_ahead) return `waiting for group ${a.group}`;
-  const pressure = a.pressure || b?.pressure;
-  if (pressure?.avg10_gate && !pressure.redacted) return `deferred: ${pressure.resource} pressure gate (CPU ${Number(pressure.cpu_avg10 ?? 0).toFixed(1)}%, IO ${Number(pressure.io_avg10 ?? 0).toFixed(1)}%; some avg10)`;
-  if (pressure) return pressure.redacted ? `deferred: host ${pressure.resource} pressure` : `deferred: ${pressure.resource} pressure ${Number(pressure.avg60).toFixed(1)}%`;
-  if (a.declared_resources && b?.run_ceiling) return "waiting for an IO/run concurrency slot";
-  if (a.declared_resources) return `waiting for declared CPU/memory capacity (${a.declared_resources.cpu_milli}m CPU, ${a.declared_resources.memory_bytes} memory bytes)`
-    + (a.head_of_queue && b?.backfilling ? " · smaller runs admitted meanwhile" : a.head_of_queue && b?.draining ? " · host draining for it" : "");
-  if (a.head_of_queue && b) return `waiting for capacity (${b.size}${b.full_drain ? ", needs the whole host" : ""})`
-    + (b.backfilling ? " · smaller runs admitted meanwhile" : b.draining ? " · host draining for it" : "");
-  if (b) return `waiting behind ${b.repo}/${b.ref} (${b.size})`;
-  if (s === "waiting" && a.state === "waiting") return `waiting for capacity${a.size ? ` (${a.size})` : ""}`;
-  if (s === "waiting") return "admitted, submitting workflow";
-  return run.Scheduling?.message ? "awaiting scheduler" : runMessage(run) || "awaiting scheduler";
+  return run.display_reason || run.Scheduling?.message || "awaiting scheduler";
 }
 function queueDetail(run) { return run.Scheduling?.message || runMessage(run); }
 function runTimeLabel(run) {
@@ -531,8 +551,7 @@ function runMessageCell(run) {
   return run.display_reason === "server restart, retry needed" ? `<span class="retry-warning">${esc(message)}</span>` : esc(message);
 }
 function runRow(run) {
-    const queued = displayRunStatus(run) === "queued";
-    const status = queuePhase(run);
+    const status = displayRunStatus(run), queued = status === "queued";
     return `<div class="trow" data-run-id="${esc(run.ID)}"><div class="status-cell run-status">${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}</div><div class="primary"><div class="repo-name">${esc(repoName(run.RepoID))}</div><div class="branch">${esc(run.RefKind === "tag" ? "tag " : "")}${esc(run.Ref)}</div></div><div class="sha">${esc(shortSha(run.SHA))}</div><div class="clip" title="${esc(run.Actor)}">${esc(run.Actor || "--")}</div><div class="nowrap" title="${esc(fmtTime(runWhen(run)))}">${esc(runTimeLabel(run))}<br><span class="meta"${queued ? ` title="${esc(queueSizeTitle(run))}"` : ""}>${queued ? esc(queueSize(run)) : esc(fmtDur(runDuration(run)))}</span></div><div class="clip" title="${esc(rowMessage(run, true))}">${runMessageCell(run)}</div></div>`;
 }
 function runsTable(runs) {
@@ -931,7 +950,7 @@ function summaryLines(detail) {
   else if (kind === "run") lines.push(`[running] running in phase ${run.Phase || "ci"} — ${reached} of ${steps.length} step${steps.length === 1 ? "" : "s"} started, ${passed} passed`);
   else if (status === "queued") {
     const scheduling = detail.Scheduling || {}, admission = scheduling.admission || {};
-    lines.push(`[queued] ${scheduling.message || "Awaiting scheduler."}`);
+    lines.push(`[queued] ${run.display_reason || scheduling.message || "awaiting scheduler"}`);
     if (admission.numeric_budget) lines.push(`capacity: ${numericBudgetText(admission.numeric_budget)}${admission.position ? ` · queue position ${admission.position}` : ""}`);
     else if (admission.weight) lines.push(`capacity: need ${admission.weight} weight · ${admission.used}/${admission.capacity} used${admission.position ? ` · queue position ${admission.position}` : ""}`);
   }
@@ -1320,7 +1339,7 @@ async function renderRepos(seq) {
     <div class="bar"><h1>Repositories</h1><span class="meta">${state.repos.length} configured</span></div>
     <div class="table repo-table">
       <div class="trow head"><div>repository</div><div>status</div><div>default branch</div><div>latest run</div><div>history</div><div>upstream</div></div>
-      ${rows.map(({ repo, runs, latest }) => `<div class="trow" data-repo-runs="${esc(repoKey(repo))}"><div class="primary"><div class="repo-name">${esc(repoLabel(repo))}</div></div><div>${repo.ArchivedAt ? pill("archived", "cancel") : latest ? pill(statusLabel(latest.Status), statusKind(latest.Status)) : '<span class="meta">no runs</span>'}</div><div class="branch">${esc(repo.DefaultBranch || "--")}</div><div>${latest ? `<div class="branch">${esc(latest.Ref)}</div><span class="meta">${esc(ago(runWhen(latest)))}</span>` : '<span class="meta">--</span>'}</div><div>${historyStrip(runs)}</div><div class="clip">${esc(upstreamName(repo.UpstreamID))}</div></div>`).join("") || '<div class="empty static">No repositories configured.</div>'}
+      ${rows.map(({ repo, runs, latest }) => `<div class="trow" data-repo-runs="${esc(repoKey(repo))}"><div class="primary"><div class="repo-name">${esc(repoLabel(repo))}</div></div><div>${repo.ArchivedAt ? pill("archived", "cancel") : latest ? pill(statusLabel(displayRunStatus(latest)), statusKind(displayRunStatus(latest))) : '<span class="meta">no runs</span>'}</div><div class="branch">${esc(repo.DefaultBranch || "--")}</div><div>${latest ? `<div class="branch">${esc(latest.Ref)}</div><span class="meta">${esc(ago(runWhen(latest)))}</span>` : '<span class="meta">--</span>'}</div><div>${historyStrip(runs)}</div><div class="clip">${esc(upstreamName(repo.UpstreamID))}</div></div>`).join("") || '<div class="empty static">No repositories configured.</div>'}
     </div>
   </section>`);
   setAuto(slowPollMs);

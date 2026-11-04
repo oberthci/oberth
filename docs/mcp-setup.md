@@ -238,7 +238,7 @@ call the proxy hostname directly.
 | `size_revoke` | Return a repository to `L` and disable automatic tag priority, even if never granted (admin-only, audited) |
 | `size_grant_get` | Read a repository's maximum admission size (`max_size`) and grant state: `never_granted`, `granted`, or `revoked` |
 | `queue_priority_config` | Replace administrator RC globs with `rc_patterns` (e.g. `["rc/*", "release/*"]`); `[]` disables; unscoped admin, audited |
-| `queue_priority_get` | Read RC patterns and the 60-minute normal/high starvation threshold; unscoped admin |
+| `queue_priority_get` | Read RC patterns and the 60-minute threshold after which a normal run ages into high; unscoped admin |
 | `priority_grant` | Allow `identity` to request priority up to `max_class` (`high` or `highest`) until RFC3339 `expires`; unscoped admin, audited |
 | `priority_grant_list` | List priority grants and expiry; unscoped admin |
 | `priority_grant_revoke` | Revoke an identity's grant for future submissions; accepted builds keep their priority; unscoped admin, audited |
@@ -487,30 +487,43 @@ required.
 ## Run list views
 
 `run_list` and `/api/runs` take an optional `view`. Omitted or `all`, the
-first page carries the whole bounded queue in position order, then admitted
-and terminal runs newest admission time first. Later pages continue the
-dated runs by a stable time-and-ID cursor. A run cancelled before admission
-sorts by its end time. The page limit counts only dated rows; the queue is
-additional. A pruned cursor returns 404: restart from the first page.
+list has three groups: the queue in scheduler claim order (highest effective
+priority first, including aged high work, then FIFO within each class); running runs, most recently started first; then terminal runs, most
+recently finished first, with passed and failed interleaved by finish time.
+The first page carries every queued and running run; the page limit counts
+only terminal rows, so no limit or page ever drops a queued or running run or
+sorts it below a finished one. Later pages continue the terminal runs by a
+stable end-time-and-ID cursor. A run cancelled before admission is terminal
+and sorts by its end time. A pruned cursor returns 404: restart from the first
+page. `latest_per_ref=1` keeps the same grouping for each ref's newest run.
 
 - `history` keeps only terminal runs (passed, failed, interrupted), with legacy
   sequence paging via `before`/`next_before`/`next_cursor`.
 - `active` is deprecated; it still returns every queued, waiting and running
-  run in one unpaged list (at most 500), in scheduling order: started runs (oldest start first), then
-  claimed runs in admission order (the weighted gate's FIFO), then unclaimed
-  queued runs in accepted order. Each run that has not started carries
+  run in one unpaged list (at most 500): started runs oldest start first,
+  then claimed and unclaimed queued runs together in scheduler claim order
+  (effective priority, then FIFO). Each run that has not started carries
   `Scheduling` with its state, message, queue or admission position, size,
   weight, used/capacity and concurrency group, so a run blocking the head of
   the queue, or one waiting on its group or VM capacity, says so.
 
 Every run response includes `display_status` and `display_reason`, while
-durable `Status` stays unchanged. Before weighted admission the display is
-`queued` with its scheduling reason. Admission records `started_at`, so a
-trusted preflight displays `running` with phase `preflight`. Terminal runs
-display `passed` (including published releases), `failed`, or
-`cancelled` with the superseding SHA, cancelling actor or restart action.
-Elapsed includes preflight; parking for VM capacity clears the admission time,
-which is set again when capacity is reacquired. After a server restart, a
+durable `Status` stays unchanged. `display_status` is exactly one of
+`queued`, `running`, `passed`, `failed`, `infra-retried`, `superseded` and
+`cancelled`; everything finer is the reason line. Every run that has not
+started is `queued`: durable queued, or claimed before admission (raw
+`Status` `waiting`). Its `display_reason` names what it waits for in plain
+words (`next in line`, `waiting for CPU budget (12.5 of 40 CPU free)`,
+`host IO pressure (42%)`, `10 runs already running (limit 10)`,
+`concurrency group deploy busy (held by run ...)`, `waiting for admission`);
+`Scheduling.state` and `Scheduling.message` keep the raw observation.
+Admission records `started_at`, so an admitted run, including a trusted
+preflight before Workflow submission, displays `running`; an uncertain
+Workflow create or an exceeded deadline is its reason, not a status. Terminal runs display
+`passed` (including published releases), `failed` (a deadline or memory
+kill is the reason), `infra-retried`, `superseded` with the superseding SHA,
+or `cancelled` with the cancelling actor or restart action.
+After a server restart, a
 running branch run whose Argo Workflow still exists is adopted first: it keeps
 its run ID and continues to its real result (#1172). Re-queueing remains the
 fallback when that Workflow is missing; such restart re-fires carry the durable
@@ -804,8 +817,12 @@ waiting work immediately; CLI/external changes are polled. New size audits
 include `automatic_tag_priority_enabled` and
 `previous_automatic_tag_priority_enabled`; historical audit rows are unchanged.
 Configured RC branches are `high`; other runs are `normal`.
-Both normal and high runs waiting 60 minutes join `highest` in their original
-FIFO position. Plan/apply triggers receive no automatic priority: their cancel
+A normal run waiting 60 minutes joins `high` in its original FIFO position,
+with the reason `aged: normal run waited at least 60 minutes`; nothing ages
+into `highest`, so explicit `highest` bumps, promotions and the oldest waiting
+tag release always lead. High runs accepted after an aged run wait behind it,
+which bounds its wait against high arrivals; sustained `highest` arrivals can
+still delay it. Plan/apply triggers receive no automatic priority: their cancel
 restrictions protect external state and do not establish queue urgency. Running
 work keeps its resources. Backfill and head-wait bounds apply within each class. Local admin
 RC configuration and bumps wake dispatch immediately; aging and external
@@ -853,7 +870,7 @@ publication warnings and force requirement. Removing an RC pattern does not
 remove supersession protection from a build already classified as priority.
 
 The queue orders highest, high, then normal, with acceptance order within each
-class and the existing starvation bound. A waiting priority head still needs
+class; a normal run ages into high after 60 minutes at its own position. A waiting priority head still needs
 the declared budget and pressure gate. Backfill within its class is allowed
 only when all backfilled work together leaves enough budget and run slots for
 the head once existing work frees capacity. The existing head-wait bound also
