@@ -17,6 +17,7 @@ import (
 	"golang.org/x/mod/module"
 
 	"github.com/oberthci/oberth/internal/gitcache"
+	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
 func TestRealGitModuleOriginMatchesPinnedZip(t *testing.T) {
@@ -144,7 +145,9 @@ func TestLegacyInfoRemainsImmutable(t *testing.T) {
 	g := newArtifactGit()
 	h := artifactHandler(t, g, t.TempDir())
 	legacy := []byte("{\"Version\":\"v1.0.0\",\"Time\":\"2026-09-29T12:00:00Z\"}\n")
-	_, err := h.artifacts.get(t.Context(), "forge/owner/repository", artifactModule, "v1.0.0", "", time.Second, func(_ context.Context) (string, map[string][]byte, error) {
+	// Seeding durably syncs objects and their manifest; this fixture setup
+	// tests byte immutability, not publication latency or backend expiry.
+	_, err := h.artifacts.get(t.Context(), "forge/owner/repository", artifactModule, "v1.0.0", "", testtimeout.Start(time.Second), func(_ context.Context) (string, map[string][]byte, error) {
 		return artifactOID, map[string][]byte{".info": legacy, ".mod": []byte(artifactMod)}, nil
 	})
 	if err != nil {
