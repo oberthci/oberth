@@ -703,7 +703,7 @@ var toolScopeBehaviour = map[string]string{
 	"priority_grant": "refused", "priority_grant_list": "refused", "priority_grant_revoke": "refused",
 	"workflow_capability_grant": "mutation", "workflow_capability_revoke": "mutation", "workflow_capability_get": "lookup",
 	"queue_cap_config": "refused", "queue_priority_config": "refused", "queue_priority_get": "refused", "run_priority": "refused",
-	"admission_release": "refused", "admission_hold": "refused",
+	"concurrency_groups": "refused", "admission_release": "refused", "admission_hold": "refused",
 	"repo_remove": "mutation", "promote_grant": "mutation", "promote_grant_revoke": "mutation",
 	"schedule_list": "filtered", "schedule_pause": "mutation", "schedule_resume": "mutation", "schedule_trigger": "mutation",
 	"repo_archive": "refused", "repo_unarchive": "refused",

@@ -255,6 +255,7 @@ call the proxy hostname directly.
 | `priority_grant_list` | List priority grants and expiry; unscoped admin |
 | `priority_grant_revoke` | Revoke an identity's grant for future submissions; accepted builds keep their priority; unscoped admin, audited |
 | `run_priority` | Set a waiting run using exact `run_id`, `priority` (`low`, `normal`, `high` or `highest`) and `reason`; unscoped admin, audited |
+| `concurrency_groups` | Read YAML-defined shared groups, limits, holders and waiters, including idle groups (unscoped, read-only) |
 | `admission_hold` | Admin-only [admission hold](admission-hold.md) with allowed classes and bounded expiry; read through system_status admission.hold. |
 | `admission_release` | Release one admission reservation no owner will release, typically a granted one held for a terminal run whose owner hung; deletes the Workflow first as proof, `force` without it (admin-only, unscoped, audited) |
 
@@ -500,9 +501,10 @@ when an observer is unavailable.
   This explains a durable `running` run that is still waiting behind an exclusive
   XL build. A run whose pipeline declares
   `oberth.ci/concurrency-group` also reports `group`; while it waits on that
-  group it names `group_holder` (the run of the same repository holding it)
-  or `group_ahead` (the earlier member queued ahead of it), and the message
-  says so. `status` carries the recorded group as `concurrency_group`;
+  group it reports `group_limit`, all `group_holders` and an earlier
+  `group_ahead` where applicable. Group names are shared across repositories;
+  scoped views omit invisible holder/waiter IDs. The queued reason names the
+  group, limit and visible holders. `status` carries the recorded group as `concurrency_group`;
   `run_get` and `run_list` carry it as the run's `ConcurrencyGroup`.
 - `execution` reports observed Workflow phase, up to 16 node phase/message
   summaries and 16 Pod phase/reason summaries. It can identify unscheduled Pods,
@@ -983,7 +985,7 @@ Issue metadata writes can pass `expected_revision` from a prior read; mismatch
 is a conflict, while omission preserves last-write-wins. See
 [conditional metadata updates](issue-lifecycle.md).
 
-The current MCP surface has **79 tools**, including administrator-only
+The current MCP surface has **80 tools**, including administrator-only
 `publication_abandon`.
 
 The CLI uses `--url`, `OBERTH_MCP_URL`, or `OBERTH_BASE_URL` (with
@@ -1013,3 +1015,12 @@ all visible fully qualified candidates; pass one as `repo` to `promote`,
 `status`, `sync`, `wait`, or other repository-taking tools. The same form works
 with CLI `--repo` options and MCP JSON arguments. When an omitted repository
 makes a SHA or branch ambiguous, the error lists candidates as well.
+
+### YAML concurrency groups
+
+`concurrency_groups({})` and `oberth admission groups [--json]` list definitions,
+limits, holders and waiters. They are read-only and require an unscoped uplink;
+an admin role is not required. `system_status.admission.groups` provides the
+same data. Configure only `oberth.ci/concurrency-group` and
+`oberth.ci/concurrency-limit` in the pipeline YAML; the default limit is 1. See
+[concurrency groups](concurrency-groups.md).

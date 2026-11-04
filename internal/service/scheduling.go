@@ -138,6 +138,20 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 			admission.NumericBudget = nil
 			admission.BackfillMessage = ""
 			admission.Pressure = admission.Pressure.Public()
+			if admission.GroupRunRepos != nil {
+				admission.GroupHolders = nil
+				for _, id := range result.Admission.GroupHolders {
+					if service.scope.seesRepo(admission.GroupRunRepos[id]) {
+						admission.GroupHolders = append(admission.GroupHolders, id)
+					}
+				}
+				if !service.scope.seesRepo(admission.GroupRunRepos[admission.GroupHolder]) {
+					admission.GroupHolder = ""
+				}
+				if !service.scope.seesRepo(admission.GroupRunRepos[admission.GroupAhead]) {
+					admission.GroupAhead = ""
+				}
+			}
 			if blocker := service.visibleBlocker(admission.BlockedBy); blocker != nil {
 				admission.BlockedBy = blocker
 			} else {
@@ -165,7 +179,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 					// shared weight or other repositories' visibility.
 					return result, reason
 				}
-				if service.scope != nil && result.Admission.GroupHolder == "" && result.Admission.GroupAhead == "" {
+				if service.scope != nil && !result.Admission.GroupBlocked && result.Admission.GroupHolder == "" && result.Admission.GroupAhead == "" {
 					// The group waits name runs of the same repository; any
 					// other wait says only that capacity is short, unless
 					// the blocking run is itself in scope.
@@ -260,6 +274,8 @@ func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
 		return fmt.Sprintf("Waiting for disk space: %d bytes free, floor is %d bytes. "+
 			"Admission is held until free bytes exceed the configured floor.",
 			admission.DiskFloor.FreeBytes, admission.DiskFloor.FloorBytes)
+	case admission.GroupLimit > 0 && (admission.GroupBlocked || admission.GroupHolder != "" || admission.GroupAhead != ""):
+		return "Waiting for " + concurrencyGroupMessage(admission, false)
 	case admission.GroupHolder != "":
 		return fmt.Sprintf("Waiting for concurrency group %q, held by run %s of the same repository; "+
 			"runs outside the group are admitted meanwhile.", admission.Group, admission.GroupHolder)

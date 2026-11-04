@@ -51,25 +51,28 @@ func TestGroupAdmissionSerializesOneRepositoryGroup(t *testing.T) {
 	releaseWaiter()
 }
 
-// Different groups of one repository, and the same group name in different
-// repositories, are independent: a group is scoped to its repository, so a
-// document elsewhere naming "terraform-state" cannot block this one.
-func TestGroupAdmissionIsPerGroupAndPerRepository(t *testing.T) {
+// Different names remain independent; equal names share the default limit of one.
+func TestGroupAdmissionIsSharedAcrossRepositories(t *testing.T) {
 	gate := newWeightedAdmissionForJobs(6)
-	releases := []func(){
-		acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("tf-plan", 1, pipeline.M, "terraform-state")),
-		acquireRequestWithinBudget(t, gate.reserve(2), groupRequest("tf-docs", 1, pipeline.M, "docs-site")),
-		acquireRequestWithinBudget(t, gate.reserve(3), groupRequest("squatter", 2, pipeline.M, "terraform-state")),
-		acquireRequestWithinBudget(t, gate.reserve(4), groupRequest("ungrouped", 1, pipeline.M, "")),
+	first := acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("plan", 1, pipeline.M, "state"))
+	other := acquireRequestWithinBudget(t, gate.reserve(2), groupRequest("docs", 1, pipeline.M, "docs"))
+	waiter := gate.reserve(3)
+	ready := make(chan func(), 1)
+	go acquireRequestForTest(waiter, groupRequest("other-repo", 2, pipeline.M, "state"), ready)
+	awaitWaiting(t, waiter)
+	if granted(gate, waiter) {
+		t.Fatal("repository escaped shared default limit")
 	}
-	for _, release := range releases {
-		release()
-	}
+	ungrouped := acquireRequestWithinBudget(t, gate.reserve(4), groupRequest("ungrouped", 1, pipeline.M, ""))
+	first()
+	awaitAcquired(t, ready)()
+	other()
+	ungrouped()
 	gate.mu.Lock()
 	groups := len(gate.groups)
 	gate.mu.Unlock()
 	if used, runs := gateUsage(gate); groups != 0 || used != 0 || runs != 0 {
-		t.Fatalf("released gate retains state: groups=%d used=%d runs=%d", groups, used, runs)
+		t.Fatal("released gate retains state", groups, used, runs)
 	}
 }
 

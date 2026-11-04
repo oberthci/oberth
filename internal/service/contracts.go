@@ -101,7 +101,7 @@ type RunQueueStore interface {
 	Run(context.Context, string) (model.Run, error)
 	SetRunWorkflowName(context.Context, string, string) (model.Run, error)
 	SetRunCredentialed(context.Context, string) error
-	SetRunConcurrencyGroup(context.Context, string, string) error
+	SetRunConcurrencyGroup(context.Context, string, string, ...int) error
 	PendingRunCancellations(context.Context) ([]model.RunCancellation, error)
 	CompleteRunCancellation(context.Context, string, string) error
 	CompleteObservedRunCancellation(context.Context, model.RunCancellation) error
@@ -479,6 +479,10 @@ type PipelineSizer interface {
 // makes. "" means the pipeline declares no group. A malformed declaration is an
 // error, exactly as a malformed size is. It is optional: an engine that does
 // not implement it runs every pipeline ungrouped.
+type PipelineConcurrencyContractReader interface {
+	PipelineConcurrencyContract(context.Context, WorkflowRequest) (string, int, error)
+}
+
 type PipelineConcurrencyGrouper interface {
 	PipelineConcurrencyGroup(context.Context, WorkflowRequest) (string, error)
 }

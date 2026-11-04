@@ -7,7 +7,6 @@ import (
 	"maps"
 	"slices"
 	"sort"
-	"strconv"
 	"sync"
 	"time"
 
@@ -50,9 +49,8 @@ type weightedAdmission struct {
 	runs         int
 	waiters      []*admissionReservation
 	reservations map[int64]*admissionReservation
-	// groups maps a repository-scoped concurrency group key to the granted
-	// reservation that holds it (#658).
-	groups map[string]*admissionReservation
+	// groups maps a shared group name to its granted reservations.
+	groups map[string][]*admissionReservation
 	// onPark, when set, is called under the lock (it must not block) after a
 	// reservation is prepared while some prepared reservation is parked on its
 	// group, so the dispatch loop can claim past the parked run.
@@ -117,16 +115,17 @@ type admissionReservation struct {
 	priorityMaximum      pipeline.Size
 	priorityLookupFailed bool
 	weight               int
-	// group is the repository-scoped key of the run's concurrency group and
+	// group is the shared key of the run's concurrency group and
 	// groupName the name the repository declared; both empty when ungrouped.
-	group     string
-	groupName string
-	prepared  bool
-	granted   bool
-	submitted bool
-	delayed   bool
-	released  bool
-	canceled  bool
+	group      string
+	groupName  string
+	groupLimit int
+	prepared   bool
+	granted    bool
+	submitted  bool
+	delayed    bool
+	released   bool
+	canceled   bool
 	// retained marks a grant whose Workflow may still be running while its
 	// owner stops on an error that leaves the run owned for the restart
 	// pass. Its weight and group stay held for the rest of this process
@@ -146,8 +145,19 @@ type admissionReservation struct {
 // scheduler failure: the owner settles the run's cancellation and returns.
 var errAdmissionAbandoned = errors.New("service: admission abandoned: run is no longer active")
 
+// A live or retained grant can outlast its durable YAML definition. Conflicting
+// new work fails that run without taking down the scheduler or releasing holders.
+type concurrencyGroupConflict struct {
+	group                   string
+	limit, conflictingLimit int
+}
+
+func (conflict *concurrencyGroupConflict) Error() string {
+	return fmt.Sprintf("service: concurrency group %q limit %d conflicts with limit %d", conflict.group, conflict.limit, conflict.conflictingLimit)
+}
+
 // admissionRequest is what a claimed run knows once its immutable checkout has
-// been read: its declared size and, optionally, its repository-scoped group.
+// been read: its declared size and, optionally, its shared group and limit.
 type admissionRequest struct {
 	Fallback             model.ResourceAdmissionFallback
 	Pods                 *argoworkflow.PodDemand
@@ -159,6 +169,7 @@ type admissionRequest struct {
 	PriorityMaximum      pipeline.Size
 	PriorityLookupFailed bool
 	Group                string
+	GroupLimit           int
 	KubeVirt             *KubeVirtResources
 	// RefKind and SHA key the durable head-wait origin; HeadSince is that
 	// origin when one was recorded before a restart; Estimate is the run's
@@ -181,7 +192,7 @@ func newWeightedAdmission(capacity int) *weightedAdmission {
 		capacity:     capacity,
 		weights:      DefaultSizeWeights,
 		reservations: make(map[int64]*admissionReservation),
-		groups:       make(map[string]*admissionReservation),
+		groups:       make(map[string][]*admissionReservation),
 	}
 }
 
@@ -197,12 +208,8 @@ func newWorkflowAdmissionForJobs(maxConcurrentJobs int) *weightedAdmission {
 	return gate
 }
 
-// concurrencyGroupKey scopes a declared group to its repository, so a document
-// in one repository naming a group can never hold or wait on another
-// repository's group of the same name.
-func concurrencyGroupKey(repoID int64, group string) string {
-	return strconv.FormatInt(repoID, 10) + "/" + group
-}
+// concurrencyGroupKey is shared by all repositories declaring the same name.
+func concurrencyGroupKey(_ int64, group string) string { return group }
 
 func (gate *weightedAdmission) reservePriorityRun(sequence, order int64, run model.Run) *admissionReservation {
 	if order <= 0 {
@@ -250,7 +257,7 @@ func admissionBeforeAt(a, b *admissionReservation, now time.Time) bool {
 }
 
 // acquireRequest sizes the reservation and waits until it is granted. A grouped
-// run additionally waits until no other run of its repository holds the same
+// run additionally waits until fewer than its declared limit hold the same
 // concurrency group; while it does, it holds neither weight nor its place at
 // the head of the queue, so it never delays the claims behind it.
 func (reservation *admissionReservation) acquireRequest(ctx context.Context, request admissionRequest) (func(), error) {
@@ -333,6 +340,15 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 	if request.Group != "" {
 		reservation.group = concurrencyGroupKey(request.RepoID, request.Group)
 		reservation.groupName = request.Group
+		reservation.groupLimit = max(1, request.GroupLimit)
+		for _, other := range gate.reservations {
+			if other != reservation && other.prepared && other.group == reservation.group && max(1, other.groupLimit) != reservation.groupLimit {
+				limit, conflictingLimit := reservation.groupLimit, max(1, other.groupLimit)
+				gate.mu.Unlock()
+				reservation.cancel()
+				return nil, &concurrencyGroupConflict{group: request.Group, limit: limit, conflictingLimit: conflictingLimit}
+			}
+		}
 	}
 	reservation.prepared = true
 	gate.grantLocked()
@@ -546,7 +562,7 @@ func (gate *weightedAdmission) grantLocked() {
 		gate.used += reservation.weight
 		gate.runs++
 		if reservation.group != "" {
-			gate.groups[reservation.group] = reservation
+			gate.groups[reservation.group] = append(gate.groups[reservation.group], reservation)
 		}
 		if !reservation.headSince.IsZero() {
 			gate.emitHeadLocked(headEvent{key: reservation.headKey(), clear: true})
@@ -653,8 +669,11 @@ func (gate *weightedAdmission) releaseLocked(reservation *admissionReservation) 
 	delete(gate.reservations, reservation.sequence)
 	gate.used -= reservation.weight
 	gate.runs--
-	if reservation.group != "" && gate.groups[reservation.group] == reservation {
-		delete(gate.groups, reservation.group)
+	if reservation.group != "" {
+		gate.groups[reservation.group] = slices.DeleteFunc(gate.groups[reservation.group], func(r *admissionReservation) bool { return r == reservation })
+		if len(gate.groups[reservation.group]) == 0 {
+			delete(gate.groups, reservation.group)
+		}
 	}
 	gate.grantLocked()
 }
@@ -671,7 +690,7 @@ func (gate *weightedAdmission) removeLocked(reservation *admissionReservation) {
 }
 
 // parkedLocked counts admin-held and VM-capacity waiters, and prepared waiters held back by their concurrency
-// group: another run of the same repository holds it, or an earlier run of the
+// group: the group is full, or an earlier run of the
 // same group is waiting ahead of them.
 func (gate *weightedAdmission) parkedLocked() int {
 	parked := 0
@@ -694,8 +713,8 @@ func (gate *weightedAdmission) groupBlockerLocked(reservation *admissionReservat
 	if reservation.group == "" || reservation.granted {
 		return "", ""
 	}
-	if current := gate.groups[reservation.group]; current != nil {
-		return current.runID, ""
+	if current := gate.groups[reservation.group]; len(current) >= max(1, reservation.groupLimit) {
+		return current[0].runID, ""
 	}
 	for _, candidate := range gate.waiters {
 		if candidate == reservation {
@@ -798,6 +817,9 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 		}
 		result.Weight = reservation.weight
 		result.Group = reservation.groupName
+		if result.Group != "" {
+			result.GroupLimit = max(1, reservation.groupLimit)
+		}
 	}
 	if reservation.granted {
 		result.State = "admitted"
@@ -811,6 +833,17 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 	}
 	result.Pressure = gate.pressureWaitLocked(reservation)
 	result.GroupHolder, result.GroupAhead = gate.groupBlockerLocked(reservation)
+	result.GroupBlocked = result.GroupHolder != "" || result.GroupAhead != ""
+	result.GroupRunRepos = map[string]int64{}
+	for _, holder := range gate.groups[reservation.group] {
+		result.GroupHolders = append(result.GroupHolders, holder.runID)
+		result.GroupRunRepos[holder.runID] = holder.repoID
+	}
+	for _, waiter := range gate.waiters {
+		if waiter.runID == result.GroupAhead {
+			result.GroupRunRepos[waiter.runID] = waiter.repoID
+		}
+	}
 	if reservation.prepared && !reservation.vmParked && !result.KubeVirtCapacity && result.GroupHolder == "" && result.GroupAhead == "" {
 		if head := gate.headBlockerLocked(); head == reservation {
 			result.HeadOfQueue = true
@@ -840,8 +873,11 @@ func (reservation *admissionReservation) parkVM() error {
 	reservation.ready = make(chan struct{})
 	gate.used -= reservation.weight
 	gate.runs--
-	if reservation.group != "" && gate.groups[reservation.group] == reservation {
-		delete(gate.groups, reservation.group)
+	if reservation.group != "" {
+		gate.groups[reservation.group] = slices.DeleteFunc(gate.groups[reservation.group], func(r *admissionReservation) bool { return r == reservation })
+		if len(gate.groups[reservation.group]) == 0 {
+			delete(gate.groups, reservation.group)
+		}
 	}
 	gate.waiters = append(gate.waiters, reservation)
 	gate.sortWaitersLocked()

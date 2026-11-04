@@ -3,6 +3,7 @@ package argoworkflow
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -28,19 +29,11 @@ const (
 	// costs two of them.
 	SizeAnnotation = "oberth.ci/size"
 
-	// ConcurrencyGroupAnnotation names a concurrency group this pipeline's
-	// runs belong to: at most one run of the same repository and group
-	// executes at a time, across branch, promotion, and tag triggers, and the
-	// others queue behind it in claim order. Absent declares no group.
-	//
-	// The group is a mutual exclusion, not a size. It never changes the run's
-	// admission weight, so a repository that must serialize its own work (a
-	// Terraform state, say) declares its real size and the group rather than
-	// XL: unrelated repositories keep running beside it. Groups are scoped to
-	// the declaring repository, so a document in another repository naming the
-	// same group cannot block this one. Names are 1 to 63 characters of
-	// lowercase letters, digits, and hyphens; anything else fails admission.
+	// ConcurrencyGroupAnnotation names a group shared across repositories and
+	// all triggers. ConcurrencyLimitAnnotation defaults to one; YAML declarations
+	// of the same group must agree. Names use 1..63 lowercase letters/digits/hyphens.
 	ConcurrencyGroupAnnotation = "oberth.ci/concurrency-group"
+	ConcurrencyLimitAnnotation = "oberth.ci/concurrency-limit"
 
 	// SecretPathsAnnotation declares the OpenBao paths credentialed steps
 	// intend to read through secretstore exec. Admission checks the approval
@@ -91,6 +84,28 @@ func DeclaredConcurrencyGroup(workflow *wfv1.Workflow) (string, error) {
 			ConcurrencyGroupAnnotation, declared, MaxConcurrencyGroupLength)
 	}
 	return group, nil
+}
+
+// DeclaredConcurrencyLimit reads a positive decimal limit from immutable YAML.
+// Omission defaults to one. A limit without a group is a configuration error.
+func DeclaredConcurrencyLimit(workflow *wfv1.Workflow) (int, error) {
+	group, err := DeclaredConcurrencyGroup(workflow)
+	if err != nil {
+		return 0, err
+	}
+	raw, present := workflow.Annotations[ConcurrencyLimitAnnotation]
+	if !present {
+		return 1, nil
+	}
+	value := strings.TrimSpace(raw)
+	if group == "" || value == "" || strings.Trim(value, "0123456789") != "" {
+		return 0, fmt.Errorf("argoworkflow: annotation %s requires a concurrency group and a positive decimal integer", ConcurrencyLimitAnnotation)
+	}
+	n, err := strconv.ParseInt(value, 10, 32)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("argoworkflow: annotation %s must be in 1..2147483647", ConcurrencyLimitAnnotation)
+	}
+	return int(n), nil
 }
 
 // DeclaredSize returns the scheduler admission weight the document requests.

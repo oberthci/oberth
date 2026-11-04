@@ -74,6 +74,23 @@ func TestPipelineConcurrencyGroupReadsTheRunsOwnDocument(t *testing.T) {
 	}
 }
 
+func TestPipelineConcurrencyLimitReadsBuildAndReleaseYAML(t *testing.T) {
+	dir := t.TempDir()
+	writePipeline(t, dir, "build.yaml", groupedPipeline("    oberth.ci/concurrency-group: state\n    oberth.ci/concurrency-limit: '2'\n"))
+	writePipeline(t, dir, "release.yaml", groupedPipeline("    oberth.ci/concurrency-group: state\n    oberth.ci/concurrency-limit: '3'\n"))
+	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
+	for _, run := range []model.Run{{Trigger: "branch"}, {Trigger: "promotion"}, {Trigger: "tag", RefKind: model.RefTag}, {Trigger: "tag", Release: true, RefKind: model.RefTag}} {
+		group, limit, err := jobs.PipelineConcurrencyContract(t.Context(), service.WorkflowRequest{Run: run, Repository: model.Repository{Name: "repo"}, SourceDir: dir})
+		want := 2
+		if run.Release {
+			want = 3
+		}
+		if err != nil || group != "state" || limit != want {
+			t.Fatal(run, group, limit, err)
+		}
+	}
+}
+
 func TestPipelineConcurrencyGroupRefusesMalformedAndMissingDocuments(t *testing.T) {
 	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
 	malformed := t.TempDir()

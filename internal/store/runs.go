@@ -19,7 +19,7 @@ const runColumns = `
 queue_sequence, COALESCE(admission_sequence, queue_sequence), id, repo_id, ref_kind, ref, sha, actor, release, credentialed, trigger,
 phase, job_name, tested_sha, base_sha, failed_burn, failed_step, error,
 status, reason, superseded_by, queued_at, started_at, finished_at, created_at, updated_at,
-concurrency_group, schedule_entry, ` + basePrioritySQL + `, ` + priorityReasonSQL + `,
+concurrency_group, concurrency_limit, schedule_entry, ` + basePrioritySQL + `, ` + priorityReasonSQL + `,
 COALESCE(` + overridePrioritySQL + `,''), COALESCE((SELECT reason FROM run_priority_overrides WHERE run_id=id),''),
 COALESCE(` + requestedPrioritySQL + `,''), COALESCE(` + requestedPriorityReasonSQL + `,''),
 COALESCE((SELECT actor FROM run_priority_overrides WHERE run_id=id),(SELECT actor FROM run_priority_requests WHERE run_id=id),''), COALESCE((SELECT refusal FROM run_priority_requests WHERE run_id=id),''), NOT (` + supersessionEligibleSQL + `)`
@@ -1363,7 +1363,7 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 		&value.SHA, &value.Actor, &release, &credentialed, &value.Trigger, &value.Phase, &value.WorkflowName,
 		&value.TestedSHA, &value.BaseSHA, &value.FailedStage, &value.FailedStep, &value.Error,
 		&value.Status, &value.Reason, &value.SupersededBy, &queued, &started, &finished,
-		&created, &updated, &value.ConcurrencyGroup, &value.ScheduleEntry, &value.Priority, &value.PriorityReason, &value.PriorityOverride, &value.PriorityOverrideReason, &value.PriorityAccepted, &value.PriorityAcceptedReason, &value.PriorityRequestedBy, &value.PriorityRefusal, &value.PriorityProtected,
+		&created, &updated, &value.ConcurrencyGroup, &value.ConcurrencyLimit, &value.ScheduleEntry, &value.Priority, &value.PriorityReason, &value.PriorityOverride, &value.PriorityOverrideReason, &value.PriorityAccepted, &value.PriorityAcceptedReason, &value.PriorityRequestedBy, &value.PriorityRefusal, &value.PriorityProtected,
 	}
 	if err := scanRowNotFound(row, "Run", append(dest, extra...)...); err != nil {
 		return model.Run{}, err
@@ -1455,44 +1455,6 @@ WHERE id = ? AND status IN ('queued', 'running') AND credentialed = 0`,
 		return fmt.Errorf("set run credentialed: %w", err)
 	}
 	return tx.Commit()
-}
-
-// SetRunConcurrencyGroup records the repository-declared concurrency group an
-// active run is admitted under (#658). The scheduler calls it after reading the
-// group from the run's own immutable checkout and before resource admission,
-// so a run waiting on its group already shows which group it waits on. The
-// group is a statement about exact reviewed bytes and therefore immutable: a
-// second call with a different group is an invalid state transition, while a
-// repeat of the same value, or of the empty "no group" value, is a no-op. A
-// run that is no longer active is left untouched.
-func (s *Store) SetRunConcurrencyGroup(ctx context.Context, id, group string) error {
-	if strings.TrimSpace(id) == "" {
-		return fmt.Errorf("%w: run ID is required", ErrInvalid)
-	}
-	if group == "" {
-		return nil
-	}
-	if !validConcurrencyGroup(group) {
-		return fmt.Errorf("%w: concurrency group %q is not 1 to 63 characters of [a-z0-9-]", ErrInvalid, group)
-	}
-	result, err := s.db.ExecContext(ctx, `
-UPDATE runs SET concurrency_group = ?, updated_at = ?
-WHERE id = ? AND status IN ('queued', 'running') AND concurrency_group = ''`,
-		group, unixNano(s.now()), id)
-	if err != nil {
-		return fmt.Errorf("set run concurrency group: %w", err)
-	}
-	if changed, err := result.RowsAffected(); err == nil && changed == 1 {
-		return nil
-	}
-	current, err := s.Run(ctx, id)
-	if err != nil {
-		return err
-	}
-	if current.ConcurrencyGroup != "" && current.ConcurrencyGroup != group {
-		return fmt.Errorf("%w: run %s already records concurrency group %q", ErrInvalidState, id, current.ConcurrencyGroup)
-	}
-	return nil
 }
 
 // validConcurrencyGroup is the store-side copy of the admission rule the

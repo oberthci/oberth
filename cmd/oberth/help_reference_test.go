@@ -24,6 +24,7 @@ admin
 admin read-file
 admin retirement-check
 admission
+admission groups
 admission hold
 admission release
 artifacts

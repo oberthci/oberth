@@ -154,6 +154,8 @@ DELETE FROM schema_migrations WHERE version>=50;
 const PostIntegerMigrationsDowngrade = `
 DROP TABLE IF EXISTS deferred_branch_receives;
 DROP TABLE IF EXISTS queue_cap;
+DROP TABLE IF EXISTS concurrency_group_declarations;
+ALTER TABLE runs DROP COLUMN concurrency_limit;
 DROP TABLE IF EXISTS admission_holds;
 DELETE FROM schema_migrations WHERE version>55;
 DROP INDEX schema_migrations_id_unique;

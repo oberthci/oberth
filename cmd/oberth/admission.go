@@ -14,6 +14,7 @@ import (
 )
 
 const admissionUsage = "Usage: oberth admission [--json] | oberth admission release <run-id> [--force] [--json]\n" +
+	"       oberth admission groups [--json]\n" +
 	"       oberth admission hold on|off --reason <reason> [--allow tag,release,promotion] [--duration 2h] [--json]\n" +
 	"         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]"
 
@@ -39,11 +40,12 @@ func runAdmission(ctx context.Context, arguments []string, output io.Writer) err
 	force, asJSON := *forceFlag, *jsonFlag
 	transport := transportFlags()
 
+	groups := len(positional) == 1 && positional[0] == "groups"
 	release := len(positional) > 0 && positional[0] == "release"
 	switch {
 	case release && len(positional) != 2:
 		return fmt.Errorf("%w: admission release <run-id>", errUsage)
-	case !release && (len(positional) != 0 || force):
+	case !release && (!groups && len(positional) != 0 || force):
 		return fmt.Errorf("%w: %s", errUsage, admissionUsage)
 	}
 	config, err := parseMCPFlags("admission", transport, 0)
@@ -51,6 +53,26 @@ func runAdmission(ctx context.Context, arguments []string, output io.Writer) err
 		return err
 	}
 	remote := remoteRunCanceller{config: config}
+	if groups {
+		raw, err := remote.call(ctx, "concurrency_groups", map[string]any{})
+		if err != nil {
+			return err
+		}
+		if asJSON {
+			_, err = fmt.Fprintf(output, "%s\n", strings.TrimSpace(string(raw)))
+			return err
+		}
+		var values []model.AdmissionGroup
+		if err = json.Unmarshal(raw, &values); err != nil {
+			return err
+		}
+		table := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
+		_, _ = fmt.Fprintln(table, "GROUP\tLIMIT\tHOLDERS\tWAITERS")
+		for _, g := range values {
+			_, _ = fmt.Fprintf(table, "%s\t%d\t%s\t%s\n", g.Name, g.Limit, dash(strings.Join(g.Holders, ", ")), dash(strings.Join(g.Waiting, ", ")))
+		}
+		return table.Flush()
+	}
 	if release {
 		arguments := map[string]any{"run_id": positional[1]}
 		if force {

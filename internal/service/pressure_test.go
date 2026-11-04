@@ -160,7 +160,7 @@ func TestPressureMaximumDeferralAdmitsButPreservesOtherGates(t *testing.T) {
 				f.gate.diskFloor = &diskFloorCheck{floorBytes: 100, cachedFree: 0, cacheTime: time.Now(), cacheTTL: time.Hour}
 			case "group":
 				r.group = "1/group"
-				f.gate.groups[r.group] = &admissionReservation{runID: "owner"}
+				f.gate.groups[r.group] = []*admissionReservation{{runID: "owner"}}
 			case "vm":
 				r.vmParked = true
 			}
