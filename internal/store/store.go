@@ -1645,14 +1645,9 @@ func (s *Store) EnqueueAdmittedPromotionRun(ctx context.Context, runSpec model.R
 	if err != nil {
 		return model.EnqueueRunResult{}, model.Promotion{}, err
 	}
-	if promotion.BranchCISkipped {
-		if enqueued.Reason != "" {
-			enqueued.Reason += "; "
-		}
-		enqueued.Reason += "promoted without branch CI"
-		if _, err := tx.ExecContext(ctx, `UPDATE runs SET reason=? WHERE id=?`, enqueued.Reason, enqueued.ID); err != nil {
-			return model.EnqueueRunResult{}, model.Promotion{}, fmt.Errorf("record skipped branch CI: %w", err)
-		}
+	enqueued.Run, err = s.recordPromotionBranchCISkippedTx(ctx, tx, promotion, enqueued.Run)
+	if err != nil {
+		return model.EnqueueRunResult{}, model.Promotion{}, err
 	}
 	promotion, err = scanPromotion(tx.QueryRowContext(ctx, `
 UPDATE promotions SET run_id = ?, updated_at = ?

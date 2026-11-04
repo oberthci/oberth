@@ -136,14 +136,11 @@ func (s *Store) kvmRetryAllowedTx(ctx context.Context, tx *sql.Tx, run model.Run
 	if err = requireKVMRetryPromotionAuthority(ctx, tx, promotion); err != nil {
 		return err
 	}
-	if spec.GrantID != "" {
-		return checkPromotionGrantReservableTx(ctx, tx, spec, now)
-	}
-	return nil
+	return checkPromotionGrantReservableTx(ctx, tx, spec, now)
 }
 
 func preflightPromotionSpec(p model.Promotion) model.PromotionSpec {
-	return model.PromotionSpec{Train: p.Train, RepoID: p.RepoID, SourceBranch: p.SourceBranch, SourceSHA: p.SourceSHA, TargetRef: p.TargetRef, PreviousSHA: p.PreviousSHA, ResultSHA: p.ResultSHA, Actor: p.Actor, GrantID: p.GrantID, RetryOf: p.ID, RetryMode: model.PromotionRetryAuto}
+	return model.PromotionSpec{BranchCISkipped: p.BranchCISkipped, Train: p.Train, RepoID: p.RepoID, SourceBranch: p.SourceBranch, SourceSHA: p.SourceSHA, TargetRef: p.TargetRef, PreviousSHA: p.PreviousSHA, ResultSHA: p.ResultSHA, Actor: p.Actor, GrantID: p.GrantID, RetryOf: p.ID, RetryMode: model.PromotionRetryAuto}
 }
 
 func (s *Store) enqueueKVMRetryTx(ctx context.Context, tx *sql.Tx, run model.Run, now int64) (model.Run, error) {
@@ -177,16 +174,18 @@ func (s *Store) enqueueKVMRetryTx(ctx context.Context, tx *sql.Tx, run model.Run
 		if err != nil {
 			return model.Run{}, err
 		}
+		enqueued.Run, err = s.recordPromotionBranchCISkippedTx(ctx, tx, promotion, enqueued.Run)
+		if err != nil {
+			return model.Run{}, err
+		}
 		if err = s.appendPromotionAdmissionAudit(ctx, tx, promotion, now); err != nil {
 			return model.Run{}, err
 		}
 		if err = s.appendPromotionRetryAudit(ctx, tx, promotion, retry, now); err != nil {
 			return model.Run{}, err
 		}
-		if spec.GrantID != "" {
-			if err = s.appendPromotionGrantReserveAudit(ctx, tx, promotion, original.ID, now); err != nil {
-				return model.Run{}, err
-			}
+		if err = s.appendPromotionGrantReserveAudit(ctx, tx, promotion, original.ID, now); err != nil {
+			return model.Run{}, err
 		}
 	}
 	next, err := s.inheritQueuePriorityTx(ctx, tx, run, enqueued.Run)

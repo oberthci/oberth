@@ -79,6 +79,9 @@ promotions; historical audit records are unchanged.
 or grant authority. It tests the merged tree again for a skipped-branch source.
 Queued planning and publication recheck target branch-CI requirements. Ordinary
 green branch promotions retain their existing fast-forward reuse behavior.
+Trusted-preflight recovery retains skipped-branch evidence, its audit marker and
+the existing run reason on the replacement. Fresh positive suite evidence cannot
+bypass a target policy that now requires branch CI.
 
 Single-source and train admission use the same eligibility check. A terminal
 failed or interrupted branch run on the SHA refuses promotion, even when the SHA
