@@ -157,7 +157,7 @@ func (s *API) readRunResources(ctx context.Context, raw json.RawMessage) (any, e
 			continue
 		}
 		if history.SafetyIncomplete {
-			step.RefuseSizing("retained safety window or executed-attempt inventory is incomplete; missing evidence cannot justify advice")
+			step.RefuseSizing("retained safety window or executed-attempt inventory is incomplete or contradictory; missing evidence cannot justify advice")
 		}
 		if r.Truncated {
 			step.RefuseSizing("history row limit reached; narrow the run selection")

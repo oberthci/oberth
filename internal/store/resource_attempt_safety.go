@@ -62,7 +62,7 @@ func (s *Store) readResourceAttemptSafety(ctx context.Context, repoID int64, pay
 	}
 	count := 0
 	perRun := map[string]int{}
-	known := map[string]bool{}
+	known := map[string]resourceAttemptBinding{}
 	for rows.Next() {
 		var runID, raw string
 		var a model.ResourceAttempt
@@ -86,13 +86,14 @@ func (s *Store) readResourceAttemptSafety(ctx context.Context, repoID int64, pay
 			_ = rows.Close()
 			return fmt.Errorf("invalid stored resource attempt binding")
 		}
-		known[runID+"\x00"+a.NodeID] = true
+		binding := resourceAttemptBinding{i, a}
+		known[runID+"\x00"+a.NodeID] = binding
 		if !a.Status.Terminal() && !terminal[runID] && !i.Terminal {
 			continue
 		}
 		covered := false
 		for _, v := range usage[runID+"\x00"+a.NodeID] {
-			if v.WorkflowUID == i.WorkflowUID && v.WorkflowName == i.WorkflowName && v.Namespace == i.Namespace && a.PodUID != "" && v.PodUID == a.PodUID && v.Stage == a.Stage && v.Step == a.Step && v.TemplateName == a.Template && v.Terminal && !v.ContainerFinishedAt.IsZero() {
+			if binding.matchesUsage(v) && v.Terminal && !v.ContainerFinishedAt.IsZero() {
 				covered = true
 			}
 		}
@@ -103,12 +104,14 @@ func (s *Store) readResourceAttemptSafety(ctx context.Context, repoID int64, pay
 	err = rows.Err()
 	_ = rows.Close()
 	for _, o := range out.SafetyObservations {
-		if !known[o.Usage.RunID+"\x00"+o.Usage.NodeID] {
+		binding, ok := known[o.Usage.RunID+"\x00"+o.Usage.NodeID]
+		if !ok || !binding.matchesUsage(o.Usage) {
 			out.SafetyIncomplete = true
 		}
 	}
 	for _, d := range out.Dispositions {
-		if !known[d.RunID+"\x00"+d.NodeID] {
+		binding, ok := known[d.RunID+"\x00"+d.NodeID]
+		if !ok || !binding.matchesDisposition(d) {
 			out.SafetyIncomplete = true
 		}
 	}

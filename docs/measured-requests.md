@@ -217,6 +217,11 @@ in one collector snapshot. The marker records visibility and terminal Workflow
 observation, not metric sufficiency. Failure and bound Pod identity survive late
 or duplicate snapshots; dropped retry nodes are retained. These tables also
 cascade with run deletion. They do not store raw Pod messages, commands or environment.
+Every retained main observation and Pod disposition is reconciled with its full
+Workflow, namespace, node, Pod and invocation binding. A contradiction refuses
+advice for the measured invocation too, even if the conflicting inventory names
+another burn or template. Current writers reject definite binding conflicts in
+either order; the reader also fences inconsistent records retained by older code.
 Use the normal pre-upgrade backup/restore process for database rollback; this
 does not require older CLI clients to understand the new fields.
 

@@ -73,6 +73,9 @@ func (s *Store) RecordResourceAttempts(ctx context.Context, i model.ResourceAtte
 		} else {
 			count++
 		}
+		if err := checkAttemptUsage(ctx, tx, i, a); err != nil {
+			return err
+		}
 		body, err := json.Marshal(a)
 		if err != nil || len(body) > 2048 {
 			return ErrInvalid
