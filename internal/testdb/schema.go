@@ -152,6 +152,8 @@ DELETE FROM schema_migrations WHERE version>=50;
 // fixtures derived from a current database. Receipt ordinals above 55 are local
 // applications of timestamp IDs, never integer migration definitions.
 const PostIntegerMigrationsDowngrade = `
+DROP TABLE IF EXISTS deferred_branch_receives;
+DROP TABLE IF EXISTS queue_cap;
 DROP TABLE IF EXISTS admission_holds;
 DELETE FROM schema_migrations WHERE version>55;
 DROP INDEX schema_migrations_id_unique;

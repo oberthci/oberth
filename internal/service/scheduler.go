@@ -279,6 +279,9 @@ func (scheduler *Scheduler) enqueueCI(ctx context.Context, request CIRequest, fi
 	if err == nil && result.Enqueued.ID != "" {
 		err = scheduler.AcceptEnqueue(ctx, result.Enqueued)
 	}
+	if err == nil && result.Enqueued.DeferredReason != "" {
+		scheduler.signalQueue()
+	}
 	return result, err
 }
 
@@ -592,6 +595,13 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 	}
 	for {
 		scheduler.dispatchProgress.Beat()
+		if err := scheduler.drainDeferredBranches(dispatchCtx, scheduler.awaitDispatchMutation); err != nil {
+			join()
+			if ctx.Err() != nil {
+				return nil
+			}
+			return err
+		}
 		priorityErr := scheduler.refreshPriorities(dispatchCtx)
 		if priorityErr != nil && !store.IsTransientLockError(priorityErr) {
 			join()
@@ -739,6 +749,9 @@ func (scheduler *Scheduler) dispatchSlotAvailable(active int) bool {
 // focused tests. The long-running server normally uses Run.
 func (scheduler *Scheduler) ProcessNext(ctx context.Context) error {
 	if err := scheduler.requireMutation(ctx); err != nil {
+		return err
+	}
+	if err := scheduler.drainDeferredBranches(ctx, scheduler.requireMutation); err != nil {
 		return err
 	}
 	run, err := scheduler.database().ClaimNextRun(ctx)

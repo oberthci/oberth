@@ -205,5 +205,8 @@ func applyQueuedDisplay(run *model.Run, scheduling *model.RunScheduling, reason 
 	if reason == "" {
 		reason = queuedDisplayReason(scheduling, nil)
 	}
+	if strings.HasPrefix(run.Reason, "branch run deferred:") {
+		reason += "; " + run.Reason
+	}
 	run.DisplayReason = reason
 }

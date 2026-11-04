@@ -121,6 +121,7 @@ type AuditChainStatus struct {
 }
 
 type HealthStatus struct {
+	QueueCap          *model.QueueCapStatus          `json:"queueCap,omitempty"`
 	DatabaseRetries   uint64                         `json:"database_retries_total,omitempty"`
 	ControllerProfile *model.ControllerProfileStatus `json:"controller_profile,omitempty"`
 	Storage           any                            `json:"storage,omitempty"`
@@ -238,6 +239,16 @@ func (health Health) Status(ctx context.Context) (any, error) {
 	if health.Store == nil {
 		return status, nil
 	}
+	var queueCapErr error
+	if reader, ok := health.Store.(interface {
+		QueueCap(context.Context) (model.QueueCapStatus, error)
+	}); ok {
+		cap, err := reader.QueueCap(ctx)
+		queueCapErr = err
+		if err == nil {
+			status.QueueCap = &cap
+		}
+	}
 	upstreams, upstreamErr := health.Store.ListUpstreams(ctx)
 	repositories, repositoryErr := health.Store.ListRepositories(ctx)
 	if upstreamErr == nil && repositoryErr == nil {
@@ -310,6 +321,9 @@ func (health Health) Status(ctx context.Context) (any, error) {
 	}
 	if health.Admission != nil {
 		status.Admission = health.Admission()
+	}
+	if queueCapErr != nil {
+		status.Database = "unavailable"
 	}
 	return status, nil
 }

@@ -91,6 +91,7 @@ type APIConfig struct {
 	KubeVirtGrants            KubeVirtGrantStore
 	SizeGrants                SizeGrantStore
 	QueuePriorities           QueuePriorityStore
+	QueueCap                  QueueCapStore
 	SecretStoreVerifier       SecretStoreVerifier
 	SecretAccessReconciler    *AccessReconciler
 	RepositoryArchiver        RepositoryArchiver
@@ -153,6 +154,8 @@ type API struct {
 	kubeVirtGrants            KubeVirtGrantStore
 	sizeGrants                SizeGrantStore
 	queuePriorities           QueuePriorityStore
+	queueCap                  QueueCapStore
+	deferredBranches          deferredBranchReader
 	secretStoreVerifier       SecretStoreVerifier
 	secretAccessReconciler    *AccessReconciler
 	repositoryArchiver        RepositoryArchiver
@@ -239,6 +242,10 @@ func NewAPI(config APIConfig) (*API, error) {
 		promotionGrantMaxLifetime = promotionGrantHardCeiling
 	}
 	lifetime, stopLifetime := context.WithCancel(context.Background())
+	if config.QueueCap == nil {
+		config.QueueCap, _ = config.Runs.(QueueCapStore)
+	}
+	deferredBranches, _ := config.Runs.(deferredBranchReader)
 	return &API{
 		issueStaleAfter: config.IssueStaleAfter, issueActiveStaleAfter: config.IssueActiveStaleAfter,
 		releasePreflight: config.ReleasePreflight,
@@ -257,6 +264,8 @@ func NewAPI(config APIConfig) (*API, error) {
 		workflowCapabilities: config.WorkflowCapabilities,
 		sizeGrants:           config.SizeGrants,
 		queuePriorities:      config.QueuePriorities,
+		queueCap:             config.QueueCap,
+		deferredBranches:     deferredBranches,
 		secretStoreVerifier:  config.SecretStoreVerifier,
 		repositoryArchiver:   config.RepositoryArchiver, changeRepositoryArchive: config.ChangeRepositoryArchive,
 		repositoryRemover: config.RepositoryRemover, removeGitCache: config.RemoveGitCache,
@@ -412,6 +421,8 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		}
 	case "priority_grant", "priority_grant_list", "priority_grant_revoke":
 		return service.priorityGrantTool(ctx, actor, name, raw)
+	case "queue_cap_config":
+		return service.queueCapConfig(ctx, actor, raw)
 	case "queue_priority_config", "queue_priority_get", "run_priority":
 		return service.queuePriorityTool(ctx, actor, name, raw)
 	case "admission_release":
@@ -1601,6 +1612,10 @@ func (service *API) statusForBranchRef(ctx context.Context, repositoryName, sele
 		if err != nil {
 			return StatusResponse{}, fmt.Errorf("%w: run selector %q", store.ErrNotFound, selector)
 		}
+		deferred, err := service.branchWithoutRun(ctx, repository, selector, sha)
+		if err != nil || deferred.Status == "queued" {
+			return deferred, err
+		}
 		run, runErr := service.runs.ResolveRun(ctx, repository.ID, sha)
 		if runErr == nil && sameOID(run.SHA, sha) {
 			return service.statusFromRun(ctx, repository, run, selector, actor)
@@ -1608,10 +1623,7 @@ func (service *API) statusForBranchRef(ctx context.Context, repositoryName, sele
 		if runErr != nil && !errors.Is(runErr, store.ErrNotFound) {
 			return StatusResponse{}, runErr
 		}
-		return StatusResponse{
-			Repository: repository, Repo: repository.Name, Ref: selector,
-			SHA: sha, Status: "no-runs", Stages: map[string]string{},
-		}, nil
+		return service.branchWithoutRun(ctx, repository, selector, sha)
 	}
 	repositories, err := service.runs.ListRepositories(ctx)
 	if err != nil {
@@ -1634,6 +1646,10 @@ func (service *API) statusForBranchRef(ctx context.Context, repositoryName, sele
 	if matched.ID == 0 {
 		return StatusResponse{}, fmt.Errorf("%w: run selector %q", store.ErrNotFound, selector)
 	}
+	deferred, err := service.branchWithoutRun(ctx, matched, selector, matchedSHA)
+	if err != nil || deferred.Status == "queued" {
+		return deferred, err
+	}
 	run, runErr := service.runs.ResolveRun(ctx, matched.ID, matchedSHA)
 	if runErr == nil && sameOID(run.SHA, matchedSHA) {
 		return service.statusFromRun(ctx, matched, run, selector, actor)
@@ -1641,10 +1657,7 @@ func (service *API) statusForBranchRef(ctx context.Context, repositoryName, sele
 	if runErr != nil && !errors.Is(runErr, store.ErrNotFound) {
 		return StatusResponse{}, runErr
 	}
-	return StatusResponse{
-		Repository: matched, Repo: matched.Name, Ref: selector,
-		SHA: matchedSHA, Status: "no-runs", Stages: map[string]string{},
-	}, nil
+	return service.branchWithoutRun(ctx, matched, selector, matchedSHA)
 }
 
 // statusFromRun builds a full StatusResponse from an already-resolved
@@ -1804,6 +1817,9 @@ func (service *API) presentationRuns(ctx context.Context, runs []model.Run) (res
 func (service *API) presentationRunWithSuccessor(ctx context.Context, run model.Run, successors map[string]model.Run) model.Run {
 	run = service.withAdmissionPriority(run)
 	visible := presentationRunAt(run, service.schedulingClock().Now())
+	if service.scope != nil && strings.HasPrefix(visible.Reason, "branch run deferred:") {
+		visible.Reason = "branch run deferred: waiting for queue capacity"
+	}
 	if run.Status == model.RunRunning && run.StartedAt != nil && service.submittedKVMPreflight(ctx, run) {
 		visible.Phase = "preflight"
 	}
@@ -3034,7 +3050,7 @@ func MutatingTool(name string) bool {
 		"access_allow", "access_revoke",
 		"kubevirt_grant", "kubevirt_revoke", "workflow_capability_grant", "workflow_capability_revoke",
 		"size_grant", "size_revoke", "resource_grant", "resource_revoke",
-		"admission_release", "admission_hold", "queue_priority_config", "run_priority", "priority_grant", "priority_grant_revoke",
+		"admission_release", "admission_hold", "queue_cap_config", "queue_priority_config", "run_priority", "priority_grant", "priority_grant_revoke",
 		"repo_remove", "repo_archive", "repo_unarchive",
 		"secretstore_sync_receipt",
 		"promote_grant", "promote_grant_revoke",

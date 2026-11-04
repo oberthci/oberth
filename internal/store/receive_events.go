@@ -28,7 +28,7 @@ func (s *Store) RecordReceiveEvent(ctx context.Context, spec model.ReceiveEventS
 		return false, fmt.Errorf("begin receive event: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if duplicate, err := receiveDuplicate(ctx, tx, spec, false); duplicate || err != nil {
+	if duplicate, err := receiveDuplicate(ctx, tx, spec); duplicate || err != nil {
 		return duplicate, err
 	}
 	now := unixNano(s.now())
@@ -73,7 +73,7 @@ func (s *Store) EnqueueReceiveEvent(ctx context.Context, event model.ReceiveEven
 }
 
 func (s *Store) enqueueReceiveEventTx(ctx context.Context, tx *sql.Tx, event model.ReceiveEventSpec, validatedRun model.RunSpec) (model.EnqueueRunResult, error) {
-	if duplicate, duplicateErr := receiveDuplicate(ctx, tx, event, true); duplicate || duplicateErr != nil {
+	if duplicate, duplicateErr := receiveDuplicate(ctx, tx, event); duplicate || duplicateErr != nil {
 		if duplicateErr != nil {
 			return model.EnqueueRunResult{}, duplicateErr
 		}
@@ -81,11 +81,23 @@ func (s *Store) enqueueReceiveEventTx(ctx context.Context, tx *sql.Tx, event mod
 		if err := tx.QueryRowContext(ctx, `SELECT run_id FROM receive_events WHERE id = ?`, event.ID).Scan(&runID); err != nil {
 			return model.EnqueueRunResult{}, fmt.Errorf("read duplicate receive run: %w", err)
 		}
+		if runID == "" {
+			var reason string
+			if err := tx.QueryRowContext(ctx, `SELECT reason FROM deferred_branch_receives WHERE event_id=?`, event.ID).Scan(&reason); err != nil {
+				return model.EnqueueRunResult{}, fmt.Errorf("read deferred receive: %w", err)
+			}
+			return model.EnqueueRunResult{Duplicate: true, DeferredReason: reason}, nil
+		}
 		run, err := scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id = ?`, runID))
 		if err != nil {
 			return model.EnqueueRunResult{}, fmt.Errorf("read duplicate receive run: %w", err)
 		}
 		return model.EnqueueRunResult{Run: run, Duplicate: true}, nil
+	}
+	if reason, err := s.deferBranchTx(ctx, tx, event, validatedRun); err != nil {
+		return model.EnqueueRunResult{}, err
+	} else if reason != "" {
+		return model.EnqueueRunResult{DeferredReason: reason}, nil
 	}
 	runID, err := randomID()
 	if err != nil {
@@ -143,7 +155,7 @@ func matchReceiveRun(event model.ReceiveEventSpec, run model.RunSpec) error {
 	return nil
 }
 
-func receiveDuplicate(ctx context.Context, tx *sql.Tx, spec model.ReceiveEventSpec, requireRun bool) (bool, error) {
+func receiveDuplicate(ctx context.Context, tx *sql.Tx, spec model.ReceiveEventSpec) (bool, error) {
 	value, err := scanReceiveEvent(tx.QueryRowContext(ctx, `SELECT `+receiveEventColumns+` FROM receive_events WHERE id = ?`, spec.ID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
@@ -153,7 +165,7 @@ func receiveDuplicate(ctx context.Context, tx *sql.Tx, spec model.ReceiveEventSp
 	}
 	if value.Actor != spec.Actor || value.RepoID != spec.RepoID || value.RefKind != spec.RefKind || value.Ref != spec.Ref ||
 		!sameStoredOID(value.OldSHA, spec.OldSHA) || !sameStoredOID(value.ObjectSHA, spec.ObjectSHA) ||
-		!sameStoredOID(value.CommitSHA, spec.CommitSHA) || value.Outcome != spec.Outcome || (requireRun && value.RunID == "") {
+		!sameStoredOID(value.CommitSHA, spec.CommitSHA) || value.Outcome != spec.Outcome {
 		return false, fmt.Errorf("%w: receive event ID was reused with different contents", ErrInvalidState)
 	}
 	return true, nil
@@ -171,12 +183,16 @@ VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	return nil
 }
 
-func (s *Store) appendReceiveAudit(ctx context.Context, tx *sql.Tx, spec model.ReceiveEventSpec, runID string, now int64) error {
-	details, err := json.Marshal(map[string]any{
+func (s *Store) appendReceiveAudit(ctx context.Context, tx *sql.Tx, spec model.ReceiveEventSpec, runID string, now int64, reason ...string) error {
+	fields := map[string]any{
 		"event_id": spec.ID, "repo_id": spec.RepoID, "ref_kind": spec.RefKind, "ref": spec.Ref,
 		"old_sha": spec.OldSHA, "object_sha": spec.ObjectSHA, "commit_sha": spec.CommitSHA,
 		"outcome": spec.Outcome, "run_id": runID,
-	})
+	}
+	if len(reason) > 0 {
+		fields["reason"] = reason[0]
+	}
+	details, err := json.Marshal(fields)
 	if err != nil {
 		return fmt.Errorf("encode receive audit: %w", err)
 	}
