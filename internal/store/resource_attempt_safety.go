@@ -87,7 +87,7 @@ func (s *Store) readResourceAttemptSafety(ctx context.Context, repoID int64, pay
 			return fmt.Errorf("invalid stored resource attempt binding")
 		}
 		known[runID+"\x00"+a.NodeID] = true
-		if !a.Status.Terminal() && !terminal[runID] {
+		if !a.Status.Terminal() && !terminal[runID] && !i.Terminal {
 			continue
 		}
 		covered := false

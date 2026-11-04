@@ -120,7 +120,10 @@ identity, timestamp, failure cause or measurement. A successful retry cannot
 discharge another node's missing coverage. Incomplete/offloaded node inventories,
 legacy missing inventories and truncated reads remain unknown and refuse advice.
 Ordinary uncensored active attempts stay outside completed measurements without
-being treated as failed workloads. An executed terminal step without retained usage or Pod
+being treated as failed workloads. This exemption requires both the run and the
+retained Workflow observation to be active: Workflow completion can precede node
+settling, log collection and run finalization. A terminal Workflow with unfinished
+exact attempt coverage refuses advice during that interval. An executed terminal step without retained usage or Pod
 disposition is an explicit coverage gap. Skipped, unexecuted steps do not invent
 measurements or failures. Ordinary still-running telemetry stays outside terminal
 quantiles; known censor evidence is evaluated before that exclusion.
