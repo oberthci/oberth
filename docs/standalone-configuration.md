@@ -47,7 +47,9 @@ that repository.
 ## Automatic infrastructure recovery
 
 `autoRetryInfrastructure` defaults to true in Helm; the server equivalent is
-`--auto-retry-infrastructure=true`. Eligible branch infrastructure failures get
+`--auto-retry-infrastructure=true`. Failed steps, including infrastructure-classified
+step failures, and execution deadlines after any step started or passed are
+excluded. Eligible branch infrastructure failures get
 one fresh attempt at their original admission position and priority. The budget
 cannot be raised beyond one retry. Set the value to false in administrator-owned
 upgrade values for manual-only recovery. See [eligibility, audit records and

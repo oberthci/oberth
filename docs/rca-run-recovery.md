@@ -4,15 +4,19 @@ A branch run can receive **one** automatic retry for an eligible infrastructure
 or workflow-level `job` failure without a failed step, matching the failure
 classes accepted by `run_retry`. Trusted-policy-refresh deadlines and lost
 executors qualify once cleanup is settled. Release/tag, promotion, plan, apply,
-user/admin cancellation and test/step failures never qualify. The administrator
+user/admin cancellation and failed steps never qualify, including
+infrastructure-classified step failures. Execution deadlines qualify only before
+any step started or passed. The administrator
 setting `autoRetryInfrastructure` defaults on; its fixed budget is one retry.
 See [configuration and upgrade behavior](infrastructure-retries.md).
 
 Only fresh dispatch initializes an explicit empty progress journal, before
 execution; it never truncates existing evidence. A missing journal or corrupt
 history refuses replay. Every retained progress attempt, engine step result and
-terminal observation participates in the failed/timed-out-step guard. Started
-or passed steps alone do not prevent recovery from a workflow failure.
+terminal observation participates in the failed-step guard. Execution deadlines
+also check all retained start/pass evidence, so a hung suite cannot receive a
+second execution window. Started or passed steps alone do not prevent recovery
+from a non-deadline workflow failure.
 
 Submitted, adopted and reconciled Workflows may qualify after a terminal
 observation or ownership-checked cleanup. A definite create rejection never
@@ -32,11 +36,12 @@ reason line and audit say `automatic retry of <id> after infrastructure failure:
 <reason>`; the retry is not inferred from stderr or client-side timeouts.
 
 The one-retry marker survives restart requeue, KVM preflight restart recovery
-and manual retry/rerun. Human
-reasons carry its fast read-side projection; immutable `run.auto-retry-lineage`
-receipts preserve it if cancellation/supersession replaces the human reason.
-An explicitly requested manual replay is still allowed by its existing policy,
-but does not reset the automatic budget. A separate new push is independent.
+and the existing `run_rerun` replay lineage. Human reasons carry its fast
+read-side projection; immutable `run.auto-retry-lineage` receipts preserve it if
+cancellation/supersession replaces the human reason. Explicit `run_retry` creates
+a fresh manual request at the normal queue position, without inheriting the
+automatic reason or lineage. That request can receive its own single eligible
+automatic retry. A separate new push is also independent.
 Retry creation is atomic with failure, so failed audit/enqueue writes leave no
 partial retry or amber claim. Transient first-attempt infrastructure failures
 that were retried do not create a CI-red issue; an exhausted attempt retains the
@@ -52,8 +57,8 @@ Raw status fields and ordinary run-list behavior remain available. Existing
 `display_status` values change for affected rows: `cancelled` becomes
 `superseded`, and an automatically retried `failed` row becomes `infra-retried`.
 Clients should accept those display enums. `auto_retry_of` can also describe
-spent-budget lineage on a manual replay; audit actions identify whether a
-particular execution was automatic.
+spent-budget lineage on a `run_rerun` replay; it is not inherited by `run_retry`.
+Audit actions identify whether a particular execution was automatic.
 
 ## Dashboard history
 

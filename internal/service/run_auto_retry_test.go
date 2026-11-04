@@ -15,7 +15,7 @@ import (
 )
 
 func TestInfrastructureAutoRetryUsesAllFailureEvidence(t *testing.T) {
-	for _, kind := range []string{"empty", "missing", "queued", "started", "earlier-start-then-queued", "torn", "result-started", "observation-started", "earlier-workflow-attempt", "result-failed", "observation-failed", "failed-then-queued", "step-timeout", "release", "tag", "trigger-tag", "trigger-release", "promotion", "plan", "apply"} {
+	for _, kind := range []string{"empty", "missing", "queued", "started", "earlier-start-then-queued", "torn", "result-started", "observation-started", "earlier-workflow-attempt", "result-failed", "observation-failed", "failed-then-queued", "release", "tag", "trigger-tag", "trigger-release", "promotion", "plan", "apply"} {
 		t.Run(kind, func(t *testing.T) {
 			root := t.TempDir()
 			logs, err := runlog.Open(root)
@@ -48,11 +48,8 @@ func TestInfrastructureAutoRetryUsesAllFailureEvidence(t *testing.T) {
 					}
 				}
 			}
-			if kind == "failed-then-queued" || kind == "step-timeout" {
+			if kind == "failed-then-queued" {
 				event := runprogress.Event{Version: 1, Stage: "ci", Step: "unit", Ordinal: 0, DeclaredSize: "M", Status: runprogress.StepFailed, StartedAt: &now, FinishedAt: &now}
-				if kind == "step-timeout" {
-					event.Status = runprogress.StepTimedOut
-				}
 				if err := logs.AppendStepProgress(run.ID, event); err != nil {
 					t.Fatal(err)
 				}

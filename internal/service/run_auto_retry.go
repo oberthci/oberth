@@ -13,14 +13,18 @@ func (scheduler *Scheduler) infrastructureAutoRetry(run model.Run, result JobRes
 	if scheduler.disableInfrastructureAutoRetry || run.RefKind != model.RefBranch || releaseLikeRun(run) || (run.Trigger != "branch" && run.Trigger != "push" && run.Trigger != "schedule" && run.Trigger != "manual") || run.AutoRetryOf != "" || run.AutoRetriedBy != "" || !model.IsInfrastructureRunFailure(result.Status, result.Phase, result.FailedStep) || result.FailedStage != "" || pushretry.PublicationFailure(result.Error) {
 		return false
 	}
+	deadline := model.IsExecutionDeadlineReason(result.Error)
+	if deadline && result.ObservedStepStart {
+		return false
+	}
 	for _, step := range result.Steps {
-		if step.Status == model.StepFailed || step.Status == model.StepTimedOut {
+		if step.Status == model.StepFailed || (deadline && (step.StartedAt != nil || step.LogEnd > step.LogStart || step.Status == model.StepRunning || step.Status == model.StepPassed)) {
 			return false
 		}
 	}
 	if result.TerminalObservation != nil {
 		for _, step := range result.TerminalObservation.Steps {
-			if step.Status == model.StepFailed || step.Status == model.StepTimedOut {
+			if step.Status == model.StepFailed || (deadline && (step.Started || step.Status == model.StepRunning || step.Status == model.StepPassed)) {
 				return false
 			}
 		}
@@ -33,9 +37,10 @@ func (scheduler *Scheduler) infrastructureAutoRetry(run model.Run, result JobRes
 		return false
 	}
 	// Use all retained attempts: a later queued/pass observation cannot erase
-	// a real failure. Started or passed work alone is not a test failure.
+	// a real failure or start. A deadline after execution began may be a hung
+	// suite, so it must not receive another full execution window.
 	for _, event := range events {
-		if event.Status == runprogress.StepFailed || event.Status == runprogress.StepTimedOut {
+		if event.Status == runprogress.StepFailed || (deadline && (event.StartedAt != nil || event.Status == runprogress.StepRunning || event.Status == runprogress.StepPassed)) {
 			return false
 		}
 	}

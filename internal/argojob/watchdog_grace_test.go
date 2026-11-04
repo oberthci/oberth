@@ -101,7 +101,7 @@ func TestDeadlineGuardWatchdogRebindsToLateStart(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Minute)
 		defer cancel()
 		_, err = controller.Wait(ctx, workflow.Name, "run", io.Discard)
-		if err == nil || !strings.Contains(err.Error(), "Server watchdog expired") || time.Since(begin) != 124*time.Second {
+		if err == nil || !strings.Contains(err.Error(), "Server watchdog expired") || !model.IsExecutionDeadlineReason(err.Error()) || time.Since(begin) != 124*time.Second {
 			t.Fatalf("watchdog did not expire at original start + budget + grace: elapsed=%s, err=%v", time.Since(begin), err)
 		}
 	})

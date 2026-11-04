@@ -2,8 +2,11 @@
 
 Oberth queues one fresh attempt when an eligible branch run fails in the
 `infrastructure` or workflow-level `job` class accepted by `run_retry`, without
-a failed step. This includes a trusted-policy-refresh deadline, a lost executor
-after cleanup, and a workflow-level failure without a failed step. The original
+a failed step. Every failed step excludes automatic retry, including steps whose
+failure is classified as infrastructure. This includes a trusted-policy-refresh
+deadline, a lost executor after cleanup, and a workflow-level failure without a
+failed step. An execution deadline qualifies only before any step started or
+passed; a hung suite never receives a second execution window. The original
 attempt keeps its failed status and error; the retry gets a new run ID at the
 same repository, ref and SHA.
 
@@ -39,15 +42,23 @@ administrator setting, applied by the normal server rollout. The budget is
 fixed at **one retry** (two total attempts); there is no setting to increase it.
 Disabling it affects future terminal decisions, not an already queued successor.
 Manual `run_retry` remains available under its existing authorization rules.
+It creates a fresh manual request at the normal queue position, with the
+requesting actor and ordinary presentation. It does not inherit the automatic
+retry reason or lineage; that new request may itself receive one eligible
+automatic retry.
 
 Automatic retry never applies to a user/admin cancellation, test or step failure,
 promotion, plan, apply, release/tag run, or an attempt whose automatic retry
-budget was already used. The spent budget survives restart recovery and manual
-retry/rerun lineage. A separate new push is a new work item.
+budget was already used. The spent budget survives restart recovery and the
+existing `run_rerun` replay lineage. An explicit `run_retry` or a separate new
+push starts a new work item.
 
 All retained progress attempts, terminal observations and persisted step rows
-are checked for failed or timed-out steps. A started or passed step alone does
-not establish a test failure. Missing or corrupt progress history does not
+are checked for failed steps, regardless of whether the run or step is
+infrastructure-classified. For an execution-deadline failure, any evidence of a
+started or passed step also prevents retry, including an earlier attempt whose
+latest state is queued. Started or passed steps alone do not prevent retry of a
+non-deadline workflow failure. Missing or corrupt progress history does not
 authorize replay. The original Workflow must be terminal, never submitted, or
 settled through ownership-checked cleanup. Ambiguous creates and failed cleanup
 stay owned by existing recovery and cannot start another executor prematurely.

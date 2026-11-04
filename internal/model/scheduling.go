@@ -288,11 +288,20 @@ type AdmissionRelease struct {
 
 // IsExecutionDeadlineReason recognizes fixed controller vocabulary, not exit signals.
 func IsExecutionDeadlineReason(message string) bool {
-	switch strings.TrimSpace(message) {
+	message = strings.TrimSpace(message)
+	// The watchdog may join a Cancel error on subsequent lines, and adopted
+	// Workflow observation adds this fixed wrapper. Ordinary operation timeouts
+	// (for example a policy refresh) are not execution deadlines.
+	first, _, _ := strings.Cut(message, "\n")
+	watchdog := ExecutionDeadlineMessage + " Server watchdog expired: context deadline exceeded"
+	if first == watchdog || (strings.HasPrefix(first, "observe adopted Workflow ") && strings.HasSuffix(first, ": "+watchdog)) {
+		return true
+	}
+	switch message {
 	case "DeadlineExceeded", "Deadline exceeded", "Step exceeded its deadline", "Workflow deadline exceeded", "workflow deadline exceeded", ExecutionDeadlineMessage:
 		return true
 	default:
-		return strings.HasPrefix(strings.TrimSpace(message), ExecutionDeadlineMessage+" Step ") && IsResourceFailureMessage(strings.TrimSpace(message))
+		return strings.HasPrefix(message, ExecutionDeadlineMessage+" Step ") && IsResourceFailureMessage(message)
 	}
 }
 
