@@ -1863,7 +1863,7 @@ func TestInstallOberthExistingKindReleaseSkipsImagePreparation(t *testing.T) {
 	if !result.AlreadyInstalled {
 		t.Fatal("existing release should be reported as already installed")
 	}
-	if len(helmCalls) != 1 || strings.Join(helmCalls[0], " ") != "list -n oberth -o json -a" {
+	if len(helmCalls) != 1 || strings.Join(helmCalls[0], " ") != "list -n oberth -o json --deployed --failed --pending --superseded --uninstalling --uninstalled" {
 		t.Fatalf("helm calls = %v, want only release lookup", helmCalls)
 	}
 }

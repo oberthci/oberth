@@ -249,15 +249,14 @@ func detectFailedHelmRevision(ctx context.Context, deps Deps, namespace string) 
 		return nil
 	}
 
-	// `helm list -a` includes all statuses (deployed, failed, etc).
-	out, err := deps.RunHelm(ctx, []string{"list", "-n", namespace, "-a", "-o", "json"})
+	out, err := deps.RunHelm(ctx, helmReleaseListArgs(namespace))
 	if err != nil {
-		return nil // cannot list — fresh install path handles this
+		return fmt.Errorf("inspect latest Helm revision in %s: %w", namespace, err)
 	}
 
 	var releases []helmRelease
-	if json.Unmarshal(out, &releases) != nil {
-		return nil
+	if err := json.Unmarshal(out, &releases); err != nil {
+		return fmt.Errorf("decode Helm release list: %w", err)
 	}
 
 	for _, r := range releases {
