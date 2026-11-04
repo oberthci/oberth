@@ -152,6 +152,7 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 60
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -160,11 +161,10 @@ spec:
       resources:
         requests:
           cpu: '1'
-          memory: 256Mi
+          memory: 128Mi
         limits:
-          cpu: '1'
-          memory: 256Mi
-
+          cpu: 1000m
+          memory: 128Mi
   # ---- setup burn (8 sequential steps) ----
   # Maps to: Test("setup", repositorySteps(inlineToolchainSteps()...)...)
   #
@@ -193,6 +193,7 @@ spec:
   # [tools-dir] /bin/mkdir -p /tmp/oberth-tools/bin
   - name: tools-dir
     automountServiceAccountToken: false
+    activeDeadlineSeconds: 60
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -241,14 +242,14 @@ spec:
       resources:
         requests:
           cpu: '2'
-          memory: 4Gi
+          memory: 128Mi
         limits:
-          cpu: '2'
-          memory: 4Gi
-
+          cpu: 2000m
+          memory: 128Mi
   # [link-go] symlink Go toolchain from image into shared tools directory
   - name: link-go
     automountServiceAccountToken: false
+    activeDeadlineSeconds: 60
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -297,14 +298,14 @@ spec:
       resources:
         requests:
           cpu: '2'
-          memory: 4Gi
+          memory: 192Mi
         limits:
-          cpu: '2'
-          memory: 4Gi
-
+          cpu: 2000m
+          memory: 192Mi
   # [install-golangci-lint] go install golangci-lint v2.12.2
   - name: install-golangci-lint
     automountServiceAccountToken: false
+    activeDeadlineSeconds: 60
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -354,12 +355,11 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 100m
-          memory: 4Gi
+          cpu: 594m
+          memory: 2368Mi
         limits:
           cpu: 2000m
-          memory: 4Gi
-
+          memory: 2368Mi
   # [install-helm] go install helm v4.2.3
   - name: install-helm
     activeDeadlineSeconds: 99
@@ -413,16 +413,17 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 1000m
-          memory: 2001Mi
+          cpu: 2365m
+          memory: 2688Mi
           ephemeral-storage: 64Mi
         limits:
-          cpu: 2000m
-          memory: 4017Mi
+          cpu: 2365m
+          memory: 2688Mi
           ephemeral-storage: 64Mi
   # [fetch-shellcheck] download shellcheck v0.10.0 static binary from upstream release
   - name: fetch-shellcheck
     automountServiceAccountToken: false
+    activeDeadlineSeconds: 60
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -489,15 +490,15 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 864m
+          memory: 192Mi
         limits:
-          cpu: '2'
-          memory: 4Gi
-
+          cpu: 2000m
+          memory: 192Mi
   # [verify-shellcheck] sha256sum check against pinned digest
   - name: verify-shellcheck
     automountServiceAccountToken: false
+    activeDeadlineSeconds: 60
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -545,12 +546,11 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 100m
-          memory: 4Gi
+          cpu: 124m
+          memory: 192Mi
         limits:
           cpu: 2000m
-          memory: 4Gi
-
+          memory: 192Mi
   # [decompress-shellcheck] the golang:1.26.10-trixie image has no xz/unxz binary,
   # so /bin/tar cannot shell out to decompress a .tar.xz. python3's stdlib lzma
   # module is present on the same pinned image, so it decompresses the verified
@@ -558,6 +558,7 @@ spec:
   # external helper.
   - name: decompress-shellcheck
     automountServiceAccountToken: false
+    activeDeadlineSeconds: 60
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -607,15 +608,15 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 192m
+          memory: 192Mi
         limits:
-          cpu: '2'
-          memory: 4Gi
-
+          cpu: 2000m
+          memory: 192Mi
   # [install-shellcheck] extract shellcheck binary from decompressed tarball
   - name: install-shellcheck
     automountServiceAccountToken: false
+    activeDeadlineSeconds: 60
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -670,12 +671,11 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 100m
+          memory: 192Mi
         limits:
-          cpu: '2'
-          memory: 4Gi
-
+          cpu: 2000m
+          memory: 192Mi
   # ---- shellcheck burn (single step) ----
   # ShellCheck v0.10.0 gates all shell scripts in .oberth/ and hack/
   # at --severity=info (errors + warnings + info). The Argo YAML migration
@@ -692,6 +692,7 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 60
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -721,11 +722,10 @@ spec:
       resources:
         requests:
           cpu: '2'
-          memory: 320296Ki
+          memory: 512Mi
         limits:
-          cpu: '2'
-          memory: 576Mi
-
+          cpu: 2000m
+          memory: 512Mi
   # ---- lint burn (2 sequential steps) ----
   # Maps to: Test("lint", repositorySteps(
   #   ctx.Go.Vet("./..."),
@@ -741,6 +741,7 @@ spec:
   # [go-vet-./...]
   - name: vet
     automountServiceAccountToken: false
+    activeDeadlineSeconds: 60
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -789,11 +790,11 @@ spec:
         subPath: trivy-cache
       resources: # remeasure: fresh uncensored measurements required
         requests:
-          cpu: 100m
-          memory: 995420Ki
+          cpu: 287m
+          memory: 3968Mi
         limits:
           cpu: 3000m
-          memory: 5935Mi
+          memory: 3968Mi
   # [golangci-lint-./...]
   # Keep one analysis worker under load. Use 6GiB of the actual 8Gi limit
   # for the Go runtime, leaving 2GiB headroom without the old 2GiB soft cap.
@@ -849,14 +850,14 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
-      resources:
+      resources: # remeasure: unmet need limits.cpu 5830m, requests.cpu 4845m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
-          cpu: 1000m
-          memory: 3365Mi
+          cpu: 4000m
+          memory: 5696Mi
           ephemeral-storage: 195Mi
         limits:
           cpu: 4000m
-          memory: 8474Mi
+          memory: 5696Mi
           ephemeral-storage: 234Mi
   # ---- parallel race-test burns ----
   # Each package runs once: dedicated store/service/gitcache groups and the
@@ -924,12 +925,12 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 1000m
-          memory: 1986Mi
+          cpu: 1535m
+          memory: 2432Mi
           ephemeral-storage: 650Mi
         limits:
-          cpu: 2000m
-          memory: 2383Mi
+          cpu: 2900m
+          memory: 2432Mi
           ephemeral-storage: 780Mi
   - name: test-service
     activeDeadlineSeconds: 1671
@@ -989,15 +990,16 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 1000m
-          memory: 1853Mi
+          cpu: 1533m
+          memory: 2368Mi
           ephemeral-storage: 488Mi
         limits:
-          cpu: 2000m
-          memory: 2311Mi
+          cpu: 2890m
+          memory: 2368Mi
           ephemeral-storage: 585Mi
   - name: test-rest
     automountServiceAccountToken: false
+    activeDeadlineSeconds: 1889
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1053,12 +1055,12 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
-      resources: # remeasure: fresh uncensored measurements required
+      resources: # remeasure: unmet need limits.cpu 4340m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
-          cpu: 965m
-          memory: 4Gi
+          cpu: 1757m
+          memory: 6208Mi
         limits:
-          cpu: 3000m
+          cpu: 4000m
           memory: 6208Mi
   # The native Git cache suite is a binding source gate.
   - name: test-gitcache
@@ -1119,15 +1121,16 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 670m
-          memory: 348Mi
+          cpu: 796m
+          memory: 512Mi
           ephemeral-storage: 222Mi
         limits:
-          cpu: 2000m
-          memory: 470Mi
+          cpu: 1440m
+          memory: 512Mi
           ephemeral-storage: 267Mi
   - name: build-static-git-runtime
     automountServiceAccountToken: false
+    activeDeadlineSeconds: 354
     container:
       image: "golang:1.26.10-alpine3.23@sha256:a07f231c19b03e6106cf442f02a5bcf262147e744d15b7b5e4b6d81d420c70a0"
       workingDir: /work/src
@@ -1181,13 +1184,13 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
-      resources: # remeasure: fresh uncensored measurements required
+      resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
-          cpu: 1350m
-          memory: 4Gi
+          cpu: 2348m
+          memory: 7616Mi
         limits:
-          cpu: 2000m
-          memory: 7608Mi
+          cpu: 2990m
+          memory: 7616Mi
   - name: test-static-git-runtime
     activeDeadlineSeconds: 266
     automountServiceAccountToken: false
@@ -1227,12 +1230,12 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 610m
-          memory: 212Mi
+          cpu: 728m
+          memory: 256Mi
           ephemeral-storage: 196Mi
         limits:
-          cpu: 2000m
-          memory: 254Mi
+          cpu: 1740m
+          memory: 256Mi
           ephemeral-storage: 235Mi
   # Every commit/file in the offline, real multi-pack source history.
   - name: test-archive-history
@@ -1290,12 +1293,12 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 1000m
-          memory: 289Mi
+          cpu: 1989m
+          memory: 384Mi
           ephemeral-storage: 204Mi
         limits:
-          cpu: 2000m
-          memory: 369Mi
+          cpu: 2020m
+          memory: 384Mi
           ephemeral-storage: 245Mi
   # ---- security burn (single step) ----
   # Maps to: Test("security", repositorySteps(
@@ -1308,6 +1311,7 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 60
     container:
       image: "aquasec/trivy:0.73.0@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c"
       workingDir: /work/src
@@ -1337,12 +1341,11 @@ spec:
         value: "/tmp/oberth-trivy"
       resources:
         requests:
-          cpu: 100m
-          memory: 2099624Ki
+          cpu: 502m
+          memory: 3136Mi
         limits:
           cpu: 4000m
           memory: 3136Mi
-
   # ---- chart burn (single step) ----
   # Maps to: Test("chart", repositorySteps(
   #   oberth.Cmd("helm-contract", "./hack/test-chart.sh"))
@@ -1353,6 +1356,7 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 60
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1370,12 +1374,11 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 145m
-          memory: 4Gi
+          cpu: 382m
+          memory: 192Mi
         limits:
           cpu: 2000m
-          memory: 4Gi
-
+          memory: 192Mi
   # ---- build-amd64 burn (single step) ----
   # Maps to: Build("build-amd64", repositorySteps(
   #   namedStep("build-oberth-amd64",
@@ -1385,6 +1388,7 @@ spec:
   # builds must be hermetic against repository git state.
   - name: build-amd64
     automountServiceAccountToken: false
+    activeDeadlineSeconds: 60
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1437,12 +1441,11 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 100m
-          memory: 1472028Ki
+          cpu: 513m
+          memory: 2176Mi
         limits:
           cpu: 2000m
           memory: 2176Mi
-
   # ---- build-arm64 burn (single step) ----
   # Maps to: Build("build-arm64", repositorySteps(
   #   namedStep("build-oberth-arm64",
@@ -1450,6 +1453,7 @@ spec:
   #   ...).After("test","chart")
   - name: build-arm64
     automountServiceAccountToken: false
+    activeDeadlineSeconds: 60
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1502,12 +1506,11 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 172m
-          memory: 1478336Ki
+          cpu: 2660m
+          memory: 2176Mi
         limits:
           cpu: 3000m
           memory: 2176Mi
-
   # ---- build-darwin-amd64 burn (single step) ----
   # Branch verification of the darwin/amd64 release target. release.sh
   # cross-compiles darwin/{amd64,arm64} and branch CI must exercise the same
@@ -1515,6 +1518,7 @@ spec:
   # int64 vs uint32) cannot pass CI and burn only at release time (#699).
   - name: build-darwin-amd64
     automountServiceAccountToken: false
+    activeDeadlineSeconds: 60
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1569,16 +1573,16 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 100m
-          memory: 1632248Ki
-        limits:
-          cpu: 2000m
+          cpu: 2261m
           memory: 2432Mi
-
+        limits:
+          cpu: 2360m
+          memory: 2432Mi
   # ---- build-darwin-arm64 burn (single step) ----
   # Branch verification of the darwin/arm64 release target (#699).
   - name: build-darwin-arm64
     automountServiceAccountToken: false
+    activeDeadlineSeconds: 60
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1633,12 +1637,11 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 100m
-          memory: 1564748Ki
+          cpu: 2614m
+          memory: 2432Mi
         limits:
-          cpu: 2000m
-          memory: 2304Mi
-
+          cpu: 2680m
+          memory: 2432Mi
   # Credentialless proof of the signed release's numeric-only prefetch refusal.
   - name: release-diagnostic
     automountServiceAccountToken: false
@@ -1646,6 +1649,7 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 60
     container:
       image: golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd
       workingDir: /work/src
@@ -1660,12 +1664,11 @@ spec:
         subPath: diagnostic
       resources:
         requests:
-          cpu: '1'
+          cpu: 100m
           memory: 256Mi
         limits:
-          cpu: '1'
+          cpu: 1000m
           memory: 256Mi
-
   # ---- verify-publisher-tools burn (#829) ----
   # Reproduces every release-setup tool install with the exact flags, images and
   # isolated caches used in release.yaml, then verifies the output bytes against
@@ -1768,12 +1771,12 @@ spec:
         subPath: vpt-private
       resources:
         requests:
-          cpu: 1000m
-          memory: 3358Mi
+          cpu: 1390m
+          memory: 4096Mi
           ephemeral-storage: 1121Mi
         limits:
-          cpu: 2000m
-          memory: 4050Mi
+          cpu: 1520m
+          memory: 4096Mi
           ephemeral-storage: 1345Mi
   # Copy trivy from its pinned image (release.yaml copy-trivy).
   - name: vpt-copy-trivy
@@ -1782,6 +1785,7 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 60
     container:
       image: "aquasec/trivy:0.73.0@sha256:4bbf3824d974b70f27631005e2e6194d4d8fbd6e72c4a9e04cf521e25c5cb07f"
       command: [/bin/sh, -c]
@@ -1793,14 +1797,13 @@ spec:
       - name: work
         mountPath: /tmp/vpt-tools
         subPath: vpt-tools
-      resources:
+      resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
-          cpu: '1'
-          memory: 256Mi
-        limits:
-          cpu: '1'
+          cpu: 156m
           memory: 512Mi
-
+        limits:
+          cpu: 1000m
+          memory: 512Mi
   # Verify all five publisher tools against the reviewed pin manifest.
   - name: vpt-verify
     automountServiceAccountToken: false
@@ -1808,6 +1811,7 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 60
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /tmp/vpt-tools/bin
@@ -1821,14 +1825,13 @@ spec:
         mountPath: /tmp/vpt-tools
         subPath: vpt-tools
         readOnly: true
-      resources:
+      resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
-          cpu: '1'
-          memory: 256Mi
+          cpu: 100m
+          memory: 384Mi
         limits:
-          cpu: '1'
-          memory: 512Mi
-
+          cpu: 1000m
+          memory: 384Mi
   # ---- test-openbao burn (#803) ----
   # Real OpenBao integration test: starts a dev server, applies rendered
   # per-repo/per-step policies, and asserts ACL isolation with real reads.
@@ -1904,10 +1907,10 @@ spec:
         value: "/tmp/private-gobuild"
       - name: GIT_TERMINAL_PROMPT
         value: "0"
-      resources: # remeasure: fresh uncensored measurements required
+      resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
-          cpu: 1251m
-          memory: 512Mi
+          cpu: 1951m
+          memory: 2432Mi
         limits:
-          cpu: 2000m
-          memory: 2401Mi
+          cpu: 2950m
+          memory: 2432Mi

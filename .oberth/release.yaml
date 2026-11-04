@@ -227,6 +227,7 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 60
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -266,16 +267,17 @@ spec:
       resources:
         requests:
           cpu: 1250m
-          memory: 95368Ki
+          memory: 64Mi
         limits:
-          cpu: '2'
-          memory: 384Mi
+          cpu: 2000m
+          memory: 64Mi
   - name: verify-publisher-tools
     automountServiceAccountToken: false
     metadata:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 60
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -301,19 +303,20 @@ spec:
       - name: bootstrap-tools
         mountPath: /tmp/oberth-tools
         readOnly: true
-      resources:
+      resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
           cpu: 625m
-          memory: 256Mi
+          memory: 384Mi
         limits:
-          cpu: '1'
-          memory: 512Mi
+          cpu: 1000m
+          memory: 384Mi
   - name: copy-trivy
     automountServiceAccountToken: false
     metadata:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 60
     container:
       image: aquasec/trivy:0.73.0@sha256:4bbf3824d974b70f27631005e2e6194d4d8fbd6e72c4a9e04cf521e25c5cb07f
       workingDir: /work/src
@@ -354,16 +357,17 @@ spec:
       resources:
         requests:
           cpu: 625m
-          memory: 258340Ki
+          memory: 576Mi
         limits:
-          cpu: '1'
-          memory: 512Mi
+          cpu: 1000m
+          memory: 576Mi
   - name: link-go
     automountServiceAccountToken: false
     metadata:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 60
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -406,16 +410,17 @@ spec:
       resources:
         requests:
           cpu: 1250m
-          memory: 36224Ki
+          memory: 192Mi
         limits:
-          cpu: '2'
-          memory: 320Mi
+          cpu: 2000m
+          memory: 192Mi
   - name: install-golangci-lint
     automountServiceAccountToken: false
     metadata:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 167
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -453,12 +458,12 @@ spec:
       - name: bootstrap-tools
         mountPath: /tmp/oberth-tools
         readOnly: false
-      resources:
+      resources: # remeasure: unmet need limits.cpu 4500m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
-          cpu: 907m
-          memory: 2408764Ki
+          cpu: 3496m
+          memory: 3584Mi
         limits:
-          cpu: 3000m
+          cpu: 4000m
           memory: 3584Mi
   - name: install-helm
     automountServiceAccountToken: false
@@ -466,6 +471,7 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 485
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -514,10 +520,10 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 561m
-          memory: 2741492Ki
+          cpu: 1360m
+          memory: 4032Mi
         limits:
-          cpu: 2000m
+          cpu: 1520m
           memory: 4032Mi
   - name: fetch-cosign
     automountServiceAccountToken: false
@@ -525,6 +531,7 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 60
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -581,17 +588,18 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 100m
-          memory: 181696Ki
+          cpu: 173m
+          memory: 320Mi
         limits:
           cpu: 2000m
-          memory: 448Mi
+          memory: 320Mi
   - name: verify-cosign
     automountServiceAccountToken: false
     metadata:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 60
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -631,17 +639,18 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 1250m
-          memory: 37828Ki
+          cpu: 586m
+          memory: 256Mi
         limits:
-          cpu: '2'
-          memory: 320Mi
+          cpu: 2000m
+          memory: 256Mi
   - name: install-cosign
     automountServiceAccountToken: false
     metadata:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 60
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -681,17 +690,18 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 1250m
-          memory: 36740Ki
+          cpu: 100m
+          memory: 128Mi
         limits:
-          cpu: '2'
-          memory: 320Mi
+          cpu: 2000m
+          memory: 128Mi
   - name: build-release-support
     automountServiceAccountToken: false
     metadata:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 92
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -742,10 +752,10 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 467m
-          memory: 620572Ki
+          cpu: 1338m
+          memory: 960Mi
         limits:
-          cpu: 2000m
+          cpu: 1360m
           memory: 960Mi
   - name: build-release-image
     automountServiceAccountToken: false
@@ -753,6 +763,7 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 116
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -803,10 +814,10 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 221m
-          memory: 619604Ki
+          cpu: 1333m
+          memory: 960Mi
         limits:
-          cpu: 2000m
+          cpu: 1350m
           memory: 960Mi
   - name: validate-tag
     automountServiceAccountToken: false
@@ -814,6 +825,7 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 60
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -853,16 +865,17 @@ spec:
       resources:
         requests:
           cpu: 1250m
-          memory: 75584Ki
+          memory: 128Mi
         limits:
-          cpu: '2'
-          memory: 384Mi
+          cpu: 2000m
+          memory: 128Mi
   - name: fetch-node
     automountServiceAccountToken: false
     metadata:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 60
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -920,16 +933,17 @@ spec:
       resources:
         requests:
           cpu: 625m
-          memory: 97436Ki
+          memory: 192Mi
         limits:
-          cpu: '1'
-          memory: 384Mi
+          cpu: 1000m
+          memory: 192Mi
   - name: verify-node
     automountServiceAccountToken: false
     metadata:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 60
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -969,17 +983,18 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 625m
-          memory: 37356Ki
+          cpu: 3113m
+          memory: 64Mi
         limits:
-          cpu: '1'
-          memory: 320Mi
+          cpu: 3113m
+          memory: 64Mi
   - name: stage-website-packages
     automountServiceAccountToken: false
     metadata:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 60
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -1019,10 +1034,10 @@ spec:
       resources:
         requests:
           cpu: 1250m
-          memory: 733196Ki
+          memory: 1152Mi
         limits:
-          cpu: '2'
-          memory: 1088Mi
+          cpu: 2000m
+          memory: 1152Mi
   - name: release-lint
     steps:
     - - name: vet
@@ -1035,6 +1050,7 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 389
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -1073,12 +1089,12 @@ spec:
         mountPath: /tmp/oberth-tools
         subPath: vet
         readOnly: true
-      resources: # remeasure: fresh uncensored measurements required
+      resources: # remeasure: unmet need limits.cpu 4510m, requests.cpu 4158m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
-          cpu: 1096m
-          memory: 4Gi
+          cpu: 4000m
+          memory: 5952Mi
         limits:
-          cpu: 4510m
+          cpu: 4000m
           memory: 5952Mi
   - name: golangci-lint-run
     automountServiceAccountToken: false
@@ -1086,6 +1102,7 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 551
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -1129,19 +1146,20 @@ spec:
         readOnly: true
       # Historical release-lint peak: 5,838,360,576 sampled bytes.
       # Keep 8Gi for headroom; the analysis worker already uses a 2GiB Go memory target.
-      resources: # remeasure: fresh uncensored measurements required
+      resources: # remeasure: unmet need limits.cpu 6010m, memory 8512Mi, requests.cpu 4062m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
-          cpu: 1250m
-          memory: 8Gi
+          cpu: 4000m
+          memory: 8192Mi
         limits:
-          cpu: 6010m
-          memory: 8474Mi
+          cpu: 4000m
+          memory: 8192Mi
   - name: release-scan
     automountServiceAccountToken: false
     metadata:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 60
     container:
       image: aquasec/trivy:0.73.0@sha256:4bbf3824d974b70f27631005e2e6194d4d8fbd6e72c4a9e04cf521e25c5cb07f
       workingDir: /work/src
@@ -1193,17 +1211,18 @@ spec:
       volumeMounts: []
       resources:
         requests:
-          cpu: 2500m
-          memory: 2039684Ki
+          cpu: 3591m
+          memory: 3072Mi
         limits:
-          cpu: '4'
-          memory: 3008Mi
+          cpu: 4000m
+          memory: 3072Mi
   - name: release-test
     automountServiceAccountToken: false
     metadata:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 6098
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -1260,19 +1279,20 @@ spec:
         readOnly: true
       # Historical unbounded race run reached 8Gi. Serialize packages and
       # bound Go workers and set a memory target above; remeasure this workload on the next release.
-      resources: # remeasure: fresh uncensored measurements required
+      resources: # remeasure: unmet need limits.cpu 6020m, memory 12352Mi, requests.cpu 4261m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
-          cpu: 1250m
-          memory: 8Gi
+          cpu: 4000m
+          memory: 8192Mi
         limits:
-          cpu: 6020m
-          memory: 12289Mi
+          cpu: 4000m
+          memory: 8192Mi
   - name: release-chart-test
     automountServiceAccountToken: false
     metadata:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 60
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -1311,11 +1331,11 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 1250m
-          memory: 105072Ki
+          cpu: 492m
+          memory: 192Mi
         limits:
-          cpu: '2'
-          memory: 384Mi
+          cpu: 2000m
+          memory: 192Mi
   - name: release-build
     automountServiceAccountToken: false
     metadata:
@@ -1367,13 +1387,13 @@ spec:
         mountPath: /tmp/oberth-release
       # Historical build peak: 6,770,733,056 sampled bytes; 8Gi leaves
       # about 1.69Gi above that observation. Bound compiler workers and set a Go memory target above.
-      resources:
+      resources: # remeasure: unmet need limits.cpu 6010m, memory 9792Mi, requests.cpu 5494m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
-          cpu: 1250m
-          memory: 8Gi
+          cpu: 4000m
+          memory: 8192Mi
         limits:
           cpu: 4000m
-          memory: 8Gi
+          memory: 8192Mi
   - name: release-sign-binaries
     metadata:
       annotations:
@@ -1434,10 +1454,10 @@ spec:
       resources:
         requests:
           cpu: 1250m
-          memory: 201752Ki
+          memory: 320Mi
         limits:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 2000m
+          memory: 320Mi
     initContainers:
     - name: verify-publisher-tools
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
@@ -1521,11 +1541,11 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: 625m
-          memory: 73308Ki
+          cpu: 157m
+          memory: 512Mi
         limits:
-          cpu: '1'
-          memory: 1Gi
+          cpu: 1000m
+          memory: 512Mi
     initContainers:
     - name: verify-publisher-tools
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
@@ -1612,11 +1632,11 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: 480m
-          memory: 3986416Ki
+          cpu: 1361m
+          memory: 5888Mi
         limits:
-          cpu: 4000m
-          memory: 8Gi
+          cpu: 2090m
+          memory: 5888Mi
     initContainers:
     - name: verify-publisher-tools
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
@@ -1647,6 +1667,7 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 60
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -1688,10 +1709,10 @@ spec:
       resources:
         requests:
           cpu: 1250m
-          memory: 222020Ki
+          memory: 384Mi
         limits:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 2000m
+          memory: 384Mi
   - name: release-publish-chart
     metadata:
       annotations:
@@ -1757,11 +1778,11 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: 1250m
-          memory: 147312Ki
+          cpu: 1096m
+          memory: 640Mi
         limits:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 2000m
+          memory: 640Mi
     initContainers:
     - name: verify-publisher-tools
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
@@ -1841,11 +1862,11 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: 117m
-          memory: 2315772Ki
+          cpu: 359m
+          memory: 3648Mi
         limits:
-          cpu: 2000m
-          memory: 4Gi
+          cpu: 460m
+          memory: 3648Mi
     initContainers:
     - name: verify-publisher-tools
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
@@ -1927,17 +1948,18 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 1250m
-          memory: 392100Ki
+          cpu: 719m
+          memory: 640Mi
         limits:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 719m
+          memory: 640Mi
   - name: copy-test-tools
     automountServiceAccountToken: false
     metadata:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 60
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -1964,10 +1986,10 @@ spec:
       # Six copies of the trusted tools go through the page cache; under
       # heavy node I/O, dirty pages outrun writeback and a 512Mi limit
       # OOM-killed this step (v0.17.38 release run ef637d76).
-      resources: # remeasure: fresh uncensored measurements required
+      resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
-          cpu: 250m
-          memory: 2Gi
+          cpu: 850m
+          memory: 4608Mi
         limits:
           cpu: 1000m
           memory: 4608Mi
@@ -1977,6 +1999,7 @@ spec:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 60
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -2033,17 +2056,18 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 625m
-          memory: 63104Ki
+          cpu: 155m
+          memory: 128Mi
         limits:
-          cpu: '1'
-          memory: 320Mi
+          cpu: 1000m
+          memory: 128Mi
   - name: verify-apko
     automountServiceAccountToken: false
     metadata:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 60
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -2086,16 +2110,17 @@ spec:
       resources:
         requests:
           cpu: 625m
-          memory: 81564Ki
+          memory: 128Mi
         limits:
-          cpu: '1'
-          memory: 384Mi
+          cpu: 1000m
+          memory: 128Mi
   - name: install-apko
     automountServiceAccountToken: false
     metadata:
       annotations:
         oberth.ci/workspace-mounts: none
         oberth.ci/workspace-env: none
+    activeDeadlineSeconds: 60
     container:
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
       workingDir: /work/src
@@ -2136,10 +2161,10 @@ spec:
       resources:
         requests:
           cpu: 625m
-          memory: 37864Ki
+          memory: 64Mi
         limits:
-          cpu: '1'
-          memory: 320Mi
+          cpu: 1000m
+          memory: 64Mi
   - name: release-publish-kvm-harness
     metadata:
       annotations:
@@ -2202,11 +2227,11 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: 950m
-          memory: 1350012Ki
+          cpu: 2785m
+          memory: 1984Mi
         limits:
-          cpu: 4000m
-          memory: 8Gi
+          cpu: 2980m
+          memory: 1984Mi
     initContainers:
     - name: verify-publisher-tools
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
@@ -2302,11 +2327,11 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 1250m
-          memory: 2Gi
+          cpu: 741m
+          memory: 1280Mi
         limits:
-          cpu: '2'
-          memory: 2Gi
+          cpu: 741m
+          memory: 1280Mi
     initContainers:
     - name: verify-publisher-tools
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
@@ -2437,7 +2462,7 @@ spec:
       resources:
         requests:
           cpu: 625m
-          memory: 52888Ki
+          memory: 128Mi
         limits:
-          cpu: '1'
-          memory: 320Mi
+          cpu: 1000m
+          memory: 128Mi
