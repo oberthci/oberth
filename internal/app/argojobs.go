@@ -238,21 +238,28 @@ func (jobs *ArgoJobs) PipelineSize(_ context.Context, request service.WorkflowRe
 
 // PipelineConcurrencyGroup reads the run's declared concurrency group (#658)
 // from the same checked-out document PipelineSize reads, without evaluating
-// anything. The group is scoped to the run's repository by the scheduler.
-func (jobs *ArgoJobs) PipelineConcurrencyGroup(_ context.Context, request service.WorkflowRequest) (string, error) {
+// anything. Equal group names share admission across repositories.
+func (jobs *ArgoJobs) PipelineConcurrencyGroup(ctx context.Context, request service.WorkflowRequest) (string, error) {
+	group, _, err := jobs.PipelineConcurrencyContract(ctx, request)
+	return group, err
+}
+
+// PipelineConcurrencyContract reads both declarations from the same immutable document.
+func (jobs *ArgoJobs) PipelineConcurrencyContract(_ context.Context, request service.WorkflowRequest) (string, int, error) {
 	source, err := jobs.readRunSource(request)
 	if err != nil {
-		return "", jobs.noRunPipelineError(err, request)
+		return "", 0, jobs.noRunPipelineError(err, request)
 	}
 	workflow, err := argoworkflow.Decode(source)
 	if err != nil {
-		return "", fmt.Errorf("app: read repository concurrency contract: %w", err)
+		return "", 0, fmt.Errorf("app: read repository concurrency contract: %w", err)
 	}
 	group, err := argoworkflow.RunConcurrencyGroup(workflow)
 	if err != nil {
-		return "", fmt.Errorf("app: read repository concurrency contract: %w", err)
+		return "", 0, err
 	}
-	return group, nil
+	limit, err := argoworkflow.DeclaredConcurrencyLimit(workflow)
+	return group, limit, err
 }
 
 // PlannedSteps enumerates the run's declared step list from the checked-out
@@ -583,6 +590,7 @@ func (jobs *ArgoJobs) auditSubmission(ctx context.Context, request service.Workf
 		// The group the scheduler actually admitted this run under (#658),
 		// not a re-read of the document: the audit records the decision.
 		details["concurrency_group"] = request.ConcurrencyGroup
+		details["concurrency_limit"] = max(1, request.Run.ConcurrencyLimit)
 	}
 	encoded, err := json.Marshal(details)
 	if err != nil {

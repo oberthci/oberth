@@ -64,6 +64,8 @@ func waitingReason(admission *model.AdmissionObservation) string {
 		return "waiting for trusted VM capacity"
 	case admission.DiskFloor != nil && admission.DiskFloor.BelowFloor:
 		return fmt.Sprintf("waiting for disk space (%s free, floor %s)", bytesText(admission.DiskFloor.FreeBytes), bytesText(admission.DiskFloor.FloorBytes))
+	case admission.GroupLimit > 0 && (admission.GroupBlocked || admission.GroupHolder != "" || admission.GroupAhead != ""):
+		return concurrencyGroupReason(admission)
 	case admission.GroupHolder != "":
 		return fmt.Sprintf("concurrency group %s busy (held by run %s)", admission.Group, shortRunID(admission.GroupHolder))
 	case admission.GroupAhead != "":

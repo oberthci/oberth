@@ -386,6 +386,20 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		}
 	}
 	switch name {
+	case "concurrency_groups":
+		if err := requireUnscoped(actor, "concurrency_groups"); err != nil {
+			return nil, err
+		}
+		if err := decodeTool(raw, &struct{}{}); err != nil {
+			return nil, err
+		}
+		observer, ok := service.admission.(interface {
+			ConcurrencyGroups(context.Context) ([]model.AdmissionGroup, error)
+		})
+		if !ok {
+			return nil, refuse(ErrUnavailable, "concurrency groups")
+		}
+		return observer.ConcurrencyGroups(ctx)
 	case "admission_hold":
 		return service.admissionHoldTool(ctx, actor, raw)
 	// Credential and grant lifecycle (#1105).

@@ -41,13 +41,17 @@ type AdmissionObservation struct {
 	Runs    int `json:"runs,omitempty"`
 	MaxRuns int `json:"max_runs,omitempty"`
 	// Group is the repository-declared concurrency group the run was admitted
-	// or is waiting under (#658). GroupHolder names the run of the same
-	// repository currently holding that group; GroupAhead names the earlier run
+	// or is waiting under (#658). GroupHolder retains the first holder for older clients;
+	// GroupHolders names all holders across repositories. GroupAhead names an earlier run
 	// of the same group queued ahead when no run holds it yet. Both are server
 	// run IDs, set only while this run waits on its group.
-	Group       string `json:"group,omitempty"`
-	GroupHolder string `json:"group_holder,omitempty"`
-	GroupAhead  string `json:"group_ahead,omitempty"`
+	Group         string           `json:"group,omitempty"`
+	GroupHolder   string           `json:"group_holder,omitempty"`
+	GroupLimit    int              `json:"group_limit,omitempty"`
+	GroupHolders  []string         `json:"group_holders,omitempty"`
+	GroupBlocked  bool             `json:"group_blocked,omitempty"`
+	GroupRunRepos map[string]int64 `json:"-"`
+	GroupAhead    string           `json:"group_ahead,omitempty"`
 	// DiskFloor reports the opt-in disk-space admission hold (#673). When
 	// non-nil and BelowFloor is true, admission is held until disk frees up.
 	DiskFloor *DiskFloorObservation `json:"disk_floor,omitempty"`
@@ -292,10 +296,11 @@ type AdmissionReservation struct {
 	Backfilled bool `json:"backfilled,omitempty"`
 }
 
-// AdmissionGroup is a repository-scoped concurrency group with a holder or
-// waiting members.
+// AdmissionGroup is a YAML-defined shared group with current holders and waiters.
 type AdmissionGroup struct {
 	Name    string   `json:"name"`
+	Limit   int      `json:"limit"`
+	Holders []string `json:"holders"`
 	RepoID  int64    `json:"-"`
 	Repo    string   `json:"repo,omitempty"`
 	Holder  string   `json:"holder_run_id,omitempty"`

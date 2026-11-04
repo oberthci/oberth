@@ -125,7 +125,7 @@ func Admit(workflow *wfv1.Workflow, policy Policy) error {
 	// The scheduler reads the same annotation before admission; refusing a
 	// malformed group here keeps `oberth validate` and server admission in
 	// agreement rather than letting a push discover it at claim time.
-	if _, err := DeclaredConcurrencyGroup(workflow); err != nil {
+	if _, err := DeclaredConcurrencyLimit(workflow); err != nil {
 		problems = append(problems, err)
 	}
 	// The same holds for both size declarations. Which triggers a document

@@ -86,7 +86,7 @@ func (gate *weightedAdmission) adopt(run model.Run, size pipeline.Size, demand a
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
 	if previous, ok := gate.reservations[run.QueueSequence]; ok {
-		if previous.runID != run.ID || previous.order != order || !previous.granted || previous.size != size.Effective() || previous.groupName != run.ConcurrencyGroup || previous.repoID != run.RepoID || previous.kubeVirt.Demand != demand || !samePodDemand(previous.pods, peak) {
+		if previous.runID != run.ID || previous.order != order || !previous.granted || previous.size != size.Effective() || previous.groupName != run.ConcurrencyGroup || max(1, previous.groupLimit) != max(1, run.ConcurrencyLimit) || previous.repoID != run.RepoID || previous.kubeVirt.Demand != demand || !samePodDemand(previous.pods, peak) {
 			return nil, fmt.Errorf("%w: conflicting adopted admission", ErrAdoptionRefused)
 		}
 		return previous, nil
@@ -94,8 +94,18 @@ func (gate *weightedAdmission) adopt(run model.Run, size pipeline.Size, demand a
 	group := ""
 	if run.ConcurrencyGroup != "" {
 		group = concurrencyGroupKey(run.RepoID, run.ConcurrencyGroup)
-		if gate.groups[group] != nil {
-			return nil, fmt.Errorf("%w: adopted concurrency group already held", ErrAdoptionRefused)
+		limit := max(1, run.ConcurrencyLimit)
+		for _, holder := range gate.groups[group] {
+			if max(1, holder.groupLimit) != limit {
+				return nil, fmt.Errorf("%w: conflicting adopted concurrency group limits", ErrAdoptionRefused)
+			}
+			// Before shared groups, independent repositories could each own
+			// one grant. Preserve those live grants on upgrade. Multiple
+			// holders in one repository, or above an explicit larger limit,
+			// cannot arise from that legacy contract and remain a refusal.
+			if len(gate.groups[group]) >= limit && (limit != 1 || holder.repoID == run.RepoID) {
+				return nil, fmt.Errorf("%w: adopted concurrency group already at limit %d", ErrAdoptionRefused, limit)
+			}
 		}
 	}
 	now := time.Now().UTC()
@@ -104,7 +114,7 @@ func (gate *weightedAdmission) adopt(run model.Run, size pipeline.Size, demand a
 		gate: gate, sequence: run.QueueSequence, order: order, runID: run.ID, repoID: run.RepoID,
 		ref: run.Ref, refKind: run.RefKind, sha: run.SHA,
 		size: size.Effective(), weight: gate.weights.of(size.Effective(), gate.capacity),
-		group: group, groupName: run.ConcurrencyGroup, prepared: true, granted: true, submitted: true, kubeVirt: resources,
+		group: group, groupName: run.ConcurrencyGroup, groupLimit: max(1, run.ConcurrencyLimit), prepared: true, granted: true, submitted: true, kubeVirt: resources,
 		claimedAt: now, preparedAt: now, grantedAt: now, ready: make(chan struct{}),
 	}
 	if gate.workflowOnly || peak != nil {
@@ -115,7 +125,7 @@ func (gate *weightedAdmission) adopt(run model.Run, size pipeline.Size, demand a
 	gate.used += reservation.weight
 	gate.runs++
 	if group != "" {
-		gate.groups[group] = reservation
+		gate.groups[group] = append(gate.groups[group], reservation)
 	}
 	return reservation, nil
 }

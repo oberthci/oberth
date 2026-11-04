@@ -927,22 +927,19 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	// never the release's execution or publication.
 	priorityMaximum, priorityErr := scheduler.releasePriorityMaximum(ctx, run)
 	jobRequest.Size = size
-	group, err := scheduler.pipelineConcurrencyGroup(ctx, jobRequest)
+	group, groupLimit, err := scheduler.pipelineConcurrencyGroup(ctx, jobRequest)
 	if err != nil {
 		_ = logFile.Close()
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("read pipeline concurrency group: %w", err))
 	}
-	if group != "" {
-		// Recorded before admission so a run waiting on its group already
-		// says which group it waits on (status, run_get, scheduling reason).
-		if groupErr := scheduler.database().SetRunConcurrencyGroup(ctx, run.ID, group); groupErr != nil {
-			_ = logFile.Close()
-			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("record concurrency group: %w", groupErr))
-		}
-		run.ConcurrencyGroup = group
-		jobRequest.Run.ConcurrencyGroup = group
-		jobRequest.ConcurrencyGroup = group
+	// Persist the YAML declaration, including removal, before any grant.
+	if groupErr := scheduler.database().SetRunConcurrencyGroup(ctx, run.ID, group, groupLimit); groupErr != nil {
+		_ = logFile.Close()
+		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("record concurrency group: %w", groupErr))
 	}
+	run.ConcurrencyGroup, run.ConcurrencyLimit = group, groupLimit
+	jobRequest.Run.ConcurrencyGroup, jobRequest.Run.ConcurrencyLimit = group, groupLimit
+	jobRequest.ConcurrencyGroup = group
 
 	kubeVirt, err := scheduler.pipelineKubeVirt(ctx, jobRequest)
 	if err != nil {
@@ -972,7 +969,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	scheduler.admissionRequested(ctx, run.ID)
 	headSince, estimate := scheduler.admissionHistory(ctx, run)
 	releaseAdmission, err := reservation.acquireRequest(ctx, admissionRequest{
-		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref, Size: size, Group: group, Pods: pods, Fallback: fallback,
+		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref, Size: size, Group: group, GroupLimit: groupLimit, Pods: pods, Fallback: fallback,
 		RefKind: run.RefKind, SHA: run.SHA, HeadSince: headSince, Estimate: estimate, KubeVirt: &kubeVirt, PriorityMaximum: priorityMaximum, PriorityLookupFailed: priorityErr != nil,
 	})
 	if errors.Is(err, errAdmissionAbandoned) {
@@ -2174,16 +2171,25 @@ func (scheduler *Scheduler) pipelineSize(ctx context.Context, request WorkflowRe
 // document declares, selecting the engine exactly as pipelineSize does (the
 // engine derives the document, build.yaml or release.yaml, from the durable
 // run). An engine without the capability runs every pipeline ungrouped.
-func (scheduler *Scheduler) pipelineConcurrencyGroup(ctx context.Context, request WorkflowRequest) (string, error) {
+func (scheduler *Scheduler) pipelineConcurrencyGroup(ctx context.Context, request WorkflowRequest) (string, int, error) {
+	read := func(engine any) (string, int, error, bool) {
+		if reader, ok := engine.(PipelineConcurrencyContractReader); ok {
+			g, n, e := reader.PipelineConcurrencyContract(ctx, request)
+			return g, n, e, true
+		}
+		if reader, ok := engine.(PipelineConcurrencyGrouper); ok {
+			g, e := reader.PipelineConcurrencyGroup(ctx, request)
+			return g, 1, e, true
+		}
+		return "", 1, nil, false
+	}
 	if request.Run.Release {
-		if grouper, ok := scheduler.releaseJobs.(PipelineConcurrencyGrouper); ok {
-			return grouper.PipelineConcurrencyGroup(ctx, request)
+		if g, n, e, ok := read(scheduler.releaseJobs); ok {
+			return g, n, e
 		}
 	}
-	if grouper, ok := scheduler.jobs.(PipelineConcurrencyGrouper); ok {
-		return grouper.PipelineConcurrencyGroup(ctx, request)
-	}
-	return "", nil
+	g, n, e, _ := read(scheduler.jobs)
+	return g, n, e
 }
 
 // pipelineCredentialed reports whether the run's pipeline declares secret-store

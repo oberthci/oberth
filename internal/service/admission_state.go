@@ -72,6 +72,13 @@ func (gate *weightedAdmission) reservationViewLocked(reservation *admissionReser
 // AdmissionState reports every reservation the gate holds, granted, retained
 // or waiting, and every concurrency group in use (#1099).
 func (scheduler *Scheduler) AdmissionState() *model.AdmissionState {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	definitions, _ := scheduler.concurrencyDefinitions(ctx)
+	return scheduler.admissionState(definitions)
+}
+
+func (scheduler *Scheduler) admissionState(definitions []model.AdmissionGroup) *model.AdmissionState {
 	gate := scheduler.admission
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
@@ -107,12 +114,15 @@ func (scheduler *Scheduler) AdmissionState() *model.AdmissionState {
 		}
 		group := groups[reservation.group]
 		if group == nil {
-			group = &model.AdmissionGroup{Name: reservation.groupName, RepoID: reservation.repoID, Repo: reservation.repo}
+			group = &model.AdmissionGroup{Name: reservation.groupName, Limit: max(1, reservation.groupLimit), Holders: []string{}, Waiting: []string{}}
 			groups[reservation.group] = group
 			groupOrder = append(groupOrder, reservation.group)
 		}
-		if holder := gate.groups[reservation.group]; holder == reservation {
-			group.Holder = reservation.runID
+		if reservation.granted {
+			group.Holders = append(group.Holders, reservation.runID)
+			if group.Holder == "" {
+				group.Holder = reservation.runID
+			}
 		} else if !reservation.granted {
 			group.Waiting = append(group.Waiting, reservation.runID)
 		}
@@ -123,6 +133,12 @@ func (scheduler *Scheduler) AdmissionState() *model.AdmissionState {
 	if head := gate.headBlockerLocked(); head != nil {
 		state.Blocker = gate.blockerLocked(head)
 	}
+	for _, definition := range definitions {
+		if _, exists := groups[definition.Name]; !exists {
+			state.Groups = append(state.Groups, definition)
+		}
+	}
+	sort.Slice(state.Groups, func(i, j int) bool { return state.Groups[i].Name < state.Groups[j].Name })
 	return state
 }
 

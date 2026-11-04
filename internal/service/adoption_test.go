@@ -506,7 +506,7 @@ func TestAdoptionPreemptedBeforeWaitRetainsAdmissionOnDeleteFailure(t *testing.T
 	scheduler.admission.mu.Lock()
 	used, runs, held := scheduler.admission.used, scheduler.admission.runs, scheduler.admission.groups[concurrencyGroupKey(run.RepoID, run.ConcurrencyGroup)]
 	scheduler.admission.mu.Unlock()
-	if used != 0 || scheduler.AdmissionState().Runs == 0 || runs != 1 || held != reservation || !reservation.retained {
+	if used != 0 || scheduler.AdmissionState().Runs == 0 || runs != 1 || len(held) != 1 || held[0] != reservation || !reservation.retained {
 		t.Fatalf("live Workflow lost admission: %d/%d held=%p", used, runs, held)
 	}
 }

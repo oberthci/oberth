@@ -244,31 +244,19 @@ Each template is a container with its own exit code, timeout, and named log
 slice. Oberth reads the YAML statically at submission -- it never executes
 repository code in the server process.
 
-Two workflow-level annotations steer the scheduler. `oberth.ci/size` (`S`,
-`M` -- the default --, `L`, `XL`) is the run's share of the host. By default
-the weights are S 1, M 2, L 3 of a budget of `maxConcurrentJobs` × 2, and `XL`
-takes the whole host and runs alone. The chart value `admission.sizeWeights`
-(server flag `--admission-size-weights`) changes them; a positive `XL` weight
-lets an XL run share the host with whatever fits beside it. While a run at the head of
-the admission queue waits for room, later runs that fit beside it are
-backfilled for up to `admission.maxHeadWait` (default 20m); after that the
-host drains for the head, so it never starves. `oberth.ci/concurrency-group: <name>`
-serializes a repository's own runs that must never overlap -- a Terraform
-state, say -- across branch, promotion, and tag runs without reserving the
-host: members run one at a time in queue order while other repositories keep
-running beside them, and each member keeps its declared size. Group names are
-1 to 63 characters of `[a-z0-9-]` and are scoped to the declaring repository;
-`status` and `run_get` show the group and, while a run waits on it, which run
-holds it.
+`oberth.ci/concurrency-group: <name>` shares a concurrency limit across every
+repository declaring that name, including branch, tag/release and promotion
+runs. `oberth.ci/concurrency-limit: "2"` permits two holders; omitting it defaults
+to one. Group names use 1–63 characters of `[a-z0-9-]`. Conflicting YAML limits
+are refused before admission. Waiting runs keep their queued status and name
+the group, limit and current holders in their reason line.
 
-For undeclared legacy workflows, `XL` needs an admin size grant (`oberth size grant <repo> --max XL`, or MCP
-`size_grant`); without one a repository's branch, promotion and schedule runs
-may declare at most `L`, and an XL declaration fails at admission instead of
-making every other repository wait for a full drain. The grant applies to
-branch, promotion and schedule runs only: tag/release runs are the
-credentialed tier and are not gated, so a reviewed release.yaml keeps its size. While a run waits at the
-head of the admission queue, the runs behind it say so: "blocked behind
-<repo>/<ref> (XL, needs a full drain)".
+Groups reserve no CPU or memory. They compose with the global workflow-count
+ceiling, while Kubernetes places pods from their requests. Existing size labels
+and weights do not change group limits or reserve the host. Read definitions,
+holders and waiters with `oberth admission groups`, MCP `concurrency_groups`, or
+`system_status.admission.groups`. Definitions and run contracts survive restart.
+See [concurrency groups](docs/concurrency-groups.md) for YAML examples and updates.
 
 When deploying the [release-priority changes](docs/release-priority.md) held for
 v0.17.72, check existing size-grant state before upgrading: an old revoked grant
@@ -392,6 +380,7 @@ List it with `oberth mcp tools`; available operations are:
 | `priority_grant_list` | List submission priority grants, including expiry. Unscoped admin only. |
 | `priority_grant_revoke` | Revoke an identity's submission priority grant. Accepted runs keep their priority. Unscoped admin only; audited. |
 | `run_priority` | Set a waiting run to normal or low (without aging), or raise it to high/highest. Cannot preempt admitted work. Unscoped admin only; audited, reason required. |
+| `concurrency_groups` | List YAML-defined concurrency groups, limits, current holders and waiters across repositories, including idle definitions. Read-only; requires an unscoped uplink. Define groups only with oberth.ci/concurrency-group and oberth.ci/concurrency-limit (default 1) in pipeline YAML. |
 | `admission_hold` | Hold new admission except allowed tag/release/promotion classes. Unscoped admin only; audited, reason required. Existing grants are untouched. Default allow is tag+release; [] holds all. Expires after duration (default 2h, maximum 12h), including across restart. Read current hold in system_status admission.hold. |
 | `admission_release` | Release one admission reservation no owner will release: typically a granted reservation still held for a run that is already terminal because its owner hung or was lost (also an ungranted one of a terminal run, or a retained one while a stopping scheduler drains). A live run's reservation is refused (use run_cancel). The run's Workflow is deleted first as proof; a granted run with no recorded Workflow (a trusted preflight) needs force, as does a failed deletion. Admin uplink required, unscoped only; audited. system_status lists every reservation. |
 | `repo_usage` | Report bounded outside-step kubelet/cAdvisor usage by repository and step: per-container app/init/helper/VM launcher p50/p95/max, pod storage peaks and per-run pod overlap; requests, paired used/request ratios and per-step peaks grouped by observed Workflow size class (S/M/L/XL or unknown). Peaks are sampled lower bounds; missing/killed samples remain unknown. Does not change admission. |

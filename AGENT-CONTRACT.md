@@ -657,42 +657,27 @@ trust assumptions and complete invalidation rules.
   evaluates); this server replaces that value. `valueFrom`, `default`,
   `enum`, a duplicate, or an out-of-vocabulary value is refused. A document
   that never mentions the parameter is submitted byte-identical to before.
-  `oberth.ci/concurrency-group: <name>` (#658) makes the run a member of a
-  mutual-exclusion group scoped to the declaring repository: at most one run
-  of a (repository, group) holds admission at a time, across branch,
-  promotion and tag triggers, and members are admitted by priority, then claim FIFO.
-  Resource templates do not imply a concurrency group. Any valid declared
-  group is allowed. Run rows have no group badge; a queued run waiting on
-  its group names it in the message column.
-  The group never changes a run's weight or identity, XL keeps its
-  exclusivity, and the same-branch supersede rule is unchanged. A member
-  waiting on its group holds no weight and no dispatch slot, so other
-  repositories' runs are admitted beside the group; admitted runs never
-  exceed the weight budget (2 × `maxConcurrentJobs` weight, so
-  `maxConcurrentJobs` M runs or up to twice as many S runs, #1021). The
-  dispatch loop claims up to `maxConcurrentJobs` unparked runs, and past that
-  claims one more only while every claimed unparked run already holds its
-  grant and weight is spare; parked members add at most `maxConcurrentJobs`
-  more claims. A
-  hold ends only when the member's Workflow is terminal or its deletion has
-  been accepted (Pods of a deleted Workflow may still be inside their
-  termination grace period). A claimed run that is superseded, requeued or
-  cancelled before it is granted owns no Workflow: the cancellation pass
-  withdraws its reservation at once, so it stops heading the FIFO queue or
-  its group, and the same grant pass admits the runs it was blocking. Names are 1 to 63 characters of `[a-z0-9-]` and
-  are never normalized; anything else fails `oberth validate` and server
-  admission, and the scheduler fails that run (phase `infrastructure`) before
-  a Workflow exists. Because the group spans trigger tiers by design (a
-  Terraform plan must never overlap an apply), a branch-tier member can delay
-  a release-tier member of the same repository, never read or alter it, and
-  only by the members claimed ahead of it, each bounded by the server's
-  Workflow deadline: strictly less than any branch document can already
-  impose on every repository by declaring XL. A release run's membership is
-  decided by its own reviewed `release.yaml`. The admitted group is recorded on the durable run
-  (`runs.concurrency_group`, schema v16, immutable once recorded; Go field
-  `ConcurrencyGroup` in `run_get`, `run_list` and `/api/runs`,
-  `concurrency_group` in `status` and `wait`) and in the Workflow-submission
-  audit details.
+  `oberth.ci/concurrency-group: <name>` names a group shared across repositories
+  and all run kinds. `oberth.ci/concurrency-limit: <N>` is a positive integer,
+  default 1. YAML is the only definition surface: no chart/admin definitions.
+  Names remain 1–63 characters of `[a-z0-9-]`. The scheduler persists each
+  immutable run's group and limit before granting it, and remembers the latest
+  accepted build/release YAML declarations per repository. Conflicting limits
+  are refused before execution, including after restart or while a group is idle.
+  An ungrouped declaration removes that pipeline's remembered definition.
+  Live grants still constrain a changed definition until they finish.
+  Members share at most N grants in priority/FIFO order, across branch, tag,
+  release and promotion runs. A waiting group member owns no workflow slot or
+  resource reservation. Granted work remains subject to the global workflow
+  ceiling; Kubernetes decides pod placement. Cancellation, retained grants,
+  VM parking and adoption preserve the same ownership boundaries. On upgrade,
+  already-running legacy members are adopted even if their combined count is
+  above the newly shared limit; new work waits for them to drain.
+  The existing queued reason names the group, limit and current holders.
+  There are no new run statuses, labels or layouts. `concurrency_groups` and
+  `oberth admission groups` are read-only unscoped views; system status includes
+  `admission.groups`. Scoped run/status views hide other repositories' holder
+  and waiter identities. See [concurrency groups](docs/concurrency-groups.md).
 - Server-owned helper operations (secret-store delivery, trusted plan
   capture/acknowledge/deliver/load) are exec'd through the same
   `go -C /work/src/.oberth run .` invocation with explicit flags; the SDK's
@@ -1006,7 +991,7 @@ trust assumptions and complete invalidation rules.
   it encodes the same result object. Authenticated tool refusal text keeps its
   stable error class and may append only an explicitly public service reason.
   Raw dependency chains stay masked; scoped missing/hidden equivalence remains.
-- MCP exposes 78 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 79 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, read-only `run_resources` (captured history and reviewed git resource suggestions), `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`, `run_kvm_preflight`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, `publication_abandon`, issue
   `issue_create`, `issue_get`, `issue_get_many`, `issue_update`, `issue_append`,
@@ -2762,6 +2747,7 @@ and v2 backup-and-replace semantics are unchanged. See
 | v53 | Promotion trains | Persist ordered sources, conflict decisions and merged tree SHA, with retry identity and per-source grant reservations; legacy promotions remain unchanged | Database restore |
 | v54 | Park promotion evidence | Add immutable `promotions.branch_ci_skipped`, defaulting to false for historical rows; parked sources must use a tested promotion run | Database restore |
 | v55 | Green commit trailers | Persist default-branch green boundaries and atomic issue-trailer processing receipts; seed historical deliveries without replay | Database restore |
+| `20261104120123-concurrency-limits-971dc11f4a5530e149fd22d0d6847b46` | YAML concurrency limits | Persist each run's limit and accepted pipeline definitions; seed legacy groups at limit 1 | Database restore |
 | `20261104022000-migration-ids` | Migration IDs | Add/backfill unique IDs in the existing ledger, preserving integer receipts and timestamps; future definitions load from separate SQL files | Database restore |
 | `YYYYMMDDHHMMSS-<slug>-<random>` | Future migrations | Per-file `Purpose` and `Rollback` contract in `internal/store/migrations/`; no shared number allocation | Per-file contract (database restore by default) |
 
