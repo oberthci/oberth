@@ -1296,6 +1296,13 @@ trust assumptions and complete invalidation rules.
   full drain)." The head itself sets `head_of_queue`. Unscoped `/api/status`
   reports the same as `admission_blocker` (#1021). A scoped actor sees the
   blocker only when its repository is in scope, without the budget's use.
+- `system_status`, `GET /api/status` and `oberth status` report pipeline
+  NetworkPolicy configuration in the Kubernetes diagnostic (`cluster_detail`).
+  The chart passes `networkPolicy.enabled` as `--pipeline-network-policy-enabled`:
+  false produces a persistent warning; true reports configured enabled, with CNI
+  enforcement unmeasured. An omitted flag reports configuration unavailable.
+  This installation-wide diagnostic is also visible to scoped uplinks; it
+  contains no repository or namespace details and never gates readiness or admission.
 - `system_status` / `GET /api/status` carry `admission` (#1099): `capacity`,
   `used`, `runs`, `max_runs`, `blocker`, `reservations[]` (`run_id`, `repo`,
   `ref`, `workflow`, `size`, `weight`, `state`, `group`, `position`, `since`)
