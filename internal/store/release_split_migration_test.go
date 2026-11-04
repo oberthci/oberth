@@ -102,10 +102,10 @@ INSERT INTO priority_grants(identity,max_class,expires,granted_by) VALUES('opera
 				}
 				defer s.Close()
 				ledger := releaseSplitLedger(t, s.db)
-				if len(ledger) != 52 {
-					t.Fatalf("ledger has %d migrations, want 52", len(ledger))
+				if len(ledger) != latestMigrationVersion {
+					t.Fatalf("ledger has %d migrations, want %d", len(ledger), latestMigrationVersion)
 				}
-				for v := 1; v <= 52; v++ {
+				for v := 1; v <= latestMigrationVersion; v++ {
 					if _, ok := ledger[v]; !ok {
 						t.Fatalf("missing migration %d", v)
 					}

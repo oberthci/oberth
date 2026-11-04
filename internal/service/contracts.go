@@ -642,6 +642,7 @@ type WaitResponse struct {
 }
 
 type PromotionWaitResponse struct {
+	SourceCount  int             `json:"source_count"`
 	Repo         string          `json:"repo"`
 	Ref          string          `json:"ref"`
 	Promotion    model.Promotion `json:"promotion"`

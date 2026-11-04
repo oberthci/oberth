@@ -278,6 +278,7 @@ func (server *Server) routes() {
 		}
 		writeJSON(writer, http.StatusOK, map[string]string{"status": "ready"})
 	})
+	server.mux.Handle("POST /api/promotions", server.requireAuth(http.HandlerFunc(server.handlePromote)))
 	server.mux.Handle("POST /mcp", server.requireAuth(http.HandlerFunc(server.handleMCP)))
 	server.mux.Handle("GET /api/runs", server.requireAuth(http.HandlerFunc(server.handleRuns)))
 	server.mux.Handle("GET /api/runs/counts", server.requireAuth(http.HandlerFunc(server.handleRunCounts)))
@@ -914,4 +915,27 @@ func serveAsset(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	_, _ = writer.Write(asset.body)
+}
+
+// handlePromote uses the same authorization, admission and mutation gate as MCP.
+func (server *Server) handlePromote(writer http.ResponseWriter, request *http.Request) {
+	body, err := io.ReadAll(http.MaxBytesReader(writer, request.Body, 1<<20))
+	if err != nil {
+		var large *http.MaxBytesError
+		code := http.StatusBadRequest
+		if errors.As(err, &large) {
+			code = http.StatusRequestEntityTooLarge
+		}
+		writeJSON(writer, code, map[string]string{"error": "cannot read promotion arguments (maximum 1 MiB)"})
+		return
+	}
+	value, err := server.tools.CallTool(request.Context(), actorFrom(request.Context()), "promote", json.RawMessage(body))
+	// A mutation accepted before drain must return its durable ID, so clients
+	// do not unknowingly duplicate work when the response races shutdown.
+	if err != nil {
+		code, message := server.classifyError(err)
+		writeJSON(writer, code, map[string]string{"error": message})
+		return
+	}
+	writeJSON(writer, http.StatusOK, value)
 }

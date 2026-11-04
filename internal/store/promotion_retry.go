@@ -49,14 +49,14 @@ func checkPromotionRetryAdmissionTx(ctx context.Context, tx *sql.Tx, spec model.
 	if err != nil {
 		return promotionRetryAdmission{}, err
 	}
-	if original.RepoID != spec.RepoID || !strings.EqualFold(original.SourceSHA, spec.SourceSHA) || original.TargetRef != spec.TargetRef {
+	if original.RepoID != spec.RepoID || !strings.EqualFold(original.SourceSHA, spec.SourceSHA) || original.TargetRef != spec.TargetRef || promotionTrainKey(original.Train) != promotionTrainKey(spec.Train) {
 		return promotionRetryAdmission{}, fmt.Errorf("%w: a promotion retry must keep the repository, source SHA and target of %s", ErrInvalid, original.ID)
 	}
 	if original.Status != model.PromotionFailed && original.Status != model.PromotionInterrupted {
 		return promotionRetryAdmission{}, fmt.Errorf("%w: promotion %s is %s; only a failed or interrupted promotion can be retried", ErrInvalidState, original.ID, original.Status)
 	}
 	if spec.RetryMode == model.PromotionRetryAuto {
-		if spec.GrantID != original.GrantID || spec.Actor != original.Actor {
+		if spec.GrantID != original.GrantID || spec.Actor != original.Actor || !sameTrainGrants(original.Train, spec.Train) {
 			return promotionRetryAdmission{}, fmt.Errorf("%w: automatic promotion retry must retain its original actor and grant", ErrInvalidState)
 		}
 		if original.Status == model.PromotionInterrupted && !trustedPreflight {
@@ -72,8 +72,8 @@ func checkPromotionRetryAdmissionTx(ctx context.Context, tx *sql.Tx, spec model.
 	var blockerID, blockerStatus string
 	err = tx.QueryRowContext(ctx, `
 SELECT id, status FROM promotions
-WHERE repo_id = ? AND lower(source_sha) = lower(?) AND target_ref = ? AND status IN ('pending', 'passed')
-ORDER BY sequence DESC LIMIT 1`, original.RepoID, original.SourceSHA, original.TargetRef).Scan(&blockerID, &blockerStatus)
+WHERE repo_id = ? AND lower(source_sha) = lower(?) AND target_ref = ? AND train_key = ? AND status IN ('pending', 'passed')
+ORDER BY sequence DESC LIMIT 1`, original.RepoID, original.SourceSHA, original.TargetRef, promotionTrainKey(original.Train)).Scan(&blockerID, &blockerStatus)
 	switch {
 	case err == nil && blockerStatus == string(model.PromotionPassed):
 		return promotionRetryAdmission{}, fmt.Errorf("%w: promotion %s already delivered %s to %s", ErrInvalidState, blockerID, original.SourceSHA, original.TargetRef)
@@ -128,6 +128,19 @@ func (s *Store) appendPromotionRetryAudit(ctx context.Context, tx *sql.Tx, promo
 // and no other pending or delivered promotion holds it. Holding is the
 // promotion's own grant_id; consumption follows only its delivery.
 func checkPromotionGrantReservableTx(ctx context.Context, tx *sql.Tx, spec model.PromotionSpec, now int64) error {
+	p := model.Promotion{Train: spec.Train, GrantID: spec.GrantID, SourceSHA: spec.SourceSHA}
+	for _, source := range promotionGrants(p, spec.ResultSHA == "") {
+		single := spec
+		single.Train = nil
+		single.SourceSHA = source.SHA
+		single.GrantID = source.GrantID
+		if err := checkSinglePromotionGrantReservableTx(ctx, tx, single, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func checkSinglePromotionGrantReservableTx(ctx context.Context, tx *sql.Tx, spec model.PromotionSpec, now int64) error {
 	grant, err := scanPromotionGrant(tx.QueryRowContext(ctx, `
 SELECT id, repo_id, source_sha, target_ref, issuer, issuer_fingerprint, note,
        created_at, expires_at, revoked_by, revoked_at, consumed_by, consumed_at
@@ -150,8 +163,8 @@ FROM promotion_grants WHERE id = ?`, spec.GrantID))
 	}
 	var holder string
 	err = tx.QueryRowContext(ctx, `
-SELECT id FROM promotions WHERE grant_id = ? AND status IN ('pending', 'passed')
-ORDER BY sequence DESC LIMIT 1`, grant.ID).Scan(&holder)
+SELECT id FROM promotions WHERE ((train_json='' AND grant_id = ?) OR EXISTS(SELECT 1 FROM promotion_train_grants g WHERE g.promotion_id=promotions.id AND g.grant_id=? AND g.included=1)) AND status IN ('pending', 'passed')
+ORDER BY sequence DESC LIMIT 1`, grant.ID, grant.ID).Scan(&holder)
 	if err == nil {
 		return fmt.Errorf("%w: promotion grant %s is held by promotion %s", ErrInvalidState, grant.ID, holder)
 	}
@@ -162,6 +175,17 @@ ORDER BY sequence DESC LIMIT 1`, grant.ID).Scan(&holder)
 }
 
 func (s *Store) appendPromotionGrantReserveAudit(ctx context.Context, tx *sql.Tx, promotion model.Promotion, retryOf string, now int64) error {
+	for _, source := range promotionGrants(promotion, promotion.ResultSHA == "") {
+		single := promotion
+		single.Train = nil
+		single.GrantID = source.GrantID
+		if err := s.appendSinglePromotionGrantReserveAudit(ctx, tx, single, retryOf, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func (s *Store) appendSinglePromotionGrantReserveAudit(ctx context.Context, tx *sql.Tx, promotion model.Promotion, retryOf string, now int64) error {
 	details, err := json.Marshal(map[string]string{"promotion_id": promotion.ID, "retry_of": retryOf})
 	if err != nil {
 		return fmt.Errorf("encode promotion grant reservation audit: %w", err)
@@ -180,6 +204,18 @@ var ErrPromotionGrantInactive = errors.New("store: promotion grant is no longer 
 // checkPromotionDeliveryGrantTx repeats authorization before publication and
 // each push attempt. Reservation alone cannot survive revocation or expiry.
 func checkPromotionDeliveryGrantTx(ctx context.Context, tx *sql.Tx, promotion model.Promotion, now int64) error {
+	for _, source := range promotionGrants(promotion, false) {
+		single := promotion
+		single.Train = nil
+		single.SourceSHA = source.SHA
+		single.GrantID = source.GrantID
+		if err := checkSinglePromotionDeliveryGrantTx(ctx, tx, single, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func checkSinglePromotionDeliveryGrantTx(ctx context.Context, tx *sql.Tx, promotion model.Promotion, now int64) error {
 	if promotion.GrantID == "" {
 		return nil
 	}
@@ -202,6 +238,18 @@ AND (consumed_at IS NULL OR consumed_by=?))`, promotion.GrantID, promotion.RepoI
 // Invalidation during a push cannot undo external delivery: preserve that
 // delivered fact, but never mark the invalidated grant as consumed.
 func (s *Store) consumeDeliveredPromotionGrantTx(ctx context.Context, tx *sql.Tx, promotion model.Promotion, publicationID string, now int64) error {
+	for _, source := range promotionGrants(promotion, false) {
+		single := promotion
+		single.Train = nil
+		single.SourceSHA = source.SHA
+		single.GrantID = source.GrantID
+		if err := s.consumeSingleDeliveredPromotionGrantTx(ctx, tx, single, publicationID, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func (s *Store) consumeSingleDeliveredPromotionGrantTx(ctx context.Context, tx *sql.Tx, promotion model.Promotion, publicationID string, now int64) error {
 	if promotion.GrantID == "" {
 		return nil
 	}

@@ -143,7 +143,7 @@ func (s *Store) kvmRetryAllowedTx(ctx context.Context, tx *sql.Tx, run model.Run
 }
 
 func preflightPromotionSpec(p model.Promotion) model.PromotionSpec {
-	return model.PromotionSpec{RepoID: p.RepoID, SourceBranch: p.SourceBranch, SourceSHA: p.SourceSHA, TargetRef: p.TargetRef, PreviousSHA: p.PreviousSHA, ResultSHA: p.ResultSHA, Actor: p.Actor, GrantID: p.GrantID, RetryOf: p.ID, RetryMode: model.PromotionRetryAuto}
+	return model.PromotionSpec{Train: p.Train, RepoID: p.RepoID, SourceBranch: p.SourceBranch, SourceSHA: p.SourceSHA, TargetRef: p.TargetRef, PreviousSHA: p.PreviousSHA, ResultSHA: p.ResultSHA, Actor: p.Actor, GrantID: p.GrantID, RetryOf: p.ID, RetryMode: model.PromotionRetryAuto}
 }
 
 func (s *Store) enqueueKVMRetryTx(ctx context.Context, tx *sql.Tx, run model.Run, now int64) (model.Run, error) {

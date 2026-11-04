@@ -16,14 +16,17 @@ const promotionRetryUsage = "Usage: oberth promotion retry <promotion-id> [--jso
 // re-tested.
 func runPromotion(ctx context.Context, arguments []string, output io.Writer) error {
 	if len(arguments) == 0 || arguments[0] == "--help" || arguments[0] == "-h" {
-		_, err := fmt.Fprintln(output, promotionRetryUsage)
+		_, err := fmt.Fprintln(output, promotionCreateUsage+"\n"+promotionRetryUsage)
 		if len(arguments) == 0 && err == nil {
 			return fmt.Errorf("%w: promotion retry <promotion-id>", errUsage)
 		}
 		return err
 	}
+	if arguments[0] == "create" {
+		return runPromotionCreate(ctx, arguments[1:], output)
+	}
 	if arguments[0] != "retry" {
-		return fmt.Errorf("%w: unknown promotion command %q; expected retry", errUsage, arguments[0])
+		return fmt.Errorf("%w: unknown promotion command %q; expected create or retry", errUsage, arguments[0])
 	}
 	arguments = arguments[1:]
 	if len(arguments) == 1 && (arguments[0] == "--help" || arguments[0] == "-h") {

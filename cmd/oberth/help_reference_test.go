@@ -56,6 +56,7 @@ preflight pki
 preflight upstreams
 promotion
 promotion retry
+promotion create
 publication
 publication abandon
 repo
