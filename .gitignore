@@ -5,7 +5,6 @@ coverage.out
 /oberth
 *.test
 .worktrees/
-.claude/settings.local.json
 
 # Loose binary artifacts
 oberth-*
