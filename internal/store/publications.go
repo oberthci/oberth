@@ -75,13 +75,16 @@ func (s *Store) BeginPublication(ctx context.Context, spec model.PublicationSpec
 	if spec.PromotionID != "" {
 		promotion, promotionErr := scanPromotion(tx.QueryRowContext(ctx, `
 SELECT sequence, id, repo_id, source_branch, source_sha, target_ref, previous_sha,
-       result_sha, actor, status, run_id, grant_id, error, created_at, updated_at
+       result_sha, actor, status, run_id, grant_id, error, created_at, updated_at, train_json
 FROM promotions WHERE id = ?`, spec.PromotionID))
 		if errors.Is(promotionErr, sql.ErrNoRows) {
 			return model.Publication{}, fmt.Errorf("%w: publication promotion", ErrNotFound)
 		}
 		if promotionErr != nil {
 			return model.Publication{}, fmt.Errorf("load publication promotion: %w", promotionErr)
+		}
+		if promotion.Train != nil && (promotion.RunID == "" || !validOID(promotion.Train.TreeSHA)) {
+			return model.Publication{}, fmt.Errorf("%w: promotion train requires its merged-tree run", ErrInvalidState)
 		}
 		if promotion.Status != model.PromotionPending || promotion.RepoID != spec.RepoID ||
 			promotion.Actor != spec.Actor || promotion.TargetRef != spec.Ref || spec.RefKind != model.RefBranch ||
@@ -304,7 +307,7 @@ UPDATE promotions
 SET status = ?, error = ?, updated_at = ?
 WHERE id = ? AND status = 'pending'
 RETURNING sequence, id, repo_id, source_branch, source_sha, target_ref, previous_sha,
-          result_sha, actor, status, run_id, grant_id, error, created_at, updated_at`,
+          result_sha, actor, status, run_id, grant_id, error, created_at, updated_at, train_json`,
 			promotionStatus, failure, now, publication.PromotionID))
 		if errors.Is(err, sql.ErrNoRows) {
 			return model.PublicationFinalization{}, fmt.Errorf("%w: publication promotion is not pending", ErrInvalidState)

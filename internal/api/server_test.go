@@ -688,7 +688,7 @@ func TestMCPToolInputsMatchContract(t *testing.T) {
 		"run_logs":            {"burn", "byte_offset", "context", "id", "limit", "offset", "pattern", "run_id", "step", "tail"},
 		"wait":                {"id", "repo", "run_id", "sha", "timeout", "trigger"},
 		"sync":                {"branch", "priority", "priority_reason", "repo", "sha"},
-		"promote":             {"branch", "priority", "priority_reason", "repo", "sha"},
+		"promote":             {"branch", "priority", "priority_reason", "repo", "sha", "skip_conflicting", "sources"},
 		"issue_list":          {"active_stale_after", "before", "kind", "limit", "query", "repo", "stale_after", "state", "work_status"},
 		"issue_get":           {"active_stale_after", "body_limit", "fields", "id", "stale_after"},
 		"issue_get_many":      {"active_stale_after", "body_limit", "fields", "ids", "stale_after"},

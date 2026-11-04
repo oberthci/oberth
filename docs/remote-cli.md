@@ -49,6 +49,7 @@ oberth run <run-id>
 oberth run retry <run-id> [--json]
 oberth run rerun <run-id> [--reason TEXT] [--force] [--json]
 oberth run cancel <run-id> [--reason TEXT] [--force] [--json]
+oberth promotion create --repo <repo> --branch main --sources-file sources.json [--skip-conflicting] [--json]
 oberth promotion retry <promotion-id> [--json]
 oberth runs cancel --repo NAME --ref BRANCH [--reason TEXT] [--force] [--json]
 oberth admission [--json]
@@ -329,3 +330,7 @@ Secret is generated once and kept, so the certificate is re-issued only after
 that Secret is deleted. Re-issuing does not invalidate an uplink, which is keyed
 by SSH public-key fingerprint, but it does change the TLS fingerprint people
 compared out of band.
+
+For ordered multi-source promotion, see [promotion trains](promotion-trains.md),
+including a three-source CLI, MCP and REST example. The single-source equivalent
+is `oberth promotion create --repo <repo> --branch main --sha <full-sha>`.

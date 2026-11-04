@@ -190,7 +190,7 @@ Manual CI investigation issues can be installation-wide or scoped to an upstream
 They are not attached to an individual repository or synchronized to the upstream
 forge. See [issue scope and retained compatibility](ci-issue-scope.md).
 
-Promotion first green-gates the candidate. It reuses the already-tested commit
+Single-source promotion first green-gates the candidate. It reuses the already-tested commit
 only when the fetched target fast-forwards to that exact candidate. A divergent
 target is merged locally and receives a new CI run. Both Git backends share a
 conservative tree merge: overlapping path changes require identical resulting
@@ -295,3 +295,9 @@ path instead of refreshing liveness forever.
 A corrupt receive outbox quarantines only its repository. Startup replays healthy
 repositories and retains the corrupt record for operator repair. Refresh, receive
 and publication refuse the affected repository until its record is repaired.
+
+Ordered [promotion trains](promotion-trains.md) reuse the same repository/target
+queue. They apply native three-way merges in request order in one private checkout
+and always test the final result once before publication. Per-source eligibility
+and grants are checked before admission. Durable source order, skipped conflicts
+and tree identity survive retries and recovery (schema v53).

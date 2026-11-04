@@ -74,7 +74,7 @@ func (service *API) promotionList(ctx context.Context, args promotionListArgumen
 			return api.PromotionListResponse{}, err
 		}
 		response.Promotions = append(response.Promotions, api.PromotionListItem{
-			Repo: repo, Ref: p.SourceBranch, ID: p.ID, Sequence: p.Sequence, RepoID: p.RepoID, SourceBranch: p.SourceBranch, SourceSHA: p.SourceSHA,
+			SourceCount: p.SourceCount(), Repo: repo, Ref: p.SourceBranch, ID: p.ID, Sequence: p.Sequence, RepoID: p.RepoID, SourceBranch: p.SourceBranch, SourceSHA: p.SourceSHA,
 			TargetRef: p.TargetRef, ResultSHA: p.ResultSHA, RunID: p.RunID, Status: string(p.Status),
 			CreatedAt: p.CreatedAt.UTC().Format(time.RFC3339Nano), UpdatedAt: p.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		})

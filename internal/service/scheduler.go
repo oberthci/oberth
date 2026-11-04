@@ -1628,7 +1628,8 @@ func (scheduler *Scheduler) promotionForRun(ctx context.Context, run model.Run) 
 	if err != nil {
 		return model.Promotion{}, fmt.Errorf("load promotion for merged-tree run: %w", err)
 	}
-	if promotion.Status != model.PromotionPending || !sameOID(promotion.ResultSHA, run.TestedSHA) || !sameOID(promotion.PreviousSHA, run.BaseSHA) {
+	baseMatches := sameOID(promotion.PreviousSHA, run.BaseSHA) || promotion.Train != nil && promotion.PreviousSHA == zeroOID && run.BaseSHA == ""
+	if promotion.Status != model.PromotionPending || !sameOID(promotion.ResultSHA, run.TestedSHA) || !baseMatches {
 		return promotion, errors.New("service: promotion run does not match its immutable record")
 	}
 	return promotion, nil

@@ -114,7 +114,7 @@ Commands:
   artifacts     List and download build artifacts
   runs          List recent CI/CD runs, or cancel a ref's active runs
   run           Show a run; retry, rerun at the same SHA, cancel one, or purge its retained logs/artifacts
-  promotion     Retry a failed or interrupted promotion onto the current target head
+  promotion     Promote source commits as a train, or retry a failed promotion
   publication   Abandon a pending upstream publication (admin only)
   log           Show step logs for a run
   repos         List registered repositories

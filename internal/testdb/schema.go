@@ -129,7 +129,7 @@ DELETE FROM schema_migrations WHERE version>=46;
 
 // PostV49Downgrade removes work-status and policy-wait additions while keeping
 // the covering run-list index already installed by the small v0.17.83 release.
-const PostV49Downgrade = `
+const PostV49Downgrade = PostV52Downgrade + `
 DROP TRIGGER IF EXISTS issues_metadata_revision;
 ALTER TABLE issues DROP COLUMN work_status;
 CREATE TRIGGER issues_metadata_revision
@@ -139,4 +139,13 @@ CREATE TRIGGER issues_metadata_revision
 DROP TRIGGER IF EXISTS publication_policy_wait_cleanup;
 DROP TABLE IF EXISTS publication_policy_waits;
 DELETE FROM schema_migrations WHERE version>=50;
+`
+
+// PostV52Downgrade reconstructs the schema before durable promotion trains.
+const PostV52Downgrade = `
+DROP TRIGGER IF EXISTS promotion_train_identity_immutable;
+DROP TABLE IF EXISTS promotion_train_grants;
+ALTER TABLE promotions DROP COLUMN train_json;
+ALTER TABLE promotions DROP COLUMN train_key;
+DELETE FROM schema_migrations WHERE version>=53;
 `

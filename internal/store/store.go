@@ -1062,7 +1062,7 @@ RETURNING `+runColumns, now, now, active.ID))
 
 	promotionRows, err := tx.QueryContext(ctx, `
 SELECT sequence, id, repo_id, source_branch, source_sha, target_ref, previous_sha,
-       result_sha, actor, status, run_id, grant_id, error, created_at, updated_at
+       result_sha, actor, status, run_id, grant_id, error, created_at, updated_at, train_json
 FROM promotions
 WHERE status = 'pending'
   AND (
@@ -1530,7 +1530,11 @@ func (s *Store) appendPromotion(ctx context.Context, spec model.PromotionSpec, r
 // promotion and records the corresponding audit action atomically.
 // Repeating the exact plan is idempotent; changing it fails closed.
 func (s *Store) PlanPromotion(ctx context.Context, id, previousSHA, resultSHA string) (model.Promotion, error) {
-	if strings.TrimSpace(id) == "" || !validOID(resultSHA) || (previousSHA != "" && !validOID(previousSHA)) {
+	return s.planPromotion(ctx, id, previousSHA, resultSHA, nil)
+}
+func (s *Store) planPromotion(ctx context.Context, id, previousSHA, resultSHA string, train *model.PromotionTrain) (model.Promotion, error) {
+	validResult := validOID(resultSHA) || train != nil && resultSHA == "" && previousSHA == ""
+	if strings.TrimSpace(id) == "" || !validResult || (previousSHA != "" && !validOID(previousSHA)) {
 		return model.Promotion{}, fmt.Errorf("%w: promotion plan fields are invalid", ErrInvalid)
 	}
 	now := unixNano(s.now())
@@ -1539,25 +1543,49 @@ func (s *Store) PlanPromotion(ctx context.Context, id, previousSHA, resultSHA st
 		return model.Promotion{}, fmt.Errorf("begin promotion plan: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	original, err := promotionTx(ctx, tx, id)
+	if err != nil {
+		return model.Promotion{}, err
+	}
+	if (original.Train == nil) != (train == nil) {
+		return model.Promotion{}, fmt.Errorf("%w: train plan metadata is required", ErrInvalid)
+	}
+	if train != nil {
+		if err := validateTrainResolution(original.Train, train, resultSHA); err != nil {
+			return model.Promotion{}, err
+		}
+	}
+	encodedTrain, err := encodePromotionTrain(train)
+	if err != nil {
+		return model.Promotion{}, err
+	}
+	if err := recordTrainGrantInclusion(ctx, tx, id, train); err != nil {
+		return model.Promotion{}, err
+	}
 	value, err := scanPromotion(tx.QueryRowContext(ctx, `
 UPDATE promotions
-SET previous_sha = ?, result_sha = ?, updated_at = ?
+SET previous_sha = ?, result_sha = ?, updated_at = ?, train_json = ?
 WHERE id = ? AND status = 'pending' AND previous_sha = '' AND result_sha = ''
 RETURNING sequence, id, repo_id, source_branch, source_sha, target_ref, previous_sha,
-          result_sha, actor, status, run_id, grant_id, error, created_at, updated_at`,
-		strings.ToLower(previousSHA), strings.ToLower(resultSHA), now, id))
+          result_sha, actor, status, run_id, grant_id, error, created_at, updated_at, train_json`,
+		strings.ToLower(previousSHA), strings.ToLower(resultSHA), now, encodedTrain, id))
 	if err == nil {
-		details, jsonErr := json.Marshal(map[string]string{
+		detailsMap := map[string]any{
 			"source":   value.SourceSHA,
 			"target":   value.TargetRef,
 			"previous": value.PreviousSHA,
 			"result":   value.ResultSHA,
-		})
+		}
+		if train != nil {
+			detailsMap["train"] = train
+			detailsMap["source_count"] = len(train.Sources)
+		}
+		details, jsonErr := json.Marshal(detailsMap)
 		if jsonErr != nil {
 			return model.Promotion{}, fmt.Errorf("encode promotion plan audit: %w", jsonErr)
 		}
 		if _, err := s.appendAuditAction(ctx, tx, model.AuditActionSpec{
-			Actor: value.Actor, Action: "promotion.pending", ResourceType: "promotion",
+			Actor: value.Actor, Action: promotionPlanAuditAction(resultSHA), ResourceType: "promotion",
 			ResourceID: value.ID, Details: string(details),
 		}, now); err != nil {
 			return model.Promotion{}, fmt.Errorf("audit promotion plan: %w", err)
@@ -1577,7 +1605,7 @@ RETURNING sequence, id, repo_id, source_branch, source_sha, target_ref, previous
 	if lookupErr != nil {
 		return model.Promotion{}, lookupErr
 	}
-	if current.Status == model.PromotionPending && sameStoredOID(current.PreviousSHA, previousSHA) && sameStoredOID(current.ResultSHA, resultSHA) {
+	if current.Status == model.PromotionPending && sameStoredOID(current.PreviousSHA, previousSHA) && sameStoredOID(current.ResultSHA, resultSHA) && samePromotionTrain(current.Train, train) {
 		return current, nil
 	}
 	return model.Promotion{}, fmt.Errorf("%w: promotion plan is already fixed", ErrInvalidState)
@@ -1607,12 +1635,13 @@ func (s *Store) EnqueueAdmittedPromotionRun(ctx context.Context, runSpec model.R
 	if err != nil {
 		return model.EnqueueRunResult{}, model.Promotion{}, err
 	}
+	baseMatches := strings.EqualFold(validatedRun.BaseSHA, promotion.PreviousSHA) || promotion.Train != nil && validatedRun.BaseSHA == "" && promotion.PreviousSHA == strings.Repeat("0", 40)
 	if promotion.Status != model.PromotionPending || promotion.RunID != "" ||
 		!validOID(promotion.ResultSHA) || validatedRun.Trigger != "promotion" || validatedRun.Release ||
 		validatedRun.RefKind != model.RefBranch || validatedRun.RepoID != promotion.RepoID ||
 		validatedRun.Actor != promotion.Actor || !strings.EqualFold(validatedRun.SHA, promotion.ResultSHA) ||
 		!strings.EqualFold(validatedRun.TestedSHA, promotion.ResultSHA) ||
-		!strings.EqualFold(validatedRun.BaseSHA, promotion.PreviousSHA) {
+		!baseMatches {
 		return model.EnqueueRunResult{}, model.Promotion{}, fmt.Errorf("%w: admitted promotion run does not match promotion", ErrInvalidState)
 	}
 	enqueued, err := s.enqueueRunTx(ctx, tx, validatedRun, runID, now, 0)
@@ -1623,7 +1652,7 @@ func (s *Store) EnqueueAdmittedPromotionRun(ctx context.Context, runSpec model.R
 UPDATE promotions SET run_id = ?, updated_at = ?
 WHERE id = ? AND status = 'pending' AND run_id = ''
 RETURNING sequence, id, repo_id, source_branch, source_sha, target_ref, previous_sha,
-          result_sha, actor, status, run_id, grant_id, error, created_at, updated_at`, runID, now, promotionID))
+          result_sha, actor, status, run_id, grant_id, error, created_at, updated_at, train_json`, runID, now, promotionID))
 	if err != nil {
 		return model.EnqueueRunResult{}, model.Promotion{}, fmt.Errorf("attach admitted promotion run: %w", err)
 	}
@@ -1634,6 +1663,7 @@ RETURNING sequence, id, repo_id, source_branch, source_sha, target_ref, previous
 }
 
 type promotionQueryer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
@@ -1641,21 +1671,37 @@ func insertPromotion(ctx context.Context, queryer promotionQueryer, spec model.P
 	if err := requireRepositoryActive(ctx, queryer, spec.RepoID); err != nil {
 		return model.Promotion{}, err
 	}
+	encodedTrain, err := encodePromotionTrain(spec.Train)
+	if err != nil {
+		return model.Promotion{}, err
+	}
 	row := queryer.QueryRowContext(ctx, `
-INSERT INTO promotions(id, repo_id, source_branch, source_sha, target_ref, previous_sha, result_sha, actor, status, run_id, grant_id, created_at, updated_at)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
+INSERT INTO promotions(id, repo_id, source_branch, source_sha, target_ref, previous_sha, result_sha, actor, status, run_id, grant_id, created_at, updated_at, train_json, train_key)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
 RETURNING sequence, id, repo_id, source_branch, source_sha, target_ref, previous_sha,
-          result_sha, actor, status, run_id, grant_id, error, created_at, updated_at`,
+          result_sha, actor, status, run_id, grant_id, error, created_at, updated_at, train_json`,
 		id, spec.RepoID, spec.SourceBranch, spec.SourceSHA, spec.TargetRef,
-		spec.PreviousSHA, spec.ResultSHA, spec.Actor, runID, grantID, now, now)
+		spec.PreviousSHA, spec.ResultSHA, spec.Actor, runID, grantID, now, now, encodedTrain, promotionTrainKey(spec.Train))
 	value, err := scanPromotion(row)
 	if err != nil {
 		return model.Promotion{}, fmt.Errorf("append promotion: %w", err)
+	}
+	if spec.Train != nil {
+		for _, source := range spec.Train.Sources {
+			if source.GrantID != "" {
+				if _, err := queryer.ExecContext(ctx, `INSERT INTO promotion_train_grants(promotion_id,grant_id,included) VALUES(?,?,?)`, id, source.GrantID, !source.Skipped); err != nil {
+					return model.Promotion{}, err
+				}
+			}
+		}
 	}
 	return value, nil
 }
 
 func validatePromotionAdmissionSpec(spec model.PromotionSpec) error {
+	if err := validatePromotionTrain(spec); err != nil {
+		return err
+	}
 	if spec.RepoID <= 0 || strings.TrimSpace(spec.SourceBranch) == "" || !validOID(spec.SourceSHA) ||
 		strings.TrimSpace(spec.TargetRef) == "" || strings.TrimSpace(spec.Actor) == "" {
 		return fmt.Errorf("%w: promotion fields are invalid", ErrInvalid)
@@ -1673,11 +1719,16 @@ func validatePromotionAdmissionSpec(spec model.PromotionSpec) error {
 }
 
 func (s *Store) appendPromotionAdmissionAudit(ctx context.Context, tx *sql.Tx, promotion model.Promotion, now int64) error {
-	details, err := json.Marshal(map[string]string{
+	detailsMap := map[string]any{
 		"source_branch": promotion.SourceBranch,
 		"source_sha":    promotion.SourceSHA,
 		"target_ref":    promotion.TargetRef,
-	})
+	}
+	if promotion.Train != nil {
+		detailsMap["train"] = promotion.Train
+		detailsMap["source_count"] = promotion.SourceCount()
+	}
+	details, err := json.Marshal(detailsMap)
 	if err != nil {
 		return fmt.Errorf("encode promotion admission audit: %w", err)
 	}
@@ -1706,7 +1757,7 @@ func (s *Store) PromotionByRun(ctx context.Context, runID string) (model.Promoti
 	}
 	value, err := scanPromotion(s.reader().QueryRowContext(ctx, `
 SELECT sequence, id, repo_id, source_branch, source_sha, target_ref, previous_sha,
-       result_sha, actor, status, run_id, grant_id, error, created_at, updated_at
+       result_sha, actor, status, run_id, grant_id, error, created_at, updated_at, train_json
 FROM promotions WHERE run_id = ?`, runID))
 	if err != nil {
 		return model.Promotion{}, translateNotFound("promotion run", err)
@@ -1717,7 +1768,7 @@ FROM promotions WHERE run_id = ?`, runID))
 func promotionByRunTx(ctx context.Context, tx *sql.Tx, runID string) (model.Promotion, error) {
 	value, err := scanPromotion(tx.QueryRowContext(ctx, `
 SELECT sequence, id, repo_id, source_branch, source_sha, target_ref, previous_sha,
-       result_sha, actor, status, run_id, grant_id, error, created_at, updated_at
+       result_sha, actor, status, run_id, grant_id, error, created_at, updated_at, train_json
 FROM promotions WHERE run_id = ?`, runID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.Promotion{}, fmt.Errorf("%w: promotion run", ErrNotFound)
@@ -1731,7 +1782,7 @@ FROM promotions WHERE run_id = ?`, runID))
 func (s *Store) Promotion(ctx context.Context, id string) (model.Promotion, error) {
 	value, err := scanPromotion(s.reader().QueryRowContext(ctx, `
 SELECT sequence, id, repo_id, source_branch, source_sha, target_ref, previous_sha,
-       result_sha, actor, status, run_id, grant_id, error, created_at, updated_at
+       result_sha, actor, status, run_id, grant_id, error, created_at, updated_at, train_json
 FROM promotions WHERE id = ?`, id))
 	if err != nil {
 		return model.Promotion{}, translateNotFound("promotion", err)
@@ -1742,7 +1793,7 @@ FROM promotions WHERE id = ?`, id))
 func promotionTx(ctx context.Context, tx *sql.Tx, id string) (model.Promotion, error) {
 	value, err := scanPromotion(tx.QueryRowContext(ctx, `
 SELECT sequence, id, repo_id, source_branch, source_sha, target_ref, previous_sha,
-       result_sha, actor, status, run_id, grant_id, error, created_at, updated_at
+       result_sha, actor, status, run_id, grant_id, error, created_at, updated_at, train_json
 FROM promotions WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.Promotion{}, fmt.Errorf("%w: promotion", ErrNotFound)
@@ -1786,7 +1837,7 @@ UPDATE promotions
 SET status = ?, run_id = ?, error = ?, updated_at = ?
 WHERE id = ? AND status = 'pending'
 RETURNING sequence, id, repo_id, source_branch, source_sha, target_ref, previous_sha,
-          result_sha, actor, status, run_id, grant_id, error, created_at, updated_at`,
+          result_sha, actor, status, run_id, grant_id, error, created_at, updated_at, train_json`,
 		status, runID, failure, now, current.ID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.Promotion{}, fmt.Errorf("%w: promotion is already terminal", ErrInvalidState)
@@ -1800,10 +1851,22 @@ RETURNING sequence, id, repo_id, source_branch, source_sha, target_ref, previous
 func scanPromotion(row rowScanner) (model.Promotion, error) {
 	var value model.Promotion
 	var created, updated int64
+	var trainJSON string
 	if err := scanRowNotFound(row, "Promotion", &value.Sequence, &value.ID, &value.RepoID, &value.SourceBranch,
 		&value.SourceSHA, &value.TargetRef, &value.PreviousSHA, &value.ResultSHA,
-		&value.Actor, &value.Status, &value.RunID, &value.GrantID, &value.Error, &created, &updated); err != nil {
+		&value.Actor, &value.Status, &value.RunID, &value.GrantID, &value.Error, &created, &updated, &trainJSON); err != nil {
 		return model.Promotion{}, err
+	}
+	if trainJSON != "" {
+		if err := json.Unmarshal([]byte(trainJSON), &value.Train); err != nil {
+			return model.Promotion{}, fmt.Errorf("decode promotion train: %w", err)
+		}
+	}
+	if reason := trainSkipReason(value.Train); reason != "" && !strings.Contains(value.Error, reason) {
+		if value.Error != "" {
+			value.Error += "; "
+		}
+		value.Error += reason
 	}
 	value.CreatedAt, value.UpdatedAt = fromUnixNano(created), fromUnixNano(updated)
 	return value, nil
