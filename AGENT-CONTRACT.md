@@ -1028,6 +1028,21 @@ trust assumptions and complete invalidation rules.
   `promotion.grantMaxLifetime`, default `24h`, hard ceiling `168h` / 7 days).
   The installer pins this value explicitly so `helm upgrade --reuse-values`
   carries the default.
+- Park refs default to `refs/heads/park/`; accepted park pushes mirror upstream
+  without a branch run. Fresh upstream `.oberth/promotion.yaml` configures the
+  namespace, non-admin opt-in and `require_branch_ci` targets. Admins or exact
+  promotion grants may also authorize parked sources. Parked promotions always
+  run full merged-tree CI, including fast-forwards and unborn targets, and
+  retain immutable `BranchCISkipped` plus admission audit evidence (schema 54).
+  The existing reason line says `promoted without branch CI`; no status changes.
+  Target branch-CI requirements survive admin/grant authority and are rechecked
+  before planning and publication. See [park promotion](docs/park-promotion.md).
+  Push policy reads use two-second burst reuse and a two-second deadline; any
+  policy error falls back to branch CI. Promotion policy reads stay fresh and
+  fail closed. Single-source and train admission reject red branch evidence
+  and share per-source park eligibility. Parked sources require `repo`.
+  Receive-event ledger outcome `parked` records a mirrored park push with no
+  branch run; it is separate from the unchanged run status vocabulary.
 - MCP `run_get` and `run_logs` accept the same full IDs and unique prefixes
   as the dashboard run views. ID prefix resolution is read-only; scheduler
   and mutation lookups still require exact durable IDs. `run_retry` and
@@ -2691,6 +2706,7 @@ alone is never evidence that missing migrations ran.
 | v51 | Issue workspace coordination | Add constrained todo/active/waiting/review work status and include real status changes in metadata revisions; staleness remains computed on reads | Database restore |
 | v52 | Run list order | Rebuild the v40 covering index idempotently; widen `runs_latest_ref_idx` to cover status, start, finish, queue time and ID, so the grouped latest-per-ref list ranks every head from one covering scan | Database restore |
 | v53 | Promotion trains | Persist ordered sources, conflict decisions and merged tree SHA, with retry identity and per-source grant reservations; legacy promotions remain unchanged | Database restore |
+| v54 | Park promotion evidence | Add immutable `promotions.branch_ci_skipped`, defaulting to false for historical rows; parked sources must use a tested promotion run | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding

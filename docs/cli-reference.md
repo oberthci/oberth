@@ -472,6 +472,15 @@ Bare names and org/name work only when unique; ambiguity errors list candidates.
 Run and promotion IDs accept unique hexadecimal prefixes of at least 8 characters.
 Issue IDs are full decimal integers.
 
+Promotion:
+  oberth mcp call promote '{"repo":"org/repo","sha":"<full-sha>","branch":"main"}'
+  Use sources:[{"sha":"<full-sha>"},...] instead of sha for a merge train.
+  Authorized park refs (default refs/heads/park/) may skip branch CI; supply repo.
+  Parked sources need an admin, an exact grant, or upstream promotion policy opt-in.
+  Single-source and train promotions always test parked sources in merged-tree CI.
+  Red branch evidence and target require_branch_ci policy still refuse promotion.
+  Use promote_status with the returned ID to follow the result.
+
 Environment:
   OBERTH_MCP_URL        MCP server URL (overrides OBERTH_BASE_URL)
   OBERTH_BASE_URL       Server URL; /mcp is appended when no MCP URL is set

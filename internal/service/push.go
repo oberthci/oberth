@@ -70,9 +70,6 @@ func (ingestor *PushIngestor) Branch(ctx context.Context, push BranchPush) (Push
 		}
 		return PushResult{Repository: repository, Deleted: true, Duplicate: duplicate, Reason: "branch deletion requires no CI run"}, nil
 	}
-	if ingestor.branches == nil {
-		return PushResult{}, refuse(ErrUnavailable, "CI queue")
-	}
 	if !validOID(push.NewOID) {
 		return PushResult{}, fmt.Errorf("%w: branch object ID is invalid", ErrInvalidInput)
 	}
@@ -85,6 +82,25 @@ func (ingestor *PushIngestor) Branch(ctx context.Context, push BranchPush) (Push
 	}
 	if !sameOID(peeled.ObjectSHA, push.NewOID) || !sameOID(peeled.CommitSHA, push.NewOID) {
 		return PushResult{}, errors.New("service: accepted branch commit no longer resolves exactly")
+	}
+	policy, policyErr := readPushPromotionPolicy(ctx, ingestor.git, push.Repository)
+	if policyErr == nil && policy.parks(push.Branch) && push.Branch != repository.DefaultBranch && !policy.requiresBranchCI(push.Branch) {
+		mirror, ok := ingestor.git.(interface {
+			SyncBranch(context.Context, string, string, string) error
+		})
+		if !ok {
+			return PushResult{}, refuse(ErrUnavailable, "park branch mirror")
+		}
+		if err := auditedGitMutation(ctx, ingestor.auditor, push.Actor, "branch.park", "repository", push.Repository,
+			map[string]any{"branch": push.Branch, "sha": peeled.CommitSHA, "event_id": push.EventID},
+			func() error { return mirror.SyncBranch(ctx, push.Repository, push.Branch, peeled.CommitSHA) }); err != nil {
+			return PushResult{}, fmt.Errorf("mirror park branch: %w", err)
+		}
+		duplicate, err := ingestor.receives.RecordReceiveEvent(ctx, receiveSpec(push.EventID, push.Actor, repository.ID, model.RefBranch, push.Branch, push.OldOID, peeled.CommitSHA, peeled.CommitSHA, "parked"))
+		return PushResult{Repository: repository, Duplicate: duplicate, Reason: "park ref mirrored; branch CI skipped"}, err
+	}
+	if ingestor.branches == nil {
+		return PushResult{}, refuse(ErrUnavailable, "CI queue")
 	}
 	enqueued, err := ingestor.branches.EnqueueCI(ctx, CIRequest{PriorityRequest: push.PriorityRequest,
 		EventID:    push.EventID,

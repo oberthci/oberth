@@ -244,11 +244,11 @@ func (h *Handler) versions(ctx context.Context, input, modulePath string) ([]str
 func (h *Handler) buildZip(ctx context.Context, input, modulePath, version, ref string) (*moduleZip, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	reader, writer := io.Pipe()
-	done := make(chan error, 1)
+	done := make(chan struct{})
 	go func() {
 		err := h.cache.ArchiveTar(ctx, input, ref, writer)
 		_ = writer.CloseWithError(err)
-		done <- err
+		close(done)
 	}()
 	defer func() { cancel(); _ = reader.CloseWithError(context.Canceled); <-done }()
 	limit := h.archiveLimit

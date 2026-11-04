@@ -190,7 +190,11 @@ Manual CI investigation issues can be installation-wide or scoped to an upstream
 They are not attached to an individual repository or synchronized to the upstream
 forge. See [issue scope and retained compatibility](ci-issue-scope.md).
 
-Single-source promotion first green-gates the candidate. It reuses the already-tested commit
+Single-source and train promotion share source eligibility: exact green branch
+evidence or authorized [park provenance](park-promotion.md). A red branch run
+cannot be discarded by parking the same SHA. Parked sources always receive full
+merged-tree CI; the promotion and audit record retain skipped branch-CI evidence.
+Single-source promotion reuses the already-tested green branch commit
 only when the fetched target fast-forwards to that exact candidate. A divergent
 target is merged locally and receives a new CI run. Both Git backends share a
 conservative tree merge: overlapping path changes require identical resulting

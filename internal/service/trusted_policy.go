@@ -121,6 +121,25 @@ func (scheduler *Scheduler) trustedReceipt(ctx context.Context, repository model
 }
 
 func (scheduler *Scheduler) requirePublicationTestPolicy(ctx context.Context, repository model.Repository, publication model.Publication) error {
+	if publication.PromotionID != "" {
+		promotion, err := scheduler.database().Promotion(ctx, publication.PromotionID)
+		if err != nil {
+			return err
+		}
+		if promotion.BranchCISkipped {
+			upstream, err := scheduler.database().Upstream(ctx, repository.UpstreamID)
+			if err != nil {
+				return err
+			}
+			policy, err := readPromotionPolicy(ctx, scheduler.git, upstream.QualifiedRepo(repository.Name))
+			if err != nil {
+				return err
+			}
+			if policy.requiresBranchCI(publication.Ref) {
+				return errors.New("target policy requires branch CI")
+			}
+		}
+	}
 	candidateSHA := publication.ResultSHA
 	var run model.Run
 	if publication.RunID != "" {

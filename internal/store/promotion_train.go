@@ -47,7 +47,10 @@ func validatePromotionTrain(spec model.PromotionSpec) error {
 	seen := map[string]bool{}
 	for _, source := range train.Sources {
 		sha := strings.ToLower(source.SHA)
-		if !validOID(sha) || source.Ref == "" || seen[sha] || (source.GrantID == "") != (spec.GrantID == "") {
+		// Park opt-in can coexist with a grant for another train member.
+		// Every nonempty grant is still checked and reserved independently.
+		mixedAuthority := (source.GrantID == "") != (spec.GrantID == "")
+		if !validOID(sha) || source.Ref == "" || seen[sha] || (mixedAuthority && !spec.BranchCISkipped) {
 			return fmt.Errorf("%w: train sources require unique full SHAs, refs and consistent authority", ErrInvalid)
 		}
 		seen[sha] = true

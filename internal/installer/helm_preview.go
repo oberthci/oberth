@@ -318,7 +318,17 @@ func plannedRekorResult(ctx context.Context, cfg Config, deps Deps, ns string) (
 		// Public-only sentinel for a key not provisioned yet. This result is used
 		// exclusively with Helm dry-run; real installation uses the Transit key.
 		curve := elliptic.P256()
-		public := &ecdsa.PublicKey{Curve: curve, X: curve.Params().Gx, Y: curve.Params().Gy}
+		// Parse the public generator point without constructing deprecated raw
+		// ECDSA coordinates or generating any private key material.
+		const coordinateBytes = 32
+		point := make([]byte, 1+2*coordinateBytes)
+		point[0] = 4 // SEC 1 uncompressed point.
+		curve.Params().Gx.FillBytes(point[1 : 1+coordinateBytes])
+		curve.Params().Gy.FillBytes(point[1+coordinateBytes:])
+		public, err := ecdsa.ParseUncompressedPublicKey(curve, point)
+		if err != nil {
+			return result, err
+		}
 		der, err := x509.MarshalPKIXPublicKey(public)
 		if err != nil {
 			return result, err

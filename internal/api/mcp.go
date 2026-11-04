@@ -59,20 +59,21 @@ type PromoteRetryResponse struct {
 // PromotionListResponse recovers durable admission IDs without exposing actor,
 // failure text or internal storage fields. Listing never starts a promotion.
 type PromotionListItem struct {
-	SourceCount  int    `json:"source_count"`
-	Repo         string `json:"repo"`
-	Ref          string `json:"ref"`
-	ID           string `json:"id"`
-	Sequence     int64  `json:"sequence"`
-	RepoID       int64  `json:"repo_id"`
-	SourceBranch string `json:"source_branch"`
-	SourceSHA    string `json:"source_sha"`
-	TargetRef    string `json:"target_ref"`
-	ResultSHA    string `json:"result_sha,omitempty"`
-	RunID        string `json:"run_id,omitempty"`
-	Status       string `json:"status"`
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
+	BranchCISkipped bool   `json:"branch_ci_skipped"`
+	SourceCount     int    `json:"source_count"`
+	Repo            string `json:"repo"`
+	Ref             string `json:"ref"`
+	ID              string `json:"id"`
+	Sequence        int64  `json:"sequence"`
+	RepoID          int64  `json:"repo_id"`
+	SourceBranch    string `json:"source_branch"`
+	SourceSHA       string `json:"source_sha"`
+	TargetRef       string `json:"target_ref"`
+	ResultSHA       string `json:"result_sha,omitempty"`
+	RunID           string `json:"run_id,omitempty"`
+	Status          string `json:"status"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
 }
 type PromotionListResponse struct {
 	Promotions []PromotionListItem `json:"promotions"`
@@ -571,7 +572,7 @@ func toolDefinitions() []map[string]any {
 		tool("run_logs", "Return one exact burn/step log by full run ID or unique hexadecimal prefix (at least 8 characters), optionally filtered server-side. Active steps without retained output return an actionable pending error. Log discovery/filtering scan at most 4 MiB each per call and stop head pages early on limit. total_scanned_bytes includes both phases; scan_limit_bytes is the aggregate cap (4 MiB terminal, 8 MiB active). Pattern scans allow one concurrent call per bearer token and two globally; waiting shares the 10-second read budget. When has_more is true, continue with next_byte_offset as byte_offset, retaining tail/pattern/context and resetting offset to zero. Counts are lower bounds unless scan_complete is true; bytes is exact only when bytes_exact is true. withheld_bytes/withheld_lines report omitted data. Lines above 64 KiB are omitted and counted.", object(logFilterProperties(map[string]any{"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"), "burn": stringProperty("Burn name (defaults to the failed burn)"), "step": stringProperty("Step name (defaults to the failed step when burn is omitted, or the burn's only step)")}), "id")),
 		tool("wait", "Long-poll until a SHA or exact run reaches a terminal state; timeout returns still-running cleanly. Timeout defaults to 600 seconds and cannot exceed 600; larger values are rejected. The CLI allows at least 60 seconds, or the tool timeout plus 30 seconds, unless --timeout overrides its client deadline. Pass id alone to wait for one run by full ID or unique prefix of at least 8 hex characters. When trigger is set, waits for a run with that trigger (e.g. 'release' for a tag-push run).", object(map[string]any{"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters); cannot be combined with repo, sha, or trigger"), "repo": stringProperty("Repository name when the SHA is ambiguous"), "sha": stringProperty("Full or short SHA (required unless id is provided)"), "trigger": stringProperty("Filter by trigger type (e.g. 'release' for tag runs, 'branch' for branch runs; 'ci' is accepted as an alias for 'branch')"), "timeout": timeoutProperty()})),
 		tool("sync", "Park the exact SHA's WIP branch upstream without a green gate; this is not completion or promotion evidence. Rejects promotion, release, plan, and apply runs. When the SHA has branch-trigger runs on multiple distinct branches, the explicit branch argument is required.", object(map[string]any{"priority": map[string]any{"type": "string", "enum": []string{"normal", "high", "highest"}}, "priority_reason": stringProperty("Reason for submission priority"), "repo": stringProperty("Repository name when the SHA is ambiguous"), "sha": stringProperty("Full SHA"), "branch": stringProperty("Explicit branch name; required when the SHA has runs on multiple branches, optional otherwise")}, "sha")),
-		tool("promote", "Green-gate and publish without force. Provide sha for one source, or 1..32 ordered sources for a merge train: all must be exactly tested green branch commits. Trains wait in the existing target queue, merge onto its current head and run CI once before publishing. Conflicts name source and paths; skip_conflicting drops them and records the reason. Example: {\"repo\":\"codeberg/acme/widgets\",\"branch\":\"main\",\"sources\":[{\"sha\":\"1111111111111111111111111111111111111111\"},{\"sha\":\"2222222222222222222222222222222222222222\"},{\"sha\":\"3333333333333333333333333333333333333333\"}]}", promotionInputSchema()),
+		tool("promote", "Green-gate and publish without force. Provide sha for one source, or 1..32 ordered sources for a merge train: sources must be exactly tested green branch commits or authorized park refs. Parked sources always run full merged-tree CI, with skipped branch CI recorded. Trains wait in the existing target queue, merge onto its current head and run CI once before publishing. Conflicts name source and paths; skip_conflicting drops them and records the reason. Example: {\"repo\":\"codeberg/acme/widgets\",\"branch\":\"main\",\"sources\":[{\"sha\":\"1111111111111111111111111111111111111111\"},{\"sha\":\"2222222222222222222222222222222222222222\"},{\"sha\":\"3333333333333333333333333333333333333333\"}]}", promotionInputSchema()),
 		tool("promotion_list", "Recover durable promotion IDs by exact repository/source SHA/status. Read-only, newest admission first; pass next_before (or next_cursor for a scoped uplink) as before for older records. Status comes from the committed promotion row, as in promote_status; remote ref equality alone never marks a pending record passed.", object(map[string]any{
 			"repo":       stringProperty("Filter by exact repository name"),
 			"source_sha": stringProperty("Filter by full source commit SHA; no ref or prefix resolution"),
