@@ -1584,7 +1584,7 @@ spec:
   # Uses the official trivy image pinned by digest -- no install step needed.
   # Trivy holds its vulnerability DB in memory; M is too tight.
   - name: security
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 90 # remeasure: censored 60s pod deadline x1.5; includes startup and wait
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -2038,7 +2038,7 @@ spec:
 
   # Credentialless proof of the signed release's numeric-only prefetch refusal.
   - name: release-diagnostic
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 90 # remeasure: censored 60s pod deadline x1.5; includes startup and wait
     automountServiceAccountToken: false
     metadata:
       annotations:
