@@ -159,6 +159,7 @@ spec:
 
   # Refuse retired branding in every tracked file, including fixtures and docs.
   - name: generic-names
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -169,12 +170,12 @@ spec:
       workingDir: /work/src
       command: ["/bin/sh", "-ec"]
       args: ["/usr/bin/python3 -I -B hack/test-new-migration.py; /usr/bin/python3 -I -B hack/test-generic-names.py; /usr/bin/python3 -I -B hack/check-generic-names.py; /usr/bin/python3 -I -B hack/test-private-addresses.py; exec /usr/bin/python3 -I -B hack/check-private-addresses.py"]
-      resources:
+      resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
-          cpu: '1'
+          cpu: 1470m
           memory: 256Mi
         limits:
-          cpu: '1'
+          cpu: 1500m
           memory: 256Mi
 
   # ---- setup stage (13 sequential steps) ----
@@ -214,6 +215,7 @@ spec:
 
   # [tools-dir] /bin/mkdir -p private scratch
   - name: tools-dir
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -262,14 +264,15 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 1000m
-          memory: 4Gi
-        limits:
           cpu: '2'
-          memory: 4Gi
+          memory: 128Mi
+        limits:
+          cpu: 2000m
+          memory: 128Mi
 
   # [link-go] symlink Go toolchain from image into shared tools directory
   - name: link-go
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -318,14 +321,15 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 1000m
-          memory: 4Gi
-        limits:
           cpu: '2'
-          memory: 4Gi
+          memory: 192Mi
+        limits:
+          cpu: 2000m
+          memory: 192Mi
 
   # [install-golangci-lint] go install golangci-lint v2.12.2
   - name: install-golangci-lint
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -376,11 +380,11 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 100m
-          memory: 4Gi
+          cpu: 1288m
+          memory: 2368Mi
         limits:
           cpu: 2000m
-          memory: 4Gi
+          memory: 2368Mi
 
   # [install-helm] go install helm v4.2.3
   - name: install-deadcode
@@ -442,6 +446,7 @@ spec:
 
   # [install-helm] go install helm v4.2.3
   - name: install-helm
+    activeDeadlineSeconds: 99
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -492,11 +497,13 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 118m
-          memory: 4Gi
+          cpu: 2365m
+          memory: 2688Mi
+          ephemeral-storage: 64Mi
         limits:
-          cpu: 2000m
-          memory: 4Gi
+          cpu: 2365m
+          memory: 2688Mi
+          ephemeral-storage: 64Mi
 
   # Pinned helm-unittest binary; fetch, verification and extraction have separate statuses.
   - name: fetch-helm-unittest
@@ -592,6 +599,7 @@ spec:
 
   # [fetch-shellcheck] download shellcheck v0.10.0 static binary from upstream release
   - name: fetch-shellcheck
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -659,14 +667,15 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 1000m
-          memory: 4Gi
+          cpu: 864m
+          memory: 192Mi
         limits:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 2000m
+          memory: 192Mi
 
   # [verify-shellcheck] sha256sum check against pinned digest
   - name: verify-shellcheck
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -715,11 +724,11 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 100m
-          memory: 4Gi
+          cpu: 124m
+          memory: 192Mi
         limits:
           cpu: 2000m
-          memory: 4Gi
+          memory: 192Mi
 
   # [decompress-shellcheck] the golang:1.26.10-trixie image has no xz/unxz binary,
   # so /bin/tar cannot shell out to decompress a .tar.xz. python3's stdlib lzma
@@ -727,6 +736,7 @@ spec:
   # archive into a plain .tar that the next step's tar can extract without an
   # external helper.
   - name: decompress-shellcheck
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -777,14 +787,15 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 1000m
-          memory: 4Gi
+          cpu: 192m
+          memory: 192Mi
         limits:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 2000m
+          memory: 192Mi
 
   # [install-shellcheck] extract shellcheck binary from decompressed tarball
   - name: install-shellcheck
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -840,11 +851,11 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 1000m
-          memory: 4Gi
+          cpu: 100m
+          memory: 192Mi
         limits:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 2000m
+          memory: 192Mi
 
   # ---- shellcheck burn (single step) ----
   # ShellCheck v0.10.0 gates all shell scripts in .oberth/ and hack/
@@ -857,6 +868,7 @@ spec:
   # catch. Style-only findings (cosmetic, e.g. backtick notation) are
   # excluded.
   - name: shellcheck
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -890,11 +902,11 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 1000m
-          memory: 320296Ki
-        limits:
           cpu: '2'
-          memory: 576Mi
+          memory: 512Mi
+        limits:
+          cpu: 2000m
+          memory: 512Mi
 
   # ---- lint burn (2 sequential steps) ----
   # Maps to: Test("lint", repositorySteps(
@@ -912,6 +924,7 @@ spec:
 
   # [go-vet-./...]
   - name: vet
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -959,19 +972,20 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
-      resources:
+      resources: # remeasure: fresh uncensored measurements required
         requests:
-          cpu: 100m
-          memory: 995420Ki
+          cpu: 360m
+          memory: 3968Mi
         limits:
           cpu: 3000m
-          memory: 1472Mi
+          memory: 3968Mi
 
   # [golangci-lint-./...]
   # Keep one analysis process under load. Use 6GiB of the actual 8Gi limit
   # for the Go runtime, leaving 2GiB headroom without the old 2GiB soft cap.
   # Internal --timeout is cooperative; the wrapper enforces a process deadline.
   - name: golangci-lint-run
+    activeDeadlineSeconds: 436
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -1021,13 +1035,15 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
-      resources:
+      resources: # remeasure: unmet need limits.cpu 5830m, requests.cpu 4845m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
-          cpu: 1000m
-          memory: 2867000Ki
+          cpu: 4000m
+          memory: 5696Mi
+          ephemeral-storage: 195Mi
         limits:
           cpu: 4000m
-          memory: 8Gi
+          memory: 5696Mi
+          ephemeral-storage: 234Mi
   # ---- parallel race-test burns ----
   # Each package runs once: dedicated store/service/gitcache groups and the
   # remainder discovered by go list ./.... Git-cache already has a required
@@ -1172,19 +1188,21 @@ spec:
         subPath: trivy-cache
       # The 4Gi envelope includes up to 768Mi of store fixtures on tmpfs;
       # leave room above the 2GiB Go heap target for the race detector.
-      resources:
+      resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
-          cpu: 971m
-          memory: 4Gi
+          cpu: 1595m
+          memory: 2432Mi
+          ephemeral-storage: 650Mi
         limits:
-          cpu: 2000m
-          memory: 4Gi
+          cpu: 2950m
+          memory: 2432Mi
+          ephemeral-storage: 780Mi
 
 
   - name: test-service
     automountServiceAccountToken: false
     # Maximum observed race duration times 1.5, rounded up to minutes.
-    activeDeadlineSeconds: 2940
+    activeDeadlineSeconds: 3593
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -1238,13 +1256,15 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
-      resources:
+      resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
-          cpu: 958m
-          memory: 4Gi
+          cpu: 1533m
+          memory: 2560Mi
+          ephemeral-storage: 488Mi
         limits:
-          cpu: 2000m
-          memory: 4Gi
+          cpu: 2930m
+          memory: 2560Mi
+          ephemeral-storage: 585Mi
 
 
   - name: test-rest
@@ -1306,16 +1326,17 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
-      resources:
+      resources: # remeasure: unmet need limits.cpu 4340m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
-          cpu: 965m
-          memory: 4Gi
+          cpu: 2249m
+          memory: 6208Mi
         limits:
-          cpu: 3000m
+          cpu: 4000m
           memory: 6208Mi
 
   # The native Git cache suite is a binding source gate.
   - name: test-gitcache
+    activeDeadlineSeconds: 476
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -1370,15 +1391,18 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
-      resources:
+      resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
-          cpu: 416m
-          memory: 326160Ki
+          cpu: 796m
+          memory: 896Mi
+          ephemeral-storage: 222Mi
         limits:
-          cpu: 2000m
-          memory: 576Mi
+          cpu: 1440m
+          memory: 896Mi
+          ephemeral-storage: 267Mi
 
   - name: build-static-git-runtime
+    activeDeadlineSeconds: 452
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-alpine3.23@sha256:a07f231c19b03e6106cf442f02a5bcf262147e744d15b7b5e4b6d81d420c70a0"
@@ -1433,15 +1457,16 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
-      resources:
+      resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
-          cpu: 1000m
-          memory: 4Gi
+          cpu: 2348m
+          memory: 7616Mi
         limits:
-          cpu: 2000m
-          memory: 6208Mi
+          cpu: 2990m
+          memory: 7616Mi
 
   - name: test-static-git-runtime
+    activeDeadlineSeconds: 431
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -1479,14 +1504,17 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 377m
-          memory: 173340Ki
+          cpu: 728m
+          memory: 320Mi
+          ephemeral-storage: 196Mi
         limits:
-          cpu: 2000m
-          memory: 448Mi
+          cpu: 1930m
+          memory: 320Mi
+          ephemeral-storage: 235Mi
 
   # Every commit/file in the offline, real multi-pack source history.
   - name: test-archive-history
+    activeDeadlineSeconds: 104
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -1540,11 +1568,13 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 1000m
-          memory: 4Gi
+          cpu: 1989m
+          memory: 512Mi
+          ephemeral-storage: 204Mi
         limits:
-          cpu: 2000m
-          memory: 4Gi
+          cpu: 2020m
+          memory: 512Mi
+          ephemeral-storage: 245Mi
 
   # ---- security burn (single step) ----
   # Maps to: Test("security", repositorySteps(
@@ -1552,6 +1582,7 @@ spec:
   # Uses the official trivy image pinned by digest -- no install step needed.
   # Trivy holds its vulnerability DB in memory; M is too tight.
   - name: security
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -1586,8 +1617,8 @@ spec:
         value: "/tmp/oberth-trivy"
       resources:
         requests:
-          cpu: 100m
-          memory: 2099624Ki
+          cpu: 1052m
+          memory: 3136Mi
         limits:
           cpu: 4000m
           memory: 3136Mi
@@ -1597,6 +1628,7 @@ spec:
   #   oberth.Cmd("helm-contract", "./hack/test-chart.sh"))
   #   ...).After("lint")
   - name: chart
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -1619,11 +1651,11 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 145m
-          memory: 4Gi
+          cpu: 1383m
+          memory: 192Mi
         limits:
           cpu: 2000m
-          memory: 4Gi
+          memory: 192Mi
 
   # Focused regression gates measured locally with one Go process (BusyBox time -v).
   # Peak RSS / wall time: unittest 38 MiB / 0.21s, schema 55 MiB / 2.86s,
@@ -1743,6 +1775,7 @@ spec:
   # -buildvcs=false matches release.sh and the Dockerfile: verification
   # builds must be hermetic against repository git state.
   - name: build-amd64
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -1796,8 +1829,8 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 100m
-          memory: 1472028Ki
+          cpu: 513m
+          memory: 2176Mi
         limits:
           cpu: 2000m
           memory: 2176Mi
@@ -1808,6 +1841,7 @@ spec:
   #     ctx.Go.Build("./cmd/oberth").WithArgs("-buildvcs=false").Env("GOARCH","arm64")))
   #   ...).After("test","chart")
   - name: build-arm64
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -1861,8 +1895,8 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 172m
-          memory: 1478336Ki
+          cpu: 2660m
+          memory: 2176Mi
         limits:
           cpu: 3000m
           memory: 2176Mi
@@ -1873,6 +1907,7 @@ spec:
   # target set so a platform-specific type mismatch (e.g. syscall.Statfs_t.Bsize
   # int64 vs uint32) cannot pass CI and burn only at release time (#699).
   - name: build-darwin-amd64
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -1928,15 +1963,16 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 100m
-          memory: 1632248Ki
+          cpu: 2614m
+          memory: 2432Mi
         limits:
-          cpu: 2000m
+          cpu: 2770m
           memory: 2432Mi
 
   # ---- build-darwin-arm64 burn (single step) ----
   # Branch verification of the darwin/arm64 release target (#699).
   - name: build-darwin-arm64
+    activeDeadlineSeconds: 62
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -1992,14 +2028,15 @@ spec:
         subPath: trivy-cache
       resources:
         requests:
-          cpu: 100m
-          memory: 1564748Ki
+          cpu: 2614m
+          memory: 2432Mi
         limits:
-          cpu: 2000m
-          memory: 2304Mi
+          cpu: 2680m
+          memory: 2432Mi
 
   # Credentialless proof of the signed release's numeric-only prefetch refusal.
   - name: release-diagnostic
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -2019,10 +2056,10 @@ spec:
         subPath: diagnostic
       resources:
         requests:
-          cpu: '1'
+          cpu: 100m
           memory: 256Mi
         limits:
-          cpu: '1'
+          cpu: 1000m
           memory: 256Mi
 
   # ---- verify-publisher-tools burn (#829) ----
@@ -2042,6 +2079,7 @@ spec:
   # Build helm, oberth-release-support, oberth-release-image and fetch cosign,
   # matching release.yaml's exact env -i, flags, and Go toolchain.
   - name: vpt-build-and-fetch
+    activeDeadlineSeconds: 600
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -2126,14 +2164,17 @@ spec:
         subPath: vpt-private
       resources:
         requests:
-          cpu: 883m
-          memory: 2764340Ki
+          cpu: 1390m
+          memory: 4096Mi
+          ephemeral-storage: 1121Mi
         limits:
-          cpu: 2000m
-          memory: 4Gi
+          cpu: 1520m
+          memory: 4096Mi
+          ephemeral-storage: 1345Mi
 
   # Copy trivy from its pinned image (release.yaml copy-trivy).
   - name: vpt-copy-trivy
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -2150,16 +2191,17 @@ spec:
       - name: work
         mountPath: /tmp/vpt-tools
         subPath: vpt-tools
-      resources:
+      resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
-          cpu: '1'
-          memory: 256Mi
+          cpu: 620m
+          memory: 512Mi
         limits:
-          cpu: '1'
+          cpu: 1000m
           memory: 512Mi
 
   # Verify all five publisher tools against the reviewed pin manifest.
   - name: vpt-verify
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -2178,13 +2220,13 @@ spec:
         mountPath: /tmp/vpt-tools
         subPath: vpt-tools
         readOnly: true
-      resources:
+      resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
-          cpu: '1'
-          memory: 256Mi
+          cpu: 485m
+          memory: 640Mi
         limits:
-          cpu: '1'
-          memory: 512Mi
+          cpu: 1000m
+          memory: 640Mi
 
   # ---- test-openbao burn (#803) ----
   # Real OpenBao integration test: starts a dev server, applies rendered
@@ -2192,7 +2234,7 @@ spec:
   # Both setup helpers also run over verified TLS with real Transit keys and denied reads.
   # Cold private caches fetch verified Go modules as well as the pinned OpenBao download.
   - name: test-openbao
-    activeDeadlineSeconds: 780
+    activeDeadlineSeconds: 791
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -2264,13 +2306,13 @@ spec:
         value: "0"
       # Local race compilation peaked at 1.28 GiB RSS; reserve headroom for
       # the compiler/linker and parent processes. Confirm CI cgroup peaks.
-      resources:
+      resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
-          cpu: 1000m
-          memory: 2Gi
+          cpu: 1951m
+          memory: 3136Mi
         limits:
-          cpu: "2"
-          memory: 2Gi
+          cpu: 2950m
+          memory: 3136Mi
 
   - name: resource-guard
     automountServiceAccountToken: false

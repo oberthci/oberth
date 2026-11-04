@@ -196,6 +196,7 @@ spec:
     - - name: copy-test-tools
         template: copy-test-tools
   - name: tools-dir
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -239,12 +240,13 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 1000m
-          memory: 95368Ki
+          cpu: 1250m
+          memory: 64Mi
         limits:
-          cpu: '2'
-          memory: 384Mi
+          cpu: 2000m
+          memory: 64Mi
   - name: verify-publisher-tools
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -275,14 +277,15 @@ spec:
       - name: bootstrap-tools
         mountPath: /tmp/oberth-tools
         readOnly: true
-      resources:
+      resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
           cpu: 625m
-          memory: 256Mi
+          memory: 704Mi
         limits:
-          cpu: '1'
-          memory: 512Mi
+          cpu: 1000m
+          memory: 704Mi
   - name: copy-trivy
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -328,11 +331,12 @@ spec:
       resources:
         requests:
           cpu: 625m
-          memory: 258340Ki
+          memory: 576Mi
         limits:
-          cpu: '1'
-          memory: 512Mi
+          cpu: 1000m
+          memory: 576Mi
   - name: link-go
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -379,12 +383,13 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 1000m
-          memory: 36224Ki
+          cpu: 1250m
+          memory: 192Mi
         limits:
-          cpu: '2'
-          memory: 320Mi
+          cpu: 2000m
+          memory: 192Mi
   - name: install-golangci-lint
+    activeDeadlineSeconds: 168
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -427,14 +432,15 @@ spec:
       - name: bootstrap-tools
         mountPath: /tmp/oberth-tools
         readOnly: false
-      resources:
+      resources: # remeasure: unmet need limits.cpu 4500m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
-          cpu: 907m
-          memory: 2408764Ki
+          cpu: 3496m
+          memory: 3584Mi
         limits:
-          cpu: 3000m
+          cpu: 4000m
           memory: 3584Mi
   - name: install-helm
+    activeDeadlineSeconds: 485
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -488,12 +494,13 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 561m
-          memory: 2741492Ki
+          cpu: 1360m
+          memory: 4032Mi
         limits:
-          cpu: 2000m
+          cpu: 1520m
           memory: 4032Mi
   - name: fetch-cosign
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -555,12 +562,13 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 100m
-          memory: 181696Ki
+          cpu: 173m
+          memory: 320Mi
         limits:
           cpu: 2000m
-          memory: 448Mi
+          memory: 320Mi
   - name: verify-cosign
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -605,12 +613,13 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 1000m
-          memory: 37828Ki
+          cpu: 586m
+          memory: 256Mi
         limits:
-          cpu: '2'
-          memory: 320Mi
+          cpu: 2000m
+          memory: 256Mi
   - name: install-cosign
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -655,12 +664,13 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 1000m
-          memory: 36740Ki
+          cpu: 100m
+          memory: 128Mi
         limits:
-          cpu: '2'
-          memory: 320Mi
+          cpu: 2000m
+          memory: 128Mi
   - name: build-release-support
+    activeDeadlineSeconds: 126
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -716,12 +726,13 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 467m
-          memory: 620572Ki
+          cpu: 1338m
+          memory: 960Mi
         limits:
-          cpu: 2000m
+          cpu: 1360m
           memory: 960Mi
   - name: build-release-image
+    activeDeadlineSeconds: 132
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -777,12 +788,13 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 221m
-          memory: 619604Ki
+          cpu: 1333m
+          memory: 960Mi
         limits:
-          cpu: 2000m
+          cpu: 1350m
           memory: 960Mi
   - name: validate-tag
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -826,12 +838,13 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 1000m
-          memory: 75584Ki
+          cpu: 1250m
+          memory: 128Mi
         limits:
-          cpu: '2'
-          memory: 384Mi
+          cpu: 2000m
+          memory: 128Mi
   - name: fetch-node
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -893,12 +906,13 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 625m
-          memory: 97436Ki
+          cpu: 686m
+          memory: 192Mi
         limits:
-          cpu: '1'
-          memory: 384Mi
+          cpu: 1000m
+          memory: 192Mi
   - name: verify-node
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -943,11 +957,11 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 625m
-          memory: 37356Ki
+          cpu: 3113m
+          memory: 64Mi
         limits:
-          cpu: '1'
-          memory: 320Mi
+          cpu: 3113m
+          memory: 64Mi
   - name: release-lint
     steps:
     - - name: vet
@@ -957,6 +971,7 @@ spec:
     - - name: deadcode
         template: deadcode
   - name: vet
+    activeDeadlineSeconds: 389
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -1000,14 +1015,15 @@ spec:
         mountPath: /tmp/oberth-tools
         subPath: vet
         readOnly: true
-      resources:
+      resources: # remeasure: unmet need limits.cpu 4510m, requests.cpu 4158m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
-          cpu: 1000m
-          memory: 4Gi
+          cpu: 4000m
+          memory: 6016Mi
         limits:
-          cpu: 3000m
-          memory: 5952Mi
+          cpu: 4000m
+          memory: 6016Mi
   - name: golangci-lint-run
+    activeDeadlineSeconds: 563
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -1056,13 +1072,13 @@ spec:
         readOnly: true
       # Historical release-lint peak: 5,838,360,576 sampled bytes.
       # Keep 8Gi for headroom; the analysis process already uses a 2GiB Go memory target.
-      resources:
+      resources: # remeasure: unmet need limits.cpu 6010m, memory 8512Mi, requests.cpu 4062m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
-          cpu: 1000m
-          memory: 8Gi
+          cpu: 4000m
+          memory: 8192Mi
         limits:
           cpu: 4000m
-          memory: 8Gi
+          memory: 8192Mi
   - name: deadcode
     automountServiceAccountToken: false
     metadata:
@@ -1115,6 +1131,7 @@ spec:
           cpu: '4'
           memory: 8Gi
   - name: release-scan
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -1171,13 +1188,14 @@ spec:
       volumeMounts: []
       resources:
         requests:
-          cpu: 1000m
-          memory: 2039684Ki
+          cpu: 3591m
+          memory: 3072Mi
         limits:
-          cpu: '4'
-          memory: 3008Mi
+          cpu: 4000m
+          memory: 3072Mi
   # Keep the release gate while giving each branch race group its own Pod.
   - name: release-test
+    activeDeadlineSeconds: 7401
     automountServiceAccountToken: false
     dag:
       tasks:
@@ -1439,6 +1457,7 @@ spec:
           cpu: 2000m
           memory: 576Mi
   - name: release-chart-test
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -1482,11 +1501,11 @@ spec:
         readOnly: true
       resources:
         requests:
-          cpu: 1000m
-          memory: 105072Ki
+          cpu: 492m
+          memory: 192Mi
         limits:
-          cpu: '2'
-          memory: 384Mi
+          cpu: 2000m
+          memory: 192Mi
   - name: release-build
     automountServiceAccountToken: false
     metadata:
@@ -1538,13 +1557,13 @@ spec:
         mountPath: /tmp/oberth-release
       # Historical build peak: 6,770,733,056 sampled bytes; 8Gi leaves
       # about 1.69Gi above that observation. Bound compiler processes and set a Go memory target above.
-      resources:
+      resources: # remeasure: unmet need limits.cpu 6010m, memory 9792Mi, requests.cpu 5494m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
-          cpu: 1000m
-          memory: 8Gi
+          cpu: 4000m
+          memory: 8192Mi
         limits:
           cpu: 4000m
-          memory: 8Gi
+          memory: 8192Mi
   - name: release-sign-binaries
     metadata:
       annotations:
@@ -1604,11 +1623,11 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: 1000m
-          memory: 201752Ki
+          cpu: 1250m
+          memory: 320Mi
         limits:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 2000m
+          memory: 320Mi
     initContainers:
     - name: verify-publisher-tools
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
@@ -1692,11 +1711,11 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: 625m
-          memory: 73308Ki
+          cpu: 157m
+          memory: 512Mi
         limits:
-          cpu: '1'
-          memory: 1Gi
+          cpu: 1000m
+          memory: 512Mi
     initContainers:
     - name: verify-publisher-tools
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
@@ -1783,11 +1802,11 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: 480m
-          memory: 3986416Ki
+          cpu: 1361m
+          memory: 5888Mi
         limits:
-          cpu: 4000m
-          memory: 8Gi
+          cpu: 2090m
+          memory: 5888Mi
     initContainers:
     - name: verify-publisher-tools
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
@@ -1813,6 +1832,7 @@ spec:
           cpu: '1'
           memory: 256Mi
   - name: release-package-chart
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -1858,11 +1878,11 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: 1000m
-          memory: 222020Ki
+          cpu: 1250m
+          memory: 384Mi
         limits:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 2000m
+          memory: 384Mi
   - name: release-publish-chart
     metadata:
       annotations:
@@ -1928,11 +1948,11 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: 1000m
-          memory: 147312Ki
+          cpu: 1096m
+          memory: 640Mi
         limits:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 2000m
+          memory: 640Mi
     initContainers:
     - name: verify-publisher-tools
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
@@ -2012,11 +2032,11 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: 117m
-          memory: 2315772Ki
+          cpu: 359m
+          memory: 3648Mi
         limits:
-          cpu: 2000m
-          memory: 4Gi
+          cpu: 460m
+          memory: 3648Mi
     initContainers:
     - name: verify-publisher-tools
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
@@ -2098,12 +2118,13 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 1000m
-          memory: 392100Ki
+          cpu: 719m
+          memory: 640Mi
         limits:
-          cpu: '2'
-          memory: 4Gi
+          cpu: 719m
+          memory: 640Mi
   - name: copy-test-tools
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -2143,14 +2164,15 @@ spec:
       # Seven copies of the trusted tools go through the page cache; under
       # heavy node I/O, dirty pages outrun writeback and a 512Mi limit
       # OOM-killed this step (v0.17.38 release run ef637d76).
-      resources:
+      resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
-          cpu: 250m
-          memory: 2Gi
+          cpu: 850m
+          memory: 4608Mi
         limits:
           cpu: 1000m
-          memory: 3Gi
+          memory: 4608Mi
   - name: fetch-apko
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -2212,12 +2234,13 @@ spec:
         readOnly: false
       resources:
         requests:
-          cpu: 625m
-          memory: 63104Ki
+          cpu: 155m
+          memory: 128Mi
         limits:
-          cpu: '1'
-          memory: 320Mi
+          cpu: 1000m
+          memory: 128Mi
   - name: verify-apko
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -2265,11 +2288,12 @@ spec:
       resources:
         requests:
           cpu: 625m
-          memory: 81564Ki
+          memory: 128Mi
         limits:
-          cpu: '1'
-          memory: 384Mi
+          cpu: 1000m
+          memory: 128Mi
   - name: install-apko
+    activeDeadlineSeconds: 60
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -2315,10 +2339,10 @@ spec:
       resources:
         requests:
           cpu: 625m
-          memory: 37864Ki
+          memory: 64Mi
         limits:
-          cpu: '1'
-          memory: 320Mi
+          cpu: 1000m
+          memory: 64Mi
   - name: release-publish-kvm-harness
     metadata:
       annotations:
@@ -2381,11 +2405,11 @@ spec:
         mountPath: /tmp/oberth-release
       resources:
         requests:
-          cpu: 950m
-          memory: 1350012Ki
+          cpu: 2785m
+          memory: 1984Mi
         limits:
-          cpu: 4000m
-          memory: 8Gi
+          cpu: 2980m
+          memory: 1984Mi
     initContainers:
     - name: verify-publisher-tools
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
