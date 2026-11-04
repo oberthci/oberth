@@ -32,8 +32,8 @@ const MinimumMemoryPolls int64 = 4
 // missed between 15-second polls. These are suggestions, not safety proofs.
 const RequestMarginPercent = 25
 const LimitMarginPercent = 50
-const DeadlineMarginPercent = 50
-const DeadlineStartupSeconds = 60
+
+const DeadlineNoSuggestion = "Pod active lifetime through finalization is not measured. duration_ns is main-container runtime; retained Pod finish is the last container exit, a lower bound. Keep the declared deadline and measure Pod finalization before sizing it."
 
 type Observation struct {
 	StepMemoryPeakBytes *int64
@@ -61,7 +61,9 @@ type Suggested struct {
 	MemoryLimitBytes      int64 `json:"memory_limit_bytes"`
 	EphemeralRequestBytes int64 `json:"ephemeral_request_bytes"`
 	EphemeralLimitBytes   int64 `json:"ephemeral_limit_bytes"`
-	ActiveDeadlineSeconds int64 `json:"activeDeadlineSeconds"`
+	// Retained for decoding older reports. Build no longer derives a Pod
+	// deadline from container timing, so new resource suggestions omit it.
+	ActiveDeadlineSeconds int64 `json:"activeDeadlineSeconds,omitempty"`
 }
 
 func (s Suggested) Resources() map[string]map[string]string {
@@ -112,6 +114,7 @@ type Step struct {
 	Flags                      Flags                   `json:"flags"`
 	Suggested                  *Suggested              `json:"suggested"`
 	NoSuggestion               []string                `json:"no_suggestion"`
+	DeadlineNoSuggestion       string                  `json:"deadline_no_suggestion"`
 }
 type Report struct {
 	Format             string `json:"-"`
@@ -139,7 +142,7 @@ func (r Report) MCPToolText() string {
 }
 
 const Retention = "External samples retain at most 90 days / 100,000 container incarnations globally, asynchronously. There is no per-repo or release reservation: busy repositories can displace rare release history. Missing history is unknown. A step-reported memory peak is used only with exact retained attempt identity, and only for advice."
-const Semantics = "Read-only. Per-step sizing_acceptance requires five comparable distinct terminal runs with CPU, memory, storage, duration and known limits together; censored or mixed-condition histories get no suggestion. Quantiles are across container attempts, not time samples; each metric reports its own count. Memory prefers an identity-bound step-reported cgroup peak (self-reported, advisory), retaining any higher external peak with at least four polls; otherwise sampler memory requires four polls per attempt. Any missing memory coverage, unknown limits or deadline kill suppresses suggestions. CPU average uses captured CPU time over its measured interval. Ephemeral and IO pressure are pod-scoped, once per main attempt; PVC bytes are excluded. External peaks are sampled lower bounds. Git is the source of truth; suggestions never change execution."
+const Semantics = "Read-only. Per-step sizing_acceptance requires five comparable distinct terminal runs with CPU, memory, storage, duration and known limits together; censored or mixed-condition histories get no suggestion. Quantiles are across container attempts, not time samples; each metric reports its own count. Memory prefers an identity-bound step-reported cgroup peak (self-reported, advisory), retaining any higher external peak with at least four polls; otherwise sampler memory requires four polls per attempt. Any missing memory coverage, unknown limits or deadline kill suppresses suggestions. CPU average uses captured CPU time over its measured interval. Ephemeral and IO pressure are pod-scoped, once per main attempt; PVC bytes are excluded. External peaks are sampled lower bounds. Git is the source of truth; suggestions never change execution. " + DeadlineNoSuggestion
 
 var fragmentName = regexp.MustCompile(`^frag-[0-9a-f]{8}-(.+)$`)
 var retrySuffix = regexp.MustCompile(`\([0-9]+\)$`)
@@ -204,7 +207,7 @@ func Build(values []Observation, declarations []Declaration) []Step {
 	out := make([]Step, 0, len(keys))
 	for _, k := range keys {
 		stage, template, _ := strings.Cut(k, "\x00")
-		s := Step{Stage: stage, Template: template, Declared: declared[k], RunIDs: []string{}, NoSuggestion: []string{}}
+		s := Step{Stage: stage, Template: template, Declared: declared[k], RunIDs: []string{}, NoSuggestion: []string{}, DeadlineNoSuggestion: DeadlineNoSuggestion}
 		if s.Declared != nil {
 			s.OwnerRepository = s.Declared.OwnerRepository
 		}
@@ -368,7 +371,7 @@ func Build(values []Observation, declarations []Declaration) []Step {
 		s.SizingAcceptance = sizing.acceptance(s.NoSuggestion)
 		if len(s.NoSuggestion) == 0 {
 			cpu := roundMargin(*s.AverageCPUNanoCores.P95, RequestMarginPercent, 10_000_000, 10_000_000) / 1_000_000
-			s.Suggested = &Suggested{CPUMilli: cpu, MemoryRequestBytes: roundMargin(*s.MemoryPeakBytes.P95, RequestMarginPercent, 1<<20, 64<<20), MemoryLimitBytes: roundMargin(*s.MemoryPeakBytes.Max, LimitMarginPercent, 1<<20, 64<<20), EphemeralRequestBytes: roundMargin(*s.EphemeralBytes.Max, RequestMarginPercent, 1<<20, 64<<20), EphemeralLimitBytes: roundMargin(*s.EphemeralBytes.Max, LimitMarginPercent, 1<<20, 64<<20), ActiveDeadlineSeconds: satAdd(roundMargin(*s.DurationNS.Max, DeadlineMarginPercent, int64(time.Second), int64(time.Second))/int64(time.Second), DeadlineStartupSeconds)}
+			s.Suggested = &Suggested{CPUMilli: cpu, MemoryRequestBytes: roundMargin(*s.MemoryPeakBytes.P95, RequestMarginPercent, 1<<20, 64<<20), MemoryLimitBytes: roundMargin(*s.MemoryPeakBytes.Max, LimitMarginPercent, 1<<20, 64<<20), EphemeralRequestBytes: roundMargin(*s.EphemeralBytes.Max, RequestMarginPercent, 1<<20, 64<<20), EphemeralLimitBytes: roundMargin(*s.EphemeralBytes.Max, LimitMarginPercent, 1<<20, 64<<20)}
 		}
 		out = append(out, s)
 	}
@@ -447,7 +450,13 @@ func YAML(r Report) string {
 	for i, s := range r.Steps {
 		if s.Suggested != nil && i < len(steps) {
 			step, _ := steps[i].(map[string]any)
-			step["paste_ready"] = map[string]any{"resources": s.Suggested.Resources(), "activeDeadlineSeconds": s.Suggested.ActiveDeadlineSeconds}
+			paste := map[string]any{"resources": s.Suggested.Resources()}
+			// Older reports can still be rendered, but a missing deadline must
+			// never become a copyable zero activeDeadlineSeconds declaration.
+			if s.Suggested.ActiveDeadlineSeconds > 0 {
+				paste["activeDeadlineSeconds"] = s.Suggested.ActiveDeadlineSeconds
+			}
+			step["paste_ready"] = paste
 		}
 	}
 	output, _ := yaml.Marshal(document)

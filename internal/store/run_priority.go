@@ -58,20 +58,33 @@ const rcPatternSQL = `(SELECT pattern FROM queue_priority_patterns WHERE ref_kin
 const legacyBasePrioritySQL = `CASE WHEN ` + naturalHighestSQL + ` THEN 'highest' WHEN ` + overridePrioritySQL + ` IS NOT NULL THEN ` + overridePrioritySQL + ` WHEN ` + requestedPrioritySQL + ` IS NOT NULL THEN ` + requestedPrioritySQL + ` WHEN ` + rcPatternSQL + ` IS NOT NULL THEN 'high' ELSE 'normal' END`
 const legacyPriorityReasonSQL = `CASE WHEN trigger='promotion' THEN 'promotion run' WHEN ` + automaticTagPrioritySQL + ` THEN '` + model.TagReleasePriorityReason + `' WHEN ` + overridePrioritySQL + ` IS NOT NULL THEN 'admin bump: ' || (SELECT reason FROM run_priority_overrides WHERE run_id=id) WHEN ` + requestedPrioritySQL + ` IS NOT NULL THEN 'submission priority: ' || (SELECT reason FROM run_priority_requests WHERE run_id=id) WHEN ` + rcPatternSQL + ` IS NOT NULL THEN 'release-candidate pattern: ' || ` + rcPatternSQL + ` WHEN ` + priorityTagReleaseSQL + ` THEN CASE WHEN NOT ` + tagPriorityEnabledSQL + ` THEN 'tag/release automatic priority disabled by size_revoke' ELSE 'tag/release waiting behind an earlier tag of this repository' END ELSE 'ordinary run' END`
 
-// Keep the SQL embedded in shipped migration 39 unchanged. Explicit admin
-// lowering takes precedence over automatic release/promotion classification.
-const loweredPrioritySQL = `(` + overridePrioritySQL + ` IN ('normal','low'))`
-const basePrioritySQL = `CASE WHEN ` + loweredPrioritySQL + ` THEN ` + overridePrioritySQL + ` ELSE (` + legacyBasePrioritySQL + `) END`
-const priorityReasonSQL = `CASE WHEN ` + loweredPrioritySQL + ` THEN 'admin priority: ' || (SELECT reason FROM run_priority_overrides WHERE run_id=id) ELSE (` + legacyPriorityReasonSQL + `) END`
+// The legacy expressions above are frozen inputs to shipped migration 39.
+// Live projections normalize old policy values without rewriting their receipts.
+const currentOverridePrioritySQL = `(SELECT CASE priority WHEN 'normal' THEN 'standard' WHEN 'highest' THEN 'high' ELSE priority END FROM run_priority_overrides WHERE run_id=id)`
+const currentRequestedPrioritySQL = `(SELECT CASE accepted WHEN 'normal' THEN 'standard' WHEN 'highest' THEN 'high' ELSE accepted END FROM run_priority_requests WHERE run_id=id AND requested!='' AND accepted IN ('low','normal','standard','promotion','high','highest') AND refusal='')`
+const currentRequestedPriorityReasonSQL = `(SELECT reason FROM run_priority_requests WHERE run_id=id AND requested!='' AND accepted IN ('low','normal','standard','promotion','high','highest') AND refusal='')`
+const basePrioritySQL = `CASE
+ WHEN ` + currentOverridePrioritySQL + ` IS NOT NULL THEN ` + currentOverridePrioritySQL + `
+ WHEN ` + currentRequestedPrioritySQL + `='low' THEN 'low'
+ WHEN ` + currentRequestedPrioritySQL + `='high' THEN 'high'
+ WHEN trigger='promotion' OR ` + automaticTagPrioritySQL + ` THEN 'promotion'
+ WHEN ` + currentRequestedPrioritySQL + `='promotion' OR ` + rcPatternSQL + ` IS NOT NULL THEN 'promotion'
+ ELSE 'standard' END`
+const priorityReasonSQL = `CASE
+ WHEN ` + currentOverridePrioritySQL + ` IS NOT NULL THEN CASE WHEN ` + currentOverridePrioritySQL + `='high' THEN 'admin bump: ' ELSE 'admin priority: ' END || (SELECT reason FROM run_priority_overrides WHERE run_id=id)
+ WHEN ` + currentRequestedPrioritySQL + ` IN ('low','high') THEN 'submission priority: ' || ` + currentRequestedPriorityReasonSQL + `
+ WHEN trigger='promotion' THEN 'promotion run'
+ WHEN ` + automaticTagPrioritySQL + ` THEN '` + model.TagReleasePriorityReason + `'
+ WHEN ` + currentRequestedPrioritySQL + `='promotion' THEN 'submission priority: ' || ` + currentRequestedPriorityReasonSQL + `
+ WHEN ` + rcPatternSQL + ` IS NOT NULL THEN 'release-candidate pattern: ' || ` + rcPatternSQL + `
+ WHEN ` + priorityTagReleaseSQL + ` THEN CASE WHEN NOT ` + tagPriorityEnabledSQL + ` THEN 'tag/release automatic priority disabled by size_revoke' ELSE 'tag/release waiting behind an earlier tag of this repository' END
+ ELSE 'ordinary run' END`
 
-// priorityOrderSQL shares the effective class with the in-memory gate
-// (model.Run.EffectivePriority): a normal run that has waited an hour joins
-// high at its own queue position; nothing ages into highest. Within a class
-// the order is FIFO by admission sequence. The clock is rendered from an
-// int64, never request text, and is fixed per query.
+// Match model.Run.EffectivePriority exactly. Standard work may join promotion
+// FIFO after an hour, but no SQL ordering path ages work into authorized high.
 func priorityOrderSQL(now time.Time) string {
-	return `CASE (` + basePrioritySQL + `) WHEN 'highest' THEN 2 WHEN 'high' THEN 1 WHEN 'low' THEN -1
- WHEN 'normal' THEN CASE WHEN COALESCE(` + overridePrioritySQL + `,'') NOT IN ('normal','low') AND queued_at <= ` + fmt.Sprint(unixNano(now)) + ` - 3600000000000 THEN 1 ELSE 0 END
+	return `CASE (` + basePrioritySQL + `) WHEN 'high' THEN 2 WHEN 'promotion' THEN 1 WHEN 'low' THEN -1
+ WHEN 'standard' THEN CASE WHEN ` + overridePrioritySQL + ` IS NULL AND queued_at <= ` + fmt.Sprint(unixNano(now)) + ` - 3600000000000 THEN 1 ELSE 0 END
  ELSE 0 END DESC, admission_sequence, queue_sequence`
 }
 
@@ -145,13 +158,14 @@ func (s *Store) SetQueuePriorityPatterns(ctx context.Context, actor string, patt
 	return s.QueuePriorityPatterns(ctx)
 }
 
-// BumpRunPriority raises waiting work to high/highest or pins it at normal/low.
+// BumpRunPriority sets any waiting class, including explicit lowering.
 // The service owns admin authorization and holds its admission gate through
 // this call; the durable state change and audit are atomic.
 func (s *Store) BumpRunPriority(ctx context.Context, actor, id string, priority model.RunPriority, reason string) (model.Run, error) {
 	reason = strings.TrimSpace(reason)
-	if strings.TrimSpace(actor) == "" || id == "" || (priority != model.PriorityLow && priority != model.PriorityNormal && priority != model.PriorityHigh && priority != model.PriorityHighest) || reason == "" || len(reason) > 512 || strings.IndexFunc(reason, unicode.IsControl) >= 0 {
-		return model.Run{}, fmt.Errorf("%w: actor, run ID, low/normal/high/highest priority and reason (1..512 bytes) required", ErrInvalid)
+	priority = priority.Canonical()
+	if strings.TrimSpace(actor) == "" || id == "" || !priority.Valid() || reason == "" || len(reason) > 512 || strings.IndexFunc(reason, unicode.IsControl) >= 0 {
+		return model.Run{}, fmt.Errorf("%w: actor, run ID, low/standard/promotion/high priority and reason (1..512 bytes) required", ErrInvalid)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -166,8 +180,8 @@ func (s *Store) BumpRunPriority(ctx context.Context, actor, id string, priority 
 		return model.Run{}, err
 	}
 	current, _ := run.EffectivePriority(s.now())
-	if !run.Status.Active() || run.StartedAt != nil || (priority != model.PriorityLow && priority != model.PriorityNormal && priority.Rank() <= current.Rank()) {
-		return model.Run{}, fmt.Errorf("%w: run must await admission; high/highest must raise its priority", ErrInvalidState)
+	if !run.Status.Active() || run.StartedAt != nil {
+		return model.Run{}, fmt.Errorf("%w: run must await admission", ErrInvalidState)
 	}
 	now := unixNano(s.now())
 	if _, err = tx.ExecContext(ctx, `INSERT INTO run_priority_overrides(run_id,priority,reason,actor,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(run_id) DO UPDATE SET priority=excluded.priority,reason=excluded.reason,actor=excluded.actor,updated_at=excluded.updated_at`, id, priority, reason, actor, now); err != nil {

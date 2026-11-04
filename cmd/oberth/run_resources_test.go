@@ -64,3 +64,26 @@ func TestRunResourcesCLIPreservesSizingAcceptance(t *testing.T) {
 		}
 	}
 }
+
+func TestRunResourcesCLIOptsIntoResourceOnlyAdvice(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("resource_only") != "true" {
+			t.Errorf("CLI did not advertise safe resource-only rendering: %s", r.URL)
+			_, _ = w.Write([]byte(`{"steps":[{"suggested":null}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"steps":[{"deadline_no_suggestion":"Pod finalization is not measured","suggested":{"cpu_milli":100,"memory_request_bytes":67108864,"memory_limit_bytes":134217728,"ephemeral_request_bytes":67108864,"ephemeral_limit_bytes":134217728}}]}`))
+	}))
+	defer server.Close()
+	t.Setenv("OBERTH_BASE_URL", server.URL)
+	t.Setenv("OBERTH_TOKEN", "fixture")
+	for _, format := range []string{"json", "yaml"} {
+		var out strings.Builder
+		if err := runRunResources(t.Context(), []string{"--repo=fixture", "--format=" + format}, &out); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(out.String(), "activeDeadlineSeconds") || !strings.Contains(out.String(), "memory_limit_bytes") || !strings.Contains(out.String(), "finalization") || (format == "yaml" && !strings.Contains(out.String(), "paste_ready:")) {
+			t.Fatalf("resource-only transport lost advice or invented deadline: %s", &out)
+		}
+	}
+}

@@ -175,7 +175,7 @@ func TestQueueOrderIsMonotoneAcrossClaimedAndUnclaimedClasses(t *testing.T) {
 		}
 		return result.Run
 	}
-	rank := map[model.RunPriority]int{model.PriorityNormal: 0, model.PriorityHigh: 1, model.PriorityHighest: 2}
+	rank := map[model.RunPriority]int{model.PriorityLow: -1, model.PriorityStandard: 0, model.PriorityPromotion: 1, model.PriorityHigh: 2}
 	check := func(label string, wantAdmission []string) {
 		t.Helper()
 		active, err := s.ListActiveRuns(ctx, model.RunListFilter{})

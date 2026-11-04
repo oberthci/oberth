@@ -27,6 +27,7 @@ func (s *API) readRunResources(ctx context.Context, raw json.RawMessage) (any, e
 		Ref           string `json:"ref"`
 		Last          int    `json:"last"`
 		IncludeFailed bool   `json:"include_failed"`
+		ResourceOnly  bool   `json:"resource_only"`
 		Format        string `json:"format"`
 	}
 	if e := decodeTool(raw, &a); e != nil {
@@ -142,6 +143,12 @@ func (s *API) readRunResources(ctx context.Context, raw json.RawMessage) (any, e
 		}
 		if r.Truncated {
 			step.RefuseSizing("history row limit reached; narrow the run selection")
+		}
+		// Previous typed clients turn an absent deadline in a non-null
+		// suggestion into zero, including in copyable YAML. Only callers
+		// advertising an omission-safe renderer may receive resource advice.
+		if !a.ResourceOnly && step.Suggested != nil {
+			step.RefuseSizing("resource-only advice requires resource_only=true and a compatible renderer; Pod deadline advice is unavailable")
 		}
 		r.Steps = append(r.Steps, step)
 	}

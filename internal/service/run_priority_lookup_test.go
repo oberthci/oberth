@@ -121,11 +121,11 @@ func TestPrioritySizeLookupRefreshWithholdsBoostAndRecovers(t *testing.T) {
 		if !found || p != want || !strings.Contains(why, reason) {
 			t.Fatalf("refreshed priority=%s / %s, want %s / %s", p, why, want, reason)
 		}
-		if p, _, _ := f.scheduler.AdmissionPriority(unaffected.sequence); p != model.PriorityHighest {
+		if p, _, _ := f.scheduler.AdmissionPriority(unaffected.sequence); p != model.PriorityPromotion {
 			t.Fatalf("another repository lost its boost: %s", p)
 		}
 	}
-	check(model.PriorityHighest, "oldest waiting")
+	check(model.PriorityPromotion, "oldest waiting")
 	state.unavailable.Store(true)
 	check(model.PriorityNormal, "repository size limit unavailable")
 	// Even an S tag must not inherit default-L urgency when the read fails.
@@ -151,9 +151,9 @@ func TestPrioritySizeLookupRefreshWithholdsBoostAndRecovers(t *testing.T) {
 	if explicit.Priority != model.PriorityHigh || explicit.PriorityReason != "admin bump: intentional expedite" {
 		t.Fatalf("lookup failure discarded explicit bump: %+v", explicit)
 	}
-	if p, _ := aged.EffectivePriority(time.Now()); p != model.PriorityHigh {
+	if p, _ := aged.EffectivePriority(time.Now()); p != model.PriorityPromotion {
 		t.Fatal("lookup failure disabled aging")
 	}
 	state.unavailable.Store(false)
-	check(model.PriorityHighest, "oldest waiting")
+	check(model.PriorityPromotion, "oldest waiting")
 }
