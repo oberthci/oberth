@@ -2,6 +2,8 @@ package gitcache
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -36,9 +38,17 @@ func TestParkSourceRequiresReachablePublicBranch(t *testing.T) {
 	if ref, err := c.ParkSource(t.Context(), "example", source, "refs/heads/park/"); err != nil || ref != "" {
 		t.Fatalf("non-park provenance=%q %v", ref, err)
 	}
-	runGit(t, r.work, "tag", "-a", "park-object", "-m", "park tag", source)
-	tag := runGit(t, r.work, "rev-parse", "refs/tags/park-object")
-	runGit(t, r.work, "push", ready.Path, "refs/tags/park-object")
+	// Object-type checks must not depend on the cache's receive admission.
+	rejectHook := filepath.Join(ready.Path, "hooks", "reject-receive")
+	if err := os.WriteFile(rejectHook, []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(rejectHook, filepath.Join(ready.Path, "hooks", "pre-receive")); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, ready.Path, "config", "core.hooksPath", filepath.Join(ready.Path, "hooks"))
+	tag := runGitStdin(t, ready.Path, "object "+source+"\ntype commit\ntag park-object\ntagger Fixture <fixture@example.invalid> 0 +0000\n\npark tag\n", "mktag")
+	runGit(t, ready.Path, "update-ref", "refs/tags/park-object", tag)
 	if _, err := c.ParkSource(t.Context(), "example", tag, "refs/heads/park/"); err == nil {
 		t.Fatal("tag object accepted as parked commit")
 	}
