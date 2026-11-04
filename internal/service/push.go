@@ -83,11 +83,8 @@ func (ingestor *PushIngestor) Branch(ctx context.Context, push BranchPush) (Push
 	if !sameOID(peeled.ObjectSHA, push.NewOID) || !sameOID(peeled.CommitSHA, push.NewOID) {
 		return PushResult{}, errors.New("service: accepted branch commit no longer resolves exactly")
 	}
-	policy, err := readPromotionPolicy(ctx, ingestor.git, push.Repository)
-	if err != nil {
-		return PushResult{}, err
-	}
-	if policy.parks(push.Branch) && push.Branch != repository.DefaultBranch && !policy.requiresBranchCI(push.Branch) {
+	policy, policyErr := readPushPromotionPolicy(ctx, ingestor.git, push.Repository)
+	if policyErr == nil && policy.parks(push.Branch) && push.Branch != repository.DefaultBranch && !policy.requiresBranchCI(push.Branch) {
 		mirror, ok := ingestor.git.(interface {
 			SyncBranch(context.Context, string, string, string) error
 		})

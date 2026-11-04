@@ -18,6 +18,7 @@ type parkPushGit struct {
 	mirrored  []string
 	policy    string
 	mirrorErr error
+	policyErr error
 }
 
 func (g *parkPushGit) SyncBranch(_ context.Context, repo, branch, sha string) error {
@@ -26,7 +27,7 @@ func (g *parkPushGit) SyncBranch(_ context.Context, repo, branch, sha string) er
 }
 
 func (g *parkPushGit) ReadDefaultBlob(context.Context, string, string, int) (string, []byte, bool, error) {
-	return strings.Repeat("b", 40), []byte(g.policy), g.policy != "", nil
+	return strings.Repeat("b", 40), []byte(g.policy), g.policy != "", g.policyErr
 }
 
 func TestParkPushMirrorsWithoutEnqueue(t *testing.T) {

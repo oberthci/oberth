@@ -37,13 +37,25 @@ type promotionPolicyReader interface {
 // Only the fresh upstream default may authorize skipping branch CI. In
 // particular, neither a parked candidate nor a locally pushed main is policy.
 func readPromotionPolicy(ctx context.Context, git any, repo string) (promotionPolicy, error) {
+	ctx, cancel := context.WithTimeout(gitcache.WithFreshPolicy(ctx), 30*time.Second)
+	defer cancel()
+	return readPromotionPolicyContext(ctx, git, repo)
+}
+
+// Push admission can reuse the recent upstream snapshot. Any error falls back
+// to ordinary CI; only promotion authorization requires a fresh successful read.
+func readPushPromotionPolicy(ctx context.Context, git any, repo string) (promotionPolicy, error) {
+	ctx, cancel := context.WithTimeout(gitcache.WithBurstPolicy(ctx), 2*time.Second)
+	defer cancel()
+	return readPromotionPolicyContext(ctx, git, repo)
+}
+
+func readPromotionPolicyContext(ctx context.Context, git any, repo string) (promotionPolicy, error) {
 	p := promotionPolicy{ParkRefPrefix: defaultParkPrefix}
 	reader, ok := git.(promotionPolicyReader)
 	if !ok {
 		return p, nil
 	}
-	ctx, cancel := context.WithTimeout(gitcache.WithFreshPolicy(ctx), 30*time.Second)
-	defer cancel()
 	_, body, exists, err := reader.ReadDefaultBlob(ctx, repo, promotionPolicyFile, 16384)
 	if err != nil {
 		return p, fmt.Errorf("read promotion policy: %w", err)
