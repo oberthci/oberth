@@ -54,8 +54,9 @@ A step can publish artifacts, perform other effects, or report both a refusal
 and a checksum failure. Such output cannot safely authorize another execution.
 The resolver chain retains its comma after the private mirror: replacing it with
 a pipe would allow private transport failures to fall through to public
-resolvers. TLS errors, checksum/integrity failures and private HTTP denials
-remain terminal. A caller implementing its own dialer may bound retries with
+resolvers. TLS errors, checksum/integrity failures and ordinary private HTTP
+denials remain terminal. Explicit pseudo-version denials return 410 and permit
+Go to try its next proxy; see the pseudo-version policy below. A caller implementing its own dialer may bound retries with
 backoff for `ECONNREFUSED` before any TLS or request bytes are sent; this batch
 does not install a new dialer into the Go tool or change its retry policy.
 
@@ -89,12 +90,13 @@ zip cannot break module-graph metadata resolution. Existing complete manifests
 remain readable.
 `.mod` stays byte-for-byte verbatim; `.zip` uses the existing canonical
 `golang.org/x/mod/zip` conversion and filtering. A changing tag cannot mix
-representations during a fill. Pseudo-versions and branch names remain refused.
+representations during a fill. Pseudo-versions use the same artifact store with
+additional live checks described below; bare branch names remain refused.
 
 Objects are addressed by SHA-256. All objects are synced before publishing an
 atomic, no-clobber manifest keyed by mapped repository, module path and version.
 A cached explicit version stays pinned across process restarts and tag changes.
-Warm reads check object size and SHA-256 before serving, without Git processes,
+Warm tagged-version reads check object size and SHA-256 before serving, without Git processes,
 repository locks or catalog reads. Unknown/unmapped private modules remain
 refused before cache access. `list` and `@latest` remain live queries; a cache
 cannot determine whether a newer tag exists while Git is unavailable. Discovery
@@ -118,8 +120,8 @@ module readers can leave that queue at their deadline without polling. Disk sysc
 process-group cleanup are not made interruptible by that context. Backend
 exhaustion returns **503 with `Retry-After: 1` and `Cache-Control: no-store`**;
 failed fills are not negative-cached. If a pinned commit has been pruned from
-the bare repository, Git confirms its absence with the object protocol and the
-proxy returns permanent **500 / `pinned_source_missing`**, without `Retry-After`
+the bare repository, Git confirms its absence with the object protocol and a
+tagged-version request returns permanent **500 / `pinned_source_missing`**, without `Retry-After`
 or a second internal archive attempt. It never substitutes the moved tag.
 Already cached representations remain available; restore the exact missing
 object from an authoritative copy to build a missing zip. Do not reset the pin
@@ -136,7 +138,7 @@ replay an arbitrary build step based on stderr. Preserve
 would send private coordinates to public resolution on 503. Go's documented
 [proxy fallback rules](https://go.dev/ref/mod#goproxy-protocol) explain that
 comma/pipe distinction. Real-Go tests verify successful recovery, go.sum
-checks, and that exhausted private failures reach neither public nor direct
+checks, and that exhausted private backend failures reach neither public nor direct
 resolution.
 
 No migration or additional configuration is required. The cache is derived
@@ -296,3 +298,68 @@ derived source; remove that data under the same quiesced maintenance procedure.
 For API Service availability under database contention, see
 [readiness under database stalls](rca-run-recovery.md#readiness-under-database-stalls).
 The private proxy's independent readiness-bypass policy above is unchanged.
+
+## Pseudo-versions
+
+Mapped repositories can serve `.info`, `.mod` and `.zip` for a pseudo-version
+whose commit exists in the mirror and is reachable from the mirrored default
+branch. The unique lowercase 12-hex commit abbreviation and UTC timestamp must
+match that exact commit's **committer** time. A base-derived pseudo-version such
+as `v1.2.4-0.20261104090000-0123456789ab` also needs the exact `v1.2.3` ancestor tag;
+it cannot identify that base tag's own commit. No remote fetch is performed to
+satisfy a requested revision.
+
+Administrators may expand reachability with:
+
+```yaml
+argo:
+  goProxy:
+    allowNonDefaultBranchPseudoVersions: true
+```
+
+The server equivalent is `--argo-goproxy-pseudo-non-default-branches=true`.
+Both default to false. The opt-in allows other public branches and canonical,
+module-compatible tags already allowed by the proxy. Default policy remains
+strictly default-branch-only, including for commits retained only by a tag.
+Internal retention, receive, promotion and artifact refs never authorize a
+pseudo-version. `@latest` and `@v/list` still report tagged versions only.
+
+Example (replace the illustrative timestamp and abbreviation with a real
+mirrored commit):
+
+```http
+GET /go.example.test/wire/@v/v0.0.0-20261104090000-0123456789ab.info HTTP/1.1
+Host: oberth-goproxy.oberth.svc:8444
+```
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+Cache-Control: private, no-cache
+
+{"Time":"2026-11-04T09:00:00Z","Version":"v0.0.0-20261104090000-0123456789ab"}
+```
+
+Use the same version with `.mod` or `.zip`, or run
+`go mod download go.example.test/wire@v0.0.0-20261104090000-0123456789ab`
+with the configured proxy. Verbatim module bytes and canonical zip bytes are
+pinned in the existing immutable artifact store. Their ETags are SHA-256 hashes
+of the stored bytes. Repeated requests and restarts never regenerate them from a
+different commit.
+
+Every pseudo-version request rechecks live mirrored reachability, even for warm
+artifacts or conditional requests, and rechecks before response headers. A
+force-pushed/unreachable commit is refused rather than served from an obsolete
+successful policy decision. A restored eligible commit serves the original
+pinned bytes. Pseudo-version HTTP responses require revalidation; Go's own local
+module cache retains its usual immutable semantics.
+
+Missing, ambiguous, invalid-time/base and disallowed/rebound commits return
+**410 Gone**, `X-Oberth-GoProxy-Error: pseudo_version_unavailable` and
+`Cache-Control: no-store`. These refusals are not negative-cached. A 410 permits
+Go to try the next configured proxy, potentially sending the rejected module
+coordinates to that proxy and then a direct resolver. This is an intentional
+exception to the ordinary private 403 behavior. Backend failures return 503
+with bounded retries and never reuse stale policy authority. Existing explicit
+administrator revocation markers still return terminal 403, and artifact
+corruption fails closed without rebuilding or rebinding a version.

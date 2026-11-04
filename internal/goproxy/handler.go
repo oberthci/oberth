@@ -40,7 +40,8 @@ type GitCache interface {
 
 // Handler serves the GOPROXY protocol (/@v/list, .info, .mod, .zip) read-only.
 type Handler struct {
-	failureLogs failureLogLimiter
+	failureLogs      failureLogLimiter
+	pseudoNonDefault bool
 
 	logger       *log.Logger
 	cache        GitCache
@@ -71,8 +72,8 @@ func NewHandler(cache GitCache, namespace string, repoMap map[string]string) *Ha
 
 // ServeHTTP handles GOPROXY protocol requests.
 // AI-INVARIANT: classify the private namespace before parsing the protocol.
-// No private failure may return 404/410: Go interprets either as permission
-// to try the next proxy. The injected comma after this mirror is mandatory.
+// Ordinary private failures stop proxy fallback. Explicit pseudo-version
+// denials use 410 by policy; those allow Go to try its next configured proxy.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	observed := &observedResponse{ResponseWriter: w}
 	h.serveHTTP(observed, r)
@@ -159,6 +160,10 @@ func (h *Handler) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		version, err = module.UnescapeVersion(strings.TrimSuffix(versionRequest, extension))
 		if err != nil || !supportedVersion(modulePath, version) {
+			if err == nil && module.IsPseudoVersion(version) {
+				pseudoUnavailable(w)
+				return
+			}
 			privateUnavailable(w)
 			return
 		}
@@ -223,7 +228,7 @@ func privateUnavailable(w http.ResponseWriter) {
 }
 
 func supportedVersion(modulePath, version string) bool {
-	return module.CanonicalVersion(version) == version && !module.IsPseudoVersion(version) && module.Check(modulePath, version) == nil
+	return module.CanonicalVersion(version) == version && module.Check(modulePath, version) == nil
 }
 
 func (h *Handler) versions(ctx context.Context, input, modulePath string) ([]string, error) {
@@ -233,7 +238,7 @@ func (h *Handler) versions(ctx context.Context, input, modulePath string) ([]str
 	}
 	var versions []string
 	for _, tag := range tags {
-		if supportedVersion(modulePath, tag) {
+		if supportedVersion(modulePath, tag) && !module.IsPseudoVersion(tag) {
 			versions = append(versions, tag)
 		}
 	}

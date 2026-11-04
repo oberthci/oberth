@@ -157,17 +157,21 @@
 The enabled Go module mirror routes the complete administrator-configured private namespace
 locally. Private missing modules/versions and unsupported requests return 403;
 backend unavailability returns 503 with `Retry-After`; artifact integrity or
-generation failures return 500. No private failure returns the 404/410
-statuses that authorize Go to try another proxy. The listener avoids path
+generation failures return 500. Explicit pseudo-version commit/time/base/policy
+denials return 410 and authorize Go to try another proxy; ordinary private
+failures retain terminal 403/503 behavior. The listener avoids path
 redirects before namespace classification. `@latest` uses canonical tags only,
-preferring stable releases; nested modules and branch pseudo-versions remain
-unsupported.
+preferring stable releases. Nested modules and bare branch names remain
+unsupported. Pseudo-versions require exact mirrored commit/time/base evidence
+and default-branch reachability; an administrator can opt into other public
+branches and already allowed tags. Warm artifacts recheck this authority.
 
 Pipeline containers receive `<mirror>,https://proxy.golang.org|direct`,
 `GONOPROXY=none`, and `GONOSUMDB=<configured namespace>`. Go's comma separator permits
 fallback only on 404/410; the pipe permits it on any error. Public misses
-therefore retain public-proxy and direct fallback, while private failures and
-mirror transport/TLS failures stop. The explicit no-proxy override prevents an
+therefore retain public-proxy and direct fallback. Explicit pseudo-version 410
+denials also permit fallback of their module coordinates. Other private failures
+and mirror transport/TLS failures stop. The explicit no-proxy override prevents an
 ambient `GOPRIVATE` from sending private coordinates directly upstream. Public
 checksum verification remains enabled. These settings configure the resolver;
 they are not an egress sandbox for repository code that replaces its environment.

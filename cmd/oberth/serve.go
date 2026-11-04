@@ -192,11 +192,12 @@ type serveOptions struct {
 
 	// argoGoProxyListen is the listen address for the read-only Go module
 	// proxy. Empty disables the listener.
-	argoGoProxyListen string
-	argoGoProxyCert   string
-	argoGoProxyKey    string
-	argoGoProxyCA     string
-	argoGoProxyURL    string
+	argoGoProxyListen           string
+	argoGoProxyCert             string
+	argoGoProxyKey              string
+	argoGoProxyCA               string
+	argoGoProxyURL              string
+	argoGoProxyPseudoNonDefault bool
 
 	// serverLeafRenewal is set when the HTTPS leaf was issued by OpenBao's
 	// PKI engine: serve renews it in place before it expires.
@@ -342,6 +343,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.argoGoProxyKey, "argo-goproxy-key", "", "TLS private key for the Go module proxy")
 	flags.StringVar(&options.argoGoProxyCA, "argo-goproxy-ca", "", "PEM CA certificate that signed the Go module proxy's TLS certificate; delivered to pipeline pods")
 	flags.StringVar(&options.argoGoProxyURL, "argo-goproxy-url", "", "HTTPS URL pipeline pods use to reach the module proxy (e.g. https://oberth-goproxy.oberth.svc:8444)")
+	flags.BoolVar(&options.argoGoProxyPseudoNonDefault, "argo-goproxy-pseudo-non-default-branches", false, "Allow pseudo-versions from non-default public branches and existing allowed tags; default is default-branch-only")
 	flags.StringVar(&options.argoGoProxyNamespace.ModulePrefix, "argo-goproxy-module-prefix", "", "Administrator-owned private module namespace")
 	flags.StringVar(&options.argoGoProxyNamespace.RepositoryPrefix, "argo-goproxy-repository-prefix", "", "Repository-name prefix within the configured owner")
 	flags.StringVar(&options.argoGoProxyNamespace.Upstream, "argo-goproxy-upstream", "", "Exact upstream owning private module repositories")
@@ -1251,7 +1253,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		if err != nil {
 			return err
 		}
-		proxyHandler, err := goproxy.NewHandler(git, options.argoGoProxyNamespace.ModulePrefix, repoMap).WithArtifactCache(filepath.Join(options.dataRoot, "goproxy"))
+		proxyHandler, err := goproxy.NewHandler(git, options.argoGoProxyNamespace.ModulePrefix, repoMap).WithPseudoVersionsOnNonDefaultBranches(options.argoGoProxyPseudoNonDefault).WithArtifactCache(filepath.Join(options.dataRoot, "goproxy"))
 		if err != nil {
 			return fmt.Errorf("open Go module artifact cache: %w", err)
 		}

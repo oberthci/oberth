@@ -66,7 +66,7 @@ func TestPrivateRoutingAllShapes(t *testing.T) {
 	for _, request := range []string{
 		"@v/v1.0.1.info", "@v/v1.0.1.mod", "@v/v1.0.1.zip", "@v/v1.0.info",
 		"@v/main.info", "@v/v2.0.0.info", "@v/v1.0.0+metadata.info",
-		"@v/v0.0.0-20260929120000-0123456789ab.info", "@v/v1.0.0/other.info",
+		"@v/v1.0.0/other.info",
 		"@v/v1.0.0.invalid", "@v/!invalid.info", "@v/", "@v/list?query=1",
 		"//../other/@v/list", "@latest/", "@v/../@v/list", "@v/list/extra", "@v/list/@v/list",
 	} {
@@ -87,6 +87,7 @@ func TestPrivateRoutingAllShapes(t *testing.T) {
 }
 
 func TestPrivateRoutingCacheFailures(t *testing.T) {
+	assertRoutingStatus(t, routingFixture(t, ""), "/go.example.test/issue764-fixture/@v/v0.0.0-20260929120000-0123456789ab.info", http.StatusServiceUnavailable)
 	for _, request := range []string{"@latest", "@v/list", "@v/v1.0.0.info", "@v/v1.0.0.mod", "@v/v1.0.0.zip"} {
 		assertRoutingStatus(t, routingFixture(t, "list"), "/go.example.test/issue764-fixture/"+request, http.StatusServiceUnavailable)
 	}

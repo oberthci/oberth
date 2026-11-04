@@ -462,6 +462,9 @@ argo:
   # their mapping explicitly when upgrading.
   goProxy:
     enabled: false
+    # Default: pseudo-versions must be reachable from the default branch.
+    # Opt in to other public branches and tags already allowed by proxy policy.
+    allowNonDefaultBranchPseudoVersions: false
     # Port for the HTTPS listener. ClusterIP-only — never exposed on a NodePort.
     port: 8444
     modulePrefix: ""

@@ -1078,6 +1078,8 @@ Usage of serve:
         Administrator-owned private module namespace
   -argo-goproxy-organization string
         Exact organization owning private module repositories
+  -argo-goproxy-pseudo-non-default-branches
+        Allow pseudo-versions from non-default public branches and existing allowed tags; default is default-branch-only
   -argo-goproxy-repository-prefix string
         Repository-name prefix within the configured owner
   -argo-goproxy-upstream string

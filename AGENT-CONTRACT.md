@@ -2353,8 +2353,8 @@ resource_id is the plan digest, details JSON carries plan_digest, policies
 Credential-free Oberth-served Go module mirror for an explicitly configured
 private module namespace. The `internal/goproxy` package serves the GOPROXY protocol
 (`@latest`, `/@v/list`, `.info`, `.mod`, `.zip`) read-only from Oberth's own git cache
-for repositories it already mirrors. Tags-only; branch pseudo-versions are
-not supported.
+for repositories it already mirrors. Canonical tags and validated pseudo-versions
+are supported; discovery (`@latest` and `@v/list`) remains tags-only.
 
 **Trust argument:** the mirror exposes only source Oberth already hosts for the
 same trust tier (the git cache is the source of truth for branch and tag pushes
@@ -2392,8 +2392,8 @@ vectors in tests.
 
 **What it never serves:** write operations (non-GET rejected by the handler
 before routing); private modules Oberth does not mirror (403); branch
-pseudo-versions (only canonical semver tags compatible with the module path); any
-secret, credential, or private key. `@latest` selects the highest release tag,
+names as versions; any secret, credential, or private key. Pseudo-versions
+require exact commit/time and reachability checks. `@latest` selects the highest release tag,
 falling back to the highest prerelease when no release exists. Empty lists are
 successful; an empty `@latest` result is a terminal 403.
 
@@ -2424,17 +2424,20 @@ upstream with a different organization fail startup.
 unsupported nested modules, missing tags, malformed requests and unsupported
 versions return 403. Backend unavailability returns 503 with `Retry-After: 1`;
 artifact-integrity and archive/zip failures return 500.
-Private failures never return 404 or 410. The dedicated listener passes requests
+Pseudo-version commit/time/base/reachability denials explicitly return 410 with
+`Cache-Control: no-store`; Go can then try its next proxy. Other private failures
+never return 404 or 410. The dedicated listener passes requests
 directly to the handler so a mux cannot redirect a malformed private path into
 another namespace. Canonical `.mod` and `.zip` bytes remain unchanged.
 
-**Immutable artifact cache:** the enabled server stores tagged-version artifacts
+**Immutable artifact cache:** the enabled server stores version artifacts
 under `<data>/goproxy`. SHA-256-addressed `.info` and verbatim `.mod` publish as
 cheap metadata; canonical `.zip` is built lazily from the same pinned source and
 published separately. Objects are fsynced before atomic, no-clobber manifests. Keys include the mapped repository, module path and
-version. The cold fill verifies tag membership and pins one Git object for all
-representations; warm requests verify the cached object's size/digest and do
-no Git or catalog lookup. Cache hits still require the current handler's
+version. Tagged cold fills verify tag membership and pin one Git object for all
+representations; warm tagged requests verify the cached object's size/digest and do
+no Git or catalog lookup. Pseudo-versions pin the full commit and validate live
+reachability even for warm artifacts, again before writing response headers. Cache hits still require the current handler's
 namespace/repository mapping. Private cache data stays on the server PVC;
 pipeline mounts and network authority are unchanged. Corrupt entries fail
 closed without rebuilding from a possibly moved tag. `list` and `@latest`
@@ -2451,7 +2454,7 @@ operations and Git process teardown retain their OS/cleanup behavior. Failed
 fills are not cached. Go does not automatically retry a terminal 503 or interpret
 `Retry-After` as a retry policy; these safe retries happen inside the proxy, not
 by replaying pipeline steps. Transient exhaustion is 503 with `Retry-After: 1`; a positively missing pinned
-commit is terminal 500 (`pinned_source_missing`) with no internal retry or tag
+tagged commit is terminal 500 (`pinned_source_missing`) with no internal retry or tag
 rebinding. The cache
 has no automatic expiry/GC and consumes server data volume space. Tag deletion
 does not revoke already pinned bytes; administrator-owned per-version markers
@@ -2461,12 +2464,37 @@ warns on unmatched coordinates while permitting pre-emptive denial. The scratch
 server cannot run it; use a pinned Python maintenance pod or the node data owner. See
 [cache operations](docs/goproxy-availability.md#immutable-version-artifacts).
 
+**Pseudo-version policy:** default-branch ancestry is enabled automatically for
+mapped repositories. Administrators can expand it with
+`--argo-goproxy-pseudo-non-default-branches=true` or Helm
+`argo.goProxy.allowNonDefaultBranchPseudoVersions: true` (default false). The
+expanded policy includes public non-default branches and canonical module-compatible
+tags already allowed by the proxy; private retention/promotion refs never grant
+reachability. The conservative default requires default-branch ancestry even
+for tag-only commits. Cached symbolic HEAD determines the default branch; no
+branch name is assumed and no requested revision is fetched from a remote.
+
+A pseudo-version needs a unique lowercase 12-hex commit abbreviation, exact
+committer timestamp in UTC and a canonical module-compatible version. Base-derived
+forms require the exact ancestor tag and a later commit. Annotated tags are peeled
+for that ancestry check; author/tagger timestamps are not pseudo-version times.
+A warmed manifest may never change its full source identity. Missing, ambiguous,
+unreachable, wrong-time/base or rebound revisions are 410, never negative-cached.
+Policy IO failures are 503 and do not fall back to stale successful authority.
+Cached bytes and SHA-256 ETags stay immutable, but pseudo-version HTTP responses
+use `private, no-cache` to require fresh origin eligibility checks; ordinary Go
+clients still retain their own immutable module cache. Explicit administrator
+revocation markers retain precedence and return 403. `@latest` and `@v/list`
+never include pseudo-versions, even if a Git tag is named like one.
+
 **GOPROXY ordering:** `<mirror>,https://proxy.golang.org|direct`
 - Comma after mirror: fall through only on 404/410.
 - Public module misses return 404, deliberately reaching the public proxy.
-- Private failures stop at the mirror, including TLS/transport failures.
+- Ordinary private failures stop at the mirror, including TLS/transport failures.
+- Explicit pseudo-version denials return 410 and permit subsequent proxy/direct
+  lookup of those coordinates. Backend/policy read failures remain retryable 503.
 - Pipe after public proxy: fall through on any error, preserving public direct
-  fallback. No private lookup reaches that leg through the injected chain.
+  fallback. Private pseudo-version 410 denials can also reach that leg.
 
 **Environment injection:** `GOPROXY`, `GONOPROXY=none` and
 `GONOSUMDB=<configured module prefix>` into every pipeline container (CI and release),

@@ -77,6 +77,10 @@ func TestModuleRepositoryLockWaitHonorsContext(t *testing.T) {
 	lock.Lock()
 	defer lock.Unlock()
 	operations := map[string]func(context.Context) error{
+		"pseudo": func(ctx context.Context) error {
+			_, _, err := cache.ModulePseudoVersionSnapshot(ctx, "example", "go.example.test/module", "v0.0.0-20260929120000-"+repository.initialSHA[:12], false)
+			return err
+		},
 		"list": func(ctx context.Context) error { _, err := cache.ListTags(ctx, "example"); return err },
 		"mod": func(ctx context.Context) error {
 			_, err := cache.ShowFile(ctx, "example", "v1.0.0", "go.mod")
