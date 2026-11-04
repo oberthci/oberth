@@ -92,11 +92,16 @@ func (service *API) admitPromotionRetry(ctx context.Context, actor api.Actor, fa
 		return model.Repository{}, model.Run{}, model.Promotion{}, fmt.Errorf("resolve promotion source %s: %w", failed.SourceSHA, err)
 	}
 	if !sameOID(candidate.SHA, failed.SourceSHA) {
-		return model.Repository{}, model.Run{}, model.Promotion{}, fmt.Errorf("%w: the newest run for %s is %s (%s), not green; rerun it before retrying promotion %s",
-			ErrInvalidInput, failed.SourceSHA, candidate.ID, candidate.Status, failed.ID)
+		return model.Repository{}, model.Run{}, model.Promotion{}, fmt.Errorf("%w: retry promotion %s requires original source %s, but the newest run %s (%s) resolves to %s",
+			ErrInvalidInput, failed.ID, failed.SourceSHA, candidate.ID, candidate.Status, candidate.SHA)
 	}
 	promotion, err := service.admitPromotion(ctx, actor, repository, candidate, failed.TargetRef, failed.ID, mode)
 	if err != nil {
+		// Keep eligibility centralized while adding the retry's actionable context.
+		if errors.Is(err, ErrInvalidInput) {
+			return model.Repository{}, model.Run{}, model.Promotion{}, fmt.Errorf("%w: the newest run for %s is %s (%s); rerun it before retrying promotion %s",
+				err, failed.SourceSHA, candidate.ID, candidate.Status, failed.ID)
+		}
 		if errors.Is(err, store.ErrInvalidState) {
 			return model.Repository{}, model.Run{}, model.Promotion{}, refuse(err,
 				"promotion retry conflicts with the current state; inspect promotion_list and promote_status")

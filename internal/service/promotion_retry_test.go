@@ -16,6 +16,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 const (
@@ -573,6 +574,58 @@ func TestMovedTargetRetryRefusesRevokedAuthority(t *testing.T) {
 			}
 			if lineage, err := fixture.store.PromotionLineage(context.Background(), id); err != nil || lineage.RetriedAs != "" {
 				t.Fatalf("lineage = %#v, %v", lineage, err)
+			}
+		})
+	}
+}
+
+// A retry keeps its source refusal actionable without duplicating the shared
+// eligibility policy used by single-source and train admission.
+func TestSingleSourcePromotionRetryNamesNewestRunAndGuidesRerun(t *testing.T) {
+	for _, status := range []model.RunStatus{model.RunFailed, model.RunInterrupted, model.RunQueued} {
+		t.Run(string(status), func(t *testing.T) {
+			git := &scriptedPromotionGit{}
+			fixture, _, service := newPromotionRetryHarness(t, git)
+			ctx := t.Context()
+			failed, err := fixture.store.AppendPromotion(ctx, model.PromotionSpec{
+				RepoID: fixture.repo.ID, SourceBranch: "feature/promote", SourceSHA: retrySourceSHA,
+				TargetRef: "main", Actor: "agent@host",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			failed, err = fixture.store.FinishPromotion(ctx, failed.ID, model.PromotionFailed, "", "fixture failure")
+			if err != nil {
+				t.Fatal(err)
+			}
+			newest, err := storetest.EnqueueRun(fixture.store, ctx, model.RunSpec{
+				RepoID: fixture.repo.ID, RefKind: model.RefBranch, Ref: "feature/promote",
+				SHA: retrySourceSHA, Actor: "agent@host", Trigger: "branch",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status != model.RunQueued {
+				_, err = fixture.store.FinishRun(ctx, newest.ID, model.RunResult{Status: status, Phase: "job", Error: "fixture failure"})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, err = service.CallTool(ctx, api.Actor{Identity: "agent@host", Admin: true}, "promote_retry", json.RawMessage(`{"id":"`+failed.ID+`"}`))
+			if !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("retry refusal = %v", err)
+			}
+			for _, want := range []string{"newest run", newest.ID, string(status), failed.ID, "rerun"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("retry refusal omits %q: %v", want, err)
+				}
+			}
+			lineage, readErr := fixture.store.PromotionLineage(ctx, failed.ID)
+			if readErr != nil || lineage.RetriedAs != "" {
+				t.Fatalf("refusal admitted retry: %+v, %v", lineage, readErr)
+			}
+			if prepared, pushed := git.counts(); prepared != 0 || pushed != 0 {
+				t.Fatalf("refusal touched Git: prepares=%d pushes=%d", prepared, pushed)
 			}
 		})
 	}
