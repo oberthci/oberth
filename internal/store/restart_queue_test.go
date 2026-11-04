@@ -95,7 +95,7 @@ func TestOwnerRestartPreservesWaitingQueue(t *testing.T) {
 			// Highest-priority work keeps admission order: the oldest tag,
 			// the next release, then the promotion. The bumped branch still
 			// leads ordinary queued work.
-			for _, index := range []int{1, 2, 3, 0, 4} {
+			for _, index := range []int{0, 1, 2, 3, 4} {
 				want := append(originals, later.Run)[index]
 				claimed, err := s.ClaimNextRun(ctx)
 				if err != nil || claimed.ID != want.ID {

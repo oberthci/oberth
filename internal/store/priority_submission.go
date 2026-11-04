@@ -32,15 +32,15 @@ INSERT OR IGNORE INTO run_priority_requests(run_id,requested,accepted,reason,act
  WHERE status IN ('queued','running') AND (` + legacyBasePrioritySQL + `) IN ('high','highest');`
 
 const requestedPrioritySQL = `(SELECT accepted FROM run_priority_requests WHERE run_id=id AND requested!='' AND accepted IN ('high','highest') AND refusal='')`
-const requestedPriorityReasonSQL = `(SELECT reason FROM run_priority_requests WHERE run_id=id AND requested!='' AND accepted IN ('high','highest') AND refusal='')`
 
 // Explicit priority, including an admin bump, survives later pushes. RC runs
 // retain the administrator's existing live classification.
-const supersessionEligibleSQL = `NOT EXISTS (SELECT 1 FROM run_priority_overrides WHERE run_id=runs.id) AND NOT EXISTS (SELECT 1 FROM run_priority_requests WHERE run_id=runs.id AND accepted IN ('high','highest')) AND (` + basePrioritySQL + `)='normal'`
+const supersessionEligibleSQL = `NOT EXISTS (SELECT 1 FROM run_priority_overrides WHERE run_id=runs.id) AND NOT EXISTS (SELECT 1 FROM run_priority_requests WHERE run_id=runs.id AND accepted IN ('low','promotion','high','highest')) AND (` + basePrioritySQL + `) IN ('standard','low')`
 
 func (s *Store) SetPriorityGrant(ctx context.Context, actor string, grant model.PriorityGrant) (model.PriorityGrant, error) {
-	if strings.TrimSpace(grant.Identity) == "" || len(grant.Identity) > 256 || strings.IndexFunc(grant.Identity, unicode.IsControl) >= 0 || (grant.MaxClass != model.PriorityHigh && grant.MaxClass != model.PriorityHighest) || (!grant.Expires.After(s.now()) || grant.Expires.UnixNano() <= s.now().UnixNano()) {
-		return model.PriorityGrant{}, fmt.Errorf("%w: identity, high/highest max_class and future expires required", ErrInvalid)
+	grant.MaxClass = grant.MaxClass.Canonical()
+	if strings.TrimSpace(grant.Identity) == "" || len(grant.Identity) > 256 || strings.IndexFunc(grant.Identity, unicode.IsControl) >= 0 || (grant.MaxClass != model.PriorityPromotion && grant.MaxClass != model.PriorityHigh) || (!grant.Expires.After(s.now()) || grant.Expires.UnixNano() <= s.now().UnixNano()) {
+		return model.PriorityGrant{}, fmt.Errorf("%w: identity, promotion/high max_class and future expires required", ErrInvalid)
 	}
 	grant.GrantedBy = actor
 	err := s.priorityGrantMutation(ctx, actor, "priority.grant", grant.Identity, grant, func(tx *sql.Tx) error {
@@ -96,6 +96,7 @@ func (s *Store) ListPriorityGrants(ctx context.Context) ([]model.PriorityGrant, 
 			return nil, err
 		}
 		g.Expires = fromUnixNano(expires)
+		g.MaxClass = g.MaxClass.Canonical()
 		grants = append(grants, g)
 	}
 	return grants, rows.Err()
@@ -107,7 +108,7 @@ func (s *Store) submissionPriorityTx(ctx context.Context, tx *sql.Tx, spec model
 	if spec.Priority == "" {
 		return "", "", "", nil
 	}
-	accepted := spec.Priority
+	accepted := spec.Priority.Canonical()
 	reason := strings.TrimSpace(spec.PriorityReason)
 	if reason == "" {
 		reason = "submission priority request"
@@ -117,14 +118,14 @@ func (s *Store) submissionPriorityTx(ctx context.Context, tx *sql.Tx, spec model
 		reason = "submission priority request"
 		refusal = "priority refused: reason must be 1..512 bytes without control characters"
 	}
-	if spec.Priority != model.PriorityHigh && spec.Priority != model.PriorityHighest && spec.Priority != model.PriorityNormal {
-		refusal = "priority refused: choose high or highest"
+	if !accepted.Valid() {
+		refusal = "priority refused: choose low, standard, promotion or high"
 	}
 	admin, err := priorityAdminTx(ctx, tx, spec)
 	if err != nil {
 		return "", "", "", err
 	}
-	if !admin && spec.Priority != model.PriorityNormal && refusal == "" {
+	if !admin && accepted.Rank() > model.PriorityStandard.Rank() && refusal == "" {
 		var maximum model.RunPriority
 		var expires int64
 		err := tx.QueryRowContext(ctx, `SELECT max_class,expires FROM priority_grants WHERE identity=?`, spec.Actor).Scan(&maximum, &expires)
@@ -135,7 +136,7 @@ func (s *Store) submissionPriorityTx(ctx context.Context, tx *sql.Tx, spec model
 			refusal = "priority refused: no admin grant for requesting identity"
 		} else if expires <= now {
 			refusal = "priority refused: admin grant expired"
-		} else if spec.Priority.Rank() > maximum.Rank() {
+		} else if accepted.Rank() > maximum.Rank() {
 			refusal = "priority refused: requested class exceeds admin grant"
 		}
 	}
@@ -174,7 +175,7 @@ func priorityAdminTx(ctx context.Context, tx *sql.Tx, spec model.RunSpec) (bool,
 func protectAutomaticPrioritiesTx(ctx context.Context, tx *sql.Tx) error {
 	_, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO run_priority_requests(run_id,requested,accepted,reason,actor,refusal)
  SELECT id,'',`+basePrioritySQL+`,`+priorityReasonSQL+`,actor,'' FROM runs
- WHERE status IN ('queued','running') AND (`+basePrioritySQL+`) IN ('high','highest')`)
+ WHERE status IN ('queued','running') AND (`+basePrioritySQL+`) IN ('promotion','high')`)
 	return err
 }
 

@@ -14,15 +14,15 @@ import (
 // work accepted before it.
 func TestPriorityReviewAgedNormalJoinsHighFIFOBelowExplicitHighest(t *testing.T) {
 	now := time.Now()
-	highBefore := &admissionReservation{priority: model.PriorityHigh, order: 1, sequence: 1, queuedAt: now.Add(-10 * time.Minute)}
+	highBefore := &admissionReservation{priority: model.PriorityPromotion, order: 1, sequence: 1, queuedAt: now.Add(-10 * time.Minute)}
 	aged := &admissionReservation{priority: model.PriorityNormal, order: 2, sequence: 2, queuedAt: now.Add(-time.Hour)}
-	highAfter := &admissionReservation{priority: model.PriorityHigh, order: 3, sequence: 3, queuedAt: now}
+	highAfter := &admissionReservation{priority: model.PriorityPromotion, order: 3, sequence: 3, queuedAt: now}
 	fresh := &admissionReservation{priority: model.PriorityNormal, order: 4, sequence: 4, queuedAt: now}
 	explicit := &admissionReservation{priority: model.PriorityHighest, priorityReason: "admin bump: release blocker", order: 5, sequence: 5, queuedAt: now}
-	if p := aged.effectivePriority(now); p != model.PriorityHigh {
+	if p := aged.effectivePriority(now); p != model.PriorityPromotion {
 		t.Fatalf("aged normal effective priority = %s, want high", p)
 	}
-	if p := highBefore.effectivePriority(now.Add(2 * time.Hour)); p != model.PriorityHigh {
+	if p := highBefore.effectivePriority(now.Add(2 * time.Hour)); p != model.PriorityPromotion {
 		t.Fatalf("aged high effective priority = %s, want high (never highest)", p)
 	}
 	waiters := []*admissionReservation{fresh, explicit, highAfter, aged, highBefore}

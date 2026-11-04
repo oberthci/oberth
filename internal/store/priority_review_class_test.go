@@ -18,13 +18,13 @@ func TestPriorityReviewRequestsOnlyRaiseAutomaticClass(t *testing.T) {
 		reason             string
 		refused            bool
 	}{
-		{"ungranted promotion", "promotion/main", "promotion", model.RefBranch, model.PriorityHigh, false, model.PriorityHighest, "promotion run", true},
-		{"admin high promotion", "promotion/main", "promotion", model.RefBranch, model.PriorityHigh, true, model.PriorityHighest, "promotion run", false},
-		{"typo RC", "rc/v1", "rc", model.RefBranch, "hgh", false, model.PriorityHigh, "release-candidate pattern: rc/*", true},
-		{"typo tag", "v1", "tag", model.RefTag, "hgh", false, model.PriorityHighest, model.TagReleasePriorityReason, true},
-		{"normal RC", "rc/v1", "branch", model.RefBranch, model.PriorityNormal, false, model.PriorityHigh, "release-candidate pattern: rc/*", false},
-		{"normal tag", "v1", "tag", model.RefTag, model.PriorityNormal, false, model.PriorityHighest, model.TagReleasePriorityReason, false},
-		{"invalid reason RC", "rc/v1", "branch", model.RefBranch, model.PriorityHighest, true, model.PriorityHigh, "release-candidate pattern: rc/*", true},
+		{"ungranted promotion", "promotion/main", "promotion", model.RefBranch, model.PriorityHigh, false, model.PriorityPromotion, "promotion run", true},
+		{"admin high promotion", "promotion/main", "promotion", model.RefBranch, model.PriorityHigh, true, model.PriorityHigh, "submission priority: urgent", false},
+		{"typo RC", "rc/v1", "rc", model.RefBranch, "hgh", false, model.PriorityPromotion, "release-candidate pattern: rc/*", true},
+		{"typo tag", "v1", "tag", model.RefTag, "hgh", false, model.PriorityPromotion, model.TagReleasePriorityReason, true},
+		{"normal RC", "rc/v1", "branch", model.RefBranch, model.PriorityNormal, false, model.PriorityPromotion, "release-candidate pattern: rc/*", false},
+		{"normal tag", "v1", "tag", model.RefTag, model.PriorityNormal, false, model.PriorityPromotion, model.TagReleasePriorityReason, false},
+		{"invalid reason RC", "rc/v1", "branch", model.RefBranch, model.PriorityHighest, true, model.PriorityPromotion, "release-candidate pattern: rc/*", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			now := time.Now()

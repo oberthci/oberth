@@ -3,23 +3,93 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/oberthci/oberth/internal/measured"
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
 )
 
 type resourceHistoryStub struct {
-	calls  int
-	filter store.RunResourceFilter
-	repoID int64
+	calls   int
+	filter  store.RunResourceFilter
+	repoID  int64
+	history store.RunResourceHistory
 }
 
 func (s *resourceHistoryStub) RunResources(_ context.Context, id int64, f store.RunResourceFilter) (store.RunResourceHistory, error) {
 	s.calls++
 	s.repoID = id
 	s.filter = f
-	return store.RunResourceHistory{}, nil
+	return s.history, nil
+}
+
+func TestRunResourcesRequiresResourceOnlyCapability(t *testing.T) {
+	for _, mode := range []string{"legacy", "explicit-false", "resource-only"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newScopeFixture(t)
+			reader := &resourceHistoryStub{}
+			at := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+			ptr := func(n int64) *int64 { return &n }
+			for i := range measured.MinimumSamples {
+				reader.history.Observations = append(reader.history.Observations, measured.Observation{
+					Template: "compile", Owner: f.visible.Name,
+					Usage:            model.StepResourceUsage{Version: 2, Source: "kubelet-cadvisor", RunID: fmt.Sprint(i), PodUID: fmt.Sprint(i), ContainerID: fmt.Sprint(i), ContainerName: "main", ContainerKind: "app", PodKind: "workflow", Stage: "build", TemplateName: "compile", Terminal: true, Samples: 4, ContainerStartedAt: at.Add(-10 * time.Second), ContainerFinishedAt: at, CPUTimeNS: ptr(5e9), CPUTimeAt: at, CPUPeakNanoCores: ptr(1e9), MemoryPeakBytes: ptr(512 << 20), EphemeralStoragePeakBytes: ptr(100 << 20)},
+					MemoryLimitBytes: ptr(2 << 30), CPULimitNanoCores: ptr(0), EphemeralLimitBytes: ptr(0),
+				})
+			}
+			f.service.runResources = reader
+			args := map[string]any{"repo": f.visible.Name}
+			if mode != "legacy" {
+				args["resource_only"] = mode == "resource-only"
+			}
+			got, err := f.call(scopedActor, "run_resources", args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			report := got.(measured.Report)
+			if len(report.Steps) != 1 {
+				t.Fatalf("missing measurements: %+v", report)
+			}
+			step := report.Steps[0]
+			if step.Attempts != 5 || step.Samples != 20 || *step.MemoryPeakBytes.Max != 512<<20 || *step.AverageCPUNanoCores.P95 != 500_000_000 || *step.EphemeralBytes.Max != 100<<20 || *step.DurationNS.Max != int64(10*time.Second) {
+				t.Fatalf("capability changed observations: %+v", step)
+			}
+			if mode == "resource-only" {
+				if step.Suggested == nil || !step.SizingAcceptance.Sufficient || step.Suggested.CPUMilli != 630 || step.Suggested.MemoryLimitBytes != 768<<20 || step.Suggested.EphemeralLimitBytes != 150<<20 || step.Suggested.ActiveDeadlineSeconds != 0 || !strings.Contains(step.DeadlineNoSuggestion, "finalization") {
+					t.Fatalf("supported resource advice: %+v", step)
+				}
+				return
+			}
+			// Previous CLIs decode into an int64 deadline, then unconditionally
+			// re-encode it and copy it into YAML whenever suggested is non-null.
+			body, err := json.Marshal(report)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var legacy struct {
+				Steps []struct {
+					Suggested *struct {
+						ActiveDeadlineSeconds int64 `json:"activeDeadlineSeconds"`
+					} `json:"suggested"`
+					NoSuggestion []string `json:"no_suggestion"`
+					Semantics    string   `json:"semantics"`
+				} `json:"steps"`
+			}
+			if err := json.Unmarshal(body, &legacy); err != nil {
+				t.Fatal(err)
+			}
+			if legacy.Steps[0].Suggested != nil {
+				t.Fatalf("previous CLI would fabricate a zero deadline: %s", body)
+			}
+			if step.SizingAcceptance.Sufficient || !strings.Contains(strings.Join(legacy.Steps[0].NoSuggestion, " "), "resource_only") || !strings.Contains(report.Semantics, "finalization") {
+				t.Fatalf("legacy client lacks explanation: %s", body)
+			}
+		})
+	}
 }
 func TestRunResourcesAuthorizesBeforeHistoryAndDefaults(t *testing.T) {
 	f := newScopeFixture(t)

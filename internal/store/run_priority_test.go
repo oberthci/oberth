@@ -47,10 +47,10 @@ func TestQueuePriorityClassificationAndFIFO(t *testing.T) {
 		t.Fatal(err)
 	}
 	rc, err = s.Run(ctx, rc.ID)
-	if err != nil || rc.Priority != model.PriorityHigh || !strings.Contains(rc.PriorityReason, "rc/*") {
+	if err != nil || rc.Priority != model.PriorityPromotion || !strings.Contains(rc.PriorityReason, "rc/*") {
 		t.Fatalf("RC classification: %+v %v", rc, err)
 	}
-	want := []string{release.ID, promotion.ID, rc.ID, normal.ID, normal2.ID}
+	want := []string{rc.ID, release.ID, promotion.ID, normal.ID, normal2.ID}
 	active, err := s.ListActiveRuns(ctx, model.RunListFilter{})
 	if err != nil {
 		t.Fatal(err)
@@ -104,18 +104,22 @@ func TestQueuePriorityStarvationAtBoundary(t *testing.T) {
 	}
 	now = now.Add(time.Nanosecond)
 	next, err = s.NextQueuedRun(ctx)
-	if err != nil || next.ID != tag.ID {
-		t.Fatalf("base highest lost to aged normal: %+v %v", next, err)
+	if err != nil || next.ID != normal.ID {
+		t.Fatalf("aged standard lost promotion FIFO: %+v %v", next, err)
 	}
-	if got, err := s.ClaimNextRun(ctx); err != nil || got.ID != tag.ID {
-		t.Fatalf("release claim: %+v %v", got, err)
+	if got, err := s.ClaimNextRun(ctx); err != nil || got.ID != normal.ID {
+		t.Fatalf("aged claim: %+v %v", got, err)
 	}
 	got, err := s.ClaimNextRun(ctx)
-	if err != nil || got.ID != normal.ID {
-		t.Fatalf("starved claim: %+v %v", got, err)
+	if err != nil || got.ID != tag.ID {
+		t.Fatalf("tag claim: %+v %v", got, err)
 	}
-	priority, reason := got.EffectivePriority(now)
-	if priority != model.PriorityHigh || !strings.Contains(reason, "aged") || strings.Contains(reason, "highest") {
+	aged, err := s.Run(ctx, normal.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	priority, reason := aged.EffectivePriority(now)
+	if priority != model.PriorityPromotion || !strings.Contains(reason, "aged") || strings.Contains(reason, "highest") {
 		t.Fatalf("aged display=%s/%s", priority, reason)
 	}
 }
@@ -144,7 +148,7 @@ func TestQueuePriorityBumpAuditedAndSurvivesReopen(t *testing.T) {
 	if _, err = s.SetQueuePriorityPatterns(ctx, "admin", []string{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.BumpRunPriority(ctx, "admin", second.ID, model.PriorityHigh, "lower"); !errors.Is(err, ErrInvalidState) {
+	if _, err = s.BumpRunPriority(ctx, "admin", second.ID, model.RunPriority("unknown"), "invalid class"); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("lower=%v", err)
 	}
 	reopened, err := Open(ctx, s.livePath, Options{Now: func() time.Time { return now }})
@@ -170,7 +174,7 @@ func TestQueuePriorityBumpAuditedAndSurvivesReopen(t *testing.T) {
 	if err = json.Unmarshal([]byte(details), &data); err != nil {
 		t.Fatal(err)
 	}
-	if actor != "admin" || data["previous_priority"] != "normal" || data["priority"] != "highest" || data["reason"] != "release blocker" {
+	if actor != "admin" || data["previous_priority"] != "standard" || data["priority"] != "high" || data["reason"] != "release blocker" {
 		t.Fatalf("audit=%s actor=%s", details, actor)
 	}
 	next, err = reopened.ClaimNextRun(ctx)
@@ -208,7 +212,7 @@ func TestQueuePriorityRestartRefireRetainsWaitAndBump(t *testing.T) {
 		t.Fatal(err)
 	}
 	p, _ := copy.EffectivePriority(now)
-	if p != model.PriorityHigh || !copy.QueuedAt.Equal(run.QueuedAt) {
+	if p != model.PriorityPromotion || !copy.QueuedAt.Equal(run.QueuedAt) {
 		t.Fatalf("restart reset aging clock: %+v", copy)
 	}
 	// A separately bumped item retains its explicit administrator reason.
@@ -313,7 +317,7 @@ func TestQueuePriorityHighAgesWithoutLosingFIFOToNormals(t *testing.T) {
 			t.Fatalf("aged claim at %d: %+v %v", i, next, err)
 		}
 		p, _ := next.EffectivePriority(now)
-		if p != model.PriorityHigh {
+		if p != model.PriorityPromotion {
 			t.Fatalf("aged %s priority=%s", want, p)
 		}
 		if _, err := s.MarkRunAdmitted(ctx, next.ID); err != nil {
@@ -354,7 +358,7 @@ func TestQueuePriorityTagsIndependentOfSizeGrantsAndBranchSignals(t *testing.T) 
 	for _, r := range ungranted {
 		want := model.PriorityNormal
 		if r.ID == tag.ID || r.ID == otherTag.ID {
-			want = model.PriorityHighest
+			want = model.PriorityPromotion
 		}
 		if r.Priority != want {
 			t.Fatalf("ungranted tag/branch classification: %+v; want %s", r, want)
@@ -366,7 +370,7 @@ func TestQueuePriorityTagsIndependentOfSizeGrantsAndBranchSignals(t *testing.T) 
 	for _, tc := range []struct {
 		id   string
 		want model.RunPriority
-	}{{tag.ID, model.PriorityHighest}, {otherTag.ID, model.PriorityHighest}, {ordinary.ID, model.PriorityNormal}} {
+	}{{tag.ID, model.PriorityPromotion}, {otherTag.ID, model.PriorityPromotion}, {ordinary.ID, model.PriorityNormal}} {
 		r, err := s.Run(ctx, tc.id)
 		if err != nil || r.Priority != tc.want {
 			t.Fatalf("scoped grant: %+v %v", r, err)
@@ -450,7 +454,7 @@ func TestQueuePriorityTagsIndependentOfSizeGrantsAndBranchSignals(t *testing.T) 
 	}
 }
 
-func TestQueuePriorityReleaseStreamPrecedesAgedNormal(t *testing.T) {
+func TestQueuePriorityAgedStandardJoinsPromotionStreamFIFO(t *testing.T) {
 	now := time.Now().UTC()
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
@@ -468,7 +472,7 @@ func TestQueuePriorityReleaseStreamPrecedesAgedNormal(t *testing.T) {
 		tag, err := s.EnqueueRun(ctx, spec)
 		want := model.PriorityNormal
 		if i == 0 {
-			want = model.PriorityHighest
+			want = model.PriorityPromotion
 		}
 		if err != nil || tag.Priority != want {
 			t.Fatalf("ungranted release %d: %+v %v", i, tag, err)
@@ -481,6 +485,13 @@ func TestQueuePriorityReleaseStreamPrecedesAgedNormal(t *testing.T) {
 		t.Fatalf("release did not overtake younger-than-60m branch: %+v %v", next, err)
 	}
 	now = origin.Add(time.Hour)
+	aged, err := s.ClaimNextRun(ctx)
+	if err != nil || aged.ID != old.ID {
+		t.Fatalf("aged branch lost promotion FIFO: %+v %v", aged, err)
+	}
+	if priority, _ := aged.EffectivePriority(now); priority != model.PriorityPromotion {
+		t.Fatalf("aging lost at the 60-minute boundary: %s", priority)
+	}
 	for _, tagID := range tags {
 		for _, read := range []func(context.Context) (model.Run, error){s.NextQueuedRun, s.ClaimNextRun} {
 			next, err := read(ctx)
@@ -496,13 +507,7 @@ func TestQueuePriorityReleaseStreamPrecedesAgedNormal(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	aged, err := s.ClaimNextRun(ctx)
-	if err != nil || aged.ID != old.ID {
-		t.Fatalf("aged branch did not follow the tag stream: %+v %v", aged, err)
-	}
-	if priority, _ := aged.EffectivePriority(now); priority != model.PriorityHigh {
-		t.Fatalf("aging lost at the 60-minute boundary: %s", priority)
-	}
+
 }
 
 func TestQueuePriorityOneWaitingTagPerRepoAndAdminOptOut(t *testing.T) {
@@ -535,10 +540,10 @@ func TestQueuePriorityOneWaitingTagPerRepoAndAdminOptOut(t *testing.T) {
 			t.Fatalf("priority=%+v %v; want %s/%s", r, err, want, reason)
 		}
 	}
-	check(first.ID, model.PriorityHighest, "oldest waiting")
+	check(first.ID, model.PriorityPromotion, "oldest waiting")
 	check(second.ID, model.PriorityNormal, "earlier tag")
 	check(third.ID, model.PriorityNormal, "earlier tag")
-	check(otherTag.ID, model.PriorityHighest, "oldest waiting")
+	check(otherTag.ID, model.PriorityPromotion, "oldest waiting")
 	claimed, err := s.ClaimNextRun(ctx)
 	if err != nil || claimed.ID != first.ID || claimed.StartedAt != nil {
 		t.Fatalf("claim=%+v %v", claimed, err)
@@ -548,12 +553,12 @@ func TestQueuePriorityOneWaitingTagPerRepoAndAdminOptOut(t *testing.T) {
 	if _, err := s.MarkRunAdmitted(ctx, first.ID); err != nil {
 		t.Fatal(err)
 	}
-	check(second.ID, model.PriorityHighest, "oldest waiting")
+	check(second.ID, model.PriorityPromotion, "oldest waiting")
 	check(third.ID, model.PriorityNormal, "earlier tag")
 	if _, err := s.FinishRun(ctx, second.ID, model.RunResult{Status: model.RunFailed}); err != nil {
 		t.Fatal(err)
 	}
-	check(third.ID, model.PriorityHighest, "oldest waiting")
+	check(third.ID, model.PriorityPromotion, "oldest waiting")
 	// Admin opt-out works on a never-granted repository, survives future tags
 	// and does not disable other repos, promotions, explicit bumps or aging.
 	grant, err := s.SetSizeGrant(ctx, repo.ID, "admin", "")
@@ -563,7 +568,7 @@ func TestQueuePriorityOneWaitingTagPerRepoAndAdminOptOut(t *testing.T) {
 	check(third.ID, model.PriorityNormal, "disabled by size_revoke")
 	newTag := enqueue(repo.ID, "junk-4")
 	check(newTag.ID, model.PriorityNormal, "disabled by size_revoke")
-	check(otherTag.ID, model.PriorityHighest, "oldest waiting")
+	check(otherTag.ID, model.PriorityPromotion, "oldest waiting")
 	if _, err := s.BumpRunPriority(ctx, "admin", third.ID, model.PriorityHigh, "intentional expedite"); err != nil {
 		t.Fatal(err)
 	}
@@ -571,14 +576,14 @@ func TestQueuePriorityOneWaitingTagPerRepoAndAdminOptOut(t *testing.T) {
 	spec := testRunSpec(repo.ID, "promotion/main/1", strings.Repeat("b", 40))
 	spec.Trigger = "promotion"
 	promotion, err := s.EnqueueRun(ctx, spec)
-	if err != nil || promotion.Priority != model.PriorityHighest {
+	if err != nil || promotion.Priority != model.PriorityPromotion {
 		t.Fatalf("promotion disabled=%+v %v", promotion, err)
 	}
 	// L is sufficient to opt back in; the per-repo cap still applies.
 	if _, err := s.SetSizeGrant(ctx, repo.ID, "admin", pipeline.L); err != nil {
 		t.Fatal(err)
 	}
-	check(third.ID, model.PriorityHighest, "oldest waiting")
+	check(third.ID, model.PriorityHigh, "admin bump")
 	if bumped, err := s.Run(ctx, third.ID); err != nil || bumped.PriorityOverride != model.PriorityHigh || bumped.PriorityOverrideReason != "intentional expedite" {
 		t.Fatalf("automatic boost discarded explicit fallback: %+v %v", bumped, err)
 	}

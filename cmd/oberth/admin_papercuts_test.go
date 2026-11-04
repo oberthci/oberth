@@ -100,7 +100,7 @@ func papercutCall(t *testing.T, tool string, args any) (string, error) {
 func TestAdminPapercutPriorityCLIAndReadback(t *testing.T) {
 	f := newPapercutFixture(t)
 	run := f.run(t, "feature/priority")
-	for _, priority := range []string{"normal", "low"} {
+	for _, priority := range []string{"low", "standard", "promotion", "high", "normal", "highest"} {
 		args := map[string]any{"run_id": run.ID[:8], "priority": priority, "reason": "let the queue move"}
 		output, err := papercutCall(t, "run_priority", args)
 		if err != nil || !strings.Contains(output, "let the queue move") {
@@ -111,7 +111,7 @@ func TestAdminPapercutPriorityCLIAndReadback(t *testing.T) {
 		if err = json.Unmarshal(reply.Body.Bytes(), &detail); err != nil {
 			t.Fatal(err)
 		}
-		if reply.Code != http.StatusOK || string(detail.Run.Priority) != priority || !strings.Contains(detail.Run.PriorityReason, "let the queue move") {
+		if reply.Code != http.StatusOK || detail.Run.Priority != model.RunPriority(priority).Canonical() || !strings.Contains(detail.Run.PriorityReason, "let the queue move") {
 			t.Fatalf("priority REST readback=%d %s", reply.Code, reply.Body)
 		}
 	}

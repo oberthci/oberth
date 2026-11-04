@@ -11,14 +11,18 @@ import (
 // or terminal work freezes at its base class.
 func TestEffectivePriorityAgesNormalIntoHighOnlyAndFreezes(t *testing.T) {
 	queued := time.Now()
-	for _, base := range []RunPriority{PriorityNormal, PriorityHigh} {
+	for _, base := range []RunPriority{PriorityStandard, PriorityPromotion, PriorityHigh} {
 		t.Run(string(base), func(t *testing.T) {
 			run := Run{Priority: base, PriorityReason: "base", QueuedAt: queued}
 			if p, reason := run.EffectivePriority(queued.Add(time.Hour - time.Nanosecond)); p != base || reason != "base" {
 				t.Fatalf("aged too soon: %s/%s", p, reason)
 			}
+			want := base
+			if base == PriorityStandard {
+				want = PriorityPromotion
+			}
 			p, reason := run.EffectivePriority(queued.Add(time.Hour))
-			if p != PriorityHigh {
+			if p != want {
 				t.Fatalf("boundary priority/reason=%s/%s, want high", p, reason)
 			}
 			if base == PriorityNormal && (!strings.Contains(reason, "aged") || strings.Contains(reason, "highest")) {
@@ -27,7 +31,7 @@ func TestEffectivePriorityAgesNormalIntoHighOnlyAndFreezes(t *testing.T) {
 			if base == PriorityHigh && reason != "base" {
 				t.Fatalf("high work aged: %s/%s", p, reason)
 			}
-			if p, _ := run.EffectivePriority(queued.Add(24 * time.Hour)); p != PriorityHigh {
+			if p, _ := run.EffectivePriority(queued.Add(24 * time.Hour)); p != want {
 				t.Fatalf("waiting a day aged into %s", p)
 			}
 			started := queued.Add(time.Minute)
@@ -41,7 +45,7 @@ func TestEffectivePriorityAgesNormalIntoHighOnlyAndFreezes(t *testing.T) {
 			}
 		})
 	}
-	if p, _ := (Run{Priority: PriorityHighest, QueuedAt: queued}).EffectivePriority(queued.Add(2 * time.Hour)); p != PriorityHighest {
+	if p, _ := (Run{Priority: PriorityHighest, QueuedAt: queued}).EffectivePriority(queued.Add(2 * time.Hour)); p != PriorityHigh {
 		t.Fatalf("highest work changed class: %s", p)
 	}
 }

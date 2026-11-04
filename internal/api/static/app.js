@@ -177,7 +177,11 @@ function displayRunStatus(run) {
   return run.Status;
 }
 function scheduleBadge(run) { return run.Trigger === "schedule" && run.ScheduleEntry ? `<span class="v4b dim" title="schedule entry">${esc(run.ScheduleEntry)}</span>` : ""; }
-function priorityBadge(run) { return run.priority_class ? `<span class="v4b dim" title="${esc(run.priority_reason || "")}">${esc(run.priority_class)} priority</span>` : ""; }
+function priorityClass(run) {
+  const name = run.priority_class || "standard";
+  return name === "normal" ? "standard" : name === "highest" ? "high" : name;
+}
+function priorityBadge(run) { return run.priority_class ? `<span class="v4b dim" title="${esc(run.priority_reason || "")}">${esc(priorityClass(run))} priority</span>` : ""; }
 function releaseBadge(run) { return priorityBadge(run) + (run.Release ? '<span class="v4b release">⏏ RELEASE</span>' : ""); }
 function runDuration(run) {
   return spanSeconds(run.StartedAt, run.FinishedAt, run.Status === "running");
@@ -447,7 +451,7 @@ function orderRuns(runs) {
   const positioned = queued.length > 0 && queued.every(run => run.QueuePosition > 0 || run.Scheduling?.queue_position > 0);
   const activeIndex = new Map(state.activeRuns.map((run, index) => [run.ID, index + 1]));
   const position = run => positioned ? run.QueuePosition || run.Scheduling?.queue_position : activeIndex.get(run.ID) || 0;
-  const priorityRank = run => run.priority_class === "highest" ? 2 : run.priority_class === "high" ? 1 : 0;
+  const priorityRank = run => ({low:-1, standard:0, promotion:1, high:2})[priorityClass(run)] ?? 0;
   const stamp = value => { const parsed = Date.parse(value || ""); return Number.isFinite(parsed) ? parsed : 0; };
   return runs.map((run, index) => ({ run, index })).sort((a, b) => {
     const group = runListGroup(a.run) - runListGroup(b.run);
@@ -535,7 +539,7 @@ function tickRunTimers() {
 setInterval(tickRunTimers, 1000);
 function prioritySummary(run) {
   const position = run.QueuePosition || run.Scheduling?.queue_position;
-  return [`priority ${run.priority_class || "normal"}`, run.priority_requested_by ? `requested by ${run.priority_requested_by}` : "", run.priority_reason, position ? `queue position ${position}` : "", run.priority_refusal].filter(Boolean).join(" · ");
+  return [`priority ${priorityClass(run)}`, run.priority_requested_by ? `requested by ${run.priority_requested_by}` : "", run.priority_reason, position ? `queue position ${position}` : "", run.priority_refusal].filter(Boolean).join(" · ");
 }
 function runMessageCell(run) {
   const message = rowMessage(run);
