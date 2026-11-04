@@ -674,13 +674,14 @@ func runRepos(ctx context.Context, arguments []string, output io.Writer) error {
 }
 
 type remoteHealthStatus struct {
-	Database     string `json:"database"`
-	Upstreams    int    `json:"upstreams"`
-	Repositories int    `json:"repositories"`
-	VCS          string `json:"vcs"`
-	Cluster      string `json:"cluster"`
-	Audit        string `json:"audit"`
-	Version      string `json:"version,omitempty"`
+	ClusterDetail string `json:"cluster_detail,omitempty"`
+	Database      string `json:"database"`
+	Upstreams     int    `json:"upstreams"`
+	Repositories  int    `json:"repositories"`
+	VCS           string `json:"vcs"`
+	Cluster       string `json:"cluster"`
+	Audit         string `json:"audit"`
+	Version       string `json:"version,omitempty"`
 }
 
 func runRemoteStatus(ctx context.Context, arguments []string, output io.Writer) error {
@@ -703,10 +704,14 @@ func runRemoteStatus(ctx context.Context, arguments []string, output io.Writer) 
 	if err := api.Get(ctx, "/api/status", nil, &status); err != nil {
 		return err
 	}
+	cluster := status.Cluster
+	if status.ClusterDetail != "" {
+		cluster += " (" + status.ClusterDetail + ")"
+	}
 	for _, row := range []struct{ label, value string }{
 		{"database:", status.Database},
 		{"vcs:", status.VCS},
-		{"cluster:", status.Cluster},
+		{"cluster:", cluster},
 		{"audit:", status.Audit},
 		{"version:", status.Version},
 		{"upstreams:", fmt.Sprint(status.Upstreams)},

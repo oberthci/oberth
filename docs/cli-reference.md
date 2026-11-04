@@ -1218,6 +1218,8 @@ Usage of serve:
         mounted ConfigMap key to reload max concurrent Jobs without restart; invalid or missing keeps the last good value
   -namespace string
         Kubernetes namespace (default "oberth")
+  -pipeline-network-policy-enabled value
+        configured chart networkPolicy.enabled (true or false); omitted means unavailable, not measured CNI enforcement
   -promotion-grant-max-lifetime duration
         maximum lifetime for promotion grants (default 24h, hard ceiling 168h) (default 24h0m0s)
   -push-banner-url string

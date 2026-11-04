@@ -161,6 +161,8 @@ type serveOptions struct {
 	secretStoreTransitKey   string
 	secretStoreInsecureHTTP bool
 
+	pipelineNetworkPolicyEnabled *bool
+
 	// Argo execution engine. Leaving argoNamespace empty leaves the engine
 	// off entirely, which is the default: every repository then runs on the
 	// Argo Workflow engine exactly as before.
@@ -322,6 +324,14 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.secretStoreTransitKey, "secretstore-transit-key", "", "OpenBao transit key for trusted Plan artifacts")
 	flags.BoolVar(&options.secretStoreInsecureHTTP, "secretstore-insecure-http", false, "DEVELOPMENT ONLY: allow a plain-HTTP OpenBao address")
 	flags.StringVar(&options.argoNamespace, "argo-namespace", "", "namespace for Argo Workflow pipelines (required)")
+	flags.Func("pipeline-network-policy-enabled", "configured chart networkPolicy.enabled (true or false); omitted means unavailable, not measured CNI enforcement", func(value string) error {
+		if value != "true" && value != "false" {
+			return errors.New("pipeline NetworkPolicy configuration must be true or false")
+		}
+		enabled := value == "true"
+		options.pipelineNetworkPolicyEnabled = &enabled
+		return nil
+	})
 	flags.StringVar(&options.argoExecutorScratchSizeLimit, "argo-executor-scratch-size-limit", "1Gi", "per-Pod Argo executor scratch size limit (Kubernetes quantity)")
 	flags.StringVar(&options.argoControllerProfile, "argo-controller-profile", "", "exact controller profile to verify before nonroot submission; empty disables nonroot")
 	flags.StringVar(&options.argoSourceStorageClass, "argo-source-storage-class", "", "storage class for per-run pipeline source volumes (empty: cluster default)")
@@ -892,7 +902,13 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return fmt.Errorf("load HTTPS identity: %w", err)
 	}
-	health := app.Health{WriterReady: writerProgress.ProbeError, Store: database, Audit: anchors.Ready, VCSCache: &app.VCSSnapshot{}, Configured: upstreamReadinessProbe(options), VCS: func(ctx context.Context, upstream model.Upstream) error {
+	health := configuredHealth(options)
+	health.WriterReady = writerProgress.ProbeError
+	health.Store = database
+	health.Audit = anchors.Ready
+	health.VCSCache = &app.VCSSnapshot{}
+	health.Configured = upstreamReadinessProbe(options)
+	health.VCS = func(ctx context.Context, upstream model.Upstream) error {
 		if upstream.Kind == "local" {
 			info, err := os.Stat(upstream.BaseURL)
 			if err != nil {
@@ -923,13 +939,14 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		}
 		// Asserts endpoint reachability + pinned host key + accepted identity.
 		return app.ProbeSSHAuthentication(ctx, upstream.BaseURL, privateKey, knownHostsData)
-	}, Cluster: func(ctx context.Context) error {
+	}
+	health.Cluster = func(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		err := kube.Discovery().RESTClient().Get().AbsPath("/version").Do(ctx).Error()
 		return err
-	}}
+	}
 	health.ReadyGate = func(context.Context) error {
 		if !scheduler.Recovered() {
 			return errors.New("scheduler recovery is pending")
@@ -955,7 +972,6 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		}
 		return app.SSHPublicKeyFingerprint(options.upstreamKey)
 	}
-	health.SecretStore = secretStoreStatus(options)
 	if options.secretStoreAddress != "" {
 		probeClient, probeErr := buildSecretStoreProbeClient(options)
 		if probeErr != nil {
@@ -2263,4 +2279,9 @@ func shutdownHTTP(ctx context.Context, server *http.Server) error {
 		return errors.Join(err, server.Close())
 	}
 	return nil
+}
+
+// configuredHealth carries deployment configuration into both status views.
+func configuredHealth(options serveOptions) app.Health {
+	return app.Health{SecretStore: secretStoreStatus(options), PipelineNetworkPolicyEnabled: options.pipelineNetworkPolicyEnabled}
 }

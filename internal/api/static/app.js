@@ -1528,7 +1528,7 @@ async function renderStatus(seq) {
     <div class="svc-grid">
       ${svcCard("database", s.database || "unavailable", `${esc(s.upstreams ?? 0)} upstream${s.upstreams === 1 ? "" : "s"} · ${esc(s.repositories ?? 0)} repos`)}
       ${svcCard("upstream vcs", s.vcs || "unavailable", "")}
-      ${svcCard("kubernetes", s.cluster || "unavailable", "")}
+      ${svcCard("kubernetes", s.cluster || "unavailable", esc(s.cluster_detail || ""))}
       ${svcCard("audit anchor", s.audit || "unavailable", chain && chain.detail ? esc(chain.detail) : s.audit_mode === "local" ? "local hash chain — external anchoring off" : "")}
       ${svcCard("secret store", storeValue, store && store.address ? esc(store.address) : "OpenBao release secrets disabled", storeMood)}
       ${svcCard("server", s.version || document.body.dataset.version || "dev", "", "ok")}
