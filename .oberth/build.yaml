@@ -1033,7 +1033,7 @@ spec:
   # remainder discovered by go list ./.... Git-cache already has a required
   # parallel burn below; exclude it from rest to avoid running that suite twice.
   # The package-union contract covers new packages.
-  # All groups keep the race detector and uncached execution. The explicit
+  # All groups keep the race detector and uncached execution.
   # Whole-group watchdogs retain measured 1.5x wall-time headroom.
   # Give each group a bounded two-CPU lane; workflow parallelism remains two.
   - name: deadcode
@@ -1099,7 +1099,7 @@ spec:
   # remainder discovered by go list ./.... Git-cache already has a required
   # parallel burn below; exclude it from rest to avoid running that suite twice.
   # The package-union contract covers new packages.
-  # All groups keep the race detector and uncached execution. The explicit
+  # All groups keep the race detector and uncached execution.
   # Whole-group watchdogs retain measured 1.5x wall-time headroom.
   # Give each group a bounded two-CPU lane; workflow parallelism remains two.
   - name: test-store
