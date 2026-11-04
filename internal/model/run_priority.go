@@ -9,54 +9,77 @@ import (
 type RunPriority string
 
 const (
-	PriorityLow            RunPriority = "low"
-	PriorityNormal         RunPriority = "normal"
-	PriorityHigh           RunPriority = "high"
-	PriorityHighest        RunPriority = "highest"
-	PriorityStarvationWait             = time.Hour
-	// PriorityAgedReason explains a normal run raised into high by waiting.
-	PriorityAgedReason = "aged: normal run waited at least 60 minutes"
+	PriorityLow       RunPriority = "low"
+	PriorityStandard  RunPriority = "standard"
+	PriorityPromotion RunPriority = "promotion"
+	PriorityHigh      RunPriority = "high"
+	// Compatibility alias for PriorityStandard; legacy wire inputs are normalized separately.
+	PriorityNormal = PriorityStandard
+	// Compatibility alias for PriorityHigh; legacy wire inputs are normalized separately.
+	PriorityHighest        = PriorityHigh
+	PriorityStarvationWait = time.Hour
+	// PriorityAgedReason explains standard work joining delivery FIFO, never urgency.
+	PriorityAgedReason = "aged: standard run waited at least 60 minutes"
 	// TagReleasePriorityReason identifies the automatic boost, so size limits
 	// never downgrade an explicit admin bump or a promotion.
 	TagReleasePriorityReason = "tag/release run: oldest waiting server-classified tag ref"
 )
 
-func (p RunPriority) Rank() int {
+// Canonical accepts the two legacy input names without emitting them.
+// Explicit legacy high/highest authority maps to high. Automatic historical
+// protection rows are classified separately by the store, never as urgency.
+func (p RunPriority) Canonical() RunPriority {
 	switch p {
+	case "normal":
+		return PriorityStandard
+	case "highest":
+		return PriorityHigh
+	default:
+		return p
+	}
+}
+
+func (p RunPriority) Valid() bool {
+	switch p.Canonical() {
+	case PriorityLow, PriorityStandard, PriorityPromotion, PriorityHigh:
+		return true
+	default:
+		return false
+	}
+}
+
+func (p RunPriority) Rank() int {
+	switch p.Canonical() {
 	case PriorityLow:
 		return -1
-	case PriorityHighest:
-		return 2
-	case PriorityHigh:
+	case PriorityPromotion:
 		return 1
+	case PriorityHigh:
+		return 2
 	default:
 		return 0
 	}
 }
 
-// EffectivePriority ages a normal run that has waited PriorityStarvationWait
-// up one class, into high, at its own queue position. It never ages work
-// into highest: promotions, the oldest waiting tag release and explicit
-// administrator bumps keep that class to themselves, so a backed-up queue
-// cannot turn every run "highest" and erase the priority line.
-// Explicit normal/low admin overrides do not age. Within a class the order
-// stays FIFO, which bounds the aged run's wait: every high
-// run accepted after it waits behind it. Admission/end freezes aging.
+// EffectivePriority ages standard work only into promotion at its existing
+// FIFO position. Neither aging nor a ref can manufacture high authority.
+// Every explicit admin override pins its class, including a lowered promotion.
+// Admission/end freezes the aging clock; running work is never preempted.
 func (run Run) EffectivePriority(now time.Time) (RunPriority, string) {
-	priority, reason := run.Priority, run.PriorityReason
+	priority, reason := run.Priority.Canonical(), run.PriorityReason
 	if priority == "" {
-		priority, reason = PriorityNormal, "ordinary run"
+		priority, reason = PriorityStandard, "ordinary run"
 	}
 	if run.StartedAt != nil {
 		now = *run.StartedAt
 	} else if run.FinishedAt != nil {
 		now = *run.FinishedAt
 	}
-	if run.PriorityOverride == PriorityNormal || run.PriorityOverride == PriorityLow {
+	if run.PriorityOverride != "" {
 		return priority, reason
 	}
-	if priority == PriorityNormal && !run.QueuedAt.IsZero() && now.Sub(run.QueuedAt) >= PriorityStarvationWait {
-		return PriorityHigh, PriorityAgedReason
+	if priority == PriorityStandard && !run.QueuedAt.IsZero() && now.Sub(run.QueuedAt) >= PriorityStarvationWait {
+		return PriorityPromotion, PriorityAgedReason
 	}
 	return priority, reason
 }

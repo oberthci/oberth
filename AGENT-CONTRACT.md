@@ -470,68 +470,39 @@ trust assumptions and complete invalidation rules.
   XL), S ≤ M ≤ L ≤ XL; sizes left unset keep their defaults. The queue-head
   message names a finite XL by weight ("XL · 11w") and a whole-budget XL as
   "needs a full drain". S packing uses the configured S and M weights.
-- Run priority is computed server-side: `highest` for promotion runs and the
-  oldest waiting server-classified tag per repository (tag ref plus release
-  flag or tag/release trigger). Claimed but unadmitted tags count as waiting;
-  later tags stay normal. No grant record enables the automatic tag boost up
-  to L. Exact-checkout size above the repository maximum withholds that boost
-  and explains why in admission/run projections; the tag keeps its execution
-  size. Before checkout priority is provisional. `size_revoke` durably disables
-  the automatic boost, including on never-granted repos; `size_grant` with L/XL
-  re-enables it within the maximum. Existing revoked records also opt out.
-  Local MCP grant/revoke refreshes waiters immediately; CLI changes are polled.
-  Explicit admin bumps, promotions and aging remain independent. Branch
-  names/flags/triggers cannot claim automatic release priority. `high` also
-  covers administrator RC globs, otherwise the default is `normal`.
-  Submission priority is requested with `git push -o oberth.priority=high|highest`
-  or optional MCP `priority` on promote, rerun, retry, schedule_trigger and sync.
-  Unscoped admins may request it directly; other identities need an unexpired
-  `priority_grant {identity,max_class,expires}`. Push admin authority uses its
-  authenticated key fingerprint, which survives receive replay; an identity
-  alias cannot inherit another key's admin role or wider scope.
-  A refusal keeps the run normal,
-  records its reason and never rejects the push. Repository schedules can set a
-  default priority but cron still requires a grant for `oberth:scheduler`.
-  Priority submissions never cancel existing work; once accepted, priority runs
-  survive supersession. Explicit cancellation or `oberth.supersede=true` needs
-  the requester or an unscoped admin. Schema v39 stores grants and request
-  provenance, including lasting supersession protection for automatic priority.
-  Both durable claims
-  and weighted admission sort by effective class, then original admission FIFO.
-  A normal run waiting 60 minutes ages into `high` with its original FIFO
-  place and the reason `aged: normal run waited at least 60 minutes`; high
-  work does not age and nothing ages into `highest`, so promotions, the oldest
-  waiting tag release and explicit `highest` bumps always lead. High runs
-  accepted after an aged run wait behind it; sustained `highest` arrivals can
-  still delay it without limit. Automatic restart refires preserve its wait
-  and explicit admin bump. Existing
-  grants are never preempted. Backfill/head-wait rules preserve the head's
-  priority reservation.
-  v0.17.81 refuses every backfill behind an effective high/highest head,
-  including an aged normal head. From v0.17.82, measured EASY backfill
-  admits later work only when its measured p95 ends strictly before the head
-  reservation, or it shares the head's effective and base priority classes
-  and leaves enough declared demand and run slots
-  for the head alongside all surviving grants. Group/VM parking still
-  releases weight and lets unrelated work proceed. Bounded extra priority claims
-  let higher classes reach the gate past ordinary waiting dispatch slots.
-  `priority_class`, `priority_reason` and `priority_requested_by` are run projections;
-  `priority_refusal` explains refused requests and queue views show positions; active
-  `display_reason` and the dashboard run-detail priority badge also explain them.
-  Unscoped-admin MCP `queue_priority_config {rc_patterns}` atomically replaces
-  up to 16 case-sensitive globs (1..256 bytes, `*`/`?` match slash; `[]` disables).
-  Defaults have no RC globs. `queue_priority_get {}` reads them and the fixed
-  60-minute starvation threshold. `run_priority {run_id, priority, reason}` raises
-  one unadmitted run to `high`/`highest`, or pins it at `normal`/`low` with a
-  required reason. Explicit normal/low choices override automatic classification
-  and never age; ordinary normal runs still age into high. No granted work is
-  preempted, and non-admin rules are unchanged. Config and
-  priority mutations use the audit gate and atomically append `queue.priority.config`
-  / `run.priority` with actor, previous value and reason. Waiting reservations
-  refresh on notification and a 15-second poll; admin calls refresh local
-  waiting reservations before returning. Schema v34 stores only admin patterns
-  and per-run overrides, never repository declarations.
-  See [release-priority.md](docs/release-priority.md) for resource and fairness bounds.
+- Execution priority has four canonical classes: `low < standard < promotion < high`.
+  Ordinary builds default to standard. Server-classified promotions and the oldest
+  eligible waiting tag/release per repository use promotion, as do admin RC globs.
+  Standard work ages into promotion after 60 minutes at its original FIFO place;
+  neither a ref, tag, promotion, pattern nor aging can create high urgency.
+  High requires an explicit unscoped-admin or unexpired priority-grant request.
+  A promotion-only grant cannot authorize high. SSH checks the exact authenticated
+  key fingerprint, never an identity alias; scoped admins need a grant.
+  Low is deliberate background work and never ages. Every explicit admin override
+  pins its class. `run_priority {run_id, priority, reason}` sets any waiting class,
+  including lowering high to promotion/standard/low; it cannot preempt admitted work.
+  Audit records retain actor, prior/selected class and reason. Admission FIFO,
+  pressure/resource/group/hold checks, measured backfill and bounded dispatch
+  capacity remain. Local changes refresh waiters immediately; polling is 15s.
+  Tag eligibility still honors oldest-waiter, exact-checkout size and size-revoke
+  rules; losing an automatic boost retains authorized explicit fallback, otherwise
+  standard. Release execution itself is not refused by that advisory lookup.
+  Submission transports and schedules accept the four names. Promotion/high need
+  authenticated authority; low/standard need no urgency grant. A standard request
+  does not lower natural delivery priority. Sync only raises an existing waiting
+  build; explicit lowering uses admin run_priority. Accepted priority and automatic
+  protection survive supersession, replay, restart and eligible infrastructure
+  refire, retaining original FIFO and reasons. Explicit protected supersession
+  still requires requester/admin authority and respects publication/cleanup guards.
+  Legacy input normal maps to standard; authorized high/highest requests, overrides
+  and grants map to high. Automatic legacy high/highest protection rows with an
+  empty requested field confer no high authority. The timestamp migration
+  `20261104190000-priority-four-classes` extends CHECK vocabularies and preserves
+  raw historical rows and audit chains. Shipped migration 39 and admin-lowering SQL
+  remain unchanged. Canonical API/CLI/MCP/dashboard output uses only the four names;
+  MCP accepts deprecated normal/highest input aliases for current clients.
+  No run status or layout changes. See [release-priority.md](docs/release-priority.md)
+  for the exact compatibility, resource and fairness rules.
 - Bounded backfill (#1085): when the queue head (the first claimed,
   prepared, unparked run) does not fit, later runs that fit the spare weight
   are admitted beside it, marked `backfilled`, until the head has waited
@@ -2807,6 +2778,8 @@ and v2 backup-and-replace semantics are unchanged. See
 | `20261104022000-migration-ids` | Migration IDs | Add/backfill unique IDs in the existing ledger, preserving integer receipts and timestamps; future definitions load from separate SQL files | Database restore |
 | `20261104130000-queue-cap` | Optional queue cap | Persist queueCap.maxNotStarted (default 0/off) and FIFO deferred branch receives; preserve the frozen integer catalog | Database restore |
 | `YYYYMMDDHHMMSS-<slug>-<random>` | Future migrations | Per-file `Purpose` and `Rollback` contract in `internal/store/migrations/`; no shared number allocation | Per-file contract (database restore by default) |
+
+Timestamp migration `20261104190000-priority-four-classes`: extend execution-priority vocabulary while preserving legacy receipts; rollback restores the pre-upgrade backup.
 
 **Contract tests:** `TestEveryMigrationDocumentedInAgentContract` checks all
 legacy table entries and each timestamped file's contract comments.

@@ -224,7 +224,7 @@ func (scheduler *Scheduler) priorityDispatchAvailable(ctx context.Context, activ
 		return false, nil
 	}
 	// Normal dispatch can already reach the weight budget plus parked claims.
-	// Priority adds only the two non-normal classes.
+	// Priority adds only the two classes above standard; low work adds no slot.
 	gate := scheduler.admission
 	gate.mu.Lock()
 	ceiling := gate.capacity + scheduler.concurrentJobsLocked() + 2
@@ -250,7 +250,7 @@ func (scheduler *Scheduler) priorityDispatchAvailable(ctx context.Context, activ
 			continue
 		}
 		rp := r.effectivePriority(gate.clock())
-		if rp.Rank() > p.Rank() || (rp.Rank() == p.Rank() && (p != model.PriorityHighest || !admissionBefore(candidate, r))) {
+		if rp.Rank() > p.Rank() || (rp.Rank() == p.Rank() && !admissionBefore(candidate, r)) {
 			return false, nil
 		}
 		lower = true
@@ -285,7 +285,7 @@ func (r *admissionReservation) priorityRun() model.Run {
 		if r.priorityOverride != "" {
 			run.Priority = r.priorityOverride
 			run.PriorityReason = "admin bump: " + r.priorityOverrideReason
-		} else if r.priorityAccepted == model.PriorityHigh || r.priorityAccepted == model.PriorityHighest {
+		} else if r.priorityAccepted != "" && r.priorityAccepted != model.PriorityStandard {
 			run.Priority = r.priorityAccepted
 			run.PriorityReason = "submission priority: " + r.priorityAcceptedReason
 		}

@@ -1,142 +1,135 @@
-# Release priority and fairness
+# Execution priority and fairness
 
-The scheduler computes queue priority from server-recorded run metadata.
-The oldest waiting tag/release run per repository gets automatic `highest`
-priority when its stored ref kind is `tag` and it carries the release flag or
-`tag`/`release` trigger. Later tags of that repository stay `normal`. Waiting
-includes claimed runs until resource admission (`started_at`); admission or
-termination releases the repository's automatic boost for its next tag.
-Promotions are also `highest`. Administrator-configured RC branch patterns
-are `high`; other work is `normal`. Explicit admin bumps and aging can still
-raise any waiting run independently of the automatic tag cap.
+Waiting admission uses four classes, in this order:
 
-Branch names, a branch's release flag, trigger spelling, pipeline annotation
-or requested Argo priority cannot claim automatic release priority. The branch
-transport records branch refs; the separate, ancestry-checked tag admission
-path records tag refs. Pipelines cannot set queue priority. Only an unscoped
-administrator can configure RC patterns or explicitly bump a waiting run.
+| Class | Intended work | Authority |
+| --- | --- | --- |
+| `low` | Deliberately deferred or background builds | A submission may defer itself; changing an existing run requires an unscoped admin |
+| `standard` | Ordinary builds, schedules and backlog work | Default |
+| `promotion` | Ordinary promotion CI and eligible tag/release delivery | Server classification, or an unscoped admin / unexpired grant for an explicit request |
+| `high` | Explicitly authorized urgent work | Unscoped admin, or an unexpired grant permitting `high` |
 
-Both durable claiming and weighted admission sort by effective priority,
-then original admission sequence and queue sequence. The dispatcher can look
-past ordinary waiting claims to expose higher priority work, with bounded
-extra claims. This does not create extra weight, run permits or capacity.
-Already admitted work is not preempted.
+Both durable claims and in-memory admission order `high > promotion > standard
+> low`, then the original admission sequence and queue sequence. Running or
+already granted work is never preempted. Priority does not bypass admission
+holds, PSI/pressure, resource ceilings, concurrency groups, cleanup or publication
+guards. Bounded dispatch lookahead retains its existing claim ceiling; it exposes
+higher-priority waiting work without creating additional execution capacity.
 
-Backfill candidates are considered in priority/FIFO order while the head's
-wait remains below `max_head_wait_seconds` (20 minutes by default). A measured
-candidate must finish strictly before the earlier of the predicted head start
-and the remaining head-wait window. If running durations are unknown, measured
-short work may use existing capacity when its finish remains inside that window.
-Work in the same effective and base priority classes may also coexist if the
-head still fits with all surviving grants at its reserved start. Lower classes
-cannot use coexistence and occupy room needed by higher-class waiters.
-Unmeasured candidates can use only proven coexistence. At the head-wait limit,
-new backfill stops and existing grants drain for up to five additional minutes.
-After that cap, available-capacity backfill and claims resume without a p95
-promise. All reservations still count and the head is considered first; this
-can extend its wait. Zero selects strict FIFO and disables the escape.
-Repository concurrency groups, VM-capacity parking, pressure, disk-floor holds
-and run-count/size limits still apply. P95 predictions are estimates, not enforced
-runtime deadlines; running work is never preempted.
+An ordinary promotion receives `promotion`, never automatic `high`. The oldest
+waiting server-classified tag/release per repository also receives `promotion`
+when its stored ref kind is `tag` and it has the release flag or tag/release
+trigger. Claimed but unadmitted tags count as waiting. Later tags remain
+`standard`; admitting or terminating the oldest releases its boost for the next.
+Administrator RC globs classify matching branches as `promotion`. Defaults have
+no RC globs. A branch/ref spelling, release flag, pipeline annotation, trigger
+spelling or promotion operation never supplies authority for `high`.
 
-Aging moves ordinary work up one class only. At 60 minutes a `normal` run without
-an explicit administrator override becomes
-effective `high`, with the reason `aged: normal run waited at least 60
-minutes`; `high` work does not age further and nothing ages into `highest`,
-so a backed-up queue cannot turn every run `highest` and empty the manual
-priority line: promotions, the oldest waiting tag release and explicit
-administrator `highest` bumps always precede aged work. Within a class the
-order stays FIFO by admission sequence, and the aged run keeps its original
-position, so every `high` run accepted after it waits behind it. Against
-`high` arrivals its wait is therefore bounded by 60 minutes plus the `high`
-work accepted before it. Aging never lifts a run above `highest`, so sustained
-`highest` arrivals (promotions from any identity holding a promote grant, tag
-releases, explicit admin bumps) can extend the wait of aged and `high` work
-without limit; before this change aged work joined `highest` FIFO instead.
-Existing resource holders must finish or be cleaned up, and repository
-concurrency groups still apply.
+After 60 minutes, ordinary `standard` work joins `promotion` at its original FIFO
+position, with reason `aged: standard run waited at least 60 minutes`. It never
+ages into `high`. Low work does not age. Every explicit admin override pins its
+class, including a lowered `standard` or `promotion`; admission/end freezes the
+aging clock. Aged work can therefore precede newer delivery work in the shared
+promotion FIFO. Sustained explicitly urgent high work can still delay it.
 
-An unscoped administrator can use MCP `run_priority` with a full run ID or unique
-8+ character hex prefix and a required reason (1–512 bytes). `high`/`highest`
-retain their raise-only rules. `normal` and `low` pin a run awaiting admission
-at the selected class, including a tag or promotion that normally gets automatic
-urgency. An explicit `normal`/`low` override never ages: it stays at that class
-until another administrator change. Ordinary normal work still ages into high.
-Queue order is highest, high, normal, low, with FIFO within each effective class.
-The existing priority reason line shows the operator's reason; the atomic
-`run.priority` audit record includes actor, previous priority, selected priority
-and reason. Overrides survive restart and automatic refire. Non-admin rules are
-unchanged. Already granted/running work cannot be preempted.
+## Requests and administration
 
-For example:
+`git push -o oberth.priority=high -o oberth.priority_reason='urgent repair'`
+requests an execution class. MCP `promote`, `run_rerun`, `run_retry`,
+`schedule_trigger` and `sync` accept the same optional `priority` and
+`priority_reason` fields. All four canonical names are accepted. An unscoped
+admin may request promotion/high directly; other identities require a matching,
+unexpired `priority_grant {identity,max_class,expires}`. `max_class` is
+`promotion` or `high`. A promotion-only grant cannot request high.
+
+Authority is resolved in the insertion transaction from the authenticated actor
+and exact SSH key fingerprint. An identity alias or scoped-admin key cannot
+inherit unscoped admin authority. Low and standard submission requests need no
+urgency grant. Low explicitly defers a new submission; a standard request leaves
+any natural promotion/tag/RC classification intact. An explicit accepted high
+request takes precedence over automatic delivery classification. Refused or
+invalid requests leave the natural class intact and report `priority_refusal`.
+A repository schedule may declare any class, but automatic execution requests as
+`oberth:scheduler` and still needs its own grant for promotion/high.
+
+`sync` publishes an existing branch result and can only raise its waiting build's
+priority. It cannot lower an existing run or modify one already admitted. Use
+unscoped-admin `run_priority` for explicit lowering:
 
 ```sh
-oberth mcp call run_priority '{"run_id":"01234567","priority":"low","reason":"Let ordinary work proceed"}'
+oberth mcp call run_priority '{"run_id":"01234567","priority":"promotion","reason":"Ordinary delivery can wait behind urgent work"}'
 ```
-`queue_priority_config` sets RC globs; `queue_priority_get` reports them and
-the aging threshold. These are unscoped-admin capabilities.
 
-A repository with no size-grant record defaults to automatic tag priority up
-to size L. After exact checkout resolves size, an oversized tag (for example,
-XL without an XL grant) falls back to an admin override, then an accepted
-submission priority, then normal order. All heads use the same measured backfill
-rule. Its admission/scheduling priority reason explains the fallback.
-Tag execution still keeps its reviewed release.yaml size without requiring a
-grant. Priority before checkout is provisional; durable queue positions do not
-incorporate the gate's resolved size. Polling/admin refresh preserves the size
-cap. If the size-limit lookup fails, automatic urgency is withheld at every
-size, with a public reason and server warning (`reason=size_limit_unavailable`).
-The release keeps any explicit priority or continues in normal order; a later
-successful refresh can restore its eligible boost. This advisory lookup never fails release execution.
-An XL grant permits automatic urgency at XL; an explicit admin bump, accepted
-submission priority and 60-minute aging are independent of this automatic size restriction.
+That tool accepts a full ID or unique 8+ hex prefix, any of the four classes and
+a printable 1–512 byte reason. It sets and pins the class, including lowering
+high to promotion, standard or low. The service holds the admission boundary;
+admitted or terminal runs refuse changes. The atomic `run.priority` audit records
+actor, previous class, selected class and reason. Overrides survive restart and
+automatic refire. Local updates refresh waiters immediately; external changes
+and aging are polled within 15 seconds, with refresh deferred on DB contention.
 
-Admin `size_revoke` / `oberth size revoke <repo>` disables automatic tag
-priority as well as returning the size maximum to L. It works even if a grant
-was never needed. Existing revoked records also opt out. `size_grant` with L
-or XL re-enables the boost within that maximum. Local MCP grant/revoke wakes
-and refreshes waiting work; in-pod CLI/external changes are polled within 15
-seconds, with refresh deferred during DB contention. Neither revocation nor
-an ordinary priority change preempts admitted work or disables promotions,
-explicit bumps or aging. The opt-out is durable in the existing
-size-grant record; no migration or new priority class is needed. Audit events
-include `automatic_tag_priority_enabled` and its previous value alongside size
-fields. Historical audit records are unchanged.
+`queue_priority_config` remains an unscoped-admin, audited replacement of at
+most 16 case-sensitive RC globs. `*` and `?` match slash; `[]` disables RC
+classification. `queue_priority_get` returns them and `starvation_minutes: 60`.
+These globs confer only promotion class, regardless of the spelling they match.
 
-A tag burst can still delay a promotion: they share `highest` FIFO, and another
-tag can become the repository's oldest waiter as its predecessor is admitted.
-The cap limits concurrent automatic boosts, not total burst duration. Release
-priority is `highest` and precedes aged branch work, which never leaves `high`;
-within `high`, aged and RC branches share one FIFO. After deployment, inspect `run_get`
-priority reasons and the admission view on the next tag before attributing the
-reported load incident entirely to priority classification.
+## Tags, resources and supersession
 
-An oversized tag that loses its boost still occupies its repository's oldest
-waiting-tag slot until admission or termination. The next tag does not inherit
-a boost while that older tag waits; it can age or receive an explicit admin
-bump. See the README's pre-deploy grant checks for existing revoked records.
+Automatic tag priority remains provisional until exact checkout resolves size.
+No size-grant record defaults to enabled within L. An oversized tag or an
+unavailable size-limit lookup loses its automatic promotion class, retaining an
+explicit admin override or accepted nonstandard request, otherwise using
+standard order. The existing reason explains the fallback. This advisory lookup
+never fails release execution; the tag retains its reviewed execution size.
+`size_revoke` durably disables automatic tag priority even on a never-granted
+repository. `size_grant` re-enables it within the selected maximum. Explicit
+urgency, promotions and aging are independent of that opt-out.
 
-Submission priority may only raise the automatic class: natural `highest`
-(promotion or eligible oldest tag), admin override, accepted `high`/`highest`
-request, RC pattern, then normal. Refused, invalid and `normal` requests leave
-that classification and its reason intact; refusals appear in `priority_refusal`.
+The existing measured backfill and head-reservation rules remain. Same effective
+and base classes may coexist only when resource/run-slot reservations stay safe;
+otherwise a later candidate needs its measured p95 to finish before the head's
+reservation. Head-wait drain, its bounded liveness escape, strict FIFO, group
+parking and runtime capacity checks are unchanged. Priority grants no resource
+or pressure exemption.
 
-Accepted priority, admin bumps and automatic RC/tag/promotion runs are protected
-from ordinary branch supersession. Every push matching an RC pattern queues
-independently, so repeated RC pushes all run. Accepting priority cancels nothing
-unless the push explicitly includes `-o oberth.supersede=true`. That option is
-honoured even on a priority push, inside the same branch and schedule entry;
-protected work may be replaced only by its requester or an unscoped admin.
-Promotion attempts and pending publications keep their separate guards.
+Accepted nonstandard requests, admin overrides and automatic RC/tag/promotion
+work retain supersession protection. Historical automatic-protection rows do
+not become urgency grants. Requests cancel nothing unless an authorized push
+explicitly selects `oberth.supersede=true`; replacing protected work requires its
+requester or an unscoped admin. Same-branch/schedule-entry, cancellation, pending
+publication and promotion guards remain. A forced ordinary schedule only
+supersedes unprotected work; force does not confer priority authority.
 
-`schedule_trigger force` bypasses the busy/paused check. A forced normal run
-replaces only unprotected runs in its branch and entry; protected runs remain,
-and a priority schedule submission queues independently. Force does not grant
-protected supersession. Cancellation still requires the existing admin/force
-permissions for tag, release, promotion and concurrency-group work; being the
-priority requester adds no admin authority.
+Restart requeue, trusted preflight recovery and eligible infrastructure retry
+retain explicit priority, reasons, original wait and admission FIFO alongside
+newer siblings. A manual retry earns its normal new queue place. Replay retains
+its accepted authority/decision; revoking or expiring a grant affects future
+requests, not an already accepted run.
 
-Restart requeue, trusted preflight recovery and eligible one-shot infrastructure
-retry preserve protected work's priority and admission sequence alongside newer
-normal siblings. Recovery can replace only its own queue place and preserves
-all existing retry, publication, cleanup and execution-evidence checks.
+## Compatibility and upgrade
+
+| Legacy context | Current interpretation |
+| --- | --- |
+| `normal` input or persisted override | `standard` |
+| Explicit authorized `high` input, override, accepted request or grant | `high` |
+| Explicit authorized `highest` input, override, accepted request or grant | `high` |
+| Automatic promotion/tag or RC classification formerly high/highest | `promotion`, subject to existing eligibility |
+| Automatic historical request with `requested=''` | Protection evidence only; never explicit high authority |
+| `low` | `low` |
+
+Canonical responses, reason text and dashboard detail use only low, standard,
+promotion and high. MCP schemas retain deprecated input aliases normal and
+highest for existing clients, with the same authentication. Old high and highest
+grants both authorize explicit high; an administrator can narrow a grant to
+promotion when delivery-only authority is intended. The compatibility Go identifiers
+`PriorityNormal` and `PriorityHighest` name the canonical standard/high values.
+
+The timestamp migration `20261104190000-priority-four-classes` extends the three
+priority tables' accepted vocabulary. It copies existing rows byte-for-byte:
+requested/accepted names, overrides, grants, actors, reasons and timestamps stay
+intact. Reads normalize legacy values; new writes use canonical accepted names
+and retain the raw requested input. Historical audit records and shipped integer
+migration 39 and the admin-lowering migration are unchanged. Take the normal
+pre-upgrade backup; rollback restores that backup because older binaries cannot
+interpret new classes. This is next-release work and does not alter the reviewed
+v0.17.85 candidate or its CI.

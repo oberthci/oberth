@@ -46,14 +46,14 @@ func TestQueuePriorityAgingMovesOneClassAndKeepsFIFO(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if priority, reason := shown.EffectivePriority(now); priority != model.PriorityHigh || !strings.Contains(reason, "aged") || strings.Contains(reason, "highest") {
+	if priority, reason := shown.EffectivePriority(now); priority != model.PriorityPromotion || !strings.Contains(reason, "aged") || strings.Contains(reason, "highest") {
 		t.Fatalf("aged normal run = %s / %q, want high with an aged reason", priority, reason)
 	}
 	shown, err = s.Run(ctx, highBefore.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if priority, reason := shown.EffectivePriority(now); priority != model.PriorityHigh || !strings.Contains(reason, "rc/*") {
+	if priority, reason := shown.EffectivePriority(now); priority != model.PriorityPromotion || !strings.Contains(reason, "rc/*") {
 		t.Fatalf("waiting high run = %s / %q, want its own high class, never highest", priority, reason)
 	}
 
@@ -121,7 +121,7 @@ func TestQueuePriorityAgingBoundsStarvationBehindHighStream(t *testing.T) {
 			t.Fatalf("aged run lost to %s: next = %+v, %v", name, next, err)
 		}
 	}
-	if priority, reason := mustRun(t, s, starved.ID).EffectivePriority(now); priority != model.PriorityHigh || !strings.Contains(reason, "aged") {
+	if priority, reason := mustRun(t, s, starved.ID).EffectivePriority(now); priority != model.PriorityPromotion || !strings.Contains(reason, "aged") {
 		t.Fatalf("aged display = %s / %q", priority, reason)
 	}
 	// Highest work still leads, so the bound is 60 minutes plus whatever
