@@ -1,13 +1,117 @@
 package service
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 )
+
+func TestSchedulerResumesRunAfterDiskFloorClears(t *testing.T) {
+	f := newControlFixture(t)
+	jobs := newConcurrentJobs("", 2)
+	scheduler, err := NewScheduler(SchedulerConfig{
+		Store: f.store, Git: f.git, Logs: f.logs, Jobs: jobs, ReleaseJobs: jobs,
+		Auditor: f.store, Signals: f.signals, WorkspaceRoot: filepath.Join(f.root, "floor-work"),
+		MaxConcurrent: 1, AdmissionDiskFloorBytes: 2048,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.scheduler = scheduler
+	check := scheduler.admission.diskFloor
+	if check == nil {
+		t.Fatal("scheduler did not wire the configured disk floor")
+	}
+	// Control only the filesystem sample, without filling the host disk or
+	// changing the configured floor. Admission and dispatch run normally.
+	check.mu.Lock()
+	check.cachedFree, check.cacheTime, check.cacheTTL = 1024, time.Now(), time.Hour
+	check.mu.Unlock()
+	ticks := make(chan time.Time, 1)
+	scheduler.dispatchTicks = ticks
+	run, err := scheduler.EnqueueCI(t.Context(), CIRequest{
+		EventID: "disk-recovery", Repository: f.repo, Branch: "feature/disk-recovery",
+		SHA: strings.Repeat("a", 40), Actor: "agent@host",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- scheduler.Run(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Error(err)
+			}
+		case <-time.After(testStartTimeout(5 * time.Second)):
+			t.Error("scheduler did not stop")
+		}
+	})
+	service := f.api(t)
+	service.admission = scheduler
+	deadline := time.NewTimer(testStartTimeout(5 * time.Second))
+	defer deadline.Stop()
+	for {
+		value, err := service.Run(t.Context(), api.Actor{Identity: "agent@host"}, run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		detail := value.(RunDetailResponse)
+		if detail.Scheduling != nil && detail.Scheduling.State == "waiting" && detail.Scheduling.Admission != nil && detail.Scheduling.Admission.DiskFloor != nil {
+			if detail.Run.DisplayStatus != "queued" || detail.Run.StartedAt != nil || detail.Run.DisplayReason != "waiting for disk space (1 KiB free, floor 2 KiB)" || !detail.Scheduling.Admission.DiskFloor.BelowFloor {
+				t.Fatalf("disk hold lost its queued reason: %+v, %+v", detail.Run, detail.Scheduling)
+			}
+			break
+		}
+		select {
+		case <-jobs.admitted:
+			t.Fatal("run submitted below the disk floor")
+		case <-deadline.C:
+			t.Fatalf("disk hold was not visible: %+v, %+v", detail.Run, detail.Scheduling)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	select {
+	case <-jobs.admitted:
+		t.Fatal("held run reached workflow creation")
+	default:
+	}
+	if state := scheduler.AdmissionState(); state.Runs != 0 {
+		t.Fatalf("disk hold consumed a grant: %+v", state)
+	}
+	check.mu.Lock()
+	check.cachedFree = check.floorBytes // Exactly at the floor is sufficient.
+	check.mu.Unlock()
+	// Wake the regular dispatch poll; the test never grants a reservation.
+	ticks <- time.Now()
+	select {
+	case id := <-jobs.admitted:
+		if id != run.ID {
+			t.Fatalf("admitted %s, want %s", id, run.ID)
+		}
+	case <-time.After(testStartTimeout(5 * time.Second)):
+		t.Fatal("disk recovery did not submit the waiting run")
+	}
+	close(jobs.release)
+	finished := waitForFixtureRunStatus(t, f, run.ID, model.RunPassed)
+	if finished.StartedAt == nil {
+		t.Fatal("submitted run has no start time")
+	}
+	jobs.mu.Lock()
+	created := append([]string(nil), jobs.created...)
+	jobs.mu.Unlock()
+	if len(created) != 1 || created[0] != run.ID {
+		t.Fatalf("disk recovery submitted workflow more than once: %v", created)
+	}
+}
 
 func TestDiskFloorNil(t *testing.T) {
 	var check *diskFloorCheck
