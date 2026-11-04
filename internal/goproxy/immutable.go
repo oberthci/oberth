@@ -29,10 +29,11 @@ type moduleTagSnapshot interface {
 }
 
 type moduleOrigin struct {
-	VCS  string
-	URL  string
-	Hash string
-	Ref  string `json:",omitempty"`
+	VCS    string
+	URL    string
+	Hash   string
+	Ref    string `json:",omitempty"`
+	Subdir string `json:",omitempty"`
 }
 
 type moduleInfo struct {
@@ -324,7 +325,7 @@ func (h *Handler) serveImmutable(w http.ResponseWriter, r *http.Request, reposit
 	entry, err := h.artifacts.get(ctx, repository, modulePath, version, "", budget, func(work context.Context) (string, map[string][]byte, error) {
 		return h.buildWithRetry(work, func(attempt context.Context) (string, map[string][]byte, error) {
 			if isPseudo {
-				return h.buildPinnedVersion(attempt, repository, version, pseudo.source, pseudo.timestamp)
+				return h.buildPinnedVersion(attempt, repository, modulePath, version, pseudo.source, pseudo.timestamp)
 			}
 			return h.buildVersion(attempt, repository, modulePath, version)
 		})
@@ -424,14 +425,15 @@ func (h *Handler) buildVersion(ctx context.Context, repository, modulePath, vers
 	if !found {
 		return "", nil, &proxyBuildError{class: "private_unavailable", status: http.StatusForbidden}
 	}
-	source, timestamp, err := h.cache.(moduleTagSnapshot).ModuleTagSnapshot(ctx, repository, version)
+	location, _ := h.moduleLocation(modulePath)
+	source, timestamp, err := h.cache.(moduleTagSnapshot).ModuleTagSnapshot(ctx, repository, location.tag(version))
 	if err != nil {
 		return "", nil, backendBuildError()
 	}
-	return h.buildPinnedVersion(ctx, repository, version, source, timestamp)
+	return h.buildPinnedVersion(ctx, repository, modulePath, version, source, timestamp)
 }
 
-func (h *Handler) buildPinnedVersion(ctx context.Context, repository, version, source string, timestamp time.Time) (string, map[string][]byte, error) {
+func (h *Handler) buildPinnedVersion(ctx context.Context, repository, modulePath, version, source string, timestamp time.Time) (string, map[string][]byte, error) {
 	if gitcache.ValidateSHA(source) != nil {
 		return "", nil, backendBuildError()
 	}
@@ -439,13 +441,14 @@ func (h *Handler) buildPinnedVersion(ctx context.Context, repository, version, s
 	if err != nil || remote == "" {
 		return "", nil, backendBuildError()
 	}
-	mod, err := h.cache.ShowFile(ctx, repository, source, "go.mod")
+	_, mod, err := h.moduleDirectory(ctx, repository, modulePath, source)
 	if err != nil {
-		return "", nil, moduleReadBuildError(err)
+		return "", nil, err
 	}
-	origin := moduleOrigin{VCS: "git", URL: remote, Hash: source}
+	location, _ := h.moduleLocation(modulePath)
+	origin := moduleOrigin{VCS: "git", URL: remote, Hash: source, Subdir: location.subdir}
 	if !module.IsPseudoVersion(version) {
-		origin.Ref = "refs/tags/" + version
+		origin.Ref = "refs/tags/" + location.tag(version)
 	}
 	info, err := json.Marshal(moduleInfo{Version: version, Time: timestamp.UTC(), Origin: origin})
 	if err != nil {
@@ -548,6 +551,9 @@ func writeBuildError(w http.ResponseWriter, err error) {
 			case "module_go_mod_missing":
 				w.Header().Set("Cache-Control", "no-store")
 				proxyError(w, failure.class, "module version unavailable: pinned commit has no go.mod", http.StatusForbidden)
+			case "module_path_mismatch":
+				w.Header().Set("Cache-Control", "no-store")
+				proxyError(w, failure.class, "module version unavailable: go.mod does not declare the requested module path or the module directory is ambiguous", http.StatusForbidden)
 			default:
 				privateUnavailable(w)
 			}

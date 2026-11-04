@@ -23,6 +23,23 @@ var ErrModulePseudoVersionUnavailable = errors.New("pseudo-version commit or pol
 // fetches a requested revision. Public branch/tag reachability, commit time and
 // any base tag are checked under one context-aware repository read lock.
 func (c *Cache) ModulePseudoVersionSnapshot(ctx context.Context, input, modulePath, version string, allowNonDefault bool) (string, time.Time, error) {
+	return c.modulePseudoVersionSnapshot(ctx, input, modulePath, "", version, allowNonDefault)
+}
+
+// ModuleSubdirPseudoVersionSnapshot applies the same commit policy to a nested
+// module. Base tags and eligible public tags belong to this subdirectory only.
+func (c *Cache) ModuleSubdirPseudoVersionSnapshot(ctx context.Context, input, modulePath, subdir, version string, allowNonDefault bool) (string, time.Time, error) {
+	if subdir == "" || validateBlobPath(subdir+"/go.mod") != nil {
+		return "", time.Time{}, ErrModulePseudoVersionUnavailable
+	}
+	return c.modulePseudoVersionSnapshot(ctx, input, modulePath, subdir, version, allowNonDefault)
+}
+
+func (c *Cache) modulePseudoVersionSnapshot(ctx context.Context, input, modulePath, subdir, version string, allowNonDefault bool) (string, time.Time, error) {
+	tagPrefix := ""
+	if subdir != "" {
+		tagPrefix = subdir + "/"
+	}
 	revision, err := module.PseudoVersionRev(version)
 	if err != nil || len(revision) != 12 || strings.ToLower(revision) != revision || module.CanonicalVersion(version) != version || module.Check(modulePath, version) != nil {
 		return "", time.Time{}, ErrModulePseudoVersionUnavailable
@@ -89,7 +106,7 @@ func (c *Cache) ModulePseudoVersionSnapshot(ctx context.Context, input, modulePa
 		return "", time.Time{}, ErrModulePseudoVersionUnavailable
 	}
 	if base != "" {
-		baseSource, err := c.modulePseudoCommit(ctx, path, "refs/tags/"+strings.TrimSuffix(base, "+incompatible")+"^{commit}")
+		baseSource, err := c.modulePseudoCommit(ctx, path, "refs/tags/"+tagPrefix+strings.TrimSuffix(base, "+incompatible")+"^{commit}")
 		if err != nil {
 			return "", time.Time{}, err
 		}
@@ -145,7 +162,8 @@ func (c *Cache) ModulePseudoVersionSnapshot(ctx context.Context, input, modulePa
 	}
 	for ref := range refs {
 		tag, tagRef := strings.CutPrefix(ref, "refs/tags/")
-		if tagRef && module.CanonicalVersion(tag) == tag && !module.IsPseudoVersion(tag) && module.Check(modulePath, tag) == nil {
+		version, inSubdir := strings.CutPrefix(tag, tagPrefix)
+		if tagRef && inSubdir && module.CanonicalVersion(version) == version && !module.IsPseudoVersion(version) && module.Check(modulePath, version) == nil {
 			return source, timestamp, nil
 		}
 	}

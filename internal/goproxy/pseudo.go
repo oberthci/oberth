@@ -12,6 +12,9 @@ import (
 type modulePseudoVersionSnapshot interface {
 	ModulePseudoVersionSnapshot(context.Context, string, string, string, bool) (string, time.Time, error)
 }
+type moduleSubdirPseudoVersionSnapshot interface {
+	ModuleSubdirPseudoVersionSnapshot(context.Context, string, string, string, string, bool) (string, time.Time, error)
+}
 type pseudoSnapshot struct {
 	source    string
 	timestamp time.Time
@@ -26,12 +29,27 @@ func (h *Handler) WithPseudoVersionsOnNonDefaultBranches(allow bool) *Handler {
 }
 
 func (h *Handler) pseudoSnapshot(ctx context.Context, repository, modulePath, version string) (pseudoSnapshot, error) {
-	backend, ok := h.cache.(modulePseudoVersionSnapshot)
-	if !ok {
-		return pseudoSnapshot{}, backendBuildError()
+	location, _ := h.moduleLocation(modulePath)
+	var resolve func(context.Context) (string, time.Time, error)
+	if location.subdir != "" {
+		backend, ok := h.cache.(moduleSubdirPseudoVersionSnapshot)
+		if !ok {
+			return pseudoSnapshot{}, backendBuildError()
+		}
+		resolve = func(ctx context.Context) (string, time.Time, error) {
+			return backend.ModuleSubdirPseudoVersionSnapshot(ctx, repository, modulePath, location.subdir, version, h.pseudoNonDefault)
+		}
+	} else {
+		backend, ok := h.cache.(modulePseudoVersionSnapshot)
+		if !ok {
+			return pseudoSnapshot{}, backendBuildError()
+		}
+		resolve = func(ctx context.Context) (string, time.Time, error) {
+			return backend.ModulePseudoVersionSnapshot(ctx, repository, modulePath, version, h.pseudoNonDefault)
+		}
 	}
 	return retryModuleBuild(ctx, h.backendBudget, func(attempt context.Context) (pseudoSnapshot, error) {
-		source, timestamp, err := backend.ModulePseudoVersionSnapshot(attempt, repository, modulePath, version, h.pseudoNonDefault)
+		source, timestamp, err := resolve(attempt)
 		if errors.Is(err, gitcache.ErrModulePseudoVersionUnavailable) {
 			return pseudoSnapshot{}, pseudoUnavailableError()
 		}

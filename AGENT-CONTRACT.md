@@ -2475,7 +2475,7 @@ upstream with a different organization fail startup.
 
 **Private routing (#764):** classify the entire configured namespace
 (including its root) before parsing any request shape. Unknown private modules,
-unsupported nested modules, missing tags, malformed requests and unsupported
+missing module directories, missing tags, malformed requests and unsupported
 versions return 403. Backend unavailability returns 503 with `Retry-After: 1`;
 artifact-integrity and archive/zip failures return 500.
 Pseudo-version commit/time/base/reachability denials return terminal 403 with
@@ -2510,6 +2510,26 @@ and restarts. Older artifacts without Origin remain readable and unchanged;
 there is no automatic backfill. Strict verifiers require metadata first
 published with Origin, including in Go's own cache. Existing h1 checksums,
 SHA-256 integrity checks and no-clobber publication remain in force.
+
+**Nested modules:** `<namespace>/<mapped-repository>/<subdir>` resolves inside
+the same mapped repository. The selected directory must have a `go.mod` whose
+module directive exactly matches the requested path; the repository need not
+have a root `go.mod`. Nested tags use `<subdir>/vX.Y.Z`, and discovery strips
+only that module's exact tag prefix. Origin includes `Subdir=<subdir>` and
+tagged `Ref=refs/tags/<subdir>/vX.Y.Z`; pseudo-versions still omit Ref. Go `/vN`
+module paths use the unversioned directory as the tag prefix/Origin.Subdir and
+allow a matching `go.mod` there or in its `vN` child; ambiguous layouts refuse.
+The lazy zip uses only the selected module directory, retaining canonical
+exclusions and inheriting the repository-root LICENSE when no module-local
+LICENSE exists. Cache/revocation keys already include the full module path,
+so siblings never share artifacts. A module-path mismatch is terminal 403
+(`module_path_mismatch`), without retry or public fallback.
+
+Nested pseudo-versions retain commit/time/default-branch checks and live warm
+revalidation. Base tags and opt-in tag-only reachability use that module's own
+`<subdir>/` namespace; root and sibling tags cannot authorize it. Unknown
+commits remain terminal 403, never fetched or negative-cached. Nested discovery
+without matching tags returns an empty list; `@latest` then refuses.
 
 At most two cold version fills execute per handler, with duplicate requests
 sharing one fill. Each fill gets two read-only attempts of at most 15 seconds
