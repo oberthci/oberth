@@ -248,7 +248,7 @@ func TestMCPLogContentIsExactRawSlice(t *testing.T) {
 func TestMCPInitializeAdvertisesAgentReadableDashboardState(t *testing.T) {
 	t.Parallel()
 	server, _ := testServer(t)
-	body := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`
+	body := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}`
 	request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
 	request.Header.Set("Authorization", "Bearer valid-token")
 	response := httptest.NewRecorder()

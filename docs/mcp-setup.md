@@ -624,8 +624,9 @@ background task progress), and `/readyz` (startup and serving readiness).
 
 ## Notes
 
-- The MCP endpoint accepts `POST /mcp` with JSON-RPC 2.0 (protocol version
-  `2025-03-26`).
+- The MCP endpoint accepts `POST /mcp` with JSON-RPC 2.0 and negotiates
+  `2025-03-26` or `2025-06-18`. See [version negotiation](mcp-protocol.md)
+  for input validation, fallback, version headers and stateless initialization.
 - Bearer tokens are bound 1:1 to an uplink SSH public-key fingerprint and
   identity.
 - Run selectors (`ref`, `sha`) are resolved across all repositories; pass
