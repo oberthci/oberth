@@ -31,16 +31,7 @@ func TestRunResourcesRequiresResourceOnlyCapability(t *testing.T) {
 	for _, mode := range []string{"legacy", "explicit-false", "resource-only"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newScopeFixture(t)
-			reader := &resourceHistoryStub{}
-			at := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
-			ptr := func(n int64) *int64 { return &n }
-			for i := range measured.MinimumSamples {
-				reader.history.Observations = append(reader.history.Observations, measured.Observation{
-					Template: "compile", Owner: f.visible.Name,
-					Usage:            model.StepResourceUsage{Version: 2, Source: "kubelet-cadvisor", RunID: fmt.Sprint(i), PodUID: fmt.Sprint(i), ContainerID: fmt.Sprint(i), ContainerName: "main", ContainerKind: "app", PodKind: "workflow", Stage: "build", TemplateName: "compile", Terminal: true, Samples: 4, ContainerStartedAt: at.Add(-10 * time.Second), ContainerFinishedAt: at, CPUTimeNS: ptr(5e9), CPUTimeAt: at, CPUPeakNanoCores: ptr(1e9), MemoryPeakBytes: ptr(512 << 20), EphemeralStoragePeakBytes: ptr(100 << 20)},
-					MemoryLimitBytes: ptr(2 << 30), CPULimitNanoCores: ptr(0), EphemeralLimitBytes: ptr(0),
-				})
-			}
+			reader := &resourceHistoryStub{history: completeAdviceHistory(f.visible.Name)}
 			f.service.runResources = reader
 			args := map[string]any{"repo": f.visible.Name}
 			if mode != "legacy" {
@@ -59,7 +50,7 @@ func TestRunResourcesRequiresResourceOnlyCapability(t *testing.T) {
 				t.Fatalf("capability changed observations: %+v", step)
 			}
 			if mode == "resource-only" {
-				if step.Suggested == nil || !step.SizingAcceptance.Sufficient || step.Suggested.CPUMilli != 630 || step.Suggested.MemoryLimitBytes != 768<<20 || step.Suggested.EphemeralLimitBytes != 150<<20 || step.Suggested.ActiveDeadlineSeconds != 0 || !strings.Contains(step.DeadlineNoSuggestion, "finalization") {
+				if step.Suggested == nil || !step.SizingAcceptance.Sufficient || step.Suggested.CPUMilli != 630 || step.Suggested.MemoryLimitBytes != 2<<30 || step.Suggested.EphemeralLimitBytes != 512<<20 || step.Suggested.ActiveDeadlineSeconds != 0 || !strings.Contains(step.DeadlineNoSuggestion, "finalization") {
 					t.Fatalf("supported resource advice: %+v", step)
 				}
 				return
@@ -140,4 +131,31 @@ func TestRunResourcesRejectsBoundsAndHiddenExactRun(t *testing.T) {
 	if reader.calls != 0 {
 		t.Fatal("invalid input reached history")
 	}
+}
+
+func completeAdviceHistory(owner string) store.RunResourceHistory {
+	reader := &resourceHistoryStub{}
+	at := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	ptr := func(n int64) *int64 { return &n }
+	for i := range measured.MinimumSamples {
+		reader.history.Observations = append(reader.history.Observations, measured.Observation{
+			Template: "compile", Owner: owner,
+			Usage:            model.StepResourceUsage{Version: 2, Source: "kubelet-cadvisor", RunID: fmt.Sprint(i), PodUID: fmt.Sprint(i), ContainerID: fmt.Sprint(i), ContainerName: "main", ContainerKind: "app", PodKind: "workflow", Stage: "build", TemplateName: "compile", Terminal: true, Samples: 4, ContainerStartedAt: at.Add(-10 * time.Second), ContainerFinishedAt: at, CPUTimeNS: ptr(5e9), CPUTimeAt: at, CPUPeakNanoCores: ptr(1e9), MemoryPeakBytes: ptr(512 << 20), EphemeralStoragePeakBytes: ptr(100 << 20)},
+			MemoryLimitBytes: ptr(2 << 30), CPULimitNanoCores: ptr(0), EphemeralLimitBytes: ptr(512 << 20),
+		})
+		v := &reader.history.Observations[len(reader.history.Observations)-1].Usage
+		v.PodStartedAt = v.ContainerStartedAt
+		v.PodFinishedAt = at
+		v.MemoryCoverage = model.MetricCoverage{Count: 4, FirstAt: v.ContainerStartedAt, LastAt: at}
+		v.CPUCoverage = v.MemoryCoverage
+		v.StorageCoverage = v.MemoryCoverage
+		v.PodEphemeralLimitBytes = ptr(512 << 20)
+		v.CPURequestNanoCores = ptr(0)
+		v.MemoryRequestBytes = ptr(0)
+		v.EphemeralRequestBytes = ptr(0)
+		code := int32(0)
+		v.ExitCode = &code
+		v.Reason = "Completed"
+	}
+	return reader.history
 }

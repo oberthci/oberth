@@ -19,6 +19,8 @@ func TestMainRuntimeCannotSupplyPodDeadline(t *testing.T) {
 				case "init-and-wait":
 					v.PodStartedAt = v.ContainerStartedAt.Add(-5 * time.Minute)
 					v.PodFinishedAt = v.ContainerFinishedAt.Add(5 * time.Minute)
+					v.StorageCoverage.LastAt = v.PodFinishedAt
+					v.LastObservedAt = v.PodFinishedAt
 				case "last-exit-before-finalization":
 					// Even a retained terminal Pod finish is the last container
 					// exit, not the time Pod finalization completed.
@@ -28,7 +30,7 @@ func TestMainRuntimeCannotSupplyPodDeadline(t *testing.T) {
 			}
 			declaration := Declaration{Stage: "step-12345678", Template: "step-abc12345", ActiveDeadlineSeconds: value(600)}
 			step := Build(rows, []Declaration{declaration})[0]
-			if step.Suggested == nil || !step.SizingAcceptance.Sufficient || step.Suggested.CPUMilli != 630 || step.Suggested.MemoryLimitBytes != 750<<20 || *step.DurationNS.Max != int64(10*time.Second) || *step.AverageCPUNanoCores.P95 != 500_000_000 {
+			if step.Suggested == nil || !step.SizingAcceptance.Sufficient || step.Suggested.CPUMilli != 630 || step.Suggested.MemoryLimitBytes != 1<<30 || *step.DurationNS.Max != int64(10*time.Second) || *step.AverageCPUNanoCores.P95 != 500_000_000 {
 				t.Fatalf("resource advice or main runtime changed: %+v", step)
 			}
 			assertNoDeadlineAdvice(t, step, true)

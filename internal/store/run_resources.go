@@ -23,7 +23,7 @@ type RunResourceFilter struct {
 // Keep the executed query and its EXPLAIN test identical. CROSS JOIN fixes the
 // bounded selected-run inventory as the outer loop; INDEXED BY requires each
 // observation lookup to use the existing run_id primary-key prefix.
-const runResourceObservationSQL = `SELECT u.observation_json,s.termination_json,s.memory_peak_bytes,s.status,r.error
+const runResourceObservationSQL = `SELECT u.observation_json,s.termination_json,s.memory_peak_bytes,s.status,r.error,r.status
  FROM json_each(?) selected
  CROSS JOIN step_resource_usage u INDEXED BY sqlite_autoindex_step_resource_usage_1 ON u.run_id=selected.value
  JOIN runs r ON r.id=u.run_id
@@ -35,9 +35,13 @@ const runResourceObservationSQL = `SELECT u.observation_json,s.termination_json,
  ORDER BY u.last_observed_at DESC,u.run_id,u.node_id,u.pod_uid,u.container_id LIMIT ?`
 
 type RunResourceHistory struct {
-	Runs         []model.Run
-	Observations []measured.Observation
-	Truncated    bool
+	SafetyObservations []measured.Observation
+	Dispositions       []model.PodResourceDisposition
+	SafetyRuns         []model.Run
+	SafetyIncomplete   bool
+	Runs               []model.Run
+	Observations       []measured.Observation
+	Truncated          bool
 }
 
 // RunResources uses the read pool, no write transaction, and the existing
@@ -77,6 +81,8 @@ func (s *Store) RunResources(ctx context.Context, repoID int64, f RunResourceFil
 	default:
 		return out, ErrInvalid
 	}
+	safetyQuery := query + ` AND status IN ('passed','failed','interrupted') ORDER BY queue_sequence DESC LIMIT ?`
+	safetyArgs := append(append([]any(nil), args...), measured.MaxRuns+1)
 	if !f.IncludeFailed {
 		query += ` AND status='passed'`
 	}
@@ -99,18 +105,30 @@ func (s *Store) RunResources(ctx context.Context, repoID int64, f RunResourceFil
 	}
 	err = rows.Err()
 	_ = rows.Close()
-	if err != nil || len(ids) == 0 {
+	if err != nil {
 		return out, err
+	}
+	if err = s.readResourceSafety(ctx, repoID, safetyQuery, safetyArgs, &out); err != nil {
+		return out, err
+	}
+	if len(ids) == 0 {
+		return out, nil
 	}
 	payload, err := json.Marshal(ids)
 	if err != nil {
 		return out, err
 	}
+	out.Observations, out.Truncated, err = s.readResourceObservations(ctx, repoID, payload)
+	return out, err
+}
+
+func (s *Store) readResourceObservations(ctx context.Context, repoID int64, payload []byte) ([]measured.Observation, bool, error) {
+	var values []measured.Observation
 	// The run_id prefix of the primary key bounds each lookup to at most
 	// 4,096 retained incarnations; helpers are excluded before the output cap.
 	observations, err := s.reader().QueryContext(ctx, runResourceObservationSQL, string(payload), repoID, measured.MaxRows+1)
 	if err != nil {
-		return out, err
+		return nil, false, err
 	}
 	defer func() { _ = observations.Close() }()
 	for observations.Next() {
@@ -118,15 +136,15 @@ func (s *Store) RunResources(ctx context.Context, repoID int64, f RunResourceFil
 		var diagnostic *string
 		var memory *int64
 		var status *string
-		var runError string
-		if err := observations.Scan(&raw, &diagnostic, &memory, &status, &runError); err != nil {
-			return out, err
+		var runError, runStatus string
+		if err := observations.Scan(&raw, &diagnostic, &memory, &status, &runError, &runStatus); err != nil {
+			return nil, false, err
 		}
 		var v model.StepResourceUsage
 		if json.Unmarshal([]byte(raw), &v) != nil || v.Validate() != nil {
-			return out, fmt.Errorf("invalid stored resource observation")
+			return nil, false, fmt.Errorf("invalid stored resource observation")
 		}
-		o := measured.Observation{Usage: v, Template: measured.TemplateOf(v), Owner: v.FragmentRepository}
+		o := measured.Observation{RunTerminal: model.RunStatus(runStatus).Terminal(), Usage: v, Template: measured.TemplateOf(v), Owner: v.FragmentRepository}
 		o.DeadlineKilled = model.IsExecutionDeadlineReason(runError) || (status != nil && model.StepStatus(*status) == model.StepTimedOut)
 		if diagnostic != nil {
 			var d model.StepDiagnostic
@@ -138,11 +156,11 @@ func (s *Store) RunResources(ctx context.Context, repoID int64, f RunResourceFil
 				o = measured.WithStepResult(o, &d, memory, stepStatus)
 			}
 		}
-		out.Observations = append(out.Observations, o)
+		values = append(values, o)
 	}
-	out.Truncated = len(out.Observations) > measured.MaxRows
-	if out.Truncated {
-		out.Observations = out.Observations[:measured.MaxRows]
+	truncated := len(values) > measured.MaxRows
+	if truncated {
+		values = values[:measured.MaxRows]
 	}
-	return out, observations.Err()
+	return values, truncated, observations.Err()
 }

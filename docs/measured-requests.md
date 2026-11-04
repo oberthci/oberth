@@ -45,7 +45,13 @@ exact ref without adding promotion refs. The response's `include_promotions`
 identifies default selection. `last` is bounded to 1..100. `run` accepts the same full ID or unique 8+
 hexadecimal prefix as `run_get`, is exclusive with `ref`, and can infer `repo`.
 Failed/incomplete runs are excluded unless `include_failed=true`, including for
-an exact run. Missing or expired measurements stay unknown. A step's own
+an exact run. This controls the displayed metric population, not the safety
+population. Independently, the server checks up to **100 latest matching
+terminal runs**, before the passed-only filter, with the same repository,
+exact-run/ref/promotion selection. `last` limits displayed runs; it cannot hide
+a known recent failure. `safety_run_ids` and `safety_scope` identify that bounded
+check. Displayed terminal runs outside this window refuse advice rather than
+claiming an unbounded failure audit. Missing or expired measurements stay unknown. A step's own
 memory peak can supplement a retained, exactly matched container attempt for
 advice; other self-reported counters are not substituted.
 
@@ -90,6 +96,27 @@ CPU, ephemeral storage, duration and known historical CPU/memory/storage limits.
 Retries in one run count once. Separate partial histories for different metrics
 cannot be combined into five complete runs.
 
+Coverage is metric-specific. `memory_coverage`, `cpu_coverage` and
+`storage_coverage` on captured usage count distinct source timestamps, with first
+and last source times. The legacy aggregate `samples` count can grow when an
+unrelated metric refreshes and cannot establish these counts. Existing rows
+without coverage retain their numbers but do not acquire invented coverage.
+External memory advice needs four memory samples through main finish, or the
+existing exact-attempt step cgroup peak. CPU advice needs four CPU-counter source
+times and a cumulative counter reaching main finish. Storage advice needs four
+local-storage source times through the last container exit of a terminal Pod.
+These are minimum coverage checks for provisional advice, not a guarantee that
+polling captured a peak. Unknown terminal tails refuse advice. CPU averages keep
+their captured-counter interval; they are never recomputed over a Pod deadline.
+
+Nonzero/failed commands retain their measured maxima but do not prove completed
+workload coverage. A bound Pod disposition is persisted independently of runtime
+container IDs, so an evicted Pod can veto advice without any usage row or valid
+main termination. An executed terminal step without retained usage or Pod
+disposition is an explicit coverage gap. Skipped, unexecuted steps do not invent
+measurements or failures. Ordinary still-running telemetry stays outside terminal
+quantiles; known censor evidence is evaluated before that exclusion.
+
 Comparable means the same normalized step and owning repository with unchanged
 observed request/limit vectors and workflow size. Mixed conditions refuse advice;
 unknown historical limits are never replaced by today's declarations. An explicit
@@ -110,6 +137,18 @@ implement these rules for both the tool and the offline table:
 | Ephemeral request | maximum pod usage + 25%, rounded to MiB, minimum 64Mi |
 | Ephemeral limit | maximum pod usage + 50%, rounded to MiB, minimum 64Mi |
 | Step deadline | withheld: Pod active lifetime through finalization is not measured |
+
+The table computes estimates before applying retained baseline floors. Because
+cache warmth and equivalent workload inputs across revisions are not proved,
+`advice_basis` labels every emitted suggestion **provisional**. Requests retain
+the greatest captured historical/current request, and memory/storage limits
+retain the greatest captured historical/current limit. A declared current
+request can also raise its corresponding suggested limit. Missing baselines,
+known unlimited memory/storage, and a Pod-local aggregate limit that differs
+from the main-container limit refuse new restrictive advice. An unlimited
+resource does not become a guessed finite cap. Retaining a declaration does not
+certify that it is sufficient or measured. Recheck after cache, mount, workload
+or CPU-cap changes; a cache mount does not prove cold coverage or cache hits.
 
 Each step's `deadline_no_suggestion` explains this timing gap, even with no
 history or otherwise sufficient resource measurements. Neither `suggested` nor
@@ -138,21 +177,28 @@ above a recorded limit (censoring), saturation, counter resets, changed requests
 restarts, ambiguous identity or truncated history. Unknown historical CPU,
 memory or ephemeral limits also suppress advice. Deadline-killed durations are
 censored, including workflow-wide deadline kills with no precise step diagnostic.
-Inspect
-coverage before committing a reduction. No automatic higher retry is performed.
+Run/step deadline uncertainty conservatively refuses advice, but that flag alone
+does not prove every Pod or retry was deadline-killed. Independent dispositions
+preserve exact Pod identity. Inspect coverage before committing a change. No
+automatic higher retry is performed.
 
 ## Bounds and retention
 
 The tool reads through the database read pool, not the writer. Run selection uses
 existing repository/ref indexes, then primary-key run lookups of telemetry and
-step diagnostics. It reads at most 100 runs and returns at most 10,000 main
-incarnations; truncation is explicit and suppresses suggestions. The storage
+step diagnostics. Display and safety each select at most 100 runs and read at
+most 10,000 main incarnations. Safety also bounds Pod dispositions and executed
+step inventory at 10,000 rows each; missing or truncated safety coverage refuses
+suggestions. No cluster query occurs on this read path. The storage
 operation has a five-second deadline and the entire service call ten seconds,
 including waiting for repository read locks. The query-plan test explains the
 exact executed observation SQL and verifies run-ID primary-key lookups.
-It takes no write transaction and makes no cluster calls. No SQL schema change
-is needed: new optional provenance and limits live in the existing versioned
-observation JSON, and old rows remain readable.
+It takes no write transaction. Optional coverage lives in versioned observation
+JSON, and old rows remain readable. An additive timestamped database migration
+stores independent Pod dispositions, bounded to 2,048 Pods per run and deleted
+with run retention. It does not store raw Pod messages, commands or environment.
+Use the normal pre-upgrade backup/restore process for database rollback; this
+does not require older CLI clients to understand the new fields.
 
 Retention currently targets 90 days and **100,000 container incarnations globally**,
 with bounded asynchronous pruning. It has no per-repo or rare-release quota.
