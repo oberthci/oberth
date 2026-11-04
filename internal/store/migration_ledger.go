@@ -4,79 +4,110 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
 )
-
-// Validate the binary independently of the database: even a fully upgraded
-// database must refuse a binary that reuses a shipped migration number.
-func validateMigrations(items []migration, latest int) error {
-	seen := make(map[int]bool, len(items))
-	for _, item := range items {
-		if seen[item.version] {
-			return fmt.Errorf("%w: duplicate migration version %d in binary", ErrSchemaIncompatible, item.version)
-		}
-		seen[item.version] = true
-	}
-	for index, item := range items {
-		if item.version != index+1 {
-			return fmt.Errorf("%w: binary migration version %d at position %d; expected version %d", ErrSchemaIncompatible, item.version, index, index+1)
-		}
-		methods := 0
-		if item.sql != "" {
-			methods++
-		}
-		if item.apply != nil {
-			methods++
-		}
-		if item.rawApply != nil {
-			methods++
-		}
-		if methods != 1 {
-			return fmt.Errorf("%w: migration %d must define exactly one application method", ErrSchemaIncompatible, item.version)
-		}
-	}
-	if len(items) != latest {
-		return fmt.Errorf("%w: binary has %d migrations, expected %d", ErrSchemaIncompatible, len(items), latest)
-	}
-	return nil
-}
 
 type migrationQuerier interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
-// The historical ledger already stores every applied version, including legacy
-// fixtures. Preserve those records verbatim; never infer missing versions from
-// the maximum, since that would conceal an out-of-order deployment.
-func readAppliedMigrations(ctx context.Context, q migrationQuerier) (map[int]bool, int, error) {
-	if err := validateMigrations(migrations, latestMigrationVersion); err != nil {
+func migrationLedgerHasIDs(ctx context.Context, q migrationQuerier) (bool, error) {
+	rows, err := q.QueryContext(ctx, `SELECT name FROM pragma_table_info('schema_migrations') WHERE name='id'`)
+	if err != nil {
+		return false, fmt.Errorf("%w: inspect migration ledger: %w", ErrSchemaIncompatible, err)
+	}
+	defer func() { _ = rows.Close() }()
+	hasIDs := rows.Next()
+	return hasIDs, rows.Err()
+}
+
+// Keep the historical ledger and its timestamps. The integer PK becomes a local
+// receipt ordinal after 55; IDs, not ordinals or a high-water mark, select work.
+// An older binary still refuses the larger ordinal before making any writes.
+func ensureMigrationIDs(ctx context.Context, tx *sql.Tx) error {
+	hasIDs, err := migrationLedgerHasIDs(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if !hasIDs {
+		if _, err = tx.ExecContext(ctx, `ALTER TABLE schema_migrations ADD COLUMN id TEXT`); err != nil {
+			return fmt.Errorf("add migration IDs: %w", err)
+		}
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE schema_migrations SET id=CAST(version AS TEXT) WHERE id IS NULL AND version<=?`, lastIntegerMigrationVersion); err != nil {
+		return fmt.Errorf("record legacy migration IDs: %w", err)
+	}
+	if _, err = tx.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS schema_migrations_id_unique ON schema_migrations(id)`); err != nil {
+		return fmt.Errorf("index migration IDs: %w", err)
+	}
+	return nil
+}
+
+func readAppliedMigrations(ctx context.Context, q migrationQuerier) (map[string]bool, int, error) {
+	if migrationDefinitionError != nil {
+		return nil, 0, migrationDefinitionError
+	}
+	return readAppliedMigrationsWith(ctx, q, migrations)
+}
+
+func readAppliedMigrationsWith(ctx context.Context, q migrationQuerier, items []migration) (map[string]bool, int, error) {
+	if err := validateMigrations(items, len(items)); err != nil {
 		return nil, 0, err
 	}
-	rows, err := q.QueryContext(ctx, `SELECT version FROM schema_migrations ORDER BY version`)
+	known := make(map[string]bool, len(items))
+	for _, item := range items {
+		known[item.ID()] = true
+	}
+	hasIDs, err := migrationLedgerHasIDs(ctx, q)
+	if err != nil {
+		return nil, 0, err
+	}
+	query := `SELECT version, NULL FROM schema_migrations ORDER BY version`
+	if hasIDs {
+		query = `SELECT version, id FROM schema_migrations ORDER BY version`
+	}
+	rows, err := q.QueryContext(ctx, query)
 	if err != nil {
 		return nil, 0, fmt.Errorf("%w: read migration ledger: %w", ErrSchemaIncompatible, err)
 	}
 	defer func() { _ = rows.Close() }()
-	applied := make(map[int]bool)
+	applied := make(map[string]bool)
+	receipts := make(map[int]bool)
 	latest := 0
 	for rows.Next() {
 		var version int
-		if err := rows.Scan(&version); err != nil {
+		var recordedID sql.NullString
+		if err := rows.Scan(&version, &recordedID); err != nil {
 			return nil, 0, fmt.Errorf("read applied migration: %w", err)
 		}
-		if version > latestMigrationVersion {
-			return nil, 0, fmt.Errorf("%w: database=%d binary=%d; see docs/upgrade-schema-v3.md", ErrSchemaTooNew, version, latestMigrationVersion)
+		id := recordedID.String
+		if !recordedID.Valid {
+			// A pre-ID database can only contain the frozen integer lineage.
+			if version > lastIntegerMigrationVersion {
+				return nil, 0, fmt.Errorf("%w: database=%d binary=%d; see docs/upgrade-schema-v3.md", ErrSchemaTooNew, version, len(items))
+			}
+			id = strconv.Itoa(version)
 		}
-		if version < 1 || applied[version] {
-			return nil, 0, fmt.Errorf("%w: invalid or duplicate applied migration version %d", ErrSchemaIncompatible, version)
+		if version < 1 || receipts[version] || applied[id] || id == "" {
+			return nil, 0, fmt.Errorf("%w: invalid or duplicate applied migration ID %q at receipt %d", ErrSchemaIncompatible, id, version)
 		}
-		applied[version] = true
+		if !known[id] {
+			return nil, 0, fmt.Errorf("%w: unknown applied migration ID %q; see docs/schema-migrations.md", ErrSchemaTooNew, id)
+		}
+		if (version <= lastIntegerMigrationVersion && id != strconv.Itoa(version)) || (version > lastIntegerMigrationVersion && !validTimestampMigrationID(id)) {
+			return nil, 0, fmt.Errorf("%w: migration ID %q at invalid receipt %d", ErrSchemaIncompatible, id, version)
+		}
+		applied[id] = true
+		receipts[version] = true
 		latest = version
 	}
 	if err := rows.Err(); err != nil {
 		return nil, 0, fmt.Errorf("read applied migrations: %w", err)
 	}
+	// Gaps in the receipt sequence remain corruption. A missing timestamped ID
+	// is ordinary pending work even if a lexically later ID has already run.
 	for version := 1; version <= latest; version++ {
-		if !applied[version] {
+		if !receipts[version] {
 			return nil, 0, fmt.Errorf("%w: migration ledger missing version %d below applied version %d; out-of-order migrations require operator repair", ErrSchemaIncompatible, version, latest)
 		}
 	}

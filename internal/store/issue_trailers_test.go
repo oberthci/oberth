@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/testdb"
 )
 
 func greenTrailerPublication(t *testing.T, s *Store, repo model.Repository, ref, trigger, sha string) model.PublicationFinalization {
@@ -161,8 +162,8 @@ func TestIssueTrailerMigrationSeedsHistoricalBoundary(t *testing.T) {
 	repo := createRepo(t, s)
 	ctx := t.Context()
 	first := greenTrailerPublication(t, s, repo, "main", "branch", strings.Repeat("a", 40))
-	// Recreate only the new migration against a schema-54 database with history.
-	if _, err := s.db.Exec(`DROP TABLE issue_trailer_publications; DELETE FROM schema_migrations WHERE version=55;`); err != nil {
+	// Recreate schema 54, including its integer-only ledger, with history.
+	if _, err := s.db.Exec(testdb.PostV54Downgrade); err != nil {
 		t.Fatal(err)
 	}
 	path := s.livePath

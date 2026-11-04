@@ -23,14 +23,14 @@ func (e sqliteResultError) Error() string { return "sqlite result" }
 
 func (e sqliteResultError) Code() int { return int(e) }
 
-func TestSchemaMigrationsAreContiguous(t *testing.T) {
+func TestSchemaMigrationsAreOrdered(t *testing.T) {
 	t.Parallel()
 
 	if err := validateMigrations(migrations, latestMigrationVersion); err != nil {
 		t.Fatal(err)
 	}
-	if latestMigrationVersion != 55 {
-		t.Fatalf("latest migration version = %d, want 55", latestMigrationVersion)
+	if lastIntegerMigrationVersion != 55 {
+		t.Fatalf("last integer migration = %d, want 55", lastIntegerMigrationVersion)
 	}
 	if len(migrations) != latestMigrationVersion {
 		t.Fatalf("migration count = %d, want %d", len(migrations), latestMigrationVersion)
@@ -99,10 +99,20 @@ func TestEveryMigrationDocumentedInAgentContract(t *testing.T) {
 			break
 		}
 	}
-	for i := 1; i <= latestMigrationVersion; i++ {
+	for i := 1; i <= lastIntegerMigrationVersion; i++ {
 		marker := fmt.Sprintf("| v%d |", i)
 		if !strings.Contains(table.String(), marker) {
 			t.Errorf("AGENT-CONTRACT.md migration v%d is missing from the contiguous schema table", i)
+		}
+	}
+	if !strings.Contains(contract, "internal/store/migrations/") || !strings.Contains(contract, "YYYYMMDDHHMMSS") {
+		t.Fatal("AGENT-CONTRACT.md missing the timestamp migration contract")
+	}
+	for _, item := range migrations[lastIntegerMigrationVersion:] {
+		for _, field := range []string{"-- Purpose: ", "-- Rollback: "} {
+			if !strings.Contains(item.sql, field) {
+				t.Errorf("migration %s missing contract field %s", item.ID(), field)
+			}
 		}
 	}
 }
@@ -1031,6 +1041,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"runs_passed_tested_sha_idx",
 		"runs_ref_idx",
 		"runs_sha_idx",
+		"schema_migrations_id_unique",
 		"secret_access_active",
 		"step_resource_usage_repo_idx",
 		"step_resource_usage_retention_idx",
@@ -1106,7 +1117,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"run_admission_timings":     {"run_id", "episode", "requested_at", "granted_at", "closed_at"},
 		"step_timings":              {"run_id", "node_id", "workflow_uid", "pod_uid", "available", "ordinal", "timing_json"},
 		"schema_identity":           {"singleton", "identity"},
-		"schema_migrations":         {"version", "applied_at"},
+		"schema_migrations":         {"version", "applied_at", "id"},
 		"upstreams":                 {"id", "name", "kind", "base_url", "created_at", "updated_at", "key_name"},
 		"repositories":              {"id", "name", "upstream_id", "default_branch", "created_at", "updated_at"},
 		"runs":                      {"queue_sequence", "id", "repo_id", "ref_kind", "ref", "sha", "actor", "release", "trigger", "phase", "job_name", "tested_sha", "base_sha", "failed_burn", "failed_step", "error", "status", "reason", "superseded_by", "queued_at", "started_at", "finished_at", "created_at", "updated_at", "credentialed", "concurrency_group", "admission_sequence", "schedule_entry"},

@@ -496,6 +496,8 @@ outage and CA-trust knobs for self-hosted witnesses — shipped in v0.10.51.
 
 ## Development
 
+For database changes, follow [Adding schema migrations](docs/schema-migrations.md).
+
 ```bash
 go vet ./...
 go test -race -count=1 ./...

@@ -741,6 +741,13 @@ func (s *Store) compatibleSchemaVersion(ctx context.Context) (int, error) {
 }
 
 func (s *Store) migrate(ctx context.Context, expectedLegacyHead *model.AuditHead) error {
+	if migrationDefinitionError != nil {
+		return migrationDefinitionError
+	}
+	return s.migrateWithMigrations(ctx, expectedLegacyHead, migrations)
+}
+
+func (s *Store) migrateWithMigrations(ctx context.Context, expectedLegacyHead *model.AuditHead, items []migration) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin schema migration: %w", err)
@@ -750,7 +757,7 @@ func (s *Store) migrate(ctx context.Context, expectedLegacyHead *model.AuditHead
 	if _, err := tx.ExecContext(ctx, createMigrationLedger); err != nil {
 		return fmt.Errorf("create migration ledger: %w", err)
 	}
-	applied, databaseVersion, err := readAppliedMigrations(ctx, tx)
+	applied, databaseVersion, err := readAppliedMigrationsWith(ctx, tx, items)
 	if err != nil {
 		return err
 	}
@@ -761,7 +768,7 @@ func (s *Store) migrate(ctx context.Context, expectedLegacyHead *model.AuditHead
 		return fmt.Errorf("%w: existing schema version 2 requires backup-and-replace; live migration to version %d is disabled; see docs/archive/upgrade-schema-v3.md",
 			ErrSchemaIncompatible, latestMigrationVersion)
 	}
-	targetVersion := latestMigrationVersion
+	targetVersion := len(items)
 	if databaseVersion == 1 {
 		if err := s.verifyLegacyV1Schema(ctx, tx); err != nil {
 			return err
@@ -790,8 +797,8 @@ func (s *Store) migrate(ctx context.Context, expectedLegacyHead *model.AuditHead
 			return err
 		}
 	}
-	for _, item := range migrations {
-		if applied[item.version] || item.version > targetVersion {
+	for _, item := range items {
+		if applied[item.ID()] || item.version > targetVersion {
 			continue
 		}
 		if item.version == publicationAbandonMigrationVersion {
@@ -821,13 +828,18 @@ func (s *Store) migrate(ctx context.Context, expectedLegacyHead *model.AuditHead
 				item.version, unixNano(s.now())); err != nil {
 				return fmt.Errorf("record connection-level migration %d: %w", item.version, err)
 			}
-			applied[item.version] = true
+			applied[item.ID()] = true
 			nextTx, beginErr := s.db.BeginTx(ctx, nil)
 			if beginErr != nil {
 				return fmt.Errorf("resume after connection-level migration %d: %w", item.version, beginErr)
 			}
 			tx = nextTx
 			continue
+		}
+		if item.id != "" {
+			if err := ensureMigrationIDs(ctx, tx); err != nil {
+				return err
+			}
 		}
 		switch {
 		case item.sql != "" && item.apply == nil && item.rawApply == nil:
@@ -838,12 +850,18 @@ func (s *Store) migrate(ctx context.Context, expectedLegacyHead *model.AuditHead
 			err = errors.New("migration must define exactly one application method")
 		}
 		if err == nil {
-			_, err = tx.ExecContext(ctx, `INSERT INTO schema_migrations(version, applied_at) VALUES(?, ?)`, item.version, unixNano(s.now()))
+			if item.id == "" {
+				_, err = tx.ExecContext(ctx, `INSERT INTO schema_migrations(version, applied_at) VALUES(?, ?)`, item.version, unixNano(s.now()))
+			} else {
+				// SQLite allocates the next local receipt ordinal. The catalog
+				// position may differ when another branch was deployed first.
+				_, err = tx.ExecContext(ctx, `INSERT INTO schema_migrations(id, applied_at) VALUES(?, ?)`, item.ID(), unixNano(s.now()))
+			}
 		}
 		if err != nil {
-			return fmt.Errorf("apply migration %d: %w", item.version, err)
+			return fmt.Errorf("apply migration %s: %w", item.ID(), err)
 		}
-		applied[item.version] = true
+		applied[item.ID()] = true
 	}
 	if err := s.verifySchemaIdentity(ctx, tx); err != nil {
 		return err
