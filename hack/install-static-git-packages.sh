@@ -17,6 +17,7 @@ for package in $APK_PACKAGES; do
   esac
 done
 [ -n "$apk_pin" ] || { echo 'static Git packages: missing apk-tools pin' >&2; exit 1; }
+[ -n "${BUILDER_APK_VERSION:-}" ] || { echo 'static Git packages: missing BUILDER_APK_VERSION pin' >&2; exit 1; }
 if [ ! -f /sbin/apk ] || [ ! -x /sbin/apk ] || [ -L /sbin/apk ]; then
   echo 'static Git packages: expected a regular executable /sbin/apk in the pinned Alpine builder' >&2
   exit 1
@@ -25,9 +26,11 @@ apk_version=$(/sbin/apk --version) || {
   echo 'static Git packages: /sbin/apk version check failed' >&2
   exit 1
 }
+# The immutable builder may predate the live repository package closure.
+# Verify its bootstrap binary separately; apk still enforces every target pin.
 case "$apk_version" in
-  "apk-tools $apk_pin, compiled for x86_64."|"apk-tools $apk_pin, compiled for aarch64.") ;;
-  *) echo "static Git packages: /sbin/apk does not match apk-tools=$apk_pin" >&2; exit 1 ;;
+  "apk-tools $BUILDER_APK_VERSION, compiled for x86_64."|"apk-tools $BUILDER_APK_VERSION, compiled for aarch64.") ;;
+  *) echo "static Git packages: /sbin/apk does not match BUILDER_APK_VERSION=$BUILDER_APK_VERSION" >&2; exit 1 ;;
 esac
 # Intentional word splitting of a source-controlled, version-qualified closure.
 # shellcheck disable=SC2086

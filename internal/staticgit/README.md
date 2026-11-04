@@ -13,7 +13,9 @@ that happens; it can be necessary within weeks of a release.
    log, source commit, digest-pinned Alpine builder, target architecture and
    unavailable package/version. Distinguish repository retirement from an
    authentication/network error. The installer deliberately uses `/sbin/apk`
-   and checks the pinned apk-tools version; changing PATH is not a repair.
+   and checks `BUILDER_APK_VERSION`, the bootstrap apk-tools version supplied
+   by that image. It may differ from the target `apk-tools` package pin in
+   `APK_PACKAGES`; changing PATH is not a repair.
 
 2. **Resolve the complete package closure in a clean, approved builder.** Use
    the same Alpine release and target-platform builder as Dockerfile's
