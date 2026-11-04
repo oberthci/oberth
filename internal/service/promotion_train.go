@@ -36,6 +36,9 @@ func (service *API) checkPromotionSource(ctx context.Context, repository model.R
 	if repository.ArchivedAt != nil {
 		return false, false, store.ErrRepositoryArchived
 	}
+	if err := refuseRedBranchSource(candidate); err != nil {
+		return false, false, err
+	}
 	if greenBranchCandidate(candidate) {
 		return false, false, nil
 	}

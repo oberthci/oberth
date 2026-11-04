@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -50,13 +51,15 @@ func TestParkPushMirrorsWithoutEnqueue(t *testing.T) {
 
 type parkDeliveryGit struct {
 	DeliveryGit
-	policy     string
-	ref        string
-	policyErr  error
-	absentRepo string
+	policy      string
+	ref         string
+	policyErr   error
+	absentRepo  string
+	policyReads atomic.Int64
 }
 
 func (g *parkDeliveryGit) ReadDefaultBlob(_ context.Context, repo string, _ string, _ int) (string, []byte, bool, error) {
+	g.policyReads.Add(1)
 	if g.absentRepo != "" && strings.HasSuffix(repo, "/"+g.absentRepo) {
 		return "", nil, false, gitcache.ErrPolicyRepositoryNotCached
 	}
@@ -349,14 +352,18 @@ func TestParkPromotionUnbornTargetRunsCI(t *testing.T) {
 	}
 }
 
-func TestParkPromotionSHAResolutionSkipsUncachedRepositories(t *testing.T) {
+func TestParkPromotionRequiresRepositoryBeforeFetchingPolicy(t *testing.T) {
 	f := newControlFixture(t)
 	if _, err := f.store.CreateRepository(t.Context(), model.RepositorySpec{Name: "absent", UpstreamID: f.repo.UpstreamID, DefaultBranch: "main"}); err != nil {
 		t.Fatal(err)
 	}
 	s := f.api(t)
-	s.git = &parkDeliveryGit{DeliveryGit: f.git, ref: "park/review", absentRepo: "absent"}
-	repository, source, err := s.resolvePromotionSource(t.Context(), "", strings.Repeat("a", 40))
+	g := &parkDeliveryGit{DeliveryGit: f.git, ref: "park/review", absentRepo: "absent"}
+	s.git = g
+	if _, _, err := s.resolvePromotionSource(t.Context(), "", strings.Repeat("a", 40)); err == nil || !strings.Contains(err.Error(), "requires repo") || g.policyReads.Load() != 0 {
+		t.Fatalf("SHA-only park resolution fetched catalogue policies: reads=%d error=%v", g.policyReads.Load(), err)
+	}
+	repository, source, err := s.resolvePromotionSource(t.Context(), f.repo.Name, strings.Repeat("a", 40))
 	if err != nil {
 		t.Fatal(err)
 	}

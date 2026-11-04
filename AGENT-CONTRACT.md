@@ -1037,6 +1037,12 @@ trust assumptions and complete invalidation rules.
   The existing reason line says `promoted without branch CI`; no status changes.
   Target branch-CI requirements survive admin/grant authority and are rechecked
   before planning and publication. See [park promotion](docs/park-promotion.md).
+  Push policy reads use two-second burst reuse and a two-second deadline; any
+  policy error falls back to branch CI. Promotion policy reads stay fresh and
+  fail closed. Single-source and train admission reject red branch evidence
+  and share per-source park eligibility. Parked sources require `repo`.
+  Receive-event ledger outcome `parked` records a mirrored park push with no
+  branch run; it is separate from the unchanged run status vocabulary.
 - MCP `run_get` and `run_logs` accept the same full IDs and unique prefixes
   as the dashboard run views. ID prefix resolution is read-only; scheduler
   and mutation lookups still require exact durable IDs. `run_retry` and

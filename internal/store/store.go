@@ -1499,10 +1499,8 @@ func (s *Store) appendPromotion(ctx context.Context, spec model.PromotionSpec, r
 	// A grant is held, not consumed, at admission (#1097): it is consumed
 	// with the delivered publication, so a failure before delivery leaves it
 	// for a retry of the same tuple, and only one promotion holds it at once.
-	if spec.GrantID != "" {
-		if err := checkPromotionGrantReservableTx(ctx, tx, spec, now); err != nil {
-			return model.Promotion{}, err
-		}
+	if err := checkPromotionGrantReservableTx(ctx, tx, spec, now); err != nil {
+		return model.Promotion{}, err
 	}
 	value, err := insertPromotion(ctx, tx, spec, id, runID, spec.GrantID, now)
 	if err != nil {
@@ -1516,10 +1514,8 @@ func (s *Store) appendPromotion(ctx context.Context, spec model.PromotionSpec, r
 			return model.Promotion{}, err
 		}
 	}
-	if spec.GrantID != "" {
-		if err := s.appendPromotionGrantReserveAudit(ctx, tx, value, spec.RetryOf, now); err != nil {
-			return model.Promotion{}, err
-		}
+	if err := s.appendPromotionGrantReserveAudit(ctx, tx, value, spec.RetryOf, now); err != nil {
+		return model.Promotion{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return model.Promotion{}, fmt.Errorf("commit append promotion: %w", err)

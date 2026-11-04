@@ -127,8 +127,6 @@ DROP TABLE IF EXISTS workflow_capability_grants;
 DELETE FROM schema_migrations WHERE version>=46;
 `
 
-// PostV49Downgrade removes work-status and policy-wait additions while keeping
-// the covering run-list index already installed by the small v0.17.83 release.
 // PostV53Downgrade reconstructs the pre-park schema while preserving trains.
 const PostV53Downgrade = `
 DROP TRIGGER IF EXISTS promotions_branch_ci_immutable;
@@ -136,6 +134,8 @@ ALTER TABLE promotions DROP COLUMN branch_ci_skipped;
 DELETE FROM schema_migrations WHERE version>=54;
 `
 
+// PostV49Downgrade removes work-status and policy-wait additions while keeping
+// the covering run-list index installed by the small v0.17.83 release.
 const PostV49Downgrade = PostV52Downgrade + `
 DROP TRIGGER IF EXISTS issues_metadata_revision;
 ALTER TABLE issues DROP COLUMN work_status;

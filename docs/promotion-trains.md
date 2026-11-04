@@ -1,6 +1,6 @@
 # Promotion trains
 
-A train combines several reviewed, green branch commits into one promotion.
+A train combines reviewed green branch commits and authorized parked commits into one promotion.
 Oberth waits for earlier promotions to the same repository and target, fetches
 the target's current head, and merges the sources in order in one temporary tree.
 It runs **one promotion CI run** on the final commit. A green result publishes
@@ -8,11 +8,14 @@ that exact commit with the existing non-forced push checks. A red result leaves
 the target unchanged.
 
 Each source needs a full commit SHA whose newest run satisfies the same exactly
-tested green branch check as single-source `promote`. Optional `ref` must match
-that run's branch; it never selects a moving head instead of the requested SHA.
+tested green branch check or authorized park provenance as single-source `promote`.
+Parked sources require `repo` and follow the [park policy](park-promotion.md);
+red branch evidence cannot be discarded by parking the same SHA. Optional `ref`
+must match the resolved branch; it never selects a moving head instead of the requested SHA.
 All sources belong to one repository. There must be 1–32 unique sources.
 An admin uplink may promote directly; other uplinks need a valid promotion grant
-for every source and the target. Only included sources' grants are consumed after
+for every source and the target, with repository opt-in also accepted for parked
+sources. Only included sources' grants are consumed after
 delivery. The existing `sha` form keeps its current merge and fast-forward behavior.
 A `sources` request always runs CI, even with one source or an already-contained tree.
 

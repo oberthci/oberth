@@ -102,11 +102,37 @@ func greenBranchCandidate(candidate model.Run) bool {
 	return candidate.RefKind == model.RefBranch && candidate.Status == model.RunPassed && sameOID(candidate.TestedSHA, candidate.SHA) && (candidate.Trigger == "" || candidate.Trigger == "branch" || candidate.Trigger == "schedule")
 }
 
+func refuseRedBranchSource(run model.Run) error {
+	if run.RefKind == model.RefBranch && run.Trigger != "promotion" && !run.Release && (run.Status == model.RunFailed || run.Status == model.RunInterrupted) {
+		return refuse(ErrInvalidInput, "promotion source must be the exactly tested green branch commit; promotion source has a red branch run %s; rerun or fix it", run.ID)
+	}
+	return nil
+}
+
 // Resolve parked SHAs without inventing a green run or borrowing a promotion
 // run as branch evidence. Repository resolution still uses the scoped store.
 func (service *API) resolvePromotionSource(ctx context.Context, repo, sha string) (model.Repository, model.Run, error) {
+	if repo == "" {
+		repository, run, err := service.resolveRun(ctx, repo, sha)
+		if err == nil {
+			if redErr := refuseRedBranchSource(run); redErr != nil {
+				return model.Repository{}, model.Run{}, redErr
+			}
+			if greenBranchCandidate(run) {
+				return repository, run, nil
+			}
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return model.Repository{}, model.Run{}, err
+		}
+		return model.Repository{}, model.Run{}, refuse(ErrInvalidInput, "promotion source must be the exactly tested green branch commit; parked promotion source requires repo")
+	}
 	return service.resolveRunWith(ctx, repo, sha, func(ctx context.Context, id int64, sha string) (model.Run, error) {
 		run, err := service.runs.ResolveRun(ctx, id, sha)
+		if err == nil {
+			if redErr := refuseRedBranchSource(run); redErr != nil {
+				return model.Run{}, redErr
+			}
+		}
 		if err == nil && greenBranchCandidate(run) {
 			return run, nil
 		}

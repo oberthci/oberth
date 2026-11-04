@@ -17,7 +17,8 @@ path. Default branches always retain ordinary branch CI.
 A parked promotion requires a full commit SHA reachable from a current park
 branch in the same repository. An ancestor of the park tip is accepted; an
 unreferenced object, similarly named branch, tag, or private promotion pin is not
-parked provenance. Pass `repo` to resolve repository ambiguity. Normal uplink
+parked provenance. Parked sources require `repo`; SHA-only lookup of ordinary
+green branch evidence remains available. Normal uplink
 repository scopes still apply.
 
 An admin may promote a parked commit directly. A non-admin needs either the
@@ -50,10 +51,14 @@ namespace. An admin or grant cannot bypass it. Normal release tag admission,
 annotated-tag provenance, secret isolation, release capability preflight and
 trusted test requirements remain in force.
 
-Only freshly fetched private upstream tracking state is policy authority.
+Promotion authorization requires freshly fetched private upstream tracking state.
 Changing the file on a candidate or pushing an untested local default branch
 cannot enable the opt-in or remove a requirement. Unreadable, malformed, unknown
-fields and multiple YAML documents fail closed. The file is limited to 16 KiB.
+fields and multiple YAML documents refuse promotion. The file is limited to 16 KiB.
+Push admission reuses successful upstream snapshots for up to two seconds and
+bounds its policy read to two seconds. On any policy read or validation error,
+the push follows ordinary branch CI instead of parking; upstream availability
+cannot prevent CI enqueue. Candidate content never supplies the fallback policy.
 
 ## Testing, publication and audit
 
@@ -74,3 +79,11 @@ promotions; historical audit records are unchanged.
 or grant authority. It tests the merged tree again for a skipped-branch source.
 Queued planning and publication recheck target branch-CI requirements. Ordinary
 green branch promotions retain their existing fast-forward reuse behavior.
+
+Single-source and train admission use the same eligibility check. A terminal
+failed or interrupted branch run on the SHA refuses promotion, even when the SHA
+is also parked; rerun it or fix it first. Trains can combine green and parked
+sources. Each green source still needs ordinary caller/grant authority; parked
+sources can also use repository opt-in. Any parked member marks the promotion
+and audit record as having skipped branch CI. Target branch-CI requirements apply
+to the entire train, and every train runs the combined CI gate before publication.
