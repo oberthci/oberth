@@ -9,33 +9,40 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-func (s *Store) readResourceSafety(ctx context.Context, repoID int64, query string, args []any, out *RunResourceHistory) error {
-	rows, err := s.reader().QueryContext(ctx, query, args...)
-	if err != nil {
-		return err
-	}
+func (s *Store) readResourceSafety(ctx context.Context, repoID int64, query, activeQuery string, args []any, out *RunResourceHistory) error {
 	var ids []string
 	known := map[string]bool{}
-	for rows.Next() {
-		run, err := scanRun(rows)
+	for population, q := range []string{query, activeQuery} {
+		rows, err := s.reader().QueryContext(ctx, q, args...)
 		if err != nil {
-			_ = rows.Close()
 			return err
 		}
-		if len(ids) == measured.MaxRuns {
-			break
+		count := 0
+		for rows.Next() {
+			run, err := scanRun(rows)
+			if err != nil {
+				_ = rows.Close()
+				return err
+			}
+			count++
+			if count > measured.MaxRuns {
+				// A bounded terminal history is explicit; an omitted active
+				// workflow could already contain a known censor or failed retry.
+				out.SafetyIncomplete = out.SafetyIncomplete || population == 1
+				break
+			}
+			ids = append(ids, run.ID)
+			known[run.ID] = true
+			out.SafetyRuns = append(out.SafetyRuns, run)
 		}
-		ids = append(ids, run.ID)
-		known[run.ID] = true
-		out.SafetyRuns = append(out.SafetyRuns, run)
-	}
-	err = rows.Err()
-	_ = rows.Close()
-	if err != nil {
-		return err
+		err = rows.Err()
+		_ = rows.Close()
+		if err != nil {
+			return err
+		}
 	}
 	for _, run := range out.Runs {
-		if run.Status.Terminal() && !known[run.ID] {
+		if !known[run.ID] {
 			out.SafetyIncomplete = true
 		}
 	}
@@ -43,11 +50,12 @@ func (s *Store) readResourceSafety(ctx context.Context, repoID int64, query stri
 		return nil
 	}
 	payload, _ := json.Marshal(ids)
+	var err error
 	out.SafetyObservations, out.SafetyIncomplete, err = safetyObservations(s, ctx, repoID, payload, out.SafetyIncomplete)
 	if err != nil {
 		return err
 	}
-	rows, err = s.reader().QueryContext(ctx, `SELECT d.observation_json FROM json_each(?) selected
+	rows, err := s.reader().QueryContext(ctx, `SELECT d.observation_json FROM json_each(?) selected
 CROSS JOIN pod_resource_dispositions d ON d.run_id=selected.value
 WHERE d.repo_id=? ORDER BY d.run_id,d.node_id,d.pod_uid LIMIT ?`, string(payload), repoID, measured.MaxRows+1)
 	if err != nil {
@@ -90,9 +98,10 @@ WHERE d.repo_id=? ORDER BY d.run_id,d.node_id,d.pod_uid LIMIT ?`, string(payload
 		return nil
 	}
 	inventory, err := s.reader().QueryContext(ctx, `SELECT
- r.status<>'skipped' AND NOT EXISTS(SELECT 1 FROM step_resource_usage u WHERE u.run_id=r.run_id AND u.burn=r.burn AND u.step=r.step AND json_extract(u.observation_json,'$.container_name')='main')
+ r.status<>'skipped' AND (runs.status IN ('passed','failed','interrupted') OR r.status IN ('passed','failed','timed_out'))
+ AND NOT EXISTS(SELECT 1 FROM step_resource_usage u WHERE u.run_id=r.run_id AND u.burn=r.burn AND u.step=r.step AND json_extract(u.observation_json,'$.container_name')='main')
  AND NOT EXISTS(SELECT 1 FROM pod_resource_dispositions d WHERE d.run_id=r.run_id AND d.burn=r.burn AND d.step=r.step)
- FROM json_each(?) selected CROSS JOIN step_results r ON r.run_id=selected.value
+ FROM json_each(?) selected CROSS JOIN step_results r ON r.run_id=selected.value JOIN runs ON runs.id=r.run_id
  LIMIT ?`, string(payload), measured.MaxRows+1)
 	if err != nil {
 		return err
@@ -119,7 +128,7 @@ WHERE d.repo_id=? ORDER BY d.run_id,d.node_id,d.pod_uid LIMIT ?`, string(payload
 	// not evidence that no work executed (e.g. an interrupted collector).
 	var empty int
 	err = s.reader().QueryRowContext(ctx, `SELECT count(*) FROM (
- SELECT 1 FROM json_each(?) selected WHERE
+ SELECT 1 FROM json_each(?) selected JOIN runs ON runs.id=selected.value WHERE runs.status IN ('passed','failed','interrupted') AND
  NOT EXISTS(SELECT 1 FROM step_results r WHERE r.run_id=selected.value)
  AND NOT EXISTS(SELECT 1 FROM step_resource_usage u WHERE u.run_id=selected.value)
  AND NOT EXISTS(SELECT 1 FROM pod_resource_dispositions d WHERE d.run_id=selected.value)

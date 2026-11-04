@@ -6,7 +6,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-const SafetyScope = "Safety checks consult up to 100 latest matching terminal runs before include_failed filtering. Missing executed-attempt evidence or a window that does not cover the displayed terminal runs refuses advice. This bounded retained history is not proof of cold-run sufficiency."
+const SafetyScope = "Safety checks consult up to 100 latest matching terminal runs and up to 100 matching active runs before include_failed filtering. Active-run overflow, missing executed-attempt evidence or a window that does not cover displayed runs refuses advice. Ordinary unfinished telemetry stays outside completed measurements. This bounded retained history is not proof of cold-run sufficiency."
 
 func applySafety(s *Step, h *sizingHistory, safety []Observation, dispositions []model.PodResourceDisposition, displayed []Observation) {
 	seen := map[string]bool{}

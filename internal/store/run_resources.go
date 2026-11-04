@@ -83,6 +83,7 @@ func (s *Store) RunResources(ctx context.Context, repoID int64, f RunResourceFil
 		return out, ErrInvalid
 	}
 	safetyQuery := query + ` AND status IN ('passed','failed','interrupted') ORDER BY queue_sequence DESC LIMIT ?`
+	activeSafetyQuery := query + ` AND status IN ('queued','waiting','running') ORDER BY queue_sequence DESC LIMIT ?`
 	safetyArgs := append(append([]any(nil), args...), measured.MaxRuns+1)
 	if !f.IncludeFailed {
 		query += ` AND status='passed'`
@@ -109,7 +110,7 @@ func (s *Store) RunResources(ctx context.Context, repoID int64, f RunResourceFil
 	if err != nil {
 		return out, err
 	}
-	if err = s.readResourceSafety(ctx, repoID, safetyQuery, safetyArgs, &out); err != nil {
+	if err = s.readResourceSafety(ctx, repoID, safetyQuery, activeSafetyQuery, safetyArgs, &out); err != nil {
 		return out, err
 	}
 	if len(ids) == 0 {
