@@ -172,6 +172,40 @@ func TestSchedulingPodReasons(t *testing.T) {
 	}
 }
 
+func TestSchedulingObservationCapacityReasons(t *testing.T) {
+	for _, tc := range []struct {
+		message, want string
+	}{
+		{"0/3 nodes are available: 3 Insufficient ephemeral-storage.", "Pending: Insufficient ephemeral-storage; pod requests 3Gi ephemeral storage."},
+		{"0/1 nodes are available: 1 Too many pods.", "Pending: Too many pods; waiting for a pod slot."},
+		{"Insufficient ephemeral-storage-policy", "Pod has not been scheduled."},
+		{"Too many pods-required", "Pod has not been scheduled."},
+	} {
+		t.Run(tc.message, func(t *testing.T) {
+			const private = "SENSITIVE-command-env-token"
+			workflow := schedulingWorkflow()
+			pod := schedulingPod("waiting", workflow.UID)
+			pod.Spec.Containers = []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceEphemeralStorage: resource.MustParse("3Gi")}}}}
+			pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable", Message: tc.message + " " + private}}
+			controller := &Controller{workflows: &schedulingWorkflowClient{workflow: workflow}, kube: fake.NewClientset(pod), config: Config{Namespace: "pipeline"}}
+			observation, err := controller.ObserveScheduling(t.Context(), "wf", "run", "sha")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(observation.Pods) != 1 || observation.Pods[0].Message != tc.want {
+				t.Fatalf("pod capacity reason = %+v, want %q", observation.Pods, tc.want)
+			}
+			if strings.HasPrefix(tc.want, "Pending:") && observation.Message != tc.want {
+				t.Fatalf("run reason = %q, want %q", observation.Message, tc.want)
+			}
+			body, err := json.Marshal(observation)
+			if err != nil || strings.Contains(string(body), private) {
+				t.Fatalf("unsafe observation: %s, %v", body, err)
+			}
+		})
+	}
+}
+
 // An unschedulable pod reports what it asks for, so an impossible job on a
 // small node is diagnosable from the run status (#024).
 func TestUnschedulablePodReportsItsRequest(t *testing.T) {
