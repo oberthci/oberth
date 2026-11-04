@@ -45,10 +45,10 @@ A head displaced by a different waiter gets a fresh forecast when it returns,
 while retaining its original durable wait origin. The scheduler does not
 preempt running work.
 
-**Higher-priority waiters sort ahead of a normal-priority XL.** They can take
+**Higher-priority waiters sort ahead of a standard-priority XL.** They can take
 freed weight and extend the drain. An
-admin bump can prevent lower-priority overtaking; normal work ages to `high`
-after 60 minutes using its original FIFO position, never into `highest`.
+admin bump can prevent lower-priority overtaking; standard work ages to `promotion`
+after 60 minutes using its original FIFO position, never into `high`.
 Existing holders and earlier highest-priority work still have to finish. See
 [priority and aging](release-priority.md).
 

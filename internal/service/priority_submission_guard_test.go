@@ -134,15 +134,15 @@ func TestPriorityGuardAuthorizationFallbackAndGrantLifecycle(t *testing.T) {
 	if refused.Priority != model.PriorityNormal || !strings.Contains(refused.PriorityRefusal, "no admin grant") || refused.PriorityRequestedBy != "worker" {
 		t.Fatalf("unauthorized priority accepted: %+v", refused)
 	}
-	raw := json.RawMessage(`{"identity":"worker","max_class":"high","expires":"` + time.Now().Add(time.Hour).UTC().Format(time.RFC3339) + `"}`)
+	raw := json.RawMessage(`{"identity":"worker","max_class":"promotion","expires":"` + time.Now().Add(time.Hour).UTC().Format(time.RFC3339) + `"}`)
 	if _, err = control.CallTool(t.Context(), api.Actor{Identity: "worker"}, "priority_grant", raw); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("non-admin grant: %v", err)
 	}
 	if _, err = control.CallTool(t.Context(), admin, "priority_grant", raw); err != nil {
 		t.Fatal(err)
 	}
-	high := enqueue("granted", model.PriorityHigh)
-	if high.Priority != model.PriorityHigh || high.PriorityReason != "submission priority: urgent fix" {
+	high := enqueue("granted", model.PriorityPromotion)
+	if high.Priority != model.PriorityPromotion || high.PriorityReason != "submission priority: urgent fix" {
 		t.Fatalf("grant ignored: %+v", high)
 	}
 	above := enqueue("above-grant", model.PriorityHighest)
@@ -155,12 +155,12 @@ func TestPriorityGuardAuthorizationFallbackAndGrantLifecycle(t *testing.T) {
 	if _, err = control.CallTool(t.Context(), admin, "priority_grant_revoke", json.RawMessage(`{"identity":"worker"}`)); err != nil {
 		t.Fatal(err)
 	}
-	after := enqueue("revoked", model.PriorityHigh)
+	after := enqueue("revoked", model.PriorityPromotion)
 	if after.Priority != model.PriorityNormal {
 		t.Fatal("revoked grant retained")
 	}
 	retained, err := f.store.Run(t.Context(), high.ID)
-	if err != nil || retained.Priority != model.PriorityHigh {
+	if err != nil || retained.Priority != model.PriorityPromotion {
 		t.Fatalf("revocation changed accepted build: %+v %v", retained, err)
 	}
 	audits, _, err := f.store.ListAuditActions(t.Context(), model.AuditListFilter{ActionPrefix: "run.priority.request"})

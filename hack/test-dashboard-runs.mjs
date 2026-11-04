@@ -16,7 +16,7 @@ run(`
   const makeRun=(ID,extra={})=>{
     const row={ID,RepoID:1,Ref:'main',RefKind:'branch',Status:'passed',StartedAt:'2026-11-01T10:00:00Z',FinishedAt:'2026-11-01T10:01:00Z',...extra};
     if(['running','queued'].includes(row.Status)) {
-      row.priority_class ??= 'normal'; row.priority_reason ??= 'ordinary run';
+      row.priority_class ??= 'standard'; row.priority_reason ??= 'ordinary run';
       row.display_reason ??= '';
     }
     return row;
@@ -255,7 +255,7 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'R5B
 
 // The shared row renderer serves /runs and run history; detail badges stay separate.
 run(`state.repos=[{ID:1,Name:'ours'}];`);
-const badgeRow = run(`runRow({ID:'labels',RepoID:1,Ref:'v1',RefKind:'tag',Status:'passed',Release:true,Trigger:'schedule',ScheduleEntry:'nightly',priority_class:'highest',priority_reason:'urgent',ConcurrencyGroup:'deploy',Scheduling:{admission:{group:'deploy'}}})`);
+const badgeRow = run(`runRow({ID:'labels',RepoID:1,Ref:'v1',RefKind:'tag',Status:'passed',Release:true,Trigger:'schedule',ScheduleEntry:'nightly',priority_class:'high',priority_reason:'urgent',ConcurrencyGroup:'deploy',Scheduling:{admission:{group:'deploy'}}})`);
 assert.ok(badgeRow.includes('<div class="repo-name">ours</div>'));
 assert.ok(!badgeRow.includes('class="v4b') && !badgeRow.includes('nightly') && !badgeRow.includes('deploy'),'list/history rows have no inline badges');
 assert.ok(!badgeRow.includes('priority highest') && !badgeRow.includes('urgent'),'priority metadata stays in detail');
@@ -263,13 +263,13 @@ assert.ok(run(`prioritySummary({priority_class:'high',priority_reason:'urgent',p
 assert.ok(run(`runRow({ID:'priority',RepoID:1,Ref:'main',Status:'queued',priority_class:'high',priority_requested_by:'operator<unsafe>',display_reason:'priority high · operator<unsafe>',QueuePosition:2})`).includes('operator&lt;unsafe&gt;'),'requester metadata is escaped');
 assert.equal(run(`runMessageCell({Status:'passed',Release:true})`),'');
 assert.equal(run(`runMessageCell({Status:'passed',Trigger:'schedule',ScheduleEntry:'nightly<unsafe>',display_reason:'schedule nightly<unsafe>'})`),'schedule nightly&lt;unsafe&gt;');
-assert.equal(run(`runMessageCell({Status:'passed',priority_class:'highest',ConcurrencyGroup:'deploy'})`),'');
+assert.equal(run(`runMessageCell({Status:'passed',priority_class:'high',ConcurrencyGroup:'deploy'})`),'');
 for(const extra of [`display_reason:'existing reason'`, `Error:'existing reason'`, `FailedStep:'test'`, `Reason:'existing reason'`]) {
   assert.equal(run(`runMessageCell({Status:'failed',Release:true,Trigger:'schedule',ScheduleEntry:'nightly',${extra}})`), extra.startsWith('display_reason')?'existing reason':'');
 }
 assert.equal(run(`runMessageCell({Status:'queued',Release:true,Trigger:'schedule',ScheduleEntry:'nightly',display_reason:'concurrency group deploy busy (held by run 0123456789ab)',Scheduling:{state:'waiting',admission:{group_holder:true,group:'deploy'}}})`),'concurrency group deploy busy (held by run 0123456789ab)');
 assert.equal(run(`runMessageCell({Status:'queued',Scheduling:{state:'queued',message:'Awaiting scheduler claim.'}})`),'','detail observation does not become a row message');
-assert.ok(run(`releaseBadge({Release:true,priority_class:'highest',priority_reason:'urgent'})`).includes('highest priority'),'detail priority and reason remain available');
+assert.ok(run(`releaseBadge({Release:true,priority_class:'high',priority_reason:'urgent'})`).includes('high priority'),'detail priority and reason remain available');
 console.log('R4B passed: label-free rows, empty-message fallbacks, existing reasons and detail badges');
 
 // One grey queued status for every run that has not started. The raw wire
@@ -314,9 +314,9 @@ for (const latest of [false, true]) {
       changeRunRepo('all'); state.filter=claimOrderLatest?'all':'queued'; state.activeRuns=[];
       claimListPath='';
       const claimOrderRows=[
-        makeRun('claim-high-first',{Ref:'q1',Status:'queued',StartedAt:null,FinishedAt:null,QueuePosition:1,priority_class:'high'}),
-        makeRun('claim-aged',{Ref:'q2',Status:'queued',StartedAt:null,FinishedAt:null,QueuePosition:2,priority_class:'high',priority_reason:'aged: normal run waited at least 60 minutes'}),
-        makeRun('claim-high-last',{Ref:'q3',Status:'queued',StartedAt:null,FinishedAt:null,QueuePosition:3,priority_class:'high'}),
+        makeRun('claim-high-first',{Ref:'q1',Status:'queued',StartedAt:null,FinishedAt:null,QueuePosition:1,priority_class:'promotion'}),
+        makeRun('claim-aged',{Ref:'q2',Status:'queued',StartedAt:null,FinishedAt:null,QueuePosition:2,priority_class:'promotion',priority_reason:'aged: standard run waited at least 60 minutes'}),
+        makeRun('claim-high-last',{Ref:'q3',Status:'queued',StartedAt:null,FinishedAt:null,QueuePosition:3,priority_class:'promotion'}),
         makeRun('claim-normal',{Ref:'q4',Status:'waiting',StartedAt:null,FinishedAt:null,QueuePosition:4,display_status:'queued'}),
       ].map(row=>claimOrderScoped?{...row,QueuePosition:0}:row);
       api=async path=>{
@@ -339,9 +339,9 @@ console.log('Queued groups preserve scheduler priority and FIFO in flat, latest-
 // never put a normal row between two priority rows.
 run(`{
   changeRunRepo('all'); state.filter='all';
-  const high=makeRun('cache-high',{Ref:'cache/high',Status:'queued',StartedAt:null,FinishedAt:null,priority_class:'high'});
+  const high=makeRun('cache-high',{Ref:'cache/high',Status:'queued',StartedAt:null,FinishedAt:null,priority_class:'promotion'});
   const normal=makeRun('cache-normal',{Ref:'cache/normal',Status:'queued',StartedAt:null,FinishedAt:null});
-  const bumped=makeRun('cache-bumped',{Ref:'cache/bumped',Status:'queued',StartedAt:null,FinishedAt:null,priority_class:'highest',priority_reason:'operator bump'});
+  const bumped=makeRun('cache-bumped',{Ref:'cache/bumped',Status:'queued',StartedAt:null,FinishedAt:null,priority_class:'high',priority_reason:'operator bump'});
   state.activeRuns=[high,normal,{...bumped,priority_class:'normal'}];
   state.activeRunsRepo='all'; state.activeRunsComplete=true;
   api=async path=>{
@@ -357,7 +357,7 @@ console.log('Priority classes remain grouped when the scoped active request fail
 
 // Server messages are the entire row message, including empty messages.
 for (const status of ['queued','running','passed','failed','cancelled','superseded','infra-retried']) {
- sandbox.contractRun={ID:'contract',RepoID:1,Ref:'main',Status:status,display_status:status,display_reason:`message ${status}`,resource_message:'hidden advice',priority_class:'highest',priority_reason:'hidden priority',Scheduling:{message:'hidden observation'}};
+ sandbox.contractRun={ID:'contract',RepoID:1,Ref:'main',Status:status,display_status:status,display_reason:`message ${status}`,resource_message:'hidden advice',priority_class:'high',priority_reason:'hidden priority',Scheduling:{message:'hidden observation'}};
  assert.equal(run('rowMessage(contractRun)'),`message ${status}`);
  sandbox.contractRun.display_reason='';
  assert.equal(run('rowMessage(contractRun)'),'');
@@ -404,3 +404,12 @@ const olderStart = new Date(2026,10,3,12,50);
 sandbox.olderStart=olderStart;
 assert.match(run(`whenCell({display_status:'failed',StartedAt:olderStart,FinishedAt:olderStart})`),/started at Nov 3 12:50<\/span>/);
 assert.doesNotMatch(run(`whenCell({display_status:'failed',StartedAt:olderStart,FinishedAt:olderStart})`),/2026|AM|PM|12:50:00/);
+
+// Four canonical classes agree with server FIFO, including views without positions.
+run('state.activeRuns=[]');
+assert.deepEqual(JSON.parse(run(`JSON.stringify(orderRuns([
+ ...['low','standard','promotion','high','low','standard','promotion','high'].map((priority,index)=>makeRun(priority+'-'+index,{Status:'queued',StartedAt:null,FinishedAt:null,QueuePosition:0,priority_class:priority}))
+]).map(row=>row.ID))`)), ['high-3','high-7','promotion-2','promotion-6','standard-1','standard-5','low-0','low-4']);
+assert.equal(run(`prioritySummary({priority_class:'normal'})`), 'priority standard');
+assert.equal(run(`prioritySummary({priority_class:'highest'})`), 'priority high');
+console.log('Four canonical priority classes and legacy response aliases pass');

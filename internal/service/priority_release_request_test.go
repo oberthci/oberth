@@ -10,7 +10,7 @@ import (
 )
 
 func TestPriorityReleaseOversizedTagKeepsAcceptedRequest(t *testing.T) {
-	for _, requested := range []model.RunPriority{model.PriorityHigh, model.PriorityHighest, model.PriorityNormal} {
+	for _, requested := range []model.RunPriority{model.PriorityPromotion, model.PriorityHigh, model.PriorityStandard, "highest"} {
 		for _, granted := range []bool{false, true} {
 			name := string(requested) + "/refused"
 			if granted {
@@ -25,7 +25,11 @@ func TestPriorityReleaseOversizedTagKeepsAcceptedRequest(t *testing.T) {
 					}
 				}
 				tag, err := f.store.EnqueueRun(ctx, model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefTag, Ref: "v1", SHA: strings.Repeat("a", 40), Actor: "requester", Trigger: "tag", PriorityRequest: model.PriorityRequest{Priority: requested, PriorityReason: "release blocker"}})
-				if err != nil || tag.Priority != model.PriorityHighest {
+				natural := model.PriorityPromotion
+				if granted && requested.Canonical() == model.PriorityHigh {
+					natural = model.PriorityHigh
+				}
+				if err != nil || tag.Priority != natural {
 					t.Fatalf("natural tag priority=%+v %v", tag, err)
 				}
 				g := newWeightedAdmission(4)
@@ -37,7 +41,7 @@ func TestPriorityReleaseOversizedTagKeepsAcceptedRequest(t *testing.T) {
 				g.mu.Unlock()
 				want := model.PriorityNormal
 				if granted && requested != model.PriorityNormal {
-					want = requested
+					want = requested.Canonical()
 				}
 				check := func(stage string) {
 					t.Helper()
@@ -57,6 +61,7 @@ func TestPriorityReleaseOversizedTagKeepsAcceptedRequest(t *testing.T) {
 				check("size lookup unavailable")
 				// An override can predate the tag becoming its repository's oldest.
 				g.mu.Lock()
+				r.priority, r.priorityReason = model.PriorityPromotion, model.TagReleasePriorityReason
 				r.priorityOverride, r.priorityOverrideReason = model.PriorityHigh, "operator choice"
 				g.mu.Unlock()
 				if p, reason, _ := f.scheduler.AdmissionPriority(tag.QueueSequence); p != model.PriorityHigh || reason != "admin bump: operator choice" {

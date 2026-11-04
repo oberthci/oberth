@@ -21,8 +21,8 @@ queue_sequence, COALESCE(admission_sequence, queue_sequence), id, repo_id, ref_k
 phase, job_name, tested_sha, base_sha, failed_burn, failed_step, error,
 status, reason, superseded_by, queued_at, started_at, finished_at, created_at, updated_at,
 concurrency_group, concurrency_limit, schedule_entry, issue_trailers, failure_cause, ` + basePrioritySQL + `, ` + priorityReasonSQL + `,
-COALESCE(` + overridePrioritySQL + `,''), COALESCE((SELECT reason FROM run_priority_overrides WHERE run_id=id),''),
-COALESCE(` + requestedPrioritySQL + `,''), COALESCE(` + requestedPriorityReasonSQL + `,''),
+COALESCE(` + currentOverridePrioritySQL + `,''), COALESCE((SELECT reason FROM run_priority_overrides WHERE run_id=id),''),
+COALESCE(` + currentRequestedPrioritySQL + `,''), COALESCE(` + currentRequestedPriorityReasonSQL + `,''),
 COALESCE((SELECT actor FROM run_priority_overrides WHERE run_id=id),(SELECT actor FROM run_priority_requests WHERE run_id=id),''), COALESCE((SELECT refusal FROM run_priority_requests WHERE run_id=id),''), NOT (` + supersessionEligibleSQL + `)`
 
 // ErrRunCursorNotFound lets clients restart paging without exposing a missing run ID.
