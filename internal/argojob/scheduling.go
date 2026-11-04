@@ -95,7 +95,7 @@ func (controller *Controller) ObserveScheduling(ctx context.Context, name, runID
 		}
 		reason := podSchedulingReason(pod)
 		result.Pods = append(result.Pods, reason)
-		if reason.Reason == "Unschedulable" && (strings.Contains(reason.Message, "Insufficient cpu") || strings.Contains(reason.Message, "Insufficient memory")) {
+		if reason.Reason == "Unschedulable" && waitingForKubernetesCapacity(&pod) {
 			result.Message = reason.Message
 		}
 		if reason.Reason == "DeadlineExceeded" && deadlineNodes[pod.Annotations["workflows.argoproj.io/node-id"]] {
@@ -153,6 +153,10 @@ func podSchedulingReason(pod corev1.Pod) model.SchedulingReason {
 					result.Message = "Pending: Insufficient cpu; pod requests " + podRequest(pod, corev1.ResourceCPU) + " CPU."
 				case strings.Contains(condition.Message, "Insufficient memory"):
 					result.Message = "Pending: Insufficient memory; pod requests " + podRequest(pod, corev1.ResourceMemory) + " memory."
+				case hasSchedulingPhrase(condition.Message, "Insufficient", "ephemeral-storage"):
+					result.Message = "Pending: Insufficient ephemeral-storage; pod requests " + podRequest(pod, corev1.ResourceEphemeralStorage) + " ephemeral storage."
+				case hasSchedulingPhrase(condition.Message, "Too", "many", "pods"):
+					result.Message = "Pending: Too many pods; waiting for a pod slot."
 				case strings.Contains(condition.Message, "unbound immediate PersistentVolumeClaims"):
 					result.Message = "Scheduler reports an unbound persistent volume claim."
 				}
@@ -175,6 +179,29 @@ func podSchedulingReason(pod corev1.Pod) model.SchedulingReason {
 		result.Message = "Pod is pending; no more specific scheduling reason was observed."
 	}
 	return result
+}
+
+// Match whole scheduler words, allowing sentence punctuation after the reason.
+// Prefix lookalikes must not become capacity reasons or suspend a deadline.
+func hasSchedulingPhrase(message string, words ...string) bool {
+	fields := strings.Fields(message)
+	for i := 0; i+len(words) <= len(fields); i++ {
+		matched := true
+		for j, word := range words {
+			field := fields[i+j]
+			if j == len(words)-1 {
+				field = strings.TrimRight(field, ".,;:")
+			}
+			if field != word {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
 }
 
 func safeWaitingReason(reason string) string {
