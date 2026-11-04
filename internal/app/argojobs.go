@@ -945,6 +945,16 @@ func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 	}
 	result.Steps = make([]model.StepResult, 0, len(completion.Steps))
 	for _, step := range completion.Steps {
+		// A terminal Workflow can still carry unfinished child nodes (for
+		// example after a controller error or stop). Their progress remains
+		// in the journal; the result store accepts only observed outcomes.
+		if step.Status == runprogress.StepQueued || step.Status == runprogress.StepRunning {
+			if result.Status == model.RunPassed {
+				result.Status, result.Phase = model.RunFailed, "job"
+				result.Error = fmt.Sprintf("terminal Workflow has unfinished step %s/%s", step.Stage, step.Step)
+			}
+			continue
+		}
 		result.Steps = append(result.Steps, model.StepResult{
 			Stage: step.Stage, Step: step.Step, Ordinal: step.Ordinal, Termination: step.Termination,
 			Status: model.StepStatus(step.Status), ExitCode: step.ExitCode,

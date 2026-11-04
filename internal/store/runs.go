@@ -1280,12 +1280,39 @@ ORDER BY queue_sequence DESC`, perRepo)
 }
 
 func (s *Store) PutStepResult(ctx context.Context, result model.StepResult) (model.StepResult, error) {
-	if strings.TrimSpace(result.RunID) == "" || strings.TrimSpace(result.Stage) == "" ||
-		strings.TrimSpace(result.Step) == "" || result.Ordinal < 0 || !result.Status.Terminal() ||
-		result.LogStart < 0 || result.LogEnd < result.LogStart || result.DeclaredSize == "" || !result.DeclaredSize.Valid() ||
-		negativeMeasurement(result.MaxRSSBytes) || negativeMeasurement(result.MemoryPeakBytes) || negativeMeasurement(result.UserCPU) || negativeMeasurement(result.SystemCPU) {
-		return model.StepResult{}, fmt.Errorf("%w: step result fields are invalid", ErrInvalid)
+	// Report only a fixed field name, never result values or diagnostics.
+	// Keep the store's terminal, identity and bounds checks at this boundary.
+	invalidField := ""
+	switch {
+	case strings.TrimSpace(result.RunID) == "":
+		invalidField = "run_id"
+	case strings.TrimSpace(result.Stage) == "":
+		invalidField = "stage"
+	case strings.TrimSpace(result.Step) == "":
+		invalidField = "step"
+	case result.Ordinal < 0:
+		invalidField = "ordinal"
+	case !result.Status.Terminal():
+		invalidField = "status"
+	case result.LogStart < 0:
+		invalidField = "log_start"
+	case result.LogEnd < result.LogStart:
+		invalidField = "log_end"
+	case result.DeclaredSize == "" || !result.DeclaredSize.Valid():
+		invalidField = "declared_size"
+	case negativeMeasurement(result.MaxRSSBytes):
+		invalidField = "max_rss_bytes"
+	case negativeMeasurement(result.MemoryPeakBytes):
+		invalidField = "memory_peak_bytes"
+	case negativeMeasurement(result.UserCPU):
+		invalidField = "user_cpu"
+	case negativeMeasurement(result.SystemCPU):
+		invalidField = "system_cpu"
 	}
+	if invalidField != "" {
+		return model.StepResult{}, fmt.Errorf("%w: step result invalid field %s", ErrInvalid, invalidField)
+	}
+
 	recorded := unixNano(s.now())
 	row := s.db.QueryRowContext(ctx, `
 INSERT INTO step_results(
