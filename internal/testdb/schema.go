@@ -128,7 +128,7 @@ DELETE FROM schema_migrations WHERE version>=46;
 `
 
 // PostV53Downgrade reconstructs the pre-park schema while preserving trains.
-const PostV53Downgrade = `
+const PostV53Downgrade = PostV54Downgrade + `
 DROP TRIGGER IF EXISTS promotions_branch_ci_immutable;
 ALTER TABLE promotions DROP COLUMN branch_ci_skipped;
 DELETE FROM schema_migrations WHERE version>=54;
@@ -155,4 +155,10 @@ DROP TABLE IF EXISTS promotion_train_grants;
 ALTER TABLE promotions DROP COLUMN train_json;
 ALTER TABLE promotions DROP COLUMN train_key;
 DELETE FROM schema_migrations WHERE version>=53;
+`
+
+// PostV54Downgrade removes green-trailer receipts before reconstructing park fixtures.
+const PostV54Downgrade = `
+DROP TABLE IF EXISTS issue_trailer_publications;
+DELETE FROM schema_migrations WHERE version>=55;
 `

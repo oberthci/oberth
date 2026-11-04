@@ -348,6 +348,9 @@ RETURNING `+publicationColumns, status, failure, now, publication.ID))
 	if err := s.appendPublicationAudit(ctx, tx, auditPublication, action, failure); err != nil {
 		return model.PublicationFinalization{}, err
 	}
+	if err := s.recordIssueTrailerWork(ctx, tx, finalization); err != nil {
+		return model.PublicationFinalization{}, fmt.Errorf("record issue trailer work: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return model.PublicationFinalization{}, fmt.Errorf("commit publication finalization: %w", err)
 	}

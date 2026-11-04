@@ -1662,14 +1662,22 @@ func (scheduler *Scheduler) recoverPendingPublicationsWithGate(ctx context.Conte
 	for _, publication := range pending {
 		ids = append(ids, publication.ID)
 	}
-	return scheduler.recoverPublicationIDsWithGate(ctx, ids, require)
+	if err := scheduler.recoverPublicationIDsWithGate(ctx, ids, require); err != nil {
+		return err
+	}
+	scheduler.retryIssueTrailers(ctx, require)
+	return nil
 }
 
 func (scheduler *Scheduler) recoverNotifiedPublicationsWithGate(ctx context.Context, require mutationRequirement) error {
 	if err := require(ctx); err != nil {
 		return err
 	}
-	return scheduler.recoverPublicationIDsWithGate(ctx, scheduler.takePublicationRecoveries(), require)
+	if err := scheduler.recoverPublicationIDsWithGate(ctx, scheduler.takePublicationRecoveries(), require); err != nil {
+		return err
+	}
+	scheduler.retryIssueTrailers(ctx, require)
+	return nil
 }
 
 func (scheduler *Scheduler) recoverPublicationIDsWithGate(ctx context.Context, ids []string, require mutationRequirement) error {
@@ -1743,7 +1751,11 @@ func (scheduler *Scheduler) deliverPublicationWithGate(
 	// Idle backoff ticks neither attempt delivery nor re-evaluate trusted
 	// policy. Only actual attempts emit the attempt/outcome evidence pair.
 	if publication.Status.Terminal() {
-		return scheduler.loadPublicationFinalization(ctx, publication)
+		finalization, err := scheduler.loadPublicationFinalization(ctx, publication)
+		if err == nil {
+			err = scheduler.finishPublication(ctx, model.Repository{}, finalization)
+		}
+		return finalization, err
 	}
 	if time.Now().Before(publication.RetryAfter) && strings.HasPrefix(publication.Error, publicationRetryPrefix) {
 		scheduler.queuePublicationRetry(publicationID)
@@ -1839,14 +1851,16 @@ func (scheduler *Scheduler) loadPublicationFinalization(
 	return scheduler.database().PublicationState(ctx, publication.ID)
 }
 
-func (scheduler *Scheduler) finishPublication(_ context.Context, _ model.Repository, finalization model.PublicationFinalization) error {
+func (scheduler *Scheduler) finishPublication(ctx context.Context, _ model.Repository, finalization model.PublicationFinalization) error {
 	if finalization.Promotion.ID != "" {
 		scheduler.signals.NotifyPromotion(finalization.Promotion.ID)
 	}
-	if finalization.Run.ID == "" {
-		return nil
+	if finalization.Run.ID != "" {
+		scheduler.signals.NotifyRun(finalization.Run.ID)
 	}
-	scheduler.signals.NotifyRun(finalization.Run.ID)
+	if finalization.Publication.Status == model.PublicationDelivered {
+		scheduler.retryIssueTrailers(ctx, scheduler.requireMutation)
+	}
 	return nil
 }
 

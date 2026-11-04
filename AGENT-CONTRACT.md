@@ -2739,10 +2739,24 @@ alone is never evidence that missing migrations ran.
 | v52 | Run list order | Rebuild the v40 covering index idempotently; widen `runs_latest_ref_idx` to cover status, start, finish, queue time and ID, so the grouped latest-per-ref list ranks every head from one covering scan | Database restore |
 | v53 | Promotion trains | Persist ordered sources, conflict decisions and merged tree SHA, with retry identity and per-source grant reservations; legacy promotions remain unchanged | Database restore |
 | v54 | Park promotion evidence | Add immutable `promotions.branch_ci_skipped`, defaulting to false for historical rows; parked sources must use a tested promotion run | Database restore |
+| v55 | Green commit trailers | Persist default-branch green boundaries and atomic issue-trailer processing receipts; seed historical deliveries without replay | Database restore |
 
 **Contract test:** `TestEveryMigrationDocumentedInAgentContract` asserts that
 every migration version in `internal/store/schema.go` has a corresponding
 entry in this table.
+
+Repository-owned `.oberth/issues.yaml` may opt in with
+`close_from_trailers: true`; omission leaves trailer automation disabled.
+Delivered green default-branch pushes and promotions process real Git `Fixes:`,
+`Closes:` and `Refs:` trailers since the preceding green head. Issue evidence,
+closure and the replay receipt commit together through the issue audit path
+with actor `oberth` and the run ID. Upstream scope and active locks constrain
+every mutation. Permanently invalid policy or bounded history is completed with
+an atomic `issue.trailer.skipped` audit; retryable Git failures remain pending.
+Recovery batches interleave repositories. No run status or additional authority
+is introduced. See
+[issue lifecycle](docs/issue-lifecycle.md#commit-trailers-on-green-default-branches)
+for policy, evidence, recovery and multi-repository behavior.
 
 ### Bounded promotion recovery (#752)
 
