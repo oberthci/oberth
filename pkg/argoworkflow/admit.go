@@ -88,6 +88,9 @@ func Admit(workflow *wfv1.Workflow, policy Policy) error {
 		problems = append(problems, validateExtendedPeak(workflow, policy.Capability))
 	}
 	problems = append(problems, admitMetadata(workflow)...)
+	if _, err := DeclaredGoProxyMirrorOnly(workflow); err != nil {
+		problems = append(problems, err)
+	}
 	problems = append(problems, admitSpec(&workflow.Spec, policy.ServerDeadline)...)
 	if policy.KubeVirt && len(policy.ContainerDiskPrefixes) != 0 {
 		if err := validateContainerDiskPrefixes(policy.ContainerDiskPrefixes); err != nil {

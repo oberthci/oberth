@@ -74,8 +74,8 @@ func TestPseudoVersionArtifactsAndDiscovery(t *testing.T) {
 			t.Fatalf("%s: %d %s", ext, r.Code, r.Body)
 		}
 		if ext == ".info" {
-			var info map[string]string
-			if err = json.Unmarshal(r.Body.Bytes(), &info); err != nil || info["Version"] != pseudoVersion || info["Time"] != "2026-09-29T12:00:00Z" {
+			var info moduleInfo
+			if err = json.Unmarshal(r.Body.Bytes(), &info); err != nil || info.Version != pseudoVersion || info.Time.Format(time.RFC3339) != "2026-09-29T12:00:00Z" {
 				t.Fatalf("info=%v %v", info, err)
 			}
 		}

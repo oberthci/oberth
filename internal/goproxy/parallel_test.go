@@ -26,7 +26,10 @@ func (*parallelCache) ListTags(context.Context, string) ([]string, error) {
 	return []string{"v1.0.0"}, nil
 }
 func (*parallelCache) ModuleTagSnapshot(context.Context, string, string) (string, time.Time, error) {
-	return "fixture-pinned-object", time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC), nil
+	return artifactOID, time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC), nil
+}
+func (*parallelCache) ModuleOriginURL(context.Context, string) (string, error) {
+	return artifactOriginURL, nil
 }
 func (*parallelCache) ShowFile(_ context.Context, input, _, _ string) ([]byte, error) {
 	return []byte("module go.example.test/" + input + "\n\ngo 1.26\n"), nil

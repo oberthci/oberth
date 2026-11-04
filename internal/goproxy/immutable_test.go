@@ -23,6 +23,7 @@ import (
 
 const artifactModule = "go.example.test/issue764-fixture"
 const artifactOID = "0123456789abcdef0123456789abcdef01234567"
+const artifactOriginURL = "ssh://git@forge.example.test/owner/repository.git"
 const artifactMod = "module " + artifactModule + "\n\ngo 1.22\n"
 
 type artifactGit struct {

@@ -25,6 +25,20 @@ import (
 // Public tag names are never used again after this resolution.
 type moduleTagSnapshot interface {
 	ModuleTagSnapshot(context.Context, string, string) (string, time.Time, error)
+	ModuleOriginURL(context.Context, string) (string, error)
+}
+
+type moduleOrigin struct {
+	VCS  string
+	URL  string
+	Hash string
+	Ref  string `json:",omitempty"`
+}
+
+type moduleInfo struct {
+	Version string
+	Time    time.Time
+	Origin  moduleOrigin
 }
 
 type artifactObject struct {
@@ -418,11 +432,22 @@ func (h *Handler) buildVersion(ctx context.Context, repository, modulePath, vers
 }
 
 func (h *Handler) buildPinnedVersion(ctx context.Context, repository, version, source string, timestamp time.Time) (string, map[string][]byte, error) {
+	if gitcache.ValidateSHA(source) != nil {
+		return "", nil, backendBuildError()
+	}
+	remote, err := h.cache.(moduleTagSnapshot).ModuleOriginURL(ctx, repository)
+	if err != nil || remote == "" {
+		return "", nil, backendBuildError()
+	}
 	mod, err := h.cache.ShowFile(ctx, repository, source, "go.mod")
 	if err != nil {
 		return "", nil, moduleReadBuildError(err)
 	}
-	info, err := json.Marshal(map[string]string{"Version": version, "Time": timestamp.UTC().Format(time.RFC3339)})
+	origin := moduleOrigin{VCS: "git", URL: remote, Hash: source}
+	if !module.IsPseudoVersion(version) {
+		origin.Ref = "refs/tags/" + version
+	}
+	info, err := json.Marshal(moduleInfo{Version: version, Time: timestamp.UTC(), Origin: origin})
 	if err != nil {
 		return "", nil, err
 	}

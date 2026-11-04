@@ -5,7 +5,9 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -40,11 +42,28 @@ func (m *mockCache) ListTags(_ context.Context, _ string) ([]string, error) {
 }
 
 func (m *mockCache) ModuleTagSnapshot(_ context.Context, _, tag string) (string, time.Time, error) {
-	return tag, time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC), nil
+	return mockTagHash(tag), time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC), nil
+}
+
+func mockTagHash(tag string) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(tag)))[:40]
+}
+
+func (m *mockCache) tagForHash(ref string) string {
+	for _, tag := range m.tags {
+		if mockTagHash(tag) == ref {
+			return tag
+		}
+	}
+	return ref
+}
+
+func (*mockCache) ModuleOriginURL(context.Context, string) (string, error) {
+	return artifactOriginURL, nil
 }
 
 func (m *mockCache) ShowFile(_ context.Context, _, ref, filePath string) ([]byte, error) {
-	key := ref + ":" + filePath
+	key := m.tagForHash(ref) + ":" + filePath
 	content, ok := m.files[key]
 	if !ok {
 		return nil, io.EOF
@@ -82,7 +101,7 @@ func (m *mockCache) ArchiveTar(_ context.Context, _, ref string, w io.Writer) er
 	}
 
 	// Default: simple go.mod + wire.go (backward compat for existing tests).
-	gomod := m.files[ref+":go.mod"]
+	gomod := m.files[m.tagForHash(ref)+":go.mod"]
 	if gomod == nil {
 		gomod = []byte("module go.example.test/wire\n\ngo 1.22\n")
 	}
@@ -132,12 +151,12 @@ func TestInfo(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
-	var info map[string]string
+	var info moduleInfo
 	if err := json.Unmarshal(rec.Body.Bytes(), &info); err != nil {
 		t.Fatal(err)
 	}
-	if info["Version"] != "v0.3.12" {
-		t.Fatalf("unexpected version: %s", info["Version"])
+	if info.Version != "v0.3.12" {
+		t.Fatalf("unexpected version: %s", info.Version)
 	}
 }
 

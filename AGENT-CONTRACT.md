@@ -2499,6 +2499,18 @@ closed without rebuilding from a possibly moved tag. `list` and `@latest`
 remain live queries that filter revoked versions; selected `@latest` info uses
 the same pinned metadata and rechecks denial before serving.
 
+New `.info` artifacts include Go `Origin` data: `VCS=git`, `URL` is the cached
+repository's configured upstream URL, and `Hash` is the full peeled commit SHA
+used for the `.mod` and lazy `.zip`. Tagged versions include
+`Ref=refs/tags/<version>`; pseudo-versions omit `Ref`. Annotated tags pin their
+commit rather than their tag object, preserving the published timestamp.
+`go mod download -json` and `go list -m -json` carry this Origin to verifiers.
+Published metadata, Origin and ETags remain immutable across tag/remote changes
+and restarts. Older artifacts without Origin remain readable and unchanged;
+there is no automatic backfill. Strict verifiers require metadata first
+published with Origin, including in Go's own cache. Existing h1 checksums,
+SHA-256 integrity checks and no-clobber publication remain in force.
+
 At most two cold version fills execute per handler, with duplicate requests
 sharing one fill. Each fill gets two read-only attempts of at most 15 seconds
 with 250ms backoff, under a separate 31-second fill context including admission
@@ -2553,6 +2565,17 @@ never include pseudo-versions, even if a Git tag is named like one.
   TLS/transport failures. Backend/policy read failures remain retryable 503.
 - Pipe after public proxy: fall through on any error, preserving public direct
   fallback for public modules.
+
+Repository YAML can opt a selected build/release Workflow into mirror-only
+resolution with `metadata.annotations["oberth.ci/goproxy"]: mirror-only`.
+Every pipeline container, including inline leaves on CI and release tiers,
+then receives `GOPROXY=<mirror>` exactly, with no public or direct fallback.
+Omission preserves the default chain above. Any other value (including empty)
+is refused with `oberth.ci/goproxy must be "mirror-only" when present`; server
+admission also refuses mirror-only without a configured mirror. This is a
+Workflow-wide declaration sourced only from repository YAML, with no hardcoded
+repository exceptions. The mirror serves mapped private modules only; public
+cache misses fail in mirror-only mode. Public sumdb policy is unchanged.
 
 **Environment injection:** `GOPROXY`, `GONOPROXY=none` and
 `GONOSUMDB=<configured module prefix>` into every pipeline container (CI and release),

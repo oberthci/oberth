@@ -21,7 +21,7 @@ func (c *Cache) lockModuleRepository(ctx context.Context, path string) (func(), 
 }
 
 // ModuleTagSnapshot resolves an exact public tag and its published timestamp
-// under the same repository lock. The object ID pins subsequent show/archive
+// under the same repository lock. The peeled commit ID pins subsequent show/archive
 // reads even if a refresh changes the tag between operations.
 func (c *Cache) ModuleTagSnapshot(ctx context.Context, input, tag string) (string, time.Time, error) {
 	if err := ValidateTag(tag); err != nil {
@@ -53,9 +53,37 @@ func (c *Cache) ModuleTagSnapshot(ctx context.Context, input, tag string) (strin
 			return "", time.Time{}, err
 		}
 		timestamp, err := time.Parse(time.RFC3339, fields[2])
-		return fields[1], timestamp, err
+		if err != nil {
+			return "", time.Time{}, err
+		}
+		commit, err := c.capture(ctx, path, "rev-parse", "--verify", fields[1]+"^{commit}")
+		if err != nil {
+			return "", time.Time{}, err
+		}
+		commit = strings.TrimSpace(commit)
+		return commit, timestamp, ValidateSHA(commit)
 	}
 	return "", time.Time{}, errors.New("exact module tag is not cached")
+}
+
+// ModuleOriginURL reads the mirrored repository's configured upstream without
+// fetching or resolving a public ref. Warm artifacts never call this method.
+func (c *Cache) ModuleOriginURL(ctx context.Context, input string) (string, error) {
+	_, path, err := c.modulePath(ctx, input)
+	if err != nil {
+		return "", err
+	}
+	unlock, err := c.lockModuleRepository(ctx, path)
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+	remote, err := c.capture(ctx, path, "remote", "get-url", "upstream")
+	if err != nil {
+		return "", err
+	}
+	remote = strings.TrimSpace(remote)
+	return remote, ValidateUpstream(remote)
 }
 
 func (c *Cache) modulePath(ctx context.Context, input string) (string, string, error) {
