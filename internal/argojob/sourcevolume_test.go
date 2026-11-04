@@ -39,6 +39,25 @@ func seedTestConfig() Config {
 	return config
 }
 
+func TestSourceSeedPodHasCheckoutExecutionHeadroom(t *testing.T) {
+	client := fake.NewClientset()
+	seeder := NewSourceSeeder(client, nil, seedTestConfig())
+	if err := seeder.createSeedPod(t.Context(), "source-seed", "source-claim"); err != nil {
+		t.Fatal(err)
+	}
+	pod, err := client.CoreV1().Pods(seeder.config.Namespace).Get(t.Context(), "source-seed", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := pod.Spec.Containers[0].Resources
+	if r.Limits.Cpu().MilliValue() < 500 || r.Limits.Memory().Value() < 512<<20 {
+		t.Fatal("source seed limits are below the 500m/512Mi execution floor", r)
+	}
+	if r.Requests.Cpu().MilliValue() != 100 || r.Requests.Memory().Value() != 64<<20 {
+		t.Fatal("source seed requests changed", r)
+	}
+}
+
 // A seeder built from a Config nobody applied defaults to must still work: the
 // engine wires one from the same literal it gives the controller, and the
 // controller defaults its own copy. Getting this wrong panicked the scheduler
@@ -219,6 +238,7 @@ func TestSeedPodHoldsNoServiceAccountToken(t *testing.T) {
 		t.Fatal("the CI seed pod received a priority override")
 	}
 	container := created.Spec.Containers[0]
+	assertBoundedControlContainer(t, container)
 	if container.SecurityContext == nil || container.SecurityContext.ReadOnlyRootFilesystem == nil ||
 		!*container.SecurityContext.ReadOnlyRootFilesystem {
 		t.Fatal("the seed pod's root filesystem is writable")

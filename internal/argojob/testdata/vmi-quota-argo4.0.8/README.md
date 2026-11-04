@@ -34,9 +34,7 @@ passed the retained Kubernetes validator. Isolation inputs now explicitly declar
 wrapped Pods. No expected Pod was assembled or edited by hand.
 
 Oberth candidate (2026-11-03) recaptured current Build outputs
-with one run-PVC volume and the replay token waiter. The authenticated v4.0.8 controller ran
-its real operation with the retained fake-client helpers and capture-only
-hooks. Callback declarations are retained in the capture helpers (or in the
-companion declarations file when needed). capture-call.go.txt records the exact
-controller-source insertion. All 27 submitted Pods passed the retained Kubernetes v1.35.7 validator.
+with explicit executor helper resources and the replay token waiter. The authenticated v4.0.8 controller ran
+its real operation with retained fake-client helpers and capture-only hooks.
+All 27 submitted Pods passed the retained Kubernetes v1.35.7 validator.
 No expected Pod was edited manually and no live cluster was used.

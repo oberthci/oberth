@@ -68,7 +68,16 @@
           "-c",
           "trap 'printf \"%s\\n\" \"executor token wait terminated\" \u003e\u00262; exit 143' TERM\ntrap 'printf \"%s\\n\" \"executor token wait interrupted\" \u003e\u00262; exit 130' INT\nprintf '%s\\n' 'waiting for executor token from Oberth' \u003e\u00262\nwaited_seconds=0\nuntil test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do\n  if ! sleep 1; then\n    printf '%s\\n' 'executor token wait failed' \u003e\u00262\n    exit 1\n  fi\n  waited_seconds=$((waited_seconds + 1))\n  if [ \"$((waited_seconds % 30))\" -eq 0 ]; then\n    printf 'still waiting for executor token from Oberth after %ss\\n' \"$waited_seconds\" \u003e\u00262\n  fi\ndone\nprintf '%s\\n' 'executor token ready' \u003e\u00262"
         ],
-        "resources": {},
+        "resources": {
+          "limits": {
+            "cpu": "200m",
+            "memory": "128Mi"
+          },
+          "requests": {
+            "cpu": "50m",
+            "memory": "64Mi"
+          }
+        },
         "volumeMounts": [
           {
             "name": "exec-sa-token",
@@ -137,7 +146,7 @@
           },
           {
             "name": "ARGO_TEMPLATE",
-            "value": "{\"name\":\"ordinary\",\"inputs\":{},\"outputs\":{},\"metadata\":{\"annotations\":{\"oberth.ci/step-usage-memory-warning\":\"usage instrumentation disabled: memory limit unspecified is below the explicit 256Mi instrumentation floor; usage remains unknown; resources are unchanged\",\"oberth.ci/workspace-env\":\"none\",\"oberth.ci/workspace-mounts\":\"none\"},\"labels\":{\"oberth.ci/run\":\"run-abc123\",\"oberth.ci/tier\":\"release\",\"oberth.ci/trigger\":\"release\"}},\"container\":{\"name\":\"\",\"image\":\"golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"command\":[\"/bin/true\"],\"env\":[{\"name\":\"KEEP_ME\",\"value\":\"yes-please\"},{\"name\":\"OBERTH_REPO\",\"value\":\"oberth\"},{\"name\":\"OBERTH_REF\",\"value\":\"refs/tags/v1.0.0\"},{\"name\":\"OBERTH_SHA\",\"value\":\"0123456789abcdef0123456789abcdef01234567\"},{\"name\":\"OBERTH_TRIGGER\",\"value\":\"release\"},{\"name\":\"OBERTH_RUN_ID\",\"value\":\"run-abc123\"},{\"name\":\"OBERTH_RELEASE_TAG\",\"value\":\"refs/tags/v1.0.0\"},{\"name\":\"OBERTH_RELEASE_SHA\",\"value\":\"0123456789abcdef0123456789abcdef01234567\"},{\"name\":\"OBERTH_STEP\",\"value\":\"ordinary\"}],\"resources\":{},\"volumeMounts\":[{\"name\":\"oberth-tmp\",\"mountPath\":\"/tmp\"},{\"name\":\"oberth-source\",\"readOnly\":true,\"mountPath\":\"/work/src\",\"subPath\":\"src\"}],\"securityContext\":{\"capabilities\":{\"drop\":[\"ALL\"]},\"readOnlyRootFilesystem\":true,\"allowPrivilegeEscalation\":false}},\"serviceAccountName\":\"oberth-per-repo\",\"automountServiceAccountToken\":false,\"podSpecPatch\":\"{\\\"$setElementOrder/initContainers\\\":[{\\\"name\\\":\\\"oberth-executor-token\\\"},{\\\"name\\\":\\\"init\\\"}],\\\"containers\\\":[{\\\"name\\\":\\\"wait\\\",\\\"volumeMounts\\\":[{\\\"mountPath\\\":\\\"/mainctrfs/work/src\\\",\\\"name\\\":\\\"oberth-source\\\",\\\"readOnly\\\":true,\\\"subPath\\\":\\\"src\\\"}]}],\\\"initContainers\\\":[{\\\"name\\\":\\\"oberth-executor-token\\\",\\\"image\\\":\\\"busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74\\\",\\\"command\\\":[\\\"sh\\\",\\\"-c\\\",\\\"trap 'printf \\\\\\\"%s\\\\\\\\n\\\\\\\" \\\\\\\"executor token wait terminated\\\\\\\" \\\\u003e\\\\u00262; exit 143' TERM\\\\ntrap 'printf \\\\\\\"%s\\\\\\\\n\\\\\\\" \\\\\\\"executor token wait interrupted\\\\\\\" \\\\u003e\\\\u00262; exit 130' INT\\\\nprintf '%s\\\\\\\\n' 'waiting for executor token from Oberth' \\\\u003e\\\\u00262\\\\nwaited_seconds=0\\\\nuntil test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do\\\\n  if ! sleep 1; then\\\\n    printf '%s\\\\\\\\n' 'executor token wait failed' \\\\u003e\\\\u00262\\\\n    exit 1\\\\n  fi\\\\n  waited_seconds=$((waited_seconds + 1))\\\\n  if [ \\\\\\\"$((waited_seconds % 30))\\\\\\\" -eq 0 ]; then\\\\n    printf 'still waiting for executor token from Oberth after %ss\\\\\\\\n' \\\\\\\"$waited_seconds\\\\\\\" \\\\u003e\\\\u00262\\\\n  fi\\\\ndone\\\\nprintf '%s\\\\\\\\n' 'executor token ready' \\\\u003e\\\\u00262\\\"],\\\"resources\\\":{},\\\"volumeMounts\\\":[{\\\"name\\\":\\\"exec-sa-token\\\",\\\"mountPath\\\":\\\"/var/run/secrets/kubernetes.io/serviceaccount\\\"}],\\\"securityContext\\\":{\\\"capabilities\\\":{\\\"drop\\\":[\\\"ALL\\\"]},\\\"runAsUser\\\":0,\\\"runAsGroup\\\":0,\\\"runAsNonRoot\\\":false,\\\"readOnlyRootFilesystem\\\":true,\\\"allowPrivilegeEscalation\\\":false,\\\"seccompProfile\\\":{\\\"type\\\":\\\"RuntimeDefault\\\"}}},{\\\"name\\\":\\\"init\\\"}],\\\"volumes\\\":[{\\\"emptyDir\\\":{\\\"medium\\\":\\\"Memory\\\",\\\"sizeLimit\\\":\\\"1Mi\\\"},\\\"name\\\":\\\"exec-sa-token\\\",\\\"secret\\\":null}]}\"}"
+            "value": "{\"name\":\"ordinary\",\"inputs\":{},\"outputs\":{},\"metadata\":{\"annotations\":{\"oberth.ci/step-usage-memory-warning\":\"usage instrumentation disabled: memory limit unspecified is below the explicit 256Mi instrumentation floor; usage remains unknown; resources are unchanged\",\"oberth.ci/workspace-env\":\"none\",\"oberth.ci/workspace-mounts\":\"none\"},\"labels\":{\"oberth.ci/run\":\"run-abc123\",\"oberth.ci/tier\":\"release\",\"oberth.ci/trigger\":\"release\"}},\"container\":{\"name\":\"\",\"image\":\"golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"command\":[\"/bin/true\"],\"env\":[{\"name\":\"KEEP_ME\",\"value\":\"yes-please\"},{\"name\":\"OBERTH_REPO\",\"value\":\"oberth\"},{\"name\":\"OBERTH_REF\",\"value\":\"refs/tags/v1.0.0\"},{\"name\":\"OBERTH_SHA\",\"value\":\"0123456789abcdef0123456789abcdef01234567\"},{\"name\":\"OBERTH_TRIGGER\",\"value\":\"release\"},{\"name\":\"OBERTH_RUN_ID\",\"value\":\"run-abc123\"},{\"name\":\"OBERTH_RELEASE_TAG\",\"value\":\"refs/tags/v1.0.0\"},{\"name\":\"OBERTH_RELEASE_SHA\",\"value\":\"0123456789abcdef0123456789abcdef01234567\"},{\"name\":\"OBERTH_STEP\",\"value\":\"ordinary\"}],\"resources\":{},\"volumeMounts\":[{\"name\":\"oberth-tmp\",\"mountPath\":\"/tmp\"},{\"name\":\"oberth-source\",\"readOnly\":true,\"mountPath\":\"/work/src\",\"subPath\":\"src\"}],\"securityContext\":{\"capabilities\":{\"drop\":[\"ALL\"]},\"readOnlyRootFilesystem\":true,\"allowPrivilegeEscalation\":false}},\"serviceAccountName\":\"oberth-per-repo\",\"automountServiceAccountToken\":false,\"podSpecPatch\":\"{\\\"$setElementOrder/initContainers\\\":[{\\\"name\\\":\\\"oberth-executor-token\\\"},{\\\"name\\\":\\\"init\\\"}],\\\"containers\\\":[{\\\"name\\\":\\\"wait\\\",\\\"resources\\\":{\\\"limits\\\":{\\\"cpu\\\":\\\"200m\\\",\\\"memory\\\":\\\"128Mi\\\"},\\\"requests\\\":{\\\"cpu\\\":\\\"50m\\\",\\\"memory\\\":\\\"64Mi\\\"}},\\\"volumeMounts\\\":[{\\\"mountPath\\\":\\\"/mainctrfs/work/src\\\",\\\"name\\\":\\\"oberth-source\\\",\\\"readOnly\\\":true,\\\"subPath\\\":\\\"src\\\"}]}],\\\"initContainers\\\":[{\\\"name\\\":\\\"oberth-executor-token\\\",\\\"image\\\":\\\"busybox:1.37@sha256:ab33eacc8251e3807b85bb6dba570e4698c3998eca6f0fc2ccb60575a563ea74\\\",\\\"command\\\":[\\\"sh\\\",\\\"-c\\\",\\\"trap 'printf \\\\\\\"%s\\\\\\\\n\\\\\\\" \\\\\\\"executor token wait terminated\\\\\\\" \\\\u003e\\\\u00262; exit 143' TERM\\\\ntrap 'printf \\\\\\\"%s\\\\\\\\n\\\\\\\" \\\\\\\"executor token wait interrupted\\\\\\\" \\\\u003e\\\\u00262; exit 130' INT\\\\nprintf '%s\\\\\\\\n' 'waiting for executor token from Oberth' \\\\u003e\\\\u00262\\\\nwaited_seconds=0\\\\nuntil test -f /var/run/secrets/kubernetes.io/serviceaccount/token; do\\\\n  if ! sleep 1; then\\\\n    printf '%s\\\\\\\\n' 'executor token wait failed' \\\\u003e\\\\u00262\\\\n    exit 1\\\\n  fi\\\\n  waited_seconds=$((waited_seconds + 1))\\\\n  if [ \\\\\\\"$((waited_seconds % 30))\\\\\\\" -eq 0 ]; then\\\\n    printf 'still waiting for executor token from Oberth after %ss\\\\\\\\n' \\\\\\\"$waited_seconds\\\\\\\" \\\\u003e\\\\u00262\\\\n  fi\\\\ndone\\\\nprintf '%s\\\\\\\\n' 'executor token ready' \\\\u003e\\\\u00262\\\"],\\\"resources\\\":{\\\"limits\\\":{\\\"cpu\\\":\\\"200m\\\",\\\"memory\\\":\\\"128Mi\\\"},\\\"requests\\\":{\\\"cpu\\\":\\\"50m\\\",\\\"memory\\\":\\\"64Mi\\\"}},\\\"volumeMounts\\\":[{\\\"name\\\":\\\"exec-sa-token\\\",\\\"mountPath\\\":\\\"/var/run/secrets/kubernetes.io/serviceaccount\\\"}],\\\"securityContext\\\":{\\\"capabilities\\\":{\\\"drop\\\":[\\\"ALL\\\"]},\\\"runAsUser\\\":0,\\\"runAsGroup\\\":0,\\\"runAsNonRoot\\\":false,\\\"readOnlyRootFilesystem\\\":true,\\\"allowPrivilegeEscalation\\\":false,\\\"seccompProfile\\\":{\\\"type\\\":\\\"RuntimeDefault\\\"}}},{\\\"name\\\":\\\"init\\\",\\\"resources\\\":{\\\"limits\\\":{\\\"cpu\\\":\\\"200m\\\",\\\"memory\\\":\\\"128Mi\\\"},\\\"requests\\\":{\\\"cpu\\\":\\\"50m\\\",\\\"memory\\\":\\\"64Mi\\\"}}}],\\\"volumes\\\":[{\\\"emptyDir\\\":{\\\"medium\\\":\\\"Memory\\\",\\\"sizeLimit\\\":\\\"1Mi\\\"},\\\"name\\\":\\\"exec-sa-token\\\",\\\"secret\\\":null}]}\"}"
           },
           {
             "name": "ARGO_NODE_ID",
@@ -149,7 +158,7 @@
           },
           {
             "name": "ARGO_DEADLINE",
-            "value": "2026-11-03T13:28:51Z"
+            "value": "2026-11-03T19:33:09Z"
           },
           {
             "name": "ARGO_PROGRESS_FILE",
@@ -164,7 +173,16 @@
             "value": "3s"
           }
         ],
-        "resources": {},
+        "resources": {
+          "limits": {
+            "cpu": "200m",
+            "memory": "128Mi"
+          },
+          "requests": {
+            "cpu": "50m",
+            "memory": "64Mi"
+          }
+        },
         "volumeMounts": [
           {
             "name": "exec-sa-token",
@@ -236,7 +254,7 @@
           },
           {
             "name": "ARGO_DEADLINE",
-            "value": "2026-11-03T13:28:51Z"
+            "value": "2026-11-03T19:33:09Z"
           },
           {
             "name": "ARGO_PROGRESS_FILE",
@@ -251,7 +269,16 @@
             "value": "3s"
           }
         ],
-        "resources": {},
+        "resources": {
+          "limits": {
+            "cpu": "200m",
+            "memory": "128Mi"
+          },
+          "requests": {
+            "cpu": "50m",
+            "memory": "64Mi"
+          }
+        },
         "volumeMounts": [
           {
             "name": "exec-sa-token",
@@ -345,7 +372,7 @@
           },
           {
             "name": "ARGO_DEADLINE",
-            "value": "2026-11-03T13:28:51Z"
+            "value": "2026-11-03T19:33:09Z"
           },
           {
             "name": "ARGO_PROGRESS_FILE",

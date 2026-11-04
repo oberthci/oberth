@@ -319,7 +319,7 @@ func verifyTrustedKVMHelpers(pod *corev1.Pod, wait *corev1.Container, config Con
 		return invalid("initializer order")
 	}
 	waiter := pod.Spec.InitContainers[0].DeepCopy()
-	expectedWaiter := corev1.Container{Name: executorTokenWaiter, Image: config.SourceSeedImage, Command: []string{"sh", "-c", executorTokenWaitCommand}, SecurityContext: nonrootContainerSecurity(0), VolumeMounts: []corev1.VolumeMount{{Name: executorTokenVolume, MountPath: executorTokenDir}}}
+	expectedWaiter := corev1.Container{Name: executorTokenWaiter, Image: config.SourceSeedImage, Command: []string{"sh", "-c", executorTokenWaitCommand}, SecurityContext: nonrootContainerSecurity(0), Resources: executorControlResources(), VolumeMounts: []corev1.VolumeMount{{Name: executorTokenVolume, MountPath: executorTokenDir}}}
 	waiter.ImagePullPolicy = ""
 	waiter.TerminationMessagePath = ""
 	waiter.TerminationMessagePolicy = ""

@@ -68,7 +68,13 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config) error {
 		}
 		volumes, _ := patch["volumes"].([]any)
 		patch["volumes"] = append(volumes, map[string]any{"name": executorTokenVolume, "secret": nil, "emptyDir": map[string]any{"medium": "Memory", "sizeLimit": "1Mi"}})
-		waiter := corev1.Container{Name: executorTokenWaiter, Image: config.SourceSeedImage, Command: []string{"sh", "-c", executorTokenWaitCommand}, SecurityContext: nonrootContainerSecurity(0), VolumeMounts: []corev1.VolumeMount{{Name: executorTokenVolume, MountPath: executorTokenDir}}}
+		// Preserve the qualified wiring and recovery identity of named nonroot profiles.
+		pinnedProfile := t.Name != trustedKVMTemplate && workflow.Annotations[nonrootProfileAnnotation] != ""
+		controlResources := corev1.ResourceRequirements{}
+		if !pinnedProfile {
+			controlResources = executorControlResources()
+		}
+		waiter := corev1.Container{Name: executorTokenWaiter, Image: config.SourceSeedImage, Command: []string{"sh", "-c", executorTokenWaitCommand}, SecurityContext: nonrootContainerSecurity(0), Resources: controlResources, VolumeMounts: []corev1.VolumeMount{{Name: executorTokenVolume, MountPath: executorTokenDir}}}
 		initializers, _ := patch["initContainers"].([]any)
 		if len(initializers) == 0 {
 			initializers = []any{map[string]any{"name": "init"}}
@@ -80,6 +86,9 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config) error {
 			if value, ok := item.(map[string]any); ok {
 				if name, ok := value["name"].(string); ok {
 					if name == "init" {
+						if _, exists := value["resources"]; !pinnedProfile && !exists {
+							value["resources"] = executorControlResources()
+						}
 						merged = append(merged, waiter)
 						order = append(order, map[string]string{"name": executorTokenWaiter})
 						inserted = true
@@ -93,6 +102,42 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config) error {
 			result = errors.New("executor initializer missing from server patch")
 			return
 		}
+		if !pinnedProfile {
+			containers, _ := patch["containers"].([]any)
+			// Match Argo: resource/data executors normally run only main. A
+			// resource template gains wait only when it archives logs.
+			hasWait := (t.Resource == nil && t.Data == nil) || (t.Resource != nil && t.SaveLogsAsArtifact())
+			foundWait, foundMain := false, false
+			for _, item := range containers {
+				value, ok := item.(map[string]any)
+				if !ok {
+					continue
+				}
+				switch value["name"] {
+				case "wait":
+					foundWait = true
+				case "main":
+					if t.Resource == nil && t.Data == nil {
+						continue
+					}
+					foundMain = true
+				default:
+					continue
+				}
+				// Existing server-authored guards keep their resources and commands.
+				if _, exists := value["resources"]; !exists {
+					value["resources"] = executorControlResources()
+				}
+			}
+			if hasWait && !foundWait {
+				containers = append(containers, map[string]any{"name": "wait", "resources": executorControlResources()})
+			}
+			if (t.Resource != nil || t.Data != nil) && !foundMain {
+				containers = append(containers, map[string]any{"name": "main", "resources": executorControlResources()})
+			}
+			patch["containers"] = containers
+		}
+
 		patch["initContainers"] = merged
 		patch["$setElementOrder/initContainers"] = order
 

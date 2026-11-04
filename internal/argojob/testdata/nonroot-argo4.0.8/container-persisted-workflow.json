@@ -298,7 +298,7 @@
   },
   "status": {
     "phase": "Running",
-    "startedAt": "2026-11-03T11:28:34Z",
+    "startedAt": "2026-11-03T17:32:52Z",
     "finishedAt": null,
     "estimatedDuration": 1,
     "progress": "0/1",
@@ -311,7 +311,7 @@
         "templateName": "test",
         "templateScope": "local/oberth-oberth-run-abc1-aabbccddeeff",
         "phase": "Pending",
-        "startedAt": "2026-11-03T11:28:34Z",
+        "startedAt": "2026-11-03T17:32:52Z",
         "finishedAt": null,
         "estimatedDuration": 1,
         "progress": "0/1",
