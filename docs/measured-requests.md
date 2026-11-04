@@ -22,8 +22,9 @@ MCP agents use `run_resources` with the same arguments (`run`, `repo`, `ref`,
 `last`, `burn`, `step`, `include_failed`, `format`). Authenticated HTTP clients
 use `GET /api/run-resources` with those query parameters, or
 `GET /api/runs/{id}/resources`. Default output is JSON; `format=yaml` includes a
-`paste_ready` mapping per suggested step. Copy its `resources` and
-`activeDeadlineSeconds` into that template in git, not the surrounding report.
+`paste_ready` mapping per suggested step. Copy its `resources` into that template
+in git, not the surrounding report. Deadline advice is withheld; keep the
+declared `activeDeadlineSeconds` until Pod lifetime has been measured.
 Bearer token scope is checked through the same repo/run lookups as `run_get`
 before raw usage or git declarations are read. Responses contain resource
 numbers, identifiers and fixed explanations; never logs, commands, environment,
@@ -69,9 +70,9 @@ The `memory_step_peak_attempts`, `memory_sampler_attempts` and
 
 Memory and peak CPU are main-container peaks. Average CPU is cumulative externally
 captured CPU time divided by the interval from container start to its CPU sample
-timestamp (clipped to finish). Duration uses pod container start/finish,
-excluding Pod Pending time. Ephemeral storage and IO pressure are pod-wide,
-including helpers; shared PVC storage is excluded. Main-container IO read/write
+timestamp (clipped to finish). `duration_ns` uses main-container start/finish,
+excluding initialization, helper wait and Pod finalization. Ephemeral storage and
+IO pressure are pod-wide, including helpers; shared PVC storage is excluded. Main-container IO read/write
 bytes and pod PSI stall nanoseconds are reported separately. Unknown is never
 zero. Sampled peaks remain lower bounds, including killed attempts.
 
@@ -103,7 +104,22 @@ implement these rules for both the tool and the offline table:
 | Memory limit | maximum peak + 50%, rounded to MiB, minimum 64Mi |
 | Ephemeral request | maximum pod usage + 25%, rounded to MiB, minimum 64Mi |
 | Ephemeral limit | maximum pod usage + 50%, rounded to MiB, minimum 64Mi |
-| Step deadline | maximum container duration + 50% + 60s startup allowance |
+| Step deadline | withheld: Pod active lifetime through finalization is not measured |
+
+Each step's `deadline_no_suggestion` explains this timing gap, even with no
+history or otherwise sufficient resource measurements. Neither `suggested` nor
+`paste_ready` contains a generated `activeDeadlineSeconds`; the captured git
+declaration remains visible under `declared`. Resource sizing acceptance applies
+to resource advice and does not establish deadline sufficiency.
+
+The retained `PodStartedAt` to `PodFinishedAt` span includes initialization and
+helper execution, but `PodFinishedAt` is the last container exit observed on a
+terminal Pod. It is a lower bound, not the time finalization completed. A Pod can
+fail its deadline after all containers exited successfully. Neither this span
+nor main runtime plus a fixed allowance establishes the complete active lifetime.
+Deadline-killed samples are censored and cannot justify a reduction. Missing
+timing stays unknown; no zero or fallback deadline is generated. Measuring final
+Pod disposition is required before restoring numeric deadline advice.
 
 The median is displayed for comparison and never drives suggestions. Request
 margin allows ordinary variation; limit margin allows bursts missed by 15-second

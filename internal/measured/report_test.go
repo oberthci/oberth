@@ -34,7 +34,7 @@ func TestRunResourcesQuantilesSuggestionsAndStableFragmentIdentity(t *testing.T)
 		t.Fatalf("suggested: %+v", s.Suggested)
 	}
 	yaml := YAML(Report{Steps: got})
-	if !strings.Contains(yaml, "resources:") || strings.Contains(yaml, "    cpu: 630m\n  requests:") || !strings.Contains(yaml, "activeDeadlineSeconds:") {
+	if !strings.Contains(yaml, "resources:") || strings.Contains(yaml, "    cpu: 630m\n  requests:") || strings.Contains(yaml, "activeDeadlineSeconds:") {
 		t.Fatal(yaml)
 	}
 }
