@@ -287,3 +287,7 @@ func TestResourceScrapeFailureDoesNotChangeWaitOrMutateWorkload(t *testing.T) {
 		})
 	}
 }
+
+func (*resourceRecorder) RecordPodResourceDisposition(context.Context, model.PodResourceDisposition) error {
+	return nil
+}

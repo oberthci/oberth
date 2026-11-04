@@ -973,6 +973,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"issues",
 		"kubevirt_grants",
 		"pending_token_credentials",
+		"pod_resource_dispositions",
 		"priority_grants",
 		"promotion_grants",
 		"promotion_train_grants",

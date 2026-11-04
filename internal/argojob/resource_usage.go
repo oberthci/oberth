@@ -23,6 +23,7 @@ import (
 
 type ResourceUsageRecorder interface {
 	RecordStepResourceUsage(context.Context, []model.StepResourceUsage) error
+	RecordPodResourceDisposition(context.Context, model.PodResourceDisposition) error
 }
 type ResourceUsageSource interface {
 	Interval() time.Duration
@@ -232,6 +233,27 @@ func (c *Controller) sampleResourceUsageWithState(ctx context.Context, wf *wfv1.
 		binding.TemplateName = node.TemplateName
 		binding.FragmentRepository, _ = argoworkflow.FragmentTemplateOwner(node.TemplateName, fragmentLock)
 		bindings[string(pod.UID)] = binding
+		if pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded {
+			reason := "Completed"
+			if pod.Status.Phase == corev1.PodFailed {
+				reason = "Failed"
+				if pod.Status.Reason == "Evicted" || pod.Status.Reason == "DeadlineExceeded" {
+					reason = pod.Status.Reason
+				}
+			}
+			disposition := model.PodResourceDisposition{RunID: runID, WorkflowName: wf.Name, WorkflowUID: string(wf.UID), Namespace: wf.Namespace, NodeID: node.ID, PodName: pod.Name, PodUID: string(pod.UID), Stage: binding.Stage, Step: binding.Step, Template: binding.TemplateName, Owner: binding.FragmentRepository, Reason: reason, ObservedAt: time.Now().UTC()}
+			if disposition.Validate() == nil {
+				cacheKey := "pod-disposition\x00" + disposition.PodUID + "\x00" + reason
+				if _, known := finished[cacheKey]; !known {
+					if err := c.resourceRecorder.RecordPodResourceDisposition(ctx, disposition); err != nil {
+						return err
+					}
+					if finished != nil && len(finished) < 4096 {
+						finished[cacheKey] = disposition.ObservedAt
+					}
+				}
+			}
+		}
 		pending := resourceContainerCandidates(pod, finished)
 		if pending == 0 {
 			continue
