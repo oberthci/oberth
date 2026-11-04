@@ -20,6 +20,8 @@ import (
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/sumdb/dirhash"
 	modzip "golang.org/x/mod/zip"
+
+	"github.com/oberthci/oberth/internal/gitcache"
 )
 
 // tarEntry describes one entry in the mock tar archive.
@@ -510,4 +512,13 @@ func hashZipBytes(t *testing.T, zipBytes []byte) string {
 		t.Fatal(err)
 	}
 	return h
+}
+
+func (m *mockCache) ModuleVersionSnapshot(ctx context.Context, repo, _, subdir, version string, _ bool) (gitcache.ModuleSnapshot, error) {
+	tag := version
+	if subdir != "" {
+		tag = subdir + "/" + version
+	}
+	source, stamp, err := m.ModuleTagSnapshot(ctx, repo, tag)
+	return gitcache.ModuleSnapshot{Commit: source, Time: stamp, Ref: "refs/tags/" + tag, URL: artifactOriginURL}, err
 }

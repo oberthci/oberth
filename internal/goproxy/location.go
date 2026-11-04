@@ -45,13 +45,6 @@ func (h *Handler) moduleLocation(modulePath string) (moduleLocation, bool) {
 	return location, true
 }
 
-func (l moduleLocation) tag(version string) string {
-	if l.subdir == "" {
-		return version
-	}
-	return l.subdir + "/" + version
-}
-
 // Resolve the module directory from the pinned commit, including Go's /vN
 // layout. The same immutable commit determines both metadata and zip contents.
 func (h *Handler) moduleDirectory(ctx context.Context, repository, modulePath, source string) (string, []byte, error) {

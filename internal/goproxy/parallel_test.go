@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/testtimeout"
+
+	"github.com/oberthci/oberth/internal/gitcache"
 )
 
 type parallelCache struct{ active, peak, archives atomic.Int32 }
@@ -133,4 +135,13 @@ func TestParallelGoModDownloads(t *testing.T) {
 		t.Fatalf("archives=%d want=%d peak_concurrency=%d", cache.archives.Load(), modules, cache.peak.Load())
 	}
 	t.Logf("clients=%d modules=%d archives=%d peak_concurrency=%d", clients, modules, cache.archives.Load(), cache.peak.Load())
+}
+
+func (g *parallelCache) ModuleVersionSnapshot(ctx context.Context, repo, _, subdir, version string, _ bool) (gitcache.ModuleSnapshot, error) {
+	tag := version
+	if subdir != "" {
+		tag = subdir + "/" + version
+	}
+	source, stamp, err := g.ModuleTagSnapshot(ctx, repo, tag)
+	return gitcache.ModuleSnapshot{Commit: source, Time: stamp, Ref: "refs/tags/" + tag, URL: artifactOriginURL}, err
 }

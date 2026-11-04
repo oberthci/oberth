@@ -36,6 +36,10 @@ func TestModuleSnapshotPinsAnnotatedTagAndArchive(t *testing.T) {
 	if remote, err := cache.ModuleOriginURL(t.Context(), "example"); err != nil || remote != repository.upstream {
 		t.Fatalf("module origin URL = %q: %v", remote, err)
 	}
+	snapshot, err := cache.ModuleVersionSnapshot(t.Context(), "example", "go.example.test/snapshot", "", "v1.0.0", false)
+	if err != nil || snapshot.Commit != source || !snapshot.Time.Equal(timestamp) || snapshot.Ref != "refs/tags/v1.0.0" || snapshot.URL != repository.upstream {
+		t.Fatalf("coherent annotated snapshot = %+v: %v", snapshot, err)
+	}
 	// Simulate a tag changing between independently locked proxy operations.
 	runGit(t, ready.Path, "update-ref", "refs/tags/v1.0.0", repository.initialSHA)
 	got, err := cache.ShowFile(t.Context(), "example", source, "go.mod")
@@ -80,6 +84,10 @@ func TestModuleRepositoryLockWaitHonorsContext(t *testing.T) {
 	lock.Lock()
 	defer lock.Unlock()
 	operations := map[string]func(context.Context) error{
+		"identity": func(ctx context.Context) error {
+			_, err := cache.ModuleVersionSnapshot(ctx, "example", "go.example.test/module", "", "v1.0.0", false)
+			return err
+		},
 		"origin": func(ctx context.Context) error {
 			_, err := cache.ModuleOriginURL(ctx, "example")
 			return err

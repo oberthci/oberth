@@ -23,7 +23,11 @@ var ErrModulePseudoVersionUnavailable = errors.New("pseudo-version commit or pol
 // fetches a requested revision. Public branch/tag reachability, commit time and
 // any base tag are checked under one context-aware repository read lock.
 func (c *Cache) ModulePseudoVersionSnapshot(ctx context.Context, input, modulePath, version string, allowNonDefault bool) (string, time.Time, error) {
-	return c.modulePseudoVersionSnapshot(ctx, input, modulePath, "", version, allowNonDefault)
+	if !module.IsPseudoVersion(version) {
+		return "", time.Time{}, ErrModulePseudoVersionUnavailable
+	}
+	snapshot, err := c.ModuleVersionSnapshot(ctx, input, modulePath, "", version, allowNonDefault)
+	return snapshot.Commit, snapshot.Time, err
 }
 
 // ModuleSubdirPseudoVersionSnapshot applies the same commit policy to a nested
@@ -32,10 +36,18 @@ func (c *Cache) ModuleSubdirPseudoVersionSnapshot(ctx context.Context, input, mo
 	if subdir == "" || validateBlobPath(subdir+"/go.mod") != nil {
 		return "", time.Time{}, ErrModulePseudoVersionUnavailable
 	}
-	return c.modulePseudoVersionSnapshot(ctx, input, modulePath, subdir, version, allowNonDefault)
+	if !module.IsPseudoVersion(version) {
+		return "", time.Time{}, ErrModulePseudoVersionUnavailable
+	}
+	snapshot, err := c.ModuleVersionSnapshot(ctx, input, modulePath, subdir, version, allowNonDefault)
+	return snapshot.Commit, snapshot.Time, err
 }
 
-func (c *Cache) modulePseudoVersionSnapshot(ctx context.Context, input, modulePath, subdir, version string, allowNonDefault bool) (string, time.Time, error) {
+// Called with the repository read lock held.
+func (c *Cache) modulePseudoVersionSnapshot(ctx context.Context, path, modulePath, subdir, version string, allowNonDefault bool) (string, time.Time, error) {
+	if subdir != "" && validateBlobPath(subdir+"/go.mod") != nil {
+		return "", time.Time{}, ErrModulePseudoVersionUnavailable
+	}
 	tagPrefix := ""
 	if subdir != "" {
 		tagPrefix = subdir + "/"
@@ -54,18 +66,6 @@ func (c *Cache) modulePseudoVersionSnapshot(ctx context.Context, input, modulePa
 	base, err := module.PseudoVersionBase(version)
 	if err != nil {
 		return "", time.Time{}, ErrModulePseudoVersionUnavailable
-	}
-	_, path, err := c.modulePath(ctx, input)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	unlock, err := c.lockModuleRepository(ctx, path)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	defer unlock()
-	if !c.isBare(ctx, path) {
-		return "", time.Time{}, errors.New("module repository is not cached")
 	}
 	// Resolve object IDs rather than Git's ref DWIM: a branch named like a short
 	// hash must never redirect the requested revision to different content.

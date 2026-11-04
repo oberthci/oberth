@@ -394,3 +394,11 @@ func TestRealGitPseudoVersionWithoutGoModIsTerminal(t *testing.T) {
 		t.Fatal("missing go.mod escaped mirror")
 	}
 }
+
+func (g *pseudoGit) ModuleVersionSnapshot(ctx context.Context, repo, mod, subdir, version string, allow bool) (gitcache.ModuleSnapshot, error) {
+	if !module.IsPseudoVersion(version) {
+		return g.artifactGit.ModuleVersionSnapshot(ctx, repo, mod, subdir, version, allow)
+	}
+	source, stamp, err := g.ModulePseudoVersionSnapshot(ctx, repo, mod, version, allow)
+	return gitcache.ModuleSnapshot{Commit: source, Time: stamp, URL: artifactOriginURL}, err
+}

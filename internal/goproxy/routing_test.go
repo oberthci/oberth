@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/gitcache"
 )
 
 // Faults come from the real handler's cache boundary, not a replacement HTTP
@@ -139,4 +141,13 @@ func assertRoutingStatus(t *testing.T, handler http.Handler, path string, want i
 	if rec.Code != want {
 		t.Fatalf("%s status = %d, want %d: %s", path, rec.Code, want, rec.Body.String())
 	}
+}
+
+func (c routingCache) ModuleVersionSnapshot(ctx context.Context, repo, _, subdir, version string, _ bool) (gitcache.ModuleSnapshot, error) {
+	tag := version
+	if subdir != "" {
+		tag = subdir + "/" + version
+	}
+	source, stamp, err := c.ModuleTagSnapshot(ctx, repo, tag)
+	return gitcache.ModuleSnapshot{Commit: source, Time: stamp, Ref: "refs/tags/" + tag, URL: artifactOriginURL}, err
 }
