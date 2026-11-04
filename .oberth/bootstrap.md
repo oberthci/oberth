@@ -146,6 +146,6 @@ claim of live Pod execution or an applied registry policy.
 ## Dashboard test runtime
 
 The tokenless fetch-node and verify-node steps stage the pinned Node archive in
-bootstrap-node-inputs. The release-test leaf mounts that claim read-only and
+bootstrap-node-inputs. The release-test-rest leaf mounts that claim read-only and
 verifies its private executable before running dashboard JavaScript tests.
 The artifact publisher has no Node tooling or site deployment authority.

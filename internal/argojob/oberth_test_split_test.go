@@ -132,7 +132,7 @@ else:
 			case "rest":
 				timeout = "-timeout=55m"
 			}
-			want := []string{"test", "-race", "-v", "-count=1", "-p=2", timeout}
+			want := []string{"test", "-race", "-v", "-count=1", "-parallel=2", "-p=2", timeout}
 			for _, pkg := range packages {
 				owner := "rest"
 				for _, dedicated := range []string{"store", "service", "gitcache"} {
