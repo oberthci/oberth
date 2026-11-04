@@ -1109,6 +1109,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		WorkflowCapabilities:   database,
 		SizeGrants:             database,
 		QueuePriorities:        database,
+		QueueCap:               database,
 		SecretStoreVerifier:    buildSecretStoreVerifier(options, kube),
 		SecretAccessReconciler: accessReconciler,
 		RepositoryArchiver:     database,
