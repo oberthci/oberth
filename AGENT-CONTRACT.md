@@ -3195,14 +3195,22 @@ shared partial-execution evidence contract and its RCA/fallback regression are
 compiled in this topic and included in its bundle.
 
 
-**RCA recovery / run-list UX:** allow-listed branch preparation failures with
-positive proof that no Workflow POST occurred can receive one atomic, audited
-retry at the same SHA. A missing progress journal is unknown; only fresh
-execution initializes an empty journal. Submitted, adopted/reconciled and
-uncertain-create settlement paths never opt in. Release,
-tag, promotion, plan and apply runs never auto-retry. All progress attempts,
-engine observations, cleanup completion and writer-side newest/step/publication
-fences apply. The automatic budget survives restart and manual replay lineage.
+**RCA recovery / run-list UX:** eligible branch failures in the infrastructure or
+workflow-level job classes accepted by `run_retry` receive one atomic, audited
+retry by default. `--auto-retry-infrastructure=false` / Helm
+`autoRetryInfrastructure: false` disables it; the budget is fixed at one.
+Trusted-policy-refresh deadlines, lost executors and step-free workflow failures
+qualify after terminal observation or cleanup. Missing/corrupt progress history,
+any retained failed/timed-out step, cancellation, release/tag, promotion, plan,
+apply, publication, pending deletion or uncleaned preflight prevent this retry.
+Started/passed steps alone are not test failures. All retained progress attempts,
+engine observations and writer-side newest/protected-work fences apply.
+Admission sequence, queued time and priority are inherited for every retry;
+the history sequence and run ID are new. The existing reason and `run.retry.auto`
+audit record `automatic retry of <id> after infrastructure failure: <reason>`.
+The automatic budget survives restart, legacy reasons and manual replay lineage;
+no historical terminal backlog is retried and no new migration is required.
+See [administrator and upgrade policy](docs/infrastructure-retries.md).
 Raw failed/interrupted statuses remain; additive retry links and `infra-retried`
 (amber) / `superseded` display states explain them. The dashboard's all-status
 view shows scoped latest-ref heads plus any missing active runs on every page;

@@ -14,8 +14,8 @@ import (
 	"github.com/oberthci/oberth/internal/runprogress"
 )
 
-func TestPreStepAutoRetryUsesAllProgressAndExecutionEvidence(t *testing.T) {
-	for _, kind := range []string{"empty", "missing", "queued", "started", "earlier-start-then-queued", "torn", "result-started", "observation-started", "earlier-workflow-attempt", "release", "tag", "trigger-tag", "trigger-release", "promotion", "plan", "apply"} {
+func TestInfrastructureAutoRetryUsesAllFailureEvidence(t *testing.T) {
+	for _, kind := range []string{"empty", "missing", "queued", "started", "earlier-start-then-queued", "torn", "result-started", "observation-started", "earlier-workflow-attempt", "result-failed", "observation-failed", "failed-then-queued", "step-timeout", "release", "tag", "trigger-tag", "trigger-release", "promotion", "plan", "apply"} {
 		t.Run(kind, func(t *testing.T) {
 			root := t.TempDir()
 			logs, err := runlog.Open(root)
@@ -26,7 +26,7 @@ func TestPreStepAutoRetryUsesAllProgressAndExecutionEvidence(t *testing.T) {
 			run := model.Run{ID: strings.Repeat("a", 32), RefKind: model.RefBranch, Trigger: "branch"}
 			result := JobResult{Status: model.RunFailed, Phase: "infrastructure"}
 			now := time.Now()
-			if kind == "empty" {
+			if kind != "missing" && kind != "torn" {
 				if err := logs.InitializeStepProgress(run.ID); err != nil {
 					t.Fatal(err)
 				}
@@ -48,12 +48,29 @@ func TestPreStepAutoRetryUsesAllProgressAndExecutionEvidence(t *testing.T) {
 					}
 				}
 			}
+			if kind == "failed-then-queued" || kind == "step-timeout" {
+				event := runprogress.Event{Version: 1, Stage: "ci", Step: "unit", Ordinal: 0, DeclaredSize: "M", Status: runprogress.StepFailed, StartedAt: &now, FinishedAt: &now}
+				if kind == "step-timeout" {
+					event.Status = runprogress.StepTimedOut
+				}
+				if err := logs.AppendStepProgress(run.ID, event); err != nil {
+					t.Fatal(err)
+				}
+				event.Status, event.StartedAt, event.FinishedAt = runprogress.StepQueued, nil, nil
+				if err := logs.AppendStepProgress(run.ID, event); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if kind == "torn" {
 				if err := os.WriteFile(filepath.Join(root, run.ID+".progress.jsonl"), []byte(`{"version":1`), 0600); err != nil {
 					t.Fatal(err)
 				}
 			}
 			switch kind {
+			case "result-failed":
+				result.Steps = []model.StepResult{{Status: model.StepFailed}}
+			case "observation-failed":
+				result.TerminalObservation = &model.RunTerminalObservation{Steps: []model.RunObservedStep{{Status: model.StepFailed, Started: true}}}
 			case "result-started":
 				result.Steps = []model.StepResult{{Status: model.StepPassed, StartedAt: &now}}
 			case "observation-started":
@@ -69,9 +86,9 @@ func TestPreStepAutoRetryUsesAllProgressAndExecutionEvidence(t *testing.T) {
 			case "promotion", "plan", "apply":
 				run.Trigger = kind
 			}
-			want := kind == "empty" || kind == "queued"
-			if got := scheduler.preStepAutoRetry(run, result); got != want {
-				t.Fatal("pre-step retry eligibility", kind, got, want)
+			want := kind == "empty" || kind == "queued" || kind == "started" || kind == "earlier-start-then-queued" || kind == "result-started" || kind == "observation-started" || kind == "earlier-workflow-attempt"
+			if got := scheduler.infrastructureAutoRetry(run, result); got != want {
+				t.Fatal("infrastructure retry eligibility", kind, got, want)
 			}
 		})
 	}
@@ -99,7 +116,7 @@ func (j *rcaCreateFailure) CreateWorkflow(context.Context, WorkflowRequest) erro
 	return j.createErr
 }
 
-func TestAutomaticRetryRequiresFailedCreateCleanupAndKeepsStartedSteps(t *testing.T) {
+func TestAutomaticRetryAfterSettledCreateOrWorkflowFailure(t *testing.T) {
 	for _, kind := range []string{"create", "create-delete-fails", "started-before-identity", "pre-step-deadline"} {
 		t.Run(kind, func(t *testing.T) {
 			fixture := newRecoveryFixture(t)
@@ -127,15 +144,15 @@ func TestAutomaticRetryRequiresFailedCreateCleanupAndKeepsStartedSteps(t *testin
 				t.Fatal(err)
 			}
 			if kind == "create" || kind == "create-delete-fails" {
-				if current.Status != model.RunFailed || current.AutoRetriedBy != "" || len(jobs.deleted) != 0 {
-					t.Fatal("unproven create error retried or deleted a possibly foreign name", current, jobs.deleted)
+				if current.Status != model.RunFailed || current.AutoRetriedBy == "" || len(jobs.deleted) != 0 {
+					t.Fatal("definite create rejection did not retry or deleted a foreign name", current, jobs.deleted)
 				}
 			}
-			if kind == "pre-step-deadline" && (current.AutoRetriedBy != "" || current.Phase != "job") {
-				t.Fatal("post-create deadline retried or raw phase rewritten", current)
+			if kind == "pre-step-deadline" && (current.AutoRetriedBy == "" || current.Phase != "job") {
+				t.Fatal("workflow-level deadline not retried or raw phase rewritten", current)
 			}
-			if kind == "started-before-identity" && current.AutoRetriedBy != "" {
-				t.Fatal("wait error erased started-step evidence", current)
+			if kind == "started-before-identity" && current.AutoRetriedBy == "" {
+				t.Fatal("passed work incorrectly prevented infrastructure retry", current)
 			}
 		})
 	}

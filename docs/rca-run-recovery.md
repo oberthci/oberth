@@ -1,45 +1,35 @@
-# Pre-step recovery and the run list
+# Infrastructure recovery and the run list
 
-A branch run can receive **one** automatic retry at the same SHA for an
-allow-listed infrastructure failure with positive proof that no Workflow POST
-occurred. Eligible source-checkout deadlines and native preparation failures
-after a definitive Workflow NotFound can qualify. Permanent configuration,
-policy, malformed pipeline and missing-SHA failures do not. Release/tag,
-promotion, plan and apply execution is excluded.
+A branch run can receive **one** automatic retry for an eligible infrastructure
+or workflow-level `job` failure without a failed step, matching the failure
+classes accepted by `run_retry`. Trusted-policy-refresh deadlines and lost
+executors qualify once cleanup is settled. Release/tag, promotion, plan, apply,
+user/admin cancellation and test/step failures never qualify. The administrator
+setting `autoRetryInfrastructure` defaults on; its fixed budget is one retry.
+See [configuration and upgrade behavior](infrastructure-retries.md).
 
 Only fresh dispatch initializes an explicit empty progress journal, before
-execution; it never truncates existing evidence. A missing journal in any later
-check is unknown and refuses replay. Every retained progress attempt, engine
-step/attempt result and terminal observation still participates in the guard.
-Run StartedAt means admission, not step execution. Started/completed/non-queued
-steps and unreadable/torn history refuse retry. Source preparation must also
-carry a trusted infrastructure classification; an unclassified error is not a
-retry authorization.
+execution; it never truncates existing evidence. A missing journal or corrupt
+history refuses replay. Every retained progress attempt, engine step result and
+terminal observation participates in the failed/timed-out-step guard. Started
+or passed steps alone do not prevent recovery from a workflow failure.
 
-After a Workflow create attempt, only the native engine's positive pre-POST
-proof can opt in. Submission-record failure, observed/completed-while-down
-Workflows and uncertain-create settlement never request automatic retry, even
-with an empty journal. Post-create workflow deadlines preserve their original
-job phase and do not auto-retry. Partial executor observations retain step-start
-evidence without collecting artifacts from a live workspace; artifact collection
-requires an actually terminal Workflow.
-
-Definite rejection and foreign-name refusal never route through Delete. An
-uncertain POST uses v0.17.72's shared create-settlement background task. A failed delete
-after successful creation/submission-record failure also transfers to that
-background task when the engine supports settlement. Its run and admission stay retained
-while Kubernetes is unavailable; unrelated runs can progress and the background task's
-error never exits the scheduler. Only confirmed cleanup settles it, without an
-automatic execution retry. Existing ownership checks remain mandatory.
+Submitted, adopted and reconciled Workflows may qualify after a terminal
+observation or ownership-checked cleanup. A definite create rejection never
+routes through Delete of a possibly foreign name. An uncertain POST retains its
+run and admission in the shared create-settlement task until absence is confirmed;
+failed deletion does not authorize another executor. Existing ownership checks
+and trusted-preflight cleanup fences remain mandatory.
 
 The writer transaction records failure, creates the retry, links both attempts
-and appends `run.retry.auto` atomically. It rechecks that the source is newest for
-its branch/schedule entry, has no active sibling, failed step, persisted step
-execution, pending deletion or publication, and belongs to an active repository.
-A newer push wins instead of being superseded backwards by retry. The queued
-copy resets credential admission and re-earns grants through the ordinary path.
-It preserves source, schedule entry, actor and queue priority. No arbitrary build
-step is replayed from stderr or a client-side timeout.
+and appends `run.retry.auto` atomically. It rechecks active repository, failed-step,
+publication and cleanup evidence and the existing protected-work/newest-run
+rules. A newer ordinary push wins instead of being superseded backwards by retry.
+The queued copy resets credential admission and re-earns grants normally. It
+preserves source, schedule entry, actor, **admission position**, queued time and
+queue priority, while receiving a new unique history sequence. The existing
+reason line and audit say `automatic retry of <id> after infrastructure failure:
+<reason>`; the retry is not inferred from stderr or client-side timeouts.
 
 The one-retry marker survives restart requeue, KVM preflight restart recovery
 and manual retry/rerun. Human

@@ -138,6 +138,7 @@ type serveOptions struct {
 	runLogLimitBytes          int64
 	retentionInterval         time.Duration
 	retentionKeepNewest       int
+	autoRetryInfrastructure   bool
 	maxConcurrent             int
 	maxConcurrentFile         string
 	declaredAdmission         service.DeclaredAdmissionConfig
@@ -290,6 +291,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.Int64Var(options.declaredAdmission.MemoryHeadroomPercent, "admission-memory-headroom-percent", 10, "memory headroom as a percentage of declared run memory, excluding executor reserves (0..100); combined with the fixed minimum using the larger value")
 	flags.IntVar(&options.declaredAdmission.IORuns, "admission-io-runs", 0, "coarse simultaneous run ceiling for IO; 0 retains the existing run ceiling")
 
+	flags.BoolVar(&options.autoRetryInfrastructure, "auto-retry-infrastructure", true, "automatically retry eligible infrastructure failures once at their original queue position")
 	flags.StringVar(&options.maxConcurrentFile, "max-concurrent-jobs-file", "", "mounted ConfigMap key to reload max concurrent Jobs without restart; invalid or missing keeps the last good value")
 	flags.StringVar(&options.admissionSizeWeights, "admission-size-weights", service.DefaultSizeWeights.String(), "admission weight per size as S=..,M=..,L=..,XL=..; XL=0 is the whole budget (an XL run runs alone), a positive XL lets XL share the host; the budget is --max-concurrent-jobs M runs (#1021)")
 	flags.DurationVar(&options.admissionMaxHeadWait, "admission-max-head-wait", service.DefaultMaxHeadWait, "maximum head-wait window for measured admission backfill; then drain for up to 5m before available-capacity backfill resumes (0 = strict FIFO)")
@@ -888,14 +890,15 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	scheduler, err := service.NewScheduler(service.SchedulerConfig{
 		Store: database, Git: git, Logs: logs, Jobs: argoJobs, ReleaseJobs: argoJobs, Auditor: database,
 		TrustedPreflight: trusted, Signals: signals, WorkspaceRoot: filepath.Join(options.dataRoot, "work"), MaxConcurrent: options.maxConcurrent,
-		MaxConcurrentFile:       options.maxConcurrentFile,
-		MaxRunLogBytes:          options.runLogLimitBytes,
-		MutationGate:            anchors.AllowMutation,
-		AdmissionDiskFloorBytes: options.admissionDiskFloorBytes,
-		AdmissionPressure:       options.admissionPressure,
-		SizeWeights:             options.sizeWeights,
-		DeclaredAdmission:       options.declaredAdmission,
-		MaxHeadWait:             options.admissionMaxHeadWait,
+		DisableInfrastructureAutoRetry: !options.autoRetryInfrastructure,
+		MaxConcurrentFile:              options.maxConcurrentFile,
+		MaxRunLogBytes:                 options.runLogLimitBytes,
+		MutationGate:                   anchors.AllowMutation,
+		AdmissionDiskFloorBytes:        options.admissionDiskFloorBytes,
+		AdmissionPressure:              options.admissionPressure,
+		SizeWeights:                    options.sizeWeights,
+		DeclaredAdmission:              options.declaredAdmission,
+		MaxHeadWait:                    options.admissionMaxHeadWait,
 	})
 	if err != nil {
 		return err

@@ -38,6 +38,9 @@ var errPreflightCancellationPending = errors.New("trusted preflight cancellation
 type mutationRequirement func(context.Context) error
 
 type SchedulerConfig struct {
+	// DisableInfrastructureAutoRetry turns off the default-on, single automatic retry.
+	DisableInfrastructureAutoRetry bool
+
 	DeclaredAdmission DeclaredAdmissionConfig
 	Store             SchedulerStore
 	Git               WorkspaceGit
@@ -68,6 +71,8 @@ type SchedulerConfig struct {
 }
 
 type Scheduler struct {
+	disableInfrastructureAutoRetry bool
+
 	databaseRetryCount atomic.Uint64
 	dispatchProgress   liveness.Heartbeat
 	headProgress       liveness.Heartbeat
@@ -181,6 +186,8 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 	deliveryPermit := make(chan struct{}, 1)
 	deliveryPermit <- struct{}{}
 	scheduler := &Scheduler{
+		disableInfrastructureAutoRetry: config.DisableInfrastructureAutoRetry,
+
 		store: config.Store, git: config.Git, logs: config.Logs, jobs: config.Jobs,
 		releaseJobs: config.ReleaseJobs, trusted: config.TrustedPreflight,
 		auditor: config.Auditor, signals: signals,
@@ -857,7 +864,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		}
 	}
 	if err := scheduler.git.Checkout(ctx, upstream.QualifiedRepo(repository.Name), checkoutSHA, sourceDir); err != nil {
-		return scheduler.finishPreCreateInfrastructureFailure(ctx, run, repository, &checkoutPreparationFailure{cause: err})
+		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("checkout run workspace: %w", err))
 	}
 	scheduler.timingMilestone(ctx, run.ID, "checkout-ready")
 	requirement, stopped, err := scheduler.awaitTrustedRequirement(gitcache.WithBurstPolicy(ctx), repository, run.ID, checkoutSHA, require)
@@ -1183,12 +1190,8 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			return logFile.Close()
 		}
 		_ = logFile.Close()
-		// Definite rejection/foreign-name refusal never goes through Delete.
-		// Native uncertain POSTs were registered above with the shared settler.
-		var before interface{ BeforeWorkflowCreate() bool }
-		if requirement.Contract == nil && errors.As(err, &before) && before.BeforeWorkflowCreate() {
-			return scheduler.finishPreCreateInfrastructureFailure(ctx, run, repository, err)
-		}
+		// Definite rejection never deletes a foreign name. Ambiguous POSTs stay
+		// owned by the settlement task above until absence is confirmed.
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("create Job: %w", err))
 	}
 	reservation.markSubmitted()
@@ -1456,7 +1459,8 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 				return fmt.Errorf("delete Workflow %s before terminalizing failed run %s: %w",
 					workflowName, run.ID, deleteErr)
 			}
-			jobResult = JobResult{Status: model.RunFailed, Phase: failurePhase, Error: waitErr.Error(), Steps: jobResult.Steps, ObservedStepStart: jobResult.ObservedStepStart, TerminalObservation: jobResult.TerminalObservation}
+			// An observation error cannot erase a positively identified failed step.
+			jobResult.Status, jobResult.Phase, jobResult.Error = model.RunFailed, failurePhase, waitErr.Error()
 		}
 	}
 	// The Workflow is now terminal or its deletion has been accepted, so its
@@ -1467,7 +1471,7 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 	workflowSettled = true
 	releaseAdmission()
 	if !validJobRunStatus(jobResult.Status) {
-		jobResult = JobResult{Status: model.RunFailed, Phase: "job", Error: "Job returned an invalid terminal status"}
+		jobResult.Status, jobResult.Phase, jobResult.Error = model.RunFailed, "job", "Job returned an invalid terminal status"
 	}
 	if gateErr := require(finalizeCtx); gateErr != nil {
 		return gateErr
@@ -1516,7 +1520,8 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 		}
 	}
 	finished, err := scheduler.database().FinishRun(finalizeCtx, run.ID, model.RunResult{
-		TerminalObservation: jobResult.TerminalObservation, Status: jobResult.Status, Phase: jobResult.Phase, TestedSHA: checkoutSHA, BaseSHA: jobResult.BaseSHA,
+		AutoRetryInfrastructure: scheduler.infrastructureAutoRetry(run, jobResult),
+		TerminalObservation:     jobResult.TerminalObservation, Status: jobResult.Status, Phase: jobResult.Phase, TestedSHA: checkoutSHA, BaseSHA: jobResult.BaseSHA,
 		FailedStage: jobResult.FailedStage, FailedStep: jobResult.FailedStep, Error: jobResult.Error,
 		FailureTail: failureTail,
 	})
@@ -1853,20 +1858,10 @@ func (scheduler *Scheduler) finishPublication(_ context.Context, _ model.Reposit
 	return nil
 }
 
-func (scheduler *Scheduler) finishInfrastructureFailure(ctx context.Context, run model.Run, repository model.Repository, failure error) error {
-	return scheduler.finishInfrastructureFailureWithRetry(ctx, run, repository, failure, false)
-}
-
-// Only call before any Workflow POST or with the engine's positive pre-POST
-// proof. Submitted/reconciled/uncertain-create paths use the default helper.
-func (scheduler *Scheduler) finishPreCreateInfrastructureFailure(ctx context.Context, run model.Run, repository model.Repository, failure error) error {
-	return scheduler.finishInfrastructureFailureWithRetry(ctx, run, repository, failure, retryablePreCreateCause(failure))
-}
-
-func (scheduler *Scheduler) finishInfrastructureFailureWithRetry(ctx context.Context, run model.Run, _ model.Repository, failure error, allow bool) error {
+func (scheduler *Scheduler) finishInfrastructureFailure(ctx context.Context, run model.Run, _ model.Repository, failure error) error {
 	defer forgetActiveLogIndex(scheduler.logs, run.ID)
 	result := JobResult{Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error()}
-	finished, err := scheduler.database().FinishRun(ctx, run.ID, model.RunResult{AutoRetryPreStep: allow && scheduler.preStepAutoRetry(run, result), Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error()})
+	finished, err := scheduler.database().FinishRun(ctx, run.ID, model.RunResult{AutoRetryInfrastructure: scheduler.infrastructureAutoRetry(run, result), Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error()})
 	if errors.Is(err, store.ErrInvalidState) {
 		scheduler.signals.NotifyRun(run.ID)
 		return nil
@@ -2015,10 +2010,6 @@ func (scheduler *Scheduler) finalizeReconciledRun(ctx context.Context, run model
 	if err := require(ctx); err != nil {
 		return err
 	}
-	repository, err := scheduler.database().Repository(ctx, run.RepoID)
-	if err != nil {
-		return scheduler.finishInfrastructureFailure(ctx, run, model.Repository{}, fmt.Errorf("load reconciled run repository: %w", err))
-	}
 	// Build the log index from whatever partial log the reconciled run left
 	// behind, so per-step logs remain readable (#437). The log file may not
 	// exist if the run never started streaming; an empty index is acceptable.
@@ -2035,6 +2026,10 @@ func (scheduler *Scheduler) finalizeReconciledRun(ctx context.Context, run model
 		jobResult = JobResult{Status: model.RunFailed, Phase: "promotion", Error: promotionErr.Error()}
 	}
 	if jobResult.Status == model.RunPassed {
+		repository, err := scheduler.database().Repository(ctx, run.RepoID)
+		if err != nil {
+			return err
+		}
 		if gateErr := require(ctx); gateErr != nil {
 			return gateErr
 		}
@@ -2051,8 +2046,9 @@ func (scheduler *Scheduler) finalizeReconciledRun(ctx context.Context, run model
 			return nil
 		}
 	}
-	_, err = scheduler.database().FinishRun(ctx, run.ID, model.RunResult{
-		TerminalObservation: jobResult.TerminalObservation, Status: jobResult.Status, Phase: jobResult.Phase,
+	finished, err := scheduler.database().FinishRun(ctx, run.ID, model.RunResult{
+		AutoRetryInfrastructure: scheduler.infrastructureAutoRetry(run, jobResult),
+		TerminalObservation:     jobResult.TerminalObservation, Status: jobResult.Status, Phase: jobResult.Phase,
 		FailedStage: jobResult.FailedStage, FailedStep: jobResult.FailedStep,
 		Error: jobResult.Error,
 	})
@@ -2062,6 +2058,10 @@ func (scheduler *Scheduler) finalizeReconciledRun(ctx context.Context, run model
 	}
 	if err != nil {
 		return fmt.Errorf("finish reconciled run %s: %w", run.ID, err)
+	}
+	if finished.AutoRetriedBy != "" {
+		scheduler.signals.NotifyRun(finished.AutoRetriedBy)
+		scheduler.signalQueue()
 	}
 	if promotion.ID != "" {
 		scheduler.signals.NotifyPromotion(promotion.ID)

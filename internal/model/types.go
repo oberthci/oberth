@@ -208,8 +208,9 @@ type RunSpec struct {
 }
 
 type RunResult struct {
-	// AutoRetryPreStep is set only by the scheduler after cleanup and progress checks.
-	AutoRetryPreStep    bool `json:"-"`
+	// AutoRetryInfrastructure is set only by the scheduler after workload settlement and failure checks.
+	AutoRetryInfrastructure bool `json:"-"`
+
 	TerminalObservation *RunTerminalObservation
 	Status              RunStatus
 	Phase               string

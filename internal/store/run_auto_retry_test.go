@@ -10,7 +10,7 @@ import (
 )
 
 func autoRetryResult() model.RunResult {
-	return model.RunResult{Status: model.RunFailed, Phase: "infrastructure", Error: "workflow unavailable", AutoRetryPreStep: true}
+	return model.RunResult{Status: model.RunFailed, Phase: "infrastructure", Error: "workflow unavailable", AutoRetryInfrastructure: true}
 }
 func autoRetrySource(t *testing.T, s *Store, repoID int64, ref string) model.Run {
 	t.Helper()
@@ -21,7 +21,7 @@ func autoRetrySource(t *testing.T, s *Store, repoID int64, ref string) model.Run
 	return r.Run
 }
 
-func TestAutoRetryPreStepIsAtomicAuditedAndOnlyOnce(t *testing.T) {
+func TestAutoRetryInfrastructureIsAtomicAuditedAndOnlyOnce(t *testing.T) {
 	now := time.Now()
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
@@ -51,8 +51,8 @@ func TestAutoRetryPreStepIsAtomicAuditedAndOnlyOnce(t *testing.T) {
 	}
 }
 
-func TestAutoRetryRefusesExecutedStepsReleasesAndStaleWork(t *testing.T) {
-	for _, kind := range []string{"step-started", "step-passed", "failed-step", "tag", "release", "trigger-tag", "trigger-release", "plan", "apply", "newer-terminal", "pending-delete", "publication"} {
+func TestAutoRetryRefusesFailedStepsReleasesAndStaleWork(t *testing.T) {
+	for _, kind := range []string{"step-started", "failed-step", "tag", "release", "trigger-tag", "trigger-release", "plan", "apply", "newer-terminal", "pending-delete", "publication"} {
 		t.Run(kind, func(t *testing.T) {
 			now := time.Now()
 			s := testStore(t, &now)

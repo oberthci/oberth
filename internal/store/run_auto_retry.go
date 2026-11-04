@@ -6,13 +6,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/pushretry"
 )
 
 // These server-owned reasons preserve lineage without a schema migration.
 // Client-supplied rerun reasons are audit-only and never set these columns.
-const autoRetryOfPrefix = "automatic infrastructure retry of "
+const legacyAutoRetryOfPrefix = "automatic infrastructure retry of "
+const autoRetryOfPrefix = "automatic retry of "
+const autoRetryCauseSeparator = " after infrastructure failure: "
 const autoRetriedByPrefix = "infra error, retried as "
 
 func (s *Store) inheritAutoRetryTx(ctx context.Context, tx *sql.Tx, previous model.Run, next *model.Run) error {
@@ -33,7 +37,11 @@ func (s *Store) inheritAutoRetryTx(ctx context.Context, tx *sql.Tx, previous mod
 	if origin == "" {
 		return nil
 	}
-	next.AutoRetryOf, next.Reason = origin, autoRetryOfPrefix+origin
+	var cause string
+	if err := tx.QueryRowContext(ctx, `SELECT error FROM runs WHERE id=?`, origin).Scan(&cause); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	next.AutoRetryOf, next.Reason = origin, autoRetryOfPrefix+origin+autoRetryCauseSeparator+cause
 	if _, err := tx.ExecContext(ctx, `UPDATE runs SET reason=? WHERE id=?`, next.Reason, next.ID); err != nil {
 		return err
 	}
@@ -47,9 +55,16 @@ func (s *Store) inheritAutoRetryTx(ctx context.Context, tx *sql.Tx, previous mod
 
 // Failure, retry, lineage and audit commit together. This is never a second
 // attempt at publication or tag-tier execution, and never supersedes newer work.
-func (s *Store) autoRetryPreStepTx(ctx context.Context, tx *sql.Tx, source model.Run, now int64) (model.Run, error) {
-	if source.Status != model.RunFailed || source.Phase != "infrastructure" || source.FailedStep != "" || source.FailedStage != "" || source.RefKind != model.RefBranch || source.Release || source.AutoRetryOf != "" || source.AutoRetriedBy != "" || source.SupersededBy != "" || (source.Trigger != "branch" && source.Trigger != "push" && source.Trigger != "schedule" && source.Trigger != "manual") {
+func (s *Store) autoRetryInfrastructureTx(ctx context.Context, tx *sql.Tx, source model.Run, observation *model.RunTerminalObservation, now int64) (model.Run, error) {
+	if !model.IsInfrastructureRunFailure(source.Status, source.Phase, source.FailedStep) || pushretry.PublicationFailure(source.Error) || source.FailedStage != "" || source.RefKind != model.RefBranch || source.Release || source.AutoRetryOf != "" || source.AutoRetriedBy != "" || source.SupersededBy != "" || (source.Trigger != "branch" && source.Trigger != "push" && source.Trigger != "schedule" && source.Trigger != "manual") {
 		return source, nil
+	}
+	if observation != nil {
+		for _, step := range observation.Steps {
+			if step.Status == model.StepFailed || step.Status == model.StepTimedOut {
+				return source, nil
+			}
+		}
 	}
 	if err := requireRepositoryActive(ctx, tx, source.RepoID); err != nil {
 		if errors.Is(err, ErrRepositoryArchived) {
@@ -63,9 +78,10 @@ func (s *Store) autoRetryPreStepTx(ctx context.Context, tx *sql.Tx, source model
     NOT EXISTS(SELECT 1 FROM runs WHERE repo_id=? AND ref_kind=? AND ref=? AND schedule_entry=? AND queue_sequence>?)
     AND NOT EXISTS(SELECT 1 FROM runs WHERE repo_id=? AND ref_kind=? AND ref=? AND schedule_entry=? AND status IN ('queued','running'))
   ))
-  AND NOT EXISTS(SELECT 1 FROM step_results WHERE run_id=? AND (started_at IS NOT NULL OR finished_at IS NOT NULL OR status NOT IN ('pending','queued')))
+  AND NOT EXISTS(SELECT 1 FROM step_results WHERE run_id=? AND status IN ('failed','timed_out'))
+  AND NOT EXISTS(SELECT 1 FROM vm_executions WHERE run_id=? AND cleaned=0)
   AND NOT EXISTS(SELECT 1 FROM publications WHERE run_id=?)
-  AND NOT EXISTS(SELECT 1 FROM run_cancellations WHERE run_id=? AND completed_at IS NULL)`, source.PriorityProtected, source.RepoID, source.RefKind, source.Ref, source.ScheduleEntry, source.QueueSequence, source.RepoID, source.RefKind, source.Ref, source.ScheduleEntry, source.ID, source.ID, source.ID).Scan(&eligible)
+  AND NOT EXISTS(SELECT 1 FROM run_cancellations WHERE run_id=? AND completed_at IS NULL)`, source.PriorityProtected, source.RepoID, source.RefKind, source.Ref, source.ScheduleEntry, source.QueueSequence, source.RepoID, source.RefKind, source.Ref, source.ScheduleEntry, source.ID, source.ID, source.ID, source.ID).Scan(&eligible)
 	if err != nil {
 		return source, fmt.Errorf("check automatic infrastructure retry: %w", err)
 	}
@@ -76,12 +92,9 @@ func (s *Store) autoRetryPreStepTx(ctx context.Context, tx *sql.Tx, source model
 	if err != nil {
 		return source, err
 	}
-	// Protected recovery retains only its own queue place. The inherited
-	// sequence also fences enqueue's supersession away from every sibling.
-	var inheritedSequence int64
-	if source.PriorityProtected {
-		inheritedSequence = source.AdmissionSequence
-	}
+	// Every automatic retry retains its source's admission position. The
+	// inherited sequence fences supersession away from all other queued work.
+	inheritedSequence := source.AdmissionSequence
 	next, err := s.enqueueRunTx(ctx, tx, model.RunSpec{RepoID: source.RepoID, RefKind: source.RefKind, Ref: source.Ref, SHA: source.SHA, Actor: source.Actor, Trigger: source.Trigger, ScheduleEntry: source.ScheduleEntry, TestedSHA: source.TestedSHA, BaseSHA: source.BaseSHA}, id, now, inheritedSequence)
 	if err != nil {
 		return source, fmt.Errorf("enqueue automatic infrastructure retry: %w", err)
@@ -97,7 +110,7 @@ func (s *Store) autoRetryPreStepTx(ctx context.Context, tx *sql.Tx, source model
 	if err = s.inheritAutoRetryTx(ctx, tx, source, &next.Run); err != nil {
 		return source, err
 	}
-	details, err := json.Marshal(map[string]any{"source_run_id": source.ID, "run_id": next.ID, "reason": "infra error, retried", "automatic": true, "attempt": 1, "sha": source.SHA, "ref": source.Ref})
+	details, err := json.Marshal(map[string]any{"source_run_id": source.ID, "run_id": next.ID, "reason": next.Reason, "failure_reason": source.Error, "admission_sequence": source.AdmissionSequence, "priority": next.Priority, "automatic": true, "attempt": 1, "sha": source.SHA, "ref": source.Ref})
 	if err != nil {
 		return source, err
 	}
@@ -105,4 +118,16 @@ func (s *Store) autoRetryPreStepTx(ctx context.Context, tx *sql.Tx, source model
 		return source, err
 	}
 	return source, nil
+}
+
+// Keep old receipts readable while the human reason now includes the cause.
+func automaticRetryOrigin(reason string) string {
+	reason = strings.TrimPrefix(strings.TrimSuffix(reason, "; "+PolicyRefreshWaitingReason), RestartRequeueReason+"; ")
+	for _, prefix := range []string{autoRetryOfPrefix, legacyAutoRetryOfPrefix} {
+		if rest, ok := strings.CutPrefix(reason, prefix); ok {
+			id, _, _ := strings.Cut(rest, autoRetryCauseSeparator)
+			return id
+		}
+	}
+	return ""
 }

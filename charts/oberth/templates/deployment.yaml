@@ -198,6 +198,11 @@ spec:
             */}}
             - "--runner-image-prefixes={{ join "," .Values.runnerImagePrefixes }}"
             - --max-concurrent-jobs={{ .Values.maxConcurrentJobs }}
+            {{- $autoRetryInfrastructure := true }}
+            {{- if hasKey .Values "autoRetryInfrastructure" }}
+            {{- $autoRetryInfrastructure = .Values.autoRetryInfrastructure }}
+            {{- end }}
+            - --auto-retry-infrastructure={{ $autoRetryInfrastructure }}
             {{- if $runtimeCapacity.enabled }}
             - --max-concurrent-jobs-file=/etc/oberth/runtime-capacity/max-concurrent-jobs
             {{- end }}

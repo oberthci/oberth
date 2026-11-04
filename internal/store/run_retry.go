@@ -49,7 +49,7 @@ func (s *Store) RetryRun(ctx context.Context, request model.RunRetryRequest) (mo
 		return model.EnqueueRunResult{}, fmt.Errorf("%w: upstream publication failed; use publish_retry without repeating CI", ErrInvalidState)
 	}
 	eligibleStatus := previous.Status == model.RunInterrupted ||
-		(previous.Status == model.RunFailed && (previous.Phase == "infrastructure" || previous.Phase == "job") && previous.FailedStep == "")
+		model.IsInfrastructureRunFailure(previous.Status, previous.Phase, previous.FailedStep)
 	if !eligibleStatus || (previous.RefKind != model.RefBranch && previous.RefKind != model.RefTag) ||
 		previous.Trigger == "promotion" || previous.Trigger == "plan" || previous.Trigger == "apply" {
 		return model.EnqueueRunResult{}, fmt.Errorf("%w: retry requires an interrupted or infrastructure-failed run without a failed step", ErrInvalidState)

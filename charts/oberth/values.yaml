@@ -36,6 +36,9 @@ uplinkTokens:
 
 replicaCount: 1
 maxConcurrentJobs: 3
+# One fresh attempt for eligible infrastructure failures; retains queue position.
+# The automatic retry budget is fixed at one and cannot be increased.
+autoRetryInfrastructure: true
 
 # Opt-in platform priority. Creates release/namespace-specific PriorityClasses
 # and assigns only the Oberth pod template. Argo and OpenBao

@@ -97,6 +97,11 @@
         }
       }
     },
+    "autoRetryInfrastructure": {
+      "type": "boolean",
+      "default": true,
+      "description": "Automatically retry eligible infrastructure failures once, retaining queue position and priority. Maximum attempts is fixed at one retry."
+    },
     "maxConcurrentJobs": {
       "type": "integer",
       "minimum": 1,
