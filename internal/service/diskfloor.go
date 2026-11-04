@@ -29,6 +29,12 @@ type diskFloorCheck struct {
 	cacheTTL   time.Duration
 }
 
+// newDiskFloorCheck builds an opt-in hold for the filesystem containing path.
+// A nonpositive floor disables the check.
+func newDiskFloorCheck(path string, floorBytes int64) *diskFloorCheck {
+	return &diskFloorCheck{path: path, floorBytes: floorBytes, cacheTTL: 5 * time.Second}
+}
+
 // freeAboveFloor reports whether the filesystem has enough free bytes.
 // Returns true when the check is disabled (floorBytes == 0).
 func (d *diskFloorCheck) freeAboveFloor() bool {

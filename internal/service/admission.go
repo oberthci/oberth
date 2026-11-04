@@ -603,6 +603,13 @@ func (gate *weightedAdmission) spareWeightForClaim(unparked int) bool {
 // hard "one L at a time" rule instead pinned every L-declaring repository to a
 // single run no matter what the operator configured.
 func (gate *weightedAdmission) canGrantLocked(reservation *admissionReservation) bool {
+	// Disk floor hold (#673): when enabled and the filesystem is below the
+	// configured floor, hold all new admissions until disk frees up. The
+	// check uses a cached statfs result (sub-microsecond syscall, 5 s TTL)
+	// so calling it under the lock is safe.
+	if gate.diskFloor != nil && !gate.diskFloor.freeAboveFloor() {
+		return false
+	}
 	if gate.workflowOnly {
 		return gate.maxRuns <= 0 || gate.runs < gate.maxRuns
 	}
@@ -610,13 +617,6 @@ func (gate *weightedAdmission) canGrantLocked(reservation *admissionReservation)
 		return false
 	}
 	if gate.resources.IORuns > 0 && gate.runs >= gate.resources.IORuns {
-		return false
-	}
-	// Disk floor hold (#673): when enabled and the filesystem is below the
-	// configured floor, hold all new admissions until disk frees up. The
-	// check uses a cached statfs result (sub-microsecond syscall, 5 s TTL)
-	// so calling it under the lock is safe.
-	if gate.diskFloor != nil && !gate.diskFloor.freeAboveFloor() {
 		return false
 	}
 	// A whole-budget XL grant stays exclusive even if capacity is raised.

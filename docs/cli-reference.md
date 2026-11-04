@@ -1022,7 +1022,7 @@ Usage of serve:
   -admission-cpu-millis int
         deprecated compatibility option; ignored by workflow admission (default 8000)
   -admission-disk-floor-bytes int
-        storage retention floor in bytes; ignored by workflow admission
+        when enabled and free bytes on /data are below this floor, admission is held until disk frees up (#673)
   -admission-extended-resources string
         deprecated compatibility option; ignored by workflow admission (default "{}")
   -admission-io-runs int

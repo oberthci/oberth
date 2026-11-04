@@ -670,7 +670,8 @@ func TestRetentionBusyIsSkippedAndRetriedWithoutEvidenceSweep(t *testing.T) {
 }
 
 // The historical floor remains observable even when evidence policies are
-// disabled. It is not a purge target or a workflow-admission capacity gate.
+// disabled. The sweeper reports the floor; admission enforces the hold without
+// turning it into an evidence-purge target.
 func TestRetentionReportsDiskFloorWithEvidencePoliciesDisabled(t *testing.T) {
 	f := newRetentionFixture(t)
 	run := f.run(t, "feature/floor", "push", true)

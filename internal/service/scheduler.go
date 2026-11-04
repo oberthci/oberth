@@ -63,7 +63,7 @@ type SchedulerConfig struct {
 	StalledRunTimeout time.Duration
 	// SizeWeights is deprecated and ignored. Kubernetes places pods by their requests.
 	SizeWeights SizeWeights
-	// AdmissionDiskFloorBytes is deprecated and ignored by workflow admission.
+	// AdmissionDiskFloorBytes is an opt-in free-space admission floor on the data root (#673).
 	AdmissionDiskFloorBytes int64
 	AdmissionPressure       AdmissionPressureConfig
 }
@@ -209,6 +209,9 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 	scheduler.admission.maxRuns = config.MaxConcurrent
 	scheduler.admission.capacityConfig = model.AdmissionCapacityConfig{MaxConcurrentJobs: config.MaxConcurrent, BootDefault: config.MaxConcurrent, Source: "boot", File: config.MaxConcurrentFile}
 	scheduler.admission.pressure = newPressureCheck(config.AdmissionPressure)
+	if config.AdmissionDiskFloorBytes > 0 {
+		scheduler.admission.diskFloor = newDiskFloorCheck(workspaceRoot, config.AdmissionDiskFloorBytes)
+	}
 	scheduler.admission.onPark = scheduler.signalQueue
 	scheduler.admission.onGrant = scheduler.signalQueue
 	return scheduler, nil

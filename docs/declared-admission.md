@@ -18,9 +18,9 @@ profile-bound executor resources. These limits still require live qualification.
 The existing PSI hard-limit valve can hold new workflow grants under host CPU or
 IO pressure. Hard pressure cannot be bypassed by release/tag priority, an idle
 host, or a starvation timer. Disabling the configurable PSI valve leaves the
-administrator's workflow ceiling in control of admission. PSI availability is
-reported through the existing observation fields; unavailable PSI retains the
-existing fail-open behavior.
+administrator's workflow ceiling and any configured disk-space floor in control
+of admission. PSI availability is reported through the existing observation
+fields; unavailable PSI retains the existing fail-open behavior.
 
 Credential authorization, source validation, repository concurrency groups,
 per-container security grants, and dedicated VM authorization/cleanup remain
@@ -29,8 +29,8 @@ separate safeguards. They do not form a global CPU/memory packing budget.
 ## Upgrade note
 
 Existing installs can retain their current chart values and server arguments
-while upgrading. The following values are accepted for compatibility but no
-longer affect workflow admission:
+while upgrading. The following settings remain accepted; their upgrade behavior
+is listed below:
 
 | Existing setting | Upgrade behavior |
 | --- | --- |
@@ -44,7 +44,7 @@ longer affect workflow admission:
 | `--disable-declared-admission` | Does not refuse workflows with declarations. |
 | `--admission-io-runs` | Use the single workflow ceiling instead. |
 | `--admission-max-head-wait` | Resource drain/backfill forecasts are removed. There is no resource-size head to drain for. |
-| `--admission-disk-floor-bytes` | No additional admission capacity knob; normal bounded storage and write-failure handling remain. |
+| `--admission-disk-floor-bytes`, `admission.diskFloorBytes` | Retained opt-in admission hold on the data root: new workflows wait while free bytes are below the floor. Already-granted runs continue. This protects server storage; it is not a Pod capacity budget. |
 | PSI soft thresholds, observation mode, max wait/defer settings | The enabled serving valve enforces only its configurable hard CPU/IO thresholds; no soft-pressure drain, settling delay, or starvation grant. |
 
 The corresponding historical `admission.declaredResources` and size-weight chart
@@ -60,8 +60,9 @@ workflows using the earlier uniform 2 CPU/2Gi default policy. Recovery
 counts existing and uncertain workflows against the workflow ceiling until
 ownership-checked cleanup is accepted or absence is confirmed.
 
-The existing reason line reports the administrator ceiling, host pressure, or
-recognized Kubernetes scheduling reasons such as `Insufficient cpu` and
+The existing reason line reports the administrator ceiling, `waiting for disk
+space`, host pressure, or recognized Kubernetes scheduling reasons such as
+`Insufficient cpu` and
 `Insufficient memory`. Arbitrary event text is withheld. No new run statuses or
 UI layouts are introduced.
 
