@@ -6,10 +6,10 @@
   "controller_source_sha256": "97d059a8ffed7854760fa8c109f657a4d6be0e2496ed193ee1dd541118b8f763",
   "files_sha256": {
     "generate_test.go.txt": "bd66cdf049500723e210de8ebec46f21dd32a031a0fbd07aff377a318a0aaf73",
-    "vmi-before-patch.json": "30914a7d9b3c51ee6e5c8433afa8cdc611935bbadaa981ae8cbba4e181886d60",
-    "vmi-workflow.json": "f9d4751d411279cec7e0f5b481ccc3f33f1b62a7878e1e6421b756bc55c9c5af",
+    "vmi-before-patch.json": "69e06da51721b1c665439fd51743ebd493e23ff4a5d7bcbb25758be306aa8844",
+    "vmi-workflow.json": "0359c3d3e243fd85ec88b60ea6feeb54713d7853ad3f580fe4326febf9a05ad2",
     "capture_test.go.txt": "6befd88419c6208165b4449feee1c5bba4b6144c243d0b1e2155cb8a9b676065",
-    "vmi-submitted.json": "5eed10aebfbdb16e654a8b2d17cdcb2b2bbb30536c89009c8829ad5404a6466f",
+    "vmi-submitted.json": "77fbdcffd1c69d488429f5cc8c8ad6f45ecc4014775976e58ebbfb247b23798e",
     "capture-hook.go.txt": "4cb2988575ac294ad6cb5e5f45c8455927b551f31888964adbd69afca8eb3127",
     "capture-call.go.txt": "4cb2988575ac294ad6cb5e5f45c8455927b551f31888964adbd69afca8eb3127"
   },
@@ -18,6 +18,6 @@
   "Sum": "h1:qa2GNFSihNtvI/v9/dgwq84E1mrfbVb8eTXB6YMxMlY=",
   "GoModSum": "h1:WLJnjr1uNM+6dhpVdnJArvSq90FJ3bdRgHEsHVR00wM=",
   "instrumented_sha256": "e94c816c3116278d8b6c363568ab3922aed0a178e6afcd83d6fd0a3270b0e8d4",
-  "recaptured_with": "2026-11-03 Oberth candidate; authenticated upstream Argo v4.0.8 with retained capture helpers; all 27 submitted Pods pass retained Kubernetes v1.35.7 ValidatePodCreate; no live cluster",
+  "recaptured_with": "2026-11-04 executor helper limits raised to 500m/512Mi on release candidate; authenticated upstream Argo v4.0.8 with retained capture helpers; all 27 submitted Pods pass retained Kubernetes v1.35.7 ValidatePodCreate; no live cluster",
   "source_sha256": "97d059a8ffed7854760fa8c109f657a4d6be0e2496ed193ee1dd541118b8f763"
 }

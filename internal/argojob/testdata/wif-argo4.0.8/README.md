@@ -95,8 +95,14 @@ passed the retained Kubernetes validator. Isolation inputs now explicitly declar
 256Mi so the measured-leaf architecture and inherited pool checks still exercise
 wrapped Pods. No expected Pod was assembled or edited by hand.
 
-Oberth candidate (2026-11-03) recaptured current Build outputs
-with explicit executor helper resources and the replay token waiter. The authenticated v4.0.8 controller ran
-its real operation with retained fake-client helpers and capture-only hooks.
-All 27 submitted Pods passed the retained Kubernetes v1.35.7 validator.
-No expected Pod was edited manually and no live cluster was used.
+Oberth helper limits (2026-11-04) recaptured current Build outputs with
+500m/512Mi limits on unpinned executor helpers. The authenticated Argo v4.0.8
+controller ran its real operation with retained fake-client helpers and
+capture-only hooks. All 27 submitted Pods passed the retained Kubernetes
+v1.35.7 validator. No expected Pod was edited manually and no live cluster
+was used.
+
+Named nonroot profiles retain their captured executor resources and token-waiter
+identity. The default 50m/64Mi requests and 500m/512Mi limits apply only to
+unpinned helpers; changing a pinned profile requires a profile revision, fresh
+controller observations and deployment qualification.

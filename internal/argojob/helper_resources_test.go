@@ -20,6 +20,11 @@ func assertBoundedControlContainer(t *testing.T, container corev1.Container) {
 	if container.Resources.Limits.Cpu().MilliValue() > 4000 || container.Resources.Limits.Memory().Value() > 8<<30 {
 		t.Errorf("helper %s exceeds the container ceiling", container.Name)
 	}
+	// Init stages inputs, wait archives outputs, and the seed container runs
+	// checkout extraction. A small idle footprint cannot justify a lower cap.
+	if container.Resources.Limits.Cpu().MilliValue() < 500 || container.Resources.Limits.Memory().Value() < 512<<20 {
+		t.Errorf("helper %s needs at least 500m CPU and 512Mi memory for input/output processing", container.Name)
+	}
 }
 
 func TestInjectedControlBudgetsCoverUnpinnedExecutorContainers(t *testing.T) {

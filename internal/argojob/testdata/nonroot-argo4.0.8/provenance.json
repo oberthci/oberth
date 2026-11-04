@@ -8,18 +8,18 @@
   "capture_boundary": "immediately before var podSpecPatchs / processPodSpecPatch",
   "instrumented_sha256": "e94c816c3116278d8b6c363568ab3922aed0a178e6afcd83d6fd0a3270b0e8d4",
   "files": {
-    "container-before-patch.json": "96e3adaf19876484b7eed3d232fa9bc6906f41fe10285642304d8b258142742c",
-    "container-submitted.json": "6491b5e7c367698ce599dbcfdd1ed4259ed6151bf211eb7e12c3a1a745d7725c",
-    "script-before-patch.json": "12681ce966366602589d9eb0ec15336b1107df4481a9c34e93b2c2e3892894a6",
-    "script-submitted.json": "39a06f33bac28b36f267d61bbf3b6db08ec683ade6dfc0941ab8424dbdc4051a",
+    "container-before-patch.json": "4568726facfa3ca0e6d8f564bad971fcee2b45dd0cb0ca3000812a3fe21feb71",
+    "container-submitted.json": "067f5435f971ceb8e22b8747b8b5f581cdd3865ccd8515281f7ae2850e246a79",
+    "script-before-patch.json": "3902aae86d43e1fe66ca00dc4eaabc7cdb5cb781debc7a94ac1abf3e83473d12",
+    "script-submitted.json": "a6cbae142476c0232980d557a8b55fc264f1b4504c63fef2f9a1e088e973f32b",
     "controller-profile.json": "7ca0f2aff6cf39e67aa5996672363a3a7a8401449a794f32d5cf375e7267a4c0",
-    "container-persisted-workflow.json": "979d7e475770c5141206374a2cff78ee44ed4bf703eb19f51aa014be80d5095c",
-    "script-persisted-workflow.json": "3d4ba20cbc568b5532433c77e3c982f9cd548647dcf4d9ad7890ff16d26725a0",
+    "container-persisted-workflow.json": "9a5cafd300097ee87b784b8d99b0fdb60a20207ac46b387a526e11c047e6e2a0",
+    "script-persisted-workflow.json": "44e76398f9576b43fadbdd8ec8da09a276a0e7b619d0e87a17324e9da1b4103b",
     "capture_test.go.txt": "2f75e2e64c0bbe5de567b8cec9bf31601cf62fcb8dfde6a92a5650d8f5f0cf22",
     "capture-hook.go.txt": "4cb2988575ac294ad6cb5e5f45c8455927b551f31888964adbd69afca8eb3127",
     "capture-call.go.txt": "4cb2988575ac294ad6cb5e5f45c8455927b551f31888964adbd69afca8eb3127"
   },
   "stage": "Before processPodSpecPatch, workflow/controller/workflowpod.go:405; observed submitted Pod after main emissary/volume rewriting at417-456.",
   "controller_profile": "nonroot-static-v1; exact executor digest and gloglevel0; raw before-Pods include separate hostile SC control. Persisted Workflows use supported profile and actual operate-to-Running fake API reconciliation.",
-  "recaptured_with": "2026-11-03 Oberth candidate; authenticated upstream Argo v4.0.8 with retained capture helpers; all 27 submitted Pods pass retained Kubernetes v1.35.7 ValidatePodCreate; no live cluster"
+  "recaptured_with": "2026-11-04 executor helper limits raised to 500m/512Mi on release candidate; authenticated upstream Argo v4.0.8 with retained capture helpers; all 27 submitted Pods pass retained Kubernetes v1.35.7 ValidatePodCreate; no live cluster"
 }

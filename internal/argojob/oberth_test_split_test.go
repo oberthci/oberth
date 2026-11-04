@@ -212,7 +212,7 @@ func TestOberthSplitStagesUseTheRaceGroupLauncher(t *testing.T) {
 				continue
 			}
 			found = true
-			if seconds, measured := map[string]int32{"store": 3300, "service": 2940, "rest": 3300}[group]; measured {
+			if seconds, measured := map[string]int32{"store": 3960, "service": 2940, "rest": 3300}[group]; measured {
 				if template.ActiveDeadlineSeconds == nil || template.ActiveDeadlineSeconds.IntVal != seconds {
 					t.Fatalf("%s step deadline = %v, want %d seconds", group, template.ActiveDeadlineSeconds, seconds)
 				}
