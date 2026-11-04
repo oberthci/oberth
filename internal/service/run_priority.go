@@ -223,11 +223,14 @@ func (scheduler *Scheduler) priorityDispatchAvailable(ctx context.Context, activ
 	if !ok {
 		return false, nil
 	}
-	// Normal dispatch can already reach the weight budget plus parked claims.
-	// Priority adds only the two classes above standard; low work adds no slot.
+	// Ordinary dispatch can fill its allowance with low group waiters. Each
+	// higher class needs an extra claim: standard, promotion, then high. Count
+	// all three transitions so parked lower classes cannot exhaust high's path.
+	// This bounds claims/checkouts only; the gate still enforces maxRuns.
 	gate := scheduler.admission
 	gate.mu.Lock()
-	ceiling := gate.capacity + scheduler.concurrentJobsLocked() + 2
+	extraClasses := model.PriorityHigh.Rank() - model.PriorityLow.Rank()
+	ceiling := gate.capacity + scheduler.concurrentJobsLocked() + extraClasses
 	hasWaiters := len(gate.waiters) > 0
 	gate.mu.Unlock()
 	if active >= ceiling || !hasWaiters {

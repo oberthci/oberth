@@ -13,8 +13,11 @@ Both durable claims and in-memory admission order `high > promotion > standard
 > low`, then the original admission sequence and queue sequence. Running or
 already granted work is never preempted. Priority does not bypass admission
 holds, PSI/pressure, resource ceilings, concurrency groups, cleanup or publication
-guards. Bounded dispatch lookahead retains its existing claim ceiling; it exposes
-higher-priority waiting work without creating additional execution capacity.
+guards. Priority dispatch lookahead has a finite ceiling of gate capacity plus
+max-concurrent jobs plus three claims, covering standard, promotion and high
+overtaking low work. Parked lower classes cannot consume high's extra path.
+This bounds claims/checkouts without increasing execution capacity or group
+limits; ordinary dispatch's existing hold/parking rules still apply.
 
 An ordinary promotion receives `promotion`, never automatic `high`. The oldest
 waiting server-classified tag/release per repository also receives `promotion`
