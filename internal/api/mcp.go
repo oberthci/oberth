@@ -312,6 +312,11 @@ type PromotionGrantListResponse struct {
 	Grants []map[string]any `json:"grants"`
 }
 
+// ConcurrencyGroupsResponse keeps the read-only group list an MCP object.
+type ConcurrencyGroupsResponse struct {
+	Groups []model.AdmissionGroup `json:"groups"`
+}
+
 // IssueDeleteResponse acknowledges a successful deletion without a null result.
 type IssueDeleteResponse struct {
 	ID      int64 `json:"id"`

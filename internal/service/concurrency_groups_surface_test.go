@@ -25,7 +25,8 @@ func TestConcurrencyGroupsReadOnlySurfaceIncludesIdleDefinitions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	groups, ok := value.([]model.AdmissionGroup)
+	response, ok := value.(api.ConcurrencyGroupsResponse)
+	groups := response.Groups
 	if !ok || len(groups) != 1 || groups[0].Name != "state" || groups[0].Limit != 2 || len(groups[0].Holders) != 0 {
 		t.Fatalf("unexpected groups %#v", value)
 	}

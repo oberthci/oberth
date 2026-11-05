@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -10,6 +11,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 )
 
@@ -58,17 +60,17 @@ func runAdmission(ctx context.Context, arguments []string, output io.Writer) err
 		if err != nil {
 			return err
 		}
+		response, err := decodeAdmissionGroups(raw)
+		if err != nil {
+			return err
+		}
 		if asJSON {
 			_, err = fmt.Fprintf(output, "%s\n", strings.TrimSpace(string(raw)))
 			return err
 		}
-		var values []model.AdmissionGroup
-		if err = json.Unmarshal(raw, &values); err != nil {
-			return err
-		}
 		table := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
 		_, _ = fmt.Fprintln(table, "GROUP\tLIMIT\tHOLDERS\tWAITERS")
-		for _, g := range values {
+		for _, g := range response.Groups {
 			_, _ = fmt.Fprintf(table, "%s\t%d\t%s\t%s\n", g.Name, g.Limit, dash(strings.Join(g.Holders, ", ")), dash(strings.Join(g.Waiting, ", ")))
 		}
 		return table.Flush()
@@ -117,6 +119,27 @@ func runAdmission(ctx context.Context, arguments []string, output io.Writer) err
 		return err
 	}
 	return renderAdmission(output, status.Admission, time.Now())
+}
+
+func decodeAdmissionGroups(raw []byte) (api.ConcurrencyGroupsResponse, error) {
+	var response api.ConcurrencyGroupsResponse
+	groups := bytes.TrimSpace(raw)
+	// Retain the CLI's existing text-array compatibility for older responses,
+	// without changing MCP's object-only result validation.
+	if len(groups) == 0 || groups[0] != '[' {
+		var envelope map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &envelope); err != nil {
+			return response, fmt.Errorf("invalid concurrency_groups response: %w", err)
+		}
+		groups = bytes.TrimSpace(envelope["groups"])
+	}
+	if len(groups) == 0 || groups[0] != '[' {
+		return response, fmt.Errorf("invalid concurrency_groups response: groups must be an array")
+	}
+	if err := json.Unmarshal(groups, &response.Groups); err != nil {
+		return response, fmt.Errorf("invalid concurrency_groups response: %w", err)
+	}
+	return response, nil
 }
 
 func renderAdmission(output io.Writer, state *model.AdmissionState, now time.Time) error {
