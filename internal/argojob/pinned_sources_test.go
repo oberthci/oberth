@@ -11,9 +11,10 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
-	corev1 "k8s.io/api/core/v1"
 )
 
 func TestPinnedSourcesBuildRequiresServerBindingAndReadonlyMount(t *testing.T) {

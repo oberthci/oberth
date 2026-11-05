@@ -67,3 +67,17 @@ func TestPinnedSourcesRejectMalformedDeclarations(t *testing.T) {
 		})
 	}
 }
+
+func TestPinnedSourcesAnnotationRejectsAmbiguousJSON(t *testing.T) {
+	good := `[{"repository":"forge/acme/producer","commit":"` + strings.Repeat("a", 40) + `","path":"/work/sources/producer"}]`
+	for _, key := range []string{"repository", "commit", "path"} {
+		t.Run(key, func(t *testing.T) {
+			body := strings.Replace(good, `"`+key+`":`, `"`+key+`":"ignored","`+key+`":`, 1)
+			workflow := map[string]any{"apiVersion": "argoproj.io/v1alpha1", "kind": "Workflow", "metadata": map[string]any{"annotations": map[string]string{SourcesAnnotation: body}}, "spec": map[string]any{}}
+			raw, _ := json.Marshal(workflow)
+			if _, err := Decode(raw); err == nil {
+				t.Fatal("duplicate annotation key accepted")
+			}
+		})
+	}
+}

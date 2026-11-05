@@ -413,13 +413,6 @@ func (*workflowSpecMismatch) AmbiguousCreate() bool      { return true }
 func (*workflowSpecMismatch) WorkflowSpecMismatch() bool { return true }
 
 func sameSubmission(existing, intended *wfv1.Workflow) error {
-	sources, err := argoworkflow.PinnedSources(intended)
-	if err != nil {
-		return err
-	}
-	if err := verifyDeliveredPinnedSources(existing, sources); err != nil {
-		return err
-	}
 	// Establish the complete submission identity before classifying a mismatch
 	// as ours to clean up. A foreign run/source never enters cancellation.
 	existingRun, existingIdentity, ok := WorkflowMeta(existing)
@@ -432,6 +425,13 @@ func sameSubmission(existing, intended *wfv1.Workflow) error {
 	}
 	if existingIdentity != intendedIdentity {
 		return fmt.Errorf("argojob: Workflow %s exists with a different spec than this run's source produces", intended.Name)
+	}
+	sources, err := argoworkflow.PinnedSources(intended)
+	if err != nil {
+		return err
+	}
+	if err := verifyDeliveredPinnedSources(existing, sources); err != nil {
+		return &workflowSpecMismatch{}
 	}
 	if binding := intended.Annotations[trustedKVMAnnotation]; binding != "" {
 		if existing.Annotations[trustedKVMAnnotation] != binding || !apiequality.Semantic.DeepEqual(existing.Spec, intended.Spec) {

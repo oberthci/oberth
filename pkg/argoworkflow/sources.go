@@ -1,14 +1,14 @@
 package argoworkflow
 
 import (
-	"bytes"
-	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"regexp"
 	"strings"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	strictjson "sigs.k8s.io/json"
+
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
@@ -52,13 +52,12 @@ func ValidatePinnedSources(sources []PinnedSource) error {
 
 func decodePinnedSources(body []byte) ([]PinnedSource, error) {
 	var sources []PinnedSource
-	d := json.NewDecoder(bytes.NewReader(body))
-	d.DisallowUnknownFields()
-	if err := d.Decode(&sources); err != nil {
+	strict, err := strictjson.UnmarshalStrict(body, &sources, strictjson.DisallowDuplicateFields, strictjson.DisallowUnknownFields)
+	if err != nil {
 		return nil, fmt.Errorf("argoworkflow: decode sources: %w", err)
 	}
-	if err := d.Decode(new(any)); err != io.EOF {
-		return nil, fmt.Errorf("argoworkflow: trailing sources data")
+	if len(strict) != 0 {
+		return nil, fmt.Errorf("argoworkflow: ambiguous sources: %w", errors.Join(strict...))
 	}
 	if err := ValidatePinnedSources(sources); err != nil {
 		return nil, err

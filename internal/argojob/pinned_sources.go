@@ -3,14 +3,16 @@ package argojob
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"path"
 	"slices"
 	"strings"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
-	corev1 "k8s.io/api/core/v1"
 )
 
 type PinnedSourceTree struct {
@@ -112,37 +114,55 @@ func verifyDeliveredPinnedSources(workflow *wfv1.Workflow, expected []pipeline.P
 	if !claimOK {
 		return errors.New("argojob: live pinned source claim mismatch")
 	}
+	// Volume names are aliases: resolve each template's effective volume scope
+	// against the actual server-owned claim, including defaults and inline nodes.
+	claimsFor := func(parent map[string]bool, volumes []corev1.Volume) map[string]bool {
+		claims := maps.Clone(parent)
+		for _, volume := range volumes {
+			claims[volume.Name] = volume.PersistentVolumeClaim != nil && volume.PersistentVolumeClaim.ClaimName == sourceClaimName(workflow.Name)
+		}
+		return claims
+	}
+	claims := claimsFor(map[string]bool{}, workflow.Spec.Volumes)
+	if workflow.Spec.TemplateDefaults != nil {
+		claims = claimsFor(claims, workflow.Spec.TemplateDefaults.Volumes)
+	}
 	var bad bool
 	// Defaults and container-set common mounts are not server source mounts.
 	// They must not introduce an alias or shadow outside member containers.
-	checkExtra := func(m corev1.VolumeMount) {
+	checkExtra := func(m corev1.VolumeMount, claims map[string]bool) {
 		for _, source := range expected {
 			a := path.Clean(m.MountPath)
-			if a == "/" || a == source.Path || strings.HasPrefix(a, source.Path+"/") || strings.HasPrefix(source.Path, a+"/") || (m.Name == SourceVolumeName && !m.ReadOnly) {
+			if a == "/" || a == source.Path || strings.HasPrefix(a, source.Path+"/") || strings.HasPrefix(source.Path, a+"/") || (claims[m.Name] && !m.ReadOnly) {
 				bad = true
 			}
 		}
 	}
-	if workflow.Spec.TemplateDefaults != nil {
-		templateContainers(workflow.Spec.TemplateDefaults, func(c *corev1.Container) {
-			for _, m := range c.VolumeMounts {
-				checkExtra(m)
-			}
-		})
-		if workflow.Spec.TemplateDefaults.ContainerSet != nil {
-			for _, m := range workflow.Spec.TemplateDefaults.ContainerSet.VolumeMounts {
-				checkExtra(m)
+	checkDefaults := func(claims map[string]bool) {
+		if workflow.Spec.TemplateDefaults != nil {
+			templateContainers(workflow.Spec.TemplateDefaults, func(c *corev1.Container) {
+				for _, m := range c.VolumeMounts {
+					checkExtra(m, claims)
+				}
+			})
+			if workflow.Spec.TemplateDefaults.ContainerSet != nil {
+				for _, m := range workflow.Spec.TemplateDefaults.ContainerSet.VolumeMounts {
+					checkExtra(m, claims)
+				}
 			}
 		}
 	}
-	var inspect func(*wfv1.Template, int)
-	inspect = func(template *wfv1.Template, depth int) {
+	checkDefaults(claims)
+	var inspect func(*wfv1.Template, int, map[string]bool)
+	inspect = func(template *wfv1.Template, depth int, inherited map[string]bool) {
 		if template == nil || depth > argoworkflow.MaxIdentityWalkDepth {
 			return
 		}
+		claims := claimsFor(inherited, template.Volumes)
+		checkDefaults(claims)
 		if template.ContainerSet != nil {
 			for _, m := range template.ContainerSet.VolumeMounts {
-				checkExtra(m)
+				checkExtra(m, claims)
 			}
 		}
 		templateContainers(template, func(c *corev1.Container) {
@@ -151,14 +171,14 @@ func verifyDeliveredPinnedSources(workflow *wfv1.Workflow, expected []pipeline.P
 				for _, m := range c.VolumeMounts {
 					if m.MountPath == source.Path {
 						count++
-						if m.Name != SourceVolumeName || !m.ReadOnly || m.SubPath != fmt.Sprintf("pinned-sources/%d", i) || m.SubPathExpr != "" {
+						if m.Name != SourceVolumeName || !claims[m.Name] || !m.ReadOnly || m.SubPath != fmt.Sprintf("pinned-sources/%d", i) || m.SubPathExpr != "" {
 							bad = true
 						}
 					}
 					if m.MountPath != source.Path && (path.Clean(m.MountPath) == "/" || strings.HasPrefix(path.Clean(m.MountPath), source.Path+"/") || strings.HasPrefix(source.Path, path.Clean(m.MountPath)+"/")) {
 						bad = true
 					}
-					if m.Name == SourceVolumeName && m.MountPath != source.Path && (m.SubPathExpr != "" || m.SubPath == "" || m.SubPath == "." || path.Clean(m.SubPath) != m.SubPath || m.SubPath == "pinned-sources" || strings.HasPrefix(m.SubPath, "pinned-sources/")) && !m.ReadOnly {
+					if claims[m.Name] && m.MountPath != source.Path && (m.SubPathExpr != "" || m.SubPath == "" || m.SubPath == "." || path.Clean(m.SubPath) != m.SubPath || m.SubPath == "pinned-sources" || strings.HasPrefix(m.SubPath, "pinned-sources/")) && !m.ReadOnly {
 						bad = true
 					}
 				}
@@ -169,17 +189,17 @@ func verifyDeliveredPinnedSources(workflow *wfv1.Workflow, expected []pipeline.P
 		})
 		for _, g := range template.Steps {
 			for _, s := range g.Steps {
-				inspect(s.Inline, depth+1)
+				inspect(s.Inline, depth+1, claims)
 			}
 		}
 		if template.DAG != nil {
 			for _, task := range template.DAG.Tasks {
-				inspect(task.Inline, depth+1)
+				inspect(task.Inline, depth+1, claims)
 			}
 		}
 	}
 	for i := range workflow.Spec.Templates {
-		inspect(&workflow.Spec.Templates[i], 0)
+		inspect(&workflow.Spec.Templates[i], 0, claims)
 	}
 	if bad {
 		return errors.New("argojob: live pinned source mount is missing, writable or shadowed")
