@@ -79,8 +79,8 @@ retention:
 promotion:
   grantMaxLifetime: "24h"
 
-# Workflow admission keeps only a concurrent-workflow ceiling and the PSI
-# hard-limit valve. Kubernetes schedules each step pod by its requests.
+# Workflow admission keeps a concurrent-workflow ceiling, the PSI hard-limit
+# valve and the disk floor. Kubernetes schedules each step pod by its requests.
 # See docs/declared-admission.md for upgrade behavior and ignored legacy values.
 admission:
   runtimeCapacity:
@@ -91,7 +91,8 @@ admission:
     enabled: true
     hardCpu: 50
     hardIo: 40
-  # Storage retention policy; this no longer gates workflow admission.
+  # Hold new workflow admission below this free-space floor; existing grants
+  # continue. Zero disables the disk floor.
   diskFloorBytes: 0
   # Deprecated compatibility values: retained for upgrades, ignored by admission.
   declaredResources:
