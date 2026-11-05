@@ -263,48 +263,52 @@ func TestImmutableCacheDoesNotBypassRepositoryMapping(t *testing.T) {
 }
 
 func TestImmutableCacheFullBuildGateDoesNotBlockWarmReads(t *testing.T) {
-	g := newArtifactGit()
-	h := artifactHandler(t, g, t.TempDir())
-	if r := artifactRequest(h, ".zip"); r.Code != http.StatusOK {
-		t.Fatal(r.Body)
-	}
-	// Occupy both cold-build slots; cache hits must not join their queue.
-	h.artifacts.builds <- struct{}{}
-	h.artifacts.builds <- struct{}{}
-	defer func() { <-h.artifacts.builds; <-h.artifacts.builds }()
-	g.down.Store(true)
-	if r := artifactRequest(h, ".zip"); r.Code != http.StatusOK || g.calls.Load() != 4 {
-		t.Fatalf("warm hit queued behind cold builds: status=%d calls=%d", r.Code, g.calls.Load())
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
-	defer cancel()
-	var called atomic.Bool
-	_, err := h.artifacts.get(ctx, "other/repository", artifactModule, "v1.0.0", "", 40*time.Millisecond, func(context.Context) (string, map[string][]byte, error) {
-		called.Store(true)
-		return "", nil, nil
+	synctest.Test(t, func(t *testing.T) {
+		// Keep filesystem and scheduler latency out of the fixture clock; only
+		// the queued miss should consume its cancellation and fill deadlines.
+		g := newArtifactGit()
+		h := artifactHandler(t, g, t.TempDir())
+		if r := artifactRequest(h, ".zip"); r.Code != http.StatusOK {
+			t.Fatal(r.Body)
+		}
+		// Occupy both cold-build slots; cache hits must not join their queue.
+		h.artifacts.builds <- struct{}{}
+		h.artifacts.builds <- struct{}{}
+		defer func() { <-h.artifacts.builds; <-h.artifacts.builds }()
+		g.down.Store(true)
+		if r := artifactRequest(h, ".zip"); r.Code != http.StatusOK || g.calls.Load() != 4 {
+			t.Fatalf("warm hit queued behind cold builds: status=%d calls=%d", r.Code, g.calls.Load())
+		}
+		ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+		defer cancel()
+		var called atomic.Bool
+		_, err := h.artifacts.get(ctx, "other/repository", artifactModule, "v1.0.0", "", 40*time.Millisecond, func(context.Context) (string, map[string][]byte, error) {
+			called.Store(true)
+			return "", nil, nil
+		})
+		var failure *proxyBuildError
+		if called.Load() || !errors.As(err, &failure) || failure.status != http.StatusServiceUnavailable {
+			t.Fatalf("canceled queued miss generated work: %v", err)
+		}
+		// Shared work outlives its canceled waiter, but its own deadline releases it.
+		deadline := time.After(time.Second)
+		for {
+			h.artifacts.mu.Lock()
+			remaining := len(h.artifacts.flights)
+			h.artifacts.mu.Unlock()
+			if remaining == 0 {
+				break
+			}
+			select {
+			case <-deadline:
+				t.Fatal("queued shared fill leaked")
+			case <-time.After(time.Millisecond):
+			}
+		}
+		if called.Load() {
+			t.Fatal("expired queued fill called backend")
+		}
 	})
-	var failure *proxyBuildError
-	if called.Load() || !errors.As(err, &failure) || failure.status != http.StatusServiceUnavailable {
-		t.Fatalf("canceled queued miss generated work: %v", err)
-	}
-	// Shared work outlives its canceled waiter, but its own deadline releases it.
-	deadline := time.After(time.Second)
-	for {
-		h.artifacts.mu.Lock()
-		remaining := len(h.artifacts.flights)
-		h.artifacts.mu.Unlock()
-		if remaining == 0 {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatal("queued shared fill leaked")
-		case <-time.After(time.Millisecond):
-		}
-	}
-	if called.Load() {
-		t.Fatal("expired queued fill called backend")
-	}
 }
 
 func TestImmutablePublicationCannotReplaceCommittedBytes(t *testing.T) {
