@@ -10,6 +10,7 @@ func TestExecutionUpgradePreservesInFlightWorkForRecovery(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			ctx := t.Context()
 			path := filepath.Join(t.TempDir(), "upgrade.sqlite")
+			copyCurrentSchemaFixture(t, path)
 			s, err := OpenAdminClient(ctx, path, Options{})
 			if err != nil {
 				t.Fatal(err)
@@ -76,6 +77,7 @@ func TestExecutionUpgradePreservesInFlightWorkForRecovery(t *testing.T) {
 func TestExecutionUpgradeAllowsDrainedGrantsAndLaterRecovery(t *testing.T) {
 	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "upgrade.sqlite")
+	copyCurrentSchemaFixture(t, path)
 	s, err := OpenAdminClient(ctx, path, Options{})
 	if err != nil {
 		t.Fatal(err)

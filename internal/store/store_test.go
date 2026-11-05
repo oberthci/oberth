@@ -30,6 +30,14 @@ var storeTemplate testdb.Template
 func testStore(t *testing.T, now *time.Time) *Store {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "oberth.db")
+	copyCurrentSchemaFixture(t, path)
+	return openTestStore(t, path, now)
+}
+
+// Existing pristine template reused only for independent setup. Openers below
+// still validate each private copy; fresh-schema tests do not use this helper.
+func copyCurrentSchemaFixture(t *testing.T, path string) {
+	t.Helper()
 	storeTemplate.Copy(t, path, func(path string) error {
 		s, err := CreateGenesis(context.Background(), path, Options{})
 		if err != nil {
@@ -37,7 +45,6 @@ func testStore(t *testing.T, now *time.Time) *Store {
 		}
 		return s.Close()
 	})
-	return openTestStore(t, path, now)
 }
 
 func openTestStore(t *testing.T, path string, now *time.Time) *Store {
