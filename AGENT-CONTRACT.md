@@ -470,20 +470,12 @@ controller/admission fixtures confer no managed-cluster authority. See
   absent and runs simply start cold.
 - The server reads YAML statically at submission -- it never executes
   repository code in the server process.
-- Two Workflow-level annotations are scheduler declarations, read statically
-  from the run's own immutable document (`build.yaml` for branch and promotion
-  runs, `release.yaml` for tags) before resource admission.
-  `oberth.ci/size: S|M|L|XL` (absent selects `M`) selects the admission
-  weight. The operator sets the weights with `admission.sizeWeights` (server
-  flag `--admission-size-weights S=1,M=2,L=3,XL=0`, the default); the budget
-  is `maxConcurrentJobs` × the M weight. XL `0` means the whole budget: an XL
-  run is admitted only once nothing else holds weight and then runs alone. A
-  positive XL is an ordinary weight (clamped to the budget), so an XL run is
-  admitted beside whatever fits, still behind the XL size grant. Weights are
-  validated at chart render and server start: each at least 1 (0 only for
-  XL), S ≤ M ≤ L ≤ XL; sizes left unset keep their defaults. The queue-head
-  message names a finite XL by weight ("XL · 11w") and a whole-budget XL as
-  "needs a full drain". S packing uses the configured S and M weights.
+- Serving admission bounds concurrent workflows. Kubernetes places step Pods by
+  their requests. Historical `oberth.ci/size`, `oberth.ci/size-by-trigger`, size
+  weights, declared host CPU/memory budgets and memory headroom settings remain
+  compatibility inputs; they do not reserve serving capacity. Explicit requests
+  and limits remain in git. Missing requests use the documented per-container
+  defaults. See [workflow admission](docs/declared-admission.md).
 - Execution priority has four canonical classes: `low < standard < promotion < high`.
   Ordinary builds default to standard. Server-classified promotions and the oldest
   eligible waiting tag/release per repository use promotion, as do admin RC globs.
@@ -496,7 +488,7 @@ controller/admission fixtures confer no managed-cluster authority. See
   pins its class. `run_priority {run_id, priority, reason}` sets any waiting class,
   including lowering high to promotion/standard/low; it cannot preempt admitted work.
   Audit records retain actor, prior/selected class and reason. Admission FIFO,
-  pressure/resource/group/hold checks, measured backfill and bounded dispatch
+  pressure, per-container resource, group and hold checks, and bounded dispatch
   capacity remain. Local changes refresh waiters immediately; polling is 15s.
   Tag eligibility still honors oldest-waiter, exact-checkout size and size-revoke
   rules; losing an automatic boost retains authorized explicit fallback, otherwise
@@ -517,57 +509,12 @@ controller/admission fixtures confer no managed-cluster authority. See
   MCP accepts deprecated normal/highest input aliases for current clients.
   No run status or layout changes. See [release-priority.md](docs/release-priority.md)
   for the exact compatibility, resource and fairness rules.
-- Bounded backfill (#1085): when the queue head (the first claimed,
-  prepared, unparked run) does not fit, later runs that fit the spare weight
-  are admitted beside it, marked `backfilled`, until the head has waited
-  `admission.maxHeadWait` (flag `--admission-max-head-wait`, default `20m`;
-  `0` is strict FIFO). A run whose repository's recent history (median of
-  the last 20 passed runs of the same class, at least 3; the classes are
-  release/tag, promotion, schedule and branch, so a release is never
-  estimated from branch CI) predicts it would end after that bound is not
-  backfilled; a run without history is backfilled only before the bound. The
-  median is advisory: it narrows which runs are backfilled, and a backfilled
-  run that overruns it still delays the head by its actual duration. Once the bound has passed nothing more is
-  backfilled and the budget drains for the head, so it starts within
-  `maxHeadWait` plus the longest admitted backfill, whatever stream of small
-  runs keeps arriving. While the head's window is open the dispatch loop may
-  claim past its ceiling into spare weight (room for at least one S run) as
-  long as every waiting claim is the head or a candidate already passed over
-  and none is still preparing, bounded by the budget's M-run count, the run
-  ceiling, the budget and the disk floor; backfill chooses among claimed
-  runs only. The head's wait origin is
-  recorded per commit (`admission_head_waits`, repository, ref kind, ref and
-  SHA) so a run requeued under a new ID after a restart keeps its clock; it
-  is cleared when the head is granted or its run is abandoned, and rows
-  older than 24 h are swept on read and hourly (a promotion or tag head that
-  dies without passing through the gate leaves one). Nothing is recorded
-  while backfill is disabled. The head reports `head_since`,
-  `head_wait_seconds`, `max_head_wait_seconds` and `backfilling` or
-  `draining`; messages say "head waiting 7m/20m, backfilling" or "draining for
-  head", and the `admission` view adds `max_head_wait_seconds` and each
-  reservation's `backfilled`.
-  A head blocked by declared CPU/memory drains immediately: later backfill
-  cannot spend its missing numeric capacity. Admission state and queue messages
-  report reserved CPU and memory against the configured budgets, including
-  legacy weights' equivalent shares; scoped views omit shared usage. Head-wait
-  persistence coalesces by commit, retains clears across a full wake channel,
-  and logs/retries failed writes. Priority overrides park their reservation
-  during persistence, release the admission mutex for SQLite, then re-evaluate
-  grants immediately.
-  `oberth.ci/size-by-trigger: "branch=M,promotion=XL,schedule=XL"` sets the
-  weight per run trigger: comma-separated `trigger=size` pairs, triggers
-  `branch`, `promotion`, `schedule` (build.yaml) and `tag` (release.yaml),
-  sizes `S|M|L|XL`, surrounding whitespace ignored. A trigger it does not
-  name falls back to `oberth.ci/size`, then `M`. The trigger is the durable
-  run's own (`release` ⇒ `tag`; trigger column `promotion` or `schedule`;
-  `branch`, legacy `push` or empty ⇒ `branch`; any other trigger, such as
-  the Go-path `plan`/`apply`, is refused), never the document's or a caller's.
-  An unknown trigger or size, a duplicate, a malformed entry, or a trigger
-  the document never runs for (`tag` in build.yaml, any other in
-  release.yaml) fails `oberth validate` and server admission (phase
-  `infrastructure`, before a Workflow exists).
-  A server that predates the annotation ignores it and uses `oberth.ci/size`,
-  so a document keeps `oberth.ci/size` as its conservative fallback.
+- Waiting admission uses workflow slots, the enabled PSI hard-limit valve and
+  the configured data-root disk floor. There is no measured backfill, resource
+  head reservation, drain forecast or starvation bypass of hard pressure.
+  Historical head-wait records remain evidence and are not rewritten to explain
+  current queue waits. Priority changes retain the existing audited transaction
+  and admission mutex boundary. Current queue reasons identify the real blocker.
 - A named scheduled run durably records its resolved schedule entry in
   `runs.schedule_entry` (v31). Cron and manual
   schedule triggers share that identity. Retry, rerun,
@@ -588,50 +535,22 @@ controller/admission fixtures confer no managed-cluster authority. See
   retain their busy-repository guard unless forced. Run list/detail expose
   `ScheduleEntry`; status/wait expose
   `schedule_entry`. See [scheduled runs](docs/scheduled-runs.md).
-- Legacy undeclared XL takes an audited admin size grant (#1021). A branch, promotion or
-  schedule run whose resolved size (including its trusted preflight's)
-  exceeds its repository's maximum fails before it takes any weight (phase
-  `infrastructure`, before a Workflow exists), with the grant command in its
-  error; other repositories' runs are never held behind it. Without a grant
-  the maximum is `L`. `oberth size grant <repo> --max L|XL` / `size revoke` /
-  `size get` (in-pod CLI) and MCP `size_grant` / `size_revoke` /
-  `size_grant_get` manage it, stored by repository ID (`size_grants`, v26)
-  and audited as `size.grant` / `size.revoke`. The XL size grant applies to
-  branch, promotion and schedule runs; tag/release runs are the credentialed
-  tier and are not gated: they keep their reviewed release.yaml size, XL
-  included, without a grant. Automatic queue urgency is limited to the size
-  maximum; oversized tags use normal order and bounded backfill. Size audits
-  also record `automatic_tag_priority_enabled` and its previous value.
-- Declared admission honors workflow-wide pod parallelism and steps/DAG
-  template parallelism at each invocation boundary, including inherited limits,
-  inline templates and bounded item/parameter/sequence loops. Template limits
-  cap child invocations; nested children retain their full inner pod envelope.
-  A leaf's limit never serializes its callers. Unknown dynamic inner fan-out
-  needs its own limit or a workflow bound; otherwise declared admission refuses it.
-  CPU requests, memory bounds, executor allowances are retained.
-  `resource_message` reports the effective concurrency and fixed explanations
-  for conservative bounds, without changing status reasons. The sealed demand
-  and explanations survive creation recovery, adoption and timing history;
-  old reservations/history are not recalculated. See
-  [declared admission](docs/declared-admission.md).
-- Ordinary workflows declaring CPU/memory requests never fall back to size
-  classes. Partial requests,
-  missing effective memory limits and demand above the host budget (including
-  helper/headroom reserves) fail before submission. The declared-admission kill
-  switch refuses new declared work; sealed existing reservations remain held.
-  Undeclared legacy work retains sizes and a deprecation warning in
-  `resource_message`. Host IO-pressure, disk floor and run ceilings still apply.
+- Size grants/revocations remain historical and automatic tag-priority policy;
+  they no longer gate workflow execution or make XL exclusive. Automatic tag
+  priority still uses its existing eligibility checks and never supplies high
+  urgency. Kubernetes decides Pod placement, with operator-owned namespace
+  quotas bounding resources created through generic workflow capabilities.
+- Workflow graph analysis and declared Pod demand remain available for validation,
+  provenance and diagnostic metadata. They do not create a serving CPU/memory
+  packing budget. Existing demand receipts remain evidence; read paths do not
+  recompute historical records from newer git declarations.
 - Numeric per-container resource ceilings are administered independently using
   `oberth resource grant/get/revoke` or `resource_grant`, `resource_grant_get`,
   `resource_revoke`. Grants contain separate requests/limits quantity maps.
-  Limits-only workflows retain deprecated size admission until requests are
-  declared in git. Trusted contract runs retain the larger main/preflight size
-  reservation and existing size authorization policy until both declared demands
-  can be charged.
   Migration v49 copies historical size-grant ceilings and provenance, including
-  revocations; later size changes affect only legacy admission and priority.
-  Every fresh submission and release preflight reads and enforces the numeric
-  ceiling; lookup failure refuses submission. No workflow values are changed.
+  revocations; later size changes do not overwrite a numeric resource grant.
+  Every fresh submission and release preflight enforces that ceiling; lookup
+  failure refuses submission. Resource history never rewrites authored values.
 - The server-owned workflow parameter `oberth-trigger`
   (`branch|promotion|schedule|tag`, the same durable run trigger) is set on
   every document that declares or mentions it, so `when:` guards can skip
@@ -1295,7 +1214,7 @@ controller/admission fixtures confer no managed-cluster authority. See
   spent in MCP long-poll); underlying controller state can lag reality.
 - Scheduling queue position is one-based effective priority then FIFO order among all durable
   queued runs, not an ETA or execution order: publication-gated refs can be
-  bypassed. Admission position is separately one-based among live weighted
+  bypassed. Admission position is separately one-based among live workflow
   reservations, with `preparing`, `waiting`, and `admitted` states. Missing
   reservations or Workflows never imply a cause or a scheduler failure. A
   grouped reservation adds optional `group`; while it waits on its group it
@@ -1359,7 +1278,7 @@ controller/admission fixtures confer no managed-cluster authority. See
   but unadmitted runs, has one numbering computed before repository/ref filters.
   Each queued run carries its scheduling reason; filtered lists keep global positions;
   scoped uplinks see no global position (#073). `started_at` is recorded when
-  weighted admission is granted.
+  workflow admission is granted.
   Workflow submission preserves the admission time. `view=history` retains its
   terminal-only sequence paging; `view=active` remains an unpaged, bounded
   deprecated compatibility view. Repository/ref filters and uplink scope apply
@@ -1375,7 +1294,7 @@ controller/admission fixtures confer no managed-cluster authority. See
   subsequent reads; ambiguous prefixes use the existing run ambiguity error.
   Detailed status/run reads can also expose an ephemeral Argo deadline and
   finalization-lag observation after steps have progressed. The clock is the
-  submitted budget plus Argo's Workflow start, not weighted admission. Only
+  submitted budget plus Argo's Workflow start, not workflow admission. Only
   explicit controller/current-attempt Pod deadline evidence puts
   `Execution deadline exceeded.` in `display_reason` (the run stays `running`
   until the store finalizes it, then `failed`); elapsed time or exit 143
@@ -3296,23 +3215,15 @@ explicit dry-run/help also succeed.
 Existing Workflow adoption and publication ownership rules
 are unchanged. See [restart handover](docs/restart-handover.md).
 
-**Host PSI admission:** `serve`/Helm default to `mode=observe`: PSI samples
-and threshold-exceeded state are visible but do not withhold grants. Explicit
-`mode=enforce` defers new grants at Linux IO `full avg60 >= 30`, resuming strictly
-below 20 (10 point hysteresis). Existing deployments needing enforcement must
-persist that mode explicitly; unqualified thresholds must not stall a fresh
-upgrade. Capacity/disk/ownership gates remain independent. CPU
-`some avg60` is independently configurable and disabled by default; memory is
-observed only. The pressure gate runs after existing grant eligibility and stops
-the grant pass while held. All prepared, unparked waiters start independent 20m pressure clocks; expiry bypasses only
-pressure, preserving release/tag priority, groups, weights/XL, disk floor and
-backfill drain rules. Existing/adopted work is never stopped. Invalid or missing
-PSI fails open with one warning per outage and later recovery; both zero thresholds
-disable reads. `/api/status`, scheduling reasons, dashboard and fixed-label
-metrics expose cached observations only. Non-admin/MCP run reasons preserve the
-non-numeric host-pressure cause; scoped status omits host PSI numbers. Helm
-rejects invalid threshold/hysteresis pairs and zero enabled maxDefer. See
-[configuration and semantics](docs/io-pressure-admission.md).
+**Host PSI admission:** the configurable serving valve uses hard CPU and IO
+`some avg10` thresholds (defaults 50% and 40%) with independent latches and
+recovery strictly below each threshold minus ten percentage points. Priority,
+release/tag status, idle state and starvation timers cannot bypass hard pressure.
+Historical observe/enforce, avg60 and max-defer settings remain accepted and are
+ignored by serving admission. Existing/adopted work continues. Missing or invalid
+PSI retains the established fail-open behavior and reports its absence; the
+workflow ceiling and configured disk floor still apply. Qualify the host scope
+and actual thresholds separately. See [host pressure](docs/io-pressure-admission.md).
 
 A currently observed nonzero init-container termination always refuses restart-cut
 classification, including when main is still Waiting/PodInitializing. This guard
