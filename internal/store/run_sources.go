@@ -14,7 +14,7 @@ func (s *Store) RecordRunSources(ctx context.Context, id, sha string, sources []
 		return fmt.Errorf("%w: source binding", ErrInvalid)
 	}
 	if err := argoworkflow.ValidatePinnedSources(sources); err != nil {
-		return fmt.Errorf("%w: source binding: %v", ErrInvalid, err)
+		return fmt.Errorf("%w: source binding: %w", ErrInvalid, err)
 	}
 	body, err := json.Marshal(sources)
 	if err != nil {
