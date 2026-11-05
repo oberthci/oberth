@@ -26,14 +26,33 @@ func TestRunListMessageContract(t *testing.T) {
 		{"publishing", model.Run{Status: model.RunRunning, StartedAt: &now, Phase: "publishing"}, "publishing to upstream"},
 		{"passed", model.Run{Status: model.RunPassed}, ""},
 		{"schedule", model.Run{Status: model.RunPassed, Trigger: "schedule", ScheduleEntry: "nightly"}, "schedule nightly"},
-		{"failed", model.Run{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit-tests", Error: "unit-tests: Workflow failed"}, "test/unit-tests failed"},
+		{"failed", model.Run{Status: model.RunFailed, Phase: "test", FailedStage: "test", FailedStep: "unit-tests", Error: "unit-tests: Workflow failed"}, "unit-tests failed"},
+
+		{"same stage and step", model.Run{Status: model.RunFailed, FailedStage: "contract-guard", FailedStep: "contract-guard"}, "contract-guard failed"},
+		{"release leaf", model.Run{Status: model.RunFailed, FailedStage: "release", FailedStep: "release-index"}, "release-index failed"},
+		{"stage only", model.Run{Status: model.RunFailed, FailedStage: "test"}, "test failed"},
+		{"no identity", model.Run{Status: model.RunFailed}, "failed"},
+		{"historical OOM", model.Run{Status: model.RunFailed, FailedStage: "test", FailedStep: "unit-tests", FailureCause: "test/unit-tests failed · OOM (limit 2 GiB)"}, "unit-tests failed · OOM (limit 2 GiB)"},
+		{"historical stage only", model.Run{Status: model.RunFailed, FailedStage: "test", FailureCause: "test/ failed · OOM"}, "test failed · OOM"},
+		{"historical no identity", model.Run{Status: model.RunFailed, FailureCause: "/ failed · deadline"}, "failed · deadline"},
+		{"long leaf", model.Run{Status: model.RunFailed, FailedStage: "test", FailedStep: strings.Repeat("界", 80)}, strings.Repeat("界", 59) + "…"},
+		{"historical deadline", model.Run{Status: model.RunFailed, FailedStage: "test", FailedStep: "e2e", FailureCause: "test/e2e failed · deadline 20m"}, "e2e failed · deadline 20m"},
+		{"unstructured path", model.Run{Status: model.RunFailed, FailedStage: "test", FailedStep: "unit-tests", FailureCause: "cannot read /test/unit-tests/file"}, "cannot read /test/unit-tests/file"},
+		{"foreign identity", model.Run{Status: model.RunFailed, FailedStage: "test", FailedStep: "unit-tests", FailureCause: "other/unit-tests failed · OOM"}, "other/unit-tests failed · OOM"},
+		{"arbitrary suffix", model.Run{Status: model.RunFailed, FailedStage: "test", FailedStep: "unit-tests", FailureCause: "test/unit-tests failed opening /path"}, "test/unit-tests failed opening /path"},
+		{"clipped historical prefix", model.Run{Status: model.RunFailed, FailedStage: strings.Repeat("界", 65), FailedStep: "leaf", FailureCause: displayFailureText(strings.Repeat("界", 65) + "/leaf failed · OOM")}, "leaf failed"},
 		{"infrastructure", model.Run{Status: model.RunFailed, Phase: "infrastructure", Error: "controller unavailable"}, "infrastructure error: controller unavailable"},
 		{"cancelled", model.Run{Status: model.RunInterrupted, Phase: model.PhaseCancelled, Reason: "cancelled by owner: no longer needed"}, "by owner: no longer needed"},
 		{"superseded", model.Run{Status: model.RunInterrupted, SupersededBy: "successor", Reason: "superseded by newer run"}, "superseded by newer run"},
 		{"infra-retried", model.Run{Status: model.RunFailed, AutoRetriedBy: "abcdef0123456789"}, "retried as abcdef012345"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := presentationRunAt(tc.run, now).DisplayReason; got != tc.want {
+			before := tc.run
+			shown := presentationRunAt(tc.run, now)
+			if shown.FailedStage != before.FailedStage || shown.FailedStep != before.FailedStep || shown.FailureCause != before.FailureCause || shown.Error != before.Error {
+				t.Fatal("presentation changed retained failure identity or evidence")
+			}
+			if got := shown.DisplayReason; got != tc.want {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})

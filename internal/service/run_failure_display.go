@@ -20,7 +20,7 @@ func displayFailureText(message string) string {
 
 func failedRunDisplayReason(run model.Run) string {
 	if run.FailureCause != "" {
-		return run.FailureCause
+		return listFailureCause(run)
 	}
 	if run.Phase == "publishing" || pushretry.PublicationFailure(run.Error) {
 		lower := strings.ToLower(run.Error)
@@ -32,10 +32,10 @@ func failedRunDisplayReason(run model.Run) string {
 		return "upstream publication failed"
 	}
 	step := run.FailedStep
+	if step == "" {
+		step = run.FailedStage
+	}
 	if step != "" {
-		if run.FailedStage != "" {
-			step = run.FailedStage + "/" + step
-		}
 		reason := step + " failed"
 		if model.IsResourceFailureMessage(run.Error) && strings.HasPrefix(run.Error, "OOM kill at ") {
 			return reason + " · OOM"
@@ -53,10 +53,38 @@ func failedRunDisplayReason(run model.Run) string {
 	}
 	phase := strings.TrimSpace(run.Phase)
 	if phase == "" {
+		if run.Error == "" {
+			return "failed"
+		}
 		phase = "infrastructure"
 	}
 	if run.Error == "" {
 		return phase + " error"
 	}
 	return phase + " error: " + run.Error
+}
+
+// Persisted structured causes retain their full stage/step identity. Project
+// only an exact identity-bound prefix into the list, including historical runs;
+// arbitrary error text and paths are not parsed or rewritten.
+func listFailureCause(run model.Run) string {
+	cause := run.FailureCause
+	prefix := run.FailedStage + "/" + run.FailedStep + " failed"
+	step := run.FailedStep
+	if step == "" {
+		step = run.FailedStage
+	}
+	leaf := "failed"
+	if step != "" {
+		leaf = step + " failed"
+	}
+	if cause == displayFailureText(prefix) {
+		return leaf
+	}
+	if suffix, ok := strings.CutPrefix(cause, prefix); ok {
+		if suffix == " · OOM" || strings.HasPrefix(suffix, " · OOM (limit ") || suffix == " · deadline" || strings.HasPrefix(suffix, " · deadline ") {
+			return leaf + suffix
+		}
+	}
+	return cause
 }

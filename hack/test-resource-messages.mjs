@@ -26,5 +26,5 @@ console.log('Resource advice remains detail-only.');
 context.row={...base,Status:'queued',StartedAt:null,display_reason:'next in line',Reason:'full operator provenance'};
 assert.ok(evaluate(`summaryLines({Run:row,Steps:[],Scheduling:{message:'full scheduling observation'}})`).includes('[scheduling] full scheduling observation'));
 assert.ok(evaluate(`summaryLines({Run:row,Steps:[]})`).includes('reason: full operator provenance'));
-context.row={...base,Status:'failed',display_reason:'test/unit-tests failed',Error:'full unabridged controller evidence'};
+context.row={...base,Status:'failed',display_reason:'unit-tests failed',Error:'full unabridged controller evidence'};
 assert.ok(evaluate(`summaryLines({Run:row,Steps:[]})`).includes('error: full unabridged controller evidence'));
