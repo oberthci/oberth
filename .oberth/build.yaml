@@ -1662,7 +1662,7 @@ spec:
   #   oberth.Cmd("helm-contract", "./hack/test-chart.sh"))
   #   ...).After("lint")
   - name: chart
-    activeDeadlineSeconds: 65 # remeasure: observed 43s pod span x1.5, rounded up
+    activeDeadlineSeconds: 99 # remeasure: deadline-censored 66s whole Pod span x1.5
     automountServiceAccountToken: false
     metadata:
       annotations:
