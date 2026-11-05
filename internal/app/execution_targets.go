@@ -142,7 +142,7 @@ func (r *executionTargets) forRequest(ctx context.Context, request service.Workf
 	var selected *ExecutionTarget
 	for _, definition := range r.definitions {
 		expected, _, ref, _, _, _, _ := definition.Config.ExecutionPlacement.Identity()
-		if repo == expected && request.Run.Ref == ref {
+		if request.Run.RefKind == model.RefBranch && repo == expected && request.Run.Ref == ref {
 			copy := definition
 			selected = &copy
 		}
