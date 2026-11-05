@@ -51,8 +51,8 @@ metadata:
     oberth.ci/secret-paths: oberth/data/release/cosign-secret,oberth/data/release/homebrew-tap-key,oberth/data/release/cloudflare-oberth-workers-token
 spec:
   entrypoint: release
-  # Bound repository-local fan-out; keep node CPU available to other workflows.
-  parallelism: 2
+  # Bound repository-local fan-out to three Pods; native resource trial required.
+  parallelism: 3
   activeDeadlineSeconds: 14400
   volumeClaimTemplates:
   - metadata:

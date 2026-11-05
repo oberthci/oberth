@@ -66,8 +66,8 @@ metadata:
     oberth.ci/nonroot-templates: test-static-git-runtime
 spec:
   entrypoint: ci
-  # Bound repository-local fan-out; keep node CPU available to other workflows.
-  parallelism: 2
+  # Bound repository-local fan-out to three Pods; native resource trial required.
+  parallelism: 3
   # Keep the enlarged race step budgets inside the overall CI deadline.
   activeDeadlineSeconds: 7200
 
@@ -1083,7 +1083,7 @@ spec:
   # The package-union contract covers new packages.
   # All groups keep the race detector and uncached execution.
   # Whole-group watchdogs retain measured 1.5x wall-time headroom.
-  # Give each group a bounded two-CPU lane; workflow parallelism remains two.
+  # Give each group a bounded two-CPU lane; workflow parallelism bounds the group overlap to three Pods.
   - name: deadcode
     automountServiceAccountToken: false
     container:
@@ -1149,7 +1149,7 @@ spec:
   # The package-union contract covers new packages.
   # All groups keep the race detector and uncached execution.
   # Whole-group watchdogs retain measured 1.5x wall-time headroom.
-  # Give each group a bounded two-CPU lane; workflow parallelism remains two.
+  # Give each group a bounded two-CPU lane; workflow parallelism bounds the group overlap to three Pods.
   - name: test-store
     automountServiceAccountToken: false
     # Maximum observed race duration times 1.5, rounded up to minutes.

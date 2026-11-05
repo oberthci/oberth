@@ -1,6 +1,7 @@
 package argojob
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -14,8 +15,8 @@ func TestOberthWorkflowCapacityAndSecurityOrdering(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if workflow.Spec.Parallelism == nil || *workflow.Spec.Parallelism != 2 {
-				t.Fatal("the repository workflow must bound its own Pod fan-out to two")
+			if workflow.Spec.Parallelism == nil || *workflow.Spec.Parallelism != 3 {
+				t.Fatal("the repository workflow must bound its own Pod fan-out to three")
 			}
 			var requests []int64
 			for _, template := range workflow.Spec.Templates {
@@ -63,19 +64,16 @@ func TestOberthWorkflowCapacityAndSecurityOrdering(t *testing.T) {
 					}
 				}
 			}
-			// This bounds only the declared main-container pair. Argo wait/init
+			// This bounds only the declared main-container trio. Argo wait/init
 			// containers and Pod overhead are excluded; it is not a whole-Pod
 			// request or a guarantee of free node CPU for other workflows.
-			var largest, second int64
-			for _, request := range requests {
-				if request >= largest {
-					second, largest = largest, request
-				} else if request > second {
-					second = request
-				}
+			slices.Sort(requests)
+			var total int64
+			for _, request := range requests[max(0, len(requests)-3):] {
+				total += request
 			}
-			if largest == 0 || largest+second > 8000 {
-				t.Fatalf("main-container pair requests %dm CPU; exceeds the reviewed 8000m bound", largest+second)
+			if total == 0 || total > 8000 {
+				t.Fatalf("main-container trio requests %dm CPU; exceeds the retained 8000m bound", total)
 			}
 		})
 	}
