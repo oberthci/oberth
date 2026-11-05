@@ -278,6 +278,9 @@ func fragmentTemplates(key FragmentKey, fragment Fragment) ([]wfv1.Template, err
 	if err != nil {
 		return nil, fmt.Errorf("argoworkflow: fragment %s: %w", key, err)
 	}
+	if sources, err := PinnedSources(document); err != nil || len(sources) > 0 {
+		return nil, fmt.Errorf("argoworkflow: fragment %s must declare pinned sources in the consuming workflow", key)
+	}
 	if len(document.Spec.Templates) == 0 {
 		return nil, fmt.Errorf("argoworkflow: fragment %s defines no templates", key)
 	}

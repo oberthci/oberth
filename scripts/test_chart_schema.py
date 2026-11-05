@@ -14,6 +14,26 @@ SAMPLER = {'enabled': True, 'interval': '15s',
 
 
 class ArgoSchemaTests(unittest.TestCase):
+    def test_pinned_source_policy_is_explicit_and_typed(self):
+        baseline = self.render({})
+        self.assertEqual(baseline.returncode, 0, baseline.stderr)
+        self.assertIn('--source-allowlist={}', baseline.stdout)
+        with tempfile.TemporaryDirectory() as directory:
+            values = Path(directory) / 'sources.json'
+            policy = {'forge/acme/consumer': ['forge/acme/producer']}
+            values.write_text(json.dumps({'sourceAccess': policy}))
+            result = self.render({}, '-f', str(values))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            # Helm quotes the complete JSON argument, with no implicit pairs.
+            self.assertIn(json.dumps('--source-allowlist=' + json.dumps(policy, separators=(',', ':'))), result.stdout)
+            for invalid in ([], {'consumer': ['forge/acme/producer']},
+                            {'forge/acme/consumer': 'forge/acme/producer'},
+                            {'forge/acme/consumer': ['https://example.com/repo']},
+                            {'forge/acme/consumer': ['forge/acme/producer'] * 65}):
+                with self.subTest(invalid=invalid):
+                    values.write_text(json.dumps({'sourceAccess': invalid}))
+                    self.assert_schema_refuses({}, '-f', str(values))
+
     def test_retired_secret_settings_are_optional_and_inert(self):
         baseline = self.render({})
         self.assertEqual(baseline.returncode, 0, baseline.stderr)

@@ -580,6 +580,8 @@ func vaultAddressRequiresPinnedAnchor(address string) bool {
 
 // Request is one run's submission intent.
 type Request struct {
+	PinnedSources []PinnedSourceTree
+
 	// BranchAuthority is native canonical policy resolution, never YAML authority.
 	BranchAuthority *vmrunner.BranchAuthority `json:"-"`
 	Capability      *argoworkflow.Capability
@@ -721,6 +723,9 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 		return nil, err
 	}
 	workflow := resolved.Workflow()
+	if err := validatePinnedSourceDelivery(workflow, request); err != nil {
+		return nil, err
+	}
 	if config.ExecutionPlacement != nil {
 		if err := validatePlacementSource(workflow); err != nil {
 			return nil, err
@@ -1702,6 +1707,9 @@ func injectServerVolumes(workflow *wfv1.Workflow, config Config, request Request
 			SubPath:   request.SourceVolume.SubPath,
 			ReadOnly:  true,
 		})
+		for i, tree := range request.PinnedSources {
+			mounts = append(mounts, corev1.VolumeMount{Name: SourceVolumeName, MountPath: tree.Source.Path, SubPath: fmt.Sprintf("pinned-sources/%d", i), ReadOnly: true})
+		}
 		if request.artifactsDelivered() {
 			mounts = append(mounts, corev1.VolumeMount{
 				Name:      SourceVolumeName,

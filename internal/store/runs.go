@@ -20,7 +20,7 @@ const runColumns = `
 queue_sequence, COALESCE(admission_sequence, queue_sequence), id, repo_id, ref_kind, ref, sha, actor, release, credentialed, trigger,
 phase, job_name, tested_sha, base_sha, failed_burn, failed_step, error,
 status, reason, superseded_by, queued_at, started_at, finished_at, created_at, updated_at,
-concurrency_group, concurrency_limit, schedule_entry, issue_trailers, failure_cause, ` + basePrioritySQL + `, ` + priorityReasonSQL + `,
+concurrency_group, concurrency_limit, schedule_entry, issue_trailers, source_bindings, failure_cause, ` + basePrioritySQL + `, ` + priorityReasonSQL + `,
 COALESCE(` + currentOverridePrioritySQL + `,''), COALESCE((SELECT reason FROM run_priority_overrides WHERE run_id=id),''),
 COALESCE(` + currentRequestedPrioritySQL + `,''), COALESCE(` + currentRequestedPriorityReasonSQL + `,''),
 COALESCE((SELECT actor FROM run_priority_overrides WHERE run_id=id),(SELECT actor FROM run_priority_requests WHERE run_id=id),''), COALESCE((SELECT refusal FROM run_priority_requests WHERE run_id=id),''), NOT (` + supersessionEligibleSQL + `)`
@@ -1383,7 +1383,7 @@ FROM step_results WHERE run_id = ? ORDER BY ordinal, burn, step`, runID)
 
 func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 	var value model.Run
-	var issueTrailers string
+	var issueTrailers, sourceBindings string
 	var release, credentialed int64
 	var queued, created, updated int64
 	var started, finished sql.NullInt64
@@ -1392,7 +1392,7 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 		&value.SHA, &value.Actor, &release, &credentialed, &value.Trigger, &value.Phase, &value.WorkflowName,
 		&value.TestedSHA, &value.BaseSHA, &value.FailedStage, &value.FailedStep, &value.Error,
 		&value.Status, &value.Reason, &value.SupersededBy, &queued, &started, &finished,
-		&created, &updated, &value.ConcurrencyGroup, &value.ConcurrencyLimit, &value.ScheduleEntry, &issueTrailers, &value.FailureCause, &value.Priority, &value.PriorityReason, &value.PriorityOverride, &value.PriorityOverrideReason, &value.PriorityAccepted, &value.PriorityAcceptedReason, &value.PriorityRequestedBy, &value.PriorityRefusal, &value.PriorityProtected,
+		&created, &updated, &value.ConcurrencyGroup, &value.ConcurrencyLimit, &value.ScheduleEntry, &issueTrailers, &sourceBindings, &value.FailureCause, &value.Priority, &value.PriorityReason, &value.PriorityOverride, &value.PriorityOverrideReason, &value.PriorityAccepted, &value.PriorityAcceptedReason, &value.PriorityRequestedBy, &value.PriorityRefusal, &value.PriorityProtected,
 	}
 	if err := scanRowNotFound(row, "Run", append(dest, extra...)...); err != nil {
 		return model.Run{}, err
@@ -1404,6 +1404,14 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 		}
 		if err := json.Unmarshal([]byte(issueTrailers), &value.IssueTrailers); err != nil {
 			return model.Run{}, fmt.Errorf("decode run issue trailers: %w", err)
+		}
+	}
+	if sourceBindings != "" {
+		if len(sourceBindings) > 8192 {
+			return model.Run{}, fmt.Errorf("%w: source bindings exceed limit", ErrInvalidState)
+		}
+		if err := json.Unmarshal([]byte(sourceBindings), &value.SourceBindings); err != nil {
+			return model.Run{}, err
 		}
 	}
 	value.AutoRetryOf = automaticRetryOrigin(value.Reason)

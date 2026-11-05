@@ -183,8 +183,16 @@ DELETE FROM schema_migrations WHERE version>=55;
 
 // PostExecutionTargetsDowngrade removes disposable target-custody fixtures
 // before reconstructing historical schemas. Production migration stays strict.
-const PostExecutionTargetsDowngrade = `
+const PostExecutionTargetsDowngrade = PostPinnedSourcesDowngrade + `
 DROP TABLE IF EXISTS execution_target_resources;
 DROP TABLE IF EXISTS execution_target_bindings;
 DELETE FROM schema_migrations WHERE id='20261105050000-execution-target-custody';
+`
+
+// PostPinnedSourcesDowngrade removes only the new source receipt from disposable
+// current-schema fixtures before reconstructing an older schema and ledger.
+const PostPinnedSourcesDowngrade = `
+DROP TRIGGER IF EXISTS run_source_bindings_immutable;
+ALTER TABLE runs DROP COLUMN source_bindings;
+DELETE FROM schema_migrations WHERE id='20261105180000-pinned-source-bindings';
 `

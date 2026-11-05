@@ -129,6 +129,7 @@ type serveOptions struct {
 	runnerImagePrefixes     string
 	scheduleMinInterval     time.Duration
 	scheduleMaxEntries      int
+	sourceAllowlist         string
 	fragmentAllowlist       string
 	artifactsLimitBytes     int64
 	artifactsBudgetBytes    int64
@@ -273,6 +274,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.runnerImagePrefixes, "runner-image-prefixes", strings.Join(pipeline.DefaultRunnerImagePrefixes, ","), "comma-separated allowlist of permitted runner image prefixes")
 	flags.DurationVar(&options.scheduleMinInterval, "schedule-min-interval", defaultScheduleMinInterval, "shortest interval a repository may schedule itself at")
 	flags.IntVar(&options.scheduleMaxEntries, "schedule-max-entries", defaultScheduleMaxEntries, "most schedule entries one repository may declare")
+	flags.StringVar(&options.sourceAllowlist, "source-allowlist", "{}", "JSON map of consumer upstream/org/repository to allowed pinned source repositories; empty denies all")
 	flags.StringVar(&options.fragmentAllowlist, "fragment-allowlist", "", "comma-separated repositories usable as pipeline fragments; empty permits every registered repository")
 	flags.Int64Var(&options.artifactsLimitBytes, "artifacts-limit-bytes", defaultArtifactsLimitBytes, "maximum total bytes of artifacts kept per run")
 	flags.Int64Var(&options.artifactsBudgetBytes, "artifacts-budget-bytes", defaultArtifactsBudgetBytes, "total artifact storage before the oldest runs are evicted")
@@ -875,6 +877,11 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
+	sourceLoader, err := app.NewPinnedSourceLoader(git, database, options.sourceAllowlist)
+	if err != nil {
+		return err
+	}
+	argoJobs.SetPinnedSources(sourceLoader, database)
 	argoJobs.SetKubeVirtGrantLoader(database)
 	argoJobs.SetWorkflowCapabilityLoader(database.ActiveWorkflowCapability)
 	logger.Printf("argo execution engine: namespace=%s pipeline-sa=%s credentialed-sa=%s ci-secrets-sa=%s executor-sa=%s",

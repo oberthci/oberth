@@ -72,6 +72,7 @@ func WithExecutionTargets(local *ArgoJobs, database *store.Store, definitions []
 	if err != nil {
 		return nil, err
 	}
+	owner.pinnedSources, owner.sourceRecorder = local.pinnedSources, local.sourceRecorder
 	owner.resourceBlobs = local.resourceBlobs
 	owner.capabilityGrants = local.capabilityGrants
 	owner.kubeVirtGrants = local.kubeVirtGrants
@@ -319,6 +320,7 @@ func (r *executionTargets) restore(ctx context.Context, b model.ExecutionTargetB
 	if err != nil {
 		return nil, err
 	}
+	child.SetPinnedSources(r.owner.pinnedSources, r.owner.sourceRecorder)
 	child.resourceBlobs = r.owner.resourceBlobs
 	child.targetSource = snapshot.Source
 	child.targetBinding = &b
