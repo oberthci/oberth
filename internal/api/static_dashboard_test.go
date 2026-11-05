@@ -420,14 +420,21 @@ func TestRunDetailStepsAreUniformOrderedRows(t *testing.T) {
 			t.Fatalf("stepIdentity is missing %s", want)
 		}
 	}
+	// The shared formatter retains the subsecond display for both initial rows
+	// and clock ticks. Only running rows without a finish timestamp tick.
+	duration := section("function stepDuration(seconds)", "\nfunction stepRow(")
+	if !strings.Contains(duration, `seconds < 1 ? "<1s" : fmtDur(seconds)`) {
+		t.Fatal("stepDuration lost the subsecond or elapsed-time display")
+	}
 	// One row shape: icon, name, optional markers, duration or state.
 	row := section("function stepRow(row, selectedKey)", "\nfunction defaultStep(")
 	for _, want := range []string{
 		`<span class="nm">${esc(label)}</span>`,
 		"${identity.attempt ? `<span class=\"tag\">retry ${esc(identity.attempt)}</span>` : \"\"}",
 		`${step.Secrets ? '<span class="tag">secret</span>' : ""}`,
-		`<span class="dur">${esc(column)}</span>`,
-		`"<1s"`,
+		"<span class=\"dur\"${ticking ? ` data-started=\"${esc(step.StartedAt)}\" data-timer-kind=\"step\"` : \"\"}>${esc(column)}</span>",
+		`const ticking = validStart && !validFinish && sk === "run";`,
+		`timed ? stepDuration(seconds)`,
 		`sk === "cancel" ? "skipped" : statusLabel(step.Status)`,
 	} {
 		if !strings.Contains(row, want) {
