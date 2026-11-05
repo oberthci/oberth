@@ -1195,7 +1195,6 @@ spec:
           memory: 3072Mi
   # Keep the release gate while giving each branch race group its own Pod.
   - name: release-test
-    activeDeadlineSeconds: 7401
     automountServiceAccountToken: false
     dag:
       tasks:

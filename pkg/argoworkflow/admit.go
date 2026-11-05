@@ -433,6 +433,11 @@ func admitTemplate(location string, template wfv1.Template, policy Policy, depth
 	}
 	var problems []error
 	problems = append(problems, admitNestedTemplates(location, template, policy, depth)...)
+	// Argo applies this deadline to a leaf Pod, never a DAG or steps gate.
+	// Keep the check in the recursive path so inline composites also refuse.
+	if template.ActiveDeadlineSeconds != nil && (template.DAG != nil || len(template.Steps) != 0) {
+		problems = append(problems, fmt.Errorf("argoworkflow: %s.activeDeadlineSeconds is only valid for leaf templates", location))
+	}
 	if strings.TrimSpace(template.PodSpecPatch) != "" {
 		problems = append(problems, fmt.Errorf("argoworkflow: %s.podSpecPatch is not admitted; it can override the server-assigned identity", location))
 	}
