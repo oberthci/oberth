@@ -29,6 +29,9 @@ func (controller *Controller) trustedKVMWorkflow(ctx context.Context, request Re
 	if request.TrustedKVM == nil {
 		return nil, nil, errors.New("argojob: missing trusted KVM intent")
 	}
+	if err := controller.config.ExecutionPlacement.verifyEnvironment(ctx, controller.kube, controller.config); err != nil {
+		return nil, nil, err
+	}
 	request, err := controller.PrepareNonroot(ctx, request)
 	if err != nil {
 		return nil, nil, err
@@ -186,6 +189,17 @@ func ownedByWorkflow(pod *corev1.Pod, name string, uid types.UID) bool {
 
 func verifyTrustedKVMPod(workflow *wfv1.Workflow, leaf *wfv1.Template, pod *corev1.Pod, node *wfv1.NodeStatus, config Config) error {
 	invalid := func(reason string) error { return fmt.Errorf("argojob: trusted Pod attestation failed: %s", reason) }
+	if p := config.ExecutionPlacement; p != nil {
+		if err := p.validate(); err != nil {
+			return err
+		}
+		if workflow.Annotations["oberth.ci/execution-placement"] != p.digest || !reflect.DeepEqual(leaf.NodeSelector, p.selectors()) || !equalPlacementTolerations(leaf.Tolerations, p.nativeTolerations()) {
+			return invalid("expected placement leaf identity")
+		}
+		if err := p.verifyPodPlacement(pod, "harness"); err != nil {
+			return err
+		}
+	}
 	if pod.Namespace != workflow.Namespace || pod.UID == "" || pod.Name != PodName(workflow, *node) || !ownedByWorkflow(pod, workflow.Name, workflow.UID) || pod.Annotations["workflows.argoproj.io/node-id"] != node.ID || pod.Annotations["workflows.argoproj.io/node-name"] != node.Name {
 		return invalid("ownership and node linkage")
 	}
@@ -294,6 +308,9 @@ func verifyTrustedKVMPod(workflow *wfv1.Workflow, leaf *wfv1.Template, pod *core
 		allowed[name] = corev1.Volume{Name: name, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}
 	}
 	allowed["var-run-argo"] = corev1.Volume{Name: "var-run-argo", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: config.executorScratchLimit()}}}
+	if config.ExecutionPlacement != nil {
+		allowed["tmp-dir-argo"] = placementTmpVolume()
+	}
 	// Projected executor token is memory-only and never accessible to main.
 	allowed[executorTokenVolume] = corev1.Volume{Name: executorTokenVolume, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{Medium: corev1.StorageMediumMemory, SizeLimit: ptr.To(resource.MustParse("1Mi"))}}}
 	for _, v := range pod.Spec.Volumes {
@@ -327,6 +344,9 @@ func verifyTrustedKVMHelpers(pod *corev1.Pod, wait *corev1.Container, config Con
 		return invalid("token waiter")
 	}
 	for _, c := range []*corev1.Container{&pod.Spec.InitContainers[1], wait} {
+		if config.ExecutionPlacement != nil && !apiequality.Semantic.DeepEqual(c.Resources, executorControlResources()) {
+			return invalid("executor resources")
+		}
 		if c.Image != argoworkflow.NonrootExecutorImage || len(c.EnvFrom) != 0 || len(c.VolumeDevices) != 0 || c.Lifecycle != nil || c.LivenessProbe != nil || c.StartupProbe != nil || c.ReadinessProbe != nil {
 			return invalid("executor image or runtime hooks")
 		}

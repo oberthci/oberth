@@ -182,6 +182,7 @@ type serveOptions struct {
 	argoVaultCredentialedRole    string
 	argoVaultCISecretsRole       string
 	argoVaultCACert              string
+	argoExecutionPlacementConfig string
 	argoReleaseWIFConfig         string
 	argoReleaseTagRoutesConfig   string
 	argoWorkflowTimeout          time.Duration
@@ -349,6 +350,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.argoVaultCISecretsRole, "argo-vault-ci-secrets-role", "", "OpenBao Kubernetes auth role for CI pipelines with approved upstream-scoped secrets; bound to the CI-secrets ServiceAccount and namespace (empty refuses CI credentialed pipelines at admission)")
 	flags.StringVar(&options.argoVaultCACert, "argo-vault-ca-cert", "", "PEM file pinning the trust anchors credentialed pipeline containers verify --argo-vault-address against")
 	flags.StringVar(&options.argoReleaseTagRoutesConfig, "argo-release-tag-routes-config", "", "absolute path to administrator-owned release tag pattern -> workflow file JSON")
+	flags.StringVar(&options.argoExecutionPlacementConfig, "argo-execution-placement-config", "", "absolute path to administrator-owned isolated execution placement JSON")
 	flags.StringVar(&options.argoReleaseWIFConfig, "argo-release-wif-config", "", "absolute path to administrator-owned public JSON release WIF capabilities (empty disables federation)")
 	flags.StringVar(&options.argoGoProxyListen, "argo-goproxy-listen", "", "listen address for the read-only Go module proxy (e.g. :8444); empty disables the proxy (#662)")
 	flags.StringVar(&options.argoGoProxyCert, "argo-goproxy-cert", "", "TLS certificate for the Go module proxy")
