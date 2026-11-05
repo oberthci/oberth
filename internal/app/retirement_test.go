@@ -46,8 +46,8 @@ func (f *retirementFixture) RetirementSources(context.Context, string) ([]gitcac
 	}
 	return []gitcache.RetirementSource{{Ref: "refs/heads/main", SHA: strings.Repeat("a", 40), Path: ".oberth/build.yaml", Body: []byte(f.body)}}, nil
 }
-func (f *retirementFixture) Load(context.Context, argoworkflow.FragmentKey, pipeline.Trigger, model.RefKind, string) (argoworkflow.Fragment, error) {
-	return argoworkflow.Fragment{SHA: strings.Repeat("b", 40), Source: []byte(f.fragment)}, nil
+func (f *retirementFixture) Load(_ context.Context, key argoworkflow.FragmentKey, _ pipeline.Trigger, _ model.RefKind, _ string) (argoworkflow.Fragment, error) {
+	return argoworkflow.Fragment{Key: key, SHA: strings.Repeat("b", 40), Source: []byte(f.fragment)}, nil
 }
 
 func TestLegacyRemovalNamesEveryBlockingBoundary(t *testing.T) {
