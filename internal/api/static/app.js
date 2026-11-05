@@ -518,9 +518,9 @@ function queueDetail(run) { return run.Scheduling?.message || runMessage(run); }
 function rowMessage(run) { return run.display_reason || ""; }
 function whenCell(run) {
   const status = displayRunStatus(run);
-  if (status === "queued") return "";
-  const started = run.StartedAt, stamp = started || run.QueuedAt;
+  const started = status === "queued" ? null : run.StartedAt, stamp = started || run.QueuedAt;
   const date = new Date(stamp || "");
+  if (status === "queued" && !Number.isFinite(+date)) return "";
   const time = Number.isFinite(+date) ? date.toLocaleTimeString("en-GB", {hour:"2-digit",minute:"2-digit",hourCycle:"h23"}) : "";
   const stampText = date.toDateString() === new Date().toDateString() ? time : `${date.toLocaleDateString("en-US", {month:"short",day:"numeric"})} ${time}`;
   const label = Number.isFinite(+date) ? `${started ? "started" : "queued"} at ${stampText}` : "";

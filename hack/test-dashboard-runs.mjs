@@ -366,6 +366,18 @@ assert.match(run('runsTable([])'),/<div>status<\/div><div>run<\/div><div>when<\/
 const clockNow=new Date(), yesterday=new Date(clockNow.getTime()-86400000);
 sandbox.clockNow=clockNow;sandbox.yesterday=yesterday;
 assert.equal(run(`whenCell({display_status:'queued'})`),'');
+for (const status of ['queued', 'running']) {
+ sandbox.queuedTimeRun={Status:status,display_status:'queued',QueuedAt:clockNow.toISOString(),StartedAt:yesterday.toISOString()};
+ const queuedCell=run('whenCell(queuedTimeRun)');
+ assert.match(queuedCell, /queued at \d{2}:\d{2}<\/span>/, 'waiting runs show their original enqueue time');
+ assert.doesNotMatch(queuedCell, /data-started|started at|\d+m \d+s/, 'waiting runs have no duration timer or start label');
+ sandbox.queuedTimeRun.QueuedAt=yesterday.toISOString();
+ assert.match(run('whenCell(queuedTimeRun)'), /queued at [A-Z][a-z]{2} \d{1,2} \d{2}:\d{2}<\/span>/);
+ for (const QueuedAt of [undefined,null,'','invalid']) {
+  sandbox.queuedTimeRun.QueuedAt=QueuedAt;
+  assert.equal(run('whenCell(queuedTimeRun)'), '', 'missing or invalid enqueue times stay empty even with a start time');
+ }
+}
 assert.match(run(`whenCell({display_status:'passed',StartedAt:clockNow,FinishedAt:new Date(clockNow.getTime()+62000)})`),/1m 2s/);
 assert.match(run(`whenCell({display_status:'passed',StartedAt:clockNow,FinishedAt:clockNow})`),/started at \d\d:\d\d/);
 assert.match(run(`whenCell({display_status:'passed',StartedAt:yesterday,FinishedAt:clockNow})`),/started at [A-Z][a-z]{2} \d{1,2} \d{2}:\d{2}/);
@@ -386,6 +398,13 @@ try {
  Date.now = () => timerStart + 62000;
  liveTimer.fn();
  assert.equal(timerCell.textContent,'1m 2s','timer advances without list polling');
+ sandbox.queuedTimeRun={Status:'running',display_status:'queued',QueuedAt:'2026-11-03T08:17:00Z',StartedAt:clockNow.toISOString()};
+ const queuedCell=run('whenCell(queuedTimeRun)');
+ Date.now = () => timerStart + 3600000;
+ liveTimer.fn();
+ assert.equal(run('whenCell(queuedTimeRun)'),queuedCell,'timer ticks and later list renders preserve the original enqueue time');
+ const queuedDate=new Date(sandbox.queuedTimeRun.QueuedAt);
+ assert.ok(queuedCell.includes(queuedDate.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',hourCycle:'h23'})), 'the displayed time comes from QueuedAt');
 } finally { Date.now = savedNow }
 for (const status of ['running','passed','failed','cancelled','superseded','infra-retried']) {
  sandbox.timeRun={display_status:status,StartedAt:clockNow.toISOString(),FinishedAt:status==='running'?null:new Date(clockNow.getTime()+62000).toISOString()};
