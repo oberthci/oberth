@@ -89,4 +89,16 @@ assert.equal(polls.at(-1).options.signal.aborted,true);assert.equal(timers.size,
 const count=streams.length;
 run(`receiveLiveChunk(abandoned,{chunk:'stale\\n',offset:999})`);
 assert.equal(run('abandoned.offset'),-1);assert.equal(streams.length,count);
+// Fire the actual fallback watchdog while retry waits for cursor ownership.
+await run(`liveLogContent({ID:'timeout'},'test','store')`);await settle();
+streams.at(-1).controller.error(new Error('offline'));await settle();
+const stalledPoll=polls.at(-1), beforeTimeout=streams.length;
+const waitingRetry=fire(1000);await settle();
+assert.equal(streams.length,beforeTimeout);
+await fire(10000);await waitingRetry;await settle();
+assert.equal(stalledPoll.options.signal.aborted,true,'10s watchdog aborts the actual fetch signal');
+assert.equal(streams.length,beforeTimeout+1,'stream resumes only after aborted poll settles');
+assert.ok(streams.at(-1).url.endsWith('offset=-1'),'timeout cannot advance the byte cursor');
+assert.equal(run('state.live.busy'),false);assert.equal(run('state.live.pollTimer'),null);
+run('closeLiveLog()');await settle();assert.equal(timers.size,0);
 console.log('local step clocks, partial UTF-8, exact-cursor reconnect, bounded backoff and cancellation pass');

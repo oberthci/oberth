@@ -163,6 +163,56 @@ func TestStructuredFailureCauseUsesBoundDiagnostics(t *testing.T) {
 	if got := structuredFailureCause(runID, result); got != "test/e2e failed · deadline 20m" {
 		t.Fatal(got)
 	}
+	// Historical summaries can end at any point inside the structured suffix.
+	// Exercise the actual producer's 60-rune clipping, then the list projection.
+	for _, tc := range []struct {
+		name   string
+		size   int
+		oom    bool
+		suffix string
+	}{
+		{"clipped OOM word", 39, true, ""},
+		{"complete OOM word", 38, true, " · OOM"},
+		{"clipped limit label", 34, true, " · OOM"},
+		{"clipped limit value", 28, true, " · OOM"},
+		{"clipped deadline word", 35, false, ""},
+		{"complete deadline word", 33, false, " · deadline"},
+		{"clipped deadline value", 31, false, " · deadline"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := *container
+			c.Reason, c.PodReason = "Error", "DeadlineExceeded"
+			status := model.StepTimedOut
+			if tc.oom {
+				c.Reason, c.PodReason, status = "OOMKilled", "none", model.StepFailed
+			}
+			d := *diagnostic
+			d.Container = &c
+			name := strings.Repeat("a", tc.size)
+			cause := structuredFailureCause(runID, JobResult{Status: model.RunFailed, Steps: []model.StepResult{{RunID: runID, Stage: "compile", Step: name, Status: status, Termination: &d}}})
+			if len([]rune(cause)) != 60 || !strings.HasSuffix(cause, "…") {
+				t.Fatalf("fixture did not clip: %q", cause)
+			}
+			run := model.Run{Status: model.RunFailed, FailedStage: "compile", FailedStep: name, FailureCause: cause}
+			shown := presentationRun(run)
+			if want := name + " failed" + tc.suffix; shown.DisplayReason != want {
+				t.Fatalf("cause %q rendered %q, want %q", cause, shown.DisplayReason, want)
+			}
+			if shown.FailureCause != cause || shown.FailedStage != run.FailedStage || shown.FailedStep != name {
+				t.Fatal("historical evidence changed")
+			}
+		})
+	}
+	for _, raw := range []string{
+		"compile/" + strings.Repeat("a", 39) + " failed opening /tmp/some/path",
+		"foreign/" + strings.Repeat("a", 39) + " failed · OOM (limit 2 GiB)",
+	} {
+		cause := displayFailureText(raw)
+		shown := presentationRun(model.Run{Status: model.RunFailed, FailedStage: "compile", FailedStep: strings.Repeat("a", 39), FailureCause: cause})
+		if shown.DisplayReason != cause {
+			t.Fatalf("unstructured or foreign clipped text changed: %q -> %q", cause, shown.DisplayReason)
+		}
+	}
 	if got := structuredFailureCause(strings.Repeat("c", 32), result); got != "" {
 		t.Fatal("foreign run evidence accepted", got)
 	}

@@ -82,6 +82,19 @@ func listFailureCause(run model.Run) string {
 		return leaf
 	}
 	if suffix, ok := strings.CutPrefix(cause, prefix); ok {
+		if len([]rune(cause)) == 60 && strings.HasSuffix(suffix, "…") {
+			retained := strings.TrimSuffix(suffix, "…")
+			for _, kind := range []struct{ label, prefix string }{{" · OOM", " · OOM (limit "}, {" · deadline", " · deadline "}} {
+				if strings.HasPrefix(kind.prefix, retained) || strings.HasPrefix(retained, kind.prefix) {
+					// Keep the cause only if its whole name survived. A partial
+					// word, limit or deadline value cannot supply missing facts.
+					if strings.HasPrefix(retained, kind.label) {
+						return leaf + kind.label
+					}
+					return leaf
+				}
+			}
+		}
 		if suffix == " · OOM" || strings.HasPrefix(suffix, " · OOM (limit ") || suffix == " · deadline" || strings.HasPrefix(suffix, " · deadline ") {
 			return leaf + suffix
 		}
