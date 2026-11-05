@@ -100,8 +100,11 @@ func TestRunResourcesReadsOwnPeakOnlyForMatchingFinalAttempt(t *testing.T) {
 	}
 	bound := 0
 	for _, o := range got.Observations {
-		if !o.DeadlineKilled {
-			t.Fatal("deadline kill lost")
+		if o.DeadlineKilled != (o.Usage.RestartCount == 0) {
+			t.Fatal("deadline kill crossed incarnation or was lost")
+		}
+		if o.Usage.RestartCount != 0 && !o.DeadlineUncertain {
+			t.Fatal("unbound deadline lost its conservative refusal")
 		}
 		if o.StepMemoryPeakBytes != nil {
 			bound++
@@ -135,7 +138,7 @@ func TestRunResourcesWorkflowDeadlineCensorsWithoutStepDiagnostic(t *testing.T) 
 		t.Fatal(err)
 	}
 	got, err := s.RunResources(t.Context(), repo.ID, RunResourceFilter{Ref: "main", Runs: 30, IncludeFailed: true})
-	if err != nil || len(got.Observations) != 1 || !got.Observations[0].DeadlineKilled {
+	if err != nil || len(got.Observations) != 1 || got.Observations[0].DeadlineKilled || !got.Observations[0].DeadlineUncertain {
 		t.Fatalf("workflow deadline censoring lost: %+v %v", got.Observations, err)
 	}
 }

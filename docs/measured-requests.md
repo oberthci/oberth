@@ -191,8 +191,12 @@ above a recorded limit (censoring), saturation, counter resets, changed requests
 restarts, ambiguous identity or truncated history. Unknown historical CPU,
 memory or ephemeral limits also suppress advice. Deadline-killed durations are
 censored, including workflow-wide deadline kills with no precise step diagnostic.
-Run/step deadline uncertainty conservatively refuses advice, but that flag alone
-does not prove every Pod or retry was deadline-killed. Independent dispositions
+Run/step deadline uncertainty conservatively refuses advice through
+`deadline_unknown`, independently of `deadline_killed`. A successful completed
+container stays a normal sample when another step or retry hits a deadline.
+Only an exactly bound container diagnostic, timed-out step result or Pod
+disposition establishes a deadline kill; the final display row cannot label
+every retry. Unknown deadline attribution cannot produce a finite suggestion. Independent dispositions
 preserve exact Pod identity. Inspect coverage before committing a change. No
 automatic higher retry is performed.
 

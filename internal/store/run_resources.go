@@ -147,7 +147,11 @@ func (s *Store) readResourceObservations(ctx context.Context, repoID int64, payl
 			return nil, false, fmt.Errorf("invalid stored resource observation")
 		}
 		o := measured.Observation{RunTerminal: model.RunStatus(runStatus).Terminal(), Usage: v, Template: measured.TemplateOf(v), Owner: v.FragmentRepository}
-		o.DeadlineKilled = model.IsExecutionDeadlineReason(runError) || (status != nil && model.StepStatus(*status) == model.StepTimedOut)
+		// Run-level errors and the final display row cannot identify which
+		// retry/container was killed. A completed incarnation remains a normal
+		// sample even if a later step or retry exhausted the workflow deadline.
+		completed := v.Terminal && v.Reason == "Completed" && v.ExitCode != nil && *v.ExitCode == 0 && !v.ContainerFinishedAt.IsZero()
+		o.DeadlineUncertain = !completed && (model.IsExecutionDeadlineReason(runError) || (status != nil && model.StepStatus(*status) == model.StepTimedOut))
 		if diagnostic != nil {
 			var d model.StepDiagnostic
 			if json.Unmarshal([]byte(*diagnostic), &d) == nil {
@@ -157,6 +161,9 @@ func (s *Store) readResourceObservations(ctx context.Context, repoID int64, payl
 				}
 				o = measured.WithStepResult(o, &d, memory, stepStatus)
 			}
+		}
+		if o.DeadlineKilled {
+			o.DeadlineUncertain = false
 		}
 		values = append(values, o)
 	}

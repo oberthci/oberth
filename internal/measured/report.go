@@ -36,6 +36,9 @@ const LimitMarginPercent = 50
 const DeadlineNoSuggestion = "Pod active lifetime through finalization is not measured. duration_ns is main-container runtime; retained Pod finish is the last container exit, a lower bound. Keep the declared deadline and measure Pod finalization before sizing it."
 
 type Observation struct {
+	// DeadlineUncertain withholds advice without claiming a particular
+	// container incarnation was killed by a run/step-level deadline.
+	DeadlineUncertain   bool
 	OOMKilled           bool
 	RunTerminal         bool
 	StepMemoryPeakBytes *int64
@@ -77,6 +80,7 @@ func (s Suggested) Resources() map[string]map[string]string {
 }
 
 type Flags struct {
+	DeadlineUnknown   bool `json:"deadline_unknown"`
 	DeadlineKilled    bool `json:"deadline_killed"`
 	LowSamples        bool `json:"low_samples"`
 	SampledLowerBound bool `json:"sampled_lower_bound"`
@@ -320,6 +324,7 @@ func build(values []Observation, declarations []Declaration, safety []Observatio
 		}
 		for _, o := range groups[k] {
 			v := o.Usage
+			s.Flags.DeadlineUnknown = s.Flags.DeadlineUnknown || o.DeadlineUncertain
 			id := v.RunID + "\x00" + v.PodUID + "\x00" + v.ContainerID
 			o.DeadlineKilled = knownDeadline[id]
 			o.OOMKilled = knownOOM[id]
@@ -480,7 +485,7 @@ func build(values []Observation, declarations []Declaration, safety []Observatio
 		if s.Flags.LimitsUnknown {
 			s.NoSuggestion = append(s.NoSuggestion, "historical CPU, memory or ephemeral limits are unknown; censoring cannot be ruled out")
 		}
-		if s.Flags.DeadlineKilled {
+		if s.Flags.DeadlineKilled || s.Flags.DeadlineUnknown {
 			s.NoSuggestion = append(s.NoSuggestion, "deadline failure/uncertainty refuses advice; a run-level flag does not establish a kill of every Pod or retry")
 		}
 		if s.Flags.LimitReached || s.Flags.OOM {
@@ -540,7 +545,13 @@ func WithDiagnostic(o Observation, d *model.StepDiagnostic) Observation {
 	if c.RunID != v.RunID || c.WorkflowUID != v.WorkflowUID || c.PodUID != v.PodUID || c.ContainerID != v.ContainerID || c.ContainerName != "main" || c.RestartCount != v.RestartCount {
 		return o
 	}
-	o.DeadlineKilled = o.DeadlineKilled || c.PodReason == "DeadlineExceeded"
+	if c.PodReason == "DeadlineExceeded" {
+		if c.Reason == "Completed" && c.ExitCode == 0 {
+			o.DeadlineUncertain = true
+		} else {
+			o.DeadlineKilled = true
+		}
+	}
 	o.OOMKilled = o.OOMKilled || c.Reason == "OOMKilled"
 	if c.CPULimitMilli != nil && *c.CPULimitMilli <= 1_000_000 {
 		n := *c.CPULimitMilli * 1_000_000
@@ -570,7 +581,13 @@ func WithStepResult(o Observation, d *model.StepDiagnostic, memory *int64, statu
 	if memory != nil && *memory >= 0 {
 		o.StepMemoryPeakBytes = memory
 	}
-	o.DeadlineKilled = o.DeadlineKilled || status == model.StepTimedOut
+	if status == model.StepTimedOut {
+		if c.Reason == "Completed" && c.ExitCode == 0 {
+			o.DeadlineUncertain = true
+		} else {
+			o.DeadlineKilled = true
+		}
+	}
 	return o
 }
 func satAdd(a, b int64) int64 {

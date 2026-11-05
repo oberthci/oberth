@@ -34,6 +34,10 @@ func applySafety(s *Step, h *sizingHistory, safety []Observation, dispositions [
 	}
 	for _, o := range safety {
 		o = withUsageLimits(o)
+		if o.DeadlineUncertain {
+			s.Flags.DeadlineUnknown = true
+			refuse("retained deadline uncertainty refuses advice without attributing a kill to this attempt")
+		}
 		if (o.Owner != "" && s.OwnerRepository != "" && o.Owner != s.OwnerRepository) || (o.Owner == "" && strings.HasPrefix(o.Template, "frag-")) {
 			s.Flags.IdentityUnknown = true
 			refuse("safety history owning repository is unknown or conflicts with displayed provenance")
@@ -74,7 +78,9 @@ func applySafety(s *Step, h *sizingHistory, safety []Observation, dispositions [
 					h.censored++
 					seen[id] = true
 				}
-				s.Flags.DeadlineKilled = s.Flags.DeadlineKilled || d.Reason == "DeadlineExceeded"
+				// Pod failure alone cannot prove the main container was killed.
+				// Retain the Pod censor and refuse advice without that attribution.
+				s.Flags.DeadlineUnknown = s.Flags.DeadlineUnknown || d.Reason == "DeadlineExceeded"
 			}
 			continue
 		}
