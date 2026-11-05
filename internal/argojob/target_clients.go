@@ -105,6 +105,9 @@ func (c *TargetClients) resource(ctx context.Context, kind, namespace, name stri
 	return model.ExecutionTargetResource{}, false, nil
 }
 func (c *TargetClients) prepare(ctx context.Context, kind string, object metav1.Object) (bool, error) {
+	if err := c.config.ExecutionPlacement.ValidateAdmission(); err != nil {
+		return false, err
+	}
 	if err := c.verifyCluster(ctx); err != nil {
 		return false, err
 	}

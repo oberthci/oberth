@@ -310,7 +310,8 @@ func DefaultedConfig(config Config) (Config, error) {
 	return config, config.Validate()
 }
 
-// Validate rejects a configuration that could not produce a safe submission.
+// Validate checks engine configuration, including retained custody after expiry.
+// Build and allocation separately require a currently valid placement admission.
 func (config Config) Validate() error {
 	if err := config.ExecutionPlacement.validate(); err != nil {
 		return err

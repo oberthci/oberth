@@ -128,7 +128,9 @@ func (p *ExecutionPlacement) MarshalJSON() ([]byte, error) {
 }
 
 func (p *ExecutionPlacement) UnmarshalJSON(body []byte) error {
-	parsed, err := ParseExecutionPlacement(body)
+	// Decoding reconstructs immutable custody, including expired bindings. It
+	// does not admit work; selection and every new target POST check expiry.
+	parsed, err := decodeExecutionPlacement(body)
 	if err == nil {
 		*p = *parsed
 	}
@@ -156,6 +158,17 @@ func (p *ExecutionPlacement) ValidateRequest(config Config, request Request) err
 // There is deliberately no profile inferred from observed Pods and no default
 // cluster/version/owner identity. The entire record is public configuration.
 func ParseExecutionPlacement(body []byte) (*ExecutionPlacement, error) {
+	placement, err := decodeExecutionPlacement(body)
+	if err != nil {
+		return nil, err
+	}
+	if err := placement.ValidateAdmission(); err != nil {
+		return nil, err
+	}
+	return placement, nil
+}
+
+func decodeExecutionPlacement(body []byte) (*ExecutionPlacement, error) {
 	if len(body) == 0 || len(body) > 65536 {
 		return nil, errors.New("argojob: placement configuration must be 1..65536 bytes")
 	}
@@ -256,6 +269,8 @@ func placementSHA(value string) bool {
 	decoded, err := hex.DecodeString(value)
 	return err == nil && len(decoded) == 32 && value == strings.ToLower(value)
 }
+
+// validate authenticates the immutable record, independently of admission time.
 func (p *ExecutionPlacement) validate() error {
 	if p == nil {
 		return nil
@@ -305,8 +320,8 @@ func (p *ExecutionPlacement) validate() error {
 			return errors.New("argojob: invalid placement identity digest")
 		}
 	}
-	if _, err := time.Parse(time.RFC3339, d.ClusterCreated); err != nil || !time.Now().Before(d.Expires) {
-		return errors.New("argojob: invalid or expired cluster binding")
+	if _, err := time.Parse(time.RFC3339, d.ClusterCreated); err != nil || d.Expires.IsZero() {
+		return errors.New("argojob: invalid cluster binding lifetime")
 	}
 	if d.AdmissionProfile != "kube1357-dts300" && d.AdmissionProfile != "kube1357-dts300-ptr-empty" {
 		return errors.New("argojob: unknown admission profile")
@@ -324,11 +339,24 @@ func (p *ExecutionPlacement) validate() error {
 	}
 	return nil
 }
+
+// ValidateAdmission checks the immutable record and its current lifetime.
+// Retained observation and disposal use structural validation independently.
+func (p *ExecutionPlacement) ValidateAdmission() error {
+	if err := p.validate(); err != nil {
+		return err
+	}
+	if p != nil && !time.Now().Before(p.document.Expires) {
+		return errors.New("argojob: expired cluster binding")
+	}
+	return nil
+}
+
 func (p *ExecutionPlacement) selectRequest(config Config, r Request) error {
 	if p == nil {
 		return nil
 	}
-	if err := p.validate(); err != nil {
+	if err := p.ValidateAdmission(); err != nil {
 		return err
 	}
 	d := p.document
@@ -471,7 +499,7 @@ func (p *ExecutionPlacement) verifyEnvironment(ctx context.Context, client kuber
 	if p == nil {
 		return nil
 	}
-	if err := p.validate(); err != nil {
+	if err := p.ValidateAdmission(); err != nil {
 		return err
 	}
 	if p.document.NativeIdentity != executionBinaryIdentity().digest || executionBinaryIdentity().err != nil || p.document.DependencyIdentity != placementDependencyIdentity(config) {

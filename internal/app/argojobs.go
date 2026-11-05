@@ -356,6 +356,9 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 	}
 	var branchAuthority *vmrunner.BranchAuthority
 	if jobs.targetBinding != nil {
+		if err := jobs.config.ExecutionPlacement.ValidateAdmission(); err != nil {
+			return err
+		}
 		b := jobs.targetBinding
 		if err := matchTargetRun(*b, request.Run, request.WorkflowName); err != nil {
 			return err
