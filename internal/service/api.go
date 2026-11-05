@@ -408,7 +408,14 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		if !ok {
 			return nil, refuse(ErrUnavailable, "concurrency groups")
 		}
-		return observer.ConcurrencyGroups(ctx)
+		groups, err := observer.ConcurrencyGroups(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if groups == nil {
+			groups = []model.AdmissionGroup{}
+		}
+		return api.ConcurrencyGroupsResponse{Groups: groups}, nil
 	case "admission_hold":
 		return service.admissionHoldTool(ctx, actor, raw)
 	// Credential and grant lifecycle (#1105).
