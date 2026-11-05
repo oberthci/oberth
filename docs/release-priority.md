@@ -12,7 +12,7 @@ Waiting admission uses four classes, in this order:
 Both durable claims and in-memory admission order `high > promotion > standard
 > low`, then the original admission sequence and queue sequence. Running or
 already granted work is never preempted. Priority does not bypass admission
-holds, PSI/pressure, resource ceilings, concurrency groups, cleanup or publication
+holds, PSI/pressure, per-container resource ceilings, concurrency groups, cleanup or publication
 guards. Priority dispatch lookahead has a finite ceiling of gate capacity plus
 max-concurrent jobs plus three claims, covering standard, promotion and high
 overtaking low work. Parked lower classes cannot consume high's extra path.
@@ -88,12 +88,12 @@ never fails release execution; the tag retains its reviewed execution size.
 repository. `size_grant` re-enables it within the selected maximum. Explicit
 urgency, promotions and aging are independent of that opt-out.
 
-The existing measured backfill and head-reservation rules remain. Same effective
-and base classes may coexist only when resource/run-slot reservations stay safe;
-otherwise a later candidate needs its measured p95 to finish before the head's
-reservation. Head-wait drain, its bounded liveness escape, strict FIFO, group
-parking and runtime capacity checks are unchanged. Priority grants no resource
-or pressure exemption.
+Serving admission uses the concurrent-workflow ceiling, configured disk floor,
+and enabled PSI hard-limit valve. Kubernetes places each step Pod by its requests;
+Oberth does not use measured backfill, resource head reservations or size weights
+to decide whether a workflow fits. Priority orders waiting workflow grants within
+these controls and repository concurrency groups. It never raises capacity or
+preempts running work. See [workflow admission](declared-admission.md).
 
 Accepted nonstandard requests, admin overrides and automatic RC/tag/promotion
 work retain supersession protection. Historical automatic-protection rows do

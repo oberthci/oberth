@@ -244,24 +244,13 @@ Each template is a container with its own exit code, timeout, and named log
 slice. Oberth reads the YAML statically at submission -- it never executes
 repository code in the server process.
 
-The workflow-level annotation `oberth.ci/size` (`S`, `M` -- the default --,
-`L`, `XL`) is the run's share of the host. By default the weights are S 1,
-M 2, L 3 of a budget of `maxConcurrentJobs` × 2, and `XL` takes the whole
-host and runs alone. The chart value `admission.sizeWeights` (server flag
-`--admission-size-weights`) changes them; a positive `XL` weight lets an XL
-run share the host with whatever fits beside it. While a run at the head of
-the admission queue waits for room, later runs that fit beside it are
-backfilled for up to `admission.maxHeadWait` (default 20m); after that the
-host drains for the head, so it never starves.
-
-For undeclared legacy workflows, `XL` needs an admin size grant (`oberth size grant <repo> --max XL`, or MCP
-`size_grant`); without one a repository's branch, promotion and schedule runs
-may declare at most `L`, and an XL declaration fails at admission instead of
-making every other repository wait for a full drain. The grant applies to
-branch, promotion and schedule runs only: tag/release runs are the
-credentialed tier and are not gated, so a reviewed release.yaml keeps its size. While a run waits at the
-head of the admission queue, the runs behind it say so: "blocked behind
-<repo>/<ref> (XL, needs a full drain)".
+Kubernetes places step Pods using their requests. Oberth keeps the configured
+concurrent-workflow ceiling, enabled hard CPU/IO PSI valve and disk-space floor.
+Historical `oberth.ci/size`, size weights, declared host budgets and headroom
+settings do not reserve capacity or control serving admission. Missing requests
+receive the documented defaults; explicit requests and limits remain owned by
+the workflow in git. See [workflow admission](docs/declared-admission.md) and
+[measured resource advice](docs/measured-requests.md).
 
 `oberth.ci/concurrency-group: <name>` shares a concurrency limit across every
 repository declaring that name, including branch, tag/release and promotion

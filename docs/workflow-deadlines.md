@@ -12,7 +12,7 @@ adopts the same object; it does not recreate the Workflow or reset its clock.
 
 Argo v4.0.8 calculates its workflow deadline from `status.startedAt`, truncated
 to a whole second, plus that submitted budget. This is the Argo Workflow start,
-not Oberth's weighted admission grant, source preparation, or the time a status
+not Oberth's workflow admission grant, source preparation, or the time a status
 client begins waiting. API creation time is shown separately. A missing Argo
 start timestamp means the deadline instant and remaining time are unknown;
 creation/admission timestamps are not substituted. Repository-authored
@@ -81,7 +81,7 @@ with an additional six-hour hard ceiling. Their journaled absolute deadline
 starts at preflight admission and covers source producers, trusted suites and
 init containers. The API and dashboard expose it as `execution.deadline` with
 `clock: preflight_admitted_at`. A server deadline failure records a failed run
-and releases its weighted admission even if Kubernetes cleanup remains pending.
+and releases its workflow admission slot even if Kubernetes cleanup remains pending.
 `run_cancel` releases preflight admission before requesting deletion of the
 journal-bound preflight Workflow and its owned Pods. It reports the preflight
 as `deleted` when deletion requests were accepted, or `pending` on a failure;

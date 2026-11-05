@@ -1,4 +1,11 @@
-# Admission waits with XL weight 8 and budget 8
+# Historical weighted-admission wait analysis
+
+This document describes the retired weighted gate and its compatibility tests.
+It does not describe current serving admission or recommend current capacity
+settings. See [workflow admission](../declared-admission.md),
+[host pressure](../io-pressure-admission.md) and
+[execution priority](../release-priority.md) for current behavior.
+
 
 With `jobs=4` and `M=2`, the weight budget is 8. An XL with weight 8 needs
 **every existing grant to release** before it can start, then occupies the
@@ -50,7 +57,7 @@ freed weight and extend the drain. An
 admin bump can prevent lower-priority overtaking; standard work ages to `promotion`
 after 60 minutes using its original FIFO position, never into `high`.
 Existing holders and earlier highest-priority work still have to finish. See
-[priority and aging](release-priority.md).
+[priority and aging](../release-priority.md).
 
 Workflows with no scheduled workload Pod fail after **ten minutes** from
 creation. Executor identity readiness has the same bound for each workload
@@ -81,7 +88,7 @@ resource exposure and needs host/platform/VM/IO qualification; it is not a
 recommendation to raise intake blindly.
 
 Use `run_get` timing and read-only `repo_usage` to investigate the last holders.
-The [#1216 measurements](step-resource-usage.md#external-sampler-coverage-1216)
+The [#1216 measurements](../step-resource-usage.md#external-sampler-coverage-1216)
 add containers, helpers, Pod overlap, storage and bound VM-launcher totals, but
 sampled peaks remain lower bounds. Representative load, platform/independent
 helper coverage and VM/storage attribution remain incomplete. Stage 2 is still

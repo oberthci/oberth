@@ -525,13 +525,12 @@ required.
 Run rows in `run_list` and `/api/runs` carry `Repo` (repository name),
 `Ref`, `SHA`, `size`, `declared_resources`, `QueuePosition` when available,
 and the boolean `superseded`. Full run detail carries the same context in
-`Run`; compact `run_get` uses `repo`, `ref`, `sha` and `queue_position`. Size
-and declared resources come from the current admission reservation, without polling
-Workflow/Pod state or reading a checkout. An unknown size is `""` and unknown
-demand is `null`, including before the scheduler has read the pipeline and
-after the reservation is released. Declared demand is the CPU, memory and Pod
-reservation, including helpers/headroom, rather than measured usage. Scoped
-uplinks continue to omit global queue positions.
+`Run`; compact `run_get` uses `repo`, `ref`, `sha` and `queue_position`.
+Historical size and declared-resource fields remain for compatibility. Serving
+admission uses workflow slots and reports no size-weight or CPU/memory
+reservation (`size` is empty and unknown demand is `null`). Kubernetes places
+Pods using their requests. Scoped uplinks omit global queue positions. See
+[workflow admission](declared-admission.md).
 
 `superseded` is true for a branch run when a run with a greater accepted run
 sequence is queued or running in the same lane: repository, ref kind, ref and
@@ -895,8 +894,9 @@ requires requester/admin authority and all existing branch/publication checks.
 
 Tag automatic priority remains conditional on oldest waiting tag, size maximum
 and size_revoke. Losing that boost retains an admin override or accepted request,
-otherwise standard. Release execution, measured backfill, head reservations,
-strict FIFO, bounded liveness escape and pressure constraints are unchanged.
+otherwise standard. Priority preserves FIFO within each class, the workflow
+ceiling, enabled hard PSI valve, configured disk floor and concurrency groups.
+Serving admission has no measured backfill or resource head reservations.
 
 Run fields `priority_class`, `priority_reason`, `priority_requested_by`,
 `priority_refusal` and queue position report the effective class and provenance.

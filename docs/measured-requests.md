@@ -241,12 +241,12 @@ the same `measured.Build` and suggestion code. Its declaration proxy is the newe
 captured request/diagnostic values, explicitly marked; this export does not
 contain every repository's git source or fragment lock.
 
-Stage A changes no admission, priorities or execution resources.
-[Stage C admission](declared-admission.md) reserves declared peak CPU/memory,
-retaining the size-class path for undeclared workflows. pod-only queuing remains a
-later stage: the workflow controller workflow deadlines include Pending time, pod has
-no FIFO aging/workflow gang guarantee, and a global Pending-pod cap and VM
-deadlock policy need proof before handing it the queue.
+Resource reporting is read-only. [Workflow admission](declared-admission.md)
+uses the concurrent-workflow ceiling, enabled hard PSI valve and configured disk
+floor. Kubernetes places step Pods by their requests; Oberth has no serving size
+weight or declared CPU/memory budget. Argo deadlines still include Pending time,
+and Kubernetes supplies neither workflow gang scheduling nor FIFO aging. These
+limits remain visible in the product contract and installation qualification.
 
 The offline comparison table reads only the anonymised export. Examples use
 `repo-01` and `step-abc12345`. That export omits container names and incarnation

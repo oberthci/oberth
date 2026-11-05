@@ -32,10 +32,10 @@ marked **deadline-bound** carry an external clock.
   allowlisted read-only checkout of a second repository inside a Workflow Pod (e.g.
   CLI validating the Helm chart schema byte-for-byte). No primitive exists in
   the Workflow model today.
-- **Resource recommendations and enforcement** (from #754): declared admission
-  classes and per-template measured history are implemented. Keep numeric Pod
-  resources in repository YAML and compare suggestions with the declared
-  budget; see [measured requests](docs/measured-requests.md).
+- **Resource measurement completion** (from #754): per-template history and
+  read-only suggestions are implemented. Complete representative measurements
+  and commit reviewed Pod resources in repository YAML. Kubernetes places the
+  Pods; Oberth never rewrites resources. See [measured requests](docs/measured-requests.md).
 - **Adaptive GOMAXPROCS** (from #755): auto-derive GOMAXPROCS from the Workflow Pod's
   cgroup quota. The admission load guard half of the original entry shipped
   in v0.10.57 as size-weighted scheduler admission.
