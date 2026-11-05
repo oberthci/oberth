@@ -523,11 +523,11 @@ spec:
         requests:
           cpu: 1000m # measured request 2365m; retain the CI policy cap
           memory: 2688Mi
-          ephemeral-storage: 96Mi # remeasure: provisional residual cap, evicted 64Mi x1.5; compiler scratch on PVC
+          ephemeral-storage: 144Mi # remeasure: provisional evicted 96Mi cap x1.5; actual Pod-local peak unsampled
         limits:
           cpu: 2365m
           memory: 2688Mi
-          ephemeral-storage: 96Mi # remeasure: provisional residual cap, evicted 64Mi x1.5; compiler scratch on PVC
+          ephemeral-storage: 144Mi # remeasure: provisional evicted 96Mi cap x1.5; actual Pod-local peak unsampled
 
   # Pinned helm-unittest binary; fetch, verification and extraction have separate statuses.
   - name: fetch-helm-unittest
