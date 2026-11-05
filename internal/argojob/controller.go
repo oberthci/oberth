@@ -413,6 +413,13 @@ func (*workflowSpecMismatch) AmbiguousCreate() bool      { return true }
 func (*workflowSpecMismatch) WorkflowSpecMismatch() bool { return true }
 
 func sameSubmission(existing, intended *wfv1.Workflow) error {
+	sources, err := argoworkflow.PinnedSources(intended)
+	if err != nil {
+		return err
+	}
+	if err := verifyDeliveredPinnedSources(existing, sources); err != nil {
+		return err
+	}
 	// Establish the complete submission identity before classifying a mismatch
 	// as ours to clean up. A foreign run/source never enters cancellation.
 	existingRun, existingIdentity, ok := WorkflowMeta(existing)

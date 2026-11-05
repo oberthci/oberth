@@ -22,6 +22,7 @@ import (
 // Adoption pins observation to the exact Workflow found during owner recovery.
 // Resource size comes from that submission, never from the current default branch.
 type Adoption struct {
+	Sources     string
 	Fallback    model.ResourceAdmissionFallback
 	Pods        argoworkflow.PodDemand
 	RestartedAt time.Time
@@ -38,6 +39,7 @@ type Adoption struct {
 var ErrAdoptionRefused = errors.New("argojob: Workflow refused for adoption")
 
 type AdoptionRequest struct {
+	PinnedSources                []pipeline.PinnedSource
 	RepositoryID                 int64
 	Name, RunID, Ref, SHA, Group string
 	Trigger                      pipeline.Trigger
@@ -69,6 +71,9 @@ func (controller *Controller) Adopt(ctx context.Context, request AdoptionRequest
 }
 
 func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request AdoptionRequest) (Adoption, error) {
+	if err := verifyDeliveredPinnedSources(workflow, request.PinnedSources); err != nil {
+		return Adoption{}, err
+	}
 	if err := controller.verifyOwnership(workflow, request.RunID); err != nil {
 		return Adoption{}, err
 	}
@@ -139,7 +144,7 @@ func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request Adop
 	if err != nil {
 		return Adoption{}, err
 	}
-	return Adoption{Fallback: fallback, Pods: peak, RestartedAt: controller.restartedAt, KubeVirt: demand, Size: size, UID: workflow.UID, Identity: identity, SpecSHA256: specHash}, nil
+	return Adoption{Sources: workflow.Annotations[argoworkflow.SourcesAnnotation], Fallback: fallback, Pods: peak, RestartedAt: controller.restartedAt, KubeVirt: demand, Size: size, UID: workflow.UID, Identity: identity, SpecSHA256: specHash}, nil
 }
 
 // Argo's status and API metadata change while it runs. Its live spec must stay
@@ -170,7 +175,7 @@ func adoptionSpecHash(workflow *wfv1.Workflow) (string, error) {
 }
 
 func (binding Adoption) matches(workflow *wfv1.Workflow) bool {
-	if workflow.UID != binding.UID || workflow.Annotations[identityAnnotation] != binding.Identity {
+	if workflow.Annotations[argoworkflow.SourcesAnnotation] != binding.Sources || workflow.UID != binding.UID || workflow.Annotations[identityAnnotation] != binding.Identity {
 		return false
 	}
 	digest, err := adoptionSpecHash(workflow)

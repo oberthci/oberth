@@ -1262,6 +1262,8 @@ Usage of serve:
         OpenBao transit key for trusted Plan artifacts
   -secretstore-transit-mount string
         OpenBao transit mount for trusted Plan artifacts (enables trusted Plan/Apply with --secretstore-transit-key)
+  -source-allowlist string
+        JSON map of consumer upstream/org/repository to allowed pinned source repositories; empty denies all (default "{}")
   -ssh-host-key string
         SSH host private key (default "/etc/oberth/ssh/ssh_host_key")
   -ssh-listen string

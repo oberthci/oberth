@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -82,6 +83,9 @@ type DeclarationRecorder interface {
 // contracts the Argo Workflow engine satisfies, so the scheduler, admission
 // gate, store, and audit chain need no knowledge of which engine ran a run.
 type ArgoJobs struct {
+	pinnedSources  *PinnedSourceLoader
+	sourceRecorder PinnedSourceRecorder
+
 	routes        *executionTargets
 	targetBinding *model.ExecutionTargetBinding
 	targetSource  []byte
@@ -137,6 +141,7 @@ type ArgoJobs struct {
 // Delete has marked cancelled: Delete owns the intent's lifecycle once it
 // sets cancelled=true.
 type argoIntent struct {
+	sources   []pipeline.PinnedSource
 	adoption  *argojob.Adoption
 	runID     string
 	trigger   pipeline.Trigger
@@ -513,6 +518,25 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 		StepGrants: stepGrants,
 		Fragments:  fragments,
 	}
+
+	sources, err := argoworkflow.PinnedSources(resolved.Workflow())
+	if err != nil {
+		return err
+	}
+	trees, cleanup, err := jobs.pinnedSources.prepare(ctx, model.CanonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repository.Name), filepath.Dir(request.SourceDir), sources)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	submission.PinnedSources = trees
+	jobs.mu.Lock()
+	pinnedIntent := jobs.intents[request.WorkflowName]
+	pinnedIntent.sources = sources
+	jobs.intents[request.WorkflowName] = pinnedIntent
+	jobs.mu.Unlock()
+	if len(sources) > 0 && jobs.sourceRecorder == nil {
+		return errors.New("app: pinned sources require durable run recording")
+	}
 	if jobs.capabilityGrants != nil {
 		submission.Capability, err = jobs.capabilityGrants(ctx, request.Repository.ID)
 		if err != nil {
@@ -543,6 +567,11 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 	}); ok {
 		submission, err = preparer.PrepareNonroot(ctx, submission)
 		if err != nil {
+			return err
+		}
+	}
+	if len(sources) > 0 {
+		if err := jobs.sourceRecorder.RecordRunSources(ctx, request.Run.ID, testedSHA, sources); err != nil {
 			return err
 		}
 	}
@@ -647,6 +676,7 @@ func (jobs *ArgoJobs) auditSubmission(ctx context.Context, request service.Workf
 		"automount_service_account_token": automount,
 		"declared_secret_paths":           declared,
 		"fragments":                       fragments,
+		"sources":                         sourcesForAudit(submission.PinnedSources),
 	}
 	if submission.VMIDemandReceipt != nil {
 		details["vmi_demand_receipt"] = submission.VMIDemandReceipt.Summary()
@@ -792,7 +822,7 @@ func (jobs *ArgoJobs) Adopt(ctx context.Context, run model.Run) (pipeline.Size, 
 		sha = run.SHA
 	}
 	binding, found, err := controller.Adopt(ctx, argojob.AdoptionRequest{
-		RepositoryID: run.RepoID, Name: run.WorkflowName, RunID: run.ID, Ref: run.Ref, SHA: sha,
+		PinnedSources: run.SourceBindings, RepositoryID: run.RepoID, Name: run.WorkflowName, RunID: run.ID, Ref: run.Ref, SHA: sha,
 		Group: run.ConcurrencyGroup, Trigger: trigger, RunTrigger: kind, ScheduleEntry: run.ScheduleEntry,
 	})
 	if errors.Is(err, argojob.ErrAdoptionRefused) {
@@ -809,7 +839,7 @@ func (jobs *ArgoJobs) Adopt(ctx context.Context, run model.Run) (pipeline.Size, 
 		}
 		return binding.Size, true, nil
 	}
-	jobs.intents[run.WorkflowName] = argoIntent{runID: run.ID, trigger: trigger, created: true, adoption: &binding}
+	jobs.intents[run.WorkflowName] = argoIntent{runID: run.ID, trigger: trigger, created: true, adoption: &binding, sources: run.SourceBindings}
 	return binding.Size, true, nil
 }
 
@@ -857,6 +887,14 @@ func (jobs *ArgoJobs) wait(ctx context.Context, name string, destination io.Writ
 		return service.JobResult{}, fmt.Errorf("app: no in-process intent for Workflow %s", name)
 	}
 	defer jobs.forget(name, intent.runID)
+	if retained == 0 {
+		for _, source := range intent.sources {
+			if _, err := fmt.Fprintf(destination, "source %s@%s mounted read-only at %s\n", source.Repository, source.Commit, source.Path); err != nil {
+				return service.JobResult{}, err
+			}
+		}
+	}
+
 	var completion argojob.Completion
 	var err error
 

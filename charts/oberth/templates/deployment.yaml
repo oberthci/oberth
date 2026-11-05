@@ -178,6 +178,7 @@ spec:
           args:
             - serve
             - --data=/data
+            - {{ printf "--source-allowlist=%s" (toJson .Values.sourceAccess) | quote }}
             - --database=/data/oberth.sqlite
             - --ssh-listen=:2222
             - --https-listen=:8443

@@ -128,8 +128,9 @@ type RepositorySpec struct {
 }
 
 type Run struct {
-	IssueTrailers         []CommitIssueTrailer `json:"issue_trailers,omitempty"`
-	IssueTrailersRecorded bool                 `json:"-"`
+	SourceBindings        []pipeline.PinnedSource `json:"source_bindings,omitempty"`
+	IssueTrailers         []CommitIssueTrailer    `json:"issue_trailers,omitempty"`
+	IssueTrailersRecorded bool                    `json:"-"`
 	// FailureCause is private server-classified presentation metadata.
 	FailureCause string `json:"-"`
 	// Read-side identity and admission context; never part of the durable run row.

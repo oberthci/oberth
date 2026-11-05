@@ -297,6 +297,13 @@ func (seeder *SourceSeeder) fill(
 			volume.ClaimName, err, strings.TrimSpace(stderr.String()))
 	}
 	volume.ArtifactsSubPath = artifactsSubPath
+	if len(requests) == 1 && requests[0] != nil {
+		for i, tree := range requests[0].PinnedSources {
+			if err := seeder.fillPinnedSource(ctx, podName, i, tree.Directory); err != nil {
+				return err
+			}
+		}
+	}
 	if err := seeder.fillVaultCA(ctx, volume, podName, credentialed); err != nil {
 		return err
 	}
@@ -305,6 +312,22 @@ func (seeder *SourceSeeder) fill(
 	}
 	if credentialed || measure {
 		return seeder.fillServerBinary(ctx, volume, podName)
+	}
+	return nil
+}
+
+func (seeder *SourceSeeder) fillPinnedSource(ctx context.Context, podName string, index int, directory string) error {
+	reader, writer := io.Pipe()
+	done := make(chan error, 1)
+	go func() { err := writeSourceArchive(writer, directory); _ = writer.CloseWithError(err); done <- err }()
+	target := fmt.Sprintf("/seed/pinned-sources/%d", index)
+	command := []string{"/bin/sh", "-c", "mkdir -p " + target + " && tar -xzf - -C " + target}
+	// Do not reflect remote output into errors. Only fixed paths enter the shell.
+	execErr := seeder.exec(ctx, seeder.config.Namespace, podName, seedContainer, command, reader, io.Discard, io.Discard)
+	_ = reader.Close()
+	archiveErr := <-done
+	if execErr != nil || archiveErr != nil {
+		return errors.New("argojob: pinned source delivery failed")
 	}
 	return nil
 }

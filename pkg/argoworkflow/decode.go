@@ -2,6 +2,7 @@ package argoworkflow
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -38,9 +39,38 @@ func Decode(source []byte) (*wfv1.Workflow, error) {
 	if err := rejectMultipleDocuments(source); err != nil {
 		return nil, err
 	}
-	var workflow wfv1.Workflow
-	if err := yaml.UnmarshalStrict(source, &workflow); err != nil {
+	encoded, err := yaml.YAMLToJSONStrict(source)
+	if err != nil {
 		return nil, fmt.Errorf("argoworkflow: decode Workflow: %w", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		return nil, err
+	}
+	sources, hasSources := fields["sources"]
+	delete(fields, "sources")
+	encoded, err = json.Marshal(fields)
+	if err != nil {
+		return nil, err
+	}
+	var workflow wfv1.Workflow
+	if err := yaml.UnmarshalStrict(encoded, &workflow); err != nil {
+		return nil, fmt.Errorf("argoworkflow: decode Workflow: %w", err)
+	}
+	if hasSources {
+		if _, exists := workflow.Annotations[SourcesAnnotation]; exists {
+			return nil, errors.New("argoworkflow: duplicate sources declaration")
+		}
+		if _, err := decodePinnedSources(sources); err != nil {
+			return nil, err
+		}
+		if workflow.Annotations == nil {
+			workflow.Annotations = map[string]string{}
+		}
+		workflow.Annotations[SourcesAnnotation] = string(sources)
+	}
+	if _, err := PinnedSources(&workflow); err != nil {
+		return nil, err
 	}
 	if workflow.APIVersion != APIVersion {
 		return nil, fmt.Errorf("argoworkflow: apiVersion must be %q, got %q", APIVersion, workflow.APIVersion)

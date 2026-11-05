@@ -561,3 +561,6 @@ trustedTests:
   # Operator must set the actual positive KVM device GID before adding recipes.
   # Zero disables trusted suite execution; no host-specific group is assumed.
   kvmSupplementalGroup: 0
+
+# Explicit consumer-to-producer upstream/org/repository pairs. Empty denies all.
+sourceAccess: {}

@@ -3414,3 +3414,13 @@ must remain valid through delivery; skipped grants are released and not consumed
 Authenticated `POST /api/promotions` accepts the same body and returns `{id}`.
 `oberth promotion create --sources-file sources.json --branch main --repo <repo>`
 calls the same MCP operation. See [promotion trains](docs/promotion-trains.md).
+
+### Pinned repository source trees
+
+Workflow `sources` declarations use exact commit objects, explicit canonical
+consumer/producer grants and read-only `/work/sources/name` mounts. The server
+fetches and verifies bounded trees through its existing registered Git access;
+Pods receive no producer credential. Immutable `source_bindings`, submission
+audits and run logs retain the selected identities. Missing or denied sources
+refuse execution without fallback. The complete limits, migration and hosted
+acceptance boundary are in [pinned sources](docs/pinned-sources.md).

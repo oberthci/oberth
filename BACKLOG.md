@@ -28,10 +28,10 @@ marked **deadline-bound** carry an external clock.
   operator-owned privileged tier (KubeVirt VM or equivalent) with the exact
   candidate SHA bound into the run and pin cleanup proven. Until designed,
   privileged eBPF validation stays outside Oberth CI.
-- **Trusted cross-repository checkouts** (from #709): a provider-owned,
-  allowlisted read-only checkout of a second repository inside a Workflow Pod (e.g.
-  CLI validating the Helm chart schema byte-for-byte). No primitive exists in
-  the Workflow model today.
+- **Pinned-source hosted acceptance** (from #709, #1476): exact commit source
+  declarations, explicit repository-pair grants and read-only delivery are
+  implemented. Publication and hosted positive/negative proof remain required;
+  see [pinned sources](docs/pinned-sources.md).
 - **Resource measurement completion** (from #754): per-template history and
   read-only suggestions are implemented. Complete representative measurements
   and commit reviewed Pod resources in repository YAML. Kubernetes places the
