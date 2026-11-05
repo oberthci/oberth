@@ -47,3 +47,20 @@ the already fetched Node archive through a read-only mount, without another
 download. Extraction and execution use Pod-private scratch, removed on exit.
 Setup/publisher tools, other test leaves and the workflow DAG are unchanged.
 Both Go suites keep `-race` and `-count=1`, so this gate runs on every CI attempt.
+
+The required Node harness also runs `hack/test-step-timers-reconnect.mjs`.
+Running step durations use the shared one-second local ticker and authoritative
+start timestamps, retain step duration formatting, and refresh on visibility
+resume. Terminal rows have no ticker metadata. The checks advance the clock
+without network responses and cover invalid/future timestamps and completion.
+
+A transient stream failure falls back to cursor-based polling while scheduling
+another streaming attempt after 1, 2, 4, 8, 16, then at most 30 seconds. A received
+stream chunk resets backoff. Reconnection waits for the in-flight poll before
+reading its updated cursor; a fallback request is bounded to 10 seconds.
+Navigation, sign-out and terminal EOF cancel transport and reconnect work.
+The Node checks cover fragmented UTF-8/SSE frames, partial command records,
+exact-cursor handoff, repeated failures, and aborting a pending fallback request.
+The browser suite additionally checks timer focus/DOM stability and restoration
+of streaming after a transient drop. These local checks do not measure a deployed
+proxy or producer's output latency.

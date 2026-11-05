@@ -344,7 +344,7 @@ function clearToken() {
 async function api(url, opts = {}) {
   const gen = state.authGen;
   const seq = state.routeSeq;
-  const controller = new AbortController();
+  const controller = opts.controller || new AbortController();
   if (!opts.detached) state.pendingController = controller;
   let response;
   try {
@@ -533,10 +533,12 @@ function runListDuration(seconds) {
 }
 function tickRunTimers() {
   document.querySelectorAll("[data-started]").forEach(cell => {
-    cell.textContent = runListDuration(spanSeconds(cell.dataset.started, null, true));
+    const seconds = spanSeconds(cell.dataset.started, null, true);
+    cell.textContent = cell.dataset.timerKind === "step" ? stepDuration(seconds) : runListDuration(seconds);
   });
 }
 setInterval(tickRunTimers, 1000);
+document.addEventListener?.("visibilitychange", () => { if (!document.hidden) tickRunTimers(); });
 function prioritySummary(run) {
   const position = run.QueuePosition || run.Scheduling?.queue_position;
   return [`priority ${priorityClass(run)}`, run.priority_requested_by ? `requested by ${run.priority_requested_by}` : "", run.priority_reason, position ? `queue position ${position}` : "", run.priority_refusal].filter(Boolean).join(" · ");
@@ -727,14 +729,18 @@ function orderSteps(steps) {
 /* Every step is the same row: icon, name, duration. The only variation is
    the status icon, the duration column (a state word until the step starts),
    and the small retry / secret markers. */
+function stepDuration(seconds) { return seconds < 1 ? "<1s" : fmtDur(seconds); }
 function stepRow(row, selectedKey) {
   const { step, label, identity } = row;
   const key = stepKey(step), sk = statusKind(step.Status);
   const seconds = spanSeconds(step.StartedAt, step.FinishedAt, sk === "run");
   // A row that ran shows its duration, never "--": a sub-second step is "<1s".
-  const timed = step.StartedAt && (step.FinishedAt || sk === "run");
-  const column = timed ? (seconds < 1 ? "<1s" : fmtDur(seconds)) : sk === "cancel" ? "skipped" : statusLabel(step.Status);
-  return `<button class="v4row${key === selectedKey ? " sel" : ""}${sk === "pending" ? " pend" : ""}" data-select-step="${esc(key)}"><span class="ic ${sk === "pass" ? "g" : sk === "fail" ? "r" : sk === "run" ? "o" : "d"}">${sk === "pass" ? "✓" : sk === "fail" ? "✗" : sk === "run" ? "◠" : sk === "cancel" ? "⊘" : "◌"}</span><span class="nm">${esc(label)}</span>${identity.attempt ? `<span class="tag">retry ${esc(identity.attempt)}</span>` : ""}${step.Secrets ? '<span class="tag">secret</span>' : ""}<span class="dur">${esc(column)}</span></button>`;
+  const validStart = Number.isFinite(Date.parse(step.StartedAt || ""));
+  const validFinish = Number.isFinite(Date.parse(step.FinishedAt || ""));
+  const timed = validStart && (validFinish || sk === "run");
+  const ticking = validStart && !validFinish && sk === "run";
+  const column = timed ? stepDuration(seconds) : sk === "cancel" ? "skipped" : statusLabel(step.Status);
+  return `<button class="v4row${key === selectedKey ? " sel" : ""}${sk === "pending" ? " pend" : ""}" data-select-step="${esc(key)}"><span class="ic ${sk === "pass" ? "g" : sk === "fail" ? "r" : sk === "run" ? "o" : "d"}">${sk === "pass" ? "✓" : sk === "fail" ? "✗" : sk === "run" ? "◠" : sk === "cancel" ? "⊘" : "◌"}</span><span class="nm">${esc(label)}</span>${identity.attempt ? `<span class="tag">retry ${esc(identity.attempt)}</span>` : ""}${step.Secrets ? '<span class="tag">secret</span>' : ""}<span class="dur"${ticking ? ` data-started="${esc(step.StartedAt)}" data-timer-kind="step"` : ""}>${esc(column)}</span></button>`;
 }
 function defaultStep(detail) {
   const steps = detail.Steps || [];
@@ -1101,6 +1107,9 @@ class LiveLogEventSource {
 function stopLiveTransport(live) {
   live.source?.close(); live.source = null;
   clearInterval(live.pollTimer); live.pollTimer = null;
+  clearTimeout(live.retryTimer); live.retryTimer = null;
+  live.pollController?.abort();
+  live.connected = false;
 }
 function closeLiveLog() {
   const live = state.live;
@@ -1118,7 +1127,9 @@ function receiveLiveChunk(live, payload) {
   const now = Date.now();
   const records = ingestLiveChunk(live, payload.chunk || "", now, payload.done === true);
   if (typeof payload.offset === "number") live.offset = payload.offset;
-  live.lastPoll = now; live.error = ""; live.done = payload.done === true;
+  live.lastPoll = now; live.error = "";
+  if (!live.fallback) live.retries = 0;
+  live.done = payload.done === true;
   if (live.view) {
     live.view.pending = live.view.pending.concat(liveViewLines(splitAttributedLogText(records.length ? records.join("\n") + "\n" : ""), live.view));
     // Bound queued work even when animation frames are paused in a hidden tab.
@@ -1132,15 +1143,36 @@ function receiveLiveChunk(live, payload) {
   if (live.done) stopLiveTransport(live);
   scheduleLiveFrame(live);
 }
-async function pollLiveLog(live) {
-  if (live.busy || live.done || live.closed || state.live !== live) return;
+function pollLiveLog(live) {
+  if (live.busy || live.done || live.closed || state.live !== live || live.source) return live.pollPromise;
   live.busy = true;
-  try {
-    const payload = await api(`/api/runs/${enc(live.runID)}/livelog?offset=${live.offset}`, {detached: true});
-    receiveLiveChunk(live, payload);
-  } catch (err) {
-    if (state.live === live) { live.error = String(err.message || err); scheduleLiveFrame(live); }
-  } finally { live.busy = false; }
+  const controller = live.pollController = new AbortController();
+  // A stalled fallback request must not prevent a later streaming attempt.
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  live.pollPromise = (async () => {
+    try {
+      const payload = await api(`/api/runs/${enc(live.runID)}/livelog?offset=${live.offset}`, {detached: true, controller});
+      if (!controller.signal.aborted) receiveLiveChunk(live, payload);
+    } catch (err) {
+      if (state.live === live && !live.closed && !live.done) {
+        live.error = controller.signal.aborted ? "live poll timed out" : String(err.message || err);
+        scheduleLiveFrame(live);
+      }
+    } finally {
+      clearTimeout(timeout);
+      live.pollController = null;
+      live.busy = false;
+    }
+  })();
+  return live.pollPromise;
+}
+function canStreamLiveLog() { return typeof ReadableStream !== "undefined" && typeof TextDecoder !== "undefined"; }
+function startLiveStream(live) {
+  if (state.live !== live || live.closed || live.done) return;
+  live.fallback = false;
+  live.source = new LiveLogEventSource(`/api/runs/${enc(live.runID)}/livelog/stream?offset=${live.offset}`,
+    payload => receiveLiveChunk(live, payload), err => fallbackLiveLog(live, err),
+    () => { if (state.live === live && !live.closed) { live.connected = true; live.error = ""; scheduleLiveFrame(live); } });
 }
 function fallbackLiveLog(live, err) {
   if (state.live !== live || live.closed || live.done) return;
@@ -1148,6 +1180,19 @@ function fallbackLiveLog(live, err) {
   live.fallback = true;
   live.error = String(err?.message || "");
   live.pollTimer = setInterval(() => { pollLiveLog(live); }, livePollMs);
+  if (canStreamLiveLog()) {
+    const delay = Math.min(30000, 1000 * 2 ** Math.min(live.retries || 0, 5));
+    live.retries = (live.retries || 0) + 1;
+    live.retryTimer = setTimeout(async () => {
+      live.retryTimer = null;
+      clearInterval(live.pollTimer); live.pollTimer = null;
+      // The poll owns the cursor until it settles. Never overlap transports
+      // or reconnect from a cursor captured before that response arrives.
+      await live.pollPromise;
+      startLiveStream(live);
+    }, delay);
+  }
+  scheduleLiveFrame(live);
   return pollLiveLog(live);
 }
 function scheduleLiveFrame(live) {
@@ -1194,11 +1239,8 @@ async function liveLogContent(run, activeBurn, activeStep) {
   if (!state.live || state.live.runID !== run.ID) {
     closeLiveLog();
     const live = state.live = {runID: run.ID, routePath: location.pathname, offset: -1, text: "", pending: "", pendingTruncated: false, busy: false, startedAt: Date.now(), lastPoll: 0, lastOutput: new Map(), delivery: new Map(), error: "", done: false, frame: null};
-    if (typeof ReadableStream !== "undefined" && typeof TextDecoder !== "undefined") {
-      live.source = new LiveLogEventSource(`/api/runs/${enc(run.ID)}/livelog/stream?offset=${live.offset}`,
-        payload => receiveLiveChunk(live, payload), err => fallbackLiveLog(live, err),
-        () => { if (state.live === live) { live.connected = true; scheduleLiveFrame(live); } });
-    } else await fallbackLiveLog(live);
+    if (canStreamLiveLog()) startLiveStream(live);
+    else await fallbackLiveLog(live);
     if (state.live !== live) return "";
   }
   const live = state.live;

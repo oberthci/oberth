@@ -16,7 +16,7 @@ const server = createServer((req, res) => {
     assert.equal(url.searchParams.has('token'), false);
     res.writeHead(200, {'Content-Type': 'text/event-stream'});
     res.write(': ping\n\n');
-    const connection = {res, closed: false};
+    const connection = {res, closed: false, offset: Number(url.searchParams.get("offset"))};
     connections.push(connection);
     res.on('close', () => {connection.closed = true;});
   } else if (url.pathname.endsWith('/livelog')) {
@@ -31,7 +31,7 @@ const server = createServer((req, res) => {
     res.end(source.slice(0, source.indexOf('/* ---------- events ---------- */')));
   } else {
     res.writeHead(200, {'Content-Type': 'text/html'});
-    res.end(`<style>${css} .term-body{height:240px;max-height:240px;} .log-line{min-height:20px}</style><div id="app"></div><script src="/app.js"></script>`);
+    res.end(`<meta charset="utf-8"><style>${css} .term-body{height:240px;max-height:240px;} .log-line{min-height:20px}</style><div id="app"></div><script src="/app.js"></script>`);
   }
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -55,6 +55,25 @@ try {
   await page.evaluate(() => document.fonts.ready);
   assert.equal(connections.length, 1);
   assert.equal(await page.evaluate(() => metadataPollMs), 4000);
+  // Local step clocks flow without any metadata/log response or DOM replacement.
+  await page.evaluate(async () => {
+    detail.Steps = [{Burn:'test', Step:'clock', Status:'running', Ordinal:0, StartedAt:new Date(Date.now()-2000).toISOString()}];
+    await renderRunDetailView(detail,state.routeSeq);
+    window.timerButton=document.querySelector('[data-select-step]');
+    window.timerCell=document.querySelector('[data-timer-kind="step"]');
+    window.timerBefore=timerCell.textContent; timerButton.focus();
+  });
+  await page.waitForFunction(() => timerCell.textContent !== timerBefore);
+  assert.equal(await page.evaluate(() => timerCell.isConnected && document.activeElement === timerButton && originalTerm === document.getElementById('termBody')),true);
+  assert.equal(connections.length,1); assert.deepEqual(pollOffsets,[]);
+  await page.evaluate(async () => {
+    detail.Steps[0].Status='passed';
+    detail.Steps[0].FinishedAt=new Date(Date.parse(detail.Steps[0].StartedAt)+5000).toISOString();
+    await renderRunDetailView(detail,state.routeSeq);
+    tickRunTimers();
+  });
+  assert.equal(await page.locator('[data-select-step="test / clock"] .dur').textContent(),'5s');
+  assert.equal(await page.locator('[data-timer-kind="step"]').count(),0);
   // Split a frame inside a UTF-8 code point; partial command records only render
   // after a subsequent newline, and delivery metadata stays outside the log.
   const wire = Buffer.from(frame('[build/one] first 🚀\n[build/one] par', 50));
@@ -104,11 +123,17 @@ try {
   assert.equal(connections.length, 1);
   assert.equal(await page.locator('#termBody .log-hdr').count(), 0);
   assert.equal(await page.locator('#termBody').textContent().then(s => s.includes('first 🚀')), false);
-  // A dropped SSE connection resumes polling at the last delivered cursor.
-  fallback = {chunk:'[build/two] fallback-tail', offset:250, done:true};
+  // A transient drop polls once, then restores SSE at the updated byte cursor.
+  fallback = {chunk:'[build/two] fallback-', offset:250, done:false};
   connections[0].res.end();
-  await page.waitForFunction(() => state.live.done && document.getElementById('termBody').textContent.includes('fallback-tail'));
+  await page.waitForFunction(() => state.live.connected && !state.live.fallback && state.live.offset === 250);
+  assert.equal(connections.length, 2);
+  assert.equal(connections[1].offset, 250);
+  assert.equal(connections[0].closed, true);
   assert.deepEqual(pollOffsets, [220]);
+  connections[1].res.write(frame('tail', 254, true));
+  await page.waitForFunction(() => state.live.done && document.getElementById('termBody').textContent.includes('fallback-tail'));
+  assert.equal((await page.locator('#termBody').textContent()).split('fallback-tail').length, 2);
   assert.equal(await page.evaluate(() => state.live.source === null && state.live.pollTimer === null), true);
   // A done event on SSE itself flushes a final unterminated line and closes.
   await page.evaluate(async () => {
@@ -116,7 +141,7 @@ try {
     await renderRunDetailView(detail, state.routeSeq);
   });
   await page.waitForFunction(() => state.live.connected);
-  connections[1].res.write(frame('[build/two] sse-final', 280, true));
+  connections[2].res.write(frame('[build/two] sse-final', 280, true));
   await page.waitForFunction(() => state.live.done && document.getElementById('termBody').textContent.includes('sse-final'));
   assert.equal(await page.evaluate(() => state.live.source === null && state.live.pending === ''), true);
   // Navigation and sign-out close active streams and stale events cannot write.
@@ -125,7 +150,7 @@ try {
     await renderRunDetailView(detail, state.routeSeq);
   });
   await page.waitForFunction(() => state.live.connected);
-  assert.equal(connections.length, 3);
+  assert.equal(connections.length, 4);
   await page.evaluate(async () => {
     window.abandoned = state.live; history.pushState(null, '', '/repos'); renderRepos = async () => {}; await route();
     receiveLiveChunk(abandoned, {chunk:'stale\n', offset:999});
