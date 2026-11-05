@@ -16,6 +16,10 @@ import (
 // consumes the step's termination message or changes admission. Peaks are
 // sampled lower bounds, including when a step is killed between polls.
 type StepResourceUsage struct {
+	MemoryCoverage         MetricCoverage `json:"memory_coverage,omitzero"`
+	CPUCoverage            MetricCoverage `json:"cpu_coverage,omitzero"`
+	StorageCoverage        MetricCoverage `json:"storage_coverage,omitzero"`
+	PodEphemeralLimitBytes *int64         `json:"pod_ephemeral_limit_bytes,omitempty"`
 	// Optional server-captured provenance and numeric limits. Stored in the
 	// existing observation JSON; old v2 rows remain readable without migration.
 	TemplateName        string `json:"template_name,omitempty"`
@@ -95,8 +99,13 @@ func (u StepResourceUsage) Validate() error {
 	if u.TemplateName != "" && !diagnosticName.MatchString(u.TemplateName) || len(u.FragmentRepository) > 253 || strings.ContainsAny(u.FragmentRepository, "\x00\r\n\t ") {
 		return bad
 	}
-	for _, p := range []*int64{u.CPULimitNanoCores, u.MemoryLimitBytes, u.EphemeralLimitBytes} {
+	for _, p := range []*int64{u.CPULimitNanoCores, u.MemoryLimitBytes, u.EphemeralLimitBytes, u.PodEphemeralLimitBytes} {
 		if p != nil && *p < 0 {
+			return bad
+		}
+	}
+	for _, coverage := range []MetricCoverage{u.MemoryCoverage, u.CPUCoverage, u.StorageCoverage} {
+		if !coverage.Valid(u.LastObservedAt) {
 			return bad
 		}
 	}
@@ -180,13 +189,16 @@ func MergeResourceUsage(old, next StepResourceUsage) (StepResourceUsage, error) 
 	for _, p := range []struct {
 		old  **int64
 		next *int64
-	}{{&out.CPULimitNanoCores, next.CPULimitNanoCores}, {&out.MemoryLimitBytes, next.MemoryLimitBytes}, {&out.EphemeralLimitBytes, next.EphemeralLimitBytes}} {
+	}{{&out.CPULimitNanoCores, next.CPULimitNanoCores}, {&out.MemoryLimitBytes, next.MemoryLimitBytes}, {&out.EphemeralLimitBytes, next.EphemeralLimitBytes}, {&out.PodEphemeralLimitBytes, next.PodEphemeralLimitBytes}} {
 		if *p.old == nil {
 			*p.old = p.next
 		} else if p.next != nil && **p.old != *p.next {
 			out.RequestsChanged = true
 		}
 	}
+	out.MemoryCoverage = out.MemoryCoverage.Merge(next.MemoryCoverage)
+	out.CPUCoverage = out.CPUCoverage.Merge(next.CPUCoverage)
+	out.StorageCoverage = out.StorageCoverage.Merge(next.StorageCoverage)
 	if next.Version == 2 {
 		out.Version = 2
 		out.ContainerKind = next.ContainerKind

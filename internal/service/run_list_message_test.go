@@ -19,10 +19,10 @@ func TestRunListMessageContract(t *testing.T) {
 	}{
 		{"queued", model.Run{Status: model.RunQueued}, "in line"},
 		{"tag boost", model.Run{Status: model.RunRunning, StartedAt: &now, Priority: model.PriorityHighest, PriorityReason: model.TagReleasePriorityReason}, ""},
-		{"aged", model.Run{Status: model.RunRunning, StartedAt: &now, Priority: model.PriorityHigh, PriorityReason: model.PriorityAgedReason}, "priority high (aged)"},
+		{"aged", model.Run{Status: model.RunRunning, StartedAt: &now, Priority: model.PriorityPromotion, PriorityReason: model.PriorityAgedReason}, "priority promotion (aged)"},
 		{"running", model.Run{Status: model.RunRunning, StartedAt: &now, Priority: "normal", PriorityReason: "ordinary run"}, ""},
 		{"promotion", model.Run{Status: model.RunRunning, StartedAt: &now, Priority: "highest", PriorityReason: "promotion run"}, ""},
-		{"admin priority", model.Run{Status: model.RunRunning, StartedAt: &now, Priority: "highest", PriorityReason: "admin bump: release candidate"}, "priority highest · release candidate"},
+		{"admin priority", model.Run{Status: model.RunRunning, StartedAt: &now, Priority: "highest", PriorityReason: "admin bump: release candidate"}, "priority high · release candidate"},
 		{"publishing", model.Run{Status: model.RunRunning, StartedAt: &now, Phase: "publishing"}, "publishing to upstream"},
 		{"passed", model.Run{Status: model.RunPassed}, ""},
 		{"schedule", model.Run{Status: model.RunPassed, Trigger: "schedule", ScheduleEntry: "nightly"}, "schedule nightly"},
@@ -110,7 +110,7 @@ func TestRunListWaitQualifierPrivacyAndClipping(t *testing.T) {
 	}
 	run := model.Run{Status: model.RunQueued, DisplayStatus: model.DisplayQueued, Priority: model.PriorityHighest, PriorityReason: "admin bump: release"}
 	applyQueuedDisplay(&run, &model.RunScheduling{State: "queued", QueuePosition: 2}, "")
-	if run.DisplayReason != "priority highest · position 2 in line" {
+	if run.DisplayReason != "priority high · position 2 in line" {
 		t.Fatal(run.DisplayReason)
 	}
 }

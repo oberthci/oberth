@@ -227,6 +227,15 @@ func (scheduler *Scheduler) runCreateCleanup(ctx context.Context) {
 		case <-scheduler.createWake:
 		}
 		scheduler.settleOneCreate(ctx)
+		if cleanup, ok := scheduler.jobs.(interface{ ReconcileTargetCleanup(context.Context) error }); ok {
+			attempt, cancel := context.WithTimeout(ctx, createSettlementAttemptBudget)
+			if err := scheduler.requireMutation(attempt); err == nil {
+				if err := cleanup.ReconcileTargetCleanup(attempt); err != nil {
+					log.Print("WARN: execution target cleanup remains pending")
+				}
+			}
+			cancel()
+		}
 	}
 }
 func (scheduler *Scheduler) settleOneCreate(ctx context.Context) {

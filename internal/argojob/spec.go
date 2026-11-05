@@ -67,6 +67,11 @@ const (
 // Config is the administrator-owned half of the Argo engine. Every field that
 // decides trust is here, not in the repository document.
 type Config struct {
+	// Custody journals remote effects; it is not serialized operator authority.
+	Custody TargetCustody `json:"-"`
+	// ExecutionPlacement selects an immutable isolated administrator profile.
+	ExecutionPlacement *ExecutionPlacement
+
 	// ExecutorScratchSizeLimit bounds Argo emissary output and control files.
 	// Empty selects 1Gi; this is separate from the test container private scratch.
 	ExecutorScratchSizeLimit string
@@ -299,8 +304,18 @@ func (config *Config) applyDefaults() {
 	}
 }
 
-// Validate rejects a configuration that could not produce a safe submission.
+// DefaultedConfig freezes the same defaults used by the native controller.
+func DefaultedConfig(config Config) (Config, error) {
+	config.applyDefaults()
+	return config, config.Validate()
+}
+
+// Validate checks engine configuration, including retained custody after expiry.
+// Build and allocation separately require a currently valid placement admission.
 func (config Config) Validate() error {
+	if err := config.ExecutionPlacement.validate(); err != nil {
+		return err
+	}
 	if config.StalledRunTimeout < 0 {
 		return errors.New("argojob: stalled run timeout must be nonnegative")
 	}
@@ -565,8 +580,10 @@ func vaultAddressRequiresPinnedAnchor(address string) bool {
 
 // Request is one run's submission intent.
 type Request struct {
-	Capability    *argoworkflow.Capability
-	DemandReceipt *argoworkflow.DemandReceipt
+	// BranchAuthority is native canonical policy resolution, never YAML authority.
+	BranchAuthority *vmrunner.BranchAuthority `json:"-"`
+	Capability      *argoworkflow.Capability
+	DemandReceipt   *argoworkflow.DemandReceipt
 	// ResourceMaximum supports legacy reconstruction and callers without numeric grants.
 	ResourceMaximum pipeline.Size
 	// ResourceCeiling is the fresh server-owned repository grant snapshot.
@@ -663,6 +680,17 @@ type Request struct {
 // legacy-chain step fetches.
 func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	config.applyDefaults()
+	if err := config.ExecutionPlacement.selectRequest(config, request); err != nil {
+		return nil, err
+	}
+	if config.ExecutionPlacement != nil {
+		expected := (&Controller{config: config}).expectedSourceVolume(request)
+		if request.SourceVolume != (SourceVolume{}) && request.SourceVolume != expected {
+			return nil, errors.New("argojob: isolated source volume differs from server delivery")
+		}
+		// Audit and submission predict the same server-owned delivery before seed.
+		request.SourceVolume = expected
+	}
 	if request.TrustedKVM != nil {
 		if err := prepareTrustedKVMRequest(config, &request); err != nil {
 			return nil, err
@@ -693,6 +721,11 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 		return nil, err
 	}
 	workflow := resolved.Workflow()
+	if config.ExecutionPlacement != nil {
+		if err := validatePlacementSource(workflow); err != nil {
+			return nil, err
+		}
+	}
 	if mirrorOnly, err := argoworkflow.DeclaredGoProxyMirrorOnly(workflow); err != nil {
 		return nil, err
 	} else if mirrorOnly && strings.TrimSpace(config.GoProxyURL) == "" {
@@ -946,6 +979,10 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 		}
 	}
 	if err := projectExecutorTokens(workflow, config); err != nil {
+		return nil, err
+	}
+
+	if err := applyExecutionPlacement(workflow, config, request); err != nil {
 		return nil, err
 	}
 

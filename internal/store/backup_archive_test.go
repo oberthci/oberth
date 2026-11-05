@@ -13,17 +13,38 @@ import (
 	"testing"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/testdb"
 )
+
+// Reuse only the closed, checkpointed historical schema. Every caller gets a
+// new O_EXCL 0600 file and commits its own canary into a private writable WAL.
+var backupTemplate testdb.Template
 
 func backupFixture(t *testing.T) (string, *Store) {
 	t.Helper()
+	backupFixtureCalls.Add(1)
 	p := filepath.Join(t.TempDir(), "source.sqlite")
-	db, e := CreateGenesis(context.Background(), p, Options{})
+	backupTemplate.Copy(t, p, func(path string) error {
+		backupFixtureGenesisBuilds.Add(1)
+		db, e := CreateGenesis(context.Background(), path, Options{})
+		if e != nil {
+			return e
+		}
+		_, e = db.db.Exec(publicationRetryDowngradeSQL + "DROP TABLE IF EXISTS step_resource_usage; DROP INDEX IF EXISTS runs_latest_ref_idx; DROP TABLE IF EXISTS run_priority_overrides; DROP TABLE IF EXISTS queue_priority_patterns; DELETE FROM schema_migrations WHERE version>=34; ALTER TABLE step_results DROP COLUMN memory_peak_bytes; DELETE FROM schema_migrations WHERE version=33; ALTER TABLE schedule_fires DROP COLUMN last_fired_at; DELETE FROM schema_migrations WHERE version=32; DROP TRIGGER run_schedule_entry_immutable; ALTER TABLE runs DROP COLUMN schedule_entry; DELETE FROM schema_migrations WHERE version=31; DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings; DROP INDEX runs_admission_idx; ALTER TABLE runs DROP COLUMN admission_sequence; DROP TABLE kubevirt_grants; DROP TABLE uplink_scopes; ALTER TABLE issues DROP COLUMN scope_upstream_id; ALTER TABLE step_results DROP COLUMN termination_json; DELETE FROM schema_migrations WHERE version>=21; PRAGMA wal_autocheckpoint=0")
+		return errors.Join(e, db.Close())
+	})
+	// OpenCurrent would migrate schema 20. The internal opener preserves the
+	// historical schema while retaining production FULL and live WAL readers.
+	db, e := openCurrentUnverified(t.Context(), p, Options{}, false)
 	if e != nil {
 		t.Fatal(e)
 	}
-	t.Cleanup(func() { _ = db.Close() })
-	if _, e := db.db.Exec(publicationRetryDowngradeSQL + "DROP TABLE IF EXISTS step_resource_usage; DROP INDEX IF EXISTS runs_latest_ref_idx; DROP TABLE IF EXISTS run_priority_overrides; DROP TABLE IF EXISTS queue_priority_patterns; DELETE FROM schema_migrations WHERE version>=34; ALTER TABLE step_results DROP COLUMN memory_peak_bytes; DELETE FROM schema_migrations WHERE version=33; ALTER TABLE schedule_fires DROP COLUMN last_fired_at; DELETE FROM schema_migrations WHERE version=32; DROP TRIGGER run_schedule_entry_immutable; ALTER TABLE runs DROP COLUMN schedule_entry; DELETE FROM schema_migrations WHERE version=31; DROP TRIGGER run_timing_claim; DROP TRIGGER run_timing_grant; DROP TRIGGER run_timing_park; DROP TRIGGER run_timing_terminal; DROP TABLE step_timings; DROP TABLE run_admission_timings; DROP TABLE run_timings; DROP INDEX runs_admission_idx; ALTER TABLE runs DROP COLUMN admission_sequence; DROP TABLE kubevirt_grants; DROP TABLE uplink_scopes; ALTER TABLE issues DROP COLUMN scope_upstream_id; ALTER TABLE step_results DROP COLUMN termination_json; DELETE FROM schema_migrations WHERE version>=21; PRAGMA wal_autocheckpoint=0"); e != nil {
+	t.Cleanup(func() {
+		if e := db.Close(); e != nil {
+			t.Errorf("close backup fixture: %v", e)
+		}
+	})
+	if _, e := db.db.Exec("PRAGMA wal_autocheckpoint=0"); e != nil {
 		t.Fatal(e)
 	}
 	if _, e := db.AppendAuditAction(context.Background(), model.AuditActionSpec{Actor: "fixture", Action: "backup-test", ResourceType: "backup", ResourceID: "private-canary"}); e != nil {

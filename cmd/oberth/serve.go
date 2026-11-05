@@ -161,6 +161,8 @@ type serveOptions struct {
 	secretStoreTransitKey   string
 	secretStoreInsecureHTTP bool
 
+	pipelineNetworkPolicyEnabled *bool
+
 	// Argo execution engine. Leaving argoNamespace empty leaves the engine
 	// off entirely, which is the default: every repository then runs on the
 	// Argo Workflow engine exactly as before.
@@ -180,6 +182,8 @@ type serveOptions struct {
 	argoVaultCredentialedRole    string
 	argoVaultCISecretsRole       string
 	argoVaultCACert              string
+	argoExecutionPlacementConfig string
+	argoExecutionTargetConfig    string
 	argoReleaseWIFConfig         string
 	argoReleaseTagRoutesConfig   string
 	argoWorkflowTimeout          time.Duration
@@ -322,6 +326,14 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.secretStoreTransitKey, "secretstore-transit-key", "", "OpenBao transit key for trusted Plan artifacts")
 	flags.BoolVar(&options.secretStoreInsecureHTTP, "secretstore-insecure-http", false, "DEVELOPMENT ONLY: allow a plain-HTTP OpenBao address")
 	flags.StringVar(&options.argoNamespace, "argo-namespace", "", "namespace for Argo Workflow pipelines (required)")
+	flags.Func("pipeline-network-policy-enabled", "configured chart networkPolicy.enabled (true or false); omitted means unavailable, not measured CNI enforcement", func(value string) error {
+		if value != "true" && value != "false" {
+			return errors.New("pipeline NetworkPolicy configuration must be true or false")
+		}
+		enabled := value == "true"
+		options.pipelineNetworkPolicyEnabled = &enabled
+		return nil
+	})
 	flags.StringVar(&options.argoExecutorScratchSizeLimit, "argo-executor-scratch-size-limit", "1Gi", "per-Pod Argo executor scratch size limit (Kubernetes quantity)")
 	flags.StringVar(&options.argoControllerProfile, "argo-controller-profile", "", "exact controller profile to verify before nonroot submission; empty disables nonroot")
 	flags.StringVar(&options.argoSourceStorageClass, "argo-source-storage-class", "", "storage class for per-run pipeline source volumes (empty: cluster default)")
@@ -339,6 +351,8 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.argoVaultCISecretsRole, "argo-vault-ci-secrets-role", "", "OpenBao Kubernetes auth role for CI pipelines with approved upstream-scoped secrets; bound to the CI-secrets ServiceAccount and namespace (empty refuses CI credentialed pipelines at admission)")
 	flags.StringVar(&options.argoVaultCACert, "argo-vault-ca-cert", "", "PEM file pinning the trust anchors credentialed pipeline containers verify --argo-vault-address against")
 	flags.StringVar(&options.argoReleaseTagRoutesConfig, "argo-release-tag-routes-config", "", "absolute path to administrator-owned release tag pattern -> workflow file JSON")
+	flags.StringVar(&options.argoExecutionPlacementConfig, "argo-execution-placement-config", "", "absolute path to administrator-owned isolated execution placement JSON")
+	flags.StringVar(&options.argoExecutionTargetConfig, "argo-execution-target-config", "", "absolute path to administrator-owned branch execution target policy")
 	flags.StringVar(&options.argoReleaseWIFConfig, "argo-release-wif-config", "", "absolute path to administrator-owned public JSON release WIF capabilities (empty disables federation)")
 	flags.StringVar(&options.argoGoProxyListen, "argo-goproxy-listen", "", "listen address for the read-only Go module proxy (e.g. :8444); empty disables the proxy (#662)")
 	flags.StringVar(&options.argoGoProxyCert, "argo-goproxy-cert", "", "TLS certificate for the Go module proxy")
@@ -849,6 +863,18 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
+	targetPolicy, err := readArgoTargetPolicy(options.argoExecutionTargetConfig)
+	if err != nil {
+		return err
+	}
+	targets, err := buildArgoTarget(targetPolicy)
+	if err != nil {
+		return err
+	}
+	argoJobs, err = app.WithExecutionTargets(argoJobs, database, targets)
+	if err != nil {
+		return err
+	}
 	argoJobs.SetKubeVirtGrantLoader(database)
 	argoJobs.SetWorkflowCapabilityLoader(database.ActiveWorkflowCapability)
 	logger.Printf("argo execution engine: namespace=%s pipeline-sa=%s credentialed-sa=%s ci-secrets-sa=%s executor-sa=%s",
@@ -892,7 +918,13 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return fmt.Errorf("load HTTPS identity: %w", err)
 	}
-	health := app.Health{WriterReady: writerProgress.ProbeError, Store: database, Audit: anchors.Ready, VCSCache: &app.VCSSnapshot{}, Configured: upstreamReadinessProbe(options), VCS: func(ctx context.Context, upstream model.Upstream) error {
+	health := configuredHealth(options)
+	health.WriterReady = writerProgress.ProbeError
+	health.Store = database
+	health.Audit = anchors.Ready
+	health.VCSCache = &app.VCSSnapshot{}
+	health.Configured = upstreamReadinessProbe(options)
+	health.VCS = func(ctx context.Context, upstream model.Upstream) error {
 		if upstream.Kind == "local" {
 			info, err := os.Stat(upstream.BaseURL)
 			if err != nil {
@@ -923,13 +955,14 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		}
 		// Asserts endpoint reachability + pinned host key + accepted identity.
 		return app.ProbeSSHAuthentication(ctx, upstream.BaseURL, privateKey, knownHostsData)
-	}, Cluster: func(ctx context.Context) error {
+	}
+	health.Cluster = func(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		err := kube.Discovery().RESTClient().Get().AbsPath("/version").Do(ctx).Error()
 		return err
-	}}
+	}
 	health.ReadyGate = func(context.Context) error {
 		if !scheduler.Recovered() {
 			return errors.New("scheduler recovery is pending")
@@ -948,6 +981,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	health.Admission = scheduler.AdmissionState
 	health.DatabaseRetries = scheduler.DatabaseRetries
 	health.ControllerProfile = argoJobs.ControllerProfileStatus
+	health.ExecutionTargetProfiles = argoJobs.ExecutionTargetProfiles
 	health.SchemaVersion = store.LatestMigrationVersion()
 	health.Identity = func(ctx context.Context) (string, error) {
 		if err := ctx.Err(); err != nil {
@@ -955,7 +989,6 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		}
 		return app.SSHPublicKeyFingerprint(options.upstreamKey)
 	}
-	health.SecretStore = secretStoreStatus(options)
 	if options.secretStoreAddress != "" {
 		probeClient, probeErr := buildSecretStoreProbeClient(options)
 		if probeErr != nil {
@@ -2263,4 +2296,9 @@ func shutdownHTTP(ctx context.Context, server *http.Server) error {
 		return errors.Join(err, server.Close())
 	}
 	return nil
+}
+
+// configuredHealth carries deployment configuration into both status views.
+func configuredHealth(options serveOptions) app.Health {
+	return app.Health{SecretStore: secretStoreStatus(options), PipelineNetworkPolicyEnabled: options.pipelineNetworkPolicyEnabled}
 }

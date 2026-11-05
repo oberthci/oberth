@@ -30,6 +30,10 @@ type resourceRecorder struct {
 	notify chan struct{}
 }
 
+func (*resourceRecorder) RecordResourceAttempts(context.Context, model.ResourceAttemptInventory) error {
+	return nil
+}
+
 func (r *resourceRecorder) RecordStepResourceUsage(_ context.Context, values []model.StepResourceUsage) error {
 	r.mu.Lock()
 	r.values = append(r.values, values...)
@@ -286,4 +290,8 @@ func TestResourceScrapeFailureDoesNotChangeWaitOrMutateWorkload(t *testing.T) {
 			}
 		})
 	}
+}
+
+func (*resourceRecorder) RecordPodResourceDisposition(context.Context, model.PodResourceDisposition) error {
+	return nil
 }

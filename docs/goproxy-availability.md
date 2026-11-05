@@ -126,8 +126,17 @@ representations during a fill. Pseudo-versions use the same artifact store with
 additional live checks described below; bare branch names remain refused.
 
 Newly published `.info` metadata includes Go's `Origin` object. `VCS` is `git`,
-`URL` is the mirrored repository's configured upstream URL (including its SSH
-scheme/user when configured that way), and `Hash` is the full peeled commit SHA
+`URL` identifies the repository from the same validated SSH snapshot and qualified
+catalog route used to select the commit. For the standard Codeberg remote
+`ssh://git@codeberg.org/owner/repository.git` (also with explicit port `22`),
+a matching fully qualified `upstream/owner/repository` route produces
+`https://codeberg.org/owner/repository.git`. This is public metadata identity;
+fetching still uses SSH with the existing catalog authorization and pinned host
+keys. HTTPS Git transport remains unsupported. Other hosts, users, ports,
+escaped or ambiguous paths, and nonmatching or unqualified routes keep their own
+validated upstream URL; they do not acquire the standard public identity.
+No mutable remote or catalog is reread to derive the public URL.
+`Hash` is the full peeled commit SHA
 used for both `go.mod` and the zip. Tagged versions include
 `Ref: "refs/tags/<version>"` at the repository root; pseudo-versions omit `Ref`.
 Nested modules also include `Subdir`, as described below. Annotated tag object
@@ -141,10 +150,17 @@ preserved. For example:
 `go mod download -json` and `go list -m -json` expose this Origin to commit
 verifiers. Origin is persisted with the immutable metadata; a tag move, remote
 URL change or restart cannot rewrite it or change the zip's pinned source.
-Existing cached metadata published before Origin support remains byte-for-byte
-unchanged, including its ETag, and therefore has no Origin. There is no automatic
-backfill or cache invalidation. Go's local module cache may also retain that
-older metadata. Strict verifiers need a version first published with Origin.
+Existing cached metadata remains byte-for-byte unchanged, including its ETag:
+records published before Origin support still have no Origin, and existing SSH
+Origin URLs remain SSH after an upgrade or restart. There is no automatic
+backfill, overwrite, deletion or cache invalidation. Go's local module cache may
+also retain older metadata. Matching ZIP/MOD checksums or a fresh client cache
+cannot repair an already immutable server `.info`. Strict public-identity
+policies require newly produced metadata with the matching identity. Reconciling
+an actual previously published coordinate is separate operational work: retain
+the installed source and exact response/manifest evidence and use an explicitly
+reviewed non-overwriting publication path. This change does not allocate a new
+version, repin consumers or authorize rewriting an existing coordinate.
 The existing Go checksum checks and artifact digest verification are unchanged.
 
 Objects are addressed by SHA-256. All objects are synced before publishing an

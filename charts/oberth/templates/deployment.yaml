@@ -303,7 +303,11 @@ spec:
             - --secretstore-path={{ . }}
             {{- end }}
             {{- end }}
+            - --pipeline-network-policy-enabled={{ .Values.networkPolicy.enabled }}
             - --argo-namespace={{ required "argo.namespace is required" .Values.argo.namespace }}
+            {{- if .Values.argo.executionPlacementConfigMap }}
+            - --argo-execution-placement-config=/etc/oberth/execution-placement/config.json
+            {{- end }}
             {{- if .Values.argo.releaseTagRoutes }}
             - --argo-release-tag-routes-config=/etc/oberth/release-tag-routes/routes.json
             {{- end }}
@@ -508,6 +512,11 @@ spec:
               mountPath: /run/oberth
             - name: tmp
               mountPath: /tmp
+            {{- if .Values.argo.executionPlacementConfigMap }}
+            - name: execution-placement
+              mountPath: /etc/oberth/execution-placement
+              readOnly: true
+            {{- end }}
             {{- if .Values.argo.releaseTagRoutes }}
             - name: release-tag-routes
               mountPath: /etc/oberth/release-tag-routes
@@ -534,6 +543,15 @@ spec:
         - name: trusted-test-recipes
           configMap:
             name: {{ include "oberth.fullname" . }}-trusted-tests
+        {{- end }}
+        {{- if .Values.argo.executionPlacementConfigMap }}
+        - name: execution-placement
+          configMap:
+            name: {{ .Values.argo.executionPlacementConfigMap | quote }}
+            optional: false
+            items:
+              - key: config.json
+                path: config.json
         {{- end }}
         {{- if .Values.argo.releaseTagRoutes }}
         - name: release-tag-routes

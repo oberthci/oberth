@@ -55,7 +55,7 @@ func TestRunIssueTrailersTimestampMigrationPreservesRowsAndReceipts(t *testing.T
 	const id = "20261104160000-run-issue-trailers"
 	old := make([]migration, 0, len(migrations))
 	for _, m := range migrations {
-		if m.ID() != id {
+		if m.id == "" || m.ID() < id {
 			old = append(old, m)
 		}
 	}

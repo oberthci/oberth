@@ -35,11 +35,11 @@ func TestAdminPriorityLoweringToolAndReservation(t *testing.T) {
 			t.Fatal(callErr)
 		}
 		shown := value.(model.Run)
-		if string(shown.Priority) != priority || !strings.Contains(shown.PriorityReason, "operator queue correction") {
+		if shown.Priority != model.RunPriority(priority).Canonical() || !strings.Contains(shown.PriorityReason, "operator queue correction") {
 			t.Fatalf("reason line=%+v", shown)
 		}
 		reservation := &admissionReservation{priority: shown.Priority, priorityReason: shown.PriorityReason, priorityOverride: shown.PriorityOverride, priorityOverrideReason: shown.PriorityOverrideReason, queuedAt: time.Now().Add(-2 * time.Hour)}
-		if got := reservation.effectivePriority(time.Now()); string(got) != priority {
+		if got := reservation.effectivePriority(time.Now()); got != model.RunPriority(priority).Canonical() {
 			t.Fatalf("reservation aged to %s", got)
 		}
 	}

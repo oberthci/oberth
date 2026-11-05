@@ -223,11 +223,14 @@ func (scheduler *Scheduler) priorityDispatchAvailable(ctx context.Context, activ
 	if !ok {
 		return false, nil
 	}
-	// Normal dispatch can already reach the weight budget plus parked claims.
-	// Priority adds only the two non-normal classes.
+	// Ordinary dispatch can fill its allowance with low group waiters. Each
+	// higher class needs an extra claim: standard, promotion, then high. Count
+	// all three transitions so parked lower classes cannot exhaust high's path.
+	// This bounds claims/checkouts only; the gate still enforces maxRuns.
 	gate := scheduler.admission
 	gate.mu.Lock()
-	ceiling := gate.capacity + scheduler.concurrentJobsLocked() + 2
+	extraClasses := model.PriorityHigh.Rank() - model.PriorityLow.Rank()
+	ceiling := gate.capacity + scheduler.concurrentJobsLocked() + extraClasses
 	hasWaiters := len(gate.waiters) > 0
 	gate.mu.Unlock()
 	if active >= ceiling || !hasWaiters {
@@ -250,7 +253,7 @@ func (scheduler *Scheduler) priorityDispatchAvailable(ctx context.Context, activ
 			continue
 		}
 		rp := r.effectivePriority(gate.clock())
-		if rp.Rank() > p.Rank() || (rp.Rank() == p.Rank() && (p != model.PriorityHighest || !admissionBefore(candidate, r))) {
+		if rp.Rank() > p.Rank() || (rp.Rank() == p.Rank() && !admissionBefore(candidate, r)) {
 			return false, nil
 		}
 		lower = true
@@ -285,7 +288,7 @@ func (r *admissionReservation) priorityRun() model.Run {
 		if r.priorityOverride != "" {
 			run.Priority = r.priorityOverride
 			run.PriorityReason = "admin bump: " + r.priorityOverrideReason
-		} else if r.priorityAccepted == model.PriorityHigh || r.priorityAccepted == model.PriorityHighest {
+		} else if r.priorityAccepted != "" && r.priorityAccepted != model.PriorityStandard {
 			run.Priority = r.priorityAccepted
 			run.PriorityReason = "submission priority: " + r.priorityAcceptedReason
 		}

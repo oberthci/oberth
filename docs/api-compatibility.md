@@ -1,7 +1,7 @@
 # HTTP and MCP compatibility
 
-Except for the issue-list privacy change below, the v0.17.x API retains existing
-field names, tool arguments, value meanings
+Except for the issue-list privacy and resource-deadline safety changes below,
+the v0.17.x API retains existing field names, tool arguments, value meanings
 and default response envelopes. New clients should use the additive names below.
 Older clients may continue using their existing names and array responses.
 
@@ -62,8 +62,9 @@ is unchanged.
 
 ## Compatibility and deprecation policy
 
-Apart from the issue-list privacy exception, no existing name, argument or
-default envelope is removed or repurposed in v0.17.x. Prefer the unified names for new integrations; legacy names remain
+Apart from the issue-list privacy and resource-deadline safety exceptions, no
+existing name, argument or default envelope is removed or repurposed in v0.17.x.
+Prefer the unified names for new integrations; legacy names remain
 supported aliases. Clients must tolerate additional object fields.
 
 A future removal requires an explicit deprecation announcement in release notes
@@ -81,3 +82,49 @@ migration process; opting into `envelope=1` does not change other callers.
 from authenticated `GET /api/issues/{id}` and `issue_get`. These removed fields
 are an explicit v0.17.x privacy exception to the additive compatibility policy.
 The list includes no discussion fields or discussion API.
+
+## Resource-deadline safety exception
+
+Resource history no longer derives a Pod deadline from main-container runtime.
+Pod initialization, helper execution and finalization are not captured by that
+runtime. Numeric `activeDeadlineSeconds` advice is withheld until complete Pod
+active lifetime is measured; declarations and actual resource measurements remain
+available.
+
+Older CLIs decode a missing suggested deadline as integer zero and copy it into
+YAML. To keep server-first upgrades safe, HTTP and MCP callers receive
+`suggested: null` unless they explicitly send `resource_only=true`. For otherwise
+accepted histories, `no_suggestion` and `sizing_acceptance.reasons` explain that
+a compatible resource-only renderer is required. Those callers still receive
+the measurements, run identities, declarations and timing semantics. The
+compatibility refusal does not mean the retained samples were removed.
+
+`resource_only=true` is a caller capability: it promises to handle suggestions
+without `activeDeadlineSeconds`, preserving absence rather than inventing zero
+in JSON or copy/paste YAML. Updated CLIs send it automatically. HTTP clients use
+the query parameter; MCP `run_resources` clients use the boolean tool argument.
+The same sample sufficiency, comparability and censoring checks still apply;
+opting in cannot force a suggestion or restore unsupported deadline advice.
+
+Upgrade the server first; existing CLIs can continue reading measurements safely.
+Then upgrade the CLI to recover resource-only suggestions. Custom integrations
+may opt in after fixing their decoder and renderer. Older servers do not
+implement this safety behavior; an upgraded CLI alone cannot correct advice
+computed by an older server. This is an explicit v0.17.x safety exception to the
+previous suggestion semantics, not a removal of measurement fields or a change
+to execution resources.
+
+Resource-only capability does not waive measurement or safety requirements.
+Coverage counts, `advice_basis`, `safety_run_ids` and `safety_scope` are additive
+fields. A passed-only metric view still consults bounded retained failure
+evidence, and incomplete or missing executed-attempt coverage can return
+`suggested: null`. Existing numeric measurements remain available. Suggestions
+that are emitted retain known resource-bound floors and explicitly remain
+provisional; no cold-run safety guarantee or numeric Pod deadline is introduced.
+
+The safety population also includes bounded active Workflow evidence. Ordinary
+unfinished telemetry is excluded from completed quantiles, while known failures
+and missing attempt coverage still refuse advice. Independent attempt inventory
+is stored through an additive migration; it adds no caller argument or run status.
+An omitted limit in an available current declaration cannot be replaced by a
+finite historical limit.

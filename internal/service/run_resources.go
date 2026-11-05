@@ -27,6 +27,7 @@ func (s *API) readRunResources(ctx context.Context, raw json.RawMessage) (any, e
 		Ref           string `json:"ref"`
 		Last          int    `json:"last"`
 		IncludeFailed bool   `json:"include_failed"`
+		ResourceOnly  bool   `json:"resource_only"`
 		Format        string `json:"format"`
 	}
 	if e := decodeTool(raw, &a); e != nil {
@@ -87,6 +88,10 @@ func (s *API) readRunResources(ctx context.Context, raw json.RawMessage) (any, e
 		return nil, e
 	}
 	r := measured.Report{Format: a.Format, Repository: repo.Name, Ref: a.Ref, Run: exact.ID, RequestedRuns: filter.Runs, SelectedRuns: len(history.Runs), IncludeFailed: a.IncludeFailed, IncludePromotions: includePromotions, Truncated: history.Truncated, DeclarationsStatus: "unavailable", Retention: measured.Retention, Semantics: measured.Semantics, Steps: []measured.Step{}}
+	r.SafetyScope = measured.SafetyScope
+	for _, run := range history.SafetyRuns {
+		r.SafetyRunIDs = append(r.SafetyRunIDs, run.ID)
+	}
 	var declarations []measured.Declaration
 	if len(history.Runs) > 0 {
 		newest := history.Runs[0]
@@ -123,25 +128,45 @@ func (s *API) readRunResources(ctx context.Context, raw json.RawMessage) (any, e
 			owners[k] = d.OwnerRepository
 		}
 	}
-	for i := range history.Observations {
-		o := &history.Observations[i]
-		if o.Owner == "" {
-			if strings.HasPrefix(o.Template, "frag-") {
-				o.Owner = owners[measured.NormalizeTemplate(o.Usage.Stage)+"\x00"+o.Template]
-			} else {
-				o.Owner = repo.Name
+	for _, population := range [][]measured.Observation{history.Observations, history.SafetyObservations} {
+		for i := range population {
+			o := &population[i]
+			if o.Owner == "" {
+				if strings.HasPrefix(o.Template, "frag-") {
+					o.Owner = owners[measured.NormalizeTemplate(o.Usage.Stage)+"\x00"+o.Template]
+				} else {
+					o.Owner = repo.Name
+				}
 			}
 		}
 	}
-	for _, step := range measured.Build(history.Observations, declarations) {
+	for i := range history.Dispositions {
+		if history.Dispositions[i].Owner == "" {
+			if strings.HasPrefix(history.Dispositions[i].Template, "frag-") {
+				history.Dispositions[i].Owner = owners[measured.NormalizeTemplate(history.Dispositions[i].Stage)+"\x00"+history.Dispositions[i].Template]
+			} else {
+				history.Dispositions[i].Owner = repo.Name
+			}
+		}
+	}
+	for _, step := range measured.BuildWithSafety(history.Observations, declarations, history.SafetyObservations, history.Dispositions, history.AttemptGaps) {
 		if a.Stage != "" && step.Stage != measured.NormalizeTemplate(a.Stage) {
 			continue
 		}
 		if a.Step != "" && step.Template != measured.NormalizeTemplate(a.Step) {
 			continue
 		}
+		if history.SafetyIncomplete {
+			step.RefuseSizing("retained safety window or executed-attempt inventory is incomplete or contradictory; missing evidence cannot justify advice")
+		}
 		if r.Truncated {
 			step.RefuseSizing("history row limit reached; narrow the run selection")
+		}
+		// Previous typed clients turn an absent deadline in a non-null
+		// suggestion into zero, including in copyable YAML. Only callers
+		// advertising an omission-safe renderer may receive resource advice.
+		if !a.ResourceOnly && step.Suggested != nil {
+			step.RefuseSizing("resource-only advice requires resource_only=true and a compatible renderer; Pod deadline advice is unavailable")
 		}
 		r.Steps = append(r.Steps, step)
 	}

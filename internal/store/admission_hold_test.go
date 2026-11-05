@@ -46,11 +46,11 @@ func TestAdmissionHoldPersistenceExpiryAndQueueOrder(t *testing.T) {
 	}
 	now = hold.ExpiresAt
 	next, err := s.ClaimNextRun(t.Context())
-	if err != nil || next.ID != promotion.ID {
+	if err != nil || next.ID != ordinary.ID || next.QueueSequence != ordinary.QueueSequence || next.AdmissionSequence != ordinary.AdmissionSequence {
 		t.Fatalf("expiry did not resume priority order: %+v %v", next, err)
 	}
 	next, err = s.ClaimNextRun(t.Context())
-	if err != nil || next.ID != ordinary.ID || next.QueueSequence != ordinary.QueueSequence || next.AdmissionSequence != ordinary.AdmissionSequence {
+	if err != nil || next.ID != promotion.ID {
 		t.Fatalf("held work moved: %+v %v", next, err)
 	}
 	action, err := s.LatestAuditActionByType(t.Context(), "admission.hold", "admission")

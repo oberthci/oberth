@@ -8,6 +8,7 @@ import (
 	"path"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -22,14 +23,21 @@ var ErrArtifactsTooLarge = errors.New("argojob: artifacts exceed the configured 
 func (seeder *SourceSeeder) Collect(ctx context.Context, workflowName string) ([]byte, error) {
 	claimName := sourceClaimName(workflowName)
 	podName := claimName + collectPodSuffix
-	if err := seeder.createSeedPod(ctx, podName, claimName); err != nil {
+	var expected *corev1.Pod
+	var err error
+	if seeder.config.Custody != nil && seeder.config.ExecutionPlacement.BranchOnly() {
+		expected, err = seeder.createSeedPodBound(ctx, podName, claimName)
+	} else {
+		err = seeder.createSeedPod(ctx, podName, claimName)
+	}
+	if err != nil {
 		return nil, err
 	}
 	defer func() {
 		_ = seeder.client.CoreV1().Pods(seeder.config.Namespace).
 			Delete(context.WithoutCancel(ctx), podName, *metav1.NewDeleteOptions(0))
 	}()
-	if err := seeder.waitForSeedPod(ctx, podName); err != nil {
+	if err := seeder.waitForSeedPod(ctx, podName, expected); err != nil {
 		return nil, err
 	}
 

@@ -43,7 +43,7 @@ func TestPriorityAdmissionOrdersClassesThenFIFO(t *testing.T) {
 	}
 	now := time.Now()
 	normal := priorityWaiter(g, 2, model.PriorityNormal, now, pipeline.XL)
-	high := priorityWaiter(g, 3, model.PriorityHigh, now, pipeline.XL)
+	high := priorityWaiter(g, 3, model.PriorityPromotion, now, pipeline.XL)
 	highest := priorityWaiter(g, 4, model.PriorityHighest, now, pipeline.XL)
 	highest2 := priorityWaiter(g, 5, model.PriorityHighest, now, pipeline.XL)
 	release()
@@ -154,7 +154,7 @@ func TestQueuePriorityToolsAdminOnlyAuditedAndGated(t *testing.T) {
 		t.Fatal(err)
 	}
 	shown := value.(model.Run)
-	if shown.Priority != model.PriorityHighest || !strings.Contains(shown.DisplayReason, "highest") || !strings.Contains(shown.PriorityReason, "release blocker") {
+	if shown.Priority != model.PriorityHighest || !strings.Contains(shown.DisplayReason, "high") || !strings.Contains(shown.PriorityReason, "release blocker") {
 		t.Fatalf("bump display=%+v", shown)
 	}
 	denied := errors.New("audit gate refused")
@@ -207,7 +207,7 @@ func TestPriorityDispatchClaimsPastLowerClassWaitersAndRefreshesBumps(t *testing
 		reservation.weight = 2
 		g.mu.Unlock()
 	}
-	if _, err = f.store.BumpRunPriority(ctx, "admin", second.ID, model.PriorityHigh, "RC blocker"); err != nil {
+	if _, err = f.store.BumpRunPriority(ctx, "admin", second.ID, model.PriorityPromotion, "RC blocker"); err != nil {
 		t.Fatal(err)
 	}
 	if err = scheduler.refreshPriorities(ctx); err != nil {
@@ -217,6 +217,9 @@ func TestPriorityDispatchClaimsPastLowerClassWaitersAndRefreshesBumps(t *testing
 		t.Fatal("admin bump did not reorder an existing reservation")
 	}
 	tag := enqueue("v1", model.RefTag)
+	if _, err := f.store.BumpRunPriority(ctx, "admin", tag.ID, model.PriorityHigh, "urgent tag"); err != nil {
+		t.Fatal(err)
+	}
 	if scheduler.dispatchSlotAvailable(3) {
 		t.Fatal("test failed to saturate normal dispatch ceiling")
 	}
@@ -463,7 +466,7 @@ func TestPriorityReleaseStreamPreservesAgingAndResourceBounds(t *testing.T) {
 	normal := priorityWaiter(g, 2, model.PriorityNormal, origin, pipeline.XL)
 	clock.now = origin.Add(45 * time.Minute)
 	tag := priorityWaiter(g, 3, realTag.Priority, clock.Now(), pipeline.L)
-	promotion := priorityWaiter(g, 4, model.PriorityHighest, clock.Now(), pipeline.XL)
+	promotion := priorityWaiter(g, 4, model.PriorityPromotion, clock.Now(), pipeline.XL)
 	if granted(g, tag) || granted(g, normal) {
 		t.Fatal("priority preempted existing resource grant")
 	}
@@ -478,7 +481,7 @@ func TestPriorityReleaseStreamPreservesAgingAndResourceBounds(t *testing.T) {
 	clock.now = origin.Add(time.Hour - time.Nanosecond)
 	var later []*admissionReservation
 	for seq := int64(5); seq < 25; seq++ {
-		later = append(later, priorityWaiter(g, seq, model.PriorityHighest, clock.Now(), pipeline.XL))
+		later = append(later, priorityWaiter(g, seq, model.PriorityPromotion, clock.Now(), pipeline.XL))
 	}
 	g.mu.Lock()
 	before := g.waiters[0]
@@ -488,9 +491,13 @@ func TestPriorityReleaseStreamPreservesAgingAndResourceBounds(t *testing.T) {
 	}
 	clock.now = origin.Add(time.Hour)
 	promotion.release()
+	if !granted(g, normal) {
+		t.Fatal("aged standard lost its promotion FIFO position")
+	}
+	normal.release()
 	for _, candidate := range later {
-		if !granted(g, candidate) || granted(g, normal) {
-			t.Fatal("base highest FIFO lost to aged normal")
+		if !granted(g, candidate) {
+			t.Fatal("promotion FIFO failed after aged work completed")
 		}
 		g.mu.Lock()
 		used, runs := g.used, g.runs
@@ -500,10 +507,6 @@ func TestPriorityReleaseStreamPreservesAgingAndResourceBounds(t *testing.T) {
 		}
 		candidate.release()
 	}
-	if !granted(g, normal) {
-		t.Fatal("aged normal did not follow base highest work")
-	}
-	normal.release()
 }
 
 func TestPriorityReleaseAdmissionWithoutGrantAndBranchTransportSignals(t *testing.T) {
@@ -519,7 +522,7 @@ func TestPriorityReleaseAdmissionWithoutGrantAndBranchTransportSignals(t *testin
 		}
 	}
 	release, err := f.scheduler.AdmitRelease(ctx, ReleaseRequest{EventID: "priority-tag", Repository: f.repo, Tag: "v1.2.3", ObjectSHA: strings.Repeat("b", 40), CommitSHA: strings.Repeat("c", 40), Actor: "pusher"})
-	if err != nil || release.Priority != model.PriorityHighest || release.RefKind != model.RefTag || !release.Release {
+	if err != nil || release.Priority != model.PriorityPromotion || release.RefKind != model.RefTag || !release.Release {
 		t.Fatalf("genuine ungranted tag failed priority admission: %+v %v", release, err)
 	}
 	next, err := f.store.NextQueuedRun(ctx)
@@ -539,7 +542,7 @@ func TestPriorityOversizedReleaseAllowsNormalBackfillAndSurvivesRefresh(t *testi
 				}
 			}
 			tag, err := f.scheduler.AdmitRelease(ctx, ReleaseRequest{EventID: "oversized-tag", Repository: f.repo, Tag: "v1", ObjectSHA: strings.Repeat("b", 40), CommitSHA: strings.Repeat("c", 40), Actor: "pusher"})
-			if err != nil || tag.Priority != model.PriorityHighest {
+			if err != nil || tag.Priority != model.PriorityPromotion {
 				t.Fatalf("tag=%+v %v", tag, err)
 			}
 			claimed, err := f.store.ClaimNextRun(ctx)
@@ -594,7 +597,7 @@ func TestPriorityOversizedReleaseAllowsNormalBackfillAndSurvivesRefresh(t *testi
 				t.Fatal(err)
 			}
 			p, reason, ok := f.scheduler.AdmissionPriority(tag.QueueSequence)
-			want := model.PriorityHighest
+			want := model.PriorityPromotion
 			if maximum == pipeline.L {
 				want = model.PriorityNormal
 				if !strings.Contains(reason, "size XL exceeds repository maximum L") {
@@ -643,9 +646,12 @@ func TestPrioritySizeCapPreservesAdminBumpsPromotionsAndAging(t *testing.T) {
 	}{
 		{model.TagReleasePriorityReason, model.PriorityNormal},
 		{"admin bump: deliberately urgent", model.PriorityHighest},
-		{"promotion run", model.PriorityHighest},
+		{"promotion run", model.PriorityPromotion},
 	} {
 		r := &admissionReservation{gate: g, prepared: true, size: pipeline.XL, priority: model.PriorityHighest, priorityReason: tc.reason, queuedAt: now}
+		if tc.reason == "promotion run" || tc.reason == model.TagReleasePriorityReason {
+			r.priority = model.PriorityPromotion
+		}
 		if got := r.effectivePriority(now); got != tc.want {
 			t.Fatalf("size cap for %q=%s", tc.reason, got)
 		}
@@ -653,7 +659,7 @@ func TestPrioritySizeCapPreservesAdminBumpsPromotionsAndAging(t *testing.T) {
 		// normal run; bumps and promotions keep highest.
 		aged := tc.want
 		if aged == model.PriorityNormal {
-			aged = model.PriorityHigh
+			aged = model.PriorityPromotion
 		}
 		if got := r.effectivePriority(now.Add(time.Hour)); got != aged {
 			t.Fatalf("aging for %q=%s, want %s", tc.reason, got, aged)

@@ -61,6 +61,9 @@ func (s *Store) RecordStepResourceUsage(ctx context.Context, values []model.Step
 				continue
 			}
 		}
+		if err := checkUsageAttempt(ctx, tx, v); err != nil {
+			return err
+		}
 		body, err := json.Marshal(v)
 		if err != nil {
 			return err

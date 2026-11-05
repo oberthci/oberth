@@ -86,7 +86,7 @@ func Parse(raw []byte, limits Limits, now time.Time) (File, error) {
 			return File{}, fmt.Errorf("schedule: entry %q is declared more than once", name)
 		}
 		seen[name] = true
-		if entry.Priority != "" && entry.Priority != model.PriorityNormal && entry.Priority != model.PriorityHigh && entry.Priority != model.PriorityHighest {
+		if entry.Priority != "" && !entry.Priority.Valid() {
 			return File{}, fmt.Errorf("schedule: entry %q has invalid priority", name)
 		}
 		if err := validBranch(entry.Branch); err != nil {
@@ -115,7 +115,7 @@ func Parse(raw []byte, limits Limits, now time.Time) (File, error) {
 			continue
 		}
 		file.Entries = append(file.Entries, Entry{
-			Priority: entry.Priority, Name: name, Cron: entry.Cron, Branch: strings.TrimSpace(entry.Branch), schedule: compiled,
+			Priority: entry.Priority.Canonical(), Name: name, Cron: entry.Cron, Branch: strings.TrimSpace(entry.Branch), schedule: compiled,
 		})
 	}
 	return file, nil

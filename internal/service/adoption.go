@@ -51,9 +51,20 @@ func (scheduler *Scheduler) withoutPendingPreflight(ctx context.Context, run mod
 // asks for nothing: the next start retries it.
 func adoptionFailure(adopter JobAdopter, run model.Run, err error) error {
 	namespace := adopter.WorkflowNamespace()
+	if target, ok := adopter.(interface {
+		WorkflowNamespaceForRun(context.Context, model.Run) (string, error)
+	}); ok {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		selected, selectErr := target.WorkflowNamespaceForRun(ctx, run)
+		if selectErr != nil {
+			return fmt.Errorf("adopt run %s: original execution target unavailable: %w", run.ID, err)
+		}
+		namespace = selected
+	}
 	failure := fmt.Errorf("adopt run %s: Workflow %s/%s: %w", run.ID, namespace, run.WorkflowName, err)
 	if errors.Is(err, ErrAdoptionRefused) {
-		failure = fmt.Errorf("%w; startup stops until it is deleted (kubectl -n %s delete workflow %s), after which the run is re-queued",
+		failure = fmt.Errorf("%w; startup stops until it is deleted (kubectl -n %s delete workflow %s); recovery retains the original execution target",
 			failure, namespace, run.WorkflowName)
 	}
 	log.Printf("ERROR: %v", failure)

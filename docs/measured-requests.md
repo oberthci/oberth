@@ -19,11 +19,17 @@ oberth run resources --repo repo-01 --burn step-abc12345 --step step-abc12345 --
 ```
 
 MCP agents use `run_resources` with the same arguments (`run`, `repo`, `ref`,
-`last`, `burn`, `step`, `include_failed`, `format`). Authenticated HTTP clients
+`last`, `burn`, `step`, `include_failed`, `resource_only`, `format`). Authenticated HTTP clients
 use `GET /api/run-resources` with those query parameters, or
 `GET /api/runs/{id}/resources`. Default output is JSON; `format=yaml` includes a
-`paste_ready` mapping per suggested step. Copy its `resources` and
-`activeDeadlineSeconds` into that template in git, not the surrounding report.
+`paste_ready` mapping per suggested step. Copy its `resources` into that template
+in git, not the surrounding report. Deadline advice is withheld; keep the
+declared `activeDeadlineSeconds` until Pod lifetime has been measured.
+Resource-only suggestions require the `resource_only=true` caller capability
+(HTTP query parameter or MCP boolean argument). Updated CLIs send it automatically.
+Older callers receive `suggested: null`, preserving measurements and a refusal
+reason, so their integer decoder cannot fabricate a zero deadline. See the
+[upgrade and compatibility policy](api-compatibility.md#resource-deadline-safety-exception).
 Bearer token scope is checked through the same repo/run lookups as `run_get`
 before raw usage or git declarations are read. Responses contain resource
 numbers, identifiers and fixed explanations; never logs, commands, environment,
@@ -39,7 +45,14 @@ exact ref without adding promotion refs. The response's `include_promotions`
 identifies default selection. `last` is bounded to 1..100. `run` accepts the same full ID or unique 8+
 hexadecimal prefix as `run_get`, is exclusive with `ref`, and can infer `repo`.
 Failed/incomplete runs are excluded unless `include_failed=true`, including for
-an exact run. Missing or expired measurements stay unknown. A step's own
+an exact run. This controls the displayed metric population, not the safety
+population. Independently, the server checks up to **100 latest matching
+terminal runs and 100 matching active runs**, before the passed-only filter, with the same repository,
+exact-run/ref/promotion selection. `last` limits displayed runs; it cannot hide
+a known recent failure, including an eviction while its Workflow is still running.
+`safety_run_ids` and `safety_scope` identify that bounded check. Active-run overflow
+or displayed runs outside this window refuse advice rather than
+claiming an unbounded failure audit. Missing or expired measurements stay unknown. A step's own
 memory peak can supplement a retained, exactly matched container attempt for
 advice; other self-reported counters are not substituted.
 
@@ -69,9 +82,9 @@ The `memory_step_peak_attempts`, `memory_sampler_attempts` and
 
 Memory and peak CPU are main-container peaks. Average CPU is cumulative externally
 captured CPU time divided by the interval from container start to its CPU sample
-timestamp (clipped to finish). Duration uses pod container start/finish,
-excluding Pod Pending time. Ephemeral storage and IO pressure are pod-wide,
-including helpers; shared PVC storage is excluded. Main-container IO read/write
+timestamp (clipped to finish). `duration_ns` uses main-container start/finish,
+excluding initialization, helper wait and Pod finalization. Ephemeral storage and
+IO pressure are pod-wide, including helpers; shared PVC storage is excluded. Main-container IO read/write
 bytes and pod PSI stall nanoseconds are reported separately. Unknown is never
 zero. Sampled peaks remain lower bounds, including killed attempts.
 
@@ -83,6 +96,37 @@ terminal runs with all required measurements together**: memory, average/peak
 CPU, ephemeral storage, duration and known historical CPU/memory/storage limits.
 Retries in one run count once. Separate partial histories for different metrics
 cannot be combined into five complete runs.
+
+Coverage is metric-specific. `memory_coverage`, `cpu_coverage` and
+`storage_coverage` on captured usage count distinct source timestamps, with first
+and last source times. The legacy aggregate `samples` count can grow when an
+unrelated metric refreshes and cannot establish these counts. Existing rows
+without coverage retain their numbers but do not acquire invented coverage.
+External memory advice needs four memory samples through main finish, or the
+existing exact-attempt step cgroup peak. CPU advice needs four CPU-counter source
+times and a cumulative counter reaching main finish. Storage advice needs four
+local-storage source times through the last container exit of a terminal Pod.
+These are minimum coverage checks for provisional advice, not a guarantee that
+polling captured a peak. Unknown terminal tails refuse advice. CPU averages keep
+their captured-counter interval; they are never recomputed over a Pod deadline.
+
+Nonzero/failed commands retain their measured maxima but do not prove completed
+workload coverage. A bound Pod disposition is persisted independently of runtime
+container IDs, so an evicted Pod can veto advice without any usage row or valid
+main termination. Before listing Pods, the collector also retains a bounded
+Workflow/node attempt inventory, including superseded retries. Pod UID is added
+only after ownership validation; an absent or foreign Pod supplies no invented
+identity, timestamp, failure cause or measurement. A successful retry cannot
+discharge another node's missing coverage. Incomplete/offloaded node inventories,
+legacy missing inventories and truncated reads remain unknown and refuse advice.
+Ordinary uncensored active attempts stay outside completed measurements without
+being treated as failed workloads. This exemption requires both the run and the
+retained Workflow observation to be active: Workflow completion can precede node
+settling, log collection and run finalization. A terminal Workflow with unfinished
+exact attempt coverage refuses advice during that interval. An executed terminal step without retained usage or Pod
+disposition is an explicit coverage gap. Skipped, unexecuted steps do not invent
+measurements or failures. Ordinary still-running telemetry stays outside terminal
+quantiles; known censor evidence is evaluated before that exclusion.
 
 Comparable means the same normalized step and owning repository with unchanged
 observed request/limit vectors and workflow size. Mixed conditions refuse advice;
@@ -103,7 +147,39 @@ implement these rules for both the tool and the offline table:
 | Memory limit | maximum peak + 50%, rounded to MiB, minimum 64Mi |
 | Ephemeral request | maximum pod usage + 25%, rounded to MiB, minimum 64Mi |
 | Ephemeral limit | maximum pod usage + 50%, rounded to MiB, minimum 64Mi |
-| Step deadline | maximum container duration + 50% + 60s startup allowance |
+| Step deadline | withheld: Pod active lifetime through finalization is not measured |
+
+The table computes estimates before applying retained baseline floors. Because
+cache warmth and equivalent workload inputs across revisions are not proved,
+`advice_basis` labels every emitted suggestion **provisional**. Requests retain
+the greatest captured historical/current request, and memory/storage limits
+retain the greatest captured historical/current limit. A declared current
+request can also raise its corresponding suggested limit. Missing baselines,
+known unlimited memory/storage, and a Pod-local aggregate limit that differs
+from the main-container limit refuse new restrictive advice. An unlimited
+resource does not become a guessed finite cap. Retaining a declaration does not
+certify that it is sufficient or measured. When a current declaration is available,
+an omitted memory or storage limit is unbounded or unknown; historical finite
+values cannot supply a new finite copyable limit. Omitted requests do not acquire
+that limit meaning. Recheck after cache, mount, workload
+or CPU-cap changes; a cache mount does not prove cold coverage or cache hits.
+
+Each step's `deadline_no_suggestion` explains this timing gap, even with no
+history or otherwise sufficient resource measurements. Neither `suggested` nor
+`paste_ready` contains a generated `activeDeadlineSeconds`; the captured git
+declaration remains visible under `declared`. Resource sizing acceptance applies
+to resource advice and does not establish deadline sufficiency. Without the
+resource-only capability, acceptance also records the compatibility refusal;
+complete comparable run counts and numeric measurements remain unchanged.
+
+The retained `PodStartedAt` to `PodFinishedAt` span includes initialization and
+helper execution, but `PodFinishedAt` is the last container exit observed on a
+terminal Pod. It is a lower bound, not the time finalization completed. A Pod can
+fail its deadline after all containers exited successfully. Neither this span
+nor main runtime plus a fixed allowance establishes the complete active lifetime.
+Deadline-killed samples are censored and cannot justify a reduction. Missing
+timing stays unknown; no zero or fallback deadline is generated. Measuring final
+Pod disposition is required before restoring numeric deadline advice.
 
 The median is displayed for comparison and never drives suggestions. Request
 margin allows ordinary variation; limit margin allows bursts missed by 15-second
@@ -115,21 +191,39 @@ above a recorded limit (censoring), saturation, counter resets, changed requests
 restarts, ambiguous identity or truncated history. Unknown historical CPU,
 memory or ephemeral limits also suppress advice. Deadline-killed durations are
 censored, including workflow-wide deadline kills with no precise step diagnostic.
-Inspect
-coverage before committing a reduction. No automatic higher retry is performed.
+Run/step deadline uncertainty conservatively refuses advice, but that flag alone
+does not prove every Pod or retry was deadline-killed. Independent dispositions
+preserve exact Pod identity. Inspect coverage before committing a change. No
+automatic higher retry is performed.
 
 ## Bounds and retention
 
 The tool reads through the database read pool, not the writer. Run selection uses
 existing repository/ref indexes, then primary-key run lookups of telemetry and
-step diagnostics. It reads at most 100 runs and returns at most 10,000 main
-incarnations; truncation is explicit and suppresses suggestions. The storage
+step diagnostics. Display selects at most 100 runs; safety selects at most 100
+terminal plus 100 active runs. Each reads at most 10,000 main incarnations.
+Safety also bounds Pod dispositions, executed step inventory and attempt rows at
+10,000 rows each; missing or truncated safety coverage refuses
+suggestions. No cluster query occurs on this read path. The storage
 operation has a five-second deadline and the entire service call ten seconds,
 including waiting for repository read locks. The query-plan test explains the
 exact executed observation SQL and verifies run-ID primary-key lookups.
-It takes no write transaction and makes no cluster calls. No SQL schema change
-is needed: new optional provenance and limits live in the existing versioned
-observation JSON, and old rows remain readable.
+It takes no write transaction. Optional coverage lives in versioned observation
+JSON, and old rows remain readable. An additive timestamped database migration
+stores independent Pod dispositions, bounded to 2,048 Pods per run and deleted
+with run retention. A further additive timestamped migration stores the attempt
+inventory marker and at most 4,096 retained nodes per run, with at most 2,048 nodes
+in one collector snapshot. The marker records visibility and terminal Workflow
+observation, not metric sufficiency. Failure and bound Pod identity survive late
+or duplicate snapshots; dropped retry nodes are retained. These tables also
+cascade with run deletion. They do not store raw Pod messages, commands or environment.
+Every retained main observation and Pod disposition is reconciled with its full
+Workflow, namespace, node, Pod and invocation binding. A contradiction refuses
+advice for the measured invocation too, even if the conflicting inventory names
+another burn or template. Current writers reject definite binding conflicts in
+either order; the reader also fences inconsistent records retained by older code.
+Use the normal pre-upgrade backup/restore process for database rollback; this
+does not require older CLI clients to understand the new fields.
 
 Retention currently targets 90 days and **100,000 container incarnations globally**,
 with bounded asynchronous pruning. It has no per-repo or rare-release quota.

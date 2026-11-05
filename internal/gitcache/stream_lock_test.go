@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -89,6 +90,22 @@ func TestStalledUploadAllowsConcurrentFetchCheckoutAndModuleRead(t *testing.T) {
 		})
 	}
 }
+
+// The pinned semaphore consults Done on entry to each acquisition. Observing
+// that call separates worker startup from the cancellation response budget.
+type lockWaitContext struct {
+	context.Context
+	acquisitions atomic.Int32
+	entered      chan struct{}
+}
+
+func (ctx *lockWaitContext) Done() <-chan struct{} {
+	if ctx.acquisitions.Add(-1) == 0 {
+		close(ctx.entered)
+	}
+	return ctx.Context.Done()
+}
+
 func TestRepositoryWaitsHonorContext(t *testing.T) {
 	r := newTestRepository(t)
 	c := newTestCache(t, r.upstream)
@@ -96,6 +113,8 @@ func TestRepositoryWaitsHonorContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Filesystem setup must finish before starting a cancellation measurement.
+	promotionWorkspace := filepath.Join(t.TempDir(), "merge")
 	operations := map[string]func(context.Context) error{
 		"ensure": func(ctx context.Context) error { _, err := c.Ensure(ctx, "example"); return err },
 		"serve": func(ctx context.Context) error {
@@ -105,28 +124,88 @@ func TestRepositoryWaitsHonorContext(t *testing.T) {
 			return c.Receive(ctx, "example", "actor", "", nil, io.Discard, io.Discard, ReceiveHandlerFunc(func(context.Context, ReceiveEvent) error { return nil }))
 		},
 		"promotion": func(ctx context.Context) error {
-			_, err := c.PreparePromotion(ctx, "example", r.initialSHA, "main", filepath.Join(t.TempDir(), "merge"))
+			_, err := c.PreparePromotion(ctx, "example", r.initialSHA, "main", promotionWorkspace)
 			return err
 		},
 	}
 	for name, op := range operations {
 		t.Run(name, func(t *testing.T) {
-			lock := c.repoLock(ready.Path)
-			lock.Lock()
-			ctx, cancel := context.WithCancel(t.Context())
-			completed := make(chan error, 1)
-			go func() { completed <- op(ctx) }()
-			cancel()
-			select {
-			case err := <-completed:
-				lock.Unlock()
-				if !errors.Is(err, context.Canceled) {
-					t.Fatal(err)
+			for _, alreadyCancelled := range []bool{true, false} {
+				phase := "contended"
+				if alreadyCancelled {
+					phase = "already-cancelled"
 				}
-			case <-time.After(250 * time.Millisecond):
-				lock.Unlock()
-				<-completed
-				t.Fatal("lock ignores cancellation")
+				t.Run(phase, func(t *testing.T) {
+					lock := c.repoLock(ready.Path)
+					lock.Lock()
+					parent, cancel := context.WithCancel(t.Context())
+					ctx := &lockWaitContext{Context: parent, entered: make(chan struct{})}
+					acquisitions := int32(1)
+					if name == "receive" && !alreadyCancelled {
+						// Receive first acquires its free transaction lock, then
+						// attempts the repository lock held by this test.
+						acquisitions = 2
+					}
+					ctx.acquisitions.Store(acquisitions)
+					type result struct {
+						err      error
+						returned time.Time
+					}
+					completed := make(chan result, 1)
+					finished := false
+					t.Cleanup(func() {
+						cancel()
+						lock.Unlock()
+						if !finished {
+							select {
+							case <-completed:
+							case <-time.After(testtimeout.Start(250 * time.Millisecond)):
+								t.Error("lock waiter did not stop after holder release")
+							}
+						}
+					})
+					if alreadyCancelled {
+						cancel()
+					}
+					go func() {
+						err := op(ctx)
+						completed <- result{err: err, returned: time.Now()}
+					}()
+					select {
+					case <-ctx.entered:
+					case <-time.After(testtimeout.Start(250 * time.Millisecond)):
+						t.Fatal("worker did not enter lock acquisition")
+					}
+					if !alreadyCancelled {
+						select {
+						case got := <-completed:
+							finished = true
+							t.Fatalf("uncancelled waiter completed while holder remained locked: %v", got.err)
+						default:
+						}
+					}
+					deadline := time.Now().Add(250 * time.Millisecond)
+					cancel()
+					var got result
+					select {
+					case got = <-completed:
+					case <-time.After(250 * time.Millisecond):
+						// A delayed observer may see both channels ready. The
+						// worker's timestamp still enforces the original budget.
+						select {
+						case got = <-completed:
+						default:
+							t.Fatal("lock ignores cancellation")
+						}
+					}
+					finished = true
+					if got.returned.After(deadline) {
+						t.Fatal("lock ignores cancellation")
+					}
+					if !errors.Is(got.err, context.Canceled) {
+						t.Fatal(got.err)
+					}
+				})
 			}
 		})
 	}

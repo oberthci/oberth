@@ -32,10 +32,12 @@ const MinimumMemoryPolls int64 = 4
 // missed between 15-second polls. These are suggestions, not safety proofs.
 const RequestMarginPercent = 25
 const LimitMarginPercent = 50
-const DeadlineMarginPercent = 50
-const DeadlineStartupSeconds = 60
+
+const DeadlineNoSuggestion = "Pod active lifetime through finalization is not measured. duration_ns is main-container runtime; retained Pod finish is the last container exit, a lower bound. Keep the declared deadline and measure Pod finalization before sizing it."
 
 type Observation struct {
+	OOMKilled           bool
+	RunTerminal         bool
 	StepMemoryPeakBytes *int64
 	DeadlineKilled      bool
 	Ambiguous           bool
@@ -61,7 +63,9 @@ type Suggested struct {
 	MemoryLimitBytes      int64 `json:"memory_limit_bytes"`
 	EphemeralRequestBytes int64 `json:"ephemeral_request_bytes"`
 	EphemeralLimitBytes   int64 `json:"ephemeral_limit_bytes"`
-	ActiveDeadlineSeconds int64 `json:"activeDeadlineSeconds"`
+	// Retained for decoding older reports. Build no longer derives a Pod
+	// deadline from container timing, so new resource suggestions omit it.
+	ActiveDeadlineSeconds int64 `json:"activeDeadlineSeconds,omitempty"`
 }
 
 func (s Suggested) Resources() map[string]map[string]string {
@@ -86,48 +90,56 @@ type Flags struct {
 	IdentityUnknown   bool `json:"identity_unknown"`
 }
 type Step struct {
-	SizingAcceptance           SizingAcceptance        `json:"sizing_acceptance"`
-	MemoryStepAttempts         int                     `json:"memory_step_peak_attempts"`
-	MemorySamplerAttempts      int                     `json:"memory_sampler_attempts"`
-	MemoryInsufficientAttempts int                     `json:"memory_insufficient_attempts"`
-	Stage                      string                  `json:"burn"`
-	Template                   string                  `json:"template"`
-	OwnerRepository            string                  `json:"owner_repository"`
-	Runs                       int                     `json:"runs"`
-	RunIDs                     []string                `json:"run_ids"`
-	Attempts                   int                     `json:"attempts"`
-	Samples                    int64                   `json:"samples"`
-	Since                      time.Time               `json:"since,omitzero"`
-	Until                      time.Time               `json:"until,omitzero"`
-	Declared                   *Declaration            `json:"declared"`
-	MemoryPeakBytes            model.ResourceQuantiles `json:"memory_peak_bytes"`
-	AverageCPUNanoCores        model.ResourceQuantiles `json:"average_cpu_nanocores"`
-	PeakCPUNanoCores           model.ResourceQuantiles `json:"peak_cpu_nanocores"`
-	EphemeralBytes             model.ResourceQuantiles `json:"ephemeral_storage_bytes"`
-	DurationNS                 model.ResourceQuantiles `json:"duration_ns"`
-	IOReadBytes                model.ResourceQuantiles `json:"io_read_bytes"`
-	IOWriteBytes               model.ResourceQuantiles `json:"io_write_bytes"`
-	IOPressureSomeNS           model.ResourceQuantiles `json:"io_pressure_some_ns"`
-	IOPressureFullNS           model.ResourceQuantiles `json:"io_pressure_full_ns"`
-	Flags                      Flags                   `json:"flags"`
-	Suggested                  *Suggested              `json:"suggested"`
-	NoSuggestion               []string                `json:"no_suggestion"`
+	MemoryCoverageInsufficientAttempts int                     `json:"memory_coverage_insufficient_attempts"`
+	CPUInsufficientAttempts            int                     `json:"cpu_insufficient_attempts"`
+	StorageInsufficientAttempts        int                     `json:"storage_insufficient_attempts"`
+	FailedWorkloadAttempts             int                     `json:"failed_workload_attempts"`
+	AdviceBasis                        string                  `json:"advice_basis,omitempty"`
+	SizingAcceptance                   SizingAcceptance        `json:"sizing_acceptance"`
+	MemoryStepAttempts                 int                     `json:"memory_step_peak_attempts"`
+	MemorySamplerAttempts              int                     `json:"memory_sampler_attempts"`
+	MemoryInsufficientAttempts         int                     `json:"memory_insufficient_attempts"`
+	Stage                              string                  `json:"burn"`
+	Template                           string                  `json:"template"`
+	OwnerRepository                    string                  `json:"owner_repository"`
+	Runs                               int                     `json:"runs"`
+	RunIDs                             []string                `json:"run_ids"`
+	Attempts                           int                     `json:"attempts"`
+	Samples                            int64                   `json:"samples"`
+	Since                              time.Time               `json:"since,omitzero"`
+	Until                              time.Time               `json:"until,omitzero"`
+	Declared                           *Declaration            `json:"declared"`
+	MemoryPeakBytes                    model.ResourceQuantiles `json:"memory_peak_bytes"`
+	AverageCPUNanoCores                model.ResourceQuantiles `json:"average_cpu_nanocores"`
+	PeakCPUNanoCores                   model.ResourceQuantiles `json:"peak_cpu_nanocores"`
+	EphemeralBytes                     model.ResourceQuantiles `json:"ephemeral_storage_bytes"`
+	DurationNS                         model.ResourceQuantiles `json:"duration_ns"`
+	IOReadBytes                        model.ResourceQuantiles `json:"io_read_bytes"`
+	IOWriteBytes                       model.ResourceQuantiles `json:"io_write_bytes"`
+	IOPressureSomeNS                   model.ResourceQuantiles `json:"io_pressure_some_ns"`
+	IOPressureFullNS                   model.ResourceQuantiles `json:"io_pressure_full_ns"`
+	Flags                              Flags                   `json:"flags"`
+	Suggested                          *Suggested              `json:"suggested"`
+	NoSuggestion                       []string                `json:"no_suggestion"`
+	DeadlineNoSuggestion               string                  `json:"deadline_no_suggestion"`
 }
 type Report struct {
-	Format             string `json:"-"`
-	Repository         string `json:"repository"`
-	Ref                string `json:"ref"`
-	Run                string `json:"run,omitempty"`
-	RequestedRuns      int    `json:"requested_runs"`
-	SelectedRuns       int    `json:"selected_runs"`
-	NewestSHA          string `json:"newest_sha"`
-	IncludeFailed      bool   `json:"include_failed"`
-	IncludePromotions  bool   `json:"include_promotions"`
-	Truncated          bool   `json:"truncated"`
-	DeclarationsStatus string `json:"declarations_status"`
-	Retention          string `json:"retention"`
-	Semantics          string `json:"semantics"`
-	Steps              []Step `json:"steps"`
+	SafetyRunIDs       []string `json:"safety_run_ids,omitempty"`
+	SafetyScope        string   `json:"safety_scope,omitempty"`
+	Format             string   `json:"-"`
+	Repository         string   `json:"repository"`
+	Ref                string   `json:"ref"`
+	Run                string   `json:"run,omitempty"`
+	RequestedRuns      int      `json:"requested_runs"`
+	SelectedRuns       int      `json:"selected_runs"`
+	NewestSHA          string   `json:"newest_sha"`
+	IncludeFailed      bool     `json:"include_failed"`
+	IncludePromotions  bool     `json:"include_promotions"`
+	Truncated          bool     `json:"truncated"`
+	DeclarationsStatus string   `json:"declarations_status"`
+	Retention          string   `json:"retention"`
+	Semantics          string   `json:"semantics"`
+	Steps              []Step   `json:"steps"`
 }
 
 func (r Report) MCPToolText() string {
@@ -139,7 +151,7 @@ func (r Report) MCPToolText() string {
 }
 
 const Retention = "External samples retain at most 90 days / 100,000 container incarnations globally, asynchronously. There is no per-repo or release reservation: busy repositories can displace rare release history. Missing history is unknown. A step-reported memory peak is used only with exact retained attempt identity, and only for advice."
-const Semantics = "Read-only. Per-step sizing_acceptance requires five comparable distinct terminal runs with CPU, memory, storage, duration and known limits together; censored or mixed-condition histories get no suggestion. Quantiles are across container attempts, not time samples; each metric reports its own count. Memory prefers an identity-bound step-reported cgroup peak (self-reported, advisory), retaining any higher external peak with at least four polls; otherwise sampler memory requires four polls per attempt. Any missing memory coverage, unknown limits or deadline kill suppresses suggestions. CPU average uses captured CPU time over its measured interval. Ephemeral and IO pressure are pod-scoped, once per main attempt; PVC bytes are excluded. External peaks are sampled lower bounds. Git is the source of truth; suggestions never change execution."
+const Semantics = "Read-only. Per-step sizing_acceptance requires five comparable distinct terminal runs with CPU, memory, storage, duration and known limits together; censored or mixed-condition histories get no suggestion. Quantiles are across container attempts, not time samples; each metric reports its own count. Memory prefers an identity-bound step-reported cgroup peak (self-reported, advisory), retaining any higher external peak with at least four polls; otherwise sampler memory requires four polls per attempt. Any missing memory coverage, unknown limits or deadline kill suppresses suggestions. CPU average uses captured CPU time over its measured interval. Ephemeral and IO pressure are pod-scoped, once per main attempt; PVC bytes are excluded. External peaks are sampled lower bounds. Git is the source of truth; suggestions never change execution. " + DeadlineNoSuggestion + " " + ProvisionalAdvice + " " + SafetyScope
 
 var fragmentName = regexp.MustCompile(`^frag-[0-9a-f]{8}-(.+)$`)
 var retrySuffix = regexp.MustCompile(`\([0-9]+\)$`)
@@ -173,6 +185,20 @@ func key(stage, template string) string {
 	return NormalizeTemplate(stage) + "\x00" + NormalizeTemplate(template)
 }
 func Build(values []Observation, declarations []Declaration) []Step {
+	return build(values, declarations, nil, nil, nil)
+}
+
+// BuildWithSafety keeps the failure/coverage population separate from displayed
+// metric quantiles. A passed-only display option cannot erase known failures.
+func BuildWithSafety(values []Observation, declarations []Declaration, safety []Observation, dispositions []model.PodResourceDisposition, attemptGaps ...[]model.ResourceAttemptGap) []Step {
+	var gaps []model.ResourceAttemptGap
+	for _, population := range attemptGaps {
+		gaps = append(gaps, population...)
+	}
+	return build(values, declarations, safety, dispositions, gaps)
+}
+
+func build(values []Observation, declarations []Declaration, safety []Observation, dispositions []model.PodResourceDisposition, gaps []model.ResourceAttemptGap) []Step {
 	groups := map[string][]Observation{}
 	for _, o := range values {
 		v := o.Usage
@@ -186,6 +212,39 @@ func Build(values []Observation, declarations []Declaration) []Step {
 			o.Owner = v.FragmentRepository
 		}
 		groups[key(v.Stage, o.Template)] = append(groups[key(v.Stage, o.Template)], o)
+	}
+	safetyGroups := map[string][]Observation{}
+	for _, o := range safety {
+		if !o.Usage.IsWorkflowMain() {
+			continue
+		}
+		if o.Template == "" {
+			o.Template = TemplateOf(o.Usage)
+		}
+		k := key(o.Usage.Stage, o.Template)
+		safetyGroups[k] = append(safetyGroups[k], o)
+		if _, exists := groups[k]; !exists {
+			groups[k] = nil
+		}
+	}
+	dispositionGroups := map[string][]model.PodResourceDisposition{}
+	for _, d := range dispositions {
+		if d.Validate() != nil {
+			continue
+		}
+		k := key(d.Stage, d.Template)
+		dispositionGroups[k] = append(dispositionGroups[k], d)
+		if _, exists := groups[k]; !exists {
+			groups[k] = nil
+		}
+	}
+	gapGroups := map[string][]model.ResourceAttemptGap{}
+	for _, gap := range gaps {
+		k := key(gap.Stage, gap.Template)
+		gapGroups[k] = append(gapGroups[k], gap)
+		if _, exists := groups[k]; !exists {
+			groups[k] = nil
+		}
 	}
 	declared := map[string]*Declaration{}
 	for i := range declarations {
@@ -204,12 +263,55 @@ func Build(values []Observation, declarations []Declaration) []Step {
 	out := make([]Step, 0, len(keys))
 	for _, k := range keys {
 		stage, template, _ := strings.Cut(k, "\x00")
-		s := Step{Stage: stage, Template: template, Declared: declared[k], RunIDs: []string{}, NoSuggestion: []string{}}
+		s := Step{Stage: stage, Template: template, Declared: declared[k], RunIDs: []string{}, NoSuggestion: []string{}, DeadlineNoSuggestion: DeadlineNoSuggestion}
 		if s.Declared != nil {
 			s.OwnerRepository = s.Declared.OwnerRepository
 		}
+		if len(groups[k]) == 0 && s.OwnerRepository == "" {
+			for _, o := range safetyGroups[k] {
+				if o.Owner != "" {
+					s.OwnerRepository = o.Owner
+					break
+				}
+			}
+			if s.OwnerRepository == "" {
+				for _, d := range dispositionGroups[k] {
+					if d.Owner != "" {
+						s.OwnerRepository = d.Owner
+						break
+					}
+				}
+			}
+			if s.OwnerRepository == "" {
+				for _, gap := range gapGroups[k] {
+					if gap.Owner != "" {
+						s.OwnerRepository = gap.Owner
+						break
+					}
+				}
+			}
+		}
 		populations := make([][]int64, 9)
 		var sizing sizingHistory
+		var baseline resourceBaseline
+		for _, o := range safetyGroups[k] {
+			if !o.Usage.Terminal {
+				continue
+			}
+			o = withUsageLimits(o)
+			baseline.observe(o)
+		}
+		knownDeadline := map[string]bool{}
+		knownOOM := map[string]bool{}
+		knownLimit := map[string]bool{}
+		knownTerminal := map[string]bool{}
+		for _, o := range groups[k] {
+			id := o.Usage.RunID + "\x00" + o.Usage.PodUID + "\x00" + o.Usage.ContainerID
+			knownDeadline[id] = knownDeadline[id] || o.DeadlineKilled || o.Usage.Reason == "DeadlineExceeded"
+			knownOOM[id] = knownOOM[id] || o.OOMKilled || o.Usage.Reason == "OOMKilled"
+			knownLimit[id] = knownLimit[id] || observationAtLimit(withUsageLimits(o))
+			knownTerminal[id] = knownTerminal[id] || o.Usage.Terminal
+		}
 		runs := map[string]bool{}
 		seen := map[string]bool{}
 		metricRuns := make([]map[string]bool, 5)
@@ -218,17 +320,34 @@ func Build(values []Observation, declarations []Declaration) []Step {
 		}
 		for _, o := range groups[k] {
 			v := o.Usage
-			// A running attempt has only partial peaks and duration. It cannot
-			// contribute to the population used to size completed work.
-			if !v.Terminal {
+			id := v.RunID + "\x00" + v.PodUID + "\x00" + v.ContainerID
+			o.DeadlineKilled = knownDeadline[id]
+			o.OOMKilled = knownOOM[id]
+			// Prefer retained terminal values over a duplicate partial update,
+			// while carrying forward every known censor from that incarnation.
+			if !v.Terminal && knownTerminal[id] {
 				continue
 			}
-			s.Flags.IdentityUnknown = s.Flags.IdentityUnknown || o.Ambiguous
-			id := v.RunID + "\x00" + v.PodUID + "\x00" + v.ContainerID
 			if seen[id] {
 				continue
 			}
 			seen[id] = true
+			deadline := o.DeadlineKilled || v.Reason == "DeadlineExceeded"
+			s.Flags.DeadlineKilled = s.Flags.DeadlineKilled || deadline
+			s.Flags.OOM = s.Flags.OOM || o.OOMKilled || v.Reason == "OOMKilled"
+			s.Flags.LimitReached = s.Flags.LimitReached || knownLimit[id]
+			// A running attempt has only partial peaks and duration. It cannot
+			// contribute to the population used to size completed work.
+			if !v.Terminal {
+				if deadline || o.OOMKilled || v.Reason == "OOMKilled" || knownLimit[id] {
+					sizing.censored++
+				}
+				if o.RunTerminal {
+					s.NoSuggestion = append(s.NoSuggestion, "terminal run has no final main telemetry; coverage is incomplete")
+				}
+				continue
+			}
+			s.Flags.IdentityUnknown = s.Flags.IdentityUnknown || o.Ambiguous
 			s.Attempts++
 			s.Samples = satAdd(s.Samples, max(v.Samples, 0))
 			runs[v.RunID] = true
@@ -250,7 +369,7 @@ func Build(values []Observation, declarations []Declaration) []Step {
 			s.Flags.SampledLowerBound = s.Flags.SampledLowerBound || v.SampledLowerBound
 			s.Flags.Saturated = s.Flags.Saturated || v.Saturated
 			s.Flags.Restarts = s.Flags.Restarts || v.RestartCount > 0
-			s.Flags.OOM = s.Flags.OOM || v.Reason == "OOMKilled"
+			s.Flags.OOM = s.Flags.OOM || o.OOMKilled || v.Reason == "OOMKilled"
 			s.Flags.DeadlineKilled = s.Flags.DeadlineKilled || o.DeadlineKilled || v.Reason == "DeadlineExceeded"
 			s.Flags.RequestsChanged = s.Flags.RequestsChanged || v.RequestsChanged
 			s.Flags.CounterReset = s.Flags.CounterReset || v.CounterReset
@@ -263,6 +382,7 @@ func Build(values []Observation, declarations []Declaration) []Step {
 			if o.EphemeralLimitBytes == nil {
 				o.EphemeralLimitBytes = v.EphemeralLimitBytes
 			}
+			baseline.observe(o)
 			s.Flags.LimitsUnknown = s.Flags.LimitsUnknown || o.MemoryLimitBytes == nil || o.CPULimitNanoCores == nil || o.EphemeralLimitBytes == nil
 			var memory *int64
 			if o.StepMemoryPeakBytes != nil && *o.StepMemoryPeakBytes >= 0 {
@@ -278,8 +398,8 @@ func Build(values []Observation, declarations []Declaration) []Step {
 				s.MemoryInsufficientAttempts++
 				s.Flags.LowSamples = true
 			}
-			censored := o.DeadlineKilled || v.Reason == "DeadlineExceeded" || v.Reason == "OOMKilled"
-			for _, p := range [][2]*int64{{memory, o.MemoryLimitBytes}, {v.MemoryPeakBytes, o.MemoryLimitBytes}, {v.CPUPeakNanoCores, o.CPULimitNanoCores}, {v.EphemeralStoragePeakBytes, o.EphemeralLimitBytes}} {
+			censored := o.DeadlineKilled || o.OOMKilled || v.Reason == "DeadlineExceeded" || v.Reason == "OOMKilled" || knownLimit[id]
+			for _, p := range [][2]*int64{{memory, o.MemoryLimitBytes}, {v.MemoryPeakBytes, o.MemoryLimitBytes}, {v.CPUPeakNanoCores, o.CPULimitNanoCores}, {v.EphemeralStoragePeakBytes, v.PodEphemeralLimitBytes}} {
 				if p[0] != nil && p[1] != nil && *p[1] > 0 && *p[0] >= *p[1] {
 					s.Flags.LimitReached = true
 					censored = true
@@ -311,7 +431,20 @@ func Build(values []Observation, declarations []Declaration) []Step {
 					complete = false
 				}
 			}
-			sizing.observe(o, complete, censored)
+			if !coveredMemory(o) {
+				s.MemoryCoverageInsufficientAttempts++
+			}
+			if !coveredCPU(v) {
+				s.CPUInsufficientAttempts++
+			}
+			if !coveredStorage(v) {
+				s.StorageInsufficientAttempts++
+			}
+			failed := (v.ExitCode != nil && *v.ExitCode != 0) || (v.Reason != "" && v.Reason != "Completed")
+			if failed {
+				s.FailedWorkloadAttempts++
+			}
+			sizing.observe(o, complete && coveredMemory(o) && coveredCPU(v) && coveredStorage(v) && !failed, censored)
 			for i, n := range metrics {
 				if n != nil && *n >= 0 {
 					populations[i] = append(populations[i], *n)
@@ -348,7 +481,7 @@ func Build(values []Observation, declarations []Declaration) []Step {
 			s.NoSuggestion = append(s.NoSuggestion, "historical CPU, memory or ephemeral limits are unknown; censoring cannot be ruled out")
 		}
 		if s.Flags.DeadlineKilled {
-			s.NoSuggestion = append(s.NoSuggestion, "deadline-killed attempt duration is censored; measure with a reviewed higher deadline first")
+			s.NoSuggestion = append(s.NoSuggestion, "deadline failure/uncertainty refuses advice; a run-level flag does not establish a kill of every Pod or retry")
 		}
 		if s.Flags.LimitReached || s.Flags.OOM {
 			s.NoSuggestion = append(s.NoSuggestion, "a peak was censored by a limit or OOM; measure with a reviewed higher limit first")
@@ -359,16 +492,37 @@ func Build(values []Observation, declarations []Declaration) []Step {
 		if s.Flags.IdentityUnknown {
 			s.NoSuggestion = append(s.NoSuggestion, "template or owning repository is unknown or conflicting")
 		}
+		if s.MemoryCoverageInsufficientAttempts > 0 {
+			s.NoSuggestion = append(s.NoSuggestion, "memory source coverage does not reach main finish; aggregate polls are not per-metric coverage")
+		}
+		if s.CPUInsufficientAttempts > 0 {
+			s.NoSuggestion = append(s.NoSuggestion, "CPU source coverage/cumulative counter does not reach main finish; terminal tail is unknown")
+		}
+		if s.StorageInsufficientAttempts > 0 {
+			s.NoSuggestion = append(s.NoSuggestion, "Pod-local storage source coverage does not reach last container exit; PVC/cache bytes cannot fill that gap")
+		}
+		if s.FailedWorkloadAttempts > 0 {
+			s.NoSuggestion = append(s.NoSuggestion, "failed workload observations retain lower bounds but do not prove full-workload completion")
+		}
 		if sizing.count() < MinimumSamples {
 			s.NoSuggestion = append(s.NoSuggestion, fmt.Sprintf("need %d comparable terminal runs with CPU, memory, storage, duration and known limits together; have %d", MinimumSamples, sizing.count()))
 		}
 		if len(sizing.cohorts) > 1 {
 			s.NoSuggestion = append(s.NoSuggestion, "historical requests, limits or workflow sizes differ; select a comparable history before sizing")
 		}
+		applySafety(&s, &sizing, safetyGroups[k], dispositionGroups[k], groups[k])
+		if len(gapGroups[k]) > 0 {
+			s.NoSuggestion = append(s.NoSuggestion, "server-observed attempt failed or lacks exact retained Pod/main coverage; another retry cannot supply it")
+		}
 		s.SizingAcceptance = sizing.acceptance(s.NoSuggestion)
 		if len(s.NoSuggestion) == 0 {
 			cpu := roundMargin(*s.AverageCPUNanoCores.P95, RequestMarginPercent, 10_000_000, 10_000_000) / 1_000_000
-			s.Suggested = &Suggested{CPUMilli: cpu, MemoryRequestBytes: roundMargin(*s.MemoryPeakBytes.P95, RequestMarginPercent, 1<<20, 64<<20), MemoryLimitBytes: roundMargin(*s.MemoryPeakBytes.Max, LimitMarginPercent, 1<<20, 64<<20), EphemeralRequestBytes: roundMargin(*s.EphemeralBytes.Max, RequestMarginPercent, 1<<20, 64<<20), EphemeralLimitBytes: roundMargin(*s.EphemeralBytes.Max, LimitMarginPercent, 1<<20, 64<<20), ActiveDeadlineSeconds: satAdd(roundMargin(*s.DurationNS.Max, DeadlineMarginPercent, int64(time.Second), int64(time.Second))/int64(time.Second), DeadlineStartupSeconds)}
+			s.Suggested = &Suggested{CPUMilli: cpu, MemoryRequestBytes: roundMargin(*s.MemoryPeakBytes.P95, RequestMarginPercent, 1<<20, 64<<20), MemoryLimitBytes: roundMargin(*s.MemoryPeakBytes.Max, LimitMarginPercent, 1<<20, 64<<20), EphemeralRequestBytes: roundMargin(*s.EphemeralBytes.Max, RequestMarginPercent, 1<<20, 64<<20), EphemeralLimitBytes: roundMargin(*s.EphemeralBytes.Max, LimitMarginPercent, 1<<20, 64<<20)}
+			if !baseline.apply(s.Suggested, s.Declared) {
+				s.RefuseSizing("cache/workload coverage is unknown; missing, unlimited or mixed-scope baselines cannot justify new restrictive resource bounds")
+			} else {
+				s.AdviceBasis = ProvisionalAdvice
+			}
 		}
 		out = append(out, s)
 	}
@@ -387,6 +541,7 @@ func WithDiagnostic(o Observation, d *model.StepDiagnostic) Observation {
 		return o
 	}
 	o.DeadlineKilled = o.DeadlineKilled || c.PodReason == "DeadlineExceeded"
+	o.OOMKilled = o.OOMKilled || c.Reason == "OOMKilled"
 	if c.CPULimitMilli != nil && *c.CPULimitMilli <= 1_000_000 {
 		n := *c.CPULimitMilli * 1_000_000
 		o.CPULimitNanoCores = &n
@@ -447,7 +602,13 @@ func YAML(r Report) string {
 	for i, s := range r.Steps {
 		if s.Suggested != nil && i < len(steps) {
 			step, _ := steps[i].(map[string]any)
-			step["paste_ready"] = map[string]any{"resources": s.Suggested.Resources(), "activeDeadlineSeconds": s.Suggested.ActiveDeadlineSeconds}
+			paste := map[string]any{"resources": s.Suggested.Resources()}
+			// Older reports can still be rendered, but a missing deadline must
+			// never become a copyable zero activeDeadlineSeconds declaration.
+			if s.Suggested.ActiveDeadlineSeconds > 0 {
+				paste["activeDeadlineSeconds"] = s.Suggested.ActiveDeadlineSeconds
+			}
+			step["paste_ready"] = paste
 		}
 	}
 	output, _ := yaml.Marshal(document)

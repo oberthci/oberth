@@ -77,6 +77,7 @@ func (h sizingHistory) acceptance(reasons []string) SizingAcceptance {
 // report-wide gap, such as truncated history, after grouping the observations.
 func (s *Step) RefuseSizing(reason string) {
 	s.Suggested = nil
+	s.AdviceBasis = ""
 	s.NoSuggestion = append(s.NoSuggestion, reason)
 	s.SizingAcceptance.Sufficient = false
 	if s.SizingAcceptance.Status == "sufficient" {

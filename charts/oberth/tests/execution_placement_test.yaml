@@ -1,0 +1,27 @@
+suite: isolated execution placement
+templates:
+   - templates/deployment.yaml
+tests:
+   - it: mounts only the configured administrator ConfigMap read only
+     set:
+       argo.executionPlacementConfigMap: placement-fixture
+     asserts:
+       - contains:
+           path: spec.template.spec.volumes
+           content:
+             name: execution-placement
+             configMap:
+               name: placement-fixture
+               optional: false
+               items:
+                 - key: config.json
+                   path: config.json
+       - contains:
+           path: spec.template.spec.containers[0].args
+           content: --argo-execution-placement-config=/etc/oberth/execution-placement/config.json
+       - contains:
+           path: spec.template.spec.containers[0].volumeMounts
+           content:
+             name: execution-placement
+             mountPath: /etc/oberth/execution-placement
+             readOnly: true

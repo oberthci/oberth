@@ -21,7 +21,11 @@ type ClusterProbe func(context.Context) error
 type VCSProbe func(context.Context, model.Upstream) error
 
 type Health struct {
-	ControllerProfile func() *model.ControllerProfileStatus
+	// PipelineNetworkPolicyEnabled is the deployment configuration, not a live
+	// enforcement measurement. Nil means configuration is unavailable.
+	PipelineNetworkPolicyEnabled *bool
+	ControllerProfile            func() *model.ControllerProfileStatus
+	ExecutionTargetProfiles      func() map[string]*model.ControllerProfileStatus
 	// ReadyGate checks process-local recovery state without network or store reads.
 	ReadyGate ClusterProbe
 	// Readiness is refreshed off the HTTP request path; nil retains direct probes.
@@ -121,24 +125,26 @@ type AuditChainStatus struct {
 }
 
 type HealthStatus struct {
-	QueueCap          *model.QueueCapStatus          `json:"queueCap,omitempty"`
-	DatabaseRetries   uint64                         `json:"database_retries_total,omitempty"`
-	ControllerProfile *model.ControllerProfileStatus `json:"controller_profile,omitempty"`
-	Storage           any                            `json:"storage,omitempty"`
-	Database          string                         `json:"database"`
-	SchemaVersion     int                            `json:"schema_version,omitempty"`
-	Upstreams         int                            `json:"upstreams"`
-	Repositories      int                            `json:"repositories"`
-	VCS               string                         `json:"vcs"`
-	Cluster           string                         `json:"cluster"`
-	Audit             string                         `json:"audit"`
-	AuditMode         string                         `json:"audit_mode,omitempty"`
-	Version           string                         `json:"version,omitempty"`
-	UpstreamInfo      []UpstreamStatus               `json:"upstream_info,omitempty"`
-	SSHIdentity       string                         `json:"ssh_identity,omitempty"`
-	SecretStore       *SecretStoreStatus             `json:"secret_store,omitempty"`
-	AuditChain        *AuditChainStatus              `json:"audit_chain,omitempty"`
-	LastBackup        *model.BackupStatus            `json:"last_backup,omitempty"`
+	QueueCap                *model.QueueCapStatus                     `json:"queueCap,omitempty"`
+	DatabaseRetries         uint64                                    `json:"database_retries_total,omitempty"`
+	ControllerProfile       *model.ControllerProfileStatus            `json:"controller_profile,omitempty"`
+	ExecutionTargetProfiles map[string]*model.ControllerProfileStatus `json:"execution_target_profiles,omitempty"`
+	Storage                 any                                       `json:"storage,omitempty"`
+	Database                string                                    `json:"database"`
+	SchemaVersion           int                                       `json:"schema_version,omitempty"`
+	Upstreams               int                                       `json:"upstreams"`
+	Repositories            int                                       `json:"repositories"`
+	VCS                     string                                    `json:"vcs"`
+	Cluster                 string                                    `json:"cluster"`
+	ClusterDetail           string                                    `json:"cluster_detail"`
+	Audit                   string                                    `json:"audit"`
+	AuditMode               string                                    `json:"audit_mode,omitempty"`
+	Version                 string                                    `json:"version,omitempty"`
+	UpstreamInfo            []UpstreamStatus                          `json:"upstream_info,omitempty"`
+	SSHIdentity             string                                    `json:"ssh_identity,omitempty"`
+	SecretStore             *SecretStoreStatus                        `json:"secret_store,omitempty"`
+	AuditChain              *AuditChainStatus                         `json:"audit_chain,omitempty"`
+	LastBackup              *model.BackupStatus                       `json:"last_backup,omitempty"`
 	// LastBackupWarning explains an omitted last_backup when the latest
 	// backup record exists but cannot be read.
 	LastBackupWarning string `json:"last_backup_warning,omitempty"`
@@ -223,13 +229,27 @@ func requiresSSHIdentity(upstreams []model.Upstream) bool {
 	return false
 }
 
+// pipelineNetworkPolicyDetail is informational and never gates readiness or admission.
+func (health Health) pipelineNetworkPolicyDetail() string {
+	if health.PipelineNetworkPolicyEnabled == nil {
+		return "pipeline NetworkPolicy configuration is unavailable; CNI enforcement has not been measured"
+	}
+	if !*health.PipelineNetworkPolicyEnabled {
+		return "WARNING: pipeline NetworkPolicy is configured disabled; Oberth does not configure pipeline egress isolation"
+	}
+	return "pipeline NetworkPolicy is configured enabled; CNI enforcement has not been measured"
+}
+
 func (health Health) Status(ctx context.Context) (any, error) {
-	status := HealthStatus{Database: "unavailable", SchemaVersion: health.SchemaVersion, VCS: "unavailable", Cluster: "unavailable", Audit: "unavailable", AuditMode: health.AuditMode, Version: health.Version, SecretStore: health.SecretStore}
+	status := HealthStatus{Database: "unavailable", SchemaVersion: health.SchemaVersion, VCS: "unavailable", Cluster: "unavailable", ClusterDetail: health.pipelineNetworkPolicyDetail(), Audit: "unavailable", AuditMode: health.AuditMode, Version: health.Version, SecretStore: health.SecretStore}
 	if health.DatabaseRetries != nil {
 		status.DatabaseRetries = health.DatabaseRetries()
 	}
 	if health.ControllerProfile != nil {
 		status.ControllerProfile = health.ControllerProfile()
+	}
+	if health.ExecutionTargetProfiles != nil {
+		status.ExecutionTargetProfiles = health.ExecutionTargetProfiles()
 	}
 	if health.Storage != nil {
 		if storage, err := health.Storage(ctx); err == nil {
@@ -332,7 +352,7 @@ func (health Health) Status(ctx context.Context) (any, error) {
 // upstreams and their repositories are counted and shown. The audit chain
 // and the secret store describe the whole installation, so they are left out.
 func (health Health) ScopedStatus(ctx context.Context, actor api.Actor) (any, error) {
-	status := HealthStatus{Database: "unavailable", SchemaVersion: health.SchemaVersion, VCS: "unavailable", Cluster: "unavailable", Audit: "unavailable", AuditMode: health.AuditMode, Version: health.Version}
+	status := HealthStatus{Database: "unavailable", SchemaVersion: health.SchemaVersion, VCS: "unavailable", Cluster: "unavailable", ClusterDetail: health.pipelineNetworkPolicyDetail(), Audit: "unavailable", AuditMode: health.AuditMode, Version: health.Version}
 	if health.Store == nil {
 		return status, nil
 	}

@@ -1092,6 +1092,10 @@ Usage of serve:
         exact controller profile to verify before nonroot submission; empty disables nonroot
   -argo-credentialed-serviceaccount string
         ServiceAccount for release templates with approved secrets; carries a projected token for OpenBao Kubernetes auth (default "oberth-argo-credentialed")
+  -argo-execution-placement-config string
+        absolute path to administrator-owned isolated execution placement JSON
+  -argo-execution-target-config string
+        absolute path to administrator-owned branch execution target policy
   -argo-executor-scratch-size-limit string
         per-Pod Argo executor scratch size limit (Kubernetes quantity) (default "1Gi")
   -argo-executor-serviceaccount string
@@ -1218,6 +1222,8 @@ Usage of serve:
         mounted ConfigMap key to reload max concurrent Jobs without restart; invalid or missing keeps the last good value
   -namespace string
         Kubernetes namespace (default "oberth")
+  -pipeline-network-policy-enabled value
+        configured chart networkPolicy.enabled (true or false); omitted means unavailable, not measured CNI enforcement
   -promotion-grant-max-lifetime duration
         maximum lifetime for promotion grants (default 24h, hard ceiling 168h) (default 24h0m0s)
   -push-banner-url string
