@@ -147,7 +147,11 @@ func TestTrustedPreflightSchedulerStartupRecovery(t *testing.T) {
 			// test.
 			recovered := make(chan struct{})
 			ctx, cancel := context.WithTimeout(context.Background(), testStartTimeout(30*time.Second))
-			f.scheduler.onStartupRecovered = func() { close(recovered); <-ctx.Done() }
+			// Cancel on the scheduler goroutine before releasing the startup
+			// hook. Done closes before cancellation reaches child contexts;
+			// waking this hook on Done can let dispatch claim the fresh retry.
+			// Handshake so Run cannot return before the recovery case is selected.
+			f.scheduler.onStartupRecovered = func() { cancel(); recovered <- struct{}{} }
 			defer cancel()
 			result := make(chan error, 1)
 			go func() { result <- f.scheduler.Run(ctx) }()
