@@ -52,3 +52,38 @@ func TestCompletedMainIsNotKilledByPodFinalizationDeadline(t *testing.T) {
 		t.Fatalf("Pod censor lost or became main kill: %+v", s)
 	}
 }
+
+func TestPodDeadlineDoesNotRelabelAnEarlierContainerFailure(t *testing.T) {
+	at := time.Now().UTC()
+	v := observations()[0].Usage
+	v.RunID = strings.Repeat("a", 32)
+	v.WorkflowUID = "11111111-1111-4111-8111-111111111111"
+	v.PodUID = "22222222-2222-4222-8222-222222222222"
+	v.ContainerID = "containerd://" + strings.Repeat("b", 64)
+	for _, tc := range []struct {
+		name, reason, podReason string
+		code                    int32
+		status                  model.StepStatus
+		killed, uncertain       bool
+	}{
+		{"failed-before-deadline", "Error", "DeadlineExceeded", 42, model.StepTimedOut, false, true},
+		{"oom-before-deadline", "OOMKilled", "DeadlineExceeded", 137, model.StepTimedOut, false, true},
+		{"bound-deadline-signal", "Error", "DeadlineExceeded", 143, model.StepTimedOut, true, false},
+		{"signal-is-not-deadline", "Error", "none", 143, model.StepFailed, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &model.StepTermination{RunID: v.RunID, WorkflowUID: v.WorkflowUID, Namespace: "oberth", WorkflowName: "wf", NodeID: "wf-1", PodName: "wf-1", PodUID: v.PodUID, ContainerName: "main", ContainerID: v.ContainerID, Reason: tc.reason, PodReason: tc.podReason, ExitCode: tc.code, StartedAt: at.Add(-time.Minute), FinishedAt: at}
+			d := &model.StepDiagnostic{Available: true, ObservedAt: &at, Container: c}
+			if err := d.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			usage := v
+			usage.Reason, usage.ExitCode = tc.reason, &tc.code
+			usage.ContainerStartedAt, usage.ContainerFinishedAt = c.StartedAt, c.FinishedAt
+			got := WithStepResult(Observation{Usage: usage}, d, nil, tc.status)
+			if got.DeadlineKilled != tc.killed || got.DeadlineUncertain != tc.uncertain || got.OOMKilled != (tc.reason == "OOMKilled") {
+				t.Fatalf("termination attribution: %+v", got)
+			}
+		})
+	}
+}

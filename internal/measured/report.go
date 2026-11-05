@@ -155,7 +155,7 @@ func (r Report) MCPToolText() string {
 }
 
 const Retention = "External samples retain at most 90 days / 100,000 container incarnations globally, asynchronously. There is no per-repo or release reservation: busy repositories can displace rare release history. Missing history is unknown. A step-reported memory peak is used only with exact retained attempt identity, and only for advice."
-const Semantics = "Read-only. Per-step sizing_acceptance requires five comparable distinct terminal runs with CPU, memory, storage, duration and known limits together; censored or mixed-condition histories get no suggestion. Quantiles are across container attempts, not time samples; each metric reports its own count. Memory prefers an identity-bound step-reported cgroup peak (self-reported, advisory), retaining any higher external peak with at least four polls; otherwise sampler memory requires four polls per attempt. Any missing memory coverage, unknown limits or deadline kill suppresses suggestions. CPU average uses captured CPU time over its measured interval. Ephemeral and IO pressure are pod-scoped, once per main attempt; PVC bytes are excluded. External peaks are sampled lower bounds. Git is the source of truth; suggestions never change execution. " + DeadlineNoSuggestion + " " + ProvisionalAdvice + " " + SafetyScope
+const Semantics = "Read-only. Per-step sizing_acceptance requires five comparable distinct terminal runs with CPU, memory, storage, duration and known limits together; censored or mixed-condition histories get no suggestion. Quantiles are across container attempts, not time samples; each metric reports its own count. Memory prefers an identity-bound step-reported cgroup peak (self-reported, advisory), retaining any higher external peak with at least four polls; otherwise sampler memory requires four polls per attempt. Any missing memory coverage, unknown limits, deadline kill or deadline uncertainty suppresses suggestions. CPU average uses captured CPU time over its measured interval. Ephemeral and IO pressure are pod-scoped, once per main attempt; PVC bytes are excluded. External peaks are sampled lower bounds. Git is the source of truth; suggestions never change execution. " + DeadlineNoSuggestion + " " + ProvisionalAdvice + " " + SafetyScope
 
 var fragmentName = regexp.MustCompile(`^frag-[0-9a-f]{8}-(.+)$`)
 var retrySuffix = regexp.MustCompile(`\([0-9]+\)$`)
@@ -546,10 +546,10 @@ func WithDiagnostic(o Observation, d *model.StepDiagnostic) Observation {
 		return o
 	}
 	if c.PodReason == "DeadlineExceeded" {
-		if c.Reason == "Completed" && c.ExitCode == 0 {
-			o.DeadlineUncertain = true
-		} else {
+		if deadlineKilledContainer(c) {
 			o.DeadlineKilled = true
+		} else {
+			o.DeadlineUncertain = true
 		}
 	}
 	o.OOMKilled = o.OOMKilled || c.Reason == "OOMKilled"
@@ -582,14 +582,25 @@ func WithStepResult(o Observation, d *model.StepDiagnostic, memory *int64, statu
 		o.StepMemoryPeakBytes = memory
 	}
 	if status == model.StepTimedOut {
-		if c.Reason == "Completed" && c.ExitCode == 0 {
-			o.DeadlineUncertain = true
-		} else {
+		if deadlineKilledContainer(c) {
 			o.DeadlineKilled = true
+		} else {
+			o.DeadlineUncertain = true
 		}
 	}
 	return o
 }
+
+// A Pod/final-step deadline can happen after main has already failed. Require
+// a bound termination compatible with deadline killing; an exit code alone is
+// never used without the caller's deadline evidence. OOM remains its own cause.
+func deadlineKilledContainer(c *model.StepTermination) bool {
+	if c.Reason == "Completed" || c.Reason == "OOMKilled" {
+		return false
+	}
+	return c.Signal == 9 || c.Signal == 15 || c.ExitCode == 137 || c.ExitCode == 143
+}
+
 func satAdd(a, b int64) int64 {
 	if a < 0 || b < 0 || a > math.MaxInt64-b {
 		return math.MaxInt64

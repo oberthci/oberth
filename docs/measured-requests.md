@@ -254,3 +254,9 @@ IDs, and its numeric termination data is not guaranteed to identify the same
 attempt. Ambiguous rows get no suggestion; no identity or pairing is inferred
 from array order. Per-repository and per-step labels in that table are the
 supplied anonymised labels only.
+
+A Pod deadline after main has already failed with an ordinary exit code, or
+with its own OOM reason, does not relabel that failure as a deadline kill.
+Bound deadline evidence also needs a compatible main-container termination;
+exit137/143 or a signal by itself is not deadline evidence. Uncertain attribution
+still refuses advice, and OOM censoring remains independent.
