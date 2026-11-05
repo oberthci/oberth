@@ -67,6 +67,13 @@ func buildArgoEngine(
 	if err != nil {
 		return nil, err
 	}
+	placementConfig, err := readArgoExecutionPlacement(options.argoExecutionPlacementConfig)
+	if err != nil {
+		return nil, err
+	}
+	if err := placementConfig.VerifyTarget(restConfig); err != nil {
+		return nil, err
+	}
 	wifConfig, err := readArgoReleaseWIFConfig(options.argoReleaseWIFConfig)
 	if err != nil {
 		return nil, err
@@ -80,6 +87,7 @@ func buildArgoEngine(
 		return nil, err
 	}
 	config := argojob.Config{
+		ExecutionPlacement:         placementConfig,
 		ReleaseWIF:                 wifConfig,
 		MaxRunLogBytes:             options.runLogLimitBytes,
 		ReleaseTagRoutes:           routes,
@@ -181,6 +189,9 @@ func buildArgoEngine(
 // would put pipeline identities beside server ones.
 func validateArgoServeOptions(options serveOptions) error {
 	if options.argoNamespace == "" {
+		if options.argoExecutionPlacementConfig != "" {
+			return errors.New("serve: --argo-execution-placement-config requires --argo-namespace")
+		}
 		if options.argoReleaseWIFConfig != "" {
 			return errors.New("serve: --argo-release-wif-config requires --argo-namespace")
 		}
@@ -251,6 +262,10 @@ func validateArgoServeOptions(options serveOptions) error {
 	if err != nil {
 		return err
 	}
+	placementConfig, err := readArgoExecutionPlacement(options.argoExecutionPlacementConfig)
+	if err != nil {
+		return err
+	}
 	wifConfig, err := readArgoReleaseWIFConfig(options.argoReleaseWIFConfig)
 	if err != nil {
 		return err
@@ -260,6 +275,7 @@ func validateArgoServeOptions(options serveOptions) error {
 		return err
 	}
 	return argojob.Config{
+		ExecutionPlacement:         placementConfig,
 		ReleaseWIF:                 wifConfig,
 		MaxRunLogBytes:             options.runLogLimitBytes,
 		ReleaseTagRoutes:           routes,

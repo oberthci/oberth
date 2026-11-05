@@ -368,6 +368,20 @@ trust assumptions and complete invalidation rules.
   publish the TLS config, then roll the chart's OnDelete pod before Transit is
   enabled.
 
+### Isolated execution placement
+
+Administrator-only `--argo-execution-placement-config` selects an immutable
+closed run/repository/source/intent/cluster/node binding shared by Build and
+direct source seeding. Empty configuration preserves existing behavior. The
+selected profile requires authenticated controller owner-chain and immutable
+admission-profile readbacks, an exact transport/binary/config identity, scoped
+1Gi/64Mi executor scratch and explicit provisional helper resources. Whole
+protected-Pod checks and exact native expected-leaf selectors remain mandatory.
+Final tolerations compare the complete role-specific canonical set, separately
+from native templates; unknown profiles and changed identities refuse. Local
+controller/admission fixtures confer no managed-cluster authority. See
+[execution placement](docs/execution-placement.md) for schema and runtime inputs.
+
 ### Repository contract
 
 - A repository provides its pipeline as Argo Workflow YAML in the `.oberth/`

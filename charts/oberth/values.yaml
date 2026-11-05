@@ -275,6 +275,8 @@ argo:
   # Selected files retain their own size/resource declarations. Empty preserves
   # .oberth/release.yaml for every tag. Overlapping matches refuse the run.
   releaseTagRoutes: {}
+  # Existing administrator ConfigMap with the closed public config.json binding.
+  executionPlacementConfigMap: ""
   # Empty disables nonroot execution. The named profile still requires actual
   # immutable controller/configuration verification before each submission.
   controllerProfile: ""
