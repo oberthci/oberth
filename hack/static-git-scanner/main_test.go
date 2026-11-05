@@ -18,7 +18,7 @@ func TestScannerClosesAmbientSuppressionAndPreservesVulnerabilityExit(t *testing
 	t.Setenv("GRYPE_ONLY_FIXED", "true")
 	t.Setenv("GRYPE_IGNORE", "*")
 	t.Setenv("SYFT_EXCLUDE", "*")
-	arguments := []string{scanner, filepath.Join(dir, "policy.yaml"), filepath.Join(dir, "db"), filepath.Join(dir, "components.cdx.json"), "alpine:3.23.7"}
+	arguments := []string{scanner, filepath.Join(dir, "policy.yaml"), filepath.Join(dir, "db"), filepath.Join(dir, "components.cdx.json"), "alpine:3.23.8"}
 	if got := runScanner(arguments); got != 2 {
 		t.Fatalf("scanner changed vulnerability status or leaked suppression: %d", got)
 	}
@@ -41,7 +41,7 @@ func TestScannerRefusesExecutableEscapeAndUnpinnedDistro(t *testing.T) {
 	if err := os.Symlink(outside, scanner); err != nil {
 		t.Fatal(err)
 	}
-	arguments := []string{scanner, filepath.Join(dir, "config"), filepath.Join(dir, "db"), filepath.Join(dir, "sbom"), "alpine:3.23.7"}
+	arguments := []string{scanner, filepath.Join(dir, "config"), filepath.Join(dir, "db"), filepath.Join(dir, "sbom"), "alpine:3.23.8"}
 	if got := runScanner(arguments); got != 1 {
 		t.Fatalf("escaping scanner executed: %d", got)
 	}
