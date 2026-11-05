@@ -2,16 +2,30 @@ package store
 
 import (
 	"encoding/json"
-	"github.com/oberthci/oberth/internal/measured"
-	"sigs.k8s.io/yaml"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"sigs.k8s.io/yaml"
+
+	"github.com/oberthci/oberth/internal/measured"
 
 	"github.com/oberthci/oberth/internal/model"
 )
 
 func TestRunResourcesDeadlineFlagBelongsToKilledStep(t *testing.T) {
+	testRunResourcesDeadlineChronology(t, false, 143)
+}
+
+func TestRunResourcesEarlierSignalRetainsDeadlineUncertainty(t *testing.T) {
+	for _, code := range []int32{137, 143} {
+		t.Run(fmt.Sprint(code), func(t *testing.T) { testRunResourcesDeadlineChronology(t, true, code) })
+	}
+}
+
+func testRunResourcesDeadlineChronology(t *testing.T, earlier bool, exit int32) {
+	t.Helper()
 	at := time.Now().UTC()
 	s := testStore(t, &at)
 	repo := createRepo(t, s)
@@ -42,13 +56,21 @@ func TestRunResourcesDeadlineFlagBelongsToKilledStep(t *testing.T) {
 	killed.PodUID = "33333333-3333-4333-8333-333333333333"
 	killed.ContainerID = "containerd://" + strings.Repeat("c", 64)
 	killed.Reason = "Error"
-	code := int32(143)
+	code := exit
 	killed.ExitCode = &code
+	killed.PodStartedAt = at.Add(-2 * time.Minute)
+	killed.ContainerStartedAt = killed.PodStartedAt
+	killed.PodFinishedAt = at
+	if earlier {
+		killed.ContainerFinishedAt = at.Add(-time.Minute)
+	}
 	if err := s.RecordStepResourceUsage(t.Context(), []model.StepResourceUsage{passed, killed}); err != nil {
 		t.Fatal(err)
 	}
 
-	c := &model.StepTermination{RunID: run.ID, Namespace: killed.Namespace, WorkflowName: killed.WorkflowName, WorkflowUID: killed.WorkflowUID, NodeID: killed.NodeID, PodName: killed.PodName, PodUID: killed.PodUID, ContainerName: "main", ContainerID: killed.ContainerID, RestartCount: killed.RestartCount, Reason: "Error", PodReason: "DeadlineExceeded", ExitCode: 143, Signal: 15, StartedAt: killed.ContainerStartedAt, FinishedAt: at}
+	c := &model.StepTermination{RunID: run.ID, Namespace: killed.Namespace, WorkflowName: killed.WorkflowName, WorkflowUID: killed.WorkflowUID, NodeID: killed.NodeID, PodName: killed.PodName, PodUID: killed.PodUID, ContainerName: "main", ContainerID: killed.ContainerID, RestartCount: killed.RestartCount, Reason: "Error", PodReason: "DeadlineExceeded", ExitCode: code, StartedAt: killed.ContainerStartedAt, FinishedAt: killed.ContainerFinishedAt}
+	seconds := int64(120)
+	c.ActiveDeadlineSeconds = &seconds
 	if _, err := s.PutStepResult(t.Context(), model.StepResult{RunID: run.ID, Stage: killed.Stage, Step: killed.Step, Status: model.StepTimedOut, DeclaredSize: "M", Termination: &model.StepDiagnostic{Available: true, ObservedAt: &at, Container: c}}); err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +85,7 @@ func TestRunResourcesDeadlineFlagBelongsToKilledStep(t *testing.T) {
 		t.Fatalf("observations=%d", len(got.Observations))
 	}
 	for _, o := range got.Observations {
-		if o.DeadlineKilled != (o.Usage.Step == "killed-step") {
+		if o.DeadlineKilled != (o.Usage.Step == "killed-step" && !earlier) || o.DeadlineUncertain != (o.Usage.Step == "killed-step" && earlier) {
 			t.Fatalf("deadline flag crossed step boundary: %s deadline_killed=%t", o.Usage.Step, o.DeadlineKilled)
 		}
 	}
@@ -85,7 +107,7 @@ func TestRunResourcesDeadlineFlagBelongsToKilledStep(t *testing.T) {
 			t.Fatalf("%s lost steps: %s", format, body)
 		}
 		for _, step := range exported.Steps {
-			if step.Flags.DeadlineKilled != (step.Template == "killed-step") || step.Flags.DeadlineUnknown {
+			if step.Flags.DeadlineKilled != (step.Template == "killed-step" && !earlier) || step.Flags.DeadlineUnknown != (step.Template == "killed-step" && earlier) {
 				t.Fatalf("%s exported wrong per-step flags: %s", format, body)
 			}
 		}

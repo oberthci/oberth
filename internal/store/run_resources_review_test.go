@@ -78,10 +78,13 @@ func TestRunResourcesReadsOwnPeakOnlyForMatchingFinalAttempt(t *testing.T) {
 	v.Namespace = "oberth"
 	v.Stage = "step-12345678"
 	v.Step = "step-abc12345"
+	v.PodStartedAt = at.Add(-time.Minute)
 	if err = s.RecordStepResourceUsage(t.Context(), []model.StepResourceUsage{v}); err != nil {
 		t.Fatal(err)
 	}
 	c := &model.StepTermination{RunID: run.ID, Namespace: v.Namespace, WorkflowName: v.WorkflowName, WorkflowUID: v.WorkflowUID, NodeID: v.NodeID, PodName: v.PodName, PodUID: v.PodUID, ContainerName: "main", ContainerID: v.ContainerID, Reason: "Error", PodReason: "DeadlineExceeded", ExitCode: 143, Signal: 15, StartedAt: at.Add(-time.Minute), FinishedAt: at}
+	seconds := int64(60)
+	c.ActiveDeadlineSeconds = &seconds
 	peak := int64(1536 << 20)
 	if _, err = s.PutStepResult(t.Context(), model.StepResult{RunID: run.ID, Stage: v.Stage, Step: v.Step, Status: model.StepTimedOut, DeclaredSize: "M", MemoryPeakBytes: &peak, Termination: &model.StepDiagnostic{Available: true, ObservedAt: &at, Container: c}}); err != nil {
 		t.Fatal(err)

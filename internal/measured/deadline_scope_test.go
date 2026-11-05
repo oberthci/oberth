@@ -1,10 +1,11 @@
 package measured
 
 import (
-	"github.com/oberthci/oberth/internal/model"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/model"
 )
 
 func TestDeadlineUncertaintyRefusesAdviceWithoutInventingKill(t *testing.T) {
@@ -77,7 +78,9 @@ func TestPodDeadlineDoesNotRelabelAnEarlierContainerFailure(t *testing.T) {
 			if err := d.Validate(); err != nil {
 				t.Fatal(err)
 			}
+			c.ActiveDeadlineSeconds = value(60)
 			usage := v
+			usage.PodStartedAt = c.StartedAt
 			usage.Reason, usage.ExitCode = tc.reason, &tc.code
 			usage.ContainerStartedAt, usage.ContainerFinishedAt = c.StartedAt, c.FinishedAt
 			got := WithStepResult(Observation{Usage: usage}, d, nil, tc.status)
@@ -85,5 +88,34 @@ func TestPodDeadlineDoesNotRelabelAnEarlierContainerFailure(t *testing.T) {
 				t.Fatalf("termination attribution: %+v", got)
 			}
 		})
+	}
+}
+
+func TestLaterDeadlineDoesNotRelabelEarlierSignalFailure(t *testing.T) {
+	at := time.Now().UTC()
+	v := observations()[0].Usage
+	v.RunID = strings.Repeat("a", 32)
+	v.WorkflowUID = "11111111-1111-4111-8111-111111111111"
+	v.PodUID = "22222222-2222-4222-8222-222222222222"
+	v.ContainerID = "containerd://" + strings.Repeat("b", 64)
+	v.PodStartedAt = at.Add(-2 * time.Minute)
+	deadline := int64(120)
+	for _, code := range []int32{137, 143} {
+		for _, podReason := range []string{"none", "DeadlineExceeded"} {
+			c := &model.StepTermination{RunID: v.RunID, WorkflowUID: v.WorkflowUID, Namespace: "oberth", WorkflowName: "wf", NodeID: "wf-1", PodName: "wf-1", PodUID: v.PodUID, ContainerName: "main", ContainerID: v.ContainerID, Reason: "Error", PodReason: podReason, ExitCode: code, StartedAt: v.PodStartedAt, FinishedAt: at.Add(-time.Minute), ActiveDeadlineSeconds: &deadline}
+			v.Reason = "Error"
+			v.ExitCode = &code
+			v.ContainerStartedAt = c.StartedAt
+			v.ContainerFinishedAt = c.FinishedAt
+			v.PodFinishedAt = at
+			d := &model.StepDiagnostic{Available: true, ObservedAt: &at, Container: c}
+			if err := d.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			got := WithStepResult(Observation{Usage: v}, d, nil, model.StepTimedOut)
+			if got.DeadlineKilled || !got.DeadlineUncertain {
+				t.Errorf("earlier exit %d relabeled by %s: %+v", code, podReason, got)
+			}
+		}
 	}
 }

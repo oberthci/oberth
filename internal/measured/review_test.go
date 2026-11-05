@@ -102,6 +102,8 @@ func TestStepMemoryAndDeadlineAreBoundToExactIncarnation(t *testing.T) {
 	v.PodUID = "22222222-2222-4222-8222-222222222222"
 	v.ContainerID = "containerd://" + strings.Repeat("b", 64)
 	c := &model.StepTermination{RunID: v.RunID, WorkflowUID: v.WorkflowUID, Namespace: "oberth", WorkflowName: "wf", NodeID: "wf-1", PodName: "wf-1", PodUID: v.PodUID, ContainerName: "main", ContainerID: v.ContainerID, Reason: "Error", PodReason: "DeadlineExceeded", ExitCode: 143, StartedAt: at.Add(-time.Minute), FinishedAt: at}
+	v.PodStartedAt = c.StartedAt
+	c.ActiveDeadlineSeconds = value(60)
 	d := &model.StepDiagnostic{Available: true, ObservedAt: &at, Container: c}
 	got := WithStepResult(Observation{Usage: v}, d, value(1536<<20), model.StepTimedOut)
 	if got.StepMemoryPeakBytes == nil || *got.StepMemoryPeakBytes != 1536<<20 || !got.DeadlineKilled {

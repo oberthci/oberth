@@ -546,7 +546,7 @@ func WithDiagnostic(o Observation, d *model.StepDiagnostic) Observation {
 		return o
 	}
 	if c.PodReason == "DeadlineExceeded" {
-		if deadlineKilledContainer(c) {
+		if deadlineKilledContainer(c, v.PodStartedAt) {
 			o.DeadlineKilled = true
 		} else {
 			o.DeadlineUncertain = true
@@ -581,21 +581,22 @@ func WithStepResult(o Observation, d *model.StepDiagnostic, memory *int64, statu
 	if memory != nil && *memory >= 0 {
 		o.StepMemoryPeakBytes = memory
 	}
-	if status == model.StepTimedOut {
-		if deadlineKilledContainer(c) {
-			o.DeadlineKilled = true
-		} else {
-			o.DeadlineUncertain = true
-		}
+	if status == model.StepTimedOut && !o.DeadlineKilled {
+		// A final step status does not date the deadline or its effect on main.
+		o.DeadlineUncertain = true
 	}
+
 	return o
 }
 
-// A Pod/final-step deadline can happen after main has already failed. Require
-// a bound termination compatible with deadline killing; an exit code alone is
-// never used without the caller's deadline evidence. OOM remains its own cause.
-func deadlineKilledContainer(c *model.StepTermination) bool {
-	if c.Reason == "Completed" || c.Reason == "OOMKilled" {
+// Attribute only a compatible termination at or after this Pod's own deadline.
+// A later Pod reason or final step status alone cannot date main's termination.
+func deadlineKilledContainer(c *model.StepTermination, podStartedAt time.Time) bool {
+	if c.PodReason != "DeadlineExceeded" || c.Reason == "Completed" || c.Reason == "OOMKilled" || podStartedAt.IsZero() || c.ActiveDeadlineSeconds == nil || *c.ActiveDeadlineSeconds <= 0 || *c.ActiveDeadlineSeconds > math.MaxInt64/int64(time.Second) {
+		return false
+	}
+	deadline := podStartedAt.Add(time.Duration(*c.ActiveDeadlineSeconds) * time.Second)
+	if c.StartedAt.Before(podStartedAt) || c.FinishedAt.Before(deadline) {
 		return false
 	}
 	return c.Signal == 9 || c.Signal == 15 || c.ExitCode == 137 || c.ExitCode == 143
