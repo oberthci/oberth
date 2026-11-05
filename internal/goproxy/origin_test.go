@@ -142,20 +142,29 @@ func TestRealGitModuleOriginMatchesPinnedZip(t *testing.T) {
 }
 
 func TestLegacyInfoRemainsImmutable(t *testing.T) {
-	g := newArtifactGit()
-	h := artifactHandler(t, g, t.TempDir())
-	legacy := []byte("{\"Version\":\"v1.0.0\",\"Time\":\"2026-09-29T12:00:00Z\"}\n")
-	// Seeding durably syncs objects and their manifest; this fixture setup
-	// tests byte immutability, not publication latency or backend expiry.
-	_, err := h.artifacts.get(t.Context(), "forge/owner/repository", artifactModule, "v1.0.0", "", testtimeout.Start(time.Second), func(_ context.Context) (string, map[string][]byte, error) {
-		return artifactOID, map[string][]byte{".info": legacy, ".mod": []byte(artifactMod)}, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	g.down.Store(true)
-	r := artifactRequest(h, ".info")
-	if r.Code != 200 || !bytes.Equal(r.Body.Bytes(), legacy) || g.calls.Load() != 0 {
-		t.Fatalf("legacy info regenerated: %d %s", r.Code, r.Body)
+	for _, legacy := range []string{
+		"{\"Version\":\"v1.0.0\",\"Time\":\"2026-09-29T12:00:00Z\"}\n",
+		"{\"Version\":\"v1.0.0\",\"Time\":\"2026-09-29T12:00:00Z\",\"Origin\":{\"VCS\":\"git\",\"URL\":\"ssh://git@codeberg.org/owner/repository.git\",\"Hash\":\"" + artifactOID + "\",\"Ref\":\"refs/tags/v1.0.0\"}}\n",
+	} {
+		t.Run(legacy, func(t *testing.T) {
+			g := newArtifactGit()
+			root := t.TempDir()
+			h := artifactHandler(t, g, root)
+			// Seed historical metadata; the new producer must never backfill a
+			// previously immutable missing-Origin or SSH-Origin coordinate.
+			_, err := h.artifacts.get(t.Context(), "forge/owner/repository", artifactModule, "v1.0.0", "", testtimeout.Start(time.Second), func(_ context.Context) (string, map[string][]byte, error) {
+				return artifactOID, map[string][]byte{".info": []byte(legacy), ".mod": []byte(artifactMod)}, nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := artifactRequest(h, ".info")
+			g.down.Store(true)
+			h = artifactHandler(t, g, root)
+			r := artifactRequest(h, ".info")
+			if r.Code != 200 || r.Body.String() != legacy || r.Header().Get("ETag") != before.Header().Get("ETag") || g.calls.Load() != 0 {
+				t.Fatalf("legacy info regenerated across restart: %d %s", r.Code, r.Body)
+			}
+		})
 	}
 }

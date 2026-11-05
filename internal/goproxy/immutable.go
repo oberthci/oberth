@@ -442,7 +442,7 @@ func (h *Handler) buildPinnedVersion(ctx context.Context, repository, modulePath
 		return "", nil, err
 	}
 	location, _ := h.moduleLocation(modulePath)
-	origin := moduleOrigin{VCS: "git", URL: snapshot.URL, Hash: source, Ref: snapshot.Ref, Subdir: location.subdir}
+	origin := moduleOrigin{VCS: "git", URL: publicOriginURL(repository, snapshot.URL), Hash: source, Ref: snapshot.Ref, Subdir: location.subdir}
 	info, err := json.Marshal(moduleInfo{Version: version, Time: snapshot.Time.UTC(), Origin: origin})
 	if err != nil {
 		return "", nil, err
