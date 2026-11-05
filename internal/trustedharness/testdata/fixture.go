@@ -17,13 +17,7 @@ func main() {
 	args := os.Args[1:]
 	if args[0] == "--case" {
 		id := args[1]
-		if id == "timeout" {
-			// Only caller cancellation may finish this case; a longer test
-			// watchdog must not turn the synthetic stall into a success.
-			for {
-				time.Sleep(time.Minute)
-			}
-		}
+
 		if id == "fail" {
 			os.Stdout.WriteString(`{"all":"passed"}`)
 			os.Exit(1)
@@ -51,6 +45,17 @@ func main() {
 			}
 			time.Sleep(time.Millisecond)
 		}
+		// Only this direct negative-test invocation selects a short QMP expiry,
+		// after guest transport readiness. Normal fixture startup retains its budget.
+		for n, arg := range args {
+			if arg == "--fixture-qmp-expiry" && n+1 < len(args) {
+				short, err := time.ParseDuration(args[n+1])
+				if err != nil || short <= 0 {
+					os.Exit(2)
+				}
+				deadline = time.Now().Add(short)
+			}
+		}
 		// A guest response can arrive before the fixture has bound QMP. Do not
 		// finish the case until shutdown can reach the monitor socket.
 		for {
@@ -64,8 +69,26 @@ func main() {
 			}
 			time.Sleep(time.Millisecond)
 		}
+		if id == "timeout" {
+			if err := os.WriteFile(args[3]+".timeout-ready", []byte("timeout-ready\n"), 0600); err != nil {
+				os.Exit(2)
+			}
+			// Only the caller's controlled deadline may end this real child process.
+			for {
+				time.Sleep(time.Minute)
+			}
+		}
 		// Guest-controlled result text is deliberately not interpreted as inventory.
 		return
+	}
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--fixture-start-delay=") {
+			delay, err := time.ParseDuration(strings.TrimPrefix(arg, "--fixture-start-delay="))
+			if err != nil {
+				os.Exit(2)
+			}
+			time.Sleep(delay)
+		}
 	}
 	var qmp, guest string
 	for n := 1; n < len(args); n++ {

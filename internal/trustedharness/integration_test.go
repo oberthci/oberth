@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -40,13 +41,17 @@ func TestHarnessProtectedTransportIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, scenario := range []string{"pass", "fail", "timeout", "changed guest"} {
+	for _, scenario := range []string{"pass", "fail", "timeout", "timeout delayed startup", "changed guest"} {
 		t.Run(scenario, func(t *testing.T) {
 			guest := guestBundle(t, []string{"kernel", "initramfs"})
 			guestHash := digest(guest)
 			cases := []string{"first", "second"}
-			if scenario == "fail" || scenario == "timeout" {
-				cases[1] = scenario
+			timeoutCase := strings.HasPrefix(scenario, "timeout")
+			if scenario == "fail" {
+				cases[1] = "fail"
+			}
+			if timeoutCase {
+				cases[1] = "timeout"
 			}
 			manifest := []byte(fmt.Sprintf("version: 1\nprofile: kvm-suite-amd64-v1\nguest_sha256: %s\nartifacts: [program]\ncases: [%s]\n", guestHash, strings.Join(cases, ", ")))
 			var bundle bytes.Buffer
@@ -77,6 +82,7 @@ func TestHarnessProtectedTransportIntegration(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(root, "program"), []byte("untrusted candidate bytes"), 0600); err != nil {
 				t.Fatal(err)
 			}
+			readyPath := make(chan string, 1)
 			var qemu *exec.Cmd
 			var argv []string
 			deps := harnessDependencies{fetch: func(_ context.Context, url, _ string, _ int64) ([]byte, error) {
@@ -89,13 +95,35 @@ func TestHarnessProtectedTransportIntegration(t *testing.T) {
 				return guest, nil
 			}, qemu: func(args ...string) *exec.Cmd {
 				argv = append([]string(nil), args...)
+				if timeoutCase {
+					for n, arg := range args {
+						if arg == "-qmp" {
+							readyPath <- strings.Split(strings.TrimPrefix(args[n+1], "unix:"), ",")[0] + ".timeout-ready"
+						}
+					}
+				}
+				if scenario == "timeout delayed startup" {
+					args = append(args, "--fixture-start-delay=1s")
+				}
 				qemu = exec.Command(binary, append([]string{"qemu"}, args...)...)
 				return qemu
 			}}
 			// The caller watchdog expires before the intent, so timeout cannot
 			// pass because of an unrelated admission deadline.
-			ctx, cancel := context.WithTimeout(context.Background(), protectedTransportTestTimeout)
+			watchdog, cancel := context.WithTimeout(t.Context(), protectedTransportTestTimeout)
 			defer cancel()
+			ctx := watchdog
+			var expiryDone chan error
+			if timeoutCase {
+				controlled := newFixtureDeadline()
+				defer controlled.finish(context.Canceled)
+				ctx = controlled
+				expiryDone = make(chan error, 1)
+				go func() {
+					err := expireAfterFixtureReady(watchdog, readyPath, controlled)
+					expiryDone <- err
+				}()
+			}
 			// Keep socket paths short while respecting the runner's writable TMPDIR.
 			private, err := os.MkdirTemp("", "kh-")
 			if err != nil {
@@ -103,6 +131,15 @@ func TestHarnessProtectedTransportIntegration(t *testing.T) {
 			}
 			defer os.RemoveAll(private)
 			report, err := run(ctx, intent, root, private, deps)
+			if timeoutCase {
+				cancel() // joins observer even if run returned before its handshake
+				if observerErr := <-expiryDone; observerErr != nil {
+					t.Fatalf("timeout fixture readiness/expiry: %v", observerErr)
+				}
+				if !time.Now().Before(intent.Deadline) {
+					t.Fatal("unrelated intent deadline elapsed")
+				}
+			}
 			switch scenario {
 			case "pass":
 				if err != nil {
@@ -111,7 +148,7 @@ func TestHarnessProtectedTransportIntegration(t *testing.T) {
 				if report.InventoryDigest != inventory || report.CaseCount != 2 || report.ArtifactSetDigest == "" {
 					t.Fatalf("wrong actual completed inventory: %#v", report)
 				}
-			case "timeout":
+			case "timeout", "timeout delayed startup":
 				if ctx.Err() != context.DeadlineExceeded || err == nil || !strings.Contains(err.Error(), "trusted host case timeout failed:") {
 					t.Fatalf("timeout must reach the caller deadline in the timeout case: %v (context: %v)", err, ctx.Err())
 				}
@@ -161,7 +198,7 @@ func TestHarnessProtectedTransportIntegration(t *testing.T) {
 		}()
 		ctx, cancel := context.WithTimeout(context.Background(), protectedTransportTestTimeout)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, binary, "--case", "first", "--qmp", filepath.Join(private, "missing.sock"), "--guest-control", guest)
+		cmd := exec.CommandContext(ctx, binary, "--case", "first", "--qmp", filepath.Join(private, "missing.sock"), "--guest-control", guest, "--fixture-qmp-expiry", testtimeout.Scale(50*time.Millisecond).String())
 		out, err := cmd.CombinedOutput()
 		listener.Close()
 		if serveErr := <-served; serveErr != nil {
@@ -173,4 +210,72 @@ func TestHarnessProtectedTransportIntegration(t *testing.T) {
 		}
 	})
 
+}
+
+// fixtureDeadline models an externally controlled deadline. Only test code can
+// expire it; production still receives the Context interface and must propagate
+// DeadlineExceeded and join real processes. No production clock/hook changes.
+// Its Done is independent of all cancelCtx internals so child contexts observe
+// this exact Err, not a cancellation relabelled through context.Cause.
+type fixtureDeadline struct {
+	context.Context
+	done chan struct{}
+	mu   sync.Mutex
+	err  error
+}
+
+func newFixtureDeadline() *fixtureDeadline {
+	return &fixtureDeadline{Context: context.Background(), done: make(chan struct{})}
+}
+func (c *fixtureDeadline) Done() <-chan struct{} { return c.done }
+func (c *fixtureDeadline) Err() error            { c.mu.Lock(); defer c.mu.Unlock(); return c.err }
+func (c *fixtureDeadline) finish(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.err == nil {
+		c.err = err
+		close(c.done)
+	}
+}
+
+func expireAfterFixtureReady(watchdog context.Context, paths <-chan string, target *fixtureDeadline) error {
+	// Startup uses the generous watchdog. A real child writes this marker only
+	// after its guest response and QMP readiness, inside the deliberate stall.
+	var path string
+	select {
+	case path = <-paths:
+	case <-watchdog.Done():
+		target.finish(watchdog.Err())
+		return watchdog.Err()
+	}
+	tick := time.NewTicker(5 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		body, err := os.ReadFile(path)
+		if err == nil && string(body) == "timeout-ready\n" {
+			break
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			target.finish(context.Canceled)
+			return err
+		}
+		select {
+		case <-tick.C:
+		case <-watchdog.Done():
+			target.finish(watchdog.Err())
+			return watchdog.Err()
+		}
+	}
+	// This deliberately elapsed timer has no scheduling-headroom floor. If the
+	// observer is descheduled, expiry simply happens later; startup cannot fail
+	// because the child took longer than this interval to begin.
+	expiry, cancel := context.WithTimeout(watchdog, testtimeout.Scale(50*time.Millisecond))
+	defer cancel()
+	<-expiry.Done()
+	if watchdog.Err() != nil {
+		target.finish(watchdog.Err())
+		return watchdog.Err()
+	}
+	target.finish(expiry.Err())
+	return nil
 }
