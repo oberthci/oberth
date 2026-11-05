@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
@@ -12,6 +13,13 @@ import (
 // PipelineKubeVirt reads declared VMI demand before the scheduler grants any
 // resource. The full submission policy still validates the exact manifests.
 func (jobs *ArgoJobs) PipelineKubeVirt(ctx context.Context, request service.WorkflowRequest) (service.KubeVirtResources, error) {
+	if jobs.routes != nil {
+		child, err := jobs.routes.forRequest(ctx, request)
+		if err != nil {
+			return service.KubeVirtResources{}, err
+		}
+		return child.PipelineKubeVirt(ctx, request)
+	}
 	source, err := jobs.readRunSource(request)
 	if err != nil {
 		return service.KubeVirtResources{}, jobs.noRunPipelineError(err, request)
@@ -105,6 +113,15 @@ var _ service.PipelineKubeVirtSizer = (*ArgoJobs)(nil)
 // AdoptedKubeVirtDemand comes from the verified live Workflow, including work
 // admitted under an older or revoked grant. Such work must remain accounted.
 func (jobs *ArgoJobs) AdoptedKubeVirtDemand(run model.Run) (argoworkflow.VMIDemand, error) {
+	if jobs.routes != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		child, err := jobs.routes.forName(ctx, run.WorkflowName, run.ID)
+		if err != nil {
+			return argoworkflow.VMIDemand{}, err
+		}
+		return child.AdoptedKubeVirtDemand(run)
+	}
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	intent, ok := jobs.intents[run.WorkflowName]
@@ -118,6 +135,15 @@ var _ service.AdoptedKubeVirtSizer = (*ArgoJobs)(nil)
 
 // Restore the server-owned submission binding, never a fresh source analysis.
 func (jobs *ArgoJobs) AdoptedPodDemand(run model.Run) (*argoworkflow.PodDemand, error) {
+	if jobs.routes != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		child, err := jobs.routes.forName(ctx, run.WorkflowName, run.ID)
+		if err != nil {
+			return nil, err
+		}
+		return child.AdoptedPodDemand(run)
+	}
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	intent, ok := jobs.intents[run.WorkflowName]
@@ -132,6 +158,15 @@ func (jobs *ArgoJobs) AdoptedPodDemand(run model.Run) (*argoworkflow.PodDemand, 
 }
 
 func (jobs *ArgoJobs) AdoptedResourceFallback(run model.Run) (model.ResourceAdmissionFallback, error) {
+	if jobs.routes != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		child, err := jobs.routes.forName(ctx, run.WorkflowName, run.ID)
+		if err != nil {
+			return "", err
+		}
+		return child.AdoptedResourceFallback(run)
+	}
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	intent, ok := jobs.intents[run.WorkflowName]

@@ -204,7 +204,9 @@ func (seeder *SourceSeeder) seed(ctx context.Context, workflowName, sourceDir st
 	// Collect anything a previous run left unowned before adding storage of our
 	// own. Doing it here rather than on a timer means the sweep runs exactly
 	// when the namespace is about to grow, and needs no scheduler of its own.
-	seeder.SweepOrphanedSourceClaims(ctx)
+	if seeder.config.Custody == nil {
+		seeder.SweepOrphanedSourceClaims(ctx)
+	}
 
 	if err := seeder.createClaim(ctx, volume.ClaimName, workflowName); err != nil {
 		return SourceVolume{}, err
@@ -444,11 +446,18 @@ func (seeder *SourceSeeder) createSeedPod(ctx context.Context, name, claimName s
 }
 func (seeder *SourceSeeder) createSeedPodBound(ctx context.Context, name, claimName string, requests ...*Request) (*corev1.Pod, error) {
 	if p := seeder.config.ExecutionPlacement; p != nil {
-		if len(requests) != 1 || requests[0] == nil || name != sourceClaimName(requests[0].Name) || name != claimName {
+		collector := false
+		if seeder.config.Custody != nil && p.BranchOnly() {
+			binding := seeder.config.Custody.Binding()
+			collector = len(requests) == 0 && claimName == sourceClaimName(binding.Workflow) && name == claimName+collectPodSuffix && binding.Namespace == seeder.config.Namespace
+		}
+		if !collector && (len(requests) != 1 || requests[0] == nil || name != sourceClaimName(requests[0].Name) || name != claimName) {
 			return nil, errors.New("argojob: seed Pod lacks complete selection")
 		}
-		if err := p.selectRequest(seeder.config, *requests[0]); err != nil {
-			return nil, err
+		if !collector {
+			if err := p.selectRequest(seeder.config, *requests[0]); err != nil {
+				return nil, err
+			}
 		}
 		if err := p.verifyEnvironment(ctx, seeder.client, seeder.config); err != nil {
 			return nil, err

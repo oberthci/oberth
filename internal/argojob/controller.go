@@ -264,6 +264,9 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 	controller.timingMilestone(ctx, request.RunID, "source-seed-started")
 	volume, err := controller.seeder.SeedRequest(ctx, request, credentialed, request.TrustedKVM == nil)
 	if err != nil {
+		if controller.config.Custody != nil {
+			return "", fmt.Errorf("%w: source delivery: %w", ErrTargetUncertain, err)
+		}
 		return "", &beforeWorkflowCreateFailure{cause: err}
 	}
 	controller.timingMilestone(ctx, request.RunID, "source-ready")

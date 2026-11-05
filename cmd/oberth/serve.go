@@ -183,6 +183,7 @@ type serveOptions struct {
 	argoVaultCISecretsRole       string
 	argoVaultCACert              string
 	argoExecutionPlacementConfig string
+	argoExecutionTargetConfig    string
 	argoReleaseWIFConfig         string
 	argoReleaseTagRoutesConfig   string
 	argoWorkflowTimeout          time.Duration
@@ -351,6 +352,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.argoVaultCACert, "argo-vault-ca-cert", "", "PEM file pinning the trust anchors credentialed pipeline containers verify --argo-vault-address against")
 	flags.StringVar(&options.argoReleaseTagRoutesConfig, "argo-release-tag-routes-config", "", "absolute path to administrator-owned release tag pattern -> workflow file JSON")
 	flags.StringVar(&options.argoExecutionPlacementConfig, "argo-execution-placement-config", "", "absolute path to administrator-owned isolated execution placement JSON")
+	flags.StringVar(&options.argoExecutionTargetConfig, "argo-execution-target-config", "", "absolute path to administrator-owned branch execution target policy")
 	flags.StringVar(&options.argoReleaseWIFConfig, "argo-release-wif-config", "", "absolute path to administrator-owned public JSON release WIF capabilities (empty disables federation)")
 	flags.StringVar(&options.argoGoProxyListen, "argo-goproxy-listen", "", "listen address for the read-only Go module proxy (e.g. :8444); empty disables the proxy (#662)")
 	flags.StringVar(&options.argoGoProxyCert, "argo-goproxy-cert", "", "TLS certificate for the Go module proxy")
@@ -861,6 +863,18 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
+	targetPolicy, err := readArgoTargetPolicy(options.argoExecutionTargetConfig)
+	if err != nil {
+		return err
+	}
+	targets, err := buildArgoTarget(targetPolicy)
+	if err != nil {
+		return err
+	}
+	argoJobs, err = app.WithExecutionTargets(argoJobs, database, targets)
+	if err != nil {
+		return err
+	}
 	argoJobs.SetKubeVirtGrantLoader(database)
 	argoJobs.SetWorkflowCapabilityLoader(database.ActiveWorkflowCapability)
 	logger.Printf("argo execution engine: namespace=%s pipeline-sa=%s credentialed-sa=%s ci-secrets-sa=%s executor-sa=%s",
@@ -967,6 +981,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	health.Admission = scheduler.AdmissionState
 	health.DatabaseRetries = scheduler.DatabaseRetries
 	health.ControllerProfile = argoJobs.ControllerProfileStatus
+	health.ExecutionTargetProfiles = argoJobs.ExecutionTargetProfiles
 	health.SchemaVersion = store.LatestMigrationVersion()
 	health.Identity = func(ctx context.Context) (string, error) {
 		if err := ctx.Err(); err != nil {

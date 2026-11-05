@@ -102,10 +102,13 @@ func TestAttemptInventoryCapPersistsIncompleteFence(t *testing.T) {
 func TestAttemptMigrationUpgradesExactPredecessorOnce(t *testing.T) {
 	s := newMigrationIDTestStore(t)
 	var old []migration
+	var throughAttempt []migration
 	for _, m := range migrations {
-		if m.ID() != attemptInventoryMigration {
-			old = append(old, m)
+		throughAttempt = append(throughAttempt, m)
+		if m.ID() == attemptInventoryMigration {
+			break
 		}
+		old = append(old, m)
 	}
 	if err := s.migrateWithMigrations(t.Context(), nil, old); err != nil {
 		t.Fatal(err)
@@ -119,7 +122,7 @@ func TestAttemptMigrationUpgradesExactPredecessorOnce(t *testing.T) {
 	}
 	before := ledger()
 	for range 2 {
-		if err := s.migrateWithMigrations(t.Context(), nil, migrations); err != nil {
+		if err := s.migrateWithMigrations(t.Context(), nil, throughAttempt); err != nil {
 			t.Fatal(err)
 		}
 	}

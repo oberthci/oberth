@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/testdb"
 )
 
 func TestFourClassesDurableQueueOrderAndAuthority(t *testing.T) {
@@ -169,7 +170,7 @@ func TestFourClassesUpgradePreservesLegacyPriorityEvidence(t *testing.T) {
 	// Reconstruct the exact old CHECK vocabulary, retaining all raw receipts.
 	// Remove later empty resource tables and receipts together so the legacy
 	// ledger has no gap when the complete migration catalog is replayed.
-	ddl := `DROP TABLE resource_attempts; DROP TABLE resource_attempt_inventories; DROP TABLE pod_resource_dispositions;
+	ddl := testdb.PostExecutionTargetsDowngrade + `DROP TABLE resource_attempts; DROP TABLE resource_attempt_inventories; DROP TABLE pod_resource_dispositions;
  CREATE TABLE run_priority_overrides_old (run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,priority TEXT NOT NULL CHECK(priority IN ('low','normal','high','highest')),reason TEXT NOT NULL,actor TEXT NOT NULL,updated_at INTEGER NOT NULL) WITHOUT ROWID;
  INSERT INTO run_priority_overrides_old SELECT * FROM run_priority_overrides; DROP TABLE run_priority_overrides; ALTER TABLE run_priority_overrides_old RENAME TO run_priority_overrides;
  CREATE TABLE priority_grants_old (identity TEXT PRIMARY KEY,max_class TEXT NOT NULL CHECK(max_class IN ('high','highest')),expires INTEGER NOT NULL,granted_by TEXT NOT NULL) WITHOUT ROWID;

@@ -132,6 +132,7 @@ func ResolveRunSource(source []byte, fragments map[FragmentKey]Fragment, binding
 }
 
 func (r *ResolvedRunSource) Workflow() *wfv1.Workflow { return r.workflow.DeepCopy() }
+func (r *ResolvedRunSource) GraphIdentity() string    { return r.identity.GraphSHA256 }
 func (r *ResolvedRunSource) Lock() Lock               { return slices.Clone(r.lock) }
 
 // BindParameters uses the identical run binding used for sizing. Legacy

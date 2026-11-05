@@ -25,6 +25,7 @@ type Health struct {
 	// enforcement measurement. Nil means configuration is unavailable.
 	PipelineNetworkPolicyEnabled *bool
 	ControllerProfile            func() *model.ControllerProfileStatus
+	ExecutionTargetProfiles      func() map[string]*model.ControllerProfileStatus
 	// ReadyGate checks process-local recovery state without network or store reads.
 	ReadyGate ClusterProbe
 	// Readiness is refreshed off the HTTP request path; nil retains direct probes.
@@ -124,25 +125,26 @@ type AuditChainStatus struct {
 }
 
 type HealthStatus struct {
-	QueueCap          *model.QueueCapStatus          `json:"queueCap,omitempty"`
-	DatabaseRetries   uint64                         `json:"database_retries_total,omitempty"`
-	ControllerProfile *model.ControllerProfileStatus `json:"controller_profile,omitempty"`
-	Storage           any                            `json:"storage,omitempty"`
-	Database          string                         `json:"database"`
-	SchemaVersion     int                            `json:"schema_version,omitempty"`
-	Upstreams         int                            `json:"upstreams"`
-	Repositories      int                            `json:"repositories"`
-	VCS               string                         `json:"vcs"`
-	Cluster           string                         `json:"cluster"`
-	ClusterDetail     string                         `json:"cluster_detail"`
-	Audit             string                         `json:"audit"`
-	AuditMode         string                         `json:"audit_mode,omitempty"`
-	Version           string                         `json:"version,omitempty"`
-	UpstreamInfo      []UpstreamStatus               `json:"upstream_info,omitempty"`
-	SSHIdentity       string                         `json:"ssh_identity,omitempty"`
-	SecretStore       *SecretStoreStatus             `json:"secret_store,omitempty"`
-	AuditChain        *AuditChainStatus              `json:"audit_chain,omitempty"`
-	LastBackup        *model.BackupStatus            `json:"last_backup,omitempty"`
+	QueueCap                *model.QueueCapStatus                     `json:"queueCap,omitempty"`
+	DatabaseRetries         uint64                                    `json:"database_retries_total,omitempty"`
+	ControllerProfile       *model.ControllerProfileStatus            `json:"controller_profile,omitempty"`
+	ExecutionTargetProfiles map[string]*model.ControllerProfileStatus `json:"execution_target_profiles,omitempty"`
+	Storage                 any                                       `json:"storage,omitempty"`
+	Database                string                                    `json:"database"`
+	SchemaVersion           int                                       `json:"schema_version,omitempty"`
+	Upstreams               int                                       `json:"upstreams"`
+	Repositories            int                                       `json:"repositories"`
+	VCS                     string                                    `json:"vcs"`
+	Cluster                 string                                    `json:"cluster"`
+	ClusterDetail           string                                    `json:"cluster_detail"`
+	Audit                   string                                    `json:"audit"`
+	AuditMode               string                                    `json:"audit_mode,omitempty"`
+	Version                 string                                    `json:"version,omitempty"`
+	UpstreamInfo            []UpstreamStatus                          `json:"upstream_info,omitempty"`
+	SSHIdentity             string                                    `json:"ssh_identity,omitempty"`
+	SecretStore             *SecretStoreStatus                        `json:"secret_store,omitempty"`
+	AuditChain              *AuditChainStatus                         `json:"audit_chain,omitempty"`
+	LastBackup              *model.BackupStatus                       `json:"last_backup,omitempty"`
 	// LastBackupWarning explains an omitted last_backup when the latest
 	// backup record exists but cannot be read.
 	LastBackupWarning string `json:"last_backup_warning,omitempty"`
@@ -245,6 +247,9 @@ func (health Health) Status(ctx context.Context) (any, error) {
 	}
 	if health.ControllerProfile != nil {
 		status.ControllerProfile = health.ControllerProfile()
+	}
+	if health.ExecutionTargetProfiles != nil {
+		status.ExecutionTargetProfiles = health.ExecutionTargetProfiles()
 	}
 	if health.Storage != nil {
 		if storage, err := health.Storage(ctx); err == nil {

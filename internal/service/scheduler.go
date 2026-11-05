@@ -1044,7 +1044,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		return err
 	}
 	admissionCtx, stopAdmission := context.WithTimeout(ctx, scheduler.stalledRunTimeout)
-	err = scheduler.awaitAdmission(admissionCtx)
+	err = scheduler.awaitAdmission(admissionCtx, jobRequest)
 	stopAdmission()
 	if err != nil {
 		_ = logFile.Close()
@@ -1473,7 +1473,8 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 			cancelDelete()
 			if deleteErr != nil {
 				var expired interface{ AdmissionExpiryReason() string }
-				if errors.As(waitErr, &expired) {
+				var unsettled interface{ AmbiguousCreate() bool }
+				if errors.As(waitErr, &expired) || (errors.As(deleteErr, &unsettled) && unsettled.AmbiguousCreate()) {
 					if _, ok := scheduler.jobs.(JobCreateSettler); ok {
 						scheduler.deferCreateCleanup(finalizeCtx, run, workflowName, reservation, waitErr)
 						return nil
@@ -2329,7 +2330,12 @@ func workflowNameFragment(value string) string {
 	return strings.Trim(result.String(), "-")
 }
 
-func (scheduler *Scheduler) awaitAdmission(ctx context.Context) error {
+func (scheduler *Scheduler) awaitAdmission(ctx context.Context, requests ...WorkflowRequest) error {
+	if gate, ok := scheduler.jobs.(interface {
+		AwaitRunAdmission(context.Context, WorkflowRequest) error
+	}); ok && len(requests) == 1 {
+		return gate.AwaitRunAdmission(ctx, requests[0])
+	}
 	if gate, ok := scheduler.jobs.(interface{ AwaitAdmission(context.Context) error }); ok {
 		return gate.AwaitAdmission(ctx)
 	}

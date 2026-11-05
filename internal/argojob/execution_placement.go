@@ -47,47 +47,109 @@ type placementRun struct {
 	TrustedIntent string `json:"trusted_intent"`
 }
 type placementDocument struct {
-	Schema                 string       `json:"schema"`
-	Repository             string       `json:"repository"`
-	RepositoryID           int64        `json:"repository_id"`
-	Ref                    string       `json:"ref"`
-	SHA                    string       `json:"sha"`
-	SourceDigest           string       `json:"source_digest"`
-	PipelineFile           string       `json:"pipeline_file"`
-	Namespace              string       `json:"namespace"`
-	ServiceAccount         string       `json:"service_account"`
-	IntentDigest           string       `json:"intent_digest"`
-	PolicyDigest           string       `json:"policy_digest"`
-	ClusterID              string       `json:"cluster_id"`
-	ClusterCreated         string       `json:"cluster_created"`
-	ClusterAnchorUID       string       `json:"cluster_anchor_uid"`
-	EndpointIdentity       string       `json:"endpoint_identity"`
-	NodeName               string       `json:"node_name"`
-	NodeUID                string       `json:"node_uid"`
-	ProviderID             string       `json:"provider_id"`
-	Zone                   string       `json:"zone"`
-	Pool                   string       `json:"pool"`
-	TaintKey               string       `json:"taint_key"`
-	TaintValue             string       `json:"taint_value"`
-	NativeIdentity         string       `json:"native_identity"`
-	DependencyIdentity     string       `json:"dependency_identity"`
-	ControllerPod          string       `json:"controller_pod"`
-	ControllerUID          string       `json:"controller_uid"`
-	ControllerConfigUID    string       `json:"controller_config_uid"`
-	ReplicaSet             string       `json:"replica_set"`
-	ReplicaSetUID          string       `json:"replica_set_uid"`
-	Deployment             string       `json:"deployment"`
-	DeploymentUID          string       `json:"deployment_uid"`
-	AdmissionConfigMap     string       `json:"admission_config_map"`
-	AdmissionUID           string       `json:"admission_uid"`
-	AdmissionDigest        string       `json:"admission_digest"`
-	AdmissionProfile       string       `json:"admission_profile"`
-	ControlPlaneVersion    string       `json:"control_plane_version"`
-	NodeVersion            string       `json:"node_version"`
-	AdmissionConfiguration string       `json:"admission_configuration"`
-	Expires                time.Time    `json:"expires"`
-	Normal                 placementRun `json:"normal"`
-	Preflight              placementRun `json:"preflight"`
+	BranchPolicyBaseline   string              `json:"branch_policy_baseline,omitempty"`
+	GraphDigest            string              `json:"graph_digest,omitempty"`
+	FragmentLockDigest     string              `json:"fragment_lock_digest,omitempty"`
+	Fragments              []placementFragment `json:"fragments,omitempty"`
+	Schema                 string              `json:"schema"`
+	Repository             string              `json:"repository"`
+	RepositoryID           int64               `json:"repository_id"`
+	Ref                    string              `json:"ref"`
+	SHA                    string              `json:"sha"`
+	SourceDigest           string              `json:"source_digest"`
+	PipelineFile           string              `json:"pipeline_file"`
+	Namespace              string              `json:"namespace"`
+	ServiceAccount         string              `json:"service_account"`
+	IntentDigest           string              `json:"intent_digest"`
+	PolicyDigest           string              `json:"policy_digest"`
+	ClusterID              string              `json:"cluster_id"`
+	ClusterCreated         string              `json:"cluster_created"`
+	ClusterAnchorUID       string              `json:"cluster_anchor_uid"`
+	EndpointIdentity       string              `json:"endpoint_identity"`
+	NodeName               string              `json:"node_name"`
+	NodeUID                string              `json:"node_uid"`
+	ProviderID             string              `json:"provider_id"`
+	Zone                   string              `json:"zone"`
+	Pool                   string              `json:"pool"`
+	TaintKey               string              `json:"taint_key"`
+	TaintValue             string              `json:"taint_value"`
+	NativeIdentity         string              `json:"native_identity"`
+	DependencyIdentity     string              `json:"dependency_identity"`
+	ControllerPod          string              `json:"controller_pod"`
+	ControllerUID          string              `json:"controller_uid"`
+	ControllerConfigUID    string              `json:"controller_config_uid"`
+	ReplicaSet             string              `json:"replica_set"`
+	ReplicaSetUID          string              `json:"replica_set_uid"`
+	Deployment             string              `json:"deployment"`
+	DeploymentUID          string              `json:"deployment_uid"`
+	AdmissionConfigMap     string              `json:"admission_config_map"`
+	AdmissionUID           string              `json:"admission_uid"`
+	AdmissionDigest        string              `json:"admission_digest"`
+	AdmissionProfile       string              `json:"admission_profile"`
+	ControlPlaneVersion    string              `json:"control_plane_version"`
+	NodeVersion            string              `json:"node_version"`
+	AdmissionConfiguration string              `json:"admission_configuration"`
+	Expires                time.Time           `json:"expires"`
+	Normal                 placementRun        `json:"normal"`
+	Preflight              placementRun        `json:"preflight"`
+}
+
+type placementFragment struct {
+	Key    string `json:"key"`
+	Commit string `json:"commit"`
+	Digest string `json:"digest"`
+}
+
+const branchPlacementSchema = "oberth.execution-placement/branch-v2"
+
+func (p *ExecutionPlacement) MarshalJSON() ([]byte, error) {
+	if p == nil {
+		return []byte("null"), nil
+	}
+	body, err := json.Marshal(p.document)
+	if err != nil || p.document.Schema != branchPlacementSchema {
+		return body, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		return nil, err
+	}
+	delete(fields, "preflight")
+	var normal map[string]json.RawMessage
+	if err := json.Unmarshal(fields["normal"], &normal); err != nil {
+		return nil, err
+	}
+	delete(normal, "trusted_intent")
+	fields["normal"], err = json.Marshal(normal)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(fields)
+}
+
+func (p *ExecutionPlacement) UnmarshalJSON(body []byte) error {
+	parsed, err := ParseExecutionPlacement(body)
+	if err == nil {
+		*p = *parsed
+	}
+	return err
+}
+
+// Identity is public operator configuration, never a transport credential.
+func (p *ExecutionPlacement) Identity() (repository string, repositoryID int64, ref, sha, normalRun, workflow, digest string) {
+	if p == nil {
+		return
+	}
+	d := p.document
+	return d.Repository, d.RepositoryID, d.Ref, d.SHA, d.Normal.RunID, d.Normal.Workflow, p.digest
+}
+
+func (p *ExecutionPlacement) BranchOnly() bool {
+	return p != nil && p.document.Schema == branchPlacementSchema
+}
+
+func (p *ExecutionPlacement) ValidateRequest(config Config, request Request) error {
+	return p.selectRequest(config, request)
 }
 
 // ParseExecutionPlacement rejects duplicate/unknown fields before typed decoding.
@@ -109,6 +171,28 @@ func ParseExecutionPlacement(body []byte) (*ExecutionPlacement, error) {
 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
 		return nil, errors.New("argojob: placement requires one JSON object")
 	}
+	if document.Schema == branchPlacementSchema {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(body, &fields); err != nil {
+			return nil, err
+		}
+		for key, raw := range fields {
+			if strings.EqualFold(key, "preflight") {
+				return nil, errors.New("argojob: branch-only placement forbids a preflight field")
+			}
+			if strings.EqualFold(key, "normal") {
+				var normal map[string]json.RawMessage
+				if json.Unmarshal(raw, &normal) != nil {
+					return nil, errors.New("argojob: branch-only normal binding must be an object")
+				}
+				for field := range normal {
+					if strings.EqualFold(field, "trusted_intent") {
+						return nil, errors.New("argojob: branch-only placement forbids a trusted intent field")
+					}
+				}
+			}
+		}
+	}
 	placement := &ExecutionPlacement{document: document, digest: placementHash(document)}
 	if err := placement.validate(); err != nil {
 		return nil, err
@@ -117,7 +201,7 @@ func ParseExecutionPlacement(body []byte) (*ExecutionPlacement, error) {
 }
 
 func checkPlacementJSON(d *json.Decoder, depth int) error {
-	if depth > 3 {
+	if depth > 5 {
 		return errors.New("argojob: placement JSON too deep")
 	}
 	token, err := d.Token()
@@ -127,6 +211,20 @@ func checkPlacementJSON(d *json.Decoder, depth int) error {
 	delimiter, object := token.(json.Delim)
 	if !object {
 		return nil
+	}
+	if delimiter == '[' {
+		count := 0
+		for d.More() {
+			count++
+			if count > argoworkflow.MaxFragments {
+				return errors.New("argojob: placement inventory too large")
+			}
+			if err := checkPlacementJSON(d, depth+1); err != nil {
+				return err
+			}
+		}
+		_, err := d.Token()
+		return err
 	}
 	if delimiter != '{' {
 		return errors.New("argojob: placement requires objects and scalar fields")
@@ -163,18 +261,41 @@ func (p *ExecutionPlacement) validate() error {
 		return nil
 	}
 	d := p.document
-	if d.Schema != "oberth.execution-placement/v1" || d.PipelineFile != ".oberth/build.yaml" || len(strings.Split(d.Repository, "/")) != 3 || d.RepositoryID <= 0 || len(d.SHA) != 40 || strings.ContainsAny(d.Repository+d.Ref, "*?[]\\\n\r\t ") || d.Normal.RunID == d.Preflight.RunID || d.Normal.Workflow == d.Preflight.Workflow || d.Normal.TrustedIntent != "" || !placementSHA(d.Preflight.TrustedIntent) || p.digest != placementHash(d) {
+	branch := d.Schema == branchPlacementSchema
+	if (d.Schema != "oberth.execution-placement/v1" && !branch) || d.PipelineFile != ".oberth/build.yaml" || len(strings.Split(d.Repository, "/")) != 3 || d.RepositoryID <= 0 || len(d.SHA) != 40 || strings.ContainsAny(d.Repository+d.Ref, "*?[]\\\n\r\t ") || d.Normal.TrustedIntent != "" || p.digest != placementHash(d) {
+		return errors.New("argojob: incomplete or unsupported closed placement selection")
+	}
+	if branch {
+		if d.Preflight != (placementRun{}) || !argoworkflow.IsFullFragmentSHA(d.BranchPolicyBaseline) || !placementSHA(d.GraphDigest) || !placementSHA(d.FragmentLockDigest) || len(d.Fragments) > argoworkflow.MaxFragments {
+			return errors.New("argojob: incomplete fragment-bound branch authority")
+		}
+		seen := map[string]bool{}
+		for _, fragment := range d.Fragments {
+			key, err := argoworkflow.ParseFragmentRef(fragment.Key)
+			if err != nil || key.String() != fragment.Key || seen[fragment.Key] || !argoworkflow.IsFullFragmentSHA(fragment.Commit) || !placementSHA(fragment.Digest) {
+				return errors.New("argojob: invalid or repeated placement fragment")
+			}
+			seen[fragment.Key] = true
+		}
+	} else if d.Normal.RunID == d.Preflight.RunID || d.Normal.Workflow == d.Preflight.Workflow || !placementSHA(d.Preflight.TrustedIntent) || d.BranchPolicyBaseline != "" || d.GraphDigest != "" || d.FragmentLockDigest != "" || len(d.Fragments) != 0 {
 		return errors.New("argojob: incomplete or unsupported closed placement selection")
 	}
 	// Every scalar identity is mandatory, apart from the normal trusted intent.
 	fields := reflect.ValueOf(d)
 	kind := fields.Type()
 	for i := 0; i < fields.NumField(); i++ {
+		if !branch && (kind.Field(i).Name == "BranchPolicyBaseline" || kind.Field(i).Name == "GraphDigest" || kind.Field(i).Name == "FragmentLockDigest") {
+			continue
+		}
 		if fields.Field(i).Kind() == reflect.String && strings.TrimSpace(fields.Field(i).String()) == "" {
 			return fmt.Errorf("argojob: missing placement %s", kind.Field(i).Tag.Get("json"))
 		}
 	}
-	for _, run := range []placementRun{d.Normal, d.Preflight} {
+	runs := []placementRun{d.Normal}
+	if !branch {
+		runs = append(runs, d.Preflight)
+	}
+	for _, run := range runs {
 		if run.RunID == "" || run.Workflow == "" {
 			return errors.New("argojob: placement requires both complete run bindings")
 		}
@@ -215,6 +336,32 @@ func (p *ExecutionPlacement) selectRequest(config Config, r Request) error {
 		return errors.New("argojob: isolated executor configuration differs or lacks dependency/device closure")
 	}
 	selected := d.Normal
+	if p.BranchOnly() {
+		if r.TrustedKVM != nil || !r.BranchAuthority.Matches(d.Repository, r.SHA, d.BranchPolicyBaseline, d.PolicyDigest) {
+			return errors.New("argojob: branch-only execution lacks canonical native policy authority")
+		}
+		if len(r.Fragments) != len(d.Fragments) {
+			return errors.New("argojob: fragment inventory differs from placement")
+		}
+		for _, expected := range d.Fragments {
+			key, err := argoworkflow.ParseFragmentRef(expected.Key)
+			if err != nil {
+				return err
+			}
+			fragment, present := r.Fragments[key]
+			sum := sha256.Sum256(fragment.Source)
+			if !present || fragment.Key != key || fragment.SHA != expected.Commit || hex.EncodeToString(sum[:]) != expected.Digest || (fragment.Digest != "" && fragment.Digest != expected.Digest) {
+				return errors.New("argojob: authentic fragment content differs from placement")
+			}
+		}
+		resolved, err := argoworkflow.ResolveRunSource(r.Source, r.Fragments, argoworkflow.RunSourceBinding{RunID: r.RunID, RepositoryID: r.RepositoryID, SHA: r.SHA, File: r.PipelineFile, Trigger: r.effectiveRunTrigger(), ScheduleEntry: r.ScheduleEntry})
+		if err != nil {
+			return err
+		}
+		if resolved.GraphIdentity() != d.GraphDigest || placementHash(resolved.Lock()) != d.FragmentLockDigest {
+			return errors.New("argojob: resolved graph or fragment lock differs from placement")
+		}
+	}
 	if r.TrustedKVM != nil {
 		selected = d.Preflight
 		if selected.TrustedIntent != vmrunner.KVMIntentDigest(*r.TrustedKVM) {
@@ -222,7 +369,7 @@ func (p *ExecutionPlacement) selectRequest(config Config, r Request) error {
 		}
 	}
 	digest := sha256.Sum256(r.Source)
-	if config.Namespace != d.Namespace || config.PipelineServiceAccount != d.ServiceAccount || canonicalRepoKey(r.UpstreamName, r.UpstreamOrg, r.Repo) != d.Repository || r.RepositoryID != d.RepositoryID || r.SHA != d.SHA || r.Ref != d.Ref || r.PipelineFile != d.PipelineFile || r.RunID != selected.RunID || r.Name != selected.Workflow || r.Trigger != pipeline.TriggerCI || r.effectiveRunTrigger() != argoworkflow.RunTriggerBranch || hex.EncodeToString(digest[:]) != d.SourceDigest || len(r.Fragments) != 0 || r.releasePreflight || r.omitRequestDefaults || r.omitStepUsage {
+	if config.Namespace != d.Namespace || config.PipelineServiceAccount != d.ServiceAccount || canonicalRepoKey(r.UpstreamName, r.UpstreamOrg, r.Repo) != d.Repository || r.RepositoryID != d.RepositoryID || r.SHA != d.SHA || r.Ref != d.Ref || r.PipelineFile != d.PipelineFile || r.RunID != selected.RunID || r.Name != selected.Workflow || r.Trigger != pipeline.TriggerCI || r.effectiveRunTrigger() != argoworkflow.RunTriggerBranch || hex.EncodeToString(digest[:]) != d.SourceDigest || (!p.BranchOnly() && len(r.Fragments) != 0) || r.releasePreflight || r.omitRequestDefaults || r.omitStepUsage {
 		return errors.New("argojob: request differs from isolated placement authority")
 	}
 	return nil

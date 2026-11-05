@@ -151,7 +151,7 @@ DELETE FROM schema_migrations WHERE version>=50;
 // PostIntegerMigrationsDowngrade restores the historical ledger shape in
 // fixtures derived from a current database. Receipt ordinals above 55 are local
 // applications of timestamp IDs, never integer migration definitions.
-const PostIntegerMigrationsDowngrade = `
+const PostIntegerMigrationsDowngrade = PostExecutionTargetsDowngrade + `
 DROP TABLE IF EXISTS resource_attempts; DROP TABLE IF EXISTS resource_attempt_inventories; DROP TABLE IF EXISTS pod_resource_dispositions;
 DROP TRIGGER IF EXISTS run_issue_trailers_immutable;
 ALTER TABLE runs DROP COLUMN issue_trailers;
@@ -179,4 +179,12 @@ DELETE FROM schema_migrations WHERE version>=53;
 const PostV54Downgrade = PostIntegerMigrationsDowngrade + `
 DROP TABLE IF EXISTS issue_trailer_publications;
 DELETE FROM schema_migrations WHERE version>=55;
+`
+
+// PostExecutionTargetsDowngrade removes disposable target-custody fixtures
+// before reconstructing historical schemas. Production migration stays strict.
+const PostExecutionTargetsDowngrade = `
+DROP TABLE IF EXISTS execution_target_resources;
+DROP TABLE IF EXISTS execution_target_bindings;
+DELETE FROM schema_migrations WHERE id='20261105050000-execution-target-custody';
 `

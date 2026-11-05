@@ -188,6 +188,15 @@ func buildArgoEngine(
 // bound to the release tier, and the pipeline namespace sharing Oberth's own
 // would put pipeline identities beside server ones.
 func validateArgoServeOptions(options serveOptions) error {
+	if options.argoExecutionTargetConfig != "" {
+		if options.argoNamespace == "" {
+			return errors.New("serve: --argo-execution-target-config requires --argo-namespace")
+		}
+		if _, err := readArgoTargetPolicy(options.argoExecutionTargetConfig); err != nil {
+			return err
+		}
+	}
+
 	if options.argoNamespace == "" {
 		if options.argoExecutionPlacementConfig != "" {
 			return errors.New("serve: --argo-execution-placement-config requires --argo-namespace")

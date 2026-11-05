@@ -14,11 +14,23 @@ import (
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
-func (jobs *ArgoJobs) SetResourceBlobs(blobs vmrunner.PolicyGit) { jobs.resourceBlobs = blobs }
+func (jobs *ArgoJobs) SetResourceBlobs(blobs vmrunner.PolicyGit) {
+	jobs.resourceBlobs = blobs
+	if jobs.routes != nil {
+		jobs.routes.local.SetResourceBlobs(blobs)
+	}
+}
 
 // ResourceDeclarations reads only the exact selected commit in the local git
 // cache. It returns numeric resource fields, never commands or complete specs.
 func (jobs *ArgoJobs) ResourceDeclarations(ctx context.Context, request service.WorkflowRequest) ([]measured.Declaration, error) {
+	if jobs.routes != nil {
+		child, err := jobs.routes.forName(ctx, request.WorkflowName, request.Run.ID)
+		if err != nil {
+			return nil, err
+		}
+		return child.ResourceDeclarations(ctx, request)
+	}
 	if jobs.resourceBlobs == nil {
 		return nil, errors.New("resource declaration git reader unavailable")
 	}
@@ -37,6 +49,9 @@ func (jobs *ArgoJobs) ResourceDeclarations(ctx context.Context, request service.
 	}
 	if !exists {
 		return nil, errors.New("resource declaration source absent")
+	}
+	if jobs.targetBinding != nil && targetBytesHash(source) != jobs.targetBinding.SourceDigest {
+		return nil, errors.New("app: resource declaration differs from retained source")
 	}
 	trigger, e := runTrigger(request.Run)
 	if e != nil {

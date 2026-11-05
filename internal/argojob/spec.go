@@ -67,6 +67,8 @@ const (
 // Config is the administrator-owned half of the Argo engine. Every field that
 // decides trust is here, not in the repository document.
 type Config struct {
+	// Custody journals remote effects; it is not serialized operator authority.
+	Custody TargetCustody `json:"-"`
 	// ExecutionPlacement selects an immutable isolated administrator profile.
 	ExecutionPlacement *ExecutionPlacement
 
@@ -300,6 +302,12 @@ func (config *Config) applyDefaults() {
 	if config.MaxRunLogBytes <= 0 {
 		config.MaxRunLogBytes = runlog.DefaultRunLimitBytes
 	}
+}
+
+// DefaultedConfig freezes the same defaults used by the native controller.
+func DefaultedConfig(config Config) (Config, error) {
+	config.applyDefaults()
+	return config, config.Validate()
 }
 
 // Validate rejects a configuration that could not produce a safe submission.
@@ -571,8 +579,10 @@ func vaultAddressRequiresPinnedAnchor(address string) bool {
 
 // Request is one run's submission intent.
 type Request struct {
-	Capability    *argoworkflow.Capability
-	DemandReceipt *argoworkflow.DemandReceipt
+	// BranchAuthority is native canonical policy resolution, never YAML authority.
+	BranchAuthority *vmrunner.BranchAuthority `json:"-"`
+	Capability      *argoworkflow.Capability
+	DemandReceipt   *argoworkflow.DemandReceipt
 	// ResourceMaximum supports legacy reconstruction and callers without numeric grants.
 	ResourceMaximum pipeline.Size
 	// ResourceCeiling is the fresh server-owned repository grant snapshot.

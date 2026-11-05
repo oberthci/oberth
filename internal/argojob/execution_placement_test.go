@@ -48,6 +48,9 @@ func placementFixture(t *testing.T) (Config, Request, []runtime.Object) {
 	// Explicitly synthetic identities; authenticated runtime evidence is external.
 	fields := reflect.ValueOf(&d).Elem()
 	for i := 0; i < fields.NumField(); i++ {
+		if fields.Type().Field(i).Name == "BranchPolicyBaseline" || fields.Type().Field(i).Name == "GraphDigest" || fields.Type().Field(i).Name == "FragmentLockDigest" {
+			continue
+		}
 		if fields.Field(i).Kind() == reflect.String {
 			fields.Field(i).SetString("fixture")
 		}
@@ -254,10 +257,15 @@ func TestExecutionPlacementConfigurationAndEnvironment(t *testing.T) {
 		}
 		t.Run(fields.Type().Field(i).Name, func(t *testing.T) {
 			d := p.document
-			reflect.ValueOf(&d).Elem().Field(i).SetString("")
+			value := reflect.ValueOf(&d).Elem().Field(i)
+			if value.String() == "" {
+				value.SetString("unexpected-branch-identity")
+			} else {
+				value.SetString("")
+			}
 			body, _ := json.Marshal(d)
 			if _, err := ParseExecutionPlacement(body); err == nil {
-				t.Fatal("missing identity accepted")
+				t.Fatal("missing required identity or foreign branch identity accepted")
 			}
 		})
 	}
