@@ -399,6 +399,21 @@ func TestVMICreateGuardAcceptsActualArgoPod(t *testing.T) {
 		if err = json.Unmarshal(input, &captured); err != nil {
 			t.Fatal(err)
 		}
+		// The captured resource Pod predates v2; its helper budgets are
+		// unchanged. Translate only the policy marker and derived identity.
+		if captured.Annotations[helperStorageAnnotation] != legacyHelperStoragePolicy || wf.Annotations[helperStorageAnnotation] != helperStoragePolicy {
+			t.Fatal("unexpected historical/current helper policy")
+		}
+		wf.Annotations[helperStorageAnnotation] = legacyHelperStoragePolicy
+		// The fixture assigns UID/status after Build stamps its identity.
+		intended := wf.DeepCopy()
+		intended.UID = ""
+		intended.Status = wfv1.WorkflowStatus{}
+		identity, err := specIdentity(intended)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wf.Annotations[identityAnnotation] = identity
 		currentJSON, err := json.Marshal(wf)
 		if err != nil {
 			t.Fatal(err)

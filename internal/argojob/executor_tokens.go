@@ -68,8 +68,9 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config, storage bool)
 		}
 		volumes, _ := patch["volumes"].([]any)
 		patch["volumes"] = append(volumes, map[string]any{"name": executorTokenVolume, "secret": nil, "emptyDir": map[string]any{"medium": "Memory", "sizeLimit": "1Mi"}})
-		// Preserve the qualified wiring and recovery identity of named nonroot profiles.
-		pinnedProfile := t.Name != trustedKVMTemplate && workflow.Annotations[nonrootProfileAnnotation] != ""
+		// Only historical policies preserve the old empty named-profile budgets.
+		// New server-owned v2 patches retain the verified profile and all wiring.
+		pinnedProfile := t.Name != trustedKVMTemplate && workflow.Annotations[nonrootProfileAnnotation] != "" && workflow.Annotations[helperStorageAnnotation] != helperStoragePolicy
 		controlResources := corev1.ResourceRequirements{}
 		if !pinnedProfile {
 			controlResources = executorResourcesWithStorage(storage)

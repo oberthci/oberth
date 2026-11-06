@@ -601,7 +601,8 @@ type Request struct {
 	omitRequestDefaults         bool
 	legacyHelperRequestDefaults bool
 	// Preserve helper resources in already-submitted Workflow identities.
-	legacyHelperStorage bool
+	legacyHelperStorage          bool
+	legacyProfileHelperResources bool
 	// Cleanup alone may reconstruct the original generated host wrapper identity.
 	legacyProtectedWrapper bool
 	// legacyStepUsage reconstructs already-submitted pre-floor wrappers only;
@@ -999,6 +1000,9 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	delete(workflow.Annotations, helperStorageAnnotation)
 	if !request.legacyHelperStorage {
 		workflow.Annotations[helperStorageAnnotation] = helperStoragePolicy
+		if request.legacyProfileHelperResources {
+			workflow.Annotations[helperStorageAnnotation] = legacyHelperStoragePolicy
+		}
 	}
 	if err := projectExecutorTokens(workflow, config, !request.legacyHelperStorage); err != nil {
 		return nil, err

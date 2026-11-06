@@ -364,7 +364,7 @@ func verifyTrustedKVMHelpers(pod *corev1.Pod, wait *corev1.Container, config Con
 		return invalid("initializer order")
 	}
 	waiter := pod.Spec.InitContainers[0].DeepCopy()
-	expectedWaiter := corev1.Container{Name: executorTokenWaiter, Image: config.SourceSeedImage, Command: []string{"sh", "-c", executorTokenWaitCommand}, SecurityContext: nonrootContainerSecurity(0), Resources: executorResourcesWithStorage(workflow.Annotations[helperStorageAnnotation] == helperStoragePolicy), VolumeMounts: []corev1.VolumeMount{{Name: executorTokenVolume, MountPath: executorTokenDir}}}
+	expectedWaiter := corev1.Container{Name: executorTokenWaiter, Image: config.SourceSeedImage, Command: []string{"sh", "-c", executorTokenWaitCommand}, SecurityContext: nonrootContainerSecurity(0), Resources: executorResourcesWithStorage(hasHelperStorage(workflow)), VolumeMounts: []corev1.VolumeMount{{Name: executorTokenVolume, MountPath: executorTokenDir}}}
 	waiter.ImagePullPolicy = ""
 	waiter.TerminationMessagePath = ""
 	waiter.TerminationMessagePolicy = ""
@@ -372,7 +372,7 @@ func verifyTrustedKVMHelpers(pod *corev1.Pod, wait *corev1.Container, config Con
 		return invalid("token waiter")
 	}
 	for _, c := range []*corev1.Container{&pod.Spec.InitContainers[1], wait} {
-		if config.ExecutionPlacement != nil && !apiequality.Semantic.DeepEqual(c.Resources, executorResourcesWithStorage(workflow.Annotations[helperStorageAnnotation] == helperStoragePolicy)) {
+		if config.ExecutionPlacement != nil && !apiequality.Semantic.DeepEqual(c.Resources, executorResourcesWithStorage(hasHelperStorage(workflow))) {
 			return invalid("executor resources")
 		}
 		if c.Image != argoworkflow.NonrootExecutorImage || len(c.EnvFrom) != 0 || len(c.VolumeDevices) != 0 || c.Lifecycle != nil || c.LivenessProbe != nil || c.StartupProbe != nil || c.ReadinessProbe != nil {

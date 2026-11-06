@@ -181,9 +181,10 @@ func TestNonrootCurrentPatchMatchesObservedControllerPods(t *testing.T) {
 		t.Run(shape, func(t *testing.T) {
 			before := nonrootControllerFixture(t, shape+"-before-patch.json")
 			observed := nonrootControllerFixture(t, shape+"-submitted.json")
-			// Replay the historical administrator limit without changing the
-			// authenticated observation; default/override sizes are tested below.
-			wf := nonrootBuiltWithScratch(t, shape == "script", "128Mi")
+			// Replay the historical administrator limit and v1 helper policy
+			// without changing the authenticated observation. New v2 budgets
+			// are covered by the pinned helper regression and controller proof.
+			wf := nonrootBuiltWithHelperPolicy(t, shape == "script", "128Mi", legacyHelperStoragePolicy)
 			current := nonrootApplyControllerFixture(t, before, wf)
 			got, err := json.MarshalIndent(current, "", "  ")
 			if err != nil {
@@ -307,7 +308,7 @@ func TestNonrootRecoveryAcceptsActualControllerPersistedSpec(t *testing.T) {
 		if existing.Status.Phase != wfv1.WorkflowRunning || len(existing.Status.Nodes) == 0 {
 			t.Fatal("fixture did not undergo actual supported reconciliation")
 		}
-		intended := nonrootBuiltWithScratch(t, shape == "script", "128Mi")
+		intended := nonrootBuiltWithHelperPolicy(t, shape == "script", "128Mi", legacyHelperStoragePolicy)
 		if err := sameSubmission(&existing, intended); err != nil {
 			t.Fatal(err)
 		}

@@ -20,16 +20,21 @@ func executorControlResources() corev1.ResourceRequirements {
 }
 
 const helperStorageAnnotation = "oberth.ci/helper-storage"
-const helperStoragePolicy = "argo-256Mi-512Mi-v1"
+const legacyHelperStoragePolicy = "argo-256Mi-512Mi-v1"
+
+// v2 applies the same budgets to verified named-profile producer helpers too.
+// The controller profile and its proof remain unchanged.
+const helperStoragePolicy = "argo-256Mi-512Mi-v2"
 
 // Reconstruct the immutable resources of already-submitted Workflows. This
 // switch is private to recovery; authored annotations cannot opt new runs out.
 func recoverHelperStorage(wf *wfv1.Workflow, request *Request) error {
 	policy := wf.Annotations[helperStorageAnnotation]
-	if policy != "" && policy != helperStoragePolicy {
+	if policy != "" && policy != legacyHelperStoragePolicy && policy != helperStoragePolicy {
 		return fmt.Errorf("argojob: existing workflow has an unknown helper-storage policy")
 	}
 	request.legacyHelperStorage = policy == ""
+	request.legacyProfileHelperResources = policy != helperStoragePolicy
 	return nil
 }
 
@@ -40,4 +45,9 @@ func executorResourcesWithStorage(enabled bool) corev1.ResourceRequirements {
 		delete(resources.Limits, corev1.ResourceEphemeralStorage)
 	}
 	return resources
+}
+
+func hasHelperStorage(wf *wfv1.Workflow) bool {
+	policy := wf.Annotations[helperStorageAnnotation]
+	return policy == legacyHelperStoragePolicy || policy == helperStoragePolicy
 }
