@@ -33,13 +33,18 @@ func TestDescribePushResultCoversDurableOutcomes(t *testing.T) {
 			want:   "ref accepted · run run-01234567 queued (acme-cli/testb)",
 		},
 		{
+			name: "queued supersession without workflow cleanup", event: branch,
+			result: pushRunResult(model.Repository{}, model.EnqueueRunResult{Run: *run, SupersededCount: 1}),
+			want:   "ref accepted · run run-01234567 queued (acme-cli/testb) · superseded 1 earlier run",
+		},
+		{
 			name: "branch deletion", event: branch,
 			result: PushResult{Deleted: true},
 			want:   "branch testb deletion recorded — no run",
 		},
 		{
 			name: "replayed duplicate with supersession", event: branch,
-			result: PushResult{Run: run, Duplicate: true, Cancellations: []model.RunCancellation{{}, {}}},
+			result: PushResult{Run: run, Duplicate: true, SupersededCount: 2},
 			want:   "ref accepted · run run-01234567 queued (acme-cli/testb) · replay of an already-recorded push · superseded 2 earlier runs",
 		},
 		{

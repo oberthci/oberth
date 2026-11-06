@@ -276,9 +276,10 @@ type RunCancellation struct {
 
 type EnqueueRunResult struct {
 	Run
-	Cancellations  []RunCancellation
-	Duplicate      bool
-	DeferredReason string `json:"deferred_reason,omitempty"`
+	Cancellations   []RunCancellation
+	SupersededCount int64
+	Duplicate       bool
+	DeferredReason  string `json:"deferred_reason,omitempty"`
 }
 
 type ReceiveEvent struct {

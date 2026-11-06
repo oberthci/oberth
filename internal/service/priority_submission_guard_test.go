@@ -14,7 +14,7 @@ import (
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
-func TestPriorityGuardSupersession(t *testing.T) {
+func TestNewHeadSupersedesQueuedPriorityAndInheritsOverride(t *testing.T) {
 	f := newControlFixture(t)
 	ctx := t.Context()
 	old, err := f.scheduler.EnqueueCI(ctx, CIRequest{EventID: "guard-old", Repository: f.repo, Branch: "feature/priority", SHA: strings.Repeat("a", 40), Actor: "requester"})
@@ -29,8 +29,8 @@ func TestPriorityGuardSupersession(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := f.store.Run(ctx, old.ID)
-	if err != nil || got.Status != model.RunQueued || got.SupersededBy != "" || len(newer.Cancellations) != 0 {
-		t.Fatalf("priority cancelled by newer push: %+v, %v", got, err)
+	if err != nil || got.Status != model.RunInterrupted || got.SupersededBy != newer.ID || len(newer.Cancellations) != 0 || newer.SupersededCount != 1 || newer.Priority != model.PriorityHigh || newer.PriorityRequestedBy != "admin" || newer.PriorityOverrideReason != "urgent" {
+		t.Fatalf("queued priority supersession or inheritance failed: %+v, %v", got, err)
 	}
 }
 

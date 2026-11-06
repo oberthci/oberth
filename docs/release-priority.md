@@ -95,8 +95,14 @@ to decide whether a workflow fits. Priority orders waiting workflow grants withi
 these controls and repository concurrency groups. It never raises capacity or
 preempts running work. See [workflow admission](declared-admission.md).
 
+A new branch-head push supersedes queued, not-started runs at older SHAs in the
+same repository/ref/schedule lane, regardless of priority. The most recent
+explicit admin override carries to the replacement with its actor and reason;
+the replacement earns a fresh FIFO place. Tags, promotions and pending
+publications remain protected. Running work retains the rules below.
+
 Accepted nonstandard requests, admin overrides and automatic RC/tag/promotion
-work retain supersession protection. Historical automatic-protection rows do
+work retain protection outside that queued new-head case. Historical automatic-protection rows do
 not become urgency grants. Requests cancel nothing unless an authorized push
 explicitly selects `oberth.supersede=true`; replacing protected work requires its
 requester or an unscoped admin. Same-branch/schedule-entry, cancellation, pending
