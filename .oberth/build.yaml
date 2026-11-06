@@ -1537,9 +1537,9 @@ spec:
           ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
 
   - name: test-static-git-runtime
-    # Remeasure: max(441s censored cap, 471s Pod span) x1.5, rounded up.
-    # The span includes shutdown grace; full qualification has not completed.
-    activeDeadlineSeconds: 707
+    # Contended runtime: 12m11s on run b193a7ff (host CPU pressure, 4 concurrent runs)
+    # against 441-471s uncontended; deadline covers the contended span with headroom.
+    activeDeadlineSeconds: 1500
     automountServiceAccountToken: false
     metadata:
       annotations:
