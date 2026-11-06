@@ -69,6 +69,15 @@ func (r *VMIDemandReceipt) DeclaredPodDemand() (*PodDemand, error) {
 	return DeclaredHostPeak(r.pods.DeepCopy(), r.summary.Binding.Trigger)
 }
 
+// WorkflowPodDemand reports only pod requests from the bound graph. It does
+// not apply legacy VM charges, resource reserves or admission headroom.
+func (r *VMIDemandReceipt) WorkflowPodDemand() (*PodDemand, error) {
+	if r == nil || r.pods == nil {
+		return nil, nil
+	}
+	return DeclaredCapabilityPeak(r.pods.DeepCopy())
+}
+
 func (r *VMIDemandReceipt) Summary() VMIDemandSummary { return r.summary }
 func (r *VMIDemandReceipt) Fragments() map[FragmentKey]Fragment {
 	return cloneVMIFragments(r.fragments)

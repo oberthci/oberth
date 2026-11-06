@@ -67,6 +67,7 @@ type weightedAdmission struct {
 }
 
 type admissionReservation struct {
+	requests *argoworkflow.PodRequests
 	fallback model.ResourceAdmissionFallback
 	pods     *argoworkflow.PodDemand
 	gate     *weightedAdmission
@@ -278,6 +279,11 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 			return nil, err
 		}
 	}
+	var requests *argoworkflow.PodRequests
+	if request.KubeVirt != nil && request.KubeVirt.Receipt != nil {
+		demand, _ := request.KubeVirt.Receipt.WorkflowPodDemand()
+		requests = queuePodRequests(demand)
+	}
 	size := request.Size.Effective()
 	gate := reservation.gate
 	gate.mu.Lock()
@@ -289,6 +295,7 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 		}
 		return nil, context.Canceled
 	}
+	reservation.requests = requests
 	reservation.vmParked = false
 	if request.KubeVirt != nil {
 		reservation.kubeVirt = *request.KubeVirt
@@ -801,7 +808,7 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 	if reservation == nil {
 		return nil
 	}
-	result := &model.AdmissionObservation{State: "preparing", Used: gate.used, Capacity: gate.capacity, Runs: gate.runs, MaxRuns: gate.maxRuns, NumericBudget: gate.numericBudgetLocked()}
+	result := &model.AdmissionObservation{Requests: reservation.requests.Clone(), State: "preparing", Used: gate.used, Capacity: gate.capacity, Runs: gate.runs, MaxRuns: gate.maxRuns, NumericBudget: gate.numericBudgetLocked()}
 	if gate.workflowOnly {
 		result.Used = gate.runs
 	}

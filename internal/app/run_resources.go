@@ -31,6 +31,61 @@ func (jobs *ArgoJobs) ResourceDeclarations(ctx context.Context, request service.
 		}
 		return child.ResourceDeclarations(ctx, request)
 	}
+	resolved, e := jobs.resourceRunSource(ctx, request)
+	if e != nil {
+		return nil, e
+	}
+	wf := resolved.Workflow()
+	steps, e := argoworkflow.PlannedSteps(wf)
+	if e != nil {
+		return nil, e
+	}
+	out := make([]measured.Declaration, 0, len(steps))
+	for _, step := range steps {
+		t := step.Template
+		if t == nil {
+			continue
+		}
+		name := t.Name
+		if name == "" {
+			name = step.Step
+		}
+		owner, ownerSHA := argoworkflow.FragmentTemplateOwner(name, resolved.Lock())
+		if owner == "" {
+			owner = request.Repository.Name
+			ownerSHA = request.Run.TestedSHA
+			if ownerSHA == "" {
+				ownerSHA = request.Run.SHA
+			}
+		}
+		d := measured.Declaration{ResolvedTemplate: name, Stage: measured.NormalizeTemplate(step.Stage), Template: measured.NormalizeTemplate(name), OwnerRepository: owner, SHA: ownerSHA, Resources: map[string]map[string]string{"requests": {}, "limits": {}}}
+		var c *corev1.Container
+		if t.Container != nil {
+			c = t.Container
+		} else if t.Script != nil {
+			c = &t.Script.Container
+		}
+		if c != nil {
+			for tier, list := range map[string]corev1.ResourceList{"requests": c.Resources.Requests, "limits": c.Resources.Limits} {
+				for resource, q := range list {
+					if resource == corev1.ResourceCPU || resource == corev1.ResourceMemory || resource == corev1.ResourceEphemeralStorage {
+						d.Resources[tier][string(resource)] = q.String()
+					}
+				}
+			}
+		}
+		if t.ActiveDeadlineSeconds != nil {
+			if n, e := strconv.ParseInt(t.ActiveDeadlineSeconds.String(), 10, 64); e == nil {
+				d.ActiveDeadlineSeconds = &n
+			}
+		}
+		out = append(out, d)
+	}
+	return out, nil
+}
+
+// resourceRunSource resolves the selected commit without a checkout or execution.
+func (jobs *ArgoJobs) resourceRunSource(ctx context.Context, request service.WorkflowRequest) (*argoworkflow.ResolvedRunSource, error) {
 	if jobs.resourceBlobs == nil {
 		return nil, errors.New("resource declaration git reader unavailable")
 	}
@@ -69,48 +124,18 @@ func (jobs *ArgoJobs) ResourceDeclarations(ctx context.Context, request service.
 	if e != nil {
 		return nil, e
 	}
-	wf := resolved.Workflow()
-	steps, e := argoworkflow.PlannedSteps(wf)
-	if e != nil {
-		return nil, e
+	return resolved, nil
+}
+
+// RunPodDemand shares the capability graph accounting, including resource helper
+// pods. It exposes scheduling requests only and never chooses an execution target.
+func (jobs *ArgoJobs) RunPodDemand(ctx context.Context, request service.WorkflowRequest) (*argoworkflow.PodDemand, error) {
+	if jobs.routes != nil {
+		return jobs.routes.local.RunPodDemand(ctx, request)
 	}
-	out := make([]measured.Declaration, 0, len(steps))
-	for _, step := range steps {
-		t := step.Template
-		if t == nil {
-			continue
-		}
-		name := t.Name
-		if name == "" {
-			name = step.Step
-		}
-		owner, ownerSHA := argoworkflow.FragmentTemplateOwner(name, resolved.Lock())
-		if owner == "" {
-			owner = request.Repository.Name
-			ownerSHA = sha
-		}
-		d := measured.Declaration{ResolvedTemplate: name, Stage: measured.NormalizeTemplate(step.Stage), Template: measured.NormalizeTemplate(name), OwnerRepository: owner, SHA: ownerSHA, Resources: map[string]map[string]string{"requests": {}, "limits": {}}}
-		var c *corev1.Container
-		if t.Container != nil {
-			c = t.Container
-		} else if t.Script != nil {
-			c = &t.Script.Container
-		}
-		if c != nil {
-			for tier, list := range map[string]corev1.ResourceList{"requests": c.Resources.Requests, "limits": c.Resources.Limits} {
-				for resource, q := range list {
-					if resource == corev1.ResourceCPU || resource == corev1.ResourceMemory || resource == corev1.ResourceEphemeralStorage {
-						d.Resources[tier][string(resource)] = q.String()
-					}
-				}
-			}
-		}
-		if t.ActiveDeadlineSeconds != nil {
-			if n, e := strconv.ParseInt(t.ActiveDeadlineSeconds.String(), 10, 64); e == nil {
-				d.ActiveDeadlineSeconds = &n
-			}
-		}
-		out = append(out, d)
+	resolved, err := jobs.resourceRunSource(ctx, request)
+	if err != nil {
+		return nil, err
 	}
-	return out, nil
+	return argoworkflow.DeclaredCapabilityPeak(resolved.Workflow())
 }

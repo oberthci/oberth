@@ -46,6 +46,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 			return nil, ""
 		}
 	}
+	demandContext := ctx
 	clock := service.schedulingClock()
 	observed := clock.Now().UTC()
 	result = &model.RunScheduling{ObservedAt: observed, State: "unavailable", Message: "Scheduling observation is unavailable."}
@@ -53,11 +54,19 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 	policyWaiting := run.Status == model.RunRunning && (run.Reason == store.PolicyRefreshWaitingReason || strings.HasSuffix(run.Reason, "; "+store.PolicyRefreshWaitingReason))
 	defer func() {
 		if model.DisplayRunStatus(run) == model.DisplayQueued {
+			if result.Admission != nil {
+				result.Requests = result.Admission.Requests.Clone()
+			}
+			if result.Requests == nil {
+				result.Requests = service.queuedRequests(demandContext, run)
+			}
 			if reason == "" {
 				reason = queuedDisplayReason(result, blocker)
+			} else {
+				reason = withQueueRequests(result.Requests, reason)
 			}
 			if policyWaiting {
-				reason = "waiting for upstream policy"
+				reason = withQueueRequests(result.Requests, "waiting for upstream policy")
 			}
 		}
 		result.AgeSeconds = int64(clock.Since(observed) / time.Second)
@@ -105,12 +114,10 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 	}
 	if run.Status == model.RunQueued {
 		result.State = "queued"
-		if service.scope == nil {
-			if observer, ok := service.admission.(interface{ QueuedAdmissionMessage() string }); ok {
-				if message := observer.QueuedAdmissionMessage(); message != "" {
-					result.Message = message
-					return result, message
-				}
+		if observer, ok := service.admission.(interface{ QueuedAdmissionMessage() string }); ok {
+			if message := observer.QueuedAdmissionMessage(); message != "" && (service.scope == nil || message == "host CPU busy" || message == "host IO busy") {
+				result.Message = message
+				return result, message
 			}
 		}
 		result.Message = "Awaiting scheduler claim; queue position follows priority then FIFO, not an execution estimate."
@@ -125,7 +132,9 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 		result.Admission = service.admission.AdmissionSnapshot(run.QueueSequence)
 		if result.Admission != nil {
 			admission := *result.Admission
-			admission.Position = int(result.QueuePosition)
+			if result.QueuePosition > 0 {
+				admission.Position = int(result.QueuePosition)
+			}
 			result.Admission = &admission
 		}
 		if result.Admission != nil && service.scope != nil {

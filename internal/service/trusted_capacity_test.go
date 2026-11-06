@@ -177,7 +177,7 @@ func TestTrustedCapacityRetryBoundaries(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if entries := listed.([]model.Run); len(entries) != 1 || entries[0].DisplayStatus != "queued" || entries[0].StartedAt != nil || !strings.Contains(entries[0].DisplayReason, "VM capacity") {
+				if entries := listed.([]model.Run); len(entries) != 1 || entries[0].DisplayStatus != "queued" || entries[0].StartedAt != nil || !strings.Contains(entries[0].DisplayReason, "VM resources") {
 					t.Fatalf("parked run list presentation = %+v", entries)
 				}
 				if used, runs := gateUsage(f.scheduler.admission); used != 0 || runs != 0 {

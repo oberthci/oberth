@@ -115,13 +115,13 @@ func TestParkFallbackUsesExistingDisplayReason(t *testing.T) {
 	cause := "branch CI: park policy unavailable (invalid promotion policy)"
 	for _, status := range []model.RunStatus{model.RunQueued, model.RunRunning, model.RunPassed, model.RunFailed} {
 		run := presentationRun(model.Run{Status: status, Reason: cause})
-		if !strings.Contains(run.DisplayReason, cause) {
+		if strings.Contains(run.DisplayReason, cause) == (run.DisplayStatus == model.DisplayQueued) {
 			t.Errorf("status=%s lost visible fallback: %q", status, run.DisplayReason)
 		}
 	}
 	run := presentationRun(model.Run{Status: model.RunQueued, Reason: cause})
 	applyQueuedDisplay(&run, &model.RunScheduling{State: "queued", QueuePosition: 3}, "")
-	if !strings.Contains(run.DisplayReason, "position 3 in line") || strings.Count(run.DisplayReason, cause) != 1 {
+	if run.DisplayReason != "position 3" || run.Reason != cause {
 		t.Errorf("queue observation hid fallback or duplicated it: %q", run.DisplayReason)
 	}
 	run = presentationRun(model.Run{Status: model.RunRunning, Reason: cause})
@@ -130,7 +130,7 @@ func TestParkFallbackUsesExistingDisplayReason(t *testing.T) {
 		t.Errorf("execution observation hid fallback or duplicated it: %q", run.DisplayReason)
 	}
 	run = presentationRun(model.Run{Status: model.RunRunning, Reason: cause + "; " + store.PolicyRefreshWaitingReason})
-	if !strings.Contains(run.DisplayReason, cause) || strings.Contains(run.DisplayReason, store.PolicyRefreshWaitingReason) {
+	if strings.Contains(run.DisplayReason, cause) || strings.Contains(run.DisplayReason, store.PolicyRefreshWaitingReason) || !strings.Contains(run.Reason, cause) {
 		t.Errorf("fallback copied a later policy-wait annotation: %q", run.DisplayReason)
 	}
 	f := newControlFixture(t)
@@ -143,7 +143,7 @@ func TestParkFallbackUsesExistingDisplayReason(t *testing.T) {
 	if err != nil || !ok || len(shown) != 1 {
 		t.Fatalf("scoped runs: %+v %v", value, err)
 	}
-	if !strings.Contains(shown[0].DisplayReason, cause) || strings.Contains(shown[0].Reason, "17/19") || strings.Contains(shown[0].DisplayReason, "17/19") {
+	if strings.Contains(shown[0].DisplayReason, cause) || !strings.Contains(shown[0].Reason, cause) || strings.Contains(shown[0].Reason, "17/19") || strings.Contains(shown[0].DisplayReason, "17/19") {
 		t.Fatalf("scoped fallback lost reason or exposed global counts: %+v", shown[0])
 	}
 }
@@ -172,7 +172,7 @@ func TestParkFallbackReasonIsBoundedAndPrintable(t *testing.T) {
 		}
 	}
 	run := presentationRun(model.Run{Status: model.RunQueued, Reason: reason})
-	if len([]rune(run.DisplayReason)) > 600 || !strings.Contains(run.DisplayReason, "branch CI: park policy unavailable") {
+	if strings.Contains(run.DisplayReason, "branch CI: park policy unavailable") || run.Reason != reason {
 		t.Fatalf("display lost or exceeded fallback bound: %q", run.DisplayReason)
 	}
 }

@@ -113,6 +113,7 @@ type APIConfig struct {
 }
 
 type API struct {
+	queueDemands              *queueDemandCache
 	issueStaleAfter           time.Duration
 	issueActiveStaleAfter     time.Duration
 	issueObservedAt           time.Time
@@ -253,6 +254,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		issueLifecycle:     config.IssueLifecycle,
 		kvmPreflights:      config.KVMPreflights,
 		schedulingObserver: config.SchedulingObserver, admission: config.Admission,
+		queueDemands:      &queueDemandCache{},
 		resourceCoverages: config.ResourceCoverages, runResources: config.RunResources, resourceDeclarations: config.ResourceDeclarations,
 		resources: config.Resources, runs: config.Runs, history: config.History, runRetries: config.RunRetries, repositories: config.Repositories,
 		issues: config.Issues, promotions: config.Promotions, promotionRuns: config.PromotionRuns,
@@ -1735,10 +1737,12 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 	if run.Status == model.RunRunning && run.Phase == "publishing" {
 		visible.DisplayReason = "publishing to upstream"
 	}
-	if run.Status.Active() {
+	if run.Status.Active() && visible.DisplayStatus != model.DisplayQueued {
 		visible.DisplayReason = joinRunMessage(priorityPrefix(visible), visible.DisplayReason)
 	}
-	visible.DisplayReason = parkPolicyDisplayReason(run, displayFailureText(visible.DisplayReason))
+	if visible.DisplayStatus != model.DisplayQueued {
+		visible.DisplayReason = parkPolicyDisplayReason(run, displayFailureText(visible.DisplayReason))
+	}
 	return visible
 }
 
