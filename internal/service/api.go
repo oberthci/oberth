@@ -587,7 +587,27 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, fmt.Errorf("%w: byte_offset must be nonnegative", ErrInvalidInput)
 		}
 		filter.ByteOffset = arguments.ByteOffset
-		return service.RunLogFiltered(ctx, actor, arguments.ID, arguments.Stage, arguments.Step, filter)
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &fields) // decodeTool already validated the object.
+		defaultWindow := true
+		for field := range fields {
+			switch strings.ToLower(field) {
+			case "pattern", "limit", "tail", "offset", "byte_offset":
+				defaultWindow = false
+			}
+		}
+		if defaultWindow {
+			filter.Tail, filter.Limit = true, runlog.DefaultWindowLines
+		}
+		value, err := service.RunLogFiltered(ctx, actor, arguments.ID, arguments.Stage, arguments.Step, filter)
+		if err != nil {
+			return nil, err
+		}
+		if response, ok := value.(LogResponse); ok && defaultWindow {
+			response.Window = runlog.DefaultWindowDescription
+			value = response
+		}
+		return value, nil
 	case "artifacts":
 		var arguments struct {
 			ID string `json:"id"`

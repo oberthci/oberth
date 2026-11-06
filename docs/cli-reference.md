@@ -412,6 +412,7 @@ Usage: oberth issues update --id <issue-id> --work-status <status> [flags]
 
 ```text
 Usage: oberth log <run-id> [--burn <burn> --step <step>] [flags]
+With no pattern, limit, tail, offset or byte-offset: last 200 lines. Pass --tail --limit N for a larger tail, or --limit 0 for the existing bounded full read.
   -burn string
         burn name
   -byte-offset int
@@ -419,7 +420,7 @@ Usage: oberth log <run-id> [--burn <burn> --step <step>] [flags]
   -context int
         lines of context around each match
   -json
-        emit the server's payload unchanged
+        emit JSON, including the default window when used
   -limit int
         return at most this many
   -offset int

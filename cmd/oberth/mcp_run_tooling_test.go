@@ -102,6 +102,18 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 			want := service.LogResponse{RunID: run.ID, Stage: "release-build-variants", Step: "release-build-variants",
 				Note: "step was not executed; no log recorded", RunError: "Workflow error", ScanComplete: true, BytesExact: true,
 				TotalScannedBytes: 0, ScanLimitBytes: runlog.MaxScanBytes}
+			if tool == "run_logs" {
+				var fields map[string]json.RawMessage
+				if err := json.Unmarshal([]byte(arguments), &fields); err != nil {
+					t.Fatal(err)
+				}
+				want.Window = runlog.DefaultWindowDescription
+				for _, field := range []string{"pattern", "limit", "tail", "offset", "byte_offset"} {
+					if _, ok := fields[field]; ok {
+						want.Window = ""
+					}
+				}
+			}
 			if got != want {
 				t.Fatalf("MCP log metadata = %#v, want %#v", got, want)
 			}
@@ -176,7 +188,11 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 					args = fmt.Sprintf(`"repo":"repo","sha":%q,"step":"release-build-variants"`, run.SHA)
 				}
 				isError, text := call(tool, "{"+args+filter.arguments+"}")
-				if isError || text != want.MCPToolText() {
+				expected := want
+				if tool == "run_logs" && filter.arguments == "" {
+					expected.Window = runlog.DefaultWindowDescription
+				}
+				if isError || text != expected.MCPToolText() {
 					t.Fatalf("%s %s %s: isError=%t text=%q", storage, tool, filter.arguments, isError, text)
 				}
 			}

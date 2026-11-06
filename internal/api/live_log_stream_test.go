@@ -146,11 +146,15 @@ func TestLiveLogStreamFlushAndWriteDeadline(t *testing.T) {
 	defer cancel()
 	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, httpServer.URL+"/api/runs/run-1/livelog/stream", nil)
 	request.Header.Set("Authorization", "Bearer valid-token")
+	request.Header.Set("Accept-Encoding", "gzip")
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer response.Body.Close()
+	if response.Header.Get("Content-Encoding") != "" || response.Uncompressed {
+		t.Fatal("live stream was compressed")
+	}
 	reader := bufio.NewReader(response.Body)
 	for {
 		line, err := reader.ReadString('\n')

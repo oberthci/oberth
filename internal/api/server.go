@@ -241,7 +241,7 @@ func (server *Server) refuseDuringDrain(writer http.ResponseWriter) bool {
 }
 
 func (server *Server) Handler() http.Handler {
-	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	return gzipJSON(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("X-Content-Type-Options", "nosniff")
 		writer.Header().Set("Referrer-Policy", "no-referrer")
 		writer.Header().Set("Strict-Transport-Security", "max-age=31536000")
@@ -257,7 +257,7 @@ func (server *Server) Handler() http.Handler {
 			request = request.WithContext(ctx)
 		}
 		server.mux.ServeHTTP(writer, request)
-	})
+	}))
 }
 
 func (server *Server) routes() {
@@ -869,6 +869,7 @@ func writeJSON(writer http.ResponseWriter, status int, value any) {
 	}
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(status)
+	// Compression is decided on the first Write; keep the complete JSON body in one write.
 	// #nosec G705 -- marshalCompatible uses json.Marshal with HTML escaping on every success path; the response is application/json.
 	_, _ = writer.Write(append(raw, '\n'))
 }

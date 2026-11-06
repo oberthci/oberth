@@ -147,11 +147,15 @@ func TestMCPStreamTLSHeartbeatAndFinalRPC(t *testing.T) {
 			}
 			req.Header.Set("Authorization", "Bearer valid-token")
 			req.Header.Set("Accept", "application/json, text/event-stream")
+			req.Header.Set("Accept-Encoding", "gzip")
 			resp, err := tls.Client().Do(req)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer resp.Body.Close()
+			if resp.Header.Get("Content-Encoding") != "" || resp.Uncompressed {
+				t.Fatal("MCP stream was compressed")
+			}
 			if (resp.ProtoMajor == 2) != http2 {
 				t.Fatalf("protocol %s", resp.Proto)
 			}
