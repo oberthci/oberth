@@ -1,3 +1,7 @@
+# Main storage budgets are explicit: bounded Argo helpers also cap the aggregate Pod.
+# Unsized cold Go/scanner leaves retain the existing 8Gi private scratch envelope;
+# utility/PVC writers use 512Mi and artifact staging uses 2Gi, all provisional.
+# Existing measured bounds remain unchanged. Samples are lower bounds, not complete peaks.
 # Oberth CI pipeline (branch-trigger) for the oberth repository.
 #
 # Every step is its own Argo template with its own container, exit code, and
@@ -174,9 +178,11 @@ spec:
         requests:
           cpu: 1000m # measured request 1470m; retain the CI policy cap
           memory: 256Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 1500m
           memory: 256Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
 
   # ---- setup stage (13 sequential steps) ----
   # Maps to: Test("setup", repositorySteps(inlineToolchainSteps()...)...)
@@ -266,9 +272,11 @@ spec:
         requests:
           cpu: 1000m # measured request 2; retain the CI policy cap
           memory: 128Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 2000m
           memory: 128Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
 
   # [link-go] symlink Go toolchain from image into shared tools directory
   - name: link-go
@@ -323,9 +331,11 @@ spec:
         requests:
           cpu: 1000m # measured request 2; retain the CI policy cap
           memory: 192Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 2000m
           memory: 192Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
 
   # [install-golangci-lint] go install golangci-lint v2.12.2
   - name: install-golangci-lint
@@ -390,9 +400,11 @@ spec:
         requests:
           cpu: 1000m # measured request 1288m; retain the CI policy cap
           memory: 2368Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 2000m
           memory: 2368Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
 
   # [install-helm] go install helm v4.2.3
   - name: install-deadcode
@@ -456,9 +468,11 @@ spec:
         requests:
           cpu: 1000m
           memory: "4Gi"
+          ephemeral-storage: 512Mi
         limits:
           cpu: "2"
           memory: "4Gi"
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
 
   # [install-helm] go install helm v4.2.3
   - name: install-helm
@@ -569,9 +583,11 @@ spec:
         requests:
           cpu: "1"
           memory: "256Mi"
+          ephemeral-storage: 512Mi
         limits:
           cpu: "1"
           memory: "256Mi"
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
 
   - name: verify-helm-unittest
     automountServiceAccountToken: false
@@ -593,9 +609,11 @@ spec:
         requests:
           cpu: "1"
           memory: "256Mi"
+          ephemeral-storage: 512Mi
         limits:
           cpu: "1"
           memory: "256Mi"
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
 
   - name: install-helm-unittest
     automountServiceAccountToken: false
@@ -617,9 +635,11 @@ spec:
         requests:
           cpu: "1"
           memory: "256Mi"
+          ephemeral-storage: 512Mi
         limits:
           cpu: "1"
           memory: "256Mi"
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
 
   # [fetch-shellcheck] download shellcheck v0.10.0 static binary from upstream release
   - name: fetch-shellcheck
@@ -693,9 +713,11 @@ spec:
         requests:
           cpu: 864m
           memory: 192Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 2000m
           memory: 192Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
 
   # [verify-shellcheck] sha256sum check against pinned digest
   - name: verify-shellcheck
@@ -750,9 +772,11 @@ spec:
         requests:
           cpu: 124m
           memory: 192Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 2000m
           memory: 192Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
 
   # [decompress-shellcheck] the golang:1.26.10-trixie image has no xz/unxz binary,
   # so /bin/tar cannot shell out to decompress a .tar.xz. python3's stdlib lzma
@@ -813,9 +837,11 @@ spec:
         requests:
           cpu: 192m
           memory: 192Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 2000m
           memory: 192Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
 
   # [install-shellcheck] extract shellcheck binary from decompressed tarball
   - name: install-shellcheck
@@ -877,9 +903,11 @@ spec:
         requests:
           cpu: 100m
           memory: 192Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 2000m
           memory: 192Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
 
   # ---- shellcheck burn (single step) ----
   # ShellCheck v0.10.0 gates all shell scripts in .oberth/ and hack/
@@ -928,9 +956,11 @@ spec:
         requests:
           cpu: 1000m # measured request 2; retain the CI policy cap
           memory: 512Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 2000m
           memory: 512Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
 
   # ---- lint burn (2 sequential steps) ----
   # Maps to: Test("lint", repositorySteps(
@@ -1000,9 +1030,11 @@ spec:
         requests:
           cpu: 360m
           memory: 3968Mi
+          ephemeral-storage: 8Gi
         limits:
           cpu: 3000m
           memory: 3968Mi
+          ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
 
   # [golangci-lint-./...]
   # Keep one analysis process under load. Use 6GiB of the actual 8Gi limit
@@ -1138,9 +1170,11 @@ spec:
         requests:
           cpu: 1000m
           memory: "8Gi"
+          ephemeral-storage: 8Gi
         limits:
           cpu: "4"
           memory: "8Gi"
+          ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
 
   # ---- parallel race-test burns ----
   # Each package runs once: dedicated store/service/gitcache groups and the
@@ -1362,9 +1396,11 @@ spec:
         requests:
           cpu: 1000m # measured request 2249m; retain the CI policy cap
           memory: 6208Mi
+          ephemeral-storage: 8Gi
         limits:
           cpu: 4000m
           memory: 6208Mi
+          ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
 
   # The native Git cache suite is a binding source gate.
   - name: test-gitcache
@@ -1494,9 +1530,11 @@ spec:
         requests:
           cpu: 1000m # measured request 2348m; retain the CI policy cap
           memory: 7616Mi
+          ephemeral-storage: 8Gi
         limits:
           cpu: 2990m
           memory: 7616Mi
+          ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
 
   - name: test-static-git-runtime
     # Remeasure: max(441s censored cap, 471s Pod span) x1.5, rounded up.
@@ -1654,9 +1692,11 @@ spec:
         requests:
           cpu: 1000m # measured request 1052m; retain the CI policy cap
           memory: 3136Mi
+          ephemeral-storage: 8Gi
         limits:
           cpu: 4000m
           memory: 3136Mi
+          ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
 
   # ---- chart burn (single step) ----
   # Maps to: Test("chart", repositorySteps(
@@ -1688,9 +1728,11 @@ spec:
         requests:
           cpu: 1000m # measured request 1383m; retain the CI policy cap
           memory: 192Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 2000m
           memory: 192Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
 
   # Focused regression gates measured locally with one Go process (BusyBox time -v).
   # Peak RSS / wall time: unittest 38 MiB / 0.21s, schema 55 MiB / 2.86s,
@@ -1721,9 +1763,11 @@ spec:
         requests:
           cpu: "1"
           memory: "256Mi"
+          ephemeral-storage: 512Mi
         limits:
           cpu: "1"
           memory: "256Mi"
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
 
   - name: test-chart-schema
     automountServiceAccountToken: false
@@ -1750,9 +1794,11 @@ spec:
         requests:
           cpu: "1"
           memory: "256Mi"
+          ephemeral-storage: 512Mi
         limits:
           cpu: "1"
           memory: "256Mi"
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
 
   - name: test-make-entrypoints
     automountServiceAccountToken: false
@@ -1774,9 +1820,11 @@ spec:
         requests:
           cpu: "1"
           memory: "256Mi"
+          ephemeral-storage: 512Mi
         limits:
           cpu: "1"
           memory: "256Mi"
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
 
   - name: test-release-prune-contract
     automountServiceAccountToken: false
@@ -1798,9 +1846,11 @@ spec:
         requests:
           cpu: "1"
           memory: "256Mi"
+          ephemeral-storage: 512Mi
         limits:
           cpu: "1"
           memory: "256Mi"
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
 
   # ---- build-amd64 burn (single step) ----
   # Maps to: Build("build-amd64", repositorySteps(
@@ -1866,9 +1916,11 @@ spec:
         requests:
           cpu: 513m
           memory: 2176Mi
+          ephemeral-storage: 8Gi
         limits:
           cpu: 2000m
           memory: 2176Mi
+          ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
 
   # ---- build-arm64 burn (single step) ----
   # Maps to: Build("build-arm64", repositorySteps(
@@ -1932,9 +1984,11 @@ spec:
         requests:
           cpu: 1000m # measured request 2660m; retain the CI policy cap
           memory: 2176Mi
+          ephemeral-storage: 8Gi
         limits:
           cpu: 3000m
           memory: 2176Mi
+          ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
 
   # ---- build-darwin-amd64 burn (single step) ----
   # Branch verification of the darwin/amd64 release target. release.sh
@@ -2000,9 +2054,11 @@ spec:
         requests:
           cpu: 1000m # measured request 2614m; retain the CI policy cap
           memory: 2432Mi
+          ephemeral-storage: 8Gi
         limits:
           cpu: 2770m
           memory: 2432Mi
+          ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
 
   # ---- build-darwin-arm64 burn (single step) ----
   # Branch verification of the darwin/arm64 release target (#699).
@@ -2065,9 +2121,11 @@ spec:
         requests:
           cpu: 1000m # measured request 2614m; retain the CI policy cap
           memory: 2432Mi
+          ephemeral-storage: 8Gi
         limits:
           cpu: 2680m
           memory: 2432Mi
+          ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
 
   # Credentialless proof of the signed release's numeric-only prefetch refusal.
   - name: release-diagnostic
@@ -2093,9 +2151,11 @@ spec:
         requests:
           cpu: 100m
           memory: 256Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 1000m
           memory: 256Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
 
   # ---- verify-publisher-tools burn (#829) ----
   # Reproduces every release-setup tool install with the exact flags, images and
@@ -2230,9 +2290,11 @@ spec:
         requests:
           cpu: 620m
           memory: 512Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 1000m
           memory: 512Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
 
   # Verify all five publisher tools against the reviewed pin manifest.
   - name: vpt-verify
@@ -2259,9 +2321,11 @@ spec:
         requests:
           cpu: 485m
           memory: 640Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 1000m
           memory: 640Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
 
   # ---- test-openbao burn (#803) ----
   # Real OpenBao integration test: starts a dev server, applies rendered
@@ -2345,9 +2409,11 @@ spec:
         requests:
           cpu: 1000m # measured request 1951m; retain the CI policy cap
           memory: 3136Mi
+          ephemeral-storage: 8Gi
         limits:
           cpu: 2950m
           memory: 3136Mi
+          ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
 
   - name: resource-guard
     automountServiceAccountToken: false
@@ -2407,7 +2473,9 @@ spec:
         requests:
           cpu: 687m
           memory: 425Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 3113m
           memory: 460Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
     activeDeadlineSeconds: 300

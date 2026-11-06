@@ -1,3 +1,7 @@
+# Main storage budgets are explicit: bounded Argo helpers also cap the aggregate Pod.
+# Unsized cold Go/scanner leaves retain the existing 8Gi private scratch envelope;
+# utility/PVC writers use 512Mi and artifact staging uses 2Gi, all provisional.
+# Existing measured bounds remain unchanged. Samples are lower bounds, not complete peaks.
 # Release workflow. The Golang and Trivy images pin their Linux amd64
 # platform manifests, not multi-platform indexes: bootstrap tools and their
 # reviewed digests target amd64 even when the Kubernetes node is arm64.
@@ -242,9 +246,11 @@ spec:
         requests:
           cpu: 1000m # measured request 1250m; retain the CI policy cap
           memory: 64Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 2000m
           memory: 64Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
   - name: verify-publisher-tools
     activeDeadlineSeconds: 60
     automountServiceAccountToken: false
@@ -281,9 +287,11 @@ spec:
         requests:
           cpu: 625m
           memory: 704Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 1000m
           memory: 704Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
   - name: copy-trivy
     activeDeadlineSeconds: 60
     automountServiceAccountToken: false
@@ -332,9 +340,11 @@ spec:
         requests:
           cpu: 625m
           memory: 576Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 1000m
           memory: 576Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
   - name: link-go
     activeDeadlineSeconds: 60
     automountServiceAccountToken: false
@@ -385,9 +395,11 @@ spec:
         requests:
           cpu: 1000m # measured request 1250m; retain the CI policy cap
           memory: 192Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 2000m
           memory: 192Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
   - name: install-golangci-lint
     activeDeadlineSeconds: 168
     automountServiceAccountToken: false
@@ -436,9 +448,11 @@ spec:
         requests:
           cpu: 1000m # measured request 3496m; retain the CI policy cap
           memory: 3584Mi
+          ephemeral-storage: 8Gi
         limits:
           cpu: 4000m
           memory: 3584Mi
+          ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
   - name: install-helm
     activeDeadlineSeconds: 485
     automountServiceAccountToken: false
@@ -496,9 +510,11 @@ spec:
         requests:
           cpu: 1000m # measured request 1360m; retain the CI policy cap
           memory: 4032Mi
+          ephemeral-storage: 8Gi
         limits:
           cpu: 1520m
           memory: 4032Mi
+          ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
   - name: fetch-cosign
     activeDeadlineSeconds: 60
     automountServiceAccountToken: false
@@ -564,9 +580,11 @@ spec:
         requests:
           cpu: 173m
           memory: 320Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 2000m
           memory: 320Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
   - name: verify-cosign
     activeDeadlineSeconds: 60
     automountServiceAccountToken: false
@@ -615,9 +633,11 @@ spec:
         requests:
           cpu: 586m
           memory: 256Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 2000m
           memory: 256Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
   - name: install-cosign
     activeDeadlineSeconds: 60
     automountServiceAccountToken: false
@@ -666,9 +686,11 @@ spec:
         requests:
           cpu: 100m
           memory: 128Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 2000m
           memory: 128Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
   - name: build-release-support
     activeDeadlineSeconds: 126
     automountServiceAccountToken: false
@@ -728,9 +750,11 @@ spec:
         requests:
           cpu: 1000m # measured request 1338m; retain the CI policy cap
           memory: 960Mi
+          ephemeral-storage: 8Gi
         limits:
           cpu: 1360m
           memory: 960Mi
+          ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
   - name: build-release-image
     activeDeadlineSeconds: 132
     automountServiceAccountToken: false
@@ -790,9 +814,11 @@ spec:
         requests:
           cpu: 1000m # measured request 1333m; retain the CI policy cap
           memory: 960Mi
+          ephemeral-storage: 8Gi
         limits:
           cpu: 1350m
           memory: 960Mi
+          ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
   - name: validate-tag
     activeDeadlineSeconds: 60
     automountServiceAccountToken: false
@@ -840,9 +866,11 @@ spec:
         requests:
           cpu: 1000m # measured request 1250m; retain the CI policy cap
           memory: 128Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 2000m
           memory: 128Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
   - name: fetch-node
     activeDeadlineSeconds: 60
     automountServiceAccountToken: false
@@ -908,9 +936,11 @@ spec:
         requests:
           cpu: 686m
           memory: 192Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 1000m
           memory: 192Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
   - name: verify-node
     activeDeadlineSeconds: 60
     automountServiceAccountToken: false
@@ -959,9 +989,11 @@ spec:
         requests:
           cpu: 1000m # measured request 3113m; retain the CI policy cap
           memory: 64Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 3113m
           memory: 64Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
   - name: release-lint
     steps:
     - - name: vet
@@ -1019,9 +1051,11 @@ spec:
         requests:
           cpu: 1000m # measured request 4000m; retain the CI policy cap
           memory: 6016Mi
+          ephemeral-storage: 8Gi
         limits:
           cpu: 4000m
           memory: 6016Mi
+          ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
   - name: golangci-lint-run
     activeDeadlineSeconds: 563
     automountServiceAccountToken: false
@@ -1076,9 +1110,11 @@ spec:
         requests:
           cpu: 1000m # measured request 4000m; retain the CI policy cap
           memory: 8Gi
+          ephemeral-storage: 8Gi
         limits:
           cpu: 4000m
           memory: 8Gi
+          ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
   - name: deadcode
     automountServiceAccountToken: false
     metadata:
@@ -1127,9 +1163,11 @@ spec:
         requests:
           cpu: 1000m
           memory: 8Gi
+          ephemeral-storage: 8Gi
         limits:
           cpu: '4'
           memory: 8Gi
+          ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
   - name: release-scan
     activeDeadlineSeconds: 60
     automountServiceAccountToken: false
@@ -1190,9 +1228,11 @@ spec:
         requests:
           cpu: 1000m # measured request 3591m; retain the CI policy cap
           memory: 3072Mi
+          ephemeral-storage: 8Gi
         limits:
           cpu: 4000m
           memory: 3072Mi
+          ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
   # Keep the release gate while giving each branch race group its own Pod.
   - name: release-test
     automountServiceAccountToken: false
@@ -1405,9 +1445,11 @@ spec:
         requests:
           cpu: 1000m # measured request 2249m; retain the CI policy cap
           memory: 6208Mi
+          ephemeral-storage: 8Gi
         limits:
           cpu: 4000m
           memory: 6208Mi
+          ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
 
   # The native Git cache suite is a binding source gate.
   - name: release-test-gitcache
@@ -1516,9 +1558,11 @@ spec:
         requests:
           cpu: 492m
           memory: 192Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 2000m
           memory: 192Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
   - name: release-build
     automountServiceAccountToken: false
     metadata:
@@ -1574,9 +1618,11 @@ spec:
         requests:
           cpu: 1000m # measured request 4000m; retain the CI policy cap
           memory: 8192Mi
+          ephemeral-storage: 8Gi
         limits:
           cpu: 4000m
           memory: 8192Mi
+          ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
   - name: release-sign-binaries
     metadata:
       annotations:
@@ -1638,9 +1684,11 @@ spec:
         requests:
           cpu: 1000m # measured request 1250m; retain the CI policy cap
           memory: 320Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 2000m
           memory: 320Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
     initContainers:
     - name: verify-publisher-tools
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
@@ -1726,9 +1774,11 @@ spec:
         requests:
           cpu: 157m
           memory: 512Mi
+          ephemeral-storage: 2Gi
         limits:
           cpu: 1000m
           memory: 512Mi
+          ephemeral-storage: 2Gi # provisional artifact-staging bound; remeasure cold volumes
     initContainers:
     - name: verify-publisher-tools
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
@@ -1817,9 +1867,11 @@ spec:
         requests:
           cpu: 1000m # measured request 1361m; retain the CI policy cap
           memory: 5888Mi
+          ephemeral-storage: 8Gi
         limits:
           cpu: 2090m
           memory: 5888Mi
+          ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
     initContainers:
     - name: verify-publisher-tools
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
@@ -1893,9 +1945,11 @@ spec:
         requests:
           cpu: 1000m # measured request 1250m; retain the CI policy cap
           memory: 384Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 2000m
           memory: 384Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
   - name: release-publish-chart
     metadata:
       annotations:
@@ -1963,9 +2017,11 @@ spec:
         requests:
           cpu: 1000m # measured request 1096m; retain the CI policy cap
           memory: 640Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 2000m
           memory: 640Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
     initContainers:
     - name: verify-publisher-tools
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
@@ -2047,9 +2103,11 @@ spec:
         requests:
           cpu: 359m
           memory: 3648Mi
+          ephemeral-storage: 8Gi
         limits:
           cpu: 460m
           memory: 3648Mi
+          ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
     initContainers:
     - name: verify-publisher-tools
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
@@ -2133,9 +2191,11 @@ spec:
         requests:
           cpu: 719m
           memory: 640Mi
+          ephemeral-storage: 2Gi
         limits:
           cpu: 719m
           memory: 640Mi
+          ephemeral-storage: 2Gi # provisional artifact-staging bound; remeasure cold volumes
   - name: copy-test-tools
     activeDeadlineSeconds: 143 # remeasure: observed 95s release pod span x1.5, rounded up
     automountServiceAccountToken: false
@@ -2181,9 +2241,11 @@ spec:
         requests:
           cpu: 850m
           memory: 4608Mi
+          ephemeral-storage: 8Gi
         limits:
           cpu: 1000m
           memory: 4608Mi
+          ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
   - name: fetch-apko
     activeDeadlineSeconds: 60
     automountServiceAccountToken: false
@@ -2249,9 +2311,11 @@ spec:
         requests:
           cpu: 155m
           memory: 128Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 1000m
           memory: 128Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
   - name: verify-apko
     activeDeadlineSeconds: 60
     automountServiceAccountToken: false
@@ -2302,9 +2366,11 @@ spec:
         requests:
           cpu: 625m
           memory: 128Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 1000m
           memory: 128Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
   - name: install-apko
     activeDeadlineSeconds: 60
     automountServiceAccountToken: false
@@ -2353,9 +2419,11 @@ spec:
         requests:
           cpu: 625m
           memory: 64Mi
+          ephemeral-storage: 512Mi
         limits:
           cpu: 1000m
           memory: 64Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
   - name: release-publish-kvm-harness
     metadata:
       annotations:
@@ -2420,9 +2488,11 @@ spec:
         requests:
           cpu: 1000m # measured request 2785m; retain the CI policy cap
           memory: 1984Mi
+          ephemeral-storage: 8Gi
         limits:
           cpu: 2980m
           memory: 1984Mi
+          ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
     initContainers:
     - name: verify-publisher-tools
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
@@ -2520,9 +2590,11 @@ spec:
         requests:
           cpu: 1000m
           memory: 2Gi
+          ephemeral-storage: 2Gi
         limits:
           cpu: '2'
           memory: 2Gi
+          ephemeral-storage: 2Gi # provisional artifact-staging bound; remeasure cold volumes
     initContainers:
     - name: verify-publisher-tools
       image: golang:1.26.10-trixie@sha256:3eca740eb349175cc59f462d409fc324a8239ab3ffdf73d8e63175a041c08b6b
