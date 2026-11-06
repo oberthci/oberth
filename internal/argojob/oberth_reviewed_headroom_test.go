@@ -25,7 +25,6 @@ func TestOberthReviewedPeakHeadroom(t *testing.T) {
 		{"release.yaml", "copy-test-tools", 4832141312, 425656320, 880},
 		{"release.yaml", "install-cosign", 0, 0, 1000},
 		{"release.yaml", "release-chart-test", 0, 0, 856},
-		{"release.yaml", "release-publish-kvm-harness", 1729372160, 1317502976, 0},
 		{"release.yaml", "release-test-gitcache", 941920256, 1865973760, 0},
 		{"release.yaml", "release-test-rest", 6509568000, 6073286656, 0},
 		{"release.yaml", "release-test-service", 4294975488, 3629645824, 0},

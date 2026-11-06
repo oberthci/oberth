@@ -27,8 +27,6 @@ func TestSchedulingMessagesUsePlainWords(t *testing.T) {
 			{State: "waiting", Pressure: &model.PressureDeferral{Resource: "io"}},
 			{State: "waiting", Runs: 6, MaxRuns: 6},
 			{State: "waiting", Group: "deploy", GroupHolder: "holder"},
-			{State: "waiting", VMCapacity: true},
-			{State: "waiting", KubeVirtCapacity: true},
 			{State: "waiting", DiskFloor: &model.DiskFloorObservation{BelowFloor: true, FreeBytes: 512 << 20}},
 			{State: "waiting", DeclaredResources: &model.DeclaredResources{CPUMilli: 1000, MemoryBytes: 1 << 30}},
 			{State: "waiting", BlockedBy: &model.AdmissionBlocker{Repo: "org/repo", Ref: "main", DeclaredResources: &model.DeclaredResources{CPUMilli: 1000}}},
@@ -57,7 +55,6 @@ func TestSchedulingMessagesUsePlainWords(t *testing.T) {
 	// Detailed helper text may still be used outside a queued row.
 	for _, observation := range []*model.AdmissionObservation{
 		{DeclaredResources: &model.DeclaredResources{CPUMilli: 1000}},
-		{KubeVirtCapacity: true}, {VMCapacity: true},
 		{DiskFloor: &model.DiskFloorObservation{BelowFloor: true}},
 		{HeadOfQueue: true, BlockedBy: &model.AdmissionBlocker{DeclaredResources: &model.DeclaredResources{CPUMilli: 1000}}},
 	} {

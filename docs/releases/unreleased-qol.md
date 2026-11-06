@@ -14,15 +14,3 @@ one more release. The `queue_cap_config` input remains `maxNotStarted`.
 
 `OBERTH_CA_CERT` accepts inline PEM, including OpenSSL preambles and a BOM,
 or a file path. Certificate read errors do not echo the supplied value.
-
-## Next-release follow-up
-
-JSON API and MCP responses of at least 1 KiB support gzip when requested by the
-client. SSE and raw downloads keep their streaming behavior.
-
-MCP `run_logs` and CLI `oberth log` now show the last 200 lines when no pattern,
-limit, tail, offset or byte offset is supplied. JSON includes a `window`
-explanation; MCP text and the CLI stderr summary explain it too. Explicit
-filters retain their behavior. Use `--tail --limit 1000` for a larger CLI tail
-or `--limit 0` for the existing bounded full read. MCP uses `tail: true` and
-`limit: 1000`, or `limit: 0`, respectively.

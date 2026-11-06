@@ -125,9 +125,7 @@ case "$1" in
    count=$((count + 1)); printf '%s\n' "$count" >"$FIXTURE_ROOT/verify-count"
    if [ "$count" = 2 ] && [ "${FIXTURE_FAILURE:-}" = final-verify ]; then exit 43; fi
   fi
-  if [ "$1" = publish-kvm ]; then
-   for name in runtime harness; do printf 'europe-west4-docker.pkg.dev/skipopsmain/oberth/kvm-%s@sha256:%064d\n' "$name" 0 >"$FIXTURE_CANDIDATE/kvm-$name-image.txt"; done
-  fi;;
+  ;;
  *) exit 90;;
 esac`)
 	f.tool("trivy", `printf 'trivy:%s\n' "$1" >>"$FIXTURE_TRACE"

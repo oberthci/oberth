@@ -116,7 +116,11 @@ func TestWorkflowOnlyReservationReportsBoundPodRequests(t *testing.T) {
 	gate := newWorkflowAdmissionForJobs(1)
 	release := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "occupant"})
 	defer release()
-	reservation := pending(t, gate, 2, admissionRequest{RunID: request.Run.ID, KubeVirt: &KubeVirtResources{Receipt: receipt}})
+	demand, err := receipt.WorkflowPodDemand()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation := pending(t, gate, 2, admissionRequest{RunID: request.Run.ID, Requests: queuePodRequests(demand)})
 	defer reservation.cancel()
 	snapshot := (&Scheduler{admission: gate}).AdmissionSnapshot(2)
 	if snapshot.Requests == nil || snapshot.Requests.CPUMilli != 7900 || snapshot.DeclaredResources != nil {

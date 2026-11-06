@@ -136,7 +136,7 @@ func TestMCPRunToolsExposePendingNotExecutedAndInvalidIDs(t *testing.T) {
 	denied := httptest.NewRecorder()
 	server.Handler().ServeHTTP(denied, unauthenticated)
 	if denied.Code != http.StatusUnauthorized || strings.Contains(denied.Body.String(), run.ID) {
-		t.Fatal("KVM evidence exposed without bearer authentication")
+		t.Fatal("Run evidence exposed without bearer authentication")
 	}
 	request := httptest.NewRequest(http.MethodGet, "/api/runs/"+run.ID[:8]+"/logs?burn=release-build-variants&step=release-build-variants", nil)
 	request.Header.Set("Authorization", "Bearer test-token")

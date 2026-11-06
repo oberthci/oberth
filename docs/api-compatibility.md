@@ -130,4 +130,4 @@ An omitted limit in an available current declaration cannot be replaced by a
 finite historical limit.
 
 The #1294 stage 3 retirement explicitly removes five legacy execution tools; see
-[the breaking change notice](releases/unreleased-execution-retirement.md).
+[the breaking change notice](releases/unreleased-v0.17.95.md#execution-retirement-1294).
