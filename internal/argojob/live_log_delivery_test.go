@@ -36,7 +36,7 @@ func TestLiveLogDeliveryMatchesPodOutput(t *testing.T) {
 			{Name: "retry", RetryStrategy: &wfv1.RetryStrategy{Limit: ptr.To(intstr.FromInt32(1))}, Container: &corev1.Container{Image: "busybox:1.37", Command: []string{"sh", "-c"}, Args: []string{`printf 'attempt-%s\n' "$ATTEMPT"; test "$ATTEMPT" != 0`}, Env: []corev1.EnvVar{{Name: "ATTEMPT", Value: "{{retries}}"}}}},
 		},
 	}}
-	if err := projectExecutorTokens(workflow, config); err != nil {
+	if err := projectExecutorTokens(workflow, config, true); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := cluster.workflows.Create(ctx, workflow, metav1.CreateOptions{}); err != nil {

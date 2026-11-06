@@ -523,9 +523,12 @@ func (seeder *SourceSeeder) createSeedPodBound(ctx context.Context, name, claimN
 					Requests: corev1.ResourceList{
 						corev1.ResourceCPU:    resource.MustParse("100m"),
 						corev1.ResourceMemory: resource.MustParse("64Mi"),
+						// Checkout bytes live on the PVC. This provisional reserve
+						// covers only the seed helper's local logs/overhead.
+						corev1.ResourceEphemeralStorage: resource.MustParse("16Mi"),
 					},
 					// Limits have no prior declaration or exact-step measurement; qualification is pending.
-					Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("500m"), corev1.ResourceMemory: resource.MustParse("512Mi")},
+					Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("500m"), corev1.ResourceMemory: resource.MustParse("512Mi"), corev1.ResourceEphemeralStorage: resource.MustParse("64Mi")},
 				},
 			}},
 			Volumes: []corev1.Volume{{

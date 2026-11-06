@@ -117,3 +117,11 @@ executor resources. The authenticated Argo v4.0.8 controller and retained
 capture helpers produced all 27 submitted Pods, which passed the retained
 Kubernetes v1.35.7 validator. Pod JSON was copied directly from that controller
 output, never hand-merged or assembled. No live API or credentials were used.
+
+The 2026-11-06 helper-storage recapture uses the authenticated Argo v4.0.8
+controller with capture-only overlays and fake clients. New unpinned helper
+requests/limits include 256Mi/512Mi ephemeral storage; main resources, image,
+credentials, mount isolation and named nonroot profile resources are preserved.
+All 27 raw submitted Pods passed the retained Kubernetes v1.35.7 validator.
+This is controller construction/validation evidence, not a live workload peak
+or kubelet acceptance. Prior receipts are retained in the review handoff.

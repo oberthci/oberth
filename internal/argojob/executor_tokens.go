@@ -53,7 +53,7 @@ const legacyExecutorTokenWaitCommand = "until test -f /var/run/secrets/kubernete
 // Argo adds a Secret-backed executor volume before applying the server-owned
 // pod patch. Replace that volume with tmpfs and wait for a Pod-bound TokenRequest
 // delivered by Oberth over exec. No token is present in a Kubernetes object.
-func projectExecutorTokens(workflow *wfv1.Workflow, config Config) error {
+func projectExecutorTokens(workflow *wfv1.Workflow, config Config, storage bool) error {
 	var result error
 	walkTemplates(workflow, func(t *wfv1.Template) {
 		if result != nil || (t.Container == nil && t.Script == nil && t.ContainerSet == nil && t.Resource == nil && t.Data == nil) {
@@ -72,7 +72,7 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config) error {
 		pinnedProfile := t.Name != trustedKVMTemplate && workflow.Annotations[nonrootProfileAnnotation] != ""
 		controlResources := corev1.ResourceRequirements{}
 		if !pinnedProfile {
-			controlResources = executorControlResources()
+			controlResources = executorResourcesWithStorage(storage)
 		}
 		waiter := corev1.Container{Name: executorTokenWaiter, Image: config.SourceSeedImage, Command: []string{"sh", "-c", executorTokenWaitCommand}, SecurityContext: nonrootContainerSecurity(0), Resources: controlResources, VolumeMounts: []corev1.VolumeMount{{Name: executorTokenVolume, MountPath: executorTokenDir}}}
 		initializers, _ := patch["initContainers"].([]any)
@@ -87,7 +87,7 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config) error {
 				if name, ok := value["name"].(string); ok {
 					if name == "init" {
 						if _, exists := value["resources"]; !pinnedProfile && !exists {
-							value["resources"] = executorControlResources()
+							value["resources"] = executorResourcesWithStorage(storage)
 						}
 						merged = append(merged, waiter)
 						order = append(order, map[string]string{"name": executorTokenWaiter})
@@ -126,14 +126,14 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config) error {
 				}
 				// Existing server-authored guards keep their resources and commands.
 				if _, exists := value["resources"]; !exists {
-					value["resources"] = executorControlResources()
+					value["resources"] = executorResourcesWithStorage(storage)
 				}
 			}
 			if hasWait && !foundWait {
-				containers = append(containers, map[string]any{"name": "wait", "resources": executorControlResources()})
+				containers = append(containers, map[string]any{"name": "wait", "resources": executorResourcesWithStorage(storage)})
 			}
 			if (t.Resource != nil || t.Data != nil) && !foundMain {
-				containers = append(containers, map[string]any{"name": "main", "resources": executorControlResources()})
+				containers = append(containers, map[string]any{"name": "main", "resources": executorResourcesWithStorage(storage)})
 			}
 			patch["containers"] = containers
 		}

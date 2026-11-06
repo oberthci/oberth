@@ -474,7 +474,7 @@ func applyExecutionPlacement(wf *wfv1.Workflow, config Config, request Request) 
 			items, _ := patch[key].([]any)
 			for _, item := range items {
 				if m, ok := item.(map[string]any); ok && (m["name"] == "wait" || m["name"] == "init" || m["name"] == executorTokenWaiter) {
-					m["resources"] = executorControlResources()
+					m["resources"] = executorResourcesWithStorage(!request.legacyHelperStorage)
 				}
 			}
 		}

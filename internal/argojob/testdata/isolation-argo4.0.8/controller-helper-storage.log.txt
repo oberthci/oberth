@@ -1,0 +1,655 @@
+=== RUN   TestOberthIsolationControllerCapture
+=== RUN   TestOberthIsolationControllerCapture/dedicated-tools
+time=2026-11-06T01:24:37.864+01:00 level=INFO msg="index config" indexWorkflowSemaphoreKeys=true
+time=2026-11-06T01:24:37.864+01:00 level=INFO msg="cron config" cronSyncPeriod=10s
+time=2026-11-06T01:24:37.864+01:00 level=INFO msg="Memoization caches will be garbage-collected if they have not been hit after" gcAfterNotHitDuration=30s
+time=2026-11-06T01:24:37.870+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:24:37.871+01:00 level=INFO msg="Watching task results" test=true labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow
+time=2026-11-06T01:24:37.871+01:00 level=INFO msg=Plugins component=config_map_informer test=true executorPlugins=false
+time=2026-11-06T01:24:37.871+01:00 level=INFO msg="Sync manager ttl" test=true component=lock_manager syncLimitCacheTTL=0s
+time=2026-11-06T01:24:37.871+01:00 level=INFO msg="Sync manager initialized" dbConfigured=false test=true component=lock_manager
+time=2026-11-06T01:24:37.871+01:00 level=INFO msg="Sync manager initialized successfully" component=lock_manager test=true
+time=2026-11-06T01:24:37.974+01:00 level=INFO msg="Processing workflow" resourceVersion="" phase="" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true
+time=2026-11-06T01:24:37.976+01:00 level=INFO msg="Task-result reconciliation" numObjs=0 test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:37.976+01:00 level=INFO msg="updated phase" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo toPhase=Running fromPhase=""
+time=2026-11-06T01:24:37.976+01:00 level=INFO msg="creating pvc" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo pvcName=oberth-oberth-run-abc1-aabbccddeeff-work
+time=2026-11-06T01:24:37.976+01:00 level=INFO msg="creating pvc" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo pvcName=oberth-oberth-run-abc1-aabbccddeeff-release-tools
+time=2026-11-06T01:24:37.976+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:37.977+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo boundaryID=""
+time=2026-11-06T01:24:37.977+01:00 level=INFO msg="node initialized" node=oberth-oberth-run-abc1-aabbccddeeff workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true phase=Pending message=""
+time=2026-11-06T01:24:37.977+01:00 level=INFO msg=getExecutorLogOpts test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info
+time=2026-11-06T01:24:37.977+01:00 level=INFO msg=getExecutorLogOpts test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info
+time=2026-11-06T01:24:37.977+01:00 level=WARN msg="couldn't get boundaryTemplate" nodeName=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:37.980+01:00 level=INFO msg=getExecutorLogOpts loglevel=info test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:37.980+01:00 level=INFO msg="Created pod" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff podName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:37.981+01:00 level=INFO msg="TaskSet Reconciliation" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:37.981+01:00 level=INFO msg=reconcileAgentPod test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:37.981+01:00 level=INFO msg="add pod event" component=pod_controller test=true pod=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:37.981+01:00 level=INFO msg="Workflow update successful" phase=Running test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo resourceVersion=""
+=== RUN   TestOberthIsolationControllerCapture/none
+time=2026-11-06T01:24:38.986+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:24:38.988+01:00 level=INFO msg="Watching task results" test=true labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow
+time=2026-11-06T01:24:38.988+01:00 level=INFO msg=Plugins component=config_map_informer executorPlugins=false test=true
+time=2026-11-06T01:24:38.988+01:00 level=INFO msg="Sync manager ttl" test=true component=lock_manager syncLimitCacheTTL=0s
+time=2026-11-06T01:24:38.988+01:00 level=INFO msg="Sync manager initialized" dbConfigured=false test=true component=lock_manager
+time=2026-11-06T01:24:38.988+01:00 level=INFO msg="Sync manager initialized successfully" test=true component=lock_manager
+time=2026-11-06T01:24:39.093+01:00 level=INFO msg="Processing workflow" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo resourceVersion="" phase="" test=true
+time=2026-11-06T01:24:39.095+01:00 level=INFO msg="Task-result reconciliation" numObjs=0 namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:39.095+01:00 level=INFO msg="updated phase" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo fromPhase="" toPhase=Running
+time=2026-11-06T01:24:39.095+01:00 level=INFO msg="creating pvc" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo pvcName=oberth-oberth-run-abc1-aabbccddeeff-work
+time=2026-11-06T01:24:39.095+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true
+time=2026-11-06T01:24:39.095+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" boundaryID="" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:39.095+01:00 level=INFO msg="node initialized" node=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo phase=Pending message=""
+time=2026-11-06T01:24:39.095+01:00 level=INFO msg=getExecutorLogOpts test=true loglevel=info nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:39.095+01:00 level=INFO msg=getExecutorLogOpts nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true
+time=2026-11-06T01:24:39.096+01:00 level=WARN msg="couldn't get boundaryTemplate" namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:39.098+01:00 level=INFO msg=getExecutorLogOpts test=true nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:39.098+01:00 level=INFO msg="Created pod" namespace=oberth-argo test=true podName=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:39.098+01:00 level=INFO msg="TaskSet Reconciliation" namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:39.098+01:00 level=INFO msg=reconcileAgentPod namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:39.098+01:00 level=INFO msg="add pod event" test=true component=pod_controller pod=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:39.099+01:00 level=INFO msg="Workflow update successful" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo resourceVersion="" phase=Running
+=== RUN   TestOberthIsolationControllerCapture/container
+time=2026-11-06T01:24:40.103+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:24:40.104+01:00 level=INFO msg="Watching task results" test=true labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow
+time=2026-11-06T01:24:40.104+01:00 level=INFO msg=Plugins test=true component=config_map_informer executorPlugins=false
+time=2026-11-06T01:24:40.104+01:00 level=INFO msg="Sync manager ttl" test=true component=lock_manager syncLimitCacheTTL=0s
+time=2026-11-06T01:24:40.104+01:00 level=INFO msg="Sync manager initialized" test=true component=lock_manager dbConfigured=false
+time=2026-11-06T01:24:40.104+01:00 level=INFO msg="Sync manager initialized successfully" test=true component=lock_manager
+time=2026-11-06T01:24:40.209+01:00 level=INFO msg="Processing workflow" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo phase="" resourceVersion=""
+time=2026-11-06T01:24:40.211+01:00 level=INFO msg="Task-result reconciliation" namespace=oberth-argo numObjs=0 test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:40.211+01:00 level=INFO msg="updated phase" toPhase=Running test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo fromPhase=""
+time=2026-11-06T01:24:40.211+01:00 level=INFO msg="creating pvc" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo pvcName=oberth-oberth-run-abc1-aabbccddeeff-work
+time=2026-11-06T01:24:40.211+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:40.211+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" namespace=oberth-argo boundaryID="" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:40.211+01:00 level=INFO msg="node initialized" node=oberth-oberth-run-abc1-aabbccddeeff phase=Pending message="" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true
+time=2026-11-06T01:24:40.211+01:00 level=INFO msg=getExecutorLogOpts namespace=oberth-argo loglevel=info test=true nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:40.211+01:00 level=INFO msg=getExecutorLogOpts test=true nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:40.211+01:00 level=WARN msg="couldn't get boundaryTemplate" nodeName=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:40.213+01:00 level=INFO msg=getExecutorLogOpts nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff workflow=oberth-oberth-run-abc1-aabbccddeeff loglevel=info namespace=oberth-argo test=true
+time=2026-11-06T01:24:40.213+01:00 level=INFO msg="Created pod" nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff podName=oberth-oberth-run-abc1-aabbccddeeff workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true
+time=2026-11-06T01:24:40.213+01:00 level=INFO msg="TaskSet Reconciliation" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:40.214+01:00 level=INFO msg=reconcileAgentPod test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:40.214+01:00 level=INFO msg="add pod event" test=true component=pod_controller pod=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:40.214+01:00 level=INFO msg="Workflow update successful" namespace=oberth-argo test=true resourceVersion="" phase=Running workflow=oberth-oberth-run-abc1-aabbccddeeff
+=== RUN   TestOberthIsolationControllerCapture/script
+time=2026-11-06T01:24:41.218+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:24:41.219+01:00 level=INFO msg="Watching task results" test=true labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow
+time=2026-11-06T01:24:41.219+01:00 level=INFO msg=Plugins test=true component=config_map_informer executorPlugins=false
+time=2026-11-06T01:24:41.219+01:00 level=INFO msg="Sync manager ttl" test=true component=lock_manager syncLimitCacheTTL=0s
+time=2026-11-06T01:24:41.219+01:00 level=INFO msg="Sync manager initialized" test=true component=lock_manager dbConfigured=false
+time=2026-11-06T01:24:41.219+01:00 level=INFO msg="Sync manager initialized successfully" test=true component=lock_manager
+time=2026-11-06T01:24:41.327+01:00 level=INFO msg="Processing workflow" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff phase="" resourceVersion=""
+time=2026-11-06T01:24:41.328+01:00 level=INFO msg="Task-result reconciliation" namespace=oberth-argo numObjs=0 workflow=oberth-oberth-run-abc1-aabbccddeeff test=true
+time=2026-11-06T01:24:41.328+01:00 level=INFO msg="updated phase" toPhase=Running test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff fromPhase=""
+time=2026-11-06T01:24:41.328+01:00 level=INFO msg="creating pvc" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff pvcName=oberth-oberth-run-abc1-aabbccddeeff-work
+time=2026-11-06T01:24:41.328+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:41.329+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" test=true boundaryID="" namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:41.329+01:00 level=INFO msg="node initialized" node=oberth-oberth-run-abc1-aabbccddeeff phase=Pending message="" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:41.329+01:00 level=INFO msg=getExecutorLogOpts loglevel=info test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:41.329+01:00 level=INFO msg=getExecutorLogOpts test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info
+time=2026-11-06T01:24:41.329+01:00 level=WARN msg="couldn't get boundaryTemplate" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:41.332+01:00 level=INFO msg=getExecutorLogOpts nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff test=true namespace=oberth-argo loglevel=info workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:41.332+01:00 level=INFO msg="Created pod" nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff podName=oberth-oberth-run-abc1-aabbccddeeff test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:41.332+01:00 level=INFO msg="TaskSet Reconciliation" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:41.332+01:00 level=INFO msg=reconcileAgentPod test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:41.332+01:00 level=INFO msg="add pod event" pod=oberth-oberth-run-abc1-aabbccddeeff test=true component=pod_controller
+time=2026-11-06T01:24:41.333+01:00 level=INFO msg="Workflow update successful" namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff test=true resourceVersion="" phase=Running
+=== RUN   TestOberthIsolationControllerCapture/containerset
+time=2026-11-06T01:24:42.335+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:24:42.335+01:00 level=INFO msg="Watching task results" test=true labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow
+time=2026-11-06T01:24:42.335+01:00 level=INFO msg=Plugins test=true component=config_map_informer executorPlugins=false
+time=2026-11-06T01:24:42.335+01:00 level=INFO msg="Sync manager ttl" syncLimitCacheTTL=0s test=true component=lock_manager
+time=2026-11-06T01:24:42.335+01:00 level=INFO msg="Sync manager initialized" test=true component=lock_manager dbConfigured=false
+time=2026-11-06T01:24:42.336+01:00 level=INFO msg="Sync manager initialized successfully" test=true component=lock_manager
+time=2026-11-06T01:24:42.442+01:00 level=INFO msg="Processing workflow" namespace=oberth-argo phase="" resourceVersion="" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:42.444+01:00 level=INFO msg="Task-result reconciliation" namespace=oberth-argo numObjs=0 test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:42.444+01:00 level=INFO msg="updated phase" namespace=oberth-argo toPhase=Running fromPhase="" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:42.444+01:00 level=INFO msg="creating pvc" pvcName=oberth-oberth-run-abc1-aabbccddeeff-work namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:42.444+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:42.445+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo boundaryID=""
+time=2026-11-06T01:24:42.445+01:00 level=INFO msg="node initialized" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo node=oberth-oberth-run-abc1-aabbccddeeff phase=Pending message=""
+time=2026-11-06T01:24:42.445+01:00 level=INFO msg=getExecutorLogOpts nodeName=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff loglevel=info namespace=oberth-argo nodeID=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:42.445+01:00 level=INFO msg=getExecutorLogOpts nodeID=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo loglevel=info
+time=2026-11-06T01:24:42.445+01:00 level=WARN msg="couldn't get boundaryTemplate" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff test=true
+time=2026-11-06T01:24:42.447+01:00 level=INFO msg=getExecutorLogOpts loglevel=info nodeName=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeID=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:42.447+01:00 level=INFO msg=getExecutorLogOpts nodeID=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff loglevel=info test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:42.448+01:00 level=INFO msg="Created pod" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeID=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff podName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:42.448+01:00 level=INFO msg="node initialized" namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff node=oberth-oberth-run-abc1-aabbccddeeff-3159830252 phase=Pending message=""
+time=2026-11-06T01:24:42.448+01:00 level=INFO msg="node initialized" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo phase=Pending message="" node=oberth-oberth-run-abc1-aabbccddeeff-3894624137 test=true
+time=2026-11-06T01:24:42.448+01:00 level=INFO msg="TaskSet Reconciliation" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:42.448+01:00 level=INFO msg=reconcileAgentPod namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:42.448+01:00 level=INFO msg="add pod event" pod=oberth-oberth-run-abc1-aabbccddeeff test=true component=pod_controller
+time=2026-11-06T01:24:42.448+01:00 level=INFO msg="Workflow update successful" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo resourceVersion="" phase=Running test=true
+=== RUN   TestOberthIsolationControllerCapture/sidecars
+time=2026-11-06T01:24:43.452+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:24:43.453+01:00 level=INFO msg="Watching task results" test=true labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow
+time=2026-11-06T01:24:43.453+01:00 level=INFO msg=Plugins test=true component=config_map_informer executorPlugins=false
+time=2026-11-06T01:24:43.453+01:00 level=INFO msg="Sync manager ttl" test=true component=lock_manager syncLimitCacheTTL=0s
+time=2026-11-06T01:24:43.453+01:00 level=INFO msg="Sync manager initialized" dbConfigured=false test=true component=lock_manager
+time=2026-11-06T01:24:43.453+01:00 level=INFO msg="Sync manager initialized successfully" test=true component=lock_manager
+time=2026-11-06T01:24:43.560+01:00 level=INFO msg="Processing workflow" test=true phase="" resourceVersion="" namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:43.562+01:00 level=INFO msg="Task-result reconciliation" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff numObjs=0
+time=2026-11-06T01:24:43.562+01:00 level=INFO msg="updated phase" workflow=oberth-oberth-run-abc1-aabbccddeeff fromPhase="" toPhase=Running test=true namespace=oberth-argo
+time=2026-11-06T01:24:43.563+01:00 level=INFO msg="creating pvc" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff pvcName=oberth-oberth-run-abc1-aabbccddeeff-work
+time=2026-11-06T01:24:43.563+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:43.563+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff boundaryID=""
+time=2026-11-06T01:24:43.563+01:00 level=INFO msg="node initialized" phase=Pending message="" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff node=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:43.563+01:00 level=INFO msg=getExecutorLogOpts nodeID=oberth-oberth-run-abc1-aabbccddeeff test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff loglevel=info
+time=2026-11-06T01:24:43.563+01:00 level=INFO msg=getExecutorLogOpts namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff loglevel=info nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff test=true
+time=2026-11-06T01:24:43.563+01:00 level=WARN msg="couldn't get boundaryTemplate" nodeName=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff test=true
+time=2026-11-06T01:24:43.567+01:00 level=INFO msg=getExecutorLogOpts test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info
+time=2026-11-06T01:24:43.567+01:00 level=INFO msg=getExecutorLogOpts test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info
+time=2026-11-06T01:24:43.568+01:00 level=INFO msg="Created pod" nodeID=oberth-oberth-run-abc1-aabbccddeeff podName=oberth-oberth-run-abc1-aabbccddeeff test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:43.568+01:00 level=INFO msg="add pod event" test=true component=pod_controller pod=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:43.568+01:00 level=INFO msg="TaskSet Reconciliation" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:43.568+01:00 level=INFO msg=reconcileAgentPod workflow=oberth-oberth-run-abc1-aabbccddeeff test=true namespace=oberth-argo
+time=2026-11-06T01:24:43.569+01:00 level=INFO msg="Workflow update successful" namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff resourceVersion="" phase=Running test=true
+=== RUN   TestOberthIsolationControllerCapture/inline-dag
+time=2026-11-06T01:24:44.575+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:24:44.575+01:00 level=INFO msg="Watching task results" test=true labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow
+time=2026-11-06T01:24:44.576+01:00 level=INFO msg=Plugins test=true component=config_map_informer executorPlugins=false
+time=2026-11-06T01:24:44.576+01:00 level=INFO msg="Sync manager ttl" test=true component=lock_manager syncLimitCacheTTL=0s
+time=2026-11-06T01:24:44.576+01:00 level=INFO msg="Sync manager initialized" component=lock_manager test=true dbConfigured=false
+time=2026-11-06T01:24:44.576+01:00 level=INFO msg="Sync manager initialized successfully" test=true component=lock_manager
+time=2026-11-06T01:24:44.680+01:00 level=INFO msg="Processing workflow" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo phase="" resourceVersion="" test=true
+time=2026-11-06T01:24:44.682+01:00 level=INFO msg="Task-result reconciliation" numObjs=0 test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:44.682+01:00 level=INFO msg="updated phase" toPhase=Running namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff fromPhase=""
+time=2026-11-06T01:24:44.683+01:00 level=INFO msg="creating pvc" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo pvcName=oberth-oberth-run-abc1-aabbccddeeff-work
+time=2026-11-06T01:24:44.683+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:44.683+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo boundaryID="" test=true
+time=2026-11-06T01:24:44.683+01:00 level=INFO msg="node initialized" phase=Running message="" namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff node=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:44.683+01:00 level=WARN msg="was unable to obtain the node" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeID=oberth-oberth-run-abc1-aabbccddeeff-894980689 taskName=test
+time=2026-11-06T01:24:44.683+01:00 level=WARN msg="was unable to obtain the node" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true taskName=test nodeID=oberth-oberth-run-abc1-aabbccddeeff-894980689
+time=2026-11-06T01:24:44.683+01:00 level=WARN msg="was unable to obtain the node" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeID=oberth-oberth-run-abc1-aabbccddeeff-894980689 taskName=test
+time=2026-11-06T01:24:44.683+01:00 level=INFO msg="All of node dependencies completed" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff.test dependencies=[]
+time=2026-11-06T01:24:44.684+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:44.684+01:00 level=INFO msg="node initialized" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo phase=Pending message="" node=oberth-oberth-run-abc1-aabbccddeeff-894980689
+time=2026-11-06T01:24:44.684+01:00 level=INFO msg=getExecutorLogOpts test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff.test nodeID=oberth-oberth-run-abc1-aabbccddeeff-894980689 loglevel=info
+time=2026-11-06T01:24:44.684+01:00 level=INFO msg=getExecutorLogOpts loglevel=info test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff.test nodeID=oberth-oberth-run-abc1-aabbccddeeff-894980689
+time=2026-11-06T01:24:44.687+01:00 level=INFO msg=getExecutorLogOpts nodeName=oberth-oberth-run-abc1-aabbccddeeff.test nodeID=oberth-oberth-run-abc1-aabbccddeeff-894980689 test=true loglevel=info workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:44.687+01:00 level=INFO msg="Created pod" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff.test nodeID=oberth-oberth-run-abc1-aabbccddeeff-894980689 test=true podName=oberth-oberth-run-abc1-aabbccddeeff-inline-894980689
+time=2026-11-06T01:24:44.687+01:00 level=INFO msg="TaskSet Reconciliation" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true
+time=2026-11-06T01:24:44.687+01:00 level=INFO msg=reconcileAgentPod test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:44.687+01:00 level=INFO msg="add pod event" component=pod_controller test=true pod=oberth-oberth-run-abc1-aabbccddeeff-inline-894980689
+time=2026-11-06T01:24:44.688+01:00 level=INFO msg="Workflow update successful" resourceVersion="" phase=Running test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+=== RUN   TestOberthIsolationControllerCapture/inline-steps
+time=2026-11-06T01:24:45.693+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:24:45.694+01:00 level=INFO msg="Watching task results" test=true labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow
+time=2026-11-06T01:24:45.694+01:00 level=INFO msg=Plugins test=true component=config_map_informer executorPlugins=false
+time=2026-11-06T01:24:45.694+01:00 level=INFO msg="Sync manager ttl" test=true component=lock_manager syncLimitCacheTTL=0s
+time=2026-11-06T01:24:45.694+01:00 level=INFO msg="Sync manager initialized" test=true component=lock_manager dbConfigured=false
+time=2026-11-06T01:24:45.694+01:00 level=INFO msg="Sync manager initialized successfully" test=true component=lock_manager
+time=2026-11-06T01:24:45.798+01:00 level=INFO msg="Processing workflow" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo resourceVersion="" phase=""
+time=2026-11-06T01:24:45.803+01:00 level=INFO msg="Task-result reconciliation" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo numObjs=0
+time=2026-11-06T01:24:45.803+01:00 level=INFO msg="updated phase" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo fromPhase="" toPhase=Running
+time=2026-11-06T01:24:45.803+01:00 level=INFO msg="creating pvc" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo pvcName=oberth-oberth-run-abc1-aabbccddeeff-work
+time=2026-11-06T01:24:45.803+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:45.803+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo boundaryID=""
+time=2026-11-06T01:24:45.803+01:00 level=INFO msg="node initialized" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true node=oberth-oberth-run-abc1-aabbccddeeff phase=Running message=""
+time=2026-11-06T01:24:45.803+01:00 level=INFO msg="node initialized" node=oberth-oberth-run-abc1-aabbccddeeff-2972806961 phase=Running message="" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true
+time=2026-11-06T01:24:45.804+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:45.804+01:00 level=INFO msg="node initialized" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo message="" node=oberth-oberth-run-abc1-aabbccddeeff-1756372237 phase=Pending
+time=2026-11-06T01:24:45.804+01:00 level=INFO msg=getExecutorLogOpts nodeName=oberth-oberth-run-abc1-aabbccddeeff[0].test nodeID=oberth-oberth-run-abc1-aabbccddeeff-1756372237 workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true loglevel=info
+time=2026-11-06T01:24:45.804+01:00 level=INFO msg=getExecutorLogOpts test=true nodeName=oberth-oberth-run-abc1-aabbccddeeff[0].test nodeID=oberth-oberth-run-abc1-aabbccddeeff-1756372237 workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo loglevel=info
+time=2026-11-06T01:24:45.806+01:00 level=INFO msg=getExecutorLogOpts loglevel=info workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true nodeName=oberth-oberth-run-abc1-aabbccddeeff[0].test nodeID=oberth-oberth-run-abc1-aabbccddeeff-1756372237
+time=2026-11-06T01:24:45.806+01:00 level=INFO msg="Created pod" nodeID=oberth-oberth-run-abc1-aabbccddeeff-1756372237 workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true nodeName=oberth-oberth-run-abc1-aabbccddeeff[0].test podName=oberth-oberth-run-abc1-aabbccddeeff-inline-1756372237
+time=2026-11-06T01:24:45.806+01:00 level=INFO msg="Workflow step group node not yet completed" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true nodeID=oberth-oberth-run-abc1-aabbccddeeff-2972806961
+time=2026-11-06T01:24:45.806+01:00 level=INFO msg="TaskSet Reconciliation" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true
+time=2026-11-06T01:24:45.806+01:00 level=INFO msg=reconcileAgentPod test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:45.807+01:00 level=INFO msg="add pod event" test=true component=pod_controller pod=oberth-oberth-run-abc1-aabbccddeeff-inline-1756372237
+time=2026-11-06T01:24:45.807+01:00 level=INFO msg="Workflow update successful" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo resourceVersion="" phase=Running
+--- PASS: TestOberthIsolationControllerCapture (8.95s)
+    --- PASS: TestOberthIsolationControllerCapture/dedicated-tools (1.12s)
+    --- PASS: TestOberthIsolationControllerCapture/none (1.12s)
+    --- PASS: TestOberthIsolationControllerCapture/container (1.11s)
+    --- PASS: TestOberthIsolationControllerCapture/script (1.12s)
+    --- PASS: TestOberthIsolationControllerCapture/containerset (1.12s)
+    --- PASS: TestOberthIsolationControllerCapture/sidecars (1.12s)
+    --- PASS: TestOberthIsolationControllerCapture/inline-dag (1.12s)
+    --- PASS: TestOberthIsolationControllerCapture/inline-steps (1.12s)
+=== RUN   TestOberthNonrootControllerCapture
+=== RUN   TestOberthNonrootControllerCapture/container
+time=2026-11-06T01:24:46.811+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:24:46.811+01:00 level=INFO msg="Watching task results" test=true labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow
+time=2026-11-06T01:24:46.811+01:00 level=INFO msg=Plugins test=true component=config_map_informer executorPlugins=false
+time=2026-11-06T01:24:46.811+01:00 level=INFO msg="Sync manager ttl" component=lock_manager test=true syncLimitCacheTTL=0s
+time=2026-11-06T01:24:46.811+01:00 level=INFO msg="Sync manager initialized" dbConfigured=false test=true component=lock_manager
+time=2026-11-06T01:24:46.812+01:00 level=INFO msg="Sync manager initialized successfully" test=true component=lock_manager
+time=2026-11-06T01:24:46.919+01:00 level=INFO msg="Processing workflow" phase="" resourceVersion="" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:46.920+01:00 level=INFO msg="Task-result reconciliation" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo numObjs=0
+time=2026-11-06T01:24:46.921+01:00 level=INFO msg="updated phase" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true fromPhase="" toPhase=Running
+time=2026-11-06T01:24:46.921+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:46.921+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo boundaryID="" test=true
+time=2026-11-06T01:24:46.921+01:00 level=INFO msg="node initialized" namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff node=oberth-oberth-run-abc1-aabbccddeeff phase=Pending message=""
+time=2026-11-06T01:24:46.921+01:00 level=INFO msg=getExecutorLogOpts test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info
+time=2026-11-06T01:24:46.921+01:00 level=INFO msg=getExecutorLogOpts nodeName=oberth-oberth-run-abc1-aabbccddeeff loglevel=info nodeID=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:46.921+01:00 level=WARN msg="couldn't get boundaryTemplate" namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:46.925+01:00 level=INFO msg=getExecutorLogOpts workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info test=true
+time=2026-11-06T01:24:46.925+01:00 level=INFO msg="Created pod" podName=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:46.925+01:00 level=INFO msg="TaskSet Reconciliation" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true
+time=2026-11-06T01:24:46.925+01:00 level=INFO msg=reconcileAgentPod test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:46.925+01:00 level=INFO msg="add pod event" pod=oberth-oberth-run-abc1-aabbccddeeff test=true component=pod_controller
+time=2026-11-06T01:24:46.926+01:00 level=INFO msg="Workflow update successful" resourceVersion="" phase=Running workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true
+=== RUN   TestOberthNonrootControllerCapture/script
+time=2026-11-06T01:24:47.932+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:24:47.933+01:00 level=INFO msg="Watching task results" test=true labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow
+time=2026-11-06T01:24:47.933+01:00 level=INFO msg=Plugins test=true component=config_map_informer executorPlugins=false
+time=2026-11-06T01:24:47.933+01:00 level=INFO msg="Sync manager ttl" syncLimitCacheTTL=0s test=true component=lock_manager
+time=2026-11-06T01:24:47.933+01:00 level=INFO msg="Sync manager initialized" test=true component=lock_manager dbConfigured=false
+time=2026-11-06T01:24:47.933+01:00 level=INFO msg="Sync manager initialized successfully" test=true component=lock_manager
+time=2026-11-06T01:24:48.036+01:00 level=INFO msg="Processing workflow" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo resourceVersion="" phase=""
+time=2026-11-06T01:24:48.037+01:00 level=INFO msg="Task-result reconciliation" namespace=oberth-argo numObjs=0 test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:48.037+01:00 level=INFO msg="updated phase" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo fromPhase="" toPhase=Running
+time=2026-11-06T01:24:48.037+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:48.038+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true boundaryID=""
+time=2026-11-06T01:24:48.038+01:00 level=INFO msg="node initialized" namespace=oberth-argo test=true node=oberth-oberth-run-abc1-aabbccddeeff phase=Pending message="" workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:48.038+01:00 level=INFO msg=getExecutorLogOpts test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info
+time=2026-11-06T01:24:48.038+01:00 level=INFO msg=getExecutorLogOpts test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info
+time=2026-11-06T01:24:48.038+01:00 level=WARN msg="couldn't get boundaryTemplate" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:48.041+01:00 level=INFO msg=getExecutorLogOpts test=true loglevel=info workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:48.041+01:00 level=INFO msg="Created pod" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff test=true podName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:48.041+01:00 level=INFO msg="TaskSet Reconciliation" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:48.041+01:00 level=INFO msg=reconcileAgentPod test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:48.041+01:00 level=INFO msg="add pod event" test=true component=pod_controller pod=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:48.042+01:00 level=INFO msg="Workflow update successful" test=true resourceVersion="" phase=Running workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+--- PASS: TestOberthNonrootControllerCapture (2.24s)
+    --- PASS: TestOberthNonrootControllerCapture/container (1.12s)
+    --- PASS: TestOberthNonrootControllerCapture/script (1.12s)
+=== RUN   TestOberthVMIQuotaControllerCapture
+time=2026-11-06T01:24:49.050+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:24:49.051+01:00 level=INFO msg="Watching task results" test=true labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow
+time=2026-11-06T01:24:49.051+01:00 level=INFO msg=Plugins test=true component=config_map_informer executorPlugins=false
+time=2026-11-06T01:24:49.051+01:00 level=INFO msg="Sync manager ttl" test=true component=lock_manager syncLimitCacheTTL=0s
+time=2026-11-06T01:24:49.051+01:00 level=INFO msg="Sync manager initialized" test=true component=lock_manager dbConfigured=false
+time=2026-11-06T01:24:49.051+01:00 level=INFO msg="Sync manager initialized successfully" test=true component=lock_manager
+time=2026-11-06T01:24:49.157+01:00 level=INFO msg="Processing workflow" test=true workflow=quota-1 namespace=oberth-argo phase="" resourceVersion=""
+time=2026-11-06T01:24:49.158+01:00 level=INFO msg="Task-result reconciliation" test=true workflow=quota-1 namespace=oberth-argo numObjs=0
+time=2026-11-06T01:24:49.159+01:00 level=INFO msg="updated phase" fromPhase="" toPhase=Running test=true workflow=quota-1 namespace=oberth-argo
+time=2026-11-06T01:24:49.159+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" namespace=oberth-argo test=true workflow=quota-1
+time=2026-11-06T01:24:49.159+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" boundaryID="" test=true workflow=quota-1 namespace=oberth-argo
+time=2026-11-06T01:24:49.159+01:00 level=INFO msg="node initialized" node=quota-1 phase=Pending message="" workflow=quota-1 namespace=oberth-argo test=true
+time=2026-11-06T01:24:49.160+01:00 level=INFO msg=getExecutorLogOpts test=true loglevel=info
+time=2026-11-06T01:24:49.160+01:00 level=INFO msg=getExecutorLogOpts nodeName=quota-1 nodeID=quota-1 loglevel=info test=true workflow=quota-1 namespace=oberth-argo
+time=2026-11-06T01:24:49.160+01:00 level=WARN msg="couldn't get boundaryTemplate" workflow=quota-1 namespace=oberth-argo nodeName=quota-1 test=true
+time=2026-11-06T01:24:49.163+01:00 level=INFO msg=getExecutorLogOpts nodeName=quota-1 nodeID=quota-1 test=true workflow=quota-1 namespace=oberth-argo loglevel=info
+time=2026-11-06T01:24:49.163+01:00 level=INFO msg="Created pod" podName=quota-1 test=true workflow=quota-1 namespace=oberth-argo nodeName=quota-1 nodeID=quota-1
+time=2026-11-06T01:24:49.163+01:00 level=INFO msg="TaskSet Reconciliation" namespace=oberth-argo test=true workflow=quota-1
+time=2026-11-06T01:24:49.163+01:00 level=INFO msg=reconcileAgentPod namespace=oberth-argo test=true workflow=quota-1
+time=2026-11-06T01:24:49.163+01:00 level=INFO msg="add pod event" test=true component=pod_controller pod=quota-1
+time=2026-11-06T01:24:49.164+01:00 level=INFO msg="Workflow update successful" test=true workflow=quota-1 namespace=oberth-argo resourceVersion="" phase=Running
+--- PASS: TestOberthVMIQuotaControllerCapture (1.12s)
+=== RUN   TestOberthWIFControllerCapture
+=== RUN   TestOberthWIFControllerCapture/image-writer-sa-false
+time=2026-11-06T01:24:50.169+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:24:50.169+01:00 level=INFO msg="Watching task results" test=true labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow
+time=2026-11-06T01:24:50.169+01:00 level=INFO msg=Plugins test=true component=config_map_informer executorPlugins=false
+time=2026-11-06T01:24:50.169+01:00 level=INFO msg="Sync manager ttl" test=true component=lock_manager syncLimitCacheTTL=0s
+time=2026-11-06T01:24:50.169+01:00 level=INFO msg="Sync manager initialized" dbConfigured=false test=true component=lock_manager
+time=2026-11-06T01:24:50.169+01:00 level=INFO msg="Sync manager initialized successfully" test=true component=lock_manager
+time=2026-11-06T01:24:50.275+01:00 level=INFO msg="Processing workflow" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo phase="" resourceVersion=""
+time=2026-11-06T01:24:50.276+01:00 level=INFO msg="Task-result reconciliation" namespace=oberth-argo numObjs=0 test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:50.276+01:00 level=INFO msg="updated phase" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true fromPhase="" toPhase=Running
+time=2026-11-06T01:24:50.277+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:50.277+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" boundaryID="" namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:50.277+01:00 level=INFO msg="node initialized" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo phase=Pending message="" node=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:50.277+01:00 level=INFO msg=getExecutorLogOpts nodeName=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info
+time=2026-11-06T01:24:50.277+01:00 level=INFO msg=getExecutorLogOpts test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeID=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff loglevel=info
+time=2026-11-06T01:24:50.277+01:00 level=WARN msg="couldn't get boundaryTemplate" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:50.279+01:00 level=INFO msg=getExecutorLogOpts workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info nodeName=oberth-oberth-run-abc1-aabbccddeeff test=true
+time=2026-11-06T01:24:50.279+01:00 level=INFO msg="Created pod" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeID=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff podName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:50.279+01:00 level=INFO msg="TaskSet Reconciliation" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:50.279+01:00 level=INFO msg=reconcileAgentPod test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:50.279+01:00 level=INFO msg="add pod event" test=true component=pod_controller pod=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:50.279+01:00 level=INFO msg="Workflow update successful" phase=Running namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff resourceVersion=""
+=== RUN   TestOberthWIFControllerCapture/image-writer-sa-true
+time=2026-11-06T01:24:51.282+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:24:51.283+01:00 level=INFO msg="Watching task results" test=true labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow
+time=2026-11-06T01:24:51.283+01:00 level=INFO msg=Plugins test=true component=config_map_informer executorPlugins=false
+time=2026-11-06T01:24:51.283+01:00 level=INFO msg="Sync manager ttl" component=lock_manager test=true syncLimitCacheTTL=0s
+time=2026-11-06T01:24:51.283+01:00 level=INFO msg="Sync manager initialized" test=true component=lock_manager dbConfigured=false
+time=2026-11-06T01:24:51.283+01:00 level=INFO msg="Sync manager initialized successfully" test=true component=lock_manager
+time=2026-11-06T01:24:51.389+01:00 level=INFO msg="Processing workflow" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true phase="" resourceVersion=""
+time=2026-11-06T01:24:51.389+01:00 level=INFO msg="Task-result reconciliation" numObjs=0 test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:51.389+01:00 level=INFO msg="updated phase" namespace=oberth-argo fromPhase="" toPhase=Running test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:51.389+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:51.390+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo boundaryID=""
+time=2026-11-06T01:24:51.390+01:00 level=INFO msg="node initialized" message="" node=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo phase=Pending
+time=2026-11-06T01:24:51.390+01:00 level=INFO msg=getExecutorLogOpts namespace=oberth-argo test=true nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:51.390+01:00 level=INFO msg=getExecutorLogOpts nodeID=oberth-oberth-run-abc1-aabbccddeeff workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true loglevel=info nodeName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:51.390+01:00 level=WARN msg="couldn't get boundaryTemplate" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:51.391+01:00 level=INFO msg=getExecutorLogOpts loglevel=info workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:51.391+01:00 level=INFO msg="Created pod" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true nodeName=oberth-oberth-run-abc1-aabbccddeeff podName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:51.391+01:00 level=INFO msg="TaskSet Reconciliation" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:51.391+01:00 level=INFO msg=reconcileAgentPod test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:51.391+01:00 level=INFO msg="add pod event" component=pod_controller pod=oberth-oberth-run-abc1-aabbccddeeff test=true
+time=2026-11-06T01:24:51.391+01:00 level=INFO msg="Workflow update successful" namespace=oberth-argo resourceVersion="" phase=Running test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+=== RUN   TestOberthWIFControllerCapture/image-reader-sa-false
+time=2026-11-06T01:24:52.394+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:24:52.394+01:00 level=INFO msg="Watching task results" test=true labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow
+time=2026-11-06T01:24:52.394+01:00 level=INFO msg=Plugins test=true component=config_map_informer executorPlugins=false
+time=2026-11-06T01:24:52.394+01:00 level=INFO msg="Sync manager ttl" syncLimitCacheTTL=0s test=true component=lock_manager
+time=2026-11-06T01:24:52.394+01:00 level=INFO msg="Sync manager initialized" test=true component=lock_manager dbConfigured=false
+time=2026-11-06T01:24:52.394+01:00 level=INFO msg="Sync manager initialized successfully" component=lock_manager test=true
+time=2026-11-06T01:24:52.497+01:00 level=INFO msg="Processing workflow" namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff phase="" resourceVersion=""
+time=2026-11-06T01:24:52.498+01:00 level=INFO msg="Task-result reconciliation" namespace=oberth-argo numObjs=0 test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:52.498+01:00 level=INFO msg="updated phase" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo fromPhase="" toPhase=Running
+time=2026-11-06T01:24:52.498+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:52.498+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo boundaryID=""
+time=2026-11-06T01:24:52.498+01:00 level=INFO msg="node initialized" phase=Pending message="" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo node=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:52.498+01:00 level=INFO msg=getExecutorLogOpts namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:52.498+01:00 level=INFO msg=getExecutorLogOpts test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info
+time=2026-11-06T01:24:52.498+01:00 level=WARN msg="couldn't get boundaryTemplate" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:52.499+01:00 level=INFO msg=getExecutorLogOpts nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo loglevel=info
+time=2026-11-06T01:24:52.500+01:00 level=INFO msg="Created pod" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff podName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:52.500+01:00 level=INFO msg="TaskSet Reconciliation" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:52.500+01:00 level=INFO msg=reconcileAgentPod test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:52.500+01:00 level=INFO msg="add pod event" test=true component=pod_controller pod=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:52.500+01:00 level=INFO msg="Workflow update successful" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo resourceVersion="" phase=Running
+=== RUN   TestOberthWIFControllerCapture/image-reader-sa-true
+time=2026-11-06T01:24:53.502+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:24:53.503+01:00 level=INFO msg="Watching task results" test=true labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow
+time=2026-11-06T01:24:53.503+01:00 level=INFO msg=Plugins component=config_map_informer executorPlugins=false test=true
+time=2026-11-06T01:24:53.503+01:00 level=INFO msg="Sync manager ttl" component=lock_manager syncLimitCacheTTL=0s test=true
+time=2026-11-06T01:24:53.503+01:00 level=INFO msg="Sync manager initialized" component=lock_manager dbConfigured=false test=true
+time=2026-11-06T01:24:53.503+01:00 level=INFO msg="Sync manager initialized successfully" test=true component=lock_manager
+time=2026-11-06T01:24:53.610+01:00 level=INFO msg="Processing workflow" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo resourceVersion="" phase=""
+time=2026-11-06T01:24:53.610+01:00 level=INFO msg="Task-result reconciliation" namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff numObjs=0
+time=2026-11-06T01:24:53.610+01:00 level=INFO msg="updated phase" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo fromPhase="" toPhase=Running
+time=2026-11-06T01:24:53.610+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:53.611+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo boundaryID=""
+time=2026-11-06T01:24:53.611+01:00 level=INFO msg="node initialized" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo node=oberth-oberth-run-abc1-aabbccddeeff phase=Pending message="" test=true
+time=2026-11-06T01:24:53.611+01:00 level=INFO msg=getExecutorLogOpts nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:53.611+01:00 level=INFO msg=getExecutorLogOpts nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:53.611+01:00 level=WARN msg="couldn't get boundaryTemplate" namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:53.611+01:00 level=INFO msg=getExecutorLogOpts nodeID=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff loglevel=info
+time=2026-11-06T01:24:53.611+01:00 level=INFO msg="Created pod" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff podName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:53.611+01:00 level=INFO msg="TaskSet Reconciliation" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:53.611+01:00 level=INFO msg=reconcileAgentPod test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:53.611+01:00 level=INFO msg="add pod event" test=true component=pod_controller pod=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:53.611+01:00 level=INFO msg="Workflow update successful" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo resourceVersion="" phase=Running test=true
+=== RUN   TestOberthWIFControllerCapture/chart-writer-sa-false
+time=2026-11-06T01:24:54.614+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:24:54.615+01:00 level=INFO msg="Watching task results" test=true labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow
+time=2026-11-06T01:24:54.615+01:00 level=INFO msg=Plugins test=true component=config_map_informer executorPlugins=false
+time=2026-11-06T01:24:54.615+01:00 level=INFO msg="Sync manager ttl" component=lock_manager syncLimitCacheTTL=0s test=true
+time=2026-11-06T01:24:54.615+01:00 level=INFO msg="Sync manager initialized" test=true component=lock_manager dbConfigured=false
+time=2026-11-06T01:24:54.615+01:00 level=INFO msg="Sync manager initialized successfully" test=true component=lock_manager
+time=2026-11-06T01:24:54.717+01:00 level=INFO msg="Processing workflow" phase="" resourceVersion="" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:54.718+01:00 level=INFO msg="Task-result reconciliation" namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff numObjs=0
+time=2026-11-06T01:24:54.718+01:00 level=INFO msg="updated phase" namespace=oberth-argo fromPhase="" toPhase=Running test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:54.718+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true
+time=2026-11-06T01:24:54.718+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo boundaryID=""
+time=2026-11-06T01:24:54.718+01:00 level=INFO msg="node initialized" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo node=oberth-oberth-run-abc1-aabbccddeeff phase=Pending message="" test=true
+time=2026-11-06T01:24:54.718+01:00 level=INFO msg=getExecutorLogOpts nodeName=oberth-oberth-run-abc1-aabbccddeeff workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo loglevel=info test=true nodeID=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:54.718+01:00 level=INFO msg=getExecutorLogOpts workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true nodeID=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff loglevel=info
+time=2026-11-06T01:24:54.718+01:00 level=WARN msg="couldn't get boundaryTemplate" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true nodeName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:54.720+01:00 level=INFO msg=getExecutorLogOpts workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true nodeID=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff loglevel=info
+time=2026-11-06T01:24:54.720+01:00 level=INFO msg="Created pod" nodeName=oberth-oberth-run-abc1-aabbccddeeff podName=oberth-oberth-run-abc1-aabbccddeeff workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true nodeID=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:54.720+01:00 level=INFO msg="TaskSet Reconciliation" namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:54.720+01:00 level=INFO msg=reconcileAgentPod test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:54.720+01:00 level=INFO msg="add pod event" component=pod_controller pod=oberth-oberth-run-abc1-aabbccddeeff test=true
+time=2026-11-06T01:24:54.721+01:00 level=INFO msg="Workflow update successful" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo resourceVersion="" phase=Running
+=== RUN   TestOberthWIFControllerCapture/chart-writer-sa-true
+time=2026-11-06T01:24:55.724+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:24:55.724+01:00 level=INFO msg="Watching task results" test=true labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow
+time=2026-11-06T01:24:55.724+01:00 level=INFO msg=Plugins test=true component=config_map_informer executorPlugins=false
+time=2026-11-06T01:24:55.724+01:00 level=INFO msg="Sync manager ttl" test=true component=lock_manager syncLimitCacheTTL=0s
+time=2026-11-06T01:24:55.724+01:00 level=INFO msg="Sync manager initialized" test=true component=lock_manager dbConfigured=false
+time=2026-11-06T01:24:55.724+01:00 level=INFO msg="Sync manager initialized successfully" test=true component=lock_manager
+time=2026-11-06T01:24:55.831+01:00 level=INFO msg="Processing workflow" resourceVersion="" namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff phase=""
+time=2026-11-06T01:24:55.832+01:00 level=INFO msg="Task-result reconciliation" namespace=oberth-argo numObjs=0 test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:55.832+01:00 level=INFO msg="updated phase" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo toPhase=Running fromPhase=""
+time=2026-11-06T01:24:55.832+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:55.832+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff boundaryID=""
+time=2026-11-06T01:24:55.832+01:00 level=INFO msg="node initialized" node=oberth-oberth-run-abc1-aabbccddeeff phase=Pending message="" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:55.832+01:00 level=INFO msg=getExecutorLogOpts loglevel=info nodeID=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:55.832+01:00 level=INFO msg=getExecutorLogOpts loglevel=info workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff test=true
+time=2026-11-06T01:24:55.832+01:00 level=WARN msg="couldn't get boundaryTemplate" workflow=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true
+time=2026-11-06T01:24:55.834+01:00 level=INFO msg=getExecutorLogOpts nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo loglevel=info
+time=2026-11-06T01:24:55.834+01:00 level=INFO msg="Created pod" podName=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:55.834+01:00 level=INFO msg="TaskSet Reconciliation" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:55.834+01:00 level=INFO msg=reconcileAgentPod test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:55.835+01:00 level=INFO msg="add pod event" component=pod_controller pod=oberth-oberth-run-abc1-aabbccddeeff test=true
+time=2026-11-06T01:24:55.836+01:00 level=INFO msg="Workflow update successful" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo resourceVersion="" phase=Running
+=== RUN   TestOberthWIFControllerCapture/script-sa-false
+time=2026-11-06T01:24:56.839+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:24:56.840+01:00 level=INFO msg="Watching task results" test=true labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow
+time=2026-11-06T01:24:56.840+01:00 level=INFO msg=Plugins test=true component=config_map_informer executorPlugins=false
+time=2026-11-06T01:24:56.840+01:00 level=INFO msg="Sync manager ttl" test=true component=lock_manager syncLimitCacheTTL=0s
+time=2026-11-06T01:24:56.840+01:00 level=INFO msg="Sync manager initialized" test=true component=lock_manager dbConfigured=false
+time=2026-11-06T01:24:56.840+01:00 level=INFO msg="Sync manager initialized successfully" test=true component=lock_manager
+time=2026-11-06T01:24:56.947+01:00 level=INFO msg="Processing workflow" namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff resourceVersion="" phase=""
+time=2026-11-06T01:24:56.948+01:00 level=INFO msg="Task-result reconciliation" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo numObjs=0
+time=2026-11-06T01:24:56.948+01:00 level=INFO msg="updated phase" fromPhase="" toPhase=Running test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:56.948+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:56.949+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo boundaryID=""
+time=2026-11-06T01:24:56.949+01:00 level=INFO msg="node initialized" phase=Pending message="" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true node=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:56.949+01:00 level=INFO msg=getExecutorLogOpts nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:56.949+01:00 level=INFO msg=getExecutorLogOpts nodeID=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff loglevel=info
+time=2026-11-06T01:24:56.949+01:00 level=WARN msg="couldn't get boundaryTemplate" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:56.951+01:00 level=INFO msg=getExecutorLogOpts test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info
+time=2026-11-06T01:24:56.952+01:00 level=INFO msg="Created pod" nodeID=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff podName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:56.952+01:00 level=INFO msg="TaskSet Reconciliation" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:56.952+01:00 level=INFO msg=reconcileAgentPod test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:56.952+01:00 level=INFO msg="add pod event" pod=oberth-oberth-run-abc1-aabbccddeeff component=pod_controller test=true
+time=2026-11-06T01:24:56.952+01:00 level=INFO msg="Workflow update successful" resourceVersion="" phase=Running test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+=== RUN   TestOberthWIFControllerCapture/script-sa-true
+time=2026-11-06T01:24:57.955+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:24:57.956+01:00 level=INFO msg="Watching task results" test=true labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow
+time=2026-11-06T01:24:57.956+01:00 level=INFO msg=Plugins test=true component=config_map_informer executorPlugins=false
+time=2026-11-06T01:24:57.956+01:00 level=INFO msg="Sync manager ttl" test=true component=lock_manager syncLimitCacheTTL=0s
+time=2026-11-06T01:24:57.956+01:00 level=INFO msg="Sync manager initialized" test=true component=lock_manager dbConfigured=false
+time=2026-11-06T01:24:57.956+01:00 level=INFO msg="Sync manager initialized successfully" test=true component=lock_manager
+time=2026-11-06T01:24:58.060+01:00 level=INFO msg="Processing workflow" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo phase="" resourceVersion=""
+time=2026-11-06T01:24:58.062+01:00 level=INFO msg="Task-result reconciliation" numObjs=0 test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:58.062+01:00 level=INFO msg="updated phase" fromPhase="" toPhase=Running test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:58.062+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:58.062+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo boundaryID=""
+time=2026-11-06T01:24:58.062+01:00 level=INFO msg="node initialized" phase=Pending message="" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo node=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:58.062+01:00 level=INFO msg=getExecutorLogOpts nodeID=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff loglevel=info test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:58.062+01:00 level=INFO msg=getExecutorLogOpts workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeID=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff loglevel=info test=true
+time=2026-11-06T01:24:58.062+01:00 level=WARN msg="couldn't get boundaryTemplate" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:58.065+01:00 level=INFO msg=getExecutorLogOpts workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeID=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff test=true loglevel=info
+time=2026-11-06T01:24:58.065+01:00 level=INFO msg="Created pod" podName=oberth-oberth-run-abc1-aabbccddeeff workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeID=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff test=true
+time=2026-11-06T01:24:58.065+01:00 level=INFO msg="TaskSet Reconciliation" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:58.065+01:00 level=INFO msg=reconcileAgentPod test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:58.065+01:00 level=INFO msg="add pod event" component=pod_controller test=true pod=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:58.066+01:00 level=INFO msg="Workflow update successful" namespace=oberth-argo test=true resourceVersion="" phase=Running workflow=oberth-oberth-run-abc1-aabbccddeeff
+=== RUN   TestOberthWIFControllerCapture/helpers-sa-false
+time=2026-11-06T01:24:59.070+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:24:59.070+01:00 level=INFO msg="Watching task results" labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow test=true
+time=2026-11-06T01:24:59.070+01:00 level=INFO msg=Plugins component=config_map_informer executorPlugins=false test=true
+time=2026-11-06T01:24:59.070+01:00 level=INFO msg="Sync manager ttl" test=true component=lock_manager syncLimitCacheTTL=0s
+time=2026-11-06T01:24:59.070+01:00 level=INFO msg="Sync manager initialized" test=true component=lock_manager dbConfigured=false
+time=2026-11-06T01:24:59.070+01:00 level=INFO msg="Sync manager initialized successfully" test=true component=lock_manager
+time=2026-11-06T01:24:59.172+01:00 level=INFO msg="Processing workflow" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo phase="" resourceVersion=""
+time=2026-11-06T01:24:59.173+01:00 level=INFO msg="Task-result reconciliation" numObjs=0 test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:59.173+01:00 level=INFO msg="updated phase" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo fromPhase="" toPhase=Running
+time=2026-11-06T01:24:59.174+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:59.174+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true boundaryID=""
+time=2026-11-06T01:24:59.174+01:00 level=INFO msg="node initialized" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo node=oberth-oberth-run-abc1-aabbccddeeff phase=Pending message="" test=true
+time=2026-11-06T01:24:59.174+01:00 level=INFO msg=getExecutorLogOpts test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info
+time=2026-11-06T01:24:59.174+01:00 level=INFO msg=getExecutorLogOpts workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info test=true
+time=2026-11-06T01:24:59.174+01:00 level=WARN msg="couldn't get boundaryTemplate" nodeName=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:59.181+01:00 level=INFO msg=getExecutorLogOpts workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info test=true
+time=2026-11-06T01:24:59.181+01:00 level=INFO msg=getExecutorLogOpts nodeID=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo loglevel=info nodeName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:59.182+01:00 level=INFO msg="Created pod" nodeID=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo podName=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:59.182+01:00 level=INFO msg="TaskSet Reconciliation" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true
+time=2026-11-06T01:24:59.182+01:00 level=INFO msg=reconcileAgentPod test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:24:59.183+01:00 level=INFO msg="add pod event" test=true component=pod_controller pod=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:24:59.183+01:00 level=INFO msg="Workflow update successful" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo resourceVersion="" phase=Running
+=== RUN   TestOberthWIFControllerCapture/helpers-sa-true
+time=2026-11-06T01:25:00.186+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:25:00.187+01:00 level=INFO msg="Watching task results" test=true labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow
+time=2026-11-06T01:25:00.187+01:00 level=INFO msg=Plugins test=true component=config_map_informer executorPlugins=false
+time=2026-11-06T01:25:00.187+01:00 level=INFO msg="Sync manager ttl" syncLimitCacheTTL=0s test=true component=lock_manager
+time=2026-11-06T01:25:00.187+01:00 level=INFO msg="Sync manager initialized" test=true component=lock_manager dbConfigured=false
+time=2026-11-06T01:25:00.187+01:00 level=INFO msg="Sync manager initialized successfully" test=true component=lock_manager
+time=2026-11-06T01:25:00.288+01:00 level=INFO msg="Processing workflow" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo phase="" resourceVersion=""
+time=2026-11-06T01:25:00.290+01:00 level=INFO msg="Task-result reconciliation" numObjs=0 test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:25:00.290+01:00 level=INFO msg="updated phase" fromPhase="" toPhase=Running test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:25:00.290+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:25:00.291+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo boundaryID=""
+time=2026-11-06T01:25:00.291+01:00 level=INFO msg="node initialized" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo node=oberth-oberth-run-abc1-aabbccddeeff phase=Pending message=""
+time=2026-11-06T01:25:00.291+01:00 level=INFO msg=getExecutorLogOpts test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeID=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff loglevel=info
+time=2026-11-06T01:25:00.291+01:00 level=INFO msg=getExecutorLogOpts loglevel=info test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeID=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:00.291+01:00 level=WARN msg="couldn't get boundaryTemplate" test=true nodeName=oberth-oberth-run-abc1-aabbccddeeff workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:25:00.295+01:00 level=INFO msg=getExecutorLogOpts test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info nodeName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:00.295+01:00 level=INFO msg=getExecutorLogOpts test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info nodeName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:00.295+01:00 level=INFO msg="Created pod" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeID=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff podName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:00.295+01:00 level=INFO msg="TaskSet Reconciliation" namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:00.295+01:00 level=INFO msg=reconcileAgentPod workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true
+time=2026-11-06T01:25:00.295+01:00 level=INFO msg="add pod event" test=true component=pod_controller pod=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:00.296+01:00 level=INFO msg="Workflow update successful" resourceVersion="" phase=Running test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+=== RUN   TestOberthWIFControllerCapture/vault-sa-false
+time=2026-11-06T01:25:01.300+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:25:01.300+01:00 level=INFO msg="Watching task results" test=true labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow
+time=2026-11-06T01:25:01.300+01:00 level=INFO msg=Plugins component=config_map_informer executorPlugins=false test=true
+time=2026-11-06T01:25:01.300+01:00 level=INFO msg="Sync manager ttl" test=true component=lock_manager syncLimitCacheTTL=0s
+time=2026-11-06T01:25:01.300+01:00 level=INFO msg="Sync manager initialized" test=true component=lock_manager dbConfigured=false
+time=2026-11-06T01:25:01.301+01:00 level=INFO msg="Sync manager initialized successfully" test=true component=lock_manager
+time=2026-11-06T01:25:01.306+01:00 level=INFO msg="Processing workflow" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff phase="" resourceVersion=""
+time=2026-11-06T01:25:01.307+01:00 level=INFO msg="Task-result reconciliation" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff numObjs=0
+time=2026-11-06T01:25:01.307+01:00 level=INFO msg="updated phase" workflow=oberth-oberth-run-abc1-aabbccddeeff test=true fromPhase="" toPhase=Running namespace=oberth-argo
+time=2026-11-06T01:25:01.307+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:01.308+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" workflow=oberth-oberth-run-abc1-aabbccddeeff test=true namespace=oberth-argo boundaryID=""
+time=2026-11-06T01:25:01.308+01:00 level=INFO msg="node initialized" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff message="" node=oberth-oberth-run-abc1-aabbccddeeff phase=Pending
+time=2026-11-06T01:25:01.308+01:00 level=INFO msg=getExecutorLogOpts test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info
+time=2026-11-06T01:25:01.308+01:00 level=INFO msg=getExecutorLogOpts namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info test=true
+time=2026-11-06T01:25:01.308+01:00 level=WARN msg="couldn't get boundaryTemplate" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:01.310+01:00 level=INFO msg=getExecutorLogOpts namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff loglevel=info nodeID=oberth-oberth-run-abc1-aabbccddeeff test=true
+time=2026-11-06T01:25:01.310+01:00 level=INFO msg="Created pod" nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff podName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:01.310+01:00 level=INFO msg="TaskSet Reconciliation" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:01.310+01:00 level=INFO msg=reconcileAgentPod namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff test=true
+time=2026-11-06T01:25:01.310+01:00 level=INFO msg="add pod event" test=true component=pod_controller pod=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:01.311+01:00 level=INFO msg="Workflow update successful" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff resourceVersion="" phase=Running
+=== RUN   TestOberthWIFControllerCapture/vault-sa-true
+time=2026-11-06T01:25:02.315+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:25:02.316+01:00 level=INFO msg="Watching task results" test=true labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow
+time=2026-11-06T01:25:02.316+01:00 level=INFO msg=Plugins test=true component=config_map_informer executorPlugins=false
+time=2026-11-06T01:25:02.316+01:00 level=INFO msg="Sync manager ttl" test=true component=lock_manager syncLimitCacheTTL=0s
+time=2026-11-06T01:25:02.316+01:00 level=INFO msg="Sync manager initialized" component=lock_manager dbConfigured=false test=true
+time=2026-11-06T01:25:02.316+01:00 level=INFO msg="Sync manager initialized successfully" test=true component=lock_manager
+time=2026-11-06T01:25:02.423+01:00 level=INFO msg="Processing workflow" namespace=oberth-argo phase="" resourceVersion="" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:02.424+01:00 level=INFO msg="Task-result reconciliation" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo numObjs=0 test=true
+time=2026-11-06T01:25:02.424+01:00 level=INFO msg="updated phase" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo fromPhase="" toPhase=Running test=true
+time=2026-11-06T01:25:02.424+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:25:02.424+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff boundaryID=""
+time=2026-11-06T01:25:02.424+01:00 level=INFO msg="node initialized" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo node=oberth-oberth-run-abc1-aabbccddeeff phase=Pending message=""
+time=2026-11-06T01:25:02.424+01:00 level=INFO msg=getExecutorLogOpts loglevel=info nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:25:02.424+01:00 level=INFO msg=getExecutorLogOpts loglevel=info test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:02.424+01:00 level=WARN msg="couldn't get boundaryTemplate" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:02.428+01:00 level=INFO msg=getExecutorLogOpts namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff loglevel=info nodeID=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:02.428+01:00 level=INFO msg="Created pod" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff podName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:02.428+01:00 level=INFO msg="TaskSet Reconciliation" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:25:02.428+01:00 level=INFO msg=reconcileAgentPod workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true
+time=2026-11-06T01:25:02.429+01:00 level=INFO msg="add pod event" component=pod_controller pod=oberth-oberth-run-abc1-aabbccddeeff test=true
+time=2026-11-06T01:25:02.430+01:00 level=INFO msg="Workflow update successful" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo resourceVersion="" phase=Running test=true
+=== RUN   TestOberthWIFControllerCapture/sibling-sa-false
+time=2026-11-06T01:25:03.433+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:25:03.433+01:00 level=INFO msg="Watching task results" test=true labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow
+time=2026-11-06T01:25:03.433+01:00 level=INFO msg=Plugins executorPlugins=false test=true component=config_map_informer
+time=2026-11-06T01:25:03.433+01:00 level=INFO msg="Sync manager ttl" component=lock_manager test=true syncLimitCacheTTL=0s
+time=2026-11-06T01:25:03.433+01:00 level=INFO msg="Sync manager initialized" dbConfigured=false test=true component=lock_manager
+time=2026-11-06T01:25:03.433+01:00 level=INFO msg="Sync manager initialized successfully" test=true component=lock_manager
+time=2026-11-06T01:25:03.541+01:00 level=INFO msg="Processing workflow" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo phase="" resourceVersion=""
+time=2026-11-06T01:25:03.542+01:00 level=INFO msg="Task-result reconciliation" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo numObjs=0
+time=2026-11-06T01:25:03.542+01:00 level=INFO msg="updated phase" namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff fromPhase="" toPhase=Running
+time=2026-11-06T01:25:03.543+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:25:03.543+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo boundaryID=""
+time=2026-11-06T01:25:03.543+01:00 level=INFO msg="node initialized" node=oberth-oberth-run-abc1-aabbccddeeff phase=Pending message="" namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:03.543+01:00 level=INFO msg=getExecutorLogOpts workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info test=true
+time=2026-11-06T01:25:03.543+01:00 level=INFO msg=getExecutorLogOpts loglevel=info namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:03.543+01:00 level=WARN msg="couldn't get boundaryTemplate" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff test=true
+time=2026-11-06T01:25:03.545+01:00 level=INFO msg=getExecutorLogOpts namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff loglevel=info
+time=2026-11-06T01:25:03.546+01:00 level=INFO msg="Created pod" nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff podName=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:25:03.546+01:00 level=INFO msg="TaskSet Reconciliation" namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:03.546+01:00 level=INFO msg=reconcileAgentPod test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:25:03.546+01:00 level=INFO msg="add pod event" test=true component=pod_controller pod=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:03.546+01:00 level=INFO msg="Workflow update successful" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo resourceVersion="" phase=Running test=true
+=== RUN   TestOberthWIFControllerCapture/sibling-sa-true
+time=2026-11-06T01:25:04.549+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:25:04.549+01:00 level=INFO msg="Watching task results" test=true labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow
+time=2026-11-06T01:25:04.549+01:00 level=INFO msg=Plugins test=true component=config_map_informer executorPlugins=false
+time=2026-11-06T01:25:04.549+01:00 level=INFO msg="Sync manager ttl" test=true component=lock_manager syncLimitCacheTTL=0s
+time=2026-11-06T01:25:04.549+01:00 level=INFO msg="Sync manager initialized" test=true component=lock_manager dbConfigured=false
+time=2026-11-06T01:25:04.549+01:00 level=INFO msg="Sync manager initialized successfully" test=true component=lock_manager
+time=2026-11-06T01:25:04.656+01:00 level=INFO msg="Processing workflow" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true phase="" resourceVersion=""
+time=2026-11-06T01:25:04.657+01:00 level=INFO msg="Task-result reconciliation" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff numObjs=0 namespace=oberth-argo
+time=2026-11-06T01:25:04.657+01:00 level=INFO msg="updated phase" toPhase=Running test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo fromPhase=""
+time=2026-11-06T01:25:04.657+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" namespace=oberth-argo test=true workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:04.657+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" test=true boundaryID="" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:25:04.657+01:00 level=INFO msg="node initialized" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo node=oberth-oberth-run-abc1-aabbccddeeff phase=Pending message=""
+time=2026-11-06T01:25:04.657+01:00 level=INFO msg=getExecutorLogOpts test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo loglevel=info nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:04.657+01:00 level=INFO msg=getExecutorLogOpts namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff test=true workflow=oberth-oberth-run-abc1-aabbccddeeff loglevel=info
+time=2026-11-06T01:25:04.657+01:00 level=WARN msg="couldn't get boundaryTemplate" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:04.660+01:00 level=INFO msg=getExecutorLogOpts loglevel=info test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:04.660+01:00 level=INFO msg="Created pod" nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff test=true podName=oberth-oberth-run-abc1-aabbccddeeff workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:25:04.660+01:00 level=INFO msg="TaskSet Reconciliation" test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:25:04.660+01:00 level=INFO msg=reconcileAgentPod test=true workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo
+time=2026-11-06T01:25:04.660+01:00 level=INFO msg="add pod event" pod=oberth-oberth-run-abc1-aabbccddeeff test=true component=pod_controller
+time=2026-11-06T01:25:04.660+01:00 level=INFO msg="Workflow update successful" resourceVersion="" workflow=oberth-oberth-run-abc1-aabbccddeeff namespace=oberth-argo test=true phase=Running
+=== RUN   TestOberthWIFControllerCapture/wif-only-step-sa-false
+time=2026-11-06T01:25:05.664+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:25:05.665+01:00 level=INFO msg="Watching task results" test=true labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow
+time=2026-11-06T01:25:05.665+01:00 level=INFO msg=Plugins component=config_map_informer test=true executorPlugins=false
+time=2026-11-06T01:25:05.665+01:00 level=INFO msg="Sync manager ttl" test=true component=lock_manager syncLimitCacheTTL=0s
+time=2026-11-06T01:25:05.665+01:00 level=INFO msg="Sync manager initialized" dbConfigured=false test=true component=lock_manager
+time=2026-11-06T01:25:05.665+01:00 level=INFO msg="Sync manager initialized successfully" test=true component=lock_manager
+time=2026-11-06T01:25:05.773+01:00 level=INFO msg="Processing workflow" test=true namespace=oberth-argo phase="" resourceVersion="" workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:05.774+01:00 level=INFO msg="Task-result reconciliation" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff numObjs=0
+time=2026-11-06T01:25:05.774+01:00 level=INFO msg="updated phase" namespace=oberth-argo fromPhase="" toPhase=Running workflow=oberth-oberth-run-abc1-aabbccddeeff test=true
+time=2026-11-06T01:25:05.774+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:05.774+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff boundaryID=""
+time=2026-11-06T01:25:05.774+01:00 level=INFO msg="node initialized" node=oberth-oberth-run-abc1-aabbccddeeff phase=Pending message="" namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff test=true
+time=2026-11-06T01:25:05.774+01:00 level=INFO msg=getExecutorLogOpts test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info
+time=2026-11-06T01:25:05.774+01:00 level=INFO msg=getExecutorLogOpts loglevel=info nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:05.774+01:00 level=WARN msg="couldn't get boundaryTemplate" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:05.776+01:00 level=INFO msg=getExecutorLogOpts nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:05.776+01:00 level=INFO msg="Created pod" workflow=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff podName=oberth-oberth-run-abc1-aabbccddeeff test=true namespace=oberth-argo
+time=2026-11-06T01:25:05.777+01:00 level=INFO msg="TaskSet Reconciliation" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:05.777+01:00 level=INFO msg=reconcileAgentPod test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:05.777+01:00 level=INFO msg="add pod event" pod=oberth-oberth-run-abc1-aabbccddeeff test=true component=pod_controller
+time=2026-11-06T01:25:05.777+01:00 level=INFO msg="Workflow update successful" workflow=oberth-oberth-run-abc1-aabbccddeeff resourceVersion="" phase=Running test=true namespace=oberth-argo
+=== RUN   TestOberthWIFControllerCapture/wif-only-step-sa-true
+time=2026-11-06T01:25:06.781+01:00 level=INFO msg="Starting Prometheus metrics exporter" test=true
+time=2026-11-06T01:25:06.782+01:00 level=INFO msg="Watching task results" labelSelector=!workflows.argoproj.io/controller-instanceid,workflows.argoproj.io/workflow test=true
+time=2026-11-06T01:25:06.783+01:00 level=INFO msg=Plugins test=true component=config_map_informer executorPlugins=false
+time=2026-11-06T01:25:06.783+01:00 level=INFO msg="Sync manager ttl" syncLimitCacheTTL=0s test=true component=lock_manager
+time=2026-11-06T01:25:06.783+01:00 level=INFO msg="Sync manager initialized" test=true component=lock_manager dbConfigured=false
+time=2026-11-06T01:25:06.783+01:00 level=INFO msg="Sync manager initialized successfully" test=true component=lock_manager
+time=2026-11-06T01:25:06.889+01:00 level=INFO msg="Processing workflow" workflow=oberth-oberth-run-abc1-aabbccddeeff phase="" resourceVersion="" test=true namespace=oberth-argo
+time=2026-11-06T01:25:06.890+01:00 level=INFO msg="Task-result reconciliation" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff numObjs=0
+time=2026-11-06T01:25:06.890+01:00 level=INFO msg="updated phase" toPhase=Running test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff fromPhase=""
+time=2026-11-06T01:25:06.890+01:00 level=INFO msg="Node was nil, will be initialized as type Skipped" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:06.891+01:00 level=INFO msg="was unable to obtain node, letting display name to be nodeName" namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff test=true boundaryID=""
+time=2026-11-06T01:25:06.891+01:00 level=INFO msg="node initialized" message="" namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff test=true node=oberth-oberth-run-abc1-aabbccddeeff phase=Pending
+time=2026-11-06T01:25:06.891+01:00 level=INFO msg=getExecutorLogOpts test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff loglevel=info
+time=2026-11-06T01:25:06.891+01:00 level=INFO msg=getExecutorLogOpts nodeID=oberth-oberth-run-abc1-aabbccddeeff test=true namespace=oberth-argo loglevel=info workflow=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:06.891+01:00 level=WARN msg="couldn't get boundaryTemplate" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:06.894+01:00 level=INFO msg=getExecutorLogOpts loglevel=info test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:06.894+01:00 level=INFO msg="Created pod" workflow=oberth-oberth-run-abc1-aabbccddeeff nodeName=oberth-oberth-run-abc1-aabbccddeeff nodeID=oberth-oberth-run-abc1-aabbccddeeff podName=oberth-oberth-run-abc1-aabbccddeeff test=true namespace=oberth-argo
+time=2026-11-06T01:25:06.894+01:00 level=INFO msg="TaskSet Reconciliation" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:06.894+01:00 level=INFO msg=reconcileAgentPod test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:06.894+01:00 level=INFO msg="add pod event" test=true component=pod_controller pod=oberth-oberth-run-abc1-aabbccddeeff
+time=2026-11-06T01:25:06.894+01:00 level=INFO msg="Workflow update successful" test=true namespace=oberth-argo workflow=oberth-oberth-run-abc1-aabbccddeeff resourceVersion="" phase=Running
+--- PASS: TestOberthWIFControllerCapture (17.73s)
+    --- PASS: TestOberthWIFControllerCapture/image-writer-sa-false (1.11s)
+    --- PASS: TestOberthWIFControllerCapture/image-writer-sa-true (1.11s)
+    --- PASS: TestOberthWIFControllerCapture/image-reader-sa-false (1.11s)
+    --- PASS: TestOberthWIFControllerCapture/image-reader-sa-true (1.11s)
+    --- PASS: TestOberthWIFControllerCapture/chart-writer-sa-false (1.11s)
+    --- PASS: TestOberthWIFControllerCapture/chart-writer-sa-true (1.11s)
+    --- PASS: TestOberthWIFControllerCapture/script-sa-false (1.12s)
+    --- PASS: TestOberthWIFControllerCapture/script-sa-true (1.11s)
+    --- PASS: TestOberthWIFControllerCapture/helpers-sa-false (1.12s)
+    --- PASS: TestOberthWIFControllerCapture/helpers-sa-true (1.11s)
+    --- PASS: TestOberthWIFControllerCapture/vault-sa-false (1.02s)
+    --- PASS: TestOberthWIFControllerCapture/vault-sa-true (1.12s)
+    --- PASS: TestOberthWIFControllerCapture/sibling-sa-false (1.12s)
+    --- PASS: TestOberthWIFControllerCapture/sibling-sa-true (1.12s)
+    --- PASS: TestOberthWIFControllerCapture/wif-only-step-sa-false (1.12s)
+    --- PASS: TestOberthWIFControllerCapture/wif-only-step-sa-true (1.12s)
+PASS
+ok  	github.com/argoproj/argo-workflows/v4/workflow/controller	30.861s

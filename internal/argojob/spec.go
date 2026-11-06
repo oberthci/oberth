@@ -599,6 +599,8 @@ type Request struct {
 	// Only recovery of an already-submitted workflow can omit current defaults.
 	omitRequestDefaults         bool
 	legacyHelperRequestDefaults bool
+	// Preserve helper resources in already-submitted Workflow identities.
+	legacyHelperStorage bool
 	// legacyStepUsage reconstructs already-submitted pre-floor wrappers only;
 	// new submissions must never opt out of the instrumentation memory guard.
 	legacyStepUsage bool
@@ -983,7 +985,11 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 			return nil, err
 		}
 	}
-	if err := projectExecutorTokens(workflow, config); err != nil {
+	delete(workflow.Annotations, helperStorageAnnotation)
+	if !request.legacyHelperStorage {
+		workflow.Annotations[helperStorageAnnotation] = helperStoragePolicy
+	}
+	if err := projectExecutorTokens(workflow, config, !request.legacyHelperStorage); err != nil {
 		return nil, err
 	}
 
