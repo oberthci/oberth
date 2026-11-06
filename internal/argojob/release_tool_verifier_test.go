@@ -260,7 +260,7 @@ func TestBootstrapExecutedEnvironmentIgnoresSharedCachesAndCredentials(t *testin
 		tested++
 	}
 	// Retain the deadcode gate with the remaining bootstrap and artifact wrappers.
-	if tested != 35 || !sawDeadcode {
-		t.Fatalf("executed %d wrappers (deadcode=%t), want all 35 including deadcode", tested, sawDeadcode)
+	if tested != 32 || !sawDeadcode {
+		t.Fatalf("executed %d wrappers (deadcode=%t), want all 32 including deadcode", tested, sawDeadcode)
 	}
 }

@@ -1,9 +1,13 @@
 package service
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/oberthci/oberth/internal/gitcache"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
@@ -50,5 +54,29 @@ func TestRetiredUnsubmittedRunFailsAfterRequeue(t *testing.T) {
 	got, err := f.store.Run(t.Context(), run.ID)
 	if err != nil || got.Status != model.RunFailed || !strings.Contains(got.Error, "workflow capability grant") || got.WorkflowName != "" {
 		t.Fatalf("run=%+v err=%v", got, err)
+	}
+}
+
+func TestPolicyWaitAuditOutageDoesNotFinishRun(t *testing.T) {
+	f := newControlFixture(t)
+	f.scheduler.git = &policyTestGit{controlGit: f.git, baselineErr: gitcache.ErrPolicyUpstreamUnavailable}
+	blocked := false
+	f.scheduler.mutationGate = func(context.Context) error {
+		if blocked {
+			return errors.New("witness offline")
+		}
+		return nil
+	}
+	f.scheduler.capacityWait = func(context.Context) error { blocked = true; return nil }
+	run, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "audit-policy", Repository: f.repo, Branch: "feature/policy", SHA: strings.Repeat("a", 40), Actor: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.scheduler.ProcessNext(t.Context()); !errors.Is(err, errMutationBlocked) {
+		t.Fatal(err)
+	}
+	got, err := f.store.Run(t.Context(), run.ID)
+	if err != nil || got.Status != model.RunRunning || got.FinishedAt != nil || got.AutoRetriedBy != "" {
+		t.Fatalf("audit outage terminalized run: %+v %v", got, err)
 	}
 }

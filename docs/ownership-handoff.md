@@ -169,3 +169,20 @@ and site owner operating after the core removes its old resources. Never roll
 back by overwriting the external resources with the old core release. Use the
 saved configuration and your routing rollback procedure if verification fails;
 retain the existing core until a successful handoff is documented.
+
+## Retired execution preflight
+
+The upgrade also inventories trusted Workflows in the installed pipeline namespace
+and Oberth-owned virtual machines and instances across namespaces. Terminal or
+already-deleting objects still block the upgrade: drain/delete these first and
+wait for confirmed deletion while the old server can still clean them up.
+
+The installed server's `admin retirement-check` must also confirm that registered
+repositories have migrated their retired contracts. A candidate that removes
+`.oberth/tests.yaml` can run and be promoted even when the default branch still
+contains that file.
+
+`--allow-retired-execution` explicitly bypasses both checks, including an unavailable
+retirement-check command. It accepts orphaned resources and refused legacy runs;
+it does not bypass the separate connector/site ownership handoff. Checks run for
+`--dry-run` and again after preview/drain before the first live write.

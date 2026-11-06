@@ -1286,6 +1286,8 @@ Usage of status:
 
 ```text
 Usage of upgrade:
+  -allow-retired-execution
+        override retired resource/repository checks; accept orphaned resources and refused legacy runs
   -argo-controller-profile string
         explicitly reconcile the managed nonroot-static-v1 Argo profile and verify it before enabling server admission
   -chart string

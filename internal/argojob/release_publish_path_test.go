@@ -38,7 +38,7 @@ func restrictedReleaseScript(t *testing.T, source, destination string, scanner b
 		}
 		fmt.Fprintf(&prelude, "%s() { \"$FIXTURE_ROOT/bin/%s\" \"$@\"; }\n", name, tool)
 	}
-	for _, name := range []string{"go", "grype", "cosign", "crane", "helm", "trivy", "apko", "node", "npm", "npx", "wrangler"} {
+	for _, name := range []string{"go", "grype", "cosign", "crane", "helm", "trivy", "node", "npm", "npx", "wrangler"} {
 		fmt.Fprintf(&prelude, "%s() { printf 'forbidden bare tool: %s\\n' >&2; return 127; }\n", name, name)
 	}
 	body := strings.ReplaceAll(string(raw), "/work/src/scripts/oberth-release-wif-credential.py", filepath.Join(filepath.Dir(destination), "scripts", "oberth-release-wif-credential.py"))
@@ -133,9 +133,6 @@ esac`)
 	f.tool("trivy", `printf 'trivy:%s\n' "$1" >>"$FIXTURE_TRACE"
 test "${FIXTURE_FAILURE:-}" != trivy`)
 	f.write("require-signature", "true")
-	f.tool("apko", `printf 'apko:%s\n' "$1" >>"$FIXTURE_TRACE"
-for last do :; done
-printf 'inert fixture image\n' >"$last"`)
 	support, err := os.ReadFile(filepath.Join(f.root, "bin/oberth-release-support"))
 	if err != nil {
 		t.Fatal(err)

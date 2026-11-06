@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
@@ -17,25 +18,25 @@ type PolicyGit interface {
 	ReadDefaultBlob(context.Context, string, string, int) (string, []byte, bool, error)
 }
 
-// Check refuses both candidate and current upstream legacy requirements. Their
-// disappearance from a candidate cannot silently bypass a published gate.
+// Check refuses retired contracts in the candidate. A candidate deleting an
+// upstream contract must remain runnable so it can be promoted normally.
 func Check(ctx context.Context, git PolicyGit, repository, candidate string) (string, error) {
 	if git == nil {
 		return "", errors.New("workflow policy reader unavailable")
 	}
 	_, exists, err := git.ReadOptionalBlob(ctx, repository, candidate, ContractFile, MaxContractBytes)
-	if err != nil {
+	if err != nil && !errors.Is(err, gitcache.ErrPolicyBlobTooLarge) {
 		return "", err
 	}
 	if exists {
 		return "", argoworkflow.ErrWorkflowCapabilityRequired
 	}
-	baseline, _, exists, err := git.ReadDefaultBlob(ctx, repository, ContractFile, MaxContractBytes)
-	if err != nil {
+	baseline, _, _, err := git.ReadDefaultBlob(ctx, repository, ContractFile, MaxContractBytes)
+	if errors.Is(err, gitcache.ErrPolicyUpstreamUnavailable) {
 		return "", &PolicyRefreshUnavailable{Cause: err}
 	}
-	if exists {
-		return "", argoworkflow.ErrWorkflowCapabilityRequired
+	if err != nil && !errors.Is(err, gitcache.ErrPolicyBlobTooLarge) {
+		return "", err
 	}
 	return baseline, nil
 }

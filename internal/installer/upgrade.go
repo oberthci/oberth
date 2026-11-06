@@ -29,6 +29,7 @@ const DefaultUpgradeWaitTimeout = 2 * time.Hour
 
 // UpgradeConfig holds options for the upgrade command.
 type UpgradeConfig struct {
+	AllowRetiredExecution bool          // explicit acceptance of retired workload/resource risk
 	OwnershipHandoff      string        // operator-verified connector/site handoff receipt
 	WaitTimeout           time.Duration // independent queue-observation limit
 	WaitFor               string        // all or critical; a nonempty selection enables waiting
@@ -294,7 +295,6 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	if w == nil {
 		w = io.Discard
 	}
-	_, _ = fmt.Fprintln(w, "Retired execution settings are ignored; migrate workloads to a workflow capability grant. See the chart upgrade notes.")
 	color := isColor(deps)
 
 	targetVersion := cfg.BinaryVersion
@@ -394,6 +394,14 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	if err := checkUpgradeOwnership(ctx, cfg, deps, currentVersion); err != nil {
 		return result, err
 	}
+	if semver.Compare(targetCanonical, "v0.17.83-0") >= 0 {
+		if err := checkUpgradeLegacyResources(ctx, cfg, deps); err != nil {
+			return result, err
+		}
+		if err := checkUpgradeLegacyRepositories(ctx, cfg, deps); err != nil {
+			return result, err
+		}
+	}
 
 	profile, cleanupProfile, err := prepareUpgradeControllerProfile(ctx, cfg, deps)
 	if err != nil {
@@ -423,6 +431,7 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		if err != nil {
 			return result, err
 		}
+		warnRetiredUpgradeValues(w, cfg, values)
 		if err := checkUpgradePKIKeyConflicts(cfg, values); err != nil {
 			return result, err
 		}
@@ -502,6 +511,14 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	// Recheck after preview/drain, immediately before the first live write.
 	if err := checkUpgradeOwnership(ctx, cfg, deps, currentVersion); err != nil {
 		return result, err
+	}
+	if semver.Compare(targetCanonical, "v0.17.83-0") >= 0 {
+		if err := checkUpgradeLegacyResources(ctx, cfg, deps); err != nil {
+			return result, err
+		}
+		if err := checkUpgradeLegacyRepositories(ctx, cfg, deps); err != nil {
+			return result, err
+		}
 	}
 
 	if profile != nil {

@@ -2,6 +2,7 @@ package gitcache
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,12 +25,23 @@ func TestDefaultPolicyRequiresFreshUpstreamAndRegularBlob(t *testing.T) {
 	if err != nil || !exists || actual != sha || string(body) != "required\n" {
 		t.Fatalf("fresh policy = %s, %q, %v, %v", actual, body, exists, err)
 	}
-	if _, _, err := cache.ReadOptionalBlob(ctx, "example", sha, "policy.yaml", 1); err == nil {
+	if _, exists, err := cache.ReadOptionalBlob(ctx, "example", sha, "policy.yaml", 1); !exists || !errors.Is(err, ErrPolicyBlobTooLarge) {
 		t.Fatal("oversized policy accepted")
 	}
 	if _, exists, err := cache.ReadOptionalBlob(ctx, "example", strings.Repeat("f", 40), "missing", 4096); err == nil || exists {
 		t.Fatal("unreadable commit became absent policy")
 	}
+	if err := os.MkdirAll(filepath.Join(repository.work, ".oberth"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	oversized := repository.commitFile(t, "oversized contract", ".oberth/tests.yaml", strings.Repeat("x", 8192))
+	if _, _, _, err := cache.ReadDefaultBlob(ctx, "example", ".oberth/tests.yaml", 4096); !errors.Is(err, ErrPolicyBlobTooLarge) {
+		t.Fatal(err)
+	}
+	if _, exists, err := cache.ReadOptionalBlob(ctx, "example", oversized, ".oberth/tests.yaml", 4096); !exists || !errors.Is(err, ErrPolicyBlobTooLarge) {
+		t.Fatalf("large contract existence lost: %v %v", exists, err)
+	}
+
 	if err := os.Symlink("policy.yaml", filepath.Join(repository.work, "linked")); err != nil {
 		t.Fatal(err)
 	}

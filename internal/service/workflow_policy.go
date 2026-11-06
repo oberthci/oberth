@@ -109,7 +109,7 @@ func (scheduler *Scheduler) awaitWorkflowPolicy(ctx context.Context, repository 
 			return true, nil
 		}
 		resume := suspendDispatch(ctx)
-		_, err = workflowpolicy.Check(gitcache.WithFreshPolicy(waitCtx), scheduler.git, repository, sha)
+		_, err = workflowpolicy.Check(gitcache.WithBurstPolicy(waitCtx), scheduler.git, repository, sha)
 		resume()
 		if ctx.Err() != nil {
 			return true, nil

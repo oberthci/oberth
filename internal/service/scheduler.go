@@ -851,6 +851,9 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		return err
 	}
 	stopped, err := scheduler.awaitWorkflowPolicy(ctx, upstream.QualifiedRepo(repository.Name), run.ID, checkoutSHA, require)
+	if errors.Is(err, errMutationBlocked) {
+		return err
+	}
 	if stopped {
 		return nil
 	}

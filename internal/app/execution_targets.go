@@ -334,9 +334,6 @@ func (r *executionTargets) restore(ctx context.Context, b model.ExecutionTargetB
 		if submission.DemandReceipt != nil {
 			capsule["demand_receipt"] = submission.DemandReceipt.Summary()
 		}
-		if submission.DemandReceipt != nil {
-			capsule["demand_receipt"] = submission.DemandReceipt.Summary()
-		}
 		body, err := json.Marshal(capsule)
 		if err != nil {
 			return err

@@ -51,7 +51,7 @@ func TestPolicyReadClassifiesOnlyTemporaryTransport(t *testing.T) {
 				limit = 1
 			}
 			sha, body, exists, err := c.ReadDefaultBlob(t.Context(), "example", "policy.yaml", limit)
-			if err == nil || errors.Is(err, ErrPolicyUpstreamUnavailable) != (name == "temporary") || exists || len(body) != 0 {
+			if err == nil || errors.Is(err, ErrPolicyUpstreamUnavailable) != (name == "temporary") || exists != (name == "oversize") || len(body) != 0 {
 				t.Fatalf("policy error misclassified or returned authority: sha=%s exists=%v body=%q err=%v", sha, exists, body, err)
 			}
 			if name == "temporary" && failed.attempts != policyRefreshAttempts {

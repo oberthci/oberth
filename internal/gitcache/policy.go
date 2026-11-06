@@ -11,6 +11,9 @@ import (
 	"github.com/oberthci/oberth/internal/boundedio"
 )
 
+// ErrPolicyBlobTooLarge identifies an existing regular policy blob whose body exceeds the read limit.
+var ErrPolicyBlobTooLarge = errors.New("policy blob exceeds the read limit")
+
 // ReadOptionalBlob distinguishes an absent path from unreadable Git state and
 // refuses symlinks, trees and submodules. Policy callers must never interpret a
 // failed object read as permission to omit a required check.
@@ -142,6 +145,9 @@ func (c *Cache) readOptionalBlobLocked(ctx context.Context, path, sha, file stri
 	}
 	body := &boundedio.Buffer{Limit: limit, LimitError: errBlobTooLarge}
 	if err := c.run(ctx, commandSpec{dir: path, args: []string{"cat-file", "blob", fields[2]}, stdout: body}); err != nil {
+		if errors.Is(body.Err(), errBlobTooLarge) {
+			return nil, true, fmt.Errorf("read required policy: %w", ErrPolicyBlobTooLarge)
+		}
 		return nil, false, fmt.Errorf("read required policy: %w", errors.Join(err, body.Err()))
 	}
 	return body.Bytes(), true, body.Err()
