@@ -82,6 +82,9 @@ func remoteClient(ctx context.Context) (*client.Client, error) {
 }
 
 func reportMode(mode string) {
+	if mode == "server" {
+		return
+	}
 	fmt.Fprintf(os.Stderr, "reading: %s\n", mode)
 }
 
