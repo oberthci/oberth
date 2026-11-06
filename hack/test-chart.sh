@@ -701,46 +701,18 @@ render --set promotion=null >"$promotion_manifest"
 grep -Fq -- '--promotion-grant-max-lifetime=24h' "$promotion_manifest"
 rm -f "$promotion_manifest"
 
-# Reused pre-Lane-B values omit trustedTests entirely; empty stays disabled.
-trusted_legacy_manifest=$(mktemp)
-render --set trustedTests=null >"$trusted_legacy_manifest"
-if grep -Fq -- '--trusted-tests-recipes=' "$trusted_legacy_manifest"; then
-  echo "legacy values unexpectedly enabled trusted suites" >&2
+# Historical VM values are accepted but cannot restore removed runtime or RBAC.
+render --set vm.kvm.enabled=true --set trustedTests.runtime=legacy --set trustedTests.kvmSupplementalGroup=0 \
+  --set argo.vmLauncherServiceAccount=legacy --set argo.kubevirtCeiling.maxVMs=16 >"$manifest"
+if grep -Ei 'kubevirt|kvm|trusted-tests|vm-launcher|vmi-reservation' "$manifest"; then
+  echo "retired values restored execution or permissions" >&2
   exit 1
 fi
-rm -f "$trusted_legacy_manifest"
+render --set trustedTests=null --set vm=null >"$manifest"
+helm template oberth "$notes_chart" --set "image.ref=$server_image" \
+  --set trustedTests.runtime=legacy --show-only templates/notes-contract.yaml >"$notes"
+grep -Fq 'values are ignored. Migrate pipelines to a workflow capability grant' "$notes"
 
-# Device access is an explicit operator input; no root or guessed-GID fallback.
-trusted_recipe='[{"suite_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","guest_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","harness_image":"example.invalid/harness@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","suite_url":"https://example.invalid/suite","guest_url":"https://example.invalid/guest"}]'
-for group in 0 -1 2147483648 null; do
-  if render --set vm.kvm.enabled=true --set-json "trustedTests.recipes=$trusted_recipe" --set "trustedTests.kvmSupplementalGroup=$group" >/dev/null 2>&1; then
-    echo "trusted suites accepted missing/invalid device GID: $group" >&2
-    exit 1
-  fi
-done
-render --set vm.kvm.enabled=true --set-json "trustedTests.recipes=$trusted_recipe" --set trustedTests.kvmSupplementalGroup=1234 >"$manifest"
-grep -Fq -- '--trusted-tests-kvm-group=1234' "$manifest"
-render >"$manifest"
-if grep -Fq -- '--trusted-tests-kvm-group=' "$manifest"; then exit 1; fi
-# Old inactive values with recipes but no new key remain inactive.
-render --set trustedTests.kvmSupplementalGroup=null >"$manifest"
-if grep -Fq -- '--trusted-tests-kvm-group=' "$manifest"; then exit 1; fi
-
-# A generic grant alone never changes execution mode; the runtime is explicit.
-render --set vm.kvm.enabled=true --set-json "trustedTests.recipes=$trusted_recipe" --set trustedTests.kvmSupplementalGroup=1234 >"$manifest"
-grep -Fq -- '--trusted-tests-runtime=legacy' "$manifest"
-render --set vm.kvm.enabled=false --set trustedTests.runtime=generic-capability --set-json "trustedTests.recipes=$trusted_recipe" --set trustedTests.kvmSupplementalGroup=1234 >"$manifest"
-grep -Fq -- '--trusted-tests-runtime=generic-capability' "$manifest"
-# Resetting the current group preserves restart cleanup only; the app refuses
-# new admission and the live controller refuses Create/Receipt with group zero.
-render --set vm.kvm.enabled=false --set trustedTests.runtime=generic-capability --set-json "trustedTests.recipes=$trusted_recipe" --set trustedTests.kvmSupplementalGroup=0 >"$manifest"
-grep -Fq -- '--trusted-tests-kvm-group=0' "$manifest"
-for mode in generic-capability invalid; do
-  if render --set "trustedTests.runtime=$mode" >/dev/null 2>&1; then
-    echo "invalid or unconfigured protected runtime accepted: $mode" >&2
-    exit 1
-  fi
-done
 
 # Retention defaults preserve log retention and the existing artifact budget.
 render >"$manifest"

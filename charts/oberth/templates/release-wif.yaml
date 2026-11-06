@@ -22,7 +22,7 @@ data:
 {{- end }}
 {{- /* Dedicated WIF-only accounts: no Vault policy/role and no RBAC grants. */}}
 {{- $used := dict }}
-{{- range $name := list (.Values.argo.pipelineServiceAccount | default "oberth-argo-pipeline") (.Values.argo.credentialedServiceAccount | default "oberth-argo-credentialed") ((.Values.argo.ciSecrets | default dict).serviceAccount | default "oberth-argo-ci-secrets") (.Values.argo.executorServiceAccount | default "oberth-argo-executor") (.Values.argo.vmLauncherServiceAccount | default "oberth-argo-vm-launcher") }}
+{{- range $name := list (.Values.argo.pipelineServiceAccount | default "oberth-argo-pipeline") (.Values.argo.credentialedServiceAccount | default "oberth-argo-credentialed") ((.Values.argo.ciSecrets | default dict).serviceAccount | default "oberth-argo-ci-secrets") (.Values.argo.executorServiceAccount | default "oberth-argo-executor") }}
 {{- $_ := set $used $name true }}
 {{- end }}
 {{- range $repo, $grant := (get $wif "repositories" | default dict) }}
