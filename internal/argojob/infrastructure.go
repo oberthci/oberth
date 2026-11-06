@@ -21,6 +21,10 @@ func nodeInfrastructureReason(node wfv1.NodeStatus) string {
 		return ""
 	}
 	message := strings.TrimSpace(node.Message)
+	message = strings.TrimPrefix(message, "Evicted: ")
+	if node.Message == "Evicted" {
+		return "Evicted"
+	}
 	if kubeletEvictionMessage.MatchString(message) {
 		return boundedKubeletMessage("Evicted: " + message)
 	}

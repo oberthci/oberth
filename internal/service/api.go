@@ -1725,6 +1725,9 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 	}
 	if visible.DisplayStatus == model.DisplayInfraRetried {
 		visible.DisplayReason = "retried as " + shortRunID(run.AutoRetriedBy)
+		if cause := evictionDisplayReason(run); cause != "" {
+			visible.DisplayReason = joinRunMessage(cause, visible.DisplayReason)
+		}
 	}
 	if run.Priority != "" {
 		visible.Priority, visible.PriorityReason = run.EffectivePriority(now)

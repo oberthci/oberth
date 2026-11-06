@@ -56,7 +56,7 @@ func (s *API) applyResourceMessages(ctx context.Context, runs []model.Run) {
 // Failure guidance is durable in the existing error field, so list, detail and
 // restart reconciliation agree without polling the execution engine per row.
 func (s *Scheduler) withResourceFailure(ctx context.Context, runID string, result JobResult) JobResult {
-	if result.Status != model.RunFailed {
+	if result.Status != model.RunFailed || evictionDisplayReason(model.Run{Phase: result.Phase, Error: result.Error}) != "" {
 		return result
 	}
 	deadline := model.IsExecutionDeadlineReason(result.Error)

@@ -1,5 +1,7 @@
 package model
 
+import "time"
+
 // RunTerminalObservation is a complete terminal Workflow snapshot, never a
 // synthesized scheduler result. It retains every step attempt, not just latest.
 type RunTerminalObservation struct {
@@ -9,10 +11,14 @@ type RunTerminalObservation struct {
 	Steps        []RunObservedStep `json:"steps"`
 }
 type RunObservedStep struct {
-	Stage   string     `json:"burn"`
-	Step    string     `json:"step"`
-	Status  StepStatus `json:"status"`
-	Started bool       `json:"started"`
+	// Evicted is set only from owned kubelet/Argo eviction evidence.
+	Evicted    bool       `json:"evicted,omitempty"`
+	StartedAt  *time.Time `json:"started_at,omitempty"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	Stage      string     `json:"burn"`
+	Step       string     `json:"step"`
+	Status     StepStatus `json:"status"`
+	Started    bool       `json:"started"`
 }
 type RunReplayAttempt struct {
 	Run                Run
@@ -75,4 +81,40 @@ type RunRerunResult struct {
 // Cancellation/interruption and publication replay have separate policies.
 func IsInfrastructureRunFailure(status RunStatus, phase, failedStep string) bool {
 	return status == RunFailed && (phase == "infrastructure" || phase == "job") && failedStep == ""
+}
+
+// EvictionOnly requires a complete terminal snapshot whose every failed attempt
+// has a kubelet eviction cause. Unknown, timed-out and earlier real failures
+// cannot be hidden by a later eviction of the same logical step.
+func (o *RunTerminalObservation) EvictionOnly() bool {
+	if o == nil || o.Version != 1 || o.WorkflowName == "" || o.Nodes < len(o.Steps) || o.Nodes > 4096 {
+		return false
+	}
+	found := false
+	for _, step := range o.Steps {
+		if !step.Status.Terminal() || step.Status == StepTimedOut {
+			return false
+		}
+		if step.Status == StepFailed {
+			if !step.Evicted || step.Stage == "" || step.Step == "" || step.StartedAt == nil || step.FinishedAt == nil {
+				return false
+			}
+			found = true
+		}
+	}
+	return found
+}
+
+// EvictedAttempt binds retained failure evidence to its exact observed attempt.
+// It does not erase step status, logs, exit code or diagnostic history.
+func (o *RunTerminalObservation) EvictedAttempt(stage, step string, started, finished *time.Time) bool {
+	if o == nil || started == nil || finished == nil {
+		return false
+	}
+	for _, attempt := range o.Steps {
+		if attempt.Evicted && attempt.Status == StepFailed && attempt.Stage == stage && attempt.Step == step && attempt.StartedAt != nil && attempt.FinishedAt != nil && started.Equal(*attempt.StartedAt) && finished.Equal(*attempt.FinishedAt) {
+			return true
+		}
+	}
+	return false
 }

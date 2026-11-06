@@ -13,18 +13,19 @@ func (scheduler *Scheduler) infrastructureAutoRetry(run model.Run, result JobRes
 	if scheduler.disableInfrastructureAutoRetry || run.RefKind != model.RefBranch || releaseLikeRun(run) || (run.Trigger != "branch" && run.Trigger != "push" && run.Trigger != "schedule" && run.Trigger != "manual") || run.AutoRetryOf != "" || run.AutoRetriedBy != "" || !model.IsInfrastructureRunFailure(result.Status, result.Phase, result.FailedStep) || result.FailedStage != "" || pushretry.PublicationFailure(result.Error) {
 		return false
 	}
+	eviction := result.Phase == "infrastructure" && result.TerminalObservation.EvictionOnly() && (run.WorkflowName == "" || result.TerminalObservation.WorkflowName == run.WorkflowName)
 	deadline := model.IsExecutionDeadlineReason(result.Error)
 	if deadline && result.ObservedStepStart {
 		return false
 	}
 	for _, step := range result.Steps {
-		if step.Status == model.StepFailed || (deadline && (step.StartedAt != nil || step.LogEnd > step.LogStart || step.Status == model.StepRunning || step.Status == model.StepPassed)) {
+		if (step.Status == model.StepFailed && (!eviction || !result.TerminalObservation.EvictedAttempt(step.Stage, step.Step, step.StartedAt, step.FinishedAt))) || (deadline && (step.StartedAt != nil || step.LogEnd > step.LogStart || step.Status == model.StepRunning || step.Status == model.StepPassed)) {
 			return false
 		}
 	}
 	if result.TerminalObservation != nil {
 		for _, step := range result.TerminalObservation.Steps {
-			if step.Status == model.StepFailed || (deadline && (step.Started || step.Status == model.StepRunning || step.Status == model.StepPassed)) {
+			if (step.Status == model.StepFailed && (!eviction || !step.Evicted)) || (deadline && (step.Started || step.Status == model.StepRunning || step.Status == model.StepPassed)) {
 				return false
 			}
 		}
@@ -40,7 +41,7 @@ func (scheduler *Scheduler) infrastructureAutoRetry(run model.Run, result JobRes
 	// a real failure or start. A deadline after execution began may be a hung
 	// suite, so it must not receive another full execution window.
 	for _, event := range events {
-		if event.Status == runprogress.StepFailed || (deadline && (event.StartedAt != nil || event.Status == runprogress.StepRunning || event.Status == runprogress.StepPassed)) {
+		if (event.Status == runprogress.StepFailed && (!eviction || !result.TerminalObservation.EvictedAttempt(event.Stage, event.Step, event.StartedAt, event.FinishedAt))) || (deadline && (event.StartedAt != nil || event.Status == runprogress.StepRunning || event.Status == runprogress.StepPassed)) {
 			return false
 		}
 	}

@@ -688,7 +688,12 @@ type Request struct {
 // configuration out of the immutable run workspace named by
 // request.SourceDir, because those files — not the document — decide what a
 // legacy-chain step fetches.
-func Build(config Config, request Request) (*wfv1.Workflow, error) {
+func Build(config Config, request Request) (result *wfv1.Workflow, resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			resultErr = &argoworkflow.AdmissionError{Cause: resultErr}
+		}
+	}()
 	config.applyDefaults()
 	if err := config.ExecutionPlacement.selectRequest(config, request); err != nil {
 		return nil, err

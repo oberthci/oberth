@@ -1907,7 +1907,9 @@ func (scheduler *Scheduler) finishInfrastructureFailure(ctx context.Context, run
 	if errors.As(failure, &cause) {
 		result.FailureCause = displayFailureText(cause.RunFailureCause())
 	}
-	finished, err := scheduler.database().FinishRun(ctx, run.ID, model.RunResult{AutoRetryInfrastructure: scheduler.infrastructureAutoRetry(run, result), Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error(), FailureCause: result.FailureCause})
+	var classified InfrastructureError
+	retry := (!errors.As(failure, &classified) || classified.InfrastructureFailure()) && scheduler.infrastructureAutoRetry(run, result)
+	finished, err := scheduler.database().FinishRun(ctx, run.ID, model.RunResult{AutoRetryInfrastructure: retry, Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error(), FailureCause: result.FailureCause})
 	if errors.Is(err, store.ErrInvalidState) {
 		scheduler.signals.NotifyRun(run.ID)
 		return nil

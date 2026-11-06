@@ -79,6 +79,19 @@ func (controller *Controller) collectRestartStepDiagnostics(ctx context.Context,
 		}
 		step.Timing = projectStepTiming(workflow, node, pod, *step, step.Termination, at)
 	}
+	// Preserve eviction evidence for every attempt, including superseded retries.
+	// The same owned Pod snapshot supplies the verdict and retry evidence.
+	for i := range completion.ReplayAttempts {
+		step := &completion.ReplayAttempts[i]
+		if step.AttemptAmbiguous {
+			continue
+		}
+		if node, ok := workflow.Status.Nodes[step.NodeID]; ok && node.ID == step.NodeID {
+			if reason := podInfrastructureReason(workflow, node, pods[step.PodName]); reason != "" {
+				step.InfrastructureReason = reason
+			}
+		}
+	}
 	// A timed-out API read must still durably retain its explicit unknowns.
 	// Persistence gets its own bounded write context, not the expired read one.
 	writeCtx, writeCancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
