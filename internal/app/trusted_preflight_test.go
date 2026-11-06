@@ -158,7 +158,7 @@ func (c *protectedControllerFixture) TrustedKVMReceipt(_ context.Context, r argo
 func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 	// Every scenario owns its controller, grant loader, workspace and database.
 	t.Parallel()
-	for _, scenario := range []string{"deadline no report", "missing deadline", "repository deadline cap", "pass", "pass empty org", "workflow failed", "workflow observation failed", "infrastructure failed", "infrastructure observation failed", "definite create refusal", "uncertain create", "recover absent", "unapproved", "guest granted", "guest revoked", "guest recover", "owned spec mismatch", "owned spec mismatch during create"} {
+	for _, scenario := range []string{"deadline no report", "missing deadline", "repository deadline cap", "pass", "pass empty org", "workflow failed", "workflow observation failed", "infrastructure failed", "infrastructure observation failed", "definite create refusal", "uncertain create", "recover absent", "unapproved", "policy removed", "bundle changed", "artifact mapping changed", "guest granted", "guest revoked", "guest recover", "owned spec mismatch", "owned spec mismatch during create"} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
 			org, wantRepo := "org", "upstream/org/repo"
@@ -266,15 +266,36 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 				t.Fatal(err)
 			}
 			fetches := 0
-			p.fetch = func(context.Context, string, string, int64) ([]byte, error) { fetches++; return bundle.Bytes(), nil }
+			p.fetch = func(context.Context, string, string, int64) ([]byte, error) {
+				fetches++
+				if scenario == "bundle changed" {
+					changed := bytes.Clone(bundle.Bytes())
+					changed[512] ^= 1
+					return changed, nil
+				}
+				return bundle.Bytes(), nil
+			}
 			contract := vmrunner.Contract{Version: 2, Profile: vmrunner.KVMSuiteAMD64Profile, SuiteSHA256: suite, GuestSHA256: guest, Artifacts: []string{"program"}}
 			if scenario == "unapproved" {
 				contract.SuiteSHA256 = strings.Repeat("e", 64)
 			}
+			if scenario == "policy removed" {
+				p.recipes = nil
+			}
+			if scenario == "artifact mapping changed" {
+				contract.Artifacts = []string{"different-program"}
+			}
 			err = p.Execute(ctx, service.WorkflowRequest{WorkflowName: "run-test", Run: run, Repository: repo, UpstreamName: "upstream", UpstreamOrg: org, SourceDir: fixture.sourceDir}, vmrunner.Requirement{CandidateSHA: sha, BaselineSHA: strings.Repeat("d", 40), Contract: &contract}, io.Discard)
-			if scenario == "unapproved" {
-				if err == nil || fetches != 0 {
-					t.Fatal("unapproved content fetched")
+			if scenario == "unapproved" || scenario == "policy removed" || scenario == "bundle changed" || scenario == "artifact mapping changed" {
+				wantFetches := 0
+				if scenario == "bundle changed" || scenario == "artifact mapping changed" {
+					wantFetches = 1
+				}
+				if err == nil || fetches != wantFetches || controller.request.TrustedKVM != nil {
+					t.Fatalf("unapproved inputs reached execution: err=%v fetches=%d", err, fetches)
+				}
+				if _, getErr := database.KVMPreflight(ctx, run.ID); !errors.Is(getErr, store.ErrNotFound) {
+					t.Fatalf("unapproved inputs reserved capacity: %v", getErr)
 				}
 				return
 			}

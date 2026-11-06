@@ -13,6 +13,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/protectedtests"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/trustedharness"
@@ -53,29 +54,14 @@ func NewTrustedPreflights(jobs *ArgoJobs, journal trustedRunStore, recipes []vmr
 	if !ok {
 		return nil, errors.New("trusted controller unavailable")
 	}
-	seen := map[string]bool{}
-	for _, r := range recipes {
-		if err := r.Validate(); err != nil {
-			return nil, err
-		}
-		key := r.SuiteSHA256 + ":" + r.GuestSHA256
-		if seen[key] {
-			return nil, errors.New("duplicate trusted recipe")
-		}
-		seen[key] = true
+	if err := protectedtests.ValidateRecipes(recipes); err != nil {
+		return nil, err
 	}
 	return &TrustedPreflights{jobs: jobs, controller: controller, store: journal, recipes: append([]vmrunner.KVMRecipe(nil), recipes...), workspaceRoot: workspaceRoot, requireMutation: requireMutation, fetch: trustedharness.Fetch}, nil
 }
 func (p *TrustedPreflights) recipe(contract vmrunner.Contract) (vmrunner.KVMRecipe, error) {
-	if vmrunner.ValidateContract(contract) != nil || contract.Version != 2 {
-		return vmrunner.KVMRecipe{}, errors.New("protected suite executor requires tests.yaml v2")
-	}
-	for _, r := range p.recipes {
-		if r.SuiteSHA256 == contract.SuiteSHA256 && r.GuestSHA256 == contract.GuestSHA256 {
-			return r, nil
-		}
-	}
-	return vmrunner.KVMRecipe{}, errors.New("suite and guest recipe is not operator-approved")
+	descriptor, err := protectedtests.SelectDescriptor(contract, p.recipes)
+	return descriptor.Recipe(), err
 }
 func (p *TrustedPreflights) Supports(contract vmrunner.Contract) error {
 	_, err := p.recipe(contract)
@@ -102,10 +88,11 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.WorkflowReq
 	if requirement.Contract == nil {
 		return errors.New("missing trusted contract")
 	}
-	recipe, err := p.recipe(*requirement.Contract)
+	descriptor, err := protectedtests.SelectDescriptor(*requirement.Contract, p.recipes)
 	if err != nil {
 		return err
 	}
+	recipe := descriptor.Recipe()
 	source, err := readArgoSource(job.SourceDir, pipeline.TriggerCI)
 	if err != nil {
 		return err
@@ -132,7 +119,7 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.WorkflowReq
 	if err != nil {
 		return err
 	}
-	suite, err := vmrunner.VerifyKVMSuiteBundle(*requirement.Contract, bundle)
+	suite, err := descriptor.VerifyBundle(bundle)
 	if err != nil {
 		return err
 	}
@@ -141,7 +128,7 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.WorkflowReq
 	if job.UpstreamOrg == "" {
 		job.UpstreamOrg = job.UpstreamName
 	}
-	intent := vmrunner.KVMIntent{RunID: job.Run.ID, RepoID: job.Repository.ID, Repository: model.CanonicalRepoKey(job.UpstreamName, job.UpstreamOrg, job.Repository.Name), CandidateSHA: requirement.CandidateSHA, BaselineSHA: requirement.BaselineSHA, Contract: *requirement.Contract, Recipe: recipe, Namespace: p.jobs.controller.Namespace(), WorkflowName: job.WorkflowName + "-trusted", WorkflowSpecDigest: hex.EncodeToString(sum[:]), InventoryDigest: inventory, CaseCount: count, AdmittedAt: now, Deadline: now.Add(duration)}
+	intent := vmrunner.KVMIntent{RunID: job.Run.ID, RepoID: job.Repository.ID, Repository: model.CanonicalRepoKey(job.UpstreamName, job.UpstreamOrg, job.Repository.Name), CandidateSHA: requirement.CandidateSHA, BaselineSHA: requirement.BaselineSHA, Contract: descriptor.Contract(), Recipe: recipe, Namespace: p.jobs.controller.Namespace(), WorkflowName: job.WorkflowName + "-trusted", WorkflowSpecDigest: hex.EncodeToString(sum[:]), InventoryDigest: inventory, CaseCount: count, AdmittedAt: now, Deadline: now.Add(duration)}
 	submission, err := p.request(job, intent)
 	if err != nil {
 		return err
@@ -465,12 +452,7 @@ func (p *TrustedPreflights) recoverOne(ctx context.Context, execution vmrunner.K
 var _ service.TrustedPreflight = (*TrustedPreflights)(nil)
 
 func (p *TrustedPreflights) RecipeAllowed(recipe vmrunner.KVMRecipe) error {
-	for _, allowed := range p.recipes {
-		if allowed == recipe {
-			return nil
-		}
-	}
-	return errors.New("journaled trusted recipe has been revoked or changed")
+	return protectedtests.RecipeAllowed(recipe, p.recipes)
 }
 func (p *TrustedPreflights) Size(_ context.Context, job service.WorkflowRequest) (pipeline.Size, error) {
 	source, err := readArgoSource(job.SourceDir, pipeline.TriggerCI)

@@ -104,10 +104,17 @@ func (scheduler *Scheduler) trustedReceipt(ctx context.Context, repository model
 		return fmt.Errorf("read trusted test receipt: %w", err)
 	}
 	intent := execution.Intent
+	descriptor, err := intent.Descriptor()
+	if err != nil {
+		return err
+	}
+	if err := descriptor.MatchContract(requirement.Contract); err != nil {
+		return err
+	}
 	if err := scheduler.trusted.RecipeAllowed(intent.Recipe); err != nil {
 		return err
 	}
-	if !execution.Cleaned || execution.Rejected || execution.Refusal != nil || execution.Receipt == nil || execution.WorkflowUID == "" || execution.WorkflowUID != execution.Receipt.WorkflowUID || intent.RunID != run.ID || intent.RepoID != repository.ID || intent.CandidateSHA != requirement.CandidateSHA || intent.BaselineSHA != requirement.BaselineSHA || vmrunner.ContractDigest(&intent.Contract) != vmrunner.ContractDigest(requirement.Contract) {
+	if !execution.Cleaned || execution.Rejected || execution.Refusal != nil || execution.Receipt == nil || execution.WorkflowUID == "" || execution.WorkflowUID != execution.Receipt.WorkflowUID || intent.RunID != run.ID || intent.RepoID != repository.ID || intent.CandidateSHA != requirement.CandidateSHA || intent.BaselineSHA != requirement.BaselineSHA {
 		return fmt.Errorf("trusted test receipt does not match publication policy")
 	}
 	upstream, err := scheduler.database().Upstream(ctx, repository.UpstreamID)

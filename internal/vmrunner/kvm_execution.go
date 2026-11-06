@@ -6,33 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"net/url"
 	"strings"
 	"time"
+
+	"github.com/oberthci/oberth/internal/protectedtests"
 )
 
-// KVMRecipe is administrator-owned. Hashes are an independent allowlist for
-// executable suite code; tests.yaml can select, but never create, this authority.
-type KVMRecipe struct {
-	SuiteSHA256  string `json:"suite_sha256"`
-	GuestSHA256  string `json:"guest_sha256"`
-	HarnessImage string `json:"harness_image"`
-	SuiteURL     string `json:"suite_url"`
-	GuestURL     string `json:"guest_url"`
-}
-
-func (r KVMRecipe) Validate() error {
-	if len(r.HarnessImage) > 512 || !sha256HexPattern.MatchString(r.SuiteSHA256) || !sha256HexPattern.MatchString(r.GuestSHA256) || len(validateGuestImageRef(r.HarnessImage)) != 0 {
-		return errors.New("trusted recipe requires complete suite, guest and harness pins")
-	}
-	for _, raw := range []string{r.SuiteURL, r.GuestURL} {
-		u, err := url.Parse(raw)
-		if len(raw) > 2048 || err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
-			return errors.New("trusted recipe requires credential-free HTTPS bundle endpoints")
-		}
-	}
-	return nil
-}
+type KVMRecipe = protectedtests.Recipe
 
 // KVMIntent precedes the credential-free preflight Workflow. The parent run has
 // no Job name yet: release credentials cannot be delivered until cleanup/gate.
@@ -54,10 +34,17 @@ type KVMIntent struct {
 }
 
 func (i KVMIntent) Validate() error {
-	if i.RunID == "" || i.RepoID <= 0 || i.Repository == "" || !hexSHA1Pattern.MatchString(i.CandidateSHA) || !hexSHA1Pattern.MatchString(i.BaselineSHA) || ValidateContract(i.Contract) != nil || i.Contract.Version != 2 || i.Recipe.Validate() != nil || i.Contract.SuiteSHA256 != i.Recipe.SuiteSHA256 || i.Contract.GuestSHA256 != i.Recipe.GuestSHA256 || i.Namespace == "" || i.WorkflowName == "" || !sha256HexPattern.MatchString(i.WorkflowSpecDigest) || !sha256HexPattern.MatchString(i.InventoryDigest) || i.CaseCount < 1 || i.CaseCount > MaxSuiteCases || i.AdmittedAt.IsZero() || !i.Deadline.After(i.AdmittedAt) || i.Deadline.Sub(i.AdmittedAt) > MaxDeadline {
+	_, descriptorErr := i.Descriptor()
+	if i.RunID == "" || i.RepoID <= 0 || i.Repository == "" || !hexSHA1Pattern.MatchString(i.CandidateSHA) || !hexSHA1Pattern.MatchString(i.BaselineSHA) || descriptorErr != nil || i.Namespace == "" || i.WorkflowName == "" || !sha256HexPattern.MatchString(i.WorkflowSpecDigest) || !sha256HexPattern.MatchString(i.InventoryDigest) || i.CaseCount < 1 || i.CaseCount > MaxSuiteCases || i.AdmittedAt.IsZero() || !i.Deadline.After(i.AdmittedAt) || i.Deadline.Sub(i.AdmittedAt) > MaxDeadline {
 		return errors.New("invalid trusted KVM preflight intent")
 	}
 	return nil
+}
+
+// Descriptor projects an existing journal record without changing its format.
+// This validates binding only; current recipe approval is checked separately.
+func (i KVMIntent) Descriptor() (protectedtests.Descriptor, error) {
+	return protectedtests.BindContract(i.Contract, i.Recipe)
 }
 func KVMIntentDigest(intent KVMIntent) string {
 	b, _ := json.Marshal(intent)
@@ -157,14 +144,3 @@ type KVMJournal interface {
 	KVMPreflight(context.Context, string) (KVMExecution, error)
 	PendingKVMPreflights(context.Context) ([]KVMExecution, error)
 }
-
-func (s VerifiedKVMSuite) Inventory() (string, int) {
-	results := make([]KVMCaseResult, len(s.caseIDs))
-	for n, id := range s.caseIDs {
-		results[n] = KVMCaseResult{ID: id, Outcome: "passed"}
-	}
-	b, _ := json.Marshal(results)
-	h := sha256.Sum256(b)
-	return hex.EncodeToString(h[:]), len(results)
-}
-func (s VerifiedKVMSuite) CaseIDs() []string { return append([]string(nil), s.caseIDs...) }

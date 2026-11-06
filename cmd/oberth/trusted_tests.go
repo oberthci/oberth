@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/oberthci/oberth/internal/protectedtests"
 	"github.com/oberthci/oberth/internal/vmrunner"
 )
 
@@ -40,19 +41,8 @@ func readTrustedRecipes(path string) ([]vmrunner.KVMRecipe, error) {
 	if err = dec.Decode(&extra); !errors.Is(err, io.EOF) {
 		return nil, errors.New("trusted recipes require exactly one JSON document")
 	}
-	if len(recipes) == 0 || len(recipes) > 128 {
-		return nil, errors.New("trusted recipes require 1..128 approved recipes")
-	}
-	seen := map[string]bool{}
-	for _, recipe := range recipes {
-		if err = recipe.Validate(); err != nil {
-			return nil, err
-		}
-		key := recipe.SuiteSHA256 + recipe.GuestSHA256
-		if seen[key] {
-			return nil, errors.New("duplicate trusted recipe")
-		}
-		seen[key] = true
+	if err := protectedtests.ValidateRecipes(recipes); err != nil {
+		return nil, err
 	}
 	return recipes, nil
 }
