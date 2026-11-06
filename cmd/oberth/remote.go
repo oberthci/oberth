@@ -466,9 +466,9 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 			return err
 		}
 	}
-	burnWidth, stepWidth, statusWidth := 0, 0, 0
+	stageWidth, stepWidth, statusWidth := 0, 0, 0
 	for _, step := range detail.Steps {
-		burnWidth = max(burnWidth, len(step.Stage))
+		stageWidth = max(stageWidth, len(step.Stage))
 		stepWidth = max(stepWidth, len(step.Step))
 		statusWidth = max(statusWidth, len(step.Status))
 	}
@@ -478,7 +478,7 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 			marker = "*"
 		}
 		if _, err := fmt.Fprintf(output, "%s %-*s %-*s %-*s %s\n",
-			marker, burnWidth, step.Stage, stepWidth, step.Step, statusWidth, step.Status, span(step.StartedAt, step.FinishedAt)); err != nil {
+			marker, stageWidth, step.Stage, stepWidth, step.Step, statusWidth, step.Status, span(step.StartedAt, step.FinishedAt)); err != nil {
 			return err
 		}
 	}
