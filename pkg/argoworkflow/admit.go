@@ -73,7 +73,12 @@ type Policy struct {
 // container, script, synchronization, retryStrategy, volumeClaimTemplates)
 // are exactly the parts a pipeline needs. Every rejection below names a
 // concrete way to reach a credential, a host, or another tenant's identity.
-func Admit(workflow *wfv1.Workflow, policy Policy) error {
+func Admit(workflow *wfv1.Workflow, policy Policy) (resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			resultErr = &AdmissionError{Cause: resultErr}
+		}
+	}()
 	if workflow == nil {
 		return errors.New("argoworkflow: no Workflow to admit")
 	}

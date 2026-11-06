@@ -1258,6 +1258,8 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		return completeErr
 	}
 
+	// Carry the persisted identity into terminal eviction evidence checks.
+	run.WorkflowName = current.WorkflowName
 	return scheduler.observeRun(ctx, run, repository, require, reservation, runObservation{file: logFile, request: &jobRequest})
 }
 
@@ -1907,7 +1909,10 @@ func (scheduler *Scheduler) finishInfrastructureFailure(ctx context.Context, run
 	if errors.As(failure, &cause) {
 		result.FailureCause = displayFailureText(cause.RunFailureCause())
 	}
-	finished, err := scheduler.database().FinishRun(ctx, run.ID, model.RunResult{AutoRetryInfrastructure: scheduler.infrastructureAutoRetry(run, result), Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error(), FailureCause: result.FailureCause})
+	var admission *argoworkflow.AdmissionError
+	var ceiling *argoworkflow.ResourceCeilingError
+	retry := !errors.As(failure, &admission) && !errors.As(failure, &ceiling) && scheduler.infrastructureAutoRetry(run, result)
+	finished, err := scheduler.database().FinishRun(ctx, run.ID, model.RunResult{AutoRetryInfrastructure: retry, Status: model.RunFailed, Phase: "infrastructure", Error: failure.Error(), FailureCause: result.FailureCause})
 	if errors.Is(err, store.ErrInvalidState) {
 		scheduler.signals.NotifyRun(run.ID)
 		return nil

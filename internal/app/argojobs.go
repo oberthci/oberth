@@ -1157,7 +1157,8 @@ func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 		observation := &model.RunTerminalObservation{Version: 1, WorkflowName: completion.Name, Nodes: completion.ObservedNodes}
 		for _, step := range completion.ReplayAttempts {
 			started := step.StartedAt != nil || step.Status == runprogress.StepRunning || step.Status == runprogress.StepPassed || step.Status == runprogress.StepFailed || step.Status == runprogress.StepTimedOut
-			observation.Steps = append(observation.Steps, model.RunObservedStep{Stage: step.Stage, Step: step.Step, Status: model.StepStatus(step.Status), Started: started})
+			observation.Steps = append(observation.Steps, model.RunObservedStep{Stage: step.Stage, Step: step.Step, Status: model.StepStatus(step.Status), Started: started,
+				Evicted: !step.AttemptAmbiguous && (step.InfrastructureReason == "Evicted" || strings.HasPrefix(step.InfrastructureReason, "Evicted: ")), StartedAt: step.StartedAt, FinishedAt: step.FinishedAt})
 		}
 		result.TerminalObservation = observation
 	}

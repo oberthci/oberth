@@ -2,7 +2,11 @@ package service
 
 import (
 	"errors"
+	"regexp"
+
 	"strings"
+
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/pushretry"
@@ -19,6 +23,9 @@ func displayFailureText(message string) string {
 }
 
 func failedRunDisplayReason(run model.Run) string {
+	if reason := evictionDisplayReason(run); reason != "" {
+		return reason
+	}
 	if run.FailureCause != "" {
 		return listFailureCause(run)
 	}
@@ -100,4 +107,29 @@ func listFailureCause(run model.Run) string {
 		}
 	}
 	return cause
+}
+
+var evictionStorageLimit = regexp.MustCompile(`^Evicted: Pod ephemeral local storage usage exceeds the total limit of containers ([0-9]+(?:[.][0-9]+)?[KMGTPE]i?)`)
+
+func evictionDisplayReason(run model.Run) string {
+	if run.Phase != "infrastructure" || run.FailedStep != "" || (run.Error != "Evicted" && !strings.HasPrefix(run.Error, "Evicted: ")) {
+		return ""
+	}
+	if match := evictionStorageLimit.FindStringSubmatch(run.Error); len(match) == 2 {
+		if quantity, err := resource.ParseQuantity(match[1]); err == nil {
+			return "evicted: ephemeral storage limit " + bytesText(quantity.Value()) + "; raise the step's ephemeral-storage limit"
+		}
+	}
+	switch {
+	case strings.Contains(run.Error, "The node was low on resource: ephemeral-storage."):
+		return "evicted: node storage pressure"
+	case strings.Contains(run.Error, "The node was low on resource: memory."):
+		return "evicted: node memory pressure"
+	case strings.Contains(run.Error, "local ephemeral storage limit"), strings.Contains(run.Error, "Pod ephemeral local storage usage exceeds"):
+		return "evicted: ephemeral storage limit; raise the step's ephemeral-storage limit"
+	case strings.HasPrefix(run.Error, "Evicted: Usage of EmptyDir volume "):
+		return "evicted: temporary volume storage limit"
+	default:
+		return "evicted by kubelet"
+	}
 }

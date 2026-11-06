@@ -16,6 +16,8 @@ func TestCompletionKubeletMessagesSurvivePodGC(t *testing.T) {
 		`Usage of EmptyDir volume "var-run-argo" exceeds the limit "128Mi".`,
 		`The node was low on resource: ephemeral-storage. Threshold quantity: 1Gi, available: 123Ki.`,
 		`The node was low on resource: memory.`,
+		`Pod ephemeral local storage usage exceeds the total limit of containers 512Mi.`,
+		`Evicted: Pod ephemeral local storage usage exceeds the total limit of containers 512Mi.`,
 	} {
 		t.Run(message, func(t *testing.T) {
 			wf, node, _, _ := diagnosticFixture()
@@ -64,6 +66,9 @@ func TestCompletionOwnedPodEvictionAndOOM(t *testing.T) {
 			controller.collectStepDiagnostics(context.Background(), wf, &completion)
 			if !completion.Infrastructure || !strings.Contains(completion.Reason, "Evicted") || strings.Contains(completion.Reason, "application-controlled") {
 				t.Fatalf("owned Pod not classified: %#v", completion)
+			}
+			if len(completion.ReplayAttempts) != 1 || completion.ReplayAttempts[0].InfrastructureReason != completion.Reason {
+				t.Fatal("owned pod eviction missing from replay evidence", completion.ReplayAttempts)
 			}
 			if completion.Reason != "Evicted: "+pod.Status.Message {
 				t.Fatal("kubelet message lost")

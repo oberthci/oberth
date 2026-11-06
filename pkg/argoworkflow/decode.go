@@ -29,7 +29,12 @@ var (
 // ignored line. That matters because the security gate in Admit reasons about
 // named fields — a typo that a lenient decoder would drop must not become an
 // unreviewed permission.
-func Decode(source []byte) (*wfv1.Workflow, error) {
+func Decode(source []byte) (result *wfv1.Workflow, resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			resultErr = &AdmissionError{Cause: resultErr}
+		}
+	}()
 	if len(source) == 0 || len(bytes.TrimSpace(source)) == 0 {
 		return nil, errors.New("argoworkflow: pipeline document is empty")
 	}

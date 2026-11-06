@@ -19,6 +19,8 @@ type ResourceCeilingError struct {
 	Cause  string
 }
 
+func (*ResourceCeilingError) InfrastructureFailure() bool { return false }
+
 func (e *ResourceCeilingError) Error() string           { return e.Detail }
 func (e *ResourceCeilingError) RunFailureCause() string { return "infrastructure error: " + e.Cause }
 
