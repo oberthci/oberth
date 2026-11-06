@@ -35,7 +35,7 @@ func runContextJSON(t *testing.T, value any) map[string]any {
 
 func TestRunRepositoryContextSurfaces(t *testing.T) {
 	f := newControlFixture(t)
-	// Priority-selected work stays active beside a newer run in the same lane.
+	// Claimed priority-selected work stays active beside a newer run in the same lane.
 	if _, err := f.store.SetQueuePriorityPatterns(t.Context(), "admin", []string{"feature/*"}); err != nil {
 		t.Fatal(err)
 	}
@@ -156,12 +156,15 @@ func TestRunRepositoryContextSurfaces(t *testing.T) {
 
 func TestRunRepositoryContextUnknownAndScope(t *testing.T) {
 	f := newScopeFixture(t)
-	if _, err := f.store.SetQueuePriorityPatterns(t.Context(), "admin", []string{"feature/*"}); err != nil {
+	if _, err := f.store.SetQueuePriorityPatterns(t.Context(), "admin", []string{"feature/context"}); err != nil {
 		t.Fatal(err)
 	}
 	old, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.visible.ID, RefKind: model.RefBranch, Ref: "feature/context", SHA: strings.Repeat("a", 40), Actor: "reader", Trigger: "push"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if claimed, err := f.store.ClaimNextRun(t.Context()); err != nil || claimed.ID != old.ID {
+		t.Fatalf("claim context fixture: %+v %v", claimed, err)
 	}
 	if _, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.visible.ID, RefKind: model.RefBranch, Ref: old.Ref, SHA: strings.Repeat("b", 40), Actor: "reader", Trigger: "push"}); err != nil {
 		t.Fatal(err)
@@ -175,7 +178,7 @@ func TestRunRepositoryContextUnknownAndScope(t *testing.T) {
 		rows := runContextJSON(t, value)["runs"].([]any)
 		if view == "history" {
 			if len(rows) != 0 {
-				t.Fatalf("history includes queued rows: %#v", rows)
+				t.Fatalf("history includes active rows: %#v", rows)
 			}
 			continue
 		}
@@ -209,13 +212,16 @@ func TestRunRepositoryContextUnknownAndScope(t *testing.T) {
 
 func TestRunRepositoryContextHTTPFilter(t *testing.T) {
 	f := newControlFixture(t)
-	// Priority-selected work stays active beside a newer run in the same lane.
+	// Claimed priority-selected work stays active beside a newer run in the same lane.
 	if _, err := f.store.SetQueuePriorityPatterns(t.Context(), "admin", []string{"feature/*"}); err != nil {
 		t.Fatal(err)
 	}
 	reader := f.api(t)
 	// A nonmatching run remains ahead globally even when the filter hides it.
 	if _, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/other", SHA: strings.Repeat("c", 40), Actor: "reader", Trigger: "push"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.ClaimNextRun(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	var runs []model.Run
@@ -225,6 +231,11 @@ func TestRunRepositoryContextHTTPFilter(t *testing.T) {
 			t.Fatal(err)
 		}
 		runs = append(runs, run.Run)
+		if i == 0 {
+			if claimed, err := f.store.ClaimNextRun(t.Context()); err != nil || claimed.ID != run.ID {
+				t.Fatalf("claim context fixture: %+v %v", claimed, err)
+			}
+		}
 	}
 	server, err := api.New(runSurfaceAuth{}, reader, reader, "test")
 	if err != nil {

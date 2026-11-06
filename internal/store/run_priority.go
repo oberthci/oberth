@@ -217,3 +217,29 @@ func (s *Store) inheritQueuePriorityTx(ctx context.Context, tx *sql.Tx, previous
 	}
 	return scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id=?`, next.ID))
 }
+
+// A new head carries the most recent explicit admin decision from queued work
+// it replaces. It gets a fresh FIFO place; running work never lends its override.
+func (s *Store) inheritBranchHeadPriorityTx(ctx context.Context, tx *sql.Tx, next model.Run, now int64) error {
+	var previousID string
+	err := tx.QueryRowContext(ctx, `SELECT runs.id FROM runs
+ JOIN run_priority_overrides AS priority ON priority.run_id=runs.id
+ WHERE runs.repo_id=? AND runs.ref_kind='branch' AND runs.ref=? AND runs.schedule_entry=?
+ AND runs.id!=? AND runs.sha!=? AND runs.trigger!='promotion'
+ AND runs.status='queued' AND runs.started_at IS NULL
+ AND NOT EXISTS (SELECT 1 FROM publications WHERE publications.run_id=runs.id AND publications.status='pending')
+ ORDER BY priority.updated_at DESC, runs.queue_sequence DESC LIMIT 1`, next.RepoID, next.Ref, next.ScheduleEntry, next.ID, next.SHA).Scan(&previousID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("find superseded admin priority: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO run_priority_overrides(run_id,priority,reason,actor,updated_at)
+ SELECT ?,priority,reason,actor,updated_at FROM run_priority_overrides WHERE run_id=?`, next.ID, previousID); err != nil {
+		return fmt.Errorf("inherit superseded admin priority: %w", err)
+	}
+	details, _ := json.Marshal(map[string]string{"previous_run_id": previousID})
+	_, err = s.appendAuditAction(ctx, tx, model.AuditActionSpec{Actor: "oberth", Action: "run.priority.inherit", ResourceType: "run", ResourceID: next.ID, Details: string(details)}, now)
+	return err
+}

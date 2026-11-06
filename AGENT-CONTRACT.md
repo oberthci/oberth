@@ -525,9 +525,12 @@ containing CI and real workload qualification remain separately required.
   authenticated authority; low/standard need no urgency grant. A standard request
   does not lower natural delivery priority. Sync only raises an existing waiting
   build; explicit lowering uses admin run_priority. Accepted priority and automatic
-  protection survive supersession, replay, restart and eligible infrastructure
-  refire, retaining original FIFO and reasons. Explicit protected supersession
-  still requires requester/admin authority and respects publication/cleanup guards.
+  protection survive replay, restart and eligible infrastructure
+  refire, retaining original FIFO and reasons. A new branch-head push replaces
+  queued, not-started runs at older SHAs in the same repo/ref/schedule lane, at
+  every priority class. The latest explicit admin override carries to the new
+  head, with its actor and reason but a fresh FIFO place. Running work retains
+  requester/admin supersession protection. Publication/cleanup guards remain.
   Legacy input normal maps to standard; authorized high/highest requests, overrides
   and grants map to high. Automatic legacy high/highest protection rows with an
   empty requested field confer no high authority. The timestamp migration

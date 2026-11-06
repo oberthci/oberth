@@ -334,7 +334,7 @@ func pushRunResult(repository model.Repository, enqueued model.EnqueueRunResult)
 		return PushResult{Repository: repository, Duplicate: enqueued.Duplicate, Reason: enqueued.DeferredReason}
 	}
 	run := presentationRun(enqueued.Run)
-	return PushResult{Repository: repository, Run: &run, Cancellations: enqueued.Cancellations, Duplicate: enqueued.Duplicate}
+	return PushResult{Repository: repository, Run: &run, Cancellations: enqueued.Cancellations, SupersededCount: enqueued.SupersededCount, Duplicate: enqueued.Duplicate}
 }
 
 func receiveSpec(id, actor string, repoID int64, kind model.RefKind, ref, oldSHA, objectSHA, commitSHA, outcome string) model.ReceiveEventSpec {

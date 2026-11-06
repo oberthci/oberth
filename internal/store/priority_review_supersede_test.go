@@ -22,6 +22,9 @@ func TestPriorityReviewExplicitPrioritySupersede(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			// Running work retains requester/admin protection; new heads replace queued work.
+			_, err = s.ClaimNextRun(t.Context())
+			requireStoreNoError(t, err)
 			spec.Actor, spec.SHA, spec.Supersede = actor, strings.Repeat("b", 40), true
 			if _, err = s.SetPriorityGrant(t.Context(), "admin", model.PriorityGrant{Identity: actor, MaxClass: model.PriorityHighest, Expires: now.Add(time.Hour)}); err != nil {
 				t.Fatal(err)
@@ -36,7 +39,7 @@ func TestPriorityReviewExplicitPrioritySupersede(t *testing.T) {
 				t.Fatal(err)
 			}
 			if actor == "other" {
-				if old.Status != model.RunQueued || old.SupersededBy != "" {
+				if old.Status != model.RunRunning || old.SupersededBy != "" {
 					t.Fatalf("other cancelled protected run: %+v", old)
 				}
 			} else if old.Status != model.RunInterrupted || old.SupersededBy != next.ID {

@@ -97,7 +97,7 @@ func describePushResult(event gitcache.ReceiveEvent, result PushResult) string {
 		if result.Duplicate {
 			line += " · replay of an already-recorded push"
 		}
-		if count := len(result.Cancellations); count > 0 {
+		if count := result.SupersededCount; count > 0 {
 			plural := ""
 			if count != 1 {
 				plural = "s"

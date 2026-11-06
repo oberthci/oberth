@@ -247,7 +247,7 @@ RETURNING `+runColumns,
 	if err != nil {
 		return model.EnqueueRunResult{}, err
 	}
-	// Priority submissions queue independently unless supersession is explicit.
+	// Preserve priority protection for running work unless supersession is explicit.
 	if value.Priority.Rank() > 0 && spec.Priority == "" {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO run_priority_requests(run_id,requested,accepted,reason,actor,refusal) VALUES(?,'',?,?,?,'')`, id, value.Priority, value.PriorityReason, spec.Actor); err != nil {
 			return model.EnqueueRunResult{}, err
@@ -264,12 +264,27 @@ RETURNING `+runColumns,
 		}
 		admin = admin || allowed
 	}
-	guard := ` AND (` + supersessionEligibleSQL + ` OR (? AND (COALESCE((SELECT actor FROM run_priority_overrides WHERE run_id=runs.id),(SELECT actor FROM run_priority_requests WHERE run_id=runs.id),actor)=? OR ?)))`
+	// A new branch head replaces stale, unclaimed work in every priority class.
+	// Keep the existing priority/authority rules for running work and retries.
+	newHead := spec.RefKind == model.RefBranch && !spec.Release && (spec.Trigger == "branch" || spec.Trigger == "push") && inheritedAdmissionSequence == 0
+	guard := ` AND ((? AND status='queued' AND started_at IS NULL AND sha!=?) OR (? AND (` + supersessionEligibleSQL + ` OR (? AND (COALESCE((SELECT actor FROM run_priority_overrides WHERE run_id=runs.id),(SELECT actor FROM run_priority_requests WHERE run_id=runs.id),actor)=? OR ?)))))`
 	if inheritedAdmissionSequence > 0 {
 		// Recovery replaces only its stranded source, preserving every newer push.
 		guard += ` AND COALESCE(admission_sequence,queue_sequence)=` + fmt.Sprint(inheritedAdmissionSequence)
 	}
+	// Compute running supersession above from the incoming request, before the
+	// queued predecessor lends its override to the replacement.
+	if newHead {
+		if err := s.inheritBranchHeadPriorityTx(ctx, tx, value, now); err != nil {
+			return model.EnqueueRunResult{}, err
+		}
+		value, err = scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE id=?`, id))
+		if err != nil {
+			return model.EnqueueRunResult{}, err
+		}
+	}
 	var cancellations []model.RunCancellation
+	var supersededCount int64
 	// Supersession stays inside a branch and its schedule entry. Named
 	// schedules are independent of other entries and ordinary branch pushes.
 	// Promotion CI uses a
@@ -277,7 +292,7 @@ RETURNING `+runColumns,
 	// and must neither supersede nor be superseded by a client push. A pending
 	// publication also owns its run until the external mutation terminalizes;
 	// newer work stays queued behind that durable obligation.
-	if spec.RefKind == model.RefBranch && spec.Trigger != "promotion" && supersede {
+	if spec.RefKind == model.RefBranch && spec.Trigger != "promotion" && (supersede || newHead) {
 		rows, err := tx.QueryContext(ctx, `
 SELECT id, job_name, phase FROM runs
 WHERE id != ? AND repo_id = ? AND ref_kind = 'branch' AND ref = ? AND schedule_entry = ?
@@ -287,7 +302,7 @@ WHERE id != ? AND repo_id = ? AND ref_kind = 'branch' AND ref = ? AND schedule_e
       WHERE publications.run_id = runs.id AND publications.status = 'pending'
   )
   AND status IN ('queued', 'running') AND (status = 'running' OR job_name != '')
- `+guard+` ORDER BY queue_sequence`, id, spec.RepoID, spec.Ref, spec.ScheduleEntry, explicit, spec.Actor, admin)
+ `+guard+` ORDER BY queue_sequence`, id, spec.RepoID, spec.Ref, spec.ScheduleEntry, newHead, spec.SHA, supersede, explicit, spec.Actor, admin)
 		if err != nil {
 			return model.EnqueueRunResult{}, fmt.Errorf("find running superseded runs: %w", err)
 		}
@@ -326,8 +341,8 @@ WHERE id != ? AND repo_id = ? AND ref_kind = 'branch' AND ref = ? AND schedule_e
 	if err := registerRunIssueWork(ctx, tx, value, now); err != nil {
 		return model.EnqueueRunResult{}, err
 	}
-	if spec.RefKind == model.RefBranch && spec.Trigger != "promotion" && supersede {
-		if _, err := tx.ExecContext(ctx, `
+	if spec.RefKind == model.RefBranch && spec.Trigger != "promotion" && (supersede || newHead) {
+		updated, err := tx.ExecContext(ctx, `
 UPDATE runs
 SET status = 'interrupted', phase = 'interrupted', reason = ?, superseded_by = ?,
     finished_at = ?, updated_at = ?
@@ -338,8 +353,13 @@ WHERE id != ? AND repo_id = ? AND ref_kind = 'branch' AND ref = ? AND schedule_e
       WHERE publications.run_id = runs.id AND publications.status = 'pending'
   )
   AND status IN ('queued', 'running')`+guard,
-			"superseded by newer run", id, now, now, id, spec.RepoID, spec.Ref, spec.ScheduleEntry, explicit, spec.Actor, admin); err != nil {
+			"superseded by newer run", id, now, now, id, spec.RepoID, spec.Ref, spec.ScheduleEntry, newHead, spec.SHA, supersede, explicit, spec.Actor, admin)
+		if err != nil {
 			return model.EnqueueRunResult{}, fmt.Errorf("supersede earlier runs: %w", err)
+		}
+		supersededCount, err = updated.RowsAffected()
+		if err != nil {
+			return model.EnqueueRunResult{}, fmt.Errorf("count superseded runs: %w", err)
 		}
 		for _, cancellation := range cancellations {
 			// Upsert: a run superseded across a restart may already carry an
@@ -360,7 +380,7 @@ ON CONFLICT(run_id) DO UPDATE SET
 			}
 		}
 	}
-	return model.EnqueueRunResult{Run: value, Cancellations: cancellations}, nil
+	return model.EnqueueRunResult{Run: value, Cancellations: cancellations, SupersededCount: supersededCount}, nil
 }
 
 func (s *Store) ClaimNextRun(ctx context.Context) (model.Run, error) {

@@ -536,13 +536,14 @@ type TagPush struct {
 }
 
 type PushResult struct {
-	Repository    model.Repository        `json:"repository"`
-	Run           *model.Run              `json:"run,omitempty"`
-	Cancellations []model.RunCancellation `json:"cancellations,omitempty"`
-	Deleted       bool                    `json:"deleted"`
-	Admitted      bool                    `json:"admitted"`
-	Duplicate     bool                    `json:"duplicate"`
-	Reason        string                  `json:"reason,omitempty"`
+	Repository      model.Repository        `json:"repository"`
+	Run             *model.Run              `json:"run,omitempty"`
+	SupersededCount int64                   `json:"superseded_count,omitempty"`
+	Cancellations   []model.RunCancellation `json:"cancellations,omitempty"`
+	Deleted         bool                    `json:"deleted"`
+	Admitted        bool                    `json:"admitted"`
+	Duplicate       bool                    `json:"duplicate"`
+	Reason          string                  `json:"reason,omitempty"`
 }
 
 type StatusResponse struct {

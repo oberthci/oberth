@@ -98,7 +98,11 @@ func (s *Store) enqueueReceiveEventTx(ctx context.Context, tx *sql.Tx, event mod
 		if err != nil {
 			return model.EnqueueRunResult{}, fmt.Errorf("read duplicate receive run: %w", err)
 		}
-		return model.EnqueueRunResult{Run: run, Duplicate: true}, nil
+		var supersededCount int64
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM runs WHERE repo_id=? AND ref_kind=? AND ref=? AND schedule_entry=? AND superseded_by=?`, run.RepoID, run.RefKind, run.Ref, run.ScheduleEntry, runID).Scan(&supersededCount); err != nil {
+			return model.EnqueueRunResult{}, fmt.Errorf("count duplicate receive supersessions: %w", err)
+		}
+		return model.EnqueueRunResult{Run: run, Duplicate: true, SupersededCount: supersededCount}, nil
 	}
 	if reason, err := s.deferBranchTx(ctx, tx, event, validatedRun); err != nil {
 		return model.EnqueueRunResult{}, err

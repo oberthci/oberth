@@ -52,7 +52,7 @@ func TestSubmissionPriorityExpiryAndSupersessionExceptions(t *testing.T) {
 	}
 }
 
-func TestRCProtectionSurvivesPatternRemoval(t *testing.T) {
+func TestNewBranchHeadReplacesQueuedRCWithoutRestoringRemovedPattern(t *testing.T) {
 	now := time.Now()
 	s := testStore(t, &now)
 	repo := createRepo(t, s)
@@ -66,12 +66,13 @@ func TestRCProtectionSurvivesPatternRemoval(t *testing.T) {
 	if _, err = s.SetQueuePriorityPatterns(t.Context(), "admin", nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.EnqueueRun(t.Context(), testRunSpec(repo.ID, "rc/v1", strings.Repeat("b", 40))); err != nil {
+	next, err := s.EnqueueRun(t.Context(), testRunSpec(repo.ID, "rc/v1", strings.Repeat("b", 40)))
+	if err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.Run(t.Context(), first.ID)
-	if err != nil || got.Status != model.RunQueued {
-		t.Fatalf("accepted RC lost protection: %+v %v", got, err)
+	if err != nil || got.Status != model.RunInterrupted || got.SupersededBy != next.ID || next.Priority != model.PriorityStandard {
+		t.Fatalf("new head retained stale RC work or restored removed priority: old=%+v next=%+v %v", got, next, err)
 	}
 }
 
