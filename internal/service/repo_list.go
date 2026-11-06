@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/oberthci/oberth/internal/api"
@@ -38,10 +39,11 @@ func (service *API) repoList(ctx context.Context) (api.RepoListResponse, error) 
 	latest := map[int64]model.Run{}
 	if service.history != nil {
 		runs, historyErr := service.history.ListLatestRunsPerRepo(ctx, 1)
-		if historyErr == nil {
-			for _, run := range runs {
-				latest[run.RepoID] = run
-			}
+		if historyErr != nil {
+			return api.RepoListResponse{}, fmt.Errorf("list latest repository runs: %w", historyErr)
+		}
+		for _, run := range runs {
+			latest[run.RepoID] = run
 		}
 	}
 	summaries := make([]repoSummary, len(repos))

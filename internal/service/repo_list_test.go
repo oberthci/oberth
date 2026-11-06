@@ -1,11 +1,14 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/oberthci/oberth/internal/api"
+	"github.com/oberthci/oberth/internal/model"
 )
 
 func TestRepoListReturnsOnlySlimScopedRecords(t *testing.T) {
@@ -44,5 +47,24 @@ func TestRepoListReturnsOnlySlimScopedRecords(t *testing.T) {
 	}
 	if len(full.([]RepoView)[0].LatestRuns) < 2 {
 		t.Fatal("dashboard history lost")
+	}
+}
+
+type failingRepoHistory struct {
+	RunHistory
+	cause error
+}
+
+func (history failingRepoHistory) ListLatestRunsPerRepo(context.Context, int) ([]model.Run, error) {
+	return nil, history.cause
+}
+
+func TestRepoListReturnsHistoryFailure(t *testing.T) {
+	f := newScopeFixture(t)
+	failure := errors.New("history unavailable")
+	f.service.history = failingRepoHistory{RunHistory: f.service.history, cause: failure}
+	_, err := f.call(scopedActor, "repo_list", map[string]any{})
+	if !errors.Is(err, failure) || !strings.Contains(err.Error(), "list latest repository runs") {
+		t.Fatal(err)
 	}
 }
