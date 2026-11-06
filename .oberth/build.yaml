@@ -1,7 +1,10 @@
 # Main storage budgets are explicit: bounded Argo helpers also cap the aggregate Pod.
 # Unsized cold Go/scanner leaves retain the existing 8Gi private scratch envelope;
 # utility/PVC writers use 512Mi and artifact staging uses 2Gi, all provisional.
-# Existing measured bounds remain unchanged. Samples are lower bounds, not complete peaks.
+# CPU/memory and existing larger storage bounds remain provisional; main storage limits are at least 512Mi.
+# Sources: branch a5144ee1989c and release 398379142b7c; branch-last30.yaml retains failure floors.
+# Pod storage samples include wait (512Mi limit) and disk /tmp (8Gi emptyDir sizeLimit), not PVCs.
+# Neither the helper allowance nor the emptyDir sizeLimit is a measured main-container peak.
 # Oberth CI pipeline (branch-trigger) for the oberth repository.
 #
 # Every step is its own Argo template with its own container, exit code, and
@@ -174,6 +177,9 @@ spec:
       workingDir: /work/src
       command: ["/bin/sh", "-ec"]
       args: ["/usr/bin/python3 -I -B hack/test-new-migration.py; /usr/bin/python3 -I -B hack/test-generic-names.py; /usr/bin/python3 -I -B hack/check-generic-names.py; /usr/bin/python3 -I -B hack/test-private-addresses.py; exec /usr/bin/python3 -I -B hack/check-private-addresses.py"]
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 894.1m, memory peak 142.6Mi, pod storage 0.1Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
           cpu: 1000m # measured request 1470m; retain the CI policy cap
@@ -268,6 +274,9 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak unknown, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 2; retain the CI policy cap
@@ -327,6 +336,9 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak unknown, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 2; retain the CI policy cap
@@ -396,6 +408,9 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 690.6Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources: # remeasure: PVC scratch placement; residual local demand remains unknown
         requests:
           cpu: 1000m # measured request 1288m; retain the CI policy cap
@@ -464,6 +479,9 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 157Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources: # remeasure: PVC scratch placement; residual local demand remains unknown
         requests:
           cpu: 1000m
@@ -533,6 +551,9 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 973.8Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 2365m; retain the CI policy cap
@@ -541,7 +562,7 @@ spec:
         limits:
           cpu: 2365m
           memory: 2688Mi
-          ephemeral-storage: 384Mi # remeasure: staged Argo 153.40Mi + provisional residual 96Mi, x1.5 rounded up
+          ephemeral-storage: 512Mi # provisional minimum; incomplete sampled coverage
 
   # Pinned helm-unittest binary; fetch, verification and extraction have separate statuses.
   - name: fetch-helm-unittest
@@ -579,6 +600,9 @@ spec:
       - name: work
         mountPath: /tmp/oberth-tools
         subPath: tools
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 71.3Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: "1"
@@ -605,6 +629,9 @@ spec:
       - name: work
         mountPath: /tmp/oberth-tools
         subPath: tools
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 37.1Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: "1"
@@ -631,6 +658,9 @@ spec:
       - name: work
         mountPath: /tmp/oberth-tools
         subPath: tools
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 124.9m, memory peak 100.1Mi, pod storage 0Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: "1"
@@ -709,6 +739,9 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak unknown, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 864m
@@ -768,6 +801,9 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak unknown, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 124m
@@ -833,6 +869,9 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak unknown, pod storage 0Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 192m
@@ -899,6 +938,9 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak unknown, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 100m
@@ -952,6 +994,9 @@ spec:
         mountPath: /tmp/oberth-tools
         subPath: tools
         readOnly: true
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 254Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 2; retain the CI policy cap
@@ -1026,6 +1071,9 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 45.3m, memory peak 315.8Mi, pod storage 0Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources: # remeasure: fresh uncensored measurements required
         requests:
           cpu: 360m
@@ -1099,6 +1147,9 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 1162Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources: # remeasure: unmet need limits.cpu 5830m, requests.cpu 4845m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
           cpu: 1000m # measured request 4000m; retain the CI policy cap
@@ -1107,7 +1158,7 @@ spec:
         limits:
           cpu: 4000m
           memory: 8Gi
-          ephemeral-storage: 446Mi # remeasure: provisional residual cap; compiler scratch now uses PVC
+          ephemeral-storage: 512Mi # provisional minimum; incomplete sampled coverage
   # ---- parallel race-test burns ----
   # Each package runs once: dedicated store/service/gitcache groups and the
   # remainder discovered by go list ./.... Git-cache already has a required
@@ -1166,6 +1217,9 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 4495.7Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m
@@ -1254,6 +1308,9 @@ spec:
         subPath: trivy-cache
       # The 4Gi envelope includes up to 768Mi of store fixtures on tmpfs;
       # leave room above the 2GiB Go heap target for the race detector.
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 1950.3m, memory peak 929.7Mi, pod storage 245.8Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
           cpu: 1000m # measured request 1595m; retain the CI policy cap
@@ -1322,6 +1379,9 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 985.9m, memory peak 471.3Mi, pod storage 279.8Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
           cpu: 1000m # measured request 1533m; retain the CI policy cap
@@ -1392,6 +1452,10 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 2006.3m, memory peak 3021.9Mi, pod storage 585.2Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
+      # Failed history in branch-last30.yaml: retain existing memory/storage failure floors.
       resources: # remeasure: unmet need limits.cpu 4340m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
           cpu: 1000m # measured request 2249m; retain the CI policy cap
@@ -1460,6 +1524,9 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 250.4m, memory peak 442.6Mi, pod storage 191.3Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
           cpu: 796m
@@ -1468,7 +1535,7 @@ spec:
         limits:
           cpu: 2000m # retain the two-processor race launcher budget
           memory: 896Mi
-          ephemeral-storage: 267Mi
+          ephemeral-storage: 512Mi # provisional minimum; incomplete sampled coverage
 
   - name: build-static-git-runtime
     activeDeadlineSeconds: 452
@@ -1526,6 +1593,9 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 1485.8m, memory peak 4216.4Mi, pod storage 513Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
           cpu: 1000m # measured request 2348m; retain the CI policy cap
@@ -1575,6 +1645,9 @@ spec:
         mountPath: /etc/ssl/certs/ca-certificates.crt
         subPath: static-git-qualification/rootfs/etc/ssl/certs/ca-certificates.crt
         readOnly: true
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 191.3m, memory peak 204.2Mi, pod storage 154.6Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 728m
@@ -1583,7 +1656,7 @@ spec:
         limits:
           cpu: 1930m
           memory: 320Mi
-          ephemeral-storage: 235Mi
+          ephemeral-storage: 512Mi # provisional minimum; incomplete sampled coverage
 
   # Every commit/file in the offline, real multi-pack source history.
   - name: test-archive-history
@@ -1639,6 +1712,9 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 70m, memory peak 222Mi, pod storage 0Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 1989m; retain the CI policy cap
@@ -1647,7 +1723,7 @@ spec:
         limits:
           cpu: 2020m
           memory: 512Mi
-          ephemeral-storage: 245Mi
+          ephemeral-storage: 512Mi # provisional minimum; incomplete sampled coverage
 
   # ---- security burn (single step) ----
   # Maps to: Test("security", repositorySteps(
@@ -1688,6 +1764,9 @@ spec:
         value: "/tmp"
       - name: TRIVY_CACHE_DIR
         value: "/tmp/oberth-trivy"
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 1984.5Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 1052m; retain the CI policy cap
@@ -1724,6 +1803,9 @@ spec:
         mountPath: /tmp/oberth-tools
         subPath: tools
         readOnly: true
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak unknown, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 1383m; retain the CI policy cap
@@ -1759,6 +1841,9 @@ spec:
         mountPath: /tmp/oberth-tools
         subPath: tools
         readOnly: true
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 51.5Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: "1"
@@ -1790,6 +1875,9 @@ spec:
         mountPath: /tmp/oberth-tools
         subPath: tools
         readOnly: true
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 66.9Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: "1"
@@ -1816,6 +1904,9 @@ spec:
         value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
       - name: HOME
         value: "/tmp"
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 50.8Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: "1"
@@ -1842,6 +1933,9 @@ spec:
         value: "/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin"
       - name: HOME
         value: "/tmp"
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 47Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: "1"
@@ -1912,6 +2006,9 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 553.1Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 513m
@@ -1980,6 +2077,9 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 572.6Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 2660m; retain the CI policy cap
@@ -2050,6 +2150,9 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 566.4Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 2614m; retain the CI policy cap
@@ -2117,6 +2220,9 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 548.7Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 2614m; retain the CI policy cap
@@ -2147,6 +2253,9 @@ spec:
       - name: work
         mountPath: /tmp/diagnostic-work
         subPath: diagnostic
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 127Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 100m
@@ -2257,6 +2366,9 @@ spec:
       - name: work
         mountPath: /tmp/vpt-private
         subPath: vpt-private
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 874.2m, memory peak 2673.5Mi, pod storage 638.3Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 1390m; retain the CI policy cap
@@ -2286,6 +2398,9 @@ spec:
       - name: work
         mountPath: /tmp/vpt-tools
         subPath: vpt-tools
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 198.4Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
           cpu: 620m
@@ -2317,6 +2432,9 @@ spec:
         mountPath: /tmp/vpt-tools
         subPath: vpt-tools
         readOnly: true
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 34.6Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
           cpu: 485m
@@ -2405,6 +2523,9 @@ spec:
         value: "0"
       # Local race compilation peaked at 1.28 GiB RSS; reserve headroom for
       # the compiler/linker and parent processes. Confirm CI cgroup peaks.
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 1305.7m, memory peak 3136Mi, pod storage 3414.9Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
           cpu: 1000m # measured request 1951m; retain the CI policy cap
@@ -2469,6 +2590,9 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
+      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 58.4Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources: # resources: provisional, re-measure
         requests:
           cpu: 687m

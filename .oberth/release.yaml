@@ -1,7 +1,10 @@
 # Main storage budgets are explicit: bounded Argo helpers also cap the aggregate Pod.
 # Unsized cold Go/scanner leaves retain the existing 8Gi private scratch envelope;
 # utility/PVC writers use 512Mi and artifact staging uses 2Gi, all provisional.
-# Existing measured bounds remain unchanged. Samples are lower bounds, not complete peaks.
+# CPU/memory and existing larger storage bounds remain provisional; main storage limits are at least 512Mi.
+# Sources: branch a5144ee1989c and release 398379142b7c; branch-last30.yaml retains failure floors.
+# Pod storage samples include wait (512Mi limit) and disk /tmp (8Gi emptyDir sizeLimit), not PVCs.
+# Neither the helper allowance nor the emptyDir sizeLimit is a measured main-container peak.
 # Release workflow. The Golang and Trivy images pin their Linux amd64
 # platform manifests, not multi-platform indexes: bootstrap tools and their
 # reviewed digests target amd64 even when the Kubernetes node is arm64.
@@ -242,6 +245,9 @@ spec:
       - name: bootstrap-tools
         mountPath: /tmp/oberth-tools
         readOnly: false
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak unknown, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 1250m; retain the CI policy cap
@@ -283,6 +289,9 @@ spec:
       - name: bootstrap-tools
         mountPath: /tmp/oberth-tools
         readOnly: true
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 40.9Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
           cpu: 625m
@@ -336,6 +345,9 @@ spec:
       - name: bootstrap-tools
         mountPath: /tmp/oberth-tools
         readOnly: false
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 197.2Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 625m
@@ -391,6 +403,9 @@ spec:
       - name: bootstrap-tools
         mountPath: /tmp/oberth-tools
         readOnly: false
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak unknown, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 1250m; retain the CI policy cap
@@ -444,6 +459,9 @@ spec:
       - name: bootstrap-tools
         mountPath: /tmp/oberth-tools
         readOnly: false
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 1710.6m, memory peak 2345.6Mi, pod storage 325.2Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources: # remeasure: unmet need limits.cpu 4500m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
           cpu: 1000m # measured request 3496m; retain the CI policy cap
@@ -506,6 +524,9 @@ spec:
       - name: bootstrap-tools
         mountPath: /tmp/oberth-tools
         readOnly: false
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 816m, memory peak 2681.6Mi, pod storage 1709.3Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 1360m; retain the CI policy cap
@@ -576,6 +597,9 @@ spec:
       - name: bootstrap-tools
         mountPath: /tmp/oberth-tools
         readOnly: false
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 176Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 173m
@@ -629,6 +653,9 @@ spec:
       - name: bootstrap-tools
         mountPath: /tmp/oberth-tools
         readOnly: true
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 36.8Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 586m
@@ -682,6 +709,9 @@ spec:
       - name: bootstrap-tools
         mountPath: /tmp/oberth-tools
         readOnly: false
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak unknown, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 100m
@@ -746,6 +776,9 @@ spec:
       - name: bootstrap-tools
         mountPath: /tmp/oberth-tools
         readOnly: false
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 116.6m, memory peak 596.2Mi, pod storage 0Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 1338m; retain the CI policy cap
@@ -810,6 +843,9 @@ spec:
       - name: bootstrap-tools
         mountPath: /tmp/oberth-tools
         readOnly: false
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 720.2m, memory peak 615.9Mi, pod storage 0.1Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 1333m; retain the CI policy cap
@@ -862,6 +898,9 @@ spec:
       - name: bootstrap-tools
         mountPath: /tmp/oberth-tools
         readOnly: true
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak unknown, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 1250m; retain the CI policy cap
@@ -932,6 +971,9 @@ spec:
       - name: bootstrap-node-inputs
         mountPath: /tmp/oberth-node-inputs
         readOnly: false
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak unknown, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 686m
@@ -985,6 +1027,9 @@ spec:
       - name: bootstrap-node-inputs
         mountPath: /tmp/oberth-node-inputs
         readOnly: true
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak unknown, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 3113m; retain the CI policy cap
@@ -1047,6 +1092,9 @@ spec:
         mountPath: /tmp/oberth-tools
         subPath: vet
         readOnly: true
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 3466m, memory peak 4237.3Mi, pod storage 2301.2Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources: # remeasure: unmet need limits.cpu 4510m, requests.cpu 4158m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
           cpu: 1000m # measured request 4000m; retain the CI policy cap
@@ -1106,6 +1154,9 @@ spec:
         readOnly: true
       # Historical release-lint peak: 5,838,360,576 sampled bytes.
       # Keep 8Gi for headroom; the analysis process already uses a 2GiB Go memory target.
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 2421.6m, memory peak 5831.2Mi, pod storage 2576.8Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources: # remeasure: unmet need limits.cpu 6010m, memory 8512Mi, requests.cpu 4062m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
           cpu: 1000m # measured request 4000m; retain the CI policy cap
@@ -1159,6 +1210,9 @@ spec:
         mountPath: /tmp/oberth-tools
         subPath: deadcode
         readOnly: true
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 1219.6m, memory peak 4853.7Mi, pod storage 0.1Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m
@@ -1224,6 +1278,9 @@ spec:
       - name: PATH
         value: /usr/bin:/bin
       volumeMounts: []
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 172.7m, memory peak 1983.5Mi, pod storage 0Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 3591m; retain the CI policy cap
@@ -1307,6 +1364,9 @@ spec:
         mountPath: /tmp/oberth-tools
         subPath: release-test-store
         readOnly: true
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 1972.2m, memory peak 3491.4Mi, pod storage 1900.5Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 1595m; retain the CI policy cap
@@ -1371,6 +1431,9 @@ spec:
         mountPath: /tmp/oberth-tools
         subPath: release-test-service
         readOnly: true
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 1088.7m, memory peak 4096Mi, pod storage 3461.5Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 1533m; retain the CI policy cap
@@ -1441,6 +1504,9 @@ spec:
       - name: bootstrap-node-inputs
         mountPath: /tmp/oberth-node-inputs
         readOnly: true
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 2131.2m, memory peak 6208Mi, pod storage 5213.9Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 2249m; retain the CI policy cap
@@ -1501,6 +1567,9 @@ spec:
         mountPath: /tmp/oberth-tools
         subPath: release-test-gitcache
         readOnly: true
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 659m, memory peak 897.1Mi, pod storage 1763.6Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 796m
@@ -1554,6 +1623,9 @@ spec:
         mountPath: /tmp/oberth-tools
         subPath: release-chart-test
         readOnly: true
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak unknown, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 492m
@@ -1614,6 +1686,9 @@ spec:
         mountPath: /tmp/oberth-release
       # Historical build peak: 6,770,733,056 sampled bytes; 8Gi leaves
       # about 1.69Gi above that observation. Bound compiler processes and set a Go memory target above.
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 1581.3m, memory peak 6152.6Mi, pod storage 4219.2Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources: # remeasure: unmet need limits.cpu 6010m, memory 9792Mi, requests.cpu 5494m; raise after Oberth 0.17.84 (k8s-decides)
         requests:
           cpu: 1000m # measured request 4000m; retain the CI policy cap
@@ -1680,6 +1755,9 @@ spec:
         readOnly: true
       - name: bootstrap-output
         mountPath: /tmp/oberth-release
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 128.9Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 1250m; retain the CI policy cap
@@ -1770,6 +1848,9 @@ spec:
         readOnly: true
       - name: bootstrap-output
         mountPath: /tmp/oberth-release
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 68.1Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 157m
@@ -1863,6 +1944,9 @@ spec:
         readOnly: true
       - name: bootstrap-output
         mountPath: /tmp/oberth-release
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 823.5m, memory peak 3909.5Mi, pod storage 3549.3Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 1361m; retain the CI policy cap
@@ -1941,6 +2025,9 @@ spec:
         readOnly: true
       - name: bootstrap-output
         mountPath: /tmp/oberth-release
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 54.8Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 1250m; retain the CI policy cap
@@ -2013,6 +2100,9 @@ spec:
         readOnly: true
       - name: bootstrap-output
         mountPath: /tmp/oberth-release
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak 146.4Mi, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 1096m; retain the CI policy cap
@@ -2099,6 +2189,9 @@ spec:
         readOnly: true
       - name: bootstrap-output
         mountPath: /tmp/oberth-release
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 207.3m, memory peak 2268.1Mi, pod storage 0.2Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 359m
@@ -2187,6 +2280,9 @@ spec:
       - name: bootstrap-runtime-receipts
         mountPath: /tmp/oberth-runtime-receipts
         readOnly: false
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 104.7m, memory peak 394.4Mi, pod storage 0Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 719m
@@ -2237,6 +2333,9 @@ spec:
       # Seven copies of the trusted tools go through the page cache; under
       # heavy node I/O, dirty pages outrun writeback and a 512Mi limit
       # OOM-killed this step (v0.17.38 release run ef637d76).
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 879.2m, memory peak 4608.2Mi, pod storage 0.2Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
           cpu: 850m
@@ -2307,6 +2406,9 @@ spec:
       - name: bootstrap-tools
         mountPath: /tmp/oberth-tools
         readOnly: false
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak unknown, pod storage 0Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 155m
@@ -2362,6 +2464,9 @@ spec:
       - name: bootstrap-tools
         mountPath: /tmp/oberth-tools
         readOnly: false
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak unknown, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 625m
@@ -2415,6 +2520,9 @@ spec:
       - name: bootstrap-tools
         mountPath: /tmp/oberth-tools
         readOnly: false
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max unknown, memory peak unknown, pod storage unknown.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 625m
@@ -2484,6 +2592,9 @@ spec:
         readOnly: true
       - name: bootstrap-output
         mountPath: /tmp/oberth-release
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 1464.7m, memory peak 1601.8Mi, pod storage 954.9Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m # measured request 2785m; retain the CI policy cap
@@ -2586,6 +2697,9 @@ spec:
       - name: bootstrap-runtime-receipts
         mountPath: /tmp/oberth-runtime-receipts
         readOnly: true
+      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
+      # Observed CPU avg max 58m, memory peak 852.5Mi, pod storage 710.3Mi.
+      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
       resources:
         requests:
           cpu: 1000m
