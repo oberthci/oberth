@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/oberthci/oberth/internal/boundedio"
 )
@@ -38,7 +37,7 @@ func (c *Cache) ReadOptionalBlob(ctx context.Context, input, sha, file string, l
 // WithCachedPolicy requires it without opening a transport. A failed refresh
 // never falls back to a previously successful snapshot.
 func (c *Cache) ReadDefaultBlob(ctx context.Context, input, file string, limit int) (sha string, body []byte, exists bool, err error) {
-	requested := time.Now()
+	requested := c.policyNow()
 	if err := validatePolicyPath(file, limit); err != nil {
 		return "", nil, false, err
 	}

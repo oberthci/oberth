@@ -3050,16 +3050,22 @@ the nonroot verifier enforces the configured bound. These
 records trust the Kubernetes API/kubelet and bind observation time separately
 from container event times; they are not independent execution attestations.
 
-The cold OpenBao CI leaf fixes compiler parallelism at 1, GOMAXPROCS 2 and a
-256 MiB per-process Go memory target within its 3136Mi container limit.
-Download, cold compilation and execution have separate 45s/600s/120s bounds;
+The OpenBao CI leaf fixes compiler parallelism at 1, GOMAXPROCS 2 and a
+256 MiB per-process Go memory target within the retained #1287 R1 4096Mi container limit.
+It uses the same verified module and build caches as the other Go test leaves,
+with `/cache/gomod` and `/cache/gobuild` work-claim subPaths as the fallback and
+server-owned repository cache paths when configured. Setup tools remain read-only;
+the leaf receives no service-account token or real Vault credentials.
+Download, compilation and execution have separate 45s/600s/120s bounds;
 the 791s outer deadline leaves 26s cleanup margin. Download uses 40s plus 5s
-TERM-to-KILL, compilation 595s plus 5s TERM-to-KILL; verification/extraction
-are inside the download phase. Race instrumentation, all
-`TestPolicyIsolation` cases and the widened-policy negative control remain
-required. Compilation uses fresh private caches and verified module downloads;
-this is not a network-free test. Direct execution retains the installer package
-working directory used by `go test`.
+TERM-to-KILL, compilation 595s plus 5s TERM-to-KILL; checksum verification and
+extraction remain inside the download phase. The integration binary omits race
+instrumentation; test-store/test-service/test-rest keep their existing race runs.
+All `TestPolicyIsolation` cases, the widened-policy negative control and
+setup-helper TLS tests remain required. Compilation keeps `-mod=readonly` and
+direct execution retains the installer package working directory. OpenBao is a
+pinned, checksum-verified release download, not compiled here. Warm local builds
+are under a minute; resource requests are provisional pending CI remeasurement.
 
 ## Release capability preflight (#1139)
 

@@ -22,6 +22,8 @@ func TestPolicyRefreshCacheAuthorityAndExpiry(t *testing.T) {
 	repository := newTestRepository(t)
 	first := repository.commitFile(t, "first policy", "policy.yaml", "first\n")
 	cache := newTestCache(t, repository.upstream)
+	now := time.Now()
+	cache.policyClock = func() time.Time { return now }
 	ctx := WithBurstPolicy(t.Context())
 	cached, err := cache.Ensure(ctx, "example")
 	if err != nil {
@@ -39,10 +41,7 @@ func TestPolicyRefreshCacheAuthorityAndExpiry(t *testing.T) {
 	read(ctx, first)                   // Explicitly bounded burst reuse.
 	read(WithFreshPolicy(ctx), second) // Publication sees new authority now.
 	third := repository.commitFile(t, "third policy", "policy.yaml", "third\n")
-	value, _ := cache.policyRefreshes.Load(cached.Path)
-	entry := value.(policyRefresh)
-	entry.completed = time.Now().Add(-policyRefreshTTL)
-	cache.policyRefreshes.Store(cached.Path, entry)
+	now = now.Add(policyRefreshTTL)
 	read(ctx, third)
 	// A different tracking commit invalidates a recent entry, even within TTL.
 	runGit(t, cached.Path, "update-ref", upstreamRefPrefix+"heads/main", first)
@@ -122,6 +121,11 @@ func TestPolicyRefreshBurstSharesRetries(t *testing.T) {
 			}
 			upstream := &refusingPolicyUpstream{gitBackend: cache.backend, refusals: refusals, ceiling: 1}
 			cache.backend = upstream
+			// All readers belong to one logical burst, regardless of scheduler or
+			// real Git latency. Keep the freshness window fixed; retry timers and
+			// IO deadlines still use real time. Expiry is covered separately.
+			now := time.Now()
+			cache.policyClock = func() time.Time { return now }
 			logger := &policyRetryLog{}
 			cache.logger = logger
 			const runs = 12

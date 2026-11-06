@@ -20,6 +20,14 @@ const policyReadTimeout = 30 * time.Second
 type burstPolicyKey struct{}
 type cachedPolicyKey struct{}
 
+// policyNow controls snapshot freshness, independently of IO deadlines and retry delays.
+func (c *Cache) policyNow() time.Time {
+	if c.policyClock != nil {
+		return c.policyClock()
+	}
+	return time.Now()
+}
+
 // WithBurstPolicy opts initial admission into bounded successful snapshot reuse.
 // Other policy readers require a fetch begun after their request by default.
 func WithBurstPolicy(ctx context.Context) context.Context {
@@ -62,7 +70,7 @@ func (c *Cache) rememberPushPolicyLocked(ctx context.Context, path, branch strin
 	} else if ValidateSHA(strings.TrimSpace(sha)) != nil {
 		return
 	}
-	c.policyRefreshes.Store(path, policyRefresh{remote: remote, ref: ref, sha: strings.TrimSpace(sha), started: started, completed: time.Now()})
+	c.policyRefreshes.Store(path, policyRefresh{remote: remote, ref: ref, sha: strings.TrimSpace(sha), started: started, completed: c.policyNow()})
 }
 
 type policyRefresh struct {
@@ -93,7 +101,7 @@ func (c *Cache) refreshPolicyLocked(ctx context.Context, input, path string, req
 			ttl = policyFailureTTL
 		}
 		burst, _ := ctx.Value(burstPolicyKey{}).(bool)
-		if previous.remote == remote && time.Since(previous.completed) < ttl && (burst || previous.err != nil || previous.started.After(requested)) {
+		if previous.remote == remote && c.policyNow().Sub(previous.completed) < ttl && (burst || previous.err != nil || previous.started.After(requested)) {
 			if previous.err != nil {
 				return "", previous.err
 			}
@@ -115,7 +123,7 @@ func (c *Cache) refreshPolicyLocked(ctx context.Context, input, path string, req
 	}
 	// Invalidate first: an unsuccessful refresh cannot resurrect old authority.
 	c.policyRefreshes.Delete(path)
-	result := policyRefresh{remote: remote, started: time.Now()}
+	result := policyRefresh{remote: remote, started: c.policyNow()}
 	for attempt := 1; attempt <= policyRefreshAttempts; attempt++ {
 		result.ref, result.sha, result.err = c.fetchPolicyLocked(ctx, path)
 		if result.err == nil || !transientPolicyTransport(result.err) || ctx.Err() != nil || attempt == policyRefreshAttempts {
@@ -137,7 +145,7 @@ func (c *Cache) refreshPolicyLocked(ctx context.Context, input, path string, req
 	if transientPolicyTransport(result.err) {
 		result.err = fmt.Errorf("%w: %w", ErrPolicyUpstreamUnavailable, result.err)
 	}
-	result.completed = time.Now()
+	result.completed = c.policyNow()
 	// Unborn repositories must be rechecked, and caller cancellation must not
 	// poison followers whose independent contexts are still alive.
 	if ctx.Err() == nil && (result.sha != "" || transientPolicyTransport(result.err)) {
