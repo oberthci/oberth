@@ -196,7 +196,7 @@ spec:
     - - name: copy-test-tools
         template: copy-test-tools
   - name: tools-dir
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -251,7 +251,7 @@ spec:
           memory: 64Mi
           ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
   - name: verify-publisher-tools
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -295,7 +295,7 @@ spec:
           memory: 704Mi
           ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
   - name: copy-trivy
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -351,7 +351,7 @@ spec:
           memory: 576Mi
           ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
   - name: link-go
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -409,7 +409,7 @@ spec:
           memory: 192Mi
           ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
   - name: install-golangci-lint
-    activeDeadlineSeconds: 168
+    activeDeadlineSeconds: 288 # remeasure: observed span unknown; provisional previous 168s cap + 120s for contention
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -530,7 +530,7 @@ spec:
           memory: 4032Mi
           ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
   - name: fetch-cosign
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -603,7 +603,7 @@ spec:
           memory: 320Mi
           ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
   - name: verify-cosign
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -659,7 +659,7 @@ spec:
           memory: 256Mi
           ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
   - name: install-cosign
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -716,7 +716,7 @@ spec:
           memory: 128Mi
           ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
   - name: build-release-support
-    activeDeadlineSeconds: 126
+    activeDeadlineSeconds: 246 # remeasure: observed span unknown; provisional previous 126s cap + 120s for contention
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -783,7 +783,7 @@ spec:
           memory: 960Mi
           ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
   - name: build-release-image
-    activeDeadlineSeconds: 132
+    activeDeadlineSeconds: 252 # remeasure: observed span unknown; provisional previous 132s cap + 120s for contention
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -850,7 +850,7 @@ spec:
           memory: 960Mi
           ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
   - name: validate-tag
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -905,7 +905,7 @@ spec:
           memory: 128Mi
           ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
   - name: fetch-node
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -978,7 +978,7 @@ spec:
           memory: 192Mi
           ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
   - name: verify-node
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -1217,7 +1217,7 @@ spec:
           memory: 8Gi
           ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
   - name: release-scan
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -1579,7 +1579,7 @@ spec:
           ephemeral-storage: 2688Mi
 
   - name: release-chart-test
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -1980,7 +1980,7 @@ spec:
           cpu: '1'
           memory: 256Mi
   - name: release-package-chart
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -2292,7 +2292,7 @@ spec:
           memory: 640Mi
           ephemeral-storage: 2Gi # provisional artifact-staging bound; remeasure cold volumes
   - name: copy-test-tools
-    activeDeadlineSeconds: 143 # remeasure: observed 95s release pod span x1.5, rounded up
+    activeDeadlineSeconds: 215 # remeasure: observed 95s release pod span x1.5, rounded up; floor observed+120s for contention
     automountServiceAccountToken: false
     metadata:
       annotations:

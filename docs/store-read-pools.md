@@ -85,9 +85,14 @@ uses 60 minutes and the remaining-package lane uses 55 minutes. Release race
 groups use the same resource declarations and deadlines as the branch groups.
 
 The successful whole-store command took 2,635.148 seconds on a loaded host,
-including scheduler pauses. Applying 1.5× wall-time headroom and rounding up to
-minutes gives 66 minutes. The remaining-package lane retains its 55-minute
-bound from a successful 2,172.592-second whole-group run. Service's newer
+including scheduler pauses. Applying
+`max(1.5 × observed, observed + 120)` seconds of wall-time headroom and
+rounding up to minutes gives 66 minutes. The 120-second
+absolute floor gives short CI and release steps room for host contention.
+Use the span in each step's remeasure comment, retain larger existing
+deadlines, and apply the same floor to any derived internal watchdog.
+The remaining-package lane retains its 55-minute bound from a successful
+2,172.592-second whole-group run. Service's newer
 2,068-second observation requires at least 3,102 seconds; both its inner and
 outer watchdogs now allow 60 minutes. The Git-cache package watchdog remains
 20 minutes, while its measured 413-second container run has a 620-second outer
@@ -100,9 +105,18 @@ combined source under the declared container CPU, heap and tmpfs envelopes.
 An OOM, timeout or refused report makes a sampled peak a lower bound. Restore
 that step's own previous memory limit and deadline, or raise them; a sibling
 step cannot justify a reduction. For a successful uncensored run, use the
-maximum memory peak times 1.3 and maximum duration times 1.5, retaining the
-previous bounds after censored history. Kernel cgroup high-water marks and
-zero limit/OOM events are required before a local memory measurement qualifies.
+maximum memory peak times 1.3 and a deadline of at least
+`max(1.5 × observed, observed + 120)` seconds, retaining the previous bounds
+after censored history. Append `; floor observed+120s for contention` to
+the deadline remeasure comment; a censored span remains a lower bound.
+For existing short caps below 360 seconds without a recorded span, add
+120 seconds to the previous cap as a provisional contention allowance,
+label the observation unknown, and collect a Pod-span measurement. Larger
+unmeasured bounds remain unchanged; no timing observation is inferred from
+a cap or from main-container runtime.
+
+Kernel cgroup high-water marks and zero limit/OOM events are required before
+a local memory measurement qualifies.
 
 The contention test first checks committed reads
 while holding an uncommitted writer transaction, with a generous scaled

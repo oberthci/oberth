@@ -157,8 +157,8 @@ func TestOberthRaceBudgetsPreserveKnownBounds(t *testing.T) {
 	}
 	// Store's successful whole-command wall maximum (2635.148s) requires
 	// 66 minutes. Service and rest retain their successful whole-group maxima
-	// (2068s from ff85317f and 2172.592s) times 1.5, rounded up to minutes. Censored
-	// memory samples cannot reduce old bounds.
+	// (2068s from ff85317f and 2172.592s): max(1.5 * observed, observed + 120),
+	// rounded up to minutes. Censored memory samples cannot reduce old bounds.
 	want := map[string]int64{"test-store": 3960, "test-service": 3120, "test-rest": 3300}
 	for _, template := range workflow.Spec.Templates {
 		deadline, ok := want[template.Name]

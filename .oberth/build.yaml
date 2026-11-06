@@ -167,7 +167,7 @@ spec:
 
   # Refuse retired branding in every tracked file, including fixtures and docs.
   - name: generic-names
-    activeDeadlineSeconds: 95 # remeasure: max(60s censored cap, 63s pod span) x1.5, rounded up
+    activeDeadlineSeconds: 183 # remeasure: max(60s censored cap, 63s pod span) x1.5, rounded up; floor observed+120s for contention
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -228,7 +228,7 @@ spec:
 
   # [tools-dir] /bin/mkdir -p private scratch
   - name: tools-dir
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -290,7 +290,7 @@ spec:
 
   # [link-go] symlink Go toolchain from image into shared tools directory
   - name: link-go
-    activeDeadlineSeconds: 90 # remeasure: censored 60s pod deadline x1.5; includes startup and wait
+    activeDeadlineSeconds: 180 # remeasure: censored 60s pod deadline x1.5; includes startup and wait; floor observed+120s for contention
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -352,7 +352,7 @@ spec:
 
   # [install-golangci-lint] go install golangci-lint v2.12.2
   - name: install-golangci-lint
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -495,7 +495,7 @@ spec:
 
   # [install-helm] go install helm v4.2.3
   - name: install-helm
-    activeDeadlineSeconds: 99
+    activeDeadlineSeconds: 219 # remeasure: observed span unknown; provisional previous 99s cap + 120s for contention
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -674,7 +674,7 @@ spec:
 
   # [fetch-shellcheck] download shellcheck v0.10.0 static binary from upstream release
   - name: fetch-shellcheck
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -755,7 +755,7 @@ spec:
 
   # [verify-shellcheck] sha256sum check against pinned digest
   - name: verify-shellcheck
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -822,7 +822,7 @@ spec:
   # archive into a plain .tar that the next step's tar can extract without an
   # external helper.
   - name: decompress-shellcheck
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -887,7 +887,7 @@ spec:
 
   # [install-shellcheck] extract shellcheck binary from decompressed tarball
   - name: install-shellcheck
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -965,7 +965,7 @@ spec:
   # catch. Style-only findings (cosmetic, e.g. backtick notation) are
   # excluded.
   - name: shellcheck
-    activeDeadlineSeconds: 95 # remeasure: observed 63s pod span x1.5, rounded up
+    activeDeadlineSeconds: 183 # remeasure: observed 63s pod span x1.5, rounded up; floor observed+120s for contention
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -1026,7 +1026,7 @@ spec:
 
   # [go-vet-./...]
   - name: vet
-    activeDeadlineSeconds: 93 # remeasure: observed 62s pod span x1.5; failed attempt retained
+    activeDeadlineSeconds: 182 # remeasure: observed 62s pod span x1.5; failed attempt retained; floor observed+120s for contention
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -1169,7 +1169,7 @@ spec:
   # parallel burn below; exclude it from rest to avoid running that suite twice.
   # The package-union contract covers new packages.
   # All groups keep the race detector and uncached execution.
-  # Whole-group watchdogs retain measured 1.5x wall-time headroom.
+  # Whole-group watchdogs retain max(1.5 x observed, observed + 120s) headroom.
   # Give each group a bounded two-CPU lane; workflow parallelism bounds the group overlap to three Pods.
   - name: deadcode
     automountServiceAccountToken: false
@@ -1240,11 +1240,11 @@ spec:
   # parallel burn below; exclude it from rest to avoid running that suite twice.
   # The package-union contract covers new packages.
   # All groups keep the race detector and uncached execution.
-  # Whole-group watchdogs retain measured 1.5x wall-time headroom.
+  # Whole-group watchdogs retain max(1.5 x observed, observed + 120s) headroom.
   # Give each group a bounded two-CPU lane; workflow parallelism bounds the group overlap to three Pods.
   - name: test-store
     automountServiceAccountToken: false
-    # Maximum observed race duration times 1.5, rounded up to minutes.
+    # Maximum observed race duration: max(1.5 x observed, observed + 120s), rounded up to minutes.
     activeDeadlineSeconds: 3960
     volumes:
     - name: store-test-tmp
@@ -1328,7 +1328,7 @@ spec:
 
   - name: test-service
     automountServiceAccountToken: false
-    # Maximum observed race duration times 1.5, rounded up to minutes.
+    # Maximum observed race duration: max(1.5 x observed, observed + 120s), rounded up to minutes.
     activeDeadlineSeconds: 3600
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -1400,7 +1400,7 @@ spec:
 
   - name: test-rest
     automountServiceAccountToken: false
-    # Maximum observed race duration times 1.5, rounded up to minutes.
+    # Maximum observed race duration: max(1.5 x observed, observed + 120s), rounded up to minutes.
     activeDeadlineSeconds: 3300
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -1473,7 +1473,7 @@ spec:
 
   # The native Git cache suite is a binding source gate.
   - name: test-gitcache
-    # Observed 413s; retain at least 1.5x execution headroom.
+    # Observed 413s; retain max(1.5 x observed, observed + 120s) execution headroom.
     activeDeadlineSeconds: 620
     automountServiceAccountToken: false
     container:
@@ -1666,7 +1666,7 @@ spec:
 
   # Every commit/file in the offline, real multi-pack source history.
   - name: test-archive-history
-    activeDeadlineSeconds: 104
+    activeDeadlineSeconds: 224 # remeasure: observed span unknown; provisional previous 104s cap + 120s for contention
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -1737,7 +1737,7 @@ spec:
   # Uses the official trivy image pinned by digest -- no install step needed.
   # Trivy holds its vulnerability DB in memory; M is too tight.
   - name: security
-    activeDeadlineSeconds: 90 # remeasure: censored 60s pod deadline x1.5; includes startup and wait
+    activeDeadlineSeconds: 180 # remeasure: censored 60s pod deadline x1.5; includes startup and wait; floor observed+120s for contention
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -1788,7 +1788,7 @@ spec:
   #   oberth.Cmd("helm-contract", "./hack/test-chart.sh"))
   #   ...).After("lint")
   - name: chart
-    activeDeadlineSeconds: 99 # remeasure: deadline-censored 66s whole Pod span x1.5
+    activeDeadlineSeconds: 186 # remeasure: deadline-censored 66s whole Pod span x1.5; floor observed+120s for contention
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -1960,7 +1960,7 @@ spec:
   # -buildvcs=false matches release.sh and the Dockerfile: verification
   # builds must be hermetic against repository git state.
   - name: build-amd64
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -2032,7 +2032,7 @@ spec:
   #     ctx.Go.Build("./cmd/oberth").WithArgs("-buildvcs=false").Env("GOARCH","arm64")))
   #   ...).After("test","chart")
   - name: build-arm64
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 173 # remeasure: observed 53s pod span x1.5, rounded up; floor observed+120s for contention
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -2103,7 +2103,7 @@ spec:
   # target set so a platform-specific type mismatch (e.g. syscall.Statfs_t.Bsize
   # int64 vs uint32) cannot pass CI and burn only at release time (#699).
   - name: build-darwin-amd64
-    activeDeadlineSeconds: 65 # remeasure: observed 43s pod span x1.5, rounded up
+    activeDeadlineSeconds: 163 # remeasure: observed 43s pod span x1.5, rounded up; floor observed+120s for contention
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -2173,7 +2173,7 @@ spec:
   # ---- build-darwin-arm64 burn (single step) ----
   # Branch verification of the darwin/arm64 release target (#699).
   - name: build-darwin-arm64
-    activeDeadlineSeconds: 75 # remeasure: observed 50s pod span x1.5
+    activeDeadlineSeconds: 170 # remeasure: observed 50s pod span x1.5; floor observed+120s for contention
     automountServiceAccountToken: false
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
@@ -2242,7 +2242,7 @@ spec:
 
   # Credentialless proof of the signed release's numeric-only prefetch refusal.
   - name: release-diagnostic
-    activeDeadlineSeconds: 90 # remeasure: censored 60s pod deadline x1.5; includes startup and wait
+    activeDeadlineSeconds: 180 # remeasure: censored 60s pod deadline x1.5; includes startup and wait; floor observed+120s for contention
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -2290,7 +2290,7 @@ spec:
   # Build helm, oberth-release-support, oberth-release-image and fetch cosign,
   # matching release.yaml's exact env -i, flags, and Go toolchain.
   - name: vpt-build-and-fetch
-    activeDeadlineSeconds: 900 # remeasure: censored 600s pod deadline x1.5; includes startup and wait
+    activeDeadlineSeconds: 900 # remeasure: censored 600s pod deadline x1.5; includes startup and wait; floor observed+120s for contention
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -2388,7 +2388,7 @@ spec:
 
   # Copy trivy from its pinned image (release.yaml copy-trivy).
   - name: vpt-copy-trivy
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -2420,7 +2420,7 @@ spec:
 
   # Verify all five publisher tools against the reviewed pin manifest.
   - name: vpt-verify
-    activeDeadlineSeconds: 60
+    activeDeadlineSeconds: 180 # remeasure: observed span unknown; provisional previous 60s cap + 120s for contention
     automountServiceAccountToken: false
     metadata:
       annotations:
@@ -2616,4 +2616,4 @@ spec:
           cpu: 3113m
           memory: 460Mi
           ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
-    activeDeadlineSeconds: 300
+    activeDeadlineSeconds: 420 # remeasure: observed span unknown; provisional previous 300s cap + 120s for contention

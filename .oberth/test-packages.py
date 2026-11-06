@@ -41,7 +41,7 @@ def main():
     if args.group == "store":
         os.execv(sys.executable, [sys.executable, "-I", "-S", "-B",
                                  str(Path(__file__).with_name("test-store.py"))])
-    # Whole-package race measurements need at least 1.5x deadline headroom.
+    # Whole-package race deadlines need max(1.5 * observed, observed + 120s).
     timeout = {"service": "60m", "rest": "55m"}.get(args.group, "20m")
     os.execvp("go", ["go", "test", "-race", "-v", "-count=1", "-parallel=2", "-p=2", f"-timeout={timeout}", *groups[args.group]])
 
