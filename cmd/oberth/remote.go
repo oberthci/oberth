@@ -410,6 +410,16 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 	if err := renderExecutionClock(output, detail.Scheduling); err != nil {
 		return err
 	}
+	if detail.Run.FailedStage != "" && detail.Run.FailedStep != "" {
+		if _, err := fmt.Fprintf(output, "failed step: %s/%s · oberth log %s --burn %s --step %s\n", detail.Run.FailedStage, detail.Run.FailedStep, detail.Run.ID, detail.Run.FailedStage, detail.Run.FailedStep); err != nil {
+			return err
+		}
+		for _, reason := range []*string{&detail.Run.DisplayReason, &detail.Run.Reason, &detail.Run.Error} {
+			if strings.EqualFold(strings.TrimSpace(*reason), "Workflow failed") {
+				*reason = ""
+			}
+		}
+	}
 	// The reason first, before the step list: a failed run is read to find out
 	// what went wrong, and burying it under timings makes the reader scroll
 	// past the answer.
@@ -453,13 +463,19 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 			return err
 		}
 	}
+	burnWidth, stepWidth, statusWidth := 0, 0, 0
+	for _, step := range detail.Steps {
+		burnWidth = max(burnWidth, len(step.Stage))
+		stepWidth = max(stepWidth, len(step.Step))
+		statusWidth = max(statusWidth, len(step.Status))
+	}
 	for _, step := range detail.Steps {
 		marker := " "
 		if step.Stage == detail.Run.FailedStage && step.Step == detail.Run.FailedStep {
 			marker = "*"
 		}
-		if _, err := fmt.Fprintf(output, "%s %-12s %-20s %-9s %s\n",
-			marker, step.Stage, step.Step, step.Status, span(step.StartedAt, step.FinishedAt)); err != nil {
+		if _, err := fmt.Fprintf(output, "%s %-*s %-*s %-*s %s\n",
+			marker, burnWidth, step.Stage, stepWidth, step.Step, statusWidth, step.Status, span(step.StartedAt, step.FinishedAt)); err != nil {
 			return err
 		}
 	}

@@ -721,3 +721,25 @@ func TestIssuesStateDefaultsOpenAndAppliesToRequests(t *testing.T) {
 		})
 	}
 }
+
+func TestRunDetailSizesColumnsAndLinksFailedStep(t *testing.T) {
+	payload := `{"Run":{"ID":"run-abc","Status":"failed","FailedBurn":"ci","FailedStep":"test","DisplayReason":"Workflow failed","Reason":"Workflow failed","Error":"Workflow failed"},"Steps":[{"Burn":"ci","Step":"test","Status":"failed"},{"Burn":"very-long-burn-name","Step":"a-very-long-step-name-over-twenty","Status":"passed"}]}`
+	configure(t, remoteServer(t, payload))
+	var out bytes.Buffer
+	if err := runRunDetail(t.Context(), []string{"run-abc"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	body := out.String()
+	if !strings.Contains(body, "failed step: ci/test · oberth log run-abc --burn ci --step test") || strings.Contains(body, "Workflow failed") {
+		t.Fatal(body)
+	}
+	var rows []string
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "* ") || strings.HasPrefix(line, "  ") {
+			rows = append(rows, line)
+		}
+	}
+	if len(rows) != 2 || strings.Index(rows[0], "test") != strings.Index(rows[1], "a-very-long-step") || strings.Index(rows[0], "failed") != strings.Index(rows[1], "passed") {
+		t.Fatal(body)
+	}
+}
