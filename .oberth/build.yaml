@@ -1499,8 +1499,9 @@ spec:
           memory: 7616Mi
 
   - name: test-static-git-runtime
-    # Observed 294s; retain at least 1.5x execution headroom.
-    activeDeadlineSeconds: 441
+    # Remeasure: max(441s censored cap, 471s Pod span) x1.5, rounded up.
+    # The span includes shutdown grace; full qualification has not completed.
+    activeDeadlineSeconds: 707
     automountServiceAccountToken: false
     metadata:
       annotations:
