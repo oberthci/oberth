@@ -75,6 +75,27 @@ curl -fsSL https://oberth.ci/install.sh | sh
 oberth install --install-secretstore
 ```
 
+### First push
+
+If setup has not already registered them, add your upstream and this machine's
+uplink. Replace `acme`, `my-repo`, `operator@host`, and `oberth.example` with your
+organization, repository, identity, and node address. Register the deploy key
+printed by `upstream add` at your forge when prompted.
+
+```bash
+oberth upstream add github ssh://git@github.com/acme
+kubectl exec -i -n oberth deploy/oberth -- \
+  oberth uplink add - operator@host < ~/.ssh/id_ed25519.pub
+
+# Run in your existing local repository, with the changes committed.
+git remote add oberth ssh://git@oberth.example:30022/github/acme/my-repo.git
+git push oberth HEAD:refs/heads/first-push
+# Open https://oberth.example:30443/runs in your browser.
+```
+
+Save the uplink token and TLS fingerprint printed once by `uplink add`.
+The push banner links to the queued run when a dashboard URL is configured.
+
 Both the server namespace (`oberth` by default) and pipeline namespace
 (`oberth-argo`) require the Pod Security Admission `privileged` level, or no
 PSA enforcement. The server's root cache initializer and the server/pipeline
@@ -102,6 +123,30 @@ helm repo add oberth https://charts.oberth.ci
 helm repo update
 helm show values oberth/oberth
 ```
+
+The SSH host key is generated once into OpenBao and reused across upgrades.
+With a production secret store the HTTPS certificate is a 30-day leaf the
+server requests from a name-constrained CA in OpenBao's PKI engine and renews
+in place; clients pin the CA. An init container
+prepares the cache directories; the pod stays `0/1 Running` — live, not
+ready — until the first upstream is registered. `upstream add` offers to mint
+a deploy key and prints it once for registration at your forge. `uplink add`
+prints the TLS fingerprint and a bearer token exactly once; wire it into your
+MCP client (full walkthrough in [docs/mcp-setup.md](docs/mcp-setup.md)):
+
+```json
+{
+  "mcpServers": {
+    "oberth": {
+      "type": "url",
+      "url": "https://<node>:30443/mcp",
+      "headers": { "Authorization": "Bearer oberth_…" }
+    }
+  }
+}
+```
+
+## Upgrading
 
 `oberth upgrade` keeps stored release configuration and merges new chart defaults
 for keys that were absent, then applies `--values`/`--set` overrides. It uses
@@ -136,28 +181,6 @@ Re-running `oberth install` and restoring a backup intentionally retain
 sets only the database identities it needs. Every newly introduced value must
 therefore have a template fallback. The v0.17.53 raw-values render and actual
 Helm install/restore tests cover the `utilityImage` fallback.
-
-The SSH host key is generated once into OpenBao and reused across upgrades.
-With a production secret store the HTTPS certificate is a 30-day leaf the
-server requests from a name-constrained CA in OpenBao's PKI engine and renews
-in place; clients pin the CA. An init container
-prepares the cache directories; the pod stays `0/1 Running` — live, not
-ready — until the first upstream is registered. `upstream add` offers to mint
-a deploy key and prints it once for registration at your forge. `uplink add`
-prints the TLS fingerprint and a bearer token exactly once; wire it into your
-MCP client (full walkthrough in [docs/mcp-setup.md](docs/mcp-setup.md)):
-
-```json
-{
-  "mcpServers": {
-    "oberth": {
-      "type": "url",
-      "url": "https://<node>:30443/mcp",
-      "headers": { "Authorization": "Bearer oberth_…" }
-    }
-  }
-}
-```
 
 ## How it works
 
