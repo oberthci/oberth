@@ -106,7 +106,8 @@ else:
 	if err := os.WriteFile(goPath, []byte(fakeGo), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	for _, group := range []string{"store", "service", "gitcache", "rest"} {
+	// Store has a binary/worker protocol, exercised by its complete runner controls.
+	for _, group := range []string{"service", "gitcache", "rest"} {
 		t.Run(group, func(t *testing.T) {
 			argsFile := filepath.Join(root, group+".json")
 			command := exec.Command("python3", "-I", "-S", "-B", ".oberth/test-packages.py", group)
@@ -125,8 +126,6 @@ else:
 			}
 			timeout := "-timeout=20m"
 			switch group {
-			case "store":
-				timeout = "-timeout=66m"
 			case "service":
 				timeout = "-timeout=60m"
 			case "rest":
@@ -257,5 +256,13 @@ func TestOberthSplitStagesUseTheRaceGroupLauncher(t *testing.T) {
 		if !found {
 			t.Errorf("missing race burn test-%s", group)
 		}
+	}
+}
+
+func TestOberthStorePartitionRunnerControls(t *testing.T) {
+	command := exec.Command("python3", "-I", "-S", "-B", ".oberth/test_store_runner.py")
+	command.Dir = repositoryRoot(t)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("store runner controls: %v\n%s", err, output)
 	}
 }

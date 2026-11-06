@@ -4,7 +4,9 @@
 import argparse
 import json
 import os
+from pathlib import Path
 import subprocess
+import sys
 
 
 def package_groups():
@@ -36,8 +38,11 @@ def main():
     if args.list:
         print(json.dumps(groups, sort_keys=True))
         return
+    if args.group == "store":
+        os.execv(sys.executable, [sys.executable, "-I", "-S", "-B",
+                                 str(Path(__file__).with_name("test-store.py"))])
     # Whole-package race measurements need at least 1.5x deadline headroom.
-    timeout = {"store": "66m", "service": "60m", "rest": "55m"}.get(args.group, "20m")
+    timeout = {"service": "60m", "rest": "55m"}.get(args.group, "20m")
     os.execvp("go", ["go", "test", "-race", "-v", "-count=1", "-parallel=2", "-p=2", f"-timeout={timeout}", *groups[args.group]])
 
 
