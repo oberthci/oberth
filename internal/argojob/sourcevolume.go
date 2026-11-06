@@ -718,10 +718,19 @@ func (seeder *SourceSeeder) orphanGrace() time.Duration {
 // DeleteClaim removes a run's source claim. It is called when a Workflow is
 // cancelled or superseded before it could adopt the claim.
 func (seeder *SourceSeeder) DeleteClaim(ctx context.Context, name string) {
+	if err := seeder.checkPlacedAllocation(ctx, strings.TrimSuffix(name, "-src")); err != nil {
+		return
+	}
 	options := metav1.DeleteOptions{}
 	if seeder.config.ExecutionPlacement.Protected() {
 		claim, err := seeder.client.CoreV1().PersistentVolumeClaims(seeder.config.Namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil || claim.UID == "" || seeder.placementSource == nil {
+			return
+		}
+		// This best-effort entry point is only for the pre-adoption window.
+		// Owned claims require the Workflow-UID cleanup path, even when the
+		// source UID still matches custody; never discard a foreign owner.
+		if len(claim.OwnerReferences) != 0 {
 			return
 		}
 		if err = seeder.placementSource(ctx, strings.TrimSuffix(name, "-src"), string(claim.UID), false); err != nil {

@@ -140,13 +140,13 @@ func (s *SourceSeeder) checkPlacedAllocation(ctx context.Context, name string) e
 	if s.config.ExecutionPlacement != nil && s.config.ExecutionPlacement.observationOnly {
 		return errors.New("argojob: retained placement cannot seed")
 	}
-	if !s.config.ExecutionPlacement.Protected() {
-		return nil
+	if s.placementCheck != nil {
+		return s.placementCheck(ctx, name)
 	}
-	if s.placementCheck == nil {
+	if s.config.ExecutionPlacement.Protected() {
 		return errors.New("argojob: protected seeder journal unavailable")
 	}
-	return s.placementCheck(ctx, name)
+	return nil
 }
 
 // ProtectedRecoveryController reconstructs the original same-instance owner.

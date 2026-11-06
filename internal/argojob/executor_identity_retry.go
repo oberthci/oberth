@@ -234,6 +234,9 @@ func (controller *Controller) reconcileExecutorIdentity(ctx context.Context, wor
 
 func (controller *Controller) execExecutorIdentity(ctx context.Context, workflow *wfv1.Workflow, original *corev1.Pod, launcher bool, payload []byte) error {
 	for attempt := 1; attempt <= executorIdentityAttempts; attempt++ {
+		if err := controller.checkPlacedAllocation(ctx, workflow.Name); err != nil {
+			return identityFailure("target_validation", err)
+		}
 		if workflow.Annotations[capabilityAnnotation] != "" {
 			if _, err := controller.boundCapability(ctx, workflow, 0); err != nil {
 				return identityFailure("operator_capability", err)

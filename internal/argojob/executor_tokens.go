@@ -158,6 +158,9 @@ func (controller *Controller) deliverExecutorTokensObserved(ctx context.Context,
 	if wf.Status.Phase.Completed() || controller.kube == nil || controller.seeder == nil {
 		return nil
 	}
+	if err := controller.checkPlacedAllocation(ctx, wf.Name); err != nil {
+		return identityFailure("target_validation", err)
+	}
 	capability, err := controller.boundCapability(ctx, wf, 0)
 	if err != nil {
 		return identityFailure("operator_capability", err)
@@ -369,6 +372,9 @@ func validateExecutorTokenTarget(pod *corev1.Pod, image string, resourcePod bool
 // gate is never removed: it represents credential lifetime and runs no code.
 // Deleting the workflow garbage-collects this Pod and invalidates its tokens.
 func (controller *Controller) executorIdentityPod(ctx context.Context, wf *wfv1.Workflow, serviceAccount string) (*corev1.Pod, error) {
+	if err := controller.checkPlacedAllocation(ctx, wf.Name); err != nil {
+		return nil, err
+	}
 	name := controller.identityPodName(wf.UID, serviceAccount)
 	desired := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: wf.Namespace, Labels: map[string]string{"oberth.ci/role": "executor-identity"}, OwnerReferences: []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: wf.Name, UID: wf.UID, Controller: ptr.To(true)}}},
@@ -457,14 +463,17 @@ func (controller *Controller) requestExecutorIdentity(ctx context.Context, names
 	requestCtx, cancel := context.WithTimeout(ctx, executorIdentityAttemptTimeout)
 	defer cancel()
 	for attempt := 1; ; attempt++ {
-		if controller.config.ExecutionPlacement.Protected() {
-			if len(workflows) != 1 {
-				return nil, errors.New("argojob: protected token lacks phase binding")
-			}
+		// The retained workflow lookup must run even after primary config removal.
+		// Production always supplies the exact Workflow; journal-bound calls cannot
+		// fall back to an unnamed legacy token request.
+		if len(workflows) == 1 {
 			if err := controller.checkPlacedAllocation(requestCtx, workflows[0]); err != nil {
 				return nil, err
 			}
+		} else if controller.config.ExecutionPlacement.Protected() || controller.placementJournal != nil {
+			return nil, errors.New("argojob: journaled token lacks phase binding")
 		}
+
 		token, err := controller.kube.CoreV1().ServiceAccounts(namespace).CreateToken(requestCtx, account, request, metav1.CreateOptions{})
 		var network interface{ Timeout() bool }
 		transient := apierrors.IsTooManyRequests(err) || apierrors.IsServiceUnavailable(err) || apierrors.IsTimeout(err) || apierrors.IsServerTimeout(err) || errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &network) && network.Timeout())
