@@ -85,9 +85,26 @@ func reportMode(mode string) {
 	fmt.Fprintf(os.Stderr, "reading: %s\n", mode)
 }
 
+func setRemoteUsage(flags *flag.FlagSet) {
+	suffix := "[flags]"
+	switch flags.Name() {
+	case "run":
+		suffix = "<run-id> [flags]"
+	case "log":
+		suffix = "<run-id> [--burn <burn> --step <step>] [flags]"
+	case "issues update":
+		suffix = "--id <issue-id> --work-status <status> [flags]"
+	}
+	flags.Usage = func() {
+		_, _ = fmt.Fprintf(flags.Output(), "Usage: oberth %s %s\n", flags.Name(), suffix)
+		flags.PrintDefaults()
+	}
+}
+
 func remoteFlags(name string, arguments []string, output io.Writer) (*flag.FlagSet, *bool, error) {
 	flags := flag.NewFlagSet(name, flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
+	setRemoteUsage(flags)
 	asJSON := flags.Bool("json", false, "emit the server's payload unchanged")
 	if err := parseCommandFlags(flags, arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -122,6 +139,7 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 	}
 	flags := flag.NewFlagSet("runs", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
+	setRemoteUsage(flags)
 	repo := flags.String("repo", "", "only this repository; use upstream/org/name when ambiguous")
 	ref := flags.String("ref", "", "only this branch or tag")
 	limit := flags.Int("limit", 20, "runs per page (at most 100)")
@@ -499,6 +517,7 @@ type remoteLog struct {
 func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) error {
 	flags := flag.NewFlagSet("log", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
+	setRemoteUsage(flags)
 	stage := flags.String("burn", "", "burn name")
 	step := flags.String("step", "", "step name")
 	pattern := flags.String("pattern", "", "RE2 pattern; offset and limit then page over matches")
@@ -742,6 +761,7 @@ func runIssues(ctx context.Context, arguments []string, output io.Writer) error 
 	}
 	flags := flag.NewFlagSet("issues", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
+	setRemoteUsage(flags)
 	asJSON := flags.Bool("json", false, "emit the server payload")
 	workStatus := flags.String("work-status", "", "filter todo, active, waiting or review")
 	staleAfter := flags.String("stale-after", "", "override the general stale window (duration)")
@@ -949,6 +969,7 @@ func renderExecutionClock(output io.Writer, scheduling *model.RunScheduling) err
 func runIssueWorkStatus(ctx context.Context, arguments []string, output io.Writer) error {
 	flags := flag.NewFlagSet("issues update", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
+	setRemoteUsage(flags)
 	id := flags.Int64("id", 0, "issue ID")
 	status := flags.String("work-status", "", "todo, active, waiting or review")
 	revision := flags.Int64("expected-revision", 0, "optional current metadata revision")

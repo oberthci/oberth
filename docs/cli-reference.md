@@ -393,7 +393,7 @@ Usage of install:
 ## oberth issues
 
 ```text
-Usage of issues:
+Usage: oberth issues [flags]
   -active-stale-after string
         override the active stale window (duration)
   -json
@@ -407,7 +407,7 @@ Usage of issues:
 ## oberth issues update
 
 ```text
-Usage of issues update:
+Usage: oberth issues update --id <issue-id> --work-status <status> [flags]
   -expected-revision int
         optional current metadata revision
   -id int
@@ -456,7 +456,7 @@ Usage of kubevirt revoke:
 ## oberth log
 
 ```text
-Usage of log:
+Usage: oberth log <run-id> [--burn <burn> --step <step>] [flags]
   -burn string
         burn name
   -byte-offset int
@@ -718,7 +718,7 @@ Usage of repo verify:
 ## oberth repos
 
 ```text
-Usage of repos:
+Usage: oberth repos [flags]
   -json
         emit the server's payload unchanged
 ```
@@ -811,7 +811,7 @@ Guide: https://github.com/oberthci/oberth/blob/main/docs/backup-restore.md
 ## oberth run
 
 ```text
-Usage of run:
+Usage: oberth run <run-id> [flags]
   -json
         emit the server's payload unchanged
 ```
@@ -871,7 +871,7 @@ Usage: oberth run retry <run-id> [--json] [--url <mcp-url>] [--token-file <path>
 ## oberth runs
 
 ```text
-Usage of runs:
+Usage: oberth runs [flags]
   -active
         only queued and running runs, in scheduling order, with queue position and wait reason
   -all
@@ -1342,7 +1342,7 @@ Usage of size revoke:
 ## oberth status
 
 ```text
-Usage of status:
+Usage: oberth status [flags]
   -json
         emit the server's payload unchanged
 ```

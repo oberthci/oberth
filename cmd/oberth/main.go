@@ -119,7 +119,7 @@ Commands:
   log           Show step logs for a run
   repos         List registered repositories
   issues        List and manage issues
-  status        Show CI status for a ref
+  status        Show server status
   uplink        Manage uplink identities
   access        Manage secret access grants
   kubevirt      Manage repository VMI grants
@@ -224,6 +224,9 @@ Commands:
 		}
 		return fmt.Errorf("%w: version accepts no arguments or --schema", errUsage)
 	default:
+		if suggestion := nearestCommand(arguments[0]); suggestion != "" {
+			return fmt.Errorf("%w: unknown command %q; did you mean %q?", errUsage, arguments[0], suggestion)
+		}
 		return fmt.Errorf("%w: unknown command %q", errUsage, arguments[0])
 	}
 }
