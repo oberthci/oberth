@@ -476,7 +476,7 @@ func missingName(arguments map[string]any) string { return selectorOf(arguments)
 func hiddenName(arguments map[string]any) string { return selectorOf(arguments) }
 
 func selectorOf(arguments map[string]any) string {
-	for _, key := range []string{"repo", "id", "sha", "ref"} {
+	for _, key := range []string{"repo", "id", "sha", "ref", "run", "name"} {
 		if value, ok := arguments[key]; ok {
 			return fmt.Sprint(value)
 		}

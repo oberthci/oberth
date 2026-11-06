@@ -385,7 +385,7 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 		return nil, err
 	}
 	value, err = service.callTool(ctx, actor, name, raw)
-	return service.stripScopedSequences(value), err
+	return service.stripScopedSequences(value), toolSelectorError(raw, err)
 }
 
 func (service *API) callTool(ctx context.Context, actor api.Actor, name string, raw json.RawMessage) (any, error) {
@@ -3579,6 +3579,9 @@ func decodeTool(raw json.RawMessage, value any) error {
 	decoder := json.NewDecoder(io.LimitReader(bytes.NewReader(raw), maximumToolBytes+1))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(value); err != nil {
+		if strings.HasPrefix(err.Error(), "json: unknown field ") {
+			return fmt.Errorf("%w: %s; accepted arguments: %s", ErrInvalidInput, strings.TrimPrefix(err.Error(), "json: "), strings.Join(toolArgumentNames(value), ", "))
+		}
 		var typeErr *json.UnmarshalTypeError
 		if errors.As(err, &typeErr) && typeErr.Field != "" {
 			expected := typeErr.Type.String()
