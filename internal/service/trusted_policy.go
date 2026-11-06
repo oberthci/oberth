@@ -12,6 +12,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/protectedtests"
 	"github.com/oberthci/oberth/internal/pushretry"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/vmrunner"
@@ -103,28 +104,14 @@ func (scheduler *Scheduler) trustedReceipt(ctx context.Context, repository model
 	if err != nil {
 		return fmt.Errorf("read trusted test receipt: %w", err)
 	}
-	intent := execution.Intent
-	descriptor, err := intent.Descriptor()
-	if err != nil {
-		return err
-	}
-	if err := descriptor.MatchContract(requirement.Contract); err != nil {
-		return err
-	}
-	if err := scheduler.trusted.RecipeAllowed(intent.Recipe); err != nil {
-		return err
-	}
-	if !execution.Cleaned || execution.Rejected || execution.Refusal != nil || execution.Receipt == nil || execution.WorkflowUID == "" || execution.WorkflowUID != execution.Receipt.WorkflowUID || intent.RunID != run.ID || intent.RepoID != repository.ID || intent.CandidateSHA != requirement.CandidateSHA || intent.BaselineSHA != requirement.BaselineSHA {
-		return fmt.Errorf("trusted test receipt does not match publication policy")
-	}
 	upstream, err := scheduler.database().Upstream(ctx, repository.UpstreamID)
 	if err != nil {
 		return err
 	}
-	if intent.Repository != upstream.QualifiedRepo(repository.Name) {
-		return fmt.Errorf("trusted test receipt repository mismatch")
-	}
-	return execution.Receipt.Validate(intent)
+	return execution.ValidateHandoff(protectedtests.HandoffExpectation{
+		RunID: run.ID, RepoID: repository.ID, Repository: upstream.QualifiedRepo(repository.Name),
+		CandidateSHA: requirement.CandidateSHA, BaselineSHA: requirement.BaselineSHA, Contract: requirement.Contract,
+	}, scheduler.trusted.RecipeAllowed)
 }
 
 func (scheduler *Scheduler) requirePublicationTestPolicy(ctx context.Context, repository model.Repository, publication model.Publication) error {

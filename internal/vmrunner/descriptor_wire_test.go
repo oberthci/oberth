@@ -8,8 +8,9 @@ import (
 	"testing"
 )
 
-// This fixture uses the supplied public v0.17.89 recipe. It is historical wire
-// evidence, not a new runtime approval or a network fetch.
+// Generic identities exercise the existing journal wire format. Original
+// installed-recipe compatibility evidence remains in the external review packet;
+// this fixture is not an installation identity, approval or network fetch.
 func TestProtectedDescriptorPreservesJournalWire(t *testing.T) {
 	body, err := os.ReadFile("testdata/protected-intent-v1.json")
 	if err != nil {
@@ -30,7 +31,7 @@ func TestProtectedDescriptorPreservesJournalWire(t *testing.T) {
 	if !bytes.Equal(encoded, body) {
 		t.Fatal("existing journal intent bytes changed")
 	}
-	if got := KVMIntentDigest(intent); got != "20820e818d11db9dc319d529f3b0627f4688829d7af22447fd1dec32848ba844" {
+	if got := KVMIntentDigest(intent); got != "c41a672051491b8abefc496b10471afeb486a969d40bf80cd02b110f8938fcf7" {
 		t.Fatalf("journal intent digest changed: %s", got)
 	}
 }

@@ -46,3 +46,33 @@ separate source review and actual runtime qualification. This extraction does
 not qualify an external executor or permit execution-engine retirement. Install
 and qualify preparation before a separate removal release; retain the current
 recovery path and historical evidence throughout.
+
+## Execution evidence and handoff preparation
+
+The protected package also owns execution intent, host report, process binding,
+receipt and refusal validation. VM names remain aliases and forwarding calls.
+Historical JSON field order, tags, intent/report versions and digests remain
+unchanged; existing journal rows and audit records are not rewritten. The
+current journal and its capacity, restart, cancellation and exact UID cleanup
+transitions remain authoritative. No new table or migration is needed for this
+shared verifier.
+
+`Execution.ValidateHandoff` is the common delivery and publication check. It
+loads no authority from candidate output: its caller supplies the current parent
+run/repository, exact candidate and baseline, fresh protected contract and current
+operator recipe approval. It requires submitted, successful, cleaned evidence
+with the same Workflow UID and a complete valid process/host receipt. It refuses
+missing or changed policy, revoked recipes, another run or repository, missing
+cleanup, refusal, substituted identity, failed/restarted process, deadline or
+inventory mismatch. A generic capability grant cannot substitute for this check.
+The scheduler invokes it both before the main Workflow receives credentials and
+at publication, using the existing durable journal each time. Its result is not
+a reusable bearer token or permission to skip current policy/audit checks.
+
+This is shared execution/evidence preparation. The current closed suite still
+uses its existing KVM runtime adapter and independently approved harness. No
+new generic runtime route, capability policy or credential path is enabled.
+Actual generic adapter construction, grant-bound admission/recovery and external
+runtime qualification remain subsequent work. Generic execution must retain the
+same closed host verifier and cannot turn repository resource status into a test
+verdict. Legacy engine removal remains a later qualified release.
