@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
@@ -33,4 +34,20 @@ type IssueListSummary struct {
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 	ClosedAt    *time.Time
+}
+
+// Closed list entries have no active work state; detail records keep their history.
+func (issue IssueListSummary) MarshalJSON() ([]byte, error) {
+	type wire IssueListSummary
+	var work *model.IssueWorkStatus
+	var stale *bool
+	if issue.State != model.IssueClosed {
+		work = &issue.WorkStatus
+		stale = &issue.Stale
+	}
+	return json.Marshal(struct {
+		wire
+		WorkStatus *model.IssueWorkStatus `json:"work_status,omitempty"`
+		Stale      *bool                  `json:"stale,omitempty"`
+	}{wire: wire(issue), WorkStatus: work, Stale: stale})
 }

@@ -691,3 +691,33 @@ func TestRunDetailShowsDeadlineAndFinalizationLag(t *testing.T) {
 		}
 	}
 }
+
+func TestIssuesStateDefaultsOpenAndAppliesToRequests(t *testing.T) {
+	for _, choice := range []string{"", "open", "closed", "all"} {
+		t.Run(choice, func(t *testing.T) {
+			wanted := choice
+			if wanted == "" {
+				wanted = "open"
+			}
+			if wanted == "all" {
+				wanted = ""
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("state") != wanted {
+					t.Errorf("state=%q want=%q", r.URL.Query().Get("state"), wanted)
+				}
+				_, _ = w.Write([]byte(`{"Issues":[]}`))
+			}))
+			defer server.Close()
+			configure(t, server)
+			args := []string{}
+			if choice != "" {
+				args = []string{"--state", choice}
+			}
+			var out bytes.Buffer
+			if err := runIssues(t.Context(), args, &out); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

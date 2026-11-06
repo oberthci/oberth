@@ -400,6 +400,8 @@ Usage: oberth issues [flags]
         emit the server payload
   -stale-after string
         override the general stale window (duration)
+  -state string
+        filter open, closed or all issues (default "open")
   -work-status string
         filter todo, active, waiting or review
 ```

@@ -763,6 +763,7 @@ func runIssues(ctx context.Context, arguments []string, output io.Writer) error 
 	flags.SetOutput(io.Discard)
 	setRemoteUsage(flags)
 	asJSON := flags.Bool("json", false, "emit the server payload")
+	issueState := flags.String("state", "open", "filter open, closed or all issues")
 	workStatus := flags.String("work-status", "", "filter todo, active, waiting or review")
 	staleAfter := flags.String("stale-after", "", "override the general stale window (duration)")
 	activeStaleAfter := flags.String("active-stale-after", "", "override the active stale window (duration)")
@@ -773,6 +774,13 @@ func runIssues(ctx context.Context, arguments []string, output io.Writer) error 
 			return nil
 		}
 		return fmt.Errorf("%w: %w", errUsage, err)
+	}
+	if *issueState != "open" && *issueState != "closed" && *issueState != "all" {
+		return fmt.Errorf("%w: --state must be open, closed or all", errUsage)
+	}
+	selectedState := *issueState
+	if selectedState == "all" {
+		selectedState = ""
 	}
 	if *workStatus != "" && !model.IssueWorkStatus(*workStatus).Valid() {
 		return fmt.Errorf("%w: invalid work status", errUsage)
@@ -793,7 +801,7 @@ func runIssues(ctx context.Context, arguments []string, output io.Writer) error 
 	}
 	reportMode("server")
 	raw, err := collectIssuePages(ctx, func(ctx context.Context, before int64) (json.RawMessage, error) {
-		query := map[string]string{"work_status": *workStatus, "stale_after": *staleAfter, "active_stale_after": *activeStaleAfter}
+		query := map[string]string{"state": selectedState, "work_status": *workStatus, "stale_after": *staleAfter, "active_stale_after": *activeStaleAfter}
 		if before > 0 {
 			query["before"] = strconv.FormatInt(before, 10)
 		}
