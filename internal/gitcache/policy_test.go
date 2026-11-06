@@ -3,6 +3,8 @@ package gitcache
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -122,5 +124,33 @@ func TestDefaultPolicyProvesUnbornBaselineWithoutIgnoringCandidate(t *testing.T)
 	runGit(t, work, "push", upstream, "refs/tags/only-tag")
 	if _, _, _, err := cache.ReadDefaultBlob(ctx, "example", ".oberth/tests.yaml", 4096); err == nil {
 		t.Fatal("nonempty missing-default upstream treated as unborn")
+	}
+}
+
+// A producer can exit successfully after a downstream writer rejected output.
+// The sticky buffer error remains authoritative in either command outcome.
+type policyOverflowBackend struct{ commandErr error }
+
+func (b policyOverflowBackend) execute(_ context.Context, spec commandSpec, _ bool) (string, error) {
+	switch spec.args[0] {
+	case "ls-tree":
+		_, err := io.WriteString(spec.stdout, "100644 blob "+strings.Repeat("a", 40)+"\t.oberth/tests.yaml\x00")
+		return "", err
+	case "cat-file":
+		_, _ = io.WriteString(spec.stdout, "partial")
+		_, _ = io.WriteString(spec.stdout, strings.Repeat("x", 8192))
+		return "", b.commandErr
+	default:
+		return "", fmt.Errorf("unexpected command %v", spec.args)
+	}
+}
+
+func TestPolicyBlobOverflowPreservesExistenceAfterSuccessfulCommand(t *testing.T) {
+	for _, commandErr := range []error{nil, errors.New("producer failed")} {
+		cache := &Cache{backend: policyOverflowBackend{commandErr: commandErr}}
+		body, exists, err := cache.readOptionalBlobLocked(t.Context(), "fixture", strings.Repeat("b", 40), ".oberth/tests.yaml", 4096)
+		if !exists || len(body) != 0 || !errors.Is(err, ErrPolicyBlobTooLarge) {
+			t.Fatalf("command=%v body=%q exists=%v err=%v", commandErr, body, exists, err)
+		}
 	}
 }

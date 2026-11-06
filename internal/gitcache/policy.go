@@ -144,10 +144,11 @@ func (c *Cache) readOptionalBlobLocked(ctx context.Context, path, sha, file stri
 		return nil, false, errors.New("policy must be a regular Git blob")
 	}
 	body := &boundedio.Buffer{Limit: limit, LimitError: errBlobTooLarge}
-	if err := c.run(ctx, commandSpec{dir: path, args: []string{"cat-file", "blob", fields[2]}, stdout: body}); err != nil {
-		if errors.Is(body.Err(), errBlobTooLarge) {
-			return nil, true, fmt.Errorf("read required policy: %w", ErrPolicyBlobTooLarge)
-		}
+	err := c.run(ctx, commandSpec{dir: path, args: []string{"cat-file", "blob", fields[2]}, stdout: body})
+	if errors.Is(body.Err(), errBlobTooLarge) {
+		return nil, true, fmt.Errorf("read required policy: %w", ErrPolicyBlobTooLarge)
+	}
+	if err != nil {
 		return nil, false, fmt.Errorf("read required policy: %w", errors.Join(err, body.Err()))
 	}
 	return body.Bytes(), true, body.Err()
