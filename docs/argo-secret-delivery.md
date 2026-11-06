@@ -51,3 +51,14 @@ changes, because a partial desired set cannot authorize orphan deletion.
 Legacy workflows using envconsul remain recognized as secret-store consumers
 and receive the token mount. The retired `oberth materialize` command is no
 longer supported; new workflows use `oberth secretstore exec`.
+
+For an external OpenBao store configured without a reviewer JWT, Kubernetes
+TokenReview uses each login JWT. The chart binds `system:auth-delegator` to the
+server and the exact credentialed, CI-secret, per-repository release/CI and
+per-step login ServiceAccounts. Pipeline and executor accounts receive no such
+binding. In-cluster stores keep their local reviewer behavior and the existing
+server-only binding. The chart detects `.svc` and `.svc.cluster.local` endpoints;
+set `secretstore.external: false` for an in-cluster store behind custom DNS, or
+`true` for an external store behind a cluster service alias. An explicit
+`argo.vault.address` determines the pipeline store's mode. Operators managing
+these bindings themselves can set `secretstore.createAuthDelegatorBinding: false`.

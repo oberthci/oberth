@@ -39,6 +39,9 @@ class ArgoSchemaTests(unittest.TestCase):
         self.assertEqual(baseline.returncode, 0, baseline.stderr)
         for settings in (
             ['--set', 'secretCreatePolicy=null'],
+            ['--set', 'upstream.createSecrets=null', '--set', 'upstream.keySecret=null',
+             '--set', 'upstream.knownHostsSecret=null', '--set', 'auditAnchor.rootsKey=null'],
+            ['--set', 'auditAnchor.rootsKey=old-roots.pem'],
             ['--set', 'secretCreatePolicy.enabled=true'],
             ['--set', 'upstream.keySecret=legacy', '--set', 'upstream.knownHostsSecret=legacy'],
         ):
@@ -46,6 +49,9 @@ class ArgoSchemaTests(unittest.TestCase):
                 result = self.render({}, *settings)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout, baseline.stdout)
+
+    def test_secret_creation_stays_disabled(self):
+        self.assert_schema_refuses({}, '--set', 'upstream.createSecrets=true')
 
     def render(self, argo, *overrides):
         with tempfile.TemporaryDirectory() as directory:
@@ -72,6 +78,8 @@ class ArgoSchemaTests(unittest.TestCase):
     def test_active_value_types_and_unknown_keys(self):
         cases = [
             {'enabled': 'false'},
+            {'vault': {'adress': 'https://bao.example.com'}},
+            {'goProxy': {'enabeld': True}},
             {'ciSecrets': 17},
             {'ciSecrets': {'serviceAccount': 17}},
             {'ciSecrets': {'vaultRole': []}},

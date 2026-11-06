@@ -1,0 +1,48 @@
+suite: namespace admission boundary
+templates:
+  - templates/argo-pod-policy.yaml
+set:
+  image.ref: example.invalid/oberth@sha256:1111111111111111111111111111111111111111111111111111111111111111
+  argo.namespace: pipeline-system
+tests:
+  - it: fails closed on pod creation and updates including ephemeral containers
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.failurePolicy
+          value: Fail
+      - equal:
+          path: spec.matchConstraints.resourceRules
+          value:
+            - apiGroups: [""]
+              apiVersions: [v1]
+              operations: [CREATE, UPDATE]
+              resources: [pods, pods/ephemeralcontainers]
+      - equal:
+          path: spec.matchConditions[0].expression
+          value: 'request.namespace == "pipeline-system"'
+  - it: denies only in the configured Argo namespace
+    documentIndex: 1
+    asserts:
+      - equal:
+          path: spec.validationActions
+          value: [Deny]
+      - equal:
+          path: spec.matchResources.namespaceSelector.matchLabels
+          value:
+            kubernetes.io/metadata.name: pipeline-system
+  - it: derives the cache allowlist from administrator roots
+    set:
+      cache.ciRoot: /srv/ci-cache
+      cache.releaseRoot: /srv/release-cache
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: spec.variables[1].expression
+          value: '["/srv/ci-cache","/srv/release-cache"]'
+  - it: refuses parent traversal in a cache root
+    set:
+      cache.ciRoot: /var/cache/../etc
+    asserts:
+      - failedTemplate:
+          errorMessage: cache roots must be canonical absolute directories other than /
