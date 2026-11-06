@@ -85,6 +85,12 @@ existing namespace policy. When using Helm directly, have the namespace
 administrator create or label both namespaces with that value first; an
 unlabelled namespace may still inherit a restrictive cluster default.
 
+The Argo pod admission policy is enabled by default (`argo.podPolicy.enabled: true`)
+and limits host access despite the privileged PSA label. It permits only
+`NET_BIND_SERVICE` as an added capability, including nonroot virt-launcher pods.
+An operator can set `argo.podPolicy.enabled: false` to remove both the policy and
+its binding when replacing this boundary with equivalent admission controls.
+
 `oberth setup` walks through the same install step by step. It lists the
 SSH key pairs in `~/.ssh`, can connect further organizations with the same
 upstream key (`--also-upstream codeberg.org/acme`), and asks which address

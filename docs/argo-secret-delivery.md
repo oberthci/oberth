@@ -55,7 +55,9 @@ longer supported; new workflows use `oberth secretstore exec`.
 For an external OpenBao store configured without a reviewer JWT, Kubernetes
 TokenReview uses each login JWT. The chart binds `system:auth-delegator` to the
 server and the exact credentialed, CI-secret, per-repository release/CI and
-per-step login ServiceAccounts. Pipeline and executor accounts receive no such
+per-step login ServiceAccounts. Holders of these tokens can call Kubernetes
+TokenReview and SubjectAccessReview; this delegation is granted to pipeline login
+identities only for external stores. Pipeline and executor accounts receive no such
 binding. In-cluster stores keep their local reviewer behavior and the existing
 server-only binding. The chart detects `.svc` and `.svc.cluster.local` endpoints;
 set `secretstore.external: false` for an in-cluster store behind custom DNS, or

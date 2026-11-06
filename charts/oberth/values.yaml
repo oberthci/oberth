@@ -296,6 +296,10 @@ argo:
   # to start if this equals the release namespace.
   namespace: "oberth-argo"
 
+  # Namespace admission boundary; disable only when replacing it with equivalent controls.
+  podPolicy:
+    enabled: true
+
   # The three pipeline identities plus the executor. All four must differ:
   # pipeline==credentialed defeats the secret access gate, ciSecrets==
   # credentialed collapses the branch and release trust tiers back into one

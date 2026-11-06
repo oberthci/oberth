@@ -1,3 +1,4 @@
+{{- if (dig "enabled" true (.Values.argo.podPolicy | default dict)) }}
 {{- $roots := list }}
 {{- range list .Values.cache.ciRoot .Values.cache.releaseRoot }}
 {{- if . }}
@@ -36,8 +37,9 @@ spec:
       message: "Argo pods cannot share host PID, IPC or network namespaces"
     - expression: "variables.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged)"
       message: "Argo containers cannot be privileged"
-    - expression: "variables.containers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || size(c.securityContext.capabilities.add) == 0)"
-      message: "Argo containers cannot add Linux capabilities"
+    - expression: "variables.containers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(x, x == 'NET_BIND_SERVICE'))"
+      message: "Argo containers can add only NET_BIND_SERVICE"
+    # The server must keep setting hostPath.type explicitly for reviewed cache volumes.
     - expression: "!has(object.spec.volumes) || object.spec.volumes.all(v, !has(v.hostPath) || (has(v.hostPath.type) && v.hostPath.type == 'DirectoryOrCreate' && variables.cacheRoots.exists(root, v.hostPath.path.startsWith(root + '/') && v.hostPath.path.substring(size(root) + 1).matches('^[a-z0-9_-]+-[a-f0-9]{12}$'))))"
       message: "Argo hostPath volumes must be repository directories beneath the configured CI or release cache root"
 ---
@@ -54,3 +56,4 @@ spec:
     namespaceSelector:
       matchLabels:
         kubernetes.io/metadata.name: {{ .Values.argo.namespace | quote }}
+{{- end }}

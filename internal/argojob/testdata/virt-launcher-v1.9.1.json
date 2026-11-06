@@ -1,0 +1,47 @@
+{
+  "apiVersion": "v1",
+  "kind": "Pod",
+  "metadata": {
+    "name": "virt-launcher-fixture",
+    "labels": {
+      "kubevirt.io": "virt-launcher"
+    }
+  },
+  "spec": {
+    "securityContext": {
+      "runAsNonRoot": true,
+      "runAsUser": 107,
+      "fsGroup": 107
+    },
+    "containers": [
+      {
+        "name": "compute",
+        "image": "example.invalid/virt-launcher:v1.9.1",
+        "securityContext": {
+          "runAsNonRoot": true,
+          "runAsUser": 107,
+          "privileged": false,
+          "allowPrivilegeEscalation": false,
+          "capabilities": {
+            "drop": [
+              "ALL"
+            ],
+            "add": [
+              "NET_BIND_SERVICE"
+            ]
+          }
+        }
+      }
+    ],
+    "volumes": [
+      {
+        "name": "private",
+        "emptyDir": {}
+      },
+      {
+        "name": "ephemeral-disks",
+        "emptyDir": {}
+      }
+    ]
+  }
+}

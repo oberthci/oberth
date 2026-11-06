@@ -2,6 +2,7 @@ package argojob
 
 import (
 	"encoding/json"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -240,6 +241,30 @@ func TestPodPolicyAcceptsEmittedShapes(t *testing.T) {
 	for i := range pods.Items {
 		if !accepts(&pods.Items[i]) {
 			t.Fatalf("helper %s refused", pods.Items[i].Name)
+		}
+	}
+}
+
+// Reduced KubeVirt v1.9.1 virt-launcher shape: its nonroot compute container
+// adds NET_BIND_SERVICE even with all default capabilities dropped.
+func TestPodPolicyAcceptsVirtLauncher191(t *testing.T) {
+	accepts := renderedPodPolicy(t)
+	body, err := os.ReadFile("testdata/virt-launcher-v1.9.1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pod corev1.Pod
+	if err = json.Unmarshal(body, &pod); err != nil {
+		t.Fatal(err)
+	}
+	if !accepts(&pod) {
+		t.Fatal("nonroot virt-launcher refused")
+	}
+	for _, capability := range []corev1.Capability{"SYS_ADMIN", "NET_ADMIN", "SYS_NICE"} {
+		changed := pod.DeepCopy()
+		changed.Spec.Containers[0].SecurityContext.Capabilities.Add = append(changed.Spec.Containers[0].SecurityContext.Capabilities.Add, capability)
+		if accepts(changed) {
+			t.Fatalf("virt-launcher with %s admitted", capability)
 		}
 	}
 }

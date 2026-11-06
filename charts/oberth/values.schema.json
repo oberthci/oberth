@@ -624,6 +624,14 @@
       "additionalProperties": false,
       "description": "Argo Workflows execution engine. Every pipeline runs as an Argo Workflow.",
       "properties": {
+        "podPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled"],
+          "properties": {
+            "enabled": {"type": "boolean", "default": true}
+          }
+        },
         "enabled": {
           "type": "boolean",
           "description": "Retired compatibility setting, accepted for stored values and ignored. Pipelines always use Argo Workflows."

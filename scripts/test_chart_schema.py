@@ -14,6 +14,14 @@ SAMPLER = {'enabled': True, 'interval': '15s',
 
 
 class ArgoSchemaTests(unittest.TestCase):
+    def test_pod_policy_switch_is_boolean(self):
+        for enabled in (True, False):
+            result = self.render({'podPolicy': {'enabled': enabled}})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual('kind: ValidatingAdmissionPolicy\n' in result.stdout, enabled)
+        for enabled in ('false', 0, None):
+            self.assert_schema_refuses({'podPolicy': {'enabled': enabled}})
+
     def test_pinned_source_policy_is_explicit_and_typed(self):
         baseline = self.render({})
         self.assertEqual(baseline.returncode, 0, baseline.stderr)

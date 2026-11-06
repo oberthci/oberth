@@ -46,3 +46,20 @@ tests:
     asserts:
       - failedTemplate:
           errorMessage: cache roots must be canonical absolute directories other than /
+
+  - it: emits both policy and binding by default
+    asserts:
+      - hasDocuments:
+          count: 2
+  - it: removes both policy and binding when disabled
+    set:
+      argo.podPolicy.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+  - it: enables the boundary for reused values predating the switch
+    set:
+      argo.podPolicy: null
+    asserts:
+      - hasDocuments:
+          count: 2

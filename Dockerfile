@@ -1,5 +1,5 @@
-# Bump Alpine package pins when Alpine removes the pinned versions from its repositories.
 # syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+# Bump Alpine package pins when Alpine removes the pinned versions from its repositories.
 # The build stage runs on the build host's native platform and cross-compiles
 # with GOOS/GOARCH; only the runtime stage below is per-target-platform.
 FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine3.23@sha256:a07f231c19b03e6106cf442f02a5bcf262147e744d15b7b5e4b6d81d420c70a0 AS build
