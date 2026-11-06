@@ -398,7 +398,7 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		if err := checkUpgradeLegacyResources(ctx, cfg, deps); err != nil {
 			return result, err
 		}
-		if err := checkUpgradeLegacyRepositories(ctx, cfg, deps); err != nil {
+		if err := checkUpgradeLegacyRepositories(ctx, cfg, deps, currentVersion); err != nil {
 			return result, err
 		}
 	}
@@ -516,7 +516,7 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		if err := checkUpgradeLegacyResources(ctx, cfg, deps); err != nil {
 			return result, err
 		}
-		if err := checkUpgradeLegacyRepositories(ctx, cfg, deps); err != nil {
+		if err := checkUpgradeLegacyRepositories(ctx, cfg, deps, currentVersion); err != nil {
 			return result, err
 		}
 	}

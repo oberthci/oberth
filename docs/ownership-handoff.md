@@ -176,9 +176,13 @@ The upgrade also inventories trusted Workflows in the installed pipeline namespa
 and Oberth-owned virtual machines and instances across namespaces. Terminal or
 already-deleting objects still block the upgrade: drain/delete these first and
 wait for confirmed deletion while the old server can still clean them up.
+This inventory remains active on later upgrades and needs cluster-wide list
+permission on KubeVirt resources.
 
-The installed server's `admin retirement-check` must also confirm that registered
-repositories have migrated their retired contracts. A candidate that removes
+When the installed version is v0.17.93 or earlier, its `admin retirement-check`
+must also confirm that registered repositories have migrated their retired
+contracts. Later versions no longer have this command, so only the resource
+inventory runs. A candidate that removes
 `.oberth/tests.yaml` can run and be promoted even when the default branch still
 contains that file.
 

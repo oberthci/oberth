@@ -27,6 +27,7 @@ import (
 // The retirement release must not replace the only process that can clean up
 // a legacy execution. Keep the running owner available; never infer cleanup
 // from a terminal phase, a deletion timestamp, or a missing database row.
+// Keep inventory on later upgrades too: an earlier override can leave resources.
 func checkUpgradeLegacyResources(ctx context.Context, cfg UpgradeConfig, deps Deps) error {
 	if cfg.AllowRetiredExecution {
 		return nil
@@ -67,7 +68,7 @@ func checkUpgradeLegacyResources(ctx context.Context, cfg UpgradeConfig, deps De
 			continue
 		} // CRDs absent, not an unreadable inventory.
 		if err != nil {
-			return fmt.Errorf("inspect legacy %s API before upgrade: %w", group.version, err)
+			return fmt.Errorf("inspect legacy %s API before upgrade (explicit override: --allow-retired-execution): %w", group.version, err)
 		}
 		gv, err := schema.ParseGroupVersion(group.version)
 		if err != nil {

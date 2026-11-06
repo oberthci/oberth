@@ -15,8 +15,12 @@ import (
 )
 
 func TestUpgradeRefusesLegacyResourcesBeforeMutation(t *testing.T) {
-	for _, scenario := range []string{"preflight", "apply preflight", "completed preflight", "deleting preflight", "vmi", "vm", "unlabelled vmi", "second page", "forbidden", "list missing", "malformed", "discovery unavailable", "clean", "no kubevirt"} {
+	for _, scenario := range []string{"preflight", "apply preflight", "completed preflight", "deleting preflight", "vmi", "vm", "unlabelled vmi", "second page", "forbidden", "list missing", "malformed", "discovery unavailable", "kubevirt discovery unavailable", "clean", "no kubevirt", "post-removal clean", "post-removal vmi"} {
 		t.Run(scenario, func(t *testing.T) {
+			installed, target := "0.17.80", "0.17.83"
+			if strings.HasPrefix(scenario, "post-removal") {
+				installed, target = "0.17.94", "0.17.95"
+			}
 			requests := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests++
@@ -37,6 +41,10 @@ func TestUpgradeRefusesLegacyResourcesBeforeMutation(t *testing.T) {
 					return
 				}
 				if r.URL.Path == "/apis/kubevirt.io/v1" {
+					if scenario == "kubevirt discovery unavailable" {
+						http.Error(w, "unavailable", http.StatusServiceUnavailable)
+						return
+					}
 					if scenario == "no kubevirt" {
 						http.Error(w, "not found", 404)
 						return
@@ -74,7 +82,7 @@ func TestUpgradeRefusesLegacyResourcesBeforeMutation(t *testing.T) {
 					annotations["oberth.ci/trusted-kvm-intent"] = "durable-intent"
 				case strings.HasSuffix(r.URL.Path, "/virtualmachineinstances"):
 					kind, namespace = "VirtualMachineInstance", "legacy-guests"
-					found = scenario == "vmi" || scenario == "unlabelled vmi"
+					found = scenario == "vmi" || scenario == "unlabelled vmi" || scenario == "post-removal vmi"
 					if scenario == "unlabelled vmi" {
 						annotations["oberth.ci/vm-spec"] = "durable-intent"
 					} else {
@@ -109,7 +117,7 @@ func TestUpgradeRefusesLegacyResourcesBeforeMutation(t *testing.T) {
 			deps := Deps{KubeClient: kube, RestConfig: config, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
 				switch args[0] {
 				case "list":
-					return []byte(`[{"name":"oberth","chart":"oberth-0.17.80","status":"deployed","revision":1}]`), nil
+					return []byte(fmt.Sprintf(`[{"name":"oberth","chart":"oberth-%s","status":"deployed","revision":1}]`, installed)), nil
 				case "get":
 					if args[1] == "manifest" {
 						return []byte{}, nil
@@ -125,6 +133,9 @@ func TestUpgradeRefusesLegacyResourcesBeforeMutation(t *testing.T) {
 				return nil, fmt.Errorf("unexpected Helm operation: %v", args)
 			}, RunCommand: func(_ context.Context, _ []byte, _ string, args ...string) ([]byte, error) {
 				if strings.HasSuffix(strings.Join(args, " "), "admin retirement-check") {
+					if strings.HasPrefix(scenario, "post-removal") {
+						t.Fatal("post-removal server has no retirement-check command")
+					}
 					return []byte(`{"format":"oberth-retirement-check-v1","ready":true}`), nil
 				}
 				mutations++
@@ -135,18 +146,21 @@ func TestUpgradeRefusesLegacyResourcesBeforeMutation(t *testing.T) {
 			receipt["source_revision"] = "1"
 			receipt["connector"] = map[string]any{"mode": "unused", "reason": "fixture has no connector"}
 			receipt["site"] = map[string]any{"mode": "unused", "reason": "fixture has no site"}
-			_, err = RunUpgrade(t.Context(), UpgradeConfig{Namespace: "oberth", BinaryVersion: "0.17.83", OwnershipHandoff: writeHandoff(t, receipt), DryRun: scenario != "apply preflight"}, deps)
+			_, err = RunUpgrade(t.Context(), UpgradeConfig{Namespace: "oberth", BinaryVersion: target, OwnershipHandoff: writeHandoff(t, receipt), DryRun: scenario != "apply preflight"}, deps)
 			if requests == 0 || mutations != 0 {
 				t.Fatalf("requests=%d mutations=%d error=%v", requests, mutations, err)
 			}
 			switch scenario {
-			case "clean", "no kubevirt":
+			case "clean", "no kubevirt", "post-removal clean":
 				if err != nil {
 					t.Fatal(err)
 				}
-			case "forbidden", "malformed", "list missing", "discovery unavailable":
+			case "forbidden", "malformed", "list missing", "discovery unavailable", "kubevirt discovery unavailable":
 				if err == nil || !strings.Contains(err.Error(), "inspect legacy") {
 					t.Fatalf("read failure did not block retirement: %v", err)
+				}
+				if strings.Contains(scenario, "discovery unavailable") && !strings.Contains(err.Error(), "--allow-retired-execution") {
+					t.Fatalf("missing explicit override: %v", err)
 				}
 			default:
 				if err == nil || !strings.Contains(err.Error(), "legacy-owned") || !strings.Contains(err.Error(), "upgrade refused") {
@@ -169,7 +183,7 @@ func TestRetirementOverrideAndConditionalWarning(t *testing.T) {
 	if err := checkUpgradeLegacyResources(t.Context(), cfg, Deps{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := checkUpgradeLegacyRepositories(t.Context(), cfg, Deps{}); err != nil {
+	if err := checkUpgradeLegacyRepositories(t.Context(), cfg, Deps{}, "0.17.93"); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {

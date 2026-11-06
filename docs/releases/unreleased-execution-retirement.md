@@ -18,6 +18,7 @@ Legacy Helm settings are accepted but ignored, with upgrade warnings. Legacy
 workflow declarations fail with a message naming the workflow capability grant.
 Old runs still list and render. Active retired executions fail clearly at
 restart; external resources need operator cleanup. Drain them before upgrading.
+The upgrade resource inventory needs cluster-wide list permission on KubeVirt resources.
 Existing migration SQL is unchanged and no migration is added. Retired tables
 are inert until a later removal migration; restore the pre-upgrade database for
 rollback. See [migration instructions](../workflow-capabilities.md#migration-from-retired-execution).

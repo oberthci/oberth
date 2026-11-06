@@ -7,10 +7,15 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"golang.org/x/mod/semver"
 )
 
-func checkUpgradeLegacyRepositories(ctx context.Context, cfg UpgradeConfig, deps Deps) error {
-	if cfg.AllowRetiredExecution {
+// Later installed releases have no legacy engine or retirement-check command.
+const lastLegacyExecutionVersion = "v0.17.93"
+
+func checkUpgradeLegacyRepositories(ctx context.Context, cfg UpgradeConfig, deps Deps, installedVersion string) error {
+	if cfg.AllowRetiredExecution || semver.Compare(canonicalChartVersion(installedVersion), lastLegacyExecutionVersion) > 0 {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
