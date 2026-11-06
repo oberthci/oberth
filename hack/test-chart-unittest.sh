@@ -6,4 +6,4 @@ trap 'find "$workspace" -depth -delete' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 cp -R charts/oberth "$workspace/oberth"
-/tmp/oberth-tools/bin/untt-linux-amd64 --strict "$workspace/oberth"
+"${HELM_UNITTEST_BIN:-untt-linux-amd64}" --strict "$workspace/oberth"

@@ -1,3 +1,4 @@
+# Bump Alpine package pins when Alpine removes the pinned versions from its repositories.
 # syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 # The build stage runs on the build host's native platform and cross-compiles
 # with GOOS/GOARCH; only the runtime stage below is per-target-platform.

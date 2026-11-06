@@ -196,7 +196,7 @@ read_mount_type() {
     _mt_exit=$?
     fail "listing $1 mounts failed (exit $_mt_exit): $_mt_out"
   fi
-  python3 -c '
+  python3 -I -c '
 import json, sys
 try:
     mounts = json.load(sys.stdin)
@@ -233,7 +233,7 @@ read_policy() {
 command -v python3 >/dev/null 2>&1 || fail "python3 is required to validate audit device JSON"
 AUDIT_ENABLED="$("$CLI" audit list -format=json)" || fail "could not list audit devices; verify CLI permission and connectivity"
 audit_status=0
-python3 -c '
+python3 -I -c '
 import json, sys
 try:
     devices = json.load(sys.stdin)
@@ -324,7 +324,9 @@ fi
 # --- 2. auth mount config (never silently overwritten or repointed) ----------
 # No reviewer JWT is ever stored. An out-of-cluster store validates logins
 # with the login JWT itself (the Helm chart's system:auth-delegator binding
-# permits that TokenReview); an in-cluster store uses its own ServiceAccount.
+# permits that TokenReview for the server and exact pipeline login identities);
+# an in-cluster store uses its own ServiceAccount. Set secretstore.external=true
+# for external stores behind a cluster-local DNS alias.
 EXISTING_HOST="$(read_field kubernetes_host "auth/$MOUNT/config")"
 if [ -n "$EXISTING_HOST" ] && [ "$FORCE_AUTH_CONFIG" != "true" ]; then
   if [ "$EXISTING_HOST" = "$KUBERNETES_HOST" ]; then
