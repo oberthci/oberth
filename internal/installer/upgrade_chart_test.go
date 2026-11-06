@@ -98,52 +98,12 @@ func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string, sh
 	if err := os.WriteFile(history, encoded, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.Method != http.MethodGet {
-			t.Errorf("dry-run attempted a Kubernetes mutation: %s %s", r.Method, r.URL.Path)
-			http.Error(w, "mutations refused", http.StatusMethodNotAllowed)
-			return
-		}
-		switch r.URL.Path {
-		case "/version":
-			_, _ = io.WriteString(w, `{"major":"1","minor":"36","gitVersion":"v1.36.0"}`)
-		case "/api":
-			_, _ = io.WriteString(w, `{"kind":"APIVersions","apiVersion":"v1","versions":["v1"]}`)
-		case "/apis":
-			_, _ = io.WriteString(w, `{"kind":"APIGroupList","apiVersion":"v1","groups":[]}`)
-		case "/api/v1":
-			_, _ = io.WriteString(w, `{"kind":"APIResourceList","apiVersion":"v1","groupVersion":"v1","resources":[]}`)
-		default:
-			t.Errorf("unexpected discovery request: %s", r.URL.Path)
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-	kubeconfig := filepath.Join(dir, "kubeconfig")
-	caData := base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}))
-	body := "apiVersion: v1\nkind: Config\nclusters:\n- name: fixture\n  cluster:\n    server: " + server.URL + "\n    certificate-authority-data: " + caData + "\ncontexts:\n- name: fixture\n  context:\n    cluster: fixture\n    namespace: oberth\ncurrent-context: fixture\n"
-	if err := os.WriteFile(kubeconfig, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	chart, err := filepath.Abs("../../charts/oberth")
 	if err != nil {
 		t.Fatal(err)
 	}
 	image := "example.invalid/oberth@sha256:" + strings.Repeat("1", 64)
-	runHelm := func(ctx context.Context, args []string) ([]byte, error) {
-		args = append(append([]string{}, args...), "--kubeconfig", kubeconfig)
-		command := exec.CommandContext(ctx, "helm", args...)
-		command.Env = append(os.Environ(), "HELM_DRIVER=memory", "HELM_MEMORY_DRIVER_DATA="+history, "HELM_CACHE_HOME="+dir, "HELM_CONFIG_HOME="+dir, "HELM_PLUGINS="+filepath.Join(dir, "plugins"))
-		out, err := command.Output()
-		if err != nil {
-			var failure *exec.ExitError
-			if errors.As(err, &failure) {
-				return nil, fmt.Errorf("Helm: %w: %s", err, failure.Stderr)
-			}
-		}
-		return out, err
-	}
+	runHelm := upgradeTestHelm(t, dir, history)
 	cfg := UpgradeConfig{Namespace: "oberth", ChartOverride: chart}
 	deps := Deps{RunHelm: runHelm}
 	if err := requireUpgradeHelmVersion(t.Context(), deps); err != nil {
@@ -348,4 +308,50 @@ func testUpgradeValuePreflight(args []string) ([]byte, bool) {
 		return []byte(`{}`), true
 	}
 	return nil, false
+}
+
+// Only local discovery reads are served; Helm uses its nonmutating memory driver.
+func upgradeTestHelm(t *testing.T, dir, history string) func(context.Context, []string) ([]byte, error) {
+	t.Helper()
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodGet {
+			t.Errorf("dry-run attempted a Kubernetes mutation: %s %s", r.Method, r.URL.Path)
+			http.Error(w, "mutations refused", http.StatusMethodNotAllowed)
+			return
+		}
+		switch r.URL.Path {
+		case "/version":
+			_, _ = io.WriteString(w, `{"major":"1","minor":"36","gitVersion":"v1.36.0"}`)
+		case "/api":
+			_, _ = io.WriteString(w, `{"kind":"APIVersions","apiVersion":"v1","versions":["v1"]}`)
+		case "/apis":
+			_, _ = io.WriteString(w, `{"kind":"APIGroupList","apiVersion":"v1","groups":[]}`)
+		case "/api/v1":
+			_, _ = io.WriteString(w, `{"kind":"APIResourceList","apiVersion":"v1","groupVersion":"v1","resources":[]}`)
+		default:
+			t.Errorf("unexpected discovery request: %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	kubeconfig := filepath.Join(dir, "kubeconfig")
+	caData := base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}))
+	body := "apiVersion: v1\nkind: Config\nclusters:\n- name: fixture\n  cluster:\n    server: " + server.URL + "\n    certificate-authority-data: " + caData + "\ncontexts:\n- name: fixture\n  context:\n    cluster: fixture\n    namespace: oberth\ncurrent-context: fixture\n"
+	if err := os.WriteFile(kubeconfig, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return func(ctx context.Context, args []string) ([]byte, error) {
+		args = append(append([]string{}, args...), "--kubeconfig", kubeconfig)
+		command := exec.CommandContext(ctx, "helm", args...)
+		command.Env = append(os.Environ(), "HELM_DRIVER=memory", "HELM_MEMORY_DRIVER_DATA="+history, "HELM_CACHE_HOME="+dir, "HELM_CONFIG_HOME="+dir, "HELM_PLUGINS="+filepath.Join(dir, "plugins"))
+		out, err := command.Output()
+		if err != nil {
+			var failure *exec.ExitError
+			if errors.As(err, &failure) {
+				return nil, fmt.Errorf("Helm: %w: %s", err, failure.Stderr)
+			}
+		}
+		return out, err
+	}
 }

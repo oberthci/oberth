@@ -216,7 +216,7 @@ spec:
             {{- end }}
             {{- $kubernetesClient := .Values.kubernetesClient | default dict }}
             - --kubernetes-client-qps={{ $kubernetesClient.qps | default 50 }}
-            - --kubernetes-client-burst={{ $kubernetesClient.burst | default 100 }}
+            - --kubernetes-client-burst={{ int64 ($kubernetesClient.burst | default 100) }}
             {{- $retention := .Values.retention | default dict }}
             {{- $logRetention := $retention.logs | default dict }}
             {{- $artifactRetention := $retention.artifacts | default dict }}
@@ -241,8 +241,10 @@ spec:
             - {{ printf "--retention-sweep-interval=%s" ($retention.interval | default "10m") | quote }}
             - --retention-keep-newest={{ $keepNewest }}
             {{- $admission := .Values.admission | default dict -}}
-            {{- if gt (int ($admission.diskFloorBytes | default 0)) 0 }}
-            - --admission-disk-floor-bytes={{ $admission.diskFloorBytes }}
+            {{- /* Helm roundtrips numeric values through float64; integer flags need decimal output. */}}
+            {{- $diskFloorBytes := int64 ($admission.diskFloorBytes | default 0) }}
+            {{- if gt $diskFloorBytes 0 }}
+            - --admission-disk-floor-bytes={{ $diskFloorBytes }}
             {{- end }}
             {{- $pressure := $admission.pressure | default dict }}
             {{- $pressureEnabled := true }}
@@ -342,7 +344,7 @@ spec:
             - --argo-resource-sampler-config=/etc/oberth/resource-sampler/config.json
             {{- end }}
             - --argo-executor-scratch-size-limit={{ .Values.argo.executorScratchSizeLimit | default "1Gi" }}
-            - --argo-workflow-ttl={{ .Values.argo.workflowTTL }}
+            - --argo-workflow-ttl={{ int64 .Values.argo.workflowTTL }}
             {{- if .Values.argo.sourceStorageClass }}
             - --argo-source-storage-class={{ .Values.argo.sourceStorageClass }}
             {{- end }}
@@ -383,7 +385,7 @@ spec:
             {{- if $trustedTests.recipes }}
             - --trusted-tests-recipes=/etc/oberth/trusted-tests/recipes.json
             - --trusted-tests-runtime={{ $trustedRuntime }}
-            - --trusted-tests-kvm-group={{ $trustedTests.kvmSupplementalGroup }}
+            - --trusted-tests-kvm-group={{ int64 $trustedTests.kvmSupplementalGroup }}
             {{- end }}
             {{- $promotion := .Values.promotion | default dict -}}
             {{- $grantMaxLifetime := $promotion.grantMaxLifetime | default "24h" -}}
