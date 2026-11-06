@@ -82,12 +82,32 @@ func remoteClient(ctx context.Context) (*client.Client, error) {
 }
 
 func reportMode(mode string) {
+	if mode == "server" {
+		return
+	}
 	fmt.Fprintf(os.Stderr, "reading: %s\n", mode)
+}
+
+func setRemoteUsage(flags *flag.FlagSet) {
+	suffix := "[flags]"
+	switch flags.Name() {
+	case "run":
+		suffix = "<run-id> [flags]"
+	case "log":
+		suffix = "<run-id> [--burn <burn> --step <step>] [flags]"
+	case "issues update":
+		suffix = "--id <issue-id> --work-status <status> [flags]"
+	}
+	flags.Usage = func() {
+		_, _ = fmt.Fprintf(flags.Output(), "Usage: oberth %s %s\n", flags.Name(), suffix)
+		flags.PrintDefaults()
+	}
 }
 
 func remoteFlags(name string, arguments []string, output io.Writer) (*flag.FlagSet, *bool, error) {
 	flags := flag.NewFlagSet(name, flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
+	setRemoteUsage(flags)
 	asJSON := flags.Bool("json", false, "emit the server's payload unchanged")
 	if err := parseCommandFlags(flags, arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -122,6 +142,7 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 	}
 	flags := flag.NewFlagSet("runs", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
+	setRemoteUsage(flags)
 	repo := flags.String("repo", "", "only this repository; use upstream/org/name when ambiguous")
 	ref := flags.String("ref", "", "only this branch or tag")
 	limit := flags.Int("limit", 20, "runs per page (at most 100)")
@@ -392,6 +413,16 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 	if err := renderExecutionClock(output, detail.Scheduling); err != nil {
 		return err
 	}
+	if detail.Run.FailedStage != "" && detail.Run.FailedStep != "" {
+		if _, err := fmt.Fprintf(output, "failed step: %s/%s · oberth log %s --burn %s --step %s\n", detail.Run.FailedStage, detail.Run.FailedStep, detail.Run.ID, detail.Run.FailedStage, detail.Run.FailedStep); err != nil {
+			return err
+		}
+		for _, reason := range []*string{&detail.Run.DisplayReason, &detail.Run.Reason, &detail.Run.Error} {
+			if strings.EqualFold(strings.TrimSpace(*reason), "Workflow failed") {
+				*reason = ""
+			}
+		}
+	}
 	// The reason first, before the step list: a failed run is read to find out
 	// what went wrong, and burying it under timings makes the reader scroll
 	// past the answer.
@@ -435,13 +466,19 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 			return err
 		}
 	}
+	burnWidth, stepWidth, statusWidth := 0, 0, 0
+	for _, step := range detail.Steps {
+		burnWidth = max(burnWidth, len(step.Stage))
+		stepWidth = max(stepWidth, len(step.Step))
+		statusWidth = max(statusWidth, len(step.Status))
+	}
 	for _, step := range detail.Steps {
 		marker := " "
 		if step.Stage == detail.Run.FailedStage && step.Step == detail.Run.FailedStep {
 			marker = "*"
 		}
-		if _, err := fmt.Fprintf(output, "%s %-12s %-20s %-9s %s\n",
-			marker, step.Stage, step.Step, step.Status, span(step.StartedAt, step.FinishedAt)); err != nil {
+		if _, err := fmt.Fprintf(output, "%s %-*s %-*s %-*s %s\n",
+			marker, burnWidth, step.Stage, stepWidth, step.Step, statusWidth, step.Status, span(step.StartedAt, step.FinishedAt)); err != nil {
 			return err
 		}
 	}
@@ -499,6 +536,7 @@ type remoteLog struct {
 func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) error {
 	flags := flag.NewFlagSet("log", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
+	setRemoteUsage(flags)
 	stage := flags.String("burn", "", "burn name")
 	step := flags.String("step", "", "step name")
 	pattern := flags.String("pattern", "", "RE2 pattern; offset and limit then page over matches")
@@ -519,9 +557,6 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 	}
 	if flags.NArg() != 1 {
 		return fmt.Errorf("%w: log <run-id> --burn <burn> --step <step>", errUsage)
-	}
-	if strings.TrimSpace(*stage) == "" || strings.TrimSpace(*step) == "" {
-		return fmt.Errorf("%w: --burn and --step are required; oberth run <id> lists them", errUsage)
 	}
 	api, err := remoteClient(ctx)
 	if err != nil {
@@ -745,7 +780,9 @@ func runIssues(ctx context.Context, arguments []string, output io.Writer) error 
 	}
 	flags := flag.NewFlagSet("issues", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
+	setRemoteUsage(flags)
 	asJSON := flags.Bool("json", false, "emit the server payload")
+	issueState := flags.String("state", "open", "filter open, closed or all issues")
 	workStatus := flags.String("work-status", "", "filter todo, active, waiting or review")
 	staleAfter := flags.String("stale-after", "", "override the general stale window (duration)")
 	activeStaleAfter := flags.String("active-stale-after", "", "override the active stale window (duration)")
@@ -756,6 +793,13 @@ func runIssues(ctx context.Context, arguments []string, output io.Writer) error 
 			return nil
 		}
 		return fmt.Errorf("%w: %w", errUsage, err)
+	}
+	if *issueState != "open" && *issueState != "closed" && *issueState != "all" {
+		return fmt.Errorf("%w: --state must be open, closed or all", errUsage)
+	}
+	selectedState := *issueState
+	if selectedState == "all" {
+		selectedState = ""
 	}
 	if *workStatus != "" && !model.IssueWorkStatus(*workStatus).Valid() {
 		return fmt.Errorf("%w: invalid work status", errUsage)
@@ -776,7 +820,7 @@ func runIssues(ctx context.Context, arguments []string, output io.Writer) error 
 	}
 	reportMode("server")
 	raw, err := collectIssuePages(ctx, func(ctx context.Context, before int64) (json.RawMessage, error) {
-		query := map[string]string{"work_status": *workStatus, "stale_after": *staleAfter, "active_stale_after": *activeStaleAfter}
+		query := map[string]string{"state": selectedState, "work_status": *workStatus, "stale_after": *staleAfter, "active_stale_after": *activeStaleAfter}
 		if before > 0 {
 			query["before"] = strconv.FormatInt(before, 10)
 		}
@@ -952,6 +996,7 @@ func renderExecutionClock(output io.Writer, scheduling *model.RunScheduling) err
 func runIssueWorkStatus(ctx context.Context, arguments []string, output io.Writer) error {
 	flags := flag.NewFlagSet("issues update", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
+	setRemoteUsage(flags)
 	id := flags.Int64("id", 0, "issue ID")
 	status := flags.String("work-status", "", "todo, active, waiting or review")
 	revision := flags.Int64("expected-revision", 0, "optional current metadata revision")

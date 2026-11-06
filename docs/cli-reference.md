@@ -393,13 +393,15 @@ Usage of install:
 ## oberth issues
 
 ```text
-Usage of issues:
+Usage: oberth issues [flags]
   -active-stale-after string
         override the active stale window (duration)
   -json
         emit the server payload
   -stale-after string
         override the general stale window (duration)
+  -state string
+        filter open, closed or all issues (default "open")
   -work-status string
         filter todo, active, waiting or review
 ```
@@ -407,7 +409,7 @@ Usage of issues:
 ## oberth issues update
 
 ```text
-Usage of issues update:
+Usage: oberth issues update --id <issue-id> --work-status <status> [flags]
   -expected-revision int
         optional current metadata revision
   -id int
@@ -456,7 +458,7 @@ Usage of kubevirt revoke:
 ## oberth log
 
 ```text
-Usage of log:
+Usage: oberth log <run-id> [--burn <burn> --step <step>] [flags]
   -burn string
         burn name
   -byte-offset int
@@ -507,7 +509,7 @@ Environment:
   OBERTH_BASE_URL       Server URL; /mcp is appended when no MCP URL is set
   OBERTH_TOKEN          Bearer token for authentication
   OBERTH_TOKEN_COMMAND  Command that prints a token when OBERTH_TOKEN is unset
-  OBERTH_CA_CERT        PEM CA certificate (overridden by --ca-file)
+  OBERTH_CA_CERT        Inline PEM or CA certificate file path (overridden by --ca-file)
 
 Flags:
   --url <url>          MCP server URL
@@ -718,7 +720,7 @@ Usage of repo verify:
 ## oberth repos
 
 ```text
-Usage of repos:
+Usage: oberth repos [flags]
   -json
         emit the server's payload unchanged
 ```
@@ -811,7 +813,7 @@ Guide: https://github.com/oberthci/oberth/blob/main/docs/backup-restore.md
 ## oberth run
 
 ```text
-Usage of run:
+Usage: oberth run <run-id> [flags]
   -json
         emit the server's payload unchanged
 ```
@@ -871,7 +873,7 @@ Usage: oberth run retry <run-id> [--json] [--url <mcp-url>] [--token-file <path>
 ## oberth runs
 
 ```text
-Usage of runs:
+Usage: oberth runs [flags]
   -active
         only queued and running runs, in scheduling order, with queue position and wait reason
   -all
@@ -1342,7 +1344,7 @@ Usage of size revoke:
 ## oberth status
 
 ```text
-Usage of status:
+Usage: oberth status [flags]
   -json
         emit the server's payload unchanged
 ```

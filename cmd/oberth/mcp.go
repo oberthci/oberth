@@ -143,7 +143,7 @@ Environment:
   OBERTH_BASE_URL       Server URL; /mcp is appended when no MCP URL is set
   OBERTH_TOKEN          Bearer token for authentication
   OBERTH_TOKEN_COMMAND  Command that prints a token when OBERTH_TOKEN is unset
-  OBERTH_CA_CERT        PEM CA certificate (overridden by --ca-file)
+  OBERTH_CA_CERT        Inline PEM or CA certificate file path (overridden by --ca-file)
 
 Flags:
   --url <url>          MCP server URL
@@ -644,13 +644,9 @@ func mcpHTTPClient(caFile string) (*http.Client, error) {
 	cloned.TLSClientConfig.MinVersion = tls.VersionTLS12
 
 	if caFile != "" {
-		pemData, err := os.ReadFile(caFile) //nolint:gosec // G304: operator-supplied CA path.
+		pool, err := client.LoadCAPool(caFile)
 		if err != nil {
-			return nil, fmt.Errorf("read CA file: %w", err)
-		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(pemData) {
-			return nil, fmt.Errorf("CA file %s contains no certificates", caFile)
+			return nil, fmt.Errorf("MCP CA certificate: %w", err)
 		}
 		cloned.TLSClientConfig.RootCAs = pool
 	}

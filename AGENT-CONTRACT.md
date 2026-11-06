@@ -3180,8 +3180,12 @@ migration. Existing single-issue mutation authorization is unchanged.
 
 ## Retained run and step timing (#1128)
 
-`run_get` and the dashboard run detail expose `Timing`, version 1. These are
-observations, independent of the verdict and the older `Run.StartedAt` field.
+Full MCP `run_get`, default `GET /api/runs/{id}`, and `oberth run <id> --json`
+expose `Timing`, version 1, and per-step `MeasuredSizeComparison` when available.
+Dashboard polling selects `?view=dashboard`, which omits `Timing`,
+`MeasuredUsage`, `MeasuredSizeComparison`, and `Termination`. For resource
+analysis, use MCP `run_resources` or `oberth run resources --run <id>`.
+These are observations, independent of the verdict and the older `Run.StartedAt` field.
 Missing timestamps are unknown; they never mean a zero duration. Legacy rows
 have `unavailable=not-recorded`; no timestamp is backfilled from `StartedAt`.
 

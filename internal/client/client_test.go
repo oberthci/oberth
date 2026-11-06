@@ -735,3 +735,22 @@ func TestALocalServerNameFallsBackToTheSystemResolver(t *testing.T) {
 		t.Fatalf("err = %v, want the certificate hostname error", err)
 	}
 }
+
+func TestInlineCACertificateAndInvalidPEM(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"ok":true}`)) }))
+	defer server.Close()
+	certificate := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+	c, err := New(t.Context(), Config{BaseURL: server.URL, Token: secret, CACert: string(certificate)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response map[string]bool
+	if err = c.Get(t.Context(), "/", nil, &response); err != nil || !response["ok"] {
+		t.Fatal(response, err)
+	}
+	invalid := "-----BEGIN CERTIFICATE-----\nprivate-fixture-material\n-----END CERTIFICATE-----"
+	_, err = newTransport(invalid)
+	if err == nil || strings.Contains(err.Error(), "private-fixture-material") || strings.Contains(err.Error(), "BEGIN") {
+		t.Fatalf("inline PEM leaked or accepted: %v", err)
+	}
+}

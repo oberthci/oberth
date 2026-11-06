@@ -67,3 +67,23 @@ func TestAdminRunLogsStepInferenceUsesActiveProgress(t *testing.T) {
 		t.Fatalf("live unique step=%v", err)
 	}
 }
+
+func TestRunLogsWithoutFailureListsAvailablePairs(t *testing.T) {
+	f := newControlFixture(t)
+	run, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/logs", SHA: strings.Repeat("a", 40), Actor: "dev", Trigger: "push"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range []model.StepResult{{RunID: run.ID, DeclaredSize: "M", Stage: "build", Step: "compile", Status: model.StepPassed}, {RunID: run.ID, DeclaredSize: "M", Stage: "test", Step: "unit", Status: model.StepPassed}} {
+		if _, err = storetest.PutHistoricalStepResult(f.store, t.Context(), step); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = f.store.FinishRun(t.Context(), run.ID, model.RunResult{Status: model.RunPassed}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.api(t).CallTool(t.Context(), api.Actor{Identity: "reader"}, "run_logs", json.RawMessage(fmt.Sprintf(`{"id":%q}`, run.ID)))
+	if err == nil || !strings.Contains(err.Error(), "build/compile, test/unit") {
+		t.Fatal(err)
+	}
+}

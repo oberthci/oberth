@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/oberthci/oberth/internal/gitcache"
@@ -65,17 +66,31 @@ func (handler *ReceiveHandler) WithNotices(notify func(format string, args ...an
 	if notify == nil {
 		return handler
 	}
-	return gitcache.ReceiveHandlerFunc(func(ctx context.Context, event gitcache.ReceiveEvent) error {
-		result, err := handler.dispatch(ctx, event)
-		if err != nil {
-			return err
-		}
-		if notice := describePushResult(event, result); notice != "" {
-			notify("%s", notice)
-		}
-		return nil
-	})
+	return &receiveNotices{dispatch: handler.dispatch, notify: notify}
 }
+
+type receiveNotices struct {
+	dispatch func(context.Context, gitcache.ReceiveEvent) (PushResult, error)
+	notify   func(string, ...any)
+	runIDs   []string
+}
+
+func (handler *receiveNotices) HandleReceive(ctx context.Context, event gitcache.ReceiveEvent) error {
+	result, err := handler.dispatch(ctx, event)
+	if err != nil {
+		return err
+	}
+	if result.Run != nil && result.Run.ID != "" && !slices.Contains(handler.runIDs, result.Run.ID) {
+		handler.runIDs = append(handler.runIDs, result.Run.ID)
+	}
+	if notice := describePushResult(event, result); notice != "" {
+		handler.notify("%s", notice)
+	}
+	return nil
+}
+
+// QueuedRunIDs exposes durable session results without parsing human notices.
+func (handler *receiveNotices) QueuedRunIDs() []string { return slices.Clone(handler.runIDs) }
 
 func describePushResult(event gitcache.ReceiveEvent, result PushResult) string {
 	kind := event.Update.Kind()

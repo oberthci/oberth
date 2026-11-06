@@ -5,8 +5,11 @@ uses the existing S/M/L/XL classes and administrator weights. Nothing in the
 report changes a grant, authored request/limit, Workflow, retry policy or size
 classification. It supplies no automatic request recommendation.
 
-`run_get`/the full run HTTP response attaches `MeasuredSizeComparison` to each
-assembled step beside `MeasuredUsage`. MCP `repo_usage` adds `report_only:true`,
+Full MCP `run_get`, default `GET /api/runs/{id}`, and `oberth run <id> --json`
+attach `MeasuredSizeComparison` to each assembled step beside `MeasuredUsage`,
+and expose run-level `Timing`. Dashboard polling uses `?view=dashboard` and
+omits those diagnostics. For resource analysis, use MCP `run_resources` or
+`oberth run resources --run <id>`. MCP `repo_usage` adds `report_only:true`,
 `size_class_semantics` and each step's `by_workflow_size` list. Each list has at
 most five buckets: S, M, L, XL, unknown. Existing repository/time/step filters,
 1,000/default–5,000/max observation window, 128 step-group cap and run-view

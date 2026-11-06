@@ -205,7 +205,7 @@ call the proxy hostname directly.
 | `artifact_get` | One artifact's contents by run ID and name, optionally filtered |
 | `wait` | Long-poll until a SHA or exact run ID reaches a terminal state |
 | `sync` | Park a WIP branch upstream without a green gate (not completion evidence) |
-| `queue_cap_config` | Unscoped admin only: set `queueCap.maxNotStarted` with `maxNotStarted` (integer, 0 disables; off by default). Defer branch run creation when queued and waiting runs reach the cap; drain deferred receives in arrival order after capacity opens. Accepted deferred pushes stay in Oberth's Git cache and durable receive journal; automatic upstream publication requires successful CI. Tags/releases, promotions and schedules bypass the cap. Audited; setting and backlog survive restart. `system_status.queueCap` reports the cap, count, deferred count and reason |
+| `queue_cap_config` | Unscoped admin only: set the branch queue cap with `maxNotStarted` (integer, 0 disables; off by default). Defer branch run creation when queued and waiting runs reach the cap; drain deferred receives in arrival order after capacity opens. Accepted deferred pushes stay in Oberth's Git cache and durable receive journal; automatic upstream publication requires successful CI. Tags/releases, promotions and schedules bypass the cap. Audited; setting and backlog survive restart. `system_status.queue_cap` reports `max_not_started`, `not_started`, `deferred` and `reason`; `queueCap` remains for one more release |
 | `promote` | Promote a green branch SHA or an authorized parked SHA; parked sources always run merged-tree CI; push without force |
 | `promotion_list` | Recover durable promotion IDs by exact repo/full source SHA/status; bounded pages with an admission-sequence cursor |
 | `promote_status` | Wait for a promotion record to become terminal; a failed or interrupted promotion that was retried names its successor in `retried_as` |
@@ -393,7 +393,7 @@ A step above the 4 MiB response ceiling returns a truncated result with
 step: a single step can exceed a model's context window.
 
 | `repo_usage` | Bounded external resource report by repository/step: sampled p50/p95/max, requests, coverage and used/request ratios. |
-| `repo_list` | List registered repositories with upstream and probe state |
+| `repo_list` | List registered repositories as id, name, upstream, default_branch, archived_at and one latest_run (id, status, ref, finished_at). No run history or probe payload. |
 | `repo_archive` / `repo_unarchive` | Archive or restore a repository, preserving history (unscoped admin only); archived repositories refuse new grants |
 | `repo_remove` | Remove a repository mapping and its Git cache (admin-only) |
 | `run_list` | List runs with repository/ref/SHA, size/declared demand, queue position and superseded status; optional repo/ref, display-status (one value or list) and `superseded:true` filters (bounded page) |

@@ -75,6 +75,27 @@ curl -fsSL https://oberth.ci/install.sh | sh
 oberth install --install-secretstore
 ```
 
+### First push
+
+If setup has not already registered them, add your upstream and this machine's
+uplink. Replace `acme`, `my-repo`, `operator@host`, and `oberth.example` with your
+organization, repository, identity, and node address. Register the deploy key
+printed by `upstream add` at your forge when prompted.
+
+```bash
+oberth upstream add github ssh://git@github.com/acme
+kubectl exec -i -n oberth deploy/oberth -- \
+  oberth uplink add - operator@host < ~/.ssh/id_ed25519.pub
+
+# Run in your existing local repository, with the changes committed.
+git remote add oberth ssh://git@oberth.example:30022/github/acme/my-repo.git
+git push oberth HEAD:refs/heads/first-push
+# Open https://oberth.example:30443/runs in your browser.
+```
+
+Save the uplink token and TLS fingerprint printed once by `uplink add`.
+The push banner links to the queued run when a dashboard URL is configured.
+
 Both the server namespace (`oberth` by default) and pipeline namespace
 (`oberth-argo`) require the Pod Security Admission `privileged` level, or no
 PSA enforcement. The server's root cache initializer and the server/pipeline
@@ -109,6 +130,30 @@ helm repo update
 helm show values oberth/oberth
 ```
 
+The SSH host key is generated once into OpenBao and reused across upgrades.
+With a production secret store the HTTPS certificate is a 30-day leaf the
+server requests from a name-constrained CA in OpenBao's PKI engine and renews
+in place; clients pin the CA. An init container
+prepares the cache directories; the pod stays `0/1 Running` — live, not
+ready — until the first upstream is registered. `upstream add` offers to mint
+a deploy key and prints it once for registration at your forge. `uplink add`
+prints the TLS fingerprint and a bearer token exactly once; wire it into your
+MCP client (full walkthrough in [docs/mcp-setup.md](docs/mcp-setup.md)):
+
+```json
+{
+  "mcpServers": {
+    "oberth": {
+      "type": "url",
+      "url": "https://<node>:30443/mcp",
+      "headers": { "Authorization": "Bearer oberth_…" }
+    }
+  }
+}
+```
+
+## Upgrading
+
 `oberth upgrade` keeps stored release configuration and merges new chart defaults
 for keys that were absent, then applies `--values`/`--set` overrides. It uses
 Helm's `--reset-then-reuse-values` mode. The chart also supports direct
@@ -142,28 +187,6 @@ Re-running `oberth install` and restoring a backup intentionally retain
 sets only the database identities it needs. Every newly introduced value must
 therefore have a template fallback. The v0.17.53 raw-values render and actual
 Helm install/restore tests cover the `utilityImage` fallback.
-
-The SSH host key is generated once into OpenBao and reused across upgrades.
-With a production secret store the HTTPS certificate is a 30-day leaf the
-server requests from a name-constrained CA in OpenBao's PKI engine and renews
-in place; clients pin the CA. An init container
-prepares the cache directories; the pod stays `0/1 Running` — live, not
-ready — until the first upstream is registered. `upstream add` offers to mint
-a deploy key and prints it once for registration at your forge. `uplink add`
-prints the TLS fingerprint and a bearer token exactly once; wire it into your
-MCP client (full walkthrough in [docs/mcp-setup.md](docs/mcp-setup.md)):
-
-```json
-{
-  "mcpServers": {
-    "oberth": {
-      "type": "url",
-      "url": "https://<node>:30443/mcp",
-      "headers": { "Authorization": "Bearer oberth_…" }
-    }
-  }
-}
-```
 
 ## How it works
 
@@ -388,7 +411,7 @@ List it with `oberth mcp tools`; available operations are:
 | `size_grant` | Raise (or set) the largest admission size a repository's branch, promotion and schedule runs may declare. The default without a grant is L; XL reserves the whole host and makes every other repository wait for a full drain. Re-enables automatic tag priority: only the oldest waiting tag per repository qualifies, and only within this size maximum. Ungranted repositories default to enabled within L. Admin uplink required; audited. |
 | `size_revoke` | Return a repository to maximum L and disable its automatic tag priority, even if never granted. Explicit admin overrides, promotions and 60-minute aging of standard runs into promotion still apply; running work continues. Admin uplink required; audited. |
 | `size_grant_get` | Read legacy admission size and priority policy, plus the independent numeric resource ceiling. Use resource_grant to change request/limit ceilings. |
-| `queue_cap_config` | Set queueCap.maxNotStarted (0 disables, the default). At the cap, accepted branch pushes stay in Oberth's Git cache and durable receive journal until run creation resumes. Automatic upstream publication still requires successful CI. Queued and claimed waiting runs count; deferred receives survive restart and create runs in arrival order. Tags/releases, promotions and schedules bypass the cap; park refs retain their configured behavior. Unscoped admin only; audited. system_status reports queueCap. |
+| `queue_cap_config` | Set the branch queue cap with maxNotStarted (0 disables, the default). At the cap, accepted branch pushes stay in Oberth's Git cache and durable receive journal until run creation resumes. Automatic upstream publication still requires successful CI. Queued and claimed waiting runs count; deferred receives survive restart and create runs in arrival order. Tags/releases, promotions and schedules bypass the cap; park refs retain their configured behavior. Unscoped admin only; audited. system_status reports queue_cap (queueCap is a legacy alias for one more release). |
 | `queue_priority_config` | Replace administrator RC branch globs (case-sensitive * and ? match slash); [] disables RC priority. Applies to queued runs immediately. A standard run waiting 60 minutes joins promotion (reason aged) at its own FIFO position; no automatic path grants high. Unscoped admin only; audited. |
 | `queue_priority_get` | Read administrator RC globs and the aging threshold after which standard work joins promotion. Unscoped admin only. |
 | `priority_grant` | Allow an identity to request submission priority up to max_class until expires (RFC3339). Unscoped admin only; audited. |
@@ -399,7 +422,7 @@ List it with `oberth mcp tools`; available operations are:
 | `admission_hold` | Hold new admission except allowed tag/release/promotion classes. Unscoped admin only; audited, reason required. Existing grants are untouched. Default allow is tag+release; [] holds all. Expires after duration (default 2h, maximum 12h), including across restart. Read current hold in system_status admission.hold. |
 | `admission_release` | Release one admission reservation no owner will release: typically a granted reservation still held for a run that is already terminal because its owner hung or was lost (also an ungranted one of a terminal run, or a retained one while a stopping scheduler drains). A live run's reservation is refused (use run_cancel). The run's Workflow is deleted first as proof; a granted run with no recorded Workflow (a trusted preflight) needs force, as does a failed deletion. Admin uplink required, unscoped only; audited. system_status lists every reservation. |
 | `repo_usage` | Report bounded outside-step kubelet/cAdvisor usage by repository and step: per-container app/init/helper/VM launcher p50/p95/max, pod storage peaks and per-run pod overlap; requests, paired used/request ratios and per-step peaks grouped by observed Workflow size class (S/M/L/XL or unknown). Peaks are sampled lower bounds; missing/killed samples remain unknown. Does not change admission. |
-| `repo_list` | List registered repositories with their upstream and probe state. |
+| `repo_list` | List registered repositories as id, name, upstream, default_branch, archived_at and one latest_run (id, status, ref, finished_at). No run history or probe payload. |
 | `repo_archive` | Archive a repository, retaining all history and refusing new work. Requires an unscoped admin; refuses in-flight runs and pending promotions. Drops the Git cache. |
 | `repo_unarchive` | Unarchive a repository and allow new work again. Requires an unscoped admin. |
 | `repo_remove` | Remove a repository mapping and its Git cache. Requires admin uplink. Refuses if runs are in-flight or promotions are pending. |

@@ -87,3 +87,28 @@ func TestProductCodeHasNoHostedInstanceURL(t *testing.T) {
 		}
 	}
 }
+
+func TestMCPInlineCAEnvironment(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) }))
+	defer server.Close()
+	inline := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}))
+	t.Setenv("OBERTH_CA_CERT", inline)
+	t.Setenv("OBERTH_TOKEN", "fixture-token")
+	cfg, err := parseMCPFlags("call", []string{"--url=" + server.URL}, 0)
+	if err != nil || cfg.CAFile != strings.TrimSpace(inline) {
+		t.Fatalf("inline environment not retained: %v", err)
+	}
+	transport, err := mcpHTTPClient(cfg.CAFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := transport.Get(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	_, err = mcpHTTPClient("-----BEGIN CERTIFICATE-----\ninline-invalid-body\n-----END CERTIFICATE-----")
+	if err == nil || strings.Contains(err.Error(), "inline-invalid-body") {
+		t.Fatal(err)
+	}
+}

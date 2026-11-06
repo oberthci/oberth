@@ -167,11 +167,11 @@ func TestRepositoryGrantMetadataIsActiveAndBestEffort(t *testing.T) {
 	}
 	check := func(wantVisible bool) {
 		t.Helper()
-		value, err := fixture.call(unscopedActor, "repo_list", map[string]any{})
+		value, err := fixture.service.Repositories(ctx, unscopedActor)
 		if err != nil {
 			t.Fatal(err)
 		}
-		views := value.(api.RepoListResponse).Repositories.([]RepoView)
+		views := value.([]RepoView)
 		if len(views) != 2 {
 			t.Fatalf("listing lost repositories: %+v", views)
 		}

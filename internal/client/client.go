@@ -169,13 +169,9 @@ func newTransport(caCert string) (http.RoundTripper, error) {
 	if caCert == "" {
 		return cloned, nil
 	}
-	pem, err := os.ReadFile(caCert) // #nosec G304 -- operator-supplied trust anchor path.
+	pool, err := LoadCAPool(caCert)
 	if err != nil {
-		return nil, fmt.Errorf("client: read OBERTH_CA_CERT: %w", err)
-	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(pem) {
-		return nil, fmt.Errorf("client: OBERTH_CA_CERT %s contains no certificate", caCert)
+		return nil, fmt.Errorf("client: OBERTH_CA_CERT: %w", err)
 	}
 	cloned.TLSClientConfig.RootCAs = pool
 	return cloned, nil

@@ -206,15 +206,32 @@ func TestLogHidesExecutorLinesUnlessRaw(t *testing.T) {
 	}
 }
 
-func TestLogRequiresStageAndStep(t *testing.T) {
-	configure(t, remoteServer(t, `{}`))
-	var out bytes.Buffer
-	err := runRemoteLog(context.Background(), []string{"run-abc"}, &out)
-	if err == nil {
-		t.Fatal("log ran without --burn and --step")
-	}
-	if !strings.Contains(err.Error(), "--burn") {
-		t.Fatalf("error does not say what is missing: %v", err)
+func TestLogDefaultsToFailedStepAndReportsAvailablePairs(t *testing.T) {
+	for _, failed := range []bool{true, false} {
+		t.Run(fmt.Sprint(failed), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("burn") != "" || r.URL.Query().Get("step") != "" {
+					t.Fatal("CLI invented selectors")
+				}
+				if !failed {
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = w.Write([]byte(`{"error":"no failed step; available burn/step pairs: build/compile, test/unit"}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{"run_id":"run-abc","burn":"test","step":"unit","output":"[test/unit] assertion failed\n"}`))
+			}))
+			defer server.Close()
+			configure(t, server)
+			var out bytes.Buffer
+			err := runRemoteLog(t.Context(), []string{"run-abc"}, &out)
+			if failed {
+				if err != nil || !strings.Contains(out.String(), "assertion failed") {
+					t.Fatal(out.String(), err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "build/compile, test/unit") {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 
@@ -671,6 +688,80 @@ func TestRunDetailShowsDeadlineAndFinalizationLag(t *testing.T) {
 	for _, want := range []string{"running", "Execution deadline exceeded", "2026-10-30T10:33:37Z", "0s remaining", "clock: Workflow start", "finalization lag: 3080s"} {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("missing %q: %s", want, output.String())
+		}
+	}
+}
+
+func TestIssuesStateDefaultsOpenAndAppliesToRequests(t *testing.T) {
+	for _, choice := range []string{"", "open", "closed", "all"} {
+		t.Run(choice, func(t *testing.T) {
+			wanted := choice
+			if wanted == "" {
+				wanted = "open"
+			}
+			if wanted == "all" {
+				wanted = ""
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("state") != wanted {
+					t.Errorf("state=%q want=%q", r.URL.Query().Get("state"), wanted)
+				}
+				_, _ = w.Write([]byte(`{"Issues":[]}`))
+			}))
+			defer server.Close()
+			configure(t, server)
+			args := []string{}
+			if choice != "" {
+				args = []string{"--state", choice}
+			}
+			var out bytes.Buffer
+			if err := runIssues(t.Context(), args, &out); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestRunDetailSizesColumnsAndLinksFailedStep(t *testing.T) {
+	payload := `{"Run":{"ID":"run-abc","Status":"failed","FailedBurn":"ci","FailedStep":"test","DisplayReason":"Workflow failed","Reason":"Workflow failed","Error":"Workflow failed"},"Steps":[{"Burn":"ci","Step":"test","Status":"failed"},{"Burn":"very-long-burn-name","Step":"a-very-long-step-name-over-twenty","Status":"passed"}]}`
+	configure(t, remoteServer(t, payload))
+	var out bytes.Buffer
+	if err := runRunDetail(t.Context(), []string{"run-abc"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	body := out.String()
+	if !strings.Contains(body, "failed step: ci/test · oberth log run-abc --burn ci --step test") || strings.Contains(body, "Workflow failed") {
+		t.Fatal(body)
+	}
+	var rows []string
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "* ") || strings.HasPrefix(line, "  ") {
+			rows = append(rows, line)
+		}
+	}
+	if len(rows) != 2 || strings.Index(rows[0], "test") != strings.Index(rows[1], "a-very-long-step") || strings.Index(rows[0], "failed") != strings.Index(rows[1], "passed") {
+		t.Fatal(body)
+	}
+}
+
+func TestRunDetailJSONRetainsFullDiagnostics(t *testing.T) {
+	payload := `{"Run":{"ID":"run-abc"},"Timing":{"Version":1},"Steps":[{"MeasuredUsage":[{}],"MeasuredSizeComparison":[{}],"Termination":{}}]}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("view") != "" {
+			t.Errorf("CLI requested compact view: %s", r.URL)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, payload)
+	}))
+	defer server.Close()
+	configure(t, server)
+	var output bytes.Buffer
+	if err := runRunDetail(t.Context(), []string{"run-abc", "--json"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"Timing", "MeasuredUsage", "MeasuredSizeComparison", "Termination"} {
+		if !strings.Contains(output.String(), field) {
+			t.Fatalf("CLI lost %s: %s", field, output.String())
 		}
 	}
 }

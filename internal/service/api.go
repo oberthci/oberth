@@ -385,7 +385,7 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 		return nil, err
 	}
 	value, err = service.callTool(ctx, actor, name, raw)
-	return service.stripScopedSequences(value), err
+	return service.stripScopedSequences(value), toolSelectorError(raw, err)
 }
 
 func (service *API) callTool(ctx context.Context, actor api.Actor, name string, raw json.RawMessage) (any, error) {
@@ -971,11 +971,10 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 	case "repo_usage":
 		return service.repoUsage(ctx, raw)
 	case "repo_list":
-		repos, err := service.Repositories(ctx, actor)
-		if err != nil {
+		if err := decodeTool(raw, &struct{}{}); err != nil {
 			return nil, err
 		}
-		return api.RepoListResponse{Repositories: repos}, nil
+		return service.repoList(ctx)
 	case "repo_archive", "repo_unarchive":
 		var arguments struct {
 			Repo string `json:"repo"`
@@ -1331,7 +1330,16 @@ func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, sta
 		}
 	}
 	if strings.TrimSpace(stage) == "" {
-		return nil, fmt.Errorf("%w: burn is required when the run has no failed burn", ErrInvalidInput)
+		pairs := make([]string, 0, len(steps))
+		for _, result := range steps {
+			pairs = append(pairs, result.Stage+"/"+result.Step)
+		}
+		sort.Strings(pairs)
+		available := strings.Join(pairs, ", ")
+		if available == "" {
+			available = "none recorded"
+		}
+		return nil, fmt.Errorf("%w: no failed step; specify burn and step; available burn/step pairs: %s", ErrInvalidInput, available)
 	}
 	if strings.TrimSpace(step) == "" {
 		var count int
@@ -3579,6 +3587,9 @@ func decodeTool(raw json.RawMessage, value any) error {
 	decoder := json.NewDecoder(io.LimitReader(bytes.NewReader(raw), maximumToolBytes+1))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(value); err != nil {
+		if strings.HasPrefix(err.Error(), "json: unknown field ") {
+			return fmt.Errorf("%w: %s; accepted arguments: %s", ErrInvalidInput, strings.TrimPrefix(err.Error(), "json: "), strings.Join(toolArgumentNames(value), ", "))
+		}
 		var typeErr *json.UnmarshalTypeError
 		if errors.As(err, &typeErr) && typeErr.Field != "" {
 			expected := typeErr.Type.String()

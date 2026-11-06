@@ -285,7 +285,7 @@ func TestScopedUplinkSeesOnlyItsUpstream(t *testing.T) {
 	// repo_list and the dashboard repository view.
 	value, err = fixture.call(scopedActor, "repo_list", map[string]any{})
 	fixture.assertNoLeak(t, "repo_list", value, err)
-	if repos := value.(api.RepoListResponse).Repositories.([]RepoView); len(repos) != 1 || repos[0].ID != fixture.visible.ID || len(repos[0].LatestRuns) != len(visibleRuns) {
+	if repos := value.(api.RepoListResponse).Repositories.([]repoSummary); len(repos) != 1 || repos[0].ID != fixture.visible.ID || repos[0].LatestRun == nil {
 		t.Fatalf("repo_list = %#v", repos)
 	}
 
@@ -476,7 +476,7 @@ func missingName(arguments map[string]any) string { return selectorOf(arguments)
 func hiddenName(arguments map[string]any) string { return selectorOf(arguments) }
 
 func selectorOf(arguments map[string]any) string {
-	for _, key := range []string{"repo", "id", "sha", "ref"} {
+	for _, key := range []string{"repo", "id", "sha", "ref", "run", "name"} {
 		if value, ok := arguments[key]; ok {
 			return fmt.Sprint(value)
 		}

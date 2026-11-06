@@ -1,6 +1,9 @@
 package service
 
 import (
+	"context"
+	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/oberthci/oberth/internal/gitcache"
@@ -67,5 +70,25 @@ func TestWithNoticesFallsBackToPlainHandlerWithoutSink(t *testing.T) {
 	handler := &ReceiveHandler{Pushes: &PushIngestor{}}
 	if handler.WithNotices(nil) != gitcache.ReceiveHandler(handler) {
 		t.Fatal("nil notice sink must return the undecorated handler")
+	}
+}
+
+func TestReceiveNoticesRetainOnlySuccessfulDurableRunIDs(t *testing.T) {
+	result := PushResult{Run: &model.Run{ID: "full-durable-run-id"}}
+	var failure error
+	handler := &receiveNotices{notify: func(string, ...any) {}, dispatch: func(context.Context, gitcache.ReceiveEvent) (PushResult, error) { return result, failure }}
+	event := gitcache.ReceiveEvent{Repo: "repo", Update: gitcache.RefUpdate{Ref: "refs/heads/main"}}
+	for range 2 {
+		if err := handler.HandleReceive(t.Context(), event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result.Run = &model.Run{ID: "not-accepted"}
+	failure = errors.New("refused")
+	if handler.HandleReceive(t.Context(), event) == nil {
+		t.Fatal("refusal lost")
+	}
+	if got := handler.QueuedRunIDs(); !reflect.DeepEqual(got, []string{"full-durable-run-id"}) {
+		t.Fatal(got)
 	}
 }

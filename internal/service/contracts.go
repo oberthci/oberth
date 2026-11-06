@@ -605,20 +605,8 @@ type LogResponse struct {
 // never precede unread bytes).
 type LiveLogResponse = api.LiveLogResponse
 
-// RunDetailResponse is the read-only dashboard view of one run: the durable
-// run record, its recorded burn/step results, and the owning repository. It
-// intentionally mirrors the raw /api/runs list encoding (Go field names) so
-// the dashboard reads one consistent shape.
-type RunDetailResponse struct {
-	Timing     *model.RunTiming      `json:"Timing,omitempty"`
-	Purges     []model.EvidencePurge `json:"Purges,omitempty"`
-	Scheduling *model.RunScheduling  `json:"Scheduling,omitempty"`
-	Repository model.Repository
-	Run        model.Run
-	Steps      []model.StepResult
-	// RerunOf names the run this one re-ran with run_rerun (#1098).
-	RerunOf string `json:"RerunOf,omitempty"`
-}
+// RunDetailResponse shares the wire contract with the dashboard handler.
+type RunDetailResponse = api.RunDetailResponse
 
 // MCPToolText makes incomplete windows actionable for text-only clients.
 // The structured Output remains the exact recorded slice without trailers.

@@ -21,7 +21,7 @@ The rest of this section is what that file contains and why.
 | `OBERTH_BASE_URL` | The server's address. Setting it is what makes a command read the server |
 | `OBERTH_TOKEN` | An uplink bearer token |
 | `OBERTH_TOKEN_COMMAND` | A command whose standard output is the token, used when `OBERTH_TOKEN` is unset |
-| `OBERTH_CA_CERT` | PEM of the authority that signed the server's certificate |
+| `OBERTH_CA_CERT` | Inline PEM or path to a PEM file containing the authority that signed the server's certificate |
 
 A token of an upstream-scoped uplink reads only its upstreams' runs, issues
 and repositories; see [Limit an uplink to some upstreams](mcp-setup.md#limit-an-uplink-to-some-upstreams).
@@ -302,7 +302,8 @@ Two failures look similar and need different fixes, so the client names which
 one happened.
 
 **Unknown authority** means the signer is not in this machine's trust store.
-Point `OBERTH_CA_CERT` at the PEM that signed the server's certificate.
+Set `OBERTH_CA_CERT` to the PEM certificate itself (containing `-----BEGIN`)
+or the path to its PEM file. OpenSSL preambles and a BOM are accepted. `--ca-file` overrides this value for MCP commands.
 
 **A hostname mismatch** means the certificate does not cover the address you
 used, and no trust anchor can fix that. The client lists the names the

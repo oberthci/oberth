@@ -34,6 +34,17 @@ func TestHealthReportsQueueCapOnlyForUnscopedStatus(t *testing.T) {
 	if got.Cap.MaxNotStarted != 3 || got.Cap.NotStarted != 4 || got.Cap.Deferred != 2 {
 		t.Fatalf("queue cap missing from system_status: %s", body)
 	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		t.Fatal(err)
+	}
+	var canonical map[string]any
+	if err := json.Unmarshal(fields["queue_cap"], &canonical); err != nil {
+		t.Fatal(err)
+	}
+	if len(canonical) != 4 || canonical["max_not_started"] != float64(3) || canonical["not_started"] != float64(4) || canonical["deferred"] != float64(2) {
+		t.Fatalf("canonical queue_cap: %s", body)
+	}
 	value, err = health.ScopedStatus(t.Context(), api.Actor{Identity: "scoped", Scope: []string{"codeberg"}})
 	if err != nil {
 		t.Fatal(err)
@@ -42,11 +53,11 @@ func TestHealthReportsQueueCapOnlyForUnscopedStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var fields map[string]json.RawMessage
+	fields = nil
 	if err := json.Unmarshal(body, &fields); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := fields["queueCap"]; ok {
+	if fields["queueCap"] != nil || fields["queue_cap"] != nil {
 		t.Fatalf("scoped health exposes global queue cap: %s", body)
 	}
 }

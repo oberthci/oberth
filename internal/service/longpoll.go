@@ -14,7 +14,8 @@ import (
 // stream starts. The returned single-use call consumes that observation instead
 // of issuing an extra lookup. Cancellation stops
 // only the observer; neither this method nor the call cancels durable work.
-func (service *API) PrepareLongPoll(ctx context.Context, actor api.Actor, name string, raw json.RawMessage) (api.PreparedLongPoll, error) {
+func (service *API) PrepareLongPoll(ctx context.Context, actor api.Actor, name string, raw json.RawMessage) (result api.PreparedLongPoll, resultErr error) {
+	defer func() { resultErr = toolSelectorError(raw, resultErr) }()
 	if strings.TrimSpace(actor.Identity) == "" {
 		return nil, errors.New("service: acting uplink identity is required")
 	}
@@ -38,6 +39,9 @@ func (service *API) PrepareLongPoll(ctx context.Context, actor api.Actor, name s
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
+		if strings.TrimSpace(arguments.ID) == "" && strings.TrimSpace(arguments.SHA) == "" {
+			return nil, fmt.Errorf("%w: id, or sha, is required", ErrInvalidInput)
+		}
 		var prepared func(context.Context) (WaitResponse, error)
 		if arguments.ID != "" {
 			if arguments.Repo != "" || arguments.SHA != "" || arguments.Trigger != "" {
@@ -52,7 +56,7 @@ func (service *API) PrepareLongPoll(ctx context.Context, actor api.Actor, name s
 		}
 		return func(ctx context.Context) (any, error) {
 			response, err := prepared(ctx)
-			return service.stripScopedSequences(response), err
+			return service.stripScopedSequences(response), toolSelectorError(raw, err)
 		}, nil
 	case "promote_status":
 		var arguments struct {
@@ -68,7 +72,7 @@ func (service *API) PrepareLongPoll(ctx context.Context, actor api.Actor, name s
 		}
 		return func(ctx context.Context) (any, error) {
 			response, err := prepared(ctx)
-			return service.stripScopedSequences(response), err
+			return service.stripScopedSequences(response), toolSelectorError(raw, err)
 		}, nil
 	default:
 		return nil, fmt.Errorf("%w: tool is not an observation long poll", ErrInvalidInput)

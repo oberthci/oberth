@@ -512,7 +512,9 @@ func (s *Server) runGit(ctx context.Context, actor sessionActor, protocol string
 			return err
 		}
 		if s.pushBannerURL != "" {
-			notify("watch: %s", s.pushBannerURL)
+			for _, target := range pushWatchURLs(s.pushBannerURL, handler) {
+				notify("watch: %s", target)
+			}
 		}
 		return nil
 	}

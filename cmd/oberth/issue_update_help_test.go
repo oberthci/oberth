@@ -35,7 +35,7 @@ func TestIssuesUpdateHelpIsLocal(t *testing.T) {
 				if err := runCLI(t.Context(), []string{"issues", "update", flag}, issueHelpInput{t}, &out); err != nil {
 					t.Fatal(err)
 				}
-				for _, want := range []string{"Usage of issues update:", "-id", "-work-status", "-expected-revision"} {
+				for _, want := range []string{"Usage: oberth issues update", "-id", "-work-status", "-expected-revision"} {
 					if !strings.Contains(out.String(), want) {
 						t.Errorf("missing %q: %s", want, &out)
 					}
