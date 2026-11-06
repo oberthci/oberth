@@ -93,6 +93,9 @@ func (scheduler *Scheduler) resolveTrustedRequirement(ctx context.Context, repos
 }
 
 func (scheduler *Scheduler) trustedReceipt(ctx context.Context, repository model.Repository, run model.Run, requirement vmrunner.Requirement) error {
+	if err := scheduler.checkProtectedPlacementAuthority(ctx, run.ID); err != nil {
+		return err
+	}
 	if requirement.Contract == nil {
 		return nil
 	}
@@ -113,6 +116,7 @@ func (scheduler *Scheduler) trustedReceipt(ctx context.Context, repository model
 			return err
 		}
 	}
+
 	upstream, err := scheduler.database().Upstream(ctx, repository.UpstreamID)
 	if err != nil {
 		return err
@@ -121,6 +125,34 @@ func (scheduler *Scheduler) trustedReceipt(ctx context.Context, repository model
 		RunID: run.ID, RepoID: repository.ID, Repository: upstream.QualifiedRepo(repository.Name),
 		CandidateSHA: requirement.CandidateSHA, BaselineSHA: requirement.BaselineSHA, Contract: requirement.Contract,
 	}, scheduler.trusted.RecipeAllowed)
+}
+
+// checkProtectedPlacementAuthority retains placement custody even if current
+// source policy no longer requests a protected contract.
+func (scheduler *Scheduler) checkProtectedPlacementAuthority(ctx context.Context, runID string) error {
+	if runID == "" {
+		return nil
+	}
+	if placementJournal, ok := scheduler.store.(interface {
+		PlacementAdmission(context.Context, string) (*protectedtests.PlacementAdmission, error)
+	}); ok {
+		placed, err := placementJournal.PlacementAdmission(ctx, runID)
+		if err != nil {
+			return err
+		}
+		if placed != nil {
+			checker, ok := scheduler.trusted.(interface {
+				CheckProtectedPlacementAuthority(context.Context, string) error
+			})
+			if !ok {
+				return errors.New("protected placement current authority checker unavailable")
+			}
+			if err = checker.CheckProtectedPlacementAuthority(ctx, runID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (scheduler *Scheduler) requirePublicationTestPolicy(ctx context.Context, repository model.Repository, publication model.Publication) error {
@@ -210,8 +242,11 @@ func (scheduler *Scheduler) requirePublicationTestPolicy(ctx context.Context, re
 		}
 	}
 	requirement, err := scheduler.trustedRequirement(gitcache.WithFreshPolicy(ctx), repository, run.ID, candidateSHA)
-	if err != nil || requirement.Contract == nil {
+	if err != nil {
 		return err
+	}
+	if requirement.Contract == nil {
+		return scheduler.checkProtectedPlacementAuthority(ctx, run.ID)
 	}
 	// Tags publish their annotated object, whose tested commit is retained on
 	// the run. Branch/merge publication must publish precisely the tested commit.

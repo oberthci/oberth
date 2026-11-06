@@ -21,11 +21,14 @@ const kvmExecutionColumns = `execution_kind,intent_json,spec_identity,workflow_u
 // AI-INVARIANT: the empty parent job_name is the delivery interlock even when
 // release admission has already marked the parent credentialed.
 func (s *Store) ReserveKVMPreflight(ctx context.Context, intent vmrunner.KVMIntent) (vmrunner.KVMExecution, error) {
-	return s.reserveProtectedPreflight(ctx, intent, nil)
+	return s.reserveProtectedPreflight(ctx, intent, nil, nil)
 }
 
-func (s *Store) reserveProtectedPreflight(ctx context.Context, intent vmrunner.KVMIntent, generic *protectedtests.GenericAdmission) (vmrunner.KVMExecution, error) {
+func (s *Store) reserveProtectedPreflight(ctx context.Context, intent vmrunner.KVMIntent, generic *protectedtests.GenericAdmission, placement *protectedtests.PlacementAdmission) (vmrunner.KVMExecution, error) {
 	if intent.Validate() != nil || len(validation.IsDNS1123Label(intent.Namespace)) != 0 || len(validation.IsDNS1123Subdomain(intent.WorkflowName)) != 0 {
+		return vmrunner.KVMExecution{}, ErrInvalid
+	}
+	if placement != nil && (generic == nil || placement.Validate(*generic) != nil) {
 		return vmrunner.KVMExecution{}, ErrInvalid
 	}
 	body, err := json.Marshal(intent)
@@ -46,6 +49,11 @@ func (s *Store) reserveProtectedPreflight(ctx context.Context, intent vmrunner.K
 			return vmrunner.KVMExecution{}, err
 		}
 	}
+	if placement != nil {
+		if err := checkPlacementParent(ctx, tx, *placement); err != nil {
+			return vmrunner.KVMExecution{}, err
+		}
+	}
 	existing, err := scanKVMExecution(tx.QueryRowContext(ctx, `SELECT `+kvmExecutionColumns+` FROM vm_executions WHERE run_id=?`, intent.RunID))
 	if err == nil {
 		if vmrunner.KVMIntentDigest(existing.Intent) != vmrunner.KVMIntentDigest(intent) {
@@ -57,6 +65,13 @@ func (s *Store) reserveProtectedPreflight(ctx context.Context, intent vmrunner.K
 		}
 		if (stored == nil) != (generic == nil) || (stored != nil && stored.Digest() != generic.Digest()) {
 			return vmrunner.KVMExecution{}, fmt.Errorf("%w: protected runtime admission is immutable", ErrInvalidState)
+		}
+		retained, loadErr := readPlacementAdmission(ctx, tx, intent.RunID)
+		if loadErr != nil {
+			return vmrunner.KVMExecution{}, loadErr
+		}
+		if (retained == nil) != (placement == nil) || (retained != nil && retained.Digest() != placement.Digest()) {
+			return vmrunner.KVMExecution{}, fmt.Errorf("%w: placement admission is immutable", ErrInvalidState)
 		}
 		return existing, nil
 	}
@@ -86,6 +101,11 @@ func (s *Store) reserveProtectedPreflight(ctx context.Context, intent vmrunner.K
 			return vmrunner.KVMExecution{}, err
 		}
 		if _, err = s.appendAuditAction(ctx, tx, model.AuditActionSpec{Actor: actor, Action: "protected.runtime-admitted", ResourceType: "run", ResourceID: intent.RunID, Details: details}, now); err != nil {
+			return vmrunner.KVMExecution{}, err
+		}
+	}
+	if placement != nil {
+		if err := s.insertPlacementAdmission(ctx, tx, actor, intent.RunID, *placement, now); err != nil {
 			return vmrunner.KVMExecution{}, err
 		}
 	}
@@ -151,7 +171,7 @@ func (s *Store) SubmitKVMPreflight(ctx context.Context, runID string) error {
 		if _, err := eligibleKVMParent(ctx, tx, current.Intent); err != nil {
 			return err
 		}
-		if err := checkStoredGenericCapability(ctx, tx, runID); err != nil {
+		if err := checkStoredGenericCapability(ctx, tx, runID, s.now()); err != nil {
 			return err
 		}
 		_, err := tx.ExecContext(ctx, `UPDATE vm_executions SET submitted=1,updated_at=? WHERE run_id=?`, now, runID)
@@ -201,7 +221,7 @@ func (s *Store) RecordKVMReceipt(ctx context.Context, runID string, receipt vmru
 		if _, err := eligibleKVMParent(ctx, tx, current.Intent); err != nil {
 			return err
 		}
-		if err := checkStoredGenericCapability(ctx, tx, runID); err != nil {
+		if err := checkStoredGenericCapability(ctx, tx, runID, s.now()); err != nil {
 			return err
 		}
 		body, err := json.Marshal(receipt)

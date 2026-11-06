@@ -128,9 +128,11 @@ type SourceVolume struct {
 
 // SourceSeeder populates a per-run source claim in the pipeline namespace.
 type SourceSeeder struct {
-	client kubernetes.Interface
-	exec   ExecStreamer
-	config Config
+	placementCheck  func(context.Context, string) error
+	placementSource func(context.Context, string, string, bool) error
+	client          kubernetes.Interface
+	exec            ExecStreamer
+	config          Config
 }
 
 // ExecStreamer runs a command in a container and streams stdin to it. It is the
@@ -204,7 +206,7 @@ func (seeder *SourceSeeder) seed(ctx context.Context, workflowName, sourceDir st
 	// Collect anything a previous run left unowned before adding storage of our
 	// own. Doing it here rather than on a timer means the sweep runs exactly
 	// when the namespace is about to grow, and needs no scheduler of its own.
-	if seeder.config.Custody == nil {
+	if seeder.config.Custody == nil && !seeder.config.ExecutionPlacement.Protected() {
 		seeder.SweepOrphanedSourceClaims(ctx)
 	}
 
@@ -245,10 +247,26 @@ func (seeder *SourceSeeder) createClaim(ctx context.Context, name, workflowName 
 	if class := strings.TrimSpace(seeder.config.SourceStorageClass); class != "" {
 		claim.Spec.StorageClassName = &class
 	}
-	_, err = seeder.client.CoreV1().PersistentVolumeClaims(seeder.config.Namespace).
+	if err := seeder.checkPlacedAllocation(ctx, workflowName); err != nil {
+		return err
+	}
+	created, err := seeder.client.CoreV1().PersistentVolumeClaims(seeder.config.Namespace).
 		Create(ctx, claim, metav1.CreateOptions{})
 	if err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("argojob: create source claim %s: %w", name, err)
+	}
+	if seeder.config.ExecutionPlacement.Protected() {
+		fresh := err == nil
+		if !fresh {
+			created, err = seeder.client.CoreV1().PersistentVolumeClaims(seeder.config.Namespace).Get(ctx, name, metav1.GetOptions{})
+			if err != nil {
+				return err
+			}
+		}
+		if seeder.placementSource == nil || created == nil {
+			return errors.New("argojob: protected source custody unavailable")
+		}
+		return seeder.placementSource(ctx, workflowName, string(created.UID), fresh)
 	}
 	return nil
 }
@@ -544,6 +562,14 @@ func (seeder *SourceSeeder) createSeedPodBound(ctx context.Context, name, claimN
 		pod.Spec.Tolerations = p.nativeTolerations()
 	}
 	expected := pod.DeepCopy()
+	if seeder.config.ExecutionPlacement.Protected() {
+		if len(requests) != 1 || requests[0] == nil {
+			return nil, errors.New("argojob: protected seed lacks request")
+		}
+		if err := seeder.checkPlacedAllocation(ctx, requests[0].Name); err != nil {
+			return nil, err
+		}
+	}
 	created, err := seeder.client.CoreV1().Pods(seeder.config.Namespace).Create(ctx, pod, metav1.CreateOptions{})
 	if seeder.config.ExecutionPlacement != nil {
 		if err != nil {
@@ -692,8 +718,18 @@ func (seeder *SourceSeeder) orphanGrace() time.Duration {
 // DeleteClaim removes a run's source claim. It is called when a Workflow is
 // cancelled or superseded before it could adopt the claim.
 func (seeder *SourceSeeder) DeleteClaim(ctx context.Context, name string) {
-	_ = seeder.client.CoreV1().PersistentVolumeClaims(seeder.config.Namespace).
-		Delete(ctx, name, metav1.DeleteOptions{})
+	options := metav1.DeleteOptions{}
+	if seeder.config.ExecutionPlacement.Protected() {
+		claim, err := seeder.client.CoreV1().PersistentVolumeClaims(seeder.config.Namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil || claim.UID == "" || seeder.placementSource == nil {
+			return
+		}
+		if err = seeder.placementSource(ctx, strings.TrimSuffix(name, "-src"), string(claim.UID), false); err != nil {
+			return
+		}
+		options.Preconditions = &metav1.Preconditions{UID: &claim.UID}
+	}
+	_ = seeder.client.CoreV1().PersistentVolumeClaims(seeder.config.Namespace).Delete(ctx, name, options)
 }
 
 // AdoptClaim makes the Workflow the owner of the run's claim, so deleting the
@@ -706,6 +742,17 @@ func (seeder *SourceSeeder) AdoptClaim(ctx context.Context, name, workflowName, 
 	claim, err := claims.Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("argojob: read source claim %s: %w", name, err)
+	}
+	if seeder.config.ExecutionPlacement.Protected() {
+		if seeder.placementSource == nil || claim.UID == "" {
+			return errors.New("argojob: source adoption lacks custody")
+		}
+		if err = seeder.placementSource(ctx, workflowName, string(claim.UID), false); err != nil {
+			return err
+		}
+		if len(claim.OwnerReferences) != 0 && (len(claim.OwnerReferences) != 1 || claim.OwnerReferences[0].UID != k8stypes.UID(workflowUID) || claim.OwnerReferences[0].Name != workflowName || claim.OwnerReferences[0].Kind != "Workflow" || claim.OwnerReferences[0].APIVersion != "argoproj.io/v1alpha1") {
+			return errors.New("argojob: source claim has a foreign owner")
+		}
 	}
 	claim.OwnerReferences = []metav1.OwnerReference{{
 		APIVersion: "argoproj.io/v1alpha1",

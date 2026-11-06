@@ -27,6 +27,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 
+	"github.com/oberthci/oberth/internal/protectedtests"
 	"github.com/oberthci/oberth/internal/vmrunner"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
@@ -37,8 +38,9 @@ import (
 // ParseExecutionPlacement is for trusted deployment configuration, never YAML,
 // request bodies, Pod annotations or repository files.
 type ExecutionPlacement struct {
-	document placementDocument
-	digest   string
+	observationOnly bool
+	document        placementDocument
+	digest          string
 }
 
 type placementRun struct {
@@ -47,51 +49,55 @@ type placementRun struct {
 	TrustedIntent string `json:"trusted_intent"`
 }
 type placementDocument struct {
-	BranchPolicyBaseline   string              `json:"branch_policy_baseline,omitempty"`
-	GraphDigest            string              `json:"graph_digest,omitempty"`
-	FragmentLockDigest     string              `json:"fragment_lock_digest,omitempty"`
-	Fragments              []placementFragment `json:"fragments,omitempty"`
-	Schema                 string              `json:"schema"`
-	Repository             string              `json:"repository"`
-	RepositoryID           int64               `json:"repository_id"`
-	Ref                    string              `json:"ref"`
-	SHA                    string              `json:"sha"`
-	SourceDigest           string              `json:"source_digest"`
-	PipelineFile           string              `json:"pipeline_file"`
-	Namespace              string              `json:"namespace"`
-	ServiceAccount         string              `json:"service_account"`
-	IntentDigest           string              `json:"intent_digest"`
-	PolicyDigest           string              `json:"policy_digest"`
-	ClusterID              string              `json:"cluster_id"`
-	ClusterCreated         string              `json:"cluster_created"`
-	ClusterAnchorUID       string              `json:"cluster_anchor_uid"`
-	EndpointIdentity       string              `json:"endpoint_identity"`
-	NodeName               string              `json:"node_name"`
-	NodeUID                string              `json:"node_uid"`
-	ProviderID             string              `json:"provider_id"`
-	Zone                   string              `json:"zone"`
-	Pool                   string              `json:"pool"`
-	TaintKey               string              `json:"taint_key"`
-	TaintValue             string              `json:"taint_value"`
-	NativeIdentity         string              `json:"native_identity"`
-	DependencyIdentity     string              `json:"dependency_identity"`
-	ControllerPod          string              `json:"controller_pod"`
-	ControllerUID          string              `json:"controller_uid"`
-	ControllerConfigUID    string              `json:"controller_config_uid"`
-	ReplicaSet             string              `json:"replica_set"`
-	ReplicaSetUID          string              `json:"replica_set_uid"`
-	Deployment             string              `json:"deployment"`
-	DeploymentUID          string              `json:"deployment_uid"`
-	AdmissionConfigMap     string              `json:"admission_config_map"`
-	AdmissionUID           string              `json:"admission_uid"`
-	AdmissionDigest        string              `json:"admission_digest"`
-	AdmissionProfile       string              `json:"admission_profile"`
-	ControlPlaneVersion    string              `json:"control_plane_version"`
-	NodeVersion            string              `json:"node_version"`
-	AdmissionConfiguration string              `json:"admission_configuration"`
-	Expires                time.Time           `json:"expires"`
-	Normal                 placementRun        `json:"normal"`
-	Preflight              placementRun        `json:"preflight"`
+	ParentRunID            string                          `json:"parent_run_id,omitempty"`
+	NormalWorkflow         string                          `json:"normal_workflow,omitempty"`
+	PreflightWorkflow      string                          `json:"preflight_workflow,omitempty"`
+	ProtectedPolicy        *protectedtests.PlacementPolicy `json:"protected_policy,omitempty"`
+	BranchPolicyBaseline   string                          `json:"branch_policy_baseline,omitempty"`
+	GraphDigest            string                          `json:"graph_digest,omitempty"`
+	FragmentLockDigest     string                          `json:"fragment_lock_digest,omitempty"`
+	Fragments              []placementFragment             `json:"fragments,omitempty"`
+	Schema                 string                          `json:"schema"`
+	Repository             string                          `json:"repository"`
+	RepositoryID           int64                           `json:"repository_id"`
+	Ref                    string                          `json:"ref"`
+	SHA                    string                          `json:"sha"`
+	SourceDigest           string                          `json:"source_digest"`
+	PipelineFile           string                          `json:"pipeline_file"`
+	Namespace              string                          `json:"namespace"`
+	ServiceAccount         string                          `json:"service_account"`
+	IntentDigest           string                          `json:"intent_digest"`
+	PolicyDigest           string                          `json:"policy_digest"`
+	ClusterID              string                          `json:"cluster_id"`
+	ClusterCreated         string                          `json:"cluster_created"`
+	ClusterAnchorUID       string                          `json:"cluster_anchor_uid"`
+	EndpointIdentity       string                          `json:"endpoint_identity"`
+	NodeName               string                          `json:"node_name"`
+	NodeUID                string                          `json:"node_uid"`
+	ProviderID             string                          `json:"provider_id"`
+	Zone                   string                          `json:"zone"`
+	Pool                   string                          `json:"pool"`
+	TaintKey               string                          `json:"taint_key"`
+	TaintValue             string                          `json:"taint_value"`
+	NativeIdentity         string                          `json:"native_identity"`
+	DependencyIdentity     string                          `json:"dependency_identity"`
+	ControllerPod          string                          `json:"controller_pod"`
+	ControllerUID          string                          `json:"controller_uid"`
+	ControllerConfigUID    string                          `json:"controller_config_uid"`
+	ReplicaSet             string                          `json:"replica_set"`
+	ReplicaSetUID          string                          `json:"replica_set_uid"`
+	Deployment             string                          `json:"deployment"`
+	DeploymentUID          string                          `json:"deployment_uid"`
+	AdmissionConfigMap     string                          `json:"admission_config_map"`
+	AdmissionUID           string                          `json:"admission_uid"`
+	AdmissionDigest        string                          `json:"admission_digest"`
+	AdmissionProfile       string                          `json:"admission_profile"`
+	ControlPlaneVersion    string                          `json:"control_plane_version"`
+	NodeVersion            string                          `json:"node_version"`
+	AdmissionConfiguration string                          `json:"admission_configuration"`
+	Expires                time.Time                       `json:"expires"`
+	Normal                 placementRun                    `json:"normal"`
+	Preflight              placementRun                    `json:"preflight"`
 }
 
 type placementFragment struct {
@@ -101,13 +107,14 @@ type placementFragment struct {
 }
 
 const branchPlacementSchema = "oberth.execution-placement/branch-v2"
+const protectedPlacementSchema = "oberth.execution-placement/protected-v2"
 
 func (p *ExecutionPlacement) MarshalJSON() ([]byte, error) {
 	if p == nil {
 		return []byte("null"), nil
 	}
 	body, err := json.Marshal(p.document)
-	if err != nil || p.document.Schema != branchPlacementSchema {
+	if err != nil || (p.document.Schema != branchPlacementSchema && p.document.Schema != protectedPlacementSchema) {
 		return body, err
 	}
 	var fields map[string]json.RawMessage
@@ -115,6 +122,10 @@ func (p *ExecutionPlacement) MarshalJSON() ([]byte, error) {
 		return nil, err
 	}
 	delete(fields, "preflight")
+	if p.Protected() {
+		delete(fields, "normal")
+		return json.Marshal(fields)
+	}
 	var normal map[string]json.RawMessage
 	if err := json.Unmarshal(fields["normal"], &normal); err != nil {
 		return nil, err
@@ -144,6 +155,10 @@ func (p *ExecutionPlacement) Identity() (repository string, repositoryID int64, 
 	}
 	d := p.document
 	return d.Repository, d.RepositoryID, d.Ref, d.SHA, d.Normal.RunID, d.Normal.Workflow, p.digest
+}
+
+func (p *ExecutionPlacement) Protected() bool {
+	return p != nil && p.document.Schema == protectedPlacementSchema
 }
 
 func (p *ExecutionPlacement) BranchOnly() bool {
@@ -183,6 +198,17 @@ func decodeExecutionPlacement(body []byte) (*ExecutionPlacement, error) {
 	}
 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
 		return nil, errors.New("argojob: placement requires one JSON object")
+	}
+	if document.Schema == protectedPlacementSchema {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(body, &fields); err != nil {
+			return nil, err
+		}
+		for key := range fields {
+			if strings.EqualFold(key, "normal") || strings.EqualFold(key, "preflight") {
+				return nil, errors.New("argojob: protected placement forbids legacy phase fields")
+			}
+		}
 	}
 	if document.Schema == branchPlacementSchema {
 		var fields map[string]json.RawMessage
@@ -277,10 +303,21 @@ func (p *ExecutionPlacement) validate() error {
 	}
 	d := p.document
 	branch := d.Schema == branchPlacementSchema
-	if (d.Schema != "oberth.execution-placement/v1" && !branch) || d.PipelineFile != ".oberth/build.yaml" || len(strings.Split(d.Repository, "/")) != 3 || d.RepositoryID <= 0 || len(d.SHA) != 40 || strings.ContainsAny(d.Repository+d.Ref, "*?[]\\\n\r\t ") || d.Normal.TrustedIntent != "" || p.digest != placementHash(d) {
+	protected := p.Protected()
+	if (d.Schema != "oberth.execution-placement/v1" && !branch && !protected) || d.PipelineFile != ".oberth/build.yaml" || len(strings.Split(d.Repository, "/")) != 3 || d.RepositoryID <= 0 || len(d.SHA) != 40 || strings.ContainsAny(d.Repository+d.Ref, "*?[]\\\n\r\t ") || d.Normal.TrustedIntent != "" || p.digest != placementHash(d) {
 		return errors.New("argojob: incomplete or unsupported closed placement selection")
 	}
-	if branch {
+	if !protected && (d.ParentRunID != "" || d.NormalWorkflow != "" || d.PreflightWorkflow != "" || d.ProtectedPolicy != nil) {
+		return errors.New("argojob: protected fields require protected-v2")
+	}
+	if protected {
+		if d.Normal != (placementRun{}) || d.Preflight != (placementRun{}) || d.ParentRunID == "" || d.NormalWorkflow == "" || d.PreflightWorkflow != d.NormalWorkflow+"-trusted" || d.ProtectedPolicy == nil || d.ProtectedPolicy.Validate() != nil || d.BranchPolicyBaseline != "" || d.GraphDigest != "" || d.FragmentLockDigest != "" || len(d.Fragments) != 0 {
+			return errors.New("argojob: incomplete protected placement authority")
+		}
+		if len(k8svalidation.IsDNS1123Subdomain(d.NormalWorkflow)) != 0 || len(k8svalidation.IsDNS1123Subdomain(d.PreflightWorkflow)) != 0 {
+			return errors.New("argojob: invalid protected phase names")
+		}
+	} else if branch {
 		if d.Preflight != (placementRun{}) || !argoworkflow.IsFullFragmentSHA(d.BranchPolicyBaseline) || !placementSHA(d.GraphDigest) || !placementSHA(d.FragmentLockDigest) || len(d.Fragments) > argoworkflow.MaxFragments {
 			return errors.New("argojob: incomplete fragment-bound branch authority")
 		}
@@ -299,6 +336,9 @@ func (p *ExecutionPlacement) validate() error {
 	fields := reflect.ValueOf(d)
 	kind := fields.Type()
 	for i := 0; i < fields.NumField(); i++ {
+		if !protected && (kind.Field(i).Name == "ParentRunID" || kind.Field(i).Name == "NormalWorkflow" || kind.Field(i).Name == "PreflightWorkflow") {
+			continue
+		}
 		if !branch && (kind.Field(i).Name == "BranchPolicyBaseline" || kind.Field(i).Name == "GraphDigest" || kind.Field(i).Name == "FragmentLockDigest") {
 			continue
 		}
@@ -309,6 +349,9 @@ func (p *ExecutionPlacement) validate() error {
 	runs := []placementRun{d.Normal}
 	if !branch {
 		runs = append(runs, d.Preflight)
+	}
+	if protected {
+		runs = nil
 	}
 	for _, run := range runs {
 		if run.RunID == "" || run.Workflow == "" {
@@ -356,7 +399,11 @@ func (p *ExecutionPlacement) selectRequest(config Config, r Request) error {
 	if p == nil {
 		return nil
 	}
-	if err := p.ValidateAdmission(); err != nil {
+	if p.observationOnly {
+		if err := p.validate(); err != nil {
+			return err
+		}
+	} else if err := p.ValidateAdmission(); err != nil {
 		return err
 	}
 	d := p.document
@@ -364,6 +411,9 @@ func (p *ExecutionPlacement) selectRequest(config Config, r Request) error {
 		return errors.New("argojob: isolated executor configuration differs or lacks dependency/device closure")
 	}
 	selected := d.Normal
+	if p.Protected() {
+		return p.selectProtectedRequest(config, r)
+	}
 	if p.BranchOnly() {
 		if r.TrustedKVM != nil || !r.BranchAuthority.Matches(d.Repository, r.SHA, d.BranchPolicyBaseline, d.PolicyDigest) {
 			return errors.New("argojob: branch-only execution lacks canonical native policy authority")
@@ -499,7 +549,11 @@ func (p *ExecutionPlacement) verifyEnvironment(ctx context.Context, client kuber
 	if p == nil {
 		return nil
 	}
-	if err := p.ValidateAdmission(); err != nil {
+	if p.observationOnly {
+		if err := p.validate(); err != nil {
+			return err
+		}
+	} else if err := p.ValidateAdmission(); err != nil {
 		return err
 	}
 	if p.document.NativeIdentity != executionBinaryIdentity().digest || executionBinaryIdentity().err != nil || p.document.DependencyIdentity != placementDependencyIdentity(config) {
@@ -709,7 +763,7 @@ func (p *ExecutionPlacement) VerifyTarget(config *rest.Config) error {
 	caData := config.CAData
 	if len(caData) == 0 && config.CAFile != "" {
 		// The authenticated client configuration selects this public CA file.
-		// #nosec G304 -- administrator transport CA path, never repository input.
+		// #nosec G304 G703 -- administrator transport CA path, never repository input.
 		file, err := os.Open(config.CAFile)
 		if err != nil {
 			return err

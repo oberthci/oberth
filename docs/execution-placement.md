@@ -92,3 +92,49 @@ allocation enforcement, real managed admission, full image/dependency/egress
 closure, capacity observations and disposal remain separately required before
 execution. Local fake-client construction, actual upstream controller rendering
 and pinned admission replay each prove their own boundary only.
+
+## Direct protected instance (protected-v2)
+
+`oberth.execution-placement/protected-v2` is an opt-in, primary-engine contract
+for a separate pinned Oberth instance that owns the complete branch run. It
+retains the environment and source fields above, but replaces `normal` and
+`preflight` with `parent_run_id`, `normal_workflow`, `preflight_workflow` and
+`protected_policy`. Both phases use the same canonically accepted run ID; their
+Workflow names differ by the `-trusted` suffix. The policy pins the baseline,
+complete protected contract and recipe, suite inventory and case count,
+capability digest, supplemental group and maximum phase duration. The immutable
+host intent is produced by the actual executor and journaled during admission;
+an operator must not invent its timestamps or digest at startup.
+
+This initial contract supports ordinary, credential-free branch pipelines
+without imported fragments. It requires explicit generic protected runtime.
+Credentialed, tag, schedule, resource-VM and fragment-bearing qualification
+remain unsupported. Existing v1 and branch-v2 meanings and host wire bytes are
+unchanged. Ordinary remote target routing does not acquire protected support.
+
+Placement, defaulted executor configuration, generic runtime, capacity and
+admission audit commit atomically before external allocation. The source PVC's
+API UID is then recorded in the immutable audit chain before a seed Pod or
+Workflow can consume it. Seed, Workflow and executor-token creation, protected
+receipt, parent delivery and scheduler publication recheck current authority.
+The scheduler uses the controller's actual authenticated-target and live
+environment verifier, including after source policy removes the contract.
+A retained receipt alone never authorizes publication on a replacement cluster.
+
+Recovery reconstructs the original public configuration with the original
+in-memory authenticated transport for observation and UID-fenced disposal only.
+It can clean after group removal, grant revocation or runtime-mode change,
+without fetching another recipe or obtaining create authority. Expired
+protected configuration may load for this purpose; expiry still refuses new
+admission. A lost Workflow create reply may precede PVC owner adoption: the
+journaled source UID permits cleanup of that exact unowned volume. A different
+source UID, foreign owner, cluster, target or Workflow UID retains the cleanup
+obligation. Source checkout paths remain part of the original submission proof.
+
+Bootstrap must accept a canonical queued run under an explicit empty-allow
+admission hold while the instance lacks workload-create RBAC. Preserve the
+hold, database and audit on restart; install and read back the exact reviewed
+placement before granting allocation or releasing the hold. The initial source
+implementation is not external runtime qualification. Bootstrap permission
+proof, authentic fragment/graph support, installed containing CI and external
+allocation/recovery qualification remain separate acceptance requirements.

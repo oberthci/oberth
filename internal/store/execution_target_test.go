@@ -45,11 +45,11 @@ func TestExecutionTargetMigrationAndProcessRecoveryPreserveCanonicalState(t *tes
 		t.Fatal(err)
 	}
 	after := releaseSplitLedger(t, s.db)
-	if len(after) != len(before)+3 {
+	if len(after) != len(before)+4 {
 		t.Fatal("unexpected migration authority")
 	}
 	var newReceipts int
-	if err := s.db.QueryRow(`SELECT count(*) FROM schema_migrations WHERE id IN ('20261105050000-execution-target-custody','20261105180000-pinned-source-bindings','20261106021113-protected-runtime-admissions-6bb6bdbe716e4f2623808c4dc612d943')`).Scan(&newReceipts); err != nil || newReceipts != 3 {
+	if err := s.db.QueryRow(`SELECT count(*) FROM schema_migrations WHERE id IN ('20261105050000-execution-target-custody','20261105180000-pinned-source-bindings','20261106021113-protected-runtime-admissions-6bb6bdbe716e4f2623808c4dc612d943','20261106033000-protected-placement-admissions-96f3e81aca97478ea8d7499e6e378631')`).Scan(&newReceipts); err != nil || newReceipts != 4 {
 		t.Fatalf("new receipts=%d: %v", newReceipts, err)
 	}
 	for id, stamp := range before {

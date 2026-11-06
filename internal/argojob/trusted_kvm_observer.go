@@ -68,6 +68,13 @@ func (controller *Controller) trustedKVMWorkflow(ctx context.Context, request Re
 // TrustedKVMWorkflowUID accepts an exactly admitted Workflow. An owned spec
 // mismatch returns its UID with an error solely for cleanup, never as evidence.
 func (controller *Controller) TrustedKVMWorkflowUID(ctx context.Context, request Request) (string, error) {
+	recovered, err := controller.ProtectedRecoveryController(ctx, request.RunID)
+	if err != nil {
+		return "", err
+	}
+	if recovered != controller {
+		return recovered.TrustedKVMWorkflowUID(ctx, request)
+	}
 	workflow, _, err := controller.trustedKVMWorkflow(ctx, request)
 	if err != nil {
 		// A nonempty UID with this classification authorizes cleanup only,
@@ -83,6 +90,9 @@ func (controller *Controller) TrustedKVMWorkflowUID(ctx context.Context, request
 // TrustedKVMReceipt uses current kubelet status from one exactly owned Pod.
 // Workflow success only determines readiness; it never substitutes for evidence.
 func (controller *Controller) TrustedKVMReceipt(ctx context.Context, request Request, workflowUID string) (vmrunner.KVMReceipt, error) {
+	if err := controller.checkPlacedRequest(ctx, request); err != nil {
+		return vmrunner.KVMReceipt{}, err
+	}
 	if err := verifyGenericProtectedRuntime(controller.config, request); err != nil {
 		return vmrunner.KVMReceipt{}, err
 	}
@@ -447,6 +457,13 @@ func verifyTrustedKVMHelpers(pod *corev1.Pod, wait *corev1.Container, config Con
 // CleanupTrustedKVM only destroys exact owned identities. It returns success
 // after observing the Workflow, every owned Pod and the source claim absent.
 func (controller *Controller) CleanupTrustedKVM(ctx context.Context, name, runID, expectedUID string) error {
+	recovered, err := controller.ProtectedRecoveryController(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if recovered != controller {
+		return recovered.CleanupTrustedKVM(ctx, name, runID, expectedUID)
+	}
 	if controller.kube == nil || name == "" || runID == "" || expectedUID == "" {
 		return errors.New("argojob: cleanup requires a bound trusted Workflow UID")
 	}
@@ -469,6 +486,9 @@ func (controller *Controller) CleanupTrustedKVM(ctx context.Context, name, runID
 	}
 }
 func (controller *Controller) cleanTrustedKVMOnce(ctx context.Context, name, runID string, uid types.UID) (bool, error) {
+	if err := controller.config.ExecutionPlacement.verifyEnvironment(ctx, controller.kube, controller.config); err != nil {
+		return false, err
+	}
 	wf, err := controller.workflows.Get(ctx, name, metav1.GetOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
 		return false, err
@@ -529,7 +549,20 @@ func (controller *Controller) cleanTrustedKVMOnce(ctx context.Context, name, run
 	if err != nil {
 		return false, err
 	}
-	if claim.UID == "" || len(claim.OwnerReferences) != 1 || claim.OwnerReferences[0].UID != uid || claim.OwnerReferences[0].Name != name || claim.OwnerReferences[0].Kind != "Workflow" || claim.OwnerReferences[0].APIVersion != "argoproj.io/v1alpha1" {
+	claimOwned := len(claim.OwnerReferences) == 1 && claim.OwnerReferences[0].UID == uid && claim.OwnerReferences[0].Name == name && claim.OwnerReferences[0].Kind == "Workflow" && claim.OwnerReferences[0].APIVersion == "argoproj.io/v1alpha1"
+	if controller.config.ExecutionPlacement.Protected() {
+		// A lost create reply can precede owner-reference adoption. The audited
+		// API UID, recorded before seed/Workflow POST, retains that exact volume.
+		sourceUID, err := controller.placementJournal.PlacementSourceUID(ctx, runID, name)
+		if err != nil {
+			return false, err
+		}
+		if sourceUID == "" || string(claim.UID) != sourceUID {
+			return false, errors.New("argojob: source claim differs from immutable placement custody")
+		}
+		claimOwned = claimOwned || len(claim.OwnerReferences) == 0
+	}
+	if claim.UID == "" || !claimOwned {
 		return false, errors.New("argojob: source claim is not bound to exact trusted Workflow")
 	}
 	if claim.DeletionTimestamp == nil {
@@ -717,6 +750,13 @@ func (controller *Controller) TrustedKVMRefusal(ctx context.Context, request Req
 // CancelTrustedKVM accepts termination of the journal-bound workflow and Pods.
 // It never declares cleanup complete: finalizers may still keep them present.
 func (controller *Controller) CancelTrustedKVM(ctx context.Context, intent vmrunner.KVMIntent, expectedUID string) error {
+	recovered, recoveryErr := controller.ProtectedRecoveryController(ctx, intent.RunID)
+	if recoveryErr != nil {
+		return recoveryErr
+	}
+	if recovered != controller {
+		return recovered.CancelTrustedKVM(ctx, intent, expectedUID)
+	}
 	workflow, err := controller.workflows.Get(ctx, intent.WorkflowName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return nil

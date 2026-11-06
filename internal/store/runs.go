@@ -832,7 +832,7 @@ RETURNING `+runColumns, workflowName, unixNano(s.now()), id))
 		return model.Run{}, fmt.Errorf("set run job name: %w", err)
 	}
 	if !value.Preempted() {
-		if err := checkStoredGenericCapability(ctx, tx, id); err != nil {
+		if err := checkStoredGenericCapability(ctx, tx, id, s.now()); err != nil {
 			return model.Run{}, err
 		}
 	}

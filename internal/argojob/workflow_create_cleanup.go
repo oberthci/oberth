@@ -17,6 +17,13 @@ const workflowCreateCleanupAttemptBudget = 10 * time.Second
 // The background owner supplies the durable late-commit boundary. A pending
 // deletion, conflict or API failure keeps the grant and is retried later.
 func (controller *Controller) SettleCreate(ctx context.Context, name, runID string, notBefore time.Time) (bool, error) {
+	recovered, recoveryErr := controller.ProtectedRecoveryController(ctx, runID)
+	if recoveryErr != nil {
+		return false, recoveryErr
+	}
+	if recovered != controller {
+		return recovered.SettleCreate(ctx, name, runID, notBefore)
+	}
 	if name == "" || runID == "" || notBefore.IsZero() {
 		return false, errors.New("argojob: pending create requires name, run ID and observation boundary")
 	}

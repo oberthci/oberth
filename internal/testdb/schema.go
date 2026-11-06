@@ -197,10 +197,20 @@ ALTER TABLE runs DROP COLUMN source_bindings;
 DELETE FROM schema_migrations WHERE id='20261105180000-pinned-source-bindings';
 `
 
-// Disposable historical fixtures remove generic runtime custody before replaying
-// older migrations. Production admissions remain append-only.
-const PostProtectedRuntimeDowngrade = `
+// PostProtectedRuntimeDowngrade removes generic runtime custody in disposable
+// historical fixtures before replaying older migrations. Production admissions
+// remain append-only.
+const PostProtectedRuntimeDowngrade = PostProtectedPlacementDowngrade + `
 DROP TABLE IF EXISTS protected_runtime_admissions;
 DROP INDEX IF EXISTS protected_runtime_audit_idx;
 DELETE FROM schema_migrations WHERE id='20261106021113-protected-runtime-admissions-6bb6bdbe716e4f2623808c4dc612d943';
+`
+
+// PostProtectedPlacementDowngrade removes placement custody only in disposable
+// historical migration fixtures. Production custody remains append-only.
+const PostProtectedPlacementDowngrade = `
+DROP TABLE IF EXISTS protected_placement_admissions;
+DROP INDEX IF EXISTS protected_placement_audit_idx;
+DROP INDEX IF EXISTS protected_placement_source_audit_idx;
+DELETE FROM schema_migrations WHERE id='20261106033000-protected-placement-admissions-96f3e81aca97478ea8d7499e6e378631';
 `

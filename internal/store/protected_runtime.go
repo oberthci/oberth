@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/oberthci/oberth/internal/protectedtests"
 )
@@ -24,7 +25,7 @@ func (s *Store) ReserveGenericPreflight(ctx context.Context, admission protected
 	if err != nil {
 		return protectedtests.Execution{}, ErrInvalid
 	}
-	return s.reserveProtectedPreflight(ctx, canonical.Intent, &canonical)
+	return s.reserveProtectedPreflight(ctx, canonical.Intent, &canonical, nil)
 }
 
 // GenericAdmission returns nil only for a legacy execution. It is immutable
@@ -83,18 +84,34 @@ func checkGenericCapability(ctx context.Context, q protectedRuntimeReader, a pro
 	}
 	return nil
 }
-func checkStoredGenericCapability(ctx context.Context, q protectedRuntimeReader, runID string) error {
+func checkStoredGenericCapability(ctx context.Context, q protectedRuntimeReader, runID string, now time.Time) error {
 	admission, err := readGenericAdmission(ctx, q, runID)
 	if err != nil || admission == nil {
 		return err
 	}
-	return checkGenericCapability(ctx, q, *admission)
+	if err = checkGenericCapability(ctx, q, *admission); err != nil {
+		return err
+	}
+	placed, err := readPlacementAdmission(ctx, q, runID)
+	if err != nil {
+		return err
+	}
+	if placed != nil {
+		scope, e := placed.Scope()
+		if e != nil {
+			return e
+		}
+		if !now.Before(scope.Expires) {
+			return fmt.Errorf("%w: protected placement expired", ErrInvalidState)
+		}
+	}
+	return nil
 }
 
 // CheckGenericPreflightAuthority is a fresh publication/delivery fence. Cleanup
 // deliberately uses the immutable admission even after this check starts failing.
 func (s *Store) CheckGenericPreflightAuthority(ctx context.Context, runID string) error {
-	return checkStoredGenericCapability(ctx, s.reader(), runID)
+	return checkStoredGenericCapability(ctx, s.reader(), runID, s.now())
 }
 
 func genericAdmissionAuditDetails(a protectedtests.GenericAdmission) (string, error) {

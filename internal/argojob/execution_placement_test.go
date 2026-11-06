@@ -48,7 +48,7 @@ func placementFixture(t *testing.T) (Config, Request, []runtime.Object) {
 	// Explicitly synthetic identities; authenticated runtime evidence is external.
 	fields := reflect.ValueOf(&d).Elem()
 	for i := 0; i < fields.NumField(); i++ {
-		if fields.Type().Field(i).Name == "BranchPolicyBaseline" || fields.Type().Field(i).Name == "GraphDigest" || fields.Type().Field(i).Name == "FragmentLockDigest" {
+		if fields.Type().Field(i).Name == "ParentRunID" || fields.Type().Field(i).Name == "NormalWorkflow" || fields.Type().Field(i).Name == "PreflightWorkflow" || fields.Type().Field(i).Name == "BranchPolicyBaseline" || fields.Type().Field(i).Name == "GraphDigest" || fields.Type().Field(i).Name == "FragmentLockDigest" {
 			continue
 		}
 		if fields.Field(i).Kind() == reflect.String {

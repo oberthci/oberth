@@ -746,7 +746,7 @@ func Build(config Config, request Request) (*wfv1.Workflow, error) {
 	}
 	delete(workflow.Annotations, capabilityAnnotation)
 	resourceSteps, extended := argoworkflow.CapabilityUsage(workflow)
-	if !resourceSteps && !extended && request.GenericProtected == nil {
+	if !resourceSteps && !extended && request.GenericProtected == nil && !config.ExecutionPlacement.Protected() {
 		request.Capability = nil
 	}
 	if err := config.validateCapability(request.Capability); err != nil {

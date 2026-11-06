@@ -22,8 +22,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/protectedtests"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
@@ -72,30 +74,33 @@ var errRunLogBudget = errors.New("argojob: aggregate run log budget exceeded")
 
 // Controller submits Workflows and supervises them to a terminal result.
 type Controller struct {
-	capabilities      func(context.Context, int64) (*argoworkflow.Capability, error)
-	restartedAt       time.Time
-	vmiQuotaMu        sync.Mutex
-	profileVerifyMu   sync.Mutex
-	profileMu         sync.Mutex
-	profileStatus     model.ControllerProfileStatus
-	profileBackoff    time.Duration
-	profileLogAt      time.Time
-	timings           TimingRecorder
-	resourceSource    ResourceUsageSource
-	resourceRecorder  ResourceUsageRecorder
-	workflows         WorkflowClient
-	kube              kubernetes.Interface
-	logs              PodLogReader
-	followLogs        PodLogFollower
-	logIdentity       podLogIdentityReader
-	logPod            func(context.Context, string, string) (*corev1.Pod, error)
-	seeder            *SourceSeeder
-	config            Config
-	vmi               dynamic.Interface
-	vmiCreate         func(context.Context, string, *unstructured.Unstructured) (*unstructured.Unstructured, error)
-	vmiCleanupFailure func(context.Context, string, error)
-	interval          time.Duration
-	readGrace         time.Duration
+	placementJournal   ProtectedPlacementJournal
+	placementTransport *rest.Config
+	placementAuthority func(context.Context, protectedtests.GenericAdmission) error
+	capabilities       func(context.Context, int64) (*argoworkflow.Capability, error)
+	restartedAt        time.Time
+	vmiQuotaMu         sync.Mutex
+	profileVerifyMu    sync.Mutex
+	profileMu          sync.Mutex
+	profileStatus      model.ControllerProfileStatus
+	profileBackoff     time.Duration
+	profileLogAt       time.Time
+	timings            TimingRecorder
+	resourceSource     ResourceUsageSource
+	resourceRecorder   ResourceUsageRecorder
+	workflows          WorkflowClient
+	kube               kubernetes.Interface
+	logs               PodLogReader
+	followLogs         PodLogFollower
+	logIdentity        podLogIdentityReader
+	logPod             func(context.Context, string, string) (*corev1.Pod, error)
+	seeder             *SourceSeeder
+	config             Config
+	vmi                dynamic.Interface
+	vmiCreate          func(context.Context, string, *unstructured.Unstructured) (*unstructured.Unstructured, error)
+	vmiCleanupFailure  func(context.Context, string, error)
+	interval           time.Duration
+	readGrace          time.Duration
 }
 
 // WithVMIClient enables the run cleanup backstop for admitted VM resources.
@@ -151,6 +156,10 @@ func NewController(workflows WorkflowClient, client kubernetes.Interface, config
 // that would fail on its first step with an empty working directory.
 func (controller *Controller) WithSourceSeeder(seeder *SourceSeeder) *Controller {
 	controller.seeder = seeder
+	if seeder != nil {
+		seeder.placementCheck = controller.checkPlacedAllocation
+		seeder.placementSource = controller.bindPlacedSource
+	}
 	return controller
 }
 
@@ -171,6 +180,9 @@ func (controller *Controller) Namespace() string { return controller.config.Name
 // and refuses otherwise rather than executing something that was not built
 // from this run's reviewed source.
 func (controller *Controller) Create(ctx context.Context, request Request) (name string, resultErr error) {
+	if err := controller.checkPlacedRequest(ctx, request); err != nil {
+		return "", err
+	}
 	if err := verifyGenericProtectedRuntime(controller.config, request); err != nil {
 		return "", err
 	}
@@ -850,6 +862,13 @@ func (controller *Controller) Owns(ctx context.Context, name string) (bool, erro
 // through Argo's own ownership references. A Workflow that belongs to another
 // run is left alone and reported, never deleted.
 func (controller *Controller) Cancel(ctx context.Context, name, runID string) error {
+	recovered, recoveryErr := controller.ProtectedRecoveryController(ctx, runID)
+	if recoveryErr != nil {
+		return recoveryErr
+	}
+	if recovered != controller {
+		return recovered.Cancel(ctx, name, runID)
+	}
 	workflow, err := controller.workflows.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		controller.cleanupVMIsBestEffort(ctx, name, runID)

@@ -267,7 +267,7 @@ func (controller *Controller) deliverExecutorTokensObserved(ctx context.Context,
 		if ca.Data["ca.crt"] == "" {
 			return identityFailure("trust_anchor_response", errors.New("executor API trust anchor is empty"))
 		}
-		token, err := controller.requestExecutorIdentity(ctx, wf.Namespace, serviceAccount, &authenticationv1.TokenRequest{Spec: authenticationv1.TokenRequestSpec{ExpirationSeconds: &seconds, BoundObjectRef: &authenticationv1.BoundObjectReference{Kind: "Pod", APIVersion: "v1", Name: holder.Name, UID: holder.UID}}})
+		token, err := controller.requestExecutorIdentity(ctx, wf.Namespace, serviceAccount, &authenticationv1.TokenRequest{Spec: authenticationv1.TokenRequestSpec{ExpirationSeconds: &seconds, BoundObjectRef: &authenticationv1.BoundObjectReference{Kind: "Pod", APIVersion: "v1", Name: holder.Name, UID: holder.UID}}}, wf.Name)
 		if err != nil {
 			return identityFailure("token_request", err)
 		}
@@ -377,6 +377,9 @@ func (controller *Controller) executorIdentityPod(ctx context.Context, wf *wfv1.
 	pods := controller.kube.CoreV1().Pods(wf.Namespace)
 	pod, err := pods.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
+		if err := controller.checkPlacedAllocation(ctx, wf.Name); err != nil {
+			return nil, err
+		}
 		pod, err = pods.Create(ctx, desired, metav1.CreateOptions{})
 		if apierrors.IsAlreadyExists(err) {
 			pod, err = pods.Get(ctx, name, metav1.GetOptions{})
@@ -450,10 +453,18 @@ func (controller *Controller) retireIdentityPod(ctx context.Context, wf *wfv1.Wo
 
 // TokenRequest gets at most one re-request, only for explicit load/timeouts.
 // Both calls and their backoff share a single 20-second per-Pod deadline.
-func (controller *Controller) requestExecutorIdentity(ctx context.Context, namespace, account string, request *authenticationv1.TokenRequest) (*authenticationv1.TokenRequest, error) {
+func (controller *Controller) requestExecutorIdentity(ctx context.Context, namespace, account string, request *authenticationv1.TokenRequest, workflows ...string) (*authenticationv1.TokenRequest, error) {
 	requestCtx, cancel := context.WithTimeout(ctx, executorIdentityAttemptTimeout)
 	defer cancel()
 	for attempt := 1; ; attempt++ {
+		if controller.config.ExecutionPlacement.Protected() {
+			if len(workflows) != 1 {
+				return nil, errors.New("argojob: protected token lacks phase binding")
+			}
+			if err := controller.checkPlacedAllocation(requestCtx, workflows[0]); err != nil {
+				return nil, err
+			}
+		}
 		token, err := controller.kube.CoreV1().ServiceAccounts(namespace).CreateToken(requestCtx, account, request, metav1.CreateOptions{})
 		var network interface{ Timeout() bool }
 		transient := apierrors.IsTooManyRequests(err) || apierrors.IsServiceUnavailable(err) || apierrors.IsTimeout(err) || apierrors.IsServerTimeout(err) || errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &network) && network.Timeout())

@@ -382,6 +382,17 @@ from native templates; unknown profiles and changed identities refuse. Local
 controller/admission fixtures confer no managed-cluster authority. See
 [execution placement](docs/execution-placement.md) for schema and runtime inputs.
 
+The opt-in primary `protected-v2` contract binds one canonical parent and two
+exact phase Workflows to a dynamically journaled generic protected intent.
+Admission/config/capacity/audit are atomic before allocation; source-volume UID
+custody is chained before seed/Workflow creation. Current authority includes
+live authenticated target/environment checks at scheduler delivery/publication,
+even when current source removes the protected contract. Recovery uses retained
+configuration only for observation and original-UID cleanup; group removal,
+revocation or mode changes grant no new create authority. Initial direct scope
+is credential-free, fragment-free branch execution; external bootstrap and
+fragment-bearing qualification remain separately required.
+
 ### Repository contract
 
 - A repository provides its pipeline as Argo Workflow YAML in the `.oberth/`

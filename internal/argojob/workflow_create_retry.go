@@ -120,6 +120,9 @@ func (controller *Controller) createWorkflowWithRetry(ctx context.Context, reque
 		if err := retryCtx.Err(); err != nil {
 			return failure("deadline", errors.Join(lastErr, err), true)
 		}
+		if err := controller.checkPlacedRequest(retryCtx, request); err != nil {
+			return failure("authority", err, false)
+		}
 		created, err := controller.workflows.Create(retryCtx, intended.DeepCopy(), metav1.CreateOptions{})
 		attempts++
 		if err == nil {
