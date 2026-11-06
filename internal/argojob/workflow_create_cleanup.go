@@ -27,6 +27,12 @@ func (controller *Controller) SettleCreate(ctx context.Context, name, runID stri
 	if name == "" || runID == "" || notBefore.IsZero() {
 		return false, errors.New("argojob: pending create requires name, run ID and observation boundary")
 	}
+	if controller.config.ExecutionPlacement.Protected() {
+		if !controller.placedParent(name, runID) {
+			return false, errors.New("argojob: settlement phase differs from protected parent custody")
+		}
+		return controller.settlePlacedParent(ctx, name, runID, notBefore)
+	}
 	budgetCtx, cancel := context.WithTimeout(ctx, workflowCreateCleanupAttemptBudget)
 	defer cancel()
 	finalObservation := !time.Now().Before(notBefore)

@@ -203,7 +203,7 @@ func TestTrustedHelperStorageRecoveryKeepsExactAttestation(t *testing.T) {
 		t.Fatal(err)
 	}
 	request.legacyHelperStorage = false
-	_, recovered, err := controller.trustedKVMWorkflow(t.Context(), request)
+	_, recovered, err := controller.trustedKVMWorkflow(t.Context(), request, false)
 	if err != nil {
 		t.Fatal("legacy trusted workflow cannot be reconstructed", err)
 	}

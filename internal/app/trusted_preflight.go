@@ -47,6 +47,7 @@ type trustedRunStore interface {
 // TrustedPreflights is the only adapter permitted to submit a server-owned KVM
 // leaf. Recipes are immutable operator policy, not repository configuration.
 type TrustedPreflights struct {
+	recoveryOnly    bool
 	generic         bool
 	jobs            *ArgoJobs
 	controller      trustedController
@@ -55,6 +56,23 @@ type TrustedPreflights struct {
 	workspaceRoot   string
 	requireMutation func(context.Context) error
 	fetch           func(context.Context, string, string, int64) ([]byte, error)
+}
+
+// NewProtectedPreflightRecovery retains cleanup ownership when all current recipe
+// approvals have been removed. It cannot admit, fetch, create, or accept evidence.
+func NewProtectedPreflightRecovery(jobs *ArgoJobs, journal trustedRunStore, workspaceRoot string, requireMutation func(context.Context) error) (*TrustedPreflights, error) {
+	if jobs == nil || journal == nil || requireMutation == nil {
+		return nil, errors.New("protected recovery requires controller, journal and mutation gate")
+	}
+	controller, ok := jobs.controller.(trustedController)
+	if !ok {
+		return nil, errors.New("trusted controller unavailable")
+	}
+	executor := &TrustedPreflights{recoveryOnly: true, jobs: jobs, controller: controller, store: journal, workspaceRoot: workspaceRoot, requireMutation: requireMutation}
+	if native, ok := jobs.controller.(*argojob.Controller); ok {
+		native.WithProtectedPlacementAuthority(executor.verifyPlacedAuthority)
+	}
+	return executor, nil
 }
 
 func NewTrustedPreflights(jobs *ArgoJobs, journal trustedRunStore, recipes []vmrunner.KVMRecipe, workspaceRoot string, requireMutation func(context.Context) error) (*TrustedPreflights, error) {
@@ -100,6 +118,9 @@ func (p *TrustedPreflights) recipe(contract vmrunner.Contract) (vmrunner.KVMReci
 	return descriptor.Recipe(), err
 }
 func (p *TrustedPreflights) Supports(contract vmrunner.Contract) error {
+	if p.recoveryOnly {
+		return errors.New("protected execution has no current recipe approvals")
+	}
 	if p.jobs != nil && p.jobs.config.ExecutionPlacement.Protected() && !p.generic {
 		return errors.New("protected placement generic runtime is not enabled")
 	}
@@ -136,6 +157,9 @@ func (p *TrustedPreflights) request(job service.WorkflowRequest, intent vmrunner
 }
 
 func (p *TrustedPreflights) Execute(ctx context.Context, job service.WorkflowRequest, requirement vmrunner.Requirement, output io.Writer) (retErr error) {
+	if p.recoveryOnly {
+		return errors.New("protected execution has no current recipe approvals")
+	}
 	if err := p.jobs.checkProtectedTarget(ctx, job); err != nil {
 		return err
 	}

@@ -389,7 +389,14 @@ custody is chained before seed/Workflow creation. Current authority includes
 live authenticated target/environment checks at scheduler delivery/publication,
 even when current source removes the protected contract. Recovery uses retained
 configuration only for observation and original-UID cleanup; group removal,
-revocation or mode changes grant no new create authority. Initial direct scope
+revocation or mode changes grant no new create authority. The normal phase records
+its full intended Workflow before POST and binds its original observed UID in
+the audit chain. Uncertain submission retains its late-commit boundary until
+Workflow, owned Pods and the exact source claim are absent; retries cannot
+reseed or recreate a phase with recorded source custody. Expired placements and
+removed recipe approvals retain cleanup ownership only. An absent recipe flag
+or explicit empty recipe array starts a recovery-only executor, never a grant.
+Initial direct scope
 is credential-free, fragment-free branch execution; external bootstrap and
 fragment-bearing qualification remain separately required.
 

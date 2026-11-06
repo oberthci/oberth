@@ -11,6 +11,9 @@ import (
 )
 
 type ProtectedPlacementJournal interface {
+	PreparePlacementWorkflow(context.Context, string, string, []byte) error
+	PlacementWorkflow(context.Context, string, string) ([]byte, string, error)
+	BindPlacementWorkflowUID(context.Context, string, string, string) error
 	BindPlacementSource(context.Context, string, string, string) error
 	PlacementSourceUID(context.Context, string, string) (string, error)
 	PlacementAdmissionForWorkflow(context.Context, string) (*protectedtests.PlacementAdmission, error)

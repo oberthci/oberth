@@ -217,6 +217,9 @@ func (controller *Controller) reconcileExecutorIdentity(ctx context.Context, wor
 	account := controller.config.ExecutorServiceAccount
 	if launcher {
 		account = controller.config.VMLauncherServiceAccount
+		if err := controller.checkPlacedParentWorkflow(ctx, workflow, false); err != nil {
+			return identityFailure("target_validation", err)
+		}
 		if workflow.Annotations[capabilityAnnotation] != "" {
 			// Retire every persisted resource binding even if the grant was
 			// revoked or the target Pod changed during delivery.

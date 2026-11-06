@@ -147,3 +147,51 @@ func TestGenericProtectedRecoveryReconstructsRevokedGroupWithoutLiveAuthority(t 
 		})
 	}
 }
+
+func TestGenericProtectedHostPreservesManagedTokenIdentity(t *testing.T) {
+	config, request := genericProtectedRequest(t)
+	wf, err := Build(config, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kube := trustedControllerClient(&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: request.Capability.ServiceAccount, Namespace: config.Namespace}})
+	controller, err := NewController(&staticWorkflowClient{}, kube, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller.WithWorkflowCapabilityLoader(func(context.Context, int64) (*argoworkflow.Capability, error) { return request.Capability, nil })
+	if _, err = controller.boundCapability(t.Context(), wf, request.RepositoryID); err != nil {
+		t.Fatalf("built protected host rejected by token authority: %v", err)
+	}
+}
+
+func TestGenericProtectedLegacyWrapperIsCleanupOnly(t *testing.T) {
+	config, request := genericProtectedRequest(t)
+	request.legacyProtectedWrapper = true
+	wf, err := Build(config, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf.UID = "original-host-uid"
+	request.legacyProtectedWrapper = false
+	kube := trustedControllerClient(&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: request.Capability.ServiceAccount, Namespace: config.Namespace}})
+	controller, err := NewController(&staticWorkflowClient{workflow: wf}, kube, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller.WithWorkflowCapabilityLoader(func(context.Context, int64) (*argoworkflow.Capability, error) { return request.Capability, nil })
+	if _, err = controller.boundCapability(t.Context(), wf, request.RepositoryID); err == nil {
+		t.Fatal("legacy wrapper obtained token authority")
+	}
+	if _, _, err = controller.trustedKVMWorkflow(t.Context(), request, false); err == nil {
+		t.Fatal("legacy wrapper accepted as current receipt evidence")
+	}
+	uid, err := controller.TrustedKVMWorkflowUID(t.Context(), request)
+	if err != nil || uid != string(wf.UID) {
+		t.Fatalf("legacy cleanup stranded: uid=%s err=%v", uid, err)
+	}
+	wf.Annotations[runIDAnnotation] = "foreign-run"
+	if uid, _ = controller.TrustedKVMWorkflowUID(t.Context(), request); uid != "" {
+		t.Fatal("foreign host acquired cleanup authority")
+	}
+}

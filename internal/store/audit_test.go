@@ -14,6 +14,7 @@ import (
 type auditHistoricalAnchorQueryGuard struct {
 	auditStateQuerier
 	loadedReceipts bool
+	placementReads int
 }
 
 func (guard *auditHistoricalAnchorQueryGuard) QueryContext(
@@ -25,6 +26,13 @@ func (guard *auditHistoricalAnchorQueryGuard) QueryContext(
 		guard.loadedReceipts = true
 	}
 	return guard.auditStateQuerier.QueryContext(ctx, query, args...)
+}
+
+func (guard *auditHistoricalAnchorQueryGuard) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	if strings.Contains(query, "protected_placement_admissions") {
+		guard.placementReads++
+	}
+	return guard.auditStateQuerier.QueryRowContext(ctx, query, args...)
 }
 
 func acceptAuditMutationState(model.AuditHead, model.AuditAnchor) error {
@@ -162,8 +170,13 @@ func TestAuditMutationStateUsesOneAuthoritativeAuditPass(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if metrics.fullTraversals != 1 || metrics.readStatements != 6 {
-		t.Fatalf("audit mutation verification metrics = %#v, want one traversal and six reads (including runtime schema/projection)", metrics)
+	// Four core reads, two runtime schema/projection reads, and two placement
+	// schema/projection reads. Workflow/source custody is in the same audit pass.
+	if metrics.fullTraversals != 1 || metrics.readStatements != 8 {
+		t.Fatalf("audit mutation verification metrics = %#v, want one traversal and eight reads (including runtime and placement schema/projection)", metrics)
+	}
+	if guard.placementReads != 2 {
+		t.Fatalf("placement verification reads = %d, want exactly schema presence and audit projection", guard.placementReads)
 	}
 	if guard.loadedReceipts {
 		t.Fatal("audit mutation verification loaded receipt blobs for historical anchors")

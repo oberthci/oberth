@@ -161,6 +161,9 @@ func (controller *Controller) deliverExecutorTokensObserved(ctx context.Context,
 	if err := controller.checkPlacedAllocation(ctx, wf.Name); err != nil {
 		return identityFailure("target_validation", err)
 	}
+	if err := controller.checkPlacedParentWorkflow(ctx, wf, false); err != nil {
+		return identityFailure("target_validation", err)
+	}
 	capability, err := controller.boundCapability(ctx, wf, 0)
 	if err != nil {
 		return identityFailure("operator_capability", err)
@@ -373,6 +376,9 @@ func validateExecutorTokenTarget(pod *corev1.Pod, image string, resourcePod bool
 // Deleting the workflow garbage-collects this Pod and invalidates its tokens.
 func (controller *Controller) executorIdentityPod(ctx context.Context, wf *wfv1.Workflow, serviceAccount string) (*corev1.Pod, error) {
 	if err := controller.checkPlacedAllocation(ctx, wf.Name); err != nil {
+		return nil, err
+	}
+	if err := controller.checkPlacedParentWorkflow(ctx, wf, false); err != nil {
 		return nil, err
 	}
 	name := controller.identityPodName(wf.UID, serviceAccount)

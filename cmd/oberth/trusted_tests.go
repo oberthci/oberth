@@ -41,6 +41,10 @@ func readTrustedRecipes(path string) ([]vmrunner.KVMRecipe, error) {
 	if err = dec.Decode(&extra); !errors.Is(err, io.EOF) {
 		return nil, errors.New("trusted recipes require exactly one JSON document")
 	}
+	// An explicitly empty array removes all admission authority while retaining cleanup.
+	if len(recipes) == 0 && bytes.Equal(bytes.TrimSpace(body), []byte("[]")) {
+		return nil, nil
+	}
 	if err := protectedtests.ValidateRecipes(recipes); err != nil {
 		return nil, err
 	}

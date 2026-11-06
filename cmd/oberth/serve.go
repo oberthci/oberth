@@ -447,9 +447,6 @@ func validateServeOptions(options serveOptions) error {
 	if options.trustedRuntime != "" && options.trustedRuntime != "legacy" && options.trustedRuntime != "generic-capability" {
 		return errors.New("trusted-tests-runtime must be legacy or generic-capability")
 	}
-	if options.trustedRuntime == "generic-capability" && options.trustedRecipesFile == "" {
-		return errors.New("generic protected runtime requires approved recipes")
-	}
 
 	if math.IsNaN(options.kubernetesQPS) || math.IsInf(options.kubernetesQPS, 0) || options.kubernetesQPS <= 0 || options.kubernetesQPS > math.MaxFloat32 || options.kubernetesBurst <= 0 {
 		return errors.New("serve: Kubernetes client QPS must be finite and positive, and burst must be positive")
@@ -903,11 +900,13 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
-	if options.trustedRuntime == "generic-capability" && len(recipes) == 0 {
-		return errors.New("generic protected runtime requires approved recipes")
-	}
 	var trusted service.TrustedPreflight
-	if len(recipes) > 0 {
+	if len(recipes) == 0 {
+		trusted, err = app.NewProtectedPreflightRecovery(argoJobs, database, filepath.Join(options.dataRoot, "work"), anchors.AllowMutation)
+		if err != nil {
+			return err
+		}
+	} else {
 		if options.trustedRuntime == "generic-capability" {
 			trusted, err = app.NewGenericProtectedPreflights(argoJobs, database, recipes, filepath.Join(options.dataRoot, "work"), anchors.AllowMutation)
 		} else {

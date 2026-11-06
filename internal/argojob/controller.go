@@ -262,6 +262,9 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 		if subErr := sameSubmission(existing, intended); subErr != nil {
 			return "", subErr
 		}
+		if err := controller.bindPlacedParentWorkflow(ctx, existing); err != nil {
+			return "", err
+		}
 		// Same submission exists; repair claim ownership if needed.
 		claimName := sourceClaimName(request.Name)
 		controller.adoptClaimBestEffort(ctx, claimName, existing.Name, string(existing.UID))
@@ -280,6 +283,23 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 		return "", &beforeWorkflowCreateFailure{cause: err}
 	}
 	controller.timingMilestone(ctx, request.RunID, "source-seed-started")
+	if controller.placedParent(request.Name, request.RunID) {
+		prior, err := controller.placementJournal.PlacementSourceUID(ctx, request.RunID, request.Name)
+		if err != nil {
+			return "", err
+		}
+		if prior != "" {
+			return "", &workflowCreateFailure{name: request.Name, stage: "retained_source", cause: errors.New("placed parent source requires settlement, not reseeding"), ambiguous: true}
+		}
+		// Once source allocation may have happened, a best-effort delete is not
+		// evidence of absence. Preserve the scheduler's durable settlement path for
+		// every subsequent failure, including a definitive failure before POST.
+		defer func() {
+			if resultErr != nil {
+				resultErr = &workflowCreateFailure{name: request.Name, stage: "placed_cleanup", cause: resultErr, ambiguous: true}
+			}
+		}()
+	}
 	volume, err := controller.seeder.SeedRequest(ctx, request, credentialed, request.TrustedKVM == nil)
 	if err != nil {
 		if controller.config.Custody != nil {
@@ -317,6 +337,9 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 		controller.seeder.DeleteClaim(context.WithoutCancel(ctx), volume.ClaimName)
 		return "", saErr
 	}
+	if err := controller.preparePlacedParentWorkflow(ctx, intended); err != nil {
+		return "", &workflowCreateFailure{name: request.Name, stage: "placement_intent", cause: err, ambiguous: true}
+	}
 	attemptedCreate = true
 	for _, warning := range stepUsageMemoryWarnings(intended) {
 		log.Printf("WARN: %s", warning)
@@ -328,6 +351,9 @@ func (controller *Controller) Create(ctx context.Context, request Request) (name
 			controller.seeder.DeleteClaim(context.WithoutCancel(ctx), volume.ClaimName)
 		}
 		return "", createErr
+	}
+	if err := controller.bindPlacedParentWorkflow(ctx, created); err != nil {
+		return "", &workflowCreateFailure{name: request.Name, stage: "placement_uid", cause: err, ambiguous: true}
 	}
 	controller.adoptClaimBestEffort(ctx, volume.ClaimName, created.Name, string(created.UID))
 	controller.retainWorkflowTiming(ctx, created)
@@ -868,6 +894,12 @@ func (controller *Controller) Cancel(ctx context.Context, name, runID string) er
 	}
 	if recovered != controller {
 		return recovered.Cancel(ctx, name, runID)
+	}
+	if controller.config.ExecutionPlacement.Protected() {
+		if !controller.placedParent(name, runID) {
+			return errors.New("argojob: cancellation phase differs from protected parent custody")
+		}
+		return controller.cancelPlacedParent(ctx, name, runID)
 	}
 	workflow, err := controller.workflows.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {

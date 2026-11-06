@@ -2,6 +2,7 @@ package argojob
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"testing"
@@ -26,8 +27,13 @@ type protectedTokenJournal struct {
 	ProtectedPlacementJournal
 	admission *protectedtests.PlacementAdmission
 	runtime   *protectedtests.GenericAdmission
+	parent    []byte
+	parentUID string
 }
 
+func (j *protectedTokenJournal) PlacementWorkflow(context.Context, string, string) ([]byte, string, error) {
+	return j.parent, j.parentUID, nil
+}
 func (j *protectedTokenJournal) PlacementAdmission(context.Context, string) (*protectedtests.PlacementAdmission, error) {
 	return j.admission, nil
 }
@@ -45,7 +51,7 @@ func (j *protectedTokenJournal) KVMPreflight(context.Context, string) (protected
 }
 
 func TestProtectedTokenDeliveryRetainsAuthorityWithExistingHolder(t *testing.T) {
-	for _, mode := range []string{"unchanged", "removed config", "removed between attempts", "removed before delivery", "revoked between attempts", "expired between attempts"} {
+	for _, mode := range []string{"unchanged", "replacement parent UID", "changed parent spec", "removed config", "removed between attempts", "removed before delivery", "revoked between attempts", "expired between attempts"} {
 		t.Run(mode, func(t *testing.T) {
 			config, request := protectedPlacementFixture(t)
 			_, _, objects := placementFixture(t)
@@ -71,6 +77,10 @@ func TestProtectedTokenDeliveryRetainsAuthorityWithExistingHolder(t *testing.T) 
 			normal.Name = config.ExecutionPlacement.document.NormalWorkflow
 			normal.TrustedKVM, normal.GenericProtected = nil, nil
 			wf, err := Build(config, normal)
+			if err != nil {
+				t.Fatal(err)
+			}
+			parentBody, err := json.Marshal(wf)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -124,7 +134,7 @@ func TestProtectedTokenDeliveryRetainsAuthorityWithExistingHolder(t *testing.T) 
 				deliveries++
 				return nil
 			}}}
-			c.WithProtectedPlacementJournal(&protectedTokenJournal{admission: admission, runtime: request.GenericProtected}, &rest.Config{Host: "https://api.example.org", TLSClientConfig: rest.TLSClientConfig{CAData: []byte("fixture-ca")}})
+			c.WithProtectedPlacementJournal(&protectedTokenJournal{admission: admission, runtime: request.GenericProtected, parent: parentBody, parentUID: string(wf.UID)}, &rest.Config{Host: "https://api.example.org", TLSClientConfig: rest.TLSClientConfig{CAData: []byte("fixture-ca")}})
 			c.WithProtectedPlacementAuthority(func(context.Context, protectedtests.GenericAdmission) error { return nil })
 			c.WithWorkflowCapabilityLoader(func(context.Context, int64) (*argoworkflow.Capability, error) {
 				if revoked {
@@ -134,6 +144,32 @@ func TestProtectedTokenDeliveryRetainsAuthorityWithExistingHolder(t *testing.T) 
 			})
 			if _, err = c.executorIdentityPod(t.Context(), wf, config.ExecutorServiceAccount); err != nil {
 				t.Fatal(err)
+			}
+			if mode == "replacement parent UID" {
+				originalHolder, e := kube.CoreV1().Pods(wf.Namespace).Get(t.Context(), c.identityPodName(wf.UID, config.ExecutorServiceAccount), metav1.GetOptions{})
+				if e != nil {
+					t.Fatal(e)
+				}
+				wf.UID = "replacement-parent-uid"
+				pod.OwnerReferences[0].UID = wf.UID
+				if _, e = kube.CoreV1().Pods(pod.Namespace).Update(t.Context(), pod, metav1.UpdateOptions{}); e != nil {
+					t.Fatal(e)
+				}
+				replacementHolder := originalHolder.DeepCopy()
+				replacementHolder.Name = c.identityPodName(wf.UID, config.ExecutorServiceAccount)
+				replacementHolder.UID = "replacement-holder-uid"
+				replacementHolder.OwnerReferences[0].UID = wf.UID
+				if e = kube.Tracker().Add(replacementHolder); e != nil {
+					t.Fatal(e)
+				}
+			}
+			if mode == "changed parent spec" {
+				for i := range wf.Spec.Templates {
+					if wf.Spec.Templates[i].Container != nil {
+						wf.Spec.Templates[i].Container.Command = []string{"sh", "-c", "changed command"}
+						break
+					}
+				}
 			}
 			if mode == "removed config" {
 				c.config.ExecutionPlacement = nil
@@ -145,7 +181,7 @@ func TestProtectedTokenDeliveryRetainsAuthorityWithExistingHolder(t *testing.T) 
 				}
 			} else {
 				expected := 1
-				if mode == "removed config" {
+				if mode == "removed config" || mode == "replacement parent UID" || mode == "changed parent spec" {
 					expected = 0
 				}
 				if err == nil || requests != expected || deliveries != 0 {

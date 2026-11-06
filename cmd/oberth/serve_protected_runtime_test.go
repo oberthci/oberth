@@ -19,7 +19,7 @@ func TestServeProtectedRuntimeRequiresExplicitOptIn(t *testing.T) {
 				options := minimalValidServeOptions()
 				options.trustedRuntime, options.trustedRecipesFile = mode, recipes
 				err := validateServeOptions(options)
-				wantValid := mode == "legacy" || mode == "generic-capability" && recipes != ""
+				wantValid := mode == "legacy" || mode == "generic-capability"
 				if (err == nil) != wantValid {
 					t.Fatalf("mode=%s recipes=%s err=%v", mode, recipes, err)
 				}

@@ -208,9 +208,16 @@ DELETE FROM schema_migrations WHERE id='20261106021113-protected-runtime-admissi
 
 // PostProtectedPlacementDowngrade removes placement custody only in disposable
 // historical migration fixtures. Production custody remains append-only.
-const PostProtectedPlacementDowngrade = `
+const PostProtectedPlacementDowngrade = PostProtectedWorkflowDowngrade + `
 DROP TABLE IF EXISTS protected_placement_admissions;
 DROP INDEX IF EXISTS protected_placement_audit_idx;
 DROP INDEX IF EXISTS protected_placement_source_audit_idx;
 DELETE FROM schema_migrations WHERE id='20261106033000-protected-placement-admissions-96f3e81aca97478ea8d7499e6e378631';
+`
+
+// PostProtectedWorkflowDowngrade removes later parent-custody indexes from disposable historical fixtures.
+const PostProtectedWorkflowDowngrade = `
+DROP INDEX IF EXISTS protected_placement_workflow_audit_idx;
+DROP INDEX IF EXISTS protected_placement_workflow_uid_audit_idx;
+DELETE FROM schema_migrations WHERE id='20261106053000-protected-workflow-custody-f83c6b27a4904dc8bd29e1952e86430a';
 `

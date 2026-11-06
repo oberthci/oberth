@@ -25,7 +25,7 @@ import (
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
-func (controller *Controller) trustedKVMWorkflow(ctx context.Context, request Request) (*wfv1.Workflow, *wfv1.Template, error) {
+func (controller *Controller) trustedKVMWorkflow(ctx context.Context, request Request, cleanup bool) (*wfv1.Workflow, *wfv1.Template, error) {
 	if request.TrustedKVM == nil {
 		return nil, nil, errors.New("argojob: missing trusted KVM intent")
 	}
@@ -35,6 +35,13 @@ func (controller *Controller) trustedKVMWorkflow(ctx context.Context, request Re
 	actual, err := controller.workflows.Get(ctx, request.Name, metav1.GetOptions{})
 	if err != nil {
 		return nil, nil, err
+	}
+	if cleanup && request.GenericProtected != nil {
+		for _, template := range actual.Spec.Templates {
+			if template.Name == trustedKVMWrapper && template.ServiceAccountName == "" && template.AutomountServiceAccountToken == nil {
+				request.legacyProtectedWrapper = true
+			}
+		}
 	}
 	if err := recoverHelperStorage(actual, &request); err != nil {
 		return nil, nil, err
@@ -75,7 +82,7 @@ func (controller *Controller) TrustedKVMWorkflowUID(ctx context.Context, request
 	if recovered != controller {
 		return recovered.TrustedKVMWorkflowUID(ctx, request)
 	}
-	workflow, _, err := controller.trustedKVMWorkflow(ctx, request)
+	workflow, _, err := controller.trustedKVMWorkflow(ctx, request, true)
 	if err != nil {
 		// A nonempty UID with this classification authorizes cleanup only,
 		// never receipt acceptance. Foreign run/source identities return no UID.
@@ -101,7 +108,7 @@ func (controller *Controller) TrustedKVMReceipt(ctx context.Context, request Req
 			return vmrunner.KVMReceipt{}, err
 		}
 	}
-	workflow, leaf, err := controller.trustedKVMWorkflow(ctx, request)
+	workflow, leaf, err := controller.trustedKVMWorkflow(ctx, request, false)
 	if err != nil {
 		return vmrunner.KVMReceipt{}, err
 	}
@@ -486,6 +493,10 @@ func (controller *Controller) CleanupTrustedKVM(ctx context.Context, name, runID
 	}
 }
 func (controller *Controller) cleanTrustedKVMOnce(ctx context.Context, name, runID string, uid types.UID) (bool, error) {
+	return controller.cleanOwnedWorkflowOnce(ctx, name, runID, uid, true)
+}
+
+func (controller *Controller) cleanOwnedWorkflowOnce(ctx context.Context, name, runID string, uid types.UID, trusted bool) (bool, error) {
 	if err := controller.config.ExecutionPlacement.verifyEnvironment(ctx, controller.kube, controller.config); err != nil {
 		return false, err
 	}
@@ -495,7 +506,7 @@ func (controller *Controller) cleanTrustedKVMOnce(ctx context.Context, name, run
 	}
 	workflowAbsent := apierrors.IsNotFound(err)
 	if !workflowAbsent {
-		if wf.UID != uid || wf.Name != name || wf.Namespace != controller.config.Namespace || wf.Annotations[runIDAnnotation] != runID || wf.Annotations[trustedKVMAnnotation] == "" {
+		if wf.UID != uid || wf.Name != name || wf.Namespace != controller.config.Namespace || wf.Annotations[runIDAnnotation] != runID || (trusted && wf.Annotations[trustedKVMAnnotation] == "") || (!trusted && len(wf.OwnerReferences) != 0) {
 			return false, errors.New("argojob: refusing foreign trusted Workflow cleanup")
 		}
 		if wf.DeletionTimestamp == nil {
@@ -509,9 +520,19 @@ func (controller *Controller) cleanTrustedKVMOnce(ctx context.Context, name, run
 	if err != nil {
 		return false, err
 	}
+	if pods.Continue != "" || (pods.RemainingItemCount != nil && *pods.RemainingItemCount > 0) {
+		return false, errors.New("argojob: incomplete cleanup Pod inventory")
+	}
 	owned := 0
 	for i := range pods.Items {
 		pod := &pods.Items[i]
+		if uid == "" {
+			for _, owner := range pod.OwnerReferences {
+				if owner.Kind == "Workflow" && owner.Name == name {
+					return false, errors.New("argojob: unknown Workflow UID retains owned Pod")
+				}
+			}
+		}
 		if !ownedByWorkflow(pod, name, uid) {
 			for _, owner := range pod.OwnerReferences {
 				if owner.UID == uid {
@@ -704,7 +725,7 @@ func trustedArgoRuntimeValue(env corev1.EnvVar, workflow *wfv1.Workflow, pod *co
 // TrustedKVMRefusal retains actual failed kubelet evidence after the same
 // executable/ownership attestation. It never validates or grants a pass.
 func (controller *Controller) TrustedKVMRefusal(ctx context.Context, request Request, workflowUID string) (*vmrunner.KVMTerminationRecord, error) {
-	workflow, leaf, err := controller.trustedKVMWorkflow(ctx, request)
+	workflow, leaf, err := controller.trustedKVMWorkflow(ctx, request, false)
 	if err != nil {
 		return nil, err
 	}

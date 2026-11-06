@@ -193,6 +193,10 @@ func appendTrustedKVM(workflow *wfv1.Workflow, config Config, request Request) e
 		{Steps: []wfv1.WorkflowStep{{Name: "candidate", Template: workflow.Spec.Entrypoint, Arguments: entrypointArguments(workflow)}}},
 		{Steps: []wfv1.WorkflowStep{{Name: "trusted-tests", Template: trustedKVMTemplate}}},
 	}}
+	if request.GenericProtected != nil && !request.legacyProtectedWrapper {
+		wrapper.ServiceAccountName = config.PipelineServiceAccount
+		wrapper.AutomountServiceAccountToken = ptr.To(false)
+	}
 	workflow.Spec.Templates = append(workflow.Spec.Templates, leaf, wrapper)
 	workflow.Spec.Entrypoint = trustedKVMWrapper
 	// A preflight's admission deadline bounds producers and the suite together.

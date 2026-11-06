@@ -23,6 +23,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
@@ -190,6 +191,7 @@ func (w *directNativeWorkflows) Create(ctx context.Context, input *wfv1.Workflow
 	if err != nil {
 		return nil, err
 	}
+	wf.UID = types.UID("workflow-" + wf.Name)
 	wf.Status.StartedAt = metav1.Now()
 	wf.Status.FinishedAt = metav1.Now()
 	wf.Status.Phase = wfv1.WorkflowSucceeded
@@ -270,6 +272,10 @@ type directPlacementFixture struct {
 }
 
 func newDirectPlacementFixture(t *testing.T) *directPlacementFixture {
+	return newDirectPlacementFixtureExpiring(t, 0)
+}
+
+func newDirectPlacementFixtureExpiring(t *testing.T, lifetime time.Duration) *directPlacementFixture {
 	t.Helper()
 	ctx := t.Context()
 	environment := newTargetRouteFixture(t)
@@ -403,6 +409,9 @@ func newDirectPlacementFixture(t *testing.T) *directPlacementFixture {
 	selection["repository_id"] = repo.ID
 	selection["source_digest"] = targetBytesHash(source)
 	selection["dependency_identity"] = targetHash(config)
+	if lifetime > 0 {
+		selection["expires"] = time.Now().UTC().Add(lifetime).Format(time.RFC3339Nano)
+	}
 	raw, _ = json.Marshal(selection)
 	config.ExecutionPlacement, err = argojob.ParseExecutionPlacement(raw)
 	if err != nil {
@@ -567,7 +576,7 @@ func TestDirectProtectedPlacementSchedulerPublicationChecksLiveEnvironment(t *te
 }
 
 func TestDirectProtectedPlacementUncertainCreateReopenRetainsOriginalOwner(t *testing.T) {
-	for _, mode := range []string{"group zero", "revoked grant", "legacy group zero", "changed primary config", "replacement cluster", "replacement workflow UID", "replacement source UID", "foreign source owner"} {
+	for _, mode := range []string{"group zero", "revoked grant", "legacy group zero", "removed recipes", "changed primary config", "replacement cluster", "replacement workflow UID", "replacement source UID", "foreign source owner"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newDirectPlacementFixture(t)
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
@@ -618,8 +627,11 @@ func TestDirectProtectedPlacementUncertainCreateReopenRetainsOriginalOwner(t *te
 			defer func() { _ = db.Close() }()
 			f.workflows.readsUnavailable = false
 			config := f.jobs.config
-			if mode == "group zero" || mode == "legacy group zero" {
+			if mode == "group zero" || mode == "legacy group zero" || mode == "removed recipes" {
 				config.TrustedKVMGroup = 0
+			}
+			if mode == "removed recipes" {
+				config.ExecutionPlacement = nil
 			}
 			if mode == "changed primary config" {
 				config.SourceStorageClass = "changed-storage-class"
@@ -657,9 +669,25 @@ func TestDirectProtectedPlacementUncertainCreateReopenRetainsOriginalOwner(t *te
 			// Restart retains the canonical checkout root: its path is part of the
 			// existing nonroot submission proof, just as in the real server.
 			workspace := f.executor.workspaceRoot
-			executor, err := constructor(jobs, db, f.executor.recipes, workspace, func(context.Context) error { return nil })
+			var executor *TrustedPreflights
+			if mode == "removed recipes" {
+				executor, err = NewProtectedPreflightRecovery(jobs, db, workspace, func(context.Context) error { return nil })
+			} else {
+				executor, err = constructor(jobs, db, f.executor.recipes, workspace, func(context.Context) error { return nil })
+			}
 			if err != nil {
 				t.Fatal(err)
+			}
+			if mode == "removed recipes" {
+				if executor.Supports(*f.requirement.Contract) == nil || executor.RecipeAllowed(f.executor.recipes[0]) == nil {
+					t.Fatal("removed recipes still authorize execution")
+				}
+				if executor.Execute(ctx, f.request, f.requirement, io.Discard) == nil {
+					t.Fatal("recovery-only executor submitted work")
+				}
+				if f.workflows.posts != 1 {
+					t.Fatal("removed recipes repeated POST")
+				}
 			}
 			_, err = executor.Recover(ctx)
 
@@ -717,6 +745,385 @@ func TestDirectProtectedPlacementParentDeliveryChecksLiveEnvironment(t *testing.
 				}
 			} else if err != nil || f.workflows.posts != 2 {
 				t.Fatalf("unchanged parent delivery failed: err=%v posts=%d", err, f.workflows.posts)
+			}
+		})
+	}
+}
+
+func TestDirectProtectedParentRecoveryRetainsOriginalUIDs(t *testing.T) {
+	for _, mode := range []string{"acknowledged", "lost reply", "group zero lost", "revoked lost", "removed config lost", "changed config lost", "replacement parent UID", "replacement source UID", "foreign source owner", "replacement cluster"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newDirectPlacementFixture(t)
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			defer cancel()
+			if err := f.executor.Execute(ctx, f.request, f.requirement, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.database.SetRunWorkflowName(ctx, f.request.Run.ID, f.request.WorkflowName); err != nil {
+				t.Fatal(err)
+			}
+			lost := strings.Contains(mode, "lost")
+			f.workflows.lostReply = lost
+			err := f.jobs.CreateWorkflow(ctx, f.request)
+			if (err != nil) != lost {
+				t.Fatalf("parent submission lost=%t err=%v", lost, err)
+			}
+			body, uid, err := f.database.PlacementWorkflow(ctx, f.request.Run.ID, f.request.WorkflowName)
+			if err != nil || len(body) == 0 || (uid == "") != lost {
+				t.Fatalf("missing original parent custody uid=%s err=%v", uid, err)
+			}
+			originalUID := string(f.workflows.object.UID)
+			if mode == "replacement parent UID" {
+				f.workflows.object.UID = "replacement-parent"
+			}
+			if mode == "replacement source UID" || mode == "foreign source owner" {
+				claim, e := f.environment.kube.CoreV1().PersistentVolumeClaims(f.jobs.config.Namespace).Get(ctx, f.request.WorkflowName+"-src", metav1.GetOptions{})
+				if e != nil {
+					t.Fatal(e)
+				}
+				if mode == "replacement source UID" {
+					claim.UID = "replacement-source"
+				} else {
+					claim.OwnerReferences = []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: "foreign", UID: "foreign"}}
+				}
+				if _, e = f.environment.kube.CoreV1().PersistentVolumeClaims(f.jobs.config.Namespace).Update(ctx, claim, metav1.UpdateOptions{}); e != nil {
+					t.Fatal(e)
+				}
+			}
+			if mode == "replacement cluster" {
+				ns, e := f.environment.kube.CoreV1().Namespaces().Get(ctx, "kube-system", metav1.GetOptions{})
+				if e != nil {
+					t.Fatal(e)
+				}
+				ns.UID = "replacement-cluster"
+				if _, e = f.environment.kube.CoreV1().Namespaces().Update(ctx, ns, metav1.UpdateOptions{}); e != nil {
+					t.Fatal(e)
+				}
+			}
+			if err = f.database.Close(); err != nil {
+				t.Fatal(err)
+			}
+			db, err := storetest.Open(ctx, f.databasePath, store.Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = db.Close() }()
+			f.workflows.readsUnavailable = false
+			config := f.jobs.config
+			switch mode {
+			case "group zero lost":
+				config.TrustedKVMGroup = 0
+			case "changed config lost":
+				config.SourceStorageClass = "changed-primary-storage"
+			case "removed config lost":
+				config.ExecutionPlacement = nil
+			case "revoked lost":
+				if _, err = db.SetWorkflowCapabilityGrant(ctx, f.request.Repository.ID, "operator", nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			native, err := argojob.NewController(f.workflows, f.environment.kube, config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			native.WithProtectedPlacementJournal(db, f.environment.definition.Transport)
+			clean := false
+			if mode == "acknowledged" {
+				err = native.Cancel(ctx, f.request.WorkflowName, f.request.Run.ID)
+				clean = err == nil
+			} else {
+				for attempt := 0; attempt < 5; attempt++ {
+					clean, err = native.SettleCreate(ctx, f.request.WorkflowName, f.request.Run.ID, time.Now().Add(-time.Second))
+					if clean || err != nil {
+						break
+					}
+				}
+			}
+			negative := strings.HasPrefix(mode, "replacement") || mode == "foreign source owner"
+			if negative {
+				if err == nil || clean {
+					t.Fatal("replacement discharged original parent obligation", err)
+				}
+				if (mode == "replacement parent UID" || mode == "replacement cluster") && f.workflows.deletes != 1 {
+					t.Fatal("replacement parent/cluster obtained deletion")
+				}
+				if mode == "replacement source UID" || mode == "foreign source owner" {
+					if _, e := f.environment.kube.CoreV1().PersistentVolumeClaims(config.Namespace).Get(ctx, f.request.WorkflowName+"-src", metav1.GetOptions{}); e != nil {
+						t.Fatal("foreign source deleted", e)
+					}
+				}
+			} else {
+				if err != nil || !clean || f.workflows.deletes != 2 {
+					t.Fatalf("parent cleanup err=%v clean=%t deletes=%d", err, clean, f.workflows.deletes)
+				}
+				_, retained, e := db.PlacementWorkflow(ctx, f.request.Run.ID, f.request.WorkflowName)
+				if e != nil || retained != originalUID {
+					t.Fatal("original UID lost", retained, e)
+				}
+			}
+			if f.workflows.posts != 2 {
+				t.Fatal("recovery repeated a Workflow POST")
+			}
+			if _, err = db.VerifyAuditState(ctx); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestDirectProtectedParentLateCreateRetainsBoundaryAndSource(t *testing.T) {
+	f := newDirectPlacementFixture(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	if err := f.executor.Execute(ctx, f.request, f.requirement, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	f.workflows.lostReply = true
+	if err := f.jobs.CreateWorkflow(ctx, f.request); err == nil {
+		t.Fatal("lost reply accepted")
+	}
+	f.workflows.readsUnavailable = false
+	late := f.workflows.object.DeepCopy()
+	f.workflows.object = nil
+	if err := f.jobs.CreateWorkflow(ctx, f.request); err == nil || f.workflows.posts != 2 {
+		t.Fatal("uncertain source reseeded/reposted", err)
+	}
+	future := time.Now().Add(time.Minute)
+	clean, err := f.native.SettleCreate(ctx, f.request.WorkflowName, f.request.Run.ID, future)
+	if err != nil || clean {
+		t.Fatal("early absence discharged late POST", clean, err)
+	}
+	if _, err = f.environment.kube.CoreV1().PersistentVolumeClaims(f.jobs.config.Namespace).Get(ctx, f.request.WorkflowName+"-src", metav1.GetOptions{}); err != nil {
+		t.Fatal("early source deletion", err)
+	}
+	f.workflows.object = late
+	clean, err = f.native.SettleCreate(ctx, f.request.WorkflowName, f.request.Run.ID, future)
+	if err != nil || clean || f.workflows.deletes != 2 {
+		t.Fatal("late original Workflow not fenced", clean, err)
+	}
+	for attempt := 0; attempt < 5; attempt++ {
+		clean, err = f.native.SettleCreate(ctx, f.request.WorkflowName, f.request.Run.ID, time.Now().Add(-time.Second))
+		if err != nil || clean {
+			break
+		}
+	}
+	if err != nil || !clean || f.workflows.posts != 2 {
+		t.Fatal("late create cleanup failed", clean, err)
+	}
+	if err = f.jobs.CreateWorkflow(ctx, f.request); err == nil || f.workflows.posts != 2 {
+		t.Fatal("settled phase recreated original run", err)
+	}
+}
+
+func TestDirectProtectedParentSourceFailureRetainsCleanupObligation(t *testing.T) {
+	for _, foreign := range []bool{false, true} {
+		t.Run(fmt.Sprint(foreign), func(t *testing.T) {
+			f := newDirectPlacementFixture(t)
+			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			defer cancel()
+			if err := f.executor.Execute(ctx, f.request, f.requirement, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			failUpload := func(ctx context.Context, ns, name, container string, command []string, input io.Reader, stdout, stderr io.Writer) error {
+				if foreign {
+					claim, err := f.environment.kube.CoreV1().PersistentVolumeClaims(ns).Get(ctx, f.request.WorkflowName+"-src", metav1.GetOptions{})
+					if err != nil {
+						return err
+					}
+					claim.OwnerReferences = []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: "foreign", UID: "foreign"}}
+					if _, err = f.environment.kube.CoreV1().PersistentVolumeClaims(ns).Update(ctx, claim, metav1.UpdateOptions{}); err != nil {
+						return err
+					}
+				}
+				return errors.New("fixture source upload failed")
+			}
+			f.native.WithSourceSeeder(argojob.NewSourceSeeder(f.environment.kube, failUpload, f.jobs.config))
+			err := f.jobs.CreateWorkflow(ctx, f.request)
+			var pending interface{ AmbiguousCreate() bool }
+			if err == nil || !errors.As(err, &pending) || !pending.AmbiguousCreate() || f.workflows.posts != 1 {
+				t.Fatal("source failure lost durable settlement classification", err)
+			}
+			clean, err := f.native.SettleCreate(ctx, f.request.WorkflowName, f.request.Run.ID, time.Now().Add(-time.Second))
+			if foreign {
+				if err == nil || clean {
+					t.Fatal("foreign source ownership discharged", clean, err)
+				}
+			} else if err != nil || !clean {
+				t.Fatal("original failed source not cleaned", clean, err)
+			}
+			if foreign {
+				if _, err = f.environment.kube.CoreV1().PersistentVolumeClaims(f.jobs.config.Namespace).Get(ctx, f.request.WorkflowName+"-src", metav1.GetOptions{}); err != nil {
+					t.Fatal("foreign source deleted", err)
+				}
+			}
+		})
+	}
+}
+
+func TestDirectProtectedExpiredPlacementRecoversAfterRestart(t *testing.T) {
+	for _, phase := range []string{"preflight", "parent"} {
+		t.Run(phase, func(t *testing.T) {
+			t.Parallel()
+			f := newDirectPlacementFixtureExpiring(t, 30*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+			defer cancel()
+			raw, err := json.Marshal(f.jobs.config.ExecutionPlacement)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var selection struct {
+				Expires time.Time `json:"expires"`
+			}
+			if err = json.Unmarshal(raw, &selection); err != nil {
+				t.Fatal(err)
+			}
+			if phase == "preflight" {
+				f.workflows.lostReply = true
+				if f.executor.Execute(ctx, f.request, f.requirement, io.Discard) == nil {
+					t.Fatal("lost reply accepted")
+				}
+			} else {
+				if err = f.executor.Execute(ctx, f.request, f.requirement, io.Discard); err != nil {
+					t.Fatal(err)
+				}
+				if _, err = f.database.SetRunWorkflowName(ctx, f.request.Run.ID, f.request.WorkflowName); err != nil {
+					t.Fatal(err)
+				}
+				f.workflows.lostReply = true
+				if f.jobs.CreateWorkflow(ctx, f.request) == nil {
+					t.Fatal("lost reply accepted")
+				}
+			}
+			posts := f.workflows.posts
+			if err = f.database.Close(); err != nil {
+				t.Fatal(err)
+			}
+			timer := time.NewTimer(time.Until(selection.Expires))
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			db, err := storetest.Open(ctx, f.databasePath, store.Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = db.Close() }()
+			config := f.jobs.config
+			config.ExecutionPlacement, err = argojob.ParseExecutionPlacementForStartup(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.workflows.readsUnavailable = false
+			native, err := argojob.NewController(f.workflows, f.environment.kube, config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			native.WithProtectedPlacementJournal(db, f.environment.definition.Transport).WithWorkflowCapabilityLoader(db.ActiveWorkflowCapability)
+			jobs, err := NewArgoJobs(native, config, db, emptySecretAccess{}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			jobs.SetWorkflowCapabilityLoader(db.ActiveWorkflowCapability)
+			jobs.SetResourceBlobs(f.jobs.resourceBlobs)
+			executor, err := NewGenericProtectedPreflights(jobs, db, f.executor.recipes, f.executor.workspaceRoot, func(context.Context) error { return nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if executor.Execute(ctx, f.request, f.requirement, io.Discard) == nil {
+				t.Fatal("expired placement admitted preflight")
+			}
+			if jobs.CreateWorkflow(ctx, f.request) == nil {
+				t.Fatal("expired placement admitted parent")
+			}
+			if phase == "preflight" {
+				if _, err = executor.Recover(ctx); err != nil {
+					t.Fatal(err)
+				}
+				execution, e := db.KVMPreflight(ctx, f.request.Run.ID)
+				if e != nil || !execution.Cleaned || execution.Receipt != nil {
+					t.Fatal("expired preflight custody lost", e)
+				}
+			} else {
+				clean := false
+				for attempt := 0; attempt < 5; attempt++ {
+					clean, err = native.SettleCreate(ctx, f.request.WorkflowName, f.request.Run.ID, time.Now().Add(-time.Second))
+					if clean || err != nil {
+						break
+					}
+				}
+				if err != nil || !clean {
+					t.Fatal("expired parent custody stranded", err)
+				}
+			}
+			if f.workflows.posts != posts || f.workflows.deletes != posts {
+				t.Fatal("expiry recreated or stranded original objects")
+			}
+			if _, err = db.VerifyAuditState(ctx); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+type directParentAuditFailure struct {
+	*store.Store
+	bind bool
+}
+
+func (j directParentAuditFailure) PreparePlacementWorkflow(ctx context.Context, id, name string, body []byte) error {
+	if !j.bind {
+		return errors.New("parent intent audit unavailable")
+	}
+	return j.Store.PreparePlacementWorkflow(ctx, id, name, body)
+}
+
+func (j directParentAuditFailure) BindPlacementWorkflowUID(ctx context.Context, id, name, uid string) error {
+	if j.bind {
+		return errors.New("parent UID audit unavailable")
+	}
+	return j.Store.BindPlacementWorkflowUID(ctx, id, name, uid)
+}
+
+func TestDirectProtectedParentAuditFailureRetainsCleanup(t *testing.T) {
+	for _, bind := range []bool{false, true} {
+		t.Run(fmt.Sprintf("bind=%t", bind), func(t *testing.T) {
+			f := newDirectPlacementFixture(t)
+			ctx := t.Context()
+			if err := f.executor.Execute(ctx, f.request, f.requirement, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.database.SetRunWorkflowName(ctx, f.request.Run.ID, f.request.WorkflowName); err != nil {
+				t.Fatal(err)
+			}
+			f.native.WithProtectedPlacementJournal(directParentAuditFailure{f.database, bind}, f.environment.definition.Transport)
+			err := f.jobs.CreateWorkflow(ctx, f.request)
+			var pending interface{ AmbiguousCreate() bool }
+			if !errors.As(err, &pending) || !pending.AmbiguousCreate() {
+				t.Fatal("failed audit lost cleanup obligation", err)
+			}
+			wantPosts := 1
+			if bind {
+				wantPosts++
+			}
+			if f.workflows.posts != wantPosts {
+				t.Fatal("unaudited intent crossed POST boundary")
+			}
+			body, uid, err := f.database.PlacementWorkflow(ctx, f.request.Run.ID, f.request.WorkflowName)
+			if err != nil || (len(body) != 0) != bind || uid != "" {
+				t.Fatal("failed audit retained false custody", err)
+			}
+			f.native.WithProtectedPlacementJournal(f.database, f.environment.definition.Transport)
+			clean := false
+			for attempt := 0; attempt < 5; attempt++ {
+				clean, err = f.native.SettleCreate(ctx, f.request.WorkflowName, f.request.Run.ID, time.Now().Add(-time.Second))
+				if clean || err != nil {
+					break
+				}
+			}
+			if err != nil || !clean || f.workflows.posts != wantPosts {
+				t.Fatal("failed audit cleanup stranded or recreated work", err)
 			}
 		})
 	}

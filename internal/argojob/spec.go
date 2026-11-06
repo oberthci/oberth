@@ -602,6 +602,8 @@ type Request struct {
 	legacyHelperRequestDefaults bool
 	// Preserve helper resources in already-submitted Workflow identities.
 	legacyHelperStorage bool
+	// Cleanup alone may reconstruct the original generated host wrapper identity.
+	legacyProtectedWrapper bool
 	// legacyStepUsage reconstructs already-submitted pre-floor wrappers only;
 	// new submissions must never opt out of the instrumentation memory guard.
 	legacyStepUsage bool
