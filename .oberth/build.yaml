@@ -1,8 +1,9 @@
 # Main storage budgets are explicit: bounded Argo helpers also cap the aggregate Pod.
 # Unsized cold Go/scanner leaves retain the existing 8Gi private scratch envelope;
 # utility/PVC writers use 512Mi and artifact staging uses 2Gi, all provisional.
-# CPU/memory and existing larger storage bounds remain provisional; main storage limits are at least 512Mi.
-# Sources: branch a5144ee1989c and release 398379142b7c; branch-last30.yaml retains failure floors.
+# Reviewed peak floors add 1.3x memory / 1.5x storage headroom; all bounds remain provisional.
+# CPU requests follow observed averages up to 1000m; main storage limits are at least 512Mi.
+# Sources: branch a5144ee1989c, release 398379142b7c and last-30 maxima; retain larger existing floors.
 # Pod storage samples include wait (512Mi limit) and disk /tmp (8Gi emptyDir sizeLimit), not PVCs.
 # Neither the helper allowance nor the emptyDir sizeLimit is a measured main-container peak.
 # Oberth CI pipeline (branch-trigger) for the oberth repository.
@@ -801,12 +802,13 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
-      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
-      # Observed CPU avg max unknown, memory peak unknown, pod storage unknown.
-      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
+      # Provisional reviewed floors; sampled peaks remain lower bounds.
+      # CPU last-30 max 352.881m; memory peak unknown.
+      # Pod storage last-30 max 153.410Mi.
+      # Raise CPU request to observed average, capped at 1000m; retain other bounds.
       resources:
         requests:
-          cpu: 124m
+          cpu: 353m
           memory: 192Mi
           ephemeral-storage: 512Mi
         limits:
@@ -869,12 +871,13 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
-      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
-      # Observed CPU avg max unknown, memory peak unknown, pod storage 0Mi.
-      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
+      # Provisional reviewed floors; sampled peaks remain lower bounds.
+      # CPU last-30 max 2215.350m; memory peak unknown.
+      # Pod storage last-30 max 0.043Mi.
+      # Raise CPU request to observed average, capped at 1000m; retain other bounds.
       resources:
         requests:
-          cpu: 192m
+          cpu: 1000m
           memory: 192Mi
           ephemeral-storage: 512Mi
         limits:
@@ -1071,12 +1074,13 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
-      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
-      # Observed CPU avg max 45.3m, memory peak 315.8Mi, pod storage 0Mi.
-      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
+      # Provisional reviewed floors; sampled peaks remain lower bounds.
+      # CPU last-30 max 2144.207m; memory last-30 max 1316.680Mi.
+      # Pod storage last-30 max 0.172Mi.
+      # Raise CPU request to observed average, capped at 1000m; retain other bounds.
       resources: # remeasure: fresh uncensored measurements required
         requests:
-          cpu: 360m
+          cpu: 1000m
           memory: 3968Mi
           ephemeral-storage: 8Gi
         limits:
@@ -1379,9 +1383,10 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
-      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
-      # Observed CPU avg max 985.9m, memory peak 471.3Mi, pod storage 279.8Mi.
-      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
+      # Provisional reviewed floors; sampled peaks remain lower bounds.
+      # CPU last-30 max 1003.393m; memory last-30 max 1906.586Mi.
+      # Pod storage last-30 max 432.961Mi.
+      # Memory request >= peak, limit >= 1.3x; storage limit >= 1.5x. Remeasure.
       resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
           cpu: 1000m # measured request 1533m; retain the CI policy cap
@@ -1390,7 +1395,7 @@ spec:
         limits:
           cpu: 2930m
           memory: 4Gi
-          ephemeral-storage: 585Mi
+          ephemeral-storage: 704Mi
 
 
   - name: test-rest
@@ -1524,9 +1529,10 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
-      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
-      # Observed CPU avg max 250.4m, memory peak 442.6Mi, pod storage 191.3Mi.
-      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
+      # Provisional reviewed floors; sampled peaks remain lower bounds.
+      # CPU last-30 max 302.425m; memory last-30 max 781.129Mi.
+      # Pod storage last-30 max 217.367Mi.
+      # Memory request >= peak, limit >= 1.3x; storage limit >= 1.5x. Remeasure.
       resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
           cpu: 796m
@@ -1534,7 +1540,7 @@ spec:
           ephemeral-storage: 222Mi
         limits:
           cpu: 2000m # retain the two-processor race launcher budget
-          memory: 896Mi
+          memory: 1024Mi
           ephemeral-storage: 512Mi # provisional minimum; incomplete sampled coverage
 
   - name: build-static-git-runtime
@@ -2006,12 +2012,13 @@ spec:
       - name: work
         mountPath: /tmp/oberth-trivy
         subPath: trivy-cache
-      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
-      # Observed CPU avg max unknown, memory peak 553.1Mi, pod storage unknown.
-      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
+      # Provisional reviewed floors; sampled peaks remain lower bounds.
+      # CPU last-30 max 2049.848m; memory last-30 max 1158.980Mi.
+      # Pod storage last-30 max 153.641Mi.
+      # Raise CPU request to observed average, capped at 1000m; retain other bounds.
       resources:
         requests:
-          cpu: 513m
+          cpu: 1000m
           memory: 2176Mi
           ephemeral-storage: 8Gi
         limits:
@@ -2523,17 +2530,18 @@ spec:
         value: "0"
       # Local race compilation peaked at 1.28 GiB RSS; reserve headroom for
       # the compiler/linker and parent processes. Confirm CI cgroup peaks.
-      # provisional: source run a5144ee1989c; incomplete CPU/storage terminal coverage.
-      # Observed CPU avg max 1305.7m, memory peak 3136Mi, pod storage 3414.9Mi.
-      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
+      # Provisional reviewed floors; sampled peaks remain lower bounds.
+      # CPU last-30 max 1314.121m; memory last-30 max 3136.008Mi.
+      # Pod storage last-30 max 3419.941Mi.
+      # Memory request >= peak, limit >= 1.3x; storage limit >= 1.5x. Remeasure.
       resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
           cpu: 1000m # measured request 1951m; retain the CI policy cap
-          memory: 3136Mi
+          memory: 3200Mi
           ephemeral-storage: 8Gi
         limits:
           cpu: 2950m
-          memory: 3136Mi
+          memory: 4096Mi
           ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
 
   - name: resource-guard

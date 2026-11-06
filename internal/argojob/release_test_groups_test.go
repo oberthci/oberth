@@ -12,8 +12,8 @@ import (
 )
 
 // Release tests must have the same disjoint package partition, watchdogs and
-// CPU/memory envelope as branch CI. Private release caches need their own local
-// storage bounds. A single all-package Pod defeats isolation.
+// CPU envelope as branch CI. Release memory may grow above branch floors from
+// retained release peaks; private caches need their own local storage bounds. A single all-package Pod defeats isolation.
 func TestOberthReleaseRaceGroupsMatchBranch(t *testing.T) {
 	branch, err := argoworkflow.Decode(loadPipeline(t, "build.yaml"))
 	if err != nil {
@@ -64,8 +64,20 @@ func TestOberthReleaseRaceGroupsMatchBranch(t *testing.T) {
 			wantResources.Requests[corev1.ResourceEphemeralStorage] = quantity
 			wantResources.Limits[corev1.ResourceEphemeralStorage] = quantity
 		}
-		if !reflect.DeepEqual(got.ActiveDeadlineSeconds, want.ActiveDeadlineSeconds) || !reflect.DeepEqual(got.Container.Resources, *wantResources) {
-			t.Errorf("%s must retain branch watchdog/CPU/memory and its release-only local storage bound", task.Name)
+		if !reflect.DeepEqual(got.ActiveDeadlineSeconds, want.ActiveDeadlineSeconds) {
+			t.Errorf("%s must retain its branch watchdog", task.Name)
+		}
+		for group, floor := range map[string]corev1.ResourceList{"requests": wantResources.Requests, "limits": wantResources.Limits} {
+			actual := got.Container.Resources.Requests
+			if group == "limits" {
+				actual = got.Container.Resources.Limits
+			}
+			for name, minimum := range floor {
+				quantity := actual[name]
+				if quantity.Cmp(minimum) < 0 || (name == corev1.ResourceCPU && quantity.Cmp(minimum) != 0) {
+					t.Errorf("%s %s %s lost its branch/release floor: %s < %s", task.Name, group, name, quantity.String(), minimum.String())
+				}
+			}
 		}
 		isolatedTools := false
 		for _, mount := range got.Container.VolumeMounts {

@@ -1,8 +1,9 @@
 # Main storage budgets are explicit: bounded Argo helpers also cap the aggregate Pod.
 # Unsized cold Go/scanner leaves retain the existing 8Gi private scratch envelope;
 # utility/PVC writers use 512Mi and artifact staging uses 2Gi, all provisional.
-# CPU/memory and existing larger storage bounds remain provisional; main storage limits are at least 512Mi.
-# Sources: branch a5144ee1989c and release 398379142b7c; branch-last30.yaml retains failure floors.
+# Reviewed peak floors add 1.3x memory / 1.5x storage headroom; all bounds remain provisional.
+# CPU requests follow observed averages up to 1000m; main storage limits are at least 512Mi.
+# Sources: branch a5144ee1989c, release 398379142b7c and last-30 maxima; retain larger existing floors.
 # Pod storage samples include wait (512Mi limit) and disk /tmp (8Gi emptyDir sizeLimit), not PVCs.
 # Neither the helper allowance nor the emptyDir sizeLimit is a measured main-container peak.
 # Release workflow. The Golang and Trivy images pin their Linux amd64
@@ -709,12 +710,13 @@ spec:
       - name: bootstrap-tools
         mountPath: /tmp/oberth-tools
         readOnly: false
-      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
-      # Observed CPU avg max unknown, memory peak unknown, pod storage unknown.
-      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
+      # Provisional reviewed floors; sampled peaks remain lower bounds.
+      # CPU last-30 max 1259.897m; memory release 398379142b7c max 0.000Mi.
+      # Pod storage last-30 max 0.070Mi.
+      # Raise CPU request to observed average, capped at 1000m; retain other bounds.
       resources:
         requests:
-          cpu: 100m
+          cpu: 1000m
           memory: 128Mi
           ephemeral-storage: 512Mi
         limits:
@@ -1364,9 +1366,10 @@ spec:
         mountPath: /tmp/oberth-tools
         subPath: release-test-store
         readOnly: true
-      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
-      # Observed CPU avg max 1972.2m, memory peak 3491.4Mi, pod storage 1900.5Mi.
-      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
+      # Provisional reviewed floors; sampled peaks remain lower bounds.
+      # CPU release 398379142b7c max 1972.224m; memory last-30 max 3510.441Mi.
+      # Pod storage last-30 max 2646.156Mi.
+      # Memory request >= peak, limit >= 1.3x; storage limit >= 1.5x. Remeasure.
       resources:
         requests:
           cpu: 1000m # measured request 1595m; retain the CI policy cap
@@ -1374,8 +1377,8 @@ spec:
           ephemeral-storage: 3941Mi # remeasure: provisional release store sampled local bytes 2754265088 x1.5, rounded up
         limits:
           cpu: 2950m
-          memory: 4Gi
-          ephemeral-storage: 3941Mi # remeasure: provisional release store sampled local bytes 2754265088 x1.5, rounded up
+          memory: 4608Mi
+          ephemeral-storage: 4032Mi
 
 
   - name: release-test-service
@@ -1431,18 +1434,19 @@ spec:
         mountPath: /tmp/oberth-tools
         subPath: release-test-service
         readOnly: true
-      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
-      # Observed CPU avg max 1088.7m, memory peak 4096Mi, pod storage 3461.5Mi.
-      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
+      # Provisional reviewed floors; sampled peaks remain lower bounds.
+      # CPU release 398379142b7c max 1088.686m; memory last-30 max 4096.008Mi.
+      # Pod storage release 398379142b7c max 3461.500Mi.
+      # Memory request >= peak, limit >= 1.3x; storage limit >= 1.5x. Remeasure.
       resources:
         requests:
           cpu: 1000m # measured request 1533m; retain the CI policy cap
-          memory: 4Gi
+          memory: 4160Mi
           ephemeral-storage: 5138Mi # remeasure: provisional release service sampled local bytes 3591286784 x1.5, rounded up
         limits:
           cpu: 2930m
-          memory: 4Gi
-          ephemeral-storage: 5138Mi # remeasure: provisional release service sampled local bytes 3591286784 x1.5, rounded up
+          memory: 5376Mi
+          ephemeral-storage: 5248Mi
 
 
   - name: release-test-rest
@@ -1504,18 +1508,19 @@ spec:
       - name: bootstrap-node-inputs
         mountPath: /tmp/oberth-node-inputs
         readOnly: true
-      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
-      # Observed CPU avg max 2131.2m, memory peak 6208Mi, pod storage 5213.9Mi.
-      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
+      # Provisional reviewed floors; sampled peaks remain lower bounds.
+      # CPU release 398379142b7c max 2131.241m; memory last-30 max 6208.008Mi.
+      # Pod storage last-30 max 5791.938Mi.
+      # Memory request >= peak, limit >= 1.3x; storage limit >= 1.5x. Remeasure.
       resources:
         requests:
           cpu: 1000m # measured request 2249m; retain the CI policy cap
-          memory: 6208Mi
+          memory: 6272Mi
           ephemeral-storage: 8Gi
         limits:
           cpu: 4000m
-          memory: 6208Mi
-          ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
+          memory: 8192Mi
+          ephemeral-storage: 8704Mi
 
   # The native Git cache suite is a binding source gate.
   - name: release-test-gitcache
@@ -1567,18 +1572,19 @@ spec:
         mountPath: /tmp/oberth-tools
         subPath: release-test-gitcache
         readOnly: true
-      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
-      # Observed CPU avg max 659m, memory peak 897.1Mi, pod storage 1763.6Mi.
-      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
+      # Provisional reviewed floors; sampled peaks remain lower bounds.
+      # CPU last-30 max 761.563m; memory last-30 max 898.285Mi.
+      # Pod storage last-30 max 1779.531Mi.
+      # Memory request >= peak, limit >= 1.3x; storage limit >= 1.5x. Remeasure.
       resources:
         requests:
           cpu: 796m
-          memory: 896Mi
+          memory: 960Mi
           ephemeral-storage: 2631Mi # remeasure: provisional release gitcache sampled local bytes 1838612480 x1.5, rounded up
         limits:
           cpu: 2000m # retain the two-processor race launcher budget
-          memory: 896Mi
-          ephemeral-storage: 2631Mi # remeasure: provisional release gitcache sampled local bytes 1838612480 x1.5, rounded up
+          memory: 1280Mi
+          ephemeral-storage: 2688Mi
 
   - name: release-chart-test
     activeDeadlineSeconds: 60
@@ -1623,12 +1629,13 @@ spec:
         mountPath: /tmp/oberth-tools
         subPath: release-chart-test
         readOnly: true
-      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
-      # Observed CPU avg max unknown, memory peak unknown, pod storage unknown.
-      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
+      # Provisional reviewed floors; sampled peaks remain lower bounds.
+      # CPU last-30 max 855.141m; memory release 398379142b7c max 0.000Mi.
+      # Pod storage last-30 max 154.332Mi.
+      # Raise CPU request to observed average, capped at 1000m; retain other bounds.
       resources:
         requests:
-          cpu: 492m
+          cpu: 856m
           memory: 192Mi
           ephemeral-storage: 512Mi
         limits:
@@ -2333,17 +2340,19 @@ spec:
       # Seven copies of the trusted tools go through the page cache; under
       # heavy node I/O, dirty pages outrun writeback and a 512Mi limit
       # OOM-killed this step (v0.17.38 release run ef637d76).
-      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
-      # Observed CPU avg max 879.2m, memory peak 4608.2Mi, pod storage 0.2Mi.
-      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
+      # Provisional reviewed floors; sampled peaks remain lower bounds.
+      # CPU release 398379142b7c max 879.217m; memory last-30 max 4608.289Mi.
+      # Pod storage last-30 max 405.938Mi.
+      # Memory request >= peak, limit >= 1.3x; storage limit >= 1.5x. Remeasure.
+      # CPU request follows observed average, capped at 1000m.
       resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
         requests:
-          cpu: 850m
-          memory: 4608Mi
+          cpu: 880m
+          memory: 4672Mi
           ephemeral-storage: 8Gi
         limits:
           cpu: 1000m
-          memory: 4608Mi
+          memory: 6144Mi
           ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
   - name: fetch-apko
     activeDeadlineSeconds: 60
@@ -2592,9 +2601,10 @@ spec:
         readOnly: true
       - name: bootstrap-output
         mountPath: /tmp/oberth-release
-      # provisional: source run 398379142b7c; incomplete CPU/storage terminal coverage.
-      # Observed CPU avg max 1464.7m, memory peak 1601.8Mi, pod storage 954.9Mi.
-      # Sampled lower bounds: retain requests/limits; apply only the 512Mi storage minimum.
+      # Provisional reviewed floors; sampled peaks remain lower bounds.
+      # CPU last-30 max 1676.736m; memory last-30 max 1649.258Mi.
+      # Pod storage last-30 max 1256.469Mi.
+      # Memory request >= peak, limit >= 1.3x; storage limit >= 1.5x. Remeasure.
       resources:
         requests:
           cpu: 1000m # measured request 2785m; retain the CI policy cap
@@ -2602,7 +2612,7 @@ spec:
           ephemeral-storage: 8Gi
         limits:
           cpu: 2980m
-          memory: 1984Mi
+          memory: 2304Mi
           ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
     initContainers:
     - name: verify-publisher-tools
