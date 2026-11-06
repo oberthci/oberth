@@ -22,7 +22,10 @@ import (
 	"github.com/oberthci/oberth/internal/gitcache"
 )
 
-type parallelCache struct{ active, peak, archives atomic.Int32 }
+type parallelCache struct {
+	active, peak, archives atomic.Int32
+	overlap                chan struct{}
+}
 
 func (*parallelCache) ListTags(context.Context, string) ([]string, error) {
 	return []string{"v1.0.0"}, nil
@@ -44,12 +47,22 @@ func (cache *parallelCache) ArchiveTar(ctx context.Context, input, _ string, out
 			break
 		}
 	}
-	cache.archives.Add(1)
-	// Keep concurrent archive reads observable without a wall-clock load test.
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(time.Millisecond):
+	arrival := cache.archives.Add(1)
+	// The first archive cannot finish before another request is active.
+	// A serial implementation fails with a bounded diagnostic, not a flaky peak.
+	if arrival == 2 {
+		close(cache.overlap)
+	}
+	if arrival <= 2 {
+		timer := time.NewTimer(testtimeout.Start(10 * time.Second))
+		defer timer.Stop()
+		select {
+		case <-cache.overlap:
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			return fmt.Errorf("archive overlap barrier: second request did not arrive")
+		}
 	}
 	writer := tar.NewWriter(output)
 	for name, body := range map[string]string{
@@ -81,7 +94,7 @@ func TestParallelGoModDownloads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cache := &parallelCache{}
+	cache := &parallelCache{overlap: make(chan struct{})}
 	mapping := map[string]string{}
 	var root strings.Builder
 	root.WriteString("module fixture.invalid/root\n\ngo 1.26\n\nrequire (\n")
