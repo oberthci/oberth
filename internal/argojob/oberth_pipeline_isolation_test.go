@@ -70,13 +70,13 @@ var (
 		"test-archive-history":     true,
 		"build-amd64":              true, "build-arm64": true,
 		"build-darwin-amd64": true, "build-darwin-arm64": true,
-		"resource-guard": true,
+		"resource-guard": true, "test-openbao": true,
 	}
 	oberthBuildIsolatedLeaves = map[string]bool{
 		"generic-names":  true,
 		"chart-unittest": true, "test-chart-schema": true, "test-make-entrypoints": true, "test-release-prune-contract": true,
 		"test-static-git-runtime": true,
-		"shellcheck":              true, "chart": true, "security": true, "release-diagnostic": true, "test-openbao": true,
+		"shellcheck":              true, "chart": true, "security": true, "release-diagnostic": true,
 		"vpt-build-and-fetch": true, "vpt-copy-trivy": true, "vpt-verify": true,
 	}
 )

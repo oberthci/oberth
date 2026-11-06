@@ -2330,15 +2330,11 @@ spec:
   # ---- test-openbao burn (#803) ----
   # Real OpenBao integration test: starts a dev server, applies rendered
   # per-repo/per-step policies, and asserts ACL isolation with real reads.
-  # Both setup helpers also run over verified TLS with real Transit keys and denied reads.
-  # Cold private caches fetch verified Go modules as well as the pinned OpenBao download.
+  # The setup helper also runs over verified TLS with real Transit keys and denied reads.
+  # Reuse the verified Go module/build caches; the pinned OpenBao binary stays private.
   - name: test-openbao
-    activeDeadlineSeconds: 791
+    activeDeadlineSeconds: 371 # 45s download + 180s compile + 120s test + 26s cleanup
     automountServiceAccountToken: false
-    metadata:
-      annotations:
-        oberth.ci/workspace-mounts: none
-        oberth.ci/workspace-env: none
     script:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
@@ -2371,13 +2367,13 @@ spec:
         export GOTOOLCHAIN=local
         export GOWORK=off
         export GOENV=off
-        # Bound compiler concurrency and per-process GC within the 2 GiB leaf.
+        # Bound compiler concurrency and per-process GC; unit suites retain -race.
         export GOMAXPROCS=2
         export GOMEMLIMIT=256MiB
         printf 'openbao-phase=compile\n'
-        # 595s work plus at most 5s TERM-to-KILL = 600s compile phase.
-        timeout --signal=TERM --kill-after=5s 595s \
-          go test -mod=readonly -p=1 -tags=openbao_integration -race -c \
+        # 175s work plus at most 5s TERM-to-KILL = 180s compile phase.
+        timeout --signal=TERM --kill-after=5s 175s \
+          go test -mod=readonly -p=1 -tags=openbao_integration -c \
           -o "$BAO_DIR/installer.test" ./internal/installer/
         printf 'openbao-phase=test\n'
         cd /work/src/internal/installer
@@ -2398,21 +2394,33 @@ spec:
       - name: GOENV
         value: "off"
       - name: GOMODCACHE
-        value: "/tmp/private-gomod"
+        value: "/cache/gomod"
       - name: GOCACHE
-        value: "/tmp/private-gobuild"
+        value: "/cache/gobuild"
       - name: GIT_TERMINAL_PROMPT
         value: "0"
-      # Local race compilation peaked at 1.28 GiB RSS; reserve headroom for
-      # the compiler/linker and parent processes. Confirm CI cgroup peaks.
-      resources: # remeasure: one-time censored peak x1.5; collect fresh uncensored measurements
+      volumeMounts:
+      - name: work
+        mountPath: /tmp/oberth-tools
+        subPath: tools
+        readOnly: true
+      - name: work
+        mountPath: /cache/gomod
+        subPath: gomod
+      - name: work
+        mountPath: /cache/gobuild
+        subPath: gobuild
+      # #1489 local Go 1.26.10 arm64 full cold-cache leaf: 133.1s, peak 2147.9Mi.
+      # Request has 20% headroom; preserve the #1287 R1 failed-run memory floor.
+      # Provisional across architectures; remeasure CI including Argo helpers.
+      resources:
         requests:
-          cpu: 1000m # measured request 1951m; retain the CI policy cap
-          memory: 3136Mi
-          ephemeral-storage: 8Gi
+          cpu: 1000m # cold compile average 1412m; retain the CI policy cap
+          memory: 2624Mi
+          ephemeral-storage: 8Gi # provisional: sampled scratch cannot justify a smaller request
         limits:
           cpu: 2950m
-          memory: 3136Mi
+          memory: 4096Mi # #1287 R1: retained CI peak 3136Mi x1.3, rounded up
           ephemeral-storage: 8Gi # provisional private-working-set bound; remeasure cold volumes
 
   - name: resource-guard
