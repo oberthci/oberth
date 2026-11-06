@@ -878,7 +878,7 @@ func TestRunUpgradeFullFlow(t *testing.T) {
 }
 
 func TestRunUpgradeAfterLegacyRemovalWithoutOverride(t *testing.T) {
-	testRunUpgradeFullFlow(t, false, "", "0.17.94", "0.17.95")
+	testRunUpgradeFullFlow(t, false, "", "0.17.95", "0.17.96")
 }
 
 func testRunUpgradeFullFlow(t *testing.T, auditFails bool, shadow, installed, target string) {
@@ -1022,7 +1022,7 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool, shadow, installed, ta
 	if auditFails && !strings.Contains(output.String(), "could not record upgrade.completed") {
 		t.Fatalf("missing warning: %s", output.String())
 	}
-	if installed == "0.17.94" && inventoryCalls.Load() != 2 {
+	if installed == "0.17.95" && inventoryCalls.Load() != 2 {
 		t.Fatalf("resource inventory must run before preparation and after preview: %d", inventoryCalls.Load())
 	}
 	if !result.Upgraded {

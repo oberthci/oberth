@@ -179,7 +179,7 @@ wait for confirmed deletion while the old server can still clean them up.
 This inventory remains active on later upgrades and needs cluster-wide list
 permission on KubeVirt resources.
 
-When the installed version is v0.17.93 or earlier, its `admin retirement-check`
+When the installed version is v0.17.94 or earlier, its `admin retirement-check`
 must also confirm that registered repositories have migrated their retired
 contracts. Later versions no longer have this command, so only the resource
 inventory runs. A candidate that removes

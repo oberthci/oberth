@@ -19,7 +19,7 @@ func TestUpgradeRefusesLegacyResourcesBeforeMutation(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			installed, target := "0.17.80", "0.17.83"
 			if strings.HasPrefix(scenario, "post-removal") {
-				installed, target = "0.17.94", "0.17.95"
+				installed, target = "0.17.95", "0.17.96"
 			}
 			requests := 0
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

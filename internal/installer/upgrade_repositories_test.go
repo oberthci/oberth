@@ -39,8 +39,8 @@ func TestRepositoryRetirementProofStopsAfterLastLegacyRelease(t *testing.T) {
 		version string
 		calls   int
 	}{
-		{"0.17.80", 1}, {"v0.17.93", 1}, {"0.17.93+build.1", 1},
-		{"0.17.94-rc.1", 0}, {"0.17.94", 0}, {"0.18.0", 0},
+		{"0.17.80", 1}, {"v0.17.94", 1}, {"0.17.94+build.1", 1},
+		{"0.17.95-rc.1", 0}, {"0.17.95", 0}, {"0.18.0", 0},
 	} {
 		t.Run(tc.version, func(t *testing.T) {
 			calls := 0

@@ -12,7 +12,7 @@ import (
 )
 
 // Later installed releases have no legacy engine or retirement-check command.
-const lastLegacyExecutionVersion = "v0.17.93"
+const lastLegacyExecutionVersion = "v0.17.94"
 
 func checkUpgradeLegacyRepositories(ctx context.Context, cfg UpgradeConfig, deps Deps, installedVersion string) error {
 	if cfg.AllowRetiredExecution || semver.Compare(canonicalChartVersion(installedVersion), lastLegacyExecutionVersion) > 0 {
