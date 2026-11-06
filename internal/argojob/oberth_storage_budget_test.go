@@ -51,8 +51,9 @@ func TestOberthEveryLeafHasMainStorageBudget(t *testing.T) {
 				count++
 				t.Run(leaf.Name, func(t *testing.T) {
 					request, limit := main.Resources.Requests.StorageEphemeral(), main.Resources.Limits.StorageEphemeral()
-					if request.Sign() <= 0 || limit.Sign() <= 0 || request.Cmp(*limit) > 0 {
-						t.Fatalf("explicit ordered main storage required: %s/%s", request, limit)
+					minimum := resource.MustParse("512Mi")
+					if request.Sign() <= 0 || limit.Cmp(minimum) < 0 || request.Cmp(*limit) > 0 {
+						t.Fatalf("explicit ordered main storage with a 512Mi minimum limit required: %s/%s", request, limit)
 					}
 					before := credentialWaitControllerShape(*main.DeepCopy())
 					before.Containers[1].Name = "main"
