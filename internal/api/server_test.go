@@ -880,10 +880,26 @@ func TestMCPToolCountMatchesDocumented(t *testing.T) {
 	if !strings.Contains(string(contract), expected) {
 		t.Fatalf("AGENT-CONTRACT.md does not contain %q — tool count drifted from code", expected)
 	}
-	for _, definition := range definitions {
-		name := definition["name"].(string)
-		if !strings.Contains(string(contract), "`"+name+"`") {
-			t.Errorf("registered tool missing from AGENT-CONTRACT.md: %s", name)
+	// Compare the bounded tool list, not incidental mentions elsewhere in the contract.
+	toolList := strings.SplitN(strings.SplitN(string(contract), expected+":", 2)[1], ". The `promote_grant`", 2)[0]
+	listed := map[string]bool{}
+	quoted := strings.Split(toolList, "`")
+	for i := 1; i < len(quoted); i += 2 {
+		name := quoted[i]
+		if strings.HasPrefix(name, "GET ") || name == "EnqueueCI" {
+			continue
+		}
+		if !registered[name] {
+			t.Errorf("unregistered tool in contract list: %s", name)
+		}
+		if listed[name] {
+			t.Errorf("duplicate tool in contract list: %s", name)
+		}
+		listed[name] = true
+	}
+	for name := range registered {
+		if !listed[name] {
+			t.Errorf("registered tool missing from contract list: %s", name)
 		}
 	}
 }

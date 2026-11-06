@@ -14,6 +14,14 @@ SAMPLER = {'enabled': True, 'interval': '15s',
 
 
 class ArgoSchemaTests(unittest.TestCase):
+    def test_pod_policy_switch_is_boolean(self):
+        for enabled in (True, False):
+            result = self.render({'podPolicy': {'enabled': enabled}})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual('kind: ValidatingAdmissionPolicy\n' in result.stdout, enabled)
+        for enabled in ('false', 0, None):
+            self.assert_schema_refuses({'podPolicy': {'enabled': enabled}})
+
     def test_pinned_source_policy_is_explicit_and_typed(self):
         baseline = self.render({})
         self.assertEqual(baseline.returncode, 0, baseline.stderr)
@@ -39,6 +47,9 @@ class ArgoSchemaTests(unittest.TestCase):
         self.assertEqual(baseline.returncode, 0, baseline.stderr)
         for settings in (
             ['--set', 'secretCreatePolicy=null'],
+            ['--set', 'upstream.createSecrets=null', '--set', 'upstream.keySecret=null',
+             '--set', 'upstream.knownHostsSecret=null', '--set', 'auditAnchor.rootsKey=null'],
+            ['--set', 'auditAnchor.rootsKey=old-roots.pem'],
             ['--set', 'secretCreatePolicy.enabled=true'],
             ['--set', 'upstream.keySecret=legacy', '--set', 'upstream.knownHostsSecret=legacy'],
         ):
@@ -46,6 +57,9 @@ class ArgoSchemaTests(unittest.TestCase):
                 result = self.render({}, *settings)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout, baseline.stdout)
+
+    def test_secret_creation_stays_disabled(self):
+        self.assert_schema_refuses({}, '--set', 'upstream.createSecrets=true')
 
     def render(self, argo, *overrides):
         with tempfile.TemporaryDirectory() as directory:
@@ -72,6 +86,8 @@ class ArgoSchemaTests(unittest.TestCase):
     def test_active_value_types_and_unknown_keys(self):
         cases = [
             {'enabled': 'false'},
+            {'vault': {'adress': 'https://bao.example.com'}},
+            {'goProxy': {'enabeld': True}},
             {'ciSecrets': 17},
             {'ciSecrets': {'serviceAccount': 17}},
             {'ciSecrets': {'vaultRole': []}},

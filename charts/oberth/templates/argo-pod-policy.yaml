@@ -1,0 +1,59 @@
+{{- if (dig "enabled" true (.Values.argo.podPolicy | default dict)) }}
+{{- $roots := list }}
+{{- range list .Values.cache.ciRoot .Values.cache.releaseRoot }}
+{{- if . }}
+{{- if or (not (hasPrefix "/" .)) (eq . "/") (hasSuffix "/" .) (regexMatch "(^|/)\\.\\.?(/|$)|//" .) }}
+{{- fail "cache roots must be canonical absolute directories other than /" }}
+{{- end }}
+{{- $roots = append $roots . }}
+{{- end }}
+{{- end }}
+# PSA stays privileged because reviewed cache hostPaths are not baseline-safe.
+# This policy applies to all pod creators, including the server and controller.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ include "oberth.fullname" . }}-{{ .Release.Namespace }}-argo-pods
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods", "pods/ephemeralcontainers"]
+  matchConditions:
+    - name: argo-namespace
+      expression: {{ printf "request.namespace == %s" (.Values.argo.namespace | toJson) | quote }}
+  variables:
+    - name: containers
+      expression: "object.spec.containers + (has(object.spec.initContainers) ? object.spec.initContainers : []) + (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers : [])"
+    - name: cacheRoots
+      expression: {{ $roots | toJson | quote }}
+  validations:
+    - expression: "(!has(object.spec.hostPID) || !object.spec.hostPID) && (!has(object.spec.hostIPC) || !object.spec.hostIPC) && (!has(object.spec.hostNetwork) || !object.spec.hostNetwork)"
+      message: "Argo pods cannot share host PID, IPC or network namespaces"
+    - expression: "variables.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged)"
+      message: "Argo containers cannot be privileged"
+    - expression: "variables.containers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(x, x == 'NET_BIND_SERVICE'))"
+      message: "Argo containers can add only NET_BIND_SERVICE"
+    # The server must keep setting hostPath.type explicitly for reviewed cache volumes.
+    - expression: "!has(object.spec.volumes) || object.spec.volumes.all(v, !has(v.hostPath) || (has(v.hostPath.type) && v.hostPath.type == 'DirectoryOrCreate' && variables.cacheRoots.exists(root, v.hostPath.path.startsWith(root + '/') && v.hostPath.path.substring(size(root) + 1).matches('^[a-z0-9_-]+-[a-f0-9]{12}$'))))"
+      message: "Argo hostPath volumes must be repository directories beneath the configured CI or release cache root"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ include "oberth.fullname" . }}-{{ .Release.Namespace }}-argo-pods
+  labels:
+    {{- include "oberth.labels" . | nindent 4 }}
+spec:
+  policyName: {{ include "oberth.fullname" . }}-{{ .Release.Namespace }}-argo-pods
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ .Values.argo.namespace | quote }}
+{{- end }}

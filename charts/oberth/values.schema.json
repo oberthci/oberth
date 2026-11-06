@@ -220,7 +220,6 @@
         "interval",
         "maxAge",
         "rootsSecret",
-        "rootsKey",
         "rekorCA",
         "rekorPublicKey",
         "tsaCA",
@@ -296,7 +295,8 @@
           "$ref": "#/definitions/optionalKubernetesName"
         },
         "rootsKey": {
-          "$ref": "#/definitions/secretDataKey"
+          "$ref": "#/definitions/secretDataKey",
+          "description": "Ignored legacy value; retained for upgrade compatibility."
         },
         "rekorCA": {
           "type": "string",
@@ -462,10 +462,7 @@
       "required": [
         "name",
         "baseURL",
-        "createSecrets",
-        "keySecret",
         "keyFile",
-        "knownHostsSecret",
         "knownHostsKey"
       ],
       "properties": {
@@ -480,16 +477,20 @@
           "pattern": "^ssh://[^\\s]+$"
         },
         "createSecrets": {
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Ignored legacy value; retained for upgrade compatibility.",
+          "const": false
         },
         "keySecret": {
-          "$ref": "#/definitions/kubernetesName"
+          "$ref": "#/definitions/kubernetesName",
+          "description": "Ignored legacy value; retained for upgrade compatibility."
         },
         "keyFile": {
           "$ref": "#/definitions/secretDataKey"
         },
         "knownHostsSecret": {
-          "$ref": "#/definitions/kubernetesName"
+          "$ref": "#/definitions/kubernetesName",
+          "description": "Ignored legacy value; retained for upgrade compatibility."
         },
         "knownHostsKey": {
           "$ref": "#/definitions/secretDataKey"
@@ -623,6 +624,14 @@
       "additionalProperties": false,
       "description": "Argo Workflows execution engine. Every pipeline runs as an Argo Workflow.",
       "properties": {
+        "podPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled"],
+          "properties": {
+            "enabled": {"type": "boolean", "default": true}
+          }
+        },
         "enabled": {
           "type": "boolean",
           "description": "Retired compatibility setting, accepted for stored values and ignored. Pipelines always use Argo Workflows."
@@ -990,7 +999,8 @@
               "type": "string",
               "description": "PEM trust anchors credentialed containers verify the Vault address against, delivered into the run's source volume and advertised as VAULT_CACERT. Certificates only; the server refuses a bundle carrying a private key."
             }
-          }
+          },
+          "additionalProperties": false
         },
         "sourceStorageClass": {
           "type": "string",
@@ -1067,7 +1077,8 @@
                 }
               }
             }
-          ]
+          ],
+          "additionalProperties": false
         },
         "executionPlacementConfigMap": {
           "type": "string",
@@ -1214,6 +1225,13 @@
         "createAuthDelegatorBinding": {
           "type": "boolean",
           "description": "Create the system:auth-delegator ClusterRoleBinding for TokenReview-based logins."
+        },
+        "external": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Override automatic external-store detection. External stores use login JWTs for TokenReview; null detects Kubernetes .svc endpoints."
         }
       },
       "required": [

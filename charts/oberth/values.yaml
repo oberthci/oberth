@@ -144,6 +144,7 @@ auditAnchor:
   gateTimeout: 2m
   verifyTimeout: 45s
   rootsSecret: ""
+  # Ignored legacy value, retained for upgrades.
   rootsKey: roots.pem
   # Optional PEM bundle pinning the Rekor HTTPS TLS trust anchors. Public CA
   # material, delivered via ConfigMap. Enables self-hosted or air-gapped Rekor
@@ -243,7 +244,8 @@ ssh:
 upstream:
   name: github
   baseURL: ssh://git@github.com/your-org
-  # Legacy names below identify OpenBao bundles; no Secret is created.
+  # createSecrets, keySecret and knownHostsSecret are ignored legacy values.
+  # createSecrets must remain false; no Kubernetes Secret is created.
   createSecrets: false
   keySecret: oberth-upstream-key
   keyFile: id_ed25519
@@ -293,6 +295,10 @@ argo:
   # namespace would put pipeline identities beside server ones. Oberth refuses
   # to start if this equals the release namespace.
   namespace: "oberth-argo"
+
+  # Namespace admission boundary; disable only when replacing it with equivalent controls.
+  podPolicy:
+    enabled: true
 
   # The three pipeline identities plus the executor. All four must differ:
   # pipeline==credentialed defeats the secret access gate, ciSecrets==
@@ -484,6 +490,10 @@ secretstore:
   # cluster-scoped object the chart creates; disable it if the binding is
   # managed elsewhere.
   createAuthDelegatorBinding: true
+  # null detects .svc / .svc.cluster.local endpoints as in-cluster. Override
+  # for stores reached through custom DNS: false uses the store's local reviewer;
+  # true grants TokenReview to the exact pipeline login identities as well.
+  external: null
 
 # Server-injected KVM device access for annotated leaves. Requires the
 # KubeVirt device plugin (devices.kubevirt.io/kvm) on the node. When enabled,

@@ -936,14 +936,15 @@ containing CI and real workload qualification remain separately required.
   `issue_create`, `issue_get`, `issue_get_many`, `issue_update`, `issue_append`,
   `issue_close`, `issue_reopen`, `issue_delete`, `issue_list`, `issue_lock`,
   `issue_unlock`, `issue_close_many`,
-  secret-access list/allow/revoke, unscoped-admin-only uplink list/revoke/rotate,
+  secret-access `access_list`/`access_allow`/`access_revoke`, unscoped-admin-only
+  `uplink_list`/`uplink_revoke`/`uplink_rotate`,
   `access_dismiss`, deprecated admin-only `kubevirt_grant` / `kubevirt_revoke`,
   unscoped-admin-only `kubevirt_grant_list`, read-only `kubevirt_grant_get`,
   admin-only `workflow_capability_grant` and
   `workflow_capability_revoke`, read-only `workflow_capability_get`, admin-only
   `resource_grant` / `resource_revoke`, read-only `resource_grant_get`, admin-only `size_grant`
   and `size_revoke`, read-only `size_grant_get` (#1021), admin-only
-  unscoped `admission_release` (#1099), `queue_cap_config`, `queue_priority_config`, `queue_priority_get`, `run_priority`, `priority_grant`, `priority_grant_list`, `priority_grant_revoke`, `repo_usage`, `repo_list`, `repo_remove`, `repo_archive`, `repo_unarchive`, `run_list`,
+  unscoped `admission_hold`/`admission_release` (#1099), `concurrency_groups`, `queue_cap_config`, `queue_priority_config`, `queue_priority_get`, `run_priority`, `priority_grant`, `priority_grant_list`, `priority_grant_revoke`, `repo_usage`, `repo_list`, `repo_remove`, `repo_archive`, `repo_unarchive`, `run_list`,
   admin-only `audit_list` (#1104; verified entries, never available to a scoped uplink;
   `GET /api/audit` shares its filters, response and restrictions),
   `schedule_list` (also `GET /api/schedules`, with the same repository scope) plus admin-only audited `schedule_pause`, `schedule_resume` and `schedule_trigger` (#1106; pause state is the audit chain, trigger goes through `EnqueueCI`),

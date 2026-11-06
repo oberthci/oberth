@@ -4,12 +4,16 @@ source_root=$(pwd)
 output=/qualification
 mkdir -p "$output" "$output/tmp"
 chmod 1777 "$output/tmp"
-toolchain=/tmp/static-git-toolchain
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/oberth-static-qualification.XXXXXXXX")
+trap 'rm -rf "$scratch"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+toolchain=$scratch/toolchain
 /bin/sh hack/install-static-git-packages.sh "$source_root/internal/staticgit/build.env" "$toolchain"
 export PATH="$toolchain/usr/bin:$toolchain/bin:$PATH"
 export LD_LIBRARY_PATH="$toolchain/lib:$toolchain/usr/lib"
 export CC="$toolchain/usr/bin/gcc --sysroot=$toolchain"
-/bin/sh hack/build-static-git.sh "$source_root/internal/staticgit/build.env" "$source_root/hack/static-git-no-shell.patch" "$output" /tmp/static-git-source
+/bin/sh hack/build-static-git.sh "$source_root/internal/staticgit/build.env" "$source_root/hack/static-git-no-shell.patch" "$output" "$scratch/source"
 # Same pinned static compiler as Git; this launcher is CI-only, not shipped.
 # shellcheck disable=SC2086
 $CC -std=c11 -O2 -Wall -Wextra -Werror -static hack/static-git-launcher.c -o "$output/launch-static-git"
