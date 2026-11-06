@@ -1259,7 +1259,7 @@ async function renderRunDetail(runID, seq, background) {
   try { ({ pending } = await loadRepoContext()); } catch { /* repo names fall back to IDs */ }
   let detail;
   try {
-    detail = await api(`/api/runs/${enc(runID)}`);
+    detail = await api(`/api/runs/${enc(runID)}?view=dashboard`);
   } catch (err) {
     if (!currentRoute(seq)) return;
     replaceApp(`<section class="screen"><div class="error">Run ${esc(runID)} is unavailable: ${esc(err.message || err)}</div></section>`);

@@ -743,3 +743,25 @@ func TestRunDetailSizesColumnsAndLinksFailedStep(t *testing.T) {
 		t.Fatal(body)
 	}
 }
+
+func TestRunDetailJSONRetainsFullDiagnostics(t *testing.T) {
+	payload := `{"Run":{"ID":"run-abc"},"Timing":{"Version":1},"Steps":[{"MeasuredUsage":[{}],"MeasuredSizeComparison":[{}],"Termination":{}}]}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("view") != "" {
+			t.Errorf("CLI requested compact view: %s", r.URL)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, payload)
+	}))
+	defer server.Close()
+	configure(t, server)
+	var output bytes.Buffer
+	if err := runRunDetail(t.Context(), []string{"run-abc", "--json"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"Timing", "MeasuredUsage", "MeasuredSizeComparison", "Termination"} {
+		if !strings.Contains(output.String(), field) {
+			t.Fatalf("CLI lost %s: %s", field, output.String())
+		}
+	}
+}

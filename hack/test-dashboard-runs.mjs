@@ -432,3 +432,19 @@ assert.deepEqual(JSON.parse(run(`JSON.stringify(orderRuns([
 assert.equal(run(`prioritySummary({priority_class:'normal'})`), 'priority standard');
 assert.equal(run(`prioritySummary({priority_class:'highest'})`), 'priority high');
 console.log('Four canonical priority classes and legacy response aliases pass');
+
+// Detail polling explicitly selects the compact dashboard representation.
+run(`
+  const savedDetailView = renderRunDetailView;
+  let detailPaths = [];
+  loadRepoContext = async () => ({pending:null});
+  currentRoute = () => true;
+  rerenderWhenStatus = () => {};
+  renderRunDetailView = async detail => { state.detailRun = detail.Run; };
+  state.attempts = new Map();
+  api = async path => { detailPaths.push(path); return {Run:{ID:'detail-fixture'},Steps:[]}; };
+`);
+await run(`renderRunDetail('detail-fixture', 1, true)`);
+assert.deepEqual(JSON.parse(run('JSON.stringify(detailPaths)')), ['/api/runs/detail-fixture?view=dashboard']);
+run('renderRunDetailView = savedDetailView');
+console.log('Dashboard detail explicitly requests the compact view');

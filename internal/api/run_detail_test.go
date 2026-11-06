@@ -14,7 +14,7 @@ func TestDashboardRunDetailOmitsHeavyDiagnosticsWithoutMutatingSource(t *testing
 	server, backend := testServer(t)
 	detail := RunDetailResponse{Run: model.Run{ID: "run-1"}, Timing: &model.RunTiming{}, Steps: []model.StepResult{{Stage: "test", Step: "unit", MeasuredUsage: []model.StepResourceUsage{{}}, MeasuredSizeComparison: []model.ResourceSizeComparison{{}}, Termination: &model.StepDiagnostic{}}}}
 	backend.runResult = detail
-	request := httptest.NewRequest(http.MethodGet, "/api/runs/run-1", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/runs/run-1?view=dashboard", nil)
 	request.Header.Set("Authorization", "Bearer valid-token")
 	writer := httptest.NewRecorder()
 	server.Handler().ServeHTTP(writer, request)
@@ -28,6 +28,19 @@ func TestDashboardRunDetailOmitsHeavyDiagnosticsWithoutMutatingSource(t *testing
 	}
 	if !strings.Contains(writer.Body.String(), `"Step":"unit"`) {
 		t.Fatal(writer.Body.String())
+	}
+	// The default HTTP representation is also the CLI --json contract.
+	request = httptest.NewRequest(http.MethodGet, "/api/runs/run-1", nil)
+	request.Header.Set("Authorization", "Bearer valid-token")
+	writer = httptest.NewRecorder()
+	server.Handler().ServeHTTP(writer, request)
+	if writer.Code != http.StatusOK {
+		t.Fatal(writer.Code, writer.Body.String())
+	}
+	for _, field := range []string{"MeasuredUsage", "MeasuredSizeComparison", "Termination", "Timing"} {
+		if !strings.Contains(writer.Body.String(), field) {
+			t.Fatalf("default HTTP response lost %s", field)
+		}
 	}
 	full, err := json.Marshal(detail)
 	if err != nil {

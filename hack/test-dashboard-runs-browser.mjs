@@ -20,16 +20,16 @@ const makeRun = (ID, extra = {}) => {
   const row = {ID, RepoID: 1, Ref: 'main', RefKind: 'branch', Status: 'passed', SHA: 'abc123456789', Actor: 'fixture', Trigger: 'push', QueuedAt: new Date(now-90000).toISOString(), StartedAt: new Date(now-80000).toISOString(), FinishedAt: new Date(now-20000).toISOString(), ...extra};
   if (['running','queued'].includes(row.Status)) {
     row.priority_class ??= 'normal'; row.priority_reason ??= 'ordinary run';
-    row.display_reason ??= `Priority ${row.priority_class}: ${row.priority_reason}.`;
+    row.display_reason ??= ''; // Messages are supplied by the server, never fabricated by the UI.
   }
   return row;
 };
-const heads = [makeRun('head-main', {earlier_attempts: 3, priority_class:'highest', priority_reason:'fixture priority', ConcurrencyGroup:'deploy'}), makeRun('head-tag', {Ref:'v1', RefKind:'tag', Release:true, Credentialed:true}), makeRun('head-branch', {Ref:'v1', Status:'failed'}), makeRun('head-queued', {RepoID:2, Status:'queued', StartedAt:null, FinishedAt:null}), makeRun('head-retry', {Ref:'feature', Status:'queued', StartedAt:null, FinishedAt:null, auto_retry_of:'retry-failed'})];
-const older = makeRun('old-failed', {Status:'failed', Error:'fixture failure', Trigger:'schedule', ScheduleEntry:'weekly', priority_class:'high', priority_reason:'history priority', ConcurrencyGroup:'deploy'});
+const heads = [makeRun('head-main', {earlier_attempts: 3, priority_class:'highest', priority_reason:'fixture priority', ConcurrencyGroup:'deploy'}), makeRun('head-tag', {Ref:'v1', RefKind:'tag', Release:true, Credentialed:true, display_reason:'release'}), makeRun('head-branch', {Ref:'v1', Status:'failed'}), makeRun('head-queued', {RepoID:2, Status:'queued', StartedAt:null, FinishedAt:null}), makeRun('head-retry', {Ref:'feature', Status:'queued', StartedAt:null, FinishedAt:null, auto_retry_of:'retry-failed'})];
+const older = makeRun('old-failed', {Status:'failed', Error:'fixture failure', Trigger:'schedule', ScheduleEntry:'weekly', priority_class:'high', priority_reason:'history priority', ConcurrencyGroup:'deploy', display_reason:'priority high · history priority fixture failure'});
 const superseded = makeRun('old-superseded', {Status:'interrupted', SupersededBy:'head-main'});
 const oldest = makeRun('oldest');
-const scheduled = makeRun('scheduled-running', {Status:'running', Trigger:'schedule', ScheduleEntry:'nightly', FinishedAt:null});
-const scheduledQueued = makeRun('scheduled-queued', {Status:'queued', Trigger:'schedule', ScheduleEntry:'daily', StartedAt:null, FinishedAt:null});
+const scheduled = makeRun('scheduled-running', {Status:'running', Trigger:'schedule', ScheduleEntry:'nightly', FinishedAt:null, display_reason:'schedule: nightly'});
+const scheduledQueued = makeRun('scheduled-queued', {Status:'queued', Trigger:'schedule', ScheduleEntry:'daily', StartedAt:null, FinishedAt:null, display_reason:'awaiting scheduler'});
 const nightlyFailed = makeRun('nightly-failed', {Status:'failed', Trigger:'schedule', ScheduleEntry:'nightly', Error:'nightly failed before a newer successful push'});
 const retried = makeRun('retry-failed', {Ref:'feature', Status:'failed', auto_retried_by:'head-retry'});
 const active = [scheduled, scheduledQueued, heads[3], heads[4]];
@@ -74,6 +74,7 @@ const server = createServer((req, res) => {
     return json(rows);
   }
   if (url.pathname.startsWith('/api/runs/')) {
+    if (url.pathname.split('/').length === 4) assert.equal(url.searchParams.get('view'), 'dashboard', 'detail polling must request the compact view');
     const id = decodeURIComponent(url.pathname.split('/')[3]);
     const Run = flat.find(run => run.ID === id || (id.length >= 8 && run.ID.startsWith(id)));
     return json({Run, Steps:[{Burn:'ci',Step:'publish',Ordinal:2,Status:'passed',Secrets:true,StartedAt:new Date(now-40000).toISOString(),FinishedAt:new Date(now-20000).toISOString()}, {Burn:'ci',Step:'test',Ordinal:1,Status:'passed',StartedAt:new Date(now-60000).toISOString(),FinishedAt:new Date(now-40000).toISOString()}]});
@@ -177,7 +178,7 @@ try {
     assert.deepEqual(await page.locator('#stepList .nm').allTextContents(), ['Run summary','ci/test','ci/publish']);
     assert.equal(await page.locator('#stepList .tag').textContent(), 'secret');
     assert.ok(!(await page.locator('.rh').textContent()).toLowerCase().includes('credentialed'));
-    assert.equal(await page.locator('.rh [title="fixture priority"]').textContent(),'highest priority');
+    assert.equal(await page.locator('.rh [title="fixture priority"]').textContent(),'high priority');
     await capture('after-detail');
     await page.locator('[data-action="toggle-attempts"]').click();
     await page.locator('#runHistory [data-run-id="old-superseded"]').first().waitFor();
