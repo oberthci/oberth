@@ -33,6 +33,7 @@ type fakeBackend struct {
 	toolErr         error
 	runFilter       RunFilter
 	runPage         []model.Run
+	runResult       any
 	runID           string
 	logStage        string
 	logStep         string
@@ -84,6 +85,9 @@ func (backend *fakeBackend) RunCounts(context.Context, Actor) (any, error) {
 }
 func (backend *fakeBackend) Run(_ context.Context, _ Actor, id string) (any, error) {
 	backend.runID = id
+	if backend.runResult != nil {
+		return backend.runResult, nil
+	}
 	return map[string]any{"Run": map[string]any{"ID": id}, "Steps": []any{}}, nil
 }
 func (backend *fakeBackend) RunLog(_ context.Context, _ Actor, id, stage, step string) (any, error) {
@@ -93,6 +97,9 @@ func (backend *fakeBackend) RunLog(_ context.Context, _ Actor, id, stage, step s
 }
 func (backend *fakeBackend) RunArtifacts(_ context.Context, _ Actor, id string) (any, error) {
 	backend.runID = id
+	if backend.runResult != nil {
+		return backend.runResult, nil
+	}
 	return map[string]any{"run_id": id, "artifacts": []map[string]any{{"name": "surefire/TEST.xml", "size": 12}}}, nil
 }
 

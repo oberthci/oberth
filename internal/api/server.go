@@ -469,6 +469,9 @@ func (server *Server) handleRunDetail(writer http.ResponseWriter, request *http.
 		return
 	}
 	value, err := server.views.Run(request.Context(), actorFrom(request.Context()), id)
+	if detail, ok := value.(RunDetailResponse); ok && err == nil {
+		value = dashboardRunDetail(detail)
+	}
 	server.writeView(writer, value, err)
 }
 
