@@ -271,7 +271,7 @@ func TestMCPInitializeAdvertisesAgentReadableDashboardState(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
 		t.Fatal(err)
 	}
-	for _, route := range []string{"/api/runs", "/api/repos", "/api/issues", "/api/grants", "/api/status", "has_more", "byte_offset", "offset=0", "empty window"} {
+	for _, route := range []string{"/api/runs", "/api/repos", "/api/issues", "/api/grants", "/api/status", "has_more", "byte_offset", "offset=0", "empty window", "Snake_case field names are canonical", "queue_cap", "one more release"} {
 		if !strings.Contains(decoded.Result.Instructions, route) {
 			t.Fatalf("initialize instructions omit %s: %q", route, decoded.Result.Instructions)
 		}
