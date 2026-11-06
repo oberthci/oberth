@@ -2,11 +2,20 @@ package api
 
 import (
 	"compress/gzip"
+	"io"
 	"mime"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 )
+
+// Writers retain their compression buffers across responses. Reset to Discard
+// before pooling so an idle writer does not retain the previous response.
+var jsonGzipPool = sync.Pool{New: func() any {
+	writer, _ := gzip.NewWriterLevel(io.Discard, gzip.BestSpeed) // Constant valid level.
+	return writer
+}}
 
 // gzipJSON compresses the buffered JSON views, never streaming or download
 // routes. writeJSON writes its complete marshaled body in one Write, so deciding
@@ -81,7 +90,8 @@ func (w *jsonGzipWriter) start(compress bool) {
 	if compress {
 		w.Header().Set("Content-Encoding", "gzip")
 		w.Header().Del("Content-Length")
-		w.compressor = gzip.NewWriter(w.ResponseWriter)
+		w.compressor = jsonGzipPool.Get().(*gzip.Writer)
+		w.compressor.Reset(w.ResponseWriter)
 	}
 	w.ResponseWriter.WriteHeader(w.status)
 }
@@ -111,5 +121,8 @@ func (w *jsonGzipWriter) finish() {
 	w.start(false)
 	if w.compressor != nil {
 		_ = w.compressor.Close()
+		w.compressor.Reset(io.Discard)
+		jsonGzipPool.Put(w.compressor)
+		w.compressor = nil
 	}
 }
