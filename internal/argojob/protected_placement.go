@@ -19,9 +19,15 @@ func (p *ExecutionPlacement) selectProtectedRequest(config Config, r Request) er
 		name = d.PreflightWorkflow
 	}
 	digest := sha256.Sum256(r.Source)
-	if config.Namespace != d.Namespace || config.PipelineServiceAccount != d.ServiceAccount || canonicalRepoKey(r.UpstreamName, r.UpstreamOrg, r.Repo) != d.Repository || r.RepositoryID != d.RepositoryID || r.SHA != d.SHA || r.Ref != d.Ref || r.PipelineFile != d.PipelineFile || r.RunID != d.ParentRunID || r.Name != name || r.Trigger != pipeline.TriggerCI || r.effectiveRunTrigger() != argoworkflow.RunTriggerBranch || hex.EncodeToString(digest[:]) != d.SourceDigest || len(r.Fragments) != 0 || r.releasePreflight || r.omitRequestDefaults || r.omitStepUsage {
+	if config.Namespace != d.Namespace || config.PipelineServiceAccount != d.ServiceAccount || canonicalRepoKey(r.UpstreamName, r.UpstreamOrg, r.Repo) != d.Repository || r.RepositoryID != d.RepositoryID || r.SHA != d.SHA || r.Ref != d.Ref || r.PipelineFile != d.PipelineFile || r.RunID != d.ParentRunID || r.Name != name || r.Trigger != pipeline.TriggerCI || r.effectiveRunTrigger() != argoworkflow.RunTriggerBranch || hex.EncodeToString(digest[:]) != d.SourceDigest || (len(r.Fragments) != 0 && d.GraphDigest == "") || r.releasePreflight || r.omitRequestDefaults || r.omitStepUsage {
 		return errors.New("argojob: request differs from protected placement authority")
 	}
+	if d.GraphDigest != "" {
+		if err := p.selectPlacementFragments(r); err != nil {
+			return err
+		}
+	}
+
 	if r.Capability == nil || r.Capability.Validate() != nil || protectedtests.CapabilityDigest(*r.Capability) != d.ProtectedPolicy.CapabilityDigest || config.TrustedKVMGroup != d.ProtectedPolicy.SupplementalGroup {
 		return errors.New("argojob: protected placement capability or device group differs")
 	}
@@ -54,6 +60,10 @@ func ProtectedAdmission(config Config, r Request) (*protectedtests.PlacementAdmi
 	body, err := json.Marshal(config)
 	if err != nil {
 		return nil, err
+	}
+	if config.ExecutionPlacement.document.GraphDigest != "" {
+		a, err := protectedtests.NewFragmentPlacementAdmission(placement, body, *r.GenericProtected, r.Source, r.Fragments)
+		return &a, err
 	}
 	a, err := protectedtests.NewPlacementAdmission(placement, body, *r.GenericProtected)
 	return &a, err

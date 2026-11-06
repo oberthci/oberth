@@ -396,9 +396,15 @@ Workflow, owned Pods and the exact source claim are absent; retries cannot
 reseed or recreate a phase with recorded source custody. Expired placements and
 removed recipe approvals retain cleanup ownership only. An absent recipe flag
 or explicit empty recipe array starts a recovery-only executor, never a grant.
-Initial direct scope
-is credential-free, fragment-free branch execution; external bootstrap and
-fragment-bearing qualification remain separately required.
+Direct scope remains credential-free branch execution. Imported templates require
+exact fragment keys, commits, byte digests, resolved graph and lock digests in
+placement. Version 2 placement admissions retain the original root and fragment
+bytes atomically with runtime/config/capacity/audit, within the existing 512 KiB
+admission bound; fragment-free version 1 custody remains compatible. Current
+allocation, receipt and publication recheck the existing fragment trust policy
+and exact source graph. Cleanup reconstructs original bytes after resolver or
+policy removal and cannot authorize new work. External bootstrap, installed
+containing CI and real workload qualification remain separately required.
 
 ### Repository contract
 

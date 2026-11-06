@@ -106,11 +106,28 @@ capability digest, supplemental group and maximum phase duration. The immutable
 host intent is produced by the actual executor and journaled during admission;
 an operator must not invent its timestamps or digest at startup.
 
-This initial contract supports ordinary, credential-free branch pipelines
-without imported fragments. It requires explicit generic protected runtime.
-Credentialed, tag, schedule, resource-VM and fragment-bearing qualification
-remain unsupported. Existing v1 and branch-v2 meanings and host wire bytes are
-unchanged. Ordinary remote target routing does not acquire protected support.
+This contract supports ordinary, credential-free branch pipelines and requires
+explicit generic protected runtime. Credentialed, tag, schedule and resource-VM
+flows remain unsupported. Existing v1 and branch-v2 meanings and host wire bytes
+are unchanged. Ordinary remote target routing does not acquire protected support.
+
+Imported templates use the same `fragments`, `graph_digest` and
+`fragment_lock_digest` checks as branch-v2. Each fragment entry pins its exact
+key, peeled commit and original byte digest. All graph fields must be complete;
+the controller compares the complete resolved graph and lock for both phases,
+using the one canonical parent run binding. Original template references remain
+in the source. Fragment loading still requires the existing registered-repository
+and published-tag or green-SHA policy.
+
+A fragment-bound admission uses version 2 source custody. Its immutable capsule
+contains the original root and fragment bytes, including optional input digest
+metadata used by existing submission identity. The capsule is validated and
+committed atomically with placement/runtime/capacity/audit before allocation.
+It stays within the existing 512 KiB serialized admission bound. Current source
+and fragment policy are rechecked before allocation, receipt and publication;
+cleanup can reconstruct the original graph after a resolver disappears or
+changes, without network lookup or new execution authority. Existing
+fragment-free version 1 admissions retain their original encoding.
 
 Placement, defaulted executor configuration, generic runtime, capacity and
 admission audit commit atomically before external allocation. The source PVC's
@@ -136,5 +153,6 @@ admission hold while the instance lacks workload-create RBAC. Preserve the
 hold, database and audit on restart; install and read back the exact reviewed
 placement before granting allocation or releasing the hold. The initial source
 implementation is not external runtime qualification. Bootstrap permission
-proof, authentic fragment/graph support, installed containing CI and external
-allocation/recovery qualification remain separate acceptance requirements.
+proof, native authentic fragment/graph qualification, installed containing CI
+and external allocation/recovery qualification remain separate acceptance
+requirements.

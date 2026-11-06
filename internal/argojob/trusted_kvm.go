@@ -42,7 +42,7 @@ func prepareTrustedKVMRequest(config Config, request *Request) error {
 		return err
 	}
 	digest := sha256.Sum256(request.Source)
-	if intent.Validate() != nil || request.Trigger != pipeline.TriggerCI || request.RunID != intent.RunID || request.Name != intent.WorkflowName || request.SHA != intent.CandidateSHA || config.Namespace != intent.Namespace || hex.EncodeToString(digest[:]) != intent.WorkflowSpecDigest || model.CanonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo) != intent.Repository || len(request.Fragments) != 0 {
+	if intent.Validate() != nil || request.Trigger != pipeline.TriggerCI || request.RunID != intent.RunID || request.Name != intent.WorkflowName || request.SHA != intent.CandidateSHA || config.Namespace != intent.Namespace || hex.EncodeToString(digest[:]) != intent.WorkflowSpecDigest || model.CanonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo) != intent.Repository || (len(request.Fragments) != 0 && (request.GenericProtected == nil || !config.ExecutionPlacement.Protected())) {
 		return errors.New("argojob: trusted preflight request differs from journaled admission")
 	}
 	expected := SourceVolume{ClaimName: sourceClaimName(request.Name), SubPath: "src", ArtifactsSubPath: artifactsSubPath}

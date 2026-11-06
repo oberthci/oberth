@@ -311,7 +311,7 @@ func (p *ExecutionPlacement) validate() error {
 		return errors.New("argojob: protected fields require protected-v2")
 	}
 	if protected {
-		if d.Normal != (placementRun{}) || d.Preflight != (placementRun{}) || d.ParentRunID == "" || d.NormalWorkflow == "" || d.PreflightWorkflow != d.NormalWorkflow+"-trusted" || d.ProtectedPolicy == nil || d.ProtectedPolicy.Validate() != nil || d.BranchPolicyBaseline != "" || d.GraphDigest != "" || d.FragmentLockDigest != "" || len(d.Fragments) != 0 {
+		if d.Normal != (placementRun{}) || d.Preflight != (placementRun{}) || d.ParentRunID == "" || d.NormalWorkflow == "" || d.PreflightWorkflow != d.NormalWorkflow+"-trusted" || d.ProtectedPolicy == nil || d.ProtectedPolicy.Validate() != nil || d.BranchPolicyBaseline != "" {
 			return errors.New("argojob: incomplete protected placement authority")
 		}
 		if len(k8svalidation.IsDNS1123Subdomain(d.NormalWorkflow)) != 0 || len(k8svalidation.IsDNS1123Subdomain(d.PreflightWorkflow)) != 0 {
@@ -321,6 +321,13 @@ func (p *ExecutionPlacement) validate() error {
 		if d.Preflight != (placementRun{}) || !argoworkflow.IsFullFragmentSHA(d.BranchPolicyBaseline) || !placementSHA(d.GraphDigest) || !placementSHA(d.FragmentLockDigest) || len(d.Fragments) > argoworkflow.MaxFragments {
 			return errors.New("argojob: incomplete fragment-bound branch authority")
 		}
+	} else if d.Normal.RunID == d.Preflight.RunID || d.Normal.Workflow == d.Preflight.Workflow || !placementSHA(d.Preflight.TrustedIntent) || d.BranchPolicyBaseline != "" || d.GraphDigest != "" || d.FragmentLockDigest != "" || len(d.Fragments) != 0 {
+		return errors.New("argojob: incomplete or unsupported closed placement selection")
+	}
+	if branch || (protected && (d.GraphDigest != "" || d.FragmentLockDigest != "" || len(d.Fragments) != 0)) {
+		if !placementSHA(d.GraphDigest) || !placementSHA(d.FragmentLockDigest) || len(d.Fragments) > argoworkflow.MaxFragments {
+			return errors.New("argojob: incomplete protected fragment graph")
+		}
 		seen := map[string]bool{}
 		for _, fragment := range d.Fragments {
 			key, err := argoworkflow.ParseFragmentRef(fragment.Key)
@@ -329,9 +336,8 @@ func (p *ExecutionPlacement) validate() error {
 			}
 			seen[fragment.Key] = true
 		}
-	} else if d.Normal.RunID == d.Preflight.RunID || d.Normal.Workflow == d.Preflight.Workflow || !placementSHA(d.Preflight.TrustedIntent) || d.BranchPolicyBaseline != "" || d.GraphDigest != "" || d.FragmentLockDigest != "" || len(d.Fragments) != 0 {
-		return errors.New("argojob: incomplete or unsupported closed placement selection")
 	}
+
 	// Every scalar identity is mandatory, apart from the normal trusted intent.
 	fields := reflect.ValueOf(d)
 	kind := fields.Type()
@@ -418,26 +424,8 @@ func (p *ExecutionPlacement) selectRequest(config Config, r Request) error {
 		if r.TrustedKVM != nil || !r.BranchAuthority.Matches(d.Repository, r.SHA, d.BranchPolicyBaseline, d.PolicyDigest) {
 			return errors.New("argojob: branch-only execution lacks canonical native policy authority")
 		}
-		if len(r.Fragments) != len(d.Fragments) {
-			return errors.New("argojob: fragment inventory differs from placement")
-		}
-		for _, expected := range d.Fragments {
-			key, err := argoworkflow.ParseFragmentRef(expected.Key)
-			if err != nil {
-				return err
-			}
-			fragment, present := r.Fragments[key]
-			sum := sha256.Sum256(fragment.Source)
-			if !present || fragment.Key != key || fragment.SHA != expected.Commit || hex.EncodeToString(sum[:]) != expected.Digest || (fragment.Digest != "" && fragment.Digest != expected.Digest) {
-				return errors.New("argojob: authentic fragment content differs from placement")
-			}
-		}
-		resolved, err := argoworkflow.ResolveRunSource(r.Source, r.Fragments, argoworkflow.RunSourceBinding{RunID: r.RunID, RepositoryID: r.RepositoryID, SHA: r.SHA, File: r.PipelineFile, Trigger: r.effectiveRunTrigger(), ScheduleEntry: r.ScheduleEntry})
-		if err != nil {
+		if err := p.selectPlacementFragments(r); err != nil {
 			return err
-		}
-		if resolved.GraphIdentity() != d.GraphDigest || placementHash(resolved.Lock()) != d.FragmentLockDigest {
-			return errors.New("argojob: resolved graph or fragment lock differs from placement")
 		}
 	}
 	if r.TrustedKVM != nil {

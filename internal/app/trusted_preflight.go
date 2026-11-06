@@ -131,11 +131,7 @@ func (p *TrustedPreflights) Supports(contract vmrunner.Contract) error {
 	return err
 }
 
-func (p *TrustedPreflights) request(job service.WorkflowRequest, intent vmrunner.KVMIntent, generic *protectedtests.GenericAdmission) (argojob.Request, error) {
-	source, err := readArgoSource(job.SourceDir, pipeline.TriggerCI)
-	if err != nil {
-		return argojob.Request{}, err
-	}
+func (p *TrustedPreflights) request(job service.WorkflowRequest, intent vmrunner.KVMIntent, generic *protectedtests.GenericAdmission, source []byte, fragments map[argoworkflow.FragmentKey]argoworkflow.Fragment) (argojob.Request, error) {
 	sum := sha256.Sum256(source)
 	if hex.EncodeToString(sum[:]) != intent.WorkflowSpecDigest {
 		return argojob.Request{}, errors.New("preflight build blueprint changed")
@@ -144,7 +140,7 @@ func (p *TrustedPreflights) request(job service.WorkflowRequest, intent vmrunner
 	if err != nil {
 		return argojob.Request{}, err
 	}
-	request := argojob.Request{RunID: job.Run.ID, RepositoryID: job.Repository.ID, Name: intent.WorkflowName, Repo: job.Repository.Name, UpstreamName: job.UpstreamName, UpstreamOrg: job.UpstreamOrg, Ref: job.Run.Ref, SHA: intent.CandidateSHA, Trigger: pipeline.TriggerCI, RunTrigger: kind, ScheduleEntry: job.Run.ScheduleEntry, Source: source, SourceDir: job.SourceDir, PipelineFile: ".oberth/build.yaml", ApprovedSecrets: map[string]bool{}, StepGrants: map[string]map[string]bool{}, TrustedKVM: &intent}
+	request := argojob.Request{RunID: job.Run.ID, RepositoryID: job.Repository.ID, Name: intent.WorkflowName, Repo: job.Repository.Name, UpstreamName: job.UpstreamName, UpstreamOrg: job.UpstreamOrg, Ref: job.Run.Ref, SHA: intent.CandidateSHA, Trigger: pipeline.TriggerCI, RunTrigger: kind, ScheduleEntry: job.Run.ScheduleEntry, Source: source, Fragments: fragments, SourceDir: job.SourceDir, PipelineFile: ".oberth/build.yaml", ApprovedSecrets: map[string]bool{}, StepGrants: map[string]map[string]bool{}, TrustedKVM: &intent}
 	if generic != nil {
 		copied, err := protectedtests.NewGenericAdmission(generic.Intent, &generic.Capability, generic.SupplementalGroup)
 		if err != nil {
@@ -192,7 +188,14 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.WorkflowReq
 	if err != nil {
 		return err
 	}
-	if err := p.checkPlacedPreparation(job, requirement, recipe, capability, source); err != nil {
+	var fragments map[argoworkflow.FragmentKey]argoworkflow.Fragment
+	if p.jobs.config.ExecutionPlacement.Protected() {
+		fragments, err = loadFragments(ctx, p.jobs.fragments, source, pipeline.TriggerCI, job.Run.RefKind, job.Run.Trigger)
+		if err != nil {
+			return err
+		}
+	}
+	if err := p.checkPlacedPreparation(job, requirement, recipe, capability, source, fragments); err != nil {
 		return err
 	}
 	blueprint, err := argoworkflow.Decode(source)
@@ -240,7 +243,7 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.WorkflowReq
 		}
 		generic = &admission
 	}
-	submission, err := p.request(job, intent, generic)
+	submission, err := p.request(job, intent, generic, source, fragments)
 	if err != nil {
 		return err
 	}
@@ -554,7 +557,11 @@ func (p *TrustedPreflights) recoverOne(ctx context.Context, execution vmrunner.K
 					return err
 				}
 			}
-			request, err := p.request(job, intent, generic)
+			source, fragments, err := p.recoverySources(ctx, job, generic)
+			if err != nil {
+				return err
+			}
+			request, err := p.request(job, intent, generic, source, fragments)
 			if err != nil {
 				return err
 			}

@@ -152,13 +152,19 @@ func directMaterializedPod(t *testing.T, wf *wfv1.Workflow, leaf *wfv1.Template)
 }
 
 type directPolicyFixture struct {
-	remote           string
-	pushes           int
-	source, contract []byte
-	baseline         string
+	fragmentPolicyErr   error
+	fragmentPolicyReads int
+	remote              string
+	pushes              int
+	source, contract    []byte
+	baseline            string
 }
 
 func (p *directPolicyFixture) ReadDefaultBlob(_ context.Context, _ string, file string, _ int) (string, []byte, bool, error) {
+	if file == argoworkflow.FragmentFile {
+		p.fragmentPolicyReads++
+		return p.baseline, nil, false, p.fragmentPolicyErr
+	}
 	if file == ".oberth/tests.yaml" {
 		return p.baseline, bytes.Clone(p.contract), p.contract != nil, nil
 	}
@@ -175,6 +181,7 @@ func (p *directPolicyFixture) ReadOptionalBlob(_ context.Context, _, _, file str
 }
 
 type directNativeWorkflows struct {
+	afterCreate      func()
 	lostReply        bool
 	readsUnavailable bool
 	targetWorkflowFake
@@ -222,6 +229,9 @@ func (w *directNativeWorkflows) Create(ctx context.Context, input *wfv1.Workflow
 		}
 	}
 	w.object = wf.DeepCopy()
+	if w.afterCreate != nil {
+		w.afterCreate()
+	}
 	if w.lostReply {
 		w.readsUnavailable = true
 		return nil, errors.New("transport reply lost")
@@ -260,15 +270,16 @@ func (w *directNativeWorkflows) Delete(ctx context.Context, name string, o metav
 }
 
 type directPlacementFixture struct {
-	databasePath string
-	executor     *TrustedPreflights
-	jobs         *ArgoJobs
-	database     *store.Store
-	request      service.WorkflowRequest
-	requirement  vmrunner.Requirement
-	native       *argojob.Controller
-	workflows    *directNativeWorkflows
-	environment  *targetRouteFixture
+	databasePath  string
+	executor      *TrustedPreflights
+	jobs          *ArgoJobs
+	database      *store.Store
+	request       service.WorkflowRequest
+	requirement   vmrunner.Requirement
+	native        *argojob.Controller
+	workflows     *directNativeWorkflows
+	environment   *targetRouteFixture
+	fragmentBlobs *fakeFragmentBlobs
 }
 
 func newDirectPlacementFixture(t *testing.T) *directPlacementFixture {
@@ -276,6 +287,10 @@ func newDirectPlacementFixture(t *testing.T) *directPlacementFixture {
 }
 
 func newDirectPlacementFixtureExpiring(t *testing.T, lifetime time.Duration) *directPlacementFixture {
+	return newDirectPlacementFixtureInputs(t, lifetime, nil, nil)
+}
+
+func newDirectPlacementFixtureInputs(t *testing.T, lifetime time.Duration, original []byte, fragments map[argoworkflow.FragmentKey]argoworkflow.Fragment) *directPlacementFixture {
 	t.Helper()
 	ctx := t.Context()
 	environment := newTargetRouteFixture(t)
@@ -344,18 +359,23 @@ func newDirectPlacementFixtureExpiring(t *testing.T, lifetime time.Duration) *di
 	if err != nil {
 		t.Fatal(err)
 	}
+	if original != nil {
+		source = bytes.Clone(original)
+	}
 	workflow, err := argoworkflow.Decode(source)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i := range workflow.Spec.Templates {
-		if leaf := workflow.Spec.Templates[i].Container; leaf != nil {
+		if leaf := workflow.Spec.Templates[i].Container; leaf != nil && original == nil {
 			leaf.Resources = corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m"), corev1.ResourceMemory: resource.MustParse("64Mi"), corev1.ResourceEphemeralStorage: resource.MustParse("64Mi")}, Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("500m"), corev1.ResourceMemory: resource.MustParse("128Mi"), corev1.ResourceEphemeralStorage: resource.MustParse("128Mi")}}
 		}
 	}
-	source, err = json.Marshal(workflow)
-	if err != nil {
-		t.Fatal(err)
+	if original == nil {
+		source, err = json.Marshal(workflow)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err = os.WriteFile(filepath.Join(request.SourceDir, argoworkflow.BuildFile), source, 0600); err != nil {
 		t.Fatal(err)
@@ -409,6 +429,30 @@ func newDirectPlacementFixtureExpiring(t *testing.T, lifetime time.Duration) *di
 	selection["repository_id"] = repo.ID
 	selection["source_digest"] = targetBytesHash(source)
 	selection["dependency_identity"] = targetHash(config)
+	var loader FragmentLoader
+	var fragmentBlobs *fakeFragmentBlobs
+	if fragments != nil {
+		resolved, e := argoworkflow.ResolveRunSource(source, fragments, argoworkflow.RunSourceBinding{RunID: run.ID, RepositoryID: repo.ID, SHA: sha, File: argoworkflow.BuildFile, Trigger: argoworkflow.RunTriggerBranch})
+		if e != nil {
+			t.Fatal(e)
+		}
+		selection["graph_digest"], selection["fragment_lock_digest"] = resolved.GraphIdentity(), targetHash(resolved.Lock())
+		inventory := []map[string]string{}
+		fragmentBlobs = &fakeFragmentBlobs{tags: map[string]string{}, blobs: map[string]string{}}
+		registry := fakeRegistry{known: map[string]bool{}}
+		for _, fragment := range resolved.Lock() {
+			inventory = append(inventory, map[string]string{"key": fragment.Key.String(), "commit": fragment.SHA, "digest": fragment.Digest})
+			fragmentBlobs.tags[fragment.Key.String()] = fragment.SHA
+			fragmentBlobs.blobs[fragment.SHA] = string(fragments[fragment.Key].Source)
+			registry.known[fragment.Key.Repo] = true
+		}
+		selection["fragments"] = inventory
+		loader, err = NewGitFragmentLoader(fragmentBlobs, registry, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	if lifetime > 0 {
 		selection["expires"] = time.Now().UTC().Add(lifetime).Format(time.RFC3339Nano)
 	}
@@ -425,7 +469,7 @@ func newDirectPlacementFixtureExpiring(t *testing.T, lifetime time.Duration) *di
 	controller.WithSourceSeeder(argojob.NewSourceSeeder(environment.kube, environment.definition.Exec, config)).WithProtectedPlacementJournal(db, environment.definition.Transport).WithWorkflowCapabilityLoader(db.ActiveWorkflowCapability).WithPodLogReader(func(context.Context, string, string, string) (io.ReadCloser, error) {
 		return io.NopCloser(strings.NewReader("")), nil
 	})
-	jobs, err := NewArgoJobs(controller, config, db, emptySecretAccess{}, nil)
+	jobs, err := NewArgoJobs(controller, config, db, emptySecretAccess{}, loader)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -455,7 +499,7 @@ func newDirectPlacementFixtureExpiring(t *testing.T, lifetime time.Duration) *di
 		t.Fatal("activation changed accepted run", err)
 	}
 	executor.fetch = func(context.Context, string, string, int64) ([]byte, error) { return bytes.Clone(archive.Bytes()), nil }
-	return &directPlacementFixture{databasePath: databasePath, executor: executor, jobs: jobs, database: db, request: request, requirement: vmrunner.Requirement{CandidateSHA: sha, BaselineSHA: policy.BaselineSHA, Contract: &contract}, native: controller, workflows: workflows, environment: environment}
+	return &directPlacementFixture{databasePath: databasePath, executor: executor, jobs: jobs, database: db, request: request, requirement: vmrunner.Requirement{CandidateSHA: sha, BaselineSHA: policy.BaselineSHA, Contract: &contract}, native: controller, workflows: workflows, environment: environment, fragmentBlobs: fragmentBlobs}
 }
 
 func TestDirectProtectedPlacementNativeAdapterReceiptAndParent(t *testing.T) {
