@@ -200,7 +200,7 @@ call the proxy hostname directly.
 | `run_rerun` | Rerun a failed or interrupted run at the same SHA and ref (`id`, optional `reason`, admin-only `force`), linked by `rerun_of`: covers failed steps (flaky tests), non-newest runs and tag/release runs. Refused while the ref has an active run, once a branch moved past the SHA, for promotion/plan/apply runs, and for a tag that is already published or green or whose release failed only in publication (use `publish_retry` on that run). A publishing-only failure is re-pushed as `publish_retry` does instead of re-run. Non-admins: branch-push runs; tags need admin and `force`. Audited as `run.rerun` |
 | `run_cancel` | Cancel one queued, waiting or running run (audited; `id`, optional `reason`, admin-only `force`). The run becomes `interrupted` with phase `cancelled` and a reason naming the caller; a claimed run's Workflow is deleted and its admission released at once; it is never re-fired and opens no CI issue. Non-admins: branch-push runs outside a concurrency group only. Protected priority runs can be cancelled only by their requester or an unscoped admin; the existing run-cancel policy still applies. Admins: any run, with `force` for tag/release and apply runs. Cancelling promotion CI fails the promotion without merging. Terminal runs are refused |
 | `run_purge` | Purge retained logs, artifacts or both for a terminal run; requires an unscoped admin uplink and `id`, `what`, `reason`. Active runs and protected release/promotion/issue/grant evidence are refused. Run/step history remains; audited purge markers identify the actor and date |
-| `run_logs` | One exact burn/step log by full run ID or unique 8+ character prefix, optionally filtered |
+| `run_logs` | One exact burn/step log by full run ID or unique 8+ character prefix; defaults to the last 200 lines without explicit filters |
 | `artifacts` | The files a run kept, with size and modification time |
 | `artifact_get` | One artifact's contents by run ID and name, optionally filtered |
 | `wait` | Long-poll until a SHA or exact run ID reaches a terminal state |
@@ -361,7 +361,7 @@ the disk floor, and the last sweep time/error. It does not rescan evidence trees
 
 ### Filtering log output
 
-`logs`, `run_logs` and `artifact_get` accept five optional parameters. Filtering happens on the
+`logs`, `run_logs` and `artifact_get` accept the optional parameters below. Filtering happens on the
 server, so a narrowed read never sends the whole step over the wire.
 
 | Parameter | Meaning |
@@ -369,8 +369,18 @@ server, so a narrowed read never sends the whole step over the wire.
 | `pattern` | RE2 expression; only matching lines are returned |
 | `context` | Lines of context on each side of a match (max 50) |
 | `offset` | First line to return, 0-based. Pages over matches when `pattern` is set, over raw lines otherwise |
-| `limit` | Maximum lines returned. Omit for no line cap |
+| `limit` | Maximum lines returned; `0` uses the existing bounded full read |
 | `tail` | Take from the end of the step rather than the start |
+
+When `run_logs` has none of `pattern`, `limit`, `tail`, `offset` or
+`byte_offset`, it returns the last 200 lines (`tail: true`, `limit: 200`).
+Its `window` field and text explain the default. `oberth log` uses the same
+window and explains it in its stderr summary or `--json` output. Context alone
+does not disable the default. Explicit filters, including zero, false or empty
+values, preserve their previous behavior. For more lines, use `tail: true` with
+`limit: 1000` (CLI: `--tail --limit 1000`); use `limit: 0` (`--limit 0`) to remove
+the line cap within the existing byte and scan bounds. `logs`, `artifact_get`
+and direct HTTP log reads retain their existing defaults.
 
 `pattern` matches against the line with its `[burn/step]` prefix removed, so `^`
 and `$` anchor to the output a step actually produced. The returned bytes keep

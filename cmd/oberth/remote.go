@@ -100,6 +100,9 @@ func setRemoteUsage(flags *flag.FlagSet) {
 	}
 	flags.Usage = func() {
 		_, _ = fmt.Fprintf(flags.Output(), "Usage: oberth %s %s\n", flags.Name(), suffix)
+		if flags.Name() == "log" {
+			_, _ = fmt.Fprintln(flags.Output(), "With no pattern, limit, tail, offset or byte-offset: last 200 lines. Pass --tail --limit N for a larger tail, or --limit 0 for the existing bounded full read.")
+		}
 		flags.PrintDefaults()
 	}
 }
@@ -546,7 +549,7 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 	limit := flags.Int("limit", 0, "return at most this many")
 	tail := flags.Bool("tail", false, "read from the end")
 	raw := flags.Bool("raw", false, "keep the [burn/step] prefix on each line and the Argo executor lines")
-	asJSON := flags.Bool("json", false, "emit the server's payload unchanged")
+	asJSON := flags.Bool("json", false, "emit JSON, including the default window when used")
 	if err := parseCommandFlags(flags, arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
@@ -577,7 +580,12 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 	if *byteOffset < 0 {
 		return fmt.Errorf("%w: --byte-offset must be nonnegative", errUsage)
 	}
+	defaultWindow := true
 	flags.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "pattern", "limit", "tail", "offset", "byte-offset":
+			defaultWindow = false
+		}
 		if f.Name == "byte-offset" {
 			query["byte_offset"] = fmt.Sprint(*byteOffset)
 		}
@@ -585,7 +593,20 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 	if *tail {
 		query["tail"] = "true"
 	}
+	if defaultWindow {
+		query["tail"], query["limit"] = "true", strconv.Itoa(runlog.DefaultWindowLines)
+	}
 	if *asJSON {
+		if defaultWindow {
+			var payload map[string]json.RawMessage
+			if err := api.Get(ctx, path, query, &payload); err != nil {
+				return err
+			}
+			payload["window"], _ = json.Marshal(runlog.DefaultWindowDescription)
+			encoder := json.NewEncoder(output)
+			encoder.SetIndent("", "  ")
+			return encoder.Encode(payload)
+		}
 		return emitJSON(ctx, api, path, query, output)
 	}
 	var log remoteLog
@@ -615,7 +636,11 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 			return err
 		}
 	}
-	_, err = fmt.Fprintln(os.Stderr, log.readSummary()+hiddenNote(hidden)+truncatedNote(log.Truncated))
+	summary := log.readSummary() + hiddenNote(hidden) + truncatedNote(log.Truncated)
+	if defaultWindow {
+		summary += "; " + runlog.DefaultWindowDescription
+	}
+	_, err = fmt.Fprintln(os.Stderr, summary)
 	return err
 }
 

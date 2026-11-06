@@ -575,6 +575,7 @@ type StatusResponse struct {
 }
 
 type LogResponse struct {
+	Window            string `json:"window,omitempty"`
 	TotalScannedBytes int64  `json:"total_scanned_bytes"`
 	ScanLimitBytes    int64  `json:"scan_limit_bytes"`
 	RunID             string `json:"run_id"`
@@ -626,6 +627,12 @@ func (response LogResponse) MCPToolText() string {
 			text += "\n"
 		}
 		text += fmt.Sprintf("[Log continuation: has_more=true; continue with byte_offset=%d, offset=0, same tail/pattern/context.]", response.NextByteOffset)
+	}
+	if response.Window != "" {
+		if text != "" && !strings.HasSuffix(text, "\n") {
+			text += "\n"
+		}
+		text += "[" + response.Window + "]"
 	}
 	return text
 }

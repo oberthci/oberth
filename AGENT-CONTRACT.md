@@ -993,6 +993,14 @@ containing CI and real workload qualification remain separately required.
   text with `isError: true`), including the run and step and a retry instruction.
   Available partial bytes keep the existing filtering and bounds. Unknown
   steps stay not-found; terminal missing logs remain faults, not pending.
+- MCP `run_logs` and CLI `oberth log` default to the last 200 lines only when
+  no pattern, limit, tail, offset or byte offset is supplied. A `window` field
+  explains this in JSON; MCP text and the CLI stderr summary explain it too.
+  Explicit filters retain their behavior, including zero/false/empty values.
+  Direct HTTP logs, `logs` and artifact reads keep their defaults.
+- JSON `/api/*` and MCP responses of at least 1 KiB negotiate gzip via
+  `Accept-Encoding` and set `Vary: Accept-Encoding`. SSE, raw downloads and
+  already encoded bodies remain uncompressed.
 - `wait` matches annotated releases by either the immutable tag object SHA or
   the peeled commit recorded in `TestedSHA`. Trigger aliases `release`/`tag`
   and `ci`/`branch` are normalized before filtering candidate runs; selection

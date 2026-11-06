@@ -46,6 +46,11 @@ type Index struct {
 	Ranges []Range `json:"ranges"`
 }
 
+// DefaultWindowLines bounds an unfiltered interactive log read.
+const DefaultWindowLines = 200
+
+const DefaultWindowDescription = "last 200 lines by default; pass tail, limit or pattern for more"
+
 type Filter struct {
 	Pattern string
 	Context int
