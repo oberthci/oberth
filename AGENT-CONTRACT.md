@@ -930,16 +930,15 @@ containing CI and real workload qualification remain separately required.
   it encodes the same result object. Authenticated tool refusal text keeps its
   stable error class and may append only an explicitly public service reason.
   Raw dependency chains stay masked; scoped missing/hidden equivalence remains.
-- MCP exposes 80 tools: `status`, bounded named-step `logs`, exact-run
-  `run_get`/`run_logs`, read-only `run_resources` (captured history and reviewed git resource suggestions), `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`, `run_kvm_preflight`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
+- MCP exposes 75 tools: `status`, bounded named-step `logs`, exact-run
+  `run_get`/`run_logs`, read-only `run_resources` (captured history and reviewed git resource suggestions), `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, `publication_abandon`, issue
   `issue_create`, `issue_get`, `issue_get_many`, `issue_update`, `issue_append`,
   `issue_close`, `issue_reopen`, `issue_delete`, `issue_list`, `issue_lock`,
   `issue_unlock`, `issue_close_many`,
   secret-access `access_list`/`access_allow`/`access_revoke`, unscoped-admin-only
   `uplink_list`/`uplink_revoke`/`uplink_rotate`,
-  `access_dismiss`, deprecated admin-only `kubevirt_grant` / `kubevirt_revoke`,
-  unscoped-admin-only `kubevirt_grant_list`, read-only `kubevirt_grant_get`,
+  `access_dismiss`,
   admin-only `workflow_capability_grant` and
   `workflow_capability_revoke`, read-only `workflow_capability_get`, admin-only
   `resource_grant` / `resource_revoke`, read-only `resource_grant_get`, admin-only `size_grant`
@@ -1048,15 +1047,6 @@ containing CI and real workload qualification remain separately required.
   write issue timestamps, revisions, audit entries or locks. `fields` can select
   `work_status` and `stale`; the dashboard shows both. See
   [issue lifecycle](docs/issue-lifecycle.md).
-- The retained legacy VM tools remain available during the preparatory release:
-  `kubevirt_grant` and `kubevirt_revoke` are audited administrator mutations;
-  `kubevirt_grant_get` reads a repository's current grant and shared VMI budget;
-  `kubevirt_grant_list` is a read-only list of active grants for unscoped admins.
-  Legacy KVM/VMI admission fails closed without an active repository grant.
-  Grants bound VMI concurrency, cores and memory and do not become generic
-  workflow capabilities. Archived repositories refuse new `kubevirt_grant`
-  mutations; existing grants remain readable and revocable. Revocation blocks
-  new submissions while existing workflows retain their cleanup authority.
 - `issue_append` takes `id` and `text` and appends bounded text with a dated
   separator to the existing body under the issue lock rules. It does not
   replace the body or create a discussion thread. Its compact response is
@@ -1340,8 +1330,8 @@ containing CI and real workload qualification remain separately required.
   run; anything finer is the reason line, never a second status. Every run
   that has not started is `queued`: durable queued, or claimed before
   admission (`Status` `waiting` on the wire, phase `waiting` or
-  `preparing`). Admission records `started_at`, so an admitted run,
-  including a trusted preflight before Workflow submission, is `running`.
+  `preparing`). Admission records `started_at`, so an admitted run
+  is `running`.
   A queued run's `display_reason` names what it waits for, in plain
   words, computed once by the server for the list, detail, status, live-log
   and active views, the CLI and the dashboard: `next in line`,
@@ -1349,12 +1339,11 @@ containing CI and real workload qualification remain separately required.
   `preparing to run`, `waiting for CPU budget (12.5 of 40 CPU free)`,
   `waiting for memory budget (8 GiB of 16 GiB free)`, `host IO pressure
   (42%)`, `10 runs already running (limit 10)`, `concurrency group deploy
-  busy (held by run <run12>)`, `waiting for KubeVirt capacity (repository
-  VM grant)`, `waiting for trusted VM capacity`, `waiting for disk space
+  busy (held by run <run12>)`, `waiting for disk space
   (... free, floor ...)`, `waiting for capacity (size M, 6 of 8 weight
   used)`, `waiting for admission` (claimed, no reservation known yet) and,
   briefly at the grant before admission is recorded, `admitted, starting
-  the workflow` or `KVM preflight running`; a head-of-queue run adds `; smaller runs run meanwhile` or `; host
+  the workflow`; a head-of-queue run adds `; smaller runs run meanwhile` or `; host
   draining for it`. A scoped viewer sees no numbers, positions or other
   repositories' runs (#073). `Scheduling.state`, `Scheduling.message` and
   `Scheduling.admission` keep the raw observation for machines.
@@ -1362,7 +1351,7 @@ containing CI and real workload qualification remain separately required.
   | Durable cause | `display_status` | `display_reason` |
   | --- | --- | --- |
   | queued, claimed before admission | `queued` | what the run waits for (above) |
-  | admitted (including a trusted preflight before Workflow submission) and started | `running` | empty |
+  | admitted and started | `running` | empty |
   | uncertain Workflow create (phase `infrastructure-pending`) | `running` | `Workflow create outcome uncertain; cleanup pending` |
   | running past its execution deadline | `running` | `Execution deadline exceeded.` (plus priority prefix) |
   | failed by its execution deadline | `failed` | `Execution deadline exceeded.` or the retained resource guidance |
@@ -2652,42 +2641,14 @@ old chart defaults. Restore overrides only its database compatibility values.
 Every newly added chart key must have a template fallback, exercised by the
 historical raw-values gate and actual Helm install/restore upgrade tests.
 
-## Protected generic runtime preparation
+## Retired execution compatibility
 
-Ordinary external execution targets do not authorize protected preflights.
-A matching repository target or retained nonlocal run binding refuses before
-bundle fetching, reservation or allocation, including other refs and trigger
-kinds. Removing the target definition cannot redirect a bound protected run
-locally. Existing local protected cleanup retains its original controller.
-See [execution-targets.md](docs/execution-targets.md).
-
-The protected runtime defaults to `legacy`. Only the explicit server flag
-`--trusted-tests-runtime=generic-capability` (chart `trustedTests.runtime`)
-selects generic device authority. Existing grants alone never select it.
-The independently approved suite/guest archives and pinned host harness remain
-the test roots; the host intent/report wire and all-case verifier are unchanged.
-Candidate resource status cannot substitute for a protected receipt.
-
-The server-only `GenericAdmission` binds the original intent, complete operator
-capability and positive supplemental group. The forward migration stores it in
-`protected_runtime_admissions`, atomically with lifecycle/capacity reservation
-and `protected.runtime-admitted`. Both full/incremental audit state and mutation
-fences verify its row, digest, timestamp and intent against the chained event.
-Immutable guards reject update/delete/replacement; missing or corrupt metadata
-refuses instead of selecting the legacy path. Existing schema/audit identities,
-historical rows and host JSON remain unchanged.
-
-New admission, Create, receipt acceptance and delivery/publication recheck
-current authority. The final bounded resource graph must fit the exact grant.
-Cleanup after restart selects the persisted admission, including uncertain
-Create without a recorded UID, and reconstructs its original group and grant
-solely for owned Workflow/UID-fenced cleanup. Generic startup with current group
-zero permits this recovery but refuses new execution, Create and Receipt.
-No grant recreation, receipt minting or publication follows from reconstruction.
-The closed host leaf, credential isolation, actual Pod/process observation,
-cancellation and durable cleanup requirements remain enforced. Activation and
-legacy retirement require separately reviewed external runtime qualification;
-this source preparation does not provide that evidence.
+Technology-specific execution and its five MCP tools are removed. Generic
+workflow capability grants, resource kinds and extended-resource allowlists
+remain. Legacy Workflow declarations fail with a workflow capability migration
+message; saved chart values are warned about and ignored. Execution journals
+are inert, historical runs remain readable, and shipped migrations are unchanged.
+See [workflow capabilities](docs/workflow-capabilities.md#migration-from-retired-execution).
 
 ## Schema migrations
 
@@ -3309,8 +3270,8 @@ retry by default. `--auto-retry-infrastructure=false` / Helm
 Trusted-policy-refresh deadlines, lost executors and step-free workflow failures
 qualify after terminal observation or cleanup. Missing/corrupt progress history,
 any retained failed step (including infrastructure-classified failures),
-cancellation, release/tag, promotion, plan, apply, publication, pending deletion
-or uncleaned preflight prevent this retry. An execution deadline after any step
+cancellation, release/tag, promotion, plan, apply, publication or pending deletion
+prevent this retry. An execution deadline after any step
 started or passed is never retried; pre-step deadlines remain eligible.
 Started/passed steps alone do not prevent non-deadline workflow recovery. All retained progress attempts,
 engine observations and writer-side newest/protected-work fences apply.
@@ -3437,13 +3398,12 @@ missing declarations or capacity never fall back to size-based admission.
 The source receipt pins exact source, fragments and run binding across sizing
 and submission. Ordinary workflows retain the existing admission behavior.
 
-Schema 46 starts capability authority empty. Schema 47 keeps legacy execution,
-capacity and KubeVirt grants writable so startup can recover work in flight.
-The old `OBERTH_KVM`/`OBERTH_GUEST_TEST`, guest-test and `.oberth/tests.yaml`
-paths are deprecated and retained, including publication gates, recovery,
-cleanup, existing grants and chart RBAC. Operators must migrate and qualify
-replacement pipelines before the later Stage 2 deletion. Schema 45 retires
-only the inactive pilot. See [workflow capabilities](docs/workflow-capabilities.md).
+Retired execution tables are inert; existing migration SQL remains unchanged.
+The five legacy execution tools and technology-specific runtime are removed.
+Historical run rendering remains available. Legacy annotations fail with a
+workflow capability migration message, and legacy Helm values warn and are
+ignored. Pipelines own resource creation, test gates and cleanup through the
+operator identity. See [workflow capabilities](docs/workflow-capabilities.md).
 
 ## Additive HTTP/MCP compatibility (v0.17.x)
 
@@ -3477,8 +3437,7 @@ order, skipped flags/paths and the final `tree_sha` (Git tree object); `result_s
 continues to identify the tested commit. `source_count` on `promote_status` and
 `promotion_list` counts requested sources, including skipped ones; legacy rows
 report 1. Automatic retries preserve every original grant, and both retry modes
-recheck all sources, merge afresh and run CI. Trusted preflight restart recovery
-retains the already planned tree and full train evidence. Every included grant
+recheck all sources, merge afresh and run CI. Every included grant
 must remain valid through delivery; skipped grants are released and not consumed.
 
 Authenticated `POST /api/promotions` accepts the same body and returns `{id}`.

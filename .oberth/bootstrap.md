@@ -68,7 +68,7 @@ account emails held only in the operator installation configuration.
 
 | Release template | Role / audience pool | First-hop principal | Final principal |
 | --- | --- | --- | --- |
-| `release-publish-images`, `release-publish-kvm-harness` | `image-writer` / `oberth-release-images` | `<release-publisher>` | `oberth-release-publisher` |
+| `release-publish-images` | `image-writer` / `oberth-release-images` | `<release-publisher>` | `oberth-release-publisher` |
 | `release-publish-chart` | `chart-writer` / `oberth-release-charts` | `<chart-publisher>` | `oberth-chart-publisher` |
 | `release-verify` | `image-reader` / `oberth-release-reader` | `<release-reader>` | `oberth-release-reader` |
 
@@ -114,7 +114,7 @@ prove IAM bindings.
 
 Only the final token reaches the private Docker credential-helper pipe.
 Docker/Helm configuration contains the public helper mapping, not an access
-token; registry login and token caching are not used. Image, chart and KVM
+token; registry login and token caching are not used. Image and chart
 publishers still obtain `cosign-secret` through Secretstore into private tmpfs
 for signing. The verifier uses the committed public signing key and does not
 invoke Secretstore. The retired `gar-image-key`, `gar-reader-key`,

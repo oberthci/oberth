@@ -20,7 +20,7 @@ func TestUpgradeRequiresLiveRepositoryRetirementProof(t *testing.T) {
 				return []byte("repository legacy/source remains"), errors.New("refused")
 			}
 			return []byte(reply), nil
-		}})
+		}}, "0.17.80")
 		if calls != 1 {
 			t.Fatal("did not query live daemon")
 		}
@@ -31,5 +31,26 @@ func TestUpgradeRequiresLiveRepositoryRetirementProof(t *testing.T) {
 		} else if err == nil {
 			t.Fatalf("unverified proof accepted: %s", reply)
 		}
+	}
+}
+
+func TestRepositoryRetirementProofStopsAfterLastLegacyRelease(t *testing.T) {
+	for _, tc := range []struct {
+		version string
+		calls   int
+	}{
+		{"0.17.80", 1}, {"v0.17.94", 1}, {"0.17.94+build.1", 1},
+		{"0.17.95-rc.1", 0}, {"0.17.95", 0}, {"0.18.0", 0},
+	} {
+		t.Run(tc.version, func(t *testing.T) {
+			calls := 0
+			err := checkUpgradeLegacyRepositories(t.Context(), UpgradeConfig{}, Deps{RunCommand: func(context.Context, []byte, string, ...string) ([]byte, error) {
+				calls++
+				return nil, errors.New("command is unavailable")
+			}}, tc.version)
+			if calls != tc.calls || (err != nil) != (tc.calls != 0) {
+				t.Fatalf("calls=%d err=%v", calls, err)
+			}
+		})
 	}
 }

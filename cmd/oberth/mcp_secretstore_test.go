@@ -186,7 +186,7 @@ func TestMCPSecretStoreVerifyDoesNotMutateConfiguredPaths(t *testing.T) {
 		_, _ = writer.Write([]byte(`{"data":{"data":{"key":"value-not-printed"},"metadata":{"version":1}}}`))
 	})
 	options := verifyServerOptions(mock)
-	options.secretStoreKVMount = "custom"
+	options.secretStoreKVPath = "custom"
 	options.secretStorePaths = []string{declared}
 	verify := buildSecretStoreVerifier(options, nil)
 	var group sync.WaitGroup

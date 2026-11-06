@@ -46,8 +46,3 @@ func executorResourcesWithStorage(enabled bool) corev1.ResourceRequirements {
 	}
 	return resources
 }
-
-func hasHelperStorage(wf *wfv1.Workflow) bool {
-	policy := wf.Annotations[helperStorageAnnotation]
-	return policy == legacyHelperStoragePolicy || policy == helperStoragePolicy
-}

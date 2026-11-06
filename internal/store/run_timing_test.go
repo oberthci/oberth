@@ -46,7 +46,8 @@ func TestRunTimingMilestonesAdmissionEpisodesAndRefire(t *testing.T) {
 	}
 	granted := now
 	now = now.Add(time.Second)
-	if _, err = s.MarkRunParked(ctx, run.ID); err != nil {
+	// Reproduce a historical admission reset; runtime no longer emits it.
+	if _, err = s.db.ExecContext(ctx, `UPDATE runs SET started_at=NULL, updated_at=? WHERE id=?`, unixNano(now), run.ID); err != nil {
 		t.Fatal(err)
 	}
 	parked := now

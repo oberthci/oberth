@@ -140,6 +140,7 @@ func prepareUpgradeValues(ctx context.Context, cfg UpgradeConfig, deps Deps, cha
 	if err != nil {
 		return preparedUpgradeValues{}, err
 	}
+	warnRetiredUpgradeValues(deps.Output, cfg, values)
 	if err := checkUpgradePKIKeyConflicts(cfg, values); err != nil {
 		return preparedUpgradeValues{}, err
 	}

@@ -233,11 +233,7 @@ func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForSettlement(t *testi
 				if err != nil {
 					t.Fatal(err)
 				}
-				demand := argoworkflow.VMIDemand{}
-				if i == 0 {
-					demand = argoworkflow.VMIDemand{VMs: 1, Cores: 1, MemoryBytes: 1 << 30}
-				}
-				if err := f.scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S, demand, &argoworkflow.PodDemand{CPUMilli: 900, MemoryBytes: 1 << 30, Pods: 1}); err != nil {
+				if err := f.scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S, &argoworkflow.PodDemand{CPUMilli: 900, MemoryBytes: 1 << 30, Pods: 1}); err != nil {
 					t.Fatal(err)
 				}
 				if marked {
@@ -286,12 +282,6 @@ func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForSettlement(t *testi
 			state := f.scheduler.AdmissionState()
 			if state.NumericBudget != nil || state.Runs != 2 || f.scheduler.pendingCreateCount() != 2 {
 				t.Fatalf("restart did not restore exact pending contracts: %+v", state)
-			}
-			f.scheduler.admission.mu.Lock()
-			demand := f.scheduler.admission.kubeVirtUsedLocked(f.repo.ID)
-			f.scheduler.admission.mu.Unlock()
-			if demand.VMs != 1 || demand.Cores != 1 || demand.MemoryBytes != 1<<30 {
-				t.Fatalf("restart lost VMI demand: %+v", demand)
 			}
 			other, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "after-restart", Repository: f.repo, Branch: "feature/available", SHA: strings.Repeat("d", 40), Actor: "pusher"})
 			if err != nil {

@@ -4,9 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"slices"
 	"strings"
 	"time"
+
+	"sigs.k8s.io/yaml"
+
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 
 	"golang.org/x/mod/semver"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -21,7 +27,11 @@ import (
 // The retirement release must not replace the only process that can clean up
 // a legacy execution. Keep the running owner available; never infer cleanup
 // from a terminal phase, a deletion timestamp, or a missing database row.
+// Keep inventory on later upgrades too: an earlier override can leave resources.
 func checkUpgradeLegacyResources(ctx context.Context, cfg UpgradeConfig, deps Deps) error {
+	if cfg.AllowRetiredExecution {
+		return nil
+	}
 	if semver.Compare(canonicalChartVersion(cfg.BinaryVersion), "v0.17.83-0") < 0 {
 		return nil
 	}
@@ -58,7 +68,7 @@ func checkUpgradeLegacyResources(ctx context.Context, cfg UpgradeConfig, deps De
 			continue
 		} // CRDs absent, not an unreadable inventory.
 		if err != nil {
-			return fmt.Errorf("inspect legacy %s API before upgrade: %w", group.version, err)
+			return fmt.Errorf("inspect legacy %s API before upgrade (explicit override: --allow-retired-execution): %w", group.version, err)
 		}
 		gv, err := schema.ParseGroupVersion(group.version)
 		if err != nil {
@@ -100,7 +110,7 @@ func checkUpgradeLegacyResources(ctx context.Context, cfg UpgradeConfig, deps De
 					if resource == "workflows" {
 						retention = " Completed preflight Workflows also count: wait for argo.workflowTTL collection (default 1 hour) or deletion by the current server."
 					}
-					return fmt.Errorf("upgrade refused: legacy executions still exist: %s; keep the current server running, stop new submissions, finish or cancel these runs and wait for confirmed resource deletion before retrying.%s See docs/retirement-upgrade.md", strings.Join(names, ", "), retention)
+					return fmt.Errorf("upgrade refused: legacy executions still exist: %s; keep the current server running, stop new submissions, finish or cancel these runs and wait for confirmed resource deletion before retrying.%s drain/delete these first. Override only after accepting orphaned-resource risk with --allow-retired-execution", strings.Join(names, ", "), retention)
 				}
 				cursor = objects.GetContinue()
 				if cursor == "" {
@@ -125,4 +135,35 @@ func legacyUpgradeResource(resource string, object *unstructured.Unstructured) b
 	_, spec := annotations["oberth.ci/vm-spec"]
 	_, identity := annotations["oberth.ci/vm-identity"]
 	return labels["oberth.ci/tier"] == "vm-runner" || spec || identity
+}
+
+func warnRetiredUpgradeValues(w io.Writer, cfg UpgradeConfig, values map[string]any) {
+	var hasRetired func(map[string]any, string) bool
+	hasRetired = func(values map[string]any, prefix string) bool {
+		for key, value := range values {
+			path := prefix + key
+			if argoworkflow.RetiredValue(path) {
+				return true
+			}
+			if nested, ok := value.(map[string]any); ok && hasRetired(nested, path+".") {
+				return true
+			}
+		}
+		return false
+	}
+	found := hasRetired(values, "")
+	for _, entry := range cfg.UserSet {
+		key, _, _ := strings.Cut(entry, "=")
+		found = found || argoworkflow.RetiredValue(key)
+	}
+	for _, file := range cfg.UserValues {
+		body, err := os.ReadFile(file) // #nosec G304 -- operator-supplied --values paths, already validated for the upgrade.
+		var overrides map[string]any
+		if err == nil && yaml.Unmarshal(body, &overrides) == nil {
+			found = found || hasRetired(overrides, "")
+		}
+	}
+	if found && w != nil {
+		_, _ = fmt.Fprintln(w, "Retired execution settings are ignored; migrate workloads to a workflow capability grant. See the chart upgrade notes.")
+	}
 }

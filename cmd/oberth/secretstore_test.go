@@ -164,7 +164,7 @@ func TestSecretStoreCmdlineMatchesServeParsing(t *testing.T) {
 		role:         options.secretStoreRole,
 		caCertPath:   options.secretStoreCACert,
 		saTokenPath:  options.secretStoreSAToken,
-		kvMount:      options.secretStoreKVMount,
+		kvPath:       options.secretStoreKVPath,
 		insecureHTTP: options.secretStoreInsecureHTTP,
 		paths:        options.secretStorePaths,
 	}

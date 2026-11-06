@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
@@ -19,7 +18,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/internal/vmrunner"
+	"github.com/oberthci/oberth/internal/workflowpolicy"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
@@ -33,8 +32,6 @@ type ExecutionTarget struct {
 	Kubernetes     kubernetes.Interface
 	Workflows      func(string) argojob.WorkflowClient
 	Exec           argojob.ExecStreamer
-	VMI            dynamic.Interface
-	VMICreate      rest.Interface
 	ResourceSource argojob.ResourceUsageSource
 }
 
@@ -75,7 +72,6 @@ func WithExecutionTargets(local *ArgoJobs, database *store.Store, definitions []
 	owner.pinnedSources, owner.sourceRecorder = local.pinnedSources, local.sourceRecorder
 	owner.resourceBlobs = local.resourceBlobs
 	owner.capabilityGrants = local.capabilityGrants
-	owner.kubeVirtGrants = local.kubeVirtGrants
 	owner.identities = local.identities
 	owner.collector = local.collector
 	owner.artifacts = local.artifacts
@@ -84,7 +80,7 @@ func WithExecutionTargets(local *ArgoJobs, database *store.Store, definitions []
 	owner.declarations = local.declarations
 	routes := &executionTargets{store: database, owner: owner, local: local, definitions: map[string]ExecutionTarget{}, children: map[string]*ArgoJobs{}}
 	for _, definition := range definitions {
-		if definition.ID == "" || definition.ID == "local" || definition.Transport == nil || definition.Kubernetes == nil || definition.Workflows == nil || definition.Exec == nil || definition.VMI == nil || definition.VMICreate == nil || !definition.Config.ExecutionPlacement.BranchOnly() {
+		if definition.ID == "" || definition.ID == "local" || definition.Transport == nil || definition.Kubernetes == nil || definition.Workflows == nil || definition.Exec == nil || !definition.Config.ExecutionPlacement.BranchOnly() {
 			return nil, errors.New("app: complete branch-only execution target required")
 		}
 		if _, duplicate := routes.definitions[definition.ID]; duplicate {
@@ -170,7 +166,7 @@ func (r *executionTargets) forRequest(ctx context.Context, request service.Workf
 	if request.Run.RefKind != model.RefBranch || request.Run.Release || request.Run.Credentialed || request.Run.Trigger != "branch" {
 		return nil, errors.New("app: remote execution requires an ordinary branch run")
 	}
-	authority, err := vmrunner.ResolveBranchAuthority(ctx, r.owner.resourceBlobs, repo, sha)
+	authority, err := workflowpolicy.ResolveBranchAuthority(ctx, r.owner.resourceBlobs, repo, sha)
 	if err != nil {
 		return nil, err
 	}
@@ -295,13 +291,11 @@ func (r *executionTargets) restore(ctx context.Context, b model.ExecutionTargetB
 	if err != nil {
 		return nil, err
 	}
-	clients.WithVMI(definition.VMI)
 	snapshot.Config.Custody = journal
 	controller, err := argojob.NewController(clients.WorkflowClient(), clients.Kubernetes(), snapshot.Config)
 	if err != nil {
 		return nil, err
 	}
-	controller.WithVMIClient(definition.VMI).WithVMICreateClient(definition.VMICreate)
 	if recorder, ok := r.owner.auditor.(argojob.TimingRecorder); ok {
 		controller.WithTimingRecorder(recorder)
 	}
@@ -326,7 +320,6 @@ func (r *executionTargets) restore(ctx context.Context, b model.ExecutionTargetB
 	child.targetBinding = &b
 	child.targetClients = clients
 	child.SetWorkflowCapabilityLoader(r.owner.capabilityGrants)
-	child.SetKubeVirtGrantLoader(r.owner.kubeVirtGrants)
 	child.SetIdentityStore(r.owner.identities)
 	child.SetDeclarationRecorder(r.owner.declarations)
 	child.SetReconcilerHealth(r.owner.reconcilerHealthy)
@@ -337,10 +330,7 @@ func (r *executionTargets) restore(ctx context.Context, b model.ExecutionTargetB
 		if err != nil {
 			return err
 		}
-		capsule := map[string]any{"workflow": workflow, "resource_maximum": submission.ResourceMaximum, "resource_ceiling": submission.ResourceCeiling, "pod_demand": submission.PodDemand, "resource_fallback": submission.ResourceFallback, "capability": submission.Capability, "kubevirt_granted": submission.KubeVirtGranted, "kubevirt_budget": submission.KubeVirtBudget, "identities": submission.Identities, "source_digest": b.SourceDigest, "graph_digest": b.GraphDigest, "fragment_lock_digest": b.FragmentLockDigest, "policy_digest": b.PolicyDigest}
-		if submission.VMIDemandReceipt != nil {
-			capsule["demand_receipt"] = submission.VMIDemandReceipt.Summary()
-		}
+		capsule := map[string]any{"workflow": workflow, "resource_maximum": submission.ResourceMaximum, "resource_ceiling": submission.ResourceCeiling, "pod_demand": submission.PodDemand, "resource_fallback": submission.ResourceFallback, "capability": submission.Capability, "identities": submission.Identities, "source_digest": b.SourceDigest, "graph_digest": b.GraphDigest, "fragment_lock_digest": b.FragmentLockDigest, "policy_digest": b.PolicyDigest}
 		if submission.DemandReceipt != nil {
 			capsule["demand_receipt"] = submission.DemandReceipt.Summary()
 		}

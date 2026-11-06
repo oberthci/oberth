@@ -70,7 +70,7 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config, storage bool)
 		patch["volumes"] = append(volumes, map[string]any{"name": executorTokenVolume, "secret": nil, "emptyDir": map[string]any{"medium": "Memory", "sizeLimit": "1Mi"}})
 		// Only historical policies preserve the old empty named-profile budgets.
 		// New server-owned v2 patches retain the verified profile and all wiring.
-		pinnedProfile := t.Name != trustedKVMTemplate && workflow.Annotations[nonrootProfileAnnotation] != "" && workflow.Annotations[helperStorageAnnotation] != helperStoragePolicy
+		pinnedProfile := workflow.Annotations[nonrootProfileAnnotation] != "" && workflow.Annotations[helperStorageAnnotation] != helperStoragePolicy
 		controlResources := corev1.ResourceRequirements{}
 		if !pinnedProfile {
 			controlResources = executorResourcesWithStorage(storage)
@@ -159,12 +159,6 @@ func (controller *Controller) deliverExecutorTokensObserved(ctx context.Context,
 	if wf.Status.Phase.Completed() || controller.kube == nil || controller.seeder == nil {
 		return nil
 	}
-	if err := controller.checkPlacedAllocation(ctx, wf.Name); err != nil {
-		return identityFailure("target_validation", err)
-	}
-	if err := controller.checkPlacedParentWorkflow(ctx, wf, false); err != nil {
-		return identityFailure("target_validation", err)
-	}
 	capability, err := controller.boundCapability(ctx, wf, 0)
 	if err != nil {
 		return identityFailure("operator_capability", err)
@@ -221,7 +215,7 @@ func (controller *Controller) deliverExecutorTokensObserved(ctx context.Context,
 				return identityFailure("target_validation", err)
 			}
 		}
-		resourceAccount := controller.config.VMLauncherServiceAccount
+		resourceAccount := ""
 		if capability != nil {
 			resourceAccount = capability.ServiceAccount
 		}
@@ -230,15 +224,6 @@ func (controller *Controller) deliverExecutorTokensObserved(ctx context.Context,
 			return identityFailure("target_validation", err)
 		}
 		serviceAccount := controller.config.ExecutorServiceAccount
-		if launcher && capability == nil {
-			if err := controller.ensureVMIForResourcePod(ctx, wf, pod); err != nil {
-				if errors.Is(err, errResourceDeletePending) {
-					continue
-				}
-				return identityFailure("launcher_provision", err)
-			}
-			serviceAccount = controller.config.VMLauncherServiceAccount
-		}
 		if launcher && capability != nil {
 			serviceAccount = capability.ServiceAccount
 		}
@@ -376,12 +361,6 @@ func validateExecutorTokenTarget(pod *corev1.Pod, image string, resourcePod bool
 // gate is never removed: it represents credential lifetime and runs no code.
 // Deleting the workflow garbage-collects this Pod and invalidates its tokens.
 func (controller *Controller) executorIdentityPod(ctx context.Context, wf *wfv1.Workflow, serviceAccount string) (*corev1.Pod, error) {
-	if err := controller.checkPlacedAllocation(ctx, wf.Name); err != nil {
-		return nil, err
-	}
-	if err := controller.checkPlacedParentWorkflow(ctx, wf, false); err != nil {
-		return nil, err
-	}
 	name := controller.identityPodName(wf.UID, serviceAccount)
 	desired := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: wf.Namespace, Labels: map[string]string{"oberth.ci/role": "executor-identity"}, OwnerReferences: []metav1.OwnerReference{{APIVersion: "argoproj.io/v1alpha1", Kind: "Workflow", Name: wf.Name, UID: wf.UID, Controller: ptr.To(true)}}},
@@ -390,9 +369,6 @@ func (controller *Controller) executorIdentityPod(ctx context.Context, wf *wfv1.
 	pods := controller.kube.CoreV1().Pods(wf.Namespace)
 	pod, err := pods.Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		if err := controller.checkPlacedAllocation(ctx, wf.Name); err != nil {
-			return nil, err
-		}
 		pod, err = pods.Create(ctx, desired, metav1.CreateOptions{})
 		if apierrors.IsAlreadyExists(err) {
 			pod, err = pods.Get(ctx, name, metav1.GetOptions{})
@@ -424,7 +400,7 @@ func (controller *Controller) retireExecutorIdentity(ctx context.Context, wf *wf
 	if controller.kube == nil || wf.UID == "" {
 		return nil
 	}
-	accounts := []string{controller.config.ExecutorServiceAccount, controller.config.VMLauncherServiceAccount}
+	accounts := []string{controller.config.ExecutorServiceAccount}
 	if wf.Annotations[capabilityAnnotation] != "" {
 		// Read the persisted resource bindings so revocation cannot prevent
 		// cleanup of already-issued operator tokens.
@@ -473,13 +449,6 @@ func (controller *Controller) requestExecutorIdentity(ctx context.Context, names
 		// The retained workflow lookup must run even after primary config removal.
 		// Production always supplies the exact Workflow; journal-bound calls cannot
 		// fall back to an unnamed legacy token request.
-		if len(workflows) == 1 {
-			if err := controller.checkPlacedAllocation(requestCtx, workflows[0]); err != nil {
-				return nil, err
-			}
-		} else if controller.config.ExecutionPlacement.Protected() || controller.placementJournal != nil {
-			return nil, errors.New("argojob: journaled token lacks phase binding")
-		}
 
 		token, err := controller.kube.CoreV1().ServiceAccounts(namespace).CreateToken(requestCtx, account, request, metav1.CreateOptions{})
 		var network interface{ Timeout() bool }

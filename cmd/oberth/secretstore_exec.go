@@ -25,11 +25,11 @@ const (
 	// the Kubernetes Job path, so a script works unchanged under either engine.
 	secretExecStoreDirEnv = "OBERTH_SECRETSTORE_DIR"
 
-	// secretExecKVMountEnv names the KV mount holding Oberth's secrets, so the
+	// secretExecKVPathEnv names the KV mount holding Oberth's secrets, so the
 	// translation below does not hardcode an administrator's choice. The
-	// fallback matches the chart's own secretstore.kvMount default.
-	secretExecKVMountEnv = "OBERTH_SECRETSTORE_KV_MOUNT"
-	defaultKVMount       = "oberth"
+	// fallback matches the chart's key/value store mount default.
+	secretExecKVPathEnv = "OBERTH_SECRETSTORE_KV_MOUNT"
+	defaultKVPath       = "oberth"
 
 	// secretExecFileMode and secretExecDirMode mirror the Job path's delivery:
 	// the owner may read the file and nothing else, and the tree is not
@@ -146,7 +146,7 @@ func runSecretStoreExec(ctx context.Context, arguments []string, standardOut, er
 	// without this the read is issued against a path no policy covers and the
 	// store answers 403. Release-tier paths are authored as <mount>/data/...
 	// already and pass through untouched.
-	paths = translateUpstreamPaths(paths, kvMountName())
+	paths = translateUpstreamPaths(paths, kvPathName())
 
 	fetched, err := client.FetchKV(ctx, paths)
 	if err != nil {
@@ -257,23 +257,6 @@ func parseExecArgs(arguments []string) (string, []string, []string, error) {
 		return "", nil, nil, errors.New("no command given after --")
 	}
 	return directory, paths, command, nil
-}
-
-// validateSecretSegment rejects a KV field name or local path segment that
-// would escape the target directory via path traversal or OS separator
-// injection. Only flat, non-empty names without directory separators are
-// accepted.
-func validateSecretSegment(kind, value string) error {
-	if value == "" {
-		return fmt.Errorf("%s is empty", kind)
-	}
-	if value == "." || value == ".." {
-		return fmt.Errorf("%s %q is a path traversal component", kind, value)
-	}
-	if strings.ContainsAny(value, "/\\") {
-		return fmt.Errorf("%s %q contains a path separator", kind, value)
-	}
-	return nil
 }
 
 type namedSecret struct {
@@ -425,19 +408,19 @@ func ramOnlySwap(fields []string) bool {
 	return err == nil && strings.TrimSpace(string(backing)) == "none"
 }
 
-// kvMountName resolves the KV mount holding Oberth's secrets.
-func kvMountName() string {
-	if mount := os.Getenv(secretExecKVMountEnv); mount != "" {
+// kvPathName resolves the KV mount holding Oberth's secrets.
+func kvPathName() string {
+	if mount := os.Getenv(secretExecKVPathEnv); mount != "" {
 		return mount
 	}
-	return defaultKVMount
+	return defaultKVPath
 }
 
 // translateUpstreamPaths rewrites upstream-scoped declarations to the KV data
 // path their values actually live at, leaving every other path untouched. A
 // path that does not parse is passed through so the store's own error surfaces
 // rather than one invented here.
-func translateUpstreamPaths(paths []string, kvMount string) []string {
+func translateUpstreamPaths(paths []string, kvPath string) []string {
 	translated := make([]string, 0, len(paths))
 	for _, path := range paths {
 		scoped, upstreamScoped, err := pipeline.ParseUpstreamSecretStorePath(path)
@@ -445,7 +428,24 @@ func translateUpstreamPaths(paths []string, kvMount string) []string {
 			translated = append(translated, path)
 			continue
 		}
-		translated = append(translated, scoped.FetchPath(kvMount))
+		translated = append(translated, scoped.FetchPath(kvPath))
 	}
 	return translated
+}
+
+// validateSecretSegment rejects a KV field name or local path segment that
+// would escape the target directory via path traversal or OS separator
+// injection. Only flat, non-empty names without directory separators are
+// accepted.
+func validateSecretSegment(kind, value string) error {
+	if value == "" {
+		return fmt.Errorf("%s is empty", kind)
+	}
+	if value == "." || value == ".." {
+		return fmt.Errorf("%s %q is a path traversal component", kind, value)
+	}
+	if strings.ContainsAny(value, "/\\") {
+		return fmt.Errorf("%s %q contains a path separator", kind, value)
+	}
+	return nil
 }

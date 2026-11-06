@@ -2,7 +2,6 @@ package store
 
 import (
 	"errors"
-	"fmt"
 	"testing"
 	"time"
 
@@ -49,28 +48,6 @@ func TestInfrastructureRetryRefusesTerminalObservationFailure(t *testing.T) {
 	failed, err := s.FinishRun(t.Context(), source.ID, result)
 	if err != nil || failed.AutoRetriedBy != "" {
 		t.Fatalf("observed failure replayed: %+v %v", failed, err)
-	}
-}
-
-func TestInfrastructureRetryWaitsForPreflightCleanup(t *testing.T) {
-	for _, cleaned := range []bool{false, true} {
-		t.Run(fmt.Sprint(cleaned), func(t *testing.T) {
-			now := time.Now()
-			s := testStore(t, &now)
-			intent := kvmIntent(t, s)
-			if _, err := s.ReserveKVMPreflight(t.Context(), intent); err != nil {
-				t.Fatal(err)
-			}
-			if cleaned {
-				if err := s.CompleteKVMPreflightCleanup(t.Context(), intent.RunID, ""); err != nil {
-					t.Fatal(err)
-				}
-			}
-			failed, err := s.FinishRun(t.Context(), intent.RunID, autoRetryResult())
-			if err != nil || (failed.AutoRetriedBy != "") != cleaned {
-				t.Fatalf("cleanup eligibility %t: %+v %v", cleaned, failed, err)
-			}
-		})
 	}
 }
 

@@ -41,9 +41,6 @@ type Identity struct {
 	// added to the executor container, never to main), which is what makes a
 	// tokenless step container possible at all.
 	ExecutorServiceAccountName string
-	// VMLauncherServiceAccountName is mounted only into admitted VMI resource
-	// templates. It has VMI permissions and must never be the shared executor.
-	VMLauncherServiceAccountName string
 	// AutomountServiceAccountToken controls whether the step container
 	// receives a ServiceAccount token. False for branch-tier runs: with no
 	// token file, an in-pod Vault login cannot even be attempted, so the tier
@@ -77,14 +74,6 @@ func (identity Identity) Validate() error {
 		}
 		if identity.ResourceServiceAccountName == identity.ServiceAccountName || identity.ResourceServiceAccountName == identity.ExecutorServiceAccountName || identity.AutomountServiceAccountToken {
 			problems = append(problems, errors.New("argoworkflow: resource authority requires distinct pipeline and shared executor accounts with pipeline token automount disabled"))
-		}
-	}
-	if identity.VMLauncherServiceAccountName != "" {
-		if messages := k8svalidation.IsDNS1123Subdomain(identity.VMLauncherServiceAccountName); len(messages) != 0 {
-			problems = append(problems, fmt.Errorf("argoworkflow: VM-launcher ServiceAccount %q is invalid: %s", identity.VMLauncherServiceAccountName, strings.Join(messages, ", ")))
-		}
-		if identity.VMLauncherServiceAccountName == identity.ServiceAccountName || identity.VMLauncherServiceAccountName == identity.ExecutorServiceAccountName {
-			problems = append(problems, errors.New("argoworkflow: VM-launcher ServiceAccount must differ from pipeline and shared executor ServiceAccounts"))
 		}
 	}
 	// A shared executor identity would hand every step container the
@@ -190,13 +179,7 @@ func ForceIdentity(workflow *wfv1.Workflow, identity Identity) error {
 			template.Executor = &wfv1.ExecutorConfig{ServiceAccountName: identity.ResourceServiceAccountName}
 			continue
 		}
-		if identity.VMLauncherServiceAccountName == "" {
-			return fmt.Errorf("argoworkflow: VMI resource template %q requires a server-assigned VM-launcher ServiceAccount", template.Name)
-		}
-		if template.Executor == nil {
-			template.Executor = &wfv1.ExecutorConfig{}
-		}
-		template.Executor.ServiceAccountName = identity.VMLauncherServiceAccountName
+		return ErrWorkflowCapabilityRequired
 	}
 	return nil
 }

@@ -7,9 +7,17 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"golang.org/x/mod/semver"
 )
 
-func checkUpgradeLegacyRepositories(ctx context.Context, cfg UpgradeConfig, deps Deps) error {
+// Later installed releases have no legacy engine or retirement-check command.
+const lastLegacyExecutionVersion = "v0.17.94"
+
+func checkUpgradeLegacyRepositories(ctx context.Context, cfg UpgradeConfig, deps Deps, installedVersion string) error {
+	if cfg.AllowRetiredExecution || semver.Compare(canonicalChartVersion(installedVersion), lastLegacyExecutionVersion) > 0 {
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 	run := deps.RunCommand
@@ -25,14 +33,14 @@ func checkUpgradeLegacyRepositories(ctx context.Context, cfg UpgradeConfig, deps
 		return errors.New("upgrade refused: retirement proof response exceeded 4096 bytes")
 	}
 	if err != nil {
-		return fmt.Errorf("upgrade refused: live repository retirement check failed; retain or install the prerequisite check release with the legacy recovery engine, migrate named repositories and drain before retrying: %w: %s", err, strings.TrimSpace(string(body)))
+		return fmt.Errorf("upgrade refused: live repository retirement check failed; retain or install the prerequisite check release with the legacy recovery engine, migrate named repositories and drain before retrying (explicit override: --allow-retired-execution): %w: %s", err, strings.TrimSpace(string(body)))
 	}
 	var proof struct {
 		Format string `json:"format"`
 		Ready  bool   `json:"ready"`
 	}
 	if json.Unmarshal(body, &proof) != nil || proof.Format != "oberth-retirement-check-v1" || !proof.Ready {
-		return errors.New("upgrade refused: live daemon did not provide a complete repository retirement proof; install the prerequisite check release first")
+		return errors.New("upgrade refused: live daemon did not provide a complete repository retirement proof; install the prerequisite check release first (explicit override: --allow-retired-execution)")
 	}
 	return nil
 }

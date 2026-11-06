@@ -24,7 +24,7 @@ func TestDeclaredAdmissionTwoMeasuredRunsFit(t *testing.T) {
 	second := *container.DeepCopy()
 	second.Name = "second"
 	wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Entrypoint: "run", Templates: []wfv1.Template{{Name: "run", ContainerSet: &wfv1.ContainerSetTemplate{Containers: []wfv1.ContainerNode{{Container: container}, {Container: second}}}}}}}
-	d, err := argoworkflow.DeclaredHostPeak(wf, argoworkflow.RunTriggerBranch)
+	d, err := argoworkflow.DeclaredPodPeak(wf)
 	if err != nil || d == nil || d.MemoryBytes != 20<<30 {
 		t.Fatalf("run demand = %+v, %v; want 20Gi requests", d, err)
 	}
@@ -94,7 +94,7 @@ func TestDeclaredMemoryHeadroomRestoredAndReported(t *testing.T) {
 	g := newWeightedAdmission(6)
 	g.resources.MemoryHeadroomBytes = ptr.To(int64(2 << 30))
 	d := &argoworkflow.PodDemand{CPUMilli: 1000, MemoryBytes: 3 << 30, Pods: 2}
-	r, err := g.adopt(model.Run{ID: "run", QueueSequence: 1}, pipeline.XL, argoworkflow.VMIDemand{}, d)
+	r, err := g.adopt(model.Run{ID: "run", QueueSequence: 1}, pipeline.XL, d)
 	if err != nil {
 		t.Fatal(err)
 	}

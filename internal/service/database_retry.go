@@ -34,12 +34,6 @@ func transientDatabaseError(err error) bool {
 // observers, which must not turn an unavailable read into cancellation.
 func IsTransientDatabaseError(err error) bool { return transientDatabaseError(err) }
 
-// A returned preflight deadline authorizes exact, fail-closed cleanup, not DB
-// replay. It may originate in Kubernetes or the executor as well as storage.
-func recoverablePreflightError(err error) bool {
-	return (errors.Is(err, context.DeadlineExceeded) || store.IsTransientLockError(err)) && transientDatabaseAttemptError(err, true)
-}
-
 func transientDatabaseAttemptError(err error, expired bool) bool {
 	if err == nil {
 		return false

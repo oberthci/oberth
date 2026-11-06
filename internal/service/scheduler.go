@@ -17,14 +17,13 @@ import (
 
 	"log"
 
-	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/gitoid"
 	"github.com/oberthci/oberth/internal/liveness"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/internal/vmrunner"
+	"github.com/oberthci/oberth/internal/workflowpolicy"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
@@ -33,7 +32,6 @@ const maximumCIIssueTailBytes = 16 << 10
 const mutationGateRetryInterval = time.Second
 
 var errMutationBlocked = errors.New("service: mutation blocked by unavailable audit integrity")
-var errPreflightCancellationPending = errors.New("trusted preflight cancellation cleanup remains pending")
 
 type mutationRequirement func(context.Context) error
 
@@ -48,7 +46,6 @@ type SchedulerConfig struct {
 	Logs              LogStore
 	Jobs              JobController
 	ReleaseJobs       ReleaseJobController
-	TrustedPreflight  TrustedPreflight
 	Auditor           Auditor
 	Signals           *Signals
 	WorkspaceRoot     string
@@ -80,7 +77,6 @@ type Scheduler struct {
 	logs               LogStore
 	jobs               JobController
 	releaseJobs        ReleaseJobController
-	trusted            TrustedPreflight
 	auditor            Auditor
 	signals            *Signals
 	workspaces         *workspaceLifecycle
@@ -193,15 +189,15 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 		disableInfrastructureAutoRetry: config.DisableInfrastructureAutoRetry,
 
 		store: config.Store, git: config.Git, logs: config.Logs, jobs: config.Jobs,
-		releaseJobs: config.ReleaseJobs, trusted: config.TrustedPreflight,
-		auditor: config.Auditor, signals: signals,
+		releaseJobs: config.ReleaseJobs,
+		auditor:     config.Auditor, signals: signals,
 		workspaces: workspaces, workspaceRoot: workspaceRoot, maxConcurrent: config.MaxConcurrent,
 		capacityFile:   config.MaxConcurrentFile,
 		admission:      newWorkflowAdmissionForJobs(config.MaxConcurrent),
 		maxRunLogBytes: config.MaxRunLogBytes, mutationGate: mutationGate, stalledRunTimeout: config.StalledRunTimeout,
 		wake: make(chan struct{}, 1), publicationWake: make(chan struct{}, 1),
 		createWake: make(chan struct{}, 1), createPending: make(map[string]*pendingCreate),
-		publicationSet: make(map[string]struct{}), deliveryPermit: deliveryPermit, capacityWait: waitTrustedCapacity,
+		publicationSet: make(map[string]struct{}), deliveryPermit: deliveryPermit, capacityWait: waitCapacityRetry,
 	}
 	scheduler.workspaces.owners = scheduler.database()
 	// Group/VM parked claims release their dispatch slots. The admission gate
@@ -368,12 +364,6 @@ func (scheduler *Scheduler) completePendingCancellationsWithGate(ctx context.Con
 		return fmt.Errorf("load pending run cancellations: %w", err)
 	}
 	err = scheduler.completeCancellationsWithGate(ctx, pending, require)
-	if errors.Is(err, errPreflightCancellationPending) {
-		// The API still reports pending deletion, but this external cleanup
-		// failure must not stop the owner or its periodic absence readback.
-		log.Printf("WARN: %v", err)
-		return nil
-	}
 	return err
 }
 
@@ -404,7 +394,6 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 	for _, current := range pending {
 		currentCancellations[current.RunID] = current
 	}
-	var preflightErr error
 	for _, cancellation := range cancellations {
 		beatDispatch(ctx)
 		current, pending := currentCancellations[cancellation.RunID]
@@ -418,16 +407,11 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 		}
 		// Same-ID restart recovery clears the run's current Workflow name.
 		// The cancellation ledger still owns the prior Workflow until deletion
-		// completes; only an empty ledger name denotes a preflight cancellation.
+		// completes. An empty name can still belong to a live checkout.
 		if cancellation.WorkflowName == "" {
-			if canceler, ok := scheduler.trusted.(interface {
-				CancelPreflight(context.Context, string) error
-			}); ok {
-				if err := canceler.CancelPreflight(ctx, run.ID); err != nil {
-					preflightErr = errors.Join(preflightErr, fmt.Errorf("%w: %w", errPreflightCancellationPending, err))
-				}
-			}
-			continue // The live owner or terminal cleanup background task confirms absence.
+			// The live owner may still be checking out. Only worker join or
+			// owner restart can confirm absence and release this workspace.
+			continue
 		}
 		if isPendingCreate(run) || scheduler.ownsCreateCleanup(run.ID) {
 			scheduler.registerCreateCleanup(run, nil, isPendingCreate(run))
@@ -449,7 +433,7 @@ func (scheduler *Scheduler) completeCancellationsWithGate(ctx context.Context, c
 			return fmt.Errorf("clean canceled run workspace %s: %w", cancellation.RunID, cleanupErr)
 		}
 	}
-	return preflightErr
+	return nil
 }
 
 // abandonAdmissions withdraws the ungranted admission reservations of runs a
@@ -463,9 +447,6 @@ func (scheduler *Scheduler) abandonAdmissions(ctx context.Context, cancellations
 			continue
 		}
 		scheduler.admission.abandon(run.QueueSequence)
-		if run.WorkflowName == "" {
-			scheduler.admission.releasePreflightRun(run.ID)
-		}
 	}
 }
 
@@ -495,9 +476,6 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		}
 		return err
 	}
-	if err := scheduler.recoverTrustedPreflights(workerCtx); err != nil {
-		return err
-	}
 	var adopted []adoptedRun
 	defer func() {
 		for _, run := range adopted {
@@ -505,10 +483,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		}
 	}()
 	if err := scheduler.reconcileStrandedRunsWithGate(workerCtx, scheduler.awaitMutation, func(run model.Run, size pipeline.Size) error {
-		demand, err := scheduler.adoptedKubeVirtDemand(run)
-		if err != nil {
-			return err
-		}
+		var err error
 		var pods *argoworkflow.PodDemand
 		if reader, ok := scheduler.jobs.(interface {
 			AdoptedPodDemand(model.Run) (*argoworkflow.PodDemand, error)
@@ -518,7 +493,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 				return err
 			}
 		}
-		reservation, err := scheduler.admission.adopt(run, size, demand, pods)
+		reservation, err := scheduler.admission.adopt(run, size, pods)
 		if err != nil {
 			return err
 		}
@@ -573,8 +548,6 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 	}()
 	workers.Add(1)
 	go func() { defer workers.Done(); scheduler.runCreateCleanup(workerCtx) }()
-	workers.Add(1)
-	go func() { defer workers.Done(); scheduler.runTerminalPreflightCleanup(workerCtx) }()
 	completed := make(chan error, max(2*scheduler.maxConcurrent, len(adopted)))
 	active := len(adopted)
 	for _, adopted := range adopted {
@@ -877,12 +850,12 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	if err := scheduler.recordRunIssueTrailers(ctx, run, upstream.QualifiedRepo(repository.Name), require); err != nil {
 		return err
 	}
-	requirement, stopped, err := scheduler.awaitTrustedRequirement(gitcache.WithBurstPolicy(ctx), repository, run.ID, checkoutSHA, require)
-	if stopped {
-		return nil
-	}
+	stopped, err := scheduler.awaitWorkflowPolicy(ctx, upstream.QualifiedRepo(repository.Name), run.ID, checkoutSHA, require)
 	if errors.Is(err, errMutationBlocked) {
 		return err
+	}
+	if stopped {
+		return nil
 	}
 	if err != nil {
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
@@ -899,12 +872,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		_ = logFile.Close()
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
 	}
-	var current model.Run
-	if requirement.Contract == nil {
-		current, err = scheduler.database().SetRunWorkflowName(ctx, run.ID, workflowName)
-	} else {
-		current, err = scheduler.database().Run(ctx, run.ID)
-	}
+	current, err := scheduler.database().SetRunWorkflowName(ctx, run.ID, workflowName)
 	if err != nil {
 		_ = logFile.Close()
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("persist deterministic Job intent: %w", err))
@@ -925,20 +893,6 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 			_ = logFile.Close()
 			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("read pipeline resource size: %w", err))
 		}
-		if requirement.Contract != nil {
-			if sized, ok := scheduler.trusted.(interface {
-				Size(context.Context, WorkflowRequest) (pipeline.Size, error)
-			}); ok {
-				preflightSize, sizeErr := sized.Size(ctx, jobRequest)
-				if sizeErr != nil {
-					_ = logFile.Close()
-					return scheduler.finishInfrastructureFailure(ctx, run, repository, sizeErr)
-				}
-				if sizeRank(preflightSize) > sizeRank(size) {
-					size = preflightSize
-				}
-			}
-		}
 	}
 	// Priority is advisory: an unavailable grant read withholds the boost,
 	// never the release's execution or publication.
@@ -958,18 +912,16 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	jobRequest.Run.ConcurrencyGroup, jobRequest.Run.ConcurrencyLimit = group, groupLimit
 	jobRequest.ConcurrencyGroup = group
 
-	kubeVirt, err := scheduler.pipelineKubeVirt(ctx, jobRequest)
+	receipt, err := scheduler.pipelineDemandReceipt(ctx, jobRequest)
 	if err != nil {
 		_ = logFile.Close()
-		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("read pipeline KubeVirt demand: %w", err))
+		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("read pipeline source receipt: %w", err))
 	}
-	jobRequest.VMIDemandReceipt = kubeVirt.Receipt
+	jobRequest.DemandReceipt = receipt
 	var pods *argoworkflow.PodDemand
 	var fallback model.ResourceAdmissionFallback
-	// Trusted runs execute build preflight and the main document under one
-	// reservation. Until both demands are charged, retain the larger size.
-	if requirement.Contract == nil {
-		pods, fallback, err = scheduler.admission.selectDeclaredDemand(kubeVirt.Receipt)
+	{
+		pods, fallback, err = scheduler.admission.selectDeclaredDemand(receipt)
 		if err != nil {
 			_ = logFile.Close()
 			return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
@@ -987,7 +939,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	headSince, estimate := scheduler.admissionHistory(ctx, run)
 	releaseAdmission, err := reservation.acquireRequest(ctx, admissionRequest{
 		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref, Size: size, Group: group, GroupLimit: groupLimit, Pods: pods, Fallback: fallback,
-		RefKind: run.RefKind, SHA: run.SHA, HeadSince: headSince, Estimate: estimate, KubeVirt: &kubeVirt, PriorityMaximum: priorityMaximum, PriorityLookupFailed: priorityErr != nil,
+		RefKind: run.RefKind, SHA: run.SHA, HeadSince: headSince, Estimate: estimate, PriorityMaximum: priorityMaximum, PriorityLookupFailed: priorityErr != nil,
 	})
 	if errors.Is(err, errAdmissionAbandoned) {
 		// Superseded or cancelled while waiting: the reservation is already
@@ -1079,71 +1031,6 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		_ = logFile.Close()
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
 	}
-	if requirement.Contract != nil {
-		stopped, err := scheduler.executeTrustedWithCapacity(ctx, jobRequest, requirement, logFile, reservation, require)
-		if stopped {
-			_ = logFile.Close()
-			return nil
-		}
-		if errors.Is(err, errMutationBlocked) {
-			_ = logFile.Close()
-			return err
-		}
-		if err != nil {
-			_ = logFile.Close()
-			journal := scheduler.store.(vmrunner.KVMJournal)
-			stateCtx, cancelState := boundedWorkspaceCleanupContext(ctx)
-			state, stateErr := retryDatabase(stateCtx, "KVMPreflight", func(ctx context.Context) (vmrunner.KVMExecution, error) { return journal.KVMPreflight(ctx, run.ID) })
-			cancelState()
-			if errors.Is(err, ErrPreflightDeadline) && ctx.Err() == nil {
-				reservation.release()
-				return scheduler.finishTrustedPreflightFailure(ctx, run, JobResult{Status: model.RunFailed, Phase: "infrastructure"}, errors.New(model.ExecutionDeadlineMessage+" Trusted preflight timed out; Kubernetes cleanup may still be pending.")) //nolint:staticcheck // ST1005: Preserve the public ExecutionDeadlineMessage presentation label.
-			}
-			current, readErr := scheduler.database().Run(ctx, run.ID)
-			if readErr == nil && current.Preempted() && current.WorkflowName == "" {
-				reservation.release()
-				scheduler.signals.NotifyRun(run.ID)
-				return nil
-			}
-			if (stateErr != nil && !errors.Is(stateErr, store.ErrNotFound)) || (stateErr == nil && !state.Cleaned) {
-				reservation.retain()
-				var mismatch interface{ WorkflowSpecMismatch() bool }
-				if errors.As(err, &mismatch) && mismatch.WorkflowSpecMismatch() {
-					return scheduler.recoverTrustedWorkflowMismatch(ctx, run, repository, reservation)
-				}
-				if recoverablePreflightError(err) && ctx.Err() == nil {
-					return scheduler.recoverDatabasePreflight(ctx, run.ID, reservation)
-				}
-				return errors.Join(err, stateErr)
-			}
-			// Owner shutdown loses the observer, not the durable recovery obligation.
-			// Keep the parent running so startup can clean and settle it atomically.
-			if ctx.Err() != nil {
-				return nil
-			}
-			var observed *TrustedPreflightFailure
-			if errors.As(err, &observed) {
-				return scheduler.finishTrustedPreflightFailure(ctx, run, observed.Result, err)
-			}
-			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("trusted preflight: %w", err))
-		}
-		fresh, stopped, err := scheduler.awaitTrustedRequirement(gitcache.WithFreshPolicy(ctx), repository, run.ID, checkoutSHA, require)
-		if stopped {
-			_ = logFile.Close()
-			return nil
-		}
-		if errors.Is(err, errMutationBlocked) {
-			_ = logFile.Close()
-			return err
-		}
-		if err == nil {
-			err = scheduler.trustedReceipt(ctx, repository, run, fresh)
-		}
-		if err != nil {
-			_ = logFile.Close()
-			return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
-		}
-	}
 	if !run.Credentialed && scheduler.pipelineCredentialed(ctx, jobRequest) {
 		if credErr := scheduler.database().SetRunCredentialed(ctx, run.ID); credErr != nil {
 			_ = logFile.Close()
@@ -1154,9 +1041,6 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	if err = require(ctx); err != nil {
 		_ = logFile.Close()
 		return err
-	}
-	if requirement.Contract != nil {
-		current, err = scheduler.database().SetRunWorkflowName(ctx, run.ID, workflowName)
 	}
 	if err != nil {
 		_ = logFile.Close()
@@ -1182,7 +1066,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	}
 
 	if _, ok := scheduler.jobs.(JobCreateSettler); ok {
-		if err := scheduler.recordResourceAdmission(run, workflowName, size, kubeVirt.Demand, pods, fallback); err != nil {
+		if err := scheduler.recordResourceAdmission(run, workflowName, size, pods, fallback); err != nil {
 			_ = logFile.Close()
 			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("record Workflow admission contract: %w", err))
 		}
@@ -1822,7 +1706,7 @@ func (scheduler *Scheduler) deliverPublicationWithGate(
 		return model.PublicationFinalization{}, err
 	}
 	if policyErr != nil {
-		var unavailable *vmrunner.PolicyRefreshUnavailable
+		var unavailable *workflowpolicy.PolicyRefreshUnavailable
 		if errors.As(policyErr, &unavailable) {
 			since, err := scheduler.database().SetPublicationPolicyWaiting(ctx, publication.ID, true)
 			if err != nil {
@@ -1950,17 +1834,25 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 		return fmt.Errorf("load stranded runs for reconciliation: %w", err)
 	}
 	for _, run := range runs {
+		if run.Phase == "preflight" {
+			if err := scheduler.failRetiredRun(ctx, run, require); err != nil {
+				return err
+			}
+			continue
+		}
 		if isPendingCreate(run) {
 			scheduler.registerCreateCleanup(run, nil, true)
 			continue
 		}
 		if adopter, ok := scheduler.jobs.(JobAdopter); ok && workflowRunAdoptable(run) {
-			eligible, err := scheduler.withoutPendingPreflight(ctx, run)
-			if err != nil {
-				return err
-			}
-			if eligible {
+			{
 				size, found, err := adopter.Adopt(ctx, run)
+				if errors.Is(err, argoworkflow.ErrWorkflowCapabilityRequired) {
+					if err := scheduler.failRetiredRun(ctx, run, require); err != nil {
+						return err
+					}
+					continue
+				}
 				if err != nil {
 					return adoptionFailure(adopter, run, err)
 				}
@@ -1976,11 +1868,7 @@ func (scheduler *Scheduler) reconcileStrandedRunsWithGate(ctx context.Context, r
 			}
 		}
 		if _, canSettle := scheduler.jobs.(JobCreateSettler); canSettle && run.Phase == "waiting" {
-			eligible, err := scheduler.withoutPendingPreflight(ctx, run)
-			if err != nil {
-				return err
-			}
-			if eligible {
+			{
 				_, contractErr := scheduler.readCreateAdmission(run)
 				// File absence is the pre-feature/never-submitted path. An
 				// unreadable or corrupt file still denotes a possible POST;

@@ -42,7 +42,7 @@ func TestLegacyFixedChargeAdmitsLiveXLHead(t *testing.T) {
 func TestLegacyFixedChargeRestoredAndRetained(t *testing.T) {
 	g := newWeightedAdmission(8)
 	g.resources.LegacyResources = map[pipeline.Size]model.LegacyResourceCharge{pipeline.L: {CPUMilli: 4500, MemoryBytes: 10 << 30}}
-	r, err := g.adopt(model.Run{ID: "restored", QueueSequence: 1}, pipeline.L, argoworkflow.VMIDemand{})
+	r, err := g.adopt(model.Run{ID: "restored", QueueSequence: 1}, pipeline.L)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestLegacyExclusiveXLOnSmallBudgets(t *testing.T) {
 func TestLegacyExclusiveXLRestoredOnSmallBudget(t *testing.T) {
 	g := newWeightedAdmission(8)
 	g.resources.CPUMilli, g.resources.MemoryBytes = 4000, 8<<30
-	r, err := g.adopt(model.Run{ID: "restored-xl", QueueSequence: 1}, pipeline.XL, argoworkflow.VMIDemand{})
+	r, err := g.adopt(model.Run{ID: "restored-xl", QueueSequence: 1}, pipeline.XL)
 	if err != nil {
 		t.Fatal(err)
 	}

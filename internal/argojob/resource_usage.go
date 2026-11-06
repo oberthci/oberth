@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"strings"
 	"sync"
 	"time"
 
@@ -290,74 +289,6 @@ func (c *Controller) sampleResourceUsageWithState(ctx context.Context, wf *wfv1.
 	}
 	if err := flush(); err != nil {
 		return err
-	}
-	// Only workflows declaring VM resources need the two additional read-only
-	// inventories. Never discover ownership from launcher metric labels.
-	needsVM := false
-	for _, t := range wf.Spec.Templates {
-		if t.Resource != nil && strings.Contains(t.Resource.Manifest, "VirtualMachineInstance") {
-			needsVM = true
-			break
-		}
-	}
-	if !needsVM || c.vmi == nil || candidates >= 4096 {
-		return nil
-	}
-	vmis, err := c.vmi.Resource(vmiResource).Namespace(wf.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "oberth.ci/workflow=" + wf.Name, Limit: 2048})
-	if err != nil {
-		return err
-	}
-	type launcherBinding struct {
-		binding   resourcesampler.Binding
-		name, uid string
-	}
-	owned := map[string]launcherBinding{}
-	for _, vmi := range vmis.Items[:min(len(vmis.Items), 2048)] {
-		owner := metav1.GetControllerOf(&vmi)
-		if owner == nil || owner.APIVersion != "argoproj.io/v1alpha1" || owner.Kind != "Workflow" || owner.Name != wf.Name || owner.UID != wf.UID {
-			continue
-		}
-		if vmi.GetAPIVersion() != "kubevirt.io/v1" || vmi.GetKind() != "VirtualMachineInstance" || vmi.GetUID() == "" || !workflowOwnsResource(wf, &vmi) {
-			continue
-		}
-		binding, ok := bindings[vmi.GetAnnotations()[vmiOperationAnnotation]]
-		if ok {
-			owned[string(vmi.GetUID())] = launcherBinding{binding, vmi.GetName(), string(vmi.GetUID())}
-		}
-	}
-	if len(owned) == 0 {
-		return nil
-	}
-	launchers, err := c.kube.CoreV1().Pods(wf.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "kubevirt.io=virt-launcher", Limit: 2048})
-	if err != nil {
-		return err
-	}
-	for _, pod := range launchers.Items[:min(len(launchers.Items), 2048)] {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		owner := metav1.GetControllerOf(&pod)
-		if owner == nil || pod.Namespace != wf.Namespace || pod.Spec.NodeName == "" {
-			continue
-		}
-		parent, ok := owned[string(owner.UID)]
-		if !ok || owner.APIVersion != "kubevirt.io/v1" || owner.Kind != "VirtualMachineInstance" || owner.Name != parent.name {
-			continue
-		}
-		pending := resourceContainerCandidates(&pod, finished)
-		if pending == 0 {
-			continue
-		}
-		candidates += pending
-		if candidates > 4096 {
-			break
-		}
-		binding := parent.binding
-		binding.PodName = pod.Name
-		binding.LauncherOwnerName, binding.LauncherOwnerUID = parent.name, parent.uid
-		if err := appendValues(resourcesampler.ObserveLauncher(binding, &pod, getSnapshot(pod.Spec.NodeName), time.Now().UTC())); err != nil {
-			return err
-		}
 	}
 	return errors.Join(flush(), ctx.Err())
 }

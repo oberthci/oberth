@@ -44,24 +44,10 @@ type Policy struct {
 	// ServerDeadline permits an omitted deadline only for a server that injects
 	// its own bound before submission and enforces a separate watchdog.
 	ServerDeadline bool
-	// Only ResolveRunSource may attach a source-bound, server-owned context.
-	runVMISource *ResolvedRunSource
 	// RunnerImagePrefixes is the administrator's image allowlist.
 	// Empty selects the built-in
 	// pipeline.DefaultRunnerImagePrefixes.
 	RunnerImagePrefixes []string
-	// KubeVirt permits VM resources and KVM device leaves for an admin-granted repository.
-	// The server sets this only after checking the repository's VM grant.
-	KubeVirt bool
-	// ContainerDiskPrefixes is the administrator's registry allowlist for VMI
-	// containerDisks. An empty list never admits a containerDisk image.
-	ContainerDiskPrefixes []string
-	// VMIBudget is the repository grant's VMI budget. Zero selects
-	// DefaultVMIBudget.
-	VMIBudget VMIBudget
-	// VMICeiling is the administrator's cluster-wide cap on any grant's
-	// budget. Zero selects VMIBudgetLimit.
-	VMICeiling VMIBudget
 }
 
 // Admit refuses every construct through which a repository-authored document
@@ -88,6 +74,9 @@ func Admit(workflow *wfv1.Workflow, policy Policy) (resultErr error) {
 	if err := policy.Capability.Validate(); err != nil {
 		return err
 	}
+	if err := RefuseRetiredWorkflow(workflow); err != nil {
+		return err
+	}
 	var problems []error
 	if policy.Capability != nil {
 		problems = append(problems, validateExtendedPeak(workflow, policy.Capability))
@@ -97,37 +86,8 @@ func Admit(workflow *wfv1.Workflow, policy Policy) (resultErr error) {
 		problems = append(problems, err)
 	}
 	problems = append(problems, admitSpec(&workflow.Spec, policy.ServerDeadline)...)
-	if policy.KubeVirt && len(policy.ContainerDiskPrefixes) != 0 {
-		if err := validateContainerDiskPrefixes(policy.ContainerDiskPrefixes); err != nil {
-			problems = append(problems, fmt.Errorf("argoworkflow: %w", err))
-		}
-	}
-	for _, budget := range []struct {
-		name   string
-		budget VMIBudget
-	}{{"grant", policy.VMIBudget}, {"ceiling", policy.VMICeiling}} {
-		if !budget.budget.IsZero() {
-			if err := budget.budget.Validate(); err != nil {
-				return fmt.Errorf("argoworkflow: KubeVirt %s: %w", budget.name, err)
-			}
-		}
-	}
 	problems = append(problems, admitTemplates(workflow, policy)...)
-	if _, err := CleanupVerdictTimeout(workflow); err != nil {
-		problems = append(problems, err)
-	} else if _, declared := workflow.Annotations[CleanupVerdictAnnotation]; declared && !policy.KubeVirt {
-		problems = append(problems, errors.New("argoworkflow: cleanup verdict requires an active repository KubeVirt admin grant"))
-	}
-
 	if _, err := DeclaredNonrootTemplates(workflow); err != nil {
-		problems = append(problems, err)
-	}
-	if names, err := DeclaredKVMTemplates(workflow); err != nil {
-		problems = append(problems, err)
-	} else if len(names) != 0 && !policy.KubeVirt {
-		problems = append(problems, errors.New("argoworkflow: KVM leaves require an active repository KubeVirt admin grant"))
-	}
-	if _, err := DeclaredGuestTestTemplates(workflow); err != nil {
 		problems = append(problems, err)
 	}
 	// The scheduler reads the same annotation before admission; refusing a
@@ -148,9 +108,6 @@ func Admit(workflow *wfv1.Workflow, policy Policy) (resultErr error) {
 	}
 	problems = append(problems, admitTriggerParameter(&workflow.Spec)...)
 	problems = append(problems, admitScheduleParameter(&workflow.Spec)...)
-	if _, err := TrustedTestsEntrypoint(workflow); err != nil {
-		problems = append(problems, err)
-	}
 	return errors.Join(problems...)
 }
 
@@ -286,8 +243,6 @@ func admitSpec(spec *wfv1.WorkflowSpec, serverDeadline bool) []error {
 
 func admitTemplates(workflow *wfv1.Workflow, policy Policy) []error {
 	var problems []error
-	vmiTemplates, vmiCreates, vmiCores := 0, 0, 0
-	vmiMemory := resource.MustParse("0")
 	if len(workflow.Spec.Templates) == 0 {
 		problems = append(problems, errors.New("argoworkflow: spec.templates is required"))
 	}
@@ -317,46 +272,6 @@ func admitTemplates(workflow *wfv1.Workflow, policy Policy) []error {
 			entrypointFound = true
 		}
 		problems = append(problems, admitTemplate(location, template, policy, 0)...)
-		if policy.Capability == nil && policy.KubeVirt && template.Resource != nil && !strings.HasPrefix(template.Name, "frag-") {
-			vmiTemplates++
-			if template.Resource.Action == "create" {
-				// The individual manifest is validated above. A malformed one
-				// already fails admission and contributes no trusted budget data.
-				if usage, err := vmiCreateUsage(template.Resource.Manifest); err == nil {
-					vmiCreates++
-					vmiCores += usage.cores
-					vmiMemory.Add(usage.memory)
-				}
-			}
-		}
-	}
-	grant, ceiling, budget := policy.effectiveVMIBudget()
-	declaredCreates := vmiCreates
-	var demand VMIDemand
-	var demandErr error
-	if policy.Capability == nil {
-		demand, demandErr = DeclaredVMIDemand(workflow)
-	}
-	if policy.Capability == nil && policy.runVMISource != nil {
-		demand, demandErr = policy.runVMISource.demandFor(workflow)
-		if demandErr != nil {
-			problems = append(problems, demandErr)
-		}
-	}
-	if demandErr == nil {
-		vmiCreates, vmiCores = demand.VMs, demand.Cores
-		vmiMemory = *resource.NewQuantity(demand.MemoryBytes, resource.BinarySI)
-	}
-	templateVMs := budget.MaxVMs
-	if vmiCreates < declaredCreates {
-		templateVMs = max(templateVMs, declaredCreates)
-	}
-	if maxTemplates := vmiTemplatesPerVM * templateVMs; vmiTemplates > maxTemplates {
-		problems = append(problems, fmt.Errorf("argoworkflow: spec.templates declares %d VMI resource templates, maximum is %d (%d per admitted VM)", vmiTemplates, maxTemplates, vmiTemplatesPerVM))
-	}
-	if vmiCreates > budget.MaxVMs || vmiCores > budget.MaxCores || vmiMemory.Cmp(budget.MaxMemory) > 0 {
-		problems = append(problems, fmt.Errorf("argoworkflow: VMI run budget exceeded: %d concurrent VMs (maximum %d), %d cores (maximum %d), %s memory (maximum %s); the KubeVirt grant allows %s under a cluster ceiling of %s",
-			vmiCreates, budget.MaxVMs, vmiCores, budget.MaxCores, vmiMemory.String(), budget.MaxMemory.String(), grant, ceiling))
 	}
 	if workflow.Spec.Entrypoint != "" && !entrypointFound {
 		problems = append(problems, fmt.Errorf("argoworkflow: spec.entrypoint %q names no template", workflow.Spec.Entrypoint))
@@ -456,12 +371,8 @@ func admitTemplate(location string, template wfv1.Template, policy Policy, depth
 			} else if err := admitCapabilityResource(location+".resource", template.Resource, policy.Capability); err != nil {
 				problems = append(problems, err)
 			}
-		} else if !policy.KubeVirt {
-			problems = append(problems, fmt.Errorf("argoworkflow: %s.resource creates arbitrary Kubernetes objects and is not admitted", location))
-		} else if strings.HasPrefix(template.Name, "frag-") || strings.Contains(location, ".inline") || location == "spec.templateDefaults" {
-			problems = append(problems, fmt.Errorf("argoworkflow: %s.resource must be a named template in the consuming repository", location))
-		} else if err := admitVMIResource(location+".resource", template.Resource, policy.ContainerDiskPrefixes); err != nil {
-			problems = append(problems, err)
+		} else {
+			problems = append(problems, fmt.Errorf("argoworkflow: %s.resource: %w", location, ErrWorkflowCapabilityRequired))
 		}
 	}
 	// Plugin and HTTP templates execute in the Argo agent pod, which runs
@@ -698,8 +609,8 @@ func admitContainerResources(location string, resources corev1.ResourceRequireme
 			}
 			if !known {
 				problems = append(problems, fmt.Errorf(
-					"argoworkflow: %s.resources.%s declares resource %q which is not admitted",
-					location, tier, name))
+					"argoworkflow: %s.resources.%s declares resource %q: %w",
+					location, tier, name, ErrWorkflowCapabilityRequired))
 				continue
 			}
 			max := resource.MustParse(ceiling)

@@ -271,40 +271,6 @@ func TestNoHeadOriginWithoutBackfill(t *testing.T) {
 	head.cancel()
 }
 
-// A backfilled grant that is parked on VM capacity and granted again with
-// no head waiting is no longer reported as backfilled.
-func TestRegrantWithoutAHeadClearsBackfilled(t *testing.T) {
-	clock := &fakeClock{now: time.Date(2026, 10, 20, 15, 0, 0, 0, time.UTC)}
-	gate := backfillGate(clock)
-	releaseRunning := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "running", Size: pipeline.M, Estimate: 20 * time.Minute})
-	head := pending(t, gate, 2, admissionRequest{RunID: "head", Size: pipeline.XL})
-	small := pending(t, gate, 3, admissionRequest{RunID: "small", Size: pipeline.S, Estimate: 5 * time.Minute})
-	if !granted(gate, small) || !small.backfilled {
-		t.Fatal("the S run was not backfilled")
-	}
-	if err := small.parkVM(); err != nil {
-		t.Fatal(err)
-	}
-	head.cancel()
-	releaseRunning()
-	go func() {
-		_, _ = small.acquireRequest(context.Background(), admissionRequest{RunID: "small", Size: pipeline.S})
-	}()
-	deadline := time.Now().Add(testStartTimeout(admissionAcquireBudget))
-	for !granted(gate, small) {
-		if time.Now().After(deadline) {
-			t.Fatal("the parked run was not granted again")
-		}
-		time.Sleep(testTimeout(time.Millisecond))
-	}
-	gate.mu.Lock()
-	backfilled := small.backfilled
-	gate.mu.Unlock()
-	if backfilled {
-		t.Fatal("a grant with no head waiting is still marked backfilled")
-	}
-}
-
 func TestBackfillWaitText(t *testing.T) {
 	for blocker, want := range map[model.AdmissionBlocker]string{
 		{Backfilling: true, HeadWaitSeconds: 45, MaxHeadWaitSeconds: 1200}: "head waiting 45s/20m, backfilling",

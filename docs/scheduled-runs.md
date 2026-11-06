@@ -132,7 +132,7 @@ Friday, not only on Fridays that fall on the 1st.
 ## Overlap, downtime and attribution
 
 **A due fire is queued even when other repository work is busy.** Weighted admission,
-KubeVirt capacity and declared concurrency groups decide when it executes. A
+generic resource capacity and declared concurrency groups decide when it executes. A
 stream of ordinary branch runs must not prevent a nightly from entering that
 queue. `fired` means the run was enqueued, not that it has started or passed.
 The current tick's branch head is pinned in the queued run; later pushes do not

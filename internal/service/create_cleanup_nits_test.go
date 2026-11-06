@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
@@ -72,7 +71,7 @@ func TestWorkflowCreateContractTerminalSweepRespectsPendingCancellation(t *testi
 	f := newRecoveryFixture(t)
 	run := recoveryWaitingRun(t, f, "feature/contract-sweep", "wf-contract", "")
 	scheduler := f.scheduler(t, &recoveryJobs{})
-	if err := scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S, argoworkflow.VMIDemand{}); err != nil {
+	if err := scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.store.MarkRunCreatePending(t.Context(), run.ID, run.WorkflowName); err != nil {
@@ -126,7 +125,7 @@ func TestWorkflowCreateRestoreFailureRegistersAndRetries(t *testing.T) {
 	scheduler := f.scheduler(t, jobs)
 	now := time.Now()
 	scheduler.createNow = func() time.Time { return now }
-	if err := scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S, argoworkflow.VMIDemand{}); err != nil {
+	if err := scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S); err != nil {
 		t.Fatal(err)
 	}
 	// An existing ungranted reservation makes both normal and quarantine
@@ -182,7 +181,7 @@ func TestWorkflowCreateConcurrentRegistrationHasOneGrant(t *testing.T) {
 	f := newRecoveryFixture(t)
 	run := recoveryWaitingRun(t, f, "feature/register-once", "wf-once", "")
 	scheduler := f.scheduler(t, &recoveryJobs{})
-	if err := scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S, argoworkflow.VMIDemand{}); err != nil {
+	if err := scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S); err != nil {
 		t.Fatal(err)
 	}
 	var workers sync.WaitGroup

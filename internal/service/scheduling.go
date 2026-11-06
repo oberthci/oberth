@@ -78,6 +78,11 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 		result.Message = store.PolicyRefreshWaitingReason + ": waiting for upstream trusted test policy; no publication is allowed."
 		return result, reason
 	}
+	if run.Phase == "preflight" {
+		result.State = "preflight"
+		result.Message = "Retired execution preflight; migrate to a workflow capability grant."
+		return result, reason
+	}
 	if isPendingCreate(run) {
 		result.State = "infra-pending"
 		result.Message = "Workflow creation outcome is uncertain; background cleanup is pending."
@@ -174,7 +179,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 				return result, reason
 			case "waiting":
 				result.Message = waitingAdmissionMessage(result.Admission)
-				if result.Admission.KubeVirtCapacity || result.Admission.Pressure != nil {
+				if result.Admission.Pressure != nil {
 					// This repository's grant is the blocker, independent of
 					// shared weight or other repositories' visibility.
 					return result, reason
@@ -194,11 +199,6 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 				return result, reason
 			case "admitted":
 				if run.StartedAt == nil {
-					if service.observeKVMPreflight(ctx, run, result) {
-						result.State = "preflight"
-						result.Message = "Trusted KVM preflight submitted; awaiting its result and cleanup before workflow submission."
-						return result, reason
-					}
 					result.State = "waiting"
 					result.Message = "Resource admission granted; waiting for workflow submission."
 					return result, reason
@@ -208,18 +208,8 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 		}
 	}
 	if run.StartedAt == nil {
-		if service.observeKVMPreflight(ctx, run, result) {
-			result.State = "preflight"
-			result.Message = "Trusted KVM preflight submitted; awaiting its result and cleanup before workflow submission."
-			return result, reason
-		}
 		result.State = "waiting"
 		result.Message = "Waiting for workflow submission."
-		return result, reason
-	}
-	if service.observeKVMPreflight(ctx, run, result) {
-		result.State = "preflight"
-		result.Message = "Trusted KVM preflight submitted; awaiting its result and cleanup before workflow submission."
 		return result, reason
 	}
 	if service.schedulingObserver == nil {
@@ -241,34 +231,11 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 	return result, reason
 }
 
-func (service *API) observeKVMPreflight(ctx context.Context, run model.Run, result *model.RunScheduling) bool {
-	if service.kvmPreflights == nil || run.WorkflowName != "" || run.Status != model.RunRunning {
-		return false
-	}
-	preflight, err := service.kvmPreflights.KVMPreflight(ctx, run.ID)
-	if err != nil || !preflight.Submitted || preflight.Rejected || preflight.Cleaned {
-		return false
-	}
-	now := service.schedulingClock().Now()
-	started, expires := preflight.Intent.AdmittedAt, preflight.Intent.Deadline
-	remaining := max(int64(0), int64(expires.Sub(now)/time.Second))
-	result.Execution = &model.ExecutionObservation{State: "preflight", Deadline: &model.ExecutionDeadline{
-		BudgetSeconds: int64(expires.Sub(started) / time.Second), Clock: "preflight_admitted_at", StartedAt: &started, ExpiresAt: &expires, RemainingSeconds: &remaining, Elapsed: !now.Before(expires),
-	}}
-	return true
-}
-
 // waitingAdmissionMessage names the concurrency group and the exact run a
 // grouped run waits on (#658). The group is a validated [a-z0-9-] name and the
 // runs are server-issued IDs, so neither can carry arbitrary text.
 func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
 
-	if admission.KubeVirtCapacity {
-		return "KubeVirt capacity"
-	}
-	if admission.VMCapacity {
-		return "Waiting for trusted VM capacity; no weighted resources or concurrency group held."
-	}
 	switch {
 	case admission.DiskFloor != nil && admission.DiskFloor.BelowFloor:
 		return fmt.Sprintf("Waiting for disk space: %d bytes free, floor is %d bytes. "+
@@ -375,8 +342,4 @@ func applyExecutionDisplay(run *model.Run, scheduling *model.RunScheduling) {
 		}
 		run.DisplayReason = parkPolicyDisplayReason(*run, displayFailureText(joinRunMessage(priorityPrefix(*run), message)))
 	}
-}
-
-func (service *API) submittedKVMPreflight(ctx context.Context, run model.Run) bool {
-	return service.observeKVMPreflight(ctx, run, &model.RunScheduling{})
 }

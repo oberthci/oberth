@@ -19,12 +19,6 @@ import (
 
 type schedulingObserverFunc func(context.Context, model.Run) (*model.ExecutionObservation, error)
 
-type admittedObservation struct{}
-
-func (admittedObservation) AdmissionSnapshot(int64) *model.AdmissionObservation {
-	return &model.AdmissionObservation{State: "admitted", Weight: 1, Capacity: 1, Used: 1}
-}
-
 func (f schedulingObserverFunc) ObserveScheduling(ctx context.Context, run model.Run) (*model.ExecutionObservation, error) {
 	return f(ctx, run)
 }
@@ -95,49 +89,6 @@ func TestClaimedRunShowsCapacityWaitUntilSubmission(t *testing.T) {
 	if observation.State != "waiting" || !strings.Contains(observation.Message, "waiting for workflow submission") {
 		t.Fatalf("admission alone started run: %#v", observation)
 	}
-}
-
-func TestSubmittedKVMPreflightHasDistinctSchedulingState(t *testing.T) {
-	f, service, intent := kvmReadFixture(t)
-	service.admission = admittedObservation{}
-	service.logs = f.logs
-	ctx := t.Context()
-	run, err := f.store.Run(ctx, intent.RunID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	check := func(want string) {
-		t.Helper()
-		observation, _ := service.observeScheduling(ctx, run, nil, true)
-		if observation == nil || observation.State != want || observation.Admission == nil || run.StartedAt != nil {
-			t.Fatalf("preflight state = %#v, run = %#v; want %s", observation, run, want)
-		}
-	}
-	check("waiting")
-	if _, err := f.store.ReserveKVMPreflight(ctx, intent); err != nil {
-		t.Fatal(err)
-	}
-	check("waiting")
-	if err := f.store.SubmitKVMPreflight(ctx, intent.RunID); err != nil {
-		t.Fatal(err)
-	}
-	check("preflight")
-	detail, err := service.Run(ctx, api.Actor{Identity: "agent@host"}, run.ID)
-	if err != nil || detail.(RunDetailResponse).Scheduling.State != "preflight" {
-		t.Fatalf("run detail hid preflight: %#v, %v", detail, err)
-	}
-	log, err := service.RunLogLive(ctx, api.Actor{Identity: "agent@host"}, run.ID, 0)
-	if err != nil || log.(LiveLogResponse).Status != "waiting" {
-		t.Fatalf("live log status diverged from visible run: %#v, %v", log, err)
-	}
-	if err := f.store.BindKVMPreflight(ctx, intent.RunID, "workflow-uid"); err != nil {
-		t.Fatal(err)
-	}
-	check("preflight")
-	if err := f.store.CompleteKVMPreflightCleanup(ctx, intent.RunID, "workflow-uid"); err != nil {
-		t.Fatal(err)
-	}
-	check("waiting")
 }
 
 func TestSchedulingProjectionSkipsTerminalAndProgressedListRows(t *testing.T) {

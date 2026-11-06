@@ -63,3 +63,18 @@ func TestPilotRetirementPreservesReadOnlyHistory(t *testing.T) {
 		t.Errorf("credential transition consulted retired pilot history: %v", err)
 	}
 }
+
+const executionRetirementTriggersDowngradeSQL = `
+DROP TRIGGER IF EXISTS vm_executions_retired_insert;
+DROP TRIGGER IF EXISTS vm_executions_retired_update;
+DROP TRIGGER IF EXISTS vm_executions_retired_delete;
+DROP TRIGGER IF EXISTS vm_capacity_slots_retired_insert;
+DROP TRIGGER IF EXISTS vm_capacity_slots_retired_update;
+DROP TRIGGER IF EXISTS vm_capacity_slots_retired_delete;
+DROP TRIGGER IF EXISTS kubevirt_grants_retired_insert;
+DROP TRIGGER IF EXISTS kubevirt_grants_retired_update;
+DROP TRIGGER IF EXISTS kubevirt_grants_retired_delete;
+DELETE FROM schema_migrations WHERE version>=48;
+`
+
+const executionRetirementDowngradeSQL = resourceCeilingDowngradeSQL + executionRetirementTriggersDowngradeSQL

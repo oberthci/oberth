@@ -16,7 +16,6 @@ import (
 	argoscheme "github.com/argoproj/argo-workflows/v4/pkg/client/clientset/versioned/scheme"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	typedcore "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -146,17 +145,9 @@ func buildArgoTarget(policy *argoTargetPolicy) ([]app.ExecutionTarget, error) {
 	if err != nil {
 		return nil, err
 	}
-	vmi, err := dynamic.NewForConfig(transport)
-	if err != nil {
-		return nil, err
-	}
-	create, err := rest.UnversionedRESTClientFor(dynamic.ConfigFor(transport))
-	if err != nil {
-		return nil, err
-	}
 	target := app.ExecutionTarget{ID: policy.ID, Config: policy.Config, Transport: transport, Kubernetes: &singlePostKubernetes{Interface: kube}, Workflows: func(namespace string) argojob.WorkflowClient {
 		return &singlePostWorkflows{WorkflowClient: workflows.ArgoprojV1alpha1().Workflows(namespace), client: workflows.ArgoprojV1alpha1().RESTClient(), namespace: namespace}
-	}, Exec: newArgoExecStreamer(transport, kube), VMI: vmi, VMICreate: create}
+	}, Exec: newArgoExecStreamer(transport, kube)}
 	if policy.ResourceSampler != "" {
 		config, err := resourcesampler.ReadConfig(policy.ResourceSampler)
 		if err != nil {

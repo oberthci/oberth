@@ -14,11 +14,8 @@ import (
 	"testing"
 	"time"
 
-	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	apiequality "k8s.io/apimachinery/pkg/api/equality"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -30,13 +27,18 @@ import (
 	ktesting "k8s.io/client-go/testing"
 	"k8s.io/utils/ptr"
 
-	"github.com/oberthci/oberth/internal/vmrunner"
+	"github.com/oberthci/oberth/internal/workflowpolicy"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func placementFixture(t *testing.T) (Config, Request, []runtime.Object) {
 	t.Helper()
-	config, request := trustedKVMRequest(t)
+	config := testConfig()
+	config.NonrootProfile = argoworkflow.NonrootStaticProfile
+	request := testRequest(pipeline.TriggerCI, greedyDocument)
+	request.UpstreamName = "codeberg"
+	request.RepositoryID = 1
 	config.applyDefaults()
 	config.SourceStorageClass = "isolated-fixture"
 	config.GoProxyURL = "https://proxy.example.test:8444"
@@ -48,14 +50,15 @@ func placementFixture(t *testing.T) (Config, Request, []runtime.Object) {
 	// Explicitly synthetic identities; authenticated runtime evidence is external.
 	fields := reflect.ValueOf(&d).Elem()
 	for i := 0; i < fields.NumField(); i++ {
-		if fields.Type().Field(i).Name == "ParentRunID" || fields.Type().Field(i).Name == "NormalWorkflow" || fields.Type().Field(i).Name == "PreflightWorkflow" || fields.Type().Field(i).Name == "BranchPolicyBaseline" || fields.Type().Field(i).Name == "GraphDigest" || fields.Type().Field(i).Name == "FragmentLockDigest" {
+		switch fields.Type().Field(i).Name {
+		case "ParentRunID", "NormalWorkflow", "PreflightWorkflow", "BranchPolicyBaseline", "GraphDigest", "FragmentLockDigest":
 			continue
 		}
 		if fields.Field(i).Kind() == reflect.String {
 			fields.Field(i).SetString("fixture")
 		}
 	}
-	d.Schema = "oberth.execution-placement/v1"
+	d.Schema = branchPlacementSchema
 	d.Repository = "codeberg/acme/oberth"
 	d.RepositoryID = request.RepositoryID
 	d.Ref = request.Ref
@@ -92,107 +95,36 @@ func placementFixture(t *testing.T) (Config, Request, []runtime.Object) {
 	d.AdmissionConfigMap = "admission-fixture"
 	d.AdmissionUID = "admission-uid"
 	d.AdmissionProfile = "kube1357-dts300"
-	d.Normal = placementRun{RunID: "normal-run", Workflow: "normal-workflow"}
-	d.Preflight = placementRun{RunID: request.RunID, Workflow: request.Name, TrustedIntent: vmrunner.KVMIntentDigest(*request.TrustedKVM)}
+	d.Normal = placementRun{RunID: request.RunID, Workflow: request.Name}
+	proof, err := workflowpolicy.ResolveBranchAuthority(t.Context(), absentBranchPolicy{}, d.Repository, request.SHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.BranchAuthority = proof
+	d.BranchPolicyBaseline, d.PolicyDigest = proof.Identity()
+	resolved, err := argoworkflow.ResolveRunSource(request.Source, request.Fragments, argoworkflow.RunSourceBinding{RunID: request.RunID, RepositoryID: request.RepositoryID, SHA: request.SHA, File: request.PipelineFile, Trigger: request.effectiveRunTrigger()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.GraphDigest, d.FragmentLockDigest = resolved.GraphIdentity(), placementHash(resolved.Lock())
 	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: d.AdmissionConfigMap, Namespace: d.Namespace, UID: types.UID(d.AdmissionUID), ResourceVersion: "1"}, Immutable: ptr.To(true), Data: map[string]string{"cluster_id": d.ClusterID, "cluster_created": d.ClusterCreated, "control_plane_version": d.ControlPlaneVersion, "node_version": d.NodeVersion, "admission_configuration": d.AdmissionConfiguration, "profile": d.AdmissionProfile, "intent_digest": d.IntentDigest, "policy_digest": d.PolicyDigest}}
 	d.AdmissionDigest = placementHash(cm.Data)
-	body, _ := json.Marshal(d)
+	body, _ := json.Marshal(&ExecutionPlacement{document: d})
 	p, err := ParseExecutionPlacement(body)
 	if err != nil {
 		t.Fatal(err)
 	}
 	config.ExecutionPlacement = p
-	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: d.NodeName, UID: types.UID(d.NodeUID), Labels: p.selectors()}, Spec: corev1.NodeSpec{ProviderID: d.ProviderID}, Status: corev1.NodeStatus{NodeInfo: corev1.NodeSystemInfo{KubeletVersion: d.NodeVersion}, Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}, Allocatable: corev1.ResourceList{corev1.ResourceName(kvmDeviceResource): resource.MustParse("4")}}}
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: d.NodeName, UID: types.UID(d.NodeUID), Labels: p.selectors()}, Spec: corev1.NodeSpec{ProviderID: d.ProviderID}, Status: corev1.NodeStatus{NodeInfo: corev1.NodeSystemInfo{KubeletVersion: d.NodeVersion}, Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}}}
 	rs := &appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{Name: d.ReplicaSet, Namespace: d.Namespace, UID: types.UID(d.ReplicaSetUID), OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "Deployment", Name: d.Deployment, UID: types.UID(d.DeploymentUID), Controller: ptr.To(true)}}}}
 	deployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: d.Deployment, Namespace: d.Namespace, UID: types.UID(d.DeploymentUID)}, Spec: appsv1.DeploymentSpec{Replicas: ptr.To(int32(1))}, Status: appsv1.DeploymentStatus{ReadyReplicas: 1}}
-	request = prepareTrustedTestRequest(t, config, request)
 	return config, request, []runtime.Object{pod, controllerCM, node, rs, deployment, cm, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "kube-system", UID: types.UID(d.ClusterAnchorUID)}}}
-}
-
-func TestExecutionPlacementBuildAndDefault(t *testing.T) {
-	config, request, _ := placementFixture(t)
-	for _, preflight := range []bool{false, true} {
-		t.Run(map[bool]string{false: "normal", true: "preflight"}[preflight], func(t *testing.T) {
-			r := request
-			if !preflight {
-				r.TrustedKVM = nil
-				r.RunID = config.ExecutionPlacement.document.Normal.RunID
-				r.Name = config.ExecutionPlacement.document.Normal.Workflow
-				r.SourceVolume = (&Controller{config: config}).expectedSourceVolume(r)
-			}
-			wf, err := Build(config, r)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !preflight {
-				audit := r
-				audit.SourceVolume = SourceVolume{}
-				predicted, err := Build(config, audit)
-				if err != nil || !reflect.DeepEqual(predicted, wf) {
-					t.Fatal("pre-seed audit differs from actual normal delivery", err)
-				}
-			}
-			count := 0
-			walkTemplates(wf, func(leaf *wfv1.Template) {
-				if leaf.Container == nil && leaf.Script == nil {
-					return
-				}
-				count++
-				if !reflect.DeepEqual(leaf.NodeSelector, config.ExecutionPlacement.selectors()) || !equalPlacementTolerations(leaf.Tolerations, config.ExecutionPlacement.nativeTolerations()) {
-					t.Fatal("leaf not placed")
-				}
-				var patch struct {
-					Volumes        []corev1.Volume    `json:"volumes"`
-					Containers     []corev1.Container `json:"containers"`
-					InitContainers []corev1.Container `json:"initContainers"`
-				}
-				if err := json.Unmarshal([]byte(leaf.PodSpecPatch), &patch); err != nil {
-					t.Fatal(err)
-				}
-				caps := map[string]string{}
-				for _, v := range patch.Volumes {
-					if v.EmptyDir != nil && v.EmptyDir.SizeLimit != nil {
-						caps[v.Name] = v.EmptyDir.SizeLimit.String()
-					}
-				}
-				if caps["var-run-argo"] != "1Gi" || caps["tmp-dir-argo"] != "64Mi" {
-					t.Fatalf("caps %v", caps)
-				}
-				for _, c := range append(patch.Containers, patch.InitContainers...) {
-					if c.Name == "wait" || c.Name == "init" || c.Name == executorTokenWaiter {
-						if !apiequality.Semantic.DeepEqual(c.Resources, executorControlResources()) {
-							t.Fatalf("helper resources %s", c.Name)
-						}
-					}
-				}
-			})
-			if count < 1 {
-				t.Fatal("no leaves")
-			}
-			if destination := os.Getenv("OBERTH_PLACEMENT_EXPORT"); destination != "" {
-				body, _ := json.MarshalIndent(wf, "", "  ")
-				if err := os.WriteFile(filepath.Join(destination, map[bool]string{false: "normal", true: "preflight"}[preflight]+"-workflow.json"), body, 0600); err != nil {
-					t.Fatal(err)
-				}
-			}
-		})
-	}
-	config.ExecutionPlacement = nil
-	wf, err := Build(config, request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, leaf := range wf.Spec.Templates {
-		if len(leaf.Tolerations) != 0 {
-			t.Fatal("default behavior changed")
-		}
-	}
 }
 
 func TestExecutionPlacementSelectionRefusesBeforeSeed(t *testing.T) {
 	config, request, objects := placementFixture(t)
 	mutations := map[string]func(*Request){"source-volume": func(r *Request) { r.SourceVolume.ClaimName = "foreign" },
-		"run": func(r *Request) { r.RunID = "other" }, "workflow": func(r *Request) { r.Name = "other" }, "repository": func(r *Request) { r.Repo = "other" }, "repo-id": func(r *Request) { r.RepositoryID++ }, "ref": func(r *Request) { r.Ref = "refs/heads/other" }, "source": func(r *Request) { r.Source = append(append([]byte{}, r.Source...), 10) }, "sha": func(r *Request) { r.SHA = strings.Repeat("b", 40) }, "pipeline": func(r *Request) { r.PipelineFile = ".oberth/other.yaml" }, "intent": func(r *Request) { v := *r.TrustedKVM; v.InventoryDigest = strings.Repeat("1", 64); r.TrustedKVM = &v }, "trigger": func(r *Request) { r.Trigger = pipeline.TriggerRelease }}
+		"run": func(r *Request) { r.RunID = "other" }, "workflow": func(r *Request) { r.Name = "other" }, "repository": func(r *Request) { r.Repo = "other" }, "repo-id": func(r *Request) { r.RepositoryID++ }, "ref": func(r *Request) { r.Ref = "refs/heads/other" }, "source": func(r *Request) { r.Source = append(append([]byte{}, r.Source...), 10) }, "sha": func(r *Request) { r.SHA = strings.Repeat("b", 40) }, "pipeline": func(r *Request) { r.PipelineFile = ".oberth/other.yaml" }, "trigger": func(r *Request) { r.Trigger = pipeline.TriggerRelease }}
 	for name, mutate := range mutations {
 		t.Run(name, func(t *testing.T) {
 			r := request
@@ -263,7 +195,7 @@ func TestExecutionPlacementConfigurationAndEnvironment(t *testing.T) {
 			} else {
 				value.SetString("")
 			}
-			body, _ := json.Marshal(d)
+			body, _ := json.Marshal(&ExecutionPlacement{document: d})
 			if _, err := ParseExecutionPlacement(body); err == nil {
 				t.Fatal("missing required identity or foreign branch identity accepted")
 			}
@@ -354,58 +286,6 @@ func TestExecutionPlacementRolesAndCanonicalRefusals(t *testing.T) {
 	}
 	if _, err := p.admittedTolerations("unknown"); err == nil {
 		t.Fatal("unknown role")
-	}
-}
-
-func TestExecutionPlacementWholeTrustedPod(t *testing.T) {
-	config, request, _ := placementFixture(t)
-	wf, err := Build(config, request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wf.UID = "workflow-uid"
-	wf.Status.StartedAt = metav1.NewTime(request.TrustedKVM.AdmittedAt)
-	var leaf *wfv1.Template
-	for i := range wf.Spec.Templates {
-		if wf.Spec.Templates[i].Name == trustedKVMTemplate {
-			leaf = &wf.Spec.Templates[i]
-		}
-	}
-	pod := trustedKVMMaterializedPod(t, wf, leaf)
-	pod.ResourceVersion = "1"
-	pod.Spec.NodeName = config.ExecutionPlacement.document.NodeName
-	pod.Spec.Tolerations, _ = config.ExecutionPlacement.admittedTolerations("harness")
-	var node wfv1.NodeStatus
-	for _, v := range wf.Status.Nodes {
-		if v.TemplateName == trustedKVMTemplate {
-			node = v
-		}
-	}
-	if err := verifyTrustedKVMPod(wf, leaf, pod, &node, config); err != nil {
-		t.Fatal(err)
-	}
-	mutations := map[string]func(*corev1.Pod){"selector": func(p *corev1.Pod) {
-		p.Spec.NodeSelector = map[string]string{"kubernetes.io/os": "linux", "kubernetes.io/arch": "amd64"}
-	}, "node": func(p *corev1.Pod) { p.Spec.NodeName = "replaced" }, "resource-version": func(p *corev1.Pod) { p.ResourceVersion = "" }, "owner": func(p *corev1.Pod) { p.OwnerReferences[0].UID = "other" }, "privileged": func(p *corev1.Pod) { p.Spec.Containers[1].SecurityContext.Privileged = ptr.To(true) }, "executable": func(p *corev1.Pod) { p.Spec.Containers[1].Command = []string{"/bin/true"} }, "helper-resources": func(p *corev1.Pod) { p.Spec.Containers[0].Resources = corev1.ResourceRequirements{} }, "tolerations": func(p *corev1.Pod) { p.Spec.Tolerations = config.ExecutionPlacement.nativeTolerations() }, "scratch": func(p *corev1.Pod) {
-		for i := range p.Spec.Volumes {
-			if p.Spec.Volumes[i].Name == "tmp-dir-argo" {
-				p.Spec.Volumes[i].EmptyDir.SizeLimit = nil
-			}
-		}
-	}}
-	for name, mutate := range mutations {
-		t.Run(name, func(t *testing.T) {
-			p := pod.DeepCopy()
-			mutate(p)
-			if err := verifyTrustedKVMPod(wf, leaf, p, &node, config); err == nil {
-				t.Fatal("whole-Pod mutation accepted")
-			}
-		})
-	}
-	old := leaf.DeepCopy()
-	old.NodeSelector = map[string]string{"kubernetes.io/os": "linux", "kubernetes.io/arch": "amd64"}
-	if err := verifyTrustedKVMPod(wf, old, pod, &node, config); err == nil {
-		t.Fatal("old leaf/new selector accepted")
 	}
 }
 

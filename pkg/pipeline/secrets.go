@@ -83,12 +83,12 @@ func (path UpstreamSecretPath) Declared() string {
 // the server's configured mount. The transform is a constant-prefix rewrite of
 // already segment-validated input; declared text can never steer the fetch
 // outside the mount's data/upstream subtree.
-func (path UpstreamSecretPath) FetchPath(kvMount string) string {
+func (path UpstreamSecretPath) FetchPath(kvPath string) string {
 	suffix := path.Org + "/" + path.Secret
 	if path.Repo != "" {
 		suffix = path.Org + "/" + path.Repo + "/" + path.Secret
 	}
-	return kvMount + "/" + kvDataSegment + "/" + upstreamNamespaceSegment + "/" + suffix
+	return kvPath + "/" + kvDataSegment + "/" + upstreamNamespaceSegment + "/" + suffix
 }
 
 // Authorize enforces the hierarchical scoping rule against the server-derived

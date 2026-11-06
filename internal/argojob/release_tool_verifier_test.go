@@ -85,7 +85,6 @@ func TestBootstrapRetainsTestsAndSeparatesPublisherAuthority(t *testing.T) {
 			name, role string
 		}{
 			{"release-publish-images", "image-writer"},
-			{"release-publish-kvm-harness", "image-writer"},
 			{"release-publish-chart", "chart-writer"},
 		} {
 			if template.Name != publisher.name {
@@ -102,9 +101,8 @@ func TestBootstrapRetainsTestsAndSeparatesPublisherAuthority(t *testing.T) {
 			}
 		}
 	}
-	// 6 original credentialed leaves + release-publish-kvm-harness = 7
-	if seenTests != len(tests) || credentialed != 7 {
-		t.Fatalf("retained tests=%d credentialed leaves=%d, want %d and 7", seenTests, credentialed, len(tests))
+	if seenTests != len(tests) || credentialed != 6 {
+		t.Fatalf("retained tests=%d credentialed leaves=%d, want %d and 6", seenTests, credentialed, len(tests))
 	}
 }
 
@@ -262,7 +260,7 @@ func TestBootstrapExecutedEnvironmentIgnoresSharedCachesAndCredentials(t *testin
 		tested++
 	}
 	// Retain the deadcode gate with the remaining bootstrap and artifact wrappers.
-	if tested != 36 || !sawDeadcode {
-		t.Fatalf("executed %d wrappers (deadcode=%t), want all 36 including deadcode", tested, sawDeadcode)
+	if tested != 32 || !sawDeadcode {
+		t.Fatalf("executed %d wrappers (deadcode=%t), want all 32 including deadcode", tested, sawDeadcode)
 	}
 }

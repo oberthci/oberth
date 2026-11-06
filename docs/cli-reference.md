@@ -49,8 +49,7 @@ Usage of access revoke:
 
 ```text
 Usage: oberth admin read-file <public-identity-path> [fallback-path]
-       oberth admin retirement-check [--database path]
-Read allowed public identity files or check legacy-removal prerequisites inside the Oberth pod.
+Read allowed public identity files inside the Oberth pod.
 ```
 
 ## oberth admin read-file
@@ -58,15 +57,6 @@ Read allowed public identity files or check legacy-removal prerequisites inside 
 ```text
 Usage: oberth admin read-file <public-identity-path> [fallback-path]
 Read allowed public identity files inside the Oberth pod.
-```
-
-## oberth admin retirement-check
-
-```text
-Usage: oberth admin retirement-check [--database path]
-Check legacy-removal prerequisites through the private in-pod admin socket.
-  -database string
-        live daemon database path (default "/data/oberth.sqlite")
 ```
 
 ## oberth admission
@@ -416,43 +406,6 @@ Usage: oberth issues update --id <issue-id> --work-status <status> [flags]
         issue ID
   -work-status string
         todo, active, waiting or review
-```
-
-## oberth kubevirt
-
-```text
-Usage: oberth kubevirt <grant|get|revoke> [flags]
-Use oberth kubevirt <command> --help for command flags.
-```
-
-## oberth kubevirt get
-
-```text
-Usage of kubevirt get:
-  -database string
-        SQLite database path (in-pod) (default "/data/oberth.sqlite")
-```
-
-## oberth kubevirt grant
-
-```text
-Usage of kubevirt grant:
-  -database string
-        SQLite database path (in-pod) (default "/data/oberth.sqlite")
-  -max-cores int
-        maximum concurrent VMI cores across admitted runs, 1..64 (default 6)
-  -max-memory string
-        maximum concurrent VMI memory across admitted runs, a Kubernetes quantity 1Gi..256Gi (default 12Gi)
-  -max-vms int
-        maximum concurrent VMIs across admitted runs, 1..16 (default 2)
-```
-
-## oberth kubevirt revoke
-
-```text
-Usage of kubevirt revoke:
-  -database string
-        SQLite database path (in-pod) (default "/data/oberth.sqlite")
 ```
 
 ## oberth log
@@ -1088,8 +1041,6 @@ Usage of serve:
         workflow startup bound for absent or non-capacity-stalled pods; Kubernetes capacity waits are exempt (default 10m0s)
   -argo-ci-secrets-serviceaccount string
         ServiceAccount for CI templates with approved upstream-scoped secrets; its Vault role never carries release grants (default "oberth-argo-ci-secrets")
-  -argo-container-disk-prefixes string
-        comma-separated administrator allowlist of VMI containerDisk repository prefixes
   -argo-controller-profile string
         exact controller profile to verify before nonroot submission; empty disables nonroot
   -argo-credentialed-serviceaccount string
@@ -1122,12 +1073,6 @@ Usage of serve:
         Exact upstream owning private module repositories
   -argo-goproxy-url string
         HTTPS URL pipeline pods use to reach the module proxy (e.g. https://oberth-goproxy.oberth.svc:8444)
-  -argo-kubevirt-max-cores int
-        cluster-wide ceiling on any KubeVirt grant's concurrent VMI cores across admitted runs (1..64) (default 24)
-  -argo-kubevirt-max-memory string
-        cluster-wide ceiling on any KubeVirt grant's concurrent VMI memory across admitted runs (1Gi..256Gi) (default "48Gi")
-  -argo-kubevirt-max-vms int
-        cluster-wide ceiling on any KubeVirt grant's concurrent VMIs (1..16) (default 8)
   -argo-namespace string
         namespace for Argo Workflow pipelines (required)
   -argo-pipeline-serviceaccount string
@@ -1150,8 +1095,6 @@ Usage of serve:
         OpenBao Kubernetes auth role for CI pipelines with approved upstream-scoped secrets; bound to the CI-secrets ServiceAccount and namespace (empty refuses CI credentialed pipelines at admission)
   -argo-vault-credentialed-role string
         OpenBao Kubernetes auth role for credentialed release pipelines; bound to the credentialed ServiceAccount and namespace
-  -argo-vm-launcher-serviceaccount string
-        ServiceAccount used only by admitted VMI resource templates (default "oberth-argo-vm-launcher")
   -argo-workflow-timeout duration
         ceiling on a Workflow's own activeDeadlineSeconds (default 12h0m0s)
   -argo-workflow-ttl int
@@ -1274,20 +1217,12 @@ Usage of serve:
         TLS certificate (default "/etc/oberth/tls/tls.crt")
   -tls-key string
         TLS private key (default "/etc/oberth/tls/tls.key")
-  -trusted-tests-kvm-group int
-        operator-approved positive /dev/kvm supplemental GID required for trusted suites; no default device group
-  -trusted-tests-recipes string
-        public operator-approved trusted suite recipes JSON file
-  -trusted-tests-runtime string
-        protected runtime: legacy or generic-capability (explicit opt-in; requires per-repository device grants) (default "legacy")
   -uplink-token-default-ttl duration
         default lifetime for new uplink bearer tokens (90 days) (default 2160h0m0s)
   -uplink-token-max-ttl duration
         maximum new uplink bearer lifetime (hard ceiling 8760h / 365 days) (default 8760h0m0s)
   -upstream-key string
         upstream SSH private key (default "/etc/oberth/upstream-key/id_ed25519")
-  -vm-kvm-enabled
-        enable server-injected KVM device access for annotated leaves (requires KubeVirt device plugin)
 ```
 
 ## oberth setup
@@ -1353,6 +1288,8 @@ Usage: oberth status [flags]
 
 ```text
 Usage of upgrade:
+  -allow-retired-execution
+        override retired resource/repository checks; accept orphaned resources and refused legacy runs
   -argo-controller-profile string
         explicitly reconcile the managed nonroot-static-v1 Argo profile and verify it before enabling server admission
   -chart string
@@ -1537,16 +1474,6 @@ Usage of upstream remove:
 Usage of validate:
   -allow-unresolved-fragments
         deprecated: unresolved fragments still fail validation because admission requires their pinned contents
-  -container-disk-prefixes string
-        comma-separated containerDisk image prefixes for KubeVirt validation
-  -kubevirt
-        validate KubeVirt VM templates and KVM device leaves, including guest-test leaves (server grant still required)
-  -kubevirt-max-cores int
-        per-run peak VMI cores to validate against (default 6)
-  -kubevirt-max-memory string
-        per-run peak VMI memory to validate against (default 12Gi)
-  -kubevirt-max-vms int
-        per-run VMI budget to validate against, as a KubeVirt grant would set it (default 2)
   -runner-image-prefixes string
         comma-separated allowlist of permitted runner image prefixes (default "golang:,debian:,aquasec/trivy:")
 ```

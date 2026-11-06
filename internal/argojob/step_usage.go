@@ -54,7 +54,7 @@ func injectStepUsageMounts(wf *wfv1.Workflow, request Request) {
 	}
 	// Warnings are server-owned, including on leaves that are not measured.
 	walkTemplates(wf, func(t *wfv1.Template) { delete(t.Metadata.Annotations, usageMemoryWarningAnnotation) })
-	if request.omitStepUsage || request.TrustedKVM != nil {
+	if request.omitStepUsage {
 		return
 	}
 	walkTemplates(wf, func(t *wfv1.Template) {

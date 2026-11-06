@@ -26,5 +26,5 @@ func readArgoExecutionPlacement(name string) (*argojob.ExecutionPlacement, error
 	if err != nil {
 		return nil, err
 	}
-	return argojob.ParseExecutionPlacementForStartup(body)
+	return argojob.ParseExecutionPlacement(body)
 }

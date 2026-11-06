@@ -15,7 +15,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	typedcore "k8s.io/client-go/kubernetes/typed/core/v1"
 
@@ -49,7 +48,6 @@ type TargetClients struct {
 	workflows WorkflowClient
 	kube      kubernetes.Interface
 	journal   TargetCustody
-	vmi       dynamic.Interface
 	digest    string
 	now       func() time.Time
 }
@@ -67,7 +65,6 @@ func NewTargetClients(workflows WorkflowClient, kube kubernetes.Interface, journ
 	sum := sha256.Sum256(body)
 	return &TargetClients{workflows: workflows, kube: kube, journal: journal, config: config, digest: hex.EncodeToString(sum[:]), now: time.Now}, nil
 }
-func (c *TargetClients) WithVMI(client dynamic.Interface) *TargetClients { c.vmi = client; return c }
 
 func (c *TargetClients) WorkflowClient() WorkflowClient { return &targetWorkflows{clients: c} }
 func (c *TargetClients) Kubernetes() kubernetes.Interface {
@@ -457,32 +454,6 @@ func (c *TargetClients) Settle(ctx context.Context, notBefore time.Time) (settle
 				}
 			}
 		}
-		if c.vmi != nil {
-			objects, err := c.vmi.Resource(vmiResource).Namespace(b.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "oberth.ci/workflow=" + b.Workflow, Limit: 500})
-			if err != nil && !apierrors.IsNotFound(err) {
-				return false, err
-			}
-			if err == nil {
-				if objects.GetContinue() != "" {
-					return false, ErrTargetUncertain
-				}
-				for i := range objects.Items {
-					object := &objects.Items[i]
-					if workflowUID == "" {
-						return false, ErrTargetUncertain
-					}
-					if ownedByTarget(object.GetOwnerReferences(), workflowUID) {
-						body, err := json.Marshal(object)
-						if err != nil {
-							return false, err
-						}
-						if err := c.journal.RetainOwned(ctx, model.ExecutionTargetResource{RunID: b.RunID, Kind: "VirtualMachineInstance", Namespace: b.Namespace, Name: object.GetName(), UID: string(object.GetUID()), Object: body, NotBefore: notBefore}, workflowUID); err != nil {
-							return false, err
-						}
-					}
-				}
-			}
-		}
 		rows, err = c.journal.Resources(ctx)
 		if err != nil {
 			return false, err
@@ -494,11 +465,7 @@ func (c *TargetClients) Settle(ctx context.Context, notBefore time.Time) (settle
 		var object metav1.Object
 		var readErr error
 		switch r.Kind {
-		case "VirtualMachineInstance":
-			if c.vmi == nil {
-				return false, ErrTargetUncertain
-			}
-			object, readErr = c.vmi.Resource(vmiResource).Namespace(r.Namespace).Get(ctx, r.Name, metav1.GetOptions{})
+
 		case "Workflow":
 			object, readErr = c.workflows.Get(ctx, r.Name, metav1.GetOptions{})
 		case "Pod":
@@ -532,8 +499,7 @@ func (c *TargetClients) Settle(ctx context.Context, notBefore time.Time) (settle
 		options.PropagationPolicy = &propagation
 		var deleteErr error
 		switch r.Kind {
-		case "VirtualMachineInstance":
-			deleteErr = c.vmi.Resource(vmiResource).Namespace(r.Namespace).Delete(ctx, r.Name, options)
+
 		case "Workflow":
 			deleteErr = c.workflows.Delete(ctx, r.Name, options)
 		case "Pod":
@@ -617,15 +583,6 @@ func (c *TargetClients) VerifyResultCustody(ctx context.Context) error {
 				}
 				return ErrTargetUncertain
 			}
-		}
-	}
-	if c.vmi != nil {
-		objects, err := c.vmi.Resource(vmiResource).Namespace(b.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "oberth.ci/workflow=" + b.Workflow, Limit: 1})
-		if err != nil && !apierrors.IsNotFound(err) {
-			return err
-		}
-		if err == nil && len(objects.Items) > 0 {
-			return ErrTargetUncertain
 		}
 	}
 	if !workflowFound {

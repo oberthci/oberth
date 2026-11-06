@@ -100,7 +100,7 @@ func addRecordAliases(document any, value reflect.Value, changed *bool) {
 		// Only primary run records get the identity alias. A promotion's run_id
 		// remains a related run and must never overwrite its promotion id.
 		switch typ.Name() {
-		case "Run", "RunSummaryResponse", "RunCancelResponse", "RunRerunResponse", "LogResponse", "ArtifactListResponse", "ArtifactResponse", "KVMPreflightResponse", "LiveLogResponse", "StatusResponse":
+		case "Run", "RunSummaryResponse", "RunCancelResponse", "RunRerunResponse", "LogResponse", "ArtifactListResponse", "ArtifactResponse", "LiveLogResponse", "StatusResponse":
 			if id, ok := object["id"]; ok {
 				if _, exists := object["run_id"]; !exists {
 					object["run_id"] = id
@@ -193,7 +193,7 @@ func (server *Server) writeCollectionView(w http.ResponseWriter, r *http.Request
 // run_id. Kept in the wire package so schema advertisement and dispatch agree.
 func RunIDArgument(tool string) string {
 	switch tool {
-	case "run_get", "run_logs", "run_retry", "run_cancel", "run_rerun", "run_purge", "run_kvm_preflight", "artifacts", "artifact_get", "wait":
+	case "run_get", "run_logs", "run_retry", "run_cancel", "run_rerun", "run_purge", "artifacts", "artifact_get", "wait":
 		return "id"
 	case "run_resources":
 		return "run"

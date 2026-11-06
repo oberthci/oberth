@@ -6,13 +6,13 @@ type ResourceAdmissionFallback string
 const (
 	ResourceFallbackBudget   ResourceAdmissionFallback = "budget"
 	ResourceFallbackGraph    ResourceAdmissionFallback = "graph"
-	ResourceFallbackVM       ResourceAdmissionFallback = "vm_undeclared"
+	ResourceFallbackExternal ResourceAdmissionFallback = "vm_undeclared"
 	ResourceFallbackMemory   ResourceAdmissionFallback = "memory_unbounded"
 	ResourceFallbackRequests ResourceAdmissionFallback = "requests_undeclared"
 )
 
 func (r ResourceAdmissionFallback) Valid() bool {
-	return r == "" || r == ResourceFallbackBudget || r == ResourceFallbackGraph || r == ResourceFallbackVM || r == ResourceFallbackMemory || r == ResourceFallbackRequests
+	return r == "" || r == ResourceFallbackBudget || r == ResourceFallbackGraph || r == ResourceFallbackExternal || r == ResourceFallbackMemory || r == ResourceFallbackRequests
 }
 
 func (r ResourceAdmissionFallback) Message() string {
@@ -21,10 +21,10 @@ func (r ResourceAdmissionFallback) Message() string {
 		return "legacy size admission: commit measured requests/limits in git; declared demand including helper reserve exceeds the numeric budget."
 	case ResourceFallbackGraph:
 		return "legacy size admission: commit measured requests/limits in git; the declared resource graph cannot be bounded."
-	case ResourceFallbackVM:
-		return "legacy size admission: commit measured requests/limits in git; VM CPU or memory declarations are unavailable."
+	case ResourceFallbackExternal:
+		return "legacy size admission: commit measured requests/limits in git; historical external resource declarations are unavailable."
 	case ResourceFallbackMemory:
-		return "legacy size admission: commit measured requests/limits in git; a pod or VM container lacks a positive declared memory limit."
+		return "legacy size admission: commit measured requests/limits in git; a pod container lacks a positive declared memory limit."
 	case ResourceFallbackRequests:
 		return "legacy size admission: commit measured requests/limits in git; a pod container lacks positive declared CPU/memory requests."
 	default:

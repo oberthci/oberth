@@ -1,6 +1,7 @@
 package argoworkflow
 
 import (
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -8,7 +9,7 @@ import (
 // podCompletionDependencies proves which predecessors have completed whenever a
 // dependency expression is true. AND unions prerequisites; OR intersects them.
 // Only terminal states earn ordering credit. This proof concerns ordinary pod
-// overlap; VM execution/deletion proofs keep their separate, stricter parser.
+// overlap.
 func podCompletionDependencies(expression string) ([]string, bool) {
 	if len(expression) > 4096 {
 		return nil, false
@@ -19,11 +20,11 @@ func podCompletionDependencies(expression string) ([]string, bool) {
 			return nil, false
 		}
 		expression = strings.TrimSpace(expression)
-		ors, ok := splitVMIExpression(expression, "||")
+		ors, ok := splitDependencyExpression(expression, "||")
 		if !ok {
 			return nil, false
 		}
-		ands, ok := splitVMIExpression(expression, "&&")
+		ands, ok := splitDependencyExpression(expression, "&&")
 		if !ok {
 			return nil, false
 		}
@@ -70,7 +71,7 @@ func podCompletionDependencies(expression string) ([]string, bool) {
 		if qualified && status == "" {
 			return nil, false
 		}
-		if !vmiDNSLabelPattern.MatchString(name) {
+		if !dependencyNamePattern.MatchString(name) {
 			return nil, false
 		}
 		switch status {
@@ -90,4 +91,45 @@ func podCompletionDependencies(expression string) ([]string, bool) {
 	}
 	sort.Strings(out)
 	return out, true
+}
+
+var dependencyNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
+// splitDependencyExpression ignores operators inside quoted operands and only splits
+// at depth zero. Parenthesis/expression bounds are independent of graph bounds.
+func splitDependencyExpression(s, operator string) ([]string, bool) {
+	var parts []string
+	depth, start := 0, 0
+	var quote byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		if c == '\'' || c == '"' {
+			quote = c
+			continue
+		}
+		switch c {
+		case '(':
+			depth++
+		case ')':
+			depth--
+		}
+		if depth < 0 || depth > 16 {
+			return nil, false
+		}
+		if depth == 0 && strings.HasPrefix(s[i:], operator) {
+			parts = append(parts, strings.TrimSpace(s[start:i]))
+			i += len(operator) - 1
+			start = i + 1
+		}
+	}
+	if depth != 0 || quote != 0 {
+		return nil, false
+	}
+	return append(parts, strings.TrimSpace(s[start:])), true
 }

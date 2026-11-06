@@ -10,11 +10,11 @@ import (
 	"github.com/oberthci/oberth/internal/measured"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
-	"github.com/oberthci/oberth/internal/vmrunner"
+	"github.com/oberthci/oberth/internal/workflowpolicy"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
-func (jobs *ArgoJobs) SetResourceBlobs(blobs vmrunner.PolicyGit) {
+func (jobs *ArgoJobs) SetResourceBlobs(blobs workflowpolicy.PolicyGit) {
 	jobs.resourceBlobs = blobs
 	if jobs.routes != nil {
 		jobs.routes.local.SetResourceBlobs(blobs)

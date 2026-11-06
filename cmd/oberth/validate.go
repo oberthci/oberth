@@ -11,10 +11,8 @@ import (
 	"strings"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
-	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/oberthci/oberth/internal/argojob"
-	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
@@ -23,12 +21,6 @@ func runValidate(_ context.Context, arguments []string, output io.Writer) error 
 	flags := flag.NewFlagSet("validate", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
 	var imagePrefixes string
-	var containerDiskPrefixes string
-	kubeVirt := flags.Bool("kubevirt", false, "validate KubeVirt VM templates and KVM device leaves, including guest-test leaves (server grant still required)")
-	flags.StringVar(&containerDiskPrefixes, "container-disk-prefixes", "", "comma-separated containerDisk image prefixes for KubeVirt validation")
-	maxVMs := flags.Int("kubevirt-max-vms", 0, "per-run VMI budget to validate against, as a KubeVirt grant would set it (default 2)")
-	maxCores := flags.Int("kubevirt-max-cores", 0, "per-run peak VMI cores to validate against (default 6)")
-	maxMemory := flags.String("kubevirt-max-memory", "", "per-run peak VMI memory to validate against (default 12Gi)")
 	flags.Bool("allow-unresolved-fragments", false,
 		"deprecated: unresolved fragments still fail validation because admission requires their pinned contents")
 	flags.StringVar(&imagePrefixes, "runner-image-prefixes", strings.Join(pipeline.DefaultRunnerImagePrefixes, ","), "comma-separated allowlist of permitted runner image prefixes")
@@ -48,31 +40,13 @@ func runValidate(_ context.Context, arguments []string, output io.Writer) error 
 		return err
 	}
 	target.imagePrefixes = splitRunnerImagePrefixes(imagePrefixes)
-	target.kubeVirt = *kubeVirt
-	target.containerDiskPrefixes = splitRunnerImagePrefixes(containerDiskPrefixes)
-	if *maxVMs != 0 || *maxCores != 0 || *maxMemory != "" {
-		budget := store.KubeVirtBudget{MaxVMs: *maxVMs, MaxCores: *maxCores}
-		if *maxMemory != "" {
-			if budget.MaxMemoryBytes, err = store.ParseKubeVirtMemory(*maxMemory); err != nil {
-				return fmt.Errorf("%w: %w", errUsage, err)
-			}
-		}
-		budget = budget.WithDefaults()
-		if err := budget.Validate(); err != nil {
-			return fmt.Errorf("%w: %w", errUsage, err)
-		}
-		target.kubeVirtBudget = argoworkflow.VMIBudget{MaxVMs: budget.MaxVMs, MaxCores: budget.MaxCores, MaxMemory: *resource.NewQuantity(budget.MaxMemoryBytes, resource.BinarySI)}
-	}
 	return executeValidate(target, output)
 }
 
 // validateTarget names the locations every check derives from.
 type validateTarget struct {
-	repoRoot              string   // the repository root
-	imagePrefixes         []string // administrator-allowed runner image prefixes
-	kubeVirt              bool
-	containerDiskPrefixes []string
-	kubeVirtBudget        argoworkflow.VMIBudget // zero: the default grant budget
+	repoRoot      string   // the repository root
+	imagePrefixes []string // administrator-allowed runner image prefixes
 }
 
 // resolveValidateTarget accepts the same spellings a developer reaches for:
@@ -169,7 +143,7 @@ func executeValidate(target validateTarget, output io.Writer) error {
 			continue
 		}
 
-		if err := argoworkflow.Admit(workflow, argoworkflow.Policy{RunnerImagePrefixes: target.imagePrefixes, KubeVirt: target.kubeVirt, ContainerDiskPrefixes: target.containerDiskPrefixes, VMIBudget: target.kubeVirtBudget}); err != nil {
+		if err := argoworkflow.Admit(workflow, argoworkflow.Policy{RunnerImagePrefixes: target.imagePrefixes}); err != nil {
 			report.problem("admission %s: %v", entry.file, err)
 			continue
 		}

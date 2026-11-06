@@ -22,7 +22,6 @@ access list
 access revoke
 admin
 admin read-file
-admin retirement-check
 admission
 admission groups
 admission hold
@@ -44,10 +43,6 @@ init
 install
 issues
 issues update
-kubevirt
-kubevirt get
-kubevirt grant
-kubevirt revoke
 log
 mcp
 mcp call
@@ -227,7 +222,6 @@ func TestHelpIncludesRegisteredFlags(t *testing.T) {
 		"remoteFlags":        {"run", "repos", "status", "issues"},
 		"fragmentFlags":      {"fragments list", "fragments show"},
 		"runSizeGrant":       {"size grant"},
-		"runKubeVirtGrant":   {"kubevirt grant"},
 		"runResourceGrant":   {"resource grant"},
 		"runRepoArchive":     {"repo archive", "repo unarchive"},
 		"runRemoteSchedules": {"schedules list", "schedules pause", "schedules resume", "schedules trigger"},

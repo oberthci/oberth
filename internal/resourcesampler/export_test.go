@@ -12,6 +12,6 @@ import (
 // and the kubelet cgroup path must agree. CPU/memory/IO are main-container scope;
 // ephemeral storage and PSI are pod scope (including helpers), not PVC/VM disks.
 func Observe(b Binding, pod *corev1.Pod, snapshot Snapshot, now time.Time) (model.StepResourceUsage, bool) {
-	v, ok := observe(b, pod, IndexSnapshot(snapshot), now, "main", "app", "workflow", false)
+	v, ok := observe(b, pod, IndexSnapshot(snapshot), now, "main", "app", "workflow")
 	return v, ok && (v.Samples > 0 || v.Terminal)
 }

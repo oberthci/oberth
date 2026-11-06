@@ -168,7 +168,7 @@ func TestOberthReleaseNodePinsMatchTheFetch(t *testing.T) {
 		}
 	}
 	joined := strings.Join(setup, ",")
-	if !strings.Contains(joined, "validate-tag,fetch-apko,verify-apko,install-apko,fetch-node,verify-node,copy-test-tools") {
+	if !strings.Contains(joined, "validate-tag,fetch-node,verify-node,copy-test-tools") {
 		t.Fatalf("release-setup order = %s", joined)
 	}
 }

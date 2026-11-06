@@ -159,7 +159,7 @@ func (gate *weightedAdmission) backfillFitsLocked(head, candidate *admissionRese
 	sort.Slice(completions, func(i, j int) bool { return completions[i].Before(completions[j]) })
 	for _, finish := range completions {
 		projection.finishBy(finish, now)
-		if !projection.canGrantLocked(head) || !projection.kubeVirtFitsLocked(head) {
+		if !projection.canGrantLocked(head) {
 			continue
 		}
 		// Later backfills cannot move an existing reservation into the future.
@@ -197,7 +197,7 @@ func (gate *weightedAdmission) backfillFitsLocked(head, candidate *admissionRese
 		held := *candidate
 		held.granted, held.released = true, false
 		projection.reservations[candidate.sequence] = &held
-		if projection.canGrantLocked(head) && projection.kubeVirtFitsLocked(head) {
+		if projection.canGrantLocked(head) {
 			candidate.backfillMessage = "backfilled: head still fits at its reserved start"
 			return true
 		}
@@ -403,7 +403,7 @@ func (gate *weightedAdmission) backfillClaimsOpenLocked(waiting int) bool {
 		return false
 	}
 	for _, reservation := range gate.waiters {
-		if !reservation.vmParked && !reservation.prepared {
+		if !reservation.prepared {
 			return false
 		}
 	}

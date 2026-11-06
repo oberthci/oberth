@@ -7,11 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -868,17 +871,21 @@ func TestRunUpgradeFullFlow(t *testing.T) {
 	for _, auditFails := range []bool{false, true} {
 		for _, shadow := range []string{"", "true", "false"} {
 			t.Run(fmt.Sprintf("audit-fails=%t/shadow=%s", auditFails, shadow), func(t *testing.T) {
-				testRunUpgradeFullFlow(t, auditFails, shadow)
+				testRunUpgradeFullFlow(t, auditFails, shadow, "0.12.34", "0.12.35")
 			})
 		}
 	}
 }
 
-func testRunUpgradeFullFlow(t *testing.T, auditFails bool, shadow string) {
+func TestRunUpgradeAfterLegacyRemovalWithoutOverride(t *testing.T) {
+	testRunUpgradeFullFlow(t, false, "", "0.17.95", "0.17.96")
+}
+
+func testRunUpgradeFullFlow(t *testing.T, auditFails bool, shadow, installed, target string) {
 	t.Parallel()
 	var output bytes.Buffer
 	migrated := ""
-	details := map[string]string{"from": "0.12.34", "to": "0.12.35"}
+	details := map[string]string{"from": installed, "to": target}
 	if shadow != "" {
 		migrated = "gitcache.shadow=" + shadow
 		details["migrated"] = migrated
@@ -887,7 +894,7 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool, shadow string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	targetImage := "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth:v0.12.35@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+	targetImage := "europe-west4-docker.pkg.dev/skipopsmain/oberth/oberth:v" + target + "@sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
 	replicas := int32(1)
 
 	deployment := &appsv1.Deployment{
@@ -914,6 +921,22 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool, shadow string) {
 	}
 
 	kubeClient := fake.NewClientset(deployment)
+	var inventoryCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/apis/argoproj.io/v1alpha1":
+			_, _ = io.WriteString(w, `{"groupVersion":"argoproj.io/v1alpha1","resources":[{"name":"workflows","kind":"Workflow","namespaced":true,"verbs":["list"]}]}`)
+		case "/apis/argoproj.io/v1alpha1/namespaces/oberth-argo/workflows":
+			inventoryCalls.Add(1)
+			_, _ = io.WriteString(w, `{"apiVersion":"v1","kind":"List","items":[]}`)
+		case "/apis/kubevirt.io/v1":
+			http.Error(w, "not found", http.StatusNotFound)
+		default:
+			t.Errorf("unexpected inventory request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
 
 	verified, recorded := false, false
 	helmCallLog := make([]string, 0)
@@ -924,6 +947,14 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool, shadow string) {
 				return []byte(fmt.Sprintf(`{"gitcache":{"shadow":%s}}`, shadow)), nil
 			}
 			if out, ok := testUpgradeValuePreflight(args); ok {
+				if args[0] == "get" && args[1] == "values" && slices.Contains(args, "--all") {
+					var values map[string]any
+					if err := json.Unmarshal(out, &values); err != nil {
+						t.Fatal(err)
+					}
+					values["argo"] = map[string]any{"namespace": "oberth-argo"}
+					return json.Marshal(values)
+				}
 				return out, nil
 			}
 			helmCallLog = append(helmCallLog, args[0])
@@ -933,7 +964,7 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool, shadow string) {
 					Name:      "oberth",
 					Namespace: "oberth",
 					Status:    "deployed",
-					Chart:     "oberth-0.12.34",
+					Chart:     "oberth-" + installed,
 				}}
 				data, _ := json.Marshal(releases)
 				return data, nil
@@ -948,6 +979,9 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool, shadow string) {
 			}
 		},
 		RunCommand: func(_ context.Context, _ []byte, name string, args ...string) ([]byte, error) {
+			if strings.Contains(strings.Join(args, " "), "retirement-check") {
+				t.Fatal("post-removal server cannot supply retirement proof")
+			}
 			if strings.Contains(strings.Join(args, " "), "audit record") {
 				if !verified || name != "kubectl" {
 					t.Fatalf("audit before verification: %s %v", name, args)
@@ -963,15 +997,15 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool, shadow string) {
 				return nil, nil
 			}
 			verified = true
-			return []byte("oberth v0.12.35 commit=abc123 date=2026-08-18T00:00:00Z\n"), nil
+			return []byte("oberth v" + target + " commit=abc123 date=2026-08-18T00:00:00Z\n"), nil
 		},
 		KubeClient:  kubeClient,
-		RestConfig:  &rest.Config{Host: "https://api.remote.example:6443"},
+		RestConfig:  &rest.Config{Host: server.URL},
 		ContextName: "remote-fixture",
 	}
 
 	result, err := RunUpgrade(context.Background(), UpgradeConfig{
-		BinaryVersion: "0.12.35",
+		BinaryVersion: target,
 		Yes:           true,
 		Namespace:     "oberth",
 		Timeout:       10 * time.Second,
@@ -988,17 +1022,20 @@ func testRunUpgradeFullFlow(t *testing.T, auditFails bool, shadow string) {
 	if auditFails && !strings.Contains(output.String(), "could not record upgrade.completed") {
 		t.Fatalf("missing warning: %s", output.String())
 	}
+	if installed == "0.17.95" && inventoryCalls.Load() != 2 {
+		t.Fatalf("resource inventory must run before preparation and after preview: %d", inventoryCalls.Load())
+	}
 	if !result.Upgraded {
 		t.Fatal("expected Upgraded")
 	}
-	if result.PreviousVersion != "0.12.34" {
+	if result.PreviousVersion != installed {
 		t.Fatalf("PreviousVersion = %q", result.PreviousVersion)
 	}
 	text := output.String()
 	if !strings.Contains(text, "Ready — Oberth deployment in namespace oberth (context remote-fixture)") || strings.Contains(text, "https://localhost:") {
 		t.Fatalf("upgrade reported an assumed local endpoint: %s", text)
 	}
-	if !strings.Contains(text, "v0.12.34") || !strings.Contains(text, "v0.12.35") {
+	if !strings.Contains(text, "v"+installed) || !strings.Contains(text, "v"+target) {
 		t.Fatalf("output = %q", text)
 	}
 	if !strings.Contains(text, "ready") {
@@ -2047,5 +2084,16 @@ func TestUpgradeSilentWhenSchemaUnchanged(t *testing.T) {
 	text := output.String()
 	if strings.Contains(text, "Schema migration") {
 		t.Fatalf("should not announce schema migration when version unchanged: %q", text)
+	}
+}
+
+func TestUpgradeAcceptsRetiredValueOverrides(t *testing.T) {
+	for _, key := range []string{"trustedTests.recipes=[]", "trustedTests.runtime=legacy", "vm.kvm.enabled=true", "argo.kubevirtCeiling.maxVMs=4", "argo.vmLauncherServiceAccount=old"} {
+		if err := validateUserSetAgainstValues([]byte("argo: {}\n"), []string{key}); err != nil {
+			t.Fatalf("%s: %v", key, err)
+		}
+	}
+	if err := validateUserSetAgainstValues([]byte("argo: {}\n"), []string{"argo.typo=true"}); err == nil {
+		t.Fatal("unknown ordinary value accepted")
 	}
 }

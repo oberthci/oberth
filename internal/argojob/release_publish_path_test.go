@@ -38,7 +38,7 @@ func restrictedReleaseScript(t *testing.T, source, destination string, scanner b
 		}
 		fmt.Fprintf(&prelude, "%s() { \"$FIXTURE_ROOT/bin/%s\" \"$@\"; }\n", name, tool)
 	}
-	for _, name := range []string{"go", "grype", "cosign", "crane", "helm", "trivy", "apko", "node", "npm", "npx", "wrangler"} {
+	for _, name := range []string{"go", "grype", "cosign", "crane", "helm", "trivy", "node", "npm", "npx", "wrangler"} {
 		fmt.Fprintf(&prelude, "%s() { printf 'forbidden bare tool: %s\\n' >&2; return 127; }\n", name, name)
 	}
 	body := strings.ReplaceAll(string(raw), "/work/src/scripts/oberth-release-wif-credential.py", filepath.Join(filepath.Dir(destination), "scripts", "oberth-release-wif-credential.py"))
@@ -116,7 +116,7 @@ esac`)
 	f.tool("oberth-release-image", `printf 'image:%s\n' "$1" >>"$FIXTURE_TRACE"
 case "$1" in
  static-sbom) printf 'fixture SBOM\n' >"$3";;
- publish|verify|publish-kvm|verify-kvm)
+ publish|verify)
   if [ "$6" = wif ]; then
    printf '%s\n' europe-west4-docker.pkg.dev | docker-credential-oberth-wif get >/dev/null
   else test "$(cat "$6")" = fixture-restricted-access-token; fi
@@ -133,14 +133,11 @@ esac`)
 	f.tool("trivy", `printf 'trivy:%s\n' "$1" >>"$FIXTURE_TRACE"
 test "${FIXTURE_FAILURE:-}" != trivy`)
 	f.write("require-signature", "true")
-	f.tool("apko", `printf 'apko:%s\n' "$1" >>"$FIXTURE_TRACE"
-for last do :; done
-printf 'inert fixture image\n' >"$last"`)
 	support, err := os.ReadFile(filepath.Join(f.root, "bin/oberth-release-support"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.absolute(filepath.Join(f.root, "bin/oberth-release-support"), strings.Replace(string(support), "{'publish-images':", "{'publish-kvm-harness': 'source-image-delegator', 'publish-images':", 1), 0700)
+	f.absolute(filepath.Join(f.root, "bin/oberth-release-support"), string(support), 0700)
 	f.write("scripts/oberth-release-wif-credential.py", "import json,sys\nassert sys.argv[1:]==['get']\nassert sys.stdin.read().strip()=='europe-west4-docker.pkg.dev'\nprint(json.dumps({'Username':'oauth2accesstoken','Secret':'synthetic-wif-token'}))\n")
 	f.env = append(f.env, "GO="+filepath.Join(f.root, "bin/go"))
 	return f
@@ -235,7 +232,7 @@ func TestCredentialedPublishImagesRestrictedPath(t *testing.T) {
 }
 
 func TestOtherCredentialedReleaseActionsRestrictedPath(t *testing.T) {
-	for _, action := range []string{"sign-binaries", "publish-chart", "verify", "publish-public", "finalize", "publish-kvm-harness", "publish-homebrew"} {
+	for _, action := range []string{"sign-binaries", "publish-chart", "verify", "publish-public", "finalize", "publish-homebrew"} {
 		t.Run(action, func(t *testing.T) {
 			f := newRestrictedReleaseFixture(t)
 			if action == "verify" {

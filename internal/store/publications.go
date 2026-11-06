@@ -401,12 +401,6 @@ type publicationAuditQuerier interface {
 }
 
 func verifyPendingPublicationIntents(ctx context.Context, querier publicationAuditQuerier) error {
-	if err := verifyProtectedRuntimeAdmissions(ctx, querier); err != nil {
-		return err
-	}
-	if err := verifyProtectedPlacementAdmissions(ctx, querier); err != nil {
-		return err
-	}
 	rows, err := pendingPublicationRows(ctx, querier)
 	if err != nil {
 		return fmt.Errorf("verify pending publication intents: %w", err)

@@ -35,7 +35,7 @@ const (
 // mount. It prepares fresh per-Pod EmptyDirs, never shared storage ownership.
 func applyNonrootLeaves(workflow *wfv1.Workflow, config Config, request Request) error {
 	names, err := argoworkflow.DeclaredNonrootTemplates(workflow)
-	if err != nil || (len(names) == 0 && request.TrustedKVM == nil) {
+	if err != nil || len(names) == 0 {
 		return err
 	}
 	proof := request.nonrootProof
@@ -44,11 +44,6 @@ func applyNonrootLeaves(workflow *wfv1.Workflow, config Config, request Request)
 		return fmt.Errorf("argojob: nonroot controller support has not been established; selected leaves are disabled")
 	}
 	workflow.Annotations[nonrootProfileAnnotation] = proof.binding()
-	// The server-owned protected leaf needs the same controller proof, but does
-	// not authorize nonroot patches or extra volumes on ordinary producer leaves.
-	if len(names) == 0 {
-		return nil
-	}
 	workflow.Spec.Volumes = append(workflow.Spec.Volumes, corev1.Volume{
 		Name:         nonrootTmpVolume,
 		VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{SizeLimit: ptr.To(resource.MustParse("8Gi"))}},
@@ -194,7 +189,7 @@ func nonrootPodPatch(tmpl *wfv1.Template, config Config) ([]byte, error) {
 	return encoded, nil
 }
 
-// executorScratchLimit is shared by generation and protected Pod attestation.
+// executorScratchLimit is shared by generation and Pod attestation.
 // Config.Validate runs before either path consumes an administrator quantity.
 func (config Config) executorScratchLimit() *resource.Quantity {
 	if config.ExecutorScratchSizeLimit == "" {

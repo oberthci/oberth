@@ -287,9 +287,6 @@ func TestDatabaseDeadlineClassificationAndRequestBoundary(t *testing.T) {
 		}
 	}
 
-	if !recoverablePreflightError(errors.Join(context.Canceled, context.DeadlineExceeded)) || recoverablePreflightError(context.Canceled) || recoverablePreflightError(errors.Join(context.Canceled, context.DeadlineExceeded, invariant)) {
-		t.Fatal("trusted cancellation masked an invariant or lost DB failure")
-	}
 	scheduler := &Scheduler{}
 	calls := 0
 	if err := retryDatabaseError(t.Context(), "request", func(context.Context) error { calls++; return context.DeadlineExceeded }); !errors.Is(err, context.DeadlineExceeded) || calls != 1 || scheduler.DatabaseRetries() != 0 {

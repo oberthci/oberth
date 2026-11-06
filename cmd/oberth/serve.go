@@ -43,10 +43,8 @@ import (
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/sshserver"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 
-	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -54,39 +52,6 @@ import (
 type stringList []string
 
 var witnessChainResetUUIDPattern = regexp.MustCompile(`^(?:[0-9a-f]{64}|[0-9a-f]{80})$`)
-
-// The cluster ceiling caps every repository grant's concurrent VMI budget. A
-// grant still defaults to 2 VMs, 6 cores and 12Gi; the ceiling only bounds
-// what an administrator may raise a grant to on this cluster.
-const (
-	defaultKubeVirtCeilingVMs    = 8
-	defaultKubeVirtCeilingCores  = 24
-	defaultKubeVirtCeilingMemory = "48Gi"
-)
-
-// kubeVirtCeiling parses and validates the cluster ceiling flags. An unset
-// field (options built without flag parsing) takes the flag default.
-func kubeVirtCeiling(options serveOptions) (argoworkflow.VMIBudget, error) {
-	vms, cores, memoryValue := options.argoKubeVirtMaxVMs, options.argoKubeVirtMaxCores, strings.TrimSpace(options.argoKubeVirtMaxMemory)
-	if vms == 0 {
-		vms = defaultKubeVirtCeilingVMs
-	}
-	if cores == 0 {
-		cores = defaultKubeVirtCeilingCores
-	}
-	if memoryValue == "" {
-		memoryValue = defaultKubeVirtCeilingMemory
-	}
-	memory, err := resource.ParseQuantity(memoryValue)
-	if err != nil {
-		return argoworkflow.VMIBudget{}, fmt.Errorf("serve: --argo-kubevirt-max-memory: %w", err)
-	}
-	ceiling := argoworkflow.VMIBudget{MaxVMs: vms, MaxCores: cores, MaxMemory: memory}
-	if err := ceiling.Validate(); err != nil {
-		return argoworkflow.VMIBudget{}, fmt.Errorf("serve: KubeVirt ceiling: %w", err)
-	}
-	return ceiling, nil
-}
 
 // splitRunnerImagePrefixes parses the comma-separated allowlist flag; empty
 // items are dropped so a trailing comma cannot silently allow everything.
@@ -157,7 +122,7 @@ type serveOptions struct {
 	secretStoreCACert       string
 	secretStoreSAToken      string
 	secretStorePaths        stringList
-	secretStoreKVMount      string
+	secretStoreKVPath       string
 	secretStoreTransitMount string
 	secretStoreTransitKey   string
 	secretStoreInsecureHTTP bool
@@ -174,11 +139,6 @@ type serveOptions struct {
 	argoCredentialedAccount      string
 	argoCISecretsAccount         string
 	argoExecutorAccount          string
-	argoVMLauncherAccount        string
-	argoContainerDiskPrefixes    string
-	argoKubeVirtMaxVMs           int
-	argoKubeVirtMaxCores         int
-	argoKubeVirtMaxMemory        string
 	argoVaultAddress             string
 	argoVaultCredentialedRole    string
 	argoVaultCISecretsRole       string
@@ -209,15 +169,6 @@ type serveOptions struct {
 	// PKI engine: serve renews it in place before it expires.
 	serverLeafRenewal    *serverLeafRenewal
 	argoGoProxyNamespace goproxy.NamespaceConfig
-
-	// VM capability switches. KVM device injection is a server-owned
-	// infrastructure decision: a repository declares which leaves want it
-	// (oberth.ci/kvm-templates), but the device is only injected when this
-	// switch is on.
-	vmKVMEnabled       bool
-	trustedRecipesFile string
-	trustedRuntime     string
-	trustedKVMGroup    int64
 
 	// Promotion grant maximum lifetime. Default 24h, hard ceiling 168h (7 days).
 	promotionGrantMaxLifetime time.Duration
@@ -324,7 +275,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.secretStoreCACert, "secretstore-ca-cert", "", "optional PEM file pinning the OpenBao TLS trust anchors")
 	flags.StringVar(&options.secretStoreSAToken, "secretstore-sa-token", "", "optional ServiceAccount token path override for the OpenBao login")
 	flags.Var(&options.secretStorePaths, "secretstore-path", "allowlisted OpenBao KV path (repeatable)")
-	flags.StringVar(&options.secretStoreKVMount, "secretstore-kv-mount", secretstore.DefaultKVMount, "KV v2 mount backing the virtual oberth/upstream/ secret namespace")
+	flags.StringVar(&options.secretStoreKVPath, "secretstore-kv-mount", secretstore.DefaultKVPath, "KV v2 mount backing the virtual oberth/upstream/ secret namespace")
 	flags.StringVar(&options.secretStoreTransitMount, "secretstore-transit-mount", "", "OpenBao transit mount for trusted Plan artifacts (enables trusted Plan/Apply with --secretstore-transit-key)")
 	flags.StringVar(&options.secretStoreTransitKey, "secretstore-transit-key", "", "OpenBao transit key for trusted Plan artifacts")
 	flags.BoolVar(&options.secretStoreInsecureHTTP, "secretstore-insecure-http", false, "DEVELOPMENT ONLY: allow a plain-HTTP OpenBao address")
@@ -344,11 +295,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.argoCredentialedAccount, "argo-credentialed-serviceaccount", "oberth-argo-credentialed", "ServiceAccount for release templates with approved secrets; carries a projected token for OpenBao Kubernetes auth")
 	flags.StringVar(&options.argoCISecretsAccount, "argo-ci-secrets-serviceaccount", "oberth-argo-ci-secrets", "ServiceAccount for CI templates with approved upstream-scoped secrets; its Vault role never carries release grants")
 	flags.StringVar(&options.argoExecutorAccount, "argo-executor-serviceaccount", "oberth-argo-executor", "ServiceAccount for Argo's own executor containers; must differ from all pipeline identities")
-	flags.StringVar(&options.argoVMLauncherAccount, "argo-vm-launcher-serviceaccount", "oberth-argo-vm-launcher", "ServiceAccount used only by admitted VMI resource templates")
-	flags.StringVar(&options.argoContainerDiskPrefixes, "argo-container-disk-prefixes", "", "comma-separated administrator allowlist of VMI containerDisk repository prefixes")
-	flags.IntVar(&options.argoKubeVirtMaxVMs, "argo-kubevirt-max-vms", defaultKubeVirtCeilingVMs, "cluster-wide ceiling on any KubeVirt grant's concurrent VMIs (1..16)")
-	flags.IntVar(&options.argoKubeVirtMaxCores, "argo-kubevirt-max-cores", defaultKubeVirtCeilingCores, "cluster-wide ceiling on any KubeVirt grant's concurrent VMI cores across admitted runs (1..64)")
-	flags.StringVar(&options.argoKubeVirtMaxMemory, "argo-kubevirt-max-memory", defaultKubeVirtCeilingMemory, "cluster-wide ceiling on any KubeVirt grant's concurrent VMI memory across admitted runs (1Gi..256Gi)")
 	flags.StringVar(&options.argoVaultAddress, "argo-vault-address", "", "OpenBao API base URL injected into credentialed Argo containers as VAULT_ADDR (HTTPS)")
 	flags.StringVar(&options.argoVaultCredentialedRole, "argo-vault-credentialed-role", "", "OpenBao Kubernetes auth role for credentialed release pipelines; bound to the credentialed ServiceAccount and namespace")
 	flags.StringVar(&options.argoVaultCISecretsRole, "argo-vault-ci-secrets-role", "", "OpenBao Kubernetes auth role for CI pipelines with approved upstream-scoped secrets; bound to the CI-secrets ServiceAccount and namespace (empty refuses CI credentialed pipelines at admission)")
@@ -374,10 +320,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.DurationVar(&options.argoWorkflowTimeout, "argo-workflow-timeout", 12*time.Hour, "ceiling on a Workflow's own activeDeadlineSeconds")
 	flags.IntVar(&options.argoWorkflowTTL, "argo-workflow-ttl", 3600, "finished Workflow retention in seconds")
 	flags.StringVar(&options.argoResourceSamplerConfig, "argo-resource-sampler-config", "", "administrator-owned kubelet sampler JSON config; disabled when empty")
-	flags.BoolVar(&options.vmKVMEnabled, "vm-kvm-enabled", false, "enable server-injected KVM device access for annotated leaves (requires KubeVirt device plugin)")
-	flags.StringVar(&options.trustedRecipesFile, "trusted-tests-recipes", "", "public operator-approved trusted suite recipes JSON file")
-	flags.StringVar(&options.trustedRuntime, "trusted-tests-runtime", "legacy", "protected runtime: legacy or generic-capability (explicit opt-in; requires per-repository device grants)")
-	flags.Int64Var(&options.trustedKVMGroup, "trusted-tests-kvm-group", 0, "operator-approved positive /dev/kvm supplemental GID required for trusted suites; no default device group")
 	flags.DurationVar(&options.promotionGrantMaxLifetime, "promotion-grant-max-lifetime", 24*time.Hour, "maximum lifetime for promotion grants (default 24h, hard ceiling 168h)")
 	flags.DurationVar(&options.gitCommandTimeout, "git-timeout", 10*time.Minute, "Git command timeout")
 	flags.DurationVar(&options.gcInterval, "git-gc-interval", 24*time.Hour, "periodic Git GC interval")
@@ -444,9 +386,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 }
 
 func validateServeOptions(options serveOptions) error {
-	if options.trustedRuntime != "" && options.trustedRuntime != "legacy" && options.trustedRuntime != "generic-capability" {
-		return errors.New("trusted-tests-runtime must be legacy or generic-capability")
-	}
 
 	if math.IsNaN(options.kubernetesQPS) || math.IsInf(options.kubernetesQPS, 0) || options.kubernetesQPS <= 0 || options.kubernetesQPS > math.MaxFloat32 || options.kubernetesBurst <= 0 {
 		return errors.New("serve: Kubernetes client QPS must be finite and positive, and burst must be positive")
@@ -552,7 +491,7 @@ func validateSecretStoreServeOptions(options serveOptions) error {
 	if options.secretStoreAddress == "" {
 		if options.secretStoreRole != "" || options.secretStoreCACert != "" || options.secretStoreSAToken != "" ||
 			len(options.secretStorePaths) != 0 || options.secretStoreInsecureHTTP || options.secretStoreAuthMount != secretstore.DefaultAuthMountPath ||
-			options.secretStoreKVMount != secretstore.DefaultKVMount || options.secretStoreTransitMount != "" || options.secretStoreTransitKey != "" {
+			options.secretStoreKVPath != secretstore.DefaultKVPath || options.secretStoreTransitMount != "" || options.secretStoreTransitKey != "" {
 			return errors.New("serve: secret store flags require --secretstore-address")
 		}
 		return nil
@@ -836,7 +775,6 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
-	removalCheck := app.LegacyRemovalCheck{Catalog: database, Git: git, Fragments: fragmentLoader}
 	// Retirement inventory runs only through the authenticated admin route.
 	// Upstream availability and repository declarations must not gate startup.
 	artifactStore, err := artifacts.Open(filepath.Join(options.dataRoot, "artifacts"))
@@ -888,7 +826,6 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		return err
 	}
 	argoJobs.SetPinnedSources(sourceLoader, database)
-	argoJobs.SetKubeVirtGrantLoader(database)
 	argoJobs.SetWorkflowCapabilityLoader(database.ActiveWorkflowCapability)
 	logger.Printf("argo execution engine: namespace=%s pipeline-sa=%s credentialed-sa=%s ci-secrets-sa=%s executor-sa=%s",
 		options.argoNamespace, options.argoPipelineAccount, options.argoCredentialedAccount,
@@ -896,31 +833,10 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if len(options.secretStorePaths) > 0 {
 		logger.Printf("--secretstore-path values are used only by 'oberth secretstore verify' as default paths; admission uses the approval table exclusively")
 	}
-	recipes, err := readTrustedRecipes(options.trustedRecipesFile)
-	if err != nil {
-		return err
-	}
-	var trusted service.TrustedPreflight
-	if len(recipes) == 0 {
-		trusted, err = app.NewProtectedPreflightRecovery(argoJobs, database, filepath.Join(options.dataRoot, "work"), anchors.AllowMutation)
-		if err != nil {
-			return err
-		}
-	} else {
-		if options.trustedRuntime == "generic-capability" {
-			trusted, err = app.NewGenericProtectedPreflights(argoJobs, database, recipes, filepath.Join(options.dataRoot, "work"), anchors.AllowMutation)
-		} else {
-			trusted, err = app.NewTrustedPreflights(argoJobs, database, recipes, filepath.Join(options.dataRoot, "work"), anchors.AllowMutation)
-		}
-		if err != nil {
-			return err
-		}
-	}
-	removalCheck.Protected, _ = trusted.(*app.TrustedPreflights)
 	signals := service.NewSignals()
 	scheduler, err := service.NewScheduler(service.SchedulerConfig{
 		Store: database, Git: git, Logs: logs, Jobs: argoJobs, ReleaseJobs: argoJobs, Auditor: database,
-		TrustedPreflight: trusted, Signals: signals, WorkspaceRoot: filepath.Join(options.dataRoot, "work"), MaxConcurrent: options.maxConcurrent,
+		Signals: signals, WorkspaceRoot: filepath.Join(options.dataRoot, "work"), MaxConcurrent: options.maxConcurrent,
 		DisableInfrastructureAutoRetry: !options.autoRetryInfrastructure,
 		MaxConcurrentFile:              options.maxConcurrentFile,
 		MaxRunLogBytes:                 options.runLogLimitBytes,
@@ -1152,7 +1068,6 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		ReleasePreflight:     argoJobs,
 		UplinkLifecycle:      database, DeclarationDismissal: database,
 		IssueLifecycle:     database,
-		KVMPreflights:      database,
 		SchedulingObserver: argoJobs, Admission: scheduler,
 		Runs: database, History: database, RunRetries: database, Repositories: database, Issues: database,
 		IssueStaleAfter: options.issueStaleAfter, IssueActiveStaleAfter: options.issueActiveStaleAfter,
@@ -1161,7 +1076,6 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		MutationGate:           anchors.AllowMutation,
 		PromotionWorkspaceRoot: filepath.Join(options.dataRoot, "work"),
 		SecretAccess:           database,
-		KubeVirtGrants:         database,
 		WorkflowCapabilities:   database,
 		SizeGrants:             database,
 		QueuePriorities:        database,
@@ -1367,7 +1281,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	}()
 	defer func() { stopTokenWarnings(); <-tokenWarningsDone }()
 	stopBootstrap()
-	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, withLegacyRemovalCheck(withRepositoryRemoval(newAdminGateServerWithTokenPolicy(anchors.AllowMutation, options.database, scheduler.NotifyQueue, options.uplinkTokenPolicy, queueSnapshot.current), anchors.AllowMutation, options.database, database, git), options.database, removalCheck.Check), activateScheduler, accessReconciler, schedules, ciIssues, retention, logger, controlAPI.Shutdown, httpAPI.BeginDrain)
+	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, withRepositoryRemoval(newAdminGateServerWithTokenPolicy(anchors.AllowMutation, options.database, scheduler.NotifyQueue, options.uplinkTokenPolicy, queueSnapshot.current), anchors.AllowMutation, options.database, database, git), activateScheduler, accessReconciler, schedules, ciIssues, retention, logger, controlAPI.Shutdown, httpAPI.BeginDrain)
 }
 
 type startupContinuity interface {

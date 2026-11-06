@@ -14,6 +14,7 @@ import (
 	"github.com/oberthci/oberth/internal/pushretry"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
+	"github.com/oberthci/oberth/internal/workflowpolicy"
 )
 
 // Shift only the publication's age at the scheduler boundary. All durable
@@ -156,4 +157,26 @@ func TestPublicationHealthyPolicyClearsExpiredWait(t *testing.T) {
 	if err != nil || result.Publication.Status != model.PublicationPending || result.Publication.Attempts != 1 {
 		t.Fatalf("success did not reset waiting origin: %+v %v", result, err)
 	}
+}
+
+type policyTestGit struct {
+	*controlGit
+	candidate, baseline       []byte
+	candidateErr, baselineErr error
+	reads                     []string
+}
+
+func (git *policyTestGit) ReadOptionalBlob(_ context.Context, repo, sha, file string, limit int) ([]byte, bool, error) {
+	git.reads = append(git.reads, repo+":"+sha+":"+file)
+	if file != workflowpolicy.ContractFile || limit != workflowpolicy.MaxContractBytes {
+		return nil, false, errors.New("unexpected policy read")
+	}
+	return git.candidate, git.candidate != nil, git.candidateErr
+}
+func (git *policyTestGit) ReadDefaultBlob(_ context.Context, repo, file string, limit int) (string, []byte, bool, error) {
+	git.reads = append(git.reads, repo+":upstream:"+file)
+	if file != workflowpolicy.ContractFile || limit != workflowpolicy.MaxContractBytes {
+		return "", nil, false, errors.New("unexpected policy read")
+	}
+	return strings.Repeat("b", 40), git.baseline, git.baseline != nil, git.baselineErr
 }

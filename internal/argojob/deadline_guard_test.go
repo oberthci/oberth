@@ -92,33 +92,3 @@ func TestDeadlineGuardRepositoryCapsAndShorterDocuments(t *testing.T) {
 		})
 	}
 }
-
-func TestDeadlineGuardTrustedCancellationKeepsAbsenceObligation(t *testing.T) {
-	config, request, workflow, pod := trustedKVMObservedFixture(t)
-	client := &trustedCleanupClient{workflow: workflow}
-	controller := &Controller{config: config, workflows: client, kube: trustedControllerClient(pod)}
-	if err := controller.CancelTrustedKVM(t.Context(), *request.TrustedKVM, "foreign"); err == nil || client.deleted {
-		t.Fatal("foreign UID cancelled")
-	}
-	if err := controller.CancelTrustedKVM(t.Context(), *request.TrustedKVM, string(workflow.UID)); err != nil {
-		t.Fatal(err)
-	}
-	if !client.deleted {
-		t.Fatal("trusted workflow was not targeted for deletion")
-	}
-}
-
-func TestDeadlineGuardVMWithoutDeclaredDeadline(t *testing.T) {
-	source := strings.Replace(kubeVirtWorkflow, "  activeDeadlineSeconds: 3600\n", "", 1)
-	_, workflow, _ := guardedVMISourceFixture(t, 1, 7, source)
-	if workflow.Spec.ActiveDeadlineSeconds == nil || *workflow.Spec.ActiveDeadlineSeconds != 1800 {
-		t.Fatalf("VM has no default deadline: %v", workflow.Spec.ActiveDeadlineSeconds)
-	}
-	origin := time.Now().Add(-time.Hour).UTC()
-	workflow.CreationTimestamp = metav1.NewTime(origin)
-	observation := &model.ExecutionObservation{}
-	observeServerDeadline(workflow, observation, 30*time.Minute, origin.Add(time.Minute))
-	if observation.ServerDeadline == nil || observation.ServerDeadline.ExpiresAt == nil || !observation.ServerDeadline.ExpiresAt.Equal(origin.Add(33*time.Minute)) || *observation.ServerDeadline.RemainingSeconds != 1920 {
-		t.Fatalf("VM watchdog hidden or reset: %+v", observation)
-	}
-}

@@ -2,47 +2,13 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
-
-func TestConcurrencyGroupsConflictDuringVMReadmission(t *testing.T) {
-	g := newWorkflowAdmissionForJobs(4)
-	r := g.reserveRun(model.Run{ID: "vm", RepoID: 1, QueueSequence: 1})
-	request := admissionRequest{RunID: "vm", RepoID: 1, Group: "state", GroupLimit: 2}
-	release := acquireRequestWithinBudget(t, r, request)
-	defer release()
-	done := make(chan error, 1)
-	go func() {
-		for range 1000 {
-			if err := r.parkVM(); err != nil {
-				done <- err
-				return
-			}
-			if _, err := r.acquireRequest(t.Context(), request); err != nil {
-				done <- err
-				return
-			}
-		}
-		done <- nil
-	}()
-	for i := int64(2); i < 1002; i++ {
-		id := fmt.Sprint(i)
-		other := g.reserveRun(model.Run{ID: id, RepoID: 2, QueueSequence: i})
-		if _, err := other.acquireRequest(t.Context(), admissionRequest{RunID: id, RepoID: 2, Group: "state", GroupLimit: 1}); err == nil || !strings.Contains(err.Error(), "limit 1 conflicts with limit 2") {
-			t.Errorf("unexpected conflict: %v", err)
-		}
-	}
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-}
 
 type twoMemberGroupEngine struct{ *groupEngine }
 
@@ -185,7 +151,7 @@ func TestConcurrencyGroupsAdoptMultipleHolders(t *testing.T) {
 	g := newWorkflowAdmissionForJobs(4)
 	for i := int64(1); i <= 2; i++ {
 		r := model.Run{ID: strings.Repeat(string(rune('a'+i)), 32), RepoID: i, QueueSequence: i, ConcurrencyGroup: "state", ConcurrencyLimit: 2}
-		if _, err := g.adopt(r, pipeline.M, argoworkflow.VMIDemand{}); err != nil {
+		if _, err := g.adopt(r, pipeline.M); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -194,7 +160,7 @@ func TestConcurrencyGroupsAdoptMultipleHolders(t *testing.T) {
 	if len(state.Groups) != 1 || state.Groups[0].Limit != 2 || len(state.Groups[0].Holders) != 2 {
 		t.Fatalf("lost adopted holders: %+v", state.Groups)
 	}
-	if _, err := g.adopt(model.Run{ID: "excess", RepoID: 3, QueueSequence: 3, ConcurrencyGroup: "state", ConcurrencyLimit: 2}, pipeline.M, argoworkflow.VMIDemand{}); err == nil {
+	if _, err := g.adopt(model.Run{ID: "excess", RepoID: 3, QueueSequence: 3, ConcurrencyGroup: "state", ConcurrencyLimit: 2}, pipeline.M); err == nil {
 		t.Fatal("adopted more than an explicit YAML limit")
 	}
 }
@@ -218,7 +184,7 @@ func TestConcurrencyGroupsAdoptionPreservesLegacyOverLimitWork(t *testing.T) {
 	g := newWorkflowAdmissionForJobs(4)
 	var holders []*admissionReservation
 	for i := int64(1); i <= 2; i++ {
-		r, err := g.adopt(model.Run{ID: string(rune('a' + i)), RepoID: i, QueueSequence: i, ConcurrencyGroup: "state"}, pipeline.M, argoworkflow.VMIDemand{})
+		r, err := g.adopt(model.Run{ID: string(rune('a' + i)), RepoID: i, QueueSequence: i, ConcurrencyGroup: "state"}, pipeline.M)
 		if err != nil {
 			t.Fatal(err)
 		}

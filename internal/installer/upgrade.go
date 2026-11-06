@@ -12,12 +12,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/oberthci/oberth/pkg/argoworkflow"
+
 	"golang.org/x/mod/semver"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
-
-	"github.com/oberthci/oberth/internal/retirement"
 )
 
 // canonicalGARPrefix is the canonical Google Artifact Registry prefix for
@@ -29,6 +29,7 @@ const DefaultUpgradeWaitTimeout = 2 * time.Hour
 
 // UpgradeConfig holds options for the upgrade command.
 type UpgradeConfig struct {
+	AllowRetiredExecution bool          // explicit acceptance of retired workload/resource risk
 	OwnershipHandoff      string        // operator-verified connector/site handoff receipt
 	WaitTimeout           time.Duration // independent queue-observation limit
 	WaitFor               string        // all or critical; a nonempty selection enables waiting
@@ -250,7 +251,7 @@ func validateUserSetAgainstValues(valuesYAML []byte, userSet []string) error {
 		if err != nil {
 			return err
 		}
-		if !keyPathExists(values, key) {
+		if !argoworkflow.RetiredValue(key) && !keyPathExists(values, key) {
 			return &ErrSchemaValidation{Detail: fmt.Sprintf("key %q does not exist in the chart values; check for typos", key)}
 		}
 	}
@@ -390,14 +391,14 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		return result, err
 	}
 
-	if err := checkUpgradeLegacyResources(ctx, cfg, deps); err != nil {
-		return result, err
-	}
 	if err := checkUpgradeOwnership(ctx, cfg, deps, currentVersion); err != nil {
 		return result, err
 	}
-	if retirement.LegacyExecutionRemoved && semver.Compare(canonicalChartVersion(cfg.BinaryVersion), "v0.17.83-0") >= 0 {
-		if err := checkUpgradeLegacyRepositories(ctx, cfg, deps); err != nil {
+	if semver.Compare(targetCanonical, "v0.17.83-0") >= 0 {
+		if err := checkUpgradeLegacyResources(ctx, cfg, deps); err != nil {
+			return result, err
+		}
+		if err := checkUpgradeLegacyRepositories(ctx, cfg, deps, currentVersion); err != nil {
 			return result, err
 		}
 	}
@@ -430,6 +431,7 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		if err != nil {
 			return result, err
 		}
+		warnRetiredUpgradeValues(w, cfg, values)
 		if err := checkUpgradePKIKeyConflicts(cfg, values); err != nil {
 			return result, err
 		}
@@ -507,14 +509,14 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	}
 
 	// Recheck after preview/drain, immediately before the first live write.
-	if err := checkUpgradeLegacyResources(ctx, cfg, deps); err != nil {
-		return result, err
-	}
 	if err := checkUpgradeOwnership(ctx, cfg, deps, currentVersion); err != nil {
 		return result, err
 	}
-	if retirement.LegacyExecutionRemoved && semver.Compare(canonicalChartVersion(cfg.BinaryVersion), "v0.17.83-0") >= 0 {
-		if err := checkUpgradeLegacyRepositories(ctx, cfg, deps); err != nil {
+	if semver.Compare(targetCanonical, "v0.17.83-0") >= 0 {
+		if err := checkUpgradeLegacyResources(ctx, cfg, deps); err != nil {
+			return result, err
+		}
+		if err := checkUpgradeLegacyRepositories(ctx, cfg, deps, currentVersion); err != nil {
 			return result, err
 		}
 	}

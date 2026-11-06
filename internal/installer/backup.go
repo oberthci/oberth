@@ -592,7 +592,7 @@ func runBackup(ctx context.Context, cfg BackupConfig, deps backupDeps) (resultEr
 			Snapshot:        snapshotMode,
 		},
 		OpenBao: backupOpenBaoSummary{
-			KVMount:   defaultKVPrefix,
+			KVPath:    defaultKVPrefix,
 			Secrets:   secretCount,
 			Policies:  policyCount,
 			AuthMount: defaultAuthMount,

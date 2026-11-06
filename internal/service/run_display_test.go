@@ -13,7 +13,6 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
-	"github.com/oberthci/oberth/internal/vmrunner"
 )
 
 func TestDisplayRunStatusSeparatesPrestartAndTerminalCauses(t *testing.T) {
@@ -47,8 +46,8 @@ func TestDisplayRunStatusSeparatesPrestartAndTerminalCauses(t *testing.T) {
 
 func TestRunDisplayReasonsCoverTerminalCausesAndTrustedPreflight(t *testing.T) {
 	started := time.Now().UTC()
-	service := &API{kvmPreflights: kvmReadFake{value: vmrunner.KVMExecution{Submitted: true}}}
-	preflight := service.presentationRun(t.Context(), model.Run{ID: "preflight", Status: model.RunRunning, StartedAt: &started})
+	service := &API{}
+	preflight := service.presentationRun(t.Context(), model.Run{ID: "preflight", Status: model.RunRunning, Phase: "preflight", StartedAt: &started})
 	if preflight.DisplayStatus != "running" || preflight.Phase != "preflight" {
 		t.Fatalf("trusted preflight presentation = %+v", preflight)
 	}
@@ -261,7 +260,7 @@ func TestDisplayReasonUsesDurableCauseNotSHAOrTextHeuristics(t *testing.T) {
 	for _, tc := range []struct{ reason, phase, want string }{
 		{"superseded by newer run", "interrupted", "superseded by aaaaaaaa"},
 		{"re-queued after restart", "interrupted", "server restart, re-queued as bbbbbbbbbbbb"},
-		{store.KVMRestartRetryReason, "interrupted", "server restart, re-queued as bbbbbbbbbbbb"},
+		{"retried once after trusted preflight owner restart", "interrupted", "server restart, re-queued as bbbbbbbbbbbb"},
 		{"cancelled by owner: restart later", "cancelled", "by owner: restart later"},
 		{"scheduler stopped", "interrupted", "server restart, retry needed"},
 		{"unrelated reason", "interrupted", "server restart, retry needed"},
@@ -295,13 +294,13 @@ func TestDisplayReasonUsesDurableCauseNotSHAOrTextHeuristics(t *testing.T) {
 
 func TestScopedDisplayDoesNotLinkHiddenSuccessor(t *testing.T) {
 	service := &API{scope: &repoScope{}}
-	for _, reason := range []string{"superseded by newer run", "re-queued after restart", store.KVMRestartRetryReason} {
+	for _, reason := range []string{"superseded by newer run", "re-queued after restart", "retried once after trusted preflight owner restart"} {
 		run := model.Run{Status: model.RunInterrupted, Reason: reason, SupersededBy: strings.Repeat("b", 32)}
 		got := service.presentationRunWithSuccessor(t.Context(), run, nil)
 		if got.SupersededBy != "" || strings.Contains(got.DisplayReason, "bbbb") || got.DisplayStatus != "superseded" {
 			t.Fatalf("hidden successor leaked: %+v", got)
 		}
-		if reason == store.KVMRestartRetryReason && got.DisplayReason != "server restart, re-queued" {
+		if reason == "retried once after trusted preflight owner restart" && got.DisplayReason != "server restart, re-queued" {
 			t.Fatalf("hidden trusted retry reason = %q", got.DisplayReason)
 		}
 	}

@@ -170,13 +170,12 @@ func TestAuditMutationStateUsesOneAuthoritativeAuditPass(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Four core reads, two runtime schema/projection reads, and two placement
-	// schema/projection reads. Workflow/source custody is in the same audit pass.
-	if metrics.fullTraversals != 1 || metrics.readStatements != 8 {
-		t.Fatalf("audit mutation verification metrics = %#v, want one traversal and eight reads (including runtime and placement schema/projection)", metrics)
+	// Four core reads; retired runtime and placement tables are never read.
+	if metrics.fullTraversals != 1 || metrics.readStatements != 4 {
+		t.Fatalf("audit mutation verification metrics = %#v, want one traversal and four core reads; retired projections must be inert", metrics)
 	}
-	if guard.placementReads != 2 {
-		t.Fatalf("placement verification reads = %d, want exactly schema presence and audit projection", guard.placementReads)
+	if guard.placementReads != 0 {
+		t.Fatalf("placement verification reads = %d, want no retired placement projection reads", guard.placementReads)
 	}
 	if guard.loadedReceipts {
 		t.Fatal("audit mutation verification loaded receipt blobs for historical anchors")

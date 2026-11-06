@@ -141,7 +141,6 @@ guard (unordered pairs are refused), and since concurrent runs of the same
 repository share the directory, keep Trivy's database in private scratch.
 
 `cache` is refused on leaves that never take a host-backed mount:
-`oberth.ci/kvm-templates` leaves (which require `none`) and
 `oberth.ci/nonroot-templates` leaves (whose Go caches move to their
 private scratch). Keep `none` for steps that must not see writable shared state, such
 as signing, publishing, credential handling, and fetching or verifying

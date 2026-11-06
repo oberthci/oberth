@@ -15,6 +15,7 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/service"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
@@ -1249,4 +1250,14 @@ spec:
 			t.Errorf("step %s secrets = %v, want %v (known %v)", step.Step, step.Secrets, secrets, ok)
 		}
 	}
+}
+
+// readArgoSource reads the pipeline document for one trigger out of the
+// immutable run workspace through a bounded, root-confined reader.
+func readArgoSource(sourceDir string, trigger pipeline.Trigger) ([]byte, error) {
+	file, err := argoworkflow.TriggerFile(trigger)
+	if err != nil {
+		return nil, err
+	}
+	return readBoundedSourceFile(sourceDir, file)
 }

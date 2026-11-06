@@ -169,3 +169,26 @@ and site owner operating after the core removes its old resources. Never roll
 back by overwriting the external resources with the old core release. Use the
 saved configuration and your routing rollback procedure if verification fails;
 retain the existing core until a successful handoff is documented.
+
+## Retired execution preflight
+
+The upgrade also inventories trusted Workflows in the installed pipeline namespace
+and Oberth-owned virtual machines and instances across namespaces. Terminal or
+already-deleting objects still block the upgrade: drain/delete these first and
+wait for confirmed deletion while the old server can still clean them up.
+This inventory remains active on later upgrades and needs cluster-wide list
+permission on KubeVirt resources.
+
+When the installed version is v0.17.94 or earlier, its `admin retirement-check`
+must also confirm that registered repositories have migrated their retired
+contracts. Later versions no longer have this command, so only the resource
+inventory runs. After the upgrade, a candidate that removes
+`.oberth/tests.yaml` can run and be promoted even when the default branch still
+contains that file. The legacy engine refuses that deletion before the upgrade.
+Prepare the migration branch first, upgrade, then run and promote it immediately;
+see the [migration sequence](workflow-capabilities.md#migration-from-retired-execution).
+
+`--allow-retired-execution` explicitly bypasses both checks, including an unavailable
+retirement-check command. It accepts orphaned resources and refused legacy runs;
+it does not bypass the separate connector/site ownership handoff. Checks run for
+`--dry-run` and again after preview/drain before the first live write.

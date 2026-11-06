@@ -54,12 +54,12 @@ func (service *API) waitRun(ctx context.Context, repositoryName, selector, trigg
 
 // Persist the server-admitted contract before POST. Recovery must never need a
 // Kubernetes read, a moving repository ref or a remote fragment to restore it.
-func (scheduler *Scheduler) recordCreateAdmission(run model.Run, name string, size pipeline.Size, demand argoworkflow.VMIDemand, pods ...*argoworkflow.PodDemand) error {
+func (scheduler *Scheduler) recordCreateAdmission(run model.Run, name string, size pipeline.Size, pods ...*argoworkflow.PodDemand) error {
 	var peak *argoworkflow.PodDemand
 	if len(pods) > 0 {
 		peak = pods[0]
 	}
-	return scheduler.recordResourceAdmission(run, name, size, demand, peak, "")
+	return scheduler.recordResourceAdmission(run, name, size, peak, "")
 }
 
 // Kept separate for status/diagnostic callers without exposing API errors.

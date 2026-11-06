@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/oberthci/oberth/internal/vmrunner"
+	"github.com/oberthci/oberth/internal/workflowpolicy"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
@@ -23,13 +23,11 @@ func (p absentBranchPolicy) ReadDefaultBlob(context.Context, string, string, int
 func branchPlacementFixture(t *testing.T) (Config, Request) {
 	t.Helper()
 	c, r, _ := placementFixture(t)
-	r.TrustedKVM = nil
 	r.SourceVolume = SourceVolume{}
 	d := c.ExecutionPlacement.document
 	d.Schema = branchPlacementSchema
-	d.Preflight = placementRun{}
 	d.Normal = placementRun{RunID: r.RunID, Workflow: r.Name}
-	proof, err := vmrunner.ResolveBranchAuthority(t.Context(), absentBranchPolicy{}, d.Repository, r.SHA)
+	proof, err := workflowpolicy.ResolveBranchAuthority(t.Context(), absentBranchPolicy{}, d.Repository, r.SHA)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +86,7 @@ func TestBranchPlacementClosedNativeAuthorityAndLegacySeparation(t *testing.T) {
 	if _, err := ParseExecutionPlacement(body); err == nil {
 		t.Fatal("empty dummy preflight accepted")
 	}
-	if proof, err := vmrunner.ResolveBranchAuthority(t.Context(), absentBranchPolicy{err: errors.New("denied")}, "codeberg/acme/oberth", r.SHA); err == nil || proof != nil {
+	if proof, err := workflowpolicy.ResolveBranchAuthority(t.Context(), absentBranchPolicy{err: errors.New("denied")}, "codeberg/acme/oberth", r.SHA); err == nil || proof != nil {
 		t.Fatal("failed native policy read became absence")
 	}
 }
@@ -133,7 +131,7 @@ spec:
 	if err != nil {
 		t.Fatal(err)
 	}
-	r = prepareTrustedTestRequest(t, c, r)
+	r = prepareNonrootFixture(t, c, r)
 	if _, err := Build(c, r); err != nil {
 		t.Fatal(err)
 	}

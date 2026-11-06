@@ -20,15 +20,7 @@ endpoint/CA, node, controller, admission, source and native configuration pins.
 It adds `branch_policy_baseline`, `graph_digest`, `fragment_lock_digest` and a
 `fragments` inventory containing each exact `key`, `commit` and raw `digest`.
 `normal` contains only `run_id` and `workflow`. No `preflight` or trusted-intent
-field is accepted. The existing version-one protected/preflight policy retains
-its original behavior.
-
-A protected preflight for a repository with a configured ordinary external
-target refuses before bundle fetching, reservation or allocation. A retained
-remote binding also refuses after its target definition is removed. Different
-branches, tags and schedules cannot fall back to the local protected controller.
-Existing local protected obligations retain their original recovery path. This
-gate does not add protected-phase remote routing or qualify a separate executor.
+field is accepted. The retired protected execution schema is refused.
 
 This policy authorizes one exact ordinary branch execution. The operator must
 know the canonical accepted run ID and its deterministic Workflow name before
@@ -56,7 +48,7 @@ original cluster anchor and object identities.
 The local controller's health remains `controller_profile`. Target controller
 profiles are reported separately in `execution_target_profiles`; run admission
 waits for its selected controller. Canonical queue, priority, resource ceilings,
-VM grants and deadlines remain authoritative. Deployment still requires actual
+workflow capability grants and deadlines remain authoritative. Deployment still requires actual
 target capacity/storage/device and transport qualification, containing source
 review and CI, and operator approval. Offline fake-client tests establish no
 installed route or physical execution result.

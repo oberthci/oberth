@@ -57,10 +57,6 @@ func (s *lostDatabaseAck) MarkRunSubmitted(ctx context.Context, id string) (mode
 	v, e := s.Store.MarkRunSubmitted(ctx, id)
 	return v, s.lost("MarkRunSubmitted", e)
 }
-func (s *lostDatabaseAck) MarkRunParked(ctx context.Context, id string) (model.Run, error) {
-	v, e := s.Store.MarkRunParked(ctx, id)
-	return v, s.lost("MarkRunParked", e)
-}
 
 func TestDatabaseDeadlineLostClaimAckKeepsExactRun(t *testing.T) {
 	fixture := newRecoveryFixture(t)
@@ -94,7 +90,7 @@ func TestDatabaseDeadlineLostClaimAckKeepsExactRun(t *testing.T) {
 }
 
 func TestDatabaseDeadlineLostTransitionAcksConverge(t *testing.T) {
-	for _, operation := range []string{"RequeueStrandedRun", "BeginPublication", "FinalizePublication", "MarkRunAdmitted", "MarkRunSubmitted", "MarkRunParked"} {
+	for _, operation := range []string{"RequeueStrandedRun", "BeginPublication", "FinalizePublication", "MarkRunAdmitted", "MarkRunSubmitted"} {
 		t.Run(operation, func(t *testing.T) {
 			t.Parallel()
 			fixture := newRecoveryFixture(t)
@@ -115,14 +111,6 @@ func TestDatabaseDeadlineLostTransitionAcksConverge(t *testing.T) {
 				fixture.setWorkflowName(t, run.ID, "known-job")
 				current, err := database.MarkRunSubmitted(ctx, run.ID)
 				if err != nil || current.Phase != "running" {
-					t.Fatal(current, err)
-				}
-			case "MarkRunParked":
-				if _, err := fixture.store.MarkRunAdmitted(t.Context(), run.ID); err != nil {
-					t.Fatal(err)
-				}
-				current, err := database.MarkRunParked(ctx, run.ID)
-				if err != nil || current.StartedAt != nil {
 					t.Fatal(current, err)
 				}
 			case "RequeueStrandedRun":

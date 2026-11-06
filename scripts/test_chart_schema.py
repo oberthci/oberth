@@ -157,7 +157,7 @@ class ArgoSchemaTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout, default.stdout)
 
-    def test_active_vm_keys_remain_declared_for_saved_values(self):
+    def test_retired_vm_keys_accept_and_ignore_saved_values(self):
         schema = json.loads((ROOT / 'charts/oberth/values.schema.json').read_text())
         argo = schema['properties']['argo']
         self.assertIs(argo['additionalProperties'], False)
@@ -166,11 +166,14 @@ class ArgoSchemaTests(unittest.TestCase):
                  'containerDiskPrefixes': ['registry.example.com/disks/']}
         result = self.render(saved)
         self.assertEqual(result.returncode, 0, result.stderr)
+        baseline = self.render({})
+        self.assertEqual(baseline.returncode, 0, baseline.stderr)
+        self.assertEqual(result.stdout, baseline.stdout, 'retired values must not change resources')
         for key in saved:
             with self.subTest(key=key):
                 description = argo['properties'][key]['description'].lower()
-                self.assertIn('active until the vm runtime is removed', description)
-                self.assertNotIn('retired', description)
+                self.assertIn('removed', description)
+                self.assertIn('accept and ignore historical values', description)
 
     def test_retired_aliases_still_report_migration(self):
         for argo in ({'ciSecretsServiceAccount': 'retired-account'},

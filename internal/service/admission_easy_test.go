@@ -159,24 +159,6 @@ func TestEASYCoexistenceIncludesMemoryAndExecutorReserves(t *testing.T) {
 	}
 }
 
-func TestEASYCoexistencePreservesHeadVMCapacity(t *testing.T) {
-	g, clock, _ := easyForecastGate(t)
-	vm := &KubeVirtResources{Demand: argoworkflow.VMIDemand{VMs: 1, Cores: 1, MemoryBytes: 1 << 30},
-		Limit: argoworkflow.VMIDemand{VMs: 1, Cores: 1, MemoryBytes: 1 << 30}}
-	h := easyRequest("vm-head", 8200, time.Hour)
-	h.RepoID, h.KubeVirt = 1, vm
-	head := pending(t, g, 2, h)
-	t.Cleanup(head.cancel)
-	clock.now = clock.now.Add(21 * time.Minute)
-	c := easyRequest("cpu-fits-vm-does-not", 1100, time.Hour)
-	c.RepoID, c.KubeVirt = 1, vm
-	r := pending(t, g, 3, c)
-	t.Cleanup(r.cancel)
-	if granted(g, r) {
-		t.Fatal("long backfill consumes the only VM slot the head needs at its reserved start")
-	}
-}
-
 func TestEASYHeadStartTimeInvariant(t *testing.T) {
 	simulate := func(backfill bool) time.Time {
 		g, clock, running := easyForecastGate(t)
