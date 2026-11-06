@@ -507,7 +507,7 @@ Environment:
   OBERTH_BASE_URL       Server URL; /mcp is appended when no MCP URL is set
   OBERTH_TOKEN          Bearer token for authentication
   OBERTH_TOKEN_COMMAND  Command that prints a token when OBERTH_TOKEN is unset
-  OBERTH_CA_CERT        PEM CA certificate (overridden by --ca-file)
+  OBERTH_CA_CERT        Inline PEM or CA certificate file path (overridden by --ca-file)
 
 Flags:
   --url <url>          MCP server URL
