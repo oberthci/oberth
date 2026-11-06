@@ -22,7 +22,7 @@ const state = {
   logCache: new Map(),
   live: null, // assigned per-run by liveLogContent
   showExec: readShowExec(),
-  issueWorkStatus: "", issueKind: "", issueState: "open", issueRepo: "", issueQuery: "", issueCursor: 0, issueCursorHistory: [],
+  issueWorkStatus: "", issueState: "open", issueRepo: "", issueQuery: "", issueCursor: 0, issueCursorHistory: [],
   issuePage: null, issueOpener: null,
   lastList: "/runs",
   authGen: 0, // incremented on sign-out and token replacement
@@ -58,6 +58,17 @@ function ago(s) {
   return Math.round(hr / 24) + "d ago";
 }
 function fmtTime(s) { if (!s) return "--"; const d = new Date(s); return Number.isNaN(+d) ? "--" : d.toLocaleString(); }
+function shortStamp(s) {
+  if (!s) return "--";
+  const date = new Date(s), today = new Date();
+  if (!Number.isFinite(+date)) return "--";
+  const time = date.toLocaleTimeString("en-GB", {hour:"2-digit",minute:"2-digit",hourCycle:"h23"});
+  if (date.toDateString() === today.toDateString()) return time;
+  const day = date.toLocaleDateString("en-US", {month:"short",day:"numeric"});
+  return `${day}${date.getFullYear() === today.getFullYear() ? "" : " " + date.getFullYear()} ${time}`;
+}
+function stampTitle(s) { return `${fmtTime(s)} · ${ago(s)}`; }
+
 function pageRange(start, length, total) { return length ? `${start}–${start + length - 1} of ${total}` : `0 of ${total}`; }
 function fmtDur(sec) {
   sec = Math.max(0, Math.round(Number(sec) || 0));
@@ -521,11 +532,9 @@ function whenCell(run) {
   const started = status === "queued" ? null : run.StartedAt, stamp = started || run.QueuedAt;
   const date = new Date(stamp || "");
   if (status === "queued" && !Number.isFinite(+date)) return "";
-  const time = Number.isFinite(+date) ? date.toLocaleTimeString("en-GB", {hour:"2-digit",minute:"2-digit",hourCycle:"h23"}) : "";
-  const stampText = date.toDateString() === new Date().toDateString() ? time : `${date.toLocaleDateString("en-US", {month:"short",day:"numeric"})} ${time}`;
-  const label = Number.isFinite(+date) ? `${started ? "started" : "queued"} at ${stampText}` : "";
+  const label = Number.isFinite(+date) ? `${started ? "started" : "queued"} at ${shortStamp(stamp)}` : "";
   const duration = ["cancelled", "superseded"].includes(status) || !started ? "" : runListDuration(spanSeconds(started, run.FinishedAt, status === "running"));
-  return `<span${status === "running" && started ? ` data-started="${esc(started)}"` : ""}>${esc(duration)}</span><span class="meta">${esc(label)}</span>`;
+  return `<span${status === "running" && started ? ` data-started="${esc(started)}"` : ""}>${esc(duration)}</span><span class="meta" title="${esc(stampTitle(stamp))}">${esc(label)}</span>`;
 }
 function runListDuration(seconds) {
   const sec = Math.max(0, Math.floor(seconds || 0));
@@ -1400,7 +1409,6 @@ async function renderRepos(seq) {
 function issueListURL() {
   const query = new URLSearchParams({ limit: "50" });
   if (state.issueRepo) query.set("repo", state.issueRepo);
-  if (state.issueKind) query.set("kind", state.issueKind);
   if (state.issueWorkStatus) query.set("work_status", state.issueWorkStatus);
   if (state.issueState) query.set("state", state.issueState);
   if (state.issueQuery) query.set("query", state.issueQuery);
@@ -1408,7 +1416,13 @@ function issueListURL() {
   return "/api/issues?" + query.toString();
 }
 function issueRow(issue) {
-  return `<button type="button" class="issue-row" data-open-issue="${esc(issue.ID)}" aria-label="Open internal issue ${esc(issue.ID)}: ${esc(issue.Title)}"><span class="sha">#${esc(issue.ID)}</span><span>${pill(issue.Kind, issue.Kind === "ci" ? "run" : "pending")}</span><span class="issue-state">${pill(issue.State, issue.State === "open" ? "fail" : "pass")} ${pill(issue.work_status || "todo", "pending")} ${issue.stale ? pill("stale", "fail") : ""}</span><span class="clip">${esc(issue.RepoID ? repoName(issue.RepoID) : (issue.upstream || "workspace"))}</span><span class="branch clip">${esc(issue.Branch || "--")}</span><span class="issue-title" title="${esc(issue.Title)}">${esc(issue.Title)}</span><span title="occurrences">×${esc(issue.Occurrences || 1)}</span><span title="updated ${esc(fmtTime(issue.UpdatedAt))}">${esc(ago(issue.UpdatedAt))}</span></button>`;
+  const repo = state.repos.find(repo => repo.ID === issue.RepoID);
+  const upstream = issue.upstream || (repo ? upstreamName(repo.UpstreamID) : "");
+  const where = issue.RepoID ? `${upstream || "--"} / ${repo?.Name || repoName(issue.RepoID)}` : (upstream || "installation");
+  const qualified = repo ? repoKey(repo) : where;
+  const closed = state.issueState === "" && issue.State === "closed";
+  const worked = `${closed ? "closed " : ""}${shortStamp(issue.UpdatedAt)}`;
+  return `<button type="button" class="issue-row${closed ? " is-closed" : ""}" data-open-issue="${esc(issue.ID)}" aria-label="Open internal issue ${esc(issue.ID)}: ${esc(issue.Title)}"><span class="issue-id">#${esc(issue.ID)}</span><span class="issue-context"><span class="issue-where" title="${esc(qualified)}"><span class="clip">${esc(where)}</span>${issue.Kind === "ci" && issue.Branch ? `<span class="issue-branch" title="${esc(issue.Branch)}">${esc(issue.Branch)}</span>` : ""}</span><span class="issue-filed" title="${esc(stampTitle(issue.CreatedAt))}">${esc(shortStamp(issue.CreatedAt))}</span><span class="issue-worked" title="${esc(stampTitle(issue.UpdatedAt))}">${esc(worked)}${issue.stale ? '<span class="meta"> stale</span>' : ""}</span></span><span class="issue-title" title="${esc(issue.Title)}">${esc(issue.Title)}</span></button>`;
 }
 async function renderIssues(seq) {
   setChrome("issues", "/ issues");
@@ -1432,26 +1446,22 @@ async function renderIssues(seq) {
   rerenderWhenStatus(pending, seq);
   state.issuePage = page;
   const issues = page.Issues || [];
-  const facets = page.counts || {};
+  const counts = page.counts || {};
   const total = page.total ?? issues.length;
   const issueStart = state.issueCursorHistory.length * 50 + 1;
-  const kinds = [["", "all"], ["ci", "ci"], ["manual", "manual"]];
   const states = [["open", "open"], ["closed", "closed"], ["", "all"]];
-  const kindCount = kind => kind === "" ? (facets.manual || 0) + (facets.ci || 0) : (facets[kind] || 0);
-  const stateCount = issueState => issueState === "" ? (facets.open || 0) + (facets.closed || 0) : (facets[issueState] || 0);
+  const stateCount = issueState => issueState === "" ? (counts.open || 0) + (counts.closed || 0) : (counts[issueState] || 0);
   replaceApp(`
   <section class="screen">
-    <div class="bar"><h1>Issues</h1><span class="meta">${facets.open || 0} open · ${facets.manual || 0} manual · ${facets.ci || 0} CI · ${facets.closed || 0} closed</span></div>
+    <div class="bar"><h1>Issues</h1></div>
     <div class="toolbar">
-      ${kinds.map(([value, label]) => `<button class="chip ${state.issueKind === value ? "on" : ""}" data-issue-kind="${esc(value)}">${esc(label)} <span class="chip-count">${kindCount(value)}</span></button>`).join("")}
-      <span class="status-divider"></span>
       ${states.map(([value, label]) => `<button class="chip ${state.issueState === value ? "on" : ""}" data-issue-state="${esc(value)}">${esc(label)} <span class="chip-count">${stateCount(value)}</span></button>`).join("")}
       <label>repo <select data-action="issue-repo"><option value="">all</option>${state.repos.map(repo => `<option value="${esc(repoKey(repo))}" ${state.issueRepo === repoKey(repo) ? "selected" : ""}>${esc(repoLabel(repo))}</option>`).join("")}</select></label>
       <label>work <select data-action="issue-work-status"><option value="">all</option>${["todo", "active", "waiting", "review"].map(status => `<option value="${status}" ${state.issueWorkStatus === status ? "selected" : ""}>${status}</option>`).join("")}</select></label>
       <label>search <input type="search" data-action="issue-query" value="${esc(state.issueQuery)}" aria-label="Search issue title, body or branch"></label>
       <span class="count">${pageRange(issueStart, issues.length, total)}</span>
     </div>
-    ${issues.length ? `<div class="table issues-table"><div class="issue-row head static"><span>id</span><span>kind</span><span>state / work</span><span>repo</span><span>branch</span><span>title</span><span>seen</span><span>updated</span></div>${issues.map(issueRow).join("")}</div>` : '<div class="empty">No internal issues match these filters.</div>'}
+    ${issues.length ? `<div class="table issues-table"><div class="issue-row head static"><span>#</span><span>where</span><span>title</span><span>filed</span><span>last worked</span></div>${issues.map(issueRow).join("")}</div>` : '<div class="empty">No internal issues match these filters.</div>'}
     <div class="issue-pager">
       <button type="button" data-action="issue-newer" ${state.issueCursorHistory.length ? "" : "disabled"}>‹ newer</button>
       <button type="button" data-action="issue-older" ${page.NextBefore ? "" : "disabled"}>older ›</button>
@@ -1690,7 +1700,6 @@ app.addEventListener("click", event => {
   if ((target = event.target.closest("[data-repo-filter]"))) { changeRunRepo(target.dataset.repoFilter); route(); return; }
   if ((target = event.target.closest("[data-kind-filter]"))) { state.releaseOnly = !state.releaseOnly; route(); return; }
   if ((target = event.target.closest("[data-status-filter]"))) { state.filter = target.dataset.statusFilter; changeRunRepo(state.repo); route(); return; }
-  if ((target = event.target.closest("[data-issue-kind]"))) { changeIssueFilter({ issueKind: target.dataset.issueKind }); return; }
   if ((target = event.target.closest("[data-issue-state]"))) { changeIssueFilter({ issueState: target.dataset.issueState }); return; }
   if ((target = event.target.closest("[data-select-step]")) && target.dataset.selectStep !== undefined) {
     state.step = target.dataset.selectStep || "__summary__";

@@ -402,7 +402,7 @@ try {
  const queuedCell=run('whenCell(queuedTimeRun)');
  Date.now = () => timerStart + 3600000;
  liveTimer.fn();
- assert.equal(run('whenCell(queuedTimeRun)'),queuedCell,'timer ticks and later list renders preserve the original enqueue time');
+ assert.equal(run('whenCell(queuedTimeRun)').replace(/ title="[^"]*"/g,''),queuedCell.replace(/ title="[^"]*"/g,''),'timer ticks and later list renders preserve the original enqueue time');
  const queuedDate=new Date(sandbox.queuedTimeRun.QueuedAt);
  assert.ok(queuedCell.includes(queuedDate.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',hourCycle:'h23'})), 'the displayed time comes from QueuedAt');
 } finally { Date.now = savedNow }
@@ -419,10 +419,10 @@ console.log('Run-list contract passed: seven states, today/older start lines, li
 assert.equal(run(`runMessageCell({display_status:'passed',display_reason:'closes #1415, #1416 · schedule nightly'})`),'closes #1415, #1416 · schedule nightly');
 assert.equal(run(`runMessageCell({display_status:'passed',issue_trailers:[{issue:1,close:true}]})`),'','the client never fabricates a trailer message');
 
-const olderStart = new Date(2026,10,3,12,50);
+const olderStart = new Date(clockNow.getFullYear(),clockNow.getMonth(),clockNow.getDate()-2,12,50);
 sandbox.olderStart=olderStart;
-assert.match(run(`whenCell({display_status:'failed',StartedAt:olderStart,FinishedAt:olderStart})`),/started at Nov 3 12:50<\/span>/);
-assert.doesNotMatch(run(`whenCell({display_status:'failed',StartedAt:olderStart,FinishedAt:olderStart})`),/2026|AM|PM|12:50:00/);
+assert.ok(run(`whenCell({display_status:'failed',StartedAt:olderStart,FinishedAt:olderStart})`).includes(`started at ${run('shortStamp(olderStart)')}</span>`));
+assert.doesNotMatch(run(`whenCell({display_status:'failed',StartedAt:olderStart,FinishedAt:olderStart})`).replace(/ title="[^"]*"/g,''),/AM|PM|12:50:00/);
 
 // Four canonical classes agree with server FIFO, including views without positions.
 run('state.activeRuns=[]');

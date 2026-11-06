@@ -287,15 +287,20 @@ func TestDashboardUsesBranchTagCountsAndIssueFacets(t *testing.T) {
 		"All retained runs",
 		"Latest run for each branch or tag",
 		"pageRange(issueStart, issues.length, total)",
-		"const facets = page.counts || {}",
-		"${facets.open || 0} open · ${facets.manual || 0} manual · ${facets.ci || 0} CI · ${facets.closed || 0} closed",
-		"kindCount(value)", "stateCount(value)",
+		"const counts = page.counts || {}",
+		"stateCount(value)",
 		`query.set("query", state.issueQuery)`,
 	} {
 		if !strings.Contains(source, want) {
 			t.Fatalf("dashboard is missing count or range logic %q", want)
 		}
 	}
+	for _, unwanted := range []string{"pill(issue.Kind", "pill(issue.State", "×${esc(issue.Occurrences", "data-issue-kind", "kindCount(value)", "facets.manual"} {
+		if strings.Contains(source, unwanted) {
+			t.Fatalf("issues list retains %q", unwanted)
+		}
+	}
+
 	if strings.Contains(source, "${issues.length} shown") || strings.Contains(source, "${visible.length} shown") {
 		t.Fatal("dashboard still uses page-only shown counts")
 	}
