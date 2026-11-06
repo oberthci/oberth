@@ -18,6 +18,12 @@ Upgrade preflight may require a successful live check; there is no override flag
 The check covers every registered repository, fresh upstream branch heads and
 unpublished branches still held by Oberth. It reads all regular YAML sources
 under `.oberth` and follows the exact pinned fragments used by those sources.
+A retained multi-document YAML artifact is inspected document by document;
+legacy declarations or malformed later documents refuse the whole file, and
+fragment references are collected across all documents. This is a source census,
+not permission to execute the artifact: workflow and protected-contract decoders
+still require one document. Each file is bounded to 1 MiB, 256 documents and
+64 levels of nesting; exceeding a bound refuses rather than inspecting a prefix.
 It names the repository, ref, commit and file that still declares KVM injection,
 guest-test injection or trusted test producers. A retained `.oberth/tests.yaml`
 is checked against the installed generic protected executor and its current

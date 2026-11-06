@@ -245,3 +245,43 @@ func TestRetirementNewInvocationCannotReuseChangedFragmentAuthority(t *testing.T
 		t.Fatalf("fresh lookup count=%d", f.ensures)
 	}
 }
+
+func TestRetirementLaterDocumentRetainsFragmentAndObligationChecks(t *testing.T) {
+	for _, scenario := range []string{"complete", "fragment legacy", "unreadable fragment", "pending obligation", "later retained legacy"} {
+		t.Run(scenario, func(t *testing.T) {
+			f, loader, blobs := retirementReuse(t)
+			for i := range f.sources {
+				f.sources[i].Body = append([]byte("kind: ConfigMap\n---\n"), f.sources[i].Body...)
+			}
+			want := ""
+			switch scenario {
+			case "fragment legacy":
+				sha := strings.Repeat("a", 40)
+				blobs.blobs[sha] = strings.Replace(blobs.blobs[sha], "spec:", "metadata:\n  annotations: {oberth.ci/kvm-templates: main}\nspec:", 1)
+				want = "legacy"
+			case "unreadable fragment":
+				delete(blobs.blobs, strings.Repeat("a", 40))
+				want = "fragment"
+			case "pending obligation":
+				f.blockers = []string{"execution pending"}
+				want = "pending"
+			case "later retained legacy":
+				f.sources[len(f.sources)-1].Body = []byte("kind: ConfigMap\n---\nmetadata: {annotations: {oberth.ci/kvm-templates: main}}")
+				want = "retained-7"
+			}
+			err := (LegacyRemovalCheck{Catalog: f, Git: f, Fragments: loader}).Check(t.Context())
+			if want != "" {
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Fatalf("boundary skipped: %v; want %s", err, want)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if f.inventory != 2 || f.obligations != 2 || f.ensures != 1 || len(blobs.readArgs) != 1 {
+				t.Fatalf("coverage omitted: inventory%d obligations%d refresh%d fragment%d", f.inventory, f.obligations, f.ensures, len(blobs.readArgs))
+			}
+		})
+	}
+}

@@ -30,7 +30,7 @@ func TestLegacyRemovalReadsPinnedFragmentsAndRejectsMalformedSource(t *testing.T
 	if err != nil || len(refs) != 1 || refs[0] != "forge/org/library@v1" {
 		t.Fatalf("fragment proof omitted: %v %v", refs, err)
 	}
-	for _, body := range []string{"spec: [", "metadata: {}\nmetadata: {}", "---\nkind: Workflow\n---\nkind: Workflow"} {
+	for _, body := range []string{"spec: [", "metadata: {}\nmetadata: {}", "---\nkind: Workflow\n---\nkind: ["} {
 		if _, err := CheckSource(".oberth/build.yaml", []byte(body), false); err == nil {
 			t.Fatal("malformed/ambiguous source accepted")
 		}

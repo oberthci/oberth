@@ -28,22 +28,6 @@ func CheckSource(path string, body []byte, operatorCapability bool) ([]string, e
 	if len(body) > 1<<20 {
 		return nil, errors.New("source exceeds retirement inspection limit")
 	}
-	reader := k8syaml.NewYAMLReader(bufio.NewReader(bytes.NewReader(body)))
-	document, err := reader.Read()
-	if err != nil {
-		return nil, fmt.Errorf("inspect pipeline document: %w", err)
-	}
-	if _, err := reader.Read(); !errors.Is(err, io.EOF) {
-		return nil, errors.New("retirement inspection requires exactly one YAML document")
-	}
-	raw, err := yaml.YAMLToJSONStrict(document)
-	if err != nil {
-		return nil, fmt.Errorf("inspect pipeline YAML: %w", err)
-	}
-	var root map[string]any
-	if err := json.Unmarshal(raw, &root); err != nil || root == nil {
-		return nil, errors.New("pipeline must be a YAML object")
-	}
 	refs := map[string]bool{}
 	var walk func(any, int) error
 	walk = func(node any, depth int) error {
@@ -89,8 +73,38 @@ func CheckSource(path string, body []byte, operatorCapability bool) ([]string, e
 		}
 		return nil
 	}
-	if err := walk(root, 0); err != nil {
-		return nil, err
+
+	// The census covers retained YAML artifacts, not just executable pipelines.
+	// Inspect every document; success never means a multi-document workflow can
+	// execute. Keep byte/depth bounds and refuse excess documents, never a prefix.
+	reader := k8syaml.NewYAMLReader(bufio.NewReader(bytes.NewReader(body)))
+	documents := 0
+	for {
+		document, err := reader.Read()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("document %d: inspect pipeline document: %w", documents+1, err)
+		}
+		documents++
+		if documents > 256 {
+			return nil, errors.New("retirement inspection document count exceeds 256")
+		}
+		raw, err := yaml.YAMLToJSONStrict(document)
+		if err != nil {
+			return nil, fmt.Errorf("document %d: inspect pipeline YAML: %w", documents, err)
+		}
+		var root map[string]any
+		if err := json.Unmarshal(raw, &root); err != nil || root == nil {
+			return nil, fmt.Errorf("document %d: pipeline must be a YAML object", documents)
+		}
+		if err := walk(root, 0); err != nil {
+			return nil, fmt.Errorf("document %d: %w", documents, err)
+		}
+	}
+	if documents == 0 {
+		return nil, errors.New("retirement inspection requires at least one YAML document")
 	}
 	out := make([]string, 0, len(refs))
 	for name := range refs {
