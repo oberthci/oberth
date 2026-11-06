@@ -58,7 +58,8 @@ type Cache struct {
 	preFinalizeGate       func(context.Context) error
 	locks                 sync.Map
 	receiveLocks          sync.Map
-	policyRefreshes       sync.Map // cache path -> policyRefresh; guarded by repoLock
+	policyRefreshes       sync.Map         // cache path -> policyRefresh; guarded by repoLock
+	policyClock           func() time.Time // Optional freshness clock; set before concurrent use.
 }
 
 // New validates static configuration without contacting an upstream.
@@ -234,7 +235,7 @@ func (c *Cache) ensureReceiveLocked(ctx context.Context, input, repo, path strin
 }
 
 func (c *Cache) ensureLockedMayRecover(ctx context.Context, input, repo, path string, detectRecovery bool) (Repository, error) {
-	started := time.Now()
+	started := c.policyNow()
 	// A failed refresh must not leave an earlier successful policy snapshot
 	// usable by this admission attempt, even when Git can serve stale refs.
 	c.policyRefreshes.Delete(path)
