@@ -55,7 +55,7 @@ func TestRepositoryArchiveToolsRequireUnscopedAdminAndKeepCatalog(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	views := value.(api.RepoListResponse).Repositories.([]RepoView)
+	views := value.(api.RepoListResponse).Repositories.([]repoSummary)
 	if len(views) != 1 || views[0].ArchivedAt == nil {
 		t.Fatalf("catalog lost archive metadata: %+v", views)
 	}
