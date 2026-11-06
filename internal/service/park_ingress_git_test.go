@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/oberthci/oberth/internal/gitcache"
 )
@@ -16,7 +17,21 @@ import (
 // fetch under the policy deadline. Mirroring uses the restored upstream.
 type parkPolicyTransportCut struct {
 	*gitcache.Cache
-	upstream string
+	upstream       string
+	fixtureContext context.Context
+}
+
+// Keep the service's policy mode values, but give real Git fixture plumbing
+// the test's bounded lifetime. Decoder/transport assertions must not depend on
+// finishing subprocesses within the production two-second fallback window.
+// TestParkPushPolicyDeadlineFallsBackToCI exercises that real window separately.
+type parkPolicyFixtureContext struct {
+	context.Context
+	policyContext context.Context
+}
+
+func (c parkPolicyFixtureContext) Value(key any) any {
+	return c.policyContext.Value(key)
 }
 
 func (g *parkPolicyTransportCut) ReadDefaultBlob(ctx context.Context, repo, file string, limit int) (string, []byte, bool, error) {
@@ -24,7 +39,7 @@ func (g *parkPolicyTransportCut) ReadDefaultBlob(ctx context.Context, repo, file
 	if err := os.Rename(g.upstream, offline); err != nil {
 		return "", nil, false, err
 	}
-	sha, body, exists, err := g.Cache.ReadDefaultBlob(ctx, repo, file, limit)
+	sha, body, exists, err := g.Cache.ReadDefaultBlob(parkPolicyFixtureContext{Context: g.fixtureContext, policyContext: ctx}, repo, file, limit)
 	return sha, body, exists, errors.Join(err, os.Rename(offline, g.upstream))
 }
 
@@ -78,7 +93,9 @@ func TestParkPushReusesVerifiedUpstreamPolicy(t *testing.T) {
 			git(work, "commit", "--allow-empty", "-m", "park candidate")
 			sha := git(work, "rev-parse", "HEAD")
 			git(work, "push", ready.Path, "HEAD:refs/heads/park/review")
-			g := &parkPolicyTransportCut{Cache: cache, upstream: upstream}
+			fixtureContext, cancelFixture := context.WithTimeout(t.Context(), time.Minute)
+			defer cancelFixture()
+			g := &parkPolicyTransportCut{Cache: cache, upstream: upstream, fixtureContext: fixtureContext}
 			p, err := NewPushIngestor(PushConfig{Repositories: f.store, Discoverer: stubRepositoryDiscoverer{}, Git: g, Receives: f.store, Branches: f.scheduler, Auditor: f.store})
 			if err != nil {
 				t.Fatal(err)
