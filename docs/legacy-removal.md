@@ -19,8 +19,13 @@ The check covers every registered repository, fresh upstream branch heads and
 unpublished branches still held by Oberth. It reads all regular YAML sources
 under `.oberth` and follows the exact pinned fragments used by those sources.
 It names the repository, ref, commit and file that still declares KVM injection,
-guest-test injection, trusted test producers or `.oberth/tests.yaml`. Legacy
-KubeVirt resources/devices need a server-owned operator capability; repository
+guest-test injection or trusted test producers. A retained `.oberth/tests.yaml`
+is checked against the installed generic protected executor and its current
+approved recipes, positive KVM group and exact-namespace device capability;
+legacy/recovery-only configuration or missing authority refuses it. Keep the
+contract and its independent suite/guest/harness requirement. See
+[retained independent test contracts](retirement-upgrade.md#retained-independent-test-contracts).
+Legacy KubeVirt resources/devices need a server-owned operator capability; repository
 annotations cannot assert one. Unreadable or stale history, malformed YAML,
 symlinks/submodules, unsupported fragment nesting and exceeded inventory limits
 refuse the check. Historical tags alone do not block retirement; referenced
@@ -40,8 +45,11 @@ requires all externally owned legacy Workflows and VM/VMIs to be absent.
    The final removal must not be the first installed binary to expose the check;
    the upgrade CLI refuses an old daemon with no proof protocol.
 2. Migrate the dependent repositories and their pinned fragments to ordinary
-   workflows/operator capabilities. Change their YAML in those repositories;
-   no Oberth-specific repository exceptions are available.
+   workflows/operator capabilities while preserving independent protected test
+   contracts and receipt/publication gates. Qualify the complete replacement
+   runtime and original-owned recovery before treating source compatibility as
+   migration evidence. Change their workflow YAML in those repositories; no
+   Oberth-specific repository exceptions or contract-deletion bypass are available.
 3. Stop submissions and scheduled triggers at their source. Drain with the
    existing owner; keep its grants and cleanup RBAC until resources disappear.
 4. Run `oberth admin retirement-check` inside the current Oberth Pod. The command

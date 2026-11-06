@@ -916,6 +916,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 			return err
 		}
 	}
+	removalCheck.Protected, _ = trusted.(*app.TrustedPreflights)
 	signals := service.NewSignals()
 	scheduler, err := service.NewScheduler(service.SchedulerConfig{
 		Store: database, Git: git, Logs: logs, Jobs: argoJobs, ReleaseJobs: argoJobs, Auditor: database,

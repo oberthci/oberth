@@ -10,6 +10,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/protectedtests"
 	"github.com/oberthci/oberth/internal/retirement"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
@@ -31,6 +32,8 @@ type LegacyRemovalCheck struct {
 	Catalog   RetirementCatalog
 	Git       RetirementGit
 	Fragments FragmentLoader
+	// Protected is the installed executor, not a source-controlled migration flag.
+	Protected *TrustedPreflights
 }
 
 // This is an optimization budget, not an inventory limit. Once full, new refs
@@ -71,6 +74,7 @@ func (c LegacyRemovalCheck) inspect(ctx context.Context) error {
 	// Once a ref resolves to a fully validated immutable commit, keep that
 	// proof only for this bounded invocation, across retained declarations.
 	checked := retirementFragmentMemo{validated: make(map[argoworkflow.FragmentKey]string)}
+	capabilities := make(map[int64]*argoworkflow.Capability, len(repositories))
 	for _, repo := range repositories {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -87,6 +91,7 @@ func (c LegacyRemovalCheck) inspect(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("repository %s: read operator capability: %w", name, err)
 		}
+		capabilities[repo.ID] = capability
 		sources, err := c.Git.RetirementSources(ctx, name)
 		if err != nil {
 			return fmt.Errorf("repository %s: inspect all branch declarations: %w", name, err)
@@ -95,7 +100,13 @@ func (c LegacyRemovalCheck) inspect(ctx context.Context) error {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			refs, err := retirement.CheckSource(source.Path, source.Body, capability != nil)
+			var refs []string
+			var err error
+			if source.Path == protectedtests.ContractFile {
+				err = c.Protected.checkRetainedContract(source.Body, capability)
+			} else {
+				refs, err = retirement.CheckSource(source.Path, source.Body, capability != nil)
+			}
 			if err == nil {
 				err = c.checkFragments(ctx, refs, &checked)
 			}
@@ -113,6 +124,15 @@ func (c LegacyRemovalCheck) inspect(ctx context.Context) error {
 	}
 	if !reflect.DeepEqual(repositories, after) {
 		return errors.New("registered repositories changed during retirement inspection; retry")
+	}
+	for _, repo := range repositories {
+		current, err := c.Catalog.ActiveWorkflowCapability(ctx, repo.ID)
+		if err != nil {
+			return fmt.Errorf("recheck repository %s operator capability: %w", repo.Name, err)
+		}
+		if !reflect.DeepEqual(capabilities[repo.ID], current) {
+			return fmt.Errorf("repository %s operator capability changed during retirement inspection; retry", repo.Name)
+		}
 	}
 	return c.checkObligations(ctx)
 }
@@ -174,6 +194,25 @@ func (c LegacyRemovalCheck) checkObligations(ctx context.Context) error {
 	}
 	if len(rows) > 0 {
 		return fmt.Errorf("legacy removal refused while execution obligations remain: %s; keep the recovery server running and drain before retrying", strings.Join(rows, ", "))
+	}
+	return nil
+}
+
+// checkRetainedContract proves source compatibility with the installed generic
+// executor. It does not qualify runtime behavior, admit work, or delete policy.
+func (p *TrustedPreflights) checkRetainedContract(body []byte, capability *argoworkflow.Capability) error {
+	if p == nil || !p.generic || p.recoveryOnly || p.jobs == nil || p.jobs.capabilityGrants == nil {
+		return errors.New("retained protected contract requires the active generic protected executor")
+	}
+	contract, err := protectedtests.DecodeContract(body)
+	if err != nil {
+		return err
+	}
+	if err := p.Supports(contract); err != nil {
+		return err
+	}
+	if capability == nil || capability.Validate() != nil || capability.Namespace != p.jobs.config.Namespace || capability.ExtendedResources[protectedtests.GenericDeviceResource] < 1 {
+		return errors.New("retained protected contract requires current device authority in its exact namespace")
 	}
 	return nil
 }

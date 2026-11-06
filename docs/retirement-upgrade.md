@@ -47,3 +47,24 @@ replacement bypasses the CLI guard and must follow the same drain and absence
 checks. Move the website/connector to their external owner before using the
 separate final connector-removal commit, as described in the
 [staged migration](releases/unreleased-execution-retirement.md).
+
+## Retained independent test contracts
+
+The server's read-only retirement census retains `.oberth/tests.yaml`. It accepts
+that file only when the installed protected executor uses `generic-capability`,
+has a positive KVM supplemental group, and can select the exact v2 suite/guest
+pair from its current complete approved recipes. The repository must also have
+an active, valid device capability in the executor's namespace. A legacy or
+recovery-only executor, removed recipe, invalid contract or missing grant refuses
+the census. Capabilities are read again before completion; a changed grant
+requires a fresh inspection. All retained declarations, fragment checks and
+execution-obligation checks still apply.
+
+Passing this census establishes source compatibility, not runtime qualification
+or permission to remove the independent test requirement. Keep the original
+contract, suite/guest/harness pins, all-case verdict checks, receipt/publication
+gates and recovery journals. The preparation release keeps legacy execution
+available. Final removal remains a separate release after actual replacement
+qualification, stopped submissions, complete drain and independent absence and
+backup/restore evidence. A source census does not grant an external execution
+route or replace the supported upgrade's live resource inventory.
