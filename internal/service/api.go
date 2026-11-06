@@ -1330,7 +1330,16 @@ func (service *API) RunLogFiltered(ctx context.Context, actor api.Actor, id, sta
 		}
 	}
 	if strings.TrimSpace(stage) == "" {
-		return nil, fmt.Errorf("%w: burn is required when the run has no failed burn", ErrInvalidInput)
+		pairs := make([]string, 0, len(steps))
+		for _, result := range steps {
+			pairs = append(pairs, result.Stage+"/"+result.Step)
+		}
+		sort.Strings(pairs)
+		available := strings.Join(pairs, ", ")
+		if available == "" {
+			available = "none recorded"
+		}
+		return nil, fmt.Errorf("%w: no failed step; specify burn and step; available burn/step pairs: %s", ErrInvalidInput, available)
 	}
 	if strings.TrimSpace(step) == "" {
 		var count int

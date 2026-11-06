@@ -206,15 +206,32 @@ func TestLogHidesExecutorLinesUnlessRaw(t *testing.T) {
 	}
 }
 
-func TestLogRequiresStageAndStep(t *testing.T) {
-	configure(t, remoteServer(t, `{}`))
-	var out bytes.Buffer
-	err := runRemoteLog(context.Background(), []string{"run-abc"}, &out)
-	if err == nil {
-		t.Fatal("log ran without --burn and --step")
-	}
-	if !strings.Contains(err.Error(), "--burn") {
-		t.Fatalf("error does not say what is missing: %v", err)
+func TestLogDefaultsToFailedStepAndReportsAvailablePairs(t *testing.T) {
+	for _, failed := range []bool{true, false} {
+		t.Run(fmt.Sprint(failed), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("burn") != "" || r.URL.Query().Get("step") != "" {
+					t.Fatal("CLI invented selectors")
+				}
+				if !failed {
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = w.Write([]byte(`{"error":"no failed step; available burn/step pairs: build/compile, test/unit"}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{"run_id":"run-abc","burn":"test","step":"unit","output":"[test/unit] assertion failed\n"}`))
+			}))
+			defer server.Close()
+			configure(t, server)
+			var out bytes.Buffer
+			err := runRemoteLog(t.Context(), []string{"run-abc"}, &out)
+			if failed {
+				if err != nil || !strings.Contains(out.String(), "assertion failed") {
+					t.Fatal(out.String(), err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "build/compile, test/unit") {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

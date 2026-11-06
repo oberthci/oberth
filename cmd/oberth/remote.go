@@ -520,9 +520,6 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 	if flags.NArg() != 1 {
 		return fmt.Errorf("%w: log <run-id> --burn <burn> --step <step>", errUsage)
 	}
-	if strings.TrimSpace(*stage) == "" || strings.TrimSpace(*step) == "" {
-		return fmt.Errorf("%w: --burn and --step are required; oberth run <id> lists them", errUsage)
-	}
 	api, err := remoteClient(ctx)
 	if err != nil {
 		return err

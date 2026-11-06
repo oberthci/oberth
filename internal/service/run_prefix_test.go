@@ -25,9 +25,9 @@ func TestRunLogDefaults(t *testing.T) {
 		{name: "explicit burn only", failedStage: "test", failedStep: "integration", stage: "setup", wantStep: "prepare"},
 		{name: "single step", stage: "test", wantStep: "unit"},
 		{name: "failed burn only", failedStage: "test", wantStep: "unit"},
-		{name: "multi-step needs step", stage: "test", multi: true, wantError: "step"},
-		{name: "explicit burn does not infer failed step", failedStage: "test", failedStep: "unit", stage: "test", multi: true, wantError: "step"},
-		{name: "no failed burn", wantError: "burn"},
+		{name: "multi-step needs step", stage: "test", multi: true, wantError: "step is required"},
+		{name: "explicit burn does not infer failed step", failedStage: "test", failedStep: "unit", stage: "test", multi: true, wantError: "step is required"},
+		{name: "no failed burn", wantError: "available burn/step pairs: setup/prepare, test/unit"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			f := newRetentionFixture(t)
@@ -67,8 +67,8 @@ func TestRunLogDefaults(t *testing.T) {
 			raw, _ := json.Marshal(map[string]string{"id": run.ID[:8], "burn": test.stage, "step": test.step})
 			value, err := f.api.CallTool(ctx, api.Actor{Identity: "reader"}, "run_logs", raw)
 			if test.wantError != "" {
-				if !errors.Is(err, ErrInvalidInput) || !strings.Contains(err.Error(), test.wantError+" is required") {
-					t.Fatalf("got %v, want required %s", err, test.wantError)
+				if !errors.Is(err, ErrInvalidInput) || !strings.Contains(err.Error(), test.wantError) {
+					t.Fatalf("got %v, want %s", err, test.wantError)
 				}
 				return
 			}
