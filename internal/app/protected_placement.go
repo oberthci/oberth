@@ -145,9 +145,10 @@ func (p *TrustedPreflights) verifyPlacedFragmentAuthority(ctx context.Context, r
 	if !present {
 		return errors.New("current protected fragment root is missing")
 	}
-	// The fragment loader reads cached tag/main refs. Refresh each original
-	// producer's authenticated default branch before re-evaluating its existing
-	// publication policy; a cached positive must not outlive a failed refresh.
+	// Refresh each original producer's authenticated private default and tag
+	// refs. Protected fragment authority then resolves only those private tags:
+	// a removed or moved upstream tag must not retain public cached authority.
+	// Failed refreshes refuse; ordinary fragment loading keeps its public refs.
 	refreshed := map[string]bool{}
 	for _, fragment := range retained.Sources.Fragments {
 		key, err := argoworkflow.ParseFragmentRef(fragment.Key)
@@ -161,7 +162,7 @@ func (p *TrustedPreflights) verifyPlacedFragmentAuthority(ctx context.Context, r
 			refreshed[key.Repo] = true
 		}
 	}
-	fragments, err := loadFragments(ctx, p.jobs.fragments, source, pipeline.TriggerCI, model.RefBranch, "branch")
+	fragments, err := loadFragments(gitcache.WithUpstreamFragmentTags(ctx), p.jobs.fragments, source, pipeline.TriggerCI, model.RefBranch, "branch")
 	if err != nil {
 		return err
 	}

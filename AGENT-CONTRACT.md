@@ -402,7 +402,11 @@ placement. Version 2 placement admissions retain the original root and fragment
 bytes atomically with runtime/config/capacity/audit, within the existing 512 KiB
 admission bound; fragment-free version 1 custody remains compatible. Current
 allocation, receipt and publication recheck the existing fragment trust policy
-and exact source graph. Cleanup reconstructs original bytes after resolver or
+and exact source graph. Protected tag lookup uses private authenticated upstream
+refs after a successful fresh producer fetch; deleted/moved tags refuse even
+when public cached tags still resolve to reachable commits. These checks do not
+materialize public tags or change ordinary fragment/replay lookup. Cleanup
+reconstructs original bytes after resolver or
 policy removal and cannot authorize new work. External bootstrap, installed
 containing CI and real workload qualification remain separately required.
 

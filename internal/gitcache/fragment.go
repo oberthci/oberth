@@ -6,6 +6,16 @@ import (
 	"strings"
 )
 
+type upstreamFragmentTagsKey struct{}
+
+// WithUpstreamFragmentTags selects private authenticated upstream tags for
+// TagSHA. The caller must first successfully refresh producer policy with
+// ReadDefaultBlob and WithFreshPolicy. It neither materializes public refs nor
+// changes exact tag-object lookup used by replay.
+func WithUpstreamFragmentTags(ctx context.Context) context.Context {
+	return context.WithValue(ctx, upstreamFragmentTagsKey{}, true)
+}
+
 func (c *Cache) TagSHA(ctx context.Context, input, tag string) (string, error) {
 	return c.resolveTagSHA(ctx, input, tag, true)
 }
@@ -40,6 +50,9 @@ func (c *Cache) resolveTagSHA(ctx context.Context, input string, tag string, pee
 		return "", fmt.Errorf("repository %s is not cached", repo)
 	}
 	ref := "refs/tags/" + tag
+	if upstream, _ := ctx.Value(upstreamFragmentTagsKey{}).(bool); peel && upstream {
+		ref = upstreamRefPrefix + "tags/" + tag
+	}
 	if peel {
 		ref += "^{commit}"
 	}

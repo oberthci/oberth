@@ -20,8 +20,7 @@ import (
 func newDirectFragmentFixture(t *testing.T) *directPlacementFixture {
 	return newDirectFragmentFixtureExpiring(t, 0)
 }
-func newDirectFragmentFixtureExpiring(t *testing.T, lifetime time.Duration) *directPlacementFixture {
-	t.Helper()
+func directFragmentSources() ([]byte, []byte) {
 	source := []byte(`apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 spec:
@@ -45,6 +44,12 @@ spec:
         requests: {cpu: 100m, memory: 64Mi}
         limits: {cpu: 1, memory: 128Mi}
 `)
+	return source, fragment
+}
+
+func newDirectFragmentFixtureExpiring(t *testing.T, lifetime time.Duration) *directPlacementFixture {
+	t.Helper()
+	source, fragment := directFragmentSources()
 	key, err := argoworkflow.ParseFragmentRef("github/org/shared@v1")
 	if err != nil {
 		t.Fatal(err)

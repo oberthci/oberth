@@ -124,7 +124,13 @@ contains the original root and fragment bytes, including optional input digest
 metadata used by existing submission identity. The capsule is validated and
 committed atomically with placement/runtime/capacity/audit before allocation.
 It stays within the existing 512 KiB serialized admission bound. Current source
-and fragment policy are rechecked before allocation, receipt and publication;
+and fragment policy are rechecked before allocation, receipt and publication.
+Each original producer is freshly fetched through its authenticated upstream;
+protected tag resolution reads only the resulting private upstream tags. A
+missing or moved tag refuses even when the old public cached tag still points
+to an ancestor of current main. Public tag refs are not materialized by this
+check; ordinary fragment and exact tag-object replay semantics are unchanged.
+A failed refresh refuses rather than using stale authority;
 cleanup can reconstruct the original graph after a resolver disappears or
 changes, without network lookup or new execution authority. Existing
 fragment-free version 1 admissions retain their original encoding.
