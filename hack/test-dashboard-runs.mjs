@@ -102,12 +102,12 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
     };
   `);
   await run('renderRuns(0)');
-  assert.deepEqual(ids(), ['queued-high-next','queued-high-second-hidden','queued-normal-late','waiting-hidden','running-late-hidden','running-early','passed-newest','failed-middle','passed-older'],
-    'F3: queue in claim order by position, then running newest start first, then finished newest finish first');
+  assert.deepEqual(ids(), ['waiting-hidden','queued-normal-late','queued-high-second-hidden','queued-high-next','running-late-hidden','running-early','passed-newest','failed-middle','passed-older'],
+    'F3: queue in reverse claim order by position, then running newest start first, then finished newest finish first');
   assert.ok(!run('runPageFull(f3Page)'), 'F3: queued and running rows never count toward the terminal page limit');
   // A scoped viewer sees no queue positions: the active view's order (the
   // server's admission order) decides, never the queue time, so an older
-  // normal run still sits below a newer high run that is admitted next.
+  // normal run sits above a newer high run that is admitted next.
   run(`
     const f3Scoped=[
       makeRun('scoped-passed',{Ref:'s1',StartedAt:f3Time(0),FinishedAt:f3Time(50)}),
@@ -124,12 +124,12 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
     };
   `);
   await run('renderRuns(0)');
-  assert.deepEqual(ids(), ['scoped-high-new','scoped-normal-old','scoped-normal-hidden','scoped-passed'],
-    'F3: without positions the queue follows the active view order, not queue time');
+  assert.deepEqual(ids(), ['scoped-normal-hidden','scoped-normal-old','scoped-high-new','scoped-passed'],
+    'F3: without positions the queue reverses the active view order, not queue time');
   run(`api=async path=>{ if(path==='/api/repos')return [{ID:1,Name:'ours',UpstreamID:1}]; if(path==='/api/runs/counts')return {Total:3,ByRepo:{1:3}}; const query=new URL(path,'https://example.test').searchParams; if(query.get('view')==='active')return []; return {body:f3Scoped,next:''}; };`);
   await run('renderRuns(0)');
-  assert.deepEqual(ids(), ['scoped-high-new','scoped-normal-old','scoped-passed'],
-    'F3: without positions or an active view priority leads, preserving server FIFO within each class');
+  assert.deepEqual(ids(), ['scoped-normal-old','scoped-high-new','scoped-passed'],
+    'F3: without positions or an active view reverse priority and reverse server FIFO within each class');
   // A claimed normal run (raw running, not started) listed by the active
   // view after an unclaimed high run stays behind it: the scoped queue is
   // the server's claim order, never "claimed first".
@@ -148,8 +148,8 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
     };
   `);
   await run('renderRuns(0)');
-  assert.deepEqual(ids(), ['scoped-high-unclaimed','scoped-claimed-normal','scoped-started'],
-    'F3: a claimed normal run sits below the unclaimed high run the gate admits first; both are queued rows');
+  assert.deepEqual(ids(), ['scoped-claimed-normal','scoped-high-unclaimed','scoped-started'],
+    'F3: a claimed normal run sits above the unclaimed high run the gate admits first; both are queued rows');
   assert.ok(!/waiting<\/span>/.test(run('html')), 'F3: the claimed run is a queued pill, not waiting');
   run('api=apiFixture;');
   console.log('F3 passed: queued runs never render below running or finished runs');
@@ -303,7 +303,7 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'V1'
   console.log('V1 passed: one queued status, reasons on the message line');
 }
 
-// Every list view preserves effective priority, including claimed work and
+// Every list view reverses claim order, including claimed work and
 // aged normal work, even when a scoped viewer has no global queue positions.
 run('var claimListPath="";');
 for (const latest of [false, true]) {
@@ -328,11 +328,11 @@ for (const latest of [false, true]) {
       };
     }`);
     await run('renderRuns(state.routeSeq)');
-    assert.deepEqual(ids(), ['claim-high-first','claim-aged','claim-high-last','claim-normal'], `claim order: latest=${latest}, scoped=${scoped}`);
+    assert.deepEqual(ids(), ['claim-normal','claim-high-last','claim-aged','claim-high-first'], `reverse claim order: latest=${latest}, scoped=${scoped}`);
     assert.equal(new URL(run('claimListPath'),'https://example.test').searchParams.has('latest_per_ref'), latest, 'exercise both flat and latest-per-ref requests');
   }
 }
-console.log('Queued groups preserve scheduler priority and FIFO in flat, latest-per-ref and scoped views');
+console.log('Queued groups reverse scheduler priority and FIFO in flat, latest-per-ref and scoped views');
 
 // A scoped poll can receive a newer priority bump in the heads while the
 // active request fails and retains its older queue order. Cached order must
@@ -352,7 +352,7 @@ run(`{
   };
 }`);
 await run('renderRuns(state.routeSeq)');
-assert.deepEqual(ids(), ['cache-bumped','cache-high','cache-normal'], 'a stale scoped active order must not interleave effective priority classes');
+assert.deepEqual(ids(), ['cache-normal','cache-high','cache-bumped'], 'a stale scoped active order must not interleave effective priority classes');
 console.log('Priority classes remain grouped when the scoped active request fails after a priority change');
 
 // Server messages are the entire row message, including empty messages.
@@ -424,11 +424,63 @@ sandbox.olderStart=olderStart;
 assert.match(run(`whenCell({display_status:'failed',StartedAt:olderStart,FinishedAt:olderStart})`),/started at Nov 3 12:50<\/span>/);
 assert.doesNotMatch(run(`whenCell({display_status:'failed',StartedAt:olderStart,FinishedAt:olderStart})`),/2026|AM|PM|12:50:00/);
 
-// Four canonical classes agree with server FIFO, including views without positions.
+// Four canonical classes reverse server FIFO, including views without positions.
 run('state.activeRuns=[]');
 assert.deepEqual(JSON.parse(run(`JSON.stringify(orderRuns([
  ...['low','standard','promotion','high','low','standard','promotion','high'].map((priority,index)=>makeRun(priority+'-'+index,{Status:'queued',StartedAt:null,FinishedAt:null,QueuePosition:0,priority_class:priority}))
-]).map(row=>row.ID))`)), ['high-3','high-7','promotion-2','promotion-6','standard-1','standard-5','low-0','low-4']);
+]).map(row=>row.ID))`)), ['low-4','low-0','standard-5','standard-1','promotion-6','promotion-2','high-7','high-3']);
 assert.equal(run(`prioritySummary({priority_class:'normal'})`), 'priority standard');
 assert.equal(run(`prioritySummary({priority_class:'highest'})`), 'priority high');
 console.log('Four canonical priority classes and legacy response aliases pass');
+
+// Owner layout (#1487 R2): the next queued run is directly above running work.
+run(`
+  const ownerQueue = [
+    ['owner-next','high',1], ['owner-high','high',2],
+    ['owner-standard','standard',3], ['owner-low','low',4],
+  ].map(([ID,priority,position])=>makeRun(ID,{
+    Ref:ID,Status:'queued',StartedAt:null,FinishedAt:null,QueuePosition:position,
+    priority_class:priority,display_status:'queued',
+    display_reason:'needs 2 CPU, 4 GiB · '+(position===1?'next in line':'position '+position),
+  }));
+  const ownerRunning = [
+    makeRun('owner-running-new',{Status:'running',StartedAt:'2026-11-05T12:00:00Z',FinishedAt:null}),
+    makeRun('owner-running-old',{Status:'running',StartedAt:'2026-11-05T11:00:00Z',FinishedAt:null}),
+  ];
+  const ownerFinished = ['passed','failed','cancelled'].map((status,index)=>makeRun('owner-'+status,{
+    Status:status==='cancelled'?'interrupted':status,display_status:status,
+    FinishedAt:'2026-11-05T10:0'+(3-index)+':00Z',
+  }));
+  const ownerRows=[...ownerQueue,...ownerRunning,...ownerFinished];
+  const ownerWire=JSON.stringify(ownerRows);
+  api=async path=>{
+    if(path==='/api/repos')return [{ID:1,Name:'ours',UpstreamID:1}];
+    if(path==='/api/runs/counts')return {Total:ownerRows.length,ByRepo:{1:ownerRows.length}};
+    if(path.includes('view=active'))return [...ownerQueue,...ownerRunning];
+    return {body:ownerRows,next:''};
+  };
+`);
+for (const filter of ['all','queued']) {
+  sandbox.ownerFilter=filter;
+  run(`changeRunRepo('all');state.filter=ownerFilter;state.activeRuns=[];`);
+  await run('renderRuns(state.routeSeq)');
+  const expected=['owner-low','owner-standard','owner-high','owner-next'];
+  if(filter==='all')expected.push('owner-running-new','owner-running-old','owner-passed','owner-failed','owner-cancelled');
+  assert.deepEqual(ids(),expected,`owner layout in ${filter} view`);
+  const rows=[...run('html').matchAll(/<div class="trow" data-run-id="([^"]+)">([\s\S]*?)(?=<div class="trow"|$)/g)];
+  const row=id=>rows.find(match=>match[1]===id)[2];
+  assert.match(row('owner-low'),/>low priority<.*needs 2 CPU, 4 GiB · position 4/);
+  assert.doesNotMatch(row('owner-standard'),/priority|class="v4b/,'standard has no priority label');
+  assert.match(row('owner-standard'),/needs 2 CPU, 4 GiB · position 3/);
+  assert.match(row('owner-high'),/>high priority<.*needs 2 CPU, 4 GiB · position 2/);
+  assert.match(row('owner-next'),/>high priority<.*needs 2 CPU, 4 GiB · next in line/);
+  assert.equal(run('JSON.stringify(ownerRows)'),run('ownerWire'),'rendering never reverses or rewrites the API response');
+}
+assert.match(run(`runRow({...ownerQueue[0],priority_class:'promotion'})`),/>priority promotion</);
+for(const priority of ['standard','normal',undefined]) {
+  sandbox.labelPriority=priority;
+  assert.doesNotMatch(run(`runRow({...ownerQueue[0],priority_class:labelPriority})`),/class="v4b|standard priority|priority standard/);
+}
+assert.match(run(`runRow({...ownerQueue[0],priority_class:'highest'})`),/>high priority</);
+assert.match(run(`runRow({...ownerQueue[0],priority_reason:'operator <unsafe>'})`),/title="operator &lt;unsafe&gt;"/);
+console.log('Owner layout passed: reversed queue, next at bottom, unchanged running/history order and wire data, and only named nonstandard priorities');

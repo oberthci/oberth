@@ -105,6 +105,7 @@ input,select{height:32px;border:1px solid var(--line);background:var(--panel);co
 .status-cell{display:flex;align-items:center;gap:8px;min-width:0}
 .run-status{display:flex;align-items:center;gap:8px;min-width:0;overflow:hidden}.run-status .pill{white-space:nowrap}
 .runs-table .run-status{overflow:visible}
+.run-name{display:flex;align-items:center;gap:8px}.run-name .repo-name{min-width:0}.run-name .v4b{flex-shrink:0}
 .primary{min-width:0}.repo-name{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .branch{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
 .sha{color:var(--cyan);white-space:nowrap}.nowrap{white-space:nowrap}

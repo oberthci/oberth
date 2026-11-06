@@ -372,14 +372,14 @@ func TestRunDetailStepsAreUniformOrderedRows(t *testing.T) {
 		return source[from : from+to]
 	}
 	// The credentialed badge is gone everywhere; release/priority/schedule
-	// badges remain on run detail, while list rows keep only repo and ref.
+	// badges remain on run detail; queued list rows also show nonstandard priority.
 	for _, unwanted := range []string{"credentialedBadge", "CREDENTIALED"} {
 		if strings.Contains(source, unwanted) {
 			t.Fatalf("dashboard retains the credentialed badge: %q", unwanted)
 		}
 	}
 	rowSource := section("function runRow(", "\nfunction runsTable(")
-	for _, unwanted := range []string{"releaseBadge", "priorityBadge", "scheduleBadge", "ConcurrencyGroup", "const group ="} {
+	for _, unwanted := range []string{"releaseBadge", "scheduleBadge", "ConcurrencyGroup", "const group ="} {
 		if strings.Contains(rowSource, unwanted) {
 			t.Fatalf("run row retains inline badge code: %s", unwanted)
 		}

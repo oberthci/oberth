@@ -1341,6 +1341,10 @@ containing CI and real workload qualification remain separately required.
   admission (`Status` `waiting` on the wire, phase `waiting` or
   `preparing`). Admission records `started_at`, so an admitted run,
   including a trusted preflight before Workflow submission, is `running`.
+  The dashboard reverses only the queued block: last-to-start at the top,
+  next-in-line directly above running rows, also in the queued filter. API/MCP
+  retain claim order. Queued badges name low priority, high priority or priority
+  promotion; standard has no priority label.
   A queued run's `display_reason` shows its peak concurrent pod requests and
   one blocker, computed by the server for list, detail, status, live-log and
   active views: `needs 9.9 CPU, 16 GiB · host CPU busy`, `host IO busy`,

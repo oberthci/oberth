@@ -181,7 +181,11 @@ function priorityClass(run) {
   const name = run.priority_class || "standard";
   return name === "normal" ? "standard" : name === "highest" ? "high" : name;
 }
-function priorityBadge(run) { return run.priority_class ? `<span class="v4b dim" title="${esc(run.priority_reason || "")}">${esc(priorityClass(run))} priority</span>` : ""; }
+function priorityBadge(run) {
+  const priority = priorityClass(run);
+  const label = {low:"low priority", high:"high priority", promotion:"priority promotion"}[priority];
+  return label ? `<span class="v4b dim" title="${esc(run.priority_reason || "")}">${label}</span>` : "";
+}
 function releaseBadge(run) { return priorityBadge(run) + (run.Release ? '<span class="v4b release">⏏ RELEASE</span>' : ""); }
 function runDuration(run) {
   return spanSeconds(run.StartedAt, run.FinishedAt, run.Status === "running");
@@ -434,7 +438,9 @@ async function loadActiveRuns() {
 /* The server lists runs in three groups: the queue with the run admitted
    next at its top, running runs newest start first, then terminal runs
    newest finish first. Active runs fetched separately (older attempts hidden
-   behind a newer head) are merged into their group, never stacked on top. */
+   behind a newer head) are merged into their group, never stacked on top.
+   The dashboard reverses only the queued group: next to start sits at the
+   bottom, directly above running work. API/MCP claim order stays unchanged. */
 function runListGroup(run) {
   if (isTerminalRun(run)) return 2;
   return displayRunStatus(run) === "queued" || !run.StartedAt ? 0 : 1;
@@ -460,6 +466,7 @@ function orderRuns(runs) {
     if (runListGroup(a.run) === 0) {
       key = priorityRank(b.run) - priorityRank(a.run);
       if (!key) key = position(a.run) && position(b.run) ? position(a.run) - position(b.run) : 0;
+      return -key || b.index - a.index;
     }
     else if (runListGroup(a.run) === 1) key = stamp(b.run.StartedAt) - stamp(a.run.StartedAt);
     else key = stamp(b.run.FinishedAt || b.run.StartedAt || b.run.QueuedAt) - stamp(a.run.FinishedAt || a.run.StartedAt || a.run.QueuedAt);
@@ -553,7 +560,7 @@ function runMessageCell(run) {
 }
 function runRow(run) {
   const status = displayRunStatus(run);
-  return `<div class="trow" data-run-id="${esc(run.ID)}"><div class="status-cell run-status">${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}</div><div class="primary" title="${esc(`sha ${run.SHA || ""} · actor ${run.Actor || ""}`)}"><div class="repo-name">${esc(repoName(run.RepoID))}</div><div class="branch">${esc(run.RefKind === "tag" ? "tag " : "")}${esc(run.Ref)}</div></div><div class="when">${whenCell(run)}</div><div class="clip" title="${esc(rowMessage(run))}">${runMessageCell(run)}</div></div>`;
+  return `<div class="trow" data-run-id="${esc(run.ID)}"><div class="status-cell run-status">${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}</div><div class="primary" title="${esc(`sha ${run.SHA || ""} · actor ${run.Actor || ""}`)}"><div class="run-name"><div class="repo-name">${esc(repoName(run.RepoID))}</div>${status === "queued" ? priorityBadge(run) : ""}</div><div class="branch">${esc(run.RefKind === "tag" ? "tag " : "")}${esc(run.Ref)}</div></div><div class="when">${whenCell(run)}</div><div class="clip" title="${esc(rowMessage(run))}">${runMessageCell(run)}</div></div>`;
 }
 function runsTable(runs) {
   return `<div class="table runs-table"><div class="trow head"><div>status</div><div>run</div><div>when</div><div>message</div></div>${runs.map(runRow).join("")}</div>`;
