@@ -11,7 +11,7 @@ export apk_test_log="$scratch/args"
 server_path=/tmp/oberth-tools/bin:/usr/local/bin:/usr/bin:/bin
 cat > "$scratch/pins" <<'PINS'
 BUILDER_APK_VERSION=3.0.8-r0
-APK_PACKAGES='apk-tools=3.0.9-r0 musl=1.2.5-r24 zlib=1.3.2-r1'
+APK_PACKAGES='apk-tools=3.0.9-r0 musl=1.2.5-r24 zlib=1.4-r0'
 PINS
 cat > "$apk_fixture" <<'APK'
 #!/bin/sh
@@ -25,11 +25,11 @@ sed "s|/sbin/apk|$apk_fixture|g" "$script" > "$scratch/install.sh"
 # Both the writable image build and the read-only-root CI install must dispatch
 # to the absolute fixture, despite /sbin being absent from this exact PATH.
 PATH=$server_path /bin/sh "$scratch/install.sh" "$scratch/pins"
-printf '%s\n' add --no-cache apk-tools=3.0.9-r0 musl=1.2.5-r24 zlib=1.3.2-r1 > "$scratch/want"
+printf '%s\n' add --no-cache apk-tools=3.0.9-r0 musl=1.2.5-r24 zlib=1.4-r0 > "$scratch/want"
 cmp "$scratch/want" "$apk_test_log"
 PATH=$server_path /bin/sh "$scratch/install.sh" "$scratch/pins" "$scratch/root"
 printf '%s\n' --root "$scratch/root" --initdb --no-scripts --keys-dir /etc/apk/keys \
-  --repositories-file /etc/apk/repositories add --no-cache apk-tools=3.0.9-r0 musl=1.2.5-r24 zlib=1.3.2-r1 > "$scratch/want"
+  --repositories-file /etc/apk/repositories add --no-cache apk-tools=3.0.9-r0 musl=1.2.5-r24 zlib=1.4-r0 > "$scratch/want"
 cmp "$scratch/want" "$apk_test_log"
 rm "$apk_test_log"
 sed '/^BUILDER_APK_VERSION=/d' "$scratch/pins" > "$scratch/missing-builder-pins"

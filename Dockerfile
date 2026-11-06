@@ -40,7 +40,7 @@ FROM scratch AS runtime
 LABEL org.oberth.static-git.version="2.56.0" \
       org.oberth.static-git.source-sha256="26c56c296b38c0695b26fa95f475f1d01704d2d38e73465ca30b0b2f5dc789d3" \
       org.oberth.static-git.musl="1.2.5-r24" \
-      org.oberth.static-git.zlib="1.3.2-r1"
+      org.oberth.static-git.zlib="1.4-r0"
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build --chmod=0755 /out/ /usr/local/bin/
 COPY --from=git-build --chmod=0755 /out/git /usr/bin/git
