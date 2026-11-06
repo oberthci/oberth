@@ -7,6 +7,11 @@ The figures use workflow requests and concurrency, not limits or retired
 weighted budgets. Scoped viewers see their own figures; shared counts and
 hidden repositories remain private. Unavailable figures are omitted.
 
+Demand lookups share one two-second budget for the whole list. A bounded LRU
+keeps successful results by run and SHA without expiry and caches failures
+and timeouts for 30 seconds. Queued detail messages use plain wording too.
+
+The priority prefix moved off queued lines; a badge still shows it.
 Priority remains in its fields and park-policy fallback details remain in the
 run's durable reason and audit, without crowding the queued line. Kubernetes
 resource waits retain `pod pending: insufficient cpu (4 CPU requested)`.

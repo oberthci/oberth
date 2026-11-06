@@ -745,7 +745,7 @@ func TestScopedSchedulingHidesInstallationLoad(t *testing.T) {
 	run := model.Run{ID: "run", Status: model.RunRunning, QueueSequence: 5}
 	got, _ := scoped.observeScheduling(context.Background(), run, nil, true)
 	if got.Admission.Position != 0 || got.Admission.Used != 0 || got.Admission.Capacity != 0 || got.Admission.DiskFloor != nil ||
-		got.Message != "Waiting for capacity." || got.Admission.Size != "M" {
+		got.Message != "In line." || got.Admission.Size != "M" {
 		t.Fatalf("scoped scheduling = %#v %#v", got, got.Admission)
 	}
 	if full, _ := unscoped.observeScheduling(context.Background(), run, nil, true); full.Admission.Used != 7 || !strings.Contains(full.Message, "disk space") {

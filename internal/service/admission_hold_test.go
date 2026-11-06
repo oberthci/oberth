@@ -40,7 +40,7 @@ func TestAdmissionHoldToolKeepsOrdinaryWorkQueued(t *testing.T) {
 		t.Fatalf("hold changed queued run: %+v %v", run, err)
 	}
 	shown, reason := control.observeScheduling(t.Context(), run, nil, false)
-	if shown.State != "queued" || !strings.Contains(shown.Message, "admission held by admin: release qualification, until ") || !strings.Contains(reason, "queue held by admin: release qualification, until ") {
+	if shown.State != "queued" || !strings.Contains(shown.Message, "queue held by admin: release qualification, until ") || !strings.Contains(reason, "queue held by admin: release qualification, until ") {
 		t.Fatalf("hold reason=%q observation=%+v", reason, shown)
 	}
 	value, err = control.Run(t.Context(), actor, run.ID)

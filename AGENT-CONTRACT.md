@@ -1348,8 +1348,9 @@ containing CI and real workload qualification remain separately required.
   Workflow graph accounting includes dependencies, parallelism and resource
   helper pods. Requests are independent of limits and retired weighted charges.
   Waiting runs use the bound receipt; unclaimed runs read the selected commit
-  and fragments without a checkout, with a 2-second budget and bounded
-  30-second cache. Unknown figures are omitted, never reported as zero.
+  and fragments without a checkout, with one shared 2-second demand budget per list. A bounded LRU
+  keeps successful run/SHA results without expiry; failures and timeouts
+  are cached for 30 seconds. Unknown figures are omitted, never reported as zero.
   Scoped viewers may see their own demand and public host-pressure reason;
   global counts, queue positions and hidden repository identities stay hidden.
   Unknown scoped positions read `in line`, not `next in line`. Other blockers

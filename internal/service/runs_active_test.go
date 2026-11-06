@@ -106,7 +106,7 @@ func TestActiveRunsOrderAndWaitReasons(t *testing.T) {
 	}
 	vmEntry, groupEntry, headEntry, queuedEntry := active[1], active[2], active[3], active[4]
 	if vmEntry.Status != model.RunWaiting || vmEntry.Scheduling == nil || vmEntry.Scheduling.Admission == nil ||
-		!vmEntry.Scheduling.Admission.VMCapacity || !strings.Contains(vmEntry.Scheduling.Message, "trusted VM capacity") {
+		!vmEntry.Scheduling.Admission.VMCapacity || !strings.Contains(vmEntry.Scheduling.Message, "Waiting for VM resources") {
 		t.Fatalf("VM-parked run lost its reason: %#v", vmEntry.Scheduling)
 	}
 	if groupEntry.Scheduling == nil || groupEntry.Scheduling.Admission == nil || groupEntry.Scheduling.Admission.Group != "deploy" ||

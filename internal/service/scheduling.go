@@ -70,14 +70,17 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 			}
 		}
 		result.AgeSeconds = int64(clock.Since(observed) / time.Second)
-		if result.Admission != nil && result.Admission.BackfillMessage != "" {
+		if model.DisplayRunStatus(run) != model.DisplayQueued && result.Admission != nil && result.Admission.BackfillMessage != "" {
 			result.Message += " " + result.Admission.BackfillMessage
 		}
 		if run.Priority != "" {
 			priority, _ := run.EffectivePriority(observed)
 			prefix := run.PriorityMessage(observed)
+			if model.DisplayRunStatus(run) == model.DisplayQueued {
+				prefix = fmt.Sprintf("Priority %s.", priority)
+			}
 			if priority != model.PriorityNormal && (result.State == "queued" || result.State == "waiting") {
-				prefix = fmt.Sprintf("priority %s: next when capacity frees. %s", priority, prefix)
+				prefix = fmt.Sprintf("priority %s: next when a run slot opens. %s", priority, prefix)
 			}
 			result.Message = prefix + " " + result.Message
 		}
@@ -91,7 +94,8 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 		result.State = "infra-pending"
 		result.Message = "Workflow creation outcome is uncertain; background cleanup is pending."
 		if run.Error == store.ExecutorIdentityPendingMessage || run.Error == store.AdmissionStalledPendingMessage {
-			result.Message = run.Error
+			result.Message = "workflow startup timed out; cleanup pending"
+			return result, result.Message
 		}
 		return result, reason
 	}
@@ -109,15 +113,15 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 	}
 	if hold, held := service.admissionHoldForRun(run); held {
 		result.State = "queued"
-		result.Message = hold.Message()
+		result.Message = hold.ShortMessage()
 		return result, hold.ShortMessage()
 	}
 	if run.Status == model.RunQueued {
 		result.State = "queued"
-		if observer, ok := service.admission.(interface{ QueuedAdmissionMessage() string }); ok {
-			if message := observer.QueuedAdmissionMessage(); message != "" && (service.scope == nil || message == "host CPU busy" || message == "host IO busy") {
-				result.Message = message
-				return result, message
+		if observer, ok := service.admission.(interface{ QueuedAdmissionMessage() queuedAdmissionMessage }); ok {
+			if message := observer.QueuedAdmissionMessage(); message.Text != "" && (service.scope == nil || message.Pressure) {
+				result.Message = message.Text
+				return result, message.Text
 			}
 		}
 		result.Message = "Awaiting scheduler claim; queue position follows priority then FIFO, not an execution estimate."
@@ -179,7 +183,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 			result.State = result.Admission.State
 			switch result.Admission.State {
 			case "preparing":
-				result.Message = "Preparing the run before resource admission."
+				result.Message = "Preparing the run."
 				return result, reason
 			case "waiting":
 				result.Message = waitingAdmissionMessage(result.Admission)
@@ -192,7 +196,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 					// The group waits name runs of the same repository; any
 					// other wait says only that capacity is short, unless
 					// the blocking run is itself in scope.
-					result.Message = "Waiting for capacity."
+					result.Message = "In line."
 					if result.Admission.BlockedBy != nil {
 						result.Message += " " + blockedBehindMessage(result.Admission.BlockedBy)
 					}
@@ -209,10 +213,10 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 						return result, reason
 					}
 					result.State = "waiting"
-					result.Message = "Resource admission granted; waiting for workflow submission."
+					result.Message = "Waiting for workflow submission."
 					return result, reason
 				}
-				result.Message = "Resource admission granted; execution progress has not been recorded."
+				result.Message = "Waiting for execution progress."
 			}
 		}
 	}
@@ -273,15 +277,15 @@ func (service *API) observeKVMPreflight(ctx context.Context, run model.Run, resu
 func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
 
 	if admission.KubeVirtCapacity {
-		return "KubeVirt capacity"
+		return "Waiting for KubeVirt resources"
 	}
 	if admission.VMCapacity {
-		return "Waiting for trusted VM capacity; no weighted resources or concurrency group held."
+		return "Waiting for VM resources."
 	}
 	switch {
 	case admission.DiskFloor != nil && admission.DiskFloor.BelowFloor:
 		return fmt.Sprintf("Waiting for disk space: %d bytes free, floor is %d bytes. "+
-			"Admission is held until free bytes exceed the configured floor.",
+			"Runs wait until free bytes exceed the configured floor.",
 			admission.DiskFloor.FreeBytes, admission.DiskFloor.FloorBytes)
 	case admission.GroupLimit > 0 && (admission.GroupBlocked || admission.GroupHolder != "" || admission.GroupAhead != ""):
 		return "Waiting for " + concurrencyGroupMessage(admission, false)
@@ -300,27 +304,27 @@ func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
 		}
 		return fmt.Sprintf("Deferred: %s pressure %.1f%% (host PSI avg60); bounded by %ds per run.", admission.Pressure.Resource, admission.Pressure.Avg60, admission.Pressure.MaxDeferSeconds)
 	case admission.Weight == 0 && admission.BlockedBy != nil && admission.BlockedBy.Size == "" && admission.BlockedBy.RunCeiling:
-		return admission.BlockedBy.Reason()
+		return schedulingBlockerReason(admission.BlockedBy)
 	case admission.HeadOfQueue && admission.BlockedBy != nil && admission.BlockedBy.Backfilling:
-		return fmt.Sprintf("At the head of the weighted resource admission queue (%s); %s smaller runs that fit beside it.",
-			admission.BlockedBy.Reason(), admission.BlockedBy.Backfill())
+		return fmt.Sprintf("At the head of the run queue (%s); %s smaller runs that fit beside it.",
+			schedulingBlockerReason(admission.BlockedBy), admission.BlockedBy.Backfill())
 	case admission.HeadOfQueue && admission.BlockedBy != nil && admission.BlockedBy.Draining:
-		return fmt.Sprintf("At the head of the weighted resource admission queue (%s); %s: later runs require measured p95 backfill that preserves its reserved start.",
-			admission.BlockedBy.Reason(), admission.BlockedBy.Backfill())
+		return fmt.Sprintf("At the head of the run queue (%s); %s: later runs require measured p95 backfill that preserves its reserved start.",
+			schedulingBlockerReason(admission.BlockedBy), admission.BlockedBy.Backfill())
 	case admission.HeadOfQueue && admission.BlockedBy != nil:
-		return fmt.Sprintf("At the head of the weighted resource admission queue (%s); every later run waits behind it.",
-			admission.BlockedBy.Reason())
+		return fmt.Sprintf("At the head of the run queue (%s); every later run waits behind it.",
+			schedulingBlockerReason(admission.BlockedBy))
 	case admission.DeclaredResources != nil:
 		if admission.BlockedBy != nil && admission.BlockedBy.RunCeiling {
 			return "Waiting for an IO/run concurrency slot."
 		}
-		return fmt.Sprintf("Waiting for admission reservation (declared requests/VM demand plus helper and memory headroom reserves): %dm CPU, %d memory bytes.", admission.DeclaredResources.CPUMilli, admission.DeclaredResources.MemoryBytes)
+		return fmt.Sprintf("Waiting for resources (pod/VM requests plus helper and memory headroom reserves): %dm CPU, %d memory bytes.", admission.DeclaredResources.CPUMilli, admission.DeclaredResources.MemoryBytes)
 	case admission.Weight == 0 && admission.NumericBudget == nil:
 		return "Waiting for a workflow slot."
 	case admission.BlockedBy != nil:
-		return "Waiting in the weighted resource admission queue, " + blockedBehindMessage(admission.BlockedBy)
+		return "Waiting in the run queue, " + blockedBehindMessage(admission.BlockedBy)
 	default:
-		return "Waiting in the weighted resource admission queue."
+		return "Waiting in the run queue."
 	}
 }
 
@@ -329,9 +333,13 @@ func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
 // repository is a registered name and the ref a validated Git ref.
 func blockedBehindMessage(blocker *model.AdmissionBlocker) string {
 	if backfill := blocker.Backfill(); backfill != "" {
-		return fmt.Sprintf("blocked behind %s/%s (%s; %s).", blocker.Repo, blocker.Ref, blocker.Reason(), backfill)
+		return fmt.Sprintf("blocked behind %s/%s (%s; %s).", blocker.Repo, blocker.Ref, schedulingBlockerReason(blocker), backfill)
 	}
-	return fmt.Sprintf("blocked behind %s/%s (%s).", blocker.Repo, blocker.Ref, blocker.Reason())
+	return fmt.Sprintf("blocked behind %s/%s (%s).", blocker.Repo, blocker.Ref, schedulingBlockerReason(blocker))
+}
+
+func schedulingBlockerReason(blocker *model.AdmissionBlocker) string {
+	return strings.ReplaceAll(blocker.Reason(), "declared reservation", "resource requests")
 }
 
 // visibleBlocker hides a blocker a scoped actor may not see (#073): it names

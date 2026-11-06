@@ -92,7 +92,7 @@ func TestClaimedRunShowsCapacityWaitUntilSubmission(t *testing.T) {
 	releaseSecond := awaitAcquired(t, acquired)
 	defer releaseSecond()
 	observation, _ = service.observeScheduling(t.Context(), run, nil, true)
-	if observation.State != "waiting" || !strings.Contains(observation.Message, "waiting for workflow submission") {
+	if observation.State != "waiting" || !strings.Contains(strings.ToLower(observation.Message), "waiting for workflow submission") {
 		t.Fatalf("admission alone started run: %#v", observation)
 	}
 }

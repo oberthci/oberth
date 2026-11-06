@@ -112,6 +112,8 @@ func (jobs *ArgoJobs) resourceRunSource(ctx context.Context, request service.Wor
 	if e != nil {
 		return nil, e
 	}
+	// Pinned fragments resolve by tag at display time, before a run has a bound
+	// receipt. This read is diagnostic; submission still verifies its own binding.
 	fragments, e := loadFragments(ctx, jobs.fragments, source, trigger, request.Run.RefKind, request.Run.Trigger)
 	if e != nil {
 		return nil, e

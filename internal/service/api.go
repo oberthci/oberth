@@ -1123,6 +1123,8 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 	if err != nil {
 		return nil, err
 	}
+	ctx, cancelDemand := withQueueDemandBudget(ctx)
+	defer cancelDemand()
 	for i := range runs {
 		if service.scope != nil {
 			runs[i].QueuePosition = 0

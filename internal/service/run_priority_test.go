@@ -615,9 +615,8 @@ func TestPriorityOversizedReleaseAllowsNormalBackfillAndSurvivesRefresh(t *testi
 			if presented.Priority != want || presented.PriorityReason != reason {
 				t.Fatalf("run_get priority disagrees with gate: %+v", presented)
 			}
-			if observation, _ := control.observeScheduling(ctx, claimed, nil, true); !strings.Contains(observation.Message, reason) {
-				t.Fatalf("scheduling hides size limit: %+v", observation)
-			}
+			observation, _ := control.observeScheduling(ctx, claimed, nil, true)
+			assertPlainScheduling(t, observation.Message) // Full cause remains in PriorityReason above.
 			if maximum == pipeline.XL {
 				if _, err := f.store.SetSizeGrant(ctx, f.repo.ID, "admin", pipeline.L); err != nil {
 					t.Fatal(err)

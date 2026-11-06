@@ -62,7 +62,7 @@ func TestKubernetesPlacementHardPSIHasNoPriorityOrTimeoutBypass(t *testing.T) {
 	defer r.cancel()
 	now = now.Add(2 * time.Hour)
 	kick(g)
-	if granted(g, r) || (&Scheduler{admission: g}).QueuedAdmissionMessage() != "host IO busy" {
+	if granted(g, r) || (&Scheduler{admission: g}).QueuedAdmissionMessage().Text != "host IO busy" {
 		t.Fatal("hard pressure was bypassed by idle tag or elapsed defer")
 	}
 	io = 0
@@ -88,7 +88,7 @@ func TestKubernetesPlacementIgnoresSoftPressureAndSettling(t *testing.T) {
 	}
 	r := pending(t, g, 11, admissionRequest{Size: pipeline.S})
 	defer r.cancel()
-	if g.runs != 10 || (&Scheduler{admission: g}).QueuedAdmissionMessage() != "10 of 10 runs running" {
+	if g.runs != 10 || (&Scheduler{admission: g}).QueuedAdmissionMessage().Text != "10 of 10 runs running" {
 		t.Fatal("ceiling bypassed or soft pressure blocked fitting workflows")
 	}
 }

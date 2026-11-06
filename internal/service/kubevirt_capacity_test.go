@@ -39,7 +39,7 @@ func TestKubeVirtAdmissionAccountsEveryDimension(t *testing.T) {
 		go acquireRequestForTest(third, kubeVirtRequest("third", 1, demand, limit), acquired)
 		awaitWaiting(t, third)
 		observation := (&Scheduler{admission: gate}).AdmissionSnapshot(3)
-		if !observation.KubeVirtCapacity || waitingAdmissionMessage(observation) != "KubeVirt capacity" || gate.groupParked() != 1 {
+		if !observation.KubeVirtCapacity || waitingAdmissionMessage(observation) != "Waiting for KubeVirt resources" || gate.groupParked() != 1 {
 			t.Fatalf("capacity park = %#v", observation)
 		}
 		other := acquireRequestWithinBudget(t, gate.reserve(4), kubeVirtRequest("other-repo", 2, demand, limit))
