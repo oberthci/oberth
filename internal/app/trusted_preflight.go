@@ -125,6 +125,9 @@ func (p *TrustedPreflights) request(job service.WorkflowRequest, intent vmrunner
 }
 
 func (p *TrustedPreflights) Execute(ctx context.Context, job service.WorkflowRequest, requirement vmrunner.Requirement, output io.Writer) (retErr error) {
+	if err := p.jobs.checkProtectedTarget(ctx, job); err != nil {
+		return err
+	}
 	if p.generic && p.jobs.config.TrustedKVMGroup <= 0 {
 		return errors.New("generic protected execution requires an explicit positive KVM group")
 	}

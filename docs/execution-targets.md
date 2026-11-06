@@ -23,6 +23,13 @@ It adds `branch_policy_baseline`, `graph_digest`, `fragment_lock_digest` and a
 field is accepted. The existing version-one protected/preflight policy retains
 its original behavior.
 
+A protected preflight for a repository with a configured ordinary external
+target refuses before bundle fetching, reservation or allocation. A retained
+remote binding also refuses after its target definition is removed. Different
+branches, tags and schedules cannot fall back to the local protected controller.
+Existing local protected obligations retain their original recovery path. This
+gate does not add protected-phase remote routing or qualify a separate executor.
+
 This policy authorizes one exact ordinary branch execution. The operator must
 know the canonical accepted run ID and its deterministic Workflow name before
 admission, supply all reviewed target identities, and retain the original

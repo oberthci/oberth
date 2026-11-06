@@ -2625,6 +2625,13 @@ historical raw-values gate and actual Helm install/restore upgrade tests.
 
 ## Protected generic runtime preparation
 
+Ordinary external execution targets do not authorize protected preflights.
+A matching repository target or retained nonlocal run binding refuses before
+bundle fetching, reservation or allocation, including other refs and trigger
+kinds. Removing the target definition cannot redirect a bound protected run
+locally. Existing local protected cleanup retains its original controller.
+See [execution-targets.md](docs/execution-targets.md).
+
 The protected runtime defaults to `legacy`. Only the explicit server flag
 `--trusted-tests-runtime=generic-capability` (chart `trustedTests.runtime`)
 selects generic device authority. Existing grants alone never select it.
