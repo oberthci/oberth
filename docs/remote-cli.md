@@ -302,8 +302,8 @@ Two failures look similar and need different fixes, so the client names which
 one happened.
 
 **Unknown authority** means the signer is not in this machine's trust store.
-Set `OBERTH_CA_CERT` to the PEM certificate itself (starting with `-----BEGIN`)
-or the path to its PEM file. `--ca-file` overrides this value for MCP commands.
+Set `OBERTH_CA_CERT` to the PEM certificate itself (containing `-----BEGIN`)
+or the path to its PEM file. OpenSSL preambles and a BOM are accepted. `--ca-file` overrides this value for MCP commands.
 
 **A hostname mismatch** means the certificate does not cover the address you
 used, and no trust anchor can fix that. The client lists the names the
