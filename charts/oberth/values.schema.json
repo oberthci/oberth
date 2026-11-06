@@ -1279,6 +1279,11 @@
         "recipes"
       ],
       "properties": {
+        "runtime": {
+          "type": "string",
+          "enum": ["legacy", "generic-capability"],
+          "default": "legacy"
+        },
         "recipes": {
           "type": "array",
           "maxItems": 128,

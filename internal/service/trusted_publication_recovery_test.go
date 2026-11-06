@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,9 +14,11 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/protectedtests"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/vmrunner"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 type alteredReceiptStore struct {
@@ -31,17 +34,24 @@ func (s *alteredReceiptStore) KVMPreflight(ctx context.Context, id string) (vmru
 	return execution, err
 }
 
-func trustedPublicationFixture(t *testing.T, release, cleaned bool) (*controlFixture, *protectedFixture, model.Run) {
+func trustedPublicationFixture(t *testing.T, release, cleaned bool, generic ...bool) (*controlFixture, *protectedFixture, model.Run) {
 	t.Helper()
 	ctx := context.Background()
 	f := newControlFixture(t)
 	raw := []byte("version: 2\nprofile: kvm-suite-amd64-v1\nsuite_sha256: " + strings.Repeat("a", 64) + "\nguest_sha256: " + strings.Repeat("b", 64) + "\nartifacts: [build/program]\n")
-	contract, err := vmrunner.DecodeContract(raw)
+	contract, err := protectedtests.DecodeContract(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.scheduler.git = &policyTestGit{controlGit: f.git, candidate: raw, baseline: raw}
 	executor := &protectedFixture{store: f.store, omitCleanup: !cleaned}
+	if len(generic) > 0 && generic[0] {
+		executor.generic = true
+		capability := &argoworkflow.Capability{Namespace: "pipelines", ServiceAccount: "operator-runner", ExtendedResources: map[string]int64{protectedtests.GenericDeviceResource: 1}}
+		if _, err := f.store.SetWorkflowCapabilityGrant(ctx, f.repo.ID, "operator", capability); err != nil {
+			t.Fatal(err)
+		}
+	}
 	f.scheduler.trusted = executor
 	spec := model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/trusted", SHA: strings.Repeat("c", 40), TestedSHA: strings.Repeat("c", 40), Actor: "agent", Trigger: "branch"}
 	if release {
@@ -243,5 +253,38 @@ func TestTrustedReceiptCertifiesPreflightNotRebuiltReleaseBytes(t *testing.T) {
 	}
 	if err = f.scheduler.requirePublicationTestPolicy(ctx, f.repo, model.Publication{RunID: run.ID, ResultSHA: run.SHA}); err != nil {
 		t.Fatalf("source/test gate unexpectedly claims rebuilt-byte equality: %v", err)
+	}
+}
+
+func TestGenericProtectedPublicationAndDeliveryRecheckCurrentGrant(t *testing.T) {
+	for _, release := range []bool{false, true} {
+		t.Run(fmt.Sprint(release), func(t *testing.T) {
+			f, executor, run := trustedPublicationFixture(t, release, true, true)
+			ctx := t.Context()
+			requirement := vmrunner.Requirement{CandidateSHA: executor.intent.CandidateSHA, BaselineSHA: executor.intent.BaselineSHA, Contract: &executor.intent.Contract}
+			if err := f.scheduler.trustedReceipt(ctx, f.repo, run, requirement); err != nil {
+				t.Fatal(err)
+			}
+			run, err := f.store.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunPassed, Phase: "passed"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			publication := model.Publication{RunID: run.ID, ResultSHA: run.SHA}
+			if err = f.scheduler.requirePublicationTestPolicy(ctx, f.repo, publication); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = f.store.SetWorkflowCapabilityGrant(ctx, f.repo.ID, "operator", nil); err != nil {
+				t.Fatal(err)
+			}
+			if err = f.scheduler.trustedReceipt(ctx, f.repo, run, requirement); err == nil {
+				t.Fatal("delivery accepted revoked generic grant")
+			}
+			if err = f.scheduler.requirePublicationTestPolicy(ctx, f.repo, publication); err == nil {
+				t.Fatal("publication reused receipt after runtime revocation")
+			}
+			if len(f.jobs.createdCI) != 0 || len(f.jobs.createdReleases) != 0 || len(f.git.syncedBranches) != 0 || len(f.git.syncedTags) != 0 {
+				t.Fatal("refusal caused external side effect")
+			}
+		})
 	}
 }

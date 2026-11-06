@@ -171,6 +171,9 @@ func (controller *Controller) Namespace() string { return controller.config.Name
 // and refuses otherwise rather than executing something that was not built
 // from this run's reviewed source.
 func (controller *Controller) Create(ctx context.Context, request Request) (name string, resultErr error) {
+	if err := verifyGenericProtectedRuntime(controller.config, request); err != nil {
+		return "", err
+	}
 	if err := controller.verifyCapabilityGrant(ctx, request.RepositoryID, request.Capability); err != nil {
 		return "", err
 	}
@@ -437,7 +440,7 @@ func sameSubmission(existing, intended *wfv1.Workflow) error {
 		return &workflowSpecMismatch{}
 	}
 	if binding := intended.Annotations[trustedKVMAnnotation]; binding != "" {
-		if existing.Annotations[trustedKVMAnnotation] != binding || !apiequality.Semantic.DeepEqual(existing.Spec, intended.Spec) {
+		if existing.Annotations[trustedKVMAnnotation] != binding || existing.Annotations[genericProtectedAnnotation] != intended.Annotations[genericProtectedAnnotation] || existing.Annotations[capabilityAnnotation] != intended.Annotations[capabilityAnnotation] || !apiequality.Semantic.DeepEqual(existing.Spec, intended.Spec) {
 			return &workflowSpecMismatch{}
 		}
 	}

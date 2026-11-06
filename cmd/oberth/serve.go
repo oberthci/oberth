@@ -216,6 +216,7 @@ type serveOptions struct {
 	// switch is on.
 	vmKVMEnabled       bool
 	trustedRecipesFile string
+	trustedRuntime     string
 	trustedKVMGroup    int64
 
 	// Promotion grant maximum lifetime. Default 24h, hard ceiling 168h (7 days).
@@ -374,7 +375,8 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.IntVar(&options.argoWorkflowTTL, "argo-workflow-ttl", 3600, "finished Workflow retention in seconds")
 	flags.StringVar(&options.argoResourceSamplerConfig, "argo-resource-sampler-config", "", "administrator-owned kubelet sampler JSON config; disabled when empty")
 	flags.BoolVar(&options.vmKVMEnabled, "vm-kvm-enabled", false, "enable server-injected KVM device access for annotated leaves (requires KubeVirt device plugin)")
-	flags.StringVar(&options.trustedRecipesFile, "trusted-tests-recipes", "", "public operator-approved trusted suite recipes JSON file (requires --vm-kvm-enabled)")
+	flags.StringVar(&options.trustedRecipesFile, "trusted-tests-recipes", "", "public operator-approved trusted suite recipes JSON file")
+	flags.StringVar(&options.trustedRuntime, "trusted-tests-runtime", "legacy", "protected runtime: legacy or generic-capability (explicit opt-in; requires per-repository device grants)")
 	flags.Int64Var(&options.trustedKVMGroup, "trusted-tests-kvm-group", 0, "operator-approved positive /dev/kvm supplemental GID required for trusted suites; no default device group")
 	flags.DurationVar(&options.promotionGrantMaxLifetime, "promotion-grant-max-lifetime", 24*time.Hour, "maximum lifetime for promotion grants (default 24h, hard ceiling 168h)")
 	flags.DurationVar(&options.gitCommandTimeout, "git-timeout", 10*time.Minute, "Git command timeout")
@@ -442,6 +444,13 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 }
 
 func validateServeOptions(options serveOptions) error {
+	if options.trustedRuntime != "" && options.trustedRuntime != "legacy" && options.trustedRuntime != "generic-capability" {
+		return errors.New("trusted-tests-runtime must be legacy or generic-capability")
+	}
+	if options.trustedRuntime == "generic-capability" && options.trustedRecipesFile == "" {
+		return errors.New("generic protected runtime requires approved recipes")
+	}
+
 	if math.IsNaN(options.kubernetesQPS) || math.IsInf(options.kubernetesQPS, 0) || options.kubernetesQPS <= 0 || options.kubernetesQPS > math.MaxFloat32 || options.kubernetesBurst <= 0 {
 		return errors.New("serve: Kubernetes client QPS must be finite and positive, and burst must be positive")
 	}
@@ -894,9 +903,16 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
+	if options.trustedRuntime == "generic-capability" && len(recipes) == 0 {
+		return errors.New("generic protected runtime requires approved recipes")
+	}
 	var trusted service.TrustedPreflight
 	if len(recipes) > 0 {
-		trusted, err = app.NewTrustedPreflights(argoJobs, database, recipes, filepath.Join(options.dataRoot, "work"), anchors.AllowMutation)
+		if options.trustedRuntime == "generic-capability" {
+			trusted, err = app.NewGenericProtectedPreflights(argoJobs, database, recipes, filepath.Join(options.dataRoot, "work"), anchors.AllowMutation)
+		} else {
+			trusted, err = app.NewTrustedPreflights(argoJobs, database, recipes, filepath.Join(options.dataRoot, "work"), anchors.AllowMutation)
+		}
 		if err != nil {
 			return err
 		}

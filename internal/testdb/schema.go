@@ -191,8 +191,16 @@ DELETE FROM schema_migrations WHERE id='20261105050000-execution-target-custody'
 
 // PostPinnedSourcesDowngrade removes only the new source receipt from disposable
 // current-schema fixtures before reconstructing an older schema and ledger.
-const PostPinnedSourcesDowngrade = `
+const PostPinnedSourcesDowngrade = PostProtectedRuntimeDowngrade + `
 DROP TRIGGER IF EXISTS run_source_bindings_immutable;
 ALTER TABLE runs DROP COLUMN source_bindings;
 DELETE FROM schema_migrations WHERE id='20261105180000-pinned-source-bindings';
+`
+
+// Disposable historical fixtures remove generic runtime custody before replaying
+// older migrations. Production admissions remain append-only.
+const PostProtectedRuntimeDowngrade = `
+DROP TABLE IF EXISTS protected_runtime_admissions;
+DROP INDEX IF EXISTS protected_runtime_audit_idx;
+DELETE FROM schema_migrations WHERE id='20261106021113-protected-runtime-admissions-6bb6bdbe716e4f2623808c4dc612d943';
 `

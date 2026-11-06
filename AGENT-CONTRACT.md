@@ -2623,6 +2623,36 @@ old chart defaults. Restore overrides only its database compatibility values.
 Every newly added chart key must have a template fallback, exercised by the
 historical raw-values gate and actual Helm install/restore upgrade tests.
 
+## Protected generic runtime preparation
+
+The protected runtime defaults to `legacy`. Only the explicit server flag
+`--trusted-tests-runtime=generic-capability` (chart `trustedTests.runtime`)
+selects generic device authority. Existing grants alone never select it.
+The independently approved suite/guest archives and pinned host harness remain
+the test roots; the host intent/report wire and all-case verifier are unchanged.
+Candidate resource status cannot substitute for a protected receipt.
+
+The server-only `GenericAdmission` binds the original intent, complete operator
+capability and positive supplemental group. The forward migration stores it in
+`protected_runtime_admissions`, atomically with lifecycle/capacity reservation
+and `protected.runtime-admitted`. Both full/incremental audit state and mutation
+fences verify its row, digest, timestamp and intent against the chained event.
+Immutable guards reject update/delete/replacement; missing or corrupt metadata
+refuses instead of selecting the legacy path. Existing schema/audit identities,
+historical rows and host JSON remain unchanged.
+
+New admission, Create, receipt acceptance and delivery/publication recheck
+current authority. The final bounded resource graph must fit the exact grant.
+Cleanup after restart selects the persisted admission, including uncertain
+Create without a recorded UID, and reconstructs its original group and grant
+solely for owned Workflow/UID-fenced cleanup. Generic startup with current group
+zero permits this recovery but refuses new execution, Create and Receipt.
+No grant recreation, receipt minting or publication follows from reconstruction.
+The closed host leaf, credential isolation, actual Pod/process observation,
+cancellation and durable cleanup requirements remain enforced. Activation and
+legacy retirement require separately reviewed external runtime qualification;
+this source preparation does not provide that evidence.
+
 ## Schema migrations
 
 Database schema migrations are forward-only. `oberth upgrade` announces

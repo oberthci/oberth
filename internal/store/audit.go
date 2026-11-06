@@ -417,6 +417,9 @@ func (s *Store) verifyAuditMutationState(
 	if err := verifyPendingPublicationSnapshot(pendingPublications, snapshot.latestPublicationActions); err != nil {
 		return model.AuditHead{}, model.AuditAnchor{}, observed.metrics(), err
 	}
+	if err := verifyProtectedRuntimeAdmissions(ctx, observed); err != nil {
+		return model.AuditHead{}, model.AuditAnchor{}, observed.metrics(), err
+	}
 	if err := verifyAuditWitnessIntentsAgainstIndex(intents, snapshot.byID); err != nil {
 		return model.AuditHead{}, model.AuditAnchor{}, observed.metrics(), err
 	}

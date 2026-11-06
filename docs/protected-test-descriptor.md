@@ -3,8 +3,8 @@
 Protected source policy lives in `internal/protectedtests`. The existing VM
 adapter forwards its contract API to that package, so execution, journal records,
 recovery and publication continue to use the same contract and recipe bytes.
-This is preparation for a separate execution adapter; it introduces no new
-configuration, grants, policy file, migration or execution route.
+The default runtime remains the legacy adapter. The explicit generic capability
+route below is preparation requiring separate external qualification.
 
 A descriptor maps a valid v2 `.oberth/tests.yaml` contract to the complete
 operator recipe: suite archive SHA256, guest archive SHA256, host harness image
@@ -41,8 +41,8 @@ is derived from the existing intent; it adds no fields to serialized intents,
 receipts or their digests. Recovery, UID fencing, cancellation and audit refusal
 remain mandatory.
 
-A subsequent generic adapter and protected cross-Workflow evidence handoff need
-separate source review and actual runtime qualification. This extraction does
+Generic execution and protected cross-Workflow evidence handoff require
+separate source review and actual runtime qualification. This preparation does
 not qualify an external executor or permit execution-engine retirement. Install
 and qualify preparation before a separate removal release; retain the current
 recovery path and historical evidence throughout.
@@ -69,10 +69,33 @@ The scheduler invokes it both before the main Workflow receives credentials and
 at publication, using the existing durable journal each time. Its result is not
 a reusable bearer token or permission to skip current policy/audit checks.
 
-This is shared execution/evidence preparation. The current closed suite still
-uses its existing KVM runtime adapter and independently approved harness. No
-new generic runtime route, capability policy or credential path is enabled.
-Actual generic adapter construction, grant-bound admission/recovery and external
-runtime qualification remain subsequent work. Generic execution must retain the
-same closed host verifier and cannot turn repository resource status into a test
-verdict. Legacy engine removal remains a later qualified release.
+## Explicit generic capability runtime
+
+`--trusted-tests-runtime=generic-capability` (Helm `trustedTests.runtime`)
+selects the generic route. The default is `legacy`; an existing capability grant
+never switches the executor. Approved recipes and a current per-repository
+capability naming the exact namespace and `devices.kubevirt.io/kvm` are required.
+The complete emitted resource graph must fit that grant. This route does not
+require `--vm-kvm-enabled` and refuses candidate builtin-KVM injection.
+
+The independently pinned harness receives exactly the existing intent bytes.
+A separate immutable server admission records the complete capability and the
+explicit positive supplemental group. A forward migration binds that admission
+to the existing protected journal and capacity reservation atomically with its
+chained audit action. Audit-state and mutation-fence verification compare the
+projection with the chained event. Missing or corrupt metadata refuses instead
+of selecting legacy execution; historical intents and audit rows are preserved.
+
+Admission, Create, receipt acceptance and credentialed delivery/publication
+recheck current authority. Changed or revoked grants refuse. Cleanup alone may
+reconstruct the original immutable grant and group after restart, including an
+uncertain Create with no recorded UID. It still requires exact owned Workflow
+reconstruction and UID-fenced cleanup. A zero current group permits generic
+startup recovery only: new admission, Create and Receipt refuse. Reconfiguration
+does not rewrite the original admission or recreate a revoked grant.
+
+The generic route retains the same closed host leaf, credential isolation,
+full Pod/process observer, all-case verifier, cancellation and cleanup journal.
+A resource grant or successful resource status cannot supply a protected test
+verdict. External runtime qualification remains required before activation and
+before a separate legacy engine removal release.

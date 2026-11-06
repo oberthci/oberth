@@ -726,6 +726,22 @@ if grep -Fq -- '--trusted-tests-kvm-group=' "$manifest"; then exit 1; fi
 render --set trustedTests.kvmSupplementalGroup=null >"$manifest"
 if grep -Fq -- '--trusted-tests-kvm-group=' "$manifest"; then exit 1; fi
 
+# A generic grant alone never changes execution mode; the runtime is explicit.
+render --set vm.kvm.enabled=true --set-json "trustedTests.recipes=$trusted_recipe" --set trustedTests.kvmSupplementalGroup=1234 >"$manifest"
+grep -Fq -- '--trusted-tests-runtime=legacy' "$manifest"
+render --set vm.kvm.enabled=false --set trustedTests.runtime=generic-capability --set-json "trustedTests.recipes=$trusted_recipe" --set trustedTests.kvmSupplementalGroup=1234 >"$manifest"
+grep -Fq -- '--trusted-tests-runtime=generic-capability' "$manifest"
+# Resetting the current group preserves restart cleanup only; the app refuses
+# new admission and the live controller refuses Create/Receipt with group zero.
+render --set vm.kvm.enabled=false --set trustedTests.runtime=generic-capability --set-json "trustedTests.recipes=$trusted_recipe" --set trustedTests.kvmSupplementalGroup=0 >"$manifest"
+grep -Fq -- '--trusted-tests-kvm-group=0' "$manifest"
+for mode in generic-capability invalid; do
+  if render --set "trustedTests.runtime=$mode" >/dev/null 2>&1; then
+    echo "invalid or unconfigured protected runtime accepted: $mode" >&2
+    exit 1
+  fi
+done
+
 # Retention defaults preserve log retention and the existing artifact budget.
 render >"$manifest"
 for flag in --log-retention=0s --artifact-retention=0s --logs-budget-bytes=0 --run-log-limit-bytes=67108864 \

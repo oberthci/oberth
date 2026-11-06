@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/protectedtests"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/vmrunner"
 )
@@ -17,6 +18,7 @@ import (
 type protectedFixture struct {
 	store                                  *store.Store
 	fail, omitReceipt, omitCleanup, revoke bool
+	generic                                bool
 	intent                                 vmrunner.KVMIntent
 	recoverIDs                             []string
 	recoverErr                             error
@@ -48,7 +50,20 @@ func (p *protectedFixture) Execute(ctx context.Context, job WorkflowRequest, req
 	now := time.Now().UTC()
 	contract := *requirement.Contract
 	p.intent = vmrunner.KVMIntent{RunID: run.ID, RepoID: run.RepoID, Repository: job.UpstreamName + "/" + job.UpstreamOrg + "/" + job.Repository.Name, CandidateSHA: requirement.CandidateSHA, BaselineSHA: requirement.BaselineSHA, Contract: contract, Recipe: vmrunner.KVMRecipe{SuiteSHA256: contract.SuiteSHA256, GuestSHA256: contract.GuestSHA256, HarnessImage: "registry.example/harness@sha256:" + strings.Repeat("e", 64), SuiteURL: "https://example.org/suite", GuestURL: "https://example.org/guest"}, Namespace: "pipelines", WorkflowName: "trusted-" + run.ID, WorkflowSpecDigest: strings.Repeat("f", 64), InventoryDigest: strings.Repeat("a", 64), CaseCount: 1, AdmittedAt: now, Deadline: now.Add(time.Minute)}
-	if _, err = p.store.ReserveKVMPreflight(ctx, p.intent); err != nil {
+	if p.generic {
+		capability, loadErr := p.store.ActiveWorkflowCapability(ctx, run.RepoID)
+		if loadErr != nil {
+			return loadErr
+		}
+		admission, admissionErr := protectedtests.NewGenericAdmission(p.intent, capability, 1234)
+		if admissionErr != nil {
+			return admissionErr
+		}
+		_, err = p.store.ReserveGenericPreflight(ctx, admission)
+	} else {
+		_, err = p.store.ReserveKVMPreflight(ctx, p.intent)
+	}
+	if err != nil {
 		return err
 	}
 	if err = p.store.SubmitKVMPreflight(ctx, run.ID); err != nil {

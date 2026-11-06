@@ -24,6 +24,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/argojob"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/protectedtests"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
@@ -158,7 +159,7 @@ func (c *protectedControllerFixture) TrustedKVMReceipt(_ context.Context, r argo
 func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 	// Every scenario owns its controller, grant loader, workspace and database.
 	t.Parallel()
-	for _, scenario := range []string{"deadline no report", "missing deadline", "repository deadline cap", "pass", "pass empty org", "workflow failed", "workflow observation failed", "infrastructure failed", "infrastructure observation failed", "definite create refusal", "uncertain create", "recover absent", "unapproved", "policy removed", "bundle changed", "artifact mapping changed", "guest granted", "guest revoked", "guest recover", "owned spec mismatch", "owned spec mismatch during create"} {
+	for _, scenario := range []string{"generic pass", "generic recover zero", "generic recover changed", "generic recover legacy", "deadline no report", "missing deadline", "repository deadline cap", "pass", "pass empty org", "workflow failed", "workflow observation failed", "infrastructure failed", "infrastructure observation failed", "definite create refusal", "uncertain create", "recover absent", "unapproved", "policy removed", "bundle changed", "artifact mapping changed", "guest granted", "guest revoked", "guest recover", "owned spec mismatch", "owned spec mismatch during create"} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
 			org, wantRepo := "org", "upstream/org/repo"
@@ -167,6 +168,19 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 			}
 			ctx := context.Background()
 			fixture := newRaceFixture(t)
+			generic := strings.HasPrefix(scenario, "generic ")
+			genericRecover := strings.HasPrefix(scenario, "generic recover ")
+			if generic {
+				path := filepath.Join(fixture.sourceDir, ".oberth", "build.yaml")
+				source, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				source = []byte(strings.Replace(string(source), "        command:", "        resources:\n          requests: {cpu: 100m, memory: 64Mi}\n          limits: {cpu: 1, memory: 64Mi}\n        command:", 1))
+				if err = os.WriteFile(path, source, 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
 			// The grant names more VMs than the default budget (two).
 			guestBudget := store.KubeVirtBudget{MaxVMs: 3, MaxCores: 4, MaxMemoryBytes: 8 << 30}
 			grants := &guestGrantLoader{allowed: scenario != "guest revoked", budget: guestBudget}
@@ -192,7 +206,7 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 			if scenario == "definite create refusal" {
 				controller.createErr = argojob.ErrTrustedKVMCreateRefused
 			}
-			if scenario == "uncertain create" || scenario == "recover absent" || scenario == "guest recover" {
+			if genericRecover || scenario == "uncertain create" || scenario == "recover absent" || scenario == "guest recover" {
 				controller.createErr = errors.New("transport uncertainty")
 			}
 			if scenario == "deadline no report" {
@@ -215,15 +229,16 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 				fixture.jobs.config.PerRepoWorkflowTimeout = map[string]time.Duration{"upstream/org/repo": 10 * time.Minute}
 			}
 			fixture.jobs.controller = controller
-			fixture.jobs.config.KVMEnabled = true
+			fixture.jobs.config.KVMEnabled = !generic
 			fixture.jobs.config.TrustedKVMGroup = 1234
 			fixture.jobs.config.NonrootProfile = argoworkflow.NonrootStaticProfile
 			controller.preparer = protectedProfilePreparer(t, fixture.jobs.config)
-			database, err := storetest.Open(ctx, filepath.Join(t.TempDir(), "db.sqlite"), store.Options{})
+			dbPath := filepath.Join(t.TempDir(), "db.sqlite")
+			database, err := storetest.Open(ctx, dbPath, store.Options{})
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer database.Close()
+			defer func() { _ = database.Close() }()
 			baseURL := "ssh://example.org/org"
 			if org == "" {
 				baseURL = "/" // Root-based local upstream: no org component.
@@ -261,7 +276,16 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 			suite := hex.EncodeToString(sum[:])
 			recipe := vmrunner.KVMRecipe{SuiteSHA256: suite, GuestSHA256: guest, HarnessImage: "registry.example/harness@sha256:" + strings.Repeat("c", 64), SuiteURL: "https://example.org/suite", GuestURL: "https://example.org/guest"}
 			workspace := t.TempDir()
-			p, err := NewTrustedPreflights(fixture.jobs, database, []vmrunner.KVMRecipe{recipe}, workspace, func(context.Context) error { return nil })
+			constructor := NewTrustedPreflights
+			if generic {
+				constructor = NewGenericProtectedPreflights
+				capability := &argoworkflow.Capability{Namespace: fixture.jobs.config.Namespace, ServiceAccount: "operator-runner", ExtendedResources: map[string]int64{protectedtests.GenericDeviceResource: 1}}
+				if _, err = database.SetWorkflowCapabilityGrant(ctx, repo.ID, "operator", capability); err != nil {
+					t.Fatal(err)
+				}
+				fixture.jobs.SetWorkflowCapabilityLoader(database.ActiveWorkflowCapability)
+			}
+			p, err := constructor(fixture.jobs, database, []vmrunner.KVMRecipe{recipe}, workspace, func(context.Context) error { return nil })
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -309,7 +333,7 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 				return
 			}
 			if controller.request.ScheduleEntry != "nightly" || controller.request.RepositoryID != repo.ID {
-				t.Fatalf("preflight lost durable entry: %+v", controller.request)
+				t.Fatalf("preflight lost durable entry: err=%v request=%+v", err, controller.request)
 			}
 			if scenario == "guest granted" {
 				budget := controller.request.KubeVirtBudget
@@ -343,7 +367,7 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 			if state.Intent.Repository != wantRepo || controller.request.TrustedKVM.Repository != wantRepo {
 				t.Fatalf("journal/submission repository changed: journal=%q submitted=%q want=%q", state.Intent.Repository, controller.request.TrustedKVM.Repository, wantRepo)
 			}
-			if scenario == "pass" || scenario == "pass empty org" || scenario == "guest granted" {
+			if scenario == "generic pass" || scenario == "pass" || scenario == "pass empty org" || scenario == "guest granted" {
 				if err != nil || state.Receipt == nil || state.Refusal != nil || !state.Cleaned || controller.waitRunID != run.ID {
 					t.Fatalf("success binding: %v %#v waitID=%q", err, state, controller.waitRunID)
 				}
@@ -367,9 +391,64 @@ func TestTrustedPreflightAdapterLifecycle(t *testing.T) {
 				if strings.HasPrefix(scenario, "infrastructure ") && !strings.Contains(err.Error(), controller.infrastructureReason) {
 					t.Fatalf("trusted preflight hid kubelet message: %v", err)
 				}
-				if scenario == "uncertain create" || scenario == "recover absent" || scenario == "guest recover" {
+				if genericRecover || scenario == "uncertain create" || scenario == "recover absent" || scenario == "guest recover" {
 					if state.Cleaned {
 						t.Fatal("uncertain create released capacity")
+					}
+					if genericRecover {
+						if e := os.CopyFS(filepath.Join(workspace, run.ID, "src"), os.DirFS(fixture.sourceDir)); e != nil {
+							t.Fatal(e)
+						}
+						if _, e := database.SetWorkflowCapabilityGrant(ctx, repo.ID, "operator", nil); e != nil {
+							t.Fatal(e)
+						}
+						if e := database.Close(); e != nil {
+							t.Fatal(e)
+						}
+						database, err = storetest.Open(ctx, dbPath, store.Options{})
+						if err != nil {
+							t.Fatal(err)
+						}
+						fixture.jobs.config.TrustedKVMGroup = 0
+						if scenario == "generic recover changed" || scenario == "generic recover legacy" {
+							fixture.jobs.config.TrustedKVMGroup = 4321
+						}
+						fixture.jobs.SetWorkflowCapabilityLoader(database.ActiveWorkflowCapability)
+						controller.preparer = protectedProfilePreparer(t, fixture.jobs.config)
+						controller.observeConfig = &fixture.jobs.config
+						controller.createErr = nil
+						restartConstructor := NewGenericProtectedPreflights
+						if scenario == "generic recover legacy" {
+							fixture.jobs.config.KVMEnabled = true
+							restartConstructor = NewTrustedPreflights
+						}
+						restarted, e := restartConstructor(fixture.jobs, database, []vmrunner.KVMRecipe{recipe}, workspace, func(context.Context) error { return nil })
+						if e != nil {
+							t.Fatal(e)
+						}
+						if scenario == "generic recover zero" {
+							if e = restarted.Supports(contract); e == nil {
+								t.Fatal("zero current group supports new execution")
+							}
+							if e = restarted.Execute(ctx, service.WorkflowRequest{}, vmrunner.Requirement{Contract: &contract}, io.Discard); e == nil {
+								t.Fatal("zero current group admitted execution")
+							}
+						}
+						ids, e := restarted.Recover(ctx)
+						if e != nil || len(ids) != 1 || ids[0] != run.ID {
+							t.Fatalf("persisted generic recovery: %v %v", ids, e)
+						}
+						observed := controller.observed
+						if observed.GenericProtected == nil || observed.GenericProtected.SupplementalGroup != 1234 || observed.KubeVirtGranted {
+							t.Fatal("recovery lost persisted runtime or recreated legacy authority")
+						}
+						state, e = database.KVMPreflight(ctx, run.ID)
+						if e != nil || !state.Cleaned || state.WorkflowUID != "workflow-uid" || !controller.cleaned || state.Receipt != nil {
+							t.Fatalf("persisted cleanup failed: %+v %v", state, e)
+						}
+						if e = database.CheckGenericPreflightAuthority(ctx, run.ID); e == nil {
+							t.Fatal("cleanup recreated current grant")
+						}
 					}
 					if scenario == "guest recover" {
 						// The Workflow exists and the grant has since been revoked.
@@ -475,7 +554,7 @@ func TestTrustedPreflightRecipesRejectMixedPairs(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			contract := vmrunner.Contract{Version: 2, Profile: vmrunner.KVMSuiteAMD64Profile, SuiteSHA256: recipes[tc.suite].SuiteSHA256, GuestSHA256: recipes[tc.guest].GuestSHA256, Artifacts: []string{"program"}}
-			if err := vmrunner.ValidateContract(contract); err != nil {
+			if err := protectedtests.ValidateContract(contract); err != nil {
 				t.Fatal(err)
 			}
 			got, err := p.recipe(contract)
@@ -494,7 +573,7 @@ func TestTrustedPreflightRecipesRejectMixedPairs(t *testing.T) {
 			// recipe check rather than merely the half-rotation guard.
 			baseline := contract
 			baseline.SuiteSHA256, baseline.GuestSHA256 = strings.Repeat("1", 64), strings.Repeat("2", 64)
-			if _, err := vmrunner.RequiredContract(&contract, &baseline, p.Supports); (err == nil) != tc.allowed {
+			if _, err := protectedtests.RequiredContract(&contract, &baseline, p.Supports); (err == nil) != tc.allowed {
 				t.Fatalf("candidate rotation = %v, allowed=%v", err, tc.allowed)
 			}
 		})

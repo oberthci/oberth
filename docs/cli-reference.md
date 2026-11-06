@@ -1275,7 +1275,9 @@ Usage of serve:
   -trusted-tests-kvm-group int
         operator-approved positive /dev/kvm supplemental GID required for trusted suites; no default device group
   -trusted-tests-recipes string
-        public operator-approved trusted suite recipes JSON file (requires --vm-kvm-enabled)
+        public operator-approved trusted suite recipes JSON file
+  -trusted-tests-runtime string
+        protected runtime: legacy or generic-capability (explicit opt-in; requires per-repository device grants) (default "legacy")
   -uplink-token-default-ttl duration
         default lifetime for new uplink bearer tokens (90 days) (default 2160h0m0s)
   -uplink-token-max-ttl duration

@@ -831,6 +831,11 @@ RETURNING `+runColumns, workflowName, unixNano(s.now()), id))
 	if err != nil {
 		return model.Run{}, fmt.Errorf("set run job name: %w", err)
 	}
+	if !value.Preempted() {
+		if err := checkStoredGenericCapability(ctx, tx, id); err != nil {
+			return model.Run{}, err
+		}
+	}
 	if value.Preempted() {
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO run_cancellations(run_id, job_name, superseded_by, reason, created_at)

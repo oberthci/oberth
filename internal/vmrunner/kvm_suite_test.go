@@ -9,6 +9,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/oberthci/oberth/internal/protectedtests"
 )
 
 func kvmContractFixture() Contract {
@@ -52,7 +54,7 @@ func pinSuite(contract Contract, bundle []byte) Contract {
 }
 
 func TestKVMContractClosedSchemaAndBaseline(t *testing.T) {
-	contract, err := DecodeContract([]byte(kvmContractYAML()))
+	contract, err := protectedtests.DecodeContract([]byte(kvmContractYAML()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,12 +76,12 @@ func TestKVMContractClosedSchemaAndBaseline(t *testing.T) {
 		"profile":            strings.ReplaceAll(kvmContractYAML(), KVMSuiteAMD64Profile, OfflineEBPFProfile),
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := DecodeContract([]byte(source)); err == nil {
+			if _, err := protectedtests.DecodeContract([]byte(source)); err == nil {
 				t.Fatal("unsafe contract admitted")
 			}
 		})
 	}
-	required, err := RequiredContract(&contract, &contract, nil)
+	required, err := protectedtests.RequiredContract(&contract, &contract, nil)
 	if err != nil || !reflect.DeepEqual(required, &contract) {
 		t.Fatalf("unchanged baseline: %v, %v", required, err)
 	}
@@ -89,12 +91,12 @@ func TestKVMContractClosedSchemaAndBaseline(t *testing.T) {
 	}
 	changed := contract
 	changed.GuestSHA256 = strings.Repeat("c", 64)
-	if _, err := RequiredContract(&changed, &contract, nil); err == nil {
+	if _, err := protectedtests.RequiredContract(&changed, &contract, nil); err == nil {
 		t.Fatal("candidate replaced published guest pin")
 	}
 	changed = contract
 	changed.SuiteSHA256 = strings.Repeat("d", 64)
-	if _, err := RequiredContract(&changed, &contract, nil); err == nil {
+	if _, err := protectedtests.RequiredContract(&changed, &contract, nil); err == nil {
 		t.Fatal("candidate replaced published suite pin")
 	}
 }

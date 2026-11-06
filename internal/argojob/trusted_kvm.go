@@ -32,11 +32,14 @@ const (
 
 func prepareTrustedKVMRequest(config Config, request *Request) error {
 	intent := request.TrustedKVM
-	if !config.KVMEnabled {
+	if request.GenericProtected == nil && !config.KVMEnabled {
 		return ErrKVMNotEnabled
 	}
-	if config.TrustedKVMGroup <= 0 {
+	if request.GenericProtected == nil && config.TrustedKVMGroup <= 0 {
 		return errors.New("argojob: trusted suites require an explicit positive KVM supplemental group")
+	}
+	if err := validateGenericProtectedRequest(*request); err != nil {
+		return err
 	}
 	digest := sha256.Sum256(request.Source)
 	if intent.Validate() != nil || request.Trigger != pipeline.TriggerCI || request.RunID != intent.RunID || request.Name != intent.WorkflowName || request.SHA != intent.CandidateSHA || config.Namespace != intent.Namespace || hex.EncodeToString(digest[:]) != intent.WorkflowSpecDigest || model.CanonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo) != intent.Repository || len(request.Fragments) != 0 {
@@ -93,7 +96,7 @@ func admitTrustedKVMSource(workflow *wfv1.Workflow) error {
 		return errors.New("argojob: trusted preflight cannot carry credentials or external artifacts")
 	}
 	for key := range workflow.Annotations {
-		if key == trustedKVMAnnotation || strings.HasPrefix(key, "oberth.ci/release-wif") {
+		if key == trustedKVMAnnotation || key == genericProtectedAnnotation || strings.HasPrefix(key, "oberth.ci/release-wif") {
 			return errors.New("argojob: trusted preflight reserved annotation or WIF declaration")
 		}
 	}
@@ -141,9 +144,13 @@ func appendTrustedKVM(workflow *wfv1.Workflow, config Config, request Request) e
 	if err != nil {
 		return err
 	}
+	group := config.TrustedKVMGroup
+	if request.GenericProtected != nil {
+		group = request.GenericProtected.SupplementalGroup
+	}
 	leaf := wfv1.Template{
 		Name:               trustedKVMTemplate,
-		SecurityContext:    trustedKVMPodSecurity(config.TrustedKVMGroup),
+		SecurityContext:    trustedKVMPodSecurity(group),
 		ServiceAccountName: config.PipelineServiceAccount, AutomountServiceAccountToken: ptr.To(false), Executor: &wfv1.ExecutorConfig{ServiceAccountName: config.ExecutorServiceAccount},
 		NodeSelector: map[string]string{"kubernetes.io/arch": "amd64", "kubernetes.io/os": "linux"},
 		Volumes: []corev1.Volume{

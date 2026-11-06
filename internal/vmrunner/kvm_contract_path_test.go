@@ -6,6 +6,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/oberthci/oberth/internal/protectedtests"
 )
 
 func TestDecodeContractUSTARArtifactPaths(t *testing.T) {
@@ -29,7 +31,7 @@ func TestDecodeContractUSTARArtifactPaths(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := strings.ReplaceAll(kvmContractYAML(), BPFArtifact, tc.path)
-			contract, err := DecodeContract([]byte(source))
+			contract, err := protectedtests.DecodeContract([]byte(source))
 			if (err == nil) != tc.accept {
 				t.Fatalf("DecodeContract path length %d: %v; accept=%v", len(tc.path), err, tc.accept)
 			}

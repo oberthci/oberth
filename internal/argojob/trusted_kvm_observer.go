@@ -83,6 +83,14 @@ func (controller *Controller) TrustedKVMWorkflowUID(ctx context.Context, request
 // TrustedKVMReceipt uses current kubelet status from one exactly owned Pod.
 // Workflow success only determines readiness; it never substitutes for evidence.
 func (controller *Controller) TrustedKVMReceipt(ctx context.Context, request Request, workflowUID string) (vmrunner.KVMReceipt, error) {
+	if err := verifyGenericProtectedRuntime(controller.config, request); err != nil {
+		return vmrunner.KVMReceipt{}, err
+	}
+	if request.GenericProtected != nil {
+		if err := controller.verifyCapabilityGrant(ctx, request.RepositoryID, request.Capability); err != nil {
+			return vmrunner.KVMReceipt{}, err
+		}
+	}
 	workflow, leaf, err := controller.trustedKVMWorkflow(ctx, request)
 	if err != nil {
 		return vmrunner.KVMReceipt{}, err

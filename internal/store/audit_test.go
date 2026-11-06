@@ -162,8 +162,8 @@ func TestAuditMutationStateUsesOneAuthoritativeAuditPass(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if metrics.fullTraversals != 1 || metrics.readStatements != 4 {
-		t.Fatalf("audit mutation verification metrics = %#v, want one traversal and four reads", metrics)
+	if metrics.fullTraversals != 1 || metrics.readStatements != 6 {
+		t.Fatalf("audit mutation verification metrics = %#v, want one traversal and six reads (including runtime schema/projection)", metrics)
 	}
 	if guard.loadedReceipts {
 		t.Fatal("audit mutation verification loaded receipt blobs for historical anchors")

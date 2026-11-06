@@ -15,7 +15,7 @@ Published default-branch requirements survive candidate removal. Changing a
 retained contract is rejected. V1 remains denied: this implementation does not
 reinterpret legacy evidence as a trusted v2 receipt.
 
-Enablement requires `--vm-kvm-enabled` and `--trusted-tests-recipes=FILE` (Helm:
+Default legacy enablement requires `--vm-kvm-enabled` and `--trusted-tests-recipes=FILE` (Helm:
 `vm.kvm.enabled` and `trustedTests.recipes`). The JSON array contains public
 operator policy: `suite_sha256`, `guest_sha256`, `harness_image` (complete OCI
 `@sha256` reference to the Linux/amd64 platform manifest actually reported by
@@ -26,6 +26,11 @@ allowlist is authority to execute that exact suite driver. Admission refuses
 unknown recipes before fetching or executing them. Revoking or changing the
 recipe also invalidates old receipts at publication. No recipe is enabled by
 default; no example digest is a production artifact.
+
+The explicit `generic-capability` runtime retains this pinned host and suite
+contract, using current per-repository device grants instead of builtin KVM
+enablement. It requires separate external qualification before activation; see
+[protected runtime admission and recovery](protected-test-descriptor.md#explicit-generic-capability-runtime).
 
 ## Producer contract and trust boundary
 
@@ -187,8 +192,10 @@ The Dockerfile and server-owned trusted main container use UID/GID 65534,
 RunAsNonRoot, dropped capabilities, no escalation, seccomp and a read-only root.
 Operators must explicitly configure `--trusted-tests-kvm-group` (chart
 `trustedTests.kvmSupplementalGroup`) to the actual positive device-plugin KVM
-GID. Zero is the inactive default; configured recipes with no valid group fail
-closed. No group is guessed from a node or candidate YAML, and there is no root
+GID. Zero is the inactive default; new execution with no valid group fails
+closed. Legacy startup rejects configured recipes without a positive group. The
+generic runtime permits startup with zero solely to recover and clean existing
+admissions using their immutable original group; Create and Receipt still refuse. No group is guessed from a node or candidate YAML, and there is no root
 fallback. The leaf uses fsGroup 65534 with OnRootMismatch for its writable
 private emptyDir independently of the supplemental device group. Producer
 artifacts must be readable by this identity (and their parent directories

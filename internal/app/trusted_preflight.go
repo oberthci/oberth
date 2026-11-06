@@ -27,6 +27,12 @@ type trustedController interface {
 	TrustedKVMReceipt(context.Context, argojob.Request, string) (vmrunner.KVMReceipt, error)
 	CleanupTrustedKVM(context.Context, string, string, string) error
 }
+type genericPreflightJournal interface {
+	ReserveGenericPreflight(context.Context, protectedtests.GenericAdmission) (protectedtests.Execution, error)
+	GenericAdmission(context.Context, string) (*protectedtests.GenericAdmission, error)
+	CheckGenericPreflightAuthority(context.Context, string) error
+}
+
 type trustedRunStore interface {
 	vmrunner.KVMJournal
 	Run(context.Context, string) (model.Run, error)
@@ -37,6 +43,7 @@ type trustedRunStore interface {
 // TrustedPreflights is the only adapter permitted to submit a server-owned KVM
 // leaf. Recipes are immutable operator policy, not repository configuration.
 type TrustedPreflights struct {
+	generic         bool
 	jobs            *ArgoJobs
 	controller      trustedController
 	store           trustedRunStore
@@ -47,8 +54,29 @@ type TrustedPreflights struct {
 }
 
 func NewTrustedPreflights(jobs *ArgoJobs, journal trustedRunStore, recipes []vmrunner.KVMRecipe, workspaceRoot string, requireMutation func(context.Context) error) (*TrustedPreflights, error) {
-	if requireMutation == nil || jobs == nil || journal == nil || !jobs.config.KVMEnabled || jobs.config.TrustedKVMGroup <= 0 || len(recipes) == 0 || len(recipes) > 128 {
+	return newProtectedPreflights(jobs, journal, recipes, workspaceRoot, requireMutation, false)
+}
+
+// NewGenericProtectedPreflights is an explicit opt-in. Existing resource grants
+// never switch the protected executor by themselves. A missing current group
+// permits recovery of persisted obligations only; Supports and Execute refuse.
+func NewGenericProtectedPreflights(jobs *ArgoJobs, journal trustedRunStore, recipes []vmrunner.KVMRecipe, workspaceRoot string, requireMutation func(context.Context) error) (*TrustedPreflights, error) {
+	return newProtectedPreflights(jobs, journal, recipes, workspaceRoot, requireMutation, true)
+}
+func newProtectedPreflights(jobs *ArgoJobs, journal trustedRunStore, recipes []vmrunner.KVMRecipe, workspaceRoot string, requireMutation func(context.Context) error, generic bool) (*TrustedPreflights, error) {
+	if requireMutation == nil || jobs == nil || journal == nil || (!generic && (!jobs.config.KVMEnabled || jobs.config.TrustedKVMGroup <= 0)) || len(recipes) == 0 || len(recipes) > 128 {
 		return nil, errors.New("trusted preflights require KVM, explicit positive KVM group, journal and approved recipes")
+	}
+	if generic {
+		if jobs.config.TrustedKVMGroup < 0 || jobs.config.TrustedKVMGroup > 2147483647 {
+			return nil, errors.New("generic protected group must be zero for recovery or a valid positive GID")
+		}
+		if jobs.capabilityGrants == nil {
+			return nil, errors.New("generic protected executor requires current operator capability loading")
+		}
+		if _, ok := journal.(genericPreflightJournal); !ok {
+			return nil, errors.New("generic protected executor requires durable runtime admission journal")
+		}
 	}
 	controller, ok := jobs.controller.(trustedController)
 	if !ok {
@@ -57,18 +85,21 @@ func NewTrustedPreflights(jobs *ArgoJobs, journal trustedRunStore, recipes []vmr
 	if err := protectedtests.ValidateRecipes(recipes); err != nil {
 		return nil, err
 	}
-	return &TrustedPreflights{jobs: jobs, controller: controller, store: journal, recipes: append([]vmrunner.KVMRecipe(nil), recipes...), workspaceRoot: workspaceRoot, requireMutation: requireMutation, fetch: trustedharness.Fetch}, nil
+	return &TrustedPreflights{generic: generic, jobs: jobs, controller: controller, store: journal, recipes: append([]vmrunner.KVMRecipe(nil), recipes...), workspaceRoot: workspaceRoot, requireMutation: requireMutation, fetch: trustedharness.Fetch}, nil
 }
 func (p *TrustedPreflights) recipe(contract vmrunner.Contract) (vmrunner.KVMRecipe, error) {
 	descriptor, err := protectedtests.SelectDescriptor(contract, p.recipes)
 	return descriptor.Recipe(), err
 }
 func (p *TrustedPreflights) Supports(contract vmrunner.Contract) error {
+	if p.generic && p.jobs.config.TrustedKVMGroup <= 0 {
+		return errors.New("generic protected execution requires an explicit positive KVM group")
+	}
 	_, err := p.recipe(contract)
 	return err
 }
 
-func (p *TrustedPreflights) request(job service.WorkflowRequest, intent vmrunner.KVMIntent) (argojob.Request, error) {
+func (p *TrustedPreflights) request(job service.WorkflowRequest, intent vmrunner.KVMIntent, generic *protectedtests.GenericAdmission) (argojob.Request, error) {
 	source, err := readArgoSource(job.SourceDir, pipeline.TriggerCI)
 	if err != nil {
 		return argojob.Request{}, err
@@ -81,10 +112,22 @@ func (p *TrustedPreflights) request(job service.WorkflowRequest, intent vmrunner
 	if err != nil {
 		return argojob.Request{}, err
 	}
-	return argojob.Request{RunID: job.Run.ID, RepositoryID: job.Repository.ID, Name: intent.WorkflowName, Repo: job.Repository.Name, UpstreamName: job.UpstreamName, UpstreamOrg: job.UpstreamOrg, Ref: job.Run.Ref, SHA: intent.CandidateSHA, Trigger: pipeline.TriggerCI, RunTrigger: kind, ScheduleEntry: job.Run.ScheduleEntry, Source: source, SourceDir: job.SourceDir, ApprovedSecrets: map[string]bool{}, StepGrants: map[string]map[string]bool{}, TrustedKVM: &intent}, nil
+	request := argojob.Request{RunID: job.Run.ID, RepositoryID: job.Repository.ID, Name: intent.WorkflowName, Repo: job.Repository.Name, UpstreamName: job.UpstreamName, UpstreamOrg: job.UpstreamOrg, Ref: job.Run.Ref, SHA: intent.CandidateSHA, Trigger: pipeline.TriggerCI, RunTrigger: kind, ScheduleEntry: job.Run.ScheduleEntry, Source: source, SourceDir: job.SourceDir, ApprovedSecrets: map[string]bool{}, StepGrants: map[string]map[string]bool{}, TrustedKVM: &intent}
+	if generic != nil {
+		copied, err := protectedtests.NewGenericAdmission(generic.Intent, &generic.Capability, generic.SupplementalGroup)
+		if err != nil {
+			return argojob.Request{}, err
+		}
+		request.GenericProtected = &copied
+		request.Capability = &copied.Capability
+	}
+	return request, nil
 }
 
 func (p *TrustedPreflights) Execute(ctx context.Context, job service.WorkflowRequest, requirement vmrunner.Requirement, output io.Writer) (retErr error) {
+	if p.generic && p.jobs.config.TrustedKVMGroup <= 0 {
+		return errors.New("generic protected execution requires an explicit positive KVM group")
+	}
 	if requirement.Contract == nil {
 		return errors.New("missing trusted contract")
 	}
@@ -93,6 +136,17 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.WorkflowReq
 		return err
 	}
 	recipe := descriptor.Recipe()
+	var capability *argoworkflow.Capability
+	if p.generic {
+		capability, err = p.jobs.capabilityGrants(ctx, job.Repository.ID)
+		if err != nil {
+			return err
+		}
+		if capability == nil || capability.Validate() != nil || capability.Namespace != p.jobs.config.Namespace || capability.ExtendedResources[protectedtests.GenericDeviceResource] < 1 {
+			return errors.New("protected generic execution requires current device authority in its exact namespace")
+		}
+	}
+
 	source, err := readArgoSource(job.SourceDir, pipeline.TriggerCI)
 	if err != nil {
 		return err
@@ -129,11 +183,19 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.WorkflowReq
 		job.UpstreamOrg = job.UpstreamName
 	}
 	intent := vmrunner.KVMIntent{RunID: job.Run.ID, RepoID: job.Repository.ID, Repository: model.CanonicalRepoKey(job.UpstreamName, job.UpstreamOrg, job.Repository.Name), CandidateSHA: requirement.CandidateSHA, BaselineSHA: requirement.BaselineSHA, Contract: descriptor.Contract(), Recipe: recipe, Namespace: p.jobs.controller.Namespace(), WorkflowName: job.WorkflowName + "-trusted", WorkflowSpecDigest: hex.EncodeToString(sum[:]), InventoryDigest: inventory, CaseCount: count, AdmittedAt: now, Deadline: now.Add(duration)}
-	submission, err := p.request(job, intent)
+	var generic *protectedtests.GenericAdmission
+	if p.generic {
+		admission, err := protectedtests.NewGenericAdmission(intent, capability, p.jobs.config.TrustedKVMGroup)
+		if err != nil {
+			return err
+		}
+		generic = &admission
+	}
+	submission, err := p.request(job, intent, generic)
 	if err != nil {
 		return err
 	}
-	if p.jobs.kubeVirtGrants != nil {
+	if !p.generic && p.jobs.kubeVirtGrants != nil {
 		budget, granted, loadErr := p.jobs.kubeVirtGrants.ActiveKubeVirtGrant(ctx, job.Repository.ID)
 		if loadErr != nil {
 			return fmt.Errorf("preflight load VM grant: %w", loadErr)
@@ -172,7 +234,12 @@ func (p *TrustedPreflights) Execute(ctx context.Context, job service.WorkflowReq
 	if err = p.requireMutation(ctx); err != nil {
 		return err
 	}
-	execution, err := p.store.ReserveKVMPreflight(ctx, intent)
+	var execution protectedtests.Execution
+	if generic != nil {
+		execution, err = p.store.(genericPreflightJournal).ReserveGenericPreflight(ctx, *generic)
+	} else {
+		execution, err = p.store.ReserveKVMPreflight(ctx, intent)
+	}
 	if err != nil {
 		return err
 	}
@@ -413,7 +480,14 @@ func (p *TrustedPreflights) recoverOne(ctx context.Context, execution vmrunner.K
 				return err
 			}
 			job := service.WorkflowRequest{Run: run, Repository: repo, UpstreamName: upstream.Name, UpstreamOrg: upstream.Org(), SourceDir: filepath.Join(p.workspaceRoot, run.ID, "src")}
-			request, err := p.request(job, intent)
+			var generic *protectedtests.GenericAdmission
+			if journal, ok := p.store.(genericPreflightJournal); ok {
+				generic, err = journal.GenericAdmission(ctx, intent.RunID)
+				if err != nil {
+					return err
+				}
+			}
+			request, err := p.request(job, intent, generic)
 			if err != nil {
 				return err
 			}
@@ -425,8 +499,10 @@ func (p *TrustedPreflights) recoverOne(ctx context.Context, execution vmrunner.K
 			// is checked against the largest budget any grant may name rather
 			// than the default: a live grant above the default (or one lowered
 			// or revoked since submission) must not strand reconciliation.
-			request.KubeVirtGranted = true
-			request.KubeVirtBudget = argoworkflow.VMIBudgetLimit()
+			if generic == nil {
+				request.KubeVirtGranted = true
+				request.KubeVirtBudget = argoworkflow.VMIBudgetLimit()
+			}
 			uid, err = p.controller.TrustedKVMWorkflowUID(ctx, request)
 			if err != nil && !trustedMismatchCleanupUID(uid, err) {
 				return fmt.Errorf("uncertain trusted create still requires reconciliation: %w", err)

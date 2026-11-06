@@ -558,6 +558,8 @@ podLabels: {}
 # suite_sha256, guest_sha256, harness_image (OCI @sha256), suite_url and guest_url
 # (public HTTPS, no credentials/query). Empty keeps the feature disabled.
 trustedTests:
+  # Generic execution is opt-in and needs independently approved device grants.
+  runtime: legacy
   recipes: []
   # Operator must set the actual positive KVM device GID before adding recipes.
   # Zero disables trusted suite execution; no host-specific group is assumed.

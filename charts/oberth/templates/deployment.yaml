@@ -50,10 +50,17 @@ template time rather than producing a broken deployment (#662). */}}
 {{- $witnessKeyInfo := required "compatibility.witnessKeyInfo must preserve the existing witness identity on upgrade" $compatibility.witnessKeyInfo -}}
 {{- $trustedVM := .Values.vm | default dict -}}
 {{- $trustedKVM := $trustedVM.kvm | default dict -}}
-{{- if and $trustedTests.recipes (le (int64 ($trustedTests.kvmSupplementalGroup | default 0)) 0) }}
+{{- $trustedRuntime := $trustedTests.runtime | default "legacy" -}}
+{{- if and $trustedTests.recipes (eq $trustedRuntime "legacy") (le (int64 ($trustedTests.kvmSupplementalGroup | default 0)) 0) }}
 {{- fail "trustedTests.recipes requires an explicit positive trustedTests.kvmSupplementalGroup" }}
 {{- end }}
-{{- if and $trustedTests.recipes (not $trustedKVM.enabled) }}
+{{- if not (has $trustedRuntime (list "legacy" "generic-capability")) }}
+{{- fail "trustedTests.runtime must be legacy or generic-capability" }}
+{{- end }}
+{{- if and (eq $trustedRuntime "generic-capability") (not $trustedTests.recipes) }}
+{{- fail "generic-capability runtime requires trustedTests.recipes" }}
+{{- end }}
+{{- if and $trustedTests.recipes (eq $trustedRuntime "legacy") (not $trustedKVM.enabled) }}
 {{- fail "trustedTests.recipes requires vm.kvm.enabled" }}
 {{- end }}
 apiVersion: apps/v1
@@ -375,6 +382,7 @@ spec:
             {{- end }}
             {{- if $trustedTests.recipes }}
             - --trusted-tests-recipes=/etc/oberth/trusted-tests/recipes.json
+            - --trusted-tests-runtime={{ $trustedRuntime }}
             - --trusted-tests-kvm-group={{ $trustedTests.kvmSupplementalGroup }}
             {{- end }}
             {{- $promotion := .Values.promotion | default dict -}}

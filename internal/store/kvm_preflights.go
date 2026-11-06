@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/protectedtests"
 	"github.com/oberthci/oberth/internal/vmrunner"
 )
 
@@ -20,6 +21,10 @@ const kvmExecutionColumns = `execution_kind,intent_json,spec_identity,workflow_u
 // AI-INVARIANT: the empty parent job_name is the delivery interlock even when
 // release admission has already marked the parent credentialed.
 func (s *Store) ReserveKVMPreflight(ctx context.Context, intent vmrunner.KVMIntent) (vmrunner.KVMExecution, error) {
+	return s.reserveProtectedPreflight(ctx, intent, nil)
+}
+
+func (s *Store) reserveProtectedPreflight(ctx context.Context, intent vmrunner.KVMIntent, generic *protectedtests.GenericAdmission) (vmrunner.KVMExecution, error) {
 	if intent.Validate() != nil || len(validation.IsDNS1123Label(intent.Namespace)) != 0 || len(validation.IsDNS1123Subdomain(intent.WorkflowName)) != 0 {
 		return vmrunner.KVMExecution{}, ErrInvalid
 	}
@@ -36,10 +41,22 @@ func (s *Store) ReserveKVMPreflight(ctx context.Context, intent vmrunner.KVMInte
 	if err != nil {
 		return vmrunner.KVMExecution{}, err
 	}
+	if generic != nil {
+		if err := checkGenericCapability(ctx, tx, *generic); err != nil {
+			return vmrunner.KVMExecution{}, err
+		}
+	}
 	existing, err := scanKVMExecution(tx.QueryRowContext(ctx, `SELECT `+kvmExecutionColumns+` FROM vm_executions WHERE run_id=?`, intent.RunID))
 	if err == nil {
 		if vmrunner.KVMIntentDigest(existing.Intent) != vmrunner.KVMIntentDigest(intent) {
 			return vmrunner.KVMExecution{}, fmt.Errorf("%w: KVM intent is immutable", ErrInvalidState)
+		}
+		stored, loadErr := readGenericAdmission(ctx, tx, intent.RunID)
+		if loadErr != nil {
+			return vmrunner.KVMExecution{}, loadErr
+		}
+		if (stored == nil) != (generic == nil) || (stored != nil && stored.Digest() != generic.Digest()) {
+			return vmrunner.KVMExecution{}, fmt.Errorf("%w: protected runtime admission is immutable", ErrInvalidState)
 		}
 		return existing, nil
 	}
@@ -55,6 +72,22 @@ func (s *Store) ReserveKVMPreflight(ctx context.Context, intent vmrunner.KVMInte
 	now := unixNano(s.now())
 	if _, err := tx.ExecContext(ctx, `INSERT INTO vm_executions(run_id,execution_kind,intent_json,spec_identity,created_at,updated_at) VALUES(?,'kvm-preflight',?,?,?,?)`, intent.RunID, string(body), vmrunner.KVMIntentDigest(intent), now, now); err != nil {
 		return vmrunner.KVMExecution{}, err
+	}
+	if generic != nil {
+		encoded, err := json.Marshal(generic)
+		if err != nil {
+			return vmrunner.KVMExecution{}, err
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO protected_runtime_admissions(run_id,admission_json,admission_sha256,intent_sha256,created_at) VALUES(?,?,?,?,?)`, intent.RunID, string(encoded), generic.Digest(), protectedtests.IntentDigest(intent), now); err != nil {
+			return vmrunner.KVMExecution{}, err
+		}
+		details, err := genericAdmissionAuditDetails(*generic)
+		if err != nil {
+			return vmrunner.KVMExecution{}, err
+		}
+		if _, err = s.appendAuditAction(ctx, tx, model.AuditActionSpec{Actor: actor, Action: "protected.runtime-admitted", ResourceType: "run", ResourceID: intent.RunID, Details: details}, now); err != nil {
+			return vmrunner.KVMExecution{}, err
+		}
 	}
 	value := vmrunner.KVMExecution{Intent: intent}
 	if err := s.auditKVMExecution(ctx, tx, actor, "kvm.intent", value, now); err != nil {
@@ -118,6 +151,9 @@ func (s *Store) SubmitKVMPreflight(ctx context.Context, runID string) error {
 		if _, err := eligibleKVMParent(ctx, tx, current.Intent); err != nil {
 			return err
 		}
+		if err := checkStoredGenericCapability(ctx, tx, runID); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx, `UPDATE vm_executions SET submitted=1,updated_at=? WHERE run_id=?`, now, runID)
 		return err
 	})
@@ -163,6 +199,9 @@ func (s *Store) RecordKVMReceipt(ctx context.Context, runID string, receipt vmru
 			return ErrInvalidState
 		}
 		if _, err := eligibleKVMParent(ctx, tx, current.Intent); err != nil {
+			return err
+		}
+		if err := checkStoredGenericCapability(ctx, tx, runID); err != nil {
 			return err
 		}
 		body, err := json.Marshal(receipt)

@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/oberthci/oberth/internal/protectedtests"
 )
 
 const validContract = "version: 1\nprofile: ebpf-offline-amd64-v1\nartifact: ebpf/secret_monitor.o\n"
@@ -29,7 +31,7 @@ func TestContractRefusesCandidateAuthority(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			if _, err := DecodeContract([]byte(body)); err == nil {
+			if _, err := protectedtests.DecodeContract([]byte(body)); err == nil {
 				t.Fatal("candidate authority or invalid contract was admitted")
 			}
 		})
@@ -38,11 +40,11 @@ func TestContractRefusesCandidateAuthority(t *testing.T) {
 
 func TestRequiredContractCopiesUnchangedBaseline(t *testing.T) {
 	t.Parallel()
-	baseline, err := DecodeContract([]byte(validContract))
+	baseline, err := protectedtests.DecodeContract([]byte(validContract))
 	if err != nil {
 		t.Fatal(err)
 	}
-	required, err := RequiredContract(&baseline, &baseline, nil)
+	required, err := protectedtests.RequiredContract(&baseline, &baseline, nil)
 	if err != nil || required == nil || !reflect.DeepEqual(*required, baseline) {
 		t.Fatalf("required = %v, err = %v", required, err)
 	}
@@ -99,8 +101,8 @@ func TestReadContractDistinguishesMissingAndInvalid(t *testing.T) {
 func FuzzDecodeContract(f *testing.F) {
 	f.Add([]byte(validContract))
 	f.Fuzz(func(t *testing.T, source []byte) {
-		contract, err := DecodeContract(source)
-		if err == nil && ValidateContract(contract) != nil {
+		contract, err := protectedtests.DecodeContract(source)
+		if err == nil && protectedtests.ValidateContract(contract) != nil {
 			t.Fatal("admitted contract escaped fixed vocabulary")
 		}
 	})
@@ -141,7 +143,7 @@ func TestRequiredContractAllowsOnlyApprovedPairedRotation(t *testing.T) {
 				original.Artifacts = []string{"one.o", "two.o"}
 				candidate.Artifacts = []string{"two.o", "one.o"}
 			}
-			got, err := RequiredContract(selected, &original, approve)
+			got, err := protectedtests.RequiredContract(selected, &original, approve)
 			if mode == "approved" {
 				if err != nil || !reflect.DeepEqual(got, &candidate) || calls != 1 {
 					t.Fatalf("approved rotation = %#v, %v; approval calls=%d", got, err, calls)

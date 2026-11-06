@@ -104,6 +104,15 @@ func (scheduler *Scheduler) trustedReceipt(ctx context.Context, repository model
 	if err != nil {
 		return fmt.Errorf("read trusted test receipt: %w", err)
 	}
+	if runtimeJournal, ok := scheduler.store.(interface {
+		CheckGenericPreflightAuthority(context.Context, string) error
+	}); ok {
+		if _, err := retryDatabase(ctx, "CheckGenericPreflightAuthority", func(ctx context.Context) (struct{}, error) {
+			return struct{}{}, runtimeJournal.CheckGenericPreflightAuthority(ctx, run.ID)
+		}); err != nil {
+			return err
+		}
+	}
 	upstream, err := scheduler.database().Upstream(ctx, repository.UpstreamID)
 	if err != nil {
 		return err
