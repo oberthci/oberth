@@ -182,9 +182,11 @@ permission on KubeVirt resources.
 When the installed version is v0.17.94 or earlier, its `admin retirement-check`
 must also confirm that registered repositories have migrated their retired
 contracts. Later versions no longer have this command, so only the resource
-inventory runs. A candidate that removes
+inventory runs. After the upgrade, a candidate that removes
 `.oberth/tests.yaml` can run and be promoted even when the default branch still
-contains that file.
+contains that file. The legacy engine refuses that deletion before the upgrade.
+Prepare the migration branch first, upgrade, then run and promote it immediately;
+see the [migration sequence](workflow-capabilities.md#migration-from-retired-execution).
 
 `--allow-retired-execution` explicitly bypasses both checks, including an unavailable
 retirement-check command. It accepts orphaned resources and refused legacy runs;
