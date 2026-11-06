@@ -22,8 +22,7 @@ Submitted, adopted and reconciled Workflows may qualify after a terminal
 observation or ownership-checked cleanup. A definite create rejection never
 routes through Delete of a possibly foreign name. An uncertain POST retains its
 run and admission in the shared create-settlement task until absence is confirmed;
-failed deletion does not authorize another executor. Existing ownership checks
-and trusted-preflight cleanup fences remain mandatory.
+failed deletion does not authorize another executor. Existing ownership checks and cleanup fences remain mandatory.
 
 The writer transaction records failure, creates the retry, links both attempts
 and appends `run.retry.auto` atomically. It rechecks active repository, failed-step,
@@ -35,8 +34,7 @@ queue priority, while receiving a new unique history sequence. The existing
 reason line and audit say `automatic retry of <id> after infrastructure failure:
 <reason>`; the retry is not inferred from stderr or client-side timeouts.
 
-The one-retry marker survives restart requeue, KVM preflight restart recovery
-and the existing `run_rerun` replay lineage. Human reasons carry its fast
+The one-retry marker survives restart requeue and the existing `run_rerun` replay lineage. Human reasons carry its fast
 read-side projection; immutable `run.auto-retry-lineage` receipts preserve it if
 cancellation/supersession replaces the human reason. Explicit `run_retry` creates
 a fresh manual request at the normal queue position, without inheriting the

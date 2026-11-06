@@ -10,4 +10,4 @@ Instance-specific qualification and migration notes are excluded from the public
 operations guides. Superseded design proposals are retained here as historical
 context, including the [operator-owned VM runner proposal](kubevirt-runner-design.md).
 Use [workflow capabilities](../workflow-capabilities.md) and
-[KubeVirt VMs](../kubevirt-vms.md) for the implemented contracts.
+[KubeVirt VMs](../workflow-capabilities.md#migration-from-retired-execution) for the implemented contracts.

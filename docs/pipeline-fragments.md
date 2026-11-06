@@ -123,7 +123,7 @@ access to the server's git cache. It reports each reference by name and exits
 non-zero rather than passing a document it did not fully check. Admission
 requires the complete document after expansion from the pinned versions;
 skipping a fragment could also skip checks on the consumer's own templates,
-including the refusal of cache mounts on KVM leaves.
+including resource allowlists and workspace isolation.
 
 For documents without fragments, local validation also runs the server's
 document-only isolation and Trivy cache checks. This includes refusing a

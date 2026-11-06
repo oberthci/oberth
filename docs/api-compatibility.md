@@ -29,7 +29,7 @@ its related `run_id` never replaces it. Publication responses keep their distinc
 `publication_id`, `promotion_id` and `run_id` meanings.
 
 The tools `run_get`, `run_logs`, `run_retry`, `run_cancel`, `run_rerun`,
-`run_purge`, `run_kvm_preflight`, `artifacts`, `artifact_get` and ID-based `wait`
+`run_purge`, `artifacts`, `artifact_get` and ID-based `wait`
 accept preferred `run_id` alongside legacy `id`. `run_resources` accepts
 `run_id` alongside legacy `run`. If both spellings are sent, they must be equal;
 conflicting selectors are invalid input. Alias resolution uses the same scope
@@ -128,3 +128,6 @@ and missing attempt coverage still refuse advice. Independent attempt inventory
 is stored through an additive migration; it adds no caller argument or run status.
 An omitted limit in an available current declaration cannot be replaced by a
 finite historical limit.
+
+The #1294 stage 3 retirement explicitly removes five legacy execution tools; see
+[the breaking change notice](releases/unreleased-execution-retirement.md).

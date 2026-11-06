@@ -9,7 +9,7 @@ The operator creates the ServiceAccount in the configured execution namespace,
 its least-privilege resource RBAC, Argo task-result permissions, and namespace
 ResourceQuota. The server needs permission to request tokens for that exact
 account. For new capability workflows, operators provide their infrastructure and
-resource permissions. The deprecated VM path retains its existing chart RBAC. Kubernetes API discovery must identify every
+resource permissions. Kubernetes API discovery must identify every
 allowed kind as namespaced; missing or cluster-scoped kinds are refused.
 
 For example, the MCP `workflow_capability_grant` arguments are:
@@ -62,33 +62,30 @@ server's capacity. Unbounded graphs, missing budgets or declarations cannot
 fall back to size admission for extended resources. Kubernetes still enforces
 actual device availability and namespace quota.
 
-The old VM path is deprecated and its deletion is deferred. `OBERTH_KVM`,
-`OBERTH_GUEST_TEST`, guest-test injection, `.oberth/tests.yaml` suite and release
-publication gates, VM launcher RBAC, cleanup and restart recovery remain active.
-Existing KubeVirt grants retain their original bounded authority; they do not
-authorize generic resources or select an operator identity. New capability
-grants are separate and start empty. Legacy chart values and CLI flags continue
-to work. The inactive pilot remains retired under Schema 46.
+## Migration from retired execution
 
-Migrations 46/47/48 retire the inactive pilot, add the capability grant table,
-and establish the staged upgrade boundary without retiring the live VM journal.
-Back up the database before upgrading. The v0.17.84 CLI requires legacy
-preflight Workflows and Oberth-owned VMs to be absent before upgrade; see the
-[retirement upgrade procedure](retirement-upgrade.md). Work in flight remains journaled and
-reaches the same owner recovery used after a restart. Startup cancellation
-cleanup retries external deletion failures with two-minute attempt budgets and
-backoff capped at five seconds. The process stays alive and unready, with
-`recovery_pending=true` in its logs, until cleanup succeeds. Permanent database
-invariant failures remain fatal. See the [staged upgrade procedure](releases/unreleased-execution-retirement.md).
+Oberth no longer implements technology-specific execution. Move VM creation,
+device requests, guest harnesses, test gates and cleanup into repository
+Workflows. Grant their operator ServiceAccount only the required namespaced
+kinds/actions and extended resources. Existing KubeVirt grants do not become
+capability grants. Remove `oberth.ci/kvm-templates`, guest-test annotations and
+`.oberth/tests.yaml` after moving the required gate into the Workflow. The server
+checks both candidate and upstream default policy, so deleting a gate in a
+candidate cannot silently bypass the default branch requirement.
 
-Stage 2 requires operators to provision resource/device capacity, accounts and
-RBAC, grant the replacement capability, move guest and suite gates into their
-repository Workflows, and prove cleanup before removing the deprecated path.
-That deletion is deliberately absent from this release. Rollback requires the
-documented database restore procedure, not only an older image.
+`OBERTH_KVM` and `OBERTH_GUEST_TEST` are no longer injected. The five legacy MCP
+tools and `oberth kubevirt` are removed. Historical runs, step usage and errors
+remain readable without consulting the inert execution journals.
 
-Trusted preflight observation uses semantic Kubernetes resource equality. An
-owned spec mismatch remains a run-local failure: Oberth binds its observed UID
-for cleanup only, retains admission and retries exact-run cleanup until absence
-is confirmed. Foreign run/source identities never authorize deletion. This
-preserves the original trusted observer path while Stage 2 deletion is deferred.
+Drain old executions and clean up their external resources with the old owner
+before upgrading. If an old execution is encountered at restart, Oberth fails
+its run with a workflow capability migration message and stops its owned Argo
+Workflow. It does not inspect or delete externally created resources. Operators
+must remove any remaining resources. Old `trustedTests.*`, `vm.*` and retired
+`argo` values are accepted, warned about and ignored; they cannot restore runtime
+or RBAC. Removed CLI serve flags must be removed from custom launch commands.
+
+No migration is added. Existing migration SQL remains byte-identical; retired
+tables are inert and reserved for removal by a later migration. Take a database
+backup before upgrade; rollback requires restoring that backup together with
+the previous server. See [backup and restore](backup-restore.md).

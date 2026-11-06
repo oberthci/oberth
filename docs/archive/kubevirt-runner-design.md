@@ -3,7 +3,7 @@
 This superseded proposal predates the current Argo Workflow execution and
 operator-owned capability grants. Its barriers and proposed controller are
 historical context. See [workflow capabilities](../workflow-capabilities.md)
-and [KubeVirt VMs](../kubevirt-vms.md) for current operation.
+and [KubeVirt VMs](../workflow-capabilities.md#migration-from-retired-execution) for current operation.
 
 Design for adding an operator-owned VM runner/controller that provides
 bounded, least-privilege KubeVirt-based execution for workload integration

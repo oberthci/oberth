@@ -9,7 +9,7 @@ The server's single-architecture executable is streamed and SHA-256 verified
 once into each ordinary source PVC. Wrapped container/script Pod templates
 add `kubernetes.io/arch` matching the server's `runtime.GOARCH` through
 `podSpecPatch` strategic merge, preserving administrator workflow/parent selectors. Protected
-KVM workflows and unsupported leaves remain unwrapped. This adds no hostPath,
+Unsupported leaves remain unwrapped. This adds no hostPath,
 capabilities, ServiceAccount token or RBAC.
 
 Instrumentation runs in the main container's cgroup and consumes its budget.
@@ -98,13 +98,6 @@ can survive a failed scrape with zero metric samples. A final killed observation
 merges without erasing earlier measurements. Missing start/finish times and
 unobserved/garbage-collected incarnations remain unknown.
 
-For workflows declaring VM resources, two additional bounded inventories can
-bind a launcher through Workflow controller UID -> VMI UID -> launcher controller
-UID. The VMI operation annotation must bind its original resource step Pod UID.
-All launcher containers use the same cgroup checks. These are launcher totals
-(including QEMU/guest consumption), not a measurement of guest versus hypervisor
-cost. Missing original resource Pods/VMIs leave that binding unknown.
-
 The existing `/stats/summary` response adds these optional storage/pod scopes:
 
 - Per-container writable-rootfs and log used-byte peaks, accepted only when the
@@ -138,12 +131,11 @@ also appear in the existing `run_get` measured observations. Resource peaks are
 not summed to invent simultaneous whole-run demand. Filters/truncation can make
 both the overlap and usage population incomplete; coverage is never claimed.
 
-The source cannot separate guest/hypervisor memory or CPU, inspect guest files,
-measure raw block-volume used space, attribute shared PVC use to a run, or recover
-missed peaks/GC'd containers. Platform Pods, independent source-seed/artifact
-helpers outside Workflow supervision and CDI importer Pods without the verified
-step/VMI chain are outside this collector. They still need separate observations;
-stage 2 remains blocked on representative, complete coverage.
+The source cannot inspect external workloads, measure raw block-volume used
+space, attribute shared PVC use to a run, or recover missed peaks/GC'd containers.
+Platform Pods and independent source-seed/artifact helpers outside Workflow
+supervision are outside this collector. Historical external-resource observations
+remain readable, but new observations cover only Workflow-owned Pods.
 
 Collection overhead is bounded: default 15s (existing configurable 1–30s), two
 shared node HTTP GETs per interval, each at most 16 MiB; at most 32 configured

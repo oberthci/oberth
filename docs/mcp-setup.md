@@ -228,11 +228,6 @@ call the proxy hostname directly.
 | `uplink_revoke` | Unscoped admin-only audited SSH and bearer revocation; protects the last active admin |
 | `uplink_rotate` | Unscoped admin-only handoff to an already-issued matching replacement key, atomically revoking the old key |
 | `access_dismiss` | Unscoped-admin-only exact pending-declaration dismissal |
-| `run_kvm_preflight` | Deprecated; read the retained trusted preflight journal for one run |
-| `kubevirt_grant` | Deprecated; audited administrator grant for the existing bounded VM path |
-| `kubevirt_revoke` | Deprecated; revoke a repository's old VM grant |
-| `kubevirt_grant_get` | Deprecated; read one repository's old VM grant |
-| `kubevirt_grant_list` | Deprecated; list old VM grants within the caller's scope |
 | `secretstore_sync_receipt` | Record the receipt for a reviewed secret-store synchronization plan |
 | `promote_grant` | Issue an audited grant for a source SHA and promotion target |
 | `promote_grant_revoke` | Revoke a promotion grant |
@@ -923,7 +918,7 @@ Issue metadata writes can pass `expected_revision` from a prior read; mismatch
 is a conflict, while omission preserves last-write-wins. See
 [conditional metadata updates](issue-lifecycle.md).
 
-The current MCP surface has **80 tools**, including administrator-only
+The current MCP surface has **75 tools**, including administrator-only
 `publication_abandon`.
 
 The CLI uses `--url`, `OBERTH_MCP_URL`, or `OBERTH_BASE_URL` (with
