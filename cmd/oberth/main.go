@@ -68,7 +68,7 @@ func main() {
 	}
 }
 
-const usageCommands = "admin, wait-idle, git-ssh, audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, schedules, fragments, artifacts, runs, run, promotion, publication, log, repos, issues, status, uplink, access, kubevirt, resource, size, admission, secretstore, mcp, preflight, or version"
+const usageCommands = "admin, wait-idle, git-ssh, audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, schedules, fragments, artifacts, runs, run, promotion, publication, log, repos, issues, status, uplink, access, resource, size, admission, secretstore, mcp, preflight, or version"
 
 func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.Writer) (resultErr error) {
 	defer func() {
@@ -122,7 +122,6 @@ Commands:
   status        Show CI status for a ref
   uplink        Manage uplink identities
   access        Manage secret access grants
-  kubevirt      Manage repository VMI grants
   resource      Manage repository CPU/memory request and limit ceilings
   size          Manage legacy admission size and tag priority policy
   admission     Show the server's admission reservations, or release a stale one
@@ -178,8 +177,6 @@ Commands:
 		return runUplink(ctx, arguments[1:], input, output)
 	case "access":
 		return runAccess(ctx, arguments[1:], output)
-	case "kubevirt":
-		return runKubeVirtGrant(ctx, arguments[1:], output)
 	case "resource":
 		return runResourceGrant(ctx, arguments[1:], output)
 	case "size":

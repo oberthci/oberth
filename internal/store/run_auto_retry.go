@@ -93,9 +93,8 @@ func (s *Store) autoRetryInfrastructureTx(ctx context.Context, tx *sql.Tx, sourc
   ))
   AND NOT EXISTS(SELECT 1 FROM step_results WHERE run_id=?
     AND (status='failed' OR (? AND (started_at IS NOT NULL OR status='passed' OR log_end>log_start))))
-  AND NOT EXISTS(SELECT 1 FROM vm_executions WHERE run_id=? AND cleaned=0)
   AND NOT EXISTS(SELECT 1 FROM publications WHERE run_id=?)
-  AND NOT EXISTS(SELECT 1 FROM run_cancellations WHERE run_id=? AND completed_at IS NULL)`, source.PriorityProtected, source.RepoID, source.RefKind, source.Ref, source.ScheduleEntry, source.QueueSequence, source.RepoID, source.RefKind, source.Ref, source.ScheduleEntry, source.ID, deadline, source.ID, source.ID, source.ID).Scan(&eligible)
+  AND NOT EXISTS(SELECT 1 FROM run_cancellations WHERE run_id=? AND completed_at IS NULL)`, source.PriorityProtected, source.RepoID, source.RefKind, source.Ref, source.ScheduleEntry, source.QueueSequence, source.RepoID, source.RefKind, source.Ref, source.ScheduleEntry, source.ID, deadline, source.ID, source.ID).Scan(&eligible)
 	if err != nil {
 		return source, fmt.Errorf("check automatic infrastructure retry: %w", err)
 	}

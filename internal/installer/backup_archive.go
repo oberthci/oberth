@@ -191,7 +191,7 @@ type backupDatabaseSummary struct {
 }
 
 type backupOpenBaoSummary struct {
-	KVMount   string `json:"kv_mount"`
+	KVPath    string `json:"kv_mount"`
 	Secrets   int    `json:"secrets"`
 	Policies  int    `json:"policies"`
 	AuthMount string `json:"auth_mount"`

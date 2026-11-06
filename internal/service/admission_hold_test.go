@@ -279,34 +279,6 @@ func TestAdmissionHoldRestartLoadsOriginalDeadline(t *testing.T) {
 	r.release()
 }
 
-func TestAdmissionHoldKubeVirtWaiterCannotBlockAllowedTag(t *testing.T) {
-	f := newControlFixture(t)
-	gate := f.scheduler.admission
-	if _, err := f.scheduler.SetAdmissionHold(t.Context(), "admin", model.AdmissionHoldRequest{On: true, Reason: "release"}); err != nil {
-		t.Fatal(err)
-	}
-	// Restart adoption must retain running ordinary work under an active hold.
-	holder, err := gate.adopt(model.Run{ID: "running", RepoID: 1, RefKind: model.RefBranch, QueueSequence: 1}, pipeline.S, argoworkflow.VMIDemand{VMs: 1, Cores: 1, MemoryBytes: 1 << 30})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ordinary := gate.reserveRun(model.Run{ID: "ordinary", RepoID: 1, RefKind: model.RefBranch, QueueSequence: 2})
-	tag := gate.reserveRun(model.Run{ID: "tag", RepoID: 1, RefKind: model.RefTag, QueueSequence: 3})
-	gate.mu.Lock()
-	ordinary.prepared, ordinary.weight = true, 1
-	ordinary.kubeVirt = KubeVirtResources{Demand: argoworkflow.VMIDemand{VMs: 2, Cores: 2, MemoryBytes: 2 << 30}, Limit: argoworkflow.VMIDemand{VMs: 2, Cores: 2, MemoryBytes: 2 << 30}}
-	tag.prepared, tag.weight = true, 1
-	tag.kubeVirt = KubeVirtResources{Demand: argoworkflow.VMIDemand{VMs: 1, Cores: 1, MemoryBytes: 1 << 30}, Limit: ordinary.kubeVirt.Limit}
-	gate.grantLocked()
-	gate.mu.Unlock()
-	if !granted(gate, holder) || !granted(gate, tag) || granted(gate, ordinary) {
-		t.Fatal("held VM waiter blocked allowed tag or displaced adopted run")
-	}
-	tag.release()
-	ordinary.release()
-	holder.release()
-}
-
 func TestAdmissionHoldExpiryResumesDispatchWithoutOperator(t *testing.T) {
 	f := newControlFixture(t, JobResult{Status: model.RunPassed, Phase: "passed", Steps: []model.StepResult{stepResult(model.StepPassed)}})
 	hold, err := f.scheduler.SetAdmissionHold(t.Context(), "admin", model.AdmissionHoldRequest{On: true, Reason: "short hold", Allow: []string{}, Duration: 100 * time.Millisecond})

@@ -47,7 +47,7 @@ func TestSharedFlagsPreserveStdinSentinel(t *testing.T) {
 }
 func TestAdminHelpNamesOnlySupportedMaintenance(t *testing.T) {
 	var out strings.Builder
-	if err := runCLI(t.Context(), []string{"admin", "--help"}, nil, &out); err != nil || !strings.Contains(out.String(), "read-file") || !strings.Contains(out.String(), "retirement-check") || strings.Contains(out.String(), "admin database") {
+	if err := runCLI(t.Context(), []string{"admin", "--help"}, nil, &out); err != nil || !strings.Contains(out.String(), "read-file") || strings.Contains(out.String(), "retirement-check") || strings.Contains(out.String(), "admin database") {
 		t.Fatalf("admin help: %v %s", err, &out)
 	}
 }

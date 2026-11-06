@@ -90,10 +90,6 @@ func (gate *weightedAdmission) dispatchParked() (held, other int) {
 			held++
 			continue
 		}
-		if r.vmParked || gate.kubeVirtBlockedLocked(r) {
-			other++
-			continue
-		}
 		if holder, ahead := gate.groupBlockerLocked(r); r.prepared && (holder != "" || ahead != "") {
 			other++
 		}

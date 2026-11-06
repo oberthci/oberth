@@ -17,7 +17,7 @@ import (
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/internal/vmrunner"
+	"github.com/oberthci/oberth/internal/workflowpolicy"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
@@ -96,7 +96,6 @@ type RunQueueStore interface {
 	MarkRunCreatePending(context.Context, string, string, ...string) error
 	MarkRunSubmitted(context.Context, string) (model.Run, error)
 	MarkRunAdmitted(context.Context, string) (model.Run, error)
-	MarkRunParked(context.Context, string) (model.Run, error)
 	SetRunPolicyWaiting(context.Context, string, bool) (model.Run, error)
 	Run(context.Context, string) (model.Run, error)
 	SetRunWorkflowName(context.Context, string, string) (model.Run, error)
@@ -245,11 +244,6 @@ type WorkflowCapabilityStore interface {
 	SetWorkflowCapabilityGrant(context.Context, int64, string, *argoworkflow.Capability) (store.WorkflowCapabilityGrant, error)
 }
 
-type KubeVirtGrantStore interface {
-	KubeVirtGrant(context.Context, int64) (store.KubeVirtGrant, error)
-	SetKubeVirtGrant(context.Context, int64, string, bool, store.KubeVirtBudget) (store.KubeVirtGrant, error)
-}
-
 // PromotionGrantStore is the narrow contract for promotion grant operations.
 // Non-admin uplinks must present a matching grant to promote; admin uplinks
 // retain direct authority.
@@ -301,7 +295,7 @@ type DeliveryGit interface {
 
 type WorkspaceGit interface {
 	PublicationGit
-	vmrunner.PolicyGit
+	workflowpolicy.PolicyGit
 	Checkout(context.Context, string, string, string) error
 }
 
@@ -376,8 +370,6 @@ type WorkflowRequest struct {
 	DemandReceipt    *argoworkflow.DemandReceipt
 	ResourceFallback model.ResourceAdmissionFallback
 	PodDemand        *argoworkflow.PodDemand
-	// VMIDemandReceipt carries the exact graph reserved before submission.
-	VMIDemandReceipt *argoworkflow.VMIDemandReceipt
 	WorkflowName     string `json:"WorkflowName"`
 	Run              model.Run
 	Repository       model.Repository
@@ -664,6 +656,5 @@ type PromotionWaitResponse struct {
 // so the frontend never has to derive per-repo status from a global window.
 type RepoView struct {
 	model.Repository
-	LatestRuns    []model.Run          `json:"LatestRuns"`
-	KubeVirtGrant *store.KubeVirtGrant `json:"KubeVirtGrant,omitempty"`
+	LatestRuns []model.Run `json:"LatestRuns"`
 }

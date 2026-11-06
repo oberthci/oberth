@@ -11,7 +11,6 @@ import (
 var commandGroups = map[string]string{
 	"access":      "list|allow|revoke",
 	"fragments":   "list|show",
-	"kubevirt":    "grant|get|revoke",
 	"preflight":   "drift|pki|upstreams",
 	"repo":        "add|remove|archive|unarchive|verify",
 	"resource":    "grant|get|revoke",

@@ -13,7 +13,7 @@ import (
 )
 
 // sizeGrantTool serves size_grant, size_revoke and size_grant_get (#1021),
-// mirroring the KubeVirt grant: scoped lookup, admin-only audited mutation.
+// with scoped lookup and admin-only audited mutation.
 func (service *API) sizeGrantTool(ctx context.Context, actor api.Actor, name, repoName, maximum string) (any, error) {
 	if service.sizeGrants == nil || service.repositories == nil {
 		return nil, refuse(ErrUnavailable, "size grants")

@@ -126,8 +126,3 @@ func (database schedulerDatabase) MarkRunSubmitted(ctx context.Context, id strin
 		return run.Status == model.RunRunning && run.Phase == "running" && run.WorkflowName != ""
 	}, database.SchedulerStore.MarkRunSubmitted)
 }
-func (database schedulerDatabase) MarkRunParked(ctx context.Context, id string) (model.Run, error) {
-	return database.runTransition(ctx, "MarkRunParked", id, func(run model.Run) bool {
-		return run.Status == model.RunRunning && run.StartedAt == nil && run.WorkflowName == ""
-	}, database.SchedulerStore.MarkRunParked)
-}

@@ -466,7 +466,7 @@ func minimalValidServeOptions() serveOptions {
 		argoWorkflowTimeout:     12 * time.Hour,
 		argoWorkflowTTL:         3600,
 		secretStoreAuthMount:    secretstore.DefaultAuthMountPath,
-		secretStoreKVMount:      secretstore.DefaultKVMount,
+		secretStoreKVPath:       secretstore.DefaultKVPath,
 	}
 }
 

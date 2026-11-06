@@ -25,7 +25,7 @@ func buildSecretStoreVerifier(options serveOptions, kube kubernetes.Interface) s
 				return secretStoreVerifyConfig{
 					address: options.secretStoreAddress, authMount: options.secretStoreAuthMount,
 					role: options.secretStoreRole, caCertPath: options.secretStoreCACert,
-					saTokenPath: options.secretStoreSAToken, kvMount: options.secretStoreKVMount,
+					saTokenPath: options.secretStoreSAToken, kvPath: options.secretStoreKVPath,
 					insecureHTTP: options.secretStoreInsecureHTTP,
 					paths:        append([]string(nil), options.secretStorePaths...),
 				}, nil

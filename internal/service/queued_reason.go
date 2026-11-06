@@ -33,7 +33,7 @@ func queuedDisplayReason(scheduling *model.RunScheduling, blocker *model.Admissi
 	case "preparing":
 		return "starting"
 	case "preflight":
-		return "KVM preflight"
+		return "retired execution preflight"
 	case "waiting":
 		if scheduling.Admission == nil {
 			return "waiting for capacity"
@@ -51,10 +51,6 @@ func queuedDisplayReason(scheduling *model.RunScheduling, blocker *model.Admissi
 func waitingReason(a *model.AdmissionObservation) string {
 	reason := "waiting for capacity"
 	switch {
-	case a.KubeVirtCapacity:
-		reason = "waiting for KubeVirt capacity"
-	case a.VMCapacity:
-		reason = "waiting for VM capacity"
 	case a.DiskFloor != nil && a.DiskFloor.BelowFloor:
 		reason = fmt.Sprintf("waiting for disk space (%s free)", bytesText(a.DiskFloor.FreeBytes))
 	case a.GroupLimit > 0 && a.GroupBlocked, a.GroupHolder != "", a.GroupAhead != "":

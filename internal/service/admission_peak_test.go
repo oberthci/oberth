@@ -99,7 +99,7 @@ func TestAdmissionPeakTotalsSurviveRecovery(t *testing.T) {
 	f := newConcurrencyFixture(t, pipeline.M, 3)
 	run := model.Run{ID: strings.Repeat("a", 32), WorkflowName: "step-abc12345", SHA: strings.Repeat("b", 40), RepoID: f.repo.ID, QueueSequence: 1}
 	d := &argoworkflow.PodDemand{CPUMilli: 1000, MemoryBytes: 1 << 30, Pods: 1, DeclaredTotal: &argoworkflow.PodRequests{CPUMilli: 3000, MemoryBytes: 3 << 30, Pods: 3}}
-	if err := f.scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.M, argoworkflow.VMIDemand{}, d); err != nil {
+	if err := f.scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.M, d); err != nil {
 		t.Fatal(err)
 	}
 	r, err := f.scheduler.restoreCreateGrant(run, nil)

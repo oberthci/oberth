@@ -2049,3 +2049,14 @@ func TestUpgradeSilentWhenSchemaUnchanged(t *testing.T) {
 		t.Fatalf("should not announce schema migration when version unchanged: %q", text)
 	}
 }
+
+func TestUpgradeAcceptsRetiredValueOverrides(t *testing.T) {
+	for _, key := range []string{"trustedTests.recipes=[]", "trustedTests.runtime=legacy", "vm.kvm.enabled=true", "argo.kubevirtCeiling.maxVMs=4", "argo.vmLauncherServiceAccount=old"} {
+		if err := validateUserSetAgainstValues([]byte("argo: {}\n"), []string{key}); err != nil {
+			t.Fatalf("%s: %v", key, err)
+		}
+	}
+	if err := validateUserSetAgainstValues([]byte("argo: {}\n"), []string{"argo.typo=true"}); err == nil {
+		t.Fatal("unknown ordinary value accepted")
+	}
+}

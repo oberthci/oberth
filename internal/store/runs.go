@@ -170,8 +170,7 @@ func (s *Store) recoverWaitingRunTx(ctx context.Context, tx *sql.Tx, run model.R
 	var safe bool
 	if err := tx.QueryRowContext(ctx, `SELECT
  NOT EXISTS(SELECT 1 FROM step_results WHERE run_id=?)
- AND NOT EXISTS(SELECT 1 FROM publications WHERE run_id=?)
- AND NOT EXISTS(SELECT 1 FROM vm_executions WHERE run_id=?)`, run.ID, run.ID, run.ID).Scan(&safe); err != nil {
+ AND NOT EXISTS(SELECT 1 FROM publications WHERE run_id=?)`, run.ID, run.ID).Scan(&safe); err != nil {
 		return false, err
 	}
 	if !safe {
@@ -391,7 +390,7 @@ RETURNING `+runColumns, now, now))
 }
 
 // MarkRunAdmitted records when the weighted gate grants a run. The run is
-// visibly running from this point, including during a trusted VM preflight.
+// visibly running from this point.
 // A cancellation that won before the grant cannot acquire a start time.
 func (s *Store) MarkRunAdmitted(ctx context.Context, id string) (model.Run, error) {
 	if strings.TrimSpace(id) == "" {
@@ -414,34 +413,6 @@ RETURNING `+runColumns, now, now, id))
 	}
 	if err != nil {
 		return model.Run{}, fmt.Errorf("mark run admitted: %w", err)
-	}
-	return value, nil
-}
-
-// MarkRunParked clears the admission time after a trusted VM reservation is
-// refused and the weighted gate releases the run's resources. A submitted
-// Workflow cannot be parked.
-func (s *Store) MarkRunParked(ctx context.Context, id string) (model.Run, error) {
-	if strings.TrimSpace(id) == "" {
-		return model.Run{}, fmt.Errorf("%w: run ID is required", ErrInvalid)
-	}
-	now := unixNano(s.now())
-	value, err := scanRun(s.db.QueryRowContext(ctx, `
-UPDATE runs SET started_at = NULL, updated_at = ?
-WHERE id = ? AND status = 'running' AND job_name = '' AND started_at IS NOT NULL
-RETURNING `+runColumns, now, id))
-	if errors.Is(err, sql.ErrNoRows) {
-		current, lookupErr := s.Run(ctx, id)
-		if lookupErr != nil {
-			return model.Run{}, lookupErr
-		}
-		if current.Preempted() {
-			return current, nil
-		}
-		return model.Run{}, fmt.Errorf("%w: run is not awaiting VM capacity", ErrInvalidState)
-	}
-	if err != nil {
-		return model.Run{}, fmt.Errorf("mark run parked: %w", err)
 	}
 	return value, nil
 }
@@ -816,7 +787,6 @@ WHERE id = ? AND (
     status IN ('queued', 'running') OR
     (status = 'interrupted' AND (superseded_by != '' OR phase = 'cancelled'))
 )
-AND NOT EXISTS (SELECT 1 FROM vm_executions WHERE run_id=runs.id AND execution_kind='kvm-preflight' AND (cleaned=0 OR receipt_json='' OR refusal_json!=''))
 RETURNING `+runColumns, workflowName, unixNano(s.now()), id))
 	if errors.Is(err, sql.ErrNoRows) {
 		var exists int
@@ -830,11 +800,6 @@ RETURNING `+runColumns, workflowName, unixNano(s.now()), id))
 	}
 	if err != nil {
 		return model.Run{}, fmt.Errorf("set run job name: %w", err)
-	}
-	if !value.Preempted() {
-		if err := checkStoredGenericCapability(ctx, tx, id, s.now()); err != nil {
-			return model.Run{}, err
-		}
 	}
 	if value.Preempted() {
 		if _, err := tx.ExecContext(ctx, `
@@ -1473,8 +1438,7 @@ func nullableUnixNano(value *time.Time) any {
 // SetRunCredentialed marks a running run as credentialed. It is called by the
 // scheduler when the pipeline document declares secret-store paths, after the
 // pipeline has been read from the immutable checkout. The update is a no-op on
-// a run that is already credentialed or no longer active. A submitted VM
-// execution must finish observed cleanup before its run can become credentialed.
+// a run that is already credentialed or no longer active.
 func (s *Store) SetRunCredentialed(ctx context.Context, id string) error {
 	if strings.TrimSpace(id) == "" {
 		return fmt.Errorf("%w: run ID is required", ErrInvalid)
@@ -1484,20 +1448,6 @@ func (s *Store) SetRunCredentialed(ctx context.Context, id string) error {
 		return fmt.Errorf("begin credential transition: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	// Serialize this check with SubmitVMExecution's eligibility check. If
-	// credential discovery wins first, submission refuses it; if submission
-	// wins, this transition refuses until the owned resources are gone.
-	var conflicts int
-	if err := tx.QueryRowContext(ctx, `
-SELECT COUNT(*) FROM runs
-WHERE id=? AND status IN ('queued','running') AND credentialed=0
-  AND EXISTS (SELECT 1 FROM vm_executions
-               WHERE run_id=runs.id AND (submitted=1 OR execution_kind='kvm-preflight') AND cleaned=0)`, id).Scan(&conflicts); err != nil {
-		return fmt.Errorf("check credential transition ownership: %w", err)
-	}
-	if conflicts != 0 {
-		return fmt.Errorf("%w: run has a submitted VM execution pending cleanup", ErrInvalidState)
-	}
 	_, err = tx.ExecContext(ctx, `
 UPDATE runs SET credentialed = 1, updated_at = ?
 WHERE id = ? AND status IN ('queued', 'running') AND credentialed = 0`,

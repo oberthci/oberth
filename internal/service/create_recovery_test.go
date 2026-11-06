@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
@@ -79,7 +78,7 @@ func TestWorkflowCreateRecoveryParkedGroupMateRequeuesInEitherOrder(t *testing.T
 				if run.ID != holder.ID {
 					t.Fatal("parked placeholder adopted")
 				}
-				_, err := scheduler.admission.adopt(run, size, argoworkflow.VMIDemand{})
+				_, err := scheduler.admission.adopt(run, size)
 				return err
 			}); err != nil {
 				t.Fatal("parked group-mate blocked startup", err)
@@ -120,7 +119,7 @@ func TestWorkflowCreateRecoveryWaitingExistingWorkflowAdoptsBeforeCleanup(t *tes
 			jobs := &createRecoveryJobs{present: map[string]bool{run.ID: true}, adoptingJobs: adoptingJobs{recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal, waitBlocks: make(chan struct{}), waitEntered: make(chan struct{})}}}
 			scheduler := f.scheduler(t, jobs)
 			if contract {
-				if err := scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S, argoworkflow.VMIDemand{}); err != nil {
+				if err := scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -129,7 +128,7 @@ func TestWorkflowCreateRecoveryWaitingExistingWorkflowAdoptsBeforeCleanup(t *tes
 			if err := scheduler.reconcileStrandedRunsWithGate(t.Context(), scheduler.requireMutation, func(found model.Run, size pipeline.Size) error {
 				resumed = found
 				var err error
-				grant, err = scheduler.admission.adopt(found, size, argoworkflow.VMIDemand{})
+				grant, err = scheduler.admission.adopt(found, size)
 				return err
 			}); err != nil {
 				t.Fatal(err)
@@ -190,7 +189,7 @@ func TestWorkflowCreateRecoveryAbsentWorkflowRequiresContractToSettle(t *testing
 			jobs := &createRecoveryJobs{present: map[string]bool{}, adoptingJobs: adoptingJobs{recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}}
 			scheduler := f.scheduler(t, jobs)
 			if contract != "none" {
-				if err := scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S, argoworkflow.VMIDemand{}); err != nil {
+				if err := scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S); err != nil {
 					t.Fatal(err)
 				}
 				if contract == "corrupt" {

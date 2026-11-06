@@ -74,8 +74,5 @@ func TestRefiredFlatQueueUsesGlobalAdmissionPositions(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertFilteredPosition(1)
-	if _, err := s.MarkRunParked(ctx, copy.ID); err != nil {
-		t.Fatal(err)
-	}
-	assertFilteredPosition(2)
+
 }

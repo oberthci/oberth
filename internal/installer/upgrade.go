@@ -12,12 +12,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/oberthci/oberth/pkg/argoworkflow"
+
 	"golang.org/x/mod/semver"
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
-
-	"github.com/oberthci/oberth/internal/retirement"
 )
 
 // canonicalGARPrefix is the canonical Google Artifact Registry prefix for
@@ -250,7 +250,7 @@ func validateUserSetAgainstValues(valuesYAML []byte, userSet []string) error {
 		if err != nil {
 			return err
 		}
-		if !keyPathExists(values, key) {
+		if !argoworkflow.RetiredValue(key) && !keyPathExists(values, key) {
 			return &ErrSchemaValidation{Detail: fmt.Sprintf("key %q does not exist in the chart values; check for typos", key)}
 		}
 	}
@@ -294,6 +294,7 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	if w == nil {
 		w = io.Discard
 	}
+	_, _ = fmt.Fprintln(w, "Retired execution settings are ignored; migrate workloads to a workflow capability grant. See the chart upgrade notes.")
 	color := isColor(deps)
 
 	targetVersion := cfg.BinaryVersion
@@ -390,16 +391,8 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		return result, err
 	}
 
-	if err := checkUpgradeLegacyResources(ctx, cfg, deps); err != nil {
-		return result, err
-	}
 	if err := checkUpgradeOwnership(ctx, cfg, deps, currentVersion); err != nil {
 		return result, err
-	}
-	if retirement.LegacyExecutionRemoved && semver.Compare(canonicalChartVersion(cfg.BinaryVersion), "v0.17.83-0") >= 0 {
-		if err := checkUpgradeLegacyRepositories(ctx, cfg, deps); err != nil {
-			return result, err
-		}
 	}
 
 	profile, cleanupProfile, err := prepareUpgradeControllerProfile(ctx, cfg, deps)
@@ -507,16 +500,8 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 	}
 
 	// Recheck after preview/drain, immediately before the first live write.
-	if err := checkUpgradeLegacyResources(ctx, cfg, deps); err != nil {
-		return result, err
-	}
 	if err := checkUpgradeOwnership(ctx, cfg, deps, currentVersion); err != nil {
 		return result, err
-	}
-	if retirement.LegacyExecutionRemoved && semver.Compare(canonicalChartVersion(cfg.BinaryVersion), "v0.17.83-0") >= 0 {
-		if err := checkUpgradeLegacyRepositories(ctx, cfg, deps); err != nil {
-			return result, err
-		}
 	}
 
 	if profile != nil {

@@ -13,8 +13,8 @@ func TestChartLegacyExecutionCompatibility(t *testing.T) {
 		t.Fatalf("chart: %v\n%s", err, rendered)
 	}
 	for _, required := range []string{"--vm-kvm-enabled", "kubevirt.io", "oberth-argo-vm-launcher"} {
-		if !bytes.Contains(rendered, []byte(required)) {
-			t.Errorf("legacy pipeline lost %s", required)
+		if bytes.Contains(rendered, []byte(required)) {
+			t.Errorf("retired runtime or RBAC rendered: %s", required)
 		}
 	}
 }

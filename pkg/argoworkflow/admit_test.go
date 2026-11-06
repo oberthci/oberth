@@ -959,7 +959,7 @@ func TestAdmitRefusesGPUResources(t *testing.T) {
 	t.Parallel()
 	document := strings.Replace(admissibleDocument, "        command: [/bin/true]\n",
 		"        command: [/bin/true]\n        resources:\n          requests:\n            nvidia.com/gpu: \"1\"\n", 1)
-	refuse(t, document, Policy{}, "not admitted")
+	refuse(t, document, Policy{}, "workflow capability grant")
 }
 
 // --- Finding 8 tests: synchronization lock scoping ---

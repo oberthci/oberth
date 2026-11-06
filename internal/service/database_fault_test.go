@@ -71,14 +71,6 @@ func (s *deadlineFaultStore) MarkRunAdmitted(a0 context.Context, a1 string) (mod
 	return s.Store.MarkRunAdmitted(a0, a1)
 }
 
-func (s *deadlineFaultStore) MarkRunParked(a0 context.Context, a1 string) (model.Run, error) {
-	if err := s.fault("MarkRunParked"); err != nil {
-		var zero model.Run
-		return zero, err
-	}
-	return s.Store.MarkRunParked(a0, a1)
-}
-
 func (s *deadlineFaultStore) Run(a0 context.Context, a1 string) (model.Run, error) {
 	if err := s.fault("Run"); err != nil {
 		var zero model.Run

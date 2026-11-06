@@ -10,7 +10,6 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestRunKindReadsOnlyTheDurableRun(t *testing.T) {
@@ -73,40 +72,6 @@ func writeBuild(t *testing.T, document string) string {
 		t.Fatal(err)
 	}
 	return dir
-}
-
-func TestPipelineSizeIsPerRunTrigger(t *testing.T) {
-	dir := writeBuild(t, perTriggerBuild)
-	jobs := &ArgoJobs{intents: map[string]argoIntent{}}
-	preflight := &TrustedPreflights{}
-	for trigger, want := range map[string]pipeline.Size{
-		"branch":    pipeline.M,
-		"promotion": pipeline.XL,
-		"schedule":  pipeline.XL, // unnamed: oberth.ci/size
-	} {
-		request := service.WorkflowRequest{
-			Run:        model.Run{Ref: "feature/x", Trigger: trigger},
-			Repository: model.Repository{Name: "ebpf"},
-			SourceDir:  dir,
-		}
-		size, err := jobs.PipelineSize(context.Background(), request)
-		if err != nil || size != want {
-			t.Fatalf("%s PipelineSize = %q, %v; want %q", trigger, size, err, want)
-		}
-		// The trusted preflight reads the same document and must not size a
-		// promotion's full gate as a branch run.
-		size, err = preflight.Size(context.Background(), request)
-		if err != nil || size != want {
-			t.Fatalf("%s preflight Size = %q, %v; want %q", trigger, size, err, want)
-		}
-	}
-	// A tag run's preflight of build.yaml gates a release: promotion's size.
-	size, err := preflight.Size(context.Background(), service.WorkflowRequest{
-		Run: model.Run{Ref: "v1.0.0", Trigger: "tag", Release: true}, Repository: model.Repository{Name: "ebpf"}, SourceDir: dir,
-	})
-	if err != nil || size != pipeline.XL {
-		t.Fatalf("tag preflight Size = %q, %v; want XL", size, err)
-	}
 }
 
 func TestPipelineSizeRefusesAMisdeclaredTrigger(t *testing.T) {

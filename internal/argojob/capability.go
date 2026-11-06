@@ -132,7 +132,7 @@ func (config Config) validateCapability(c *argoworkflow.Capability) error {
 	if c.Namespace != config.Namespace {
 		return errors.New("argojob: operator capability belongs to a different execution namespace")
 	}
-	for _, account := range []string{config.PipelineServiceAccount, config.ExecutorServiceAccount, config.VMLauncherServiceAccount, config.CredentialedServiceAccount, config.CISecretsServiceAccount} {
+	for _, account := range []string{config.PipelineServiceAccount, config.ExecutorServiceAccount, config.CredentialedServiceAccount, config.CISecretsServiceAccount} {
 		if c.ServiceAccount == account {
 			return errors.New("argojob: operator capability cannot select an Oberth-managed identity")
 		}

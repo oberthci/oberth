@@ -27,15 +27,13 @@ type AdmissionObservation struct {
 	DeclaredResources *DeclaredResources    `json:"declared_resources,omitempty"`
 	LegacyResources   *LegacyResourceCharge `json:"legacy_resources,omitempty"`
 
-	Pressure         *PressureDeferral `json:"pressure,omitempty"`
-	KubeVirtCapacity bool              `json:"kubevirt_capacity,omitempty"`
-	VMCapacity       bool              `json:"vm_capacity,omitempty"`
-	State            string            `json:"state"`
-	Position         int               `json:"position,omitempty"`
-	Size             string            `json:"size,omitempty"`
-	Weight           int               `json:"weight,omitempty"`
-	Used             int               `json:"used"`
-	Capacity         int               `json:"capacity"`
+	Pressure *PressureDeferral `json:"pressure,omitempty"`
+	State    string            `json:"state"`
+	Position int               `json:"position,omitempty"`
+	Size     string            `json:"size,omitempty"`
+	Weight   int               `json:"weight,omitempty"`
+	Used     int               `json:"used"`
+	Capacity int               `json:"capacity"`
 	// Runs and MaxRuns are the run ceiling: how many runs hold a grant and
 	// how many may. Zero for a scoped viewer, like Used and Capacity.
 	Runs    int `json:"runs,omitempty"`

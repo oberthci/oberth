@@ -10,7 +10,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/vmrunner"
+	"github.com/oberthci/oberth/internal/workflowpolicy"
 )
 
 // ReleasePreflighter observes declarations and public capabilities only.
@@ -27,7 +27,7 @@ type ReleasePreflightResult struct {
 const releasePreflightFile = ".oberth/release.yaml"
 const releasePreflightLimit = 1 << 20
 
-func releasePreflight(ctx context.Context, git vmrunner.PolicyGit, checker ReleasePreflighter, request WorkflowRequest, base string, defaultBase bool) (ReleasePreflightResult, error) {
+func releasePreflight(ctx context.Context, git workflowpolicy.PolicyGit, checker ReleasePreflighter, request WorkflowRequest, base string, defaultBase bool) (ReleasePreflightResult, error) {
 	ctx, cancel := context.WithTimeout(gitcache.WithFreshPolicy(ctx), 30*time.Second)
 	defer cancel()
 	repo := model.CanonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repository.Name)
@@ -122,7 +122,7 @@ func (service *API) checkPromotionRelease(ctx context.Context, repository model.
 	if service.releasePreflight == nil {
 		return nil
 	}
-	git, ok := service.git.(vmrunner.PolicyGit)
+	git, ok := service.git.(workflowpolicy.PolicyGit)
 	if !ok {
 		return fmt.Errorf("release preflight Git reader unavailable")
 	}

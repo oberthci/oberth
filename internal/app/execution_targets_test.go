@@ -23,7 +23,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
-	"k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -37,7 +36,7 @@ import (
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
-	"github.com/oberthci/oberth/internal/vmrunner"
+	"github.com/oberthci/oberth/internal/workflowpolicy"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
@@ -234,7 +233,7 @@ func newTargetRouteFragmentsFixture(t *testing.T, withFragment bool) *targetRout
 		t.Fatal(err)
 	}
 	policy := &targetPolicyGit{baseline: strings.Repeat("b", 40), source: source}
-	authority, err := vmrunner.ResolveBranchAuthority(ctx, policy, "github/org/repo", run.SHA)
+	authority, err := workflowpolicy.ResolveBranchAuthority(ctx, policy, "github/org/repo", run.SHA)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,18 +363,16 @@ func newTargetRouteFragmentsFixture(t *testing.T, withFragment bool) *targetRout
 		}
 		return nil
 	}
-	vmi := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachineinstances"}: "VirtualMachineInstanceList"})
 	definition := ExecutionTarget{ID: "remote", Config: config, Transport: &rest.Config{Host: "https://api.example.org", TLSClientConfig: rest.TLSClientConfig{CAData: []byte("fixture-ca")}}, Kubernetes: kube, Workflows: func(namespace string) argojob.WorkflowClient {
 		if namespace != config.Namespace {
 			t.Fatal("wrong Workflow namespace")
 		}
 		return remote
-	}, Exec: exec, VMI: vmi, VMICreate: &fakerest.RESTClient{}}
+	}, Exec: exec}
 	jobs, err := WithExecutionTargets(local, db, []ExecutionTarget{definition})
 	if err != nil {
 		t.Fatal(err)
 	}
-	jobs.SetKubeVirtGrantLoader(db)
 	jobs.SetWorkflowCapabilityLoader(db.ActiveWorkflowCapability)
 	return &targetRouteFixture{jobs: jobs, local: local, db: db, request: request, definition: definition, remote: remote, kube: kube, localKube: localKube, localWorkflows: localWorkflows, policy: policy, execs: execs}
 }
@@ -460,9 +457,6 @@ func TestExecutionTargetNativeCreatePlanningAndRestart(t *testing.T) {
 	}
 	if namespace, err := restarted.WorkflowNamespaceForRun(ctx, run); err != nil || namespace != f.definition.Config.Namespace {
 		t.Fatal(namespace, err)
-	}
-	if _, err := restarted.AdoptedKubeVirtDemand(run); err != nil {
-		t.Fatal(err)
 	}
 	if _, err := restarted.AdoptedPodDemand(run); err != nil {
 		t.Fatal(err)
@@ -710,5 +704,4 @@ var (
 	_ service.JobCreateSettler                  = (*ArgoJobs)(nil)
 	_ service.PipelineConcurrencyContractReader = (*ArgoJobs)(nil)
 	_ service.PipelineDemandSizer               = (*ArgoJobs)(nil)
-	_ service.AdoptedKubeVirtSizer              = (*ArgoJobs)(nil)
 )

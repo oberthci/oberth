@@ -19,9 +19,9 @@ type fallbackJobs struct {
 func (j fallbackJobs) PipelineSize(context.Context, WorkflowRequest) (pipeline.Size, error) {
 	return pipeline.M, nil
 }
-func (j fallbackJobs) PipelineKubeVirt(ctx context.Context, req WorkflowRequest) (KubeVirtResources, error) {
+func (j fallbackJobs) PipelineDemandReceipt(ctx context.Context, req WorkflowRequest) (*argoworkflow.DemandReceipt, error) {
 	if !j.graph {
-		return j.declaredJobs.PipelineKubeVirt(ctx, req)
+		return j.declaredJobs.PipelineDemandReceipt(ctx, req)
 	}
 	source := []byte(`apiVersion: argoproj.io/v1alpha1
 kind: Workflow
@@ -41,10 +41,10 @@ spec:
 `)
 	r, err := argoworkflow.ResolveRunSource(source, nil, argoworkflow.RunSourceBinding{RunID: req.Run.ID, RepositoryID: req.Repository.ID, SHA: req.Run.SHA, File: ".oberth/build.yaml", Trigger: argoworkflow.RunTriggerBranch})
 	if err != nil {
-		return KubeVirtResources{}, err
+		return nil, err
 	}
 	receipt, err := r.Receipt(argoworkflow.Policy{RunnerImagePrefixes: []string{"example.invalid/"}})
-	return KubeVirtResources{Receipt: receipt}, err
+	return receipt, err
 }
 
 func TestDeclaredGraphAndBudgetDoNotGateKubernetesSubmission(t *testing.T) {
@@ -85,7 +85,7 @@ func TestFallbackSurvivesUncertainCreateRecovery(t *testing.T) {
 		t.Run(string(reason), func(t *testing.T) {
 			f := newConcurrencyFixture(t, pipeline.M, 3)
 			run := model.Run{ID: strings.Repeat("a", 32), WorkflowName: "step-abc12345", SHA: strings.Repeat("b", 40), RepoID: f.repo.ID, QueueSequence: 1}
-			if err := f.scheduler.recordResourceAdmission(run, run.WorkflowName, pipeline.M, argoworkflow.VMIDemand{}, nil, reason); err != nil {
+			if err := f.scheduler.recordResourceAdmission(run, run.WorkflowName, pipeline.M, nil, reason); err != nil {
 				t.Fatal(err)
 			}
 			r, err := f.scheduler.restoreCreateGrant(run, nil)
@@ -93,22 +93,5 @@ func TestFallbackSurvivesUncertainCreateRecovery(t *testing.T) {
 				t.Fatalf("restored fallback: %+v %v", r, err)
 			}
 		})
-	}
-}
-
-func TestDeclaredVMAndSmallRunsShareButCellLimitRemains(t *testing.T) {
-	g := newWeightedAdmission(6)
-	vm := &KubeVirtResources{Demand: argoworkflow.VMIDemand{VMs: 1, Cores: 2, MemoryBytes: 4 << 30}, Limit: argoworkflow.VMIDemand{VMs: 1, Cores: 2, MemoryBytes: 4 << 30}}
-	releaseVM := acquireRequestWithinBudget(t, g.reserve(1), admissionRequest{RunID: "step-abc12345", RepoID: 1, Size: pipeline.XL, KubeVirt: vm, Pods: &argoworkflow.PodDemand{CPUMilli: 2600, MemoryBytes: (5 << 30) + (256 << 20), Pods: 1}})
-	defer releaseVM()
-	releaseSmall := acquireRequestWithinBudget(t, g.reserve(2), admissionRequest{RunID: "step-11111111", RepoID: 1, Size: pipeline.M, Pods: &argoworkflow.PodDemand{CPUMilli: 500, MemoryBytes: 1 << 30, Pods: 1}})
-	defer releaseSmall()
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.runs != 2 {
-		t.Fatal("VM run remained exclusive")
-	}
-	if g.kubeVirtFitsLocked(&admissionReservation{repoID: 1, kubeVirt: *vm}) {
-		t.Fatal("host admission bypassed independent cell limit")
 	}
 }

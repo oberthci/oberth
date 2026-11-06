@@ -145,7 +145,7 @@ type secretStoreVerifyConfig struct {
 	role         string
 	caCertPath   string
 	saTokenPath  string
-	kvMount      string
+	kvPath       string
 	insecureHTTP bool
 	paths        []string
 }
@@ -203,7 +203,7 @@ func runSecretStoreVerifyWithSources(ctx context.Context, arguments []string, ou
 	flags.StringVar(&explicit.role, "role", "", "OpenBao Kubernetes auth role")
 	flags.StringVar(&explicit.caCertPath, "ca-cert", "", "optional PEM file pinning the OpenBao TLS trust anchors")
 	flags.StringVar(&explicit.saTokenPath, "sa-token", "", "optional ServiceAccount token path override")
-	flags.StringVar(&explicit.kvMount, "kv-mount", "", "KV v2 mount backing the virtual oberth/upstream/ namespace (default: discovered from serve, else oberth)")
+	flags.StringVar(&explicit.kvPath, "kv-mount", "", "KV v2 mount backing the virtual oberth/upstream/ namespace (default: discovered from serve, else oberth)")
 	flags.BoolVar(&explicit.insecureHTTP, "insecure-http", false, "DEVELOPMENT ONLY: allow a plain-HTTP OpenBao address")
 	releaseTier := flags.Bool("release-tier", false, "verify the release-tier OpenBao trust chain (Argo pipeline namespace, release ServiceAccount, --argo-vault-* flags)")
 	repoFlag := flags.String("repo", "", "verify a per-repo identity (upstream/org/repo); with --release-tier, overrides the shared SA")
@@ -242,7 +242,7 @@ func runSecretStoreVerifyWithSources(ctx context.Context, arguments []string, ou
 	}
 	options := explicit
 	if options.address == "" {
-		if options.role != "" || options.authMount != "" || options.caCertPath != "" || options.saTokenPath != "" || options.kvMount != "" || options.insecureHTTP {
+		if options.role != "" || options.authMount != "" || options.caCertPath != "" || options.saTokenPath != "" || options.kvPath != "" || options.insecureHTTP {
 			return fmt.Errorf("%w: explicit secretstore verify flags require --address", errUsage)
 		}
 		discovered, err := sources.server()
@@ -268,14 +268,14 @@ func runSecretStoreVerifyWithSources(ctx context.Context, arguments []string, ou
 	if len(paths) == 0 {
 		return errors.New("nothing to verify: the server allowlists no --secretstore-path values; pass one or more KV API paths (e.g. oberth/data/r2-upload) or scoped paths (e.g. oberth/upstream/<org>/<repo>/<secret>) as arguments")
 	}
-	kvMount := options.kvMount
-	if kvMount == "" {
-		kvMount = secretstore.DefaultKVMount
+	kvPath := options.kvPath
+	if kvPath == "" {
+		kvPath = secretstore.DefaultKVPath
 	}
 	// Virtual oberth/upstream/ arguments are canonicalized to the KV v2 API
 	// path exactly as release admission does, so the administrator can prove
 	// a scoped secret with the very string a repository declares.
-	paths, declaredByFetch, err := secretStoreVerifyPaths(paths, kvMount)
+	paths, declaredByFetch, err := secretStoreVerifyPaths(paths, kvPath)
 	if err != nil {
 		return err
 	}
@@ -362,7 +362,7 @@ func runReleaseTierVerifyWithSources(
 	ctx = deadlineCtx
 	// --release-tier is mutually exclusive with explicit server-tier flags.
 	if explicit.address != "" || explicit.role != "" || explicit.authMount != "" ||
-		explicit.caCertPath != "" || explicit.saTokenPath != "" || explicit.kvMount != "" || explicit.insecureHTTP {
+		explicit.caCertPath != "" || explicit.saTokenPath != "" || explicit.kvPath != "" || explicit.insecureHTTP {
 		return fmt.Errorf("%w: --release-tier is mutually exclusive with explicit server-tier flags (--address, --role, --ca-cert, etc.)", errUsage)
 	}
 
@@ -405,11 +405,11 @@ func runReleaseTierVerifyWithSources(
 	if len(paths) == 0 {
 		return errors.New("nothing to verify: the server allowlists no --secretstore-path values; pass one or more KV API paths as positional arguments")
 	}
-	kvMount := serverConfig.kvMount
-	if kvMount == "" {
-		kvMount = secretstore.DefaultKVMount
+	kvPath := serverConfig.kvPath
+	if kvPath == "" {
+		kvPath = secretstore.DefaultKVPath
 	}
-	paths, declaredByFetch, err := secretStoreVerifyPaths(paths, kvMount)
+	paths, declaredByFetch, err := secretStoreVerifyPaths(paths, kvPath)
 	if err != nil {
 		return err
 	}
@@ -510,9 +510,9 @@ func runPerRepoTierVerify(
 	if err != nil {
 		return fmt.Errorf("discover server secret store configuration: %w", err)
 	}
-	kvMount := serverConfig.kvMount
-	if kvMount == "" {
-		kvMount = secretstore.DefaultKVMount
+	kvPath := serverConfig.kvPath
+	if kvPath == "" {
+		kvPath = secretstore.DefaultKVPath
 	}
 
 	// For per-repo verification, the paths come from positional args or,
@@ -522,7 +522,7 @@ func runPerRepoTierVerify(
 	if len(paths) == 0 {
 		paths = serverConfig.paths
 	}
-	paths, declaredByFetch, err := secretStoreVerifyPaths(paths, kvMount)
+	paths, declaredByFetch, err := secretStoreVerifyPaths(paths, kvPath)
 	if err != nil {
 		return err
 	}
@@ -584,7 +584,7 @@ func runPerRepoTierVerify(
 	return err
 }
 
-func secretStoreVerifyPaths(input []string, kvMount string) ([]string, map[string]string, error) {
+func secretStoreVerifyPaths(input []string, kvPath string) ([]string, map[string]string, error) {
 	if len(input) > 32 {
 		return nil, nil, fmt.Errorf("%w: verification allows at most 32 paths", errUsage)
 	}
@@ -597,7 +597,7 @@ func secretStoreVerifyPaths(input []string, kvMount string) ([]string, map[strin
 			return nil, nil, fmt.Errorf("%w: %w", errUsage, err)
 		}
 		if upstreamScoped {
-			canonical := scoped.FetchPath(kvMount)
+			canonical := scoped.FetchPath(kvPath)
 			declaredByFetch[canonical] = path
 			path = canonical
 		}
@@ -852,7 +852,7 @@ func secretStoreConfigFromServeCmdline(path string) (secretStoreVerifyConfig, er
 			if err := consumeValue(); err != nil {
 				return secretStoreVerifyConfig{}, err
 			}
-			config.kvMount = value
+			config.kvPath = value
 		case "secretstore-path":
 			if err := consumeValue(); err != nil {
 				return secretStoreVerifyConfig{}, err

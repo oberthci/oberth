@@ -685,7 +685,6 @@ func TestMCPToolInputsMatchContract(t *testing.T) {
 		"run_retry":           {"id", "priority", "priority_reason", "run_id"},
 		"run_cancel":          {"force", "id", "reason", "run_id"},
 		"run_purge":           {"id", "reason", "run_id", "what"},
-		"run_kvm_preflight":   {"id", "run_id"},
 		"run_logs":            {"burn", "byte_offset", "context", "id", "limit", "offset", "pattern", "run_id", "step", "tail"},
 		"wait":                {"id", "repo", "run_id", "sha", "timeout", "trigger"},
 		"sync":                {"branch", "priority", "priority_reason", "repo", "sha"},
@@ -832,7 +831,7 @@ func TestMCPToolCountMatchesDocumented(t *testing.T) {
 	t.Parallel()
 	// The documented count in docs/mcp-setup.md must match the registered
 	// tool count. A mismatch means the table drifted from the code.
-	const documented = 80
+	const documented = 75
 	definitions := toolDefinitions()
 	if len(definitions) != documented {
 		t.Fatalf("registered %d tools, documented %d in docs/mcp-setup.md — update the table", len(definitions), documented)
@@ -890,13 +889,12 @@ func TestMCPToolCountMatchesDocumented(t *testing.T) {
 
 func TestMCPToolSurfaceMatchesContract(t *testing.T) {
 	want := []string{
-		"status", "logs", "run_kvm_preflight", "run_get", "run_resources", "run_retry", "publication_abandon", "run_cancel", "run_rerun", "run_purge", "artifacts", "artifact_get", "run_logs", "wait", "sync", "promote", "promotion_list", "promote_status", "promote_retry",
+		"status", "logs", "run_get", "run_resources", "run_retry", "publication_abandon", "run_cancel", "run_rerun", "run_purge", "artifacts", "artifact_get", "run_logs", "wait", "sync", "promote", "promotion_list", "promote_status", "promote_retry",
 		"issue_create", "issue_get", "issue_get_many", "issue_update", "issue_append", "issue_close", "issue_reopen",
 		"issue_delete", "issue_list", "issue_unlock", "issue_close_many", "issue_lock",
-		"uplink_list", "uplink_revoke", "uplink_rotate", "access_dismiss", "kubevirt_grant_list",
+		"uplink_list", "uplink_revoke", "uplink_rotate", "access_dismiss",
 		"access_list", "access_allow", "access_revoke",
 		"workflow_capability_grant", "workflow_capability_revoke", "workflow_capability_get",
-		"kubevirt_grant", "kubevirt_revoke", "kubevirt_grant_get",
 		"resource_grant", "resource_revoke", "resource_grant_get", "size_grant", "size_revoke", "size_grant_get", "queue_cap_config", "queue_priority_config", "queue_priority_get", "priority_grant", "priority_grant_list", "priority_grant_revoke", "run_priority", "concurrency_groups", "admission_hold", "admission_release",
 		"repo_usage", "repo_list", "repo_archive", "repo_unarchive", "repo_remove", "run_list", "audit_list", "schedule_list", "schedule_pause", "schedule_resume", "schedule_trigger", "system_status", "publish_retry", "secretstore_plan", "secretstore_sync_receipt", "secretstore_verify",
 		"promote_grant", "promote_grant_revoke", "promote_grant_list",

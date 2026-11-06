@@ -71,7 +71,7 @@ func TestValidateRefusesUncheckedFragmentsEvenWhenAllowed(t *testing.T) {
 
 // A fragment reference used to skip all admission, even for consumer-owned
 // leaves. The same KVM cache mount must never pass just by adding a fragment.
-func TestValidateFragmentCannotBypassKVMCacheMountAdmission(t *testing.T) {
+func TestValidateRefusesRetiredExecution(t *testing.T) {
 	const document = `apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
@@ -112,11 +112,11 @@ spec:
 		t.Run(name, func(t *testing.T) {
 			root := writeConsumer(t, body)
 			var output bytes.Buffer
-			err := runValidate(context.Background(), []string{"--kubevirt", "--allow-unresolved-fragments", root}, &output)
+			err := runValidate(context.Background(), []string{"--allow-unresolved-fragments", root}, &output)
 			if err == nil {
-				t.Fatalf("validate passed a KVM cache mount:\n%s", output.String())
+				t.Fatalf("validate passed retired execution:\n%s", output.String())
 			}
-			want := `KVM template "kernel-test" cannot use oberth.ci/workspace-mounts: cache`
+			want := "workflow capability grant"
 			if withFragment {
 				// Without pinned contents available offline the entire document
 				// must fail, rather than claiming the KVM check ran.

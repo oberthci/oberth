@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/internal/vmrunner"
+	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
@@ -25,23 +25,6 @@ func workflowRunAdoptable(run model.Run) bool {
 	// Keep the persisted trigger and credential classification. The engine's
 	// exact Workflow binding checks apply to ordinary tags as well as releases.
 	return run.RefKind == model.RefBranch || run.RefKind == model.RefTag
-}
-
-func (scheduler *Scheduler) withoutPendingPreflight(ctx context.Context, run model.Run) (bool, error) {
-	journal, ok := scheduler.store.(vmrunner.KVMJournal)
-	if !ok {
-		return true, nil
-	}
-	pending, err := retryDatabase(ctx, "PendingKVMPreflights", journal.PendingKVMPreflights)
-	if err != nil {
-		return false, fmt.Errorf("load pending preflights before adoption: %w", err)
-	}
-	for _, execution := range pending {
-		if execution.Intent.RunID == run.ID {
-			return false, nil
-		}
-	}
-	return true, nil
 }
 
 // adoptionFailure names the exact Workflow startup could not adopt, so the
@@ -73,7 +56,7 @@ func adoptionFailure(adopter JobAdopter, run model.Run, err error) error {
 
 // adopt restores grants for work already running, even if the new owner's
 // configured capacity is smaller. New admissions wait until it has drained.
-func (gate *weightedAdmission) adopt(run model.Run, size pipeline.Size, demand argoworkflow.VMIDemand, pods ...*argoworkflow.PodDemand) (*admissionReservation, error) {
+func (gate *weightedAdmission) adopt(run model.Run, size pipeline.Size, pods ...*argoworkflow.PodDemand) (*admissionReservation, error) {
 	var peak *argoworkflow.PodDemand
 	if len(pods) > 0 && pods[0] != nil {
 		if !pods[0].Valid() {
@@ -86,10 +69,6 @@ func (gate *weightedAdmission) adopt(run model.Run, size pipeline.Size, demand a
 	if (!gate.workflowOnly && !size.Valid()) || (run.ConcurrencyGroup != "" && !argoworkflow.ValidConcurrencyGroup(run.ConcurrencyGroup)) {
 		return nil, fmt.Errorf("%w: invalid adopted resource contract", ErrAdoptionRefused)
 	}
-	resources := KubeVirtResources{Demand: demand, Limit: argoworkflow.VMIBudgetLimit().DemandLimit()}
-	if err := resources.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrAdoptionRefused, err)
-	}
 	order := run.AdmissionSequence
 	if order <= 0 {
 		order = run.QueueSequence
@@ -97,7 +76,7 @@ func (gate *weightedAdmission) adopt(run model.Run, size pipeline.Size, demand a
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
 	if previous, ok := gate.reservations[run.QueueSequence]; ok {
-		if previous.runID != run.ID || previous.order != order || !previous.granted || previous.size != size.Effective() || previous.groupName != run.ConcurrencyGroup || max(1, previous.groupLimit) != max(1, run.ConcurrencyLimit) || previous.repoID != run.RepoID || previous.kubeVirt.Demand != demand || !samePodDemand(previous.pods, peak) {
+		if previous.runID != run.ID || previous.order != order || !previous.granted || previous.size != size.Effective() || previous.groupName != run.ConcurrencyGroup || max(1, previous.groupLimit) != max(1, run.ConcurrencyLimit) || previous.repoID != run.RepoID || !samePodDemand(previous.pods, peak) {
 			return nil, fmt.Errorf("%w: conflicting adopted admission", ErrAdoptionRefused)
 		}
 		return previous, nil
@@ -125,7 +104,7 @@ func (gate *weightedAdmission) adopt(run model.Run, size pipeline.Size, demand a
 		gate: gate, sequence: run.QueueSequence, order: order, runID: run.ID, repoID: run.RepoID,
 		ref: run.Ref, refKind: run.RefKind, sha: run.SHA,
 		size: size.Effective(), weight: gate.weights.of(size.Effective(), gate.capacity),
-		group: group, groupName: run.ConcurrencyGroup, groupLimit: max(1, run.ConcurrencyLimit), prepared: true, granted: true, submitted: true, kubeVirt: resources,
+		group: group, groupName: run.ConcurrencyGroup, groupLimit: max(1, run.ConcurrencyLimit), prepared: true, granted: true, submitted: true,
 		claimedAt: now, preparedAt: now, grantedAt: now, ready: make(chan struct{}),
 	}
 	if gate.workflowOnly || peak != nil {
@@ -206,4 +185,24 @@ func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run,
 		}
 	}
 	return errors.Join(err, cleanupErr)
+}
+
+// Retired execution is terminal, rather than a reason to stop the new owner.
+// Delete only the owned Argo Workflow; operators own any external resources.
+func (scheduler *Scheduler) failRetiredRun(ctx context.Context, run model.Run, require mutationRequirement) error {
+	if err := require(ctx); err != nil {
+		return err
+	}
+	if err := scheduler.jobs.Delete(ctx, run.WorkflowName, run.ID); err != nil {
+		return fmt.Errorf("stop retired Workflow %s: %w", run.WorkflowName, err)
+	}
+	if err := scheduler.finalizeReconciledRun(ctx, run, JobResult{Status: model.RunFailed, Phase: "infrastructure", Error: argoworkflow.ErrWorkflowCapabilityRequired.Error()}, require); err != nil {
+		return err
+	}
+	if err := scheduler.database().CompleteRunCancellation(ctx, run.ID, run.WorkflowName); err != nil && !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	cleanupCtx, cancel := boundedWorkspaceCleanupContext(ctx)
+	defer cancel()
+	return scheduler.workspaces.cleanupRunDeferred(cleanupCtx, run.ID)
 }

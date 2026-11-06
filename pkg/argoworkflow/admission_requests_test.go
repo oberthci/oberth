@@ -60,7 +60,7 @@ func TestRunDemandUsesConcurrentMemoryRequests(t *testing.T) {
 		{Name: "root", DAG: &wfv1.DAGTemplate{Tasks: []wfv1.DAGTask{{Name: "a", Template: "a"}, {Name: "b", Template: "b"}, {Name: "c", Template: "c", Dependencies: []string{"a", "b"}}}}}, a, b, c,
 	}}}
 	before := wf.DeepCopy()
-	d, err := DeclaredHostPeak(wf, RunTriggerBranch)
+	d, err := DeclaredPodPeak(wf)
 	if err != nil || d == nil || d.MemoryBytes != 5<<30 || d.Pods != 2 {
 		t.Fatalf("run demand = %+v, %v; want concurrent 5Gi requests", d, err)
 	}
@@ -68,7 +68,7 @@ func TestRunDemandUsesConcurrentMemoryRequests(t *testing.T) {
 		t.Fatal("workflow declarations changed")
 	}
 	delete(wf.Spec.Templates[1].Container.Resources.Requests, corev1.ResourceMemory)
-	if d, err := DeclaredHostPeak(wf, RunTriggerBranch); err != nil || d != nil {
+	if d, err := DeclaredPodPeak(wf); err != nil || d != nil {
 		t.Fatalf("undeclared step gained numeric credit: %+v, %v", d, err)
 	}
 }

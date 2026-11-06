@@ -31,7 +31,6 @@ var oberthReleaseCredentialedLeaves = []string{
 	"release-publish-chart",
 	"release-publish-homebrew",
 	"release-publish-images",
-	"release-publish-kvm-harness",
 	"release-sign-binaries",
 	"release-verify",
 }

@@ -15,7 +15,6 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
@@ -167,7 +166,7 @@ func TestSchedulerPodJournalFailureDegradesWithoutStrandingRun(t *testing.T) {
 					}
 
 				}
-				reservation, err := scheduler.admission.adopt(run, pipeline.M, argoworkflow.VMIDemand{})
+				reservation, err := scheduler.admission.adopt(run, pipeline.M)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -236,7 +235,7 @@ func TestSchedulerActiveOwnerRetainsPodJournalForRestart(t *testing.T) {
 	}
 	jobs := &journalRecoveryJobs{t: t, block: true, entered: make(chan struct{})}
 	scheduler := fixture.scheduler(t, jobs)
-	reservation, err := scheduler.admission.adopt(run, pipeline.M, argoworkflow.VMIDemand{})
+	reservation, err := scheduler.admission.adopt(run, pipeline.M)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +304,7 @@ func TestSchedulerPendingCancellationKeepsPodJournal(t *testing.T) {
 	}
 	_ = j.Close()
 	_ = f.Close()
-	reservation, err := scheduler.admission.adopt(run, pipeline.M, argoworkflow.VMIDemand{})
+	reservation, err := scheduler.admission.adopt(run, pipeline.M)
 	if err != nil {
 		t.Fatal(err)
 	}

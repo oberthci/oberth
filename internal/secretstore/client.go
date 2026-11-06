@@ -33,9 +33,9 @@ const (
 	DefaultServiceAccountTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token" // #nosec G101 -- well-known mount path, not a credential.
 	// DefaultAuthMountPath is OpenBao's conventional Kubernetes auth mount.
 	DefaultAuthMountPath = "kubernetes"
-	// DefaultKVMount is the conventional KV v2 mount backing both the
+	// DefaultKVPath is the conventional KV v2 mount backing both the
 	// administrator allowlist and the virtual oberth/upstream/ namespace.
-	DefaultKVMount = "oberth"
+	DefaultKVPath = "oberth"
 	// DefaultTransitMountPath is the dedicated engine used only for trusted
 	// promotion artifact envelopes.
 	DefaultTransitMountPath = "oberth-transit"
@@ -43,15 +43,15 @@ const (
 	// engine. Repositories can never select either the mount or key.
 	DefaultTransitKey = "trusted-plan-artifacts"
 
-	defaultTimeout       = 30 * time.Second
-	maxTokenBytes        = 1 << 20
-	maxFetchPaths        = 32
-	loginPathVerbatim    = "auth/%s/login"
-	kvDataField          = "data"
-	kvMetadataField      = "metadata"
-	maxSecretValueBytes  = 1 << 20
-	maxSecretTotalBytes  = 8 << 20
-	maxSecretKeysPerPath = 256
+	defaultTimeout          = 30 * time.Second
+	maxTokenBytes           = 1 << 20
+	maxFetchPaths           = 32
+	loginPathVerbatim       = "auth/%s/login"
+	kvDataField             = "data"
+	kvResponseMetadataField = "metadata"
+	maxSecretValueBytes     = 1 << 20
+	maxSecretTotalBytes     = 8 << 20
+	maxSecretKeysPerPath    = 256
 
 	// A plan itself is capped at 16 MiB by the artifact store. Transit seals a
 	// bounded manifest together with that plan under a 17 MiB envelope ceiling.
@@ -511,7 +511,7 @@ func (client *Client) readKV(ctx context.Context, session *vaultapi.Client, path
 	// A soft-deleted entry returns data.data as null (nil interface) or an
 	// empty map; detect both shapes before falling through to the string
 	// iteration that would produce a confusing "must be a string value" error.
-	if _, hasMetadata := data[kvMetadataField].(map[string]any); hasMetadata {
+	if _, hasMetadata := data[kvResponseMetadataField].(map[string]any); hasMetadata {
 		rawData, hasDataKey := data[kvDataField]
 		if hasDataKey {
 			inner, isMap := rawData.(map[string]any)
