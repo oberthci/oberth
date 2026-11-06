@@ -256,3 +256,17 @@ func TestAllPendingPodMessagesUseUniformPrefix(t *testing.T) {
 		})
 	}
 }
+
+func TestPendingCPUMessageUsesPodRequests(t *testing.T) {
+	pod := corev1.Pod{
+		Spec: corev1.PodSpec{Containers: []corev1.Container{
+			{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("3500m")}, Limits: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("16")}}},
+			{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("500m")}}},
+		}},
+		Status: corev1.PodStatus{Phase: corev1.PodPending, Conditions: []corev1.PodCondition{{Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: "Unschedulable", Message: "0/3 nodes are available: 3 Insufficient cpu."}}},
+	}
+	got := podSchedulingReason(pod)
+	if got.Message != "pod pending: insufficient cpu (4 CPU requested)" {
+		t.Fatal(got.Message)
+	}
+}

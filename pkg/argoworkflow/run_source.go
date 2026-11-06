@@ -52,6 +52,15 @@ type DemandReceipt struct {
 	fragments  map[FragmentKey]Fragment
 }
 
+// WorkflowPodDemand reports only pod requests from the bound graph, without
+// admission charges or headroom.
+func (r *DemandReceipt) WorkflowPodDemand() (*PodDemand, error) {
+	if r == nil || r.pods == nil {
+		return nil, nil
+	}
+	return DeclaredCapabilityPeak(r.pods.DeepCopy())
+}
+
 // DeclaredPodDemand analyzes the same immutable source and fragment resolution
 // whose receipt final submission verifies. No second tag lookup is involved.
 func (r *DemandReceipt) DeclaredPodDemand() (*PodDemand, error) {

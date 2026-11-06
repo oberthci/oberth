@@ -42,6 +42,8 @@ func (service *API) activeRuns(ctx context.Context, filter api.RunFilter) (any, 
 	if err != nil {
 		return nil, err
 	}
+	ctx, cancelDemand := withQueueDemandBudget(ctx)
+	defer cancelDemand()
 	observer := *service
 	started := make([]ActiveRun, 0, len(runs))
 	admitted := make([]ActiveRun, 0)

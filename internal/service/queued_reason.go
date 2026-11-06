@@ -6,96 +6,114 @@ import (
 	"strings"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
-// queuedDisplayReason is the display_reason of a run that has not started:
-// what it waits for, in plain words, next to the one grey queued status.
-// The raw scheduling state (queued, preparing, waiting, admitted, preflight)
-// stays machine-readable in Scheduling.state; this line is what people read.
-// The observation passed in is already redacted for the viewer's scope, so a
-// scoped viewer gets "waiting for capacity" where an admin sees the numbers.
+// queuedDisplayReason combines this run's pod requests with exactly one blocker.
+// Unknown figures are omitted; global counts and other repos are already scoped.
 func queuedDisplayReason(scheduling *model.RunScheduling, blocker *model.AdmissionBlocker) string {
 	if scheduling == nil {
 		return "in line"
 	}
-	var reason string
+	reason := queuePositionReason(scheduling.QueuePosition)
 	switch scheduling.State {
 	case "infra-pending":
 		return "workflow create uncertain, cleanup pending"
-	case "queued":
-		reason = "in line"
-		if scheduling.QueuePosition == 1 {
-			reason = "next in line"
-		}
-		if scheduling.QueuePosition > 1 {
-			reason = fmt.Sprintf("position %d in line", scheduling.QueuePosition)
-		}
 	case "preparing":
 		return "starting"
 	case "preflight":
 		return "retired execution preflight"
 	case "waiting":
-		if scheduling.Admission == nil {
-			return "waiting for capacity"
+		if scheduling.Admission != nil {
+			if scheduling.Admission.State == "admitted" {
+				return "starting"
+			}
+			reason = waitingReason(scheduling.Admission)
 		}
-		if scheduling.Admission.State == "admitted" {
-			return "starting"
-		}
-		return waitingReason(scheduling.Admission)
 	default:
-		return "in line"
+		if qualifier := queueBlockerReason(nil, blocker); qualifier != "" {
+			reason = qualifier
+		}
 	}
-	return displayFailureText(withWaitQualifier(reason, nil, blocker))
+	requests := scheduling.Requests
+	if requests == nil && scheduling.Admission != nil {
+		requests = scheduling.Admission.Requests
+	}
+	return withQueueRequests(requests, reason)
 }
 
-func waitingReason(a *model.AdmissionObservation) string {
-	reason := "waiting for capacity"
-	switch {
-	case a.DiskFloor != nil && a.DiskFloor.BelowFloor:
-		reason = fmt.Sprintf("waiting for disk space (%s free)", bytesText(a.DiskFloor.FreeBytes))
-	case a.GroupLimit > 0 && a.GroupBlocked, a.GroupHolder != "", a.GroupAhead != "":
-		reason = "group " + a.Group + " busy"
-	case a.MaxRuns > 0 && a.Runs >= a.MaxRuns:
-		reason = fmt.Sprintf("%d runs already running (limit %d)", a.Runs, a.MaxRuns)
-	case a.BlockedBy != nil && a.BlockedBy.RunCeiling:
-		reason = "waiting for a run slot"
-	case a.DeclaredResources != nil:
-		reason = budgetReason(a.NumericBudget, a.DeclaredResources)
-	case a.Size != "":
-		reason = fmt.Sprintf("waiting for a slot (size %s)", a.Size)
+func queuePositionReason(position int64) string {
+	if position == 1 {
+		return "next in line"
 	}
+	if position > 1 {
+		return fmt.Sprintf("position %d", position)
+	}
+	return "in line"
+}
+
+func withQueueRequests(requests *argoworkflow.PodRequests, reason string) string {
+	reason = displayFailureText(reason)
+	if requests == nil {
+		return reason
+	}
+	return fmt.Sprintf("needs %s CPU, %s · %s", cpuText(requests.CPUMilli), bytesText(requests.MemoryBytes), reason)
+}
+
+func waitingReason(a *model.AdmissionObservation) (reason string) {
+	defer func() { reason = displayFailureText(reason) }()
 	blocker := a.BlockedBy
-	if a.HeadOfQueue {
-		blocker = nil
-	}
 	pressure := a.Pressure
-	if pressure == nil && a.BlockedBy != nil {
-		pressure = a.BlockedBy.Pressure
-	}
-	return displayFailureText(withWaitQualifier(reason, pressure, blocker))
-}
-
-func withWaitQualifier(reason string, pressure *model.PressureDeferral, blocker *model.AdmissionBlocker) string {
 	if pressure == nil && blocker != nil {
 		pressure = blocker.Pressure
 	}
-	if pressure != nil {
-		if pressure.Resource == "io" || pressure.Resource == "cpu+io" {
-			return reason + " · host IO pressure"
-		}
-		if pressure.Resource == "cpu" {
-			return reason + " · host CPU pressure"
+	if reason := queuePressureReason(pressure); reason != "" {
+		return reason
+	}
+	if a.MaxRuns > 0 && a.Runs >= a.MaxRuns {
+		return fmt.Sprintf("%d of %d runs running", a.Runs, a.MaxRuns)
+	}
+	if !a.HeadOfQueue {
+		if reason := queueBlockerReason(nil, blocker); reason != "" {
+			return reason
 		}
 	}
-	// A redacted blocker has no identity; never invent a hidden repo/ref.
-	if blocker != nil && blocker.Repo != "" && blocker.Ref != "" {
-		return reason + " · behind " + blocker.Repo + "/" + blocker.Ref
+	switch {
+	case a.DiskFloor != nil && a.DiskFloor.BelowFloor:
+		return fmt.Sprintf("waiting for disk space (%s free)", bytesText(a.DiskFloor.FreeBytes))
+	case a.GroupBlocked || a.GroupHolder != "" || a.GroupAhead != "":
+		return "group " + a.Group + " busy"
 	}
-	return reason
+	if a.HeadOfQueue {
+		return "next in line"
+	}
+	return queuePositionReason(int64(a.Position))
 }
 
-func budgetReason(_ *model.NumericBudget, resources *model.DeclaredResources) string {
-	return fmt.Sprintf("waiting for %s CPU, %s", cpuText(resources.CPUMilli), bytesText(resources.MemoryBytes))
+func queuePressureReason(pressure *model.PressureDeferral) string {
+	if pressure == nil {
+		return ""
+	}
+	switch pressure.Resource {
+	case "io", "cpu+io":
+		return "host IO busy"
+	case "cpu":
+		return "host CPU busy"
+	}
+	return ""
+}
+
+func queueBlockerReason(pressure *model.PressureDeferral, blocker *model.AdmissionBlocker) string {
+	if pressure == nil && blocker != nil {
+		pressure = blocker.Pressure
+	}
+	if reason := queuePressureReason(pressure); reason != "" {
+		return reason
+	}
+	if blocker != nil && blocker.Repo != "" && blocker.Ref != "" {
+		return displayFailureText("behind " + blocker.Repo + "/" + blocker.Ref)
+	}
+	return ""
 }
 
 // cpuText renders millicores as cores: 12500 -> "12.5", 40000 -> "40".
@@ -130,5 +148,5 @@ func applyQueuedDisplay(run *model.Run, scheduling *model.RunScheduling, reason 
 	if reason == "" {
 		reason = queuedDisplayReason(scheduling, nil)
 	}
-	run.DisplayReason = parkPolicyDisplayReason(*run, displayFailureText(joinRunMessage(priorityPrefix(*run), reason)))
+	run.DisplayReason = reason
 }

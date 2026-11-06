@@ -111,12 +111,12 @@ func TestAdmissionLimitsUnclaimedQueueReportsFullRunCeilingWithoutLeakingScope(t
 	api := &API{admission: &Scheduler{admission: g}}
 	run := model.Run{ID: "queued", RepoID: 1, Status: model.RunQueued}
 	observed, reason := api.observeScheduling(t.Context(), run, nil, true)
-	if observed.Message != "10 runs running" || reason != observed.Message {
+	if observed.Message != "10 of 10 runs running" || reason != observed.Message {
 		t.Fatalf("unclaimed row hides real blocker: message=%q reason=%q", observed.Message, reason)
 	}
 	api.scope = &repoScope{repos: map[int64]model.Repository{1: {ID: 1}}}
 	observed, reason = api.observeScheduling(t.Context(), run, nil, true)
-	if strings.Contains(observed.Message, "10 runs") || strings.Contains(reason, "10 runs") {
+	if strings.Contains(observed.Message, "10") || strings.Contains(reason, "10") {
 		t.Fatal("scoped queue exposes shared run count", observed.Message, reason)
 	}
 }
@@ -125,7 +125,7 @@ func TestAdmissionLimitsPendingCleanupShowsDeadlineReason(t *testing.T) {
 	for _, reason := range []string{store.ExecutorIdentityPendingMessage, store.AdmissionStalledPendingMessage} {
 		run := model.Run{ID: "pending", Status: model.RunRunning, Phase: "infrastructure-pending", Error: reason}
 		got, _ := new(API).observeScheduling(t.Context(), run, nil, true)
-		if got.State != "infra-pending" || got.Message != reason {
+		if got.State != "infra-pending" || got.Message != "workflow startup timed out; cleanup pending" || run.Error != reason {
 			t.Fatalf("pending cleanup hides deadline reason: %+v", got)
 		}
 	}

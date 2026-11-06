@@ -111,6 +111,7 @@ type APIConfig struct {
 }
 
 type API struct {
+	queueDemands              *queueDemandCache
 	issueStaleAfter           time.Duration
 	issueActiveStaleAfter     time.Duration
 	issueObservedAt           time.Time
@@ -248,6 +249,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		uplinkLifecycle:  config.UplinkLifecycle, declarationDismissal: config.DeclarationDismissal,
 		issueLifecycle:     config.IssueLifecycle,
 		schedulingObserver: config.SchedulingObserver, admission: config.Admission,
+		queueDemands:      &queueDemandCache{},
 		resourceCoverages: config.ResourceCoverages, runResources: config.RunResources, resourceDeclarations: config.ResourceDeclarations,
 		resources: config.Resources, runs: config.Runs, history: config.History, runRetries: config.RunRetries, repositories: config.Repositories,
 		issues: config.Issues, promotions: config.Promotions, promotionRuns: config.PromotionRuns,
@@ -1096,6 +1098,8 @@ func (service *API) Runs(ctx context.Context, actor api.Actor, filter api.RunFil
 	if err != nil {
 		return nil, err
 	}
+	ctx, cancelDemand := withQueueDemandBudget(ctx)
+	defer cancelDemand()
 	for i := range runs {
 		if service.scope != nil {
 			runs[i].QueuePosition = 0
@@ -1717,15 +1721,17 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 	if run.Status == model.RunRunning && run.Phase == "publishing" {
 		visible.DisplayReason = "publishing to upstream"
 	}
-	if run.Status.Active() {
+	if run.Status.Active() && visible.DisplayStatus != model.DisplayQueued {
 		visible.DisplayReason = joinRunMessage(priorityPrefix(visible), visible.DisplayReason)
 	}
-	// Eviction wording is a fixed, bounded projection. Keep its remediation and
-	// retry link intact instead of clipping either halfway through a word.
-	if evictionDisplayReason(run) == "" {
-		visible.DisplayReason = displayFailureText(visible.DisplayReason)
+	if visible.DisplayStatus != model.DisplayQueued {
+		// Eviction wording is a fixed, bounded projection. Keep its remediation and
+		// retry link intact instead of clipping either halfway through a word.
+		if evictionDisplayReason(run) == "" {
+			visible.DisplayReason = displayFailureText(visible.DisplayReason)
+		}
+		visible.DisplayReason = parkPolicyDisplayReason(run, visible.DisplayReason)
 	}
-	visible.DisplayReason = parkPolicyDisplayReason(run, visible.DisplayReason)
 	return visible
 }
 

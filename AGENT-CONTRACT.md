@@ -1338,23 +1338,32 @@ containing CI and real workload qualification remain separately required.
   run; anything finer is the reason line, never a second status. Every run
   that has not started is `queued`: durable queued, or claimed before
   admission (`Status` `waiting` on the wire, phase `waiting` or
-  `preparing`). Admission records `started_at`, so an admitted run
+  `preparing`). Admission records `started_at`, so an admitted run,
   is `running`.
-  A queued run's `display_reason` names what it waits for, in plain
-  words, computed once by the server for the list, detail, status, live-log
-  and active views, the CLI and the dashboard: `next in line`,
-  `position 3 in line, behind org/app/main (needs the whole host)`,
-  `preparing to run`, `waiting for CPU budget (12.5 of 40 CPU free)`,
-  `waiting for memory budget (8 GiB of 16 GiB free)`, `host IO pressure
-  (42%)`, `10 runs already running (limit 10)`, `concurrency group deploy
-  busy (held by run <run12>)`, `waiting for disk space
-  (... free, floor ...)`, `waiting for capacity (size M, 6 of 8 weight
-  used)`, `waiting for admission` (claimed, no reservation known yet) and,
-  briefly at the grant before admission is recorded, `admitted, starting
-  the workflow`; a head-of-queue run adds `; smaller runs run meanwhile` or `; host
-  draining for it`. A scoped viewer sees no numbers, positions or other
-  repositories' runs (#073). `Scheduling.state`, `Scheduling.message` and
-  `Scheduling.admission` keep the raw observation for machines.
+  The dashboard reverses only the queued block: last-to-start at the top,
+  next-in-line directly above running rows, also in the queued filter. API/MCP
+  retain claim order. Queued badges name low priority, high priority or priority
+  promotion; standard has no priority label.
+  A queued run's `display_reason` shows its peak concurrent pod requests and
+  one blocker, computed by the server for list, detail, status, live-log and
+  active views: `needs 9.9 CPU, 16 GiB · host CPU busy`, `host IO busy`,
+  `6 of 6 runs running`, `behind org/app/main`, `next in line` or `position 3`.
+  Workflow graph accounting includes dependencies, parallelism and resource
+  helper pods. Requests are independent of limits and retired weighted charges.
+  Waiting runs use the bound receipt; unclaimed runs read the selected commit
+  and fragments without a checkout, with one shared 2-second demand budget per list. A bounded LRU
+  keeps successful run/SHA results without expiry; failures and timeouts
+  are cached for 30 seconds. Unknown figures are omitted, never reported as zero.
+  Scoped viewers may see their own demand and public host-pressure reason;
+  global counts, queue positions and hidden repository identities stay hidden.
+  Unknown scoped positions read `in line`, not `next in line`. Other blockers
+  retain plain explanations for group waits, disk space, administrator holds
+  and workflow startup. The queued line omits priority prefixes and park-policy
+  fallback diagnostics; priority fields, durable reasons and audit retain them.
+  `Scheduling.requests` and `Scheduling.admission.requests` expose the pod
+  requests. Other scheduling fields keep the detailed machine observation.
+  Running pending pods report, for example,
+  `pod pending: insufficient cpu (4 CPU requested)`.
 
   | Durable cause | `display_status` | `display_reason` |
   | --- | --- | --- |

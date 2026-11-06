@@ -936,9 +936,14 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	jobRequest.PodDemand = pods
 	jobRequest.ResourceFallback = fallback
 	scheduler.admissionRequested(ctx, run.ID)
+	var requests *argoworkflow.PodRequests
+	if receipt != nil {
+		demand, _ := receipt.WorkflowPodDemand()
+		requests = queuePodRequests(demand)
+	}
 	headSince, estimate := scheduler.admissionHistory(ctx, run)
 	releaseAdmission, err := reservation.acquireRequest(ctx, admissionRequest{
-		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref, Size: size, Group: group, GroupLimit: groupLimit, Pods: pods, Fallback: fallback,
+		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref, Size: size, Group: group, GroupLimit: groupLimit, Pods: pods, Requests: requests, Fallback: fallback,
 		RefKind: run.RefKind, SHA: run.SHA, HeadSince: headSince, Estimate: estimate, PriorityMaximum: priorityMaximum, PriorityLookupFailed: priorityErr != nil,
 	})
 	if errors.Is(err, errAdmissionAbandoned) {

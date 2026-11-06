@@ -12,20 +12,23 @@ import (
 // QueuePosition is accepted order among durable queued runs, not an ETA or
 // claim order: publication gates may let later runs start first.
 type RunScheduling struct {
-	ObservedAt    time.Time             `json:"observed_at"`
-	AgeSeconds    int64                 `json:"age_seconds"`
-	State         string                `json:"state"`
-	Message       string                `json:"message"`
-	QueuePosition int64                 `json:"queue_position,omitempty"`
-	Admission     *AdmissionObservation `json:"admission,omitempty"`
-	Execution     *ExecutionObservation `json:"execution,omitempty"`
+	// Requests is this run's peak pod requests, independent of admission budgets.
+	Requests      *argoworkflow.PodRequests `json:"requests,omitempty"`
+	ObservedAt    time.Time                 `json:"observed_at"`
+	AgeSeconds    int64                     `json:"age_seconds"`
+	State         string                    `json:"state"`
+	Message       string                    `json:"message"`
+	QueuePosition int64                     `json:"queue_position,omitempty"`
+	Admission     *AdmissionObservation     `json:"admission,omitempty"`
+	Execution     *ExecutionObservation     `json:"execution,omitempty"`
 }
 
 type AdmissionObservation struct {
-	NumericBudget     *NumericBudget        `json:"numeric_budget,omitempty"`
-	BackfillMessage   string                `json:"backfill_message,omitempty"`
-	DeclaredResources *DeclaredResources    `json:"declared_resources,omitempty"`
-	LegacyResources   *LegacyResourceCharge `json:"legacy_resources,omitempty"`
+	Requests          *argoworkflow.PodRequests `json:"requests,omitempty"`
+	NumericBudget     *NumericBudget            `json:"numeric_budget,omitempty"`
+	BackfillMessage   string                    `json:"backfill_message,omitempty"`
+	DeclaredResources *DeclaredResources        `json:"declared_resources,omitempty"`
+	LegacyResources   *LegacyResourceCharge     `json:"legacy_resources,omitempty"`
 
 	Pressure *PressureDeferral `json:"pressure,omitempty"`
 	State    string            `json:"state"`

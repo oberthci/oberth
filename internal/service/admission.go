@@ -67,6 +67,7 @@ type weightedAdmission struct {
 }
 
 type admissionReservation struct {
+	requests *argoworkflow.PodRequests
 	fallback model.ResourceAdmissionFallback
 	pods     *argoworkflow.PodDemand
 	gate     *weightedAdmission
@@ -156,6 +157,7 @@ func (conflict *concurrencyGroupConflict) Error() string {
 // admissionRequest is what a claimed run knows once its immutable checkout has
 // been read: its declared size and, optionally, its shared group and limit.
 type admissionRequest struct {
+	Requests             *argoworkflow.PodRequests
 	Fallback             model.ResourceAdmissionFallback
 	Pods                 *argoworkflow.PodDemand
 	RunID                string
@@ -279,6 +281,7 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 		}
 		return nil, context.Canceled
 	}
+	reservation.requests = request.Requests.Clone()
 	if request.RunID != "" {
 		reservation.runID = request.RunID
 	}
@@ -787,7 +790,7 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 	if reservation == nil {
 		return nil
 	}
-	result := &model.AdmissionObservation{State: "preparing", Used: gate.used, Capacity: gate.capacity, Runs: gate.runs, MaxRuns: gate.maxRuns, NumericBudget: gate.numericBudgetLocked()}
+	result := &model.AdmissionObservation{Requests: reservation.requests.Clone(), State: "preparing", Used: gate.used, Capacity: gate.capacity, Runs: gate.runs, MaxRuns: gate.maxRuns, NumericBudget: gate.numericBudgetLocked()}
 	if gate.workflowOnly {
 		result.Used = gate.runs
 	}

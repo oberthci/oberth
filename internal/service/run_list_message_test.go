@@ -64,9 +64,9 @@ func TestRunListMessageContract(t *testing.T) {
 }
 
 func TestRunListQueuedResourcesAndQualifier(t *testing.T) {
-	admission := &model.AdmissionObservation{State: "waiting", DeclaredResources: &model.DeclaredResources{CPUMilli: 9900, MemoryBytes: 16 << 30}, Pressure: &model.PressureDeferral{Resource: "io"}, BlockedBy: &model.AdmissionBlocker{Repo: "wrapper", Ref: "main"}}
+	admission := &model.AdmissionObservation{State: "waiting", Requests: &argoworkflow.PodRequests{CPUMilli: 9900, MemoryBytes: 16 << 30}, Pressure: &model.PressureDeferral{Resource: "io"}, BlockedBy: &model.AdmissionBlocker{Repo: "wrapper", Ref: "main"}}
 	got := queuedDisplayReason(&model.RunScheduling{State: "waiting", Admission: admission}, nil)
-	if want := "waiting for 9.9 CPU, 16 GiB · host IO pressure"; got != want {
+	if want := "needs 9.9 CPU, 16 GiB · host IO busy"; got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
 }
@@ -118,8 +118,8 @@ func TestRunListPersistsTypedCeilingCauseAndFullError(t *testing.T) {
 }
 
 func TestRunListWaitQualifierPrivacyAndClipping(t *testing.T) {
-	a := &model.AdmissionObservation{DeclaredResources: &model.DeclaredResources{CPUMilli: 9900, MemoryBytes: 16 << 30}, BlockedBy: &model.AdmissionBlocker{}}
-	if got := waitingReason(a); got != "waiting for 9.9 CPU, 16 GiB" {
+	a := &model.AdmissionObservation{Requests: &argoworkflow.PodRequests{CPUMilli: 9900, MemoryBytes: 16 << 30}, BlockedBy: &model.AdmissionBlocker{}}
+	if got := waitingReason(a); got != "in line" {
 		t.Fatal(got)
 	}
 	a.BlockedBy = &model.AdmissionBlocker{Repo: strings.Repeat("界", 80), Ref: "main"}
@@ -129,7 +129,7 @@ func TestRunListWaitQualifierPrivacyAndClipping(t *testing.T) {
 	}
 	run := model.Run{Status: model.RunQueued, DisplayStatus: model.DisplayQueued, Priority: model.PriorityHighest, PriorityReason: "admin bump: release"}
 	applyQueuedDisplay(&run, &model.RunScheduling{State: "queued", QueuePosition: 2}, "")
-	if run.DisplayReason != "priority high · position 2 in line" {
+	if run.DisplayReason != "position 2" {
 		t.Fatal(run.DisplayReason)
 	}
 }

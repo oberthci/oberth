@@ -360,7 +360,7 @@ func TestGroupAdmissionSnapshotNamesTheGroupAndItsHolder(t *testing.T) {
 	}
 	// The free group's head waits on weight behind nothing: it is the queue
 	// head itself (#1021), and the run behind it in the group names its group.
-	if message := waitingAdmissionMessage(scheduler.AdmissionSnapshot(4)); !strings.HasPrefix(message, "At the head of the weighted resource admission queue (M, needs 2 weight") {
+	if message := waitingAdmissionMessage(scheduler.AdmissionSnapshot(4)); !strings.HasPrefix(message, "At the head of the run queue (M, needs 2 weight") {
 		t.Fatalf("queue-head wait reason = %q", message)
 	}
 	releaseBig()
