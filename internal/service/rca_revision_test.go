@@ -71,7 +71,7 @@ func TestRCARevisionDefiniteCreateFailureRetriesWithoutDeletingName(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			if (current.AutoRetriedBy != "") != (kind != "hard-policy") || len(jobs.deleted) != 0 {
+			if current.AutoRetriedBy == "" || len(jobs.deleted) != 0 {
 				t.Fatal("unsafe retry/cleanup", current, jobs.deleted)
 			}
 			if current.AutoRetriedBy != "" {

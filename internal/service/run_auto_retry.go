@@ -13,7 +13,7 @@ func (scheduler *Scheduler) infrastructureAutoRetry(run model.Run, result JobRes
 	if scheduler.disableInfrastructureAutoRetry || run.RefKind != model.RefBranch || releaseLikeRun(run) || (run.Trigger != "branch" && run.Trigger != "push" && run.Trigger != "schedule" && run.Trigger != "manual") || run.AutoRetryOf != "" || run.AutoRetriedBy != "" || !model.IsInfrastructureRunFailure(result.Status, result.Phase, result.FailedStep) || result.FailedStage != "" || pushretry.PublicationFailure(result.Error) {
 		return false
 	}
-	eviction := result.Phase == "infrastructure" && result.TerminalObservation.EvictionOnly() && (run.WorkflowName == "" || result.TerminalObservation.WorkflowName == run.WorkflowName)
+	eviction := result.Phase == "infrastructure" && result.TerminalObservation.EvictionOnly() && (run.WorkflowName != "" && result.TerminalObservation.WorkflowName == run.WorkflowName)
 	deadline := model.IsExecutionDeadlineReason(result.Error)
 	if deadline && result.ObservedStepStart {
 		return false

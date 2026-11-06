@@ -20,7 +20,7 @@ func evictionResult(name string, at time.Time) JobResult {
 }
 
 func TestEvictionRetryRequiresEveryRetainedFailureToMatch(t *testing.T) {
-	for _, kind := range []string{"eviction", "real failure", "earlier failure", "other step", "unknown attempt", "incomplete", "wrong workflow", "already retried"} {
+	for _, kind := range []string{"eviction", "real failure", "earlier failure", "other step", "unknown attempt", "incomplete", "wrong workflow", "empty workflow", "already retried"} {
 		t.Run(kind, func(t *testing.T) {
 			at := time.Now().UTC()
 			result := evictionResult("workflow", at)
@@ -47,6 +47,8 @@ func TestEvictionRetryRequiresEveryRetainedFailureToMatch(t *testing.T) {
 				result.TerminalObservation = nil
 			case "wrong workflow":
 				result.TerminalObservation.WorkflowName = "foreign"
+			case "empty workflow":
+				run.WorkflowName = ""
 			case "already retried":
 				run.AutoRetryOf = "previous"
 			}
@@ -123,7 +125,7 @@ func TestDeterministicAdmissionRefusalsDoNotAutoRetry(t *testing.T) {
 
 func TestEvictionDisplayReason(t *testing.T) {
 	for message, want := range map[string]string{
-		"Evicted: Pod ephemeral local storage usage exceeds the total limit of containers 512Mi.": "evicted: ephemeral storage limit 512 MiB",
+		"Evicted: Pod ephemeral local storage usage exceeds the total limit of containers 512Mi.": "evicted: ephemeral storage limit 512 MiB; raise the step's ephemeral-storage limit",
 		"Evicted: The node was low on resource: memory.":                                          "evicted: node memory pressure",
 		"Evicted: The node was low on resource: ephemeral-storage.":                               "evicted: node storage pressure",
 		"Evicted": "evicted by kubelet",
@@ -136,5 +138,54 @@ func TestEvictionDisplayReason(t *testing.T) {
 		if got := presentationRun(run).DisplayReason; !strings.Contains(got, want) || !strings.Contains(got, "retried as") {
 			t.Errorf("lost eviction retry cause: %s", got)
 		}
+	}
+}
+
+// Mirrors the controller's pre-create wrapper: false is not proof of a
+// deterministic refusal, and the underlying error must remain inspectable.
+type preparationRetryFailure struct{ cause error }
+
+func (e *preparationRetryFailure) Error() string             { return e.cause.Error() }
+func (e *preparationRetryFailure) Unwrap() error             { return e.cause }
+func (*preparationRetryFailure) InfrastructureFailure() bool { return false }
+func (*preparationRetryFailure) BeforeWorkflowCreate() bool  { return true }
+
+func TestPreparationRetryOnlyRejectsExplicitDeterministicRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		cause error
+		retry bool
+	}{
+		{"seed-stream", fmt.Errorf("stream source checkout: temporary read failure"), true},
+		{"source-claim-quota", fmt.Errorf("create source claim: quota 403"), true},
+		{"source-claim-conflict", fmt.Errorf("create source claim: conflict"), true},
+		{"identity-refresh", fmt.Errorf("refresh nonroot identity: transient read"), true},
+		{"admission", &argoworkflow.AdmissionError{Cause: fmt.Errorf("invalid workflow")}, false},
+		{"ceiling", &argoworkflow.ResourceCeilingError{Detail: "requests.cpu exceeds administrator resource ceiling"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newRecoveryFixture(t)
+			run := f.enqueueAndClaim(t, "feature/"+tc.name, strings.Repeat("c", 40))
+			for attempt := 0; attempt < 2; attempt++ {
+				jobs := &rcaCreateFailure{createErr: &preparationRetryFailure{cause: tc.cause}}
+				if err := f.scheduler(t, jobs).executeAndCleanup(t.Context(), run); err != nil {
+					t.Fatal(err)
+				}
+				failed, err := f.store.Run(t.Context(), run.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if (failed.AutoRetriedBy != "") != (tc.retry && attempt == 0) {
+					t.Fatalf("attempt %d: %+v", attempt, failed)
+				}
+				if failed.AutoRetriedBy == "" {
+					break
+				}
+				run, err = f.store.ClaimNextRun(t.Context())
+				if err != nil || run.ID != failed.AutoRetriedBy {
+					t.Fatalf("retry: %+v %v", run, err)
+				}
+			}
+		})
 	}
 }
