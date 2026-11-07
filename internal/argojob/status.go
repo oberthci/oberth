@@ -22,7 +22,7 @@ import (
 type StepResult struct {
 	ExitCodeKnown        bool
 	restartCutReason     string
-	storageLimit         string // Pod total of a step-declared storage eviction
+	storageLimit         string // the enforced limit of a step-declared storage eviction
 	exitEvidenceConflict bool
 	Usage                stepusage.Usage
 	Timing               *model.StepTiming

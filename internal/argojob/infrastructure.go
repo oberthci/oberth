@@ -19,27 +19,29 @@ import (
 // only a kubelet eviction/pressure message establishes an infrastructure cause.
 var kubeletEvictionMessage = regexp.MustCompile(`^(Usage of EmptyDir volume "[^"]+" exceeds the limit "[^"]+"\.|The node was low on resource: (ephemeral-storage|memory)\.|Pod ephemeral local storage usage exceeds the total limit of containers|Container [a-z0-9-]+ exceeded its local ephemeral storage limit)`)
 
-var podStorageTotalMessage = regexp.MustCompile(`^Pod ephemeral local storage usage exceeds the total limit of containers ([0-9]+(?:[.][0-9]+)?[A-Za-z]{0,2})(?:[.\s]|$)`)
+// The kubelet prints the Pod total with resource.Quantity.String(): digits with
+// a binary or decimal SI suffix, or a decimal exponent such as 1e9.
+var podStorageTotalMessage = regexp.MustCompile(`^Pod ephemeral local storage usage exceeds the total limit of containers ([0-9]+(?:[.][0-9]+)?(?:[eE][+-]?[0-9]+|[A-Za-z]{0,2}))(?:[.\s]|$)`)
 
-// stepStorageLimit returns the Pod total of a kubelet ephemeral-storage
-// eviction that enforced the step's own declared budget, or "". Such a step
+var containerStorageMessage = regexp.MustCompile(`^Container ([a-z0-9-]+) exceeded its local ephemeral storage limit`)
+
+// stepStorageLimit describes the limit of a kubelet ephemeral-storage eviction
+// that enforced the step's own declared budget, or returns "". Such a step
 // exceeded what it declared: a rerun fails the same way, so it is a step
-// resource failure, not infrastructure. The total qualifies when it includes no
-// helper limit the step did not ask for (podTotalIsStepBudget). Otherwise the
-// eviction stays infrastructure and gets at most one auto-retry, which is
-// rebuilt under the current policy.
+// resource failure, not infrastructure. Otherwise the eviction stays
+// infrastructure and gets at most one auto-retry, which is rebuilt under the
+// current policy.
+//
+// A container eviction qualifies when the named container is one of the step's
+// own containers with a declared limit (stepStorageLimits); the kubelet only
+// enforces a container limit that exists, but a server helper's limit is not
+// the step's. A Pod-total eviction qualifies when the total includes no helper
+// limit the step did not ask for (podTotalIsStepBudget).
 func stepStorageLimit(workflow *wfv1.Workflow, node wfv1.NodeStatus, message string) string {
 	if workflow == nil || node.Type != wfv1.NodeTypePod || (node.Phase != wfv1.NodeFailed && node.Phase != wfv1.NodeError) {
 		return ""
 	}
-	match := podStorageTotalMessage.FindStringSubmatch(strings.TrimPrefix(strings.TrimSpace(message), "Evicted: "))
-	if match == nil {
-		return ""
-	}
-	total, err := resource.ParseQuantity(match[1])
-	if err != nil || total.Sign() <= 0 {
-		return ""
-	}
+	message = strings.TrimPrefix(strings.TrimSpace(message), "Evicted: ")
 	var template *wfv1.Template
 	for i := range workflow.Spec.Templates {
 		if node.TemplateName != "" && workflow.Spec.Templates[i].Name == node.TemplateName {
@@ -47,10 +49,22 @@ func stepStorageLimit(workflow *wfv1.Workflow, node wfv1.NodeStatus, message str
 			break
 		}
 	}
-	if !podTotalIsStepBudget(workflow, template) {
+	if match := containerStorageMessage.FindStringSubmatch(message); match != nil {
+		limit, ok := stepStorageLimits(workflow, template)[match[1]]
+		if !ok {
+			return ""
+		}
+		return fmt.Sprintf("container %s's own limit %s", match[1], limit.String())
+	}
+	match := podStorageTotalMessage.FindStringSubmatch(message)
+	if match == nil {
 		return ""
 	}
-	return total.String()
+	total, err := resource.ParseQuantity(match[1])
+	if err != nil || total.Sign() <= 0 || !podTotalIsStepBudget(workflow, template) {
+		return ""
+	}
+	return fmt.Sprintf("the total container limit %s (the step's limits plus Argo helper limits)", total.String())
 }
 
 // podTotalIsStepBudget reports whether a Pod ephemeral-storage total of
@@ -78,7 +92,7 @@ func podStepStorageLimit(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *cor
 }
 
 func stepStorageLimitReason(step StepResult) string {
-	return fmt.Sprintf("Step %s/%s exceeded its declared ephemeral-storage budget: the kubelet evicted its Pod at the total container limit %s (the step's limits plus Argo helper limits). Raise the step's ephemeral-storage limit in git.", step.Stage, step.Step, step.storageLimit)
+	return fmt.Sprintf("Step %s/%s exceeded its declared ephemeral-storage budget: the kubelet evicted its Pod at %s. Raise the step's ephemeral-storage limit in git.", step.Stage, step.Step, step.storageLimit)
 }
 
 func nodeInfrastructureReason(workflow *wfv1.Workflow, node wfv1.NodeStatus) string {
