@@ -396,3 +396,14 @@ status and its owners are read in one committed snapshot, including behind an
 uncommitted writer. Retry tests cover queued, delivered, failed, stale/lost
 replies, unreadable status, admitted dispatch failures and no-work refusals.
 Run-list/detail/CLI tests keep failure phase and publication backoff visible.
+
+Branch deletion (#1490): `TestReceiveDeletionCallbackNeverReentersReceiveLock`
+delivers a deletion callback under the held receive lock (the v0.17.84-v0.17.95
+self-deadlock). `TestReplayPendingDeletionCompletesWithinBudget` replays a
+stranded deletion within a deadline and proves a refresh does not re-create the
+branch before propagation; `TestReplayPendingKeepsSkippingQuarantinedRecord`
+keeps operator-quarantined records untouched. `TestBlockingUpstreamNeverBlocksReceiveAndRetriesBounded`
+runs receives while the propagator is stuck on a forge that never answers, then
+exhausts the bounded attempts. Prune plans, stale confirmation, merged-only,
+protected and typed-confirmation refusals, per-batch audit and outbox repair
+have their own tests.

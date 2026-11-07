@@ -299,6 +299,22 @@ path instead of refreshing liveness forever.
 A corrupt receive outbox quarantines only its repository. Startup replays healthy
 repositories and retains the corrupt record for operator repair. Refresh, receive
 and publication refuse the affected repository until its record is repaired.
+An unscoped admin repairs it with the `receive_outbox` MCP tool or `oberth outbox`:
+`show` reads the record, `retry` delivers it (an operator-set `quarantined` state
+is restored first when the rest validates), and `abandon` moves it to
+`.receive-outbox/abandoned/` with an audit entry.
+
+Branch deletions never wait for the forge. A receive (or `branch_delete_many`)
+deletes the mirror ref, records a private `refs/oberth/deleting/heads/<branch>`
+marker and commits a pending row in `branch_deletions` together with the receive
+event, then returns. The callback takes only the repository lock, never the
+receive lock it already runs under. A background propagator later deletes the
+upstream refs, one push per repository batch, with no repository lock held
+across network I/O: an upstream ref is deleted only while it still names the
+deleted head or an ancestor (force-with-lease on the observed SHA). Each record
+ends `propagated`, `skipped` (pushed again) or `failed` after six attempts or a
+moved upstream; a failure restores the mirror branch from its tracking ref.
+While the marker exists a refresh does not re-create the branch.
 
 Ordered [promotion trains](promotion-trains.md) reuse the same repository/target
 queue. They apply native three-way merges in request order in one private checkout
