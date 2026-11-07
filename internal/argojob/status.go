@@ -22,6 +22,7 @@ import (
 type StepResult struct {
 	ExitCodeKnown        bool
 	restartCutReason     string
+	storageLimit         string // Pod total of a step-declared storage eviction
 	exitEvidenceConflict bool
 	Usage                stepusage.Usage
 	Timing               *model.StepTiming
@@ -137,7 +138,8 @@ func stepAttempts(workflow *wfv1.Workflow) []StepResult {
 		attempt, superseded := retries.attempt(workflow.Status.Nodes, node, rootID)
 		retryOrder[node.ID] = retries.order(workflow.Status.Nodes, node)
 		results = append(results, StepResult{
-			InfrastructureReason: nodeInfrastructureReason(node),
+			InfrastructureReason: nodeInfrastructureReason(workflow, node),
+			storageLimit:         stepStorageLimit(workflow, node, node.Message),
 			NodeID:               node.ID,
 			Attempt:              attempt,
 			Superseded:           superseded,

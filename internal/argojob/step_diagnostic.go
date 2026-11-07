@@ -70,7 +70,9 @@ func (controller *Controller) collectRestartStepDiagnostics(ctx context.Context,
 				step.ExitCode = int(step.Termination.Container.ExitCode)
 			}
 			step.Usage = projectStepUsage(workflow, node, pod)
-			if reason := podInfrastructureReason(workflow, node, pod); reason != "" {
+			if limit := podStepStorageLimit(workflow, node, pod); limit != "" {
+				step.InfrastructureReason, step.storageLimit = "", limit
+			} else if reason := podInfrastructureReason(workflow, node, pod); reason != "" {
 				step.InfrastructureReason = reason
 			}
 		}
@@ -87,7 +89,9 @@ func (controller *Controller) collectRestartStepDiagnostics(ctx context.Context,
 			continue
 		}
 		if node, ok := workflow.Status.Nodes[step.NodeID]; ok && node.ID == step.NodeID {
-			if reason := podInfrastructureReason(workflow, node, pods[step.PodName]); reason != "" {
+			if limit := podStepStorageLimit(workflow, node, pods[step.PodName]); limit != "" {
+				step.InfrastructureReason, step.storageLimit = "", limit
+			} else if reason := podInfrastructureReason(workflow, node, pods[step.PodName]); reason != "" {
 				step.InfrastructureReason = reason
 			}
 		}

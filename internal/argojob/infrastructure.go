@@ -1,13 +1,16 @@
 package argojob
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"unicode/utf8"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
 )
 
@@ -16,8 +19,56 @@ import (
 // only a kubelet eviction/pressure message establishes an infrastructure cause.
 var kubeletEvictionMessage = regexp.MustCompile(`^(Usage of EmptyDir volume "[^"]+" exceeds the limit "[^"]+"\.|The node was low on resource: (ephemeral-storage|memory)\.|Pod ephemeral local storage usage exceeds the total limit of containers|Container [a-z0-9-]+ exceeded its local ephemeral storage limit)`)
 
-func nodeInfrastructureReason(node wfv1.NodeStatus) string {
+var podStorageTotalMessage = regexp.MustCompile(`^Pod ephemeral local storage usage exceeds the total limit of containers ([0-9]+(?:[.][0-9]+)?[A-Za-z]{0,2})(?:[.\s]|$)`)
+
+// stepStorageLimit returns the Pod total of a kubelet ephemeral-storage
+// eviction that enforced the step's own declared budget, or "". Such a step
+// exceeded what it declared: a rerun fails the same way, so it is a step
+// resource failure, not infrastructure. Under the v3 helper policy the server
+// adds helper limits only when the step declares one, so any Pod total is the
+// step's. Historical policies limited every helper; there only a named template
+// with its own limit qualifies. Otherwise the eviction stays infrastructure and
+// gets at most one auto-retry, which is rebuilt under the current policy.
+func stepStorageLimit(workflow *wfv1.Workflow, node wfv1.NodeStatus, message string) string {
+	if workflow == nil || node.Type != wfv1.NodeTypePod || (node.Phase != wfv1.NodeFailed && node.Phase != wfv1.NodeError) {
+		return ""
+	}
+	match := podStorageTotalMessage.FindStringSubmatch(strings.TrimPrefix(strings.TrimSpace(message), "Evicted: "))
+	if match == nil {
+		return ""
+	}
+	total, err := resource.ParseQuantity(match[1])
+	if err != nil || total.Sign() <= 0 {
+		return ""
+	}
+	declared := workflow.Annotations[helperStorageAnnotation] == helperStoragePolicy
+	for i := range workflow.Spec.Templates {
+		if !declared && node.TemplateName != "" && workflow.Spec.Templates[i].Name == node.TemplateName {
+			declared = stepDeclaresStorageLimit(workflow, &workflow.Spec.Templates[i])
+		}
+	}
+	if !declared {
+		return ""
+	}
+	return total.String()
+}
+
+func podStepStorageLimit(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev1.Pod) string {
+	if !stepPodBound(workflow, node, pod) || pod.Status.Phase != corev1.PodFailed {
+		return ""
+	}
+	return stepStorageLimit(workflow, node, pod.Status.Message)
+}
+
+func stepStorageLimitReason(step StepResult) string {
+	return fmt.Sprintf("Step %s/%s exceeded its declared ephemeral-storage budget: the kubelet evicted its Pod at the total container limit %s (the step's limits plus Argo helper limits). Raise the step's ephemeral-storage limit in git.", step.Stage, step.Step, step.storageLimit)
+}
+
+func nodeInfrastructureReason(workflow *wfv1.Workflow, node wfv1.NodeStatus) string {
 	if node.Type != wfv1.NodeTypePod || (node.Phase != wfv1.NodeFailed && node.Phase != wfv1.NodeError) {
+		return ""
+	}
+	if stepStorageLimit(workflow, node, node.Message) != "" {
 		return ""
 	}
 	message := strings.TrimSpace(node.Message)
@@ -34,7 +85,7 @@ func nodeInfrastructureReason(node wfv1.NodeStatus) string {
 func podInfrastructureReason(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev1.Pod) string {
 	// Eviction may precede main startup or leave running container states, so
 	// it needs the owned Pod binding, not a complete container diagnostic.
-	if !stepPodBound(workflow, node, pod) || pod.Status.Phase != corev1.PodFailed {
+	if !stepPodBound(workflow, node, pod) || pod.Status.Phase != corev1.PodFailed || podStepStorageLimit(workflow, node, pod) != "" {
 		return ""
 	}
 	message := strings.TrimSpace(pod.Status.Message)
@@ -62,7 +113,7 @@ func (completion *Completion) classifyInfrastructure() {
 	if completion.Succeeded {
 		return
 	}
-	reason := ""
+	reason, storage := "", ""
 	failedStage, failedStep := "", ""
 	for _, step := range completion.Steps {
 		if step.Status == runprogress.StepPassed || step.Status == runprogress.StepSkipped || !terminal(step.Status) {
@@ -73,6 +124,9 @@ func (completion *Completion) classifyInfrastructure() {
 		if step.AttemptAmbiguous || step.InfrastructureReason == "" {
 			if failedStep == "" {
 				failedStage, failedStep = step.Stage, step.Step
+				if step.storageLimit != "" && !step.AttemptAmbiguous {
+					storage = stepStorageLimitReason(step)
+				}
 			}
 			continue
 		}
@@ -81,6 +135,13 @@ func (completion *Completion) classifyInfrastructure() {
 		}
 	}
 	if failedStep != "" {
+		// Owned Pod evidence can turn a node-level eviction into the step's
+		// own declared storage budget; an earlier verdict must not survive.
+		completion.Infrastructure = false
+		// Name the declared budget instead of Argo's generic child failure.
+		if storage != "" && !model.IsExecutionDeadlineReason(completion.Reason) {
+			completion.Reason = storage
+		}
 		if reason != "" {
 			completion.FailedStage, completion.FailedStep = failedStage, failedStep
 		}

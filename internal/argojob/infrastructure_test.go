@@ -8,6 +8,7 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -123,5 +124,78 @@ func TestKubeletMessageIsBounded(t *testing.T) {
 	message := boundedKubeletMessage(strings.Repeat("界", 2000))
 	if len(message) > 4096 || strings.ContainsRune(message, '\ufffd') {
 		t.Fatal("unbounded or broken UTF-8 message")
+	}
+}
+
+// #1491: when the step declared its own ephemeral-storage limit, the kubelet
+// Pod total is the step's budget. Exceeding it is a step resource failure that
+// a rerun repeats, so it is not infrastructure and is not auto-retried.
+func TestDeclaredStorageEvictionIsStepFailure(t *testing.T) {
+	const total = "Pod ephemeral local storage usage exceeds the total limit of containers 1152Mi. "
+	declared := wfv1.Template{Name: "test-template", Container: &corev1.Container{Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{corev1.ResourceEphemeralStorage: resource.MustParse("640Mi")}}}}
+	undeclared := wfv1.Template{Name: "test-template", Container: &corev1.Container{}}
+	cases := []struct {
+		name       string
+		policy     string
+		template   wfv1.Template
+		nodeMsg    string
+		podMsg     string
+		stepBudget bool
+	}{
+		{name: "v3/node", policy: helperStoragePolicy, template: undeclared, nodeMsg: total, stepBudget: true},
+		{name: "v3/node-prefixed", policy: helperStoragePolicy, template: declared, nodeMsg: "Evicted: " + total, stepBudget: true},
+		{name: "v3/pod-only", policy: helperStoragePolicy, template: declared, nodeMsg: "Evicted", podMsg: total, stepBudget: true},
+		{name: "v2/declared-template", policy: cappedHelperStoragePolicy, template: declared, nodeMsg: total, stepBudget: true},
+		// v2 limited every helper: an undeclared step's 512Mi total was not its
+		// own budget. It stays infrastructure with at most one auto-retry.
+		{name: "v2/undeclared-template", policy: cappedHelperStoragePolicy, template: undeclared, nodeMsg: total},
+		{name: "v2/unresolved-template", policy: cappedHelperStoragePolicy, template: wfv1.Template{Name: "other", Container: declared.Container}, nodeMsg: total},
+		{name: "v1/undeclared-pod", policy: legacyHelperStoragePolicy, template: undeclared, nodeMsg: "Evicted", podMsg: total},
+		// Node pressure is never the step's budget.
+		{name: "v3/node-pressure", policy: helperStoragePolicy, template: declared, nodeMsg: "The node was low on resource: ephemeral-storage. Threshold quantity: 1Gi, available: 123Ki."},
+		{name: "v3/pod-node-pressure", policy: helperStoragePolicy, template: declared, nodeMsg: "Evicted", podMsg: "The node was low on resource: ephemeral-storage. "},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wf, node, pod, _ := diagnosticFixture()
+			wf.Annotations[helperStorageAnnotation] = tc.policy
+			wf.Spec.Templates = []wfv1.Template{tc.template}
+			node.TemplateName = "test-template"
+			node.Message = tc.nodeMsg
+			wf.Status.Nodes[node.ID] = node
+			pod.Name = PodName(wf, node)
+			kube := fake.NewClientset()
+			if tc.podMsg != "" {
+				pod.Status.Phase = corev1.PodFailed
+				pod.Status.Reason = "Evicted"
+				pod.Status.Message = tc.podMsg
+				pod.Status.ContainerStatuses = nil
+				kube = fake.NewClientset(pod)
+			}
+			completion := completionFor(wf)
+			controller := &Controller{kube: kube}
+			controller.collectStepDiagnostics(context.Background(), wf, &completion)
+			if completion.Succeeded {
+				t.Fatal("evicted step succeeded")
+			}
+			if !tc.stepBudget {
+				if !completion.Infrastructure || completion.ReplayAttempts[0].InfrastructureReason == "" {
+					t.Fatalf("eviction lost its infrastructure classification: %#v", completion)
+				}
+				return
+			}
+			if completion.Infrastructure || completion.FailedStep != "test" {
+				t.Fatalf("declared budget classified as infrastructure: %#v", completion)
+			}
+			for _, attempt := range append(completion.ReplayAttempts, completion.Steps...) {
+				if attempt.InfrastructureReason != "" {
+					t.Fatal("retry evidence still marks the attempt evicted by infrastructure")
+				}
+			}
+			want := "Step " + completion.Steps[0].Stage + "/test exceeded its declared ephemeral-storage budget: the kubelet evicted its Pod at the total container limit 1152Mi"
+			if !strings.HasPrefix(completion.Reason, want) {
+				t.Fatalf("reason %q does not name the declared total", completion.Reason)
+			}
+		})
 	}
 }
