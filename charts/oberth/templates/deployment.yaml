@@ -359,7 +359,7 @@ spec:
             - --promotion-grant-max-lifetime={{ $grantMaxLifetime }}
             {{- end }}
             {{- $branches := .Values.branches | default dict -}}
-            {{- if $branches.protected }}
+            {{- if and (hasKey $branches "protected") (kindIs "slice" $branches.protected) }}
             - {{ printf "--protected-branches=%s" (join "," $branches.protected) | quote }}
             {{- end }}
           env:
