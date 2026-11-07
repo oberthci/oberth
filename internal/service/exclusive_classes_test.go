@@ -117,22 +117,79 @@ func TestExclusiveClassAllowlistRefusesUnknownClasses(t *testing.T) {
 	f := newGroupFixture(t, 4)
 	request := WorkflowRequest{Run: model.Run{ID: "run"}}
 	f.scheduler.jobs = exclusiveEngine{groupEngine: f.engine, classes: []string{"kvm"}}
-	_, err := f.scheduler.pipelineExclusiveClasses(t.Context(), request)
+	_, err := f.scheduler.pipelineExclusiveClasses(t.Context(), request, nil)
 	var admission *argoworkflow.AdmissionError
 	if !errors.As(err, &admission) || !strings.Contains(err.Error(), `exclusive class "kvm" is not on this server's allowlist`) {
 		t.Fatalf("feature-off declaration not refused at admission: %v", err)
 	}
 	f.scheduler.admission.exclusiveLimits = map[string]int{"kvm": 1}
-	classes, err := f.scheduler.pipelineExclusiveClasses(t.Context(), request)
+	classes, err := f.scheduler.pipelineExclusiveClasses(t.Context(), request, nil)
 	if err != nil || len(classes) != 1 || classes[0] != "kvm" {
 		t.Fatalf("allowlisted class refused: %v %v", classes, err)
 	}
 	f.scheduler.jobs = exclusiveEngine{groupEngine: f.engine, classes: []string{"gpu"}}
-	if _, err := f.scheduler.pipelineExclusiveClasses(t.Context(), request); !errors.As(err, &admission) {
+	if _, err := f.scheduler.pipelineExclusiveClasses(t.Context(), request, nil); !errors.As(err, &admission) {
 		t.Fatalf("unlisted class admitted: %v", err)
 	}
 }
 
 func snapshotFor(gate *weightedAdmission, sequence int64) *model.AdmissionObservation {
 	return (&Scheduler{admission: gate}).AdmissionSnapshot(sequence)
+}
+
+// #1499: admission reads classes from the fragment-resolved receipt, so a
+// class declared only inside a fragment meets the allowlist and the limit even
+// when the repository's own document declares none.
+func TestExclusiveClassFromFragmentIsAdmittedFromTheReceipt(t *testing.T) {
+	const image = "golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	key := argoworkflow.FragmentKey{Repo: "acme/vm-test", Version: "v1"}
+	fragment := argoworkflow.Fragment{Key: key, SHA: strings.Repeat("1", 40), Source: []byte(`
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  entrypoint: run
+  templates:
+    - name: run
+      metadata:
+        annotations:
+          oberth.ci/exclusive: kvm
+      container:
+        image: ` + image + `
+        command: [/bin/true]
+`)}
+	source := []byte(`
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  entrypoint: main
+  activeDeadlineSeconds: 600
+  templates:
+    - name: main
+      steps:
+        - - name: verify
+            templateRef:
+              name: ` + key.String() + `
+              template: run
+`)
+	resolved, err := argoworkflow.ResolveRunSource(source, map[argoworkflow.FragmentKey]argoworkflow.Fragment{key: fragment}, argoworkflow.RunSourceBinding{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := resolved.Receipt(argoworkflow.Policy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := newGroupFixture(t, 4)
+	request := WorkflowRequest{Run: model.Run{ID: "run"}}
+	// The raw document declares no class; only the receipt sees the fragment's.
+	f.scheduler.jobs = exclusiveEngine{groupEngine: f.engine}
+	var admission *argoworkflow.AdmissionError
+	if _, err := f.scheduler.pipelineExclusiveClasses(t.Context(), request, receipt); !errors.As(err, &admission) || !strings.Contains(err.Error(), `exclusive class "kvm" is not on this server's allowlist`) {
+		t.Fatalf("fragment class bypassed the allowlist: %v", err)
+	}
+	f.scheduler.admission.exclusiveLimits = map[string]int{"kvm": 1}
+	classes, err := f.scheduler.pipelineExclusiveClasses(t.Context(), request, receipt)
+	if err != nil || len(classes) != 1 || classes[0] != "kvm" {
+		t.Fatalf("fragment class not admitted as a member: %v %v", classes, err)
+	}
 }

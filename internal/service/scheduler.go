@@ -926,18 +926,19 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	run.ConcurrencyGroup, run.ConcurrencyLimit = group, groupLimit
 	jobRequest.Run.ConcurrencyGroup, jobRequest.Run.ConcurrencyLimit = group, groupLimit
 	jobRequest.ConcurrencyGroup = group
-	exclusive, err := scheduler.pipelineExclusiveClasses(ctx, jobRequest)
-	if err != nil {
-		_ = logFile.Close()
-		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
-	}
-
 	receipt, err := scheduler.pipelineDemandReceipt(ctx, jobRequest)
 	if err != nil {
 		_ = logFile.Close()
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("read pipeline source receipt: %w", err))
 	}
 	jobRequest.DemandReceipt = receipt
+	// Classes come from the same fragment-resolved graph Build submits.
+	exclusive, err := scheduler.pipelineExclusiveClasses(ctx, jobRequest, receipt)
+	if err != nil {
+		_ = logFile.Close()
+		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
+	}
+	jobRequest.Exclusive = exclusive
 	var pods *argoworkflow.PodDemand
 	var fallback model.ResourceAdmissionFallback
 	{
@@ -2143,17 +2144,27 @@ type PipelineExclusiveClassReader interface {
 }
 
 // pipelineExclusiveClasses reads the run's declared exclusive classes and
-// refuses any class outside the administrator allowlist. The refusal is an
-// admission error: a rerun cannot change it, so it is never auto-retried.
-func (scheduler *Scheduler) pipelineExclusiveClasses(ctx context.Context, request WorkflowRequest) ([]string, error) {
-	reader, ok := any(scheduler.jobs).(PipelineExclusiveClassReader)
-	if release, releaseOK := any(scheduler.releaseJobs).(PipelineExclusiveClassReader); request.Run.Release && releaseOK {
-		reader, ok = release, true
+// refuses any class outside the administrator allowlist. The admitted source
+// receipt is authoritative: it holds the fragment-resolved graph, so a class
+// declared only inside a fragment is admitted, limited and refused exactly
+// like one in the repository's own document. Build refuses any later
+// difference. The refusal is an admission error: a rerun cannot change it,
+// so it is never auto-retried.
+func (scheduler *Scheduler) pipelineExclusiveClasses(ctx context.Context, request WorkflowRequest, receipt *argoworkflow.DemandReceipt) ([]string, error) {
+	var classes []string
+	var err error
+	if receipt != nil {
+		classes, err = receipt.ExclusiveClasses()
+	} else {
+		reader, ok := any(scheduler.jobs).(PipelineExclusiveClassReader)
+		if release, releaseOK := any(scheduler.releaseJobs).(PipelineExclusiveClassReader); request.Run.Release && releaseOK {
+			reader, ok = release, true
+		}
+		if !ok {
+			return nil, nil
+		}
+		classes, err = reader.PipelineExclusiveClasses(ctx, request)
 	}
-	if !ok {
-		return nil, nil
-	}
-	classes, err := reader.PipelineExclusiveClasses(ctx, request)
 	if err != nil {
 		return nil, &argoworkflow.AdmissionError{Cause: fmt.Errorf("read pipeline exclusive classes: %w", err)}
 	}

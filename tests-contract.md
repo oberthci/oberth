@@ -422,5 +422,8 @@ OOM exit a genuine failure.
 store end to end: one automatic retry, never an `Execution deadline exceeded.`
 reason. Exclusive classes #1499: `TestExclusiveClassSerializesAcrossRepositories`,
 `TestExclusiveClassLimitAndFIFO` and `TestExclusiveClassAdoptedHolderBlocksNewMembers`
-cover the gate; `TestExclusiveClassAllowlistRefusesUnknownClasses`, the
+cover the gate; `TestExclusiveClassFromFragmentIsAdmittedFromTheReceipt` and
+`TestBuildBindsFragmentExclusiveClassesToAdmission` keep fragment-declared
+classes under the allowlist, the limit and Build's admitted-set check;
+`TestExclusiveClassAllowlistRefusesUnknownClasses`, the
 argoworkflow syntax/count tests and the serve/chart flag tests cover the bounds.

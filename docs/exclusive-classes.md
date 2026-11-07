@@ -38,9 +38,11 @@ templates:
 ```
 
 Inline templates and `spec.templateDefaults` may declare it too. A pipeline may
-declare at most four distinct classes. Declare it in the repository's own
-pipeline document: the scheduler reads the immutable checked-out document
-before admission.
+declare at most four distinct classes. A template inlined from a pinned
+fragment may declare it as well: the scheduler reads the classes from the same
+immutable, fragment-resolved graph it admits, so a fragment's class meets the
+allowlist and the limit exactly like one in the repository's own document.
+Submission refuses a built Workflow whose classes differ from the admitted set.
 
 A class that is not on the server's allowlist (including every class while the
 list is empty) refuses the run at admission with a message naming the class.

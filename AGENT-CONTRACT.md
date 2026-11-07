@@ -626,8 +626,10 @@ containing CI and real workload qualification remain separately required.
   declaration. A step declares `oberth.ci/exclusive: <class>` on its template
   metadata (also inline templates and `templateDefaults`); a class is 1-40 of
   `[a-z0-9-]`, starting and ending with a letter or digit, at most four distinct
-  classes per pipeline. Membership is per run, read statically from the
-  immutable checkout before admission. At most `limit` member runs hold a class
+  classes per pipeline. Membership is per run, read statically before admission
+  from the same fragment-resolved source receipt submission uses, so classes
+  declared inside pinned fragments count; Build refuses a resolved Workflow
+  whose classes differ from the admitted set. At most `limit` member runs hold a class
   across all repositories and triggers; further members wait in Oberth's
   admission queue in priority/FIFO order within the class, hold no workflow
   slot and create no Workflow or Pod, and never block runs outside the class.

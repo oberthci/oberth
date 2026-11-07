@@ -506,6 +506,7 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 	submission := argojob.Request{
 		BranchAuthority:  branchAuthority,
 		PodDemand:        request.PodDemand,
+		Exclusive:        request.Exclusive,
 		ResourceFallback: request.ResourceFallback,
 		DemandReceipt:    request.DemandReceipt,
 		PipelineFile:     pipelineFile,
