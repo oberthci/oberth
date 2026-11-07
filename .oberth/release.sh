@@ -659,7 +659,9 @@ WIFHELPER
 
 sign_registry_object() {
 	reference=$1
-	if ! "$cosign_tool" verify --key "$release_dir/cosign.pub" "$reference" >/dev/null 2>&1; then
+	# Probe twice so a transient TUF or Rekor failure does not add a duplicate signature.
+	if ! "$cosign_tool" verify --key "$release_dir/cosign.pub" "$reference" >/dev/null 2>&1 &&
+		! { sleep 5 && "$cosign_tool" verify --key "$release_dir/cosign.pub" "$reference" >/dev/null 2>&1; }; then
 		COSIGN_PASSWORD=$signing_password COSIGN_YES=true "$cosign_tool" sign --key "$signing_key_file" "$reference" >/dev/null
 	fi
 	"$cosign_tool" verify --key "$release_dir/cosign.pub" "$reference" >/dev/null || fail "registry signature verification failed for $reference"
