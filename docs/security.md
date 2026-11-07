@@ -202,3 +202,36 @@ running-workflow authority or execution verdicts. Scoped status, reservation and
 run views omit host PSI numbers while retaining a non-numeric pressure cause,
 as they omit aggregate capacity. Non-admin and MCP run reasons also omit
 pressure percentages and timing details. The existing unscoped admin metrics authorization remains in force.
+
+## Release signature verification
+
+Each release publishes `SHA256SUMS`, `release.json` and the Helm chart with a
+Sigstore bundle (`<file>.sigstore.json`), and signs the server image and the
+OCI chart in GAR. All are signed with one pinned key whose `cosign.pub` has
+SHA-256 `036dd71c9d3c07a19bff06d4392874014573f695620ac8554d9df175094c4a31`.
+From v0.17.96, every signature is also recorded in the public Rekor
+transparency log, so the bundles carry an inclusion proof and an RFC 3161
+timestamp. The release verifies them without `--insecure-ignore-tlog`, and so
+should you (cosign v3, which fetches the Sigstore trusted root over TUF):
+
+```bash
+v=0.17.96
+base=https://releases.oberth.ci/oberth/v$v
+curl -fsSL -O "$base/SHA256SUMS" -O "$base/SHA256SUMS.sigstore.json" \
+  -O "$base/cosign.pub" -O "$base/release.json" -O "$base/release.json.sigstore.json"
+echo '036dd71c9d3c07a19bff06d4392874014573f695620ac8554d9df175094c4a31  cosign.pub' | sha256sum -c -
+cosign verify-blob --key cosign.pub --bundle SHA256SUMS.sigstore.json SHA256SUMS
+cosign verify-blob --key cosign.pub --bundle release.json.sigstore.json release.json
+sha256sum -c --ignore-missing SHA256SUMS   # after downloading a binary
+curl -fsSL -O "https://charts.oberth.ci/oberth-$v.tgz" -O "https://charts.oberth.ci/oberth-$v.tgz.sigstore.json"
+cosign verify-blob --key cosign.pub --bundle "oberth-$v.tgz.sigstore.json" "oberth-$v.tgz"
+cosign verify --key cosign.pub "$(jq -r .images.server.ref release.json)"
+```
+
+Releases up to and including v0.17.95 were signed without a transparency-log
+entry. Their signatures remain valid, but only against the pinned key: add
+`--insecure-ignore-tlog` to the `cosign` commands above for those versions
+only, and expect cosign's warning that the check proves no publication time or
+log inclusion. A release after v0.17.95 whose signature fails without that
+flag must be treated as unverified. `oberth upgrade` does not run cosign, so
+upgrading from v0.17.95 is unaffected.
