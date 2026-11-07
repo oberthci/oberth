@@ -53,17 +53,33 @@ class ContractGuards(unittest.TestCase):
             with self.subTest(rule=rule):
                 self.assertIn(rule, [r for r, _, _ in self.scan(name, source)])
 
+    def test_markdown_default_tables_follow_headers(self):
+        for source in (
+                '| Law or rule | Guard |\n| --- | --- |\n| 9. Lifecycle on the default profile | review |',
+                '| Scenario | Action |\n| --- | --- |\n| bootstrap | Install default profile |',
+                '| Namespace | Binding |\n| --- | --- |\n| default | reader |',
+                '| Tool | Purpose |\n| --- | --- |\n| `issue_get` | Full record by default |'):
+            with self.subTest(source=source):
+                self.assertNotIn('law2-handtyped-table', [r for r, _, _ in self.scan('a.md', source)])
+        for source in (
+                '| Flag | Default | Meaning |\n| --- | --- | --- |\n| `--limit` | 256 MiB | per run |',
+                '| Setting | **Default** |\n| --- | --- |\n| `retention.interval` | `10m` |',
+                '| Option | Value |\n| --- | --- |\n| mode | APP_MODE |'):
+            with self.subTest(source=source):
+                found = [line for r, _, line in self.scan('a.md', source) if r == 'law2-handtyped-table']
+                self.assertEqual(found, [source.splitlines()[-1]])
+
     def test_runtime_temporary_witnesses_do_not_declare_sunsets(self):
         # Six unchanged source witnesses from the consumer qualification stop.
         witnesses = (
-            ('beacon', '.oberth/release_oci.py', 'temporary = None'),
-            ('operator', '.oberth/release_oci.py', 'temporary = None'),
-            ('port', '.oberth/release_oci.py', 'temporary = None'),
-            ('wrapper', '.oberth/test_release_alias.py',
+            ('consumer-a', '.oberth/release_oci.py', 'temporary = None'),
+            ('consumer-b', '.oberth/release_oci.py', 'temporary = None'),
+            ('consumer-c', '.oberth/release_oci.py', 'temporary = None'),
+            ('consumer-d', '.oberth/test_release_alias.py',
              'with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:'),
-            ('cli', 'cmd/source_install_docker_test.go',
+            ('consumer-e', 'cmd/source_install_docker_test.go',
              '// temporarily swapping to bytes.Buffer because printDockerDryRun writes'),
-            ('db-proxy', '.oberth/release_oci.py', 'temporary = None'),
+            ('consumer-f', '.oberth/release_oci.py', 'temporary = None'),
         )
         for consumer, name, source in witnesses:
             with self.subTest(consumer=consumer):
@@ -85,7 +101,7 @@ class ContractGuards(unittest.TestCase):
         for source in ('// temporary workaround', '// temporary measure',
                        '// The temporary v2-only compatibility path has no authenticated registration.',
                        '// The temporary v2.1-only compatibility path remains available.',
-                       '`--operator-introduction-transition=true` is an explicit temporary companion to',
+                       '`--controller-introduction-transition=true` is an explicit temporary companion to',
                        '// This is a temporary API.', '// The API is temporary.',
                        '// The v1 endpoint is temporarily supported.',
                        '// Temporarily retain the old API.',
@@ -110,7 +126,7 @@ class ContractGuards(unittest.TestCase):
                        'ok "Downloaded and verified temporary cosign v${COSIGN_VERSION}"'):
             with self.subTest(source=source):
                 self.assertFalse(CHECK.temporary_lifetime(source, source.startswith('//') or source == 'if temporary {'))
-        for source in ('// temporary copy of port/tokenreview',
+        for source in ('// temporary copy of auth/tokenreview',
                        '// temporary flag file', '// temporary feature buffer',
                        '// temporary override for the cache',
                        '// temporary API with an outage diagnostic'):
@@ -119,8 +135,8 @@ class ContractGuards(unittest.TestCase):
 
     def test_temporary_prose_punctuation_is_a_lifetime(self):
         claims = (
-            '// TEMPORARY: remove once beacon ships auth',
-            '# Temporary: remove once beacon ships auth',
+            '// TEMPORARY: remove once the gateway ships auth',
+            '# Temporary: remove once the gateway ships auth',
             'text = "temporary(remove after migration)"',
             'text = "temporary: remove after migration"',
             '// Temporary: drop after the v2 migration',
@@ -173,19 +189,19 @@ class ContractGuards(unittest.TestCase):
     def test_temporary_trigger_fails_closed(self):
         for source in (
                 '// This temporary compatibility is intended only for a rolling upgrade',
-                '// Temporary train-356 operator copy.',
+                '// Temporary train-356 controller copy.',
                 '// TODO: temporary, remove after migration',
                 '// This flag is temporary and will be removed.',
                 '// temporary flag for the v1 migration',
                 '// The --foo option is temporary.', '// This env var is temporary.',
                 '// temporary compatibility setting', '// temporary hack',
-                '// temporary fix; remove once beacon ships auth',
+                '// temporary fix; remove once the gateway ships auth',
                 '// temporary override', '// Temporarily support the old flag.',
                 '// Temporarily accept unauthenticated registrations.',
                 '// temporary field kept for old clients',
                 '// The old field is temporarily retained.',
-                '// temporary copy of port/tokenreview',
-                '// temporary bridge for v2 clients', '// temporary support for v2 wrappers',
+                '// temporary copy of auth/tokenreview',
+                '// temporary bridge for v2 clients', '// temporary support for v2 agents',
                 '// temporary object API', '// temporary credential override',
                 '// temporary file; temporary flag', '// temporary file. Temporary hack',
                 '// temporary file, temporary feature', '// temporary mysterious mechanism'):
@@ -204,7 +220,7 @@ class ContractGuards(unittest.TestCase):
                 self.assertNotIn('law4-unregistered', [r for r, _, _ in self.scan('a.go', source)])
 
     def test_operation_context_does_not_waive_lifetime_claims(self):
-        for source in ('// temporary compatibility mode for each request from v2 wrappers',
+        for source in ('// temporary compatibility mode for each request from v2 agents',
                        '// The temporary API is kept for the request path from v1 clients.',
                        '// Use a temporary API for this test.',
                        '// temporary flag for the test',
@@ -235,11 +251,11 @@ class ContractGuards(unittest.TestCase):
 
     def test_until_retained_copy_policy_and_qualification_lifetimes(self):
         claims = (
-            ('a.md', '`v0.13.x`. Until the minimum supported operator is >= v0.14.0, the wrapper keeps'),
+            ('a.md', '`v0.13.x`. Until the minimum supported controller is >= v0.14.0, the agent keeps'),
             ('a.yaml', '# pattern locally until a fragment release provides this tool.'),
             ('a.tpl', 'existing installs continue working until the helm-update pipeline populates'),
-            ('a.go', '// proxyReadersSupported stays false until Port qualification lifts the gate in'),
-            ('a.go', '// upgrade keeps its old, broad policy in vault until its operator re-inits'),
+            ('a.go', '// proxyReadersSupported stays false until gateway qualification lifts the gate in'),
+            ('a.go', '// upgrade keeps its old, broad policy in the store until its controller re-inits'),
         )
         for name, source in claims:
             with self.subTest(source=source):
@@ -408,7 +424,7 @@ class ContractGuards(unittest.TestCase):
                        'Retained for compatibility with 0.18 callers',
                        'Temporarily accept the bare HMAC form',
                        'for back-compat', 'back-compatible with pre-v0.1.64 operators',
-                       'backcompat shim', 'compatibility alias for --vault-addr',
+                       'backcompat shim', 'compatibility alias for --store-addr',
                        'retained for backward API compatibility',
                        'remove after 2026-12-01', 'TODO: remove in v0.20',
                        'remove by 2027-01-31', 'removed at v2.0',

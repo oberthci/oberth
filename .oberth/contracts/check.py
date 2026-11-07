@@ -71,7 +71,7 @@ def temporary_lifetime(line, go_source=False, prose=False):
     # never an open-ended list of feature nouns.
     resource = r"(?:files?|dirs?|directories|directory|buffers?|outputs?|keys?|credentials?|tokens?|listeners?|storage|snapshots?|roots?|pods?|units?|binaries|binary|downloads?|caches?|databases?|objects?|paths?|artifacts?)"
     feature = r"(?:API|feature|flag|option|setting|field|override|hack|copy|support|compatibility|workaround)"
-    modifier = r"(?:(?:TLS|SA|S3|R2|prefix-scoped|probe|test|activation|beacon|banner|cosign|client|report|parent-side|Go|env|mounted-root|body/error|owned|raw|release|per-check|tool)\s+){0,3}"
+    modifier = r"(?:(?:TLS|SA|S3|R2|prefix-scoped|probe|test|activation|banner|cosign|client|report|parent-side|Go|env|mounted-root|body/error|owned|raw|release|per-check|tool)\s+){0,3}"
     literals = list(re.finditer(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`[^`]*`', line))
     offset = 0
     for sentence in re.split(r";|\.(?=\s|$)", line):
@@ -176,6 +176,28 @@ def files(root):
     return sorted(set(result.stdout.decode().split("\0")) - {""})
 
 
+def default_table_rows(lines):
+    """Rows of tables whose header declares a default column.
+
+    The word "default" in ordinary table prose (a law name, a branch, a
+    profile) is not a copied default value; the header identifies one.
+    """
+    rows = set()
+    active = False
+    for index, line in enumerate(lines):
+        if "|" not in line:
+            active = False
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if cells and all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells):
+            if index:
+                headers = lines[index - 1].strip().strip("|").split("|")
+                active = any(re.fullmatch(r"(?:current\s+|public\s+)?defaults?(?:\s+value)?(?:\s*\([^)]*\))?", header.strip("* `\t "), re.I) for header in headers)
+        elif active:
+            rows.add(index)
+    return rows
+
+
 def scan(root, names, registry, deprecations):
     found = []
     pipeline = "\n".join((root / p).read_text(errors="replace") for p in names if p.startswith(".oberth/") and p.endswith((".yaml", ".yml")))
@@ -216,12 +238,13 @@ def scan(root, names, registry, deprecations):
         for line in sunset_lines:
             if (structured_sunsets or sunset_statement(line, path.suffix == ".go", path.suffix in {".md", ".yaml", ".yml", ".txt", ".html", ".tpl", ".json"})) and not registered_sunset(line, deprecations, name):
                 found.append(("law4-unregistered", name, line.strip()))
-        for line in lines:
+        default_rows = default_table_rows(lines) if path.suffix == ".md" else set()
+        for index, line in enumerate(lines):
             def add(rule):
                 found.append((rule, name, line.strip()))
             if CONFESSION.search(line) and not GENERATOR.search(line):
                 add("law1-confession")
-            if path.suffix==".md" and "|" in line and re.search(r"\bdefault\b|[A-Z][A-Z0-9]+_[A-Z0-9_]+",line) and "generat" not in content[max(0,content.find(line)-300):content.find(line)].lower():
+            if path.suffix==".md" and "|" in line and (index in default_rows or re.search(r"[A-Z][A-Z0-9]+_[A-Z0-9_]+",line)) and "generat" not in content[max(0,content.find(line)-300):content.find(line)].lower():
                 add("law2-handtyped-table")
             if name.endswith("values.yaml") and re.match(r"^\s*[a-zA-Z][\w-]*:",line):
                 key="value:"+line.split(":",1)[0].strip()
