@@ -359,8 +359,8 @@ spec:
             - --promotion-grant-max-lifetime={{ $grantMaxLifetime }}
             {{- end }}
             {{- $branches := .Values.branches | default dict -}}
-            {{- if and (hasKey $branches "protected") (kindIs "slice" $branches.protected) }}
-            - {{ printf "--protected-branches=%s" (join "," $branches.protected) | quote }}
+            {{- if and (hasKey $branches "reserved") (kindIs "slice" $branches.reserved) }}
+            - {{ printf "--reserved-branches=%s" (join "," $branches.reserved) | quote }}
             {{- end }}
           env:
             - name: VAULT_ADDR

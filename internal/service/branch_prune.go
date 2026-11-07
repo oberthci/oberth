@@ -48,13 +48,13 @@ type branchPruneArguments struct {
 		Branch      string `json:"branch"`
 		ExpectedSHA string `json:"expected_sha"`
 	} `json:"branches"`
-	MergedInto       string   `json:"merged_into"`
-	ExcludePrefixes  []string `json:"exclude_prefixes"`
-	OlderThan        string   `json:"older_than"`
-	AllowUnmerged    bool     `json:"allow_unmerged"`
-	Confirm          bool     `json:"confirm"`
-	PlanID           string   `json:"plan_id"`
-	ConfirmProtected string   `json:"confirm_protected"`
+	MergedInto      string   `json:"merged_into"`
+	ExcludePrefixes []string `json:"exclude_prefixes"`
+	OlderThan       string   `json:"older_than"`
+	AllowUnmerged   bool     `json:"allow_unmerged"`
+	Confirm         bool     `json:"confirm"`
+	PlanID          string   `json:"plan_id"`
+	ConfirmReserved string   `json:"confirm_reserved"`
 }
 
 type BranchPlanEntry struct {
@@ -65,7 +65,7 @@ type BranchPlanEntry struct {
 	Ahead           int    `json:"ahead"`
 	Behind          int    `json:"behind"`
 	LastCommit      string `json:"last_commit"`
-	Protected       bool   `json:"protected,omitempty"`
+	Reserved        bool   `json:"reserved,omitempty"`
 }
 
 type BranchPlanRefusal struct {
@@ -130,16 +130,16 @@ func (service *API) branchDeleteMany(ctx context.Context, actor api.Actor, raw j
 	}
 	entries := make([]model.BranchPruneEntry, len(selected))
 	heads := make([]gitcache.BranchHead, len(selected))
-	protected := false
+	reserved := false
 	for index, entry := range selected {
 		entries[index] = model.BranchPruneEntry{Branch: entry.Branch, SHA: entry.HeadSHA}
 		heads[index] = gitcache.BranchHead{Branch: entry.Branch, SHA: entry.HeadSHA}
-		protected = protected || entry.Protected
+		reserved = reserved || entry.Reserved
 	}
 	if err := service.branchDeletions.QueueBranchPrune(ctx, batchID, repository.ID, actor.Identity, entries); err != nil {
 		return plan, err
 	}
-	outcomes, pruneErr := service.branchPrune.PruneBranches(ctx, input, heads, protected)
+	outcomes, pruneErr := service.branchPrune.PruneBranches(ctx, input, heads, reserved)
 	skipped := make(map[string]string)
 	plan.Skipped = []BranchPlanRefusal{}
 	if pruneErr != nil {
@@ -163,7 +163,7 @@ func (service *API) branchDeleteMany(ctx context.Context, actor api.Actor, raw j
 		"plan_id": plan.PlanID, "batch_id": batchID, "repo": input, "repo_id": repository.ID,
 		"deleted": plan.Deleted, "skipped": len(skipped), "failed": 0, "allow_unmerged": args.AllowUnmerged,
 		"merged_into": plan.MergedInto, "older_than": args.OlderThan, "exclude_prefixes": args.ExcludePrefixes,
-		"explicit": len(args.Branches) > 0, "protected_confirmed": protected,
+		"explicit": len(args.Branches) > 0, "reserved_confirmed": reserved,
 	}
 	if pruneErr != nil {
 		details["failed"], details["deleted"], details["error"] = len(heads), 0, pruneErr.Error()
@@ -211,8 +211,8 @@ func (service *API) planBranchPrune(ctx context.Context, args branchPruneArgumen
 		return model.Repository{}, "", BranchPruneResponse{}, nil, fmt.Errorf("%w: at most %d branches per call", ErrInvalidInput, branchPruneMaxExplicit)
 	case len(args.ExcludePrefixes) > branchPruneMaxPrefixes:
 		return model.Repository{}, "", BranchPruneResponse{}, nil, fmt.Errorf("%w: at most %d exclude_prefixes", ErrInvalidInput, branchPruneMaxPrefixes)
-	case args.ConfirmProtected != "" && len(args.Branches) != 1:
-		return model.Repository{}, "", BranchPruneResponse{}, nil, fmt.Errorf("%w: confirm_protected applies only to a single explicit branch", ErrInvalidInput)
+	case args.ConfirmReserved != "" && len(args.Branches) != 1:
+		return model.Repository{}, "", BranchPruneResponse{}, nil, fmt.Errorf("%w: confirm_reserved applies only to a single explicit branch", ErrInvalidInput)
 	}
 	for _, prefix := range args.ExcludePrefixes {
 		if strings.TrimSpace(prefix) == "" || len(prefix) > branchPruneMaxPrefixLen {
@@ -256,8 +256,8 @@ func (service *API) planBranchPrune(ctx context.Context, args branchPruneArgumen
 				refusal.Reason = "head moved: expected " + strings.ToLower(request.ExpectedSHA) + ", found " + entry.SHA
 			case entry.Default:
 				refusal.Reason = "the default branch cannot be deleted"
-			case entry.Protected && args.ConfirmProtected != input+":"+request.Branch:
-				refusal.Reason = fmt.Sprintf("protected branch: delete it alone with confirm_protected %q", input+":"+request.Branch)
+			case entry.Reserved && args.ConfirmReserved != input+":"+request.Branch:
+				refusal.Reason = fmt.Sprintf("reserved branch: delete it alone with confirm_reserved %q", input+":"+request.Branch)
 			default:
 				candidates = append(candidates, entry)
 				continue
@@ -267,7 +267,7 @@ func (service *API) planBranchPrune(ctx context.Context, args branchPruneArgumen
 	} else {
 		cutoff := time.Now().Add(-olderThan)
 		for _, entry := range inventory.Branches {
-			if entry.Protected || excludedBranch(entry.Branch, args.ExcludePrefixes) {
+			if entry.Reserved || excludedBranch(entry.Branch, args.ExcludePrefixes) {
 				continue
 			}
 			if olderThan > 0 && !entry.CommittedAt.Before(cutoff) {
@@ -292,7 +292,7 @@ func (service *API) planBranchPrune(ctx context.Context, args branchPruneArgumen
 	var selected []BranchPlanEntry
 	for _, entry := range candidates {
 		planned := BranchPlanEntry{Branch: entry.Branch, HeadSHA: entry.SHA, Merged: entry.Merged, Ahead: entry.Ahead, Behind: entry.Behind,
-			LastCommit: entry.CommittedAt.Format(time.RFC3339), Protected: entry.Protected}
+			LastCommit: entry.CommittedAt.Format(time.RFC3339), Reserved: entry.Reserved}
 		patch, checked := equivalent[entry.Branch]
 		if entry.Merged {
 			patch, checked = true, true
@@ -329,7 +329,7 @@ func (service *API) planBranchPrune(ctx context.Context, args branchPruneArgumen
 
 func branchPlanID(input string, args branchPruneArguments, selected []BranchPlanEntry) string {
 	hash := sha256.New()
-	_, _ = fmt.Fprintf(hash, "oberth-branch-prune-v1\n%s\n%t\n%s\n", input, args.AllowUnmerged, args.ConfirmProtected)
+	_, _ = fmt.Fprintf(hash, "oberth-branch-prune-v1\n%s\n%t\n%s\n", input, args.AllowUnmerged, args.ConfirmReserved)
 	sorted := append([]BranchPlanEntry(nil), selected...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Branch < sorted[j].Branch })
 	for _, entry := range sorted {

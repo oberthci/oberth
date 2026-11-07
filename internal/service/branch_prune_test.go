@@ -65,8 +65,8 @@ func newPruneFixture(t *testing.T) *pruneFixture {
 	}
 	f.git(t, f.work, "clone", "--bare", f.work, f.upstream)
 	cache, err := gitcache.New(gitcache.Config{Root: filepath.Join(root, "cache"), AllowLocalUpstreams: true,
-		ProtectedBranches: []string{"main", "master"},
-		Upstream:          func(string) (string, error) { return f.upstream, nil }})
+		ReservedBranches: []string{"main", "master"},
+		Upstream:         func(string) (string, error) { return f.upstream, nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func TestBranchDeleteManyRefusals(t *testing.T) {
 		!strings.Contains(reasons["main"], "default branch") || strings.Join(planBranches(plan.Branches), ",") != "feature/b" {
 		t.Fatalf("explicit plan = %+v", plan)
 	}
-	// Selectors never pick protected branches, even with allow_unmerged.
+	// Selectors never pick reserved branches, even with allow_unmerged.
 	all, err := f.prune(t, pruneAdmin, map[string]any{"repo": f.repo.Name, "older_than": "1h", "allow_unmerged": true})
 	if err != nil {
 		t.Fatal(err)
@@ -249,23 +249,23 @@ func TestBranchDeleteManyRefusals(t *testing.T) {
 		}
 	}
 	// The default branch is refused even with its typed confirmation.
-	defaultBranch := map[string]any{"repo": f.repo.Name, "branches": []map[string]string{{"branch": "main", "expected_sha": f.initial}}, "confirm_protected": f.input + ":main"}
+	defaultBranch := map[string]any{"repo": f.repo.Name, "branches": []map[string]string{{"branch": "main", "expected_sha": f.initial}}, "confirm_reserved": f.input + ":main"}
 	if plan, err := f.prune(t, pruneAdmin, defaultBranch); err != nil || len(plan.Branches) != 0 || len(plan.Refused) != 1 || !strings.Contains(plan.Refused[0].Reason, "default branch") {
 		t.Fatalf("default branch plan = %+v, %v", plan, err)
 	}
-	// One configured protected branch, alone, with the typed confirmation.
-	single := map[string]any{"repo": f.repo.Name, "branches": []map[string]string{{"branch": "master", "expected_sha": f.initial}}, "confirm_protected": "wrong:master"}
+	// One configured reserved branch, alone, with the typed confirmation.
+	single := map[string]any{"repo": f.repo.Name, "branches": []map[string]string{{"branch": "master", "expected_sha": f.initial}}, "confirm_reserved": "wrong:master"}
 	if plan, err := f.prune(t, pruneAdmin, single); err != nil || len(plan.Branches) != 0 || len(plan.Refused) != 1 {
 		t.Fatalf("mistyped confirmation = %+v, %v", plan, err)
 	}
-	single["confirm_protected"] = f.input + ":master"
+	single["confirm_reserved"] = f.input + ":master"
 	plan, err = f.prune(t, pruneAdmin, single)
-	if err != nil || strings.Join(planBranches(plan.Branches), ",") != "master" || !plan.Branches[0].Protected {
-		t.Fatalf("confirmed protected plan = %+v, %v", plan, err)
+	if err != nil || strings.Join(planBranches(plan.Branches), ",") != "master" || !plan.Branches[0].Reserved {
+		t.Fatalf("confirmed reserved plan = %+v, %v", plan, err)
 	}
 	single["confirm"], single["plan_id"] = true, plan.PlanID
 	if executed, err := f.prune(t, pruneAdmin, single); err != nil || executed.Deleted != 1 {
-		t.Fatalf("confirmed protected deletion = %+v, %v", executed, err)
+		t.Fatalf("confirmed reserved deletion = %+v, %v", executed, err)
 	}
 	if got := f.git(t, f.mirror, "rev-parse", "refs/heads/main"); got != f.initial {
 		t.Fatalf("default branch changed: %s", got)

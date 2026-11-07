@@ -56,7 +56,7 @@ type Cache struct {
 	repositoryGate        func(context.Context, string) error
 	promotionPinAbandoned func(context.Context, string, string, string) (bool, error)
 	preFinalizeGate       func(context.Context) error
-	protectedBranches     []string
+	reservedBranches      []string
 	locks                 sync.Map
 	receiveLocks          sync.Map
 	policyRefreshes       sync.Map         // cache path -> policyRefresh; guarded by repoLock
@@ -99,12 +99,12 @@ func New(config Config) (*Cache, error) {
 			return nil, fmt.Errorf("invalid Git environment key %q", key)
 		}
 	}
-	protected, err := ProtectedBranchPatterns(config.ProtectedBranches)
+	reserved, err := ReservedBranchPatterns(config.ReservedBranches)
 	if err != nil {
 		return nil, err
 	}
 	cache := &Cache{
-		protectedBranches:     protected,
+		reservedBranches:      reserved,
 		allowLocalUpstreams:   config.AllowLocalUpstreams,
 		root:                  root,
 		outboxRoot:            outboxRoot,

@@ -13,7 +13,7 @@ import (
 )
 
 const branchUsage = "Usage: oberth branch prune <repository> [--merged-into <default-branch>] [--older-than <30d|72h>] [--exclude-prefix <prefix>]...\n" +
-	"         [--branch <name>=<sha>]... [--allow-unmerged] [--confirm --plan-id <id>] [--confirm-protected <upstream/org/repo:branch>]\n" +
+	"         [--branch <name>=<sha>]... [--allow-unmerged] [--confirm --plan-id <id>] [--confirm-reserved <upstream/org/repo:branch>]\n" +
 	"         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]\n" +
 	"       oberth branch deletions [--repo <repository>] [--status pending|propagated|failed|skipped] [--batch <id>]\n" +
 	"         [--limit N] [--before N] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]\n" +
@@ -60,7 +60,7 @@ func runBranchPrune(ctx context.Context, arguments []string, output io.Writer) e
 	allowUnmerged := flags.Bool("allow-unmerged", false, "also delete unmerged branches")
 	confirm := flags.Bool("confirm", false, "execute the plan named by --plan-id")
 	planID := flags.String("plan-id", "", "plan ID from the dry run")
-	confirmProtected := flags.String("confirm-protected", "", "typed confirmation to delete one protected branch")
+	confirmReserved := flags.String("confirm-reserved", "", "typed confirmation to delete one reserved branch")
 	var excludes, branches repeatedFlag
 	flags.Var(&excludes, "exclude-prefix", "skip branches with this prefix (repeatable)")
 	flags.Var(&branches, "branch", "explicit <name>=<expected-sha> (repeatable)")
@@ -83,7 +83,7 @@ func runBranchPrune(ctx context.Context, arguments []string, output io.Writer) e
 		}
 		request["branches"] = list
 	}
-	for key, value := range map[string]string{"merged_into": *mergedInto, "older_than": *olderThan, "plan_id": *planID, "confirm_protected": *confirmProtected} {
+	for key, value := range map[string]string{"merged_into": *mergedInto, "older_than": *olderThan, "plan_id": *planID, "confirm_reserved": *confirmReserved} {
 		if value != "" {
 			request[key] = value
 		}

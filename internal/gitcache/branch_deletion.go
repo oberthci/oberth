@@ -20,9 +20,9 @@ import (
 // still-present upstream tracking ref. Clients never see refs/oberth/.
 const deletingRefPrefix = "refs/oberth/deleting/heads/"
 
-// protectedBranchesEnv carries the configured protected-branch globs from the
+// reservedBranchesEnv carries the configured reserved-branch globs from the
 // server into its receive hooks.
-const protectedBranchesEnv = "OBERTH_PROTECTED_BRANCHES"
+const reservedBranchesEnv = "OBERTH_RESERVED_BRANCHES"
 
 // upstreamDeletionChunk bounds the delete refspecs of one upstream push.
 const upstreamDeletionChunk = 100
@@ -31,9 +31,9 @@ const upstreamDeletionChunk = 100
 // repository is not yet delivered: its ref diff must not absorb the prune.
 var ErrReceivePending = errors.New("an earlier receive of this repository is not yet delivered; retry shortly")
 
-// ProtectedBranchPatterns normalizes configured protected-branch globs.
+// ReservedBranchPatterns normalizes configured reserved-branch globs.
 // Patterns use path.Match syntax; "*" does not cross "/".
-func ProtectedBranchPatterns(values []string) ([]string, error) {
+func ReservedBranchPatterns(values []string) ([]string, error) {
 	patterns := make([]string, 0, len(values))
 	seen := make(map[string]bool, len(values))
 	for _, value := range values {
@@ -42,10 +42,10 @@ func ProtectedBranchPatterns(values []string) ([]string, error) {
 			continue
 		}
 		if len(value) > maximumRefPartBytes {
-			return nil, fmt.Errorf("protected branch pattern %q is too long", value)
+			return nil, fmt.Errorf("reserved branch pattern %q is too long", value)
 		}
 		if _, err := path.Match(value, ""); err != nil {
-			return nil, fmt.Errorf("protected branch pattern %q: %w", value, err)
+			return nil, fmt.Errorf("reserved branch pattern %q: %w", value, err)
 		}
 		seen[value] = true
 		patterns = append(patterns, value)
@@ -53,7 +53,7 @@ func ProtectedBranchPatterns(values []string) ([]string, error) {
 	return patterns, nil
 }
 
-func protectedByPattern(branch string, patterns []string) bool {
+func reservedByPattern(branch string, patterns []string) bool {
 	for _, pattern := range patterns {
 		if matched, err := path.Match(pattern, branch); err == nil && matched {
 			return true
@@ -62,19 +62,19 @@ func protectedByPattern(branch string, patterns []string) bool {
 	return false
 }
 
-func (c *Cache) protectedByConfig(branch string) bool {
+func (c *Cache) reservedByConfig(branch string) bool {
 	if c.hookChild {
-		patterns, err := ProtectedBranchPatterns(strings.Split(os.Getenv(protectedBranchesEnv), ","))
+		patterns, err := ReservedBranchPatterns(strings.Split(os.Getenv(reservedBranchesEnv), ","))
 		// An unreadable configuration cannot grant a deletion.
-		return err != nil || protectedByPattern(branch, patterns)
+		return err != nil || reservedByPattern(branch, patterns)
 	}
-	return protectedByPattern(branch, c.protectedBranches)
+	return reservedByPattern(branch, c.reservedBranches)
 }
 
-// BranchProtected reports whether a branch is the default branch or matches
-// a configured protected pattern.
-func (c *Cache) BranchProtected(branch, defaultBranch string) bool {
-	return branch == defaultBranch || c.protectedByConfig(branch)
+// BranchReserved reports whether a branch is the default branch or matches
+// a configured reserved pattern.
+func (c *Cache) BranchReserved(branch, defaultBranch string) bool {
+	return branch == defaultBranch || c.reservedByConfig(branch)
 }
 
 // markReceiveDeletionsLocked runs inside receive finalization, under the
@@ -149,10 +149,10 @@ type BranchHead struct {
 
 // Local prune outcomes.
 const (
-	PruneDeleted   = "deleted"
-	PruneMoved     = "moved"
-	PruneMissing   = "missing"
-	PruneProtected = "protected"
+	PruneDeleted  = "deleted"
+	PruneMoved    = "moved"
+	PruneMissing  = "missing"
+	PruneReserved = "reserved"
 )
 
 type PruneOutcome struct {
@@ -165,10 +165,10 @@ type PruneOutcome struct {
 // PruneBranches deletes many exact branch heads from the mirror in one ref
 // transaction. Each head is compared and deleted: a moved or missing head is
 // reported and left alone. The default branch is always refused; configured
-// protected branches only unless allowProtected is set by an explicitly
+// reserved branches only unless allowReserved is set by an explicitly
 // confirmed caller. Only local
 // refs change here; upstream propagation is the caller's asynchronous job.
-func (c *Cache) PruneBranches(ctx context.Context, input string, heads []BranchHead, allowProtected bool) ([]PruneOutcome, error) {
+func (c *Cache) PruneBranches(ctx context.Context, input string, heads []BranchHead, allowReserved bool) ([]PruneOutcome, error) {
 	if len(heads) == 0 {
 		return nil, nil
 	}
@@ -222,8 +222,8 @@ func (c *Cache) PruneBranches(ctx context.Context, input string, heads []BranchH
 		sha := strings.ToLower(head.SHA)
 		outcome := PruneOutcome{Branch: head.Branch, SHA: sha, Current: current[ref]}
 		switch {
-		case head.Branch == defaultBranch || !allowProtected && c.protectedByConfig(head.Branch):
-			outcome.Result = PruneProtected
+		case head.Branch == defaultBranch || !allowReserved && c.reservedByConfig(head.Branch):
+			outcome.Result = PruneReserved
 		case outcome.Current == "":
 			outcome.Result = PruneMissing
 		case outcome.Current != sha:
@@ -253,7 +253,7 @@ type BranchInventoryEntry struct {
 	Merged      bool
 	Ahead       int
 	Behind      int
-	Protected   bool
+	Reserved    bool
 	Default     bool
 }
 
@@ -334,7 +334,7 @@ func (c *Cache) BranchInventory(ctx context.Context, input, target string) (Bran
 			Ahead: ahead, Behind: behind, Merged: ahead == 0,
 			Default: branch == defaultBranch,
 		}
-		entry.Protected = c.BranchProtected(branch, defaultBranch)
+		entry.Reserved = c.BranchReserved(branch, defaultBranch)
 		inventory.Branches = append(inventory.Branches, entry)
 	}
 	sort.Slice(inventory.Branches, func(i, j int) bool { return inventory.Branches[i].Branch < inventory.Branches[j].Branch })

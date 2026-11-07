@@ -405,5 +405,5 @@ branch before propagation; `TestReplayPendingKeepsSkippingQuarantinedRecord`
 keeps operator-quarantined records untouched. `TestBlockingUpstreamNeverBlocksReceiveAndRetriesBounded`
 runs receives while the propagator is stuck on a forge that never answers, then
 exhausts the bounded attempts. Prune plans, stale confirmation, merged-only,
-protected and typed-confirmation refusals, per-batch audit and outbox repair
+reserved-branch and typed-confirmation refusals, per-batch audit and outbox repair
 have their own tests.

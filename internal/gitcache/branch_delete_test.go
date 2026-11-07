@@ -33,7 +33,7 @@ func TestDeleteBranchRefusesDefaultBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	outcomes, err := cache.PruneBranches(t.Context(), "example", []BranchHead{{Branch: "main", SHA: repository.initialSHA}}, false)
-	if err != nil || len(outcomes) != 1 || outcomes[0].Result != PruneProtected {
+	if err != nil || len(outcomes) != 1 || outcomes[0].Result != PruneReserved {
 		t.Fatalf("deletion = %+v, %v", outcomes, err)
 	}
 	if got := remoteRef(t, repository.upstream, "refs/heads/main"); got != repository.initialSHA {

@@ -81,11 +81,11 @@ promotion:
 
 # Branch globs (Go path.Match; * does not cross /) that no push --delete or
 # branch_delete_many selector may delete (#1490). Each repository's default
-# branch is always protected on top of this list. An admin may delete one
+# branch is always reserved on top of this list. An admin may delete one
 # listed branch alone with a typed confirmation. [] protects only the default
 # branch; null (or removing the key) keeps the server default main,master.
 branches:
-  protected: [main, master]
+  reserved: [main, master]
 
 # Workflow admission keeps a concurrent-workflow ceiling, the PSI hard-limit
 # valve and the disk floor. Kubernetes schedules each step pod by its requests.

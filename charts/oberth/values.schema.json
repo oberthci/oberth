@@ -1072,11 +1072,11 @@
       "additionalProperties": false,
       "description": "Branch deletion guards (#1490).",
       "properties": {
-        "protected": {
+        "reserved": {
           "type": ["array", "null"],
           "maxItems": 64,
           "items": {"type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[^,]+$"},
-          "description": "Branch globs (Go path.Match; * does not cross /) that no push or prune selector may delete; the default branch is always protected. [] protects only the default branch; null or absent keeps the server default main,master."
+          "description": "Branch globs (Go path.Match; * does not cross /) that no push or prune selector may delete; the default branch is always reserved. [] reserves only the default branch; null or absent keeps the server default main,master."
         }
       }
     },

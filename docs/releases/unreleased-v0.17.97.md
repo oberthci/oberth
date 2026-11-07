@@ -101,16 +101,16 @@ is now asynchronous:
   `abandon` needs the record id and a reason, moves the file to
   `.receive-outbox/abandoned/` and is audited.
 
-**Protected branches.** Each repository's default branch can never be deleted:
+**Reserved branches.** Each repository's default branch can never be deleted:
 not by `git push --delete`, not by prune selectors, and not by an explicit
 `branch_delete_many` request, even with a confirmation. The globs of the new
-`--protected-branches` server flag (chart `branches.protected`, default
+`--reserved-branches` server flag (chart `branches.reserved`, default
 `[main, master]`; `[]` protects only the default branch; `null` keeps the server
 default) are refused the same way, except that an admin can delete exactly one
 such non-default branch with `branch_delete_many` and a typed
-`confirm_protected: "<upstream>/<org>/<repo>:<branch>"`. **Behaviour change:** a
+`confirm_reserved: "<upstream>/<org>/<repo>:<branch>"`. **Behaviour change:** a
 push deleting a non-default `main` or `master` branch is now refused; set
-`branches.protected` to change the list.
+`branches.reserved` to change the list.
 
 **Upgrade and compatibility.**
 

@@ -104,7 +104,7 @@ func (c *Cache) receiveWithTransport(ctx context.Context, input, actor, protocol
 		if transport != nil {
 			return transport()
 		}
-		return c.runTransport(ctx, commandSpec{dir: path, args: c.serviceArgs(ReceivePack, path), stdin: stdin, stdout: stdout, stderr: stderr, env: map[string]string{"GIT_PROTOCOL": protocol, "OBERTH_RECEIVE_OUTBOX": c.outboxRoot, "OBERTH_RECEIVE_REPO": identity, protectedBranchesEnv: strings.Join(c.protectedBranches, ",")}})
+		return c.runTransport(ctx, commandSpec{dir: path, args: c.serviceArgs(ReceivePack, path), stdin: stdin, stdout: stdout, stderr: stderr, env: map[string]string{"GIT_PROTOCOL": protocol, "OBERTH_RECEIVE_OUTBOX": c.outboxRoot, "OBERTH_RECEIVE_REPO": identity, reservedBranchesEnv: strings.Join(c.reservedBranches, ",")}})
 	}, handler)
 }
 

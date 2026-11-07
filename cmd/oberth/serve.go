@@ -174,7 +174,7 @@ type serveOptions struct {
 	promotionGrantMaxLifetime time.Duration
 
 	gitCommandTimeout       time.Duration
-	protectedBranches       string
+	reservedBranches        string
 	gcInterval              time.Duration
 	pushBannerURL           string
 	auditTSAURL             string
@@ -323,7 +323,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.argoResourceSamplerConfig, "argo-resource-sampler-config", "", "administrator-owned kubelet sampler JSON config; disabled when empty")
 	flags.DurationVar(&options.promotionGrantMaxLifetime, "promotion-grant-max-lifetime", 24*time.Hour, "maximum lifetime for promotion grants (default 24h, hard ceiling 168h)")
 	flags.DurationVar(&options.gitCommandTimeout, "git-timeout", 10*time.Minute, "Git command timeout")
-	flags.StringVar(&options.protectedBranches, "protected-branches", "main,master", "comma-separated branch globs that, like the default branch, no push or prune may delete")
+	flags.StringVar(&options.reservedBranches, "reserved-branches", "main,master", "comma-separated branch globs that, like the default branch, no push or prune may delete")
 	flags.DurationVar(&options.gcInterval, "git-gc-interval", 24*time.Hour, "periodic Git GC interval")
 	flags.StringVar(&options.pushBannerURL, "push-banner-url", "", "optional HTTPS dashboard URL echoed to every accepted git push")
 	flags.StringVar(&options.auditTSAURL, "audit-tsa-url", "", "RFC 3161 timestamp authority HTTPS URL (empty disables external timestamps)")
@@ -754,7 +754,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		RepositoryGate:        upstreams.RequireActive,
 		PreFinalizeGate:       anchors.AllowMutation,
 		PromotionPinAbandoned: database.AbandonedPromotionPin,
-		ProtectedBranches:     strings.Split(options.protectedBranches, ","),
+		ReservedBranches:      strings.Split(options.reservedBranches, ","),
 	})
 	if err != nil {
 		return err

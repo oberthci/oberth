@@ -252,7 +252,7 @@ Use oberth branch <command> --help for command flags.
 
 ```text
 Usage: oberth branch prune <repository> [--merged-into <default-branch>] [--older-than <30d|72h>] [--exclude-prefix <prefix>]...
-         [--branch <name>=<sha>]... [--allow-unmerged] [--confirm --plan-id <id>] [--confirm-protected <upstream/org/repo:branch>]
+         [--branch <name>=<sha>]... [--allow-unmerged] [--confirm --plan-id <id>] [--confirm-reserved <upstream/org/repo:branch>]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
        oberth branch deletions [--repo <repository>] [--status pending|propagated|failed|skipped] [--batch <id>]
          [--limit N] [--before N] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
@@ -264,7 +264,7 @@ upstream deletion follows asynchronously. Read per-branch upstream state with br
 
 ```text
 Usage: oberth branch prune <repository> [--merged-into <default-branch>] [--older-than <30d|72h>] [--exclude-prefix <prefix>]...
-         [--branch <name>=<sha>]... [--allow-unmerged] [--confirm --plan-id <id>] [--confirm-protected <upstream/org/repo:branch>]
+         [--branch <name>=<sha>]... [--allow-unmerged] [--confirm --plan-id <id>] [--confirm-reserved <upstream/org/repo:branch>]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
        oberth branch deletions [--repo <repository>] [--status pending|propagated|failed|skipped] [--batch <id>]
          [--limit N] [--before N] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
@@ -1212,7 +1212,7 @@ Usage of serve:
         configured chart networkPolicy.enabled (true or false); omitted means unavailable, not measured CNI enforcement
   -promotion-grant-max-lifetime duration
         maximum lifetime for promotion grants (default 24h, hard ceiling 168h) (default 24h0m0s)
-  -protected-branches string
+  -reserved-branches string
         comma-separated branch globs that, like the default branch, no push or prune may delete (default "main,master")
   -push-banner-url string
         optional HTTPS dashboard URL echoed to every accepted git push

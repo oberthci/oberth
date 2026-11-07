@@ -195,7 +195,7 @@ func TestPruneBranchesComparesEachHead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{PruneDeleted, PruneMoved, PruneMissing, PruneProtected}
+	want := []string{PruneDeleted, PruneMoved, PruneMissing, PruneReserved}
 	for index, outcome := range outcomes {
 		if outcome.Result != want[index] {
 			t.Fatalf("outcomes = %+v, want %v", outcomes, want)
@@ -336,15 +336,15 @@ func TestBranchInventoryClassifiesMergedAndPatchEquivalent(t *testing.T) {
 	if err != nil || len(equivalence) != 1 || !equivalence["feature/gone"] {
 		t.Fatalf("patch equivalence = %v, %v", equivalence, err)
 	}
-	if entry := byName["main"]; !entry.Protected || !entry.Default {
+	if entry := byName["main"]; !entry.Reserved || !entry.Default {
 		t.Fatalf("default entry = %+v", entry)
 	}
 }
 
-func TestReceiveHookRefusesConfiguredProtectedBranchDeletion(t *testing.T) {
+func TestReceiveHookRefusesConfiguredReservedBranchDeletion(t *testing.T) {
 	r, c, _ := hookSecurityFixture(t)
 	c.hookChild = true
-	t.Setenv(protectedBranchesEnv, "master,release/*")
+	t.Setenv(reservedBranchesEnv, "master,release/*")
 	for ref, refused := range map[string]bool{"refs/heads/master": true, "refs/heads/release/1.0": true, "refs/heads/feature/x": false, "refs/heads/main": true} {
 		err := c.nativeUpdate(t.Context(), ref, r.initialSHA, zeroObjectID)
 		if (err != nil) != refused {
@@ -364,18 +364,18 @@ func runGitInput(t *testing.T, dir, input string, args ...string) {
 	}
 }
 
-func TestPruneRefusesDefaultBranchEvenWhenProtectedAllowed(t *testing.T) {
+func TestPruneRefusesDefaultBranchEvenWhenReservedAllowed(t *testing.T) {
 	t.Parallel()
 	repository, cache, ready, _ := deletionFixture(t, filepath.Join(t.TempDir(), "cache"))
-	cache.protectedBranches = []string{"release/*"}
+	cache.reservedBranches = []string{"release/*"}
 	runGit(t, ready.Path, "update-ref", "refs/heads/release/1", repository.initialSHA)
 	heads := []BranchHead{{Branch: "main", SHA: repository.initialSHA}, {Branch: "release/1", SHA: repository.initialSHA}}
 	outcomes, err := cache.PruneBranches(t.Context(), "example", heads, false)
-	if err != nil || outcomes[0].Result != PruneProtected || outcomes[1].Result != PruneProtected {
+	if err != nil || outcomes[0].Result != PruneReserved || outcomes[1].Result != PruneReserved {
 		t.Fatalf("unconfirmed = %+v, %v", outcomes, err)
 	}
 	outcomes, err = cache.PruneBranches(t.Context(), "example", heads, true)
-	if err != nil || outcomes[0].Result != PruneProtected || outcomes[1].Result != PruneDeleted {
+	if err != nil || outcomes[0].Result != PruneReserved || outcomes[1].Result != PruneDeleted {
 		t.Fatalf("confirmed = %+v, %v", outcomes, err)
 	}
 	if got := remoteRef(t, ready.Path, "refs/heads/main"); got != repository.initialSHA {
