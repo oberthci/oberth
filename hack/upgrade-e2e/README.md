@@ -19,8 +19,11 @@ both on success or failure. It never selects an existing cluster.
 The script downloads the requested published chart and signed release record,
 checks the public key against its pinned SHA-256, verifies the record's signature,
 and verifies the chart digest and server image reference against that record.
-Transparency-log verification is disabled for this pinned-key blob signature;
-this rehearsal does not establish publication time or transparency inclusion.
+For `--from` releases after v0.17.95 the signature check also requires the
+record's public Rekor inclusion proof. Releases up to and including v0.17.95
+were signed without a transparency-log entry, so for those versions only the
+pinned-key signature is checked (cosign then prints its tlog warning), and the
+rehearsal does not establish publication time or transparency inclusion.
 
 It builds each candidate in order. Use exact commit arguments to repeat a
 trial, or `E2E_REPO` to select the source repository. Application versions come
