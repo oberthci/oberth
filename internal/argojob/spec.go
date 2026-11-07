@@ -569,6 +569,8 @@ type Request struct {
 	// Preserve helper resources in already-submitted Workflow identities.
 	legacyHelperStorage          bool
 	legacyProfileHelperResources bool
+	// legacyHelperStorageLimits keeps the v2 helper limit on undeclared steps.
+	legacyHelperStorageLimits bool
 	// legacyStepUsage reconstructs already-submitted pre-floor wrappers only;
 	// new submissions must never opt out of the instrumentation memory guard.
 	legacyStepUsage bool
@@ -921,11 +923,8 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 		return nil, err
 	}
 	delete(workflow.Annotations, helperStorageAnnotation)
-	if !request.legacyHelperStorage {
-		workflow.Annotations[helperStorageAnnotation] = helperStoragePolicy
-		if request.legacyProfileHelperResources {
-			workflow.Annotations[helperStorageAnnotation] = legacyHelperStoragePolicy
-		}
+	if policy := request.helperStoragePolicy(); policy != "" {
+		workflow.Annotations[helperStorageAnnotation] = policy
 	}
 	if err := projectExecutorTokens(workflow, config, !request.legacyHelperStorage); err != nil {
 		return nil, err

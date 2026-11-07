@@ -69,11 +69,11 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config, storage bool)
 		volumes, _ := patch["volumes"].([]any)
 		patch["volumes"] = append(volumes, map[string]any{"name": executorTokenVolume, "secret": nil, "emptyDir": map[string]any{"medium": "Memory", "sizeLimit": "1Mi"}})
 		// Only historical policies preserve the old empty named-profile budgets.
-		// New server-owned v2 patches retain the verified profile and all wiring.
-		pinnedProfile := workflow.Annotations[nonrootProfileAnnotation] != "" && workflow.Annotations[helperStorageAnnotation] != helperStoragePolicy
+		// New server-owned v2/v3 patches retain the verified profile and all wiring.
+		pinnedProfile := workflow.Annotations[nonrootProfileAnnotation] != "" && !profileHelperBudgets(workflow)
 		controlResources := corev1.ResourceRequirements{}
 		if !pinnedProfile {
-			controlResources = executorResourcesWithStorage(storage)
+			controlResources = helperResources(workflow, t, storage)
 		}
 		waiter := corev1.Container{Name: executorTokenWaiter, Image: config.SourceSeedImage, Command: []string{"sh", "-c", executorTokenWaitCommand}, SecurityContext: nonrootContainerSecurity(0), Resources: controlResources, VolumeMounts: []corev1.VolumeMount{{Name: executorTokenVolume, MountPath: executorTokenDir}}}
 		initializers, _ := patch["initContainers"].([]any)
@@ -88,7 +88,7 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config, storage bool)
 				if name, ok := value["name"].(string); ok {
 					if name == "init" {
 						if _, exists := value["resources"]; !pinnedProfile && !exists {
-							value["resources"] = executorResourcesWithStorage(storage)
+							value["resources"] = helperResources(workflow, t, storage)
 						}
 						merged = append(merged, waiter)
 						order = append(order, map[string]string{"name": executorTokenWaiter})
@@ -127,14 +127,14 @@ func projectExecutorTokens(workflow *wfv1.Workflow, config Config, storage bool)
 				}
 				// Existing server-authored guards keep their resources and commands.
 				if _, exists := value["resources"]; !exists {
-					value["resources"] = executorResourcesWithStorage(storage)
+					value["resources"] = helperResources(workflow, t, storage)
 				}
 			}
 			if hasWait && !foundWait {
-				containers = append(containers, map[string]any{"name": "wait", "resources": executorResourcesWithStorage(storage)})
+				containers = append(containers, map[string]any{"name": "wait", "resources": helperResources(workflow, t, storage)})
 			}
 			if (t.Resource != nil || t.Data != nil) && !foundMain {
-				containers = append(containers, map[string]any{"name": "main", "resources": executorResourcesWithStorage(storage)})
+				containers = append(containers, map[string]any{"name": "main", "resources": helperResources(workflow, t, storage)})
 			}
 			patch["containers"] = containers
 		}

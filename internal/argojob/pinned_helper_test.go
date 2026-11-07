@@ -25,7 +25,7 @@ func TestPinnedProfileNewHelpersHaveBudgets(t *testing.T) {
 			for _, c := range append(pod.Spec.InitContainers, pod.Spec.Containers...) {
 				switch c.Name {
 				case "init", "wait", executorTokenWaiter:
-					assertBoundedControlContainer(t, c)
+					assertControlContainer(t, c, false)
 				}
 			}
 			// A named nonroot leaf stamps the entire Workflow; ordinary siblings must
@@ -35,7 +35,7 @@ func TestPinnedProfileNewHelpersHaveBudgets(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, c := range append(ordinary.InitContainers, ordinary.Containers...) {
-				assertBoundedControlContainer(t, c)
+				assertControlContainer(t, c, false)
 			}
 			if ordinary.SecurityContext != nil {
 				t.Fatal("ordinary sibling gained a nonroot Pod context")
@@ -52,7 +52,7 @@ func TestPinnedProfileNewHelpersHaveBudgets(t *testing.T) {
 // Re-enter Create through a new controller, fresh controller verification and
 // the persisted API object, not an in-memory request carrying legacy flags.
 func TestPinnedProfileHelperPolicyRecovery(t *testing.T) {
-	for _, policy := range []string{"", legacyHelperStoragePolicy, helperStoragePolicy} {
+	for _, policy := range []string{"", legacyHelperStoragePolicy, cappedHelperStoragePolicy, helperStoragePolicy} {
 		t.Run(policy, func(t *testing.T) {
 			pod, cm := nonrootVerifierObjects()
 			kube := fake.NewClientset(pod, cm)
@@ -88,7 +88,7 @@ func TestPinnedProfileHelperPolicyRecovery(t *testing.T) {
 				t.Fatal("fixture policy mismatch")
 			}
 			count := len(seeds)
-			request.legacyHelperStorage, request.legacyProfileHelperResources = false, false
+			request.legacyHelperStorage, request.legacyProfileHelperResources, request.legacyHelperStorageLimits = false, false, false
 			request.nonrootProof = nil
 			controller = newController()
 			request, err = controller.PrepareNonroot(t.Context(), request)
@@ -132,7 +132,7 @@ func TestPinnedProfileHelperPolicyRecovery(t *testing.T) {
 }
 
 func TestPinnedProfileNewBuildCannotSelectHistoricalBudgets(t *testing.T) {
-	for _, authored := range []string{"", legacyHelperStoragePolicy, helperStoragePolicy, "unknown-policy"} {
+	for _, authored := range []string{"", legacyHelperStoragePolicy, cappedHelperStoragePolicy, helperStoragePolicy, "unknown-policy"} {
 		source := strings.Replace(nonrootTestDocument, "    oberth.ci/nonroot-templates: test", "    oberth.ci/nonroot-templates: test\n    oberth.ci/helper-storage: "+authored, 1)
 		request := nonrootFixtureProof(testRequest(pipeline.TriggerCI, source))
 		config := testConfig()

@@ -70,24 +70,20 @@ func TestReleaseWIFMatchesActualControllerObservation(t *testing.T) {
 	for _, shape := range wifControllerShapes {
 		t.Run(shape, func(t *testing.T) {
 			c, r := wifControllerInput(t, shape)
+			var input wfv1.Workflow
+			decode(t, shape+"-workflow.json", &input)
+			// These authenticated historical Pods predate v2 and v3. Recovery of
+			// their policy must reproduce the captured Workflow exactly.
+			if input.Annotations[helperStorageAnnotation] != legacyHelperStoragePolicy {
+				t.Fatal("unexpected historical helper policy")
+			}
+			if err := recoverHelperStorage(&input, &r); err != nil {
+				t.Fatal(err)
+			}
 			current, err := Build(c, r)
 			if err != nil {
 				t.Fatal(err)
 			}
-			var input wfv1.Workflow
-			decode(t, shape+"-workflow.json", &input)
-			// These authenticated historical Pods predate v2. On workflows
-			// without a named profile only the server policy marker changes;
-			// preserve the captured resources and every other field exactly.
-			if input.Annotations[helperStorageAnnotation] != legacyHelperStoragePolicy || current.Annotations[helperStorageAnnotation] != helperStoragePolicy {
-				t.Fatal("unexpected historical/current helper policy")
-			}
-			current.Annotations[helperStorageAnnotation] = legacyHelperStoragePolicy
-			identity, err := specIdentity(current)
-			if err != nil {
-				t.Fatal(err)
-			}
-			current.Annotations[identityAnnotation] = identity
 			if !reflect.DeepEqual(current, &input) {
 				t.Fatal("Build changed: recapture actual controller proof")
 			}
