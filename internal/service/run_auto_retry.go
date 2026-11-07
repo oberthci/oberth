@@ -25,7 +25,7 @@ func (scheduler *Scheduler) infrastructureAutoRetry(run model.Run, result JobRes
 	}
 	if result.TerminalObservation != nil {
 		for _, step := range result.TerminalObservation.Steps {
-			if (step.Status == model.StepFailed && (!eviction || !step.Evicted)) || (deadline && (step.Started || step.Status == model.StepRunning || step.Status == model.StepPassed)) {
+			if (step.Status == model.StepFailed && (!eviction || !step.Infrastructure())) || (deadline && (step.Started || step.Status == model.StepRunning || step.Status == model.StepPassed)) {
 				return false
 			}
 		}

@@ -781,6 +781,10 @@ func admitTemplateMetadata(location string, metadata wfv1.Metadata) []error {
 			if value != "none" {
 				problems = append(problems, fmt.Errorf("argoworkflow: %s.%s must be none", location, name))
 			}
+		case ExclusiveAnnotation:
+			if !ValidExclusiveClass(strings.TrimSpace(value)) {
+				problems = append(problems, fmt.Errorf("argoworkflow: %s.%s must name an exclusive class: 1 to %d lowercase letters, digits and inner hyphens", location, name, MaxExclusiveClassLength))
+			}
 		default:
 			problems = append(problems, fmt.Errorf("argoworkflow: %s.annotations is assigned by Oberth; Pod annotations select security profiles and injection webhooks", location))
 		}

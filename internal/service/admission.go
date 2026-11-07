@@ -51,6 +51,12 @@ type weightedAdmission struct {
 	reservations map[int64]*admissionReservation
 	// groups maps a shared group name to its granted reservations.
 	groups map[string][]*admissionReservation
+	// exclusiveLimits is the administrator's exclusive-class allowlist with
+	// each class's concurrent-run limit (#1499); exclusive maps a class to its
+	// granted reservations. Classes live in their own server-owned namespace,
+	// separate from YAML concurrency groups.
+	exclusiveLimits map[string]int
+	exclusive       map[string][]*admissionReservation
 	// onPark, when set, is called under the lock (it must not block) after a
 	// reservation is prepared while some prepared reservation is parked on its
 	// group, so the dispatch loop can claim past the parked run.
@@ -120,12 +126,14 @@ type admissionReservation struct {
 	group      string
 	groupName  string
 	groupLimit int
-	prepared   bool
-	granted    bool
-	submitted  bool
-	delayed    bool
-	released   bool
-	canceled   bool
+	// exclusive lists the server-allowlisted classes the run's steps declare.
+	exclusive []string
+	prepared  bool
+	granted   bool
+	submitted bool
+	delayed   bool
+	released  bool
+	canceled  bool
 	// retained marks a grant whose Workflow may still be running while its
 	// owner stops on an error that leaves the run owned for the restart
 	// pass. Its weight and group stay held for the rest of this process
@@ -169,6 +177,8 @@ type admissionRequest struct {
 	PriorityLookupFailed bool
 	Group                string
 	GroupLimit           int
+	// Exclusive lists allowlisted exclusive classes the run's steps declare.
+	Exclusive []string
 	// RefKind and SHA key the durable head-wait origin; HeadSince is that
 	// origin when one was recorded before a restart; Estimate is the run's
 	// predicted duration from history (#1085).
@@ -191,6 +201,7 @@ func newWeightedAdmission(capacity int) *weightedAdmission {
 		weights:      DefaultSizeWeights,
 		reservations: make(map[int64]*admissionReservation),
 		groups:       make(map[string][]*admissionReservation),
+		exclusive:    make(map[string][]*admissionReservation),
 	}
 }
 
@@ -339,6 +350,7 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 			}
 		}
 	}
+	reservation.exclusive = slices.Clone(request.Exclusive)
 	reservation.prepared = true
 	gate.grantLocked()
 	granted := reservation.granted
@@ -509,7 +521,7 @@ func (gate *weightedAdmission) grantLocked() {
 			index++
 			continue
 		}
-		if holder, ahead := gate.groupBlockerLocked(reservation); holder != "" || ahead != "" {
+		if gate.sharedBlockedLocked(reservation) {
 			index++
 			continue
 		}
@@ -552,6 +564,9 @@ func (gate *weightedAdmission) grantLocked() {
 		gate.runs++
 		if reservation.group != "" {
 			gate.groups[reservation.group] = append(gate.groups[reservation.group], reservation)
+		}
+		for _, class := range reservation.exclusive {
+			gate.exclusive[class] = append(gate.exclusive[class], reservation)
 		}
 		if !reservation.headSince.IsZero() {
 			gate.emitHeadLocked(headEvent{key: reservation.headKey(), clear: true})
@@ -664,6 +679,12 @@ func (gate *weightedAdmission) releaseLocked(reservation *admissionReservation) 
 			delete(gate.groups, reservation.group)
 		}
 	}
+	for _, class := range reservation.exclusive {
+		gate.exclusive[class] = slices.DeleteFunc(gate.exclusive[class], func(r *admissionReservation) bool { return r == reservation })
+		if len(gate.exclusive[class]) == 0 {
+			delete(gate.exclusive, class)
+		}
+	}
 	gate.grantLocked()
 }
 
@@ -688,7 +709,7 @@ func (gate *weightedAdmission) parkedLocked() int {
 			parked++
 			continue
 		}
-		if holder, ahead := gate.groupBlockerLocked(reservation); reservation.prepared && (holder != "" || ahead != "") {
+		if reservation.prepared && gate.sharedBlockedLocked(reservation) {
 			parked++
 		}
 	}
@@ -716,6 +737,85 @@ func (gate *weightedAdmission) groupBlockerLocked(reservation *admissionReservat
 	return "", ""
 }
 
+// exclusiveLimitLocked is the configured limit of a class. A class removed
+// from the allowlist while an adopted run still holds it keeps limit one, so
+// new work cannot start beside the live holder.
+func (gate *weightedAdmission) exclusiveLimitLocked(class string) int {
+	if limit := gate.exclusiveLimits[class]; limit > 0 {
+		return limit
+	}
+	return 1
+}
+
+// exclusiveBlockerLocked names the exclusive class a waiting reservation is
+// parked on: the class is at its limit, or an earlier prepared run of the
+// same class waits ahead of it (class FIFO). Empty when not parked.
+func (gate *weightedAdmission) exclusiveBlockerLocked(reservation *admissionReservation) string {
+	if len(reservation.exclusive) == 0 || reservation.granted {
+		return ""
+	}
+	for _, class := range reservation.exclusive {
+		if len(gate.exclusive[class]) >= gate.exclusiveLimitLocked(class) {
+			return class
+		}
+	}
+	for _, candidate := range gate.waiters {
+		if candidate == reservation {
+			break
+		}
+		if !candidate.prepared || gate.adminHeldLocked(candidate) {
+			continue
+		}
+		for _, class := range reservation.exclusive {
+			if slices.Contains(candidate.exclusive, class) {
+				return class
+			}
+		}
+	}
+	return ""
+}
+
+// validExclusiveClasses accepts a bounded, sorted, distinct set of legal names.
+func validExclusiveClasses(classes []string) bool {
+	if len(classes) > argoworkflow.MaxExclusiveClassesPerRun {
+		return false
+	}
+	for index, class := range classes {
+		if !argoworkflow.ValidExclusiveClass(class) || (index > 0 && classes[index-1] >= class) {
+			return false
+		}
+	}
+	return true
+}
+
+// adoptExclusive makes an adopted grant hold the exclusive classes its live
+// Workflow declares, even above the current limit: running work is never
+// interrupted, and new members wait until the class drains below its limit.
+func (gate *weightedAdmission) adoptExclusive(reservation *admissionReservation, classes []string) {
+	if reservation == nil || len(classes) == 0 || !validExclusiveClasses(classes) {
+		return
+	}
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	if !reservation.granted || reservation.released || len(reservation.exclusive) != 0 {
+		return
+	}
+	reservation.exclusive = slices.Clone(classes)
+	for _, class := range classes {
+		gate.exclusive[class] = append(gate.exclusive[class], reservation)
+	}
+}
+
+// sharedBlockedLocked reports a waiter parked on its concurrency group or an
+// exclusive class. Such a run waits for other runs, not for the node, so it
+// never stops the grant pass for unrelated claims behind it.
+func (gate *weightedAdmission) sharedBlockedLocked(reservation *admissionReservation) bool {
+	if holder, ahead := gate.groupBlockerLocked(reservation); holder != "" || ahead != "" {
+		return true
+	}
+	return gate.exclusiveBlockerLocked(reservation) != ""
+}
+
 // headBlockerLocked returns the waiter that stops the grant pass: the first
 // claimed run in queue order that is prepared, not parked on its group
 // capacity, and still not granted. grantLocked has already admitted every
@@ -730,7 +830,7 @@ func (gate *weightedAdmission) headBlockerLocked() *admissionReservation {
 		if !reservation.prepared {
 			return nil
 		}
-		if holder, ahead := gate.groupBlockerLocked(reservation); holder != "" || ahead != "" {
+		if gate.sharedBlockedLocked(reservation) {
 			continue
 		}
 		return reservation
@@ -807,6 +907,7 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 		if result.Group != "" {
 			result.GroupLimit = max(1, reservation.groupLimit)
 		}
+		result.ExclusiveClasses = slices.Clone(reservation.exclusive)
 	}
 	if reservation.granted {
 		result.State = "admitted"
@@ -831,7 +932,12 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 			result.GroupRunRepos[waiter.runID] = waiter.repoID
 		}
 	}
-	if reservation.prepared && result.GroupHolder == "" && result.GroupAhead == "" {
+	if reservation.prepared {
+		if class := gate.exclusiveBlockerLocked(reservation); class != "" {
+			result.ExclusiveBlocked, result.ExclusiveClass, result.ExclusiveLimit = true, class, gate.exclusiveLimitLocked(class)
+		}
+	}
+	if reservation.prepared && result.GroupHolder == "" && result.GroupAhead == "" && !result.ExclusiveBlocked {
 		if head := gate.headBlockerLocked(); head == reservation {
 			result.HeadOfQueue = true
 			result.BlockedBy = gate.blockerLocked(head)

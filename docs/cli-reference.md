@@ -1040,6 +1040,8 @@ Usage of serve:
         deprecated compatibility option; ignored by workflow admission (default 8000)
   -admission-disk-floor-bytes int
         when enabled and free bytes on /data are below this floor, admission is held until disk frees up (#673)
+  -admission-exclusive-classes string
+        comma-separated server-wide exclusive classes steps may declare with oberth.ci/exclusive, each class or class=limit (default limit 1); empty refuses every declaration (#1499)
   -admission-extended-resources string
         deprecated compatibility option; ignored by workflow admission (default "{}")
   -admission-io-runs int

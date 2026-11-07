@@ -227,6 +227,14 @@ spec:
             {{- if gt $diskFloorBytes 0 }}
             - --admission-disk-floor-bytes={{ $diskFloorBytes }}
             {{- end }}
+            {{- $exclusiveClasses := $admission.exclusiveClasses | default dict }}
+            {{- if $exclusiveClasses }}
+            {{- $exclusiveEntries := list }}
+            {{- range $name := keys $exclusiveClasses | sortAlpha }}
+            {{- $exclusiveEntries = append $exclusiveEntries (printf "%s=%d" $name (int64 (get $exclusiveClasses $name))) }}
+            {{- end }}
+            - {{ printf "--admission-exclusive-classes=%s" (join "," $exclusiveEntries) | quote }}
+            {{- end }}
             {{- $pressure := $admission.pressure | default dict }}
             {{- $pressureEnabled := true }}
             {{- if hasKey $pressure "enabled" }}{{- $pressureEnabled = $pressure.enabled }}{{- end }}

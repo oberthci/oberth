@@ -102,6 +102,14 @@ admission:
   # Hold new workflow admission below this free-space floor; existing grants
   # continue. Zero disables the disk floor.
   diskFloorBytes: 0
+  # Server-wide exclusive classes (#1499): class name -> concurrent-run limit.
+  # A step declaring template annotation oberth.ci/exclusive: <class> makes its
+  # run wait in Oberth's queue while <limit> runs of that class hold it, across
+  # all repositories. Empty (default) refuses every declaration. Example:
+  #   exclusiveClasses:
+  #     kvm: 1
+  # See docs/exclusive-classes.md.
+  exclusiveClasses: {}
   # Deprecated compatibility values: retained for upgrades, ignored by admission.
   declaredResources:
     extendedResources: {}

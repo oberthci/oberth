@@ -289,6 +289,27 @@ func (jobs *ArgoJobs) PipelineConcurrencyContract(ctx context.Context, request s
 	return group, limit, err
 }
 
+// PipelineExclusiveClasses reads the exclusive classes the run's steps
+// declare (#1499) from the same immutable document, without evaluating it.
+func (jobs *ArgoJobs) PipelineExclusiveClasses(ctx context.Context, request service.WorkflowRequest) ([]string, error) {
+	if jobs.routes != nil {
+		child, err := jobs.routes.forRequest(ctx, request)
+		if err != nil {
+			return nil, err
+		}
+		return child.PipelineExclusiveClasses(ctx, request)
+	}
+	source, err := jobs.readRunSource(request)
+	if err != nil {
+		return nil, jobs.noRunPipelineError(err, request)
+	}
+	workflow, err := argoworkflow.Decode(source)
+	if err != nil {
+		return nil, fmt.Errorf("app: read repository exclusive classes: %w", err)
+	}
+	return argoworkflow.DeclaredExclusiveClasses(workflow)
+}
+
 // PlannedSteps enumerates the run's declared step list from the checked-out
 // document, without evaluating anything and without a second trust surface:
 // the same Decode the submission path uses, then a read-only walk of the
@@ -1104,7 +1125,8 @@ func (jobs *ArgoJobs) result(completion argojob.Completion) service.JobResult {
 		for _, step := range completion.ReplayAttempts {
 			started := step.StartedAt != nil || step.Status == runprogress.StepRunning || step.Status == runprogress.StepPassed || step.Status == runprogress.StepFailed || step.Status == runprogress.StepTimedOut
 			observation.Steps = append(observation.Steps, model.RunObservedStep{Stage: step.Stage, Step: step.Step, Status: model.StepStatus(step.Status), Started: started,
-				Evicted: !step.AttemptAmbiguous && (step.InfrastructureReason == "Evicted" || strings.HasPrefix(step.InfrastructureReason, "Evicted: ")), StartedAt: step.StartedAt, FinishedAt: step.FinishedAt})
+				Evicted:         !step.AttemptAmbiguous && (step.InfrastructureReason == "Evicted" || strings.HasPrefix(step.InfrastructureReason, "Evicted: ")),
+				StartupDeadline: !step.AttemptAmbiguous && model.IsStartupDeadlineReason(step.InfrastructureReason), StartedAt: step.StartedAt, FinishedAt: step.FinishedAt})
 		}
 		result.TerminalObservation = observation
 	}

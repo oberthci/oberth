@@ -53,6 +53,13 @@ type AdmissionObservation struct {
 	GroupBlocked  bool             `json:"group_blocked,omitempty"`
 	GroupRunRepos map[string]int64 `json:"-"`
 	GroupAhead    string           `json:"group_ahead,omitempty"`
+	// ExclusiveClasses are the server-allowlisted exclusive classes the run's
+	// steps declare (#1499). ExclusiveBlocked names the class it is parked on
+	// and that class's limit. Holder identities are never exposed.
+	ExclusiveClasses []string `json:"exclusive_classes,omitempty"`
+	ExclusiveClass   string   `json:"exclusive_class,omitempty"`
+	ExclusiveLimit   int      `json:"exclusive_limit,omitempty"`
+	ExclusiveBlocked bool     `json:"exclusive_blocked,omitempty"`
 	// DiskFloor reports the opt-in disk-space admission hold (#673). When
 	// non-nil and BelowFloor is true, admission is held until disk frees up.
 	DiskFloor *DiskFloorObservation `json:"disk_floor,omitempty"`

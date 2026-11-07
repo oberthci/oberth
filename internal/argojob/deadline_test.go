@@ -44,7 +44,9 @@ func TestWorkflowDeadlineSubmittedAndRetryPreservesClock(t *testing.T) {
 				t.Fatalf("submitted deadline = %v, want %d", got.Spec.ActiveDeadlineSeconds, test.want)
 			}
 			leaf := got.Spec.Templates[0]
-			if leaf.ActiveDeadlineSeconds == nil || leaf.ActiveDeadlineSeconds.IntVal != 60 || leaf.Timeout != "75s" {
+			// #1499: the Pod deadline carries the start-up allowance; the
+			// declared step budget travels beside it on the step Pod.
+			if leaf.ActiveDeadlineSeconds == nil || int64(leaf.ActiveDeadlineSeconds.IntVal) != FlooredStepDeadline(60) || leaf.Metadata.Annotations[StepDeadlineAnnotation] != "60" || leaf.Timeout != "75s" {
 				t.Fatal("submission lost the shorter template deadlines")
 			}
 			created := got.CreationTimestamp

@@ -881,6 +881,7 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	}
 	applyExecutionDeadline(workflow, config, canonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo))
 	applyServerBounds(workflow, config)
+	applyStepDeadlineFloor(workflow)
 	applyServerSecurity(workflow)
 	injectServerVolumes(workflow, config, request, credentialed)
 	injectStepUsageMounts(workflow, request)

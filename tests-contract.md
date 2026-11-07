@@ -407,3 +407,16 @@ runs receives while the propagator is stuck on a forge that never answers, then
 exhausts the bounded attempts. Prune plans, stale confirmation, merged-only,
 reserved-branch and typed-confirmation refusals, per-batch audit and outbox repair
 have their own tests.
+
+Step deadline start-up allowance #1499: `TestBuildFloorsStepDeadlinesAndRecordsDeclaredBudget`
+checks the floored Pod deadline and server-owned declared budget on named and
+inline leaves, `TestStepDeadlineAnnotationIsServerOwned` refuses a repository
+copy, and `TestStartupDeadlineKillIsInfrastructure` /
+`TestStartupDeadlineRequiresServerBudgetAndStepScope` keep genuine, capped,
+workflow and foreign-Pod deadlines as the step's own failure.
+`TestStartupDeadlineStepAutomaticallyRetriesOnce` runs the scheduler and SQLite
+store end to end: one automatic retry, never an `Execution deadline exceeded.`
+reason. Exclusive classes #1499: `TestExclusiveClassSerializesAcrossRepositories`,
+`TestExclusiveClassLimitAndFIFO` and `TestExclusiveClassAdoptedHolderBlocksNewMembers`
+cover the gate; `TestExclusiveClassAllowlistRefusesUnknownClasses`, the
+argoworkflow syntax/count tests and the serve/chart flag tests cover the bounds.

@@ -197,7 +197,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 					// shared weight or other repositories' visibility.
 					return result, reason
 				}
-				if service.scope != nil && !result.Admission.GroupBlocked && result.Admission.GroupHolder == "" && result.Admission.GroupAhead == "" {
+				if service.scope != nil && !result.Admission.GroupBlocked && !result.Admission.ExclusiveBlocked && result.Admission.GroupHolder == "" && result.Admission.GroupAhead == "" {
 					// The group waits name runs of the same repository; any
 					// other wait says only that capacity is short, unless
 					// the blocking run is itself in scope.
@@ -256,6 +256,8 @@ func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
 			admission.DiskFloor.FreeBytes, admission.DiskFloor.FloorBytes)
 	case admission.GroupLimit > 0 && (admission.GroupBlocked || admission.GroupHolder != "" || admission.GroupAhead != ""):
 		return "Waiting for " + concurrencyGroupMessage(admission, false)
+	case admission.ExclusiveBlocked:
+		return fmt.Sprintf("Waiting for exclusive class %q (limit %d); runs outside the class are admitted meanwhile.", admission.ExclusiveClass, admission.ExclusiveLimit)
 	case admission.GroupHolder != "":
 		return fmt.Sprintf("Waiting for concurrency group %q, held by run %s of the same repository; "+
 			"runs outside the group are admitted meanwhile.", admission.Group, admission.GroupHolder)

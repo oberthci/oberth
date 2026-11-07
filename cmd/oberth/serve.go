@@ -43,6 +43,7 @@ import (
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/sshserver"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 
 	"k8s.io/client-go/kubernetes"
@@ -109,6 +110,12 @@ type serveOptions struct {
 	maxConcurrentFile       string
 	declaredAdmission       service.DeclaredAdmissionConfig
 	admissionDiskFloorBytes int64
+
+	// admissionExclusiveClasses is the raw exclusive-class allowlist (#1499);
+	// exclusiveClasses is its parsed form.
+	admissionExclusiveClasses string
+	exclusiveClasses          map[string]int
+
 	admissionPressure       service.AdmissionPressureConfig
 	admissionSizeWeights    string
 	admissionMaxHeadWait    time.Duration
@@ -268,6 +275,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.DurationVar(&options.admissionPressure.MaxDefer, "admission-pressure-max-defer", 20*time.Minute, "deprecated compatibility option; ignored by workflow admission")
 
 	flags.Int64Var(&options.admissionDiskFloorBytes, "admission-disk-floor-bytes", 0, "when enabled and free bytes on /data are below this floor, admission is held until disk frees up (#673)")
+	flags.StringVar(&options.admissionExclusiveClasses, "admission-exclusive-classes", "", "comma-separated server-wide exclusive classes steps may declare with oberth.ci/exclusive, each class or class=limit (default limit 1); empty refuses every declaration (#1499)")
 	flags.StringVar(&options.ciCacheRoot, "ci-cache-root", "/var/cache/oberth/ci", "CI host cache root")
 	flags.StringVar(&options.releaseCacheRoot, "release-cache-root", "/var/cache/oberth/release", "release host cache root")
 	flags.StringVar(&options.secretStoreAddress, "secretstore-address", "", "OpenBao API base URL for store-sourced release secrets (HTTPS)")
@@ -384,6 +392,11 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	if options.admissionStallTimeout <= 0 {
 		return serveOptions{}, errors.New("serve: --admission-stall-timeout must be positive")
 	}
+	classes, err := argoworkflow.ParseExclusiveClasses(options.admissionExclusiveClasses)
+	if err != nil {
+		return serveOptions{}, fmt.Errorf("serve: --admission-exclusive-classes: %w", err)
+	}
+	options.exclusiveClasses = classes
 	return options, nil
 }
 
@@ -845,6 +858,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		MaxRunLogBytes:                 options.runLogLimitBytes,
 		MutationGate:                   anchors.AllowMutation,
 		AdmissionDiskFloorBytes:        options.admissionDiskFloorBytes,
+		ExclusiveClasses:               options.exclusiveClasses,
 		AdmissionPressure:              options.admissionPressure,
 		SizeWeights:                    options.sizeWeights,
 		DeclaredAdmission:              options.declaredAdmission,

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -182,4 +183,54 @@ func (completion *Completion) classifyInfrastructure() {
 		completion.Infrastructure = true
 		completion.Reason = reason
 	}
+}
+
+// podStartupDeadlineReason classifies a step-level Pod deadline kill that the
+// step command did not cause (#1499). Kubernetes counts activeDeadlineSeconds
+// from Pod start, so scheduling contention, image pulls, init containers and
+// the post-exit wait sidecar are charged to the Pod. Two kills are
+// infrastructure: main exited 0 (the step itself succeeded), or main ran less
+// than the declared step budget Build recorded beside the floored Pod deadline.
+// A main container that used its whole declared budget remains the step's own
+// deadline failure, and a workflow-deadline kill is never reclassified.
+func podStartupDeadlineReason(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev1.Pod, stage, step string) string {
+	if !stepPodBound(workflow, node, pod) || pod.Status.Phase != corev1.PodFailed || pod.Status.Reason != "DeadlineExceeded" || pod.Spec.ActiveDeadlineSeconds == nil || workflowDeadlineExceeded(workflow) {
+		return ""
+	}
+	var main *corev1.ContainerStatus
+	for i := range pod.Status.ContainerStatuses {
+		status := &pod.Status.ContainerStatuses[i]
+		if status.Name != mainContainerName {
+			continue
+		}
+		if main != nil {
+			return ""
+		}
+		main = status
+	}
+	limit := *pod.Spec.ActiveDeadlineSeconds
+	if main != nil && main.State.Terminated != nil && main.State.Terminated.ExitCode == 0 && main.State.Running == nil && main.State.Waiting == nil {
+		return model.StartupDeadlineReasonPrefix + fmt.Sprintf("step %s/%s exited 0, but its Pod deadline of %ds expired outside the step command (Pod start-up or result upload).", stage, step, limit)
+	}
+	declared, ok := declaredStepDeadline(pod)
+	if !ok {
+		return ""
+	}
+	var runtime time.Duration
+	switch {
+	case main == nil || (main.State.Waiting != nil && main.State.Terminated == nil && main.State.Running == nil && main.ContainerID == ""):
+		// Main never started: the whole Pod deadline went to start-up.
+	case main.State.Terminated != nil && main.State.Running == nil && main.State.Waiting == nil:
+		t := main.State.Terminated
+		if t.StartedAt.IsZero() || t.FinishedAt.IsZero() || t.FinishedAt.Before(&t.StartedAt) {
+			return ""
+		}
+		runtime = t.FinishedAt.Sub(t.StartedAt.Time)
+	default:
+		return ""
+	}
+	if runtime >= time.Duration(declared)*time.Second {
+		return ""
+	}
+	return model.StartupDeadlineReasonPrefix + fmt.Sprintf("step %s/%s ran %s of its %ds budget; its Pod deadline of %ds expired during Pod start-up (scheduling, image pull, init containers).", stage, step, runtime.Truncate(time.Second), declared, limit)
 }

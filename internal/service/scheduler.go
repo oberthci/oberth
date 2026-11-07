@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,6 +64,10 @@ type SchedulerConfig struct {
 	// AdmissionDiskFloorBytes is an opt-in free-space admission floor on the data root (#673).
 	AdmissionDiskFloorBytes int64
 	AdmissionPressure       AdmissionPressureConfig
+	// ExclusiveClasses is the administrator's allowlist of server-wide
+	// exclusive classes and their concurrent-run limits (#1499). Empty
+	// refuses every declaration.
+	ExclusiveClasses map[string]int
 }
 
 type Scheduler struct {
@@ -206,6 +211,7 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 	scheduler.admission.maxRuns = config.MaxConcurrent
 	scheduler.admission.capacityConfig = model.AdmissionCapacityConfig{MaxConcurrentJobs: config.MaxConcurrent, BootDefault: config.MaxConcurrent, Source: "boot", File: config.MaxConcurrentFile}
 	scheduler.admission.pressure = newPressureCheck(config.AdmissionPressure)
+	scheduler.admission.exclusiveLimits = maps.Clone(config.ExclusiveClasses)
 	if config.AdmissionDiskFloorBytes > 0 {
 		scheduler.admission.diskFloor = newDiskFloorCheck(workspaceRoot, config.AdmissionDiskFloorBytes)
 	}
@@ -496,6 +502,15 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		reservation, err := scheduler.admission.adopt(run, size, pods)
 		if err != nil {
 			return err
+		}
+		if reader, ok := scheduler.jobs.(interface {
+			AdoptedExclusiveClasses(model.Run) ([]string, error)
+		}); ok {
+			classes, e := reader.AdoptedExclusiveClasses(run)
+			if e != nil {
+				return e
+			}
+			scheduler.admission.adoptExclusive(reservation, classes)
 		}
 		if reader, ok := scheduler.jobs.(interface {
 			AdoptedResourceFallback(model.Run) (model.ResourceAdmissionFallback, error)
@@ -911,6 +926,11 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	run.ConcurrencyGroup, run.ConcurrencyLimit = group, groupLimit
 	jobRequest.Run.ConcurrencyGroup, jobRequest.Run.ConcurrencyLimit = group, groupLimit
 	jobRequest.ConcurrencyGroup = group
+	exclusive, err := scheduler.pipelineExclusiveClasses(ctx, jobRequest)
+	if err != nil {
+		_ = logFile.Close()
+		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
+	}
 
 	receipt, err := scheduler.pipelineDemandReceipt(ctx, jobRequest)
 	if err != nil {
@@ -943,7 +963,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	}
 	headSince, estimate := scheduler.admissionHistory(ctx, run)
 	releaseAdmission, err := reservation.acquireRequest(ctx, admissionRequest{
-		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref, Size: size, Group: group, GroupLimit: groupLimit, Pods: pods, Requests: requests, Fallback: fallback,
+		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref, Size: size, Group: group, GroupLimit: groupLimit, Exclusive: exclusive, Pods: pods, Requests: requests, Fallback: fallback,
 		RefKind: run.RefKind, SHA: run.SHA, HeadSince: headSince, Estimate: estimate, PriorityMaximum: priorityMaximum, PriorityLookupFailed: priorityErr != nil,
 	})
 	if errors.Is(err, errAdmissionAbandoned) {
@@ -2114,6 +2134,38 @@ func (scheduler *Scheduler) pipelineConcurrencyGroup(ctx context.Context, reques
 	}
 	g, n, e, _ := read(scheduler.jobs)
 	return g, n, e
+}
+
+// PipelineExclusiveClassReader reads the exclusive classes the immutable
+// checked-out pipeline's steps declare (#1499), by the same static read.
+type PipelineExclusiveClassReader interface {
+	PipelineExclusiveClasses(context.Context, WorkflowRequest) ([]string, error)
+}
+
+// pipelineExclusiveClasses reads the run's declared exclusive classes and
+// refuses any class outside the administrator allowlist. The refusal is an
+// admission error: a rerun cannot change it, so it is never auto-retried.
+func (scheduler *Scheduler) pipelineExclusiveClasses(ctx context.Context, request WorkflowRequest) ([]string, error) {
+	reader, ok := any(scheduler.jobs).(PipelineExclusiveClassReader)
+	if release, releaseOK := any(scheduler.releaseJobs).(PipelineExclusiveClassReader); request.Run.Release && releaseOK {
+		reader, ok = release, true
+	}
+	if !ok {
+		return nil, nil
+	}
+	classes, err := reader.PipelineExclusiveClasses(ctx, request)
+	if err != nil {
+		return nil, &argoworkflow.AdmissionError{Cause: fmt.Errorf("read pipeline exclusive classes: %w", err)}
+	}
+	if !validExclusiveClasses(classes) {
+		return nil, &argoworkflow.AdmissionError{Cause: errors.New("read pipeline exclusive classes: invalid declaration")}
+	}
+	for _, class := range classes {
+		if scheduler.admission.exclusiveLimits[class] < 1 {
+			return nil, &argoworkflow.AdmissionError{Cause: fmt.Errorf("exclusive class %q is not on this server's allowlist (admission.exclusiveClasses); ask the administrator to configure it or remove the %s annotation", class, argoworkflow.ExclusiveAnnotation)}
+		}
+	}
+	return classes, nil
 }
 
 // pipelineCredentialed reports whether the run's pipeline declares secret-store

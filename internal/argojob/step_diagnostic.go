@@ -74,6 +74,8 @@ func (controller *Controller) collectRestartStepDiagnostics(ctx context.Context,
 				step.InfrastructureReason, step.storageLimit = "", limit
 			} else if reason := podInfrastructureReason(workflow, node, pod); reason != "" {
 				step.InfrastructureReason = reason
+			} else if reason := podStartupDeadlineReason(workflow, node, pod, step.Stage, step.Step); reason != "" {
+				step.InfrastructureReason = reason
 			}
 		}
 		if adopted && ok && step.StartedAt != nil && !step.StartedAt.After(restartedAt) && !step.AttemptAmbiguous && reason != "binding-mismatch" && reason != "ambiguous-attempt" {
@@ -92,6 +94,8 @@ func (controller *Controller) collectRestartStepDiagnostics(ctx context.Context,
 			if limit := podStepStorageLimit(workflow, node, pods[step.PodName]); limit != "" {
 				step.InfrastructureReason, step.storageLimit = "", limit
 			} else if reason := podInfrastructureReason(workflow, node, pods[step.PodName]); reason != "" {
+				step.InfrastructureReason = reason
+			} else if reason := podStartupDeadlineReason(workflow, node, pods[step.PodName], step.Stage, step.Step); reason != "" {
 				step.InfrastructureReason = reason
 			}
 		}

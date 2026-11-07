@@ -620,6 +620,27 @@ containing CI and real workload qualification remain separately required.
   `oberth admission groups` are read-only unscoped views; system status includes
   `admission.groups`. Scoped run/status views hide other repositories' holder
   and waiter identities. See [concurrency groups](docs/concurrency-groups.md).
+- Exclusive classes (#1499) are administrator-owned: `admission.exclusiveClasses`
+  (`--admission-exclusive-classes=class[=limit],...`, limit 1-64, default 1, at
+  most 32 classes) is an allowlist that defaults to empty, which refuses every
+  declaration. A step declares `oberth.ci/exclusive: <class>` on its template
+  metadata (also inline templates and `templateDefaults`); a class is 1-40 of
+  `[a-z0-9-]`, starting and ending with a letter or digit, at most four distinct
+  classes per pipeline. Membership is per run, read statically from the
+  immutable checkout before admission. At most `limit` member runs hold a class
+  across all repositories and triggers; further members wait in Oberth's
+  admission queue in priority/FIFO order within the class, hold no workflow
+  slot and create no Workflow or Pod, and never block runs outside the class.
+  Global ceiling, hold, disk floor, pressure and concurrency groups still apply.
+  An unlisted class is a deterministic admission refusal, never auto-retried.
+  Classes are an in-memory server namespace, separate from YAML group names;
+  they never become Argo synchronization objects, ConfigMaps, node selectors or
+  affinity, so they add no node reach. Restart adoption and uncertain-create
+  settlement re-hold classes from the live Workflow or the create receipt,
+  even above a lowered limit. Queued reason `exclusive <class> busy`; the
+  admission observation adds `exclusive_classes`, `exclusive_class`,
+  `exclusive_limit`, `exclusive_blocked`, without holder identities. No status,
+  label or layout is added. See [exclusive classes](docs/exclusive-classes.md).
 - Server-owned helper operations (secret-store delivery, trusted plan
   capture/acknowledge/deliver/load) are exec'd through the same
   `go -C /work/src/.oberth run .` invocation with explicit flags; the SDK's
@@ -2601,6 +2622,9 @@ remain required, with no public listener or insecure fallback.
 | Honour a repository-supplied synchronization mutex/semaphore name without trigger/repo scoping | Forbidden |
 | Let a repository-declared concurrency group span repositories, or change a run's weight, identity, or credentials | Forbidden |
 | Change the `oberth.ci/concurrency-group` annotation name, name grammar, or cross-trigger membership | Breaking |
+| Let a repository create an exclusive class, choose its limit, or turn a class into an Argo synchronization object, ConfigMap, node selector or affinity | Forbidden |
+| Change the `oberth.ci/exclusive` annotation name, class grammar, empty-allowlist refusal, or run-level membership | Breaking |
+| Charge Pod start-up to a step's declared deadline budget again, or report a step whose `main` exited 0 as a deadline failure | Breaking |
 | Admit a `volumeClaimTemplate` with `dataSource`, `dataSourceRef`, or `selector` | Forbidden |
 | Reduce a resource ceiling without verifying all known pipeline documents remain admissible | Breaking |
 | Admit a construct that reaches the node (`hostPort`, `hostPath`, `hostNetwork`, `nodeSelector`, `affinity`) or the cluster (`workflowTemplateRef`, `imagePullSecrets`) | Forbidden |
@@ -3015,6 +3039,24 @@ now retained as authorized run output (`message`, at most 1536 UTF-8 bytes,
 bytes). Log summaries quote control characters. Message contents do not establish
 infrastructure authority. Container OOM reason and Pod deadline reason are
 separate observations; exit 137 alone means neither.
+
+**Step deadlines exclude Pod start-up (#1499).** Build widens every literal leaf
+template `activeDeadlineSeconds` (including inline templates and
+`templateDefaults`) to `declared + clamp(declared/2, 120s, 600s)` and records
+the declared value in the server-owned Pod annotation
+`oberth.ci/step-deadline-seconds`, which template-metadata admission refuses
+from repositories. The workflow deadline is unchanged. A step Pod with Pod
+reason `DeadlineExceeded`, outside a workflow-deadline kill, whose owned `main`
+container exited 0, or never started, or ran less than the declared budget
+recorded beside the exact floored Pod deadline, is an infrastructure attempt:
+the run error starts with `Startup deadline: `, the terminal observation marks
+the attempt `startup_deadline`, the existing single automatic infrastructure
+retry applies exactly as for eviction evidence, no CI-red issue is opened, and
+resource deadline guidance does not replace the reason. A `main` container that
+used its declared budget, a Pod whose deadline Argo lowered to the remaining
+workflow budget, and a workflow deadline keep `Execution deadline exceeded.`
+Pre-upgrade Pods without the annotation get only the exit-0 rule. See
+[workflow deadlines](docs/workflow-deadlines.md#step-deadlines-exclude-pod-start-up-1499).
 
 Step log collection selects the failed init instead of requesting nonexistent
 main logs. Received complete records and inclusive timestamp/count/digest cursors

@@ -124,7 +124,8 @@ func (s *Store) projectRunIssue(ctx context.Context, tx *sql.Tx, run model.Run, 
 	return s.applyCIIssueProjection(ctx, tx, projection, outcome, now)
 }
 
-// The engine emits this prefix only from owned Pod eviction/pressure evidence.
+// The engine emits these prefixes only from owned Pod eviction/pressure or
+// startup-deadline evidence (#1499).
 // Keep scheduler errors (checkout, resource/group grants, etc.) visible even
 // though they share the infrastructure phase and have no failed step.
 func transientNodeFailure(run model.Run) bool {
@@ -132,7 +133,7 @@ func transientNodeFailure(run model.Run) bool {
 		return false
 	}
 	message := strings.TrimPrefix(run.Error, "trusted preflight: trusted preflight infrastructure failure: ")
-	return message == "Evicted" || strings.HasPrefix(message, "Evicted: ")
+	return message == "Evicted" || strings.HasPrefix(message, "Evicted: ") || model.IsStartupDeadlineReason(message)
 }
 
 func runIssueBody(run model.Run, failureTail string) string {

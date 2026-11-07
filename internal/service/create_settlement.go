@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -28,6 +29,9 @@ type createAdmission struct {
 	RunID, WorkflowName, SHA, Group string
 	RepoID                          int64
 	Size                            pipeline.Size
+	// Exclusive keeps the run's exclusive classes held across a restart
+	// while its Workflow create outcome is uncertain (#1499).
+	Exclusive []string `json:",omitempty"`
 }
 
 type pendingCreate struct {
@@ -65,7 +69,13 @@ func (scheduler *Scheduler) recordResourceAdmission(run model.Run, name string, 
 	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
 		return err
 	}
-	body, err := json.Marshal(createAdmission{Fallback: fallback, Pods: peak, RunID: run.ID, WorkflowName: name, SHA: run.SHA, RepoID: run.RepoID, Group: run.ConcurrencyGroup, Size: size.Effective()})
+	var exclusive []string
+	scheduler.admission.mu.Lock()
+	if held := scheduler.admission.reservations[run.QueueSequence]; held != nil && held.runID == run.ID {
+		exclusive = slices.Clone(held.exclusive)
+	}
+	scheduler.admission.mu.Unlock()
+	body, err := json.Marshal(createAdmission{Fallback: fallback, Pods: peak, RunID: run.ID, WorkflowName: name, SHA: run.SHA, RepoID: run.RepoID, Group: run.ConcurrencyGroup, Size: size.Effective(), Exclusive: exclusive})
 	if err != nil {
 		return err
 	}
@@ -114,6 +124,9 @@ func (scheduler *Scheduler) readCreateAdmission(run model.Run) (createAdmission,
 	if !saved.Fallback.Valid() {
 		return createAdmission{}, errors.New("invalid saved admission fallback")
 	}
+	if !validExclusiveClasses(saved.Exclusive) {
+		return createAdmission{}, errors.New("invalid saved exclusive classes")
+	}
 	return saved, nil
 }
 
@@ -140,6 +153,7 @@ func (scheduler *Scheduler) restoreCreateGrant(run model.Run, grant *admissionRe
 			scheduler.admission.mu.Lock()
 			grant.fallback = saved.Fallback
 			scheduler.admission.mu.Unlock()
+			scheduler.admission.adoptExclusive(grant, saved.Exclusive)
 		}
 		if err != nil {
 			// Conflicting historical groups are quarantined behind a full budget.
