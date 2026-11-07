@@ -53,6 +53,15 @@ esac
 runtime_receipt=${OBERTH_RUNTIME_RECEIPT:-/tmp/oberth-runtime-receipts/receipt}
 release_public_key=.oberth/pins/release-cosign.pub
 release_public_key_sha256=036dd71c9d3c07a19bff06d4392874014573f695620ac8554d9df175094c4a31
+# Signatures use the pinned key and cosign's TUF-provided public Sigstore
+# signing config, so every bundle and registry signature carries a public
+# Rekor inclusion proof (and the configured RFC 3161 timestamp). Every
+# verification below requires that log entry; none skips the tlog check.
+# Sigstore's trusted root comes from TUF, anchored on the root embedded in
+# the hash-pinned cosign binary. Releases up to and including v0.17.95 were
+# signed without a log entry; this script only ever signs and verifies its
+# own tag, so they are re-verified with their own tagged release.sh (see
+# docs/security.md for manual re-verification).
 
 fail() {
 	printf 'release: %s\n' "$*" >&2
@@ -357,9 +366,9 @@ clear_signing_identity() {
 stage_signed_bundle() {
 	payload=$1
 	bundle=$2
-	COSIGN_PASSWORD=$signing_password COSIGN_YES=true "$cosign_tool" sign-blob --use-signing-config=false --tlog-upload=false --key "$signing_key_file" --bundle "$bundle" "$payload" >/dev/null
+	COSIGN_PASSWORD=$signing_password COSIGN_YES=true "$cosign_tool" sign-blob --key "$signing_key_file" --bundle "$bundle" "$payload" >/dev/null
 	test -s "$bundle" || fail "cosign produced an empty signature bundle"
-	"$cosign_tool" verify-blob --key "$release_dir/cosign.pub" --insecure-ignore-tlog --bundle "$bundle" "$payload" >/dev/null || \
+	"$cosign_tool" verify-blob --key "$release_dir/cosign.pub" --bundle "$bundle" "$payload" >/dev/null || \
 		fail "staged signature bundle does not authenticate its payload"
 }
 
@@ -374,13 +383,13 @@ publish_signed_bundle() {
 	case "$bundle_status" in
 		200)
 			mv "$existing" "$bundle"
-			"$cosign_tool" verify-blob --key "$release_dir/cosign.pub" --insecure-ignore-tlog --bundle "$bundle" "$payload" >/dev/null || \
+			"$cosign_tool" verify-blob --key "$release_dir/cosign.pub" --bundle "$bundle" "$payload" >/dev/null || \
 				fail "existing immutable signature bundle does not authenticate its payload"
 			;;
 		404)
 			rm -f -- "$existing" "$existing_headers"
 			test -s "$bundle" || fail "staged signature bundle is missing"
-			"$cosign_tool" verify-blob --key "$release_dir/cosign.pub" --insecure-ignore-tlog --bundle "$bundle" "$payload" >/dev/null || \
+			"$cosign_tool" verify-blob --key "$release_dir/cosign.pub" --bundle "$bundle" "$payload" >/dev/null || \
 				fail "new signature bundle does not authenticate its payload"
 			put_status=$(put_conditionally "$object_key" "$bundle" application/json 'If-None-Match: *')
 			case "$put_status" in 200|201|409|412) ;;
@@ -390,7 +399,7 @@ publish_signed_bundle() {
 			readback_headers=$release_dir/.authoritative-bundle.headers
 			readback_status=$(authoritative_object_status "$object_key" "$readback" "$readback_headers")
 			[ "$readback_status" = 200 ] || fail "immutable signature readback returned HTTP $readback_status"
-			"$cosign_tool" verify-blob --key "$release_dir/cosign.pub" --insecure-ignore-tlog --bundle "$readback" "$payload" >/dev/null || \
+			"$cosign_tool" verify-blob --key "$release_dir/cosign.pub" --bundle "$readback" "$payload" >/dev/null || \
 				fail "authoritative signature bundle does not authenticate its payload after HTTP $put_status"
 			mv "$readback" "$bundle"
 			rm -f -- "$readback_headers"
@@ -415,7 +424,7 @@ publish_public_release() {
 	require_chart
 	verify_pinned_public_key "$release_dir/cosign.pub"
 	for payload in SHA256SUMS "oberth-${tag#v}.tgz" release.json; do
-		"$cosign_tool" verify-blob --key "$release_dir/cosign.pub" --insecure-ignore-tlog \
+		"$cosign_tool" verify-blob --key "$release_dir/cosign.pub" \
 			--bundle "$release_dir/$payload.sigstore.json" "$release_dir/$payload" >/dev/null || \
 			fail "public publication requires a valid staged signature"
 	done
@@ -650,10 +659,10 @@ WIFHELPER
 
 sign_registry_object() {
 	reference=$1
-	if ! "$cosign_tool" verify --key "$release_dir/cosign.pub" --insecure-ignore-tlog "$reference" >/dev/null 2>&1; then
-		COSIGN_PASSWORD=$signing_password COSIGN_YES=true "$cosign_tool" sign --use-signing-config=false --tlog-upload=false --key "$signing_key_file" "$reference" >/dev/null
+	if ! "$cosign_tool" verify --key "$release_dir/cosign.pub" "$reference" >/dev/null 2>&1; then
+		COSIGN_PASSWORD=$signing_password COSIGN_YES=true "$cosign_tool" sign --key "$signing_key_file" "$reference" >/dev/null
 	fi
-	"$cosign_tool" verify --key "$release_dir/cosign.pub" --insecure-ignore-tlog "$reference" >/dev/null || fail "registry signature verification failed for $reference"
+	"$cosign_tool" verify --key "$release_dir/cosign.pub" "$reference" >/dev/null || fail "registry signature verification failed for $reference"
 }
 
 scan_image() {
@@ -893,9 +902,9 @@ verify_public_binaries() {
 		cmp -s "$release_dir/$file" "$verify_dir/$file" || fail "downloaded $file differs from the published candidate"
 	done
 	(cd "$verify_dir" && sha256sum -c SHA256SUMS >/dev/null) || fail "downloaded artifact checksum mismatch"
-	"$cosign_tool" verify-blob --key "$verify_dir/cosign.pub" --insecure-ignore-tlog --bundle "$verify_dir/SHA256SUMS.sigstore.json" "$verify_dir/SHA256SUMS" >/dev/null || \
+	"$cosign_tool" verify-blob --key "$verify_dir/cosign.pub" --bundle "$verify_dir/SHA256SUMS.sigstore.json" "$verify_dir/SHA256SUMS" >/dev/null || \
 		fail "downloaded binary signature bundle is invalid"
-	"$cosign_tool" verify-blob --key "$verify_dir/cosign.pub" --insecure-ignore-tlog --bundle "$verify_dir/release.json.sigstore.json" "$verify_dir/release.json" >/dev/null || \
+	"$cosign_tool" verify-blob --key "$verify_dir/cosign.pub" --bundle "$verify_dir/release.json.sigstore.json" "$verify_dir/release.json" >/dev/null || \
 		fail "downloaded release.json signature bundle is invalid"
 	# Cross-check: release.json server image ref must match the published one.
 	/usr/bin/python3 -I -S -B -c '
@@ -930,8 +939,13 @@ verify_runtime_payload() {
 		END { if (NR != 4) exit 1 }
 	' "$release_dir/SHA256SUMS" || fail "downloaded checksums must name exactly four release binaries"
 	(cd "$release_dir" && sha256sum -c SHA256SUMS >/dev/null) || fail "downloaded artifact checksum mismatch"
-	"$cosign_tool" verify-blob --key "$release_public_key" --insecure-ignore-tlog --bundle "$release_dir/SHA256SUMS.sigstore.json" "$release_dir/SHA256SUMS" >/dev/null || \
-		fail "downloaded binary signature bundle is invalid"
+	# This leaf executes the downloaded binary between two checks. A TUF
+	# cache it could have rewritten would be a substitute trust anchor, so
+	# each check starts from an empty cache and cosign's embedded root.
+	runtime_tuf_root=$(mktemp -d "$release_dir/.tuf-root.XXXXXXXX") || fail "cannot create a private TUF cache"
+	TUF_ROOT=$runtime_tuf_root "$cosign_tool" verify-blob --key "$release_public_key" --bundle "$release_dir/SHA256SUMS.sigstore.json" "$release_dir/SHA256SUMS" >/dev/null || \
+		{ rm -rf -- "$runtime_tuf_root"; fail "downloaded binary signature bundle is invalid"; }
+	rm -rf -- "$runtime_tuf_root"
 }
 
 runtime_receipt_bytes() {
@@ -1001,7 +1015,7 @@ verify_chart() {
 	chart_tag=$(printf '%s' "$chart_version" | tr '+' '_')
 	resolved=$("$release_support_tool" registry-digest "$gar_chart:$chart_tag" "$gar_key")
 	[ "$gar_chart@$resolved" = "$chart_reference" ] || fail "GAR chart tag does not resolve to the signed digest"
-	"$cosign_tool" verify --key "$release_dir/cosign.pub" --insecure-ignore-tlog "$chart_reference" >/dev/null || fail "GAR chart signature is invalid"
+	"$cosign_tool" verify --key "$release_dir/cosign.pub" "$chart_reference" >/dev/null || fail "GAR chart signature is invalid"
 	public_dir=$release_dir/verified-public-chart
 	rm -rf -- "$public_dir"
 	mkdir -p "$public_dir"
@@ -1010,7 +1024,7 @@ verify_chart() {
 	download_public_object "$chart_repo/cosign.pub" "$public_dir/cosign.pub"
 	cmp -s "$chart_path" "$public_dir/$chart_name" || fail "public chart differs from the source package"
 	cmp -s "$release_dir/cosign.pub" "$public_dir/cosign.pub" || fail "public chart signing key differs from the mounted release key"
-	"$cosign_tool" verify-blob --key "$public_dir/cosign.pub" --insecure-ignore-tlog --bundle "$public_dir/$chart_name.sigstore.json" "$public_dir/$chart_name" >/dev/null || \
+	"$cosign_tool" verify-blob --key "$public_dir/cosign.pub" --bundle "$public_dir/$chart_name.sigstore.json" "$public_dir/$chart_name" >/dev/null || \
 		fail "public chart signature bundle is invalid"
 	"$helm_tool" template oberth "$public_dir/$chart_name" --namespace oberth >"$public_dir/rendered.yaml"
 	grep -Fq "$(sed -n '1p' "$release_dir/server-image.txt")" "$public_dir/rendered.yaml" || fail "public chart does not render the signed server image"
@@ -1029,7 +1043,7 @@ verify_release() {
 	created=$(source_created)
 	"$release_image_tool" verify "$tag" "$sha" "$created" "$release_dir" "$gar_key"
 	reference=$(sed -n '1p' "$release_dir/server-image.txt")
-	"$cosign_tool" verify --key "$release_dir/cosign.pub" --insecure-ignore-tlog "$reference" >/dev/null || fail "GAR image signature is invalid"
+	"$cosign_tool" verify --key "$release_dir/cosign.pub" "$reference" >/dev/null || fail "GAR image signature is invalid"
 	scan_image "$reference"
 
 	verify_chart
@@ -1145,9 +1159,9 @@ stage_versioned_release() (
 	done
 	cmp -s "$release_dir/cosign.pub" "$stage_dir/cosign.pub" || fail "versioned release $stage_version uses an untrusted signing key"
 	(cd "$stage_dir" && sha256sum -c SHA256SUMS >/dev/null) || fail "versioned release $stage_version has invalid checksums"
-	"$cosign_tool" verify-blob --key "$release_dir/cosign.pub" --insecure-ignore-tlog --bundle "$stage_dir/SHA256SUMS.sigstore.json" "$stage_dir/SHA256SUMS" >/dev/null || \
+	"$cosign_tool" verify-blob --key "$release_dir/cosign.pub" --bundle "$stage_dir/SHA256SUMS.sigstore.json" "$stage_dir/SHA256SUMS" >/dev/null || \
 		fail "versioned release $stage_version has an invalid signature bundle"
-	"$cosign_tool" verify-blob --key "$release_dir/cosign.pub" --insecure-ignore-tlog --bundle "$stage_dir/release.json.sigstore.json" "$stage_dir/release.json" >/dev/null || \
+	"$cosign_tool" verify-blob --key "$release_dir/cosign.pub" --bundle "$stage_dir/release.json.sigstore.json" "$stage_dir/release.json" >/dev/null || \
 		fail "versioned release $stage_version has an invalid release.json signature bundle"
 	# Only this tag's receipt authorizes these bytes. Newer releases are
 	# handled as supersession before staging, never by executing their data.
