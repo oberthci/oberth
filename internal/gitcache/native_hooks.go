@@ -200,6 +200,9 @@ func (c *Cache) allowBranchDeletion(ctx context.Context, path, ref string) error
 	if strings.TrimSpace(head) == ref {
 		return errors.New("cannot delete the default branch")
 	}
+	if branch := strings.TrimPrefix(ref, "refs/heads/"); c.protectedByConfig(branch) {
+		return fmt.Errorf("cannot delete protected branch %s; an admin may use branch_delete_many with confirm_protected", branch)
+	}
 	return nil
 }
 

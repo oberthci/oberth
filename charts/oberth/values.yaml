@@ -79,6 +79,12 @@ retention:
 promotion:
   grantMaxLifetime: "24h"
 
+# Branch globs that, like each repository's default branch, no push --delete
+# or branch_delete_many selector may delete (#1490). An admin may delete one
+# alone with a typed confirmation. Empty keeps the server default main,master.
+branches:
+  protected: []
+
 # Workflow admission keeps a concurrent-workflow ceiling, the PSI hard-limit
 # valve and the disk floor. Kubernetes schedules each step pod by its requests.
 # See docs/declared-admission.md for upgrade behavior and ignored legacy values.

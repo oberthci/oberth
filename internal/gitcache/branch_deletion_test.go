@@ -1,0 +1,353 @@
+package gitcache
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/oberthci/oberth/internal/testtimeout"
+)
+
+// deletionFixture caches a repository whose upstream and mirror both carry
+// feature/gone.
+func deletionFixture(t *testing.T, root string) (*testRepository, *Cache, Repository, string) {
+	t.Helper()
+	repository := newTestRepository(t)
+	featureSHA := repository.featureCommit(t, "feature/gone", "gone\n")
+	runGit(t, repository.work, "push", "origin", featureSHA+":refs/heads/feature/gone")
+	cache := newTestCacheAt(t, root, repository.upstream)
+	ready, err := cache.Ensure(t.Context(), "example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := remoteRef(t, ready.Path, "refs/heads/feature/gone"); got != featureSHA {
+		t.Fatalf("mirror feature = %s", got)
+	}
+	return repository, cache, ready, featureSHA
+}
+
+// The v0.17.84-v0.17.95 hang: receive callback delivery holds the receive
+// lock and the deletion handler took it again. The callback's local marker
+// must complete while the receive lock is held.
+func TestReceiveDeletionCallbackNeverReentersReceiveLock(t *testing.T) {
+	t.Parallel()
+	_, cache, ready, featureSHA := deletionFixture(t, filepath.Join(t.TempDir(), "cache"))
+	budget := testtimeout.Scale(20 * time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), budget)
+	defer cancel()
+	var delivered []ReceiveEvent
+	err := cache.receiveTransaction(ctx, "example", ready.Path, "operator@host", func() error {
+		return cache.deleteRef(ctx, ready.Path, "refs/heads/feature/gone", featureSHA)
+	}, ReceiveHandlerFunc(func(ctx context.Context, event ReceiveEvent) error {
+		delivered = append(delivered, event)
+		return cache.MarkBranchDeletion(ctx, event.Repo, strings.TrimPrefix(event.Update.Ref, "refs/heads/"), event.Update.OldSHA)
+	}))
+	if err != nil {
+		t.Fatalf("receive with deletion callback: %v", err)
+	}
+	if len(delivered) != 1 || !delivered[0].Update.Deleted() {
+		t.Fatalf("delivered = %+v", delivered)
+	}
+	if got := runGitOptional(t, ready.Path, "rev-parse", "--verify", deletingRefPrefix+"feature/gone"); got != featureSHA {
+		t.Fatalf("deletion marker = %q, want %s", got, featureSHA)
+	}
+}
+
+// A deletion left in the outbox by an interrupted process replays at startup
+// within the scheduler's recovery budget, even with an upstream that would
+// never answer: replay makes no network call. The deleted branch then stays
+// deleted across a refresh until propagation completes.
+func TestReplayPendingDeletionCompletesWithinBudget(t *testing.T) {
+	t.Parallel()
+	root := filepath.Join(t.TempDir(), "cache")
+	repository, cache, ready, featureSHA := deletionFixture(t, root)
+	interrupted := errors.New("process stopped")
+	err := cache.receiveTransaction(t.Context(), "example", ready.Path, "operator@host", func() error {
+		return cache.deleteRef(t.Context(), ready.Path, "refs/heads/feature/gone", featureSHA)
+	}, ReceiveHandlerFunc(func(context.Context, ReceiveEvent) error { return interrupted }))
+	if !errors.Is(err, interrupted) {
+		t.Fatalf("receive = %v", err)
+	}
+
+	restarted := newTestCacheAt(t, root, repository.upstream)
+	budget := testtimeout.Scale(20 * time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), budget)
+	defer cancel()
+	started := time.Now()
+	if err := restarted.ReplayPending(ctx, ReceiveHandlerFunc(func(ctx context.Context, event ReceiveEvent) error {
+		return restarted.MarkBranchDeletion(ctx, event.Repo, strings.TrimPrefix(event.Update.Ref, "refs/heads/"), event.Update.OldSHA)
+	})); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > budget {
+		t.Fatalf("replay took %s", elapsed)
+	}
+	if pending, err := restarted.PendingReceives(); err != nil || len(pending) != 0 {
+		t.Fatalf("pending after replay = %+v, %v", pending, err)
+	}
+
+	// Unrelated upstream movement forces materialization: the deleted
+	// branch must not come back from its still-present tracking ref.
+	repository.commit(t, "advance", "advanced\n")
+	if _, err := restarted.Ensure(t.Context(), "example"); err != nil {
+		t.Fatal(err)
+	}
+	if got := runGitOptional(t, ready.Path, "show-ref", "--verify", "refs/heads/feature/gone"); got != "" {
+		t.Fatalf("deleted branch re-created by refresh: %s", got)
+	}
+
+	results, err := restarted.PropagateBranchDeletions(t.Context(), "example", []UpstreamDeletion{{Branch: "feature/gone", OldSHA: featureSHA}})
+	if err != nil || len(results) != 1 || results[0].State != UpstreamPropagated {
+		t.Fatalf("propagate = %+v, %v", results, err)
+	}
+	if got := runGitOptional(t, "", "ls-remote", repository.upstream, "refs/heads/feature/gone"); got != "" {
+		t.Fatalf("upstream still has the branch: %s", got)
+	}
+	for _, ref := range []string{deletingRefPrefix + "feature/gone", upstreamRefPrefix + "heads/feature/gone"} {
+		if got := runGitOptional(t, ready.Path, "show-ref", "--verify", ref); got != "" {
+			t.Fatalf("%s left behind: %s", ref, got)
+		}
+	}
+}
+
+// An operator-quarantined record (state edited to "quarantined", the escape
+// hatch used during the v0.17.95 upgrade) is skipped without delivery and
+// kept byte-for-byte.
+func TestReplayPendingKeepsSkippingQuarantinedRecord(t *testing.T) {
+	t.Parallel()
+	root := filepath.Join(t.TempDir(), "cache")
+	repository, cache, ready, featureSHA := deletionFixture(t, root)
+	interrupted := errors.New("process stopped")
+	_ = cache.receiveTransaction(t.Context(), "example", ready.Path, "operator@host", func() error {
+		return cache.deleteRef(t.Context(), ready.Path, "refs/heads/feature/gone", featureSHA)
+	}, ReceiveHandlerFunc(func(context.Context, ReceiveEvent) error { return interrupted }))
+	file, err := cache.reservationPath("example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record map[string]any
+	if err := json.Unmarshal(body, &record); err != nil {
+		t.Fatal(err)
+	}
+	record["state"] = "quarantined"
+	edited, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, edited, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted := newTestCacheAt(t, root, repository.upstream)
+	for range 2 {
+		ctx, cancel := context.WithTimeout(t.Context(), testtimeout.Scale(10*time.Second))
+		err := restarted.ReplayPending(ctx, ReceiveHandlerFunc(func(context.Context, ReceiveEvent) error {
+			t.Fatal("quarantined record delivered")
+			return nil
+		}))
+		cancel()
+		if err != nil {
+			t.Fatalf("replay with quarantined record: %v", err)
+		}
+	}
+	pending, err := restarted.PendingReceives()
+	if err != nil || len(pending) != 1 || pending[0].State != "quarantined" {
+		t.Fatalf("pending = %+v, %v", pending, err)
+	}
+	if kept, err := os.ReadFile(file); err != nil || string(kept) != string(edited) {
+		t.Fatalf("quarantined record changed: %v", err)
+	}
+	if _, err := restarted.PruneBranches(t.Context(), "example", []BranchHead{{Branch: "feature/gone", SHA: featureSHA}}, false); err == nil {
+		t.Fatal("prune mutated a quarantined repository")
+	}
+}
+
+func TestPruneBranchesComparesEachHead(t *testing.T) {
+	t.Parallel()
+	repository, cache, ready, featureSHA := deletionFixture(t, filepath.Join(t.TempDir(), "cache"))
+	movedSHA := repository.featureCommit(t, "feature/moved", "moved\n")
+	seedCacheObject(t, repository.work, ready.Path, movedSHA)
+	runGit(t, ready.Path, "update-ref", "refs/heads/feature/moved", movedSHA)
+	outcomes, err := cache.PruneBranches(t.Context(), "example", []BranchHead{
+		{Branch: "feature/gone", SHA: featureSHA},
+		{Branch: "feature/moved", SHA: repository.initialSHA},
+		{Branch: "feature/absent", SHA: repository.initialSHA},
+		{Branch: "main", SHA: repository.initialSHA},
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{PruneDeleted, PruneMoved, PruneMissing, PruneProtected}
+	for index, outcome := range outcomes {
+		if outcome.Result != want[index] {
+			t.Fatalf("outcomes = %+v, want %v", outcomes, want)
+		}
+	}
+	if got := runGitOptional(t, ready.Path, "show-ref", "--verify", "refs/heads/feature/gone"); got != "" {
+		t.Fatalf("deleted head still present: %s", got)
+	}
+	for ref, sha := range map[string]string{"refs/heads/feature/moved": movedSHA, "refs/heads/main": repository.initialSHA, deletingRefPrefix + "feature/gone": featureSHA} {
+		if got := remoteRef(t, ready.Path, ref); got != sha {
+			t.Fatalf("%s = %s, want %s", ref, got, sha)
+		}
+	}
+}
+
+func TestPropagateRefusesUpstreamThatMovedAndRestoresOnAbandon(t *testing.T) {
+	t.Parallel()
+	repository, cache, ready, featureSHA := deletionFixture(t, filepath.Join(t.TempDir(), "cache"))
+	if _, err := cache.PruneBranches(t.Context(), "example", []BranchHead{{Branch: "feature/gone", SHA: featureSHA}}, false); err != nil {
+		t.Fatal(err)
+	}
+	// Someone pushes new work straight to the forge after the deletion.
+	runGit(t, repository.work, "checkout", "feature/gone")
+	newer := repository.featureCommit(t, "feature/other", "other\n")
+	runGit(t, repository.work, "push", "--force", "origin", newer+":refs/heads/feature/gone")
+	results, err := cache.PropagateBranchDeletions(t.Context(), "example", []UpstreamDeletion{{Branch: "feature/gone", OldSHA: featureSHA}})
+	if err != nil || len(results) != 1 || results[0].State != UpstreamRefused || !strings.Contains(results[0].Err.Error(), "moved") {
+		t.Fatalf("propagate = %+v, %v", results, err)
+	}
+	if got := remoteRef(t, repository.upstream, "refs/heads/feature/gone"); got != newer {
+		t.Fatalf("upstream changed: %s", got)
+	}
+	if err := cache.AbandonBranchDeletions(t.Context(), "example", []string{"feature/gone"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := runGitOptional(t, ready.Path, "show-ref", "--verify", deletingRefPrefix+"feature/gone"); got != "" {
+		t.Fatalf("marker kept after abandon: %s", got)
+	}
+	if got := remoteRef(t, ready.Path, "refs/heads/feature/gone"); got != featureSHA {
+		t.Fatalf("mirror branch not restored from tracking: %s", got)
+	}
+}
+
+func TestPropagateSkipsBranchPushedAgain(t *testing.T) {
+	t.Parallel()
+	repository, cache, ready, featureSHA := deletionFixture(t, filepath.Join(t.TempDir(), "cache"))
+	if _, err := cache.PruneBranches(t.Context(), "example", []BranchHead{{Branch: "feature/gone", SHA: featureSHA}}, false); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, ready.Path, "update-ref", "refs/heads/feature/gone", repository.initialSHA)
+	results, err := cache.PropagateBranchDeletions(t.Context(), "example", []UpstreamDeletion{{Branch: "feature/gone", OldSHA: featureSHA}})
+	if err != nil || len(results) != 1 || results[0].State != UpstreamSkipped {
+		t.Fatalf("propagate = %+v, %v", results, err)
+	}
+	if got := remoteRef(t, repository.upstream, "refs/heads/feature/gone"); got != featureSHA {
+		t.Fatalf("upstream changed: %s", got)
+	}
+}
+
+func TestPruneManyBranchesInOneTransaction(t *testing.T) {
+	t.Parallel()
+	repository, cache, ready, _ := deletionFixture(t, filepath.Join(t.TempDir(), "cache"))
+	const count = 250
+	var input strings.Builder
+	heads := make([]BranchHead, 0, count)
+	for index := range count {
+		branch := fmt.Sprintf("stale/b%03d", index)
+		heads = append(heads, BranchHead{Branch: branch, SHA: repository.initialSHA})
+		input.WriteString("create refs/heads/" + branch + " " + repository.initialSHA + "\n")
+	}
+	runGitInput(t, ready.Path, input.String(), "update-ref", "--stdin")
+	runGitInput(t, repository.upstream, input.String(), "update-ref", "--stdin")
+	started := time.Now()
+	outcomes, err := cache.PruneBranches(t.Context(), "example", heads, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, outcome := range outcomes {
+		if outcome.Result != PruneDeleted {
+			t.Fatalf("outcome = %+v", outcome)
+		}
+	}
+	deletions := make([]UpstreamDeletion, 0, count)
+	for _, head := range heads {
+		deletions = append(deletions, UpstreamDeletion{Branch: head.Branch, OldSHA: head.SHA})
+	}
+	results, err := cache.PropagateBranchDeletions(t.Context(), "example", deletions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, result := range results {
+		if result.State != UpstreamPropagated {
+			t.Fatalf("result = %+v", result)
+		}
+	}
+	if elapsed := time.Since(started); elapsed > testtimeout.Scale(60*time.Second) {
+		t.Fatalf("pruning %d branches took %s", count, elapsed)
+	}
+	if got := runGitOptional(t, "", "ls-remote", "--heads", repository.upstream, "refs/heads/stale/*"); got != "" {
+		t.Fatalf("upstream kept stale branches: %.200s", got)
+	}
+}
+
+func TestBranchInventoryClassifiesMergedAndPatchEquivalent(t *testing.T) {
+	t.Parallel()
+	repository, cache, ready, featureSHA := deletionFixture(t, filepath.Join(t.TempDir(), "cache"))
+	// feature/merged is an ancestor of main; feature/gone is not merged.
+	runGit(t, ready.Path, "update-ref", "refs/heads/feature/merged", repository.initialSHA)
+	inventory, err := cache.BranchInventory(t.Context(), "example", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inventory.DefaultBranch != "main" || inventory.Target != "main" || inventory.TargetSHA != repository.initialSHA {
+		t.Fatalf("inventory = %+v", inventory)
+	}
+	byName := make(map[string]BranchInventoryEntry)
+	for _, entry := range inventory.Branches {
+		byName[entry.Branch] = entry
+	}
+	if entry := byName["feature/merged"]; !entry.Merged || entry.Ahead != 0 {
+		t.Fatalf("merged entry = %+v", entry)
+	}
+	if entry := byName["feature/gone"]; entry.Merged || entry.Ahead != 1 || entry.SHA != featureSHA {
+		t.Fatalf("unmerged entry = %+v", entry)
+	}
+	// A cherry-picked copy of feature/gone on main makes it patch-equivalent.
+	runGit(t, repository.work, "checkout", "main")
+	runGit(t, repository.work, "cherry-pick", featureSHA)
+	picked := runGit(t, repository.work, "rev-parse", "HEAD")
+	seedCacheObject(t, repository.work, ready.Path, picked)
+	runGit(t, ready.Path, "update-ref", "refs/heads/main", picked)
+	equivalence, err := cache.BranchPatchEquivalence(t.Context(), "example", "main", []BranchHead{{Branch: "feature/gone", SHA: featureSHA}}, 10)
+	if err != nil || len(equivalence) != 1 || !equivalence["feature/gone"] {
+		t.Fatalf("patch equivalence = %v, %v", equivalence, err)
+	}
+	if entry := byName["main"]; !entry.Protected || !entry.Default {
+		t.Fatalf("default entry = %+v", entry)
+	}
+}
+
+func TestReceiveHookRefusesConfiguredProtectedBranchDeletion(t *testing.T) {
+	r, c, _ := hookSecurityFixture(t)
+	c.hookChild = true
+	t.Setenv(protectedBranchesEnv, "master,release/*")
+	for ref, refused := range map[string]bool{"refs/heads/master": true, "refs/heads/release/1.0": true, "refs/heads/feature/x": false, "refs/heads/main": true} {
+		err := c.nativeUpdate(t.Context(), ref, r.initialSHA, zeroObjectID)
+		if (err != nil) != refused {
+			t.Fatalf("delete %s: err=%v, want refused=%v", ref, err, refused)
+		}
+	}
+}
+
+func runGitInput(t *testing.T, dir, input string, args ...string) {
+	t.Helper()
+	command := exec.Command("git", args...)
+	command.Dir = dir
+	command.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0")
+	command.Stdin = strings.NewReader(input)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, output)
+	}
+}

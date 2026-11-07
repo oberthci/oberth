@@ -1067,6 +1067,19 @@
     "vm": {
       "description": "Removed; retained only to accept and ignore historical values."
     },
+    "branches": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Branch deletion guards (#1490).",
+      "properties": {
+        "protected": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {"type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[^,]+$"},
+          "description": "Branch globs (Go path.Match; * does not cross /) that, like the default branch, no push or prune may delete. Empty or absent keeps the server default main,master."
+        }
+      }
+    },
     "promotion": {
       "type": "object",
       "additionalProperties": false,

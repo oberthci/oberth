@@ -174,6 +174,7 @@ type serveOptions struct {
 	promotionGrantMaxLifetime time.Duration
 
 	gitCommandTimeout       time.Duration
+	protectedBranches       string
 	gcInterval              time.Duration
 	pushBannerURL           string
 	auditTSAURL             string
@@ -322,6 +323,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.StringVar(&options.argoResourceSamplerConfig, "argo-resource-sampler-config", "", "administrator-owned kubelet sampler JSON config; disabled when empty")
 	flags.DurationVar(&options.promotionGrantMaxLifetime, "promotion-grant-max-lifetime", 24*time.Hour, "maximum lifetime for promotion grants (default 24h, hard ceiling 168h)")
 	flags.DurationVar(&options.gitCommandTimeout, "git-timeout", 10*time.Minute, "Git command timeout")
+	flags.StringVar(&options.protectedBranches, "protected-branches", "main,master", "comma-separated branch globs that, like the default branch, no push or prune may delete")
 	flags.DurationVar(&options.gcInterval, "git-gc-interval", 24*time.Hour, "periodic Git GC interval")
 	flags.StringVar(&options.pushBannerURL, "push-banner-url", "", "optional HTTPS dashboard URL echoed to every accepted git push")
 	flags.StringVar(&options.auditTSAURL, "audit-tsa-url", "", "RFC 3161 timestamp authority HTTPS URL (empty disables external timestamps)")
@@ -752,6 +754,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		RepositoryGate:        upstreams.RequireActive,
 		PreFinalizeGate:       anchors.AllowMutation,
 		PromotionPinAbandoned: database.AbandonedPromotionPin,
+		ProtectedBranches:     strings.Split(options.protectedBranches, ","),
 	})
 	if err != nil {
 		return err
@@ -1063,6 +1066,11 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		}
 	}
 	argoJobs.SetResourceBlobs(git)
+	// Upstream branch deletion runs after the receive returns (#1490).
+	branchDeletions, err := service.NewBranchDeletionPropagator(database, git, database, anchors.AllowMutation, logger)
+	if err != nil {
+		return err
+	}
 	controlAPI, err := service.NewAPI(service.APIConfig{
 		ResourceDeclarations: argoJobs,
 		ReleasePreflight:     argoJobs,
@@ -1155,6 +1163,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	pushes, err := service.NewPushIngestor(service.PushConfig{
 		Repositories: database, Discoverer: upstreams, Git: git, Receives: database,
 		Branches: scheduler, Releases: scheduler, Auditor: database,
+		DeletionQueued: branchDeletions.Notify,
 	})
 	if err != nil {
 		return err
@@ -1281,7 +1290,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	}()
 	defer func() { stopTokenWarnings(); <-tokenWarningsDone }()
 	stopBootstrap()
-	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, withRepositoryRemoval(newAdminGateServerWithTokenPolicy(anchors.AllowMutation, options.database, scheduler.NotifyQueue, options.uplinkTokenPolicy, queueSnapshot.current), anchors.AllowMutation, options.database, database, git), activateScheduler, accessReconciler, schedules, ciIssues, retention, logger, controlAPI.Shutdown, httpAPI.BeginDrain)
+	return runComponents(ctx, options, scheduler, anchors, git, sshService, httpsServer, goProxyServer, withRepositoryRemoval(newAdminGateServerWithTokenPolicy(anchors.AllowMutation, options.database, scheduler.NotifyQueue, options.uplinkTokenPolicy, queueSnapshot.current), anchors.AllowMutation, options.database, database, git), activateScheduler, accessReconciler, schedules, ciIssues, branchDeletions, retention, logger, controlAPI.Shutdown, httpAPI.BeginDrain)
 }
 
 type startupContinuity interface {
@@ -1684,6 +1693,7 @@ func runComponents(
 	accessReconciler *service.AccessReconciler,
 	schedules *app.Schedules,
 	ciIssues *service.CIIssueReconciler,
+	branchDeletions *service.BranchDeletionPropagator,
 	retention *service.Retention,
 	logger *log.Logger,
 	apiShutdown func(context.Context) error,
@@ -1823,6 +1833,20 @@ func runComponents(
 			}
 			if err := ciIssues.Run(runCtx); err != nil && runCtx.Err() == nil {
 				logger.Printf("CI issue reconciler stopped: %v", err)
+			}
+		}()
+	}
+	if branchDeletions != nil {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			select {
+			case <-schedulerActivated:
+			case <-runCtx.Done():
+				return
+			}
+			if err := branchDeletions.Run(runCtx); err != nil && runCtx.Err() == nil {
+				logger.Printf("upstream branch deletion stopped: %v", err)
 			}
 		}()
 	}

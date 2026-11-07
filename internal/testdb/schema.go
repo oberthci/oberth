@@ -216,8 +216,15 @@ DELETE FROM schema_migrations WHERE id='20261106033000-protected-placement-admis
 `
 
 // PostProtectedWorkflowDowngrade removes later parent-custody indexes from disposable historical fixtures.
-const PostProtectedWorkflowDowngrade = `
+const PostProtectedWorkflowDowngrade = PostBranchDeletionsDowngrade + `
 DROP INDEX IF EXISTS protected_placement_workflow_audit_idx;
 DROP INDEX IF EXISTS protected_placement_workflow_uid_audit_idx;
 DELETE FROM schema_migrations WHERE id='20261106053000-protected-workflow-custody-f83c6b27a4904dc8bd29e1952e86430a';
+`
+
+// PostBranchDeletionsDowngrade removes the asynchronous branch deletion
+// records from disposable historical fixtures.
+const PostBranchDeletionsDowngrade = `
+DROP TABLE IF EXISTS branch_deletions;
+DELETE FROM schema_migrations WHERE id='20261107120000-branch-deletions';
 `

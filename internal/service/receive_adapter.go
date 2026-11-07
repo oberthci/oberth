@@ -98,7 +98,7 @@ func describePushResult(event gitcache.ReceiveEvent, result PushResult) string {
 	target := event.Repo + "/" + name
 	switch {
 	case result.Deleted:
-		return fmt.Sprintf("%s %s deletion recorded — no run", kind, name)
+		return fmt.Sprintf("%s %s deleted on the mirror · upstream deletion queued — no run", kind, name)
 	case result.Run != nil:
 		line := fmt.Sprintf("ref accepted · run %s queued (%s)", shortRunID(result.Run.ID), target)
 		if kind == "tag" {

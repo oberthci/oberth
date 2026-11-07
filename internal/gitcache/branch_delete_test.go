@@ -32,8 +32,9 @@ func TestDeleteBranchRefusesDefaultBranch(t *testing.T) {
 	if _, err := cache.Ensure(t.Context(), "example"); err != nil {
 		t.Fatal(err)
 	}
-	if err := cache.DeleteBranch(t.Context(), "example", "main"); err == nil || !strings.Contains(err.Error(), "default branch") {
-		t.Fatalf("deletion = %v", err)
+	outcomes, err := cache.PruneBranches(t.Context(), "example", []BranchHead{{Branch: "main", SHA: repository.initialSHA}}, false)
+	if err != nil || len(outcomes) != 1 || outcomes[0].Result != PruneProtected {
+		t.Fatalf("deletion = %+v, %v", outcomes, err)
 	}
 	if got := remoteRef(t, repository.upstream, "refs/heads/main"); got != repository.initialSHA {
 		t.Fatalf("upstream main = %s", got)

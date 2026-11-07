@@ -55,8 +55,8 @@ func TestDeleteBranchRefusesWhenDefaultBranchUnavailable(t *testing.T) {
 		t.Fatal(err)
 	}
 	runGit(t, ready.Path, "update-ref", "--no-deref", "HEAD", r.initialSHA)
-	if err := c.DeleteBranch(t.Context(), "example", "feature"); err == nil {
-		t.Fatal("upstream deletion admitted without identifying the default branch")
+	if _, err := c.PruneBranches(t.Context(), "example", []BranchHead{{Branch: "feature", SHA: r.initialSHA}}, false); err == nil {
+		t.Fatal("deletion admitted without identifying the default branch")
 	}
 	for _, path := range []string{r.upstream, ready.Path} {
 		if got := remoteRef(t, path, "refs/heads/feature"); got != r.initialSHA {

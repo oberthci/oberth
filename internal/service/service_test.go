@@ -102,7 +102,7 @@ func (git *stubPushGit) RemoteRef(context.Context, string, string) (string, bool
 	return git.remoteSHA, git.remoteExists, nil
 }
 
-func (git *stubPushGit) DeleteBranch(_ context.Context, repo, branch string) error {
+func (git *stubPushGit) MarkBranchDeletion(_ context.Context, repo, branch, _ string) error {
 	git.deletedBranches = append(git.deletedBranches, repo+":"+branch)
 	return git.deleteErr
 }
