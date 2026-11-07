@@ -45,7 +45,9 @@ func TestExecutionTargetMigrationAndProcessRecoveryPreserveCanonicalState(t *tes
 		t.Fatal(err)
 	}
 	after := releaseSplitLedger(t, s.db)
-	if len(after) != len(before)+5 {
+	// Five target-custody receipts plus every later migration replayed by
+	// the cumulative downgrade (branch deletions).
+	if len(after) != len(before)+6 {
 		t.Fatal("unexpected migration authority")
 	}
 	var newReceipts int

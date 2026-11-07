@@ -278,7 +278,6 @@ type PushGit interface {
 	PeelObject(context.Context, string, string) (gitcache.PeeledObject, error)
 	ReleaseReachable(context.Context, string, string, string) (bool, error)
 	RemoteRef(context.Context, string, string) (string, bool, error)
-	DeleteBranch(context.Context, string, string) error
 }
 
 type PublicationGit interface {

@@ -963,6 +963,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"admission_holds",
 		"audit_actions",
 		"audit_anchors",
+		"branch_deletions",
 		"ci_issue_projections",
 		"ci_issue_work",
 		"concurrency_group_declarations",
@@ -1022,6 +1023,8 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 	assertSchemaObjects(t, store.db, "index", []string{
 		"audit_actions_page_idx",
 		"audit_anchors_latest_idx",
+		"branch_deletions_pending_idx",
+		"branch_deletions_repo_idx",
 		"ci_issue_projection_failure_idx",
 		"ci_issue_work_branch_idx",
 		"ci_issue_work_promotion_idx",
@@ -1141,6 +1144,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 	expectedColumns := map[string][]string{
 		"queue_cap":                      {"singleton", "max_not_started"},
 		"deferred_branch_receives":       {"sequence", "event_id", "run_spec", "reason"},
+		"branch_deletions":               {"sequence", "id", "repo_id", "branch", "old_sha", "actor", "source", "batch_id", "status", "attempts", "retry_after", "error", "created_at", "updated_at"},
 		"concurrency_group_declarations": {"repo_id", "release", "group_name", "group_limit"},
 		"publication_policy_waits":       {"publication_id", "since"},
 		"priority_grants":                {"identity", "max_class", "expires", "granted_by"},

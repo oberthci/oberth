@@ -40,7 +40,7 @@ func TestDescribePushResultCoversDurableOutcomes(t *testing.T) {
 		{
 			name: "branch deletion", event: branch,
 			result: PushResult{Deleted: true},
-			want:   "branch testb deletion recorded — no run",
+			want:   "branch testb deleted on the mirror · upstream deletion queued — no run",
 		},
 		{
 			name: "replayed duplicate with supersession", event: branch,

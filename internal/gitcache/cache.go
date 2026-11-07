@@ -56,6 +56,7 @@ type Cache struct {
 	repositoryGate        func(context.Context, string) error
 	promotionPinAbandoned func(context.Context, string, string, string) (bool, error)
 	preFinalizeGate       func(context.Context) error
+	protectedBranches     []string
 	locks                 sync.Map
 	receiveLocks          sync.Map
 	policyRefreshes       sync.Map         // cache path -> policyRefresh; guarded by repoLock
@@ -98,7 +99,12 @@ func New(config Config) (*Cache, error) {
 			return nil, fmt.Errorf("invalid Git environment key %q", key)
 		}
 	}
+	protected, err := ProtectedBranchPatterns(config.ProtectedBranches)
+	if err != nil {
+		return nil, err
+	}
 	cache := &Cache{
+		protectedBranches:     protected,
 		allowLocalUpstreams:   config.AllowLocalUpstreams,
 		root:                  root,
 		outboxRoot:            outboxRoot,
@@ -503,6 +509,11 @@ func (c *Cache) materialize(ctx context.Context, path string, old map[string]str
 		return err
 	}
 
+	deleting, err := c.deletingBranches(ctx, path)
+	if err != nil {
+		return err
+	}
+
 	newOwned := make(map[string]string, len(current))
 
 	// Phase 1: Delete public refs whose tracking ref was removed upstream.
@@ -553,6 +564,10 @@ func (c *Cache) materialize(ctx context.Context, path string, old map[string]str
 		publicSHA, publicExists := public[ref]
 
 		if !publicExists {
+			if _, deleting := deleting[ref]; deleting {
+				// Accepted deletion still propagating upstream.
+				continue
+			}
 			creates = append(creates, pendingCreate{ref: ref, newSHA: newSHA})
 			continue
 		}

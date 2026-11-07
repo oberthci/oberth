@@ -299,6 +299,29 @@ path instead of refreshing liveness forever.
 A corrupt receive outbox quarantines only its repository. Startup replays healthy
 repositories and retains the corrupt record for operator repair. Refresh, receive
 and publication refuse the affected repository until its record is repaired.
+An unscoped admin repairs it with the `receive_outbox` MCP tool or `oberth outbox`:
+`show` reads the record, `retry` delivers it (an operator-set `quarantined` state
+is restored first when the rest validates), and `abandon` moves it to
+`.receive-outbox/abandoned/` with an audit entry.
+
+Branch deletions never wait for the forge. Receive finalization, under the
+repository lock, writes a private `refs/oberth/deleting/heads/<branch>` marker
+for each deleted branch (and drops it for a branch pushed again); the callback
+then commits a pending row in `branch_deletions` together with the receive
+event and returns without any Git call. `branch_delete_many` queues its rows
+not yet due, deletes and marks the refs in one compare-and-delete transaction
+under the receive and repository locks, then releases only the applied rows. A
+background propagator deletes the upstream refs, one push per repository batch
+and one refspec per branch, with no repository lock held across network I/O:
+an upstream ref is deleted only while it still names a deleted head or an
+ancestor (force-with-lease on the observed SHA). A branch still on the mirror
+with its marker is retried later; without one it was pushed again and is
+`skipped`. Each record ends `propagated`, `skipped` or `failed` (six attempts or
+a moved upstream). A failure restores the mirror branch from its upstream
+tracking ref as last fetched, which can lag the forge until the next refresh.
+While the marker exists a refresh does not re-create the branch, and a pending
+feature-branch publication for a branch deleted on the mirror is abandoned
+instead of pushed.
 
 Ordered [promotion trains](promotion-trains.md) reuse the same repository/target
 queue. They apply native three-way merges in request order in one private checkout

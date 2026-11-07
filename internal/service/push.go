@@ -13,13 +13,15 @@ import (
 )
 
 type PushConfig struct {
-	Repositories RepositoryWriter
-	Discoverer   RepositoryDiscoverer
-	Git          PushGit
-	Receives     ReceiveRecorder
-	Branches     CIQueue
-	Releases     ReleaseAdmission
-	Auditor      Auditor
+	// DeletionQueued wakes the upstream deletion propagator; optional.
+	DeletionQueued func()
+	Repositories   RepositoryWriter
+	Discoverer     RepositoryDiscoverer
+	Git            PushGit
+	Receives       ReceiveRecorder
+	Branches       CIQueue
+	Releases       ReleaseAdmission
+	Auditor        Auditor
 }
 
 type PushIngestor struct {
@@ -31,6 +33,7 @@ type PushIngestor struct {
 	releases     ReleaseAdmission
 	auditor      Auditor
 	accepted     receiveEventReader
+	queued       func()
 }
 
 type receiveEventReader interface {
@@ -51,6 +54,7 @@ func NewPushIngestor(config PushConfig) (*PushIngestor, error) {
 		releases:     config.Releases,
 		auditor:      config.Auditor,
 		accepted:     accepted,
+		queued:       config.DeletionQueued,
 	}, nil
 }
 
@@ -58,24 +62,21 @@ func (ingestor *PushIngestor) Branch(ctx context.Context, push BranchPush) (Push
 	if strings.TrimSpace(push.EventID) == "" || strings.TrimSpace(push.Repository) == "" || strings.TrimSpace(push.Branch) == "" || strings.TrimSpace(push.Actor) == "" {
 		return PushResult{}, fmt.Errorf("%w: event ID, repository, branch, and actor are required", ErrInvalidInput)
 	}
+	if deletionOID(push.NewOID) {
+		// A deletion of a registered repository needs no cache refresh:
+		// Ensure fetches from the forge, and a deletion callback (including
+		// its startup replay) must not wait for the network.
+		repository, err := ingestor.repositories.RepositoryByName(ctx, push.Repository)
+		if err == nil && repository.ArchivedAt == nil {
+			return ingestor.deleteBranch(ctx, push, repository)
+		}
+	}
 	repository, err := ingestor.ensureRepository(gitcache.WithBurstPolicy(ctx), push.Repository)
 	if err != nil {
 		return PushResult{}, err
 	}
 	if deletionOID(push.NewOID) {
-		if repository.DefaultBranch == "" || push.Branch == repository.DefaultBranch {
-			return PushResult{}, fmt.Errorf("%w: cannot delete the default branch", ErrInvalidInput)
-		}
-		if err := auditedGitMutation(ctx, ingestor.auditor, push.Actor, "branch.delete", "repository", push.Repository,
-			map[string]any{"branch": push.Branch, "old_sha": push.OldOID, "event_id": push.EventID},
-			func() error { return ingestor.git.DeleteBranch(ctx, push.Repository, push.Branch) }); err != nil {
-			return PushResult{}, fmt.Errorf("propagate branch deletion upstream: %w", err)
-		}
-		duplicate, err := ingestor.receives.RecordReceiveEvent(ctx, receiveSpec(push.EventID, push.Actor, repository.ID, model.RefBranch, push.Branch, push.OldOID, "", "", "deleted"))
-		if err != nil {
-			return PushResult{}, err
-		}
-		return PushResult{Repository: repository, Deleted: true, Duplicate: duplicate, Reason: "branch deletion requires no CI run"}, nil
+		return ingestor.deleteBranch(ctx, push, repository)
 	}
 	if !validOID(push.NewOID) {
 		return PushResult{}, fmt.Errorf("%w: branch object ID is invalid", ErrInvalidInput)
@@ -134,6 +135,26 @@ func (ingestor *PushIngestor) Branch(ctx context.Context, push BranchPush) (Push
 		reason = parkFallbackPrefix + boundedParkPolicyText(policyErr.Error()) + ")"
 	}
 	return ingestor.enqueueBranch(ctx, push, repository, peeled.CommitSHA, reason)
+}
+
+// deleteBranch acknowledges a branch deletion receive-pack already applied to
+// the mirror. It records the receive event and a pending upstream deletion in
+// one transaction and returns: upstream propagation is asynchronous, so a
+// slow or unreachable forge never holds the receive, its replay, or startup.
+// It makes no Git call: receive finalization already wrote the deletion
+// marker under the repository lock, and callbacks run under the receive lock.
+func (ingestor *PushIngestor) deleteBranch(ctx context.Context, push BranchPush, repository model.Repository) (PushResult, error) {
+	if repository.DefaultBranch == "" || push.Branch == repository.DefaultBranch {
+		return PushResult{}, fmt.Errorf("%w: cannot delete the default branch", ErrInvalidInput)
+	}
+	duplicate, err := ingestor.receives.RecordReceiveEvent(ctx, receiveSpec(push.EventID, push.Actor, repository.ID, model.RefBranch, push.Branch, push.OldOID, "", "", "deleted"))
+	if err != nil {
+		return PushResult{}, err
+	}
+	if ingestor.queued != nil {
+		ingestor.queued()
+	}
+	return PushResult{Repository: repository, Deleted: true, Duplicate: duplicate, Reason: "branch deleted on the mirror; upstream deletion queued; no CI run"}, nil
 }
 
 func (ingestor *PushIngestor) enqueueBranch(ctx context.Context, push BranchPush, repository model.Repository, sha, reason string) (PushResult, error) {

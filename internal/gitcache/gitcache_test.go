@@ -293,9 +293,14 @@ func TestDeleteBranchRemovesUpstreamAndLocalRefs(t *testing.T) {
 		t.Fatalf("upstream feature = %s, want %s", got, branchSHA)
 	}
 
-	// Delete the branch and verify it is gone upstream and locally.
-	if err := cache.DeleteBranch(context.Background(), "example", "feature/delete-me"); err != nil {
-		t.Fatal(err)
+	// Delete the branch locally, then propagate it and verify it is gone
+	// upstream and locally.
+	if outcomes, err := cache.PruneBranches(context.Background(), "example", []BranchHead{{Branch: "feature/delete-me", SHA: branchSHA}}, false); err != nil || len(outcomes) != 1 || outcomes[0].Result != PruneDeleted {
+		t.Fatalf("prune = %+v, %v", outcomes, err)
+	}
+	results, err := cache.PropagateBranchDeletions(context.Background(), "example", []UpstreamDeletion{{Branch: "feature/delete-me", OldSHA: branchSHA}})
+	if err != nil || len(results) != 1 || results[0].State != UpstreamPropagated {
+		t.Fatalf("propagate = %+v, %v", results, err)
 	}
 	output := runGit(t, "", "ls-remote", repository.upstream, "refs/heads/feature/delete-me")
 	if output != "" {
@@ -322,10 +327,11 @@ func TestDeleteBranchSucceedsForNeverPublishedBranch(t *testing.T) {
 	if _, err := cache.Ensure(context.Background(), "example"); err != nil {
 		t.Fatal(err)
 	}
-	// Delete a branch that was never published upstream — should succeed
-	// silently without attempting a remote push.
-	if err := cache.DeleteBranch(context.Background(), "example", "feature/never-existed"); err != nil {
-		t.Fatalf("deleting never-published branch failed: %v", err)
+	// Propagating a branch that was never published upstream succeeds
+	// without a remote push.
+	results, err := cache.PropagateBranchDeletions(context.Background(), "example", []UpstreamDeletion{{Branch: "feature/never-existed", OldSHA: repository.initialSHA}})
+	if err != nil || len(results) != 1 || results[0].State != UpstreamPropagated {
+		t.Fatalf("propagating never-published branch = %+v, %v", results, err)
 	}
 }
 

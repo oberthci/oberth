@@ -207,6 +207,9 @@ type Config struct {
 	// reservations bypass this gate; the per-callback recheck in the
 	// handler still applies.
 	PreFinalizeGate func(context.Context) error
+	// ProtectedBranches are branch globs (path.Match syntax) that, like the
+	// default branch, no receive or prune may delete.
+	ProtectedBranches []string
 }
 
 // ServiceRunner is the narrow surface consumed by the SSH server.

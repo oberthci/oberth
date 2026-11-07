@@ -88,6 +88,11 @@ func deliverPublication(
 	// push so it cannot silently overwrite a just-delivered promotion (#432).
 	forceBranch := publication.PromotionID == "" && publication.RefKind == model.RefBranch && publication.Ref != repository.DefaultBranch
 	if forceBranch {
+		if deleted, err := mirrorBranchDeleted(ctx, git, repositoryInput, publication.Ref); err != nil {
+			return model.PublicationFinalization{}, err
+		} else if deleted {
+			return abandonDeletedBranchPublication(ctx, publications, publication)
+		}
 		return attemptPublicationMutation(ctx, publications, git, auditor, repository, repositoryInput, publication, ref, true)
 	}
 	if !publication.PreviousKnown {
@@ -298,4 +303,39 @@ func finalizePublication(ctx context.Context, publications PublicationStore, id 
 	finalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	return publications.FinalizePublication(finalCtx, id, status, failure)
+}
+
+type mirrorBranchReader interface {
+	MirrorBranchExists(context.Context, string, string) (bool, error)
+}
+
+// mirrorBranchDeleted reports a feature branch deleted on the mirror after its
+// run started. Its forced publication would push the branch back upstream
+// and undo the deletion (#1490).
+func mirrorBranchDeleted(ctx context.Context, git PublicationGit, repository, branch string) (bool, error) {
+	reader, ok := git.(mirrorBranchReader)
+	if !ok {
+		return false, nil
+	}
+	exists, err := reader.MirrorBranchExists(ctx, repository, branch)
+	if err != nil {
+		return false, fmt.Errorf("read mirror branch %s before publication: %w", branch, err)
+	}
+	return !exists, nil
+}
+
+const deletedBranchPublicationActor = "oberth:branch-deletion"
+
+func abandonDeletedBranchPublication(ctx context.Context, publications PublicationStore, publication model.Publication) (model.PublicationFinalization, error) {
+	finalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	reason := "branch " + publication.Ref + " was deleted on the mirror; upstream left unchanged"
+	var owner any = publications
+	if wrapped, ok := publications.(schedulerDatabase); ok {
+		owner = wrapped.SchedulerStore
+	}
+	if abandoner, ok := owner.(publicationAbandoner); ok {
+		return abandoner.AbandonPublication(finalCtx, publication.ID, deletedBranchPublicationActor, reason)
+	}
+	return publications.FinalizePublication(finalCtx, publication.ID, model.PublicationFailed, reason)
 }

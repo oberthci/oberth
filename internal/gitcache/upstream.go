@@ -71,53 +71,6 @@ func (c *Cache) SyncTag(ctx context.Context, input, tag, sha string) error {
 	return c.verifyRemoteRef(ctx, path, "--tags", ref, sha)
 }
 
-// DeleteBranch removes a branch from the upstream forge and cleans up the
-// local tracking and public refs. If the branch does not exist upstream,
-// only local cleanup is performed — a never-published branch is not an error.
-func (c *Cache) DeleteBranch(ctx context.Context, input, branch string) error {
-	if err := ValidateBranch(branch); err != nil {
-		return err
-	}
-	_, path, err := c.path(input)
-	if err != nil {
-		return err
-	}
-	receive := c.receiveLock(path)
-	if err := receive.LockContext(ctx); err != nil {
-		return err
-	}
-	defer receive.Unlock()
-	lock := c.repoLock(path)
-	if err := lock.LockContext(ctx); err != nil {
-		return err
-	}
-	defer lock.Unlock()
-	if err := c.checkRepositoryActive(ctx, input); err != nil {
-		return err
-	}
-	ref := "refs/heads/" + branch
-	if err := c.allowBranchDeletion(ctx, path, ref); err != nil {
-		return err
-	}
-	// Check whether the branch exists upstream before pushing the deletion
-	// so a never-published branch completes silently.
-	output, err := c.capture(ctx, path, "ls-remote", "--heads", "upstream", ref)
-	if err != nil {
-		return fmt.Errorf("check upstream branch %s: %w", branch, err)
-	}
-	if strings.TrimSpace(output) != "" {
-		if err := c.run(ctx, commandSpec{dir: path, args: []string{"push", "upstream", ":" + ref}}); err != nil {
-			return fmt.Errorf("delete upstream branch %s: %w", branch, err)
-		}
-	}
-	// Clean up the local tracking and public refs so a later refresh
-	// does not re-create the deleted branch from stale upstream state.
-	tracking := upstreamRefPrefix + "heads/" + branch
-	_ = c.deleteRef(ctx, path, tracking, "")
-	_ = c.deleteRef(ctx, path, ref, "")
-	return nil
-}
-
 // ReleaseReachable proves commit ancestry against the exact upstream snapshot
 // durably bound to the receive before its public ref mutation. It never trusts
 // the client-writable public default branch or later repository metadata.

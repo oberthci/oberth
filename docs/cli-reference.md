@@ -241,6 +241,37 @@ Advanced:
   --dir DIR                    DIR for recipient.key and recipient.pem (created 0700)
 ```
 
+## oberth branch
+
+```text
+Usage: oberth branch <prune|deletions> [flags]
+Use oberth branch <command> --help for command flags.
+```
+
+## oberth branch deletions
+
+```text
+Usage: oberth branch prune <repository> [--merged-into <default-branch>] [--older-than <30d|72h>] [--exclude-prefix <prefix>]...
+         [--branch <name>=<sha>]... [--allow-unmerged] [--confirm --plan-id <id>] [--confirm-protected <upstream/org/repo:branch>]
+         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+       oberth branch deletions [--repo <repository>] [--status pending|propagated|failed|skipped] [--batch <id>]
+         [--limit N] [--before N] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+prune is a dry run unless --confirm names the dry run's plan ID. Mirror refs are deleted at once;
+upstream deletion follows asynchronously. Read per-branch upstream state with branch deletions.
+```
+
+## oberth branch prune
+
+```text
+Usage: oberth branch prune <repository> [--merged-into <default-branch>] [--older-than <30d|72h>] [--exclude-prefix <prefix>]...
+         [--branch <name>=<sha>]... [--allow-unmerged] [--confirm --plan-id <id>] [--confirm-protected <upstream/org/repo:branch>]
+         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+       oberth branch deletions [--repo <repository>] [--status pending|propagated|failed|skipped] [--batch <id>]
+         [--limit N] [--before N] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+prune is a dry run unless --confirm names the dry run's plan ID. Mirror refs are deleted at once;
+upstream deletion follows asynchronously. Read per-branch upstream state with branch deletions.
+```
+
 ## oberth fragments
 
 ```text
@@ -522,6 +553,15 @@ Usage: oberth mcp tools [arguments] [flags]
         token file
   -url string
         MCP URL
+```
+
+## oberth outbox
+
+```text
+Usage: oberth outbox list|show|retry|abandon [<upstream/org/repo>] [--id <record-id>] [--reason <text>]
+         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+Repair a receive record that blocks its repository: show it, retry delivery, or abandon it
+(moved aside under abandoned/, audited). Unscoped admin only.
 ```
 
 ## oberth preflight
@@ -1172,6 +1212,8 @@ Usage of serve:
         configured chart networkPolicy.enabled (true or false); omitted means unavailable, not measured CNI enforcement
   -promotion-grant-max-lifetime duration
         maximum lifetime for promotion grants (default 24h, hard ceiling 168h) (default 24h0m0s)
+  -protected-branches string
+        comma-separated branch globs that, like the default branch, no push or prune may delete (default "main,master")
   -push-banner-url string
         optional HTTPS dashboard URL echoed to every accepted git push
   -release-cache-root string
