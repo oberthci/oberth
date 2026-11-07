@@ -68,7 +68,7 @@ func main() {
 	}
 }
 
-const usageCommands = "admin, wait-idle, git-ssh, audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, schedules, fragments, artifacts, runs, run, promotion, publication, log, repos, issues, status, uplink, access, resource, size, admission, secretstore, mcp, preflight, or version"
+const usageCommands = "admin, wait-idle, git-ssh, audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, branch, outbox, schedules, fragments, artifacts, runs, run, promotion, publication, log, repos, issues, status, uplink, access, resource, size, admission, secretstore, mcp, preflight, or version"
 
 func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.Writer) (resultErr error) {
 	defer func() {
@@ -109,6 +109,8 @@ Commands:
   serve         Start the Oberth server
   upstream      Manage upstream forge connections
   repo          Manage repository mappings
+  branch        Prune mirror branches in batches; read upstream deletion state
+  outbox        Show, retry or abandon a receive record that blocks a repository
   schedules     List and manage scheduled runs
   fragments     Manage pipeline fragments
   artifacts     List and download build artifacts
@@ -151,6 +153,10 @@ Commands:
 		return runUpstream(ctx, arguments[1:], output)
 	case "repo":
 		return runRepo(ctx, arguments[1:], output)
+	case "branch":
+		return runBranch(ctx, arguments[1:], output)
+	case "outbox":
+		return runOutbox(ctx, arguments[1:], output)
 	case "schedules":
 		return runSchedules(ctx, arguments[1:], output)
 	case "fragments":

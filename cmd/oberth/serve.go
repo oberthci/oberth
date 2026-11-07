@@ -1072,6 +1072,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		return err
 	}
 	controlAPI, err := service.NewAPI(service.APIConfig{
+		BranchPrune: git, BranchDeletions: database, DeletionQueued: branchDeletions.Notify,
 		ResourceDeclarations: argoJobs,
 		ReleasePreflight:     argoJobs,
 		UplinkLifecycle:      database, DeclarationDismissal: database,
@@ -1172,6 +1173,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
+	controlAPI.SetReceiveOutbox(git, receiveHandler)
 	hostSigner, err := sshserver.ParseHostSigner(hostKey)
 	if err != nil {
 		return err

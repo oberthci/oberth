@@ -35,6 +35,9 @@ backup database
 backup export-secrets
 backup key
 backup keygen
+branch
+branch deletions
+branch prune
 fragments
 fragments list
 fragments show
@@ -47,6 +50,7 @@ log
 mcp
 mcp call
 mcp tools
+outbox
 preflight
 preflight drift
 preflight pki

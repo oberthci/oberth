@@ -3,7 +3,7 @@ package main
 import "strings"
 
 func nearestCommand(input string) string {
-	commands := strings.Fields("access admin admission artifacts audit backup fragments git-ssh init install issues log mcp preflight promotion publication repo repos resource restore run runs schedules secretstore serve setup size status uplink upgrade upstream validate version wait-idle")
+	commands := strings.Fields("access admin admission artifacts audit backup branch fragments git-ssh init install issues log mcp outbox preflight promotion publication repo repos resource restore run runs schedules secretstore serve setup size status uplink upgrade upstream validate version wait-idle")
 	best, distance := "", 3
 	for _, command := range commands {
 		candidate := commandDistance(input, command)
