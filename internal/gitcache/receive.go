@@ -266,6 +266,7 @@ func (c *Cache) finalizeReceiveLocked(ctx context.Context, path string, reservat
 			}
 		}
 	}
+	c.markReceiveDeletionsLocked(ctx, path, updates)
 	reservation.State = receiveReady
 	reservation.Updates = updates
 	reservation.Next = 0

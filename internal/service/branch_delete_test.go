@@ -47,27 +47,16 @@ func TestBranchDeletionRecordsPendingUpstreamDeletionAndReturns(t *testing.T) {
 	if len(receives.events) != 1 || receives.events[0].Outcome != "deleted" || receives.events[0].OldSHA != strings.Repeat("a", 40) || receives.events[0].Actor != "operator@host" {
 		t.Fatalf("events = %+v", receives.events)
 	}
-	if len(git.deletedBranches) != 1 || woken != 1 || git.ensureCalls != 0 {
-		t.Fatalf("marker calls=%v woken=%d ensure=%d (a deletion must not refresh from the forge)", git.deletedBranches, woken, git.ensureCalls)
+	if woken != 1 || git.ensureCalls != 0 || git.peelCalls != 0 || git.remoteCalls != 0 {
+		t.Fatalf("woken=%d git=%+v (a deletion callback makes no Git call)", woken, git)
 	}
 }
 
-// The marker is best effort: a failed or slow local marker never fails the
-// receive, while a failed durable record does.
+// A failed durable record fails the receive callback (it is replayed later);
+// nothing else can.
 func TestBranchDeletionDependsOnlyOnTheDurableRecord(t *testing.T) {
-	git := &stubPushGit{deleteErr: errors.New("repository lock busy")}
-	ingestor, err := NewPushIngestor(PushConfig{
-		Repositories: stubPushRepositories{repository: model.Repository{ID: 1, Name: "repo", DefaultBranch: "main"}},
-		Discoverer:   stubRepositoryDiscoverer{}, Git: git, Receives: &stubReceiveRecorder{},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	push := BranchPush{EventID: "delete", Repository: "repo", Branch: "feature/retired",
 		Actor: "operator@host", OldOID: strings.Repeat("a", 40), NewOID: strings.Repeat("0", 40)}
-	if result, err := ingestor.Branch(t.Context(), push); err != nil || !result.Deleted {
-		t.Fatalf("marker failure failed the receive: %+v %v", result, err)
-	}
 	failing, err := NewPushIngestor(PushConfig{
 		Repositories: stubPushRepositories{repository: model.Repository{ID: 1, Name: "repo", DefaultBranch: "main"}},
 		Discoverer:   stubRepositoryDiscoverer{}, Git: &stubPushGit{}, Receives: failingReceiveRecorder{err: errors.New("database unavailable")},
@@ -92,7 +81,7 @@ func TestBranchDeletionRefusesDefaultBranch(t *testing.T) {
 	}
 	_, err = ingestor.Branch(t.Context(), BranchPush{EventID: "delete", Repository: "repo", Branch: "main",
 		Actor: "agent@host", OldOID: strings.Repeat("a", 40), NewOID: strings.Repeat("0", 40)})
-	if err == nil || !strings.Contains(err.Error(), "default branch") || len(git.deletedBranches) != 0 || len(receives.events) != 0 {
-		t.Fatalf("default deletion: err=%v calls=%v events=%v", err, git.deletedBranches, receives.events)
+	if err == nil || !strings.Contains(err.Error(), "default branch") || len(receives.events) != 0 {
+		t.Fatalf("default deletion: err=%v events=%v", err, receives.events)
 	}
 }

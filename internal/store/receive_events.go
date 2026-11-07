@@ -44,7 +44,7 @@ func (s *Store) RecordReceiveEvent(ctx context.Context, spec model.ReceiveEventS
 	// An accepted branch deletion commits its pending upstream propagation
 	// with the receive event: the receive returns once this row exists.
 	if spec.RefKind == model.RefBranch && spec.Outcome == "deleted" {
-		if err := insertBranchDeletionTx(ctx, tx, spec.ID, spec.RepoID, spec.Ref, spec.OldSHA, spec.Actor, model.BranchDeletionFromPush, "", now); err != nil {
+		if err := insertBranchDeletionTx(ctx, tx, spec.ID, spec.RepoID, spec.Ref, spec.OldSHA, spec.Actor, model.BranchDeletionFromPush, "", now, 0); err != nil {
 			return false, err
 		}
 	}

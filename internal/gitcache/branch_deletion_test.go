@@ -33,30 +33,39 @@ func deletionFixture(t *testing.T, root string) (*testRepository, *Cache, Reposi
 	return repository, cache, ready, featureSHA
 }
 
-// The v0.17.84-v0.17.95 hang: receive callback delivery holds the receive
-// lock and the deletion handler took it again. The callback's local marker
-// must complete while the receive lock is held.
-func TestReceiveDeletionCallbackNeverReentersReceiveLock(t *testing.T) {
+// Receive finalization writes the deletion marker under the repository
+// lock, so it already exists when the callback runs: no refresh between
+// receive-pack and the callback can re-create the branch. The callback itself
+// needs no Git call (the v0.17.84-v0.17.95 hang re-took the receive lock
+// there).
+func TestReceiveDeletionMarkedBeforeCallback(t *testing.T) {
 	t.Parallel()
-	_, cache, ready, featureSHA := deletionFixture(t, filepath.Join(t.TempDir(), "cache"))
-	budget := testtimeout.Scale(20 * time.Second)
-	ctx, cancel := context.WithTimeout(t.Context(), budget)
-	defer cancel()
+	repository, cache, ready, featureSHA := deletionFixture(t, filepath.Join(t.TempDir(), "cache"))
+	// Re-pushing a branch clears a stale marker in the same finalization.
+	runGit(t, ready.Path, "update-ref", deletingRefPrefix+"feature/again", repository.initialSHA)
 	var delivered []ReceiveEvent
-	err := cache.receiveTransaction(ctx, "example", ready.Path, "operator@host", func() error {
-		return cache.deleteRef(ctx, ready.Path, "refs/heads/feature/gone", featureSHA)
-	}, ReceiveHandlerFunc(func(ctx context.Context, event ReceiveEvent) error {
+	err := cache.receiveTransaction(t.Context(), "example", ready.Path, "operator@host", func() error {
+		if err := cache.deleteRef(t.Context(), ready.Path, "refs/heads/feature/gone", featureSHA); err != nil {
+			return err
+		}
+		return cache.updateRef(t.Context(), ready.Path, "refs/heads/feature/again", repository.initialSHA, "")
+	}, ReceiveHandlerFunc(func(_ context.Context, event ReceiveEvent) error {
+		if event.Update.Deleted() {
+			if got := runGitOptional(t, ready.Path, "rev-parse", "--verify", deletingRefPrefix+"feature/gone"); got != featureSHA {
+				return errors.New("deletion marker missing at callback time")
+			}
+		}
 		delivered = append(delivered, event)
-		return cache.MarkBranchDeletion(ctx, event.Repo, strings.TrimPrefix(event.Update.Ref, "refs/heads/"), event.Update.OldSHA)
+		return nil
 	}))
 	if err != nil {
 		t.Fatalf("receive with deletion callback: %v", err)
 	}
-	if len(delivered) != 1 || !delivered[0].Update.Deleted() {
+	if len(delivered) != 2 {
 		t.Fatalf("delivered = %+v", delivered)
 	}
-	if got := runGitOptional(t, ready.Path, "rev-parse", "--verify", deletingRefPrefix+"feature/gone"); got != featureSHA {
-		t.Fatalf("deletion marker = %q, want %s", got, featureSHA)
+	if got := runGitOptional(t, ready.Path, "show-ref", "--verify", deletingRefPrefix+"feature/again"); got != "" {
+		t.Fatalf("re-pushed branch kept its deletion marker: %s", got)
 	}
 }
 
@@ -81,9 +90,7 @@ func TestReplayPendingDeletionCompletesWithinBudget(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), budget)
 	defer cancel()
 	started := time.Now()
-	if err := restarted.ReplayPending(ctx, ReceiveHandlerFunc(func(ctx context.Context, event ReceiveEvent) error {
-		return restarted.MarkBranchDeletion(ctx, event.Repo, strings.TrimPrefix(event.Update.Ref, "refs/heads/"), event.Update.OldSHA)
-	})); err != nil {
+	if err := restarted.ReplayPending(ctx, ReceiveHandlerFunc(func(context.Context, ReceiveEvent) error { return nil })); err != nil {
 		t.Fatalf("replay: %v", err)
 	}
 	if elapsed := time.Since(started); elapsed > budget {
@@ -238,7 +245,12 @@ func TestPropagateSkipsBranchPushedAgain(t *testing.T) {
 	if _, err := cache.PruneBranches(t.Context(), "example", []BranchHead{{Branch: "feature/gone", SHA: featureSHA}}, false); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, ready.Path, "update-ref", "refs/heads/feature/gone", repository.initialSHA)
+	// Pushed again through a receive, which drops the deletion marker.
+	if err := cache.receiveTransaction(t.Context(), "example", ready.Path, "dev@host", func() error {
+		return cache.updateRef(t.Context(), ready.Path, "refs/heads/feature/gone", repository.initialSHA, "")
+	}, ReceiveHandlerFunc(func(context.Context, ReceiveEvent) error { return nil })); err != nil {
+		t.Fatal(err)
+	}
 	results, err := cache.PropagateBranchDeletions(t.Context(), "example", []UpstreamDeletion{{Branch: "feature/gone", OldSHA: featureSHA}})
 	if err != nil || len(results) != 1 || results[0].State != UpstreamSkipped {
 		t.Fatalf("propagate = %+v, %v", results, err)
@@ -320,7 +332,7 @@ func TestBranchInventoryClassifiesMergedAndPatchEquivalent(t *testing.T) {
 	picked := runGit(t, repository.work, "rev-parse", "HEAD")
 	seedCacheObject(t, repository.work, ready.Path, picked)
 	runGit(t, ready.Path, "update-ref", "refs/heads/main", picked)
-	equivalence, err := cache.BranchPatchEquivalence(t.Context(), "example", "main", []BranchHead{{Branch: "feature/gone", SHA: featureSHA}}, 10)
+	equivalence, err := cache.BranchPatchEquivalence(t.Context(), "example", picked, []BranchHead{{Branch: "feature/gone", SHA: featureSHA}}, 10)
 	if err != nil || len(equivalence) != 1 || !equivalence["feature/gone"] {
 		t.Fatalf("patch equivalence = %v, %v", equivalence, err)
 	}
@@ -349,5 +361,63 @@ func runGitInput(t *testing.T, dir, input string, args ...string) {
 	command.Stdin = strings.NewReader(input)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, output)
+	}
+}
+
+func TestPruneRefusesDefaultBranchEvenWhenProtectedAllowed(t *testing.T) {
+	t.Parallel()
+	repository, cache, ready, _ := deletionFixture(t, filepath.Join(t.TempDir(), "cache"))
+	cache.protectedBranches = []string{"release/*"}
+	runGit(t, ready.Path, "update-ref", "refs/heads/release/1", repository.initialSHA)
+	heads := []BranchHead{{Branch: "main", SHA: repository.initialSHA}, {Branch: "release/1", SHA: repository.initialSHA}}
+	outcomes, err := cache.PruneBranches(t.Context(), "example", heads, false)
+	if err != nil || outcomes[0].Result != PruneProtected || outcomes[1].Result != PruneProtected {
+		t.Fatalf("unconfirmed = %+v, %v", outcomes, err)
+	}
+	outcomes, err = cache.PruneBranches(t.Context(), "example", heads, true)
+	if err != nil || outcomes[0].Result != PruneProtected || outcomes[1].Result != PruneDeleted {
+		t.Fatalf("confirmed = %+v, %v", outcomes, err)
+	}
+	if got := remoteRef(t, ready.Path, "refs/heads/main"); got != repository.initialSHA {
+		t.Fatalf("default branch deleted: %s", got)
+	}
+}
+
+// Several pending records for one branch (deleted, pushed again, deleted
+// again) become one delete refspec: Git refuses a push naming one
+// destination twice.
+func TestPropagateGroupsRecordsOfOneBranch(t *testing.T) {
+	t.Parallel()
+	repository, cache, _, featureSHA := deletionFixture(t, filepath.Join(t.TempDir(), "cache"))
+	if _, err := cache.PruneBranches(t.Context(), "example", []BranchHead{{Branch: "feature/gone", SHA: featureSHA}}, false); err != nil {
+		t.Fatal(err)
+	}
+	results, err := cache.PropagateBranchDeletions(t.Context(), "example", []UpstreamDeletion{
+		{Branch: "feature/gone", OldSHA: repository.initialSHA},
+		{Branch: "feature/gone", OldSHA: featureSHA},
+	})
+	if err != nil || len(results) != 2 || results[0].State != UpstreamPropagated || results[1].State != UpstreamPropagated {
+		t.Fatalf("propagate = %+v, %v", results, err)
+	}
+	if got := runGitOptional(t, "", "ls-remote", repository.upstream, "refs/heads/feature/gone"); got != "" {
+		t.Fatalf("upstream still has the branch: %s", got)
+	}
+}
+
+// A queued prune whose local deletion has not run yet (the branch is still on
+// the mirror, with its marker) is deferred, never skipped.
+func TestPropagateDefersUntilLocalDeletionApplies(t *testing.T) {
+	t.Parallel()
+	repository, cache, ready, featureSHA := deletionFixture(t, filepath.Join(t.TempDir(), "cache"))
+	runGit(t, ready.Path, "update-ref", deletingRefPrefix+"feature/gone", featureSHA)
+	results, err := cache.PropagateBranchDeletions(t.Context(), "example", []UpstreamDeletion{{Branch: "feature/gone", OldSHA: featureSHA}})
+	if err != nil || len(results) != 1 || results[0].State != UpstreamRetry {
+		t.Fatalf("propagate = %+v, %v", results, err)
+	}
+	if got := remoteRef(t, repository.upstream, "refs/heads/feature/gone"); got != featureSHA {
+		t.Fatalf("upstream changed: %s", got)
+	}
+	if got := remoteRef(t, ready.Path, deletingRefPrefix+"feature/gone"); got != featureSHA {
+		t.Fatalf("marker dropped: %s", got)
 	}
 }

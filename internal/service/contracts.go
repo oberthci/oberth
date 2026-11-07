@@ -278,9 +278,6 @@ type PushGit interface {
 	PeelObject(context.Context, string, string) (gitcache.PeeledObject, error)
 	ReleaseReachable(context.Context, string, string, string) (bool, error)
 	RemoteRef(context.Context, string, string) (string, bool, error)
-	// MarkBranchDeletion is local and bounded: receive callbacks hold the
-	// receive lock, so it must never take that lock or touch the network.
-	MarkBranchDeletion(context.Context, string, string, string) error
 }
 
 type PublicationGit interface {

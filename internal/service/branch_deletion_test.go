@@ -12,6 +12,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // blockingUpstream never answers until its context ends, like the forge in
@@ -140,5 +141,49 @@ func TestRefusedUpstreamDeletionFailsAtOnce(t *testing.T) {
 	}
 	if strings.Join(upstream.abandoned, ",") != "feature/x" {
 		t.Fatalf("abandoned = %v", upstream.abandoned)
+	}
+}
+
+type mirrorBranchGit struct {
+	*retryPublicationGit
+	exists bool
+}
+
+func (g *mirrorBranchGit) MirrorBranchExists(context.Context, string, string) (bool, error) {
+	return g.exists, nil
+}
+
+// A feature-branch publication whose branch was deleted on the mirror after
+// its run started must not force-push the branch back upstream.
+func TestPublicationSkipsBranchDeletedOnMirror(t *testing.T) {
+	for _, exists := range []bool{true, false} {
+		t.Run(map[bool]string{true: "present", false: "deleted"}[exists], func(t *testing.T) {
+			f := newControlFixture(t)
+			run, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/gone", SHA: retrySourceSHA, Actor: "agent@host", Trigger: "branch"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = f.store.ClaimNextRun(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			pub, err := f.store.BeginPublication(t.Context(), model.PublicationSpec{RepoID: f.repo.ID, RunID: run.ID, RefKind: model.RefBranch, Ref: "feature/gone", ResultSHA: run.SHA, Actor: run.Actor})
+			if err != nil {
+				t.Fatal(err)
+			}
+			g := &mirrorBranchGit{retryPublicationGit: &retryPublicationGit{controlGit: f.git}, exists: exists}
+			final, err := deliverPublication(t.Context(), f.scheduler.database(), g, f.store, f.repo, f.repo.Name, pub)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if exists {
+				if g.forced != 1 || final.Publication.Status != model.PublicationDelivered {
+					t.Fatalf("present branch: forced=%d final=%+v", g.forced, final.Publication)
+				}
+				return
+			}
+			if g.forced != 0 || final.Publication.Status != model.PublicationAbandoned || final.Run.Phase != "abandoned" || !strings.Contains(final.Publication.Error, "deleted on the mirror") {
+				t.Fatalf("deleted branch: forced=%d publication=%+v run=%+v", g.forced, final.Publication, final.Run)
+			}
+		})
 	}
 }

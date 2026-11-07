@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/gitoid"
@@ -138,25 +137,15 @@ func (ingestor *PushIngestor) Branch(ctx context.Context, push BranchPush) (Push
 	return ingestor.enqueueBranch(ctx, push, repository, peeled.CommitSHA, reason)
 }
 
-// branchDeletionMarkBudget bounds the only Git work a deletion callback does.
-// It waits for the repository lock, never for the network.
-const branchDeletionMarkBudget = 10 * time.Second
-
 // deleteBranch acknowledges a branch deletion receive-pack already applied to
 // the mirror. It records the receive event and a pending upstream deletion in
 // one transaction and returns: upstream propagation is asynchronous, so a
 // slow or unreachable forge never holds the receive, its replay, or startup.
+// It makes no Git call: receive finalization already wrote the deletion
+// marker under the repository lock, and callbacks run under the receive lock.
 func (ingestor *PushIngestor) deleteBranch(ctx context.Context, push BranchPush, repository model.Repository) (PushResult, error) {
 	if repository.DefaultBranch == "" || push.Branch == repository.DefaultBranch {
 		return PushResult{}, fmt.Errorf("%w: cannot delete the default branch", ErrInvalidInput)
-	}
-	if validOID(push.OldOID) {
-		// Best effort: the marker stops a refresh from re-creating the
-		// branch before propagation, and propagation re-creates it if this
-		// bounded attempt loses the race for the repository lock.
-		markCtx, cancel := context.WithTimeout(ctx, branchDeletionMarkBudget)
-		_ = ingestor.git.MarkBranchDeletion(markCtx, push.Repository, push.Branch, strings.ToLower(push.OldOID))
-		cancel()
 	}
 	duplicate, err := ingestor.receives.RecordReceiveEvent(ctx, receiveSpec(push.EventID, push.Actor, repository.ID, model.RefBranch, push.Branch, push.OldOID, "", "", "deleted"))
 	if err != nil {

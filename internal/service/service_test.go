@@ -68,17 +68,15 @@ func (queue *stubCIQueue) EnqueueCI(_ context.Context, request CIRequest) (model
 }
 
 type stubPushGit struct {
-	peeled          gitcache.PeeledObject
-	reachable       bool
-	remoteSHA       string
-	remoteExists    bool
-	ensureCalls     int
-	peelCalls       int
-	ancestorCalls   int
-	admissionSHAs   []string
-	remoteCalls     int
-	deletedBranches []string
-	deleteErr       error
+	peeled        gitcache.PeeledObject
+	reachable     bool
+	remoteSHA     string
+	remoteExists  bool
+	ensureCalls   int
+	peelCalls     int
+	ancestorCalls int
+	admissionSHAs []string
+	remoteCalls   int
 }
 
 func (git *stubPushGit) Ensure(context.Context, string) (gitcache.Repository, error) {
@@ -100,11 +98,6 @@ func (git *stubPushGit) ReleaseReachable(_ context.Context, _, _, admissionSHA s
 func (git *stubPushGit) RemoteRef(context.Context, string, string) (string, bool, error) {
 	git.remoteCalls++
 	return git.remoteSHA, git.remoteExists, nil
-}
-
-func (git *stubPushGit) MarkBranchDeletion(_ context.Context, repo, branch, _ string) error {
-	git.deletedBranches = append(git.deletedBranches, repo+":"+branch)
-	return git.deleteErr
 }
 
 type stubPushRepositories struct {

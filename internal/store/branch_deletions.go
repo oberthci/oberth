@@ -20,11 +20,17 @@ d.batch_id, d.status, d.attempts, d.retry_after, d.error, d.created_at, d.update
 
 const maximumBranchDeletionError = 2048
 
-func insertBranchDeletionTx(ctx context.Context, tx *sql.Tx, id string, repoID int64, branch, oldSHA, actor, source, batchID string, now int64) error {
+// branchPruneHold keeps queued prune rows away from the propagator until
+// FinishBranchPrune releases the ones the local deletion applied. After a
+// crash between the two, the hold expires and propagation decides from the
+// mirror: a deleted branch propagates, a branch still present is skipped.
+const branchPruneHold = time.Hour
+
+func insertBranchDeletionTx(ctx context.Context, tx *sql.Tx, id string, repoID int64, branch, oldSHA, actor, source, batchID string, now, retryAfter int64) error {
 	_, err := tx.ExecContext(ctx, `
-INSERT INTO branch_deletions(id, repo_id, branch, old_sha, actor, source, batch_id, status, created_at, updated_at)
-VALUES(?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-		id, repoID, branch, strings.ToLower(oldSHA), actor, source, batchID, now, now)
+INSERT INTO branch_deletions(id, repo_id, branch, old_sha, actor, source, batch_id, status, retry_after, created_at, updated_at)
+VALUES(?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
+		id, repoID, branch, strings.ToLower(oldSHA), actor, source, batchID, retryAfter, now, now)
 	if err != nil {
 		return fmt.Errorf("insert branch deletion: %w", err)
 	}
@@ -32,8 +38,8 @@ VALUES(?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
 }
 
 // QueueBranchPrune records every planned deletion of one confirmed prune
-// batch as pending before any local ref changes. Entries the local
-// compare-and-delete refuses are marked skipped by FinishBranchPrune.
+// batch as pending, but not yet due, before any local ref changes.
+// FinishBranchPrune releases the applied ones and skips the rest.
 func (s *Store) QueueBranchPrune(ctx context.Context, batchID string, repoID int64, actor string, entries []model.BranchPruneEntry) error {
 	if strings.TrimSpace(batchID) == "" || len(batchID) > 128 || repoID <= 0 || strings.TrimSpace(actor) == "" || len(entries) == 0 {
 		return fmt.Errorf("%w: branch prune batch fields are invalid", ErrInvalid)
@@ -48,9 +54,10 @@ func (s *Store) QueueBranchPrune(ctx context.Context, batchID string, repoID int
 		return fmt.Errorf("begin branch prune: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	now := unixNano(s.now())
+	now := s.now()
 	for index, entry := range entries {
-		if err := insertBranchDeletionTx(ctx, tx, fmt.Sprintf("%s:%d", batchID, index), repoID, entry.Branch, entry.SHA, actor, model.BranchDeletionFromPrune, batchID, now); err != nil {
+		if err := insertBranchDeletionTx(ctx, tx, fmt.Sprintf("%s:%d", batchID, index), repoID, entry.Branch, entry.SHA, actor,
+			model.BranchDeletionFromPrune, batchID, unixNano(now), unixNano(now.Add(branchPruneHold))); err != nil {
 			return err
 		}
 	}
@@ -61,7 +68,8 @@ func (s *Store) QueueBranchPrune(ctx context.Context, batchID string, repoID int
 }
 
 // FinishBranchPrune marks the planned deletions the local compare-and-delete
-// refused and appends the single audit entry for the batch.
+// refused, releases the applied ones to the propagator, and appends the
+// single audit entry for the batch.
 func (s *Store) FinishBranchPrune(ctx context.Context, batchID, actor string, repoID int64, skipped map[string]string, details map[string]any) error {
 	encoded, err := json.Marshal(details)
 	if err != nil {
@@ -78,6 +86,10 @@ func (s *Store) FinishBranchPrune(ctx context.Context, batchID, actor string, re
 WHERE batch_id=? AND repo_id=? AND branch=? AND status='pending'`, boundedDeletionError(reason), now, batchID, repoID, branch); err != nil {
 			return fmt.Errorf("skip branch prune entry: %w", err)
 		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE branch_deletions SET retry_after=0, updated_at=?
+WHERE batch_id=? AND repo_id=? AND status='pending'`, now, batchID, repoID); err != nil {
+		return fmt.Errorf("release branch prune entries: %w", err)
 	}
 	if _, err := s.appendAuditAction(ctx, tx, model.AuditActionSpec{
 		Actor: actor, Action: "branch.prune", ResourceType: "repository",

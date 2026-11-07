@@ -77,31 +77,30 @@ func (c *Cache) BranchProtected(branch, defaultBranch string) bool {
 	return branch == defaultBranch || c.protectedByConfig(branch)
 }
 
-// MarkBranchDeletion records the private deletion marker for a branch that a
-// receive already removed from the mirror. It runs inside receive callback
-// delivery, which holds the receive lock: it must never take that lock again
-// (the v0.17.84-v0.17.95 self-deadlock) and never touches the network. A
-// branch that exists again on the mirror is left unmarked.
-func (c *Cache) MarkBranchDeletion(ctx context.Context, input, branch, oldSHA string) error {
-	if err := ValidateBranch(branch); err != nil {
-		return err
+// markReceiveDeletionsLocked runs inside receive finalization, under the
+// repository lock, so no refresh can re-create a just-deleted branch before
+// its deletion is recorded. A branch created or updated by the same receive
+// drops any stale marker: it was pushed again and must not be deleted
+// upstream. Marker failures are logged, never fatal: propagation re-creates
+// a missing marker.
+func (c *Cache) markReceiveDeletionsLocked(ctx context.Context, path string, updates []RefUpdate) {
+	for _, update := range updates {
+		branch, ok := strings.CutPrefix(update.Ref, "refs/heads/")
+		if !ok || ValidateBranch(branch) != nil {
+			continue
+		}
+		var err error
+		if update.Deleted() {
+			if ValidateSHA(update.OldSHA) == nil {
+				err = c.markDeletionLocked(ctx, path, branch, strings.ToLower(update.OldSHA))
+			}
+		} else {
+			err = c.deleteRef(ctx, path, deletingRefPrefix+branch, "")
+		}
+		if err != nil {
+			c.logger.Printf("branch deletion marker for %s: %v", update.Ref, err)
+		}
 	}
-	if err := ValidateSHA(oldSHA); err != nil {
-		return err
-	}
-	_, path, err := c.path(input)
-	if err != nil {
-		return err
-	}
-	lock := c.repoLock(path)
-	if err := lock.LockContext(ctx); err != nil {
-		return err
-	}
-	defer lock.Unlock()
-	if !c.isBare(ctx, path) {
-		return fmt.Errorf("repository %s is not cached", input)
-	}
-	return c.markDeletionLocked(ctx, path, branch, oldSHA)
 }
 
 func (c *Cache) markDeletionLocked(ctx context.Context, path, branch, oldSHA string) error {
@@ -114,6 +113,32 @@ func (c *Cache) markDeletionLocked(ctx context.Context, path, branch, oldSHA str
 		return nil
 	}
 	return c.updateRef(ctx, path, deletingRefPrefix+branch, oldSHA, "")
+}
+
+// MirrorBranchExists reports whether the mirror still has a public branch.
+// A feature-branch publication checks it before force-pushing, so a branch
+// deleted after its CI run started is not pushed back upstream.
+func (c *Cache) MirrorBranchExists(ctx context.Context, input, branch string) (bool, error) {
+	if err := ValidateBranch(branch); err != nil {
+		return false, err
+	}
+	_, path, err := c.path(input)
+	if err != nil {
+		return false, err
+	}
+	lock := c.repoLock(path)
+	if err := lock.RLockContext(ctx); err != nil {
+		return false, err
+	}
+	defer lock.RUnlock()
+	if !c.isBare(ctx, path) {
+		return false, fmt.Errorf("repository %s is not cached", input)
+	}
+	refs, err := c.listRefsAtMost(ctx, path, 1, "refs/heads/"+branch)
+	if err != nil {
+		return false, err
+	}
+	return refs["refs/heads/"+branch] != "", nil
 }
 
 // BranchHead is one exact branch head selected for deletion.
@@ -139,8 +164,9 @@ type PruneOutcome struct {
 
 // PruneBranches deletes many exact branch heads from the mirror in one ref
 // transaction. Each head is compared and deleted: a moved or missing head is
-// reported and left alone. The default and protected branches are refused
-// unless allowProtected is set by an explicitly confirmed caller. Only local
+// reported and left alone. The default branch is always refused; configured
+// protected branches only unless allowProtected is set by an explicitly
+// confirmed caller. Only local
 // refs change here; upstream propagation is the caller's asynchronous job.
 func (c *Cache) PruneBranches(ctx context.Context, input string, heads []BranchHead, allowProtected bool) ([]PruneOutcome, error) {
 	if len(heads) == 0 {
@@ -196,7 +222,7 @@ func (c *Cache) PruneBranches(ctx context.Context, input string, heads []BranchH
 		sha := strings.ToLower(head.SHA)
 		outcome := PruneOutcome{Branch: head.Branch, SHA: sha, Current: current[ref]}
 		switch {
-		case !allowProtected && c.BranchProtected(head.Branch, defaultBranch):
+		case head.Branch == defaultBranch || !allowProtected && c.protectedByConfig(head.Branch):
 			outcome.Result = PruneProtected
 		case outcome.Current == "":
 			outcome.Result = PruneMissing
@@ -316,21 +342,19 @@ func (c *Cache) BranchInventory(ctx context.Context, input, target string) (Bran
 }
 
 // BranchPatchEquivalence checks, with git cherry, whether every commit of
-// each unmerged head already has an equivalent change in target. At most
-// limit heads are checked; the rest are absent from the result. Read-only.
-func (c *Cache) BranchPatchEquivalence(ctx context.Context, input, target string, heads []BranchHead, limit int) (map[string]bool, error) {
-	if err := ValidateBranch(target); err != nil {
+// each unmerged head already has an equivalent change in targetSHA. At most
+// limit heads are checked; the rest are absent from the result. Read-only and
+// lock-free: every input is an exact object ID from an earlier snapshot, so
+// concurrent ref changes cannot affect the answer, and receives never wait
+// behind a long plan. Execution still compares and deletes each head.
+func (c *Cache) BranchPatchEquivalence(ctx context.Context, input, targetSHA string, heads []BranchHead, limit int) (map[string]bool, error) {
+	if err := ValidateSHA(targetSHA); err != nil {
 		return nil, err
 	}
 	_, path, err := c.path(input)
 	if err != nil {
 		return nil, err
 	}
-	lock := c.repoLock(path)
-	if err := lock.RLockContext(ctx); err != nil {
-		return nil, err
-	}
-	defer lock.RUnlock()
 	result := make(map[string]bool, min(len(heads), limit))
 	for _, head := range heads {
 		if len(result) >= limit || ctx.Err() != nil {
@@ -339,7 +363,7 @@ func (c *Cache) BranchPatchEquivalence(ctx context.Context, input, target string
 		if ValidateSHA(head.SHA) != nil {
 			continue
 		}
-		output, err := c.capture(ctx, path, "cherry", "refs/heads/"+target, head.SHA)
+		output, err := c.capture(ctx, path, "cherry", targetSHA, head.SHA)
 		if err != nil {
 			continue
 		}
@@ -386,16 +410,20 @@ type UpstreamDeletionResult struct {
 // block receives, replay or readiness.
 //
 // Each upstream ref is compared before deletion: it is removed only while it
-// still names the deleted head or one of its ancestors, with a force-with-lease
+// still names a deleted head or one of its ancestors, with a force-with-lease
 // on the exact observed SHA. A ref that moved elsewhere is refused. A branch
-// that exists again on the mirror is skipped.
+// that exists again on the mirror without a deletion marker was pushed again
+// and is skipped; with a marker its local deletion has not been applied yet,
+// so it is retried later. Several records for one branch share one refspec
+// and one outcome.
 func (c *Cache) PropagateBranchDeletions(ctx context.Context, input string, deletions []UpstreamDeletion) ([]UpstreamDeletionResult, error) {
 	_, path, err := c.path(input)
 	if err != nil {
 		return nil, err
 	}
 	results := make([]UpstreamDeletionResult, len(deletions))
-	pending := make([]int, 0, len(deletions))
+	pending := make(map[string][]int)
+	var order []string
 	if err := c.withRepoLock(ctx, path, func() error {
 		if err := c.checkRepositoryActive(ctx, input); err != nil {
 			return err
@@ -410,68 +438,90 @@ func (c *Cache) PropagateBranchDeletions(ctx context.Context, input string, dele
 		if err != nil {
 			return err
 		}
+		markers, err := c.deletingBranches(ctx, path)
+		if err != nil {
+			return err
+		}
 		for index, deletion := range deletions {
 			results[index].Branch = deletion.Branch
-			if ValidateBranch(deletion.Branch) != nil {
+			ref := "refs/heads/" + deletion.Branch
+			switch {
+			case ValidateBranch(deletion.Branch) != nil:
 				results[index].State, results[index].Err = UpstreamRefused, errors.New("branch name is invalid")
-				continue
-			}
-			if public["refs/heads/"+deletion.Branch] != "" {
+			case public[ref] != "" && markers[ref] != "":
+				results[index].State, results[index].Err = UpstreamRetry, errors.New("local deletion not applied yet; upstream left unchanged")
+			case public[ref] != "":
 				results[index].State, results[index].Err = UpstreamSkipped, errors.New("branch exists again on the mirror; upstream left unchanged")
-				continue
-			}
-			if ValidateSHA(deletion.OldSHA) != nil {
+			case ValidateSHA(deletion.OldSHA) != nil:
 				results[index].State, results[index].Err = UpstreamRefused, errors.New("deleted head is unknown; upstream left unchanged")
-				continue
+			default:
+				// Replayed pre-upgrade receives have no marker yet.
+				if markers[ref] == "" {
+					if err := c.markDeletionLocked(ctx, path, deletion.Branch, strings.ToLower(deletion.OldSHA)); err != nil {
+						return err
+					}
+				}
+				if _, seen := pending[deletion.Branch]; !seen {
+					order = append(order, deletion.Branch)
+				}
+				pending[deletion.Branch] = append(pending[deletion.Branch], index)
 			}
-			// Replayed pre-upgrade receives have no marker yet.
-			if err := c.markDeletionLocked(ctx, path, deletion.Branch, strings.ToLower(deletion.OldSHA)); err != nil {
-				return err
-			}
-			pending = append(pending, index)
 		}
 		return nil
 	}); err != nil {
 		return nil, err
 	}
-	if len(pending) == 0 {
+	if len(order) == 0 {
 		return results, c.cleanDeletionRefs(ctx, path, results)
 	}
 	remote, err := c.remoteHeads(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("read upstream branches: %w", err)
 	}
-	var push []int
-	leases := make(map[int]string, len(pending))
-	for _, index := range pending {
-		deletion := deletions[index]
-		observed := remote["refs/heads/"+deletion.Branch]
-		old := strings.ToLower(deletion.OldSHA)
-		switch {
-		case observed == "":
-			results[index].State = UpstreamPropagated
-		case observed == old || c.localAncestor(ctx, path, observed, old):
-			leases[index] = observed
-			push = append(push, index)
-		default:
-			results[index].State = UpstreamRefused
-			results[index].Err = fmt.Errorf("upstream %s moved: expected %s or an ancestor, found %s; upstream left unchanged", deletion.Branch, old, observed)
+	setAll := func(branch, state string, err error) {
+		for _, index := range pending[branch] {
+			results[index].State, results[index].Err = state, err
 		}
 	}
-	pushErrs := make(map[int]error, len(push))
+	var push []string
+	leases := make(map[string]string, len(order))
+	for _, branch := range order {
+		observed := remote["refs/heads/"+branch]
+		if observed == "" {
+			setAll(branch, UpstreamPropagated, nil)
+			continue
+		}
+		eligible := false
+		var expected []string
+		for _, index := range pending[branch] {
+			old := strings.ToLower(deletions[index].OldSHA)
+			expected = append(expected, old)
+			if observed == old || c.localAncestor(ctx, path, observed, old) {
+				eligible = true
+				break
+			}
+		}
+		if !eligible {
+			setAll(branch, UpstreamRefused, fmt.Errorf("upstream %s moved: expected %s or an ancestor, found %s; upstream left unchanged", branch, strings.Join(expected, " or "), observed))
+			continue
+		}
+		leases[branch] = observed
+		push = append(push, branch)
+	}
+	pushErrs := make(map[string]error, len(push))
 	for start := 0; start < len(push); start += upstreamDeletionChunk {
 		chunk := push[start:min(start+upstreamDeletionChunk, len(push))]
 		args := []string{"push", "--porcelain"}
-		for _, index := range chunk {
-			args = append(args, "--force-with-lease=refs/heads/"+deletions[index].Branch+":"+leases[index])
+		for _, branch := range chunk {
+			args = append(args, "--force-with-lease=refs/heads/"+branch+":"+leases[branch])
 		}
 		args = append(args, "upstream")
-		for _, index := range chunk {
-			args = append(args, ":refs/heads/"+deletions[index].Branch)
+		for _, branch := range chunk {
+			args = append(args, ":refs/heads/"+branch)
 		}
 		if pushErr := c.run(ctx, commandSpec{dir: path, args: args}); pushErr != nil {
-			for _, index := range chunk {
-				pushErrs[index] = pushErr
+			for _, branch := range chunk {
+				pushErrs[branch] = pushErr
 			}
 		}
 	}
@@ -479,16 +529,16 @@ func (c *Cache) PropagateBranchDeletions(ctx context.Context, input string, dele
 		// Read back instead of trusting push output: a lost reply or a
 		// partial chunk failure is classified per ref.
 		after, readErr := c.remoteHeads(ctx, path)
-		for _, index := range push {
+		for _, branch := range push {
 			switch {
 			case readErr != nil:
-				results[index].State, results[index].Err = UpstreamRetry, errors.Join(pushErrs[index], readErr)
-			case after["refs/heads/"+deletions[index].Branch] == "":
-				results[index].State = UpstreamPropagated
-			case pushErrs[index] != nil:
-				results[index].State, results[index].Err = UpstreamRetry, pushErrs[index]
+				setAll(branch, UpstreamRetry, errors.Join(pushErrs[branch], readErr))
+			case after["refs/heads/"+branch] == "":
+				setAll(branch, UpstreamPropagated, nil)
+			case pushErrs[branch] != nil:
+				setAll(branch, UpstreamRetry, pushErrs[branch])
 			default:
-				results[index].State, results[index].Err = UpstreamRetry, errors.New("upstream branch still exists after deletion push")
+				setAll(branch, UpstreamRetry, errors.New("upstream branch still exists after deletion push"))
 			}
 		}
 	}

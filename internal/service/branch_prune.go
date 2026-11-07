@@ -254,6 +254,8 @@ func (service *API) planBranchPrune(ctx context.Context, args branchPruneArgumen
 				refusal.Reason = "branch does not exist on the mirror"
 			case !sameOID(entry.SHA, request.ExpectedSHA):
 				refusal.Reason = "head moved: expected " + strings.ToLower(request.ExpectedSHA) + ", found " + entry.SHA
+			case entry.Default:
+				refusal.Reason = "the default branch cannot be deleted"
 			case entry.Protected && args.ConfirmProtected != input+":"+request.Branch:
 				refusal.Reason = fmt.Sprintf("protected branch: delete it alone with confirm_protected %q", input+":"+request.Branch)
 			default:
@@ -282,7 +284,7 @@ func (service *API) planBranchPrune(ctx context.Context, args branchPruneArgumen
 	}
 	equivalent := map[string]bool{}
 	if len(unmergedHeads) > 0 {
-		equivalent, err = service.branchPrune.BranchPatchEquivalence(ctx, input, inventory.Target, unmergedHeads, branchPrunePatchLimit)
+		equivalent, err = service.branchPrune.BranchPatchEquivalence(ctx, input, inventory.TargetSHA, unmergedHeads, branchPrunePatchLimit)
 		if err != nil {
 			return model.Repository{}, "", BranchPruneResponse{}, nil, err
 		}
