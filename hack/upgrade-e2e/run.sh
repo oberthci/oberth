@@ -65,8 +65,18 @@ fetch() { curl --fail --silent --show-error --location --proto '=https' --max-ti
 release=https://releases.oberth.ci/oberth/v$from
 for file in cosign.pub release.json release.json.sigstore.json; do fetch "$release/$file" "$evidence/$file"; done
 printf '%s  %s\n' 036dd71c9d3c07a19bff06d4392874014573f695620ac8554d9df175094c4a31 "$evidence/cosign.pub" | sha256sum -c -
-cosign verify-blob --key "$evidence/cosign.pub" --insecure-ignore-tlog \
-  --bundle "$evidence/release.json.sigstore.json" "$evidence/release.json"
+# Releases up to and including v0.17.95 were signed without a transparency-log
+# entry; only those versions take the legacy pinned-key-only check. Every later
+# release must carry a Rekor inclusion proof, verified with no insecure flag.
+IFS=. read -r from_major from_minor from_patch <<<"$from"
+if ((10#$from_major == 0 && (10#$from_minor < 17 || (10#$from_minor == 17 && 10#$from_patch <= 95)))); then
+  echo "v$from predates release transparency logging; checking the pinned key signature only" >&2
+  cosign verify-blob --key "$evidence/cosign.pub" --insecure-ignore-tlog \
+    --bundle "$evidence/release.json.sigstore.json" "$evidence/release.json"
+else
+  cosign verify-blob --key "$evidence/cosign.pub" \
+    --bundle "$evidence/release.json.sigstore.json" "$evidence/release.json"
+fi
 jq -e --arg v "$from" '.component=="oberth" and .version==("v"+$v) and .chart.version==$v' "$evidence/release.json" >/dev/null
 base=$(jq -er '.source.sha' "$evidence/release.json")
 published=$(jq -er '.images.server.ref' "$evidence/release.json")
