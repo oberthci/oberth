@@ -414,6 +414,10 @@ inline leaves, `TestStepDeadlineAnnotationIsServerOwned` refuses a repository
 copy, and `TestStartupDeadlineKillIsInfrastructure` /
 `TestStartupDeadlineRequiresServerBudgetAndStepScope` keep genuine, capped,
 workflow and foreign-Pod deadlines as the step's own failure.
+`TestStartupDeadlineNeverStartedShapes` accepts kubelet's TerminatePod
+`ContainerStatusUnknown`/137 shape and refuses image/config waiting reasons;
+`TestStartupDeadlineRequiresTheDeadlineToStopMain` keeps an early nonzero or
+OOM exit a genuine failure.
 `TestStartupDeadlineStepAutomaticallyRetriesOnce` runs the scheduler and SQLite
 store end to end: one automatic retry, never an `Execution deadline exceeded.`
 reason. Exclusive classes #1499: `TestExclusiveClassSerializesAcrossRepositories`,

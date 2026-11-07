@@ -102,6 +102,9 @@ func startupDeadlineFixture(declared int64, runtime time.Duration, exit int32) (
 		terminated.Reason = "Completed"
 	}
 	terminated.FinishedAt = metav1.NewTime(terminated.StartedAt.Add(runtime))
+	// The Pod deadline stopped main: the Pod started one floored deadline
+	// before main finished.
+	pod.Status.StartTime = ptr.To(metav1.NewTime(terminated.FinishedAt.Add(-time.Duration(FlooredStepDeadline(declared)) * time.Second)))
 	node.Outputs.ExitCode = ptr.To(strconv.Itoa(int(exit)))
 	node.Message = pod.Status.Message
 	wf.Status.Nodes[node.ID] = node
@@ -168,5 +171,89 @@ func TestStartupDeadlineRequiresServerBudgetAndStepScope(t *testing.T) {
 	pod.Status.ContainerStatuses[0] = corev1.ContainerStatus{Name: "main", State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating"}}}
 	if reason := podStartupDeadlineReason(wf, node, pod, "test", "test"); !model.IsStartupDeadlineReason(reason) {
 		t.Fatal("a main container that never started was not infrastructure")
+	}
+}
+
+// Kubelet's TerminatePod (pkg/kubelet/status/status_manager.go) rewrites every
+// non-terminated container of an initialized Pod to ContainerStatusUnknown
+// with exit 137 and no start time. That is how a never-started main looks on a
+// real cluster after a Pod deadline kill.
+func TestStartupDeadlineNeverStartedShapes(t *testing.T) {
+	unknown := corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Reason: "ContainerStatusUnknown", Message: "The container could not be located when the pod was terminated", ExitCode: 137}}
+	waiting := func(reason string) corev1.ContainerState {
+		return corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: reason}}
+	}
+	for _, tc := range []struct {
+		name  string
+		main  corev1.ContainerStatus
+		infra bool
+	}{
+		{"terminate pod rewrite", corev1.ContainerStatus{Name: "main", State: unknown}, true},
+		{"container creating", corev1.ContainerStatus{Name: "main", State: waiting("ContainerCreating")}, true},
+		{"pod initializing", corev1.ContainerStatus{Name: "main", State: waiting("PodInitializing")}, true},
+		{"image pull error", corev1.ContainerStatus{Name: "main", State: waiting("ErrImagePull")}, false},
+		{"image pull back-off", corev1.ContainerStatus{Name: "main", State: waiting("ImagePullBackOff")}, false},
+		{"invalid image name", corev1.ContainerStatus{Name: "main", State: waiting("InvalidImageName")}, false},
+		{"container config error", corev1.ContainerStatus{Name: "main", State: waiting("CreateContainerConfigError")}, false},
+		{"unknown waiting reason", corev1.ContainerStatus{Name: "main", State: waiting("")}, false},
+		{"unknown after it ran", corev1.ContainerStatus{Name: "main", ContainerID: "containerd://abc", State: unknown}, false},
+		{"unknown with a start time", corev1.ContainerStatus{Name: "main", State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Reason: "ContainerStatusUnknown", ExitCode: 137, StartedAt: metav1.Now()}}}, false},
+		{"unknown with another exit", corev1.ContainerStatus{Name: "main", State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Reason: "ContainerStatusUnknown", ExitCode: 1}}}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wf, node, pod := startupDeadlineFixture(180, 0, 137)
+			pod.Status.ContainerStatuses[0] = tc.main
+			reason := podStartupDeadlineReason(wf, node, pod, "test", "test")
+			if model.IsStartupDeadlineReason(reason) != tc.infra {
+				t.Fatalf("startup deadline = %q, want infrastructure %v", reason, tc.infra)
+			}
+		})
+	}
+	// The realistic shape goes through the whole completion path too.
+	wf, _, pod := startupDeadlineFixture(180, 0, 137)
+	pod.Status.ContainerStatuses[0] = corev1.ContainerStatus{Name: "main", State: unknown}
+	controller := &Controller{kube: fake.NewClientset(pod)}
+	completion := completionFor(wf)
+	controller.collectStepDiagnostics(context.Background(), wf, &completion)
+	if !completion.Infrastructure || !model.IsStartupDeadlineReason(completion.Reason) {
+		t.Fatalf("never-started main after TerminatePod is not infrastructure: %#v", completion)
+	}
+}
+
+// A step whose command failed on its own before the Pod deadline is a genuine
+// failure even when the Pod later hit its deadline (for example while the wait
+// sidecar was still uploading logs).
+func TestStartupDeadlineRequiresTheDeadlineToStopMain(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		exit   int32
+		reason string
+		early  time.Duration // how long before the Pod deadline main finished
+		start  bool          // Pod start time recorded
+		infra  bool
+	}{
+		{"exit 1 long before the deadline", 1, "Error", 60 * time.Second, true, false},
+		{"exit 137 long before the deadline", 137, "Error", 60 * time.Second, true, false},
+		{"killed at the deadline", 137, "Error", 0, true, true},
+		{"terminated at the deadline", 143, "Error", 0, true, true},
+		{"finished within clock skew", 137, "Error", time.Second, true, true},
+		{"out of memory at the deadline", 137, "OOMKilled", 0, true, false},
+		{"no start time, killed", 137, "Error", 60 * time.Second, false, true},
+		{"no start time, exit 1", 1, "Error", 0, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wf, node, pod := startupDeadlineFixture(180, 5*time.Second, tc.exit)
+			main := pod.Status.ContainerStatuses[0].State.Terminated
+			main.Reason = tc.reason
+			if tc.start {
+				pod.Status.StartTime = ptr.To(metav1.NewTime(pod.Status.StartTime.Add(tc.early)))
+			} else {
+				pod.Status.StartTime = nil
+			}
+			reason := podStartupDeadlineReason(wf, node, pod, "test", "test")
+			if model.IsStartupDeadlineReason(reason) != tc.infra {
+				t.Fatalf("startup deadline = %q, want infrastructure %v", reason, tc.infra)
+			}
+		})
 	}
 }

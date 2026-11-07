@@ -120,8 +120,17 @@ reads the owned Pod's `main` container:
 
 - `main` exited 0: the step succeeded; the kill happened outside the step
   command. It is never reported as a step deadline failure.
-- `main` never started, or ran less than the declared budget recorded beside
-  the exact floored Pod deadline: start-up consumed the allowance.
+- `main` never started (still `ContainerCreating` or `PodInitializing`, or
+  rewritten by the kubelet to `ContainerStatusUnknown` with exit 137, no
+  container and no start time), or the Pod deadline stopped `main` (it
+  finished at the Pod deadline) before it ran the declared budget recorded
+  beside the exact floored Pod deadline: start-up consumed the allowance.
+
+A `main` container that exited nonzero on its own before the Pod deadline, was
+killed for memory, or never started because of an image or configuration error
+(`ErrImagePull`, `ImagePullBackOff`, `InvalidImageName`,
+`CreateContainerConfigError`, ...) is the step's own failure and opens a CI-red
+issue as usual.
 
 Both are infrastructure failures with a reason that starts with
 `Startup deadline:` and names the step, the main runtime and the limits. They

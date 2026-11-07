@@ -3047,14 +3047,19 @@ the declared value in the server-owned Pod annotation
 `oberth.ci/step-deadline-seconds`, which template-metadata admission refuses
 from repositories. The workflow deadline is unchanged. A step Pod with Pod
 reason `DeadlineExceeded`, outside a workflow-deadline kill, whose owned `main`
-container exited 0, or never started, or ran less than the declared budget
-recorded beside the exact floored Pod deadline, is an infrastructure attempt:
+container exited 0, or never started (`ContainerCreating`/`PodInitializing`, or
+kubelet's `ContainerStatusUnknown`/137 with no container and no start time), or
+was stopped at the Pod deadline before it ran the declared budget recorded
+beside the exact floored Pod deadline, is an infrastructure attempt:
 the run error starts with `Startup deadline: `, the terminal observation marks
 the attempt `startup_deadline`, the existing single automatic infrastructure
 retry applies exactly as for eviction evidence, no CI-red issue is opened, and
 resource deadline guidance does not replace the reason. A `main` container that
-used its declared budget, a Pod whose deadline Argo lowered to the remaining
-workflow budget, and a workflow deadline keep `Execution deadline exceeded.`
+used its declared budget, exited nonzero or was OOM-killed before the Pod
+deadline, or never started because of an image or configuration error, a Pod
+whose deadline Argo lowered to the remaining workflow budget, and a workflow
+deadline stay the step's own failure (`Execution deadline exceeded.` for
+deadline kills) and open a CI-red issue.
 Pre-upgrade Pods without the annotation get only the exit-0 rule. See
 [workflow deadlines](docs/workflow-deadlines.md#step-deadlines-exclude-pod-start-up-1499).
 
