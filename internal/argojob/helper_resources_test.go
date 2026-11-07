@@ -64,7 +64,7 @@ func TestInjectedControlBudgetsCoverUnpinnedExecutorContainers(t *testing.T) {
 		wantWait bool
 		wantMain bool
 	}{name: "container-declared", leaf: wfv1.Template{Container: declared.DeepCopy()}, wantWait: true})
-	for _, policy := range []string{cappedHelperStoragePolicy, helperStoragePolicy} {
+	for _, policy := range []string{cappedHelperStoragePolicy, stepLimitHelperStoragePolicy, helperStoragePolicy} {
 		for _, profile := range []string{"", "verified-fixture"} {
 			for _, tc := range cases {
 				t.Run(policy+"/"+profile+"/"+tc.name, func(t *testing.T) {
@@ -78,7 +78,7 @@ func TestInjectedControlBudgetsCoverUnpinnedExecutorContainers(t *testing.T) {
 					if err := json.Unmarshal([]byte(workflow.Spec.Templates[0].PodSpecPatch), &patch); err != nil {
 						t.Fatal(err)
 					}
-					// v2 limits every helper; v3 only when the step declares a limit.
+					// v2 limits every helper; v3/v4 only when the step declares a limit.
 					limited := policy == cappedHelperStoragePolicy || tc.name == "container-declared"
 					seen := map[string]bool{}
 					for _, container := range append(patch.InitContainers, patch.Containers...) {
@@ -160,7 +160,7 @@ func TestDefaultCompiledPodStorageIncludesSharedArgoHelper(t *testing.T) {
 }
 
 func TestHelperStorageUpgradePreservesSubmittedWorkflow(t *testing.T) {
-	for _, policy := range []string{"", legacyHelperStoragePolicy, cappedHelperStoragePolicy, helperStoragePolicy} {
+	for _, policy := range []string{"", legacyHelperStoragePolicy, cappedHelperStoragePolicy, stepLimitHelperStoragePolicy, helperStoragePolicy} {
 		t.Run(policy, func(t *testing.T) {
 			config := seedTestConfig()
 			kube := fake.NewClientset()
@@ -185,7 +185,7 @@ func TestHelperStorageUpgradePreservesSubmittedWorkflow(t *testing.T) {
 				t.Fatal("not a legacy fixture")
 			}
 			seedCount := len(seeds)
-			r.legacyHelperStorage, r.legacyProfileHelperResources, r.legacyHelperStorageLimits = false, false, false
+			r.legacyHelperStorage, r.legacyProfileHelperResources, r.legacyHelperStorageLimits, r.legacyStepLimitHelperStorage = false, false, false, false
 			if _, err := c.Create(t.Context(), r); err != nil {
 				t.Fatal("upgrade changed submitted workflow", err)
 			}
@@ -246,8 +246,10 @@ func TestHelperStorageAddsNoPodCapToUndeclaredStep(t *testing.T) {
 		name, resources, policy string
 		wantLimit               int64
 	}{
-		{"undeclared/v3", undeclared, helperStoragePolicy, 0},
-		{"declared/v3", declared, helperStoragePolicy, (128 + 512) << 20},
+		{"undeclared/v4", undeclared, helperStoragePolicy, 0},
+		{"declared/v4", declared, helperStoragePolicy, (128 + 512) << 20},
+		{"undeclared/v3", undeclared, stepLimitHelperStoragePolicy, 0},
+		{"declared/v3", declared, stepLimitHelperStoragePolicy, (128 + 512) << 20},
 		// Recovered v2 Workflows keep their submitted shape, including the cap.
 		{"undeclared/v2", undeclared, cappedHelperStoragePolicy, 512 << 20},
 		{"declared/v2", declared, cappedHelperStoragePolicy, (128 + 512) << 20},
@@ -299,32 +301,68 @@ func TestHelperStorageAddsNoPodCapToUndeclaredStep(t *testing.T) {
 	}
 }
 
+// Argo v4.0.8 merges spec.templateDefaults into each template before it builds
+// the Pod: main fields merge, container-set lists replace, and sidecars and
+// init containers merge by name, so default-only entries run too. v4 decides
+// "declared" from that merged Pod. v3 keeps its historical decision so adopted
+// v3 Workflows rebuild exactly; the rows where they differ are marked.
 func TestStepDeclaresStorageLimitCoversStepContainers(t *testing.T) {
 	limit := corev1.ResourceRequirements{Limits: corev1.ResourceList{corev1.ResourceEphemeralStorage: resource.MustParse("1Gi")}}
 	requestOnly := corev1.ResourceRequirements{Requests: corev1.ResourceList{corev1.ResourceEphemeralStorage: resource.MustParse("1Gi")}}
+	zero := corev1.ResourceRequirements{Limits: corev1.ResourceList{corev1.ResourceEphemeralStorage: resource.MustParse("0")}}
+	always := corev1.ContainerRestartPolicyAlways
 	withLimit := corev1.Container{Name: "main", Resources: limit}
+	named := func(name string, resources corev1.ResourceRequirements, restart *corev1.ContainerRestartPolicy) wfv1.UserContainer {
+		return wfv1.UserContainer{Container: corev1.Container{Name: name, Resources: resources, RestartPolicy: restart}}
+	}
 	cases := []struct {
-		name     string
-		defaults *wfv1.Template
-		leaf     wfv1.Template
-		want     bool
+		name      string
+		defaults  *wfv1.Template
+		leaf      wfv1.Template
+		want, v3  bool
+		container string // the step container that carries the limit
 	}{
-		{name: "container", leaf: wfv1.Template{Container: withLimit.DeepCopy()}, want: true},
+		{name: "container", leaf: wfv1.Template{Container: withLimit.DeepCopy()}, want: true, v3: true, container: "main"},
 		{name: "container-request-only", leaf: wfv1.Template{Container: &corev1.Container{Resources: requestOnly}}},
-		{name: "script", leaf: wfv1.Template{Script: &wfv1.ScriptTemplate{Container: withLimit}}, want: true},
-		{name: "containerset", leaf: wfv1.Template{ContainerSet: &wfv1.ContainerSetTemplate{Containers: []wfv1.ContainerNode{{Container: corev1.Container{Name: "a"}}, {Container: withLimit}}}}, want: true},
-		{name: "sidecar", leaf: wfv1.Template{Container: &corev1.Container{}, Sidecars: []wfv1.UserContainer{{Container: withLimit}}}, want: true},
-		{name: "template-defaults", defaults: &wfv1.Template{Container: withLimit.DeepCopy()}, leaf: wfv1.Template{Container: &corev1.Container{}}, want: true},
+		{name: "script", leaf: wfv1.Template{Script: &wfv1.ScriptTemplate{Container: withLimit}}, want: true, v3: true, container: "main"},
+		{name: "containerset", leaf: wfv1.Template{ContainerSet: &wfv1.ContainerSetTemplate{Containers: []wfv1.ContainerNode{{Container: corev1.Container{Name: "a"}}, {Container: withLimit}}}}, want: true, v3: true, container: "main"},
+		{name: "sidecar", leaf: wfv1.Template{Container: &corev1.Container{}, Sidecars: []wfv1.UserContainer{named("proxy", limit, nil)}}, want: true, v3: true, container: "proxy"},
+		{name: "template-defaults", defaults: &wfv1.Template{Container: withLimit.DeepCopy()}, leaf: wfv1.Template{Container: &corev1.Container{}}, want: true, v3: true, container: "main"},
 		{name: "template-defaults-other-kind", defaults: &wfv1.Template{Container: withLimit.DeepCopy()}, leaf: wfv1.Template{Script: &wfv1.ScriptTemplate{}}},
-		// Init containers enter the kubelet total by maximum and keep their own effect.
-		{name: "init-only", leaf: wfv1.Template{Container: &corev1.Container{}, InitContainers: []wfv1.UserContainer{{Container: withLimit}}}},
+		// An explicit zero overrides the default in the merged map.
+		{name: "template-defaults-zero-override", defaults: &wfv1.Template{Container: withLimit.DeepCopy()}, leaf: wfv1.Template{Container: &corev1.Container{Resources: zero}}, v3: true},
+		// Container-set lists replace defaults, so the default limit never runs.
+		{name: "containerset-defaults-only", defaults: &wfv1.Template{ContainerSet: &wfv1.ContainerSetTemplate{Containers: []wfv1.ContainerNode{{Container: withLimit}}}}, leaf: wfv1.Template{ContainerSet: &wfv1.ContainerSetTemplate{Containers: []wfv1.ContainerNode{{Container: corev1.Container{Name: "main"}}}}}, v3: true},
+		{name: "sidecar-inherits-by-name", defaults: &wfv1.Template{Sidecars: []wfv1.UserContainer{named("proxy", limit, nil)}}, leaf: wfv1.Template{Container: &corev1.Container{}, Sidecars: []wfv1.UserContainer{named("proxy", requestOnly, nil)}}, want: true, v3: true, container: "proxy"},
+		{name: "sidecar-defaults-only", defaults: &wfv1.Template{Sidecars: []wfv1.UserContainer{named("proxy", limit, nil)}}, leaf: wfv1.Template{Container: &corev1.Container{}}, want: true, container: "proxy"},
+		{name: "native-sidecar", leaf: wfv1.Template{Container: &corev1.Container{}, InitContainers: []wfv1.UserContainer{named("proxy", limit, &always)}}, want: true, container: "proxy"},
+		{name: "native-sidecar-defaults-only", defaults: &wfv1.Template{InitContainers: []wfv1.UserContainer{named("proxy", limit, &always)}}, leaf: wfv1.Template{Container: &corev1.Container{}}, want: true, container: "proxy"},
+		{name: "native-sidecar-inherits-restart", defaults: &wfv1.Template{InitContainers: []wfv1.UserContainer{named("proxy", requestOnly, &always)}}, leaf: wfv1.Template{Container: &corev1.Container{}, InitContainers: []wfv1.UserContainer{named("proxy", limit, nil)}}, want: true, container: "proxy"},
+		// One-shot init containers enter the kubelet total by maximum and keep their own effect.
+		{name: "init-only", leaf: wfv1.Template{Container: &corev1.Container{}, InitContainers: []wfv1.UserContainer{named("setup", limit, nil)}}},
+		{name: "init-defaults-only", defaults: &wfv1.Template{InitContainers: []wfv1.UserContainer{named("setup", limit, nil)}}, leaf: wfv1.Template{Container: &corev1.Container{}}},
 		{name: "resource", leaf: wfv1.Template{Resource: &wfv1.ResourceTemplate{Action: "create"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			wf := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{TemplateDefaults: tc.defaults}}
+			wf := &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}, Spec: wfv1.WorkflowSpec{TemplateDefaults: tc.defaults}}
 			if got := stepDeclaresStorageLimit(wf, &tc.leaf); got != tc.want {
 				t.Fatalf("declared=%t, want %t", got, tc.want)
+			}
+			if got := stepDeclaresStorageLimitV3(wf, &tc.leaf); got != tc.v3 {
+				t.Fatalf("v3 declared=%t, want %t", got, tc.v3)
+			}
+			limits := stepStorageLimits(wf, &tc.leaf)
+			if _, ok := limits[tc.container]; ok != (tc.container != "") || len(limits) > 1 {
+				t.Fatalf("step storage limits %v, want only %q", limits, tc.container)
+			}
+			// Each policy limits helpers exactly when its own decision says so.
+			for policy, declared := range map[string]bool{helperStoragePolicy: tc.want, stepLimitHelperStoragePolicy: tc.v3, cappedHelperStoragePolicy: true} {
+				wf.Annotations[helperStorageAnnotation] = policy
+				_, limited := helperResources(wf, &tc.leaf, true).Limits[corev1.ResourceEphemeralStorage]
+				if limited != declared {
+					t.Fatalf("%s helper limit=%t, want %t", policy, limited, declared)
+				}
 			}
 		})
 	}

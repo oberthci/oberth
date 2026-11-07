@@ -155,6 +155,16 @@ func podHelpers(authored, inherited []wfv1.UserContainer) []podContainer {
 	return out
 }
 
+// EachTemplateHelper visits the sidecars or init containers Argo runs for a
+// template after spec.templateDefaults merge by name: each authored entry with
+// the default of the same name (or nil), then each default-only entry with nil.
+// It is the merge the Pod peak uses, so other Pod-level checks share it.
+func EachTemplateHelper(authored, inherited []wfv1.UserContainer, visit func(container, defaults *corev1.Container)) {
+	for _, c := range podHelpers(authored, inherited) {
+		visit(c.container, c.defaults)
+	}
+}
+
 func templatePodDemand(t, defaults *wfv1.Template, resourcePods bool) (PodDemand, error) {
 	resourceOnly := resourcePods && t.Resource != nil
 	var main, inherited *corev1.Container

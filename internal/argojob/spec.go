@@ -571,6 +571,8 @@ type Request struct {
 	legacyProfileHelperResources bool
 	// legacyHelperStorageLimits keeps the v2 helper limit on undeclared steps.
 	legacyHelperStorageLimits bool
+	// legacyStepLimitHelperStorage keeps the v3 "step declares a limit" decision.
+	legacyStepLimitHelperStorage bool
 	// legacyStepUsage reconstructs already-submitted pre-floor wrappers only;
 	// new submissions must never opt out of the instrumentation memory guard.
 	legacyStepUsage bool

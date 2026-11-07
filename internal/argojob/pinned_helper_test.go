@@ -52,7 +52,7 @@ func TestPinnedProfileNewHelpersHaveBudgets(t *testing.T) {
 // Re-enter Create through a new controller, fresh controller verification and
 // the persisted API object, not an in-memory request carrying legacy flags.
 func TestPinnedProfileHelperPolicyRecovery(t *testing.T) {
-	for _, policy := range []string{"", legacyHelperStoragePolicy, cappedHelperStoragePolicy, helperStoragePolicy} {
+	for _, policy := range []string{"", legacyHelperStoragePolicy, cappedHelperStoragePolicy, stepLimitHelperStoragePolicy, helperStoragePolicy} {
 		t.Run(policy, func(t *testing.T) {
 			pod, cm := nonrootVerifierObjects()
 			kube := fake.NewClientset(pod, cm)
@@ -88,7 +88,7 @@ func TestPinnedProfileHelperPolicyRecovery(t *testing.T) {
 				t.Fatal("fixture policy mismatch")
 			}
 			count := len(seeds)
-			request.legacyHelperStorage, request.legacyProfileHelperResources, request.legacyHelperStorageLimits = false, false, false
+			request.legacyHelperStorage, request.legacyProfileHelperResources, request.legacyHelperStorageLimits, request.legacyStepLimitHelperStorage = false, false, false, false
 			request.nonrootProof = nil
 			controller = newController()
 			request, err = controller.PrepareNonroot(t.Context(), request)
@@ -132,7 +132,7 @@ func TestPinnedProfileHelperPolicyRecovery(t *testing.T) {
 }
 
 func TestPinnedProfileNewBuildCannotSelectHistoricalBudgets(t *testing.T) {
-	for _, authored := range []string{"", legacyHelperStoragePolicy, cappedHelperStoragePolicy, helperStoragePolicy, "unknown-policy"} {
+	for _, authored := range []string{"", legacyHelperStoragePolicy, cappedHelperStoragePolicy, stepLimitHelperStoragePolicy, helperStoragePolicy, "unknown-policy"} {
 		source := strings.Replace(nonrootTestDocument, "    oberth.ci/nonroot-templates: test", "    oberth.ci/nonroot-templates: test\n    oberth.ci/helper-storage: "+authored, 1)
 		request := nonrootFixtureProof(testRequest(pipeline.TriggerCI, source))
 		config := testConfig()

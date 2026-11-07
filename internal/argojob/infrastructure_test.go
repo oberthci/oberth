@@ -128,37 +128,53 @@ func TestKubeletMessageIsBounded(t *testing.T) {
 }
 
 // #1491: when the step declared its own ephemeral-storage limit, the kubelet
-// Pod total is the step's budget. Exceeding it is a step resource failure that
-// a rerun repeats, so it is not infrastructure and is not auto-retried.
+// Pod total is the step's budget. Exceeding it is a step resource failure that a rerun repeats, so
+// it is not infrastructure and is not auto-retried.
 func TestDeclaredStorageEvictionIsStepFailure(t *testing.T) {
 	const total = "Pod ephemeral local storage usage exceeds the total limit of containers 1152Mi. "
-	declared := wfv1.Template{Name: "test-template", Container: &corev1.Container{Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{corev1.ResourceEphemeralStorage: resource.MustParse("640Mi")}}}}
+	const totalReason = "the total container limit 1152Mi"
+	limit := corev1.ResourceRequirements{Limits: corev1.ResourceList{corev1.ResourceEphemeralStorage: resource.MustParse("640Mi")}}
+	declared := wfv1.Template{Name: "test-template", Container: &corev1.Container{Resources: limit}}
 	undeclared := wfv1.Template{Name: "test-template", Container: &corev1.Container{}}
+	// Argo replaces container-set lists, so this default limit never runs.
+	setDefaults := &wfv1.Template{ContainerSet: &wfv1.ContainerSetTemplate{Containers: []wfv1.ContainerNode{{Container: corev1.Container{Name: "main", Resources: limit}}}}}
+	set := wfv1.Template{Name: "test-template", ContainerSet: &wfv1.ContainerSetTemplate{Containers: []wfv1.ContainerNode{{Container: corev1.Container{Name: "main"}}}}}
+	// Argo adds a default-only sidecar by name.
+	sidecarDefaults := &wfv1.Template{Sidecars: []wfv1.UserContainer{{Container: corev1.Container{Name: "proxy", Resources: limit}}}}
 	cases := []struct {
-		name       string
-		policy     string
-		template   wfv1.Template
-		nodeMsg    string
-		podMsg     string
-		stepBudget bool
+		name     string
+		policy   string
+		defaults *wfv1.Template
+		template wfv1.Template
+		nodeMsg  string
+		podMsg   string
+		reason   string // the enforced limit the run reason names; "" means infrastructure
 	}{
-		{name: "v3/node", policy: helperStoragePolicy, template: undeclared, nodeMsg: total, stepBudget: true},
-		{name: "v3/node-prefixed", policy: helperStoragePolicy, template: declared, nodeMsg: "Evicted: " + total, stepBudget: true},
-		{name: "v3/pod-only", policy: helperStoragePolicy, template: declared, nodeMsg: "Evicted", podMsg: total, stepBudget: true},
-		{name: "v2/declared-template", policy: cappedHelperStoragePolicy, template: declared, nodeMsg: total, stepBudget: true},
+		{name: "v4/node", policy: helperStoragePolicy, template: undeclared, nodeMsg: total, reason: totalReason},
+		{name: "v4/node-prefixed", policy: helperStoragePolicy, template: declared, nodeMsg: "Evicted: " + total, reason: totalReason},
+		{name: "v4/pod-only", policy: helperStoragePolicy, template: declared, nodeMsg: "Evicted", podMsg: total, reason: totalReason},
+		{name: "v3/node", policy: stepLimitHelperStoragePolicy, template: undeclared, nodeMsg: total, reason: totalReason},
+		{name: "v3/declared", policy: stepLimitHelperStoragePolicy, template: declared, nodeMsg: total, reason: totalReason},
+		// v3 limited the helpers of this shape although no step limit runs:
+		// the total is helper limits alone, so it stays infrastructure.
+		{name: "v3/containerset-defaults", policy: stepLimitHelperStoragePolicy, defaults: setDefaults, template: set, nodeMsg: total},
+		{name: "v4/containerset-defaults", policy: helperStoragePolicy, defaults: setDefaults, template: set, nodeMsg: total, reason: totalReason},
+		{name: "v2/declared-template", policy: cappedHelperStoragePolicy, template: declared, nodeMsg: total, reason: totalReason},
+		{name: "v2/default-sidecar", policy: cappedHelperStoragePolicy, defaults: sidecarDefaults, template: undeclared, nodeMsg: total, reason: totalReason},
 		// v2 limited every helper: an undeclared step's 512Mi total was not its
 		// own budget. It stays infrastructure with at most one auto-retry.
 		{name: "v2/undeclared-template", policy: cappedHelperStoragePolicy, template: undeclared, nodeMsg: total},
 		{name: "v2/unresolved-template", policy: cappedHelperStoragePolicy, template: wfv1.Template{Name: "other", Container: declared.Container}, nodeMsg: total},
 		{name: "v1/undeclared-pod", policy: legacyHelperStoragePolicy, template: undeclared, nodeMsg: "Evicted", podMsg: total},
 		// Node pressure is never the step's budget.
-		{name: "v3/node-pressure", policy: helperStoragePolicy, template: declared, nodeMsg: "The node was low on resource: ephemeral-storage. Threshold quantity: 1Gi, available: 123Ki."},
-		{name: "v3/pod-node-pressure", policy: helperStoragePolicy, template: declared, nodeMsg: "Evicted", podMsg: "The node was low on resource: ephemeral-storage. "},
+		{name: "v4/node-pressure", policy: helperStoragePolicy, template: declared, nodeMsg: "The node was low on resource: ephemeral-storage. Threshold quantity: 1Gi, available: 123Ki."},
+		{name: "v4/pod-node-pressure", policy: helperStoragePolicy, template: declared, nodeMsg: "Evicted", podMsg: "The node was low on resource: ephemeral-storage. "},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			wf, node, pod, _ := diagnosticFixture()
 			wf.Annotations[helperStorageAnnotation] = tc.policy
+			wf.Spec.TemplateDefaults = tc.defaults
 			wf.Spec.Templates = []wfv1.Template{tc.template}
 			node.TemplateName = "test-template"
 			node.Message = tc.nodeMsg
@@ -178,7 +194,7 @@ func TestDeclaredStorageEvictionIsStepFailure(t *testing.T) {
 			if completion.Succeeded {
 				t.Fatal("evicted step succeeded")
 			}
-			if !tc.stepBudget {
+			if tc.reason == "" {
 				if !completion.Infrastructure || completion.ReplayAttempts[0].InfrastructureReason == "" {
 					t.Fatalf("eviction lost its infrastructure classification: %#v", completion)
 				}
@@ -192,9 +208,9 @@ func TestDeclaredStorageEvictionIsStepFailure(t *testing.T) {
 					t.Fatal("retry evidence still marks the attempt evicted by infrastructure")
 				}
 			}
-			want := "Step " + completion.Steps[0].Stage + "/test exceeded its declared ephemeral-storage budget: the kubelet evicted its Pod at the total container limit 1152Mi"
+			want := "Step " + completion.Steps[0].Stage + "/test exceeded its declared ephemeral-storage budget: the kubelet evicted its Pod at " + tc.reason
 			if !strings.HasPrefix(completion.Reason, want) {
-				t.Fatalf("reason %q does not name the declared total", completion.Reason)
+				t.Fatalf("reason %q does not name the declared limit %q", completion.Reason, tc.reason)
 			}
 		})
 	}

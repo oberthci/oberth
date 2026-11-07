@@ -24,11 +24,10 @@ var podStorageTotalMessage = regexp.MustCompile(`^Pod ephemeral local storage us
 // stepStorageLimit returns the Pod total of a kubelet ephemeral-storage
 // eviction that enforced the step's own declared budget, or "". Such a step
 // exceeded what it declared: a rerun fails the same way, so it is a step
-// resource failure, not infrastructure. Under the v3 helper policy the server
-// adds helper limits only when the step declares one, so any Pod total is the
-// step's. Historical policies limited every helper; there only a named template
-// with its own limit qualifies. Otherwise the eviction stays infrastructure and
-// gets at most one auto-retry, which is rebuilt under the current policy.
+// resource failure, not infrastructure. The total qualifies when it includes no
+// helper limit the step did not ask for (podTotalIsStepBudget). Otherwise the
+// eviction stays infrastructure and gets at most one auto-retry, which is
+// rebuilt under the current policy.
 func stepStorageLimit(workflow *wfv1.Workflow, node wfv1.NodeStatus, message string) string {
 	if workflow == nil || node.Type != wfv1.NodeTypePod || (node.Phase != wfv1.NodeFailed && node.Phase != wfv1.NodeError) {
 		return ""
@@ -41,16 +40,34 @@ func stepStorageLimit(workflow *wfv1.Workflow, node wfv1.NodeStatus, message str
 	if err != nil || total.Sign() <= 0 {
 		return ""
 	}
-	declared := workflow.Annotations[helperStorageAnnotation] == helperStoragePolicy
+	var template *wfv1.Template
 	for i := range workflow.Spec.Templates {
-		if !declared && node.TemplateName != "" && workflow.Spec.Templates[i].Name == node.TemplateName {
-			declared = stepDeclaresStorageLimit(workflow, &workflow.Spec.Templates[i])
+		if node.TemplateName != "" && workflow.Spec.Templates[i].Name == node.TemplateName {
+			template = &workflow.Spec.Templates[i]
+			break
 		}
 	}
-	if !declared {
+	if !podTotalIsStepBudget(workflow, template) {
 		return ""
 	}
 	return total.String()
+}
+
+// podTotalIsStepBudget reports whether a Pod ephemeral-storage total of
+// template t is the step's own budget. v4 adds helper limits only when the step
+// declares one, so any total is the step's. v3 did the same, except where its
+// decision counted a limit Argo does not run (a template-default container-set
+// member): then the total may be helper limits alone. Historical policies
+// limited every helper; there only a named template with its own limit
+// qualifies.
+func podTotalIsStepBudget(workflow *wfv1.Workflow, t *wfv1.Template) bool {
+	switch workflow.Annotations[helperStorageAnnotation] {
+	case helperStoragePolicy:
+		return true
+	case stepLimitHelperStoragePolicy:
+		return t == nil || !stepDeclaresStorageLimitV3(workflow, t) || stepDeclaresStorageLimit(workflow, t)
+	}
+	return t != nil && stepDeclaresStorageLimit(workflow, t)
 }
 
 func podStepStorageLimit(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev1.Pod) string {
