@@ -401,7 +401,7 @@ step: a single step can exceed a model's context window.
 | `repo_list` | List registered repositories as id, name, upstream, default_branch, archived_at and one latest_run (id, status, ref, finished_at). No run history or probe payload. |
 | `repo_archive` / `repo_unarchive` | Archive or restore a repository, preserving history (unscoped admin only); archived repositories refuse new grants |
 | `repo_remove` | Remove a repository mapping and its Git cache (admin-only) |
-| `branch_delete_many` | Batch branch deletion: dry-run plan with plan_id, then confirm; compare-and-delete per ref, merged-only unless allow_unmerged, protected branches only alone with confirm_protected; upstream deletion is asynchronous (unscoped admin only) |
+| `branch_delete_many` | Batch branch deletion: dry-run plan with plan_id, then confirm; compare-and-delete per ref, merged-only unless allow_unmerged, never the default branch, configured protected branches only alone with confirm_protected; upstream deletion is asynchronous (unscoped admin only) |
 | `branch_deletion_list` | Upstream state of accepted branch deletions: pending, propagated, failed or skipped (unscoped admin only) |
 | `receive_outbox` | Show, retry or abandon a receive record that blocks its repository; retry/abandon audited (unscoped admin only) |
 | `run_list` | List runs with repository/ref/SHA, size/declared demand, queue position and superseded status; optional repo/ref, display-status (one value or list) and `superseded:true` filters (bounded page) |

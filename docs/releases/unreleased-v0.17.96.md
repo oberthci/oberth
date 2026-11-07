@@ -10,17 +10,23 @@ receive lock is held, and the deletion handler (`DeleteBranch`) took the same,
 non-reentrant lock again before pushing the deletion upstream. Branch deletion
 is now asynchronous:
 
-- The receive deletes the mirror ref, records a pending upstream deletion in
-  the same transaction as the receive event, and returns. The callback never
-  takes the receive lock and never touches the network (a deletion of a
-  registered repository no longer refreshes from the forge), so startup replay
-  of a deletion completes within its budget.
+- The receive deletes the mirror ref, writes a deletion marker during receive
+  finalization (under the repository lock, so no refresh can re-create the
+  branch), records a pending upstream deletion in the same transaction as the
+  receive event, and returns. The callback makes no Git call and never touches
+  the network (a deletion of a registered repository no longer refreshes from
+  the forge), so startup replay of a deletion completes within its budget.
 - A background propagator deletes upstream refs with one push per repository
   batch and no repository lock held across network I/O. The upstream ref is
   deleted only while it still names the deleted head or an ancestor
   (force-with-lease). Failures retry with backoff (1, 2, 4, 8, 16 minutes); after
   six attempts, or when the upstream ref moved, the record is `failed` and the
-  mirror branch is restored from its upstream tracking ref.
+  mirror branch is restored from its upstream tracking ref (as last fetched,
+  which may lag the forge until the next refresh). Several pending records for
+  one branch share one delete refspec.
+- A feature-branch publication whose branch was deleted on the mirror after
+  its run started is abandoned (actor `oberth:branch-deletion`) instead of
+  force-pushing the branch back upstream.
 - Per-branch state (`pending`, `propagated`, `failed`, `skipped`) is in the new
   admin MCP tool `branch_deletion_list` and `oberth branch deletions`. The push
   notice now reads "deleted on the mirror · upstream deletion queued". Each
@@ -35,7 +41,9 @@ is now asynchronous:
   `older_than` with `exclude_prefixes`. `confirm: true` with the same arguments
   and `plan_id` executes; any moved head makes the plan stale. Each ref is
   compared and deleted in one local transaction, and unmerged branches need
-  `allow_unmerged`. Each batch writes one `branch.prune` audit entry, and
+  `allow_unmerged`. Queued rows become due for upstream propagation only after
+  the local deletion applied; refused heads are recorded as `skipped`. The dry
+  run reads refs under a short lock and computes patch equivalence without it. Each batch writes one `branch.prune` audit entry, and
   upstream propagation is batched and asynchronous. A plan holds at most 1000
   branches; patch equivalence is checked for at most 500 unmerged heads.
 - `branch_deletion_list`: per-branch receipts by repository, status, prune batch
@@ -46,13 +54,16 @@ is now asynchronous:
   `abandon` needs the record id and a reason, moves the file to
   `.receive-outbox/abandoned/` and is audited.
 
-**Protected branches.** Each repository's default branch, plus the globs of the
-new `--protected-branches` server flag (chart `branches.protected`, default
-`main,master`), cannot be deleted by `git push --delete` or by prune selectors.
-An admin can delete exactly one such branch with `branch_delete_many` and a
-typed `confirm_protected: "<upstream>/<org>/<repo>:<branch>"`. **Behaviour
-change:** a push deleting a non-default `main` or `master` branch is now
-refused; set `branches.protected` to override the default list.
+**Protected branches.** Each repository's default branch can never be deleted:
+not by `git push --delete`, not by prune selectors, and not by an explicit
+`branch_delete_many` request, even with a confirmation. The globs of the new
+`--protected-branches` server flag (chart `branches.protected`, default
+`[main, master]`; `[]` protects only the default branch; `null` keeps the server
+default) are refused the same way, except that an admin can delete exactly one
+such non-default branch with `branch_delete_many` and a typed
+`confirm_protected: "<upstream>/<org>/<repo>:<branch>"`. **Behaviour change:** a
+push deleting a non-default `main` or `master` branch is now refused; set
+`branches.protected` to change the list.
 
 **Upgrade and compatibility.**
 
@@ -63,10 +74,15 @@ refused; set `branches.protected` to override the default list.
 - Old clients pushing `--delete` keep working; only the upstream push moves out
   of the receive.
 - To finish the deletions stranded by the v0.17.95 upgrade (upstream still has
-  the branches), copy each backed-up record back into `.receive-outbox/` with its
-  `quarantined` state, then run `oberth outbox retry <upstream/org/repo>`.
-  Retrying re-delivers the deletion, and the propagator removes the upstream
-  branch.
+  `chore/917-followups` and probably `auto/cli-v0.19.133`), check the mirror
+  first, for example with `git ls-remote <mirror> refs/heads/<branch>`:
+  - Branch absent on the mirror: copy the backed-up record back into
+    `.receive-outbox/` with its `quarantined` state, then run
+    `oberth outbox retry <upstream/org/repo>`. Retrying re-delivers the
+    deletion, and the propagator removes the upstream branch.
+  - Branch present again (a refresh re-materialized it from upstream): do not
+    restore the record. Delete it with `oberth branch prune <repo> --branch
+    <name>=<sha>` (dry run, then `--confirm --plan-id`); upstream follows.
 
 **Follow-up (not in this release):** the per-repository `branch_retention` option
 (scheduled deletion of merged branches) and keeping reads served while startup
