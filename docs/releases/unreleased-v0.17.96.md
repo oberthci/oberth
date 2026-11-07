@@ -24,6 +24,9 @@ Running and adopted Workflows keep the policy they were submitted with
 (`argo-256Mi-512Mi-v1` or `-v2`) and reconstruct with the same spec identity.
 Unknown policy values are still refused.
 
+**Rollback:** a v0.17.95 server refuses to re-create Workflows with policy
+`argo-256Mi-512Mi-v3`, so drain v3 runs before rolling back to v0.17.95.
+
 The kubelet message "Pod ephemeral local storage usage exceeds the total limit
 of containers" is no longer treated as infrastructure when the step declared
 its own limit. The run fails on that step and is not auto-retried. The reason
