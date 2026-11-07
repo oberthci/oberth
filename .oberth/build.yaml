@@ -98,6 +98,8 @@ spec:
         template: setup
       - name: generic-names
         template: generic-names
+      - name: contract-guard
+        template: contract-guard
       - name: lint
         template: lint
         depends: setup
@@ -189,6 +191,33 @@ spec:
         limits:
           cpu: 1500m
           memory: 256Mi
+          ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
+
+  - name: contract-guard
+    activeDeadlineSeconds: 420 # remeasure: observed span unknown; provisional previous 300s cap + 120s for contention
+    automountServiceAccountToken: false
+    metadata:
+      annotations:
+        oberth.ci/workspace-mounts: none
+        oberth.ci/workspace-env: none
+    container:
+      image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
+      workingDir: /work/src
+      command: [/usr/bin/python3]
+      args: [-I, -B, .oberth/contracts/check.py, --self-test]
+      env:
+      - name: PYTHONDONTWRITEBYTECODE
+        value: "1"
+      # provisional: no CI run yet. Local run: single-threaded, 9.5s CPU, 31.3Mi peak RSS.
+      # Shape copied from generic-names (lightweight isolated Python leaf).
+      resources: # remeasure: collect the first CI measurements and resize
+        requests:
+          cpu: 1000m # single-threaded scan; retain the CI policy cap
+          memory: 128Mi
+          ephemeral-storage: 512Mi
+        limits:
+          cpu: 1500m
+          memory: 128Mi
           ephemeral-storage: 512Mi # provisional utility bound; remeasure cold volumes
 
   # ---- setup stage (13 sequential steps) ----
