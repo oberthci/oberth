@@ -1212,12 +1212,12 @@ Usage of serve:
         configured chart networkPolicy.enabled (true or false); omitted means unavailable, not measured CNI enforcement
   -promotion-grant-max-lifetime duration
         maximum lifetime for promotion grants (default 24h, hard ceiling 168h) (default 24h0m0s)
-  -reserved-branches string
-        comma-separated branch globs that, like the default branch, no push or prune may delete (default "main,master")
   -push-banner-url string
         optional HTTPS dashboard URL echoed to every accepted git push
   -release-cache-root string
         release host cache root (default "/var/cache/oberth/release")
+  -reserved-branches string
+        comma-separated branch globs that, like the default branch, no push or prune may delete (default "main,master")
   -retention-keep-newest int
         terminal runs retained per repository/ref during automatic sweeps (default 1)
   -retention-sweep-interval duration
