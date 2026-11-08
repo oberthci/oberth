@@ -1329,7 +1329,8 @@ spec:
   - name: test-service
     automountServiceAccountToken: false
     # Maximum observed race duration: max(1.5 x observed, observed + 120s), rounded up to minutes.
-    activeDeadlineSeconds: 3600
+    # 2026-11-08: four runs at host load ~30 were killed at 59m5xs (censored > 60m); 1.5 x 60m.
+    activeDeadlineSeconds: 5400
     container:
       image: "golang:1.26.10-trixie@sha256:7202554ed358a37f41c44e4910ae29bbc5ef0715f289ac637218adbb0ca132dd"
       workingDir: /work/src
