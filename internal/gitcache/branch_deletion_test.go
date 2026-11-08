@@ -469,7 +469,7 @@ func TestArchivedUpstreamMessage(t *testing.T) {
 		`remote: Forgejo: Repo "org/name" is archived.`:                    true,
 		"remote: Gitea: repo is archived\nerror: failed to push some refs": true,
 		"ERROR: This repository was archived so it is read-only.":          true,
-		"remote: rejected: protected branch":                               false,
+		"remote: error: GH006: pre-receive hook declined":                  false,
 		"error: failed to push some refs to 'repo.git'\nis archived":       false,
 	} {
 		if got := ArchivedUpstream(errors.New(message)); got != want {
