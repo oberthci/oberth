@@ -441,6 +441,12 @@ func TestPropagateTreatsArchivedUpstreamAsFinal(t *testing.T) {
 	if err := os.WriteFile(hook, []byte("#!/bin/sh\necho 'Forgejo: Repo \"example/example\" is archived.' >&2\nexit 1\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	// The static Git qualification lane's launcher refuses to execute anything
+	// outside the candidate payload, so a forge hook cannot run there; the
+	// ordinary gitcache lane runs this test with the hook executing.
+	if err := exec.Command(hook).Run(); err != nil && errors.Is(err, os.ErrPermission) {
+		t.Skip("forge hook cannot execute in this runtime (payload-only exec)")
+	}
 	results, err := cache.PropagateBranchDeletions(t.Context(), "example", []UpstreamDeletion{{Branch: "feature/gone", OldSHA: featureSHA}})
 	if err != nil || len(results) != 1 || results[0].State != UpstreamArchived || !ArchivedUpstream(results[0].Err) {
 		t.Fatalf("propagate = %+v, %v", results, err)
