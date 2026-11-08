@@ -136,7 +136,7 @@ func applyStepDeadlineFloor(workflow *wfv1.Workflow, allowance StepStartupAllowa
 				deadline := allowance.Floored(declared)
 				floored := intstr.FromString(strconv.FormatInt(deadline, 10))
 				if template.ActiveDeadlineSeconds.Type == intstr.Int && deadline <= 1<<31-1 {
-					floored = intstr.FromInt32(int32(deadline))
+					floored = intstr.FromInt32(int32(deadline)) // #nosec G115 -- bounded by the int32 range check above.
 				}
 				template.ActiveDeadlineSeconds = &floored
 				if template.Metadata.Annotations == nil {

@@ -108,7 +108,7 @@ func TestStepStartupAllowanceIsConfigurable(t *testing.T) {
 	if got := (StepStartupAllowance{MinSeconds: 90, MaxSeconds: 90}).Floored(3600); got != 3690 {
 		t.Fatalf("fixed allowance = %d", got)
 	}
-	if (1<<63 - 1) != (StepStartupAllowance{FactorPercent: 400, MaxSeconds: 3600}).Floored(1<<63-1) {
+	if got := (StepStartupAllowance{FactorPercent: 400, MaxSeconds: 3600}).Floored(1<<63 - 1); got != 1<<63-1 {
 		t.Fatal("unbounded declared value overflowed")
 	}
 	for _, invalid := range []StepStartupAllowance{
