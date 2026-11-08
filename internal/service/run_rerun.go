@@ -64,7 +64,7 @@ func RunRerunPolicy(run model.Run, admin, force, safe bool) (string, error) {
 // flaky test), a run that is not the newest of its ref, and tag/release runs.
 // A run whose steps all passed and whose publication alone failed is not
 // re-executed: its publication is retried exactly as publish_retry does.
-func (service *API) rerunRun(ctx context.Context, actor api.Actor, id, reason string, force bool, priority ...model.PriorityRequest) (api.RunRerunResponse, error) {
+func (service *API) rerunRun(ctx context.Context, actor api.Actor, id, reason string, force, assist bool, priority ...model.PriorityRequest) (api.RunRerunResponse, error) {
 	if strings.TrimSpace(id) == "" {
 		return api.RunRerunResponse{}, fmt.Errorf("%w: run ID is required", ErrInvalidInput)
 	}
@@ -124,7 +124,7 @@ func (service *API) rerunRun(ctx context.Context, actor api.Actor, id, reason st
 			tagCheck = check
 		}
 	}
-	result, err := service.runReruns.RerunRun(ctx, model.RunRerunRequest{PriorityRequest: requestedPriority(actor, firstPriority(priority)),
+	result, err := service.runReruns.RerunRun(ctx, model.RunRerunRequest{PriorityRequest: requestedPriority(actor, firstPriority(priority)), Assist: assist,
 		RunID: source.ID, Actor: actor.Identity, Reason: reason, Force: force, ReplayAudit: audit,
 		Authorize: func(current model.Run, evidence model.RunReplayEvidence) (string, error) {
 			safe := false

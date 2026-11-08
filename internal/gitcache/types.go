@@ -120,6 +120,7 @@ type ReceiveEvent struct {
 	Priority         string           `json:"priority,omitempty"`
 	PriorityReason   string           `json:"priority_reason,omitempty"`
 	Supersede        bool             `json:"supersede,omitempty"`
+	Assist           bool             `json:"assist,omitempty"`
 	ID               string           `json:"id"`
 	Actor            string           `json:"actor"`
 	Repo             string           `json:"repo"`

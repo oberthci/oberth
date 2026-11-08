@@ -265,6 +265,7 @@ func (scheduler *Scheduler) enqueueCI(ctx context.Context, request CIRequest, fi
 		request.OldSHA, request.SHA, request.SHA, "queued")
 	spec := model.RunSpec{
 		PriorityRequest: request.PriorityRequest,
+		Assist:          request.Assist,
 		Reason:          request.Reason,
 		RepoID:          request.Repository.ID, RefKind: model.RefBranch, Ref: request.Branch,
 		SHA: request.SHA, Actor: request.Actor, Trigger: trigger, ScheduleEntry: request.ScheduleEntry, TestedSHA: testedSHA, BaseSHA: request.BaseSHA,
@@ -1426,7 +1427,7 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 	if promotionErr != nil {
 		jobResult = JobResult{Status: model.RunFailed, Phase: "promotion", Error: promotionErr.Error()}
 	}
-	if jobResult.Status == model.RunPassed {
+	if jobResult.Status == model.RunPassed && !scheduler.runAssisted(finalizeCtx, run.ID) {
 		if gateErr := require(finalizeCtx); gateErr != nil {
 			return gateErr
 		}
@@ -1579,6 +1580,18 @@ func (scheduler *Scheduler) promotionForRun(ctx context.Context, run model.Run) 
 		return promotion, errors.New("service: promotion run does not match its immutable record")
 	}
 	return promotion, nil
+}
+
+// runAssisted re-reads the run's durable assisted verdict at finalization: a
+// held step continued by the agent means the passed tree is not the commit,
+// so the run finishes passed in Oberth's own record but is never published
+// upstream. An unreadable run is treated as assisted, failing closed.
+func (scheduler *Scheduler) runAssisted(ctx context.Context, runID string) bool {
+	current, err := scheduler.database().Run(ctx, runID)
+	if err != nil {
+		return true
+	}
+	return current.Assisted
 }
 
 func (scheduler *Scheduler) beginRunPublication(ctx context.Context, repository model.Repository, run model.Run, promotion model.Promotion) (model.Publication, error) {
@@ -1991,7 +2004,7 @@ func (scheduler *Scheduler) finalizeReconciledRun(ctx context.Context, run model
 	if promotionErr != nil {
 		jobResult = JobResult{Status: model.RunFailed, Phase: "promotion", Error: promotionErr.Error()}
 	}
-	if jobResult.Status == model.RunPassed {
+	if jobResult.Status == model.RunPassed && !scheduler.runAssisted(ctx, run.ID) {
 		repository, err := scheduler.database().Repository(ctx, run.RepoID)
 		if err != nil {
 			return err

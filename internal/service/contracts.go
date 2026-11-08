@@ -300,6 +300,8 @@ type WorkspaceGit interface {
 
 type CIRequest struct {
 	model.PriorityRequest
+	// Assist asks for agent-assisted retry holds on this run.
+	Assist        bool
 	Reason        string
 	EventID       string
 	Repository    model.Repository
@@ -511,6 +513,8 @@ type Health interface {
 
 type BranchPush struct {
 	model.PriorityRequest
+	// Assist carries the oberth.assist push option.
+	Assist     bool
 	EventID    string
 	Repository string
 	Branch     string

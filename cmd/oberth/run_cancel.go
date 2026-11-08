@@ -27,18 +27,27 @@ const runsCancelUsage = "Usage: oberth runs cancel --repo <repo> --ref <branch> 
 // the live daemon's database, after its audit mutation gate.
 type cancelOptions struct {
 	reason, database, repo, ref string
-	force, asJSON               bool
+	force, asJSON, assist       bool
 	transport                   []string
 	positional                  []string
 }
 
 func parseCancelOptions(arguments []string, allowSelector bool) (cancelOptions, error) {
+	return parseRunActionOptions("run cancel", arguments, allowSelector, false)
+}
+
+// parseRunActionOptions is shared by cancel, rerun and publication abandon;
+// only rerun registers --assist, so each command's help lists its own flags.
+func parseRunActionOptions(command string, arguments []string, allowSelector, allowAssist bool) (cancelOptions, error) {
 	var options cancelOptions
-	flags := flag.NewFlagSet("run cancel", flag.ContinueOnError)
+	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	flags.StringVar(&options.reason, "reason", "", "cancellation reason")
 	flags.StringVar(&options.database, "database", "", "in-pod database")
 	flags.BoolVar(&options.force, "force", false, "force cancellation")
 	flags.BoolVar(&options.asJSON, "json", false, "emit JSON")
+	if allowAssist {
+		flags.BoolVar(&options.assist, "assist", false, "ask for agent-assisted retry holds")
+	}
 	if allowSelector {
 		flags.StringVar(&options.repo, "repo", "", "repository; use upstream/org/name when ambiguous")
 		flags.StringVar(&options.ref, "ref", "", "ref")

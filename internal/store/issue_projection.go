@@ -82,6 +82,11 @@ func (s *Store) projectRunIssue(ctx context.Context, tx *sql.Tx, run model.Run, 
 	if run.Status == model.RunInterrupted {
 		return nil
 	}
+	// An assisted green run tested a tree that is not in Git: it neither
+	// closes nor opens a CI issue.
+	if run.Status == model.RunPassed && run.Assisted {
+		return nil
+	}
 	// Only kubelet eviction/pressure failures are transient node failures.
 	// Scheduler/admission failures remain actionable in the repository issue.
 	if transientNodeFailure(run) {

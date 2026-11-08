@@ -80,6 +80,8 @@ type RunRerunRequest struct {
 	Reason string
 	// Force records that an admin explicitly confirmed a tag/release rerun.
 	Force bool
+	// Assist asks the rerun for retry holds (agent-assisted continuation).
+	Assist bool
 	// ReplayAudit is filled only by Authorize inside the writer transaction.
 	ReplayAudit *RunReplayAudit
 	// Authorize, when set, is called inside the rerun transaction with the

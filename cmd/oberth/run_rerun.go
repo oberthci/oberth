@@ -10,7 +10,7 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 )
 
-const runRerunUsage = "Usage: oberth run rerun <run-id> [--reason <text>] [--force] [--json]\n" +
+const runRerunUsage = "Usage: oberth run rerun <run-id> [--reason <text>] [--force] [--assist] [--json]\n" +
 	"         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]"
 
 // runRunRerun is `oberth run rerun`, the CLI form of MCP run_rerun (#1098):
@@ -21,7 +21,7 @@ func runRunRerun(ctx context.Context, arguments []string, output io.Writer) erro
 		_, err := fmt.Fprintln(output, runRerunUsage)
 		return err
 	}
-	options, err := parseCancelOptions(arguments, false)
+	options, err := parseRunActionOptions("run rerun", arguments, false, true)
 	if err != nil {
 		return err
 	}
@@ -41,6 +41,9 @@ func runRunRerun(ctx context.Context, arguments []string, output io.Writer) erro
 	}
 	if options.force {
 		toolArguments["force"] = true
+	}
+	if options.assist {
+		toolArguments["assist"] = true
 	}
 	raw, err := remoteRunCanceller{config: config}.call(ctx, "run_rerun", toolArguments)
 	if err != nil {

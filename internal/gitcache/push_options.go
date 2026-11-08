@@ -29,7 +29,7 @@ func recordNativePushOptions() error {
 		for i := 0; i < count; i++ {
 			options = append(options, os.Getenv("GIT_PUSH_OPTION_"+strconv.Itoa(i)))
 		}
-		reservation.Priority, reservation.PriorityReason, reservation.Supersede = parsePushOptions(options)
+		reservation.Priority, reservation.PriorityReason, reservation.Supersede, reservation.Assist = parsePushOptions(options)
 	}
 	if reservation.State != receiveReserved {
 		return errors.New("push options require a reserved receive")
@@ -37,7 +37,10 @@ func recordNativePushOptions() error {
 	return c.writeReservation(reservation)
 }
 
-func parsePushOptions(options []string) (priority, reason string, supersede bool) {
+// parsePushOptions reads the oberth.* push options. oberth.assist=1 (or true)
+// asks for agent-assisted retry holds on the branch run; the server still
+// decides eligibility (branch CI, no credentials, policy enabled).
+func parsePushOptions(options []string) (priority, reason string, supersede, assist bool) {
 	seenPriority := false
 	for _, option := range options {
 		switch {
@@ -54,6 +57,8 @@ func parsePushOptions(options []string) (priority, reason string, supersede bool
 			}
 		case option == "oberth.supersede=true":
 			supersede = true
+		case option == "oberth.assist=1" || option == "oberth.assist=true":
+			assist = true
 		}
 	}
 	if priority != "" && reason == "" {

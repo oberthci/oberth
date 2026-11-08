@@ -22,6 +22,7 @@ func TestPriorityPushOptionsSurviveReceiveAndReplay(t *testing.T) {
 	input.WriteString("0000")
 	packet("oberth.priority=highest")
 	packet("oberth.supersede=true")
+	packet("oberth.assist=1")
 	input.WriteString("0000")
 	emptyPack := []byte{'P', 'A', 'C', 'K', 0, 0, 0, 2, 0, 0, 0, 0}
 	checksum := sha1.Sum(emptyPack)
@@ -34,7 +35,7 @@ func TestPriorityPushOptionsSurviveReceiveAndReplay(t *testing.T) {
 	if !errors.Is(err, deliveryFailure) {
 		t.Fatalf("receive: %v\n%s", err, output.String())
 	}
-	if live.ActorFingerprint != "SHA256:original-key" || live.Priority != "highest" || !live.Supersede || live.Actor != "original-requester" || live.PriorityReason != "git push priority request" {
+	if live.ActorFingerprint != "SHA256:original-key" || live.Priority != "highest" || !live.Supersede || !live.Assist || live.Actor != "original-requester" || live.PriorityReason != "git push priority request" {
 		t.Fatalf("lost push options: %+v", live)
 	}
 	restarted := newTestCacheAt(t, cache.root, repository.upstream)
@@ -49,12 +50,21 @@ func TestPriorityPushOptionsSurviveReceiveAndReplay(t *testing.T) {
 
 func TestPriorityPushOptionsInvalidRequestsDoNotRejectPush(t *testing.T) {
 	for _, options := range [][]string{{"oberth.priority="}, {"oberth.priority=high", "oberth.priority=highest"}, {"oberth.priority=" + strings.Repeat("x", 1024)}} {
-		p, reason, _ := parsePushOptions(options)
+		p, reason, _, _ := parsePushOptions(options)
 		if p != "invalid" || reason == "" {
 			t.Fatalf("invalid request lost: %q %q", p, reason)
 		}
 	}
-	p, _, supersede := parsePushOptions([]string{"oberth.priority=high", "oberth.supersede=false"})
+	p, _, supersede, assist := parsePushOptions([]string{"oberth.priority=high", "oberth.supersede=false", "oberth.assist=0"})
+	if assist {
+		t.Fatal("oberth.assist=0 asked for assistance")
+	}
+	if _, _, _, assist := parsePushOptions([]string{"oberth.assist=1"}); !assist {
+		t.Fatal("oberth.assist=1 ignored")
+	}
+	if _, _, _, assist := parsePushOptions([]string{"oberth.assist=true"}); !assist {
+		t.Fatal("oberth.assist=true ignored")
+	}
 	if p != "high" || supersede {
 		t.Fatal("false supersede enabled cancellation")
 	}

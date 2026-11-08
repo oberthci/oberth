@@ -614,6 +614,7 @@ func toolDefinitions() []map[string]any {
 			"id":     stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),
 			"reason": stringProperty("Why the run is rerun (printable text, at most 512 bytes)"),
 			"force":  map[string]any{"type": "boolean", "description": "Admin only: confirm replaying a tag/release run after credentialed/publication work started or when replay safety is unknown"},
+			"assist": map[string]any{"type": "boolean", "description": "Ask for agent-assisted continuation: a failed credential-free step of this branch CI rerun parks its retry for run_hold_* instead of failing (assist.enabled; ignored elsewhere)"},
 		}, "id")),
 		tool("run_purge", "Purge retained logs, artifacts, or both for one terminal run. Requires an unscoped admin uplink and a reason. Active runs, release evidence, promotion evidence, open-issue evidence and active grants are protected. Run and step history stays visible; every purge is audited.", object(map[string]any{
 			"id":     stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),

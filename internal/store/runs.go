@@ -20,7 +20,7 @@ const runColumns = `
 queue_sequence, COALESCE(admission_sequence, queue_sequence), id, repo_id, ref_kind, ref, sha, actor, release, credentialed, trigger,
 phase, job_name, tested_sha, base_sha, failed_burn, failed_step, error,
 status, reason, superseded_by, queued_at, started_at, finished_at, created_at, updated_at,
-concurrency_group, concurrency_limit, schedule_entry, issue_trailers, source_bindings, failure_cause, ` + basePrioritySQL + `, ` + priorityReasonSQL + `,
+concurrency_group, concurrency_limit, schedule_entry, issue_trailers, source_bindings, failure_cause, assist_requested, assisted, assist_record, ` + basePrioritySQL + `, ` + priorityReasonSQL + `,
 COALESCE(` + currentOverridePrioritySQL + `,''), COALESCE((SELECT reason FROM run_priority_overrides WHERE run_id=id),''),
 COALESCE(` + currentRequestedPrioritySQL + `,''), COALESCE(` + currentRequestedPriorityReasonSQL + `,''),
 COALESCE((SELECT actor FROM run_priority_overrides WHERE run_id=id),(SELECT actor FROM run_priority_requests WHERE run_id=id),''), COALESCE((SELECT refusal FROM run_priority_requests WHERE run_id=id),''), NOT (` + supersessionEligibleSQL + `)`
@@ -229,12 +229,12 @@ func (s *Store) enqueueRunTx(ctx context.Context, tx *sql.Tx, spec model.RunSpec
 	row := tx.QueryRowContext(ctx, `
 INSERT INTO runs(
     id, repo_id, ref_kind, ref, sha, actor, release, credentialed, trigger, phase,
-    tested_sha, base_sha, schedule_entry, status, reason, queued_at, created_at, updated_at
+    tested_sha, base_sha, schedule_entry, status, reason, assist_requested, queued_at, created_at, updated_at
 )
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, 'queued', ?, ?, ?, ?)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, 'queued', ?, ?, ?, ?, ?)
 RETURNING `+runColumns,
 		id, spec.RepoID, spec.RefKind, spec.Ref, spec.SHA, spec.Actor, spec.Release,
-		spec.Credentialed, spec.Trigger, spec.TestedSHA, spec.BaseSHA, spec.ScheduleEntry, spec.Reason, now, now, now)
+		spec.Credentialed, spec.Trigger, spec.TestedSHA, spec.BaseSHA, spec.ScheduleEntry, spec.Reason, spec.Assist, now, now, now)
 	value, err := scanRun(row)
 	if err != nil {
 		return model.EnqueueRunResult{}, fmt.Errorf("insert run: %w", err)
@@ -605,7 +605,7 @@ func (s *Store) HasPassedRunForSHA(ctx context.Context, name, sha string) (bool,
 	}
 	var passed bool
 	err = s.reader().QueryRowContext(ctx, `SELECT EXISTS(
-SELECT 1 FROM runs WHERE repo_id = ? AND tested_sha = ? AND status = 'passed'
+SELECT 1 FROM runs WHERE repo_id = ? AND tested_sha = ? AND status = 'passed' AND assisted = 0
 )`, repo.ID, sha).Scan(&passed)
 	if err != nil {
 		return false, fmt.Errorf("check passed fragment run: %w", err)
@@ -1373,8 +1373,8 @@ FROM step_results WHERE run_id = ? ORDER BY ordinal, burn, step`, runID)
 
 func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 	var value model.Run
-	var issueTrailers, sourceBindings string
-	var release, credentialed int64
+	var issueTrailers, sourceBindings, assistRecord string
+	var release, credentialed, assistRequested, assisted int64
 	var queued, created, updated int64
 	var started, finished sql.NullInt64
 	dest := []any{
@@ -1382,7 +1382,7 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 		&value.SHA, &value.Actor, &release, &credentialed, &value.Trigger, &value.Phase, &value.WorkflowName,
 		&value.TestedSHA, &value.BaseSHA, &value.FailedStage, &value.FailedStep, &value.Error,
 		&value.Status, &value.Reason, &value.SupersededBy, &queued, &started, &finished,
-		&created, &updated, &value.ConcurrencyGroup, &value.ConcurrencyLimit, &value.ScheduleEntry, &issueTrailers, &sourceBindings, &value.FailureCause, &value.Priority, &value.PriorityReason, &value.PriorityOverride, &value.PriorityOverrideReason, &value.PriorityAccepted, &value.PriorityAcceptedReason, &value.PriorityRequestedBy, &value.PriorityRefusal, &value.PriorityProtected,
+		&created, &updated, &value.ConcurrencyGroup, &value.ConcurrencyLimit, &value.ScheduleEntry, &issueTrailers, &sourceBindings, &value.FailureCause, &assistRequested, &assisted, &assistRecord, &value.Priority, &value.PriorityReason, &value.PriorityOverride, &value.PriorityOverrideReason, &value.PriorityAccepted, &value.PriorityAcceptedReason, &value.PriorityRequestedBy, &value.PriorityRefusal, &value.PriorityProtected,
 	}
 	if err := scanRowNotFound(row, "Run", append(dest, extra...)...); err != nil {
 		return model.Run{}, err
@@ -1404,6 +1404,18 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 			return model.Run{}, err
 		}
 	}
+	if assistRecord != "" {
+		if len(assistRecord) > model.MaximumRunAssistRecordBytes {
+			return model.Run{}, fmt.Errorf("%w: run assist record exceeds limit", ErrInvalidState)
+		}
+		var record model.RunAssistRecord
+		if err := json.Unmarshal([]byte(assistRecord), &record); err != nil {
+			return model.Run{}, fmt.Errorf("decode run assist record: %w", err)
+		}
+		value.Assist = &record
+	}
+	value.AssistRequested = assistRequested != 0
+	value.Assisted = assisted != 0
 	value.AutoRetryOf = automaticRetryOrigin(value.Reason)
 	value.AutoRetriedBy = automaticRetrySuccessor(value.Reason)
 	value.Release = release != 0

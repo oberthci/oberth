@@ -41,3 +41,19 @@ func passedRunDisplayReason(run model.Run) string {
 	}
 	return strings.Join(parts, " · ")
 }
+
+// assistDisplayReason is the reason-line fragment of an assisted run. The
+// status stays passed or failed; the line says why it is not evidence and
+// was not published. A requested-but-unused hold says nothing.
+func assistDisplayReason(run model.Run) string {
+	if run.Assist == nil {
+		return ""
+	}
+	if reason := run.Assist.Reason(); reason != "" {
+		return reason
+	}
+	if run.Assisted {
+		return "assisted; not evidence"
+	}
+	return ""
+}

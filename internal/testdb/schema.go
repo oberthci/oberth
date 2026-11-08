@@ -231,8 +231,19 @@ DELETE FROM schema_migrations WHERE id='20261107120000-branch-deletions';
 
 // PostRuntimeOverridesDowngrade removes the runtime release WIF and admission
 // capacity overrides (#1497) from disposable historical fixtures.
-const PostRuntimeOverridesDowngrade = `
+const PostRuntimeOverridesDowngrade = PostAssistedRunsDowngrade + `
 DROP TABLE IF EXISTS release_wif_overrides;
 DROP TABLE IF EXISTS admission_capacity_override;
 DELETE FROM schema_migrations WHERE id='20261108090000-runtime-admin-overrides';
+`
+
+// PostAssistedRunsDowngrade removes the agent-assisted continuation columns
+// from disposable historical fixtures.
+const PostAssistedRunsDowngrade = `
+DROP TRIGGER IF EXISTS run_assist_requested_immutable;
+DROP TRIGGER IF EXISTS run_assisted_monotonic;
+ALTER TABLE runs DROP COLUMN assist_requested;
+ALTER TABLE runs DROP COLUMN assisted;
+ALTER TABLE runs DROP COLUMN assist_record;
+DELETE FROM schema_migrations WHERE id='20261108232919-assisted-runs-2c8c05259f2ff5d590fe8162f2e1d195';
 `

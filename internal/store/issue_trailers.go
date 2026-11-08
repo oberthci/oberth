@@ -33,7 +33,7 @@ func (s *Store) recordIssueTrailerWork(ctx context.Context, tx *sql.Tx, final mo
 			runID = final.Promotion.RunID
 		}
 		if runID == "" {
-			err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE repo_id=? AND sha=? AND tested_sha=sha AND status='passed' AND ref_kind='branch' ORDER BY queue_sequence DESC LIMIT 1`, p.RepoID, p.ResultSHA).Scan(&runID)
+			err := tx.QueryRowContext(ctx, `SELECT id FROM runs WHERE repo_id=? AND sha=? AND tested_sha=sha AND status='passed' AND assisted=0 AND ref_kind='branch' ORDER BY queue_sequence DESC LIMIT 1`, p.RepoID, p.ResultSHA).Scan(&runID)
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil
 			}
@@ -41,7 +41,7 @@ func (s *Store) recordIssueTrailerWork(ctx context.Context, tx *sql.Tx, final mo
 				return err
 			}
 		}
-	} else if final.Run.Status != model.RunPassed || (final.Run.Trigger != "push" && final.Run.Trigger != "branch") || final.Run.RefKind != model.RefBranch || final.Run.Ref != branch {
+	} else if final.Run.Status != model.RunPassed || final.Run.Assisted || (final.Run.Trigger != "push" && final.Run.Trigger != "branch") || final.Run.RefKind != model.RefBranch || final.Run.Ref != branch {
 		return nil
 	}
 	// A fast-forward promotion reuses its source's successful run.

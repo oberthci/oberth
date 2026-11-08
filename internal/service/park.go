@@ -130,8 +130,11 @@ func (p promotionPolicy) parks(branch string) bool {
 	return strings.HasPrefix("refs/heads/"+branch, p.ParkRefPrefix)
 }
 
+// greenBranchCandidate is the promotion-source evidence rule. An assisted
+// run passed on a tree the agent changed inside the held Pod, which is not
+// the commit; it is never evidence.
 func greenBranchCandidate(candidate model.Run) bool {
-	return candidate.RefKind == model.RefBranch && candidate.Status == model.RunPassed && sameOID(candidate.TestedSHA, candidate.SHA) && (candidate.Trigger == "" || candidate.Trigger == "branch" || candidate.Trigger == "schedule")
+	return candidate.RefKind == model.RefBranch && candidate.Status == model.RunPassed && !candidate.Assisted && sameOID(candidate.TestedSHA, candidate.SHA) && (candidate.Trigger == "" || candidate.Trigger == "branch" || candidate.Trigger == "schedule")
 }
 
 func refuseRedBranchSource(run model.Run) error {

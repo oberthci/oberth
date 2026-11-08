@@ -162,6 +162,7 @@ func (ingestor *PushIngestor) enqueueBranch(ctx context.Context, push BranchPush
 		return PushResult{}, refuse(ErrUnavailable, "CI queue")
 	}
 	enqueued, err := ingestor.branches.EnqueueCI(ctx, CIRequest{PriorityRequest: push.PriorityRequest,
+		Assist:     push.Assist,
 		Reason:     reason,
 		EventID:    push.EventID,
 		Repository: repository,

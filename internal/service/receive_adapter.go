@@ -38,6 +38,7 @@ func (handler *ReceiveHandler) dispatch(ctx context.Context, event gitcache.Rece
 	case strings.HasPrefix(ref, "refs/heads/"):
 		return handler.Pushes.Branch(ctx, BranchPush{
 			PriorityRequest: model.PriorityRequest{RequesterFingerprint: event.ActorFingerprint, Priority: model.RunPriority(event.Priority), PriorityReason: event.PriorityReason, Supersede: event.Supersede},
+			Assist:          event.Assist,
 			EventID:         event.ID, Repository: event.Repo, Branch: strings.TrimPrefix(ref, "refs/heads/"),
 			OldOID: event.Update.OldSHA, NewOID: event.Update.NewSHA, Actor: event.Actor,
 		})

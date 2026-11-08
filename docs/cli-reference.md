@@ -950,7 +950,7 @@ Usage: oberth run purge <run-id> --what logs|artifacts|both --reason <text> [--j
 ## oberth run rerun
 
 ```text
-Usage: oberth run rerun <run-id> [--reason <text>] [--force] [--json]
+Usage: oberth run rerun <run-id> [--reason <text>] [--force] [--assist] [--json]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
 ```
 

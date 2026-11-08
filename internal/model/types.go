@@ -142,6 +142,13 @@ type Run struct {
 	// ResourceMessage is advice, separate from the exact status vocabulary.
 	ResourceMessage string `json:"resource_message,omitempty"`
 
+	// AssistRequested is the run's opt-in to retry holds; Assisted is set once
+	// a held step was continued, and Assist holds the hold record. An
+	// assisted run never satisfies promotion, publication or green-for-SHA.
+	AssistRequested bool             `json:"assist_requested,omitempty"`
+	Assisted        bool             `json:"assisted,omitempty"`
+	Assist          *RunAssistRecord `json:"assist,omitempty"`
+
 	EarlierAttempts     int         `json:"earlier_attempts,omitempty"`
 	AutoRetryOf         string      `json:"auto_retry_of,omitempty"`
 	AutoRetriedBy       string      `json:"auto_retried_by,omitempty"`
@@ -200,6 +207,8 @@ type Run struct {
 
 type RunSpec struct {
 	PriorityRequest
+	// Assist asks for retry holds (push option oberth.assist=1, rerun assist).
+	Assist        bool
 	Reason        string
 	RepoID        int64
 	RefKind       RefKind

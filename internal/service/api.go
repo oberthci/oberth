@@ -567,11 +567,12 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			ID     string `json:"id"`
 			Reason string `json:"reason"`
 			Force  bool   `json:"force"`
+			Assist bool   `json:"assist"`
 		}
 		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		return service.rerunRun(ctx, actor, arguments.ID, arguments.Reason, arguments.Force, requestedPriority(actor, arguments.PriorityRequest))
+		return service.rerunRun(ctx, actor, arguments.ID, arguments.Reason, arguments.Force, arguments.Assist, requestedPriority(actor, arguments.PriorityRequest))
 	case "run_purge":
 		if !actor.Admin || actor.Scoped() {
 			return nil, refuse(ErrForbidden, "run_purge requires an unscoped admin uplink")
@@ -1763,6 +1764,7 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 	if run.Status == model.RunRunning && run.Phase == "publishing" {
 		visible.DisplayReason = "publishing to upstream"
 	}
+
 	if run.Status.Active() && visible.DisplayStatus != model.DisplayQueued {
 		visible.DisplayReason = joinRunMessage(priorityPrefix(visible), visible.DisplayReason)
 	}
@@ -1773,6 +1775,11 @@ func presentationRunAt(run model.Run, now time.Time) model.Run {
 			visible.DisplayReason = displayFailureText(visible.DisplayReason)
 		}
 		visible.DisplayReason = parkPolicyDisplayReason(run, visible.DisplayReason)
+		// The assisted fragment stays whole: its digest and actor are the
+		// evidence trail, so it is appended after the bounded clipping.
+		if reason := assistDisplayReason(run); reason != "" {
+			visible.DisplayReason = joinRunMessage(visible.DisplayReason, reason)
+		}
 	}
 	return visible
 }

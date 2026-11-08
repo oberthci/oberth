@@ -136,7 +136,7 @@ func (r *CIIssueReconciler) reconcileIssue(ctx context.Context, issue model.Issu
 	if err != nil {
 		return fmt.Errorf("load latest default-branch run: %w", err)
 	}
-	if mainRun.Status != model.RunPassed {
+	if mainRun.Status != model.RunPassed || mainRun.Assisted {
 		return nil
 	}
 	// The accepted public ref may be ahead of the last published upstream

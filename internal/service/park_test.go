@@ -379,5 +379,31 @@ func TestGreenBranchEvidenceKeepsScheduledCIAndExcludesPromotionRuns(t *testing.
 		if got := greenBranchCandidate(candidate); got != (trigger != "promotion") {
 			t.Errorf("trigger=%q green branch=%v", trigger, got)
 		}
+		candidate.Assisted = true
+		if greenBranchCandidate(candidate) {
+			t.Errorf("trigger=%q assisted run counted as green evidence", trigger)
+		}
+	}
+}
+
+func TestAssistedRunReasonLineExplainsMissingEvidence(t *testing.T) {
+	record := &model.RunAssistRecord{Events: []model.RunAssistEvent{
+		{Actor: "uplink-a", Step: "test", Kind: model.RunAssistPatch, PatchSHA256: strings.Repeat("e", 64)},
+		{Actor: "uplink-a", Step: "test", Kind: model.RunAssistContinue, Assisted: true},
+	}}
+	passed := presentationRun(model.Run{Status: model.RunPassed, RefKind: model.RefBranch, Trigger: "branch", Assisted: true, Assist: record})
+	if passed.DisplayStatus != model.DisplayRunStatus(model.Run{Status: model.RunPassed}) {
+		t.Fatalf("assisted run changed display status: %q", passed.DisplayStatus)
+	}
+	if !strings.Contains(passed.DisplayReason, "assisted: step test continued after patch sha256:eeeeeeeeeeee by uplink-a; not evidence") {
+		t.Fatalf("passed assisted reason = %q", passed.DisplayReason)
+	}
+	failed := presentationRun(model.Run{Status: model.RunFailed, RefKind: model.RefBranch, Trigger: "branch", Error: "step lint failed", Assisted: true, Assist: record})
+	if !strings.Contains(failed.DisplayReason, "assisted: step test continued") {
+		t.Fatalf("failed assisted reason = %q", failed.DisplayReason)
+	}
+	requested := presentationRun(model.Run{Status: model.RunPassed, RefKind: model.RefBranch, Trigger: "branch", AssistRequested: true})
+	if strings.Contains(requested.DisplayReason, "assist") {
+		t.Fatalf("an unused hold request must say nothing: %q", requested.DisplayReason)
 	}
 }
