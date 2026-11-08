@@ -326,13 +326,25 @@ func mirrorBranchDeleted(ctx context.Context, git PublicationGit, repository, br
 
 const deletedBranchPublicationActor = "oberth:branch-deletion"
 
+// deletedBranchPublicationSkipper finishes a deleted branch's publication
+// without failing its green run.
+type deletedBranchPublicationSkipper interface {
+	SkipDeletedBranchPublication(context.Context, string, string, string) (model.PublicationFinalization, error)
+}
+
+// abandonDeletedBranchPublication does not push a branch deleted on the
+// mirror back upstream. The run's steps passed, so the run finishes passed
+// with the reason line; only the publication is abandoned (#1500).
 func abandonDeletedBranchPublication(ctx context.Context, publications PublicationStore, publication model.Publication) (model.PublicationFinalization, error) {
 	finalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
-	reason := "branch " + publication.Ref + " was deleted on the mirror; upstream left unchanged"
+	reason := "branch " + publication.Ref + " was deleted on the mirror; result not published, upstream left unchanged"
 	var owner any = publications
 	if wrapped, ok := publications.(schedulerDatabase); ok {
 		owner = wrapped.SchedulerStore
+	}
+	if skipper, ok := owner.(deletedBranchPublicationSkipper); ok {
+		return skipper.SkipDeletedBranchPublication(finalCtx, publication.ID, deletedBranchPublicationActor, reason)
 	}
 	if abandoner, ok := owner.(publicationAbandoner); ok {
 		return abandoner.AbandonPublication(finalCtx, publication.ID, deletedBranchPublicationActor, reason)
