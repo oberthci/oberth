@@ -3135,9 +3135,16 @@ readable and revocable. Schedules skip archived
 repositories before reading Git. Git refreshes/probes fail closed, and the
 qualified cache is removed under receive/refresh locks. Retry archive if cache
 removal failed; the catalog stays archived. Unarchive allows lazy cache recreation.
-Dashboard repository lists default to active; the archived filter retains counts
-and historical links. `repo_list` includes archive metadata so operators can
-inspect the whole catalog. Upstream-level health probes remain shared by active
+Dashboard repository lists (runs sidebar, repositories page and the issue
+repository selector) default to active repositories; the `archived N` filter,
+remembered per browser, shows archived ones last with their counts and historical
+links, and a selected archived repository stays listed (#1498). `repo_list`
+hides archived repositories by default and reports them in `archived_hidden`;
+`archived=include` returns the whole catalog with archive metadata and
+`archived=only` the archived subset. Run history, logs and audit stay readable.
+Archived repositories are never deleted: their runs, publications, promotions
+and custody records are append-only evidence, so `repo_remove` still refuses
+once runs exist. Upstream-level health probes remain shared by active
 repositories; an upstream used only by archived repositories is not contacted.
 
 Migration **v29** follows the admission-sequence migration v28 (#1092). It

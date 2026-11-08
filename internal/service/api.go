@@ -976,10 +976,13 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 	case "repo_usage":
 		return service.repoUsage(ctx, raw)
 	case "repo_list":
-		if err := decodeTool(raw, &struct{}{}); err != nil {
+		var arguments struct {
+			Archived string `json:"archived"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
 			return nil, err
 		}
-		return service.repoList(ctx)
+		return service.repoList(ctx, arguments.Archived)
 	case "repo_archive", "repo_unarchive":
 		var arguments struct {
 			Repo string `json:"repo"`

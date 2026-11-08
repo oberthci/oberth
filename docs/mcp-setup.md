@@ -403,7 +403,7 @@ A step above the 4 MiB response ceiling returns a truncated result with
 step: a single step can exceed a model's context window.
 
 | `repo_usage` | Bounded external resource report by repository/step: sampled p50/p95/max, requests, coverage and used/request ratios. |
-| `repo_list` | List registered repositories as id, name, upstream, default_branch, archived_at and one latest_run (id, status, ref, finished_at). No run history or probe payload. |
+| `repo_list` | List registered repositories as id, name, upstream, default_branch, archived_at and one latest_run (id, status, ref, finished_at). Archived repositories are hidden by default and counted in `archived_hidden`; `archived=include` lists the whole catalog, `archived=only` the archived subset. No run history or probe payload. |
 | `repo_archive` / `repo_unarchive` | Archive or restore a repository, preserving history (unscoped admin only); archived repositories refuse new grants |
 | `repo_remove` | Remove a repository mapping and its Git cache (admin-only) |
 | `branch_delete_many` | Batch branch deletion: dry-run plan with plan_id, then confirm; compare-and-delete per ref, merged-only unless allow_unmerged, never the default branch, configured reserved branches only alone with confirm_reserved; upstream deletion is asynchronous (unscoped admin only) |
@@ -838,6 +838,8 @@ restore it with `oberth repo unarchive upstream/org/repo`. Both use the remote
 admin MCP tools and accept `--url`, `--token-file` and `--ca-file`. Archive refuses
 in-flight work and pending promotions, keeps all evidence, drops the Git cache,
 and refuses pushes and new runs until restored. History remains readable.
+Archived repositories leave the default `repo_list` and dashboard lists; use
+`repo_list` with `archived=include` or the dashboard's `archived` filter to see them.
 Remove its releaseWIF mapping and list it under chart `archivedRepositories` to
 make stale release capabilities fail chart validation.
 

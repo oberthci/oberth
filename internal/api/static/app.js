@@ -18,6 +18,7 @@ const state = {
   filter: readRunFilter(),
   releaseOnly: localStorage.getItem("oberth-kind") === "release" || localStorage.getItem("oberth-filter") === "release",
   repo: localStorage.getItem("oberth-repo") || "all",
+  showArchived: localStorage.getItem("oberth-archived") === "show",
   step: "", stepRunID: "",
   logCache: new Map(),
   live: null, // assigned per-run by liveLogContent
@@ -675,11 +676,12 @@ async function renderRuns(seq) {
         <div class="toolbar runs-toolbar">
           ${runFilters.map(f => `<button class="chip ${state.filter === f ? "on" : ""}" data-status-filter="${esc(f)}">${esc(f)}</button>`).join("")}
           <button class="chip ${state.releaseOnly ? "on" : ""}" data-kind-filter="release" aria-pressed="${state.releaseOnly}">release</button>
+          ${archivedToggle()}
         </div>
       <aside class="repo-side" aria-label="Repositories and retained run counts">
         <div class="side-head">Retained runs</div>
         <div class="repo-filter-row"><button class="repo-filter ${state.repo === "all" ? "on" : ""}" data-repo-filter="all"><span class="name">All repos</span><span class="count" title="${esc(retainedRunCount(counts.get("all") || 0))}" aria-label="${esc(retainedRunCount(counts.get("all") || 0))}">${esc(counts.get("all") || 0)}</span></button></div>
-        ${orderedRepos().map((repo, index, repos) => {
+        ${orderedRepos(state.repo).map((repo, index, repos) => {
           const divider = repo.ArchivedAt && (index === 0 || !repos[index - 1].ArchivedAt) ? '<div class="repo-filter-row repo-archived-divider"><span class="meta">archived</span></div>' : "";
           return `${divider}<div class="repo-filter-row"><button class="${repo.ArchivedAt ? "repo-filter archived" : "repo-filter"}${state.repo === repoKey(repo) ? " on" : ""}" data-repo-filter="${esc(repoKey(repo))}" title="${esc(repoKey(repo))}"><span class="name">${esc(repoLabel(repo))}</span><span class="count" title="${esc(retainedRunCount(counts.get(repoKey(repo)) || 0))}" aria-label="${esc(retainedRunCount(counts.get(repoKey(repo)) || 0))}">${esc(counts.get(repoKey(repo)) || 0)}</span></button></div>`;
         }).join("")}
@@ -1390,8 +1392,21 @@ function upstreamName(upstreamID) {
 function historyStrip(runs) {
   return `<div class="history" aria-label="recent runs, oldest to newest">${runs.slice(0, 12).reverse().map(run => `<button type="button" class="hist ${statusKind(displayRunStatus(run))}" data-run-id="${esc(run.ID)}" title="${esc(`${shortSha(run.SHA)} · ${run.RefKind === "tag" ? "tag" : "branch"} ${run.Ref} · ${statusLabel(displayRunStatus(run))} · ${ago(runWhen(run))}`)}"></button>`).join("") || '<span class="meta">--</span>'}</div>`;
 }
-function orderedRepos() {
-  return [...state.repos.filter(repo => !repo.ArchivedAt), ...state.repos.filter(repo => repo.ArchivedAt)];
+/* Archived repositories are hidden unless the archived filter is on (#1498).
+   A selected archived repository stays listed so its filter remains visible. */
+function archivedRepos() { return state.repos.filter(repo => repo.ArchivedAt); }
+function orderedRepos(selected) {
+  const archived = archivedRepos().filter(repo => state.showArchived || (selected && repoKey(repo) === selected));
+  return [...state.repos.filter(repo => !repo.ArchivedAt), ...archived];
+}
+function archivedToggle() {
+  const count = archivedRepos().length;
+  if (!count) return "";
+  return `<button type="button" class="chip ${state.showArchived ? "on" : ""}" data-archived-filter aria-pressed="${state.showArchived}" title="${esc(`${count} archived repositor${count === 1 ? "y" : "ies"}`)}">archived ${esc(count)}</button>`;
+}
+function toggleArchived() {
+  state.showArchived = !state.showArchived;
+  localStorage.setItem("oberth-archived", state.showArchived ? "show" : "hide");
 }
 async function renderRepos(seq) {
   setChrome("repos", "/ repos");
@@ -1403,7 +1418,7 @@ async function renderRepos(seq) {
   });
   replaceApp(`
   <section class="screen">
-    <div class="bar"><h1>Repositories</h1><span class="meta">${state.repos.length} configured</span></div>
+    <div class="bar"><h1>Repositories</h1><span class="meta">${state.repos.length} configured</span>${archivedToggle()}</div>
     <div class="table repo-table">
       <div class="trow head"><div>repository</div><div>status</div><div>default branch</div><div>latest run</div><div>history</div><div>upstream</div></div>
       ${rows.map(({ repo, runs, latest }) => `<div class="trow" data-repo-runs="${esc(repoKey(repo))}"><div class="primary"><div class="repo-name">${esc(repoLabel(repo))}</div></div><div>${repo.ArchivedAt ? pill("archived", "cancel") : latest ? pill(statusLabel(displayRunStatus(latest)), statusKind(displayRunStatus(latest))) : '<span class="meta">no runs</span>'}</div><div class="branch">${esc(repo.DefaultBranch || "--")}</div><div>${latest ? `<div class="branch">${esc(latest.Ref)}</div><span class="meta">${esc(ago(runWhen(latest)))}</span>` : '<span class="meta">--</span>'}</div><div>${historyStrip(runs)}</div><div class="clip">${esc(upstreamName(repo.UpstreamID))}</div></div>`).join("") || '<div class="empty static">No repositories configured.</div>'}
@@ -1463,7 +1478,7 @@ async function renderIssues(seq) {
     <div class="bar"><h1>Issues</h1></div>
     <div class="toolbar">
       ${states.map(([value, label]) => `<button class="chip ${state.issueState === value ? "on" : ""}" data-issue-state="${esc(value)}">${esc(label)} <span class="chip-count">${stateCount(value)}</span></button>`).join("")}
-      <label>repo <select data-action="issue-repo"><option value="">all</option>${state.repos.map(repo => `<option value="${esc(repoKey(repo))}" ${state.issueRepo === repoKey(repo) ? "selected" : ""}>${esc(repoLabel(repo))}</option>`).join("")}</select></label>
+      <label>repo <select data-action="issue-repo"><option value="">all</option>${orderedRepos(state.issueRepo).map(repo => `<option value="${esc(repoKey(repo))}" ${state.issueRepo === repoKey(repo) ? "selected" : ""}>${esc(repoLabel(repo))}</option>`).join("")}</select></label>
       <label>work <select data-action="issue-work-status"><option value="">all</option>${["todo", "active", "waiting", "review"].map(status => `<option value="${status}" ${state.issueWorkStatus === status ? "selected" : ""}>${status}</option>`).join("")}</select></label>
       <label>search <input type="search" data-action="issue-query" value="${esc(state.issueQuery)}" aria-label="Search issue title, body or branch"></label>
       <span class="count">${pageRange(issueStart, issues.length, total)}</span>
@@ -1706,6 +1721,7 @@ app.addEventListener("click", event => {
   if ((target = event.target.closest("[data-repo-runs]"))) { changeRunRepo(target.dataset.repoRuns); go("/runs"); return; }
   if ((target = event.target.closest("[data-repo-filter]"))) { changeRunRepo(target.dataset.repoFilter); route(); return; }
   if ((target = event.target.closest("[data-kind-filter]"))) { state.releaseOnly = !state.releaseOnly; route(); return; }
+  if ((target = event.target.closest("[data-archived-filter]"))) { toggleArchived(); route(); return; }
   if ((target = event.target.closest("[data-status-filter]"))) { state.filter = target.dataset.statusFilter; changeRunRepo(state.repo); route(); return; }
   if ((target = event.target.closest("[data-issue-state]"))) { changeIssueFilter({ issueState: target.dataset.issueState }); return; }
   if ((target = event.target.closest("[data-select-step]")) && target.dataset.selectStep !== undefined) {
