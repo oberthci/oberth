@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -395,7 +396,23 @@ const (
 	UpstreamRetry      = "retry"
 	UpstreamRefused    = "refused"
 	UpstreamSkipped    = "skipped"
+	// UpstreamArchived is final: the forge refuses every push because the
+	// repository is archived. The mirror deletion and its marker are kept,
+	// so a refresh does not re-create the branch from the read-only forge.
+	UpstreamArchived = "archived"
 )
+
+// archivedUpstreamMessage matches the push refusal of a read-only archived
+// repository: Forgejo and Gitea print "Repo ... is archived", GitHub "This
+// repository was archived so it is read-only". Only a refused push is
+// classified, after the read-back shows the ref unchanged.
+var archivedUpstreamMessage = regexp.MustCompile(`(?i)\brepo\b[^\n]{0,300}\bis archived\b|\brepository was archived so it is read-only\b`)
+
+// ArchivedUpstream reports whether a push failure says the upstream
+// repository is archived.
+func ArchivedUpstream(err error) bool {
+	return err != nil && archivedUpstreamMessage.MatchString(err.Error())
+}
 
 type UpstreamDeletionResult struct {
 	Branch string
@@ -411,7 +428,9 @@ type UpstreamDeletionResult struct {
 //
 // Each upstream ref is compared before deletion: it is removed only while it
 // still names a deleted head or one of its ancestors, with a force-with-lease
-// on the exact observed SHA. A ref that moved elsewhere is refused. A branch
+// on the exact observed SHA. A ref that moved elsewhere is refused. A push the
+// forge refuses because the repository is archived is final (UpstreamArchived)
+// and keeps the deletion marker. A branch
 // that exists again on the mirror without a deletion marker was pushed again
 // and is skipped; with a marker its local deletion has not been applied yet,
 // so it is retried later. Several records for one branch share one refspec
@@ -535,6 +554,8 @@ func (c *Cache) PropagateBranchDeletions(ctx context.Context, input string, dele
 				setAll(branch, UpstreamRetry, errors.Join(pushErrs[branch], readErr))
 			case after["refs/heads/"+branch] == "":
 				setAll(branch, UpstreamPropagated, nil)
+			case ArchivedUpstream(pushErrs[branch]):
+				setAll(branch, UpstreamArchived, pushErrs[branch])
 			case pushErrs[branch] != nil:
 				setAll(branch, UpstreamRetry, pushErrs[branch])
 			default:

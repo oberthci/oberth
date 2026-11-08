@@ -154,7 +154,8 @@ func (g *mirrorBranchGit) MirrorBranchExists(context.Context, string, string) (b
 }
 
 // A feature-branch publication whose branch was deleted on the mirror after
-// its run started must not force-push the branch back upstream.
+// its run started must not force-push the branch back upstream, and must not
+// turn the green run red.
 func TestPublicationSkipsBranchDeletedOnMirror(t *testing.T) {
 	for _, exists := range []bool{true, false} {
 		t.Run(map[bool]string{true: "present", false: "deleted"}[exists], func(t *testing.T) {
@@ -181,8 +182,13 @@ func TestPublicationSkipsBranchDeletedOnMirror(t *testing.T) {
 				}
 				return
 			}
-			if g.forced != 0 || final.Publication.Status != model.PublicationAbandoned || final.Run.Phase != "abandoned" || !strings.Contains(final.Publication.Error, "deleted on the mirror") {
-				t.Fatalf("deleted branch: forced=%d publication=%+v run=%+v", g.forced, final.Publication, final.Run)
+			if g.forced != 0 || final.Publication.Status != model.PublicationAbandoned || !strings.Contains(final.Publication.Error, "deleted on the mirror") {
+				t.Fatalf("deleted branch: forced=%d publication=%+v", g.forced, final.Publication)
+			}
+			// The run's steps passed: it finishes passed with a reason line,
+			// not failed/abandoned (#1500).
+			if final.Run.Status != model.RunPassed || final.Run.Phase != "passed" || final.Run.Error != "" || !strings.Contains(final.Run.Reason, "deleted on the mirror") {
+				t.Fatalf("deleted branch run = %+v", final.Run)
 			}
 		})
 	}

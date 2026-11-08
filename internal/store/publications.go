@@ -231,7 +231,7 @@ func (s *Store) FinalizePublication(ctx context.Context, id string, status model
 	if status == model.PublicationAbandoned {
 		return model.PublicationFinalization{}, fmt.Errorf("%w: use AbandonPublication with an actor and reason", ErrInvalid)
 	}
-	return s.finalizePublication(ctx, id, status, failure, "")
+	return s.finalizePublication(ctx, id, status, failure, "", false)
 }
 
 // AbandonPublication records an operator decision and closes the intent and
@@ -245,11 +245,24 @@ func (s *Store) AbandonPublication(ctx context.Context, id, actor, reason string
 	if err := ValidateCancelReason(reason); err != nil {
 		return model.PublicationFinalization{}, err
 	}
-	return s.finalizePublication(ctx, id, model.PublicationAbandoned, "abandoned by "+actor+": "+reason, actor)
+	return s.finalizePublication(ctx, id, model.PublicationAbandoned, "abandoned by "+actor+": "+reason, actor, false)
 }
 
-func (s *Store) finalizePublication(ctx context.Context, id string, status model.PublicationStatus, failure, abandonActor string) (model.PublicationFinalization, error) {
-	if strings.TrimSpace(id) == "" || !status.Terminal() {
+// SkipDeletedBranchPublication ends the publication of a feature-branch run
+// whose branch was deleted on the mirror while the run was publishing. The
+// publication is abandoned so the branch is not pushed back upstream, but the
+// run itself passed: it finishes passed with the reason line, not failed
+// (#1500). Promotion publications never take this path.
+func (s *Store) SkipDeletedBranchPublication(ctx context.Context, id, actor, reason string) (model.PublicationFinalization, error) {
+	actor, reason = strings.TrimSpace(actor), strings.TrimSpace(reason)
+	if actor == "" || reason == "" {
+		return model.PublicationFinalization{}, fmt.Errorf("%w: skip actor and reason are required", ErrInvalid)
+	}
+	return s.finalizePublication(ctx, id, model.PublicationAbandoned, reason, actor, true)
+}
+
+func (s *Store) finalizePublication(ctx context.Context, id string, status model.PublicationStatus, failure, abandonActor string, runPassed bool) (model.PublicationFinalization, error) {
+	if strings.TrimSpace(id) == "" || !status.Terminal() || runPassed && status != model.PublicationAbandoned {
 		return model.PublicationFinalization{}, fmt.Errorf("%w: terminal publication result is required", ErrInvalid)
 	}
 	if status == model.PublicationDelivered {
@@ -275,6 +288,9 @@ SELECT `+publicationColumns+` FROM publications WHERE id = ?`, id))
 	if publication.Status != model.PublicationPending {
 		return model.PublicationFinalization{}, fmt.Errorf("%w: publication is already terminal", ErrInvalidState)
 	}
+	if runPassed && (publication.PromotionID != "" || publication.RunID == "") {
+		return model.PublicationFinalization{}, fmt.Errorf("%w: only a run's own branch publication can finish its run as passed", ErrInvalidState)
+	}
 
 	finalization := model.PublicationFinalization{}
 	if publication.RunID != "" {
@@ -288,11 +304,18 @@ SELECT `+publicationColumns+` FROM publications WHERE id = ?`, id))
 		if status == model.PublicationAbandoned {
 			phase = "abandoned"
 		}
+		runError, runReason := failure, ""
+		if abandonActor != "" {
+			runReason = failure
+		}
+		if runPassed {
+			runStatus, phase, runError = model.RunPassed, "passed", ""
+		}
 		finalization.Run, err = scanRun(tx.QueryRowContext(ctx, `
 UPDATE runs
 SET status = ?, phase = ?, error = ?, reason = CASE WHEN ? != '' THEN ? ELSE reason END, finished_at = ?, updated_at = ?
 WHERE id = ? AND status = 'running' AND phase = 'publishing'
-RETURNING `+runColumns, runStatus, phase, failure, abandonActor, failure, now, now, publication.RunID))
+RETURNING `+runColumns, runStatus, phase, runError, runReason, runReason, now, now, publication.RunID))
 		if errors.Is(err, sql.ErrNoRows) {
 			return model.PublicationFinalization{}, fmt.Errorf("%w: publication run is not active", ErrInvalidState)
 		}

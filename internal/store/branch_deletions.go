@@ -175,11 +175,102 @@ func (s *Store) UpdateBranchDeletions(ctx context.Context, updates []model.Branc
 WHERE id=? AND status='pending'`, string(update.Status), update.Attempts, retry, boundedDeletionError(update.Error), now, update.ID); err != nil {
 			return fmt.Errorf("update branch deletion: %w", err)
 		}
+		if update.Status == model.BranchDeletionPropagated {
+			// The upstream branch is gone: an older failed deletion of the
+			// same branch has nothing left to do.
+			if _, err := tx.ExecContext(ctx, `UPDATE branch_deletions SET status='skipped', error=?, updated_at=?
+WHERE status='failed' AND repo_id=(SELECT repo_id FROM branch_deletions WHERE id=? AND status='propagated')
+AND branch=(SELECT branch FROM branch_deletions WHERE id=?) AND sequence<(SELECT sequence FROM branch_deletions WHERE id=?)`,
+				boundedDeletionError("resolved: later deletion "+update.ID+" propagated upstream"), now, update.ID, update.ID, update.ID); err != nil {
+				return fmt.Errorf("resolve superseded branch deletions: %w", err)
+			}
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit branch deletion update: %w", err)
 	}
 	return nil
+}
+
+// BranchDeletionCounts counts every record per status, for one repository
+// or (repoID 0) for all of them, independent of any page.
+func (s *Store) BranchDeletionCounts(ctx context.Context, repoID int64) (map[string]int, error) {
+	rows, err := s.reader().QueryContext(ctx, `SELECT status, COUNT(*) FROM branch_deletions
+WHERE (?=0 OR repo_id=?) GROUP BY status`, repoID, repoID)
+	if err != nil {
+		return nil, fmt.Errorf("count branch deletions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	counts := map[string]int{}
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, fmt.Errorf("scan branch deletion count: %w", err)
+		}
+		counts[status] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read branch deletion counts: %w", err)
+	}
+	return counts, nil
+}
+
+// ResolveBranchDeletions closes failed records of one repository as skipped
+// with a reason line and one audit entry. Only failed rows change; it returns
+// the IDs it resolved. Refs are not touched: a failed deletion already
+// restored its mirror branch.
+func (s *Store) ResolveBranchDeletions(ctx context.Context, repoID int64, ids []string, actor, reason string) ([]string, error) {
+	actor, reason = strings.TrimSpace(actor), strings.TrimSpace(reason)
+	if repoID <= 0 || actor == "" || reason == "" || len(ids) == 0 || len(ids) > 1000 {
+		return nil, fmt.Errorf("%w: branch deletion resolution fields are invalid", ErrInvalid)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin branch deletion resolution: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := unixNano(s.now())
+	message := boundedDeletionError("resolved by " + actor + ": " + reason)
+	resolved := []string{}
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		result, err := tx.ExecContext(ctx, `UPDATE branch_deletions SET status='skipped', error=?, updated_at=?
+WHERE id=? AND repo_id=? AND status='failed'`, message, now, id, repoID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve branch deletion: %w", err)
+		}
+		if changed, err := result.RowsAffected(); err != nil {
+			return nil, fmt.Errorf("resolve branch deletion: %w", err)
+		} else if changed == 1 {
+			resolved = append(resolved, id)
+		}
+	}
+	if len(resolved) == 0 {
+		return resolved, nil
+	}
+	listed := resolved
+	if len(listed) > 50 {
+		listed = listed[:50]
+	}
+	encoded, err := json.Marshal(map[string]any{"repo_id": repoID, "resolved": len(resolved), "ids": listed, "reason": reason})
+	if err != nil {
+		return nil, fmt.Errorf("encode branch deletion resolution audit: %w", err)
+	}
+	if _, err := s.appendAuditAction(ctx, tx, model.AuditActionSpec{
+		Actor: actor, Action: "branch.deletion.resolve", ResourceType: "repository",
+		ResourceID: fmt.Sprint(repoID), Details: string(encoded),
+	}, now); err != nil {
+		return nil, fmt.Errorf("append branch deletion resolution audit: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit branch deletion resolution: %w", err)
+	}
+	return resolved, nil
 }
 
 func boundedDeletionError(message string) string {

@@ -319,9 +319,16 @@ with its marker is retried later; without one it was pushed again and is
 `skipped`. Each record ends `propagated`, `skipped` or `failed` (six attempts or
 a moved upstream). A failure restores the mirror branch from its upstream
 tracking ref as last fetched, which can lag the forge until the next refresh.
+A push the forge refuses because the upstream repository is archived is final
+at once: the record is `skipped` with an "upstream archived" reason line, and
+the mirror deletion and its marker are kept rather than restored. A failed
+record is resolved (`skipped` with a reason line, no ref change) when a later
+deletion of the same branch propagates, by an hourly sweep once its branch is
+gone from the mirror, or by an unscoped admin with `branch_deletion_resolve`.
 While the marker exists a refresh does not re-create the branch, and a pending
 feature-branch publication for a branch deleted on the mirror is abandoned
-instead of pushed.
+instead of pushed; its run, whose steps passed, finishes passed with the reason
+line.
 
 Ordered [promotion trains](promotion-trains.md) reuse the same repository/target
 queue. They apply native three-way merges in request order in one private checkout
