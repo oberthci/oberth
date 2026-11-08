@@ -226,6 +226,10 @@ type Config struct {
 	// start-up time (#1499). Nil selects DefaultStepStartupAllowance.
 	StepStartupAllowance *StepStartupAllowance
 
+	// Assist is the agent-assisted continuation policy (Helm assist.*).
+	// Disabled by default; see assist_hold.go.
+	Assist AssistConfig
+
 	// StalledRunTimeout bounds an admitted workflow without a scheduled pod or progress.
 	// Zero selects ten minutes.
 	StalledRunTimeout time.Duration
@@ -316,6 +320,9 @@ func DefaultedConfig(config Config) (Config, error) {
 // Build and allocation separately require a currently valid placement admission.
 func (config Config) Validate() error {
 	if err := config.ExecutionPlacement.validate(); err != nil {
+		return err
+	}
+	if err := config.Assist.Validate(); err != nil {
 		return err
 	}
 	if config.StalledRunTimeout < 0 {
@@ -627,6 +634,10 @@ type Request struct {
 	// branch for CI); production callers always set it from the run record.
 	RunTrigger    argoworkflow.RunTrigger
 	ScheduleEntry string
+	// Assist is the run's opt-in to agent-assisted continuation (push option
+	// oberth.assist=1 or run_rerun assist). Build honours it only for
+	// credential-free branch CI under an enabled administrator policy.
+	Assist bool
 	// Source is the exact bytes of the repository's pipeline document for
 	// this trigger, read from the immutable run workspace.
 	Source []byte
@@ -923,6 +934,9 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	applyExecutionDeadline(workflow, config, canonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo))
 	applyServerBounds(workflow, config)
 	applyStepDeadlineFloor(workflow, config.stepStartupAllowance())
+	if err := markAssistHolds(workflow, config, request, credentialed); err != nil {
+		return nil, err
+	}
 	applyServerSecurity(workflow)
 	injectServerVolumes(workflow, config, request, credentialed)
 	injectStepUsageMounts(workflow, request)
@@ -979,6 +993,9 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	}
 
 	if err := wrapStepUsage(workflow, request.legacyStepUsage); err != nil {
+		return nil, err
+	}
+	if err := injectAssistHolds(workflow); err != nil {
 		return nil, err
 	}
 	stampPodDemand(workflow, request.PodDemand)
