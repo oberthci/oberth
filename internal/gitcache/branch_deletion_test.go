@@ -432,6 +432,11 @@ func TestPropagateTreatsArchivedUpstreamAsFinal(t *testing.T) {
 	if _, err := cache.PruneBranches(t.Context(), "example", []BranchHead{{Branch: "feature/gone", SHA: featureSHA}}, false); err != nil {
 		t.Fatal(err)
 	}
+	// A repository initialised without templates (as the static Git runtime
+	// does) has no hooks directory.
+	if err := os.MkdirAll(filepath.Join(repository.upstream, "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	hook := filepath.Join(repository.upstream, "hooks", "pre-receive")
 	if err := os.WriteFile(hook, []byte("#!/bin/sh\necho 'Forgejo: Repo \"example/example\" is archived.' >&2\nexit 1\n"), 0o700); err != nil {
 		t.Fatal(err)
