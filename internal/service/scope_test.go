@@ -700,7 +700,7 @@ var toolScopeBehaviour = map[string]string{
 	"repo_remove": "mutation", "promote_grant": "mutation", "promote_grant_revoke": "mutation",
 	"schedule_list": "filtered", "schedule_pause": "mutation", "schedule_resume": "mutation", "schedule_trigger": "mutation",
 	"repo_archive": "refused", "repo_unarchive": "refused",
-	"branch_delete_many": "refused", "branch_deletion_list": "refused", "receive_outbox": "refused",
+	"branch_delete_many": "refused", "branch_deletion_list": "refused", "branch_deletion_resolve": "refused", "receive_outbox": "refused",
 	"secretstore_verify": "refused", "secretstore_plan": "refused", "secretstore_sync_receipt": "refused",
 	"audit_list": "refused",
 }

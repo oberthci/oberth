@@ -421,3 +421,62 @@ func TestPropagateDefersUntilLocalDeletionApplies(t *testing.T) {
 		t.Fatalf("marker dropped: %s", got)
 	}
 }
+
+// A forge that refuses the push because the repository is archived ends the
+// deletion at once: the upstream ref stays, the result is final, and the
+// mirror keeps both the deletion and its marker, so a refresh does not bring
+// the branch back from the read-only forge (#1500).
+func TestPropagateTreatsArchivedUpstreamAsFinal(t *testing.T) {
+	t.Parallel()
+	repository, cache, ready, featureSHA := deletionFixture(t, filepath.Join(t.TempDir(), "cache"))
+	if _, err := cache.PruneBranches(t.Context(), "example", []BranchHead{{Branch: "feature/gone", SHA: featureSHA}}, false); err != nil {
+		t.Fatal(err)
+	}
+	hook := filepath.Join(repository.upstream, "hooks", "pre-receive")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\necho 'Forgejo: Repo \"example/example\" is archived.' >&2\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	results, err := cache.PropagateBranchDeletions(t.Context(), "example", []UpstreamDeletion{{Branch: "feature/gone", OldSHA: featureSHA}})
+	if err != nil || len(results) != 1 || results[0].State != UpstreamArchived || !ArchivedUpstream(results[0].Err) {
+		t.Fatalf("propagate = %+v, %v", results, err)
+	}
+	if got := remoteRef(t, repository.upstream, "refs/heads/feature/gone"); got != featureSHA {
+		t.Fatalf("upstream changed: %s", got)
+	}
+	if got := runGitOptional(t, ready.Path, "rev-parse", "--verify", deletingRefPrefix+"feature/gone"); got != featureSHA {
+		t.Fatalf("archived deletion dropped its marker: %q", got)
+	}
+	// Another upstream change makes the next refresh materialize again.
+	if err := os.Remove(hook); err != nil {
+		t.Fatal(err)
+	}
+	newer := repository.featureCommit(t, "feature/new", "new\n")
+	runGit(t, repository.work, "push", "origin", newer+":refs/heads/feature/new")
+	if _, err := cache.Ensure(t.Context(), "example"); err != nil {
+		t.Fatal(err)
+	}
+	if got := remoteRef(t, ready.Path, "refs/heads/feature/new"); got != newer {
+		t.Fatalf("refresh did not materialize: %s", got)
+	}
+	if got := runGitOptional(t, ready.Path, "show-ref", "--verify", "refs/heads/feature/gone"); got != "" {
+		t.Fatalf("refresh re-created the deleted branch: %s", got)
+	}
+}
+
+func TestArchivedUpstreamMessage(t *testing.T) {
+	t.Parallel()
+	for message, want := range map[string]bool{
+		`remote: Forgejo: Repo "org/name" is archived.`:                    true,
+		"remote: Gitea: repo is archived\nerror: failed to push some refs": true,
+		"ERROR: This repository was archived so it is read-only.":          true,
+		"remote: rejected: protected branch":                               false,
+		"error: failed to push some refs to 'repo.git'\nis archived":       false,
+	} {
+		if got := ArchivedUpstream(errors.New(message)); got != want {
+			t.Errorf("ArchivedUpstream(%q) = %t, want %t", message, got, want)
+		}
+	}
+	if ArchivedUpstream(nil) {
+		t.Error("nil error classified as archived")
+	}
+}

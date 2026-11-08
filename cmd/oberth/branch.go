@@ -1,8 +1,8 @@
 package main
 
-// `oberth branch prune|deletions` and `oberth outbox` (#1490): remote forms of
-// the unscoped-admin MCP tools branch_delete_many, branch_deletion_list and
-// receive_outbox.
+// `oberth branch prune|deletions|resolve` and `oberth outbox` (#1490, #1500):
+// remote forms of the unscoped-admin MCP tools branch_delete_many,
+// branch_deletion_list, branch_deletion_resolve and receive_outbox.
 
 import (
 	"context"
@@ -13,12 +13,17 @@ import (
 )
 
 const branchUsage = "Usage: oberth branch prune <repository> [--merged-into <default-branch>] [--older-than <30d|72h>] [--exclude-prefix <prefix>]...\n" +
-	"         [--branch <name>=<sha>]... [--allow-unmerged] [--confirm --plan-id <id>] [--confirm-reserved <upstream/org/repo:branch>]\n" +
+	"         [--branch <name>=<sha>]... [--allow-unmerged] [--report] [--confirm --plan-id <id>] [--confirm-reserved <upstream/org/repo:branch>]\n" +
 	"         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]\n" +
 	"       oberth branch deletions [--repo <repository>] [--status pending|propagated|failed|skipped] [--batch <id>]\n" +
 	"         [--limit N] [--before N] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]\n" +
+	"       oberth branch resolve <repository> --reason <text> [--id <record-id>]...\n" +
+	"         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]\n" +
 	"prune is a dry run unless --confirm names the dry run's plan ID. Mirror refs are deleted at once;\n" +
-	"upstream deletion follows asynchronously. Read per-branch upstream state with branch deletions."
+	"upstream deletion follows asynchronously. Read per-branch upstream state with branch deletions.\n" +
+	"Each planned branch is classed merged, patch-equivalent, unique or unchecked; --report also lists\n" +
+	"the kept ones. resolve closes failed deletion records (no ref changes); without --id only those\n" +
+	"whose branch is gone from the mirror."
 
 const outboxUsage = "Usage: oberth outbox list|show|retry|abandon [<upstream/org/repo>] [--id <record-id>] [--reason <text>]\n" +
 	"         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]\n" +
@@ -43,6 +48,8 @@ func runBranch(ctx context.Context, arguments []string, output io.Writer) error 
 		return runBranchPrune(ctx, arguments[1:], output)
 	case "deletions":
 		return runBranchDeletions(ctx, arguments[1:], output)
+	case "resolve":
+		return runBranchResolve(ctx, arguments[1:], output)
 	default:
 		return fmt.Errorf("%w: %s", errUsage, branchUsage)
 	}
@@ -61,6 +68,7 @@ func runBranchPrune(ctx context.Context, arguments []string, output io.Writer) e
 	confirm := flags.Bool("confirm", false, "execute the plan named by --plan-id")
 	planID := flags.String("plan-id", "", "plan ID from the dry run")
 	confirmReserved := flags.String("confirm-reserved", "", "typed confirmation to delete one reserved branch")
+	report := flags.Bool("report", false, "dry run only: also list kept (unique or unchecked) branches")
 	var excludes, branches repeatedFlag
 	flags.Var(&excludes, "exclude-prefix", "skip branches with this prefix (repeatable)")
 	flags.Var(&branches, "branch", "explicit <name>=<expected-sha> (repeatable)")
@@ -96,6 +104,9 @@ func runBranchPrune(ctx context.Context, arguments []string, output io.Writer) e
 	}
 	if *confirm {
 		request["confirm"] = true
+	}
+	if *report {
+		request["report"] = true
 	}
 	config, err := parseMCPFlags("branch prune", transportFlags(), 0)
 	if err != nil {
@@ -146,6 +157,39 @@ func runBranchDeletions(ctx context.Context, arguments []string, output io.Write
 		return err
 	}
 	raw, err := (remoteRunCanceller{config: config}).call(ctx, "branch_deletion_list", request)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(output, strings.TrimSpace(string(raw)))
+	return err
+}
+
+func runBranchResolve(ctx context.Context, arguments []string, output io.Writer) error {
+	if wantsHelp(arguments) {
+		_, err := fmt.Fprintln(output, branchUsage)
+		return err
+	}
+	flags := flag.NewFlagSet("branch resolve", flag.ContinueOnError)
+	transportFlags := mcpTransportFlags(flags)
+	reason := flags.String("reason", "", "why the failed records are resolved")
+	var ids repeatedFlag
+	flags.Var(&ids, "id", "failed record ID from branch deletions (repeatable)")
+	positional, _, err := parseOperatorFlags(flags, arguments)
+	if err != nil {
+		return err
+	}
+	if len(positional) != 1 || positional[0] == "" || strings.TrimSpace(*reason) == "" {
+		return fmt.Errorf("%w: %s", errUsage, branchUsage)
+	}
+	request := map[string]any{"repo": positional[0], "reason": *reason}
+	if len(ids) > 0 {
+		request["ids"] = []string(ids)
+	}
+	config, err := parseMCPFlags("branch resolve", transportFlags(), 0)
+	if err != nil {
+		return err
+	}
+	raw, err := (remoteRunCanceller{config: config}).call(ctx, "branch_deletion_resolve", request)
 	if err != nil {
 		return err
 	}

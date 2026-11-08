@@ -252,24 +252,51 @@ Use oberth branch <command> --help for command flags.
 
 ```text
 Usage: oberth branch prune <repository> [--merged-into <default-branch>] [--older-than <30d|72h>] [--exclude-prefix <prefix>]...
-         [--branch <name>=<sha>]... [--allow-unmerged] [--confirm --plan-id <id>] [--confirm-reserved <upstream/org/repo:branch>]
+         [--branch <name>=<sha>]... [--allow-unmerged] [--report] [--confirm --plan-id <id>] [--confirm-reserved <upstream/org/repo:branch>]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
        oberth branch deletions [--repo <repository>] [--status pending|propagated|failed|skipped] [--batch <id>]
          [--limit N] [--before N] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+       oberth branch resolve <repository> --reason <text> [--id <record-id>]...
+         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
 prune is a dry run unless --confirm names the dry run's plan ID. Mirror refs are deleted at once;
 upstream deletion follows asynchronously. Read per-branch upstream state with branch deletions.
+Each planned branch is classed merged, patch-equivalent, unique or unchecked; --report also lists
+the kept ones. resolve closes failed deletion records (no ref changes); without --id only those
+whose branch is gone from the mirror.
 ```
 
 ## oberth branch prune
 
 ```text
 Usage: oberth branch prune <repository> [--merged-into <default-branch>] [--older-than <30d|72h>] [--exclude-prefix <prefix>]...
-         [--branch <name>=<sha>]... [--allow-unmerged] [--confirm --plan-id <id>] [--confirm-reserved <upstream/org/repo:branch>]
+         [--branch <name>=<sha>]... [--allow-unmerged] [--report] [--confirm --plan-id <id>] [--confirm-reserved <upstream/org/repo:branch>]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
        oberth branch deletions [--repo <repository>] [--status pending|propagated|failed|skipped] [--batch <id>]
          [--limit N] [--before N] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+       oberth branch resolve <repository> --reason <text> [--id <record-id>]...
+         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
 prune is a dry run unless --confirm names the dry run's plan ID. Mirror refs are deleted at once;
 upstream deletion follows asynchronously. Read per-branch upstream state with branch deletions.
+Each planned branch is classed merged, patch-equivalent, unique or unchecked; --report also lists
+the kept ones. resolve closes failed deletion records (no ref changes); without --id only those
+whose branch is gone from the mirror.
+```
+
+## oberth branch resolve
+
+```text
+Usage: oberth branch prune <repository> [--merged-into <default-branch>] [--older-than <30d|72h>] [--exclude-prefix <prefix>]...
+         [--branch <name>=<sha>]... [--allow-unmerged] [--report] [--confirm --plan-id <id>] [--confirm-reserved <upstream/org/repo:branch>]
+         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+       oberth branch deletions [--repo <repository>] [--status pending|propagated|failed|skipped] [--batch <id>]
+         [--limit N] [--before N] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+       oberth branch resolve <repository> --reason <text> [--id <record-id>]...
+         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+prune is a dry run unless --confirm names the dry run's plan ID. Mirror refs are deleted at once;
+upstream deletion follows asynchronously. Read per-branch upstream state with branch deletions.
+Each planned branch is classed merged, patch-equivalent, unique or unchecked; --report also lists
+the kept ones. resolve closes failed deletion records (no ref changes); without --id only those
+whose branch is gone from the mirror.
 ```
 
 ## oberth fragments

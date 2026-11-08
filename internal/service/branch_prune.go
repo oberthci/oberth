@@ -40,6 +40,8 @@ type BranchDeletionRecords interface {
 	FinishBranchPrune(context.Context, string, string, int64, map[string]string, map[string]any) error
 	BranchDeletions(context.Context, model.BranchDeletionFilter) ([]model.BranchDeletion, error)
 	BranchDeletionBatch(context.Context, string) ([]model.BranchDeletion, error)
+	BranchDeletionCounts(context.Context, int64) (map[string]int, error)
+	ResolveBranchDeletions(context.Context, int64, []string, string, string) ([]string, error)
 }
 
 type branchPruneArguments struct {
@@ -55,7 +57,19 @@ type branchPruneArguments struct {
 	Confirm         bool     `json:"confirm"`
 	PlanID          string   `json:"plan_id"`
 	ConfirmReserved string   `json:"confirm_reserved"`
+	Report          bool     `json:"report"`
 }
+
+// Branch classes against the default branch (#1500): merged (an ancestor),
+// patch-equivalent (every commit already applied, by git cherry), unique (at
+// least one change not in the target) or unchecked (beyond the git cherry
+// budget of one plan).
+const (
+	branchClassMerged          = "merged"
+	branchClassPatchEquivalent = "patch-equivalent"
+	branchClassUnique          = "unique"
+	branchClassUnchecked       = "unchecked"
+)
 
 type BranchPlanEntry struct {
 	Branch          string `json:"branch"`
@@ -66,6 +80,7 @@ type BranchPlanEntry struct {
 	Behind          int    `json:"behind"`
 	LastCommit      string `json:"last_commit"`
 	Reserved        bool   `json:"reserved,omitempty"`
+	Class           string `json:"class"`
 }
 
 type BranchPlanRefusal struct {
@@ -88,6 +103,9 @@ type BranchPruneResponse struct {
 	Count           int                 `json:"count"`
 	Truncated       bool                `json:"truncated,omitempty"`
 	TotalCandidates int                 `json:"total_candidates"`
+	Classes         map[string]int      `json:"classes"`
+	Kept            []BranchPlanEntry   `json:"kept,omitempty"`
+	KeptTruncated   bool                `json:"kept_truncated,omitempty"`
 	BatchID         string              `json:"batch_id,omitempty"`
 	Deleted         int                 `json:"deleted,omitempty"`
 	Skipped         []BranchPlanRefusal `json:"skipped,omitempty"`
@@ -108,6 +126,9 @@ func (service *API) branchDeleteMany(ctx context.Context, actor api.Actor, raw j
 	repository, input, plan, selected, err := service.planBranchPrune(ctx, args)
 	if err != nil {
 		return BranchPruneResponse{}, err
+	}
+	if args.Report && args.Confirm {
+		return BranchPruneResponse{}, fmt.Errorf("%w: report is a dry run; drop report to confirm", ErrInvalidInput)
 	}
 	if !args.Confirm {
 		plan.DryRun = true
@@ -232,7 +253,11 @@ func (service *API) planBranchPrune(ctx context.Context, args branchPruneArgumen
 		return model.Repository{}, "", BranchPruneResponse{}, nil, fmt.Errorf("%w: merged_into must be the default branch %q", ErrInvalidInput, inventory.DefaultBranch)
 	}
 	plan := BranchPruneResponse{Repo: input, DefaultBranch: inventory.DefaultBranch, MergedInto: inventory.Target, TargetSHA: inventory.TargetSHA,
-		Branches: []BranchPlanEntry{}, Unmerged: []BranchPlanEntry{}, Refused: []BranchPlanRefusal{}}
+		Branches: []BranchPlanEntry{}, Unmerged: []BranchPlanEntry{}, Refused: []BranchPlanRefusal{},
+		Classes: map[string]int{branchClassMerged: 0, branchClassPatchEquivalent: 0, branchClassUnique: 0, branchClassUnchecked: 0}}
+	if args.Report {
+		plan.Kept = []BranchPlanEntry{}
+	}
 	byName := make(map[string]gitcache.BranchInventoryEntry, len(inventory.Branches))
 	for _, entry := range inventory.Branches {
 		byName[entry.Branch] = entry
@@ -301,6 +326,17 @@ func (service *API) planBranchPrune(ctx context.Context, args branchPruneArgumen
 			planned.PatchEquivalent = &patch
 		}
 		mergedLike := entry.Merged || (checked && patch)
+		switch {
+		case entry.Merged:
+			planned.Class = branchClassMerged
+		case !checked:
+			planned.Class = branchClassUnchecked
+		case patch:
+			planned.Class = branchClassPatchEquivalent
+		default:
+			planned.Class = branchClassUnique
+		}
+		plan.Classes[planned.Class]++
 		plan.TotalCandidates++
 		switch {
 		case mergedLike:
@@ -320,6 +356,12 @@ func (service *API) planBranchPrune(ctx context.Context, args branchPruneArgumen
 		case explicit:
 			plan.Refused = append(plan.Refused, BranchPlanRefusal{Branch: entry.Branch, ExpectedSHA: entry.SHA, HeadSHA: entry.SHA,
 				Reason: fmt.Sprintf("not merged into %s (%d commit(s) ahead); set allow_unmerged to delete it", inventory.Target, entry.Ahead)})
+		case args.Report:
+			if len(plan.Kept) >= branchPruneMaxEntries {
+				plan.KeptTruncated = true
+				continue
+			}
+			plan.Kept = append(plan.Kept, planned)
 		}
 	}
 	plan.Count = len(selected)
@@ -405,6 +447,7 @@ func (service *API) branchDeletionList(ctx context.Context, actor api.Actor, raw
 	}
 	var records []model.BranchDeletion
 	var err error
+	var repoID int64
 	if args.Limit <= 0 || args.Limit > 200 {
 		args.Limit = 50
 	}
@@ -420,7 +463,7 @@ func (service *API) branchDeletionList(ctx context.Context, actor api.Actor, raw
 			if lookupErr != nil {
 				return nil, lookupErr
 			}
-			filter.RepoID = repository.ID
+			filter.RepoID, repoID = repository.ID, repository.ID
 		}
 		records, err = service.branchDeletions.BranchDeletions(ctx, filter)
 	}
@@ -428,7 +471,7 @@ func (service *API) branchDeletionList(ctx context.Context, actor api.Actor, raw
 		return nil, err
 	}
 	views := make([]BranchDeletionView, 0, len(records))
-	counts := map[string]int{}
+	pageCounts := map[string]int{}
 	for _, record := range records {
 		view := BranchDeletionView{ID: record.ID, Repo: record.Repository, Branch: record.Branch, OldSHA: record.OldSHA, Actor: record.Actor,
 			Source: record.Source, BatchID: record.BatchID, Status: string(record.Status), Attempts: record.Attempts, Error: record.Error,
@@ -436,10 +479,19 @@ func (service *API) branchDeletionList(ctx context.Context, actor api.Actor, raw
 		if record.Status == model.BranchDeletionPending && !record.RetryAfter.IsZero() {
 			view.RetryAfter = record.RetryAfter.Format(time.RFC3339)
 		}
-		counts[view.Status]++
+		pageCounts[view.Status]++
 		views = append(views, view)
 	}
-	result := map[string]any{"deletions": views, "counts": counts}
+	// counts covers every record of the repository (or of all of them), or
+	// the whole batch; page_counts covers only the returned page.
+	counts := pageCounts
+	if args.Batch == "" {
+		counts, err = service.branchDeletions.BranchDeletionCounts(ctx, repoID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	result := map[string]any{"deletions": views, "counts": counts, "page_counts": pageCounts}
 	if args.Batch == "" && len(views) == args.Limit {
 		result["next_before"] = views[len(views)-1].Sequence
 	}

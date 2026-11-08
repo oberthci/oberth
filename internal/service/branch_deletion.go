@@ -24,12 +24,20 @@ const (
 	branchDeletionBatchLimit  = 2000
 	branchDeletionActor       = "oberth:branch-deletion"
 	branchDeletionAuditNames  = 50
+	// Failed records whose branch is gone from the mirror are resolved at
+	// most this often; each sweep reads one bounded page of failed records.
+	branchDeletionSweepInterval = time.Hour
+	branchDeletionSweepLimit    = 500
+	absentBranchReason          = "branch no longer exists on the mirror"
+	archivedUpstreamReason      = "upstream archived: the forge refuses pushes; mirror deletion kept, upstream left unchanged"
 )
 
 type BranchDeletionStore interface {
 	DueBranchDeletions(context.Context, time.Time, int) ([]model.BranchDeletion, error)
 	UpdateBranchDeletions(context.Context, []model.BranchDeletionUpdate) error
 	QualifiedRepoName(context.Context, int64) (string, error)
+	BranchDeletions(context.Context, model.BranchDeletionFilter) ([]model.BranchDeletion, error)
+	ResolveBranchDeletions(context.Context, int64, []string, string, string) ([]string, error)
 }
 
 type BranchDeletionGit interface {
@@ -46,6 +54,7 @@ type BranchDeletionPropagator struct {
 	wake    chan struct{}
 	now     func() time.Time
 	budget  time.Duration
+	swept   time.Time
 }
 
 func NewBranchDeletionPropagator(database BranchDeletionStore, git BranchDeletionGit, auditor Auditor, gate func(context.Context) error, logger *log.Logger) (*BranchDeletionPropagator, error) {
@@ -113,7 +122,79 @@ func (p *BranchDeletionPropagator) Propagate(ctx context.Context) (int, error) {
 			errs = append(errs, err)
 		}
 	}
+	if now := p.now(); ctx.Err() == nil && now.Sub(p.swept) >= branchDeletionSweepInterval {
+		p.swept = now
+		if err := p.resolveAbsentFailed(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	return finished, errors.Join(errs...)
+}
+
+// resolveAbsentFailed closes failed records whose branch no longer exists on
+// the mirror (deleted again, or never restored): nothing is left to clean up.
+// A failed record whose branch is still on the mirror stays failed until an
+// operator resolves it or a later deletion of the branch propagates.
+func (p *BranchDeletionPropagator) resolveAbsentFailed(ctx context.Context) error {
+	reader, ok := p.git.(mirrorBranchReader)
+	if !ok {
+		return nil
+	}
+	failed, err := p.store.BranchDeletions(ctx, model.BranchDeletionFilter{Status: model.BranchDeletionFailed, Limit: branchDeletionSweepLimit})
+	if err != nil {
+		return fmt.Errorf("list failed branch deletions: %w", err)
+	}
+	var order []int64
+	byRepo := make(map[int64][]model.BranchDeletion)
+	for _, record := range failed {
+		if _, seen := byRepo[record.RepoID]; !seen {
+			order = append(order, record.RepoID)
+		}
+		byRepo[record.RepoID] = append(byRepo[record.RepoID], record)
+	}
+	var errs []error
+	for _, repoID := range order {
+		input, err := p.store.QualifiedRepoName(ctx, repoID)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("resolve repository %d: %w", repoID, err))
+			continue
+		}
+		absent, _, err := absentFailedDeletions(ctx, reader, input, byRepo[repoID])
+		if err == nil && len(absent) > 0 {
+			_, err = p.store.ResolveBranchDeletions(ctx, repoID, absent, branchDeletionActor, absentBranchReason)
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("resolve failed deletions of %s: %w", input, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// absentFailedDeletions splits failed records of one repository into those
+// whose branch is gone from the mirror and those whose branch is present.
+func absentFailedDeletions(ctx context.Context, reader mirrorBranchReader, input string, records []model.BranchDeletion) ([]string, []model.BranchDeletion, error) {
+	exists := make(map[string]bool)
+	var absent []string
+	var present []model.BranchDeletion
+	for _, record := range records {
+		if record.Status != model.BranchDeletionFailed {
+			continue
+		}
+		found, checked := exists[record.Branch]
+		if !checked {
+			var err error
+			if found, err = reader.MirrorBranchExists(ctx, input, record.Branch); err != nil {
+				return nil, nil, err
+			}
+			exists[record.Branch] = found
+		}
+		if found {
+			present = append(present, record)
+		} else {
+			absent = append(absent, record.ID)
+		}
+	}
+	return absent, present, nil
 }
 
 func (p *BranchDeletionPropagator) propagateRepository(ctx context.Context, deletions []model.BranchDeletion) (int, error) {
@@ -155,6 +236,11 @@ func (p *BranchDeletionPropagator) propagateRepository(ctx context.Context, dele
 			update.Status = model.BranchDeletionPropagated
 		case gitcache.UpstreamSkipped:
 			update.Status, update.Error = model.BranchDeletionSkipped, message
+		case gitcache.UpstreamArchived:
+			// Final, and not abandoned: restoring the mirror branch would
+			// undo an accepted cleanup the read-only forge can never apply.
+			update.Status = model.BranchDeletionSkipped
+			update.Error = archivedUpstreamReason + "; last: " + message
 		case gitcache.UpstreamRetry:
 			if update.Attempts >= branchDeletionMaxAttempts {
 				update.Status = model.BranchDeletionFailed
