@@ -9,6 +9,7 @@ import (
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/utils/ptr"
 
@@ -158,5 +159,27 @@ func TestWorkflowDeadlineObservationOnlyUsesOwnedPods(t *testing.T) {
 	result, err = controller.ObserveScheduling(t.Context(), "wf", "run", "sha")
 	if err != nil || result.State == "deadline_exceeded" || workflowDeadlineExceeded(workflow) {
 		t.Fatal("a successful retry inherited an earlier attempt's deadline failure")
+	}
+}
+
+func TestStepDeadlineFloorKeepsIntOrStringForm(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		in   intstr.IntOrString
+		want intstr.IntOrString
+	}{
+		{"int", intstr.FromInt32(60), intstr.FromInt32(180)},
+		{"string", intstr.FromString("60"), intstr.FromString("180")},
+		// A floored value past int32 cannot stay an integer; it keeps its digits.
+		{"int32 overflow", intstr.FromInt32(1<<31 - 100), intstr.FromString("2147484148")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			in := test.in
+			workflow := &wfv1.Workflow{Spec: wfv1.WorkflowSpec{Templates: []wfv1.Template{{Name: "main", ActiveDeadlineSeconds: &in}}}}
+			applyStepDeadlineFloor(workflow, DefaultStepStartupAllowance)
+			if got := workflow.Spec.Templates[0].ActiveDeadlineSeconds; got == nil || *got != test.want {
+				t.Fatalf("floored deadline = %#v, want %#v", got, test.want)
+			}
+		})
 	}
 }
