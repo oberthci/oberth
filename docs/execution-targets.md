@@ -3,7 +3,11 @@
 One Oberth control plane continues to own Git ingress, runs, admission, grants,
 logs, results and publication. `--argo-execution-target-config` optionally loads
 one administrator-owned branch target. Without this file, new runs use the
-existing local engine. Previously bound remote runs still require their original
+existing local engine. In Helm, `argo.executionTargetConfigMap` names an
+existing ConfigMap whose `config.json` key is this policy, mounted read-only at
+`/etc/oberth/execution-target`; the optional `argo.executionTargetCredentialsSecret`
+mounts an existing Secret read-only at `/etc/oberth/execution-target-credentials`
+for the policy's absolute `kubeconfig` path. Previously bound remote runs still require their original
 bundle after restart; removing configuration never redirects them locally.
 
 The JSON object has schema `oberth.execution-target/v1`, a nonempty `id` other

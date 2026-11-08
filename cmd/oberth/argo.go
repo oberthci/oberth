@@ -81,6 +81,7 @@ func buildArgoEngine(
 	if err != nil {
 		return nil, err
 	}
+	stepStartupAllowance := options.stepStartupAllowance
 	config := argojob.Config{
 		ExecutionPlacement:         placementConfig,
 		ReleaseWIF:                 wifConfig,
@@ -112,6 +113,8 @@ func buildArgoEngine(
 		CICacheRoot:            options.ciCacheRoot,
 		ReleaseCacheRoot:       options.releaseCacheRoot,
 		WorkflowTimeout:        options.argoWorkflowTimeout,
+		DefaultWorkflowTimeout: options.argoDefaultWorkflowTimeout,
+		StepStartupAllowance:   &stepStartupAllowance,
 		StalledRunTimeout:      options.admissionStallTimeout,
 		PerRepoWorkflowTimeout: repoTimeouts,
 		// #nosec G115 -- validateServeOptions bounds argoWorkflowTTL to a positive int32.

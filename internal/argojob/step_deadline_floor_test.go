@@ -49,8 +49,8 @@ spec:
 
 func TestStepStartAllowanceBounds(t *testing.T) {
 	for declared, want := range map[int64]int64{4: 124, 60: 180, 180: 300, 300: 450, 1200: 1800, 3600: 4200} {
-		if got := FlooredStepDeadline(declared); got != want {
-			t.Fatalf("FlooredStepDeadline(%d) = %d, want %d", declared, got, want)
+		if got := DefaultStepStartupAllowance.Floored(declared); got != want {
+			t.Fatalf("DefaultStepStartupAllowance.Floored(%d) = %d, want %d", declared, got, want)
 		}
 	}
 }
@@ -67,7 +67,7 @@ func TestBuildFloorsStepDeadlinesAndRecordsDeclaredBudget(t *testing.T) {
 		byName[wf.Spec.Templates[i].Name] = &wf.Spec.Templates[i]
 	}
 	fmtTemplate := byName["fmt"]
-	if fmtTemplate.ActiveDeadlineSeconds == nil || fmtTemplate.ActiveDeadlineSeconds.String() != "300" || fmtTemplate.Metadata.Annotations[StepDeadlineAnnotation] != "180" {
+	if fmtTemplate.ActiveDeadlineSeconds == nil || fmtTemplate.ActiveDeadlineSeconds.String() != "300" || fmtTemplate.Metadata.Annotations[StepDeadlineAnnotation] != "180" || fmtTemplate.Metadata.Annotations[StepStartAllowanceAnnotation] != "120" {
 		t.Fatalf("fmt deadline %v annotations %v", fmtTemplate.ActiveDeadlineSeconds, fmtTemplate.Metadata.Annotations)
 	}
 	inline := byName["main"].DAG.Tasks[1].Inline
@@ -83,9 +83,100 @@ func TestBuildFloorsStepDeadlinesAndRecordsDeclaredBudget(t *testing.T) {
 }
 
 func TestStepDeadlineAnnotationIsServerOwned(t *testing.T) {
-	source := strings.Replace(stepDeadlineDocument, "    - name: open\n      container:", "    - name: open\n      metadata:\n        annotations:\n          oberth.ci/step-deadline-seconds: \"999\"\n      container:", 1)
-	if _, err := Build(testConfig(), testRequest(pipeline.TriggerCI, source)); err == nil || !strings.Contains(err.Error(), "annotations is assigned by Oberth") {
-		t.Fatalf("repository-authored step deadline annotation admitted: %v", err)
+	for _, annotation := range []string{StepDeadlineAnnotation, StepStartAllowanceAnnotation} {
+		source := strings.Replace(stepDeadlineDocument, "    - name: open\n      container:", "    - name: open\n      metadata:\n        annotations:\n          "+annotation+": \"999\"\n      container:", 1)
+		if _, err := Build(testConfig(), testRequest(pipeline.TriggerCI, source)); err == nil || !strings.Contains(err.Error(), "annotations is assigned by Oberth") {
+			t.Fatalf("repository-authored %s admitted: %v", annotation, err)
+		}
+	}
+}
+
+// The administrator owns the allowance: factor, floor and ceiling are
+// configurable, zero disables it, and the defaults are unchanged.
+func TestStepStartupAllowanceIsConfigurable(t *testing.T) {
+	custom := StepStartupAllowance{FactorPercent: 100, MinSeconds: 30, MaxSeconds: 900}
+	for declared, want := range map[int64]int64{10: 40, 60: 120, 600: 1200, 1200: 2100, 1 << 62: 1<<62 + 900} {
+		if got := custom.Floored(declared); got != want {
+			t.Fatalf("custom Floored(%d) = %d, want %d", declared, got, want)
+		}
+	}
+	for _, off := range []StepStartupAllowance{{}, {FactorPercent: 50, MinSeconds: 0, MaxSeconds: 0}} {
+		if got := off.Floored(180); got != 180 {
+			t.Fatalf("disabled allowance %+v widened 180 to %d", off, got)
+		}
+	}
+	if got := (StepStartupAllowance{MinSeconds: 90, MaxSeconds: 90}).Floored(3600); got != 3690 {
+		t.Fatalf("fixed allowance = %d", got)
+	}
+	if (1<<63 - 1) != (StepStartupAllowance{FactorPercent: 400, MaxSeconds: 3600}).Floored(1<<63-1) {
+		t.Fatal("unbounded declared value overflowed")
+	}
+	for _, invalid := range []StepStartupAllowance{
+		{FactorPercent: -1, MaxSeconds: 600}, {FactorPercent: 401, MaxSeconds: 600},
+		{MinSeconds: -1, MaxSeconds: 600}, {MaxSeconds: 3601}, {MinSeconds: 601, MaxSeconds: 600},
+	} {
+		config := testConfig()
+		config.StepStartupAllowance = &invalid
+		if config.Validate() == nil {
+			t.Fatalf("invalid allowance accepted: %+v", invalid)
+		}
+	}
+
+	config := testConfig()
+	config.StepStartupAllowance = &custom
+	wf, err := Build(config, testRequest(pipeline.TriggerCI, stepDeadlineDocument))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, template := range wf.Spec.Templates {
+		if template.Name == "fmt" && (template.ActiveDeadlineSeconds.String() != "360" || template.Metadata.Annotations[StepStartAllowanceAnnotation] != "180") {
+			t.Fatalf("custom allowance not applied: %v %v", template.ActiveDeadlineSeconds, template.Metadata.Annotations)
+		}
+	}
+
+	config.StepStartupAllowance = &StepStartupAllowance{}
+	wf, err = Build(config, testRequest(pipeline.TriggerCI, stepDeadlineDocument))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, template := range wf.Spec.Templates {
+		if template.Name == "fmt" && (template.ActiveDeadlineSeconds.String() != "180" || template.Metadata.Annotations[StepDeadlineAnnotation] != "" || template.Metadata.Annotations[StepStartAllowanceAnnotation] != "") {
+			t.Fatalf("disabled allowance changed the step: %v %v", template.ActiveDeadlineSeconds, template.Metadata.Annotations)
+		}
+	}
+}
+
+// Classification reads the allowance Build recorded, not the server's current
+// setting, so a values change never reclassifies Pods already running.
+func TestStartupDeadlineUsesTheRecordedAllowance(t *testing.T) {
+	wf, node, pod := startupDeadlineFixture(180, 39*time.Second, 137)
+	pod.Annotations[StepStartAllowanceAnnotation] = "30"
+	pod.Spec.ActiveDeadlineSeconds = ptr.To(int64(210))
+	finished := pod.Status.ContainerStatuses[0].State.Terminated.FinishedAt
+	pod.Status.StartTime = ptr.To(metav1.NewTime(finished.Add(-210 * time.Second)))
+	if reason := podStartupDeadlineReason(wf, node, pod, "test", "test"); !model.IsStartupDeadlineReason(reason) {
+		t.Fatal("a Pod floored by a non-default allowance was not classified")
+	}
+}
+
+// A document without its own workflow deadline gets the administrator's
+// default, still capped by the workflow ceiling.
+func TestDefaultWorkflowTimeoutIsConfigurable(t *testing.T) {
+	config := testConfig()
+	config.DefaultWorkflowTimeout = 45 * time.Minute
+	if got := config.ExecutionTimeout("", nil); got != 45*time.Minute {
+		t.Fatalf("default workflow timeout = %s", got)
+	}
+	config.WorkflowTimeout = 20 * time.Minute
+	if got := config.ExecutionTimeout("", nil); got != 20*time.Minute {
+		t.Fatalf("default not capped by the ceiling: %s", got)
+	}
+	config.DefaultWorkflowTimeout = 1500 * time.Millisecond
+	if config.Validate() == nil {
+		t.Fatal("fractional default workflow timeout accepted")
+	}
+	if got := testConfig().ExecutionTimeout("", nil); got != DefaultExecutionTimeout {
+		t.Fatalf("unset default = %s", got)
 	}
 }
 
@@ -94,8 +185,9 @@ func startupDeadlineFixture(declared int64, runtime time.Duration, exit int32) (
 	wf, node, pod, _ := diagnosticFixture()
 	pod.Status.Phase, pod.Status.Reason = corev1.PodFailed, "DeadlineExceeded"
 	pod.Status.Message = "Pod was active on the node longer than the specified deadline"
-	pod.Spec.ActiveDeadlineSeconds = ptr.To(FlooredStepDeadline(declared))
+	pod.Spec.ActiveDeadlineSeconds = ptr.To(DefaultStepStartupAllowance.Floored(declared))
 	pod.Annotations[StepDeadlineAnnotation] = strconv.FormatInt(declared, 10)
+	pod.Annotations[StepStartAllowanceAnnotation] = strconv.FormatInt(DefaultStepStartupAllowance.Seconds(declared), 10)
 	terminated := pod.Status.ContainerStatuses[0].State.Terminated
 	terminated.Reason, terminated.ExitCode = "Error", exit
 	if exit == 0 {
@@ -104,7 +196,7 @@ func startupDeadlineFixture(declared int64, runtime time.Duration, exit int32) (
 	terminated.FinishedAt = metav1.NewTime(terminated.StartedAt.Add(runtime))
 	// The Pod deadline stopped main: the Pod started one floored deadline
 	// before main finished.
-	pod.Status.StartTime = ptr.To(metav1.NewTime(terminated.FinishedAt.Add(-time.Duration(FlooredStepDeadline(declared)) * time.Second)))
+	pod.Status.StartTime = ptr.To(metav1.NewTime(terminated.FinishedAt.Add(-time.Duration(DefaultStepStartupAllowance.Floored(declared)) * time.Second)))
 	node.Outputs.ExitCode = ptr.To(strconv.Itoa(int(exit)))
 	node.Message = pod.Status.Message
 	wf.Status.Nodes[node.ID] = node
@@ -152,6 +244,12 @@ func TestStartupDeadlineRequiresServerBudgetAndStepScope(t *testing.T) {
 		// Argo lowered the Pod deadline to the remaining workflow budget.
 		"capped by workflow": func(_ *wfv1.Workflow, p *corev1.Pod) { p.Spec.ActiveDeadlineSeconds = ptr.To(int64(60)) },
 		"no server budget":   func(_ *wfv1.Workflow, p *corev1.Pod) { delete(p.Annotations, StepDeadlineAnnotation) },
+		"no recorded allowance": func(_ *wfv1.Workflow, p *corev1.Pod) {
+			delete(p.Annotations, StepStartAllowanceAnnotation)
+		},
+		"allowance does not match the Pod deadline": func(_ *wfv1.Workflow, p *corev1.Pod) {
+			p.Annotations[StepStartAllowanceAnnotation] = "119"
+		},
 		"workflow deadline": func(w *wfv1.Workflow, _ *corev1.Pod) {
 			w.Status.Message = model.ExecutionDeadlineMessage
 		},

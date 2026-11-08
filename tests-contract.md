@@ -408,6 +408,16 @@ exhausts the bounded attempts. Prune plans, stale confirmation, merged-only,
 reserved-branch and typed-confirmation refusals, per-batch audit and outbox repair
 have their own tests.
 
+Scheduling and placement Helm values: `TestStepStartupAllowanceIsConfigurable`
+covers factor, floor, ceiling, disabling, overflow and bounds;
+`TestStartupDeadlineUsesTheRecordedAllowance` classifies from the recorded
+allowance, not the current setting; `TestDefaultWorkflowTimeoutIsConfigurable`;
+`TestServeStepStartupAllowanceFlags`;
+`TestChartSchedulingValuesDefaultToBinaryDefaults` parses the default chart's
+args and requires them to equal the binary defaults;
+`TestChartSchedulingValuesReachTheServer` round-trips each value and refuses
+out-of-range values; chart unittest `execution_target_test.yaml`.
+
 Step deadline start-up allowance #1499: `TestBuildFloorsStepDeadlinesAndRecordsDeclaredBudget`
 checks the floored Pod deadline and server-owned declared budget on named and
 inline leaves, `TestStepDeadlineAnnotationIsServerOwned` refuses a repository

@@ -218,6 +218,14 @@ type Config struct {
 	// WorkflowTimeout caps the document's own spec.activeDeadlineSeconds.
 	WorkflowTimeout time.Duration
 
+	// DefaultWorkflowTimeout is the deadline of a document that declares none,
+	// still capped by WorkflowTimeout. Zero selects DefaultExecutionTimeout.
+	DefaultWorkflowTimeout time.Duration
+
+	// StepStartupAllowance widens literal step deadlines by bounded Pod
+	// start-up time (#1499). Nil selects DefaultStepStartupAllowance.
+	StepStartupAllowance *StepStartupAllowance
+
 	// StalledRunTimeout bounds an admitted workflow without a scheduled pod or progress.
 	// Zero selects ten minutes.
 	StalledRunTimeout time.Duration
@@ -274,6 +282,9 @@ func (config *Config) applyDefaults() {
 	if config.WorkflowTimeout <= 0 {
 		config.WorkflowTimeout = defaultWorkflowTimeout
 	}
+	if config.DefaultWorkflowTimeout <= 0 {
+		config.DefaultWorkflowTimeout = DefaultExecutionTimeout
+	}
 	if config.TTLSeconds <= 0 {
 		config.TTLSeconds = defaultTTLSeconds
 	}
@@ -286,6 +297,13 @@ func (config *Config) applyDefaults() {
 	if config.MaxRunLogBytes <= 0 {
 		config.MaxRunLogBytes = runlog.DefaultRunLimitBytes
 	}
+}
+
+func (config Config) stepStartupAllowance() StepStartupAllowance {
+	if config.StepStartupAllowance == nil {
+		return DefaultStepStartupAllowance
+	}
+	return *config.StepStartupAllowance
 }
 
 // DefaultedConfig freezes the same defaults used by the native controller.
@@ -305,6 +323,14 @@ func (config Config) Validate() error {
 	}
 	if config.WorkflowTimeout > 0 && (config.WorkflowTimeout < time.Second || config.WorkflowTimeout%time.Second != 0) {
 		return errors.New("argojob: workflow timeout must use whole positive seconds")
+	}
+	if config.DefaultWorkflowTimeout > 0 && (config.DefaultWorkflowTimeout < time.Second || config.DefaultWorkflowTimeout%time.Second != 0) {
+		return errors.New("argojob: default workflow timeout must use whole positive seconds")
+	}
+	if config.StepStartupAllowance != nil {
+		if err := config.StepStartupAllowance.Validate(); err != nil {
+			return err
+		}
 	}
 	for repo, cap := range config.PerRepoWorkflowTimeout {
 		if len(strings.Split(repo, "/")) != 3 || cap < time.Second || cap%time.Second != 0 {
@@ -890,7 +916,7 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	}
 	applyExecutionDeadline(workflow, config, canonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo))
 	applyServerBounds(workflow, config)
-	applyStepDeadlineFloor(workflow)
+	applyStepDeadlineFloor(workflow, config.stepStartupAllowance())
 	applyServerSecurity(workflow)
 	injectServerVolumes(workflow, config, request, credentialed)
 	injectStepUsageMounts(workflow, request)

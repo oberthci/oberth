@@ -73,7 +73,8 @@ The intentionally gated executor identity holder binds the credential lifetime
 to the owned Workflow. The real step's token waiter retries issuance once after
 two minutes, then fails after another two minutes without readiness. A workflow
 that has never scheduled a workload Pod and has no progress fails after ten
-minutes by default; `--admission-stall-timeout` configures that startup bound.
+minutes by default; `--admission-stall-timeout` (Helm `admission.stallTimeout`)
+configures that startup bound.
 An owned Pending Pod with the scheduler's `Unschedulable: Insufficient cpu`,
 `Insufficient memory`, `Insufficient ephemeral-storage`, `Too many pods`, or a
 qualified extended-resource shortage suspends this clock. Kubernetes owns that

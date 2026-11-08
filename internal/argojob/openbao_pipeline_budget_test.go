@@ -23,7 +23,7 @@ func TestOpenBaoPipelinePhasesPreserveTestsAndStopOnFailure(t *testing.T) {
 		if leaf.Name != "test-openbao" {
 			continue
 		}
-		if leaf.ActiveDeadlineSeconds == nil || int64(leaf.ActiveDeadlineSeconds.IntValue()) != FlooredStepDeadline(45+600+120+26) || leaf.Metadata.Annotations[StepDeadlineAnnotation] != "791" || leaf.Script.Resources.Limits.Memory().Value() < 4<<30 || leaf.Script.Resources.Requests.Memory().Value() < 2<<30 || leaf.Script.Resources.Limits.Cpu().MilliValue() < 2000 {
+		if leaf.ActiveDeadlineSeconds == nil || int64(leaf.ActiveDeadlineSeconds.IntValue()) != DefaultStepStartupAllowance.Floored(45+600+120+26) || leaf.Metadata.Annotations[StepDeadlineAnnotation] != "791" || leaf.Script.Resources.Limits.Memory().Value() < 4<<30 || leaf.Script.Resources.Requests.Memory().Value() < 2<<30 || leaf.Script.Resources.Limits.Cpu().MilliValue() < 2000 {
 			t.Fatal("outer resources fell below the retained phase budgets")
 		}
 		script = leaf.Script.Source

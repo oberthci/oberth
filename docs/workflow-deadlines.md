@@ -2,9 +2,12 @@
 
 A repository's `spec.activeDeadlineSeconds` is retained on the submitted Argo
 Workflow, capped by the administrator's `--argo-workflow-timeout` ceiling
-(default 12 hours). An omitted deadline receives a 30-minute server default.
-The repeatable administrator flag `--argo-repo-workflow-timeout
-forge/org/repo=20m` caps that canonical repository independently; a repository
+(Helm `argo.workflowTimeout`, default 12 hours). An omitted deadline receives
+the server default `--argo-default-workflow-timeout` (Helm
+`argo.defaultWorkflowTimeout`, default 30 minutes), still capped by the
+ceiling. The repeatable administrator flag `--argo-repo-workflow-timeout
+forge/org/repo=20m` (Helm `argo.repoWorkflowTimeouts`, a map of
+`upstream/org/repo` to duration) caps that canonical repository independently; a repository
 cannot raise its cap, and caps never raise the global ceiling. Explicit zero
 or negative deadlines remain invalid.
 Oberth's branch CI declares 5400 seconds. Retrying an ambiguous submission
@@ -107,12 +110,29 @@ were killed at a 180-second limit. Oberth therefore treats a template's literal
 `activeDeadlineSeconds` as the budget of the step command and submits the Pod
 with a bounded start-up allowance on top:
 
-    pod deadline = declared + clamp(declared / 2, 120s, 600s)
+    pod deadline = declared + clamp(declared * factorPercent / 100, minSeconds, maxSeconds)
 
-so 60s becomes 180s, 180s becomes 300s and 3600s becomes 4200s. The declared
-value is recorded on the step Pod as the server-owned annotation
-`oberth.ci/step-deadline-seconds`; admission refuses a repository-authored
-copy. The workflow deadline is unchanged and still bounds the whole run, and
+With the defaults (50%, 120s, 600s) 60s becomes 180s, 180s becomes 300s and
+3600s becomes 4200s. The allowance is administrator-owned Helm configuration:
+
+```yaml
+admission:
+  stepStartupAllowance:
+    enabled: true      # false submits step deadlines exactly as declared
+    factorPercent: 50  # 0-400
+    minSeconds: 120    # 0-3600, at most maxSeconds
+    maxSeconds: 600    # 0-3600; 0 also disables the allowance
+```
+
+rendered as `--admission-step-startup-allowance-percent`, `-min-seconds` and
+`-max-seconds`; the server refuses values outside these bounds at startup.
+The declared value and the applied allowance are recorded on the step Pod as
+the server-owned annotations `oberth.ci/step-deadline-seconds` and
+`oberth.ci/step-start-allowance-seconds`; admission refuses a
+repository-authored copy of either. Classification compares the Pod deadline
+with these recorded values, so changing the setting never reclassifies Pods
+already running. With the allowance disabled no annotations are written and
+only the exit-0 rule below applies. The workflow deadline is unchanged and still bounds the whole run, and
 Argo still lowers a Pod deadline to the remaining workflow budget.
 
 When a step Pod is killed by its own deadline (`DeadlineExceeded`), Oberth
@@ -124,7 +144,8 @@ reads the owned Pod's `main` container:
   rewritten by the kubelet to `ContainerStatusUnknown` with exit 137, no
   container and no start time), or the Pod deadline stopped `main` (it
   finished at the Pod deadline) before it ran the declared budget recorded
-  beside the exact floored Pod deadline: start-up consumed the allowance.
+  beside the exact floored Pod deadline (declared plus recorded allowance):
+  start-up consumed the allowance.
 
 A `main` container that exited nonzero on its own before the Pod deadline, was
 killed for memory, or never started because of an image or configuration error

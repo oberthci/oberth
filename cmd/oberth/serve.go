@@ -120,6 +120,7 @@ type serveOptions struct {
 	admissionSizeWeights    string
 	admissionMaxHeadWait    time.Duration
 	admissionStallTimeout   time.Duration
+	stepStartupAllowance    argojob.StepStartupAllowance
 	sizeWeights             service.SizeWeights
 	ciCacheRoot             string
 	releaseCacheRoot        string
@@ -155,6 +156,7 @@ type serveOptions struct {
 	argoReleaseWIFConfig         string
 	argoReleaseTagRoutesConfig   string
 	argoWorkflowTimeout          time.Duration
+	argoDefaultWorkflowTimeout   time.Duration
 	argoRepoWorkflowTimeouts     []string
 	argoWorkflowTTL              int
 	argoResourceSamplerConfig    string
@@ -274,6 +276,9 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.Float64Var(&options.admissionPressure.Hysteresis, "admission-pressure-hysteresis", 10, "deprecated compatibility option; ignored by workflow admission")
 	flags.DurationVar(&options.admissionPressure.MaxDefer, "admission-pressure-max-defer", 20*time.Minute, "deprecated compatibility option; ignored by workflow admission")
 
+	flags.Int64Var(&options.stepStartupAllowance.FactorPercent, "admission-step-startup-allowance-percent", argojob.DefaultStepStartupAllowance.FactorPercent, "Pod start-up allowance added to each declared step deadline, as a percentage of that deadline (0-400; #1499)")
+	flags.Int64Var(&options.stepStartupAllowance.MinSeconds, "admission-step-startup-allowance-min-seconds", argojob.DefaultStepStartupAllowance.MinSeconds, "smallest step start-up allowance in seconds (0-3600, at most the maximum)")
+	flags.Int64Var(&options.stepStartupAllowance.MaxSeconds, "admission-step-startup-allowance-max-seconds", argojob.DefaultStepStartupAllowance.MaxSeconds, "largest step start-up allowance in seconds (0-3600); 0 disables the allowance")
 	flags.Int64Var(&options.admissionDiskFloorBytes, "admission-disk-floor-bytes", 0, "when enabled and free bytes on /data are below this floor, admission is held until disk frees up (#673)")
 	flags.StringVar(&options.admissionExclusiveClasses, "admission-exclusive-classes", "", "comma-separated server-wide exclusive classes steps may declare with oberth.ci/exclusive, each class or class=limit (default limit 1); empty refuses every declaration (#1499)")
 	flags.StringVar(&options.ciCacheRoot, "ci-cache-root", "/var/cache/oberth/ci", "CI host cache root")
@@ -327,6 +332,7 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 		return nil
 	})
 	flags.DurationVar(&options.argoWorkflowTimeout, "argo-workflow-timeout", 12*time.Hour, "ceiling on a Workflow's own activeDeadlineSeconds")
+	flags.DurationVar(&options.argoDefaultWorkflowTimeout, "argo-default-workflow-timeout", argojob.DefaultExecutionTimeout, "deadline of a Workflow that declares no activeDeadlineSeconds, capped by --argo-workflow-timeout")
 	flags.IntVar(&options.argoWorkflowTTL, "argo-workflow-ttl", 3600, "finished Workflow retention in seconds")
 	flags.StringVar(&options.argoResourceSamplerConfig, "argo-resource-sampler-config", "", "administrator-owned kubelet sampler JSON config; disabled when empty")
 	flags.DurationVar(&options.promotionGrantMaxLifetime, "promotion-grant-max-lifetime", 24*time.Hour, "maximum lifetime for promotion grants (default 24h, hard ceiling 168h)")
@@ -391,6 +397,12 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	}
 	if options.admissionStallTimeout <= 0 {
 		return serveOptions{}, errors.New("serve: --admission-stall-timeout must be positive")
+	}
+	if err := options.stepStartupAllowance.Validate(); err != nil {
+		return serveOptions{}, fmt.Errorf("serve: --admission-step-startup-allowance: %w", err)
+	}
+	if options.argoDefaultWorkflowTimeout < time.Second || options.argoDefaultWorkflowTimeout%time.Second != 0 {
+		return serveOptions{}, errors.New("serve: --argo-default-workflow-timeout must use whole positive seconds")
 	}
 	classes, err := argoworkflow.ParseExclusiveClasses(options.admissionExclusiveClasses)
 	if err != nil {
