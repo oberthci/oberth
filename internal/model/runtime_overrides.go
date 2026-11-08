@@ -19,13 +19,17 @@ type ReleaseWIFOverride struct {
 	UpdatedAt time.Time       `json:"updated_at"`
 }
 
-// ReleaseWIFOverrideSpec is a validated grant or revoke request. A revoke
-// carries no grant body.
+// ReleaseWIFOverrideSpec is a validated grant, revoke or reset request. A
+// revoke carries no grant body. PreviousEffective and Effective are the
+// repository's effective entries before and after the change (nil when
+// absent), so the audit record also names a replaced or removed Helm entry.
 type ReleaseWIFOverrideSpec struct {
-	Repo    string
-	Revoked bool
-	Grant   json.RawMessage
-	Reason  string
+	Repo              string
+	Revoked           bool
+	Grant             json.RawMessage
+	Reason            string
+	PreviousEffective json.RawMessage
+	Effective         json.RawMessage
 }
 
 // AdmissionCapacityOverride is the server-owned runtime workflow ceiling. It

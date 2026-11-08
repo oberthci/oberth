@@ -18,7 +18,7 @@ func TestReleaseWIFOverrideGrantRevokeResetAudited(t *testing.T) {
 	if got, err := s.ReleaseWIFOverrides(ctx); err != nil || len(got) != 0 {
 		t.Fatalf("fresh overrides = %+v %v", got, err)
 	}
-	if _, err := s.ClearReleaseWIFOverride(ctx, "admin", repo, "nothing"); !errors.Is(err, ErrInvalidState) {
+	if _, err := s.ClearReleaseWIFOverride(ctx, "admin", model.ReleaseWIFOverrideSpec{Repo: repo, Reason: "nothing"}); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("reset without override: %v", err)
 	}
 	for _, bad := range []model.ReleaseWIFOverrideSpec{
@@ -35,14 +35,14 @@ func TestReleaseWIFOverrideGrantRevokeResetAudited(t *testing.T) {
 	if err != nil || granted.Revoked || string(granted.Grant) != `{"templates":{"publish":"image-writer"}}` || granted.Actor != "admin" {
 		t.Fatalf("grant = %+v %v", granted, err)
 	}
-	revoked, err := s.SetReleaseWIFOverride(ctx, "admin2", model.ReleaseWIFOverrideSpec{Repo: repo, Revoked: true, Reason: "retired"})
+	revoked, err := s.SetReleaseWIFOverride(ctx, "admin2", model.ReleaseWIFOverrideSpec{Repo: repo, Revoked: true, Reason: "retired", PreviousEffective: json.RawMessage(`{"service_account_name":"app-release"}`)})
 	if err != nil || !revoked.Revoked || revoked.Grant != nil || revoked.Actor != "admin2" {
 		t.Fatalf("revoke = %+v %v", revoked, err)
 	}
 	if got, err := s.ReleaseWIFOverrides(ctx); err != nil || len(got) != 1 || !got[0].Revoked {
 		t.Fatalf("overrides after revoke = %+v %v", got, err)
 	}
-	cleared, err := s.ClearReleaseWIFOverride(ctx, "admin", repo, "back to helm")
+	cleared, err := s.ClearReleaseWIFOverride(ctx, "admin", model.ReleaseWIFOverrideSpec{Repo: repo, Reason: "back to helm", PreviousEffective: json.RawMessage(`{"service_account_name":"app-release"}`), Effective: json.RawMessage(`{"service_account_name":"helm-release"}`)})
 	if err != nil || !cleared.Revoked {
 		t.Fatalf("reset = %+v %v", cleared, err)
 	}
@@ -67,6 +67,29 @@ func TestReleaseWIFOverrideGrantRevokeResetAudited(t *testing.T) {
 	}
 	if strings.Join(actions, ",") != "release_wif.grant,release_wif.revoke,release_wif.reset" {
 		t.Fatalf("audit actions = %v", actions)
+	}
+	// The effective entries record a replaced or removed Helm grant that no
+	// override row holds; an absent entry is an explicit null.
+	effective := map[string][2]string{
+		"release_wif.grant":  {`null`, `null`},
+		"release_wif.revoke": {`{"service_account_name":"app-release"}`, `null`},
+		"release_wif.reset":  {`{"service_account_name":"app-release"}`, `{"service_account_name":"helm-release"}`},
+	}
+	for action, want := range effective {
+		var details struct {
+			PreviousEffective json.RawMessage `json:"previous_effective"`
+			Effective         json.RawMessage `json:"effective"`
+		}
+		var body string
+		if err := s.db.QueryRow(`SELECT details FROM audit_actions WHERE resource_type='release_wif' AND resource_id=? AND action=?`, repo, action).Scan(&body); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal([]byte(body), &details); err != nil {
+			t.Fatal(err)
+		}
+		if string(details.PreviousEffective) != want[0] || string(details.Effective) != want[1] {
+			t.Fatalf("%s effective entries = %s -> %s, want %s -> %s", action, details.PreviousEffective, details.Effective, want[0], want[1])
+		}
 	}
 }
 

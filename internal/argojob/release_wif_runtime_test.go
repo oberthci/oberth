@@ -101,3 +101,40 @@ func TestReleaseWIFRuntimeWithoutBootMapStaysDisabled(t *testing.T) {
 		t.Fatal("disabled federation gained a runtime map")
 	}
 }
+
+// Admission refuses a release identity that is another repository's release
+// or any CI identity, even when that account is outside the WIF map, so the
+// runtime check refuses it before the grant is stored (#1497).
+func TestReleaseWIFRuntimeRefusesOtherRepositoryIdentitiesOutsideMap(t *testing.T) {
+	config := wifTestConfig()
+	delete(config.ReleaseWIF.Repositories, "github/acme/oberth")
+	runtime := NewReleaseWIFRuntime(config)
+	repo := "github/acme/other"
+	grant := func(account string) []model.ReleaseWIFOverride {
+		return []model.ReleaseWIFOverride{runtimeGrant(repo, `{"service_account_name":"`+account+`","templates":{"main":"image-writer"}}`)}
+	}
+	if err := runtime.Check(grant("oberth-per-repo")); err == nil || !strings.Contains(err.Error(), "github/acme/oberth") {
+		t.Fatalf("boot release identity of another repository accepted: %v", err)
+	}
+	if err := runtime.Check(grant("other-release")); err != nil {
+		t.Fatalf("unrelated account refused: %v", err)
+	}
+	// The live identity store replaces the boot identity maps.
+	runtime.SetIdentityStore(NewIdentityStoreWithSteps(
+		map[string]PerRepoIdentityConfig{"github/acme/third": {ServiceAccountName: "third-release"}, repo: {ServiceAccountName: "other-release"}},
+		map[string]PerRepoIdentityConfig{repo: {ServiceAccountName: "other-ci"}}, nil))
+	for _, account := range []string{"third-release", "other-ci"} {
+		if err := runtime.Check(grant(account)); err == nil {
+			t.Fatalf("%s accepted", account)
+		}
+		if inactive := runtime.Apply(grant(account)); len(inactive) != 1 {
+			t.Fatalf("%s applied: %+v", account, inactive)
+		}
+	}
+	if err := runtime.Check(grant("oberth-per-repo")); err != nil {
+		t.Fatalf("account released by the identity store still refused: %v", err)
+	}
+	if err := runtime.Check(grant("other-release")); err != nil {
+		t.Fatalf("repository's own release identity refused: %v", err)
+	}
+}

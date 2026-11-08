@@ -63,8 +63,9 @@ func releaseWIFOverrides(ctx context.Context, q interface {
 }
 
 // SetReleaseWIFOverride grants or revokes one repository's release WIF entry
-// and records the previous override in the same transaction. The caller
-// validates the grant against the boot capability map before calling.
+// and records the previous override and the previous and new effective
+// entries in the same transaction. The caller validates the grant against the
+// boot capability map before calling.
 func (s *Store) SetReleaseWIFOverride(ctx context.Context, actor string, spec model.ReleaseWIFOverrideSpec) (model.ReleaseWIFOverride, error) {
 	if strings.TrimSpace(actor) == "" || len(spec.Repo) < 5 || len(spec.Repo) > 512 || !validRuntimeOverrideReason(spec.Reason) {
 		return model.ReleaseWIFOverride{}, fmt.Errorf("%w: actor, repository and a 1..512 byte reason are required", ErrInvalid)
@@ -81,7 +82,7 @@ func (s *Store) SetReleaseWIFOverride(ctx context.Context, actor string, spec mo
 	if spec.Revoked {
 		action = "release_wif.revoke"
 	}
-	return s.changeReleaseWIFOverride(ctx, actor, spec.Repo, spec.Reason, action, func(tx *sql.Tx, now int64) error {
+	return s.changeReleaseWIFOverride(ctx, actor, spec, action, func(tx *sql.Tx, now int64) error {
 		_, err := tx.ExecContext(ctx, `INSERT INTO release_wif_overrides(repo,revoked,grant_json,reason,actor,updated_at) VALUES(?,?,?,?,?,?)
 ON CONFLICT(repo) DO UPDATE SET revoked=excluded.revoked,grant_json=excluded.grant_json,reason=excluded.reason,actor=excluded.actor,updated_at=excluded.updated_at`,
 			spec.Repo, spec.Revoked, grant, spec.Reason, actor, now)
@@ -94,13 +95,14 @@ ON CONFLICT(repo) DO UPDATE SET revoked=excluded.revoked,grant_json=excluded.gra
 }
 
 // ClearReleaseWIFOverride removes the runtime decision so the boot default
-// applies again. The audit record retains the cleared override.
-func (s *Store) ClearReleaseWIFOverride(ctx context.Context, actor, repo, reason string) (model.ReleaseWIFOverride, error) {
-	if strings.TrimSpace(actor) == "" || repo == "" || !validRuntimeOverrideReason(reason) {
+// applies again. The audit record retains the cleared override. Only Repo,
+// Reason and the effective entries of spec are used.
+func (s *Store) ClearReleaseWIFOverride(ctx context.Context, actor string, spec model.ReleaseWIFOverrideSpec) (model.ReleaseWIFOverride, error) {
+	if strings.TrimSpace(actor) == "" || spec.Repo == "" || !validRuntimeOverrideReason(spec.Reason) {
 		return model.ReleaseWIFOverride{}, fmt.Errorf("%w: actor, repository and a 1..512 byte reason are required", ErrInvalid)
 	}
-	return s.changeReleaseWIFOverride(ctx, actor, repo, reason, "release_wif.reset", func(tx *sql.Tx, _ int64) error {
-		result, err := tx.ExecContext(ctx, `DELETE FROM release_wif_overrides WHERE repo=?`, repo)
+	return s.changeReleaseWIFOverride(ctx, actor, spec, "release_wif.reset", func(tx *sql.Tx, _ int64) error {
+		result, err := tx.ExecContext(ctx, `DELETE FROM release_wif_overrides WHERE repo=?`, spec.Repo)
 		if err != nil {
 			return err
 		}
@@ -114,12 +116,13 @@ func (s *Store) ClearReleaseWIFOverride(ctx context.Context, actor, repo, reason
 	}, nil)
 }
 
-func (s *Store) changeReleaseWIFOverride(ctx context.Context, actor, repo, reason, action string, change func(*sql.Tx, int64) error, describe func(map[string]any)) (model.ReleaseWIFOverride, error) {
+func (s *Store) changeReleaseWIFOverride(ctx context.Context, actor string, spec model.ReleaseWIFOverrideSpec, action string, change func(*sql.Tx, int64) error, describe func(map[string]any)) (model.ReleaseWIFOverride, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return model.ReleaseWIFOverride{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	repo := spec.Repo
 	previous, err := scanReleaseWIFOverride(tx.QueryRowContext(ctx, releaseWIFOverrideSelect+` WHERE repo=?`, repo).Scan)
 	hadPrevious := err == nil
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -129,9 +132,17 @@ func (s *Store) changeReleaseWIFOverride(ctx context.Context, actor, repo, reaso
 	if err := change(tx, now); err != nil {
 		return model.ReleaseWIFOverride{}, err
 	}
-	details := map[string]any{"repo": repo, "reason": reason}
+	details := map[string]any{"repo": repo, "reason": spec.Reason}
 	if hadPrevious {
 		details["previous"] = previous
+	}
+	// The effective entries cover a Helm grant the change replaced or removed,
+	// which no override row records. An absent entry is recorded as null.
+	for key, value := range map[string]json.RawMessage{"previous_effective": spec.PreviousEffective, "effective": spec.Effective} {
+		if len(value) == 0 || !json.Valid(value) {
+			value = json.RawMessage("null")
+		}
+		details[key] = value
 	}
 	if describe != nil {
 		describe(details)

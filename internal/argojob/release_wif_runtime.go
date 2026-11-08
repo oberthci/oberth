@@ -19,8 +19,9 @@ import (
 // configuration: a runtime grant can only bind an existing role to a
 // repository's own release ServiceAccount. Published snapshots are immutable.
 type ReleaseWIFRuntime struct {
-	base    Config
-	current atomic.Pointer[releaseWIFRuntimeState]
+	base       Config
+	current    atomic.Pointer[releaseWIFRuntimeState]
+	identities atomic.Pointer[IdentityStore]
 }
 
 type releaseWIFRuntimeState struct {
@@ -35,6 +36,12 @@ func NewReleaseWIFRuntime(config Config) *ReleaseWIFRuntime {
 	runtime := &ReleaseWIFRuntime{base: config}
 	runtime.current.Store(&releaseWIFRuntimeState{config: config.ReleaseWIF.Clone()})
 	return runtime
+}
+
+// SetIdentityStore makes grant validation read the live per-repository
+// identities, the same maps admission authorizes against.
+func (runtime *ReleaseWIFRuntime) SetIdentityStore(store *IdentityStore) {
+	runtime.identities.Store(store)
 }
 
 // Base returns a copy of the boot capability map.
@@ -54,18 +61,8 @@ func (runtime *ReleaseWIFRuntime) State() model.ReleaseWIFState {
 	state := runtime.current.Load()
 	view := model.ReleaseWIFState{Enabled: runtime.base.ReleaseWIF != nil, Boot: map[string]json.RawMessage{}, Effective: map[string]json.RawMessage{}, Roles: []string{}}
 	view.Inactive = append(view.Inactive, state.inactive...)
-	encode := func(target map[string]json.RawMessage, config *ReleaseWIFConfig) {
-		if config == nil {
-			return
-		}
-		for repo, grant := range config.Repositories {
-			if body, err := json.Marshal(grant); err == nil {
-				target[repo] = body
-			}
-		}
-	}
-	encode(view.Boot, runtime.base.ReleaseWIF)
-	encode(view.Effective, state.config)
+	encodeReleaseWIFRepositories(view.Boot, runtime.base.ReleaseWIF)
+	encodeReleaseWIFRepositories(view.Effective, state.config)
 	if runtime.base.ReleaseWIF != nil {
 		for role := range runtime.base.ReleaseWIF.Roles {
 			view.Roles = append(view.Roles, role)
@@ -77,11 +74,32 @@ func (runtime *ReleaseWIFRuntime) State() model.ReleaseWIFState {
 
 // Check refuses a candidate override set unless every grant applies cleanly.
 func (runtime *ReleaseWIFRuntime) Check(overrides []model.ReleaseWIFOverride) error {
-	_, inactive := runtime.merge(overrides)
+	_, inactive := runtime.Preview(overrides)
 	if len(inactive) > 0 {
 		return fmt.Errorf("release WIF override for %s: %s", inactive[0].Repo, inactive[0].Error)
 	}
 	return nil
+}
+
+// Preview returns the effective map a candidate override set would publish,
+// encoded like State, and the grants it would leave inactive. It changes
+// nothing.
+func (runtime *ReleaseWIFRuntime) Preview(overrides []model.ReleaseWIFOverride) (map[string]json.RawMessage, []model.ReleaseWIFOverrideStatus) {
+	config, inactive := runtime.merge(overrides)
+	effective := map[string]json.RawMessage{}
+	encodeReleaseWIFRepositories(effective, config)
+	return effective, inactive
+}
+
+func encodeReleaseWIFRepositories(target map[string]json.RawMessage, config *ReleaseWIFConfig) {
+	if config == nil {
+		return
+	}
+	for repo, grant := range config.Repositories {
+		if body, err := json.Marshal(grant); err == nil {
+			target[repo] = body
+		}
+	}
 }
 
 // Apply publishes the effective map. Invalid stored grants are skipped and
@@ -106,6 +124,12 @@ func (runtime *ReleaseWIFRuntime) merge(overrides []model.ReleaseWIFOverride) (*
 	if merged.Repositories == nil {
 		merged.Repositories = map[string]ReleaseWIFRepository{}
 	}
+	base := runtime.base
+	if store := runtime.identities.Load(); store != nil {
+		if snapshot := store.Snapshot(); snapshot != nil {
+			base.PerRepoIdentities, base.PerRepoCIIdentities = snapshot.Release, snapshot.CI
+		}
+	}
 	for _, override := range overrides {
 		if override.Revoked {
 			delete(merged.Repositories, override.Repo)
@@ -119,7 +143,7 @@ func (runtime *ReleaseWIFRuntime) merge(overrides []model.ReleaseWIFOverride) (*
 		if err == nil {
 			candidate := merged.Clone()
 			candidate.Repositories[override.Repo] = grant
-			config := runtime.base
+			config := base
 			config.ReleaseWIF = candidate
 			if err = config.validateRuntimeReleaseWIFGrant(override.Repo, grant); err == nil {
 				merged = candidate
@@ -156,7 +180,9 @@ func decodeRuntimeReleaseWIFGrant(raw json.RawMessage) (ReleaseWIFRepository, er
 
 // The merged map must pass the same validation as a boot map. A runtime grant
 // also needs a repository ServiceAccount (it has no dedicated step identity)
-// that is none of the shared pipeline identities.
+// that is none of the shared pipeline identities, no CI identity and no other
+// repository's release identity; admission refuses those, so storing one
+// would only create a grant that can never authorize a run.
 func (config Config) validateRuntimeReleaseWIFGrant(repo string, grant ReleaseWIFRepository) error {
 	if grant.ServiceAccountName == "" {
 		return errors.New("runtime grant requires the repository's release service_account_name")
@@ -164,6 +190,16 @@ func (config Config) validateRuntimeReleaseWIFGrant(repo string, grant ReleaseWI
 	switch grant.ServiceAccountName {
 	case config.PipelineServiceAccount, config.CredentialedServiceAccount, config.CISecretsServiceAccount, config.ExecutorServiceAccount:
 		return fmt.Errorf("runtime grant for %s cannot use shared ServiceAccount %q", repo, grant.ServiceAccountName)
+	}
+	for other, identity := range config.PerRepoIdentities {
+		if other != repo && identity.ServiceAccountName == grant.ServiceAccountName {
+			return fmt.Errorf("runtime grant for %s cannot use %s's release ServiceAccount %q", repo, other, grant.ServiceAccountName)
+		}
+	}
+	for other, identity := range config.PerRepoCIIdentities {
+		if identity.ServiceAccountName == grant.ServiceAccountName {
+			return fmt.Errorf("runtime grant for %s cannot use %s's CI ServiceAccount %q", repo, other, grant.ServiceAccountName)
+		}
 	}
 	if err := config.ReleaseWIF.Validate(); err != nil {
 		return err

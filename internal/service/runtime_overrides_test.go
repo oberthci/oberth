@@ -201,3 +201,111 @@ func TestAdmissionCapacityRuntimeOverrideAppliesAndClears(t *testing.T) {
 		t.Fatalf("audit = %v", actions)
 	}
 }
+
+// cancelAfterCommit ends the request right after the store commits, as an
+// MCP client that disconnects or times out would.
+type cancelAfterCommit struct {
+	*store.Store
+	cancel context.CancelFunc
+}
+
+func (s cancelAfterCommit) SetReleaseWIFOverride(ctx context.Context, actor string, spec model.ReleaseWIFOverrideSpec) (model.ReleaseWIFOverride, error) {
+	defer s.cancel()
+	return s.Store.SetReleaseWIFOverride(ctx, actor, spec)
+}
+
+func (s cancelAfterCommit) SetAdmissionCapacityOverride(ctx context.Context, actor string, jobs int, reason string) (*model.AdmissionCapacityOverride, error) {
+	defer s.cancel()
+	return s.Store.SetAdmissionCapacityOverride(ctx, actor, jobs, reason)
+}
+
+func TestRuntimeOverridesTakeEffectWhenRequestEndsAfterCommit(t *testing.T) {
+	f, control, runtime := runtimeWIFFixture(t)
+	admin := api.Actor{Identity: "admin", Admin: true}
+	ctx, cancel := context.WithCancel(t.Context())
+	control.releaseWIFOverrides = cancelAfterCommit{Store: f.store, cancel: cancel}
+	if _, err := control.CallTool(ctx, admin, "release_wif_grant", json.RawMessage(`{"repo":"oberth","service_account_name":"oberth-release","templates":{"publish":"image-writer"},"reason":"client times out"}`)); err != nil {
+		t.Fatalf("committed grant reported failure: %v", err)
+	}
+	if runtime.Snapshot().Repositories[runtimeTestRepo].ServiceAccountName != "oberth-release" {
+		t.Fatal("committed grant is not applied to admission")
+	}
+	ctx, cancel = context.WithCancel(t.Context())
+	control.capacityOverrides = cancelAfterCommit{Store: f.store, cancel: cancel}
+	value, err := control.CallTool(ctx, admin, "admission_capacity_config", json.RawMessage(`{"max_concurrent_jobs":1,"reason":"client times out"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := value.(map[string]any)["configuration"].(model.AdmissionCapacityConfig); got.MaxConcurrentJobs != 1 || got.Source != "runtime" || f.scheduler.concurrentJobs() != 1 {
+		t.Fatalf("committed capacity not applied: %+v jobs=%d", got, f.scheduler.concurrentJobs())
+	}
+}
+
+// release_wif_list publishes the stored set, so any drift between the store
+// and the admission map is repaired by listing.
+func TestReleaseWIFListResyncsAdmissionMap(t *testing.T) {
+	f, control, runtime := runtimeWIFFixture(t)
+	ctx := t.Context()
+	if _, err := f.store.SetReleaseWIFOverride(ctx, "admin", model.ReleaseWIFOverrideSpec{Repo: "github/retired/old", Revoked: true, Reason: "stored by another path"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := runtime.Snapshot().Repositories["github/retired/old"]; !ok {
+		t.Fatal("fixture: store write must not publish by itself")
+	}
+	value, err := control.CallTool(ctx, api.Actor{Identity: "admin", Admin: true}, "release_wif_list", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := runtime.Snapshot().Repositories["github/retired/old"]; ok {
+		t.Fatal("release_wif_list did not re-sync the stored revoke")
+	}
+	if effective := value.(map[string]any)["effective"].(map[string]json.RawMessage); effective["github/retired/old"] != nil {
+		t.Fatalf("view effective = %v", effective)
+	}
+}
+
+// Revoking or shadowing a Helm entry audits the Helm grant it replaced.
+func TestReleaseWIFAuditRecordsReplacedEffectiveEntry(t *testing.T) {
+	f, control, _ := runtimeWIFFixture(t)
+	ctx := t.Context()
+	admin := api.Actor{Identity: "admin", Admin: true}
+	for _, call := range []struct{ name, raw string }{
+		{"release_wif_revoke", `{"repo":"github/retired/old","reason":"retired"}`},
+		{"release_wif_reset", `{"repo":"github/retired/old","reason":"restore"}`},
+	} {
+		if _, err := control.CallTool(ctx, admin, call.name, json.RawMessage(call.raw)); err != nil {
+			t.Fatalf("%s: %v", call.name, err)
+		}
+	}
+	audit, _, err := f.store.ListAuditActions(ctx, model.AuditListFilter{Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	helm := `"service_account_name":"old-release"`
+	seen := 0
+	for _, entry := range audit {
+		var details struct {
+			Previous          json.RawMessage `json:"previous"`
+			PreviousEffective json.RawMessage `json:"previous_effective"`
+			Effective         json.RawMessage `json:"effective"`
+		}
+		if err := json.Unmarshal([]byte(entry.Details), &details); err != nil {
+			continue
+		}
+		switch entry.Action {
+		case "release_wif.revoke":
+			seen++
+			if details.Previous != nil || !strings.Contains(string(details.PreviousEffective), helm) || string(details.Effective) != "null" {
+				t.Fatalf("revoke audit lacks the Helm grant: %s", entry.Details)
+			}
+		case "release_wif.reset":
+			seen++
+			if string(details.PreviousEffective) != "null" || !strings.Contains(string(details.Effective), helm) {
+				t.Fatalf("reset audit lacks the restored Helm grant: %s", entry.Details)
+			}
+		}
+	}
+	if seen != 2 {
+		t.Fatalf("audit entries seen = %d", seen)
+	}
+}

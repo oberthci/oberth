@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/oberthci/oberth/internal/api"
@@ -20,12 +21,14 @@ import (
 type ReleaseWIFOverrideStore interface {
 	ReleaseWIFOverrides(context.Context) ([]model.ReleaseWIFOverride, error)
 	SetReleaseWIFOverride(context.Context, string, model.ReleaseWIFOverrideSpec) (model.ReleaseWIFOverride, error)
-	ClearReleaseWIFOverride(context.Context, string, string, string) (model.ReleaseWIFOverride, error)
+	ClearReleaseWIFOverride(context.Context, string, model.ReleaseWIFOverrideSpec) (model.ReleaseWIFOverride, error)
 }
 
-// ReleaseWIFPolicy merges overrides with the boot capability map.
+// ReleaseWIFPolicy merges overrides with the boot capability map. Preview
+// returns the effective map and inactive grants a candidate set would
+// publish without publishing it.
 type ReleaseWIFPolicy interface {
-	Check([]model.ReleaseWIFOverride) error
+	Preview([]model.ReleaseWIFOverride) (map[string]json.RawMessage, []model.ReleaseWIFOverrideStatus)
 	Apply([]model.ReleaseWIFOverride) []model.ReleaseWIFOverrideStatus
 	State() model.ReleaseWIFState
 }
@@ -60,14 +63,22 @@ func runtimeOverrideReason(reason string) error {
 	return nil
 }
 
-// ReloadReleaseWIF publishes the stored overrides. Startup and every change
-// call it; an invalid stored grant stays inactive and is reported.
+// ReloadReleaseWIF publishes the stored overrides. Startup and
+// release_wif_list call it; an invalid stored grant stays inactive and is
+// reported.
 func ReloadReleaseWIF(ctx context.Context, overrides ReleaseWIFOverrideStore, policy ReleaseWIFPolicy) ([]model.ReleaseWIFOverrideStatus, error) {
 	values, err := overrides.ReleaseWIFOverrides(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return policy.Apply(values), nil
+}
+
+func refuseInactiveReleaseWIF(inactive []model.ReleaseWIFOverrideStatus) error {
+	if len(inactive) == 0 {
+		return nil
+	}
+	return refuse(ErrInvalidInput, "release WIF override for %s: %s", inactive[0].Repo, inactive[0].Error)
 }
 
 func (service *API) releaseWIFTool(ctx context.Context, actor api.Actor, name string, raw json.RawMessage) (any, error) {
@@ -81,7 +92,16 @@ func (service *API) releaseWIFTool(ctx context.Context, actor api.Actor, name st
 		if err := decodeTool(raw, &struct{}{}); err != nil {
 			return nil, err
 		}
-		return service.releaseWIFView(ctx)
+		// Listing re-syncs the admission map with the store, so it also
+		// repairs any drift between a stored change and the published map.
+		service.releaseWIFMu.Lock()
+		defer service.releaseWIFMu.Unlock()
+		overrides, err := service.releaseWIFOverrides.ReleaseWIFOverrides(ctx)
+		if err != nil {
+			return nil, err
+		}
+		service.releaseWIF.Apply(overrides)
+		return service.releaseWIFView(overrides), nil
 	}
 	var args struct {
 		Repo               string            `json:"repo"`
@@ -102,24 +122,28 @@ func (service *API) releaseWIFTool(ctx context.Context, actor api.Actor, name st
 	if err != nil {
 		return nil, err
 	}
-	// One change at a time: the candidate check and the write must see the
-	// same override set, or two valid grants could combine into a conflict.
+	// One change at a time: the candidate check, the write and the publish
+	// must see the same override set, or two valid grants could combine into
+	// a conflict.
 	service.releaseWIFMu.Lock()
 	defer service.releaseWIFMu.Unlock()
 	current, err := service.releaseWIFOverrides.ReleaseWIFOverrides(ctx)
 	if err != nil {
 		return nil, err
 	}
-	candidate := make([]model.ReleaseWIFOverride, 0, len(current)+1)
+	others := make([]model.ReleaseWIFOverride, 0, len(current)+1)
 	var existing *model.ReleaseWIFOverride
 	for i := range current {
 		if current[i].Repo == repo {
 			existing = &current[i]
 			continue
 		}
-		candidate = append(candidate, current[i])
+		others = append(others, current[i])
 	}
 	state := service.releaseWIF.State()
+	spec := model.ReleaseWIFOverrideSpec{Repo: repo, Reason: args.Reason, PreviousEffective: state.Effective[repo]}
+	// next is the complete override set once the change is stored.
+	next := others
 	switch name {
 	case "release_wif_grant":
 		if registered == nil {
@@ -128,55 +152,59 @@ func (service *API) releaseWIFTool(ctx context.Context, actor api.Actor, name st
 		if err := refuseArchivedGrant(*registered, name, repo); err != nil {
 			return nil, err
 		}
-		grant, err := json.Marshal(map[string]any{"service_account_name": args.ServiceAccountName, "templates": args.Templates})
+		spec.Grant, err = json.Marshal(map[string]any{"service_account_name": args.ServiceAccountName, "templates": args.Templates})
 		if err != nil {
 			return nil, err
 		}
-		candidate = append(candidate, model.ReleaseWIFOverride{Repo: repo, Grant: grant})
-		if err := service.releaseWIF.Check(candidate); err != nil {
-			return nil, refuse(ErrInvalidInput, "%v", err)
-		}
-		_, err = service.releaseWIFOverrides.SetReleaseWIFOverride(ctx, actor.Identity, model.ReleaseWIFOverrideSpec{Repo: repo, Grant: grant, Reason: args.Reason})
-		if err != nil {
-			return nil, err
-		}
+		next = append(next, model.ReleaseWIFOverride{Repo: repo, Grant: spec.Grant})
 	case "release_wif_revoke":
 		if _, active := state.Effective[repo]; !active && (existing == nil || existing.Revoked) {
 			return nil, refuse(store.ErrInvalidState, "%s has no active release WIF entry", repo)
 		}
-		if _, err := service.releaseWIFOverrides.SetReleaseWIFOverride(ctx, actor.Identity, model.ReleaseWIFOverrideSpec{Repo: repo, Revoked: true, Reason: args.Reason}); err != nil {
-			return nil, err
-		}
+		spec.Revoked = true
+		next = append(next, model.ReleaseWIFOverride{Repo: repo, Revoked: true})
 	case "release_wif_reset":
 		if existing == nil {
 			return nil, refuse(store.ErrInvalidState, "%s has no runtime release WIF override", repo)
 		}
-		// Restoring the boot entry must not conflict with other runtime grants.
-		if err := service.releaseWIF.Check(candidate); err != nil {
-			return nil, refuse(ErrInvalidInput, "%v", err)
-		}
-		if _, err := service.releaseWIFOverrides.ClearReleaseWIFOverride(ctx, actor.Identity, repo, args.Reason); err != nil {
-			return nil, err
-		}
 	default:
 		return nil, fmt.Errorf("%w: unknown release WIF tool %s", ErrInvalidInput, name)
 	}
-	if _, err := ReloadReleaseWIF(ctx, service.releaseWIFOverrides, service.releaseWIF); err != nil {
-		return nil, fmt.Errorf("release WIF change is stored and audited but not yet applied; retry release_wif_list or restart: %w", err)
+	effective, inactive := service.releaseWIF.Preview(next)
+	// A revoke only narrows authority, so an unrelated inactive grant never
+	// blocks it. A grant, or restoring a boot entry, must not conflict.
+	if name != "release_wif_revoke" {
+		if err := refuseInactiveReleaseWIF(inactive); err != nil {
+			return nil, err
+		}
 	}
-	return service.releaseWIFView(ctx)
-}
-
-func (service *API) releaseWIFView(ctx context.Context) (any, error) {
-	overrides, err := service.releaseWIFOverrides.ReleaseWIFOverrides(ctx)
+	spec.Effective = effective[repo]
+	var stored model.ReleaseWIFOverride
+	if name == "release_wif_reset" {
+		_, err = service.releaseWIFOverrides.ClearReleaseWIFOverride(ctx, actor.Identity, spec)
+	} else {
+		stored, err = service.releaseWIFOverrides.SetReleaseWIFOverride(ctx, actor.Identity, spec)
+	}
 	if err != nil {
 		return nil, err
 	}
+	// Publish the validated set the store just committed, without another
+	// read: a cancelled or failing request must not leave admission on the
+	// old map after the change is stored and audited.
+	if name != "release_wif_reset" {
+		next[len(next)-1] = stored
+	}
+	slices.SortFunc(next, func(a, b model.ReleaseWIFOverride) int { return strings.Compare(a.Repo, b.Repo) })
+	service.releaseWIF.Apply(next)
+	return service.releaseWIFView(next), nil
+}
+
+func (service *API) releaseWIFView(overrides []model.ReleaseWIFOverride) map[string]any {
 	if overrides == nil {
 		overrides = []model.ReleaseWIFOverride{}
 	}
 	state := service.releaseWIF.State()
-	return map[string]any{"enabled": state.Enabled, "roles": state.Roles, "boot": state.Boot, "overrides": overrides, "effective": state.Effective, "inactive": state.Inactive}, nil
+	return map[string]any{"enabled": state.Enabled, "roles": state.Roles, "boot": state.Boot, "overrides": overrides, "effective": state.Effective, "inactive": state.Inactive}
 }
 
 // A registered repository always uses its canonical "upstream/org/repo" key.
@@ -242,6 +270,8 @@ func (service *API) admissionCapacityConfig(ctx context.Context, actor api.Actor
 	if err != nil {
 		return nil, err
 	}
-	configuration := service.runtimeCapacity.ApplyRuntimeCapacity(ctx)
+	// The override is committed: reload it even if the caller has gone, or
+	// admission keeps the old ceiling until the next periodic reload.
+	configuration := service.runtimeCapacity.ApplyRuntimeCapacity(context.WithoutCancel(ctx))
 	return map[string]any{"override": override, "configuration": configuration}, nil
 }

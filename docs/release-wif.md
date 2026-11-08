@@ -27,15 +27,20 @@ repository coexist, and the override wins until reset.
   `service_account_name` and a `templates` leaf -> role map. Roles must already
   exist in the boot map. `step_service_accounts`/`step_routes` and any other
   field are refused: dedicated WIF-only accounts are Kubernetes objects that
-  only the chart creates. Shared pipeline accounts and another repository's
-  account are refused. The merged map passes the same validation as a boot
-  map before the grant is stored.
+  only the chart creates. Shared pipeline accounts, any CI identity and
+  another repository's release identity (from the live identity maps, even
+  when that repository has no WIF entry) are refused before the grant is
+  stored. The merged map passes the same validation as a boot map.
 - A revoke removes the entry, including a Helm entry and one for a retired,
   unregistered `upstream/org/repo` key (the chart schema cannot express that
   removal with `null`). A reset drops the override so the boot entry applies.
 - Every change requires a reason and is audited (`release_wif.grant`,
-  `release_wif.revoke`, `release_wif.reset`) with the previous override in the
-  same transaction. Changes go through the audit mutation gate.
+  `release_wif.revoke`, `release_wif.reset`) with the previous override and
+  the repository's `previous_effective` and new `effective` entries (`null`
+  when absent), so revoking or shadowing a Helm entry records the Helm grant
+  it replaced. Changes go through the audit mutation gate. A committed change
+  is published to admission at once, even if the client disconnects;
+  `release_wif_list` also re-applies the stored set.
 - Each admission pins one effective snapshot for its audit Build and its
   submitted Workflow; the policy digest covers the effective map, so the
   submission audit records exactly which map authorized the run. Release
