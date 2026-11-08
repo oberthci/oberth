@@ -10,7 +10,7 @@ import (
 // Groups without their own flag set still offer successful, offline help.
 var commandGroups = map[string]string{
 	"access":      "list|allow|revoke",
-	"branch":      "prune|deletions",
+	"branch":      "prune|prune-refs|deletions",
 	"fragments":   "list|show",
 	"preflight":   "drift|pki|upstreams",
 	"release-wif": "list|grant|revoke|reset",

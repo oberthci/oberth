@@ -39,6 +39,7 @@ backup keygen
 branch
 branch deletions
 branch prune
+branch prune-refs
 branch resolve
 fragments
 fragments list

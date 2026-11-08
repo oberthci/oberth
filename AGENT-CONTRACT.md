@@ -108,6 +108,22 @@ branch gone from the mirror, or through the unscoped-admin, audited
 on the mirror while it published finishes `passed` with that reason line; only
 its publication is abandoned.
 
+Stray mirror refs outside `refs/heads/` and `refs/tags/` (such as
+`refs/remotes/upstream/*`, which caches configured before v0.17.99 gained from
+git's default fetch refspec on their upstream remote) are removed only by the
+unscoped-admin `ref_delete_many` (#1504, CLI `oberth branch prune-refs`): a dry
+run lists them, each classed `default-branch`, `tag`, `unreachable` or
+`not-commit`; a confirmation needs a selection (prefixes or exact
+`{ref, expected_sha}`), the dry run's `plan_id`, and `allow_unreachable` for refs
+whose target is not reachable from the default branch or a tag. At most 500
+refs per call, each deleted on its exact object ID in one local transaction; a
+symbolic ref is deleted itself, never its target. `refs/heads/`, `refs/tags/`,
+`refs/oberth/` and `refs/replace/` are never listed or changed, and nothing
+changes upstream. `ref.prune.intent` lists every ref and object ID before Git
+runs; `ref.prune.succeeded` or `ref.prune.failed` records the outcome. The cache's
+upstream remote carries no fetch refspec, so fetches and pushes write no
+`refs/remotes/upstream/*`.
+
 - One PVC mounted at `/data` stores `oberth.sqlite`, bare Git caches under
   `/data/git`, immutable run workspaces under `/data/work`, retained logs under
   `/data/logs`, and the accepted-push outbox.
@@ -986,7 +1002,7 @@ containing CI and real workload qualification remain separately required.
   it encodes the same result object. Authenticated tool refusal text keeps its
   stable error class and may append only an explicitly public service reason.
   Raw dependency chains stay masked; scoped missing/hidden equivalence remains.
-- MCP exposes 84 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 85 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, read-only `run_resources` (captured history and reviewed git resource suggestions), `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, `publication_abandon`, issue
   `issue_create`, `issue_get`, `issue_get_many`, `issue_update`, `issue_append`,
@@ -999,7 +1015,7 @@ containing CI and real workload qualification remain separately required.
   `workflow_capability_revoke`, read-only `workflow_capability_get`, admin-only
   `resource_grant` / `resource_revoke`, read-only `resource_grant_get`, admin-only `size_grant`
   and `size_revoke`, read-only `size_grant_get` (#1021), admin-only
-  unscoped `admission_hold`/`admission_release` (#1099), `concurrency_groups`, `queue_cap_config`, unscoped-admin-only `admission_capacity_config`, `release_wif_list`, `release_wif_grant`, `release_wif_revoke` and `release_wif_reset` (#1497), `queue_priority_config`, `queue_priority_get`, `run_priority`, `priority_grant`, `priority_grant_list`, `priority_grant_revoke`, `repo_usage`, `repo_list`, `repo_remove`, `repo_archive`, `repo_unarchive`, unscoped-admin-only `branch_delete_many`, `branch_deletion_list` and `receive_outbox` (#1490), `branch_deletion_resolve` (#1500), `run_list`,
+  unscoped `admission_hold`/`admission_release` (#1099), `concurrency_groups`, `queue_cap_config`, unscoped-admin-only `admission_capacity_config`, `release_wif_list`, `release_wif_grant`, `release_wif_revoke` and `release_wif_reset` (#1497), `queue_priority_config`, `queue_priority_get`, `run_priority`, `priority_grant`, `priority_grant_list`, `priority_grant_revoke`, `repo_usage`, `repo_list`, `repo_remove`, `repo_archive`, `repo_unarchive`, unscoped-admin-only `branch_delete_many`, `branch_deletion_list` and `receive_outbox` (#1490), `branch_deletion_resolve` (#1500), `ref_delete_many` (#1504), `run_list`,
   admin-only `audit_list` (#1104; verified entries, never available to a scoped uplink;
   `GET /api/audit` shares its filters, response and restrictions),
   `schedule_list` (also `GET /api/schedules`, with the same repository scope) plus admin-only audited `schedule_pause`, `schedule_resume` and `schedule_trigger` (#1106; pause state is the audit chain, trigger goes through `EnqueueCI`),

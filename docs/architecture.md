@@ -325,6 +325,11 @@ the mirror deletion and its marker are kept rather than restored. A failed
 record is resolved (`skipped` with a reason line, no ref change) when a later
 deletion of the same branch propagates, by an hourly sweep once its branch is
 gone from the mirror, or by an unscoped admin with `branch_deletion_resolve`.
+Refs outside `refs/heads/`, `refs/tags/` and Oberth's private `refs/oberth/` and
+`refs/replace/` are never fetched, received or mirrored; the cache's upstream
+remote has no fetch refspec, so git writes no `refs/remotes/upstream/*`. Older
+leftovers are removed by `ref_delete_many`, locally, under the repository lock,
+with a compare-and-delete per ref and an audited plan.
 While the marker exists a refresh does not re-create the branch, and a pending
 feature-branch publication for a branch deleted on the mirror is abandoned
 instead of pushed; its run, whose steps passed, finishes passed with the reason

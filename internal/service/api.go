@@ -114,7 +114,8 @@ type APIConfig struct {
 	Schedules ScheduleControl
 	// BranchPrune and BranchDeletions back branch_delete_many,
 	// branch_deletion_list (#1490) and branch_deletion_resolve (#1500); nil
-	// disables them.
+	// disables them. ref_delete_many (#1504) also needs BranchPrune to
+	// implement StrayRefGit.
 	BranchPrune     BranchPruneGit
 	BranchDeletions BranchDeletionRecords
 	// DeletionQueued wakes the upstream deletion propagator; optional.
@@ -996,6 +997,8 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		return service.branchDeleteMany(ctx, actor, raw)
 	case "branch_deletion_list":
 		return service.branchDeletionList(ctx, actor, raw)
+	case "ref_delete_many":
+		return service.refDeleteMany(ctx, actor, raw)
 	case "branch_deletion_resolve":
 		return service.branchDeletionResolve(ctx, actor, raw)
 	case "receive_outbox":
@@ -3114,7 +3117,7 @@ func MutatingTool(name string) bool {
 		"workflow_capability_grant", "workflow_capability_revoke",
 		"size_grant", "size_revoke", "resource_grant", "resource_revoke",
 		"admission_release", "admission_hold", "queue_cap_config", "admission_capacity_config", "release_wif_grant", "release_wif_revoke", "release_wif_reset", "queue_priority_config", "run_priority", "priority_grant", "priority_grant_revoke",
-		"repo_remove", "repo_archive", "repo_unarchive", "branch_delete_many", "branch_deletion_resolve", "receive_outbox",
+		"repo_remove", "repo_archive", "repo_unarchive", "branch_delete_many", "branch_deletion_resolve", "ref_delete_many", "receive_outbox",
 		"secretstore_sync_receipt",
 		"promote_grant", "promote_grant_revoke",
 		"schedule_pause", "schedule_resume", "schedule_trigger":

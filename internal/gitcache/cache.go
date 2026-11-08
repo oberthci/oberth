@@ -447,9 +447,22 @@ func (c *Cache) configureRemote(ctx context.Context, input, path string) error {
 		return err
 	}
 	if _, err := c.capture(ctx, path, "remote", "get-url", "upstream"); err != nil {
-		return c.run(ctx, commandSpec{dir: path, args: []string{"remote", "add", "upstream", remote}})
+		err = c.run(ctx, commandSpec{dir: path, args: []string{"remote", "add", "upstream", remote}})
+		if err != nil {
+			return err
+		}
+	} else if err := c.run(ctx, commandSpec{dir: path, args: []string{"remote", "set-url", "upstream", remote}}); err != nil {
+		return err
 	}
-	return c.run(ctx, commandSpec{dir: path, args: []string{"remote", "set-url", "upstream", remote}})
+	// git remote add configures +refs/heads/*:refs/remotes/upstream/*. With
+	// it, every fetch and push opportunistically writes refs/remotes/upstream/*
+	// in the mirror, which no prune removes and upload-pack advertises, so a
+	// deleted branch stays served (#1504). Oberth fetches only explicit
+	// refspecs into refs/oberth/upstream/, so the remote needs none.
+	if _, err := c.capture(ctx, path, "config", "--get-all", "remote.upstream.fetch"); err == nil {
+		return c.run(ctx, commandSpec{dir: path, args: []string{"config", "--unset-all", "remote.upstream.fetch"}})
+	}
+	return nil
 }
 
 func (c *Cache) validatedUpstream(input string) (string, error) {

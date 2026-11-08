@@ -407,6 +407,7 @@ step: a single step can exceed a model's context window.
 | `repo_archive` / `repo_unarchive` | Archive or restore a repository, preserving history (unscoped admin only); archived repositories refuse new grants |
 | `repo_remove` | Remove a repository mapping and its Git cache (admin-only) |
 | `branch_delete_many` | Batch branch deletion: dry-run plan with plan_id, then confirm; every candidate classed merged, patch-equivalent, unique or unchecked (`report` lists the kept ones); compare-and-delete per ref, merged-only unless allow_unmerged, never the default branch, configured reserved branches only alone with confirm_reserved; upstream deletion is asynchronous (unscoped admin only) |
+| `ref_delete_many` | Stray mirror refs outside refs/heads/ and refs/tags/ (e.g. refs/remotes/upstream/*): listing, then a prefixes or explicit {ref, expected_sha} plan with plan_id, then confirm; every ref classed default-branch, tag, unreachable or not-commit, unreachable ones only with allow_unreachable; at most 500 per call, compare-and-delete on each object ID, symbolic refs deleted themselves; local only, never refs/heads/, refs/tags/ or refs/oberth/; audited with every ref (unscoped admin only) |
 | `branch_deletion_list` | Upstream state of accepted branch deletions: pending, propagated, failed or skipped, with global `counts` and per-page `page_counts` (unscoped admin only) |
 | `branch_deletion_resolve` | Close failed branch deletion records as skipped with a reason line, by id or (without ids) those whose branch is gone from the mirror; no ref changes; audited (unscoped admin only) |
 | `receive_outbox` | Show, retry or abandon a receive record that blocks its repository; retry/abandon audited (unscoped admin only) |
@@ -939,7 +940,7 @@ Issue metadata writes can pass `expected_revision` from a prior read; mismatch
 is a conflict, while omission preserves last-write-wins. See
 [conditional metadata updates](issue-lifecycle.md).
 
-The current MCP surface has **84 tools**, including administrator-only
+The current MCP surface has **85 tools**, including administrator-only
 `publication_abandon`.
 
 The CLI uses `--url`, `OBERTH_MCP_URL`, or `OBERTH_BASE_URL` (with

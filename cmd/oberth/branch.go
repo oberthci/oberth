@@ -1,8 +1,9 @@
 package main
 
-// `oberth branch prune|deletions|resolve` and `oberth outbox` (#1490, #1500):
-// remote forms of the unscoped-admin MCP tools branch_delete_many,
-// branch_deletion_list, branch_deletion_resolve and receive_outbox.
+// `oberth branch prune|prune-refs|deletions|resolve` and `oberth outbox`
+// (#1490, #1500, #1504): remote forms of the unscoped-admin MCP tools
+// branch_delete_many, ref_delete_many, branch_deletion_list,
+// branch_deletion_resolve and receive_outbox.
 
 import (
 	"context"
@@ -15,6 +16,8 @@ import (
 const branchUsage = "Usage: oberth branch prune <repository> [--merged-into <default-branch>] [--older-than <30d|72h>] [--exclude-prefix <prefix>]...\n" +
 	"         [--branch <name>=<sha>]... [--allow-unmerged] [--report] [--confirm --plan-id <id>] [--confirm-reserved <upstream/org/repo:branch>]\n" +
 	"         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]\n" +
+	"       oberth branch prune-refs <repository> [--prefix <refs/...>]... [--ref <refs/...>=<sha>]... [--allow-unreachable]\n" +
+	"         [--confirm --plan-id <id>] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]\n" +
 	"       oberth branch deletions [--repo <repository>] [--status pending|propagated|failed|skipped] [--batch <id>]\n" +
 	"         [--limit N] [--before N] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]\n" +
 	"       oberth branch resolve <repository> --reason <text> [--id <record-id>]...\n" +
@@ -23,7 +26,10 @@ const branchUsage = "Usage: oberth branch prune <repository> [--merged-into <def
 	"upstream deletion follows asynchronously. Read per-branch upstream state with branch deletions.\n" +
 	"Each planned branch is classed merged, patch-equivalent, unique or unchecked; --report also lists\n" +
 	"the kept ones. resolve closes failed deletion records (no ref changes); without --id only those\n" +
-	"whose branch is gone from the mirror."
+	"whose branch is gone from the mirror.\n" +
+	"prune-refs lists stray refs outside refs/heads/ and refs/tags/ (such as refs/remotes/upstream/*),\n" +
+	"classed default-branch, tag, unreachable or not-commit; with a selection it plans their deletion,\n" +
+	"and --confirm --plan-id deletes them on the mirror only (they are never mirrored upstream)."
 
 const outboxUsage = "Usage: oberth outbox list|show|retry|abandon [<upstream/org/repo>] [--id <record-id>] [--reason <text>]\n" +
 	"         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]\n" +
@@ -46,6 +52,8 @@ func runBranch(ctx context.Context, arguments []string, output io.Writer) error 
 	switch arguments[0] {
 	case "prune":
 		return runBranchPrune(ctx, arguments[1:], output)
+	case "prune-refs":
+		return runBranchPruneRefs(ctx, arguments[1:], output)
 	case "deletions":
 		return runBranchDeletions(ctx, arguments[1:], output)
 	case "resolve":
@@ -114,6 +122,62 @@ func runBranchPrune(ctx context.Context, arguments []string, output io.Writer) e
 	}
 	caller := remoteRunCanceller{config: config}
 	raw, err := caller.call(ctx, "branch_delete_many", request)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(output, strings.TrimSpace(string(raw)))
+	return err
+}
+
+func runBranchPruneRefs(ctx context.Context, arguments []string, output io.Writer) error {
+	if wantsHelp(arguments) {
+		_, err := fmt.Fprintln(output, branchUsage)
+		return err
+	}
+	flags := flag.NewFlagSet("branch prune-refs", flag.ContinueOnError)
+	transportFlags := mcpTransportFlags(flags)
+	allowUnreachable := flags.Bool("allow-unreachable", false, "also delete refs not reachable from the default branch or a tag")
+	confirm := flags.Bool("confirm", false, "execute the plan named by --plan-id")
+	planID := flags.String("plan-id", "", "plan ID from the dry run")
+	var prefixes, refs repeatedFlag
+	flags.Var(&prefixes, "prefix", "select stray refs with this prefix, e.g. refs/remotes/upstream/ (repeatable)")
+	flags.Var(&refs, "ref", "explicit <refs/...>=<expected-sha> (repeatable)")
+	positional, _, err := parseOperatorFlags(flags, arguments)
+	if err != nil {
+		return err
+	}
+	if len(positional) != 1 || positional[0] == "" {
+		return fmt.Errorf("%w: %s", errUsage, branchUsage)
+	}
+	request := map[string]any{"repo": positional[0]}
+	if len(refs) > 0 {
+		list := make([]map[string]string, 0, len(refs))
+		for _, value := range refs {
+			name, sha, ok := strings.Cut(value, "=")
+			if !ok || name == "" || sha == "" {
+				return fmt.Errorf("%w: --ref takes <refs/...>=<expected-sha>", errUsage)
+			}
+			list = append(list, map[string]string{"ref": name, "expected_sha": sha})
+		}
+		request["refs"] = list
+	}
+	if len(prefixes) > 0 {
+		request["prefixes"] = []string(prefixes)
+	}
+	if *planID != "" {
+		request["plan_id"] = *planID
+	}
+	if *allowUnreachable {
+		request["allow_unreachable"] = true
+	}
+	if *confirm {
+		request["confirm"] = true
+	}
+	config, err := parseMCPFlags("branch prune-refs", transportFlags(), 0)
+	if err != nil {
+		return err
+	}
+	raw, err := (remoteRunCanceller{config: config}).call(ctx, "ref_delete_many", request)
 	if err != nil {
 		return err
 	}

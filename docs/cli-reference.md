@@ -255,7 +255,7 @@ Advanced:
 ## oberth branch
 
 ```text
-Usage: oberth branch <prune|deletions> [flags]
+Usage: oberth branch <prune|prune-refs|deletions> [flags]
 Use oberth branch <command> --help for command flags.
 ```
 
@@ -265,6 +265,8 @@ Use oberth branch <command> --help for command flags.
 Usage: oberth branch prune <repository> [--merged-into <default-branch>] [--older-than <30d|72h>] [--exclude-prefix <prefix>]...
          [--branch <name>=<sha>]... [--allow-unmerged] [--report] [--confirm --plan-id <id>] [--confirm-reserved <upstream/org/repo:branch>]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+       oberth branch prune-refs <repository> [--prefix <refs/...>]... [--ref <refs/...>=<sha>]... [--allow-unreachable]
+         [--confirm --plan-id <id>] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
        oberth branch deletions [--repo <repository>] [--status pending|propagated|failed|skipped] [--batch <id>]
          [--limit N] [--before N] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
        oberth branch resolve <repository> --reason <text> [--id <record-id>]...
@@ -274,6 +276,9 @@ upstream deletion follows asynchronously. Read per-branch upstream state with br
 Each planned branch is classed merged, patch-equivalent, unique or unchecked; --report also lists
 the kept ones. resolve closes failed deletion records (no ref changes); without --id only those
 whose branch is gone from the mirror.
+prune-refs lists stray refs outside refs/heads/ and refs/tags/ (such as refs/remotes/upstream/*),
+classed default-branch, tag, unreachable or not-commit; with a selection it plans their deletion,
+and --confirm --plan-id deletes them on the mirror only (they are never mirrored upstream).
 ```
 
 ## oberth branch prune
@@ -282,6 +287,8 @@ whose branch is gone from the mirror.
 Usage: oberth branch prune <repository> [--merged-into <default-branch>] [--older-than <30d|72h>] [--exclude-prefix <prefix>]...
          [--branch <name>=<sha>]... [--allow-unmerged] [--report] [--confirm --plan-id <id>] [--confirm-reserved <upstream/org/repo:branch>]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+       oberth branch prune-refs <repository> [--prefix <refs/...>]... [--ref <refs/...>=<sha>]... [--allow-unreachable]
+         [--confirm --plan-id <id>] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
        oberth branch deletions [--repo <repository>] [--status pending|propagated|failed|skipped] [--batch <id>]
          [--limit N] [--before N] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
        oberth branch resolve <repository> --reason <text> [--id <record-id>]...
@@ -291,6 +298,31 @@ upstream deletion follows asynchronously. Read per-branch upstream state with br
 Each planned branch is classed merged, patch-equivalent, unique or unchecked; --report also lists
 the kept ones. resolve closes failed deletion records (no ref changes); without --id only those
 whose branch is gone from the mirror.
+prune-refs lists stray refs outside refs/heads/ and refs/tags/ (such as refs/remotes/upstream/*),
+classed default-branch, tag, unreachable or not-commit; with a selection it plans their deletion,
+and --confirm --plan-id deletes them on the mirror only (they are never mirrored upstream).
+```
+
+## oberth branch prune-refs
+
+```text
+Usage: oberth branch prune <repository> [--merged-into <default-branch>] [--older-than <30d|72h>] [--exclude-prefix <prefix>]...
+         [--branch <name>=<sha>]... [--allow-unmerged] [--report] [--confirm --plan-id <id>] [--confirm-reserved <upstream/org/repo:branch>]
+         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+       oberth branch prune-refs <repository> [--prefix <refs/...>]... [--ref <refs/...>=<sha>]... [--allow-unreachable]
+         [--confirm --plan-id <id>] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+       oberth branch deletions [--repo <repository>] [--status pending|propagated|failed|skipped] [--batch <id>]
+         [--limit N] [--before N] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+       oberth branch resolve <repository> --reason <text> [--id <record-id>]...
+         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+prune is a dry run unless --confirm names the dry run's plan ID. Mirror refs are deleted at once;
+upstream deletion follows asynchronously. Read per-branch upstream state with branch deletions.
+Each planned branch is classed merged, patch-equivalent, unique or unchecked; --report also lists
+the kept ones. resolve closes failed deletion records (no ref changes); without --id only those
+whose branch is gone from the mirror.
+prune-refs lists stray refs outside refs/heads/ and refs/tags/ (such as refs/remotes/upstream/*),
+classed default-branch, tag, unreachable or not-commit; with a selection it plans their deletion,
+and --confirm --plan-id deletes them on the mirror only (they are never mirrored upstream).
 ```
 
 ## oberth branch resolve
@@ -299,6 +331,8 @@ whose branch is gone from the mirror.
 Usage: oberth branch prune <repository> [--merged-into <default-branch>] [--older-than <30d|72h>] [--exclude-prefix <prefix>]...
          [--branch <name>=<sha>]... [--allow-unmerged] [--report] [--confirm --plan-id <id>] [--confirm-reserved <upstream/org/repo:branch>]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+       oberth branch prune-refs <repository> [--prefix <refs/...>]... [--ref <refs/...>=<sha>]... [--allow-unreachable]
+         [--confirm --plan-id <id>] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
        oberth branch deletions [--repo <repository>] [--status pending|propagated|failed|skipped] [--batch <id>]
          [--limit N] [--before N] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
        oberth branch resolve <repository> --reason <text> [--id <record-id>]...
@@ -308,6 +342,9 @@ upstream deletion follows asynchronously. Read per-branch upstream state with br
 Each planned branch is classed merged, patch-equivalent, unique or unchecked; --report also lists
 the kept ones. resolve closes failed deletion records (no ref changes); without --id only those
 whose branch is gone from the mirror.
+prune-refs lists stray refs outside refs/heads/ and refs/tags/ (such as refs/remotes/upstream/*),
+classed default-branch, tag, unreachable or not-commit; with a selection it plans their deletion,
+and --confirm --plan-id deletes them on the mirror only (they are never mirrored upstream).
 ```
 
 ## oberth fragments
