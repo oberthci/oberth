@@ -17,6 +17,7 @@ import (
 	"net/netip"
 	"net/url"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -217,6 +218,14 @@ type Config struct {
 	// WorkflowTimeout caps the document's own spec.activeDeadlineSeconds.
 	WorkflowTimeout time.Duration
 
+	// DefaultWorkflowTimeout is the deadline of a document that declares none,
+	// still capped by WorkflowTimeout. Zero selects DefaultExecutionTimeout.
+	DefaultWorkflowTimeout time.Duration
+
+	// StepStartupAllowance widens literal step deadlines by bounded Pod
+	// start-up time (#1499). Nil selects DefaultStepStartupAllowance.
+	StepStartupAllowance *StepStartupAllowance
+
 	// StalledRunTimeout bounds an admitted workflow without a scheduled pod or progress.
 	// Zero selects ten minutes.
 	StalledRunTimeout time.Duration
@@ -273,6 +282,9 @@ func (config *Config) applyDefaults() {
 	if config.WorkflowTimeout <= 0 {
 		config.WorkflowTimeout = defaultWorkflowTimeout
 	}
+	if config.DefaultWorkflowTimeout <= 0 {
+		config.DefaultWorkflowTimeout = DefaultExecutionTimeout
+	}
 	if config.TTLSeconds <= 0 {
 		config.TTLSeconds = defaultTTLSeconds
 	}
@@ -285,6 +297,13 @@ func (config *Config) applyDefaults() {
 	if config.MaxRunLogBytes <= 0 {
 		config.MaxRunLogBytes = runlog.DefaultRunLimitBytes
 	}
+}
+
+func (config Config) stepStartupAllowance() StepStartupAllowance {
+	if config.StepStartupAllowance == nil {
+		return DefaultStepStartupAllowance
+	}
+	return *config.StepStartupAllowance
 }
 
 // DefaultedConfig freezes the same defaults used by the native controller.
@@ -304,6 +323,14 @@ func (config Config) Validate() error {
 	}
 	if config.WorkflowTimeout > 0 && (config.WorkflowTimeout < time.Second || config.WorkflowTimeout%time.Second != 0) {
 		return errors.New("argojob: workflow timeout must use whole positive seconds")
+	}
+	if config.DefaultWorkflowTimeout > 0 && (config.DefaultWorkflowTimeout < time.Second || config.DefaultWorkflowTimeout%time.Second != 0) {
+		return errors.New("argojob: default workflow timeout must use whole positive seconds")
+	}
+	if config.StepStartupAllowance != nil {
+		if err := config.StepStartupAllowance.Validate(); err != nil {
+			return err
+		}
 	}
 	for repo, cap := range config.PerRepoWorkflowTimeout {
 		if len(strings.Split(repo, "/")) != 3 || cap < time.Second || cap%time.Second != 0 {
@@ -561,6 +588,11 @@ type Request struct {
 	ResourceCeiling  *corev1.ResourceRequirements
 	ResourceFallback model.ResourceAdmissionFallback
 	PodDemand        *argoworkflow.PodDemand
+	// Exclusive is the sorted exclusive-class set admission granted (#1499).
+	// Build refuses a resolved Workflow, fragments included, whose declared
+	// classes differ, so no class escapes the allowlist, the limit or the
+	// restart adoption that reads the built Workflow.
+	Exclusive []string
 	// omitStepUsage preserves already-running legacy specs during recovery.
 	omitStepUsage bool
 	// Only recovery of an already-submitted workflow can omit current defaults.
@@ -704,6 +736,9 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 		if err := validatePlacementSource(workflow); err != nil {
 			return nil, err
 		}
+	}
+	if err := verifyAdmittedExclusiveClasses(workflow, request.Exclusive); err != nil {
+		return nil, err
 	}
 	if mirrorOnly, err := argoworkflow.DeclaredGoProxyMirrorOnly(workflow); err != nil {
 		return nil, err
@@ -887,6 +922,7 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	}
 	applyExecutionDeadline(workflow, config, canonicalRepoKey(request.UpstreamName, request.UpstreamOrg, request.Repo))
 	applyServerBounds(workflow, config)
+	applyStepDeadlineFloor(workflow, config.stepStartupAllowance())
 	applyServerSecurity(workflow)
 	injectServerVolumes(workflow, config, request, credentialed)
 	injectStepUsageMounts(workflow, request)
@@ -2445,4 +2481,19 @@ func WorkflowMeta(workflow *wfv1.Workflow) (runID string, identity string, ok bo
 	runID = workflow.Annotations[runIDAnnotation]
 	identity = workflow.Annotations[identityAnnotation]
 	return runID, identity, runID != ""
+}
+
+// verifyAdmittedExclusiveClasses binds the fragment-resolved Workflow to the
+// exclusive classes admission granted. A class the gate never saw would run
+// without the allowlist or the limit, and after a restart adoption (which
+// reads the built Workflow) would hold it, so any difference is refused.
+func verifyAdmittedExclusiveClasses(workflow *wfv1.Workflow, admitted []string) error {
+	resolved, err := argoworkflow.DeclaredExclusiveClasses(workflow)
+	if err != nil {
+		return err
+	}
+	if !slices.Equal(resolved, admitted) {
+		return fmt.Errorf("argojob: exclusive classes %v of the resolved pipeline (fragments included) differ from the admitted classes %v", resolved, admitted)
+	}
+	return nil
 }

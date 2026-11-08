@@ -1125,6 +1125,8 @@ Usage of serve:
         deprecated compatibility option; ignored by workflow admission (default 8000)
   -admission-disk-floor-bytes int
         when enabled and free bytes on /data are below this floor, admission is held until disk frees up (#673)
+  -admission-exclusive-classes string
+        comma-separated server-wide exclusive classes steps may declare with oberth.ci/exclusive, each class or class=limit (default limit 1); empty refuses every declaration (#1499)
   -admission-extended-resources string
         deprecated compatibility option; ignored by workflow admission (default "{}")
   -admission-io-runs int
@@ -1165,12 +1167,20 @@ Usage of serve:
         deprecated compatibility option; ignored; Kubernetes places step pods (default "S=1,M=2,L=3,XL=0")
   -admission-stall-timeout duration
         workflow startup bound for absent or non-capacity-stalled pods; Kubernetes capacity waits are exempt (default 10m0s)
+  -admission-step-startup-allowance-max-seconds int
+        largest step start-up allowance in seconds (0-3600); 0 disables the allowance (default 600)
+  -admission-step-startup-allowance-min-seconds int
+        smallest step start-up allowance in seconds (0-3600, at most the maximum) (default 120)
+  -admission-step-startup-allowance-percent int
+        Pod start-up allowance added to each declared step deadline, as a percentage of that deadline (0-400; #1499) (default 50)
   -argo-ci-secrets-serviceaccount string
         ServiceAccount for CI templates with approved upstream-scoped secrets; its Vault role never carries release grants (default "oberth-argo-ci-secrets")
   -argo-controller-profile string
         exact controller profile to verify before nonroot submission; empty disables nonroot
   -argo-credentialed-serviceaccount string
         ServiceAccount for release templates with approved secrets; carries a projected token for OpenBao Kubernetes auth (default "oberth-argo-credentialed")
+  -argo-default-workflow-timeout duration
+        deadline of a Workflow that declares no activeDeadlineSeconds, capped by --argo-workflow-timeout (default 30m0s)
   -argo-execution-placement-config string
         absolute path to administrator-owned isolated execution placement JSON
   -argo-execution-target-config string

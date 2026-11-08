@@ -407,3 +407,33 @@ runs receives while the propagator is stuck on a forge that never answers, then
 exhausts the bounded attempts. Prune plans, stale confirmation, merged-only,
 reserved-branch and typed-confirmation refusals, per-batch audit and outbox repair
 have their own tests.
+
+Scheduling and placement Helm values: `TestStepStartupAllowanceIsConfigurable`
+covers factor, floor, ceiling, disabling, overflow and bounds;
+`TestStartupDeadlineUsesTheRecordedAllowance` classifies from the recorded
+allowance, not the current setting; `TestDefaultWorkflowTimeoutIsConfigurable`;
+`TestServeStepStartupAllowanceFlags`;
+`TestChartSchedulingValuesDefaultToBinaryDefaults` parses the default chart's
+args and requires them to equal the binary defaults;
+`TestChartSchedulingValuesReachTheServer` round-trips each value and refuses
+out-of-range values; chart unittest `execution_target_test.yaml`.
+
+Step deadline start-up allowance #1499: `TestBuildFloorsStepDeadlinesAndRecordsDeclaredBudget`
+checks the floored Pod deadline and server-owned declared budget on named and
+inline leaves, `TestStepDeadlineAnnotationIsServerOwned` refuses a repository
+copy, and `TestStartupDeadlineKillIsInfrastructure` /
+`TestStartupDeadlineRequiresServerBudgetAndStepScope` keep genuine, capped,
+workflow and foreign-Pod deadlines as the step's own failure.
+`TestStartupDeadlineNeverStartedShapes` accepts kubelet's TerminatePod
+`ContainerStatusUnknown`/137 shape and refuses image/config waiting reasons;
+`TestStartupDeadlineRequiresTheDeadlineToStopMain` keeps an early nonzero or
+OOM exit a genuine failure.
+`TestStartupDeadlineStepAutomaticallyRetriesOnce` runs the scheduler and SQLite
+store end to end: one automatic retry, never an `Execution deadline exceeded.`
+reason. Exclusive classes #1499: `TestExclusiveClassSerializesAcrossRepositories`,
+`TestExclusiveClassLimitAndFIFO` and `TestExclusiveClassAdoptedHolderBlocksNewMembers`
+cover the gate; `TestExclusiveClassFromFragmentIsAdmittedFromTheReceipt` and
+`TestBuildBindsFragmentExclusiveClassesToAdmission` keep fragment-declared
+classes under the allowlist, the limit and Build's admitted-set check;
+`TestExclusiveClassAllowlistRefusesUnknownClasses`, the
+argoworkflow syntax/count tests and the serve/chart flag tests cover the bounds.

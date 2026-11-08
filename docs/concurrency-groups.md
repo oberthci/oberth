@@ -10,6 +10,9 @@ metadata:
     oberth.ci/concurrency-limit: "2"
 ```
 
+For a server-defined class that repositories may only queue in, see
+[exclusive classes](exclusive-classes.md).
+
 The limit defaults to **1** when omitted. It is a positive decimal integer
 (1–2147483647), and requires a group. Names use 1–63 lowercase letters, digits
 or hyphens. Oberth reads the annotations from the run's immutable pipeline

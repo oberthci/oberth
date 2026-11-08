@@ -86,7 +86,7 @@ func (s *Store) autoRetryInfrastructureTx(ctx context.Context, tx *sql.Tx, sourc
 	deadline := model.IsExecutionDeadlineReason(source.Error)
 	if observation != nil {
 		for _, step := range observation.Steps {
-			if (step.Status == model.StepFailed && (!eviction || !step.Evicted)) || (deadline && (step.Started || step.Status == model.StepRunning || step.Status == model.StepPassed)) {
+			if (step.Status == model.StepFailed && (!eviction || !step.Infrastructure())) || (deadline && (step.Started || step.Status == model.StepRunning || step.Status == model.StepPassed)) {
 				return source, nil
 			}
 		}

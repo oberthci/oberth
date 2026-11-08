@@ -227,6 +227,39 @@ spec:
             {{- if gt $diskFloorBytes 0 }}
             - --admission-disk-floor-bytes={{ $diskFloorBytes }}
             {{- end }}
+            {{- $exclusiveClasses := $admission.exclusiveClasses | default dict }}
+            {{- if $exclusiveClasses }}
+            {{- $exclusiveEntries := list }}
+            {{- range $name := keys $exclusiveClasses | sortAlpha }}
+            {{- $exclusiveEntries = append $exclusiveEntries (printf "%s=%d" $name (int64 (get $exclusiveClasses $name))) }}
+            {{- end }}
+            - {{ printf "--admission-exclusive-classes=%s" (join "," $exclusiveEntries) | quote }}
+            {{- end }}
+            - {{ printf "--admission-stall-timeout=%s" ($admission.stallTimeout | default "10m") | quote }}
+            {{- /* hasKey, not default/merge: zero is a meaningful allowance value. */}}
+            {{- $allowance := $admission.stepStartupAllowance | default dict }}
+            {{- $allowanceEnabled := true }}
+            {{- if hasKey $allowance "enabled" }}{{- $allowanceEnabled = $allowance.enabled }}{{- end }}
+            {{- $allowancePercent := int64 50 }}
+            {{- if hasKey $allowance "factorPercent" }}{{- $allowancePercent = int64 $allowance.factorPercent }}{{- end }}
+            {{- $allowanceMin := int64 120 }}
+            {{- if hasKey $allowance "minSeconds" }}{{- $allowanceMin = int64 $allowance.minSeconds }}{{- end }}
+            {{- $allowanceMax := int64 600 }}
+            {{- if hasKey $allowance "maxSeconds" }}{{- $allowanceMax = int64 $allowance.maxSeconds }}{{- end }}
+            {{- if not $allowanceEnabled }}
+            {{- $allowancePercent = 0 }}{{- $allowanceMin = 0 }}{{- $allowanceMax = 0 }}
+            {{- end }}
+            {{- if gt $allowanceMin $allowanceMax }}
+            {{- fail "admission.stepStartupAllowance.minSeconds must not exceed maxSeconds" }}
+            {{- end }}
+            - --admission-step-startup-allowance-percent={{ $allowancePercent }}
+            - --admission-step-startup-allowance-min-seconds={{ $allowanceMin }}
+            - --admission-step-startup-allowance-max-seconds={{ $allowanceMax }}
+            {{- $schedules := .Values.schedules | default dict }}
+            {{- $scheduleMaxEntries := 8 }}
+            {{- if hasKey $schedules "maxEntries" }}{{- $scheduleMaxEntries = int $schedules.maxEntries }}{{- end }}
+            - {{ printf "--schedule-min-interval=%s" ($schedules.minInterval | default "15m") | quote }}
+            - --schedule-max-entries={{ $scheduleMaxEntries }}
             {{- $pressure := $admission.pressure | default dict }}
             {{- $pressureEnabled := true }}
             {{- if hasKey $pressure "enabled" }}{{- $pressureEnabled = $pressure.enabled }}{{- end }}
@@ -299,6 +332,12 @@ spec:
             {{- if .Values.argo.executionPlacementConfigMap }}
             - --argo-execution-placement-config=/etc/oberth/execution-placement/config.json
             {{- end }}
+            {{- if and .Values.argo.executionTargetCredentialsSecret (not .Values.argo.executionTargetConfigMap) }}
+            {{- fail "argo.executionTargetCredentialsSecret requires argo.executionTargetConfigMap" }}
+            {{- end }}
+            {{- if .Values.argo.executionTargetConfigMap }}
+            - --argo-execution-target-config=/etc/oberth/execution-target/config.json
+            {{- end }}
             {{- if .Values.argo.releaseTagRoutes }}
             - --argo-release-tag-routes-config=/etc/oberth/release-tag-routes/routes.json
             {{- end }}
@@ -316,6 +355,11 @@ spec:
             - --argo-ci-secrets-serviceaccount={{ (.Values.argo.ciSecrets).serviceAccount | default "oberth-argo-ci-secrets" }}
             - --argo-executor-serviceaccount={{ .Values.argo.executorServiceAccount }}
             - --argo-workflow-timeout={{ .Values.argo.workflowTimeout }}
+            - {{ printf "--argo-default-workflow-timeout=%s" (.Values.argo.defaultWorkflowTimeout | default "30m") | quote }}
+            {{- $repoWorkflowTimeouts := .Values.argo.repoWorkflowTimeouts | default dict }}
+            {{- range $repo := keys $repoWorkflowTimeouts | sortAlpha }}
+            - {{ printf "--argo-repo-workflow-timeout=%s=%s" $repo (get $repoWorkflowTimeouts $repo) | quote }}
+            {{- end }}
             {{- if (.Values.argo.resourceSampler).enabled }}
             - --argo-resource-sampler-config=/etc/oberth/resource-sampler/config.json
             {{- end }}
@@ -493,6 +537,16 @@ spec:
               mountPath: /etc/oberth/execution-placement
               readOnly: true
             {{- end }}
+            {{- if .Values.argo.executionTargetConfigMap }}
+            - name: execution-target
+              mountPath: /etc/oberth/execution-target
+              readOnly: true
+            {{- end }}
+            {{- if .Values.argo.executionTargetCredentialsSecret }}
+            - name: execution-target-credentials
+              mountPath: /etc/oberth/execution-target-credentials
+              readOnly: true
+            {{- end }}
             {{- if .Values.argo.releaseTagRoutes }}
             - name: release-tag-routes
               mountPath: /etc/oberth/release-tag-routes
@@ -523,6 +577,22 @@ spec:
             items:
               - key: config.json
                 path: config.json
+        {{- end }}
+        {{- if .Values.argo.executionTargetConfigMap }}
+        - name: execution-target
+          configMap:
+            name: {{ .Values.argo.executionTargetConfigMap | quote }}
+            optional: false
+            items:
+              - key: config.json
+                path: config.json
+        {{- end }}
+        {{- if .Values.argo.executionTargetCredentialsSecret }}
+        - name: execution-target-credentials
+          secret:
+            secretName: {{ .Values.argo.executionTargetCredentialsSecret | quote }}
+            optional: false
+            defaultMode: 0440
         {{- end }}
         {{- if .Values.argo.releaseTagRoutes }}
         - name: release-tag-routes

@@ -2,9 +2,12 @@
 
 A repository's `spec.activeDeadlineSeconds` is retained on the submitted Argo
 Workflow, capped by the administrator's `--argo-workflow-timeout` ceiling
-(default 12 hours). An omitted deadline receives a 30-minute server default.
-The repeatable administrator flag `--argo-repo-workflow-timeout
-forge/org/repo=20m` caps that canonical repository independently; a repository
+(Helm `argo.workflowTimeout`, default 12 hours). An omitted deadline receives
+the server default `--argo-default-workflow-timeout` (Helm
+`argo.defaultWorkflowTimeout`, default 30 minutes), still capped by the
+ceiling. The repeatable administrator flag `--argo-repo-workflow-timeout
+forge/org/repo=20m` (Helm `argo.repoWorkflowTimeouts`, a map of
+`upstream/org/repo` to duration) caps that canonical repository independently; a repository
 cannot raise its cap, and caps never raise the global ceiling. Explicit zero
 or negative deadlines remain invalid.
 Oberth's branch CI declares 5400 seconds. Retrying an ambiguous submission
@@ -19,7 +22,8 @@ creation/admission timestamps are not substituted. Repository-authored
 workflow and template suspension are refused.
 
 Templates may also declare `activeDeadlineSeconds` and `timeout`; these fields
-survive submission. Argo constrains ordinary step Pods by the workflow time
+survive submission (a literal template deadline receives the start-up
+allowance described below). Argo constrains ordinary step Pods by the workflow time
 remaining and any shorter template deadline. Every step, including VM resource steps, shares the bounded workflow lifetime.
 A server watchdog uses Argo's start timestamp and adds a grace period of
 `max(2 minutes, 10% of the workflow budget)`. This lets Argo record its deadline
@@ -96,3 +100,65 @@ pending without stopping the scheduler. Cleanup does not retry the run or
 change its terminal result, and never targets a running parent.
 The executor identity init container logs its initial wait, progress every 30
 seconds and receipt, without logging credential contents.
+
+## Step deadlines exclude Pod start-up (#1499)
+
+Kubernetes counts a Pod's `activeDeadlineSeconds` from Pod start, so image
+pulls, init containers, kubelet contention and the post-exit wait sidecar are
+charged to the step. On a loaded single node, steps that finished in 39 seconds
+were killed at a 180-second limit. Oberth therefore treats a template's literal
+`activeDeadlineSeconds` as the budget of the step command and submits the Pod
+with a bounded start-up allowance on top:
+
+    pod deadline = declared + clamp(declared * factorPercent / 100, minSeconds, maxSeconds)
+
+With the defaults (50%, 120s, 600s) 60s becomes 180s, 180s becomes 300s and
+3600s becomes 4200s. The allowance is administrator-owned Helm configuration:
+
+```yaml
+admission:
+  stepStartupAllowance:
+    enabled: true      # false submits step deadlines exactly as declared
+    factorPercent: 50  # 0-400
+    minSeconds: 120    # 0-3600, at most maxSeconds
+    maxSeconds: 600    # 0-3600; 0 also disables the allowance
+```
+
+rendered as `--admission-step-startup-allowance-percent`, `-min-seconds` and
+`-max-seconds`; the server refuses values outside these bounds at startup.
+The declared value and the applied allowance are recorded on the step Pod as
+the server-owned annotations `oberth.ci/step-deadline-seconds` and
+`oberth.ci/step-start-allowance-seconds`; admission refuses a
+repository-authored copy of either. Classification compares the Pod deadline
+with these recorded values, so changing the setting never reclassifies Pods
+already running. With the allowance disabled no annotations are written and
+only the exit-0 rule below applies. The workflow deadline is unchanged and still bounds the whole run, and
+Argo still lowers a Pod deadline to the remaining workflow budget.
+
+When a step Pod is killed by its own deadline (`DeadlineExceeded`), Oberth
+reads the owned Pod's `main` container:
+
+- `main` exited 0: the step succeeded; the kill happened outside the step
+  command. It is never reported as a step deadline failure.
+- `main` never started (still `ContainerCreating` or `PodInitializing`, or
+  rewritten by the kubelet to `ContainerStatusUnknown` with exit 137, no
+  container and no start time), or the Pod deadline stopped `main` (it
+  finished at the Pod deadline) before it ran the declared budget recorded
+  beside the exact floored Pod deadline (declared plus recorded allowance):
+  start-up consumed the allowance.
+
+A `main` container that exited nonzero on its own before the Pod deadline, was
+killed for memory, or never started because of an image or configuration error
+(`ErrImagePull`, `ImagePullBackOff`, `InvalidImageName`,
+`CreateContainerConfigError`, ...) is the step's own failure and opens a CI-red
+issue as usual.
+
+Both are infrastructure failures with a reason that starts with
+`Startup deadline:` and names the step, the main runtime and the limits. They
+use the existing single automatic infrastructure retry (`infra-retried`,
+`retried as <run>`), open no CI-red issue, and keep their step rows and logs.
+A `main` container that ran at least its declared budget remains the step's own
+`Execution deadline exceeded.` failure, as does any workflow-deadline kill or a
+Pod whose deadline Argo lowered to the remaining workflow budget. Pods
+submitted before the upgrade carry no annotation; only the exit-0 rule applies
+to them.

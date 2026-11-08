@@ -198,10 +198,10 @@ separate concern.
 
 ## Limits
 
-| Setting | Default | Meaning |
-|---|---|---|
-| `--schedule-min-interval` | 15m | Shortest interval a repository may ask for |
-| `--schedule-max-entries` | 8 | Most entries one repository may declare |
+| Setting | Helm value | Default | Meaning |
+|---|---|---|---|
+| `--schedule-min-interval` | `schedules.minInterval` | 15m | Shortest interval a repository may ask for |
+| `--schedule-max-entries` | `schedules.maxEntries` (1-256) | 8 | Most entries one repository may declare |
 
 Both exist because a schedule is the first repository-authored input that causes
 work with nobody watching. Without a floor, `* * * * *` is a denial of service

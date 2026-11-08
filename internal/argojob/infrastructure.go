@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -182,4 +183,99 @@ func (completion *Completion) classifyInfrastructure() {
 		completion.Infrastructure = true
 		completion.Reason = reason
 	}
+}
+
+// podStartupDeadlineReason classifies a step-level Pod deadline kill that the
+// step command did not cause (#1499). Kubernetes counts activeDeadlineSeconds
+// from Pod start, so scheduling contention, image pulls, init containers and
+// the post-exit wait sidecar are charged to the Pod. Three kills are
+// infrastructure: main exited 0 (the step itself succeeded); main never
+// started (still being created, or rewritten by kubelet's TerminatePod to
+// ContainerStatusUnknown/137 without a container or start time); or the Pod
+// deadline itself stopped main before main had used the declared step budget
+// Build recorded beside the floored Pod deadline. A main container that exited
+// nonzero on its own before the deadline, that used its whole declared budget,
+// or that never started because of an image or configuration error remains
+// the step's own failure, and a workflow-deadline kill is never reclassified.
+func podStartupDeadlineReason(workflow *wfv1.Workflow, node wfv1.NodeStatus, pod *corev1.Pod, stage, step string) string {
+	if !stepPodBound(workflow, node, pod) || pod.Status.Phase != corev1.PodFailed || pod.Status.Reason != "DeadlineExceeded" || pod.Spec.ActiveDeadlineSeconds == nil || workflowDeadlineExceeded(workflow) {
+		return ""
+	}
+	var main *corev1.ContainerStatus
+	for i := range pod.Status.ContainerStatuses {
+		status := &pod.Status.ContainerStatuses[i]
+		if status.Name != mainContainerName {
+			continue
+		}
+		if main != nil {
+			return ""
+		}
+		main = status
+	}
+	if main == nil {
+		return ""
+	}
+	limit := *pod.Spec.ActiveDeadlineSeconds
+	if main.State.Terminated != nil && main.State.Terminated.ExitCode == 0 && main.State.Running == nil && main.State.Waiting == nil {
+		return model.StartupDeadlineReasonPrefix + fmt.Sprintf("step %s/%s exited 0, but its Pod deadline of %ds expired outside the step command (Pod start-up or result upload).", stage, step, limit)
+	}
+	declared, ok := declaredStepDeadline(pod)
+	if !ok {
+		return ""
+	}
+	var runtime time.Duration
+	switch {
+	case mainNeverStarted(main):
+		// The whole Pod deadline went to start-up.
+	case main.State.Terminated != nil && main.State.Running == nil && main.State.Waiting == nil:
+		t := main.State.Terminated
+		if t.StartedAt.IsZero() || t.FinishedAt.IsZero() || t.FinishedAt.Before(&t.StartedAt) || !killedByPodDeadline(pod, t) {
+			return ""
+		}
+		runtime = t.FinishedAt.Sub(t.StartedAt.Time)
+	default:
+		return ""
+	}
+	if runtime >= time.Duration(declared)*time.Second {
+		return ""
+	}
+	return model.StartupDeadlineReasonPrefix + fmt.Sprintf("step %s/%s ran %s of its %ds budget; its Pod deadline of %ds expired during Pod start-up (scheduling, image pull, init containers).", stage, step, runtime.Truncate(time.Second), declared, limit)
+}
+
+// podDeadlineClockSkew tolerates the kubelet recording main's finish a moment
+// before its own Pod deadline check, measured from the Pod's start time.
+const podDeadlineClockSkew = 2 * time.Second
+
+// mainNeverStarted accepts only the shapes of a container that was still being
+// started when the Pod deadline expired. Kubelet's TerminatePod rewrites every
+// non-terminated container of an initialized Pod to ContainerStatusUnknown with
+// exit 137 and no start time; a container still being created keeps its
+// ContainerCreating or PodInitializing waiting reason. Image and configuration
+// errors (ErrImagePull, InvalidImageName, CreateContainerConfigError, ...) are
+// the repository's own failure and never count as start-up.
+func mainNeverStarted(main *corev1.ContainerStatus) bool {
+	if main.ContainerID != "" || main.LastTerminationState.Terminated != nil || main.State.Running != nil {
+		return false
+	}
+	if waiting := main.State.Waiting; waiting != nil {
+		return main.State.Terminated == nil && (waiting.Reason == "ContainerCreating" || waiting.Reason == "PodInitializing")
+	}
+	t := main.State.Terminated
+	return t != nil && t.Reason == "ContainerStatusUnknown" && t.ExitCode == 137 && t.StartedAt.IsZero() && t.ContainerID == ""
+}
+
+// killedByPodDeadline reports whether the Pod deadline stopped main, rather
+// than main exiting on its own. Main must have finished at or after the Pod
+// deadline; without a Pod start time only a plain SIGKILL exit (137, not an
+// out-of-memory kill) is accepted. A nonzero exit before the deadline is
+// always the step's own failure.
+func killedByPodDeadline(pod *corev1.Pod, t *corev1.ContainerStateTerminated) bool {
+	if t.Reason == "OOMKilled" {
+		return false
+	}
+	if pod.Status.StartTime == nil || pod.Status.StartTime.IsZero() {
+		return t.ExitCode == 137
+	}
+	deadline := pod.Status.StartTime.Add(time.Duration(*pod.Spec.ActiveDeadlineSeconds) * time.Second)
+	return !t.FinishedAt.Time.Before(deadline.Add(-podDeadlineClockSkew))
 }

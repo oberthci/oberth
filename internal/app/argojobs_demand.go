@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
@@ -108,4 +109,25 @@ func (jobs *ArgoJobs) AdoptedResourceFallback(run model.Run) (model.ResourceAdmi
 		return "", fmt.Errorf("app: no adopted resource binding for run %s", run.ID)
 	}
 	return intent.adoption.Fallback, nil
+}
+
+// AdoptedExclusiveClasses returns the exclusive classes the adopted live
+// Workflow declares, so a restart keeps them held (#1499).
+func (jobs *ArgoJobs) AdoptedExclusiveClasses(run model.Run) ([]string, error) {
+	if jobs.routes != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		child, err := jobs.routes.forName(ctx, run.WorkflowName, run.ID)
+		if err != nil {
+			return nil, err
+		}
+		return child.AdoptedExclusiveClasses(run)
+	}
+	jobs.mu.Lock()
+	defer jobs.mu.Unlock()
+	intent, ok := jobs.intents[run.WorkflowName]
+	if !ok || intent.runID != run.ID || intent.adoption == nil {
+		return nil, fmt.Errorf("app: no adopted exclusive binding for run %s", run.ID)
+	}
+	return slices.Clone(intent.adoption.Exclusive), nil
 }

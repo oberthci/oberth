@@ -104,6 +104,27 @@ admission:
   # Hold new workflow admission below this free-space floor; existing grants
   # continue. Zero disables the disk floor.
   diskFloorBytes: 0
+  # Server-wide exclusive classes (#1499): class name -> concurrent-run limit.
+  # A step declaring template annotation oberth.ci/exclusive: <class> makes its
+  # run wait in Oberth's queue while <limit> runs of that class hold it, across
+  # all repositories. Empty (default) refuses every declaration. Example:
+  #   exclusiveClasses:
+  #     kvm: 1
+  # See docs/exclusive-classes.md.
+  exclusiveClasses: {}
+  # Startup bound for an admitted workflow that has neither a scheduled pod nor
+  # progress (Kubernetes capacity waits are exempt). Go duration, e.g. 10m.
+  stallTimeout: "10m"
+  # Pod start-up allowance added to every literal step activeDeadlineSeconds
+  # (#1499): clamp(declared * factorPercent / 100, minSeconds, maxSeconds).
+  # The declared value stays the step's verdict budget. enabled: false (or
+  # maxSeconds: 0) submits step deadlines exactly as declared.
+  # See docs/workflow-deadlines.md.
+  stepStartupAllowance:
+    enabled: true
+    factorPercent: 50
+    minSeconds: 120
+    maxSeconds: 600
   # Deprecated compatibility values: retained for upgrades, ignored by admission.
   declaredResources:
     extendedResources: {}
@@ -119,6 +140,12 @@ admission:
     M: 2
     L: 3
     XL: 0
+
+# Repository cron schedules (docs/scheduled-runs.md): the shortest interval a
+# repository may schedule itself at, and the most entries it may declare.
+schedules:
+  minInterval: "15m"
+  maxEntries: 8
 
 # Optional public dashboard URL echoed to every accepted git push as a
 # "remote: watch: <url>" line. Display-only; must be HTTPS when set.
@@ -292,6 +319,13 @@ argo:
   releaseTagRoutes: {}
   # Existing administrator ConfigMap with the closed public config.json binding.
   executionPlacementConfigMap: ""
+  # Existing administrator ConfigMap whose config.json key is the branch
+  # execution target policy (docs/execution-targets.md), mounted read-only at
+  # /etc/oberth/execution-target. Empty keeps every run on the local engine.
+  executionTargetConfigMap: ""
+  # Optional existing Secret mounted read-only at
+  # /etc/oberth/execution-target-credentials for the policy's kubeconfig path.
+  executionTargetCredentialsSecret: ""
   # Empty disables nonroot execution. The named profile still requires actual
   # immutable controller/configuration verification before each submission.
   controllerProfile: ""
@@ -377,6 +411,12 @@ argo:
   # Workflow object is retained.
   workflowTimeout: 12h
   workflowTTL: 3600
+  # Deadline of a document that declares no spec.activeDeadlineSeconds, still
+  # capped by workflowTimeout and repoWorkflowTimeouts.
+  defaultWorkflowTimeout: 30m
+  # Per-repository deadline caps below workflowTimeout, keyed by
+  # upstream/org/repo, e.g. {"codeberg/example/app": "45m"}.
+  repoWorkflowTimeouts: {}
 
   # Storage class for the per-run source volume the server creates in this
   # namespace. A Pod may only mount claims in its own namespace, so a pipeline

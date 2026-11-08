@@ -74,6 +74,16 @@ func (r *DemandReceipt) DeclaredPodDemand() (*PodDemand, error) {
 }
 
 func (r *DemandReceipt) Summary() RunSourceSummary { return r.summary }
+
+// ExclusiveClasses reads the exclusive classes of the admitted, fragment-
+// resolved graph (#1499), so a class declared inside a fragment is seen by
+// admission exactly as Build and restart adoption see it.
+func (r *DemandReceipt) ExclusiveClasses() ([]string, error) {
+	if r == nil || r.pods == nil {
+		return nil, errors.New("argoworkflow: no admitted workflow source")
+	}
+	return DeclaredExclusiveClasses(r.pods.DeepCopy())
+}
 func (r *DemandReceipt) Fragments() map[FragmentKey]Fragment {
 	return cloneSourceFragments(r.fragments)
 }

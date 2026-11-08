@@ -1,6 +1,20 @@
 package model
 
-import "time"
+import (
+	"strings"
+	"time"
+)
+
+// StartupDeadlineReasonPrefix starts the infrastructure reason the engine
+// emits only from owned Pod evidence that a step-level Pod deadline expired
+// outside the step command (#1499): main exited 0, or ran less than its
+// declared budget because Pod start-up consumed the rest.
+const StartupDeadlineReasonPrefix = "Startup deadline: "
+
+// IsStartupDeadlineReason reports the engine's startup-deadline reason.
+func IsStartupDeadlineReason(message string) bool {
+	return strings.HasPrefix(message, StartupDeadlineReasonPrefix)
+}
 
 // RunTerminalObservation is a complete terminal Workflow snapshot, never a
 // synthesized scheduler result. It retains every step attempt, not just latest.
@@ -12,13 +26,16 @@ type RunTerminalObservation struct {
 }
 type RunObservedStep struct {
 	// Evicted is set only from owned kubelet/Argo eviction evidence.
-	Evicted    bool       `json:"evicted,omitempty"`
-	StartedAt  *time.Time `json:"started_at,omitempty"`
-	FinishedAt *time.Time `json:"finished_at,omitempty"`
-	Stage      string     `json:"burn"`
-	Step       string     `json:"step"`
-	Status     StepStatus `json:"status"`
-	Started    bool       `json:"started"`
+	Evicted bool `json:"evicted,omitempty"`
+	// StartupDeadline is set only from owned Pod deadline evidence that the
+	// step command did not exhaust its declared budget (#1499).
+	StartupDeadline bool       `json:"startup_deadline,omitempty"`
+	StartedAt       *time.Time `json:"started_at,omitempty"`
+	FinishedAt      *time.Time `json:"finished_at,omitempty"`
+	Stage           string     `json:"burn"`
+	Step            string     `json:"step"`
+	Status          StepStatus `json:"status"`
+	Started         bool       `json:"started"`
 }
 type RunReplayAttempt struct {
 	Run                Run
@@ -84,8 +101,9 @@ func IsInfrastructureRunFailure(status RunStatus, phase, failedStep string) bool
 }
 
 // EvictionOnly requires a complete terminal snapshot whose every failed attempt
-// has a kubelet eviction cause. Unknown, timed-out and earlier real failures
-// cannot be hidden by a later eviction of the same logical step.
+// has a kubelet eviction or startup-deadline (#1499) cause. Unknown, timed-out
+// and earlier real failures cannot be hidden by a later eviction of the same
+// logical step.
 func (o *RunTerminalObservation) EvictionOnly() bool {
 	if o == nil || o.Version != 1 || o.WorkflowName == "" || o.Nodes < len(o.Steps) || o.Nodes > 4096 {
 		return false
@@ -96,7 +114,7 @@ func (o *RunTerminalObservation) EvictionOnly() bool {
 			return false
 		}
 		if step.Status == StepFailed {
-			if !step.Evicted || step.Stage == "" || step.Step == "" || step.StartedAt == nil || step.FinishedAt == nil {
+			if !step.Infrastructure() || step.Stage == "" || step.Step == "" || step.StartedAt == nil || step.FinishedAt == nil {
 				return false
 			}
 			found = true
@@ -105,6 +123,10 @@ func (o *RunTerminalObservation) EvictionOnly() bool {
 	return found
 }
 
+// Infrastructure reports owned evidence that the attempt failed for a node or
+// Pod start-up cause rather than for its own command.
+func (s RunObservedStep) Infrastructure() bool { return s.Evicted || s.StartupDeadline }
+
 // EvictedAttempt binds retained failure evidence to its exact observed attempt.
 // It does not erase step status, logs, exit code or diagnostic history.
 func (o *RunTerminalObservation) EvictedAttempt(stage, step string, started, finished *time.Time) bool {
@@ -112,7 +134,7 @@ func (o *RunTerminalObservation) EvictedAttempt(stage, step string, started, fin
 		return false
 	}
 	for _, attempt := range o.Steps {
-		if attempt.Evicted && attempt.Status == StepFailed && attempt.Stage == stage && attempt.Step == step && attempt.StartedAt != nil && attempt.FinishedAt != nil && started.Equal(*attempt.StartedAt) && finished.Equal(*attempt.FinishedAt) {
+		if attempt.Infrastructure() && attempt.Status == StepFailed && attempt.Stage == stage && attempt.Step == step && attempt.StartedAt != nil && attempt.FinishedAt != nil && started.Equal(*attempt.StartedAt) && finished.Equal(*attempt.FinishedAt) {
 			return true
 		}
 	}

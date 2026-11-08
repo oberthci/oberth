@@ -390,6 +390,10 @@ type WorkflowRequest struct {
 	// this run under (#658), empty for none. Engines record it with the
 	// submission; it never selects identity or resources.
 	ConcurrencyGroup string
+	// Exclusive is the sorted exclusive-class set admission granted (#1499),
+	// read from the fragment-resolved graph. Build refuses a Workflow whose
+	// resolved classes differ.
+	Exclusive []string
 }
 
 type JobResult struct {
