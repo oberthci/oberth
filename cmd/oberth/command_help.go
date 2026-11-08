@@ -13,6 +13,7 @@ var commandGroups = map[string]string{
 	"branch":      "prune|deletions",
 	"fragments":   "list|show",
 	"preflight":   "drift|pki|upstreams",
+	"release-wif": "list|grant|revoke|reset",
 	"repo":        "add|remove|archive|unarchive|verify",
 	"resource":    "grant|get|revoke",
 	"secretstore": "setup|verify|sync|exec|bootstrap-tls",

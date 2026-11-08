@@ -206,6 +206,11 @@ call the proxy hostname directly.
 | `wait` | Long-poll until a SHA or exact run ID reaches a terminal state |
 | `sync` | Park a WIP branch upstream without a green gate (not completion evidence) |
 | `queue_cap_config` | Unscoped admin only: set the branch queue cap with `maxNotStarted` (integer, 0 disables; off by default). Defer branch run creation when queued and waiting runs reach the cap; drain deferred receives in arrival order after capacity opens. Accepted deferred pushes stay in Oberth's Git cache and durable receive journal; automatic upstream publication requires successful CI. Tags/releases, promotions and schedules bypass the cap. Audited; setting and backlog survive restart. `system_status.queue_cap` reports `max_not_started`, `not_started`, `deferred` and `reason`; `queueCap` remains for one more release |
+| `admission_capacity_config` | Unscoped admin only: set (`max_concurrent_jobs`, 1..64) or `clear` the server-owned runtime workflow ceiling with a required `reason` (#1497). It overrides the mounted runtime-capacity file and the boot flag without Helm upgrade or restart; clearing restores them. Lowering never cancels admitted work. Audited with the previous value; `system_status.admission.configuration.source` reports `runtime` |
+| `release_wif_list` | Unscoped admin only: read the boot (Helm/flag) release WIF repository map, runtime overrides, the effective map used by release preflight and tag admission, configured role names and any stored grant left inactive. Public data only |
+| `release_wif_grant` | Unscoped admin only: grant or replace one registered repository's release WIF entry (`service_account_name`, `templates` leaf -> configured role) with a required `reason`. Roles, namespace and dedicated step identities stay Helm configuration. Validated against the boot map and applied without restart; audited |
+| `release_wif_revoke` | Unscoped admin only: revoke a repository's release WIF entry at runtime, including a Helm entry or one for a retired, unregistered `upstream/org/repo`. Audited, `reason` required |
+| `release_wif_reset` | Unscoped admin only: drop a repository's runtime release WIF override so the Helm boot default applies again. Audited, `reason` required |
 | `promote` | Promote a green branch SHA or an authorized parked SHA; parked sources always run merged-tree CI; push without force |
 | `promotion_list` | Recover durable promotion IDs by exact repo/full source SHA/status; bounded pages with an admission-sequence cursor |
 | `promote_status` | Wait for a promotion record to become terminal; a failed or interrupted promotion that was retried names its successor in `retried_as` |
@@ -931,7 +936,7 @@ Issue metadata writes can pass `expected_revision` from a prior read; mismatch
 is a conflict, while omission preserves last-write-wins. See
 [conditional metadata updates](issue-lifecycle.md).
 
-The current MCP surface has **78 tools**, including administrator-only
+The current MCP surface has **83 tools**, including administrator-only
 `publication_abandon`.
 
 The CLI uses `--url`, `OBERTH_MCP_URL`, or `OBERTH_BASE_URL` (with

@@ -68,7 +68,7 @@ func main() {
 	}
 }
 
-const usageCommands = "admin, wait-idle, git-ssh, audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, branch, outbox, schedules, fragments, artifacts, runs, run, promotion, publication, log, repos, issues, status, uplink, access, resource, size, admission, secretstore, mcp, preflight, or version"
+const usageCommands = "admin, wait-idle, git-ssh, audit, init, validate, install, setup, upgrade, backup, restore, serve, upstream, repo, branch, outbox, schedules, fragments, artifacts, runs, run, promotion, publication, log, repos, issues, status, uplink, access, resource, size, admission, release-wif, secretstore, mcp, preflight, or version"
 
 func runCLI(ctx context.Context, arguments []string, input io.Reader, output io.Writer) (resultErr error) {
 	defer func() {
@@ -126,7 +126,8 @@ Commands:
   access        Manage secret access grants
   resource      Manage repository CPU/memory request and limit ceilings
   size          Manage legacy admission size and tag priority policy
-  admission     Show the server's admission reservations, or release a stale one
+  admission     Show the server's admission reservations, release a stale one, or set runtime capacity
+  release-wif   Grant, revoke or reset runtime release WIF repository capabilities
   secretstore   Verify and inspect the secret store
   mcp           Call Oberth MCP tools
   preflight     Release pre-flight checks
@@ -189,6 +190,8 @@ Commands:
 		return runSizeGrant(ctx, arguments[1:], output)
 	case "admission":
 		return runAdmission(ctx, arguments[1:], output)
+	case "release-wif":
+		return runReleaseWIF(ctx, arguments[1:], output)
 	case "secretstore":
 		return runSecretStore(ctx, arguments[1:], output)
 	case "mcp":

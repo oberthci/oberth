@@ -636,6 +636,11 @@ type Request struct {
 	// both Builds of one admission to the same identity version, so the audit
 	// record and the pod spec always agree. (Issue #465)
 	Identities *IdentitySnapshot
+
+	// ReleaseWIF overrides Config.ReleaseWIF when non-nil. The caller pins
+	// ReleaseWIFRuntime.Snapshot() once per admission so the audit Build and
+	// the submitted Workflow carry the same runtime capability map (#1497).
+	ReleaseWIF *ReleaseWIFConfig
 }
 
 // Build turns a repository document into the exact Workflow object Oberth will
@@ -677,6 +682,7 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 			config.PerStepIdentities = request.Identities.Step
 		}
 	}
+	config = config.withRequestReleaseWIF(request)
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}

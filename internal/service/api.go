@@ -90,6 +90,10 @@ type APIConfig struct {
 	SizeGrants                SizeGrantStore
 	QueuePriorities           QueuePriorityStore
 	QueueCap                  QueueCapStore
+	ReleaseWIFOverrides       ReleaseWIFOverrideStore
+	ReleaseWIF                ReleaseWIFPolicy
+	CapacityOverrides         AdmissionCapacityOverrideStore
+	RuntimeCapacity           RuntimeCapacityController
 	SecretStoreVerifier       SecretStoreVerifier
 	SecretAccessReconciler    *AccessReconciler
 	RepositoryArchiver        RepositoryArchiver
@@ -163,6 +167,11 @@ type API struct {
 	sizeGrants                SizeGrantStore
 	queuePriorities           QueuePriorityStore
 	queueCap                  QueueCapStore
+	releaseWIFOverrides       ReleaseWIFOverrideStore
+	releaseWIF                ReleaseWIFPolicy
+	releaseWIFMu              *sync.Mutex
+	capacityOverrides         AdmissionCapacityOverrideStore
+	runtimeCapacity           RuntimeCapacityController
 	deferredBranches          deferredBranchReader
 	secretStoreVerifier       SecretStoreVerifier
 	secretAccessReconciler    *AccessReconciler
@@ -279,6 +288,8 @@ func NewAPI(config APIConfig) (*API, error) {
 		repositoryRemover: config.RepositoryRemover, removeGitCache: config.RemoveGitCache,
 		promotionGrants: config.PromotionGrants, promotionGrantMaxLifetime: promotionGrantMaxLifetime,
 		runCancels: config.RunCancels, retention: config.Retention, runReruns: config.RunReruns, schedules: config.Schedules, uplinks: config.Uplinks, background: &sync.WaitGroup{},
+		releaseWIFOverrides: config.ReleaseWIFOverrides, releaseWIF: config.ReleaseWIF, releaseWIFMu: &sync.Mutex{},
+		capacityOverrides: config.CapacityOverrides, runtimeCapacity: config.RuntimeCapacity,
 		promotionProgress: &sync.Map{},
 		lifetime:          lifetime, stopLifetime: stopLifetime, closing: &backgroundClosing{},
 	}, nil
@@ -450,6 +461,10 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		return service.priorityGrantTool(ctx, actor, name, raw)
 	case "queue_cap_config":
 		return service.queueCapConfig(ctx, actor, raw)
+	case "admission_capacity_config":
+		return service.admissionCapacityConfig(ctx, actor, raw)
+	case "release_wif_list", "release_wif_grant", "release_wif_revoke", "release_wif_reset":
+		return service.releaseWIFTool(ctx, actor, name, raw)
 	case "queue_priority_config", "queue_priority_get", "run_priority":
 		return service.queuePriorityTool(ctx, actor, name, raw)
 	case "admission_release":
@@ -3092,7 +3107,7 @@ func MutatingTool(name string) bool {
 		"access_allow", "access_revoke",
 		"workflow_capability_grant", "workflow_capability_revoke",
 		"size_grant", "size_revoke", "resource_grant", "resource_revoke",
-		"admission_release", "admission_hold", "queue_cap_config", "queue_priority_config", "run_priority", "priority_grant", "priority_grant_revoke",
+		"admission_release", "admission_hold", "queue_cap_config", "admission_capacity_config", "release_wif_grant", "release_wif_revoke", "release_wif_reset", "queue_priority_config", "run_priority", "priority_grant", "priority_grant_revoke",
 		"repo_remove", "repo_archive", "repo_unarchive", "branch_delete_many", "receive_outbox",
 		"secretstore_sync_receipt",
 		"promote_grant", "promote_grant_revoke",

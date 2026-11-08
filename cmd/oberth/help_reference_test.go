@@ -23,6 +23,7 @@ access revoke
 admin
 admin read-file
 admission
+admission capacity
 admission groups
 admission hold
 admission release
@@ -60,6 +61,11 @@ promotion retry
 promotion create
 publication
 publication abandon
+release-wif
+release-wif grant
+release-wif list
+release-wif reset
+release-wif revoke
 repo
 repo add
 repo archive

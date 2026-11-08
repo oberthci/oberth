@@ -156,6 +156,9 @@ func buildArgoEngine(
 	if identityStore != nil {
 		jobs.SetIdentityStore(identityStore)
 	}
+	// Helm/flag capabilities are the boot default; audited runtime overrides
+	// from the store are layered on in serve before requests are accepted.
+	jobs.SetReleaseWIFRuntime(argojob.NewReleaseWIFRuntime(config))
 	return jobs, nil
 }
 

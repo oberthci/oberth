@@ -1,0 +1,247 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/oberthci/oberth/internal/api"
+	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/store"
+)
+
+// Runtime administration (#1497): server-owned overrides layered on the Helm
+// or flag boot defaults. Overrides live only in the audited store, so a Helm
+// upgrade never shares an object with them and cannot conflict.
+
+// ReleaseWIFOverrideStore persists audited runtime release WIF decisions.
+type ReleaseWIFOverrideStore interface {
+	ReleaseWIFOverrides(context.Context) ([]model.ReleaseWIFOverride, error)
+	SetReleaseWIFOverride(context.Context, string, model.ReleaseWIFOverrideSpec) (model.ReleaseWIFOverride, error)
+	ClearReleaseWIFOverride(context.Context, string, string, string) (model.ReleaseWIFOverride, error)
+}
+
+// ReleaseWIFPolicy merges overrides with the boot capability map.
+type ReleaseWIFPolicy interface {
+	Check([]model.ReleaseWIFOverride) error
+	Apply([]model.ReleaseWIFOverride) []model.ReleaseWIFOverrideStatus
+	State() model.ReleaseWIFState
+}
+
+// AdmissionCapacityOverrideStore persists the audited runtime ceiling.
+type AdmissionCapacityOverrideStore interface {
+	AdmissionCapacityOverride(context.Context) (*model.AdmissionCapacityOverride, error)
+	SetAdmissionCapacityOverride(context.Context, string, int, string) (*model.AdmissionCapacityOverride, error)
+}
+
+// RuntimeCapacityController validates and applies the runtime ceiling.
+type RuntimeCapacityController interface {
+	ValidateRuntimeCapacity(int) error
+	ApplyRuntimeCapacity(context.Context) model.AdmissionCapacityConfig
+}
+
+type qualifiedRepositoryNamer interface {
+	QualifiedRepoName(context.Context, int64) (string, error)
+}
+
+func requireRuntimeAdmin(actor api.Actor, tool string) error {
+	if !actor.Admin {
+		return refuse(ErrForbidden, "%s requires an admin uplink", tool)
+	}
+	return requireUnscoped(actor, tool)
+}
+
+func runtimeOverrideReason(reason string) error {
+	if strings.TrimSpace(reason) == "" || len(reason) > 512 {
+		return refuse(ErrInvalidInput, "a 1..512 byte reason is required")
+	}
+	return nil
+}
+
+// ReloadReleaseWIF publishes the stored overrides. Startup and every change
+// call it; an invalid stored grant stays inactive and is reported.
+func ReloadReleaseWIF(ctx context.Context, overrides ReleaseWIFOverrideStore, policy ReleaseWIFPolicy) ([]model.ReleaseWIFOverrideStatus, error) {
+	values, err := overrides.ReleaseWIFOverrides(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return policy.Apply(values), nil
+}
+
+func (service *API) releaseWIFTool(ctx context.Context, actor api.Actor, name string, raw json.RawMessage) (any, error) {
+	if err := requireRuntimeAdmin(actor, name); err != nil {
+		return nil, err
+	}
+	if service.releaseWIFOverrides == nil || service.releaseWIF == nil {
+		return nil, refuse(ErrUnavailable, "runtime release WIF administration")
+	}
+	if name == "release_wif_list" {
+		if err := decodeTool(raw, &struct{}{}); err != nil {
+			return nil, err
+		}
+		return service.releaseWIFView(ctx)
+	}
+	var args struct {
+		Repo               string            `json:"repo"`
+		ServiceAccountName string            `json:"service_account_name"`
+		Templates          map[string]string `json:"templates"`
+		Reason             string            `json:"reason"`
+	}
+	if err := decodeTool(raw, &args); err != nil {
+		return nil, err
+	}
+	if err := runtimeOverrideReason(args.Reason); err != nil {
+		return nil, err
+	}
+	if name != "release_wif_grant" && (args.ServiceAccountName != "" || args.Templates != nil) {
+		return nil, refuse(ErrInvalidInput, "%s takes only repo and reason", name)
+	}
+	repo, registered, err := service.releaseWIFRepositoryKey(ctx, args.Repo)
+	if err != nil {
+		return nil, err
+	}
+	// One change at a time: the candidate check and the write must see the
+	// same override set, or two valid grants could combine into a conflict.
+	service.releaseWIFMu.Lock()
+	defer service.releaseWIFMu.Unlock()
+	current, err := service.releaseWIFOverrides.ReleaseWIFOverrides(ctx)
+	if err != nil {
+		return nil, err
+	}
+	candidate := make([]model.ReleaseWIFOverride, 0, len(current)+1)
+	var existing *model.ReleaseWIFOverride
+	for i := range current {
+		if current[i].Repo == repo {
+			existing = &current[i]
+			continue
+		}
+		candidate = append(candidate, current[i])
+	}
+	state := service.releaseWIF.State()
+	switch name {
+	case "release_wif_grant":
+		if registered == nil {
+			return nil, fmt.Errorf("%w: release WIF grants require a registered repository: %s", store.ErrNotFound, args.Repo)
+		}
+		if err := refuseArchivedGrant(*registered, name, repo); err != nil {
+			return nil, err
+		}
+		grant, err := json.Marshal(map[string]any{"service_account_name": args.ServiceAccountName, "templates": args.Templates})
+		if err != nil {
+			return nil, err
+		}
+		candidate = append(candidate, model.ReleaseWIFOverride{Repo: repo, Grant: grant})
+		if err := service.releaseWIF.Check(candidate); err != nil {
+			return nil, refuse(ErrInvalidInput, "%v", err)
+		}
+		_, err = service.releaseWIFOverrides.SetReleaseWIFOverride(ctx, actor.Identity, model.ReleaseWIFOverrideSpec{Repo: repo, Grant: grant, Reason: args.Reason})
+		if err != nil {
+			return nil, err
+		}
+	case "release_wif_revoke":
+		if _, active := state.Effective[repo]; !active && (existing == nil || existing.Revoked) {
+			return nil, refuse(store.ErrInvalidState, "%s has no active release WIF entry", repo)
+		}
+		if _, err := service.releaseWIFOverrides.SetReleaseWIFOverride(ctx, actor.Identity, model.ReleaseWIFOverrideSpec{Repo: repo, Revoked: true, Reason: args.Reason}); err != nil {
+			return nil, err
+		}
+	case "release_wif_reset":
+		if existing == nil {
+			return nil, refuse(store.ErrInvalidState, "%s has no runtime release WIF override", repo)
+		}
+		// Restoring the boot entry must not conflict with other runtime grants.
+		if err := service.releaseWIF.Check(candidate); err != nil {
+			return nil, refuse(ErrInvalidInput, "%v", err)
+		}
+		if _, err := service.releaseWIFOverrides.ClearReleaseWIFOverride(ctx, actor.Identity, repo, args.Reason); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("%w: unknown release WIF tool %s", ErrInvalidInput, name)
+	}
+	if _, err := ReloadReleaseWIF(ctx, service.releaseWIFOverrides, service.releaseWIF); err != nil {
+		return nil, fmt.Errorf("release WIF change is stored and audited but not yet applied; retry release_wif_list or restart: %w", err)
+	}
+	return service.releaseWIFView(ctx)
+}
+
+func (service *API) releaseWIFView(ctx context.Context) (any, error) {
+	overrides, err := service.releaseWIFOverrides.ReleaseWIFOverrides(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if overrides == nil {
+		overrides = []model.ReleaseWIFOverride{}
+	}
+	state := service.releaseWIF.State()
+	return map[string]any{"enabled": state.Enabled, "roles": state.Roles, "boot": state.Boot, "overrides": overrides, "effective": state.Effective, "inactive": state.Inactive}, nil
+}
+
+// A registered repository always uses its canonical "upstream/org/repo" key.
+// An unregistered exact key remains revocable, so a retired repository's
+// boot entry can be removed without a Helm change.
+func (service *API) releaseWIFRepositoryKey(ctx context.Context, name string) (string, *model.Repository, error) {
+	if strings.TrimSpace(name) == "" || len(name) > 512 {
+		return "", nil, refuse(ErrInvalidInput, "repo is required")
+	}
+	if service.repositories == nil {
+		return "", nil, refuse(ErrUnavailable, "repositories")
+	}
+	repository, err := service.repositories.RepositoryByName(ctx, name)
+	if errors.Is(err, store.ErrNotFound) {
+		if parts := strings.Split(name, "/"); len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+			return "", nil, fmt.Errorf("%w: unregistered repositories must be named upstream/org/repo", ErrInvalidInput)
+		}
+		return name, nil, nil
+	}
+	if err != nil {
+		return "", nil, err
+	}
+	namer, ok := service.repositories.(qualifiedRepositoryNamer)
+	if !ok {
+		return "", nil, refuse(ErrUnavailable, "repository canonical names")
+	}
+	key, err := namer.QualifiedRepoName(ctx, repository.ID)
+	if err != nil {
+		return "", nil, err
+	}
+	return key, &repository, nil
+}
+
+func (service *API) admissionCapacityConfig(ctx context.Context, actor api.Actor, raw json.RawMessage) (any, error) {
+	if err := requireRuntimeAdmin(actor, "admission_capacity_config"); err != nil {
+		return nil, err
+	}
+	if service.capacityOverrides == nil || service.runtimeCapacity == nil {
+		return nil, refuse(ErrUnavailable, "runtime admission capacity")
+	}
+	var args struct {
+		MaxConcurrentJobs *int   `json:"max_concurrent_jobs"`
+		Clear             bool   `json:"clear"`
+		Reason            string `json:"reason"`
+	}
+	if err := decodeTool(raw, &args); err != nil {
+		return nil, err
+	}
+	if err := runtimeOverrideReason(args.Reason); err != nil {
+		return nil, err
+	}
+	if (args.MaxConcurrentJobs == nil) == !args.Clear {
+		return nil, refuse(ErrInvalidInput, "pass exactly one of max_concurrent_jobs (1..64) or clear")
+	}
+	jobs := 0
+	if args.MaxConcurrentJobs != nil {
+		jobs = *args.MaxConcurrentJobs
+		if err := service.runtimeCapacity.ValidateRuntimeCapacity(jobs); err != nil {
+			return nil, refuse(ErrInvalidInput, "%v", err)
+		}
+	}
+	override, err := service.capacityOverrides.SetAdmissionCapacityOverride(ctx, actor.Identity, jobs, args.Reason)
+	if err != nil {
+		return nil, err
+	}
+	configuration := service.runtimeCapacity.ApplyRuntimeCapacity(ctx)
+	return map[string]any{"override": override, "configuration": configuration}, nil
+}

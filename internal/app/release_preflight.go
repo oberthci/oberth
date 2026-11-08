@@ -56,6 +56,7 @@ func (jobs *ArgoJobs) preflightRelease(ctx context.Context, request service.Work
 	if identities != nil {
 		submission.Identities = identities.Snapshot()
 	}
+	submission.ReleaseWIF = jobs.releaseWIFSnapshot()
 	result, err := argojob.PreflightRelease(jobs.config, submission)
 	if err != nil {
 		return service.ReleasePreflightResult{}, err

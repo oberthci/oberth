@@ -224,7 +224,15 @@ DELETE FROM schema_migrations WHERE id='20261106053000-protected-workflow-custod
 
 // PostBranchDeletionsDowngrade removes the asynchronous branch deletion
 // records from disposable historical fixtures.
-const PostBranchDeletionsDowngrade = `
+const PostBranchDeletionsDowngrade = PostRuntimeOverridesDowngrade + `
 DROP TABLE IF EXISTS branch_deletions;
 DELETE FROM schema_migrations WHERE id='20261107120000-branch-deletions';
+`
+
+// PostRuntimeOverridesDowngrade removes the runtime release WIF and admission
+// capacity overrides (#1497) from disposable historical fixtures.
+const PostRuntimeOverridesDowngrade = `
+DROP TABLE IF EXISTS release_wif_overrides;
+DROP TABLE IF EXISTS admission_capacity_override;
+DELETE FROM schema_migrations WHERE id='20261108090000-runtime-admin-overrides';
 `

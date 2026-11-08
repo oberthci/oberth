@@ -412,3 +412,47 @@ func TestRuntimeCapacityDispatchUsesEffectiveLimitWhileClaimsPrepare(t *testing.
 		t.Fatal("lower did not restrict future dispatch")
 	}
 }
+
+// The server-owned override (#1497) wins over the mounted file, survives its
+// reloads, and clearing it hands authority back to the file. A failed
+// override read keeps the last good value instead of falling back.
+func TestRuntimeCapacityOverrideTakesPrecedenceOverFile(t *testing.T) {
+	s, auditor := runtimeCapacityFixture(t, 2)
+	if err := os.WriteFile(s.capacityFile, []byte("3\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	var override *model.AdmissionCapacityOverride
+	var readErr error
+	s.SetCapacityOverrideReader(func(context.Context) (*model.AdmissionCapacityOverride, error) { return override, readErr })
+	s.refreshRuntimeCapacity(ctx)
+	if s.concurrentJobs() != 3 {
+		t.Fatalf("file jobs = %d", s.concurrentJobs())
+	}
+	override = &model.AdmissionCapacityOverride{MaxConcurrentJobs: 1}
+	if got := s.ApplyRuntimeCapacity(ctx); got.MaxConcurrentJobs != 1 || got.Source != "runtime" || s.concurrentJobs() != 1 {
+		t.Fatalf("runtime override = %+v", got)
+	}
+	s.refreshRuntimeCapacity(ctx)
+	if s.concurrentJobs() != 1 {
+		t.Fatal("file reload replaced the runtime override")
+	}
+	readErr = errors.New("database is locked")
+	if got := s.ApplyRuntimeCapacity(ctx); got.MaxConcurrentJobs != 1 || got.Error == "" || strings.Contains(got.Error, "locked") {
+		t.Fatalf("override read failure must keep last good with a public error: %+v", got)
+	}
+	readErr, override = nil, nil
+	if got := s.ApplyRuntimeCapacity(ctx); got.MaxConcurrentJobs != 3 || got.Source != "file" || got.Error != "" {
+		t.Fatalf("cleared override = %+v", got)
+	}
+	if err := s.ValidateRuntimeCapacity(65); err == nil {
+		t.Fatal("65 jobs validated")
+	}
+	sources := []string{}
+	for _, action := range auditor.actions {
+		sources = append(sources, action.Details)
+	}
+	if len(auditor.actions) != 3 || !strings.Contains(sources[1], `"source":"runtime"`) || !strings.Contains(sources[2], `"previous_source":"runtime"`) {
+		t.Fatalf("capacity audit = %v", sources)
+	}
+}

@@ -83,6 +83,7 @@ type Scheduler struct {
 	workspaceRoot      string
 	maxConcurrent      int // immutable boot default
 	capacityFile       string
+	capacityOverride   CapacityOverrideReader // server-owned runtime layer (#1497)
 	capacityReloadMu   sync.Mutex
 	admission          *weightedAdmission
 	holdMu             sync.Mutex
