@@ -240,8 +240,12 @@ trust assumptions and complete invalidation rules.
   nonsecret external_account ADC are projected read-only only into main; helper
   mirrors, ordinary sibling leaves and controller wait receive neither token
   nor credential mount. Existing explicit Vault projections and their separate
-  wait protections remain intact. Startup copies freeze the capability maps;
-  their public digest joins the immutable spec/audit binding. No provider, IAM,
+  wait protections remain intact. Startup copies freeze the boot capability
+  maps. Audited, server-owned runtime repository overrides (`release_wif_grant`,
+  `release_wif_revoke`, `release_wif_reset`, #1497) layer on that default; they
+  bind only existing roles to a repository's own release ServiceAccount, never
+  dedicated step identities. Each admission pins one effective snapshot, whose
+  public digest joins the immutable spec/audit binding. No provider, IAM,
   release-consumer cutover or key retirement is activated by shipping this
   feature. See [release WIF](docs/release-wif.md) for separate acceptance gates.
 - Administrator-only `argo.releaseTagRoutes` / `--argo-release-tag-routes-config`
@@ -944,7 +948,7 @@ containing CI and real workload qualification remain separately required.
   it encodes the same result object. Authenticated tool refusal text keeps its
   stable error class and may append only an explicitly public service reason.
   Raw dependency chains stay masked; scoped missing/hidden equivalence remains.
-- MCP exposes 79 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 84 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, read-only `run_resources` (captured history and reviewed git resource suggestions), `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, `publication_abandon`, issue
   `issue_create`, `issue_get`, `issue_get_many`, `issue_update`, `issue_append`,
@@ -957,7 +961,7 @@ containing CI and real workload qualification remain separately required.
   `workflow_capability_revoke`, read-only `workflow_capability_get`, admin-only
   `resource_grant` / `resource_revoke`, read-only `resource_grant_get`, admin-only `size_grant`
   and `size_revoke`, read-only `size_grant_get` (#1021), admin-only
-  unscoped `admission_hold`/`admission_release` (#1099), `concurrency_groups`, `queue_cap_config`, `queue_priority_config`, `queue_priority_get`, `run_priority`, `priority_grant`, `priority_grant_list`, `priority_grant_revoke`, `repo_usage`, `repo_list`, `repo_remove`, `repo_archive`, `repo_unarchive`, unscoped-admin-only `branch_delete_many`, `branch_deletion_list` and `receive_outbox` (#1490), `branch_deletion_resolve` (#1500), `run_list`,
+  unscoped `admission_hold`/`admission_release` (#1099), `concurrency_groups`, `queue_cap_config`, unscoped-admin-only `admission_capacity_config`, `release_wif_list`, `release_wif_grant`, `release_wif_revoke` and `release_wif_reset` (#1497), `queue_priority_config`, `queue_priority_get`, `run_priority`, `priority_grant`, `priority_grant_list`, `priority_grant_revoke`, `repo_usage`, `repo_list`, `repo_remove`, `repo_archive`, `repo_unarchive`, unscoped-admin-only `branch_delete_many`, `branch_deletion_list` and `receive_outbox` (#1490), `branch_deletion_resolve` (#1500), `run_list`,
   admin-only `audit_list` (#1104; verified entries, never available to a scoped uplink;
   `GET /api/audit` shares its filters, response and restrictions),
   `schedule_list` (also `GET /api/schedules`, with the same repository scope) plus admin-only audited `schedule_pause`, `schedule_resume` and `schedule_trigger` (#1106; pause state is the audit chain, trigger goes through `EnqueueCI`),
@@ -3142,9 +3146,16 @@ readable and revocable. Schedules skip archived
 repositories before reading Git. Git refreshes/probes fail closed, and the
 qualified cache is removed under receive/refresh locks. Retry archive if cache
 removal failed; the catalog stays archived. Unarchive allows lazy cache recreation.
-Dashboard repository lists default to active; the archived filter retains counts
-and historical links. `repo_list` includes archive metadata so operators can
-inspect the whole catalog. Upstream-level health probes remain shared by active
+Dashboard repository lists (runs sidebar, repositories page and the issue
+repository selector) default to active repositories; the `archived N` filter,
+remembered per browser, shows archived ones last with their counts and historical
+links, and a selected archived repository stays listed (#1498). `repo_list`
+hides archived repositories by default and reports them in `archived_hidden`;
+`archived=include` returns the whole catalog with archive metadata and
+`archived=only` the archived subset. Run history, logs and audit stay readable.
+Archived repositories are never deleted: their runs, publications, promotions
+and custody records are append-only evidence, so `repo_remove` still refuses
+once runs exist. Upstream-level health probes remain shared by active
 repositories; an upstream used only by archived repositories is not contacted.
 
 Migration **v29** follows the admission-sequence migration v28 (#1092). It
@@ -3350,7 +3361,11 @@ Lowering never cancels running work, and raising wakes the queue.
 `system_status.admission.configuration` and the dashboard show effective jobs,
 source and reload errors; scoped views omit this host-wide configuration.
 The chart mounts `<fullname>-admission` read-only as a directory, without
-subPath or a pod-template checksum. See [runtime capacity](docs/runtime-admission-capacity.md).
+subPath or a pod-template checksum. The unscoped-admin `admission_capacity_config`
+tool (#1497) stores a server-owned runtime override that takes precedence over
+the file and the boot flag until cleared; Helm never writes it, so upgrades do not
+conflict with it. Set and clear are audited with reason and previous value.
+See [runtime capacity](docs/runtime-admission-capacity.md).
 
 ### Administrative admission hold
 

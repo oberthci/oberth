@@ -334,25 +334,34 @@ func TestRunsFiltersCountsAndCancelledSuccessors(t *testing.T) {
 	}
 }
 
-func TestArchivedRepositoriesListedLastWithoutToggle(t *testing.T) {
+func TestArchivedRepositoriesHiddenBehindArchivedFilter(t *testing.T) {
 	t.Parallel()
 	source := string(staticAssets["app.js"].body)
 	for _, required := range []string{
-		`function orderedRepos()`,
+		`showArchived: localStorage.getItem("oberth-archived") === "show"`,
+		`function orderedRepos(selected)`,
+		`state.showArchived || (selected && repoKey(repo) === selected)`,
 		`repo-archived-divider`,
 		`repo-filter archived`,
+		`${orderedRepos(state.repo).map(`,
 		`const rows = orderedRepos().map`,
-		`${state.repos.length} configured`,
+		`${orderedRepos(state.issueRepo).map(`,
+		`data-archived-filter`,
+		`closest("[data-archived-filter]"))) { toggleArchived(); route(); return; }`,
+		`${state.repos.length} configured</span>${archivedToggle()}`,
 		`state.runCounts.ByRepo?.[repo.ID]`,
 		`pill("archived", "cancel")`,
 	} {
 		if !strings.Contains(source, required) {
-			t.Fatalf("archived repository listing missing %q", required)
+			t.Fatalf("archived repository filter missing %q", required)
 		}
 	}
-	for _, unwanted := range []string{"repoArchive", "data-repo-archive", "repoArchiveFilters"} {
+	for _, unwanted := range []string{
+		`return [...state.repos.filter(repo => !repo.ArchivedAt), ...state.repos.filter(repo => repo.ArchivedAt)];`,
+		`${state.repos.map(repo => `,
+	} {
 		if strings.Contains(source, unwanted) {
-			t.Fatalf("archive toggle remains: %s", unwanted)
+			t.Fatalf("archived repositories still listed by default: %s", unwanted)
 		}
 	}
 }

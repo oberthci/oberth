@@ -51,13 +51,27 @@ func TestRepositoryArchiveToolsRequireUnscopedAdminAndKeepCatalog(t *testing.T) 
 	if len(cacheNames) != 1 || cacheNames[0] != "codeberg/acme/oberth" {
 		t.Fatalf("cache inputs = %v", cacheNames)
 	}
+	// The default list hides archived repositories and counts them (#1498).
 	value, err = service.CallTool(ctx, actor, "repo_list", json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	views := value.(api.RepoListResponse).Repositories.([]repoSummary)
-	if len(views) != 1 || views[0].ArchivedAt == nil {
-		t.Fatalf("catalog lost archive metadata: %+v", views)
+	if list := value.(api.RepoListResponse); len(list.Repositories.([]repoSummary)) != 0 || list.ArchivedHidden != 1 {
+		t.Fatalf("default list shows archived repository: %+v", list)
+	}
+	for _, filter := range []string{"include", "only"} {
+		value, err = service.CallTool(ctx, actor, "repo_list", json.RawMessage(`{"archived":"`+filter+`"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		list := value.(api.RepoListResponse)
+		views := list.Repositories.([]repoSummary)
+		if len(views) != 1 || views[0].ArchivedAt == nil || list.ArchivedHidden != 0 {
+			t.Fatalf("archived=%s lost archive metadata: %+v", filter, list)
+		}
+	}
+	if _, err = service.CallTool(ctx, actor, "repo_list", json.RawMessage(`{"archived":"all"}`)); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("unknown archived filter = %v", err)
 	}
 	// A caller retaining a pre-archive repository snapshot cannot enqueue.
 	_, err = fixture.scheduler.EnqueueCI(ctx, CIRequest{EventID: "late", Repository: fixture.repo, Branch: "main", SHA: strings.Repeat("a", 40), Actor: "agent"})
@@ -69,6 +83,20 @@ func TestRepositoryArchiveToolsRequireUnscopedAdminAndKeepCatalog(t *testing.T) 
 	}
 	if len(transitions) != 2 || !transitions[0] || transitions[1] {
 		t.Fatalf("transitions = %v", transitions)
+	}
+	value, err = service.CallTool(ctx, actor, "repo_list", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list := value.(api.RepoListResponse); len(list.Repositories.([]repoSummary)) != 1 || list.ArchivedHidden != 0 {
+		t.Fatalf("default list after unarchive = %+v", list)
+	}
+	value, err = service.CallTool(ctx, actor, "repo_list", json.RawMessage(`{"archived":"only"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if views := value.(api.RepoListResponse).Repositories.([]repoSummary); len(views) != 0 {
+		t.Fatalf("archived=only listed an active repository: %+v", views)
 	}
 }
 

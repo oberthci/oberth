@@ -91,6 +91,8 @@ branches:
 # valve and the disk floor. Kubernetes schedules each step pod by its requests.
 # See docs/declared-admission.md for upgrade behavior and ignored legacy values.
 admission:
+  # Boot default. Change capacity at runtime with admission_capacity_config
+  # (oberth admission capacity); never kubectl-edit the rendered ConfigMap.
   runtimeCapacity:
     enabled: true
     # Null initializes the runtime value from maxConcurrentJobs above.
@@ -278,6 +280,8 @@ argo:
   executorScratchSizeLimit: 1Gi
   # Public administrator capabilities only; empty disables release federation.
   # Tokens/private keys must never be supplied here. See docs/release-wif.md.
+  # This is the boot default: release_wif_grant/revoke/reset change repository
+  # entries at runtime without an upgrade (roles stay here).
   # Dedicated step_service_accounts additionally require step_routes pins to
   # exact configured releaseTagRoutes entries (both file and pattern).
   releaseWIF: {}

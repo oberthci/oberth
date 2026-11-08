@@ -10,7 +10,45 @@ value is public authorization configuration, rendered into a read-only server
 ConfigMap mount with a deployment checksum. It contains no token or private
 key. Unknown fields, duplicate JSON properties, namespace mismatches and
 noncanonical repository spellings fail closed. The engine freezes nested maps
-at construction; configuration changes require an explicitly authorized rollout.
+at construction; role, namespace and step-identity changes require an
+explicitly authorized rollout.
+
+## Runtime repository grants (#1497)
+
+The Helm/flag map is the boot default. An unscoped administrator can change
+repository entries without an upgrade or restart through `release_wif_grant`,
+`release_wif_revoke` and `release_wif_reset` (CLI `oberth release-wif`), and
+read the boot, override and effective maps with `release_wif_list`. Overrides
+live only in the server database, so a Helm upgrade never shares an object with
+them and cannot conflict; the boot default and an override for the same
+repository coexist, and the override wins until reset.
+
+- A grant names a registered, unarchived repository, its per-repo release
+  `service_account_name` and a `templates` leaf -> role map. Roles must already
+  exist in the boot map. `step_service_accounts`/`step_routes` and any other
+  field are refused: dedicated WIF-only accounts are Kubernetes objects that
+  only the chart creates. Shared pipeline accounts, any CI identity and
+  another repository's release identity (from the live identity maps, even
+  when that repository has no WIF entry) are refused before the grant is
+  stored. The merged map passes the same validation as a boot map.
+- A revoke removes the entry, including a Helm entry and one for a retired,
+  unregistered `upstream/org/repo` key (the chart schema cannot express that
+  removal with `null`). A reset drops the override so the boot entry applies.
+- Every change requires a reason and is audited (`release_wif.grant`,
+  `release_wif.revoke`, `release_wif.reset`) with the previous override and
+  the repository's `previous_effective` and new `effective` entries (`null`
+  when absent), so revoking or shadowing a Helm entry records the Helm grant
+  it replaced. Changes go through the audit mutation gate. A committed change
+  is published to admission at once, even if the client disconnects;
+  `release_wif_list` also re-applies the stored set.
+- Each admission pins one effective snapshot for its audit Build and its
+  submitted Workflow; the policy digest covers the effective map, so the
+  submission audit records exactly which map authorized the run. Release
+  preflight reads the same layer.
+- On startup the stored overrides are applied again. A stored grant that no
+  longer validates (for example, its role was removed from Helm) stays
+  inactive, is logged and listed by `release_wif_list`, and never widens
+  authority. Revocations always apply.
 
 Roles are administrator-defined DNS labels (1–63 lowercase letters/digits/hyphens,
 no leading/trailing hyphen), at most 32 per deployment. The existing `image-writer`,

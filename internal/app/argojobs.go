@@ -104,6 +104,9 @@ type ArgoJobs struct {
 	// controller) bind the same identity version. Updated by the
 	// reconciler callback in serve.go. (Issue #465)
 	identities *argojob.IdentityStore
+	// releaseWIF layers audited runtime overrides on the boot release WIF
+	// map (#1497). Each admission pins one snapshot for both Builds.
+	releaseWIF *argojob.ReleaseWIFRuntime
 
 	mu      sync.Mutex
 	intents map[string]argoIntent
@@ -216,6 +219,34 @@ func (jobs *ArgoJobs) SetIdentityStore(store *argojob.IdentityStore) {
 	jobs.mu.Lock()
 	defer jobs.mu.Unlock()
 	jobs.identities = store
+}
+
+// SetReleaseWIFRuntime wires the runtime release WIF layer (#1497) before
+// serving requests. Without it admissions use the boot map unchanged.
+func (jobs *ArgoJobs) SetReleaseWIFRuntime(runtime *argojob.ReleaseWIFRuntime) {
+	if jobs.routes != nil {
+		jobs.routes.local.SetReleaseWIFRuntime(runtime)
+	}
+	jobs.mu.Lock()
+	defer jobs.mu.Unlock()
+	jobs.releaseWIF = runtime
+}
+
+// ReleaseWIFRuntime returns the wired runtime layer, or nil.
+func (jobs *ArgoJobs) ReleaseWIFRuntime() *argojob.ReleaseWIFRuntime {
+	jobs.mu.Lock()
+	defer jobs.mu.Unlock()
+	return jobs.releaseWIF
+}
+
+func (jobs *ArgoJobs) releaseWIFSnapshot() *argojob.ReleaseWIFConfig {
+	jobs.mu.Lock()
+	runtime := jobs.releaseWIF
+	jobs.mu.Unlock()
+	if runtime == nil {
+		return nil
+	}
+	return runtime.Snapshot()
 }
 
 func (jobs *ArgoJobs) CreateWorkflow(ctx context.Context, request service.WorkflowRequest) error {
@@ -529,6 +560,7 @@ func (jobs *ArgoJobs) create(ctx context.Context, request service.WorkflowReques
 	if jobs.identities != nil {
 		submission.Identities = jobs.identities.Snapshot()
 	}
+	submission.ReleaseWIF = jobs.releaseWIFSnapshot()
 	if preparer, ok := jobs.controller.(interface {
 		PrepareNonroot(context.Context, argojob.Request) (argojob.Request, error)
 	}); ok {

@@ -18,6 +18,7 @@ import (
 const admissionUsage = "Usage: oberth admission [--json] | oberth admission release <run-id> [--force] [--json]\n" +
 	"       oberth admission groups [--json]\n" +
 	"       oberth admission hold on|off --reason <reason> [--allow tag,release,promotion] [--duration 2h] [--json]\n" +
+	"       oberth admission capacity <1..64>|clear --reason <reason> [--json]\n" +
 	"         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]"
 
 // runAdmission prints the server's admission gate, or releases one stale
@@ -26,6 +27,9 @@ const admissionUsage = "Usage: oberth admission [--json] | oberth admission rele
 func runAdmission(ctx context.Context, arguments []string, output io.Writer) error {
 	if len(arguments) > 0 && arguments[0] == "hold" {
 		return runAdmissionHold(ctx, arguments[1:], output)
+	}
+	if len(arguments) > 0 && arguments[0] == "capacity" {
+		return runAdmissionCapacity(ctx, arguments[1:], output)
 	}
 	if wantsHelp(arguments) {
 		_, err := fmt.Fprintln(output, admissionUsage)

@@ -24,10 +24,27 @@ type repoLatestRun struct {
 	FinishedAt *time.Time `json:"finished_at"`
 }
 
+// repoListArchived selects archived repositories: the default "exclude" keeps
+// retired repositories out of everyday catalog reads (#1498); "include" returns
+// the whole catalog and "only" the archived ones. History stays readable.
+func repoListArchived(value string) (string, error) {
+	switch value {
+	case "":
+		return "exclude", nil
+	case "exclude", "include", "only":
+		return value, nil
+	default:
+		return "", fmt.Errorf("%w: archived must be exclude, include or only", ErrInvalidInput)
+	}
+}
+
 // Called on the actor-scoped service; the dashboard retains its history view.
-func (service *API) repoList(ctx context.Context) (api.RepoListResponse, error) {
+func (service *API) repoList(ctx context.Context, archived string) (api.RepoListResponse, error) {
+	archived, err := repoListArchived(archived)
+	if err != nil {
+		return api.RepoListResponse{}, err
+	}
 	var repos []model.Repository
-	var err error
 	if service.repositories != nil {
 		repos, err = service.repositories.ListRepositories(ctx)
 	} else {
@@ -46,8 +63,15 @@ func (service *API) repoList(ctx context.Context) (api.RepoListResponse, error) 
 			latest[run.RepoID] = run
 		}
 	}
-	summaries := make([]repoSummary, len(repos))
-	for i, repo := range repos {
+	summaries := make([]repoSummary, 0, len(repos))
+	hidden := 0
+	for _, repo := range repos {
+		if (archived == "exclude" && repo.ArchivedAt != nil) || (archived == "only" && repo.ArchivedAt == nil) {
+			if repo.ArchivedAt != nil {
+				hidden++
+			}
+			continue
+		}
 		summary := repoSummary{ID: repo.ID, Name: repo.Name, DefaultBranch: repo.DefaultBranch, ArchivedAt: repo.ArchivedAt}
 		if resolver, ok := service.runs.(upstreamResolver); ok {
 			upstream, err := resolver.Upstream(ctx, repo.UpstreamID)
@@ -60,7 +84,7 @@ func (service *API) repoList(ctx context.Context) (api.RepoListResponse, error) 
 			shown := service.presentationRun(ctx, run)
 			summary.LatestRun = &repoLatestRun{ID: run.ID, Status: shown.DisplayStatus, Ref: run.Ref, FinishedAt: run.FinishedAt}
 		}
-		summaries[i] = summary
+		summaries = append(summaries, summary)
 	}
-	return api.RepoListResponse{Repositories: summaries}, nil
+	return api.RepoListResponse{Repositories: summaries, ArchivedHidden: hidden}, nil
 }

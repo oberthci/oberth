@@ -65,7 +65,16 @@ Read allowed public identity files inside the Oberth pod.
 Usage: oberth admission [--json] | oberth admission release <run-id> [--force] [--json]
        oberth admission groups [--json]
        oberth admission hold on|off --reason <reason> [--allow tag,release,promotion] [--duration 2h] [--json]
+       oberth admission capacity <1..64>|clear --reason <reason> [--json]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+```
+
+## oberth admission capacity
+
+```text
+Usage: oberth admission capacity <1..64>|clear --reason <reason> [--json]
+         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+Sets the server-owned runtime workflow ceiling; clear restores the mounted file or boot flag.
 ```
 
 ## oberth admission groups
@@ -74,6 +83,7 @@ Usage: oberth admission [--json] | oberth admission release <run-id> [--force] [
 Usage: oberth admission [--json] | oberth admission release <run-id> [--force] [--json]
        oberth admission groups [--json]
        oberth admission hold on|off --reason <reason> [--allow tag,release,promotion] [--duration 2h] [--json]
+       oberth admission capacity <1..64>|clear --reason <reason> [--json]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
 ```
 
@@ -91,6 +101,7 @@ Default allow: tag,release. Default duration: 2h; maximum: 12h. --allow '' holds
 Usage: oberth admission [--json] | oberth admission release <run-id> [--force] [--json]
        oberth admission groups [--json]
        oberth admission hold on|off --reason <reason> [--allow tag,release,promotion] [--duration 2h] [--json]
+       oberth admission capacity <1..64>|clear --reason <reason> [--json]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
 ```
 
@@ -681,6 +692,53 @@ Usage: oberth publication abandon <publication-id> --reason <text> [--json]
 ```text
 Usage: oberth publication abandon <publication-id> --reason <text> [--json]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+```
+
+## oberth release-wif
+
+```text
+Usage: oberth release-wif <list|grant|revoke|reset> [flags]
+Use oberth release-wif <command> --help for command flags.
+```
+
+## oberth release-wif grant
+
+```text
+Usage: oberth release-wif list [--json]
+       oberth release-wif grant <repo> --service-account <name> --template <leaf>=<role>[,...] --reason <reason> [--json]
+       oberth release-wif revoke|reset <repo> --reason <reason> [--json]
+         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+Runtime overrides layered on the Helm argo.releaseWIF default; roles stay Helm configuration.
+```
+
+## oberth release-wif list
+
+```text
+Usage: oberth release-wif list [--json]
+       oberth release-wif grant <repo> --service-account <name> --template <leaf>=<role>[,...] --reason <reason> [--json]
+       oberth release-wif revoke|reset <repo> --reason <reason> [--json]
+         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+Runtime overrides layered on the Helm argo.releaseWIF default; roles stay Helm configuration.
+```
+
+## oberth release-wif reset
+
+```text
+Usage: oberth release-wif list [--json]
+       oberth release-wif grant <repo> --service-account <name> --template <leaf>=<role>[,...] --reason <reason> [--json]
+       oberth release-wif revoke|reset <repo> --reason <reason> [--json]
+         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+Runtime overrides layered on the Helm argo.releaseWIF default; roles stay Helm configuration.
+```
+
+## oberth release-wif revoke
+
+```text
+Usage: oberth release-wif list [--json]
+       oberth release-wif grant <repo> --service-account <name> --template <leaf>=<role>[,...] --reason <reason> [--json]
+       oberth release-wif revoke|reset <repo> --reason <reason> [--json]
+         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+Runtime overrides layered on the Helm argo.releaseWIF default; roles stay Helm configuration.
 ```
 
 ## oberth repo

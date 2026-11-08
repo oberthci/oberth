@@ -838,7 +838,7 @@ func TestMCPToolCountMatchesDocumented(t *testing.T) {
 	t.Parallel()
 	// The documented count in docs/mcp-setup.md must match the registered
 	// tool count. A mismatch means the table drifted from the code.
-	const documented = 79
+	const documented = 84
 	definitions := toolDefinitions()
 	if len(definitions) != documented {
 		t.Fatalf("registered %d tools, documented %d in docs/mcp-setup.md — update the table", len(definitions), documented)
@@ -918,7 +918,7 @@ func TestMCPToolSurfaceMatchesContract(t *testing.T) {
 		"uplink_list", "uplink_revoke", "uplink_rotate", "access_dismiss",
 		"access_list", "access_allow", "access_revoke",
 		"workflow_capability_grant", "workflow_capability_revoke", "workflow_capability_get",
-		"resource_grant", "resource_revoke", "resource_grant_get", "size_grant", "size_revoke", "size_grant_get", "queue_cap_config", "queue_priority_config", "queue_priority_get", "priority_grant", "priority_grant_list", "priority_grant_revoke", "run_priority", "concurrency_groups", "admission_hold", "admission_release",
+		"resource_grant", "resource_revoke", "resource_grant_get", "size_grant", "size_revoke", "size_grant_get", "queue_cap_config", "admission_capacity_config", "release_wif_list", "release_wif_grant", "release_wif_revoke", "release_wif_reset", "queue_priority_config", "queue_priority_get", "priority_grant", "priority_grant_list", "priority_grant_revoke", "run_priority", "concurrency_groups", "admission_hold", "admission_release",
 		"repo_usage", "repo_list", "repo_archive", "repo_unarchive", "repo_remove", "branch_delete_many", "branch_deletion_list", "branch_deletion_resolve", "receive_outbox", "run_list", "audit_list", "schedule_list", "schedule_pause", "schedule_resume", "schedule_trigger", "system_status", "publish_retry", "secretstore_plan", "secretstore_sync_receipt", "secretstore_verify",
 		"promote_grant", "promote_grant_revoke", "promote_grant_list",
 	}

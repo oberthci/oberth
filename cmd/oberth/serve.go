@@ -820,9 +820,18 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
+	releaseWIF := argoJobs.ReleaseWIFRuntime()
 	argoJobs, err = app.WithExecutionTargets(argoJobs, database, targets)
 	if err != nil {
 		return err
+	}
+	argoJobs.SetReleaseWIFRuntime(releaseWIF)
+	inactiveWIF, err := service.ReloadReleaseWIF(ctx, database, releaseWIF)
+	if err != nil {
+		return fmt.Errorf("load runtime release WIF overrides: %w", err)
+	}
+	for _, inactive := range inactiveWIF {
+		logger.Printf("WARNING: runtime release WIF grant for %s is inactive: %s", inactive.Repo, inactive.Error)
 	}
 	sourceLoader, err := app.NewPinnedSourceLoader(git, database, options.sourceAllowlist)
 	if err != nil {
@@ -854,6 +863,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
+	scheduler.SetCapacityOverrideReader(database.AdmissionCapacityOverride)
 	retention.AcquirePurge = scheduler.AcquireEvidencePurge
 	writerProgress := &liveness.Heartbeat{}
 	served, err := loadServedCertificate(options.tlsCert, options.tlsKey)
@@ -1089,6 +1099,10 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		SizeGrants:             database,
 		QueuePriorities:        database,
 		QueueCap:               database,
+		ReleaseWIFOverrides:    database,
+		ReleaseWIF:             releaseWIF,
+		CapacityOverrides:      database,
+		RuntimeCapacity:        scheduler,
 		SecretStoreVerifier:    buildSecretStoreVerifier(options, kube),
 		SecretAccessReconciler: accessReconciler,
 		RepositoryArchiver:     database,

@@ -36,6 +36,7 @@ func PreflightRelease(config Config, request Request) (ReleasePreflight, error) 
 			config.PerStepIdentities = request.Identities.Step
 		}
 	}
+	config = config.withRequestReleaseWIF(request)
 	request.Trigger = pipeline.TriggerRelease
 	wf, err := argoworkflow.Decode(request.Source)
 	if err != nil {
@@ -167,6 +168,7 @@ func (controller *Controller) PreflightReleaseAccounts(ctx context.Context, requ
 			config.PerStepIdentities = request.Identities.Step
 		}
 	}
+	config = config.withRequestReleaseWIF(request)
 	wf, err := argoworkflow.Decode(request.Source)
 	if err != nil {
 		return err

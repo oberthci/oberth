@@ -959,6 +959,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 
 	assertFreshSchemaLedger(t, store.db)
 	assertSchemaObjects(t, store.db, "table", []string{
+		"admission_capacity_override",
 		"admission_head_waits",
 		"admission_holds",
 		"audit_actions",
@@ -988,6 +989,7 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 		"queue_cap",
 		"queue_priority_patterns",
 		"receive_events",
+		"release_wif_overrides",
 		"repositories",
 		"resource_attempt_inventories",
 		"resource_attempts",
@@ -1144,6 +1146,8 @@ func TestFreshSchemaIsCompleteAndIdempotent(t *testing.T) {
 	expectedColumns := map[string][]string{
 		"queue_cap":                      {"singleton", "max_not_started"},
 		"deferred_branch_receives":       {"sequence", "event_id", "run_spec", "reason"},
+		"release_wif_overrides":          {"repo", "revoked", "grant_json", "reason", "actor", "updated_at"},
+		"admission_capacity_override":    {"singleton", "max_concurrent_jobs", "reason", "actor", "updated_at"},
 		"branch_deletions":               {"sequence", "id", "repo_id", "branch", "old_sha", "actor", "source", "batch_id", "status", "attempts", "retry_after", "error", "created_at", "updated_at"},
 		"concurrency_group_declarations": {"repo_id", "release", "group_name", "group_limit"},
 		"publication_policy_waits":       {"publication_id", "since"},
