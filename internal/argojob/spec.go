@@ -50,6 +50,10 @@ const (
 	// monitoring, and RBAC can scope rules to branch-tier (untrusted) or
 	// release-tier (credentialed) pods without inspecting identities.
 	tierLabel = "oberth.ci/tier"
+	// triggerLabel carries request.Trigger (pipeline.TriggerCI for branch
+	// CI) on the Workflow and every step Pod; runLabel carries the run ID.
+	triggerLabel = "oberth.ci/trigger"
+	runLabel     = "oberth.ci/run"
 
 	defaultWorkflowTimeout = 12 * time.Hour
 	defaultTTLSeconds      = int32(3600)
@@ -1254,9 +1258,9 @@ func applyServerMetadata(workflow *wfv1.Workflow, config Config, request Request
 	}
 	workflow.Labels["app.kubernetes.io/name"] = "oberth-run"
 	workflow.Labels["oberth.ci/repo"] = labelValue(request.Repo)
-	workflow.Labels["oberth.ci/run"] = labelValue(request.RunID)
+	workflow.Labels[runLabel] = labelValue(request.RunID)
 	workflow.Labels["oberth.ci/sha"] = labelValue(request.SHA)
-	workflow.Labels["oberth.ci/trigger"] = string(request.Trigger)
+	workflow.Labels[triggerLabel] = string(request.Trigger)
 	workflow.Labels[tierLabel] = tierFor(request.Trigger)
 	workflow.Labels["oberth.ci/engine"] = "argo"
 	if workflow.Annotations == nil {
@@ -1284,8 +1288,8 @@ func applyServerMetadata(workflow *wfv1.Workflow, config Config, request Request
 	if workflow.Spec.PodMetadata.Labels == nil {
 		workflow.Spec.PodMetadata.Labels = map[string]string{}
 	}
-	workflow.Spec.PodMetadata.Labels["oberth.ci/run"] = labelValue(request.RunID)
-	workflow.Spec.PodMetadata.Labels["oberth.ci/trigger"] = string(request.Trigger)
+	workflow.Spec.PodMetadata.Labels[runLabel] = labelValue(request.RunID)
+	workflow.Spec.PodMetadata.Labels[triggerLabel] = string(request.Trigger)
 	workflow.Spec.PodMetadata.Labels[tierLabel] = tierFor(request.Trigger)
 }
 

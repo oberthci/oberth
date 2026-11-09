@@ -35,6 +35,14 @@
     "annotation:oberth.ci/exclusive": {
       "doc_anchor": "docs/native-synchronization.md#migration-from-oberthciexclusive",
       "test_ref": "internal/argojob/fragment_test.go TestBuildIgnoresRetiredExclusiveAnnotationInFragments"
+    },
+    "annotation:oberth.ci/trigger": {
+      "doc_anchor": "docs/assisted-continuation.md#capacity-supersession-and-bounds",
+      "test_ref": "internal/argojob/assist_hold_ops_test.go TestEnforceAssistHoldsFindsPodsLabelledByBuild"
+    },
+    "annotation:oberth.ci/run": {
+      "doc_anchor": "docs/assisted-continuation.md#capacity-supersession-and-bounds",
+      "test_ref": "internal/argojob/assist_hold_ops_test.go TestEnforceAssistHoldsFindsPodsLabelledByBuild"
     }
   }
 }

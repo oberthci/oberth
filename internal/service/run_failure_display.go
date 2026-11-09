@@ -23,6 +23,14 @@ func displayFailureText(message string) string {
 }
 
 func failedRunDisplayReason(run model.Run) string {
+	// A step whose held retry the sweep abandoned failed at its first
+	// attempt; the assisted fragment (assistDisplayReason) names that step,
+	// the attempt's exit code and the hold. The held Pod's runtime and
+	// deadline (budget plus hold TTL) say nothing about the step, so no
+	// generic deadline or step wording is added in front of it.
+	if step := run.FailedStep; step != "" && run.Assist != nil && run.Assist.SweepAbandoned(step) {
+		return ""
+	}
 	if reason := evictionDisplayReason(run); reason != "" {
 		return reason
 	}

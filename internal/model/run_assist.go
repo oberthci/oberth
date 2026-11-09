@@ -39,6 +39,51 @@ type RunAssistEvent struct {
 	// exec, patch or continue (see docs/assisted-continuation.md); the flag
 	// only shapes the reason line.
 	Assisted bool `json:"assisted,omitempty"`
+	// AbandonReason, HeldSince, FailedAttempt and FailedExitCode describe a
+	// hold the server's sweep abandoned (actor "oberth"): reason
+	// AssistAbandonTTL or AssistAbandonCap, when the hold parked, and the
+	// attempt whose failure created it. At is the abandon time.
+	AbandonReason  string     `json:"abandon_reason,omitempty"`
+	HeldSince      *time.Time `json:"held_since,omitempty"`
+	FailedAttempt  int        `json:"failed_attempt,omitempty"`
+	FailedExitCode *int       `json:"failed_exit_code,omitempty"`
+}
+
+// Sweep abandon reasons.
+const (
+	AssistAbandonTTL = "ttl"
+	AssistAbandonCap = "cap"
+)
+
+// AssistActivityWindow is how long after an agent's last exec, patch or
+// continue a hold counts as being worked: the cap never abandons such a hold.
+const AssistActivityWindow = 5 * time.Minute
+
+// AssistPodActivity is what the active runs' assist records say about one
+// held Pod: released (continued or abandoned) holds are running work or
+// gone; LastAction is the latest exec, patch or continue on it.
+type AssistPodActivity struct {
+	Released   bool
+	LastAction time.Time
+}
+
+// AssistAbandon is one hold the server sweep abandoned.
+type AssistAbandon struct {
+	RunID          string
+	Pod            string
+	Step           string
+	Reason         string
+	HeldSince      time.Time
+	AbandonedAt    time.Time
+	FailedAttempt  int
+	FailedExitCode *int
+}
+
+// Event is the assist record entry for a sweep abandon.
+func (abandon AssistAbandon) Event() RunAssistEvent {
+	held := abandon.HeldSince.UTC()
+	return RunAssistEvent{At: abandon.AbandonedAt.UTC(), Actor: "oberth", Step: abandon.Step, Pod: abandon.Pod, Kind: RunAssistAbandon,
+		AbandonReason: abandon.Reason, HeldSince: &held, FailedAttempt: abandon.FailedAttempt, FailedExitCode: abandon.FailedExitCode}
 }
 
 // RunAssistRecord is the JSON stored in runs.assist_record.
@@ -50,6 +95,16 @@ type RunAssistRecord struct {
 func (record RunAssistRecord) Continued() bool {
 	for _, event := range record.Events {
 		if event.Kind == RunAssistContinue {
+			return true
+		}
+	}
+	return false
+}
+
+// SweepAbandoned reports whether the server sweep abandoned a hold of step.
+func (record RunAssistRecord) SweepAbandoned(step string) bool {
+	for _, event := range record.Events {
+		if event.Step == step && event.Kind == RunAssistAbandon && event.AbandonReason != "" {
 			return true
 		}
 	}
@@ -71,11 +126,19 @@ func (record RunAssistRecord) Touched(step string) bool {
 // "assisted: step test continued after patch sha256:ab12… by uplink-a; not
 // evidence"; a step that was only inspected or patched reads "step test
 // patched sha256:… by uplink-a" or "step test inspected by uplink-a".
+//
+// A hold the server sweep abandoned reads "step test failed at attempt 0
+// (exit 1); hold abandoned unserviced after 20m0s (ttl)", without
+// "unserviced" when its Pod saw an exec or patch first.
 func (record RunAssistRecord) Reason() string {
 	var order []string
 	actors := map[string]string{}
+	var swept []string
 	for _, event := range record.Events {
 		if event.Kind == RunAssistAbandon {
+			if event.AbandonReason != "" {
+				swept = append(swept, record.sweepClause(event))
+			}
 			continue
 		}
 		if _, seen := actors[event.Step]; !seen {
@@ -106,10 +169,29 @@ func (record RunAssistRecord) Reason() string {
 		}
 		parts = append(parts, fmt.Sprintf("step %s %s by %s", step, detail, actors[step]))
 	}
+	parts = append(parts, swept...)
 	if len(parts) == 0 {
 		return ""
 	}
 	return "assisted: " + strings.Join(parts, "; ") + "; not evidence"
+}
+
+func (record RunAssistRecord) sweepClause(abandon RunAssistEvent) string {
+	exit := "exit unknown"
+	if abandon.FailedExitCode != nil {
+		exit = fmt.Sprintf("exit %d", *abandon.FailedExitCode)
+	}
+	held := "unknown time"
+	if abandon.HeldSince != nil && !abandon.At.Before(*abandon.HeldSince) {
+		held = abandon.At.Sub(*abandon.HeldSince).Round(time.Second).String()
+	}
+	serviced := "unserviced "
+	for _, event := range record.Events {
+		if event.Pod == abandon.Pod && (event.Kind == RunAssistExec || event.Kind == RunAssistPatch) {
+			serviced = ""
+		}
+	}
+	return fmt.Sprintf("step %s failed at attempt %d (%s); hold abandoned %safter %s (%s)", abandon.Step, abandon.FailedAttempt, exit, serviced, held, abandon.AbandonReason)
 }
 
 func (record RunAssistRecord) lastPatch(step string) string {

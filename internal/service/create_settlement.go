@@ -408,29 +408,43 @@ func (scheduler *Scheduler) deferCreateCleanup(ctx context.Context, run model.Ru
 // above the installation cap. Pods their agent already continued or
 // abandoned (the run's assist record) are running work and are skipped; if
 // that record cannot be read, nothing is abandoned, so a released step is
-// never killed by a blind sweep.
+// never killed by a blind sweep. Each abandon is appended to its run's
+// assist record and audited as run.assist.abandon with actor oberth.
 func (scheduler *Scheduler) sweepAssistHolds(ctx context.Context) {
 	holds, ok := scheduler.jobs.(interface {
-		EnforceAssistHolds(context.Context, map[string]bool, time.Time) ([]string, error)
+		EnforceAssistHolds(context.Context, map[string]model.AssistPodActivity, time.Time) ([]model.AssistAbandon, error)
 	})
 	if !ok {
 		return
 	}
 	attempt, cancel := context.WithTimeout(ctx, createSettlementAttemptBudget)
 	defer cancel()
-	released := map[string]bool{}
+	activity := map[string]model.AssistPodActivity{}
 	if source, ok := scheduler.store.(interface {
-		ReleasedAssistPods(context.Context) (map[string]bool, error)
+		AssistPodActivity(context.Context) (map[string]model.AssistPodActivity, error)
 	}); ok {
 		var err error
-		if released, err = source.ReleasedAssistPods(attempt); err != nil {
+		if activity, err = source.AssistPodActivity(attempt); err != nil {
 			log.Print("WARN: assist hold sweep skipped: released holds unknown")
 			return
 		}
 	}
-	if abandoned, err := holds.EnforceAssistHolds(attempt, released, time.Now()); err != nil {
+	abandoned, err := holds.EnforceAssistHolds(attempt, activity, time.Now())
+	if err != nil {
 		log.Print("WARN: assist hold sweep remains pending")
-	} else if len(abandoned) > 0 {
-		log.Printf("assist: abandoned %d held attempts past assist.holdTTL or above assist.maxConcurrentHolds", len(abandoned))
+	}
+	recorder, _ := scheduler.store.(interface {
+		AppendRunAssist(context.Context, model.RunAssistRequest) (model.Run, error)
+	})
+	for _, abandon := range abandoned {
+		log.Printf("assist: abandoned hold run=%s step=%s pod=%s reason=%s held_for=%s", abandon.RunID, abandon.Step, abandon.Pod, abandon.Reason, abandon.AbandonedAt.Sub(abandon.HeldSince).Round(time.Second))
+		if recorder == nil || abandon.RunID == "" {
+			continue
+		}
+		if _, err := recorder.AppendRunAssist(attempt, model.RunAssistRequest{RunID: abandon.RunID, Event: abandon.Event()}); err != nil {
+			log.Printf("WARN: assist abandon of run=%s pod=%s not recorded", abandon.RunID, abandon.Pod)
+		} else {
+			scheduler.signals.NotifyRun(abandon.RunID)
+		}
 	}
 }

@@ -90,6 +90,11 @@ type Controller struct {
 	config           Config
 	interval         time.Duration
 	readGrace        time.Duration
+	// assistSeen remembers the holds the sweep already logged.
+	assistSeen struct {
+		sync.Mutex
+		pods map[string]bool
+	}
 }
 
 // NewController builds the engine. client may be nil when logs are supplied

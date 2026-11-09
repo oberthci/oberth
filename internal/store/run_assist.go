@@ -70,11 +70,16 @@ func (s *Store) AppendRunAssist(ctx context.Context, request model.RunAssistRequ
 	if _, err := tx.ExecContext(ctx, `UPDATE runs SET assist_record = ?, assisted = ?, updated_at = ? WHERE id = ?`, string(encoded), assisted, unixNano(now), current.ID); err != nil {
 		return model.Run{}, fmt.Errorf("record run assist: %w", err)
 	}
-	details, err := json.Marshal(map[string]any{
+	fields := map[string]any{
 		"run_id": current.ID, "repo_id": current.RepoID, "ref": current.Ref, "sha": current.SHA, "step": event.Step, "pod": event.Pod,
 		"kind": event.Kind, "patch_sha256": event.PatchSHA256, "patch_bytes": event.PatchBytes, "files": event.Files,
 		"argv": event.Argv, "exit_code": event.ExitCode, "assisted": assisted,
-	})
+	}
+	if event.AbandonReason != "" {
+		fields["reason"], fields["held_since"], fields["abandoned_at"] = event.AbandonReason, event.HeldSince, event.At
+		fields["failed_attempt"], fields["failed_exit_code"] = event.FailedAttempt, event.FailedExitCode
+	}
+	details, err := json.Marshal(fields)
 	if err != nil {
 		return model.Run{}, err
 	}
@@ -92,15 +97,17 @@ func (s *Store) AppendRunAssist(ctx context.Context, request model.RunAssistRequ
 	return updated, nil
 }
 
-// ReleasedAssistPods lists the held Pods of active runs whose agent already
-// continued or abandoned them, so the hold sweep leaves running steps alone.
-func (s *Store) ReleasedAssistPods(ctx context.Context) (map[string]bool, error) {
+// AssistPodActivity reports, per held Pod of an active run, whether its
+// agent already continued or abandoned it (the sweep leaves running steps
+// alone) and when an exec, patch or continue last touched it (the cap never
+// abandons a hold that is being worked).
+func (s *Store) AssistPodActivity(ctx context.Context) (map[string]model.AssistPodActivity, error) {
 	rows, err := s.reader().QueryContext(ctx, `SELECT assist_record FROM runs WHERE status IN ('queued','running') AND assist_record <> ''`)
 	if err != nil {
 		return nil, fmt.Errorf("list assist records: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	released := map[string]bool{}
+	pods := map[string]model.AssistPodActivity{}
 	for rows.Next() {
 		var raw string
 		if err := rows.Scan(&raw); err != nil {
@@ -111,13 +118,21 @@ func (s *Store) ReleasedAssistPods(ctx context.Context) (map[string]bool, error)
 			return nil, fmt.Errorf("decode assist record: %w", err)
 		}
 		for _, event := range record.Events {
-			if event.Pod != "" && (event.Kind == model.RunAssistContinue || event.Kind == model.RunAssistAbandon) {
-				released[event.Pod] = true
+			if event.Pod == "" {
+				continue
 			}
+			activity := pods[event.Pod]
+			if event.Kind == model.RunAssistContinue || event.Kind == model.RunAssistAbandon {
+				activity.Released = true
+			}
+			if event.Kind != model.RunAssistAbandon && event.At.After(activity.LastAction) {
+				activity.LastAction = event.At
+			}
+			pods[event.Pod] = activity
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list assist records: %w", err)
 	}
-	return released, nil
+	return pods, nil
 }

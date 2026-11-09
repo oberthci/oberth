@@ -90,8 +90,9 @@ retry Pod with the held patch: the executor parks before the command, the
 step shows as running, and the run keeps its run slot, template locks and
 concurrency group. If nobody acts before `holdTTL`, the server's hold sweep (the scheduler's
 settlement tick) abandons the Pod, the retry is exhausted and the run fails
-as it would have; the kubelet deadline (budget plus TTL) is the backstop if
-the server is down. That deadline is not the recorded floored step deadline,
+as it would have, recorded as a server abandon (see *Capacity, supersession
+and bounds*); the kubelet deadline (budget plus TTL) is the backstop if
+the server is down, and such a kubelet kill is not recorded. That deadline is not the recorded floored step deadline,
 so #1499 never classifies a timed-out hold as a start-up failure, and a
 retained failed step prevents the automatic infrastructure retry.
 
@@ -215,12 +216,29 @@ per-workflow and unaffected.
 
 - A held run keeps its run slot, template locks and concurrency
   group until its Workflow ends: it counts as running work.
-- The scheduler's settlement tick sweeps holds: an unreleased hold older
-  than `assist.holdTTL` is abandoned, then the newest parked holds above
-  `assist.maxConcurrentHolds` are abandoned. Holds whose run's assist record
-  shows a continue or abandon are running commands and are skipped; if that
-  record cannot be read the sweep does nothing rather than kill a released
-  step.
+- The scheduler's settlement tick (every 5 s) sweeps the branch-CI step
+  Pods (`oberth.ci/trigger=ci`, the label `Build` writes). An unreleased hold
+  whose `held_since` is `assist.holdTTL` old is abandoned (reason `ttl`).
+  Holds whose run's assist record shows a continue or abandon are running
+  commands and are skipped; if that record cannot be read the sweep does
+  nothing rather than kill a released step.
+- **Cap rule.** Above `assist.maxConcurrentHolds` the newest *idle* hold is
+  abandoned first (reason `cap`). Because the sweep runs every few seconds, a
+  hold that parks over the cap in practice fails at once, as if the run were
+  unassisted, and the holds agents already have keep their slots. A hold
+  with an exec, patch or continue in the last 5 minutes is never abandoned by
+  the cap, even when it is the newest; it still counts toward the cap, so
+  several worked holds can sit above it until they finish or reach the TTL.
+- Every sweep abandon is appended to the run's assist record (actor
+  `oberth`, `abandon_reason`, `held_since`, `failed_attempt`,
+  `failed_exit_code`) and audited as `run.assist.abandon` with `reason`,
+  `step`, `pod`, `held_since` and `abandoned_at`. It does not mark the run
+  assisted. The reason line reads `assisted: step test failed at attempt 0
+  (exit 1); hold abandoned unserviced after 20m0s (ttl); not evidence`
+  ("unserviced" is dropped when the held Pod saw an exec or patch), and the
+  failed step's generic deadline wording is not added: the held Pod's
+  deadline and runtime describe the hold, not the step. The server logs
+  `assist: hold started run=… step=… pod=…` when it first sees a hold.
 - A newer push that supersedes the run deletes its Workflow through the
   existing cancellation path, which removes any held Pod; explicit
   `run_cancel` does the same.

@@ -81,7 +81,7 @@ func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request Adop
 	if request.RunID == "" || workflow.Name != request.Name || workflow.Namespace != controller.config.Namespace ||
 		workflow.UID == "" || workflow.DeletionTimestamp != nil || digestErr != nil || len(digest) != 32 ||
 		workflow.Annotations[refAnnotation] != request.Ref || workflow.Labels["oberth.ci/sha"] != labelValue(request.SHA) ||
-		workflow.Labels["oberth.ci/trigger"] != string(request.Trigger) {
+		workflow.Labels[triggerLabel] != string(request.Trigger) {
 		return Adoption{}, fmt.Errorf("argojob: Workflow %s adoption binding mismatch", request.Name)
 	}
 	if !argoworkflow.ScheduleEntryMatches(workflow, request.RunTrigger, request.ScheduleEntry) {

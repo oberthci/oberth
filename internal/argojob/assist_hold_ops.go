@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"regexp"
 	"sort"
 	"strconv"
@@ -17,6 +18,7 @@ import (
 	kexec "k8s.io/client-go/util/exec"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // Hold operations the run_hold_* tools reach through app.ArgoJobs. They act
@@ -206,52 +208,135 @@ func (controller *Controller) AbandonAssistHold(ctx context.Context, pod string)
 	return controller.kube.CoreV1().Pods(controller.Namespace()).Delete(ctx, pod, metav1.DeleteOptions{})
 }
 
-// EnforceAssistHolds bounds parked attempts: an unreleased hold older than
-// the hold TTL is abandoned (the Pod deadline covers the step budget too, so
-// the server, not the kubelet, enforces the TTL), and the newest parked
-// holds above the installation cap are abandoned. Holds already released by
-// their agent are running commands and are neither aged nor counted.
-func (controller *Controller) EnforceAssistHolds(ctx context.Context, released map[string]bool, now time.Time) ([]string, error) {
+// assistSweepSelector selects every branch-CI step Pod: Build stamps
+// triggerLabel with request.Trigger, and holds exist only on TriggerCI runs.
+var assistSweepSelector = triggerLabel + "=" + string(pipeline.TriggerCI)
+
+// EnforceAssistHolds bounds parked attempts and returns what it abandoned.
+// Holds already released by their agent are running commands and are
+// neither aged nor counted.
+//
+//   - TTL: an unreleased hold whose HeldSince is assist.holdTTL old is
+//     abandoned (the Pod deadline covers the step budget too, so the server,
+//     not the kubelet, enforces the TTL).
+//   - Cap: above assist.maxConcurrentHolds the newest idle holds are
+//     abandoned first. The sweep runs every few seconds, so in practice a
+//     hold that parks over the cap fails at once, as if the run were
+//     unassisted, and the holds agents already have keep their slots. A hold
+//     with an exec, patch or continue in the last model.AssistActivityWindow
+//     is never abandoned by the cap; it still counts toward it.
+func (controller *Controller) EnforceAssistHolds(ctx context.Context, activity map[string]model.AssistPodActivity, now time.Time) ([]model.AssistAbandon, error) {
 	if controller.kube == nil || !controller.config.Assist.Enabled {
 		return nil, nil
 	}
 	assist := controller.config.Assist.Effective()
-	pods, err := controller.kube.CoreV1().Pods(controller.Namespace()).List(ctx, metav1.ListOptions{LabelSelector: "oberth.ci/trigger=branch"})
+	pods, err := controller.kube.CoreV1().Pods(controller.Namespace()).List(ctx, metav1.ListOptions{LabelSelector: assistSweepSelector})
 	if err != nil {
 		return nil, fmt.Errorf("list branch pods: %w", err)
 	}
-	var abandoned []string
-	abandon := func(pod string) error {
-		if err := controller.kube.CoreV1().Pods(controller.Namespace()).Delete(ctx, pod, metav1.DeleteOptions{}); err != nil {
-			return fmt.Errorf("abandon hold %s: %w", pod, err)
+	var abandoned []model.AssistAbandon
+	abandon := func(sweep assistSweepHold, reason string) error {
+		if err := controller.kube.CoreV1().Pods(controller.Namespace()).Delete(ctx, sweep.hold.Pod, metav1.DeleteOptions{}); err != nil {
+			return fmt.Errorf("abandon hold %s: %w", sweep.hold.Pod, err)
 		}
-		abandoned = append(abandoned, pod)
+		step := sweep.hold.Step
+		if step == "" {
+			step = sweep.hold.Node
+		}
+		abandoned = append(abandoned, model.AssistAbandon{RunID: sweep.runID, Pod: sweep.hold.Pod, Step: step, Reason: reason,
+			HeldSince: sweep.hold.HeldSince, AbandonedAt: now, FailedAttempt: sweep.hold.Attempt - 1, FailedExitCode: sweep.failedExit})
 		return nil
 	}
-	var holds []model.AssistHold
+	var holds []assistSweepHold
+	seen := map[string]bool{}
 	for index := range pods.Items {
-		hold, ok := assistHoldOf(&pods.Items[index])
-		if !ok || released[hold.Pod] {
+		pod := &pods.Items[index]
+		hold, ok := assistHoldOf(pod)
+		if !ok || activity[hold.Pod].Released {
 			continue
 		}
+		sweep := assistSweepHold{hold: hold, runID: pod.Labels[runLabel], failedExit: failedAttemptExit(pods.Items, pod, hold)}
+		seen[hold.Pod] = true
+		controller.noteAssistHold(sweep)
 		if !hold.HeldSince.Add(assist.HoldTTL).After(now) {
-			if err := abandon(hold.Pod); err != nil {
+			if err := abandon(sweep, model.AssistAbandonTTL); err != nil {
 				return abandoned, err
 			}
 			continue
 		}
-		holds = append(holds, hold)
+		holds = append(holds, sweep)
 	}
-	if len(holds) <= assist.MaxConcurrentHolds {
+	controller.forgetAssistHolds(seen)
+	excess := len(holds) - assist.MaxConcurrentHolds
+	if excess <= 0 {
 		return abandoned, nil
 	}
-	sort.Slice(holds, func(i, j int) bool { return holds[i].HeldSince.Before(holds[j].HeldSince) })
-	for _, hold := range holds[assist.MaxConcurrentHolds:] {
-		if err := abandon(hold.Pod); err != nil {
+	sort.Slice(holds, func(i, j int) bool { return holds[i].hold.HeldSince.After(holds[j].hold.HeldSince) })
+	for _, sweep := range holds {
+		if excess == 0 {
+			break
+		}
+		if last := activity[sweep.hold.Pod].LastAction; !last.IsZero() && now.Sub(last) < model.AssistActivityWindow {
+			continue
+		}
+		if err := abandon(sweep, model.AssistAbandonCap); err != nil {
 			return abandoned, err
 		}
+		excess--
 	}
 	return abandoned, nil
+}
+
+type assistSweepHold struct {
+	hold       model.AssistHold
+	runID      string
+	failedExit *int
+}
+
+// failedAttemptExit is the main container exit code of the attempt whose
+// failure created the hold: the sibling Pod of node "...(N-1)" of the same
+// Workflow. Step Pods have no PodGC, so it stays until the Workflow goes.
+func failedAttemptExit(pods []corev1.Pod, held *corev1.Pod, hold model.AssistHold) *int {
+	base := retryAttemptSuffix.ReplaceAllString(hold.Node, "")
+	node := fmt.Sprintf("%s(%d)", base, hold.Attempt-1)
+	for index := range pods {
+		pod := &pods[index]
+		if pod.Labels[argoWorkflowLabel] != held.Labels[argoWorkflowLabel] || pod.Annotations[argoNodeNameAnnotation] != node {
+			continue
+		}
+		for _, status := range pod.Status.ContainerStatuses {
+			if status.Name == mainContainerName && status.State.Terminated != nil {
+				code := int(status.State.Terminated.ExitCode)
+				return &code
+			}
+		}
+	}
+	return nil
+}
+
+// noteAssistHold logs a hold the first time the sweep sees it.
+func (controller *Controller) noteAssistHold(sweep assistSweepHold) {
+	controller.assistSeen.Lock()
+	defer controller.assistSeen.Unlock()
+	if controller.assistSeen.pods == nil {
+		controller.assistSeen.pods = map[string]bool{}
+	}
+	if controller.assistSeen.pods[sweep.hold.Pod] {
+		return
+	}
+	controller.assistSeen.pods[sweep.hold.Pod] = true
+	log.Printf("assist: hold started run=%s step=%s pod=%s held_since=%s", sweep.runID, sweep.hold.Step, sweep.hold.Pod, sweep.hold.HeldSince.UTC().Format(time.RFC3339))
+}
+
+// forgetAssistHolds drops logged holds the sweep no longer sees.
+func (controller *Controller) forgetAssistHolds(seen map[string]bool) {
+	controller.assistSeen.Lock()
+	defer controller.assistSeen.Unlock()
+	for pod := range controller.assistSeen.pods {
+		if !seen[pod] {
+			delete(controller.assistSeen.pods, pod)
+		}
+	}
 }
 
 // boundedBuffer keeps the first limit bytes and counts the rest.

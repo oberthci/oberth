@@ -68,9 +68,9 @@ func TestAssistedRunIsNeverGreenEvidence(t *testing.T) {
 	if reason := updated.Assist.Reason(); reason != "assisted: step test inspected by tester; not evidence" {
 		t.Fatalf("exec-only reason = %q", reason)
 	}
-	released, err := s.ReleasedAssistPods(ctx)
-	if err != nil || len(released) != 0 {
-		t.Fatalf("exec released a hold: %v, %v", released, err)
+	pods, err := s.AssistPodActivity(ctx)
+	if err != nil || len(pods) != 1 || pods["wf-test-1"].Released || pods["wf-test-1"].LastAction.IsZero() {
+		t.Fatalf("exec released a hold or left no activity: %v, %v", pods, err)
 	}
 	updated, err = s.AppendRunAssist(ctx, model.RunAssistRequest{RunID: run.ID, Event: model.RunAssistEvent{Actor: "tester", Step: "test", Pod: "wf-test-1", Kind: model.RunAssistPatch, PatchSHA256: strings.Repeat("d", 64), PatchBytes: 120, Files: []string{"go.mod"}}})
 	if err != nil {
@@ -89,8 +89,8 @@ func TestAssistedRunIsNeverGreenEvidence(t *testing.T) {
 	if reason := updated.Assist.Reason(); !strings.Contains(reason, "step test continued after patch sha256:dddddddddddd by tester") || !strings.HasSuffix(reason, "not evidence") {
 		t.Fatalf("reason line = %q", reason)
 	}
-	if released, err = s.ReleasedAssistPods(ctx); err != nil || !released["wf-test-1"] || len(released) != 1 {
-		t.Fatalf("released pods after continue = %v, %v", released, err)
+	if pods, err = s.AssistPodActivity(ctx); err != nil || !pods["wf-test-1"].Released || len(pods) != 1 {
+		t.Fatalf("released pods after continue = %v, %v", pods, err)
 	}
 	if _, err := s.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunPassed}); err != nil {
 		t.Fatal(err)
@@ -129,8 +129,8 @@ func TestAssistedRunIsNeverGreenEvidence(t *testing.T) {
 	if patchedRun, err := s.AppendRunAssist(ctx, model.RunAssistRequest{RunID: patched.ID, Event: model.RunAssistEvent{Actor: "tester", Step: "lint", Pod: "wf-lint-1", Kind: model.RunAssistPatch, PatchSHA256: strings.Repeat("1", 64)}}); err != nil || !patchedRun.Assisted {
 		t.Fatalf("patch alone = %+v, %v", patchedRun.Assisted, err)
 	}
-	if released, err := s.ReleasedAssistPods(ctx); err != nil || released["wf-lint-1"] {
-		t.Fatalf("patch released a hold: %v, %v", released, err)
+	if pods, err := s.AssistPodActivity(ctx); err != nil || pods["wf-lint-1"].Released {
+		t.Fatalf("patch released a hold: %v, %v", pods, err)
 	}
 
 	// A rerun carries the caller's choice, not the source run's.
@@ -148,5 +148,61 @@ func TestAssistedRunIsNeverGreenEvidence(t *testing.T) {
 	}
 	if !rerun.Enqueued.AssistRequested || rerun.Enqueued.Assisted {
 		t.Fatalf("rerun assist state = requested %v assisted %v", rerun.Enqueued.AssistRequested, rerun.Enqueued.Assisted)
+	}
+}
+
+// TestSweepAbandonIsRecordedAndAudited proves a server sweep abandon lands in
+// the run's assist record and audit with its reason and times, leaves the
+// run unassisted (no agent touched it), releases the Pod for the next sweep,
+// and produces the abandoned-hold reason line.
+func TestSweepAbandonIsRecordedAndAudited(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC)
+	s := testStore(t, &now)
+	ctx := context.Background()
+	upstream, err := s.CreateUpstream(ctx, model.UpstreamSpec{Name: "codeberg", Kind: "forgejo", BaseURL: "https://codeberg.org/acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository, err := s.CreateRepository(ctx, model.RepositorySpec{Name: "fragment", UpstreamID: upstream.ID, DefaultBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sha := strings.Repeat("a", 40)
+	run, err := s.EnqueueRun(ctx, model.RunSpec{Assist: true, RepoID: repository.ID, RefKind: model.RefBranch, Ref: "feature/held", SHA: sha, TestedSHA: sha, Actor: "tester", Trigger: "branch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exit := 1
+	held := now.Add(-20 * time.Minute)
+	abandon := model.AssistAbandon{RunID: run.ID, Pod: "wf-test-1", Step: "test", Reason: model.AssistAbandonTTL, HeldSince: held, AbandonedAt: now, FailedExitCode: &exit}
+	updated, err := s.AppendRunAssist(ctx, model.RunAssistRequest{RunID: run.ID, Event: abandon.Event()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Assisted {
+		t.Fatal("an unserviced sweep abandon marked the run assisted")
+	}
+	if !updated.Assist.SweepAbandoned("test") || updated.Assist.SweepAbandoned("lint") {
+		t.Fatalf("sweep abandon not attributed to its step: %+v", updated.Assist)
+	}
+	want := "assisted: step test failed at attempt 0 (exit 1); hold abandoned unserviced after 20m0s (ttl); not evidence"
+	if reason := updated.Assist.Reason(); reason != want {
+		t.Fatalf("reason = %q, want %q", reason, want)
+	}
+	if pods, err := s.AssistPodActivity(ctx); err != nil || !pods["wf-test-1"].Released || !pods["wf-test-1"].LastAction.IsZero() {
+		t.Fatalf("abandoned pod activity = %v, %v", pods, err)
+	}
+	var actor, details string
+	if err := s.db.QueryRowContext(ctx, `SELECT actor, details FROM audit_actions WHERE resource_id = ? AND action = 'run.assist.abandon'`, run.ID).Scan(&actor, &details); err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{`"reason":"ttl"`, `"step":"test"`, `"pod":"wf-test-1"`, `"held_since":"2026-11-08T23:40:00Z"`, `"abandoned_at":"2026-11-09T00:00:00Z"`} {
+		if !strings.Contains(details, fragment) {
+			t.Fatalf("audit details %s lack %s", details, fragment)
+		}
+	}
+	if actor != "oberth" {
+		t.Fatalf("audit actor = %q", actor)
 	}
 }
