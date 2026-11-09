@@ -108,6 +108,17 @@ func (service *API) decidePromotionPrune(ctx context.Context, promotion model.Pr
 	if !exists || !sameOID(upstream, promotion.ResultSHA) {
 		return kept("upstream %s is %s, not the promotion result %s; source branch kept", target, shortSHA(upstream), shortSHA(promotion.ResultSHA))
 	}
+	// Guard (#1296): only the promotion's own source branch, never the
+	// default branch, the target or a reserved (protected) branch. The plan
+	// below refuses them too; this keeps the rule independent of it.
+	if promotion.SourceBranch == repository.DefaultBranch || promotion.SourceBranch == target {
+		return kept("source branch %s is the default or target branch; never pruned", promotion.SourceBranch)
+	}
+	if reserved, err := service.reservedSourceBranch(ctx, input, promotion.SourceBranch); err != nil {
+		return model.PromotionPruneKept, "branch inventory unavailable", "", true
+	} else if reserved {
+		return kept("source branch %s is reserved; never pruned by prune_source", promotion.SourceBranch)
+	}
 	args := branchPruneArguments{Repo: input, Branches: []struct {
 		Branch      string `json:"branch"`
 		ExpectedSHA string `json:"expected_sha"`
@@ -146,4 +157,18 @@ func publicPruneError(err error) string {
 		return reason.MCPErrorReason()
 	}
 	return "internal error"
+}
+
+// reservedSourceBranch reports whether the mirror marks branch reserved.
+func (service *API) reservedSourceBranch(ctx context.Context, input, branch string) (bool, error) {
+	inventory, err := service.branchPrune.BranchInventory(ctx, input, "")
+	if err != nil {
+		return false, err
+	}
+	for _, entry := range inventory.Branches {
+		if entry.Branch == branch {
+			return entry.Reserved || entry.Default, nil
+		}
+	}
+	return false, nil
 }

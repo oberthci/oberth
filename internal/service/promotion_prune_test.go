@@ -163,3 +163,20 @@ func TestBranchDeleteManyUnmergedNeedsReason(t *testing.T) {
 		t.Fatalf("audit = %+v, %v", actions, err)
 	}
 }
+
+// prune_source never deletes the default branch, the target or a reserved
+// (protected) branch, even after a verified promotion (#1296).
+func TestPromotionPruneSourceNeverPrunesDefaultOrReservedBranches(t *testing.T) {
+	f, git := newPrunePromotionFixture(t)
+	git.head = f.initial
+	for _, branch := range []string{"main", "master"} {
+		promotion, request := f.promotion(t, branch, f.initial, model.PromotionPassed, f.initial)
+		got := f.service.settlePromotionPrune(t.Context(), f.store, promotion, request, time.Now())
+		if got.Status != model.PromotionPruneKept || !strings.Contains(got.Reason, "never pruned") || !f.mirrorHas(t, branch) {
+			t.Fatalf("%s = %+v", branch, got)
+		}
+	}
+	if f.queued != 0 {
+		t.Fatalf("deletion queued %d times", f.queued)
+	}
+}
