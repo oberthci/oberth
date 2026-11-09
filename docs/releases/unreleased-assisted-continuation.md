@@ -20,7 +20,13 @@ before the action runs): never a promotion source, never
 published upstream, never green-for-SHA or CI-issue evidence, with the reason
 line `assisted: step X continued after patch sha256:… by <actor>; not evidence`
 on its existing status. Release, tag, promotion, schedule, plan and apply runs
-never hold; #1499 classification and the infrastructure retry are unchanged.
+never hold. Only a command that failed on its own is retried and held: the
+injected retry expression refuses signal exit codes (137, 143) and any attempt
+whose duration reached the floored step budget, because Argo v4.0.8 records a
+kubelet `activeDeadlineSeconds` kill with exit code 143, not `-1` (found in
+the live spike; a timed-out step would otherwise have been parked and rerun
+with a second budget). #1499 classification and the infrastructure retry are
+unchanged.
 
 Helm: `assist.{enabled,holdTTL,maxConcurrentHolds,execTimeout,execOutputBytes,patchMaxBytes,patchMaxFiles}`.
 Admission now refuses `ARGO_*` environment names from repository YAML.

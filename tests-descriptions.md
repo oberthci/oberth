@@ -5,10 +5,16 @@ Assisted continuation (retry hold): `TestBuildAssistMarksOnlyCredentialFreeLeave
 server-owned one-attempt `retryStrategy` and conditional `podSpecPatch`, the
 workflow deadline extension and the refusal of repository copies of the hold
 annotations. `TestAssistPatchResolvesWithArgoTemplateEngine` substitutes the
-conditional patch with Argo v4.0.8's own template engine for attempt 1, a
-deadline-killed retry and a failed-command retry, and applies it with the same
-strategic merge, proving pause, deadline, writable source, read-only cache and
-scratch cache variables land only on the held attempt. Controller tests with a
+conditional patch with Argo v4.0.8's own template engine for attempt 1, the
+deadline-killed retries (exit 143 or 137 after the budget, a trapped signal, no
+exit code), self-inflicted 137/143 exits and a failed-command retry, and
+applies it with the same strategic merge, proving pause, deadline, writable
+source, read-only cache and scratch cache variables land only on the held
+attempt. `TestAssistRetryRefusesDeadlineKills` evaluates the injected
+`retryStrategy.expression` with Argo's own evaluator in the
+`processNodeRetries` scope: the live-spike kubelet kill (exit 143, duration at
+the budget) is not retried, nor are SIGKILL, trapped-signal, evicted or
+self-exited 137/143 attempts; a command that failed under its budget is. Controller tests with a
 fake clientset cover hold detection, bounded exec and exit codes, release argv,
 abandon and the concurrent-hold cap; `internal/holdfs` tests cover unified-diff
 parsing refusals (traversal, `.git`, renames, binaries, counts, limits), exact

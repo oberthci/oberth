@@ -24,22 +24,35 @@ repository's YAML, to Argo, or to the step image:
 - The controller drops the Pod `activeDeadlineSeconds` only when that
   variable is on the *template's* container; it checks before it applies the
   template `podSpecPatch` (`workflow/controller/workflowpod.go`). A
-  `podSpecPatch` is substituted with the retry-local variables `retries` and
-  `lastRetry.exitCode` right before each attempt's Pod is created
-  (`workflow/controller/operator.go`, `SubstituteParams`).
+  `podSpecPatch` is substituted with the retry-local variables `retries`,
+  `lastRetry.exitCode` and `lastRetry.duration` right before each attempt's
+  Pod is created (`workflow/controller/operator.go`, `SubstituteParams`);
+  the retry expression sees the same values
+  (`buildRetryStrategyLocalScope`).
 
 For a run in assist mode, `Build` adds to every eligible pod leaf:
 
 - a server-owned `retryStrategy`: `limit: 1`, `retryPolicy: OnFailure`,
-  `expression: asInt(lastRetry.exitCode) > 0`. Only a command that exited
-  nonzero is retried. A Pod killed at its deadline, an eviction or an executor
-  error has no exit code (Argo substitutes `-1`), so attempt 1 is classified
-  exactly as before (#1499 start-up deadlines included) and the run-level
-  infrastructure retry is unchanged. A leaf with its own `retryStrategy` keeps
-  it and is not held;
+  `expression: asInt(lastRetry.exitCode) > 0 && asInt(lastRetry.exitCode) !=
+  137 && asInt(lastRetry.exitCode) != 143 && asFloat(lastRetry.duration) <
+  <floored step budget>`. Only a command that failed on its own is retried:
+  it exited nonzero, not by SIGKILL or SIGTERM, and its attempt finished
+  before the step's floored budget (the node duration is the main container's
+  termination time minus the node's creation, so a Pod the kubelet stopped at
+  `activeDeadlineSeconds` always shows at least the budget). A kubelet
+  deadline kill is recorded by Argo v4.0.8 with the forwarded signal's exit
+  code (143, or 137 after the grace period), never `-1`, which is why the exit
+  code alone is not enough; an eviction or executor error has no exit code
+  (`-1`). None of them is retried, so attempt 1 is classified exactly as
+  before (#1499 start-up deadlines included) and the run-level infrastructure
+  retry is unchanged. A command that exits 137 or 143 by itself, or that
+  outlives its budget during the kubelet's check interval, is conservatively
+  not held either. A leaf with its own `retryStrategy` keeps it and is not
+  held;
 - a server-owned conditional `podSpecPatch`, an Argo expression template
-  `{{= asInt(retries) > 0 && asInt(lastRetry.exitCode) > 0 ? '<held>' :
-  '<base>' }}`. `<base>` is the plain server patch every step already gets.
+  `{{= asInt(retries) > 0 && <the same failure condition> ? '<held>' :
+  '<base>' }}`, so the retry and the hold can never disagree. `<base>` is the
+  plain server patch every step already gets.
   `<held>` additionally sets `ARGO_DEBUG_PAUSE_BEFORE=true` and
   `OBERTH_ASSIST_HOLD=1` on `main`, sets the Pod `activeDeadlineSeconds` to
   the step's #1499-floored budget plus `assist.holdTTL` so the kubelet bounds
@@ -224,8 +237,10 @@ per-workflow and unaffected.
   recorded annotations; the held attempt's deadline differs from the recorded
   floor, so its expiry is the step's own failure, never a start-up
   infrastructure attempt. The injected `retryStrategy` never retries a
-  deadline kill, so a start-up failure does not get a second in-workflow
-  attempt before the run-level infrastructure retry sees it.
+  deadline kill (signal exit code, or a duration at or above the floored
+  budget), so a start-up failure does not get a second in-workflow attempt
+  before the run-level infrastructure retry sees it, and a step that ran out
+  of time is never given a second budget plus the hold TTL.
 - **Workflow deadline**: extended by one hold TTL per assisted run.
 - **Exclusive classes, concurrency groups, admission hold**: unchanged; a
   held run is a member for the whole hold.

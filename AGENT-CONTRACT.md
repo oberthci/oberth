@@ -3131,9 +3131,11 @@ declares no secret-store paths gets, on every single-main container/script leaf
 without its own `retryStrategy` (and no `templateDefaults.retryStrategy` in
 the document), credentials, step identity, token mount or nonroot launcher, a
 server-owned `retryStrategy` (`limit 1`, `OnFailure`,
-`expression: asInt(lastRetry.exitCode) > 0`) and a server-owned conditional
-`podSpecPatch` (`{{= asInt(retries) > 0 && asInt(lastRetry.exitCode) > 0 ? held
-: base }}`). Attempt 1 is unchanged. The held retry parks before its command
+`expression: asInt(lastRetry.exitCode) > 0 && asInt(lastRetry.exitCode) != 137
+&& asInt(lastRetry.exitCode) != 143 && asFloat(lastRetry.duration) < <floored
+step budget>`) and a server-owned conditional `podSpecPatch`
+(`{{= asInt(retries) > 0 && <the same condition> ? held : base }}`). Attempt 1
+is unchanged. The held retry parks before its command
 (`ARGO_DEBUG_PAUSE_BEFORE`), has a Pod deadline of the floored step budget plus
 `assist.holdTTL` (the server abandons an unreleased hold once `holdTTL` has
 passed; the Pod deadline is the backstop), a writable `/work/src`, a read-only `/work/cache` with its
@@ -3141,9 +3143,12 @@ cache variables moved to private scratch, and the server executable mounted.
 The Workflow deadline grows by one hold TTL. Server-owned annotations
 `oberth.ci/assist` (Workflow) and `oberth.ci/assist-hold` (template, refused
 from repositories) mark the mode. Release, tag, promotion, schedule, plan and
-apply runs never hold; a deadline-killed or evicted attempt is never retried in
-the Workflow, so #1499 classification and the run-level infrastructure retry are
-unchanged, and a hold that expires is the step's own failure. The tools
+apply runs never hold; a deadline-killed (signal exit code 137/143, or an
+attempt that ran at least its floored budget: Argo records the kubelet kill
+with the forwarded signal's exit code, not `-1`), evicted or executor-failed
+attempt is never retried in the Workflow, so #1499 classification and the
+run-level infrastructure retry are unchanged, a timed-out step never gets a
+second budget, and a hold that expires is the step's own failure. The tools
 `run_hold_list` (read), `run_hold_exec`, `run_hold_patch`, `run_continue` and
 `run_hold_abandon` (run's own uplink or admin, active run only, serialized per
 run, capped by `assist.maxConcurrentHolds`, bounded by `assist.execTimeout`,

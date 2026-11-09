@@ -31,7 +31,9 @@ import (
 // the kubelet bounds the park with a wider Pod deadline, the source mount is
 // writable and the shared caches are detached. The run's agent inspects,
 // patches and releases the held pod through the run_hold_* MCP tools; the
-// step then runs natively and the DAG continues.
+// step then runs natively and the DAG continues. An attempt the kubelet
+// stopped at its deadline is not a failed command: it is neither retried
+// nor held (assistCommandFailure).
 //
 // Nothing here adds node reach or credentials: the patch only touches the
 // main container's env and the read-only flag of two server-owned mounts,
@@ -58,15 +60,46 @@ const (
 	// patched tree can never write into the shared, cross-run cache.
 	AssistScratchCachePath = "/tmp/oberth-assist-cache"
 
-	// assistRetryExpression retries only a genuine command failure. A Pod
-	// deadline kill, an eviction or an executor error has no exit code
-	// (Argo substitutes -1), so #1499 start-up classification and the
-	// run-level infrastructure retry keep attempt 1 exactly as today.
-	assistRetryExpression = "asInt(lastRetry.exitCode) > 0"
-	// assistPatchCondition selects the held branch of the podSpecPatch
-	// expression: a retry attempt that follows a failed command.
-	assistPatchCondition = "asInt(retries) > 0 && asInt(lastRetry.exitCode) > 0"
+	// Exit codes of a main container that died by SIGKILL or SIGTERM. The
+	// kubelet's deadline kill sends SIGTERM to the emissary, which forwards it
+	// to the step command and exits with its code, so the controller records
+	// 143 (or 137 after the grace period); it is not the -1 of a Pod with no
+	// terminated main container (operator.go getExitCode).
+	exitCodeSIGKILL = 137
+	exitCodeSIGTERM = 143
 )
+
+// assistCommandFailure is the retry-local expression that tells a genuine
+// command failure from a kill. Both Argo scopes that evaluate it
+// (retryStrategy.expression, operator.go buildRetryStrategyLocalScope; the
+// podSpecPatch substitution, operator.go executeTemplate) carry
+// lastRetry.exitCode and lastRetry.duration for the last attempt, the
+// duration being the node's FinishedAt (the container's termination time)
+// minus its StartedAt (node creation, before scheduling). A Pod the kubelet
+// stopped at activeDeadlineSeconds has therefore run for at least the
+// floored step budget and exited 143 (137 once the grace period ran out); a
+// command that failed on its own did so with another code, before the
+// budget. Only the latter is retried and held. A command that happens to
+// exit 137 or 143 itself, or one that outlives its budget during the
+// kubelet's check interval, is not held: conservative, and it keeps #1499
+// start-up classification and the run-level infrastructure retry exactly as
+// for an unassisted run.
+func assistCommandFailure(budget int64) string {
+	return fmt.Sprintf("asInt(lastRetry.exitCode) > 0 && asInt(lastRetry.exitCode) != %d && asInt(lastRetry.exitCode) != %d && asFloat(lastRetry.duration) < %d", exitCodeSIGKILL, exitCodeSIGTERM, budget)
+}
+
+// assistRetryExpression retries only a genuine command failure (see
+// assistCommandFailure). A Pod deadline kill, an eviction or an executor
+// error is never retried in the Workflow.
+func assistRetryExpression(budget int64) string { return assistCommandFailure(budget) }
+
+// assistPatchCondition selects the held branch of the podSpecPatch
+// expression: a retry attempt that follows a failed command. It is the
+// retry expression guarded by `retries > 0`, so the two can never disagree
+// (a plain, unheld retry would otherwise run the step twice).
+func assistPatchCondition(budget int64) string {
+	return "asInt(retries) > 0 && " + assistCommandFailure(budget)
+}
 
 // Administrator bounds for AssistConfig.
 const (
@@ -287,8 +320,13 @@ func markAssistHolds(workflow *wfv1.Workflow, config Config, request Request, cr
 // Every earlier pass merges JSON into t.PodSpecPatch; an expression there
 // would break them, so this pass must stay after wrapStepUsage.
 func injectAssistHolds(workflow *wfv1.Workflow) error {
-	if _, assisted := workflow.Annotations[AssistWorkflowAnnotation]; !assisted {
+	rawTTL, assisted := workflow.Annotations[AssistWorkflowAnnotation]
+	if !assisted {
 		return nil
+	}
+	ttl, err := strconv.ParseInt(rawTTL, 10, 64)
+	if err != nil || ttl <= 0 {
+		return fmt.Errorf("argojob: %s on the workflow is not a hold TTL", AssistWorkflowAnnotation)
 	}
 	var failure error
 	walkTemplates(workflow, func(t *wfv1.Template) {
@@ -297,10 +335,13 @@ func injectAssistHolds(workflow *wfv1.Workflow) error {
 			return
 		}
 		deadline, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || deadline <= 0 {
-			failure = fmt.Errorf("argojob: %s on %q is not a deadline", AssistHoldAnnotation, t.Name)
+		if err != nil || deadline <= ttl {
+			failure = fmt.Errorf("argojob: %s on %q is not a hold deadline above the TTL", AssistHoldAnnotation, t.Name)
 			return
 		}
+		// markAssistHolds wrote the floored step budget plus one TTL; the
+		// budget is the bound a failed command must have finished under.
+		budget := deadline - ttl
 		main := usageContainer(t)
 		if main == nil {
 			failure = fmt.Errorf("argojob: hold-eligible template %q lost its main container", t.Name)
@@ -318,14 +359,14 @@ func injectAssistHolds(workflow *wfv1.Workflow) error {
 			failure = err
 			return
 		}
-		patch, err := assistConditionalPatch(base, held)
+		patch, err := assistConditionalPatch(base, held, budget)
 		if err != nil {
 			failure = fmt.Errorf("argojob: template %q: %w", t.Name, err)
 			return
 		}
 		t.PodSpecPatch = patch
 		limit := intstr.FromInt32(1)
-		t.RetryStrategy = &wfv1.RetryStrategy{Limit: &limit, RetryPolicy: wfv1.RetryPolicyOnFailure, Expression: assistRetryExpression}
+		t.RetryStrategy = &wfv1.RetryStrategy{Limit: &limit, RetryPolicy: wfv1.RetryPolicyOnFailure, Expression: assistRetryExpression(budget)}
 	})
 	return failure
 }
@@ -405,8 +446,9 @@ func hasUsageBinary(main *corev1.Container) bool {
 // right before it creates each attempt's Pod (operator.go, SubstituteParams
 // with retries/lastRetry.*), after the template-level pause check that would
 // otherwise drop the Pod deadline. Each branch is a single-quoted expr
-// string literal holding compact JSON.
-func assistConditionalPatch(base, held map[string]any) (string, error) {
+// string literal holding compact JSON; budget is the floored step budget the
+// failed command must have finished under (assistCommandFailure).
+func assistConditionalPatch(base, held map[string]any, budget int64) (string, error) {
 	baseLiteral, err := exprJSONLiteral(base)
 	if err != nil {
 		return "", err
@@ -415,7 +457,7 @@ func assistConditionalPatch(base, held map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("{{= %s ? '%s' : '%s' }}", assistPatchCondition, heldLiteral, baseLiteral), nil
+	return fmt.Sprintf("{{= %s ? '%s' : '%s' }}", assistPatchCondition(budget), heldLiteral, baseLiteral), nil
 }
 
 // exprJSONLiteral encodes a value as JSON that can sit inside a single-quoted

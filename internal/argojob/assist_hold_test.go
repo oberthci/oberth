@@ -3,6 +3,7 @@ package argojob
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -10,6 +11,8 @@ import (
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
+	"github.com/argoproj/argo-workflows/v4/util/expr/argoexpr"
+	argoexprenv "github.com/argoproj/argo-workflows/v4/util/expr/env"
 	argologging "github.com/argoproj/argo-workflows/v4/util/logging"
 	argotemplate "github.com/argoproj/argo-workflows/v4/util/template"
 	corev1 "k8s.io/api/core/v1"
@@ -136,18 +139,24 @@ func TestBuildAssistMarksOnlyCredentialFreeLeavesWithoutOwnRetries(t *testing.T)
 	if want := strconv.FormatInt(floored+1200, 10); test.Metadata.Annotations[AssistHoldAnnotation] != want {
 		t.Fatalf("test hold deadline = %q, want the floored step budget %d + 1200", test.Metadata.Annotations[AssistHoldAnnotation], floored)
 	}
-	if test.RetryStrategy == nil || test.RetryStrategy.Limit.String() != "1" || test.RetryStrategy.RetryPolicy != wfv1.RetryPolicyOnFailure || test.RetryStrategy.Expression != assistRetryExpression {
+	if test.RetryStrategy == nil || test.RetryStrategy.Limit.String() != "1" || test.RetryStrategy.RetryPolicy != wfv1.RetryPolicyOnFailure || test.RetryStrategy.Expression != assistRetryExpression(floored) {
 		t.Fatalf("test retryStrategy = %+v", test.RetryStrategy)
 	}
-	if !strings.HasPrefix(test.PodSpecPatch, "{{= "+assistPatchCondition+" ? '") {
+	if want := fmt.Sprintf("asInt(lastRetry.exitCode) > 0 && asInt(lastRetry.exitCode) != 137 && asInt(lastRetry.exitCode) != 143 && asFloat(lastRetry.duration) < %d", floored); test.RetryStrategy.Expression != want {
+		t.Fatalf("test retry expression = %q, want %q", test.RetryStrategy.Expression, want)
+	}
+	if !strings.HasPrefix(test.PodSpecPatch, "{{= "+assistPatchCondition(floored)+" ? '") {
 		t.Fatalf("test Pod patch is not the conditional expression: %s", test.PodSpecPatch)
 	}
 	lint := templateNamed(t, wf, "lint")
 	if got := lint.Metadata.Annotations[AssistHoldAnnotation]; got != "4800" {
 		t.Fatalf("lint hold deadline = %q, want the 3600 workflow budget + 1200", got)
 	}
-	if lint.RetryStrategy == nil {
-		t.Fatal("lint (no own deadline) is hold-eligible and gained no retryStrategy")
+	if lint.RetryStrategy == nil || lint.RetryStrategy.Expression != assistRetryExpression(3600) {
+		t.Fatalf("lint (no own deadline) is hold-eligible and must be bounded by the 3600 workflow budget: %+v", lint.RetryStrategy)
+	}
+	if !strings.HasPrefix(lint.PodSpecPatch, "{{= "+assistPatchCondition(3600)+" ? '") {
+		t.Fatalf("lint Pod patch is not bounded by the workflow budget: %s", lint.PodSpecPatch)
 	}
 	flaky := templateNamed(t, wf, "flaky")
 	if _, ok := flaky.Metadata.Annotations[AssistHoldAnnotation]; ok || flaky.RetryStrategy.Limit.String() != "2" || flaky.RetryStrategy.Expression != "" {
@@ -249,6 +258,10 @@ func TestBuildRefusesRepositoryAssistAnnotations(t *testing.T) {
 // variables), then applies it with the same strategic merge
 // (workflow/util.ApplyPodSpecPatch). Attempt 1 and a deadline-killed
 // attempt keep the base patch; a failed command parks the retry.
+//
+// The deadline-kill rows are the live spike of 2026-11-09 on Argo v4.0.8:
+// the kubelet stopped `sleep 400` at activeDeadlineSeconds and the controller
+// recorded exit code 143 (not -1) with a node duration above the budget.
 func TestAssistPatchResolvesWithArgoTemplateEngine(t *testing.T) {
 	wf, err := Build(assistConfig(), assistRequest(pipeline.TriggerCI, assistDocument))
 	if err != nil {
@@ -259,9 +272,10 @@ func TestAssistPatchResolvesWithArgoTemplateEngine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolve := func(retries, exitCode string) *corev1.PodSpec {
+	floored := DefaultStepStartupAllowance.Floored(600)
+	resolve := func(retries, exitCode, duration string) *corev1.PodSpec {
 		t.Helper()
-		params := map[string]any{"retries": retries, "lastRetry.exitCode": exitCode, "lastRetry.status": "Failed", "lastRetry.duration": "10", "lastRetry.message": ""}
+		params := map[string]any{"retries": retries, "lastRetry.exitCode": exitCode, "lastRetry.status": "Failed", "lastRetry.duration": duration, "lastRetry.message": ""}
 		ctx := argologging.WithLogger(context.Background(), argologging.NewSlogLogger(argologging.Info, argologging.Text))
 		replaced, err := argotemplate.Replace(ctx, string(encoded), params, true)
 		if err != nil {
@@ -310,7 +324,7 @@ func TestAssistPatchResolvesWithArgoTemplateEngine(t *testing.T) {
 		return false, false
 	}
 
-	first := resolve("0", "0")
+	first := resolve("0", "0", "0")
 	if env := containerEnv(mainOf(first)); env[assistPauseEnv] != "" || env[AssistHoldEnv] != "" {
 		t.Fatalf("attempt 1 is paused: %v", env)
 	}
@@ -321,12 +335,28 @@ func TestAssistPatchResolvesWithArgoTemplateEngine(t *testing.T) {
 		t.Fatal("attempt 1 lost its read-only source mount")
 	}
 
-	killed := resolve("1", "-1")
-	if env := containerEnv(mainOf(killed)); env[assistPauseEnv] != "" {
-		t.Fatal("a retry after a deadline kill (no exit code) must not park")
+	unheld := map[string][3]string{
+		"evicted, no exit code":                   {"1", "-1", "0"},
+		"kubelet deadline SIGTERM (live spike)":   {"1", "143", fmt.Sprint(float64(floored) + 2.5)},
+		"kubelet deadline SIGKILL after grace":    {"1", "137", fmt.Sprint(float64(floored) + 31)},
+		"command trapped the signal, exited 1":    {"1", "1", fmt.Sprint(float64(floored) + 0.1)},
+		"command exited 143 by itself":            {"1", "143", "12"},
+		"command exited 137 by itself (OOM-like)": {"1", "137", "12"},
+	}
+	for name, params := range unheld {
+		killed := resolve(params[0], params[1], params[2])
+		if env := containerEnv(mainOf(killed)); env[assistPauseEnv] != "" || env[AssistHoldEnv] != "" {
+			t.Fatalf("%s: the retry must not park: %v", name, env)
+		}
+		if got := *killed.ActiveDeadlineSeconds; got != floored {
+			t.Fatalf("%s: deadline = %d, want the floored step deadline %d", name, got, floored)
+		}
+		if readOnly, ok := mountReadOnly(mainOf(killed), SourceMountPath); !ok || !readOnly {
+			t.Fatalf("%s: source mount became writable", name)
+		}
 	}
 
-	held := resolve("1", "2")
+	held := resolve("1", "2", fmt.Sprint(float64(floored)-0.5))
 	main := mainOf(held)
 	env := containerEnv(main)
 	if env[assistPauseEnv] != "true" || env[AssistHoldEnv] != "1" {
@@ -365,6 +395,52 @@ func TestAssistPatchResolvesWithArgoTemplateEngine(t *testing.T) {
 	}
 	if AssistHoldPod(&corev1.Pod{Spec: *first}) {
 		t.Fatal("attempt 1 recognised as a hold")
+	}
+}
+
+// TestAssistRetryRefusesDeadlineKills evaluates the injected
+// retryStrategy.expression with Argo v4.0.8's own evaluator in the scope
+// processNodeRetries builds (operator.go buildRetryStrategyLocalScope: the
+// exit code defaults to -1, the duration is the node's FinishedAt minus
+// StartedAt). Regression for the live spike of 2026-11-09: a `sleep 400`
+// stopped by the kubelet at activeDeadlineSeconds 300 was recorded with exit
+// code 143 and was retried into a hold.
+func TestAssistRetryRefusesDeadlineKills(t *testing.T) {
+	wf, err := Build(assistConfig(), assistRequest(pipeline.TriggerCI, assistDocument))
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	expression := templateNamed(t, wf, "test").RetryStrategy.Expression
+	floored := DefaultStepStartupAllowance.Floored(600)
+	retries := func(exitCode, duration string) bool {
+		t.Helper()
+		scope := map[string]any{"retries": "0", "lastRetry.exitCode": exitCode, "lastRetry.status": "Failed", "lastRetry.duration": duration, "lastRetry.message": "Pod was active on the node longer than the specified deadline"}
+		retry, err := argoexpr.EvalBool(expression, argoexprenv.GetFuncMap(scope))
+		if err != nil {
+			t.Fatalf("retry expression %q: %v", expression, err)
+		}
+		return retry
+	}
+	if retries("143", fmt.Sprint(float64(floored)+2.5)) {
+		t.Fatal("a kubelet deadline kill (SIGTERM, exit 143, ran the whole budget) was retried")
+	}
+	if retries("137", fmt.Sprint(float64(floored)+31)) {
+		t.Fatal("a kubelet deadline kill (SIGKILL after the grace period, exit 137) was retried")
+	}
+	if retries("1", fmt.Sprint(float64(floored)+0.1)) {
+		t.Fatal("a command that trapped the deadline signal and exited 1 after its budget was retried")
+	}
+	if retries("-1", "0") || retries("-1", "45") {
+		t.Fatal("an attempt without an exit code (eviction, executor error) was retried")
+	}
+	if retries("0", "12") {
+		t.Fatal("a passed attempt was retried")
+	}
+	if retries("143", "12") || retries("137", "12") {
+		t.Fatal("a command that exited 143 or 137 by itself must not be retried into a hold (conservative)")
+	}
+	if !retries("1", "12") || !retries("2", fmt.Sprint(float64(floored)-0.5)) {
+		t.Fatal("a command that failed under its budget must be retried into the hold")
 	}
 }
 
