@@ -204,6 +204,10 @@ call the proxy hostname directly.
 | `run_hold_patch` | Apply a unified `diff` to the held step's writable `/work/src` through the server's Pod helper (`id`, `diff`, optional `step`): exact context, clean relative paths only, no renames/binaries/`.git`/symlinks, bounded by `assist.patchMaxBytes`/`patchMaxFiles`; the diff's sha256 is recorded and audited as `run.assist.patch` before it is applied, which marks the run assisted |
 | `run_continue` | Release a held step so its real command runs on the (patched) tree and the DAG continues (`id`, optional `step`). Recorded first as `run.assist.continue`; the run becomes assisted: never published, never a promotion source, never green for its SHA, with an `assisted: … not evidence` reason line |
 | `run_hold_abandon` | Delete a held step's parked Pod so the step fails normally (`id`, optional `step`). Audited as `run.assist.abandon` |
+| `run_wait` | Block server-side until one run (`id`) finishes, holds a retry, or changes at all (`until`: `finished`, `held`, `any`), bounded by `timeout_s` (default and maximum 600); returns `state` (`finished`, `held`, `changed`, `timeout`), the run summary, unreleased holds and `retry_hint`. See [agent events](agent-events.md) |
+| `events_subscribe` | Narrow the agent events this MCP session receives as server push (`repos`, `refs_glob`, `kinds`, `own`); without a call a session receives every kind in its uplink scope. Kinds: `run.finished`, `run.held`, `run.lock_wait`, `promotion.finished`, `release.published`, `publication.failed`. See [agent events](agent-events.md) |
+| `events_since` | Agent events after a cursor (`after_id`, `limit`, same filters), in id order, scoped to the uplink; `next_after_id` continues, `gap` reports pruned history |
+| `sync_status` | Native Argo semaphore and mutex holders and waiters now, and the stored history per lock: intervals, maximum concurrent holders, wait durations (`lock`, `since`, `limit`); scoped uplinks see their own runs only |
 | `run_purge` | Purge retained logs, artifacts or both for a terminal run; requires an unscoped admin uplink and `id`, `what`, `reason`. Active runs and protected release/promotion/issue/grant evidence are refused. Run/step history remains; audited purge markers identify the actor and date |
 | `run_logs` | One exact burn/step log by full run ID or unique 8+ character prefix; defaults to the last 200 lines without explicit filters |
 | `artifacts` | The files a run kept, with size and modification time |
@@ -943,7 +947,7 @@ Issue metadata writes can pass `expected_revision` from a prior read; mismatch
 is a conflict, while omission preserves last-write-wins. See
 [conditional metadata updates](issue-lifecycle.md).
 
-The current MCP surface has **90 tools**, including administrator-only
+The current MCP surface has **94 tools**, including administrator-only
 `publication_abandon`.
 
 The CLI uses `--url`, `OBERTH_MCP_URL`, or `OBERTH_BASE_URL` (with

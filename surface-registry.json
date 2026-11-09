@@ -43,6 +43,70 @@
     "annotation:oberth.ci/run": {
       "doc_anchor": "docs/assisted-continuation.md#capacity-supersession-and-bounds",
       "test_ref": "internal/argojob/assist_hold_ops_test.go TestEnforceAssistHoldsFindsPodsLabelledByBuild"
+    },
+    "value:agentEvents": {
+      "doc_anchor": "docs/agent-events.md#values",
+      "test_ref": "cmd/oberth/agent_events_flags_test.go TestChartRendersAgentEventFlagsWithBinaryDefaults"
+    },
+    "value:retention": {
+      "doc_anchor": "docs/agent-events.md#values",
+      "test_ref": "cmd/oberth/agent_events_flags_test.go TestChartRendersAgentEventFlagsWithBinaryDefaults"
+    },
+    "value:syncRetention": {
+      "doc_anchor": "docs/agent-events.md#values",
+      "test_ref": "cmd/oberth/agent_events_flags_test.go TestChartRendersAgentEventFlagsWithBinaryDefaults"
+    },
+    "value:interval": {
+      "doc_anchor": "docs/agent-events.md#values",
+      "test_ref": "cmd/oberth/agent_events_flags_test.go TestChartRendersAgentEventFlagsWithBinaryDefaults"
+    },
+    "value:lockWaitThreshold": {
+      "doc_anchor": "docs/agent-events.md#values",
+      "test_ref": "cmd/oberth/agent_events_flags_test.go TestChartRendersAgentEventFlagsWithBinaryDefaults"
+    },
+    "value:maxStreamsPerToken": {
+      "doc_anchor": "docs/agent-events.md#values",
+      "test_ref": "cmd/oberth/agent_events_flags_test.go TestChartRendersAgentEventFlagsWithBinaryDefaults"
+    },
+    "value:maxBacklog": {
+      "doc_anchor": "docs/agent-events.md#values",
+      "test_ref": "cmd/oberth/agent_events_flags_test.go TestChartRendersAgentEventFlagsWithBinaryDefaults"
+    },
+    "value:heartbeat": {
+      "doc_anchor": "docs/agent-events.md#values",
+      "test_ref": "cmd/oberth/agent_events_flags_test.go TestChartRendersAgentEventFlagsWithBinaryDefaults"
+    },
+    "flag:agent-events-retention": {
+      "doc_anchor": "docs/agent-events.md#values",
+      "test_ref": "cmd/oberth/agent_events_flags_test.go TestServeAgentEventFlagsBounded"
+    },
+    "flag:agent-events-sync-retention": {
+      "doc_anchor": "docs/agent-events.md#values",
+      "test_ref": "cmd/oberth/agent_events_flags_test.go TestServeAgentEventFlagsBounded"
+    },
+    "flag:agent-events-interval": {
+      "doc_anchor": "docs/agent-events.md#values",
+      "test_ref": "cmd/oberth/agent_events_flags_test.go TestServeAgentEventFlagsBounded"
+    },
+    "flag:agent-events-lock-wait-threshold": {
+      "doc_anchor": "docs/agent-events.md#values",
+      "test_ref": "cmd/oberth/agent_events_flags_test.go TestServeAgentEventFlagsBounded"
+    },
+    "flag:agent-events-max-streams-per-token": {
+      "doc_anchor": "docs/agent-events.md#values",
+      "test_ref": "cmd/oberth/agent_events_flags_test.go TestServeAgentEventFlagsBounded"
+    },
+    "flag:agent-events-max-backlog": {
+      "doc_anchor": "docs/agent-events.md#values",
+      "test_ref": "cmd/oberth/agent_events_flags_test.go TestServeAgentEventFlagsBounded"
+    },
+    "flag:agent-events-heartbeat": {
+      "doc_anchor": "docs/agent-events.md#values",
+      "test_ref": "cmd/oberth/agent_events_flags_test.go TestServeAgentEventFlagsBounded"
+    },
+    "flag:reason": {
+      "doc_anchor": "docs/agent-events.md#safe-land-promote-with-prune_source",
+      "test_ref": "internal/service/promotion_prune_test.go TestBranchDeleteManyUnmergedNeedsReason"
     }
   }
 }

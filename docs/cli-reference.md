@@ -263,7 +263,7 @@ Use oberth branch <command> --help for command flags.
 
 ```text
 Usage: oberth branch prune <repository> [--merged-into <default-branch>] [--older-than <30d|72h>] [--exclude-prefix <prefix>]...
-         [--branch <name>=<sha>]... [--allow-unmerged] [--report] [--confirm --plan-id <id>] [--confirm-reserved <upstream/org/repo:branch>]
+         [--branch <name>=<sha>]... [--allow-unmerged --reason <text>] [--report] [--confirm --plan-id <id>] [--confirm-reserved <upstream/org/repo:branch>]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
        oberth branch prune-refs <repository> [--prefix <refs/...>]... [--ref <refs/...>=<sha>]... [--allow-unreachable]
          [--confirm --plan-id <id>] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
@@ -285,7 +285,7 @@ and --confirm --plan-id deletes them on the mirror only (they are never mirrored
 
 ```text
 Usage: oberth branch prune <repository> [--merged-into <default-branch>] [--older-than <30d|72h>] [--exclude-prefix <prefix>]...
-         [--branch <name>=<sha>]... [--allow-unmerged] [--report] [--confirm --plan-id <id>] [--confirm-reserved <upstream/org/repo:branch>]
+         [--branch <name>=<sha>]... [--allow-unmerged --reason <text>] [--report] [--confirm --plan-id <id>] [--confirm-reserved <upstream/org/repo:branch>]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
        oberth branch prune-refs <repository> [--prefix <refs/...>]... [--ref <refs/...>=<sha>]... [--allow-unreachable]
          [--confirm --plan-id <id>] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
@@ -307,7 +307,7 @@ and --confirm --plan-id deletes them on the mirror only (they are never mirrored
 
 ```text
 Usage: oberth branch prune <repository> [--merged-into <default-branch>] [--older-than <30d|72h>] [--exclude-prefix <prefix>]...
-         [--branch <name>=<sha>]... [--allow-unmerged] [--report] [--confirm --plan-id <id>] [--confirm-reserved <upstream/org/repo:branch>]
+         [--branch <name>=<sha>]... [--allow-unmerged --reason <text>] [--report] [--confirm --plan-id <id>] [--confirm-reserved <upstream/org/repo:branch>]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
        oberth branch prune-refs <repository> [--prefix <refs/...>]... [--ref <refs/...>=<sha>]... [--allow-unreachable]
          [--confirm --plan-id <id>] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
@@ -329,7 +329,7 @@ and --confirm --plan-id deletes them on the mirror only (they are never mirrored
 
 ```text
 Usage: oberth branch prune <repository> [--merged-into <default-branch>] [--older-than <30d|72h>] [--exclude-prefix <prefix>]...
-         [--branch <name>=<sha>]... [--allow-unmerged] [--report] [--confirm --plan-id <id>] [--confirm-reserved <upstream/org/repo:branch>]
+         [--branch <name>=<sha>]... [--allow-unmerged --reason <text>] [--report] [--confirm --plan-id <id>] [--confirm-reserved <upstream/org/repo:branch>]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
        oberth branch prune-refs <repository> [--prefix <refs/...>]... [--ref <refs/...>=<sha>]... [--allow-unreachable]
          [--confirm --plan-id <id>] [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
@@ -1240,6 +1240,20 @@ Usage of serve:
         smallest step start-up allowance in seconds (0-3600, at most the maximum) (default 120)
   -admission-step-startup-allowance-percent int
         Pod start-up allowance added to each declared step deadline, as a percentage of that deadline (0-400; #1499) (default 50)
+  -agent-events-heartbeat duration
+        keepalive interval of MCP streams (1s-5m) (default 20s)
+  -agent-events-interval duration
+        sweep period for retry holds, native lock waits and publication retries (2s-5m) (default 10s)
+  -agent-events-lock-wait-threshold duration
+        how long a run waits on one native Argo lock before a run.lock_wait event (default 1m0s)
+  -agent-events-max-backlog int
+        agent events replayed to one MCP push stream on connect; older ones are left to events_since (1-10000) (default 500)
+  -agent-events-max-streams-per-token int
+        open MCP push streams (GET /mcp) allowed per bearer credential (1-64) (default 4)
+  -agent-events-retention int
+        newest agent events kept for events_since and push replay (1-1000000; Helm agentEvents.retention) (default 10000)
+  -agent-events-sync-retention int
+        newest native Argo lock holder/waiter intervals kept for sync_status (1-1000000) (default 20000)
   -argo-ci-secrets-serviceaccount string
         ServiceAccount for CI templates with approved upstream-scoped secrets; its Vault role never carries release grants (default "oberth-argo-ci-secrets")
   -argo-controller-profile string

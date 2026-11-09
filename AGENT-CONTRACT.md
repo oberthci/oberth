@@ -998,9 +998,9 @@ containing CI and real workload qualification remain separately required.
   it encodes the same result object. Authenticated tool refusal text keeps its
   stable error class and may append only an explicitly public service reason.
   Raw dependency chains stay masked; scoped missing/hidden equivalence remains.
-- MCP exposes 90 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 94 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, read-only `run_resources` (captured history and reviewed git resource suggestions), `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`,
-  assisted-continuation `run_hold_list`, audited `run_hold_exec`, `run_hold_patch`, `run_continue` and `run_hold_abandon` (run's own uplink or admin; see [assisted continuation](docs/assisted-continuation.md)), `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
+  assisted-continuation `run_hold_list`, audited `run_hold_exec`, `run_hold_patch`, `run_continue` and `run_hold_abandon` (run's own uplink or admin; see [assisted continuation](docs/assisted-continuation.md)), the read-only agent loop `run_wait`, `events_subscribe`, `events_since` and `sync_status` (see [agent events](docs/agent-events.md)), `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, `publication_abandon`, issue
   `issue_create`, `issue_get`, `issue_get_many`, `issue_update`, `issue_append`,
   `issue_close`, `issue_reopen`, `issue_delete`, `issue_list`, `issue_lock`,

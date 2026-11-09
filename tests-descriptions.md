@@ -118,3 +118,33 @@ and HTTP/2 tests retain transport coverage. Held-writer reads and per-commit
 handshakes cover all 16 × 32 status and step writes without a continuous reader
 loop. Global resource retention checks exact oldest-first persisted rows across
 bounded partial sweeps, then requires a completed no-op sweep of fresh rows.
+
+MCP agent loop (#1514): store tests cover the migration, the fresh-schema
+object list and the downgrade fixture. `TestAgentEventRunFinishedOnceWithReasonAndHint`
+records one `run.finished` with failed step, reason and retry hint however
+often the run is observed, including after a simulated restart.
+`TestAgentEventRunHeldPayload` pins the `run.held` payload (step, pod,
+`held_since`, `abandon_at`, `holds_in_run`, `multiple_holds`) and that a
+continued hold is not reported. `TestAgentEventLockWaitAndSyncStatus` emits
+`run.lock_wait` only past the threshold with the holders, and proves
+`sync_status` current holders, wait durations and `max_concurrent_holders`
+(1 for a handover, 2 for an overlap). `TestAgentEventsScopedToUplink` proves a
+scoped uplink reads no other upstream's events or lock members, that a hidden
+repository filter answers like a missing one, and the `own` and `refs_glob`
+filters. `TestAgentEventReleaseAndPublication`, `TestRunWaitUntilFinishedHeldAndTimeout`,
+`TestRunWaitReturnsOnHold`, `TestRetryHintClassification` and
+`TestAgentEventPolicyBounds` cover the remaining kinds, `run_wait` states,
+every retry hint class and the policy clamps. `TestPromotionPruneSourceOnlyAfterVerifiedPromotion`
+keeps the source for a failed promotion, a differing upstream target, an
+unmerged source and (until the bound) an unreachable upstream, prunes only a
+verified promotion, never changes a settled request, audits every decision and
+carries the outcome in `promotion.finished`; `TestBranchDeleteManyUnmergedNeedsReason`
+requires and records a reason for unmerged deletions. API tests drive the real
+HTTP handler: `TestMCPEventStreamPushesChannelNotifications` (capabilities,
+session ID, channel notification shape and identifier meta keys, filter by
+`events_subscribe`), `TestMCPEventStreamResourcesAndScope` (`run://`
+resources, `resources/updated`, a foreign credential's 404, per-uplink scope),
+`TestMCPEventStreamBounds` (bounded backlog with truncation notice, one stream
+per credential returning 429, heartbeat, 406 without SSE) and
+`TestMCPWithoutEventFeedHasNoPush`. Flag and chart tests render every
+`agentEvents.*` value and refuse out-of-range values.
