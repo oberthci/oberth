@@ -15,9 +15,6 @@ func (scheduler *Scheduler) Live() error {
 	if err := scheduler.dispatchProgress.Check(); err != nil {
 		return fmt.Errorf("scheduler: %w", err)
 	}
-	if err := scheduler.headProgress.Check(); err != nil {
-		return fmt.Errorf("admission persistence: %w", err)
-	}
 	return nil
 }
 
@@ -109,7 +106,6 @@ func runDispatchExternal(ctx context.Context, operation func(context.Context) er
 // logger; it never takes background task locks or probes dependencies.
 func (scheduler *Scheduler) WalkLiveness(visit func(string, *liveness.Heartbeat)) {
 	visit("scheduler", &scheduler.dispatchProgress)
-	visit("admission persistence", &scheduler.headProgress)
 }
 
 func (service *API) WalkLiveness(visit func(string, *liveness.Heartbeat)) {

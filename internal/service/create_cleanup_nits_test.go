@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type contractSubmitFailureStore struct{ SchedulerStore }
@@ -71,7 +70,7 @@ func TestWorkflowCreateContractTerminalSweepRespectsPendingCancellation(t *testi
 	f := newRecoveryFixture(t)
 	run := recoveryWaitingRun(t, f, "feature/contract-sweep", "wf-contract", "")
 	scheduler := f.scheduler(t, &recoveryJobs{})
-	if err := scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S); err != nil {
+	if err := scheduler.recordWorkflowCreateBinding(run, run.WorkflowName); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.store.MarkRunCreatePending(t.Context(), run.ID, run.WorkflowName); err != nil {
@@ -125,7 +124,7 @@ func TestWorkflowCreateRestoreFailureRegistersAndRetries(t *testing.T) {
 	scheduler := f.scheduler(t, jobs)
 	now := time.Now()
 	scheduler.createNow = func() time.Time { return now }
-	if err := scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S); err != nil {
+	if err := scheduler.recordWorkflowCreateBinding(run, run.WorkflowName); err != nil {
 		t.Fatal(err)
 	}
 	// An existing ungranted reservation makes both normal and quarantine
@@ -159,7 +158,7 @@ func TestWorkflowCreateRestoreFailureRegistersAndRetries(t *testing.T) {
 	conflict.cancel()
 	now = now.Add(5 * time.Second)
 	scheduler.settleOneCreate(t.Context())
-	if calls != 1 || scheduler.AdmissionState().NumericBudget != nil {
+	if calls != 1 {
 		t.Fatal("restored run not charged before observation")
 	}
 	finish = true
@@ -181,7 +180,7 @@ func TestWorkflowCreateConcurrentRegistrationHasOneGrant(t *testing.T) {
 	f := newRecoveryFixture(t)
 	run := recoveryWaitingRun(t, f, "feature/register-once", "wf-once", "")
 	scheduler := f.scheduler(t, &recoveryJobs{})
-	if err := scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S); err != nil {
+	if err := scheduler.recordWorkflowCreateBinding(run, run.WorkflowName); err != nil {
 		t.Fatal(err)
 	}
 	var workers sync.WaitGroup
@@ -191,7 +190,7 @@ func TestWorkflowCreateConcurrentRegistrationHasOneGrant(t *testing.T) {
 	}
 	workers.Wait()
 	state := scheduler.AdmissionState()
-	if scheduler.pendingCreateCount() != 1 || state.Runs != 1 || state.NumericBudget != nil {
+	if scheduler.pendingCreateCount() != 1 || state.Runs != 1 {
 		t.Fatalf("concurrent registration duplicated admission: %+v", state)
 	}
 }

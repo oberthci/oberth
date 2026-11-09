@@ -21,7 +21,7 @@ import (
 func TestActiveRunsOrderAndWaitReasons(t *testing.T) {
 	fixture := newControlFixture(t)
 	ctx := t.Context()
-	gate := newWeightedAdmission(4)
+	gate := newAdmissionGate(2)
 	service := fixture.api(t)
 	service.admission = &Scheduler{admission: gate}
 	enqueue := func(branch string) model.Run {
@@ -67,7 +67,10 @@ func TestActiveRunsOrderAndWaitReasons(t *testing.T) {
 		t.Fatal(err)
 	}
 	releaseDone()
-	// 5: the head of the weighted queue: needs 3 with 2 of 4 in use.
+	// A second running run fills the other slot; it is not a durable run and
+	// never shows in the list.
+	cleanup = append(cleanup, acquireRequestWithinBudget(t, gate.reserve(99), groupRequest("filler", 2, pipeline.M, "")))
+	// 5: the head of the queue: every slot is taken.
 	head := enqueue("feature/head")
 	headReservation := gate.reserve(head.QueueSequence)
 	go func() {
@@ -102,10 +105,10 @@ func TestActiveRunsOrderAndWaitReasons(t *testing.T) {
 		groupEntry.Scheduling.Admission.GroupHolder != holder.ID || !strings.Contains(groupEntry.Scheduling.Message, `concurrency group "deploy"`) {
 		t.Fatalf("group waiter lost its reason: %#v", groupEntry.Scheduling)
 	}
-	if admission := headEntry.Scheduling.Admission; admission == nil || admission.Size != "L" || admission.Weight != 3 ||
-		admission.Used != 2 || admission.Capacity != 4 || admission.Position == 0 ||
-		!strings.Contains(headEntry.Scheduling.Message, "Need 3 weight; 2/4 used") {
-		t.Fatalf("queue head lost its weight: %#v %#v", headEntry.Scheduling, admission)
+	if admission := headEntry.Scheduling.Admission; admission == nil ||
+		admission.Used != 2 || admission.Capacity != 2 || admission.Position == 0 ||
+		!strings.Contains(headEntry.Scheduling.Message, "2 runs running") {
+		t.Fatalf("queue head lost its reason: %#v %#v", headEntry.Scheduling, admission)
 	}
 	if queuedEntry.ID != queued.ID || queuedEntry.Scheduling == nil || queuedEntry.Scheduling.State != "queued" || queuedEntry.Scheduling.QueuePosition != 3 {
 		t.Fatalf("queued run = %#v", queuedEntry.Scheduling)

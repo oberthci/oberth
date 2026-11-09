@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -17,17 +16,6 @@ import (
 )
 
 const runtimeCapacityInterval = 5 * time.Second
-
-func admissionCapacityBudget(jobs int, weights SizeWeights, requireXLFit bool) (int, error) {
-	if jobs < 1 || jobs > 64 || weights.M < 1 || weights.M > math.MaxInt/jobs {
-		return 0, errors.New("admission capacity requires 1..64 jobs and a representable jobs * M weight budget")
-	}
-	budget := jobs * weights.M
-	if requireXLFit && weights.XL > budget {
-		return 0, errors.New("admission capacity is below the configured XL weight")
-	}
-	return budget, nil
-}
 
 // Open the key on every sample: Kubernetes updates a projected ConfigMap by
 // swapping symlinks. A retained descriptor or subPath mount would pin old bytes.
@@ -57,11 +45,11 @@ func readRuntimeCapacity(path string) (int, error) {
 	}
 	text := strings.TrimSpace(string(body))
 	if text == "" || strings.IndexFunc(text, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
-		return 0, errors.New("capacity file requires one integer in 1..64")
+		return 0, errors.New("capacity file requires one integer in 0..64")
 	}
 	jobs, err := strconv.Atoi(text)
-	if err != nil || jobs < 1 || jobs > 64 {
-		return 0, errors.New("capacity file requires one integer in 1..64")
+	if err != nil || jobs < 0 || jobs > 64 {
+		return 0, errors.New("capacity file requires one integer in 0..64")
 	}
 	return jobs, nil
 }
@@ -77,7 +65,7 @@ func (scheduler *Scheduler) concurrentJobs() int {
 // one coherent snapshot with other admission fields. Caller holds admission.mu.
 func (scheduler *Scheduler) concurrentJobsLocked() int {
 	gate := scheduler.admission
-	if (gate.capacityConfig.Source == "file" || gate.capacityConfig.Source == "runtime") && gate.capacityConfig.MaxConcurrentJobs > 0 {
+	if gate.capacityConfig.Source == "file" || gate.capacityConfig.Source == "runtime" {
 		return gate.capacityConfig.MaxConcurrentJobs
 	}
 	return scheduler.maxConcurrent
@@ -107,20 +95,13 @@ func (scheduler *Scheduler) SetCapacityOverrideReader(read CapacityOverrideReade
 	scheduler.capacityOverride = read
 }
 
-// ValidateRuntimeCapacity applies the same bounds and weight budget check as
-// a reload, so an administrator change that cannot apply is refused early.
+// ValidateRuntimeCapacity applies the same bounds as a reload, so an
+// administrator change that cannot apply is refused early. Zero is no ceiling.
 func (scheduler *Scheduler) ValidateRuntimeCapacity(jobs int) error {
-	if jobs < 1 || jobs > 64 {
-		return errors.New("admission capacity requires 1..64 jobs")
+	if jobs < 0 || jobs > 64 {
+		return errors.New("admission capacity requires 0..64 jobs (0: no ceiling)")
 	}
-	gate := scheduler.admission
-	gate.mu.Lock()
-	defer gate.mu.Unlock()
-	if gate.workflowOnly {
-		return nil
-	}
-	_, err := admissionCapacityBudget(jobs, gate.weights, true)
-	return err
+	return nil
 }
 
 // ApplyRuntimeCapacity reloads every capacity layer now and returns the
@@ -164,13 +145,9 @@ func (scheduler *Scheduler) refreshRuntimeCapacity(ctx context.Context) {
 	gate := scheduler.admission
 	gate.mu.Lock()
 	previous := gate.capacityConfig
-	budget, validationErr := jobs, error(nil)
-	if !gate.workflowOnly && err == nil {
-		budget, validationErr = admissionCapacityBudget(jobs, gate.weights, true)
-	}
 	gate.mu.Unlock()
-	if err == nil {
-		err = validationErr
+	if err == nil && (jobs < 0 || jobs > 64) {
+		err = errors.New("admission capacity requires 0..64 jobs (0: no ceiling)")
 	}
 	if err != nil {
 		scheduler.capacityReloadError(err)
@@ -182,7 +159,7 @@ func (scheduler *Scheduler) refreshRuntimeCapacity(ctx context.Context) {
 		gate.mu.Unlock()
 		return
 	}
-	details, err := json.Marshal(map[string]any{"previous_jobs": previous.MaxConcurrentJobs, "previous_source": previous.Source, "jobs": jobs, "weight_budget": budget, "source": source, "file": scheduler.capacityFile})
+	details, err := json.Marshal(map[string]any{"previous_jobs": previous.MaxConcurrentJobs, "previous_source": previous.Source, "jobs": jobs, "source": source, "file": scheduler.capacityFile})
 	if err == nil {
 		auditCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
@@ -195,22 +172,18 @@ func (scheduler *Scheduler) refreshRuntimeCapacity(ctx context.Context) {
 		return
 	}
 	gate.mu.Lock()
-	gate.capacity = budget
-	gate.maxRuns = budget
+	gate.maxRuns = jobs
 	gate.capacityConfig.MaxConcurrentJobs = jobs
 	gate.capacityConfig.Source = source
 	gate.capacityConfig.Error = ""
 	gate.capacityConfig.ChangedAt = time.Now().UTC()
-	// Granted/retained reservations keep the exact weight they hold. Waiting
-	// weights must be repriced, including whole-budget XL and clamped L weights.
-	for _, waiter := range gate.waiters {
-		if !gate.workflowOnly && waiter.prepared && !gate.usesDeclarations(waiter) {
-			waiter.weight = gate.weights.of(waiter.size, budget)
-		}
-	}
 	gate.grantLocked()
 	gate.mu.Unlock()
 	scheduler.signalQueue()
+	if jobs == 0 {
+		log.Printf("admission capacity: no run ceiling, source=%s", source)
+		return
+	}
 	log.Printf("admission capacity: %d concurrent runs, source=%s", jobs, source)
 }
 

@@ -583,6 +583,37 @@ if grep -Fq -- '--admission-disk-floor-bytes=' "$admission_legacy_manifest"; the
 fi
 rm -f "$admission_legacy_manifest"
 
+# argoSync.semaphores renders the fixed-name limits ConfigMap in the pipeline
+# namespace, with integer values quoted as ConfigMap data; empty renders none.
+# releases.serialize renders the one flag only when set. Removed admission
+# values are refused by the schema, never silently ignored.
+sync_manifest=$(mktemp)
+render --set argoSync.semaphores.kvm=1 --set-string argoSync.semaphores.heavy-go=2 --set releases.serialize=true >"$sync_manifest"
+grep -q '^  name: oberth-sync-limits$' "$sync_manifest"
+grep -q '^  kvm: "1"$' "$sync_manifest"
+grep -q '^  heavy-go: "2"$' "$sync_manifest"
+grep -q -- '--serialize-releases=true' "$sync_manifest"
+render >"$sync_manifest"
+if grep -q 'oberth-sync-limits' "$sync_manifest" || grep -q -- '--serialize-releases' "$sync_manifest"; then
+  exit 1
+fi
+if render --set argoSync.semaphores.kvm=0 >/dev/null 2>&1; then exit 1; fi
+if render --set-string 'argoSync.semaphores.bad key=1' >/dev/null 2>&1; then exit 1; fi
+if render --set maxConcurrentJobs=0 >"$sync_manifest"; then
+  grep -q -- '--max-concurrent-jobs=0' "$sync_manifest"
+  grep -q '^  max-concurrent-jobs: "0"$' "$sync_manifest"
+else
+  exit 1
+fi
+# Removed admission keys: the former stock defaults still render (a
+# --reuse-values upgrade carries them); any deliberate value fails with the
+# replacement named.
+render --set-string admission.maxHeadWait=20m --set admission.sizeWeights.S=1 --set admission.sizeWeights.M=2 --set admission.sizeWeights.L=3 --set admission.sizeWeights.XL=0 --set admission.declaredResources.ioRuns=0 --set admission.declaredResources.cpuMillis=8000 >/dev/null
+for removed in admission.exclusiveClasses.kvm=1 admission.sizeWeights.XL=8 admission.maxHeadWait=45m admission.declaredResources.ioRuns=2 admission.legacyResources.L.cpu_milli=1; do
+  if render --set "$removed" >/dev/null 2>&1; then exit 1; fi
+done
+rm -f "$sync_manifest"
+
 # Executor scratch keeps a safe default for reused values and accepts overrides.
 grep -q -- '--argo-executor-scratch-size-limit=1Gi' "$manifest"
 render --set argo.executorScratchSizeLimit=4Gi >"$argo_legacy_manifest"

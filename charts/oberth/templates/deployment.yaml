@@ -192,6 +192,10 @@ spec:
             {{- $autoRetryInfrastructure = .Values.autoRetryInfrastructure }}
             {{- end }}
             - --auto-retry-infrastructure={{ $autoRetryInfrastructure }}
+            {{- $releases := .Values.releases | default dict }}
+            {{- if $releases.serialize }}
+            - --serialize-releases=true
+            {{- end }}
             {{- if $runtimeCapacity.enabled }}
             - --max-concurrent-jobs-file=/etc/oberth/runtime-capacity/max-concurrent-jobs
             {{- end }}
@@ -226,14 +230,6 @@ spec:
             {{- $diskFloorBytes := int64 ($admission.diskFloorBytes | default 0) }}
             {{- if gt $diskFloorBytes 0 }}
             - --admission-disk-floor-bytes={{ $diskFloorBytes }}
-            {{- end }}
-            {{- $exclusiveClasses := $admission.exclusiveClasses | default dict }}
-            {{- if $exclusiveClasses }}
-            {{- $exclusiveEntries := list }}
-            {{- range $name := keys $exclusiveClasses | sortAlpha }}
-            {{- $exclusiveEntries = append $exclusiveEntries (printf "%s=%d" $name (int64 (get $exclusiveClasses $name))) }}
-            {{- end }}
-            - {{ printf "--admission-exclusive-classes=%s" (join "," $exclusiveEntries) | quote }}
             {{- end }}
             - {{ printf "--admission-stall-timeout=%s" ($admission.stallTimeout | default "10m") | quote }}
             {{- /* hasKey, not default/merge: zero is a meaningful allowance value. */}}

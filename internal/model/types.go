@@ -134,10 +134,8 @@ type Run struct {
 	// FailureCause is private server-classified presentation metadata.
 	FailureCause string `json:"-"`
 	// Read-side identity and admission context; never part of the durable run row.
-	Repo              string
-	Superseded        bool               `json:"superseded"`
-	Size              string             `json:"size"`
-	DeclaredResources *DeclaredResources `json:"declared_resources"`
+	Repo       string
+	Superseded bool `json:"superseded"`
 
 	// ResourceMessage is advice, separate from the exact status vocabulary.
 	ResourceMessage string `json:"resource_message,omitempty"`

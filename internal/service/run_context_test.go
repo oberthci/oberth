@@ -17,7 +17,7 @@ import (
 type runContextAdmission struct{}
 
 func (runContextAdmission) AdmissionSnapshot(int64) *model.AdmissionObservation {
-	return &model.AdmissionObservation{State: "waiting", Size: "L", DeclaredResources: &model.DeclaredResources{CPUMilli: 3000, MemoryBytes: 4096, Pods: 2}}
+	return &model.AdmissionObservation{State: "waiting"}
 }
 
 func runContextJSON(t *testing.T, value any) map[string]any {
@@ -65,12 +65,13 @@ func TestRunRepositoryContextSurfaces(t *testing.T) {
 			repo, ref, sha, position = "repo", "ref", "sha", "queue_position"
 			expectedRepo = "codeberg/acme/oberth"
 		}
-		if row[repo] != expectedRepo || row[ref] != old.Ref || row[sha] != old.SHA || row[position] != float64(1) || row["superseded"] != true || row["size"] != "L" {
+		if row[repo] != expectedRepo || row[ref] != old.Ref || row[sha] != old.SHA || row[position] != float64(1) || row["superseded"] != true {
 			t.Errorf("missing run context: %#v", row)
 		}
-		demand, ok := row["declared_resources"].(map[string]any)
-		if !ok || demand["cpu_milli"] != float64(3000) || demand["memory_bytes"] != float64(4096) || demand["pods"] != float64(2) {
-			t.Errorf("missing demand: %#v", row)
+		for _, retired := range []string{"size", "declared_resources"} {
+			if _, exists := row[retired]; exists {
+				t.Errorf("retired admission field %s still exposed: %#v", retired, row)
+			}
 		}
 	}
 	for _, view := range []string{"all", "active"} {
@@ -186,11 +187,8 @@ func TestRunRepositoryContextUnknownAndScope(t *testing.T) {
 			t.Fatalf("filtered scoped rows: %#v", rows)
 		}
 		row := rows[0].(map[string]any)
-		if row["Repo"] != f.visible.Name || row["superseded"] != true || row["size"] != "" {
+		if row["Repo"] != f.visible.Name || row["superseded"] != true {
 			t.Fatalf("scoped row: %#v", row)
-		}
-		if demand, exists := row["declared_resources"]; !exists || demand != nil {
-			t.Fatalf("unknown demand: %#v", row)
 		}
 		if _, exists := row["QueuePosition"]; exists {
 			t.Fatal("scoped queue position leaked")
@@ -202,7 +200,7 @@ func TestRunRepositoryContextUnknownAndScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := runContextJSON(t, value)
-	if row["repo"] != "github/oberthci/oberth" || row["ref"] != old.Ref || row["sha"] != old.SHA || row["superseded"] != true || row["size"] != "" {
+	if row["repo"] != "github/oberthci/oberth" || row["ref"] != old.Ref || row["sha"] != old.SHA || row["superseded"] != true {
 		t.Fatalf("scoped summary: %#v", row)
 	}
 	if _, exists := row["queue_position"]; exists {

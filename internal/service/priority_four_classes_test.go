@@ -10,7 +10,7 @@ import (
 )
 
 func TestFourClassesUrgencyPassesPromotionsWithoutPreemptingRunningWork(t *testing.T) {
-	g := newWeightedAdmission(4)
+	g := newAdmissionGate(1)
 	holder := g.reserve(1)
 	release, err := holder.acquire(context.Background(), pipeline.XL)
 	if err != nil {
@@ -41,8 +41,8 @@ func TestFourClassesUrgencyPassesPromotionsWithoutPreemptingRunningWork(t *testi
 			t.Fatalf("four-class FIFO failed at %d (priority %s)", i, r.priority)
 		}
 		g.mu.Lock()
-		if g.runs != 1 || g.used != 4 {
-			t.Errorf("admission constraints changed: runs=%d used=%d", g.runs, g.used)
+		if g.runs != 1 {
+			t.Errorf("admission constraints changed: runs=%d", g.runs)
 		}
 		g.mu.Unlock()
 		r.release()

@@ -270,3 +270,21 @@ func TestPendingCPUMessageUsesPodRequests(t *testing.T) {
 		t.Fatal(got.Message)
 	}
 }
+
+// The reason line says which lock a run is queued behind, in the controller's
+// own lock-key grammar; anything outside it falls back to the fixed form.
+func TestLockWaitMessageNamesTheLockWithoutFreeText(t *testing.T) {
+	for message, want := range map[string]string{
+		"Waiting for pipeline/ConfigMap/oberth-sync-limits/kvm lock. Lock status: 0/1": "Waiting for lock ConfigMap/oberth-sync-limits/kvm (0/1 free).",
+		"Waiting for pipeline/Mutex/oberth-release lock. Lock status: 0/1 ":            "Waiting for lock Mutex/oberth-release (0/1 free).",
+		"Waiting for pipeline/ConfigMap/limits/heavy-go lock. Lock status: 1/2":        "Waiting for lock ConfigMap/limits/heavy-go (1/2 free).",
+		"Waiting for SENSITIVE-command-env-token lock. Lock status: 0/1":               "Waiting for lock (synchronization).",
+		"Waiting for $(curl evil) lock. Lock status: 0/1":                              "Waiting for lock (synchronization).",
+		"Waiting for pipeline/Secret/token lock. Lock status: 0/1":                     "Waiting for lock (synchronization).",
+		"Waiting for pipeline/Mutex/name;rm -rf lock. Lock status: 0/1":                "Waiting for lock (synchronization).",
+	} {
+		if got := safeWorkflowMessage(message); got != want {
+			t.Fatalf("safeWorkflowMessage(%q) = %q, want %q", message, got, want)
+		}
+	}
+}

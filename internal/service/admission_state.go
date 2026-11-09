@@ -18,7 +18,7 @@ import (
 // release: one whose owner is alive and will release it itself.
 var ErrAdmissionReleaseRefused = fmt.Errorf("%w: admission release refused", store.ErrInvalidState)
 
-func (gate *weightedAdmission) reservationStateLocked(reservation *admissionReservation) string {
+func (gate *admissionGate) reservationStateLocked(reservation *admissionReservation) string {
 	switch {
 	case reservation.granted && reservation.retained:
 		return "retained"
@@ -33,22 +33,17 @@ func (gate *weightedAdmission) reservationStateLocked(reservation *admissionRese
 	return "waiting"
 }
 
-func (gate *weightedAdmission) reservationViewLocked(reservation *admissionReservation) model.AdmissionReservation {
+func (gate *admissionGate) reservationViewLocked(reservation *admissionReservation) model.AdmissionReservation {
 	view := model.AdmissionReservation{
-		DeclaredResources: gate.reportedResourcesLocked(reservation),
-		LegacyResources:   gate.reportedLegacyResourcesLocked(reservation),
-		RunID:             reservation.runID, RepoID: reservation.repoID, Repo: reservation.repo, Ref: reservation.ref,
-		Size: string(reservation.size), Weight: reservation.weight, Group: reservation.groupName,
+		RunID: reservation.runID, RepoID: reservation.repoID, Repo: reservation.repo, Ref: reservation.ref,
+		Group:    reservation.groupName,
 		Pressure: gate.pressureWaitLocked(reservation),
-		State:    gate.reservationStateLocked(reservation), Backfilled: reservation.granted && reservation.backfilled,
+		State:    gate.reservationStateLocked(reservation),
 	}
 	if reservation.repo != "" && reservation.runID != "" {
 		if name, err := deterministicWorkflowName(reservation.repo, reservation.runID); err == nil {
 			view.Workflow = name
 		}
-	}
-	if gate.workflowOnly {
-		view.Size = ""
 	}
 	switch view.State {
 	case "granted", "retained":
@@ -84,15 +79,10 @@ func (scheduler *Scheduler) admissionState(definitions []model.AdmissionGroup) *
 	hold := gate.adminHold.Snapshot(gate.clock())
 	state := &model.AdmissionState{
 		Hold:          &hold,
-		NumericBudget: gate.numericBudgetLocked(),
 		Configuration: &configuration,
 		Pressure:      gate.pressureStateLocked(),
-		Capacity:      gate.capacity, Used: gate.used, Runs: gate.runs, MaxRuns: gate.maxRuns,
-		MaxHeadWaitSeconds: int64(gate.maxHeadWait / time.Second),
-		Reservations:       []model.AdmissionReservation{}, Groups: []model.AdmissionGroup{},
-	}
-	if gate.workflowOnly {
-		state.Used = gate.runs
+		Capacity:      gate.maxRuns, Used: gate.runs, Runs: gate.runs, MaxRuns: gate.maxRuns,
+		Reservations: []model.AdmissionReservation{}, Groups: []model.AdmissionGroup{},
 	}
 	sequences := make([]int64, 0, len(gate.reservations))
 	for sequence := range gate.reservations {
@@ -179,7 +169,7 @@ func (scheduler *Scheduler) ReleaseAdmission(ctx context.Context, runID, actor s
 			ErrAdmissionReleaseRefused, runID)
 	}
 	active := err == nil && run.Status.Active()
-	result := model.AdmissionRelease{RunID: runID, State: view.State, Weight: view.Weight, Group: view.Group, Workflow: run.WorkflowName, Forced: force}
+	result := model.AdmissionRelease{RunID: runID, State: view.State, Group: view.Group, Workflow: run.WorkflowName, Forced: force}
 	switch view.State {
 	case "retained":
 	case "granted":
@@ -227,7 +217,7 @@ func (scheduler *Scheduler) ReleaseAdmission(ctx context.Context, runID, actor s
 		return model.AdmissionRelease{}, fmt.Errorf("%w: the reservation of run %s was released by its owner meanwhile", store.ErrNotFound, runID)
 	}
 	details, err := json.Marshal(map[string]any{
-		"run_id": runID, "state": view.State, "weight": view.Weight, "group": view.Group,
+		"run_id": runID, "state": view.State, "group": view.Group,
 		"workflow": run.WorkflowName, "verified": result.Verified, "force": force,
 	})
 	if err == nil {

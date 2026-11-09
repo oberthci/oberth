@@ -21,14 +21,10 @@ func acquireWithinBudget(t *testing.T, reservation *admissionReservation, size p
 	return reservation.acquire(ctx, size)
 }
 
-// Large runs are governed by the weight budget, not by a separate global
-// "one at a time" rule. This assertion replaces an earlier one that required
-// the second L to block at capacity 6: that rule pinned every L-declaring
-// repository to a single concurrent run regardless of maxConcurrentJobs,
-// which is the defect this file's newWeightedAdmissionForJobs tests cover.
-// Two L runs weigh exactly the capacity here, so both run and a third waits.
-func TestWeightedAdmissionEnforcesCapacityForLargeRuns(t *testing.T) {
-	gate := newWeightedAdmission(6)
+// The ceiling counts runs: two fit a ceiling of two whatever their historical
+// size tier says, and a third waits for one of them to finish.
+func TestAdmissionEnforcesRunCeiling(t *testing.T) {
+	gate := newAdmissionGate(2)
 	first := gate.reserve(1)
 	releaseFirst, err := first.acquire(context.Background(), pipeline.L)
 	if err != nil {
@@ -39,7 +35,7 @@ func TestWeightedAdmissionEnforcesCapacityForLargeRuns(t *testing.T) {
 	second := gate.reserve(2)
 	releaseSecond, err := acquireWithinBudget(t, second, pipeline.L)
 	if err != nil {
-		t.Fatalf("two large runs must fit a budget that weighs exactly two of them: %v", err)
+		t.Fatalf("two runs must fit a ceiling of two: %v", err)
 	}
 	defer releaseSecond()
 
@@ -60,7 +56,7 @@ func TestWeightedAdmissionEnforcesCapacityForLargeRuns(t *testing.T) {
 // as waiting until submission.
 func TestWeightedAdmissionForJobsAdmitsConfiguredConcurrencyAtDefaultSize(t *testing.T) {
 	const maxConcurrentJobs = 3
-	gate := newWeightedAdmissionForJobs(maxConcurrentJobs)
+	gate := newAdmissionGate(maxConcurrentJobs)
 	releases := make([]func(), 0, maxConcurrentJobs)
 	for sequence := 1; sequence <= maxConcurrentJobs; sequence++ {
 		reservation := gate.reserve(int64(sequence))
@@ -90,7 +86,7 @@ func TestWeightedAdmissionForJobsAdmitsConfiguredConcurrencyAtDefaultSize(t *tes
 // shape of the reported defect, where every run of one L-declaring repository
 // serialized behind the previous one.
 func TestWeightedAdmissionForJobsRunsLargePipelinesConcurrently(t *testing.T) {
-	gate := newWeightedAdmissionForJobs(3)
+	gate := newAdmissionGate(3)
 	first := gate.reserve(1)
 	releaseFirst, err := first.acquire(context.Background(), pipeline.L)
 	if err != nil {
@@ -106,32 +102,13 @@ func TestWeightedAdmissionForJobsRunsLargePipelinesConcurrently(t *testing.T) {
 	releaseSecond()
 }
 
-// XL declares the whole node and keeps its exclusivity: the budget conversion
-// must not weaken the one size that genuinely needs to run alone.
-func TestWeightedAdmissionForJobsKeepsExtraLargeExclusive(t *testing.T) {
-	gate := newWeightedAdmissionForJobs(3)
-	first := gate.reserve(1)
-	releaseFirst, err := first.acquire(context.Background(), pipeline.XL)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	second := gate.reserve(2)
-	acquired := make(chan func(), 1)
-	go acquireForTest(second, pipeline.S, acquired)
-	assertNotAcquired(t, acquired)
-	releaseFirst()
-	releaseSecond := awaitAcquired(t, acquired)
-	releaseSecond()
-}
-
 // An operator who configures a single concurrent job still gets one run at the
 // default size and heavier. The gate is a resource budget, so a size lighter
 // than the default can fit twice in it; the hard run-count ceiling is the
 // dispatch loop's `active < maxConcurrent`, not this gate.
 func TestWeightedAdmissionForJobsHonorsSingleJobCeiling(t *testing.T) {
 	for _, size := range []pipeline.Size{"", pipeline.M, pipeline.L, pipeline.XL} {
-		gate := newWeightedAdmissionForJobs(1)
+		gate := newAdmissionGate(1)
 		first := gate.reserve(1)
 		releaseFirst, err := first.acquire(context.Background(), size)
 		if err != nil {
@@ -147,8 +124,8 @@ func TestWeightedAdmissionForJobsHonorsSingleJobCeiling(t *testing.T) {
 	}
 }
 
-func TestWeightedAdmissionIsFIFOAndXLDrains(t *testing.T) {
-	gate := newWeightedAdmission(3)
+func TestAdmissionIsFIFO(t *testing.T) {
+	gate := newAdmissionGate(1)
 	medium := gate.reserve(1)
 	releaseMedium, err := medium.acquire(context.Background(), pipeline.M)
 	if err != nil {
@@ -172,8 +149,8 @@ func TestWeightedAdmissionIsFIFOAndXLDrains(t *testing.T) {
 	releaseSmall()
 }
 
-func TestWeightedAdmissionReservesClaimOrderBeforeSizingCompletes(t *testing.T) {
-	gate := newWeightedAdmission(3)
+func TestAdmissionReservesClaimOrderBeforePreparationCompletes(t *testing.T) {
+	gate := newAdmissionGate(1)
 	first := gate.reserve(1)
 	second := gate.reserve(2)
 	secondAcquired := make(chan func(), 1)
@@ -191,7 +168,7 @@ func TestWeightedAdmissionReservesClaimOrderBeforeSizingCompletes(t *testing.T) 
 }
 
 func TestWeightedAdmissionClampsDefaultMToSmallCapacity(t *testing.T) {
-	gate := newWeightedAdmission(1)
+	gate := newAdmissionGate(1)
 	reservation := gate.reserve(1)
 	release, err := reservation.acquire(context.Background(), "")
 	if err != nil {
@@ -228,12 +205,12 @@ func awaitAcquired(t *testing.T, acquired <-chan func()) func() {
 	}
 }
 
-// abandon withdraws only an ungranted reservation. A waiting XL head that is
-// abandoned returns errAdmissionAbandoned to its owner, and the same call
-// admits the run queued behind it; a granted reservation stays with its owner
+// abandon withdraws only an ungranted reservation. A waiting head that is
+// abandoned returns errAdmissionAbandoned to its owner and leaves its place
+// to the run queued behind it; a granted reservation stays with its owner
 // until the owner releases it, and a preparing one fails its later acquire.
-func TestWeightedAdmissionAbandonWithdrawsOnlyUngrantedReservations(t *testing.T) {
-	gate := newWeightedAdmission(6)
+func TestAdmissionAbandonWithdrawsOnlyUngrantedReservations(t *testing.T) {
+	gate := newAdmissionGate(1)
 	holder := gate.reserve(1)
 	releaseHolder, err := holder.acquire(context.Background(), pipeline.L)
 	if err != nil {
@@ -264,6 +241,7 @@ func TestWeightedAdmissionAbandonWithdrawsOnlyUngrantedReservations(t *testing.T
 	case <-time.After(testStartTimeout(admissionAcquireBudget)):
 		t.Fatal("abandoned waiter never woke")
 	}
+	releaseHolder()
 	releaseBehind := awaitAcquired(t, acquired)
 	if gate.abandon(2) {
 		t.Fatal("an abandoned reservation was abandoned twice")
@@ -278,7 +256,7 @@ func TestWeightedAdmissionAbandonWithdrawsOnlyUngrantedReservations(t *testing.T
 	}
 	releaseBehind()
 	releaseHolder()
-	if gate.used != 0 || gate.runs != 0 || len(gate.waiters) != 0 || len(gate.reservations) != 0 {
-		t.Fatalf("gate leaked state: used=%d runs=%d waiters=%d reservations=%d", gate.used, gate.runs, len(gate.waiters), len(gate.reservations))
+	if gate.runs != 0 || len(gate.waiters) != 0 || len(gate.reservations) != 0 {
+		t.Fatalf("gate leaked state: runs=%d waiters=%d reservations=%d", gate.runs, len(gate.waiters), len(gate.reservations))
 	}
 }

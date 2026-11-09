@@ -9,7 +9,7 @@ import (
 )
 
 func TestAdmissionReservationUsesInheritedFIFOOrderAndUniqueRunKeys(t *testing.T) {
-	gate := newWeightedAdmissionForJobs(2)
+	gate := newAdmissionGate(2)
 	queuedBehind := gate.reserveInOrder(2, 2)
 	refired := gate.reserveInOrder(3, 1)
 	defer queuedBehind.cancel()
@@ -27,7 +27,7 @@ func TestAdmissionReservationUsesInheritedFIFOOrderAndUniqueRunKeys(t *testing.T
 }
 
 func TestAdmissionSnapshotAndStateKeepRefiredHeadIdentity(t *testing.T) {
-	gate := newWeightedAdmissionForJobs(2)
+	gate := newAdmissionGate(2)
 	held := gate.reserve(1)
 	release, err := held.acquire(context.Background(), pipeline.XL)
 	if err != nil {
@@ -40,7 +40,7 @@ func TestAdmissionSnapshotAndStateKeepRefiredHeadIdentity(t *testing.T) {
 	defer refired.cancel()
 	gate.mu.Lock()
 	for _, reservation := range []*admissionReservation{behind, refired} {
-		reservation.prepared, reservation.size, reservation.weight = true, pipeline.L, gate.capacity
+		reservation.prepared = true
 	}
 	gate.mu.Unlock()
 	scheduler := &Scheduler{admission: gate}

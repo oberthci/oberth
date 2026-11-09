@@ -293,13 +293,6 @@ func renderActiveRuns(output io.Writer, runs []remoteActiveRun, now time.Time) e
 			row.Scheduling = run.Scheduling
 		}
 		reason = displayRunReason(row)
-		if scheduling := run.Scheduling; scheduling != nil {
-			if admission := scheduling.Admission; admission != nil {
-				if admission.Size != "" {
-					size = fmt.Sprintf("%s/%d", admission.Size, admission.Weight)
-				}
-			}
-		}
 		if _, err := fmt.Fprintf(output, "%-4s %-34s %-9s %-8s %-8s %-30s %s\n",
 			position, run.ID, displayRunStatus(run.remoteRun), size, elapsed, run.Ref, reason); err != nil {
 			return err
@@ -408,12 +401,6 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 	if displayRunStatus(detail.Run) == "queued" && detail.Scheduling != nil {
 		if _, err := fmt.Fprintln(output, detail.Scheduling.Message); err != nil {
 			return err
-		}
-		if admission := detail.Scheduling.Admission; admission != nil && admission.Weight > 0 {
-			if _, err := fmt.Fprintf(output, "capacity: need %d weight, %d/%d used, queue position %d\n",
-				admission.Weight, admission.Used, admission.Capacity, admission.Position); err != nil {
-				return err
-			}
 		}
 	}
 	if err := renderExecutionClock(output, detail.Scheduling); err != nil {

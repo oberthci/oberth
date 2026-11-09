@@ -198,7 +198,6 @@ func admitSpec(spec *wfv1.WorkflowSpec, serverDeadline bool) []error {
 		problems = append(problems, fmt.Errorf("argoworkflow: spec.parallelism %d exceeds the %d ceiling",
 			*spec.Parallelism, MaxParallelism))
 	}
-	problems = append(problems, admitSynchronization("spec", spec.Synchronization)...)
 	problems = append(problems, admitPodSecurityContext("spec.securityContext", spec.SecurityContext)...)
 	problems = append(problems, admitVolumes("spec.volumes", spec.Volumes)...)
 	if len(spec.VolumeClaimTemplates) > MaxVolumeClaimTemplates {
@@ -423,7 +422,6 @@ func admitTemplate(location string, template wfv1.Template, policy Policy, depth
 				location, limit, MaxRetryLimit))
 		}
 	}
-	problems = append(problems, admitSynchronization(location, template.Synchronization)...)
 	problems = append(problems, admitPodSecurityContext(location+".securityContext", template.SecurityContext)...)
 	problems = append(problems, admitVolumes(location+".volumes", template.Volumes)...)
 	problems = append(problems, admitContainers(location, template, policy)...)
@@ -791,10 +789,10 @@ func admitTemplateMetadata(location string, metadata wfv1.Metadata) []error {
 			if value != "none" {
 				problems = append(problems, fmt.Errorf("argoworkflow: %s.%s must be none", location, name))
 			}
-		case ExclusiveAnnotation:
-			if !ValidExclusiveClass(strings.TrimSpace(value)) {
-				problems = append(problems, fmt.Errorf("argoworkflow: %s.%s must name an exclusive class: 1 to %d lowercase letters, digits and inner hyphens", location, name, MaxExclusiveClassLength))
-			}
+		case RetiredExclusiveAnnotation:
+			// Inert since v0.18.0: accepted and ignored so documents that
+			// still carry it keep running. Native Argo synchronization
+			// (semaphores, mutexes) replaces it; see docs/native-synchronization.md.
 		default:
 			problems = append(problems, fmt.Errorf("argoworkflow: %s.annotations is assigned by Oberth; Pod annotations select security profiles and injection webhooks", location))
 		}
@@ -856,54 +854,6 @@ func admitVolumes(location string, volumes []corev1.Volume) []error {
 			problems = append(problems, fmt.Errorf("argoworkflow: %s mounts the node filesystem and is not admitted", where))
 		default:
 			problems = append(problems, fmt.Errorf("argoworkflow: %s declares an unsupported volume source; only emptyDir and spec.volumeClaimTemplates are admitted", where))
-		}
-	}
-	return problems
-}
-
-// admitSynchronization refuses ConfigMap-backed semaphores, database-backed
-// mutexes, and namespace overrides. Named logical mutexes are admitted; the
-// server rewrites their names to a repo/trigger-scoped form before submission
-// (see spec.go scopeSynchronization) so a branch pipeline cannot squat a
-// release-tier lock.
-func admitSynchronization(location string, sync *wfv1.Synchronization) []error {
-	if sync == nil {
-		return nil
-	}
-	var problems []error
-	for index, sem := range sync.Semaphores {
-		if sem == nil {
-			continue
-		}
-		if sem.ConfigMapKeyRef != nil {
-			problems = append(problems, fmt.Errorf(
-				"argoworkflow: %s.synchronization.semaphores[%d].configMapKeyRef reads a Kubernetes ConfigMap and is not admitted",
-				location, index))
-		}
-		if sem.Database != nil {
-			problems = append(problems, fmt.Errorf(
-				"argoworkflow: %s.synchronization.semaphores[%d].database is not admitted",
-				location, index))
-		}
-		if sem.Namespace != "" {
-			problems = append(problems, fmt.Errorf(
-				"argoworkflow: %s.synchronization.semaphores[%d].namespace overrides are not admitted",
-				location, index))
-		}
-	}
-	for index, mtx := range sync.Mutexes {
-		if mtx == nil {
-			continue
-		}
-		if mtx.Database {
-			problems = append(problems, fmt.Errorf(
-				"argoworkflow: %s.synchronization.mutexes[%d].database is not admitted",
-				location, index))
-		}
-		if mtx.Namespace != "" {
-			problems = append(problems, fmt.Errorf(
-				"argoworkflow: %s.synchronization.mutexes[%d].namespace overrides are not admitted",
-				location, index))
 		}
 	}
 	return problems

@@ -20,7 +20,7 @@ import (
 )
 
 type pressureFixture struct {
-	gate   *weightedAdmission
+	gate   *admissionGate
 	now    time.Time
 	sample model.PressureSample
 	err    error
@@ -30,7 +30,7 @@ type pressureFixture struct {
 
 func pressureTestGate() *pressureFixture {
 	f := &pressureFixture{now: time.Date(2026, 10, 30, 15, 0, 0, 0, time.UTC)}
-	f.gate = newWeightedAdmission(4)
+	f.gate = newAdmissionGate(4)
 	f.gate.now = func() time.Time { return f.now }
 	f.gate.pressure = newPressureCheck(AdmissionPressureConfig{IOFullAvg60Max: 30, Hysteresis: 10, MaxDefer: 20 * time.Minute,
 		Source: func() (model.PressureSample, error) { f.reads++; return f.sample, f.err },
@@ -39,15 +39,11 @@ func pressureTestGate() *pressureFixture {
 	return f
 }
 
-func (f *pressureFixture) prepare(id int64, priority model.RunPriority, group string, size pipeline.Size, estimates ...time.Duration) *admissionReservation {
+func (f *pressureFixture) prepare(id int64, priority model.RunPriority, group string, _ pipeline.Size, _ ...time.Duration) *admissionReservation {
 	r := f.gate.reservePriorityRun(id, id, model.Run{ID: fmt.Sprint(id), Priority: priority, QueuedAt: f.now, RepoID: 1})
 	f.gate.mu.Lock()
 	defer f.gate.mu.Unlock()
 	r.prepared, r.preparedAt = true, f.now
-	if len(estimates) > 0 {
-		r.estimate = estimates[0]
-	}
-	r.size, r.weight = size, f.gate.weights.of(size, f.gate.capacity)
 	r.groupName = group
 	if group != "" {
 		r.group = concurrencyGroupKey(1, group)
@@ -73,7 +69,7 @@ func TestPressureThresholdHysteresisAndNewWorkOnly(t *testing.T) {
 	f.sample.IO.FullAvg60 = 30
 	f.advance(time.Second)
 	waiting := f.prepare(2, model.PriorityNormal, "", pipeline.M)
-	if waiting.granted || !running.granted || f.gate.used != 2 {
+	if waiting.granted || !running.granted {
 		t.Fatal("pressure must hold new work and leave running grant alone")
 	}
 	scheduler := &Scheduler{admission: f.gate}
@@ -135,23 +131,15 @@ func TestPressureCPUGateOptionalAndIndependent(t *testing.T) {
 }
 
 func TestPressureMaximumDeferralAdmitsButPreservesOtherGates(t *testing.T) {
-	for _, guard := range []string{"none", "weight", "whole-budget", "run-ceiling", "disk-floor", "group"} {
+	for _, guard := range []string{"none", "run-ceiling", "disk-floor", "group"} {
 		t.Run(guard, func(t *testing.T) {
 			f := pressureTestGate()
 			f.sample.IO.FullAvg60 = 80
-			size := pipeline.M
-			if guard == "whole-budget" {
-				size = pipeline.XL
-			}
-			r := f.prepare(1, model.PriorityNormal, "", size)
+			r := f.prepare(1, model.PriorityNormal, "", pipeline.M)
 			if r.granted {
 				t.Fatal("pressure did not hold")
 			}
 			switch guard {
-			case "weight":
-				f.gate.used = 4
-			case "whole-budget":
-				f.gate.used = 1
 			case "run-ceiling":
 				f.gate.maxRuns = 1
 				f.gate.runs = 1
@@ -175,7 +163,6 @@ func TestPressureMaximumDeferralAdmitsButPreservesOtherGates(t *testing.T) {
 			if r.granted || f.gate.pressure.bypasses != 0 {
 				t.Fatal("pressure timeout bypassed", guard)
 			}
-			f.gate.used = 0
 			f.gate.runs = 0
 			f.gate.diskFloor = nil
 			delete(f.gate.groups, r.group)
@@ -219,6 +206,7 @@ func TestPressureZeroStartDoesNotExpire(t *testing.T) {
 
 func TestPressureTimeoutDoesNotJumpHigherPriorityOrGroupHead(t *testing.T) {
 	f := pressureTestGate()
+	f.gate.maxRuns = 2
 	f.sample.IO.FullAvg60 = 80
 	normal := f.prepare(1, model.PriorityNormal, "deploy", pipeline.M)
 	f.advance(19 * time.Minute)
@@ -250,34 +238,6 @@ func TestPressureTimeoutDoesNotJumpHigherPriorityOrGroupHead(t *testing.T) {
 	}
 }
 
-func TestPressureTimeoutPreservesBackfillDrain(t *testing.T) {
-	f := pressureTestGate()
-	f.gate.maxHeadWait = 20 * time.Minute // 21m is draining, before its 25m cap.
-	running := f.prepare(1, model.PriorityNormal, "", pipeline.M, time.Minute)
-	head := f.prepare(2, model.PriorityNormal, "", pipeline.XL)
-	f.sample.IO.FullAvg60 = 80
-	f.advance(time.Second)
-	small := f.prepare(3, model.PriorityNormal, "", pipeline.S, 30*time.Second)
-	if small.pressureSince.IsZero() {
-		t.Fatal("fixture did not reach pressure gate during backfill window")
-	}
-	f.advance(21 * time.Minute)
-	if small.granted || head.granted {
-		t.Fatal("pressure timeout bypassed an overrun head reservation")
-	}
-	f.gate.mu.Lock()
-	f.gate.releaseLocked(running)
-	f.gate.mu.Unlock()
-	if !head.granted || small.granted {
-		t.Fatal("expired per-run pressure wait did not preserve XL drain ordering")
-	}
-	f.sample.IO.FullAvg60 = 0
-	f.advance(time.Second)
-	if !head.granted || small.granted {
-		t.Fatal("recovery did not drain for XL first")
-	}
-}
-
 func TestPressureUnavailableFailsOpenWarnsOnceAndResetsEpisode(t *testing.T) {
 	f := pressureTestGate()
 	f.sample.IO.FullAvg60 = 80
@@ -298,7 +258,6 @@ func TestPressureUnavailableFailsOpenWarnsOnceAndResetsEpisode(t *testing.T) {
 		t.Fatal("unavailable warning was not emitted once", f.logs)
 	}
 	f.err = nil
-	f.gate.capacity = 6
 	f.sample.IO.FullAvg60 = 80
 	f.advance(time.Second)
 	next := f.prepare(2, model.PriorityNormal, "", pipeline.M)
@@ -320,12 +279,12 @@ func TestPressureUnavailableFailsOpenWarnsOnceAndResetsEpisode(t *testing.T) {
 func TestPressureAdoptionPreservesExistingWorkflowGrant(t *testing.T) {
 	f := pressureTestGate()
 	f.sample.IO.FullAvg60 = 80
-	r, err := f.gate.adopt(model.Run{ID: "existing", QueueSequence: 1, RepoID: 1}, pipeline.M)
+	r, err := f.gate.adopt(model.Run{ID: "existing", QueueSequence: 1, RepoID: 1})
 	if err != nil || !r.granted || !r.submitted {
 		t.Fatal("pressure held adoption of running work", err)
 	}
 	f.advance(time.Second)
-	if !r.granted || f.gate.used != 2 || f.gate.pressure.deferrals != 0 {
+	if !r.granted || f.gate.pressure.deferrals != 0 {
 		t.Fatal("pressure touched adopted work")
 	}
 }
@@ -475,7 +434,8 @@ func TestPressureEpisodeResetsWhileCapacityBlocks(t *testing.T) {
 			f := pressureTestGate()
 			f.sample.IO.FullAvg60 = 80
 			r := f.prepare(1, model.PriorityNormal, "", pipeline.M)
-			f.gate.used = f.gate.capacity
+			// Another gate, the run ceiling, keeps blocking it after recovery.
+			f.gate.maxRuns, f.gate.runs = 1, 1
 			f.advance(19 * time.Minute)
 			if unavailable {
 				f.err = errors.New("unavailable PSI")
@@ -488,7 +448,7 @@ func TestPressureEpisodeResetsWhileCapacityBlocks(t *testing.T) {
 			}
 			f.err = nil
 			f.sample.IO.FullAvg60 = 80
-			f.gate.used = 0
+			f.gate.runs = 0
 			f.advance(time.Second)
 			since := f.now
 			if r.granted || !r.pressureSince.Equal(since) {
@@ -508,7 +468,6 @@ func TestPressureEpisodeResetsWhileCapacityBlocks(t *testing.T) {
 
 func TestPressureEachQueuedRunHasOwnMaximumWait(t *testing.T) {
 	f := pressureTestGate()
-	f.gate.capacity = 16
 	f.sample.IO.FullAvg60 = 40
 	var order []int64
 	seen := map[int64]bool{}
@@ -624,10 +583,11 @@ func TestPressureObserveHighLoadKeepsOtherAdmissionGates(t *testing.T) {
 	f.gate.pressure.config.Mode = PressureObserve
 	f.gate.pressure.state.Mode = PressureObserve
 	f.sample.IO.FullAvg60 = 72
+	f.gate.maxRuns = 1
 	first := f.prepare(1, model.PriorityNormal, "", pipeline.L)
 	second := f.prepare(2, model.PriorityNormal, "", pipeline.L)
-	if !first.granted || second.granted { // L weighs 3; a budget of 4 still binds.
-		t.Fatal("observation bypassed weighted capacity or blocked the first grant")
+	if !first.granted || second.granted { // the run ceiling still binds.
+		t.Fatal("observation bypassed the run ceiling or blocked the first grant")
 	}
 	state := (&Scheduler{admission: f.gate}).AdmissionState().Pressure
 	if state == nil || state.Mode != PressureObserve || !state.Available || !state.ThresholdExceeded || state.Holding || state.Sample.IO.FullAvg60 != 72 || state.Deferred != 0 {

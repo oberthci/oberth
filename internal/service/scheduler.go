@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,34 +39,26 @@ type SchedulerConfig struct {
 	// DisableInfrastructureAutoRetry turns off the default-on, single automatic retry.
 	DisableInfrastructureAutoRetry bool
 
-	// DeclaredAdmission is deprecated and ignored; Kubernetes places step pods.
-	DeclaredAdmission DeclaredAdmissionConfig
-	Store             SchedulerStore
-	Git               WorkspaceGit
-	Logs              LogStore
-	Jobs              JobController
-	ReleaseJobs       ReleaseJobController
-	Auditor           Auditor
-	Signals           *Signals
-	WorkspaceRoot     string
-	RemoveWorkspace   func(string) error
+	Store           SchedulerStore
+	Git             WorkspaceGit
+	Logs            LogStore
+	Jobs            JobController
+	ReleaseJobs     ReleaseJobController
+	Auditor         Auditor
+	Signals         *Signals
+	WorkspaceRoot   string
+	RemoveWorkspace func(string) error
+	// MaxConcurrent is the optional run ceiling: how many runs may hold a
+	// grant at once (0..64). Zero is no ceiling.
 	MaxConcurrent     int
 	MaxConcurrentFile string
 	MaxRunLogBytes    int64
 	MutationGate      func(context.Context) error
-	// MaxHeadWait is deprecated and ignored; resource drain/backfill is removed.
-	MaxHeadWait time.Duration
 	// StalledRunTimeout bounds granted runs before submission. Zero is ten minutes.
 	StalledRunTimeout time.Duration
-	// SizeWeights is deprecated and ignored. Kubernetes places pods by their requests.
-	SizeWeights SizeWeights
 	// AdmissionDiskFloorBytes is an opt-in free-space admission floor on the data root (#673).
 	AdmissionDiskFloorBytes int64
 	AdmissionPressure       AdmissionPressureConfig
-	// ExclusiveClasses is the administrator's allowlist of server-wide
-	// exclusive classes and their concurrent-run limits (#1499). Empty
-	// refuses every declaration.
-	ExclusiveClasses map[string]int
 }
 
 type Scheduler struct {
@@ -75,7 +66,6 @@ type Scheduler struct {
 
 	databaseRetryCount atomic.Uint64
 	dispatchProgress   liveness.Heartbeat
-	headProgress       liveness.Heartbeat
 	startupRecovered   atomic.Bool
 	store              SchedulerStore
 	git                WorkspaceGit
@@ -90,7 +80,7 @@ type Scheduler struct {
 	capacityFile       string
 	capacityOverride   CapacityOverrideReader // server-owned runtime layer (#1497)
 	capacityReloadMu   sync.Mutex
-	admission          *weightedAdmission
+	admission          *admissionGate
 	holdMu             sync.Mutex
 	priorityMu         sync.Mutex // serialize durable priority refresh snapshots
 	maxRunLogBytes     int64
@@ -164,11 +154,8 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 	if config.Store == nil || config.Git == nil || config.Logs == nil || config.Jobs == nil || config.Auditor == nil {
 		return nil, errors.New("service: scheduler store, Git, logs, jobs, and auditor are required")
 	}
-	if config.MaxConcurrent <= 0 {
-		config.MaxConcurrent = 3
-	}
-	if config.MaxConcurrent > 64 {
-		return nil, errors.New("service: maximum concurrent runs must be in 1..64")
+	if config.MaxConcurrent < 0 || config.MaxConcurrent > 64 {
+		return nil, errors.New("service: maximum concurrent runs must be in 0..64 (0: no ceiling)")
 	}
 	if config.MaxRunLogBytes <= 0 {
 		config.MaxRunLogBytes = runlog.DefaultRunLimitBytes
@@ -199,20 +186,18 @@ func NewScheduler(config SchedulerConfig) (*Scheduler, error) {
 		auditor:     config.Auditor, signals: signals,
 		workspaces: workspaces, workspaceRoot: workspaceRoot, maxConcurrent: config.MaxConcurrent,
 		capacityFile:   config.MaxConcurrentFile,
-		admission:      newWorkflowAdmissionForJobs(config.MaxConcurrent),
+		admission:      newAdmissionGate(config.MaxConcurrent),
 		maxRunLogBytes: config.MaxRunLogBytes, mutationGate: mutationGate, stalledRunTimeout: config.StalledRunTimeout,
 		wake: make(chan struct{}, 1), publicationWake: make(chan struct{}, 1),
 		createWake: make(chan struct{}, 1), createPending: make(map[string]*pendingCreate),
 		publicationSet: make(map[string]struct{}), deliveryPermit: deliveryPermit, capacityWait: waitCapacityRetry,
 	}
 	scheduler.workspaces.owners = scheduler.database()
-	// Group/VM parked claims release their dispatch slots. The admission gate
-	// independently enforces the administrator's workflow ceiling. Kubernetes
+	// Group-parked claims release their dispatch slots. The admission gate
+	// independently enforces the administrator's run ceiling. Kubernetes
 	// decides whether each step pod fits its node by the declared requests.
-	scheduler.admission.maxRuns = config.MaxConcurrent
 	scheduler.admission.capacityConfig = model.AdmissionCapacityConfig{MaxConcurrentJobs: config.MaxConcurrent, BootDefault: config.MaxConcurrent, Source: "boot", File: config.MaxConcurrentFile}
 	scheduler.admission.pressure = newPressureCheck(config.AdmissionPressure)
-	scheduler.admission.exclusiveLimits = maps.Clone(config.ExclusiveClasses)
 	if config.AdmissionDiskFloorBytes > 0 {
 		scheduler.admission.diskFloor = newDiskFloorCheck(workspaceRoot, config.AdmissionDiskFloorBytes)
 	}
@@ -490,40 +475,10 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 			run.reservation.cancel()
 		}
 	}()
-	if err := scheduler.reconcileStrandedRunsWithGate(workerCtx, scheduler.awaitMutation, func(run model.Run, size pipeline.Size) error {
-		var err error
-		var pods *argoworkflow.PodDemand
-		if reader, ok := scheduler.jobs.(interface {
-			AdoptedPodDemand(model.Run) (*argoworkflow.PodDemand, error)
-		}); ok {
-			pods, err = reader.AdoptedPodDemand(run)
-			if err != nil {
-				return err
-			}
-		}
-		reservation, err := scheduler.admission.adopt(run, size, pods)
+	if err := scheduler.reconcileStrandedRunsWithGate(workerCtx, scheduler.awaitMutation, func(run model.Run, _ pipeline.Size) error {
+		reservation, err := scheduler.admission.adopt(run)
 		if err != nil {
 			return err
-		}
-		if reader, ok := scheduler.jobs.(interface {
-			AdoptedExclusiveClasses(model.Run) ([]string, error)
-		}); ok {
-			classes, e := reader.AdoptedExclusiveClasses(run)
-			if e != nil {
-				return e
-			}
-			scheduler.admission.adoptExclusive(reservation, classes)
-		}
-		if reader, ok := scheduler.jobs.(interface {
-			AdoptedResourceFallback(model.Run) (model.ResourceAdmissionFallback, error)
-		}); ok {
-			fallback, e := reader.AdoptedResourceFallback(run)
-			if e != nil {
-				return e
-			}
-			scheduler.admission.mu.Lock()
-			reservation.fallback = fallback
-			scheduler.admission.mu.Unlock()
 		}
 		adopted = append(adopted, adoptedRun{run: run, reservation: reservation})
 		return nil
@@ -559,13 +514,8 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 		go func() { defer workers.Done(); scheduler.watchRuntimeCapacity(workerCtx, nil) }()
 	}
 	workers.Add(1)
-	go func() {
-		defer workers.Done()
-		scheduler.runHeadEvents(workerCtx)
-	}()
-	workers.Add(1)
 	go func() { defer workers.Done(); scheduler.runCreateCleanup(workerCtx) }()
-	completed := make(chan error, max(2*scheduler.maxConcurrent, len(adopted)))
+	completed := make(chan error, max(2*scheduler.maxConcurrent, len(adopted), 8))
 	active := len(adopted)
 	for _, adopted := range adopted {
 		workers.Add(1)
@@ -708,21 +658,18 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 // dispatchSlotAvailable reports whether the dispatch loop may claim another
 // run while active claimed runs are in flight.
 //
-// A run parked on VM capacity (#278) or its concurrency group (#658) waits for another run of its
-// own repository, not for node resources, and holds no admission weight. If
-// it also held a dispatch slot, one repository with a few queued runs in one
-// group could fill every slot and stall unrelated repositories: exactly the
-// whole-host reservation the group exists to replace. Parked runs therefore
-// do not count, up to MaxConcurrent of them, which bounds the claimed runs (and
-// their checkouts) at twice the ceiling. The gate mirrors MaxConcurrent as its
-// run ceiling, so admitted runs never exceed it when a parked run's group
-// frees up. Without parked runs this is exactly `active < MaxConcurrent`.
+// A run parked on its concurrency group (#658) waits for another run of its
+// own group, not for a slot. If it also held a dispatch slot, one repository
+// with a few queued runs in one group could fill every slot and stall
+// unrelated repositories. Parked runs therefore do not count, up to the
+// ceiling of them, which bounds the claimed runs (and their checkouts) at
+// twice the ceiling. The gate enforces the ceiling itself, so admitted runs
+// never exceed it when a parked run's group frees up. Without parked runs
+// this is exactly `active < MaxConcurrent`.
 //
-// Past that ceiling the loop claims only into spare weight (#1021): when every
-// claimed run already holds its grant and the budget still has room, one more
-// run is claimed, so S-sized runs fill the 2 x MaxConcurrent weight budget
-// instead of stopping at MaxConcurrent runs. At most one such claim waits at a
-// time, so this never piles up checkouts behind a full budget.
+// Past that ceiling, and always without a ceiling, the loop claims one more
+// run only once every claimed run already holds its grant, so at most one
+// checkout waits for a slot at a time.
 func (scheduler *Scheduler) dispatchSlotAvailable(active int) bool {
 	// Held claims cannot be replenished by ClaimNextRun. Exclude all of them
 	// so a new hold cannot strand its allowed classes behind earlier claims.
@@ -730,10 +677,10 @@ func (scheduler *Scheduler) dispatchSlotAvailable(active int) bool {
 	held, other := scheduler.admission.dispatchParked()
 	active = max(0, active-held)
 	parked := min(other, limit)
-	if active-parked < limit {
+	if limit > 0 && active-parked < limit {
 		return true
 	}
-	return scheduler.admission.spareWeightForClaim(active - parked)
+	return scheduler.admission.spareSlotForClaim(active - parked)
 }
 
 // ProcessNext is a deterministic single-run entrypoint for recovery tools and
@@ -903,18 +850,10 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		return nil
 	}
 	jobRequest := WorkflowRequest{WorkflowName: workflowName, Run: run, Repository: repository, SourceDir: sourceDir, UpstreamName: upstream.Name, UpstreamOrg: upstream.Org()}
-	size := pipeline.M // Historical wire metadata; it has no admission effect.
-	if !scheduler.admission.workflowOnly {
-		size, err = scheduler.pipelineSize(ctx, jobRequest)
-		if err != nil {
-			_ = logFile.Close()
-			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("read pipeline resource size: %w", err))
-		}
-	}
-	// Priority is advisory: an unavailable grant read withholds the boost,
+	// Priority is advisory: an unavailable policy read withholds the boost,
 	// never the release's execution or publication.
-	priorityMaximum, priorityErr := scheduler.releasePriorityMaximum(ctx, run)
-	jobRequest.Size = size
+	_, priorityErr := scheduler.releasePriorityMaximum(ctx, run)
+	jobRequest.Size = pipeline.M // Historical wire metadata; it has no admission effect.
 	group, groupLimit, err := scheduler.pipelineConcurrencyGroup(ctx, jobRequest)
 	if err != nil {
 		_ = logFile.Close()
@@ -934,40 +873,15 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("read pipeline source receipt: %w", err))
 	}
 	jobRequest.DemandReceipt = receipt
-	// Classes come from the same fragment-resolved graph Build submits.
-	exclusive, err := scheduler.pipelineExclusiveClasses(ctx, jobRequest, receipt)
-	if err != nil {
-		_ = logFile.Close()
-		return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
-	}
-	jobRequest.Exclusive = exclusive
-	var pods *argoworkflow.PodDemand
-	var fallback model.ResourceAdmissionFallback
-	{
-		pods, fallback, err = scheduler.admission.selectDeclaredDemand(receipt)
-		if err != nil {
-			_ = logFile.Close()
-			return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
-		}
-	}
-	if !scheduler.admission.workflowOnly && pods == nil {
-		if err := scheduler.authorizeRunSize(ctx, run, repository, size); err != nil {
-			_ = logFile.Close()
-			return scheduler.finishInfrastructureFailure(ctx, run, repository, err)
-		}
-	}
-	jobRequest.PodDemand = pods
-	jobRequest.ResourceFallback = fallback
 	scheduler.admissionRequested(ctx, run.ID)
 	var requests *argoworkflow.PodRequests
 	if receipt != nil {
 		demand, _ := receipt.WorkflowPodDemand()
 		requests = queuePodRequests(demand)
 	}
-	headSince, estimate := scheduler.admissionHistory(ctx, run)
 	releaseAdmission, err := reservation.acquireRequest(ctx, admissionRequest{
-		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref, Size: size, Group: group, GroupLimit: groupLimit, Exclusive: exclusive, Pods: pods, Requests: requests, Fallback: fallback,
-		RefKind: run.RefKind, SHA: run.SHA, HeadSince: headSince, Estimate: estimate, PriorityMaximum: priorityMaximum, PriorityLookupFailed: priorityErr != nil,
+		RunID: run.ID, RepoID: run.RepoID, Repo: repository.Name, Ref: run.Ref, Group: group, GroupLimit: groupLimit, Requests: requests,
+		RefKind: run.RefKind, SHA: run.SHA, PriorityLookupFailed: priorityErr != nil,
 	})
 	if errors.Is(err, errAdmissionAbandoned) {
 		// Superseded or cancelled while waiting: the reservation is already
@@ -988,27 +902,11 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		return err
 	}
 	defer releaseAdmission()
-	// Keep submission and recovery bound to the contract the gate actually held.
-	scheduler.admission.mu.Lock()
-	actualPods := reservation.pods
-	if actualPods != nil {
-		copy := *actualPods
-		actualPods = &copy
-	}
-	fallback = reservation.fallback
-	scheduler.admission.mu.Unlock()
-	if pods != nil && actualPods == nil {
-		_ = logFile.Close()
-		return scheduler.finishInfrastructureFailure(ctx, run, repository, errors.New("declared resource reservation lost before submission"))
-	}
-	pods = actualPods
-	jobRequest.PodDemand = pods
-	jobRequest.ResourceFallback = fallback
 	if reservation.wasDelayed() {
 		current, err = scheduler.database().Run(ctx, run.ID)
 		if err != nil {
 			_ = logFile.Close()
-			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("verify run before weighted admission: %w", err))
+			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("verify run before admission: %w", err))
 		}
 		if current.Preempted() {
 			_ = logFile.Close()
@@ -1036,7 +934,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	current, err = scheduler.database().MarkRunAdmitted(ctx, run.ID)
 	if err != nil {
 		_ = logFile.Close()
-		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("record weighted admission: %w", err))
+		return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("record admission: %w", err))
 	}
 	if current.Preempted() {
 		_ = logFile.Close()
@@ -1094,7 +992,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	}
 
 	if _, ok := scheduler.jobs.(JobCreateSettler); ok {
-		if err := scheduler.recordResourceAdmission(run, workflowName, size, pods, fallback); err != nil {
+		if err := scheduler.recordWorkflowCreateBinding(run, workflowName); err != nil {
 			_ = logFile.Close()
 			return scheduler.finishInfrastructureFailure(ctx, run, repository, fmt.Errorf("record Workflow admission contract: %w", err))
 		}
@@ -2076,55 +1974,10 @@ func (scheduler *Scheduler) requireMutation(ctx context.Context) error {
 	return nil
 }
 
-// RunSizeLimiter reports the largest admission size a repository's runs may
-// be admitted at (#1021): L unless an administrator granted XL.
+// RunSizeLimiter reports a repository's release priority policy record
+// (#1021); its size value is historical and no longer limits admission.
 type RunSizeLimiter interface {
 	MaxRunSize(context.Context, int64) (pipeline.Size, error)
-}
-
-// authorizeRunSize refuses a branch, promotion or schedule run whose resolved
-// size exceeds its repository's size grant, before it takes any weight: one
-// repository's document declaring XL would otherwise make every other
-// repository wait for a full drain. A tag run keeps its reviewed
-// release.yaml size. A store without the capability (test doubles) limits
-// nothing; the production store always has it.
-func (scheduler *Scheduler) authorizeRunSize(ctx context.Context, run model.Run, repository model.Repository, size pipeline.Size) error {
-	limiter, ok := scheduler.store.(RunSizeLimiter)
-	if run.Release || !ok {
-		return nil
-	}
-	maximum, err := retryDatabase(ctx, "MaxRunSize", func(ctx context.Context) (pipeline.Size, error) { return limiter.MaxRunSize(ctx, run.RepoID) })
-	if err != nil {
-		return fmt.Errorf("read repository size grant: %w", err)
-	}
-	if sizeRank(size) <= sizeRank(maximum) {
-		return nil
-	}
-	return fmt.Errorf("pipeline declares size %s for this %s run, but repository %s may run at most %s; "+
-		"an administrator raises the maximum with `oberth size grant %s --max %s` (MCP size_grant), "+
-		"or the pipeline declares a smaller size (oberth.ci/size-by-trigger can keep %s for promotion and schedule runs only)",
-		size.Effective(), runTriggerName(run), repository.Name, maximum, repository.Name, size.Effective(), size.Effective())
-}
-
-func runTriggerName(run model.Run) string {
-	switch run.Trigger {
-	case "promotion", "schedule":
-		return run.Trigger
-	default:
-		return "branch"
-	}
-}
-
-func (scheduler *Scheduler) pipelineSize(ctx context.Context, request WorkflowRequest) (pipeline.Size, error) {
-	if request.Run.Release {
-		if sizer, ok := scheduler.releaseJobs.(PipelineSizer); ok {
-			return sizer.PipelineSize(ctx, request)
-		}
-	}
-	if sizer, ok := scheduler.jobs.(PipelineSizer); ok {
-		return sizer.PipelineSize(ctx, request)
-	}
-	return pipeline.M, nil
 }
 
 // pipelineConcurrencyGroup reads the concurrency group the run's own pipeline
@@ -2150,48 +2003,6 @@ func (scheduler *Scheduler) pipelineConcurrencyGroup(ctx context.Context, reques
 	}
 	g, n, e, _ := read(scheduler.jobs)
 	return g, n, e
-}
-
-// PipelineExclusiveClassReader reads the exclusive classes the immutable
-// checked-out pipeline's steps declare (#1499), by the same static read.
-type PipelineExclusiveClassReader interface {
-	PipelineExclusiveClasses(context.Context, WorkflowRequest) ([]string, error)
-}
-
-// pipelineExclusiveClasses reads the run's declared exclusive classes and
-// refuses any class outside the administrator allowlist. The admitted source
-// receipt is authoritative: it holds the fragment-resolved graph, so a class
-// declared only inside a fragment is admitted, limited and refused exactly
-// like one in the repository's own document. Build refuses any later
-// difference. The refusal is an admission error: a rerun cannot change it,
-// so it is never auto-retried.
-func (scheduler *Scheduler) pipelineExclusiveClasses(ctx context.Context, request WorkflowRequest, receipt *argoworkflow.DemandReceipt) ([]string, error) {
-	var classes []string
-	var err error
-	if receipt != nil {
-		classes, err = receipt.ExclusiveClasses()
-	} else {
-		reader, ok := any(scheduler.jobs).(PipelineExclusiveClassReader)
-		if release, releaseOK := any(scheduler.releaseJobs).(PipelineExclusiveClassReader); request.Run.Release && releaseOK {
-			reader, ok = release, true
-		}
-		if !ok {
-			return nil, nil
-		}
-		classes, err = reader.PipelineExclusiveClasses(ctx, request)
-	}
-	if err != nil {
-		return nil, &argoworkflow.AdmissionError{Cause: fmt.Errorf("read pipeline exclusive classes: %w", err)}
-	}
-	if !validExclusiveClasses(classes) {
-		return nil, &argoworkflow.AdmissionError{Cause: errors.New("read pipeline exclusive classes: invalid declaration")}
-	}
-	for _, class := range classes {
-		if scheduler.admission.exclusiveLimits[class] < 1 {
-			return nil, &argoworkflow.AdmissionError{Cause: fmt.Errorf("exclusive class %q is not on this server's allowlist (admission.exclusiveClasses); ask the administrator to configure it or remove the %s annotation", class, argoworkflow.ExclusiveAnnotation)}
-		}
-	}
-	return classes, nil
 }
 
 // pipelineCredentialed reports whether the run's pipeline declares secret-store

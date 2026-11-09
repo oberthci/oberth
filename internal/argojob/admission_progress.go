@@ -93,7 +93,7 @@ func (p *admissionProgress) check(wf *wfv1.Workflow, pods []corev1.Pod, delivere
 			p.lastProgress = node.FinishedAt.Time
 		}
 	}
-	capacityWait := false
+	capacityWait := waitingForSynchronization(wf)
 	live := map[types.UID]bool{}
 	unobserved := map[types.UID]bool{}
 	if p.identity == nil {
@@ -195,6 +195,35 @@ func (p *admissionProgress) check(wf *wfv1.Workflow, pods []corev1.Pod, delivere
 		return &admissionProgressError{reason: fmt.Sprintf("resource admission expired: no scheduled pod or progress for %s", timeout)}
 	}
 	return nil
+}
+
+// waitingForLock recognizes the Argo controller's synchronization wait,
+// "Waiting for <lock> lock. Lock status: <free>/<limit>", on a Workflow or a
+// node. The controller holds the whole run (workflow-level) or the step
+// (template-level) in Pending until the semaphore or mutex frees; nothing of
+// Oberth's is stalled, so the startup clock does not run.
+func waitingForLock(message string) bool {
+	return strings.HasPrefix(message, "Waiting for ") && strings.Contains(message, " lock. Lock status: ")
+}
+
+// waitingForSynchronization reports a Workflow queued behind native Argo
+// synchronization: the Workflow itself, before Argo records its start, or any
+// Pending node. Argo anchors its own deadline to startedAt, so a workflow-level
+// wait burns nothing; a template-level wait burns the workflow deadline Argo
+// enforces, and Oberth adds no clock of its own on top.
+func waitingForSynchronization(wf *wfv1.Workflow) bool {
+	if wf == nil || wf.Status.Phase.Completed() {
+		return false
+	}
+	if waitingForLock(wf.Status.Message) {
+		return true
+	}
+	for _, node := range wf.Status.Nodes {
+		if node.Phase == wfv1.NodePending && waitingForLock(node.Message) {
+			return true
+		}
+	}
+	return false
 }
 
 // Only the scheduler's recognized capacity condition suspends the startup

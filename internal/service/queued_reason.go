@@ -83,8 +83,6 @@ func waitingReason(a *model.AdmissionObservation) (reason string) {
 		return fmt.Sprintf("waiting for disk space (%s free)", bytesText(a.DiskFloor.FreeBytes))
 	case a.GroupBlocked || a.GroupHolder != "" || a.GroupAhead != "":
 		return "group " + a.Group + " busy"
-	case a.ExclusiveBlocked:
-		return "exclusive " + a.ExclusiveClass + " busy"
 	}
 	if a.HeadOfQueue {
 		return "next in line"

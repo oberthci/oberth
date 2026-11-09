@@ -144,7 +144,7 @@ func TestRestartCutLocalLogFailureUsesPinnedReobserve(t *testing.T) {
 			scheduler.logs = logs
 			// A direct resumed owner isolates the post-Wait local-index failure from
 			// startup and proves that the capability is used even when Wait returned nil.
-			reservation, err := scheduler.admission.adopt(run, "M")
+			reservation, err := scheduler.admission.adopt(run)
 			if err != nil {
 				t.Fatal(err)
 			}

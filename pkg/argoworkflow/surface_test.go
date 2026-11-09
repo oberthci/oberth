@@ -190,7 +190,7 @@ func surfaceRoots() map[string]surfaceRoot {
 
 		// Closed by construction rather than by a check.
 		"Metrics":         {"Prometheus metric definitions carry no credential selector; the type-graph hit is the shared SecurityContext reachable through them", ""},
-		"Synchronization": {"a semaphore's ConfigMap key holds an integer concurrency limit that is never surfaced to the pipeline; mutexes and semaphores are required for chart-index compare-and-swap", ""},
+		"Synchronization": {"native Argo synchronization passes through as written: a semaphore reads one integer from a ConfigMap in the run's namespace through the controller's RBAC and a mutex is a name; neither reaches a credential", ""},
 		"Sidecar":         {"executor plugin sidecars are not reachable from WorkflowSpec in this schema version", ""},
 	}
 }

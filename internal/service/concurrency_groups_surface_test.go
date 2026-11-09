@@ -42,7 +42,7 @@ func TestConcurrencyGroupsReadOnlySurfaceIncludesIdleDefinitions(t *testing.T) {
 }
 
 func TestConcurrencyGroupsScopedQueuedReasonHidesOtherRepositories(t *testing.T) {
-	g := newWorkflowAdmissionForJobs(3)
+	g := newAdmissionGate(3)
 	hidden := strings.Repeat("a", 32)
 	r := g.reserveRun(model.Run{ID: hidden, RepoID: 2, QueueSequence: 1})
 	release := acquireRequestWithinBudget(t, r, admissionRequest{RunID: hidden, RepoID: 2, Group: "state"})

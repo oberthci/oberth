@@ -8,14 +8,12 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
@@ -23,15 +21,13 @@ const createObservationWindow = time.Minute
 const createSettlementAttemptBudget = 15 * time.Second
 const pendingCreateMessage = "Workflow create outcome uncertain; cleanup pending"
 
+// createAdmission binds a pending Workflow create to its run. Size is the
+// run's historical tier, written for older readers of the file; the gate
+// counts runs and reads nothing else from it.
 type createAdmission struct {
-	Fallback                        model.ResourceAdmissionFallback `json:",omitempty"`
-	Pods                            *argoworkflow.PodDemand         `json:",omitempty"`
 	RunID, WorkflowName, SHA, Group string
 	RepoID                          int64
 	Size                            pipeline.Size
-	// Exclusive keeps the run's exclusive classes held across a restart
-	// while its Workflow create outcome is uncertain (#1499).
-	Exclusive []string `json:",omitempty"`
 }
 
 type pendingCreate struct {
@@ -61,7 +57,7 @@ func runCreateAdmissionPath(root, id string) string {
 	return filepath.Join(root, ".create-admissions", id+".json")
 }
 
-func (scheduler *Scheduler) recordResourceAdmission(run model.Run, name string, size pipeline.Size, peak *argoworkflow.PodDemand, fallback model.ResourceAdmissionFallback) error {
+func (scheduler *Scheduler) recordWorkflowCreateBinding(run model.Run, name string) error {
 	target := scheduler.createAdmissionPath(run.ID)
 	if !pathWithin(scheduler.workspaceRoot, target) {
 		return errors.New("service: create admission escaped workspace")
@@ -69,13 +65,7 @@ func (scheduler *Scheduler) recordResourceAdmission(run model.Run, name string, 
 	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
 		return err
 	}
-	var exclusive []string
-	scheduler.admission.mu.Lock()
-	if held := scheduler.admission.reservations[run.QueueSequence]; held != nil && held.runID == run.ID {
-		exclusive = slices.Clone(held.exclusive)
-	}
-	scheduler.admission.mu.Unlock()
-	body, err := json.Marshal(createAdmission{Fallback: fallback, Pods: peak, RunID: run.ID, WorkflowName: name, SHA: run.SHA, RepoID: run.RepoID, Group: run.ConcurrencyGroup, Size: size.Effective(), Exclusive: exclusive})
+	body, err := json.Marshal(createAdmission{RunID: run.ID, WorkflowName: name, SHA: run.SHA, RepoID: run.RepoID, Group: run.ConcurrencyGroup, Size: pipeline.M})
 	if err != nil {
 		return err
 	}
@@ -118,15 +108,6 @@ func (scheduler *Scheduler) readCreateAdmission(run model.Run) (createAdmission,
 	if len(body) > 4096 || json.Unmarshal(body, &saved) != nil || saved.RunID != run.ID || saved.WorkflowName != run.WorkflowName || saved.RepoID != run.RepoID || saved.SHA != run.SHA || saved.Group != run.ConcurrencyGroup || !saved.Size.Valid() || saved.Size != saved.Size.Effective() {
 		return createAdmission{}, errors.New("service: pending create admission binding mismatch")
 	}
-	if saved.Pods != nil && !saved.Pods.Valid() {
-		return createAdmission{}, errors.New("invalid saved workflow resource demand")
-	}
-	if !saved.Fallback.Valid() {
-		return createAdmission{}, errors.New("invalid saved admission fallback")
-	}
-	if !validExclusiveClasses(saved.Exclusive) {
-		return createAdmission{}, errors.New("invalid saved exclusive classes")
-	}
 	return saved, nil
 }
 
@@ -141,33 +122,20 @@ func (scheduler *Scheduler) restoreCreateGrant(run model.Run, grant *admissionRe
 		scheduler.admission.mu.Unlock()
 	}
 	if grant == nil {
-		saved, err := scheduler.readCreateAdmission(run)
-		if err != nil {
-			// Pre-feature/corrupt snapshots have no trustworthy resource contract.
-			// Keep the API available, conservatively reserve the ceiling, and warn.
-			saved.Size = pipeline.XL
-			log.Printf("WARN: create_cleanup run=%q missing_admission_contract=true reserving_ceiling=true", run.ID)
+		if _, err := scheduler.readCreateAdmission(run); err != nil {
+			// A missing or corrupt binding changes nothing about the slot the
+			// run holds; keep the API available and warn.
+			log.Printf("WARN: create_cleanup run=%q missing_admission_contract=true", run.ID)
 		}
-		grant, err = scheduler.admission.adopt(run, saved.Size, saved.Pods)
-		if err == nil {
-			scheduler.admission.mu.Lock()
-			grant.fallback = saved.Fallback
-			scheduler.admission.mu.Unlock()
-			scheduler.admission.adoptExclusive(grant, saved.Exclusive)
-		}
+		var err error
+		grant, err = scheduler.admission.adopt(run)
 		if err != nil {
-			// Conflicting historical groups are quarantined behind a full budget.
+			// A conflicting historical group still holds one slot.
 			run.ConcurrencyGroup = ""
-			grant, err = scheduler.admission.adopt(run, pipeline.XL)
+			grant, err = scheduler.admission.adopt(run)
 			if err != nil {
 				return nil, err
 			}
-			scheduler.admission.mu.Lock()
-			if !scheduler.admission.workflowOnly {
-				scheduler.admission.used += scheduler.admission.capacity - grant.weight
-				grant.weight = scheduler.admission.capacity
-			}
-			scheduler.admission.mu.Unlock()
 		}
 	}
 	scheduler.admission.mu.Lock()

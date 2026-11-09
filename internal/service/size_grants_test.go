@@ -68,7 +68,7 @@ func TestSizeGrantToolRevokesNeverGrantedTagPriorityAndRefreshesWaiter(t *testin
 	r := g.reserveRun(tag.Run)
 	defer r.cancel()
 	g.mu.Lock()
-	r.prepared, r.size = true, pipeline.M
+	r.prepared = true
 	g.mu.Unlock()
 	control, err := NewAPI(APIConfig{Runs: f.store, Repositories: f.store, SizeGrants: f.store, Enqueues: f.scheduler})
 	if err != nil {

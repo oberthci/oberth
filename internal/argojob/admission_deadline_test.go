@@ -233,3 +233,48 @@ func TestAdmissionDeadlineRetrySurvivesObserverRestartAndIgnoresForeignPod(t *te
 		t.Fatal("foreign pod kept admitted workflow alive", err)
 	}
 }
+
+// A run queued behind native Argo synchronization is not stalled: Argo holds
+// the Workflow (workflow-level lock) or the step (template-level lock) in
+// Pending until the semaphore or mutex frees, and its own deadline starts at
+// startedAt. Neither Oberth's startup clock nor its pre-start watchdog runs
+// while the controller reports the wait; once the message is gone, the
+// startup bound applies again.
+func TestAdmissionDeadlineLeavesSynchronizationWaitToArgo(t *testing.T) {
+	const lockMessage = "Waiting for pipeline/ConfigMap/oberth-sync-limits/kvm lock. Lock status: 0/1"
+	for name, arrange := range map[string]func(*wfv1.Workflow){
+		"workflow-level": func(wf *wfv1.Workflow) {
+			wf.Status.Phase, wf.Status.Message, wf.Status.StartedAt = wfv1.WorkflowPending, lockMessage, metav1.Time{}
+			wf.Status.Nodes = nil
+		},
+		"template-level": func(wf *wfv1.Workflow) {
+			wf.Status.Phase, wf.Status.Message = wfv1.WorkflowRunning, ""
+			wf.Status.Nodes = wfv1.Nodes{"step": {ID: "step", Name: "wf.step", Type: wfv1.NodeTypePod, Phase: wfv1.NodePending, Message: lockMessage}}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			wf := schedulingWorkflow()
+			now := time.Now()
+			wf.CreationTimestamp = metav1.NewTime(now.Add(-time.Hour))
+			arrange(wf)
+			watch := admissionProgress{}
+			for _, at := range []time.Time{now, now.Add(2 * time.Hour)} {
+				if err := watch.check(wf, nil, nil, at, 10*time.Minute); err != nil {
+					t.Fatal("synchronization wait failed the workflow", err)
+				}
+			}
+			if origin, _ := watchdogOrigin(wf); name == "workflow-level" && !origin.IsZero() {
+				t.Fatalf("pre-start watchdog counts a lock wait from %v", origin)
+			}
+			// The lock frees but nothing is scheduled: the startup bound runs again.
+			wf.Status.Message = ""
+			for id, node := range wf.Status.Nodes {
+				node.Message = ""
+				wf.Status.Nodes[id] = node
+			}
+			if err := watch.check(wf, nil, nil, now.Add(2*time.Hour+10*time.Minute), 10*time.Minute); err == nil {
+				t.Fatal("startup stall after the lock freed escaped the deadline")
+			}
+		})
+	}
+}

@@ -975,14 +975,11 @@ function summaryLines(detail) {
     const scheduling = detail.Scheduling || {}, admission = scheduling.admission || {};
     lines.push(`[queued] ${run.display_reason || scheduling.message || "awaiting scheduler"}`);
     if (scheduling.message && scheduling.message !== run.display_reason) lines.push(`[scheduling] ${scheduling.message}`);
-    if (admission.numeric_budget) lines.push(`capacity: ${numericBudgetText(admission.numeric_budget)}${admission.position ? ` · queue position ${admission.position}` : ""}`);
-    else if (admission.weight) lines.push(`capacity: need ${admission.weight} weight · ${admission.used}/${admission.capacity} used${admission.position ? ` · queue position ${admission.position}` : ""}`);
+    if (admission.capacity) lines.push(`capacity: ${admission.used}/${admission.capacity} run slots used${admission.position ? ` · queue position ${admission.position}` : ""}`);
   }
   else if (kind === "warn") lines.push(`[infra error, retried] ${runMessage(run)}`);
   else if (kind === "cancel") lines.push(`[${status}] ${runMessage(run)}`);
   else lines.push(`[queued] queued behind earlier work for this repository`);
-  const legacy = detail.Scheduling?.admission?.legacy_resources;
-  if (legacy) lines.push(`[legacy size ${detail.Scheduling.admission.size}] fixed reservation: ${legacy.cpu_milli}m CPU, ${legacy.memory_bytes} memory bytes; using size admission`);
   const execution = detail.Scheduling?.execution;
   if (execution) {
     if (["deadline_exceeded", "deadline_elapsed", "terminal_observed"].includes(execution.state)) lines.push(`[execution] ${detail.Scheduling.message}`);
@@ -1562,15 +1559,12 @@ function pressureStatusCard(pressure) {
   const policy = observing ? " · PSI does not defer grants; other admission gates still apply" : "";
   return svcCard("host pressure", value, detail + policy, pressure.holding || pressure.threshold_exceeded || !pressure.available ? "warn" : "ok");
 }
-function numericBudgetText(budget) {
-  return `CPU ${budget.cpu_used_milli}m/${budget.cpu_budget_milli}m reserved · memory ${budget.memory_used_bytes}/${budget.memory_budget_bytes} bytes reserved`;
-}
 function capacityStatusCard(admission) {
   const config = admission?.configuration;
   if (!config) return "";
-  const budget = admission.numeric_budget ? numericBudgetText(admission.numeric_budget) : `${admission.used}/${admission.capacity} weight used`;
-  const detail = `${budget} · source ${config.source}${config.file ? ` (${config.file})` : ""}${config.error ? ` · keeping last good value: ${config.error}` : ""}`;
-  return svcCard("admission capacity", `${config.max_concurrent_jobs} M jobs`, esc(detail), config.error ? "warn" : "ok");
+  const slots = config.max_concurrent_jobs > 0 ? `${admission.runs}/${config.max_concurrent_jobs} run slots used` : `${admission.runs} running, no ceiling`;
+  const detail = `${slots} · source ${config.source}${config.file ? ` (${config.file})` : ""}${config.error ? ` · keeping last good value: ${config.error}` : ""}`;
+  return svcCard("admission capacity", config.max_concurrent_jobs > 0 ? `${config.max_concurrent_jobs} concurrent runs` : "no run ceiling", esc(detail), config.error ? "warn" : "ok");
 }
 function controllerProfileStatusCard(profile) {
  if (!profile) return "";

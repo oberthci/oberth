@@ -70,9 +70,6 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 			}
 		}
 		result.AgeSeconds = int64(clock.Since(observed) / time.Second)
-		if model.DisplayRunStatus(run) != model.DisplayQueued && result.Admission != nil && result.Admission.BackfillMessage != "" {
-			result.Message += " " + result.Admission.BackfillMessage
-		}
 		if run.Priority != "" {
 			priority, _ := run.EffectivePriority(observed)
 			prefix := run.PriorityMessage(observed)
@@ -153,8 +150,6 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 			admission := *result.Admission
 			admission.Position, admission.Used, admission.Capacity, admission.DiskFloor = 0, 0, 0, nil
 			admission.Runs, admission.MaxRuns = 0, 0
-			admission.NumericBudget = nil
-			admission.BackfillMessage = ""
 			admission.Pressure = admission.Pressure.Public()
 			if admission.GroupRunRepos != nil {
 				admission.GroupHolders = nil
@@ -197,7 +192,7 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 					// shared weight or other repositories' visibility.
 					return result, reason
 				}
-				if service.scope != nil && !result.Admission.GroupBlocked && !result.Admission.ExclusiveBlocked && result.Admission.GroupHolder == "" && result.Admission.GroupAhead == "" {
+				if service.scope != nil && !result.Admission.GroupBlocked && result.Admission.GroupHolder == "" && result.Admission.GroupAhead == "" {
 					// The group waits name runs of the same repository; any
 					// other wait says only that capacity is short, unless
 					// the blocking run is itself in scope.
@@ -205,9 +200,6 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 					if result.Admission.BlockedBy != nil {
 						result.Message += " " + blockedBehindMessage(result.Admission.BlockedBy)
 					}
-				} else if service.scope == nil && result.Admission.Weight > 0 {
-					result.Message += fmt.Sprintf(" Need %d weight; %d/%d used; queue position %d.",
-						result.Admission.Weight, result.Admission.Used, result.Admission.Capacity, result.Admission.Position)
 				}
 				return result, reason
 			case "admitted":
@@ -248,7 +240,6 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 // grouped run waits on (#658). The group is a validated [a-z0-9-] name and the
 // runs are server-issued IDs, so neither can carry arbitrary text.
 func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
-
 	switch {
 	case admission.DiskFloor != nil && admission.DiskFloor.BelowFloor:
 		return fmt.Sprintf("Waiting for disk space: %d bytes free, floor is %d bytes. "+
@@ -256,8 +247,6 @@ func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
 			admission.DiskFloor.FreeBytes, admission.DiskFloor.FloorBytes)
 	case admission.GroupLimit > 0 && (admission.GroupBlocked || admission.GroupHolder != "" || admission.GroupAhead != ""):
 		return "Waiting for " + concurrencyGroupMessage(admission, false)
-	case admission.ExclusiveBlocked:
-		return fmt.Sprintf("Waiting for exclusive class %q (limit %d); runs outside the class are admitted meanwhile.", admission.ExclusiveClass, admission.ExclusiveLimit)
 	case admission.GroupHolder != "":
 		return fmt.Sprintf("Waiting for concurrency group %q, held by run %s of the same repository; "+
 			"runs outside the group are admitted meanwhile.", admission.Group, admission.GroupHolder)
@@ -265,50 +254,27 @@ func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
 		return fmt.Sprintf("Waiting for concurrency group %q behind run %s of the same repository, "+
 			"which is queued ahead in the group.", admission.Group, admission.GroupAhead)
 	case admission.Pressure != nil:
-		if admission.Weight == 0 && admission.Size == "" {
-			return (model.AdmissionBlocker{Pressure: admission.Pressure}).Reason()
-		}
 		if admission.Pressure.Redacted || admission.Pressure.Avg10Gate {
 			return admission.Pressure.Reason()
 		}
 		return fmt.Sprintf("Deferred: %s pressure %.1f%% (host PSI avg60); bounded by %ds per run.", admission.Pressure.Resource, admission.Pressure.Avg60, admission.Pressure.MaxDeferSeconds)
-	case admission.Weight == 0 && admission.BlockedBy != nil && admission.BlockedBy.Size == "" && admission.BlockedBy.RunCeiling:
-		return schedulingBlockerReason(admission.BlockedBy)
-	case admission.HeadOfQueue && admission.BlockedBy != nil && admission.BlockedBy.Backfilling:
-		return fmt.Sprintf("At the head of the run queue (%s); %s smaller runs that fit beside it.",
-			schedulingBlockerReason(admission.BlockedBy), admission.BlockedBy.Backfill())
-	case admission.HeadOfQueue && admission.BlockedBy != nil && admission.BlockedBy.Draining:
-		return fmt.Sprintf("At the head of the run queue (%s); %s: later runs require measured p95 backfill that preserves its reserved start.",
-			schedulingBlockerReason(admission.BlockedBy), admission.BlockedBy.Backfill())
 	case admission.HeadOfQueue && admission.BlockedBy != nil:
 		return fmt.Sprintf("At the head of the run queue (%s); every later run waits behind it.",
-			schedulingBlockerReason(admission.BlockedBy))
-	case admission.DeclaredResources != nil:
-		if admission.BlockedBy != nil && admission.BlockedBy.RunCeiling {
-			return "Waiting for an IO/run concurrency slot."
-		}
-		return fmt.Sprintf("Waiting for resources (pod/VM requests plus helper and memory headroom reserves): %dm CPU, %d memory bytes.", admission.DeclaredResources.CPUMilli, admission.DeclaredResources.MemoryBytes)
-	case admission.Weight == 0 && admission.NumericBudget == nil:
-		return "Waiting for a workflow slot."
+			admission.BlockedBy.Reason())
+	case admission.BlockedBy != nil && admission.BlockedBy.RunCeiling:
+		return admission.BlockedBy.Reason()
 	case admission.BlockedBy != nil:
 		return "Waiting in the run queue, " + blockedBehindMessage(admission.BlockedBy)
 	default:
-		return "Waiting in the run queue."
+		return "Waiting for a run slot."
 	}
 }
 
 // blockedBehindMessage names the queue-head run every later run waits behind,
-// e.g. "blocked behind exampleorg-ebpf/main (XL, needs a full drain)". The
+// e.g. "blocked behind exampleorg-ebpf/main (3 runs running)". The
 // repository is a registered name and the ref a validated Git ref.
 func blockedBehindMessage(blocker *model.AdmissionBlocker) string {
-	if backfill := blocker.Backfill(); backfill != "" {
-		return fmt.Sprintf("blocked behind %s/%s (%s; %s).", blocker.Repo, blocker.Ref, schedulingBlockerReason(blocker), backfill)
-	}
-	return fmt.Sprintf("blocked behind %s/%s (%s).", blocker.Repo, blocker.Ref, schedulingBlockerReason(blocker))
-}
-
-func schedulingBlockerReason(blocker *model.AdmissionBlocker) string {
-	return strings.ReplaceAll(blocker.Reason(), "declared reservation", "resource requests")
+	return fmt.Sprintf("blocked behind %s/%s (%s).", blocker.Repo, blocker.Ref, blocker.Reason())
 }
 
 // visibleBlocker hides a blocker a scoped actor may not see (#073): it names
@@ -326,7 +292,6 @@ func (service *API) visibleBlocker(blocker *model.AdmissionBlocker) *model.Admis
 	scoped := *blocker
 	if service.scope != nil {
 		scoped.Used, scoped.Capacity = 0, 0
-		scoped.NumericBudget = nil
 	}
 	scoped.Pressure = scoped.Pressure.Public()
 	return &scoped
@@ -351,6 +316,10 @@ func applyExecutionDisplay(run *model.Run, scheduling *model.RunScheduling) {
 			return
 		}
 	}
+	if wait := lockWaitReason(scheduling.Execution); wait != "" {
+		run.DisplayReason = parkPolicyDisplayReason(*run, displayFailureText(joinRunMessage(priorityPrefix(*run), wait)))
+		return
+	}
 	switch scheduling.Execution.State {
 	case "deadline_exceeded", "deadline_elapsed", "terminal_observed":
 		// The run is still running until the store says otherwise; the
@@ -361,4 +330,24 @@ func applyExecutionDisplay(run *model.Run, scheduling *model.RunScheduling) {
 		}
 		run.DisplayReason = parkPolicyDisplayReason(*run, displayFailureText(joinRunMessage(priorityPrefix(*run), message)))
 	}
+}
+
+// lockWaitReason turns the fixed-form synchronization wait of the Workflow
+// or of one Pending step into the reason line: "waiting for lock <key> (0 of
+// 1 free)". The key is the controller's lock name, already bounded to the
+// lock-key grammar by the observation.
+func lockWaitReason(execution *model.ExecutionObservation) string {
+	messages := []string{execution.Message}
+	for _, node := range execution.Nodes {
+		if node.Phase == "Pending" {
+			messages = append(messages, node.Message)
+		}
+	}
+	for _, message := range messages {
+		if !strings.HasPrefix(message, model.LockWaitMessagePrefix) {
+			continue
+		}
+		return "w" + strings.TrimSuffix(strings.TrimPrefix(message, "W"), ".")
+	}
+	return ""
 }

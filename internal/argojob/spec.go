@@ -17,7 +17,6 @@ import (
 	"net/netip"
 	"net/url"
 	"path"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -229,6 +228,13 @@ type Config struct {
 	// Assist is the agent-assisted continuation policy (Helm assist.*).
 	// Disabled by default; see assist_hold.go.
 	Assist AssistConfig
+
+	// SerializeReleases (Helm releases.serialize) adds the native Argo
+	// workflow-level mutex ReleaseMutexName to every release run, so no two
+	// releases of any repository run at the same time. The decision is the
+	// run's trigger, never its document; a document's own synchronization is
+	// kept beside the server's mutex. Off by default.
+	SerializeReleases bool
 
 	// StalledRunTimeout bounds an admitted workflow without a scheduled pod or progress.
 	// Zero selects ten minutes.
@@ -595,11 +601,6 @@ type Request struct {
 	ResourceCeiling  *corev1.ResourceRequirements
 	ResourceFallback model.ResourceAdmissionFallback
 	PodDemand        *argoworkflow.PodDemand
-	// Exclusive is the sorted exclusive-class set admission granted (#1499).
-	// Build refuses a resolved Workflow, fragments included, whose declared
-	// classes differ, so no class escapes the allowlist, the limit or the
-	// restart adoption that reads the built Workflow.
-	Exclusive []string
 	// omitStepUsage preserves already-running legacy specs during recovery.
 	omitStepUsage bool
 	// Only recovery of an already-submitted workflow can omit current defaults.
@@ -747,9 +748,6 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 		if err := validatePlacementSource(workflow); err != nil {
 			return nil, err
 		}
-	}
-	if err := verifyAdmittedExclusiveClasses(workflow, request.Exclusive); err != nil {
-		return nil, err
 	}
 	if mirrorOnly, err := argoworkflow.DeclaredGoProxyMirrorOnly(workflow); err != nil {
 		return nil, err
@@ -926,7 +924,7 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 		return nil, err
 	}
 
-	scopeSynchronization(workflow, request)
+	serializeReleases(workflow, config, request)
 	applyServerMetadata(workflow, config, request, declaredPaths, fragmentLock)
 	if request.Capability != nil {
 		workflow.Annotations[capabilityAnnotation] = capabilityBinding(request.RepositoryID, request.Capability)
@@ -1291,29 +1289,31 @@ func applyServerMetadata(workflow *wfv1.Workflow, config Config, request Request
 	workflow.Spec.PodMetadata.Labels[tierLabel] = tierFor(request.Trigger)
 }
 
-// scopeSynchronization rewrites every mutex name to include the trigger and
-// repository, so a CI pipeline cannot squat a release-tier lock and two
-// different repositories cannot interfere with each other. The rewrite is
-// transparent to the repository author: they write `name: chart-index`, the
-// server submits `name: release/oberth/chart-index`.
-func scopeSynchronization(workflow *wfv1.Workflow, request Request) {
-	scope := func(name string) string {
-		return string(request.Trigger) + "/" + request.Repo + "/" + name
+// ReleaseMutexName is the fixed native Argo mutex every release run takes at
+// workflow level while Config.SerializeReleases is on. One name across all
+// repositories is the point: releases wait for each other in Argo's queue,
+// priority then creation time, and show "Waiting for lock .../Mutex/oberth-release".
+const ReleaseMutexName = "oberth-release"
+
+// serializeReleases adds the release mutex to a release run's workflow-level
+// synchronization, merging with whatever the document declares there. A
+// held retry keeps it: Argo acquires workflow-level locks before the run
+// starts and releases them when the Workflow is fulfilled. A release waiting
+// for it is Pending with the controller's lock message, which the startup
+// stall clock and the pre-start watchdog leave alone.
+func serializeReleases(workflow *wfv1.Workflow, config Config, request Request) {
+	if !config.SerializeReleases || request.Trigger != pipeline.TriggerRelease {
+		return
 	}
-	rewrite := func(sync *wfv1.Synchronization) {
-		if sync == nil {
+	if workflow.Spec.Synchronization == nil {
+		workflow.Spec.Synchronization = &wfv1.Synchronization{}
+	}
+	for _, mutex := range workflow.Spec.Synchronization.Mutexes {
+		if mutex != nil && mutex.Name == ReleaseMutexName && mutex.Namespace == "" {
 			return
 		}
-		for i := range sync.Mutexes {
-			if sync.Mutexes[i] != nil && sync.Mutexes[i].Name != "" {
-				sync.Mutexes[i].Name = scope(sync.Mutexes[i].Name)
-			}
-		}
 	}
-	rewrite(workflow.Spec.Synchronization)
-	for i := range workflow.Spec.Templates {
-		rewrite(workflow.Spec.Templates[i].Synchronization)
-	}
+	workflow.Spec.Synchronization.Mutexes = append(workflow.Spec.Synchronization.Mutexes, &wfv1.Mutex{Name: ReleaseMutexName})
 }
 
 // applyServerBounds caps the document's own deadline and pins retention. A
@@ -2498,19 +2498,4 @@ func WorkflowMeta(workflow *wfv1.Workflow) (runID string, identity string, ok bo
 	runID = workflow.Annotations[runIDAnnotation]
 	identity = workflow.Annotations[identityAnnotation]
 	return runID, identity, runID != ""
-}
-
-// verifyAdmittedExclusiveClasses binds the fragment-resolved Workflow to the
-// exclusive classes admission granted. A class the gate never saw would run
-// without the allowlist or the limit, and after a restart adoption (which
-// reads the built Workflow) would hold it, so any difference is refused.
-func verifyAdmittedExclusiveClasses(workflow *wfv1.Workflow, admitted []string) error {
-	resolved, err := argoworkflow.DeclaredExclusiveClasses(workflow)
-	if err != nil {
-		return err
-	}
-	if !slices.Equal(resolved, admitted) {
-		return fmt.Errorf("argojob: exclusive classes %v of the resolved pipeline (fragments included) differ from the admitted classes %v", resolved, admitted)
-	}
-	return nil
 }

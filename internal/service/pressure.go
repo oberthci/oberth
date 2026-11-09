@@ -217,7 +217,7 @@ func pressureLatch(held bool, value, limit, hysteresis float64) bool {
 	return value >= limit
 }
 
-func (gate *weightedAdmission) pressureWaitLocked(r *admissionReservation) *model.PressureDeferral {
+func (gate *admissionGate) pressureWaitLocked(r *admissionReservation) *model.PressureDeferral {
 	p := gate.pressure
 	if p == nil || !p.state.Holding || !r.pressureDeferred || r.granted {
 		return nil
@@ -234,7 +234,7 @@ func (gate *weightedAdmission) pressureWaitLocked(r *admissionReservation) *mode
 
 // Legacy avg60 gives prepared waiters their own clocks. Avg10 starts a clock
 // only at an eligible pressure deferral and keeps it across brief PSI drops.
-func (gate *weightedAdmission) preparePressureWaitsLocked(now time.Time) {
+func (gate *admissionGate) preparePressureWaitsLocked(now time.Time) {
 	p := gate.pressure
 	for _, r := range gate.waiters {
 		r.pressureDeferred = false
@@ -261,7 +261,7 @@ func (gate *weightedAdmission) preparePressureWaitsLocked(now time.Time) {
 	}
 }
 
-func (gate *weightedAdmission) deferPressureLocked(r *admissionReservation, now time.Time) bool {
+func (gate *admissionGate) deferPressureLocked(r *admissionReservation, now time.Time) bool {
 	p := gate.pressure
 	if p == nil || !p.state.Holding {
 		return false
@@ -302,7 +302,7 @@ func (gate *weightedAdmission) deferPressureLocked(r *admissionReservation, now 
 
 // Only the first eligible waiter may use the starvation guard. grantLocked
 // checks all other gates first; priority alone never authorizes an idle bypass.
-func (gate *weightedAdmission) pressureBypassLocked(r *admissionReservation, now time.Time) bool {
+func (gate *admissionGate) pressureBypassLocked(r *admissionReservation, now time.Time) bool {
 	p := gate.pressure
 	if p.settling() {
 		return false
@@ -328,11 +328,11 @@ func (gate *weightedAdmission) pressureBypassLocked(r *admissionReservation, now
 	return !since.IsZero() && now.Sub(since).Seconds() > float64(p.config.MaxWaitSeconds) && p.state.Sample.CPU.SomeAvg10 < p.config.HardCPU && p.state.Sample.IO.SomeAvg10 < p.config.HardIO
 }
 
-func (gate *weightedAdmission) pressureIdleBypassLocked(r *admissionReservation) bool {
+func (gate *admissionGate) pressureIdleBypassLocked(r *admissionReservation) bool {
 	return gate.runs == 0 && !r.pressurePromotion && (r.pressureRelease || r.refKind == model.RefTag)
 }
 
-func (gate *weightedAdmission) pressureStateLocked() *model.AdmissionPressure {
+func (gate *admissionGate) pressureStateLocked() *model.AdmissionPressure {
 	if gate.pressure == nil {
 		return nil
 	}

@@ -14,20 +14,16 @@ import (
 // Repository annotations are read statically so the reviewed source and
 // admission decision cannot diverge through evaluated repository code.
 const (
-	// SizeAnnotation declares the scheduler admission weight of this pipeline,
-	// one of S/M/L/XL. Absent selects M.
-	//
-	// This does not size any container: an Argo template
-	// carries its own resources block. It only tells Oberth's weighted queue
-	// how much of the node this run intends to occupy.
-	//
-	// The declaration costs concurrency, so declare what the pipeline needs
-	// rather than the largest tier that looks safe. Against a server
-	// configured for N concurrent jobs, S and M both run N at a time, L runs
-	// floor(2N/3), and XL runs alone. Declaring L on a server set to 3 buys
-	// per-run headroom at the price of one of the three slots; declaring XL
-	// costs two of them.
+	// SizeAnnotation names the pipeline's historical S/M/L/XL tier. It is
+	// recorded with the run and shown, nothing more: admission counts runs
+	// and Kubernetes places each Pod by its own resources block.
 	SizeAnnotation = "oberth.ci/size"
+
+	// RetiredExclusiveAnnotation is the former per-step exclusive-class
+	// declaration. Since v0.18.0 it is accepted and ignored, so documents
+	// that still carry it keep running; steps that need a shared limit
+	// declare native Argo synchronization instead.
+	RetiredExclusiveAnnotation = "oberth.ci/exclusive"
 
 	// ConcurrencyGroupAnnotation names a group shared across repositories and
 	// all triggers. ConcurrencyLimitAnnotation defaults to one; YAML declarations

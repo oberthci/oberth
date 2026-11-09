@@ -91,8 +91,6 @@ func TestQueueMessageHasRequestsAndOneBlocker(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.observation.State = "waiting"
 			tc.observation.Requests = &argoworkflow.PodRequests{CPUMilli: 9900, MemoryBytes: 16 << 30, Pods: 2}
-			// Retired weighted charges must never substitute for pod requests.
-			tc.observation.DeclaredResources = &model.DeclaredResources{CPUMilli: 99000, MemoryBytes: 128 << 30}
 			got := queuedDisplayReason(&model.RunScheduling{State: "waiting", Admission: &tc.observation}, nil)
 			if got != "needs 9.9 CPU, 16 GiB · "+tc.want || strings.Count(got, " · ") != 1 {
 				t.Fatal(got)
@@ -113,7 +111,7 @@ func TestWorkflowOnlyReservationReportsBoundPodRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gate := newWorkflowAdmissionForJobs(1)
+	gate := newAdmissionGate(1)
 	release := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "occupant"})
 	defer release()
 	demand, err := receipt.WorkflowPodDemand()
@@ -123,7 +121,7 @@ func TestWorkflowOnlyReservationReportsBoundPodRequests(t *testing.T) {
 	reservation := pending(t, gate, 2, admissionRequest{RunID: request.Run.ID, Requests: queuePodRequests(demand)})
 	defer reservation.cancel()
 	snapshot := (&Scheduler{admission: gate}).AdmissionSnapshot(2)
-	if snapshot.Requests == nil || snapshot.Requests.CPUMilli != 7900 || snapshot.DeclaredResources != nil {
+	if snapshot.Requests == nil || snapshot.Requests.CPUMilli != 7900 {
 		t.Fatalf("requests lost or retired budget restored: %+v", snapshot)
 	}
 	snapshot.Requests.CPUMilli = 1

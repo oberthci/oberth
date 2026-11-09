@@ -110,7 +110,7 @@ func TestConcurrencyGroupsSchedulerPersistsAndSharesYAMLLimit(t *testing.T) {
 }
 
 func TestConcurrencyGroupsShareLimitAcrossRepositoriesAndTriggers(t *testing.T) {
-	g := newWorkflowAdmissionForJobs(4)
+	g := newAdmissionGate(4)
 	s := &Scheduler{admission: g}
 	first := g.reserveRun(model.Run{ID: "branch", RepoID: 1, QueueSequence: 1, RefKind: model.RefBranch})
 	releaseFirst := acquireRequestWithinBudget(t, first, admissionRequest{RunID: "branch", RepoID: 1, Group: "state", GroupLimit: 2})
@@ -137,7 +137,7 @@ func TestConcurrencyGroupsShareLimitAcrossRepositoriesAndTriggers(t *testing.T) 
 }
 
 func TestConcurrencyGroupsRefuseConflictingLiveLimit(t *testing.T) {
-	g := newWorkflowAdmissionForJobs(4)
+	g := newAdmissionGate(4)
 	r := g.reserveRun(model.Run{ID: "first", RepoID: 1, QueueSequence: 1})
 	release := acquireRequestWithinBudget(t, r, admissionRequest{RunID: "first", RepoID: 1, Group: "state", GroupLimit: 2})
 	defer release()
@@ -148,10 +148,10 @@ func TestConcurrencyGroupsRefuseConflictingLiveLimit(t *testing.T) {
 }
 
 func TestConcurrencyGroupsAdoptMultipleHolders(t *testing.T) {
-	g := newWorkflowAdmissionForJobs(4)
+	g := newAdmissionGate(4)
 	for i := int64(1); i <= 2; i++ {
 		r := model.Run{ID: strings.Repeat(string(rune('a'+i)), 32), RepoID: i, QueueSequence: i, ConcurrencyGroup: "state", ConcurrencyLimit: 2}
-		if _, err := g.adopt(r, pipeline.M); err != nil {
+		if _, err := g.adopt(r); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -160,13 +160,13 @@ func TestConcurrencyGroupsAdoptMultipleHolders(t *testing.T) {
 	if len(state.Groups) != 1 || state.Groups[0].Limit != 2 || len(state.Groups[0].Holders) != 2 {
 		t.Fatalf("lost adopted holders: %+v", state.Groups)
 	}
-	if _, err := g.adopt(model.Run{ID: "excess", RepoID: 3, QueueSequence: 3, ConcurrencyGroup: "state", ConcurrencyLimit: 2}, pipeline.M); err == nil {
+	if _, err := g.adopt(model.Run{ID: "excess", RepoID: 3, QueueSequence: 3, ConcurrencyGroup: "state", ConcurrencyLimit: 2}); err == nil {
 		t.Fatal("adopted more than an explicit YAML limit")
 	}
 }
 
 func TestConcurrencyGroupsRemainBoundedByWorkflowCeiling(t *testing.T) {
-	g := newWorkflowAdmissionForJobs(1)
+	g := newAdmissionGate(1)
 	first := g.reserveRun(model.Run{ID: "first", QueueSequence: 1, RepoID: 1})
 	release := acquireRequestWithinBudget(t, first, admissionRequest{RunID: "first", RepoID: 1, Group: "state", GroupLimit: 4})
 	next := g.reserveRun(model.Run{ID: "second", QueueSequence: 2, RepoID: 2, Release: true, RefKind: model.RefTag})
@@ -181,10 +181,10 @@ func TestConcurrencyGroupsRemainBoundedByWorkflowCeiling(t *testing.T) {
 }
 
 func TestConcurrencyGroupsAdoptionPreservesLegacyOverLimitWork(t *testing.T) {
-	g := newWorkflowAdmissionForJobs(4)
+	g := newAdmissionGate(4)
 	var holders []*admissionReservation
 	for i := int64(1); i <= 2; i++ {
-		r, err := g.adopt(model.Run{ID: string(rune('a' + i)), RepoID: i, QueueSequence: i, ConcurrencyGroup: "state"}, pipeline.M)
+		r, err := g.adopt(model.Run{ID: string(rune('a' + i)), RepoID: i, QueueSequence: i, ConcurrencyGroup: "state"})
 		if err != nil {
 			t.Fatal(err)
 		}

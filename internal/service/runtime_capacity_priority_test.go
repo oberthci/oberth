@@ -33,7 +33,7 @@ func runtimePriorityFixture(t *testing.T) *Scheduler {
 }
 func TestRuntimeCapacityPriorityDispatchUsesLiveCeiling(t *testing.T) {
 	s := runtimePriorityFixture(t)
-	for _, tc := range []struct{ jobs, below, at int }{{4, 14, 15}, {1, 5, 6}} {
+	for _, tc := range []struct{ jobs, below, at int }{{4, 10, 11}, {1, 4, 5}} {
 		writeCapacity(t, s, fmt.Sprint(tc.jobs))
 		s.refreshRuntimeCapacity(t.Context())
 		if available, err := s.priorityDispatchAvailable(t.Context(), tc.below); err != nil || !available {

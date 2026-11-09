@@ -12,7 +12,6 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
@@ -79,7 +78,7 @@ func TestAdmissionHoldSkipsPreparedAndUnpreparedClaimsWithoutPreemption(t *testi
 	gate.now = func() time.Time { return now }
 	holder := gate.reserveRun(model.Run{ID: "holder", QueueSequence: 1, RefKind: model.RefBranch})
 	gate.mu.Lock()
-	holder.prepared, holder.weight = true, 1
+	holder.prepared = true
 	gate.grantLocked()
 	gate.mu.Unlock()
 	if !granted(gate, holder) {
@@ -91,7 +90,7 @@ func TestAdmissionHoldSkipsPreparedAndUnpreparedClaimsWithoutPreemption(t *testi
 	}
 	tag := gate.reserveRun(model.Run{ID: "tag", QueueSequence: 3, RefKind: model.RefTag})
 	gate.mu.Lock()
-	tag.prepared, tag.weight = true, 1
+	tag.prepared = true
 	gate.grantLocked()
 	gate.mu.Unlock()
 	if !granted(gate, holder) || !granted(gate, tag) || granted(gate, ordinary) {
@@ -99,7 +98,7 @@ func TestAdmissionHoldSkipsPreparedAndUnpreparedClaimsWithoutPreemption(t *testi
 	}
 	tag.release()
 	gate.mu.Lock()
-	ordinary.prepared, ordinary.weight = true, 1
+	ordinary.prepared = true
 	gate.grantLocked()
 	gate.mu.Unlock()
 	if granted(gate, ordinary) {
@@ -128,7 +127,6 @@ func TestAdmissionHoldDispatchAndGroupBypass(t *testing.T) {
 		r := gate.reserveRun(model.Run{ID: "ordinary", QueueSequence: i, RefKind: model.RefBranch})
 		gate.mu.Lock()
 		r.prepared = true
-		r.weight = 1
 		r.group = "shared"
 		gate.mu.Unlock()
 		held = append(held, r)
@@ -139,7 +137,6 @@ func TestAdmissionHoldDispatchAndGroupBypass(t *testing.T) {
 	tag := gate.reserveRun(model.Run{ID: "tag", QueueSequence: 7, RefKind: model.RefTag})
 	gate.mu.Lock()
 	tag.prepared = true
-	tag.weight = 1
 	tag.group = "shared"
 	gate.grantLocked()
 	gate.mu.Unlock()
@@ -199,7 +196,6 @@ func TestAdmissionHoldWriteFenceKeepsGateResponsive(t *testing.T) {
 			holder := gate.reserveRun(model.Run{ID: "running", QueueSequence: 1, RefKind: model.RefBranch})
 			gate.mu.Lock()
 			holder.prepared = true
-			holder.weight = 1
 			gate.grantLocked()
 			gate.mu.Unlock()
 			state := &blockedHoldStore{Store: f.store, entered: make(chan struct{}), resume: make(chan struct{}), fail: mode == "rollback", lostAck: mode == "lost-ack"}
@@ -217,7 +213,6 @@ func TestAdmissionHoldWriteFenceKeepsGateResponsive(t *testing.T) {
 				r := gate.reserveRun(model.Run{ID: "waiting", QueueSequence: 2, RefKind: model.RefBranch})
 				gate.mu.Lock()
 				r.prepared = true
-				r.weight = 1
 				gate.grantLocked()
 				gate.mu.Unlock()
 				responsive <- r
@@ -263,7 +258,6 @@ func TestAdmissionHoldRestartLoadsOriginalDeadline(t *testing.T) {
 	r := gate.reserveRun(model.Run{ID: "ordinary", QueueSequence: 1, RefKind: model.RefBranch})
 	gate.mu.Lock()
 	r.prepared = true
-	r.weight = 1
 	gate.grantLocked()
 	gate.mu.Unlock()
 	if granted(gate, r) {
@@ -338,9 +332,6 @@ func TestAdmissionHoldExpiryResumesDispatchWithoutOperator(t *testing.T) {
 func TestAdmissionHoldWorkflowOnlyKeepsRunningGrantAndSlotCeiling(t *testing.T) {
 	f := newControlFixture(t)
 	gate := f.scheduler.admission
-	if !gate.workflowOnly {
-		t.Fatal("production scheduler must delegate pod placement to Kubernetes")
-	}
 	gate.maxRuns = 1
 	f.scheduler.maxConcurrent = 1
 	holder := gate.reserveRun(model.Run{ID: "running", RepoID: 1, QueueSequence: 1, RefKind: model.RefBranch})
@@ -383,10 +374,9 @@ func TestAdmissionHoldWorkflowOnlyKeepsRunningGrantAndSlotCeiling(t *testing.T) 
 	releaseOrdinary()
 }
 
-func TestAdmissionHoldWorkflowOnlyRuntimeCeilingIgnoresLegacyWeights(t *testing.T) {
+func TestAdmissionHoldRuntimeCeilingAppliesUnderHold(t *testing.T) {
 	f := newControlFixture(t)
 	f.scheduler.capacityFile = filepath.Join(t.TempDir(), "max-concurrent-jobs")
-	f.scheduler.admission.weights.XL = 1000
 	if _, err := f.scheduler.SetAdmissionHold(t.Context(), "admin", model.AdmissionHoldRequest{On: true, Reason: "qualification"}); err != nil {
 		t.Fatal(err)
 	}
@@ -394,12 +384,12 @@ func TestAdmissionHoldWorkflowOnlyRuntimeCeilingIgnoresLegacyWeights(t *testing.
 	f.scheduler.refreshRuntimeCapacity(t.Context())
 	state := f.scheduler.AdmissionState()
 	if state.Configuration.Error != "" || state.Configuration.MaxConcurrentJobs != 1 || state.Configuration.Source != "file" || state.MaxRuns != 1 || !state.Hold.On {
-		t.Fatal("runtime ceiling rejected legacy XL or changed hold", state)
+		t.Fatal("runtime ceiling not applied or hold changed", state)
 	}
 	tag := f.scheduler.admission.reserveRun(model.Run{ID: "tag", QueueSequence: 1, RefKind: model.RefTag})
-	release := acquireRequestWithinBudget(t, tag, admissionRequest{Size: pipeline.XL, Pods: &argoworkflow.PodDemand{CPUMilli: 32000, MemoryBytes: 64 << 30, Pods: 1}})
+	release := acquireRequestWithinBudget(t, tag, admissionRequest{})
 	defer release()
-	if state = f.scheduler.AdmissionState(); state.Runs != 1 || state.Used != 1 || state.NumericBudget != nil {
+	if state = f.scheduler.AdmissionState(); state.Runs != 1 || state.Used != 1 {
 		t.Fatal("hold restored numeric admission", state)
 	}
 }

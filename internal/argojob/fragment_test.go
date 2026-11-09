@@ -356,34 +356,24 @@ func exclusiveFragment(t *testing.T) (argoworkflow.FragmentKey, argoworkflow.Fra
 `)}
 }
 
-// #1499: a class declared only inside a fragment is part of the resolved
-// Workflow. Build must refuse it unless admission granted exactly that set,
-// or the run would bypass the allowlist and the limit before a restart and
-// hold the class after one (adoption reads the built Workflow).
-func TestBuildBindsFragmentExclusiveClassesToAdmission(t *testing.T) {
+// The retired oberth.ci/exclusive annotation is inert: a fragment that still
+// carries it builds, the annotation stays on the template as plain Pod
+// metadata, and nothing about admission depends on it.
+func TestBuildIgnoresRetiredExclusiveAnnotationInFragments(t *testing.T) {
 	key, fragment := exclusiveFragment(t)
 	request := fragmentRequest(t, consumingDocument("    oberth.ci/size: S\n", key.String()),
 		map[argoworkflow.FragmentKey]argoworkflow.Fragment{key: fragment})
-	if _, err := Build(testConfig(), request); err == nil || !strings.Contains(err.Error(), "differ from the admitted classes") {
-		t.Fatalf("fragment exclusive class built without admission: %v", err)
-	}
-	request.Exclusive = []string{"gpu"}
-	if _, err := Build(testConfig(), request); err == nil || !strings.Contains(err.Error(), "differ from the admitted classes") {
-		t.Fatalf("fragment exclusive class built under a different admitted class: %v", err)
-	}
-	request.Exclusive = []string{"kvm"}
 	workflow, err := Build(testConfig(), request)
 	if err != nil {
-		t.Fatalf("admitted fragment class refused: %v", err)
+		t.Fatalf("retired annotation refused: %v", err)
 	}
-	if classes, err := argoworkflow.DeclaredExclusiveClasses(workflow); err != nil || len(classes) != 1 || classes[0] != "kvm" {
-		t.Fatalf("built Workflow classes %v %v", classes, err)
+	found := false
+	for _, template := range workflow.Spec.Templates {
+		if template.Metadata.Annotations[argoworkflow.RetiredExclusiveAnnotation] == "kvm" {
+			found = true
+		}
 	}
-	plainKey, plain := plainFragment(t, "transferz/maven-verify", "v3")
-	request = fragmentRequest(t, consumingDocument("    oberth.ci/size: S\n", plainKey.String()),
-		map[argoworkflow.FragmentKey]argoworkflow.Fragment{plainKey: plain})
-	request.Exclusive = []string{"kvm"}
-	if _, err := Build(testConfig(), request); err == nil || !strings.Contains(err.Error(), "differ from the admitted classes") {
-		t.Fatalf("admitted class missing from the resolved Workflow was built: %v", err)
+	if !found {
+		t.Fatal("fragment template lost its (inert) annotation")
 	}
 }

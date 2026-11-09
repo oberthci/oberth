@@ -24,8 +24,9 @@ func TestRuntimeCapacityChartProjectedDirectoryAndOverrides(t *testing.T) {
 		value   string
 		enabled bool
 	}{
-		{name: "default", value: "3", enabled: true},
+		{name: "default", value: "0", enabled: true},
 		{name: "boot-default", sets: []string{"maxConcurrentJobs=8"}, value: "8", enabled: true},
+		{name: "override-zero", sets: []string{"maxConcurrentJobs=8", "admission.runtimeCapacity.maxConcurrentJobs=0"}, value: "0", enabled: true},
 		{name: "override", sets: []string{"admission.runtimeCapacity.maxConcurrentJobs=5"}, value: "5", enabled: true},
 		{name: "disabled", sets: []string{"admission.runtimeCapacity.enabled=false"}},
 	} {
@@ -103,7 +104,7 @@ func TestRuntimeCapacityChartProjectedDirectoryAndOverrides(t *testing.T) {
 			}
 		})
 	}
-	for _, value := range []string{"0", "65", "-1", "wrong"} {
+	for _, value := range []string{"65", "-1", "wrong"} {
 		output, err := exec.Command("helm", "template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@"+goProxyDigest, "--set", "admission.runtimeCapacity.maxConcurrentJobs="+value).CombinedOutput()
 		if err == nil {
 			t.Fatal("invalid chart capacity accepted", value, string(output))

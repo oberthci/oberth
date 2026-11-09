@@ -7,7 +7,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/storetest"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 // Exercise the production workflow-count gate and real durable queue, with
@@ -16,7 +15,7 @@ func TestPriorityDispatchReachesHighPastParkedLowerClasses(t *testing.T) {
 	for _, initial := range []model.RunPriority{model.PriorityStandard, model.PriorityLow} {
 		t.Run(string(initial), func(t *testing.T) {
 			f := newControlFixture(t)
-			g := newWorkflowAdmissionForJobs(2)
+			g := newAdmissionGate(2)
 			s := &Scheduler{store: f.store, admission: g, maxConcurrent: 2}
 			active := 0
 			enqueue := func(ref string, priority model.RunPriority) model.Run {
@@ -59,7 +58,7 @@ func TestPriorityDispatchReachesHighPastParkedLowerClasses(t *testing.T) {
 				return reservation
 			}
 			holder := claim(enqueue("holder", model.PriorityStandard))
-			release, err := holder.acquireRequest(t.Context(), admissionRequest{Group: "serial", GroupLimit: 1, Size: pipeline.S})
+			release, err := holder.acquireRequest(t.Context(), admissionRequest{Group: "serial", GroupLimit: 1})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -100,7 +99,7 @@ func TestPriorityDispatchReachesHighPastParkedLowerClasses(t *testing.T) {
 			// Cross the actual dispatch boundary, then use the otherwise free
 			// workflow slot. The existing holder and serial group stay intact.
 			urgentReservation := claim(urgent)
-			releaseUrgent, err := urgentReservation.acquireRequest(t.Context(), admissionRequest{Group: "independent", GroupLimit: 1, Size: pipeline.S})
+			releaseUrgent, err := urgentReservation.acquireRequest(t.Context(), admissionRequest{Group: "independent", GroupLimit: 1})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -60,20 +60,20 @@ func TestRetainedReservationIsListedAndReleasable(t *testing.T) {
 	}
 	gate := scheduler.admission
 	held := gate.reserve(stale.QueueSequence)
-	acquireRequestWithinBudget(t, held, admissionRequest{RunID: stale.ID, RepoID: fixture.repo.ID, Repo: fixture.repo.Name, Ref: "feature/stale", Size: pipeline.M})
+	acquireRequestWithinBudget(t, held, admissionRequest{RunID: stale.ID, RepoID: fixture.repo.ID, Repo: fixture.repo.Name, Ref: "feature/stale"})
 	held.retain()
 
 	waiter := gate.reserve(stale.QueueSequence + 1)
 	waiterReady := make(chan func(), 1)
-	go acquireRequestForTest(waiter, admissionRequest{RunID: "waiting-run", RepoID: fixture.repo.ID, Repo: fixture.repo.Name, Ref: "feature/next", Size: pipeline.M}, waiterReady)
+	go acquireRequestForTest(waiter, admissionRequest{RunID: "waiting-run", RepoID: fixture.repo.ID, Repo: fixture.repo.Name, Ref: "feature/next"}, waiterReady)
 	awaitWaiting(t, waiter)
 
 	state := scheduler.AdmissionState()
-	if state.NumericBudget != nil || state.Capacity != 1 || len(state.Reservations) != 2 {
+	if state.Capacity != 1 || len(state.Reservations) != 2 {
 		t.Fatalf("state = %#v", state)
 	}
 	retained, waiting := state.Reservations[0], state.Reservations[1]
-	if retained.RunID != stale.ID || retained.State != "retained" || retained.Weight != 0 || retained.Since.IsZero() || retained.Workflow == "" {
+	if retained.RunID != stale.ID || retained.State != "retained" || retained.Since.IsZero() || retained.Workflow == "" {
 		t.Fatalf("retained view = %#v", retained)
 	}
 	if waiting.RunID != "waiting-run" || waiting.State != "waiting" || waiting.Position != 1 {
@@ -96,7 +96,7 @@ func TestRetainedReservationIsListedAndReleasable(t *testing.T) {
 	scheduler.jobs = fixture.jobs
 	control := &API{history: fixture.store, admission: scheduler}
 	released, err := control.releaseAdmission(ctx, api.Actor{Identity: "admin@host", Admin: true}, stale.ID[:8], false)
-	if err != nil || !released.Verified || released.State != "retained" || released.Weight != 0 {
+	if err != nil || !released.Verified || released.State != "retained" {
 		t.Fatalf("release = %#v, %v", released, err)
 	}
 	awaitAcquired(t, waiterReady)()
@@ -122,7 +122,7 @@ func TestAdmissionReleaseRefusesLiveRunsAndNonAdmins(t *testing.T) {
 		t.Fatal(err)
 	}
 	reservation := scheduler.admission.reserve(live.QueueSequence)
-	release := acquireRequestWithinBudget(t, reservation, admissionRequest{RunID: live.ID, RepoID: fixture.repo.ID, Repo: fixture.repo.Name, Ref: "feature/live", Size: pipeline.M})
+	release := acquireRequestWithinBudget(t, reservation, admissionRequest{RunID: live.ID, RepoID: fixture.repo.ID, Repo: fixture.repo.Name, Ref: "feature/live"})
 	defer release()
 	if _, err := scheduler.ReleaseAdmission(ctx, live.ID, "admin@host", true); !errors.Is(err, ErrAdmissionReleaseRefused) ||
 		!strings.Contains(err.Error(), "run_cancel") {
@@ -160,13 +160,13 @@ func TestReleaseOfAGrantWithoutAWorkflowNameNeedsForce(t *testing.T) {
 		t.Fatal(err)
 	}
 	reservation := scheduler.admission.reserveRun(claimed)
-	acquireRequestWithinBudget(t, reservation, admissionRequest{RunID: preflight.ID, RepoID: fixture.repo.ID, Repo: fixture.repo.Name, Ref: "feature/kvm", Size: pipeline.M})
+	acquireRequestWithinBudget(t, reservation, admissionRequest{RunID: preflight.ID, RepoID: fixture.repo.ID, Repo: fixture.repo.Name, Ref: "feature/kvm"})
 
 	if _, err := scheduler.ReleaseAdmission(ctx, preflight.ID, "admin@host", false); !errors.Is(err, ErrAdmissionReleaseRefused) ||
 		!strings.Contains(err.Error(), "force") {
 		t.Fatalf("unforced release without a Workflow name = %v", err)
 	}
-	if state := scheduler.AdmissionState(); state.NumericBudget != nil || len(auditor.actions) != 0 {
+	if state := scheduler.AdmissionState(); len(auditor.actions) != 0 {
 		t.Fatalf("refused release changed state: used %d, audit %d", state.Used, len(auditor.actions))
 	}
 	released, err := scheduler.ReleaseAdmission(ctx, preflight.ID, "admin@host", true)

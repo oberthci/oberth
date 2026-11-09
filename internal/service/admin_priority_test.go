@@ -55,7 +55,7 @@ func TestAdminPriorityLoweringReordersBlockedHead(t *testing.T) {
 	for _, priority := range []model.RunPriority{model.PriorityNormal, model.PriorityLow} {
 		t.Run(string(priority), func(t *testing.T) {
 			f := newControlFixture(t)
-			gate := newWeightedAdmission(4)
+			gate := newAdmissionGate(1)
 			future := time.Now().Add(2 * time.Hour)
 			gate.now = func() time.Time { return future }
 			f.scheduler.admission = gate
@@ -84,7 +84,7 @@ func TestAdminPriorityLoweringReordersBlockedHead(t *testing.T) {
 				}
 				r := gate.reserveRun(run)
 				gate.mu.Lock()
-				r.prepared, r.size, r.weight = true, pipeline.XL, 4
+				r.prepared = true
 				gate.mu.Unlock()
 				waiting = append(waiting, r)
 			}

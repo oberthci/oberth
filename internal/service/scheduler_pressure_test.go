@@ -59,7 +59,7 @@ func TestSchedulerPressureBlocksSecondRunWithinBudget(t *testing.T) {
 			}
 		}
 		if blocked {
-			if state.Runs != 1 || state.NumericBudget != nil || !state.Pressure.Holding {
+			if state.Runs != 1 || !state.Pressure.Holding {
 				t.Fatalf("budget should fit second run: %+v", state)
 			}
 			break

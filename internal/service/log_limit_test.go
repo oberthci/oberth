@@ -13,7 +13,6 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/runprogress"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 func TestRunLogWriterRetainsExactBoundAndFailsClosed(t *testing.T) {
@@ -42,7 +41,7 @@ func TestStepProgressLogWriterJournalsControlRecordsWithoutRetainingThem(t *test
 	started := time.Now().UTC()
 	event := runprogress.Event{
 		Version: runprogress.Version, Stage: "test", Step: "unit", Ordinal: 0,
-		Status: runprogress.StepRunning, DeclaredSize: pipeline.M, StartedAt: &started,
+		Status: runprogress.StepRunning, DeclaredSize: "M", StartedAt: &started,
 	}
 	marker, err := runprogress.MarshalMarker(event)
 	if err != nil {

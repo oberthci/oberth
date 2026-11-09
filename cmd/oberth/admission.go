@@ -93,7 +93,7 @@ func runAdmission(ctx context.Context, arguments []string, output io.Writer) err
 			_, err = fmt.Fprintf(output, "%s\n", strings.TrimSpace(string(raw)))
 			return err
 		}
-		line := fmt.Sprintf("%s  released (%s, weight %d", released.RunID, released.State, released.Weight)
+		line := fmt.Sprintf("%s  released (%s", released.RunID, released.State)
 		if released.Group != "" {
 			line += ", group " + released.Group
 		}
@@ -147,10 +147,12 @@ func decodeAdmissionGroups(raw []byte) (api.ConcurrencyGroupsResponse, error) {
 }
 
 func renderAdmission(output io.Writer, state *model.AdmissionState, now time.Time) error {
-	if state.Capacity > 0 {
-		if _, err := fmt.Fprintf(output, "weight %d/%d used, %d run(s) admitted (ceiling %d)\n", state.Used, state.Capacity, state.Runs, state.MaxRuns); err != nil {
+	if state.MaxRuns > 0 {
+		if _, err := fmt.Fprintf(output, "%d of %d run slots used\n", state.Runs, state.MaxRuns); err != nil {
 			return err
 		}
+	} else if _, err := fmt.Fprintf(output, "%d run(s) admitted, no ceiling\n", state.Runs); err != nil {
+		return err
 	}
 	if p := state.Pressure; p != nil {
 		if p.Fallback != "" {
@@ -161,26 +163,19 @@ func renderAdmission(output io.Writer, state *model.AdmissionState, now time.Tim
 	}
 	if state.Blocker != nil {
 		line := fmt.Sprintf("queue head: %s/%s (%s)", state.Blocker.Repo, state.Blocker.Ref, state.Blocker.Reason())
-		if backfill := state.Blocker.Backfill(); backfill != "" {
-			line += "; " + backfill
-		}
 		if _, err := fmt.Fprintln(output, line); err != nil {
 			return err
 		}
 	}
 	writer := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
-	_, _ = fmt.Fprintln(writer, "RUN\tSTATE\tSIZE\tWEIGHT\tREPO/REF\tGROUP\tFOR")
+	_, _ = fmt.Fprintln(writer, "RUN\tSTATE\tREPO/REF\tGROUP\tFOR")
 	for _, reservation := range state.Reservations {
 		age := "-"
 		if !reservation.Since.IsZero() {
 			age = now.Sub(reservation.Since).Truncate(time.Second).String()
 		}
-		label := reservation.State
-		if reservation.Backfilled {
-			label += " (backfill)"
-		}
-		_, _ = fmt.Fprintf(writer, "%s\t%s\t%s\t%d\t%s/%s\t%s\t%s\n", reservation.RunID, label,
-			dash(reservation.Size), reservation.Weight, reservation.Repo, reservation.Ref, dash(reservation.Group), age)
+		_, _ = fmt.Fprintf(writer, "%s\t%s\t%s/%s\t%s\t%s\n", reservation.RunID, reservation.State,
+			reservation.Repo, reservation.Ref, dash(reservation.Group), age)
 	}
 	return writer.Flush()
 }

@@ -1181,13 +1181,22 @@ spec:
 	}
 }
 
-func TestBuildScopesSynchronizationMutexNames(t *testing.T) {
-	const withMutex = `
+// Native synchronization is submitted exactly as the document declares it:
+// the same mutex name under every trigger (a CI and a release pipeline that
+// name the same lock share it, which is what a chart-index compare-and-swap
+// needs) and the ConfigMap semaphore reference untouched.
+func TestBuildSubmitsSynchronizationUntouched(t *testing.T) {
+	const withLocks = `
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 spec:
   entrypoint: main
   activeDeadlineSeconds: 3600
+  synchronization:
+    semaphores:
+      - configMapKeyRef:
+          name: oberth-sync-limits
+          key: heavy-go
   templates:
     - name: main
       synchronization:
@@ -1197,29 +1206,20 @@ spec:
         image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         command: [/bin/true]
 `
-	workflow, err := Build(testConfig(), testRequest(pipeline.TriggerRelease, withMutex))
-	if err != nil {
-		t.Fatalf("build: %v", err)
-	}
-	tmpl := workflow.Spec.Templates[0]
-	if tmpl.Synchronization == nil || len(tmpl.Synchronization.Mutexes) == 0 {
-		t.Fatal("expected a mutex after Build")
-	}
-	got := tmpl.Synchronization.Mutexes[0].Name
-	want := "release/oberth/chart-index"
-	if got != want {
-		t.Fatalf("scoped mutex name = %q, want %q", got, want)
-	}
-
-	ciWorkflow, err := Build(testConfig(), testRequest(pipeline.TriggerCI, withMutex))
-	if err != nil {
-		t.Fatalf("build CI: %v", err)
-	}
-	ciTmpl := ciWorkflow.Spec.Templates[0]
-	ciGot := ciTmpl.Synchronization.Mutexes[0].Name
-	ciWant := "ci/oberth/chart-index"
-	if ciGot != ciWant {
-		t.Fatalf("CI scoped mutex name = %q, want %q", ciGot, ciWant)
+	for _, trigger := range []pipeline.Trigger{pipeline.TriggerRelease, pipeline.TriggerCI} {
+		workflow, err := Build(testConfig(), testRequest(trigger, withLocks))
+		if err != nil {
+			t.Fatalf("build %s: %v", trigger, err)
+		}
+		tmpl := workflow.Spec.Templates[0]
+		if tmpl.Synchronization == nil || len(tmpl.Synchronization.Mutexes) != 1 || tmpl.Synchronization.Mutexes[0].Name != "chart-index" {
+			t.Fatalf("%s: template mutex rewritten: %+v", trigger, tmpl.Synchronization)
+		}
+		sync := workflow.Spec.Synchronization
+		if sync == nil || len(sync.Semaphores) != 1 || sync.Semaphores[0].ConfigMapKeyRef == nil ||
+			sync.Semaphores[0].ConfigMapKeyRef.Name != "oberth-sync-limits" || sync.Semaphores[0].ConfigMapKeyRef.Key != "heavy-go" {
+			t.Fatalf("%s: workflow semaphore rewritten: %+v", trigger, sync)
+		}
 	}
 }
 
@@ -2173,4 +2173,81 @@ func TestSpecIdentityIgnoresSourceVolumeFields(t *testing.T) {
 	// and handled by the controller passing a zero SourceVolume to Build.
 	_ = digestZero
 	_ = digestPopulated
+}
+
+// releases.serialize gives every release run, and only release runs, the
+// workflow-level mutex oberth-release, merged with the document's own
+// workflow-level synchronization rather than replacing it.
+func TestBuildSerializesReleasesWithOneNativeMutex(t *testing.T) {
+	const withOwnLocks = `
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  entrypoint: main
+  activeDeadlineSeconds: 3600
+  synchronization:
+    semaphores:
+      - configMapKeyRef:
+          name: oberth-sync-limits
+          key: heavy-go
+    mutexes:
+      - name: chart-index
+  templates:
+    - name: main
+      container:
+        image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        command: [/bin/true]
+`
+	const plainDocument = `
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  entrypoint: main
+  activeDeadlineSeconds: 3600
+  templates:
+    - name: main
+      container:
+        image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        command: [/bin/true]
+`
+	config := testConfig()
+	config.SerializeReleases = true
+	releaseNames := func(t *testing.T, source string) []string {
+		t.Helper()
+		workflow, err := Build(config, testRequest(pipeline.TriggerRelease, source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var names []string
+		for _, mutex := range workflow.Spec.Synchronization.Mutexes {
+			names = append(names, mutex.Name)
+		}
+		return names
+	}
+	if names := releaseNames(t, plainDocument); len(names) != 1 || names[0] != ReleaseMutexName {
+		t.Fatalf("release without own locks: mutexes %v", names)
+	}
+	workflow, err := Build(config, testRequest(pipeline.TriggerRelease, withOwnLocks))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sync := workflow.Spec.Synchronization
+	if len(sync.Mutexes) != 2 || sync.Mutexes[0].Name != "chart-index" || sync.Mutexes[1].Name != ReleaseMutexName || len(sync.Semaphores) != 1 {
+		t.Fatalf("release with own locks: %+v", sync)
+	}
+	ci, err := Build(config, testRequest(pipeline.TriggerCI, plainDocument))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ci.Spec.Synchronization != nil {
+		t.Fatalf("CI run took the release mutex: %+v", ci.Spec.Synchronization)
+	}
+	config.SerializeReleases = false
+	off, err := Build(config, testRequest(pipeline.TriggerRelease, plainDocument))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if off.Spec.Synchronization != nil {
+		t.Fatalf("disabled policy still serialized: %+v", off.Spec.Synchronization)
+	}
 }

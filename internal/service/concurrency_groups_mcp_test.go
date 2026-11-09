@@ -16,7 +16,7 @@ func TestConcurrencyGroupsMCPEnvelope(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			f := newControlFixture(t)
 			control := f.api(t)
-			f.scheduler.admission = newWorkflowAdmissionForJobs(3)
+			f.scheduler.admission = newAdmissionGate(3)
 			control.admission = f.scheduler
 			if mode == "nil-observer-list" {
 				control.admission = &concurrencyResultObserver{}

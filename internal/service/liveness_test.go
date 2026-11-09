@@ -61,40 +61,6 @@ func TestSchedulerLivenessDetectsStalledLocalDispatch(t *testing.T) {
 	}
 }
 
-type stalledHeadStore struct {
-	SchedulerStore
-	HeadWaitStore
-	entered chan struct{}
-	release chan struct{}
-}
-
-func (store *stalledHeadStore) RecordAdmissionHeadWait(ctx context.Context, _ int64, _ model.RefKind, _, _ string, _ time.Time) error {
-	close(store.entered)
-	select {
-	case <-store.release:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func TestAdmissionLivenessDetectsStalledPersistenceAndStops(t *testing.T) {
-	fixture := newRecoveryFixture(t)
-	scheduler := fixture.scheduler(t, &recoveryJobs{})
-	stalled := &stalledHeadStore{SchedulerStore: scheduler.store, HeadWaitStore: fixture.store, entered: make(chan struct{}), release: make(chan struct{})}
-	scheduler.store = stalled
-	scheduler.admission.headEvents = make(chan headEvent, 1)
-	scheduler.admission.headEvents <- headEvent{key: headWaitKey{RepoID: 1}, since: time.Now()}
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { scheduler.runHeadEvents(ctx); done <- nil }()
-	defer func() { close(stalled.release); cancel(); awaitLivenessDone(t, done) }()
-	awaitLivenessSignal(t, stalled.entered)
-	if err := scheduler.liveAt(time.Now().Add(liveness.MaxStall + time.Second)); !errors.Is(err, liveness.ErrStalled) || !strings.HasPrefix(err.Error(), "admission persistence:") {
-		t.Fatalf("stalled admission: %v", err)
-	}
-}
-
 type queuedLivenessPromotions struct {
 	PromotionRepository
 	calls    int // used by the initial call and then its sole queue background task

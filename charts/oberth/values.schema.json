@@ -110,6 +110,18 @@
       "default": true,
       "description": "Automatically retry eligible infrastructure failures once, retaining queue position and priority. Maximum attempts is fixed at one retry."
     },
+    "releases": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Release run policy.",
+      "properties": {
+        "serialize": {
+          "type": "boolean",
+          "default": false,
+          "description": "Give every release run the native Argo workflow-level mutex oberth-release, so no two releases of any repository run at once."
+        }
+      }
+    },
     "assist": {
       "type": "object",
       "additionalProperties": false,
@@ -126,8 +138,28 @@
     },
     "maxConcurrentJobs": {
       "type": "integer",
-      "minimum": 1,
-      "maximum": 64
+      "minimum": 0,
+      "maximum": 64,
+      "description": "Optional run ceiling: runs that may hold a Workflow at once. 0 is no ceiling."
+    },
+    "argoSync": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Shared step limits rendered into the ConfigMap oberth-sync-limits in the pipeline namespace for native Argo synchronization semaphores.",
+      "properties": {
+        "semaphores": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9]([-._A-Za-z0-9]{0,251}[A-Za-z0-9])?$"
+          },
+          "additionalProperties": {
+            "type": ["integer", "string"],
+            "pattern": "^[1-9][0-9]{0,5}$",
+            "minimum": 1
+          }
+        }
+      }
     },
     "terminationGracePeriodSeconds": {
       "type": "integer",
@@ -138,11 +170,25 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "exclusiveClasses": {
+          "type": "object",
+          "description": "Not used since v0.18.0. Accepted only empty so --reuse-values upgrades render; any class fails validation. Define argoSync.semaphores and declare synchronization.semaphores on the step instead."
+        },
+        "sizeWeights": {
+          "type": "object",
+          "description": "Not used since v0.18.0. Accepted only at its former default (S 1, M 2, L 3, XL 0) so --reuse-values upgrades render; any other value fails validation. Pods are placed by their resources."
+        },
+        "maxHeadWait": {
+          "type": "string",
+          "description": "Not used since v0.18.0. Accepted only at its former default 20m so --reuse-values upgrades render; any other value fails validation."
+        },
         "declaredResources": {
-          "description": "Deprecated compatibility value; ignored. Kubernetes schedules pods by their requests."
+          "type": "object",
+          "description": "Not used since v0.18.0. Accepted only at its former defaults so --reuse-values upgrades render; any other value fails validation."
         },
         "legacyResources": {
-          "description": "Deprecated compatibility value; ignored. Kubernetes places pods by their requests."
+          "type": "object",
+          "description": "Not used since v0.18.0. Accepted only empty so --reuse-values upgrades render; any entry fails validation."
         },
         "runtimeCapacity": {
           "type": "object",
@@ -156,7 +202,7 @@
                 "integer",
                 "null"
               ],
-              "minimum": 1,
+              "minimum": 0,
               "maximum": 64
             }
           }
@@ -165,19 +211,6 @@
           "type": "integer",
           "minimum": 0,
           "description": "Opt-in disk-space admission floor in bytes. 0 = disabled."
-        },
-        "exclusiveClasses": {
-          "type": "object",
-          "description": "Server-wide exclusive classes steps may declare with oberth.ci/exclusive, mapped to each class's concurrent-run limit. Empty refuses every declaration.",
-          "maxProperties": 32,
-          "propertyNames": {
-            "pattern": "^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$"
-          },
-          "additionalProperties": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 64
-          }
         },
         "stallTimeout": {
           "type": "string",
@@ -238,12 +271,6 @@
               "description": "Deprecated compatibility value; ignored by the hard-limit valve."
             }
           }
-        },
-        "maxHeadWait": {
-          "description": "Deprecated compatibility value; ignored. Kubernetes schedules pods by their requests."
-        },
-        "sizeWeights": {
-          "description": "Deprecated compatibility value; ignored. Kubernetes schedules pods by their requests."
         }
       }
     },

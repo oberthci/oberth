@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,54 +37,11 @@ func (a *capacityAudit) AppendAuditAction(ctx context.Context, spec model.AuditA
 }
 func runtimeCapacityFixture(t *testing.T, jobs int) (*Scheduler, *capacityAudit) {
 	t.Helper()
-	gate := newWeightedAdmissionForJobs(jobs)
-	gate.maxRuns = gate.capacity
+	gate := newAdmissionGate(jobs)
 	path := filepath.Join(t.TempDir(), "max-concurrent-jobs")
 	gate.capacityConfig = model.AdmissionCapacityConfig{MaxConcurrentJobs: jobs, BootDefault: jobs, Source: "boot", File: path}
 	auditor := &capacityAudit{}
 	return &Scheduler{admission: gate, maxConcurrent: jobs, capacityFile: path, auditor: auditor, mutationGate: func(context.Context) error { return nil }, wake: make(chan struct{}, 1)}, auditor
-}
-
-func TestRuntimeCapacityPlatformProtectionFiniteXLFourSharesAfterRaise(t *testing.T) {
-	s, _ := runtimeCapacityFixture(t, 4)
-	// Isolate the live weight-cap change: fixed XL+M charges also need
-	// numeric room (20Gi), independently of the configured weight budget.
-	s.admission.resources.CPUMilli, s.admission.resources.MemoryBytes = 24000, 96<<30
-	s.admission.weights = SizeWeights{S: 1, M: 2, L: 3, XL: 8}
-	writeCapacity(t, s, "2")
-	s.refreshRuntimeCapacity(t.Context())
-	state := s.AdmissionState()
-	if state.Capacity != 8 || state.Configuration.MaxConcurrentJobs != 4 || state.Configuration.Error == "" {
-		t.Fatalf("positive XL compatibility trap not retained: %#v", state)
-	}
-	// The operator changes this startup configuration while intake is drained;
-	// runtime reload itself does not change the configured size weights.
-	s.admission.weights = SizeWeights{S: 1, M: 2, L: 3, XL: 4}
-	s.refreshRuntimeCapacity(t.Context())
-	state = s.AdmissionState()
-	if state.Capacity != 4 || state.Configuration.MaxConcurrentJobs != 2 || state.Configuration.Source != "file" || state.Configuration.Error != "" {
-		t.Fatalf("qualified two-job budget not effective: %#v", state)
-	}
-	// Positive XL=4 fills the initial budget by weight, without an exclusion
-	// flag. Raising capacity to six lets a waiting M share the held XL grant.
-	releaseXL, err := acquireWithinBudget(t, s.admission.reserve(1), pipeline.XL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer releaseXL()
-	_, ready := capacityWaiting(t, s.admission, 2, pipeline.M)
-	writeCapacity(t, s, "3")
-	s.refreshRuntimeCapacity(t.Context())
-	select {
-	case releaseM := <-ready:
-		defer releaseM()
-	case <-time.After(testStartTimeout(time.Second)):
-		t.Fatal("XL=4 retained exclusive semantics after capacity rose to six")
-	}
-	state = s.AdmissionState()
-	if state.Used != 6 || state.Runs != 2 || state.Capacity != 6 {
-		t.Fatalf("XL=4 and M=2 did not share the raised budget: %#v", state)
-	}
 }
 func writeCapacity(t *testing.T, s *Scheduler, text string) {
 	t.Helper()
@@ -93,11 +49,11 @@ func writeCapacity(t *testing.T, s *Scheduler, text string) {
 		t.Fatal(err)
 	}
 }
-func capacityWaiting(t *testing.T, g *weightedAdmission, seq int64, size pipeline.Size) (*admissionReservation, <-chan func()) {
+func capacityWaiting(t *testing.T, g *admissionGate, seq int64, _ pipeline.Size) (*admissionReservation, <-chan func()) {
 	t.Helper()
 	r := g.reserve(seq)
 	ch := make(chan func(), 1)
-	go acquireRequestForTest(r, admissionRequest{RunID: "waiting", Size: size}, ch)
+	go acquireRequestForTest(r, admissionRequest{RunID: "waiting"}, ch)
 	t.Cleanup(r.cancel)
 	awaitWaiting(t, r)
 	return r, ch
@@ -131,13 +87,13 @@ func TestRuntimeCapacityRaiseAndLowerPreserveGrants(t *testing.T) {
 	case <-time.After(testStartTimeout(time.Second)):
 		t.Fatal("raise did not wake prepared waiter")
 	}
-	if !capacityGranted(t, waiting) || s.AdmissionState().Used != 6 || !s.dispatchSlotAvailable(2) {
+	if !capacityGranted(t, waiting) || s.AdmissionState().Used != 3 || !s.dispatchSlotAvailable(2) {
 		t.Fatal("raise left a stale gate or dispatch ceiling", s.AdmissionState())
 	}
 	writeCapacity(t, s, "1")
 	s.refreshRuntimeCapacity(t.Context())
 	state := s.AdmissionState()
-	if state.Used != 6 || state.Capacity != 2 || state.Runs != 3 || state.Configuration.MaxConcurrentJobs != 1 || state.Configuration.Source != "file" || s.dispatchSlotAvailable(3) {
+	if state.Used != 3 || state.Capacity != 1 || state.Runs != 3 || state.Configuration.MaxConcurrentJobs != 1 || state.Configuration.Source != "file" || s.dispatchSlotAvailable(3) {
 		t.Fatal("lower changed held grants", state)
 	}
 	next, nextReady := capacityWaiting(t, g, 4, pipeline.M)
@@ -165,16 +121,16 @@ func TestRuntimeCapacityRaiseAndLowerPreserveGrants(t *testing.T) {
 func TestRuntimeCapacityInvalidMissingAndAuditFailureKeepLastGood(t *testing.T) {
 	s, a := runtimeCapacityFixture(t, 2)
 	s.refreshRuntimeCapacity(t.Context())
-	if state := s.AdmissionState(); state.Configuration.Source != "boot" || state.Configuration.Error == "" || state.Capacity != 4 {
+	if state := s.AdmissionState(); state.Configuration.Source != "boot" || state.Configuration.Error == "" || state.Capacity != 2 {
 		t.Fatal(state)
 	}
 	writeCapacity(t, s, "4")
 	s.refreshRuntimeCapacity(t.Context())
-	for _, text := range []string{"", "0", "65", "-1", "+3", "2.5", "secret-content", strings.Repeat("2", 65)} {
+	for _, text := range []string{"", "65", "-1", "+3", "2.5", "secret-content", strings.Repeat("2", 65)} {
 		writeCapacity(t, s, text)
 		s.refreshRuntimeCapacity(t.Context())
 		state := s.AdmissionState()
-		if state.Capacity != 8 || state.Configuration.MaxConcurrentJobs != 4 || state.Configuration.Error == "" || strings.Contains(state.Configuration.Error, "secret-content") {
+		if state.Capacity != 4 || state.Configuration.MaxConcurrentJobs != 4 || state.Configuration.Error == "" || strings.Contains(state.Configuration.Error, "secret-content") {
 			t.Fatal("invalid override changed or leaked", state)
 		}
 	}
@@ -182,14 +138,14 @@ func TestRuntimeCapacityInvalidMissingAndAuditFailureKeepLastGood(t *testing.T) 
 		t.Fatal(err)
 	}
 	s.refreshRuntimeCapacity(t.Context())
-	if s.AdmissionState().Capacity != 8 {
+	if s.AdmissionState().Capacity != 4 {
 		t.Fatal("missing file restored boot instead of last good")
 	}
 	if err := os.Mkdir(s.capacityFile, 0700); err != nil {
 		t.Fatal(err)
 	}
 	s.refreshRuntimeCapacity(t.Context())
-	if s.AdmissionState().Capacity != 8 {
+	if s.AdmissionState().Capacity != 4 {
 		t.Fatal("directory changed last good")
 	}
 	if err := os.Remove(s.capacityFile); err != nil {
@@ -198,68 +154,13 @@ func TestRuntimeCapacityInvalidMissingAndAuditFailureKeepLastGood(t *testing.T) 
 	a.fail = errors.New("writer unavailable")
 	writeCapacity(t, s, "3")
 	s.refreshRuntimeCapacity(t.Context())
-	if s.AdmissionState().Capacity != 8 || !strings.Contains(s.AdmissionState().Configuration.Error, "audited") {
+	if s.AdmissionState().Capacity != 4 || !strings.Contains(s.AdmissionState().Configuration.Error, "audited") {
 		t.Fatal("unaudited change accepted")
 	}
 	a.fail = nil
 	s.refreshRuntimeCapacity(t.Context())
-	if s.AdmissionState().Capacity != 6 || s.AdmissionState().Configuration.Error != "" || len(a.actions) != 2 {
+	if s.AdmissionState().Capacity != 3 || s.AdmissionState().Configuration.Error != "" || len(a.actions) != 2 {
 		t.Fatal("valid recovery did not apply", s.AdmissionState(), a.actions)
-	}
-}
-
-func TestRuntimeCapacityXLAndOverflowValidation(t *testing.T) {
-	s, _ := runtimeCapacityFixture(t, 3)
-	s.admission.weights.XL = 6
-	writeCapacity(t, s, "2")
-	s.refreshRuntimeCapacity(t.Context())
-	if s.AdmissionState().Capacity != 6 || s.AdmissionState().Configuration.Error == "" {
-		t.Fatal("runtime XL no longer fits", s.AdmissionState())
-	}
-	writeCapacity(t, s, "4")
-	s.refreshRuntimeCapacity(t.Context())
-	if s.AdmissionState().Capacity != 8 {
-		t.Fatal(s.AdmissionState())
-	}
-	if _, err := admissionCapacityBudget(2, SizeWeights{S: 1, M: math.MaxInt, L: math.MaxInt}, true); err == nil {
-		t.Fatal("overflow accepted")
-	}
-}
-
-func TestRuntimeCapacityRepricesWaitersAndKeepsWholeXLExclusive(t *testing.T) {
-	s, _ := runtimeCapacityFixture(t, 1)
-	g := s.admission
-	release, err := acquireWithinBudget(t, g.reserve(1), pipeline.XL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer release()
-	next, ready := capacityWaiting(t, g, 2, pipeline.XL)
-	writeCapacity(t, s, "4")
-	s.refreshRuntimeCapacity(t.Context())
-	if capacityGranted(t, next) {
-		t.Fatal("raise admitted beside held XL")
-	}
-	g.mu.Lock()
-	weight := next.weight
-	held := g.used
-	g.mu.Unlock()
-	if weight != 8 || held != 2 {
-		t.Fatal("waiting XL not repriced or held XL changed", weight, held)
-	}
-	release()
-	var nextRelease func()
-	select {
-	case nextRelease = <-ready:
-		defer nextRelease()
-	case <-time.After(testStartTimeout(time.Second)):
-		t.Fatal("XL did not acquire raised budget")
-	}
-	small, _ := capacityWaiting(t, g, 3, pipeline.S)
-	writeCapacity(t, s, "6")
-	s.refreshRuntimeCapacity(t.Context())
-	if capacityGranted(t, small) {
-		t.Fatal("raising capacity broke running XL exclusivity")
 	}
 }
 
@@ -285,7 +186,7 @@ func TestRuntimeCapacityAuditDoesNotBlockAdmissionOrStatus(t *testing.T) {
 	go func() { stateDone <- s.AdmissionState() }()
 	select {
 	case state := <-stateDone:
-		if state.Capacity != 4 {
+		if state.Capacity != 2 {
 			t.Fatal(state)
 		}
 	case <-time.After(testStartTimeout(time.Second)):
@@ -297,7 +198,7 @@ func TestRuntimeCapacityAuditDoesNotBlockAdmissionOrStatus(t *testing.T) {
 	case <-time.After(testStartTimeout(time.Second)):
 		t.Fatal("reload ignored cancellation")
 	}
-	if s.AdmissionState().Capacity != 4 {
+	if s.AdmissionState().Capacity != 2 {
 		t.Fatal("failed audit changed capacity")
 	}
 }
@@ -353,9 +254,6 @@ func TestRuntimeCapacityWatchReopensConfigMapSymlink(t *testing.T) {
 func TestRuntimeCapacityRunUsesOverrideBeyondBootDispatchLimit(t *testing.T) {
 	f := newConcurrencyFixture(t, pipeline.M, 1)
 	s := f.scheduler
-	// A run-ceiling increase does not create CPU or memory. Declare small
-	// demands so all three runs fit the unchanged numeric pool.
-	s.jobs = declaredJobs{f.jobs}
 	s.capacityFile = filepath.Join(t.TempDir(), "capacity")
 	s.admission.capacityConfig.File = s.capacityFile
 	writeCapacity(t, s, "2")
@@ -391,7 +289,7 @@ func TestRuntimeCapacityRunUsesOverrideBeyondBootDispatchLimit(t *testing.T) {
 	case <-time.After(testStartTimeout(10 * time.Second)):
 		t.Fatal("live raise did not wake scheduler")
 	}
-	if b := s.AdmissionState(); b.NumericBudget != nil || b.Runs != 3 {
+	if b := s.AdmissionState(); b.Runs != 3 {
 		t.Fatalf("run ceiling changed numeric resources: %+v", b)
 	}
 }

@@ -69,7 +69,7 @@ func (scheduler *Scheduler) AdmissionHold() model.AdmissionHold {
 	defer gate.mu.Unlock()
 	return gate.adminHold.Snapshot(gate.clock())
 }
-func (gate *weightedAdmission) adminHeldLocked(r *admissionReservation) bool {
+func (gate *admissionGate) adminHeldLocked(r *admissionReservation) bool {
 	if r.granted {
 		return false
 	}
@@ -82,7 +82,7 @@ func (gate *weightedAdmission) adminHeldLocked(r *admissionReservation) bool {
 	}
 	return gate.adminHold.Blocks(run, gate.clock())
 }
-func (gate *weightedAdmission) dispatchParked() (held, other int) {
+func (gate *admissionGate) dispatchParked() (held, other int) {
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
 	for _, r := range gate.waiters {

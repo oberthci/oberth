@@ -509,11 +509,7 @@ func (controller *Controller) wait(ctx context.Context, name, runID string, dest
 		}
 		if !workflow.Status.Phase.Completed() {
 			budget := watchdogBudget(controller.config.ExecutionTimeout("", workflow.Spec.ActiveDeadlineSeconds))
-			origin, _ := watchdogOrigin(workflow)
-			if origin.IsZero() {
-				origin = observingSince
-			}
-			expires := origin.Add(budget)
+			expires := watchdogOriginSince(workflow, observingSince).Add(budget)
 			remaining := time.Until(expires)
 			if remaining <= 0 {
 				cancelWatchdog(watchdogFailure)

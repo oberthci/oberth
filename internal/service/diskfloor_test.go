@@ -124,12 +124,12 @@ func TestDiskFloorNil(t *testing.T) {
 }
 
 func TestDiskFloorAdmissionHold(t *testing.T) {
-	gate := newWeightedAdmission(10)
+	gate := newAdmissionGate(10)
 	gate.diskFloor = &diskFloorCheck{path: t.TempDir(), floorBytes: 1 << 62, cacheTTL: 5 * time.Second}
 	reservation := gate.reserve(1)
 	defer reservation.cancel()
 	gate.mu.Lock()
-	reservation.size, reservation.weight, reservation.prepared = "M", 2, true
+	reservation.prepared = true
 	can := gate.canGrantLocked(reservation)
 	gate.mu.Unlock()
 	if can {
@@ -144,7 +144,7 @@ func TestWorkflowAdmissionDiskFloorHoldAndGrant(t *testing.T) {
 		allow bool
 	}{{"below", 1 << 62, false}, {"above", 1, true}, {"disabled", 0, true}} {
 		t.Run(tc.name, func(t *testing.T) {
-			gate := newWorkflowAdmissionForJobs(4)
+			gate := newAdmissionGate(4)
 			gate.diskFloor = &diskFloorCheck{path: t.TempDir(), floorBytes: tc.floor, cacheTTL: 5 * time.Second}
 			reservation := gate.reserveRun(model.Run{ID: "waiting", QueueSequence: 1})
 			defer reservation.cancel()
@@ -162,7 +162,7 @@ func TestWorkflowAdmissionDiskFloorHoldAndGrant(t *testing.T) {
 				t.Fatalf("grant count changed while held: %d", runs)
 			}
 			if !tc.allow {
-				if gate.spareWeightForClaim(0) {
+				if gate.spareSlotForClaim(0) {
 					t.Fatal("below-floor gate claimed spare capacity")
 				}
 				observation := (&Scheduler{admission: gate}).AdmissionSnapshot(1)
@@ -175,7 +175,7 @@ func TestWorkflowAdmissionDiskFloorHoldAndGrant(t *testing.T) {
 }
 
 func TestWorkflowAdmissionDiskFloorPreservesGrantedRun(t *testing.T) {
-	gate := newWorkflowAdmissionForJobs(4)
+	gate := newAdmissionGate(4)
 	// Cached samples make threshold changes deterministic without filling disk.
 	gate.diskFloor = &diskFloorCheck{floorBytes: 512, cachedFree: 1024, cacheTime: time.Now(), cacheTTL: time.Hour}
 	first := gate.reserveRun(model.Run{ID: "running", QueueSequence: 1})
@@ -231,9 +231,6 @@ func TestNewSchedulerWiresDiskFloor(t *testing.T) {
 		})
 		if err != nil {
 			t.Fatal(err)
-		}
-		if !scheduler.admission.workflowOnly {
-			t.Fatal("disk guard replaced the live workflow gate")
 		}
 		check := scheduler.admission.diskFloor
 		if floor == 0 {

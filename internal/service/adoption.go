@@ -11,7 +11,6 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type adoptedRun struct {
@@ -54,20 +53,11 @@ func adoptionFailure(adopter JobAdopter, run model.Run, err error) error {
 	return failure
 }
 
-// adopt restores grants for work already running, even if the new owner's
-// configured capacity is smaller. New admissions wait until it has drained.
-func (gate *weightedAdmission) adopt(run model.Run, size pipeline.Size, pods ...*argoworkflow.PodDemand) (*admissionReservation, error) {
-	var peak *argoworkflow.PodDemand
-	if len(pods) > 0 && pods[0] != nil {
-		if !pods[0].Valid() {
-			return nil, fmt.Errorf("%w: invalid adopted pod demand", ErrAdoptionRefused)
-		}
-		copy := *pods[0]
-		copy.DeclaredTotal = pods[0].DeclaredTotal.Clone()
-		peak = &copy
-	}
-	if (!gate.workflowOnly && !size.Valid()) || (run.ConcurrencyGroup != "" && !argoworkflow.ValidConcurrencyGroup(run.ConcurrencyGroup)) {
-		return nil, fmt.Errorf("%w: invalid adopted resource contract", ErrAdoptionRefused)
+// adopt restores the grant of work already running, even above the new
+// owner's configured ceiling. New admissions wait until it has drained.
+func (gate *admissionGate) adopt(run model.Run) (*admissionReservation, error) {
+	if run.ConcurrencyGroup != "" && !argoworkflow.ValidConcurrencyGroup(run.ConcurrencyGroup) {
+		return nil, fmt.Errorf("%w: invalid adopted concurrency group", ErrAdoptionRefused)
 	}
 	order := run.AdmissionSequence
 	if order <= 0 {
@@ -76,7 +66,7 @@ func (gate *weightedAdmission) adopt(run model.Run, size pipeline.Size, pods ...
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
 	if previous, ok := gate.reservations[run.QueueSequence]; ok {
-		if previous.runID != run.ID || previous.order != order || !previous.granted || previous.size != size.Effective() || previous.groupName != run.ConcurrencyGroup || max(1, previous.groupLimit) != max(1, run.ConcurrencyLimit) || previous.repoID != run.RepoID || !samePodDemand(previous.pods, peak) {
+		if previous.runID != run.ID || previous.order != order || !previous.granted || previous.groupName != run.ConcurrencyGroup || max(1, previous.groupLimit) != max(1, run.ConcurrencyLimit) || previous.repoID != run.RepoID {
 			return nil, fmt.Errorf("%w: conflicting adopted admission", ErrAdoptionRefused)
 		}
 		return previous, nil
@@ -100,19 +90,13 @@ func (gate *weightedAdmission) adopt(run model.Run, size pipeline.Size, pods ...
 	}
 	now := time.Now().UTC()
 	reservation := &admissionReservation{
-		pods: peak,
 		gate: gate, sequence: run.QueueSequence, order: order, runID: run.ID, repoID: run.RepoID,
 		ref: run.Ref, refKind: run.RefKind, sha: run.SHA,
-		size: size.Effective(), weight: gate.weights.of(size.Effective(), gate.capacity),
 		group: group, groupName: run.ConcurrencyGroup, groupLimit: max(1, run.ConcurrencyLimit), prepared: true, granted: true, submitted: true,
 		claimedAt: now, preparedAt: now, grantedAt: now, ready: make(chan struct{}),
 	}
-	if gate.workflowOnly || peak != nil {
-		reservation.weight = 0
-	}
 	close(reservation.ready)
 	gate.reservations[run.QueueSequence] = reservation
-	gate.used += reservation.weight
 	gate.runs++
 	if group != "" {
 		gate.groups[group] = append(gate.groups[group], reservation)
@@ -122,7 +106,6 @@ func (gate *weightedAdmission) adopt(run model.Run, size pipeline.Size, pods ...
 
 func (scheduler *Scheduler) resumeAdoptedRun(ctx context.Context, run model.Run, require mutationRequirement, reservation *admissionReservation) error {
 	defer reservation.cancel()
-	scheduler.restoreBackfillHistory(ctx, run, reservation)
 	if err := require(ctx); err != nil {
 		reservation.retain()
 		return err

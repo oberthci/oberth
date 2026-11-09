@@ -188,23 +188,22 @@ func (scheduler *Scheduler) refreshPriorities(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// Read grant state outside the gate as well. An unavailable size limit
-	// drops automatic urgency but must never fail a release or abort refresh.
-	maxima := make(map[int64]pipeline.Size)
+	// Read grant state outside the gate as well. An unavailable release
+	// policy drops automatic urgency but must never fail a release or abort refresh.
 	lookupFailed := make(map[int64]bool)
+	seen := make(map[int64]bool)
 	for _, run := range runs {
-		if _, seen := maxima[run.RepoID]; seen || run.RefKind != model.RefTag {
+		if seen[run.RepoID] || run.RefKind != model.RefTag {
 			continue
 		}
-		maximum, err := scheduler.releasePriorityMaximum(ctx, run)
-		maxima[run.RepoID] = maximum
+		seen[run.RepoID] = true
+		_, err := scheduler.releasePriorityMaximum(ctx, run)
 		lookupFailed[run.RepoID] = err != nil
 	}
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
 	for _, r := range gate.waiters {
 		if run, ok := runs[r.runID]; ok {
-			r.priorityMaximum = maxima[run.RepoID]
 			r.priorityLookupFailed = lookupFailed[run.RepoID]
 			r.priority, r.priorityReason = run.Priority, run.PriorityReason
 			r.priorityOverride, r.priorityOverrideReason = run.PriorityOverride, run.PriorityOverrideReason
@@ -230,7 +229,7 @@ func (scheduler *Scheduler) priorityDispatchAvailable(ctx context.Context, activ
 	gate := scheduler.admission
 	gate.mu.Lock()
 	extraClasses := model.PriorityHigh.Rank() - model.PriorityLow.Rank()
-	ceiling := gate.capacity + scheduler.concurrentJobsLocked() + extraClasses
+	ceiling := 2*scheduler.concurrentJobsLocked() + extraClasses
 	hasWaiters := len(gate.waiters) > 0
 	gate.mu.Unlock()
 	if active >= ceiling || !hasWaiters {
@@ -271,20 +270,14 @@ func (r *admissionReservation) effectivePriority(now time.Time) model.RunPriorit
 // The normal notification path applies local admin changes immediately.
 const priorityPollInterval = 15 * time.Second
 
-// priorityRun applies the exact-checkout size restriction every time priority
-// is used, including after polling/admin refresh. Aging still applies normally.
+// priorityRun withholds automatic tag urgency while the repository's release
+// policy could not be read, every time priority is used, including after
+// polling/admin refresh. Aging still applies normally.
 func (r *admissionReservation) priorityRun() model.Run {
 	run := model.Run{Priority: r.priority, PriorityReason: r.priorityReason, PriorityOverride: r.priorityOverride, PriorityOverrideReason: r.priorityOverrideReason, QueuedAt: r.queuedAt}
-	maximum := r.priorityMaximum
-	if maximum == "" {
-		maximum = store.DefaultMaxRunSize
-	}
-	if run.PriorityReason == model.TagReleasePriorityReason && (r.priorityLookupFailed || (r.prepared && sizeRank(r.size) > sizeRank(maximum))) {
+	if run.PriorityReason == model.TagReleasePriorityReason && r.priorityLookupFailed {
 		run.Priority = model.PriorityNormal
-		run.PriorityReason = fmt.Sprintf("tag/release automatic priority withheld: size %s exceeds repository maximum %s", r.size, maximum)
-		if r.priorityLookupFailed {
-			run.PriorityReason = "tag/release automatic priority withheld: repository size limit unavailable"
-		}
+		run.PriorityReason = "tag/release automatic priority withheld: repository release policy unavailable"
 		if r.priorityOverride != "" {
 			run.Priority = r.priorityOverride
 			run.PriorityReason = "admin bump: " + r.priorityOverrideReason

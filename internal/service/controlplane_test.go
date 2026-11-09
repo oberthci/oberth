@@ -1781,7 +1781,7 @@ func TestActiveMCPAndDashboardLogsReadCurrentStepRange(t *testing.T) {
 	started := time.Now().UTC()
 	if err := fixture.logs.AppendStepProgress(enqueued.ID, runprogress.Event{
 		Version: runprogress.Version, Stage: "release", Step: "advance-stable-aliases", Ordinal: 0,
-		Status: runprogress.StepRunning, DeclaredSize: pipeline.M, StartedAt: &started,
+		Status: runprogress.StepRunning, DeclaredSize: "M", StartedAt: &started,
 	}); err != nil {
 		t.Fatal(err)
 	}

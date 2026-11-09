@@ -17,11 +17,6 @@ func TestServePressureHardValveDefaultsAndValidation(t *testing.T) {
 			t.Fatal("invalid hard limit accepted", value)
 		}
 	}
-	for _, value := range []string{"--admission-pressure-cpu-some-avg10=NaN", "--admission-pressure-mode=retired", "--admission-pressure-max-wait-seconds=0", "--admission-pressure-max-defer=-1m"} {
-		if _, err := parseServeOptions([]string{"--argo-namespace=argo", value}, io.Discard); err != nil {
-			t.Fatal("ignored legacy setting rejected", value, err)
-		}
-	}
 	disabled, err := parseServeOptions([]string{"--argo-namespace=argo", "--admission-pressure-enabled=false"}, io.Discard)
 	if err != nil || disabled.admissionPressure.Enabled {
 		t.Fatal("cannot disable PSI valve", err)
@@ -29,7 +24,7 @@ func TestServePressureHardValveDefaultsAndValidation(t *testing.T) {
 }
 
 func TestChartPressureRendersOnlyHardValve(t *testing.T) {
-	for _, set := range []string{"admission.pressure.mode=retired", "admission.pressure.hardCpu=29", "admission.pressure.cpuSomeAvg10=101", "admission.declaredResources.cpuMillis=0"} {
+	for _, set := range []string{"admission.pressure.mode=retired", "admission.pressure.hardCpu=29", "admission.pressure.cpuSomeAvg10=101"} {
 		output, err := exec.Command("helm", "template", "oberth", "../../charts/oberth", "--set", "image.ref=example.invalid/oberth@"+goProxyDigest, "--set", set).CombinedOutput()
 		if err != nil {
 			t.Fatalf("retired knob affected rendering: %v %s", err, output)

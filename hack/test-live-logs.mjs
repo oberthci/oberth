@@ -293,8 +293,10 @@ console.log('run-list grouping and detail-history checks passed');
 assert.equal(run(`summaryLines({Run:{ID:'original',Status:'failed',auto_retried_by:'retry',display_reason:'infra error, retried as retry'},Steps:[]}).some(line => line.startsWith('[queued]'))`), false);
 
 assert.equal(run(`capacityStatusCard({})`), '');
-const capacityCard = run(`capacityStatusCard({used:8,capacity:4,configuration:{max_concurrent_jobs:2,source:'file',file:'/etc/capacity',error:'invalid <override>'}})`);
-for (const text of ['2 M jobs', '8/4 weight used', 'source file', 'keeping last good value', 'invalid &lt;override&gt;']) assert.ok(capacityCard.includes(text), text);
+const capacityCard = run(`capacityStatusCard({runs:2,used:2,capacity:2,configuration:{max_concurrent_jobs:2,source:'file',file:'/etc/capacity',error:'invalid <override>'}})`);
+for (const text of ['2 concurrent runs', '2/2 run slots used', 'source file', 'keeping last good value', 'invalid &lt;override&gt;']) assert.ok(capacityCard.includes(text), text);
+const unlimitedCard = run(`capacityStatusCard({runs:3,used:3,capacity:0,configuration:{max_concurrent_jobs:0,source:'boot'}})`);
+for (const text of ['no run ceiling', '3 running, no ceiling']) assert.ok(unlimitedCard.includes(text), text);
 assert.ok(!capacityCard.includes('invalid <override>'));
 
 // Controller-profile holds must be visible and refresh without delaying logs.

@@ -4,66 +4,45 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
-	"slices"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
-type weightedAdmission struct {
-	// workflowOnly delegates pod placement to Kubernetes. Historical weighted
-	// helpers remain for isolated compatibility tests; serving uses only slots.
-	workflowOnly   bool
+// admissionGate counts runs. A run claimed from the queue holds a reservation
+// here from its claim until its Workflow is terminal; a grant is one run slot.
+// Nothing in the gate reads the run's workflow document: what a step needs
+// is the step's own resources block, placed by Kubernetes, and what a step
+// may share with other steps is native Argo synchronization, queued by the
+// workflow controller. The gate keeps only host safety that is independent
+// of workflow contents: the optional run ceiling, the administrator hold,
+// the disk floor and the PSI pressure valve.
+type admissionGate struct {
 	adminHold      model.AdmissionHold
 	holdUpdating   bool
-	resources      DeclaredAdmissionConfig
 	mu             sync.Mutex
-	capacity       int
 	capacityConfig model.AdmissionCapacityConfig
-	// weights is the operator's weight per size (#1021).
-	weights SizeWeights
-	// Historical weighted-gate tests retain a head-wait bound. Serving workflow
-	// admission ignores resource drain and backfill.
-	maxHeadWait time.Duration
 	// now is the gate's clock; nil is time.Now.
-	now func() time.Time
-	// headEvents carries head-wait origins to persist and clear, so a
-	// restarted server keeps the head's wait origin. Sends never block.
-	// backfillHead owns the forecast only while continuously at the head.
-	backfillHead    *admissionReservation
-	headEvents      chan headEvent
-	headPending     map[headWaitKey]headEvent
+	now             func() time.Time
 	priorityChanges map[string]bool
-	used            int
-	// maxRuns, when positive, caps how many runs hold a grant at once. The
-	// scheduler mirrors its dispatch ceiling here: runs parked on their own
-	// concurrency group stop counting against the dispatch loop, so the loop
-	// alone no longer bounds how many claimed runs can be admitted together.
-	// Zero leaves the run count to the caller, as it always was.
+	// maxRuns, when positive, caps how many runs hold a grant at once. Zero
+	// is no ceiling: every prepared run is admitted unless the hold, the disk
+	// floor or host pressure says otherwise.
 	maxRuns      int
 	runs         int
 	waiters      []*admissionReservation
 	reservations map[int64]*admissionReservation
-	// groups maps a shared group name to its granted reservations.
+	// groups maps a shared concurrency group name to its granted reservations.
 	groups map[string][]*admissionReservation
-	// exclusiveLimits is the administrator's exclusive-class allowlist with
-	// each class's concurrent-run limit (#1499); exclusive maps a class to its
-	// granted reservations. Classes live in their own server-owned namespace,
-	// separate from YAML concurrency groups.
-	exclusiveLimits map[string]int
-	exclusive       map[string][]*admissionReservation
 	// onPark, when set, is called under the lock (it must not block) after a
 	// reservation is prepared while some prepared reservation is parked on its
 	// group, so the dispatch loop can claim past the parked run.
 	onPark func()
 	// onGrant, when set, is called under the lock (it must not block) after
-	// a grant, so the dispatch loop can claim into weight the grant left
-	// spare (#1021).
+	// a grant, so the dispatch loop can claim the slot the grant may leave.
 	onGrant func()
 	// diskFloor is an opt-in disk-space admission hold (#673). When non-nil
 	// and below the configured floor, no new runs are admitted until disk
@@ -73,10 +52,9 @@ type weightedAdmission struct {
 }
 
 type admissionReservation struct {
+	// requests is the run's peak pod requests, carried for display only.
 	requests *argoworkflow.PodRequests
-	fallback model.ResourceAdmissionFallback
-	pods     *argoworkflow.PodDemand
-	gate     *weightedAdmission
+	gate     *admissionGate
 	sequence int64
 	// order retains restart FIFO position; sequence stays the unique run key.
 	order int64
@@ -87,10 +65,13 @@ type admissionReservation struct {
 	priorityOverrideReason string
 	priorityAccepted       model.RunPriority
 	priorityAcceptedReason string
-	queuedAt               time.Time
-	runID                  string
+	// priorityLookupFailed withholds automatic tag urgency while the
+	// repository's release policy could not be read.
+	priorityLookupFailed bool
+	queuedAt             time.Time
+	runID                string
 	// repoID, repo and ref identify the run when it blocks the queue head
-	// (#1021); preparedAt is when it started waiting for weight.
+	// (#1021); preparedAt is when it started waiting for a slot.
 	repoID            int64
 	repo              string
 	ref               string
@@ -103,40 +84,22 @@ type admissionReservation struct {
 	// admission view (#1099).
 	claimedAt time.Time
 	grantedAt time.Time
-	// refKind and sha complete the durable key of the run's head-wait
-	// origin (#1085), which survives a restart's requeue under a new run ID.
-	refKind model.RefKind
-	sha     string
-	// headSince is when this run first waited at the queue head (or the
-	// durable origin recorded before a restart); zero while it never has.
-	headSince        time.Time
-	backfillDeadline time.Time
-	backfillMessage  string
-	// estimate is the run's predicted duration from history, zero if none.
-	estimate time.Duration
-	// backfilled marks a grant made beside a waiting head.
-	backfilled bool
-	size       pipeline.Size
-	// priorityMaximum caps only automatic tag urgency, not release execution.
-	priorityMaximum      pipeline.Size
-	priorityLookupFailed bool
-	weight               int
+	refKind   model.RefKind
+	sha       string
 	// group is the shared key of the run's concurrency group and
 	// groupName the name the repository declared; both empty when ungrouped.
 	group      string
 	groupName  string
 	groupLimit int
-	// exclusive lists the server-allowlisted classes the run's steps declare.
-	exclusive []string
-	prepared  bool
-	granted   bool
-	submitted bool
-	delayed   bool
-	released  bool
-	canceled  bool
+	prepared   bool
+	granted    bool
+	submitted  bool
+	delayed    bool
+	released   bool
+	canceled   bool
 	// retained marks a grant whose Workflow may still be running while its
 	// owner stops on an error that leaves the run owned for the restart
-	// pass. Its weight and group stay held for the rest of this process
+	// pass. Its slot and group stay held for the rest of this process
 	// instead of passing to the next run.
 	retained bool
 	// abandoned marks an ungranted reservation withdrawn because its run was
@@ -163,64 +126,41 @@ func (conflict *concurrencyGroupConflict) Error() string {
 }
 
 // admissionRequest is what a claimed run knows once its immutable checkout has
-// been read: its declared size and, optionally, its shared group and limit.
+// been read: its identity and, optionally, its shared group and limit.
 type admissionRequest struct {
 	Requests             *argoworkflow.PodRequests
-	Fallback             model.ResourceAdmissionFallback
-	Pods                 *argoworkflow.PodDemand
 	RunID                string
 	RepoID               int64
 	Repo                 string
 	Ref                  string
-	Size                 pipeline.Size
-	PriorityMaximum      pipeline.Size
 	PriorityLookupFailed bool
 	Group                string
 	GroupLimit           int
-	// Exclusive lists allowlisted exclusive classes the run's steps declare.
-	Exclusive []string
-	// RefKind and SHA key the durable head-wait origin; HeadSince is that
-	// origin when one was recorded before a restart; Estimate is the run's
-	// predicted duration from history (#1085).
-	RefKind   model.RefKind
-	SHA       string
-	HeadSince time.Time
-	Estimate  time.Duration
+	RefKind              model.RefKind
+	SHA                  string
 }
 
-// newWeightedAdmission builds a gate whose capacity is denominated in size
-// weight, not in runs. Callers holding a run-count ceiling must convert with
-// newWeightedAdmissionForJobs rather than passing the count directly.
-func newWeightedAdmission(capacity int) *weightedAdmission {
-	if capacity < 1 {
-		capacity = 1
-	}
-	return &weightedAdmission{
-		resources:    DefaultDeclaredAdmissionConfig(),
-		capacity:     capacity,
-		weights:      DefaultSizeWeights,
+// newAdmissionGate builds a gate that admits at most maxRuns runs at once;
+// zero or less is no ceiling.
+func newAdmissionGate(maxRuns int) *admissionGate {
+	return &admissionGate{
+		maxRuns:      max(0, maxRuns),
 		reservations: make(map[int64]*admissionReservation),
 		groups:       make(map[string][]*admissionReservation),
-		exclusive:    make(map[string][]*admissionReservation),
 	}
 }
 
-// newWorkflowAdmissionForJobs bounds workflow count. Kubernetes alone decides
-// whether each step pod fits its node by its requests.
-func newWorkflowAdmissionForJobs(maxConcurrentJobs int) *weightedAdmission {
-	if maxConcurrentJobs < 1 {
-		maxConcurrentJobs = 1
+func (gate *admissionGate) clock() time.Time {
+	if gate.now != nil {
+		return gate.now()
 	}
-	gate := newWeightedAdmission(maxConcurrentJobs)
-	gate.workflowOnly = true
-	gate.maxRuns = maxConcurrentJobs
-	return gate
+	return time.Now()
 }
 
 // concurrencyGroupKey is shared by all repositories declaring the same name.
 func concurrencyGroupKey(_ int64, group string) string { return group }
 
-func (gate *weightedAdmission) reservePriorityRun(sequence, order int64, run model.Run) *admissionReservation {
+func (gate *admissionGate) reservePriorityRun(sequence, order int64, run model.Run) *admissionReservation {
 	if order <= 0 {
 		order = sequence
 	}
@@ -243,7 +183,7 @@ func (gate *weightedAdmission) reservePriorityRun(sequence, order int64, run mod
 // reserveRun is reserve for a claimed run: the reservation carries the run's
 // identity from the claim on, so a run still preparing (checking out, reading
 // its document) is already addressable by its run ID.
-func (gate *weightedAdmission) reserveRun(run model.Run) *admissionReservation {
+func (gate *admissionGate) reserveRun(run model.Run) *admissionReservation {
 	return gate.reservePriorityRun(run.QueueSequence, run.AdmissionSequence, run)
 }
 
@@ -265,23 +205,18 @@ func admissionBeforeAt(a, b *admissionReservation, now time.Time) bool {
 	return a.sequence < b.sequence
 }
 
-// acquireRequest sizes the reservation and waits until it is granted. A grouped
-// run additionally waits until fewer than its declared limit hold the same
-// concurrency group; while it does, it holds neither weight nor its place at
-// the head of the queue, so it never delays the claims behind it.
+// acquireRequest completes the reservation and waits until it is granted. A
+// grouped run additionally waits until fewer than its declared limit hold the
+// same concurrency group; while it does, it holds neither a slot nor its
+// place at the head of the queue, so it never delays the claims behind it.
 func (reservation *admissionReservation) acquireRequest(ctx context.Context, request admissionRequest) (func(), error) {
 	if ctx == nil {
 		ctx = context.Background()
-	}
-	if !reservation.gate.workflowOnly && !request.Size.Valid() {
-		reservation.cancel()
-		return nil, fmt.Errorf("service: invalid resource size %q", request.Size)
 	}
 	if request.Group != "" && !argoworkflow.ValidConcurrencyGroup(request.Group) {
 		reservation.cancel()
 		return nil, fmt.Errorf("service: invalid concurrency group %q", request.Group)
 	}
-	size := request.Size.Effective()
 	gate := reservation.gate
 	gate.mu.Lock()
 	if reservation.canceled || reservation.released {
@@ -300,43 +235,10 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 	if request.RefKind != "" {
 		reservation.refKind, reservation.sha = request.RefKind, request.SHA
 	}
-	reservation.estimate = request.Estimate
-	if !request.HeadSince.IsZero() && (reservation.headSince.IsZero() || request.HeadSince.Before(reservation.headSince)) {
-		reservation.headSince = request.HeadSince
-	}
 	if !reservation.prepared {
 		reservation.preparedAt = time.Now().UTC()
 	}
-	reservation.size = size
-	if err := gate.validatePodDemand(request.Pods); err != nil {
-		gate.mu.Unlock()
-		reservation.cancel()
-		return nil, err
-	}
-	if !gate.workflowOnly && request.Pods == nil {
-		charge := gate.legacyCharge(size)
-		if charge.CPUMilli > gate.resources.CPUMilli || charge.MemoryBytes > gate.resources.MemoryBytes {
-			gate.mu.Unlock()
-			reservation.cancel()
-			return nil, fmt.Errorf("service: legacy size %s fixed charge exceeds the numeric budget; reduce the size or raise the administrator budget", size)
-		}
-	}
-	reservation.pods = nil
-	reservation.fallback = request.Fallback
-	if request.Pods != nil {
-		pods := *request.Pods
-		pods.ExtendedResources = maps.Clone(request.Pods.ExtendedResources)
-		pods.DeclaredTotal = request.Pods.DeclaredTotal.Clone()
-		reservation.pods = &pods
-	} else if !gate.workflowOnly && reservation.fallback == "" {
-		reservation.fallback = model.ResourceFallbackRequests
-	}
-	reservation.priorityMaximum = request.PriorityMaximum
 	reservation.priorityLookupFailed = request.PriorityLookupFailed
-	reservation.weight = 0
-	if !gate.workflowOnly && !gate.usesDeclarations(reservation) {
-		reservation.weight = gate.weights.of(size, gate.capacity)
-	}
 	if request.Group != "" {
 		reservation.group = concurrencyGroupKey(request.RepoID, request.Group)
 		reservation.groupName = request.Group
@@ -350,7 +252,6 @@ func (reservation *admissionReservation) acquireRequest(ctx context.Context, req
 			}
 		}
 	}
-	reservation.exclusive = slices.Clone(request.Exclusive)
 	reservation.prepared = true
 	gate.grantLocked()
 	granted := reservation.granted
@@ -412,14 +313,14 @@ func (reservation *admissionReservation) cancel() {
 }
 
 // abandon withdraws the reservation of a run that was terminalized while it
-// had not been granted: still preparing, waiting for weight, parked on its
+// had not been granted: still preparing, waiting for a slot, parked on its
 // concurrency group. Such a run owns no Workflow,
 // so nothing has to be proved gone first. Its place at the head of the FIFO,
 // and its position ahead of later members of its group, end now rather than
 // when its owner happens to wake, so the same pass admits the runs it was
 // blocking. A granted reservation is never abandoned here: its owner releases
 // it only once the Workflow is terminal or its deletion was accepted.
-func (gate *weightedAdmission) abandon(sequence int64) bool {
+func (gate *admissionGate) abandon(sequence int64) bool {
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
 	reservation := gate.reservations[sequence]
@@ -430,11 +331,6 @@ func (gate *weightedAdmission) abandon(sequence int64) bool {
 	reservation.abandoned = true
 	gate.removeLocked(reservation)
 	close(reservation.ready)
-	if !reservation.headSince.IsZero() {
-		// The run is over: its head-wait origin must not be inherited by a
-		// later run of the same commit.
-		gate.emitHeadLocked(headEvent{key: reservation.headKey(), clear: true})
-	}
 	gate.grantLocked()
 	return true
 }
@@ -456,7 +352,7 @@ func (reservation *admissionReservation) releaseAfterCleanup() {
 	gate.releaseLocked(reservation)
 }
 
-// retain keeps a granted reservation's weight and concurrency group held
+// retain keeps a granted reservation's slot and concurrency group held
 // while a Workflow may still be running. Passing the group on before observed
 // cleanup would let its next member start beside a live Workflow. Exact-run
 // cleanup or startup reconciliation must confirm absence before release.
@@ -469,35 +365,21 @@ func (reservation *admissionReservation) retain() {
 	}
 }
 
-// grantLocked admits waiters in claim order. An unsized claim at the head
-// holds its place, and so does a sized head that does not fit, which is what
-// keeps heavy runs (and XL, which needs the whole node) from starving. EASY
-// backfill lets measured work use spare capacity within maxHeadWait, preserving
-// the head's predicted start when running durations are known.
+// grantLocked admits waiters in claim order. An unprepared claim at the head
+// holds its place, and so does a prepared head without a slot: slots are
+// shared by every run, so the first run that cannot start stops the pass and
+// nothing later overtakes it.
 //
 // A run parked on its concurrency group is the one exception. It is not
-// waiting for the node but for another run of its own repository, so it is
+// waiting for a slot but for another run of its own group, so it is
 // passed over rather than allowed to stop the pass: unrelated claims behind it
-// are admitted on the weight budget as usual. Every later run of the same group
+// are admitted as usual. Every later run of the same group
 // is passed over too, which keeps the group itself in claim order, and the
 // parked run regains its place in that order the moment its group is free.
-func (gate *weightedAdmission) grantLocked() {
+func (gate *admissionGate) grantLocked() {
 	if gate.holdUpdating {
 		return
 	}
-	if gate.backfillHead != nil && gate.adminHeldLocked(gate.backfillHead) {
-		gate.setBackfillHeadLocked(nil)
-	}
-	// head is the first prepared, unparked waiter that does not fit.
-	var head *admissionReservation
-	defer func() {
-		// An earlier unprepared or pressure-held claim can end this pass
-		// before it reaches the existing head. Keep that waiting head's
-		// forecast so an overrun cannot move its reservation later.
-		if gate.backfillHead != nil && !slices.Contains(gate.waiters, gate.backfillHead) {
-			gate.setBackfillHeadLocked(nil)
-		}
-	}()
 	now := gate.clock()
 	if gate.pressure != nil {
 		gate.pressure.starvationGranted = false
@@ -507,69 +389,32 @@ func (gate *weightedAdmission) grantLocked() {
 	gate.preparePressureWaitsLocked(now)
 	for index := 0; index < len(gate.waiters); {
 		reservation := gate.waiters[index]
-		reservation.backfillMessage = ""
 		if gate.adminHeldLocked(reservation) {
 			index++
 			continue
 		}
 		if !reservation.prepared || gate.priorityChanges[reservation.runID] {
-			// A claim whose size is still unknown holds its place at the
-			// head. Behind a known head it is simply not a candidate yet.
-			if head == nil {
-				return
-			}
-			index++
-			continue
+			// A claim still preparing holds its place at the head.
+			return
 		}
 		if gate.sharedBlockedLocked(reservation) {
 			index++
 			continue
 		}
 		if !gate.canGrantLocked(reservation) {
-			if head == nil {
-				head = reservation
-				gate.setBackfillHeadLocked(head)
-				gate.markHeadLocked(head, now)
-				if !gate.backfillEnabledLocked(head) {
-					return
-				}
-			}
-			index++
-			continue
-		}
-		reservation.backfilled = false
-		if head != nil {
-			// Traverse priority/FIFO order; a higher class never backfills
-			// behind a lower head. Lower classes use the same safety rule.
-			if reservation.effectivePriority(now).Rank() > head.effectivePriority(now).Rank() {
-				return
-			}
-			if !gate.backfillFitsLocked(head, reservation, now) {
-				index++
-				continue
-			}
-			reservation.backfilled = true
+			return
 		}
 		// Stop at the first otherwise eligible candidate. A pressure timeout
-		// never bypasses priority, group, disk, weight or backfill rules.
+		// never bypasses priority, group, disk or slot rules.
 		if gate.deferPressureLocked(reservation, now) {
-			reservation.backfilled = false
-			reservation.backfillMessage = ""
 			return
 		}
 		gate.waiters = append(gate.waiters[:index], gate.waiters[index+1:]...)
 		reservation.granted = true
 		reservation.grantedAt = now.UTC()
-		gate.used += reservation.weight
 		gate.runs++
 		if reservation.group != "" {
 			gate.groups[reservation.group] = append(gate.groups[reservation.group], reservation)
-		}
-		for _, class := range reservation.exclusive {
-			gate.exclusive[class] = append(gate.exclusive[class], reservation)
-		}
-		if !reservation.headSince.IsZero() {
-			gate.emitHeadLocked(headEvent{key: reservation.headKey(), clear: true})
 		}
 		close(reservation.ready)
 		if gate.onGrant != nil {
@@ -586,26 +431,16 @@ func (gate *weightedAdmission) grantLocked() {
 	}
 }
 
-// spareWeightForClaim reports whether the dispatch loop may claim one more
-// run past its MaxConcurrent ceiling: every claimed, unparked run holds its
-// grant, and the weight budget, the run ceiling and the disk floor all still
-// have room for at least an S run. unparked is the dispatch loop's count of
-// claimed runs not parked on a group.
-func (gate *weightedAdmission) spareWeightForClaim(unparked int) bool {
+// spareSlotForClaim reports whether the dispatch loop may claim one more run
+// past its ceiling: every claimed, unparked run already holds its grant, and
+// the run ceiling and the disk floor both still have room. unparked is the
+// dispatch loop's count of claimed runs not parked on a group.
+func (gate *admissionGate) spareSlotForClaim(unparked int) bool {
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
 	// Every unparked claimed run must already hold its grant: one still
-	// checking out or waiting for weight may need what is spare. The one
-	// exception is a head that does not fit while its backfill window is
-	// open (#1085): the spare weight is then exactly what backfill fills.
-	waiting := len(gate.waiters) - gate.parkedLocked()
-	extra := 0
-	if waiting > 0 && gate.backfillClaimsOpenLocked(waiting) {
-		// Every waiting claim is the head or a candidate already passed
-		// over, so one more claim may be the run that fits.
-		extra = waiting
-	}
-	if waiting-extra > 0 || unparked > gate.runs+extra || (!gate.workflowOnly && unparked >= gate.capacity) {
+	// checking out or waiting for a slot may need what is spare.
+	if len(gate.waiters)-gate.parkedLocked() > 0 || unparked > gate.runs {
 		return false
 	}
 	if gate.maxRuns > 0 && gate.runs >= gate.maxRuns {
@@ -614,23 +449,12 @@ func (gate *weightedAdmission) spareWeightForClaim(unparked int) bool {
 	if gate.diskFloor != nil && !gate.diskFloor.freeAboveFloor() {
 		return false
 	}
-	if gate.workflowOnly {
-		return true
-	}
-	// Room for at least one S run, at the configured S weight.
-	return gate.used+gate.weights.S <= gate.capacity
+	return true
 }
 
-// canGrantLocked admits on the weight budget alone, with one exception: XL
-// declares the whole node and therefore runs alone. When the gate mirrors a
-// run ceiling (maxRuns), a grant also needs a free run slot.
-//
-// L carries no separate global exclusion. Its weight already prices it above
-// the default size, so the budget throttles it proportionally and an operator
-// who raises maxConcurrentJobs actually gets more concurrent large runs. A
-// hard "one L at a time" rule instead pinned every L-declaring repository to a
-// single run no matter what the operator configured.
-func (gate *weightedAdmission) canGrantLocked(reservation *admissionReservation) bool {
+// canGrantLocked admits on the run ceiling alone, after the administrator
+// hold and the disk floor.
+func (gate *admissionGate) canGrantLocked(reservation *admissionReservation) bool {
 	if gate.adminHeldLocked(reservation) {
 		return false
 	}
@@ -641,54 +465,36 @@ func (gate *weightedAdmission) canGrantLocked(reservation *admissionReservation)
 	if gate.diskFloor != nil && !gate.diskFloor.freeAboveFloor() {
 		return false
 	}
-	if gate.workflowOnly {
-		return gate.maxRuns <= 0 || gate.runs < gate.maxRuns
-	}
-	if gate.maxRuns > 0 && gate.runs >= gate.maxRuns {
-		return false
-	}
-	if gate.resources.IORuns > 0 && gate.runs >= gate.resources.IORuns {
-		return false
-	}
-	// A whole-budget XL grant stays exclusive even if capacity is raised.
-	for _, held := range gate.reservations {
-		if held.granted && !held.released && !gate.usesDeclarations(held) && gate.weights.wholeBudget(held.size) {
-			return false
-		}
-	}
-	if !gate.usesDeclarations(reservation) && gate.weights.wholeBudget(reservation.size) {
-		return gate.runs == 0 && gate.used == 0 && gate.numericFitsLocked(reservation)
-	}
-	if !gate.numericFitsLocked(reservation) {
-		return false
-	}
-	return gate.used+reservation.weight <= gate.capacity
+	return gate.maxRuns <= 0 || gate.runs < gate.maxRuns
 }
 
-func (gate *weightedAdmission) releaseLocked(reservation *admissionReservation) {
+func (gate *admissionGate) releaseLocked(reservation *admissionReservation) {
 	if !reservation.granted || reservation.released || reservation.retained {
 		return
 	}
 	reservation.released = true
 	delete(gate.reservations, reservation.sequence)
-	gate.used -= reservation.weight
 	gate.runs--
 	if reservation.group != "" {
-		gate.groups[reservation.group] = slices.DeleteFunc(gate.groups[reservation.group], func(r *admissionReservation) bool { return r == reservation })
+		gate.groups[reservation.group] = deleteReservation(gate.groups[reservation.group], reservation)
 		if len(gate.groups[reservation.group]) == 0 {
 			delete(gate.groups, reservation.group)
-		}
-	}
-	for _, class := range reservation.exclusive {
-		gate.exclusive[class] = slices.DeleteFunc(gate.exclusive[class], func(r *admissionReservation) bool { return r == reservation })
-		if len(gate.exclusive[class]) == 0 {
-			delete(gate.exclusive, class)
 		}
 	}
 	gate.grantLocked()
 }
 
-func (gate *weightedAdmission) removeLocked(reservation *admissionReservation) {
+func deleteReservation(list []*admissionReservation, target *admissionReservation) []*admissionReservation {
+	kept := list[:0]
+	for _, candidate := range list {
+		if candidate != target {
+			kept = append(kept, candidate)
+		}
+	}
+	return kept
+}
+
+func (gate *admissionGate) removeLocked(reservation *admissionReservation) {
 	delete(gate.reservations, reservation.sequence)
 	for index, candidate := range gate.waiters {
 		if candidate != reservation {
@@ -702,7 +508,7 @@ func (gate *weightedAdmission) removeLocked(reservation *admissionReservation) {
 // parkedLocked counts admin-held waiters, and prepared waiters held back by their concurrency
 // group: the group is full, or an earlier run of the
 // same group is waiting ahead of them.
-func (gate *weightedAdmission) parkedLocked() int {
+func (gate *admissionGate) parkedLocked() int {
 	parked := 0
 	for _, reservation := range gate.waiters {
 		if gate.adminHeldLocked(reservation) {
@@ -719,7 +525,7 @@ func (gate *weightedAdmission) parkedLocked() int {
 // groupBlockerLocked names what a waiting grouped reservation waits for: the
 // run holding its group, or else the earlier run of the same group queued
 // ahead of it. Both are empty when the reservation is not parked.
-func (gate *weightedAdmission) groupBlockerLocked(reservation *admissionReservation) (holder, ahead string) {
+func (gate *admissionGate) groupBlockerLocked(reservation *admissionReservation) (holder, ahead string) {
 	if reservation.group == "" || reservation.granted {
 		return "", ""
 	}
@@ -737,92 +543,21 @@ func (gate *weightedAdmission) groupBlockerLocked(reservation *admissionReservat
 	return "", ""
 }
 
-// exclusiveLimitLocked is the configured limit of a class. A class removed
-// from the allowlist while an adopted run still holds it keeps limit one, so
-// new work cannot start beside the live holder.
-func (gate *weightedAdmission) exclusiveLimitLocked(class string) int {
-	if limit := gate.exclusiveLimits[class]; limit > 0 {
-		return limit
-	}
-	return 1
-}
-
-// exclusiveBlockerLocked names the exclusive class a waiting reservation is
-// parked on: the class is at its limit, or an earlier prepared run of the
-// same class waits ahead of it (class FIFO). Empty when not parked.
-func (gate *weightedAdmission) exclusiveBlockerLocked(reservation *admissionReservation) string {
-	if len(reservation.exclusive) == 0 || reservation.granted {
-		return ""
-	}
-	for _, class := range reservation.exclusive {
-		if len(gate.exclusive[class]) >= gate.exclusiveLimitLocked(class) {
-			return class
-		}
-	}
-	for _, candidate := range gate.waiters {
-		if candidate == reservation {
-			break
-		}
-		if !candidate.prepared || gate.adminHeldLocked(candidate) {
-			continue
-		}
-		for _, class := range reservation.exclusive {
-			if slices.Contains(candidate.exclusive, class) {
-				return class
-			}
-		}
-	}
-	return ""
-}
-
-// validExclusiveClasses accepts a bounded, sorted, distinct set of legal names.
-func validExclusiveClasses(classes []string) bool {
-	if len(classes) > argoworkflow.MaxExclusiveClassesPerRun {
-		return false
-	}
-	for index, class := range classes {
-		if !argoworkflow.ValidExclusiveClass(class) || (index > 0 && classes[index-1] >= class) {
-			return false
-		}
-	}
-	return true
-}
-
-// adoptExclusive makes an adopted grant hold the exclusive classes its live
-// Workflow declares, even above the current limit: running work is never
-// interrupted, and new members wait until the class drains below its limit.
-func (gate *weightedAdmission) adoptExclusive(reservation *admissionReservation, classes []string) {
-	if reservation == nil || len(classes) == 0 || !validExclusiveClasses(classes) {
-		return
-	}
-	gate.mu.Lock()
-	defer gate.mu.Unlock()
-	if !reservation.granted || reservation.released || len(reservation.exclusive) != 0 {
-		return
-	}
-	reservation.exclusive = slices.Clone(classes)
-	for _, class := range classes {
-		gate.exclusive[class] = append(gate.exclusive[class], reservation)
-	}
-}
-
-// sharedBlockedLocked reports a waiter parked on its concurrency group or an
-// exclusive class. Such a run waits for other runs, not for the node, so it
-// never stops the grant pass for unrelated claims behind it.
-func (gate *weightedAdmission) sharedBlockedLocked(reservation *admissionReservation) bool {
-	if holder, ahead := gate.groupBlockerLocked(reservation); holder != "" || ahead != "" {
-		return true
-	}
-	return gate.exclusiveBlockerLocked(reservation) != ""
+// sharedBlockedLocked reports a waiter parked on its concurrency group. Such
+// a run waits for other runs, not for a slot, so it never stops the grant
+// pass for unrelated claims behind it.
+func (gate *admissionGate) sharedBlockedLocked(reservation *admissionReservation) bool {
+	holder, ahead := gate.groupBlockerLocked(reservation)
+	return holder != "" || ahead != ""
 }
 
 // headBlockerLocked returns the waiter that stops the grant pass: the first
-// claimed run in queue order that is prepared, not parked on its group
-// capacity, and still not granted. grantLocked has already admitted every
-// waiter it could, so that run is waiting on weight, the run ceiling or the
+// claimed run in queue order that is prepared, not parked on its group,
+// and still not granted. grantLocked has already admitted every
+// waiter it could, so that run is waiting on the run ceiling or the
 // disk floor, and every unparked run claimed after it waits behind it. Nil
-// while the head is still preparing (its size is unknown) or nothing waits.
-func (gate *weightedAdmission) headBlockerLocked() *admissionReservation {
+// while the head is still preparing or nothing waits.
+func (gate *admissionGate) headBlockerLocked() *admissionReservation {
 	for _, reservation := range gate.waiters {
 		if gate.adminHeldLocked(reservation) {
 			continue
@@ -838,32 +573,19 @@ func (gate *weightedAdmission) headBlockerLocked() *admissionReservation {
 	return nil
 }
 
-func (gate *weightedAdmission) blockerLocked(reservation *admissionReservation) *model.AdmissionBlocker {
+func (gate *admissionGate) blockerLocked(reservation *admissionReservation) *model.AdmissionBlocker {
 	blocker := &model.AdmissionBlocker{
-		DeclaredResources: gate.reportedResourcesLocked(reservation),
-		LegacyResources:   gate.reportedLegacyResourcesLocked(reservation),
-		RunID:             reservation.runID, RepoID: reservation.repoID, Repo: reservation.repo, Ref: reservation.ref,
-		Size: string(reservation.size), Weight: reservation.weight, Used: gate.used, Capacity: gate.capacity,
+		RunID: reservation.runID, RepoID: reservation.repoID, Repo: reservation.repo, Ref: reservation.ref,
+		Used: gate.runs, Capacity: gate.maxRuns,
 		WaitingSince: reservation.preparedAt,
 		Pressure:     gate.pressureWaitLocked(reservation),
 	}
 	switch {
 	case gate.diskFloor != nil && !gate.diskFloor.freeAboveFloor():
 		blocker.DiskFloor = true
-	case !gate.workflowOnly && !gate.usesDeclarations(reservation) && gate.weights.wholeBudget(reservation.size):
-		blocker.FullDrain = true
-	case (gate.maxRuns > 0 && gate.runs >= gate.maxRuns) || (!gate.workflowOnly && gate.resources.IORuns > 0 && gate.runs >= gate.resources.IORuns):
+	case gate.maxRuns > 0 && gate.runs >= gate.maxRuns:
 		blocker.RunCeiling = true
-		if gate.workflowOnly {
-			blocker.Used, blocker.Capacity = gate.runs, gate.maxRuns
-		}
-	case !gate.workflowOnly && gate.numericBlockedLocked(reservation):
-		blocker.NumericBudget = gate.numericBudgetLocked()
 	}
-	if gate.workflowOnly {
-		blocker.Size = ""
-	}
-	gate.backfillStateLocked(reservation, blocker)
 	return blocker
 }
 
@@ -880,7 +602,7 @@ func (scheduler *Scheduler) AdmissionBlocker() *model.AdmissionBlocker {
 	return gate.blockerLocked(head)
 }
 
-// AdmissionSnapshot reports only this run's reservation and aggregate capacity.
+// AdmissionSnapshot reports only this run's reservation and the run ceiling.
 // No reservation means unknown, never proof of admission or a failed scheduler.
 func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionObservation {
 	gate := scheduler.admission
@@ -890,24 +612,13 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 	if reservation == nil {
 		return nil
 	}
-	result := &model.AdmissionObservation{Requests: reservation.requests.Clone(), State: "preparing", Used: gate.used, Capacity: gate.capacity, Runs: gate.runs, MaxRuns: gate.maxRuns, NumericBudget: gate.numericBudgetLocked()}
-	if gate.workflowOnly {
-		result.Used = gate.runs
-	}
-	result.BackfillMessage = reservation.backfillMessage
+	result := &model.AdmissionObservation{Requests: reservation.requests.Clone(), State: "preparing", Used: gate.runs, Capacity: gate.maxRuns, Runs: gate.runs, MaxRuns: gate.maxRuns}
 	if reservation.prepared {
-		result.DeclaredResources = gate.reportedResourcesLocked(reservation)
-		result.LegacyResources = gate.reportedLegacyResourcesLocked(reservation)
 		result.State = "waiting"
-		if !gate.workflowOnly {
-			result.Size = string(reservation.size)
-		}
-		result.Weight = reservation.weight
 		result.Group = reservation.groupName
 		if result.Group != "" {
 			result.GroupLimit = max(1, reservation.groupLimit)
 		}
-		result.ExclusiveClasses = slices.Clone(reservation.exclusive)
 	}
 	if reservation.granted {
 		result.State = "admitted"
@@ -932,12 +643,7 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 			result.GroupRunRepos[waiter.runID] = waiter.repoID
 		}
 	}
-	if reservation.prepared {
-		if class := gate.exclusiveBlockerLocked(reservation); class != "" {
-			result.ExclusiveBlocked, result.ExclusiveClass, result.ExclusiveLimit = true, class, gate.exclusiveLimitLocked(class)
-		}
-	}
-	if reservation.prepared && result.GroupHolder == "" && result.GroupAhead == "" && !result.ExclusiveBlocked {
+	if reservation.prepared && !result.GroupBlocked {
 		if head := gate.headBlockerLocked(); head == reservation {
 			result.HeadOfQueue = true
 			result.BlockedBy = gate.blockerLocked(head)
@@ -951,8 +657,31 @@ func (scheduler *Scheduler) AdmissionSnapshot(sequence int64) *model.AdmissionOb
 	return result
 }
 
+type queuedAdmissionMessage struct {
+	Text     string
+	Pressure bool
+}
+
+// QueuedAdmissionMessage is the reason an unclaimed queued run is not being
+// claimed: the run ceiling or host pressure, both server-wide facts.
+func (scheduler *Scheduler) QueuedAdmissionMessage() queuedAdmissionMessage {
+	if scheduler == nil || scheduler.admission == nil {
+		return queuedAdmissionMessage{}
+	}
+	gate := scheduler.admission
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	if p := gate.pressureStateLocked(); p != nil && p.Holding {
+		return queuedAdmissionMessage{Text: queuePressureReason(&model.PressureDeferral{Resource: p.Resource}), Pressure: true}
+	}
+	if gate.maxRuns > 0 && gate.runs >= gate.maxRuns {
+		return queuedAdmissionMessage{Text: fmt.Sprintf("%d of %d runs running", gate.runs, gate.maxRuns)}
+	}
+	return queuedAdmissionMessage{}
+}
+
 // Re-sort on every admission pass because aging changes effective class.
-func (gate *weightedAdmission) sortWaitersLocked() {
+func (gate *admissionGate) sortWaitersLocked() {
 	now := gate.clock()
 	sort.SliceStable(gate.waiters, func(i, j int) bool { return admissionBeforeAt(gate.waiters[i], gate.waiters[j], now) })
 }

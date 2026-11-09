@@ -169,14 +169,14 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 					t.Fatalf("adopted run = %#v", current)
 				}
 				scheduler.admission.mu.Lock()
-				used, runs, groups := scheduler.admission.used, scheduler.admission.runs, len(scheduler.admission.groups)
+				runs, groups := scheduler.admission.runs, len(scheduler.admission.groups)
 				order := scheduler.admission.reservations[run.QueueSequence].order
 				scheduler.admission.mu.Unlock()
 				if order != run.AdmissionSequence {
 					t.Fatalf("adopted admission order = %d, want persisted %d", order, run.AdmissionSequence)
 				}
-				if used != 0 || scheduler.AdmissionState().NumericBudget != nil || runs != 1 || groups != 1 {
-					t.Fatalf("admission used/runs/groups = %d/%d/%d", used, runs, groups)
+				if runs != 1 || groups != 1 {
+					t.Fatalf("admission runs/groups = %d/%d", runs, groups)
 				}
 				close(jobs.waitBlocks)
 			}
@@ -202,10 +202,10 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 				t.Fatalf("adoption did not preserve intent/logs: %#v", jobs)
 			}
 			scheduler.admission.mu.Lock()
-			used, runs := scheduler.admission.used, scheduler.admission.runs
+			runs := scheduler.admission.runs
 			scheduler.admission.mu.Unlock()
-			if used != 0 || runs != 0 {
-				t.Fatalf("admission leaked: %d/%d", used, runs)
+			if runs != 0 {
+				t.Fatalf("admission leaked: %d", runs)
 			}
 		})
 	}
@@ -274,32 +274,32 @@ func TestAdoptedWorkflowSurvivesShutdownWithWorkspace(t *testing.T) {
 }
 
 func TestAdoptedAdmissionIsIdempotentAndHoldsItsGroup(t *testing.T) {
-	gate := newWeightedAdmissionForJobs(1)
+	gate := newAdmissionGate(1)
 	run := model.Run{ID: "active", QueueSequence: 11, AdmissionSequence: 2, RepoID: 1, ConcurrencyGroup: "build"}
-	first, err := gate.adopt(run, pipeline.L)
+	first, err := gate.adopt(run)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.sequence != run.QueueSequence || first.order != run.AdmissionSequence {
 		t.Fatalf("adoption changed admission identity: key=%d order=%d", first.sequence, first.order)
 	}
-	again, err := gate.adopt(run, pipeline.L)
+	again, err := gate.adopt(run)
 	if err != nil || again != first {
 		t.Fatalf("second adoption = %p, %v", again, err)
 	}
-	other, err := gate.adopt(model.Run{ID: "also-active", QueueSequence: 2, RepoID: 2}, pipeline.L)
+	other, err := gate.adopt(model.Run{ID: "also-active", QueueSequence: 2, RepoID: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gate.used != 2*gate.weights.of(pipeline.L, gate.capacity) || gate.runs != 2 {
-		t.Fatalf("over-capacity adoption = %d/%d", gate.used, gate.runs)
+	if gate.runs != 2 {
+		t.Fatalf("over-capacity adoption = %d", gate.runs)
 	}
 	waiting := gate.reserveRun(model.Run{ID: "next", QueueSequence: 3, RepoID: 1, ConcurrencyGroup: "build"})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	granted := make(chan func(), 1)
 	go func() {
-		release, err := waiting.acquireRequest(ctx, admissionRequest{RunID: "next", RepoID: 1, Group: "build", Size: pipeline.S})
+		release, err := waiting.acquireRequest(ctx, admissionRequest{RunID: "next", RepoID: 1, Group: "build"})
 		if err == nil {
 			granted <- release
 		}
@@ -336,8 +336,8 @@ func TestAdoptedAdmissionIsIdempotentAndHoldsItsGroup(t *testing.T) {
 	case <-time.After(testStartTimeout(time.Second)):
 		t.Fatal("group did not pass after completion")
 	}
-	if gate.used != 0 || gate.runs != 0 {
-		t.Fatalf("admission leaked: %d/%d", gate.used, gate.runs)
+	if gate.runs != 0 {
+		t.Fatalf("admission leaked: %d", gate.runs)
 	}
 }
 
@@ -349,7 +349,7 @@ func TestAdoptedRunStillHonorsCancelAndSupersede(t *testing.T) {
 			fixture.setWorkflowName(t, run.ID, "oberth-preempted")
 			jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal, waitErr: errors.New("Workflow deleted"), waitBlocks: make(chan struct{}), waitEntered: make(chan struct{})}}
 			scheduler := fixture.scheduler(t, jobs)
-			reservation, err := scheduler.admission.adopt(run, pipeline.M)
+			reservation, err := scheduler.admission.adopt(run)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -391,10 +391,10 @@ func TestAdoptedRunStillHonorsCancelAndSupersede(t *testing.T) {
 				t.Fatalf("pending cancellation = %#v %v", pending, err)
 			}
 			scheduler.admission.mu.Lock()
-			used, runs := scheduler.admission.used, scheduler.admission.runs
+			runs := scheduler.admission.runs
 			scheduler.admission.mu.Unlock()
-			if used != 0 || runs != 0 {
-				t.Fatalf("cancelled adoption retained admission: %d/%d", used, runs)
+			if runs != 0 {
+				t.Fatalf("cancelled adoption retained admission: %d", runs)
 			}
 		})
 	}
@@ -492,7 +492,7 @@ func TestAdoptionPreemptedBeforeWaitRetainsAdmissionOnDeleteFailure(t *testing.T
 	run.ConcurrencyGroup = "build"
 	jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{deleteErr: errors.New("API unavailable")}}
 	scheduler := fixture.scheduler(t, jobs)
-	reservation, err := scheduler.admission.adopt(run, pipeline.M)
+	reservation, err := scheduler.admission.adopt(run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -503,10 +503,10 @@ func TestAdoptionPreemptedBeforeWaitRetainsAdmissionOnDeleteFailure(t *testing.T
 		t.Fatal("failed deletion accepted")
 	}
 	scheduler.admission.mu.Lock()
-	used, runs, held := scheduler.admission.used, scheduler.admission.runs, scheduler.admission.groups[concurrencyGroupKey(run.RepoID, run.ConcurrencyGroup)]
+	runs, held := scheduler.admission.runs, scheduler.admission.groups[concurrencyGroupKey(run.RepoID, run.ConcurrencyGroup)]
 	scheduler.admission.mu.Unlock()
-	if used != 0 || scheduler.AdmissionState().Runs == 0 || runs != 1 || len(held) != 1 || held[0] != reservation || !reservation.retained {
-		t.Fatalf("live Workflow lost admission: %d/%d held=%p", used, runs, held)
+	if scheduler.AdmissionState().Runs == 0 || runs != 1 || len(held) != 1 || held[0] != reservation || !reservation.retained {
+		t.Fatalf("live Workflow lost admission: %d held=%p", runs, held)
 	}
 }
 
@@ -545,10 +545,10 @@ func TestAdoptedObservationFailureFailsOnlyThatRun(t *testing.T) {
 		t.Fatalf("unobservable Workflows were not deleted before failing: %v", jobs.deleted)
 	}
 	scheduler.admission.mu.Lock()
-	used, runs := scheduler.admission.used, scheduler.admission.runs
+	runs := scheduler.admission.runs
 	scheduler.admission.mu.Unlock()
-	if used != 0 || runs != 0 {
-		t.Fatalf("failed adoption retained admission: %d/%d", used, runs)
+	if runs != 0 {
+		t.Fatalf("failed adoption retained admission: %d", runs)
 	}
 }
 
@@ -562,7 +562,7 @@ func TestAdoptedTerminalObservationErrorKeepsRealResult(t *testing.T) {
 		waitErr: errors.New("step test/unit breached the aggregate run log budget"),
 	}}
 	scheduler := fixture.scheduler(t, jobs)
-	reservation, err := scheduler.admission.adopt(run, pipeline.M)
+	reservation, err := scheduler.admission.adopt(run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -606,12 +606,12 @@ func TestAdoptionFailureNamesTheWorkflowToDelete(t *testing.T) {
 			jobs := &adoptingJobs{found: test.adoptErr == nil, adoptErr: test.adoptErr, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}
 			scheduler := fixture.scheduler(t, jobs)
 			if test.holdOther {
-				if _, err := scheduler.admission.adopt(model.Run{ID: "holder", QueueSequence: run.QueueSequence + 100, RepoID: run.RepoID, ConcurrencyGroup: "build"}, pipeline.M); err != nil {
+				if _, err := scheduler.admission.adopt(model.Run{ID: "holder", QueueSequence: run.QueueSequence + 100, RepoID: run.RepoID, ConcurrencyGroup: "build"}); err != nil {
 					t.Fatal(err)
 				}
 			}
 			err := scheduler.reconcileStrandedRunsWithGate(context.Background(), scheduler.requireMutation, func(run model.Run, size pipeline.Size) error {
-				_, err := scheduler.admission.adopt(run, size)
+				_, err := scheduler.admission.adopt(run)
 				return err
 			})
 			if err == nil || errors.Is(err, ErrAdoptionRefused) != test.refused {

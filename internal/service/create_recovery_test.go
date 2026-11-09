@@ -78,7 +78,7 @@ func TestWorkflowCreateRecoveryParkedGroupMateRequeuesInEitherOrder(t *testing.T
 				if run.ID != holder.ID {
 					t.Fatal("parked placeholder adopted")
 				}
-				_, err := scheduler.admission.adopt(run, size)
+				_, err := scheduler.admission.adopt(run)
 				return err
 			}); err != nil {
 				t.Fatal("parked group-mate blocked startup", err)
@@ -101,7 +101,7 @@ func TestWorkflowCreateRecoveryParkedGroupMateRequeuesInEitherOrder(t *testing.T
 				t.Fatal(err)
 			}
 			state := scheduler.AdmissionState()
-			if adopted != 1 || scheduler.pendingCreateCount() != 0 || state.NumericBudget != nil || state.Runs != 1 || len(state.Groups) != 1 || state.Groups[0].Holder != holder.ID || jobs.settleCalls != 0 {
+			if adopted != 1 || scheduler.pendingCreateCount() != 0 || state.Runs != 1 || len(state.Groups) != 1 || state.Groups[0].Holder != holder.ID || jobs.settleCalls != 0 {
 				t.Fatalf("placeholder took a grant/quarantine or displaced sibling: adopted=%d pending=%d state=%+v settles=%d", adopted, scheduler.pendingCreateCount(), state, jobs.settleCalls)
 			}
 			if len(jobs.deleted) != 1 || jobs.deleted[0] != parked.WorkflowName {
@@ -119,7 +119,7 @@ func TestWorkflowCreateRecoveryWaitingExistingWorkflowAdoptsBeforeCleanup(t *tes
 			jobs := &createRecoveryJobs{present: map[string]bool{run.ID: true}, adoptingJobs: adoptingJobs{recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal, waitBlocks: make(chan struct{}), waitEntered: make(chan struct{})}}}
 			scheduler := f.scheduler(t, jobs)
 			if contract {
-				if err := scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S); err != nil {
+				if err := scheduler.recordWorkflowCreateBinding(run, run.WorkflowName); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -128,7 +128,7 @@ func TestWorkflowCreateRecoveryWaitingExistingWorkflowAdoptsBeforeCleanup(t *tes
 			if err := scheduler.reconcileStrandedRunsWithGate(t.Context(), scheduler.requireMutation, func(found model.Run, size pipeline.Size) error {
 				resumed = found
 				var err error
-				grant, err = scheduler.admission.adopt(found, size)
+				grant, err = scheduler.admission.adopt(found)
 				return err
 			}); err != nil {
 				t.Fatal(err)
@@ -189,7 +189,7 @@ func TestWorkflowCreateRecoveryAbsentWorkflowRequiresContractToSettle(t *testing
 			jobs := &createRecoveryJobs{present: map[string]bool{}, adoptingJobs: adoptingJobs{recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}}
 			scheduler := f.scheduler(t, jobs)
 			if contract != "none" {
-				if err := scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S); err != nil {
+				if err := scheduler.recordWorkflowCreateBinding(run, run.WorkflowName); err != nil {
 					t.Fatal(err)
 				}
 				if contract == "corrupt" {
@@ -215,7 +215,7 @@ func TestWorkflowCreateRecoveryAbsentWorkflowRequiresContractToSettle(t *testing
 				}
 				return
 			}
-			if current.Status != model.RunRunning || scheduler.pendingCreateCount() != 1 || state.NumericBudget != nil {
+			if current.Status != model.RunRunning || scheduler.pendingCreateCount() != 1 {
 				t.Fatalf("possible POST requeued or contract not reserved: %+v state=%+v", current, state)
 			}
 			scheduler.settleOneCreate(t.Context())

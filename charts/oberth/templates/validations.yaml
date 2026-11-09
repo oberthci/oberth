@@ -59,8 +59,17 @@ are worse than allowing the override.
 {{- if or (and (eq $persistenceUnits "Gi") (lt $persistenceAmount 10)) (and (eq $persistenceUnits "Ti") (lt $persistenceAmount 1)) -}}
 {{- fail "persistence.size must be at least 10Gi" -}}
 {{- end -}}
-{{- if or (lt (int .Values.maxConcurrentJobs) 1) (gt (int .Values.maxConcurrentJobs) 64) -}}
-{{- fail "maxConcurrentJobs must be between one and 64" -}}
+{{- if or (lt (int .Values.maxConcurrentJobs) 0) (gt (int .Values.maxConcurrentJobs) 64) -}}
+{{- fail "maxConcurrentJobs must be between 0 (no ceiling) and 64" -}}
+{{- end -}}
+{{- $argoSync := .Values.argoSync | default dict -}}
+{{- range $key, $limit := ($argoSync.semaphores | default dict) -}}
+{{- if not (regexMatch "^[A-Za-z0-9]([-._A-Za-z0-9]{0,251}[A-Za-z0-9])?$" $key) -}}
+{{- fail (printf "argoSync.semaphores key %q must be a ConfigMap key: letters, digits, '-', '_' and '.', starting and ending alphanumeric" $key) -}}
+{{- end -}}
+{{- if not (regexMatch "^[1-9][0-9]{0,5}$" (toString $limit)) -}}
+{{- fail (printf "argoSync.semaphores.%s must be a positive integer, got %v" $key $limit) -}}
+{{- end -}}
 {{- end -}}
 {{- /*
 Promotion grant max lifetime must be a valid Go duration string, positive, and
@@ -87,13 +96,34 @@ An explicit value exceeding the ceiling or an invalid string fails here.
 {{- if lt (int ($admission.diskFloorBytes | default 0)) 0 -}}
 {{- fail "admission.diskFloorBytes must be zero (disabled) or a positive byte count" -}}
 {{- end -}}
-{{- with merge (deepCopy ($admission.sizeWeights | default dict)) (dict "S" 1 "M" 2 "L" 3 "XL" 0) -}}
-{{- if or (lt (int .S) 1) (lt (int .M) 1) (lt (int .L) 1) (lt (int .XL) 0) -}}
-{{- fail "admission.sizeWeights: S, M and L must be at least 1; XL must be 0 (the whole budget) or at least 1" -}}
+{{- /*
+Gone since v0.18.0. A --reuse-values upgrade still carries the former stock
+defaults of these keys, so exactly those render; a value an operator set on
+purpose fails here with the replacement named, never silently ignored.
+*/ -}}
+{{- if $admission.exclusiveClasses -}}
+{{- fail "admission.exclusiveClasses is gone since v0.18.0: define the limits in argoSync.semaphores and declare synchronization.semaphores (configMapKeyRef name oberth-sync-limits) on the step; see docs/native-synchronization.md" -}}
 {{- end -}}
-{{- if or (gt (int .S) (int .M)) (gt (int .M) (int .L)) (and (gt (int .XL) 0) (lt (int .XL) (int .L))) -}}
-{{- fail "admission.sizeWeights must satisfy S <= M <= L <= XL (XL 0 = the whole budget)" -}}
+{{- with $admission.sizeWeights -}}
+{{- if not (and (eq (int (.S | default 1)) 1) (eq (int (.M | default 2)) 2) (eq (int (.L | default 3)) 3) (eq (int (.XL | default 0)) 0)) -}}
+{{- fail "admission.sizeWeights is gone since v0.18.0: delete the key; Pods are placed by their resources and admission counts runs" -}}
 {{- end -}}
+{{- end -}}
+{{- with $admission.maxHeadWait -}}
+{{- if ne (toString .) "20m" -}}
+{{- fail "admission.maxHeadWait is gone since v0.18.0: delete the key" -}}
+{{- end -}}
+{{- end -}}
+{{- with $admission.declaredResources -}}
+{{- $stock := dict "extendedResources" (dict) "disabled" false "cpuMillis" 8000 "memoryBytes" 17179869184 "memoryHeadroomBytes" 1073741824 "memoryHeadroomPercent" 10 "ioRuns" 0 -}}
+{{- range $key, $value := . -}}
+{{- if or (not (hasKey $stock $key)) (ne (toJson $value) (toJson (get $stock $key))) -}}
+{{- fail (printf "admission.declaredResources.%s is gone since v0.18.0: delete the block; admission counts runs" $key) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if $admission.legacyResources -}}
+{{- fail "admission.legacyResources is gone since v0.18.0: delete the key" -}}
 {{- end -}}
 {{- /*
 An empty argo.vault.caCert is documented to mean the store presents a publicly

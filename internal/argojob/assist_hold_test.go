@@ -531,3 +531,29 @@ func TestBuildAssistRefusesExecutorEnvAndSkipsDefaultRetries(t *testing.T) {
 		t.Fatal("leaf gained an injected retryStrategy over the document default")
 	}
 }
+
+// A held retry keeps its template lock. Argo acquires a template-level
+// semaphore or mutex once, for the retry parent node, before attempt 1, and
+// releases it when the retry parent is fulfilled; the retry child that the
+// hold parks never re-acquires or releases it. For that to hold, Build must
+// leave the authored synchronization on the very template it gives the hold
+// retryStrategy, so the lock and the hold belong to the same node.
+func TestBuildAssistHoldKeepsTemplateSynchronization(t *testing.T) {
+	document := strings.Replace(assistDocument, "    - name: test\n      activeDeadlineSeconds: 600\n",
+		"    - name: test\n      activeDeadlineSeconds: 600\n      synchronization:\n        semaphores:\n          - configMapKeyRef:\n              name: oberth-sync-limits\n              key: kvm\n", 1)
+	if document == assistDocument {
+		t.Fatal("fixture did not take the semaphore")
+	}
+	wf, err := Build(assistConfig(), assistRequest(pipeline.TriggerCI, document))
+	if err != nil {
+		t.Fatal(err)
+	}
+	test := templateNamed(t, wf, "test")
+	if test.RetryStrategy == nil || test.RetryStrategy.Limit.String() != "1" || test.Metadata.Annotations[AssistHoldAnnotation] == "" {
+		t.Fatalf("locked leaf lost its hold: %+v %v", test.RetryStrategy, test.Metadata.Annotations)
+	}
+	if test.Synchronization == nil || len(test.Synchronization.Semaphores) != 1 || test.Synchronization.Semaphores[0].ConfigMapKeyRef == nil ||
+		test.Synchronization.Semaphores[0].ConfigMapKeyRef.Name != "oberth-sync-limits" || test.Synchronization.Semaphores[0].ConfigMapKeyRef.Key != "kvm" {
+		t.Fatalf("held leaf lost its template lock: %+v", test.Synchronization)
+	}
+}

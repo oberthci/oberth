@@ -3,6 +3,8 @@ package argojob
 import (
 	"context"
 	"errors"
+	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -121,8 +123,8 @@ func safeWorkflowMessage(message string) string {
 	switch {
 	case strings.HasPrefix(message, "Waiting for a PVC to be created."):
 		return "Waiting for a persistent volume claim to be created."
-	case strings.HasPrefix(message, "Waiting for ") && strings.Contains(message, " lock. Lock status: "):
-		return "Waiting for a workflow synchronization lock."
+	case waitingForLock(message):
+		return lockWaitMessage(message)
 	case strings.HasPrefix(message, "Pending "):
 		return "Workflow node is pending."
 	case model.IsExecutionDeadlineReason(message):
@@ -238,4 +240,22 @@ func podRequest(pod corev1.Pod, name corev1.ResourceName) string {
 		return "no explicit"
 	}
 	return total.String()
+}
+
+// lockWaitPattern is the controller's synchronization wait with its lock key
+// (<namespace>/<Kind>/<name>[/<key>], Kind one of ConfigMap, Mutex, Database)
+// and "free/limit" status. Only a key in this grammar reaches the message,
+// without its namespace; anything else gets the fixed form.
+var lockWaitPattern = regexp.MustCompile(`^Waiting for [A-Za-z0-9][A-Za-z0-9_.-]{0,62}/((?:ConfigMap|Mutex|Database)/[A-Za-z0-9][A-Za-z0-9_.-]{0,252}(?:/[A-Za-z0-9][A-Za-z0-9_.-]{0,252})?) lock\. Lock status: ([0-9]{1,6})/([0-9]{1,6})`)
+
+// lockWaitMessage renders Argo's "Waiting for <ns>/<Kind>/<name>[/<key>]
+// lock. Lock status: a/b" as "Waiting for lock <Kind>/<name>[/<key>] (a/b
+// free).", naming the operator-defined semaphore key or the repository's
+// mutex so the reason line says what the step is queued behind.
+func lockWaitMessage(message string) string {
+	match := lockWaitPattern.FindStringSubmatch(message)
+	if match == nil {
+		return model.LockWaitMessagePrefix + "(synchronization)."
+	}
+	return fmt.Sprintf("%s%s (%s/%s free).", model.LockWaitMessagePrefix, match[1], match[2], match[3])
 }

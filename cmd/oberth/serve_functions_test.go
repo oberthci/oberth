@@ -636,7 +636,7 @@ func TestParseServeOptionsRejectsNegativeConcurrency(t *testing.T) {
 		"--argo-namespace", "argo-pipelines",
 		"--max-concurrent-jobs", "-1",
 	}, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "positive") {
+	if err == nil || !strings.Contains(err.Error(), "0..64") {
 		t.Fatalf("negative concurrency error = %v", err)
 	}
 }
@@ -647,7 +647,7 @@ func TestParseServeOptionsRejectsExcessiveConcurrency(t *testing.T) {
 		"--argo-namespace", "argo-pipelines",
 		"--max-concurrent-jobs", "65",
 	}, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "positive") {
+	if err == nil || !strings.Contains(err.Error(), "0..64") {
 		t.Fatalf("excessive concurrency error = %v", err)
 	}
 }

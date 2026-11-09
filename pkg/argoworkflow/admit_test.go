@@ -962,9 +962,13 @@ func TestAdmitRefusesGPUResources(t *testing.T) {
 	refuse(t, document, Policy{}, "workflow capability grant")
 }
 
-// --- Finding 8 tests: synchronization lock scoping ---
+// --- native synchronization passes through unchanged ---
 
-func TestAdmitRefusesConfigMapSemaphore(t *testing.T) {
+// Native Argo synchronization is not a content filter's business: a
+// ConfigMap-backed semaphore reads one integer from a ConfigMap in the run's
+// namespace through the controller's own RBAC, and a mutex is a name. Both
+// are admitted as written, at workflow and at template level.
+func TestAdmitPassesNativeSynchronizationThrough(t *testing.T) {
 	t.Parallel()
 	const document = `
 apiVersion: argoproj.io/v1alpha1
@@ -975,57 +979,22 @@ spec:
   synchronization:
     semaphores:
       - configMapKeyRef:
-          name: my-config
-          key: limit
-  templates:
-    - name: main
-      container:
-        image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-        command: [/bin/true]
-`
-	refuse(t, document, Policy{}, "configMapKeyRef reads a Kubernetes ConfigMap")
-}
-
-func TestAdmitRefusesDatabaseMutex(t *testing.T) {
-	t.Parallel()
-	const document = `
-apiVersion: argoproj.io/v1alpha1
-kind: Workflow
-spec:
-  entrypoint: main
-  activeDeadlineSeconds: 3600
-  synchronization:
+          name: oberth-sync-limits
+          key: heavy-go
     mutexes:
-      - name: my-lock
-        database: true
+      - name: release-index
   templates:
     - name: main
+      synchronization:
+        semaphores:
+          - configMapKeyRef:
+              name: oberth-sync-limits
+              key: kvm
       container:
         image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
         command: [/bin/true]
 `
-	refuse(t, document, Policy{}, "database is not admitted")
-}
-
-func TestAdmitRefusesMutexNamespaceOverride(t *testing.T) {
-	t.Parallel()
-	const document = `
-apiVersion: argoproj.io/v1alpha1
-kind: Workflow
-spec:
-  entrypoint: main
-  activeDeadlineSeconds: 3600
-  synchronization:
-    mutexes:
-      - name: my-lock
-        namespace: kube-system
-  templates:
-    - name: main
-      container:
-        image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-        command: [/bin/true]
-`
-	refuse(t, document, Policy{}, "namespace overrides are not admitted")
+	mustAdmit(t, document, Policy{})
 }
 
 func TestAdmitAcceptsNamedMutex(t *testing.T) {

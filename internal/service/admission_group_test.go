@@ -10,8 +10,8 @@ import (
 )
 
 // groupRequest is one claimed run of repository repoID declaring group.
-func groupRequest(runID string, repoID int64, size pipeline.Size, group string) admissionRequest {
-	return admissionRequest{RunID: runID, RepoID: repoID, Size: size, Group: group}
+func groupRequest(runID string, repoID int64, _ pipeline.Size, group string) admissionRequest {
+	return admissionRequest{RunID: runID, RepoID: repoID, Group: group}
 }
 
 func acquireRequestForTest(reservation *admissionReservation, request admissionRequest, acquired chan<- func()) {
@@ -35,7 +35,7 @@ func acquireRequestWithinBudget(t *testing.T, reservation *admissionReservation,
 // At most one run of a (repository, group) holds a grant, however much weight
 // is free: the group is a mutual exclusion, not a size.
 func TestGroupAdmissionSerializesOneRepositoryGroup(t *testing.T) {
-	gate := newWeightedAdmissionForJobs(6)
+	gate := newAdmissionGate(6)
 	holder := gate.reserve(1)
 	releaseHolder := acquireRequestWithinBudget(t, holder, groupRequest("plan", 1, pipeline.M, "terraform-state"))
 
@@ -43,8 +43,8 @@ func TestGroupAdmissionSerializesOneRepositoryGroup(t *testing.T) {
 	acquired := make(chan func(), 1)
 	go acquireRequestForTest(waiter, groupRequest("apply", 1, pipeline.M, "terraform-state"), acquired)
 	awaitWaiting(t, waiter)
-	if used, runs := gateUsage(gate); used != 2 || runs != 1 {
-		t.Fatalf("used=%d runs=%d; a run waiting on its group must hold no weight", used, runs)
+	if runs := gateUsage(gate); runs != 1 {
+		t.Fatalf("runs=%d; a run waiting on its group must hold no slot", runs)
 	}
 	releaseHolder()
 	releaseWaiter := awaitAcquired(t, acquired)
@@ -53,7 +53,7 @@ func TestGroupAdmissionSerializesOneRepositoryGroup(t *testing.T) {
 
 // Different names remain independent; equal names share the default limit of one.
 func TestGroupAdmissionIsSharedAcrossRepositories(t *testing.T) {
-	gate := newWeightedAdmissionForJobs(6)
+	gate := newAdmissionGate(6)
 	first := acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("plan", 1, pipeline.M, "state"))
 	other := acquireRequestWithinBudget(t, gate.reserve(2), groupRequest("docs", 1, pipeline.M, "docs"))
 	waiter := gate.reserve(3)
@@ -71,8 +71,8 @@ func TestGroupAdmissionIsSharedAcrossRepositories(t *testing.T) {
 	gate.mu.Lock()
 	groups := len(gate.groups)
 	gate.mu.Unlock()
-	if used, runs := gateUsage(gate); groups != 0 || used != 0 || runs != 0 {
-		t.Fatal("released gate retains state", groups, used, runs)
+	if runs := gateUsage(gate); groups != 0 || runs != 0 {
+		t.Fatal("released gate retains state", groups, runs)
 	}
 }
 
@@ -80,7 +80,7 @@ func TestGroupAdmissionIsSharedAcrossRepositories(t *testing.T) {
 // behind it. A parked group run must never stop the pass: claims behind it are
 // admitted on the weight budget while it waits for its own repository.
 func TestGroupAdmissionParkedRunDoesNotBlockLaterClaims(t *testing.T) {
-	gate := newWeightedAdmissionForJobs(3) // capacity 6
+	gate := newAdmissionGate(3) // capacity 6
 	releaseHolder := acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("plan", 1, pipeline.M, "terraform-state"))
 
 	parked := gate.reserve(2)
@@ -90,8 +90,8 @@ func TestGroupAdmissionParkedRunDoesNotBlockLaterClaims(t *testing.T) {
 
 	// Another repository's M run, claimed after the parked run, is admitted.
 	releaseOther := acquireRequestWithinBudget(t, gate.reserve(3), groupRequest("example-service", 2, pipeline.M, ""))
-	if used, _ := gateUsage(gate); used != 4 {
-		t.Fatalf("used = %d, want the holder and the other repository only (4)", used)
+	if runs := gateUsage(gate); runs != 2 {
+		t.Fatalf("runs = %d, want the holder and the other repository only (2)", runs)
 	}
 	releaseOther()
 	releaseHolder()
@@ -102,7 +102,7 @@ func TestGroupAdmissionParkedRunDoesNotBlockLaterClaims(t *testing.T) {
 // Runs of one group are admitted in claim order: the group is FIFO, and a
 // newer run of the group never overtakes an older one when the group frees.
 func TestGroupAdmissionKeepsClaimOrderWithinTheGroup(t *testing.T) {
-	gate := newWeightedAdmissionForJobs(6)
+	gate := newAdmissionGate(6)
 	releaseHolder := acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("branch-a", 1, pipeline.M, "terraform-state"))
 
 	older := gate.reserve(2)
@@ -123,59 +123,11 @@ func TestGroupAdmissionKeepsClaimOrderWithinTheGroup(t *testing.T) {
 	releaseNewer()
 }
 
-// A group run whose group is free but whose weight does not fit keeps its place
-// at the head exactly like any other sized run, so the group cannot be used to
-// starve heavy runs or to jump the queue.
-func TestGroupAdmissionFreeGroupStillQueuesOnWeight(t *testing.T) {
-	gate := newWeightedAdmission(4)
-	releaseBig := acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("other", 2, pipeline.L, ""))
-
-	grouped := gate.reserve(2)
-	groupedAcquired := make(chan func(), 1)
-	go acquireRequestForTest(grouped, groupRequest("plan", 1, pipeline.M, "terraform-state"), groupedAcquired)
-	awaitWaiting(t, grouped)
-
-	small := gate.reserve(3)
-	smallAcquired := make(chan func(), 1)
-	go acquireRequestForTest(small, groupRequest("small", 3, pipeline.S, ""), smallAcquired)
-	awaitWaiting(t, small)
-
-	releaseBig()
-	releaseGrouped := awaitAcquired(t, groupedAcquired)
-	releaseSmall := awaitAcquired(t, smallAcquired)
-	releaseGrouped()
-	releaseSmall()
-}
-
-// The group never changes the weight: a grouped run is priced at its declared
-// size, and XL keeps its exclusivity whether or not it declares a group.
-func TestGroupAdmissionPreservesDeclaredWeightAndXL(t *testing.T) {
-	gate := newWeightedAdmissionForJobs(6)
-	releaseLarge := acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("plan", 1, pipeline.L, "terraform-state"))
-	if used, _ := gateUsage(gate); used != DefaultSizeWeights.L {
-		t.Fatalf("used = %d, want the declared L weight %d", used, DefaultSizeWeights.L)
-	}
-	xl := gate.reserve(2)
-	xlAcquired := make(chan func(), 1)
-	go acquireRequestForTest(xl, groupRequest("kernel-matrix", 2, pipeline.XL, "vm-lab"), xlAcquired)
-	awaitWaiting(t, xl)
-	releaseLarge()
-	releaseXL := awaitAcquired(t, xlAcquired)
-
-	after := gate.reserve(3)
-	afterAcquired := make(chan func(), 1)
-	go acquireRequestForTest(after, groupRequest("tiny", 3, pipeline.S, ""), afterAcquired)
-	awaitWaiting(t, after)
-	releaseXL()
-	releaseAfter := awaitAcquired(t, afterAcquired)
-	releaseAfter()
-}
-
 // Parking is what the dispatch loop reads: runs held back only by their own
 // group are counted, the first waiter of a free group is not, and a newly
 // parked run wakes the dispatcher.
 func TestGroupAdmissionCountsParkedRunsAndWakesTheDispatcher(t *testing.T) {
-	gate := newWeightedAdmissionForJobs(6)
+	gate := newAdmissionGate(6)
 	wakes := make(chan struct{}, 8)
 	gate.onPark = func() { wakes <- struct{}{} }
 
@@ -217,7 +169,7 @@ func TestGroupAdmissionCountsParkedRunsAndWakesTheDispatcher(t *testing.T) {
 // The scheduler mirrors its dispatch ceiling into the gate, so admitted runs
 // never exceed MaxConcurrent even when parked runs let the loop claim more.
 func TestGroupAdmissionMirroredRunCeiling(t *testing.T) {
-	gate := newWeightedAdmissionForJobs(2) // capacity 4
+	gate := newAdmissionGate(2) // capacity 4
 	gate.maxRuns = 2
 	releaseOne := acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("one", 1, pipeline.S, ""))
 	releaseTwo := acquireRequestWithinBudget(t, gate.reserve(2), groupRequest("two", 2, pipeline.S, ""))
@@ -233,7 +185,7 @@ func TestGroupAdmissionMirroredRunCeiling(t *testing.T) {
 
 // A canceled parked run leaves no trace, and a canceled holder frees the group.
 func TestGroupAdmissionCancellationFreesTheGroup(t *testing.T) {
-	gate := newWeightedAdmissionForJobs(6)
+	gate := newAdmissionGate(6)
 	holder := gate.reserve(1)
 	acquireRequestWithinBudget(t, holder, groupRequest("plan", 1, pipeline.M, "terraform-state"))
 
@@ -261,7 +213,7 @@ func TestGroupAdmissionCancellationFreesTheGroup(t *testing.T) {
 // A retained grant (its Workflow may still be alive while the owner stops)
 // keeps its weight and its group through release and cancel alike.
 func TestGroupAdmissionRetainedGrantKeepsItsGroupAndWeight(t *testing.T) {
-	gate := newWeightedAdmissionForJobs(6)
+	gate := newAdmissionGate(6)
 	holder := gate.reserve(1)
 	releaseHolder := acquireRequestWithinBudget(t, holder, groupRequest("plan", 1, pipeline.M, "terraform-state"))
 	member := gate.reserve(2)
@@ -277,8 +229,8 @@ func TestGroupAdmissionRetainedGrantKeepsItsGroupAndWeight(t *testing.T) {
 	releaseHolder()
 	holder.cancel()
 	awaitWaiting(t, member)
-	if used, runs := gateUsage(gate); used != 2 || runs != 1 {
-		t.Fatalf("used=%d runs=%d after releasing a retained grant; want its weight and run slot still held", used, runs)
+	if runs := gateUsage(gate); runs != 1 {
+		t.Fatalf("runs=%d after releasing a retained grant; want its run slot still held", runs)
 	}
 
 	// Retaining is only for a live grant: an ungranted or released
@@ -287,8 +239,8 @@ func TestGroupAdmissionRetainedGrantKeepsItsGroupAndWeight(t *testing.T) {
 	releaseUnrelated := acquireRequestWithinBudget(t, unrelated, groupRequest("example-service", 2, pipeline.M, ""))
 	releaseUnrelated()
 	unrelated.retain()
-	if used, runs := gateUsage(gate); used != 2 || runs != 1 {
-		t.Fatalf("retaining a released grant changed the gate: used=%d runs=%d", used, runs)
+	if runs := gateUsage(gate); runs != 1 {
+		t.Fatalf("retaining a released grant changed the gate: runs=%d", runs)
 	}
 	cancelMember()
 	if err := <-memberDone; err == nil {
@@ -297,7 +249,7 @@ func TestGroupAdmissionRetainedGrantKeepsItsGroupAndWeight(t *testing.T) {
 }
 
 func TestGroupAdmissionRefusesAMalformedGroup(t *testing.T) {
-	gate := newWeightedAdmissionForJobs(3)
+	gate := newAdmissionGate(3)
 	reservation := gate.reserve(1)
 	if _, err := reservation.acquireRequest(context.Background(), groupRequest("bad", 1, pipeline.M, "Bad_Group")); err == nil ||
 		!strings.Contains(err.Error(), "invalid concurrency group") {
@@ -313,7 +265,7 @@ func TestGroupAdmissionRefusesAMalformedGroup(t *testing.T) {
 
 // The #552 scheduling reason names the group and the exact run it waits on.
 func TestGroupAdmissionSnapshotNamesTheGroupAndItsHolder(t *testing.T) {
-	gate := newWeightedAdmissionForJobs(6)
+	gate := newAdmissionGate(1)
 	scheduler := &Scheduler{admission: gate}
 	releaseHolder := acquireRequestWithinBudget(t, gate.reserve(1), groupRequest("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 1, pipeline.M, "terraform-state"))
 	if snapshot := scheduler.AdmissionSnapshot(1); snapshot.State != "admitted" || snapshot.Group != "terraform-state" ||
@@ -327,7 +279,7 @@ func TestGroupAdmissionSnapshotNamesTheGroupAndItsHolder(t *testing.T) {
 	awaitWaiting(t, waiter)
 	snapshot := scheduler.AdmissionSnapshot(2)
 	if snapshot.State != "waiting" || snapshot.Group != "terraform-state" ||
-		snapshot.GroupHolder != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" || snapshot.GroupAhead != "" || snapshot.Weight != 2 {
+		snapshot.GroupHolder != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" || snapshot.GroupAhead != "" {
 		t.Fatalf("waiting snapshot = %#v", snapshot)
 	}
 	message := waitingAdmissionMessage(snapshot)
@@ -338,7 +290,7 @@ func TestGroupAdmissionSnapshotNamesTheGroupAndItsHolder(t *testing.T) {
 	releaseWaiter := awaitAcquired(t, acquired)
 	releaseWaiter()
 
-	// With no holder, the run ahead in the group is named instead.
+	// With no holder but no free slot, the run ahead in the group is named instead.
 	releaseBig := acquireRequestWithinBudget(t, gate.reserve(3), groupRequest("big", 2, pipeline.XL, ""))
 	ahead := gate.reserve(4)
 	behind := gate.reserve(5)
@@ -358,9 +310,9 @@ func TestGroupAdmissionSnapshotNamesTheGroupAndItsHolder(t *testing.T) {
 	if message := waitingAdmissionMessage(behindSnapshot); !strings.Contains(message, "behind run cccccccccccccccccccccccccccccccc") {
 		t.Fatalf("queued-behind reason = %q", message)
 	}
-	// The free group's head waits on weight behind nothing: it is the queue
+	// The free group's head waits on a slot behind nothing: it is the queue
 	// head itself (#1021), and the run behind it in the group names its group.
-	if message := waitingAdmissionMessage(scheduler.AdmissionSnapshot(4)); !strings.HasPrefix(message, "At the head of the run queue (M, needs 2 weight") {
+	if message := waitingAdmissionMessage(scheduler.AdmissionSnapshot(4)); !strings.HasPrefix(message, "At the head of the run queue (1 run running)") {
 		t.Fatalf("queue-head wait reason = %q", message)
 	}
 	releaseBig()
@@ -397,11 +349,11 @@ func awaitWaiting(t *testing.T, reservation *admissionReservation) {
 	}
 }
 
-// gateUsage reads the gate's weight and run counters under its lock.
-func gateUsage(gate *weightedAdmission) (used, runs int) {
+// gateUsage reads the gate's run counter under its lock.
+func gateUsage(gate *admissionGate) (runs int) {
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
-	return gate.used, gate.runs
+	return gate.runs
 }
 
 func awaitWake(t *testing.T, wakes <-chan struct{}) {
@@ -422,7 +374,7 @@ func contextDeadline(t *testing.T) <-chan struct{} {
 
 // groupParked reports claimed runs parked on VM capacity or their concurrency
 // group. The dispatch loop does not count them against its ceiling.
-func (gate *weightedAdmission) groupParked() int {
+func (gate *admissionGate) groupParked() int {
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
 	return gate.parkedLocked()

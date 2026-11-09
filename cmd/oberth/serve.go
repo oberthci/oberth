@@ -43,7 +43,6 @@ import (
 	"github.com/oberthci/oberth/internal/service"
 	"github.com/oberthci/oberth/internal/sshserver"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 
 	"k8s.io/client-go/kubernetes"
@@ -108,21 +107,12 @@ type serveOptions struct {
 	autoRetryInfrastructure bool
 	maxConcurrent           int
 	maxConcurrentFile       string
-	declaredAdmission       service.DeclaredAdmissionConfig
 	admissionDiskFloorBytes int64
-
-	// admissionExclusiveClasses is the raw exclusive-class allowlist (#1499);
-	// exclusiveClasses is its parsed form.
-	admissionExclusiveClasses string
-	exclusiveClasses          map[string]int
-
 	admissionPressure       service.AdmissionPressureConfig
-	admissionSizeWeights    string
-	admissionMaxHeadWait    time.Duration
 	admissionStallTimeout   time.Duration
 	stepStartupAllowance    argojob.StepStartupAllowance
+	serializeReleases       bool
 	assist                  argojob.AssistConfig
-	sizeWeights             service.SizeWeights
 	ciCacheRoot             string
 	releaseCacheRoot        string
 	secretStoreAddress      string
@@ -216,8 +206,7 @@ func runServe(ctx context.Context, arguments []string, output io.Writer) error {
 }
 
 func parseServeOptions(arguments []string, output io.Writer) (serveOptions, error) {
-	options := serveOptions{declaredAdmission: service.DefaultDeclaredAdmissionConfig()}
-	var extendedResourceBudgets, legacyResourceCharges string
+	options := serveOptions{}
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.DurationVar(&options.issueStaleAfter, "issue-stale-after", service.DefaultIssueStaleAfter, "open issue stale window since last update")
 	flags.DurationVar(&options.issueActiveStaleAfter, "issue-active-stale-after", service.DefaultIssueActiveStaleAfter, "active issue stale window since last update (no longer than issue-stale-after)")
@@ -249,37 +238,20 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.IntVar(&options.retentionKeepNewest, "retention-keep-newest", 1, "terminal runs retained per repository/ref during automatic sweeps")
 	flags.Float64Var(&options.kubernetesQPS, "kubernetes-client-qps", 50, "Kubernetes API requests per second per server client")
 	flags.IntVar(&options.kubernetesBurst, "kubernetes-client-burst", 100, "Kubernetes API burst allowance per server client")
-	flags.IntVar(&options.maxConcurrent, "max-concurrent-jobs", 3, "maximum concurrent workflows (boot default)")
-	flags.StringVar(&legacyResourceCharges, "admission-legacy-resources", "{}", "deprecated compatibility option; ignored by workflow admission")
-	flags.StringVar(&extendedResourceBudgets, "admission-extended-resources", "{}", "deprecated compatibility option; ignored by workflow admission")
-	flags.BoolVar(&options.declaredAdmission.Disabled, "disable-declared-admission", false, "deprecated compatibility option; ignored by workflow admission")
-	flags.Int64Var(&options.declaredAdmission.CPUMilli, "admission-cpu-millis", 8000, "deprecated compatibility option; ignored by workflow admission")
-	flags.Int64Var(&options.declaredAdmission.MemoryBytes, "admission-memory-bytes", 17179869184, "deprecated compatibility option; ignored by workflow admission")
-	flags.Int64Var(options.declaredAdmission.MemoryHeadroomBytes, "admission-memory-headroom-bytes", 1073741824, "deprecated compatibility option; ignored by workflow admission")
-	flags.Int64Var(options.declaredAdmission.MemoryHeadroomPercent, "admission-memory-headroom-percent", 10, "deprecated compatibility option; ignored by workflow admission")
-	flags.IntVar(&options.declaredAdmission.IORuns, "admission-io-runs", 0, "deprecated compatibility option; ignored by workflow admission")
+	flags.IntVar(&options.maxConcurrent, "max-concurrent-jobs", 0, "optional run ceiling: how many runs may hold a Workflow at once (0..64; 0 is no ceiling; boot default)")
 
 	flags.BoolVar(&options.autoRetryInfrastructure, "auto-retry-infrastructure", true, "automatically retry eligible infrastructure failures once at their original queue position")
-	flags.StringVar(&options.maxConcurrentFile, "max-concurrent-jobs-file", "", "mounted ConfigMap key to reload max concurrent Jobs without restart; invalid or missing keeps the last good value")
-	flags.StringVar(&options.admissionSizeWeights, "admission-size-weights", service.DefaultSizeWeights.String(), "deprecated compatibility option; ignored; Kubernetes places step pods")
+	flags.StringVar(&options.maxConcurrentFile, "max-concurrent-jobs-file", "", "mounted ConfigMap key to reload the run ceiling without restart (0 is no ceiling); invalid or missing keeps the last good value")
 	flags.DurationVar(&options.admissionStallTimeout, "admission-stall-timeout", 10*time.Minute, "workflow startup bound for absent or non-capacity-stalled pods; Kubernetes capacity waits are exempt")
-	flags.DurationVar(&options.admissionMaxHeadWait, "admission-max-head-wait", service.DefaultMaxHeadWait, "deprecated compatibility option; ignored by workflow admission")
 	defaults := service.DefaultAdmissionPressureConfig()
 	flags.BoolVar(&options.admissionPressure.Enabled, "admission-pressure-enabled", defaults.Enabled, "hold new workflow grants at the hard host CPU/IO PSI limits")
-	flags.Float64Var(&options.admissionPressure.CPUSomeAvg10, "admission-pressure-cpu-some-avg10", defaults.CPUSomeAvg10, "deprecated compatibility option; ignored by workflow admission")
-	flags.Float64Var(&options.admissionPressure.IOSomeAvg10, "admission-pressure-io-some-avg10", defaults.IOSomeAvg10, "deprecated compatibility option; ignored by workflow admission")
 	flags.Float64Var(&options.admissionPressure.HardCPU, "admission-pressure-hard-cpu", defaults.HardCPU, "hard host CPU some PSI avg10 percentage for new workflow grants")
 	flags.Float64Var(&options.admissionPressure.HardIO, "admission-pressure-hard-io", defaults.HardIO, "hard host IO some PSI avg10 percentage for new workflow grants")
-	flags.Int64Var(&options.admissionPressure.MaxWaitSeconds, "admission-pressure-max-wait-seconds", defaults.MaxWaitSeconds, "deprecated compatibility option; ignored by workflow admission")
-	flags.StringVar(&options.admissionPressure.Mode, "admission-pressure-mode", service.PressureEnforce, "deprecated compatibility option; ignored by workflow admission")
-	flags.Float64Var(&options.admissionPressure.IOFullAvg60Max, "admission-pressure-io-full-avg60-max", 0, "deprecated compatibility option; ignored by workflow admission")
-	flags.Float64Var(&options.admissionPressure.CPUSomeAvg60Max, "admission-pressure-cpu-some-avg60-max", 0, "deprecated compatibility option; ignored by workflow admission")
-	flags.Float64Var(&options.admissionPressure.Hysteresis, "admission-pressure-hysteresis", 10, "deprecated compatibility option; ignored by workflow admission")
-	flags.DurationVar(&options.admissionPressure.MaxDefer, "admission-pressure-max-defer", 20*time.Minute, "deprecated compatibility option; ignored by workflow admission")
 
 	flags.Int64Var(&options.stepStartupAllowance.FactorPercent, "admission-step-startup-allowance-percent", argojob.DefaultStepStartupAllowance.FactorPercent, "Pod start-up allowance added to each declared step deadline, as a percentage of that deadline (0-400; #1499)")
 	flags.Int64Var(&options.stepStartupAllowance.MinSeconds, "admission-step-startup-allowance-min-seconds", argojob.DefaultStepStartupAllowance.MinSeconds, "smallest step start-up allowance in seconds (0-3600, at most the maximum)")
 	flags.Int64Var(&options.stepStartupAllowance.MaxSeconds, "admission-step-startup-allowance-max-seconds", argojob.DefaultStepStartupAllowance.MaxSeconds, "largest step start-up allowance in seconds (0-3600); 0 disables the allowance")
+	flags.BoolVar(&options.serializeReleases, "serialize-releases", false, "give every release run the native Argo workflow-level mutex oberth-release, so no two releases of any repository run at once (Helm releases.serialize)")
 	flags.BoolVar(&options.assist.Enabled, "assist-enabled", false, "allow agent-assisted continuation: opted-in credential-free branch CI steps park a failed retry for run_hold_* instead of failing (Helm assist.enabled)")
 	flags.DurationVar(&options.assist.HoldTTL, "assist-hold-ttl", argojob.DefaultAssistHoldTTL, "how long an unreleased assist hold waits for its agent before the server abandons it; the held Pod deadline is the step budget plus this TTL (whole seconds, at most 4h)")
 	flags.IntVar(&options.assist.MaxConcurrentHolds, "assist-max-concurrent-holds", argojob.DefaultAssistMaxConcurrentHolds, "parked assist retries allowed at once across the installation; newer holds above it are abandoned (1-64)")
@@ -288,7 +260,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.Int64Var(&options.assist.PatchMaxBytes, "assist-patch-max-bytes", argojob.DefaultAssistPatchMaxBytes, "largest run_hold_patch diff and largest patched file (at most 16 MiB)")
 	flags.IntVar(&options.assist.PatchMaxFiles, "assist-patch-max-files", argojob.DefaultAssistPatchMaxFiles, "most files one run_hold_patch diff may touch (at most 1024)")
 	flags.Int64Var(&options.admissionDiskFloorBytes, "admission-disk-floor-bytes", 0, "when enabled and free bytes on /data are below this floor, admission is held until disk frees up (#673)")
-	flags.StringVar(&options.admissionExclusiveClasses, "admission-exclusive-classes", "", "comma-separated server-wide exclusive classes steps may declare with oberth.ci/exclusive, each class or class=limit (default limit 1); empty refuses every declaration (#1499)")
 	flags.StringVar(&options.ciCacheRoot, "ci-cache-root", "/var/cache/oberth/ci", "CI host cache root")
 	flags.StringVar(&options.releaseCacheRoot, "release-cache-root", "/var/cache/oberth/release", "release host cache root")
 	flags.StringVar(&options.secretStoreAddress, "secretstore-address", "", "OpenBao API base URL for store-sourced release secrets (HTTPS)")
@@ -395,7 +366,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	if err := validateServeOptions(options); err != nil {
 		return serveOptions{}, err
 	}
-	// Historical resource budgets and size weights are accepted but ignored.
 	options.admissionPressure.HardOnly = true
 	if !options.admissionPressure.Enabled {
 		options.admissionPressure.IOFullAvg60Max, options.admissionPressure.CPUSomeAvg60Max = 0, 0
@@ -418,11 +388,6 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	if options.argoDefaultWorkflowTimeout < time.Second || options.argoDefaultWorkflowTimeout%time.Second != 0 {
 		return serveOptions{}, errors.New("serve: --argo-default-workflow-timeout must use whole positive seconds")
 	}
-	classes, err := argoworkflow.ParseExclusiveClasses(options.admissionExclusiveClasses)
-	if err != nil {
-		return serveOptions{}, fmt.Errorf("serve: --admission-exclusive-classes: %w", err)
-	}
-	options.exclusiveClasses = classes
 	return options, nil
 }
 
@@ -448,8 +413,11 @@ func validateServeOptions(options serveOptions) error {
 	if err := validateArgoServeOptions(options); err != nil {
 		return err
 	}
-	if options.maxConcurrent <= 0 || options.maxConcurrent > 64 || options.gitCommandTimeout <= 0 || options.gcInterval <= 0 {
-		return errors.New("serve: concurrency, timeout, and GC values must be positive")
+	if options.maxConcurrent < 0 || options.maxConcurrent > 64 {
+		return errors.New("serve: --max-concurrent-jobs must be in 0..64 (0: no ceiling)")
+	}
+	if options.gitCommandTimeout <= 0 || options.gcInterval <= 0 {
+		return errors.New("serve: timeout and GC values must be positive")
 	}
 	if strings.TrimSpace(options.namespace) == "" {
 		return errors.New("serve: namespace is required")
@@ -893,11 +861,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		MaxRunLogBytes:                 options.runLogLimitBytes,
 		MutationGate:                   anchors.AllowMutation,
 		AdmissionDiskFloorBytes:        options.admissionDiskFloorBytes,
-		ExclusiveClasses:               options.exclusiveClasses,
 		AdmissionPressure:              options.admissionPressure,
-		SizeWeights:                    options.sizeWeights,
-		DeclaredAdmission:              options.declaredAdmission,
-		MaxHeadWait:                    options.admissionMaxHeadWait,
 		StalledRunTimeout:              options.admissionStallTimeout,
 	})
 	if err != nil {

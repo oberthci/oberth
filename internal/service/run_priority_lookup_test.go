@@ -70,7 +70,7 @@ func TestPrioritySizeLookupFailureDoesNotFailReleaseExecution(t *testing.T) {
 				if state.calls.Load() == 0 || len(jobs.createdReleases) != 1 || len(f.git.syncedTags) != 1 {
 					t.Fatalf("lookup/creation/publication = %d/%d/%d", state.calls.Load(), len(jobs.createdReleases), len(f.git.syncedTags))
 				}
-				if jobs.priority != model.PriorityNormal || !strings.Contains(jobs.reason, "repository size limit unavailable") {
+				if jobs.priority != model.PriorityNormal || !strings.Contains(jobs.reason, "repository release policy unavailable") {
 					t.Fatalf("unavailable lookup retained urgency: %s / %s", jobs.priority, jobs.reason)
 				}
 			})
@@ -88,7 +88,7 @@ func TestPrioritySizeLookupRefreshWithholdsBoostAndRecovers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g := newWeightedAdmission(4)
+	g := newAdmissionGate(1)
 	f.scheduler.admission = g
 	holder := g.reserve(-1)
 	release, err := holder.acquire(ctx, pipeline.XL)
@@ -105,7 +105,7 @@ func TestPrioritySizeLookupRefreshWithholdsBoostAndRecovers(t *testing.T) {
 		r := g.reserveRun(tag.Run)
 		t.Cleanup(r.cancel)
 		g.mu.Lock()
-		r.prepared, r.size, r.weight = true, pipeline.S, 1
+		r.prepared = true
 		g.mu.Unlock()
 		return r
 	}
@@ -127,7 +127,7 @@ func TestPrioritySizeLookupRefreshWithholdsBoostAndRecovers(t *testing.T) {
 	}
 	check(model.PriorityPromotion, "oldest waiting")
 	state.unavailable.Store(true)
-	check(model.PriorityNormal, "repository size limit unavailable")
+	check(model.PriorityNormal, "repository release policy unavailable")
 	// Even an S tag must not inherit default-L urgency when the read fails.
 	control, err := NewAPI(APIConfig{Runs: f.store, Repositories: f.store, Admission: f.scheduler})
 	if err != nil {
@@ -138,7 +138,7 @@ func TestPrioritySizeLookupRefreshWithholdsBoostAndRecovers(t *testing.T) {
 		t.Fatal(err)
 	}
 	shown := control.presentationRun(ctx, durable)
-	if shown.Priority != model.PriorityNormal || !strings.Contains(shown.PriorityReason, "size limit unavailable") || durable.Status != model.RunQueued {
+	if shown.Priority != model.PriorityNormal || !strings.Contains(shown.PriorityReason, "release policy unavailable") || durable.Status != model.RunQueued {
 		t.Fatalf("priority failure changed run state or lost reason: %+v / %+v", shown, durable)
 	}
 	g.mu.Lock()

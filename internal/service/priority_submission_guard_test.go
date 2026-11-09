@@ -10,7 +10,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
@@ -35,8 +34,7 @@ func TestNewHeadSupersedesQueuedPriorityAndInheritsOverride(t *testing.T) {
 }
 
 func TestPriorityGuardBackfillCannotDelayHead(t *testing.T) {
-	g := newWeightedAdmission(4)
-	g.maxHeadWait = 20 * time.Minute
+	g := newAdmissionGate(1)
 	holder := g.reserve(1)
 	release, err := holder.acquire(context.Background(), pipeline.M)
 	if err != nil {
@@ -46,7 +44,7 @@ func TestPriorityGuardBackfillCannotDelayHead(t *testing.T) {
 	head := priorityWaiter(g, 2, model.PriorityHighest, time.Now(), pipeline.L)
 	small := priorityWaiter(g, 3, model.PriorityHighest, time.Now(), pipeline.M)
 	if granted(g, small) {
-		t.Fatal("backfill leaves too little capacity for the priority head")
+		t.Fatal("a later run overtook the priority head")
 	}
 	release()
 	if !granted(g, head) || granted(g, small) {
@@ -189,58 +187,6 @@ func TestPriorityCancellationRequiresRequesterOrUnscopedAdmin(t *testing.T) {
 	}
 }
 
-func TestPriorityBackfillPreservesNumericHeadAndAggregateDemand(t *testing.T) {
-	for _, tc := range []struct {
-		name                                               string
-		headCPU, headMemory, candidateCPU, candidateMemory int64
-		want                                               bool
-	}{
-		{"CPU fits", 5000, 1 << 30, 1000, 1 << 30, true},
-		{"CPU exceeds", 7000, 1 << 30, 1000, 1 << 30, false},
-		{"memory exceeds", 1000, 13 << 30, 1000, 3 << 30, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			clock := &fakeClock{now: time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)}
-			g := newWeightedAdmission(8)
-			g.now, g.maxHeadWait = clock.Now, time.Hour
-			running := g.reserve(1)
-			acquireRequestWithinBudget(t, running, admissionRequest{Size: pipeline.M, Estimate: 30 * time.Minute,
-				Pods: &argoworkflow.PodDemand{CPUMilli: 4000, MemoryBytes: 4 << 30, Pods: 1}})
-			t.Cleanup(running.release)
-			head := pending(t, g, 2, admissionRequest{Size: pipeline.M,
-				Pods: &argoworkflow.PodDemand{CPUMilli: tc.headCPU, MemoryBytes: tc.headMemory, Pods: 1}})
-			t.Cleanup(head.cancel)
-			if granted(g, head) {
-				t.Fatal("fixture head must wait before backfill")
-			}
-			g.mu.Lock()
-			head.priority = model.PriorityHighest
-			g.mu.Unlock()
-			clock.now = clock.now.Add(21 * time.Minute)
-			candidate := pendingPriority(t, g, 3, model.PriorityHighest, admissionRequest{Size: pipeline.M, Estimate: time.Hour,
-				Pods: &argoworkflow.PodDemand{CPUMilli: tc.candidateCPU, MemoryBytes: tc.candidateMemory, Pods: 1}})
-			t.Cleanup(candidate.cancel)
-			if got := granted(g, candidate); got != tc.want {
-				t.Fatalf("head fits alongside = %v, want %v", got, tc.want)
-			}
-		})
-	}
-	g := newWeightedAdmission(4)
-	g.maxHeadWait = 2 * time.Hour
-	running := g.reserve(1)
-	acquireRequestWithinBudget(t, running, admissionRequest{Size: pipeline.M, Estimate: time.Hour})
-	t.Cleanup(running.release)
-	head := priorityWaiter(g, 2, model.PriorityHighest, time.Now(), pipeline.L)
-	t.Cleanup(head.cancel)
-	first := priorityWaiter(g, 3, model.PriorityHighest, time.Now(), pipeline.S, 2*time.Hour)
-	t.Cleanup(first.cancel)
-	second := priorityWaiter(g, 4, model.PriorityHighest, time.Now(), pipeline.S, 2*time.Hour)
-	t.Cleanup(second.cancel)
-	if !granted(g, first) || granted(g, second) {
-		t.Fatal("aggregate backfills failed to preserve the priority head")
-	}
-}
-
 func TestPrioritySubmissionReasonCannotImpersonateAutomaticTagClass(t *testing.T) {
 	f := newControlFixture(t)
 	admin := true
@@ -251,7 +197,6 @@ func TestPrioritySubmissionReasonCannotImpersonateAutomaticTagClass(t *testing.T
 	r := f.scheduler.admission.reserveRun(enqueued.Run)
 	f.scheduler.admission.mu.Lock()
 	r.prepared = true
-	r.size = pipeline.XL
 	p := r.priorityRun().Priority
 	f.scheduler.admission.mu.Unlock()
 	if p != model.PriorityHighest {

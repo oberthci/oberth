@@ -23,22 +23,20 @@ type RunScheduling struct {
 	Execution     *ExecutionObservation     `json:"execution,omitempty"`
 }
 
+// AdmissionObservation is one run's place in the admission gate. Admission
+// counts runs: Used and Runs are how many runs hold a grant, Capacity and
+// MaxRuns how many may (zero: no ceiling). Kubernetes places each Pod.
 type AdmissionObservation struct {
-	Requests          *argoworkflow.PodRequests `json:"requests,omitempty"`
-	NumericBudget     *NumericBudget            `json:"numeric_budget,omitempty"`
-	BackfillMessage   string                    `json:"backfill_message,omitempty"`
-	DeclaredResources *DeclaredResources        `json:"declared_resources,omitempty"`
-	LegacyResources   *LegacyResourceCharge     `json:"legacy_resources,omitempty"`
+	// Requests is this run's peak pod requests, shown for context only.
+	Requests *argoworkflow.PodRequests `json:"requests,omitempty"`
 
 	Pressure *PressureDeferral `json:"pressure,omitempty"`
 	State    string            `json:"state"`
 	Position int               `json:"position,omitempty"`
-	Size     string            `json:"size,omitempty"`
-	Weight   int               `json:"weight,omitempty"`
 	Used     int               `json:"used"`
 	Capacity int               `json:"capacity"`
-	// Runs and MaxRuns are the run ceiling: how many runs hold a grant and
-	// how many may. Zero for a scoped viewer, like Used and Capacity.
+	// Runs and MaxRuns repeat the run ceiling for older clients. Zero for a
+	// scoped viewer, like Used and Capacity.
 	Runs    int `json:"runs,omitempty"`
 	MaxRuns int `json:"max_runs,omitempty"`
 	// Group is the repository-declared concurrency group the run was admitted
@@ -53,138 +51,64 @@ type AdmissionObservation struct {
 	GroupBlocked  bool             `json:"group_blocked,omitempty"`
 	GroupRunRepos map[string]int64 `json:"-"`
 	GroupAhead    string           `json:"group_ahead,omitempty"`
-	// ExclusiveClasses are the server-allowlisted exclusive classes the run's
-	// steps declare (#1499). ExclusiveBlocked names the class it is parked on
-	// and that class's limit. Holder identities are never exposed.
-	ExclusiveClasses []string `json:"exclusive_classes,omitempty"`
-	ExclusiveClass   string   `json:"exclusive_class,omitempty"`
-	ExclusiveLimit   int      `json:"exclusive_limit,omitempty"`
-	ExclusiveBlocked bool     `json:"exclusive_blocked,omitempty"`
 	// DiskFloor reports the opt-in disk-space admission hold (#673). When
 	// non-nil and BelowFloor is true, admission is held until disk frees up.
 	DiskFloor *DiskFloorObservation `json:"disk_floor,omitempty"`
 	// BlockedBy names the run at the head of the admission queue that every
-	// later run waits behind (#1021): the first claimed run that does not
-	// fit. HeadOfQueue marks the run that is itself that run; BlockedBy then
-	// describes it. Nil when the run is parked on its group or VM capacity
-	// or nothing blocks the queue.
+	// later run waits behind (#1021): the first claimed run without a run
+	// slot. HeadOfQueue marks the run that is itself that run; BlockedBy then
+	// describes it. Nil when the run is parked on its group or nothing
+	// blocks the queue.
 	BlockedBy   *AdmissionBlocker `json:"blocked_by,omitempty"`
 	HeadOfQueue bool              `json:"head_of_queue,omitempty"`
 }
 
-// AdmissionBlocker is the claimed run at the head of the weighted admission
-// queue that does not fit, which holds back every run claimed after it.
+// AdmissionBlocker is the claimed run at the head of the admission queue that
+// has no run slot, which holds back every run claimed after it.
 type AdmissionBlocker struct {
-	NumericBudget     *NumericBudget        `json:"numeric_budget,omitempty"`
-	DeclaredResources *DeclaredResources    `json:"declared_resources,omitempty"`
-	LegacyResources   *LegacyResourceCharge `json:"legacy_resources,omitempty"`
-
 	Pressure *PressureDeferral `json:"pressure,omitempty"`
 	RunID    string            `json:"run_id"`
 	RepoID   int64             `json:"-"`
 	Repo     string            `json:"repo"`
 	Ref      string            `json:"ref"`
-	Size     string            `json:"size"`
-	Weight   int               `json:"weight"`
-	// FullDrain is set for an XL run, which is admitted only once nothing
-	// else holds weight.
-	FullDrain bool `json:"full_drain,omitempty"`
-	// RunCeiling and DiskFloor name the other reasons a run that would fit
-	// the weight budget still waits.
-	RunCeiling   bool      `json:"run_ceiling,omitempty"`
-	DiskFloor    bool      `json:"disk_floor,omitempty"`
+	// RunCeiling and DiskFloor name why the head waits: every run slot is
+	// taken, or the data disk is below its floor.
+	RunCeiling bool `json:"run_ceiling,omitempty"`
+	DiskFloor  bool `json:"disk_floor,omitempty"`
+	// Used and Capacity are the run ceiling: runs holding a grant and the
+	// configured maximum. Zero for a scoped viewer.
 	Used         int       `json:"used"`
 	Capacity     int       `json:"capacity"`
 	WaitingSince time.Time `json:"waiting_since"`
-	// Measured backfill: HeadSince is when this run started waiting
-	// at the head (it survives a restart), HeadWaitSeconds how long it has,
-	// and MaxHeadWaitSeconds the drain threshold. Backfilling is set before
-	// the threshold, Draining at and after it. Draining stops new backfill.
-	// All zero when disabled.
-	HeadSince          time.Time `json:"head_since,omitzero"`
-	HeadWaitSeconds    int64     `json:"head_wait_seconds,omitempty"`
-	MaxHeadWaitSeconds int64     `json:"max_head_wait_seconds,omitempty"`
-	Backfilling        bool      `json:"backfilling,omitempty"`
-	Draining           bool      `json:"draining,omitempty"`
-}
-
-// Backfill describes the head's backfill window, e.g. "head waiting 7m/20m,
-// backfilling" or "draining for head"; empty when backfill is disabled.
-func (blocker AdmissionBlocker) Backfill() string {
-	switch {
-	case blocker.Backfilling:
-		return fmt.Sprintf("head waiting %s/%s, backfilling", waitText(blocker.HeadWaitSeconds), waitText(blocker.MaxHeadWaitSeconds))
-	case blocker.Draining:
-		return fmt.Sprintf("head waited %s of %s, draining for head", waitText(blocker.HeadWaitSeconds), waitText(blocker.MaxHeadWaitSeconds))
-	default:
-		return ""
-	}
-}
-
-// waitText renders whole minutes, or seconds below a minute; a negative wait
-// (a clock step backwards) reads as zero.
-func waitText(seconds int64) string {
-	if seconds < 0 {
-		seconds = 0
-	}
-	if seconds < 60 {
-		return fmt.Sprintf("%ds", seconds)
-	}
-	return fmt.Sprintf("%dm", seconds/60)
 }
 
 // Reason is the parenthesized why of a blocked admission, e.g.
-// "XL, needs a full drain".
+// "waiting for a run slot".
 func (blocker AdmissionBlocker) Reason() string {
-	if blocker.Weight == 0 && blocker.Size == "" {
-		switch {
-		case blocker.DiskFloor:
-			return "waiting for disk space"
-		case blocker.RunCeiling:
-			if blocker.Used <= 0 {
-				return "waiting for a workflow slot"
-			}
-			return fmt.Sprintf("%d runs running", blocker.Used)
-		case blocker.Pressure != nil:
-			switch blocker.Pressure.Resource {
-			case "io":
-				return "host IO pressure"
-			case "cpu":
-				return "host CPU pressure"
-			case "cpu+io":
-				return "host CPU and IO pressure"
-			default:
-				return "waiting for host pressure to settle"
-			}
-		}
-	}
-
-	if b := blocker.NumericBudget; b != nil {
-		return fmt.Sprintf("%s, CPU %dm/%dm used; memory %d/%d bytes used", blocker.Size, b.CPUUsedMilli, b.CPUBudgetMilli, b.MemoryUsedBytes, b.MemoryBudgetBytes)
-	}
-	if d := blocker.DeclaredResources; d != nil {
-		return fmt.Sprintf("declared reservation (requests/VM demand plus helper and memory headroom reserves) %dm CPU, %d memory bytes", d.CPUMilli, d.MemoryBytes)
-	}
 	switch {
 	case blocker.DiskFloor:
-		return blocker.Size + ", held by the disk floor"
-	case blocker.Pressure != nil:
-		return blocker.Size + ", " + blocker.Pressure.Reason()
-	case blocker.FullDrain:
-		return blocker.Size + ", needs a full drain"
+		return "waiting for disk space"
 	case blocker.RunCeiling:
-		return blocker.Size + ", waiting for a run slot"
-	case blocker.Size == "XL" && blocker.Capacity == 0:
-		// An XL with an operator-configured finite weight shares the host.
-		return fmt.Sprintf("XL · %dw", blocker.Weight)
-	case blocker.Size == "XL":
-		return fmt.Sprintf("XL · %dw, needs %d weight; %d/%d used", blocker.Weight, blocker.Weight, blocker.Used, blocker.Capacity)
-	case blocker.Capacity == 0:
-		// A scoped view omits the shared budget's use.
-		return fmt.Sprintf("%s, needs %d weight", blocker.Size, blocker.Weight)
-	default:
-		return fmt.Sprintf("%s, needs %d weight; %d/%d used", blocker.Size, blocker.Weight, blocker.Used, blocker.Capacity)
+		switch blocker.Used {
+		case 0:
+			return "waiting for a run slot"
+		case 1:
+			return "1 run running"
+		}
+		return fmt.Sprintf("%d runs running", blocker.Used)
+	case blocker.Pressure != nil:
+		switch blocker.Pressure.Resource {
+		case "io":
+			return "host IO pressure"
+		case "cpu":
+			return "host CPU pressure"
+		case "cpu+io":
+			return "host CPU and IO pressure"
+		default:
+			return "waiting for host pressure to settle"
+		}
 	}
+	return "waiting for a run slot"
 }
 
 // DiskFloorObservation is the scheduling-visible state of the disk floor
@@ -197,6 +121,13 @@ type DiskFloorObservation struct {
 
 // ExecutionDeadlineMessage is a fixed presentation label, never raw controller text.
 const ExecutionDeadlineMessage = "Execution deadline exceeded."
+
+// LockWaitMessagePrefix starts the fixed-form message of a workflow or step
+// queued behind native Argo synchronization: "Waiting for lock
+// <Kind>/<name>[/<key>] (<free>/<limit> free)." The key is the controller's
+// lock name without its namespace, admitted into the message only when it
+// matches the lock-key grammar.
+const LockWaitMessagePrefix = "Waiting for lock "
 
 // ExecutionDeadline is a read-only clock projection, never terminal evidence.
 // Argo anchors workflow deadlines to status.startedAt, not Oberth admission.
@@ -244,64 +175,39 @@ type AdmissionCapacityConfig struct {
 }
 
 // AdmissionState is the whole in-memory admission gate as data (#1099): its
-// budget, every reservation it holds, and every concurrency group in use. It
-// is an ephemeral observation of one server process, never durable evidence.
+// run ceiling, every reservation it holds, and every concurrency group in
+// use. It is an ephemeral observation of one server process, never durable
+// evidence. Used and Runs count runs holding a grant; Capacity and MaxRuns
+// are the ceiling, zero when none is configured.
 type AdmissionState struct {
 	Hold          *AdmissionHold           `json:"hold,omitempty"`
-	NumericBudget *NumericBudget           `json:"numeric_budget,omitempty"`
 	Configuration *AdmissionCapacityConfig `json:"configuration,omitempty"`
 	Pressure      *AdmissionPressure       `json:"pressure,omitempty"`
 	Capacity      int                      `json:"capacity"`
 	Used          int                      `json:"used"`
 	Runs          int                      `json:"runs"`
 	MaxRuns       int                      `json:"max_runs"`
-	// MaxHeadWaitSeconds is the backfill bound (#1085); 0 is strict FIFO.
-	MaxHeadWaitSeconds int64                  `json:"max_head_wait_seconds"`
-	Reservations       []AdmissionReservation `json:"reservations"`
-	Groups             []AdmissionGroup       `json:"groups"`
-	Blocker            *AdmissionBlocker      `json:"blocker,omitempty"`
-}
-
-// NumericBudget includes declared Pod/helper requests and fixed CPU/memory
-// charges for legacy sizes. It is not measured usage.
-type NumericBudget struct {
-	CPUUsedMilli      int64 `json:"cpu_used_milli"`
-	CPUBudgetMilli    int64 `json:"cpu_budget_milli"`
-	MemoryUsedBytes   int64 `json:"memory_used_bytes"`
-	MemoryBudgetBytes int64 `json:"memory_budget_bytes"`
-}
-
-// LegacyResourceCharge is the fixed reservation for a run using size admission.
-// It includes the entire numeric charge, without declared-run helper/headroom
-// additions, and does not describe Kubernetes requests or measured usage.
-type LegacyResourceCharge struct {
-	CPUMilli    int64 `json:"cpu_milli"`
-	MemoryBytes int64 `json:"memory_bytes"`
+	Reservations  []AdmissionReservation   `json:"reservations"`
+	Groups        []AdmissionGroup         `json:"groups"`
+	Blocker       *AdmissionBlocker        `json:"blocker,omitempty"`
 }
 
 // AdmissionReservation is one claimed run's place in the gate. State is
-// preparing (checkout and static reads still running), waiting (for weight),
-// group (parked on its concurrency group), vm (parked on trusted VM
-// capacity), granted, or retained (granted, and kept held after its owner
-// stopped on an error that may have left its Workflow running).
+// preparing (checkout and static reads still running), waiting (for a run
+// slot), group (parked on its concurrency group), granted, or retained
+// (granted, and kept held after its owner stopped on an error that may have
+// left its Workflow running).
 type AdmissionReservation struct {
-	DeclaredResources *DeclaredResources    `json:"declared_resources,omitempty"`
-	LegacyResources   *LegacyResourceCharge `json:"legacy_resources,omitempty"`
-
 	Pressure *PressureDeferral `json:"pressure,omitempty"`
 	RunID    string            `json:"run_id"`
 	RepoID   int64             `json:"-"`
 	Repo     string            `json:"repo,omitempty"`
 	Ref      string            `json:"ref,omitempty"`
 	Workflow string            `json:"workflow,omitempty"`
-	Size     string            `json:"size,omitempty"`
-	Weight   int               `json:"weight"`
 	State    string            `json:"state"`
 	Group    string            `json:"group,omitempty"`
 	Position int               `json:"position,omitempty"`
 	Since    time.Time         `json:"since"`
-	// Backfilled marks a grant made beside a waiting head (#1085).
-	Backfilled bool `json:"backfilled,omitempty"`
 }
 
 // AdmissionGroup is a YAML-defined shared group with current holders and waiters.
@@ -319,7 +225,6 @@ type AdmissionGroup struct {
 type AdmissionRelease struct {
 	RunID    string `json:"run_id"`
 	State    string `json:"state"`
-	Weight   int    `json:"weight"`
 	Group    string `json:"group,omitempty"`
 	Workflow string `json:"workflow,omitempty"`
 	Verified bool   `json:"verified"`
@@ -406,18 +311,4 @@ func (p *PressureDeferral) Reason() string {
 		return fmt.Sprintf("deferred: %s pressure gate (host PSI some avg10: cpu %.1f%%, io %.1f%%)", p.Resource, p.CPUAvg10, p.IOAvg10)
 	}
 	return fmt.Sprintf("deferred: %s pressure %.1f%%", p.Resource, p.Avg60)
-}
-
-// DeclaredResources describes this run's admission reservation, including
-// declared requests/VM host demand, server helpers and memory headroom.
-// Aggregate host usage is deliberately not included.
-type DeclaredResources struct {
-	// Raw declarations and concurrent envelope, before helpers/headroom.
-	// A missing total is unknown (dynamic, unsupported, or historical).
-	DeclaredTotal     *argoworkflow.PodRequests `json:"declared_total,omitempty"`
-	Peak              *argoworkflow.PodRequests `json:"peak,omitempty"`
-	ExtendedResources map[string]int64          `json:"extended_resources,omitempty"`
-	CPUMilli          int64                     `json:"cpu_milli"`
-	MemoryBytes       int64                     `json:"memory_bytes"`
-	Pods              int64                     `json:"pods"`
 }

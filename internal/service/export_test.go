@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"testing"
 	"time"
 
 	"github.com/oberthci/oberth/internal/identityname"
@@ -10,38 +11,23 @@ import (
 	"github.com/oberthci/oberth/internal/runlog"
 	"github.com/oberthci/oberth/internal/store"
 	"github.com/oberthci/oberth/internal/storetest"
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
-// newWeightedAdmissionForJobs converts the operator's configured concurrent-run
-// ceiling into the weight budget this gate is denominated in.
-//
-// The two are different units and conflating them silently caps the whole
-// server at one run: a budget of maxConcurrentJobs weight admits only
-// floor(maxConcurrentJobs / weight) runs, which for the default M size (weight
-// 2) is one run at maxConcurrentJobs=3. Scaling by the default size's weight
-// makes maxConcurrentJobs runs of an undeclared-size pipeline fit exactly, so
-// the configured number is the number an ordinary repository actually gets.
-// A pipeline that declares a heavier size then trades concurrency for
-// per-run resources proportionally, instead of collapsing the server to one.
-func newWeightedAdmissionForJobs(maxConcurrentJobs int) *weightedAdmission {
-	return newWeightedAdmission(max(1, maxConcurrentJobs) * DefaultSizeWeights.M)
-}
-
 // reserve records FIFO claim order before exact-SHA checkout and static
 // parsing can finish out of order.
-func (gate *weightedAdmission) reserve(sequence int64) *admissionReservation {
+func (gate *admissionGate) reserve(sequence int64) *admissionReservation {
 	return gate.reserveInOrder(sequence, sequence)
 }
 
-func (gate *weightedAdmission) reserveInOrder(sequence, order int64) *admissionReservation {
+func (gate *admissionGate) reserveInOrder(sequence, order int64) *admissionReservation {
 	return gate.reservePriorityRun(sequence, order, model.Run{})
 }
 
-// acquire admits an ungrouped run of the given size.
-func (reservation *admissionReservation) acquire(ctx context.Context, size pipeline.Size) (func(), error) {
-	return reservation.acquireRequest(ctx, admissionRequest{Size: size})
+// acquire admits an ungrouped run. The historical size tier is accepted for
+// fixture brevity and has no effect: the gate counts runs.
+func (reservation *admissionReservation) acquire(ctx context.Context, _ pipeline.Size) (func(), error) {
+	return reservation.acquireRequest(ctx, admissionRequest{})
 }
 
 func (service *API) waitRun(ctx context.Context, repositoryName, selector, trigger string, requestedSeconds int, actor string) (WaitResponse, error) {
@@ -50,16 +36,6 @@ func (service *API) waitRun(ctx context.Context, repositoryName, selector, trigg
 		return WaitResponse{}, err
 	}
 	return prepared(ctx)
-}
-
-// Persist the server-admitted contract before POST. Recovery must never need a
-// Kubernetes read, a moving repository ref or a remote fragment to restore it.
-func (scheduler *Scheduler) recordCreateAdmission(run model.Run, name string, size pipeline.Size, pods ...*argoworkflow.PodDemand) error {
-	var peak *argoworkflow.PodDemand
-	if len(pods) > 0 {
-		peak = pods[0]
-	}
-	return scheduler.recordResourceAdmission(run, name, size, peak, "")
 }
 
 // Kept separate for status/diagnostic callers without exposing API errors.
@@ -72,9 +48,6 @@ func (scheduler *Scheduler) pendingCreateCount() int {
 func (scheduler *Scheduler) liveAt(now time.Time) error {
 	if err := scheduler.dispatchProgress.CheckAt(now); err != nil {
 		return fmt.Errorf("scheduler: %w", err)
-	}
-	if err := scheduler.headProgress.CheckAt(now); err != nil {
-		return fmt.Errorf("admission persistence: %w", err)
 	}
 	return nil
 }
@@ -125,10 +98,61 @@ func readPressureDirectory(root string) (model.PressureSample, error) {
 	return readPressureSources(root, true)
 }
 
-// Historical gate tests exercise the pre-numeric compatibility semantics in
-// isolation. The deployed scheduler only constructs newWorkflowAdmissionForJobs.
-func newWeightedAdmissionForJobsWeights(jobs int, weights SizeWeights) *weightedAdmission {
-	gate := newWeightedAdmission(max(1, jobs) * weights.M)
-	gate.weights = weights
-	return gate
+type fakeClock struct{ now time.Time }
+
+func (clock *fakeClock) Now() time.Time { return clock.now }
+
+// pending starts an acquire that may wait and returns its reservation.
+func pending(t *testing.T, gate *admissionGate, sequence int64, request admissionRequest) *admissionReservation {
+	t.Helper()
+	return pendingPriority(t, gate, sequence, model.PriorityNormal, request)
+}
+
+func pendingPriority(t *testing.T, gate *admissionGate, sequence int64, priority model.RunPriority, request admissionRequest) *admissionReservation {
+	t.Helper()
+	reservation := gate.reserveRun(model.Run{ID: request.RunID, QueueSequence: sequence, Priority: priority, QueuedAt: gate.clock()})
+	go func() { _, _ = reservation.acquireRequest(context.Background(), request) }()
+	deadline := time.Now().Add(testStartTimeout(admissionAcquireBudget))
+	for {
+		gate.mu.Lock()
+		settled := reservation.prepared || reservation.granted
+		gate.mu.Unlock()
+		if settled {
+			return reservation
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("reservation %d never prepared", sequence)
+		}
+		time.Sleep(testTimeout(time.Millisecond))
+	}
+}
+
+func granted(gate *admissionGate, reservation *admissionReservation) bool {
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	return reservation.granted
+}
+
+func kick(gate *admissionGate) {
+	gate.mu.Lock()
+	gate.grantLocked()
+	gate.mu.Unlock()
+}
+
+func awaitRunStatus(t *testing.T, fixture *concurrencyFixture, runID string, want model.RunStatus) model.Run {
+	t.Helper()
+	deadline := time.Now().Add(testStartTimeout(15 * time.Second))
+	for {
+		run, err := fixture.store.Run(context.Background(), runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run.Status == want {
+			return run
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("run %s is %s, want %s", runID, run.Status, want)
+		}
+		time.Sleep(testTimeout(20 * time.Millisecond))
+	}
 }

@@ -114,7 +114,7 @@ func TestHostPressureIdleBypassUsesRunClassification(t *testing.T) {
 			}
 			r := f.gate.reservePriorityRun(2, 2, run)
 			f.gate.mu.Lock()
-			r.prepared, r.preparedAt, r.size, r.weight = true, f.now, pipeline.S, 1
+			r.prepared, r.preparedAt = true, f.now
 			f.gate.grantLocked()
 			f.gate.mu.Unlock()
 			if r.granted != tc.grant {
@@ -160,9 +160,9 @@ func TestHostPressureStarvationOnlyHeadAndBudgetStillApply(t *testing.T) {
 	if head.granted || behind.granted {
 		t.Fatal("expired follower bypassed fresh head")
 	}
-	// Once the head is old, its grant still consumes capacity.
+	// Once the head is old, its grant still consumes the only run slot.
+	f.gate.maxRuns = 1
 	head.pressureSince = f.now.Add(-21 * time.Minute)
-	behind.weight = f.gate.capacity
 	f.advance(time.Second)
 	if !head.granted || behind.granted {
 		t.Fatal("starvation bypassed budget")
@@ -351,6 +351,7 @@ func TestHostPressureStarvationOnlyOnceInLongPass(t *testing.T) {
 
 func TestHostPressureBudgetWaitDoesNotStartStarvation(t *testing.T) {
 	f := hostPressureTestGate()
+	f.gate.maxRuns = 1
 	running := f.prepare(1, model.PriorityNormal, "", pipeline.XL)
 	f.sample.CPU.SomeAvg10 = 45
 	waiting := f.prepare(2, model.PriorityNormal, "", pipeline.S)

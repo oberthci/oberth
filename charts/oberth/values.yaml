@@ -35,10 +35,21 @@ uplinkTokens:
   maxTTL: 8760h # 365-day hard ceiling; may be lowered
 
 replicaCount: 1
-maxConcurrentJobs: 3
+# Optional run ceiling: how many runs may hold a Workflow at once (0..64).
+# 0, the default, is no ceiling: Argo and Kubernetes decide what runs. Shared
+# limits between steps are native Argo synchronization; see argoSync below.
+maxConcurrentJobs: 0
 # One fresh attempt for eligible infrastructure failures; retains queue position.
 # The automatic retry budget is fixed at one and cannot be increased.
 autoRetryInfrastructure: true
+
+# Release runs of every repository, one at a time. When true, every release
+# run carries the native Argo workflow-level mutex `oberth-release`; a second
+# release waits in the Argo controller's queue (priority, then creation time)
+# and shows "waiting for lock .../Mutex/oberth-release" until the first
+# finishes. A document's own synchronization is kept beside it.
+releases:
+  serialize: false
 
 # Agent-assisted CI continuation (retry hold). Off by default. When enabled,
 # a branch run pushed with `git push -o oberth.assist=1` (or rerun with
@@ -109,15 +120,16 @@ promotion:
 branches:
   reserved: [main, master]
 
-# Workflow admission keeps a concurrent-workflow ceiling, the PSI hard-limit
-# valve and the disk floor. Kubernetes schedules each step pod by its requests.
-# See docs/declared-admission.md for upgrade behavior and ignored legacy values.
+# Admission counts runs. Besides the optional ceiling above it keeps only host
+# safety that reads nothing from a workflow: the PSI hard-limit valve and the
+# disk floor. Kubernetes schedules each step pod by its requests; steps that
+# must not overlap declare native Argo synchronization (docs/native-synchronization.md).
 admission:
   # Boot default. Change capacity at runtime with admission_capacity_config
   # (oberth admission capacity); never kubectl-edit the rendered ConfigMap.
   runtimeCapacity:
     enabled: true
-    # Null initializes the runtime value from maxConcurrentJobs above.
+    # Null initializes the runtime value from maxConcurrentJobs above (0: no ceiling).
     maxConcurrentJobs: null
   pressure:
     enabled: true
@@ -126,14 +138,6 @@ admission:
   # Hold new workflow admission below this free-space floor; existing grants
   # continue. Zero disables the disk floor.
   diskFloorBytes: 0
-  # Server-wide exclusive classes (#1499): class name -> concurrent-run limit.
-  # A step declaring template annotation oberth.ci/exclusive: <class> makes its
-  # run wait in Oberth's queue while <limit> runs of that class hold it, across
-  # all repositories. Empty (default) refuses every declaration. Example:
-  #   exclusiveClasses:
-  #     kvm: 1
-  # See docs/exclusive-classes.md.
-  exclusiveClasses: {}
   # Startup bound for an admitted workflow that has neither a scheduled pod nor
   # progress (Kubernetes capacity waits are exempt). Go duration, e.g. 10m.
   stallTimeout: "10m"
@@ -147,21 +151,23 @@ admission:
     factorPercent: 50
     minSeconds: 120
     maxSeconds: 600
-  # Deprecated compatibility values: retained for upgrades, ignored by admission.
-  declaredResources:
-    extendedResources: {}
-    disabled: false
-    cpuMillis: 8000
-    memoryBytes: 17179869184
-    memoryHeadroomBytes: 1073741824
-    memoryHeadroomPercent: 10
-    ioRuns: 0
-  maxHeadWait: "20m"
-  sizeWeights:
-    S: 1
-    M: 2
-    L: 3
-    XL: 0
+
+# Shared step limits for native Argo synchronization. Each entry becomes a key
+# of the ConfigMap `oberth-sync-limits` in the pipeline namespace; a step that
+# declares
+#   synchronization:
+#     semaphores:
+#       - configMapKeyRef: {name: oberth-sync-limits, key: kvm}
+# runs at most that many instances at once, across every repository, queued by
+# the Argo controller. Argo re-reads the ConfigMap, so a change applies on the
+# next helm upgrade without a server restart. Empty renders no ConfigMap.
+# Example:
+#   argoSync:
+#     semaphores:
+#       kvm: 1
+#       heavy-go: 2
+argoSync:
+  semaphores: {}
 
 # Repository cron schedules (docs/scheduled-runs.md): the shortest interval a
 # repository may schedule itself at, and the most entries it may declare.

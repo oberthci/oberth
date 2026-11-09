@@ -30,8 +30,6 @@ type Adoption struct {
 	UID         types.UID
 	Identity    string
 	SpecSHA256  string
-	// Exclusive lists the exclusive classes the live Workflow's steps declare.
-	Exclusive []string
 }
 
 // ErrAdoptionRefused marks a Workflow that exists but must not be observed as
@@ -124,11 +122,7 @@ func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request Adop
 	if err != nil {
 		return Adoption{}, err
 	}
-	exclusive, err := argoworkflow.DeclaredExclusiveClasses(workflow)
-	if err != nil {
-		return Adoption{}, err
-	}
-	return Adoption{Exclusive: exclusive, Sources: workflow.Annotations[argoworkflow.SourcesAnnotation], Fallback: fallback, Pods: peak, RestartedAt: controller.restartedAt, Size: size, UID: workflow.UID, Identity: identity, SpecSHA256: specHash}, nil
+	return Adoption{Sources: workflow.Annotations[argoworkflow.SourcesAnnotation], Fallback: fallback, Pods: peak, RestartedAt: controller.restartedAt, Size: size, UID: workflow.UID, Identity: identity, SpecSHA256: specHash}, nil
 }
 
 // Argo's status and API metadata change while it runs. Its live spec must stay

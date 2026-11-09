@@ -161,13 +161,10 @@ apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
   annotations:
-    # Scheduler concurrency tier:
-    #   S  -- lightweight (6 concurrent)
-    #   M  -- standard (3 concurrent, default)
-    #   L  -- heavy (2 concurrent)
-    #   XL -- exclusive (runs alone; needs an admin size grant)
-    # Does NOT set per-container CPU/memory — declare resources:
-    # on each template. Max per-container: cpu 8, memory 16Gi.
+    # Historical size tier, recorded with the run and otherwise unused:
+    # admission counts runs, Kubernetes places each Pod by its resources:
+    # block (declare one on each template; max per-container: cpu 8,
+    # memory 16Gi), and shared step limits are native Argo synchronization.
     oberth.ci/size: S
 spec:
   entrypoint: ci

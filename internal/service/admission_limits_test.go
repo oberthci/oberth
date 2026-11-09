@@ -9,7 +9,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
 type stalledGrantJobs struct{ *fakeJobs }
@@ -35,7 +34,7 @@ func TestAdmissionLimitsGrantedBeforeSubmissionDeadlineReleasesReservation(t *te
 		t.Fatalf("stalled grant was not settled: %+v", run)
 	}
 	state := f.scheduler.AdmissionState()
-	if state.Runs != 0 || state.NumericBudget != nil || len(state.Reservations) != 0 {
+	if state.Runs != 0 || len(state.Reservations) != 0 {
 		t.Fatalf("stalled grant leaked resources: %+v", state)
 	}
 }
@@ -73,7 +72,7 @@ func TestAdmissionLimitsCleanupOutageKeepsServerAvailableAndEventuallyReleases(t
 	if err != nil || run.Error != store.ExecutorIdentityPendingMessage || !isPendingCreate(run) {
 		t.Fatalf("deadline cleanup cause was lost: %+v %v", run, err)
 	}
-	if state := f.scheduler.AdmissionState(); state.Runs != 1 || state.NumericBudget != nil {
+	if state := f.scheduler.AdmissionState(); state.Runs != 1 {
 		t.Fatal("capacity released while workflow may live", state)
 	}
 	f.scheduler.settleOneCreate(t.Context())
@@ -86,7 +85,7 @@ func TestAdmissionLimitsCleanupOutageKeepsServerAvailableAndEventuallyReleases(t
 	if err != nil || run.Status != model.RunFailed || !strings.Contains(run.Error, "executor identity readiness deadline") {
 		t.Fatalf("cleanup failed to settle deadline: %+v %v", run, err)
 	}
-	if state := f.scheduler.AdmissionState(); state.Runs != 0 || state.NumericBudget != nil || f.scheduler.pendingCreateCount() != 1 {
+	if state := f.scheduler.AdmissionState(); state.Runs != 0 || f.scheduler.pendingCreateCount() != 1 {
 		t.Fatalf("scratch cleanup retained physical capacity: %+v", state)
 	}
 	f.scheduler.workspaces.remove = remove
@@ -98,7 +97,7 @@ func TestAdmissionLimitsCleanupOutageKeepsServerAvailableAndEventuallyReleases(t
 }
 
 func TestAdmissionLimitsUnclaimedQueueReportsFullRunCeilingWithoutLeakingScope(t *testing.T) {
-	g := newWorkflowAdmissionForJobs(10)
+	g := newAdmissionGate(10)
 	var releases []func()
 	defer func() {
 		for _, release := range releases {
@@ -106,7 +105,7 @@ func TestAdmissionLimitsUnclaimedQueueReportsFullRunCeilingWithoutLeakingScope(t
 		}
 	}()
 	for i := int64(1); i <= 10; i++ {
-		releases = append(releases, acquireRequestWithinBudget(t, g.reserve(i), admissionRequest{Size: pipeline.M}))
+		releases = append(releases, acquireRequestWithinBudget(t, g.reserve(i), admissionRequest{}))
 	}
 	api := &API{admission: &Scheduler{admission: g}}
 	run := model.Run{ID: "queued", RepoID: 1, Status: model.RunQueued}

@@ -13,7 +13,6 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/runprogress"
-	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
 
@@ -170,9 +169,6 @@ func TestWorkflowCreateBrownoutTenMinutesDoesNotStopServerOrOtherRuns(t *testing
 				for _, grant := range state.Reservations {
 					if grant.RunID == pending.ID {
 						found = true
-						if grant.Weight != 0 || grant.DeclaredResources != nil || grant.Size != "" {
-							t.Fatalf("pending grant changed: %+v", grant)
-						}
 					}
 				}
 				if !found {
@@ -213,7 +209,7 @@ func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForSettlement(t *testi
 			jobs := &pendingCreateJobs{fakeJobs: f.jobs}
 			f.scheduler.jobs = jobs
 			f.scheduler.maxConcurrent = 3
-			f.scheduler.admission = newWorkflowAdmissionForJobs(3)
+			f.scheduler.admission = newAdmissionGate(3)
 			var runs []model.Run
 			for i := range 2 {
 				queued, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: fmt.Sprintf("restart-%d", i), Repository: f.repo, Branch: fmt.Sprintf("feature/restart-%d", i), SHA: strings.Repeat("c", 40), Actor: "pusher"})
@@ -233,7 +229,7 @@ func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForSettlement(t *testi
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := f.scheduler.recordCreateAdmission(run, run.WorkflowName, pipeline.S, &argoworkflow.PodDemand{CPUMilli: 900, MemoryBytes: 1 << 30, Pods: 1}); err != nil {
+				if err := f.scheduler.recordWorkflowCreateBinding(run, run.WorkflowName); err != nil {
 					t.Fatal(err)
 				}
 				if marked {
@@ -280,7 +276,7 @@ func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForSettlement(t *testi
 				t.Fatalf("unacknowledged recovery bypassed adoption: %d", jobs.adoptCalls.Load())
 			}
 			state := f.scheduler.AdmissionState()
-			if state.NumericBudget != nil || state.Runs != 2 || f.scheduler.pendingCreateCount() != 2 {
+			if state.Runs != 2 || f.scheduler.pendingCreateCount() != 2 {
 				t.Fatalf("restart did not restore exact pending contracts: %+v", state)
 			}
 			other, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: "after-restart", Repository: f.repo, Branch: "feature/available", SHA: strings.Repeat("d", 40), Actor: "pusher"})
@@ -340,9 +336,6 @@ func TestWorkflowCreateProcessNextAndCancelNeverSettleInline(t *testing.T) {
 	current, _ := f.store.Run(t.Context(), source.ID)
 	if !current.Cancelled() || !isPendingCreate(current) {
 		t.Fatalf("cancel lost durable pending marker: %+v", current)
-	}
-	if f.scheduler.AdmissionState().NumericBudget != nil {
-		t.Fatal("cancel released uncertain grant")
 	}
 }
 
@@ -429,9 +422,6 @@ func TestWorkflowCreatePendingPersistenceFailureIsRetriedWithoutFatal(t *testing
 	if err := f.scheduler.ProcessNext(t.Context()); err != nil {
 		t.Fatal("pending persistence failure reached scheduler", err)
 	}
-	if f.scheduler.AdmissionState().NumericBudget != nil {
-		t.Fatal("persistence outage freed grant")
-	}
 	db.fail = false
 	f.scheduler.settleOneCreate(t.Context())
 	run, err := f.store.Run(t.Context(), source.ID)
@@ -471,7 +461,7 @@ func TestWorkflowCreatePendingPushAndResolvedCancelStayLocal(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if calls != 0 || f.scheduler.AdmissionState().NumericBudget != nil {
+			if calls != 0 {
 				t.Fatal("push/cancel settled inline or released grant")
 			}
 			f.scheduler.settleOneCreate(t.Context())

@@ -734,7 +734,7 @@ func TestEveryToolIsClassifiedForScopedUplinks(t *testing.T) {
 type busyAdmission struct{}
 
 func (busyAdmission) AdmissionSnapshot(int64) *model.AdmissionObservation {
-	return &model.AdmissionObservation{State: "waiting", Position: 3, Size: "M", Weight: 2, Used: 7, Capacity: 8,
+	return &model.AdmissionObservation{State: "waiting", Position: 3, Used: 7, Capacity: 8,
 		DiskFloor: &model.DiskFloorObservation{BelowFloor: true, FreeBytes: 1, FloorBytes: 2}}
 }
 
@@ -747,7 +747,7 @@ func TestScopedSchedulingHidesInstallationLoad(t *testing.T) {
 	run := model.Run{ID: "run", Status: model.RunRunning, QueueSequence: 5}
 	got, _ := scoped.observeScheduling(context.Background(), run, nil, true)
 	if got.Admission.Position != 0 || got.Admission.Used != 0 || got.Admission.Capacity != 0 || got.Admission.DiskFloor != nil ||
-		got.Message != "In line." || got.Admission.Size != "M" {
+		got.Message != "In line." {
 		t.Fatalf("scoped scheduling = %#v %#v", got, got.Admission)
 	}
 	if full, _ := unscoped.observeScheduling(context.Background(), run, nil, true); full.Admission.Used != 7 || !strings.Contains(full.Message, "disk space") {

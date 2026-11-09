@@ -24,7 +24,7 @@ func (f schedulingObserverFunc) ObserveScheduling(ctx context.Context, run model
 }
 
 func TestSchedulingAdmissionSnapshotsFollowLifecycle(t *testing.T) {
-	gate := newWeightedAdmission(2)
+	gate := newAdmissionGate(1)
 	scheduler := &Scheduler{admission: gate}
 	first := gate.reserve(1)
 	release, err := first.acquire(t.Context(), pipeline.XL)
@@ -39,7 +39,7 @@ func TestSchedulingAdmissionSnapshotsFollowLifecycle(t *testing.T) {
 	acquired := make(chan func(), 1)
 	go acquireForTest(second, pipeline.M, acquired)
 	assertNotAcquired(t, acquired)
-	if result := scheduler.AdmissionSnapshot(2); result.State != "waiting" || result.Position != 1 || result.Used != 2 || result.Size != "M" {
+	if result := scheduler.AdmissionSnapshot(2); result.State != "waiting" || result.Position != 1 || result.Used != 1 {
 		t.Fatalf("waiting=%#v", result)
 	}
 	if result := scheduler.AdmissionSnapshot(1); result.State != "admitted" || result.Position != 0 {
@@ -59,7 +59,7 @@ func TestSchedulingAdmissionSnapshotsFollowLifecycle(t *testing.T) {
 }
 
 func TestClaimedRunShowsCapacityWaitUntilSubmission(t *testing.T) {
-	gate := newWeightedAdmission(3)
+	gate := newAdmissionGate(1)
 	scheduler := &Scheduler{admission: gate}
 	first := gate.reserve(1)
 	releaseFirst, err := first.acquire(t.Context(), pipeline.L)
@@ -77,9 +77,9 @@ func TestClaimedRunShowsCapacityWaitUntilSubmission(t *testing.T) {
 	})}
 	run := model.Run{Status: model.RunRunning, QueueSequence: 2, QueuePosition: 1, WorkflowName: "reserved-workflow"}
 	observation, _ := service.observeScheduling(t.Context(), run, nil, true)
-	if observation.State != "waiting" || observation.Admission == nil || observation.Admission.Weight != 2 ||
-		observation.Admission.Used != 3 || observation.Admission.Capacity != 3 || observation.Admission.Position != 1 ||
-		!strings.Contains(observation.Message, "Need 2 weight; 3/3 used; queue position 1") {
+	if observation.State != "waiting" || observation.Admission == nil ||
+		observation.Admission.Used != 1 || observation.Admission.Capacity != 1 || observation.Admission.Position != 1 ||
+		!strings.Contains(observation.Message, "1 run running") {
 		t.Fatalf("capacity wait was not visible: %#v", observation)
 	}
 	releaseFirst()
@@ -354,5 +354,28 @@ func TestSchedulingDeadlineVisibleAfterProgressWithoutChangingDurableStatus(t *t
 	terminal.Status, terminal.Error = model.RunFailed, "Step exceeded its deadline"
 	if got := presentationRun(terminal); got.DisplayStatus != "failed" || got.DisplayReason != "infrastructure error: deadline exceeded" {
 		t.Fatalf("retained terminal deadline reason hidden: %+v", got)
+	}
+}
+
+// A running run whose step is queued behind native Argo synchronization shows
+// the lock in its reason line, with no new status.
+func TestExecutionDisplayNamesTheSynchronizationLock(t *testing.T) {
+	for name, execution := range map[string]*model.ExecutionObservation{
+		"workflow-level": {State: "observed", Phase: "Pending", Message: model.LockWaitMessagePrefix + "ConfigMap/oberth-sync-limits/kvm (0/1 free)."},
+		"template-level": {State: "observed", Phase: "Running", Message: "Workflow execution is running.",
+			Nodes: []model.SchedulingReason{{Phase: "Succeeded"}, {Phase: "Pending", Message: model.LockWaitMessagePrefix + "ConfigMap/oberth-sync-limits/kvm (0/1 free)."}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			run := model.Run{ID: "run", Status: model.RunRunning, DisplayStatus: model.DisplayRunning}
+			applyExecutionDisplay(&run, &model.RunScheduling{State: "observed", Execution: execution})
+			if run.DisplayReason != "waiting for lock ConfigMap/oberth-sync-limits/kvm (0/1 free)" || run.DisplayStatus != model.DisplayRunning {
+				t.Fatalf("display = %q / %q", run.DisplayStatus, run.DisplayReason)
+			}
+		})
+	}
+	run := model.Run{ID: "run", Status: model.RunRunning, DisplayStatus: model.DisplayRunning}
+	applyExecutionDisplay(&run, &model.RunScheduling{State: "observed", Execution: &model.ExecutionObservation{State: "observed", Message: "Workflow execution is running."}})
+	if run.DisplayReason != "" {
+		t.Fatalf("plain running run got a lock reason: %q", run.DisplayReason)
 	}
 }

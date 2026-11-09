@@ -1224,50 +1224,14 @@ Usage of serve:
         one-shot acknowledgment: exact Rekor UUID of the latest published witness before a fresh genesis permanently abandons that chain
   -accept-witness-genesis string
         one-shot acknowledgment: exact current audit chain head as <auditID>:<sha256hex>; marks it as the witness genesis so external witnessing starts there, explicitly trusting all prior local history (enables Rekor on an existing deployment)
-  -admission-cpu-millis int
-        deprecated compatibility option; ignored by workflow admission (default 8000)
   -admission-disk-floor-bytes int
         when enabled and free bytes on /data are below this floor, admission is held until disk frees up (#673)
-  -admission-exclusive-classes string
-        comma-separated server-wide exclusive classes steps may declare with oberth.ci/exclusive, each class or class=limit (default limit 1); empty refuses every declaration (#1499)
-  -admission-extended-resources string
-        deprecated compatibility option; ignored by workflow admission (default "{}")
-  -admission-io-runs int
-        deprecated compatibility option; ignored by workflow admission
-  -admission-legacy-resources string
-        deprecated compatibility option; ignored by workflow admission (default "{}")
-  -admission-max-head-wait duration
-        deprecated compatibility option; ignored by workflow admission (default 20m0s)
-  -admission-memory-bytes int
-        deprecated compatibility option; ignored by workflow admission (default 17179869184)
-  -admission-memory-headroom-bytes int
-        deprecated compatibility option; ignored by workflow admission (default 1073741824)
-  -admission-memory-headroom-percent int
-        deprecated compatibility option; ignored by workflow admission (default 10)
-  -admission-pressure-cpu-some-avg10 float
-        deprecated compatibility option; ignored by workflow admission (default 30)
-  -admission-pressure-cpu-some-avg60-max float
-        deprecated compatibility option; ignored by workflow admission
   -admission-pressure-enabled
         hold new workflow grants at the hard host CPU/IO PSI limits (default true)
   -admission-pressure-hard-cpu float
         hard host CPU some PSI avg10 percentage for new workflow grants (default 50)
   -admission-pressure-hard-io float
         hard host IO some PSI avg10 percentage for new workflow grants (default 40)
-  -admission-pressure-hysteresis float
-        deprecated compatibility option; ignored by workflow admission (default 10)
-  -admission-pressure-io-full-avg60-max float
-        deprecated compatibility option; ignored by workflow admission
-  -admission-pressure-io-some-avg10 float
-        deprecated compatibility option; ignored by workflow admission (default 20)
-  -admission-pressure-max-defer duration
-        deprecated compatibility option; ignored by workflow admission (default 20m0s)
-  -admission-pressure-max-wait-seconds int
-        deprecated compatibility option; ignored by workflow admission (default 1200)
-  -admission-pressure-mode string
-        deprecated compatibility option; ignored by workflow admission (default "enforce")
-  -admission-size-weights string
-        deprecated compatibility option; ignored; Kubernetes places step pods (default "S=1,M=2,L=3,XL=0")
   -admission-stall-timeout duration
         workflow startup bound for absent or non-capacity-stalled pods; Kubernetes capacity waits are exempt (default 10m0s)
   -admission-step-startup-allowance-max-seconds int
@@ -1390,8 +1354,6 @@ Usage of serve:
         persistent data root (default "/data")
   -database string
         SQLite database path (default "/data/oberth.sqlite")
-  -disable-declared-admission
-        deprecated compatibility option; ignored by workflow admission
   -fragment-allowlist string
         comma-separated repositories usable as pipeline fragments; empty permits every registered repository
   -git-gc-interval duration
@@ -1415,9 +1377,9 @@ Usage of serve:
   -logs-budget-bytes int
         total retained log budget (0 disables size retention)
   -max-concurrent-jobs int
-        maximum concurrent workflows (boot default) (default 3)
+        optional run ceiling: how many runs may hold a Workflow at once (0..64; 0 is no ceiling; boot default)
   -max-concurrent-jobs-file string
-        mounted ConfigMap key to reload max concurrent Jobs without restart; invalid or missing keeps the last good value
+        mounted ConfigMap key to reload the run ceiling without restart (0 is no ceiling); invalid or missing keeps the last good value
   -namespace string
         Kubernetes namespace (default "oberth")
   -pipeline-network-policy-enabled value
@@ -1462,6 +1424,8 @@ Usage of serve:
         OpenBao transit key for trusted Plan artifacts
   -secretstore-transit-mount string
         OpenBao transit mount for trusted Plan artifacts (enables trusted Plan/Apply with --secretstore-transit-key)
+  -serialize-releases
+        give every release run the native Argo workflow-level mutex oberth-release, so no two releases of any repository run at once (Helm releases.serialize)
   -source-allowlist string
         JSON map of consumer upstream/org/repository to allowed pinned source repositories; empty denies all (default "{}")
   -ssh-host-key string

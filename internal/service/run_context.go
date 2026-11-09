@@ -23,11 +23,5 @@ func (service *API) runAdmissionContext(ctx context.Context, run model.Run, look
 	if service.scope != nil {
 		run.QueuePosition = 0
 	}
-	if service.admission != nil {
-		if admission := service.admission.AdmissionSnapshot(run.QueueSequence); admission != nil {
-			run.Size = admission.Size
-			run.DeclaredResources = admission.DeclaredResources
-		}
-	}
 	return run
 }
