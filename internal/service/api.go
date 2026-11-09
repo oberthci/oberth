@@ -133,6 +133,7 @@ type API struct {
 	receiveOutbox             ReceiveOutbox
 	receiveHandler            gitcache.ReceiveHandler
 	queueDemands              *queueDemandCache
+	branchCounts              *branchCountCache
 	issueStaleAfter           time.Duration
 	issueActiveStaleAfter     time.Duration
 	issueObservedAt           time.Time
@@ -281,6 +282,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		issueLifecycle:     config.IssueLifecycle,
 		schedulingObserver: config.SchedulingObserver, admission: config.Admission,
 		queueDemands:      &queueDemandCache{},
+		branchCounts:      &branchCountCache{},
 		resourceCoverages: config.ResourceCoverages, runResources: config.RunResources, resourceDeclarations: config.ResourceDeclarations,
 		resources: config.Resources, runs: config.Runs, history: config.History, runRetries: config.RunRetries, repositories: config.Repositories,
 		issues: config.Issues, promotions: config.Promotions, promotionRuns: config.PromotionRuns,
@@ -1552,10 +1554,10 @@ func (service *API) Repositories(ctx context.Context, actor api.Actor) (any, err
 			}
 		}
 	}
+	branches := service.nonDefaultBranchCounts(ctx, repos)
 	views := make([]RepoView, len(repos))
 	for i, repo := range repos {
-		views[i] = RepoView{Repository: repo, LatestRuns: runsByRepo[repo.ID]}
-
+		views[i] = RepoView{Repository: repo, LatestRuns: runsByRepo[repo.ID], NonDefaultBranches: branchCountPointer(branches, repo.ID)}
 	}
 	return service.stripScopedSequences(views), nil
 }

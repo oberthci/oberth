@@ -408,7 +408,7 @@ A step above the 4 MiB response ceiling returns a truncated result with
 step: a single step can exceed a model's context window.
 
 | `repo_usage` | Bounded external resource report by repository/step: sampled p50/p95/max, requests, coverage and used/request ratios. |
-| `repo_list` | List registered repositories as id, name, upstream, default_branch, archived_at and one latest_run (id, status, ref, finished_at). Archived repositories are hidden by default and counted in `archived_hidden`; `archived=include` lists the whole catalog, `archived=only` the archived subset. No run history or probe payload. |
+| `repo_list` | List registered repositories as id, name, upstream, default_branch, archived_at, `non_default_branches` (mirror `refs/heads/*` besides the default branch, cached up to a minute; null until counted) and one latest_run (id, status, ref, finished_at). Archived repositories are hidden by default and counted in `archived_hidden`; `archived=include` lists the whole catalog, `archived=only` the archived subset. No run history or probe payload. |
 | `repo_archive` / `repo_unarchive` | Archive or restore a repository, preserving history (unscoped admin only); archived repositories refuse new grants |
 | `repo_remove` | Remove a repository mapping and its Git cache (admin-only) |
 | `branch_delete_many` | Batch branch deletion: dry-run plan with plan_id, then confirm; every candidate classed merged, patch-equivalent, unique or unchecked (`report` lists the kept ones); compare-and-delete per ref, merged-only unless allow_unmerged, never the default branch, configured reserved branches only alone with confirm_reserved; upstream deletion is asynchronous (unscoped admin only) |

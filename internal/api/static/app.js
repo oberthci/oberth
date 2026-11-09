@@ -1405,6 +1405,13 @@ function toggleArchived() {
   state.showArchived = !state.showArchived;
   localStorage.setItem("oberth-archived", state.showArchived ? "show" : "hide");
 }
+/* Non-default branch counter (#1508): a subtle cleanup marker under the
+   default branch, shown only when non-zero; there is no branch view to link. */
+function branchCount(repo) {
+  const count = repo.non_default_branches;
+  if (typeof count !== "number" || count <= 0) return "";
+  return `<span class="meta" title="${esc(`${count} non-default branch${count === 1 ? "" : "es"}`)}">+${esc(count)}</span>`;
+}
 async function renderRepos(seq) {
   setChrome("repos", "/ repos");
   await Promise.all([loadRepos(), loadStatus().catch(() => { })]);
@@ -1418,7 +1425,7 @@ async function renderRepos(seq) {
     <div class="bar"><h1>Repositories</h1><span class="meta">${state.repos.length} configured</span>${archivedToggle()}</div>
     <div class="table repo-table">
       <div class="trow head"><div>repository</div><div>status</div><div>default branch</div><div>latest run</div><div>history</div><div>upstream</div></div>
-      ${rows.map(({ repo, runs, latest }) => `<div class="trow" data-repo-runs="${esc(repoKey(repo))}"><div class="primary"><div class="repo-name">${esc(repoLabel(repo))}</div></div><div>${repo.ArchivedAt ? pill("archived", "cancel") : latest ? pill(statusLabel(displayRunStatus(latest)), statusKind(displayRunStatus(latest))) : '<span class="meta">no runs</span>'}</div><div class="branch">${esc(repo.DefaultBranch || "--")}</div><div>${latest ? `<div class="branch">${esc(latest.Ref)}</div><span class="meta">${esc(ago(runWhen(latest)))}</span>` : '<span class="meta">--</span>'}</div><div>${historyStrip(runs)}</div><div class="clip">${esc(upstreamName(repo.UpstreamID))}</div></div>`).join("") || '<div class="empty static">No repositories configured.</div>'}
+      ${rows.map(({ repo, runs, latest }) => `<div class="trow" data-repo-runs="${esc(repoKey(repo))}"><div class="primary"><div class="repo-name">${esc(repoLabel(repo))}</div></div><div>${repo.ArchivedAt ? pill("archived", "cancel") : latest ? pill(statusLabel(displayRunStatus(latest)), statusKind(displayRunStatus(latest))) : '<span class="meta">no runs</span>'}</div><div><div class="branch">${esc(repo.DefaultBranch || "--")}</div>${branchCount(repo)}</div><div>${latest ? `<div class="branch">${esc(latest.Ref)}</div><span class="meta">${esc(ago(runWhen(latest)))}</span>` : '<span class="meta">--</span>'}</div><div>${historyStrip(runs)}</div><div class="clip">${esc(upstreamName(repo.UpstreamID))}</div></div>`).join("") || '<div class="empty static">No repositories configured.</div>'}
     </div>
   </section>`);
   setAuto(slowPollMs);

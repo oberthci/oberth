@@ -499,3 +499,30 @@ for(const priority of ['standard','normal',undefined]) {
 assert.match(run(`runRow({...ownerQueue[0],priority_class:'highest'})`),/>high priority</);
 assert.match(run(`runRow({...ownerQueue[0],priority_reason:'operator <unsafe>'})`),/title="operator &lt;unsafe&gt;"/);
 console.log('Owner layout passed: reversed queue, next at bottom, unchanged running/history order and wire data, and only named nonstandard priorities');
+// #1508: /repos shows a subtle, muted non-default branch count, only when non-zero.
+run(`
+  state.showArchived=false;
+  api=async path=>{
+    if(path==='/api/repos')return [
+      {ID:1,Name:'ours',UpstreamID:1,DefaultBranch:'main',non_default_branches:2,LatestRuns:[]},
+      {ID:2,Name:'clean',UpstreamID:1,DefaultBranch:'main',non_default_branches:0,LatestRuns:[]},
+      {ID:3,Name:'uncounted',UpstreamID:1,DefaultBranch:'main',non_default_branches:null,LatestRuns:[]},
+      {ID:4,Name:'old',UpstreamID:1,DefaultBranch:'main',non_default_branches:7,ArchivedAt:'2026-11-01T00:00:00Z',LatestRuns:[]}];
+    if(path==='/api/status')return state.status;
+    return [];
+  };
+`);
+await run('renderRepos(state.routeSeq)');
+const repoHtml = run('html');
+assert.match(repoHtml, /<div class="trow head"><div>repository<\/div><div>status<\/div><div>default branch<\/div><div>latest run<\/div><div>history<\/div><div>upstream<\/div><\/div>/, 'no new column header');
+const cell = (html, name) => html.match(new RegExp(`data-repo-runs="(?:[^"]*/)?${name}">[\\s\\S]*?<div><div class="branch">main</div>([\\s\\S]*?)</div><div>`))?.[1];
+assert.equal(cell(repoHtml, 'ours'), '<span class="meta" title="2 non-default branches">+2</span>', 'a non-zero count is muted text under the default branch');
+assert.equal(cell(repoHtml, 'clean'), '', 'zero shows nothing');
+assert.equal(cell(repoHtml, 'uncounted'), '', 'an uncounted mirror shows nothing');
+assert.equal(cell(repoHtml, 'old'), undefined, 'archived repositories stay hidden by default (#1498)');
+assert.doesNotMatch(repoHtml, /non-default branch[^<]*<\/a>|<a [^>]*>\+\d/, 'the count is never a link');
+run(`toggleArchived()`);
+await run('renderRepos(state.routeSeq)');
+assert.equal(cell(run('html'), 'old'), '<span class="meta" title="7 non-default branches">+7</span>', 'shown archived repositories carry their count');
+run(`toggleArchived()`);
+console.log('Repos passed: subtle muted non-default branch count only when non-zero, no column, archived hidden by default');

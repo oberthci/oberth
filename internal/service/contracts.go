@@ -660,4 +660,7 @@ type PromotionWaitResponse struct {
 type RepoView struct {
 	model.Repository
 	LatestRuns []model.Run `json:"LatestRuns"`
+	// NonDefaultBranches counts the mirror's refs/heads/* besides its default
+	// branch (#1508); null when the mirror has not been counted yet.
+	NonDefaultBranches *int `json:"non_default_branches"`
 }

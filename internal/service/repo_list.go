@@ -10,12 +10,15 @@ import (
 )
 
 type repoSummary struct {
-	ID            int64          `json:"id"`
-	Name          string         `json:"name"`
-	Upstream      string         `json:"upstream"`
-	DefaultBranch string         `json:"default_branch"`
-	ArchivedAt    *time.Time     `json:"archived_at"`
-	LatestRun     *repoLatestRun `json:"latest_run"`
+	ID            int64      `json:"id"`
+	Name          string     `json:"name"`
+	Upstream      string     `json:"upstream"`
+	DefaultBranch string     `json:"default_branch"`
+	ArchivedAt    *time.Time `json:"archived_at"`
+	// NonDefaultBranches is the mirror's branch count besides the default
+	// branch (#1508); null when unknown. 0 everywhere means no leftovers.
+	NonDefaultBranches *int           `json:"non_default_branches"`
+	LatestRun          *repoLatestRun `json:"latest_run"`
 }
 type repoLatestRun struct {
 	ID         string     `json:"id"`
@@ -63,7 +66,7 @@ func (service *API) repoList(ctx context.Context, archived string) (api.RepoList
 			latest[run.RepoID] = run
 		}
 	}
-	summaries := make([]repoSummary, 0, len(repos))
+	listed := make([]model.Repository, 0, len(repos))
 	hidden := 0
 	for _, repo := range repos {
 		if (archived == "exclude" && repo.ArchivedAt != nil) || (archived == "only" && repo.ArchivedAt == nil) {
@@ -72,7 +75,13 @@ func (service *API) repoList(ctx context.Context, archived string) (api.RepoList
 			}
 			continue
 		}
-		summary := repoSummary{ID: repo.ID, Name: repo.Name, DefaultBranch: repo.DefaultBranch, ArchivedAt: repo.ArchivedAt}
+		listed = append(listed, repo)
+	}
+	// Count only what is listed, so hidden archived mirrors cost nothing.
+	branches := service.nonDefaultBranchCounts(ctx, listed)
+	summaries := make([]repoSummary, 0, len(listed))
+	for _, repo := range listed {
+		summary := repoSummary{ID: repo.ID, Name: repo.Name, DefaultBranch: repo.DefaultBranch, ArchivedAt: repo.ArchivedAt, NonDefaultBranches: branchCountPointer(branches, repo.ID)}
 		if resolver, ok := service.runs.(upstreamResolver); ok {
 			upstream, err := resolver.Upstream(ctx, repo.UpstreamID)
 			if err != nil {
