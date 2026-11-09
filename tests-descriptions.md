@@ -1,3 +1,28 @@
+Assisted continuation (retry hold): `TestBuildAssistMarksOnlyCredentialFreeLeavesWithoutOwnRetries`,
+`TestBuildWithoutAssistInjectsNoHolds`, `TestBuildAssistSkipsCredentialedWorkflows`,
+`TestAssistHoldEligibilityRefusesIdentityAndLaunchers` and
+`TestBuildRefusesRepositoryAssistAnnotations` pin which leaves receive the
+server-owned one-attempt `retryStrategy` and conditional `podSpecPatch`, the
+workflow deadline extension and the refusal of repository copies of the hold
+annotations. `TestAssistPatchResolvesWithArgoTemplateEngine` substitutes the
+conditional patch with Argo v4.0.8's own template engine for attempt 1, a
+deadline-killed retry and a failed-command retry, and applies it with the same
+strategic merge, proving pause, deadline, writable source, read-only cache and
+scratch cache variables land only on the held attempt. Controller tests with a
+fake clientset cover hold detection, bounded exec and exit codes, release argv,
+abandon and the concurrent-hold cap; `internal/holdfs` tests cover unified-diff
+parsing refusals (traversal, `.git`, renames, binaries, counts, limits), exact
+context application and the Pod helper's symlink, precondition, truncation and
+release behaviour. Service tests cover owner-uplink/admin authorization, argv
+and stdin bounds, patch application through the real helper, the record-before-
+release rule, abandon on failed release, step disambiguation and the gate. Store
+tests prove the opt-in is immutable, a continue marks the run assisted
+atomically with its audit row, the verdict is monotonic, and assisted passed
+runs are excluded from `HasPassedRunForSHA`; service tests exclude them from
+`greenBranchCandidate` and give them the `assisted: ... not evidence` reason
+line without changing status. Chart tests render every `assist.*` value as its
+serve flag with the binary default and reject out-of-range values.
+
 Release chart digest #1181 tests execute the release script with real Helm
 (skipped when Helm is unavailable). They verify the published digest reaches
 the packaged defaults and render without editing source, and reject a stale
