@@ -280,7 +280,7 @@ func markAssistHolds(workflow *wfv1.Workflow, config Config, request Request, cr
 		if deadline := leafDeadline(t, workflow.Spec.TemplateDefaults); deadline != nil {
 			declared, err := strconv.ParseInt(deadline.String(), 10, 64)
 			if err != nil || declared <= 0 {
-				return // non-literal: Argo rejects it; never guess a hold deadline.
+				return // non-literal (Argo substitutes it later): never guess a hold deadline.
 			}
 			budget = declared
 		}
