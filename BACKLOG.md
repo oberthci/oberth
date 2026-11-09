@@ -147,5 +147,5 @@ single-upstream-only by design).
   admission classes, per-template Pod requests, resource measurement and
   numeric recommendations are implemented. Continue qualifying capacity
   accounting under contention and incomplete observations; see
-  [declared admission](docs/declared-admission.md) and
+  [admission and native synchronization](docs/native-synchronization.md) and
   [runtime capacity](docs/runtime-admission-capacity.md).

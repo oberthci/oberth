@@ -373,10 +373,11 @@ classes, tag/promotion precedence, administrator RC globs, FIFO and queue-positi
 agreement across durable views. Boundary and restart tests cover the 60-minute
 starvation boost, schema v33 upgrades, durable bumps and retained restart age.
 `TestQueuePriorityToolsAdminOnlyAuditedAndGated` refuses ordinary/scoped actors
-and blocked audit gates. Admission tests keep weighted budgets, same-class
-backfill and head-wait drains. The complete scheduler regression
+and blocked audit gates. Admission tests count runs against the ceiling
+(`TestAdmissionEnforcesRunCeiling`, `TestAdmissionIsFIFO`). The complete
+scheduler regression
 `TestSchedulerReleaseCandidateOvertakesAlreadyClaimedBranchQueue` puts an RC
-behind ordinary claimed L runs and proves it reaches the spare weight first,
+behind ordinary claimed runs and proves it reaches the spare slot first,
 then preserves ordinary FIFO. Cross-trigger group tests retain the live holder
 while a waiting tag takes priority over a waiting branch.
 
@@ -430,10 +431,13 @@ workflow and foreign-Pod deadlines as the step's own failure.
 OOM exit a genuine failure.
 `TestStartupDeadlineStepAutomaticallyRetriesOnce` runs the scheduler and SQLite
 store end to end: one automatic retry, never an `Execution deadline exceeded.`
-reason. Exclusive classes #1499: `TestExclusiveClassSerializesAcrossRepositories`,
-`TestExclusiveClassLimitAndFIFO` and `TestExclusiveClassAdoptedHolderBlocksNewMembers`
-cover the gate; `TestExclusiveClassFromFragmentIsAdmittedFromTheReceipt` and
-`TestBuildBindsFragmentExclusiveClassesToAdmission` keep fragment-declared
-classes under the allowlist, the limit and Build's admitted-set check;
-`TestExclusiveClassAllowlistRefusesUnknownClasses`, the
-argoworkflow syntax/count tests and the serve/chart flag tests cover the bounds.
+reason. Native synchronization (v0.18.0): `TestAdmitPassesNativeSynchronizationThrough`
+and `TestBuildSubmitsSynchronizationUntouched` keep semaphores and mutexes as
+written; `TestAdmissionDeadlineLeavesSynchronizationWaitToArgo` exempts lock
+waits from the stall bound and the pre-start watchdog;
+`TestLockWaitMessageNamesTheLockWithoutFreeText` and
+`TestExecutionDisplayNamesTheSynchronizationLock` bound the reason line;
+`TestBuildAssistHoldKeepsTemplateSynchronization` keeps a held retry's lock;
+`TestBuildSerializesReleasesWithOneNativeMutex` covers `releases.serialize`;
+`TestBuildIgnoresRetiredExclusiveAnnotationInFragments` keeps the retired
+annotation inert.

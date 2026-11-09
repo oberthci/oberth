@@ -529,12 +529,14 @@ containing CI and real workload qualification remain separately required.
   absent and runs simply start cold.
 - The server reads YAML statically at submission -- it never executes
   repository code in the server process.
-- Serving admission bounds concurrent workflows. Kubernetes places step Pods by
-  their requests. Historical `oberth.ci/size`, `oberth.ci/size-by-trigger`, size
-  weights, declared host CPU/memory budgets and memory headroom settings remain
-  compatibility inputs; they do not reserve serving capacity. Explicit requests
-  and limits remain in git. Missing requests use the documented per-container
-  defaults. See [workflow admission](docs/declared-admission.md).
+- Serving admission counts runs against one optional ceiling
+  (`maxConcurrentJobs`, 0..64, default 0: none). Kubernetes places step Pods by
+  their requests. Oberth reads nothing from a workflow document to decide
+  whether a run may start: there are no size weights, declared budgets,
+  exclusive classes or backfill. Historical `oberth.ci/size` and
+  `oberth.ci/size-by-trigger` are accepted and unused. Explicit requests and
+  limits remain in git. Missing requests use the documented per-container
+  defaults. See [admission and native synchronization](docs/native-synchronization.md).
 - Execution priority has four canonical classes: `low < standard < promotion < high`.
   Ordinary builds default to standard. Server-classified promotions and the oldest
   eligible waiting tag/release per repository use promotion, as do admin RC globs.
@@ -571,11 +573,10 @@ containing CI and real workload qualification remain separately required.
   MCP accepts deprecated normal/highest input aliases for current clients.
   No run status or layout changes. See [release-priority.md](docs/release-priority.md)
   for the exact compatibility, resource and fairness rules.
-- Waiting admission uses workflow slots, the enabled PSI hard-limit valve and
+- Waiting admission uses run slots, the enabled PSI hard-limit valve and
   the configured data-root disk floor. There is no measured backfill, resource
   head reservation, drain forecast or starvation bypass of hard pressure.
-  Historical head-wait records remain evidence and are not rewritten to explain
-  current queue waits. Priority changes retain the existing audited transaction
+  Historical head-wait records remain evidence; nothing writes them any more. Priority changes retain the existing audited transaction
   and admission mutex boundary. Current queue reasons identify the real blocker.
 - A named scheduled run durably records its resolved schedule entry in
   `runs.schedule_entry` (v31). Cron and manual
@@ -597,10 +598,10 @@ containing CI and real workload qualification remain separately required.
   retain their busy-repository guard unless forced. Run list/detail expose
   `ScheduleEntry`; status/wait expose
   `schedule_entry`. See [scheduled runs](docs/scheduled-runs.md).
-- Size grants/revocations remain historical and automatic tag-priority policy;
-  they no longer gate workflow execution or make XL exclusive. Automatic tag
-  priority still uses its existing eligibility checks and never supplies high
-  urgency. Kubernetes decides Pod placement, with operator-owned namespace
+- Size grants/revocations remain the historical automatic tag-priority policy
+  record; they gate nothing and no size tier caps automatic tag priority.
+  Automatic tag priority still uses its existing eligibility checks and never
+  supplies high urgency. Kubernetes decides Pod placement, with operator-owned namespace
   quotas bounding resources created through generic workflow capabilities.
 - Workflow graph analysis and declared Pod demand remain available for validation,
   provenance and diagnostic metadata. They do not create a serving CPU/memory
@@ -654,7 +655,9 @@ containing CI and real workload qualification remain separately required.
 - Every scheduling and placement setting is a Helm value rendered into a serve
   flag, with chart-default equal to binary-default: `maxConcurrentJobs`,
   `admission.runtimeCapacity`, `admission.pressure.{enabled,hardCpu,hardIo}`,
-  `admission.diskFloorBytes`, `admission.exclusiveClasses`,
+  `admission.diskFloorBytes`, `argoSync.semaphores` (the ConfigMap
+  `oberth-sync-limits`, no flag), `releases.serialize`
+  (`--serialize-releases`, off),
   `admission.stallTimeout` (`--admission-stall-timeout`, 10m),
   `admission.stepStartupAllowance`, `autoRetryInfrastructure`,
   `assist.{enabled,holdTTL,maxConcurrentHolds,execTimeout,execOutputBytes,patchMaxBytes,patchMaxFiles}`
@@ -668,29 +671,20 @@ containing CI and real workload qualification remain separately required.
   `--schedule-max-entries` 8). Queue priority classes and patterns stay runtime
   admin state (`queue_priority_config`); the 60-minute standard-run aging is a
   fixed rule.
-- Exclusive classes (#1499) are administrator-owned: `admission.exclusiveClasses`
-  (`--admission-exclusive-classes=class[=limit],...`, limit 1-64, default 1, at
-  most 32 classes) is an allowlist that defaults to empty, which refuses every
-  declaration. A step declares `oberth.ci/exclusive: <class>` on its template
-  metadata (also inline templates and `templateDefaults`); a class is 1-40 of
-  `[a-z0-9-]`, starting and ending with a letter or digit, at most four distinct
-  classes per pipeline. Membership is per run, read statically before admission
-  from the same fragment-resolved source receipt submission uses, so classes
-  declared inside pinned fragments count; Build refuses a resolved Workflow
-  whose classes differ from the admitted set. At most `limit` member runs hold a class
-  across all repositories and triggers; further members wait in Oberth's
-  admission queue in priority/FIFO order within the class, hold no workflow
-  slot and create no Workflow or Pod, and never block runs outside the class.
-  Global ceiling, hold, disk floor, pressure and concurrency groups still apply.
-  An unlisted class is a deterministic admission refusal, never auto-retried.
-  Classes are an in-memory server namespace, separate from YAML group names;
-  they never become Argo synchronization objects, ConfigMaps, node selectors or
-  affinity, so they add no node reach. Restart adoption and uncertain-create
-  settlement re-hold classes from the live Workflow or the create receipt,
-  even above a lowered limit. Queued reason `exclusive <class> busy`; the
-  admission observation adds `exclusive_classes`, `exclusive_class`,
-  `exclusive_limit`, `exclusive_blocked`, without holder identities. No status,
-  label or layout is added. See [exclusive classes](docs/exclusive-classes.md).
+- Native Argo `synchronization` is passed through as written at workflow and
+  template level: semaphores by `configMapKeyRef`, mutexes by name, no
+  refusal, no scoping, no allowlist. Limits are operator-owned keys of the
+  ConfigMap `oberth-sync-limits` in the pipeline namespace, rendered from
+  `argoSync.semaphores`; the Argo controller queues waiters (priority, then
+  creation) and re-reads the ConfigMap. A Workflow or step Pending behind a
+  lock is exempt from `admission.stallTimeout`, and the pre-start watchdog
+  does not count a workflow-level lock wait. The existing reason line reads
+  `waiting for lock <key> (a of b free)` with the key admitted only under the
+  controller's lock-key grammar. `releases.serialize` adds the workflow-level
+  mutex `oberth-release` to every release run by trigger, merged with the
+  document's own synchronization. A held retry keeps its template lock. The
+  retired `oberth.ci/exclusive` annotation is accepted and ignored. No status,
+  label or layout is added. See [native synchronization](docs/native-synchronization.md).
 - Server-owned helper operations (secret-store delivery, trusted plan
   capture/acknowledge/deliver/load) are exec'd through the same
   `go -C /work/src/.oberth run .` invocation with explicit flags; the SDK's
@@ -2670,12 +2664,11 @@ remain required, with no public listener or insecure fallback.
 | Change a NodePort, route, MCP tool name/input, environment variable, mount path, or binding step-result JSON field | Breaking |
 | Change the Argo Workflow YAML contract — expected filenames (`.oberth/build.yaml`, `.oberth/release.yaml`), required annotations, admission-set fields, the Workflow submission path, the source mount path, the cache mount path, or the injected environment | Breaking |
 | Honour a repository-supplied `serviceAccountName`, namespace, security context, or `claimName` | Forbidden |
-| Honour a repository-supplied synchronization mutex/semaphore name without trigger/repo scoping | Forbidden |
 | Let a repository-declared concurrency group span repositories, or change a run's weight, identity, or credentials | Forbidden |
 | Change the `oberth.ci/concurrency-group` annotation name, name grammar, or cross-trigger membership | Breaking |
-| Let a repository create an exclusive class, choose its limit, or turn a class into an Argo synchronization object, ConfigMap, node selector or affinity | Forbidden |
+| Decide a run's admission from its workflow document (size, weight, declared demand, a class annotation), rewrite or refuse native `synchronization`, or add a run status or label for a lock wait | Forbidden |
 | Count an assisted run (any exec, patch or continue on a retry hold) as promotion, publication, SHA-pinned fragment or CI-issue evidence; hold a credentialed, release, tag, promotion, schedule, plan or apply step; let a repository set `oberth.ci/assist-hold` or `podSpecPatch` | Forbidden |
-| Change the `oberth.ci/exclusive` annotation name, class grammar, empty-allowlist refusal, or run-level membership | Breaking |
+| Change the ConfigMap name `oberth-sync-limits`, the mutex name `oberth-release`, or the trigger that `releases.serialize` applies to | Breaking |
 | Charge Pod start-up to a step's declared deadline budget again by default, or report a step whose `main` exited 0 as a deadline failure | Breaking |
 | Change a scheduling or placement default (`admission.stepStartupAllowance`, `admission.stallTimeout`, `argo.defaultWorkflowTimeout`, `schedules.*`), or add such a setting without a Helm value | Breaking |
 | Let a repository choose the step start-up allowance or write `oberth.ci/step-start-allowance-seconds` | Forbidden |
@@ -3167,7 +3160,7 @@ continue follows nothing: it is never a promotion source, never published upstre
 never SHA-pinned fragment evidence and never resolves a CI issue. No status,
 label or layout is added; the existing status carries the reason line
 `assisted: step <name> continued after patch sha256:<12 hex> by <actor>; not
-evidence`. Held runs keep their workflow slot, exclusive classes and groups;
+evidence`. Held runs keep their run slot, template locks and groups;
 supersession and cancellation delete their Workflow. No RBAC is added: the
 Argo Role's existing `pods/exec` and `pods` delete verbs are used in the
 pipeline namespace only. See
@@ -3497,8 +3490,8 @@ The optional `--max-concurrent-jobs-file` is re-opened every five seconds, so
 projected ConfigMap symlink swaps take effect without restart. The boot flag
 remains the initial default. Accepted changes are audited before application;
 invalid/unreadable values and audit failure retain the last good configuration.
-The server counts granted workflows and delegates pod placement to Kubernetes.
-Legacy size weights do not constrain this ceiling; one workflow is valid.
+The server counts granted runs and delegates pod placement to Kubernetes.
+Zero means no ceiling; one is valid.
 Lowering never cancels running work, and raising wakes the queue.
 `system_status.admission.configuration` and the dashboard show effective jobs,
 source and reload errors; scoped views omit this host-wide configuration.

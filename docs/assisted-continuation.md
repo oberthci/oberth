@@ -87,8 +87,8 @@ repositories and `Build` deletes an authored `oberth.ci/assist`.
 
 Attempt 1 runs immediately. If its command exits nonzero, Argo creates the
 retry Pod with the held patch: the executor parks before the command, the
-step shows as running, and the run keeps its workflow slot, exclusive
-classes and concurrency group. If nobody acts before `holdTTL`, the server's hold sweep (the scheduler's
+step shows as running, and the run keeps its run slot, template locks and
+concurrency group. If nobody acts before `holdTTL`, the server's hold sweep (the scheduler's
 settlement tick) abandons the Pod, the retry is exhausted and the run fails
 as it would have; the kubelet deadline (budget plus TTL) is the backstop if
 the server is down. That deadline is not the recorded floored step deadline,
@@ -213,7 +213,7 @@ per-workflow and unaffected.
 
 ## Capacity, supersession and bounds
 
-- A held run keeps its workflow slot, exclusive classes and concurrency
+- A held run keeps its run slot, template locks and concurrency
   group until its Workflow ends: it counts as running work.
 - The scheduler's settlement tick sweeps holds: an unreleased hold older
   than `assist.holdTTL` is abandoned, then the newest parked holds above
@@ -252,8 +252,8 @@ per-workflow and unaffected.
   before the run-level infrastructure retry sees it, and a step that ran out
   of time is never given a second budget plus the hold TTL.
 - **Workflow deadline**: extended by one hold TTL per assisted run.
-- **Exclusive classes, concurrency groups, admission hold**: unchanged; a
-  held run is a member for the whole hold.
+- **Template locks, concurrency groups, admission hold**: unchanged; a
+  held run holds its native Argo lock and its group for the whole hold.
 - **Adoption after restart**: the Workflow carries everything the hold tools
   need (`oberth.ci/assist`, Pod annotations and env); the assist record is
   durable in the run.

@@ -129,7 +129,7 @@ The limit counts terminal rows; queued and running rows are additional on page 1
 pruned, restart from the first page. Queue positions are global even when a
 repository or ref filter is used, and withheld for scoped uplinks. The deprecated
 `oberth runs --active` compatibility view stays unpaged and uses the same server
-queue positions. Elapsed time begins at the weighted grant, includes preflight,
+queue positions. Elapsed time begins at the admission grant, includes preflight,
 and resets at re-admission after a VM-capacity park. Interrupted results neither
 open nor resolve CI-red issues.
 

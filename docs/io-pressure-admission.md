@@ -75,5 +75,5 @@ Authenticated admin metrics retain the pressure avg10/avg60 samples, availabilit
 enforcement/holding state and deferral/bypass counters. CPU full PSI is undefined
 at host scope and reported as zero. Memory and full averages remain diagnostic;
 they do not control this policy. No run/repository metric labels are added.
-Counters reset on restart. See the [workflow admission upgrade note](declared-admission.md)
-for the complete list of ignored settings and request defaults.
+Counters reset on restart. See [admission and native synchronization](native-synchronization.md)
+for the controls that remain.

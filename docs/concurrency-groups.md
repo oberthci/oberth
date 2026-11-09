@@ -10,8 +10,8 @@ metadata:
     oberth.ci/concurrency-limit: "2"
 ```
 
-For a server-defined class that repositories may only queue in, see
-[exclusive classes](exclusive-classes.md).
+For an operator-defined limit that steps declare as a native Argo semaphore,
+see [native synchronization](native-synchronization.md).
 
 The limit defaults to **1** when omitted. It is a positive decimal integer
 (1–2147483647), and requires a group. Names use 1–63 lowercase letters, digits
@@ -27,9 +27,8 @@ fails admission with the group and both limits in the reason; no Workflow is
 created. Rejected declarations do not replace accepted definitions.
 
 Up to N members own a group slot at once. Waiting members retain priority/FIFO
-order and hold no workflow slot or resource reservation. Group membership
-does not bypass the global workflow ceiling, administrative hold, disk floor,
-hard pressure valve or VM limits. Kubernetes places pods from their requests.
+order and hold no run slot. Group membership does not bypass the run
+ceiling, administrative hold, disk floor or hard pressure valve. Kubernetes places pods from their requests.
 Running and retained grants keep their group slots until execution is known
 to be terminal or deletion has been accepted. Cancellation before a grant
 withdraws the waiter; VM parking releases the group slot.

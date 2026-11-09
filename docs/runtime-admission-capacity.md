@@ -1,11 +1,11 @@
 # Change admission capacity without restarting
 
-`--max-concurrent-jobs` remains the boot default (1–64). Optional
-`--max-concurrent-jobs-file` names a mounted text key with one integer in that
-range. The server opens it again every five seconds, following Kubernetes'
-ConfigMap symlink updates. The effective value caps granted workflows.
-Kubernetes decides pod placement from declared requests. S/M/L/XL labels and
-legacy weights do not constrain this ceiling; setting it to one is valid.
+`--max-concurrent-jobs` remains the boot default (0–64; 0 is no ceiling).
+Optional `--max-concurrent-jobs-file` names a mounted text key with one integer
+in that range. The server opens it again every five seconds, following
+Kubernetes' ConfigMap symlink updates. The effective value caps granted runs.
+Kubernetes decides pod placement from declared requests; setting the ceiling
+to one is valid, and zero removes it.
 
 The chart enables `admission.runtimeCapacity.enabled` by default. It creates
 `<release-fullname>-admission` with key `max-concurrent-jobs` and mounts its
@@ -47,8 +47,7 @@ using its current budget while an update is awaiting audit.
 Lowering capacity never cancels a granted/retained run. Existing workflow usage
 may exceed the new ceiling until grants are released; new work waits for room.
 Raising capacity wakes the queue. The disk floor, hard IO-pressure valve,
-priority, concurrency groups and repository VM limits still apply. Oberth does
-not drain workflows to satisfy old size weights or numeric resource arithmetic.
+priority and concurrency groups still apply.
 
 The effective value, boot default, source, file, last accepted change time and
 last reload error are exposed with the aggregate admission status. Scoped

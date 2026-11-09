@@ -273,13 +273,16 @@ Each template is a container with its own exit code, timeout, and named log
 slice. Oberth reads the YAML statically at submission -- it never executes
 repository code in the server process.
 
-Kubernetes places step Pods using their requests. Oberth keeps the configured
-concurrent-workflow ceiling, enabled hard CPU/IO PSI valve and disk-space floor.
-Historical `oberth.ci/size`, size weights, declared host budgets and headroom
-settings do not reserve capacity or control serving admission. Missing requests
+Kubernetes places step Pods using their requests. Oberth admits runs by
+counting them against one optional ceiling (`maxConcurrentJobs`, default none)
+and keeps only host safety that reads nothing from a workflow: the hard CPU/IO
+PSI valve and the disk-space floor. Shared step limits are native Argo
+`synchronization`, submitted as written, with limits defined once in
+`argoSync.semaphores`; `releases.serialize` runs releases one at a time. The
+historical `oberth.ci/size` annotation is accepted and unused. Missing requests
 receive the documented defaults; explicit requests and limits remain owned by
-the workflow in git. See [workflow admission](docs/declared-admission.md) and
-[measured resource advice](docs/measured-requests.md).
+the workflow in git. See [admission and native synchronization](docs/native-synchronization.md)
+and [measured resource advice](docs/measured-requests.md).
 
 `oberth.ci/concurrency-group: <name>` shares a concurrency limit across every
 repository declaring that name, including branch, tag/release and promotion
@@ -288,9 +291,8 @@ to one. Group names use 1–63 characters of `[a-z0-9-]`. Conflicting YAML limit
 are refused before admission. Waiting runs keep their queued status and name
 the group, limit and current holders in their reason line.
 
-Groups reserve no CPU or memory. They compose with the global workflow-count
-ceiling, while Kubernetes places pods from their requests. Group declarations
-do not change size weights or size-grant policy. Read definitions,
+Groups reserve no CPU or memory. They compose with the run ceiling, while
+Kubernetes places pods from their requests. Read definitions,
 holders and waiters with `oberth admission groups`, MCP `concurrency_groups`, or
 `system_status.admission.groups`. Definitions and run contracts survive restart.
 See [concurrency groups](docs/concurrency-groups.md) for YAML examples and updates.

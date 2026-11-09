@@ -241,7 +241,7 @@ the same `measured.Build` and suggestion code. Its declaration proxy is the newe
 captured request/diagnostic values, explicitly marked; this export does not
 contain every repository's git source or fragment lock.
 
-Resource reporting is read-only. [Workflow admission](declared-admission.md)
+Resource reporting is read-only. [Admission](native-synchronization.md)
 uses the concurrent-workflow ceiling, enabled hard PSI valve and configured disk
 floor. Kubernetes places step Pods by their requests; Oberth has no serving size
 weight or declared CPU/memory budget. Argo deadlines still include Pending time,

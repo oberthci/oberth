@@ -1,3 +1,40 @@
 {
-  "entries": {}
+  "entries": {
+    "value:maxConcurrentJobs": {
+      "doc_anchor": "docs/native-synchronization.md#what-oberth-keeps",
+      "test_ref": "cmd/oberth/serve_startup_test.go TestServeOptions; internal/service/admission_test.go TestAdmissionEnforcesRunCeiling"
+    },
+    "flag:max-concurrent-jobs": {
+      "doc_anchor": "docs/native-synchronization.md#what-oberth-keeps",
+      "test_ref": "internal/service/admission_test.go TestAdmissionEnforcesRunCeiling"
+    },
+    "flag:max-concurrent-jobs-file": {
+      "doc_anchor": "docs/runtime-admission-capacity.md",
+      "test_ref": "internal/service/runtime_capacity_test.go TestRuntimeCapacityRaiseAndLowerPreserveGrants"
+    },
+    "value:argoSync": {
+      "doc_anchor": "docs/native-synchronization.md#shared-step-limits-semaphores",
+      "test_ref": "hack/test-chart.sh argoSync"
+    },
+    "value:semaphores": {
+      "doc_anchor": "docs/native-synchronization.md#shared-step-limits-semaphores",
+      "test_ref": "hack/test-chart.sh argoSync"
+    },
+    "value:releases": {
+      "doc_anchor": "docs/native-synchronization.md#serialized-releases",
+      "test_ref": "internal/argojob/spec_test.go TestBuildSerializesReleasesWithOneNativeMutex"
+    },
+    "value:serialize": {
+      "doc_anchor": "docs/native-synchronization.md#serialized-releases",
+      "test_ref": "internal/argojob/spec_test.go TestBuildSerializesReleasesWithOneNativeMutex"
+    },
+    "flag:serialize-releases": {
+      "doc_anchor": "docs/native-synchronization.md#serialized-releases",
+      "test_ref": "internal/argojob/spec_test.go TestBuildSerializesReleasesWithOneNativeMutex"
+    },
+    "annotation:oberth.ci/exclusive": {
+      "doc_anchor": "docs/native-synchronization.md#migration-from-oberthciexclusive",
+      "test_ref": "internal/argojob/fragment_test.go TestBuildIgnoresRetiredExclusiveAnnotationInFragments"
+    }
+  }
 }

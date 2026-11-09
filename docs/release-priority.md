@@ -88,12 +88,12 @@ never fails release execution; the tag retains its reviewed execution size.
 repository. `size_grant` re-enables it within the selected maximum. Explicit
 urgency, promotions and aging are independent of that opt-out.
 
-Serving admission uses the concurrent-workflow ceiling, configured disk floor,
-and enabled PSI hard-limit valve. Kubernetes places each step Pod by its requests;
-Oberth does not use measured backfill, resource head reservations or size weights
-to decide whether a workflow fits. Priority orders waiting workflow grants within
-these controls and repository concurrency groups. It never raises capacity or
-preempts running work. See [workflow admission](declared-admission.md).
+Serving admission uses the optional run ceiling, configured disk floor, and
+enabled PSI hard-limit valve. Kubernetes places each step Pod by its requests;
+Oberth reads nothing from a document to decide whether a run fits. Priority
+orders waiting grants within these controls and repository concurrency groups.
+It never raises capacity or preempts running work. See
+[admission and native synchronization](native-synchronization.md).
 
 A new branch-head push supersedes queued, not-started runs at older SHAs in the
 same repository/ref/schedule lane, regardless of priority. The most recent

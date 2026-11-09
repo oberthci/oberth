@@ -2,7 +2,7 @@
 
 Git owns resource values. Oberth validates explicit declarations and submits
 them unchanged. Missing requests receive the defaults documented in
-[workflow admission](declared-admission.md). Oberth adds no CPU limit to
+[admission and native synchronization](native-synchronization.md). Oberth adds no CPU limit to
 repository containers and never raises resources after an OOM or deadline failure.
 
 ## Administrator ceilings
@@ -112,9 +112,9 @@ Repository concurrency groups, credential checks, numeric per-container ceilings
 and ownership/cleanup checks still apply. Existing requests and limits stay in
 repository YAML; the read-only resource report never rewrites them.
 
-Missing requests use the documented per-container defaults. Legacy admission
-budget, weight and headroom settings remain accepted for upgrade compatibility
-and are ignored. See [workflow admission](declared-admission.md) for the exact
-defaults, retained controls and Pending/deadline behavior. Numeric resource
+Missing requests use the documented per-container defaults. Admission counts
+runs and reads no budget, weight or headroom from a document. See
+[admission and native synchronization](native-synchronization.md) for the
+retained controls and Pending/deadline behavior. Numeric resource
 ceilings require migration 49; historical demand receipts remain evidence and
 do not restore a serving resource-packing budget.

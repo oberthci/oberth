@@ -515,11 +515,11 @@ when an observer is unavailable.
 - `queue_position` is global accepted order across unclaimed and claimed but
   unadmitted runs, computed before repository/ref filters. Publication
   gates can let later runs execute first; it is not an ETA.
-- `admission` reports the actual resource gate reservation: `preparing`,
-  `waiting`, or `admitted`, with the same global queue `position`, size, weight and
-  aggregate used/capacity. Scoped uplinks see no global position, used or capacity.
-  This explains a durable `running` run that is still waiting behind an exclusive
-  XL build. A run whose pipeline declares
+- `admission` reports the run's place in the gate: `preparing`,
+  `waiting`, or `admitted`, with the same global queue `position` and the run
+  ceiling as `used`/`capacity`. Scoped uplinks see no global position, used or capacity.
+  This explains a durable `running` run that is still waiting for a run slot.
+  A run whose pipeline declares
   `oberth.ci/concurrency-group` also reports `group`; while it waits on that
   group it reports `group_limit`, all `group_holders` and an earlier
   `group_ahead` where applicable. Group names are shared across repositories;
@@ -543,14 +543,12 @@ required.
 ## Run list views
 
 Run rows in `run_list` and `/api/runs` carry `Repo` (repository name),
-`Ref`, `SHA`, `size`, `declared_resources`, `QueuePosition` when available,
-and the boolean `superseded`. Full run detail carries the same context in
-`Run`; compact `run_get` uses `repo`, `ref`, `sha` and `queue_position`.
-Historical size and declared-resource fields remain for compatibility. Serving
-admission uses workflow slots and reports no size-weight or CPU/memory
-reservation (`size` is empty and unknown demand is `null`). Kubernetes places
-Pods using their requests. Scoped uplinks omit global queue positions. See
-[workflow admission](declared-admission.md).
+`Ref`, `SHA`, `QueuePosition` when available, and the boolean `superseded`.
+Full run detail carries the same context in `Run`; compact `run_get` uses
+`repo`, `ref`, `sha` and `queue_position`. Serving admission counts runs and
+reports no size or CPU/memory reservation. Kubernetes places Pods using their
+requests. Scoped uplinks omit global queue positions. See
+[admission and native synchronization](native-synchronization.md).
 
 `superseded` is true for a branch run when a run with a greater accepted run
 sequence is queued or running in the same lane: repository, ref kind, ref and
