@@ -289,6 +289,7 @@ func shortSHA(sha string) string {
 }
 
 func (recorder *agentEventRecorder) observeRun(ctx context.Context, run model.Run) {
+	recorder.observeAbandons(ctx, run)
 	if !run.Status.Terminal() || run.FinishedAt == nil || run.FinishedAt.Before(recorder.started.Add(-agentEventLookback)) {
 		return
 	}
@@ -353,6 +354,7 @@ func (recorder *agentEventRecorder) observeActive(ctx context.Context, active []
 		}
 		if run.AssistRequested {
 			recorder.observeHolds(ctx, run)
+			recorder.observeAbandons(ctx, run)
 		}
 		if observer == nil {
 			continue
@@ -566,4 +568,46 @@ func (recorder *agentEventRecorder) latestSync() syncSnapshot {
 	snapshot := recorder.snapshot
 	snapshot.Participants = append([]model.SyncParticipant(nil), snapshot.Participants...)
 	return snapshot
+}
+
+// observeAbandons records run.hold_abandoned once per abandoned held Pod from
+// the run's assist record: the server sweep's abandon (reason ttl or cap,
+// with held_since and the failed attempt's exit code) or the agent's own.
+func (recorder *agentEventRecorder) observeAbandons(ctx context.Context, run model.Run) {
+	if run.Assist == nil {
+		return
+	}
+	repo := ""
+	for _, event := range run.Assist.Events {
+		if event.Kind != model.RunAssistAbandon || event.Pod == "" || event.At.Before(recorder.started.Add(-agentEventLookback)) {
+			continue
+		}
+		key := model.AgentEventRunHoldAbandoned + ":" + run.ID + ":" + event.Pod
+		if recorder.memo[key] {
+			continue
+		}
+		if repo == "" {
+			repo, _ = recorder.base.repositoryIdentity(ctx, run.RepoID)
+		}
+		reason := event.AbandonReason
+		if reason == "" {
+			reason = "agent"
+		}
+		data := map[string]any{"step": event.Step, "pod": event.Pod, "abandon_reason": reason, "abandoned_by": event.Actor,
+			"abandoned_at": event.At.UTC().Format(time.RFC3339), "actor": run.Actor}
+		summary := fmt.Sprintf("run %s %s %s@%s hold of step %s abandoned (%s)", shortRunID(run.ID), repo, run.Ref, shortSHA(run.SHA), event.Step, reason)
+		if event.HeldSince != nil {
+			data["held_since"] = event.HeldSince.UTC().Format(time.RFC3339)
+			summary += " after " + event.At.Sub(*event.HeldSince).Round(time.Second).String()
+		}
+		if event.AbandonReason != "" {
+			data["failed_attempt"] = event.FailedAttempt
+			if event.FailedExitCode != nil {
+				data["failed_exit_code"] = *event.FailedExitCode
+				summary += fmt.Sprintf("; attempt %d exited %d", event.FailedAttempt, *event.FailedExitCode)
+			}
+		}
+		recorder.emit(ctx, model.AgentEvent{Kind: model.AgentEventRunHoldAbandoned, Key: key, RepoID: run.RepoID, Repo: repo, RunID: run.ID,
+			Ref: run.Ref, SHA: run.SHA, At: event.At, Summary: summary, Data: data})
+	}
 }

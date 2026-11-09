@@ -429,3 +429,27 @@ func TestAgentEventPolicyBounds(t *testing.T) {
 		t.Fatal("wake without a recorder")
 	}
 }
+
+// The sweep's abandon record (v0.18.2) becomes one run.hold_abandoned with
+// the reason, held_since and the failed attempt's exit code.
+func TestAgentEventRunHoldAbandoned(t *testing.T) {
+	f := newAgentFixture(t)
+	run := f.enqueue(t, "land/abandoned", "5", true)
+	held := f.now.Add(-21 * time.Minute)
+	exit := 1
+	abandon := model.AssistAbandon{RunID: run.ID, Pod: "wf-test-1", Step: "test", Reason: model.AssistAbandonTTL, HeldSince: held, AbandonedAt: f.now, FailedExitCode: &exit}
+	if _, err := f.store.AppendRunAssist(t.Context(), model.RunAssistRequest{RunID: run.ID, Event: abandon.Event()}); err != nil {
+		t.Fatal(err)
+	}
+	f.recorder.handle(t.Context(), agentNotification{kind: "run", id: run.ID})
+	f.recorder.handle(t.Context(), agentNotification{kind: "run", id: run.ID})
+	page := f.events(t, agentActor, map[string]any{"kinds": []string{model.AgentEventRunHoldAbandoned}})
+	if len(page.Events) != 1 {
+		t.Fatalf("abandon events = %+v", page.Events)
+	}
+	data := page.Events[0].Data
+	if data["step"] != "test" || data["pod"] != "wf-test-1" || data["abandon_reason"] != "ttl" || data["abandoned_by"] != "oberth" ||
+		data["held_since"] != held.UTC().Format(time.RFC3339) || data["failed_exit_code"] != float64(1) || !strings.Contains(page.Events[0].Summary, "exited 1") {
+		t.Fatalf("abandon event = %+v", page.Events[0])
+	}
+}

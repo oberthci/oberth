@@ -15,6 +15,7 @@ layout is added.
 |------|------|------|
 | `run.finished` | a run reaches passed, failed or interrupted | `status`, `display_status`, `display_reason`, `phase`, `failed_burn`, `failed_step`, bounded `error`, `retry_hint` (`class`, `cause`, `action`), `actor`, `trigger`, `release`, `assisted` |
 | `run.held` | an assisted retry hold parks (once per held Pod) | `step`, `pod`, `attempt`, `held_since`, `abandon_at` (= `held_since` + `assist.holdTTL`), `hold_ttl_s`, `holds_in_run`, `multiple_holds`, `held_steps`, `patch_capable` |
+| `run.hold_abandoned` | a held Pod was abandoned: by the server sweep past `assist.holdTTL` or above `assist.maxConcurrentHolds`, or by the agent (once per Pod) | `step`, `pod`, `abandon_reason` (`ttl`, `cap` or `agent`), `abandoned_by`, `held_since`, `abandoned_at`, `failed_attempt`, `failed_exit_code` |
 | `run.lock_wait` | a running run waits on one native Argo semaphore or mutex longer than `agentEvents.lockWaitThreshold` (once per wait) | `lock`, `waiting_since`, `waited_s`, `holders` (run IDs), `holder_count` |
 | `promotion.finished` | a promotion is passed, failed or interrupted | `status`, `source_branch`, `source_sha`, `target_ref`, `result_sha`, `run_id`, bounded `error`, `prune_source` (`status`, `reason`, `batch_id`) when requested |
 | `release.published` | a release run passed (its publication is delivered) | `tag`, `sha` |

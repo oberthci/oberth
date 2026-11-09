@@ -133,7 +133,7 @@ scoped uplink reads no other upstream's events or lock members, that a hidden
 repository filter answers like a missing one, and the `own` and `refs_glob`
 filters. `TestAgentEventReleaseAndPublication`, `TestRunWaitUntilFinishedHeldAndTimeout`,
 `TestRunWaitReturnsOnHold`, `TestRetryHintClassification` and
-`TestAgentEventPolicyBounds` cover the remaining kinds, `run_wait` states,
+`TestAgentEventPolicyBounds` and `TestAgentEventRunHoldAbandoned` cover the remaining kinds, `run_wait` states,
 every retry hint class and the policy clamps. `TestPromotionPruneSourceOnlyAfterVerifiedPromotion`
 keeps the source for a failed promotion, a differing upstream target, an
 unmerged source and (until the bound) an unreachable upstream, prunes only a

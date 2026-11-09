@@ -14,6 +14,7 @@ import (
 const (
 	AgentEventRunFinished       = "run.finished"
 	AgentEventRunHeld           = "run.held"
+	AgentEventRunHoldAbandoned  = "run.hold_abandoned"
 	AgentEventRunLockWait       = "run.lock_wait"
 	AgentEventPromotionFinished = "promotion.finished"
 	AgentEventReleasePublished  = "release.published"
@@ -27,7 +28,7 @@ const (
 
 // AgentEventKinds lists every kind in a stable order.
 func AgentEventKinds() []string {
-	return []string{AgentEventRunFinished, AgentEventRunHeld, AgentEventRunLockWait, AgentEventPromotionFinished, AgentEventReleasePublished, AgentEventPublicationFailed}
+	return []string{AgentEventRunFinished, AgentEventRunHeld, AgentEventRunHoldAbandoned, AgentEventRunLockWait, AgentEventPromotionFinished, AgentEventReleasePublished, AgentEventPublicationFailed}
 }
 
 // ValidAgentEventKind reports whether kind is in the fixed vocabulary.

@@ -6,7 +6,7 @@
 CREATE TABLE IF NOT EXISTS agent_events (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  dedupe_key TEXT NOT NULL UNIQUE,
- kind TEXT NOT NULL CHECK(kind IN ('run.finished','run.held','run.lock_wait','promotion.finished','release.published','publication.failed')),
+ kind TEXT NOT NULL CHECK(kind IN ('run.finished','run.held','run.hold_abandoned','run.lock_wait','promotion.finished','release.published','publication.failed')),
  repo_id INTEGER NOT NULL DEFAULT 0,
  repo TEXT NOT NULL DEFAULT '',
  run_id TEXT NOT NULL DEFAULT '',

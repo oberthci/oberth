@@ -14,7 +14,7 @@ func TestSyncLockKeyStripsOnlyTheNamespace(t *testing.T) {
 			t.Errorf("SyncLockKey(%q) = %q, want %q", input, got, want)
 		}
 	}
-	if !ValidAgentEventKind(AgentEventRunHeld) || ValidAgentEventKind("run.hold_abandoned") || len(AgentEventKinds()) != 6 {
+	if !ValidAgentEventKind(AgentEventRunHeld) || !ValidAgentEventKind(AgentEventRunHoldAbandoned) || ValidAgentEventKind("run.bogus") || len(AgentEventKinds()) != 7 {
 		t.Fatal("event kind vocabulary changed")
 	}
 }

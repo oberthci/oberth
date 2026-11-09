@@ -475,7 +475,7 @@ func eventChannelFrame(event model.AgentEvent) string {
 			meta[key] = value
 		}
 	}
-	for _, key := range []string{"status", "failed_step", "step", "pod", "held_since", "abandon_at", "holds_in_run", "lock", "waited_s", "attempt", "final"} {
+	for _, key := range []string{"status", "failed_step", "step", "pod", "held_since", "abandon_at", "abandoned_at", "abandon_reason", "failed_exit_code", "holds_in_run", "lock", "waited_s", "attempt", "final"} {
 		switch value := event.Data[key].(type) {
 		case string:
 			meta[key] = value
