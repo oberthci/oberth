@@ -82,9 +82,17 @@ NODE_EXTRA_CA_CERTS=~/.config/oberth/ca.crt \
   claude --dangerously-load-development-channels server:oberth
 ```
 
-`--channels server:oberth` works instead where the organization allows the
-server's channel. Events then arrive in the session as
+`--channels` accepts only Claude Code's allowlisted channel plugins, so a
+custom server needs the development flag; it is ignored in `-p` mode and in
+the Agent SDK. Claude Code documents channels over stdio; Oberth's HTTP
+stream uses the same capability and notification, but confirm delivery on
+your client version with `/mcp` and `claude --debug` before relying on it,
+and keep `run_wait` or `events_since` as the fallback. Events then arrive in
+the session as
 `<channel source="oberth" kind="run.held" step="test" abandon_at="..." ...>`.
+Claude Code's v2 runtime does not register a channel from a server that
+negotiates MCP revision 2026-07-28; Oberth negotiates 2025-06-18 and is
+unaffected.
 
 ### Delivery and bounds
 

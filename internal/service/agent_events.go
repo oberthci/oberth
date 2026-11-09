@@ -523,7 +523,17 @@ func (recorder *agentEventRecorder) observePromotion(ctx context.Context, promot
 	if recorder.memo[key] {
 		return
 	}
-	if !promotion.UpdatedAt.IsZero() && promotion.UpdatedAt.Before(recorder.started.Add(-agentEventLookback)) {
+	// A prune_source request is settled before the lookback applies: a
+	// request left pending across a restart must still be decided, and its
+	// promotion.finished event must still be emitted.
+	request, requestErr := recorder.store.PromotionPrune(ctx, promotion.ID)
+	if requestErr == nil && request.Status == model.PromotionPrunePending {
+		request = recorder.base.settlePromotionPrune(ctx, recorder.store, promotion, request, recorder.now())
+		if request.Status == model.PromotionPrunePending {
+			return // Retried on the next sweep; the event carries the outcome.
+		}
+	}
+	if requestErr != nil && !promotion.UpdatedAt.IsZero() && promotion.UpdatedAt.Before(recorder.started.Add(-agentEventLookback)) {
 		return
 	}
 	data := map[string]any{"status": string(promotion.Status), "source_branch": promotion.SourceBranch, "source_sha": promotion.SourceSHA,
@@ -538,13 +548,7 @@ func (recorder *agentEventRecorder) observePromotion(ctx context.Context, promot
 		data["error"] = boundedText(promotion.Error, agentEventDataErrorLength)
 	}
 	summary := fmt.Sprintf("promotion %s %s %s -> %s %s", shortRunID(promotion.ID), "%s", shortSHA(promotion.SourceSHA), promotion.TargetRef, promotion.Status)
-	if request, err := recorder.store.PromotionPrune(ctx, promotion.ID); err == nil {
-		if request.Status == model.PromotionPrunePending {
-			request = recorder.base.settlePromotionPrune(ctx, recorder.store, promotion, request, recorder.now())
-			if request.Status == model.PromotionPrunePending {
-				return // Retried on the next sweep; the event carries the outcome.
-			}
-		}
+	if requestErr == nil {
 		data["prune_source"] = map[string]any{"status": request.Status, "reason": request.Reason, "batch_id": request.BatchID}
 		summary += "; source " + request.Status
 		if request.Reason != "" {

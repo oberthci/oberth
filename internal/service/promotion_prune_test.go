@@ -121,6 +121,27 @@ func TestPromotionPruneSourceOnlyAfterVerifiedPromotion(t *testing.T) {
 	}
 }
 
+// A prune request left pending across a restart (the upstream was
+// unreachable, or the server crashed) is still settled by the recorder even
+// when the promotion finished before the recorder's event lookback.
+func TestPromotionPruneSettlesPendingRequestBeyondLookback(t *testing.T) {
+	f, git := newPrunePromotionFixture(t)
+	git.head = f.initial
+	promotion, _ := f.promotion(t, "feature/a", f.initial, model.PromotionPassed, f.initial)
+	now := time.Now()
+	promotion.UpdatedAt = now.Add(-2 * agentEventLookback)
+	f.service.agentEvents.started = now
+	f.service.agentEvents.observePromotion(t.Context(), promotion)
+	request, err := f.store.PromotionPrune(t.Context(), promotion.ID)
+	if err != nil || request.Status != model.PromotionPrunePruned || f.mirrorHas(t, "feature/a") {
+		t.Fatalf("pending prune beyond the lookback = %+v, %v", request, err)
+	}
+	events, err := f.store.AgentEvents(t.Context(), model.AgentEventFilter{Kinds: []string{model.AgentEventPromotionFinished}})
+	if err != nil || len(events) != 1 {
+		t.Fatalf("a settled prune emits promotion.finished once: %+v, %v", events, err)
+	}
+}
+
 // promote refuses prune_source for a train or a non-default target before
 // anything is admitted.
 func TestPromotePruneSourceRefusals(t *testing.T) {
