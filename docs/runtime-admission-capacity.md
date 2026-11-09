@@ -21,14 +21,14 @@ alone on the next rollout. No ConfigMap API permission is added to the server.
 ## Runtime override without Helm (#1497)
 
 To change capacity while the server runs, use the unscoped-admin MCP tool
-`admission_capacity_config` (CLI `oberth admission capacity <1..64>|clear
+`admission_capacity_config` (CLI `oberth admission capacity <0..64>|clear
 --reason <reason>`). It stores a server-owned override in the database, which
 Helm never renders or applies, so upgrades and runtime changes cannot conflict.
 Precedence is: runtime override, then the mounted file, then the boot flag.
 The override applies immediately, survives restarts and upgrades, and is kept
 by every five-second reload; `clear` hands authority back to the file (or the
-boot flag when no file is configured). The value must pass the same 1–64 and
-weight-budget validation as the file. Each set or clear requires a reason and is
+boot flag when no file is configured). The value must pass the same 0–64 (0 is no ceiling)
+validation as the file. Each set or clear requires a reason and is
 audited as `admission.capacity.override` / `admission.capacity.override.clear`
 with the previous override, followed by the usual `admission.capacity.change`
 when it is applied. `system_status.admission.configuration.source` reports

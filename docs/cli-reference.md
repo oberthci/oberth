@@ -65,16 +65,16 @@ Read allowed public identity files inside the Oberth pod.
 Usage: oberth admission [--json] | oberth admission release <run-id> [--force] [--json]
        oberth admission groups [--json]
        oberth admission hold on|off --reason <reason> [--allow tag,release,promotion] [--duration 2h] [--json]
-       oberth admission capacity <1..64>|clear --reason <reason> [--json]
+       oberth admission capacity <0..64>|clear --reason <reason> [--json]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
 ```
 
 ## oberth admission capacity
 
 ```text
-Usage: oberth admission capacity <1..64>|clear --reason <reason> [--json]
+Usage: oberth admission capacity <0..64>|clear --reason <reason> [--json]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
-Sets the server-owned runtime workflow ceiling; clear restores the mounted file or boot flag.
+Sets the server-owned runtime run ceiling (0 is no ceiling); clear restores the mounted file or boot flag.
 ```
 
 ## oberth admission groups
@@ -83,7 +83,7 @@ Sets the server-owned runtime workflow ceiling; clear restores the mounted file 
 Usage: oberth admission [--json] | oberth admission release <run-id> [--force] [--json]
        oberth admission groups [--json]
        oberth admission hold on|off --reason <reason> [--allow tag,release,promotion] [--duration 2h] [--json]
-       oberth admission capacity <1..64>|clear --reason <reason> [--json]
+       oberth admission capacity <0..64>|clear --reason <reason> [--json]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
 ```
 
@@ -101,7 +101,7 @@ Default allow: tag,release. Default duration: 2h; maximum: 12h. --allow '' holds
 Usage: oberth admission [--json] | oberth admission release <run-id> [--force] [--json]
        oberth admission groups [--json]
        oberth admission hold on|off --reason <reason> [--allow tag,release,promotion] [--duration 2h] [--json]
-       oberth admission capacity <1..64>|clear --reason <reason> [--json]
+       oberth admission capacity <0..64>|clear --reason <reason> [--json]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
 ```
 

@@ -19,6 +19,7 @@ func TestRuntimeAdminCLIForwardsAuditedTools(t *testing.T) {
 	}{
 		{[]string{"capacity", "4", "--reason", "host overload"}, `tool=admission_capacity_config args={"max_concurrent_jobs":4,"reason":"host overload"}`},
 		{[]string{"capacity", "clear", "--reason", "recovered"}, `tool=admission_capacity_config args={"clear":true,"reason":"recovered"}`},
+		{[]string{"capacity", "0", "--reason", "no ceiling"}, `tool=admission_capacity_config args={"max_concurrent_jobs":0,"reason":"no ceiling"}`},
 		{[]string{"list"}, `tool=release_wif_list args={}`},
 		{[]string{"grant", "github/acme/app", "--service-account", "app-release", "--template", "publish=image-writer,sign=image-reader", "--reason", "absorb"}, `tool=release_wif_grant args={"reason":"absorb","repo":"github/acme/app","service_account_name":"app-release","templates":{"publish":"image-writer","sign":"image-reader"}}`},
 		{[]string{"revoke", "github/retired/old", "--reason", "deleted upstream"}, `tool=release_wif_revoke args={"reason":"deleted upstream","repo":"github/retired/old"}`},
@@ -35,7 +36,7 @@ func TestRuntimeAdminCLIForwardsAuditedTools(t *testing.T) {
 			t.Fatalf("%v = %s, %v", test.args, output.String(), err)
 		}
 	}
-	for _, args := range [][]string{{"capacity", "4"}, {"capacity", "0", "--reason", "x"}, {"capacity", "65", "--reason", "x"}, {"capacity", "--reason", "x"}} {
+	for _, args := range [][]string{{"capacity", "4"}, {"capacity", "-1", "--reason", "x"}, {"capacity", "65", "--reason", "x"}, {"capacity", "--reason", "x"}} {
 		if err := runAdmission(t.Context(), args, &strings.Builder{}); !errors.Is(err, errUsage) {
 			t.Fatal(args, err)
 		}

@@ -257,7 +257,7 @@ func (service *API) admissionCapacityConfig(ctx context.Context, actor api.Actor
 		return nil, err
 	}
 	if (args.MaxConcurrentJobs == nil) == !args.Clear {
-		return nil, refuse(ErrInvalidInput, "pass exactly one of max_concurrent_jobs (1..64) or clear")
+		return nil, refuse(ErrInvalidInput, "pass exactly one of max_concurrent_jobs (0..64; 0 is no ceiling) or clear")
 	}
 	jobs := 0
 	if args.MaxConcurrentJobs != nil {

@@ -13,9 +13,9 @@ import (
 // Runtime administration (#1497): both commands call audited MCP tools that
 // write server-owned overrides, so neither needs a Helm upgrade or restart.
 
-const admissionCapacityUsage = "Usage: oberth admission capacity <1..64>|clear --reason <reason> [--json]\n" +
+const admissionCapacityUsage = "Usage: oberth admission capacity <0..64>|clear --reason <reason> [--json]\n" +
 	"         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]\n" +
-	"Sets the server-owned runtime workflow ceiling; clear restores the mounted file or boot flag."
+	"Sets the server-owned runtime run ceiling (0 is no ceiling); clear restores the mounted file or boot flag."
 
 func runAdmissionCapacity(ctx context.Context, args []string, output io.Writer) error {
 	if wantsHelp(args) {
@@ -38,7 +38,7 @@ func runAdmissionCapacity(ctx context.Context, args []string, output io.Writer) 
 		arguments["clear"] = true
 	} else {
 		jobs, err := strconv.Atoi(positional[0])
-		if err != nil || jobs < 1 || jobs > 64 {
+		if err != nil || jobs < 0 || jobs > 64 {
 			return fmt.Errorf("%w: %s", errUsage, admissionCapacityUsage)
 		}
 		arguments["max_concurrent_jobs"] = jobs

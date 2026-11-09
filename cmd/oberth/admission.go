@@ -18,7 +18,7 @@ import (
 const admissionUsage = "Usage: oberth admission [--json] | oberth admission release <run-id> [--force] [--json]\n" +
 	"       oberth admission groups [--json]\n" +
 	"       oberth admission hold on|off --reason <reason> [--allow tag,release,promotion] [--duration 2h] [--json]\n" +
-	"       oberth admission capacity <1..64>|clear --reason <reason> [--json]\n" +
+	"       oberth admission capacity <0..64>|clear --reason <reason> [--json]\n" +
 	"         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]"
 
 // runAdmission prints the server's admission gate, or releases one stale
