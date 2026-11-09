@@ -239,11 +239,20 @@ DELETE FROM schema_migrations WHERE id='20261108090000-runtime-admin-overrides';
 
 // PostAssistedRunsDowngrade removes the agent-assisted continuation columns
 // from disposable historical fixtures.
-const PostAssistedRunsDowngrade = `
+const PostAssistedRunsDowngrade = PostAgentEventsDowngrade + `
 DROP TRIGGER IF EXISTS run_assist_requested_immutable;
 DROP TRIGGER IF EXISTS run_assisted_monotonic;
 ALTER TABLE runs DROP COLUMN assist_requested;
 ALTER TABLE runs DROP COLUMN assisted;
 ALTER TABLE runs DROP COLUMN assist_record;
 DELETE FROM schema_migrations WHERE id='20261108232919-assisted-runs-2c8c05259f2ff5d590fe8162f2e1d195';
+`
+
+// PostAgentEventsDowngrade removes the MCP agent loop tables (#1514) from
+// disposable historical fixtures.
+const PostAgentEventsDowngrade = `
+DROP TABLE IF EXISTS agent_events;
+DROP TABLE IF EXISTS sync_intervals;
+DROP TABLE IF EXISTS promotion_prunes;
+DELETE FROM schema_migrations WHERE id='20261109220004-agent-events-5a27b69187397087ddb6d1f52bd68403';
 `
