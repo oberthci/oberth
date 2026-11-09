@@ -1589,6 +1589,7 @@ func (scheduler *Scheduler) promotionForRun(ctx context.Context, run model.Run) 
 func (scheduler *Scheduler) runAssisted(ctx context.Context, runID string) bool {
 	current, err := scheduler.database().Run(ctx, runID)
 	if err != nil {
+		log.Printf("WARN: run=%s assisted verdict unreadable at finalization; publication skipped: %v", runID, err)
 		return true
 	}
 	return current.Assisted
