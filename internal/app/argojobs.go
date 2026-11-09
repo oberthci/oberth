@@ -1302,6 +1302,24 @@ func (jobs *ArgoJobs) ObserveScheduling(ctx context.Context, run model.Run) (*mo
 	return observer.ObserveScheduling(ctx, run.WorkflowName, run.ID, sha)
 }
 
+// ObserveSynchronization forwards the read-only native lock observation (#1514).
+func (jobs *ArgoJobs) ObserveSynchronization(ctx context.Context, run model.Run) (*model.SyncObservation, error) {
+	if jobs.routes != nil {
+		child, err := jobs.routes.forName(ctx, run.WorkflowName, run.ID)
+		if err != nil {
+			return nil, err
+		}
+		return child.ObserveSynchronization(ctx, run)
+	}
+	observer, ok := jobs.controller.(interface {
+		ObserveSynchronization(context.Context, string, string) (*model.SyncObservation, error)
+	})
+	if !ok {
+		return nil, service.ErrUnavailable
+	}
+	return observer.ObserveSynchronization(ctx, run.WorkflowName, run.ID)
+}
+
 // SetProfileOutageGate connects the controller profile outage gate to the scheduler.
 func (jobs *ArgoJobs) AwaitAdmission(ctx context.Context) error {
 	if gate, ok := jobs.controller.(interface{ AwaitAdmission(context.Context) error }); ok {

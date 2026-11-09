@@ -58,6 +58,9 @@ type branchPruneArguments struct {
 	PlanID          string   `json:"plan_id"`
 	ConfirmReserved string   `json:"confirm_reserved"`
 	Report          bool     `json:"report"`
+	// Reason is required to confirm a deletion of unmerged branches and
+	// is recorded in the batch audit (#1514).
+	Reason string `json:"reason"`
 }
 
 // Branch classes against the default branch (#1500): merged (an ancestor),
@@ -145,6 +148,19 @@ func (service *API) branchDeleteMany(ctx context.Context, actor api.Actor, raw j
 		plan.Message = "Nothing to delete."
 		return plan, nil
 	}
+	if len(plan.Unmerged) > 0 && strings.TrimSpace(args.Reason) == "" {
+		return plan, refuse(ErrInvalidInput, "allow_unmerged selects %d unmerged branch(es) with commits not in %s; confirm them with a reason, which is recorded", len(plan.Unmerged), plan.MergedInto)
+	}
+	if len(args.Reason) > 512 {
+		return plan, fmt.Errorf("%w: reason is at most 512 bytes", ErrInvalidInput)
+	}
+	return service.executeBranchPrune(ctx, actor.Identity, repository, input, plan, selected, args)
+}
+
+// executeBranchPrune deletes a confirmed selection on the mirror, records
+// the batch and queues upstream deletion. branch_delete_many and promote
+// prune_source share it.
+func (service *API) executeBranchPrune(ctx context.Context, identity string, repository model.Repository, input string, plan BranchPruneResponse, selected []BranchPlanEntry, args branchPruneArguments) (BranchPruneResponse, error) {
 	batchID, err := newPruneBatchID()
 	if err != nil {
 		return plan, err
@@ -157,7 +173,7 @@ func (service *API) branchDeleteMany(ctx context.Context, actor api.Actor, raw j
 		heads[index] = gitcache.BranchHead{Branch: entry.Branch, SHA: entry.HeadSHA}
 		reserved = reserved || entry.Reserved
 	}
-	if err := service.branchDeletions.QueueBranchPrune(ctx, batchID, repository.ID, actor.Identity, entries); err != nil {
+	if err := service.branchDeletions.QueueBranchPrune(ctx, batchID, repository.ID, identity, entries); err != nil {
 		return plan, err
 	}
 	outcomes, pruneErr := service.branchPrune.PruneBranches(ctx, input, heads, reserved)
@@ -185,6 +201,10 @@ func (service *API) branchDeleteMany(ctx context.Context, actor api.Actor, raw j
 		"deleted": plan.Deleted, "skipped": len(skipped), "failed": 0, "allow_unmerged": args.AllowUnmerged,
 		"merged_into": plan.MergedInto, "older_than": args.OlderThan, "exclude_prefixes": args.ExcludePrefixes,
 		"explicit": len(args.Branches) > 0, "reserved_confirmed": reserved,
+		"unmerged": len(plan.Unmerged),
+	}
+	if strings.TrimSpace(args.Reason) != "" {
+		details["reason"] = args.Reason
 	}
 	if pruneErr != nil {
 		details["failed"], details["deleted"], details["error"] = len(heads), 0, pruneErr.Error()
@@ -193,7 +213,7 @@ func (service *API) branchDeleteMany(ctx context.Context, actor api.Actor, raw j
 	// caller's request has been cancelled.
 	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
-	finishErr := service.branchDeletions.FinishBranchPrune(finishCtx, batchID, actor.Identity, repository.ID, skipped, details)
+	finishErr := service.branchDeletions.FinishBranchPrune(finishCtx, batchID, identity, repository.ID, skipped, details)
 	if service.deletionQueued != nil {
 		service.deletionQueued()
 	}

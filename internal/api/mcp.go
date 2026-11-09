@@ -72,6 +72,9 @@ type callParams struct {
 // internal persistence record.
 type PromoteResponse struct {
 	ID string `json:"id"`
+	// PruneSource is "pending" when prune_source was recorded (#1514); the
+	// outcome arrives in promote_status and the promotion.finished event.
+	PruneSource string `json:"prune_source,omitempty"`
 }
 
 // PromoteRetryResponse identifies the new promotion that re-runs a failed or
@@ -380,6 +383,12 @@ func (server *Server) handleMCP(writer http.ResponseWriter, request *http.Reques
 		return
 	}
 	response := rpcResponse{JSONRPC: "2.0", ID: incoming.ID}
+	owner := sessionOwner(actorFrom(request.Context()))
+	session, sessionOK := server.sessions.lookup(request, owner, incoming.Method == "resources/subscribe" || (incoming.Method == "tools/call" && strings.Contains(string(incoming.Params), "events_subscribe")))
+	if !sessionOK {
+		http.Error(writer, "unknown MCP session", http.StatusNotFound)
+		return
+	}
 	switch incoming.Method {
 	case "initialize":
 		version, err := negotiateMCPProtocol(incoming.Params)
@@ -387,16 +396,34 @@ func (server *Server) handleMCP(writer http.ResponseWriter, request *http.Reques
 			response.Error = &rpcError{Code: -32602, Message: err.Error()}
 			break
 		}
+		capabilities := map[string]any{"tools": map[string]any{}}
+		if server.pushAvailable() {
+			// Server push (#1514): the session-push capability Claude Code
+			// accepts, and standard run resource subscriptions.
+			capabilities["experimental"] = map[string]any{"claude/channel": map[string]any{}}
+			capabilities["resources"] = map[string]any{"subscribe": true, "listChanged": false}
+			writer.Header().Set(mcpSessionHeader, server.sessions.create("", owner).id)
+		}
 		response.Result = map[string]any{
 			"protocolVersion": version,
-			"capabilities":    map[string]any{"tools": map[string]any{}},
+			"capabilities":    capabilities,
 			"serverInfo":      map[string]string{"name": "oberth", "version": server.version},
 			"instructions":    "Snake_case field names are canonical; prefer them over legacy aliases. system_status reports queue_cap with snake_case keys; queueCap remains for one more release. Use status/wait/logs for SHA-oriented CI, run_get/run_logs for exact promotion run IDs, sync only to park the selected exact WIP branch upstream without a green gate, and promote to merge, test, and push a target branch. Sync is not completion evidence. Use run_resources (CLI: oberth run resources --run <id> --yaml) after branch CI to compare captured resource usage with declarations and commit reviewed resources in git; Oberth never auto-sizes a step. Prefer issue_get/issue_get_many with fields/body_limit and run_get with summary:true for routine status reads; full records remain available. Filter logs with pattern/context/limit/tail rather than retrieving a whole step. Log reads scan bounded byte windows; counts are lower bounds unless scan_complete is true. When has_more is true, continue with next_byte_offset as byte_offset, offset=0 and the same tail/pattern/context, including after an empty window. offset skips only within the current scanned window; with tail that window can change during lookback. An empty incomplete page does not prove absence. A step named frag-<hash>-<template> came from another repository's pinned pipeline fragment, not from the repository under test, so a failure there is usually the pinned version rather than this commit. Authenticated JSON dashboard state is available at /api/runs, /api/repos, /api/issues, /api/grants, and /api/status.",
+		}
+		if server.pushAvailable() {
+			result := response.Result.(map[string]any)
+			result["instructions"] = result["instructions"].(string) + agentLoopInstructions
 		}
 	case "notifications/initialized":
 		response.Error = &rpcError{Code: -32600, Message: "notifications/initialized must not have a request ID"}
 	case "ping":
 		response.Result = map[string]any{}
+	case "resources/list", "resources/templates/list", "resources/read", "resources/subscribe", "resources/unsubscribe":
+		if !server.pushAvailable() {
+			response.Error = &rpcError{Code: -32601, Message: "method not found"}
+			break
+		}
+		server.handleMCPResources(request, session, incoming.Method, incoming.Params, &response)
 	case "tools/list":
 		response.Result = map[string]any{"tools": toolDefinitions()}
 	case "tools/call":
@@ -415,11 +442,17 @@ func (server *Server) handleMCP(writer http.ResponseWriter, request *http.Reques
 		if server.refuseDuringDrain(writer) {
 			return
 		}
-		if call.Name == "wait" || call.Name == "promote_status" {
+		if call.Name == "wait" || call.Name == "promote_status" || call.Name == "run_wait" {
 			server.handleMCPLongPoll(writer, request, response, call)
 			return
 		}
 		result, err := server.tools.CallTool(request.Context(), actorFrom(request.Context()), call.Name, call.Arguments)
+		if subscribed, ok := result.(EventsSubscribeResponse); ok && err == nil && session != nil {
+			server.sessions.setSubscription(session, subscribed.Subscription)
+			subscribed.Session = true
+			subscribed.Push = "GET stream of MCP session " + session.id + ": notifications/claude/channel and notifications/resources/updated"
+			result = subscribed
+		}
 		if err != nil {
 			response.Result = server.classifyToolFailure(err)
 		} else {
@@ -429,6 +462,25 @@ func (server *Server) handleMCP(writer http.ResponseWriter, request *http.Reques
 		response.Error = &rpcError{Code: -32601, Message: "method not found"}
 	}
 	writeRPC(writer, response)
+}
+
+func (server *Server) pushAvailable() bool {
+	feed, ok := server.tools.(EventFeed)
+	return ok && feed.AgentEventWake() != nil
+}
+
+// agentLoopInstructions extend the initialize instructions when push is on.
+const agentLoopInstructions = " Prefer pushed agent events over polling: run_wait blocks until a run finishes or holds; the session's GET stream pushes run.finished, run.held (service it before abandon_at), run.lock_wait, promotion.finished, release.published and publication.failed as notifications/claude/channel; events_subscribe narrows them and events_since catches up after a reconnect. run_get retry_hint says whether a failure is infrastructure (retry unchanged) or code."
+
+// handleMCPSessionDelete ends a session (streamable-HTTP DELETE).
+func (server *Server) handleMCPSessionDelete(writer http.ResponseWriter, request *http.Request) {
+	session, ok := server.sessions.lookup(request, sessionOwner(actorFrom(request.Context())), false)
+	if !ok || session == nil {
+		http.Error(writer, "unknown MCP session", http.StatusNotFound)
+		return
+	}
+	server.sessions.remove(session)
+	writer.WriteHeader(http.StatusNoContent)
 }
 
 func normalizeID(id json.RawMessage) json.RawMessage {
@@ -598,7 +650,7 @@ func toolDefinitions() []map[string]any {
 		}
 		return map[string]any{"name": name, "description": description, "inputSchema": schema, "outputSchema": toolOutputSchema(name)}
 	}
-	return []map[string]any{
+	return append([]map[string]any{
 		tool("status", "Return concise CI status for a full SHA, short SHA, or branch, including the failed step.", object(map[string]any{"repo": stringProperty("Repository name when the selector is ambiguous"), "ref": stringProperty("Full SHA, short SHA, or branch")}, "ref")),
 		tool("logs", "Return one named step log for a SHA, optionally filtered server-side. Prefer a pattern over retrieving a whole step: counts are lower bounds unless scan_complete is true; continue has_more pages with next_byte_offset as byte_offset and offset:0.", object(logFilterProperties(map[string]any{"repo": stringProperty("Repository name when the SHA is ambiguous"), "sha": stringProperty("Full or short SHA"), "step": stringProperty("Step name")}), "sha", "step")),
 		tool("run_get", "Return one run by full durable ID or unique hexadecimal prefix (at least 8 characters). Default: full run, step results and versioned retained timing; missing timing is unknown. display_status is one of queued, running, passed, failed, infra-retried, superseded or cancelled; display_reason names the cause. Raw Status, Phase and Scheduling.state stay machine-readable. Set summary:true for id/repo/ref/sha, queue_position when available, superseded, status/phase/failed_burn/failed_step/error and compact steps (burn, name, status, started_at, finished_at), omitting retained Timing, the full repository record and diagnostics.", object(map[string]any{"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"), "summary": map[string]any{"type": "boolean", "description": "Return run identity, admission context, superseded status, failure and compact steps; default false"}}, "id")),
@@ -735,7 +787,7 @@ func toolDefinitions() []map[string]any {
 		tool("repo_archive", "Archive a repository, retaining all history and refusing new work. Requires an unscoped admin; refuses in-flight runs and pending promotions. Drops the Git cache.", object(map[string]any{"repo": stringProperty("Repository name")}, "repo")),
 		tool("repo_unarchive", "Unarchive a repository and allow new work again. Requires an unscoped admin.", object(map[string]any{"repo": stringProperty("Repository name")}, "repo")),
 		tool("repo_remove", "Remove a repository mapping and its Git cache. Requires admin uplink. Refuses if runs are in-flight or promotions are pending.", object(map[string]any{"repo": stringProperty("Repository name")}, "repo")),
-		tool("branch_delete_many", "Delete many mirror branches in one batch; upstream deletion follows asynchronously. Dry run by default: returns plan_id and per-branch head_sha, merged/patch_equivalent (git cherry), ahead/behind against the default branch and last_commit; unmerged branches are listed separately. Select an explicit branches list of {branch, expected_sha}, or merged_into (the default branch) and/or older_than (30d, 72h) with optional exclude_prefixes. Executes only with confirm:true and the dry run's plan_id; any moved head makes the plan stale. Each ref is compared and deleted; unmerged branches need allow_unmerged. The default branch is never deleted. Configured reserved branches are never selected; one may be deleted alone with confirm_reserved \"<upstream>/<org>/<repo>:<branch>\". Every plan entry has class merged, patch-equivalent, unique or unchecked (beyond the git cherry budget), and classes counts every candidate; report:true (dry run only) also lists kept candidates. Unscoped admin only; one audit entry per batch. Read per-branch upstream state with branch_deletion_list.", object(map[string]any{
+		tool("branch_delete_many", "Delete many mirror branches in one batch; upstream deletion follows asynchronously. Dry run by default: returns plan_id and per-branch head_sha, merged/patch_equivalent (git cherry), ahead/behind against the default branch and last_commit; unmerged branches are listed separately. Select an explicit branches list of {branch, expected_sha}, or merged_into (the default branch) and/or older_than (30d, 72h) with optional exclude_prefixes. Executes only with confirm:true and the dry run's plan_id; any moved head makes the plan stale. Each ref is compared and deleted; unmerged branches need allow_unmerged and, to confirm, a reason that is recorded. The default branch is never deleted. Configured reserved branches are never selected; one may be deleted alone with confirm_reserved \"<upstream>/<org>/<repo>:<branch>\". Every plan entry has class merged, patch-equivalent, unique or unchecked (beyond the git cherry budget), and classes counts every candidate; report:true (dry run only) also lists kept candidates. Unscoped admin only; one audit entry per batch. Read per-branch upstream state with branch_deletion_list.", object(map[string]any{
 			"repo":             stringProperty("Repository name"),
 			"branches":         map[string]any{"type": "array", "maxItems": 1000, "items": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"branch", "expected_sha"}, "properties": map[string]any{"branch": stringProperty("Branch name"), "expected_sha": stringProperty("Full head SHA the branch must still have")}}},
 			"merged_into":      stringProperty("Selector: branches merged or patch-equivalent into this branch; must be the default branch"),
@@ -745,7 +797,7 @@ func toolDefinitions() []map[string]any {
 			"confirm":          map[string]any{"type": "boolean", "description": "Execute the plan named by plan_id; omitted or false is a dry run"},
 			"plan_id":          stringProperty("plan_id from the dry run with the same arguments"),
 			"confirm_reserved": stringProperty("Typed confirmation <upstream>/<org>/<repo>:<branch> to delete one configured reserved (non-default) branch"),
-			"report":           map[string]any{"type": "boolean", "description": "Dry run only: also list the selected branches that are kept (unique or unchecked) under kept, so the plan classifies every candidate"},
+			"report":           map[string]any{"type": "boolean", "description": "Dry run only: also list the selected branches that are kept (unique or unchecked) under kept, so the plan classifies every candidate"}, "reason": map[string]any{"type": "string", "maxLength": 512, "description": "Why unmerged branches are deleted; required to confirm a plan with unmerged entries (allow_unmerged) and recorded in the batch audit"},
 		}, "repo")),
 		tool("branch_deletion_list", "List accepted branch deletions newest first with their upstream state: pending (with attempts and retry_after), propagated, failed (upstream unchanged, mirror branch restored) or skipped (branch pushed again, head moved before a prune, upstream repository archived with the mirror deletion kept, or a failed record resolved; error holds the reason line). Filter by repo and status, or read one prune batch or receive event with batch. counts holds every record per status for repo (or all repositories) or for the whole batch; page_counts only the returned page. Unscoped admin only. A full page returns next_before.", object(map[string]any{
 			"repo":   stringProperty("Repository name"),
@@ -831,7 +883,7 @@ func toolDefinitions() []map[string]any {
 			"sha":    stringProperty("Filter by exact full source SHA"),
 			"status": map[string]any{"type": "string", "enum": []string{"active", "revoked", "expired", "consumed", "all"}, "description": "Filter by grant status (default: all)"},
 		})),
-	}
+	}, agentLoopToolDefinitions(tool, object, stringProperty)...)
 }
 
 // IssueReadFields is the public MCP field allowlist; persistence-only fields
@@ -874,6 +926,7 @@ func promotionInputSchema() map[string]any {
 			"branch":           map[string]any{"type": "string", "description": "Target branch"},
 			"sources":          map[string]any{"type": "array", "minItems": 1, "maxItems": 32, "description": "Sources in merge order; optional ref must match the tested branch", "items": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"sha"}, "properties": map[string]any{"sha": map[string]any{"type": "string"}, "ref": map[string]any{"type": "string"}}}},
 			"skip_conflicting": map[string]any{"type": "boolean", "description": "Train only: drop conflicting sources and keep their paths in the promotion reason"},
+			"prune_source":     map[string]any{"type": "boolean", "description": "Single source into the default branch only: after the promotion passed and the upstream target equals its result, delete the source branch (head still the promoted SHA) on the mirror and queue its upstream deletion. Any other outcome keeps the branch with a recorded reason, shown in promote_status prune_source and the promotion.finished event"},
 		},
 	}
 	return schema
@@ -883,4 +936,34 @@ func promotionInputSchema() map[string]any {
 // working without adding output classes or bypassing transaction authorization.
 func executionPriorityProperty() map[string]any {
 	return map[string]any{"type": "string", "enum": []string{"low", "standard", "promotion", "high", "normal", "highest"}, "description": "Execution class low < standard < promotion < high. Deprecated aliases: normal=standard, highest=high. Promotion/high requests require unscoped-admin or unexpired grant authority; lowering an existing run requires the run_priority admin tool."}
+}
+
+// agentLoopToolDefinitions are the read-only MCP agent loop tools (#1514).
+func agentLoopToolDefinitions(tool func(string, string, map[string]any) map[string]any, object func(map[string]any, ...string) map[string]any, stringProperty func(string) map[string]any) []map[string]any {
+	return []map[string]any{
+		tool("run_wait", "Block server-side until one run finishes, holds a retry (assisted runs: a parked step waits for run_hold_*), or changes in any way, bounded by timeout_s (default and maximum 600). Returns state finished, held, changed or timeout with the run summary, its unreleased holds and retry_hint. Read-only; replaces client polling loops.", object(map[string]any{
+			"id":        stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),
+			"until":     map[string]any{"type": "string", "enum": []string{"finished", "held", "any"}, "description": "finished (default): terminal status; held: a parked retry hold or terminal; any: any change of status, phase, failed step, error, assist record or holds"},
+			"timeout_s": map[string]any{"type": "integer", "minimum": 1, "maximum": 600, "description": "Wait bound in seconds (default 600)"},
+		}, "id")),
+		tool("events_subscribe", "Set which agent events this MCP session receives as server push: a notifications/claude/channel message on the session's GET event stream (Claude Code with --channels server:<name>), and notifications/resources/updated for run://<id> resources the session subscribed. Kinds: run.finished (status, failed step, reason, retry_hint), run.held (step, pod, held_since, abandon_at, holds_in_run), run.lock_wait (a native Argo lock wait past agentEvents.lockWaitThreshold, with the lock and its holders), promotion.finished (with the prune_source outcome), release.published and publication.failed (final, or an automatic retry attempt). Without a call a session receives every kind for every repository in its uplink scope. Events carry a monotonically increasing id; delivery is at-least-once; after a reconnect resume with events_since. Read-only.", object(map[string]any{
+			"repos":     map[string]any{"type": "array", "maxItems": 32, "items": map[string]any{"type": "string"}, "description": "Repositories (qualified or unique names) in scope; empty: all"},
+			"refs_glob": stringProperty("Shell-style pattern on the ref, e.g. land/*; empty: all"),
+			"kinds":     map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": []string{"run.finished", "run.held", "run.lock_wait", "promotion.finished", "release.published", "publication.failed"}}, "description": "Event kinds; empty: all"},
+			"own":       map[string]any{"type": "boolean", "description": "Only events about runs and promotions of this uplink"},
+		})),
+		tool("events_since", "Read agent events after a cursor in id order, scoped to the caller's uplink scope and the same optional filters as events_subscribe. Use after a reconnect or without a push stream: pass next_after_id back as after_id. gap is true when older events were pruned (agentEvents.retention). Read-only.", object(map[string]any{
+			"after_id":  map[string]any{"type": "integer", "minimum": 0, "description": "Return events with a larger id; 0 starts at the oldest retained"},
+			"limit":     map[string]any{"type": "integer", "minimum": 1, "maximum": 200, "description": "Page size before filtering (default 100)"},
+			"repos":     map[string]any{"type": "array", "maxItems": 32, "items": map[string]any{"type": "string"}, "description": "Repositories (qualified or unique names) in scope; empty: all"},
+			"refs_glob": stringProperty("Shell-style pattern on the ref, e.g. land/*; empty: all"),
+			"kinds":     map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": []string{"run.finished", "run.held", "run.lock_wait", "promotion.finished", "release.published", "publication.failed"}}, "description": "Event kinds; empty: all"},
+			"own":       map[string]any{"type": "boolean", "description": "Only events about runs and promotions of this uplink"},
+		})),
+		tool("sync_status", "Native Argo synchronization: the current holders and waiters of every semaphore and mutex observed on active runs (sampled every agentEvents.interval from Workflow status.synchronization), and the bounded stored history per lock: holder and waiter intervals, the maximum number of concurrent holders (proves two runs never overlapped) and wait durations. A scoped uplink sees only its own runs. Read-only.", object(map[string]any{
+			"lock":  stringProperty("One lock key, e.g. ConfigMap/oberth-sync-limits/kvm or Mutex/oberth-release; empty: all"),
+			"since": stringProperty("History window such as 6h or 7d (default 24h, maximum 30d)"),
+			"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 2000, "description": "Maximum stored intervals, newest first (default 2000)"},
+		})),
+	}
 }

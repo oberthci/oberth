@@ -154,6 +154,7 @@ type Server struct {
 	maximumToolWait       time.Duration
 	mcpHeartbeatInterval  time.Duration
 	mcpStreamWriteTimeout time.Duration
+	sessions              *mcpSessions
 	mux                   *http.ServeMux
 }
 
@@ -173,7 +174,7 @@ func New(auth Authenticator, tools ToolService, views ViewService, version strin
 		version = "dev"
 	}
 	drainContext, stopObservers := context.WithCancel(context.Background())
-	server := &Server{drainContext: drainContext, stopObservers: stopObservers, auth: auth, tools: tools, views: views, downloads: downloads, version: version, mux: http.NewServeMux()}
+	server := &Server{drainContext: drainContext, stopObservers: stopObservers, auth: auth, tools: tools, views: views, downloads: downloads, version: version, sessions: newMCPSessions(), mux: http.NewServeMux()}
 	for _, option := range options {
 		option(server)
 	}
@@ -282,6 +283,8 @@ func (server *Server) routes() {
 	server.mux.Handle("POST /api/admission/hold", server.requireAuth(http.HandlerFunc(server.handleAdmissionHold)))
 	server.mux.Handle("POST /api/promotions", server.requireAuth(http.HandlerFunc(server.handlePromote)))
 	server.mux.Handle("POST /mcp", server.requireAuth(http.HandlerFunc(server.handleMCP)))
+	server.mux.Handle("GET /mcp", server.requireAuth(http.HandlerFunc(server.handleMCPEventStream)))
+	server.mux.Handle("DELETE /mcp", server.requireAuth(http.HandlerFunc(server.handleMCPSessionDelete)))
 	server.mux.Handle("GET /api/runs", server.requireAuth(http.HandlerFunc(server.handleRuns)))
 	server.mux.Handle("GET /api/runs/counts", server.requireAuth(http.HandlerFunc(server.handleRunCounts)))
 	server.mux.Handle("GET /api/run-resources", server.requireAuth(http.HandlerFunc(server.handleRunResources)))

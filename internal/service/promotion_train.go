@@ -23,6 +23,9 @@ type promotionArguments struct {
 	Branch          string                    `json:"branch"`
 	Sources         []promotionSourceArgument `json:"sources"`
 	SkipConflicting bool                      `json:"skip_conflicting"`
+	// PruneSource deletes the source branch once the promotion passed and
+	// the upstream target equals its result (#1514).
+	PruneSource bool `json:"prune_source"`
 }
 type promotionTrainGit interface {
 	PreparePromotionTrain(context.Context, string, []model.PromotionSource, string, string, bool) (gitcache.PromotionTrainCandidate, error)

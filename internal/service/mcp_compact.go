@@ -121,6 +121,8 @@ type RunSummaryResponse struct {
 	FailedStep    string           `json:"failed_step"`
 	Error         string           `json:"error"`
 	Steps         []RunStepSummary `json:"steps"`
+	// RetryHint classifies a run that did not pass (#1514).
+	RetryHint *model.RetryHint `json:"retry_hint,omitempty"`
 }
 
 type RunStepSummary struct {

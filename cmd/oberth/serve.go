@@ -113,6 +113,10 @@ type serveOptions struct {
 	stepStartupAllowance    argojob.StepStartupAllowance
 	serializeReleases       bool
 	assist                  argojob.AssistConfig
+	agentEvents             service.AgentEventPolicy
+	agentEventStreams       int
+	agentEventBacklog       int
+	mcpHeartbeat            time.Duration
 	ciCacheRoot             string
 	releaseCacheRoot        string
 	secretStoreAddress      string
@@ -259,6 +263,13 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.Int64Var(&options.assist.ExecOutputBytes, "assist-exec-output-bytes", argojob.DefaultAssistExecOutputBytes, "captured stdout/stderr bound of one run_hold_exec command (at most 4 MiB)")
 	flags.Int64Var(&options.assist.PatchMaxBytes, "assist-patch-max-bytes", argojob.DefaultAssistPatchMaxBytes, "largest run_hold_patch diff and largest patched file (at most 16 MiB)")
 	flags.IntVar(&options.assist.PatchMaxFiles, "assist-patch-max-files", argojob.DefaultAssistPatchMaxFiles, "most files one run_hold_patch diff may touch (at most 1024)")
+	flags.IntVar(&options.agentEvents.Retention, "agent-events-retention", service.DefaultAgentEventRetention, "newest agent events kept for events_since and push replay (1-1000000; Helm agentEvents.retention)")
+	flags.IntVar(&options.agentEvents.SyncRetention, "agent-events-sync-retention", service.DefaultAgentSyncRetention, "newest native Argo lock holder/waiter intervals kept for sync_status (1-1000000)")
+	flags.DurationVar(&options.agentEvents.Interval, "agent-events-interval", service.DefaultAgentEventInterval, "sweep period for retry holds, native lock waits and publication retries (2s-5m)")
+	flags.DurationVar(&options.agentEvents.LockWait, "agent-events-lock-wait-threshold", service.DefaultAgentEventLockWait, "how long a run waits on one native Argo lock before a run.lock_wait event")
+	flags.IntVar(&options.agentEventStreams, "agent-events-max-streams-per-token", 4, "open MCP push streams (GET /mcp) allowed per bearer credential (1-64)")
+	flags.IntVar(&options.agentEventBacklog, "agent-events-max-backlog", 500, "agent events replayed to one MCP push stream on connect; older ones are left to events_since (1-10000)")
+	flags.DurationVar(&options.mcpHeartbeat, "agent-events-heartbeat", 20*time.Second, "keepalive interval of MCP streams (1s-5m)")
 	flags.Int64Var(&options.admissionDiskFloorBytes, "admission-disk-floor-bytes", 0, "when enabled and free bytes on /data are below this floor, admission is held until disk frees up (#673)")
 	flags.StringVar(&options.ciCacheRoot, "ci-cache-root", "/var/cache/oberth/ci", "CI host cache root")
 	flags.StringVar(&options.releaseCacheRoot, "release-cache-root", "/var/cache/oberth/release", "release host cache root")
@@ -385,10 +396,40 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	if options.assist.Enabled && (options.assist.HoldTTL <= 0 || options.assist.MaxConcurrentHolds <= 0) {
 		return serveOptions{}, errors.New("serve: --assist-hold-ttl and --assist-max-concurrent-holds must be positive when --assist-enabled")
 	}
+	if err := validateAgentEventOptions(options); err != nil {
+		return serveOptions{}, err
+	}
 	if options.argoDefaultWorkflowTimeout < time.Second || options.argoDefaultWorkflowTimeout%time.Second != 0 {
 		return serveOptions{}, errors.New("serve: --argo-default-workflow-timeout must use whole positive seconds")
 	}
 	return options, nil
+}
+
+// withAgentEvents adds the MCP agent loop (#1514) store and policy.
+func withAgentEvents(options serveOptions, store service.AgentEventStore, config service.APIConfig) service.APIConfig {
+	config.AgentEvents, config.AgentEventPolicy = store, options.agentEvents
+	return config
+}
+
+func validateAgentEventOptions(options serveOptions) error {
+	events := options.agentEvents
+	switch {
+	case events.Retention < 1 || events.Retention > service.MaxAgentEventRetention:
+		return errors.New("serve: --agent-events-retention must be 1..1000000")
+	case events.SyncRetention < 1 || events.SyncRetention > service.MaxAgentSyncRetention:
+		return errors.New("serve: --agent-events-sync-retention must be 1..1000000")
+	case events.Interval < service.MinAgentEventInterval || events.Interval > service.MaxAgentEventInterval:
+		return errors.New("serve: --agent-events-interval must be 2s..5m")
+	case events.LockWait <= 0:
+		return errors.New("serve: --agent-events-lock-wait-threshold must be positive")
+	case options.agentEventStreams < 1 || options.agentEventStreams > 64:
+		return errors.New("serve: --agent-events-max-streams-per-token must be 1..64")
+	case options.agentEventBacklog < 1 || options.agentEventBacklog > 10000:
+		return errors.New("serve: --agent-events-max-backlog must be 1..10000")
+	case options.mcpHeartbeat < time.Second || options.mcpHeartbeat > 5*time.Minute:
+		return errors.New("serve: --agent-events-heartbeat must be 1s..5m")
+	}
+	return nil
 }
 
 func validateServeOptions(options serveOptions) error {
@@ -1085,7 +1126,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
-	controlAPI, err := service.NewAPI(service.APIConfig{
+	controlAPI, err := service.NewAPI(withAgentEvents(options, database, service.APIConfig{
 		BranchPrune: git, BranchDeletions: database, DeletionQueued: branchDeletions.Notify,
 		ResourceDeclarations: argoJobs,
 		ReleasePreflight:     argoJobs,
@@ -1127,7 +1168,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		RunAssists:                database,
 		Retention:                 retention,
 		Schedules:                 schedules,
-	})
+	}))
 	if err != nil {
 		return err
 	}
@@ -1167,7 +1208,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 			scheduler.WritePressureMetrics(w)
 			argoJobs.WriteResourceMetrics(w)
 		}),
-		api.WithMaximumToolWait(service.DefaultMaximumWait),
+		api.WithMaximumToolWait(service.DefaultMaximumWait), api.WithAgentEventStreams(options.agentEventStreams, options.agentEventBacklog), api.WithMCPHeartbeat(options.mcpHeartbeat),
 		api.WithLiveness(func() error {
 			if err := writerProgress.Check(); err != nil {
 				return err
@@ -1293,7 +1334,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		if err := scheduler.RetryRecovery(activationCtx, "ReplayPending", sshService.ReplayPending); err != nil {
 			return fmt.Errorf("replay accepted Git events after audit verification: %w", err)
 		}
-		return nil
+		return controlAPI.StartAgentEvents(activationCtx)
 	}
 	ciIssues, err := service.NewCIIssueReconciler(database, git, anchors.AllowMutation, logger)
 	if err != nil {

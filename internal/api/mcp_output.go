@@ -33,6 +33,10 @@ func toolOutputSchema(name string) map[string]any {
 		collection = "uplinks"
 	case "audit_list":
 		collection = "entries"
+	case "events_since":
+		collection = "events"
+	case "sync_status":
+		collection = "locks"
 	case "access_list":
 		schema["anyOf"] = []any{toolCollectionSchema("grants"), toolCollectionSchema("declarations")}
 	case "issue_delete":

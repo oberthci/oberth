@@ -74,6 +74,15 @@ func (service *API) PrepareLongPoll(ctx context.Context, actor api.Actor, name s
 			response, err := prepared(ctx)
 			return service.stripScopedSequences(response), toolSelectorError(raw, err)
 		}, nil
+	case "run_wait":
+		prepared, err := service.prepareRunWait(ctx, raw)
+		if err != nil {
+			return nil, err
+		}
+		return func(ctx context.Context) (any, error) {
+			response, err := prepared(ctx)
+			return response, toolSelectorError(raw, err)
+		}, nil
 	default:
 		return nil, fmt.Errorf("%w: tool is not an observation long poll", ErrInvalidInput)
 	}

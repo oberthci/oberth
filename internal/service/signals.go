@@ -10,6 +10,28 @@ type Signals struct {
 	mu         sync.Mutex
 	runs       chan struct{}
 	promotions chan struct{}
+	// observer receives every notified ID (#1514). It must not block.
+	observer func(kind, id string)
+}
+
+// Observe installs the change observer the agent event recorder uses. The
+// observer runs outside the lock and must not block.
+func (signals *Signals) Observe(observer func(kind, id string)) {
+	if signals == nil {
+		return
+	}
+	signals.mu.Lock()
+	defer signals.mu.Unlock()
+	signals.observer = observer
+}
+
+func (signals *Signals) observe(kind, id string) {
+	signals.mu.Lock()
+	observer := signals.observer
+	signals.mu.Unlock()
+	if observer != nil && id != "" {
+		observer(kind, id)
+	}
 }
 
 func NewSignals() *Signals {
@@ -42,28 +64,30 @@ func (signals *Signals) Promotion(_ string) <-chan struct{} {
 	return signals.promotions
 }
 
-func (signals *Signals) NotifyRun(_ string) {
+func (signals *Signals) NotifyRun(id string) {
 	if signals == nil {
 		return
 	}
 	signals.mu.Lock()
-	defer signals.mu.Unlock()
 	if signals.runs == nil {
 		signals.runs = make(chan struct{})
 	}
 	close(signals.runs)
 	signals.runs = make(chan struct{})
+	signals.mu.Unlock()
+	signals.observe("run", id)
 }
 
-func (signals *Signals) NotifyPromotion(_ string) {
+func (signals *Signals) NotifyPromotion(id string) {
 	if signals == nil {
 		return
 	}
 	signals.mu.Lock()
-	defer signals.mu.Unlock()
 	if signals.promotions == nil {
 		signals.promotions = make(chan struct{})
 	}
 	close(signals.promotions)
 	signals.promotions = make(chan struct{})
+	signals.mu.Unlock()
+	signals.observe("promotion", id)
 }

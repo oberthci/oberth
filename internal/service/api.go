@@ -124,6 +124,10 @@ type APIConfig struct {
 	BranchDeletions BranchDeletionRecords
 	// DeletionQueued wakes the upstream deletion propagator; optional.
 	DeletionQueued func()
+	// AgentEvents backs events_subscribe, events_since, sync_status, the MCP
+	// push stream and promote prune_source (#1514); nil disables them.
+	AgentEvents      AgentEventStore
+	AgentEventPolicy AgentEventPolicy
 }
 
 type API struct {
@@ -211,6 +215,8 @@ type API struct {
 	schedules   ScheduleControl
 	// scope is set on the per-call copy serving a scoped actor (#073).
 	scope *repoScope
+	// agentEvents is shared by the per-actor copies (#1514).
+	agentEvents *agentEventRecorder
 }
 
 func NewAPI(config APIConfig) (*API, error) {
@@ -274,7 +280,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		config.QueueCap, _ = config.Runs.(QueueCapStore)
 	}
 	deferredBranches, _ := config.Runs.(deferredBranchReader)
-	return &API{
+	created := &API{
 		branchPrune: config.BranchPrune, branchDeletions: config.BranchDeletions, deletionQueued: config.DeletionQueued,
 		issueStaleAfter: config.IssueStaleAfter, issueActiveStaleAfter: config.IssueActiveStaleAfter,
 		releasePreflight: config.ReleasePreflight,
@@ -305,7 +311,9 @@ func NewAPI(config APIConfig) (*API, error) {
 		capacityOverrides: config.CapacityOverrides, runtimeCapacity: config.RuntimeCapacity,
 		promotionProgress: &sync.Map{},
 		lifetime:          lifetime, stopLifetime: stopLifetime, closing: &backgroundClosing{},
-	}, nil
+	}
+	created.agentEvents = newAgentEventRecorder(created, config.AgentEvents, config.AgentEventPolicy)
+	return created, nil
 }
 
 // backgroundClosing guards the background WaitGroup against late Adds.
@@ -416,7 +424,7 @@ func (service *API) CallTool(ctx context.Context, actor api.Actor, name string, 
 	if err != nil {
 		return nil, err
 	}
-	value, err = service.callTool(ctx, actor, name, raw)
+	value, err = service.dispatchTool(ctx, actor, name, raw)
 	return service.stripScopedSequences(value), toolSelectorError(raw, err)
 }
 
@@ -746,24 +754,7 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		}
 		return service.sync(ctx, actor, arguments.Repo, arguments.SHA, arguments.Branch, requestedPriority(actor, arguments.PriorityRequest))
 	case "promote":
-		var arguments promotionArguments
-		if err := decodeTool(raw, &arguments); err != nil {
-			return nil, err
-		}
-		if (arguments.SHA != "") == (arguments.Sources != nil) || arguments.SkipConflicting && arguments.Sources == nil {
-			return nil, refuse(ErrInvalidInput, "provide either sha or sources; skip_conflicting requires sources")
-		}
-		var promotion model.Promotion
-		var err error
-		if arguments.Sources != nil {
-			promotion, err = service.promoteTrain(ctx, actor, arguments)
-		} else {
-			promotion, err = service.promote(ctx, actor, arguments.Repo, arguments.SHA, arguments.Branch, requestedPriority(actor, arguments.PriorityRequest))
-		}
-		if err != nil {
-			return nil, err
-		}
-		return api.PromoteResponse{ID: promotion.ID}, nil
+		return service.promoteTool(ctx, actor, raw)
 	case "promote_retry":
 		var arguments struct {
 			ID string `json:"id"`
@@ -1313,11 +1304,18 @@ func (service *API) readRun(ctx context.Context, actor api.Actor, id string, sum
 			return nil, err
 		}
 		run.DisplayStatus, run.DisplayReason = shown.DisplayStatus, shown.DisplayReason
-		return summarizeRun(run, steps), nil
+		summarized := summarizeRun(run, steps)
+		// The compact summary keeps the hint's class, cause and action.
+		if hint := runRetryHint(run, service.runPublicationRetry(ctx, run)); hint != nil {
+			hint.Detail = ""
+			summarized.RetryHint = hint
+		}
+		return summarized, nil
 	}
 	scheduling, queuedReason := service.observeScheduling(ctx, run, steps, true)
 	response := RunDetailResponse{Run: service.presentationRun(ctx, run), Steps: steps, Scheduling: scheduling,
 		RerunOf: service.runRerunOf(ctx, run.ID)}
+	response.RetryHint = runRetryHint(response.Run, service.runPublicationRetry(ctx, run))
 	applyExecutionDisplay(&response.Run, response.Scheduling)
 	if reader, ok := service.history.(RunTimingReader); ok {
 		timing, timingErr := reader.RunTiming(ctx, run.ID)
@@ -2840,7 +2838,13 @@ func (service *API) prepareWaitPromotion(ctx context.Context, id string, request
 		if err != nil {
 			return PromotionWaitResponse{}, err
 		}
-		return PromotionWaitResponse{SourceCount: promotion.SourceCount(), Promotion: promotion, Repo: repo, Ref: promotion.SourceBranch, RetriedAs: retriedAs}, nil
+		response := PromotionWaitResponse{SourceCount: promotion.SourceCount(), Promotion: promotion, Repo: repo, Ref: promotion.SourceBranch, RetriedAs: retriedAs}
+		if service.agentEvents != nil {
+			if request, err := service.agentEvents.store.PromotionPrune(ctx, promotion.ID); err == nil {
+				response.PruneSource = &request
+			}
+		}
+		return response, nil
 	}
 	return func(ctx context.Context) (PromotionWaitResponse, error) {
 		timer := time.NewTimer(time.Until(deadline))

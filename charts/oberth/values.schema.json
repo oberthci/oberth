@@ -136,6 +136,20 @@
         "patchMaxFiles": {"type": "integer", "minimum": 1, "maximum": 1024}
       }
     },
+    "agentEvents": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "MCP agent loop: durable agent events, native Argo lock history and MCP push stream bounds (docs/agent-events.md).",
+      "properties": {
+        "retention": {"type": "integer", "minimum": 1, "maximum": 1000000},
+        "syncRetention": {"type": "integer", "minimum": 1, "maximum": 1000000},
+        "interval": {"type": "string", "pattern": "^[0-9]+(s|m)$", "description": "Sweep period, 2s..5m."},
+        "lockWaitThreshold": {"type": "string", "pattern": "^[0-9]+(s|m|h)$"},
+        "maxStreamsPerToken": {"type": "integer", "minimum": 1, "maximum": 64},
+        "maxBacklog": {"type": "integer", "minimum": 1, "maximum": 10000},
+        "heartbeat": {"type": "string", "pattern": "^[0-9]+(s|m)$", "description": "Keepalive interval, 1s..5m."}
+      }
+    },
     "maxConcurrentJobs": {
       "type": "integer",
       "minimum": 0,

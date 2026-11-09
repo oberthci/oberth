@@ -652,6 +652,9 @@ type PromotionWaitResponse struct {
 	// one (#1097): promote_retry, or the server's own retry after the target
 	// moved. Follow it with promote_status.
 	RetriedAs string `json:"retried_as,omitempty"`
+	// PruneSource is the promote prune_source request and its outcome
+	// (#1514); absent when none was requested.
+	PruneSource *model.PromotionPrune `json:"prune_source,omitempty"`
 }
 
 // RepoView is the enriched repository response for the /api/repos dashboard

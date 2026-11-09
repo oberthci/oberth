@@ -15,6 +15,9 @@ type RunDetailResponse struct {
 	Steps      []model.StepResult
 	// RerunOf names the run this one re-ran with run_rerun (#1098).
 	RerunOf string `json:"RerunOf,omitempty"`
+	// RetryHint classifies a run that did not pass as infrastructure or
+	// code (#1514), so an agent can retry without reading logs.
+	RetryHint *model.RetryHint `json:"retry_hint,omitempty"`
 }
 
 // Shadow only unused diagnostic fields on the HTTP projection. The embedded

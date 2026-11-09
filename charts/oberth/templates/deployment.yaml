@@ -270,6 +270,23 @@ spec:
             - --assist-exec-output-bytes={{ $assistOutput }}
             - --assist-patch-max-bytes={{ $assistPatchBytes }}
             - --assist-patch-max-files={{ $assistPatchFiles }}
+            {{- /* MCP agent loop (#1514): every knob is a flag with the binary default. */}}
+            {{- $events := .Values.agentEvents | default dict }}
+            {{- $eventsRetention := int64 10000 }}
+            {{- if hasKey $events "retention" }}{{- $eventsRetention = int64 $events.retention }}{{- end }}
+            {{- $eventsSync := int64 20000 }}
+            {{- if hasKey $events "syncRetention" }}{{- $eventsSync = int64 $events.syncRetention }}{{- end }}
+            {{- $eventsStreams := int64 4 }}
+            {{- if hasKey $events "maxStreamsPerToken" }}{{- $eventsStreams = int64 $events.maxStreamsPerToken }}{{- end }}
+            {{- $eventsBacklog := int64 500 }}
+            {{- if hasKey $events "maxBacklog" }}{{- $eventsBacklog = int64 $events.maxBacklog }}{{- end }}
+            - --agent-events-retention={{ $eventsRetention }}
+            - --agent-events-sync-retention={{ $eventsSync }}
+            - {{ printf "--agent-events-interval=%s" ($events.interval | default "10s") | quote }}
+            - {{ printf "--agent-events-lock-wait-threshold=%s" ($events.lockWaitThreshold | default "60s") | quote }}
+            - --agent-events-max-streams-per-token={{ $eventsStreams }}
+            - --agent-events-max-backlog={{ $eventsBacklog }}
+            - {{ printf "--agent-events-heartbeat=%s" ($events.heartbeat | default "20s") | quote }}
             {{- $schedules := .Values.schedules | default dict }}
             {{- $scheduleMaxEntries := 8 }}
             {{- if hasKey $schedules "maxEntries" }}{{- $scheduleMaxEntries = int $schedules.maxEntries }}{{- end }}

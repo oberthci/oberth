@@ -172,7 +172,7 @@ func newScopeFixture(t *testing.T) *scopeFixture {
 		Runs: database, History: database, Repositories: database, Issues: database,
 		Promotions: database, Logs: logs, Artifacts: kept, Auditor: database,
 		SecretAccess: database, SizeGrants: database, WorkflowCapabilities: database, PromotionGrants: database, RepositoryRemover: database,
-		Health: fixture.health, Signals: NewSignals(), RunCancels: database, RunReruns: database,
+		Health: fixture.health, Signals: NewSignals(), RunCancels: database, RunReruns: database, AgentEvents: database,
 		MaximumWait: testTimeout(50 * time.Millisecond), PromotionWorkspaceRoot: filepath.Join(root, "promotion-work"),
 		SecretStoreVerifier: func(context.Context, api.SecretStoreVerifyRequest) (api.SecretStoreVerifyResponse, error) {
 			return api.SecretStoreVerifyResponse{}, nil
@@ -414,6 +414,9 @@ func TestScopedUplinkCannotTellHiddenFromMissing(t *testing.T) {
 		{"run_cancel", map[string]any{"id": hiddenRun.ID[:16]}, map[string]any{"id": missingRunID[:16]}},
 		{"run_rerun", map[string]any{"id": hiddenRun.ID, "reason": "x"}, map[string]any{"id": missingRunID, "reason": "x"}},
 		{"run_hold_list", map[string]any{"id": hiddenRun.ID}, map[string]any{"id": missingRunID}},
+		{"run_wait", map[string]any{"id": hiddenRun.ID, "timeout_s": 1}, map[string]any{"id": missingRunID, "timeout_s": 1}},
+		{"events_subscribe", map[string]any{"repos": []string{hiddenRepo}}, map[string]any{"repos": []string{missingRepo}}},
+		{"events_since", map[string]any{"repos": []string{hiddenRepo}}, map[string]any{"repos": []string{missingRepo}}},
 		{"run_hold_exec", map[string]any{"id": hiddenRun.ID, "argv": []string{"true"}}, map[string]any{"id": missingRunID, "argv": []string{"true"}}},
 		{"run_hold_patch", map[string]any{"id": hiddenRun.ID, "diff": "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n"}, map[string]any{"id": missingRunID, "diff": "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n"}},
 		{"run_continue", map[string]any{"id": hiddenRun.ID}, map[string]any{"id": missingRunID}},
@@ -711,6 +714,7 @@ var toolScopeBehaviour = map[string]string{
 	"branch_delete_many": "refused", "branch_deletion_list": "refused", "branch_deletion_resolve": "refused", "ref_delete_many": "refused", "receive_outbox": "refused",
 	"secretstore_verify": "refused", "secretstore_plan": "refused", "secretstore_sync_receipt": "refused",
 	"audit_list": "refused",
+	"run_wait":   "lookup", "events_subscribe": "lookup", "events_since": "filtered", "sync_status": "filtered",
 }
 
 // A new tool must be classified here AND covered by the behaviour tests:
