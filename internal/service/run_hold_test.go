@@ -49,6 +49,8 @@ func (s *holdAssistStore) AppendRunAssist(_ context.Context, request model.RunAs
 	}
 	if event.Kind == model.RunAssistContinue {
 		event.Assisted = record.Touched(event.Step)
+	}
+	if event.Kind != model.RunAssistAbandon {
 		run.Assisted = true
 	}
 	record.Events = append(record.Events, event)
@@ -212,8 +214,16 @@ func TestRunHoldExecBoundsArgv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.Result.ExitCode != 1 || response.Step != "test" || len(assists.events) != 1 || assists.events[0].Kind != model.RunAssistExec || *assists.events[0].ExitCode != 1 {
+	if response.Result.ExitCode != 1 || response.Step != "test" || len(assists.events) != 1 || assists.events[0].Kind != model.RunAssistExec || assists.events[0].Argv[0] != "false" {
 		t.Fatalf("exec response %+v events %+v", response, assists.events)
+	}
+	if !service.history.(holdHistory).runs[run.ID].Assisted {
+		t.Fatal("exec alone must mark the run assisted before the command runs")
+	}
+	// A refused exec (unknown step) records nothing; a recorded exec whose
+	// command fails to start still leaves the run assisted.
+	if _, err := service.execRunHold(ctx, owner, run.ID, "nope", []string{"true"}, "", 0); !errors.Is(err, ErrInvalidInput) || len(assists.events) != 1 {
+		t.Fatalf("unknown step exec = %v, events %d", err, len(assists.events))
 	}
 }
 
@@ -228,6 +238,9 @@ func TestRunHoldPatchAppliesThroughHelperAndContinueMarksAssisted(t *testing.T) 
 	}
 	if response.PatchSHA256 != holdfs.Digest([]byte(diff)) || len(response.Files) != 2 || response.Step != "test" {
 		t.Fatalf("patch response %+v", response)
+	}
+	if !service.history.(holdHistory).runs[run.ID].Assisted || assists.events[0].Kind != model.RunAssistPatch || assists.events[0].PatchSHA256 != response.PatchSHA256 {
+		t.Fatalf("patch alone must mark the run assisted before it is applied: %+v", assists.events)
 	}
 	if got, _ := os.ReadFile(filepath.Join(operator.root, "go.mod")); string(got) != "module example.com/x\n\ngo 1.27\n" {
 		t.Fatalf("go.mod = %q", got)

@@ -1889,7 +1889,7 @@ containing CI and real workload qualification remain separately required.
 - Admission refuses everything that would reach the node or the cluster around
   the envelope: `podSpecPatch`, `hostNetwork`, `hostAliases`, `hostPath`,
   `nodeSelector`, `affinity`, `hostPort`/`hostIP`, `workflowTemplateRef`,
-  `imagePullSecrets`, Secret or ConfigMap references in `env`/`envFrom`,
+  `imagePullSecrets`, Secret or ConfigMap references in `env`/`envFrom`, `ARGO_*` environment names,
   repository-chosen object names, repository-set Pod or container security
   contexts, and any `claimName`. Documents are decoded strictly, and exactly one
   YAML document per file is accepted.
@@ -2674,7 +2674,7 @@ remain required, with no public listener or insecure fallback.
 | Let a repository-declared concurrency group span repositories, or change a run's weight, identity, or credentials | Forbidden |
 | Change the `oberth.ci/concurrency-group` annotation name, name grammar, or cross-trigger membership | Breaking |
 | Let a repository create an exclusive class, choose its limit, or turn a class into an Argo synchronization object, ConfigMap, node selector or affinity | Forbidden |
-| Count an assisted run (any continued retry hold) as promotion, publication, SHA-pinned fragment or CI-issue evidence; hold a credentialed, release, tag, promotion, schedule, plan or apply step; let a repository set `oberth.ci/assist-hold` or `podSpecPatch` | Forbidden |
+| Count an assisted run (any exec, patch or continue on a retry hold) as promotion, publication, SHA-pinned fragment or CI-issue evidence; hold a credentialed, release, tag, promotion, schedule, plan or apply step; let a repository set `oberth.ci/assist-hold` or `podSpecPatch` | Forbidden |
 | Change the `oberth.ci/exclusive` annotation name, class grammar, empty-allowlist refusal, or run-level membership | Breaking |
 | Charge Pod start-up to a step's declared deadline budget again by default, or report a step whose `main` exited 0 as a deadline failure | Breaking |
 | Change a scheduling or placement default (`admission.stepStartupAllowance`, `admission.stallTimeout`, `argo.defaultWorkflowTimeout`, `schedules.*`), or add such a setting without a Helm value | Breaking |
@@ -3128,13 +3128,15 @@ exit-0 rule. See
 A branch-tier CI run that asked (`git push -o oberth.assist=1`, `run_rerun`
 `assist`, `oberth run rerun --assist`; immutable `runs.assist_requested`) and
 declares no secret-store paths gets, on every single-main container/script leaf
-without its own `retryStrategy`, credentials, step identity, token mount or
-nonroot launcher, a server-owned `retryStrategy` (`limit 1`, `OnFailure`,
+without its own `retryStrategy` (and no `templateDefaults.retryStrategy` in
+the document), credentials, step identity, token mount or nonroot launcher, a
+server-owned `retryStrategy` (`limit 1`, `OnFailure`,
 `expression: asInt(lastRetry.exitCode) > 0`) and a server-owned conditional
 `podSpecPatch` (`{{= asInt(retries) > 0 && asInt(lastRetry.exitCode) > 0 ? held
 : base }}`). Attempt 1 is unchanged. The held retry parks before its command
 (`ARGO_DEBUG_PAUSE_BEFORE`), has a Pod deadline of the floored step budget plus
-`assist.holdTTL`, a writable `/work/src`, a read-only `/work/cache` with its
+`assist.holdTTL` (the server abandons an unreleased hold once `holdTTL` has
+passed; the Pod deadline is the backstop), a writable `/work/src`, a read-only `/work/cache` with its
 cache variables moved to private scratch, and the server executable mounted.
 The Workflow deadline grows by one hold TTL. Server-owned annotations
 `oberth.ci/assist` (Workflow) and `oberth.ci/assist-hold` (template, refused
@@ -3148,10 +3150,12 @@ run, capped by `assist.maxConcurrentHolds`, bounded by `assist.execTimeout`,
 `execOutputBytes`, `patchMaxBytes`, `patchMaxFiles`; argv-only exec; exact-
 context unified diffs applied through the Pod helper `oberth internal-hold-fs`
 with no symlink following, no `.git`, no renames or binaries) append to the
-audited `runs.assist_record` (`run.assist.<kind>`). A continue is recorded
-before the release; a failed release abandons the Pod. **A run with any
-continued hold is assisted** (`runs.assisted`, monotonic), also when nothing was
-patched or exec'd: it is never a promotion source, never published upstream,
+audited `runs.assist_record` (`run.assist.<kind>`) before they execute; a
+failed release abandons the Pod. Admission refuses every `ARGO_*` environment
+name from repositories (template defaults and fragments included) and a hold is
+recognised only on a retry node (`(N)`, N >= 1). **A run with any exec, patch or
+continue on a held step is assisted** (`runs.assisted`, monotonic), also when a
+continue follows nothing: it is never a promotion source, never published upstream,
 never SHA-pinned fragment evidence and never resolves a CI issue. No status,
 label or layout is added; the existing status carries the reason line
 `assisted: step <name> continued after patch sha256:<12 hex> by <actor>; not

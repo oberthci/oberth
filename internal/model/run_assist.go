@@ -35,9 +35,9 @@ type RunAssistEvent struct {
 	Argv     []string `json:"argv,omitempty"`
 	ExitCode *int     `json:"exit_code,omitempty"`
 	// Assisted is recorded on a continue: whether the held step saw a patch
-	// or an exec before release. A continue without either is still not
-	// evidence (see docs/assisted-continuation.md), so the run is assisted
-	// either way; the flag only shapes the reason line.
+	// or an exec before release. The run itself is assisted from the first
+	// exec, patch or continue (see docs/assisted-continuation.md); the flag
+	// only shapes the reason line.
 	Assisted bool `json:"assisted,omitempty"`
 }
 
@@ -67,21 +67,44 @@ func (record RunAssistRecord) Touched(step string) bool {
 }
 
 // Reason is the reason-line fragment for an assisted run: no new status, the
-// existing status explains itself. Example:
-// "assisted: step test continued after patch sha256:ab12… by uplink-a".
+// existing status explains itself. One clause per touched step, e.g.
+// "assisted: step test continued after patch sha256:ab12… by uplink-a; not
+// evidence"; a step that was only inspected or patched reads "step test
+// patched sha256:… by uplink-a" or "step test inspected by uplink-a".
 func (record RunAssistRecord) Reason() string {
-	var parts []string
+	var order []string
+	actors := map[string]string{}
 	for _, event := range record.Events {
-		if event.Kind != RunAssistContinue {
+		if event.Kind == RunAssistAbandon {
 			continue
 		}
-		detail := "continued without changes"
-		if sha := record.lastPatch(event.Step); sha != "" {
-			detail = "continued after patch sha256:" + shortDigest(sha)
-		} else if record.Touched(event.Step) {
-			detail = "continued after exec"
+		if _, seen := actors[event.Step]; !seen {
+			order = append(order, event.Step)
 		}
-		parts = append(parts, fmt.Sprintf("step %s %s by %s", event.Step, detail, event.Actor))
+		actors[event.Step] = event.Actor
+	}
+	var parts []string
+	for _, step := range order {
+		sha, continued, touched := record.lastPatch(step), false, record.Touched(step)
+		for _, event := range record.Events {
+			if event.Step == step && event.Kind == RunAssistContinue {
+				continued = true
+			}
+		}
+		detail := ""
+		switch {
+		case continued && sha != "":
+			detail = "continued after patch sha256:" + shortDigest(sha)
+		case continued && touched:
+			detail = "continued after exec"
+		case continued:
+			detail = "continued without changes"
+		case sha != "":
+			detail = "patched sha256:" + shortDigest(sha)
+		default:
+			detail = "inspected"
+		}
+		parts = append(parts, fmt.Sprintf("step %s %s by %s", step, detail, actors[step]))
 	}
 	if len(parts) == 0 {
 		return ""

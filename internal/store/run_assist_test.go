@@ -62,15 +62,22 @@ func TestAssistedRunIsNeverGreenEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Assisted || updated.Assist == nil || len(updated.Assist.Events) != 1 {
-		t.Fatalf("exec alone must not decide the verdict: %+v", updated)
+	if !updated.Assisted || updated.Assist == nil || len(updated.Assist.Events) != 1 {
+		t.Fatalf("exec alone must mark the run assisted (an exec can edit the tree or release the hold): %+v", updated)
+	}
+	if reason := updated.Assist.Reason(); reason != "assisted: step test inspected by tester; not evidence" {
+		t.Fatalf("exec-only reason = %q", reason)
+	}
+	released, err := s.ReleasedAssistPods(ctx)
+	if err != nil || len(released) != 0 {
+		t.Fatalf("exec released a hold: %v, %v", released, err)
 	}
 	updated, err = s.AppendRunAssist(ctx, model.RunAssistRequest{RunID: run.ID, Event: model.RunAssistEvent{Actor: "tester", Step: "test", Pod: "wf-test-1", Kind: model.RunAssistPatch, PatchSHA256: strings.Repeat("d", 64), PatchBytes: 120, Files: []string{"go.mod"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Assisted {
-		t.Fatal("patch alone must not decide the verdict")
+	if !updated.Assisted || !strings.Contains(updated.Assist.Reason(), "step test patched sha256:dddddddddddd by tester") {
+		t.Fatalf("patch alone must mark the run assisted: %+v %q", updated.Assisted, updated.Assist.Reason())
 	}
 	updated, err = s.AppendRunAssist(ctx, model.RunAssistRequest{RunID: run.ID, Event: model.RunAssistEvent{Actor: "tester", Step: "test", Pod: "wf-test-1", Kind: model.RunAssistContinue}})
 	if err != nil {
@@ -81,6 +88,9 @@ func TestAssistedRunIsNeverGreenEvidence(t *testing.T) {
 	}
 	if reason := updated.Assist.Reason(); !strings.Contains(reason, "step test continued after patch sha256:dddddddddddd by tester") || !strings.HasSuffix(reason, "not evidence") {
 		t.Fatalf("reason line = %q", reason)
+	}
+	if released, err = s.ReleasedAssistPods(ctx); err != nil || !released["wf-test-1"] || len(released) != 1 {
+		t.Fatalf("released pods after continue = %v, %v", released, err)
 	}
 	if _, err := s.FinishRun(ctx, run.ID, model.RunResult{Status: model.RunPassed}); err != nil {
 		t.Fatal(err)
@@ -108,6 +118,19 @@ func TestAssistedRunIsNeverGreenEvidence(t *testing.T) {
 	var audited int
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_actions WHERE resource_id = ? AND action LIKE 'run.assist.%'`, run.ID).Scan(&audited); err != nil || audited != 3 {
 		t.Fatalf("assist audit rows = %d, %v", audited, err)
+	}
+
+	// A patch with no exec before it is enough on its own.
+	sha = strings.Repeat("f", 40)
+	patched, err := s.EnqueueRun(ctx, model.RunSpec{Assist: true, RepoID: repository.ID, RefKind: model.RefBranch, Ref: "feature/patched", SHA: sha, TestedSHA: sha, Actor: "tester", Trigger: "branch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if patchedRun, err := s.AppendRunAssist(ctx, model.RunAssistRequest{RunID: patched.ID, Event: model.RunAssistEvent{Actor: "tester", Step: "lint", Pod: "wf-lint-1", Kind: model.RunAssistPatch, PatchSHA256: strings.Repeat("1", 64)}}); err != nil || !patchedRun.Assisted {
+		t.Fatalf("patch alone = %+v, %v", patchedRun.Assisted, err)
+	}
+	if released, err := s.ReleasedAssistPods(ctx); err != nil || released["wf-lint-1"] {
+		t.Fatalf("patch released a hold: %v, %v", released, err)
 	}
 
 	// A rerun carries the caller's choice, not the source run's.

@@ -1348,7 +1348,7 @@ type assistHoldController interface {
 	ExecAssistHold(context.Context, model.AssistExecRequest) (model.AssistExecResult, error)
 	ReleaseAssistHold(context.Context, string) error
 	AbandonAssistHold(context.Context, string) error
-	EnforceAssistHoldCap(context.Context, map[string]bool) ([]string, error)
+	EnforceAssistHolds(context.Context, map[string]bool, time.Time) ([]string, error)
 }
 
 // AssistPolicy reports the administrator policy Build and the tools share.
@@ -1399,11 +1399,12 @@ func (jobs *ArgoJobs) AbandonAssistHold(ctx context.Context, pod string) error {
 	return controller.AbandonAssistHold(ctx, pod)
 }
 
-// EnforceAssistHoldCap abandons parked attempts above assist.maxConcurrentHolds.
-func (jobs *ArgoJobs) EnforceAssistHoldCap(ctx context.Context, released map[string]bool) ([]string, error) {
+// EnforceAssistHolds abandons parked attempts older than assist.holdTTL and
+// above assist.maxConcurrentHolds; released holds are skipped.
+func (jobs *ArgoJobs) EnforceAssistHolds(ctx context.Context, released map[string]bool, now time.Time) ([]string, error) {
 	controller, err := jobs.assistController()
 	if err != nil {
 		return nil, nil
 	}
-	return controller.EnforceAssistHoldCap(ctx, released)
+	return controller.EnforceAssistHolds(ctx, released, now)
 }

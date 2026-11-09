@@ -49,7 +49,9 @@ autoRetryInfrastructure: true
 # with the same default. See docs/assisted-continuation.md.
 assist:
   enabled: false
-  # Kubelet-bounded wait for the agent; whole seconds, at most 4h.
+  # How long an unreleased hold waits for the agent before the server abandons
+  # it (the held Pod's own deadline is the step budget plus this TTL, so a
+  # released step keeps its budget); whole seconds, at most 4h.
   holdTTL: 20m
   # Parked retries allowed at once across the installation (1-64).
   maxConcurrentHolds: 2

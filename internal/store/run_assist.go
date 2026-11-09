@@ -55,6 +55,10 @@ func (s *Store) AppendRunAssist(ctx context.Context, request model.RunAssistRequ
 	if event.Kind == model.RunAssistContinue {
 		event.Assisted = record.Touched(event.Step)
 	}
+	// Any exec or patch is a change the server cannot bound (an exec may
+	// edit the tree or release the hold itself), so the verdict is set the
+	// moment such an action is recorded, before it runs.
+	assisted := current.Assisted || event.Kind != model.RunAssistAbandon
 	record.Events = append(record.Events, event)
 	encoded, err := json.Marshal(record)
 	if err != nil {
@@ -63,7 +67,6 @@ func (s *Store) AppendRunAssist(ctx context.Context, request model.RunAssistRequ
 	if len(encoded) > model.MaximumRunAssistRecordBytes {
 		return model.Run{}, fmt.Errorf("%w: run assist record exceeds limit", ErrInvalid)
 	}
-	assisted := current.Assisted || event.Kind == model.RunAssistContinue
 	if _, err := tx.ExecContext(ctx, `UPDATE runs SET assist_record = ?, assisted = ?, updated_at = ? WHERE id = ?`, string(encoded), assisted, unixNano(now), current.ID); err != nil {
 		return model.Run{}, fmt.Errorf("record run assist: %w", err)
 	}
@@ -87,4 +90,34 @@ func (s *Store) AppendRunAssist(ctx context.Context, request model.RunAssistRequ
 		return model.Run{}, fmt.Errorf("commit run assist: %w", err)
 	}
 	return updated, nil
+}
+
+// ReleasedAssistPods lists the held Pods of active runs whose agent already
+// continued or abandoned them, so the hold sweep leaves running steps alone.
+func (s *Store) ReleasedAssistPods(ctx context.Context) (map[string]bool, error) {
+	rows, err := s.reader().QueryContext(ctx, `SELECT assist_record FROM runs WHERE status IN ('queued','running') AND assist_record <> ''`)
+	if err != nil {
+		return nil, fmt.Errorf("list assist records: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	released := map[string]bool{}
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, fmt.Errorf("scan assist record: %w", err)
+		}
+		var record model.RunAssistRecord
+		if err := json.Unmarshal([]byte(raw), &record); err != nil {
+			return nil, fmt.Errorf("decode assist record: %w", err)
+		}
+		for _, event := range record.Events {
+			if event.Pod != "" && (event.Kind == model.RunAssistContinue || event.Kind == model.RunAssistAbandon) {
+				released[event.Pod] = true
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list assist records: %w", err)
+	}
+	return released, nil
 }

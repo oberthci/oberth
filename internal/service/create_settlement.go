@@ -236,17 +236,7 @@ func (scheduler *Scheduler) runCreateCleanup(ctx context.Context) {
 		case <-scheduler.createWake:
 		}
 		scheduler.settleOneCreate(ctx)
-		if holds, ok := scheduler.jobs.(interface {
-			EnforceAssistHoldCap(context.Context, map[string]bool) ([]string, error)
-		}); ok {
-			attempt, cancel := context.WithTimeout(ctx, createSettlementAttemptBudget)
-			if abandoned, err := holds.EnforceAssistHoldCap(attempt, nil); err != nil {
-				log.Print("WARN: assist hold cap enforcement remains pending")
-			} else if len(abandoned) > 0 {
-				log.Printf("assist: abandoned %d held attempts above assist.maxConcurrentHolds", len(abandoned))
-			}
-			cancel()
-		}
+		scheduler.sweepAssistHolds(ctx)
 		if cleanup, ok := scheduler.jobs.(interface{ ReconcileTargetCleanup(context.Context) error }); ok {
 			attempt, cancel := context.WithTimeout(ctx, createSettlementAttemptBudget)
 			if err := scheduler.requireMutation(attempt); err == nil {
@@ -443,5 +433,36 @@ func (scheduler *Scheduler) deferCreateCleanup(ctx context.Context, run model.Ru
 	scheduler.registerCreateCleanup(run, grant, err == nil)
 	if err != nil {
 		log.Printf("WARN: create_cleanup run=%q persistence_deferred=true", run.ID)
+	}
+}
+
+// sweepAssistHolds abandons parked assist attempts past the hold TTL or
+// above the installation cap. Pods their agent already continued or
+// abandoned (the run's assist record) are running work and are skipped; if
+// that record cannot be read, nothing is abandoned, so a released step is
+// never killed by a blind sweep.
+func (scheduler *Scheduler) sweepAssistHolds(ctx context.Context) {
+	holds, ok := scheduler.jobs.(interface {
+		EnforceAssistHolds(context.Context, map[string]bool, time.Time) ([]string, error)
+	})
+	if !ok {
+		return
+	}
+	attempt, cancel := context.WithTimeout(ctx, createSettlementAttemptBudget)
+	defer cancel()
+	released := map[string]bool{}
+	if source, ok := scheduler.store.(interface {
+		ReleasedAssistPods(context.Context) (map[string]bool, error)
+	}); ok {
+		var err error
+		if released, err = source.ReleasedAssistPods(attempt); err != nil {
+			log.Print("WARN: assist hold sweep skipped: released holds unknown")
+			return
+		}
+	}
+	if abandoned, err := holds.EnforceAssistHolds(attempt, released, time.Now()); err != nil {
+		log.Print("WARN: assist hold sweep remains pending")
+	} else if len(abandoned) > 0 {
+		log.Printf("assist: abandoned %d held attempts past assist.holdTTL or above assist.maxConcurrentHolds", len(abandoned))
 	}
 }

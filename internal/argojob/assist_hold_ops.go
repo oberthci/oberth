@@ -86,8 +86,16 @@ func assistHoldOf(pod *corev1.Pod) (model.AssistHold, bool) {
 			hold.Step = variable.Value
 		}
 	}
-	if match := retryAttemptSuffix.FindStringSubmatch(hold.Node); match != nil {
-		hold.Attempt, _ = strconv.Atoi(match[1])
+	// Only a retry child (node "...(N)", N >= 1) can be a hold: the held
+	// patch branch is never applied to attempt 1, and the pause variable is
+	// refused from repositories, so an attempt-1 Pod carrying it is not ours.
+	match := retryAttemptSuffix.FindStringSubmatch(hold.Node)
+	if match == nil {
+		return model.AssistHold{}, false
+	}
+	hold.Attempt, _ = strconv.Atoi(match[1])
+	if hold.Attempt < 1 {
+		return model.AssistHold{}, false
 	}
 	for _, status := range pod.Status.ContainerStatuses {
 		if status.Name == mainContainerName && status.State.Running != nil {
@@ -198,34 +206,50 @@ func (controller *Controller) AbandonAssistHold(ctx context.Context, pod string)
 	return controller.kube.CoreV1().Pods(controller.Namespace()).Delete(ctx, pod, metav1.DeleteOptions{})
 }
 
-// EnforceAssistHoldCap abandons the newest parked attempts above the
-// installation cap. Holds already released by their agent are not counted:
-// their command is running.
-func (controller *Controller) EnforceAssistHoldCap(ctx context.Context, released map[string]bool) ([]string, error) {
+// EnforceAssistHolds bounds parked attempts: an unreleased hold older than
+// the hold TTL is abandoned (the Pod deadline covers the step budget too, so
+// the server, not the kubelet, enforces the TTL), and the newest parked
+// holds above the installation cap are abandoned. Holds already released by
+// their agent are running commands and are neither aged nor counted.
+func (controller *Controller) EnforceAssistHolds(ctx context.Context, released map[string]bool, now time.Time) ([]string, error) {
 	if controller.kube == nil || !controller.config.Assist.Enabled {
 		return nil, nil
 	}
-	cap := controller.config.Assist.Effective().MaxConcurrentHolds
+	assist := controller.config.Assist.Effective()
 	pods, err := controller.kube.CoreV1().Pods(controller.Namespace()).List(ctx, metav1.ListOptions{LabelSelector: "oberth.ci/trigger=branch"})
 	if err != nil {
 		return nil, fmt.Errorf("list branch pods: %w", err)
 	}
+	var abandoned []string
+	abandon := func(pod string) error {
+		if err := controller.kube.CoreV1().Pods(controller.Namespace()).Delete(ctx, pod, metav1.DeleteOptions{}); err != nil {
+			return fmt.Errorf("abandon hold %s: %w", pod, err)
+		}
+		abandoned = append(abandoned, pod)
+		return nil
+	}
 	var holds []model.AssistHold
 	for index := range pods.Items {
-		if hold, ok := assistHoldOf(&pods.Items[index]); ok && !released[hold.Pod] {
-			holds = append(holds, hold)
+		hold, ok := assistHoldOf(&pods.Items[index])
+		if !ok || released[hold.Pod] {
+			continue
 		}
+		if !hold.HeldSince.Add(assist.HoldTTL).After(now) {
+			if err := abandon(hold.Pod); err != nil {
+				return abandoned, err
+			}
+			continue
+		}
+		holds = append(holds, hold)
 	}
-	if len(holds) <= cap {
-		return nil, nil
+	if len(holds) <= assist.MaxConcurrentHolds {
+		return abandoned, nil
 	}
 	sort.Slice(holds, func(i, j int) bool { return holds[i].HeldSince.Before(holds[j].HeldSince) })
-	var abandoned []string
-	for _, hold := range holds[cap:] {
-		if err := controller.kube.CoreV1().Pods(controller.Namespace()).Delete(ctx, hold.Pod, metav1.DeleteOptions{}); err != nil {
-			return abandoned, fmt.Errorf("abandon hold %s over cap: %w", hold.Pod, err)
+	for _, hold := range holds[assist.MaxConcurrentHolds:] {
+		if err := abandon(hold.Pod); err != nil {
+			return abandoned, err
 		}
-		abandoned = append(abandoned, hold.Pod)
 	}
 	return abandoned, nil
 }

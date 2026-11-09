@@ -65,6 +65,10 @@ type WriteResponse struct {
 // MaxReadBytes bounds any single read regardless of the request.
 const MaxReadBytes = 16 << 20
 
+// ReleaseMarkerPath is the only file the release command creates: the
+// emissary's debug-pause release marker for the main container.
+const ReleaseMarkerPath = "/var/run/argo/ctr/main/before"
+
 // Run is the helper entrypoint; it returns the process exit code.
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) < 1 {
@@ -309,10 +313,14 @@ func runRelease(args []string) error {
 	if err != nil {
 		return err
 	}
-	if !filepath.IsAbs(target) {
-		return fmt.Errorf("%w: release path must be absolute", ErrPath)
+	if target != ReleaseMarkerPath {
+		return fmt.Errorf("%w: release creates only %s", ErrPath, ReleaseMarkerPath)
 	}
-	file, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|noFollow, 0o600) // #nosec G304 -- the server names Argo's release marker path.
+	return releaseMarker(target)
+}
+
+func releaseMarker(target string) error {
+	file, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|noFollow, 0o600) // #nosec G304 -- fixed by the caller to the Argo release marker.
 	if err != nil {
 		return err
 	}

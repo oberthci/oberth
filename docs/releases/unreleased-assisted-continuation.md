@@ -15,13 +15,15 @@ diff through the server's own Pod helper (`run_hold_patch`), and releases the
 step (`run_continue`) so Argo continues the DAG natively; `run_hold_abandon`
 fails it. Every action is audited (`run.assist.*`) and appended to the run.
 
-A run with any continued hold is **assisted**: never a promotion source, never
+A run with any exec, patch or continue on a hold is **assisted** (recorded
+before the action runs): never a promotion source, never
 published upstream, never green-for-SHA or CI-issue evidence, with the reason
 line `assisted: step X continued after patch sha256:… by <actor>; not evidence`
 on its existing status. Release, tag, promotion, schedule, plan and apply runs
 never hold; #1499 classification and the infrastructure retry are unchanged.
 
 Helm: `assist.{enabled,holdTTL,maxConcurrentHolds,execTimeout,execOutputBytes,patchMaxBytes,patchMaxFiles}`.
+Admission now refuses `ARGO_*` environment names from repository YAML.
 Schema: migration `assisted-runs` adds `runs.assist_requested`, `runs.assisted`,
 `runs.assist_record` (rollback: pre-upgrade backup). No new RBAC.
 See [assisted continuation](../assisted-continuation.md).

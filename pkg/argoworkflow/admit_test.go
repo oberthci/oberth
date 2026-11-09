@@ -1168,3 +1168,14 @@ func TestPipelinePriorityAnnotationDoesNotSetArgoPriority(t *testing.T) {
 	}
 	refuse(t, strings.Replace(admissibleDocument, "spec:\n", "spec:\n  priority: 1000\n", 1), Policy{}, "spec.priority")
 }
+
+// Repositories may not set the Argo executor's own control environment:
+// ARGO_DEBUG_PAUSE_BEFORE would park a Pod with no deadline (#retry-hold).
+func TestAdmitRefusesReservedExecutorEnv(t *testing.T) {
+	document := strings.Replace(admissibleDocument, "        command: [/bin/true]\n",
+		"        command: [/bin/true]\n        env:\n          - name: ARGO_DEBUG_PAUSE_BEFORE\n            value: \"true\"\n", 1)
+	refuse(t, document, Policy{}, "reserved for the Argo executor")
+	defaults := strings.Replace(admissibleDocument, "  entrypoint: main\n",
+		"  entrypoint: main\n  templateDefaults:\n    container:\n      env:\n        - name: ARGO_CONTAINER_NAME\n          value: wait\n", 1)
+	refuse(t, defaults, Policy{}, "reserved for the Argo executor")
+}

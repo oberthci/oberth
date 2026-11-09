@@ -43,7 +43,8 @@ For a run in assist mode, `Build` adds to every eligible pod leaf:
   `<held>` additionally sets `ARGO_DEBUG_PAUSE_BEFORE=true` and
   `OBERTH_ASSIST_HOLD=1` on `main`, sets the Pod `activeDeadlineSeconds` to
   the step's #1499-floored budget plus `assist.holdTTL` so the kubelet bounds
-  the hold, makes the `/work/src` mount writable, makes the shared
+  the whole attempt (hold and the command after release) while the server
+  abandons an unreleased hold once `holdTTL` has passed, makes the `/work/src` mount writable, makes the shared
   `/work/cache` mount read-only and moves every cache variable that pointed
   into it (`GOCACHE`, `GOMODCACHE`, `OBERTH_CACHE_DIR`) to
   `/tmp/oberth-assist-cache`, and pins the server's architecture when the
@@ -64,9 +65,10 @@ repositories and `Build` deletes an authored `oberth.ci/assist`.
 Attempt 1 runs immediately. If its command exits nonzero, Argo creates the
 retry Pod with the held patch: the executor parks before the command, the
 step shows as running, and the run keeps its workflow slot, exclusive
-classes and concurrency group. If nobody acts before `holdTTL`, the kubelet
-fails the Pod at the held deadline, the retry is exhausted and the run fails
-as it would have. That deadline is not the recorded floored step deadline,
+classes and concurrency group. If nobody acts before `holdTTL`, the server's hold sweep (the scheduler's
+settlement tick) abandons the Pod, the retry is exhausted and the run fails
+as it would have; the kubelet deadline (budget plus TTL) is the backstop if
+the server is down. That deadline is not the recorded floored step deadline,
 so #1499 never classifies a timed-out hold as a start-up failure, and a
 retained failed step prevents the automatic infrastructure retry.
 
@@ -89,7 +91,9 @@ A leaf is held only when it has no credentials and no identity of its own:
 
 - a single-main `container` or `script` template (no DAG, steps,
   ContainerSet, resource, suspend, data, HTTP or plugin template);
-- no authored `retryStrategy`;
+- no authored `retryStrategy`, and no `templateDefaults.retryStrategy` in
+  the document (an injected strategy would silently replace the default, so
+  such a document never holds);
 - no `oberth secretstore exec` or envconsul command, no
   `oberth.ci/release-wif-role`, no per-step `serviceAccountName`, no
   `automountServiceAccountToken: true`, no token, secret or WIF volume
@@ -101,6 +105,12 @@ A leaf is held only when it has no credentials and no identity of its own:
 Everything else keeps today's behaviour. Steps whose image lane lacks the
 server helper mount are inspect-only: `run_hold_exec` works, `run_hold_patch`
 is refused.
+
+A hold is identified by the server-owned annotation, the pause variable on
+`main` and a retry node name (`...(N)`, N ≥ 1); admission refuses every
+`ARGO_*` environment name from repository YAML, template defaults and
+fragments included, so a document cannot pause its own attempt 1 (which
+Argo would run without a Pod deadline) or impersonate a hold.
 
 ## Working a hold
 
@@ -121,10 +131,13 @@ installation-wide (`assist.maxConcurrentHolds` slots); each one is appended
 to the run's `assist_record` and audited as `run.assist.<kind>` with actor,
 run, step, pod, argv and exit code or patch digest, bytes and files.
 
-A `run_continue` is recorded before the marker is created, so a continued
-step can never run without the evidence exclusion. If creating the marker
-fails, the Pod is abandoned and the step fails: a hold is never left in an
-unknown state.
+Every exec, patch and continue is recorded **before** it executes, so the
+run is assisted from the first action whatever it does: an exec may edit the
+tree or create the release marker itself, and a patch may be half-applied.
+If creating the marker fails, the Pod is abandoned and the step fails: a hold
+is never left in an unknown state. `assist.execTimeout` stops the exec stream
+and returns `timed_out`; a process the image keeps running after that is not
+killed, which is one more reason an exec'd run is not evidence.
 
 `run_hold_exec` is a diagnostic surface, not an editing one: the Pod has no
 shell guarantee and the exec runs as the step's user inside the step's
@@ -133,8 +146,9 @@ footprint is the same the measured-step wrapper documents.
 
 ## Evidence
 
-**A run in which any held step was continued is assisted** (`runs.assisted`,
-monotonic). It is excluded from:
+**A run with any exec, patch or continue on a held step is assisted**
+(`runs.assisted`, monotonic, set when the action is recorded). It is excluded
+from:
 
 - promotion sources (`greenBranchCandidate`, single promotions, trains and
   retries);
@@ -178,9 +192,12 @@ per-workflow and unaffected.
 
 - A held run keeps its workflow slot, exclusive classes and concurrency
   group until its Workflow ends: it counts as running work.
-- `assist.maxConcurrentHolds` caps parked attempts across the installation;
-  the scheduler's settlement tick abandons the newest holds above the cap
-  (released holds are running commands and are not counted).
+- The scheduler's settlement tick sweeps holds: an unreleased hold older
+  than `assist.holdTTL` is abandoned, then the newest parked holds above
+  `assist.maxConcurrentHolds` are abandoned. Holds whose run's assist record
+  shows a continue or abandon are running commands and are skipped; if that
+  record cannot be read the sweep does nothing rather than kill a released
+  step.
 - A newer push that supersedes the run deletes its Workflow through the
   existing cancellation path, which removes any held Pod; explicit
   `run_cancel` does the same.
@@ -194,7 +211,7 @@ per-workflow and unaffected.
 | Value | Flag | Default | Bound |
 |---|---|---|---|
 | `assist.enabled` | `--assist-enabled` | `false` | |
-| `assist.holdTTL` | `--assist-hold-ttl` | `20m` | whole seconds, at most `4h` |
+| `assist.holdTTL` | `--assist-hold-ttl` | `20m` | whole seconds, at most `4h`; unreleased holds are abandoned after it, the held Pod deadline is step budget + TTL |
 | `assist.maxConcurrentHolds` | `--assist-max-concurrent-holds` | `2` | 1-64 |
 | `assist.execTimeout` | `--assist-exec-timeout` | `1m` | at most `15m` |
 | `assist.execOutputBytes` | `--assist-exec-output-bytes` | `65536` | at most 4 MiB |

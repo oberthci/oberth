@@ -283,13 +283,15 @@ func (service *API) execRunHold(ctx context.Context, actor api.Actor, id, step s
 	if timeoutSeconds > 0 && time.Duration(timeoutSeconds)*time.Second < timeout {
 		timeout = time.Duration(timeoutSeconds) * time.Second
 	}
+	// Record before running: an exec can change the tree or release the
+	// hold itself, so the run is assisted from this moment whatever the
+	// command does. The exit code is returned, not recorded.
+	if _, err := service.recordAssist(ctx, actor, run, model.RunAssistEvent{Step: hold.Step, Pod: hold.Pod, Kind: model.RunAssistExec, Argv: argv}); err != nil {
+		return RunHoldExecResponse{}, err
+	}
 	result, err := service.assistHolds.ExecAssistHold(ctx, model.AssistExecRequest{Pod: hold.Pod, Argv: argv, Stdin: []byte(stdin), Timeout: timeout, OutputLimit: policy.ExecOutputBytes})
 	if err != nil {
 		return RunHoldExecResponse{}, fmt.Errorf("exec in held step %s: %w", hold.Step, err)
-	}
-	exitCode := result.ExitCode
-	if _, err := service.recordAssist(ctx, actor, run, model.RunAssistEvent{Step: hold.Step, Pod: hold.Pod, Kind: model.RunAssistExec, Argv: argv, ExitCode: &exitCode}); err != nil {
-		return RunHoldExecResponse{}, err
 	}
 	return RunHoldExecResponse{RunID: run.ID, Step: hold.Step, Pod: hold.Pod, Argv: argv, Result: result}, nil
 }
@@ -319,12 +321,17 @@ func (service *API) patchRunHold(ctx context.Context, actor api.Actor, id, step,
 	if !hold.PatchCapable {
 		return RunHoldPatchResponse{}, refuse(ErrInvalidInput, "step %s is inspect-only: the server helper is not mounted in its image lane", hold.Step)
 	}
-	files, err := service.applyHoldPatch(ctx, hold, patches, policy)
-	if err != nil {
+	digest := holdfs.Digest([]byte(diff))
+	files := make([]string, 0, len(patches))
+	for _, patch := range patches {
+		files = append(files, patch.Path)
+	}
+	// Record before applying: the verdict must not depend on whether the
+	// write succeeds.
+	if _, err := service.recordAssist(ctx, actor, run, model.RunAssistEvent{Step: hold.Step, Pod: hold.Pod, Kind: model.RunAssistPatch, PatchSHA256: digest, PatchBytes: int64(len(diff)), Files: files}); err != nil {
 		return RunHoldPatchResponse{}, err
 	}
-	digest := holdfs.Digest([]byte(diff))
-	if _, err := service.recordAssist(ctx, actor, run, model.RunAssistEvent{Step: hold.Step, Pod: hold.Pod, Kind: model.RunAssistPatch, PatchSHA256: digest, PatchBytes: int64(len(diff)), Files: files}); err != nil {
+	if _, err := service.applyHoldPatch(ctx, hold, patches, policy); err != nil {
 		return RunHoldPatchResponse{}, err
 	}
 	return RunHoldPatchResponse{RunID: run.ID, Step: hold.Step, Pod: hold.Pod, PatchSHA256: digest, PatchBytes: int64(len(diff)), Files: files}, nil

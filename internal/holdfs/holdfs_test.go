@@ -181,13 +181,15 @@ func TestHelperReadsAndWritesWithoutFollowingSymlinks(t *testing.T) {
 		t.Fatal("deletion did not remove the file")
 	}
 	release := filepath.Join(t.TempDir(), "before")
-	if code := Run([]string{"release", "--path", release}, nil, &stdout, &stderr); code != 0 {
-		t.Fatal(stderr.String())
+	if err := releaseMarker(release); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := os.Lstat(release); err != nil {
 		t.Fatal("release marker missing")
 	}
-	if code := Run([]string{"release", "--path", "relative"}, nil, &stdout, &stderr); code == 0 {
-		t.Fatal("relative release path accepted")
+	for _, path := range []string{release, "relative", "/var/run/argo/ctr/wait/before", ReleaseMarkerPath + "/../../../tmp/x"} {
+		if code := Run([]string{"release", "--path", path}, nil, &stdout, &stderr); code == 0 {
+			t.Fatalf("release accepted %q; only %s may be created", path, ReleaseMarkerPath)
+		}
 	}
 }

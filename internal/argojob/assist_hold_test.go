@@ -386,3 +386,21 @@ func TestAssistConfigValidation(t *testing.T) {
 		t.Fatalf("defaults: %+v", effective)
 	}
 }
+
+func TestBuildAssistRefusesExecutorEnvAndSkipsDefaultRetries(t *testing.T) {
+	spoofed := strings.Replace(assistDocument, "        workingDir: /work/src\n", "        workingDir: /work/src\n        env:\n          - name: ARGO_DEBUG_PAUSE_BEFORE\n            value: \"true\"\n", 1)
+	if _, err := Build(assistConfig(), assistRequest(pipeline.TriggerCI, spoofed)); err == nil || !strings.Contains(err.Error(), "reserved for the Argo executor") {
+		t.Fatalf("repository ARGO_DEBUG_PAUSE_BEFORE admitted: %v", err)
+	}
+	defaults := strings.Replace(assistDocument, "  entrypoint: main\n", "  entrypoint: main\n  templateDefaults:\n    retryStrategy:\n      limit: 1\n", 1)
+	wf, err := Build(assistConfig(), assistRequest(pipeline.TriggerCI, defaults))
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if _, ok := wf.Annotations[AssistWorkflowAnnotation]; ok {
+		t.Fatal("a document with a default retryStrategy must not hold: the injected strategy would replace it")
+	}
+	if templateNamed(t, wf, "test").RetryStrategy != nil {
+		t.Fatal("leaf gained an injected retryStrategy over the document default")
+	}
+}

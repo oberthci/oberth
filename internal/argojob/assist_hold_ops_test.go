@@ -40,8 +40,12 @@ func TestListAssistHoldsRecognisesParkedAttemptsOnly(t *testing.T) {
 	first.Spec.Containers[0].Env = []corev1.EnvVar{{Name: "OBERTH_STEP", Value: "test"}} // attempt 1 has no pause
 	finished := heldPodFixture("wf-a-lint-1", "wf-a", "lint", time.Minute, false)
 	finished.Status.Phase = corev1.PodFailed
+	// Attempt 1 carrying the pause through a repository env (refused at
+	// admission, but defence in depth): no retry suffix, not a hold.
+	spoofed := heldPodFixture("wf-a-build-0", "wf-a", "build", time.Minute, false)
+	spoofed.Annotations[argoNodeNameAnnotation] = "wf-a.build"
 	other := heldPodFixture("wf-b-test-1", "wf-b", "test", 3*time.Minute, false)
-	client := fake.NewClientset(held, first, finished, other)
+	client := fake.NewClientset(held, first, finished, other, spoofed)
 	controller, err := NewController(&staticWorkflowClient{}, client, testConfig())
 	if err != nil {
 		t.Fatal(err)
@@ -106,28 +110,32 @@ func TestExecAssistHoldBoundsOutputAndReportsExitCode(t *testing.T) {
 	}
 }
 
-func TestEnforceAssistHoldCapAbandonsNewestAboveCap(t *testing.T) {
+func TestEnforceAssistHoldsAbandonsExpiredAndAboveCap(t *testing.T) {
 	oldest := heldPodFixture("wf-a-test-1", "wf-a", "test", 10*time.Minute, false)
 	middle := heldPodFixture("wf-b-test-1", "wf-b", "test", 5*time.Minute, false)
 	newest := heldPodFixture("wf-c-test-1", "wf-c", "test", time.Minute, false)
-	released := heldPodFixture("wf-d-test-1", "wf-d", "test", 20*time.Minute, false)
-	client := fake.NewClientset(oldest, middle, newest, released)
+	released := heldPodFixture("wf-d-test-1", "wf-d", "test", 40*time.Minute, false)
+	expired := heldPodFixture("wf-e-test-1", "wf-e", "test", 25*time.Minute, false)
+	client := fake.NewClientset(oldest, middle, newest, released, expired)
 	config := testConfig()
-	config.Assist = AssistConfig{Enabled: true, MaxConcurrentHolds: 2}
+	config.Assist = AssistConfig{Enabled: true, MaxConcurrentHolds: 2, HoldTTL: 20 * time.Minute}
 	controller, err := NewController(&staticWorkflowClient{}, client, config)
 	if err != nil {
 		t.Fatal(err)
 	}
-	abandoned, err := controller.EnforceAssistHoldCap(context.Background(), map[string]bool{"wf-d-test-1": true})
+	abandoned, err := controller.EnforceAssistHolds(context.Background(), map[string]bool{"wf-d-test-1": true}, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(abandoned) != 1 || abandoned[0] != "wf-c-test-1" {
-		t.Fatalf("abandoned = %v, want only the newest parked hold", abandoned)
+	if len(abandoned) != 2 || abandoned[0] != "wf-e-test-1" || abandoned[1] != "wf-c-test-1" {
+		t.Fatalf("abandoned = %v, want the expired hold and the newest above the cap", abandoned)
+	}
+	if _, err := client.CoreV1().Pods(testNamespace).Get(context.Background(), "wf-d-test-1", metav1.GetOptions{}); err != nil {
+		t.Fatal("a released hold past the TTL was abandoned: its command is running")
 	}
 	config.Assist.Enabled = false
 	disabled, _ := NewController(&staticWorkflowClient{}, client, config)
-	if abandoned, err := disabled.EnforceAssistHoldCap(context.Background(), nil); err != nil || abandoned != nil {
+	if abandoned, err := disabled.EnforceAssistHolds(context.Background(), nil, time.Now()); err != nil || abandoned != nil {
 		t.Fatalf("disabled policy acted: %v %v", abandoned, err)
 	}
 }

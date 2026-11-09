@@ -516,6 +516,10 @@ func admitFanOut(location string, withItemsCount int, withSequence *wfv1.Sequenc
 	return problems
 }
 
+// ReservedExecutorEnvPrefix names the environment the Argo emissary reads
+// (and the hold pause the server injects); repositories may not set it.
+const ReservedExecutorEnvPrefix = "ARGO_"
+
 func admitContainers(location string, template wfv1.Template, policy Policy) []error {
 	var problems []error
 	containers := 0
@@ -574,6 +578,12 @@ func admitContainer(location string, container *corev1.Container, policy Policy)
 		}
 	}
 	for _, variable := range container.Env {
+		// ARGO_* is the executor's own control vocabulary (ARGO_DEBUG_PAUSE_*,
+		// ARGO_CONTAINER_NAME, ARGO_DEADLINE, ...). A document that sets one
+		// could pause or mislead the emissary; only the server may.
+		if strings.HasPrefix(variable.Name, ReservedExecutorEnvPrefix) {
+			problems = append(problems, fmt.Errorf("argoworkflow: %s.env[%q] is reserved for the Argo executor and is not admitted", location, variable.Name))
+		}
 		if variable.ValueFrom == nil {
 			continue
 		}

@@ -116,7 +116,7 @@
       "description": "Agent-assisted CI continuation: opted-in credential-free branch CI steps park a failed retry for run_hold_* tools. Off by default; assisted runs are never green evidence.",
       "properties": {
         "enabled": {"type": "boolean", "default": false},
-        "holdTTL": {"type": "string", "pattern": "^[0-9]+(s|m|h)$", "description": "Kubelet-bounded wait for the agent; whole seconds, at most 4h."},
+        "holdTTL": {"type": "string", "pattern": "^[0-9]+(s|m|h)$", "description": "How long an unreleased hold waits for the agent before the server abandons it; the held Pod deadline is the step budget plus this TTL. Whole seconds, at most 4h."},
         "maxConcurrentHolds": {"type": "integer", "minimum": 1, "maximum": 64},
         "execTimeout": {"type": "string", "pattern": "^[0-9]+(s|m|h)$", "description": "Deadline of one run_hold_exec command; at most 15m."},
         "execOutputBytes": {"type": "integer", "minimum": 1024, "maximum": 4194304},

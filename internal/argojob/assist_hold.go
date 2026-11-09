@@ -15,6 +15,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 
+	"github.com/oberthci/oberth/internal/holdfs"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
@@ -51,8 +52,8 @@ const (
 	// AssistHoldEnv tells the step itself that it runs as a held attempt.
 	AssistHoldEnv = "OBERTH_ASSIST_HOLD"
 	// AssistReleasePath is the file the executor waits for. run_continue
-	// creates it through pods/exec.
-	AssistReleasePath = "/var/run/argo/ctr/main/before"
+	// creates it through pods/exec with the holdfs helper.
+	AssistReleasePath = holdfs.ReleaseMarkerPath
 	// AssistScratchCachePath receives the Go caches of a held attempt so a
 	// patched tree can never write into the shared, cross-run cache.
 	AssistScratchCachePath = "/tmp/oberth-assist-cache"
@@ -205,6 +206,12 @@ func markAssistHolds(workflow *wfv1.Workflow, config Config, request Request, cr
 	delete(workflow.Annotations, AssistWorkflowAnnotation)
 	walkTemplates(workflow, func(t *wfv1.Template) { delete(t.Metadata.Annotations, AssistHoldAnnotation) })
 	if !assistActive(config, request, credentialed) {
+		return nil
+	}
+	// A default retryStrategy would be replaced on every eligible leaf by
+	// the injected one; rather than change the document's retry meaning,
+	// such a document never holds.
+	if workflow.Spec.TemplateDefaults != nil && workflow.Spec.TemplateDefaults.RetryStrategy != nil {
 		return nil
 	}
 	names, err := argoworkflow.DeclaredNonrootTemplates(workflow)
