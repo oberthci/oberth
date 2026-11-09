@@ -236,6 +236,17 @@ func (scheduler *Scheduler) runCreateCleanup(ctx context.Context) {
 		case <-scheduler.createWake:
 		}
 		scheduler.settleOneCreate(ctx)
+		if holds, ok := scheduler.jobs.(interface {
+			EnforceAssistHoldCap(context.Context, map[string]bool) ([]string, error)
+		}); ok {
+			attempt, cancel := context.WithTimeout(ctx, createSettlementAttemptBudget)
+			if abandoned, err := holds.EnforceAssistHoldCap(attempt, nil); err != nil {
+				log.Print("WARN: assist hold cap enforcement remains pending")
+			} else if len(abandoned) > 0 {
+				log.Printf("assist: abandoned %d held attempts above assist.maxConcurrentHolds", len(abandoned))
+			}
+			cancel()
+		}
 		if cleanup, ok := scheduler.jobs.(interface{ ReconcileTargetCleanup(context.Context) error }); ok {
 			attempt, cancel := context.WithTimeout(ctx, createSettlementAttemptBudget)
 			if err := scheduler.requireMutation(attempt); err == nil {

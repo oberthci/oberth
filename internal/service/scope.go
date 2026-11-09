@@ -126,6 +126,9 @@ func (service *API) forActor(ctx context.Context, actor api.Actor) (*API, error)
 	if service.runReruns != nil {
 		scoped.runReruns = scopedRunReruns{inner: service.runReruns, history: scoped.history}
 	}
+	if service.runAssists != nil {
+		scoped.runAssists = scopedRunAssists{inner: service.runAssists, history: scoped.history}
+	}
 	if service.repositories != nil {
 		scoped.repositories = scopedRepositories{inner: service.repositories, scope: scope}
 	}
@@ -883,4 +886,21 @@ func (cursor *pageCursor) UnmarshalJSON(raw []byte) error {
 		return errors.New("before must not be negative")
 	}
 	return nil
+}
+
+type scopedRunAssists struct {
+	inner   RunAssistStore
+	history RunHistory
+}
+
+// AppendRunAssist repeats the actor-scoped resolution before the writer sees
+// the exact ID, so no caller can act on a hold outside the actor's scope.
+func (assist scopedRunAssists) AppendRunAssist(ctx context.Context, request model.RunAssistRequest) (model.Run, error) {
+	if assist.history == nil {
+		return model.Run{}, refuse(ErrUnavailable, "run assist history")
+	}
+	if _, err := assist.history.ResolveRunID(ctx, request.RunID); err != nil {
+		return model.Run{}, err
+	}
+	return assist.inner.AppendRunAssist(ctx, request)
 }

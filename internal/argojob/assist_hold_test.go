@@ -278,7 +278,7 @@ func TestAssistPatchResolvesWithArgoTemplateEngine(t *testing.T) {
 		if err := json.Unmarshal([]byte(resolved.PodSpecPatch), &patch); err != nil {
 			t.Fatalf("resolved patch is not a PodSpec: %v: %s", err, resolved.PodSpecPatch)
 		}
-		deadline := int64(DefaultStepStartupAllowance.Floored(600))
+		deadline := DefaultStepStartupAllowance.Floored(600)
 		pod := corev1.PodSpec{ActiveDeadlineSeconds: &deadline, Containers: []corev1.Container{*test.Container, {Name: "wait"}}}
 		pod.Containers[0].Name = mainContainerName
 		podJSON, _ := json.Marshal(pod)

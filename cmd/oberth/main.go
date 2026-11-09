@@ -14,6 +14,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/app"
 	"github.com/oberthci/oberth/internal/gitcache"
+	"github.com/oberthci/oberth/internal/holdfs"
 	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/stepusage"
 	"github.com/oberthci/oberth/internal/store"
@@ -36,6 +37,11 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "internal-step-exec" {
 		os.Exit(stepusage.Run(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "internal-hold-fs" {
+		// Pod-side helper of run_hold_patch/run_continue, exec'd by the server
+		// inside a held attempt (docs/assisted-continuation.md).
+		os.Exit(holdfs.Run(os.Args[2:], os.Stdin, os.Stdout, os.Stderr))
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

@@ -657,6 +657,8 @@ containing CI and real workload qualification remain separately required.
   `admission.diskFloorBytes`, `admission.exclusiveClasses`,
   `admission.stallTimeout` (`--admission-stall-timeout`, 10m),
   `admission.stepStartupAllowance`, `autoRetryInfrastructure`,
+  `assist.{enabled,holdTTL,maxConcurrentHolds,execTimeout,execOutputBytes,patchMaxBytes,patchMaxFiles}`
+  (`--assist-*`, default off, 20m, 2, 1m, 64Ki, 1Mi, 64),
   `argo.workflowTimeout`, `argo.defaultWorkflowTimeout`
   (`--argo-default-workflow-timeout`, 30m), `argo.repoWorkflowTimeouts`
   (`--argo-repo-workflow-timeout`), `argo.executionPlacementConfigMap`,
@@ -1002,8 +1004,9 @@ containing CI and real workload qualification remain separately required.
   it encodes the same result object. Authenticated tool refusal text keeps its
   stable error class and may append only an explicitly public service reason.
   Raw dependency chains stay masked; scoped missing/hidden equivalence remains.
-- MCP exposes 85 tools: `status`, bounded named-step `logs`, exact-run
-  `run_get`/`run_logs`, read-only `run_resources` (captured history and reviewed git resource suggestions), `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`, `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
+- MCP exposes 90 tools: `status`, bounded named-step `logs`, exact-run
+  `run_get`/`run_logs`, read-only `run_resources` (captured history and reviewed git resource suggestions), `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`,
+  assisted-continuation `run_hold_list`, audited `run_hold_exec`, `run_hold_patch`, `run_continue` and `run_hold_abandon` (run's own uplink or admin; see [assisted continuation](docs/assisted-continuation.md)), `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, `publication_abandon`, issue
   `issue_create`, `issue_get`, `issue_get_many`, `issue_update`, `issue_append`,
   `issue_close`, `issue_reopen`, `issue_delete`, `issue_list`, `issue_lock`,
@@ -2671,6 +2674,7 @@ remain required, with no public listener or insecure fallback.
 | Let a repository-declared concurrency group span repositories, or change a run's weight, identity, or credentials | Forbidden |
 | Change the `oberth.ci/concurrency-group` annotation name, name grammar, or cross-trigger membership | Breaking |
 | Let a repository create an exclusive class, choose its limit, or turn a class into an Argo synchronization object, ConfigMap, node selector or affinity | Forbidden |
+| Count an assisted run (any continued retry hold) as promotion, publication, SHA-pinned fragment or CI-issue evidence; hold a credentialed, release, tag, promotion, schedule, plan or apply step; let a repository set `oberth.ci/assist-hold` or `podSpecPatch` | Forbidden |
 | Change the `oberth.ci/exclusive` annotation name, class grammar, empty-allowlist refusal, or run-level membership | Breaking |
 | Charge Pod start-up to a step's declared deadline budget again by default, or report a step whose `main` exited 0 as a deadline failure | Breaking |
 | Change a scheduling or placement default (`admission.stepStartupAllowance`, `admission.stallTimeout`, `argo.defaultWorkflowTimeout`, `schedules.*`), or add such a setting without a Helm value | Breaking |
@@ -3119,6 +3123,43 @@ deadline kills) and open a CI-red issue.
 Pods without both annotations (pre-upgrade, or allowance disabled) get only the
 exit-0 rule. See
 [workflow deadlines](docs/workflow-deadlines.md#step-deadlines-exclude-pod-start-up-1499).
+
+**Agent-assisted continuation (retry hold).** Off by default (`assist.enabled`).
+A branch-tier CI run that asked (`git push -o oberth.assist=1`, `run_rerun`
+`assist`, `oberth run rerun --assist`; immutable `runs.assist_requested`) and
+declares no secret-store paths gets, on every single-main container/script leaf
+without its own `retryStrategy`, credentials, step identity, token mount or
+nonroot launcher, a server-owned `retryStrategy` (`limit 1`, `OnFailure`,
+`expression: asInt(lastRetry.exitCode) > 0`) and a server-owned conditional
+`podSpecPatch` (`{{= asInt(retries) > 0 && asInt(lastRetry.exitCode) > 0 ? held
+: base }}`). Attempt 1 is unchanged. The held retry parks before its command
+(`ARGO_DEBUG_PAUSE_BEFORE`), has a Pod deadline of the floored step budget plus
+`assist.holdTTL`, a writable `/work/src`, a read-only `/work/cache` with its
+cache variables moved to private scratch, and the server executable mounted.
+The Workflow deadline grows by one hold TTL. Server-owned annotations
+`oberth.ci/assist` (Workflow) and `oberth.ci/assist-hold` (template, refused
+from repositories) mark the mode. Release, tag, promotion, schedule, plan and
+apply runs never hold; a deadline-killed or evicted attempt is never retried in
+the Workflow, so #1499 classification and the run-level infrastructure retry are
+unchanged, and a hold that expires is the step's own failure. The tools
+`run_hold_list` (read), `run_hold_exec`, `run_hold_patch`, `run_continue` and
+`run_hold_abandon` (run's own uplink or admin, active run only, serialized per
+run, capped by `assist.maxConcurrentHolds`, bounded by `assist.execTimeout`,
+`execOutputBytes`, `patchMaxBytes`, `patchMaxFiles`; argv-only exec; exact-
+context unified diffs applied through the Pod helper `oberth internal-hold-fs`
+with no symlink following, no `.git`, no renames or binaries) append to the
+audited `runs.assist_record` (`run.assist.<kind>`). A continue is recorded
+before the release; a failed release abandons the Pod. **A run with any
+continued hold is assisted** (`runs.assisted`, monotonic), also when nothing was
+patched or exec'd: it is never a promotion source, never published upstream,
+never SHA-pinned fragment evidence and never resolves a CI issue. No status,
+label or layout is added; the existing status carries the reason line
+`assisted: step <name> continued after patch sha256:<12 hex> by <actor>; not
+evidence`. Held runs keep their workflow slot, exclusive classes and groups;
+supersession and cancellation delete their Workflow. No RBAC is added: the
+Argo Role's existing `pods/exec` and `pods` delete verbs are used in the
+pipeline namespace only. See
+[assisted continuation](docs/assisted-continuation.md).
 
 Step log collection selects the failed init instead of requesting nonexistent
 main logs. Received complete records and inclusive timestamp/count/digest cursors

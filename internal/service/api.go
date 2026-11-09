@@ -109,7 +109,11 @@ type APIConfig struct {
 	Uplinks UplinkDirectory
 	// RunReruns backs run_rerun; nil disables the tool.
 	RunReruns RunRerunStore
-	Retention *Retention
+	// AssistHolds and RunAssists back run_hold_list, run_hold_exec,
+	// run_hold_patch, run_continue and run_hold_abandon; nil disables them.
+	AssistHolds AssistHoldOperator
+	RunAssists  RunAssistStore
+	Retention   *Retention
 	// Schedules backs the schedule_* tools (#1106); nil disables them.
 	Schedules ScheduleControl
 	// BranchPrune and BranchDeletions back branch_delete_many,
@@ -198,8 +202,12 @@ type API struct {
 	// caller is about to close.
 	closing   *backgroundClosing
 	runReruns RunRerunStore
-	retention *Retention
-	schedules ScheduleControl
+	// assistHolds and runAssists back the run_hold_* tools; nil disables them.
+	assistHolds AssistHoldOperator
+	runAssists  RunAssistStore
+	assistGate  *assistGate
+	retention   *Retention
+	schedules   ScheduleControl
 	// scope is set on the per-call copy serving a scoped actor (#073).
 	scope *repoScope
 }
@@ -290,6 +298,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		repositoryRemover: config.RepositoryRemover, removeGitCache: config.RemoveGitCache,
 		promotionGrants: config.PromotionGrants, promotionGrantMaxLifetime: promotionGrantMaxLifetime,
 		runCancels: config.RunCancels, retention: config.Retention, runReruns: config.RunReruns, schedules: config.Schedules, uplinks: config.Uplinks, background: &sync.WaitGroup{},
+		assistHolds: config.AssistHolds, runAssists: config.RunAssists, assistGate: newAssistGate(assistGateLimit(config.AssistHolds)),
 		releaseWIFOverrides: config.ReleaseWIFOverrides, releaseWIF: config.ReleaseWIF, releaseWIFMu: &sync.Mutex{},
 		capacityOverrides: config.CapacityOverrides, runtimeCapacity: config.RuntimeCapacity,
 		promotionProgress: &sync.Map{},
@@ -573,6 +582,54 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 			return nil, err
 		}
 		return service.rerunRun(ctx, actor, arguments.ID, arguments.Reason, arguments.Force, arguments.Assist, requestedPriority(actor, arguments.PriorityRequest))
+	case "run_hold_list":
+		var arguments struct {
+			ID string `json:"id"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		return service.listRunHolds(ctx, actor, arguments.ID)
+	case "run_hold_exec":
+		var arguments struct {
+			ID             string   `json:"id"`
+			Step           string   `json:"step"`
+			Argv           []string `json:"argv"`
+			Stdin          string   `json:"stdin"`
+			TimeoutSeconds int      `json:"timeout_seconds"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		return service.execRunHold(ctx, actor, arguments.ID, arguments.Step, arguments.Argv, arguments.Stdin, arguments.TimeoutSeconds)
+	case "run_hold_patch":
+		var arguments struct {
+			ID   string `json:"id"`
+			Step string `json:"step"`
+			Diff string `json:"diff"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		return service.patchRunHold(ctx, actor, arguments.ID, arguments.Step, arguments.Diff)
+	case "run_continue":
+		var arguments struct {
+			ID   string `json:"id"`
+			Step string `json:"step"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		return service.continueRunHold(ctx, actor, arguments.ID, arguments.Step)
+	case "run_hold_abandon":
+		var arguments struct {
+			ID   string `json:"id"`
+			Step string `json:"step"`
+		}
+		if err := decodeTool(raw, &arguments); err != nil {
+			return nil, err
+		}
+		return service.abandonRunHold(ctx, actor, arguments.ID, arguments.Step)
 	case "run_purge":
 		if !actor.Admin || actor.Scoped() {
 			return nil, refuse(ErrForbidden, "run_purge requires an unscoped admin uplink")
@@ -3119,7 +3176,7 @@ func MutatingTool(name string) bool {
 		return true
 	case "issue_unlock", "issue_close_many":
 		return true
-	case "sync", "promote", "promote_retry", "publish_retry", "publication_abandon", "run_retry", "run_rerun", "run_cancel", "run_purge", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
+	case "sync", "promote", "promote_retry", "publish_retry", "publication_abandon", "run_retry", "run_rerun", "run_cancel", "run_purge", "run_hold_exec", "run_hold_patch", "run_continue", "run_hold_abandon", "issue_create", "issue_update", "issue_append", "issue_close", "issue_reopen", "issue_delete", "issue_lock",
 		"access_allow", "access_revoke",
 		"workflow_capability_grant", "workflow_capability_revoke",
 		"size_grant", "size_revoke", "resource_grant", "resource_revoke",

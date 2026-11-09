@@ -29,6 +29,7 @@ its related `run_id` never replaces it. Publication responses keep their distinc
 `publication_id`, `promotion_id` and `run_id` meanings.
 
 The tools `run_get`, `run_logs`, `run_retry`, `run_cancel`, `run_rerun`,
+`run_hold_list`, `run_hold_exec`, `run_hold_patch`, `run_continue`, `run_hold_abandon`,
 `run_purge`, `artifacts`, `artifact_get` and ID-based `wait`
 accept preferred `run_id` alongside legacy `id`. `run_resources` accepts
 `run_id` alongside legacy `run`. If both spellings are sent, they must be equal;

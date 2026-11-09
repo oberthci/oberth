@@ -193,7 +193,7 @@ func (server *Server) writeCollectionView(w http.ResponseWriter, r *http.Request
 // run_id. Kept in the wire package so schema advertisement and dispatch agree.
 func RunIDArgument(tool string) string {
 	switch tool {
-	case "run_get", "run_logs", "run_retry", "run_cancel", "run_rerun", "run_purge", "artifacts", "artifact_get", "wait":
+	case "run_get", "run_logs", "run_retry", "run_cancel", "run_rerun", "run_hold_list", "run_hold_exec", "run_hold_patch", "run_continue", "run_hold_abandon", "run_purge", "artifacts", "artifact_get", "wait":
 		return "id"
 	case "run_resources":
 		return "run"

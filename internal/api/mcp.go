@@ -539,6 +539,9 @@ func ToolNames() []string {
 	return names
 }
 
+// maxAssistArgv bounds run_hold_exec argv entries (service.maxAssistExecArgs).
+const maxAssistArgv = 64
+
 func toolDefinitions() []map[string]any {
 	stringProperty := func(description string) map[string]any {
 		return map[string]any{"type": "string", "description": description}
@@ -615,6 +618,29 @@ func toolDefinitions() []map[string]any {
 			"reason": stringProperty("Why the run is rerun (printable text, at most 512 bytes)"),
 			"force":  map[string]any{"type": "boolean", "description": "Admin only: confirm replaying a tag/release run after credentialed/publication work started or when replay safety is unknown"},
 			"assist": map[string]any{"type": "boolean", "description": "Ask for agent-assisted continuation: a failed credential-free step of this branch CI rerun parks its retry for run_hold_* instead of failing (assist.enabled; ignored elsewhere)"},
+		}, "id")),
+		tool("run_hold_list", "List the parked retry attempts (holds) of an assisted branch CI run: step, pod, attempt, held_since, kubelet deadline, whether run_hold_patch can apply files, and whether the hold was already continued or abandoned. Also returns the run's assist record and the installation policy. A run holds only when it asked for assistance (push option oberth.assist=1 or run_rerun assist), assist.enabled is on, and a credential-free step exited nonzero; the retry Pod parks before its command until run_continue, run_hold_abandon or the hold TTL. Read-only.", object(map[string]any{
+			"id": stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),
+		}, "id")),
+		tool("run_hold_exec", "Run one bounded command (argv, no shell) inside the held step's main container, as the run's own uplink or an admin: for diagnosing the failure in the live environment. Bounded by assist.execTimeout and assist.execOutputBytes, serialized per run, capped installation-wide, and recorded in the run's assist record and audit (run.assist.exec). Any exec marks the step as touched: once continued, the run is assisted and never evidence.", object(map[string]any{
+			"id":              stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),
+			"step":            stringProperty("Held step (Argo template name); optional when exactly one step is held"),
+			"argv":            map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "minItems": 1, "maxItems": maxAssistArgv, "description": "Command and arguments, executed directly (argv[0] must be on PATH or absolute); no shell interpretation"},
+			"stdin":           stringProperty("Optional standard input, at most 1 MiB"),
+			"timeout_seconds": map[string]any{"type": "integer", "minimum": 1, "description": "Optional shorter deadline than assist.execTimeout"},
+		}, "id", "argv")),
+		tool("run_hold_patch", "Apply a unified diff to the held step's writable source tree (/work/src) through the server's own Pod helper: exact-context hunks, relative cleaned paths only, no renames, binaries, mode changes, .git or symlink traversal, bounded by assist.patchMaxBytes/patchMaxFiles. The diff's sha256 is recorded in the run's assist record and audit (run.assist.patch). The patched tree exists only inside this run: once continued, the run is assisted and never promotion, release or green-for-SHA evidence; push the change as a commit for a real green run.", object(map[string]any{
+			"id":   stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),
+			"step": stringProperty("Held step (Argo template name); optional when exactly one step is held"),
+			"diff": stringProperty("Unified diff (git diff or diff -u output)"),
+		}, "id", "diff")),
+		tool("run_continue", "Release a held step: the parked executor runs the step's real command on the (possibly patched) tree and Argo continues the DAG natively on success. Recorded before the release (run.assist.continue); the run becomes assisted and its status carries an 'assisted: ... not evidence' reason line. An assisted run is never published upstream, never a promotion source and never green for its SHA, even when no patch or exec happened (a plain release is still not evidence). Run's own uplink or admin.", object(map[string]any{
+			"id":   stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),
+			"step": stringProperty("Held step (Argo template name); optional when exactly one step is held"),
+		}, "id")),
+		tool("run_hold_abandon", "Delete a held step's parked Pod so the step fails normally and the run ends red as it would have without assistance. Recorded as run.assist.abandon. Run's own uplink or admin.", object(map[string]any{
+			"id":   stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),
+			"step": stringProperty("Held step (Argo template name); optional when exactly one step is held"),
 		}, "id")),
 		tool("run_purge", "Purge retained logs, artifacts, or both for one terminal run. Requires an unscoped admin uplink and a reason. Active runs, release evidence, promotion evidence, open-issue evidence and active grants are protected. Run and step history stays visible; every purge is audited.", object(map[string]any{
 			"id":     stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),

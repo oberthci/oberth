@@ -40,6 +40,26 @@ maxConcurrentJobs: 3
 # The automatic retry budget is fixed at one and cannot be increased.
 autoRetryInfrastructure: true
 
+# Agent-assisted CI continuation (retry hold). Off by default. When enabled,
+# a branch run pushed with `git push -o oberth.assist=1` (or rerun with
+# assist) parks the retry of a failed credential-free step before its command,
+# for the run's agent to inspect (run_hold_exec), patch (run_hold_patch) and
+# release (run_continue). A continued run is never promotion, release or
+# green-for-SHA evidence and is never published. Every value is a serve flag
+# with the same default. See docs/assisted-continuation.md.
+assist:
+  enabled: false
+  # Kubelet-bounded wait for the agent; whole seconds, at most 4h.
+  holdTTL: 20m
+  # Parked retries allowed at once across the installation (1-64).
+  maxConcurrentHolds: 2
+  # One run_hold_exec command: deadline (at most 15m) and captured bytes (at most 4Mi).
+  execTimeout: 1m
+  execOutputBytes: 65536
+  # One run_hold_patch diff: bytes (also the largest patched file, at most 16Mi) and files (at most 1024).
+  patchMaxBytes: 1048576
+  patchMaxFiles: 64
+
 # Opt-in platform priority. Creates release/namespace-specific PriorityClasses
 # and assigns only the Oberth pod template. Argo and OpenBao
 # are separate releases: see docs/platform-protection.md for their overlays.

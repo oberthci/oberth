@@ -15,6 +15,8 @@ func toolOutputSchema(name string) map[string]any {
 		collection = "steps"
 	case "run_list":
 		collection = "runs"
+	case "run_hold_list":
+		collection = "holds"
 	case "repo_list":
 		collection = "repositories"
 	case "promotion_list":

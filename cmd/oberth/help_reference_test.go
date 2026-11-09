@@ -82,6 +82,12 @@ resource revoke
 restore
 run
 run cancel
+run hold
+run hold abandon
+run hold continue
+run hold exec
+run hold list
+run hold patch
 run purge
 run rerun
 run resources

@@ -255,6 +255,25 @@ spec:
             - --admission-step-startup-allowance-percent={{ $allowancePercent }}
             - --admission-step-startup-allowance-min-seconds={{ $allowanceMin }}
             - --admission-step-startup-allowance-max-seconds={{ $allowanceMax }}
+            {{- /* Agent-assisted continuation: every knob is a flag with the binary default, so --reuse-values upgrades keep behaviour. */}}
+            {{- $assist := .Values.assist | default dict }}
+            {{- $assistEnabled := false }}
+            {{- if hasKey $assist "enabled" }}{{- $assistEnabled = $assist.enabled }}{{- end }}
+            {{- $assistHolds := int64 2 }}
+            {{- if hasKey $assist "maxConcurrentHolds" }}{{- $assistHolds = int64 $assist.maxConcurrentHolds }}{{- end }}
+            {{- $assistOutput := int64 65536 }}
+            {{- if hasKey $assist "execOutputBytes" }}{{- $assistOutput = int64 $assist.execOutputBytes }}{{- end }}
+            {{- $assistPatchBytes := int64 1048576 }}
+            {{- if hasKey $assist "patchMaxBytes" }}{{- $assistPatchBytes = int64 $assist.patchMaxBytes }}{{- end }}
+            {{- $assistPatchFiles := int64 64 }}
+            {{- if hasKey $assist "patchMaxFiles" }}{{- $assistPatchFiles = int64 $assist.patchMaxFiles }}{{- end }}
+            - --assist-enabled={{ $assistEnabled }}
+            - {{ printf "--assist-hold-ttl=%s" ($assist.holdTTL | default "20m") | quote }}
+            - --assist-max-concurrent-holds={{ $assistHolds }}
+            - {{ printf "--assist-exec-timeout=%s" ($assist.execTimeout | default "1m") | quote }}
+            - --assist-exec-output-bytes={{ $assistOutput }}
+            - --assist-patch-max-bytes={{ $assistPatchBytes }}
+            - --assist-patch-max-files={{ $assistPatchFiles }}
             {{- $schedules := .Values.schedules | default dict }}
             {{- $scheduleMaxEntries := 8 }}
             {{- if hasKey $schedules "maxEntries" }}{{- $scheduleMaxEntries = int $schedules.maxEntries }}{{- end }}

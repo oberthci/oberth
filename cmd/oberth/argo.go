@@ -115,6 +115,7 @@ func buildArgoEngine(
 		WorkflowTimeout:        options.argoWorkflowTimeout,
 		DefaultWorkflowTimeout: options.argoDefaultWorkflowTimeout,
 		StepStartupAllowance:   &stepStartupAllowance,
+		Assist:                 options.assist,
 		StalledRunTimeout:      options.admissionStallTimeout,
 		PerRepoWorkflowTimeout: repoTimeouts,
 		// #nosec G115 -- validateServeOptions bounds argoWorkflowTTL to a positive int32.

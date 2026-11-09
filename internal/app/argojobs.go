@@ -1340,3 +1340,70 @@ func (jobs *ArgoJobs) ControllerProfileStatus() *model.ControllerProfileStatus {
 	}
 	return nil
 }
+
+// Assisted continuation (run_hold_* tools) delegates to the native
+// controller; a controller without the capability disables the tools.
+type assistHoldController interface {
+	ListAssistHolds(context.Context, string) ([]model.AssistHold, error)
+	ExecAssistHold(context.Context, model.AssistExecRequest) (model.AssistExecResult, error)
+	ReleaseAssistHold(context.Context, string) error
+	AbandonAssistHold(context.Context, string) error
+	EnforceAssistHoldCap(context.Context, map[string]bool) ([]string, error)
+}
+
+// AssistPolicy reports the administrator policy Build and the tools share.
+func (jobs *ArgoJobs) AssistPolicy() model.AssistPolicy {
+	assist := jobs.config.Assist.Effective()
+	_, capable := jobs.controller.(assistHoldController)
+	return model.AssistPolicy{Enabled: jobs.config.Assist.Enabled && capable, HoldTTL: assist.HoldTTL, MaxConcurrentHolds: assist.MaxConcurrentHolds,
+		ExecTimeout: assist.ExecTimeout, ExecOutputBytes: assist.ExecOutputBytes, PatchMaxBytes: assist.PatchMaxBytes, PatchMaxFiles: assist.PatchMaxFiles}
+}
+
+func (jobs *ArgoJobs) assistController() (assistHoldController, error) {
+	controller, ok := jobs.controller.(assistHoldController)
+	if !ok || !jobs.config.Assist.Enabled {
+		return nil, errors.New("app: assisted continuation is not available on this engine")
+	}
+	return controller, nil
+}
+
+func (jobs *ArgoJobs) ListAssistHolds(ctx context.Context, workflowName string) ([]model.AssistHold, error) {
+	controller, err := jobs.assistController()
+	if err != nil {
+		return nil, err
+	}
+	return controller.ListAssistHolds(ctx, workflowName)
+}
+
+func (jobs *ArgoJobs) ExecAssistHold(ctx context.Context, request model.AssistExecRequest) (model.AssistExecResult, error) {
+	controller, err := jobs.assistController()
+	if err != nil {
+		return model.AssistExecResult{}, err
+	}
+	return controller.ExecAssistHold(ctx, request)
+}
+
+func (jobs *ArgoJobs) ReleaseAssistHold(ctx context.Context, pod string) error {
+	controller, err := jobs.assistController()
+	if err != nil {
+		return err
+	}
+	return controller.ReleaseAssistHold(ctx, pod)
+}
+
+func (jobs *ArgoJobs) AbandonAssistHold(ctx context.Context, pod string) error {
+	controller, err := jobs.assistController()
+	if err != nil {
+		return err
+	}
+	return controller.AbandonAssistHold(ctx, pod)
+}
+
+// EnforceAssistHoldCap abandons parked attempts above assist.maxConcurrentHolds.
+func (jobs *ArgoJobs) EnforceAssistHoldCap(ctx context.Context, released map[string]bool) ([]string, error) {
+	controller, err := jobs.assistController()
+	if err != nil {
+		return nil, nil
+	}
+	return controller.EnforceAssistHoldCap(ctx, released)
+}

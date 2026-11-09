@@ -335,3 +335,11 @@ compared out of band.
 For ordered multi-source promotion, see [promotion trains](promotion-trains.md),
 including a three-source CLI, MCP and REST example. The single-source equivalent
 is `oberth promotion create --repo <repo> --branch main --sha <full-sha>`.
+
+## Assisted continuation
+
+`oberth run rerun <id> --assist` asks for retry holds; `oberth run hold
+list|exec|patch|continue|abandon <id>` drives a held step (MCP `run_hold_*`,
+`run_continue`). `run hold exec` takes the command after `--`; `run hold patch`
+reads a unified diff from `--diff-file <path>` or `-`. See
+[assisted continuation](assisted-continuation.md).

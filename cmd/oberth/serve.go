@@ -121,6 +121,7 @@ type serveOptions struct {
 	admissionMaxHeadWait    time.Duration
 	admissionStallTimeout   time.Duration
 	stepStartupAllowance    argojob.StepStartupAllowance
+	assist                  argojob.AssistConfig
 	sizeWeights             service.SizeWeights
 	ciCacheRoot             string
 	releaseCacheRoot        string
@@ -279,6 +280,13 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.Int64Var(&options.stepStartupAllowance.FactorPercent, "admission-step-startup-allowance-percent", argojob.DefaultStepStartupAllowance.FactorPercent, "Pod start-up allowance added to each declared step deadline, as a percentage of that deadline (0-400; #1499)")
 	flags.Int64Var(&options.stepStartupAllowance.MinSeconds, "admission-step-startup-allowance-min-seconds", argojob.DefaultStepStartupAllowance.MinSeconds, "smallest step start-up allowance in seconds (0-3600, at most the maximum)")
 	flags.Int64Var(&options.stepStartupAllowance.MaxSeconds, "admission-step-startup-allowance-max-seconds", argojob.DefaultStepStartupAllowance.MaxSeconds, "largest step start-up allowance in seconds (0-3600); 0 disables the allowance")
+	flags.BoolVar(&options.assist.Enabled, "assist-enabled", false, "allow agent-assisted continuation: opted-in credential-free branch CI steps park a failed retry for run_hold_* instead of failing (Helm assist.enabled)")
+	flags.DurationVar(&options.assist.HoldTTL, "assist-hold-ttl", argojob.DefaultAssistHoldTTL, "how long a parked assist retry waits for its agent before the kubelet fails it (whole seconds, at most 4h)")
+	flags.IntVar(&options.assist.MaxConcurrentHolds, "assist-max-concurrent-holds", argojob.DefaultAssistMaxConcurrentHolds, "parked assist retries allowed at once across the installation; newer holds above it are abandoned (1-64)")
+	flags.DurationVar(&options.assist.ExecTimeout, "assist-exec-timeout", argojob.DefaultAssistExecTimeout, "deadline of one run_hold_exec command (at most 15m)")
+	flags.Int64Var(&options.assist.ExecOutputBytes, "assist-exec-output-bytes", argojob.DefaultAssistExecOutputBytes, "captured stdout/stderr bound of one run_hold_exec command (at most 4 MiB)")
+	flags.Int64Var(&options.assist.PatchMaxBytes, "assist-patch-max-bytes", argojob.DefaultAssistPatchMaxBytes, "largest run_hold_patch diff and largest patched file (at most 16 MiB)")
+	flags.IntVar(&options.assist.PatchMaxFiles, "assist-patch-max-files", argojob.DefaultAssistPatchMaxFiles, "most files one run_hold_patch diff may touch (at most 1024)")
 	flags.Int64Var(&options.admissionDiskFloorBytes, "admission-disk-floor-bytes", 0, "when enabled and free bytes on /data are below this floor, admission is held until disk frees up (#673)")
 	flags.StringVar(&options.admissionExclusiveClasses, "admission-exclusive-classes", "", "comma-separated server-wide exclusive classes steps may declare with oberth.ci/exclusive, each class or class=limit (default limit 1); empty refuses every declaration (#1499)")
 	flags.StringVar(&options.ciCacheRoot, "ci-cache-root", "/var/cache/oberth/ci", "CI host cache root")
@@ -400,6 +408,12 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	}
 	if err := options.stepStartupAllowance.Validate(); err != nil {
 		return serveOptions{}, fmt.Errorf("serve: --admission-step-startup-allowance: %w", err)
+	}
+	if err := options.assist.Validate(); err != nil {
+		return serveOptions{}, fmt.Errorf("serve: --assist: %w", err)
+	}
+	if options.assist.Enabled && (options.assist.HoldTTL <= 0 || options.assist.MaxConcurrentHolds <= 0) {
+		return serveOptions{}, errors.New("serve: --assist-hold-ttl and --assist-max-concurrent-holds must be positive when --assist-enabled")
 	}
 	if options.argoDefaultWorkflowTimeout < time.Second || options.argoDefaultWorkflowTimeout%time.Second != 0 {
 		return serveOptions{}, errors.New("serve: --argo-default-workflow-timeout must use whole positive seconds")
@@ -1145,6 +1159,8 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		RunCancels:                database,
 		Uplinks:                   database,
 		RunReruns:                 database,
+		AssistHolds:               argoJobs,
+		RunAssists:                database,
 		Retention:                 retention,
 		Schedules:                 schedules,
 	})

@@ -88,3 +88,11 @@ or replayed on upgrade; only newly finalized eligible failures are considered.
 Other restart and publication recovery mechanisms keep their existing contracts.
 See [standalone configuration](standalone-configuration.md) for upgrade values
 and [recovery semantics](rca-run-recovery.md) for the existing run-list behavior.
+
+## Assisted continuation
+
+A retry hold ([assisted continuation](assisted-continuation.md)) never
+compounds with the automatic infrastructure retry: the injected in-Workflow
+`retryStrategy` retries only a command that exited nonzero, a deadline-killed
+or evicted attempt is never held, and a hold that expires is a retained failed
+step, which this retry refuses as before.

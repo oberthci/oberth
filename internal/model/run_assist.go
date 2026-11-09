@@ -113,3 +113,55 @@ type RunAssistRequest struct {
 	// Authorize runs inside the writer transaction against the current run.
 	Authorize func(Run) error
 }
+
+// AssistHold is one parked retry attempt as the engine sees it.
+type AssistHold struct {
+	Pod     string `json:"pod"`
+	Step    string `json:"step"`
+	Node    string `json:"node"`
+	Attempt int    `json:"attempt"`
+	// HeldSince is when the paused main container started; Deadline is when
+	// the kubelet fails the Pod if nobody acts.
+	HeldSince time.Time `json:"held_since"`
+	Deadline  time.Time `json:"deadline"`
+	// PatchCapable reports that the server's helper executable is mounted,
+	// so run_hold_patch can apply files; exec works either way.
+	PatchCapable bool `json:"patch_capable"`
+	// SourcePath is the writable source tree inside the held container.
+	SourcePath string `json:"source_path"`
+	// Released is filled from the run's assist record: the hold was
+	// continued or abandoned already.
+	Released bool `json:"released,omitempty"`
+}
+
+// AssistExecRequest runs one bounded argv in a held Pod's main container.
+type AssistExecRequest struct {
+	Pod         string
+	Argv        []string
+	Stdin       []byte
+	Timeout     time.Duration
+	OutputLimit int64
+}
+
+// AssistExecResult is the bounded outcome.
+type AssistExecResult struct {
+	ExitCode    int           `json:"exit_code"`
+	Stdout      string        `json:"stdout"`
+	Stderr      string        `json:"stderr"`
+	Truncated   bool          `json:"truncated,omitempty"`
+	StdoutBytes int64         `json:"stdout_bytes"`
+	StderrBytes int64         `json:"stderr_bytes"`
+	Duration    time.Duration `json:"duration"`
+	TimedOut    bool          `json:"timed_out,omitempty"`
+}
+
+// AssistPolicy is the administrator policy the tools report and enforce.
+type AssistPolicy struct {
+	Enabled            bool          `json:"enabled"`
+	HoldTTL            time.Duration `json:"hold_ttl"`
+	MaxConcurrentHolds int           `json:"max_concurrent_holds"`
+	ExecTimeout        time.Duration `json:"exec_timeout"`
+	ExecOutputBytes    int64         `json:"exec_output_bytes"`
+	PatchMaxBytes      int64         `json:"patch_max_bytes"`
+	PatchMaxFiles      int           `json:"patch_max_files"`
+}

@@ -123,7 +123,7 @@ func TestAssistedRunIsNeverGreenEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !rerun.Enqueued.Run.AssistRequested || rerun.Enqueued.Run.Assisted {
-		t.Fatalf("rerun assist state = requested %v assisted %v", rerun.Enqueued.Run.AssistRequested, rerun.Enqueued.Run.Assisted)
+	if !rerun.Enqueued.AssistRequested || rerun.Enqueued.Assisted {
+		t.Fatalf("rerun assist state = requested %v assisted %v", rerun.Enqueued.AssistRequested, rerun.Enqueued.Assisted)
 	}
 }

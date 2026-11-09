@@ -941,6 +941,72 @@ Usage: oberth run cancel <run-id> [--reason <text>] [--force] [--json]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>] | [--database <path>]
 ```
 
+## oberth run hold
+
+```text
+Usage: oberth run hold list <run-id> [--json]
+       oberth run hold exec <run-id> [--step <name>] [--stdin <path>] [--timeout <seconds>] [--json] -- <argv...>
+       oberth run hold patch <run-id> [--step <name>] (--diff-file <path> | --diff-file -) [--json]
+       oberth run hold continue <run-id> [--step <name>] [--json]
+       oberth run hold abandon <run-id> [--step <name>] [--json]
+         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+```
+
+## oberth run hold abandon
+
+```text
+Usage: oberth run hold list <run-id> [--json]
+       oberth run hold exec <run-id> [--step <name>] [--stdin <path>] [--timeout <seconds>] [--json] -- <argv...>
+       oberth run hold patch <run-id> [--step <name>] (--diff-file <path> | --diff-file -) [--json]
+       oberth run hold continue <run-id> [--step <name>] [--json]
+       oberth run hold abandon <run-id> [--step <name>] [--json]
+         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+```
+
+## oberth run hold continue
+
+```text
+Usage: oberth run hold list <run-id> [--json]
+       oberth run hold exec <run-id> [--step <name>] [--stdin <path>] [--timeout <seconds>] [--json] -- <argv...>
+       oberth run hold patch <run-id> [--step <name>] (--diff-file <path> | --diff-file -) [--json]
+       oberth run hold continue <run-id> [--step <name>] [--json]
+       oberth run hold abandon <run-id> [--step <name>] [--json]
+         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+```
+
+## oberth run hold exec
+
+```text
+Usage: oberth run hold list <run-id> [--json]
+       oberth run hold exec <run-id> [--step <name>] [--stdin <path>] [--timeout <seconds>] [--json] -- <argv...>
+       oberth run hold patch <run-id> [--step <name>] (--diff-file <path> | --diff-file -) [--json]
+       oberth run hold continue <run-id> [--step <name>] [--json]
+       oberth run hold abandon <run-id> [--step <name>] [--json]
+         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+```
+
+## oberth run hold list
+
+```text
+Usage: oberth run hold list <run-id> [--json]
+       oberth run hold exec <run-id> [--step <name>] [--stdin <path>] [--timeout <seconds>] [--json] -- <argv...>
+       oberth run hold patch <run-id> [--step <name>] (--diff-file <path> | --diff-file -) [--json]
+       oberth run hold continue <run-id> [--step <name>] [--json]
+       oberth run hold abandon <run-id> [--step <name>] [--json]
+         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+```
+
+## oberth run hold patch
+
+```text
+Usage: oberth run hold list <run-id> [--json]
+       oberth run hold exec <run-id> [--step <name>] [--stdin <path>] [--timeout <seconds>] [--json] -- <argv...>
+       oberth run hold patch <run-id> [--step <name>] (--diff-file <path> | --diff-file -) [--json]
+       oberth run hold continue <run-id> [--step <name>] [--json]
+       oberth run hold abandon <run-id> [--step <name>] [--json]
+         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
+```
+
 ## oberth run purge
 
 ```text
@@ -1278,6 +1344,20 @@ Usage of serve:
         total artifact storage before the oldest runs are evicted (default 4294967296)
   -artifacts-limit-bytes int
         maximum total bytes of artifacts kept per run (default 268435456)
+  -assist-enabled
+        allow agent-assisted continuation: opted-in credential-free branch CI steps park a failed retry for run_hold_* instead of failing (Helm assist.enabled)
+  -assist-exec-output-bytes int
+        captured stdout/stderr bound of one run_hold_exec command (at most 4 MiB) (default 65536)
+  -assist-exec-timeout duration
+        deadline of one run_hold_exec command (at most 15m) (default 1m0s)
+  -assist-hold-ttl duration
+        how long a parked assist retry waits for its agent before the kubelet fails it (whole seconds, at most 4h) (default 20m0s)
+  -assist-max-concurrent-holds int
+        parked assist retries allowed at once across the installation; newer holds above it are abandoned (1-64) (default 2)
+  -assist-patch-max-bytes int
+        largest run_hold_patch diff and largest patched file (at most 16 MiB) (default 1048576)
+  -assist-patch-max-files int
+        most files one run_hold_patch diff may touch (at most 1024) (default 64)
   -audit-anchor-interval duration
         external audit checkpoint interval (default 10m0s)
   -audit-anchor-max-age duration

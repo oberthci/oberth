@@ -364,6 +364,9 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 	if len(arguments) > 0 && arguments[0] == "rerun" {
 		return runRunRerun(ctx, arguments[1:], output)
 	}
+	if len(arguments) > 0 && arguments[0] == "hold" {
+		return runRunHold(ctx, arguments[1:], output)
+	}
 	flags, asJSON, err := remoteFlags("run", arguments, output)
 	if err != nil || flags == nil {
 		return err
