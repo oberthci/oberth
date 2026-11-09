@@ -5,12 +5,15 @@ Assisted continuation (retry hold): `TestBuildAssistMarksOnlyCredentialFreeLeave
 server-owned one-attempt `retryStrategy` and conditional `podSpecPatch`, the
 workflow deadline extension and the refusal of repository copies of the hold
 annotations. `TestAssistPatchResolvesWithArgoTemplateEngine` substitutes the
-conditional patch with Argo v4.0.8's own template engine for attempt 1, the
-deadline-killed retries (exit 143 or 137 after the budget, a trapped signal, no
-exit code), self-inflicted 137/143 exits and a failed-command retry, and
-applies it with the same strategic merge, proving pause, deadline, writable
-source, read-only cache and scratch cache variables land only on the held
-attempt. `TestAssistRetryRefusesDeadlineKills` evaluates the injected
+conditional patch with Argo v4.0.8's own template engine for attempt 1, a
+failed-command retry and the re-substitution of a retry whose Pod creation was
+deferred (`lastRetry` zeroed), and applies it with the same strategic merge,
+proving pause, deadline, writable source, read-only cache and scratch cache
+variables land on every retry attempt and never on attempt 1.
+`TestBuildAssistBoundsInheritedTemplateDefaultsDeadline` proves a leaf without
+its own deadline takes the floored `templateDefaults.activeDeadlineSeconds` as
+hold deadline and retry bound (a leaf's own still wins; a non-literal default
+means no hold). `TestAssistRetryRefusesDeadlineKills` evaluates the injected
 `retryStrategy.expression` with Argo's own evaluator in the
 `processNodeRetries` scope: the live-spike kubelet kill (exit 143, duration at
 the budget) is not retried, nor are SIGKILL, trapped-signal, evicted or

@@ -39,7 +39,9 @@ For a run in assist mode, `Build` adds to every eligible pod leaf:
   it exited nonzero, not by SIGKILL or SIGTERM, and its attempt finished
   before the step's floored budget (the node duration is the main container's
   termination time minus the node's creation, so a Pod the kubelet stopped at
-  `activeDeadlineSeconds` always shows at least the budget). A kubelet
+  `activeDeadlineSeconds` always shows at least the budget; a long Pending
+  phase inflates it too, so a genuine failure after a long pend may not be
+  held, which is conservative). A kubelet
   deadline kill is recorded by Argo v4.0.8 with the forwarded signal's exit
   code (143, or 137 after the grace period), never `-1`, which is why the exit
   code alone is not enough; an eviction or executor error has no exit code
@@ -47,12 +49,20 @@ For a run in assist mode, `Build` adds to every eligible pod leaf:
   before (#1499 start-up deadlines included) and the run-level infrastructure
   retry is unchanged. A command that exits 137 or 143 by itself, or that
   outlives its budget during the kubelet's check interval, is conservatively
-  not held either. A leaf with its own `retryStrategy` keeps it and is not
-  held;
+  not held either. The budget is the leaf's own floored deadline, else the
+  floored `templateDefaults.activeDeadlineSeconds` Argo merges into every
+  leaf (`mergedTemplateDefaultsInto`), else the workflow budget. A leaf with
+  its own `retryStrategy` keeps it and is not held;
 - a server-owned conditional `podSpecPatch`, an Argo expression template
-  `{{= asInt(retries) > 0 && <the same failure condition> ? '<held>' :
-  '<base>' }}`, so the retry and the hold can never disagree. `<base>` is the
-  plain server patch every step already gets.
+  `{{= asInt(retries) > 0 ? '<held>' : '<base>' }}`. Attempt `(N)`, N ≥ 1,
+  exists only after `processNodeRetries` let the retry expression pass, so
+  `retries > 0` already means "after a failed command". The patch does not
+  repeat the discriminator on purpose: when the retry's Pod cannot be created
+  at once (quota, transient API error) the controller substitutes the patch
+  again for the pending child with `lastRetry.exitCode` `0` and duration `0`
+  (`operator.go` executeTemplate), and a repeated discriminator would resolve
+  to `<base>` and run the step again unheld. `<base>` is the plain server
+  patch every step already gets.
   `<held>` additionally sets `ARGO_DEBUG_PAUSE_BEFORE=true` and
   `OBERTH_ASSIST_HOLD=1` on `main`, sets the Pod `activeDeadlineSeconds` to
   the step's #1499-floored budget plus `assist.holdTTL` so the kubelet bounds

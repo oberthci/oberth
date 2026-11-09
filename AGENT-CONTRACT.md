@@ -3133,9 +3133,12 @@ the document), credentials, step identity, token mount or nonroot launcher, a
 server-owned `retryStrategy` (`limit 1`, `OnFailure`,
 `expression: asInt(lastRetry.exitCode) > 0 && asInt(lastRetry.exitCode) != 137
 && asInt(lastRetry.exitCode) != 143 && asFloat(lastRetry.duration) < <floored
-step budget>`) and a server-owned conditional `podSpecPatch`
-(`{{= asInt(retries) > 0 && <the same condition> ? held : base }}`). Attempt 1
-is unchanged. The held retry parks before its command
+step budget>`, the budget being the leaf's own deadline, else the inherited
+`templateDefaults.activeDeadlineSeconds`, else the workflow budget) and a
+server-owned conditional `podSpecPatch` (`{{= asInt(retries) > 0 ? held :
+base }}`; a retry attempt exists only after the retry expression passed, and
+the patch is re-substituted for a deferred retry Pod with zeroed `lastRetry`
+values, so it must not repeat the discriminator). Attempt 1 is unchanged. The held retry parks before its command
 (`ARGO_DEBUG_PAUSE_BEFORE`), has a Pod deadline of the floored step budget plus
 `assist.holdTTL` (the server abandons an unreleased hold once `holdTTL` has
 passed; the Pod deadline is the backstop), a writable `/work/src`, a read-only `/work/cache` with its

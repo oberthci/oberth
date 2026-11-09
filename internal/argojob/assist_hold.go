@@ -70,12 +70,11 @@ const (
 )
 
 // assistCommandFailure is the retry-local expression that tells a genuine
-// command failure from a kill. Both Argo scopes that evaluate it
-// (retryStrategy.expression, operator.go buildRetryStrategyLocalScope; the
-// podSpecPatch substitution, operator.go executeTemplate) carry
-// lastRetry.exitCode and lastRetry.duration for the last attempt, the
-// duration being the node's FinishedAt (the container's termination time)
-// minus its StartedAt (node creation, before scheduling). A Pod the kubelet
+// command failure from a kill. The retryStrategy scope (operator.go
+// buildRetryStrategyLocalScope) carries lastRetry.exitCode and
+// lastRetry.duration for the last attempt, the duration being the node's
+// FinishedAt (the container's termination time) minus its StartedAt (node
+// creation, before scheduling; a long Pending phase counts). A Pod the kubelet
 // stopped at activeDeadlineSeconds has therefore run for at least the
 // floored step budget and exited 143 (137 once the grace period ran out); a
 // command that failed on its own did so with another code, before the
@@ -83,7 +82,8 @@ const (
 // exit 137 or 143 itself, or one that outlives its budget during the
 // kubelet's check interval, is not held: conservative, and it keeps #1499
 // start-up classification and the run-level infrastructure retry exactly as
-// for an unassisted run.
+// for an unassisted run, as is a genuine failure after a long Pending phase
+// that pushed the duration past the budget.
 func assistCommandFailure(budget int64) string {
 	return fmt.Sprintf("asInt(lastRetry.exitCode) > 0 && asInt(lastRetry.exitCode) != %d && asInt(lastRetry.exitCode) != %d && asFloat(lastRetry.duration) < %d", exitCodeSIGKILL, exitCodeSIGTERM, budget)
 }
@@ -94,12 +94,16 @@ func assistCommandFailure(budget int64) string {
 func assistRetryExpression(budget int64) string { return assistCommandFailure(budget) }
 
 // assistPatchCondition selects the held branch of the podSpecPatch
-// expression: a retry attempt that follows a failed command. It is the
-// retry expression guarded by `retries > 0`, so the two can never disagree
-// (a plain, unheld retry would otherwise run the step twice).
-func assistPatchCondition(budget int64) string {
-	return "asInt(retries) > 0 && " + assistCommandFailure(budget)
-}
+// expression: any retry attempt. Argo creates attempt (N), N >= 1, only
+// after processNodeRetries let assistRetryExpression pass (operator.go
+// :1158-1168, :2393), so `retries > 0` already implies a failed command.
+// The patch must not repeat the discriminator: when the Pod of attempt N
+// could not be created at once (quota, transient API error), the controller
+// substitutes the patch again for the pending child with lastRetry.exitCode
+// 0 and duration 0 (operator.go:2384-2389, :2410-2418), and a repeated
+// discriminator would then resolve to the base branch, running the step
+// again unheld.
+const assistPatchCondition = "asInt(retries) > 0"
 
 // Administrator bounds for AssistConfig.
 const (
@@ -268,11 +272,13 @@ func markAssistHolds(workflow *wfv1.Workflow, config Config, request Request, cr
 		}
 		// The held attempt keeps the step's whole (#1499-floored) budget for
 		// the command after release, plus the hold itself. A leaf without its
-		// own deadline is bounded by the workflow budget, so that is its step
-		// budget here.
+		// own deadline inherits the (floored) templateDefaults deadline, which
+		// Argo merges into every leaf before it creates the Pod
+		// (operator.go mergedTemplateDefaultsInto); without that too it is
+		// bounded by the workflow budget, so that is its step budget here.
 		budget := workflowDeadline
-		if t.ActiveDeadlineSeconds != nil {
-			declared, err := strconv.ParseInt(t.ActiveDeadlineSeconds.String(), 10, 64)
+		if deadline := leafDeadline(t, workflow.Spec.TemplateDefaults); deadline != nil {
+			declared, err := strconv.ParseInt(deadline.String(), 10, 64)
 			if err != nil || declared <= 0 {
 				return // non-literal: Argo rejects it; never guess a hold deadline.
 			}
@@ -312,6 +318,19 @@ func markAssistHolds(workflow *wfv1.Workflow, config Config, request Request, cr
 		workflow.Annotations = map[string]string{}
 	}
 	workflow.Annotations[AssistWorkflowAnnotation] = strconv.FormatInt(ttl, 10)
+	return nil
+}
+
+// leafDeadline is the activeDeadlineSeconds the kubelet will enforce on a
+// leaf's Pod before the workflow budget is considered: the leaf's own, or
+// the document's templateDefaults value.
+func leafDeadline(t *wfv1.Template, defaults *wfv1.Template) *intstr.IntOrString {
+	if t.ActiveDeadlineSeconds != nil {
+		return t.ActiveDeadlineSeconds
+	}
+	if defaults != nil {
+		return defaults.ActiveDeadlineSeconds
+	}
 	return nil
 }
 
@@ -359,7 +378,7 @@ func injectAssistHolds(workflow *wfv1.Workflow) error {
 			failure = err
 			return
 		}
-		patch, err := assistConditionalPatch(base, held, budget)
+		patch, err := assistConditionalPatch(base, held)
 		if err != nil {
 			failure = fmt.Errorf("argojob: template %q: %w", t.Name, err)
 			return
@@ -446,9 +465,8 @@ func hasUsageBinary(main *corev1.Container) bool {
 // right before it creates each attempt's Pod (operator.go, SubstituteParams
 // with retries/lastRetry.*), after the template-level pause check that would
 // otherwise drop the Pod deadline. Each branch is a single-quoted expr
-// string literal holding compact JSON; budget is the floored step budget the
-// failed command must have finished under (assistCommandFailure).
-func assistConditionalPatch(base, held map[string]any, budget int64) (string, error) {
+// string literal holding compact JSON.
+func assistConditionalPatch(base, held map[string]any) (string, error) {
 	baseLiteral, err := exprJSONLiteral(base)
 	if err != nil {
 		return "", err
@@ -457,7 +475,7 @@ func assistConditionalPatch(base, held map[string]any, budget int64) (string, er
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("{{= %s ? '%s' : '%s' }}", assistPatchCondition(budget), heldLiteral, baseLiteral), nil
+	return fmt.Sprintf("{{= %s ? '%s' : '%s' }}", assistPatchCondition, heldLiteral, baseLiteral), nil
 }
 
 // exprJSONLiteral encodes a value as JSON that can sit inside a single-quoted

@@ -145,8 +145,11 @@ func TestBuildAssistMarksOnlyCredentialFreeLeavesWithoutOwnRetries(t *testing.T)
 	if want := fmt.Sprintf("asInt(lastRetry.exitCode) > 0 && asInt(lastRetry.exitCode) != 137 && asInt(lastRetry.exitCode) != 143 && asFloat(lastRetry.duration) < %d", floored); test.RetryStrategy.Expression != want {
 		t.Fatalf("test retry expression = %q, want %q", test.RetryStrategy.Expression, want)
 	}
-	if !strings.HasPrefix(test.PodSpecPatch, "{{= "+assistPatchCondition(floored)+" ? '") {
+	if !strings.HasPrefix(test.PodSpecPatch, "{{= asInt(retries) > 0 ? '") {
 		t.Fatalf("test Pod patch is not the conditional expression: %s", test.PodSpecPatch)
+	}
+	if strings.Contains(test.PodSpecPatch, "lastRetry") {
+		t.Fatalf("the Pod patch must not repeat the retry discriminator (deferred-pod re-substitution): %s", test.PodSpecPatch)
 	}
 	lint := templateNamed(t, wf, "lint")
 	if got := lint.Metadata.Annotations[AssistHoldAnnotation]; got != "4800" {
@@ -155,8 +158,8 @@ func TestBuildAssistMarksOnlyCredentialFreeLeavesWithoutOwnRetries(t *testing.T)
 	if lint.RetryStrategy == nil || lint.RetryStrategy.Expression != assistRetryExpression(3600) {
 		t.Fatalf("lint (no own deadline) is hold-eligible and must be bounded by the 3600 workflow budget: %+v", lint.RetryStrategy)
 	}
-	if !strings.HasPrefix(lint.PodSpecPatch, "{{= "+assistPatchCondition(3600)+" ? '") {
-		t.Fatalf("lint Pod patch is not bounded by the workflow budget: %s", lint.PodSpecPatch)
+	if !strings.HasPrefix(lint.PodSpecPatch, "{{= "+assistPatchCondition+" ? '") {
+		t.Fatalf("lint Pod patch is not the conditional expression: %s", lint.PodSpecPatch)
 	}
 	flaky := templateNamed(t, wf, "flaky")
 	if _, ok := flaky.Metadata.Annotations[AssistHoldAnnotation]; ok || flaky.RetryStrategy.Limit.String() != "2" || flaky.RetryStrategy.Expression != "" {
@@ -256,12 +259,12 @@ func TestBuildRefusesRepositoryAssistAnnotations(t *testing.T) {
 // Pod patch exactly as the Argo v4.0.8 controller does before it creates a
 // retry attempt's Pod (operator.go SubstituteParams with the retry-local
 // variables), then applies it with the same strategic merge
-// (workflow/util.ApplyPodSpecPatch). Attempt 1 and a deadline-killed
-// attempt keep the base patch; a failed command parks the retry.
-//
-// The deadline-kill rows are the live spike of 2026-11-09 on Argo v4.0.8:
-// the kubelet stopped `sleep 400` at activeDeadlineSeconds and the controller
-// recorded exit code 143 (not -1) with a node duration above the budget.
+// (workflow/util.ApplyPodSpecPatch). Attempt 1 keeps the base patch; every
+// retry attempt parks, including the re-substitution for a retry whose Pod
+// could not be created at once (operator.go:2384-2389: the pending child is
+// the last child, so lastRetry.exitCode is 0 and the duration 0). Whether a
+// retry exists at all is the retry expression's decision
+// (TestAssistRetryRefusesDeadlineKills).
 func TestAssistPatchResolvesWithArgoTemplateEngine(t *testing.T) {
 	wf, err := Build(assistConfig(), assistRequest(pipeline.TriggerCI, assistDocument))
 	if err != nil {
@@ -335,24 +338,21 @@ func TestAssistPatchResolvesWithArgoTemplateEngine(t *testing.T) {
 		t.Fatal("attempt 1 lost its read-only source mount")
 	}
 
-	unheld := map[string][3]string{
-		"evicted, no exit code":                   {"1", "-1", "0"},
-		"kubelet deadline SIGTERM (live spike)":   {"1", "143", fmt.Sprint(float64(floored) + 2.5)},
-		"kubelet deadline SIGKILL after grace":    {"1", "137", fmt.Sprint(float64(floored) + 31)},
-		"command trapped the signal, exited 1":    {"1", "1", fmt.Sprint(float64(floored) + 0.1)},
-		"command exited 143 by itself":            {"1", "143", "12"},
-		"command exited 137 by itself (OOM-like)": {"1", "137", "12"},
+	if pending := resolve("0", "0", "0"); containerEnv(mainOf(pending))[assistPauseEnv] != "" {
+		t.Fatal("attempt 1 re-substituted for a deferred Pod is paused")
 	}
-	for name, params := range unheld {
-		killed := resolve(params[0], params[1], params[2])
-		if env := containerEnv(mainOf(killed)); env[assistPauseEnv] != "" || env[AssistHoldEnv] != "" {
-			t.Fatalf("%s: the retry must not park: %v", name, env)
-		}
-		if got := *killed.ActiveDeadlineSeconds; got != floored {
-			t.Fatalf("%s: deadline = %d, want the floored step deadline %d", name, got, floored)
-		}
-		if readOnly, ok := mountReadOnly(mainOf(killed), SourceMountPath); !ok || !readOnly {
-			t.Fatalf("%s: source mount became writable", name)
+	deferred := resolve("1", "0", "0")
+	if env := containerEnv(mainOf(deferred)); env[assistPauseEnv] != "true" || *deferred.ActiveDeadlineSeconds != floored+1200 {
+		t.Fatalf("a retry whose Pod creation was deferred must still park (plain unheld retry otherwise): %v deadline=%d", env, *deferred.ActiveDeadlineSeconds)
+	}
+	for name, params := range map[string][3]string{
+		"retry recorded 143 by a trapped exit": {"1", "143", "12"},
+		"retry after -1":                       {"1", "-1", "0"},
+	} {
+		// These attempts do not exist in Argo (the retry expression refused
+		// them); if one ever did, the patch would still be the held one.
+		if containerEnv(mainOf(resolve(params[0], params[1], params[2])))[assistPauseEnv] != "true" {
+			t.Fatalf("%s: a retry attempt resolves to the base patch", name)
 		}
 	}
 
@@ -441,6 +441,57 @@ func TestAssistRetryRefusesDeadlineKills(t *testing.T) {
 	}
 	if !retries("1", "12") || !retries("2", fmt.Sprint(float64(floored)-0.5)) {
 		t.Fatal("a command that failed under its budget must be retried into the hold")
+	}
+}
+
+// TestBuildAssistBoundsInheritedTemplateDefaultsDeadline: a leaf without its
+// own activeDeadlineSeconds inherits templateDefaults.activeDeadlineSeconds
+// (Argo merges the defaults into every leaf before the Pod is created,
+// operator.go mergedTemplateDefaultsInto), floored by #1499 like a leaf's
+// own. The hold deadline and the retry bound must use that value, not the
+// larger workflow budget, or a command that trapped SIGTERM and exited 1 at
+// the kubelet kill would be held with a second budget.
+func TestBuildAssistBoundsInheritedTemplateDefaultsDeadline(t *testing.T) {
+	document := strings.Replace(assistDocument, "spec:\n  entrypoint: main\n", "spec:\n  entrypoint: main\n  templateDefaults:\n    activeDeadlineSeconds: 900\n", 1)
+	if document == assistDocument {
+		t.Fatal("fixture anchor not found")
+	}
+	wf, err := Build(assistConfig(), assistRequest(pipeline.TriggerCI, document))
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	inherited := DefaultStepStartupAllowance.Floored(900)
+	if got := wf.Spec.TemplateDefaults.ActiveDeadlineSeconds.String(); got != strconv.FormatInt(inherited, 10) {
+		t.Fatalf("templateDefaults deadline = %s, want the floored %d", got, inherited)
+	}
+	lint := templateNamed(t, wf, "lint")
+	if got := lint.Metadata.Annotations[AssistHoldAnnotation]; got != strconv.FormatInt(inherited+1200, 10) {
+		t.Fatalf("lint hold deadline = %q, want the inherited floored budget %d + 1200", got, inherited)
+	}
+	if lint.RetryStrategy == nil || lint.RetryStrategy.Expression != assistRetryExpression(inherited) {
+		t.Fatalf("lint retry expression = %+v, want the inherited budget %d", lint.RetryStrategy, inherited)
+	}
+	if !strings.Contains(lint.PodSpecPatch, fmt.Sprintf(`"activeDeadlineSeconds":%d,`, inherited+1200)) {
+		t.Fatalf("lint held patch does not carry the inherited deadline: %s", lint.PodSpecPatch)
+	}
+	// The leaf's own deadline still wins over the default.
+	test := templateNamed(t, wf, "test")
+	if own := DefaultStepStartupAllowance.Floored(600); test.RetryStrategy.Expression != assistRetryExpression(own) {
+		t.Fatalf("test retry expression = %q, want its own budget %d", test.RetryStrategy.Expression, own)
+	}
+
+	// A non-literal default is left for Argo; the inheriting leaf never holds.
+	parametric := strings.Replace(assistDocument, "spec:\n  entrypoint: main\n", "spec:\n  entrypoint: main\n  arguments:\n    parameters: [{name: budget, value: \"900\"}]\n  templateDefaults:\n    activeDeadlineSeconds: \"{{workflow.parameters.budget}}\"\n", 1)
+	wf, err = Build(assistConfig(), assistRequest(pipeline.TriggerCI, parametric))
+	if err != nil {
+		t.Fatalf("build (parametric default): %v", err)
+	}
+	lint = templateNamed(t, wf, "lint")
+	if lint.RetryStrategy != nil || lint.Metadata.Annotations[AssistHoldAnnotation] != "" {
+		t.Fatalf("lint inherited a non-literal deadline and must not hold: %+v %v", lint.RetryStrategy, lint.Metadata.Annotations)
+	}
+	if test := templateNamed(t, wf, "test"); test.RetryStrategy == nil {
+		t.Fatal("test has its own literal deadline and must still hold")
 	}
 }
 

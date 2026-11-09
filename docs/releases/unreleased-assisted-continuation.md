@@ -22,7 +22,8 @@ line `assisted: step X continued after patch sha256:… by <actor>; not evidence
 on its existing status. Release, tag, promotion, schedule, plan and apply runs
 never hold. Only a command that failed on its own is retried and held: the
 injected retry expression refuses signal exit codes (137, 143) and any attempt
-whose duration reached the floored step budget, because Argo v4.0.8 records a
+whose duration reached the floored step budget (the leaf's own, else the
+inherited `templateDefaults` deadline, else the workflow budget), because Argo v4.0.8 records a
 kubelet `activeDeadlineSeconds` kill with exit code 143, not `-1` (found in
 the live spike; a timed-out step would otherwise have been parked and rerun
 with a second budget). #1499 classification and the infrastructure retry are
