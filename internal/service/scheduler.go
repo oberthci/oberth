@@ -518,6 +518,7 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 	// the pass again after a bounded backoff. Store errors stay fatal.
 	var cancellationRetry <-chan time.Time
 	cancellationDelay := databaseRetryMinimum
+	deletionRetries := 0
 	cancellationPass := func() error {
 		err := scheduler.completePendingCancellationsWithGate(dispatchCtx, scheduler.awaitDispatchMutation)
 		if err == nil || !onlyPendingJobDeletions(err) || ctx.Err() != nil {
@@ -526,8 +527,8 @@ func (scheduler *Scheduler) Run(ctx context.Context) error {
 			}
 			return err
 		}
-		total := scheduler.databaseRetryCount.Add(1)
-		log.Printf("WARN: scheduler cancellation pass deletion_pending=true retries_total=%d retry_in=%s error=%q", total, cancellationDelay, err)
+		deletionRetries++
+		log.Printf("WARN: scheduler cancellation pass deletion_pending=true deletion_retries_total=%d retry_in=%s error=%q", deletionRetries, cancellationDelay, err)
 		if cancellationRetry == nil {
 			cancellationRetry = time.After(cancellationDelay)
 		}
@@ -844,7 +845,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	if current.Preempted() {
 		_ = logFile.Close()
 		if err := scheduler.completePendingCancellationsWithGate(ctx, require); err != nil {
-			return err
+			return scheduler.deferRefusedDeletions(ctx, err)
 		}
 		scheduler.signals.NotifyRun(run.ID)
 		return nil
@@ -875,7 +876,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		// gone, so settle the cancellation like the pre-admission check does.
 		_ = logFile.Close()
 		if err := scheduler.completePendingCancellationsWithGate(ctx, require); err != nil {
-			return err
+			return scheduler.deferRefusedDeletions(ctx, err)
 		}
 		scheduler.signals.NotifyRun(run.ID)
 		return nil
@@ -894,7 +895,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 		if current.Preempted() {
 			_ = logFile.Close()
 			if err := scheduler.completePendingCancellationsWithGate(ctx, require); err != nil {
-				return err
+				return scheduler.deferRefusedDeletions(ctx, err)
 			}
 			scheduler.signals.NotifyRun(run.ID)
 			return nil
@@ -922,7 +923,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	if current.Preempted() {
 		_ = logFile.Close()
 		if err := scheduler.completePendingCancellationsWithGate(ctx, require); err != nil {
-			return err
+			return scheduler.deferRefusedDeletions(ctx, err)
 		}
 		scheduler.signals.NotifyRun(run.ID)
 		return nil
@@ -968,7 +969,7 @@ func (scheduler *Scheduler) execute(ctx context.Context, run model.Run, require 
 	} else if fresh.Preempted() {
 		_ = logFile.Close()
 		if err := scheduler.completePendingCancellationsWithGate(ctx, require); err != nil {
-			return err
+			return scheduler.deferRefusedDeletions(ctx, err)
 		}
 		scheduler.signals.NotifyRun(run.ID)
 		return nil
@@ -1228,7 +1229,7 @@ func (scheduler *Scheduler) observeRun(ctx context.Context, run model.Run, repos
 		if current, lookupErr := scheduler.database().Run(finalizeCtx, run.ID); lookupErr == nil && current.Preempted() {
 			if err := scheduler.completePendingCancellationsWithGate(finalizeCtx, require); err != nil {
 				reservation.retain()
-				return err
+				return scheduler.deferRefusedDeletions(finalizeCtx, err)
 			}
 			workflowSettled = true
 			scheduler.signals.NotifyRun(run.ID)

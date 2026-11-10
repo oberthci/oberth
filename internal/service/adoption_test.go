@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -465,14 +466,32 @@ func TestAdoptionPreemptedBeforeWaitRetainsAdmissionOnDeleteFailure(t *testing.T
 	if _, err := fixture.store.CancelRun(context.Background(), model.RunCancelRequest{RunID: run.ID, Actor: "agent@host"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := scheduler.resumeAdoptedRun(context.Background(), run, scheduler.requireMutation, reservation); err == nil {
-		t.Fatal("failed deletion accepted")
+	// A refused deletion no longer ends the scheduler: the worker returns
+	// nil and the obligation stays pending for the dispatch-loop pass.
+	if err := scheduler.resumeAdoptedRun(context.Background(), run, scheduler.requireMutation, reservation); err != nil {
+		t.Fatalf("refused deletion ended the worker with an error: %v", err)
+	}
+	pending, err := fixture.store.PendingRunCancellations(context.Background())
+	if err != nil || len(pending) != 1 || pending[0].RunID != run.ID {
+		t.Fatalf("refused deletion lost its obligation: %+v %v", pending, err)
 	}
 	scheduler.admission.mu.Lock()
 	runs, held := scheduler.admission.runs, scheduler.admission.reservations[run.QueueSequence]
 	scheduler.admission.mu.Unlock()
 	if scheduler.AdmissionState().Runs == 0 || runs != 1 || held != reservation || !reservation.retained {
 		t.Fatalf("live Workflow lost admission: %d held=%p", runs, held)
+	}
+	// The retry pass that completes the obligation releases the slot once.
+	jobs.deleteErr = nil
+	if err := scheduler.completePendingCancellations(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	reservation.cancel() // A late owner cancel must not release it twice.
+	scheduler.admission.mu.Lock()
+	runs, held = scheduler.admission.runs, scheduler.admission.reservations[run.QueueSequence]
+	scheduler.admission.mu.Unlock()
+	if runs != 0 || held != nil || !reservation.released || reservation.retained {
+		t.Fatalf("completed deletion did not release the slot exactly once: runs=%d held=%p %+v", runs, held, reservation)
 	}
 }
 
@@ -595,5 +614,82 @@ func TestAdoptionFailureNamesTheWorkflowToDelete(t *testing.T) {
 				t.Fatalf("refused adoption mutated work: %#v %v deleted=%v", current, lookupErr, jobs.deleted)
 			}
 		})
+	}
+}
+
+type refusingDeleteJobs struct {
+	*adoptingJobs
+	refusals atomic.Int32
+	calls    atomic.Int32
+}
+
+func (jobs *refusingDeleteJobs) Delete(ctx context.Context, name, id string) error {
+	jobs.calls.Add(1)
+	if jobs.refusals.Add(-1) >= 0 {
+		return errors.New("kube-apiserver temporarily unavailable")
+	}
+	return jobs.adoptingJobs.Delete(ctx, name, id)
+}
+
+// A cancel lands under an adopted Wait while the API refuses the deletion.
+// The worker's own cancellation pass must not end the scheduler; the
+// dispatch-loop retry deletes the Workflow and releases the slot once.
+func TestAdoptedPreemptedObservationDeleteRefusalKeepsSchedulerAlive(t *testing.T) {
+	fixture := newRecoveryFixture(t)
+	run := fixture.enqueueAndClaim(t, "feature/refused-delete", "efefefefefefefefefefefefefefefefefefefef")
+	fixture.setWorkflowName(t, run.ID, "oberth-refused-delete")
+	inner := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{
+		terminalErr: ErrJobNotTerminal, waitErr: errors.New("argojob: Workflow deleted under Wait"),
+		waitBlocks: make(chan struct{}), waitEntered: make(chan struct{}),
+	}}
+	jobs := &refusingDeleteJobs{adoptingJobs: inner}
+	jobs.refusals.Store(2)
+	scheduler := fixture.scheduler(t, jobs)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- scheduler.Run(ctx) }()
+	select {
+	case <-inner.waitEntered:
+	case err := <-done:
+		t.Fatalf("scheduler exited before the adopted Wait: %v", err)
+	case <-time.After(testStartTimeout(5 * time.Second)):
+		t.Fatal("adopted run never waited")
+	}
+	if _, err := fixture.store.CancelRun(context.Background(), model.RunCancelRequest{RunID: run.ID, Actor: "agent@host"}); err != nil {
+		t.Fatal(err)
+	}
+	close(inner.waitBlocks)
+	deadline := time.Now().Add(testStartTimeout(10 * time.Second))
+	for {
+		select {
+		case err := <-done:
+			t.Fatalf("a refused Workflow deletion stopped the scheduler: %v", err)
+		default:
+		}
+		pending, err := fixture.store.PendingRunCancellations(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		scheduler.admission.mu.Lock()
+		runs := scheduler.admission.runs
+		scheduler.admission.mu.Unlock()
+		if len(pending) == 0 && runs == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("obligation or slot not settled: pending=%+v runs=%d calls=%d", pending, runs, jobs.calls.Load())
+		}
+		time.Sleep(testTimeout(5 * time.Millisecond))
+	}
+	if jobs.calls.Load() < 3 {
+		t.Fatalf("deletion was not retried after refusals: calls=%d", jobs.calls.Load())
+	}
+	if scheduler.admission.runs < 0 {
+		t.Fatalf("slot released twice: %d", scheduler.admission.runs)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }

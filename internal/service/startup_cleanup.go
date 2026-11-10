@@ -15,6 +15,26 @@ type pendingJobDeletionError struct{ error }
 
 func (e *pendingJobDeletionError) Unwrap() error { return e.error }
 
+// deferRefusedDeletions makes a worker's cancellation pass that failed only on
+// Workflow deletions the API refused non-fatal. Those obligations stay
+// pending in the store; the dispatch loop's cancellation pass owns the retry
+// and its backoff, so the worker logs, wakes that pass and ends normally
+// instead of ending the server. Every other error is returned unchanged.
+//
+// A caller whose own Workflow may still be alive retains its admission
+// reservation first. The pass that completes that run's obligation releases
+// it through releaseDeletedRun; if the pass already completed it, the
+// reservation is released and retain is a no-op, so the slot is released
+// exactly once.
+func (scheduler *Scheduler) deferRefusedDeletions(ctx context.Context, err error) error {
+	if err == nil || !onlyPendingJobDeletions(err) || ctx.Err() != nil {
+		return err
+	}
+	log.Printf("WARN: scheduler worker cancellation deletion_pending=true retry=dispatch_pass error=%q", err)
+	scheduler.signalQueue()
+	return nil
+}
+
 // cancellationRetryMaximum caps the steady-state cancellation pass backoff.
 const cancellationRetryMaximum = 30 * time.Second
 

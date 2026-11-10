@@ -238,3 +238,36 @@ func TestOnlyPendingJobDeletions(t *testing.T) {
 		})
 	}
 }
+
+// Every worker call site of the cancellation pass routes its error through
+// deferRefusedDeletions: refused deletions become a dispatch-loop retry,
+// anything else, or a cancelled worker, keeps the error.
+func TestDeferRefusedDeletionsWakesDispatchRetry(t *testing.T) {
+	pending := fmt.Errorf("delete superseded Job x: %w", &pendingJobDeletionError{errors.New("api down")})
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, tc := range []struct {
+		name    string
+		ctx     context.Context
+		err     error
+		want    error
+		wakeups int
+	}{
+		{"refused deletion", context.Background(), pending, nil, 1},
+		{"store error", context.Background(), errors.New("database is locked"), errors.New("database is locked"), 0},
+		{"mixed", context.Background(), errors.Join(pending, errors.New("constraint")), errors.New("x"), 0},
+		{"worker stopping", cancelled, pending, pending, 0},
+		{"nil", context.Background(), nil, nil, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			scheduler := &Scheduler{wake: make(chan struct{}, 1)}
+			got := scheduler.deferRefusedDeletions(tc.ctx, tc.err)
+			if (got == nil) != (tc.want == nil) {
+				t.Fatalf("deferRefusedDeletions = %v, want error=%t", got, tc.want != nil)
+			}
+			if len(scheduler.wake) != tc.wakeups {
+				t.Fatalf("dispatch wakeups = %d, want %d", len(scheduler.wake), tc.wakeups)
+			}
+		})
+	}
+}
