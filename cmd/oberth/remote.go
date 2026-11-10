@@ -268,18 +268,19 @@ type remoteActiveRun struct {
 }
 
 // renderActiveRuns prints the active list in the server's order: started
-// runs with their elapsed time, then the queue with each run's position,
-// size and weight, and why it waits.
+// runs with their elapsed time, then the queue with each run's position and
+// why it waits. There is no size column: run limits live in Argo since
+// v0.18.0 and runs carry no admission size.
 func renderActiveRuns(output io.Writer, runs []remoteActiveRun, now time.Time) error {
 	if len(runs) == 0 {
 		_, err := fmt.Fprintln(output, "no active runs")
 		return err
 	}
-	if _, err := fmt.Fprintf(output, "%-4s %-34s %-9s %-8s %-8s %-30s %s\n", "#", "RUN", "STATUS", "SIZE", "ELAPSED", "REF", "REASON"); err != nil {
+	if _, err := fmt.Fprintf(output, "%-4s %-34s %-9s %-8s %-30s %s\n", "#", "RUN", "STATUS", "ELAPSED", "REF", "REASON"); err != nil {
 		return err
 	}
 	for _, run := range runs {
-		position, size, elapsed, reason := "-", "-", "-", ""
+		position, elapsed, reason := "-", "-", ""
 		if displayRunStatus(run.remoteRun) == "queued" && run.Scheduling != nil && run.Scheduling.QueuePosition > 0 {
 			position = strconv.FormatInt(run.Scheduling.QueuePosition, 10)
 		}
@@ -293,8 +294,8 @@ func renderActiveRuns(output io.Writer, runs []remoteActiveRun, now time.Time) e
 			row.Scheduling = run.Scheduling
 		}
 		reason = displayRunReason(row)
-		if _, err := fmt.Fprintf(output, "%-4s %-34s %-9s %-8s %-8s %-30s %s\n",
-			position, run.ID, displayRunStatus(run.remoteRun), size, elapsed, run.Ref, reason); err != nil {
+		if _, err := fmt.Fprintf(output, "%-4s %-34s %-9s %-8s %-30s %s\n",
+			position, run.ID, displayRunStatus(run.remoteRun), elapsed, run.Ref, reason); err != nil {
 			return err
 		}
 	}

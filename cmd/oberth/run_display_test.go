@@ -33,6 +33,12 @@ func TestCLIDisplayRunStatusCombinesCancelledCauses(t *testing.T) {
 	if !strings.Contains(output.String(), "queued") || strings.Contains(output.String(), "waiting  ") || !strings.Contains(output.String(), "waiting for capacity") {
 		t.Fatalf("active output = %q", output.String())
 	}
+	// No SIZE column: runs carry no admission size since v0.18.0, so it
+	// could only ever print "-".
+	header := strings.Fields(strings.SplitN(output.String(), "\n", 2)[0])
+	if strings.Join(header, " ") != "# RUN STATUS ELAPSED REF REASON" {
+		t.Fatalf("active header = %q", header)
+	}
 }
 
 func ptrTime(value time.Time) *time.Time { return &value }
