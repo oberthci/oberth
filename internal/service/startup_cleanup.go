@@ -15,6 +15,52 @@ type pendingJobDeletionError struct{ error }
 
 func (e *pendingJobDeletionError) Unwrap() error { return e.error }
 
+// deferRefusedDeletions makes a worker's cancellation pass that failed only on
+// Workflow deletions the API refused non-fatal. Those obligations stay
+// pending in the store; the dispatch loop's cancellation pass owns the retry
+// and its backoff, so the worker logs, wakes that pass and ends normally
+// instead of ending the server. Every other error is returned unchanged.
+//
+// A caller whose own Workflow may still be alive retains its admission
+// reservation first. The pass that completes that run's obligation releases
+// it through releaseDeletedRun; if the pass already completed it, the
+// reservation is released and retain is a no-op, so the slot is released
+// exactly once.
+func (scheduler *Scheduler) deferRefusedDeletions(ctx context.Context, err error) error {
+	if err == nil || !onlyPendingJobDeletions(err) || ctx.Err() != nil {
+		return err
+	}
+	log.Printf("WARN: scheduler worker cancellation deletion_pending=true retry=dispatch_pass error=%q", err)
+	scheduler.signalQueue()
+	return nil
+}
+
+// cancellationRetryMaximum caps the steady-state cancellation pass backoff.
+const cancellationRetryMaximum = 30 * time.Second
+
+// onlyPendingJobDeletions reports whether err consists solely of Workflow
+// deletions the API refused, which leave their obligations pending. Any
+// other cause, alone or joined, is not retryable here.
+func onlyPendingJobDeletions(err error) bool {
+	if err == nil {
+		return false
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		causes := joined.Unwrap()
+		if len(causes) == 0 {
+			return false
+		}
+		for _, cause := range causes {
+			if !onlyPendingJobDeletions(cause) {
+				return false
+			}
+		}
+		return true
+	}
+	var pending *pendingJobDeletionError
+	return errors.As(err, &pending)
+}
+
 // Startup cleanup is idempotent and owns durable obligations. A temporarily
 // unavailable deletion API must leave the server alive and unready, rather
 // than force another Recreate restart. Each attempt and its retry backoff are
@@ -35,8 +81,7 @@ func (scheduler *Scheduler) waitForStartupCleanup(ctx context.Context, operation
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		var pending *pendingJobDeletionError
-		if !errors.As(err, &pending) {
+		if !onlyPendingJobDeletions(err) {
 			return err
 		}
 		total := scheduler.databaseRetryCount.Add(1)

@@ -108,7 +108,6 @@ func TestInfrastructurePromotionRunDoesNotProjectCIRedIssue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedLegacyPromotionIssueWork(t, database, promotion)
 	if _, err := database.PlanPromotion(ctx, promotion.ID, retryStoreBase, retryStoreMerged); err != nil {
 		t.Fatal(err)
 	}
@@ -438,37 +437,11 @@ BEGIN SELECT RAISE(ABORT, 'injected issue close failure'); END;`); err != nil {
 	}
 }
 
-func TestLegacyPromotionAndIssueProjectionCommitAtomically(t *testing.T) {
-	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
-	database := testStore(t, &now)
-	repository := projectionRepository(t, database)
-	ctx := context.Background()
-	promotion, err := database.AppendPromotion(ctx, model.PromotionSpec{
-		RepoID: repository.ID, SourceBranch: "feature/promotion-atomic", SourceSHA: projectionSourceSHA,
-		TargetRef: "main", PreviousSHA: projectionBaseSHA, ResultSHA: projectionResultSHA,
-		Actor: "agent@host",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	seedLegacyPromotionIssueWork(t, database, promotion)
-	if _, err := database.db.ExecContext(ctx, `
-CREATE TRIGGER inject_promotion_issue_failure
-BEFORE INSERT ON issues WHEN NEW.kind = 'ci'
-BEGIN SELECT RAISE(ABORT, 'injected promotion issue failure'); END;`); err != nil {
-		t.Fatal(err)
-	}
-	_, err = database.FinishPromotion(ctx, promotion.ID, model.PromotionFailed, "", "red")
-	if err == nil || !strings.Contains(err.Error(), "injected promotion issue failure") {
-		t.Fatalf("FinishPromotion error = %v, want injected projection failure", err)
-	}
-	pending, err := database.Promotion(ctx, promotion.ID)
-	if err != nil || pending.Status != model.PromotionPending {
-		t.Fatalf("promotion after rollback = %#v, %v", pending, err)
-	}
-}
-
-func TestLegacyPromotionIssueProjectionIsOrderedAndProofAware(t *testing.T) {
+// Databases from before promotions stopped filing CI issues can still hold
+// an open issue whose newest failure is a promotion. A green branch run
+// supersedes it and closes the issue (LOGIC-8, #447); a finished promotion
+// never projects one.
+func TestLegacyPromotionFailureIssueClosesOnGreenBranchRun(t *testing.T) {
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	database := testStore(t, &now)
 	repository := projectionRepository(t, database)
@@ -479,34 +452,29 @@ func TestLegacyPromotionIssueProjectionIsOrderedAndProofAware(t *testing.T) {
 		TargetRef: "main", PreviousSHA: projectionBaseSHA, ResultSHA: projectionResultSHA,
 		Actor: "agent@host",
 	}
-
-	older, err := database.AppendPromotion(ctx, spec)
+	earlier, err := database.AppendPromotion(ctx, spec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	newer, err := database.AppendPromotion(ctx, spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	seedLegacyPromotionIssueWork(t, database, older)
-	seedLegacyPromotionIssueWork(t, database, newer)
-	if _, err := database.FinishPromotion(ctx, newer.ID, model.PromotionFailed, "", "newer promotion failed"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := database.FinishPromotion(ctx, older.ID, model.PromotionFailed, "", "delayed older promotion failed"); err != nil {
-		t.Fatal(err)
-	}
+	seedEarlierPromotionIssue(t, database, earlier)
 	issue, err := database.OpenCIIssue(ctx, repository.ID, branch)
+	if err != nil || !strings.Contains(issue.Body, earlier.ID) {
+		t.Fatalf("earlier promotion issue = %#v, %v", issue, err)
+	}
+
+	// A promotion finishing now leaves the older issue as it was.
+	current, err := database.AppendPromotion(ctx, spec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(issue.Body, newer.ID) || strings.Contains(issue.Body, older.ID) {
-		t.Fatalf("delayed result overwrote newer projection: %#v", issue)
+	if _, err := database.FinishPromotion(ctx, current.ID, model.PromotionFailed, "", "current promotion failed"); err != nil {
+		t.Fatal(err)
+	}
+	after, err := database.OpenCIIssue(ctx, repository.ID, branch)
+	if err != nil || after.ID != issue.ID || strings.Contains(after.Body, current.ID) {
+		t.Fatalf("finished promotion projected an issue: %#v, %v", after, err)
 	}
 
-	// LOGIC-8 (#447): a green branch run supersedes the stale promotion
-	// failure and closes the CI issue. The branch code is healthy; the
-	// promotion failure is a historical artifact.
 	green := projectionRunWithTrigger(t, database, repository.ID, branch, projectionSourceSHA, "schedule")
 	if _, err := database.FinishRun(ctx, green.ID, model.RunResult{Status: model.RunPassed, Phase: "passed"}); err != nil {
 		t.Fatal(err)
@@ -514,34 +482,12 @@ func TestLegacyPromotionIssueProjectionIsOrderedAndProofAware(t *testing.T) {
 	if _, err := database.OpenCIIssue(ctx, repository.ID, branch); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("green branch run should close stale promotion-failure issue: %v", err)
 	}
-
-	// A subsequent qualifying promotion with a delivered publication also
-	// keeps the issue closed (no regression from the LOGIC-8 path).
-	qualifying, err := database.AppendPromotion(ctx, spec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	seedLegacyPromotionIssueWork(t, database, qualifying)
-	publication, err := database.BeginPublication(ctx, model.PublicationSpec{
-		RepoID: repository.ID, PromotionID: qualifying.ID, RefKind: model.RefBranch,
-		Ref: qualifying.TargetRef, PreviousSHA: qualifying.PreviousSHA, ResultSHA: qualifying.ResultSHA,
-		Actor: qualifying.Actor,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := database.FinalizePublication(ctx, publication.ID, model.PublicationDelivered, ""); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := database.OpenCIIssue(ctx, repository.ID, branch); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("qualifying promotion did not keep issue closed: %v", err)
-	}
 }
 
 func TestRestartInterruptedPromotionDoesNotProjectIssue(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := OpenAdminClient(ctx, path, Options{})
+	database, err := openAdminClientForTest(ctx, path, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -554,7 +500,6 @@ func TestRestartInterruptedPromotionDoesNotProjectIssue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedLegacyPromotionIssueWork(t, database, promotion)
 	if err := database.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -574,14 +519,30 @@ func TestRestartInterruptedPromotionDoesNotProjectIssue(t *testing.T) {
 	}
 }
 
-// Recreate admission records retained by databases opened before the policy
-// change, without enabling new promotion issue registration in production.
-func seedLegacyPromotionIssueWork(t *testing.T, database *Store, promotion model.Promotion) {
+// seedEarlierPromotionIssue recreates the state an older binary left: a
+// promotion's issue work and its failed projection with an open CI issue.
+func seedEarlierPromotionIssue(t *testing.T, database *Store, promotion model.Promotion) {
 	t.Helper()
-	if _, err := database.db.ExecContext(context.Background(), `
+	ctx := context.Background()
+	tx, err := database.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	created := unixNano(database.now())
+	var sequence int64
+	if err := tx.QueryRowContext(ctx, `
 INSERT INTO ci_issue_work(repo_id, branch, origin, promotion_id, actor, created_at)
-VALUES(?, ?, 'promotion', ?, ?, ?)
-ON CONFLICT(promotion_id) WHERE promotion_id IS NOT NULL DO NOTHING`, promotion.RepoID, promotion.SourceBranch, promotion.ID, promotion.Actor, unixNano(database.now())); err != nil {
+VALUES(?, ?, 'promotion', ?, ?, ?) RETURNING sequence`, promotion.RepoID, promotion.SourceBranch, promotion.ID, promotion.Actor, created).Scan(&sequence); err != nil {
+		t.Fatal(err)
+	}
+	work := ciIssueWork{Sequence: sequence, RepoID: promotion.RepoID, Branch: promotion.SourceBranch, Origin: ciOriginPromotion, PromotionID: promotion.ID, Actor: promotion.Actor}
+	if err := database.applyCIIssueProjection(ctx, tx, ciIssueProjection{
+		Work: work, Title: "Promotion red: " + promotion.SourceBranch, Body: "promotion " + promotion.ID,
+	}, ciOutcomeFailed, created); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
 }

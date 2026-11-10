@@ -21,6 +21,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type tokenWarningBuffer struct {
@@ -45,6 +46,10 @@ func TestCLIUsesLiveTokenPolicyAndRejectsAboveServerMaximum(t *testing.T) {
 	directory := t.TempDir()
 	certificate := filepath.Join(directory, "tls.crt")
 	database := filepath.Join(directory, "oberth.sqlite")
+	// Admin commands act on a database the server created; they never create one.
+	if err := storetest.EnsureDatabase(t.Context(), database, store.Options{}); err != nil {
+		t.Fatal(err)
+	}
 	writeTestCertificate(t, certificate, private.Public().(ed25519.PublicKey), private)
 	policy := model.UplinkTokenPolicy{DefaultTTL: 30 * 24 * time.Hour, MaxTTL: 60 * 24 * time.Hour}
 	socket := privateAdminSocket(t)
@@ -65,7 +70,7 @@ func TestCLIUsesLiveTokenPolicyAndRejectsAboveServerMaximum(t *testing.T) {
 	if err := runUplinkWithDependencies(t.Context(), args, strings.NewReader(""), io.Discard, deps); err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.OpenAdminClient(t.Context(), database, store.Options{})
+	db, err := storetest.OpenAdminClient(t.Context(), database, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,6 +184,10 @@ func TestLegacyTokenWarningReadErrorDoesNotExposeDetails(t *testing.T) {
 func TestUplinkRotateIgnoresRevokedExpiredCredentials(t *testing.T) {
 	directory := t.TempDir()
 	database := filepath.Join(directory, "oberth.sqlite")
+	// Admin commands act on a database the server created; they never create one.
+	if err := storetest.EnsureDatabase(t.Context(), database, store.Options{}); err != nil {
+		t.Fatal(err)
+	}
 	oldKey, certificateKey := newTestUplinkKey(t)
 	certificatePath := filepath.Join(directory, "tls.crt")
 	writeTestCertificate(t, certificatePath, certificateKey.Public().(ed25519.PublicKey), certificateKey)

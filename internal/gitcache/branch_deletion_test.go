@@ -341,6 +341,44 @@ func TestBranchInventoryClassifiesMergedAndPatchEquivalent(t *testing.T) {
 	}
 }
 
+// The mirror's main can run ahead of the forge while a fast-forward push is
+// unpublished. A branch merged only into those commits must stay unmerged,
+// and patch equivalence must be judged against the forge-confirmed head.
+func TestBranchInventoryJudgesMergedAgainstForgeConfirmedTarget(t *testing.T) {
+	t.Parallel()
+	repository, cache, ready, featureSHA := deletionFixture(t, filepath.Join(t.TempDir(), "cache"))
+	runGit(t, ready.Path, "update-ref", "refs/heads/feature/merged", repository.initialSHA)
+	// An unpublished merge of feature/gone lands on the mirror's main only.
+	runGit(t, repository.work, "checkout", "main")
+	runGit(t, repository.work, "merge", "--no-ff", "--no-edit", featureSHA)
+	unpublished := runGit(t, repository.work, "rev-parse", "HEAD")
+	runGit(t, repository.work, "reset", "--hard", repository.initialSHA)
+	seedCacheObject(t, repository.work, ready.Path, unpublished)
+	runGit(t, ready.Path, "update-ref", "refs/heads/main", unpublished)
+	inventory, err := cache.BranchInventory(t.Context(), "example", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inventory.TargetSHA != repository.initialSHA {
+		t.Fatalf("target sha = %s, want the forge-confirmed %s", inventory.TargetSHA, repository.initialSHA)
+	}
+	byName := make(map[string]BranchInventoryEntry)
+	for _, entry := range inventory.Branches {
+		byName[entry.Branch] = entry
+	}
+	if entry := byName["feature/gone"]; entry.Merged || entry.Ahead != 1 {
+		t.Fatalf("branch merged only into unpublished mirror main judged merged: %+v", entry)
+	}
+	if entry := byName["feature/merged"]; !entry.Merged {
+		t.Fatalf("branch merged upstream judged unmerged: %+v", entry)
+	}
+	// Without a forge-confirmed head the plan refuses instead of guessing.
+	runGit(t, ready.Path, "update-ref", "-d", upstreamRefPrefix+"heads/main")
+	if _, err := cache.BranchInventory(t.Context(), "example", ""); err == nil || !strings.Contains(err.Error(), "no forge-confirmed head") {
+		t.Fatalf("inventory without upstream head = %v", err)
+	}
+}
+
 func TestReceiveHookRefusesConfiguredReservedBranchDeletion(t *testing.T) {
 	r, c, _ := hookSecurityFixture(t)
 	c.hookChild = true

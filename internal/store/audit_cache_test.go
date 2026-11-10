@@ -157,7 +157,7 @@ func TestLocalAuditCacheInvalidations(t *testing.T) {
 				s.db.SetMaxIdleConns(0)
 				s.db.SetMaxIdleConns(1)
 			case "external-append":
-				other, err := OpenAdminClient(t.Context(), s.livePath, Options{})
+				other, err := openAdminClientForTest(t.Context(), s.livePath, Options{})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -391,7 +391,7 @@ func BenchmarkLocalAuditGate(b *testing.B) {
 		for _, mode := range []string{"cached", "append", "full"} {
 			b.Run(fmt.Sprintf("%s/rows=%d", mode, rows), func(b *testing.B) {
 				now := time.Now()
-				s, err := OpenAdminClient(context.Background(), filepath.Join(b.TempDir(), "bench.db"), Options{})
+				s, err := openAdminClientForTest(context.Background(), filepath.Join(b.TempDir(), "bench.db"), Options{})
 				if err != nil {
 					b.Fatal(err)
 				}

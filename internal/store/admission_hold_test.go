@@ -35,7 +35,7 @@ func TestAdmissionHoldPersistenceExpiryAndQueueOrder(t *testing.T) {
 	if err = s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err = OpenAdminClient(t.Context(), path, Options{Now: func() time.Time { return now }})
+	s, err = openAdminClientForTest(t.Context(), path, Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}

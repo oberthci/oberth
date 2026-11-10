@@ -250,6 +250,10 @@ func (server *Server) Handler() http.Handler {
 		if request.URL.Path != "/healthz" && request.URL.Path != "/livez" && server.refuseDuringDrain(writer) {
 			return
 		}
+		if goFieldNamesRequested(request) {
+			writer.Header().Set(GoFieldNamesHeader, "1")
+			request = request.WithContext(withGoFieldNames(request.Context()))
+		}
 		if request.Method == http.MethodGet {
 			ctx, cancel := context.WithCancel(request.Context())
 			stop := context.AfterFunc(server.drainContext, cancel)
@@ -865,7 +869,8 @@ func strictUnmarshal(raw json.RawMessage, value any) error {
 }
 
 func writeJSON(writer http.ResponseWriter, status int, value any) {
-	raw, err := marshalCompatible(value)
+	// Handler marks an opted-in request on its response headers.
+	raw, err := marshalCompatible(value, writer.Header().Get(GoFieldNamesHeader) == "1")
 	if err != nil {
 		status = http.StatusInternalServerError
 		raw = []byte(`{"error":"internal error"}`)

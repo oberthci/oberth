@@ -326,10 +326,10 @@ func TestAdmittedRerunErrorDoesNotClaimNothingStarted(t *testing.T) {
 
 func TestFailedRunDisplayCoversTransientAndPermanentPublication(t *testing.T) {
 	for _, tc := range []struct{ phase, message, want string }{
-		{"publishing", "remote: Internal Server Error", "upstream publication failed"},
-		{"infrastructure", "upstream publication infrastructure failure: all 5 attempts exhausted", "upstream publication failed"},
+		{"publishing", "remote: Internal Server Error", "steps passed; upstream publication failed"},
+		{"infrastructure", "upstream publication infrastructure failure: all 5 attempts exhausted", "steps passed; upstream publication failed"},
 		{"publishing", "non-fast-forward", "upstream rejected: non-fast-forward"},
-		{"publishing", "", "upstream publication failed"},
+		{"publishing", "", "steps passed; upstream publication failed"},
 		{"checkout", "object unavailable", "checkout error"},
 	} {
 		run := model.Run{Status: model.RunFailed, Phase: tc.phase, Error: tc.message}

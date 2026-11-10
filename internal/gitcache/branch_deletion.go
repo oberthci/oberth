@@ -267,6 +267,14 @@ type BranchInventory struct {
 
 // BranchInventory reads every mirror branch with its relation to target in
 // one for-each-ref pass. Read-only.
+//
+// "Merged" is judged against the forge-confirmed target (the upstream
+// tracking ref), never the mirror's own target branch: a fast-forward push
+// lands on the mirror before it is published, so while a publication is
+// pending or failed the mirror target can hold commits the forge never
+// received. A branch merged only into those commits is not merged upstream,
+// and deleting it would lose its work there. TargetSHA is the
+// forge-confirmed head.
 func (c *Cache) BranchInventory(ctx context.Context, input, target string) (BranchInventory, error) {
 	_, path, err := c.path(input)
 	if err != nil {
@@ -293,10 +301,13 @@ func (c *Cache) BranchInventory(ctx context.Context, input, target string) (Bran
 	if err := ValidateBranch(target); err != nil {
 		return BranchInventory{}, err
 	}
-	targetRef := "refs/heads/" + target
+	if _, err := c.capture(ctx, path, "rev-parse", "--verify", "--quiet", "refs/heads/"+target+"^{commit}"); err != nil {
+		return BranchInventory{}, fmt.Errorf("branch %s does not exist on the mirror", target)
+	}
+	targetRef := upstreamRefPrefix + "heads/" + target
 	targetSHA, err := c.capture(ctx, path, "rev-parse", "--verify", "--quiet", targetRef+"^{commit}")
 	if err != nil {
-		return BranchInventory{}, fmt.Errorf("branch %s does not exist on the mirror", target)
+		return BranchInventory{}, fmt.Errorf("branch %s has no forge-confirmed head on the mirror, so merged branches cannot be judged; publish the default branch to the forge if it has none yet, or wait for the next upstream refresh, then plan again", target)
 	}
 	inventory := BranchInventory{DefaultBranch: defaultBranch, Target: target, TargetSHA: strings.TrimSpace(targetSHA)}
 	listCtx, cancel := context.WithCancel(ctx)

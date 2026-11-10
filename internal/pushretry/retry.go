@@ -7,6 +7,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/oberthci/oberth/internal/gitssh"
 )
 
 const MaxAttempts = 5
@@ -41,13 +43,21 @@ func Transient(err error) bool {
 	}
 	message := strings.ToLower(err.Error())
 	// Explicit policy, identity and concurrency refusals always win, even if
-	// a wrapper also contains a server-error line.
-	for _, text := range []string{"non-fast-forward", "fetch first", "protected" + " branch", "protected tag", "permission denied", "authentication failed", "access denied", "not authorized", "not allowed", "repository not found"} {
+	// a wrapper also contains a server-error line. The git-ssh shim's own
+	// refusal line is one of them.
+	for _, text := range []string{strings.ToLower(gitssh.RefusalMessage), "non-fast-forward", "fetch first", "protected" + " branch", "protected tag", "permission denied", "authentication failed", "access denied", "not authorized", "not allowed", "repository not found"} {
 		if strings.Contains(message, text) {
 			return false
 		}
 	}
-	if errors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, gitssh.ErrTransportUnavailable) {
+		return true
+	}
+	// The git-ssh shim prints this fixed line to Git's stderr when the TCP
+	// dial, handshake or session stream failed. Git then appends its generic
+	// "Could not read from remote repository ... correct access rights"
+	// advice, which says nothing about the cause; the shim's line does.
+	if strings.Contains(message, strings.ToLower(gitssh.TemporaryFailureMessage)) {
 		return true
 	}
 	for _, text := range []string{"internal server connection error", "internal server error", "service unavailable", "bad gateway", "gateway timeout", "connection reset", "connection timed out", "connection timeout", "i/o timeout", "operation timed out", "remote end hung up unexpectedly", "unexpected disconnect", "could not resolve host", "temporary failure in name resolution", "connection refused", "network is unreachable"} {

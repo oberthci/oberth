@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/oberthci/oberth/internal/gitcache"
+	"github.com/oberthci/oberth/internal/recordjson"
 	"github.com/oberthci/oberth/internal/store"
 )
 
@@ -98,6 +99,10 @@ func requestLiveRepositoryRemoval(ctx context.Context, path, root, input string)
 		return store.RemovedRepository{}, fmt.Errorf("daemon repository removal: %s: %s", response.Status, body)
 	}
 	var removed store.RemovedRepository
-	err = json.NewDecoder(io.LimitReader(response.Body, 64<<10)).Decode(&removed)
+	body, err := io.ReadAll(io.LimitReader(response.Body, 64<<10))
+	if err != nil {
+		return removed, err
+	}
+	err = recordjson.Unmarshal(body, &removed)
 	return removed, err
 }

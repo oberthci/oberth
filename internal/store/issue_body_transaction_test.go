@@ -15,12 +15,12 @@ import (
 
 func TestIssueBodyHashSerializesIndependentStoreConnections(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "issues.sqlite")
-	first, err := OpenAdminClient(t.Context(), path, Options{})
+	first, err := openAdminClientForTest(t.Context(), path, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = first.Close() })
-	second, err := OpenAdminClient(t.Context(), path, Options{})
+	second, err := openAdminClientForTest(t.Context(), path, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

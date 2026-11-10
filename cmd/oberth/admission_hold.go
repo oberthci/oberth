@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"strings"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/recordjson"
 )
 
 const admissionHoldUsage = "Usage: oberth admission hold on|off --reason <reason> [--allow tag,release,promotion] [--duration 2h] [--json]\n" +
@@ -54,7 +54,7 @@ func runAdmissionHold(ctx context.Context, args []string, output io.Writer) erro
 		return err
 	}
 	var hold model.AdmissionHold
-	if *asJSON || json.Unmarshal(raw, &hold) != nil {
+	if *asJSON || recordjson.Unmarshal(raw, &hold) != nil {
 		_, err = fmt.Fprintf(output, "%s\n", strings.TrimSpace(string(raw)))
 		return err
 	}

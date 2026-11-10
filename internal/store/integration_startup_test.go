@@ -15,7 +15,7 @@ func TestRejectDiscardedWorkspaceDatabase(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "incompatible.sqlite")
-			s, err := OpenAdminClient(t.Context(), path, Options{})
+			s, err := openAdminClientForTest(t.Context(), path, Options{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -26,7 +26,7 @@ func TestRejectDiscardedWorkspaceDatabase(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, open := range []func() (*Store, error){
-				func() (*Store, error) { return OpenAdminClient(t.Context(), path, Options{}) },
+				func() (*Store, error) { return openAdminClientForTest(t.Context(), path, Options{}) },
 				func() (*Store, error) { return OpenCurrent(t.Context(), path, Options{}) },
 				func() (*Store, error) { return InspectCurrent(t.Context(), path, Options{}) },
 			} {
@@ -51,7 +51,7 @@ func TestUpgradePriorityV39Database(t *testing.T) {
 	}{{"owner", Open}, {"admin", OpenAdminClient}, {"current", OpenCurrent}} {
 		t.Run(opener.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "priority-v39.sqlite")
-			s, err := OpenAdminClient(t.Context(), path, Options{})
+			s, err := openAdminClientForTest(t.Context(), path, Options{})
 			if err != nil {
 				t.Fatal(err)
 			}

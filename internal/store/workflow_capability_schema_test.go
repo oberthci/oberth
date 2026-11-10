@@ -8,7 +8,7 @@ import (
 func TestWorkflowCapabilitiesStartEmptyAcrossUpgrade(t *testing.T) {
 	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "capabilities.sqlite")
-	s, err := OpenAdminClient(ctx, path, Options{})
+	s, err := openAdminClientForTest(ctx, path, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -19,7 +19,7 @@ func TestWorkflowCapabilitiesStartEmptyAcrossUpgrade(t *testing.T) {
 	if err = s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err = OpenAdminClient(ctx, path, Options{})
+	s, err = openAdminClientForTest(ctx, path, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

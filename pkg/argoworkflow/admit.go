@@ -172,6 +172,8 @@ func admitSpec(spec *wfv1.WorkflowSpec, serverDeadline bool) []error {
 	// includes AppArmor and seccomp annotations and sidecar-injection
 	// triggers. Pod metadata is assigned server-side.
 	problems = append(problems, admitPodMetadata("spec.podMetadata", spec.PodMetadata)...)
+	problems = append(problems, admitWorkflowMetadata("spec.workflowMetadata", spec.WorkflowMetadata)...)
+	problems = append(problems, admitSynchronization("spec.synchronization", spec.Synchronization)...)
 	if spec.PodPriorityClassName != "" || spec.Priority != nil {
 		problems = append(problems, errors.New("argoworkflow: spec.priority and spec.podPriorityClassName are not admitted"))
 	}
@@ -346,6 +348,7 @@ func admitTemplate(location string, template wfv1.Template, policy Policy, depth
 	}
 	var problems []error
 	problems = append(problems, admitNestedTemplates(location, template, policy, depth)...)
+	problems = append(problems, admitSynchronization(location+".synchronization", template.Synchronization)...)
 	// Argo applies this deadline to a leaf Pod, never a DAG or steps gate.
 	// Keep the check in the recursive path so inline composites also refuse.
 	if template.ActiveDeadlineSeconds != nil && (template.DAG != nil || len(template.Steps) != 0) {

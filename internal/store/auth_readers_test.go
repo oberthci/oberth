@@ -90,7 +90,7 @@ func TestSSHLookupRevocationAndScopeAreImmediate(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				other, openErr := OpenAdminClient(t.Context(), path, Options{})
+				other, openErr := openAdminClientForTest(t.Context(), path, Options{})
 				if openErr != nil {
 					t.Fatal(openErr)
 				}
@@ -149,7 +149,7 @@ func TestSSHReadersRequireServerStartup(t *testing.T) {
 			case "genesis":
 				opener = CreateGenesis
 			case "admin":
-				opener = OpenAdminClient
+				opener = openAdminClientForTest
 			case "current", "inspection":
 				seed, err := CreateGenesis(t.Context(), path, Options{})
 				if err != nil {

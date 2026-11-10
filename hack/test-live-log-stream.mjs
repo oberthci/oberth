@@ -45,8 +45,8 @@ try {
   await page.addInitScript(() => localStorage.setItem('oberth-token', 'browser-token'));
   await page.goto(`http://127.0.0.1:${server.address().port}/runs/live-run`);
   await page.evaluate(async () => {
-    state.repos = [{ID: 1, Name: 'oberth'}]; state.step = '__summary__'; state.stepRunID = 'live-run';
-    window.detail = {Run: {ID: 'live-run', RepoID: 1, Ref: 'test', Status: 'running', StartedAt: new Date().toISOString()}, Steps: []};
+    state.repos = [{id: 1, name: 'oberth'}]; state.step = '__summary__'; state.stepRunID = 'live-run';
+    window.detail = {run: {id: 'live-run', repo_id: 1, ref: 'test', status: 'running', started_at: new Date().toISOString()}, steps: []};
     setAuto = ms => {window.metadataPollMs = ms;};
     await renderRunDetailView(detail, state.routeSeq);
     window.originalTerm = document.getElementById('termBody');
@@ -57,7 +57,7 @@ try {
   assert.equal(await page.evaluate(() => metadataPollMs), 4000);
   // Local step clocks flow without any metadata/log response or DOM replacement.
   await page.evaluate(async () => {
-    detail.Steps = [{Burn:'test', Step:'clock', Status:'running', Ordinal:0, StartedAt:new Date(Date.now()-2000).toISOString()}];
+    detail.steps = [{burn:'test', step:'clock', status:'running', ordinal:0, started_at:new Date(Date.now()-2000).toISOString()}];
     await renderRunDetailView(detail,state.routeSeq);
     window.timerButton=document.querySelector('[data-select-step]');
     window.timerCell=document.querySelector('[data-timer-kind="step"]');
@@ -67,8 +67,8 @@ try {
   assert.equal(await page.evaluate(() => timerCell.isConnected && document.activeElement === timerButton && originalTerm === document.getElementById('termBody')),true);
   assert.equal(connections.length,1); assert.deepEqual(pollOffsets,[]);
   await page.evaluate(async () => {
-    detail.Steps[0].Status='passed';
-    detail.Steps[0].FinishedAt=new Date(Date.parse(detail.Steps[0].StartedAt)+5000).toISOString();
+    detail.steps[0].status='passed';
+    detail.steps[0].finished_at=new Date(Date.parse(detail.steps[0].started_at)+5000).toISOString();
     await renderRunDetailView(detail,state.routeSeq);
     tickRunTimers();
   });
@@ -117,7 +117,7 @@ try {
   assert.equal(await page.locator('#termBody .log-hdr').first().textContent().then(s => s.includes('build / one')), true);
   // Scope changes reset the view, but reuse the same stream for this run.
   await page.evaluate(async () => {
-    detail.Steps = [{Burn:'build', Step:'two', Status:'running'}]; state.step = 'build / two';
+    detail.steps = [{burn:'build', step:'two', status:'running'}]; state.step = 'build / two';
     await renderRunDetailView(detail, state.routeSeq);
   });
   assert.equal(connections.length, 1);

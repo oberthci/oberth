@@ -12,6 +12,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
@@ -52,7 +53,7 @@ func concurrentGateManager(t *testing.T, mode string) (*Manager, *racingGateStor
 	t.Helper()
 	now := time.Now()
 	path := filepath.Join(t.TempDir(), "audit.sqlite")
-	database, err := store.OpenAdminClient(t.Context(), path, store.Options{})
+	database, err := storetest.OpenAdminClient(t.Context(), path, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

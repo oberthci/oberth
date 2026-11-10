@@ -121,7 +121,7 @@ func TestPromotionTrainUpgradeFrom52PreservesSingleSource(t *testing.T) {
 	if err = s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err = OpenAdminClient(t.Context(), path, Options{})
+	s, err = openAdminClientForTest(t.Context(), path, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

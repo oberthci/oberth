@@ -11,6 +11,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/recordjson"
 )
 
 func TestScheduleEntryEnqueuePersistsTheResolvedName(t *testing.T) {
@@ -49,7 +50,7 @@ func TestScheduleEntryIsVisibleThroughHTTPAndMCP(t *testing.T) {
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
 	var detail RunDetailResponse
-	if err = json.Unmarshal(response.Body.Bytes(), &detail); err != nil || response.Code != http.StatusOK || detail.Run.ScheduleEntry != "nightly" {
+	if err = recordjson.Unmarshal(response.Body.Bytes(), &detail); err != nil || response.Code != http.StatusOK || detail.Run.ScheduleEntry != "nightly" {
 		t.Fatalf("HTTP detail lost entry: %d %s (%v)", response.Code, response.Body, err)
 	}
 	raw, _ := json.Marshal(map[string]string{"id": run.ID})

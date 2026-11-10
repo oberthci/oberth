@@ -896,7 +896,7 @@ func TestAdminClientOpenDoesNotRecoverOwnerRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	admin, err := OpenAdminClient(ctx, path, Options{})
+	admin, err := openAdminClientForTest(ctx, path, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1423,7 +1423,7 @@ func TestConcurrentStoreClientsDeduplicateReceivesAndSerializeEnqueue(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := OpenAdminClient(ctx, path, Options{Now: func() time.Time { return now }})
+	second, err := openAdminClientForTest(ctx, path, Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1980,4 +1980,26 @@ func TestOwnerRecoveryRetiresLegacyBranchRestartCancellation(t *testing.T) {
 	if err != nil || current.Status != model.RunRunning || current.SupersededBy != "" {
 		t.Fatalf("legacy recovery = %#v %v", current, err)
 	}
+}
+
+// openAdminClientForTest creates a genesis database when path is missing, as
+// a running server would have, then opens it as an admin client. The
+// production opener refuses a missing database.
+func openAdminClientForTest(ctx context.Context, path string, opts Options) (*Store, error) {
+	base, _, _ := strings.Cut(path, "?")
+	if _, err := os.Stat(base); errors.Is(err, os.ErrNotExist) {
+		if base == path {
+			// The genesis handle is the same opener the admin client uses.
+			return CreateGenesis(ctx, path, opts)
+		}
+		// CreateGenesis takes no DSN query; create the file, then reopen.
+		created, err := CreateGenesis(ctx, base, opts)
+		if err != nil {
+			return nil, err
+		}
+		if err := created.Close(); err != nil {
+			return nil, err
+		}
+	}
+	return OpenAdminClient(ctx, path, opts)
 }

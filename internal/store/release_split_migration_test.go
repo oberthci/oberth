@@ -47,7 +47,7 @@ func TestReleaseSplitUpgradeFromV39AndV40(t *testing.T) {
 			t.Run(fmt.Sprintf("v%d/%s", version, name), func(t *testing.T) {
 				now := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
 				path := filepath.Join(t.TempDir(), "release.sqlite")
-				s, err := OpenAdminClient(t.Context(), path, Options{Now: func() time.Time { return now }})
+				s, err := openAdminClientForTest(t.Context(), path, Options{Now: func() time.Time { return now }})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -164,7 +164,7 @@ func TestReleaseSplitRejectsInvalidV40(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "invalid-v40.sqlite")
-			s, err := OpenAdminClient(t.Context(), path, Options{})
+			s, err := openAdminClientForTest(t.Context(), path, Options{})
 			if err != nil {
 				t.Fatal(err)
 			}

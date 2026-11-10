@@ -125,7 +125,7 @@ func TestEvidenceRemovalDoesNotBlockSchedulerWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writer, err := OpenAdminClient(ctx, path, Options{BusyTimeout: 100 * time.Millisecond})
+	writer, err := openAdminClientForTest(ctx, path, Options{BusyTimeout: 100 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}

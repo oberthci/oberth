@@ -11,6 +11,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 // TestPerUpstreamNativeSSHEnvironmentUsesProjectedKeyFiles pins the serve-time
@@ -38,7 +39,7 @@ func TestPerUpstreamNativeSSHEnvironmentUsesProjectedKeyFiles(t *testing.T) {
 		}
 	}
 	databasePath := filepath.Join(directory, "oberth.sqlite")
-	database, err := store.OpenAdminClient(ctx, databasePath, store.Options{})
+	database, err := storetest.OpenAdminClient(ctx, databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +103,7 @@ func TestPerUpstreamNativeSSHEnvironmentFallsBackToLegacySingleKey(t *testing.T)
 	sharedKey := filepath.Join(directory, "id_ed25519")
 	knownHosts := filepath.Join(directory, "known_hosts")
 	databasePath := filepath.Join(directory, "oberth.sqlite")
-	database, err := store.OpenAdminClient(ctx, databasePath, store.Options{})
+	database, err := storetest.OpenAdminClient(ctx, databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

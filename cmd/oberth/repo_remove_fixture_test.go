@@ -7,13 +7,14 @@ import (
 	"github.com/oberthci/oberth/internal/app"
 	"github.com/oberthci/oberth/internal/gitcache"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func removeTestRepository(ctx context.Context, path, root, input string) (store.RemovedRepository, error) {
 	if root == "/data/git" {
 		root = filepath.Join(filepath.Dir(path), "git")
 	}
-	database, err := store.OpenAdminClient(ctx, path, store.Options{})
+	database, err := storetest.OpenAdminClient(ctx, path, store.Options{})
 	if err != nil {
 		return store.RemovedRepository{}, err
 	}

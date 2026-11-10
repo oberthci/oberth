@@ -300,8 +300,10 @@ func (service *API) prepareRunWait(ctx context.Context, raw json.RawMessage) (fu
 		observation := runWaitObservation{run: current, holds: []model.AssistHold{}}
 		if current.AssistRequested && current.Status == model.RunRunning && current.WorkflowName != "" && service.assistHolds != nil && service.assistHolds.AssistPolicy().Enabled {
 			if holds, err := service.assistHolds.ListAssistHolds(ctx, current.WorkflowName); err == nil {
+				activities, ttl := assistActivities(current.Assist), service.assistHolds.AssistPolicy().HoldTTL
 				for _, hold := range holds {
 					if !assistReleased(current.Assist, hold.Pod) {
+						withAbandonAt(&hold, activities, ttl)
 						observation.holds = append(observation.holds, hold)
 					}
 				}

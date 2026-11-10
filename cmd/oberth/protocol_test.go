@@ -7,6 +7,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestCommandProtocolConfiguresStartupAndAdministrativeReads(t *testing.T) {
@@ -36,7 +37,7 @@ func TestCommandProtocolConfiguresStartupAndAdministrativeReads(t *testing.T) {
 		t.Fatal(err)
 	}
 	db.Close()
-	admin, err := store.OpenAdminClient(ctx, path, configuredStoreOptions(ctx))
+	admin, err := storetest.OpenAdminClient(ctx, path, configuredStoreOptions(ctx))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -116,7 +116,7 @@ func TestConfiguredProtocolRejectsMismatchedConcurrentWriter(t *testing.T) {
 	defer first.Close()
 	alternate := DefaultProtocolConfig()
 	alternate.AuditDomain = "different-audit-v1"
-	second, err := OpenAdminClient(ctx, path, Options{Protocol: alternate})
+	second, err := openAdminClientForTest(ctx, path, Options{Protocol: alternate})
 	if err != nil {
 		t.Fatal(err)
 	}

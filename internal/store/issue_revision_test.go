@@ -82,7 +82,7 @@ func TestIssueRevisionMismatchRollsBackLockAndAudit(t *testing.T) {
 
 func TestIssueRevisionMigrationPreservesPopulatedV38AndRestarts(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "revision.sqlite")
-	s, err := OpenAdminClient(t.Context(), path, Options{})
+	s, err := openAdminClientForTest(t.Context(), path, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestIssueRevisionMigrationPreservesPopulatedV38AndRestarts(t *testing.T) {
 	if err = s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err = OpenAdminClient(t.Context(), path, Options{})
+	s, err = openAdminClientForTest(t.Context(), path, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestIssueRevisionMigrationPreservesPopulatedV38AndRestarts(t *testing.T) {
 	if err = s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err = OpenAdminClient(t.Context(), path, Options{})
+	s, err = openAdminClientForTest(t.Context(), path, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

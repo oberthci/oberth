@@ -18,6 +18,9 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/oberthci/oberth/internal/api"
+	"github.com/oberthci/oberth/internal/argojob"
 )
 
 func TestMCPDeadlineDerivesToolTimeoutAndHonorsOverride(t *testing.T) {
@@ -36,6 +39,12 @@ func TestMCPDeadlineDerivesToolTimeoutAndHonorsOverride(t *testing.T) {
 		{"zero wait", "wait", `{"timeout":0}`, 0, 630 * time.Second},
 		{"default promotion", "promote_status", `{}`, 0, 630 * time.Second},
 		{"generic tool", "custom_poll", `{"timeout":120}`, 0, 150 * time.Second},
+		{"generic tool seconds", "custom_poll", `{"timeout_s":120}`, 0, 150 * time.Second},
+		{"run wait default", "run_wait", `{"id":"f0ac7a40"}`, 0, 630 * time.Second},
+		{"run wait timeout_s", "run_wait", `{"id":"f0ac7a40","timeout_s":75}`, 0, 105 * time.Second},
+		{"run wait foreign spelling ignored", "run_wait", `{"id":"f0ac7a40","timeout":1}`, 0, 630 * time.Second},
+		{"hold exec default", "run_hold_exec", `{"id":"f0ac7a40","argv":["true"]}`, 0, 930 * time.Second},
+		{"hold exec bound", "run_hold_exec", `{"id":"f0ac7a40","argv":["true"],"timeout_seconds":50}`, 0, 80 * time.Second},
 		{"override shorter", "wait", `{"timeout":600}`, time.Second, time.Second},
 		{"override longer", "status", `{}`, 2 * time.Minute, 2 * time.Minute},
 	} {
@@ -48,6 +57,26 @@ func TestMCPDeadlineDerivesToolTimeoutAndHonorsOverride(t *testing.T) {
 	}
 	if _, _, err := mcpDeadline(mcpFlagResult{}, toolsCallParams{Name: "wait", Arguments: json.RawMessage(`{"timeout":9223372036854775807}`)}); !errors.Is(err, errUsage) {
 		t.Fatalf("unrepresentable deadline accepted: %v", err)
+	}
+}
+
+// Every tool whose schema carries a timeout argument gets a client deadline
+// at least its server bound plus the margin; nothing is hand-listed.
+func TestMCPDeadlineCoversEveryBlockingTool(t *testing.T) {
+	timeouts := api.ToolTimeouts()
+	for _, name := range []string{"wait", "promote_status", "run_wait", "run_hold_exec"} {
+		if timeouts[name].Default <= 0 {
+			t.Fatalf("%s has no derived bound: %+v", name, timeouts[name])
+		}
+	}
+	if timeouts["run_hold_exec"].Default != argojob.MaxAssistExecTimeout {
+		t.Fatalf("run_hold_exec bound %s, want argojob.MaxAssistExecTimeout %s", timeouts["run_hold_exec"].Default, argojob.MaxAssistExecTimeout)
+	}
+	for name, timeout := range timeouts {
+		limit, toolTimeout, err := mcpDeadline(mcpFlagResult{}, toolsCallParams{Name: name, Arguments: json.RawMessage(`{}`)})
+		if err != nil || toolTimeout != timeout.Default || limit < timeout.Default+mcpDeadlineMargin {
+			t.Errorf("%s: deadline %s tool %s err %v; want at least %s", name, limit, toolTimeout, err, timeout.Default+mcpDeadlineMargin)
+		}
 	}
 }
 
@@ -70,6 +99,21 @@ func TestMCPTimeoutFlag(t *testing.T) {
 // Exercise the actual CLI HTTP/TLS/SSE path beyond both former 60-second
 // limits. In-memory connections let synctest advance the full minute virtually.
 func TestMCPCallStreamsHeartbeatsBeyondSixtySeconds(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		tool     string
+		args     string
+		duration time.Duration
+	}{
+		{"generic timeout", "custom_poll", `{"timeout":300}`, 61 * time.Second},
+		// run_wait spells its bound timeout_s; the CLI once cut it at 60 s.
+		{"run_wait timeout_s", "run_wait", `{"id":"f0ac7a40","timeout_s":75}`, 70 * time.Second},
+	} {
+		t.Run(test.name, func(t *testing.T) { testMCPCallStreamsHeartbeats(t, test.tool, test.args, test.duration) })
+	}
+}
+
+func testMCPCallStreamsHeartbeats(t *testing.T, tool, args string, duration time.Duration) {
 	synctest.Test(t, func(t *testing.T) {
 		var heartbeats atomic.Int64
 		server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -79,7 +123,7 @@ func TestMCPCallStreamsHeartbeatsBeyondSixtySeconds(t *testing.T) {
 				return
 			}
 			w.Header().Set("Content-Type", mcpContentTypeSSE)
-			finished := time.NewTimer(61 * time.Second)
+			finished := time.NewTimer(duration)
 			defer finished.Stop()
 			ticker := time.NewTicker(time.Second)
 			defer ticker.Stop()
@@ -124,12 +168,12 @@ func TestMCPCallStreamsHeartbeatsBeyondSixtySeconds(t *testing.T) {
 		t.Setenv("OBERTH_TOKEN", "heartbeat-test-token")
 		var output strings.Builder
 		started := time.Now()
-		err := runMCPCall(t.Context(), []string{"custom_poll", `{"timeout":300}`, "--url", server.URL}, &output)
+		err := runMCPCall(t.Context(), []string{tool, args, "--url", server.URL}, &output)
 		if err != nil || output.String() != "finished\n" {
 			t.Fatalf("streaming call = %q, %v", output.String(), err)
 		}
-		if elapsed := time.Since(started); elapsed != 61*time.Second {
-			t.Fatalf("stream duration = %s, want 61s", elapsed)
+		if elapsed := time.Since(started); elapsed != duration {
+			t.Fatalf("stream duration = %s, want %s", elapsed, duration)
 		}
 		if heartbeats.Load() < 60 {
 			t.Fatal("long-running tool did not stream heartbeats")

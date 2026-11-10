@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"github.com/oberthci/oberth/internal/holdfs"
+	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/pkg/argoworkflow"
 	"github.com/oberthci/oberth/pkg/pipeline"
 )
@@ -112,7 +113,7 @@ const assistPatchCondition = "asInt(retries) > 0"
 // many hold TTLs after held_since. The held Pod's deadline and the workflow
 // deadline therefore grow by AssistHoldMaxAgeFactor TTLs, so a hold
 // extended to the cap still has the step's whole budget after release.
-const AssistHoldMaxAgeFactor = 2
+const AssistHoldMaxAgeFactor = model.AssistHoldMaxAgeFactor
 
 // assistHoldAllowance is the time a held attempt may spend parked: the
 // bound the sweep enforces on a worked hold, added to the Pod and workflow

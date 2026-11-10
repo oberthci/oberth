@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/oberthci/oberth/internal/recordjson"
 	"github.com/oberthci/oberth/internal/service"
 )
 
@@ -101,7 +102,7 @@ func runAuditList(ctx context.Context, arguments []string, output io.Writer) err
 		return err
 	}
 	var response service.AuditListResponse
-	if err := json.Unmarshal(raw, &response); err != nil {
+	if err := recordjson.Unmarshal(raw, &response); err != nil {
 		return fmt.Errorf("decode audit_list: %w", err)
 	}
 	if err := writeAuditEntries(output, response.Entries, true); err != nil {
@@ -123,7 +124,7 @@ func fetchAudit(ctx context.Context, remote auditCaller, arguments map[string]an
 		return service.AuditListResponse{}, err
 	}
 	var response service.AuditListResponse
-	if err := json.Unmarshal(raw, &response); err != nil {
+	if err := recordjson.Unmarshal(raw, &response); err != nil {
 		return service.AuditListResponse{}, fmt.Errorf("decode audit_list: %w", err)
 	}
 	return response, nil
