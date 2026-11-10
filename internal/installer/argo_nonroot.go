@@ -19,31 +19,75 @@ import (
 
 // nonrootArgoValues uses existing fields of the pinned upstream chart. The
 // immutable ConfigMap is part of the same Helm release as the controller, so
-// ordinary Helm object ordering creates it before the Deployment.
-func nonrootArgoValues(namespace string) map[string]any {
+// ordinary Helm object ordering creates it before the Deployment. The
+// profile carries the controller's run limits: with configMap.create false
+// the chart never renders controller.parallelism itself (#1517).
+func nonrootArgoValues(namespace string, profile argoworkflow.NonrootProfile) map[string]any {
 	return map[string]any{
 		"controller": map[string]any{
-			"configMap": map[string]any{"create": false, "name": argoworkflow.NonrootProfileConfigMap},
+			"configMap": map[string]any{"create": false, "name": profile.ConfigMap},
 			"image":     map[string]any{"tag": strings.SplitN(argoworkflow.NonrootControllerImage, ":", 2)[1]},
 			"volumes": []any{map[string]any{"name": argoworkflow.NonrootProfileVolume, "configMap": map[string]any{
-				"name": argoworkflow.NonrootProfileConfigMap, "optional": false, "defaultMode": 0444,
+				"name": profile.ConfigMap, "optional": false, "defaultMode": 0444,
 				"items": []any{map[string]any{"key": "config", "path": "config"}},
 			}}},
 			"volumeMounts": []any{map[string]any{"name": argoworkflow.NonrootProfileVolume, "mountPath": argoworkflow.NonrootProfileMount, "readOnly": true}},
 		},
 		"executor":     map[string]any{"image": map[string]any{"tag": strings.SplitN(argoworkflow.NonrootExecutorImage, ":", 2)[1]}},
-		"extraObjects": nonrootProfileObjects(namespace),
+		"extraObjects": nonrootProfileObjects(namespace, profile),
 	}
+}
+
+// baseNonrootProfile is the built-in profile without controller limits.
+func baseNonrootProfile() argoworkflow.NonrootProfile {
+	profile, _ := argoworkflow.NewNonrootProfile(0, 0) // Zero limits are always valid.
+	return profile
+}
+
+// storedParallelism reads controller.<key> from helm get values output.
+func storedParallelism(values map[string]any, key string) int {
+	controller, _ := values["controller"].(map[string]any)
+	value, _ := controller[key].(float64)
+	if value < 0 || value > argoworkflow.MaxNonrootParallelism || value != math.Trunc(value) {
+		return 0
+	}
+	return int(value)
+}
+
+// effectiveNonrootProfile is the profile for this run's limits: a requested
+// flag wins, otherwise the stored release value, otherwise none.
+func effectiveNonrootProfile(cfg Config, stored map[string]any) (argoworkflow.NonrootProfile, error) {
+	parallelism, namespaced := storedParallelism(stored, "parallelism"), storedParallelism(stored, "namespaceParallelism")
+	if cfg.ArgoParallelism != nil {
+		parallelism = *cfg.ArgoParallelism
+	}
+	if cfg.ArgoNamespaceParallelism != nil {
+		namespaced = *cfg.ArgoNamespaceParallelism
+	}
+	return argoworkflow.NewNonrootProfile(parallelism, namespaced)
+}
+
+// nonrootProfile is the profile ArgoHelmArgs renders: the one the Argo
+// phase computed, or one from the requested limits alone (dry-run plans).
+func (cfg Config) nonrootProfile() argoworkflow.NonrootProfile {
+	if cfg.argoProfile != nil {
+		return *cfg.argoProfile
+	}
+	profile, err := effectiveNonrootProfile(cfg, nil)
+	if err != nil {
+		return baseNonrootProfile()
+	}
+	return profile
 }
 
 // nonrootProfileObjects is the profile's extraObjects list: the immutable
 // controller ConfigMap. The limits ConfigMap (argo_limits.go) shares the
 // list, so every writer of extraObjects starts from this.
-func nonrootProfileObjects(namespace string) []any {
+func nonrootProfileObjects(namespace string, profile argoworkflow.NonrootProfile) []any {
 	return []any{map[string]any{
 		"apiVersion": "v1", "kind": "ConfigMap",
-		"metadata":  map[string]any{"name": argoworkflow.NonrootProfileConfigMap, "namespace": namespace},
-		"immutable": true, "data": map[string]any{"config": argoworkflow.NonrootProfileConfig},
+		"metadata":  map[string]any{"name": profile.ConfigMap, "namespace": namespace},
+		"immutable": true, "data": map[string]any{"config": profile.Config},
 	}}
 }
 
@@ -52,6 +96,22 @@ func nonrootProfileObjects(namespace string) []any {
 // other customization instead of silently overwriting
 // archive, plugin, controller or environment settings under --reuse-values.
 func validateNonrootReuse(values map[string]any, namespace string) error {
+	// The stored profile is the canonical one for the stored limits, or the
+	// built-in one an earlier release wrote before the limits were set.
+	candidates := []argoworkflow.NonrootProfile{baseNonrootProfile()}
+	if stored, err := argoworkflow.NewNonrootProfile(storedParallelism(values, "parallelism"), storedParallelism(values, "namespaceParallelism")); err == nil && stored.ConfigMap != candidates[0].ConfigMap {
+		candidates = append([]argoworkflow.NonrootProfile{stored}, candidates...)
+	}
+	var err error
+	for _, profile := range candidates {
+		if err = validateNonrootReuseFor(values, namespace, profile); err == nil {
+			return nil
+		}
+	}
+	return err
+}
+
+func validateNonrootReuseFor(values map[string]any, namespace string, nonroot argoworkflow.NonrootProfile) error {
 	allowed := map[string]any{
 		"singleNamespace": true, "createAggregateRoles": false,
 		"server":   map[string]any{"enabled": false},
@@ -116,7 +176,7 @@ func validateNonrootReuse(values map[string]any, namespace string) error {
 			values["extraObjects"] = rest
 		}
 	}
-	profile := nonrootArgoValues(namespace)
+	profile := nonrootArgoValues(namespace, nonroot)
 	for key, value := range profile {
 		if key == "controller" {
 			for child, v := range value.(map[string]any) {
@@ -156,30 +216,34 @@ func validateNonrootReuse(values map[string]any, namespace string) error {
 	return nil
 }
 
-func prepareNonrootArgoValues(ctx context.Context, cfg Config, deps Deps, exists bool, installedVersion string) (string, func(), error) {
+func prepareNonrootArgoValues(ctx context.Context, cfg Config, deps Deps, exists bool, installedVersion string) (string, *argoworkflow.NonrootProfile, func(), error) {
 	noop := func() {}
 	if cfg.ArgoControllerProfile == "" {
-		return "", noop, nil
+		return "", nil, noop, nil
 	}
 	if cfg.ArgoControllerProfile != argoworkflow.NonrootStaticProfile ||
 		(cfg.ArgoChartVersion != "" && cfg.ArgoChartVersion != DefaultArgoChartVersion) ||
 		(exists && installedVersion != DefaultArgoChartVersion) || cfg.SkipArgo {
-		return "", noop, errors.New("nonroot profile requires the managed exact Argo chart1.0.24")
+		return "", nil, noop, errors.New("nonroot profile requires the managed exact Argo chart1.0.24")
 	}
 	var stored map[string]any
 	if exists {
 		encoded, err := deps.RunHelm(ctx, []string{"get", "values", "argo-workflows", "-n", cfg.ArgoNamespace, "-o", "json"})
 		if err != nil {
-			return "", noop, errors.New("cannot inspect existing Argo profile settings")
+			return "", nil, noop, errors.New("cannot inspect existing Argo profile settings")
 		}
 		if err := json.Unmarshal(encoded, &stored); err != nil {
-			return "", noop, errors.New("cannot decode existing Argo profile settings")
+			return "", nil, noop, errors.New("cannot decode existing Argo profile settings")
 		}
 		if err := validateNonrootReuse(stored, cfg.ArgoNamespace); err != nil {
-			return "", noop, err
+			return "", nil, noop, err
 		}
 	}
-	profile := nonrootArgoValues(cfg.ArgoNamespace)
+	nonroot, err := effectiveNonrootProfile(cfg, stored)
+	if err != nil {
+		return "", nil, noop, err
+	}
+	profile := nonrootArgoValues(cfg.ArgoNamespace, nonroot)
 	if cfg.ArgoSyncLimits == nil {
 		// This values file replaces the release's extraObjects. Keep the
 		// limits ConfigMap an earlier run wrote there (#1517): a list without
@@ -191,21 +255,44 @@ func prepareNonrootArgoValues(ctx context.Context, cfg Config, deps Deps, exists
 	}
 	encoded, err := json.Marshal(profile)
 	if err != nil {
-		return "", noop, fmt.Errorf("encode built-in Argo profile: %w", err)
+		return "", nil, noop, fmt.Errorf("encode built-in Argo profile: %w", err)
 	}
 	file, err := os.CreateTemp("", "oberth-argo-profile-*.json")
 	if err != nil {
-		return "", noop, err
+		return "", nil, noop, err
 	}
 	cleanup := func() { _ = os.Remove(file.Name()) }
 	if _, err := file.Write(encoded); err != nil {
 		_ = file.Close()
 		cleanup()
-		return "", noop, err
+		return "", nil, noop, err
 	}
 	if err := file.Close(); err != nil {
 		cleanup()
-		return "", noop, err
+		return "", nil, noop, err
 	}
-	return file.Name(), cleanup, nil
+	return file.Name(), &nonroot, cleanup, nil
+}
+
+// storedNonrootRelease reports whether the existing argo-workflows release
+// runs a nonroot controller profile ConfigMap.
+func storedNonrootRelease(ctx context.Context, deps Deps, namespace string) (bool, error) {
+	encoded, err := deps.RunHelm(ctx, []string{"get", "values", "argo-workflows", "-n", namespace, "-o", "json"})
+	if err != nil {
+		return false, errors.New("cannot inspect existing Argo profile settings")
+	}
+	var stored struct {
+		Controller struct {
+			ConfigMap struct {
+				Name string `json:"name"`
+			} `json:"configMap"`
+		} `json:"controller"`
+	}
+	if len(bytes.TrimSpace(encoded)) == 0 || string(bytes.TrimSpace(encoded)) == "null" {
+		return false, nil
+	}
+	if err := json.Unmarshal(encoded, &stored); err != nil {
+		return false, errors.New("cannot decode existing Argo profile settings")
+	}
+	return argoworkflow.ValidNonrootProfileConfigMap(stored.Controller.ConfigMap.Name), nil
 }

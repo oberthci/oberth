@@ -65,7 +65,7 @@ func TestNonrootControllerRequiredConfigCausality(t *testing.T) {
 	} {
 		pod, cm := nonrootVerifierObjects()
 		mutate(pod, cm)
-		if _, err := verifyNonrootController(t.Context(), fake.NewClientset(pod, cm), testNamespace, testRequest(pipeline.TriggerCI, nonrootTestDocument)); err != nil {
+		if _, err := verifyNonrootController(t.Context(), fake.NewClientset(pod, cm), testNamespace, "", testRequest(pipeline.TriggerCI, nonrootTestDocument)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -101,7 +101,7 @@ func TestNonrootControllerRequiredConfigCausality(t *testing.T) {
 			pod, cm := nonrootVerifierObjects()
 			pod.Status.ContainerStatuses[0].State.Running.StartedAt = cm.CreationTimestamp
 			mutate(pod)
-			if _, err := verifyNonrootController(t.Context(), fake.NewClientset(pod, cm), testNamespace, testRequest(pipeline.TriggerCI, nonrootTestDocument)); err == nil {
+			if _, err := verifyNonrootController(t.Context(), fake.NewClientset(pod, cm), testNamespace, "", testRequest(pipeline.TriggerCI, nonrootTestDocument)); err == nil {
 				t.Fatal("uncausal or injected profile accepted")
 			}
 		})
@@ -151,7 +151,7 @@ func TestNonrootProfileMatchesActualUpstreamHelmRender(t *testing.T) {
 	pod.Spec.Containers[0].VolumeMounts = append(pod.Spec.Containers[0].VolumeMounts, accountMount)
 	fixture.ConfigMap.ObjectMeta = meta.ObjectMeta
 	pod.Status.ContainerStatuses[0].State.Running.StartedAt = meta.CreationTimestamp
-	if _, err := verifyNonrootController(t.Context(), fake.NewClientset(pod, &fixture.ConfigMap), testNamespace, testRequest(pipeline.TriggerCI, nonrootTestDocument)); err != nil {
+	if _, err := verifyNonrootController(t.Context(), fake.NewClientset(pod, &fixture.ConfigMap), testNamespace, "", testRequest(pipeline.TriggerCI, nonrootTestDocument)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -194,7 +194,7 @@ func TestNonrootVerifierRejectsUnsupportedControllerState(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			pod, cm := nonrootVerifierObjects()
 			mutate(pod, cm)
-			_, err := verifyNonrootController(t.Context(), fake.NewClientset(pod, cm), testNamespace, testRequest(pipeline.TriggerCI, nonrootTestDocument))
+			_, err := verifyNonrootController(t.Context(), fake.NewClientset(pod, cm), testNamespace, "", testRequest(pipeline.TriggerCI, nonrootTestDocument))
 			if err == nil {
 				t.Fatal("unsupported controller accepted")
 			}
@@ -208,7 +208,7 @@ func TestNonrootVerifierRejectsUnsupportedControllerState(t *testing.T) {
 		other := pod.DeepCopy()
 		other.Name = "second"
 		other.UID = "second"
-		if _, err := verifyNonrootController(t.Context(), fake.NewClientset(pod, other, cm), testNamespace, testRequest(pipeline.TriggerCI, nonrootTestDocument)); err == nil {
+		if _, err := verifyNonrootController(t.Context(), fake.NewClientset(pod, other, cm), testNamespace, "", testRequest(pipeline.TriggerCI, nonrootTestDocument)); err == nil {
 			t.Fatal("ambiguous controllers accepted")
 		}
 	})
@@ -218,7 +218,7 @@ func TestNonrootVerifierRejectsUnsupportedControllerState(t *testing.T) {
 		client.PrependReactor("get", "configmaps", func(ktesting.Action) (bool, runtime.Object, error) {
 			return true, nil, errors.New("do-not-serialize-this-value")
 		})
-		_, err := verifyNonrootController(t.Context(), client, testNamespace, testRequest(pipeline.TriggerCI, nonrootTestDocument))
+		_, err := verifyNonrootController(t.Context(), client, testNamespace, "", testRequest(pipeline.TriggerCI, nonrootTestDocument))
 		if err == nil || strings.Contains(err.Error(), "do-not-serialize") {
 			t.Fatalf("unsafe read error: %v", err)
 		}

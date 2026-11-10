@@ -63,7 +63,7 @@ func TestControllerEvictedHistoryReadyReplacementRestoresProof(t *testing.T) {
 				objects = append(objects, previous)
 			}
 			client := fake.NewClientset(objects...)
-			proof, err := verifyNonrootController(t.Context(), client, testNamespace, testRequest(pipeline.TriggerCI, nonrootTestDocument))
+			proof, err := verifyNonrootController(t.Context(), client, testNamespace, "", testRequest(pipeline.TriggerCI, nonrootTestDocument))
 			if err != nil || proof == nil || proof.podUID != string(live.UID) {
 				t.Fatal("verified replacement remained blocked or history supplied authority", proof, err)
 			}
@@ -131,7 +131,7 @@ func TestControllerEvictedHistoryRejectsAmbiguousReplacement(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			live, old, cm, rs := evictedControllerFixture()
 			change(live, old, cm, rs)
-			if proof, err := verifyNonrootController(t.Context(), fake.NewClientset(live, old, cm, rs), testNamespace, testRequest(pipeline.TriggerCI, nonrootTestDocument)); err == nil || proof != nil {
+			if proof, err := verifyNonrootController(t.Context(), fake.NewClientset(live, old, cm, rs), testNamespace, "", testRequest(pipeline.TriggerCI, nonrootTestDocument)); err == nil || proof != nil {
 				t.Fatal("ambiguous replacement authorized submission", proof, err)
 			}
 		})
@@ -160,7 +160,7 @@ func TestControllerEvictedHistoryPredecessorMustBeDrainedSameDeployment(t *testi
 			case "missing-deployment":
 				previous.OwnerReferences = nil
 			}
-			if proof, err := verifyNonrootController(t.Context(), fake.NewClientset(live, old, cm, rs, previous), testNamespace, testRequest(pipeline.TriggerCI, nonrootTestDocument)); err == nil || proof != nil {
+			if proof, err := verifyNonrootController(t.Context(), fake.NewClientset(live, old, cm, rs, previous), testNamespace, "", testRequest(pipeline.TriggerCI, nonrootTestDocument)); err == nil || proof != nil {
 				t.Fatal("foreign/live predecessor ignored", proof, err)
 			}
 		})
@@ -178,7 +178,7 @@ func TestControllerEvictedHistoryIncompleteListAndRSReadFailClosed(t *testing.T)
 					return true, &corev1.PodList{ListMeta: metav1.ListMeta{Continue: "next"}, Items: []corev1.Pod{*live, *old}}, nil
 				})
 			}
-			proof, err := verifyNonrootController(t.Context(), client, testNamespace, testRequest(pipeline.TriggerCI, nonrootTestDocument))
+			proof, err := verifyNonrootController(t.Context(), client, testNamespace, "", testRequest(pipeline.TriggerCI, nonrootTestDocument))
 			if proof != nil || err == nil {
 				t.Fatal("missing observation authorized admission", proof, err)
 			}
@@ -243,7 +243,7 @@ func TestControllerNodeShutdownRequiresReadyReplacement(t *testing.T) {
 					old.Status.Message = "Pod was terminated in response to imminent node shutdown."
 				}
 				rs.Status.ReadyReplicas = ready
-				proof, err := verifyNonrootController(t.Context(), fake.NewClientset(live, old, cm, rs), testNamespace, testRequest(pipeline.TriggerCI, nonrootTestDocument))
+				proof, err := verifyNonrootController(t.Context(), fake.NewClientset(live, old, cm, rs), testNamespace, "", testRequest(pipeline.TriggerCI, nonrootTestDocument))
 				if ready == 0 && (err == nil || proof != nil) {
 					t.Fatal("shutdown bypassed Ready replacement proof", proof, err)
 				}
@@ -261,7 +261,7 @@ func TestControllerTerminatedHistoryNeedsShutdownMessage(t *testing.T) {
 			live, old, cm, rs := evictedControllerFixture()
 			old.Status.Reason = "Terminated"
 			old.Status.Message = message
-			proof, err := verifyNonrootController(t.Context(), fake.NewClientset(live, old, cm, rs), testNamespace, testRequest(pipeline.TriggerCI, nonrootTestDocument))
+			proof, err := verifyNonrootController(t.Context(), fake.NewClientset(live, old, cm, rs), testNamespace, "", testRequest(pipeline.TriggerCI, nonrootTestDocument))
 			if err == nil || proof != nil {
 				t.Fatal("generic Terminated Pod bypassed history verification", proof, err)
 			}

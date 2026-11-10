@@ -31,11 +31,13 @@ type upgradeControllerProfile struct {
 	valuesDigest [32]byte
 	chartPath    string
 	chartDigest  string
+	// profile is the canonical profile the reused limits select (#1517).
+	profile argoworkflow.NonrootProfile
 }
 
 func checkControllerProfileOverrides(cfg UpgradeConfig) error {
 	refused := func(key string) bool {
-		for _, fixed := range []string{"argo.namespace", "argo.controllerProfile"} {
+		for _, fixed := range []string{"argo.namespace", "argo.controllerProfile", "argo.controllerProfileConfigMap"} {
 			if key == fixed || strings.HasPrefix(fixed, key+".") || strings.HasPrefix(key, fixed+".") {
 				return true
 			}
@@ -87,6 +89,16 @@ func installedPipelineNamespace(ctx context.Context, cfg UpgradeConfig, deps Dep
 	return values.Argo.Namespace, nil
 }
 
+// pinUpgradeControllerProfile prepares the transition and records its
+// profile ConfigMap for the Oberth chart (#1517).
+func pinUpgradeControllerProfile(ctx context.Context, cfg *UpgradeConfig, deps Deps) (*upgradeControllerProfile, func(), error) {
+	profile, cleanup, err := prepareUpgradeControllerProfile(ctx, *cfg, deps)
+	if err == nil && profile != nil {
+		cfg.argoProfileConfigMap = profile.profile.ConfigMap
+	}
+	return profile, cleanup, err
+}
+
 func prepareUpgradeControllerProfile(ctx context.Context, cfg UpgradeConfig, deps Deps) (*upgradeControllerProfile, func(), error) {
 	noop := func() {}
 	if cfg.ArgoControllerProfile == "" {
@@ -111,7 +123,7 @@ func prepareUpgradeControllerProfile(ctx context.Context, cfg UpgradeConfig, dep
 	if !exists || release.Chart != "argo-workflows-"+DefaultArgoChartVersion || (release.Status != "deployed" && release.Status != "failed") || helmRevisionLabel(release.Revision) == "" {
 		return nil, noop, errors.New("controller transition requires existing managed Argo chart1.0.24 in deployed or failed state")
 	}
-	file, cleanup, err := prepareNonrootArgoValues(ctx, Config{Namespace: cfg.Namespace, ArgoNamespace: namespace, ArgoControllerProfile: cfg.ArgoControllerProfile}, deps, true, DefaultArgoChartVersion)
+	file, profile, cleanup, err := prepareNonrootArgoValues(ctx, Config{Namespace: cfg.Namespace, ArgoNamespace: namespace, ArgoControllerProfile: cfg.ArgoControllerProfile}, deps, true, DefaultArgoChartVersion)
 	if err != nil {
 		return nil, noop, err
 	}
@@ -125,7 +137,7 @@ func prepareUpgradeControllerProfile(ctx context.Context, cfg UpgradeConfig, dep
 		cleanup()
 		return nil, noop, errors.New("changed or unsupported Argo values")
 	}
-	return &upgradeControllerProfile{namespace: namespace, status: release.Status, revision: helmRevisionLabel(release.Revision), valuesFile: file, valuesDigest: sha256.Sum256(raw), chartDigest: "7b1d540095ba32bb8c914432b554c64809b47a6f737b1448273d3a4740be3d50"}, cleanup, nil
+	return &upgradeControllerProfile{namespace: namespace, status: release.Status, revision: helmRevisionLabel(release.Revision), valuesFile: file, valuesDigest: sha256.Sum256(raw), chartDigest: "7b1d540095ba32bb8c914432b554c64809b47a6f737b1448273d3a4740be3d50", profile: *profile}, cleanup, nil
 }
 
 func (p *upgradeControllerProfile) args(timeout time.Duration) []string {
@@ -136,9 +148,9 @@ func (p *upgradeControllerProfile) describe(w io.Writer, timeout time.Duration) 
 	preview := *p
 	preview.chartPath = "<sha256:" + p.chartDigest + ">"
 	_, _ = fmt.Fprintf(w, "  helm %s\n", strings.Join(preview.args(timeout), " "))
-	overlay, _ := json.Marshal(nonrootArgoValues(p.namespace))
+	overlay, _ := json.Marshal(nonrootArgoValues(p.namespace, p.profile))
 	_, _ = fmt.Fprintf(w, "  Built-in public overlay: %s\n", overlay)
-	_, _ = fmt.Fprintf(w, "Controller transition: existing Argo chart%s in namespace %s; preserve reused values, apply only built-in %s (config SHA256 %s; controller %s; executor %s), wait and verify exact live profile, then enable Oberth admission. No automatic rollback.\n", DefaultArgoChartVersion, p.namespace, argoworkflow.NonrootStaticProfile, argoworkflow.NonrootProfileConfigSHA256, argoworkflow.NonrootControllerImage, argoworkflow.NonrootExecutorImage)
+	_, _ = fmt.Fprintf(w, "Controller transition: existing Argo chart%s in namespace %s; preserve reused values, apply only built-in %s (config SHA256 %s; controller %s; executor %s), wait and verify exact live profile, then enable Oberth admission. No automatic rollback.\n", DefaultArgoChartVersion, p.namespace, argoworkflow.NonrootStaticProfile, p.profile.SHA256, argoworkflow.NonrootControllerImage, argoworkflow.NonrootExecutorImage)
 }
 
 func (p *upgradeControllerProfile) verifySnapshot(ctx context.Context, deps Deps) error {
@@ -186,7 +198,7 @@ func (p *upgradeControllerProfile) apply(ctx context.Context, cfg UpgradeConfig,
 	deadline, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
 	for {
-		if argojob.VerifyNonrootControllerProfile(deadline, deps.KubeClient, p.namespace) == nil {
+		if argojob.VerifyNonrootControllerProfile(deadline, deps.KubeClient, p.namespace, p.profile.ConfigMap) == nil {
 			return nil
 		}
 		select {
@@ -198,7 +210,7 @@ func (p *upgradeControllerProfile) apply(ctx context.Context, cfg UpgradeConfig,
 }
 
 func (p *upgradeControllerProfile) verifyFinal(ctx context.Context, cfg UpgradeConfig, deps Deps) error {
-	if err := argojob.VerifyNonrootControllerProfile(ctx, deps.KubeClient, p.namespace); err != nil {
+	if err := argojob.VerifyNonrootControllerProfile(ctx, deps.KubeClient, p.namespace, p.profile.ConfigMap); err != nil {
 		return errors.New("controller profile changed after Oberth upgrade")
 	}
 	namespace, err := installedPipelineNamespace(ctx, cfg, deps)
@@ -208,10 +220,12 @@ func (p *upgradeControllerProfile) verifyFinal(ctx context.Context, cfg UpgradeC
 	raw, readErr := deps.RunHelm(ctx, []string{"get", "values", "oberth", "-n", cfg.Namespace, "--all", "-o", "json"})
 	var values struct {
 		Argo struct {
-			Profile string `json:"controllerProfile"`
+			Profile          string `json:"controllerProfile"`
+			ProfileConfigMap string `json:"controllerProfileConfigMap"`
 		} `json:"argo"`
 	}
-	if readErr != nil || json.Unmarshal(raw, &values) != nil || values.Argo.Profile != argoworkflow.NonrootStaticProfile {
+	if readErr != nil || json.Unmarshal(raw, &values) != nil || values.Argo.Profile != argoworkflow.NonrootStaticProfile ||
+		(values.Argo.ProfileConfigMap != p.profile.ConfigMap && (values.Argo.ProfileConfigMap != "" || p.profile.ConfigMap != argoworkflow.NonrootProfileConfigMap)) {
 		return errors.New("oberth controller profile values readback refused")
 	}
 	deployments, err := deps.KubeClient.AppsV1().Deployments(cfg.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/instance=oberth"})

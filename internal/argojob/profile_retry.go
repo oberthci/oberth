@@ -98,7 +98,7 @@ func (controller *Controller) verifyNonrootWithRetry(ctx context.Context, reques
 			continue
 		}
 		attemptCtx, cancel := context.WithTimeout(ctx, profileReadTimeout)
-		proof, err := verifyNonrootController(attemptCtx, controller.kube, controller.config.Namespace, request)
+		proof, err := verifyNonrootController(attemptCtx, controller.kube, controller.config.Namespace, controller.config.NonrootProfileConfigMap, request)
 		cancel()
 		if ctx.Err() != nil {
 			controller.profileVerifyMu.Unlock()

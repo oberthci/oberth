@@ -376,6 +376,12 @@ spec:
             {{- fail "argo.controllerProfile must be empty or nonroot-static-v1" }}
             {{- end }}
             - --argo-controller-profile={{ .Values.argo.controllerProfile }}
+            {{- with .Values.argo.controllerProfileConfigMap }}
+            {{- if not (regexMatch "^oberth-argo-nr-[0-9a-f]{48}$" .) }}
+            {{- fail "argo.controllerProfileConfigMap must be a nonroot profile ConfigMap name (oberth-argo-nr-<48 hex>)" }}
+            {{- end }}
+            - --argo-controller-profile-configmap={{ . }}
+            {{- end }}
             {{- end }}
             - --argo-pipeline-serviceaccount={{ .Values.argo.pipelineServiceAccount | default .Values.argo.ciServiceAccount | default "oberth-argo-pipeline" }}
             - --argo-credentialed-serviceaccount={{ .Values.argo.credentialedServiceAccount | default "oberth-argo-credentialed" }}

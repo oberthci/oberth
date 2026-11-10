@@ -30,6 +30,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+
+	"github.com/oberthci/oberth/pkg/argoworkflow"
 )
 
 const (
@@ -152,9 +154,12 @@ type Config struct {
 	// controller.namespaceParallelism); nil keeps the release's value.
 	// ArgoSyncLimits, when non-nil, replaces the semaphore limits in the
 	// ConfigMap oberth-sync-limits (docs/where-limits-live.md).
-	ArgoParallelism           *int
-	ArgoNamespaceParallelism  *int
-	ArgoSyncLimits            map[string]int
+	ArgoParallelism          *int
+	ArgoNamespaceParallelism *int
+	ArgoSyncLimits           map[string]int
+	// argoProfile is the nonroot controller profile the Argo phase rendered
+	// (#1517): the built-in config plus the effective controller limits.
+	argoProfile               *argoworkflow.NonrootProfile
 	ArgoVaultAddress          string
 	ArgoVaultCredentialedRole string
 	// CredentialedSecretPaths are exact secret paths for the shared
@@ -1015,7 +1020,7 @@ func Run(ctx context.Context, cfg Config, deps Deps) error {
 	// reconciles produces a run that never starts and never fails.
 	quietArgoDeps := deps
 	quietArgoDeps.Output = io.Discard
-	argo, err := InstallArgoWorkflows(ctx, cfg, quietArgoDeps)
+	argo, err := installArgoPinningProfile(ctx, &cfg, quietArgoDeps)
 	if err != nil {
 		tw.WriteFooter()
 		return fmt.Errorf("install Argo Workflows: %w", err)

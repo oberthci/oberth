@@ -357,6 +357,10 @@ argo:
   # Empty disables nonroot execution. The named profile still requires actual
   # immutable controller/configuration verification before each submission.
   controllerProfile: ""
+  # The profile ConfigMap the controller runs. Empty is the built-in one
+  # without controller limits; a profile carrying Argo parallelism has its own
+  # digest-derived name, which oberth install sets (docs/where-limits-live.md).
+  controllerProfileConfigMap: ""
   # Optional workflow annotation oberth.ci/nonroot-templates selects fixed
   # UID/GID65534 plain uncredentialed test leaves. This has no chart UID knob:
   # the server owns all identities, executor patches and bounded Pod scratch.

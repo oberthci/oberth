@@ -1242,6 +1242,8 @@ Usage of serve:
         ServiceAccount for CI templates with approved upstream-scoped secrets; its Vault role never carries release grants (default "oberth-argo-ci-secrets")
   -argo-controller-profile string
         exact controller profile to verify before nonroot submission; empty disables nonroot
+  -argo-controller-profile-configmap string
+        nonroot profile ConfigMap the controller runs (oberth-argo-nr-<digest>); empty is the built-in profile without controller limits
   -argo-credentialed-serviceaccount string
         ServiceAccount for release templates with approved secrets; carries a projected token for OpenBao Kubernetes auth (default "oberth-argo-credentialed")
   -argo-default-workflow-timeout duration

@@ -536,7 +536,7 @@ func (p *ExecutionPlacement) verifyEnvironment(ctx context.Context, client kuber
 			return errors.New("argojob: node selector differs")
 		}
 	}
-	proof, err := verifyNonrootController(ctx, client, config.Namespace, Request{})
+	proof, err := verifyNonrootController(ctx, client, config.Namespace, config.NonrootProfileConfigMap, Request{})
 	if err != nil {
 		return err
 	}

@@ -52,6 +52,9 @@ type ArgoResult struct {
 	// TargetVersion is the chart version the install aimed at.
 	TargetVersion string
 	Namespace     string
+	// Profile is the nonroot controller profile rendered, nil without one;
+	// the Oberth chart pins its ConfigMap name for verification (#1517).
+	Profile *argoworkflow.NonrootProfile
 	// Skipped reports that the caller opted out with --skip-argo-workflows,
 	// having supplied a controller by other means.
 	Skipped bool
@@ -123,11 +126,23 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 		result.TargetVersion = DefaultArgoChartVersion
 	}
 
-	profileFile, cleanup, err := prepareNonrootArgoValues(ctx, cfg, deps, exists, result.InstalledVersion)
+	if cfg.ArgoControllerProfile == "" && exists && argoLimitsRequested(cfg) {
+		// Under the nonroot profile the chart never renders
+		// controller.parallelism: the limits must go into the profile
+		// ConfigMap, so a limit run on a profile release keeps the profile.
+		if stored, err := storedNonrootRelease(ctx, deps, ns); err != nil {
+			return result, err
+		} else if stored {
+			cfg.ArgoControllerProfile = argoworkflow.NonrootStaticProfile
+			_, _ = fmt.Fprintln(deps.Output, "The argo-workflows release runs the nonroot controller profile; the limits go into its profile ConfigMap.")
+		}
+	}
+	profileFile, profile, cleanup, err := prepareNonrootArgoValues(ctx, cfg, deps, exists, result.InstalledVersion)
 	if err != nil {
 		return result, err
 	}
 	defer cleanup()
+	cfg.argoProfile, result.Profile = profile, profile
 	action := planHelmAction(exists, result.InstalledVersion, result.TargetVersion, release.Status, cfg.Upgrade)
 	if (profileFile != "" || argoLimitsRequested(cfg)) && action == actionSkip {
 		action = actionUpgrade
@@ -161,6 +176,16 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 		return result, fmt.Errorf("helm install Argo Workflows: %w", err)
 	}
 	return result, nil
+}
+
+// installArgoPinningProfile installs Argo and records the nonroot profile it
+// rendered, so the Oberth chart pins the ConfigMap the controller runs.
+func installArgoPinningProfile(ctx context.Context, cfg *Config, deps Deps) (ArgoResult, error) {
+	result, err := InstallArgoWorkflows(ctx, *cfg, deps)
+	if err == nil && result.Profile != nil {
+		cfg.argoProfile, cfg.ArgoControllerProfile = result.Profile, argoworkflow.NonrootStaticProfile
+	}
+	return result, err
 }
 
 // ArgoHelmArgs returns the exact helm arguments for installing the workflow
@@ -248,7 +273,8 @@ func argoOberthHelmValues(cfg Config, openbao OpenBaoResult) []string {
 	}
 	values := []string{"--set", "argo.namespace=" + ns}
 	if cfg.ArgoControllerProfile != "" {
-		values = append(values, "--set", "argo.controllerProfile="+cfg.ArgoControllerProfile)
+		values = append(values, "--set", "argo.controllerProfile="+cfg.ArgoControllerProfile,
+			"--set-string", "argo.controllerProfileConfigMap="+cfg.nonrootProfile().ConfigMap)
 	}
 	address := strings.TrimSpace(cfg.ArgoVaultAddress)
 	// When the installer manages a production secret store and the caller did

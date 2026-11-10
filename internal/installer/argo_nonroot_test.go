@@ -29,7 +29,7 @@ func TestNonrootArgoInstallerProfile(t *testing.T) {
 					}
 					return []byte("[]"), nil
 				case "get":
-					return json.Marshal(nonrootArgoValues(DefaultArgoNamespace))
+					return json.Marshal(nonrootArgoValues(DefaultArgoNamespace, baseNonrootProfile()))
 				case "upgrade":
 					index := slices.Index(args, "--values")
 					if index < 0 || index+1 >= len(args) {
@@ -138,7 +138,7 @@ func TestNonrootArgoRejectsCustomReuse(t *testing.T) {
 			}
 			return []byte(response), nil
 		}
-		_, cleanup, err := prepareNonrootArgoValues(t.Context(), Config{ArgoControllerProfile: argoworkflow.NonrootStaticProfile, ArgoNamespace: DefaultArgoNamespace}, deps, true, DefaultArgoChartVersion)
+		_, _, cleanup, err := prepareNonrootArgoValues(t.Context(), Config{ArgoControllerProfile: argoworkflow.NonrootStaticProfile, ArgoNamespace: DefaultArgoNamespace}, deps, true, DefaultArgoChartVersion)
 		cleanup()
 		if err == nil {
 			t.Fatal("invalid existing profile accepted")
@@ -161,7 +161,7 @@ func TestNonrootArgoAcceptsPlatformProtectionReuse(t *testing.T) {
 	for _, profile := range []bool{false, true} {
 		values := map[string]any{}
 		if profile {
-			values = nonrootArgoValues(DefaultArgoNamespace)
+			values = nonrootArgoValues(DefaultArgoNamespace, baseNonrootProfile())
 		}
 		values["singleNamespace"] = true
 		values["server"] = map[string]any{"enabled": false}
@@ -185,7 +185,7 @@ func TestNonrootArgoAcceptsPlatformProtectionReuse(t *testing.T) {
 			}
 			return encoded, nil
 		}}
-		file, cleanup, err := prepareNonrootArgoValues(t.Context(), Config{ArgoControllerProfile: argoworkflow.NonrootStaticProfile, ArgoNamespace: DefaultArgoNamespace}, deps, true, DefaultArgoChartVersion)
+		file, _, cleanup, err := prepareNonrootArgoValues(t.Context(), Config{ArgoControllerProfile: argoworkflow.NonrootStaticProfile, ArgoNamespace: DefaultArgoNamespace}, deps, true, DefaultArgoChartVersion)
 		if err != nil {
 			cleanup()
 			t.Fatalf("profile=%v: platform overlay refused: %v", profile, err)
@@ -195,7 +195,7 @@ func TestNonrootArgoAcceptsPlatformProtectionReuse(t *testing.T) {
 		if readErr != nil {
 			t.Fatal(readErr)
 		}
-		want, err := json.Marshal(nonrootArgoValues(DefaultArgoNamespace))
+		want, err := json.Marshal(nonrootArgoValues(DefaultArgoNamespace, baseNonrootProfile()))
 		if err != nil || string(actual) != string(want) {
 			t.Fatal("profile overlay changed or overwrote reused platform settings")
 		}
@@ -235,7 +235,7 @@ func TestNonrootArgoReuseAcceptsInstallerLimits(t *testing.T) {
 		}
 		return stored, encoded
 	}
-	withLimits := nonrootArgoValues(DefaultArgoNamespace)
+	withLimits := nonrootArgoValues(DefaultArgoNamespace, baseNonrootProfile())
 	withLimits["controller"].(map[string]any)["parallelism"] = 4
 	withLimits["controller"].(map[string]any)["namespaceParallelism"] = 0
 	withLimits["extraObjects"] = append(withLimits["extraObjects"].([]any), limits)
@@ -272,7 +272,7 @@ func TestNonrootArgoReuseAcceptsInstallerLimits(t *testing.T) {
 			}
 			return encoded, nil
 		}}
-		file, cleanup, err := prepareNonrootArgoValues(t.Context(), cfg, deps, true, DefaultArgoChartVersion)
+		file, _, cleanup, err := prepareNonrootArgoValues(t.Context(), cfg, deps, true, DefaultArgoChartVersion)
 		if err != nil {
 			cleanup()
 			t.Fatal(err)

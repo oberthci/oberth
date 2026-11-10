@@ -51,6 +51,9 @@ type UpgradeConfig struct {
 	OpenBaoNamespace      string
 	serverPKI             bool
 	storedValues          string // internal schema-validated legacy migration snapshot
+	// argoProfileConfigMap is the nonroot profile ConfigMap the controller
+	// transition renders, pinned into the Oberth chart (#1517).
+	argoProfileConfigMap string
 }
 
 // ErrPinnedKeyOverride is returned when a user --set or --values file
@@ -403,7 +406,7 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		}
 	}
 
-	profile, cleanupProfile, err := prepareUpgradeControllerProfile(ctx, cfg, deps)
+	profile, cleanupProfile, err := pinUpgradeControllerProfile(ctx, &cfg, deps)
 	if err != nil {
 		return result, err
 	}
@@ -667,6 +670,9 @@ func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string, compatibility ba
 	)
 	if cfg.ArgoControllerProfile != "" {
 		args = append(args, "--set-string", "argo.controllerProfile="+cfg.ArgoControllerProfile)
+		if cfg.argoProfileConfigMap != "" {
+			args = append(args, "--set-string", "argo.controllerProfileConfigMap="+cfg.argoProfileConfigMap)
+		}
 	}
 	// User values files come after pins. Pinned-key conflicts have already
 	// been refused by checkPinnedKeyConflicts, so these cannot override a pin.

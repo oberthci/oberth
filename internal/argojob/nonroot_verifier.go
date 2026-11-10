@@ -25,7 +25,9 @@ const nonrootProfileAnnotation = "oberth.ci/verified-controller-profile"
 type nonrootProof struct {
 	requestID, podUID, configUID, configVersion string
 	namespace                                   string
-	verifiedAt                                  time.Time
+	// configSHA256 is the verified canonical profile's content digest.
+	configSHA256 string
+	verifiedAt   time.Time
 }
 
 func nonrootRequestIdentity(request Request) string {
@@ -61,7 +63,11 @@ func nonrootRequestIdentity(request Request) string {
 }
 
 func (proof *nonrootProof) binding() string {
-	encoded, _ := json.Marshal([]string{argoworkflow.NonrootStaticProfile, argoworkflow.NonrootProfileConfigSHA256, proof.namespace, proof.requestID, proof.podUID, proof.configUID, proof.configVersion})
+	sum := proof.configSHA256
+	if sum == "" {
+		sum = argoworkflow.NonrootProfileConfigSHA256 // the built-in profile
+	}
+	encoded, _ := json.Marshal([]string{argoworkflow.NonrootStaticProfile, sum, proof.namespace, proof.requestID, proof.podUID, proof.configUID, proof.configVersion})
 	digest := sha256.Sum256(encoded)
 	return argoworkflow.NonrootStaticProfile + ":" + hex.EncodeToString(digest[:])
 }
@@ -125,7 +131,14 @@ func (controller *Controller) expectedSourceVolume(request Request) SourceVolume
 	return volume
 }
 
-func verifyNonrootController(ctx context.Context, client kubernetes.Interface, namespace string, request Request) (*nonrootProof, error) {
+// verifyNonrootController proves the running controller uses the canonical
+// profile in ConfigMap configMap (empty: the built-in one without limits).
+// The name is the operator's pin, rendered into this server's RBAC; the
+// content must be the canonical profile that name derives from (#1517).
+func verifyNonrootController(ctx context.Context, client kubernetes.Interface, namespace, configMap string, request Request) (*nonrootProof, error) {
+	if configMap == "" {
+		configMap = argoworkflow.NonrootProfileConfigMap
+	}
 	if client == nil {
 		return nil, errors.New("argojob: controller profile verification requires Kubernetes")
 	}
@@ -141,7 +154,7 @@ func verifyNonrootController(ctx context.Context, client kubernetes.Interface, n
 	if err != nil {
 		return nil, err
 	}
-	if err := verifyNonrootControllerPod(pod); err != nil {
+	if err := verifyNonrootControllerPod(pod, configMap); err != nil {
 		return nil, err
 	}
 	if len(evicted) > 0 {
@@ -149,12 +162,16 @@ func verifyNonrootController(ctx context.Context, client kubernetes.Interface, n
 			return nil, err
 		}
 	}
-	cm, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, argoworkflow.NonrootProfileConfigMap, metav1.GetOptions{})
+	cm, err := client.CoreV1().ConfigMaps(namespace).Get(ctx, configMap, metav1.GetOptions{})
 	if err != nil {
-		return nil, &profileReadError{message: "argojob: cannot read the exact nonroot controller profile ConfigMap", object: namespace + "/ConfigMap/" + argoworkflow.NonrootProfileConfigMap, cause: err}
+		return nil, &profileReadError{message: "argojob: cannot read the exact nonroot controller profile ConfigMap", object: namespace + "/ConfigMap/" + configMap, cause: err}
 	}
-	if cm.Name != argoworkflow.NonrootProfileConfigMap || cm.Namespace != namespace || cm.UID == "" || cm.ResourceVersion == "" || cm.Immutable == nil || !*cm.Immutable || cm.DeletionTimestamp != nil ||
-		len(cm.Data) != 1 || cm.Data["config"] != argoworkflow.NonrootProfileConfig || len(cm.BinaryData) != 0 {
+	if cm.Name != configMap || cm.Namespace != namespace || cm.UID == "" || cm.ResourceVersion == "" || cm.Immutable == nil || !*cm.Immutable || cm.DeletionTimestamp != nil ||
+		len(cm.Data) != 1 || len(cm.BinaryData) != 0 {
+		return nil, errors.New("argojob: nonroot controller configuration is not the exact immutable built-in profile")
+	}
+	profile, err := argoworkflow.ParseNonrootProfile(cm.Name, cm.Data["config"])
+	if err != nil {
 		return nil, errors.New("argojob: nonroot controller configuration is not the exact immutable built-in profile")
 	}
 	// The exact required public-config mount is a causal startup dependency.
@@ -168,10 +185,10 @@ func verifyNonrootController(ctx context.Context, client kubernetes.Interface, n
 	if cm.CreationTimestamp.IsZero() || created.After(started) {
 		return nil, errors.New("argojob: controller configuration was created after the running process")
 	}
-	return &nonrootProof{requestID: nonrootRequestIdentity(request), namespace: namespace, podUID: string(pod.UID), configUID: string(cm.UID), configVersion: cm.ResourceVersion, verifiedAt: time.Now()}, nil
+	return &nonrootProof{requestID: nonrootRequestIdentity(request), namespace: namespace, podUID: string(pod.UID), configUID: string(cm.UID), configVersion: cm.ResourceVersion, configSHA256: profile.SHA256, verifiedAt: time.Now()}, nil
 }
 
-func verifyNonrootControllerPod(pod *corev1.Pod) error {
+func verifyNonrootControllerPod(pod *corev1.Pod, configMap string) error {
 	invalid := func(reason string) error {
 		return fmt.Errorf("argojob: unsupported nonroot controller profile: %s", reason)
 	}
@@ -196,7 +213,7 @@ func verifyNonrootControllerPod(pod *corev1.Pod) error {
 		container.Image != argoworkflow.NonrootControllerImage || (status.ImageID != indexID && status.ImageID != argoworkflow.NonrootControllerAMD64) {
 		return invalid("controller image or running image identity")
 	}
-	wantArgs := []string{"--configmap", argoworkflow.NonrootProfileConfigMap, "--executor-image", argoworkflow.NonrootExecutorImage, "--loglevel", "info", "--gloglevel", "0", "--log-format", "text", "--namespaced"}
+	wantArgs := []string{"--configmap", configMap, "--executor-image", argoworkflow.NonrootExecutorImage, "--loglevel", "info", "--gloglevel", "0", "--log-format", "text", "--namespaced"}
 	if !reflect.DeepEqual(container.Command, []string{"workflow-controller"}) || !reflect.DeepEqual(container.Args, wantArgs) || len(container.EnvFrom) != 0 {
 		return invalid("command, watch scope or executor image")
 	}
@@ -215,13 +232,13 @@ func verifyNonrootControllerPod(pod *corev1.Pod) error {
 	if len(wanted) != 0 {
 		return invalid("missing controller environment")
 	}
-	if err := verifyNonrootControllerMounts(pod); err != nil {
+	if err := verifyNonrootControllerMounts(pod, configMap); err != nil {
 		return invalid(err.Error())
 	}
 	return nil
 }
 
-func verifyNonrootControllerMounts(pod *corev1.Pod) error {
+func verifyNonrootControllerMounts(pod *corev1.Pod, configMap string) error {
 	// A controller gets the existing standard projected service-account mount
 	// plus exactly one public configuration mount. No Secret is introduced.
 	if len(pod.Spec.Volumes) != 2 || len(pod.Spec.Containers[0].VolumeMounts) != 2 {
@@ -239,7 +256,7 @@ func verifyNonrootControllerMounts(pod *corev1.Pod) error {
 		return errors.New("missing required public controller configuration volume")
 	}
 	wantProfile := corev1.Volume{Name: argoworkflow.NonrootProfileVolume, VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
-		LocalObjectReference: corev1.LocalObjectReference{Name: argoworkflow.NonrootProfileConfigMap},
+		LocalObjectReference: corev1.LocalObjectReference{Name: configMap},
 		Items:                []corev1.KeyToPath{{Key: "config", Path: "config"}}, DefaultMode: ptr.To(int32(0444)), Optional: ptr.To(false),
 	}}}
 	// Kubernetes permits omitted optional:false; it has the same required-key
@@ -280,10 +297,10 @@ func verifyNonrootControllerMounts(pod *corev1.Pod) error {
 
 // VerifyNonrootControllerProfile observes the exact supported installed boundary.
 // It does not issue a submission proof or authorize any repository request.
-func VerifyNonrootControllerProfile(ctx context.Context, client kubernetes.Interface, namespace string) error {
+func VerifyNonrootControllerProfile(ctx context.Context, client kubernetes.Interface, namespace, configMap string) error {
 	if client == nil {
 		return errors.New("argojob: controller profile verification requires Kubernetes")
 	}
-	_, err := verifyNonrootController(ctx, client, namespace, Request{})
+	_, err := verifyNonrootController(ctx, client, namespace, configMap, Request{})
 	return err
 }

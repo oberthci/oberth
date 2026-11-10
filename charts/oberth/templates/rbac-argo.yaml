@@ -36,7 +36,7 @@ rules:
   # collection, write or Secret permission accompanies the binding.
   - apiGroups: [""]
     resources: ["configmaps"]
-    resourceNames: ["oberth-argo-nr-5f121f7f1f5ef468eb2208b1cf7e911746c8cb6173c1d24e"]
+    resourceNames: [{{ .Values.argo.controllerProfileConfigMap | default "oberth-argo-nr-5f121f7f1f5ef468eb2208b1cf7e911746c8cb6173c1d24e" | quote }}]
     verbs: ["get"]
   {{- end }}
   - apiGroups: ["argoproj.io"]

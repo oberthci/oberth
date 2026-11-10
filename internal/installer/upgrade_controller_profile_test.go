@@ -227,7 +227,7 @@ func TestUpgradeControllerProfileOverlayIsExactBuiltIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected, err := json.Marshal(nonrootArgoValues("oberth-argo"))
+	expected, err := json.Marshal(nonrootArgoValues("oberth-argo", baseNonrootProfile()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +312,7 @@ func TestUpgradeControllerProfileBothReadbacksAndForwardRepair(t *testing.T) {
 			return []byte(`[{"name":"argo-workflows","chart":"argo-workflows-1.0.24","status":"failed","revision":19}]`), nil
 		}
 		if args[0] == "get" && args[2] == "argo-workflows" {
-			return json.Marshal(nonrootArgoValues("oberth-argo"))
+			return json.Marshal(nonrootArgoValues("oberth-argo", baseNonrootProfile()))
 		}
 		return base(ctx, args)
 	}

@@ -98,7 +98,7 @@ func argoLimitArgs(cfg Config, namespace string) []string {
 	if cfg.ArgoSyncLimits != nil {
 		objects := []any{}
 		if cfg.ArgoControllerProfile != "" {
-			objects = append(objects, nonrootProfileObjects(namespace)...)
+			objects = append(objects, nonrootProfileObjects(namespace, cfg.nonrootProfile())...)
 		}
 		if object := syncLimitsConfigMap(cfg.ArgoSyncLimits, namespace); object != nil {
 			objects = append(objects, object)

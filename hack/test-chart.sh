@@ -630,6 +630,15 @@ grep -A2 'resources: \["configmaps"\]' "$argo_vault_manifest" | \
 if render --set argo.controllerProfile=unchecked >/dev/null 2>&1; then
   exit 1
 fi
+# A profile carrying Argo parallelism (#1517) has its own ConfigMap: the
+# server's single GET and its verification flag follow the pinned name.
+render --set argo.controllerProfile=nonroot-static-v1 --set argo.controllerProfileConfigMap=oberth-argo-nr-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa >"$argo_legacy_manifest"
+grep -q -- '--argo-controller-profile-configmap=oberth-argo-nr-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' "$argo_legacy_manifest"
+grep -A2 'resources: \["configmaps"\]' "$argo_legacy_manifest" | grep -q 'resourceNames: \["oberth-argo-nr-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"\]'
+if grep -q 'oberth-argo-nr-5f121f7f' "$argo_legacy_manifest"; then exit 1; fi
+if render --set argo.controllerProfile=nonroot-static-v1 --set argo.controllerProfileConfigMap=other >/dev/null 2>&1; then
+  exit 1
+fi
 
 # argojob's fail-closed per-repo ServiceAccount verification (issue #467):
 # the server Role in the pipeline namespace must grant read-only get on

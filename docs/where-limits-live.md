@@ -33,7 +33,35 @@ helm upgrade argo-workflows argo/argo-workflows -n oberth-argo --version 1.0.24 
 `0` is no limit. The installer's controller is single-namespace, so
 `parallelism` and `namespaceParallelism` both bound every pipeline Workflow;
 use `parallelism`. The controller watches its ConfigMap, so a change applies
-without a controller or Oberth restart.
+without a controller or Oberth restart, except under the nonroot profile
+(below).
+
+### Under the nonroot controller profile
+
+With `argo.controllerProfile: nonroot-static-v1` the controller does not read
+the chart's own ConfigMap (`controller.configMap.create: false`), so the
+chart never renders `controller.parallelism`. The limits travel inside the
+immutable profile ConfigMap instead: its `config` is the built-in profile plus
+`parallelism` / `namespaceParallelism` when positive, rendered canonically
+(JSON with sorted keys), and its name is `oberth-argo-nr-` followed by the
+first 48 hex digits of the SHA-256 of that `config`. Without limits it is
+exactly the built-in `oberth-argo-nr-5f121f7f…`; with `--argo-parallelism 6`
+the `config` is
+
+```json
+{"failedPodRestart":{"enabled":false,"maxRestarts":3},"nodeEvents":{"enabled":true},"parallelism":6,"workflowEvents":{"enabled":true}}
+```
+
+`oberth install --upgrade --argo-parallelism N` on a profile release keeps the
+profile, renders the matching ConfigMap, points the controller at it, and
+sets the Oberth chart's `argo.controllerProfileConfigMap` to that name. The
+server reads only that one ConfigMap (its Role's single `get`) and verifies
+before each nonroot submission that the controller runs it and that its data
+is exactly the canonical profile for its name; any other key or byte is
+refused. A changed limit is a new immutable ConfigMap, so the controller rolls
+once; running Workflows survive the rollout. Between the argo-workflows
+upgrade and the Oberth upgrade, nonroot admission pauses because the running
+controller and the pinned name disagree; it resumes when both match.
 
 **Default: none.** Neither Oberth nor the installer sets a limit. That is the
 behaviour Oberth has had since v0.18.0, whose `maxConcurrentJobs` default was
@@ -173,7 +201,10 @@ upgrade while the live ConfigMap still belongs to the Oberth release without
 
 With the nonroot controller profile (`--argo-controller-profile`), the
 installer puts the limits ConfigMap beside the profile's own ConfigMap in the
-release's `extraObjects`; pass the profile flag on every run as before.
+release's `extraObjects`; pass the profile flag on every run as before. Never
+replace `extraObjects` with a list that lacks the profile ConfigMap: Helm
+deletes it, and the controller (whose volume is `optional: false`) can no
+longer start.
 
 ## Migrating from concurrency groups
 
