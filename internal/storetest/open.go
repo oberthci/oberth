@@ -56,8 +56,20 @@ func Track(database *store.Store, path string, opts store.Options) *store.Store 
 // genesis database when none exists, as a running server would have. The
 // production opener refuses a missing database.
 func OpenAdminClient(ctx context.Context, path string, opts store.Options) (*store.Store, error) {
-	if err := EnsureDatabase(ctx, path, opts); err != nil {
-		return nil, err
+	base, _, _ := strings.Cut(path, "?")
+	if _, err := os.Stat(base); errors.Is(err, os.ErrNotExist) {
+		if base == path {
+			// The genesis handle is the same opener the admin client uses.
+			return store.CreateGenesis(ctx, path, opts)
+		}
+		// CreateGenesis takes no DSN query; create the file, then reopen.
+		created, err := store.CreateGenesis(ctx, base, opts)
+		if err != nil {
+			return nil, err
+		}
+		if err := created.Close(); err != nil {
+			return nil, err
+		}
 	}
 	return store.OpenAdminClient(ctx, path, opts)
 }

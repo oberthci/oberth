@@ -1988,6 +1988,11 @@ func TestOwnerRecoveryRetiresLegacyBranchRestartCancellation(t *testing.T) {
 func openAdminClientForTest(ctx context.Context, path string, opts Options) (*Store, error) {
 	base, _, _ := strings.Cut(path, "?")
 	if _, err := os.Stat(base); errors.Is(err, os.ErrNotExist) {
+		if base == path {
+			// The genesis handle is the same opener the admin client uses.
+			return CreateGenesis(ctx, path, opts)
+		}
+		// CreateGenesis takes no DSN query; create the file, then reopen.
 		created, err := CreateGenesis(ctx, base, opts)
 		if err != nil {
 			return nil, err
