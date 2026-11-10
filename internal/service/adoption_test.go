@@ -685,8 +685,11 @@ func TestAdoptedPreemptedObservationDeleteRefusalKeepsSchedulerAlive(t *testing.
 	if jobs.calls.Load() < 3 {
 		t.Fatalf("deletion was not retried after refusals: calls=%d", jobs.calls.Load())
 	}
-	if scheduler.admission.runs < 0 {
-		t.Fatalf("slot released twice: %d", scheduler.admission.runs)
+	scheduler.admission.mu.Lock()
+	runs := scheduler.admission.runs
+	scheduler.admission.mu.Unlock()
+	if runs != 0 {
+		t.Fatalf("slot not released exactly once: %d", runs)
 	}
 	cancel()
 	if err := <-done; err != nil {
