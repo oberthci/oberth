@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"math"
 	"os"
 	"strings"
 
@@ -29,13 +31,20 @@ func nonrootArgoValues(namespace string) map[string]any {
 			}}},
 			"volumeMounts": []any{map[string]any{"name": argoworkflow.NonrootProfileVolume, "mountPath": argoworkflow.NonrootProfileMount, "readOnly": true}},
 		},
-		"executor": map[string]any{"image": map[string]any{"tag": strings.SplitN(argoworkflow.NonrootExecutorImage, ":", 2)[1]}},
-		"extraObjects": []any{map[string]any{
-			"apiVersion": "v1", "kind": "ConfigMap",
-			"metadata":  map[string]any{"name": argoworkflow.NonrootProfileConfigMap, "namespace": namespace},
-			"immutable": true, "data": map[string]any{"config": argoworkflow.NonrootProfileConfig},
-		}},
+		"executor":     map[string]any{"image": map[string]any{"tag": strings.SplitN(argoworkflow.NonrootExecutorImage, ":", 2)[1]}},
+		"extraObjects": nonrootProfileObjects(namespace),
 	}
+}
+
+// nonrootProfileObjects is the profile's extraObjects list: the immutable
+// controller ConfigMap. The limits ConfigMap (argo_limits.go) shares the
+// list, so every writer of extraObjects starts from this.
+func nonrootProfileObjects(namespace string) []any {
+	return []any{map[string]any{
+		"apiVersion": "v1", "kind": "ConfigMap",
+		"metadata":  map[string]any{"name": argoworkflow.NonrootProfileConfigMap, "namespace": namespace},
+		"immutable": true, "data": map[string]any{"config": argoworkflow.NonrootProfileConfig},
+	}}
 }
 
 // validateNonrootReuse admits only the ordinary installer options or the exact
@@ -78,6 +87,33 @@ func validateNonrootReuse(values map[string]any, namespace string) error {
 				}
 			}
 			controllerAllowed["resources"] = map[string]any{"requests": allowedRequests}
+		}
+		// The run limits this installer writes (#1517) are not customization:
+		// the controller's own parallelism, non-negative whole numbers.
+		for _, key := range []string{"parallelism", "namespaceParallelism"} {
+			if value, exists := controller[key]; exists {
+				n, ok := value.(float64)
+				if !ok || n < 0 || n > maxArgoParallelism || n != math.Trunc(n) {
+					return fmt.Errorf("nonroot profile requires a non-negative integer controller.%s", key)
+				}
+				controllerAllowed[key] = value
+			}
+		}
+	}
+	// The limits ConfigMap the installer wrote beside the profile object is
+	// its own, so the comparison below sees extraObjects without it.
+	if objects, ok := values["extraObjects"].([]any); ok {
+		rest := make([]any, 0, len(objects))
+		for _, object := range objects {
+			if !isSyncLimitsConfigMap(object, namespace) {
+				rest = append(rest, object)
+			}
+		}
+		values = maps.Clone(values)
+		if len(rest) == 0 {
+			delete(values, "extraObjects")
+		} else {
+			values["extraObjects"] = rest
 		}
 	}
 	profile := nonrootArgoValues(namespace)
@@ -130,20 +166,30 @@ func prepareNonrootArgoValues(ctx context.Context, cfg Config, deps Deps, exists
 		(exists && installedVersion != DefaultArgoChartVersion) || cfg.SkipArgo {
 		return "", noop, errors.New("nonroot profile requires the managed exact Argo chart1.0.24")
 	}
+	var stored map[string]any
 	if exists {
 		encoded, err := deps.RunHelm(ctx, []string{"get", "values", "argo-workflows", "-n", cfg.ArgoNamespace, "-o", "json"})
 		if err != nil {
 			return "", noop, errors.New("cannot inspect existing Argo profile settings")
 		}
-		var values map[string]any
-		if err := json.Unmarshal(encoded, &values); err != nil {
+		if err := json.Unmarshal(encoded, &stored); err != nil {
 			return "", noop, errors.New("cannot decode existing Argo profile settings")
 		}
-		if err := validateNonrootReuse(values, cfg.ArgoNamespace); err != nil {
+		if err := validateNonrootReuse(stored, cfg.ArgoNamespace); err != nil {
 			return "", noop, err
 		}
 	}
-	encoded, err := json.Marshal(nonrootArgoValues(cfg.ArgoNamespace))
+	profile := nonrootArgoValues(cfg.ArgoNamespace)
+	if cfg.ArgoSyncLimits == nil {
+		// This values file replaces the release's extraObjects. Keep the
+		// limits ConfigMap an earlier run wrote there (#1517): a list without
+		// it would make Helm delete it under the Workflows whose semaphores
+		// name it. A requested limit set goes through --set-json instead.
+		if object := storedSyncLimitsConfigMap(stored, cfg.ArgoNamespace); object != nil {
+			profile["extraObjects"] = append(profile["extraObjects"].([]any), object)
+		}
+	}
+	encoded, err := json.Marshal(profile)
 	if err != nil {
 		return "", noop, fmt.Errorf("encode built-in Argo profile: %w", err)
 	}

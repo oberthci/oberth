@@ -83,7 +83,10 @@ func argoLimitsRequested(cfg Config) bool {
 }
 
 // argoLimitArgs renders the requested limits as helm arguments for the
-// argo-workflows chart.
+// argo-workflows chart. extraObjects is one list and --set wins over
+// --values, so while the nonroot controller profile is active its immutable
+// controller ConfigMap goes into the same list: a list without it would make
+// Helm delete the controller's configuration under the running controller.
 func argoLimitArgs(cfg Config, namespace string) []string {
 	var args []string
 	if cfg.ArgoParallelism != nil {
@@ -93,35 +96,82 @@ func argoLimitArgs(cfg Config, namespace string) []string {
 		args = append(args, "--set", fmt.Sprintf("controller.namespaceParallelism=%d", *cfg.ArgoNamespaceParallelism))
 	}
 	if cfg.ArgoSyncLimits != nil {
-		args = append(args, "--set-json", "extraObjects="+syncLimitsObject(cfg.ArgoSyncLimits, namespace))
+		objects := []any{}
+		if cfg.ArgoControllerProfile != "" {
+			objects = append(objects, nonrootProfileObjects(namespace)...)
+		}
+		if object := syncLimitsConfigMap(cfg.ArgoSyncLimits, namespace); object != nil {
+			objects = append(objects, object)
+		}
+		// Marshaling strings and string maps cannot fail.
+		encoded, _ := json.Marshal(objects)
+		args = append(args, "--set-json", "extraObjects="+string(encoded))
 	}
 	return args
 }
 
-// syncLimitsObject is the extraObjects list holding the limits ConfigMap.
-// The installer owns extraObjects of the release it manages; an empty map
-// renders no ConfigMap.
-func syncLimitsObject(limits map[string]int, namespace string) string {
+// syncLimitsConfigMap is the limits ConfigMap as an extraObjects entry, or
+// nil for an empty set, which renders no ConfigMap. The installer owns
+// extraObjects of the release it manages.
+func syncLimitsConfigMap(limits map[string]int, namespace string) map[string]any {
 	if len(limits) == 0 {
-		return "[]"
+		return nil
 	}
 	keys := make([]string, 0, len(limits))
 	for key := range limits {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	data := map[string]string{}
+	data := map[string]any{}
 	for _, key := range keys {
 		data[key] = strconv.Itoa(limits[key])
 	}
-	// Marshaling strings and string maps cannot fail.
-	encoded, _ := json.Marshal([]map[string]any{{
+	return map[string]any{
 		"apiVersion": "v1", "kind": "ConfigMap",
 		"metadata": map[string]any{"name": SyncLimitsConfigMap, "namespace": namespace,
-			"labels": map[string]string{"app.kubernetes.io/part-of": "oberth", "app.kubernetes.io/component": "sync-limits"}},
+			"labels": map[string]any{"app.kubernetes.io/part-of": "oberth", "app.kubernetes.io/component": "sync-limits"}},
 		"data": data,
-	}})
-	return string(encoded)
+	}
+}
+
+// isSyncLimitsConfigMap reports an extraObjects entry, as helm get values
+// returns it, that is the limits ConfigMap this installer wrote: the fixed
+// name in the pipeline namespace with only positive integer limits as data.
+func isSyncLimitsConfigMap(object any, namespace string) bool {
+	entry, ok := object.(map[string]any)
+	if !ok || entry["apiVersion"] != "v1" || entry["kind"] != "ConfigMap" {
+		return false
+	}
+	metadata, ok := entry["metadata"].(map[string]any)
+	if !ok || metadata["name"] != SyncLimitsConfigMap || metadata["namespace"] != namespace {
+		return false
+	}
+	data, ok := entry["data"].(map[string]any)
+	if !ok || len(data) == 0 {
+		return false
+	}
+	for key, value := range data {
+		limit, isString := value.(string)
+		if !syncLimitKey.MatchString(key) || !isString {
+			return false
+		}
+		if _, _, err := ParseArgoSyncLimit(key + "=" + limit); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// storedSyncLimitsConfigMap returns the limits ConfigMap an earlier run wrote
+// into the release's extraObjects, or nil.
+func storedSyncLimitsConfigMap(values map[string]any, namespace string) any {
+	objects, _ := values["extraObjects"].([]any)
+	for _, object := range objects {
+		if isSyncLimitsConfigMap(object, namespace) {
+			return object
+		}
+	}
+	return nil
 }
 
 // handOverSyncLimits lets the argo-workflows release adopt the limits

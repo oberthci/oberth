@@ -214,3 +214,87 @@ func TestNonrootArgoAcceptsPlatformProtectionReuse(t *testing.T) {
 		}
 	}
 }
+
+// The run limits the installer writes into the argo-workflows release (#1517)
+// are not profile customization: the controller's parallelism and the limits
+// ConfigMap beside the profile object are accepted on reuse, a foreign object
+// or a non-integer parallelism is still refused, a profile re-run without
+// --argo-sync-limit carries the stored ConfigMap into its values file, and
+// a run with limits leaves it to --set-json.
+func TestNonrootArgoReuseAcceptsInstallerLimits(t *testing.T) {
+	limits := syncLimitsConfigMap(map[string]int{"kvm": 1, "heavy-go": 2}, DefaultArgoNamespace)
+	roundTrip := func(t *testing.T, values map[string]any) (map[string]any, []byte) {
+		t.Helper()
+		encoded, err := json.Marshal(values)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var stored map[string]any
+		if err := json.Unmarshal(encoded, &stored); err != nil {
+			t.Fatal(err)
+		}
+		return stored, encoded
+	}
+	withLimits := nonrootArgoValues(DefaultArgoNamespace)
+	withLimits["controller"].(map[string]any)["parallelism"] = 4
+	withLimits["controller"].(map[string]any)["namespaceParallelism"] = 0
+	withLimits["extraObjects"] = append(withLimits["extraObjects"].([]any), limits)
+	stored, encoded := roundTrip(t, withLimits)
+	if err := validateNonrootReuse(stored, DefaultArgoNamespace); err != nil {
+		t.Fatalf("installer limits refused on reuse: %v", err)
+	}
+	// Limits set before the profile: extraObjects holds the ConfigMap alone.
+	before, _ := roundTrip(t, map[string]any{"extraObjects": []any{limits}, "controller": map[string]any{"parallelism": 2}})
+	if err := validateNonrootReuse(before, DefaultArgoNamespace); err != nil {
+		t.Fatalf("limits set before the profile refused: %v", err)
+	}
+	for _, data := range []string{
+		`{"controller":{"parallelism":-1}}`,
+		`{"controller":{"parallelism":1.5}}`,
+		`{"controller":{"namespaceParallelism":"4"}}`,
+		`{"extraObjects":[{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"oberth-sync-limits","namespace":"oberth-argo"},"data":{"kvm":"1"}},{"kind":"Secret"}]}`,
+		`{"extraObjects":[{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"oberth-sync-limits","namespace":"elsewhere"},"data":{"kvm":"1"}}]}`,
+		`{"extraObjects":[{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"oberth-sync-limits","namespace":"oberth-argo"},"data":{"kvm":"x"}}]}`,
+	} {
+		var values map[string]any
+		if err := json.Unmarshal([]byte(data), &values); err != nil {
+			t.Fatal(err)
+		}
+		if err := validateNonrootReuse(values, DefaultArgoNamespace); err == nil {
+			t.Fatalf("accepted on reuse: %s", data)
+		}
+	}
+	profileValues := func(t *testing.T, cfg Config) []any {
+		t.Helper()
+		deps := Deps{RunHelm: func(_ context.Context, args []string) ([]byte, error) {
+			if args[0] != "get" {
+				t.Fatal("reuse validation caused mutation")
+			}
+			return encoded, nil
+		}}
+		file, cleanup, err := prepareNonrootArgoValues(t.Context(), cfg, deps, true, DefaultArgoChartVersion)
+		if err != nil {
+			cleanup()
+			t.Fatal(err)
+		}
+		body, readErr := os.ReadFile(file)
+		cleanup()
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		var values map[string]any
+		if err := json.Unmarshal(body, &values); err != nil {
+			t.Fatal(err)
+		}
+		return values["extraObjects"].([]any)
+	}
+	cfg := Config{ArgoControllerProfile: argoworkflow.NonrootStaticProfile, ArgoNamespace: DefaultArgoNamespace}
+	objects := profileValues(t, cfg)
+	if len(objects) != 2 || !isSyncLimitsConfigMap(objects[1], DefaultArgoNamespace) {
+		t.Fatalf("profile re-run dropped the stored limits ConfigMap: %v", objects)
+	}
+	cfg.ArgoSyncLimits = map[string]int{"kvm": 3}
+	if objects := profileValues(t, cfg); len(objects) != 1 {
+		t.Fatalf("requested limits duplicated in the profile values: %v", objects)
+	}
+}
