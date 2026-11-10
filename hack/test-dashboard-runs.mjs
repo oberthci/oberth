@@ -30,7 +30,7 @@ run(`
   state.status={upstream_info:[{id:1,name:'github',base_url:'https://example.test/org'}]};state.statusLoadedAt=Date.now();
   api=async path=>{
     requests.push(path);
-    if(path==='/api/repos')return [{id:1,name:'ours',upstream_id:1},{id:2,name:'theirs',upstream_id:1}];
+    if(path.startsWith('/api/repos'))return [{id:1,name:'ours',upstream_id:1},{id:2,name:'theirs',upstream_id:1}];
     if(path==='/api/runs/counts')return {total:300,by_repo:{1:299,2:1}};
     const query=new URL(path,'https://example.test').searchParams;
     if(query.get('view')==='active')return [scheduled,queued,head,...(query.has('repo')?[]:[makeRun('foreign-running',{repo_id:2,status:'running',finished_at:null})])];
@@ -94,7 +94,7 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
       makeRun('queued-high-second-hidden',{ref:'r8',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(22),queue_position:2,priority_class:'high'}),
     ];
     api=async path=>{
-      if(path==='/api/repos')return [{id:1,name:'ours',upstream_id:1}];
+      if(path.startsWith('/api/repos'))return [{id:1,name:'ours',upstream_id:1}];
       if(path==='/api/runs/counts')return {total:9,by_repo:{1:9}};
       const query=new URL(path,'https://example.test').searchParams;
       if(query.get('view')==='active')return [...f3Active,...f3Page.filter(row=>['queued','running'].includes(row.status))];
@@ -116,7 +116,7 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
     ];
     const f3ScopedHidden=makeRun('scoped-normal-hidden',{ref:'s4',status:'queued',started_at:null,finished_at:null,queued_at:f3Time(22)});
     api=async path=>{
-      if(path==='/api/repos')return [{id:1,name:'ours',upstream_id:1}];
+      if(path.startsWith('/api/repos'))return [{id:1,name:'ours',upstream_id:1}];
       if(path==='/api/runs/counts')return {total:4,by_repo:{1:4}};
       const query=new URL(path,'https://example.test').searchParams;
       if(query.get('view')==='active')return [f3Scoped[2],f3Scoped[1],f3ScopedHidden];
@@ -126,7 +126,7 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
   await run('renderRuns(0)');
   assert.deepEqual(ids(), ['scoped-normal-hidden','scoped-normal-old','scoped-high-new','scoped-passed'],
     'F3: without positions the queue reverses the active view order, not queue time');
-  run(`api=async path=>{ if(path==='/api/repos')return [{id:1,name:'ours',upstream_id:1}]; if(path==='/api/runs/counts')return {total:3,by_repo:{1:3}}; const query=new URL(path,'https://example.test').searchParams; if(query.get('view')==='active')return []; return {body:f3Scoped,next:''}; };`);
+  run(`api=async path=>{ if(path.startsWith('/api/repos'))return [{id:1,name:'ours',upstream_id:1}]; if(path==='/api/runs/counts')return {total:3,by_repo:{1:3}}; const query=new URL(path,'https://example.test').searchParams; if(query.get('view')==='active')return []; return {body:f3Scoped,next:''}; };`);
   await run('renderRuns(0)');
   assert.deepEqual(ids(), ['scoped-normal-old','scoped-high-new','scoped-passed'],
     'F3: without positions or an active view reverse priority and reverse server FIFO within each class');
@@ -140,7 +140,7 @@ if (!process.env.DASHBOARD_RUNS_CASE || process.env.DASHBOARD_RUNS_CASE === 'F3'
       makeRun('scoped-started',{ref:'s7',status:'running',started_at:f3Time(30),finished_at:null,display_status:'running'}),
     ];
     api=async path=>{
-      if(path==='/api/repos')return [{id:1,name:'ours',upstream_id:1}];
+      if(path.startsWith('/api/repos'))return [{id:1,name:'ours',upstream_id:1}];
       if(path==='/api/runs/counts')return {total:3,by_repo:{1:3}};
       const query=new URL(path,'https://example.test').searchParams;
       if(query.get('view')==='active')return [f3Claimed[2],f3Claimed[1],f3Claimed[0]];
@@ -320,7 +320,7 @@ for (const latest of [false, true]) {
         makeRun('claim-normal',{ref:'q4',status:'waiting',started_at:null,finished_at:null,queue_position:4,display_status:'queued'}),
       ].map(row=>claimOrderScoped?{...row,queue_position:0}:row);
       api=async path=>{
-        if(path==='/api/repos')return [{id:1,name:'ours',upstream_id:1}];
+        if(path.startsWith('/api/repos'))return [{id:1,name:'ours',upstream_id:1}];
         if(path==='/api/runs/counts')return {total:4,by_repo:{1:4}};
         if(path.includes('view=active'))return claimOrderRows;
         claimListPath=path;
@@ -345,7 +345,7 @@ run(`{
   state.activeRuns=[high,normal,{...bumped,priority_class:'normal'}];
   state.activeRunsRepo='all'; state.activeRunsComplete=true;
   api=async path=>{
-    if(path==='/api/repos')return [{id:1,name:'ours',upstream_id:1}];
+    if(path.startsWith('/api/repos'))return [{id:1,name:'ours',upstream_id:1}];
     if(path==='/api/runs/counts')return {total:3,by_repo:{1:3}};
     if(path.includes('view=active'))throw Object.assign(new Error('offline'),{status:503});
     return {body:[bumped,normal],next:''};
@@ -470,7 +470,7 @@ run(`
   const ownerRows=[...ownerQueue,...ownerRunning,...ownerFinished];
   const ownerWire=JSON.stringify(ownerRows);
   api=async path=>{
-    if(path==='/api/repos')return [{id:1,name:'ours',upstream_id:1}];
+    if(path.startsWith('/api/repos'))return [{id:1,name:'ours',upstream_id:1}];
     if(path==='/api/runs/counts')return {total:ownerRows.length,by_repo:{1:ownerRows.length}};
     if(path.includes('view=active'))return [...ownerQueue,...ownerRunning];
     return {body:ownerRows,next:''};
@@ -483,7 +483,7 @@ for (const filter of ['all','queued']) {
   const expected=['owner-low','owner-standard','owner-high','owner-next'];
   if(filter==='all')expected.push('owner-running-new','owner-running-old','owner-passed','owner-failed','owner-cancelled');
   assert.deepEqual(ids(),expected,`owner layout in ${filter} view`);
-  const rows=[...run('html').matchAll(/<div class="trow" data-run-id="([^"]+)">([\s\S]*?)(?=<div class="trow"|$)/g)];
+  const rows=[...run('html').matchAll(/<div class="trow" data-run-id="([^"]+)"[^>]*>([\s\S]*?)(?=<div class="trow"|$)/g)];
   const row=id=>rows.find(match=>match[1]===id)[2];
   assert.match(row('owner-low'),/>low priority<.*needs 2 CPU, 4 GiB · position 4/);
   assert.doesNotMatch(row('owner-standard'),/priority|class="v4b/,'standard has no priority label');
@@ -504,7 +504,7 @@ console.log('Owner layout passed: reversed queue, next at bottom, unchanged runn
 run(`
   state.showArchived=false;
   api=async path=>{
-    if(path==='/api/repos')return [
+    if(path.startsWith('/api/repos'))return [
       {id:1,name:'ours',upstream_id:1,default_branch:'main',non_default_branches:2,latest_runs:[]},
       {id:2,name:'clean',upstream_id:1,default_branch:'main',non_default_branches:0,latest_runs:[]},
       {id:3,name:'uncounted',upstream_id:1,default_branch:'main',non_default_branches:null,latest_runs:[]},
@@ -516,7 +516,7 @@ run(`
 await run('renderRepos(state.routeSeq)');
 const repoHtml = run('html');
 assert.match(repoHtml, /<div class="trow head"><div>repository<\/div><div>status<\/div><div>default branch<\/div><div>latest run<\/div><div>history<\/div><div>upstream<\/div><\/div>/, 'no new column header');
-const cell = (html, name) => html.match(new RegExp(`data-repo-runs="(?:[^"]*/)?${name}">[\\s\\S]*?<div><div class="branch">main</div>([\\s\\S]*?)</div><div>`))?.[1];
+const cell = (html, name) => html.match(new RegExp(`data-repo-runs="(?:[^"]*/)?${name}"[^>]*>[\\s\\S]*?<div><div class="branch">main</div>([\\s\\S]*?)</div><div>`))?.[1];
 assert.equal(cell(repoHtml, 'ours'), '<span class="meta" title="2 non-default branches">+2</span>', 'a non-zero count is muted text under the default branch');
 assert.equal(cell(repoHtml, 'clean'), '', 'zero shows nothing');
 assert.equal(cell(repoHtml, 'uncounted'), '', 'an uncounted mirror shows nothing');

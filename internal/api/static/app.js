@@ -42,7 +42,31 @@ function readRunFilter() {
 /* ---------- tiny utilities (unchanged from the old dashboard) ---------- */
 function esc(v) { return String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 function enc(v) { return encodeURIComponent(String(v ?? "")); }
-function replaceApp(html) { app.innerHTML = html; }
+/* A background poll must not take the reader's place: while they type in a
+   field or hold a text selection inside the page, the poll keeps the current
+   DOM (the next poll renders); otherwise the focused control is found again
+   by its identifying attribute and refocused. */
+const focusKeys = ["data-run-id", "data-repo-runs", "data-repo-filter", "data-status-filter", "data-kind-filter", "data-issue-state", "data-open-issue", "data-select-step", "data-action", "data-head", "data-copy-text", "id"];
+function focusKeyOf(element) {
+  if (!element || element === app || !app.contains?.(element)) return null;
+  for (const name of focusKeys) if (element.hasAttribute?.(name)) return [name, element.getAttribute(name)];
+  return null;
+}
+function readerIsBusy() {
+  const active = typeof document.activeElement === "undefined" ? null : document.activeElement;
+  if (active && app.contains?.(active) && ["INPUT", "SELECT", "TEXTAREA"].includes(active.tagName)) return true;
+  const selection = typeof window.getSelection === "function" ? window.getSelection() : null;
+  return !!(selection && !selection.isCollapsed && selection.anchorNode && app.contains?.(selection.anchorNode));
+}
+function replaceApp(html) {
+  const background = state.backgroundSeq === state.routeSeq;
+  if (background && readerIsBusy()) return;
+  const key = focusKeyOf(typeof document.activeElement === "undefined" ? null : document.activeElement);
+  app.innerHTML = html;
+  if (!key) return;
+  const match = [...app.querySelectorAll(`[${key[0]}]`)].find(element => element.getAttribute(key[0]) === key[1]);
+  match?.focus?.({ preventScroll: true });
+}
 function shortSha(s) { return s ? String(s).slice(0, 7) : "--"; }
 function shortId(s) { s = String(s || ""); return s.length > 13 ? s.slice(0, 13) + "…" : (s || "--"); }
 function shortSuccessor(s) { return String(s || "").slice(0, 12); }
@@ -293,7 +317,10 @@ function rerenderWhenStatus(pending, seq) {
 function setChrome(tab, sub) {
   for (const name of ["Runs", "Repos", "Issues", "Status"]) {
     const el = document.getElementById("tab" + name);
-    if (el) el.classList.toggle("on", tab === name.toLowerCase());
+    if (el) {
+      el.classList.toggle("on", tab === name.toLowerCase());
+      if (tab === name.toLowerCase()) el.setAttribute("aria-current", "page"); else el.removeAttribute("aria-current");
+    }
   }
   const brand = document.getElementById("brandSub");
   if (brand) brand.textContent = sub || "/ dashboard";
@@ -323,7 +350,7 @@ function toggleTheme() {
 
 /* ---------- auth: token entered once, kept in localStorage ---------- */
 function hasToken() { return !!localStorage.getItem("oberth-token"); }
-function setToken(t) { if (t) localStorage.setItem("oberth-token", t.trim()); else localStorage.removeItem("oberth-token"); }
+function setToken(t) { viewCache.clear(); if (t) localStorage.setItem("oberth-token", t.trim()); else localStorage.removeItem("oberth-token"); }
 function authHeaders() { const token = localStorage.getItem("oberth-token"); return token ? { "Authorization": "Bearer " + token } : {}; }
 function showTokenPrompt(message) {
   closeLiveLog();
@@ -363,8 +390,11 @@ async function api(url, opts = {}) {
   const controller = opts.controller || new AbortController();
   if (!opts.detached) state.pendingController = controller;
   let response;
+  const cached = viewCache.get(url);
+  const headers = authHeaders();
+  if (cached) headers["If-None-Match"] = cached.etag;
   try {
-    response = await fetch(url, { cache: "no-store", headers: authHeaders(), signal: controller.signal });
+    response = await fetch(url, { cache: "no-store", headers, signal: controller.signal });
   } catch (err) {
     if (err.name === "AbortError") throw err;
     setConn(false, "network unreachable");
@@ -379,6 +409,14 @@ async function api(url, opts = {}) {
       : (hasToken() ? "Token rejected — enter a current uplink token." : ""));
     throw new Error("authentication required");
   }
+  if (response.status === 304 && cached && cached.gen === gen) {
+    // The view is unchanged since the last poll: reuse its body, no download.
+    setConn(true, "connected");
+    // A copy, so a renderer that sorts or annotates rows never edits the cache.
+    const body = typeof structuredClone === "function" ? structuredClone(cached.body) : JSON.parse(JSON.stringify(cached.body));
+    if (opts.withNext) return { body, next: cached.next };
+    return body;
+  }
   if (!response.ok) {
     let detail = "";
     try { detail = (await response.json()).error || ""; } catch { /* opaque body */ }
@@ -387,9 +425,22 @@ async function api(url, opts = {}) {
     throw error;
   }
   setConn(true, "connected");
+  const body = await response.json();
+  const etag = typeof response.headers?.get === "function" ? response.headers.get("ETag") : null;
+  const next = opts.withNext || etag ? response.headers.get("X-Oberth-Next-Before") || "" : "";
+  if (etag) rememberView(url, { etag, body, next, gen });
   /* opts.withNext also returns the next-page cursor the server names. */
-  if (opts.withNext) return { body: await response.json(), next: response.headers.get("X-Oberth-Next-Before") || "" };
-  return response.json();
+  if (opts.withNext) return { body, next };
+  return body;
+}
+/* Bodies of the most recent JSON views, keyed by URL, so a poll can send
+   If-None-Match and reuse the body on 304. Bounded; cleared on sign-out. */
+const viewCache = new Map();
+const viewCacheLimit = 48;
+function rememberView(url, entry) {
+  viewCache.delete(url);
+  viewCache.set(url, entry);
+  while (viewCache.size > viewCacheLimit) viewCache.delete(viewCache.keys().next().value);
 }
 
 /* ---------- navigation ---------- */
@@ -399,13 +450,25 @@ function go(path) {
   location.href = path;
 }
 function currentRoute(seq) { return seq === state.routeSeq; }
+/* Polls pause while the tab is hidden; returning to it refreshes at once. */
 function setAuto(ms) {
   clearInterval(state.timer);
-  state.timer = setInterval(() => { route(true).catch(() => { }); }, ms || listPollMs);
+  state.timer = setInterval(() => {
+    if (typeof document.hidden !== "undefined" && document.hidden) return;
+    route(true).catch(() => { });
+  }, ms || listPollMs);
 }
 
 /* ---------- data loading ---------- */
-async function loadRepos() { state.repos = await api("/api/repos") || []; }
+async function loadRepos() { state.repos = await api("/api/repos") || []; state.reposLoadedAt = Date.now(); state.reposSummary = false; }
+/* The runs page needs repository names and archive state only: read the
+   summary view, and at most once per slow poll. */
+async function loadRepoSummaries() {
+  if (state.repos.length && Date.now() - (state.reposLoadedAt || 0) < slowPollMs) return;
+  state.repos = await api("/api/repos?view=summary") || [];
+  state.reposLoadedAt = Date.now();
+  state.reposSummary = true;
+}
 const runPageSize = 100;
 /* Status filters search retained attempts; the all view groups by ref. */
 function groupedRuns() { return state.filter === "all"; }
@@ -570,7 +633,7 @@ function runMessageCell(run) {
 }
 function runRow(run) {
   const status = displayRunStatus(run);
-  return `<div class="trow" data-run-id="${esc(run.id)}"><div class="status-cell run-status">${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}</div><div class="primary" title="${esc(`sha ${run.sha || ""} · actor ${run.actor || ""}`)}"><div class="run-name"><div class="repo-name">${esc(repoName(run.repo_id))}</div>${status === "queued" ? priorityBadge(run) : ""}</div><div class="branch">${esc(run.ref_kind === "tag" ? "tag " : "")}${esc(run.ref)}</div></div><div class="when">${whenCell(run)}</div><div class="clip" title="${esc(rowMessage(run))}">${runMessageCell(run)}</div></div>`;
+  return `<div class="trow" data-run-id="${esc(run.id)}" tabindex="0" role="link" aria-label="${esc(`run ${repoName(run.repo_id)} ${run.ref || ""} ${statusLabel(status)}`)}"><div class="status-cell run-status">${statusIcon(status)}${pill(statusLabel(status), statusKind(status))}</div><div class="primary" title="${esc(`sha ${run.sha || ""} · actor ${run.actor || ""}`)}"><div class="run-name"><div class="repo-name">${esc(repoName(run.repo_id))}</div>${status === "queued" ? priorityBadge(run) : ""}</div><div class="branch">${esc(run.ref_kind === "tag" ? "tag " : "")}${esc(run.ref)}</div></div><div class="when">${whenCell(run)}</div><div class="clip" title="${esc(rowMessage(run))}">${runMessageCell(run)}</div></div>`;
 }
 function runsTable(runs) {
   return `<div class="table runs-table"><div class="trow head"><div>status</div><div>run</div><div>when</div><div>message</div></div>${runs.map(runRow).join("")}</div>`;
@@ -646,7 +709,7 @@ async function loadRunAttempts(id, older, refresh = false) {
 }
 async function renderRuns(seq) {
   setChrome("runs", "/ runs");
-  await loadRepos();
+  await loadRepoSummaries();
   const pending = ensureStatus();
   if (state.repo !== "all" && !isQualifiedSelector(state.repo)) await pending;
   state.repo = normalizeRepoSelector(state.repo, "all");
@@ -672,6 +735,7 @@ async function renderRuns(seq) {
   <section class="screen">
     <h1 class="sr-only">Runs</h1>
     ${admissionPausedBanner(state.status?.controller_profile)}
+    ${admissionHoldBanner(state.status?.admission)}
     <div class="runs-layout">
         <div class="toolbar runs-toolbar">
           ${runFilters.map(f => `<button class="chip ${state.filter === f ? "on" : ""}" data-status-filter="${esc(f)}">${esc(f)}</button>`).join("")}
@@ -1326,8 +1390,8 @@ async function renderRunDetailView(detail, seq) {
       </div>
       <div class="rh2">
         <span>actor <span class="ag" title="${esc(run.actor)}">${esc(run.actor || "--")}</span></span>
-        <span>sha <span class="sha cpy" data-copy-text="${esc(run.sha)}" title="${esc(run.sha)} — click to copy">${esc(shortSha(run.sha))}</span></span>
-        <span class="cpy" data-copy-text="${esc(run.id)}" title="${esc(run.id)} — click to copy">run ${esc(shortId(run.id))} ⧉</span>
+        <span>sha <span class="sha cpy" data-copy-text="${esc(run.sha)}" tabindex="0" role="button" title="${esc(run.sha)} — click to copy">${esc(shortSha(run.sha))}</span></span>
+        <span class="cpy" data-copy-text="${esc(run.id)}" tabindex="0" role="button" title="${esc(run.id)} — click to copy">run ${esc(shortId(run.id))} ⧉</span>
         <span>trigger ${esc(run.trigger || "--")}</span>
         <span class="priority-detail">${esc(prioritySummary(run))}</span>
         <span>${esc(run.ref_kind === "tag" ? "tag" : "branch")}</span>
@@ -1425,7 +1489,7 @@ async function renderRepos(seq) {
     <div class="bar"><h1>Repositories</h1><span class="meta">${state.repos.length} configured</span>${archivedToggle()}</div>
     <div class="table repo-table">
       <div class="trow head"><div>repository</div><div>status</div><div>default branch</div><div>latest run</div><div>history</div><div>upstream</div></div>
-      ${rows.map(({ repo, runs, latest }) => `<div class="trow" data-repo-runs="${esc(repoKey(repo))}"><div class="primary"><div class="repo-name">${esc(repoLabel(repo))}</div></div><div>${repo.archived_at ? pill("archived", "cancel") : latest ? pill(statusLabel(displayRunStatus(latest)), statusKind(displayRunStatus(latest))) : '<span class="meta">no runs</span>'}</div><div><div class="branch">${esc(repo.default_branch || "--")}</div>${branchCount(repo)}</div><div>${latest ? `<div class="branch">${esc(latest.ref)}</div><span class="meta">${esc(ago(runWhen(latest)))}</span>` : '<span class="meta">--</span>'}</div><div>${historyStrip(runs)}</div><div class="clip">${esc(upstreamName(repo.upstream_id))}</div></div>`).join("") || '<div class="empty static">No repositories configured.</div>'}
+      ${rows.map(({ repo, runs, latest }) => `<div class="trow" data-repo-runs="${esc(repoKey(repo))}" tabindex="0" role="link" aria-label="${esc(`runs of ${repoLabel(repo)}`)}"><div class="primary"><div class="repo-name">${esc(repoLabel(repo))}</div></div><div>${repo.archived_at ? pill("archived", "cancel") : latest ? pill(statusLabel(displayRunStatus(latest)), statusKind(displayRunStatus(latest))) : '<span class="meta">no runs</span>'}</div><div><div class="branch">${esc(repo.default_branch || "--")}</div>${branchCount(repo)}</div><div>${latest ? `<div class="branch">${esc(latest.ref)}</div><span class="meta">${esc(ago(runWhen(latest)))}</span>` : '<span class="meta">--</span>'}</div><div>${historyStrip(runs)}</div><div class="clip">${esc(upstreamName(repo.upstream_id))}</div></div>`).join("") || '<div class="empty static">No repositories configured.</div>'}
     </div>
   </section>`);
   setAuto(slowPollMs);
@@ -1570,7 +1634,20 @@ function pressureStatusCard(pressure) {
    many runs Oberth admitted, never a ceiling of its own. */
 function admissionStatusCard(admission) {
   if (!admission) return "";
+  const hold = admission.hold?.on ? admission.hold : null;
+  if (hold) return svcCard("admission", `held by admin · ${admission.runs ?? 0} admitted`, esc(admissionHoldText(hold)), "warn");
   return svcCard("admission", `${admission.runs ?? 0} admitted`, "run limits: Argo controller parallelism and native synchronization", "ok");
+}
+/* The whole administrator hold: reason, who, until when, what may pass. */
+function admissionHoldText(hold) {
+  const allowed = (hold.allow || []).length ? hold.allow.join(", ") : "nothing";
+  const until = hold.expires_at ? ` until ${fmtTime(hold.expires_at)}` : "";
+  return `${hold.reason || "no reason recorded"} · by ${hold.actor || "an admin"}${until} · allowed: ${allowed}`;
+}
+function admissionHoldBanner(admission) {
+  const hold = admission?.hold;
+  if (!hold?.on) return "";
+  return `<div role="status" class="svc warn"><strong>Queue held by admin</strong><div>${esc(admissionHoldText(hold))}</div></div>`;
 }
 function controllerProfileStatusCard(profile) {
  if (!profile) return "";
@@ -1640,6 +1717,7 @@ async function renderStatus(seq) {
 /* ---------- router ---------- */
 async function route(background) {
   const seq = ++state.routeSeq;
+  state.backgroundSeq = background ? seq : 0;
   clearInterval(state.timer);
   if (!hasToken()) { showTokenPrompt(); return; }
   if (!background) window.scrollTo(0, 0);
@@ -1733,6 +1811,12 @@ app.addEventListener("click", event => {
 });
 document.addEventListener("keydown", event => {
   if (event.key === "Enter" && event.target instanceof HTMLInputElement && event.target.id === "tokenInput") { submitToken(); return; }
+  /* Row links and copy controls are not buttons: Enter (and Space) open them. */
+  if ((event.key === "Enter" || event.key === " ") && event.target instanceof Element && event.target.matches?.('[role="link"][tabindex], [role="button"][tabindex]') && app.contains(event.target)) {
+    event.preventDefault();
+    event.target.click();
+    return;
+  }
   if (document.getElementById("issueDialog")?.open) return;
   if (event.target && ["INPUT", "SELECT", "TEXTAREA"].includes(event.target.tagName)) return;
   if (event.key === "r" || event.key === "R") route();
@@ -1751,6 +1835,9 @@ document.addEventListener("keydown", event => {
   }
 });
 window.addEventListener("popstate", () => route());
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && hasToken() && state.timer) route(true).catch(() => { });
+});
 const issueDialog = document.getElementById("issueDialog");
 issueDialog?.addEventListener("cancel", event => { event.preventDefault(); closeIssue(); });
 issueDialog?.addEventListener("click", event => { if (event.target === issueDialog) closeIssue(); });

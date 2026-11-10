@@ -7,20 +7,20 @@
 *{box-sizing:border-box}
 :root{
   --bg:#282a36;--panel:#21222c;--panel2:#1e1f29;--panel3:#343746;
-  --line:#44475a;--line2:#6272a4;--fg:#f8f8f2;--muted:#b0b8d1;--dim:#7a84a8;
+  --line:#44475a;--line2:#6272a4;--fg:#f8f8f2;--muted:#b0b8d1;--dim:#959fc0;
   --cyan:#8be9fd;--green:#50fa7b;--orange:#ffb86c;--pink:#ff79c6;
   --purple:#bd93f9;--red:#ff5555;--yellow:#f1fa8c;--shadow:#14151d66;
   --s-pass:#50fa7b;--s-fail:#ff5555;--s-run:#f0c040;--s-pending:#8b949e;--s-cancel:#8b949e;
-  --tbg:#11131a;--tbar:#1b1e29;--tfg:#e7ecf4;--tdim:#7d879a;
+  --tbg:#11131a;--tbar:#1b1e29;--tfg:#e7ecf4;--tdim:#939db0;
   --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   --sans:"IBM Plex Sans",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
 }
 body.light{
   --bg:#f6f7fb;--panel:#ffffff;--panel2:#eef1f7;--panel3:#e2e7f1;
-  --line:#d3d9e8;--line2:#9ca8bf;--fg:#151c2c;--muted:#526078;--dim:#7b879b;
+  --line:#d3d9e8;--line2:#9ca8bf;--fg:#151c2c;--muted:#526078;--dim:#5f6b80;
   --cyan:#147a91;--green:#168a3a;--orange:#a9620f;--pink:#b33682;
   --purple:#6842b7;--red:#c52d35;--yellow:#7c6500;--shadow:#5b64781f;
-  --s-pass:#2da44e;--s-fail:#cf222e;--s-run:#bf8700;--s-pending:#656d76;--s-cancel:#656d76;
+  --s-pass:#116329;--s-fail:#cf222e;--s-run:#8a5f00;--s-pending:#656d76;--s-cancel:#656d76;
 }
 html,body{min-height:100%;margin:0}
 body{background:var(--bg);color:var(--fg);font-family:var(--mono);min-width:320px}
@@ -300,3 +300,5 @@ input,select{height:32px;border:1px solid var(--line);background:var(--panel);co
   .issue-context .issue-filed,.issue-context .issue-worked{flex:0 0 auto;font-size:inherit}
   .issue-context .issue-filed::before,.issue-context .issue-worked::before{content:"· ";color:var(--dim)}
 }
+/* Run and repository rows open with Enter; copy controls are focusable. */
+.trow[tabindex]:focus-visible,.cpy[tabindex]:focus-visible{outline:2px solid var(--purple);outline-offset:-2px}
