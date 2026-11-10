@@ -61,12 +61,6 @@ SELECT sequence, repo_id, branch, origin, run_id, promotion_id, actor
 FROM ci_issue_work WHERE run_id = ?`, runID))
 }
 
-func promotionIssueWork(ctx context.Context, tx *sql.Tx, promotionID string) (ciIssueWork, error) {
-	return scanCIIssueWork(tx.QueryRowContext(ctx, `
-SELECT sequence, repo_id, branch, origin, run_id, promotion_id, actor
-FROM ci_issue_work WHERE promotion_id = ?`, promotionID))
-}
-
 func scanCIIssueWork(row rowScanner) (ciIssueWork, error) {
 	var value ciIssueWork
 	var runID, promotionID sql.NullString
@@ -164,43 +158,6 @@ func runIssueBody(run model.Run, failureTail string) string {
 		sections = append(sections, fmt.Sprintf("full step log: logs %s %s", sha, step))
 	}
 	return strings.Join(sections, "\n\n")
-}
-
-func (s *Store) projectPromotionIssue(ctx context.Context, tx *sql.Tx, promotion model.Promotion, now int64) error {
-	if promotion.Status == model.PromotionInterrupted {
-		return nil
-	}
-	if promotion.Status == model.PromotionFailed && promotion.RunID != "" {
-		run, err := scanRun(tx.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs
-			WHERE id = ? AND repo_id = ? AND trigger = 'promotion'`, promotion.RunID, promotion.RepoID))
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("load promotion run for issue projection: %w", err)
-		}
-		if err == nil && transientNodeFailure(run) {
-			return nil
-		}
-	}
-	work, err := promotionIssueWork(ctx, tx, promotion.ID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("load promotion issue work: %w", err)
-	}
-	outcome := ciOutcomeFailed
-	if promotion.Status == model.PromotionPassed {
-		outcome = ciOutcomePassed
-	}
-	projection := ciIssueProjection{
-		Work:  work,
-		Title: fmt.Sprintf("Promotion red: %s → %s failed", promotion.SourceBranch, promotion.TargetRef),
-		Body: fmt.Sprintf(
-			"promotion %s, source %s, target %s, result %s\n\n%s",
-			promotion.ID, promotion.SourceSHA, promotion.TargetRef, promotion.ResultSHA, strings.TrimSpace(promotion.Error),
-		),
-		Resolution: fmt.Sprintf("resolved by promotion %s", promotion.ID),
-	}
-	return s.applyCIIssueProjection(ctx, tx, projection, outcome, now)
 }
 
 func (s *Store) applyCIIssueProjection(ctx context.Context, tx *sql.Tx, projection ciIssueProjection, outcome string, now int64) error {

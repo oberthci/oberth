@@ -1005,9 +1005,6 @@ RETURNING `+runColumns,
 		if promotionErr != nil {
 			return model.Run{}, promotionErr
 		}
-		if err := s.projectPromotionIssue(ctx, tx, promotion, now); err != nil {
-			return model.Run{}, err
-		}
 	} else if value.AutoRetriedBy == "" {
 		if err := s.projectRunIssue(ctx, tx, value, result.FailureTail, now); err != nil {
 			return model.Run{}, err

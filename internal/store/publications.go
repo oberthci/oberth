@@ -355,11 +355,9 @@ RETURNING sequence, id, repo_id, source_branch, source_sha, target_ref, previous
 			}
 		}
 	}
-	if finalization.Promotion.ID != "" {
-		if err := s.projectPromotionIssue(ctx, tx, finalization.Promotion, now); err != nil {
-			return model.PublicationFinalization{}, err
-		}
-	} else if finalization.Run.ID != "" {
+	// Promotions file no CI issues (scoped to default-branch and scheduled
+	// runs); only a run's own publication projects one.
+	if finalization.Promotion.ID == "" && finalization.Run.ID != "" {
 		if err := s.projectRunIssue(ctx, tx, finalization.Run, "", now); err != nil {
 			return model.PublicationFinalization{}, err
 		}

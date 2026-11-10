@@ -1009,9 +1009,6 @@ ORDER BY queue_sequence`)
 				if err != nil {
 					return err
 				}
-				if err := s.projectPromotionIssue(ctx, tx, promotion, now); err != nil {
-					return err
-				}
 			} else if err := s.projectRunIssue(ctx, tx, recovered, "", now); err != nil {
 				return err
 			}
@@ -1062,9 +1059,6 @@ RETURNING `+runColumns, now, now, active.ID))
 			)
 			if promotionErr != nil {
 				return promotionErr
-			}
-			if err := s.projectPromotionIssue(ctx, tx, promotion, now); err != nil {
-				return err
 			}
 		} else if err := s.projectRunIssue(ctx, tx, recovered, "", now); err != nil {
 			return err
@@ -1123,12 +1117,8 @@ ORDER BY sequence`)
 				}
 			}
 		}
-		recovered, recoveryErr := finishPromotionTx(ctx, tx, pending, status, pending.RunID, failure, now)
-		if recoveryErr != nil {
+		if _, recoveryErr := finishPromotionTx(ctx, tx, pending, status, pending.RunID, failure, now); recoveryErr != nil {
 			return recoveryErr
-		}
-		if err := s.projectPromotionIssue(ctx, tx, recovered, now); err != nil {
-			return err
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -1832,9 +1822,6 @@ func (s *Store) FinishPromotion(ctx context.Context, id string, status model.Pro
 	}
 	value, err := finishPromotionTx(ctx, tx, current, status, runID, failure, now)
 	if err != nil {
-		return model.Promotion{}, err
-	}
-	if err := s.projectPromotionIssue(ctx, tx, value, now); err != nil {
 		return model.Promotion{}, err
 	}
 	if err := tx.Commit(); err != nil {
