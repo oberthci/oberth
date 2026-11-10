@@ -69,11 +69,81 @@ sequence number.
 
 ## 2. Configure Claude Code
 
-`oberth install` offers to write this for you on an interactive install, right
-after it registers the uplink, into `~/.config/oberth/mcp.json`. What follows is
-the same thing by hand, and the explanation of why it is shaped the way it is.
+### `oberth client setup`
+
+On any machine that holds the token (in `~/.config/oberth/token`, mode 0600,
+or a secret store) and the deployment's CA (`~/.config/oberth/ca.crt`, see
+[below](#via-the-https-nodeport)), one command configures Claude Code:
+
+```bash
+oberth client setup --url https://localhost:30443/mcp
+```
+
+It registers Oberth with `claude mcp add-json oberth --scope user` as:
+
+```json
+{
+  "type": "http",
+  "url": "https://localhost:30443/mcp",
+  "headersHelper": "printf '{\"Authorization\":\"Bearer %s\"}' \"$(cat \"${XDG_CONFIG_HOME:-$HOME/.config}/oberth/token\")\"",
+  "timeout": 630000
+}
+```
+
+and adds `env.NODE_EXTRA_CA_CERTS` (the absolute CA path) to
+`~/.claude/settings.json`, keeping every other key. Then plain `claude` connects
+with no environment variables and no launcher; `claude mcp get oberth` shows
+`Status: ✔ Connected` and `Timeout: 630000ms`, and the command checks that
+itself at the end.
+
+- **What it changes is printed**, one line per target with each difference;
+  `--dry-run` prints the same, including the `claude` commands, and changes
+  nothing. Running it again prints `no change`. An entry registered by hand
+  that already has an HTTP url, a working `headersHelper` and the timeout is
+  kept as it is.
+- **No secret is written.** The token is read by the `headersHelper` command
+  each time Claude Code connects; neither `~/.claude.json` nor the settings
+  file holds it. A literal `Authorization` header or a `${OBERTH_TOKEN}`
+  header from an older setup is replaced. A literal `OBERTH_TOKEN` in the
+  environment is ignored.
+- **Where the values come from.** Each flag falls back to the CLI's own
+  configuration: `--url` to `OBERTH_MCP_URL`, `OBERTH_BASE_URL` (plus `/mcp`),
+  the `env` and `mcp.json` files `oberth install` writes, then the server
+  Claude Code already has registered; `--ca-file` to `OBERTH_CA_CERT`, the
+  `env` file, then `~/.config/oberth/ca.crt`. The token command is
+  `--token-command`, or `cat` of `--token-file` (refused unless mode 0600),
+  else `OBERTH_TOKEN_COMMAND`, the `env` file, the token file in
+  `~/.config/oberth`, and finally the platform secret store (`security`,
+  `secret-tool` or `pass`). An existing working `headersHelper` is replaced
+  only when `--token-command` or `--token-file` is given.
+- **CA trust.** `--ca-trust settings` (the default) uses the settings `env`
+  block, which Claude Code applies to its own process. When
+  `NODE_EXTRA_CA_CERTS` already names another bundle, the command keeps it if
+  the bundle holds the Oberth CA and otherwise stops with an error rather than
+  replacing it (the variable names a single file). `--ca-trust system` relies
+  on the operating system trust store, which Claude Code's native binary reads
+  by default; the command checks it and, when the CA is missing, prints the
+  `sudo` command that adds it. `--ca-trust none` is for a server behind a
+  publicly trusted certificate.
+- **Claude Code settings location.** `CLAUDE_CONFIG_DIR`, when set, holds both
+  `.claude.json` and `settings.json`, as it does for Claude Code itself.
+
+`oberth install` uses the same path for the machine it runs on when you choose
+MCP access, timeout and CA trust included, and also writes the entry to
+`~/.config/oberth/mcp.json` for other clients.
+
+The `"timeout"` field is required for long waits: Claude Code's default
+per-request timeout for an HTTP MCP server is 60 s, and `run_wait`, `wait` and
+`promote_status` block for up to 600 s. With the timeout, a 600 s `run_wait`
+through Claude Code 2.1.322 returns after the full wait. An interactive
+session moves a call that runs longer than 120 s into a background task and
+delivers its result when it returns; `-p` mode waits in the foreground. Server push to a Claude Code session needs a per-session flag; see
+[agent events](agent-events.md#claude-code).
 
 ### Keep the token out of the file
+
+This and the next sections are what `oberth client setup` does, by hand, and
+why it is shaped the way it is.
 
 The obvious configuration puts the bearer token in a literal header, and then a
 credential lives in a file for as long as the file does. `headersHelper` names a
@@ -85,7 +155,8 @@ command that prints the headers instead, run fresh on every connection:
     "oberth": {
       "type": "http",
       "url": "https://oberth:30443/mcp",
-      "headersHelper": "printf '{\"Authorization\":\"Bearer %s\"}' \"$(security find-generic-password -s oberth-token -w)\""
+      "headersHelper": "printf '{\"Authorization\":\"Bearer %s\"}' \"$(security find-generic-password -s oberth-token -w)\"",
+      "timeout": 630000
     }
   }
 }
@@ -118,11 +189,12 @@ is typically checked into the repository.
 {
   "mcpServers": {
     "oberth": {
-      "type": "url",
+      "type": "http",
       "url": "https://<node-address>:30443/mcp",
       "headers": {
         "Authorization": "Bearer oberth_xxxxxxxxxxxxxxxx"
-      }
+      },
+      "timeout": 630000
     }
   }
 }
@@ -676,7 +748,9 @@ Heartbeats prevent an idle reverse proxy from timing out a silent long poll.
 The observed Cloudflare HTTP 524 at approximately 125 seconds is one such
 failure; extending the origin write deadline alone does not prevent it.
 Heartbeats do not extend a client's total MCP request deadline. Keep the tool's
-`timeout` below that configured deadline (for Codex, `tool_timeout_sec`). JSON
+`timeout` below that configured deadline (for Codex, `tool_timeout_sec`; for
+Claude Code, the server entry's `"timeout"`, which `oberth client setup` sets
+to 630000 ms against a 60 s default). JSON
 clients behind an idle proxy should use shorter waits and retry; 100 seconds
 is below the observed edge limit. A transport failure leaves the run or
 promotion unchanged: disconnect cancels only its observation, and the heartbeat

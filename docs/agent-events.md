@@ -65,34 +65,52 @@ its upstreams, through any of these paths.
 
 ### Claude Code
 
-Configure Oberth as an HTTP MCP server and allow its channel:
+Configure Claude Code once per machine with `oberth client setup` (see
+[MCP setup](mcp-setup.md#oberth-client-setup)). It registers Oberth as a
+user-scope HTTP server whose `headersHelper` reads the token at connect time,
+with `"timeout": 630000`, and trusts the CA through `env.NODE_EXTRA_CA_CERTS`
+in `~/.claude/settings.json`. No environment variable, token in a file or
+launcher script is needed. What a session then gets depends on one flag.
 
-```json
-{
-  "mcpServers": {
-    "oberth": {
-      "type": "http",
-      "url": "https://oberth.example:30443/mcp",
-      "headers": { "Authorization": "Bearer ${OBERTH_TOKEN}" }
-    }
-  }
-}
-```
+**Plain `claude` (and `claude -p`, the Agent SDK): tools, `run_wait` and
+`events_since`; no push.** Every Oberth tool works. Waiting is a tool call:
+`run_wait {id, timeout_s: 600}` blocks server-side until the run finishes,
+holds or times out. Verified with Claude Code 2.1.322 in `-p` mode: a
+`run_wait {timeout_s: 600}` on a running run returned `state: timeout` after
+10 m 0 s, with no client timeout. In an interactive session Claude Code
+documents moving an MCP call that runs longer than 120 s into a background
+task (`CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS`) and delivering its result when it
+returns, so the agent keeps working and still hears the outcome; `-p` mode
+waits for the call in the foreground. After a
+reconnect or a long gap, `events_since {after_id}` reads what happened in
+order. Pushed events do not arrive in this mode, so do not wait for them.
+
+The 630 s timeout matters here: Claude Code's default per-request timeout for
+an HTTP MCP server is 60 s, which cuts a 600 s `run_wait` at one minute. The
+registered timeout covers the longest wait plus its final heartbeat. An entry
+registered by hand needs the same field (`claude mcp get oberth` shows
+`Timeout: 630000ms`).
+
+**Push: interactive sessions started with the development-channels flag.**
 
 ```sh
-export OBERTH_TOKEN="$(cat ~/.config/oberth/token)"
-NODE_EXTRA_CA_CERTS=~/.config/oberth/ca.crt \
-  claude --dangerously-load-development-channels server:oberth
+claude --dangerously-load-development-channels server:oberth
 ```
 
-`--channels` accepts only Claude Code's allowlisted channel plugins, so a
-custom server needs the development flag; it is ignored in `-p` mode and in
-the Agent SDK. Claude Code documents channels over stdio; Oberth's HTTP
-stream uses the same capability and notification, but confirm delivery on
-your client version with `/mcp` and `claude --debug` before relying on it,
-and keep `run_wait` or `events_since` as the fallback. Events then arrive in
-the session as
+Claude Code's channels are a research preview. A session receives channel
+notifications only from servers named for that session: `--channels` accepts
+only plugins on Anthropic's channel allowlist (or an organisation's
+`allowedChannelPlugins` managed setting), and any other server, Oberth
+included, needs `--dangerously-load-development-channels`, which shows a
+confirmation dialog at each start. The flag is ignored in `-p` mode and in the
+Agent SDK, and no settings key, environment variable or `.mcp.json` field
+replaces it. With it, Claude Code 2.1.322 logs `Channel notifications
+registered` for `oberth` over HTTP and holds one of the credential's GET
+streams; events then arrive in the session as
 `<channel source="oberth" kind="run.held" step="test" abandon_at="..." ...>`.
+Confirm on your client version with `/mcp` and `claude --debug`, and keep
+`run_wait` and `events_since` as the fallback either way.
+
 Claude Code's v2 runtime does not register a channel from a server that
 negotiates MCP revision 2026-07-28; Oberth negotiates 2025-06-18 and is
 unaffected.
@@ -125,7 +143,9 @@ unaffected.
 - `run_wait {id, until: finished|held|any, timeout_s}` blocks server-side, at
   most 600 s, and returns `state` (`finished`, `held`, `changed`, `timeout`),
   the run summary, its unreleased holds and `retry_hint`. It replaces client
-  loops around `run_get`.
+  loops around `run_get`. The client's request timeout must exceed the wait:
+  Claude Code needs the server entry's `"timeout": 630000` (its default is
+  60 s).
 - `events_since {after_id, limit, repos?, refs_glob?, kinds?, own?}` pages the
   event log in ID order; continue with `next_after_id`.
 - `sync_status {lock?, since?, limit?}` returns, per native Argo lock key
