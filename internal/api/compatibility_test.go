@@ -328,7 +328,7 @@ func keys(object map[string]json.RawMessage) []string {
 // A json tag that spells a lowerCamel wire name (queue_cap_config's
 // maxNotStarted, a declaration's activeDeadlineSeconds) is the field's
 // declared name, not a Go-style duplicate: it stays next to its snake_case
-// spelling, so system_status keeps the legacy queueCap shape it documents.
+// spelling, so system_status keeps the older queueCap shape it documents.
 func TestLowerCamelTaggedNamesStayByDefault(t *testing.T) {
 	payload := struct {
 		Canonical *struct {
