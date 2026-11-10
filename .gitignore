@@ -11,6 +11,8 @@ oberth-*
 !cmd/oberth-kvm-harness/
 # Host service files shipped from deploy/systemd (issue 056).
 !deploy/systemd/oberth-*
+# The Claude Code plugin skill (#1521).
+!claude-plugin/skills/oberth-agent-loop/
 *.tar.gz
 
 # Setup backlog lives outside the repository (~/work/oberth/issues).
