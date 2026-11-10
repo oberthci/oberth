@@ -5,12 +5,14 @@ umask 077
 from=${FROM_VERSION:-}
 read -r -a candidates <<< "${CANDIDATES:-}"
 rehearse=${REHEARSE_ROLLBACK:-false}
+rehearse_published=${REHEARSE_TO_PUBLISHED:-false}
 while (($#)); do
   case $1 in
     --rehearse-rollback) rehearse=true; shift ;;
+    --rehearse-rollback-to-published) rehearse=true; rehearse_published=true; shift ;;
     --from) from=${2:?--from requires a version}; shift 2 ;;
     --candidate) candidates+=("${2:?--candidate requires a ref}"); shift 2 ;;
-    --help) echo 'Usage: run.sh --from VERSION --candidate REF [--candidate REF ...] [--rehearse-rollback]'; exit 0 ;;
+    --help) echo 'Usage: run.sh --from VERSION --candidate REF [--candidate REF ...] [--rehearse-rollback | --rehearse-rollback-to-published]'; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -22,7 +24,8 @@ from=${from#v}
 if $rehearse && ((${#candidates[@]} != 1)); then
   echo '--rehearse-rollback takes exactly one --candidate' >&2; exit 2
 fi
-export FROM_VERSION=$from CANDIDATES="${candidates[*]}" REHEARSE_ROLLBACK=$rehearse
+[[ $rehearse_published == true || $rehearse_published == false ]] || { echo 'REHEARSE_TO_PUBLISHED must be true or false' >&2; exit 2; }
+export FROM_VERSION=$from CANDIDATES="${candidates[*]}" REHEARSE_ROLLBACK=$rehearse REHEARSE_TO_PUBLISHED=$rehearse_published
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 repo=${E2E_REPO:-}
 if [[ -z $repo ]]; then
@@ -267,7 +270,11 @@ if $rehearse; then
   # Since v0.20 a server claims every queued run at once; the rollback
   # rehearsal needs queued runs in its pre-upgrade backup, so it holds
   # admission (administrator hold, no class allowed) until it releases them.
-  fixture_pod fixture-hold hold-on
+  # Rolling back to the published release, the seed hold lapses by itself
+  # after the pre-upgrade backup, so the restore has to place its own.
+  hold_mode=hold-on
+  ! $rehearse_published || hold_mode=hold-on-5m
+  fixture_pod fixture-hold "$hold_mode"
   k -n oberth delete pod fixture-hold --wait=true
 fi
 k create -f "$evidence/workflow.json"
@@ -342,7 +349,7 @@ schedule_probe() {
     "$(jq '.Ledger|length' "$evidence/state-$phase.json")" 0
 }
 if $rehearse; then
-  rehearse_rollback
+  if $rehearse_published; then rehearse_rollback_to_published; else rehearse_rollback; fi
   k -n oberth get secrets -o json | jq -e '[.items[]|select(.type!="helm.sh/release.v1")]|length==0' >/dev/null
   printf 'PASS: oberth upgrade across a schema migration (backup, rollback record), oberth upgrade --rollback (Helm rollback, history restore), previous version and history back, no restored run dispatched again\n'
   exit 0

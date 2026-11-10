@@ -167,3 +167,75 @@ rehearse_rollback() {
   printf 'rehearsal: %s -> %s (schema %s -> %s) -> rollback to %s; run admitted after the upgrade: %s; holder %s\n' \
     "${candidate_versions[$a]}" "${candidate_versions[$b]}" "$schema_a" "$schema_b" "${candidate_versions[$a]}" "$target" "$holder" >"$out/summary.txt"
 }
+
+# rehearse_rollback_to_published: published release --oberth upgrade-->
+# rehearsal build (one throwaway migration) --oberth upgrade --rollback-->
+# published release. The published server does not read the restored-runs
+# marker, so the restore must hold admission in the restored database: the
+# backup's queued runs stay queued until the hold is released. The seed hold
+# (five minutes) covers the pre-upgrade backup and then lapses, so the
+# upgraded server claims that work, and the backup's own hold has lapsed by
+# the time of the restore.
+rehearse_rollback_to_published() {
+  local b=rehearsal out="$evidence/rehearsal" home="$private/home"
+  local cli="$private/oberth-$b" schema_a schema_b record holder hold_until
+  mkdir -p "$out" "$home"
+  schema_b=$("$private/oberth-$b" version --schema)
+  rehearsal_version "v$from" before
+  k -n oberth-argo wait --for=jsonpath='{.status.phase}'=Running workflow/oberth-e2e-running --timeout=60s
+  rehearsal_runs before
+  schema_a=$(jq -sr 'map(select(.schema))|.[0].schema' "$out/runs-before.jsonl")
+  [[ $schema_b == $((schema_a+1)) ]] || { echo "rehearsal schema $schema_b is not $schema_a+1" >&2; return 1; }
+  jq -se '([.[]|select(.status=="running")]|length)==1 and ([.[]|select(.status=="queued")]|length)==4' "$out/runs-before.jsonl" >/dev/null
+  hold_until=$(( $(date +%s) + 300 ))
+
+  awk -v ref="${candidate_refs[$b]}" '/^image:/{img=1} img && /^  ref:/{print "  ref: " ref; img=0; next} {print}' \
+    "$private/source-$b/charts/oberth/values.yaml" >"$private/rehearsal-values.yaml"
+  mv "$private/rehearsal-values.yaml" "$private/source-$b/charts/oberth/values.yaml"
+  HOME=$home nice "$cli" upgrade --chart "$private/source-$b/charts/oberth" --yes --backup-dir "$out" \
+    --set image.pullPolicy=Never --timeout 5m >"$out/upgrade.log" 2>&1 || { cat "$out/upgrade.log" >&2; return 1; }
+  # The backup must have been taken while the seed hold still held the runs.
+  (( $(date +%s) < hold_until )) || { echo "the seed hold lapsed before the upgrade finished; the backup may hold no queued runs" >&2; return 1; }
+  rehearsal_version "${candidate_versions[$b]}" upgraded
+  record=$(find "$out" -maxdepth 1 -name 'oberth-upgrade-*.json' -print -quit)
+  jq -e --argjson a "$schema_a" --argjson b "$schema_b" '.schemaBefore==$a and .schemaAfter==$b and (.backup|length)>0' "$record" >/dev/null
+
+  # Work on the new version once the seed hold lapses.
+  holder=$(jq -sr '.[]|select(.status=="running")|.id' "$out/runs-before.jsonl")
+  k -n oberth-argo delete workflow oberth-e2e-running --wait=true
+  for ((i=0;i<120;i++)); do
+    rehearsal_runs dispatched
+    if jq -se '[.[]|select(.id)]|all(.status!="queued")' "$out/runs-dispatched.jsonl" >/dev/null; then break; fi
+    sleep 5
+  done
+  jq -se '[.[]|select(.id)]|all(.status!="queued")' "$out/runs-dispatched.jsonl" >/dev/null ||
+    { echo "the upgraded server did not claim the queued runs after the seed hold lapsed" >&2; return 1; }
+
+  HOME=$home nice "$cli" upgrade --rollback "$record" --yes --timeout 5m >"$out/rollback.log" 2>&1 || { cat "$out/rollback.log" >&2; return 1; }
+  rg -qF 'oberth admission hold off --reason "restored runs checked"' "$out/rollback.log" ||
+    { echo "the rollback placed no admission hold" >&2; return 1; }
+  rehearsal_version "v$from" rolled-back
+  k -n oberth rollout status deploy/oberth --timeout=180s
+  sleep 45
+  # The published server runs the restored history, held: the backup's queued
+  # runs are still queued (not dispatched again), and nothing was added.
+  rehearsal_runs rolled-back
+  jq -se --argjson s "$schema_a" '(map(select(.schema))|.[0].schema)==$s' "$out/runs-rolled-back.jsonl" >/dev/null
+  jq -se --slurpfile before <(jq -s 'map(select(.id))|map(.id)|sort' "$out/runs-before.jsonl") \
+    'map(select(.id))|map(.id)|sort == $before[0]' "$out/runs-rolled-back.jsonl" >/dev/null ||
+    { echo "restored run set differs from the backup's" >&2; return 1; }
+  jq -se --arg holder "$holder" '[.[]|select(.id and .id!=$holder)]|all(.status=="queued")' "$out/runs-rolled-back.jsonl" >/dev/null ||
+    { echo "the published server dispatched restored queued runs despite the hold" >&2; return 1; }
+  # Releasing the hold is the operator's decision; once released, the
+  # published server dispatches that work (it does not read the marker).
+  rehearsal_release_hold published "$fixture_image"
+  for ((i=0;i<60;i++)); do
+    rehearsal_runs released
+    if jq -se --arg holder "$holder" '[.[]|select(.id and .id!=$holder)]|all(.status!="queued")' "$out/runs-released.jsonl" >/dev/null; then break; fi
+    sleep 3
+  done
+  jq -se --arg holder "$holder" '[.[]|select(.id and .id!=$holder)]|all(.status!="queued")' "$out/runs-released.jsonl" >/dev/null ||
+    { echo "the hold, not something else, should have been what held the runs" >&2; return 1; }
+  printf 'rehearsal: %s -> %s (schema %s -> %s) -> rollback to %s; restored queued runs held until release; holder %s\n' \
+    "v$from" "${candidate_versions[$b]}" "$schema_a" "$schema_b" "v$from" "$holder" >"$out/summary.txt"
+}

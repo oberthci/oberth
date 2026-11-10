@@ -136,7 +136,13 @@ The two chart versions are stamped `v<major>.<minor+1>.0-e2e.a.<sha>` and
 `...-e2e.b.<sha>`. The behavioral backfill check and the migration probe of
 the default path are skipped. Evidence is under `<evidence>/rehearsal/`.
 
-The rollback target here is a build of the candidate itself: the restored-runs
-marker is read by the server the rollback returns to, so rolling back to a
-release older than v0.21.0 restores the history and the version but cannot
-stop that older server from dispatching the restored queued runs again.
+The rollback target here is a build of the candidate itself, which reads the
+restored-runs marker. `--rehearse-rollback-to-published` instead runs
+`oberth upgrade` from the published release straight to the rehearsal build
+and rolls back to the published release, which predates the marker. The seed
+hold then lasts five minutes: it covers the pre-upgrade backup and lapses
+before the restore, so the upgraded server claims the queued work and the
+restore has to place its own hold. The rehearsal checks that the published
+server, after the rollback, leaves the backup's queued runs queued and adds
+none, and that releasing the hold (the operator's step) is what lets it
+dispatch them.

@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/mod/semver"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -525,6 +526,13 @@ func applyRestore(ctx context.Context, cfg RestoreConfig, deps backupDeps, archi
 			"Scaling up now runs the restored database, which needs the restored compatibility values; "+
 			"to return to the previous state instead, move those files back to /data first",
 			err, target.Timestamp, target.Server.ClaimName)
+	}
+
+	if parts.History {
+		var err error
+		if archive, err = placeRollbackHold(ctx, cfg, archive, target, w); err != nil {
+			return err
+		}
 	}
 
 	_, _ = fmt.Fprintln(w, "Stopping the server...")
@@ -1058,3 +1066,57 @@ func printRestoreNextSteps(w io.Writer, cfg RestoreConfig, archive restoreArchiv
 // errRestoredDatabaseInPlace marks a swap failure that happened after the
 // restored database was already in place.
 var errRestoredDatabaseInPlace = errors.New("the restored database is in place but its final check failed")
+
+// rollbackHoldReason is the reason line of the hold a rollback restore places.
+const rollbackHoldReason = "restored by oberth upgrade --rollback: check the queued runs, then release this hold"
+
+// rollbackHoldDuration is the longest hold the store accepts.
+const rollbackHoldDuration = 12 * time.Hour
+
+// placeRollbackHold holds admission in the restored database before any
+// server opens it, when a rollback restores queued or waiting runs onto a
+// release older than v0.21.0: such a server does not read the restored-runs
+// marker and would dispatch that work again, although it may already have run
+// on the version the rollback undid. An admission hold is honoured by every
+// release since v0.17.85. A hold the backup already had is kept. The file
+// changes, so its hashes are taken again for the swap.
+func placeRollbackHold(ctx context.Context, cfg RestoreConfig, archive restoreArchive, target restoreTarget, w io.Writer) (restoreArchive, error) {
+	if !cfg.InterruptQueued {
+		return archive, nil
+	}
+	if version := canonicalChartVersion(target.ChartVersion); version != "" && semver.Compare(version, "v0.21.0-0") >= 0 {
+		// The server reads the restored-runs marker and cancels that work.
+		return archive, nil
+	}
+	compat := archive.Manifest.Compatibility
+	opts := store.Options{Protocol: store.ProtocolConfig{SchemaIdentity: compat.SchemaIdentity, AuditDomain: compat.AuditDomain}}
+	placed, hold, err := store.PlaceRestoreHold(ctx, archive.Database.Main, opts, "oberth upgrade --rollback", rollbackHoldReason, rollbackHoldDuration)
+	switch {
+	case errors.Is(err, store.ErrNoAdmissionHold):
+		_, _ = fmt.Fprintf(w, "WARNING: the backup predates the admission hold; release %s may dispatch the backup's queued runs again: check its queue once it starts.\n",
+			displayVersion(target.ChartVersion))
+		return archive, nil
+	case err != nil:
+		return archive, fmt.Errorf("hold admission in the restored database: %w", err)
+	case !placed && hold.On:
+		_, _ = fmt.Fprintf(w, "  ✓ the backup already holds admission (%q, until %s); it is kept\n", hold.Reason, hold.ExpiresAt.Format(time.RFC3339))
+		return archive, nil
+	case !placed:
+		return archive, nil
+	}
+	if archive.Database.MainSHA256, err = fileSHA256(archive.Database.Main); err != nil {
+		return archive, err
+	}
+	archive.Database.WAL, archive.Database.WALSHA256 = "", ""
+	if info, err := os.Stat(archive.Database.Main + "-wal"); err == nil && info.Size() > 0 {
+		archive.Database.WAL = archive.Database.Main + "-wal"
+		if archive.Database.WALSHA256, err = fileSHA256(archive.Database.WAL); err != nil {
+			return archive, err
+		}
+	}
+	_, _ = fmt.Fprintf(w, "  ✓ admission held in the restored database until %s: release %s does not read the restored-runs marker and would dispatch the backup's queued runs again\n"+
+		"    Check them (oberth runs), cancel what already ran, then release the hold:\n"+
+		"        oberth admission hold off --reason \"restored runs checked\"\n",
+		hold.ExpiresAt.Format(time.RFC3339), displayVersion(target.ChartVersion))
+	return archive, nil
+}
