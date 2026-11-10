@@ -9,6 +9,13 @@ import subprocess
 import sys
 
 
+
+# Race instrumentation of the pure-Go SQLite engine and its libc made these
+# CPU-bound suites ~30x slower (RCA-STORE-TEST-TIME, 2026-11-10). Oberth's own
+# packages stay fully race-instrumented; races inside third-party SQLite are
+# not reported.
+RACE_SCOPE = ["-gcflags=modernc.org/sqlite/...=-race=false", "-gcflags=modernc.org/libc/...=-race=false"]
+
 def package_groups():
     packages = subprocess.check_output(["go", "list", "./..."], text=True).split()
     if len(packages) != len(set(packages)):
@@ -43,7 +50,7 @@ def main():
                                  str(Path(__file__).with_name("test-store.py"))])
     # Whole-package race deadlines need max(1.5 * observed, observed + 120s).
     timeout = {"service": "60m", "rest": "55m"}.get(args.group, "20m")
-    os.execvp("go", ["go", "test", "-race", "-v", "-count=1", "-parallel=2", "-p=2", f"-timeout={timeout}", *groups[args.group]])
+    os.execvp("go", ["go", "test", "-race", *RACE_SCOPE, "-v", "-count=1", "-parallel=2", "-p=2", f"-timeout={timeout}", *groups[args.group]])
 
 
 if __name__ == "__main__":

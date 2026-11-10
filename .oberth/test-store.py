@@ -18,6 +18,13 @@ DEADLINE_SECONDS = 66 * 60
 STOP_GRACE_SECONDS = 3
 
 
+
+# Race instrumentation of the pure-Go SQLite engine and its libc made these
+# CPU-bound suites ~30x slower (RCA-STORE-TEST-TIME, 2026-11-10). Oberth's own
+# packages stay fully race-instrumented; races inside third-party SQLite are
+# not reported.
+RACE_SCOPE = ["-gcflags=modernc.org/sqlite/...=-race=false", "-gcflags=modernc.org/libc/...=-race=false"]
+
 def discover(output):
     names = output.splitlines()
     if not names or any(not re.fullmatch(r"(?:Test|Example|Fuzz|Benchmark)\w*", name)
@@ -110,7 +117,7 @@ def main():
             # Cleanup children before their binary/private fixtures disappear.
             cleanup.callback(children.stop)
             binary = scratch / "store-race.test"
-            build = children.start(["go", "test", "-race", "-c", "-p=2", "-o", str(binary), PACKAGE], root, env)
+            build = children.start(["go", "test", "-race", "-c", "-p=2", *RACE_SCOPE, "-o", str(binary), PACKAGE], root, env)
             if children.wait([build]) != [0]:
                 return 1
             package_dir = root / "internal/store"

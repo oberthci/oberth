@@ -77,7 +77,7 @@ import json, os, pathlib, sys
 if sys.argv[1:] == ["list", "./..."]:
     print("github.com/oberthci/oberth/internal/store\ngithub.com/oberthci/oberth/internal/service\ngithub.com/oberthci/oberth/internal/gitcache\ngithub.com/oberthci/oberth/pkg/other")
     raise SystemExit(0)
-assert sys.argv[1:5] == ["test", "-race", "-c", "-p=2"], sys.argv
+assert sys.argv[1:7] == ["test", "-race", "-c", "-p=2", "-gcflags=modernc.org/sqlite/...=-race=false", "-gcflags=modernc.org/libc/...=-race=false"], sys.argv
 pathlib.Path(os.environ["RECORDS"], "build.json").write_text(json.dumps({"argv":sys.argv[1:],"cpu":os.environ["GOMAXPROCS"],"heap":os.environ["GOMEMLIMIT"]}))
 output = pathlib.Path(sys.argv[sys.argv.index("-o") + 1])
 output.write_text("#!" + sys.executable + "\n" + ''' + repr(WORKER) + ''')
