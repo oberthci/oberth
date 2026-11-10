@@ -936,6 +936,7 @@ func Build(config Config, request Request) (result *wfv1.Workflow, resultErr err
 	}
 
 	serializeReleases(workflow, config, request)
+	prioritizeReleases(workflow, request)
 	applyServerMetadata(workflow, config, request, declaredPaths, fragmentLock)
 	if request.Capability != nil {
 		workflow.Annotations[capabilityAnnotation] = capabilityBinding(request.RepositoryID, request.Capability)
@@ -1325,6 +1326,26 @@ func serializeReleases(workflow *wfv1.Workflow, config Config, request Request) 
 		}
 	}
 	workflow.Spec.Synchronization.Mutexes = append(workflow.Spec.Synchronization.Mutexes, &wfv1.Mutex{Name: ReleaseMutexName})
+}
+
+// ReleasePriority is the Argo spec.priority every release run carries. The
+// controller admits postponed Workflows (workflow/sync/multi_throttler.go)
+// and grants mutexes and semaphores (workflow/sync/semaphore.go) by priority,
+// then creation time, so a release is admitted and locked before the branch
+// runs queued ahead of it, as Oberth's own queue orders releases first
+// (docs/release-priority.md). It is decided by the trigger alone: documents
+// cannot set spec.priority (argoworkflow.Admit refuses it), so no repository
+// can place itself ahead of a release.
+const ReleasePriority int32 = 1
+
+// prioritizeReleases sets ReleasePriority on a release run's Workflow and
+// leaves every other run at Argo's default (none, which orders as 0).
+func prioritizeReleases(workflow *wfv1.Workflow, request Request) {
+	if request.Trigger != pipeline.TriggerRelease {
+		return
+	}
+	priority := ReleasePriority
+	workflow.Spec.Priority = &priority
 }
 
 // applyServerBounds caps the document's own deadline and pins retention. A

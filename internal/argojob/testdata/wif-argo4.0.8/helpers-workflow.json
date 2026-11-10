@@ -20,7 +20,7 @@
       "oberth.ci/request-defaults": "2cpu-2Gi-helpers-250m-256Mi-v2",
       "oberth.ci/run-id": "run-abc123",
       "oberth.ci/size": "L",
-      "oberth.ci/spec-identity": "2f36b54ddc228c62449d37c0f8022525f1da1013bdf72487f4a967234c6a844d",
+      "oberth.ci/spec-identity": "c8cbe04631804df7fcf09668ff455dc759cbc0411ecc540c703161d60dd1e727",
       "oberth.ci/step-usage-memory-policy": "explicit-limit-256Mi-v1",
       "workflows.argoproj.io/pod-name-format": "v2"
     }
@@ -325,6 +325,7 @@
       "secondsAfterCompletion": 3600
     },
     "activeDeadlineSeconds": 7200,
+    "priority": 1,
     "securityContext": {
       "runAsUser": 0,
       "runAsGroup": 0,

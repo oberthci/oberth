@@ -2251,3 +2251,44 @@ spec:
 		t.Fatalf("disabled policy still serialized: %+v", off.Spec.Synchronization)
 	}
 }
+
+// A release run carries spec.priority ReleasePriority whatever the release
+// serialisation policy, so Argo admits it from the postponed queue, and grants
+// it a shared lock, before the branch runs created ahead of it (#1517). A CI
+// run carries none: the trigger decides, never the document, which cannot set
+// the field at all.
+func TestReleaseRunsCarryArgoPriority(t *testing.T) {
+	const document = `
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+spec:
+  entrypoint: main
+  activeDeadlineSeconds: 3600
+  templates:
+    - name: main
+      container:
+        image: golang:1.26-alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        command: [/bin/true]
+`
+	for _, serialize := range []bool{true, false} {
+		config := testConfig()
+		config.SerializeReleases = serialize
+		release, err := Build(config, testRequest(pipeline.TriggerRelease, document))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if release.Spec.Priority == nil || *release.Spec.Priority != ReleasePriority {
+			t.Fatalf("serialize=%v: release priority = %v", serialize, release.Spec.Priority)
+		}
+		ci, err := Build(config, testRequest(pipeline.TriggerCI, document))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ci.Spec.Priority != nil {
+			t.Fatalf("serialize=%v: CI run carries priority %d", serialize, *ci.Spec.Priority)
+		}
+	}
+	if _, err := Build(testConfig(), testRequest(pipeline.TriggerRelease, strings.Replace(document, "spec:\n", "spec:\n  priority: 100\n", 1))); err == nil {
+		t.Fatal("a document set its own spec.priority")
+	}
+}

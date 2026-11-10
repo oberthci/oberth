@@ -92,7 +92,10 @@ hard-limit valve; Argo's controller parallelism bounds running Workflows
 ([where limits live](where-limits-live.md)). Kubernetes places each step Pod
 by its requests; Oberth reads nothing from a document to decide whether a run
 fits. Priority orders submission within these controls; Argo admits postponed
-Workflows in creation order. It never preempts running work. See
+Workflows, and grants mutexes and semaphores, by `spec.priority` then creation
+order, and Oberth sets `spec.priority: 1` on release runs only (by trigger;
+documents cannot set it), so a release is not queued behind branch runs
+there either. It never preempts running work. See
 [admission and native synchronization](native-synchronization.md).
 
 A new branch-head push supersedes queued, not-started runs at older SHAs in the

@@ -114,11 +114,13 @@ restart Argo counts only `Running` Workflows until it has re-processed the
 
 Oberth's queue order (priority `low < standard < promotion < high`, then
 FIFO) decides the order in which runs are submitted. Argo admits postponed
-Workflows by `spec.priority`, then creation time; Oberth sets no
-`spec.priority` and documents cannot set one, so among postponed Workflows the
-earlier submission starts first. A release submitted after ten postponed
-branch runs waits behind them. Raise the limit or hold ordinary work
-(`admission_hold`) when release order matters.
+Workflows by `spec.priority`, then creation time. Since v0.20.1 Oberth sets
+`spec.priority: 1` on every release run, decided by the trigger alone;
+every other run carries none (Argo orders it as 0), and documents cannot set
+one. A release submitted after ten postponed branch runs is therefore
+admitted before them; among postponed runs of the same kind the earlier
+submission starts first. The priority orders only Argo's queues: it is not a
+Pod priority and preempts nothing.
 
 ## Shared step limits
 
@@ -239,7 +241,8 @@ the run may proceed; see [native synchronization](native-synchronization.md).
 Differences to know:
 
 - Argo orders a mutex queue by `spec.priority`, then creation time, not by
-  Oberth's queue order.
+  Oberth's queue order; a release run (`spec.priority: 1`) is granted a
+  shared lock before branch runs that waited longer.
 - A Workflow waiting for a workflow-level mutex occupies an Argo parallelism
   slot ([above](#what-occupies-a-slot)); a parked group member did not.
 - A scoped (non-admin) uplink may cancel a branch run that holds a mutex;
