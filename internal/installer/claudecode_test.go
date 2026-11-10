@@ -587,3 +587,29 @@ func TestInstallConfiguresClaudeCodeThroughClientSetup(t *testing.T) {
 		t.Fatalf("install did not trust the CA in Claude Code settings: %s %v", settings, err)
 	}
 }
+
+// client setup copies the env file's token command into Claude Code only
+// from client files nobody else can change.
+func TestResolveClaudeCodeSetupRefusesClientFilesOthersCanChange(t *testing.T) {
+	fixture := newClaudeCodeFixture(t)
+	root := filepath.Join(fixture.home, ".config", "oberth")
+	env := filepath.Join(root, "env")
+	if err := os.WriteFile(env, []byte(renderClientEnv("https://oberth.example:30443", fixture.caFile, "pass show oberth/token")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(env, 0o620); err != nil {
+		t.Fatal(err)
+	}
+	setup, _, err := ResolveClaudeCodeSetup(ClientSetupFlags{})
+	if err == nil || setup.TokenCommand == "pass show oberth/token" || !strings.Contains(err.Error(), "not trusted") {
+		t.Fatalf("group-writable env = %+v %v", setup, err)
+	}
+	// Explicit flags do not need the files.
+	setup, _, err = ResolveClaudeCodeSetup(ClientSetupFlags{URL: "https://oberth.example:30443", TokenCommand: "pass show other"})
+	if err != nil || setup.TokenCommand != "pass show other" {
+		t.Fatalf("explicit flags = %+v %v", setup, err)
+	}
+	if setup.TokenCommand == "pass show oberth/token" {
+		t.Fatal("the untrusted env file's token command was registered")
+	}
+}

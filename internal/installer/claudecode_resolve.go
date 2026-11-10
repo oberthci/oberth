@@ -46,7 +46,16 @@ func ResolveClaudeCodeSetup(flags ClientSetupFlags) (ClaudeCodeSetup, []string, 
 		return setup, nil, err
 	}
 	environment := client.FromEnv()
-	written := readClientEnvFile(filepath.Join(root, "env"))
+	// Client files someone else can change are not read: their address and
+	// token command would be registered in Claude Code. Explicit flags still
+	// work without them.
+	filesTrust := client.TrustClientFiles(root)
+	written := map[string]string{}
+	filesMCPURL := ""
+	if filesTrust == nil {
+		written = readClientEnvFile(filepath.Join(root, "env"))
+		filesMCPURL = mcpConfigURL(filepath.Join(root, "mcp.json"))
+	}
 
 	// URL.
 	candidates := []string{
@@ -54,7 +63,7 @@ func ResolveClaudeCodeSetup(flags ClientSetupFlags) (ClaudeCodeSetup, []string, 
 		strings.TrimSpace(os.Getenv("OBERTH_MCP_URL")),
 		environment.BaseURL,
 		written["OBERTH_BASE_URL"],
-		mcpConfigURL(filepath.Join(root, "mcp.json")),
+		filesMCPURL,
 	}
 	if paths, pathErr := claudeCodePaths(); pathErr == nil {
 		if existing, _, readErr := readClaudeCodeServer(paths.userConfig); readErr == nil && existing != nil {
@@ -73,18 +82,24 @@ func ResolveClaudeCodeSetup(flags ClientSetupFlags) (ClaudeCodeSetup, []string, 
 		}
 	}
 	if setup.URL == "" {
+		if filesTrust != nil {
+			return setup, nil, fmt.Errorf("no server address: pass --url https://<host>:<port>/mcp, or set OBERTH_BASE_URL; the client files were not read: %w", filesTrust)
+		}
 		return setup, nil, errors.New("no server address: pass --url https://<host>:<port>/mcp, or set OBERTH_BASE_URL")
 	}
 
 	// The saved token source and CA belong to the server the client files
 	// name; an address that names another server gets neither.
-	saved := client.SavedServer(root)
+	saved := ""
+	if filesTrust == nil {
+		saved = client.SavedServer(root)
+	}
 	otherServer := saved != "" && !client.SameServer(setup.URL, saved)
 	if otherServer {
 		written = map[string]string{}
 	}
 	savedFile := func(name string) string {
-		if otherServer {
+		if otherServer || filesTrust != nil {
 			return ""
 		}
 		return existingFile(filepath.Join(root, name))
@@ -117,6 +132,8 @@ func ResolveClaudeCodeSetup(flags ClientSetupFlags) (ClaudeCodeSetup, []string, 
 		setup.TokenCommand = environment.TokenCommand
 	case written["OBERTH_TOKEN_COMMAND"] != "":
 		setup.TokenCommand = written["OBERTH_TOKEN_COMMAND"]
+	case filesTrust != nil && existingFile(filepath.Join(root, "token")) != "":
+		return setup, nil, fmt.Errorf("the token saved in %s is not used: %w; pass --token-command or --token-file", displayPath(root), filesTrust)
 	case otherServer:
 		return setup, nil, fmt.Errorf("no token source for %s: the one saved in %s belongs to %s and is never registered for another server; "+
 			"pass --token-command or --token-file for this address", setup.URL, displayPath(root), saved)

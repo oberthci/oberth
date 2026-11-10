@@ -80,6 +80,15 @@ assisted runs are never evidence). The URL is `OBERTH_MCP_URL`, by default
 `https://localhost:30443/mcp`; Claude Code must trust the server's CA, as
 below.
 
+The saved token file is sent only to the server the client files name
+(`OBERTH_BASE_URL` or `OBERTH_MCP_URL` in `~/.config/oberth/env`, else the url
+in `mcp.json`), compared like the CLI does; any other URL gets nothing and the
+helper says why. On the server host, where the files usually name the public
+address while the plugin defaults to localhost, set `OBERTH_MCP_URL` to the
+address the files name. `OBERTH_TOKEN_COMMAND` serves any URL. Client files
+someone else can change (not owned by you, or group/world-writable, the
+directory included) are not read.
+
 ```bash
 claude plugin marketplace add <path or git URL of the oberth repository>
 claude plugin install oberth@oberth

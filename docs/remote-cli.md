@@ -31,7 +31,9 @@ The token and CA from the files belong to the server the files name: when
 command and CA are not used, and that address needs its own `--token-file`,
 `OBERTH_TOKEN` or `OBERTH_TOKEN_COMMAND`. A token file with no server named in
 `env` or `mcp.json` is not used either. The env file's `OBERTH_TOKEN_COMMAND`
-runs only when the file is yours and not writable by group or others.
+runs only when the file is yours and not writable by group or others, and
+none of the files (or the directory) is read when someone else can change
+them.
 
 `--url` takes the server's base address or its `/mcp` endpoint; either
 command family derives the other form. `XDG_CONFIG_HOME` replaces

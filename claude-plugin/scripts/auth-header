@@ -1,37 +1,116 @@
 #!/bin/sh
 # headersHelper of the Oberth plugin: prints the Authorization header Claude
-# Code sends to the Oberth MCP server. The token comes from
-# OBERTH_TOKEN_COMMAND when it is set (a command that prints it, such as a
-# secret-store lookup), else from the owner-only token file oberth install
-# saves. Nothing is written; the token is never logged.
+# Code sends to the Oberth MCP server at OBERTH_MCP_URL (default
+# https://localhost:30443/mcp, as in .mcp.json).
+#
+# The token comes from OBERTH_TOKEN_COMMAND when it is set (a command that
+# prints it, such as a secret-store lookup), for any server. Otherwise it is
+# the owner-only token file oberth install saves, and that file is sent only
+# to the server the client files name (OBERTH_BASE_URL or OBERTH_MCP_URL in
+# env, else the url in mcp.json), compared like the oberth CLI does
+# (client.SameServer): scheme, host and port, base path; letter case, a
+# trailing slash, the /mcp endpoint, user information and the scheme's
+# default port do not matter. Client files someone else can change are not
+# read. On any refusal nothing is printed on stdout. Nothing is written; the
+# token is never logged.
 set -eu
+
+fail() {
+	echo "oberth: $*" >&2
+	exit 1
+}
+
+# normal prints the comparison form of an address, or nothing when the
+# address is not one the comparison accepts (which never matches).
+normal() {
+	address=$(printf '%s' "$1" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+	while [ "${address%/}" != "$address" ]; do address=${address%/}; done
+	case "$address" in
+	*://*) ;;
+	*) return 0 ;;
+	esac
+	case "$address" in
+	*[!A-Za-z0-9._~:/@\[\]+-]*) return 0 ;;
+	esac
+	scheme=${address%%://*}
+	rest=${address#*://}
+	authority=${rest%%/*}
+	path=${rest#"$authority"}
+	case "$path" in
+	*/mcp) path=${path%/mcp} ;;
+	esac
+	host=${authority##*@}
+	[ -n "$scheme" ] && [ -n "$host" ] || return 0
+	scheme=$(printf '%s' "$scheme" | tr 'A-Z' 'a-z')
+	host=$(printf '%s' "$host" | tr 'A-Z' 'a-z')
+	case "$scheme:$host" in
+	https:*:443) host=${host%:443} ;;
+	http:*:80) host=${host%:80} ;;
+	esac
+	while [ "${path%/}" != "$path" ]; do path=${path%/}; done
+	printf '%s://%s%s' "$scheme" "$host" "$path"
+}
+
+# trusted refuses a path someone other than this user can change.
+trusted() {
+	[ -e "$1" ] || return 0
+	listing=$(ls -ldn "$1")
+	owner=$(printf '%s' "$listing" | awk '{print $3}')
+	[ "$owner" = "$(id -u)" ] || fail "$1 is not owned by this user; it is not trusted"
+	case "$(printf '%s' "$listing" | cut -c6,9)" in
+	--) ;;
+	*) fail "$1 is writable by others; it is not trusted: chmod go-w it" ;;
+	esac
+}
+
+# saved_value prints the last NAME=value of the env file, unquoted.
+saved_value() {
+	value=$(sed -n "s/^[[:space:]]*\(export[[:space:]]\{1,\}\)\{0,1\}$1=//p" "$config/env" 2>/dev/null | tail -n 1)
+	case "$value" in
+	*\\*) return 0 ;;
+	\"*\") value=${value#\"}; value=${value%\"} ;;
+	esac
+	printf '%s' "$value"
+}
+
 if [ -n "${OBERTH_TOKEN_COMMAND:-}" ]; then
 	token=$(/bin/sh -c "$OBERTH_TOKEN_COMMAND")
 else
-	file="${XDG_CONFIG_HOME:-$HOME/.config}/oberth/token"
-	if [ ! -r "$file" ]; then
-		echo "oberth: no token: set OBERTH_TOKEN_COMMAND or save the token as $file (mode 0600)" >&2
-		exit 1
-	fi
-	case "$(ls -l "$file" | cut -c5-10)" in
+	config="${XDG_CONFIG_HOME:-$HOME/.config}/oberth"
+	file="$config/token"
+	for path in "$config" "$config/env" "$config/mcp.json" "$file"; do
+		trusted "$path"
+	done
+	[ -r "$file" ] || fail "no token: set OBERTH_TOKEN_COMMAND or save the token as $file (mode 0600)"
+	case "$(ls -ln "$file" | cut -c5-10)" in
 	------) ;;
-	*)
-		echo "oberth: $file is readable by others; chmod 600 it" >&2
-		exit 1
-		;;
+	*) fail "$file is readable by others; chmod 600 it" ;;
 	esac
+	saved=$(saved_value OBERTH_BASE_URL)
+	[ -n "$saved" ] || saved=$(saved_value OBERTH_MCP_URL)
+	if [ -z "$saved" ] && [ -r "$config/mcp.json" ]; then
+		urls=$(grep -o '"url"[[:space:]]*:[[:space:]]*"[^"]*"' "$config/mcp.json" || true)
+		if [ "$(printf '%s\n' "$urls" | grep -c .)" = 1 ]; then
+			saved=$(printf '%s' "$urls" | sed 's/.*:[[:space:]]*"\([^"]*\)"$/\1/')
+		fi
+	fi
+	target="${OBERTH_MCP_URL:-https://localhost:30443/mcp}"
+	[ -n "$saved" ] || fail "the token in $file names no server (no address in $config/env or mcp.json); it is not sent to $target"
+	want=$(normal "$saved")
+	got=$(normal "$target")
+	if [ -z "$want" ] || [ "$want" != "$got" ]; then
+		fail "the token in $file belongs to $saved and is not sent to $target: set OBERTH_MCP_URL to that address, or OBERTH_TOKEN_COMMAND for this server"
+	fi
 	token=$(cat "$file")
 fi
 token=$(printf '%s' "$token" | tr -d '\r\n')
 if [ -z "$token" ]; then
-	echo "oberth: the token source printed nothing" >&2
-	exit 1
+	fail "the token source printed nothing"
 fi
 # The header is JSON: a token is printed only when it needs no escaping.
 case "$token" in
 *[!A-Za-z0-9._~+/=:-]*)
-	echo "oberth: the token holds characters a bearer token does not use; refusing to print it" >&2
-	exit 1
+	fail "the token holds characters a bearer token does not use; refusing to print it"
 	;;
 esac
 printf '{"Authorization":"Bearer %s"}\n' "$token"

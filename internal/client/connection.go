@@ -168,9 +168,16 @@ func ResolveConnection(flags ConnectionFlags) (Connection, error) {
 
 	// The address the client files name: their credential and CA belong to
 	// that server and to no other.
+	// Files someone else can change are not read at all: their address
+	// would move where the saved token goes.
 	filesAddress := ""
+	var filesTrust error
 	if rootErr == nil {
-		filesAddress = SavedServer(root)
+		if filesTrust = TrustClientFiles(root); filesTrust == nil {
+			filesAddress = SavedServer(root)
+		} else {
+			written = map[string]string{}
+		}
 	}
 	switch {
 	case strings.TrimSpace(flags.URL) != "":
@@ -202,6 +209,9 @@ func ResolveConnection(flags ConnectionFlags) (Connection, error) {
 		configured = func(string) string { return "" }
 	}
 	if connection.BaseURL == "" {
+		if filesTrust != nil {
+			return connection, fmt.Errorf("%w; the client files were not read: %w", ErrNotConfigured, filesTrust)
+		}
 		return connection, ErrNotConfigured
 	}
 	if _, err := ValidateServerURL(connection.BaseURL); err != nil {
@@ -240,6 +250,8 @@ func ResolveConnection(flags ConnectionFlags) (Connection, error) {
 			return connection, err
 		}
 		connection.Token = token
+	case filesTrust != nil:
+		return connection, fmt.Errorf("no credential for %s: the client files were not read: %w", connection.BaseURL, filesTrust)
 	case !filesServer && rootErr == nil && (regularFile(filepath.Join(root, "token")) != "" || ReadConfigEnv(filepath.Join(root, "env"))["OBERTH_TOKEN_COMMAND"] != ""):
 		saved := "names no server address"
 		if filesAddress != "" {
@@ -251,6 +263,21 @@ func ResolveConnection(flags ConnectionFlags) (Connection, error) {
 		return connection, errNoCredential
 	}
 	return connection, nil
+}
+
+// TrustClientFiles refuses the client files when someone other than the
+// user can change them: the directory, env, mcp.json or token is not owned
+// by the user, or is writable by its group or by others. Missing files pass.
+func TrustClientFiles(root string) error {
+	for _, path := range []string{root, filepath.Join(root, "env"), filepath.Join(root, "mcp.json"), filepath.Join(root, "token")} {
+		if _, err := os.Lstat(path); err != nil {
+			continue
+		}
+		if err := trustedConfigFile(path); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // SavedServer returns the address the client files in root name: the env

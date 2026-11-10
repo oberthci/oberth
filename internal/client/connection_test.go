@@ -226,3 +226,39 @@ func TestSameServer(t *testing.T) {
 		t.Error("another spelling or a non-default port read as the same server")
 	}
 }
+
+// The client files steer where the saved token goes, so a directory, env,
+// mcp.json or token file someone else can change is not read at all.
+func TestClientFilesOthersCanChangeAreNotRead(t *testing.T) {
+	for _, writable := range []string{"", "env", "mcp.json", "token"} {
+		t.Run("writable "+writable, func(t *testing.T) {
+			directory := isolate(t)
+			write(t, filepath.Join(directory, "env"), "export OBERTH_BASE_URL=\"https://a.example.test\"\n", 0o600)
+			write(t, filepath.Join(directory, "mcp.json"), `{"mcpServers":{"oberth":{"url":"https://a.example.test/mcp"}}}`, 0o600)
+			write(t, filepath.Join(directory, "token"), "token-of-a", 0o600)
+			target := directory
+			if writable != "" {
+				target = filepath.Join(directory, writable)
+			}
+			info, err := os.Stat(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(target, info.Mode().Perm()|0o020); err != nil {
+				t.Fatal(err)
+			}
+			connection, err := ResolveConnection(ConnectionFlags{})
+			if err == nil || connection.Token != "" || !strings.Contains(err.Error(), "not trusted") {
+				t.Fatalf("files read although %s is group-writable: %+v %v", target, connection, err)
+			}
+			connection, err = ResolveConnection(ConnectionFlags{URL: "https://a.example.test"})
+			if err == nil || connection.Token != "" || !strings.Contains(err.Error(), "not trusted") {
+				t.Fatalf("saved token used although %s is group-writable: %+v %v", target, connection, err)
+			}
+			t.Setenv("OBERTH_TOKEN", "explicit")
+			if connection, err := ResolveConnection(ConnectionFlags{URL: "https://a.example.test"}); err != nil || connection.Token != "explicit" {
+				t.Fatalf("an explicit credential = %+v %v", connection, err)
+			}
+		})
+	}
+}
