@@ -102,12 +102,14 @@ agentEvents:
   # Keepalive interval of MCP streams (1s-5m).
   heartbeat: 20s
 
-# Opt-in platform priority. Creates release/namespace-specific PriorityClasses
-# and assigns only the Oberth pod template. Argo and OpenBao
-# are separate releases: see docs/platform-protection.md for their overlays.
-# Requests in those overlays are based on one idle sample, unmeasured under load.
+# Opt-in platform priority (default off). true creates three cluster-scoped
+# release/namespace-specific PriorityClasses (value 1000000,
+# PreemptLowerPriority) and assigns only the Oberth pod template; on a shared
+# node they preempt other workloads. Argo and OpenBao are separate releases:
+# see docs/platform-protection.md for their overlays. Requests in those
+# overlays are based on one idle sample, unmeasured under load.
 platformProtection:
-  enabled: true
+  enabled: false
 
 # Per-client API limits with headroom for eight concurrent jobs and
 # workflow polling. Admission retries read failures without exiting.
@@ -121,15 +123,17 @@ kubernetesClient:
 # API background shutdown (55s); the default keeps margin over that.
 terminationGracePeriodSeconds: 75
 
-# Age retention and the log budget default off. The artifact budget preserves
-# the existing 4 GiB limit; protected evidence may exceed any budget.
+# Age retention defaults off. Step logs keep a 2 GiB total budget (oldest
+# evicted first, the newest run per ref kept) and artifacts the existing
+# 4 GiB, so together they fit the 10 Gi minimum volume with room for the
+# database; 0 disables a budget. Protected evidence may exceed any budget.
 retention:
   interval: "10m"
   keepNewestPerRef: 1
   logs:
     limitBytes: 67108864
     maxAge: "0s"
-    budgetBytes: 0
+    budgetBytes: 2147483648
   artifacts:
     maxAge: "0s"
     limitBytes: 268435456
@@ -158,9 +162,10 @@ admission:
     enabled: true
     hardCpu: 50
     hardIo: 40
-  # Hold new workflow admission below this free-space floor; existing grants
-  # continue. Zero disables the disk floor.
-  diskFloorBytes: 0
+  # Hold new workflow admission below this free-space floor on the data
+  # volume; existing grants continue. The 1 GiB default keeps SQLite writable
+  # on a full volume; zero disables the disk floor.
+  diskFloorBytes: 1073741824
   # Startup bound for an admitted workflow that has neither a scheduled pod nor
   # progress (Kubernetes capacity waits are exempt). Go duration, e.g. 10m.
   stallTimeout: "10m"
@@ -566,8 +571,10 @@ secretstore:
   # Entries addressing the upstream subtree are rejected at startup.
   allowedPaths: []
   # Grant this ServiceAccount system:auth-delegator so OpenBao can validate
-  # its tokens via TokenReview without storing a reviewer JWT. This is the one
-  # cluster-scoped object the chart creates; disable it if the binding is
+  # its tokens via TokenReview without storing a reviewer JWT. This binding is
+  # cluster-scoped, like the chart's ValidatingAdmissionPolicy and its binding,
+  # the resource-sampler ClusterRole and (opt-in) the platform PriorityClasses;
+  # disable it if the binding is
   # managed elsewhere.
   createAuthDelegatorBinding: true
   # null detects .svc / .svc.cluster.local endpoints as in-cluster. Override

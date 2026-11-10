@@ -23,6 +23,12 @@ render() {
 }
 
 render >"$work/default.yaml"
+# Opt-in: the default renders no cluster-scoped priority that could preempt
+# other workloads on a shared node (docs/platform-protection.md).
+if grep -Eq 'kind: PriorityClass|priorityClassName:' "$work/default.yaml"; then
+  echo 'default values enabled platform priority' >&2
+  exit 1
+fi
 render --set platformProtection.enabled=false >"$work/off.yaml"
 if grep -Eq 'kind: PriorityClass|priorityClassName:' "$work/off.yaml"; then
   echo 'explicitly disabled platform priority still rendered protection' >&2
@@ -43,9 +49,8 @@ render --set platformProtection.enabled=true >"$work/no-tunnel.yaml"
 test "$(grep -c '^kind: PriorityClass$' "$work/no-tunnel.yaml")" -eq 3
 test "$(grep -c '^      priorityClassName:' "$work/no-tunnel.yaml")" -eq 1
 render --set platformProtection.enabled=true >"$work/on.yaml"
-# Stage C protects platform workloads by default. Explicit opt-out and raw
-# historical values remain covered separately below and above.
-diff -u "$work/default.yaml" "$work/on.yaml"
+# Platform priority is opt-in: the default equals the explicit opt-out.
+diff -u "$work/default.yaml" "$work/off.yaml"
 test "$(grep -c '^kind: PriorityClass$' "$work/on.yaml")" -eq 3
 test "$(grep -c '^value: 1000000$' "$work/on.yaml")" -eq 3
 test "$(grep -c '^globalDefault: false$' "$work/on.yaml")" -eq 3

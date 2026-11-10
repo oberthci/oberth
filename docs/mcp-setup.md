@@ -419,7 +419,7 @@ its policies and budgets are configured with the chart's `retention` values.
 | `retention.keepNewestPerRef` | `1` | `--retention-keep-newest`: newest terminal runs kept per repository/ref; `0` disables this extra protection |
 | `retention.logs.maxAge` | `0s` | `--log-retention`: age since run completion; `0s` disables age retention |
 | `retention.logs.limitBytes` | `67108864` | `--run-log-limit-bytes`: maximum retained bytes per run; exceeding it fails the run |
-| `retention.logs.budgetBytes` | `0` | `--logs-budget-bytes`: total log budget; `0` disables size retention |
+| `retention.logs.budgetBytes` | `2147483648` (2 GiB; `0` before v0.21.0) | `--logs-budget-bytes`: total log budget; `0` disables size retention |
 | `retention.artifacts.maxAge` | `0s` | `--artifact-retention`: age since run completion; `0s` disables age retention |
 | `retention.artifacts.limitBytes` | `268435456` (256 MiB) | `--artifacts-limit-bytes`: maximum collected artifact bytes per run |
 | `retention.artifacts.budgetBytes` | `4294967296` (4 GiB) | `--artifacts-budget-bytes`: total artifact budget; `0` disables size retention |
@@ -429,7 +429,8 @@ oldest eligible evidence when either its age or the global storage budget is
 exceeded. Active runs, protected evidence, and the newest terminal runs per ref
 can keep storage above the budget. Manual purges keep the same evidence
 protections but may remove the newest terminal run. The separate
-`admission.diskFloorBytes` value controls the free-space admission floor.
+`admission.diskFloorBytes` value controls the free-space admission floor
+(1 GiB by default since v0.21.0; `0` disables it).
 
 When an evidence class has an enabled age or budget policy, sweeps also reclaim
 orphaned files with no run row, recording the removal in the audit trail.

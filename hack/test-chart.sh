@@ -750,9 +750,11 @@ helm template oberth "$notes_chart" --set "image.ref=$server_image" \
 grep -Fq 'values are ignored. Migrate pipelines to a workflow capability grant' "$notes"
 
 
-# Retention defaults preserve log retention and the existing artifact budget.
+# Retention defaults keep logs by age, bound them to a 2 GiB budget and keep
+# the existing artifact budget; the disk floor holds admission at 1 GiB free.
 render >"$manifest"
-for flag in --log-retention=0s --artifact-retention=0s --logs-budget-bytes=0 --run-log-limit-bytes=67108864 \
+for flag in --log-retention=0s --artifact-retention=0s --logs-budget-bytes=2147483648 --run-log-limit-bytes=67108864 \
+  --admission-disk-floor-bytes=1073741824 \
   --artifacts-budget-bytes=4294967296 --artifacts-limit-bytes=268435456 \
   --retention-sweep-interval=10m --retention-keep-newest=1; do
   grep -Fq -- "$flag" "$manifest"

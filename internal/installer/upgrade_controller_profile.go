@@ -91,7 +91,6 @@ func installedPipelineNamespace(ctx context.Context, cfg UpgradeConfig, deps Dep
 	return values.Argo.Namespace, nil
 }
 
-
 func prepareUpgradeControllerProfile(ctx context.Context, cfg UpgradeConfig, deps Deps) (*upgradeControllerProfile, func(), error) {
 	noop := func() {}
 	if cfg.ArgoControllerProfile == "" {

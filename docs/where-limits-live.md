@@ -14,7 +14,8 @@ no run ceiling, no concurrency groups and no semaphore table of its own.
 
 What Oberth still holds back, because it reads the host and not a workflow:
 the PSI hard valve (`admission.pressure.*`), the disk floor
-(`admission.diskFloorBytes`) and the administrator hold (`admission_hold`).
+(`admission.diskFloorBytes`, 1 GiB free by default since v0.21.0; 0 disables
+it) and the administrator hold (`admission_hold`).
 Priority still orders Oberth's queue; see [Ordering](#ordering).
 
 ## How many Workflows run at once
@@ -71,12 +72,13 @@ upgrade. That pause happens one last time while upgrading to v0.21.0 (the old
 server still holds the pin); afterwards it does not recur. A name set in
 `argo.controllerProfileConfigMap` by hand still pins exactly that profile.
 
-**Default: none.** Neither Oberth nor the installer sets a limit. That is the
-behaviour Oberth has had since v0.18.0, whose `maxConcurrentJobs` default was
-`0` (no ceiling): Kubernetes places each step Pod by its `resources`, and the
-PSI valve and disk floor still hold new runs on an overloaded host. A useful
-number depends on the host, so a generic default would be wrong for most
-installs. On a small single-node host, set one.
+**Default: half the cluster's CPUs.** Since v0.21.0 a fresh `oberth install`
+that creates the argo-workflows release sets `parallelism` to half the
+cluster's allocatable CPUs, at least 2 (it prints the number). An explicit
+`--argo-parallelism N` wins, `0` is no limit, and an existing release keeps
+whatever it has: an upgrade never adds a limit. Without a limit Kubernetes
+places each step Pod by its `resources`, and only the PSI valve and the disk
+floor hold new runs on an overloaded host.
 
 A Workflow beyond the limit stays `Pending` with Argo's message
 `Workflow processing has been postponed because too many workflows are already running`
