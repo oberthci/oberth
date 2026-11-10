@@ -51,10 +51,11 @@ normal() {
 	printf '%s://%s%s' "$scheme" "$host" "$path"
 }
 
-# trusted refuses a path someone other than this user can change.
+# trusted refuses a path someone other than this user can change. A symbolic
+# link is followed, as the oberth CLI does: its target is what is checked.
 trusted() {
 	[ -e "$1" ] || return 0
-	listing=$(ls -ldn "$1")
+	listing=$(ls -ldnL "$1")
 	owner=$(printf '%s' "$listing" | awk '{print $3}')
 	[ "$owner" = "$(id -u)" ] || fail "$1 is not owned by this user; it is not trusted"
 	case "$(printf '%s' "$listing" | cut -c6,9)" in

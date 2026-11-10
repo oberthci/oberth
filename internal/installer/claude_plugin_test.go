@@ -248,4 +248,20 @@ func TestClaudePluginHelperRefusesClientFilesOthersCanChange(t *testing.T) {
 			t.Errorf("group-writable %s: %q %v", target, out, err)
 		}
 	}
+	// A symbolic link to the directory is followed, as the CLI does: the
+	// target's owner and mode decide.
+	config := pluginFiles(t, "export OBERTH_BASE_URL=\"https://localhost:30443\"\n")
+	linked := t.TempDir()
+	if err := os.Symlink(filepath.Join(config, "oberth"), filepath.Join(linked, "oberth")); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := pluginHelper(t, linked); err != nil || !strings.Contains(out, "Bearer file-token") {
+		t.Errorf("symbolic link to trusted client files: %q %v", out, err)
+	}
+	if err := os.Chmod(filepath.Join(config, "oberth"), 0o770); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := pluginHelper(t, linked); err == nil || out != "" {
+		t.Errorf("symbolic link to a group-writable directory: %q %v", out, err)
+	}
 }
