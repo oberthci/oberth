@@ -33,10 +33,10 @@ func TestSnakeCase(t *testing.T) {
 	}
 }
 
-func TestUnmarshalReadsSnakeAndLegacyNames(t *testing.T) {
+func TestUnmarshalReadsSnakeAndGoNames(t *testing.T) {
 	for name, body := range map[string]string{
-		"snake":  `{"id":"r","repo_id":9007199254740993,"sha":"s","queue_position":2,"started_at":"2026-11-10T00:00:00Z","steps":[{"exit_code":3,"tagged_name":"t"}],"by_repo":{"7":{"exit_code":4}},"labels":{"BuildMain":"kept"}}`,
-		"legacy": `{"ID":"r","RepoID":9007199254740993,"SHA":"s","QueuePosition":2,"StartedAt":"2026-11-10T00:00:00Z","Steps":[{"ExitCode":3,"tagged_name":"t"}],"ByRepo":{"7":{"ExitCode":4}},"Labels":{"BuildMain":"kept"}}`,
+		"snake":    `{"id":"r","repo_id":9007199254740993,"sha":"s","queue_position":2,"started_at":"2026-11-10T00:00:00Z","steps":[{"exit_code":3,"tagged_name":"t"}],"by_repo":{"7":{"exit_code":4}},"labels":{"BuildMain":"kept"}}`,
+		"go names": `{"ID":"r","RepoID":9007199254740993,"SHA":"s","QueuePosition":2,"StartedAt":"2026-11-10T00:00:00Z","Steps":[{"ExitCode":3,"tagged_name":"t"}],"ByRepo":{"7":{"ExitCode":4}},"Labels":{"BuildMain":"kept"}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			var got record

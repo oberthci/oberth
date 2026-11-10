@@ -155,9 +155,9 @@ Flags:
                        timeout_s or timeout_seconds; when omitted, the server's
                        bound for that tool) plus 30s
   --reconnect-window <duration>  Read reconnect window across server restarts
-  --legacy-fields      Also return the Go-style record names (ID, RepoID, Steps)
-                       next to the snake_case ones, as before v0.20.3; also set
-                       by OBERTH_LEGACY_FIELDS=1
+  --go-field-names     Also return the Go-style record names (ID, RepoID, Steps)
+                       next to the snake_case ones; also set by
+                       OBERTH_GO_FIELD_NAMES=1
   -o <path>           Alias for --output
   --args-file <path>   Read tool arguments JSON from a file (or "-" for stdin);
                        bypasses the shell argv length ceiling for large payloads
@@ -317,9 +317,9 @@ type mcpFlagResult struct {
 	// --reconnect-window: how long reads reconnect across a restart; zero
 	// uses restartretry.DefaultWindow.
 	reconnectWindow time.Duration
-	// --legacy-fields or OBERTH_LEGACY_FIELDS=1: ask the server to send the
-	// pre-v0.20.3 Go-style record names next to the snake_case ones.
-	legacyFields bool
+	// --go-field-names or OBERTH_GO_FIELD_NAMES=1: ask the server to send the
+	// Go-style record names next to the snake_case ones.
+	goFieldNames bool
 }
 
 // parseMCPFlags parses the common MCP flags from arguments. wantPositional
@@ -342,7 +342,7 @@ func parseMCPFlags(name string, arguments []string, wantPositional int) (mcpFlag
 	flags.StringVar(&result.argsFile, "args-file", "", "JSON file or - for stdin")
 	flags.StringVar(&result.output, "output", "", "output file")
 	flags.StringVar(&result.output, "o", "", "output file")
-	flags.BoolVar(&result.legacyFields, "legacy-fields", os.Getenv("OBERTH_LEGACY_FIELDS") == "1", "also send Go-style record names")
+	flags.BoolVar(&result.goFieldNames, "go-field-names", os.Getenv("OBERTH_GO_FIELD_NAMES") == "1", "also send Go-style record names")
 	var help bool
 	var err error
 	positional, help, err = parseOperatorFlags(flags, arguments)
@@ -554,8 +554,8 @@ func mcpRequestOnce(ctx context.Context, cfg mcpFlagResult, body []byte, request
 	httpReq.Header.Set("Accept", mcpAcceptStreamable)
 	httpReq.Header.Set("MCP-Protocol-Version", mcpProtocolVersion)
 	httpReq.Header.Set("Authorization", "Bearer "+cfg.Token)
-	if cfg.legacyFields {
-		httpReq.Header.Set(api.LegacyFieldsHeader, "1")
+	if cfg.goFieldNames {
+		httpReq.Header.Set(api.GoFieldNamesHeader, "1")
 	}
 	ua := "oberth-cli/" + cfg.Version
 	httpReq.Header.Set("User-Agent", ua)

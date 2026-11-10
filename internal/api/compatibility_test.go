@@ -16,34 +16,34 @@ import (
 	"github.com/oberthci/oberth/internal/model"
 )
 
-func TestRecordFieldsAreSnakeCaseUnlessLegacyRequested(t *testing.T) {
+func TestRecordFieldsAreSnakeCaseUnlessGoNamesRequested(t *testing.T) {
 	server, backend := testServer(t)
 	backend.runPage = []model.Run{{ID: "aaaaaaaa", RepoID: 7, QueueSequence: 9007199254740993, Status: model.RunPassed, SHA: "commit"}}
 	for _, test := range []struct {
-		name   string
-		path   string
-		header bool
-		legacy bool
+		name    string
+		path    string
+		header  bool
+		goNames bool
 	}{
 		{"array", "/api/runs?limit=1", false, false},
 		{"envelope", "/api/runs?limit=1&envelope=1", false, false},
-		{"legacy header", "/api/runs?limit=1", true, true},
-		{"legacy query", "/api/runs?limit=1&legacy_fields=1", false, true},
-		{"legacy envelope", "/api/runs?limit=1&envelope=1&legacy_fields=1", false, true},
+		{"go names header", "/api/runs?limit=1", true, true},
+		{"go names query", "/api/runs?limit=1&go_field_names=1", false, true},
+		{"go names envelope", "/api/runs?limit=1&envelope=1&go_field_names=1", false, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, test.path, nil)
 			req.Header.Set("Authorization", "Bearer valid-token")
 			if test.header {
-				req.Header.Set(LegacyFieldsHeader, "1")
+				req.Header.Set(GoFieldNamesHeader, "1")
 			}
 			out := httptest.NewRecorder()
 			server.Handler().ServeHTTP(out, req)
 			if out.Code != 200 {
 				t.Fatal(out.Code, out.Body)
 			}
-			if got := out.Header().Get(LegacyFieldsHeader) == "1"; got != test.legacy {
-				t.Fatalf("legacy echo = %v", got)
+			if got := out.Header().Get(GoFieldNamesHeader) == "1"; got != test.goNames {
+				t.Fatalf("go names echo = %v", got)
 			}
 			var rows []map[string]json.RawMessage
 			if strings.Contains(test.path, "envelope=1") {
@@ -66,8 +66,8 @@ func TestRecordFieldsAreSnakeCaseUnlessLegacyRequested(t *testing.T) {
 				if len(row[alias]) == 0 {
 					t.Errorf("missing %s: %s", alias, out.Body)
 				}
-				if _, present := row[old]; present != test.legacy || (test.legacy && string(row[old]) != string(row[alias])) {
-					t.Errorf("legacy %s present=%v: %s", old, present, out.Body)
+				if _, present := row[old]; present != test.goNames || (test.goNames && string(row[old]) != string(row[alias])) {
+					t.Errorf("go name %s present=%v: %s", old, present, out.Body)
 				}
 			}
 			if string(row["run_id"]) != string(row["id"]) {
@@ -269,7 +269,7 @@ func TestResourceQueryAcceptsRunIDAliasAndRejectsConflict(t *testing.T) {
 }
 
 // A full run_get used to carry every record twice (Steps and steps, Run and
-// run). The default MCP reply now carries it once; the legacy opt-in still
+// run). The default MCP reply now carries it once; the go_field_names opt-in still
 // returns both spellings.
 func TestRunGetMCPPayloadSendsRecordsOnce(t *testing.T) {
 	steps := make([]model.StepResult, 41)
@@ -281,13 +281,13 @@ func TestRunGetMCPPayloadSendsRecordsOnce(t *testing.T) {
 		steps[i] = model.StepResult{Stage: "ci", Step: fmt.Sprintf("step-%d", i), Ordinal: i, Status: model.StepPassed, MeasuredUsage: usage}
 	}
 	payload := RunDetailResponse{Run: model.Run{ID: "aaaaaaaa", RepoID: 1, Status: model.RunPassed, SHA: strings.Repeat("a", 40)}, Steps: steps, Timing: &model.RunTiming{}}
-	size := func(legacy bool) (int, map[string]json.RawMessage) {
+	size := func(goNames bool) (int, map[string]json.RawMessage) {
 		server, backend := testServer(t)
 		backend.toolResult = payload
 		request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"run_get","arguments":{}}}`))
 		request.Header.Set("Authorization", "Bearer valid-token")
-		if legacy {
-			request.Header.Set(LegacyFieldsHeader, "1")
+		if goNames {
+			request.Header.Set(GoFieldNamesHeader, "1")
 		}
 		response := httptest.NewRecorder()
 		server.Handler().ServeHTTP(response, request)
@@ -304,16 +304,16 @@ func TestRunGetMCPPayloadSendsRecordsOnce(t *testing.T) {
 		return len(envelope.Result.Structured), object
 	}
 	current, object := size(false)
-	legacy, legacyObject := size(true)
-	t.Logf("run_get structuredContent: %d bytes snake_case only, %d bytes with legacy names", current, legacy)
+	goNamesSize, goNamesObject := size(true)
+	t.Logf("run_get structuredContent: %d bytes snake_case only, %d bytes with Go-style names", current, goNamesSize)
 	if object["Steps"] != nil || object["Run"] != nil || len(object["steps"]) == 0 || len(object["run"]) == 0 {
 		t.Fatalf("default reply is not snake_case only: %v", keys(object))
 	}
-	if legacyObject["Steps"] == nil || legacyObject["steps"] == nil {
-		t.Fatalf("legacy opt-in lost a spelling: %v", keys(legacyObject))
+	if goNamesObject["Steps"] == nil || goNamesObject["steps"] == nil {
+		t.Fatalf("go_field_names opt-in lost a spelling: %v", keys(goNamesObject))
 	}
-	if current*10 > legacy*6 {
-		t.Fatalf("snake_case reply %d bytes is not well under the legacy %d bytes", current, legacy)
+	if current*10 > goNamesSize*6 {
+		t.Fatalf("snake_case reply %d bytes is not well under the Go-style %d bytes", current, goNamesSize)
 	}
 }
 

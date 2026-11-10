@@ -11,34 +11,34 @@ import (
 	"github.com/oberthci/oberth/internal/recordjson"
 )
 
-// LegacyFieldsHeader opts one HTTP or MCP request into the pre-v0.20.3 record
+// GoFieldNamesHeader opts one HTTP or MCP request into the pre-v0.20.3 record
 // shape, where every Go-style field name (ID, RepoID, Steps) is sent next to
 // its snake_case name. The server echoes it on responses that honour it.
-const LegacyFieldsHeader = "X-Oberth-Legacy-Fields"
+const GoFieldNamesHeader = "X-Oberth-Go-Field-Names"
 
-type legacyFieldsKey struct{}
+type goFieldNamesKey struct{}
 
-// legacyFieldsRequested reports an explicit opt-in: the header, or the
-// legacy_fields=1 query parameter on HTTP routes.
-func legacyFieldsRequested(request *http.Request) bool {
-	return request.Header.Get(LegacyFieldsHeader) == "1" || request.URL.Query().Get("legacy_fields") == "1"
+// goFieldNamesRequested reports an explicit opt-in: the header, or the
+// go_field_names=1 query parameter on HTTP routes.
+func goFieldNamesRequested(request *http.Request) bool {
+	return request.Header.Get(GoFieldNamesHeader) == "1" || request.URL.Query().Get("go_field_names") == "1"
 }
 
-func withLegacyFields(ctx context.Context) context.Context {
-	return context.WithValue(ctx, legacyFieldsKey{}, true)
+func withGoFieldNames(ctx context.Context) context.Context {
+	return context.WithValue(ctx, goFieldNamesKey{}, true)
 }
 
-func legacyFields(ctx context.Context) bool {
-	legacy, _ := ctx.Value(legacyFieldsKey{}).(bool)
-	return legacy
+func goFieldNames(ctx context.Context) bool {
+	goNames, _ := ctx.Value(goFieldNamesKey{}).(bool)
+	return goNames
 }
 
 // marshalCompatible renames typed public records to their snake_case wire
 // names after authorization/redaction (ID -> id, RepoID -> repo_id, Steps ->
-// steps). With legacy set, the Go-style names are kept next to the
+// steps). With goNames set, the Go-style names are kept next to the
 // snake_case ones, the shape every release before v0.20.3 sent by default.
 // Map keys are dictionaries (step names, labels, etc.), not Go field names.
-func marshalCompatible(payload any, legacy bool) ([]byte, error) {
+func marshalCompatible(payload any, goNames bool) ([]byte, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -50,14 +50,14 @@ func marshalCompatible(payload any, legacy bool) ([]byte, error) {
 		return nil, err
 	}
 	changed := false
-	addRecordAliases(document, reflect.ValueOf(payload), legacy, &changed)
+	addRecordAliases(document, reflect.ValueOf(payload), goNames, &changed)
 	if !changed {
 		return raw, nil
 	}
 	return json.Marshal(document)
 }
 
-func addRecordAliases(document any, value reflect.Value, legacy bool, changed *bool) {
+func addRecordAliases(document any, value reflect.Value, goNames bool, changed *bool) {
 	for value.IsValid() && (value.Kind() == reflect.Pointer || value.Kind() == reflect.Interface) {
 		if value.IsNil() {
 			return
@@ -76,21 +76,21 @@ func addRecordAliases(document any, value reflect.Value, legacy bool, changed *b
 		typ := value.Type()
 		for _, field := range recordjson.Plan(typ) {
 			if field.Embedded {
-				addRecordAliases(object, value.Field(field.Index), legacy, changed)
+				addRecordAliases(object, value.Field(field.Index), goNames, changed)
 				continue
 			}
 			item, exists := object[field.Name]
 			if !exists {
 				continue
 			}
-			addRecordAliases(item, value.Field(field.Index), legacy, changed)
+			addRecordAliases(item, value.Field(field.Index), goNames, changed)
 			if field.Alias == field.Name {
 				continue
 			}
 			if _, exists := object[field.Alias]; !exists {
 				object[field.Alias] = item
 				*changed = true
-				if !legacy {
+				if !goNames {
 					// The snake_case name now carries the value alone. A
 					// name whose alias is another field's key stays.
 					delete(object, field.Name)
@@ -126,7 +126,7 @@ func addRecordAliases(document any, value reflect.Value, legacy bool, changed *b
 			return
 		}
 		for i := 0; i < value.Len() && i < len(rows); i++ {
-			addRecordAliases(rows[i], value.Index(i), legacy, changed)
+			addRecordAliases(rows[i], value.Index(i), goNames, changed)
 		}
 	case reflect.Map:
 		object, ok := document.(map[string]any)
@@ -137,7 +137,7 @@ func addRecordAliases(document any, value reflect.Value, legacy bool, changed *b
 		for iterator.Next() {
 			key := iterator.Key().String()
 			if item, exists := object[key]; exists {
-				addRecordAliases(item, iterator.Value(), legacy, changed)
+				addRecordAliases(item, iterator.Value(), goNames, changed)
 			}
 		}
 	}

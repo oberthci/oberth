@@ -13,11 +13,11 @@ snake_case field names: a run returns `id`, `repo_id`, `queue_sequence`,
 `repository`. Integers keep their full JSON integer precision. JavaScript
 clients should use an integer-preserving decoder for IDs above 2^53.
 
-Until v0.20.3 every record also carried its Go-style name (`ID`, `RepoID`,
+Releases before v0.20.3 also sent every record's Go-style name (`ID`, `RepoID`,
 `QueueSequence`, `Run`, `Steps`, `Repository`) with the same value, on every
 nested record. That doubled each record and, for a full `run_get` whose steps
 carry resource samples, multiplied the reply about fourfold. Those duplicates
-are no longer sent by default; see [Legacy field names](#legacy-field-names).
+are no longer sent by default; see [Go-style field names](#go-style-field-names).
 
 Names already written in snake_case retain their spelling. Dictionary keys,
 such as step names, labels and resource names, are data and are not renamed.
@@ -63,26 +63,27 @@ specialized text format, such as logs or YAML reports, keep that existing text
 format; their structured records receive the additive fields. JSON-RPC framing
 is unchanged.
 
-## Legacy field names
+## Go-style field names
 
-A client that still reads the Go-style names asks for them per request:
+A client that reads the Go-style names asks for them per request:
 
-- HTTP and MCP: send the header `X-Oberth-Legacy-Fields: 1`.
-- HTTP only: or add `legacy_fields=1` to the query string.
-- CLI: `oberth mcp call --legacy-fields`, or `OBERTH_LEGACY_FIELDS=1` for
+- HTTP and MCP: send the header `X-Oberth-Go-Field-Names: 1`.
+- HTTP only: or add `go_field_names=1` to the query string.
+- CLI: `oberth mcp call --go-field-names`, or `OBERTH_GO_FIELD_NAMES=1` for
   `oberth mcp call` and the REST commands (`oberth runs --json` and friends).
 
-The response then carries both spellings, exactly as releases before v0.20.3
-did, and echoes `X-Oberth-Legacy-Fields: 1`. Without the opt-in only the
-snake_case names are sent. The bundled CLI and dashboard read the snake_case
-names and also accept the old shape, so either side may be upgraded first. Go
-programs that decode responses into untagged records (`model.Run`) can use
-`internal/recordjson.Unmarshal`, which maps the snake_case names back to the
-Go field names.
+The response then carries both spellings with the same value, the shape
+releases before v0.20.3 sent by default, and echoes
+`X-Oberth-Go-Field-Names: 1`. Without the opt-in only the snake_case names are
+sent. The bundled CLI and dashboard read the snake_case names and also accept
+the two-spelling shape, so either side may be upgraded first. Go programs that
+decode responses into untagged records (`model.Run`) can use
+`internal/recordjson.Unmarshal`, which maps the snake_case names back to the Go
+field names.
 
-This changes the default response shape of v0.20.3, an announced exception to
-the additive policy below: the values are unchanged, only the duplicate
-spelling moved behind the opt-in.
+The v0.20.3 default response shape is an announced exception to the additive
+policy below: the values are unchanged; only the duplicate spelling moved
+behind the opt-in.
 
 ## Compatibility and deprecation policy
 

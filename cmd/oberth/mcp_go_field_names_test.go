@@ -9,9 +9,9 @@ import (
 	"github.com/oberthci/oberth/internal/api"
 )
 
-func TestMCPLegacyFieldsOptIn(t *testing.T) {
+func TestMCPGoFieldNamesOptIn(t *testing.T) {
 	t.Setenv("OBERTH_MCP_URL", "https://example.invalid/mcp")
-	t.Setenv("OBERTH_TOKEN", "legacy-test-token")
+	t.Setenv("OBERTH_TOKEN", "go-names-test-token")
 	for _, test := range []struct {
 		name string
 		env  string
@@ -19,19 +19,19 @@ func TestMCPLegacyFieldsOptIn(t *testing.T) {
 		want bool
 	}{
 		{"default", "", nil, false},
-		{"flag", "", []string{"--legacy-fields"}, true},
+		{"flag", "", []string{"--go-field-names"}, true},
 		{"environment", "1", nil, true},
-		{"flag overrides environment", "1", []string{"--legacy-fields=false"}, false},
+		{"flag overrides environment", "1", []string{"--go-field-names=false"}, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			t.Setenv("OBERTH_LEGACY_FIELDS", test.env)
+			t.Setenv("OBERTH_GO_FIELD_NAMES", test.env)
 			cfg, err := parseMCPFlags("mcp call", test.args, 0)
-			if err != nil || cfg.legacyFields != test.want {
-				t.Fatalf("legacyFields = %v, %v; want %v", cfg.legacyFields, err, test.want)
+			if err != nil || cfg.goFieldNames != test.want {
+				t.Fatalf("goFieldNames = %v, %v; want %v", cfg.goFieldNames, err, test.want)
 			}
 			var seen string
 			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				seen = r.Header.Get(api.LegacyFieldsHeader)
+				seen = r.Header.Get(api.GoFieldNamesHeader)
 				id := 1
 				testWriteJSONRPCError(w, &id, -32601, "method not found")
 			}))

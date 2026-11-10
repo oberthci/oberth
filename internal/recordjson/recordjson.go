@@ -79,7 +79,7 @@ var jsonUnmarshalerType = reflect.TypeFor[json.Unmarshaler]()
 // Unmarshal decodes an API response (snake_case record names) into a
 // Go record whose fields carry no json tags (model.Run and friends): each
 // snake_case wire name is mapped back to its Go field name first. Responses
-// that still carry the Go-style names (legacy opt-in, older servers) decode
+// that still carry the Go-style names (the go_field_names opt-in, older servers) decode
 // unchanged, so clients work against either shape.
 func Unmarshal(data []byte, into any) error {
 	target := reflect.TypeOf(into)

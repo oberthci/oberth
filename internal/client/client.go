@@ -198,10 +198,10 @@ func (client *Client) newGetRequest(ctx context.Context, path string, query map[
 		return nil, fmt.Errorf("client: build request for %s: %w", path, err)
 	}
 	request.Header.Set("Authorization", "Bearer "+client.token)
-	if os.Getenv("OBERTH_LEGACY_FIELDS") == "1" {
-		// The server's opt-in for pre-v0.20.3 Go-style record names; see
+	if os.Getenv("OBERTH_GO_FIELD_NAMES") == "1" {
+		// The server's opt-in for Go-style record names next to snake_case; see
 		// docs/api-compatibility.md. Decoding accepts either shape.
-		request.Header.Set("X-Oberth-Legacy-Fields", "1")
+		request.Header.Set("X-Oberth-Go-Field-Names", "1")
 	}
 	return request, nil
 }

@@ -564,9 +564,9 @@ Flags:
                        timeout_s or timeout_seconds; when omitted, the server's
                        bound for that tool) plus 30s
   --reconnect-window <duration>  Read reconnect window across server restarts
-  --legacy-fields      Also return the Go-style record names (ID, RepoID, Steps)
-                       next to the snake_case ones, as before v0.20.3; also set
-                       by OBERTH_LEGACY_FIELDS=1
+  --go-field-names     Also return the Go-style record names (ID, RepoID, Steps)
+                       next to the snake_case ones; also set by
+                       OBERTH_GO_FIELD_NAMES=1
   -o <path>           Alias for --output
   --args-file <path>   Read tool arguments JSON from a file (or "-" for stdin);
                        bypasses the shell argv length ceiling for large payloads
@@ -583,7 +583,7 @@ Usage: oberth mcp call [arguments] [flags]
         JSON file or - for stdin
   -ca-file string
         CA file
-  -legacy-fields
+  -go-field-names
         also send Go-style record names
   -o string
         output file
@@ -607,7 +607,7 @@ Usage: oberth mcp tools [arguments] [flags]
         JSON file or - for stdin
   -ca-file string
         CA file
-  -legacy-fields
+  -go-field-names
         also send Go-style record names
   -o string
         output file
