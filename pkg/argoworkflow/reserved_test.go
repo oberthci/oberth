@@ -71,6 +71,44 @@ func TestAdmitRefusesReservedWorkflowMetadataAndReleaseMutex(t *testing.T) {
 			expect: `spec.synchronization.mutexes[1].name "oberth-release" is reserved`,
 		},
 		{
+			name: "workflowMetadata templated annotation key",
+			spec: `  workflowMetadata:
+    annotations:
+      "{{workflow.parameters.key}}": someone-else
+`,
+			expect: `spec.workflowMetadata.annotations["{{workflow.parameters.key}}"] is refused`,
+		},
+		{
+			name: "workflowMetadata templated labelsFrom key",
+			spec: `  workflowMetadata:
+    labelsFrom:
+      "{{='oberth.ci/' + 'run'}}":
+        expression: "'other'"
+`,
+			expect: `is refused: a templated key could resolve`,
+		},
+		{
+			name: "workflow-level mutex named by a parameter",
+			spec: `  synchronization:
+    mutexes:
+      - name: "{{workflow.parameters.lock}}"
+`,
+			expect: `spec.synchronization.mutexes[0].name "{{workflow.parameters.lock}}" is refused`,
+		},
+		{
+			name: "workflow-level mutex completed by an expression",
+			spec: `  synchronization:
+    mutexes:
+      - name: "oberth-{{='release'}}"
+`,
+			expect: `could resolve to the reserved oberth-release`,
+		},
+		{
+			name:     "template-level mutex named by an input",
+			template: "      synchronization:\n        mutexes:\n          - name: \"{{inputs.parameters.lock}}\"\n",
+			expect:   `spec.templates["main"].synchronization.mutexes[0].name "{{inputs.parameters.lock}}" is refused`,
+		},
+		{
 			name:     "template-level release mutex",
 			template: "      synchronization:\n        mutexes:\n          - name: oberth-release\n",
 			expect:   `spec.templates["main"].synchronization.mutexes[0].name "oberth-release" is reserved`,
@@ -103,6 +141,8 @@ func TestAdmitKeepsUserLocksAndUnreservedWorkflowMetadata(t *testing.T) {
       - name: chart-index
       - name: oberth-release-finalize
       - name: oberth-chart-index
+      - name: "deploy-{{workflow.parameters.environment}}"
+      - name: "oberth-chart-{{workflow.parameters.environment}}"
     semaphores:
       - configMapKeyRef:
           name: oberth-sync-limits

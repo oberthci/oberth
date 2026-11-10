@@ -19,6 +19,9 @@ const ReservedMetadataPrefix = "oberth.ci/"
 // itself would hold every release in the installation behind its own run.
 const ReleaseMutexName = "oberth-release"
 
+// templateTagOpen starts every Argo template tag, simple or expression.
+const templateTagOpen = "{{"
+
 // admitWorkflowMetadata refuses Oberth-owned keys in spec.workflowMetadata.
 // The Argo controller copies workflowMetadata onto the live Workflow at every
 // reconcile, after Oberth has stamped its own metadata, so an oberth.ci/ key
@@ -36,6 +39,15 @@ func admitWorkflowMetadata(location string, metadata *wfv1.WorkflowMetadata) []e
 				problems = append(problems, fmt.Errorf(
 					"argoworkflow: %s.%s[%q] is refused: keys under %s are assigned by Oberth and record which run owns the Workflow; remove the key or rename it outside %s",
 					location, field, key, ReservedMetadataPrefix, ReservedMetadataPrefix))
+				continue
+			}
+			// The controller substitutes {{...}} across the whole serialized
+			// spec, map keys included, before it copies workflowMetadata, so
+			// a templated key can resolve to a reserved one at run time.
+			if strings.Contains(key, templateTagOpen) {
+				problems = append(problems, fmt.Errorf(
+					"argoworkflow: %s.%s[%q] is refused: a templated key could resolve to one under %s, which Oberth assigns; write the key literally",
+					location, field, key, ReservedMetadataPrefix))
 			}
 		}
 	}
@@ -74,6 +86,15 @@ func admitSynchronization(location string, synchronization *wfv1.Synchronization
 			problems = append(problems, fmt.Errorf(
 				"argoworkflow: %s.mutexes[%d].name %q is reserved: Oberth adds it to every release run to serialize releases across the installation; use a mutex name of your own",
 				location, index, mutex.Name))
+			continue
+		}
+		// The controller substitutes {{...}} in the name before it takes
+		// the lock. A templated name is admitted only when the literal text
+		// before the first tag already rules the reserved name out.
+		if literal, _, templated := strings.Cut(mutex.Name, templateTagOpen); templated && strings.HasPrefix(ReleaseMutexName, literal) {
+			problems = append(problems, fmt.Errorf(
+				"argoworkflow: %s.mutexes[%d].name %q is refused: the templated name could resolve to the reserved %s; start it with literal text of your own, such as \"deploy-{{...}}\"",
+				location, index, mutex.Name, ReleaseMutexName))
 		}
 	}
 	return problems
