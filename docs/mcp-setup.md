@@ -887,13 +887,21 @@ establish the cause of historical uncorrelated 502 or QUIC failures.
 
 ## CLI long-poll timeouts
 
-`oberth mcp call` derives its client deadline from the tool's `timeout` argument
-plus 30 seconds, with a minimum of 60 seconds. `wait` and `promote_status`
-default to a 600-second tool timeout when omitted or zero, so their default
-client deadline is 630 seconds. The server rejects tool timeouts above 600
-seconds.
+`oberth mcp call` derives its client deadline from the tool's own timeout
+argument plus 30 seconds, with a minimum of 60 seconds. The argument is the one
+the tool's schema declares (`timeout` for `wait` and `promote_status`,
+`timeout_s` for `run_wait`, `timeout_seconds` for `run_hold_exec`); when it is
+omitted or zero the CLI uses the bound the schema gives for that tool. `wait`,
+`promote_status` and `run_wait` default to 600 seconds, so their default client
+deadline is 630 seconds; `run_hold_exec` allows for the longest configurable
+`assist.execTimeout` (900 seconds, deadline 930 seconds). The server rejects
+long-poll timeouts above 600 seconds. Tools without a timeout argument keep the
+60-second deadline. A reconnect after a server restart shrinks the long poll's
+timeout argument to the client deadline left.
 
 ```bash
+oberth mcp call --token-file ~/.config/oberth/token run_wait \
+  '{"id":"<run-id>","timeout_s":600}'
 oberth mcp call --token-file ~/.config/oberth/token wait \
   '{"sha":"<tested-sha>","timeout":600}'
 oberth mcp call --token-file ~/.config/oberth/token --timeout 11m wait \

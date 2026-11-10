@@ -592,6 +592,10 @@ func ToolNames() []string {
 // maxAssistArgv bounds run_hold_exec argv entries (service.maxAssistExecArgs).
 const maxAssistArgv = 64
 
+// maxAssistExecSeconds is argojob.MaxAssistExecTimeout in seconds: the
+// longest run_hold_exec any installation can configure.
+const maxAssistExecSeconds = 900
+
 func toolDefinitions() []map[string]any {
 	stringProperty := func(description string) map[string]any {
 		return map[string]any{"type": "string", "description": description}
@@ -677,7 +681,7 @@ func toolDefinitions() []map[string]any {
 			"step":            stringProperty("Held step (Argo template name); optional when exactly one step is held"),
 			"argv":            map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "minItems": 1, "maxItems": maxAssistArgv, "description": "Command and arguments, executed directly (argv[0] must be on PATH or absolute); no shell interpretation"},
 			"stdin":           stringProperty("Optional standard input, at most 1 MiB"),
-			"timeout_seconds": map[string]any{"type": "integer", "minimum": 1, "description": "Optional shorter deadline than assist.execTimeout"},
+			"timeout_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": maxAssistExecSeconds, "description": "Optional shorter deadline than assist.execTimeout (itself at most 900)"},
 		}, "id", "argv")),
 		tool("run_hold_patch", "Apply a unified diff to the held step's writable source tree (/work/src) through the server's own Pod helper: exact-context hunks, relative cleaned paths only, no renames, binaries, mode changes, .git or symlink traversal, bounded by assist.patchMaxBytes/patchMaxFiles. The diff's sha256 is recorded in the run's assist record and audit (run.assist.patch) before it is applied, and the run is assisted from then on: never promotion, release or green-for-SHA evidence; push the change as a commit for a real green run.", object(map[string]any{
 			"id":   stringProperty("Full run ID or unique hexadecimal prefix (at least 8 characters)"),

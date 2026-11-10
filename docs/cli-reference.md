@@ -560,7 +560,9 @@ Flags:
   --token-file <path>  Path to a file containing the bearer token (0600)
   --ca-file <path>     PEM CA certificate for TLS verification
   --timeout <duration> Client deadline override (e.g. 90s or 11m); by default
-                       at least 60s, or the tool timeout plus 30s for long polls
+                       at least 60s, or the tool's own timeout argument (timeout,
+                       timeout_s or timeout_seconds; when omitted, the server's
+                       bound for that tool) plus 30s
   --reconnect-window <duration>  Read reconnect window across server restarts
   -o <path>           Alias for --output
   --args-file <path>   Read tool arguments JSON from a file (or "-" for stdin);

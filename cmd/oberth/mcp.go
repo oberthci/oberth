@@ -150,7 +150,9 @@ Flags:
   --token-file <path>  Path to a file containing the bearer token (0600)
   --ca-file <path>     PEM CA certificate for TLS verification
   --timeout <duration> Client deadline override (e.g. 90s or 11m); by default
-                       at least 60s, or the tool timeout plus 30s for long polls
+                       at least 60s, or the tool's own timeout argument (timeout,
+                       timeout_s or timeout_seconds; when omitted, the server's
+                       bound for that tool) plus 30s
   --reconnect-window <duration>  Read reconnect window across server restarts
   -o <path>           Alias for --output
   --args-file <path>   Read tool arguments JSON from a file (or "-" for stdin);
@@ -512,7 +514,7 @@ func mcpRetryBody(ctx context.Context, request jsonRPCRequest, toolTimeout time.
 // mutation gate and changes no durable state, so a lost reply can be asked
 // again. Unknown tools fail closed.
 var mcpReconnectableTools = map[string]bool{
-	"wait": true, "status": true, "logs": true, "system_status": true,
+	"wait": true, "run_wait": true, "events_since": true, "run_hold_list": true, "status": true, "logs": true, "system_status": true,
 	"run_get": true, "run_logs": true, "run_resources": true, "run_list": true, "artifacts": true, "artifact_get": true,
 	"promote_status": true, "promotion_list": true, "promote_grant_list": true,
 	"repo_usage": true, "repo_list": true, "issue_get": true, "issue_get_many": true, "issue_list": true,
