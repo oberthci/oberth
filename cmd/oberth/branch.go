@@ -36,7 +36,8 @@ const outboxUsage = "Usage: oberth outbox list\n" +
 	"       oberth outbox abandon <upstream/org/repo> --id <record-id> --reason <text>\n" +
 	"         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]\n" +
 	"Repair a receive record that blocks its repository: show it, retry delivery, or abandon it\n" +
-	"(moved aside under abandoned/, audited). Unscoped admin only."
+	"(moved aside under abandoned/, audited). --id takes the record ID, or the <record-id>:<index>\n" +
+	"a failed push prints. Unscoped admin only."
 
 type repeatedFlag []string
 

@@ -85,7 +85,12 @@ func TestAbandonMovesRecordAsideAndUnfreezesRepository(t *testing.T) {
 	if _, err := cache.PruneBranches(t.Context(), "example", []BranchHead{{Branch: "feature/gone", SHA: featureSHA}}, false); err == nil {
 		t.Fatal("repository not frozen before abandon")
 	}
-	abandoned, err := cache.AbandonReceiveRecord(t.Context(), "example", record.ID)
+	if _, err := cache.AbandonReceiveRecord(t.Context(), "example", record.ID+":x"); err == nil {
+		t.Fatal("abandon accepted a record ID with a malformed update index")
+	}
+	// The push error prints the delivery event <record>:<index>; pasting it
+	// names the same record.
+	abandoned, err := cache.AbandonReceiveRecord(t.Context(), "example", record.ID+":0")
 	if err != nil || !strings.HasPrefix(abandoned.MovedTo, "abandoned/") {
 		t.Fatalf("abandon = %+v, %v", abandoned, err)
 	}

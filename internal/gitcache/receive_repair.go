@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -75,7 +76,7 @@ func (c *Cache) RetryReceiveRecord(ctx context.Context, input, id string, handle
 	if err != nil {
 		return ReceiveRecord{}, err
 	}
-	if id != "" && record.ID != id {
+	if id != "" && !namesReceiveRecord(record.ID, id) {
 		return record, fmt.Errorf("receive record for %s is %q, not %q", identity, record.ID, id)
 	}
 	if !record.Retryable {
@@ -114,7 +115,7 @@ func (c *Cache) AbandonReceiveRecord(ctx context.Context, input, id string) (Rec
 	if err != nil {
 		return ReceiveRecord{}, err
 	}
-	if id != "" && record.ID != id {
+	if id != "" && !namesReceiveRecord(record.ID, id) {
 		return record, fmt.Errorf("receive record for %s is %q, not %q", identity, record.ID, id)
 	}
 	source, err := c.reservationPath(identity)
@@ -214,4 +215,19 @@ func (c *Cache) readReservationLenient(identity string) (receiveReservation, err
 		reservation.Updates = reservation.Updates[:maximumReceiveRefUpdates]
 	}
 	return reservation, nil
+}
+
+// namesReceiveRecord accepts the bare record ID and the delivery form
+// <record ID>:<update index> a failed push prints, so the value a pusher
+// pastes from its error works with --id.
+func namesReceiveRecord(recordID, given string) bool {
+	if given == recordID {
+		return true
+	}
+	index, ok := strings.CutPrefix(given, recordID+":")
+	if !ok || index == "" {
+		return false
+	}
+	_, err := strconv.ParseUint(index, 10, 32)
+	return err == nil
 }
