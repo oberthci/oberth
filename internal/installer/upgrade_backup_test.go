@@ -158,7 +158,7 @@ func newUpgradeFixture(t *testing.T, installed, target, liveSchema string) upgra
 
 func TestUpgradeBacksUpBeforeTheFirstChangeAndRecordsTheRollback(t *testing.T) {
 	t.Parallel()
-	// Below v0.17.83 the fixture needs no legacy-execution inventory.
+	// Below v0.17.83 the fixture needs no retired-execution inventory.
 	fixture := newUpgradeFixture(t, "0.16.20", "0.16.21", "73")
 	dir := t.TempDir()
 	archive := filepath.Join(dir, "oberth-backup-test.tar.gz.enc")

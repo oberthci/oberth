@@ -1555,7 +1555,7 @@ Usage of upgrade:
   -chart string
         deploy this chart instead of the signed release (development only: not verified)
   -chart-repository string
-        fetch the chart from this HTTPS mirror of https://charts.oberth.ci
+        fetch the chart from this HTTPS origin instead of https://charts.oberth.ci
   -context string
         kubeconfig context to target (default: current-context)
   -dry-run
@@ -1575,7 +1575,7 @@ Usage of upgrade:
   -release-dir DIR
         read the signed release (release.json, oberth-<version>.tgz and their .sigstore.json bundles) from DIR instead of fetching it
   -release-origin string
-        fetch release.json from this HTTPS mirror of https://releases.oberth.ci
+        fetch release.json from this HTTPS origin instead of https://releases.oberth.ci
   -rollback FILE
         roll back the upgrade recorded in FILE (the rollback record an upgrade printed): Helm revisions, then the pre-upgrade backup when a migration ran
   -set value

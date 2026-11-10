@@ -159,6 +159,54 @@
     "env:OBERTH_MCP_URL": {
       "doc_anchor": "docs/mcp-setup.md#oberth-client-setup",
       "test_ref": "internal/installer/claudecode_test.go TestResolveClaudeCodeSetupUsesTheCLIConfiguration"
+    },
+    "flag:rollback": {
+      "doc_anchor": "docs/installer-reruns.md#install-reconciles-upgrade-moves-versions",
+      "test_ref": "internal/installer/upgrade_backup_test.go TestRollbackRestoresTheBackupAfterAMigration"
+    },
+    "flag:force-record": {
+      "doc_anchor": "docs/installer-reruns.md#install-reconciles-upgrade-moves-versions",
+      "test_ref": "internal/installer/upgrade_backup_test.go TestRollbackRefusals"
+    },
+    "flag:allow-downgrade": {
+      "doc_anchor": "docs/installer-reruns.md#install-reconciles-upgrade-moves-versions",
+      "test_ref": "internal/installer/upgrade_backup_test.go TestUpgradeRefusesNewerLiveSchema"
+    },
+    "flag:no-backup": {
+      "doc_anchor": "docs/backup-restore.md#upgrading-across-migrations",
+      "test_ref": "internal/installer/upgrade_backup_test.go TestUpgradeWithoutABackupChangesNothing"
+    },
+    "flag:backup-dir": {
+      "doc_anchor": "docs/backup-restore.md#upgrading-across-migrations",
+      "test_ref": "internal/installer/upgrade_backup_test.go TestUpgradeBacksUpBeforeTheFirstChangeAndRecordsTheRollback"
+    },
+    "flag:release-dir": {
+      "doc_anchor": "docs/installer-reruns.md#install-reconciles-upgrade-moves-versions",
+      "test_ref": "internal/installer/upgrade_release_test.go TestVerifyUpgradeReleaseFailsClosed"
+    },
+    "flag:release-origin": {
+      "doc_anchor": "docs/installer-reruns.md#install-reconciles-upgrade-moves-versions",
+      "test_ref": "internal/releaseverify/releaseverify_test.go TestFetchAndLoadDir"
+    },
+    "flag:chart-repository": {
+      "doc_anchor": "docs/installer-reruns.md#install-reconciles-upgrade-moves-versions",
+      "test_ref": "internal/releaseverify/releaseverify_test.go TestFetchAndLoadDir"
+    },
+    "flag:chart": {
+      "doc_anchor": "docs/installer-reruns.md#install-reconciles-upgrade-moves-versions",
+      "test_ref": "internal/installer/upgrade_pki_test.go TestPlainPKIUpgradeNeedsNoBaoToken"
+    },
+    "value:budgetBytes": {
+      "doc_anchor": "docs/mcp-setup.md#purging-retained-evidence",
+      "test_ref": "internal/installer/upgrade_defaults_test.go TestUpgradeKeepsTheRenderedLogBudget"
+    },
+    "value:diskFloorBytes": {
+      "doc_anchor": "docs/where-limits-live.md#where-limits-live",
+      "test_ref": "hack/test-chart.sh retention and disk floor defaults"
+    },
+    "value:enabled": {
+      "doc_anchor": "docs/platform-protection.md#platform-protection",
+      "test_ref": "hack/test-platform-protection.sh default renders no platform priority"
     }
   }
 }

@@ -55,7 +55,7 @@ func TestUpgradeKeepsTheRenderedLogBudget(t *testing.T) {
 	// Older stored values without a retention object render no budget: 0.
 	plan, err = reconcileChangedDefaults(t.Context(), UpgradeConfig{Namespace: "oberth"}, defaultsDeps(`{}`, `{}`), "7", []byte(v021Defaults))
 	if err != nil || !slices.Contains(plan.args, "retention.logs.budgetBytes=0") {
-		t.Fatalf("legacy plan = %+v, %v", plan, err)
+		t.Fatalf("older-chart plan = %+v, %v", plan, err)
 	}
 	// A stored or explicit choice is the operator's.
 	for _, cfg := range []UpgradeConfig{{Namespace: "oberth", UserSet: []string{"retention.logs.budgetBytes=1024"}}, {Namespace: "oberth"}} {
