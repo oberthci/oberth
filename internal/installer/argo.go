@@ -273,8 +273,11 @@ func argoOberthHelmValues(cfg Config, openbao OpenBaoResult) []string {
 	}
 	values := []string{"--set", "argo.namespace=" + ns}
 	if cfg.ArgoControllerProfile != "" {
+		// No profile name is pinned (and an earlier pin is cleared): the
+		// server follows the canonical profile the controller runs, so the
+		// two releases need no order and admission never pauses (#1517).
 		values = append(values, "--set", "argo.controllerProfile="+cfg.ArgoControllerProfile,
-			"--set-string", "argo.controllerProfileConfigMap="+cfg.nonrootProfile().ConfigMap)
+			"--set-string", "argo.controllerProfileConfigMap=")
 	}
 	address := strings.TrimSpace(cfg.ArgoVaultAddress)
 	// When the installer manages a production secret store and the caller did

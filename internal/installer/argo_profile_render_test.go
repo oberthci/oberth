@@ -119,7 +119,7 @@ func roundTrip(t *testing.T, values map[string]any) map[string]any {
 
 // --argo-parallelism on a release that runs the nonroot profile keeps the
 // profile and moves the limit into it, even without --argo-controller-profile,
-// and the Oberth chart pins the new profile ConfigMap.
+// and the Oberth chart follows it without a pinned name.
 func TestArgoParallelismOnANonrootReleaseKeepsTheProfile(t *testing.T) {
 	var upgrade []string
 	deps := Deps{Output: io.Discard, RunHelm: func(_ context.Context, args []string) ([]byte, error) {
@@ -141,8 +141,10 @@ func TestArgoParallelismOnANonrootReleaseKeepsTheProfile(t *testing.T) {
 	if !slices.Contains(upgrade, "--values") {
 		t.Fatalf("profile values not applied: %v", upgrade)
 	}
+	// The Oberth chart pins no profile name and clears an earlier pin: the
+	// server follows the profile the controller runs.
 	values := argoOberthHelmValues(Config{ArgoControllerProfile: argoworkflow.NonrootStaticProfile, argoProfile: result.Profile}, OpenBaoResult{})
-	if !slices.Contains(values, "argo.controllerProfileConfigMap="+result.Profile.ConfigMap) {
-		t.Fatalf("Oberth values do not pin the profile: %v", values)
+	if !slices.Contains(values, "argo.controllerProfileConfigMap=") || slices.Contains(values, "argo.controllerProfileConfigMap="+result.Profile.ConfigMap) {
+		t.Fatalf("Oberth values pin the profile name: %v", values)
 	}
 }

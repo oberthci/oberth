@@ -83,9 +83,9 @@ type Config struct {
 	// NonrootProfile selects an exact built-in verification policy, not an
 	// unchecked capability. Empty disables selected nonroot leaves.
 	NonrootProfile string
-	// NonrootProfileConfigMap names the canonical profile ConfigMap to
-	// verify; empty is the built-in one without controller limits. A profile
-	// carrying parallelism has its own digest-derived name (#1517).
+	// NonrootProfileConfigMap pins the canonical profile ConfigMap to
+	// verify; empty follows the profile the running controller names, which
+	// is verified against its own digest-derived name (#1517).
 	NonrootProfileConfigMap string
 
 	// Namespace is where every Workflow and its pods are created. It is

@@ -131,14 +131,14 @@ func (controller *Controller) expectedSourceVolume(request Request) SourceVolume
 	return volume
 }
 
-// verifyNonrootController proves the running controller uses the canonical
-// profile in ConfigMap configMap (empty: the built-in one without limits).
-// The name is the operator's pin, rendered into this server's RBAC; the
-// content must be the canonical profile that name derives from (#1517).
+// verifyNonrootController proves the running controller uses a canonical
+// profile (#1517). An explicit configMap pins one profile name; empty
+// follows the profile the controller itself names in --configmap. Either
+// way the name is a digest of the content, and the content must be exactly
+// the canonical profile that name derives from, so following the controller
+// admits no other configuration: it only removes the ordering between the
+// argo-workflows and the Oberth release when the controller limits change.
 func verifyNonrootController(ctx context.Context, client kubernetes.Interface, namespace, configMap string, request Request) (*nonrootProof, error) {
-	if configMap == "" {
-		configMap = argoworkflow.NonrootProfileConfigMap
-	}
 	if client == nil {
 		return nil, errors.New("argojob: controller profile verification requires Kubernetes")
 	}
@@ -153,6 +153,9 @@ func verifyNonrootController(ctx context.Context, client kubernetes.Interface, n
 	pod, err := selectNonrootControllerWithHistory(pods.Items, namespace, evicted)
 	if err != nil {
 		return nil, err
+	}
+	if configMap == "" {
+		configMap = runningProfileConfigMap(pod)
 	}
 	if err := verifyNonrootControllerPod(pod, configMap); err != nil {
 		return nil, err
@@ -186,6 +189,19 @@ func verifyNonrootController(ctx context.Context, client kubernetes.Interface, n
 		return nil, errors.New("argojob: controller configuration was created after the running process")
 	}
 	return &nonrootProof{requestID: nonrootRequestIdentity(request), namespace: namespace, podUID: string(pod.UID), configUID: string(cm.UID), configVersion: cm.ResourceVersion, configSHA256: profile.SHA256, verifiedAt: time.Now()}, nil
+}
+
+// runningProfileConfigMap is the profile ConfigMap the controller names in
+// its --configmap argument when that has the profile name form, else the
+// built-in profile (which verifyNonrootControllerPod then holds it to).
+func runningProfileConfigMap(pod *corev1.Pod) string {
+	if len(pod.Spec.Containers) == 1 {
+		args := pod.Spec.Containers[0].Args
+		if len(args) >= 2 && args[0] == "--configmap" && argoworkflow.ValidNonrootProfileConfigMap(args[1]) {
+			return args[1]
+		}
+	}
+	return argoworkflow.NonrootProfileConfigMap
 }
 
 func verifyNonrootControllerPod(pod *corev1.Pod, configMap string) error {

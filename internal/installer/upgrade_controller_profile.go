@@ -91,15 +91,6 @@ func installedPipelineNamespace(ctx context.Context, cfg UpgradeConfig, deps Dep
 	return values.Argo.Namespace, nil
 }
 
-// pinUpgradeControllerProfile prepares the transition and records its
-// profile ConfigMap for the Oberth chart (#1517).
-func pinUpgradeControllerProfile(ctx context.Context, cfg *UpgradeConfig, deps Deps) (*upgradeControllerProfile, func(), error) {
-	profile, cleanup, err := prepareUpgradeControllerProfile(ctx, *cfg, deps)
-	if err == nil && profile != nil {
-		cfg.argoProfileConfigMap = profile.profile.ConfigMap
-	}
-	return profile, cleanup, err
-}
 
 func prepareUpgradeControllerProfile(ctx context.Context, cfg UpgradeConfig, deps Deps) (*upgradeControllerProfile, func(), error) {
 	noop := func() {}
@@ -226,8 +217,10 @@ func (p *upgradeControllerProfile) verifyFinal(ctx context.Context, cfg UpgradeC
 			ProfileConfigMap string `json:"controllerProfileConfigMap"`
 		} `json:"argo"`
 	}
+	// The transition clears any pinned profile name; the server follows the
+	// controller, which apply already verified on p.profile.
 	if readErr != nil || json.Unmarshal(raw, &values) != nil || values.Argo.Profile != argoworkflow.NonrootStaticProfile ||
-		(values.Argo.ProfileConfigMap != p.profile.ConfigMap && (values.Argo.ProfileConfigMap != "" || p.profile.ConfigMap != argoworkflow.NonrootProfileConfigMap)) {
+		values.Argo.ProfileConfigMap != "" {
 		return errors.New("oberth controller profile values readback refused")
 	}
 	deployments, err := deps.KubeClient.AppsV1().Deployments(cfg.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/instance=oberth"})

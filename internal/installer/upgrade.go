@@ -71,9 +71,6 @@ type UpgradeConfig struct {
 	// signed release; Helm then gets no --version.
 	verifiedChart bool
 	storedValues  string // internal schema-validated legacy migration snapshot
-	// argoProfileConfigMap is the nonroot profile ConfigMap the controller
-	// transition renders, pinned into the Oberth chart (#1517).
-	argoProfileConfigMap string
 }
 
 // ErrPinnedKeyOverride is returned when a user --set or --values file
@@ -431,7 +428,7 @@ func RunUpgrade(ctx context.Context, cfg UpgradeConfig, deps Deps) (UpgradeResul
 		}
 	}
 
-	profile, cleanupProfile, err := pinUpgradeControllerProfile(ctx, &cfg, deps)
+	profile, cleanupProfile, err := prepareUpgradeControllerProfile(ctx, cfg, deps)
 	if err != nil {
 		return result, err
 	}
@@ -739,10 +736,10 @@ func upgradeHelmArgs(cfg UpgradeConfig, chart, imageRef string, compatibility ba
 		"--set", "argo.goProxy.port=8444",
 	)
 	if cfg.ArgoControllerProfile != "" {
-		args = append(args, "--set-string", "argo.controllerProfile="+cfg.ArgoControllerProfile)
-		if cfg.argoProfileConfigMap != "" {
-			args = append(args, "--set-string", "argo.controllerProfileConfigMap="+cfg.argoProfileConfigMap)
-		}
+		// Clear any pinned profile name: the server follows the profile the
+		// controller runs (#1517).
+		args = append(args, "--set-string", "argo.controllerProfile="+cfg.ArgoControllerProfile,
+			"--set-string", "argo.controllerProfileConfigMap=")
 	}
 	// User values files come after pins. Pinned-key conflicts have already
 	// been refused by checkPinnedKeyConflicts, so these cannot override a pin.

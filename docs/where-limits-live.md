@@ -53,15 +53,23 @@ the `config` is
 ```
 
 `oberth install --upgrade --argo-parallelism N` on a profile release keeps the
-profile, renders the matching ConfigMap, points the controller at it, and
-sets the Oberth chart's `argo.controllerProfileConfigMap` to that name. The
-server reads only that one ConfigMap (its Role's single `get`) and verifies
-before each nonroot submission that the controller runs it and that its data
-is exactly the canonical profile for its name; any other key or byte is
-refused. A changed limit is a new immutable ConfigMap, so the controller rolls
-once; running Workflows survive the rollout. Between the argo-workflows
-upgrade and the Oberth upgrade, nonroot admission pauses because the running
-controller and the pinned name disagree; it resumes when both match.
+profile, renders the matching ConfigMap and points the controller at it. The
+Oberth release pins no name (`argo.controllerProfileConfigMap` stays empty, and
+the installer clears an earlier pin): before each nonroot submission the server
+reads the profile ConfigMap the running controller names in `--configmap` and
+verifies that its data is exactly the canonical profile its digest-derived name
+stands for; any other key or byte is refused. The server's Role
+`<release>-argo-controller-profile` grants `get` (no list, watch or write) on
+ConfigMaps in the pipeline namespace for this. A changed limit is a new
+immutable ConfigMap, so the controller rolls once; running Workflows survive
+the rollout. Changing the limits needs no Oberth upgrade and no release order,
+and nonroot admission does not pause.
+
+Since v0.21.0. Before it, the Oberth chart pinned the name in its Role and the
+server flag, so admission paused between the argo-workflows and the Oberth
+upgrade. That pause happens one last time while upgrading to v0.21.0 (the old
+server still holds the pin); afterwards it does not recur. A name set in
+`argo.controllerProfileConfigMap` by hand still pins exactly that profile.
 
 **Default: none.** Neither Oberth nor the installer sets a limit. That is the
 behaviour Oberth has had since v0.18.0, whose `maxConcurrentJobs` default was
