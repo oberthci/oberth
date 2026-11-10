@@ -229,9 +229,6 @@ code that uses them:
 # .oberth/build.yaml (branch-trigger, abbreviated)
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
-metadata:
-  annotations:
-    oberth.ci/size: L
 spec:
   entrypoint: ci
   activeDeadlineSeconds: 3600
@@ -298,37 +295,27 @@ spec:
       - name: terraform-state
 ```
 
-When deploying the [release-priority changes](docs/release-priority.md) held for
-v0.17.72, check existing size-grant state before upgrading: an old revoked grant
-now disables that repository's automatic release boost. An administrator should
-inspect these repositories:
+Size grants (`oberth size`, MCP `size_grant`, `size_revoke`, `size_grant_get`)
+no longer change admission: Oberth reads no size from a workflow. Their one
+remaining effect is automatic tag priority. A repository whose size grant was
+revoked gets no automatic boost for its tags; `never_granted` and `granted`
+keep it. Only the oldest waiting tag per repository gets the boost, so it caps
+waiting tags, not a continuous stream. To check a repository:
 
 ```bash
-oberth mcp call size_grant_get '{"repo":"oberth"}'
-oberth mcp call size_grant_get '{"repo":"exampleorg-wrapper"}'
-oberth mcp call size_grant_get '{"repo":"exampleorg-ebpf"}'
+oberth mcp call size_grant_get '{"repo":"example"}'
 ```
 
-`revoked` disables the automatic boost; `never_granted` enables it within L.
-If priority should be re-enabled, an admin grants L (or XL when appropriate)
-with `size_grant`. Only the oldest waiting tag per repository gets the boost;
-this caps waiting tags, not a continuous stream. An oversized tag uses normal
-order but holds that repository's waiting-tag slot until admission or finish.
+`revoked` disables the automatic boost; an admin re-enables it with
+`size_grant` (any accepted maximum).
 
-`oberth.ci/size-by-trigger` sizes each kind of run separately, so a heavy
-gate (a kernel matrix, say) can hold the host only on promotion and nightly
-runs while branch pushes stay small. Triggers are `branch`, `promotion` and
-`schedule` in build.yaml and `tag` in release.yaml; an unnamed trigger falls
-back to `oberth.ci/size`. To skip the heavy work itself on a branch run, guard
-it with the server-set `oberth-trigger` workflow parameter. Declaring the
-parameter with a default keeps the document valid on servers that predate it
-(they never set it, so the default decides):
+To skip heavy work on a branch run, guard it with the server-set
+`oberth-trigger` workflow parameter (`branch`, `promotion` or `schedule` in
+build.yaml, `tag` in release.yaml). Declaring the parameter with a default
+keeps the document valid on servers that predate it (they never set it, so the
+default decides):
 
 ```yaml
-metadata:
-  annotations:
-    oberth.ci/size: XL   # older servers: the only size they read
-    oberth.ci/size-by-trigger: "branch=M,promotion=XL,schedule=XL"
 spec:
   arguments:
     parameters:
@@ -343,10 +330,14 @@ spec:
         when: "'{{workflow.parameters.oberth-trigger}}' != 'branch'"
 ```
 
+The historical `oberth.ci/size` and `oberth.ci/size-by-trigger` annotations are
+accepted and unused for admission; the resource report still groups
+measurements by them.
+
 Numeric resource ceilings use `oberth resource grant/get/revoke` or MCP
 `resource_grant`, `resource_grant_get`, `resource_revoke`. Migration 40 copies
-existing size grants; later size changes affect only legacy admission and tag
-priority. Declared workflows never fall back to sizes. See
+existing size grants; later size changes affect only automatic tag priority.
+Declared workflows never fall back to sizes. See
 [declared resources](docs/declared-resources.md).
 
 ## MCP tools

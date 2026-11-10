@@ -29,7 +29,7 @@ func runSizeGrant(ctx context.Context, arguments []string, output io.Writer) err
 	databasePath := flags.String("database", "/data/oberth.sqlite", "SQLite database path (in-pod)")
 	maximum := ""
 	if action == "grant" {
-		flags.StringVar(&maximum, "max", "", "largest admission size the repository may declare: L or XL")
+		flags.StringVar(&maximum, "max", "", "legacy size maximum, L or XL; sizes do not affect admission, any grant enables automatic tag priority")
 	}
 	// Accept the repository before or after the flags.
 	var repo string

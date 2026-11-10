@@ -110,6 +110,11 @@ func renderAdmission(output io.Writer, state *model.AdmissionState, now time.Tim
 	if _, err := fmt.Fprintf(output, "%d run(s) admitted; Argo parallelism bounds running Workflows\n", state.Runs); err != nil {
 		return err
 	}
+	if line := admissionHoldLine(state.Hold); line != "" {
+		if _, err := fmt.Fprintln(output, "hold: "+line); err != nil {
+			return err
+		}
+	}
 	if p := state.Pressure; p != nil {
 		if p.Fallback != "" {
 			_, _ = fmt.Fprintln(output, p.Fallback)

@@ -1,9 +1,13 @@
 # Measured peaks beside Workflow size labels
 
-This is a report-only follow-up to the opt-in trusted sampler. Admission still
-uses the existing S/M/L/XL classes and administrator weights. Nothing in the
-report changes a grant, authored request/limit, Workflow, retry policy or size
-classification. It supplies no automatic request recommendation.
+This is a report-only follow-up to the opt-in trusted sampler. Admission does
+not use sizes: since v0.20.0 it counts runs, Argo controller `parallelism`
+bounds running Workflows and shared step limits are native Argo
+`synchronization` ([where limits live](where-limits-live.md)). The S/M/L/XL
+buckets below are the historical `oberth.ci/size` labels a Workflow still
+declares, kept only to group the measurements. Nothing in the report changes a
+grant, authored request/limit, Workflow or retry policy. It supplies no
+automatic request recommendation.
 
 Full MCP `run_get`, default `GET /api/runs/{id}`, and `oberth run <id> --json`
 attach `MeasuredSizeComparison` to each assembled step beside `MeasuredUsage`,

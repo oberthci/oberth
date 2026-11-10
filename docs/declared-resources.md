@@ -101,15 +101,18 @@ where attempt identity is ambiguous.
 
 ## Workflow admission and placement
 
-Oberth bounds the number of concurrent workflows. Kubernetes places step Pods
-using their declared requests and leaves them Pending when capacity is unavailable.
-Serving does not reserve a whole-workflow CPU/memory budget, calculate memory
-headroom, or fall back to S/M/L/XL weights when declarations are incomplete.
+Oberth keeps no run ceiling: the Argo controller's `parallelism` bounds running
+Workflows ([where limits live](where-limits-live.md)). Kubernetes places step
+Pods using their declared requests and leaves them Pending when capacity is
+unavailable. Serving does not reserve a whole-workflow CPU/memory budget,
+calculate memory headroom, or fall back to S/M/L/XL weights when declarations
+are incomplete.
 
 The enabled PSI hard-limit valve and configured disk-space floor can hold new
-workflow grants. Priority does not bypass them or the concurrent-workflow ceiling.
-Repository concurrency groups, credential checks, numeric per-container ceilings
-and ownership/cleanup checks still apply. Existing requests and limits stay in
+workflow grants. Priority does not bypass them. Shared step limits and mutual
+exclusion are native Argo `synchronization`; repository concurrency groups are
+gone. Credential checks, numeric per-container ceilings and ownership/cleanup
+checks still apply. Existing requests and limits stay in
 repository YAML; the read-only resource report never rewrites them.
 
 Missing requests use the documented per-container defaults. Admission counts

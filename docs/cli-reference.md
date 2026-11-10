@@ -675,7 +675,9 @@ Running it again changes nothing. --dry-run prints what would change.
 ## oberth outbox
 
 ```text
-Usage: oberth outbox list|show|retry|abandon [<upstream/org/repo>] [--id <record-id>] [--reason <text>]
+Usage: oberth outbox list
+       oberth outbox show|retry <upstream/org/repo>
+       oberth outbox abandon <upstream/org/repo> --id <record-id> --reason <text>
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
 Repair a receive record that blocks its repository: show it, retry delivery, or abandon it
 (moved aside under abandoned/, audited). Unscoped admin only.
@@ -1542,7 +1544,7 @@ Usage of size grant:
   -database string
         SQLite database path (in-pod) (default "/data/oberth.sqlite")
   -max string
-        largest admission size the repository may declare: L or XL
+        legacy size maximum, L or XL; sizes do not affect admission, any grant enables automatic tag priority
 ```
 
 ## oberth size revoke

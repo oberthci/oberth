@@ -156,10 +156,13 @@ promotion without merging. A terminal run is refused. `oberth runs cancel`
 cancels every active run of one ref the same way, reporting each refusal.
 
 `oberth admission` prints the server's admission gate from `system_status`:
-the weight budget and its use, the queue-head run every later run waits
+how many runs are admitted (Argo controller `parallelism` bounds how many
+Workflows run; Oberth keeps no run ceiling), an active administrator hold with
+its whole reason, host pressure, the queue-head run every later run waits
 behind, and every reservation with its state (`preparing`, `waiting`,
-`group`, `vm`, `granted`, `retained`), size, weight, repository/ref, group and
-age. `oberth admission release <run-id>` calls the admin-only
+`granted`, `retained`), repository/ref and age. There are no sizes, weights or
+concurrency groups: shared step limits are native Argo `synchronization`
+([where limits live](where-limits-live.md)). `oberth admission release <run-id>` calls the admin-only
 `admission_release` MCP tool to free a reservation no owner will release,
 typically a granted one still held for a run that is already terminal. It
 deletes the run's Workflow first as proof; `--force` releases without that

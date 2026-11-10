@@ -326,9 +326,9 @@ call the proxy hostname directly.
 | `resource_grant` | Set per-container numeric `requests` and `limits` ceilings for CPU and memory (Kubernetes quantity strings); optional ephemeral-storage defaults to 16Gi; admin-only, audited |
 | `resource_revoke` | Return numeric ceilings to requests/limits of 4 CPU, 8Gi memory, 16Gi ephemeral-storage; admin-only, audited |
 | `resource_grant_get` | Read the numeric resource ceiling and grant/revocation provenance |
-| `size_grant` | Set a repository's maximum admission size, `L` or `XL` (admin-only, audited); without a grant the maximum is `L`; re-enables the oldest waiting tag's automatic boost within that maximum |
-| `size_revoke` | Return a repository to `L` and disable automatic tag priority, even if never granted (admin-only, audited) |
-| `size_grant_get` | Read a repository's maximum admission size (`max_size`) and grant state: `never_granted`, `granted`, or `revoked` |
+| `size_grant` | Legacy size grant, `L` or `XL` (admin-only, audited). Sizes do not affect admission; the grant re-enables the oldest waiting tag's automatic priority boost |
+| `size_revoke` | Disable a repository's automatic tag priority, even if never granted (admin-only, audited) |
+| `size_grant_get` | Read the legacy size grant (`max_size`) and its state: `never_granted`, `granted`, or `revoked` (revoked disables automatic tag priority) |
 | `queue_priority_config` | Replace administrator RC globs with `rc_patterns` (e.g. `["rc/*", "release/*"]`); `[]` disables; unscoped admin, audited |
 | `queue_priority_get` | Read RC patterns and the 60-minute threshold after which a standard run ages into promotion; unscoped admin |
 | `priority_grant` | Allow `identity` to request priority up to `max_class` (`promotion` or `high`; legacy `highest` aliases high) until RFC3339 `expires`; unscoped admin, audited |
