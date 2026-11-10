@@ -35,7 +35,7 @@ func runSetup(ctx context.Context, arguments []string, input io.Reader, output i
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("%w: setup accepts flags only, no positional arguments", errUsage)

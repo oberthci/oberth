@@ -26,7 +26,7 @@ func runPreflightUpstreams(arguments []string, output io.Writer) error {
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if *inventory == "" || flags.NArg() != 0 {
 		return fmt.Errorf("%w: preflight upstreams --inventory FILE", errUsage)

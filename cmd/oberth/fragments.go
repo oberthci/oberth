@@ -40,7 +40,7 @@ func fragmentFlags(name string, arguments []string, output io.Writer) (string, s
 			flags.Usage()
 			return "", "", nil, nil
 		}
-		return "", "", nil, fmt.Errorf("%w: %w", errUsage, err)
+		return "", "", nil, usageError(err)
 	}
 	return *databasePath, *dataRoot, flags.Args(), nil
 }

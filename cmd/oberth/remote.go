@@ -89,6 +89,13 @@ func reportMode(mode string) {
 	fmt.Fprintf(os.Stderr, "reading: %s\n", mode)
 }
 
+// remoteSubcommands lists the verbs a command dispatches before parsing its
+// own flags, so --help shows every form the command accepts.
+var remoteSubcommands = map[string]string{
+	"run":  "       oberth run resources|retry|rerun|cancel|purge|hold ... (see oberth run <subcommand> --help)",
+	"runs": "       oberth runs cancel --repo <repo> --ref <branch> [flags] (see oberth runs cancel --help)",
+}
+
 func setRemoteUsage(flags *flag.FlagSet) {
 	suffix := "[flags]"
 	switch flags.Name() {
@@ -101,6 +108,9 @@ func setRemoteUsage(flags *flag.FlagSet) {
 	}
 	flags.Usage = func() {
 		_, _ = fmt.Fprintf(flags.Output(), "Usage: oberth %s %s\n", flags.Name(), suffix)
+		if subcommands := remoteSubcommands[flags.Name()]; subcommands != "" {
+			_, _ = fmt.Fprintln(flags.Output(), subcommands)
+		}
 		if flags.Name() == "log" {
 			_, _ = fmt.Fprintln(flags.Output(), "With no pattern, limit, tail, offset or byte-offset: last 200 lines. Pass --tail --limit N for a larger tail, or --limit 0 for the existing bounded full read.")
 		}
@@ -119,7 +129,7 @@ func remoteFlags(name string, arguments []string, output io.Writer) (*flag.FlagS
 			flags.Usage()
 			return nil, nil, nil
 		}
-		return nil, nil, fmt.Errorf("%w: %w", errUsage, err)
+		return nil, nil, usageError(err)
 	}
 	return flags, asJSON, nil
 }
@@ -153,14 +163,14 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 	before := flags.String("before", "", "only runs older than this cursor (printed after a full page)")
 	all := flags.Bool("all", false, "follow pages to the oldest run")
 	active := flags.Bool("active", false, "only queued and running runs, in scheduling order, with queue position and wait reason")
-	asJSON := flags.Bool("json", false, "emit the server's payload unchanged")
-	if err := flags.Parse(arguments); err != nil {
+	asJSON := flags.Bool("json", false, `emit {"runs":[...],"next_before":N}; --active emits the server's array unchanged`)
+	if err := parseCommandFlags(flags, arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("%w: runs takes no positional arguments; use --repo and --ref to filter", errUsage)
@@ -194,37 +204,20 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 	if *before != "" {
 		query["before"] = *before
 	}
-	if *asJSON {
-		return emitJSON(ctx, api, "/api/runs", query, output)
-	}
 	// The server returns at most one bounded page; --all walks the cursor
 	// to the oldest run instead of stopping at the newest page (#050).
-	var runs []remoteRun
-	next := ""
-	for {
-		var page []remoteRun
-		headers, err := api.GetWithHeaders(ctx, "/api/runs", query, &page)
-		if err != nil {
-			return err
+	rows, next, err := collectRunPages(ctx, api, query, *limit, *all)
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		return emitRunPage(output, rows, next)
+	}
+	runs := make([]remoteRun, len(rows))
+	for i, row := range rows {
+		if err := json.Unmarshal(row, &runs[i]); err != nil {
+			return fmt.Errorf("decode run: %w", err)
 		}
-		runs = append(runs, page...)
-		previous := next
-		next = headers.Get("X-Oberth-Next-Before")
-		if next == "" && len(page) > 0 && datedRunCount(page) == *limit {
-			next = runCursor(page[len(page)-1])
-		}
-		// A server older than paging ignores ?before and returns the newest
-		// page again: a cursor that does not move backwards ends the walk
-		// instead of looping forever.
-		if previous != "" && !cursorMovedBack(previous, next) {
-			runs = runs[:len(runs)-len(page)]
-			next = ""
-			break
-		}
-		if !*all || next == "" {
-			break
-		}
-		query["before"] = next
 	}
 	if len(runs) == 0 {
 		_, err := fmt.Fprintln(output, "no runs")
@@ -244,6 +237,67 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 		return err
 	}
 	return nil
+}
+
+// collectRunPages reads one page, or every page with all, and returns the
+// raw rows and the cursor for the next page ("" after the oldest run).
+func collectRunPages(ctx context.Context, api *client.Client, query map[string]string, limit int, all bool) ([]json.RawMessage, string, error) {
+	var rows []json.RawMessage
+	next := ""
+	for {
+		var page []json.RawMessage
+		headers, err := api.GetWithHeaders(ctx, "/api/runs", query, &page)
+		if err != nil {
+			return nil, "", err
+		}
+		previous := next
+		next = headers.Get("X-Oberth-Next-Before")
+		if next == "" && len(page) > 0 {
+			decoded := make([]remoteRun, 0, len(page))
+			for _, row := range page {
+				var run remoteRun
+				if err := json.Unmarshal(row, &run); err != nil {
+					return nil, "", fmt.Errorf("decode run: %w", err)
+				}
+				decoded = append(decoded, run)
+			}
+			if datedRunCount(decoded) == limit {
+				next = runCursor(decoded[len(decoded)-1])
+			}
+		}
+		// A server older than paging ignores ?before and returns the newest
+		// page again: a cursor that does not move backwards ends the walk
+		// instead of looping forever.
+		if previous != "" && !cursorMovedBack(previous, next) {
+			return rows, "", nil
+		}
+		rows = append(rows, page...)
+		if !all || next == "" {
+			return rows, next, nil
+		}
+		query["before"] = next
+	}
+}
+
+// emitRunPage writes `oberth runs --json`: the rows and the cursor of the
+// next page, in the same envelope as GET /api/runs?envelope=1 and MCP
+// run_list. next_before is a sequence; a scoped uplink pages by run ID in
+// next_cursor. Neither field is present after the oldest run.
+func emitRunPage(output io.Writer, rows []json.RawMessage, next string) error {
+	if rows == nil {
+		rows = []json.RawMessage{}
+	}
+	document := map[string]any{"runs": rows}
+	if next != "" {
+		if sequence, err := strconv.ParseInt(next, 10, 64); err == nil {
+			document["next_before"] = sequence
+		} else {
+			document["next_cursor"] = next
+		}
+	}
+	encoder := json.NewEncoder(output)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(document)
 }
 
 // datedRunCount counts the rows that count against the page limit: terminal
@@ -368,6 +422,9 @@ func runRunDetail(ctx context.Context, arguments []string, output io.Writer) err
 	}
 	if flags.NArg() != 1 {
 		return fmt.Errorf("%w: run <run-id>", errUsage)
+	}
+	if err := refuseVerbAsRunID("run", flags.Arg(0), "<run-id>, or a subcommand: resources, retry, rerun, cancel, purge or hold"); err != nil {
+		return err
 	}
 	api, err := remoteClient(ctx)
 	if err != nil {
@@ -548,10 +605,13 @@ func runRemoteLog(ctx context.Context, arguments []string, output io.Writer) err
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 1 {
 		return fmt.Errorf("%w: log <run-id> --burn <burn> --step <step>", errUsage)
+	}
+	if err := refuseVerbAsRunID("log", flags.Arg(0), "<run-id> [--burn <burn> --step <step>]"); err != nil {
+		return err
 	}
 	api, err := remoteClient(ctx)
 	if err != nil {
@@ -791,25 +851,62 @@ type remoteIssuePage struct {
 	Total      int64 `json:"total"`
 }
 
+// UnmarshalJSON reads the preferred snake_case envelope and falls back to the
+// legacy PascalCase names, so the CLI keeps working when the aliases go.
+func (page *remoteIssuePage) UnmarshalJSON(raw []byte) error {
+	var wire struct {
+		Issues       []remoteIssueSummary `json:"issues"`
+		LegacyIssues []remoteIssueSummary `json:"Issues"`
+		NextBefore   *int64               `json:"next_before"`
+		LegacyNext   int64                `json:"NextBefore"`
+		Total        int64                `json:"total"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		return err
+	}
+	page.Issues, page.NextBefore, page.Total = wire.Issues, wire.LegacyNext, wire.Total
+	if page.Issues == nil {
+		page.Issues = wire.LegacyIssues
+	}
+	if wire.NextBefore != nil {
+		page.NextBefore = *wire.NextBefore
+	}
+	return nil
+}
+
+// issuePageLimit is the server's page cap (internal/api issueFilter).
+const issuePageLimit = 50
+
+const issuesUsage = "Usage: oberth issues [--state open|closed|all] [--work-status <status>] [--limit N] [--before <issue-id>] [--all] [--json]\n" +
+	"       oberth issues update --id <issue-id> --work-status <status> [flags]\n" +
+	"Prints one page of at most 50 issues, newest first, with the matching total.\n" +
+	"A full page ends with the --before value for the next page; --all follows every page."
+
 func runIssues(ctx context.Context, arguments []string, output io.Writer) error {
 	if len(arguments) > 0 && arguments[0] == "update" {
 		return runIssueWorkStatus(ctx, arguments[1:], output)
 	}
 	flags := flag.NewFlagSet("issues", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	setRemoteUsage(flags)
-	asJSON := flags.Bool("json", false, "emit the server payload")
+	flags.Usage = func() {
+		_, _ = fmt.Fprintln(flags.Output(), issuesUsage)
+		flags.PrintDefaults()
+	}
+	asJSON := flags.Bool("json", false, "emit the server payload (one page, or every page with --all)")
 	issueState := flags.String("state", "open", "filter open, closed or all issues")
 	workStatus := flags.String("work-status", "", "filter todo, active, waiting or review")
 	staleAfter := flags.String("stale-after", "", "override the general stale window (duration)")
 	activeStaleAfter := flags.String("active-stale-after", "", "override the active stale window (duration)")
+	limit := flags.Int("limit", issuePageLimit, "issues per page (1 to 50)")
+	before := flags.Int64("before", 0, "only issues older than this issue ID (printed after a full page)")
+	all := flags.Bool("all", false, "follow every page to the oldest matching issue")
 	if err := parseCommandFlags(flags, arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if *issueState != "open" && *issueState != "closed" && *issueState != "all" {
 		return fmt.Errorf("%w: --state must be open, closed or all", errUsage)
@@ -828,6 +925,12 @@ func runIssues(ctx context.Context, arguments []string, output io.Writer) error 
 			}
 		}
 	}
+	if *limit < 1 || *limit > issuePageLimit {
+		return fmt.Errorf("%w: --limit must be between 1 and %d", errUsage, issuePageLimit)
+	}
+	if *before < 0 {
+		return fmt.Errorf("%w: --before must be a positive issue ID", errUsage)
+	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("%w: issues takes no arguments; use the dashboard for individual issue detail", errUsage)
 	}
@@ -836,13 +939,19 @@ func runIssues(ctx context.Context, arguments []string, output io.Writer) error 
 		return err
 	}
 	reportMode("server")
-	raw, err := collectIssuePages(ctx, func(ctx context.Context, before int64) (json.RawMessage, error) {
-		query := map[string]string{"state": selectedState, "work_status": *workStatus, "stale_after": *staleAfter, "active_stale_after": *activeStaleAfter}
-		if before > 0 {
-			query["before"] = strconv.FormatInt(before, 10)
+	load := func(ctx context.Context, cursor int64) (json.RawMessage, error) {
+		query := map[string]string{"state": selectedState, "work_status": *workStatus, "stale_after": *staleAfter, "active_stale_after": *activeStaleAfter, "limit": strconv.Itoa(*limit)}
+		if cursor > 0 {
+			query["before"] = strconv.FormatInt(cursor, 10)
 		}
 		return api.GetRaw(ctx, "/api/issues", query)
-	})
+	}
+	var raw json.RawMessage
+	if *all {
+		raw, err = collectIssuePages(ctx, *before, load)
+	} else {
+		raw, err = load(ctx, *before)
+	}
 	if err != nil {
 		return err
 	}
@@ -881,8 +990,33 @@ func runIssues(ctx context.Context, arguments []string, output io.Writer) error 
 	if total == 0 { // A server before #1124 did not return total.
 		total = int64(len(page.Issues))
 	}
-	_, err = fmt.Fprintf(output, "1–%d of %d\n", len(page.Issues), total)
+	if *before > 0 {
+		// A later page has no absolute offset; name the cursor it continues.
+		_, err = fmt.Fprintf(output, "%d older than #%d, of %d\n", len(page.Issues), *before, total)
+	} else {
+		_, err = fmt.Fprintf(output, "1–%d of %d\n", len(page.Issues), total)
+	}
+	if err != nil || *all || page.NextBefore <= 0 {
+		return err
+	}
+	_, err = fmt.Fprintf(output, "more: oberth issues%s --before %d (or --all)\n", issueFilterArguments(*issueState, *workStatus, *limit), page.NextBefore)
 	return err
+}
+
+// issueFilterArguments repeats the non-default filters in the next-page hint,
+// so the printed command continues the same listing.
+func issueFilterArguments(state, workStatus string, limit int) string {
+	var builder strings.Builder
+	if state != "open" {
+		builder.WriteString(" --state " + state)
+	}
+	if workStatus != "" {
+		builder.WriteString(" --work-status " + workStatus)
+	}
+	if limit != issuePageLimit {
+		builder.WriteString(" --limit " + strconv.Itoa(limit))
+	}
+	return builder.String()
 }
 
 func shortSHA(sha string) string {
@@ -1023,7 +1157,7 @@ func runIssueWorkStatus(ctx context.Context, arguments []string, output io.Write
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	revisionProvided := false
 	flags.Visit(func(value *flag.Flag) {

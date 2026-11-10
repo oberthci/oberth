@@ -28,7 +28,7 @@ func runWaitIdle(ctx context.Context, arguments []string, output io.Writer) erro
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 0 || *timeout <= 0 || (*mode != "all" && *mode != "critical") {
 		return fmt.Errorf("%w: wait-idle requires a positive --timeout and --wait-for=all|critical", errUsage)

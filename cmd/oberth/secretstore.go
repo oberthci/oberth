@@ -79,7 +79,7 @@ func runSecretStoreBootstrapTLS(arguments []string, output io.Writer) error {
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 0 || *outputDirectory == "" || *namespace == "" {
 		return fmt.Errorf("%w: secretstore bootstrap-tls requires --output-dir and --namespace", errUsage)
@@ -102,7 +102,7 @@ func runSecretStoreSetup(arguments []string, output io.Writer) error {
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("%w: secretstore setup accepts flags only", errUsage)
@@ -220,7 +220,7 @@ func runSecretStoreVerifyWithSources(ctx context.Context, arguments []string, ou
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if *timeout <= 0 {
 		return fmt.Errorf("%w: timeout must be positive", errUsage)
@@ -483,7 +483,7 @@ func runPerRepoTierVerify(
 	}
 	for _, part := range parts {
 		if err := gitcache.ValidateSegment("identity", part); err != nil {
-			return fmt.Errorf("%w: %w", errUsage, err)
+			return usageError(err)
 		}
 	}
 	upstream, org, repoName := parts[0], parts[1], parts[2]
@@ -594,7 +594,7 @@ func secretStoreVerifyPaths(input []string, kvPath string) ([]string, map[string
 	for _, path := range input {
 		scoped, upstreamScoped, err := pipeline.ParseUpstreamSecretStorePath(path)
 		if err != nil {
-			return nil, nil, fmt.Errorf("%w: %w", errUsage, err)
+			return nil, nil, usageError(err)
 		}
 		if upstreamScoped {
 			canonical := scoped.FetchPath(kvPath)
@@ -602,7 +602,7 @@ func secretStoreVerifyPaths(input []string, kvPath string) ([]string, map[string
 			path = canonical
 		}
 		if err := pipeline.ValidateSecretStorePath(path); err != nil {
-			return nil, nil, fmt.Errorf("%w: %w", errUsage, err)
+			return nil, nil, usageError(err)
 		}
 		if !seen[path] {
 			seen[path] = true
@@ -974,7 +974,7 @@ func runSecretStoreSync(ctx context.Context, arguments []string, output io.Write
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("%w: secretstore sync accepts flags only", errUsage)

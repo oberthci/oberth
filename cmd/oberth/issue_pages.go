@@ -7,11 +7,12 @@ import (
 )
 
 // collectIssuePages keeps the source transport's envelope and follows its
-// cursor. Explicit CLI cursor/limit requests bypass this all-issues view.
-func collectIssuePages(ctx context.Context, load func(context.Context, int64) (json.RawMessage, error)) (json.RawMessage, error) {
+// cursor from start (0 = newest). Only `oberth issues --all` walks every page;
+// the default listing reads one page.
+func collectIssuePages(ctx context.Context, start int64, load func(context.Context, int64) (json.RawMessage, error)) (json.RawMessage, error) {
 	var first map[string]json.RawMessage
 	var all []json.RawMessage
-	var before int64
+	before := start
 	var issuesKey, cursorKey string
 	for page := 0; page < 1000; page++ {
 		if err := ctx.Err(); err != nil {
@@ -28,8 +29,10 @@ func collectIssuePages(ctx context.Context, load func(context.Context, int64) (j
 		if first == nil {
 			first = object
 			issuesKey, cursorKey = "issues", "next_before"
-			if _, ok := object["Issues"]; ok {
-				issuesKey, cursorKey = "Issues", "NextBefore"
+			if _, ok := object["issues"]; !ok {
+				if _, legacy := object["Issues"]; legacy {
+					issuesKey, cursorKey = "Issues", "NextBefore"
+				}
 			}
 		}
 		if _, ok := object[issuesKey]; !ok {
@@ -50,7 +53,7 @@ func collectIssuePages(ctx context.Context, load func(context.Context, int64) (j
 			}
 		}
 		// A pre-paging server may repeat the same page. Never duplicate its rows.
-		if before > 0 && next >= before {
+		if before > start && next >= before {
 			break
 		}
 		all = append(all, rows...)
@@ -58,7 +61,7 @@ func collectIssuePages(ctx context.Context, load func(context.Context, int64) (j
 			break
 		}
 		if page == 999 {
-			return nil, fmt.Errorf("issue pagination exceeded 1000 pages; use --before and --limit")
+			return nil, fmt.Errorf("issue pagination exceeded 1000 pages; use --before to read fewer pages")
 		}
 		before = next
 	}

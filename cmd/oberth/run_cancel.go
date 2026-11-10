@@ -68,7 +68,7 @@ func parseRunActionOptions(command string, arguments []string, allowSelector, al
 		return cancelOptions{}, fmt.Errorf("%w: --database (in-pod) and --url/--token-file/--ca-file (remote) are exclusive", errUsage)
 	}
 	if err := store.ValidateCancelReason(strings.TrimSpace(options.reason)); err != nil {
-		return cancelOptions{}, fmt.Errorf("%w: %w", errUsage, err)
+		return cancelOptions{}, usageError(err)
 	}
 	return options, nil
 }

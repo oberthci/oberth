@@ -47,7 +47,7 @@ func runUpgrade(ctx context.Context, arguments []string, output io.Writer) error
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("%w: upgrade accepts flags only, no positional arguments", errUsage)

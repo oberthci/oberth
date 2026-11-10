@@ -34,7 +34,7 @@ func runSchedules(ctx context.Context, arguments []string, output io.Writer) err
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() > 1 {
 		return fmt.Errorf("%w: schedules [repository]", errUsage)

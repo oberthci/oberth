@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -63,3 +64,28 @@ type commandHelpError struct{ usage string }
 
 func (e commandHelpError) Error() string        { return e.usage }
 func (e commandHelpError) Is(target error) bool { return target == flag.ErrHelp }
+
+// usageError marks a flag-parsing failure as a usage error exactly once;
+// parseOperatorFlags already returns errUsage-wrapped errors.
+func usageError(err error) error {
+	if errors.Is(err, errUsage) {
+		return err
+	}
+	return fmt.Errorf("%w: %w", errUsage, err)
+}
+
+// verbLikeWords are subcommand spellings people try that no command takes.
+// Sent to the server as a run ID they would come back as an opaque 400.
+var verbLikeWords = map[string]bool{
+	"show": true, "list": true, "ls": true, "get": true, "view": true, "describe": true, "info": true,
+	"status": true, "logs": true, "log": true, "delete": true, "remove": true, "rm": true, "help": true,
+}
+
+// refuseVerbAsRunID rejects a verb in the run-ID position and names the forms
+// the command accepts.
+func refuseVerbAsRunID(command, given, forms string) error {
+	if !verbLikeWords[strings.ToLower(given)] {
+		return nil
+	}
+	return fmt.Errorf("%w: %q is not a run ID; oberth %s takes %s", errUsage, given, command, forms)
+}

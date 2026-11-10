@@ -44,7 +44,7 @@ to exactly that file (mode 0600; a different token already there is kept as
 ## Commands
 
 ```
-oberth runs [--repo NAME] [--ref REF] [--limit N] [--before CURSOR] [--all]
+oberth runs [--repo NAME] [--ref REF] [--limit N] [--before CURSOR] [--all] [--json]
 oberth run <run-id>
 oberth run retry <run-id> [--json]
 oberth run rerun <run-id> [--reason TEXT] [--force] [--json]
@@ -57,7 +57,7 @@ oberth admission release <run-id> [--force] [--json]
 oberth log <run-id> --burn B --step S [--pattern P] [--context N] [--offset N] [--limit N] [--tail] [--byte-offset N]
 oberth artifacts <run-id> [name]
 oberth repos
-oberth issues
+oberth issues [--state open|closed|all] [--work-status S] [--limit N] [--before ID] [--all] [--json]
 oberth status
 ```
 
@@ -70,8 +70,12 @@ also retry tag/release infrastructure failures before credentialed/publication
 work started; the tag object, tested commit and release admission are retained.
 Test failures, older runs and promotion/plan/apply runs cannot be retried this way.
 
-`oberth issues` prints the first page and its full matching count, such as
-`1–50 of 93`. The dashboard shows the same page range and state/kind counts.
+`oberth issues` prints one page (at most 50, `--limit N`) and its full matching
+count, such as `1–50 of 93`, followed by `more: oberth issues --before <id> (or
+--all)` when older issues match. `--before <id>` continues from that cursor and
+`--all` follows every page. `--json` prints the server's page envelope with its
+`next_before` cursor; with `--all` it prints every row and `next_before: 0`. The
+dashboard shows the same page range and state/kind counts.
 
 `oberth run rerun` calls the `run_rerun` MCP tool with the same uplink
 token. It reruns a failed or interrupted run at the same SHA and ref without
@@ -126,7 +130,12 @@ The reason identifies the successor, actor or retry action. `--json` keeps the u
 `display_status: "passed"`.
 
 The limit counts terminal rows; queued and running rows are additional on page 1.
-`--all` follows the server cursor through terminal pages. If a cursor run was
+`--all` follows the server cursor through terminal pages. `oberth runs --json`
+prints `{"runs": [...], "next_before": N}`, the envelope of `GET
+/api/runs?envelope=1` and MCP `run_list`: pass `next_before` to `--before` for
+the next page (a scoped uplink gets `next_cursor`, a run ID, instead). After the
+oldest run neither field is present. `--all --json` prints every page's rows in
+one envelope. If a cursor run was
 pruned, restart from the first page. Queue positions are global even when a
 repository or ref filter is used, and withheld for scoped uplinks. The deprecated
 `oberth runs --active` compatibility view stays unpaged and uses the same server

@@ -34,7 +34,7 @@ func runRemoteSchedules(ctx context.Context, subcommand string, arguments []stri
 	force := flags.Bool("force", false, "run despite active runs or a pause")
 	transport := scheduleTransportFlags(flags)
 	if err := parseCommandFlags(flags, arguments); err != nil {
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	positional := flags.Args()
 	toolArguments := map[string]any{}

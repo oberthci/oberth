@@ -165,14 +165,14 @@ func runUpstreamWithDependencies(ctx context.Context, arguments []string, output
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 2 {
 		return fmt.Errorf("%w: upstream add requires name and base URL", errUsage)
 	}
 	name, baseURL := flags.Arg(0), strings.TrimSuffix(flags.Arg(1), "/")
 	if err := app.ValidateUpstreamName(name); err != nil {
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	kind, err := app.UpstreamKind(baseURL)
 	if err != nil {
@@ -304,14 +304,14 @@ func runUpstreamAddFromHost(ctx context.Context, arguments []string, output io.W
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 2 {
 		return fmt.Errorf("%w: upstream add requires name and base URL", errUsage)
 	}
 	name, baseURL := flags.Arg(0), strings.TrimSuffix(flags.Arg(1), "/")
 	if err := app.ValidateUpstreamName(name); err != nil {
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	kind, err := app.UpstreamKind(baseURL)
 	if err != nil {
@@ -521,14 +521,14 @@ func runUpstreamProvideKey(ctx context.Context, arguments []string, input io.Rea
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 1 {
 		return fmt.Errorf("%w: upstream provide-key requires the upstream name", errUsage)
 	}
 	name := flags.Arg(0)
 	if err := app.ValidateUpstreamName(name); err != nil {
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 
 	// Determine data keys and field manager.
@@ -716,7 +716,7 @@ func runUpstreamList(ctx context.Context, arguments []string, output io.Writer) 
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("%w: upstream list accepts no arguments", errUsage)
@@ -788,7 +788,7 @@ func runUpstreamRemove(ctx context.Context, arguments []string, input io.Reader,
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 1 {
 		return fmt.Errorf("%w: upstream remove [--yes] <name>", errUsage)
@@ -854,7 +854,7 @@ func runUplinkList(ctx context.Context, arguments []string, output io.Writer) er
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("%w: uplink list accepts no arguments", errUsage)
@@ -921,7 +921,7 @@ func runUplinkScope(ctx context.Context, arguments []string, output io.Writer, m
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 1 || (len(set) > 0) == *clearScope {
 		return fmt.Errorf("%w: uplink scope [--fingerprint SHA256:...] (--set UPSTREAM[,UPSTREAM] | --clear) <identity@host>", errUsage)
@@ -967,7 +967,7 @@ func runUplinkRemove(ctx context.Context, arguments []string, output io.Writer, 
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 1 {
 		return fmt.Errorf("%w: uplink remove [--fingerprint SHA256:...] <identity>", errUsage)
@@ -1038,7 +1038,7 @@ func runRepoAdd(ctx context.Context, arguments []string, output io.Writer, depen
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 2 {
 		return fmt.Errorf("%w: repo add requires a repository name and an upstream name", errUsage)
@@ -1122,7 +1122,7 @@ func runRepoVerify(ctx context.Context, arguments []string, output io.Writer) er
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if !*all && flags.NArg() == 0 {
 		return fmt.Errorf("%w: repo verify <repository> | repo verify --all", errUsage)
@@ -1238,7 +1238,7 @@ func runRepoRemove(ctx context.Context, arguments []string, output io.Writer, de
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 1 {
 		return fmt.Errorf("%w: repo remove requires a repository name", errUsage)
@@ -1306,7 +1306,7 @@ func runUplinkWithDependencies(ctx context.Context, arguments []string, input io
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 2 {
 		return fmt.Errorf("%w: uplink add requires one public-key source and identity", errUsage)
@@ -1471,7 +1471,7 @@ func runAccessList(ctx context.Context, arguments []string, output io.Writer) er
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("%w: access list accepts no positional arguments", errUsage)
@@ -1564,7 +1564,7 @@ func runAccessAllowWithDependencies(ctx context.Context, arguments []string, out
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 3 {
 		return fmt.Errorf("%w: access allow <repo> <step> <secret-path>", errUsage)
@@ -1622,7 +1622,7 @@ func runAccessRevokeWithDependencies(ctx context.Context, arguments []string, ou
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 3 {
 		return fmt.Errorf("%w: access revoke <repo> <step> <secret-path>", errUsage)
@@ -1722,7 +1722,7 @@ func runUplinkRotate(ctx context.Context, arguments []string, input io.Reader, o
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 2 {
 		return fmt.Errorf("%w: uplink rotate [--database PATH] [--ttl DURATION] <public-key-file|raw-key|-> <identity@host>", errUsage)

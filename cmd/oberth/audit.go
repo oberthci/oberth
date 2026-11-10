@@ -37,7 +37,7 @@ func runAuditHead(ctx context.Context, arguments []string, output io.Writer) err
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("%w: audit head accepts flags only", errUsage)
@@ -78,7 +78,7 @@ func runAuditRecordWithGate(ctx context.Context, arguments []string, output io.W
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 1 {
 		return fmt.Errorf("%w: audit record <action> [--details JSON]", errUsage)

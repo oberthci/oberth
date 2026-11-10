@@ -43,7 +43,7 @@ func runSizeGrant(ctx context.Context, arguments []string, output io.Writer) err
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if repo == "" && flags.NArg() == 1 {
 		repo = flags.Arg(0)

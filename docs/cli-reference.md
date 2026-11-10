@@ -86,7 +86,8 @@ Usage: oberth admission [--json] | oberth admission release <run-id> [--force] [
 ## oberth artifacts
 
 ```text
-Usage of artifacts:
+Usage: oberth artifacts <run-id> [name] [--output FILE]
+Lists a run's artifacts, or writes one artifact to stdout or --output.
   -data-root string
         Oberth data root holding the artifact store (default "/data")
   -o string
@@ -473,11 +474,20 @@ Usage of install:
 ## oberth issues
 
 ```text
-Usage: oberth issues [flags]
+Usage: oberth issues [--state open|closed|all] [--work-status <status>] [--limit N] [--before <issue-id>] [--all] [--json]
+       oberth issues update --id <issue-id> --work-status <status> [flags]
+Prints one page of at most 50 issues, newest first, with the matching total.
+A full page ends with the --before value for the next page; --all follows every page.
   -active-stale-after string
         override the active stale window (duration)
+  -all
+        follow every page to the oldest matching issue
+  -before int
+        only issues older than this issue ID (printed after a full page)
   -json
-        emit the server payload
+        emit the server payload (one page, or every page with --all)
+  -limit int
+        issues per page (1 to 50) (default 50)
   -stale-after string
         override the general stale window (duration)
   -state string
@@ -962,6 +972,7 @@ Guide: https://github.com/oberthci/oberth/blob/main/docs/backup-restore.md
 
 ```text
 Usage: oberth run <run-id> [flags]
+       oberth run resources|retry|rerun|cancel|purge|hold ... (see oberth run <subcommand> --help)
   -json
         emit the server's payload unchanged
 ```
@@ -1088,6 +1099,7 @@ Usage: oberth run retry <run-id> [--json] [--url <mcp-url>] [--token-file <path>
 
 ```text
 Usage: oberth runs [flags]
+       oberth runs cancel --repo <repo> --ref <branch> [flags] (see oberth runs cancel --help)
   -active
         only queued and running runs, in scheduling order, with queue position and wait reason
   -all
@@ -1095,7 +1107,7 @@ Usage: oberth runs [flags]
   -before string
         only runs older than this cursor (printed after a full page)
   -json
-        emit the server's payload unchanged
+        emit {"runs":[...],"next_before":N}; --active emits the server's array unchanged
   -limit int
         runs per page (at most 100) (default 20)
   -ref string

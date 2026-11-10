@@ -62,7 +62,7 @@ func runAuditList(ctx context.Context, arguments []string, output io.Writer) err
 	before := flags.Int64("before", 0, "exclusive audit ID cursor")
 	transport := mcpTransportFlags(flags)
 	if err := parseCommandFlags(flags, arguments); err != nil {
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("%w: audit takes flags only", errUsage)

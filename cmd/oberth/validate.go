@@ -30,7 +30,7 @@ func runValidate(_ context.Context, arguments []string, output io.Writer) error 
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() > 1 {
 		return fmt.Errorf("%w: validate accepts at most one path (a repository root or a .oberth directory)", errUsage)

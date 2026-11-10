@@ -50,7 +50,7 @@ func runResourceGrant(ctx context.Context, arguments []string, output io.Writer)
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if repo == "" && flags.NArg() == 1 {
 		repo = flags.Arg(0)
@@ -70,7 +70,7 @@ func runResourceGrant(ctx context.Context, arguments []string, output io.Writer)
 		var err error
 		resources, err = store.ParseResourceCeiling(requests, limits)
 		if err != nil {
-			return fmt.Errorf("%w: %w", errUsage, err)
+			return usageError(err)
 		}
 	}
 	if action != "get" {

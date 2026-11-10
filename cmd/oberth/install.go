@@ -123,7 +123,7 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("%w: install accepts flags only, no positional arguments", errUsage)
@@ -160,7 +160,7 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 		for _, value := range argoSyncLimits {
 			key, limit, err := installer.ParseArgoSyncLimit(value)
 			if err != nil {
-				return fmt.Errorf("%w: %w", errUsage, err)
+				return usageError(err)
 			}
 			cfg.ArgoSyncLimits[key] = limit
 		}

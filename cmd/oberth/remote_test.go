@@ -254,9 +254,10 @@ func TestLogCountsGoToStderrNotStdout(t *testing.T) {
 }
 
 func TestEveryRemoteCommandAcceptsJSON(t *testing.T) {
+	// runs --json wraps its page with the cursor; see
+	// TestRunsJSONCarriesCursorAndAllFollowsPages.
 	configure(t, remoteServer(t, `{"ok":true}`))
 	commands := map[string]func(context.Context, []string, io.Writer) error{
-		"runs":   runRuns,
 		"repos":  runRepos,
 		"issues": runIssues,
 		"status": runRemoteStatus,

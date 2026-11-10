@@ -19,17 +19,24 @@ func runArtifacts(ctx context.Context, arguments []string, output io.Writer) err
 	var outputPath string
 	flags.StringVar(&outputPath, "output", "", "save the artifact to this file (written atomically, digest-verified)")
 	flags.StringVar(&outputPath, "o", "", "shorthand for --output")
+	flags.Usage = func() {
+		_, _ = fmt.Fprintln(flags.Output(), "Usage: oberth artifacts <run-id> [name] [--output FILE]\nLists a run's artifacts, or writes one artifact to stdout or --output.")
+		flags.PrintDefaults()
+	}
 	if err := parseCommandFlags(flags, arguments); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(output)
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	rest := flags.Args()
 	if len(rest) == 0 || len(rest) > 2 {
 		return fmt.Errorf("%w: artifacts [--output FILE] <run-id> [name]", errUsage)
+	}
+	if err := refuseVerbAsRunID("artifacts", rest[0], "<run-id> [name]: oberth artifacts <run-id> lists a run's artifacts"); err != nil {
+		return err
 	}
 	if outputPath != "" && len(rest) != 2 {
 		return fmt.Errorf("%w: --output needs an artifact name", errUsage)

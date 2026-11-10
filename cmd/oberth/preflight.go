@@ -60,7 +60,7 @@ func runPreflightDrift(ctx context.Context, arguments []string, output io.Writer
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 0 {
 		return fmt.Errorf("%w: preflight drift accepts flags only", errUsage)

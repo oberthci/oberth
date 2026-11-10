@@ -73,7 +73,7 @@ func runBackup(ctx context.Context, arguments []string, input io.Reader, output 
 		return fmt.Errorf("%w: backup takes no arguments (write elsewhere with --output FILE)", errUsage)
 	}
 	if _, err := store.BackupMaxBytes(cfg.MaxDatabaseBytes); err != nil {
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if *historyOnly {
 		cfg.Scope = installer.BackupScopeHistory
@@ -378,7 +378,7 @@ func runBackupDatabase(ctx context.Context, arguments []string, output io.Writer
 			flags.Usage()
 			return nil
 		}
-		return fmt.Errorf("%w: %w", errUsage, err)
+		return usageError(err)
 	}
 	if flags.NArg() != 0 || strings.TrimSpace(*database) == "" {
 		return fmt.Errorf("%w: backup database accepts only --database and --max-database-bytes", errUsage)
