@@ -91,3 +91,15 @@ func TestRunsJSONScopedCursorIsNextCursor(t *testing.T) {
 		t.Fatalf("scoped page = %s", out.String())
 	}
 }
+
+// Snake_case-only rows (the default since v0.20.3) still yield the cursor.
+func TestRunsTableReadsSnakeCaseRows(t *testing.T) {
+	configure(t, remoteServer(t, `[{"id":"snake-run","status":"passed","ref":"main","queue_sequence":41}]`))
+	var out bytes.Buffer
+	if err := runRuns(t.Context(), []string{"--limit", "1"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "snake-run") || !strings.Contains(out.String(), "more: oberth runs --before 41") {
+		t.Fatalf("output:\n%s", out.String())
+	}
+}

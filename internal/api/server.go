@@ -703,16 +703,17 @@ func validRunSelector(value string) bool {
 func (server *Server) handleRepos(writer http.ResponseWriter, request *http.Request) {
 	value, err := server.views.Repositories(request.Context(), actorFrom(request.Context()))
 	if err == nil && request.URL.Query().Get("view") == "summary" {
-		value, err = repositorySummaries(value)
+		value, err = repositorySummaries(value, goFieldNames(request.Context()))
 	}
 	server.writeCollectionView(writer, request, "repositories", value, err)
 }
 
 // repositorySummaries is ?view=summary of /api/repos: each repository record
 // without its latest runs. The runs page polls it for names and archive state
-// only; the full view carries a dozen runs per repository.
-func repositorySummaries(value any) (any, error) {
-	raw, err := marshalCompatible(value)
+// only; the full view carries a dozen runs per repository. goNames keeps the
+// Go-style names of an opted-in request (X-Oberth-Go-Field-Names).
+func repositorySummaries(value any, goNames bool) (any, error) {
+	raw, err := marshalCompatible(value, goNames)
 	if err != nil {
 		return nil, err
 	}
@@ -903,7 +904,10 @@ func writeJSON(writer http.ResponseWriter, status int, value any) {
 	body := append(raw, '\n')
 	writer.Header().Set("Content-Type", "application/json")
 	if status == http.StatusOK {
+		// The digest is of the shape actually sent, so the snake_case-only and
+		// Go-field-names responses of one view never share a validator.
 		writer.Header().Set("ETag", jsonETag(body))
+		writer.Header().Add("Vary", GoFieldNamesHeader)
 	}
 	writer.WriteHeader(status)
 	// Compression is decided on the first Write; keep the complete JSON body in one write.

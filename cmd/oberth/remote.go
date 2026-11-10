@@ -215,7 +215,7 @@ func runRuns(ctx context.Context, arguments []string, output io.Writer) error {
 	}
 	runs := make([]remoteRun, len(rows))
 	for i, row := range rows {
-		if err := json.Unmarshal(row, &runs[i]); err != nil {
+		if err := recordjson.Unmarshal(row, &runs[i]); err != nil {
 			return fmt.Errorf("decode run: %w", err)
 		}
 	}
@@ -256,7 +256,7 @@ func collectRunPages(ctx context.Context, api *client.Client, query map[string]s
 			decoded := make([]remoteRun, 0, len(page))
 			for _, row := range page {
 				var run remoteRun
-				if err := json.Unmarshal(row, &run); err != nil {
+				if err := recordjson.Unmarshal(row, &run); err != nil {
 					return nil, "", fmt.Errorf("decode run: %w", err)
 				}
 				decoded = append(decoded, run)

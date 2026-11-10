@@ -75,3 +75,33 @@ func TestRepositorySummaryOmitsLatestRuns(t *testing.T) {
 		t.Fatalf("summary view: %d %s", summary.Code, body)
 	}
 }
+
+// The Go-field-names opt-in changes the body, so it must change the ETag:
+// a validator from one shape never revalidates the other.
+func TestConditionalPollsKeepTheTwoShapesApart(t *testing.T) {
+	server, backend := testServer(t)
+	server.views = &collectionViews{fakeBackend: backend, repos: []repoSummaryRow{{ID: 1, Name: "app"}}}
+	snake := getAPI(t, server, "/api/repos", nil)
+	goNames := getAPI(t, server, "/api/repos", map[string]string{GoFieldNamesHeader: "1"})
+	if snake.Header().Get("ETag") == "" || snake.Header().Get("ETag") == goNames.Header().Get("ETag") {
+		t.Fatalf("shapes share a validator: %q %q", snake.Header().Get("ETag"), goNames.Header().Get("ETag"))
+	}
+	if !strings.Contains(goNames.Body.String(), `"Name":"app"`) || strings.Contains(snake.Body.String(), `"Name"`) {
+		t.Fatalf("shapes: snake=%s go=%s", snake.Body, goNames.Body)
+	}
+	crossed := getAPI(t, server, "/api/repos", map[string]string{GoFieldNamesHeader: "1", "If-None-Match": snake.Header().Get("ETag")})
+	if crossed.Code != http.StatusOK {
+		t.Fatalf("a snake_case validator revalidated the Go-names shape: %d", crossed.Code)
+	}
+	same := getAPI(t, server, "/api/repos", map[string]string{GoFieldNamesHeader: "1", "If-None-Match": goNames.Header().Get("ETag")})
+	if same.Code != http.StatusNotModified {
+		t.Fatalf("Go-names poll: %d", same.Code)
+	}
+	if !strings.Contains(strings.Join(snake.Header().Values("Vary"), ","), GoFieldNamesHeader) {
+		t.Fatalf("Vary omits the opt-in header: %v", snake.Header().Values("Vary"))
+	}
+	summary := getAPI(t, server, "/api/repos?view=summary", map[string]string{GoFieldNamesHeader: "1"})
+	if !strings.Contains(summary.Body.String(), `"Name":"app"`) {
+		t.Fatalf("summary ignored the opt-in: %s", summary.Body)
+	}
+}
