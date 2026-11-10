@@ -37,6 +37,9 @@ if [[ -n ${E2E_WRAPPER:-} ]]; then
   exec env -u E2E_WRAPPER "$E2E_WRAPPER" env E2E_REPO="$repo" E2E_EVIDENCE="$evidence" bash "$here/run.sh"
 fi
 helm=${E2E_HELM:-helm}
+# Every binary runs in the published distroless runtime: build them static,
+# as the release does, whatever the host's cgo default.
+export CGO_ENABLED=0
 for tool in k3d kubectl "$helm" docker go jq cosign curl sha256sum git rg; do command -v "$tool" >/dev/null; done
 ! $rehearse || command -v openssl >/dev/null
 private=$(mktemp -d /tmp/oberth-upgrade-e2e.XXXXXXXX)
