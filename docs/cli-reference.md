@@ -63,27 +63,7 @@ Read allowed public identity files inside the Oberth pod.
 
 ```text
 Usage: oberth admission [--json] | oberth admission release <run-id> [--force] [--json]
-       oberth admission groups [--json]
        oberth admission hold on|off --reason <reason> [--allow tag,release,promotion] [--duration 2h] [--json]
-       oberth admission capacity <0..64>|clear --reason <reason> [--json]
-         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
-```
-
-## oberth admission capacity
-
-```text
-Usage: oberth admission capacity <0..64>|clear --reason <reason> [--json]
-         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
-Sets the server-owned runtime run ceiling (0 is no ceiling); clear restores the mounted file or boot flag.
-```
-
-## oberth admission groups
-
-```text
-Usage: oberth admission [--json] | oberth admission release <run-id> [--force] [--json]
-       oberth admission groups [--json]
-       oberth admission hold on|off --reason <reason> [--allow tag,release,promotion] [--duration 2h] [--json]
-       oberth admission capacity <0..64>|clear --reason <reason> [--json]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
 ```
 
@@ -99,9 +79,7 @@ Default allow: tag,release. Default duration: 2h; maximum: 12h. --allow '' holds
 
 ```text
 Usage: oberth admission [--json] | oberth admission release <run-id> [--force] [--json]
-       oberth admission groups [--json]
        oberth admission hold on|off --reason <reason> [--allow tag,release,promotion] [--duration 2h] [--json]
-       oberth admission capacity <0..64>|clear --reason <reason> [--json]
          [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]
 ```
 
@@ -404,6 +382,12 @@ Usage of install:
         install the verified nonroot-static-v1 controller profile (requires the managed pinned chart)
   -argo-namespace string
         namespace pipelines execute in; must differ from --namespace (default: oberth-argo)
+  -argo-namespace-parallelism int
+        Argo controller namespaceParallelism for the pipeline namespace, 0 for no limit (default: keep the release's value) (default -1)
+  -argo-parallelism int
+        Argo controller parallelism: how many pipeline Workflows run at once, 0 for no limit; the excess waits Pending as postponed (default: keep the release's value, none on a fresh install) (default -1)
+  -argo-sync-limit value
+        semaphore limit key=N in the ConfigMap oberth-sync-limits, rendered by the argo-workflows release (repeatable; the set given replaces the previous one; see docs/where-limits-live.md)
   -argo-vault-address string
         OpenBao/Vault base URL injected into credentialed pipeline containers as VAULT_ADDR (https only)
   -argo-vault-credentialed-role string
@@ -1390,10 +1374,6 @@ Usage of serve:
         maximum age of terminal run logs (0 disables age retention)
   -logs-budget-bytes int
         total retained log budget (0 disables size retention)
-  -max-concurrent-jobs int
-        optional run ceiling: how many runs may hold a Workflow at once (0..64; 0 is no ceiling; boot default)
-  -max-concurrent-jobs-file string
-        mounted ConfigMap key to reload the run ceiling without restart (0 is no ceiling); invalid or missing keeps the last good value
   -namespace string
         Kubernetes namespace (default "oberth")
   -pipeline-network-policy-enabled value

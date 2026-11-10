@@ -529,9 +529,19 @@ containing CI and real workload qualification remain separately required.
   absent and runs simply start cold.
 - The server reads YAML statically at submission -- it never executes
   repository code in the server process.
-- Serving admission counts runs against one optional ceiling
-  (`maxConcurrentJobs`, 0..64, default 0: none). Kubernetes places step Pods by
-  their requests. Oberth reads nothing from a workflow document to decide
+- Every limit on what runs at once lives in Argo (#1517, v0.20.0;
+  [where limits live](docs/where-limits-live.md)). Oberth has no run ceiling:
+  it submits every admitted run, and the Argo controller's `parallelism` /
+  `namespaceParallelism` (argo-workflows release values, `oberth install
+  --argo-parallelism`, default none) postpones the excess. A postponed
+  Workflow (Pending, no `startedAt`, Argo's exact message `Workflow processing
+  has been postponed because too many workflows are already running`) is
+  exempt from `admission.stallTimeout` and the pre-start watchdog like a
+  workflow-level lock wait, and reads `waiting for an Argo workflow slot
+  (controller parallelism)` in the existing reason line. An admitted Workflow
+  holds its slot while it waits for a workflow-level lock (including
+  `oberth-release`) and while an assisted retry hold parks it. Kubernetes
+  places step Pods by their requests. Oberth reads nothing from a workflow document to decide
   whether a run may start: there are no size weights, declared budgets,
   exclusive classes or backfill. Historical `oberth.ci/size` and
   `oberth.ci/size-by-trigger` are accepted and unused. Explicit requests and
@@ -624,39 +634,18 @@ containing CI and real workload qualification remain separately required.
   evaluates); this server replaces that value. `valueFrom`, `default`,
   `enum`, a duplicate, or an out-of-vocabulary value is refused. A document
   that never mentions the parameter is submitted byte-identical to before.
-  `oberth.ci/concurrency-group: <name>` names a group shared across repositories
-  and all run kinds. `oberth.ci/concurrency-limit: <N>` is a positive integer,
-  default 1. YAML is the only definition surface: no chart/admin definitions.
-  Names remain 1–63 characters of `[a-z0-9-]`. The scheduler persists each
-  immutable run's group and limit before granting it, and remembers the latest
-  accepted build/release YAML declarations per repository. Conflicting limits
-  are refused before execution, including after restart or while a group is idle.
-  Declaration keys are `(repository, release)`, not branch/ref/filename: accepted
-  YAML on one branch can clear or replace another branch's remembered declaration;
-  conflicting limits still refuse without replacing it. A live/retained gate
-  conflict fails only the incoming run as infrastructure, never the scheduler.
-  An ungrouped declaration removes that pipeline's remembered definition.
-  Live grants still constrain a changed definition until they finish.
-  Members share at most N grants in priority/FIFO order, across branch, tag,
-  release and promotion runs. A waiting group member owns no workflow slot or
-  resource reservation. Granted work remains subject to the global workflow
-  ceiling; Kubernetes decides pod placement. Cancellation, retained grants,
-  VM parking and adoption preserve the same ownership boundaries. On upgrade,
-  already-running legacy members are adopted even if their combined count is
-  above the newly shared limit; new work waits for them to drain.
-  Migration seeds only the latest active grouped run per repository/release slot;
-  terminal history cannot create an idle definition. VM readmission retains the
-  immutable YAML limit when reacquiring its group slot.
-  The existing queued reason names the group, limit and current holders.
-  There are no new run statuses, labels or layouts. `concurrency_groups` and
-  `oberth admission groups` are read-only unscoped views; system status includes
-  `admission.groups`. Scoped run/status views hide other repositories' holder
-  and waiter identities. See [concurrency groups](docs/concurrency-groups.md).
+  The retired `oberth.ci/concurrency-group` and `oberth.ci/concurrency-limit`
+  annotations are accepted and ignored since v0.20.0; a run that must not
+  overlap another declares a native Argo mutex or semaphore. The
+  `concurrency_groups` tool, `oberth admission groups` and
+  `system_status.admission.groups` are gone; the `runs.concurrency_group`,
+  `runs.concurrency_limit` columns and `concurrency_group_declarations` stay in
+  the schema, unread and unwritten. Concurrency-group membership no longer
+  restricts cancellation.
 - Every scheduling and placement setting is a Helm value rendered into a serve
-  flag, with chart-default equal to binary-default: `maxConcurrentJobs`,
-  `admission.runtimeCapacity`, `admission.pressure.{enabled,hardCpu,hardIo}`,
-  `admission.diskFloorBytes`, `argoSync.semaphores` (the ConfigMap
-  `oberth-sync-limits`, no flag), `releases.serialize`
+  flag, with chart-default equal to binary-default:
+  `admission.pressure.{enabled,hardCpu,hardIo}`,
+  `admission.diskFloorBytes`, `releases.serialize`
   (`--serialize-releases`, off),
   `admission.stallTimeout` (`--admission-stall-timeout`, 10m),
   `admission.stepStartupAllowance`, `autoRetryInfrastructure`,
@@ -674,9 +663,13 @@ containing CI and real workload qualification remain separately required.
 - Native Argo `synchronization` is passed through as written at workflow and
   template level: semaphores by `configMapKeyRef`, mutexes by name, no
   refusal, no scoping, no allowlist. Limits are operator-owned keys of the
-  ConfigMap `oberth-sync-limits` in the pipeline namespace, rendered from
-  `argoSync.semaphores`; the Argo controller queues waiters (priority, then
-  creation) and re-reads the ConfigMap. A Workflow or step Pending behind a
+  ConfigMap `oberth-sync-limits` in the pipeline namespace, rendered by the
+  argo-workflows release (`oberth install --argo-sync-limit`) since v0.20.0;
+  the Oberth chart refuses `argoSync.semaphores`, `maxConcurrentJobs` and
+  `admission.runtimeCapacity` except at their former defaults, and refuses to
+  upgrade while the live ConfigMap still belongs to its release without
+  `helm.sh/resource-policy: keep`. The Argo controller queues waiters
+  (priority, then creation) and re-reads the ConfigMap. A Workflow or step Pending behind a
   lock is exempt from `admission.stallTimeout`, and the pre-start watchdog
   does not count a workflow-level lock wait. The existing reason line reads
   `waiting for lock <key> (a of b free)` with the key admitted only under the
@@ -998,7 +991,7 @@ containing CI and real workload qualification remain separately required.
   it encodes the same result object. Authenticated tool refusal text keeps its
   stable error class and may append only an explicitly public service reason.
   Raw dependency chains stay masked; scoped missing/hidden equivalence remains.
-- MCP exposes 94 tools: `status`, bounded named-step `logs`, exact-run
+- MCP exposes 92 tools: `status`, bounded named-step `logs`, exact-run
   `run_get`/`run_logs`, read-only `run_resources` (captured history and reviewed git resource suggestions), `run_retry`, audited `run_rerun` (#1098), audited `run_cancel`/`run_purge`,
   assisted-continuation `run_hold_list`, audited `run_hold_exec`, `run_hold_patch`, `run_continue` and `run_hold_abandon` (run's own uplink or admin; see [assisted continuation](docs/assisted-continuation.md)), the read-only agent loop `run_wait`, `events_subscribe`, `events_since` and `sync_status` (see [agent events](docs/agent-events.md)), `artifacts`/`artifact_get`, `wait`, `sync`, `promote`,
   `promotion_list`, `promote_status`, audited `promote_retry` (#1097), `publish_retry`, `publication_abandon`, issue
@@ -1012,7 +1005,7 @@ containing CI and real workload qualification remain separately required.
   `workflow_capability_revoke`, read-only `workflow_capability_get`, admin-only
   `resource_grant` / `resource_revoke`, read-only `resource_grant_get`, admin-only `size_grant`
   and `size_revoke`, read-only `size_grant_get` (#1021), admin-only
-  unscoped `admission_hold`/`admission_release` (#1099), `concurrency_groups`, `queue_cap_config`, unscoped-admin-only `admission_capacity_config`, `release_wif_list`, `release_wif_grant`, `release_wif_revoke` and `release_wif_reset` (#1497), `queue_priority_config`, `queue_priority_get`, `run_priority`, `priority_grant`, `priority_grant_list`, `priority_grant_revoke`, `repo_usage`, `repo_list`, `repo_remove`, `repo_archive`, `repo_unarchive`, unscoped-admin-only `branch_delete_many`, `branch_deletion_list` and `receive_outbox` (#1490), `branch_deletion_resolve` (#1500), `ref_delete_many` (#1504), `run_list`,
+  unscoped `admission_hold`/`admission_release` (#1099), `queue_cap_config`, `release_wif_list`, `release_wif_grant`, `release_wif_revoke` and `release_wif_reset` (#1497), `queue_priority_config`, `queue_priority_get`, `run_priority`, `priority_grant`, `priority_grant_list`, `priority_grant_revoke`, `repo_usage`, `repo_list`, `repo_remove`, `repo_archive`, `repo_unarchive`, unscoped-admin-only `branch_delete_many`, `branch_deletion_list` and `receive_outbox` (#1490), `branch_deletion_resolve` (#1500), `ref_delete_many` (#1504), `run_list`,
   admin-only `audit_list` (#1104; verified entries, never available to a scoped uplink;
   `GET /api/audit` shares its filters, response and restrictions),
   `schedule_list` (also `GET /api/schedules`, with the same repository scope) plus admin-only audited `schedule_pause`, `schedule_resume` and `schedule_trigger` (#1106; pause state is the audit chain, trigger goes through `EnqueueCI`),
@@ -1312,17 +1305,12 @@ containing CI and real workload qualification remain separately required.
   queued runs, not an ETA or execution order: publication-gated refs can be
   bypassed. Admission position is separately one-based among live workflow
   reservations, with `preparing`, `waiting`, and `admitted` states. Missing
-  reservations or Workflows never imply a cause or a scheduler failure. A
-  grouped reservation adds optional `group`; while it waits on its group it
-  also names either `group_holder` (the run of the same repository holding
-  the group) or `group_ahead` (the earlier member queued ahead of it), both
-  server run IDs, and the scheduling message names the group and that run.
+  reservations or Workflows never imply a cause or a scheduler failure.
   An unparked reservation behind the queue head (the first claimed,
-  prepared, unparked run that does not fit) carries `blocked_by` (`run_id`,
-  `repo`, `ref`, `size`, `weight`, `full_drain` for XL, `run_ceiling`,
-  `disk_floor`, `used`, `capacity`, `waiting_since`), and its message, like
-  every unclaimed queued run's, ends "blocked behind <repo>/<ref> (XL, needs a
-  full drain)." The head itself sets `head_of_queue`. Unscoped `/api/status`
+  prepared, unparked run the disk floor or host pressure holds back) carries
+  `blocked_by` (`run_id`, `repo`, `ref`, `disk_floor`, `used`,
+  `waiting_since`, `pressure`), and its message, like every unclaimed queued
+  run's, ends "blocked behind <repo>/<ref> (<reason>)." The head itself sets `head_of_queue`. Unscoped `/api/status`
   reports the same as `admission_blocker` (#1021). A scoped actor sees the
   blocker only when its repository is in scope, without the budget's use.
 - `system_status`, `GET /api/status` and `oberth status` report pipeline
@@ -1332,14 +1320,14 @@ containing CI and real workload qualification remain separately required.
   enforcement unmeasured. An omitted flag reports configuration unavailable.
   This installation-wide diagnostic is also visible to scoped uplinks; it
   contains no repository or namespace details and never gates readiness or admission.
-- `system_status` / `GET /api/status` carry `admission` (#1099): `capacity`,
-  `used`, `runs`, `max_runs`, `blocker`, `reservations[]` (`run_id`, `repo`,
-  `ref`, `workflow`, `size`, `weight`, `state`, `group`, `position`, `since`)
-  and `groups[]` (`name`, `repo`, `holder_run_id`, `waiting[]`). `state` is
-  one of `preparing`, `waiting`, `group`, `vm`, `granted`, `retained`. It is
-  the live process's in-memory gate, never durable evidence. A scoped uplink
-  sees only its repositories' reservations and groups, without the budget,
-  its use, positions or the blocker. Admin-only, unscoped MCP
+- `system_status` / `GET /api/status` carry `admission` (#1099): `used`,
+  `runs`, `blocker`, `hold`, `pressure` and `reservations[]` (`run_id`,
+  `repo`, `ref`, `workflow`, `state`, `position`, `since`). `state` is one of
+  `preparing`, `waiting`, `granted`, `retained`. `capacity`, `max_runs`,
+  `configuration` and `groups[]` are gone since v0.20.0. It is the live
+  process's in-memory gate, never durable evidence. A scoped uplink sees only
+  its repositories' reservations, without the run count, positions or the
+  blocker. Admin-only, unscoped MCP
   `admission_release {run_id, force}` (CLI `oberth admission release`,
   remote only; `oberth admission` prints the view) releases a reservation no
   owner will release. The practical case is a granted reservation still held
@@ -1598,14 +1586,10 @@ containing CI and real workload qualification remain separately required.
   CI issue. Authorization: an admin uplink may cancel any run it can see, but
   tag/release and apply runs require an explicit `force` and record the
   warning that their publication may be partial (anything the Workflow
-  already pushed stays published); a running concurrency-group member's
-  cancel warns that the external state its group guards may need recovery. A
-  non-admin uplink may cancel only `branch`-trigger runs outside any
-  concurrency group in repositories its scope can see; release, tag, plan,
-  apply, promotion and scheduled runs and group members are refused with
-  `ErrForbidden`. The decision is re-made on the run as it is inside the
-  cancel transaction; a run's group is known once the scheduler has read its
-  document after claim, so a still-queued member is an ordinary branch run.
+  already pushed stays published). A non-admin uplink may cancel only
+  `branch`-trigger runs in repositories its scope can see; release, tag,
+  plan, apply, promotion and scheduled runs are refused with `ErrForbidden`.
+  The decision is re-made on the run as it is inside the cancel transaction.
   Because a cancellation pass can settle an obligation before the owner
   creates the Workflow, the owner re-reads the run right before creation and,
   if it must delete a Workflow it created for a preempted run and fails,
@@ -1679,18 +1663,17 @@ containing CI and real workload qualification remain separately required.
   a joined invariant error cannot be hidden by a concurrent DB deadline.
 - A server stop or restart adopts an existing Argo Workflow for an active
   branch, promotion, tag or release run (#1172). The
-  Workflow's run ID, ref, tested SHA, trigger, persisted concurrency group and
+  Workflow's run ID, ref, tested SHA, trigger and
   namespace must match the run and configured engine. Its spec identity must
   be present; its UID, identity and live spec remain pinned during observation.
   A name collision or unreadable API stops recovery without deleting or
   re-firing that work. Startup logs and returns the run ID and the exact
   `<namespace>/<name>` of a refused Workflow (binding mismatch, invalid size
-  declaration, conflicting concurrency group) with the `kubectl delete`
+  declaration) with the `kubectl delete`
   command for it; once it is deleted, the next start takes the
-  missing-Workflow fallback below. Admission weight is
-  restored from the submitted Workflow's size declaration before new claims,
-  and its repository-scoped group remains held. Existing work may temporarily
-  exceed a reduced capacity; new work waits until it drains.
+  missing-Workflow fallback below. The adopted run's grant is restored before
+  new claims. A Workflow a v0.19 server submitted with a concurrency-group
+  annotation is adopted; the annotation no longer constrains new work.
   Adoption keeps the same run row, `queue_sequence` and `admission_sequence`;
   it does not enqueue a replacement or allocate a new admission order.
   Shutdown leaves a non-terminal Workflow and its run/workspace intact,
@@ -1771,8 +1754,8 @@ containing CI and real workload qualification remain separately required.
   remain available. An explicitly cancelled run (or promotion) projects no CI
   issue and leaves an existing one unchanged. Transient kubelet evictions,
   including node memory/storage pressure and executor scratch eviction, also
-  leave CI issues unchanged. Scheduler-side infrastructure failures (checkout,
-  concurrency-group or size-grant refusal) still open/update default-branch and
+  leave CI issues unchanged. Scheduler-side infrastructure failures (checkout
+  or size-grant refusal) still open/update default-branch and
   scheduled-run issues. A container killed at its own memory limit remains a
   test failure; `OOMKilled` alone does not establish node pressure. A periodic
   reconciliation also
@@ -2664,8 +2647,8 @@ remain required, with no public listener or insecure fallback.
 | Change a NodePort, route, MCP tool name/input, environment variable, mount path, or binding step-result JSON field | Breaking |
 | Change the Argo Workflow YAML contract — expected filenames (`.oberth/build.yaml`, `.oberth/release.yaml`), required annotations, admission-set fields, the Workflow submission path, the source mount path, the cache mount path, or the injected environment | Breaking |
 | Honour a repository-supplied `serviceAccountName`, namespace, security context, or `claimName` | Forbidden |
-| Let a repository-declared concurrency group span repositories, or change a run's weight, identity, or credentials | Forbidden |
-| Change the `oberth.ci/concurrency-group` annotation name, name grammar, or cross-trigger membership | Breaking |
+| Let a repository annotation change a run's identity or credentials | Forbidden |
+| Refuse a document for carrying the retired `oberth.ci/concurrency-group` or `oberth.ci/concurrency-limit` annotation | Breaking |
 | Decide a run's admission from its workflow document (size, weight, declared demand, a class annotation), rewrite or refuse native `synchronization`, or add a run status or label for a lock wait | Forbidden |
 | Count an assisted run (any exec, patch or continue on a retry hold) as promotion, publication, SHA-pinned fragment or CI-issue evidence; hold a credentialed, release, tag, promotion, schedule, plan or apply step; let a repository set `oberth.ci/assist-hold` or `podSpecPatch` | Forbidden |
 | Change the ConfigMap name `oberth-sync-limits`, the mutex name `oberth-release`, or the trigger that `releases.serialize` applies to | Breaking |
@@ -3486,21 +3469,13 @@ See [recovery, history and readiness semantics](docs/rca-run-recovery.md).
 
 ### Runtime admission capacity
 
-The optional `--max-concurrent-jobs-file` is re-opened every five seconds, so
-projected ConfigMap symlink swaps take effect without restart. The boot flag
-remains the initial default. Accepted changes are audited before application;
-invalid/unreadable values and audit failure retain the last good configuration.
-The server counts granted runs and delegates pod placement to Kubernetes.
-Zero means no ceiling; one is valid.
-Lowering never cancels running work, and raising wakes the queue.
-`system_status.admission.configuration` and the dashboard show effective jobs,
-source and reload errors; scoped views omit this host-wide configuration.
-The chart mounts `<fullname>-admission` read-only as a directory, without
-subPath or a pod-template checksum. The unscoped-admin `admission_capacity_config`
-tool (#1497) stores a server-owned runtime override that takes precedence over
-the file and the boot flag until cleared; Helm never writes it, so upgrades do not
-conflict with it. Set and clear are audited with reason and previous value.
-See [runtime capacity](docs/runtime-admission-capacity.md).
+Gone since v0.20.0 with the run ceiling: `--max-concurrent-jobs`,
+`--max-concurrent-jobs-file`, `admission.runtimeCapacity`, the
+`<fullname>-admission` ConfigMap, `admission_capacity_config` and
+`oberth admission capacity`. A runtime override stored by an older server
+stays in the database without effect, and startup logs a warning naming it.
+How many Workflows run at once is the Argo controller's parallelism; see
+[where limits live](docs/where-limits-live.md).
 
 ### Administrative admission hold
 

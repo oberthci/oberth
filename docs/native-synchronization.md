@@ -8,29 +8,27 @@ start, and it submits `synchronization` exactly as written.
 
 ## What Oberth keeps
 
+Since v0.20.0 Oberth has no run ceiling and no concurrency groups: every limit
+on what runs at once lives in Argo ([where limits live](where-limits-live.md)).
+
 | Setting | Helm | Meaning |
 | --- | --- | --- |
-| Run ceiling | `maxConcurrentJobs` (`--max-concurrent-jobs`, default `0`) | How many runs may hold a Workflow at once, 0..64. `0` is no ceiling. A waiting run keeps its queued status with the reason `N of M runs running`, `waiting for a run slot` or `behind <repo>/<ref>`. Changeable at runtime (`admission_capacity_config`, [runtime capacity](runtime-admission-capacity.md)). |
 | Pressure valve | `admission.pressure.{enabled,hardCpu,hardIo}` | Holds new grants while host CPU or IO PSI is above the hard limit. Reads `/proc/pressure`, never a workflow. |
 | Disk floor | `admission.diskFloorBytes` | Holds new grants while the data disk is below the floor. |
 | Administrator hold | `admission_hold` | Keeps selected run classes queued. |
-| Startup stall bound | `admission.stallTimeout` | Fails an admitted Workflow that neither schedules a Pod nor makes progress. Kubernetes capacity waits and Argo synchronization waits are exempt. |
+| Startup stall bound | `admission.stallTimeout` | Fails an admitted Workflow that neither schedules a Pod nor makes progress. Kubernetes capacity waits, Argo synchronization waits and Argo parallelism postponement are exempt. |
 
-Priority (`low < standard < promotion < high`) still orders the queue; it never
-raises the ceiling. Repository [concurrency groups](concurrency-groups.md)
-still park runs on their group; they are the one remaining declaration Oberth
-reads for admission, kept because their MCP and CLI surface is in use.
+Priority (`low < standard < promotion < high`) orders Oberth's queue, which is
+the order runs are submitted in.
 
 ## Shared step limits: semaphores
 
 An operator-defined limit is a key of the ConfigMap `oberth-sync-limits` in the
-pipeline namespace, rendered by the chart from `argoSync.semaphores`:
+pipeline namespace. Since v0.20.0 the argo-workflows release renders it
+([where limits live](where-limits-live.md#shared-step-limits)):
 
-```yaml
-argoSync:
-  semaphores:
-    kvm: 1
-    heavy-go: 2
+```sh
+oberth install --upgrade --argo-sync-limit kvm=1 --argo-sync-limit heavy-go=2
 ```
 
 A step that must respect the limit declares the native Argo semaphore on its
@@ -55,7 +53,7 @@ lock. Lock status: 0/1`; Oberth shows it in the run's existing reason line as
 `waiting for lock ConfigMap/oberth-sync-limits/kvm (0/1 free)`. No
 status, label or layout is added.
 
-Argo re-reads the ConfigMap, so a `helm upgrade` that changes a limit applies
+Argo re-reads the ConfigMap, so an upgrade of the argo-workflows release that changes a limit applies
 to the next acquisition without a server restart. Lowering a limit below the
 current holders is tolerated: holders drain, no new instance starts.
 
@@ -88,7 +86,9 @@ every repository the workflow-level mutex `oberth-release`, so no two releases
 run at the same time. The decision is the run's trigger, not its document; a
 document's own `spec.synchronization` is kept beside the server's mutex. A
 second release shows `waiting for lock Mutex/oberth-release (0/1 free)`
-until the first finishes. Off by default.
+until the first finishes. Off by default. A release waiting for the mutex has
+been admitted by Argo and occupies a controller parallelism slot
+([what occupies a slot](where-limits-live.md#what-occupies-a-slot)).
 
 ## Waiting is not stalling
 
@@ -119,9 +119,9 @@ that key for up to the step budget plus `assist.holdTTL`.
   only read where its Role allows; with the installer's single-namespace
   controller that is the pipeline namespace alone.
 - A mutex is a name. A repository that names another repository's lock delays
-  it, bounded by its own `activeDeadlineSeconds`; the same interference existed
-  with shared concurrency groups. The reason line names the lock so this is
-  visible.
+  it, bounded by its own `activeDeadlineSeconds`; the former shared
+  concurrency groups allowed the same. The reason line names the lock so this
+  is visible.
 - The lock key in the reason line is admitted only when it matches the
   controller's lock-key grammar `<ns>/<ConfigMap|Mutex|Database>/<name>[/<key>]`
   over `[A-Za-z0-9_.-]`, and the namespace is dropped; anything else renders
@@ -154,14 +154,9 @@ semaphore:
               key: kvm
 ```
 
-and define the limit once in the chart values:
-
-```yaml
-argoSync:
-  semaphores:
-    kvm: 1
-    heavy-go: 2
-```
+and define the limit once on the argo-workflows release
+(`oberth install --upgrade --argo-sync-limit kvm=1`; see
+[where limits live](where-limits-live.md#shared-step-limits)).
 
 Also removed: `admission.sizeWeights`, `admission.declaredResources`,
 `admission.maxHeadWait` and the server flags behind them. The historical

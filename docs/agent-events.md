@@ -16,7 +16,7 @@ layout is added.
 | `run.finished` | a run reaches passed, failed or interrupted | `status`, `display_status`, `display_reason`, `phase`, `failed_burn`, `failed_step`, bounded `error`, `retry_hint` (`class`, `cause`, `action`), `actor`, `trigger`, `release`, `assisted` |
 | `run.held` | an assisted retry hold parks (once per held Pod) | `step`, `pod`, `attempt`, `held_since`, `abandon_at` (= `held_since` + `assist.holdTTL`), `hold_ttl_s`, `holds_in_run`, `multiple_holds`, `held_steps`, `patch_capable` |
 | `run.hold_abandoned` | a held Pod was abandoned: by the server sweep past `assist.holdTTL` or above `assist.maxConcurrentHolds`, or by the agent (once per Pod) | `step`, `pod`, `abandon_reason` (`ttl`, `cap` or `agent`), `abandoned_by`, `held_since`, `abandoned_at`, `failed_attempt`, `failed_exit_code` |
-| `run.lock_wait` | a running run waits on one native Argo semaphore or mutex longer than `agentEvents.lockWaitThreshold` (once per wait) | `lock`, `waiting_since`, `waited_s`, `holders` (run IDs), `holder_count` |
+| `run.lock_wait` | a running run waits on one native Argo semaphore or mutex longer than `agentEvents.lockWaitThreshold` (once per wait); since v0.20.0 also a Workflow the Argo controller postponed for its parallelism | `lock`, `waiting_since`, `waited_s`, `holders` (run IDs), `holder_count`; for parallelism `lock: Parallelism/workflow-controller`, `postponed: true` and `running` (Oberth Workflows Argo admitted) instead of the holders |
 | `promotion.finished` | a promotion is passed, failed or interrupted | `status`, `source_branch`, `source_sha`, `target_ref`, `result_sha`, `run_id`, bounded `error`, `prune_source` (`status`, `reason`, `batch_id`) when requested |
 | `release.published` | a release run passed (its publication is delivered) | `tag`, `sha` |
 | `publication.failed` | an upstream publication failed for good, or Oberth scheduled an automatic retry | `final`, `attempt`, `max_attempts`, `next_retry_at`, `publication_id`, bounded `error` |
@@ -30,7 +30,8 @@ an agent names the right `step` for `run_hold_*` when a run holds two.
 
 Oberth records events from the existing run and promotion change signals and
 from a sweep every `agentEvents.interval` (default 10 s) for what has no
-signal: parked holds, lock waits and publication retries. It starts after
+signal: parked holds, lock waits, parallelism postponement and publication
+retries. It starts after
 owner recovery and only reads Kubernetes: one Workflow GET per running run
 (at most 64 per sweep) and the existing hold Pod list for assisted runs.
 
@@ -43,7 +44,7 @@ Oberth's MCP server declares two capabilities in `initialize` and returns an
   `notifications/claude/channel` notification. `content` is the summary line
   followed by the event as JSON; `meta` carries `kind`, `event_id`, `repo`,
   `run_id`, `ref`, `sha`, `at` and the scalar fields above (`step`, `pod`,
-  `held_since`, `abandon_at`, `status`, `failed_step`, `lock`, `retry_class`,
+  `held_since`, `abandon_at`, `status`, `failed_step`, `lock`, `waited_s`, `retry_class`,
   ...) as strings.
 - `resources: {subscribe: true}`: `run://<id>` is a resource
   (`resources/read` returns the run detail); `resources/subscribe` on it
@@ -126,7 +127,10 @@ unaffected.
 - `events_since {after_id, limit, repos?, refs_glob?, kinds?, own?}` pages the
   event log in ID order; continue with `next_after_id`.
 - `sync_status {lock?, since?, limit?}` returns, per native Argo lock key
-  (`ConfigMap/<name>/<key>`, `Mutex/<name>`), the current holders and waiters
+  (`ConfigMap/<name>/<key>`, `Mutex/<name>`) and for the Argo controller's
+  parallelism (`Parallelism/workflow-controller`: waiters are postponed
+  Workflows, holders the Oberth Workflows Argo admitted; see
+  [where limits live](where-limits-live.md)), the current holders and waiters
   with how long each has held or waited, and the stored history: holder and
   waiter intervals, `max_concurrent_holders` (with when), and wait counts,
   maximum, total and median. `max_concurrent_holders: 1` over a window proves

@@ -198,7 +198,7 @@ call the proxy hostname directly.
 | `run_get` | One durable run and its steps by full run ID or unique 8+ character prefix; `summary:true` returns repository/ref/SHA, admission context, superseded status, failure and compact steps |
 | `run_retry` | Requeue the newest interrupted or infrastructure-failed branch run using its same repo/ref/SHA; workflow-level failures without a failed step qualify, while test failures and older runs are refused |
 | `run_rerun` | Rerun a failed or interrupted run at the same SHA and ref (`id`, optional `reason`, admin-only `force`), linked by `rerun_of`: covers failed steps (flaky tests), non-newest runs and tag/release runs. Refused while the ref has an active run, once a branch moved past the SHA, for promotion/plan/apply runs, and for a tag that is already published or green or whose release failed only in publication (use `publish_retry` on that run). A publishing-only failure is re-pushed as `publish_retry` does instead of re-run. Non-admins: branch-push runs; tags need admin and `force`. Audited as `run.rerun` |
-| `run_cancel` | Cancel one queued, waiting or running run (audited; `id`, optional `reason`, admin-only `force`). The run becomes `interrupted` with phase `cancelled` and a reason naming the caller; a claimed run's Workflow is deleted and its admission released at once; it is never re-fired and opens no CI issue. Non-admins: branch-push runs outside a concurrency group only. Protected priority runs can be cancelled only by their requester or an unscoped admin; the existing run-cancel policy still applies. Admins: any run, with `force` for tag/release and apply runs. Cancelling promotion CI fails the promotion without merging. Terminal runs are refused |
+| `run_cancel` | Cancel one queued, waiting or running run (audited; `id`, optional `reason`, admin-only `force`). The run becomes `interrupted` with phase `cancelled` and a reason naming the caller; a claimed run's Workflow is deleted and its admission released at once; it is never re-fired and opens no CI issue. Non-admins: branch-push runs only. Protected priority runs can be cancelled only by their requester or an unscoped admin; the existing run-cancel policy still applies. Admins: any run, with `force` for tag/release and apply runs. Cancelling promotion CI fails the promotion without merging. Terminal runs are refused |
 | `run_hold_list` | List the parked retry attempts (holds) of an assisted branch CI run (`id`): step, pod, attempt, `held_since`, kubelet `deadline`, `patch_capable`, `released`; plus the run's assist record and the `assist.*` policy. Read-only. See [assisted continuation](assisted-continuation.md) |
 | `run_hold_exec` | Run one bounded argv (no shell) inside a held step's main container (`id`, `argv`, optional `step`, `stdin`, `timeout_seconds`). Run's own uplink or admin; bounded by `assist.execTimeout`/`execOutputBytes`; serialized per run; recorded and audited (`run.assist.exec`) before the command runs, which marks the run assisted |
 | `run_hold_patch` | Apply a unified `diff` to the held step's writable `/work/src` through the server's Pod helper (`id`, `diff`, optional `step`): exact context, clean relative paths only, no renames/binaries/`.git`/symlinks, bounded by `assist.patchMaxBytes`/`patchMaxFiles`; the diff's sha256 is recorded and audited as `run.assist.patch` before it is applied, which marks the run assisted |
@@ -215,7 +215,6 @@ call the proxy hostname directly.
 | `wait` | Long-poll until a SHA or exact run ID reaches a terminal state |
 | `sync` | Park a WIP branch upstream without a green gate (not completion evidence) |
 | `queue_cap_config` | Unscoped admin only: set the branch queue cap with `maxNotStarted` (integer, 0 disables; off by default). Defer branch run creation when queued and waiting runs reach the cap; drain deferred receives in arrival order after capacity opens. Accepted deferred pushes stay in Oberth's Git cache and durable receive journal; automatic upstream publication requires successful CI. Tags/releases, promotions and schedules bypass the cap. Audited; setting and backlog survive restart. `system_status.queue_cap` reports `max_not_started`, `not_started`, `deferred` and `reason`; `queueCap` remains for one more release |
-| `admission_capacity_config` | Unscoped admin only: set (`max_concurrent_jobs`, 0..64; 0 is no ceiling) or `clear` the server-owned runtime workflow ceiling with a required `reason` (#1497). It overrides the mounted runtime-capacity file and the boot flag without Helm upgrade or restart; clearing restores them. Lowering never cancels admitted work. Audited with the previous value; `system_status.admission.configuration.source` reports `runtime` |
 | `release_wif_list` | Unscoped admin only: read the boot (Helm/flag) release WIF repository map, runtime overrides, the effective map used by release preflight and tag admission, configured role names and any stored grant left inactive. Re-applies the stored overrides to admission. Public data only |
 | `release_wif_grant` | Unscoped admin only: grant or replace one registered repository's release WIF entry (`service_account_name`, `templates` leaf -> configured role) with a required `reason`. Roles, namespace and dedicated step identities stay Helm configuration. Validated against the boot map and applied without restart; audited |
 | `release_wif_revoke` | Unscoped admin only: revoke a repository's release WIF entry at runtime, including a Helm entry or one for a retired, unregistered `upstream/org/repo`. Audited, `reason` required |
@@ -264,7 +263,6 @@ call the proxy hostname directly.
 | `priority_grant_list` | List priority grants and expiry; unscoped admin |
 | `priority_grant_revoke` | Revoke an identity's grant for future submissions; accepted builds keep their priority; unscoped admin, audited |
 | `run_priority` | Set a waiting run using exact `run_id`, `priority` (`low`, `standard`, `promotion` or `high`; legacy aliases accepted) and `reason`; unscoped admin, audited |
-| `concurrency_groups` | Read YAML-defined shared groups, limits, holders and waiters, including idle groups (unscoped, read-only) |
 | `admission_hold` | Admin-only [admission hold](admission-hold.md) with allowed classes and bounded expiry; read through system_status admission.hold. |
 | `admission_release` | Release one admission reservation no owner will release, typically a granted one held for a terminal run whose owner hung; deletes the Workflow first as proof, `force` without it (admin-only, unscoped, audited) |
 
@@ -520,16 +518,11 @@ when an observer is unavailable.
   unadmitted runs, computed before repository/ref filters. Publication
   gates can let later runs execute first; it is not an ETA.
 - `admission` reports the run's place in the gate: `preparing`,
-  `waiting`, or `admitted`, with the same global queue `position` and the run
-  ceiling as `used`/`capacity`. Scoped uplinks see no global position, used or capacity.
-  This explains a durable `running` run that is still waiting for a run slot.
-  A run whose pipeline declares
-  `oberth.ci/concurrency-group` also reports `group`; while it waits on that
-  group it reports `group_limit`, all `group_holders` and an earlier
-  `group_ahead` where applicable. Group names are shared across repositories;
-  scoped views omit invisible holder/waiter IDs. The queued reason names the
-  group, limit and visible holders. `status` carries the recorded group as `concurrency_group`;
-  `run_get` and `run_list` carry it as the run's `ConcurrencyGroup`.
+  `waiting`, or `admitted`, with the same global queue `position` and the
+  number of admitted runs as `used`. Scoped uplinks see no global position or
+  used. A submitted Workflow the Argo controller postponed for its
+  parallelism shows `execution.message` `Waiting for an Argo workflow slot
+  (controller parallelism).` ([where limits live](where-limits-live.md)).
 - `execution` reports observed Workflow phase, up to 16 node phase/message
   summaries and 16 Pod phase/reason summaries. It can identify unscheduled Pods,
   insufficient CPU/memory, unbound claims, image pull waits, startup, and known
@@ -593,9 +586,8 @@ page. `latest_per_ref=1` keeps the same grouping for each ref's newest run.
   all runs that have not started, claimed or unclaimed, in one queue. Effective
   priority comes first, then ascending admission sequence and queue sequence
   (FIFO), matching the scheduler's claim order. Each run that has not started carries
-  `Scheduling` with its state, message, queue or admission position, size,
-  weight, used/capacity and concurrency group, so a run blocking the head of
-  the queue, or one waiting on its group, says so.
+  `Scheduling` with its state, message, queue or admission position and
+  `used`, so a run blocking the head of the queue says so.
 
 Every run response includes `display_status` and `display_reason`, while
 durable `Status` stays unchanged. `display_status` is exactly one of
@@ -918,8 +910,9 @@ requires requester/admin authority and all existing branch/publication checks.
 
 Tag automatic priority remains conditional on oldest waiting tag, size maximum
 and size_revoke. Losing that boost retains an admin override or accepted request,
-otherwise standard. Priority preserves FIFO within each class, the workflow
-ceiling, enabled hard PSI valve, configured disk floor and concurrency groups.
+otherwise standard. Priority preserves FIFO within each class, the enabled
+hard PSI valve and the configured disk floor; Argo parallelism then admits
+submitted Workflows in creation order.
 Serving admission has no measured backfill or resource head reservations.
 
 Run fields `priority_class`, `priority_reason`, `priority_requested_by`,
@@ -947,7 +940,7 @@ Issue metadata writes can pass `expected_revision` from a prior read; mismatch
 is a conflict, while omission preserves last-write-wins. See
 [conditional metadata updates](issue-lifecycle.md).
 
-The current MCP surface has **94 tools**, including administrator-only
+The current MCP surface has **92 tools**, including administrator-only
 `publication_abandon`.
 
 The CLI uses `--url`, `OBERTH_MCP_URL`, or `OBERTH_BASE_URL` (with
@@ -978,11 +971,9 @@ all visible fully qualified candidates; pass one as `repo` to `promote`,
 with CLI `--repo` options and MCP JSON arguments. When an omitted repository
 makes a SHA or branch ambiguous, the error lists candidates as well.
 
-### YAML concurrency groups
+### Concurrency groups (gone)
 
-`concurrency_groups({})` and `oberth admission groups [--json]` list definitions,
-limits, holders and waiters. They are read-only and require an unscoped uplink;
-an admin role is not required. `system_status.admission.groups` provides the
-same data. Configure only `oberth.ci/concurrency-group` and
-`oberth.ci/concurrency-limit` in the pipeline YAML; the default limit is 1. See
-[concurrency groups](concurrency-groups.md).
+Repository concurrency groups, `concurrency_groups` and `oberth admission
+groups` are gone since v0.20.0; runs that must not overlap declare a native
+Argo mutex or semaphore, and `sync_status` reports holders, waiters and
+history. See [where limits live](where-limits-live.md#migrating-from-concurrency-groups).

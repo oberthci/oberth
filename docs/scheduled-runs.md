@@ -57,8 +57,8 @@ Ordinary branch pushes and other entries are independent. A due cron occurrence
 coalesces into a queued or running attempt of the same entry and branch instead
 of superseding it. Other active work does not stop cron from queueing. Explicit
 manual retries or forced triggers can still replace an attempt of the same
-entry and branch. Resource admission and declared concurrency groups bound
-execution.
+entry and branch. Admission, Argo parallelism and native Argo
+synchronization bound execution ([where limits live](where-limits-live.md)).
 
 Run list/detail APIs expose `ScheduleEntry`; `status` and `wait` expose
 `schedule_entry`. The dashboard run detail shows the entry name. List and
@@ -131,8 +131,8 @@ Friday, not only on Fridays that fall on the 1st.
 
 ## Overlap, downtime and attribution
 
-**A due fire is queued even when other repository work is busy.** Weighted admission,
-generic resource capacity and declared concurrency groups decide when it executes. A
+**A due fire is queued even when other repository work is busy.** Admission,
+Argo parallelism and native Argo synchronization decide when it executes. A
 stream of ordinary branch runs must not prevent a nightly from entering that
 queue. `fired` means the run was enqueued, not that it has started or passed.
 The current tick's branch head is pinned in the queued run; later pushes do not

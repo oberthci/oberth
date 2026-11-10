@@ -111,8 +111,9 @@ row), and `promote_status` on the failed promotion names the retry in
 label, `queued`, for every run that has not started (durable queued, or
 claimed before admission), with the server's `display_reason` naming what it
 waits for: `next in line`, `waiting for CPU budget (12.5 of 40 CPU free)`,
-`host IO pressure (42%)`, `concurrency group deploy busy (held by run ...)`,
-`waiting for admission`. Admission records the start, so an admitted run is
+`host IO pressure (42%)`, `waiting for admission`; a submitted run the Argo
+controller postponed reads `waiting for an Argo workflow slot (controller
+parallelism)`. Admission records the start, so an admitted run is
 `running` from the grant on. The default list puts the whole queue first, with the
 run admitted next at its top (effective priority, then FIFO), then running runs newest start first, then
 terminal runs newest finish first. A trusted
@@ -139,7 +140,7 @@ token. It cancels one queued, waiting or running run: the run becomes
 and `oberth run`) and a reason naming the caller; a claimed run's Workflow is
 deleted and its admission capacity released immediately; it is never re-fired
 and opens no CI issue. A non-admin uplink may cancel only branch-push runs
-outside a concurrency group in repositories it can see. An admin may cancel
+in repositories it can see. An admin may cancel
 any run, but a tag/release or apply run needs `--force`, because anything its
 Workflow already published stays published. Cancelling promotion CI fails the
 promotion without merging. A terminal run is refused. `oberth runs cancel`

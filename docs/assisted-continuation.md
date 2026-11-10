@@ -87,8 +87,8 @@ repositories and `Build` deletes an authored `oberth.ci/assist`.
 
 Attempt 1 runs immediately. If its command exits nonzero, Argo creates the
 retry Pod with the held patch: the executor parks before the command, the
-step shows as running, and the run keeps its run slot, template locks and
-concurrency group. If nobody acts before `holdTTL`, the server's hold sweep (the scheduler's
+step shows as running, and the run keeps its Argo parallelism slot and
+template locks. If nobody acts before `holdTTL`, the server's hold sweep (the scheduler's
 settlement tick) abandons the Pod, the retry is exhausted and the run fails
 as it would have, recorded as a server abandon (see *Capacity, supersession
 and bounds*); the kubelet deadline (budget plus TTL) is the backstop if
@@ -214,8 +214,9 @@ per-workflow and unaffected.
 
 ## Capacity, supersession and bounds
 
-- A held run keeps its run slot, template locks and concurrency
-  group until its Workflow ends: it counts as running work.
+- A held run keeps its Argo parallelism slot and template locks until its
+  Workflow ends: it counts as running work
+  ([what occupies a slot](where-limits-live.md#what-occupies-a-slot)).
 - The scheduler's settlement tick (every 5 s) sweeps the branch-CI step
   Pods (`oberth.ci/trigger=ci`, the label `Build` writes). An unreleased hold
   whose `held_since` is `assist.holdTTL` old is abandoned (reason `ttl`).
@@ -270,8 +271,9 @@ per-workflow and unaffected.
   before the run-level infrastructure retry sees it, and a step that ran out
   of time is never given a second budget plus the hold TTL.
 - **Workflow deadline**: extended by one hold TTL per assisted run.
-- **Template locks, concurrency groups, admission hold**: unchanged; a
-  held run holds its native Argo lock and its group for the whole hold.
+- **Template locks, Argo parallelism, admission hold**: unchanged; a
+  held run holds its native Argo lock and its parallelism slot for the whole
+  hold.
 - **Adoption after restart**: the Workflow carries everything the hold tools
   need (`oberth.ci/assist`, Pod annotations and env); the assist record is
   durable in the run.

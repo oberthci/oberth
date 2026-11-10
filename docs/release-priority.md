@@ -12,10 +12,9 @@ Waiting admission uses four classes, in this order:
 Both durable claims and in-memory admission order `high > promotion > standard
 > low`, then the original admission sequence and queue sequence. Running or
 already granted work is never preempted. Priority does not bypass admission
-holds, PSI/pressure, per-container resource ceilings, concurrency groups, cleanup or publication
-guards. Priority dispatch lookahead has a finite ceiling of gate capacity plus
-max-concurrent jobs plus three claims, covering standard, promotion and high
-overtaking low work. Parked lower classes cannot consume high's extra path.
+holds, PSI/pressure, per-container resource ceilings, cleanup or publication
+guards. Priority dispatch lookahead is bounded at three claims, covering
+standard, promotion and high overtaking low work. Parked lower classes cannot consume high's extra path.
 This bounds claims/checkouts without increasing execution capacity or group
 limits; ordinary dispatch's existing hold/parking rules still apply.
 
@@ -88,11 +87,12 @@ never fails release execution; the tag retains its reviewed execution size.
 repository. `size_grant` re-enables it within the selected maximum. Explicit
 urgency, promotions and aging are independent of that opt-out.
 
-Serving admission uses the optional run ceiling, configured disk floor, and
-enabled PSI hard-limit valve. Kubernetes places each step Pod by its requests;
-Oberth reads nothing from a document to decide whether a run fits. Priority
-orders waiting grants within these controls and repository concurrency groups.
-It never raises capacity or preempts running work. See
+Serving admission uses the configured disk floor and the enabled PSI
+hard-limit valve; Argo's controller parallelism bounds running Workflows
+([where limits live](where-limits-live.md)). Kubernetes places each step Pod
+by its requests; Oberth reads nothing from a document to decide whether a run
+fits. Priority orders submission within these controls; Argo admits postponed
+Workflows in creation order. It never preempts running work. See
 [admission and native synchronization](native-synchronization.md).
 
 A new branch-head push supersedes queued, not-started runs at older SHAs in the

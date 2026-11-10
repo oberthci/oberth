@@ -21,8 +21,9 @@ Website: [oberth.ci](https://oberth.ci)
 - **CI** — each push submits the repository's Argo Workflow YAML
   (`.oberth/build.yaml` for branches, `.oberth/release.yaml` for tags); each
   template runs in its own container with its own exit code and named log
-  slice. FIFO queue with a concurrency knob (default 3); a newer push to the
-  same branch supersedes its own in-flight run.
+  slice. A priority-then-FIFO queue; how many Workflows run at once is the
+  Argo controller's parallelism ([where limits live](docs/where-limits-live.md));
+  a newer push to the same branch supersedes its own in-flight run.
 - **Issues** — a red run files exactly one issue per repository and branch;
   repeated reds update it, green auto-closes it. Five-minute uplink-owned
   locks keep two agents off the same issue.
@@ -273,29 +274,29 @@ Each template is a container with its own exit code, timeout, and named log
 slice. Oberth reads the YAML statically at submission -- it never executes
 repository code in the server process.
 
-Kubernetes places step Pods using their requests. Oberth admits runs by
-counting them against one optional ceiling (`maxConcurrentJobs`, default none)
-and keeps only host safety that reads nothing from a workflow: the hard CPU/IO
-PSI valve and the disk-space floor. Shared step limits are native Argo
-`synchronization`, submitted as written, with limits defined once in
-`argoSync.semaphores`; `releases.serialize` runs releases one at a time. The
-historical `oberth.ci/size` annotation is accepted and unused. Missing requests
-receive the documented defaults; explicit requests and limits remain owned by
-the workflow in git. See [admission and native synchronization](docs/native-synchronization.md)
-and [measured resource advice](docs/measured-requests.md).
+Kubernetes places step Pods using their requests. Every limit on what runs at
+once lives in Argo ([where limits live](docs/where-limits-live.md)): the
+controller's `parallelism` bounds running Workflows, shared step limits are
+native Argo `synchronization` against the ConfigMap `oberth-sync-limits` the
+argo-workflows release renders, and `releases.serialize` runs releases one at
+a time with a native mutex. Oberth submits every admitted run at once and keeps
+only host safety that reads nothing from a workflow: the hard CPU/IO PSI valve
+and the disk-space floor. The historical `oberth.ci/size`,
+`oberth.ci/concurrency-group` and `oberth.ci/concurrency-limit` annotations
+are accepted and unused. Missing requests receive the documented defaults;
+explicit requests and limits remain owned by the workflow in git. See
+[admission and native synchronization](docs/native-synchronization.md) and
+[measured resource advice](docs/measured-requests.md).
 
-`oberth.ci/concurrency-group: <name>` shares a concurrency limit across every
-repository declaring that name, including branch, tag/release and promotion
-runs. `oberth.ci/concurrency-limit: "2"` permits two holders; omitting it defaults
-to one. Group names use 1–63 characters of `[a-z0-9-]`. Conflicting YAML limits
-are refused before admission. Waiting runs keep their queued status and name
-the group, limit and current holders in their reason line.
+A run that must not overlap another declares a native mutex, shared by name
+across repositories and triggers:
 
-Groups reserve no CPU or memory. They compose with the run ceiling, while
-Kubernetes places pods from their requests. Read definitions,
-holders and waiters with `oberth admission groups`, MCP `concurrency_groups`, or
-`system_status.admission.groups`. Definitions and run contracts survive restart.
-See [concurrency groups](docs/concurrency-groups.md) for YAML examples and updates.
+```yaml
+spec:
+  synchronization:
+    mutexes:
+      - name: terraform-state
+```
 
 When deploying the [release-priority changes](docs/release-priority.md) held for
 v0.17.72, check existing size-grant state before upgrading: an old revoked grant
@@ -342,13 +343,6 @@ spec:
         when: "'{{workflow.parameters.oberth-trigger}}' != 'branch'"
 ```
 
-```yaml
-metadata:
-  annotations:
-    oberth.ci/size: M
-    oberth.ci/concurrency-group: terraform-state
-```
-
 Numeric resource ceilings use `oberth resource grant/get/revoke` or MCP
 `resource_grant`, `resource_grant_get`, `resource_revoke`. Migration 40 copies
 existing size grants; later size changes affect only legacy admission and tag
@@ -368,7 +362,7 @@ List it with `oberth mcp tools`; available operations are:
 | `run_resources` | Read captured per-template resource history and numeric declarations at the newest selected SHA. Git remains the source of truth. Each step reports sizing_acceptance: five comparable terminal runs must contain complete CPU/memory/storage/duration and known limits together. Suggestions use p95/max; incomplete, mixed-condition or censored history gets no suggestion. Resource-only suggestions require resource_only=true, declaring that the caller preserves missing deadlines in JSON and YAML; other callers still receive measurements and a refusal reason. YAML includes paste-ready ordinary pod resources. Main-container duration does not measure Pod active lifetime through finalization, so no activeDeadlineSeconds is suggested. No logs, commands, environment or image details. |
 | `run_retry` | Queue a fresh attempt for the newest interrupted or infrastructure-failed run, retaining repository, ref, SHA and release admission. Workflow-level failures without a failed step qualify. Tag/release retries require an admin, an unchanged tag object and complete credential-aware terminal observations for the entire tag history (or proof of no Workflow intent). Started secret-store/WIF work, old plans, missing evidence, a moved tag or an older source need run_rerun with force. Pending Workflow deletion is refused even with force. Test failures, older runs, promotion/plan/apply runs, published tags and refs with an active run are refused. The caller is recorded as actor. |
 | `publication_abandon` | Abandon one pending upstream publication by its full publication ID. Requires an unscoped admin uplink and a reason. Atomically marks the publication abandoned and its run failed/abandoned (and its promotion failed), with the administrator in the audit chain. Never pushes; earlier pushes may already be visible upstream. Abandoned intents cannot be retried with publish_retry. An in-flight delivery settles before this operation; terminal publications are refused. |
-| `run_cancel` | Cancel one queued or running run (a claimed run that has not started is queued). The run becomes interrupted with phase cancelled and a reason naming the caller; a claimed run's Workflow is deleted and its admission released, and it is never re-fired. Cancelling a terminal run is refused. Non-admin uplinks may cancel only branch-push runs outside a concurrency group; admins may cancel any run but must set force for tag/release and apply runs, whose publication may be left partial. Cancelling promotion CI fails the promotion without merging. Audited. |
+| `run_cancel` | Cancel one queued or running run (a claimed run that has not started is queued). The run becomes interrupted with phase cancelled and a reason naming the caller; a claimed run's Workflow is deleted and its admission released, and it is never re-fired. Cancelling a terminal run is refused. Non-admin uplinks may cancel only branch-push runs; admins may cancel any run but must set force for tag/release and apply runs, whose publication may be left partial. Cancelling promotion CI fails the promotion without merging. Audited. |
 | `run_rerun` | Rerun a failed or interrupted run at the same SHA and ref, linked to the original (rerun_of), for what run_retry refuses: a failed step such as a flaky test, a run that is no longer the newest of its ref, and tag/release test failures. SHA-keyed status, wait and promote then follow the newest run for that SHA. Refused while the ref has an active run, when a branch has moved past the run's SHA, and for promotion (use promote_retry), plan and apply runs. A run that passed every step and failed only in upstream publication is not re-executed: its publication is retried as publish_retry does (mode publish_retry, action publication_retry). Responses name the started action and include run_status/run_phase; no-work refusals say nothing started. Non-admin uplinks may rerun branch-push runs; tag/release runs need an admin; force-free replay requires the newest source, an unchanged tag object, current credential-aware plans and complete terminal observations for every tag attempt (or no Workflow intent). Secret-store/WIF starts, incomplete observation, legacy plans, older sources, moved tags and unknown evidence require force. Pending Workflow deletion is refused even with force. A tag that is already published or green is refused, so it is never published twice. Audited as run.rerun. |
 | `run_hold_list` | List the parked retry attempts (holds) of an assisted branch CI run: step, pod, attempt, held_since, kubelet deadline, whether run_hold_patch can apply files, and whether the hold was already continued or abandoned. Also returns the run's assist record and the installation policy. A run holds only when it asked for assistance (push option oberth.assist=1 or run_rerun assist), assist.enabled is on, and a credential-free step exited nonzero; the retry Pod parks before its command until run_continue, run_hold_abandon or assist.holdTTL (the server abandons an unreleased hold past the TTL; the Pod deadline shown also covers the step's own budget after release). Read-only. |
 | `run_hold_exec` | Run one bounded command (argv, no shell) inside the held step's main container, as the run's own uplink or an admin: for diagnosing the failure in the live environment. Bounded by assist.execTimeout and assist.execOutputBytes (the deadline stops the stream; a process the image keeps running is not killed), serialized per run, capped installation-wide, and recorded in the run's assist record and audit (run.assist.exec) before the command runs. Any exec marks the run assisted: it is never evidence from this point, whatever the command did. |
@@ -414,7 +408,6 @@ List it with `oberth mcp tools`; available operations are:
 | `size_revoke` | Return a repository to maximum L and disable its automatic tag priority, even if never granted. Explicit admin overrides, promotions and 60-minute aging of standard runs into promotion still apply; running work continues. Admin uplink required; audited. |
 | `size_grant_get` | Read legacy admission size and priority policy, plus the independent numeric resource ceiling. Use resource_grant to change request/limit ceilings. |
 | `queue_cap_config` | Set the branch queue cap with maxNotStarted (0 disables, the default). At the cap, accepted branch pushes stay in Oberth's Git cache and durable receive journal until run creation resumes. Automatic upstream publication still requires successful CI. Queued and claimed waiting runs count; deferred receives survive restart and create runs in arrival order. Tags/releases, promotions and schedules bypass the cap; park refs retain their configured behavior. Unscoped admin only; audited. system_status reports queue_cap (queueCap is a legacy alias for one more release). |
-| `admission_capacity_config` | Set or clear the server-owned runtime run ceiling (0 is no ceiling) without a Helm upgrade or restart (#1497). It overrides the mounted runtime-capacity file and the boot flag until cleared; clearing restores them. Lowering never cancels admitted work; raising wakes the queue. Unscoped admin only; audited with the previous value, reason required. system_status admission.configuration reports source runtime. |
 | `release_wif_list` | Read the release WIF capability map: boot default from Helm/flags, runtime overrides, the effective map used by preflight and admission, configured role names and any stored grant left inactive. Public data only. Unscoped admin only. |
 | `release_wif_grant` | Grant or replace one registered repository's release WIF entry at runtime (#1497): its release service_account_name and template-to-role map. Roles, namespace and dedicated step identities stay Helm configuration. Validated against the boot map; applies to the next preflight and tag admission without restart. Unscoped admin only; audited, reason required. |
 | `release_wif_revoke` | Revoke a repository's release WIF entry at runtime, including a Helm-configured entry or one for a retired, unregistered upstream/org/repo. New release admissions refuse its WIF leaves. Unscoped admin only; audited, reason required. |
@@ -425,7 +418,6 @@ List it with `oberth mcp tools`; available operations are:
 | `priority_grant_list` | List submission priority grants, including expiry. Unscoped admin only. |
 | `priority_grant_revoke` | Revoke an identity's submission priority grant. Accepted runs keep their priority. Unscoped admin only; audited. |
 | `run_priority` | Set and pin a waiting run to low, standard, promotion or high, including explicit lowering. Legacy normal/highest inputs map to standard/high. Cannot preempt admitted work. Unscoped admin only; audited, reason required. |
-| `concurrency_groups` | List YAML-defined concurrency groups, limits, current holders and waiters across repositories, including idle definitions. Read-only; requires an unscoped uplink. Define groups only with oberth.ci/concurrency-group and oberth.ci/concurrency-limit (default 1) in pipeline YAML. |
 | `admission_hold` | Hold new admission except allowed tag/release/promotion classes. Unscoped admin only; audited, reason required. Existing grants are untouched. Default allow is tag+release; [] holds all. Expires after duration (default 2h, maximum 12h), including across restart. Read current hold in system_status admission.hold. |
 | `admission_release` | Release one admission reservation no owner will release: typically a granted reservation still held for a run that is already terminal because its owner hung or was lost (also an ungranted one of a terminal run, or a retained one while a stopping scheduler drains). A live run's reservation is refused (use run_cancel). The run's Workflow is deleted first as proof; a granted run with no recorded Workflow (a trusted preflight) needs force, as does a failed deletion. Admin uplink required, unscoped only; audited. system_status lists every reservation. |
 | `repo_usage` | Report bounded outside-step kubelet/cAdvisor usage by repository and step: per-container app/init/helper/VM launcher p50/p95/max, pod storage peaks and per-run pod overlap; requests, paired used/request ratios and per-step peaks grouped by observed Workflow size class (S/M/L/XL or unknown). Peaks are sampled lower bounds; missing/killed samples remain unknown. Does not change admission. |
@@ -453,9 +445,9 @@ List it with `oberth mcp tools`; available operations are:
 | `promote_grant_revoke` | Revoke an active promotion grant. Admin uplink required. Already-consumed or already-revoked grants are refused. |
 | `promote_grant_list` | List promotion grants with optional repository, SHA, and status filters. Read-only. |
 | `run_wait` | Block server-side until one run finishes, holds a retry (assisted runs: a parked step waits for run_hold_*), or changes in any way, bounded by timeout_s (default and maximum 600). Returns state finished, held, changed or timeout with the run summary, its unreleased holds and retry_hint. Read-only; replaces client polling loops. |
-| `events_subscribe` | Set which agent events this MCP session receives as server push: a notifications/claude/channel message on the session's GET event stream (Claude Code with --channels server:<name>), and notifications/resources/updated for run://<id> resources the session subscribed. Kinds: run.finished (status, failed step, reason, retry_hint), run.held (step, pod, held_since, abandon_at, holds_in_run), run.hold_abandoned (step, pod, reason ttl, cap or the agent, held_since, abandoned_at, failed attempt and exit code), run.lock_wait (a native Argo lock wait past agentEvents.lockWaitThreshold, with the lock and its holders), promotion.finished (with the prune_source outcome), release.published and publication.failed (final, or an automatic retry attempt). Without a call a session receives every kind for every repository in its uplink scope. Events carry a monotonically increasing id; delivery is at-least-once; after a reconnect resume with events_since. Read-only. |
+| `events_subscribe` | Set which agent events this MCP session receives as server push: a notifications/claude/channel message on the session's GET event stream (Claude Code with --channels server:<name>), and notifications/resources/updated for run://<id> resources the session subscribed. Kinds: run.finished (status, failed step, reason, retry_hint), run.held (step, pod, held_since, abandon_at, holds_in_run), run.hold_abandoned (step, pod, reason ttl, cap or the agent, held_since, abandoned_at, failed attempt and exit code), run.lock_wait (a native Argo lock wait past agentEvents.lockWaitThreshold, with the lock and its holders; lock Parallelism/workflow-controller with postponed true is a Workflow the Argo controller postponed for its parallelism), promotion.finished (with the prune_source outcome), release.published and publication.failed (final, or an automatic retry attempt). Without a call a session receives every kind for every repository in its uplink scope. Events carry a monotonically increasing id; delivery is at-least-once; after a reconnect resume with events_since. Read-only. |
 | `events_since` | Read agent events after a cursor in id order, scoped to the caller's uplink scope and the same optional filters as events_subscribe. Use after a reconnect or without a push stream: pass next_after_id back as after_id. gap is true when older events were pruned (agentEvents.retention). Read-only. |
-| `sync_status` | Native Argo synchronization: the current holders and waiters of every semaphore and mutex observed on active runs (sampled every agentEvents.interval from Workflow status.synchronization), and the bounded stored history per lock: holder and waiter intervals, the maximum number of concurrent holders (proves two runs never overlapped) and wait durations. A scoped uplink sees only its own runs. Read-only. |
+| `sync_status` | Native Argo synchronization: the current holders and waiters of every semaphore and mutex observed on active runs (sampled every agentEvents.interval from Workflow status.synchronization), and of the Argo controller parallelism as Parallelism/workflow-controller (waiters are postponed Workflows, holders admitted ones), and the bounded stored history per lock: holder and waiter intervals, the maximum number of concurrent holders (proves two runs never overlapped) and wait durations. A scoped uplink sees only its own runs. Read-only. |
 
 Authenticated `GET` endpoints (`/api/runs`, `/api/repos`, `/api/issues`,
 `/api/status`) serve the same state; `/healthz`, `/livez`, and `/readyz` are

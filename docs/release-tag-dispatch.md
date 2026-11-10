@@ -56,7 +56,7 @@ spec:
       command: ["deploy"]
 ```
 
-The static size, concurrency group, planned steps, credential detection, VM
+The static size, planned steps, credential detection, VM
 resource inspection, admission audit and actual execution all select this same
 file. Existing `oberth.ci/size-by-trigger` supports `tag=...` for release files.
 No route-level size override bypasses the document's normal resource admission.

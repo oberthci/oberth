@@ -66,9 +66,8 @@ normal priority, FIFO and resource rules.
 
 ## Workflow count and release isolation
 
-The runtime ceiling counts granted runs, independent of the historical
-S/M/L/XL label. Setting it to one is valid; zero is no ceiling. Kubernetes
-places each pod using its requests. The hold selects which classes may obtain
-new workflow slots; it does not change the ceiling or preempt existing grants.
-Use the hold to keep ordinary work queued while releases proceed. See
-[runtime admission capacity](runtime-admission-capacity.md).
+Oberth has no run ceiling since v0.20.0: how many Workflows run at once is the
+Argo controller's parallelism ([where limits live](where-limits-live.md)).
+The hold selects which classes Oberth submits; it does not preempt existing
+grants. Use the hold to keep ordinary work queued while releases proceed:
+held runs are not submitted, so they occupy no Argo parallelism slot.
