@@ -12,7 +12,7 @@ import (
 
 func TestWorkflowCapabilityGrantsAreScopedAuditedAndRevocable(t *testing.T) {
 	ctx := t.Context()
-	s, err := OpenAdminClient(ctx, filepath.Join(t.TempDir(), "grants.sqlite"), Options{})
+	s, err := openAdminClientForTest(ctx, filepath.Join(t.TempDir(), "grants.sqlite"), Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

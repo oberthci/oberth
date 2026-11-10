@@ -3,8 +3,11 @@ package pushretry
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
+
+	"github.com/oberthci/oberth/internal/gitssh"
 )
 
 func TestTransientPushClassification(t *testing.T) {
@@ -46,5 +49,31 @@ func TestRetryBudget(t *testing.T) {
 	}
 	if MaxAttempts != 5 || total != 30*time.Minute || Delay(0) != 0 || Delay(6) != 0 {
 		t.Fatal("retry must be bounded to five attempts over thirty minutes")
+	}
+}
+
+// The git-ssh shim's fixed lines are the classification; Git's generic
+// "Could not read from remote repository" advice that follows them is not.
+func TestTransientGitSSHShimLines(t *testing.T) {
+	const gitAdvice = "\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists."
+	for _, tc := range []struct {
+		name      string
+		err       error
+		transient bool
+	}{
+		{"push transport failure", errors.New("git push: exit status 128: " + gitssh.TemporaryFailureMessage + gitAdvice), true},
+		{"ls-remote transport failure", errors.New("git ls-remote: exit status 128: " + gitssh.TemporaryFailureMessage + gitAdvice), true},
+		{"typed transport failure", fmt.Errorf("fetch: %w", gitssh.ErrTransportUnavailable), true},
+		{"shim refusal", errors.New("git push: exit status 128: " + gitssh.RefusalMessage + gitAdvice), false},
+		{"refusal wins over transport line", errors.New(gitssh.RefusalMessage + "\n" + gitssh.TemporaryFailureMessage), false},
+		{"upstream service failure", errors.New("git push: exit status 128: " + gitssh.Diagnostic(errors.New("remote exit 1")) + gitAdvice), false},
+		{"generic advice alone", errors.New("exit status 128" + gitAdvice), false},
+		{"transport line beside permission denied", errors.New(gitssh.TemporaryFailureMessage + "\nPermission denied (publickey)"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Transient(tc.err); got != tc.transient {
+				t.Fatalf("Transient(%q) = %v, want %v", tc.err, got, tc.transient)
+			}
+		})
 	}
 }

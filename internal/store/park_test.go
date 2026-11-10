@@ -90,7 +90,7 @@ func TestParkedPromotionEvidenceIsDurableAndImmutable(t *testing.T) {
 func TestParkPromotionUpgradeFromV53PreservesHistory(t *testing.T) {
 	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "upgrade.sqlite")
-	s, err := OpenAdminClient(ctx, path, Options{})
+	s, err := openAdminClientForTest(ctx, path, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestParkPromotionUpgradeFromV53PreservesHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 2 {
-		s, err = OpenAdminClient(ctx, path, Options{})
+		s, err = openAdminClientForTest(ctx, path, Options{})
 		if err != nil {
 			t.Fatal(err)
 		}

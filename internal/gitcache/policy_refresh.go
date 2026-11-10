@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oberthci/oberth/internal/gitssh"
 	"github.com/oberthci/oberth/internal/pushretry"
 )
 
@@ -154,17 +153,12 @@ func (c *Cache) refreshPolicyLocked(ctx context.Context, input, path string, req
 	return result.sha, result.err
 }
 
+// transientPolicyTransport shares the publication classifier, which knows
+// the git-ssh shim's own transport and refusal lines. A result already
+// classified as an upstream outage stays one.
 func transientPolicyTransport(err error) bool {
-	if err == nil || errors.Is(err, context.Canceled) {
-		return false
+	if errors.Is(err, ErrPolicyUpstreamUnavailable) {
+		return true
 	}
-	// Explicit authentication/policy errors take precedence over ambiguous
-	// transport-wrapper wording. Exit status 128 alone is never retryable.
-	message := strings.ToLower(err.Error())
-	for _, permanent := range []string{gitssh.RefusalMessage, "oberth git-ssh: transport refused or upstream", "permission denied", "authentication failed", "access denied", "not authorized", "not allowed", "repository not found"} {
-		if strings.Contains(message, permanent) {
-			return false
-		}
-	}
-	return strings.Contains(message, gitssh.TemporaryFailureMessage) || pushretry.Transient(err)
+	return pushretry.Transient(err)
 }

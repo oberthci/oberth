@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -49,4 +50,39 @@ func Open(ctx context.Context, path string, opts store.Options) (*store.Store, e
 func Track(database *store.Store, path string, opts store.Options) *store.Store {
 	fixtures.Store(database, fixtureInfo{path: path, now: opts.Now})
 	return database
+}
+
+// OpenAdminClient opens path through store.OpenAdminClient, first creating a
+// genesis database when none exists, as a running server would have. The
+// production opener refuses a missing database.
+func OpenAdminClient(ctx context.Context, path string, opts store.Options) (*store.Store, error) {
+	base, _, _ := strings.Cut(path, "?")
+	if _, err := os.Stat(base); errors.Is(err, os.ErrNotExist) {
+		if base == path {
+			// The genesis handle is the same opener the admin client uses.
+			return store.CreateGenesis(ctx, path, opts)
+		}
+		// CreateGenesis takes no DSN query; create the file, then reopen.
+		created, err := store.CreateGenesis(ctx, base, opts)
+		if err != nil {
+			return nil, err
+		}
+		if err := created.Close(); err != nil {
+			return nil, err
+		}
+	}
+	return store.OpenAdminClient(ctx, path, opts)
+}
+
+// EnsureDatabase creates a genesis database at path unless one exists.
+func EnsureDatabase(ctx context.Context, path string, opts store.Options) error {
+	base, _, _ := strings.Cut(path, "?")
+	if _, err := os.Stat(base); !errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	database, err := store.CreateGenesis(ctx, base, opts)
+	if err != nil {
+		return err
+	}
+	return database.Close()
 }

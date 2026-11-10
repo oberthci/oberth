@@ -10,7 +10,7 @@ import (
 
 func TestV43MigrationRejectsOrphanPublicationAtV38(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "orphan-v38.sqlite")
-	s, err := OpenAdminClient(t.Context(), path, Options{})
+	s, err := openAdminClientForTest(t.Context(), path, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestV43MigrationRejectsOrphanPublicationAtV38(t *testing.T) {
  VALUES('orphan-publication',999,'missing-run','branch','main','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','fixture',1,1);`); err != nil {
 		t.Fatal(err)
 	}
-	got, err := OpenAdminClient(t.Context(), path, Options{})
+	got, err := openAdminClientForTest(t.Context(), path, Options{})
 	if got != nil {
 		_ = got.Close()
 	}

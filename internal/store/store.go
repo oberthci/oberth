@@ -48,6 +48,7 @@ var (
 	ErrLockHeld           = errors.New("store: issue lock held by another identity")
 	ErrLockNotOwned       = errors.New("store: issue lock is expired or not owned by identity")
 	ErrSchemaTooNew       = errors.New("store: database schema is newer than this binary")
+	ErrDatabaseMissing    = errors.New("store: database does not exist")
 	ErrSchemaIncompatible = errors.New("store: database schema is incompatible with this binary")
 	ErrSchemaLegacyV1     = fmt.Errorf("%w: exact predecessor schema version 1", ErrSchemaIncompatible)
 )
@@ -108,8 +109,40 @@ type Store struct {
 // administrative command. It deliberately does not run owner-startup recovery
 // because the live server may currently own active Jobs. Existing legacy
 // schemas are rejected; only the continuity-bound startup path may migrate v1.
+//
+// An administrative command only ever acts on an installation that already
+// exists, so a missing file is refused rather than created: a mistyped
+// --database or an unmounted volume must not leave a fresh empty database
+// behind and report "not found" against it.
 func OpenAdminClient(ctx context.Context, path string, opts Options) (*Store, error) {
+	if err := requireExistingDatabase(path); err != nil {
+		return nil, err
+	}
 	return open(ctx, path, opts, false, nil)
+}
+
+// requireExistingDatabase refuses a database path that names no regular,
+// non-empty file. SQLite would otherwise create and initialize it.
+func requireExistingDatabase(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("%w: database path is empty", ErrInvalid)
+	}
+	base, _, _ := strings.Cut(path, "?")
+	base = strings.TrimPrefix(base, "file:")
+	info, err := os.Stat(base)
+	if errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("%w: %s does not exist; check --database (admin commands never create a database)", ErrDatabaseMissing, base)
+	}
+	if err != nil {
+		return fmt.Errorf("stat database %s: %w", base, err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%w: %s is not a regular file; check --database", ErrDatabaseMissing, base)
+	}
+	if info.Size() == 0 {
+		return fmt.Errorf("%w: %s is empty; check --database (admin commands never initialize a database)", ErrDatabaseMissing, base)
+	}
+	return nil
 }
 
 // MigrateLegacyV1 upgrades exactly the predecessor v1 schema and returns the
@@ -1005,11 +1038,8 @@ ORDER BY queue_sequence`)
 				if err != nil {
 					return err
 				}
-				promotion, err = finishPromotionTx(ctx, tx, promotion, model.PromotionFailed, recovered.ID, recovered.Error, now)
+				_, err = finishPromotionTx(ctx, tx, promotion, model.PromotionFailed, recovered.ID, recovered.Error, now)
 				if err != nil {
-					return err
-				}
-				if err := s.projectPromotionIssue(ctx, tx, promotion, now); err != nil {
 					return err
 				}
 			} else if err := s.projectRunIssue(ctx, tx, recovered, "", now); err != nil {
@@ -1056,15 +1086,12 @@ RETURNING `+runColumns, now, now, active.ID))
 			if promotionErr != nil {
 				return fmt.Errorf("load interrupted promotion for run %s: %w", recovered.ID, promotionErr)
 			}
-			promotion, promotionErr = finishPromotionTx(
+			_, promotionErr = finishPromotionTx(
 				ctx, tx, promotion, model.PromotionInterrupted, recovered.ID,
 				"oberth restarted during promotion CI", now,
 			)
 			if promotionErr != nil {
 				return promotionErr
-			}
-			if err := s.projectPromotionIssue(ctx, tx, promotion, now); err != nil {
-				return err
 			}
 		} else if err := s.projectRunIssue(ctx, tx, recovered, "", now); err != nil {
 			return err
@@ -1123,12 +1150,8 @@ ORDER BY sequence`)
 				}
 			}
 		}
-		recovered, recoveryErr := finishPromotionTx(ctx, tx, pending, status, pending.RunID, failure, now)
-		if recoveryErr != nil {
+		if _, recoveryErr := finishPromotionTx(ctx, tx, pending, status, pending.RunID, failure, now); recoveryErr != nil {
 			return recoveryErr
-		}
-		if err := s.projectPromotionIssue(ctx, tx, recovered, now); err != nil {
-			return err
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -1832,9 +1855,6 @@ func (s *Store) FinishPromotion(ctx context.Context, id string, status model.Pro
 	}
 	value, err := finishPromotionTx(ctx, tx, current, status, runID, failure, now)
 	if err != nil {
-		return model.Promotion{}, err
-	}
-	if err := s.projectPromotionIssue(ctx, tx, value, now); err != nil {
 		return model.Promotion{}, err
 	}
 	if err := tx.Commit(); err != nil {

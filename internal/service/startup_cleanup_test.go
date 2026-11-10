@@ -3,11 +3,13 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 type retryingStartupJobs struct {
@@ -113,5 +115,159 @@ func TestStartupCleanupAttemptStopsOnShutdown(t *testing.T) {
 		}
 	case <-time.After(testTimeout(5 * time.Second)):
 		t.Fatal("shutdown did not interrupt cleanup")
+	}
+}
+
+type steadyCancellationJobs struct {
+	recoveryJobs
+	calls   atomic.Int32
+	failed  chan struct{}
+	deleted chan struct{}
+}
+
+func (j *steadyCancellationJobs) Delete(_ context.Context, name, _ string) error {
+	switch j.calls.Add(1) {
+	case 1:
+		close(j.failed)
+		return errors.New("kube-apiserver temporarily unavailable")
+	case 2:
+		close(j.deleted)
+	}
+	return nil
+}
+
+// After startup, a Workflow deletion the API refuses keeps the server up and
+// the obligation pending, and the pass runs again on its own backoff.
+func TestSteadyCancellationDeleteFailureRetriesWithoutExit(t *testing.T) {
+	f := newRecoveryFixture(t)
+	jobs := &steadyCancellationJobs{failed: make(chan struct{}), deleted: make(chan struct{})}
+	scheduler := f.scheduler(t, jobs)
+	// Create the cancellation once startup recovery is over and before the
+	// dispatch loop starts, so neither startup cleanup nor a dispatch claim
+	// can take it.
+	recovered := make(chan error, 1)
+	scheduler.onStartupRecovered = func() {
+		recovered <- func() error {
+			enqueued, err := storetest.EnqueueRun(f.store, context.Background(), model.RunSpec{
+				RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "feature/cancelled",
+				SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Actor: "agent@host", Trigger: "branch",
+			})
+			if err != nil {
+				return err
+			}
+			if _, err := f.store.ClaimNextRun(context.Background()); err != nil {
+				return err
+			}
+			if _, err := f.store.SetRunWorkflowName(context.Background(), enqueued.ID, "oberth-cancelled"); err != nil {
+				return err
+			}
+			_, err = f.store.CancelRun(context.Background(), model.RunCancelRequest{RunID: enqueued.ID, Actor: "operator"})
+			return err
+		}()
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- scheduler.Run(ctx) }()
+	defer func() { cancel(); <-done }()
+	select {
+	case err := <-recovered:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case err := <-done:
+		done <- err
+		t.Fatalf("scheduler exited during startup: %v", err)
+	case <-time.After(testTimeout(5 * time.Second)):
+		t.Fatal("startup did not finish")
+	}
+	select {
+	case <-jobs.failed:
+	case err := <-done:
+		done <- err
+		t.Fatalf("scheduler exited before the deletion: %v", err)
+	case <-time.After(testTimeout(5 * time.Second)):
+		t.Fatal("deletion was not attempted")
+	}
+	select {
+	case <-jobs.deleted:
+	case err := <-done:
+		done <- err
+		t.Fatalf("one failed deletion stopped the scheduler: %v", err)
+	case <-time.After(testTimeout(5 * time.Second)):
+		t.Fatal("the cancellation pass did not retry on its own")
+	}
+	deadline := time.Now().Add(testTimeout(5 * time.Second))
+	for {
+		pending, err := f.store.PendingRunCancellations(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(pending) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("obligation not completed after retry: %+v", pending)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	select {
+	case err := <-done:
+		done <- err
+		t.Fatalf("scheduler exited: %v", err)
+	default:
+	}
+}
+
+func TestOnlyPendingJobDeletions(t *testing.T) {
+	pending := fmt.Errorf("delete superseded Job x: %w", &pendingJobDeletionError{errors.New("api down")})
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"one deletion", pending, true},
+		{"joined deletions", errors.Join(pending, pending), true},
+		{"store error", errors.New("database is locked"), false},
+		{"deletion beside store error", errors.Join(pending, errors.New("constraint failed")), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := onlyPendingJobDeletions(tc.err); got != tc.want {
+				t.Fatalf("onlyPendingJobDeletions = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// Every worker call site of the cancellation pass routes its error through
+// deferRefusedDeletions: refused deletions become a dispatch-loop retry,
+// anything else, or a cancelled worker, keeps the error.
+func TestDeferRefusedDeletionsWakesDispatchRetry(t *testing.T) {
+	pending := fmt.Errorf("delete superseded Job x: %w", &pendingJobDeletionError{errors.New("api down")})
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, tc := range []struct {
+		name    string
+		ctx     context.Context
+		err     error
+		want    error
+		wakeups int
+	}{
+		{"refused deletion", context.Background(), pending, nil, 1},
+		{"store error", context.Background(), errors.New("database is locked"), errors.New("database is locked"), 0},
+		{"mixed", context.Background(), errors.Join(pending, errors.New("constraint")), errors.New("x"), 0},
+		{"worker stopping", cancelled, pending, pending, 0},
+		{"nil", context.Background(), nil, nil, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			scheduler := &Scheduler{wake: make(chan struct{}, 1)}
+			got := scheduler.deferRefusedDeletions(tc.ctx, tc.err)
+			if (got == nil) != (tc.want == nil) {
+				t.Fatalf("deferRefusedDeletions = %v, want error=%t", got, tc.want != nil)
+			}
+			if len(scheduler.wake) != tc.wakeups {
+				t.Fatalf("dispatch wakeups = %d, want %d", len(scheduler.wake), tc.wakeups)
+			}
+		})
 	}
 }

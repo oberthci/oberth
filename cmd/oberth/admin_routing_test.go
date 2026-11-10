@@ -14,6 +14,7 @@ import (
 	"github.com/oberthci/oberth/internal/installer"
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 )
 
 func TestRunAccessRoutesSubcommands(t *testing.T) {
@@ -40,7 +41,7 @@ func TestRunAccessRoutesSubcommands(t *testing.T) {
 func TestRunAccessListFormatsGrants(t *testing.T) {
 	t.Parallel()
 	databasePath := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := store.OpenAdminClient(context.Background(), databasePath, store.Options{})
+	database, err := storetest.OpenAdminClient(context.Background(), databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +75,7 @@ func TestRunAccessListFormatsGrants(t *testing.T) {
 func TestRunAccessListFiltersByRepo(t *testing.T) {
 	t.Parallel()
 	databasePath := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := store.OpenAdminClient(context.Background(), databasePath, store.Options{})
+	database, err := storetest.OpenAdminClient(context.Background(), databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +362,7 @@ func TestGatedAdminTokensCreateAndActivateErrorPaths(t *testing.T) {
 func TestUplinkListShowsAdminLabel(t *testing.T) {
 	t.Parallel()
 	databasePath := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := store.OpenAdminClient(context.Background(), databasePath, store.Options{})
+	database, err := storetest.OpenAdminClient(context.Background(), databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -564,7 +565,7 @@ func TestRunUpstreamListRejectsPositionalArguments(t *testing.T) {
 func TestRunAccessListShowsRevokedGrants(t *testing.T) {
 	t.Parallel()
 	databasePath := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := store.OpenAdminClient(context.Background(), databasePath, store.Options{})
+	database, err := storetest.OpenAdminClient(context.Background(), databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -618,7 +619,7 @@ func TestRunUpstreamRemoveAutoYes(t *testing.T) {
 func TestRunAccessListJSONEmitsSchema(t *testing.T) {
 	t.Parallel()
 	databasePath := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := store.OpenAdminClient(context.Background(), databasePath, store.Options{})
+	database, err := storetest.OpenAdminClient(context.Background(), databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -677,7 +678,7 @@ func TestRunAccessListJSONEmitsSchema(t *testing.T) {
 func TestRunAccessListJSONZeroGrantsEmitsEmptyArray(t *testing.T) {
 	t.Parallel()
 	databasePath := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := store.OpenAdminClient(context.Background(), databasePath, store.Options{})
+	database, err := storetest.OpenAdminClient(context.Background(), databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -699,7 +700,7 @@ func TestRunAccessListJSONZeroGrantsEmitsEmptyArray(t *testing.T) {
 func TestRunAccessListJSONRevokedGrant(t *testing.T) {
 	t.Parallel()
 	databasePath := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := store.OpenAdminClient(context.Background(), databasePath, store.Options{})
+	database, err := storetest.OpenAdminClient(context.Background(), databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -739,7 +740,7 @@ func TestRunAccessListJSONRevokedGrant(t *testing.T) {
 func TestRunAccessListJSONDefaultOutputUnchanged(t *testing.T) {
 	t.Parallel()
 	databasePath := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := store.OpenAdminClient(context.Background(), databasePath, store.Options{})
+	database, err := storetest.OpenAdminClient(context.Background(), databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -772,7 +773,7 @@ func TestRunAccessListJSONDefaultOutputUnchanged(t *testing.T) {
 func TestRoundTripTabwriterOutputThroughProducerParser(t *testing.T) {
 	t.Parallel()
 	databasePath := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := store.OpenAdminClient(context.Background(), databasePath, store.Options{})
+	database, err := storetest.OpenAdminClient(context.Background(), databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -821,7 +822,7 @@ func TestRoundTripTabwriterOutputThroughProducerParser(t *testing.T) {
 func TestRoundTripJSONOutputThroughProducerParser(t *testing.T) {
 	t.Parallel()
 	databasePath := filepath.Join(t.TempDir(), "oberth.sqlite")
-	database, err := store.OpenAdminClient(context.Background(), databasePath, store.Options{})
+	database, err := storetest.OpenAdminClient(context.Background(), databasePath, store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

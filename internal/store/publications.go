@@ -304,18 +304,26 @@ SELECT `+publicationColumns+` FROM publications WHERE id = ?`, id))
 		if status == model.PublicationAbandoned {
 			phase = "abandoned"
 		}
-		runError, runReason := failure, ""
+		// A failed publication gets a reason line unless the run already
+		// carries a lineage reason (rerun, automatic retry, restart), which
+		// later reruns parse and which must stay intact.
+		runError, runReason, failedReason := failure, "", ""
 		if abandonActor != "" {
 			runReason = failure
+		}
+		if status == model.PublicationFailed {
+			failedReason = publicationFailedReason(publication, failure)
 		}
 		if runPassed {
 			runStatus, phase, runError = model.RunPassed, "passed", ""
 		}
 		finalization.Run, err = scanRun(tx.QueryRowContext(ctx, `
 UPDATE runs
-SET status = ?, phase = ?, error = ?, reason = CASE WHEN ? != '' THEN ? ELSE reason END, finished_at = ?, updated_at = ?
+SET status = ?, phase = ?, error = ?,
+    reason = CASE WHEN ? != '' THEN ? WHEN ? != '' AND reason IN ('', ?) THEN ? ELSE reason END,
+    finished_at = ?, updated_at = ?
 WHERE id = ? AND status = 'running' AND phase = 'publishing'
-RETURNING `+runColumns, runStatus, phase, runError, runReason, runReason, now, now, publication.RunID))
+RETURNING `+runColumns, runStatus, phase, runError, runReason, runReason, failedReason, PolicyRefreshWaitingReason, failedReason, now, now, publication.RunID))
 		if errors.Is(err, sql.ErrNoRows) {
 			return model.PublicationFinalization{}, fmt.Errorf("%w: publication run is not active", ErrInvalidState)
 		}
@@ -347,11 +355,9 @@ RETURNING sequence, id, repo_id, source_branch, source_sha, target_ref, previous
 			}
 		}
 	}
-	if finalization.Promotion.ID != "" {
-		if err := s.projectPromotionIssue(ctx, tx, finalization.Promotion, now); err != nil {
-			return model.PublicationFinalization{}, err
-		}
-	} else if finalization.Run.ID != "" {
+	// Promotions file no CI issues (scoped to default-branch and scheduled
+	// runs); only a run's own publication projects one.
+	if finalization.Promotion.ID == "" && finalization.Run.ID != "" {
 		if err := s.projectRunIssue(ctx, tx, finalization.Run, "", now); err != nil {
 			return model.PublicationFinalization{}, err
 		}
@@ -672,4 +678,18 @@ func (s *Store) AbandonedPromotionPin(ctx context.Context, input, target, sha st
 		return false, fmt.Errorf("check abandoned promotion pin: %w", err)
 	}
 	return abandoned, nil
+}
+
+// publicationFailedReason is the run's reason line when every step passed
+// and only the upstream publication failed. The run status stays failed (no
+// new statuses); the reason says the code was green and how to retry.
+func publicationFailedReason(publication model.Publication, failure string) string {
+	reason := "steps passed; upstream publication failed"
+	if pushretry.PublicationFailure(failure) {
+		reason += " after all retry attempts"
+	}
+	if publication.PromotionID != "" {
+		return reason + "; retry with promote_retry"
+	}
+	return reason + "; retry with run_rerun, which re-publishes without re-running steps"
 }

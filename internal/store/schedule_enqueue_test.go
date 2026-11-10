@@ -201,7 +201,7 @@ func TestScheduleOccurrenceConcurrentTransactionsConsumeSnapshotOnce(t *testing.
 	}
 	defer first.Close()
 	repo := createRepo(t, first)
-	second, err := OpenAdminClient(ctx, path, Options{})
+	second, err := openAdminClientForTest(ctx, path, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

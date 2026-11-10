@@ -14,7 +14,7 @@ const pilotRetirementDowngradeSQL = executionRetirementTriggersDowngradeSQL + te
 func TestPilotRetirementPreservesReadOnlyHistory(t *testing.T) {
 	ctx := t.Context()
 	path := filepath.Join(t.TempDir(), "pilot-history.sqlite")
-	s, err := OpenAdminClient(ctx, path, Options{})
+	s, err := openAdminClientForTest(ctx, path, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestPilotRetirementPreservesReadOnlyHistory(t *testing.T) {
 	if err = s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err = OpenAdminClient(ctx, path, Options{})
+	s, err = openAdminClientForTest(ctx, path, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

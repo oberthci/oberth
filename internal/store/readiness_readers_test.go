@@ -103,7 +103,7 @@ func TestReadinessReaderReadOnlyBoundedAndClosed(t *testing.T) {
 func TestReadinessReaderBusyTimeoutCoversBudgetOnEveryConnection(t *testing.T) {
 	for _, configured := range []time.Duration{5 * time.Second, 25 * time.Second} {
 		t.Run(configured.String(), func(t *testing.T) {
-			s, err := OpenAdminClient(t.Context(), filepath.Join(t.TempDir(), "readiness.db"), Options{BusyTimeout: configured})
+			s, err := openAdminClientForTest(t.Context(), filepath.Join(t.TempDir(), "readiness.db"), Options{BusyTimeout: configured})
 			if err != nil {
 				t.Fatal(err)
 			}

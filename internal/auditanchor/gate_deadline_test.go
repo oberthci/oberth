@@ -9,6 +9,7 @@ import (
 
 	"github.com/oberthci/oberth/internal/model"
 	"github.com/oberthci/oberth/internal/store"
+	"github.com/oberthci/oberth/internal/storetest"
 	"github.com/oberthci/oberth/internal/testtimeout"
 )
 
@@ -29,7 +30,7 @@ func (c *deadlineContinuity) Reconcile(ctx context.Context, history []model.Audi
 func deadlineTestManager(t *testing.T, timeout time.Duration) (*Manager, *deadlineContinuity) {
 	t.Helper()
 	now := time.Now()
-	database, err := store.OpenAdminClient(t.Context(), filepath.Join(t.TempDir(), "audit.sqlite"), store.Options{})
+	database, err := storetest.OpenAdminClient(t.Context(), filepath.Join(t.TempDir(), "audit.sqlite"), store.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -80,7 +80,7 @@ func TestFourClassesLoweringSurvivesReopenAndAudit(t *testing.T) {
 			t.Fatal(err)
 		}
 		now = now.Add(2 * time.Hour)
-		reopened, err := OpenAdminClient(t.Context(), s.livePath, Options{Now: func() time.Time { return now }})
+		reopened, err := openAdminClientForTest(t.Context(), s.livePath, Options{Now: func() time.Time { return now }})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -235,7 +235,7 @@ func TestFourClassesUpgradePreservesLegacyPriorityEvidence(t *testing.T) {
 			t.Fatalf("legacy projection %s=%s want %s: %v", id, got.Priority, want, err)
 		}
 	}
-	reopened, err := OpenAdminClient(t.Context(), s.livePath, Options{Now: func() time.Time { return now }})
+	reopened, err := openAdminClientForTest(t.Context(), s.livePath, Options{Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}

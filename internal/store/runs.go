@@ -1001,12 +1001,9 @@ RETURNING `+runColumns,
 		case model.RunInterrupted:
 			promotionStatus = model.PromotionInterrupted
 		}
-		promotion, promotionErr = finishPromotionTx(ctx, tx, promotion, promotionStatus, value.ID, value.Error, now)
+		_, promotionErr = finishPromotionTx(ctx, tx, promotion, promotionStatus, value.ID, value.Error, now)
 		if promotionErr != nil {
 			return model.Run{}, promotionErr
-		}
-		if err := s.projectPromotionIssue(ctx, tx, promotion, now); err != nil {
-			return model.Run{}, err
 		}
 	} else if value.AutoRetriedBy == "" {
 		if err := s.projectRunIssue(ctx, tx, value, result.FailureTail, now); err != nil {
