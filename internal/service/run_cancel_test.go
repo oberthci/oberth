@@ -119,38 +119,22 @@ func TestRunCancelQueuedRunIsNeverClaimed(t *testing.T) {
 	}
 }
 
-// Cancelling a parked group waiter withdraws its claim at once. After the
-// active group holder completes, the next member must not remain behind a
-// cancelled reservation. Other repositories keep their workflow slots.
+// Cancelling a waiting run withdraws its claim at once: once the host
+// pressure that holds it clears, the run behind it is not held up by
+// a cancelled reservation, and the cancelled run never creates a Workflow.
 func TestRunCancelWaitingRunReleasesItsAdmissionReservation(t *testing.T) {
 	fixture := newGroupFixture(t, 3)
-	fixture.engine.declare("busy", kubevirtGroup, pipeline.L)
-	fixture.engine.declare("feat-kv", kubevirtGroup, pipeline.XL)
-	fixture.engine.declare("feat-kv-2", kubevirtGroup, pipeline.S)
-	fixture.engine.declare("small", "", pipeline.S)
-	holder := fixture.branch(t, fixture.terraform, "busy", "a")
+	lift := fixture.pressureValve(t)
 	head := fixture.branch(t, fixture.terraform, "feat-kv", "b")
 	member := fixture.branch(t, fixture.terraform, "feat-kv-2", "c")
-	small := fixture.branch(t, fixture.exampleService, "small", "d")
 	fixture.start(t)
-	if created := fixture.awaitCreated(t, 2); !created[holder.ID] || !created[small.ID] {
-		t.Fatalf("created %v; want only the holder", created)
-	}
-	fixture.awaitAdmission(t, head, "waiting XL head", func(snapshot *model.AdmissionObservation) bool {
-		return snapshot != nil && snapshot.State == "waiting" && snapshot.GroupHolder == holder.ID
+	fixture.awaitAdmission(t, head, "held by host pressure", func(snapshot *model.AdmissionObservation) bool {
+		return snapshot != nil && snapshot.State == "waiting"
 	})
-	fixture.awaitAdmission(t, member, "waiting behind the head in its group", func(snapshot *model.AdmissionObservation) bool {
-		return snapshot != nil && snapshot.GroupHolder == holder.ID
-	})
-
-	// A non-admin may not cancel a concurrency-group member; nothing changes.
-	if _, err := callRunCancel(t, fixture.control, cancelAgent, map[string]any{"id": head.ID}); !errors.Is(err, ErrForbidden) {
-		t.Fatalf("non-admin cancel of a group member = %v", err)
-	}
 	fixture.assertNothingCreated(t)
 
 	response := mustRunCancel(t, fixture.control, cancelAdmin, map[string]any{"id": head.ID, "reason": "wrong size"})
-	if response.PreviousState != "waiting" || response.Workflow != "deleted" || response.Warning != "" {
+	if response.PreviousState != "waiting" || response.Warning != "" {
 		t.Fatalf("waiting cancel response = %#v", response)
 	}
 	if snapshot := fixture.scheduler.AdmissionSnapshot(head.QueueSequence); snapshot != nil {
@@ -163,15 +147,14 @@ func TestRunCancelWaitingRunReleasesItsAdmissionReservation(t *testing.T) {
 		t.Fatalf("cancel during admission: %+v", shown)
 	}
 	fixture.awaitNoPendingCancellations(t)
+	lift()
+	if created := fixture.awaitCreated(t, 1); !created[member.ID] {
+		t.Fatalf("cancelled waiter held the next run: %v", created)
+	}
 	if fixture.engine.wasCreated(head.ID) {
 		t.Fatal("a cancelled waiting run created its Workflow")
 	}
-	fixture.engine.finish(t, holder.ID)
-	if created := fixture.awaitCreated(t, 1); !created[member.ID] {
-		t.Fatalf("cancelled waiter held the next group member: %v", created)
-	}
 	fixture.engine.finish(t, member.ID)
-	fixture.engine.finish(t, small.ID)
 	fixture.assertNothingCreated(t)
 	fixture.assertNoCIIssue(t, fixture.terraform, "feat-kv")
 	fixture.engine.assertNoViolations(t)
@@ -285,10 +268,8 @@ func TestRunCancelReleaseRunRequiresAdminAndForce(t *testing.T) {
 func TestRunCancelPolicyMatrix(t *testing.T) {
 	started := time.Now()
 	branch := model.Run{ID: "b", RefKind: model.RefBranch, Trigger: "branch", Status: model.RunQueued}
-	grouped := branch
-	grouped.ConcurrencyGroup = "terraform-state"
-	groupedRunning := grouped
-	groupedRunning.Status, groupedRunning.StartedAt = model.RunRunning, &started
+	running := branch
+	running.Status, running.StartedAt = model.RunRunning, &started
 	tag := model.Run{ID: "t", RefKind: model.RefTag, Trigger: "tag", Release: true, Status: model.RunRunning}
 	promotion := model.Run{ID: "p", RefKind: model.RefBranch, Trigger: "promotion", Status: model.RunRunning}
 	schedule := model.Run{ID: "s", RefKind: model.RefBranch, Trigger: "schedule", Status: model.RunQueued}
@@ -301,14 +282,13 @@ func TestRunCancelPolicyMatrix(t *testing.T) {
 		warning      string
 	}{
 		{"agent branch", branch, false, false, nil, ""},
-		{"agent grouped", grouped, false, false, ErrForbidden, ""},
+		{"agent running branch", running, false, false, nil, ""},
 		{"agent tag", tag, false, true, ErrForbidden, ""},
 		{"agent promotion", promotion, false, false, ErrForbidden, ""},
 		{"agent schedule", schedule, false, false, ErrForbidden, ""},
 		{"agent apply", apply, false, true, ErrForbidden, ""},
 		{"admin branch", branch, true, false, nil, ""},
-		{"admin grouped queued", grouped, true, false, nil, ""},
-		{"admin grouped running", groupedRunning, true, false, nil, "manual recovery"},
+		{"admin running branch", running, true, false, nil, ""},
 		{"admin promotion", promotion, true, false, nil, ""},
 		{"admin tag", tag, true, false, ErrInvalidInput, ""},
 		{"admin tag forced", tag, true, true, nil, "partial"},
@@ -407,8 +387,7 @@ func TestRunCancelIsNotRefiredAcrossARestart(t *testing.T) {
 	}
 	successor, err := NewScheduler(SchedulerConfig{
 		Store: fixture.store, Git: &controlGit{}, Logs: logs, Jobs: fixture.engine, ReleaseJobs: fixture.engine,
-		Auditor: fixture.store, Signals: fixture.scheduler.signals, WorkspaceRoot: filepath.Join(t.TempDir(), "work"), MaxConcurrent: 3,
-	})
+		Auditor: fixture.store, Signals: fixture.scheduler.signals, WorkspaceRoot: filepath.Join(t.TempDir(), "work")})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -30,54 +30,51 @@ func priorityWaiter(g *admissionGate, seq int64, p model.RunPriority, at time.Ti
 }
 
 func TestPriorityAdmissionOrdersClassesThenFIFO(t *testing.T) {
-	g := newAdmissionGate(1)
+	g := newAdmissionGate()
 	holder := g.reserve(1)
 	release, err := holder.acquire(context.Background(), pipeline.XL)
 	if err != nil {
 		t.Fatal(err)
 	}
+	blockOnDiskFloor(g)
 	now := time.Now()
 	normal := priorityWaiter(g, 2, model.PriorityNormal, now, pipeline.XL)
 	high := priorityWaiter(g, 3, model.PriorityPromotion, now, pipeline.XL)
 	highest := priorityWaiter(g, 4, model.PriorityHighest, now, pipeline.XL)
 	highest2 := priorityWaiter(g, 5, model.PriorityHighest, now, pipeline.XL)
 	release()
-	for i, r := range []*admissionReservation{highest, highest2, high, normal} {
+	assertWaiterOrder(t, g, highest, highest2, high, normal)
+	clearDiskFloor(g)
+	for _, r := range []*admissionReservation{highest, highest2, high, normal} {
 		if !granted(g, r) {
-			t.Fatalf("class/FIFO order failed at %d", i)
+			t.Fatal("waiter not admitted after the floor cleared")
 		}
-		g.mu.Lock()
-		if g.runs != 1 {
-			t.Errorf("over-admission runs=%d", g.runs)
-		}
-		g.mu.Unlock()
 		r.release()
 	}
 }
 
 func TestPriorityAdmissionStarvationReordersExistingWaiters(t *testing.T) {
 	clock := &fakeClock{now: time.Now()}
-	g := newAdmissionGate(1)
+	g := newAdmissionGate()
 	g.now = clock.Now
 	holder := g.reserve(1)
 	release, err := holder.acquire(context.Background(), pipeline.XL)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer release()
+	blockOnDiskFloor(g)
 	normal := priorityWaiter(g, 2, model.PriorityNormal, clock.now.Add(-time.Hour+time.Nanosecond), pipeline.XL)
 	highest := priorityWaiter(g, 3, model.PriorityHighest, clock.now, pipeline.XL)
-	if g.waiters[0] != highest {
-		t.Fatal("normal aged before threshold")
-	}
+	assertWaiterOrder(t, g, highest, normal)
 	clock.now = clock.now.Add(time.Nanosecond)
-	release()
-	if !granted(g, highest) || granted(g, normal) {
-		t.Fatal("base highest lost to aged normal")
+	// Aging lifts normal, but never above base highest.
+	assertWaiterOrder(t, g, highest, normal)
+	clearDiskFloor(g)
+	if !granted(g, highest) || !granted(g, normal) {
+		t.Fatal("waiters not admitted after the floor cleared")
 	}
 	highest.release()
-	if !granted(g, normal) {
-		t.Fatal("aged normal did not follow base highest")
-	}
 	normal.release()
 }
 
@@ -135,14 +132,16 @@ func TestQueuePriorityToolsAdminOnlyAuditedAndGated(t *testing.T) {
 func TestPriorityDispatchClaimsPastLowerClassWaitersAndRefreshesBumps(t *testing.T) {
 	f := newControlFixture(t)
 	ctx := context.Background()
-	g := newAdmissionGate(2)
-	scheduler := &Scheduler{store: f.store, admission: g, maxConcurrent: 1}
+	g := newAdmissionGate()
+	scheduler := &Scheduler{store: f.store, admission: g}
 	holder := g.reserve(-1)
 	release, err := holder.acquire(ctx, pipeline.XL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer release()
+	// The disk floor keeps the claimed runs waiting.
+	blockOnDiskFloor(g)
 	enqueue := func(ref string, kind model.RefKind) model.Run {
 		t.Helper()
 		trigger := "push"
@@ -180,10 +179,12 @@ func TestPriorityDispatchClaimsPastLowerClassWaitersAndRefreshesBumps(t *testing
 	if _, err := f.store.BumpRunPriority(ctx, "admin", tag.ID, model.PriorityHigh, "urgent tag"); err != nil {
 		t.Fatal(err)
 	}
-	if scheduler.dispatchSlotAvailable(3) {
-		t.Fatal("test failed to saturate normal dispatch ceiling")
+	if scheduler.dispatchSlotAvailable(2) {
+		t.Fatal("ordinary dispatch claimed past a waiting run")
 	}
-	if available, err := scheduler.priorityDispatchAvailable(ctx, 3); err != nil || !available {
+	// Without a run ceiling the priority lookahead allows one extra claim
+	// per class above low: three claims in flight.
+	if available, err := scheduler.priorityDispatchAvailable(ctx, 2); err != nil || !available {
 		t.Fatalf("release hidden behind dispatch ceiling: %v %v", available, err)
 	}
 	r, err := f.store.ClaimNextRun(ctx)
@@ -193,85 +194,45 @@ func TestPriorityDispatchClaimsPastLowerClassWaitersAndRefreshesBumps(t *testing
 	tagReservation := g.reserveRun(r)
 	// The next release cannot pile up another same-class claim.
 	enqueue("v2", model.RefTag)
-	if available, err := scheduler.priorityDispatchAvailable(ctx, 4); err != nil || available {
+	if available, err := scheduler.priorityDispatchAvailable(ctx, 3); err != nil || available {
 		t.Fatalf("unbounded priority claims: %v %v", available, err)
 	}
 	g.mu.Lock()
 	tagReservation.prepared = true
 	g.mu.Unlock()
 	release()
-	if !granted(g, tagReservation) {
-		t.Fatal("release did not overtake ordinary reservations")
+	assertWaiterOrder(t, g, tagReservation, g.reservations[second.QueueSequence])
+	clearDiskFloor(g)
+	if !granted(g, tagReservation) || !granted(g, g.reservations[second.QueueSequence]) {
+		t.Fatal("waiters not admitted after the floor cleared")
 	}
 	tagReservation.release()
-	if !granted(g, g.reservations[second.QueueSequence]) {
-		t.Fatal("admin bump lost after release")
-	}
 	for _, r := range g.reservations {
 		r.cancel()
 	}
 }
 
-func TestSchedulerReleaseCandidateOvertakesQueuedBranchesAtWorkflowCeiling(t *testing.T) {
-	f := newGroupFixture(t, 1)
-	f.engine.declare("running", "", pipeline.L) // 3/4 used
-	f.engine.declare("ordinary-a", "", pipeline.L)
-	f.engine.declare("ordinary-b", "", pipeline.L)
-	f.engine.declare("rc/v1", "", pipeline.S)
-	for _, ref := range []string{"running", "ordinary-a", "ordinary-b"} {
-		f.engine.declareCPU(ref, 5900)
-	}
-	f.engine.declareCPU("rc/v1", 1900)
-	if _, err := f.store.SetQueuePriorityPatterns(t.Context(), "admin", []string{"rc/*"}); err != nil {
-		t.Fatal(err)
-	}
-	running := f.branch(t, f.terraform, "running", "a")
-	f.start(t)
-	if created := f.awaitCreated(t, 1); !created[running.ID] {
-		t.Fatalf("initial creation=%v", created)
-	}
-	ordinaryA := f.branch(t, f.terraform, "ordinary-a", "b")
-	ordinaryB := f.branch(t, f.exampleService, "ordinary-b", "c")
-	rc := f.branch(t, f.exampleService, "rc/v1", "d")
-	f.engine.finish(t, running.ID)
-	if created := f.awaitCreated(t, 1); !created[rc.ID] {
-		t.Fatalf("higher-class RC did not overtake branches: %v", created)
-	}
-	if state := f.scheduler.AdmissionState(); state.Runs != 1 || state.MaxRuns != 1 {
-		t.Fatalf("priority bypassed the workflow ceiling: %+v", state)
-	}
-	f.engine.finish(t, rc.ID)
-	if created := f.awaitCreated(t, 1); !created[ordinaryA.ID] {
-		t.Fatalf("ordinary FIFO lost: %v", created)
-	}
-	f.engine.finish(t, ordinaryA.ID)
-	if created := f.awaitCreated(t, 1); !created[ordinaryB.ID] {
-		t.Fatalf("remaining branch lost: %v", created)
-	}
-	f.engine.finish(t, ordinaryB.ID)
-}
-
 func TestPriorityAdmissionAgesHighBeforeNewerNormal(t *testing.T) {
 	clock := &fakeClock{now: time.Now()}
-	g := newAdmissionGate(1)
+	g := newAdmissionGate()
 	g.now = clock.Now
 	holder := g.reserve(1)
 	release, err := holder.acquire(t.Context(), pipeline.XL)
 	if err != nil {
 		t.Fatal(err)
 	}
+	blockOnDiskFloor(g)
 	high := priorityWaiter(g, 2, model.PriorityHigh, clock.now, pipeline.XL)
 	clock.now = clock.now.Add(time.Minute)
 	normal := priorityWaiter(g, 3, model.PriorityNormal, clock.now, pipeline.XL)
 	clock.now = clock.now.Add(time.Hour)
 	release()
-	if !granted(g, high) || granted(g, normal) {
-		t.Fatal("aged normal leapfrogged older high")
+	assertWaiterOrder(t, g, high, normal)
+	clearDiskFloor(g)
+	if !granted(g, high) || !granted(g, normal) {
+		t.Fatal("waiters not admitted after the floor cleared")
 	}
 	high.release()
-	if !granted(g, normal) {
-		t.Fatal("aged normal did not follow aged high")
-	}
 	normal.release()
 }
 
@@ -361,8 +322,8 @@ func TestPrioritySchedulerSurvivesBusyReadsAndResumesDispatch(t *testing.T) {
 			f := newGroupFixture(t, 2)
 			busy := &busyPriorityStore{Store: f.store, observed: make(chan string, 1)}
 			f.scheduler.store = busy
-			f.engine.declare("running", "serial", pipeline.L)
-			f.engine.declare("waiting", "serial", pipeline.L)
+			f.engine.declare("running", "", pipeline.L)
+			f.engine.declare("waiting", "", pipeline.L)
 			f.engine.declare("rc/v1", "", pipeline.S)
 			f.engine.declareCPU("running", 5900)
 			f.engine.declareCPU("waiting", 5900)
@@ -373,8 +334,13 @@ func TestPrioritySchedulerSurvivesBusyReadsAndResumesDispatch(t *testing.T) {
 			running := f.branch(t, f.terraform, "running", "a")
 			f.start(t)
 			f.awaitCreated(t, 1)
+			// Host pressure keeps the ordinary run waiting in the gate, so the
+			// priority refresh and lookahead read the store.
+			lift := f.pressureValve(t)
 			waiting := f.branch(t, f.terraform, "waiting", "b")
-			f.awaitParked(t, waiting, running.ID)
+			f.awaitAdmission(t, waiting, "pressure-held run", func(snapshot *model.AdmissionObservation) bool {
+				return snapshot != nil && snapshot.State == "waiting"
+			})
 			if operation == "refresh" {
 				busy.refreshBusy.Store(true)
 			} else {
@@ -390,80 +356,15 @@ func TestPrioritySchedulerSurvivesBusyReadsAndResumesDispatch(t *testing.T) {
 			case <-time.After(testStartTimeout(10 * time.Second)):
 				t.Fatal("busy read was not exercised")
 			}
-			if created := f.awaitCreated(t, 1); !created[rc.ID] {
+			lift()
+			if created := f.awaitCreated(t, 2); !created[rc.ID] || !created[waiting.ID] {
 				t.Fatalf("dispatch did not recover after busy %s: %v", operation, created)
 			}
 			f.engine.finish(t, rc.ID)
 			f.engine.finish(t, running.ID)
-			if created := f.awaitCreated(t, 1); !created[waiting.ID] {
-				t.Fatalf("ordinary waiter did not resume: %v", created)
-			}
 			f.engine.finish(t, waiting.ID)
 			f.awaitTerminal(t, waiting.ID)
 		})
-	}
-}
-
-func TestPriorityReleaseStreamPreservesAgingAndResourceBounds(t *testing.T) {
-	// The lead tag comes through real server admission, without a grant. On
-	// the old grant-dependent classifier it is normal and cannot overtake.
-	f := newControlFixture(t)
-	realTag, err := f.scheduler.AdmitRelease(t.Context(), ReleaseRequest{EventID: "stream-tag", Repository: f.repo, Tag: "v1", ObjectSHA: strings.Repeat("b", 40), CommitSHA: strings.Repeat("c", 40), Actor: "pusher"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	clock := &fakeClock{now: time.Now().UTC()}
-	g := newAdmissionGate(4)
-	g.now, g.maxRuns = clock.Now, 1
-	origin := clock.Now()
-	holder := g.reserve(1)
-	release, err := holder.acquire(t.Context(), pipeline.XL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	normal := priorityWaiter(g, 2, model.PriorityNormal, origin, pipeline.XL)
-	clock.now = origin.Add(45 * time.Minute)
-	tag := priorityWaiter(g, 3, realTag.Priority, clock.Now(), pipeline.L)
-	promotion := priorityWaiter(g, 4, model.PriorityPromotion, clock.Now(), pipeline.XL)
-	if granted(g, tag) || granted(g, normal) {
-		t.Fatal("priority preempted existing resource grant")
-	}
-	release()
-	if !granted(g, tag) || granted(g, normal) || granted(g, promotion) {
-		t.Fatal("release did not lead ordinary work")
-	}
-	tag.release()
-	if !granted(g, promotion) || granted(g, normal) {
-		t.Fatal("promotion lost highest-class FIFO")
-	}
-	clock.now = origin.Add(time.Hour - time.Nanosecond)
-	var later []*admissionReservation
-	for seq := int64(5); seq < 25; seq++ {
-		later = append(later, priorityWaiter(g, seq, model.PriorityPromotion, clock.Now(), pipeline.XL))
-	}
-	g.mu.Lock()
-	before := g.waiters[0]
-	g.mu.Unlock()
-	if before == normal {
-		t.Fatal("normal aged before the 60-minute bound")
-	}
-	clock.now = origin.Add(time.Hour)
-	promotion.release()
-	if !granted(g, normal) {
-		t.Fatal("aged standard lost its promotion FIFO position")
-	}
-	normal.release()
-	for _, candidate := range later {
-		if !granted(g, candidate) {
-			t.Fatal("promotion FIFO failed after aged work completed")
-		}
-		g.mu.Lock()
-		runs := g.runs
-		g.mu.Unlock()
-		if runs != 1 {
-			t.Fatalf("capacity exceeded: runs=%d", runs)
-		}
-		candidate.release()
 	}
 }
 
@@ -490,7 +391,7 @@ func TestPriorityReleaseAdmissionWithoutGrantAndBranchTransportSignals(t *testin
 }
 
 func TestPriorityWithheldTagPreservesAdminBumpsPromotionsAndAging(t *testing.T) {
-	g := newAdmissionGate(4)
+	g := newAdmissionGate()
 	now := time.Now()
 	for _, tc := range []struct {
 		reason string

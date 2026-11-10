@@ -1,5 +1,4 @@
 # Local evaluation only. No upstream credentials or external witnesses.
-maxConcurrentJobs: 1
 service:
   type: ClusterIP
 upstream:
@@ -13,9 +12,6 @@ persistence:
 networkPolicy:
   enabled: false
 admission:
-  runtimeCapacity:
-    enabled: true
-    maxConcurrentJobs: 1
   pressure:
     enabled: false
 resources:

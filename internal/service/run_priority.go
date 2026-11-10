@@ -222,17 +222,18 @@ func (scheduler *Scheduler) priorityDispatchAvailable(ctx context.Context, activ
 	if !ok {
 		return false, nil
 	}
-	// Ordinary dispatch can fill its allowance with low group waiters. Each
+	// Ordinary dispatch can fill its allowance with held lower waiters. Each
 	// higher class needs an extra claim: standard, promotion, then high. Count
 	// all three transitions so parked lower classes cannot exhaust high's path.
-	// This bounds claims/checkouts only; the gate still enforces maxRuns.
+	// This bounds claims/checkouts only.
 	gate := scheduler.admission
 	gate.mu.Lock()
-	extraClasses := model.PriorityHigh.Rank() - model.PriorityLow.Rank()
-	ceiling := 2*scheduler.concurrentJobsLocked() + extraClasses
+	// Granted runs are running Workflows, not claims waiting here.
+	ceiling := model.PriorityHigh.Rank() - model.PriorityLow.Rank()
+	waiting := active - gate.runs
 	hasWaiters := len(gate.waiters) > 0
 	gate.mu.Unlock()
-	if active >= ceiling || !hasWaiters {
+	if waiting >= ceiling || !hasWaiters {
 		return false, nil
 	}
 	next, err := retryDatabase(ctx, "NextQueuedRun", reader.NextQueuedRun)

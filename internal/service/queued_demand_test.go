@@ -81,9 +81,8 @@ func TestQueueMessageHasRequestsAndOneBlocker(t *testing.T) {
 		position    int64
 		want        string
 	}{
-		{name: "CPU pressure", observation: model.AdmissionObservation{Pressure: &model.PressureDeferral{Resource: "cpu"}, Runs: 6, MaxRuns: 6}, want: "host CPU busy"},
+		{name: "CPU pressure", observation: model.AdmissionObservation{Pressure: &model.PressureDeferral{Resource: "cpu"}, Runs: 6}, want: "host CPU busy"},
 		{name: "IO pressure", observation: model.AdmissionObservation{Pressure: &model.PressureDeferral{Resource: "io"}}, want: "host IO busy"},
-		{name: "ceiling", observation: model.AdmissionObservation{Runs: 6, MaxRuns: 6, BlockedBy: &model.AdmissionBlocker{Repo: "other", Ref: "main"}}, want: "6 of 6 runs running"},
 		{name: "behind", observation: model.AdmissionObservation{BlockedBy: &model.AdmissionBlocker{Repo: "org/repo", Ref: "main"}}, want: "behind org/repo/main"},
 		{name: "head", observation: model.AdmissionObservation{HeadOfQueue: true}, want: "next in line"},
 		{name: "position", observation: model.AdmissionObservation{Position: 3}, want: "position 3"},
@@ -111,7 +110,7 @@ func TestWorkflowOnlyReservationReportsBoundPodRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gate := newAdmissionGate(1)
+	gate := newAdmissionGate()
 	release := acquireRequestWithinBudget(t, gate.reserve(1), admissionRequest{RunID: "occupant"})
 	defer release()
 	demand, err := receipt.WorkflowPodDemand()
@@ -143,7 +142,7 @@ func TestWorkflowOnlyReservationReportsBoundPodRequests(t *testing.T) {
 type queueDemandAdmission struct{}
 
 func (queueDemandAdmission) AdmissionSnapshot(int64) *model.AdmissionObservation {
-	return &model.AdmissionObservation{State: "waiting", Requests: &argoworkflow.PodRequests{CPUMilli: 9900, MemoryBytes: 16 << 30, Pods: 2}, Runs: 6, MaxRuns: 6, Pressure: &model.PressureDeferral{Resource: "cpu"}, BlockedBy: &model.AdmissionBlocker{RepoID: 999, Repo: "secret", Ref: "private"}}
+	return &model.AdmissionObservation{State: "waiting", Requests: &argoworkflow.PodRequests{CPUMilli: 9900, MemoryBytes: 16 << 30, Pods: 2}, Runs: 6, Pressure: &model.PressureDeferral{Resource: "cpu"}, BlockedBy: &model.AdmissionBlocker{RepoID: 999, Repo: "secret", Ref: "private"}}
 }
 
 func TestScopedWaitingRequestsUseBoundReceiptWithoutGlobalCounts(t *testing.T) {
@@ -165,7 +164,7 @@ func TestScopedWaitingRequestsUseBoundReceiptWithoutGlobalCounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	detail := value.(RunDetailResponse)
-	if detail.Run.DisplayReason != "needs 9.9 CPU, 16 GiB · host CPU busy" || detail.Scheduling.Admission.Runs != 0 || detail.Scheduling.Admission.MaxRuns != 0 || detail.Scheduling.Admission.BlockedBy != nil || reader.calls != 0 {
+	if detail.Run.DisplayReason != "needs 9.9 CPU, 16 GiB · host CPU busy" || detail.Scheduling.Admission.Runs != 0 || detail.Scheduling.Admission.BlockedBy != nil || reader.calls != 0 {
 		t.Fatalf("scoped waiting view=%+v scheduling=%+v reads=%d", detail.Run, detail.Scheduling, reader.calls)
 	}
 }

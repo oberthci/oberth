@@ -32,8 +32,6 @@ func runtimeWIFFixture(t *testing.T) (*controlFixture, *API, *argojob.ReleaseWIF
 	})
 	control := f.api(t)
 	control.releaseWIFOverrides, control.releaseWIF = f.store, runtime
-	control.capacityOverrides, control.runtimeCapacity = f.store, f.scheduler
-	f.scheduler.SetCapacityOverrideReader(f.store.AdmissionCapacityOverride)
 	return f, control, runtime
 }
 
@@ -41,11 +39,10 @@ func TestRuntimeAdminToolsRequireUnscopedAdminAndMutationGate(t *testing.T) {
 	_, control, _ := runtimeWIFFixture(t)
 	ctx := t.Context()
 	calls := map[string]string{
-		"release_wif_list":          `{}`,
-		"release_wif_grant":         `{"repo":"oberth","service_account_name":"oberth-release","templates":{"publish":"image-writer"},"reason":"r"}`,
-		"release_wif_revoke":        `{"repo":"github/retired/old","reason":"r"}`,
-		"release_wif_reset":         `{"repo":"github/retired/old","reason":"r"}`,
-		"admission_capacity_config": `{"max_concurrent_jobs":1,"reason":"r"}`,
+		"release_wif_list":   `{}`,
+		"release_wif_grant":  `{"repo":"oberth","service_account_name":"oberth-release","templates":{"publish":"image-writer"},"reason":"r"}`,
+		"release_wif_revoke": `{"repo":"github/retired/old","reason":"r"}`,
+		"release_wif_reset":  `{"repo":"github/retired/old","reason":"r"}`,
 	}
 	for name, raw := range calls {
 		for _, actor := range []api.Actor{{Identity: "dev"}, {Identity: "scoped", Admin: true, Scope: []string{"codeberg"}}} {
@@ -60,7 +57,7 @@ func TestRuntimeAdminToolsRequireUnscopedAdminAndMutationGate(t *testing.T) {
 	denied := errors.New("audit gate refused")
 	control.mutationGate = func(context.Context) error { return denied }
 	admin := api.Actor{Identity: "admin", Admin: true}
-	for _, name := range []string{"release_wif_grant", "release_wif_revoke", "admission_capacity_config"} {
+	for _, name := range []string{"release_wif_grant", "release_wif_revoke"} {
 		if _, err := control.CallTool(ctx, admin, name, json.RawMessage(calls[name])); !errors.Is(err, denied) {
 			t.Fatalf("%s bypassed the audit gate: %v", name, err)
 		}
@@ -153,55 +150,6 @@ func TestReleaseWIFRuntimeGrantRevokeResetWithoutRestart(t *testing.T) {
 	}
 }
 
-func TestAdmissionCapacityRuntimeOverrideAppliesAndClears(t *testing.T) {
-	f, control, _ := runtimeWIFFixture(t)
-	ctx := t.Context()
-	admin := api.Actor{Identity: "admin", Admin: true}
-	for _, raw := range []string{`{"reason":"r"}`, `{"max_concurrent_jobs":0,"reason":"r"}`, `{"max_concurrent_jobs":65,"reason":"r"}`, `{"max_concurrent_jobs":1}`, `{"max_concurrent_jobs":1,"clear":true,"reason":"r"}`} {
-		if _, err := control.CallTool(ctx, admin, "admission_capacity_config", json.RawMessage(raw)); err == nil {
-			t.Fatalf("accepted %s", raw)
-		}
-	}
-	if _, err := control.CallTool(ctx, admin, "admission_capacity_config", json.RawMessage(`{"clear":true,"reason":"r"}`)); !errors.Is(err, store.ErrInvalidState) {
-		t.Fatalf("clear without override: %v", err)
-	}
-	value, err := control.CallTool(ctx, admin, "admission_capacity_config", json.RawMessage(`{"max_concurrent_jobs":1,"reason":"host overload"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := value.(map[string]any)["configuration"].(model.AdmissionCapacityConfig); got.MaxConcurrentJobs != 1 || got.Source != "runtime" || got.BootDefault != 2 {
-		t.Fatalf("configuration = %+v", got)
-	}
-	if f.scheduler.concurrentJobs() != 1 {
-		t.Fatalf("effective jobs = %d", f.scheduler.concurrentJobs())
-	}
-	// The periodic reload keeps the runtime layer authoritative.
-	f.scheduler.refreshRuntimeCapacity(ctx)
-	if f.scheduler.concurrentJobs() != 1 {
-		t.Fatal("reload dropped the runtime override")
-	}
-	value, err = control.CallTool(ctx, admin, "admission_capacity_config", json.RawMessage(`{"clear":true,"reason":"recovered"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := value.(map[string]any)["configuration"].(model.AdmissionCapacityConfig); got.MaxConcurrentJobs != 2 || got.Source != "boot" {
-		t.Fatalf("cleared configuration = %+v", got)
-	}
-	audit, _, err := f.store.ListAuditActions(ctx, model.AuditListFilter{Limit: 50})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var actions []string
-	for _, entry := range audit {
-		if strings.HasPrefix(entry.Action, "admission.capacity") {
-			actions = append(actions, entry.Action)
-		}
-	}
-	if strings.Join(actions, ",") != "admission.capacity.change,admission.capacity.override.clear,admission.capacity.change,admission.capacity.override" {
-		t.Fatalf("audit = %v", actions)
-	}
-}
-
 // cancelAfterCommit ends the request right after the store commits, as an
 // MCP client that disconnects or times out would.
 type cancelAfterCommit struct {
@@ -214,11 +162,6 @@ func (s cancelAfterCommit) SetReleaseWIFOverride(ctx context.Context, actor stri
 	return s.Store.SetReleaseWIFOverride(ctx, actor, spec)
 }
 
-func (s cancelAfterCommit) SetAdmissionCapacityOverride(ctx context.Context, actor string, jobs int, reason string) (*model.AdmissionCapacityOverride, error) {
-	defer s.cancel()
-	return s.Store.SetAdmissionCapacityOverride(ctx, actor, jobs, reason)
-}
-
 func TestRuntimeOverridesTakeEffectWhenRequestEndsAfterCommit(t *testing.T) {
 	f, control, runtime := runtimeWIFFixture(t)
 	admin := api.Actor{Identity: "admin", Admin: true}
@@ -229,15 +172,6 @@ func TestRuntimeOverridesTakeEffectWhenRequestEndsAfterCommit(t *testing.T) {
 	}
 	if runtime.Snapshot().Repositories[runtimeTestRepo].ServiceAccountName != "oberth-release" {
 		t.Fatal("committed grant is not applied to admission")
-	}
-	ctx, cancel = context.WithCancel(t.Context())
-	control.capacityOverrides = cancelAfterCommit{Store: f.store, cancel: cancel}
-	value, err := control.CallTool(ctx, admin, "admission_capacity_config", json.RawMessage(`{"max_concurrent_jobs":1,"reason":"client times out"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := value.(map[string]any)["configuration"].(model.AdmissionCapacityConfig); got.MaxConcurrentJobs != 1 || got.Source != "runtime" || f.scheduler.concurrentJobs() != 1 {
-		t.Fatalf("committed capacity not applied: %+v jobs=%d", got, f.scheduler.concurrentJobs())
 	}
 }
 

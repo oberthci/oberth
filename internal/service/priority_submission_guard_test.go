@@ -34,26 +34,35 @@ func TestNewHeadSupersedesQueuedPriorityAndInheritsOverride(t *testing.T) {
 }
 
 func TestPriorityGuardBackfillCannotDelayHead(t *testing.T) {
-	g := newAdmissionGate(1)
+	g := newAdmissionGate()
 	holder := g.reserve(1)
 	release, err := holder.acquire(context.Background(), pipeline.M)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer release()
+	blockOnDiskFloor(g)
 	head := priorityWaiter(g, 2, model.PriorityHighest, time.Now(), pipeline.L)
 	small := priorityWaiter(g, 3, model.PriorityHighest, time.Now(), pipeline.M)
-	if granted(g, small) {
+	if granted(g, small) || granted(g, head) {
+		t.Fatal("a run overtook the disk floor")
+	}
+	g.mu.Lock()
+	first := g.waiters[0]
+	g.mu.Unlock()
+	if first != head {
 		t.Fatal("a later run overtook the priority head")
 	}
-	release()
-	if !granted(g, head) || granted(g, small) {
-		t.Fatal("priority head did not start next")
+	clearDiskFloor(g)
+	if !granted(g, head) || !granted(g, small) {
+		t.Fatal("waiters not admitted after the floor cleared")
 	}
 	head.release()
 	small.release()
 }
 
+// A priority submission changes no existing run, and with no Oberth run
+// ceiling it is submitted beside the running work at once.
 func TestPriorityGuardSubmissionLeavesExistingRunsAndStartsNext(t *testing.T) {
 	f := newGroupFixture(t, 1)
 	for _, ref := range []string{"busy", "normal-a", "normal-b", "urgent"} {
@@ -67,6 +76,9 @@ func TestPriorityGuardSubmissionLeavesExistingRunsAndStartsNext(t *testing.T) {
 	}
 	a := f.branch(t, f.terraform, "normal-a", "b")
 	b := f.branch(t, f.exampleService, "normal-b", "c")
+	if got := f.awaitCreated(t, 2); !got[a.ID] || !got[b.ID] {
+		t.Fatal(got)
+	}
 	before := map[string]model.Run{}
 	for _, r := range []model.Run{running, a, b} {
 		got, err := f.store.Run(t.Context(), r.ID)
@@ -89,19 +101,13 @@ func TestPriorityGuardSubmissionLeavesExistingRunsAndStartsNext(t *testing.T) {
 	if len(urgent.Cancellations) != 0 {
 		t.Fatal("priority submission created cancellations")
 	}
-	f.assertNothingCreated(t)
-	f.engine.finish(t, running.ID)
 	if got := f.awaitCreated(t, 1); !got[urgent.ID] {
-		t.Fatalf("priority was not next: %v", got)
+		t.Fatalf("priority run was not submitted: %v", got)
 	}
-	f.engine.finish(t, urgent.ID)
-	for _, r := range []model.Run{a, b} {
-		if got := f.awaitCreated(t, 1); !got[r.ID] {
-			t.Fatalf("normal FIFO lost: %v", got)
-		}
-		f.engine.finish(t, r.ID)
+	for _, id := range []string{running.ID, a.ID, b.ID, urgent.ID} {
+		f.engine.finish(t, id)
 	}
-	f.awaitTerminal(t, b.ID)
+	f.awaitTerminal(t, urgent.ID)
 	f.engine.assertNoViolations(t)
 }
 

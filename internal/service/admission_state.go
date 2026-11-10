@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
@@ -27,16 +26,12 @@ func (gate *admissionGate) reservationStateLocked(reservation *admissionReservat
 	case !reservation.prepared:
 		return "preparing"
 	}
-	if holder, ahead := gate.groupBlockerLocked(reservation); holder != "" || ahead != "" {
-		return "group"
-	}
 	return "waiting"
 }
 
 func (gate *admissionGate) reservationViewLocked(reservation *admissionReservation) model.AdmissionReservation {
 	view := model.AdmissionReservation{
 		RunID: reservation.runID, RepoID: reservation.repoID, Repo: reservation.repo, Ref: reservation.ref,
-		Group:    reservation.groupName,
 		Pressure: gate.pressureWaitLocked(reservation),
 		State:    gate.reservationStateLocked(reservation),
 	}
@@ -63,26 +58,18 @@ func (gate *admissionGate) reservationViewLocked(reservation *admissionReservati
 }
 
 // AdmissionState reports every reservation the gate holds, granted, retained
-// or waiting, and every concurrency group in use (#1099).
+// or waiting (#1099).
 func (scheduler *Scheduler) AdmissionState() *model.AdmissionState {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	definitions, _ := scheduler.concurrencyDefinitions(ctx)
-	return scheduler.admissionState(definitions)
-}
-
-func (scheduler *Scheduler) admissionState(definitions []model.AdmissionGroup) *model.AdmissionState {
 	gate := scheduler.admission
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
-	configuration := gate.capacityConfig
 	hold := gate.adminHold.Snapshot(gate.clock())
 	state := &model.AdmissionState{
-		Hold:          &hold,
-		Configuration: &configuration,
-		Pressure:      gate.pressureStateLocked(),
-		Capacity:      gate.maxRuns, Used: gate.runs, Runs: gate.runs, MaxRuns: gate.maxRuns,
-		Reservations: []model.AdmissionReservation{}, Groups: []model.AdmissionGroup{},
+		Hold:         &hold,
+		Pressure:     gate.pressureStateLocked(),
+		Used:         gate.runs,
+		Runs:         gate.runs,
+		Reservations: []model.AdmissionReservation{},
 	}
 	sequences := make([]int64, 0, len(gate.reservations))
 	for sequence := range gate.reservations {
@@ -91,42 +78,12 @@ func (scheduler *Scheduler) admissionState(definitions []model.AdmissionGroup) *
 	sort.Slice(sequences, func(i, j int) bool {
 		return admissionBefore(gate.reservations[sequences[i]], gate.reservations[sequences[j]])
 	})
-	groups := map[string]*model.AdmissionGroup{}
-	var groupOrder []string
 	for _, sequence := range sequences {
-		reservation := gate.reservations[sequence]
-		view := gate.reservationViewLocked(reservation)
-		state.Reservations = append(state.Reservations, view)
-		if reservation.group == "" {
-			continue
-		}
-		group := groups[reservation.group]
-		if group == nil {
-			group = &model.AdmissionGroup{Name: reservation.groupName, Limit: max(1, reservation.groupLimit), Holders: []string{}, Waiting: []string{}}
-			groups[reservation.group] = group
-			groupOrder = append(groupOrder, reservation.group)
-		}
-		if reservation.granted {
-			group.Holders = append(group.Holders, reservation.runID)
-			if group.Holder == "" {
-				group.Holder = reservation.runID
-			}
-		} else if !reservation.granted {
-			group.Waiting = append(group.Waiting, reservation.runID)
-		}
-	}
-	for _, key := range groupOrder {
-		state.Groups = append(state.Groups, *groups[key])
+		state.Reservations = append(state.Reservations, gate.reservationViewLocked(gate.reservations[sequence]))
 	}
 	if head := gate.headBlockerLocked(); head != nil {
 		state.Blocker = gate.blockerLocked(head)
 	}
-	for _, definition := range definitions {
-		if _, exists := groups[definition.Name]; !exists {
-			state.Groups = append(state.Groups, definition)
-		}
-	}
-	sort.Slice(state.Groups, func(i, j int) bool { return state.Groups[i].Name < state.Groups[j].Name })
 	return state
 }
 
@@ -169,7 +126,7 @@ func (scheduler *Scheduler) ReleaseAdmission(ctx context.Context, runID, actor s
 			ErrAdmissionReleaseRefused, runID)
 	}
 	active := err == nil && run.Status.Active()
-	result := model.AdmissionRelease{RunID: runID, State: view.State, Group: view.Group, Workflow: run.WorkflowName, Forced: force}
+	result := model.AdmissionRelease{RunID: runID, State: view.State, Workflow: run.WorkflowName, Forced: force}
 	switch view.State {
 	case "retained":
 	case "granted":
@@ -217,7 +174,7 @@ func (scheduler *Scheduler) ReleaseAdmission(ctx context.Context, runID, actor s
 		return model.AdmissionRelease{}, fmt.Errorf("%w: the reservation of run %s was released by its owner meanwhile", store.ErrNotFound, runID)
 	}
 	details, err := json.Marshal(map[string]any{
-		"run_id": runID, "state": view.State, "group": view.Group,
+		"run_id": runID, "state": view.State,
 		"workflow": run.WorkflowName, "verified": result.Verified, "force": force,
 	})
 	if err == nil {

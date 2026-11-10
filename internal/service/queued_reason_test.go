@@ -12,7 +12,7 @@ func TestQueuedDisplayReasonNamesWhatTheRunWaitsFor(t *testing.T) {
 		admission.State = "waiting"
 		return &model.RunScheduling{State: "waiting", Admission: &admission}
 	}
-	head := &model.AdmissionBlocker{Repo: "org/app", Ref: "main", RunCeiling: true}
+	head := &model.AdmissionBlocker{Repo: "org/app", Ref: "main"}
 	for _, tc := range []struct {
 		name       string
 		scheduling *model.RunScheduling
@@ -21,8 +21,6 @@ func TestQueuedDisplayReasonNamesWhatTheRunWaitsFor(t *testing.T) {
 	}{
 		{"no observation", nil, nil, "in line"},
 		{"unknown state", &model.RunScheduling{State: "unavailable"}, nil, "in line"},
-		{"YAML group blocked", waiting(model.AdmissionObservation{Group: "e2e", GroupLimit: 2, GroupBlocked: true}), nil, "group e2e busy"},
-		{"YAML group available", waiting(model.AdmissionObservation{Group: "e2e", GroupLimit: 2}), nil, "in line"},
 		{"next in line", &model.RunScheduling{State: "queued", QueuePosition: 1}, nil, "next in line"},
 		{"third in line", &model.RunScheduling{State: "queued", QueuePosition: 3}, nil, "position 3"},
 		{"scoped viewer, no position", &model.RunScheduling{State: "queued"}, nil, "in line"},
@@ -31,19 +29,15 @@ func TestQueuedDisplayReasonNamesWhatTheRunWaitsFor(t *testing.T) {
 		{"preflight", &model.RunScheduling{State: "preflight"}, nil, "retired execution preflight"},
 		{"admitted, not submitted", &model.RunScheduling{State: "waiting", Admission: &model.AdmissionObservation{State: "admitted"}}, nil, "starting"},
 		{"no reservation known", &model.RunScheduling{State: "waiting"}, nil, "in line"},
-		{"head of the queue", waiting(model.AdmissionObservation{HeadOfQueue: true, BlockedBy: &model.AdmissionBlocker{RunCeiling: true}}), nil,
+		{"head of the queue", waiting(model.AdmissionObservation{HeadOfQueue: true, BlockedBy: &model.AdmissionBlocker{DiskFloor: true}}), nil,
 			"next in line"},
 		{"host IO pressure", waiting(model.AdmissionObservation{Pressure: &model.PressureDeferral{Resource: "io", Avg60: 42.4}}), nil, "host IO busy"},
 		{"host pressure, scoped", waiting(model.AdmissionObservation{Pressure: &model.PressureDeferral{Resource: "cpu+io", Redacted: true}}), nil, "host IO busy"},
 		{"avg10 gate", waiting(model.AdmissionObservation{Pressure: &model.PressureDeferral{Resource: "cpu", Avg10Gate: true, CPUAvg10: 45.25, IOAvg10: 30.6}}), nil, "host CPU busy"},
-		{"run ceiling", waiting(model.AdmissionObservation{Runs: 10, MaxRuns: 10, HeadOfQueue: true, BlockedBy: &model.AdmissionBlocker{RunCeiling: true}}), nil, "10 of 10 runs running"},
-		{"run ceiling, scoped", waiting(model.AdmissionObservation{BlockedBy: &model.AdmissionBlocker{RunCeiling: true, Repo: "org/app", Ref: "main"}}), nil, "behind org/app/main"},
 		{"behind a head held by pressure", waiting(model.AdmissionObservation{BlockedBy: &model.AdmissionBlocker{Repo: "org/app", Ref: "main", Pressure: &model.PressureDeferral{Resource: "io", Avg60: 42}}}), nil, "host IO busy"},
-		{"concurrency group held", waiting(model.AdmissionObservation{Group: "deploy", GroupHolder: "0123456789abcdef0123456789abcdef"}), nil, "group deploy busy"},
-		{"concurrency group ahead", waiting(model.AdmissionObservation{Group: "deploy", GroupAhead: "fedcba9876543210fedcba9876543210"}), nil, "group deploy busy"},
 		{"disk floor", waiting(model.AdmissionObservation{DiskFloor: &model.DiskFloorObservation{BelowFloor: true, FreeBytes: 512 << 20, FloorBytes: 2 << 30}}), nil, "waiting for disk space (512 MiB free)"},
-		{"weight capacity", waiting(model.AdmissionObservation{Used: 6, Capacity: 8}), nil, "in line"},
-		{"behind the head", waiting(model.AdmissionObservation{Used: 6, Capacity: 8, BlockedBy: head}), nil, "behind org/app/main"},
+		{"runs admitted", waiting(model.AdmissionObservation{Used: 6}), nil, "in line"},
+		{"behind the head", waiting(model.AdmissionObservation{Used: 6, BlockedBy: head}), nil, "behind org/app/main"},
 		{"scoped capacity", waiting(model.AdmissionObservation{}), nil, "in line"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

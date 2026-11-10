@@ -92,6 +92,9 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 		return ArgoResult{}, errors.New("nonroot profile requires the managed exact Argo chart1.0.24")
 	}
 	result := ArgoResult{Namespace: ns}
+	if err := validateArgoLimits(cfg); err != nil {
+		return result, err
+	}
 	if cfg.SkipArgo {
 		result.Skipped = true
 		return result, nil
@@ -126,7 +129,7 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 	}
 	defer cleanup()
 	action := planHelmAction(exists, result.InstalledVersion, result.TargetVersion, release.Status, cfg.Upgrade)
-	if profileFile != "" && action == actionSkip {
+	if (profileFile != "" || argoLimitsRequested(cfg)) && action == actionSkip {
 		action = actionUpgrade
 	}
 	switch action {
@@ -145,6 +148,11 @@ func InstallArgoWorkflows(ctx context.Context, cfg Config, deps Deps) (ArgoResul
 		_, _ = fmt.Fprintln(deps.Output, "Installing Argo Workflows...")
 	}
 
+	if action != actionInstall {
+		if err := handOverSyncLimits(ctx, cfg, deps, ns); err != nil {
+			return result, err
+		}
+	}
 	args := ArgoHelmArgs(cfg)
 	if profileFile != "" {
 		args = append(args, "--values", profileFile)
@@ -167,7 +175,7 @@ func ArgoHelmArgs(cfg Config) []string {
 	if chartVersion == "" {
 		chartVersion = DefaultArgoChartVersion
 	}
-	return []string{
+	args := []string{
 		"upgrade", "--install", "argo-workflows", argoRepoName + "/argo-workflows",
 		"-n", ns, "--create-namespace",
 		"--set", "singleNamespace=true",
@@ -193,6 +201,7 @@ func ArgoHelmArgs(cfg Config) []string {
 		"--reuse-values",
 		"--wait",
 	}
+	return append(args, argoLimitArgs(cfg, ns)...)
 }
 
 // VerifyArgoController checks that a controller is actually watching the

@@ -33,18 +33,6 @@ type ReleaseWIFPolicy interface {
 	State() model.ReleaseWIFState
 }
 
-// AdmissionCapacityOverrideStore persists the audited runtime ceiling.
-type AdmissionCapacityOverrideStore interface {
-	AdmissionCapacityOverride(context.Context) (*model.AdmissionCapacityOverride, error)
-	SetAdmissionCapacityOverride(context.Context, string, int, string) (*model.AdmissionCapacityOverride, error)
-}
-
-// RuntimeCapacityController validates and applies the runtime ceiling.
-type RuntimeCapacityController interface {
-	ValidateRuntimeCapacity(int) error
-	ApplyRuntimeCapacity(context.Context) model.AdmissionCapacityConfig
-}
-
 type qualifiedRepositoryNamer interface {
 	QualifiedRepoName(context.Context, int64) (string, error)
 }
@@ -236,42 +224,4 @@ func (service *API) releaseWIFRepositoryKey(ctx context.Context, name string) (s
 		return "", nil, err
 	}
 	return key, &repository, nil
-}
-
-func (service *API) admissionCapacityConfig(ctx context.Context, actor api.Actor, raw json.RawMessage) (any, error) {
-	if err := requireRuntimeAdmin(actor, "admission_capacity_config"); err != nil {
-		return nil, err
-	}
-	if service.capacityOverrides == nil || service.runtimeCapacity == nil {
-		return nil, refuse(ErrUnavailable, "runtime admission capacity")
-	}
-	var args struct {
-		MaxConcurrentJobs *int   `json:"max_concurrent_jobs"`
-		Clear             bool   `json:"clear"`
-		Reason            string `json:"reason"`
-	}
-	if err := decodeTool(raw, &args); err != nil {
-		return nil, err
-	}
-	if err := runtimeOverrideReason(args.Reason); err != nil {
-		return nil, err
-	}
-	if (args.MaxConcurrentJobs == nil) == !args.Clear {
-		return nil, refuse(ErrInvalidInput, "pass exactly one of max_concurrent_jobs (0..64; 0 is no ceiling) or clear")
-	}
-	jobs := 0
-	if args.MaxConcurrentJobs != nil {
-		jobs = *args.MaxConcurrentJobs
-		if err := service.runtimeCapacity.ValidateRuntimeCapacity(jobs); err != nil {
-			return nil, refuse(ErrInvalidInput, "%v", err)
-		}
-	}
-	override, err := service.capacityOverrides.SetAdmissionCapacityOverride(ctx, actor.Identity, jobs, args.Reason)
-	if err != nil {
-		return nil, err
-	}
-	// The override is committed: reload it even if the caller has gone, or
-	// admission keeps the old ceiling until the next periodic reload.
-	configuration := service.runtimeCapacity.ApplyRuntimeCapacity(context.WithoutCancel(ctx))
-	return map[string]any{"override": override, "configuration": configuration}, nil
 }

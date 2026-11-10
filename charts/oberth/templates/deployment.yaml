@@ -1,4 +1,3 @@
-{{- $runtimeCapacity := (.Values.admission).runtimeCapacity | default dict -}}
 {{- if not .Values.secretstore.enabled }}
 {{- fail "OpenBao is required for server and upstream identities; configure secretstore.enabled" }}
 {{- end }}
@@ -186,7 +185,6 @@ spec:
             the Deployment could not be applied with the chart's own defaults.
             */}}
             - "--runner-image-prefixes={{ join "," .Values.runnerImagePrefixes }}"
-            - --max-concurrent-jobs={{ .Values.maxConcurrentJobs }}
             {{- $autoRetryInfrastructure := true }}
             {{- if hasKey .Values "autoRetryInfrastructure" }}
             {{- $autoRetryInfrastructure = .Values.autoRetryInfrastructure }}
@@ -195,9 +193,6 @@ spec:
             {{- $releases := .Values.releases | default dict }}
             {{- if $releases.serialize }}
             - --serialize-releases=true
-            {{- end }}
-            {{- if $runtimeCapacity.enabled }}
-            - --max-concurrent-jobs-file=/etc/oberth/runtime-capacity/max-concurrent-jobs
             {{- end }}
             {{- $kubernetesClient := .Values.kubernetesClient | default dict }}
             - --kubernetes-client-qps={{ $kubernetesClient.qps | default 50 }}
@@ -517,11 +512,6 @@ spec:
             capabilities:
               drop: ["ALL"]
           volumeMounts:
-            {{- if $runtimeCapacity.enabled }}
-            - name: runtime-capacity
-              mountPath: /etc/oberth/runtime-capacity
-              readOnly: true
-            {{- end }}
             {{- if (.Values.argo.resourceSampler).enabled }}
             - name: resource-sampler
               mountPath: /etc/oberth/resource-sampler
@@ -590,12 +580,6 @@ spec:
               readOnly: true
             {{- end }}
       volumes:
-        {{- if $runtimeCapacity.enabled }}
-        - name: runtime-capacity
-          configMap:
-            name: {{ include "oberth.fullname" . }}-admission
-            optional: true
-        {{- end }}
         {{- if (.Values.argo.resourceSampler).enabled }}
         - name: resource-sampler
           configMap:

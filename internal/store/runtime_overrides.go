@@ -167,7 +167,9 @@ func (s *Store) changeReleaseWIFOverride(ctx context.Context, actor string, spec
 	return result, nil
 }
 
-// AdmissionCapacityOverride returns nil when no runtime ceiling is set.
+// AdmissionCapacityOverride returns the runtime ceiling a v0.19 or older
+// server stored, or nil. Since v0.20.0 nothing applies or sets it; the server
+// reads it once at startup to warn that it no longer has an effect.
 func (s *Store) AdmissionCapacityOverride(ctx context.Context) (*model.AdmissionCapacityOverride, error) {
 	return admissionCapacityOverride(ctx, s.reader())
 }
@@ -186,55 +188,4 @@ func admissionCapacityOverride(ctx context.Context, q interface {
 	}
 	value.UpdatedAt = fromUnixNano(updated)
 	return &value, nil
-}
-
-// SetAdmissionCapacityOverride sets the runtime ceiling, or clears it when jobs
-// is zero, and records the previous override in the same transaction.
-func (s *Store) SetAdmissionCapacityOverride(ctx context.Context, actor string, jobs int, reason string) (*model.AdmissionCapacityOverride, error) {
-	if strings.TrimSpace(actor) == "" || jobs < 0 || jobs > 64 || !validRuntimeOverrideReason(reason) {
-		return nil, fmt.Errorf("%w: actor, 0..64 jobs and a 1..512 byte reason are required", ErrInvalid)
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	previous, err := admissionCapacityOverride(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	if jobs == 0 && previous == nil {
-		return nil, fmt.Errorf("%w: no runtime admission capacity override is set", ErrInvalidState)
-	}
-	now := unixNano(s.now())
-	action := "admission.capacity.override"
-	if jobs == 0 {
-		action = "admission.capacity.override.clear"
-		_, err = tx.ExecContext(ctx, `DELETE FROM admission_capacity_override WHERE singleton=1`)
-	} else {
-		_, err = tx.ExecContext(ctx, `INSERT INTO admission_capacity_override(singleton,max_concurrent_jobs,reason,actor,updated_at) VALUES(1,?,?,?,?)
-ON CONFLICT(singleton) DO UPDATE SET max_concurrent_jobs=excluded.max_concurrent_jobs,reason=excluded.reason,actor=excluded.actor,updated_at=excluded.updated_at`, jobs, reason, actor, now)
-	}
-	if err != nil {
-		return nil, err
-	}
-	details := map[string]any{"jobs": jobs, "reason": reason}
-	if previous != nil {
-		details["previous"] = previous
-	}
-	body, err := json.Marshal(details)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := s.appendAuditAction(ctx, tx, model.AuditActionSpec{Actor: actor, Action: action, ResourceType: "admission", ResourceID: "capacity", Details: string(body)}, now); err != nil {
-		return nil, err
-	}
-	value, err := admissionCapacityOverride(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return value, nil
 }

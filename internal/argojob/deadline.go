@@ -95,13 +95,14 @@ func watchdogBudget(budget time.Duration) time.Duration {
 
 // watchdogOrigin is the clock the server watchdog counts from: Argo's own
 // start once recorded, otherwise the Workflow's creation. A Workflow that
-// Argo holds Pending behind a native synchronization lock has not started by
-// Argo's clock either, so nothing counts yet (a zero origin).
+// Argo holds Pending behind a native synchronization lock, or postpones for
+// its parallelism limit, has not started by Argo's clock either, so nothing
+// counts yet (a zero origin).
 func watchdogOrigin(workflow *wfv1.Workflow) (time.Time, string) {
 	if !workflow.Status.StartedAt.IsZero() {
 		return workflow.Status.StartedAt.UTC().Truncate(time.Second), "workflow_started_at"
 	}
-	if waitingForLock(workflow.Status.Message) {
+	if heldBeforeStart(workflow) {
 		return time.Time{}, "workflow_started_at"
 	}
 	return workflow.CreationTimestamp.UTC(), "workflow_created_at"
@@ -110,15 +111,22 @@ func watchdogOrigin(workflow *wfv1.Workflow) (time.Time, string) {
 // watchdogOriginSince is the live watchdog's clock: watchdogOrigin, or the
 // moment observation began when Argo has recorded nothing yet. A Workflow
 // queued behind a native Argo lock before Argo's start is re-armed from now
-// on every poll: Argo's own deadline has not begun, so neither has Oberth's.
+// on every poll, and so is one Argo postponed for its parallelism limit:
+// Argo's own deadline has not begun, so neither has Oberth's.
 func watchdogOriginSince(workflow *wfv1.Workflow, observingSince time.Time) time.Time {
-	if workflow.Status.StartedAt.IsZero() && waitingForLock(workflow.Status.Message) {
+	if workflow.Status.StartedAt.IsZero() && heldBeforeStart(workflow) {
 		return time.Now()
 	}
 	if origin, _ := watchdogOrigin(workflow); !origin.IsZero() {
 		return origin
 	}
 	return observingSince
+}
+
+// heldBeforeStart reports a Workflow the Argo controller holds before its
+// start: behind a workflow-level lock or postponed for parallelism.
+func heldBeforeStart(workflow *wfv1.Workflow) bool {
+	return waitingForLock(workflow.Status.Message) || postponedByParallelism(workflow)
 }
 
 func observeServerDeadline(workflow *wfv1.Workflow, result *model.ExecutionObservation, budget time.Duration, now time.Time) {

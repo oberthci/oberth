@@ -190,7 +190,7 @@ func testRCACreateCleanupOutage(t *testing.T, knownCreate bool) {
 	if knownCreate {
 		database = &rcaRevisionStore{Store: fixture.store, submitFailure: true, submitRef: "uncertain", submitError: errors.New("submission record rejected")}
 	}
-	scheduler, err := NewScheduler(SchedulerConfig{Store: database, Git: &controlGit{}, Logs: logs, Jobs: jobs, Auditor: fixture.store, Signals: NewSignals(), WorkspaceRoot: filepath.Join(fixture.root, "work"), MaxConcurrent: 2})
+	scheduler, err := NewScheduler(SchedulerConfig{Store: database, Git: &controlGit{}, Logs: logs, Jobs: jobs, Auditor: fixture.store, Signals: NewSignals(), WorkspaceRoot: filepath.Join(fixture.root, "work")})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -94,13 +94,6 @@ func (s *deadlineFaultStore) SetRunCredentialed(a0 context.Context, a1 string) e
 	return s.Store.SetRunCredentialed(a0, a1)
 }
 
-func (s *deadlineFaultStore) SetRunConcurrencyGroup(a0 context.Context, a1 string, a2 string, limits ...int) error {
-	if err := s.fault("SetRunConcurrencyGroup"); err != nil {
-		return err
-	}
-	return s.Store.SetRunConcurrencyGroup(a0, a1, a2, limits...)
-}
-
 func (s *deadlineFaultStore) PendingRunCancellations(a0 context.Context) ([]model.RunCancellation, error) {
 	if err := s.fault("PendingRunCancellations"); err != nil {
 		var zero []model.RunCancellation

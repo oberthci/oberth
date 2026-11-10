@@ -308,8 +308,8 @@ func TestCancelRefusesARunOwnedByAPendingPublication(t *testing.T) {
 }
 
 // The authorization callback sees the run as it is inside the cancel
-// transaction: a concurrency group recorded after the caller's read refuses a
-// non-admin cancel without any change.
+// transaction: a claim recorded after the caller's read is visible, and a
+// refusal changes nothing.
 func TestCancelRunAuthorizesTheCurrentRecord(t *testing.T) {
 	now := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
 	s := testStore(t, &now)
@@ -319,14 +319,11 @@ func TestCancelRunAuthorizesTheCurrentRecord(t *testing.T) {
 	if _, err := s.ClaimNextRun(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetRunConcurrencyGroup(ctx, run.ID, "terraform-state"); err != nil {
-		t.Fatal(err)
-	}
 	refused := errors.New("refused")
 	var seen model.Run
 	_, err := s.CancelRun(ctx, model.RunCancelRequest{RunID: run.ID, Actor: "agent@host",
 		Authorize: func(current model.Run) (string, error) { seen = current; return "", refused }})
-	if !errors.Is(err, refused) || seen.ConcurrencyGroup != "terraform-state" {
+	if !errors.Is(err, refused) || seen.ID != run.ID || seen.Status != model.RunRunning {
 		t.Fatalf("authorize saw %#v, err %v", seen, err)
 	}
 	if current, err := s.Run(ctx, run.ID); err != nil || current.Status != model.RunRunning {

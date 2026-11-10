@@ -23,9 +23,10 @@ type RunScheduling struct {
 	Execution     *ExecutionObservation     `json:"execution,omitempty"`
 }
 
-// AdmissionObservation is one run's place in the admission gate. Admission
-// counts runs: Used and Runs are how many runs hold a grant, Capacity and
-// MaxRuns how many may (zero: no ceiling). Kubernetes places each Pod.
+// AdmissionObservation is one run's place in the admission gate. Used and
+// Runs are how many runs hold a grant. Oberth has no run ceiling: the Argo
+// controller's parallelism bounds running Workflows, and Kubernetes places
+// each Pod.
 type AdmissionObservation struct {
 	// Requests is this run's peak pod requests, shown for context only.
 	Requests *argoworkflow.PodRequests `json:"requests,omitempty"`
@@ -34,51 +35,32 @@ type AdmissionObservation struct {
 	State    string            `json:"state"`
 	Position int               `json:"position,omitempty"`
 	Used     int               `json:"used"`
-	Capacity int               `json:"capacity"`
-	// Runs and MaxRuns repeat the run ceiling for older clients. Zero for a
-	// scoped viewer, like Used and Capacity.
-	Runs    int `json:"runs,omitempty"`
-	MaxRuns int `json:"max_runs,omitempty"`
-	// Group is the repository-declared concurrency group the run was admitted
-	// or is waiting under (#658). GroupHolder retains the first holder for older clients;
-	// GroupHolders names all holders across repositories. GroupAhead names an earlier run
-	// of the same group queued ahead when no run holds it yet. Both are server
-	// run IDs, set only while this run waits on its group.
-	Group         string           `json:"group,omitempty"`
-	GroupHolder   string           `json:"group_holder,omitempty"`
-	GroupLimit    int              `json:"group_limit,omitempty"`
-	GroupHolders  []string         `json:"group_holders,omitempty"`
-	GroupBlocked  bool             `json:"group_blocked,omitempty"`
-	GroupRunRepos map[string]int64 `json:"-"`
-	GroupAhead    string           `json:"group_ahead,omitempty"`
+	// Runs repeats Used. Zero for a scoped viewer, like Used.
+	Runs int `json:"runs,omitempty"`
 	// DiskFloor reports the opt-in disk-space admission hold (#673). When
 	// non-nil and BelowFloor is true, admission is held until disk frees up.
 	DiskFloor *DiskFloorObservation `json:"disk_floor,omitempty"`
 	// BlockedBy names the run at the head of the admission queue that every
-	// later run waits behind (#1021): the first claimed run without a run
-	// slot. HeadOfQueue marks the run that is itself that run; BlockedBy then
-	// describes it. Nil when the run is parked on its group or nothing
-	// blocks the queue.
+	// later run waits behind (#1021): the first claimed run the disk floor or
+	// host pressure holds back. HeadOfQueue marks the run that is itself
+	// that run; BlockedBy then describes it. Nil when nothing blocks the
+	// queue.
 	BlockedBy   *AdmissionBlocker `json:"blocked_by,omitempty"`
 	HeadOfQueue bool              `json:"head_of_queue,omitempty"`
 }
 
 // AdmissionBlocker is the claimed run at the head of the admission queue that
-// has no run slot, which holds back every run claimed after it.
+// cannot be granted yet, which holds back every run claimed after it.
 type AdmissionBlocker struct {
 	Pressure *PressureDeferral `json:"pressure,omitempty"`
 	RunID    string            `json:"run_id"`
 	RepoID   int64             `json:"-"`
 	Repo     string            `json:"repo"`
 	Ref      string            `json:"ref"`
-	// RunCeiling and DiskFloor name why the head waits: every run slot is
-	// taken, or the data disk is below its floor.
-	RunCeiling bool `json:"run_ceiling,omitempty"`
-	DiskFloor  bool `json:"disk_floor,omitempty"`
-	// Used and Capacity are the run ceiling: runs holding a grant and the
-	// configured maximum. Zero for a scoped viewer.
+	// DiskFloor names why the head waits: the data disk is below its floor.
+	DiskFloor bool `json:"disk_floor,omitempty"`
+	// Used is how many runs hold a grant. Zero for a scoped viewer.
 	Used         int       `json:"used"`
-	Capacity     int       `json:"capacity"`
 	WaitingSince time.Time `json:"waiting_since"`
 }
 
@@ -88,14 +70,6 @@ func (blocker AdmissionBlocker) Reason() string {
 	switch {
 	case blocker.DiskFloor:
 		return "waiting for disk space"
-	case blocker.RunCeiling:
-		switch blocker.Used {
-		case 0:
-			return "waiting for a run slot"
-		case 1:
-			return "1 run running"
-		}
-		return fmt.Sprintf("%d runs running", blocker.Used)
 	case blocker.Pressure != nil:
 		switch blocker.Pressure.Resource {
 		case "io":
@@ -128,6 +102,18 @@ const ExecutionDeadlineMessage = "Execution deadline exceeded."
 // lock name without its namespace, admitted into the message only when it
 // matches the lock-key grammar.
 const LockWaitMessagePrefix = "Waiting for lock "
+
+// ParallelismWaitMessage is the fixed-form message of a Workflow the Argo
+// controller postponed because its parallelism limit is reached
+// (controller.parallelism or controller.namespaceParallelism). The run is
+// queued by Argo, not stalled; nothing of the controller's text is copied.
+const ParallelismWaitMessage = "Waiting for an Argo workflow slot (controller parallelism)."
+
+// SyncParallelismLock is the sync_status key under which Workflows waiting
+// for, and holding, an Argo controller parallelism slot are reported. It is
+// not a lock a document can declare; it follows the lock-key form so the
+// history and events treat it like one.
+const SyncParallelismLock = "Parallelism/workflow-controller"
 
 // ExecutionDeadline is a read-only clock projection, never terminal evidence.
 // Argo anchors workflow deadlines to status.startedAt, not Oberth admission.
@@ -164,37 +150,21 @@ type SchedulingReason struct {
 	Message string `json:"message,omitempty"`
 }
 
-// AdmissionCapacityConfig describes the effective operator capacity and reload health.
-type AdmissionCapacityConfig struct {
-	MaxConcurrentJobs int       `json:"max_concurrent_jobs"`
-	BootDefault       int       `json:"boot_default"`
-	Source            string    `json:"source"`
-	File              string    `json:"file,omitempty"`
-	Error             string    `json:"error,omitempty"`
-	ChangedAt         time.Time `json:"changed_at,omitzero"`
-}
-
-// AdmissionState is the whole in-memory admission gate as data (#1099): its
-// run ceiling, every reservation it holds, and every concurrency group in
-// use. It is an ephemeral observation of one server process, never durable
-// evidence. Used and Runs count runs holding a grant; Capacity and MaxRuns
-// are the ceiling, zero when none is configured.
+// AdmissionState is the whole in-memory admission gate as data (#1099):
+// every reservation it holds. It is an ephemeral observation of one server
+// process, never durable evidence. Used and Runs count runs holding a grant.
 type AdmissionState struct {
-	Hold          *AdmissionHold           `json:"hold,omitempty"`
-	Configuration *AdmissionCapacityConfig `json:"configuration,omitempty"`
-	Pressure      *AdmissionPressure       `json:"pressure,omitempty"`
-	Capacity      int                      `json:"capacity"`
-	Used          int                      `json:"used"`
-	Runs          int                      `json:"runs"`
-	MaxRuns       int                      `json:"max_runs"`
-	Reservations  []AdmissionReservation   `json:"reservations"`
-	Groups        []AdmissionGroup         `json:"groups"`
-	Blocker       *AdmissionBlocker        `json:"blocker,omitempty"`
+	Hold         *AdmissionHold         `json:"hold,omitempty"`
+	Pressure     *AdmissionPressure     `json:"pressure,omitempty"`
+	Used         int                    `json:"used"`
+	Runs         int                    `json:"runs"`
+	Reservations []AdmissionReservation `json:"reservations"`
+	Blocker      *AdmissionBlocker      `json:"blocker,omitempty"`
 }
 
 // AdmissionReservation is one claimed run's place in the gate. State is
-// preparing (checkout and static reads still running), waiting (for a run
-// slot), group (parked on its concurrency group), granted, or retained
+// preparing (checkout and static reads still running), waiting (held by
+// the administrator hold, the disk floor or host pressure), granted, or retained
 // (granted, and kept held after its owner stopped on an error that may have
 // left its Workflow running).
 type AdmissionReservation struct {
@@ -205,27 +175,14 @@ type AdmissionReservation struct {
 	Ref      string            `json:"ref,omitempty"`
 	Workflow string            `json:"workflow,omitempty"`
 	State    string            `json:"state"`
-	Group    string            `json:"group,omitempty"`
 	Position int               `json:"position,omitempty"`
 	Since    time.Time         `json:"since"`
-}
-
-// AdmissionGroup is a YAML-defined shared group with current holders and waiters.
-type AdmissionGroup struct {
-	Name    string   `json:"name"`
-	Limit   int      `json:"limit"`
-	Holders []string `json:"holders"`
-	RepoID  int64    `json:"-"`
-	Repo    string   `json:"repo,omitempty"`
-	Holder  string   `json:"holder_run_id,omitempty"`
-	Waiting []string `json:"waiting,omitempty"`
 }
 
 // AdmissionRelease reports an operator release of one reservation (#1099).
 type AdmissionRelease struct {
 	RunID    string `json:"run_id"`
 	State    string `json:"state"`
-	Group    string `json:"group,omitempty"`
 	Workflow string `json:"workflow,omitempty"`
 	Verified bool   `json:"verified"`
 	Forced   bool   `json:"forced,omitempty"`

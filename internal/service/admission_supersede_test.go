@@ -1,14 +1,12 @@
 package service
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/oberthci/oberth/internal/model"
-	"github.com/oberthci/oberth/pkg/pipeline"
 )
-
-const kubevirtGroup = "kubevirt"
 
 // awaitAdmission waits until the run's reservation satisfies accept.
 func (fixture *groupFixture) awaitAdmission(t *testing.T, run model.Run, what string, accept func(*model.AdmissionObservation) bool) *model.AdmissionObservation {
@@ -26,59 +24,62 @@ func (fixture *groupFixture) awaitAdmission(t *testing.T, run model.Run, what st
 	}
 }
 
-// The live example-node defect: an XL run of a concurrency group waits at the head
-// of the FIFO admission queue while a smaller run holds weight. A newer push
-// supersedes it, and the durable record turns interrupted, but its in-memory
-// reservation stayed prepared at the head of the queue. Every later run, of the
-// same group and of other repositories, kept waiting behind a run that no
-// longer existed until the server restarted. Superseding it must withdraw the
-// reservation at once, so the next grant pass admits the runs it blocked.
-func TestSupersedingActiveWorkflowReleasesGroupAndSlotWithoutDrain(t *testing.T) {
-	fixture := newGroupFixture(t, 10)
-	fixture.engine.declare("busy", "", pipeline.L)
-	fixture.engine.declare("feat-kv", kubevirtGroup, pipeline.XL)
-	fixture.engine.declare("feat-kv-2", kubevirtGroup, pipeline.S)
-	fixture.engine.declare("small", "", pipeline.S)
-	holder := fixture.branch(t, fixture.exampleService, "busy", "a")
-	head := fixture.branch(t, fixture.terraform, "feat-kv", "b")
-	member := fixture.branch(t, fixture.terraform, "feat-kv-2", "c")
-	small := fixture.branch(t, fixture.exampleService, "small", "d")
-	fixture.start(t)
-
-	created := fixture.awaitCreated(t, 3)
-	if !created[holder.ID] || !created[head.ID] || !created[small.ID] {
-		t.Fatalf("size classes prevented Kubernetes submission: %v", created)
+// pressureValve holds every new grant on the host pressure valve until the
+// returned release lifts it. Unlike the administrator hold or the disk floor
+// it lets the scheduler claim a run, so the run waits in the gate with a
+// reservation.
+func (fixture *groupFixture) pressureValve(t *testing.T) (release func()) {
+	t.Helper()
+	high := &atomic.Bool{}
+	high.Store(true)
+	config := DefaultAdmissionPressureConfig()
+	config.HardOnly = true
+	config.Logf = func(string, ...any) {}
+	config.Source = func() (model.PressureSample, error) {
+		if high.Load() {
+			return model.PressureSample{CPU: model.PressureResource{SomeAvg10: 99}, IO: model.PressureResource{SomeAvg10: 99}}, nil
+		}
+		return model.PressureSample{}, nil
 	}
-	fixture.awaitAdmission(t, member, "waiting behind active workflow in its group", func(snapshot *model.AdmissionObservation) bool {
-		return snapshot != nil && snapshot.State == "waiting" && snapshot.GroupHolder == head.ID
-	})
-	fixture.assertNothingCreated(t)
+	gate := fixture.scheduler.admission
+	gate.mu.Lock()
+	gate.pressure = newPressureCheck(config)
+	gate.mu.Unlock()
+	return func() {
+		high.Store(false)
+		gate.mu.Lock()
+		gate.grantLocked()
+		gate.mu.Unlock()
+		fixture.scheduler.signalQueue()
+	}
+}
 
+// A waiting run that a newer push supersedes must withdraw its reservation
+// at once: the durable record turns interrupted, and the runs it was ahead
+// of are admitted as soon as nothing else holds them, without a restart.
+func TestSupersedingAWaitingRunReleasesItsReservationWithoutDrain(t *testing.T) {
+	fixture := newGroupFixture(t, 0)
+	lift := fixture.pressureValve(t)
+	head := fixture.branch(t, fixture.terraform, "feat-kv", "b")
+	other := fixture.branch(t, fixture.exampleService, "small", "d")
+	fixture.start(t)
+	fixture.awaitAdmission(t, head, "pressure-held head", func(snapshot *model.AdmissionObservation) bool {
+		return snapshot != nil && snapshot.State == "waiting"
+	})
 	newer := fixture.branch(t, fixture.terraform, "feat-kv", "e")
 	superseded := fixture.awaitTerminal(t, head.ID)
 	if superseded.Status != model.RunInterrupted || superseded.SupersededBy != newer.ID {
 		t.Fatalf("superseded head = status %s superseded_by %q", superseded.Status, superseded.SupersededBy)
 	}
-	created = fixture.awaitCreated(t, 1)
-	if !created[member.ID] {
-		t.Fatalf("after the supersede the grant pass admitted %v; want the group member %s and the small run %s", created, member.ID, small.ID)
-	}
 	if snapshot := fixture.scheduler.AdmissionSnapshot(head.QueueSequence); snapshot != nil {
 		t.Fatalf("superseded head still holds a reservation: %#v", snapshot)
 	}
-	// The replacement XL waits for the node and its group like any other run;
-	// nothing names the superseded run any more.
-	fixture.awaitAdmission(t, newer, "waiting replacement", func(snapshot *model.AdmissionObservation) bool {
-		return snapshot != nil && snapshot.State == "waiting" && snapshot.GroupHolder == member.ID
-	})
-	fixture.assertNothingCreated(t)
-
-	fixture.engine.finish(t, holder.ID)
-	fixture.engine.finish(t, small.ID)
-	fixture.engine.finish(t, member.ID)
-	if next := fixture.awaitCreated(t, 1); !next[newer.ID] {
-		t.Fatalf("after the node drained the gate admitted %v; want the replacement XL %s", next, newer.ID)
+	lift()
+	created := fixture.awaitCreated(t, 2)
+	if !created[other.ID] || !created[newer.ID] || fixture.engine.wasCreated(head.ID) {
+		t.Fatalf("after the supersede the gate admitted %v", created)
 	}
+	fixture.engine.finish(t, other.ID)
 	fixture.engine.finish(t, newer.ID)
 	fixture.awaitTerminal(t, newer.ID)
 	fixture.engine.assertNoViolations(t)

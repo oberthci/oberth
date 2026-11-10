@@ -437,7 +437,7 @@ func scopedAdmission(state *model.AdmissionState, upstreams []model.Upstream, re
 			visible[repository.ID] = true
 		}
 	}
-	scoped := &model.AdmissionState{Reservations: []model.AdmissionReservation{}, Groups: []model.AdmissionGroup{}}
+	scoped := &model.AdmissionState{Reservations: []model.AdmissionReservation{}}
 	for _, reservation := range state.Reservations {
 		if visible[reservation.RepoID] {
 			reservation.Position = 0
@@ -445,35 +445,6 @@ func scopedAdmission(state *model.AdmissionState, upstreams []model.Upstream, re
 			scoped.Reservations = append(scoped.Reservations, reservation)
 		}
 	}
-	visibleRuns := map[string]bool{}
-	for _, r := range scoped.Reservations {
-		visibleRuns[r.RunID] = true
-	}
-	for _, group := range state.Groups {
-		copy := group
-		copy.Holders = nil
-		copy.Waiting = nil
-		for _, id := range group.Holders {
-			if visibleRuns[id] {
-				copy.Holders = append(copy.Holders, id)
-			}
-		}
-		for _, id := range group.Waiting {
-			if visibleRuns[id] {
-				copy.Waiting = append(copy.Waiting, id)
-			}
-		}
-		if !visibleRuns[group.Holder] {
-			copy.Holder = ""
-		}
-		if visible[group.RepoID] {
-			copy.Holder = group.Holder
-		} // historical single-repository observations
-		if visible[group.RepoID] || len(copy.Holders) > 0 || len(copy.Waiting) > 0 {
-			scoped.Groups = append(scoped.Groups, copy)
-		}
-	}
-
 	return scoped
 }
 

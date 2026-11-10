@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 
+	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/oberthci/oberth/internal/model"
@@ -17,7 +18,8 @@ const maxSyncKeys = 32
 // synchronization status (#1514): the semaphore and mutex keys it holds and
 // waits for. It performs one exact Workflow GET and never mutates anything.
 // Keys keep the controller's "<ns>/<Kind>/<name>[/<key>]" form; the service
-// strips the namespace. A completed or missing Workflow holds nothing.
+// strips the namespace. A completed or missing Workflow holds nothing. The
+// Argo controller's parallelism appears as model.SyncParallelismLock.
 func (controller *Controller) ObserveSynchronization(ctx context.Context, name, runID string) (*model.SyncObservation, error) {
 	workflow, err := controller.workflows.Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
@@ -27,10 +29,24 @@ func (controller *Controller) ObserveSynchronization(ctx context.Context, name, 
 		return nil, errors.New("argojob: synchronization observation identity mismatch")
 	}
 	observation := &model.SyncObservation{Holding: []string{}, Waiting: []string{}}
-	if workflow.Status.Phase.Completed() || workflow.Status.Synchronization == nil {
+	if workflow.Status.Phase.Completed() {
 		return observation, nil
 	}
 	holding, waiting := map[string]bool{}, map[string]bool{}
+	// Argo controller parallelism (#1517) is reported like a lock: a
+	// postponed Workflow waits for a slot; a Workflow the throttler admitted
+	// (running, or Pending behind a workflow-level lock) holds one.
+	switch {
+	case postponedByParallelism(workflow):
+		waiting[model.SyncParallelismLock] = true
+	case workflow.Status.Phase == wfv1.WorkflowRunning ||
+		(workflow.Status.Phase == wfv1.WorkflowPending && waitingForLock(workflow.Status.Message)):
+		holding[model.SyncParallelismLock] = true
+	}
+	if workflow.Status.Synchronization == nil {
+		observation.Holding, observation.Waiting = boundedKeys(holding), boundedKeys(waiting)
+		return observation, nil
+	}
 	if semaphore := workflow.Status.Synchronization.Semaphore; semaphore != nil {
 		for _, entry := range semaphore.Holding {
 			holding[entry.Semaphore] = true

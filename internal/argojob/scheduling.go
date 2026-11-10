@@ -40,6 +40,9 @@ func (controller *Controller) ObserveScheduling(ctx context.Context, name, runID
 	if workflow.Status.Message != "" {
 		result.Message = safeWorkflowMessage(workflow.Status.Message)
 	}
+	if postponedByParallelism(workflow) {
+		result.Message = model.ParallelismWaitMessage
+	}
 	if workflow.Status.Message == "" && workflow.Status.Phase == wfv1.WorkflowRunning {
 		result.Message = "Workflow execution is running."
 	}

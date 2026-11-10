@@ -70,19 +70,13 @@ func waitingReason(a *model.AdmissionObservation) (reason string) {
 	if reason := queuePressureReason(pressure); reason != "" {
 		return reason
 	}
-	if a.MaxRuns > 0 && a.Runs >= a.MaxRuns {
-		return fmt.Sprintf("%d of %d runs running", a.Runs, a.MaxRuns)
-	}
 	if !a.HeadOfQueue {
 		if reason := queueBlockerReason(nil, blocker); reason != "" {
 			return reason
 		}
 	}
-	switch {
-	case a.DiskFloor != nil && a.DiskFloor.BelowFloor:
+	if a.DiskFloor != nil && a.DiskFloor.BelowFloor {
 		return fmt.Sprintf("waiting for disk space (%s free)", bytesText(a.DiskFloor.FreeBytes))
-	case a.GroupBlocked || a.GroupHolder != "" || a.GroupAhead != "":
-		return "group " + a.Group + " busy"
 	}
 	if a.HeadOfQueue {
 		return "next in line"

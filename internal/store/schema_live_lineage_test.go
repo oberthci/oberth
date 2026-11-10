@@ -200,12 +200,9 @@ PRAGMA foreign_keys = ON;`); err != nil {
 		t.Fatalf("secret_access key = %q, want codeberg/acme/terraform", grantRepo)
 	}
 
-	// v16 (#658) lands on the live lineage as well: the column exists and the
-	// pre-upgrade run reads as ungrouped rather than failing to scan.
-	if !hasRunsColumn(t, s2.db, "concurrency_group") {
-		t.Fatal("runs.concurrency_group missing after live-lineage upgrade")
-	}
-	if value, err := s2.Run(ctx, liveRun.ID); err != nil || value.ConcurrencyGroup != "" || value.Status != model.RunQueued {
+	// v16 (#658) lands on the live lineage as well: the retired column
+	// exists and the pre-upgrade run still scans.
+	if value, err := s2.Run(ctx, liveRun.ID); err != nil || value.Status != model.RunQueued {
 		t.Fatalf("pre-upgrade run after live-lineage upgrade = %#v, %v", value, err)
 	}
 

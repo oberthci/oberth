@@ -87,7 +87,7 @@ func TestRunLogOverflowMakesRunFailClearly(t *testing.T) {
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: fixture.store, Git: fixture.git, Logs: fixture.logs, Jobs: overflowingJobs{},
 		Auditor: fixture.store, Signals: fixture.signals,
-		WorkspaceRoot: filepath.Join(fixture.root, "bounded-log-work"), MaxConcurrent: 1, MaxRunLogBytes: 64,
+		WorkspaceRoot: filepath.Join(fixture.root, "bounded-log-work"), MaxRunLogBytes: 64,
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -20,7 +20,7 @@ const runColumns = `
 queue_sequence, COALESCE(admission_sequence, queue_sequence), id, repo_id, ref_kind, ref, sha, actor, release, credentialed, trigger,
 phase, job_name, tested_sha, base_sha, failed_burn, failed_step, error,
 status, reason, superseded_by, queued_at, started_at, finished_at, created_at, updated_at,
-concurrency_group, concurrency_limit, schedule_entry, issue_trailers, source_bindings, failure_cause, assist_requested, assisted, assist_record, ` + basePrioritySQL + `, ` + priorityReasonSQL + `,
+schedule_entry, issue_trailers, source_bindings, failure_cause, assist_requested, assisted, assist_record, ` + basePrioritySQL + `, ` + priorityReasonSQL + `,
 COALESCE(` + currentOverridePrioritySQL + `,''), COALESCE((SELECT reason FROM run_priority_overrides WHERE run_id=id),''),
 COALESCE(` + currentRequestedPrioritySQL + `,''), COALESCE(` + currentRequestedPriorityReasonSQL + `,''),
 COALESCE((SELECT actor FROM run_priority_overrides WHERE run_id=id),(SELECT actor FROM run_priority_requests WHERE run_id=id),''), COALESCE((SELECT refusal FROM run_priority_requests WHERE run_id=id),''), NOT (` + supersessionEligibleSQL + `)`
@@ -1382,7 +1382,7 @@ func scanRun(row rowScanner, extra ...any) (model.Run, error) {
 		&value.SHA, &value.Actor, &release, &credentialed, &value.Trigger, &value.Phase, &value.WorkflowName,
 		&value.TestedSHA, &value.BaseSHA, &value.FailedStage, &value.FailedStep, &value.Error,
 		&value.Status, &value.Reason, &value.SupersededBy, &queued, &started, &finished,
-		&created, &updated, &value.ConcurrencyGroup, &value.ConcurrencyLimit, &value.ScheduleEntry, &issueTrailers, &sourceBindings, &value.FailureCause, &assistRequested, &assisted, &assistRecord, &value.Priority, &value.PriorityReason, &value.PriorityOverride, &value.PriorityOverrideReason, &value.PriorityAccepted, &value.PriorityAcceptedReason, &value.PriorityRequestedBy, &value.PriorityRefusal, &value.PriorityProtected,
+		&created, &updated, &value.ScheduleEntry, &issueTrailers, &sourceBindings, &value.FailureCause, &assistRequested, &assisted, &assistRecord, &value.Priority, &value.PriorityReason, &value.PriorityOverride, &value.PriorityOverrideReason, &value.PriorityAccepted, &value.PriorityAcceptedReason, &value.PriorityRequestedBy, &value.PriorityRefusal, &value.PriorityProtected,
 	}
 	if err := scanRowNotFound(row, "Run", append(dest, extra...)...); err != nil {
 		return model.Run{}, err
@@ -1488,22 +1488,6 @@ WHERE id = ? AND status IN ('queued', 'running') AND credentialed = 0`,
 		return fmt.Errorf("set run credentialed: %w", err)
 	}
 	return tx.Commit()
-}
-
-// validConcurrencyGroup is the store-side copy of the admission rule the
-// schema CHECK also enforces; the store package does not import the pipeline
-// document package.
-func validConcurrencyGroup(group string) bool {
-	if group == "" || len(group) > 63 {
-		return false
-	}
-	for index := 0; index < len(group); index++ {
-		character := group[index]
-		if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '-' {
-			return false
-		}
-	}
-	return true
 }
 
 func isHexPrefix(value string) bool {

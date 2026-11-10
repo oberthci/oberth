@@ -144,27 +144,12 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 			result.Admission = &admission
 		}
 		if result.Admission != nil && service.scope != nil {
-			// The position, the capacity and its use, and the disk floor
-			// describe every run, in or out of a scoped actor's scope; a full
-			// pool of invisible work must not show (#073).
+			// The position, the run count and the disk floor describe every
+			// run, in or out of a scoped actor's scope; a full pool of
+			// invisible work must not show (#073).
 			admission := *result.Admission
-			admission.Position, admission.Used, admission.Capacity, admission.DiskFloor = 0, 0, 0, nil
-			admission.Runs, admission.MaxRuns = 0, 0
+			admission.Position, admission.Used, admission.Runs, admission.DiskFloor = 0, 0, 0, nil
 			admission.Pressure = admission.Pressure.Public()
-			if admission.GroupRunRepos != nil {
-				admission.GroupHolders = nil
-				for _, id := range result.Admission.GroupHolders {
-					if service.scope.seesRepo(admission.GroupRunRepos[id]) {
-						admission.GroupHolders = append(admission.GroupHolders, id)
-					}
-				}
-				if !service.scope.seesRepo(admission.GroupRunRepos[admission.GroupHolder]) {
-					admission.GroupHolder = ""
-				}
-				if !service.scope.seesRepo(admission.GroupRunRepos[admission.GroupAhead]) {
-					admission.GroupAhead = ""
-				}
-			}
 			if blocker := service.visibleBlocker(admission.BlockedBy); blocker != nil {
 				admission.BlockedBy = blocker
 			} else {
@@ -192,10 +177,9 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 					// shared weight or other repositories' visibility.
 					return result, reason
 				}
-				if service.scope != nil && !result.Admission.GroupBlocked && result.Admission.GroupHolder == "" && result.Admission.GroupAhead == "" {
-					// The group waits name runs of the same repository; any
-					// other wait says only that capacity is short, unless
-					// the blocking run is itself in scope.
+				if service.scope != nil {
+					// A scoped wait says only that the run is in line,
+					// unless the blocking run is itself in scope.
 					result.Message = "In line."
 					if result.Admission.BlockedBy != nil {
 						result.Message += " " + blockedBehindMessage(result.Admission.BlockedBy)
@@ -236,23 +220,13 @@ func (service *API) observeScheduling(ctx context.Context, run model.Run, steps 
 	return result, reason
 }
 
-// waitingAdmissionMessage names the concurrency group and the exact run a
-// grouped run waits on (#658). The group is a validated [a-z0-9-] name and the
-// runs are server-issued IDs, so neither can carry arbitrary text.
+// waitingAdmissionMessage names why a prepared run is not granted yet.
 func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
 	switch {
 	case admission.DiskFloor != nil && admission.DiskFloor.BelowFloor:
 		return fmt.Sprintf("Waiting for disk space: %d bytes free, floor is %d bytes. "+
 			"Runs wait until free bytes exceed the configured floor.",
 			admission.DiskFloor.FreeBytes, admission.DiskFloor.FloorBytes)
-	case admission.GroupLimit > 0 && (admission.GroupBlocked || admission.GroupHolder != "" || admission.GroupAhead != ""):
-		return "Waiting for " + concurrencyGroupMessage(admission, false)
-	case admission.GroupHolder != "":
-		return fmt.Sprintf("Waiting for concurrency group %q, held by run %s of the same repository; "+
-			"runs outside the group are admitted meanwhile.", admission.Group, admission.GroupHolder)
-	case admission.GroupAhead != "":
-		return fmt.Sprintf("Waiting for concurrency group %q behind run %s of the same repository, "+
-			"which is queued ahead in the group.", admission.Group, admission.GroupAhead)
 	case admission.Pressure != nil:
 		if admission.Pressure.Redacted || admission.Pressure.Avg10Gate {
 			return admission.Pressure.Reason()
@@ -261,17 +235,15 @@ func waitingAdmissionMessage(admission *model.AdmissionObservation) string {
 	case admission.HeadOfQueue && admission.BlockedBy != nil:
 		return fmt.Sprintf("At the head of the run queue (%s); every later run waits behind it.",
 			admission.BlockedBy.Reason())
-	case admission.BlockedBy != nil && admission.BlockedBy.RunCeiling:
-		return admission.BlockedBy.Reason()
 	case admission.BlockedBy != nil:
 		return "Waiting in the run queue, " + blockedBehindMessage(admission.BlockedBy)
 	default:
-		return "Waiting for a run slot."
+		return "Waiting in line."
 	}
 }
 
 // blockedBehindMessage names the queue-head run every later run waits behind,
-// e.g. "blocked behind exampleorg-ebpf/main (3 runs running)". The
+// e.g. "blocked behind exampleorg-ebpf/main (waiting for disk space)". The
 // repository is a registered name and the ref a validated Git ref.
 func blockedBehindMessage(blocker *model.AdmissionBlocker) string {
 	return fmt.Sprintf("blocked behind %s/%s (%s).", blocker.Repo, blocker.Ref, blocker.Reason())
@@ -291,7 +263,7 @@ func (service *API) visibleBlocker(blocker *model.AdmissionBlocker) *model.Admis
 	}
 	scoped := *blocker
 	if service.scope != nil {
-		scoped.Used, scoped.Capacity = 0, 0
+		scoped.Used = 0
 	}
 	scoped.Pressure = scoped.Pressure.Public()
 	return &scoped
@@ -335,8 +307,13 @@ func applyExecutionDisplay(run *model.Run, scheduling *model.RunScheduling) {
 // lockWaitReason turns the fixed-form synchronization wait of the Workflow
 // or of one Pending step into the reason line: "waiting for lock <key> (0 of
 // 1 free)". The key is the controller's lock name, already bounded to the
-// lock-key grammar by the observation.
+// lock-key grammar by the observation. A Workflow the Argo controller
+// postponed for its parallelism reads "waiting for an Argo workflow slot
+// (controller parallelism)".
 func lockWaitReason(execution *model.ExecutionObservation) string {
+	if execution.Message == model.ParallelismWaitMessage {
+		return "w" + strings.TrimSuffix(strings.TrimPrefix(model.ParallelismWaitMessage, "W"), ".")
+	}
 	messages := []string{execution.Message}
 	for _, node := range execution.Nodes {
 		if node.Phase == "Pending" {

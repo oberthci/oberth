@@ -193,10 +193,9 @@ func TestValidateWithoutReleaseYAMLShowsOptionalMessage(t *testing.T) {
 	}
 }
 
-// `oberth validate` is where a repository learns about a malformed concurrency
-// group (#658) before pushing: the same Admit the server runs refuses it and
-// names the annotation, while a legal group passes.
-func TestValidateChecksTheConcurrencyGroupAnnotation(t *testing.T) {
+// Since v0.20.0 the concurrency-group annotation is retired: `oberth
+// validate`, like server admission, accepts and ignores it whatever its value.
+func TestValidateIgnoresTheRetiredConcurrencyGroupAnnotation(t *testing.T) {
 	t.Parallel()
 	const sizeLine = "    oberth.ci/size: S\n"
 	if !strings.Contains(buildYAMLDemo, sizeLine) {
@@ -207,8 +206,8 @@ func TestValidateChecksTheConcurrencyGroupAnnotation(t *testing.T) {
 		pass  bool
 	}{
 		{"terraform-state", true},
-		{"Terraform_State", false},
-		{strings.Repeat("g", 64), false},
+		{"Terraform_State", true},
+		{strings.Repeat("g", 64), true},
 	} {
 		root := t.TempDir()
 		oberthDir := filepath.Join(root, ".oberth")
@@ -223,7 +222,7 @@ func TestValidateChecksTheConcurrencyGroupAnnotation(t *testing.T) {
 		err := runValidate(context.Background(), []string{root}, &output)
 		switch {
 		case tc.pass && err != nil:
-			t.Fatalf("legal group %q refused: %v\n%s", tc.group, err, output.String())
+			t.Fatalf("retired group annotation %q refused: %v\n%s", tc.group, err, output.String())
 		case !tc.pass && (err == nil || !strings.Contains(output.String(), "oberth.ci/concurrency-group") ||
 			!strings.Contains(output.String(), "result: FAIL")):
 			t.Fatalf("malformed group %q = %v\n%s", tc.group, err, output.String())

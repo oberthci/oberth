@@ -132,7 +132,6 @@ func (f *recoveryFixture) scheduler(t *testing.T, jobs JobController) *Scheduler
 		Auditor:       f.store,
 		Signals:       NewSignals(),
 		WorkspaceRoot: filepath.Join(f.root, "work"),
-		MaxConcurrent: 1,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -394,8 +393,7 @@ func TestStartupReconciliationFinishesRunWhoseJobCompleted(t *testing.T) {
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: database, Git: &controlGit{}, Logs: logs, Jobs: jobs,
 		Auditor: database, Signals: NewSignals(),
-		WorkspaceRoot: filepath.Join(root, "work"), MaxConcurrent: 1,
-	})
+		WorkspaceRoot: filepath.Join(root, "work")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -489,8 +487,7 @@ func TestStartupReconciliationRequeuesRunWithVanishedJob(t *testing.T) {
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: database, Git: &controlGit{}, Logs: logs, Jobs: jobs,
 		Auditor: database, Signals: NewSignals(),
-		WorkspaceRoot: filepath.Join(root, "work"), MaxConcurrent: 1,
-	})
+		WorkspaceRoot: filepath.Join(root, "work")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -600,8 +597,7 @@ func TestStartupReconciliationResetsUnobservedTag(t *testing.T) {
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: database, Git: &controlGit{}, Logs: logs, Jobs: jobs,
 		Auditor: database, Signals: NewSignals(),
-		WorkspaceRoot: filepath.Join(root, "work"), MaxConcurrent: 1,
-	})
+		WorkspaceRoot: filepath.Join(root, "work")})
 	if err != nil {
 		t.Fatal(err)
 	}

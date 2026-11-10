@@ -15,18 +15,18 @@ func TestRenderAdmissionShowsRetainedReservations(t *testing.T) {
 	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 	var output bytes.Buffer
 	err := renderAdmission(&output, &model.AdmissionState{
-		Capacity: 2, Used: 2, Runs: 2, MaxRuns: 2,
+		Used: 2, Runs: 2,
 		Reservations: []model.AdmissionReservation{
 			{RunID: "aaaa", State: "retained", Repo: "exampleorg-ebpf", Ref: "main", Since: now.Add(-90 * time.Second)},
-			{RunID: "bbbb", State: "waiting", Repo: "cli", Ref: "feature/x", Group: "tf"},
+			{RunID: "bbbb", State: "waiting", Repo: "cli", Ref: "feature/x"},
 		},
-		Blocker: &model.AdmissionBlocker{Repo: "cli", Ref: "feature/x", RunCeiling: true, Used: 2, Capacity: 2},
+		Blocker: &model.AdmissionBlocker{Repo: "cli", Ref: "feature/x", DiskFloor: true, Used: 2},
 	}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := output.String()
-	for _, want := range []string{"2 of 2 run slots used", "queue head: cli/feature/x (2 runs running)", "aaaa  retained", "1m30s", "exampleorg-ebpf/main"} {
+	for _, want := range []string{"2 run(s) admitted; Argo parallelism bounds running Workflows", "queue head: cli/feature/x (waiting for disk space)", "aaaa  retained", "1m30s", "exampleorg-ebpf/main"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("output lacks %q:\n%s", want, text)
 		}
@@ -34,7 +34,7 @@ func TestRenderAdmissionShowsRetainedReservations(t *testing.T) {
 }
 
 func TestAdmissionUsage(t *testing.T) {
-	for _, arguments := range [][]string{{"release"}, {"release", "a", "b"}, {"--force"}, {"bogus"}, {"--nope"}} {
+	for _, arguments := range [][]string{{"release"}, {"release", "a", "b"}, {"--force"}, {"bogus"}, {"--nope"}, {"groups"}, {"capacity", "3"}} {
 		if err := runAdmission(context.Background(), arguments, &bytes.Buffer{}); !errors.Is(err, errUsage) {
 			t.Fatalf("%v: %v, want usage error", arguments, err)
 		}

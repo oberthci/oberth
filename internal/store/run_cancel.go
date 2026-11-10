@@ -127,7 +127,7 @@ ON CONFLICT(run_id) DO UPDATE SET
 	details, err := json.Marshal(map[string]any{
 		"run_id": cancelled.ID, "repo_id": cancelled.RepoID, "ref_kind": cancelled.RefKind, "ref": cancelled.Ref,
 		"sha": cancelled.SHA, "trigger": cancelled.Trigger, "previous_state": previous, "job_name": cancelled.WorkflowName,
-		"concurrency_group": cancelled.ConcurrencyGroup, "reason": request.Reason, "force": request.Force,
+		"reason": request.Reason, "force": request.Force,
 		"warning": request.Warning, "promotion_id": result.PromotionID,
 	})
 	if err != nil {

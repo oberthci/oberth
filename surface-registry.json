@@ -1,24 +1,24 @@
 {
   "entries": {
-    "value:maxConcurrentJobs": {
-      "doc_anchor": "docs/native-synchronization.md#what-oberth-keeps",
-      "test_ref": "cmd/oberth/serve_startup_test.go TestServeOptions; internal/service/admission_test.go TestAdmissionEnforcesRunCeiling"
+    "flag:argo-parallelism": {
+      "doc_anchor": "docs/where-limits-live.md#how-many-workflows-run-at-once",
+      "test_ref": "internal/installer/argo_limits_test.go TestArgoHelmArgsRenderTheRequestedLimits"
     },
-    "flag:max-concurrent-jobs": {
-      "doc_anchor": "docs/native-synchronization.md#what-oberth-keeps",
-      "test_ref": "internal/service/admission_test.go TestAdmissionEnforcesRunCeiling"
+    "flag:argo-namespace-parallelism": {
+      "doc_anchor": "docs/where-limits-live.md#how-many-workflows-run-at-once",
+      "test_ref": "internal/installer/argo_limits_test.go TestArgoHelmArgsRenderTheRequestedLimits"
     },
-    "flag:max-concurrent-jobs-file": {
-      "doc_anchor": "docs/runtime-admission-capacity.md",
-      "test_ref": "internal/service/runtime_capacity_test.go TestRuntimeCapacityRaiseAndLowerPreserveGrants"
+    "flag:argo-sync-limit": {
+      "doc_anchor": "docs/where-limits-live.md#shared-step-limits",
+      "test_ref": "internal/installer/argo_limits_test.go TestArgoHelmArgsRenderTheRequestedLimits"
     },
-    "value:argoSync": {
-      "doc_anchor": "docs/native-synchronization.md#shared-step-limits-semaphores",
-      "test_ref": "hack/test-chart.sh argoSync"
+    "annotation:oberth.ci/concurrency-group": {
+      "doc_anchor": "docs/where-limits-live.md#migrating-from-concurrency-groups",
+      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitIgnoresRetiredConcurrencyGroupAnnotations"
     },
-    "value:semaphores": {
-      "doc_anchor": "docs/native-synchronization.md#shared-step-limits-semaphores",
-      "test_ref": "hack/test-chart.sh argoSync"
+    "annotation:oberth.ci/concurrency-limit": {
+      "doc_anchor": "docs/where-limits-live.md#migrating-from-concurrency-groups",
+      "test_ref": "pkg/argoworkflow/concurrency_group_test.go TestAdmitIgnoresRetiredConcurrencyGroupAnnotations"
     },
     "value:releases": {
       "doc_anchor": "docs/native-synchronization.md#serialized-releases",

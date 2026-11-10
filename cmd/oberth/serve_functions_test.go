@@ -630,25 +630,15 @@ func TestParseServeOptionsRejectsEmptyNamespace(t *testing.T) {
 	}
 }
 
-func TestParseServeOptionsRejectsNegativeConcurrency(t *testing.T) {
+// The run ceiling flag is gone since v0.20.0 (Argo parallelism bounds
+// running Workflows); an old command line fails instead of being ignored.
+func TestParseServeOptionsRefusesRetiredRunCeilingFlags(t *testing.T) {
 	t.Parallel()
-	_, err := parseServeOptions([]string{
-		"--argo-namespace", "argo-pipelines",
-		"--max-concurrent-jobs", "-1",
-	}, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "0..64") {
-		t.Fatalf("negative concurrency error = %v", err)
-	}
-}
-
-func TestParseServeOptionsRejectsExcessiveConcurrency(t *testing.T) {
-	t.Parallel()
-	_, err := parseServeOptions([]string{
-		"--argo-namespace", "argo-pipelines",
-		"--max-concurrent-jobs", "65",
-	}, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "0..64") {
-		t.Fatalf("excessive concurrency error = %v", err)
+	for _, flag := range []string{"--max-concurrent-jobs", "--max-concurrent-jobs-file"} {
+		_, err := parseServeOptions([]string{"--argo-namespace", "argo-pipelines", flag, "3"}, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
+			t.Fatalf("%s error = %v", flag, err)
+		}
 	}
 }
 

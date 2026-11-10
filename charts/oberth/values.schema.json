@@ -6,7 +6,6 @@
     "image",
     "runnerImagePrefixes",
     "replicaCount",
-    "maxConcurrentJobs",
     "auditAnchor",
     "service",
     "persistence",
@@ -154,15 +153,15 @@
       "type": "integer",
       "minimum": 0,
       "maximum": 64,
-      "description": "Optional run ceiling: runs that may hold a Workflow at once. 0 is no ceiling."
+      "description": "Not used since v0.20.0. Accepted only at its former default 0 so --reuse-values upgrades render; any other value fails validation. Set the Argo controller parallelism instead (oberth install --argo-parallelism)."
     },
     "argoSync": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Shared step limits rendered into the ConfigMap oberth-sync-limits in the pipeline namespace for native Argo synchronization semaphores.",
+      "description": "Not used since v0.20.0. Accepted only empty so --reuse-values upgrades render; any limit fails validation. The ConfigMap oberth-sync-limits is rendered by the argo-workflows release (oberth install --argo-sync-limit).",
       "properties": {
         "semaphores": {
-          "type": "object",
+          "type": ["object", "null"],
           "maxProperties": 64,
           "propertyNames": {
             "pattern": "^[A-Za-z0-9]([-._A-Za-z0-9]{0,251}[A-Za-z0-9])?$"
@@ -186,7 +185,7 @@
       "properties": {
         "exclusiveClasses": {
           "type": "object",
-          "description": "Not used since v0.18.0. Accepted only empty so --reuse-values upgrades render; any class fails validation. Define argoSync.semaphores and declare synchronization.semaphores on the step instead."
+          "description": "Not used since v0.18.0. Accepted only empty so --reuse-values upgrades render; any class fails validation. Define the limit in the ConfigMap oberth-sync-limits (oberth install --argo-sync-limit) and declare synchronization.semaphores on the step instead."
         },
         "sizeWeights": {
           "type": "object",
@@ -207,6 +206,7 @@
         "runtimeCapacity": {
           "type": "object",
           "additionalProperties": false,
+          "description": "Not used since v0.20.0. Accepted only at its former defaults (enabled true, maxConcurrentJobs null or 0) so --reuse-values upgrades render; anything else fails validation.",
           "properties": {
             "enabled": {
               "type": "boolean"

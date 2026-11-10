@@ -53,12 +53,8 @@ func adoptionFailure(adopter JobAdopter, run model.Run, err error) error {
 	return failure
 }
 
-// adopt restores the grant of work already running, even above the new
-// owner's configured ceiling. New admissions wait until it has drained.
+// adopt restores the grant of work already running.
 func (gate *admissionGate) adopt(run model.Run) (*admissionReservation, error) {
-	if run.ConcurrencyGroup != "" && !argoworkflow.ValidConcurrencyGroup(run.ConcurrencyGroup) {
-		return nil, fmt.Errorf("%w: invalid adopted concurrency group", ErrAdoptionRefused)
-	}
 	order := run.AdmissionSequence
 	if order <= 0 {
 		order = run.QueueSequence
@@ -66,41 +62,21 @@ func (gate *admissionGate) adopt(run model.Run) (*admissionReservation, error) {
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
 	if previous, ok := gate.reservations[run.QueueSequence]; ok {
-		if previous.runID != run.ID || previous.order != order || !previous.granted || previous.groupName != run.ConcurrencyGroup || max(1, previous.groupLimit) != max(1, run.ConcurrencyLimit) || previous.repoID != run.RepoID {
+		if previous.runID != run.ID || previous.order != order || !previous.granted || previous.repoID != run.RepoID {
 			return nil, fmt.Errorf("%w: conflicting adopted admission", ErrAdoptionRefused)
 		}
 		return previous, nil
-	}
-	group := ""
-	if run.ConcurrencyGroup != "" {
-		group = concurrencyGroupKey(run.RepoID, run.ConcurrencyGroup)
-		limit := max(1, run.ConcurrencyLimit)
-		for _, holder := range gate.groups[group] {
-			if max(1, holder.groupLimit) != limit {
-				return nil, fmt.Errorf("%w: conflicting adopted concurrency group limits", ErrAdoptionRefused)
-			}
-			// Before shared groups, independent repositories could each own
-			// one grant. Preserve those live grants on upgrade. Multiple
-			// holders in one repository, or above an explicit larger limit,
-			// cannot arise from that legacy contract and remain a refusal.
-			if len(gate.groups[group]) >= limit && (limit != 1 || holder.repoID == run.RepoID) {
-				return nil, fmt.Errorf("%w: adopted concurrency group already at limit %d", ErrAdoptionRefused, limit)
-			}
-		}
 	}
 	now := time.Now().UTC()
 	reservation := &admissionReservation{
 		gate: gate, sequence: run.QueueSequence, order: order, runID: run.ID, repoID: run.RepoID,
 		ref: run.Ref, refKind: run.RefKind, sha: run.SHA,
-		group: group, groupName: run.ConcurrencyGroup, groupLimit: max(1, run.ConcurrencyLimit), prepared: true, granted: true, submitted: true,
+		prepared: true, granted: true, submitted: true,
 		claimedAt: now, preparedAt: now, grantedAt: now, ready: make(chan struct{}),
 	}
 	close(reservation.ready)
 	gate.reservations[run.QueueSequence] = reservation
 	gate.runs++
-	if group != "" {
-		gate.groups[group] = append(gate.groups[group], reservation)
-	}
 	return reservation, nil
 }
 

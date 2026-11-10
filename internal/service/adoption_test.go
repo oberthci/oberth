@@ -99,9 +99,6 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 			if err != nil || run.ID != replacement.ID || run.AdmissionSequence != previous.AdmissionSequence || run.QueueSequence != previous.QueueSequence || run.ID != previous.ID {
 				t.Fatalf("re-fired fixture lost its admission order: previous=%#v run=%#v err=%v", previous, run, err)
 			}
-			if err := fixture.store.SetRunConcurrencyGroup(context.Background(), run.ID, "build"); err != nil {
-				t.Fatal(err)
-			}
 			fixture.setWorkflowName(t, run.ID, "oberth-adopt")
 			if _, err := fixture.store.MarkRunSubmitted(context.Background(), run.ID); err != nil {
 				t.Fatal(err)
@@ -169,14 +166,14 @@ func TestStartupAdoptsBranchWorkflowAndFinalizesSameRun(t *testing.T) {
 					t.Fatalf("adopted run = %#v", current)
 				}
 				scheduler.admission.mu.Lock()
-				runs, groups := scheduler.admission.runs, len(scheduler.admission.groups)
+				runs := scheduler.admission.runs
 				order := scheduler.admission.reservations[run.QueueSequence].order
 				scheduler.admission.mu.Unlock()
 				if order != run.AdmissionSequence {
 					t.Fatalf("adopted admission order = %d, want persisted %d", order, run.AdmissionSequence)
 				}
-				if runs != 1 || groups != 1 {
-					t.Fatalf("admission runs/groups = %d/%d", runs, groups)
+				if runs != 1 {
+					t.Fatalf("admission runs = %d", runs)
 				}
 				close(jobs.waitBlocks)
 			}
@@ -273,9 +270,11 @@ func TestAdoptedWorkflowSurvivesShutdownWithWorkspace(t *testing.T) {
 	}
 }
 
-func TestAdoptedAdmissionIsIdempotentAndHoldsItsGroup(t *testing.T) {
-	gate := newAdmissionGate(1)
-	run := model.Run{ID: "active", QueueSequence: 11, AdmissionSequence: 2, RepoID: 1, ConcurrencyGroup: "build"}
+// Adoption is idempotent and counts every adopted run; a new run is
+// granted beside adopted ones (Argo parallelism bounds the Workflows).
+func TestAdoptedAdmissionIsIdempotent(t *testing.T) {
+	gate := newAdmissionGate()
+	run := model.Run{ID: "active", QueueSequence: 11, AdmissionSequence: 2, RepoID: 1}
 	first, err := gate.adopt(run)
 	if err != nil {
 		t.Fatal(err)
@@ -287,55 +286,26 @@ func TestAdoptedAdmissionIsIdempotentAndHoldsItsGroup(t *testing.T) {
 	if err != nil || again != first {
 		t.Fatalf("second adoption = %p, %v", again, err)
 	}
+	if _, err := gate.adopt(model.Run{ID: "conflict", QueueSequence: 11, AdmissionSequence: 2, RepoID: 1}); !errors.Is(err, ErrAdoptionRefused) {
+		t.Fatalf("conflicting adoption = %v", err)
+	}
 	other, err := gate.adopt(model.Run{ID: "also-active", QueueSequence: 2, RepoID: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if gate.runs != 2 {
-		t.Fatalf("over-capacity adoption = %d", gate.runs)
+		t.Fatalf("adopted runs = %d", gate.runs)
 	}
-	waiting := gate.reserveRun(model.Run{ID: "next", QueueSequence: 3, RepoID: 1, ConcurrencyGroup: "build"})
-	ctx, cancel := context.WithCancel(context.Background())
+	waiting := gate.reserveRun(model.Run{ID: "next", QueueSequence: 3, RepoID: 1})
+	ctx, cancel := context.WithTimeout(context.Background(), testStartTimeout(time.Second))
 	defer cancel()
-	granted := make(chan func(), 1)
-	go func() {
-		release, err := waiting.acquireRequest(ctx, admissionRequest{RunID: "next", RepoID: 1, Group: "build"})
-		if err == nil {
-			granted <- release
-		}
-	}()
-	deadline := time.Now().Add(testStartTimeout(time.Second))
-	for {
-		gate.mu.Lock()
-		prepared := waiting.prepared
-		gate.mu.Unlock()
-		if prepared {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("waiter was not prepared")
-		}
-		time.Sleep(testTimeout(time.Millisecond))
+	release, err := waiting.acquireRequest(ctx, admissionRequest{RunID: "next", RepoID: 1})
+	if err != nil {
+		t.Fatalf("new work waited behind adopted runs: %v", err)
 	}
-	select {
-	case <-granted:
-		t.Fatal("new work bypassed adopted weight/group")
-	default:
-	}
+	release()
 	other.release()
-	gate.mu.Lock()
-	grantedEarly := waiting.granted
-	gate.mu.Unlock()
-	if grantedEarly {
-		t.Fatal("group passed while adopted holder still runs")
-	}
 	first.release()
-	select {
-	case release := <-granted:
-		release()
-	case <-time.After(testStartTimeout(time.Second)):
-		t.Fatal("group did not pass after completion")
-	}
 	if gate.runs != 0 {
 		t.Fatalf("admission leaked: %d", gate.runs)
 	}
@@ -486,10 +456,6 @@ func TestAdoptionPreemptedBeforeWaitRetainsAdmissionOnDeleteFailure(t *testing.T
 	fixture := newRecoveryFixture(t)
 	run := fixture.enqueueAndClaim(t, "feature/delete-failure", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	fixture.setWorkflowName(t, run.ID, "oberth-delete-failure")
-	if err := fixture.store.SetRunConcurrencyGroup(context.Background(), run.ID, "build"); err != nil {
-		t.Fatal(err)
-	}
-	run.ConcurrencyGroup = "build"
 	jobs := &adoptingJobs{found: true, recoveryJobs: recoveryJobs{deleteErr: errors.New("API unavailable")}}
 	scheduler := fixture.scheduler(t, jobs)
 	reservation, err := scheduler.admission.adopt(run)
@@ -503,9 +469,9 @@ func TestAdoptionPreemptedBeforeWaitRetainsAdmissionOnDeleteFailure(t *testing.T
 		t.Fatal("failed deletion accepted")
 	}
 	scheduler.admission.mu.Lock()
-	runs, held := scheduler.admission.runs, scheduler.admission.groups[concurrencyGroupKey(run.RepoID, run.ConcurrencyGroup)]
+	runs, held := scheduler.admission.runs, scheduler.admission.reservations[run.QueueSequence]
 	scheduler.admission.mu.Unlock()
-	if scheduler.AdmissionState().Runs == 0 || runs != 1 || len(held) != 1 || held[0] != reservation || !reservation.retained {
+	if scheduler.AdmissionState().Runs == 0 || runs != 1 || held != reservation || !reservation.retained {
 		t.Fatalf("live Workflow lost admission: %d held=%p", runs, held)
 	}
 }
@@ -592,7 +558,7 @@ func TestAdoptionFailureNamesTheWorkflowToDelete(t *testing.T) {
 		refused   bool
 	}{
 		{"binding-mismatch", fmt.Errorf("%w: argojob: Workflow oberth-refused adoption binding mismatch", ErrAdoptionRefused), false, true},
-		{"group-conflict", nil, true, true},
+		{"admission-conflict", nil, true, true},
 		{"read-failure", errors.New("argojob: read Workflow for adoption: connection refused"), false, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -600,13 +566,11 @@ func TestAdoptionFailureNamesTheWorkflowToDelete(t *testing.T) {
 			fixture := newRecoveryFixture(t)
 			run := fixture.enqueueAndClaim(t, "feature/refused", "abcdefabcdefabcdefabcdefabcdefabcdefabcd")
 			fixture.setWorkflowName(t, run.ID, "oberth-refused")
-			if err := fixture.store.SetRunConcurrencyGroup(context.Background(), run.ID, "build"); err != nil {
-				t.Fatal(err)
-			}
 			jobs := &adoptingJobs{found: test.adoptErr == nil, adoptErr: test.adoptErr, recoveryJobs: recoveryJobs{terminalErr: ErrJobNotTerminal}}
 			scheduler := fixture.scheduler(t, jobs)
 			if test.holdOther {
-				if _, err := scheduler.admission.adopt(model.Run{ID: "holder", QueueSequence: run.QueueSequence + 100, RepoID: run.RepoID, ConcurrencyGroup: "build"}); err != nil {
+				// Another run already holds this run's admission key.
+				if _, err := scheduler.admission.adopt(model.Run{ID: "holder", QueueSequence: run.QueueSequence, AdmissionSequence: run.AdmissionSequence, RepoID: run.RepoID}); err != nil {
 					t.Fatal(err)
 				}
 			}

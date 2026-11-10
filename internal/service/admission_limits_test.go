@@ -96,8 +96,10 @@ func TestAdmissionLimitsCleanupOutageKeepsServerAvailableAndEventuallyReleases(t
 	}
 }
 
-func TestAdmissionLimitsUnclaimedQueueReportsFullRunCeilingWithoutLeakingScope(t *testing.T) {
-	g := newAdmissionGate(10)
+// Oberth has no run ceiling: an unclaimed queued run never reads "N of M
+// runs running", and a scoped viewer sees no shared run count.
+func TestAdmissionLimitsUnclaimedQueueReportsNoRunCeilingWithoutLeakingScope(t *testing.T) {
+	g := newAdmissionGate()
 	var releases []func()
 	defer func() {
 		for _, release := range releases {
@@ -109,14 +111,12 @@ func TestAdmissionLimitsUnclaimedQueueReportsFullRunCeilingWithoutLeakingScope(t
 	}
 	api := &API{admission: &Scheduler{admission: g}}
 	run := model.Run{ID: "queued", RepoID: 1, Status: model.RunQueued}
-	observed, reason := api.observeScheduling(t.Context(), run, nil, true)
-	if observed.Message != "10 of 10 runs running" || reason != observed.Message {
-		t.Fatalf("unclaimed row hides real blocker: message=%q reason=%q", observed.Message, reason)
-	}
-	api.scope = &repoScope{repos: map[int64]model.Repository{1: {ID: 1}}}
-	observed, reason = api.observeScheduling(t.Context(), run, nil, true)
-	if strings.Contains(observed.Message, "10") || strings.Contains(reason, "10") {
-		t.Fatal("scoped queue exposes shared run count", observed.Message, reason)
+	for _, scope := range []*repoScope{nil, {repos: map[int64]model.Repository{1: {ID: 1}}}} {
+		api.scope = scope
+		observed, reason := api.observeScheduling(t.Context(), run, nil, true)
+		if strings.Contains(observed.Message, "runs running") || strings.Contains(observed.Message, "10") || strings.Contains(reason, "10") {
+			t.Fatal("queued row reports a run ceiling", observed.Message, reason)
+		}
 	}
 }
 

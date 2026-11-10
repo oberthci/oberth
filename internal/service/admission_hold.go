@@ -82,20 +82,6 @@ func (gate *admissionGate) adminHeldLocked(r *admissionReservation) bool {
 	}
 	return gate.adminHold.Blocks(run, gate.clock())
 }
-func (gate *admissionGate) dispatchParked() (held, other int) {
-	gate.mu.Lock()
-	defer gate.mu.Unlock()
-	for _, r := range gate.waiters {
-		if gate.adminHeldLocked(r) {
-			held++
-			continue
-		}
-		if holder, ahead := gate.groupBlockerLocked(r); r.prepared && (holder != "" || ahead != "") {
-			other++
-		}
-	}
-	return
-}
 
 func (service *API) admissionHoldTool(ctx context.Context, actor api.Actor, raw json.RawMessage) (any, error) {
 	if !actor.Admin {

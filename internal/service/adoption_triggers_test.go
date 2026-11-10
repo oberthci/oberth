@@ -59,9 +59,6 @@ func slice2RecoveryRun(t *testing.T, kind string) (*recoveryFixture, model.Run, 
 	ctx := context.Background()
 	var err error
 
-	if err = fixture.store.SetRunConcurrencyGroup(ctx, run.ID, "publish"); err != nil {
-		t.Fatal(err)
-	}
 	if _, err = fixture.store.MarkRunAdmitted(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}

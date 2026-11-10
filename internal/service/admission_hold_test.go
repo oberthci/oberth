@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -127,7 +126,6 @@ func TestAdmissionHoldDispatchAndGroupBypass(t *testing.T) {
 		r := gate.reserveRun(model.Run{ID: "ordinary", QueueSequence: i, RefKind: model.RefBranch})
 		gate.mu.Lock()
 		r.prepared = true
-		r.group = "shared"
 		gate.mu.Unlock()
 		held = append(held, r)
 	}
@@ -137,11 +135,10 @@ func TestAdmissionHoldDispatchAndGroupBypass(t *testing.T) {
 	tag := gate.reserveRun(model.Run{ID: "tag", QueueSequence: 7, RefKind: model.RefTag})
 	gate.mu.Lock()
 	tag.prepared = true
-	tag.group = "shared"
 	gate.grantLocked()
 	gate.mu.Unlock()
 	if !granted(gate, tag) {
-		t.Fatal("held group waiter blocked allowed tag")
+		t.Fatal("held waiter blocked allowed tag")
 	}
 	for _, r := range held {
 		if granted(gate, r) {
@@ -151,13 +148,10 @@ func TestAdmissionHoldDispatchAndGroupBypass(t *testing.T) {
 	if _, err := f.scheduler.SetAdmissionHold(t.Context(), "admin", model.AdmissionHoldRequest{Reason: "done"}); err != nil {
 		t.Fatal(err)
 	}
-	if granted(gate, held[0]) {
-		t.Fatal("clearing hold preempted running group holder")
-	}
 	tag.release()
 	for _, r := range held {
 		if !granted(gate, r) {
-			t.Fatal("cleared hold lost group FIFO", r.sequence)
+			t.Fatal("cleared hold did not admit the held waiters", r.sequence)
 		}
 		r.release()
 	}
@@ -329,11 +323,12 @@ func TestAdmissionHoldExpiryResumesDispatchWithoutOperator(t *testing.T) {
 	}
 }
 
-func TestAdmissionHoldWorkflowOnlyKeepsRunningGrantAndSlotCeiling(t *testing.T) {
+// The hold never displaces a running grant: the holder keeps it, a run the
+// hold allows starts beside it, and the ordinary run waits until the hold
+// ends. Oberth has no run ceiling; Argo parallelism bounds the Workflows.
+func TestAdmissionHoldWorkflowOnlyKeepsRunningGrant(t *testing.T) {
 	f := newControlFixture(t)
 	gate := f.scheduler.admission
-	gate.maxRuns = 1
-	f.scheduler.maxConcurrent = 1
 	holder := gate.reserveRun(model.Run{ID: "running", RepoID: 1, QueueSequence: 1, RefKind: model.RefBranch})
 	releaseHolder := acquireRequestWithinBudget(t, holder, groupRequest("running", 1, pipeline.XL, ""))
 	if _, err := f.scheduler.SetAdmissionHold(t.Context(), "admin", model.AdmissionHoldRequest{On: true, Reason: "release only"}); err != nil {
@@ -343,53 +338,23 @@ func TestAdmissionHoldWorkflowOnlyKeepsRunningGrantAndSlotCeiling(t *testing.T) 
 	ordinaryReady := make(chan func(), 1)
 	go acquireRequestForTest(ordinary, groupRequest("ordinary", 1, pipeline.XL, ""), ordinaryReady)
 	awaitWaiting(t, ordinary)
-	// A running grant still consumes its slot even when another claim is held.
-	if f.scheduler.dispatchSlotAvailable(2) {
-		t.Fatal("running workflow lost its dispatch slot")
-	}
 	tag := gate.reserveRun(model.Run{ID: "release-tag", RepoID: 1, QueueSequence: 3, RefKind: model.RefTag})
-	tagReady := make(chan func(), 1)
-	go acquireRequestForTest(tag, groupRequest("release-tag", 1, pipeline.XL, ""), tagReady)
-	awaitWaiting(t, tag)
+	releaseTag := acquireRequestWithinBudget(t, tag, groupRequest("release-tag", 1, pipeline.XL, ""))
 	state := f.scheduler.AdmissionState()
-	if !granted(gate, holder) || granted(gate, tag) || state.Runs != 1 || state.Used != 1 {
-		t.Fatal("hold displaced running work or exceeded one workflow", state)
+	if !granted(gate, holder) || !granted(gate, tag) || granted(gate, ordinary) || state.Runs != 2 || state.Used != 2 {
+		t.Fatal("hold displaced running work or blocked the allowed tag", state)
 	}
 	releaseHolder()
-	releaseTag := awaitAcquired(t, tagReady)
-	if granted(gate, ordinary) {
-		t.Fatal("ordinary XL bypassed hold")
-	}
 	releaseTag()
-	if state = f.scheduler.AdmissionState(); state.Runs != 0 || !state.Hold.On {
+	if state = f.scheduler.AdmissionState(); state.Runs != 0 || !state.Hold.On || granted(gate, ordinary) {
 		t.Fatal("release changed hold", state)
 	}
 	if _, err := f.scheduler.SetAdmissionHold(t.Context(), "admin", model.AdmissionHoldRequest{Reason: "qualification finished"}); err != nil {
 		t.Fatal(err)
 	}
 	releaseOrdinary := awaitAcquired(t, ordinaryReady)
-	if state = f.scheduler.AdmissionState(); state.Runs != 1 || state.Used != 1 || state.MaxRuns != 1 {
-		t.Fatal("workflow slot accounting changed", state)
+	if state = f.scheduler.AdmissionState(); state.Runs != 1 || state.Used != 1 {
+		t.Fatal("workflow accounting changed", state)
 	}
 	releaseOrdinary()
-}
-
-func TestAdmissionHoldRuntimeCeilingAppliesUnderHold(t *testing.T) {
-	f := newControlFixture(t)
-	f.scheduler.capacityFile = filepath.Join(t.TempDir(), "max-concurrent-jobs")
-	if _, err := f.scheduler.SetAdmissionHold(t.Context(), "admin", model.AdmissionHoldRequest{On: true, Reason: "qualification"}); err != nil {
-		t.Fatal(err)
-	}
-	writeCapacity(t, f.scheduler, "1")
-	f.scheduler.refreshRuntimeCapacity(t.Context())
-	state := f.scheduler.AdmissionState()
-	if state.Configuration.Error != "" || state.Configuration.MaxConcurrentJobs != 1 || state.Configuration.Source != "file" || state.MaxRuns != 1 || !state.Hold.On {
-		t.Fatal("runtime ceiling not applied or hold changed", state)
-	}
-	tag := f.scheduler.admission.reserveRun(model.Run{ID: "tag", QueueSequence: 1, RefKind: model.RefTag})
-	release := acquireRequestWithinBudget(t, tag, admissionRequest{})
-	defer release()
-	if state = f.scheduler.AdmissionState(); state.Runs != 1 || state.Used != 1 {
-		t.Fatal("hold restored numeric admission", state)
-	}
 }

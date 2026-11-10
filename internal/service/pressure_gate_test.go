@@ -160,12 +160,11 @@ func TestHostPressureStarvationOnlyHeadAndBudgetStillApply(t *testing.T) {
 	if head.granted || behind.granted {
 		t.Fatal("expired follower bypassed fresh head")
 	}
-	// Once the head is old, its grant still consumes the only run slot.
-	f.gate.maxRuns = 1
+	// Once the head is old, it alone is admitted in this pass.
 	head.pressureSince = f.now.Add(-21 * time.Minute)
 	f.advance(time.Second)
 	if !head.granted || behind.granted {
-		t.Fatal("starvation bypassed budget")
+		t.Fatal("starvation admitted more than the head")
 	}
 }
 
@@ -278,14 +277,13 @@ func TestHostPressureStarvationStartsAtPressureDeferral(t *testing.T) {
 		t.Fatal("queue age incorrectly counted as pressure starvation")
 	}
 	// Keep the pressure clock across a brief hysteresis recovery while
-	// capacity prevents a grant, so a short dip cannot reset starvation.
-	f.gate.maxRuns = 1
-	f.gate.runs = 1
+	// the disk floor prevents a grant, so a short dip cannot reset starvation.
+	f.blockDisk(true)
 	f.sample.CPU.SomeAvg10 = 0
 	f.advance(time.Second)
 	f.sample.CPU.SomeAvg10 = 45
 	f.advance(time.Second)
-	f.gate.runs = 0
+	f.blockDisk(false)
 	f.advance(20*time.Minute - 3*time.Second)
 	if r.granted {
 		t.Fatal("starvation granted at the exact wait boundary")
@@ -349,18 +347,18 @@ func TestHostPressureStarvationOnlyOnceInLongPass(t *testing.T) {
 	}
 }
 
-func TestHostPressureBudgetWaitDoesNotStartStarvation(t *testing.T) {
+func TestHostPressureDiskWaitDoesNotStartStarvation(t *testing.T) {
 	f := hostPressureTestGate()
-	f.gate.maxRuns = 1
-	running := f.prepare(1, model.PriorityNormal, "", pipeline.XL)
+	f.blockDisk(true)
 	f.sample.CPU.SomeAvg10 = 45
 	waiting := f.prepare(2, model.PriorityNormal, "", pipeline.S)
 	f.advance(21 * time.Minute)
 	if !waiting.pressureSince.IsZero() {
-		t.Fatal("capacity wait incorrectly started pressure starvation")
+		t.Fatal("disk wait incorrectly started pressure starvation")
 	}
-	running.cancel()
+	f.blockDisk(false)
+	f.advance(time.Second)
 	if waiting.granted || waiting.pressureSince.IsZero() {
-		t.Fatal("releasing capacity should start a pressure deferral")
+		t.Fatal("disk recovery should start a pressure deferral")
 	}
 }

@@ -70,7 +70,7 @@ func TestArgoCollectUnfinishedNodesPreservesFailure(t *testing.T) {
 				control := &configuredController{waitResult: completion}
 				adapter := &ArgoJobs{controller: control, intents: map[string]argoIntent{}}
 				jobs := &collectJobs{adapter: adapter, logs: logs, completion: completion}
-				scheduler, err := service.NewScheduler(service.SchedulerConfig{Store: db, Git: collectGit{}, Logs: logs, Jobs: jobs, Auditor: db, WorkspaceRoot: t.TempDir(), MaxConcurrent: 1})
+				scheduler, err := service.NewScheduler(service.SchedulerConfig{Store: db, Git: collectGit{}, Logs: logs, Jobs: jobs, Auditor: db, WorkspaceRoot: t.TempDir()})
 				if err != nil {
 					t.Fatal(err)
 				}

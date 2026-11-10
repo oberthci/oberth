@@ -70,8 +70,7 @@ func newRerunHarness(t *testing.T, results ...JobResult) *rerunHarness {
 	harness.scheduler, err = NewScheduler(SchedulerConfig{
 		Store: fixture.store, Git: harness.git, Logs: fixture.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs,
 		Auditor: fixture.store, Signals: fixture.signals,
-		WorkspaceRoot: filepath.Join(fixture.root, "rerun-work"), MaxConcurrent: 1,
-	})
+		WorkspaceRoot: filepath.Join(fixture.root, "rerun-work")})
 	if err != nil {
 		t.Fatal(err)
 	}

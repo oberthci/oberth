@@ -41,12 +41,6 @@ func (database schedulerDatabase) SetRunCredentialed(ctx context.Context, runID 
 	return retryDatabaseError(ctx, "SetRunCredentialed", func(ctx context.Context) error { return database.SchedulerStore.SetRunCredentialed(ctx, runID) })
 }
 
-func (database schedulerDatabase) SetRunConcurrencyGroup(ctx context.Context, runID string, group string, limits ...int) error {
-	return retryDatabaseError(ctx, "SetRunConcurrencyGroup", func(ctx context.Context) error {
-		return database.SchedulerStore.SetRunConcurrencyGroup(ctx, runID, group, limits...)
-	})
-}
-
 func (database schedulerDatabase) PendingRunCancellations(ctx context.Context) ([]model.RunCancellation, error) {
 	return retryDatabase(ctx, "PendingRunCancellations", func(ctx context.Context) ([]model.RunCancellation, error) {
 		return database.SchedulerStore.PendingRunCancellations(ctx)

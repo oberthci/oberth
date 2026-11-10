@@ -105,8 +105,6 @@ type serveOptions struct {
 	retentionInterval       time.Duration
 	retentionKeepNewest     int
 	autoRetryInfrastructure bool
-	maxConcurrent           int
-	maxConcurrentFile       string
 	admissionDiskFloorBytes int64
 	admissionPressure       service.AdmissionPressureConfig
 	admissionStallTimeout   time.Duration
@@ -242,10 +240,8 @@ func parseServeOptions(arguments []string, output io.Writer) (serveOptions, erro
 	flags.IntVar(&options.retentionKeepNewest, "retention-keep-newest", 1, "terminal runs retained per repository/ref during automatic sweeps")
 	flags.Float64Var(&options.kubernetesQPS, "kubernetes-client-qps", 50, "Kubernetes API requests per second per server client")
 	flags.IntVar(&options.kubernetesBurst, "kubernetes-client-burst", 100, "Kubernetes API burst allowance per server client")
-	flags.IntVar(&options.maxConcurrent, "max-concurrent-jobs", 0, "optional run ceiling: how many runs may hold a Workflow at once (0..64; 0 is no ceiling; boot default)")
 
 	flags.BoolVar(&options.autoRetryInfrastructure, "auto-retry-infrastructure", true, "automatically retry eligible infrastructure failures once at their original queue position")
-	flags.StringVar(&options.maxConcurrentFile, "max-concurrent-jobs-file", "", "mounted ConfigMap key to reload the run ceiling without restart (0 is no ceiling); invalid or missing keeps the last good value")
 	flags.DurationVar(&options.admissionStallTimeout, "admission-stall-timeout", 10*time.Minute, "workflow startup bound for absent or non-capacity-stalled pods; Kubernetes capacity waits are exempt")
 	defaults := service.DefaultAdmissionPressureConfig()
 	flags.BoolVar(&options.admissionPressure.Enabled, "admission-pressure-enabled", defaults.Enabled, "hold new workflow grants at the hard host CPU/IO PSI limits")
@@ -453,9 +449,6 @@ func validateServeOptions(options serveOptions) error {
 	}
 	if err := validateArgoServeOptions(options); err != nil {
 		return err
-	}
-	if options.maxConcurrent < 0 || options.maxConcurrent > 64 {
-		return errors.New("serve: --max-concurrent-jobs must be in 0..64 (0: no ceiling)")
 	}
 	if options.gitCommandTimeout <= 0 || options.gcInterval <= 0 {
 		return errors.New("serve: timeout and GC values must be positive")
@@ -896,9 +889,8 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	signals := service.NewSignals()
 	scheduler, err := service.NewScheduler(service.SchedulerConfig{
 		Store: database, Git: git, Logs: logs, Jobs: argoJobs, ReleaseJobs: argoJobs, Auditor: database,
-		Signals: signals, WorkspaceRoot: filepath.Join(options.dataRoot, "work"), MaxConcurrent: options.maxConcurrent,
+		Signals: signals, WorkspaceRoot: filepath.Join(options.dataRoot, "work"),
 		DisableInfrastructureAutoRetry: !options.autoRetryInfrastructure,
-		MaxConcurrentFile:              options.maxConcurrentFile,
 		MaxRunLogBytes:                 options.runLogLimitBytes,
 		MutationGate:                   anchors.AllowMutation,
 		AdmissionDiskFloorBytes:        options.admissionDiskFloorBytes,
@@ -908,7 +900,7 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 	if err != nil {
 		return err
 	}
-	scheduler.SetCapacityOverrideReader(database.AdmissionCapacityOverride)
+	warnRetiredCapacityOverride(ctx, logger, database)
 	retention.AcquirePurge = scheduler.AcquireEvidencePurge
 	writerProgress := &liveness.Heartbeat{}
 	served, err := loadServedCertificate(options.tlsCert, options.tlsKey)
@@ -1146,8 +1138,6 @@ func serve(ctx context.Context, options serveOptions, logger *log.Logger) (resul
 		QueueCap:               database,
 		ReleaseWIFOverrides:    database,
 		ReleaseWIF:             releaseWIF,
-		CapacityOverrides:      database,
-		RuntimeCapacity:        scheduler,
 		SecretStoreVerifier:    buildSecretStoreVerifier(options, kube),
 		SecretAccessReconciler: accessReconciler,
 		RepositoryArchiver:     database,
@@ -2325,4 +2315,20 @@ func shutdownHTTP(ctx context.Context, server *http.Server) error {
 // configuredHealth carries deployment configuration into both status views.
 func configuredHealth(options serveOptions) app.Health {
 	return app.Health{SecretStore: secretStoreStatus(options), PipelineNetworkPolicyEnabled: options.pipelineNetworkPolicyEnabled}
+}
+
+// warnRetiredCapacityOverride logs a run ceiling an older server stored with
+// admission_capacity_config. Since v0.20.0 it has no effect; the Argo
+// controller's parallelism bounds running Workflows.
+func warnRetiredCapacityOverride(ctx context.Context, logger *log.Logger, reader interface {
+	AdmissionCapacityOverride(context.Context) (*model.AdmissionCapacityOverride, error)
+}) {
+	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	override, err := reader.AdmissionCapacityOverride(readCtx)
+	if err != nil || override == nil || override.MaxConcurrentJobs <= 0 {
+		return
+	}
+	logger.Printf("WARN: the runtime run ceiling %d (set by %s) has no effect since v0.20.0; set the Argo controller parallelism instead (docs/where-limits-live.md)",
+		override.MaxConcurrentJobs, override.Actor)
 }

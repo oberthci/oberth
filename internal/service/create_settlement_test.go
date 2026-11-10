@@ -208,8 +208,7 @@ func TestWorkflowCreateRestartRestoresGrantsWithoutWaitingForSettlement(t *testi
 			f := newControlFixture(t, JobResult{Status: model.RunFailed, Phase: "infrastructure"})
 			jobs := &pendingCreateJobs{fakeJobs: f.jobs}
 			f.scheduler.jobs = jobs
-			f.scheduler.maxConcurrent = 3
-			f.scheduler.admission = newAdmissionGate(3)
+			f.scheduler.admission = newAdmissionGate()
 			var runs []model.Run
 			for i := range 2 {
 				queued, err := f.scheduler.EnqueueCI(t.Context(), CIRequest{EventID: fmt.Sprintf("restart-%d", i), Repository: f.repo, Branch: fmt.Sprintf("feature/restart-%d", i), SHA: strings.Repeat("c", 40), Actor: "pusher"})

@@ -7,8 +7,9 @@ const intervals = [];
 const sandbox = vm.createContext({URLSearchParams, console, Map, Set, Date, location:{pathname:'/runs'}, document:{body:{dataset:{version:'test'}},getElementById(){return null}}, localStorage:{getItem(){return null},setItem(){}}, setInterval(fn,ms){intervals.push({fn,ms});return intervals.length},clearInterval(){}});
 vm.runInContext(source.slice(0, source.indexOf('/* ---------- events ---------- */')), sandbox);
 const run = code => vm.runInContext(code, sandbox);
-const slotCapacity = run(`capacityStatusCard({configuration:{max_concurrent_jobs:4,source:'config'},runs:0,used:0,capacity:4})`);
-assert.match(slotCapacity, /0\/4 run slots used/, 'capacity card must show run slots');
+const admissionCard = run(`admissionStatusCard({runs:2,used:2})`);
+assert.match(admissionCard, /2 admitted/, 'admission card must show admitted runs');
+assert.doesNotMatch(admissionCard, /ceiling|run slots/, 'Oberth has no run ceiling since v0.20.0');
 run(`
   let html='', requests=[], listNext='', flatPaging=false;
   replaceApp=value=>{html=value};
@@ -266,7 +267,7 @@ assert.equal(run(`runMessageCell({Status:'passed',priority_class:'high',Concurre
 for(const extra of [`display_reason:'existing reason'`, `Error:'existing reason'`, `FailedStep:'test'`, `Reason:'existing reason'`]) {
   assert.equal(run(`runMessageCell({Status:'failed',Release:true,Trigger:'schedule',ScheduleEntry:'nightly',${extra}})`), extra.startsWith('display_reason')?'existing reason':'');
 }
-assert.equal(run(`runMessageCell({Status:'queued',Release:true,Trigger:'schedule',ScheduleEntry:'nightly',display_reason:'concurrency group deploy busy (held by run 0123456789ab)',Scheduling:{state:'waiting',admission:{group_holder:true,group:'deploy'}}})`),'concurrency group deploy busy (held by run 0123456789ab)');
+assert.equal(run(`runMessageCell({Status:'queued',Release:true,Trigger:'schedule',ScheduleEntry:'nightly',display_reason:'waiting for an Argo workflow slot (controller parallelism)',Scheduling:{state:'waiting'}})`),'waiting for an Argo workflow slot (controller parallelism)');
 assert.equal(run(`runMessageCell({Status:'queued',Scheduling:{state:'queued',message:'Awaiting scheduler claim.'}})`),'','detail observation does not become a row message');
 assert.ok(run(`releaseBadge({Release:true,priority_class:'high',priority_reason:'urgent'})`).includes('high priority'),'detail priority and reason remain available');
 console.log('R4B passed: label-free rows, empty-message fallbacks, existing reasons and detail badges');

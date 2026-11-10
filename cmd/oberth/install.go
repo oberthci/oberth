@@ -81,6 +81,15 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 	flags.StringVar(&cfg.ArgoVaultCredentialedRole, "argo-vault-credentialed-role", "",
 		"Kubernetes-auth role credentialed pipelines log in with; bind it to exactly "+
 			"(--argo-namespace, the credentialed ServiceAccount)")
+	argoParallelism := flags.Int("argo-parallelism", -1,
+		"Argo controller parallelism: how many pipeline Workflows run at once, 0 for no limit; "+
+			"the excess waits Pending as postponed (default: keep the release's value, none on a fresh install)")
+	argoNamespaceParallelism := flags.Int("argo-namespace-parallelism", -1,
+		"Argo controller namespaceParallelism for the pipeline namespace, 0 for no limit (default: keep the release's value)")
+	var argoSyncLimits stringList
+	flags.Var(&argoSyncLimits, "argo-sync-limit",
+		"semaphore limit key=N in the ConfigMap oberth-sync-limits, rendered by the argo-workflows release (repeatable; "+
+			"the set given replaces the previous one; see docs/where-limits-live.md)")
 	var credentialedSecretPaths stringList
 	flags.Var(&credentialedSecretPaths, "credentialed-secret-path",
 		"full KV data path approved in the secret-access table (repeatable, exactly the string "+
@@ -138,6 +147,24 @@ func runInstall(ctx context.Context, arguments []string, input io.Reader, output
 	cfg.TLSRemoveIPs = tlsRemoveIPs
 	cfg.AlsoUpstreams = alsoUpstreams
 	cfg.ValuesFiles = valuesFiles
+	flags.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "argo-parallelism":
+			cfg.ArgoParallelism = argoParallelism
+		case "argo-namespace-parallelism":
+			cfg.ArgoNamespaceParallelism = argoNamespaceParallelism
+		}
+	})
+	if len(argoSyncLimits) > 0 {
+		cfg.ArgoSyncLimits = map[string]int{}
+		for _, value := range argoSyncLimits {
+			key, limit, err := installer.ParseArgoSyncLimit(value)
+			if err != nil {
+				return fmt.Errorf("%w: %w", errUsage, err)
+			}
+			cfg.ArgoSyncLimits[key] = limit
+		}
+	}
 
 	return installer.Execute(ctx, cfg, installer.InstallDeps{
 		Output: output,

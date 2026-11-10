@@ -26,7 +26,7 @@ func TestUpgradeIntegerFlagsThroughHelmRoundTrip(t *testing.T) {
 		"argo-workflow-ttl":   2592000,
 		"run-log-limit-bytes": 21474836480, "logs-budget-bytes": 21474836480,
 		"artifacts-limit-bytes": 21474836480, "artifacts-budget-bytes": 21474836480,
-		"retention-keep-newest": 0, "max-concurrent-jobs": 0,
+		"retention-keep-newest": 0,
 	}
 	for _, route := range []string{"values-file", "stored-migration"} {
 		t.Run(route, func(t *testing.T) {

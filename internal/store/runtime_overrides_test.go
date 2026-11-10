@@ -93,41 +93,17 @@ func TestReleaseWIFOverrideGrantRevokeResetAudited(t *testing.T) {
 	}
 }
 
-func TestAdmissionCapacityOverrideSetClearAudited(t *testing.T) {
+func TestAdmissionCapacityOverrideReadsARetiredRow(t *testing.T) {
 	now := time.Now()
 	s := testStore(t, &now)
 	ctx := t.Context()
 	if got, err := s.AdmissionCapacityOverride(ctx); err != nil || got != nil {
 		t.Fatalf("fresh override = %+v %v", got, err)
 	}
-	if _, err := s.SetAdmissionCapacityOverride(ctx, "admin", 0, "clear"); !errors.Is(err, ErrInvalidState) {
-		t.Fatalf("clear without override: %v", err)
+	if _, err := s.db.Exec(`INSERT INTO admission_capacity_override(singleton,max_concurrent_jobs,reason,actor,updated_at) VALUES(1,4,'host overload','admin',1)`); err != nil {
+		t.Fatal(err)
 	}
-	for _, jobs := range []int{-1, 65} {
-		if _, err := s.SetAdmissionCapacityOverride(ctx, "admin", jobs, "bad"); !errors.Is(err, ErrInvalid) {
-			t.Fatalf("jobs %d accepted: %v", jobs, err)
-		}
-	}
-	if _, err := s.SetAdmissionCapacityOverride(ctx, "admin", 4, " "); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("blank reason accepted: %v", err)
-	}
-	set, err := s.SetAdmissionCapacityOverride(ctx, "admin", 4, "host overload")
-	if err != nil || set == nil || set.MaxConcurrentJobs != 4 || set.Reason != "host overload" {
-		t.Fatalf("set = %+v %v", set, err)
-	}
-	if set, err = s.SetAdmissionCapacityOverride(ctx, "admin", 6, "recovered"); err != nil || set.MaxConcurrentJobs != 6 {
-		t.Fatalf("replace = %+v %v", set, err)
-	}
-	if cleared, err := s.SetAdmissionCapacityOverride(ctx, "admin", 0, "back to helm"); err != nil || cleared != nil {
-		t.Fatalf("clear = %+v %v", cleared, err)
-	}
-	var count int
-	var last string
-	if err := s.db.QueryRow(`SELECT count(*),max(details) FROM audit_actions WHERE resource_type='admission' AND action LIKE 'admission.capacity.override%'`).Scan(&count, &last); err != nil || count != 3 {
-		t.Fatalf("audit count = %d %v", count, err)
-	}
-	var details string
-	if err := s.db.QueryRow(`SELECT details FROM audit_actions WHERE action='admission.capacity.override.clear'`).Scan(&details); err != nil || !strings.Contains(details, `"max_concurrent_jobs":6`) {
-		t.Fatalf("clear audit lacks previous value: %s %v", details, err)
+	if got, err := s.AdmissionCapacityOverride(ctx); err != nil || got == nil || got.MaxConcurrentJobs != 4 || got.Actor != "admin" {
+		t.Fatalf("stored override = %+v %v", got, err)
 	}
 }

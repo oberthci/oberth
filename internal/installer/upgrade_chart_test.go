@@ -76,7 +76,7 @@ func testUpgradeActualHelmPreservesOldValues(t *testing.T, oldVersion string, sh
 	if shadow != nil {
 		config["gitcache"] = map[string]any{"shadow": *shadow}
 	}
-	values["pushBannerURL"] = ""
+	values["pushBannerURL"], values["maxConcurrentJobs"] = "", 0 // v0.20.0 refuses a reused 0.17 ceiling of 3
 	values["retention"].(map[string]any)["keepNewestPerRef"] = 0
 	values["argo"].(map[string]any)["goProxy"].(map[string]any)["enabled"] = false
 	values["podAnnotations"] = map[string]any{"round17.example/stored": "kept"}

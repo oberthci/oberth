@@ -24,7 +24,7 @@ func (s priorityReviewCancelStore) CancelRun(ctx context.Context, request model.
 	return s.RunCancelStore.CancelRun(ctx, request)
 }
 func TestPriorityReviewRequesterNeverAcquiresAdminCancellation(t *testing.T) {
-	for _, kind := range []string{"tag", "release", "promotion", "concurrency-group"} {
+	for _, kind := range []string{"tag", "release", "promotion"} {
 		t.Run(kind, func(t *testing.T) {
 			f := newControlFixture(t)
 			spec := model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: "urgent", SHA: strings.Repeat("a", 40), Actor: "requester", Trigger: "branch"}
@@ -41,8 +41,6 @@ func TestPriorityReviewRequesterNeverAcquiresAdminCancellation(t *testing.T) {
 				current.Release = true
 			case "promotion":
 				current.Trigger = "promotion"
-			case "concurrency-group":
-				current.ConcurrencyGroup = "external-state"
 			}
 			control, err := NewAPI(APIConfig{Runs: f.store, History: f.store, RunCancels: priorityReviewCancelStore{RunCancelStore: f.store, current: current}})
 			if err != nil {

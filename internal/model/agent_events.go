@@ -12,9 +12,12 @@ import (
 // reconnecting agent resumes with events_since. The kinds are a fixed
 // vocabulary; they never add a run status or label.
 const (
-	AgentEventRunFinished       = "run.finished"
-	AgentEventRunHeld           = "run.held"
-	AgentEventRunHoldAbandoned  = "run.hold_abandoned"
+	AgentEventRunFinished      = "run.finished"
+	AgentEventRunHeld          = "run.held"
+	AgentEventRunHoldAbandoned = "run.hold_abandoned"
+	// AgentEventRunLockWait also reports a Workflow the Argo controller
+	// postponed for its parallelism: lock SyncParallelismLock, postponed
+	// true (#1517).
 	AgentEventRunLockWait       = "run.lock_wait"
 	AgentEventPromotionFinished = "promotion.finished"
 	AgentEventReleasePublished  = "release.published"

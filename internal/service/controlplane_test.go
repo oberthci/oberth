@@ -433,8 +433,7 @@ func TestFastForwardPendingPublicationRecoversWithoutRestart(t *testing.T) {
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: failing, Git: fixture.git, Logs: fixture.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs,
 		Auditor: fixture.store, Signals: fixture.signals,
-		WorkspaceRoot: filepath.Join(fixture.root, "fast-forward-recovery-work"), MaxConcurrent: 2,
-	})
+		WorkspaceRoot: filepath.Join(fixture.root, "fast-forward-recovery-work")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -507,8 +506,7 @@ func TestPublicationRecoveryWakeDoesNotSeizeUnrelatedLivePublication(t *testing.
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: observed, Git: fixture.git, Logs: fixture.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs,
 		Auditor: fixture.store, Signals: fixture.signals,
-		WorkspaceRoot: filepath.Join(fixture.root, "targeted-publication-recovery-work"), MaxConcurrent: 2,
-	})
+		WorkspaceRoot: filepath.Join(fixture.root, "targeted-publication-recovery-work")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -646,8 +644,7 @@ func TestPublicationCoordinatorRechecksGateAfterBoundedWait(t *testing.T) {
 		scheduler, err := NewScheduler(SchedulerConfig{
 			Store: fixture.store, Git: fixture.git, Logs: fixture.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs,
 			Auditor: fixture.store, Signals: fixture.signals,
-			WorkspaceRoot: filepath.Join(fixture.root, "publication-gate-recheck-work"), MaxConcurrent: 1,
-			MutationGate: gate.check,
+			WorkspaceRoot: filepath.Join(fixture.root, "publication-gate-recheck-work"), MutationGate: gate.check,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -752,8 +749,7 @@ func TestSchedulerPausesAndResumesCompletedWorkWhenMutationGateCloses(t *testing
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: fixture.store, Git: fixture.git, Logs: fixture.logs, Jobs: jobs, ReleaseJobs: jobs,
 		Auditor: fixture.store, Signals: fixture.signals,
-		WorkspaceRoot: filepath.Join(fixture.root, "mutation-pause-work"), MaxConcurrent: 1,
-		MutationGate: gate.check,
+		WorkspaceRoot: filepath.Join(fixture.root, "mutation-pause-work"), MutationGate: gate.check,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -826,8 +822,7 @@ func TestDurableEnqueueWakeSurvivesMutationGateClosingBeforeAcceptance(t *testin
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: observed, Git: fixture.git, Logs: fixture.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs,
 		Auditor: fixture.store, Signals: fixture.signals,
-		WorkspaceRoot: filepath.Join(fixture.root, "durable-enqueue-wake-work"), MaxConcurrent: 1,
-		MutationGate: gate.check,
+		WorkspaceRoot: filepath.Join(fixture.root, "durable-enqueue-wake-work"), MutationGate: gate.check,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1334,8 +1329,7 @@ func newControlFixture(t *testing.T, results ...JobResult) *controlFixture {
 	signals := NewSignals()
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: database, Git: git, Logs: logs, Jobs: jobs, ReleaseJobs: jobs,
-		Auditor: database, Signals: signals, WorkspaceRoot: filepath.Join(root, "work"), MaxConcurrent: 2,
-	})
+		Auditor: database, Signals: signals, WorkspaceRoot: filepath.Join(root, "work")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1981,8 +1975,7 @@ func TestSchedulerCompletesSupersedeAndRestartCancellationObligations(t *testing
 	t.Cleanup(func() { _ = reopened.Close() })
 	recoveryScheduler, err := NewScheduler(SchedulerConfig{
 		Store: reopened, Git: fixture.git, Logs: fixture.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs,
-		Auditor: reopened, Signals: fixture.signals, WorkspaceRoot: filepath.Join(fixture.root, "work"), MaxConcurrent: 1,
-	})
+		Auditor: reopened, Signals: fixture.signals, WorkspaceRoot: filepath.Join(fixture.root, "work")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2031,8 +2024,7 @@ func TestSupersessionBetweenJobIntentAndCreateCannotOrphanJob(t *testing.T) {
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: fixture.store, Git: fixture.git, Logs: fixture.logs, Jobs: jobs, ReleaseJobs: jobs,
 		Auditor: fixture.store, Signals: fixture.signals,
-		WorkspaceRoot: filepath.Join(fixture.root, "create-cancel-race"), MaxConcurrent: 1,
-	})
+		WorkspaceRoot: filepath.Join(fixture.root, "create-cancel-race")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2090,8 +2082,7 @@ func TestSupersessionDeleteFailureRetainsCancellationUntilRetry(t *testing.T) {
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: fixture.store, Git: fixture.git, Logs: fixture.logs, Jobs: jobs, ReleaseJobs: jobs,
 		Auditor: fixture.store, Signals: fixture.signals,
-		WorkspaceRoot: filepath.Join(fixture.root, "create-delete-failure"), MaxConcurrent: 1,
-	})
+		WorkspaceRoot: filepath.Join(fixture.root, "create-delete-failure")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2151,8 +2142,7 @@ func TestPostCreateReadAndDeleteFailureRecoversExactJobOnRestart(t *testing.T) {
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: wrappedStore, Git: fixture.git, Logs: fixture.logs, Jobs: jobs, ReleaseJobs: jobs,
 		Auditor: wrappedStore, Signals: fixture.signals,
-		WorkspaceRoot: filepath.Join(fixture.root, "post-create-delete-failure"), MaxConcurrent: 1,
-	})
+		WorkspaceRoot: filepath.Join(fixture.root, "post-create-delete-failure")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2183,8 +2173,7 @@ func TestPostCreateReadAndDeleteFailureRecoversExactJobOnRestart(t *testing.T) {
 	recovery, err := NewScheduler(SchedulerConfig{
 		Store: reopened, Git: fixture.git, Logs: fixture.logs, Jobs: jobs, ReleaseJobs: jobs,
 		Auditor: reopened, Signals: fixture.signals,
-		WorkspaceRoot: filepath.Join(fixture.root, "post-create-delete-failure"), MaxConcurrent: 1,
-	})
+		WorkspaceRoot: filepath.Join(fixture.root, "post-create-delete-failure")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2209,8 +2198,7 @@ func TestSchedulerShutdownCancelsAndJoinsWorkers(t *testing.T) {
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: fixture.store, Git: fixture.git, Logs: fixture.logs, Jobs: jobs, ReleaseJobs: jobs,
 		Auditor: fixture.store, Signals: fixture.signals,
-		WorkspaceRoot: filepath.Join(fixture.root, "shutdown-work"), MaxConcurrent: 1,
-	})
+		WorkspaceRoot: filepath.Join(fixture.root, "shutdown-work")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2409,8 +2397,7 @@ func TestBranchAndTagPublicationRecoverAfterPushBeforeFinalization(t *testing.T)
 			scheduler, err := NewScheduler(SchedulerConfig{
 				Store: failing, Git: fixture.git, Logs: fixture.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs,
 				Auditor: fixture.store, Signals: fixture.signals,
-				WorkspaceRoot: filepath.Join(fixture.root, "crash-work"), MaxConcurrent: 1,
-			})
+				WorkspaceRoot: filepath.Join(fixture.root, "crash-work")})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2438,8 +2425,7 @@ func TestBranchAndTagPublicationRecoverAfterPushBeforeFinalization(t *testing.T)
 			recovery, err := NewScheduler(SchedulerConfig{
 				Store: fixture.store, Git: fixture.git, Logs: fixture.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs,
 				Auditor: fixture.store, Signals: fixture.signals,
-				WorkspaceRoot: filepath.Join(fixture.root, "recovery-work"), MaxConcurrent: 1,
-			})
+				WorkspaceRoot: filepath.Join(fixture.root, "recovery-work")})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2543,8 +2529,7 @@ func TestDivergentPromotionRecoversPushBeforeAtomicFinalization(t *testing.T) {
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: failing, Git: fixture.git, Logs: fixture.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs,
 		Auditor: fixture.store, Signals: fixture.signals,
-		WorkspaceRoot: filepath.Join(fixture.root, "promotion-crash-work"), MaxConcurrent: 1,
-	})
+		WorkspaceRoot: filepath.Join(fixture.root, "promotion-crash-work")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2716,8 +2701,7 @@ func TestPromotionFastForwardDivergentAndNonFastForwardFailure(t *testing.T) {
 		failingScheduler, err := NewScheduler(SchedulerConfig{
 			Store: failing, Git: fixture.git, Logs: fixture.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs,
 			Auditor: fixture.store, Signals: fixture.signals,
-			WorkspaceRoot: filepath.Join(fixture.root, "promotion-fast-crash-work"), MaxConcurrent: 1,
-		})
+			WorkspaceRoot: filepath.Join(fixture.root, "promotion-fast-crash-work")})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2854,8 +2838,7 @@ func TestFastForwardPromotionPublicationWakesSameRefQueue(t *testing.T) {
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: observed, Git: fixture.git, Logs: fixture.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs,
 		Auditor: fixture.store, Signals: fixture.signals,
-		WorkspaceRoot: filepath.Join(fixture.root, "promotion-publication-wake-work"), MaxConcurrent: 2,
-	})
+		WorkspaceRoot: filepath.Join(fixture.root, "promotion-publication-wake-work")})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -975,7 +975,7 @@ function summaryLines(detail) {
     const scheduling = detail.Scheduling || {}, admission = scheduling.admission || {};
     lines.push(`[queued] ${run.display_reason || scheduling.message || "awaiting scheduler"}`);
     if (scheduling.message && scheduling.message !== run.display_reason) lines.push(`[scheduling] ${scheduling.message}`);
-    if (admission.capacity) lines.push(`capacity: ${admission.used}/${admission.capacity} run slots used${admission.position ? ` · queue position ${admission.position}` : ""}`);
+    if (admission.position) lines.push(`queue position ${admission.position}`);
   }
   else if (kind === "warn") lines.push(`[infra error, retried] ${runMessage(run)}`);
   else if (kind === "cancel") lines.push(`[${status}] ${runMessage(run)}`);
@@ -1566,12 +1566,11 @@ function pressureStatusCard(pressure) {
   const policy = observing ? " · PSI does not defer grants; other admission gates still apply" : "";
   return svcCard("host pressure", value, detail + policy, pressure.holding || pressure.threshold_exceeded || !pressure.available ? "warn" : "ok");
 }
-function capacityStatusCard(admission) {
-  const config = admission?.configuration;
-  if (!config) return "";
-  const slots = config.max_concurrent_jobs > 0 ? `${admission.runs}/${config.max_concurrent_jobs} run slots used` : `${admission.runs} running, no ceiling`;
-  const detail = `${slots} · source ${config.source}${config.file ? ` (${config.file})` : ""}${config.error ? ` · keeping last good value: ${config.error}` : ""}`;
-  return svcCard("admission capacity", config.max_concurrent_jobs > 0 ? `${config.max_concurrent_jobs} concurrent runs` : "no run ceiling", esc(detail), config.error ? "warn" : "ok");
+/* Run limits live in Argo (docs/where-limits-live.md): the card shows how
+   many runs Oberth admitted, never a ceiling of its own. */
+function admissionStatusCard(admission) {
+  if (!admission) return "";
+  return svcCard("admission", `${admission.runs ?? 0} admitted`, "run limits: Argo controller parallelism and native synchronization", "ok");
 }
 function controllerProfileStatusCard(profile) {
  if (!profile) return "";
@@ -1612,7 +1611,7 @@ async function renderStatus(seq) {
       ${svcCard("secret store", storeValue, store && store.address ? esc(store.address) : "OpenBao release secrets disabled", storeMood)}
       ${svcCard("server", s.version || document.body.dataset.version || "dev", "", "ok")}
       ${pressureStatusCard(s.admission?.pressure)}
-      ${capacityStatusCard(s.admission)}
+      ${admissionStatusCard(s.admission)}
       ${controllerProfileStatusCard(s.controller_profile)}
     </div>
     ${uplinkExpiryWarnings(uplinks)}

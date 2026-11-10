@@ -451,7 +451,6 @@ func minimalValidServeOptions() serveOptions {
 		httpsListen:             ":8443",
 		namespace:               "oberth",
 		runnerImagePrefixes:     "golang:",
-		maxConcurrent:           3,
 		gitCommandTimeout:       10 * time.Minute,
 		gcInterval:              24 * time.Hour,
 		auditAnchorInterval:     10 * time.Minute,

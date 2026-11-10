@@ -249,9 +249,6 @@ func (gate *admissionGate) preparePressureWaitsLocked(now time.Time) {
 		if !r.prepared {
 			continue
 		}
-		if holder, ahead := gate.groupBlockerLocked(r); holder != "" || ahead != "" {
-			continue
-		}
 		if r.pressureSince.IsZero() {
 			r.pressureSince = now
 			p.deferrals++
@@ -318,10 +315,7 @@ func (gate *admissionGate) pressureBypassLocked(r *admissionReservation, now tim
 			break
 		}
 		if other.prepared {
-			holder, ahead := gate.groupBlockerLocked(other)
-			if holder == "" && ahead == "" {
-				return false
-			}
+			return false
 		}
 	}
 	since := r.pressureSince

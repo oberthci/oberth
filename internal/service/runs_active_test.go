@@ -21,7 +21,7 @@ import (
 func TestActiveRunsOrderAndWaitReasons(t *testing.T) {
 	fixture := newControlFixture(t)
 	ctx := t.Context()
-	gate := newAdmissionGate(2)
+	gate := newAdmissionGate()
 	service := fixture.api(t)
 	service.admission = &Scheduler{admission: gate}
 	enqueue := func(branch string) model.Run {
@@ -43,7 +43,7 @@ func TestActiveRunsOrderAndWaitReasons(t *testing.T) {
 			release()
 		}
 	}()
-	// 2: holds concurrency group "deploy" and has started.
+	// 2: running and started.
 	holder := enqueue("feature/holder")
 	cleanup = append(cleanup, acquireRequestWithinBudget(t, gate.reserve(holder.QueueSequence), groupRequest(holder.ID, holder.RepoID, pipeline.M, "deploy")))
 	if _, err := fixture.store.SetRunWorkflowName(ctx, holder.ID, "wf-holder"); err != nil {
@@ -52,7 +52,9 @@ func TestActiveRunsOrderAndWaitReasons(t *testing.T) {
 	if _, err := fixture.store.MarkRunSubmitted(ctx, holder.ID); err != nil {
 		t.Fatal(err)
 	}
-	// 3: waits on its group, behind the holder.
+	// Every later run waits on the disk floor.
+	blockOnDiskFloor(gate)
+	// 3: waits behind the disk floor.
 	grouped := enqueue("feature/grouped")
 	groupedReservation := gate.reserve(grouped.QueueSequence)
 	// Waiters give up when the test context ends, so none outlives the test.
@@ -60,17 +62,12 @@ func TestActiveRunsOrderAndWaitReasons(t *testing.T) {
 		_, _ = groupedReservation.acquireRequest(ctx, groupRequest(grouped.ID, grouped.RepoID, pipeline.S, "deploy"))
 	}()
 	awaitWaiting(t, groupedReservation)
-	// 4: newer than the waiters, admitted and finished.
+	// 4: newer than the waiters, finished.
 	done := enqueue("feature/done")
-	releaseDone := acquireRequestWithinBudget(t, gate.reserve(done.QueueSequence), groupRequest(done.ID, done.RepoID, pipeline.S, ""))
 	if _, err := fixture.store.FinishRun(ctx, done.ID, model.RunResult{Status: model.RunPassed, Phase: "passed"}); err != nil {
 		t.Fatal(err)
 	}
-	releaseDone()
-	// A second running run fills the other slot; it is not a durable run and
-	// never shows in the list.
-	cleanup = append(cleanup, acquireRequestWithinBudget(t, gate.reserve(99), groupRequest("filler", 2, pipeline.M, "")))
-	// 5: the head of the queue: every slot is taken.
+	// 5: also waiting on the disk floor.
 	head := enqueue("feature/head")
 	headReservation := gate.reserve(head.QueueSequence)
 	go func() {
@@ -101,14 +98,14 @@ func TestActiveRunsOrderAndWaitReasons(t *testing.T) {
 		t.Fatalf("started run = %#v", active[0])
 	}
 	groupEntry, headEntry, queuedEntry := active[1], active[2], active[3]
-	if groupEntry.Scheduling == nil || groupEntry.Scheduling.Admission == nil || groupEntry.Scheduling.Admission.Group != "deploy" ||
-		groupEntry.Scheduling.Admission.GroupHolder != holder.ID || !strings.Contains(groupEntry.Scheduling.Message, `concurrency group "deploy"`) {
-		t.Fatalf("group waiter lost its reason: %#v", groupEntry.Scheduling)
+	if groupEntry.Scheduling == nil || groupEntry.Scheduling.Admission == nil ||
+		!strings.Contains(groupEntry.Scheduling.Message, "disk space") {
+		t.Fatalf("disk floor waiter lost its reason: %#v", groupEntry.Scheduling)
 	}
 	if admission := headEntry.Scheduling.Admission; admission == nil ||
-		admission.Used != 2 || admission.Capacity != 2 || admission.Position == 0 ||
-		!strings.Contains(headEntry.Scheduling.Message, "2 runs running") {
-		t.Fatalf("queue head lost its reason: %#v %#v", headEntry.Scheduling, admission)
+		admission.Used != 1 || admission.Position == 0 ||
+		!strings.Contains(headEntry.Scheduling.Message, "disk space") {
+		t.Fatalf("later waiter lost its reason: %#v %#v", headEntry.Scheduling, admission)
 	}
 	if queuedEntry.ID != queued.ID || queuedEntry.Scheduling == nil || queuedEntry.Scheduling.State != "queued" || queuedEntry.Scheduling.QueuePosition != 3 {
 		t.Fatalf("queued run = %#v", queuedEntry.Scheduling)
@@ -221,7 +218,7 @@ func TestScopedDefaultRunsHideGlobalQueuePositions(t *testing.T) {
 		t.Fatal("no scoped runs")
 	}
 	for _, run := range runs {
-		if run.QueuePosition != 0 || run.DisplayStatus == "queued" && (run.Scheduling == nil || run.Scheduling.QueuePosition != 0 || run.Scheduling.Admission != nil && (run.Scheduling.Admission.Position != 0 || run.Scheduling.Admission.Used != 0 || run.Scheduling.Admission.Capacity != 0)) {
+		if run.QueuePosition != 0 || run.DisplayStatus == "queued" && (run.Scheduling == nil || run.Scheduling.QueuePosition != 0 || run.Scheduling.Admission != nil && (run.Scheduling.Admission.Position != 0 || run.Scheduling.Admission.Used != 0)) {
 			t.Fatalf("scoped queue position leaked: %+v", run)
 		}
 	}

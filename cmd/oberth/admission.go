@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -11,15 +10,19 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/oberthci/oberth/internal/api"
 	"github.com/oberthci/oberth/internal/model"
 )
 
 const admissionUsage = "Usage: oberth admission [--json] | oberth admission release <run-id> [--force] [--json]\n" +
-	"       oberth admission groups [--json]\n" +
 	"       oberth admission hold on|off --reason <reason> [--allow tag,release,promotion] [--duration 2h] [--json]\n" +
-	"       oberth admission capacity <0..64>|clear --reason <reason> [--json]\n" +
 	"         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]"
+
+// removedAdmissionCommands name the subcommands v0.20.0 removed with the
+// limits they served; each now lives in Argo (docs/where-limits-live.md).
+var removedAdmissionCommands = map[string]string{
+	"groups":   "oberth admission groups is gone since v0.20.0, with concurrency groups: declare a native Argo mutex or semaphore and read its holders and waiters with the sync_status MCP tool (docs/where-limits-live.md)",
+	"capacity": "oberth admission capacity is gone since v0.20.0, with the Oberth run ceiling: set the Argo controller parallelism instead (oberth install --argo-parallelism, docs/where-limits-live.md)",
+}
 
 // runAdmission prints the server's admission gate, or releases one stale
 // reservation (#1099). The gate lives in the server process, so both go
@@ -28,8 +31,10 @@ func runAdmission(ctx context.Context, arguments []string, output io.Writer) err
 	if len(arguments) > 0 && arguments[0] == "hold" {
 		return runAdmissionHold(ctx, arguments[1:], output)
 	}
-	if len(arguments) > 0 && arguments[0] == "capacity" {
-		return runAdmissionCapacity(ctx, arguments[1:], output)
+	if len(arguments) > 0 {
+		if removed, ok := removedAdmissionCommands[arguments[0]]; ok {
+			return fmt.Errorf("%w: %s", errUsage, removed)
+		}
 	}
 	if wantsHelp(arguments) {
 		_, err := fmt.Fprintln(output, admissionUsage)
@@ -46,12 +51,11 @@ func runAdmission(ctx context.Context, arguments []string, output io.Writer) err
 	force, asJSON := *forceFlag, *jsonFlag
 	transport := transportFlags()
 
-	groups := len(positional) == 1 && positional[0] == "groups"
 	release := len(positional) > 0 && positional[0] == "release"
 	switch {
 	case release && len(positional) != 2:
 		return fmt.Errorf("%w: admission release <run-id>", errUsage)
-	case !release && (!groups && len(positional) != 0 || force):
+	case !release && (len(positional) != 0 || force):
 		return fmt.Errorf("%w: %s", errUsage, admissionUsage)
 	}
 	config, err := parseMCPFlags("admission", transport, 0)
@@ -59,26 +63,6 @@ func runAdmission(ctx context.Context, arguments []string, output io.Writer) err
 		return err
 	}
 	remote := remoteRunCanceller{config: config}
-	if groups {
-		raw, err := remote.call(ctx, "concurrency_groups", map[string]any{})
-		if err != nil {
-			return err
-		}
-		response, err := decodeAdmissionGroups(raw)
-		if err != nil {
-			return err
-		}
-		if asJSON {
-			_, err = fmt.Fprintf(output, "%s\n", strings.TrimSpace(string(raw)))
-			return err
-		}
-		table := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
-		_, _ = fmt.Fprintln(table, "GROUP\tLIMIT\tHOLDERS\tWAITERS")
-		for _, g := range response.Groups {
-			_, _ = fmt.Fprintf(table, "%s\t%d\t%s\t%s\n", g.Name, g.Limit, dash(strings.Join(g.Holders, ", ")), dash(strings.Join(g.Waiting, ", ")))
-		}
-		return table.Flush()
-	}
 	if release {
 		arguments := map[string]any{"run_id": positional[1]}
 		if force {
@@ -93,11 +77,7 @@ func runAdmission(ctx context.Context, arguments []string, output io.Writer) err
 			_, err = fmt.Fprintf(output, "%s\n", strings.TrimSpace(string(raw)))
 			return err
 		}
-		line := fmt.Sprintf("%s  released (%s", released.RunID, released.State)
-		if released.Group != "" {
-			line += ", group " + released.Group
-		}
-		line += ")"
+		line := fmt.Sprintf("%s  released (%s)", released.RunID, released.State)
 		if released.Warning != "" {
 			line += "\n  warning: " + released.Warning
 		}
@@ -125,33 +105,8 @@ func runAdmission(ctx context.Context, arguments []string, output io.Writer) err
 	return renderAdmission(output, status.Admission, time.Now())
 }
 
-func decodeAdmissionGroups(raw []byte) (api.ConcurrencyGroupsResponse, error) {
-	var response api.ConcurrencyGroupsResponse
-	groups := bytes.TrimSpace(raw)
-	// Retain the CLI's existing text-array compatibility for older responses,
-	// without changing MCP's object-only result validation.
-	if len(groups) == 0 || groups[0] != '[' {
-		var envelope map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &envelope); err != nil {
-			return response, fmt.Errorf("invalid concurrency_groups response: %w", err)
-		}
-		groups = bytes.TrimSpace(envelope["groups"])
-	}
-	if len(groups) == 0 || groups[0] != '[' {
-		return response, fmt.Errorf("invalid concurrency_groups response: groups must be an array")
-	}
-	if err := json.Unmarshal(groups, &response.Groups); err != nil {
-		return response, fmt.Errorf("invalid concurrency_groups response: %w", err)
-	}
-	return response, nil
-}
-
 func renderAdmission(output io.Writer, state *model.AdmissionState, now time.Time) error {
-	if state.MaxRuns > 0 {
-		if _, err := fmt.Fprintf(output, "%d of %d run slots used\n", state.Runs, state.MaxRuns); err != nil {
-			return err
-		}
-	} else if _, err := fmt.Fprintf(output, "%d run(s) admitted, no ceiling\n", state.Runs); err != nil {
+	if _, err := fmt.Fprintf(output, "%d run(s) admitted; Argo parallelism bounds running Workflows\n", state.Runs); err != nil {
 		return err
 	}
 	if p := state.Pressure; p != nil {
@@ -168,14 +123,14 @@ func renderAdmission(output io.Writer, state *model.AdmissionState, now time.Tim
 		}
 	}
 	writer := tabwriter.NewWriter(output, 0, 4, 2, ' ', 0)
-	_, _ = fmt.Fprintln(writer, "RUN\tSTATE\tREPO/REF\tGROUP\tFOR")
+	_, _ = fmt.Fprintln(writer, "RUN\tSTATE\tREPO/REF\tFOR")
 	for _, reservation := range state.Reservations {
 		age := "-"
 		if !reservation.Since.IsZero() {
 			age = now.Sub(reservation.Since).Truncate(time.Second).String()
 		}
-		_, _ = fmt.Fprintf(writer, "%s\t%s\t%s/%s\t%s\t%s\n", reservation.RunID, reservation.State,
-			reservation.Repo, reservation.Ref, dash(reservation.Group), age)
+		_, _ = fmt.Fprintf(writer, "%s\t%s\t%s/%s\t%s\n", reservation.RunID, reservation.State,
+			reservation.Repo, reservation.Ref, age)
 	}
 	return writer.Flush()
 }

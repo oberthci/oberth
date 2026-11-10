@@ -105,7 +105,7 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 	terminal.Annotations[identityAnnotation] = strings.Repeat("a", 64)
 	terminal.Annotations[refAnnotation] = "feature/adopt"
 	terminal.Annotations[argoworkflow.SizeAnnotation] = "L"
-	terminal.Annotations[argoworkflow.ConcurrencyGroupAnnotation] = "build"
+	terminal.Annotations[argoworkflow.RetiredConcurrencyGroupAnnotation] = "build" // a v0.19 Workflow still adopts
 	terminal.Labels = map[string]string{"oberth.ci/sha": sha, "oberth.ci/trigger": string(pipeline.TriggerCI)}
 	terminal.Spec.Entrypoint = "dag"
 	terminal.Spec.Templates = []wfv1.Template{
@@ -174,7 +174,7 @@ func TestAdoptedWaitRetainsTimingWithoutDuplicateAttempts(t *testing.T) {
 	}
 	defer db.Close()
 	recorder = &failingTimingRecorder{Store: db}
-	request := AdoptionRequest{Name: terminal.Name, RunID: run.ID, Ref: "feature/adopt", SHA: sha, Group: "build", Trigger: pipeline.TriggerCI, RunTrigger: argoworkflow.RunTriggerBranch}
+	request := AdoptionRequest{Name: terminal.Name, RunID: run.ID, Ref: "feature/adopt", SHA: sha, Trigger: pipeline.TriggerCI, RunTrigger: argoworkflow.RunTriggerBranch}
 	binding, found, err := (&Controller{workflows: &staticWorkflowClient{workflow: running}, config: config}).Adopt(ctx, request)
 	if err != nil || !found {
 		t.Fatalf("adopt: %v %v", found, err)

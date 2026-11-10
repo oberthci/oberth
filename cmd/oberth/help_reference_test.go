@@ -23,8 +23,6 @@ access revoke
 admin
 admin read-file
 admission
-admission capacity
-admission groups
 admission hold
 admission release
 artifacts

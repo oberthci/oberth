@@ -120,7 +120,7 @@ func TestPublicationPolicyWaitPersistsAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = reopened.Close() })
-	restarted, err := NewScheduler(SchedulerConfig{Store: reopened, Git: g, Logs: f.logs, Jobs: f.jobs, ReleaseJobs: f.jobs, Auditor: reopened, Signals: NewSignals(), WorkspaceRoot: filepath.Join(f.root, "restarted-work"), MaxConcurrent: 2})
+	restarted, err := NewScheduler(SchedulerConfig{Store: reopened, Git: g, Logs: f.logs, Jobs: f.jobs, ReleaseJobs: f.jobs, Auditor: reopened, Signals: NewSignals(), WorkspaceRoot: filepath.Join(f.root, "restarted-work")})
 	if err != nil {
 		t.Fatal(err)
 	}

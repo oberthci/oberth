@@ -100,7 +100,6 @@ type RunQueueStore interface {
 	Run(context.Context, string) (model.Run, error)
 	SetRunWorkflowName(context.Context, string, string) (model.Run, error)
 	SetRunCredentialed(context.Context, string) error
-	SetRunConcurrencyGroup(context.Context, string, string, ...int) error
 	PendingRunCancellations(context.Context) ([]model.RunCancellation, error)
 	CompleteRunCancellation(context.Context, string, string) error
 	CompleteObservedRunCancellation(context.Context, model.RunCancellation) error
@@ -388,10 +387,6 @@ type WorkflowRequest struct {
 	PipelineFile string
 	SourceDir    string
 	Size         pipeline.Size
-	// ConcurrencyGroup is the repository-declared group the scheduler admitted
-	// this run under (#658), empty for none. Engines record it with the
-	// submission; it never selects identity or resources.
-	ConcurrencyGroup string
 	// Exclusive is the sorted exclusive-class set admission granted (#1499),
 	// read from the fragment-resolved graph. Build refuses a Workflow whose
 	// resolved classes differ.
@@ -471,19 +466,6 @@ type ReleaseJobController interface {
 // evaluating repository code in the server process.
 type PipelineSizer interface {
 	PipelineSize(context.Context, WorkflowRequest) (pipeline.Size, error)
-}
-
-// PipelineConcurrencyGrouper reads the concurrency group the immutable
-// checked-out pipeline declares (#658), by the same static read PipelineSizer
-// makes. "" means the pipeline declares no group. A malformed declaration is an
-// error, exactly as a malformed size is. It is optional: an engine that does
-// not implement it runs every pipeline ungrouped.
-type PipelineConcurrencyContractReader interface {
-	PipelineConcurrencyContract(context.Context, WorkflowRequest) (string, int, error)
-}
-
-type PipelineConcurrencyGrouper interface {
-	PipelineConcurrencyGroup(context.Context, WorkflowRequest) (string, error)
 }
 
 // PipelinePlanner enumerates the steps the immutable checked-out pipeline
@@ -568,10 +550,7 @@ type StatusResponse struct {
 	FailedStep    string               `json:"failed_step,omitempty"`
 	ExitCode      *int                 `json:"exit_code,omitempty"`
 	Issue         *int64               `json:"issue,omitempty"`
-	// ConcurrencyGroup is the repository-declared concurrency group the run
-	// was admitted under (#658), once the scheduler has read it.
-	ConcurrencyGroup string            `json:"concurrency_group,omitempty"`
-	Stages           map[string]string `json:"burns"`
+	Stages        map[string]string    `json:"burns"`
 }
 
 type LogResponse struct {

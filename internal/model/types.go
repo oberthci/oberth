@@ -190,17 +190,11 @@ type Run struct {
 	Status        RunStatus
 	Reason        string
 	SupersededBy  string
-	// ConcurrencyGroup is the repository-declared concurrency group the run
-	// was admitted under (#658), recorded once the scheduler reads it from the
-	// run's own checkout; empty when the pipeline declares none or the run has
-	// not been read yet. The name is shared across repositories.
-	ConcurrencyGroup string
-	ConcurrencyLimit int
-	QueuedAt         time.Time
-	StartedAt        *time.Time
-	FinishedAt       *time.Time
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	QueuedAt      time.Time
+	StartedAt     *time.Time
+	FinishedAt    *time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 type RunSpec struct {

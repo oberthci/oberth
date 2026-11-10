@@ -9,7 +9,7 @@ import (
 )
 
 func TestAdmissionReservationUsesInheritedFIFOOrderAndUniqueRunKeys(t *testing.T) {
-	gate := newAdmissionGate(2)
+	gate := newAdmissionGate()
 	queuedBehind := gate.reserveInOrder(2, 2)
 	refired := gate.reserveInOrder(3, 1)
 	defer queuedBehind.cancel()
@@ -27,7 +27,7 @@ func TestAdmissionReservationUsesInheritedFIFOOrderAndUniqueRunKeys(t *testing.T
 }
 
 func TestAdmissionSnapshotAndStateKeepRefiredHeadIdentity(t *testing.T) {
-	gate := newAdmissionGate(2)
+	gate := newAdmissionGate()
 	held := gate.reserve(1)
 	release, err := held.acquire(context.Background(), pipeline.XL)
 	if err != nil {

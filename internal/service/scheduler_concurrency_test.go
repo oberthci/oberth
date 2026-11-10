@@ -84,9 +84,8 @@ func (jobs *concurrentJobs) TerminalResult(context.Context, string) (JobResult, 
 // so it fails for any regression anywhere on the claim-to-creation path,
 // including a new serialization point introduced outside admission.go.
 //
-// It is two-sided on purpose. The lower bound is the reported bug; the upper
-// bound is the node budget the gate exists to enforce, which must not be
-// traded away to buy the lower bound back.
+// Since v0.20.0 Oberth has no run ceiling, so every run reaches Job creation
+// concurrently; the Argo controller's parallelism is the only bound.
 func TestSchedulerCreatesJobsConcurrentlyForOneRepository(t *testing.T) {
 	const maxConcurrentJobs = 3
 	// Undeclared work retains one default numeric share, independent of size.
@@ -147,12 +146,13 @@ func TestSchedulerCreatesJobsConcurrentlyForOneRepository(t *testing.T) {
 				}
 			}
 
-			// Upper bound: the run past the budget must wait for a slot.
+			// No upper bound in Oberth: the run past the old ceiling is
+			// submitted too, and the Argo controller's parallelism postpones
+			// it if the install sets one.
 			select {
 			case <-fixture.jobs.admitted:
-				t.Fatalf("size %q admitted more than %d concurrent runs; the node budget is not being enforced",
-					size.declared.Effective(), size.expected)
-			case <-time.After(testTimeout(250 * time.Millisecond)):
+			case <-deadline.C:
+				t.Fatalf("size %q withheld a run past %d; Oberth has no run ceiling", size.declared.Effective(), size.expected)
 			}
 		})
 	}
@@ -196,8 +196,7 @@ func newConcurrencyFixture(t *testing.T, size pipeline.Size, maxConcurrentJobs i
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: database, Git: &controlGit{}, Logs: logs, Jobs: jobs, ReleaseJobs: jobs,
 		Auditor: database, Signals: NewSignals(),
-		WorkspaceRoot: filepath.Join(root, "work"), MaxConcurrent: maxConcurrentJobs,
-	})
+		WorkspaceRoot: filepath.Join(root, "work")})
 	if err != nil {
 		t.Fatal(err)
 	}

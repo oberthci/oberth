@@ -25,12 +25,10 @@ func TestSchedulingMessagesUsePlainWords(t *testing.T) {
 			{State: "waiting"},
 			{State: "waiting", Requests: &argoworkflow.PodRequests{CPUMilli: 9900, MemoryBytes: 16 << 30}, Pressure: &model.PressureDeferral{Resource: "cpu"}},
 			{State: "waiting", Pressure: &model.PressureDeferral{Resource: "io"}},
-			{State: "waiting", Runs: 6, MaxRuns: 6},
-			{State: "waiting", Group: "deploy", GroupHolder: "holder"},
 			{State: "waiting", DiskFloor: &model.DiskFloorObservation{BelowFloor: true, FreeBytes: 512 << 20}},
 			{State: "waiting"},
 			{State: "waiting", BlockedBy: &model.AdmissionBlocker{Repo: "org/repo", Ref: "main"}},
-			{State: "waiting", HeadOfQueue: true, BlockedBy: &model.AdmissionBlocker{RunCeiling: true}},
+			{State: "waiting", HeadOfQueue: true, BlockedBy: &model.AdmissionBlocker{DiskFloor: true}},
 		} {
 			control := &API{admission: schedulingLanguageObserver{observation}}
 			if scoped {

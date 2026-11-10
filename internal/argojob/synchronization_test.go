@@ -7,6 +7,8 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/oberthci/oberth/internal/model"
 )
 
 // The observation reports held and waited lock keys from the Workflow's own
@@ -29,7 +31,7 @@ func TestObserveSynchronizationReadsNativeLockStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(observation.Holding, []string{testNamespace + "/ConfigMap/oberth-sync-limits/kvm"}) ||
+	if !slices.Equal(observation.Holding, []string{model.SyncParallelismLock, testNamespace + "/ConfigMap/oberth-sync-limits/kvm"}) ||
 		!slices.Equal(observation.Waiting, []string{testNamespace + "/ConfigMap/oberth-sync-limits/heavy-go", testNamespace + "/Mutex/oberth-release"}) {
 		t.Fatalf("observation = %+v", observation)
 	}

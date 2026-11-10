@@ -44,14 +44,14 @@ func (controller *adoptingArgoControl) WaitResumed(_ context.Context, name, runI
 func TestArgoJobsAdoptRestoresIntentAndResumesWait(t *testing.T) {
 	controller := &adoptingArgoControl{found: true, binding: argojob.Adoption{Size: pipeline.L, UID: "workflow-uid", Identity: "spec-identity"}}
 	jobs := &ArgoJobs{controller: controller, intents: map[string]argoIntent{}}
-	run := model.Run{ID: "run", WorkflowName: "workflow", RefKind: model.RefBranch, Ref: "feature/adopt", SHA: "pushed-sha", TestedSHA: "tested-sha", ConcurrencyGroup: "build", Trigger: "branch"}
+	run := model.Run{ID: "run", WorkflowName: "workflow", RefKind: model.RefBranch, Ref: "feature/adopt", SHA: "pushed-sha", TestedSHA: "tested-sha", Trigger: "branch"}
 	for range 2 {
 		size, found, err := jobs.Adopt(context.Background(), run)
 		if err != nil || !found || size != pipeline.L {
 			t.Fatalf("adopt = %s %v %v", size, found, err)
 		}
 	}
-	if controller.request.SHA != "tested-sha" || controller.request.Group != "build" || controller.request.RunTrigger != argoworkflow.RunTriggerBranch || controller.request.Trigger != pipeline.TriggerCI {
+	if controller.request.SHA != "tested-sha" || controller.request.RunTrigger != argoworkflow.RunTriggerBranch || controller.request.Trigger != pipeline.TriggerCI {
 		t.Fatalf("adopt request = %#v", controller.request)
 	}
 	if _, _, err := jobs.Adopt(context.Background(), model.Run{ID: "foreign", WorkflowName: run.WorkflowName, Trigger: "branch"}); err == nil {
@@ -114,7 +114,7 @@ func TestArgoJobsAdoptionKeepsPromotionAndReleaseTriggerBindings(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			controller := &adoptingArgoControl{found: true, binding: argojob.Adoption{Size: pipeline.L, UID: "workflow-uid", Identity: "spec-identity", SpecSHA256: "exact-admitted-spec"}}
 			jobs := &ArgoJobs{controller: controller, intents: map[string]argoIntent{}}
-			run := model.Run{ID: "run-" + kind, WorkflowName: "workflow-" + kind, RefKind: model.RefTag, Ref: "v1.2.3", SHA: "annotated-tag-object", TestedSHA: "peeled-reviewed-commit", ConcurrencyGroup: "publish", Trigger: kind, Release: true, Credentialed: true}
+			run := model.Run{ID: "run-" + kind, WorkflowName: "workflow-" + kind, RefKind: model.RefTag, Ref: "v1.2.3", SHA: "annotated-tag-object", TestedSHA: "peeled-reviewed-commit", Trigger: kind, Release: true, Credentialed: true}
 			expectedTier := pipeline.TriggerRelease
 			expectedKind := argoworkflow.RunTriggerTag
 			if kind == "promotion" {
@@ -125,7 +125,7 @@ func TestArgoJobsAdoptionKeepsPromotionAndReleaseTriggerBindings(t *testing.T) {
 				expectedKind = argoworkflow.RunTriggerPromotion
 			}
 			size, found, err := jobs.Adopt(context.Background(), run)
-			if err != nil || !found || size != pipeline.L || controller.request.Trigger != expectedTier || controller.request.RunTrigger != expectedKind || controller.request.SHA != run.TestedSHA || controller.request.Ref != run.Ref || controller.request.Group != run.ConcurrencyGroup {
+			if err != nil || !found || size != pipeline.L || controller.request.Trigger != expectedTier || controller.request.RunTrigger != expectedKind || controller.request.SHA != run.TestedSHA || controller.request.Ref != run.Ref {
 				t.Fatalf("adoption binding changed: %+v %v", controller.request, err)
 			}
 			result, err := jobs.WaitResumed(context.Background(), run.WorkflowName, io.Discard, nil, 0)

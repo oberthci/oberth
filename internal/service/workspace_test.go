@@ -46,7 +46,6 @@ func TestWorkspaceCleanupFailureDoesNotRepaintTerminalRun(t *testing.T) {
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: fixture.store, Git: fixture.git, Logs: fixture.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs,
 		Auditor: fixture.store, Signals: fixture.signals, WorkspaceRoot: filepath.Join(fixture.root, "work"),
-		MaxConcurrent: 1,
 		RemoveWorkspace: func(path string) error {
 			if path == failedPath {
 				return cleanupErr
@@ -92,7 +91,6 @@ func TestWorkspaceCleanupFailureDoesNotRepaintTerminalRun(t *testing.T) {
 	restarted, err := NewScheduler(SchedulerConfig{
 		Store: fixture.store, Git: fixture.git, Logs: fixture.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs,
 		Auditor: fixture.store, Signals: fixture.signals, WorkspaceRoot: filepath.Join(fixture.root, "work"),
-		MaxConcurrent: 1,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -235,8 +233,7 @@ func TestWorkspaceStartupRecoveryPreservesPendingPublication(t *testing.T) {
 	t.Cleanup(func() { _ = reopened.Close() })
 	restarted, err := NewScheduler(SchedulerConfig{
 		Store: reopened, Git: fixture.git, Logs: fixture.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs,
-		Auditor: reopened, Signals: fixture.signals, WorkspaceRoot: root, MaxConcurrent: 1,
-	})
+		Auditor: reopened, Signals: fixture.signals, WorkspaceRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,8 +344,7 @@ func TestOwnerRestartCompletesEmptyNameSupersedeBeforeCleanup(t *testing.T) {
 	}
 	restarted, err := NewScheduler(SchedulerConfig{
 		Store: reopened, Git: fixture.git, Logs: fixture.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs,
-		Auditor: reopened, Signals: fixture.signals, WorkspaceRoot: root, MaxConcurrent: 1,
-	})
+		Auditor: reopened, Signals: fixture.signals, WorkspaceRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -368,8 +364,7 @@ func TestWorkerJoinCompletesEmptyNameSupersedeBeforeCleanup(t *testing.T) {
 	}
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: fixture.store, Git: git, Logs: fixture.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs,
-		Auditor: fixture.store, Signals: fixture.signals, WorkspaceRoot: root, MaxConcurrent: 1,
-	})
+		Auditor: fixture.store, Signals: fixture.signals, WorkspaceRoot: root})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -17,27 +17,21 @@ func TestRuntimeAdminCLIForwardsAuditedTools(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"capacity", "4", "--reason", "host overload"}, `tool=admission_capacity_config args={"max_concurrent_jobs":4,"reason":"host overload"}`},
-		{[]string{"capacity", "clear", "--reason", "recovered"}, `tool=admission_capacity_config args={"clear":true,"reason":"recovered"}`},
-		{[]string{"capacity", "0", "--reason", "no ceiling"}, `tool=admission_capacity_config args={"max_concurrent_jobs":0,"reason":"no ceiling"}`},
 		{[]string{"list"}, `tool=release_wif_list args={}`},
 		{[]string{"grant", "github/acme/app", "--service-account", "app-release", "--template", "publish=image-writer,sign=image-reader", "--reason", "absorb"}, `tool=release_wif_grant args={"reason":"absorb","repo":"github/acme/app","service_account_name":"app-release","templates":{"publish":"image-writer","sign":"image-reader"}}`},
 		{[]string{"revoke", "github/retired/old", "--reason", "deleted upstream"}, `tool=release_wif_revoke args={"reason":"deleted upstream","repo":"github/retired/old"}`},
 		{[]string{"reset", "github/retired/old", "--reason", "back to helm"}, `tool=release_wif_reset args={"reason":"back to helm","repo":"github/retired/old"}`},
 	} {
 		var output strings.Builder
-		var err error
-		if test.args[0] == "capacity" {
-			err = runAdmission(t.Context(), test.args, &output)
-		} else {
-			err = runReleaseWIF(t.Context(), test.args, &output)
-		}
+		err := runReleaseWIF(t.Context(), test.args, &output)
 		if err != nil || !strings.Contains(output.String(), test.want) {
 			t.Fatalf("%v = %s, %v", test.args, output.String(), err)
 		}
 	}
-	for _, args := range [][]string{{"capacity", "4"}, {"capacity", "-1", "--reason", "x"}, {"capacity", "65", "--reason", "x"}, {"capacity", "--reason", "x"}} {
-		if err := runAdmission(t.Context(), args, &strings.Builder{}); !errors.Is(err, errUsage) {
+	// The removed subcommands name their replacement instead of calling a tool.
+	for _, args := range [][]string{{"capacity", "4", "--reason", "x"}, {"groups"}} {
+		err := runAdmission(t.Context(), args, &strings.Builder{})
+		if !errors.Is(err, errUsage) || !strings.Contains(err.Error(), "v0.20.0") {
 			t.Fatal(args, err)
 		}
 	}

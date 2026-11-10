@@ -206,16 +206,34 @@ func waitingForLock(message string) bool {
 	return strings.HasPrefix(message, "Waiting for ") && strings.Contains(message, " lock. Lock status: ")
 }
 
-// waitingForSynchronization reports a Workflow queued behind native Argo
-// synchronization: the Workflow itself, before Argo records its start, or any
-// Pending node. Argo anchors its own deadline to startedAt, so a workflow-level
+// argoParallelismPostponed is the exact status message the Argo v4.0.8
+// workflow controller writes when its throttler does not admit a new
+// Workflow (workflow/controller/controller.go, processNextItem): the phase
+// becomes Pending, startedAt stays unset, and no condition is added. The
+// controller writes it once, on the Workflow's first pass, and replaces it
+// when the Workflow is admitted.
+const argoParallelismPostponed = "Workflow processing has been postponed because too many workflows are already running"
+
+// postponedByParallelism reports a Workflow the Argo controller holds back
+// for its parallelism limit. Like a workflow-level lock wait it has not
+// started by Argo's clock, so neither Oberth's startup bound nor its
+// watchdog counts the wait.
+func postponedByParallelism(wf *wfv1.Workflow) bool {
+	return wf != nil && wf.Status.Phase == wfv1.WorkflowPending && wf.Status.StartedAt.IsZero() &&
+		wf.Status.Message == argoParallelismPostponed
+}
+
+// waitingForSynchronization reports a Workflow queued by the Argo controller:
+// postponed for its parallelism limit, or behind native synchronization (the
+// Workflow itself, before Argo records its start, or any Pending node). Argo
+// anchors its own deadline to startedAt, so a postponed or workflow-level
 // wait burns nothing; a template-level wait burns the workflow deadline Argo
 // enforces, and Oberth adds no clock of its own on top.
 func waitingForSynchronization(wf *wfv1.Workflow) bool {
 	if wf == nil || wf.Status.Phase.Completed() {
 		return false
 	}
-	if waitingForLock(wf.Status.Message) {
+	if postponedByParallelism(wf) || waitingForLock(wf.Status.Message) {
 		return true
 	}
 	for _, node := range wf.Status.Nodes {

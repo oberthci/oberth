@@ -3,7 +3,6 @@ package argoworkflow
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	wfv1 "github.com/argoproj/argo-workflows/v4/pkg/apis/workflow/v1alpha1"
@@ -25,11 +24,12 @@ const (
 	// declare native Argo synchronization instead.
 	RetiredExclusiveAnnotation = "oberth.ci/exclusive"
 
-	// ConcurrencyGroupAnnotation names a group shared across repositories and
-	// all triggers. ConcurrencyLimitAnnotation defaults to one; YAML declarations
-	// of the same group must agree. Names use 1..63 lowercase letters/digits/hyphens.
-	ConcurrencyGroupAnnotation = "oberth.ci/concurrency-group"
-	ConcurrencyLimitAnnotation = "oberth.ci/concurrency-limit"
+	// RetiredConcurrencyGroupAnnotation and RetiredConcurrencyLimitAnnotation
+	// are the former repository concurrency-group declarations. Since v0.20.0
+	// they are accepted and ignored, like oberth.ci/exclusive: a run that
+	// must not overlap another declares a native Argo mutex or semaphore.
+	RetiredConcurrencyGroupAnnotation = "oberth.ci/concurrency-group"
+	RetiredConcurrencyLimitAnnotation = "oberth.ci/concurrency-limit"
 
 	// SecretPathsAnnotation declares the OpenBao paths credentialed steps
 	// intend to read through secretstore exec. Admission checks the approval
@@ -39,70 +39,6 @@ const (
 )
 
 const maxDeclaredSecretPaths = 32
-
-// MaxConcurrencyGroupLength bounds a concurrency group name.
-const MaxConcurrencyGroupLength = 63
-
-// ValidConcurrencyGroup reports whether name is a legal concurrency group:
-// 1 to 63 characters, each a lowercase ASCII letter, digit, or hyphen. The
-// store's schema enforces the same rule, so a name that passes here is the
-// only kind that can ever be recorded on a run.
-func ValidConcurrencyGroup(name string) bool {
-	if name == "" || len(name) > MaxConcurrencyGroupLength {
-		return false
-	}
-	for index := 0; index < len(name); index++ {
-		character := name[index]
-		if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '-' {
-			return false
-		}
-	}
-	return true
-}
-
-// DeclaredConcurrencyGroup returns the concurrency group the document declares,
-// or "" when it declares none. Surrounding whitespace is ignored exactly as it
-// is for the size annotation; the name itself is never normalized, so a value
-// that is not already a legal group name is an admission error rather than a
-// silently different group.
-func DeclaredConcurrencyGroup(workflow *wfv1.Workflow) (string, error) {
-	if workflow == nil {
-		return "", errors.New("argoworkflow: no Workflow to read")
-	}
-	declared, ok := workflow.Annotations[ConcurrencyGroupAnnotation]
-	if !ok || strings.TrimSpace(declared) == "" {
-		return "", nil
-	}
-	group := strings.TrimSpace(declared)
-	if !ValidConcurrencyGroup(group) {
-		return "", fmt.Errorf("argoworkflow: annotation %s declares invalid concurrency group %q; "+
-			"a group is 1 to %d characters of lowercase letters, digits, and hyphens ([a-z0-9-])",
-			ConcurrencyGroupAnnotation, declared, MaxConcurrencyGroupLength)
-	}
-	return group, nil
-}
-
-// DeclaredConcurrencyLimit reads a positive decimal limit from immutable YAML.
-// Omission defaults to one. A limit without a group is a configuration error.
-func DeclaredConcurrencyLimit(workflow *wfv1.Workflow) (int, error) {
-	group, err := DeclaredConcurrencyGroup(workflow)
-	if err != nil {
-		return 0, err
-	}
-	raw, present := workflow.Annotations[ConcurrencyLimitAnnotation]
-	if !present {
-		return 1, nil
-	}
-	value := strings.TrimSpace(raw)
-	if group == "" || value == "" || strings.Trim(value, "0123456789") != "" {
-		return 0, fmt.Errorf("argoworkflow: annotation %s requires a concurrency group and a positive decimal integer", ConcurrencyLimitAnnotation)
-	}
-	n, err := strconv.ParseInt(value, 10, 32)
-	if err != nil || n < 1 {
-		return 0, fmt.Errorf("argoworkflow: annotation %s must be in 1..2147483647", ConcurrencyLimitAnnotation)
-	}
-	return int(n), nil
-}
 
 // DeclaredSize returns the scheduler admission weight the document requests.
 func DeclaredSize(workflow *wfv1.Workflow) (pipeline.Size, error) {

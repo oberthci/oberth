@@ -391,16 +391,6 @@ func TestExecutionTargetNativeCreatePlanningAndRestart(t *testing.T) {
 	if size, err := f.jobs.PipelineSize(ctx, request); err != nil || size != pipeline.L {
 		t.Fatal(size, err)
 	}
-	group, limit, err := f.jobs.PipelineConcurrencyContract(ctx, request)
-	if err != nil || group != "shared" || limit != 2 {
-		t.Fatal(group, limit, err)
-	}
-	if err := f.db.SetRunConcurrencyGroup(ctx, request.Run.ID, group, limit); err != nil {
-		t.Fatal(err)
-	}
-	request.Run.ConcurrencyGroup = group
-	request.Run.ConcurrencyLimit = limit
-	request.ConcurrencyGroup = group
 	if steps, err := f.jobs.PlannedSteps(ctx, request); err != nil || len(steps) != 1 {
 		t.Fatal(steps, err)
 	}
@@ -699,9 +689,8 @@ func TestExecutionTargetGitOutageDoesNotSerializeLocalAdmission(t *testing.T) {
 
 // Keep the canonical optional contracts visible at compile time.
 var (
-	_ service.JobController                     = (*ArgoJobs)(nil)
-	_ service.JobAdopter                        = (*ArgoJobs)(nil)
-	_ service.JobCreateSettler                  = (*ArgoJobs)(nil)
-	_ service.PipelineConcurrencyContractReader = (*ArgoJobs)(nil)
-	_ service.PipelineDemandSizer               = (*ArgoJobs)(nil)
+	_ service.JobController       = (*ArgoJobs)(nil)
+	_ service.JobAdopter          = (*ArgoJobs)(nil)
+	_ service.JobCreateSettler    = (*ArgoJobs)(nil)
+	_ service.PipelineDemandSizer = (*ArgoJobs)(nil)
 )

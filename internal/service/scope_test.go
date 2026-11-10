@@ -705,9 +705,9 @@ var toolScopeBehaviour = map[string]string{
 	"size_grant": "mutation", "size_revoke": "mutation", "resource_grant": "mutation", "resource_revoke": "mutation",
 	"priority_grant": "refused", "priority_grant_list": "refused", "priority_grant_revoke": "refused",
 	"workflow_capability_grant": "mutation", "workflow_capability_revoke": "mutation", "workflow_capability_get": "lookup",
-	"queue_cap_config": "refused", "admission_capacity_config": "refused", "release_wif_list": "refused", "release_wif_grant": "refused", "release_wif_revoke": "refused", "release_wif_reset": "refused",
+	"queue_cap_config": "refused", "release_wif_list": "refused", "release_wif_grant": "refused", "release_wif_revoke": "refused", "release_wif_reset": "refused",
 	"queue_priority_config": "refused", "queue_priority_get": "refused", "run_priority": "refused",
-	"concurrency_groups": "refused", "admission_release": "refused", "admission_hold": "refused",
+	"admission_release": "refused", "admission_hold": "refused",
 	"repo_remove": "mutation", "promote_grant": "mutation", "promote_grant_revoke": "mutation",
 	"schedule_list": "filtered", "schedule_pause": "mutation", "schedule_resume": "mutation", "schedule_trigger": "mutation",
 	"repo_archive": "refused", "repo_unarchive": "refused",
@@ -738,7 +738,7 @@ func TestEveryToolIsClassifiedForScopedUplinks(t *testing.T) {
 type busyAdmission struct{}
 
 func (busyAdmission) AdmissionSnapshot(int64) *model.AdmissionObservation {
-	return &model.AdmissionObservation{State: "waiting", Position: 3, Used: 7, Capacity: 8,
+	return &model.AdmissionObservation{State: "waiting", Position: 3, Used: 7,
 		DiskFloor: &model.DiskFloorObservation{BelowFloor: true, FreeBytes: 1, FloorBytes: 2}}
 }
 
@@ -750,7 +750,7 @@ func TestScopedSchedulingHidesInstallationLoad(t *testing.T) {
 	unscoped := &API{admission: busyAdmission{}}
 	run := model.Run{ID: "run", Status: model.RunRunning, QueueSequence: 5}
 	got, _ := scoped.observeScheduling(context.Background(), run, nil, true)
-	if got.Admission.Position != 0 || got.Admission.Used != 0 || got.Admission.Capacity != 0 || got.Admission.DiskFloor != nil ||
+	if got.Admission.Position != 0 || got.Admission.Used != 0 || got.Admission.DiskFloor != nil ||
 		got.Message != "In line." {
 		t.Fatalf("scoped scheduling = %#v %#v", got, got.Admission)
 	}

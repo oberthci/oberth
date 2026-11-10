@@ -45,15 +45,6 @@ func TestExecutionTargetExpiredCustodyRecovery(t *testing.T) {
 			if _, err := jobs.PipelineSize(ctx, request); err != nil {
 				t.Fatal(err)
 			}
-			group, limit, err := jobs.PipelineConcurrencyContract(ctx, request)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := f.db.SetRunConcurrencyGroup(ctx, request.Run.ID, group, limit); err != nil {
-				t.Fatal(err)
-			}
-			request.Run.ConcurrencyGroup, request.Run.ConcurrencyLimit = group, limit
-			request.ConcurrencyGroup = group
 			request.DemandReceipt, err = jobs.PipelineDemandReceipt(ctx, request)
 			if err != nil {
 				t.Fatal(err)

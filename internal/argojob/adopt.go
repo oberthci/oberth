@@ -38,12 +38,12 @@ type Adoption struct {
 var ErrAdoptionRefused = errors.New("argojob: Workflow refused for adoption")
 
 type AdoptionRequest struct {
-	PinnedSources                []pipeline.PinnedSource
-	RepositoryID                 int64
-	Name, RunID, Ref, SHA, Group string
-	Trigger                      pipeline.Trigger
-	RunTrigger                   argoworkflow.RunTrigger
-	ScheduleEntry                string
+	PinnedSources         []pipeline.PinnedSource
+	RepositoryID          int64
+	Name, RunID, Ref, SHA string
+	Trigger               pipeline.Trigger
+	RunTrigger            argoworkflow.RunTrigger
+	ScheduleEntry         string
 }
 
 func (controller *Controller) Adopt(ctx context.Context, request AdoptionRequest) (Adoption, bool, error) {
@@ -96,10 +96,6 @@ func (controller *Controller) bindAdoption(workflow *wfv1.Workflow, request Adop
 				return Adoption{}, argoworkflow.ErrWorkflowCapabilityRequired
 			}
 		}
-	}
-	group, err := argoworkflow.DeclaredConcurrencyGroup(workflow)
-	if err != nil || group != request.Group {
-		return Adoption{}, fmt.Errorf("argojob: Workflow %s adoption group mismatch", request.Name)
 	}
 	size, err := argoworkflow.DeclaredSizeFor(workflow, request.RunTrigger)
 	if err != nil {

@@ -21,160 +21,72 @@ func acquireWithinBudget(t *testing.T, reservation *admissionReservation, size p
 	return reservation.acquire(ctx, size)
 }
 
-// The ceiling counts runs: two fit a ceiling of two whatever their historical
-// size tier says, and a third waits for one of them to finish.
-func TestAdmissionEnforcesRunCeiling(t *testing.T) {
-	gate := newAdmissionGate(2)
-	first := gate.reserve(1)
-	releaseFirst, err := first.acquire(context.Background(), pipeline.L)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer releaseFirst()
-
-	second := gate.reserve(2)
-	releaseSecond, err := acquireWithinBudget(t, second, pipeline.L)
-	if err != nil {
-		t.Fatalf("two runs must fit a ceiling of two: %v", err)
-	}
-	defer releaseSecond()
-
-	third := gate.reserve(3)
-	acquired := make(chan func(), 1)
-	go acquireForTest(third, pipeline.L, acquired)
-	assertNotAcquired(t, acquired)
-	releaseSecond()
-	releaseThird := awaitAcquired(t, acquired)
-	releaseThird()
-}
-
-// The regression this file exists for: a run-count ceiling passed straight
-// into a weight-denominated budget capped the whole server at one concurrent
-// run, because the default M size weighs 2 and the budget was 3. A run claimed
-// past that gate used to appear started with no Workflow object at all, since
-// the gate is acquired before the engine is asked to create one. It now reads
-// as waiting until submission.
-func TestWeightedAdmissionForJobsAdmitsConfiguredConcurrencyAtDefaultSize(t *testing.T) {
-	const maxConcurrentJobs = 3
-	gate := newAdmissionGate(maxConcurrentJobs)
-	releases := make([]func(), 0, maxConcurrentJobs)
-	for sequence := 1; sequence <= maxConcurrentJobs; sequence++ {
-		reservation := gate.reserve(int64(sequence))
-		// The empty size is what an undeclared pipeline resolves to.
-		release, err := acquireWithinBudget(t, reservation, "")
+// Oberth has no run ceiling (Argo parallelism bounds running Workflows):
+// every prepared run is granted at once whatever its historical size tier,
+// unless the disk floor, host pressure or the administrator hold says
+// otherwise.
+func TestAdmissionHasNoRunCeiling(t *testing.T) {
+	gate := newAdmissionGate()
+	var releases []func()
+	for sequence, size := range []pipeline.Size{"", pipeline.S, pipeline.M, pipeline.L, pipeline.XL, pipeline.XL} {
+		release, err := acquireWithinBudget(t, gate.reserve(int64(sequence+1)), size)
 		if err != nil {
-			t.Fatalf("run %d of %d did not acquire at the configured concurrency: %v",
-				sequence, maxConcurrentJobs, err)
+			t.Fatalf("run %d (%q) waited for a ceiling: %v", sequence+1, size, err)
 		}
 		releases = append(releases, release)
 	}
-
-	overflow := gate.reserve(int64(maxConcurrentJobs) + 1)
-	acquired := make(chan func(), 1)
-	go acquireForTest(overflow, "", acquired)
-	assertNotAcquired(t, acquired)
-	releases[0]()
-	releaseOverflow := awaitAcquired(t, acquired)
-	releaseOverflow()
-	for _, release := range releases[1:] {
+	if gate.runs != len(releases) {
+		t.Fatalf("runs=%d, want %d", gate.runs, len(releases))
+	}
+	for _, release := range releases {
 		release()
 	}
-}
-
-// A pipeline that declares L trades concurrency for per-run resources
-// proportionally. It must not collapse to a single run: that is exactly the
-// shape of the reported defect, where every run of one L-declaring repository
-// serialized behind the previous one.
-func TestWeightedAdmissionForJobsRunsLargePipelinesConcurrently(t *testing.T) {
-	gate := newAdmissionGate(3)
-	first := gate.reserve(1)
-	releaseFirst, err := first.acquire(context.Background(), pipeline.L)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer releaseFirst()
-
-	second := gate.reserve(2)
-	releaseSecond, err := acquireWithinBudget(t, second, pipeline.L)
-	if err != nil {
-		t.Fatalf("a second large run must not serialize behind the first: %v", err)
-	}
-	releaseSecond()
-}
-
-// An operator who configures a single concurrent job still gets one run at the
-// default size and heavier. The gate is a resource budget, so a size lighter
-// than the default can fit twice in it; the hard run-count ceiling is the
-// dispatch loop's `active < maxConcurrent`, not this gate.
-func TestWeightedAdmissionForJobsHonorsSingleJobCeiling(t *testing.T) {
-	for _, size := range []pipeline.Size{"", pipeline.M, pipeline.L, pipeline.XL} {
-		gate := newAdmissionGate(1)
-		first := gate.reserve(1)
-		releaseFirst, err := first.acquire(context.Background(), size)
-		if err != nil {
-			t.Fatalf("size %q did not acquire at maxConcurrentJobs=1: %v", size, err)
-		}
-		second := gate.reserve(2)
-		acquired := make(chan func(), 1)
-		go acquireForTest(second, size, acquired)
-		assertNotAcquired(t, acquired)
-		releaseFirst()
-		releaseSecond := awaitAcquired(t, acquired)
-		releaseSecond()
+	if gate.runs != 0 {
+		t.Fatalf("gate leaked runs=%d", gate.runs)
 	}
 }
 
+// Waiters held back by the disk floor keep claim order: when it clears, the
+// grant pass admits them in FIFO order, and nothing later overtakes a head
+// that is still preparing.
 func TestAdmissionIsFIFO(t *testing.T) {
-	gate := newAdmissionGate(1)
-	medium := gate.reserve(1)
-	releaseMedium, err := medium.acquire(context.Background(), pipeline.M)
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	gate := newAdmissionGate()
+	blockOnDiskFloor(gate)
 	xl := gate.reserve(2)
 	small := gate.reserve(3)
 	xlAcquired := make(chan func(), 1)
 	smallAcquired := make(chan func(), 1)
 	go acquireForTest(xl, pipeline.XL, xlAcquired)
+	awaitWaiting(t, xl)
 	go acquireForTest(small, pipeline.S, smallAcquired)
-	assertNotAcquired(t, xlAcquired)
-	assertNotAcquired(t, smallAcquired)
-
-	releaseMedium()
-	releaseXL := awaitAcquired(t, xlAcquired)
-	assertNotAcquired(t, smallAcquired)
-	releaseXL()
-	releaseSmall := awaitAcquired(t, smallAcquired)
-	releaseSmall()
+	awaitWaiting(t, small)
+	gate.mu.Lock()
+	order := []*admissionReservation{gate.waiters[0], gate.waiters[1]}
+	gate.mu.Unlock()
+	if order[0] != xl || order[1] != small {
+		t.Fatal("waiters lost claim order")
+	}
+	clearDiskFloor(gate)
+	awaitAcquired(t, xlAcquired)()
+	awaitAcquired(t, smallAcquired)()
 }
 
 func TestAdmissionReservesClaimOrderBeforePreparationCompletes(t *testing.T) {
-	gate := newAdmissionGate(1)
+	gate := newAdmissionGate()
 	first := gate.reserve(1)
 	second := gate.reserve(2)
 	secondAcquired := make(chan func(), 1)
 	go acquireForTest(second, pipeline.S, secondAcquired)
+	// The first claim is still preparing: the prepared run behind it waits.
 	assertNotAcquired(t, secondAcquired)
 
 	releaseFirst, err := first.acquire(context.Background(), pipeline.XL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertNotAcquired(t, secondAcquired)
-	releaseFirst()
 	releaseSecond := awaitAcquired(t, secondAcquired)
+	releaseFirst()
 	releaseSecond()
-}
-
-func TestWeightedAdmissionClampsDefaultMToSmallCapacity(t *testing.T) {
-	gate := newAdmissionGate(1)
-	reservation := gate.reserve(1)
-	release, err := reservation.acquire(context.Background(), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	release()
 }
 
 func acquireForTest(reservation *admissionReservation, size pipeline.Size, acquired chan<- func()) {
@@ -210,18 +122,23 @@ func awaitAcquired(t *testing.T, acquired <-chan func()) func() {
 // to the run queued behind it; a granted reservation stays with its owner
 // until the owner releases it, and a preparing one fails its later acquire.
 func TestAdmissionAbandonWithdrawsOnlyUngrantedReservations(t *testing.T) {
-	gate := newAdmissionGate(1)
+	gate := newAdmissionGate()
 	holder := gate.reserve(1)
 	releaseHolder, err := holder.acquire(context.Background(), pipeline.L)
 	if err != nil {
 		t.Fatal(err)
 	}
+	blockOnDiskFloor(gate)
 	head := gate.reserve(2)
 	headErr := make(chan error, 1)
 	go func() {
 		_, err := head.acquire(context.Background(), pipeline.XL)
 		headErr <- err
 	}()
+	awaitWaiting(t, head)
+	gate.mu.Lock()
+	gate.grantLocked()
+	gate.mu.Unlock()
 	behind := gate.reserve(3)
 	acquired := make(chan func(), 1)
 	go acquireForTest(behind, pipeline.S, acquired)
@@ -242,6 +159,7 @@ func TestAdmissionAbandonWithdrawsOnlyUngrantedReservations(t *testing.T) {
 		t.Fatal("abandoned waiter never woke")
 	}
 	releaseHolder()
+	clearDiskFloor(gate)
 	releaseBehind := awaitAcquired(t, acquired)
 	if gate.abandon(2) {
 		t.Fatal("an abandoned reservation was abandoned twice")

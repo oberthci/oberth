@@ -92,8 +92,6 @@ type APIConfig struct {
 	QueueCap                  QueueCapStore
 	ReleaseWIFOverrides       ReleaseWIFOverrideStore
 	ReleaseWIF                ReleaseWIFPolicy
-	CapacityOverrides         AdmissionCapacityOverrideStore
-	RuntimeCapacity           RuntimeCapacityController
 	SecretStoreVerifier       SecretStoreVerifier
 	SecretAccessReconciler    *AccessReconciler
 	RepositoryArchiver        RepositoryArchiver
@@ -181,8 +179,6 @@ type API struct {
 	releaseWIFOverrides       ReleaseWIFOverrideStore
 	releaseWIF                ReleaseWIFPolicy
 	releaseWIFMu              *sync.Mutex
-	capacityOverrides         AdmissionCapacityOverrideStore
-	runtimeCapacity           RuntimeCapacityController
 	deferredBranches          deferredBranchReader
 	secretStoreVerifier       SecretStoreVerifier
 	secretAccessReconciler    *AccessReconciler
@@ -308,7 +304,7 @@ func NewAPI(config APIConfig) (*API, error) {
 		runCancels: config.RunCancels, retention: config.Retention, runReruns: config.RunReruns, schedules: config.Schedules, uplinks: config.Uplinks, background: &sync.WaitGroup{},
 		assistHolds: config.AssistHolds, runAssists: config.RunAssists, assistGate: newAssistGate(assistGateLimit(config.AssistHolds)),
 		releaseWIFOverrides: config.ReleaseWIFOverrides, releaseWIF: config.ReleaseWIF, releaseWIFMu: &sync.Mutex{},
-		capacityOverrides: config.CapacityOverrides, runtimeCapacity: config.RuntimeCapacity,
+
 		promotionProgress: &sync.Map{},
 		lifetime:          lifetime, stopLifetime: stopLifetime, closing: &backgroundClosing{},
 	}
@@ -435,27 +431,6 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		}
 	}
 	switch name {
-	case "concurrency_groups":
-		if err := requireUnscoped(actor, "concurrency_groups"); err != nil {
-			return nil, err
-		}
-		if err := decodeTool(raw, &struct{}{}); err != nil {
-			return nil, err
-		}
-		observer, ok := service.admission.(interface {
-			ConcurrencyGroups(context.Context) ([]model.AdmissionGroup, error)
-		})
-		if !ok {
-			return nil, refuse(ErrUnavailable, "concurrency groups")
-		}
-		groups, err := observer.ConcurrencyGroups(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if groups == nil {
-			groups = []model.AdmissionGroup{}
-		}
-		return api.ConcurrencyGroupsResponse{Groups: groups}, nil
 	case "admission_hold":
 		return service.admissionHoldTool(ctx, actor, raw)
 	// Credential and grant lifecycle (#1105).
@@ -482,8 +457,6 @@ func (service *API) callTool(ctx context.Context, actor api.Actor, name string, 
 		return service.priorityGrantTool(ctx, actor, name, raw)
 	case "queue_cap_config":
 		return service.queueCapConfig(ctx, actor, raw)
-	case "admission_capacity_config":
-		return service.admissionCapacityConfig(ctx, actor, raw)
 	case "release_wif_list", "release_wif_grant", "release_wif_revoke", "release_wif_reset":
 		return service.releaseWIFTool(ctx, actor, name, raw)
 	case "queue_priority_config", "queue_priority_get", "run_priority":
@@ -1652,11 +1625,10 @@ func (service *API) statusForRun(ctx context.Context, repository model.Repositor
 		Priority: presented.Priority, PriorityReason: presented.PriorityReason, PriorityRequestedBy: presented.PriorityRequestedBy, PriorityRefusal: presented.PriorityRefusal,
 		Repository: repository, Run: run, Repo: repository.Name, Ref: run.Ref,
 		SHA: run.SHA, RunID: run.ID, Status: wireRunStatus(visibleRun(run).Status), Stages: map[string]string{},
-		DisplayStatus:    presented.DisplayStatus,
-		DisplayReason:    presented.DisplayReason,
-		ResourceMessage:  presented.ResourceMessage,
-		ConcurrencyGroup: run.ConcurrencyGroup,
-		ScheduleEntry:    run.ScheduleEntry,
+		DisplayStatus:   presented.DisplayStatus,
+		DisplayReason:   presented.DisplayReason,
+		ResourceMessage: presented.ResourceMessage,
+		ScheduleEntry:   run.ScheduleEntry,
 	}
 	if service.history != nil {
 		steps, err := service.stepsForRun(ctx, run)

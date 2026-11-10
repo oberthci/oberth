@@ -55,7 +55,7 @@ func TestAdminPriorityLoweringReordersBlockedHead(t *testing.T) {
 	for _, priority := range []model.RunPriority{model.PriorityNormal, model.PriorityLow} {
 		t.Run(string(priority), func(t *testing.T) {
 			f := newControlFixture(t)
-			gate := newAdmissionGate(1)
+			gate := newAdmissionGate()
 			future := time.Now().Add(2 * time.Hour)
 			gate.now = func() time.Time { return future }
 			f.scheduler.admission = gate
@@ -65,6 +65,7 @@ func TestAdminPriorityLoweringReordersBlockedHead(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer release()
+			blockOnDiskFloor(gate)
 			var runs []model.Run
 			for _, ref := range []string{"head", "next"} {
 				queued, err := storetest.EnqueueRun(f.store, t.Context(), model.RunSpec{RepoID: f.repo.ID, RefKind: model.RefBranch, Ref: ref, SHA: strings.Repeat("a", 40), Actor: "dev", Trigger: "push"})
@@ -96,13 +97,18 @@ func TestAdminPriorityLoweringReordersBlockedHead(t *testing.T) {
 				t.Fatal(lowered)
 			}
 			release()
-			if !granted(gate, waiting[1]) || granted(gate, waiting[0]) {
-				t.Fatal("lowered head still blocks ordinary work")
+			gate.mu.Lock()
+			gate.sortWaitersLocked()
+			first := gate.waiters[0]
+			gate.mu.Unlock()
+			if first != waiting[1] {
+				t.Fatal("lowered head still leads ordinary work")
 			}
-			waiting[1].release()
-			if !granted(gate, waiting[0]) {
+			clearDiskFloor(gate)
+			if !granted(gate, waiting[1]) || !granted(gate, waiting[0]) {
 				t.Fatal("lowered run lost its reservation")
 			}
+			waiting[1].release()
 			if _, err = f.scheduler.BumpRunPriority(t.Context(), "admin", runs[0].ID, model.PriorityLow, "already admitted"); !errors.Is(err, store.ErrInvalidState) {
 				t.Fatalf("admitted work was preempted: %v", err)
 			}

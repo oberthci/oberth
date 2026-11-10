@@ -24,7 +24,7 @@ func (f schedulingObserverFunc) ObserveScheduling(ctx context.Context, run model
 }
 
 func TestSchedulingAdmissionSnapshotsFollowLifecycle(t *testing.T) {
-	gate := newAdmissionGate(1)
+	gate := newAdmissionGate()
 	scheduler := &Scheduler{admission: gate}
 	first := gate.reserve(1)
 	release, err := first.acquire(t.Context(), pipeline.XL)
@@ -32,6 +32,7 @@ func TestSchedulingAdmissionSnapshotsFollowLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
+	blockOnDiskFloor(gate)
 	second := gate.reserve(2)
 	if result := scheduler.AdmissionSnapshot(2); result.State != "preparing" || result.Position != 1 {
 		t.Fatalf("preparing=%#v", result)
@@ -46,6 +47,7 @@ func TestSchedulingAdmissionSnapshotsFollowLifecycle(t *testing.T) {
 		t.Fatalf("admitted=%#v", result)
 	}
 	release()
+	clearDiskFloor(gate)
 	releaseSecond := awaitAcquired(t, acquired)
 	releaseSecond()
 	if scheduler.AdmissionSnapshot(1) != nil || scheduler.AdmissionSnapshot(2) != nil {
@@ -59,7 +61,7 @@ func TestSchedulingAdmissionSnapshotsFollowLifecycle(t *testing.T) {
 }
 
 func TestClaimedRunShowsCapacityWaitUntilSubmission(t *testing.T) {
-	gate := newAdmissionGate(1)
+	gate := newAdmissionGate()
 	scheduler := &Scheduler{admission: gate}
 	first := gate.reserve(1)
 	releaseFirst, err := first.acquire(t.Context(), pipeline.L)
@@ -67,6 +69,7 @@ func TestClaimedRunShowsCapacityWaitUntilSubmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer releaseFirst()
+	blockOnDiskFloor(gate)
 	second := gate.reserve(2)
 	acquired := make(chan func(), 1)
 	go acquireForTest(second, pipeline.M, acquired)
@@ -78,11 +81,12 @@ func TestClaimedRunShowsCapacityWaitUntilSubmission(t *testing.T) {
 	run := model.Run{Status: model.RunRunning, QueueSequence: 2, QueuePosition: 1, WorkflowName: "reserved-workflow"}
 	observation, _ := service.observeScheduling(t.Context(), run, nil, true)
 	if observation.State != "waiting" || observation.Admission == nil ||
-		observation.Admission.Used != 1 || observation.Admission.Capacity != 1 || observation.Admission.Position != 1 ||
-		!strings.Contains(observation.Message, "1 run running") {
+		observation.Admission.Used != 1 || observation.Admission.Position != 1 ||
+		!strings.Contains(observation.Message, "disk space") {
 		t.Fatalf("capacity wait was not visible: %#v", observation)
 	}
 	releaseFirst()
+	clearDiskFloor(gate)
 	releaseSecond := awaitAcquired(t, acquired)
 	defer releaseSecond()
 	observation, _ = service.observeScheduling(t.Context(), run, nil, true)

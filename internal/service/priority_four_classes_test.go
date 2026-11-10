@@ -10,13 +10,14 @@ import (
 )
 
 func TestFourClassesUrgencyPassesPromotionsWithoutPreemptingRunningWork(t *testing.T) {
-	g := newAdmissionGate(1)
+	g := newAdmissionGate()
 	holder := g.reserve(1)
 	release, err := holder.acquire(context.Background(), pipeline.XL)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer release()
+	blockOnDiskFloor(g)
 	var low, standard, promotion, high []*admissionReservation
 	for i, name := range []model.RunPriority{"low", "standard", "promotion", "high", "low", "standard", "promotion", "high"} {
 		r := priorityWaiter(g, int64(i+2), name, time.Now(), pipeline.XL)
@@ -31,20 +32,23 @@ func TestFourClassesUrgencyPassesPromotionsWithoutPreemptingRunningWork(t *testi
 			high = append(high, r)
 		}
 		if granted(g, r) || !granted(g, holder) {
-			t.Fatal("waiting urgency preempted running work or bypassed resource cap")
+			t.Fatal("waiting urgency preempted running work or bypassed the disk floor")
 		}
 	}
-	release()
 	want := append(append(append(high, promotion...), standard...), low...)
+	g.mu.Lock()
+	g.sortWaitersLocked()
 	for i, r := range want {
+		if g.waiters[i] != r {
+			t.Errorf("four-class FIFO failed at %d (priority %s)", i, r.priority)
+		}
+	}
+	g.mu.Unlock()
+	clearDiskFloor(g)
+	for _, r := range want {
 		if !granted(g, r) {
-			t.Fatalf("four-class FIFO failed at %d (priority %s)", i, r.priority)
+			t.Fatalf("waiter %s not admitted after the floor cleared", r.priority)
 		}
-		g.mu.Lock()
-		if g.runs != 1 {
-			t.Errorf("admission constraints changed: runs=%d", g.runs)
-		}
-		g.mu.Unlock()
 		r.release()
 	}
 }

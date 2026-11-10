@@ -403,9 +403,6 @@ fi
 if render --set service.htpsNodePort=31443 >/dev/null 2>&1; then
   exit 1
 fi
-if render --set maxConcurrentJobs=65 >/dev/null 2>&1; then
-  exit 1
-fi
 if render --set-string auditAnchor.rekorPublicKey=not-a-pem >/dev/null 2>&1; then
   exit 1
 fi
@@ -583,28 +580,23 @@ if grep -Fq -- '--admission-disk-floor-bytes=' "$admission_legacy_manifest"; the
 fi
 rm -f "$admission_legacy_manifest"
 
-# argoSync.semaphores renders the fixed-name limits ConfigMap in the pipeline
-# namespace, with integer values quoted as ConfigMap data; empty renders none.
-# releases.serialize renders the one flag only when set. Removed admission
-# values are refused by the schema, never silently ignored.
+# Run limits live in Argo since v0.20.0: the chart renders no limits
+# ConfigMap, no runtime-capacity ConfigMap and no run-ceiling flag.
+# releases.serialize renders the one flag only when set. The retired keys
+# render at their former stock defaults (a --reuse-values upgrade carries
+# them) and fail with the replacement named at any other value.
 sync_manifest=$(mktemp)
-render --set argoSync.semaphores.kvm=1 --set-string argoSync.semaphores.heavy-go=2 --set releases.serialize=true >"$sync_manifest"
-grep -q '^  name: oberth-sync-limits$' "$sync_manifest"
-grep -q '^  kvm: "1"$' "$sync_manifest"
-grep -q '^  heavy-go: "2"$' "$sync_manifest"
+render --set releases.serialize=true >"$sync_manifest"
 grep -q -- '--serialize-releases=true' "$sync_manifest"
-render >"$sync_manifest"
-if grep -q 'oberth-sync-limits' "$sync_manifest" || grep -q -- '--serialize-releases' "$sync_manifest"; then
+render --set maxConcurrentJobs=0 --set admission.runtimeCapacity.enabled=true --set admission.runtimeCapacity.maxConcurrentJobs=null --set argoSync.semaphores=null >"$sync_manifest"
+if grep -q 'oberth-sync-limits\|--serialize-releases\|max-concurrent-jobs\|runtime-capacity' "$sync_manifest"; then
   exit 1
 fi
-if render --set argoSync.semaphores.kvm=0 >/dev/null 2>&1; then exit 1; fi
-if render --set-string 'argoSync.semaphores.bad key=1' >/dev/null 2>&1; then exit 1; fi
-if render --set maxConcurrentJobs=0 >"$sync_manifest"; then
-  grep -q -- '--max-concurrent-jobs=0' "$sync_manifest"
-  grep -q '^  max-concurrent-jobs: "0"$' "$sync_manifest"
-else
-  exit 1
-fi
+for retired in maxConcurrentJobs=3 admission.runtimeCapacity.enabled=false admission.runtimeCapacity.maxConcurrentJobs=2 argoSync.semaphores.kvm=1; do
+  if render --set "$retired" >/dev/null 2>&1; then exit 1; fi
+done
+render --set maxConcurrentJobs=3 2>&1 >/dev/null | grep -q 'oberth install --argo-parallelism'
+render --set argoSync.semaphores.kvm=1 2>&1 >/dev/null | grep -q 'oberth install --argo-sync-limit'
 # Removed admission keys: the former stock defaults still render (a
 # --reuse-values upgrade carries them); any deliberate value fails with the
 # replacement named.

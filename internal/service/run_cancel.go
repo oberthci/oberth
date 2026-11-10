@@ -45,9 +45,8 @@ func releaseLikeRun(run model.Run) bool {
 // warning to record with the cancel.
 //
 // A non-admin uplink may cancel only ordinary branch-push runs (trigger
-// branch) outside any concurrency group: release, tag, plan, apply, promotion
-// and scheduled runs, and members of a repository-declared concurrency group
-// (which guards external state such as a Terraform apply), are refused. Which
+// branch): release, tag, plan, apply, promotion and scheduled runs are
+// refused. Which
 // repositories it can see is the caller's scope check. An admin may cancel any
 // run, but a tag/release or apply run requires an explicit force, because its
 // Workflow may already have published part of its output.
@@ -57,8 +56,6 @@ func RunCancelPolicy(run model.Run, admin, force bool) (string, error) {
 		switch {
 		case releaseLike:
 			return "", refuse(ErrForbidden, "release, tag and apply runs can be cancelled only by an admin uplink")
-		case run.ConcurrencyGroup != "":
-			return "", refuse(ErrForbidden, "runs in concurrency group %q can be cancelled only by an admin uplink", run.ConcurrencyGroup)
 		case run.RefKind != model.RefBranch || run.Trigger != "branch":
 			return "", refuse(ErrForbidden, "a non-admin uplink may cancel only branch-push runs, not %s runs", run.Trigger)
 		}
@@ -71,9 +68,6 @@ func RunCancelPolicy(run model.Run, admin, force bool) (string, error) {
 				"(anything its Workflow already pushed stays published). Repeat with force to cancel it anyway", ErrInvalidInput, run.ID, run.Trigger)
 		}
 		warnings = append(warnings, "publication may be partial: anything the Workflow already pushed stays published, and Oberth publishes nothing further for this run")
-	}
-	if run.ConcurrencyGroup != "" && run.Status == model.RunRunning && run.StartedAt != nil {
-		warnings = append(warnings, fmt.Sprintf("concurrency group %q member cancelled while running: external state the group guards may need manual recovery", run.ConcurrencyGroup))
 	}
 	return strings.Join(warnings, "; "), nil
 }
@@ -123,7 +117,7 @@ func (service *API) cancelRun(ctx context.Context, actor api.Actor, id, reason s
 		return api.RunCancelResponse{}, err
 	}
 	// The store repeats the decision on the run as it is inside the cancel
-	// transaction: a claim may have recorded its concurrency group since.
+	// transaction: the run may have changed since.
 	var warning string
 	result, err := service.runCancels.CancelRun(ctx, model.RunCancelRequest{
 		RunID: run.ID, Actor: actor.Identity, Reason: reason, Force: force,

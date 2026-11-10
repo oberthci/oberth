@@ -32,8 +32,9 @@ type ReleaseWIFOverrideSpec struct {
 	Effective         json.RawMessage
 }
 
-// AdmissionCapacityOverride is the server-owned runtime workflow ceiling. It
-// takes precedence over the mounted file and the boot flag until cleared.
+// AdmissionCapacityOverride is the runtime run ceiling a v0.19 or older
+// server stored. Since v0.20.0 it has no effect: Argo parallelism bounds
+// running Workflows.
 type AdmissionCapacityOverride struct {
 	MaxConcurrentJobs int       `json:"max_concurrent_jobs"`
 	Reason            string    `json:"reason"`

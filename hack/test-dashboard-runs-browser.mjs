@@ -24,8 +24,8 @@ const makeRun = (ID, extra = {}) => {
   }
   return row;
 };
-const heads = [makeRun('head-main', {earlier_attempts: 3, priority_class:'highest', priority_reason:'fixture priority', ConcurrencyGroup:'deploy'}), makeRun('head-tag', {Ref:'v1', RefKind:'tag', Release:true, Credentialed:true, display_reason:'release'}), makeRun('head-branch', {Ref:'v1', Status:'failed'}), makeRun('head-queued', {RepoID:2, Status:'queued', StartedAt:null, FinishedAt:null}), makeRun('head-retry', {Ref:'feature', Status:'queued', StartedAt:null, FinishedAt:null, auto_retry_of:'retry-failed'})];
-const older = makeRun('old-failed', {Status:'failed', Error:'fixture failure', Trigger:'schedule', ScheduleEntry:'weekly', priority_class:'high', priority_reason:'history priority', ConcurrencyGroup:'deploy', display_reason:'priority high · history priority fixture failure'});
+const heads = [makeRun('head-main', {earlier_attempts: 3, priority_class:'highest', priority_reason:'fixture priority'}), makeRun('head-tag', {Ref:'v1', RefKind:'tag', Release:true, Credentialed:true, display_reason:'release'}), makeRun('head-branch', {Ref:'v1', Status:'failed'}), makeRun('head-queued', {RepoID:2, Status:'queued', StartedAt:null, FinishedAt:null}), makeRun('head-retry', {Ref:'feature', Status:'queued', StartedAt:null, FinishedAt:null, auto_retry_of:'retry-failed'})];
+const older = makeRun('old-failed', {Status:'failed', Error:'fixture failure', Trigger:'schedule', ScheduleEntry:'weekly', priority_class:'high', priority_reason:'history priority', display_reason:'priority high · history priority fixture failure'});
 const superseded = makeRun('old-superseded', {Status:'interrupted', SupersededBy:'head-main'});
 const oldest = makeRun('oldest');
 const scheduled = makeRun('scheduled-running', {Status:'running', Trigger:'schedule', ScheduleEntry:'nightly', FinishedAt:null, display_reason:'schedule: nightly'});

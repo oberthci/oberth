@@ -6,69 +6,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 )
 
-// Runtime administration (#1497): both commands call audited MCP tools that
-// write server-owned overrides, so neither needs a Helm upgrade or restart.
-
-const admissionCapacityUsage = "Usage: oberth admission capacity <0..64>|clear --reason <reason> [--json]\n" +
-	"         [--url <mcp-url>] [--token-file <path>] [--ca-file <path>]\n" +
-	"Sets the server-owned runtime run ceiling (0 is no ceiling); clear restores the mounted file or boot flag."
-
-func runAdmissionCapacity(ctx context.Context, args []string, output io.Writer) error {
-	if wantsHelp(args) {
-		_, err := fmt.Fprintln(output, admissionCapacityUsage)
-		return err
-	}
-	flags := flag.NewFlagSet("admission capacity", flag.ContinueOnError)
-	reason := flags.String("reason", "", "reason for the capacity change")
-	asJSON := flags.Bool("json", false, "emit JSON")
-	transport := mcpTransportFlags(flags)
-	positional, _, err := parseOperatorFlags(flags, args)
-	if err != nil {
-		return err
-	}
-	if len(positional) != 1 || strings.TrimSpace(*reason) == "" {
-		return fmt.Errorf("%w: %s", errUsage, admissionCapacityUsage)
-	}
-	arguments := map[string]any{"reason": *reason}
-	if positional[0] == "clear" {
-		arguments["clear"] = true
-	} else {
-		jobs, err := strconv.Atoi(positional[0])
-		if err != nil || jobs < 0 || jobs > 64 {
-			return fmt.Errorf("%w: %s", errUsage, admissionCapacityUsage)
-		}
-		arguments["max_concurrent_jobs"] = jobs
-	}
-	config, err := parseMCPFlags("admission capacity", transport(), 0)
-	if err != nil {
-		return err
-	}
-	raw, err := (remoteRunCanceller{config: config}).call(ctx, "admission_capacity_config", arguments)
-	if err != nil {
-		return err
-	}
-	var result struct {
-		Configuration struct {
-			MaxConcurrentJobs int    `json:"max_concurrent_jobs"`
-			Source            string `json:"source"`
-			Error             string `json:"error"`
-		} `json:"configuration"`
-	}
-	if *asJSON || json.Unmarshal(raw, &result) != nil || result.Configuration.Source == "" {
-		_, err = fmt.Fprintf(output, "%s\n", strings.TrimSpace(string(raw)))
-		return err
-	}
-	line := fmt.Sprintf("admission capacity: %d concurrent workflows, source=%s", result.Configuration.MaxConcurrentJobs, result.Configuration.Source)
-	if result.Configuration.Error != "" {
-		line += "; last reload error: " + result.Configuration.Error
-	}
-	_, err = fmt.Fprintln(output, line)
-	return err
-}
+// Runtime administration (#1497): release-wif calls audited MCP tools that
+// write server-owned overrides, so it needs no Helm upgrade or restart.
 
 const releaseWIFUsage = "Usage: oberth release-wif list [--json]\n" +
 	"       oberth release-wif grant <repo> --service-account <name> --template <leaf>=<role>[,...] --reason <reason> [--json]\n" +

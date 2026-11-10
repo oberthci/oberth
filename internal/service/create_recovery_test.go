@@ -34,15 +34,10 @@ func (j *createRecoveryJobs) SettleCreate(context.Context, string, string, time.
 var _ JobAdopter = (*createRecoveryJobs)(nil)
 var _ JobCreateSettler = (*createRecoveryJobs)(nil)
 
-func recoveryWaitingRun(t *testing.T, f *recoveryFixture, ref, name, group string) model.Run {
+func recoveryWaitingRun(t *testing.T, f *recoveryFixture, ref, name, _ string) model.Run {
 	t.Helper()
 	run := f.enqueueAndClaim(t, ref, strings.Repeat("a", 40))
 	f.setWorkflowName(t, run.ID, name)
-	if group != "" {
-		if err := f.store.SetRunConcurrencyGroup(t.Context(), run.ID, group); err != nil {
-			t.Fatal(err)
-		}
-	}
 	run, err := f.store.Run(t.Context(), run.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +96,7 @@ func TestWorkflowCreateRecoveryParkedGroupMateRequeuesInEitherOrder(t *testing.T
 				t.Fatal(err)
 			}
 			state := scheduler.AdmissionState()
-			if adopted != 1 || scheduler.pendingCreateCount() != 0 || state.Runs != 1 || len(state.Groups) != 1 || state.Groups[0].Holder != holder.ID || jobs.settleCalls != 0 {
+			if adopted != 1 || scheduler.pendingCreateCount() != 0 || state.Runs != 1 || len(state.Reservations) != 1 || state.Reservations[0].RunID != holder.ID || jobs.settleCalls != 0 {
 				t.Fatalf("placeholder took a grant/quarantine or displaced sibling: adopted=%d pending=%d state=%+v settles=%d", adopted, scheduler.pendingCreateCount(), state, jobs.settleCalls)
 			}
 			if len(jobs.deleted) != 1 || jobs.deleted[0] != parked.WorkflowName {

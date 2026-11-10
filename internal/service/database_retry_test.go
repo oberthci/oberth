@@ -103,7 +103,7 @@ func awaitDeadlineRun(t *testing.T, fixture *recoveryFixture, id string, done <-
 // Exercise actual Run startup, dispatch, submitted background task and finalization;
 // checking only adapter returns would miss a fatal completion-channel escape.
 func TestDatabaseDeadlineSchedulerConverges(t *testing.T) {
-	operations := []string{"RunningRunsWithJobs", "PendingRunCancellations", "PendingPublications", "RunWorkspaceCleanupCandidates", "PromotionWorkspaceCleanupCandidates", "ClaimNextRun", "Run", "Repository", "Upstream", "SetRunWorkflowName", "SetRunConcurrencyGroup", "SetRunCredentialed", "MarkRunAdmitted", "MarkRunSubmitted", "PutStepResult", "FinishRun", "CompleteSupersededRunCancellationWithoutJob", "RunWorkspaceCleanupEligible"}
+	operations := []string{"RunningRunsWithJobs", "PendingRunCancellations", "PendingPublications", "RunWorkspaceCleanupCandidates", "PromotionWorkspaceCleanupCandidates", "ClaimNextRun", "Run", "Repository", "Upstream", "SetRunWorkflowName", "SetRunCredentialed", "MarkRunAdmitted", "MarkRunSubmitted", "PutStepResult", "FinishRun", "CompleteSupersededRunCancellationWithoutJob", "RunWorkspaceCleanupEligible"}
 	for _, operation := range operations {
 		for _, fault := range []struct {
 			name string
@@ -422,9 +422,10 @@ func TestDatabaseDeadlineWaitingDoesNotTripLiveness(t *testing.T) {
 
 type deadlineJoinStore struct {
 	*store.Store
-	claims  atomic.Int64
-	blocked chan struct{}
-	once    sync.Once
+	admitted atomic.Bool
+	claims   atomic.Int64
+	blocked  chan struct{}
+	once     sync.Once
 }
 
 func (s *deadlineJoinStore) ClaimNextRun(ctx context.Context) (model.Run, error) {
@@ -438,9 +439,22 @@ func (s *deadlineJoinStore) ClaimNextRun(ctx context.Context) (model.Run, error)
 		return model.Run{}, ctx.Err()
 	}
 }
-func (s *deadlineJoinStore) Run(context.Context, string) (model.Run, error) {
+
+// Run fails with a retryable deadline once the first run holds its grant:
+// without an Oberth run ceiling the dispatch loop claims the next run only
+// after every claimed run is granted, so the retry must start after that.
+func (s *deadlineJoinStore) Run(ctx context.Context, id string) (model.Run, error) {
+	if !s.admitted.Load() {
+		return s.Store.Run(ctx, id)
+	}
 	s.once.Do(func() { close(s.blocked) })
 	return model.Run{}, context.DeadlineExceeded
+}
+
+func (s *deadlineJoinStore) MarkRunAdmitted(ctx context.Context, id string) (model.Run, error) {
+	run, err := s.Store.MarkRunAdmitted(ctx, id)
+	s.admitted.Store(true)
+	return run, err
 }
 func TestDatabaseDeadlineFatalInvariantCancelsOtherRetryingWorkers(t *testing.T) {
 	fixture := newRecoveryFixture(t)
@@ -448,7 +462,6 @@ func TestDatabaseDeadlineFatalInvariantCancelsOtherRetryingWorkers(t *testing.T)
 		t.Fatal(err)
 	}
 	scheduler := fixture.scheduler(t, &deadlineJobs{})
-	scheduler.maxConcurrent = 2
 	scheduler.store = &deadlineJoinStore{Store: fixture.store, blocked: make(chan struct{})}
 	// This deadline is a watchdog, not the expected completion. A fatal invariant
 	// must cancel the other background task's retry scope before joining it.

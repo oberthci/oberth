@@ -35,9 +35,20 @@ check_default() {
   fi
 }
 
+# The v0.17 fixture carries that release's default run ceiling of 3. Since
+# v0.20.0 the ceiling is the Argo controller's parallelism, so a reused 3
+# fails with the replacement named instead of being dropped silently; the
+# renders below clear it the way the upgrade notes say.
+if "$helm_tool" template oberth "$legacy_chart" --is-upgrade --namespace oberth \
+  --set-string "image.ref=$server_image" >"$work/rendered.yaml" 2>"$work/error.txt"; then
+  echo 'a reused run ceiling rendered without the v0.20.0 migration' >&2
+  exit 1
+fi
+grep -Fq 'oberth install --argo-parallelism' "$work/error.txt"
+
 # Direct Helm --reuse-values compatibility: neither new key is present.
 "$helm_tool" template oberth "$legacy_chart" --is-upgrade --namespace oberth \
-  --set-string "image.ref=$server_image" >"$work/rendered.yaml"
+  --set maxConcurrentJobs=0 --set-string "image.ref=$server_image" >"$work/rendered.yaml"
 check_default
 # New policy defaults must also apply when old --reuse-values omit their keys.
 grep -Fq 'kubernetes.io/metadata.name: "kube-system"' "$work/rendered.yaml"
@@ -45,7 +56,7 @@ grep -Fq 'name: oberth-pipeline-ingress' "$work/rendered.yaml"
 
 # The reset-then-reuse path merges new defaults with the old release's values.
 "$helm_tool" template oberth "$chart" --is-upgrade --namespace oberth \
-  --values "$fixture" --set-string "image.ref=$server_image" >"$work/rendered.yaml"
+  --values "$fixture" --set maxConcurrentJobs=0 --set-string "image.ref=$server_image" >"$work/rendered.yaml"
 check_default
 
 # A previously stored utility mirror choice
@@ -53,13 +64,13 @@ check_default
 cp -- "$fixture" "$work/stored-values.yaml"
 printf '\nutilityImage: %s\n' "$mirror" >>"$work/stored-values.yaml"
 "$helm_tool" template oberth "$chart" --is-upgrade --namespace oberth \
-  --values "$work/stored-values.yaml" --set-string "image.ref=$server_image" >"$work/rendered.yaml"
+  --values "$work/stored-values.yaml" --set maxConcurrentJobs=0 --set-string "image.ref=$server_image" >"$work/rendered.yaml"
 grep -Fq -- "image: \"$mirror\"" "$work/rendered.yaml"
 
 # Operator mirrors retain precedence.
 for source in "$legacy_chart" "$chart"; do
   "$helm_tool" template oberth "$source" --is-upgrade --namespace oberth \
-    --values "$fixture" --set-string "image.ref=$server_image" \
+    --values "$fixture" --set maxConcurrentJobs=0 --set-string "image.ref=$server_image" \
     --set-string "utilityImage=$mirror" >"$work/rendered.yaml"
   grep -Fq -- "image: \"$mirror\"" "$work/rendered.yaml"
 done

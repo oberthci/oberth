@@ -30,7 +30,7 @@ type pressureFixture struct {
 
 func pressureTestGate() *pressureFixture {
 	f := &pressureFixture{now: time.Date(2026, 10, 30, 15, 0, 0, 0, time.UTC)}
-	f.gate = newAdmissionGate(4)
+	f.gate = newAdmissionGate()
 	f.gate.now = func() time.Time { return f.now }
 	f.gate.pressure = newPressureCheck(AdmissionPressureConfig{IOFullAvg60Max: 30, Hysteresis: 10, MaxDefer: 20 * time.Minute,
 		Source: func() (model.PressureSample, error) { f.reads++; return f.sample, f.err },
@@ -44,12 +44,19 @@ func (f *pressureFixture) prepare(id int64, priority model.RunPriority, group st
 	f.gate.mu.Lock()
 	defer f.gate.mu.Unlock()
 	r.prepared, r.preparedAt = true, f.now
-	r.groupName = group
-	if group != "" {
-		r.group = concurrencyGroupKey(1, group)
-	}
 	f.gate.grantLocked()
 	return r
+}
+
+// blockDisk holds every grant on the disk floor, the remaining admission
+// guard besides pressure and the administrator hold.
+func (f *pressureFixture) blockDisk(blocked bool) {
+	f.gate.mu.Lock()
+	defer f.gate.mu.Unlock()
+	f.gate.diskFloor = nil
+	if blocked {
+		f.gate.diskFloor = &diskFloorCheck{floorBytes: 100, cachedFree: 0, cacheTime: time.Now(), cacheTTL: time.Hour}
+	}
 }
 
 func (f *pressureFixture) advance(d time.Duration) {
@@ -131,7 +138,7 @@ func TestPressureCPUGateOptionalAndIndependent(t *testing.T) {
 }
 
 func TestPressureMaximumDeferralAdmitsButPreservesOtherGates(t *testing.T) {
-	for _, guard := range []string{"none", "run-ceiling", "disk-floor", "group"} {
+	for _, guard := range []string{"none", "disk-floor"} {
 		t.Run(guard, func(t *testing.T) {
 			f := pressureTestGate()
 			f.sample.IO.FullAvg60 = 80
@@ -139,15 +146,8 @@ func TestPressureMaximumDeferralAdmitsButPreservesOtherGates(t *testing.T) {
 			if r.granted {
 				t.Fatal("pressure did not hold")
 			}
-			switch guard {
-			case "run-ceiling":
-				f.gate.maxRuns = 1
-				f.gate.runs = 1
-			case "disk-floor":
+			if guard == "disk-floor" {
 				f.gate.diskFloor = &diskFloorCheck{floorBytes: 100, cachedFree: 0, cacheTime: time.Now(), cacheTTL: time.Hour}
-			case "group":
-				r.group = "1/group"
-				f.gate.groups[r.group] = []*admissionReservation{{runID: "owner"}}
 			}
 			f.advance(20*time.Minute - time.Nanosecond)
 			if r.granted {
@@ -163,9 +163,7 @@ func TestPressureMaximumDeferralAdmitsButPreservesOtherGates(t *testing.T) {
 			if r.granted || f.gate.pressure.bypasses != 0 {
 				t.Fatal("pressure timeout bypassed", guard)
 			}
-			f.gate.runs = 0
 			f.gate.diskFloor = nil
-			delete(f.gate.groups, r.group)
 			f.advance(time.Second)
 			if !r.granted || f.gate.pressure.bypasses != 1 {
 				t.Fatal("guard recovery did not allow bounded pressure bypass", guard)
@@ -204,11 +202,10 @@ func TestPressureZeroStartDoesNotExpire(t *testing.T) {
 	}
 }
 
-func TestPressureTimeoutDoesNotJumpHigherPriorityOrGroupHead(t *testing.T) {
+func TestPressureTimeoutDoesNotJumpHigherPriority(t *testing.T) {
 	f := pressureTestGate()
-	f.gate.maxRuns = 2
 	f.sample.IO.FullAvg60 = 80
-	normal := f.prepare(1, model.PriorityNormal, "deploy", pipeline.M)
+	normal := f.prepare(1, model.PriorityNormal, "", pipeline.M)
 	f.advance(19 * time.Minute)
 	release := f.prepare(2, model.PriorityHighest, "", pipeline.M)
 	tag := f.prepare(3, model.PriorityHigh, "", pipeline.M)
@@ -218,23 +215,8 @@ func TestPressureTimeoutDoesNotJumpHigherPriorityOrGroupHead(t *testing.T) {
 	}
 	f.sample.IO.FullAvg60 = 0
 	f.advance(time.Second)
-	if !release.granted || !tag.granted || normal.granted {
-		t.Fatal("pressure recovery lost release/tag ordering")
-	}
-	// Release both higher classes. First group head wins; its follower waits.
-	f.gate.mu.Lock()
-	f.gate.releaseLocked(release)
-	f.gate.releaseLocked(tag)
-	f.gate.mu.Unlock()
-	follower := f.prepare(4, model.PriorityNormal, "deploy", pipeline.M)
-	if !normal.granted || follower.granted {
-		t.Fatal("pressure path changed concurrency-group ordering")
-	}
-	f.gate.mu.Lock()
-	f.gate.releaseLocked(normal)
-	f.gate.mu.Unlock()
-	if !follower.granted {
-		t.Fatal("group head release did not wake follower")
+	if !release.granted || !tag.granted || !normal.granted {
+		t.Fatal("pressure recovery did not admit the queue")
 	}
 }
 
@@ -434,8 +416,8 @@ func TestPressureEpisodeResetsWhileCapacityBlocks(t *testing.T) {
 			f := pressureTestGate()
 			f.sample.IO.FullAvg60 = 80
 			r := f.prepare(1, model.PriorityNormal, "", pipeline.M)
-			// Another gate, the run ceiling, keeps blocking it after recovery.
-			f.gate.maxRuns, f.gate.runs = 1, 1
+			// Another gate, the disk floor, keeps blocking it after recovery.
+			f.blockDisk(true)
 			f.advance(19 * time.Minute)
 			if unavailable {
 				f.err = errors.New("unavailable PSI")
@@ -448,7 +430,7 @@ func TestPressureEpisodeResetsWhileCapacityBlocks(t *testing.T) {
 			}
 			f.err = nil
 			f.sample.IO.FullAvg60 = 80
-			f.gate.runs = 0
+			f.blockDisk(false)
 			f.advance(time.Second)
 			since := f.now
 			if r.granted || !r.pressureSince.Equal(since) {
@@ -583,11 +565,11 @@ func TestPressureObserveHighLoadKeepsOtherAdmissionGates(t *testing.T) {
 	f.gate.pressure.config.Mode = PressureObserve
 	f.gate.pressure.state.Mode = PressureObserve
 	f.sample.IO.FullAvg60 = 72
-	f.gate.maxRuns = 1
 	first := f.prepare(1, model.PriorityNormal, "", pipeline.L)
+	f.blockDisk(true)
 	second := f.prepare(2, model.PriorityNormal, "", pipeline.L)
-	if !first.granted || second.granted { // the run ceiling still binds.
-		t.Fatal("observation bypassed the run ceiling or blocked the first grant")
+	if !first.granted || second.granted { // the disk floor still binds.
+		t.Fatal("observation bypassed the disk floor or blocked the first grant")
 	}
 	state := (&Scheduler{admission: f.gate}).AdmissionState().Pressure
 	if state == nil || state.Mode != PressureObserve || !state.Available || !state.ThresholdExceeded || state.Holding || state.Sample.IO.FullAvg60 != 72 || state.Deferred != 0 {
@@ -598,8 +580,10 @@ func TestPressureObserveHighLoadKeepsOtherAdmissionGates(t *testing.T) {
 		t.Fatal("observation acquired a deferral clock or bypassed capacity")
 	}
 	first.cancel()
+	f.blockDisk(false)
+	f.advance(time.Second)
 	if !second.granted {
-		t.Fatal("capacity release did not progress under high PSI")
+		t.Fatal("disk recovery did not progress under high PSI")
 	}
 	var metrics bytes.Buffer
 	(&Scheduler{admission: f.gate}).WritePressureMetrics(&metrics)
@@ -646,13 +630,13 @@ func TestPressureExplicitEnforcementRecoversWithoutRestart(t *testing.T) {
 	}
 }
 
-func TestPressureObserveDoesNotBypassDiskOrGroupOwnership(t *testing.T) {
+func TestPressureObserveDoesNotBypassDiskFloor(t *testing.T) {
 	f := pressureTestGate()
 	f.gate.pressure.config.Mode = PressureObserve
 	f.gate.pressure.state.Mode = PressureObserve
 	f.sample.IO.FullAvg60 = 70
 	f.gate.diskFloor = &diskFloorCheck{floorBytes: 100, cachedFree: 0, cacheTime: time.Now(), cacheTTL: time.Hour}
-	waiting := f.prepare(1, model.PriorityNormal, "deploy", pipeline.S)
+	waiting := f.prepare(1, model.PriorityNormal, "", pipeline.S)
 	if waiting.granted {
 		t.Fatal("observation waived the disk floor")
 	}
@@ -660,13 +644,5 @@ func TestPressureObserveDoesNotBypassDiskOrGroupOwnership(t *testing.T) {
 	f.advance(time.Second)
 	if !waiting.granted {
 		t.Fatal("disk recovery did not progress")
-	}
-	follower := f.prepare(2, model.PriorityNormal, "deploy", pipeline.S)
-	if follower.granted {
-		t.Fatal("observation waived group ownership")
-	}
-	waiting.cancel()
-	if !follower.granted {
-		t.Fatal("group release did not progress")
 	}
 }

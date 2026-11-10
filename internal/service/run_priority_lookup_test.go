@@ -88,7 +88,7 @@ func TestPrioritySizeLookupRefreshWithholdsBoostAndRecovers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g := newAdmissionGate(1)
+	g := newAdmissionGate()
 	f.scheduler.admission = g
 	holder := g.reserve(-1)
 	release, err := holder.acquire(ctx, pipeline.XL)
@@ -96,6 +96,7 @@ func TestPrioritySizeLookupRefreshWithholdsBoostAndRecovers(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
+	blockOnDiskFloor(g)
 	reserve := func(repo model.Repository) *admissionReservation {
 		t.Helper()
 		tag, err := f.scheduler.AdmitRelease(ctx, ReleaseRequest{EventID: repo.Name, Repository: repo, Tag: "v1", ObjectSHA: strings.Repeat("b", 40), CommitSHA: strings.Repeat("c", 40), Actor: "pusher"})

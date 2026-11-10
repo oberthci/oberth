@@ -287,39 +287,6 @@ func (jobs *ArgoJobs) PipelineSize(ctx context.Context, request service.Workflow
 	return size, nil
 }
 
-// PipelineConcurrencyGroup reads the run's declared concurrency group (#658)
-// from the same checked-out document PipelineSize reads, without evaluating
-// anything. Equal group names share admission across repositories.
-func (jobs *ArgoJobs) PipelineConcurrencyGroup(ctx context.Context, request service.WorkflowRequest) (string, error) {
-	group, _, err := jobs.PipelineConcurrencyContract(ctx, request)
-	return group, err
-}
-
-// PipelineConcurrencyContract reads both declarations from the same immutable document.
-func (jobs *ArgoJobs) PipelineConcurrencyContract(ctx context.Context, request service.WorkflowRequest) (string, int, error) {
-	if jobs.routes != nil {
-		child, err := jobs.routes.forRequest(ctx, request)
-		if err != nil {
-			return "", 0, err
-		}
-		return child.PipelineConcurrencyContract(ctx, request)
-	}
-	source, err := jobs.readRunSource(request)
-	if err != nil {
-		return "", 0, jobs.noRunPipelineError(err, request)
-	}
-	workflow, err := argoworkflow.Decode(source)
-	if err != nil {
-		return "", 0, fmt.Errorf("app: read repository concurrency contract: %w", err)
-	}
-	group, err := argoworkflow.DeclaredConcurrencyGroup(workflow)
-	if err != nil {
-		return "", 0, err
-	}
-	limit, err := argoworkflow.DeclaredConcurrencyLimit(workflow)
-	return group, limit, err
-}
-
 // PlannedSteps enumerates the run's declared step list from the checked-out
 // document, without evaluating anything and without a second trust surface:
 // the same Decode the submission path uses, then a read-only walk of the
@@ -696,12 +663,6 @@ func (jobs *ArgoJobs) auditSubmission(ctx context.Context, request service.Workf
 		}
 		details["release_wif_leaves"] = leaves
 	}
-	if request.ConcurrencyGroup != "" {
-		// The group the scheduler actually admitted this run under (#658),
-		// not a re-read of the document: the audit records the decision.
-		details["concurrency_group"] = request.ConcurrencyGroup
-		details["concurrency_limit"] = max(1, request.Run.ConcurrencyLimit)
-	}
 	encoded, err := json.Marshal(details)
 	if err != nil {
 		return fmt.Errorf("app: encode Workflow submission audit details: %w", err)
@@ -816,7 +777,7 @@ func (jobs *ArgoJobs) Adopt(ctx context.Context, run model.Run) (pipeline.Size, 
 	}
 	binding, found, err := controller.Adopt(ctx, argojob.AdoptionRequest{
 		PinnedSources: run.SourceBindings, RepositoryID: run.RepoID, Name: run.WorkflowName, RunID: run.ID, Ref: run.Ref, SHA: sha,
-		Group: run.ConcurrencyGroup, Trigger: trigger, RunTrigger: kind, ScheduleEntry: run.ScheduleEntry,
+		Trigger: trigger, RunTrigger: kind, ScheduleEntry: run.ScheduleEntry,
 	})
 	if errors.Is(err, argojob.ErrAdoptionRefused) {
 		return "", false, fmt.Errorf("%w: %w", service.ErrAdoptionRefused, err)
@@ -1276,7 +1237,6 @@ var (
 	_ service.PipelineSizer              = (*ArgoJobs)(nil)
 	_ service.PipelinePlanner            = (*ArgoJobs)(nil)
 	_ service.PipelineCredentialDetector = (*ArgoJobs)(nil)
-	_ service.PipelineConcurrencyGrouper = (*ArgoJobs)(nil)
 	_                                    = time.Second
 )
 

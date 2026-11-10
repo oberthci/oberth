@@ -35,10 +35,12 @@ uplinkTokens:
   maxTTL: 8760h # 365-day hard ceiling; may be lowered
 
 replicaCount: 1
-# Optional run ceiling: how many runs may hold a Workflow at once (0..64).
-# 0, the default, is no ceiling: Argo and Kubernetes decide what runs. Shared
-# limits between steps are native Argo synchronization; see argoSync below.
-maxConcurrentJobs: 0
+# Run limits live in Argo since v0.20.0 (docs/where-limits-live.md): how many
+# pipeline Workflows run at once is the argo-workflows release's
+# controller.parallelism, and shared step limits are the ConfigMap
+# oberth-sync-limits that release renders. Oberth submits every run at once.
+# The former keys maxConcurrentJobs, admission.runtimeCapacity and
+# argoSync.semaphores are accepted only at their old defaults.
 # One fresh attempt for eligible infrastructure failures; retains queue position.
 # The automatic retry budget is fixed at one and cannot be increased.
 autoRetryInfrastructure: true
@@ -141,17 +143,11 @@ promotion:
 branches:
   reserved: [main, master]
 
-# Admission counts runs. Besides the optional ceiling above it keeps only host
-# safety that reads nothing from a workflow: the PSI hard-limit valve and the
-# disk floor. Kubernetes schedules each step pod by its requests; steps that
-# must not overlap declare native Argo synchronization (docs/native-synchronization.md).
+# Admission keeps only host safety that reads nothing from a workflow: the PSI
+# hard-limit valve and the disk floor. Kubernetes schedules each step pod by
+# its requests; steps that must not overlap declare native Argo
+# synchronization (docs/native-synchronization.md).
 admission:
-  # Boot default. Change capacity at runtime with admission_capacity_config
-  # (oberth admission capacity); never kubectl-edit the rendered ConfigMap.
-  runtimeCapacity:
-    enabled: true
-    # Null initializes the runtime value from maxConcurrentJobs above (0: no ceiling).
-    maxConcurrentJobs: null
   pressure:
     enabled: true
     hardCpu: 50
@@ -172,23 +168,6 @@ admission:
     factorPercent: 50
     minSeconds: 120
     maxSeconds: 600
-
-# Shared step limits for native Argo synchronization. Each entry becomes a key
-# of the ConfigMap `oberth-sync-limits` in the pipeline namespace; a step that
-# declares
-#   synchronization:
-#     semaphores:
-#       - configMapKeyRef: {name: oberth-sync-limits, key: kvm}
-# runs at most that many instances at once, across every repository, queued by
-# the Argo controller. Argo re-reads the ConfigMap, so a change applies on the
-# next helm upgrade without a server restart. Empty renders no ConfigMap.
-# Example:
-#   argoSync:
-#     semaphores:
-#       kvm: 1
-#       heavy-go: 2
-argoSync:
-  semaphores: {}
 
 # Repository cron schedules (docs/scheduled-runs.md): the shortest interval a
 # repository may schedule itself at, and the most entries it may declare.

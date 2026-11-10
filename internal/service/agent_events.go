@@ -395,7 +395,8 @@ func (recorder *agentEventRecorder) observeActive(ctx context.Context, active []
 }
 
 // observeLockWaits records run.lock_wait once per wait interval that has
-// lasted longer than the policy threshold, naming the lock's holders.
+// lasted longer than the policy threshold, naming the lock's holders; a wait
+// on the Argo controller's parallelism carries postponed and running instead.
 func (recorder *agentEventRecorder) observeLockWaits(ctx context.Context, participants []model.SyncParticipant, now time.Time) {
 	holders := map[string][]string{}
 	waiting := map[string]model.SyncParticipant{}
@@ -433,6 +434,20 @@ func (recorder *agentEventRecorder) observeLockWaits(ctx context.Context, partic
 		run := model.Run{ID: interval.RunID}
 		if recorder.base.history != nil {
 			run, _ = recorder.base.history.Run(ctx, interval.RunID)
+		}
+		if interval.Lock == model.SyncParallelismLock {
+			// Argo parallelism is not a document lock: its holders are every
+			// admitted Oberth Workflow, so the event carries their count
+			// instead of their IDs. The kind stays run.lock_wait: the stored
+			// event vocabulary is fixed by the v0.19.0 schema.
+			recorder.emit(ctx, model.AgentEvent{Kind: model.AgentEventRunLockWait,
+				Key:    fmt.Sprintf("%s:%s:%s:%d", model.AgentEventRunLockWait, interval.RunID, interval.Lock, interval.StartedAt.UnixNano()),
+				RepoID: participant.RepoID, Repo: participant.Repo, RunID: interval.RunID, Ref: run.Ref, SHA: run.SHA,
+				Summary: fmt.Sprintf("run %s %s %s postponed %s by Argo parallelism (%d Oberth workflows running)", shortRunID(interval.RunID), participant.Repo, run.Ref,
+					waited.Round(time.Second), len(lockHolders)),
+				Data: map[string]any{"lock": interval.Lock, "waiting_since": interval.StartedAt.UTC().Format(time.RFC3339), "waited_s": int64(waited / time.Second),
+					"postponed": true, "running": len(lockHolders), "actor": run.Actor}})
+			continue
 		}
 		recorder.emit(ctx, model.AgentEvent{Kind: model.AgentEventRunLockWait,
 			Key:    fmt.Sprintf("%s:%s:%s:%d", model.AgentEventRunLockWait, interval.RunID, interval.Lock, interval.StartedAt.UnixNano()),

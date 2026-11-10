@@ -39,7 +39,7 @@ func slice2CredentialedWorkflow(t *testing.T, kind string) (Config, *wfv1.Workfl
 	}
 	workflow.UID = "exact-credentialed-workflow"
 	workflow.Status.Phase = wfv1.WorkflowSucceeded
-	return config, workflow, AdoptionRequest{Name: request.Name, RunID: request.RunID, Ref: request.Ref, SHA: request.SHA, Group: "", Trigger: request.Trigger, RunTrigger: request.RunTrigger}
+	return config, workflow, AdoptionRequest{Name: request.Name, RunID: request.RunID, Ref: request.Ref, SHA: request.SHA, Trigger: request.Trigger, RunTrigger: request.RunTrigger}
 }
 
 func TestAdoptedCredentialedTriggersKeepSubmittedIdentityAndWIFDespiteNewConfig(t *testing.T) {

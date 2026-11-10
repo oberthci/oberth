@@ -17,7 +17,7 @@ func TestSchedulerResumesRunAfterDiskFloorClears(t *testing.T) {
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: f.store, Git: f.git, Logs: f.logs, Jobs: jobs, ReleaseJobs: jobs,
 		Auditor: f.store, Signals: f.signals, WorkspaceRoot: filepath.Join(f.root, "floor-work"),
-		MaxConcurrent: 1, AdmissionDiskFloorBytes: 2048,
+		AdmissionDiskFloorBytes: 2048,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +124,7 @@ func TestDiskFloorNil(t *testing.T) {
 }
 
 func TestDiskFloorAdmissionHold(t *testing.T) {
-	gate := newAdmissionGate(10)
+	gate := newAdmissionGate()
 	gate.diskFloor = &diskFloorCheck{path: t.TempDir(), floorBytes: 1 << 62, cacheTTL: 5 * time.Second}
 	reservation := gate.reserve(1)
 	defer reservation.cancel()
@@ -144,7 +144,7 @@ func TestWorkflowAdmissionDiskFloorHoldAndGrant(t *testing.T) {
 		allow bool
 	}{{"below", 1 << 62, false}, {"above", 1, true}, {"disabled", 0, true}} {
 		t.Run(tc.name, func(t *testing.T) {
-			gate := newAdmissionGate(4)
+			gate := newAdmissionGate()
 			gate.diskFloor = &diskFloorCheck{path: t.TempDir(), floorBytes: tc.floor, cacheTTL: 5 * time.Second}
 			reservation := gate.reserveRun(model.Run{ID: "waiting", QueueSequence: 1})
 			defer reservation.cancel()
@@ -162,8 +162,8 @@ func TestWorkflowAdmissionDiskFloorHoldAndGrant(t *testing.T) {
 				t.Fatalf("grant count changed while held: %d", runs)
 			}
 			if !tc.allow {
-				if gate.spareSlotForClaim(0) {
-					t.Fatal("below-floor gate claimed spare capacity")
+				if gate.spareSlotForClaim() {
+					t.Fatal("a second claim passed the run waiting below the floor")
 				}
 				observation := (&Scheduler{admission: gate}).AdmissionSnapshot(1)
 				if observation == nil || observation.State != "waiting" || observation.DiskFloor == nil || !observation.DiskFloor.BelowFloor || !strings.HasPrefix(waitingReason(observation), "waiting for disk space (") {
@@ -175,7 +175,7 @@ func TestWorkflowAdmissionDiskFloorHoldAndGrant(t *testing.T) {
 }
 
 func TestWorkflowAdmissionDiskFloorPreservesGrantedRun(t *testing.T) {
-	gate := newAdmissionGate(4)
+	gate := newAdmissionGate()
 	// Cached samples make threshold changes deterministic without filling disk.
 	gate.diskFloor = &diskFloorCheck{floorBytes: 512, cachedFree: 1024, cacheTime: time.Now(), cacheTTL: time.Hour}
 	first := gate.reserveRun(model.Run{ID: "running", QueueSequence: 1})
@@ -226,8 +226,7 @@ func TestNewSchedulerWiresDiskFloor(t *testing.T) {
 	for _, floor := range []int64{0, 4096} {
 		scheduler, err := NewScheduler(SchedulerConfig{
 			Store: f.store, Git: f.git, Logs: f.logs, Jobs: f.jobs, Auditor: f.store,
-			WorkspaceRoot: f.root + "/./floor-work", MaxConcurrent: 4,
-			AdmissionDiskFloorBytes: floor,
+			WorkspaceRoot: f.root + "/./floor-work", AdmissionDiskFloorBytes: floor,
 		})
 		if err != nil {
 			t.Fatal(err)

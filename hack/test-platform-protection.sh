@@ -30,11 +30,11 @@ if grep -Eq 'kind: PriorityClass|priorityClassName:' "$work/off.yaml"; then
 fi
 
 # Simulate --reuse-values with a stored values shape predating this feature.
-cp -R -- "$chart" "$work/legacy"
-chmod -R u+w "$work/legacy"
-cp -- "$script_dir/testdata/chart-values-v0.17.53.yaml" "$work/legacy/values.yaml"
-"$helm_tool" template oberth "$work/legacy" --namespace oberth >"$work/legacy.yaml"
-if grep -Eq 'kind: PriorityClass|priorityClassName:' "$work/legacy.yaml"; then
+cp -R -- "$chart" "$work/reused"
+chmod -R u+w "$work/reused"
+cp -- "$script_dir/testdata/chart-values-v0.17.53.yaml" "$work/reused/values.yaml"
+"$helm_tool" template oberth "$work/reused" --namespace oberth --set maxConcurrentJobs=0 >"$work/reused.yaml"
+if grep -Eq 'kind: PriorityClass|priorityClassName:' "$work/reused.yaml"; then
   echo 'absent platformProtection enabled platform priority' >&2
   exit 1
 fi

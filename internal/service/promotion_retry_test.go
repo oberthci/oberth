@@ -125,8 +125,7 @@ func newPromotionRetryHarnessWithUplinks(t *testing.T, git *scriptedPromotionGit
 	scheduler, err := NewScheduler(SchedulerConfig{
 		Store: fixture.store, Git: git, Logs: fixture.logs, Jobs: fixture.jobs, ReleaseJobs: fixture.jobs,
 		Auditor: fixture.store, Signals: fixture.signals,
-		WorkspaceRoot: filepath.Join(fixture.root, "retry-work"), MaxConcurrent: 1,
-	})
+		WorkspaceRoot: filepath.Join(fixture.root, "retry-work")})
 	if err != nil {
 		t.Fatal(err)
 	}

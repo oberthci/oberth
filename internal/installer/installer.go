@@ -137,16 +137,24 @@ type Config struct {
 	// ArgoNamespace. It does not make pipelines execute any other way: Argo is
 	// the execution engine, so the install still binds Oberth to that
 	// namespace and still verifies a controller is really there.
-	SkipArgo                  bool
-	OpenBaoNamespace          string
-	Namespace                 string
-	RekorNamespace            string
-	ArgoNamespace             string
-	ChartVersion              string
-	OpenBaoChartVersion       string
-	RekorChartVersion         string
-	ArgoChartVersion          string
-	ArgoControllerProfile     string
+	SkipArgo              bool
+	OpenBaoNamespace      string
+	Namespace             string
+	RekorNamespace        string
+	ArgoNamespace         string
+	ChartVersion          string
+	OpenBaoChartVersion   string
+	RekorChartVersion     string
+	ArgoChartVersion      string
+	ArgoControllerProfile string
+	// ArgoParallelism and ArgoNamespaceParallelism set the managed Argo
+	// controller's workflow limits (controller.parallelism and
+	// controller.namespaceParallelism); nil keeps the release's value.
+	// ArgoSyncLimits, when non-nil, replaces the semaphore limits in the
+	// ConfigMap oberth-sync-limits (docs/where-limits-live.md).
+	ArgoParallelism           *int
+	ArgoNamespaceParallelism  *int
+	ArgoSyncLimits            map[string]int
 	ArgoVaultAddress          string
 	ArgoVaultCredentialedRole string
 	// CredentialedSecretPaths are exact secret paths for the shared
